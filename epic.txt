@@ -1,0 +1,31 @@
+3d city simulator called AI town
+
+it is a "sim city" style simulator.
+
+requirements:
+* generated terrain
+* realistic graphics
+* desktop only
+* irrlicht 3d engine
+* Opensoft AL audio engine
+* object oriented c++
+* crossplatform (Linux/Windows)
+
+GameDesign
+add a Senior Game Designer (gamedesign-lookandfeel) specialized in game play and feel of 3d city simulators, ie balance, traffic, economy etc
+add a Senior UI/UX Designer (gamedesign-ux) specialized in UI/UX of 3d city simulators
+
+Graphics
+add a Senior 3d model artist (graphics-artist-3d-model) specialized in 3d models for 3d city simulators
+add a Senior 2d texture artist (graphics-artist-2d-texture) specialized in 2d textures for 3d city simulators
+add a Senior C++ developer (graphics-dev-irrlicht) specialized in 3d irrlicht engine
+
+Sound:
+add a Senior Sound Artist (sound-artist-opensoftal) specialized in game music and sounds for city simulators
+add a Senior C++ developer (sound-dev-opensoftal) specialized in Opensoft AL and audio
+
+Testing:
+add a Senior C++ test engineer (test-dev-cpp) specialized in cpp best practice for testing
+
+CI/CD:
+add a Senior github pipeline engineer (cicd-dev-github)

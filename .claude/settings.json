@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(/home/user/repos/ai-town/**)",
+      "Edit(/home/user/repos/ai-town/**)",
+      "Read(/workspace/**)",
+      "Edit(/workspace/**)",
+      "Read(//tmp/**)",
+      "Edit(//tmp/**)",
+      "Bash",
+      "WebSearch",
+      "WebFetch"
+    ],
+    "additionalDirectories": ["/tmp"]
+  }
+}
