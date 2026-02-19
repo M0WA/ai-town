@@ -58,6 +58,13 @@ find_package(Irrlicht REQUIRED)
 # OpenAL Soft: required for aitown_audio
 find_package(OpenAL REQUIRED)
 
+# fmt: required because openal-soft is built with the devendor-fmt vcpkg patch, which
+# replaces its bundled copy of fmt with the external vcpkg fmt package.  libopenal.a
+# therefore references fmt symbols (e.g. fmt::v12::report_error) that must be satisfied
+# at link time.  Linking fmt::fmt PRIVATE to aitown_audio satisfies those symbols for
+# every target that links aitown_audio (including all audio_tests).
+find_package(fmt CONFIG REQUIRED)
+
 # Vorbis: vcpkg port name is "libvorbis" (NOT "libvorbisfile" — no such port exists).
 # "libvorbis" installs both libvorbis and libvorbisfile; CMake target is Vorbis::vorbisfile.
 find_package(Vorbis REQUIRED)
@@ -150,11 +157,15 @@ target_include_directories(aitown_audio
 target_compile_definitions(aitown_audio PRIVATE
     AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
 )
-# PRIVATE scope: OpenAL and Vorbis headers must NOT propagate to test targets.
-# Omitting either library causes a cmake --build build link failure on Linux and Windows.
+# PRIVATE scope: OpenAL, Vorbis, and fmt headers must NOT propagate to test targets.
+# Omitting any of these causes a cmake --build build link failure on Linux and Windows.
+# fmt::fmt is required because openal-soft's devendor-fmt patch causes libopenal.a to
+# reference fmt symbols; failing to link it produces "undefined reference to
+# fmt::v12::report_error" when linking audio_tests.
 target_link_libraries(aitown_audio PRIVATE
     OpenAL::OpenAL
     Vorbis::vorbisfile
+    fmt::fmt
 )
 
 # ----------------------------------------------------------------------------

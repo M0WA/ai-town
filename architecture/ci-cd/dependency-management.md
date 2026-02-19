@@ -10,10 +10,12 @@
   "dependencies": [
     "irrlicht",
     "openal-soft",
-    "libvorbis"
+    "libvorbis",
+    "fmt"
   ]
 }
 ```
+**`fmt` is a required explicit dependency**: the `openal-soft` vcpkg portfile applies a `devendor-fmt.diff` patch that replaces OpenAL Soft's bundled copy of `{fmt}` with the external vcpkg `fmt` package. This means `libopenal.a` contains object files that reference `fmt::v12::report_error` and other `fmt` symbols. Any CMake target that links (directly or transitively) against `OpenAL::OpenAL` must also link `fmt::fmt`, or the linker will fail with `undefined reference to fmt::v12::report_error`. Adding `fmt` to `vcpkg.json` ensures the vcpkg `fmt` package is installed; `fmt::fmt` must then be linked PRIVATE to `aitown_audio` in `CMakeLists.txt`.
 - CMake configured with `-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake`
 - CI uses `lukka/run-vcpkg@<ACTION-SHA-REQUIRED> # v11.5` with a pinned vcpkg commit hash stored as `env.VCPKG_COMMIT_ID`. **`VCPKG_COMMIT_ID` must be declared at the workflow level** (in the top-level `env:` block of the CI YAML file, not at the job or step level) so it is available to all jobs and steps. Declaring it at the job level would make it unavailable to the baseline validation step if that step runs in a different job. Example declaration at workflow level:
   ```yaml
@@ -47,10 +49,14 @@ A 200 response confirms the port exists. A 404 means the port was removed — tr
 ### CMake Dependencies
 ```cmake
 find_package(OpenAL REQUIRED)
+# fmt is required because openal-soft's devendor-fmt vcpkg patch causes libopenal.a to reference
+# fmt symbols. Any target linking OpenAL::OpenAL must also link fmt::fmt to satisfy those symbols.
+find_package(fmt CONFIG REQUIRED)
 find_package(Vorbis REQUIRED)
-# Phase 0: route OpenAL and Vorbis to aitown_audio stub library (NOT to 'aitown' — that executable
-# does not exist at Phase 0). The 'aitown' executable is the final game binary added in a later phase.
-target_link_libraries(aitown_audio PRIVATE OpenAL::OpenAL Vorbis::vorbisfile)
+# Phase 0: route OpenAL, fmt, and Vorbis to aitown_audio stub library (NOT to 'aitown' — that
+# executable does not exist at Phase 0). The 'aitown' executable is the final game binary added
+# in a later phase.
+target_link_libraries(aitown_audio PRIVATE OpenAL::OpenAL fmt::fmt Vorbis::vorbisfile)
 # Irrlicht is deferred to Phase 1 (CMake target name spike required first):
 # target_link_libraries(aitown_render PRIVATE Irrlicht::Irrlicht)
 ```

@@ -21,7 +21,16 @@ macro(aitown_add_tests TARGET)
     if(NOT AITOWN_TEST_TIMEOUT)
         set(AITOWN_TEST_TIMEOUT 120)  # default per-test timeout in seconds
     endif()
+    # WORKING_DIRECTORY must be CMAKE_SOURCE_DIR (project root), NOT the default
+    # CMAKE_CURRENT_BINARY_DIR (the build tree).  gtest_discover_tests defaults to
+    # the binary dir, which means GTEST_OUTPUT=xml:test_results/ writes XML into
+    # build/test_results/ instead of <workspace>/test_results/.  The CI step that
+    # collects test XML always looks in <workspace>/test_results/ on both Linux and
+    # Windows (multi-config MSBuild), so an incorrect working directory silently
+    # produces zero XML files and causes dorny/test-reporter to fail with
+    # "No test report files were found".
     gtest_discover_tests(${TARGET}
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         DISCOVERY_TIMEOUT 30
         PROPERTIES TIMEOUT ${AITOWN_TEST_TIMEOUT}
         LABELS "${AITOWN_TEST_LABEL}"
