@@ -29,3 +29,9 @@ add a Senior C++ test engineer (test-dev-cpp) specialized in cpp best practice f
 
 CI/CD:
 add a Senior github pipeline engineer (cicd-dev-github)
+
+
+Skill
+add this skill (fix-specs)
+have all agents review the specs in their respective field. fix all high/criticals with the recommandation that is reviewed and agreed on.
+repeat this until there is one review where no critical or high are detected by any of the agents. after each fix re-review.

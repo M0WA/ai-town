@@ -1,0 +1,5 @@
+# Terrain Interaction
+
+- **Non-buildable slope**: Slopes where `atan(height_delta / cell_width) > 15.0°` (exact; no approximation) are non-buildable without earthworks.
+- **Earthworks cost**: `cost_per_tile = $500 × slope_severity_factor` where `slope_severity_factor = clamp((slope_degrees − 15) / 30, 0, 2)` (scales from 0 at exactly 15° to 2 at 45°+). Earthworks are applied automatically at zone placement and deducted from treasury immediately.
+- **Map playability guarantee**: The procedural terrain generator must guarantee **at least 20% of total map tiles are flat or sub-15° slope** to ensure viable starting conditions on all difficulty tiers. The generator re-seeds if this constraint is not met after generation. **Minimum contiguous flat area**: the generator must also guarantee at least **one contiguous region of flat-or-sub-15° tiles of minimum 50×50 tiles** (2,500 tiles) — this ensures the player always has a viable starting district large enough for roads + 2 residential zones + 1 commercial zone + 1 power plant + 1 water tower, even on mountainous maps. The generator re-seeds if this contiguous-area constraint is not met.

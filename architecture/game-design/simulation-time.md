@@ -1,0 +1,22 @@
+# Simulation Time System
+
+- **Base tick rate**: 1 in-game day = 1 real second at 1× speed
+- **Month definition**: 1 in-game month = 30 in-game days = 30 real seconds at 1× speed
+- **Economy budget tick**: Taxes collected and expenses processed at the end of each in-game month (every 30 real seconds at 1× speed)
+- **Base day duration**: V1 uses exactly **1.0 real second per in-game day on all difficulty tiers**. Named constants: `SimulationConstants::base_day_duration_easy = 1.0` s, `SimulationConstants::base_day_duration_normal = 1.0` s, `SimulationConstants::base_day_duration_hard = 1.0` s. Configurable per-difficulty day duration (the previously noted 0.5–3 s tuning range) is **post-V1 scope** — it is not implemented in V1. All timing calculations (month length, interest accrual intervals, grace period real-time gates) assume exactly 1.0 s/day at 1× speed. If per-difficulty day duration is introduced post-V1, all downstream timing constants must be re-evaluated.
+- **Speed multipliers**: 1× / 3× / 10× simulation speed; pause
+- **Default starting speed**: **3×** (not 1× — too slow for feedback, not 10× — too punishing for new players). Speed selector is always user-adjustable.
+- **SpeedMultiplier enum definition**:
+
+  ```cpp
+  enum class SpeedMultiplier {
+      Paused = 0,  // simulation frozen; real-time multiplier = 0
+      x1     = 1,  // 1× speed  (1 in-game day per real second)
+      x3     = 2,  // 3× speed  (3 in-game days per real second)
+      x10    = 3,  // 10× speed (10 in-game days per real second)
+  };
+  ```
+
+  The integer values (0–3) are the storage representation only and must not be used directly in logic — always reference enum names. The default starting speed maps to `SpeedMultiplier::x3`. The auto-slow-to-1× mechanic (e.g., game-over deficit warning on month 1 of streak) calls `setSpeed(SpeedMultiplier::x1)`. The paused state is `SpeedMultiplier::Paused`.
+- **`ticks_per_year = 12`** — this is a named constant used in the interest formula and in tests. Derived from 12 budget ticks (months) per in-game year at 30 days/month. Do not compute it inline; reference this constant everywhere.
+- **Simulation second**: 1 simulation second = 1 real second at 1× speed. The traffic subsystem uses simulation seconds as its time unit for travel time calculations (path travel time = `path_length_meters / segment_speed_m_per_s`). At the default road max speed of 13.9 m/s, a 350 m commute takes approximately 25 simulation seconds; an 835 m commute takes approximately 60 simulation seconds — these are the T=25 and T=60 demand coupling thresholds. Traffic simulation is independent of the day/tick rate: agents run at simulation-second granularity regardless of speed setting. The traffic demand coupling thresholds (T=25, T=60 for Residential; T=30, T=65 for Commercial; T=40, T=80 for Industrial) are in **simulation seconds**, not in-game minutes — the label "in-game minutes" that may appear in earlier draft text was a documentation error and refers to simulation seconds.

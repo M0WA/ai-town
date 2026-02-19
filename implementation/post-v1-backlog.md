@@ -1,0 +1,20 @@
+## Post-V1 Backlog (Out of Scope for V1)
+
+The following items are explicitly marked post-V1 in the architecture specifications and must not be promoted into any Phase above:
+
+- Scenario mode gameplay (grayed "Post-launch" in New Game screen) (`architecture/ui-ux/main-menu-new-game-flow.md`)
+- Education, health, environment, disaster systems (`architecture/game-design/minimum-viable-simulation.md`)
+- Tourism income ($0 in V1) (`architecture/game-design/economy-model.md`)
+- Parks / greenspace adjacency bonus (`architecture/game-design/zoning-system.md`)
+- Full undo stack (post-V1 per `architecture/game-design/undo-system.md`)
+- Binary save format (`architecture/game-design/save-system.md`)
+- Atlased lightmaps (per-asset UV repacking rework) (`architecture/asset-standards/2d-texture-standards.md`)
+- BC5/ATI2 normal map format (`architecture/asset-standards/2d-texture-standards.md`)
+- EFX reverb zones (interiors, tunnels) (`architecture/audio-architecture/audio-occlusion.md`)
+- `stinger_game_over` (WAV PCM mono, ≤4 s, -18 LUFS/-1 dBTP): game-over stinger for Scenario mode; wires to sources[57] (reserved in V1); `kStingerCount` increases from 2 to 3 when Scenario mode ships; `StingerType::GAME_OVER = 57` added to enum (`architecture/audio-architecture/source-pool.md`, `architecture/audio-architecture/v1-audio-asset-manifest.md`)
+- Second road marking atlas if >16 decal types needed (`architecture/asset-standards/2d-texture-standards.md`)
+- Additional terrain material layers beyond 4 (second splat map) (`architecture/asset-standards/2d-texture-standards.md`)
+- `sfx_population_notification` lightweight non-ducked population milestone sound (`architecture/audio-architecture/v1-audio-asset-manifest.md`)
+- Rebindable chord bindings (Ctrl+Z undo, Ctrl+S save — non-rebindable in V1; requires separate key-mapping infrastructure) (`architecture/ui-ux/hotkey-scheme.md`)
+- Merge queue configuration (`architecture/ci-cd/branch-protection.md`)
+- Win modal and HUD goal tracker: UI layout stubbed in Phase 8; interaction wiring (functional Scenario win-condition evaluation, player-visible goal tracker updates, win modal dismissal flow) deferred post-V1 (`architecture/game-design/game-progression-modes.md`)

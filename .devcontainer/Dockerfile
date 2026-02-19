@@ -25,7 +25,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   jq \
   nano \
   vim \
-  libirrlicht-dev build-essential \
+  libirrlicht-dev \
+  xvfb libgl1-mesa-dev \
+  libvorbis-dev \
+  build-essential \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # install recent go
