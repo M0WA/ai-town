@@ -35,3 +35,7 @@ Skill
 add this skill (fix-specs)
 have all agents review the specs in their respective field. fix all high/criticals with the recommandation that is reviewed and agreed on.
 repeat this until there is one review where no critical or high are detected by any of the agents. after each fix re-review.
+
+---
+
+[1fc3874e917df2ef3a21f7d706546aad73942217] have phase 0 from implementation plan implemented by the choosen agents.
