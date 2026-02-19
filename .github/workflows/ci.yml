@@ -32,7 +32,7 @@ jobs:
     steps:
       # Step 1: checkout (must be first — makes ci.yml available on disk for lint step)
       - name: Checkout code
-        uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29  # v4.1.1
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
       # Step 2: Supply-chain lint — first substantive step, immediately after checkout.
       # Greps ci.yml for placeholder SHAs and rejects any SHA shorter than 40 hex chars.
@@ -72,7 +72,7 @@ jobs:
       # Step 5: Cache vcpkg packages.
       # Reads $COMPILER_VERSION set in step 4. Must follow step 4.
       - name: Cache vcpkg packages
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c6158d  # v4.2.0
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: ~/.cache/vcpkg
           key: vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT_ID }}
@@ -83,7 +83,7 @@ jobs:
       # Keyed on CMakeLists.txt + cmake/** to invalidate when SHA pins change.
       # Reads $COMPILER_VERSION set in step 4.
       - name: Cache FetchContent downloads
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c6158d  # v4.2.0
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: .fetchcontent_cache
           key: fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
@@ -223,7 +223,7 @@ jobs:
     steps:
       # Step 1: Checkout
       - name: Checkout code
-        uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29  # v4.1.1
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
       # Step 2: Supply-chain lint (same grep as build-linux — rejects placeholder SHAs).
       - name: Lint workflow for placeholder SHAs
@@ -253,7 +253,7 @@ jobs:
       # Step 4: Cache vcpkg packages.
       # Reads $env:COMPILER_VERSION set in step 3.
       - name: Cache vcpkg packages
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c6158d  # v4.2.0
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
           key: vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT_ID }}
@@ -262,7 +262,7 @@ jobs:
 
       # Step 5: Cache FetchContent downloads.
       - name: Cache FetchContent downloads
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c6158d  # v4.2.0
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: .fetchcontent_cache
           key: fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
@@ -390,7 +390,7 @@ jobs:
     steps:
       # Step 1: Checkout
       - name: Checkout code
-        uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29  # v4.1.1
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
       # Step 2: Supply-chain lint (same as build-linux — both jobs must enforce supply-chain pins).
       # Rationale: a CI run that skips build-linux and only runs coverage-linux must still
@@ -422,7 +422,7 @@ jobs:
 
       # Step 5: Cache vcpkg packages.
       - name: Cache vcpkg packages
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c6158d  # v4.2.0
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: ~/.cache/vcpkg
           key: vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT_ID }}
@@ -431,7 +431,7 @@ jobs:
 
       # Step 6: Cache FetchContent downloads.
       - name: Cache FetchContent downloads
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c6158d  # v4.2.0
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: .fetchcontent_cache
           key: fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
