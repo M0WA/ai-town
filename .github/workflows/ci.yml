@@ -544,11 +544,15 @@ jobs:
           lcov --capture --directory "${BUILD_DIR}" --base-directory . \
                --ignore-errors mismatch \
                --output-file coverage.info
-          # Note: "${BUILD_DIR}/_deps/*" is intentionally absent — FetchContent uses
-          # FETCHCONTENT_BASE_DIR=.fetchcontent_cache (outside the build tree), so
-          # build/_deps/ never exists. Newer lcov treats unused patterns as errors
-          # (exit code 25); removing the dead pattern avoids that failure.
+          # --ignore-errors unused: lcov 2.x treats any --remove pattern that matches
+          # no files as a fatal error (exit 25). At Phase 0 only smoke tests exist, so
+          # many exclusion patterns (mock_*.h, manual_*.h, src/audio/*, etc.) match
+          # nothing yet. These patterns are correct future-proofing — they must stay so
+          # they suppress coverage for those paths when real code arrives in Phase 1+.
+          # Note: "${BUILD_DIR}/_deps/*" is intentionally absent — with
+          # FETCHCONTENT_BASE_DIR=.fetchcontent_cache, build/_deps/ never exists.
           lcov --remove coverage.info \
+            --ignore-errors unused \
             '/usr/*' \
             "${{ github.workspace }}/.fetchcontent_cache/*" \
             '*/tests/*' \

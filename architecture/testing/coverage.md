@@ -18,7 +18,11 @@ lcov --capture --directory build --base-directory $(pwd) \
 # the build tree (as in CI). FetchContent then writes to .fetchcontent_cache/, not
 # build/_deps/, so the pattern is unused. Newer lcov (2.x) treats unused patterns as
 # errors (exit code 25). Use "*/.fetchcontent_cache/*" instead.
+# --ignore-errors unused: lcov 2.x treats any --remove pattern matching no files as a
+# fatal error (exit 25). Many patterns are future-proofing (mock_*.h, src/audio/*, etc.)
+# and match nothing until Phase 1+ code exists. Keep all patterns; suppress the error.
 lcov --remove coverage.info \
+  --ignore-errors unused \
   '/usr/*' \
   "*/.fetchcontent_cache/*" \
   '*/tests/*' \

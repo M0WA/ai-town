@@ -217,10 +217,13 @@ This step runs as the **first named step** in the `build-linux` job — before v
         lcov --capture --directory build --base-directory ${{ github.workspace }} \
              --ignore-errors mismatch \
              --output-file coverage.info
-        # Note: "${BUILD_DIR}/_deps/*" is intentionally absent. With FETCHCONTENT_BASE_DIR=
-        # .fetchcontent_cache, FetchContent never populates build/_deps/. Newer lcov (2.x)
-        # treats unused --remove patterns as errors (exit 25).
+        # --ignore-errors unused: lcov 2.x treats any --remove pattern matching no files
+        # as a fatal error (exit 25). At Phase 0 only smoke tests exist; many patterns
+        # (mock_*.h, src/audio/*, etc.) are future-proofing and match nothing yet.
+        # Note: "${BUILD_DIR}/_deps/*" intentionally absent — build/_deps/ never exists
+        # with FETCHCONTENT_BASE_DIR=.fetchcontent_cache.
         lcov --remove coverage.info \
+          --ignore-errors unused \
           '/usr/*' \
           "${{ github.workspace }}/.fetchcontent_cache/*" \
           '*/tests/*' \
