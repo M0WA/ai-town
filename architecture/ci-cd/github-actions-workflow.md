@@ -209,7 +209,14 @@ This step runs as the **first named step** in the `build-linux` job — before v
     - name: Capture and gate lcov coverage
       run: |
         BUILD_DIR=build
-        lcov --capture --directory build --base-directory ${{ github.workspace }} --output-file coverage.info
+        # --ignore-errors mismatch: GCC 13 geninfo emits "mismatched end line" for inline
+        # functions and lambdas in headers (GTest macros, fmt headers, etc.). This is a
+        # known lcov/GCC 13 compatibility issue; the mismatch is benign and does not affect
+        # coverage accuracy. Without this flag lcov --capture exits non-zero and the entire
+        # coverage job fails before genhtml runs.
+        lcov --capture --directory build --base-directory ${{ github.workspace }} \
+             --ignore-errors mismatch \
+             --output-file coverage.info
         lcov --remove coverage.info \
           '/usr/*' \
           "${BUILD_DIR}/_deps/*" \

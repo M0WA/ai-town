@@ -537,7 +537,12 @@ jobs:
       - name: Generate coverage report
         run: |
           BUILD_DIR=build
+          # --ignore-errors mismatch: GCC 13 geninfo produces "mismatched end line"
+          # errors for inline functions and lambdas in headers (e.g. GTest macros).
+          # This is a known lcov/GCC 13 compatibility issue; the mismatch is benign
+          # and does not affect coverage accuracy.
           lcov --capture --directory "${BUILD_DIR}" --base-directory . \
+               --ignore-errors mismatch \
                --output-file coverage.info
           lcov --remove coverage.info \
             '/usr/*' \
