@@ -34,6 +34,16 @@
       # as of mid-2024 runner images. If jq availability is uncertain, add an install step.
   ```
 
+### Baseline Staleness Risk
+
+**Old vcpkg baselines break Windows CI via MSYS2 mirror 404s.** Confirmed failure mode (encountered in Phase 0): the `zlib` portfile at baseline `f7423ee` called `vcpkg_fixup_pkgconfig`, which attempted to download `msys2-runtime-3.5.3-3` from MSYS2 mirrors to obtain `pkgconf`. All six MSYS2 mirrors returned HTTP 404 — the package had been superseded and removed. The build failed with `error: Failed to download file with error: 1`.
+
+**Rule**: If Windows CI fails with vcpkg download errors referencing MSYS2 packages, the baseline is too old. Update `builtin-baseline` in `vcpkg.json` AND `VCPKG_COMMIT_ID` in `ci.yml` to the current vcpkg HEAD (or a recent commit). Always verify that the `irrlicht` port still exists at the new baseline before committing:
+```
+curl -s https://api.github.com/repos/microsoft/vcpkg/contents/ports/irrlicht?ref=<NEW_SHA>
+```
+A 200 response confirms the port exists. A 404 means the port was removed — try a slightly older commit.
+
 ### CMake Dependencies
 ```cmake
 find_package(OpenAL REQUIRED)
@@ -81,7 +91,7 @@ The spec mandates vcpkg as the "mandatory dependency manager on all platforms." 
 
   # Cache step (runs BEFORE configure; restore-then-save on cache miss):
   - name: Cache FetchContent downloads
-    uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c6158d  # v4.2.0 — pin to SHA in production
+    uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0 — pin to SHA in production
     with:
       path: .fetchcontent_cache
       key: fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
