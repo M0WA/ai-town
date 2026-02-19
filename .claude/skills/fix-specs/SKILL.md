@@ -12,7 +12,8 @@ Iteratively review and fix the project specification using all agent roles. Repe
 ### Step 1 — Identify spec files
 
 Read all specification files in the project. This includes:
-- `CLAUDE.md` — primary project spec
+- `CLAUDE.md` — primary project spec (project overview, guidelines, and index of architecture files)
+- `architecture/` — canonical detailed spec files; **all files here must be read, maintained, and extended as needed**. The `architecture/DOCUMENT_INDEX.md` lists every file. When a fix requires adding or expanding detail, update the relevant `architecture/` file (not just `CLAUDE.md`).
 - `epic.txt` — if present, raw planning document
 - Any other `.md` files at the project root that describe requirements, architecture, or design
 
@@ -71,7 +72,10 @@ HIGH issues: Y
 For each CRITICAL or HIGH issue (prioritizing CRITICAL first):
 
 1. Present the issue and the agent's recommendation clearly
-2. Apply the fix to the relevant spec file(s) — edit `CLAUDE.md` or other spec files directly
+2. Apply the fix to the relevant spec file(s):
+   - Detailed technical content → edit the appropriate `architecture/` file
+   - Project overview, guidelines, or index entries → edit `CLAUDE.md`
+   - If no `architecture/` file exists for the topic, create one and add it to `architecture/DOCUMENT_INDEX.md` and the index table in `CLAUDE.md`
 3. Confirm what was changed
 
 Apply fixes one at a time, updating the spec file after each. Do not batch multiple conflicting changes without verifying consistency.
@@ -106,3 +110,4 @@ The specification has passed a full review by all agents with no CRITICAL or HIG
 - All agents must run in parallel each round to minimize latency
 - MEDIUM and LOW issues are noted but do not block completion
 - If the same issue persists across 3 rounds without being resolved, flag it explicitly and ask the user for guidance before continuing
+- **All spec files must be maintained and extended**: fixes go into `architecture/` files (canonical detail) or `CLAUDE.md` (overview/index). Never leave a fix as a comment or note — write it into the spec. If a topic lacks an `architecture/` file, create one.

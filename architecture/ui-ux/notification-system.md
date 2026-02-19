@@ -1,0 +1,46 @@
+# Notification System
+
+- **Persistent indicators**: Budget in red when negative; debt indicator; power/water coverage warnings as persistent HUD icons
+- **Transient toasts**: Displayed top-center; CRITICAL band: up to 2 simultaneously; Normal band: up to 3 simultaneously (reduced when CRITICAL band is occupied — see priority separation below). **Auto-dismiss (5 seconds) applies only to Normal queue toasts.** CRITICAL queue toasts do NOT auto-dismiss — they require explicit player dismissal (click, Enter, or Delete).
+- **Priority separation**: Toasts are separated into two queues with **dedicated vertical screen bands** to prevent overlap:
+  - **CRITICAL queue** (fire, bankruptcy, power/water outage): displayed in a **reserved top band at virtual y: 20–116 px** (fixed 48 px per item — **CRITICAL toasts are fixed-height at 48 px each**; 2 toasts × 48 px = 96 px content fits exactly within the 96 px band height. Title + single-line body + dismiss affordance + padding all fit at 48 px; see toast height constraints below), max 2 visible simultaneously (rest remain queued); never silently dropped; each CRITICAL toast must be explicitly dismissed by the player (click, Enter, or Delete — Delete added as alternative to avoid interrupting mouse work). Maximum 2 CRITICAL toasts visible at once; further CRITICAL toasts queue behind them.
+  - **CRITICAL toast auto-pause**: The simulation is automatically paused (equivalent to pressing Space/Pause) when the CRITICAL notification queue transitions from empty to non-empty. **Auto-resume requires explicit player action**: the simulation does NOT automatically resume when the CRITICAL queue is cleared (all CRITICAL toasts dismissed). The player must explicitly unpause (press Space or click the Pause button) after dismissing CRITICAL toasts. This prevents unexpected simulation restarts after the player pauses manually and then dismisses CRITICAL toasts. The `NotificationManager` calls `setPaused(true)` when the first CRITICAL toast arrives; it does NOT call `setPaused(false)` when the last CRITICAL toast is dismissed — the player is responsible for unpausing. During auto-pause triggered by a CRITICAL toast, the speed selector remains accessible (player can change speed setting for when the simulation resumes). A "Paused — [event name]" indicator appears in the Time Controls area to distinguish CRITICAL-toast-pause from player-initiated pause; after CRITICAL toast dismissal the indicator changes to the standard "Paused" label. **Priority rule**: If a blocking modal is simultaneously active, the modal takes precedence — the speed selector is grayed out regardless of CRITICAL toast state. The CRITICAL-toast auto-pause rule applies only when no blocking modal is present.
+
+  **Speed selector state matrix** (to prevent ambiguity when states combine):
+  | State | Simulation | Speed selector |
+  |---|---|---|
+  | No modal, no CRITICAL toast | Running | Enabled |
+  | CRITICAL toast only (no modal) | Auto-paused | **Enabled** — player can pre-set speed for resume |
+  | Modal only (no CRITICAL toast) | Paused | **Disabled** (grayed out) |
+  | Modal + CRITICAL toast | Paused | **Disabled** (modal wins) |
+  | Modal dismissed, CRITICAL toast remains | Auto-paused (re-evaluated) | **Enabled** — back to CRITICAL-toast-only rule |
+
+  The "modal dismissed with queued CRITICAL toast" row is the non-obvious transition: after `closeModal()`, CRITICAL toasts become visible and auto-pause is re-evaluated, but the speed selector transitions back to **ENABLED** because the modal is gone. The player must manually unpause to resume simulation (auto-resume is never performed by `NotificationManager`).
+
+  - **Simultaneous CRITICAL toast + blocking modal behavior**: When a blocking modal becomes active, **ALL CRITICAL toasts — both currently visible and any new arrivals — are hidden**. Pre-existing visible CRITICAL toasts are returned to the front of the CRITICAL queue and their on-screen elements removed. New CRITICAL toasts arriving while a modal is active are also held in the queue without being displayed. After the modal is dismissed, all queued CRITICAL toasts become visible (up to the 2-simultaneous limit) and CRITICAL-toast auto-pause is re-evaluated. This ensures the modal has complete visual focus with no competing blocking UI layers. **Rationale for hiding pre-existing toasts**: showing pre-existing CRITICAL toasts on top of the modal scrim creates two simultaneous blocking UI layers (modal + toast), forcing the player to decide which to address first. The modal always takes full precedence. After modal dismissal the player immediately sees any outstanding CRITICAL alerts.
+  - **CRITICAL toast keyboard navigation**: The two visible CRITICAL toasts are Tab-navigable. The first (oldest) CRITICAL toast receives keyboard focus automatically when it becomes visible. Tab moves focus to the second CRITICAL toast if visible. Enter or Delete dismisses the currently focused CRITICAL toast. The focus ring uses the same 2px accent-color border as modal buttons. CRITICAL toast keyboard focus is established AFTER any blocking modal is dismissed (modals hold keyboard focus exclusively while active — see Input Arbitration Priority 1).
+  - **Normal queue**: FIFO, max depth 10; auto-dismiss after 5 seconds; dismissable by click. Max 3 visible simultaneously when no CRITICAL toasts are visible; max 2 visible simultaneously when 1 CRITICAL toast is visible; max 1 visible when 2 CRITICAL toasts are visible. **Start position**: Normal queue toasts always start at virtual y = **130 px** (immediately below the CRITICAL reserved band at y:20–116, with a 14 px visual separation gap). This position is fixed regardless of how many CRITICAL toasts are currently visible — the CRITICAL band is a fixed reserved region at y:20–116 that never overlaps y:130+, so Normal toasts do not need to shift down based on CRITICAL count. The visible-count reduction (3/2/1) above provides sufficient density adaptation. Toasts beyond depth 10 are **logged to an in-game notification log** rather than silently discarded.
+  - **Toast height constraints** (required to enforce the 320 px cap):
+    - CRITICAL toast height: **fixed 48 px** per toast (title line + single-line body + dismiss affordance + padding; long body text truncated with ellipsis at 80 characters to prevent wrapping). **Fixed at 48 px, not variable** — 2 × 48 px = 96 px fits exactly in the 96 px CRITICAL band (y:20–116 px). Do NOT allow CRITICAL toasts to grow beyond 48 px; a variable max of 80 px would overflow the band (2 × 80 = 160 px > 96 px).
+    - Normal toast height: min 40 px, max **63 px** per toast (single-line body; long text truncated with ellipsis at 80 characters).
+    - **320 px budget verification**: CRITICAL band = 2 × 48 px (fixed) = 96 px from y:20 → y:116. Normal band starts at y:130 (14 px visual gap below CRITICAL band). 3 Normal toasts × 63 px = 189 px; total from top = 130 + 189 = 319 px ≤ 320 px. ✓ `NotificationManager` must enforce the 63 px Normal toast height cap and the 48 px CRITICAL toast fixed height at element creation time.
+    - Long notification messages that would overflow the toast body are stored in full in the notification log (bell icon) but displayed truncated with "…" in the toast. The `NotificationManager` must NOT allow toast body elements to exceed the max height; if text wraps beyond the allowed height, truncate and append "…".
+  - Combined maximum height of both bands must not exceed 320 px (virtual) to prevent the stack from reaching center screen.
+- **Notification log**: Accessible via a bell/log icon in the HUD. See [Notification Log Panel](#notification-log-panel) below for full specification.
+
+## Notification Log Panel
+
+The notification log panel is a scrollable history overlay toggled by the bell icon or the **B** key.
+
+- **Panel dimensions**: 400×500 px (virtual/scaled)
+- **Anchor**: opens below-left of the bell icon — the bottom-left corner of the panel aligns to the bottom-left corner of the bell icon (i.e., the panel extends leftward and downward from that anchor point)
+- **Z-order**: rendered above all HUD elements; when a blocking modal is active, the log panel is covered by the modal scrim (the log does NOT render above the scrim)
+- **Toggle**: **B** key or bell icon click; opening the panel resets the unread-count badge to 0
+- **Content**: Shows the last 50 notifications (CRITICAL and Normal combined), most-recent entry at the top. Each row displays:
+  - Timestamp: elapsed time since the event (e.g., "2m 34s ago")
+  - Priority badge: CRITICAL entries use a red badge; Normal entries use the default (no special color)
+  - Message text: full message (not truncated, unlike toast display)
+- **Scroll**: mouse wheel scrolls the list; most-recent notification is at the top of the list
+- **Session persistence**: the log persists for the duration of the play session; it is NOT cleared on save or load within the same session
+- **Dismiss on outside click**: clicking anywhere outside the panel bounds closes the log panel. Outside clicks do not consume scroll-wheel or middle-mouse-button events — those pass through to the camera/3D view
+- Implementation: `NotificationManager` class creates/manages `IGUIStaticText` or custom `IGUIElement` overlays
