@@ -19,7 +19,7 @@ target_link_libraries(my_test PRIVATE GTest::gtest_main GTest::gmock)
 FetchContent_Declare(
   rapidcheck
   GIT_REPOSITORY https://github.com/emil-e/rapidcheck.git
-  GIT_TAG        ff6af6fc683159deb51c543b065eba14dfcf329d  # pinned SHA — no versioned tag available
+  GIT_TAG        b96a4e626ef4c7348dcd16c500353c2f997a9f3f  # pinned SHA — no versioned tag available
 )
 set(RC_ENABLE_GTEST ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(rapidcheck)
