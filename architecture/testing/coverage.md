@@ -38,11 +38,12 @@ lcov --list coverage_filtered.info
 # Generate HTML report BEFORE the gate check — if --fail-under-percent runs first and exits
 # non-zero, genhtml is skipped and the coverage HTML artifact is lost.
 genhtml coverage_filtered.info --output-directory coverage_html/
-# PHASED ROLLOUT: The --fail-under-percent 80 gate is NOT applied from Phase 0.
-# At Phase 0, use --fail-under-percent 0 (the smoke test gives trivial coverage;
-# the 80% gate is not meaningful until Phase 2+ logic is covered).
-# Change the gate to 80 as part of Phase 2 delivery.
-lcov --fail-under-percent 0 --summary coverage_filtered.info
+# PHASED ROLLOUT: No hard coverage gate at Phase 0. lcov --fail-under-percent does
+# not exist in lcov 2.0 (ubuntu-latest ships 2.0; the flag was added in 2.1).
+# At Phase 0 the gate would be 0% anyway (smoke tests give trivial coverage).
+# Use --summary for informational output. Phase 2 adds a real gate.
+# TODO Phase 2: implement 80% gate (bash awk check or upgrade to lcov 2.1+).
+lcov --summary coverage_filtered.info
 ```
 **Mock exclusion patterns**: `'*/mock_*.h'` and `'*/mock_*.cpp'` are required exclusions even though mock files live under `tests/` (which is already excluded). Template instantiations of `StrictMock<MockAudioSystem>` and similar types may produce coverage data attributed to the mock header paths (`tests/*/mock_*.h`) rather than the test `.cpp` file — the mock exclusion patterns ensure these do not contribute to the gate even if the `*/tests/*` glob misses them due to path normalization differences.
 **Manual test double exclusion patterns**: `'*/manual_*.h'` and `'*/manual_*.cpp'` must be added alongside the mock exclusion patterns. `ManualRNG` (`tests/simulation/manual_rng.h`), `ManualClock` (`tests/simulation/manual_clock.h`), and similar hand-written test doubles follow the `manual_` naming convention and must be excluded from the coverage gate for the same reason as mocks — gcov may attribute their template/inline method coverage to the header file path rather than the calling test `.cpp`. Without this exclusion, manual test doubles can appear as partially-uncovered files and incorrectly lower the gate percentage. Both `mock_*` and `manual_*` patterns must appear in every lcov `--remove` invocation: in `coverage.md` (local developer script), in the `coverage-linux` CI job YAML, and in the `CLAUDE.md` coverage command reference.

@@ -233,11 +233,13 @@ This step runs as the **first named step** in the `build-linux` job — before v
           --output-file coverage_filtered.info
         lcov --list coverage_filtered.info
         genhtml coverage_filtered.info --output-directory coverage_html/
-        # PHASING NOTE: Phase 0 uses --fail-under-percent 0 (smoke tests give trivial coverage;
-        # the 80% gate is not meaningful until Phase 2 raises it). Use exactly:
-        #   Phase 0:  lcov --fail-under-percent 0  --summary coverage_filtered.info  # TODO: raise to 80 from Phase 2
-        #   Phase 2+: lcov --fail-under-percent 80 --summary coverage_filtered.info
-        lcov --fail-under-percent 0 --summary coverage_filtered.info  # Phase 0: 0; raise to 80 in Phase 2
+        # PHASING NOTE: No hard coverage gate at Phase 0.
+        # lcov --fail-under-percent does NOT exist in lcov 2.0 (ubuntu-latest ships 2.0;
+        # the flag was added in lcov 2.1). Using it exits 1 with "Unknown option".
+        # At Phase 0 the gate would be 0% anyway. Use --summary for informational output.
+        # Phase 2 TODO: implement 80% gate via bash awk check or after confirming lcov 2.1+:
+        #   lcov --summary coverage_filtered.info | awk '/lines/ {if ($2+0 < 80) exit 1}'
+        lcov --summary coverage_filtered.info
     ```
     The lcov capture-and-gate step must run **after all three ctest steps complete** — lcov reads the `.gcda` files produced by test execution. Running lcov before all three ctest steps complete will under-report coverage for integration-tested code paths. `BUILD_DIR` is set and used within the same `run:` block as all lcov operations, keeping variable scope self-contained.
   - **`coverage-linux` test reporting steps (required)**: After all three ctest steps and **before the lcov capture step**, `coverage-linux` must include the XML verification and `dorny/test-reporter` steps. Placing these **before lcov** is intentional: if a test fails and ctest exits non-zero, the XML files may still be present; reporting them before the lcov step ensures test annotations reach the PR even when lcov subsequently fails or is skipped. Without these steps, test failures in the coverage build produce no PR annotations, silently hiding coverage-run failures from reviewers. **Step order in `coverage-linux`**: (1) unit tests ctest, (2) integration tests ctest, (3) OpenGL tests ctest under xvfb, (4) Verify test XML, (5) Publish test results via `dorny/test-reporter`, (6) lcov capture + filter + gate, (7) Upload coverage artifact. The `coverage-linux` YAML must include (after all ctest steps, before lcov):

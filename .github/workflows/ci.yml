@@ -562,10 +562,13 @@ jobs:
             --output-file coverage_filtered.info
           lcov --list coverage_filtered.info
           genhtml coverage_filtered.info --output-directory coverage_html/
-          # Phase 0: --fail-under-percent 0 (smoke test gives trivial coverage; 80% gate
-          # is not meaningful until Phase 2). Raise to 80 from Phase 2 onward.
-          lcov --fail-under-percent 0 --summary coverage_filtered.info
-          # TODO: raise to 80 from Phase 2
+          # Phase 0: no hard coverage gate. lcov --fail-under-percent does not exist in
+          # lcov 2.0 (ubuntu-latest); it was added in lcov 2.1. At Phase 0 the gate would
+          # be 0% anyway (smoke tests give trivial coverage). Use --summary for informational
+          # output only. Phase 2 replaces this with a proper 80% gate once the tool version
+          # is confirmed or the gate is implemented via a bash percentage check.
+          # TODO Phase 2: replace with: lcov --summary coverage_filtered.info | awk check
+          lcov --summary coverage_filtered.info
 
       # Step 18: Upload coverage HTML artifact.
       # if: always() — upload even if lcov gate fails for post-mortem analysis.
