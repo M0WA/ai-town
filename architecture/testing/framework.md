@@ -128,7 +128,7 @@ aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300)
 add_executable(audio_tests tests/audio/duck_state_test.cpp ...)
 # rapidcheck and rapidcheck_gtest are included proactively: removing them later is trivial,
 # but omitting them causes a confusing link failure if a property test is added to audio_tests.
-# Vorbis::vorbisfile (vcpkg libvorbisfile, header <vorbis/vorbisfile.h>) is required because
+# Vorbis::vorbisfile (vcpkg port libvorbis, header <vorbis/vorbisfile.h>) is required because
 # Phase 4 audio tests call ov_fopen(), ov_read(), and ov_pcm_total() directly for OGG header
 # validation. stb_vorbis is not used; Vorbis::vorbisfile is the sole OGG decode library.
 target_link_libraries(audio_tests PRIVATE aitown_audio Vorbis::vorbisfile GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)

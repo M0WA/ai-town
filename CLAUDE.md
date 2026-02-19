@@ -87,7 +87,7 @@ Do not suggest alternative engines, languages, or platforms.
 ### Dependencies
 - Irrlicht 3D Engine
 - OpenAL Soft (OpenSoft AL)
-- libvorbisfile (OGG decoding)
+- libvorbis/libvorbisfile (OGG decoding — vcpkg port: `libvorbis`)
 - Google Test + GMock (unit testing)
 - RapidCheck (property-based testing)
 - vcpkg (dependency management)

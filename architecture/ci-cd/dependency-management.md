@@ -10,7 +10,7 @@
   "dependencies": [
     "irrlicht",
     "openal-soft",
-    "libvorbisfile"
+    "libvorbis"
   ]
 }
 ```
