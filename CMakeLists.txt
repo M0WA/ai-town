@@ -58,10 +58,8 @@ find_package(Irrlicht REQUIRED)
 # OpenAL Soft: required for aitown_audio
 find_package(OpenAL REQUIRED)
 
-# Vorbis (libvorbisfile): required for aitown_audio and audio_tests
-# Spike note: verify the CMake target name from vcpkg — may be Vorbis::vorbisfile,
-# Vorbis::Vorbis, or libvorbisfile::libvorbisfile depending on port version.
-# Run: vcpkg install libvorbisfile, inspect share/vorbis/VorbisConfig.cmake (or equivalent).
+# Vorbis: vcpkg port name is "libvorbis" (NOT "libvorbisfile" — no such port exists).
+# "libvorbis" installs both libvorbis and libvorbisfile; CMake target is Vorbis::vorbisfile.
 find_package(Vorbis REQUIRED)
 
 # ============================================================================
