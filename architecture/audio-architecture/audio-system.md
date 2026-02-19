@@ -7,6 +7,10 @@
 **Important**: `IAudioSystem` has no OpenAL include dependencies. It uses only game-domain types (`SoundId`, `MusicTrackId`, `StingerType`, `SimSpeed`, `CameraState`, `vec3`, `TimeOfDay`, `SoundPriority`). Never expose `ALuint`, `ALfloat`, or any `AL_*` constant through this interface.
 
 ```cpp
+// audio_types.h MUST #include <cstdint> — uint32_t is not guaranteed to be pulled in
+// transitively on all compilers (GCC strict include order exposed this; MSVC was silently
+// resolving it via other headers).  Never rely on transitive inclusion of <cstdint>.
+
 // Forward declarations — defined in game-domain headers, not in OpenAL headers:
 struct vec3;         // 3-component float vector (X, Y, Z)
 struct CameraState;  // position (vec3), forward (vec3), up (vec3)
