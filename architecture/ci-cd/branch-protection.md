@@ -1,4 +1,5 @@
 # Branch Protection (repository settings)
+<!-- Status: CONFIGURED — branch protection is active on both `main` and `develop` as of Phase 0. -->
 
 - Branch protection on BOTH `main` and `develop`. Both branches require:
   1. **Required status check**: `all-checks-pass` (single gate covering both Linux + Windows + coverage)
