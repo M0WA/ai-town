@@ -59,7 +59,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils
+          sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev
 
       # Step 4: Detect GCC version and write to GITHUB_ENV.
       # MUST be a SEPARATE named step before the actions/cache step.
@@ -412,7 +412,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils lcov
+          sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev lcov
 
       # Step 4: Detect GCC version (separate step before actions/cache).
       - name: Detect GCC version
