@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include "vec3.h"
 #include "camera_state.h"
 
