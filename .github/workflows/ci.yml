@@ -544,9 +544,12 @@ jobs:
           lcov --capture --directory "${BUILD_DIR}" --base-directory . \
                --ignore-errors mismatch \
                --output-file coverage.info
+          # Note: "${BUILD_DIR}/_deps/*" is intentionally absent — FetchContent uses
+          # FETCHCONTENT_BASE_DIR=.fetchcontent_cache (outside the build tree), so
+          # build/_deps/ never exists. Newer lcov treats unused patterns as errors
+          # (exit code 25); removing the dead pattern avoids that failure.
           lcov --remove coverage.info \
             '/usr/*' \
-            "${BUILD_DIR}/_deps/*" \
             "${{ github.workspace }}/.fetchcontent_cache/*" \
             '*/tests/*' \
             '*/mock_*.h' '*/mock_*.cpp' \

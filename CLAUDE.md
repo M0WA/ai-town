@@ -241,11 +241,10 @@ cmake --build build
 ctest --test-dir build -LE "integration|requires-opengl" --output-on-failure
 ctest --test-dir build -L "^integration$" --output-on-failure
 xvfb-run --auto-servernum ctest --test-dir build -L "^requires-opengl$" --output-on-failure
-lcov --capture --directory build --base-directory . --output-file coverage.info
+lcov --capture --directory build --base-directory . --ignore-errors mismatch --output-file coverage.info
 BUILD_DIR=build
 lcov --remove coverage.info \
   '/usr/*' \
-  "${BUILD_DIR}/_deps/*" \
   "*/.fetchcontent_cache/*" \
   '*/tests/*' \
   '*/mock_*.h' '*/mock_*.cpp' \
@@ -293,7 +292,7 @@ ctest --test-dir build -C Release --output-on-failure
 - **CI step order**: compiler-version detect step must write to `$GITHUB_ENV` in a **separate step before** the `actions/cache` step — `$GITHUB_ENV` writes are not visible within the same step
 - Tests use Google Test + GMock (pinned v1.14.0) + RapidCheck (SHA-pinned); simulation injected via IRenderer/IAudioSystem; UIManager via IUIBackend (opaque UIElementHandle — no raw Irrlicht pointers in interface)
 - Mock policy: StrictMock for unit tests, NiceMock for property/integration tests; add TearDown() to explicitly reset sim_ and document destructor-path contract
-- Coverage gate (lcov 80%) Linux only; use `${BUILD_DIR}/_deps/*` glob (not library-name globs) AND `"${{ github.workspace }}/.fetchcontent_cache/*"` in CI YAML (or `"*/.fetchcontent_cache/*"` in local scripts) to exclude googletest/RapidCheck sources when `FETCHCONTENT_BASE_DIR=.fetchcontent_cache`; building atlas mip chain clamped at 4 levels
+- Coverage gate (lcov 80%) Linux only; use `"${{ github.workspace }}/.fetchcontent_cache/*"` in CI YAML (or `"*/.fetchcontent_cache/*"` in local scripts) to exclude googletest/RapidCheck sources; do NOT include `${BUILD_DIR}/_deps/*` — with `FETCHCONTENT_BASE_DIR=.fetchcontent_cache` that path never exists and newer lcov (2.x) treats unused patterns as errors (exit 25); also pass `--ignore-errors mismatch` to `lcov --capture` for GCC 13 compatibility; building atlas mip chain clamped at 4 levels
 - CI: permissions block needed (`checks: write`); `coverage-linux` is self-contained job (builds+tests+lcov with ENABLE_COVERAGE=ON); use `GTEST_OUTPUT=xml:test_results/` (directory form); `all-checks-pass` gate MUST have `if: always()` + strict branch protection; vcpkg baseline enforcement step required; cache FetchContent `_deps/` in CI; DLL verification before upload; `actions/upload-artifact` steps must be explicit
 - Linux CI: run unit tests with `ctest -LE "integration|requires-opengl"`; integration tests (no display) with `ctest -L "^integration$"`; OpenGL tests under `xvfb-run` with `ctest -L "^requires-opengl$"`
 - Windows CI: use `vswhere.exe` for MSVC version in cache key; include `AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` in test step `env:`
