@@ -7,6 +7,17 @@ description: Use this skill when the user wants to sync the implementation plan 
 
 Update the implementation plan to reflect the current architecture specs, then run both the design squad and the tech squad over it to surface any gaps or issues.
 
+## Configuration
+
+**Severity filter** (optional, default: `CRITICAL+HIGH`): controls which issue levels agents report and which are fixed each cycle.
+
+Parse `[TARGET_SEVERITIES]` from the user's invocation at the very start:
+
+- If the user specified a list (e.g. `critical`, `critical+high+medium`, `all`), use those levels.
+- If nothing was specified, default to **CRITICAL and HIGH**.
+
+Express `[TARGET_SEVERITIES]` as a human-readable list (e.g. "CRITICAL and HIGH", or "CRITICAL, HIGH, and MEDIUM") and use it consistently in every step below. Issues below the threshold are out of scope for the entire run — agents must not report them.
+
 ## Process
 
 ### Step 1 — Product Owner updates the implementation plan
@@ -25,13 +36,13 @@ Once the plan is written, launch **both squads simultaneously** using the Task t
 
 Use the `design-squad` skill behaviour: launch `gamedesign-lookandfeel`, `gamedesign-ux`, `graphics-artist-2d-texture`, `graphics-artist-3d-model`, and `sound-artist-opensoftal` in parallel. Each agent prompt:
 
-> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read `./implementation/INDEX.md` and the per-phase files under `./implementation/` and the relevant architecture spec files under `architecture/`. Review the implementation plan from your domain's perspective. Only report CRITICAL and HIGH issues — do not report MEDIUM or LOW issues. For each CRITICAL or HIGH issue provide a concrete recommendation. If no CRITICAL or HIGH issues in your domain, say "NO ISSUES FOUND".
+> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read `./implementation/INDEX.md` and the per-phase files under `./implementation/` and the relevant architecture spec files under `architecture/`. Review the implementation plan from your domain's perspective. Only report [TARGET_SEVERITIES] issues — do not report issues below that threshold. For each in-scope issue provide a concrete recommendation. If no [TARGET_SEVERITIES] issues in your domain, say "NO ISSUES FOUND".
 
 #### Tech Squad (all 4 agents in parallel)
 
 Use the `tech-squad` skill behaviour: launch `cicd-dev-github`, `graphics-dev-irrlicht`, `sound-dev-opensoftal`, and `test-dev-cpp` in parallel. Each agent prompt:
 
-> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read `./implementation/INDEX.md` and the per-phase files under `./implementation/` and the relevant architecture spec files under `architecture/`. Review the implementation plan from your domain's perspective. Only report CRITICAL and HIGH issues — do not report MEDIUM or LOW issues. For each CRITICAL or HIGH issue provide a concrete recommendation. If no CRITICAL or HIGH issues in your domain, say "NO ISSUES FOUND".
+> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read `./implementation/INDEX.md` and the per-phase files under `./implementation/` and the relevant architecture spec files under `architecture/`. Review the implementation plan from your domain's perspective. Only report [TARGET_SEVERITIES] issues — do not report issues below that threshold. For each in-scope issue provide a concrete recommendation. If no [TARGET_SEVERITIES] issues in your domain, say "NO ISSUES FOUND".
 
 All 9 agents (5 design + 4 tech) run in parallel.
 
@@ -41,12 +52,13 @@ After all agents respond, display a structured summary:
 
 ```
 === PLAN REVIEW ===
+Severity filter: [TARGET_SEVERITIES]
 
-CRITICAL issues: X
-HIGH issues: Y
+[severity] issues: X
+[severity] issues: Y
 
 --- Senior Game Designer ---
-  [CRITICAL/HIGH/...] Issue description
+  [SEVERITY] Issue description
     → Recommendation: ...
 
 --- Senior UI/UX Designer ---
@@ -74,9 +86,9 @@ HIGH issues: Y
   ...
 ```
 
-### Step 4 — Fix CRITICAL and HIGH issues in the plan
+### Step 4 — Fix [TARGET_SEVERITIES] issues in the plan
 
-For each CRITICAL or HIGH issue (CRITICAL first):
+For each in-scope issue (highest severity first):
 
 1. Present the issue and recommendation clearly
 2. Apply the fix directly to the relevant file(s) under `./implementation/` (per-phase file or `INDEX.md`)
@@ -100,17 +112,18 @@ After all fixes are applied and the linter is clean, run `/compact` to reduce co
 
 ### Step 7 — Completion check
 
-After each review round, check: **did every agent report NO CRITICAL or HIGH issues?**
+After each review round, check: **did every agent report NO [TARGET_SEVERITIES] issues?**
 
 - If **yes** → output a final summary:
 
 ```
 === PLAN REVIEW COMPLETE ===
 
+Severity filter: [TARGET_SEVERITIES]
 Rounds completed: N
 Total issues fixed: X
 
-The implementation plan has passed a full review by all agents with no CRITICAL or HIGH issues remaining.
+The implementation plan has passed a full review by all agents with no [TARGET_SEVERITIES] issues remaining.
 ```
 
 - If **no** → continue from Step 4 with the new findings.
@@ -119,6 +132,6 @@ The implementation plan has passed a full review by all agents with no CRITICAL 
 
 - The Product Owner step (Step 1) must complete before squad reviews begin
 - All 9 squad agents run in parallel each review round — never skip any
-- MEDIUM and LOW issues are out of scope — agents must not report them
+- Issues below [TARGET_SEVERITIES] are out of scope — agents must not report them
 - If the same issue persists across 3 rounds without resolution, flag it explicitly and ask the user for guidance before continuing
 - Fixes go into `./implementation/INDEX.md` and the per-phase files only — do not modify spec files during this skill (use `/fix-specs` for that)
