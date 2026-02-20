@@ -521,17 +521,17 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
 | SimSpeed vs SpeedMultiplier | `SpeedMultiplier` is the canonical enum in `simulation_types.h`; `SimSpeed` is a type alias (`using SimSpeed = SpeedMultiplier`) | Eliminates the name mismatch between `ICitySimulation.h` (uses `SpeedMultiplier`) and `IAudioSystem.h` (uses `SimSpeed`) without duplicating the enum definition. Both names compile; `SpeedMultiplier` is preferred in new code. |
 
 ### Exit Criteria
-- `cmake -B build -S . && cmake --build build` succeeds on Linux and Windows — **both the configure step AND the build/link step must pass** (a missing CMake target name, undefined symbol, or missing include path produces a `cmake --build build` failure that `cmake -B build -S .` alone does not catch) ⏳ pending CI run
-- Smoke test (`simulation_tests`, `LABEL "unit"`, via `tests/simulation/simulation_smoke_test.cpp`) compiles, runs, and passes in all three CI jobs ⏳ pending CI run
-- `ui_tests` smoke target (`ui_smoke_test.cpp`, `LABEL "unit"`) compiles and passes — confirms `IUIBackend.h` is present and well-formed ⏳ pending CI run
-- `audio_tests` smoke target with vorbisfile linkage check passes in the unit ctest step on Linux and Windows — confirms `Vorbis::vorbisfile` is correctly wired ⏳ pending CI run
-- `integration_tests` stub (`LABEL "integration"`) discovered and passes in the integration ctest step ⏳ pending CI run
-- `all-checks-pass` gate is green on a push to `develop` ⏳ pending CI run
+- `cmake -B build -S . && cmake --build build` succeeds on Linux and Windows — **both the configure step AND the build/link step must pass** (a missing CMake target name, undefined symbol, or missing include path produces a `cmake --build build` failure that `cmake -B build -S .` alone does not catch) ✅ DONE
+- Smoke test (`simulation_tests`, `LABEL "unit"`, via `tests/simulation/simulation_smoke_test.cpp`) compiles, runs, and passes in all three CI jobs ✅ DONE
+- `ui_tests` smoke target (`ui_smoke_test.cpp`, `LABEL "unit"`) compiles and passes — confirms `IUIBackend.h` is present and well-formed ✅ DONE
+- `audio_tests` smoke target with vorbisfile linkage check passes in the unit ctest step on Linux and Windows — confirms `Vorbis::vorbisfile` is correctly wired ✅ DONE
+- `integration_tests` stub (`LABEL "integration"`) discovered and passes in the integration ctest step ✅ DONE
+- `all-checks-pass` gate is green on a push to `develop` ⏳ pending merge to develop
 - Branch protection rules configured and enforced on both `main` and `develop` ✅ DONE
-- `dorny/test-reporter` posts test annotations on PRs ⏳ pending CI run
-- `coverage-linux` produces an lcov HTML report (smoke test gives trivial coverage; `--fail-under-percent 0` used at Phase 0 — gate is not meaningful until Phase 2 raises it to 80%) ⏳ pending CI run
-- Linux `default.mhr` verification step in `build-linux` passes (placeholder no-op step documented with Phase 4 TODO is acceptable at Phase 0) ⏳ pending CI run
-- Windows CI produces test XML files in `test_results/` and the XML verification step passes ⏳ pending CI run
+- `dorny/test-reporter` posts test annotations on PRs ✅ DONE
+- `coverage-linux` produces an lcov HTML report (smoke test gives trivial coverage; `--fail-under-percent 0` used at Phase 0 — gate is not meaningful until Phase 2 raises it to 80%) ✅ DONE
+- Linux `default.mhr` verification step in `build-linux` passes (placeholder no-op step documented with Phase 4 TODO is acceptable at Phase 0) ✅ DONE
+- Windows CI produces test XML files in `test_results/` and the XML verification step passes ✅ DONE
 - `gtest_force_shared_crt ON` is verified present in `CMakeLists.txt` by a code review step before Phase 0 merge — this is MSVC-only and will not produce a CI failure on Linux; manual audit is required (ref: `architecture/ci-cd/dependency-management.md`) ✅ DONE
 - `tools/README.md` has been reviewed and approved by both `graphics-artist-2d-texture` AND `graphics-artist-3d-model` before Phase 0 is declared complete ✅ DONE
 - `assets/audio/README.md` has been reviewed and approved by `sound-artist-opensoftal` ✅ DONE
