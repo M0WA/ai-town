@@ -146,7 +146,7 @@ If the linter exits with errors, fix every reported violation before continuing.
 
 ### Step 6 — Commit round changes
 
-After the linter is clean, commit all modified files:
+After the linter is clean, use the **Bash tool** to commit all modified files directly — do NOT delegate this to a sub-agent or merely describe the commands:
 
 ```bash
 git add -A
@@ -155,9 +155,11 @@ git commit -m "fix(specs+plan): apply round-N plan+spec fixes from squad review"
 
 Replace `N` with the current round number. If nothing has changed since the last commit (e.g. all agents reported NO ISSUES and no files were modified), skip the commit and proceed directly to Step 8.
 
-### Step 7 — Compact and re-review
+### Step 7 — Compress and re-review
 
-After committing, run `/compact` to reduce context window usage, then return to **Step 2** and run all 9 agents again on the updated plan and specs. (Skip `/compact` on the final cycle when all agents report clean — just output the completion summary.)
+After committing, run `/compress` to reduce context window usage, then return to **Step 2** and run all 9 agents again on the updated plan and specs. (Skip `/compress` on the final cycle when all agents report clean — just output the completion summary.)
+
+Note: `/compress` is the built-in context compression command. Do NOT invoke it as a skill via the Skill tool — type it directly as a slash command.
 
 ### Step 8 — Completion check
 
