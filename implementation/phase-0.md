@@ -535,7 +535,7 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
 - `gtest_force_shared_crt ON` is verified present in `CMakeLists.txt` by a code review step before Phase 0 merge — this is MSVC-only and will not produce a CI failure on Linux; manual audit is required (ref: `architecture/ci-cd/dependency-management.md`) ✅ DONE
 - `tools/README.md` has been reviewed and approved by both `graphics-artist-2d-texture` AND `graphics-artist-3d-model` before Phase 0 is declared complete ✅ DONE
 - `assets/audio/README.md` has been reviewed and approved by `sound-artist-opensoftal` ✅ DONE
-- `assets/models/buildings/`, `vehicles/`, `props/` subdirectories exist and are tracked in git ⏳ pending commit/push
+- `assets/models/buildings/`, `vehicles/`, `props/` subdirectories exist and are tracked in git ✅ DONE
 
 ### Team
 | Role | Responsibility |
