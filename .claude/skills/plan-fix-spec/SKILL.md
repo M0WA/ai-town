@@ -122,11 +122,21 @@ Run Track A and Track B in parallel where possible. If a plan fix depends on a s
 
 If two agents make conflicting recommendations for the same issue, surface the conflict explicitly, reason about the best resolution, and apply the most appropriate fix.
 
-### Step 5 — Clear context and re-review
+### Step 5 — Markdown lint check
 
-After all fixes from this round are applied, run `/clear` to reset the context window, then return to **Step 2** and run all 9 agents again on the updated plan and specs.
+After all fixes from this round are applied, run the markdown linter:
 
-### Step 6 — Completion check
+```bash
+markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+```
+
+If the linter exits with errors, fix every reported violation before continuing. Re-run until the linter exits zero. Only then proceed to Step 6.
+
+### Step 6 — Clear context and re-review
+
+After all fixes are applied and the linter is clean, run `/clear` to reset the context window, then return to **Step 2** and run all 9 agents again on the updated plan and specs.
+
+### Step 7 — Completion check
 
 After each review round, check: **did every agent report NO CRITICAL or HIGH issues in their domain (for the targeted phases)?**
 

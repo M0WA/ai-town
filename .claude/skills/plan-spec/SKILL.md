@@ -84,11 +84,21 @@ For each CRITICAL or HIGH issue (CRITICAL first):
 
 If two agents make conflicting recommendations for the same issue, surface the conflict explicitly, reason about the best resolution, and apply the most appropriate fix.
 
-### Step 5 — Re-review
+### Step 5 — Markdown lint check
 
-After all fixes are applied, return to **Step 2** and run all 9 agents again on the updated plan.
+After all fixes are applied, run the markdown linter:
 
-### Step 6 — Completion check
+```bash
+markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+```
+
+If the linter exits with errors, fix every reported violation before continuing. Re-run until the linter exits zero. Only then proceed to Step 6.
+
+### Step 6 — Re-review
+
+After all fixes are applied and the linter is clean, return to **Step 2** and run all 9 agents again on the updated plan.
+
+### Step 7 — Completion check
 
 After each review round, check: **did every agent report NO CRITICAL or HIGH issues?**
 
