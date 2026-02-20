@@ -360,10 +360,10 @@ This step runs as the **first named step** in the `build-linux` job — before v
         # lcov --fail-under-percent does NOT exist in lcov 2.0 (ubuntu-latest ships 2.0;
         # the flag was added in lcov 2.1). Using it exits 1 with "Unknown option".
         # At Phase 0 the gate would be 0% anyway. Use --summary for informational output.
-        # Phase 2 TODO: implement 80% gate via bash awk check or after confirming lcov 2.1+:
+        # Phase 5 TODO: implement 80% gate via bash awk check or after confirming lcov 2.1+:
         #   lcov --summary coverage_filtered.info | awk '/lines/ {if ($2+0 < 80) exit 1}'
         lcov --summary coverage_filtered.info
-        # Phase 1 src/ui/ coverage gate (BLOCKING): enforce a 25% floor on src/ui/ files.
+        # Phase 4 src/ui/ coverage gate (BLOCKING): enforce a 25% floor on src/ui/ files.
         # lcov --list emits per-file coverage lines; grep filters to src/ui/ files only;
         # awk extracts the rightmost percentage field; sort -n and head -1 find the minimum.
         # If no src/ui/ files are present in the coverage data (empty grep output) the check
@@ -466,7 +466,7 @@ markdown-lint:
 
 - **`validate-assets` job** — validates asset files using the Python validation script. Must run on every push and PR alongside the build jobs so asset errors are caught before any binary is produced. Runs on `ubuntu-latest` with a 10-minute timeout.
 
-  **Phasing**: This job is introduced in Phase 1 running `tools/validate_assets.py` as a stub that always exits 0. It is wired into `all-checks-pass` at Phase 1 creation — not deferred to a later phase. This means the stub always passes, keeping the gate green while the real check logic is absent. In Phase 2 the script gains 13 real checks; in Phase 6 a 14th sidecar check is added. The job definition and `all-checks-pass` wiring remain unchanged across all phases.
+  **Phasing**: This job is introduced in Phase 1 running `tools/validate_assets.py` as a stub that always exits 0. It is wired into `all-checks-pass` at Phase 1 creation — not deferred to a later phase. This means the stub always passes, keeping the gate green while the real check logic is absent. In Phase 5 the script gains 13 real checks; in Phase 9 a 14th sidecar check is added. The job definition and `all-checks-pass` wiring remain unchanged across all phases.
 
   Job definition:
 
@@ -502,8 +502,8 @@ or equivalently via the GitHub API. The SHA shown here is a placeholder only.
   **Phasing summary for `validate-assets`**:
   - Phase 0: `validate-assets` job does not exist yet; omit from `needs:`.
   - Phase 1: `validate-assets` job is introduced running `tools/validate_assets.py` as a stub that always exits 0. Wire it into `all-checks-pass` immediately. Adding the job (even as a stub) now means the `all-checks-pass` dependency list never needs to change in later phases — only the script gains real checks.
-  - Phase 2: the stub script gains 13 real asset checks; the job definition and `all-checks-pass` wiring are unchanged.
-  - Phase 6: a 14th sidecar check is added to the script; again no change to the job definition or wiring.
+  - Phase 5: the stub script gains 13 real asset checks; the job definition and `all-checks-pass` wiring are unchanged.
+  - Phase 9: a 14th sidecar check is added to the script; again no change to the job definition or wiring.
 
 ### PHASE 0 FORM (validate-assets not yet introduced)
 
@@ -545,7 +545,7 @@ all-checks-pass:
 
 ### PHASE 1+ FORM (validate-assets stub introduced and wired in Phase 1)
 
-When the `validate-assets` job is added in Phase 1, update `all-checks-pass` to include it simultaneously. The job runs `tools/validate_assets.py`, which is a stub that always exits 0 at Phase 1. Wiring it in now means the `needs:` list requires no further changes in Phase 2 (real checks) or Phase 6 (sidecar check) — only the script content changes, not the CI wiring.
+When the `validate-assets` job is added in Phase 1, update `all-checks-pass` to include it simultaneously. The job runs `tools/validate_assets.py`, which is a stub that always exits 0 at Phase 1. Wiring it in now means the `needs:` list requires no further changes in Phase 5 (real checks) or Phase 9 (sidecar check) — only the script content changes, not the CI wiring.
 
 ```yaml
 all-checks-pass:

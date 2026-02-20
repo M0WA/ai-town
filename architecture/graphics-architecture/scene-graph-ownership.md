@@ -24,7 +24,7 @@
   // (consistent with the Tutorial 10 pattern and CMeshSceneNode::setMesh() implementation).
   // This assumption MUST be validated by inspecting source/Irrlicht/CMeshSceneNode.cpp
   // in the vendored Irrlicht build — specifically whether setMesh() calls grab()/drop()
-  // on the new/old mesh. This is the Phase 1 LOD spike (lod_swap_smoke_test.cpp),
+  // on the new/old mesh. This is the Phase 2 LOD spike (lod_swap_smoke_test.cpp),
   // NOT the GLEW availability spike. See the CONTINGENCY block below.
   // If the spike reveals that grab() is NOT called by setMesh(), remove this drop() — see
   // the CONTINGENCY block in this file (§"CONTINGENCY — if spike reveals grab() is NOT called").
@@ -36,22 +36,22 @@
 
   ```cpp
   TEST(LODSwapSmokeTest, SetMeshGrabDropContract) {
-      // TODO: Fill in after Phase 1 SMesh::addMeshBuffer() grab/drop spike.
+      // TODO: Fill in after Phase 2 SMesh::addMeshBuffer() grab/drop spike.
       // The spike inspects CMeshSceneNode.cpp and SMesh.h to determine whether
       // addMeshBuffer() calls grab() on the buffer. If it does, the caller must
       // call ->drop() after addMeshBuffer(); if it does not, the caller owns the
       // buffer and must not call ->drop().
       // Timing measurement requires a real GPU; this test is promoted to
-      // requires-opengl label in Phase 2 when the real LOD swap is implemented.
-      GTEST_SKIP() << "LOD swap timing requires real GPU; promoted to Phase 2.";
+      // requires-opengl label in Phase 5 when the real LOD swap is implemented.
+      GTEST_SKIP() << "LOD swap timing requires real GPU; promoted to Phase 5.";
   }
   ```
 
-  Phase 6 fills in the real test body after the spike result is confirmed. The Phase 1 CMake registration of this file (with `GTEST_SKIP()` body) validates CI routing for the requires-opengl label. **Note**: this body must remain `GTEST_SKIP()` — `SUCCEED()` produces a false-green result that implies the timing constraint has been verified.
+  Phase 5 fills in the real test body after the spike result is confirmed. The Phase 2 CMake registration of this file (with `GTEST_SKIP()` body) validates CI routing for the requires-opengl label. **Note**: this body must remain `GTEST_SKIP()` — `SUCCEED()` produces a false-green result that implies the timing constraint has been verified.
 
   If this test fails (crash or ASAN fault), the vendored Irrlicht source must be patched before any LOD swap code is written. Inspect `source/Irrlicht/CMeshSceneNode.cpp` to confirm `setMesh()` calls `grab()`/`drop()` on the new/old mesh.
-  **PENDING SPIKE — `SMesh::addMeshBuffer()` grab/drop contract**: The smoke test body above calls `newMesh->addMeshBuffer(new SMeshBuffer())`. Whether `SMesh::addMeshBuffer()` calls `grab()` on the buffer argument **must be verified** by inspecting `source/Irrlicht/SMesh.h` at Phase 1 implementation time. If `addMeshBuffer()` calls `grab()`, the caller must call `->drop()` on the `SMeshBuffer*` immediately after `addMeshBuffer()` to relinquish the caller's ownership reference — otherwise the buffer leaks (ref_count 2, never reaches 0). If `addMeshBuffer()` does NOT call `grab()`, the caller retains sole ownership and must NOT call `->drop()` after `addMeshBuffer()`. The smoke test body in `tests/rendering/lod_swap_smoke_test.cpp` must be updated to reflect the confirmed convention once the source has been read. **Record the result of this spike as a one-line comment in both `tests/rendering/lod_swap_smoke_test.cpp` and this spec file**, e.g.: `// VERIFIED: SMesh::addMeshBuffer() calls grab(); caller must drop() after addMeshBuffer().`
-  **CONTINGENCY — if spike reveals grab() is NOT called**: If the Phase 1
+  **PENDING SPIKE — `SMesh::addMeshBuffer()` grab/drop contract**: The smoke test body above calls `newMesh->addMeshBuffer(new SMeshBuffer())`. Whether `SMesh::addMeshBuffer()` calls `grab()` on the buffer argument **must be verified** by inspecting `source/Irrlicht/SMesh.h` at Phase 2 implementation time. If `addMeshBuffer()` calls `grab()`, the caller must call `->drop()` on the `SMeshBuffer*` immediately after `addMeshBuffer()` to relinquish the caller's ownership reference — otherwise the buffer leaks (ref_count 2, never reaches 0). If `addMeshBuffer()` does NOT call `grab()`, the caller retains sole ownership and must NOT call `->drop()` after `addMeshBuffer()`. The smoke test body in `tests/rendering/lod_swap_smoke_test.cpp` must be updated to reflect the confirmed convention once the source has been read. **Record the result of this spike as a one-line comment in both `tests/rendering/lod_swap_smoke_test.cpp` and this spec file**, e.g.: `// VERIFIED: SMesh::addMeshBuffer() calls grab(); caller must drop() after addMeshBuffer().`
+  **CONTINGENCY — if spike reveals grab() is NOT called**: If the Phase 2
   `lod_swap_smoke_test.cpp` spike reveals that the vendored Irrlicht
   `CMeshSceneNode::setMesh()` does NOT call `grab()` on the new mesh:
 
@@ -61,12 +61,12 @@
      counteract the drop.
   2. The `lod_swap_smoke_test.cpp` must be updated to verify (via ASAN) that
      the mesh survives the swap without the caller's `drop()`.
-  3. This finding is a BLOCKING gate for Phase 2 TerrainChunk implementation
-     — `scene-graph-ownership.md` must be updated before Phase 2 code touches
+  3. This finding is a BLOCKING gate for Phase 5 TerrainChunk implementation
+     — `scene-graph-ownership.md` must be updated before Phase 5 code touches
      `setMesh()`.
-  4. The spec update must also be noted in `implementation/phase-1.md` exit
-     criteria as a Phase 1 spike finding that either: (a) confirms the
-     `grab()` pattern is correct and Phase 2 may proceed, or (b) documents
+  4. The spec update must also be noted in `implementation/phase-2.md` exit
+     criteria as a Phase 2 spike finding that either: (a) confirms the
+     `grab()` pattern is correct and Phase 5 may proceed, or (b) documents
      the corrected no-drop pattern.
 
   **`recalculateBoundingBox()` type requirement**: `recalculateBoundingBox()` is a method of the concrete `SMesh` class, NOT the `IMesh` interface. The mesh pointer must be typed as `SMesh*` (not `IMesh*`) at the point this method is called. After `addMeshSceneNode()` or `setMesh()`, the scene node stores the mesh as `IMesh*` — do NOT call `getMesh()` on the scene node and attempt to call `recalculateBoundingBox()` on the returned pointer; it is typed as `IMesh*` and this method is not on the interface. Always call `recalculateBoundingBox()` before `setMesh()` while the `SMesh*` is still in scope.

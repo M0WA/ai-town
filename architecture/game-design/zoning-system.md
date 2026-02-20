@@ -37,7 +37,7 @@
     2. All three zone types placed simultaneously at tick 0.
     3. Rapid C/I removal during the bootstrap period (place then demolish C/I tiles within ticks 0–5).
 
-    The Phase 1 design review sign-off is valid ONLY when all three scenarios are evaluated and documented with numerical results. A blanket "analytically confirmed" statement without showing the scenario 3 calculation is not a passing sign-off.
+    The Phase 6 design review sign-off is valid ONLY when all three scenarios are evaluated and documented with numerical results. A blanket "analytically confirmed" statement without showing the scenario 3 calculation is not a passing sign-off.
 
   - **Demolition-Induced Swing Exemption**: Player demolition actions that directly reduce `total_C_I_worker_capacity` (or `I_production_capacity`) are player-driven capacity changes, not formula-driven oscillation. The oscillation criterion (`|effective_demand_factor(z, tick+1) − effective_demand_factor(z, tick)| ≤ 0.30`) applies to formula-driven evolution of demand given a **fixed city layout** (no zone placements or demolitions between ticks). For scenario 3, the analysis must evaluate the formula-driven demand trajectory AFTER the demolition completes — i.e., starting from the state immediately after the last demolition event — not across the demolition event itself. The sign-off reviewer must document: (a) the city state immediately after the final C/I demolition at tick T, (b) the resulting effective_demand_factor at tick T, and (c) the formula-driven trajectory from tick T onward through tick 6. The swing from tick T−1 (pre-demolition) to tick T (post-demolition) is exempt from the oscillation criterion because it is player-action-driven. Swings between consecutive ticks with no player actions are subject to the criterion.
 
@@ -59,7 +59,7 @@
   >
   > - **Maximum formula-driven swing (any zone, any scenario)**: **0.083/tick** — Residential at tick 0→1 (pure bootstrap decay: 0.50 × 1/6 ≈ 0.083).
   > - **Worst-case combined swing (scenario 3, post-demolition trajectory)**: **0.192/tick** (Industrial, tick 3→4) — within the 0.30 threshold.
-  > - **Contingency path**: NOT triggered. No HOLD flag is placed on Phase 3 DemandOscillation spike review. The oscillation gate is cleared and Phase 3 implementation may proceed without a DemandOscillation HOLD condition.
+  > - **Contingency path**: NOT triggered. No HOLD flag is placed on Phase 6 DemandOscillation spike review. The oscillation gate is cleared and Phase 6 implementation may proceed without a DemandOscillation HOLD condition.
   >
   > ---
   >
@@ -140,7 +140,7 @@
 
 ## SimulationConstants Mapping
 
-The following named constants in `simulation_constants.h` canonicalize values that appear as inline literals elsewhere in this spec. Phase 3 property-based tests MUST reference these names rather than hardcoding magic numbers. Any change to a value requires updating the constant definition only — all references pick it up automatically.
+The following named constants in `simulation_constants.h` canonicalize values that appear as inline literals elsewhere in this spec. Phase 6 property-based tests MUST reference these names rather than hardcoding magic numbers. Any change to a value requires updating the constant definition only — all references pick it up automatically.
 
 | Constant name | Value | Spec meaning |
 |---|---|---|

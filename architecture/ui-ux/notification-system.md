@@ -62,7 +62,7 @@ dismiss methods documented elsewhere in this spec:
   visible in the toast stack (i.e., at least one CRITICAL toast has been displayed and not yet dismissed by
   the player). Used by `UIManager::onEvent()` Priority 2 guard ("no CRITICAL toast is visible" condition)
   to decide whether click/Enter/Delete events must be routed to `NotificationManager` before any other
-  handler. Phase 1 stub: returns `false`.
+  handler. Phase 3 stub: returns `false`.
 - `void dismissCriticalToast(UIElementHandle handle)` — production API for player-dismissal of a specific
   CRITICAL toast (not a test backdoor). Called when the player clicks the dismiss button, presses Enter, or
   presses Delete on the focused CRITICAL toast.
@@ -77,7 +77,7 @@ does NOT call `getConsecutiveDeficitMonths()` internally — that method is poll
 concerns, `NotificationManager` could accept `ISimulationPauser*` instead — but since `UIManager` already
 holds `ICitySimulation*` and no cast is required, `ICitySimulation*` is used.
 
-Therefore, Phase 5 auto-pause unit tests for `NotificationManager` must use
+Therefore, Phase 8 auto-pause unit tests for `NotificationManager` must use
 `NiceMock<MockCitySimulation>` (which implements both `ICitySimulation` and `ISimulationPauser` via
 inheritance), NOT `MockSimulationPauser` (which only implements `ISimulationPauser` and cannot be passed as
 `ICitySimulation*`).

@@ -33,7 +33,7 @@
 
 ## SimulationConstants Mapping
 
-The following named constants in `simulation_constants.h` canonicalize values that appear as inline literals ("+10%", "−15%") in this spec. Phase 3 property-based tests MUST reference these names rather than hardcoding magic numbers. Any change to a value requires updating the constant definition only.
+The following named constants in `simulation_constants.h` canonicalize values that appear as inline literals ("+10%", "−15%") in this spec. Phase 6 property-based tests MUST reference these names rather than hardcoding magic numbers. Any change to a value requires updating the constant definition only.
 
 | Constant name | Value | Spec meaning |
 |---|---|---|

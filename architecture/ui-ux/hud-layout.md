@@ -26,19 +26,19 @@ All four parameters are stored as non-owning pointers. The `IAudioSystem*` param
 IAudioSystem* m_audio{nullptr};
 ```
 
-**Rationale**: Phase 5 HUD calls `m_audio->playSound(SoundId::UI_CLICK, ...)` for toolbar clicks and `m_audio->playSound(SoundId::UI_MENU_OPEN, ...)` for panel opens. Adding this dependency now prevents a Phase 5 header change to HUD that would force recompilation of UIManager and all tests that construct HUD directly.
+**Rationale**: Phase 9 HUD calls `m_audio->playSound(SoundId::UI_CLICK, ...)` for toolbar clicks and `m_audio->playSound(SoundId::UI_MENU_OPEN, ...)` for panel opens. Adding this dependency now prevents a Phase 9 header change to HUD that would force recompilation of UIManager and all tests that construct HUD directly.
 
-**Phase 1 stub contract**: The Phase 1 stub body stores `m_audio` but never calls it. No audio calls are made in Phase 1. Phase 5 fills in the audio call sites. Tests that construct HUD in Phase 1 must supply a mock or null-safe stub for `IAudioSystem*`.
+**Phase 8 stub contract**: The Phase 8 stub body stores `m_audio` but never calls it. No audio calls are made in Phase 8. Phase 9 fills in the audio call sites. Tests that construct HUD in Phase 8 must supply a mock or null-safe stub for `IAudioSystem*`.
 
 Required private members of the `HUD` class relevant to the budget detail overlay:
 
 ```cpp
-BudgetDetailPanel* m_budgetDetail{nullptr}; // owned by HUD; shown on treasury balance hover; Phase 5 implementation
+BudgetDetailPanel* m_budgetDetail{nullptr}; // owned by HUD; shown on treasury balance hover; Phase 8 full implementation
 ```
 
-> **Phase 1 stub requirement**: A companion stub class `src/ui/budget_detail_panel.h` MUST be created in
-> Phase 1 with an empty constructor accepting `IUIBackend*` and a no-op `draw()` method. This prevents
-> Phase 5 from requiring a header change to HUD (which would force recompilation of UIManager and all HUD
+> **Phase 8 stub requirement**: A companion stub class `src/ui/budget_detail_panel.h` MUST be created in
+> Phase 8 with an empty constructor accepting `IUIBackend*` and a no-op `draw()` method. This prevents
+> Phase 9 from requiring a header change to HUD (which would force recompilation of UIManager and all HUD
 > consumers).
 
 ## Budget Detail Panel

@@ -55,7 +55,7 @@
 
 ## DDS Authoring Pipeline
 
-All DDS textures must be produced via a validated command-line pipeline rather than DCC-tool GUI exporters. The canonical pipeline entry point is `tools/export_textures.py` (to be created in Phase 2 alongside `validate_assets.py`). Direct invocation of the tools below is permitted for individual asset iteration, but CI must call only `export_textures.py`.
+All DDS textures must be produced via a validated command-line pipeline rather than DCC-tool GUI exporters. The canonical pipeline entry point is `tools/export_textures.py` (to be created in Phase 9 when full atlas textures are produced). Direct invocation of the tools below is permitted for individual asset iteration, but CI must call only `export_textures.py`.
 
 **Recommended export tools (choose one per workstation):**
 
@@ -94,7 +94,7 @@ Normal map source PNGs store full XYZ in RGB. Before invoking the compressor, th
 
 The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reconstructs Z via `sqrt(max(0.0, 1.0 - nx*nx - ny*ny))` — see the DXT5nm packing section above for the full unpack GLSL.
 
-**Note:** `tools/export_textures.py` will automate steps 1–7 for all texture categories and is the canonical pipeline entry point from Phase 2 onward. Until that script exists, artists must follow the manual procedure above exactly and have their exported DDS files reviewed against the naming convention and format table before committing to the asset directory.
+**Note:** `tools/export_textures.py` will automate steps 1–7 for all texture categories and is the canonical pipeline entry point from Phase 9 onward. Until that script exists, artists must follow the manual procedure above exactly and have their exported DDS files reviewed against the naming convention and format table before committing to the asset directory.
 
 - **Anisotropic filtering** (mandatory for in-world textures):
   - Terrain base textures and building facades: minimum **8× anisotropy**

@@ -18,7 +18,7 @@
 
 ## Game Mode Applicability
 
-This section is the authoritative reference for which game-over flow components are active in each game mode. Phase 3 `CitySimulation` implementers and Phase 5 `NotificationManager` implementers must follow these rules exactly.
+This section is the authoritative reference for which game-over flow components are active in each game mode. Phase 6 `CitySimulation` implementers and Phase 8 `NotificationManager` implementers must follow these rules exactly.
 
 | Mechanic | Sandbox mode | Scenario mode |
 |---|---|---|
@@ -43,6 +43,6 @@ This section is the authoritative reference for which game-over flow components 
 
 **Testability of the deficit-streak polling bridge**: The polling bridge (`UIManager::update()` calls `ICitySimulation::getConsecutiveDeficitMonths()` each frame and dispatches CRITICAL toasts via `NotificationManager::postCritical()`) is verified at two distinct test phases with explicitly separated responsibilities:
 
-- **Phase 3 `CitySimulation` unit tests** verify only that `getConsecutiveDeficitMonths()` returns the correct integer value after each deficit month is processed. These tests do NOT verify toast dispatch — they confirm only that the counter increments, resets, and returns the correct value according to the rules above.
-- **Phase 5 integration tests** verify the full toast-dispatch chain: `UIManager::update()` polling `getConsecutiveDeficitMonths()` → `NotificationManager::postCritical()` triggering the CRITICAL toast. These tests use a real `UIManager` instance wired to a `MockUIBackend` (via `IUIBackend`) so that toast calls can be captured and asserted without a live display.
+- **Phase 6 `CitySimulation` unit tests** verify only that `getConsecutiveDeficitMonths()` returns the correct integer value after each deficit month is processed. These tests do NOT verify toast dispatch — they confirm only that the counter increments, resets, and returns the correct value according to the rules above.
+- **Phase 8 integration tests** verify the full toast-dispatch chain: `UIManager::update()` polling `getConsecutiveDeficitMonths()` → `NotificationManager::postCritical()` triggering the CRITICAL toast. These tests use a real `UIManager` instance wired to a `MockUIBackend` (via `IUIBackend`) so that toast calls can be captured and asserted without a live display.
 - **`MockUIManager` must NOT be created.** `UIManager` is always tested through its `IUIBackend` mock. Creating a `MockUIManager` would bypass the real polling logic and produce tests that verify mock behaviour rather than production code. See `testability-architecture.md` for the full mock policy.

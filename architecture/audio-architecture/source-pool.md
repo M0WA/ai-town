@@ -30,12 +30,12 @@ Named constants (V1): kEvictableSFXCount = 55, kStingerCount = 2,
 
 **Rationale for kStreamSourceCount = 4**: At most 2 music stems are simultaneously active (outgoing + incoming crossfade) and at most 2 ambient bed sources are simultaneously active (active + crossfade target). 4 stream slots cover all simultaneous usage exactly. Allocating 6 stream slots (as in a prior draft) would permanently waste 2 non-evictable sources that can never be acquired by any code path.
 
-## Phase 1 Compile-Time Constants
+## Phase 3 Compile-Time Constants
 
-These constants MUST be declared as `constexpr` in `src/interfaces/audio_types.h` during Phase 1:
+These constants MUST be declared as `constexpr` in `src/interfaces/audio_types.h` during Phase 3:
 
 ```cpp
-// Phase 1 compile-time constants — declared in src/interfaces/audio_types.h
+// Phase 3 compile-time constants — declared in src/interfaces/audio_types.h
 constexpr int kEvictableSFXCount   = 55;  // sources[0..54]
 constexpr int kStingerCount        = 2;   // V1: sources[55..56] (CRISIS + MILESTONE)
 constexpr int kSFXPoolSize         = 58;  // 55 evictable + 2 stingers + 1 reserved (sources[57])
@@ -53,7 +53,7 @@ static_assert(kEvictableSFXCount + kStingerCount + 1 + kStreamSourceCount == kTo
               "Source pool layout constants are inconsistent — update source-pool.md");
 ```
 
-These constants must be declared in Phase 1 `audio_types.h` (at `src/interfaces/audio_types.h`) alongside the `StingerType` enum so Phase 4 pool construction uses named constants rather than magic literals, and any layout change triggers an immediate compile error.
+These constants must be declared in Phase 3 `audio_types.h` (at `src/interfaces/audio_types.h`) alongside the `StingerType` enum so Phase 7 pool construction uses named constants rather than magic literals, and any layout change triggers an immediate compile error.
 
 **Constant definitions**:
 

@@ -110,7 +110,7 @@ The following initialization sequence MUST occur immediately after `createDevice
 
 4. **Extension queries**: Use `glewIsExtensionSupported("GL_EXT_texture_sRGB")` etc. only after a successful `glewInit()`.
 
-**GLEW availability spike**: Phase 1 must verify whether the vendored Irrlicht build exposes GLEW symbols. If GLEW is unavailable (Irrlicht compiled without GLEW), all extension checks must use `glGetString(GL_EXTENSIONS)` string matching or `IVideoDriver::queryFeature()` instead. This spike must complete before any `glewIsExtensionSupported()` code is written. The spike result must be documented in BOTH `architecture/graphics-architecture/irrlicht-device-lifecycle.md` under the Phase 1 Spike Results section AND as a one-line comment in `src/rendering/render_system.h` confirming the confirmed extension query path (glewIsExtensionSupported or glGetString(GL_EXTENSIONS) fallback). The code comment ensures in-code documentation for implementers; the architecture doc ensures the decision is visible to non-implementers reviewing the spec.
+**GLEW availability spike**: Phase 2 must verify whether the vendored Irrlicht build exposes GLEW symbols. If GLEW is unavailable (Irrlicht compiled without GLEW), all extension checks must use `glGetString(GL_EXTENSIONS)` string matching or `IVideoDriver::queryFeature()` instead. This spike must complete before any `glewIsExtensionSupported()` code is written. The spike result must be documented in BOTH `architecture/graphics-architecture/irrlicht-device-lifecycle.md` under the Phase 2 Spike Results section AND as a one-line comment in `src/rendering/render_system.h` confirming the confirmed extension query path (glewIsExtensionSupported or glGetString(GL_EXTENSIONS) fallback). The code comment ensures in-code documentation for implementers; the architecture doc ensures the decision is visible to non-implementers reviewing the spec.
 
 ### GLEW Spike — Two Independent Questions
 
@@ -151,7 +151,7 @@ Irrlicht bundles its own copy of GLEW headers and symbols (in `source/Irrlicht/g
 
    This suppresses the linker error but does not guarantee the correct definition wins; link order (mitigation 2) must still be applied.
 
-**Phase 1 build verification (BUILD-BLOCKING):** The build engineer must verify that no duplicate GLEW symbols remain after applying mitigations. Run the following after a successful Linux build:
+**Phase 2 build verification (BUILD-BLOCKING):** The build engineer must verify that no duplicate GLEW symbols remain after applying mitigations. Run the following after a successful Linux build:
 
 ```bash
 nm build/aitown | grep -i glew | sort | uniq -d
@@ -159,11 +159,11 @@ nm build/aitown | grep -i glew | sort | uniq -d
 
 **Note on `-D` flag**: On a fully static Linux build, the `-D` flag inspects only the dynamic export table and will produce no output even when symbols are duplicated in the static image. Plain `nm` without `-D` must be used for statically-linked executables.
 
-If this command produces any output, duplicate GLEW symbols are present and the build is BLOCKED — the issue must be resolved before merging. The result of this check (clean or duplicate list) must be recorded in the Phase 1 Spike Results section below.
+If this command produces any output, duplicate GLEW symbols are present and the build is BLOCKED — the issue must be resolved before merging. The result of this check (clean or duplicate list) must be recorded in the Phase 2 Spike Results section below.
 
-## Phase 1 Spike Results
+## Phase 2 Spike Results
 
-<!-- Placeholder: populate this section once the Phase 1 GLEW availability spike is complete. -->
+<!-- Placeholder: populate this section once the Phase 2 GLEW availability spike is complete. -->
 <!-- Record here: whether the vendored Irrlicht build exposes GLEW symbols, and which extension query path was confirmed (glewIsExtensionSupported vs. glGetString(GL_EXTENSIONS) fallback). -->
 
 ## Test Guard — `shader_stub_compile_test` Skip vs. Fail

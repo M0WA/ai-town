@@ -98,16 +98,16 @@ public:
   4. Loading `keybindings.json` containing Q or E for any action: the binding is ignored; a warning is logged; the default binding for that action is restored in memory.
   5. A conflict-free assignment: `keybindings.json` is written; subsequent load of the file produces the same binding state (round-trip test).
 - **`ModalDialog` + auto-pause testability** (tests in `tests/ui/` and `tests/simulation/`). Required test cases:
-  1. `ModalDialog_OnOpen_SimulationIsPaused` *(Phase 5 deliverable — Phase 1 delivers fixture stub with no test body)*: calling `UIManager::showModal()` calls `CitySimulation::setPaused(true)` before returning.
-  2. `ModalDialog_OnOpen_SpeedSelectorIsDisabled` *(Phase 5 deliverable — Phase 1 delivers fixture stub with no test body)*: `IUIBackend::setElementEnabled(..., false)` is called on the speed selector handle (not `setElementVisible` — the selector remains visible but non-interactive).
-  3. `ModalDialog_OnClose_SimulationResumes` *(Phase 5 deliverable — Phase 1 delivers fixture stub with no test body)*: dismissing the modal calls `setPaused(false)` and calls `setElementEnabled(..., true)` on the speed selector to re-enable it.
-  4. `UndoSystem_BlockedDuringModal_HotkeyIgnored` *(Phase 5 deliverable — Phase 1 delivers fixture stub with no test body)*: injecting a Ctrl+Z `InputEvent` while modal is active does NOT call any undo operation.
-  5. `UndoSystem_BlockedDuringModal_ButtonGrayedOut` *(Phase 5 deliverable — Phase 1 delivers fixture stub with no test body)*: while modal is active, `setElementEnabled(..., false)` is called on the undo button element via `IUIBackend`.
-  6. `CriticalToast_DuringModal_IsQueued_NotDisplayed` *(Phase 5 deliverable — Phase 1 delivers fixture stub with no test body)*: posting a CRITICAL toast while a blocking modal is active queues the toast but does NOT display it immediately (no `addStaticText` call to `IUIBackend` for the toast element). After modal dismissal, the toast becomes visible (a deferred `addStaticText` call is verified).
-  7. `CriticalToast_DuringModal_AutoPauseDeferred` *(Phase 5 deliverable — Phase 1 delivers fixture stub with no test body)*: CRITICAL toast auto-pause logic does not fire while a blocking modal is active; `setPaused(true)` is NOT called a second time for the toast arrival (the modal pause is already active). After modal dismissal, if the CRITICAL queue is non-empty, auto-pause state is re-evaluated once.
-  8. `ModalDialog_OnClose_WithQueuedCriticalToast_AutoPauseReevaluated` *(Phase 5 deliverable — Phase 1 delivers fixture stub with no test body)*: post a CRITICAL toast while a blocking modal is active (verifies no second `setPaused(true)` call during modal-active period), then dismiss the modal (`UIManager::closeModal()`), then verify: (a) the queued CRITICAL toast is now displayed (`addStaticText` called on `MockUIBackend`), and (b) `setPaused(true)` is called **once more** during `closeModal()` re-evaluation — meaning **twice total** across the test (once on modal open, once on re-evaluation in `closeModal()` because CRITICAL queue is non-empty); `setPaused(false)` is NOT called — simulation stays paused because the CRITICAL toast remains active after modal close. **Reconciliation with StrictMock matrix**: The StrictMock Expected Call Matrix entry for this test specifies `setPaused(true) × 2` (total) and `setPaused(false) × 0` — the prose description above matches this. The "exactly once" wording in prior spec drafts referred to the re-evaluation step only (one call within `closeModal()`), not the total across the test; this was ambiguous and has been corrected to "once more during closeModal()". This test exercises the deferred re-evaluation path explicitly — without it, the re-evaluation call in the `closeModal()` code path is unverified and can be silently dropped. **Deferred `addStaticText` call timing**: The CRITICAL toast's `addStaticText` call to `MockUIBackend` MUST occur synchronously within the same `closeModal()` call stack — NOT deferred to the next `update()` tick. This is a firm implementation requirement: the `closeModal()` implementation must call the display logic synchronously, not schedule it for the next frame. Tests assert the element handle's presence immediately after `closeModal()` returns, with no intervening `update()` call. Implementations that defer display to `update()` do not meet this requirement and must be refactored.
-  9. `Modal_SpeedSelectorGrayed_DespiteCriticalToast_SpeedAccessible_WhenModalOnly` *(Phase 5 deliverable — Phase 1 delivers fixture stub with no test body)*: when only a CRITICAL toast is active (no modal), the speed selector remains ENABLED (accessible per CRITICAL-toast-pause spec). This distinguishes modal-pause (selector grayed) from CRITICAL-toast-pause (selector accessible).
-  10. `ModalDialog_OnClose_WithEmptyCriticalQueue_NoAutoRePause` *(Phase 5 deliverable — Phase 1 delivers fixture stub with no test body)*: open a modal (verifies `setPaused(true)` called once), then dismiss the modal with no CRITICAL toasts in the queue, then verify: (a) `setPaused(false)` is called exactly once (simulation resumes), and (b) `setPaused(true)` is NOT called again during `closeModal()`. This is the inverse of test 8 — it confirms that the CRITICAL toast auto-pause re-evaluation in `closeModal()` does NOT call `setPaused(true)` when the CRITICAL queue is empty, preventing a spurious re-pause on normal modal dismiss.
+  1. `ModalDialog_OnOpen_SimulationIsPaused` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: calling `UIManager::showModal()` calls `CitySimulation::setPaused(true)` before returning.
+  2. `ModalDialog_OnOpen_SpeedSelectorIsDisabled` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: `IUIBackend::setElementEnabled(..., false)` is called on the speed selector handle (not `setElementVisible` — the selector remains visible but non-interactive).
+  3. `ModalDialog_OnClose_SimulationResumes` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: dismissing the modal calls `setPaused(false)` and calls `setElementEnabled(..., true)` on the speed selector to re-enable it.
+  4. `UndoSystem_BlockedDuringModal_HotkeyIgnored` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: injecting a Ctrl+Z `InputEvent` while modal is active does NOT call any undo operation.
+  5. `UndoSystem_BlockedDuringModal_ButtonGrayedOut` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: while modal is active, `setElementEnabled(..., false)` is called on the undo button element via `IUIBackend`.
+  6. `CriticalToast_DuringModal_IsQueued_NotDisplayed` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: posting a CRITICAL toast while a blocking modal is active queues the toast but does NOT display it immediately (no `addStaticText` call to `IUIBackend` for the toast element). After modal dismissal, the toast becomes visible (a deferred `addStaticText` call is verified).
+  7. `CriticalToast_DuringModal_AutoPauseDeferred` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: CRITICAL toast auto-pause logic does not fire while a blocking modal is active; `setPaused(true)` is NOT called a second time for the toast arrival (the modal pause is already active). After modal dismissal, if the CRITICAL queue is non-empty, auto-pause state is re-evaluated once.
+  8. `ModalDialog_OnClose_WithQueuedCriticalToast_AutoPauseReevaluated` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: post a CRITICAL toast while a blocking modal is active (verifies no second `setPaused(true)` call during modal-active period), then dismiss the modal (`UIManager::closeModal()`), then verify: (a) the queued CRITICAL toast is now displayed (`addStaticText` called on `MockUIBackend`), and (b) `setPaused(true)` is called **once more** during `closeModal()` re-evaluation — meaning **twice total** across the test (once on modal open, once on re-evaluation in `closeModal()` because CRITICAL queue is non-empty); `setPaused(false)` is NOT called — simulation stays paused because the CRITICAL toast remains active after modal close. **Reconciliation with StrictMock matrix**: The StrictMock Expected Call Matrix entry for this test specifies `setPaused(true) × 2` (total) and `setPaused(false) × 0` — the prose description above matches this. The "exactly once" wording in prior spec drafts referred to the re-evaluation step only (one call within `closeModal()`), not the total across the test; this was ambiguous and has been corrected to "once more during closeModal()". This test exercises the deferred re-evaluation path explicitly — without it, the re-evaluation call in the `closeModal()` code path is unverified and can be silently dropped. **Deferred `addStaticText` call timing**: The CRITICAL toast's `addStaticText` call to `MockUIBackend` MUST occur synchronously within the same `closeModal()` call stack — NOT deferred to the next `update()` tick. This is a firm implementation requirement: the `closeModal()` implementation must call the display logic synchronously, not schedule it for the next frame. Tests assert the element handle's presence immediately after `closeModal()` returns, with no intervening `update()` call. Implementations that defer display to `update()` do not meet this requirement and must be refactored.
+  9. `Modal_SpeedSelectorGrayed_DespiteCriticalToast_SpeedAccessible_WhenModalOnly` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: when only a CRITICAL toast is active (no modal), the speed selector remains ENABLED (accessible per CRITICAL-toast-pause spec). This distinguishes modal-pause (selector grayed) from CRITICAL-toast-pause (selector accessible).
+  10. `ModalDialog_OnClose_WithEmptyCriticalQueue_NoAutoRePause` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: open a modal (verifies `setPaused(true)` called once), then dismiss the modal with no CRITICAL toasts in the queue, then verify: (a) `setPaused(false)` is called exactly once (simulation resumes), and (b) `setPaused(true)` is NOT called again during `closeModal()`. This is the inverse of test 8 — it confirms that the CRITICAL toast auto-pause re-evaluation in `closeModal()` does NOT call `setPaused(true)` when the CRITICAL queue is empty, preventing a spurious re-pause on normal modal dismiss.
 - **`ISimulationRNG`** — injectable RNG interface for deterministic simulation testing: Service degradation (random building selection at −10% budget surplus) and any other simulation-layer random draws must use this interface rather than `std::rand()` or a global `std::mt19937`. Tests inject a `ManualRNG` that returns a preset sequence. **Source location**: `ISimulationRNG.h` lives in `src/interfaces/`; `ManualRNG` lives in `tests/simulation/manual_rng.h` (used by simulation tests) — **not** in `src/` (it is a test double, never linked into production code).
 
   ```cpp
@@ -361,15 +361,15 @@ public:
       // DISTINCT from getDemandPressurePct: this is the raw traffic-only component BEFORE combining
       // with bootstrap decay, capacity-ratio signals, or demand floors. It is used internally by
       // the traffic simulation to modulate zone growth, and is exposed here solely for:
-      //   (a) Phase 8 save/load round-trip tests that verify the rolling-window state persists, and
-      //   (b) the traffic rolling-average serialization requirement in implementation/phase-3.md.
+      //   (a) Phase 11 save/load round-trip tests that verify the rolling-window state persists, and
+      //   (b) the traffic rolling-average serialization requirement in implementation/phase-11.md.
       // The HUD demand bars display getDemandPressurePct (the post-combination aggregate), NOT this value.
-      // Cross-reference: implementation/phase-3.md (Traffic demand factor serialization).
+      // Cross-reference: implementation/phase-11.md (Traffic demand factor serialization).
       virtual float getTrafficDemandFactor(ZoneType zone) const = 0;
 
       // Density-unlock state accessor — returns a snapshot of all density-unlock counters and flags.
-      // Required for Phase 8 save round-trip test to verify counter persistence across save/load.
-      // Cross-reference: implementation/phase-3.md (getDensityUnlockState deliverable).
+      // Required for Phase 11 save round-trip test to verify counter persistence across save/load.
+      // Cross-reference: implementation/phase-11.md (getDensityUnlockState deliverable).
       // DensityUnlockState is defined in simulation_types.h alongside ZoneType and SpeedMultiplier.
       //   struct DensityUnlockState {
       //       int  consecutive_months_above_threshold[6];  // 0–2 range; one counter per density tier
@@ -421,13 +421,13 @@ public:
 
       // Traffic demand factor accessor. Returns the INTERNAL traffic-only multiplier in [0.0, 1.0]
       // from the rolling travel-time window BEFORE bootstrap/floor combination. R/C = 5-tick window;
-      // I = 3-tick window. Exposed for Phase 8 save/load round-trip serialization only.
+      // I = 3-tick window. Exposed for Phase 11 save/load round-trip serialization only.
       // HUD bars read getDemandPressurePct (the post-combination aggregate), not this value.
-      // Cross-reference: implementation/phase-3.md (Traffic demand factor serialization).
+      // Cross-reference: implementation/phase-11.md (Traffic demand factor serialization).
       MOCK_METHOD(float, getTrafficDemandFactor, (ZoneType), (const, override));
 
       // Density-unlock state accessor. Returns consecutive-month counters and unlock flags for all 6
-      // density tiers. Cross-reference: implementation/phase-3.md (getDensityUnlockState deliverable).
+      // density tiers. Cross-reference: implementation/phase-11.md (getDensityUnlockState deliverable).
       MOCK_METHOD(DensityUnlockState, getDensityUnlockState, (), (const, override));
   };
   ```
@@ -561,7 +561,7 @@ public:
 
   `NiceMock` is used here (not `StrictMock`) because the test purpose is construction/destruction only; no calls are expected and no suppression of warnings is needed. If any virtual method is absent from `MockAudioSystem`, instantiation fails at link time — the `SUCCEED()` body is intentionally trivial to isolate the failure to the vtable rather than test logic.
 
-  **Canonical name note**: The exact test suite name `AudioSmokeTest` and case name `MockAudioSystem_InstantiatesCleanly` are canonical. Phase 1 deliverable and Phase 1 exit criteria must reference this exact GTest name. CTest filter: `-R MockAudioSystem_InstantiatesCleanly`. Do not use `TEST(MockAudioSmoke, Instantiates)` or any other form — name drift causes CI `-R` filter expressions to silently match nothing.
+  **Canonical name note**: The exact test suite name `AudioSmokeTest` and case name `MockAudioSystem_InstantiatesCleanly` are canonical. Phase 3 deliverable and Phase 3 exit criteria must reference this exact GTest name. CTest filter: `-R MockAudioSystem_InstantiatesCleanly`. Do not use `TEST(MockAudioSmoke, Instantiates)` or any other form — name drift causes CI `-R` filter expressions to silently match nothing.
 
 `IRenderer` uses opaque `TextureHandle` (uint32_t) instead of `ITexture*` — the same pattern as `IUIBackend` with `UIElementHandle`. This fully severs the compile-time dependency on Irrlicht headers in any translation unit that only includes `IRenderer.h`, including all simulation test files. `MockRenderer::loadTexture()` returns an incrementing non-zero integer. The concrete `IrrlichtRenderer` maintains `std::unordered_map<TextureHandle, ITexture*>` internally.
 
@@ -581,11 +581,11 @@ public:
   # IAudioSystem.h from src/interfaces/; audio_constants.h from src/audio/
   target_include_directories(audio_tests PRIVATE tests/simulation/ src/interfaces/ src/audio/ ${CMAKE_SOURCE_DIR})
 
-  # integration_tests — needs shared mock paths and UI header paths for Phase 1+ integration tests;
+  # integration_tests — needs shared mock paths and UI header paths for Phase 3+ integration tests;
   # src/rendering/ is required because IrrlichtUIBackend.h lives there and integration tests compile against it
   target_include_directories(integration_tests PRIVATE tests/simulation/ tests/ui/ src/interfaces/ src/ui/ src/rendering/ ${CMAKE_SOURCE_DIR})
 
-  # terrain_tests — needs tests/simulation/ for ManualClock (if timing tests added in Phase 2+),
+  # terrain_tests — needs tests/simulation/ for ManualClock (if timing tests added in Phase 5+),
   # tests/terrain/ for MockTerrainRNG, src/terrain/ for ITerrainRNG.h (included by mock_terrain_rng.h
   # via project-root-relative path "#include "src/terrain/ITerrainRNG.h""), and ${CMAKE_SOURCE_DIR}
   # so that project-root-relative includes resolve correctly.
@@ -670,16 +670,16 @@ namespace handles {
 
 Each panel stub's `draw()` in `UIManagerDrawOrderTest` calls `m_backend->setElementVisible(handles::kXxxSentinel, true)`. The production panel classes do NOT include this header.
 
-**RULE — sentinel magic values are TEST-ONLY constants**: The sentinel `UIElementHandle` constants defined in `tests/ui/panel_sentinel_handles.h` (e.g. `handles::kNotificationSentinel = 0xDEAD0105u`) are for test code only. Production panel stubs (`notification_manager.cpp`, `hud.cpp`, etc.) MUST NOT `#include "tests/ui/panel_sentinel_handles.h"`. Instead, the Phase 1 production stub for each panel declares its own local `constexpr UIElementHandle` in the `.cpp` file with the matching magic value. The test header and the production `.cpp` file both use the same numeric literal; the test header is never part of the production build graph.
+**RULE — sentinel magic values are TEST-ONLY constants**: The sentinel `UIElementHandle` constants defined in `tests/ui/panel_sentinel_handles.h` (e.g. `handles::kNotificationSentinel = 0xDEAD0105u`) are for test code only. Production panel stubs (`notification_manager.cpp`, `hud.cpp`, etc.) MUST NOT `#include "tests/ui/panel_sentinel_handles.h"`. Instead, the Phase 3 production stub for each panel declares its own local `constexpr UIElementHandle` in the `.cpp` file with the matching magic value. The test header and the production `.cpp` file both use the same numeric literal; the test header is never part of the production build graph.
 
-**Phase 1 NotificationManager sentinel mechanism** — the two-sided contract:
+**Phase 3 NotificationManager sentinel mechanism** — the two-sided contract:
 
-1. **Production side** (`notification_manager.cpp`): The Phase 1 stub declares a local constant and uses it in `draw()`:
+1. **Production side** (`notification_manager.cpp`): The Phase 3 stub declares a local constant and uses it in `draw()`:
 
    ```cpp
-   // notification_manager.cpp  (Phase 1 stub — NOT the Phase 5 implementation)
+   // notification_manager.cpp  (Phase 3 stub — NOT the Phase 8 implementation)
    namespace {
-       // Phase 5 REPLACE THIS: real IUIBackend element handle
+       // Phase 8 REPLACE THIS: real IUIBackend element handle
        constexpr UIElementHandle kNotifSentinel = 0xDEAD0105u;
    }
 
@@ -688,7 +688,7 @@ Each panel stub's `draw()` in `UIManagerDrawOrderTest` calls `m_backend->setElem
    }
    ```
 
-   `kNotifSentinel` is defined locally in the `.cpp` file. The file does NOT include `tests/ui/panel_sentinel_handles.h` or any test header. There are no `#ifdef TEST` guards — the constant is simply an anonymous-namespace literal baked into the Phase 1 stub.
+   `kNotifSentinel` is defined locally in the `.cpp` file. The file does NOT include `tests/ui/panel_sentinel_handles.h` or any test header. There are no `#ifdef TEST` guards — the constant is simply an anonymous-namespace literal baked into the Phase 3 stub.
 
 2. **Test side** (`tests/ui/panel_sentinel_handles.h`): The header declares the same numeric value under the `handles` namespace:
 
@@ -710,9 +710,9 @@ Each panel stub's `draw()` in `UIManagerDrawOrderTest` calls `m_backend->setElem
 
    This expectation fires because `notification_manager.cpp` calls `setElementVisible(0xDEAD0105u, true)` and `handles::kNotificationSentinel == 0xDEAD0105u`. No include of `tests/ui/panel_sentinel_handles.h` is needed in `notification_manager.cpp`.
 
-4. **Phase 5 replacement**: When the real `NotificationManager::draw()` is implemented, the `constexpr UIElementHandle kNotifSentinel` line and the single `setElementVisible` call in `draw()` are replaced with real `IUIBackend` calls. The `// Phase 5 REPLACE THIS: real IUIBackend element handle` comment in the Phase 1 stub is the implementer's marker.
+4. **Phase 8 replacement**: When the real `NotificationManager::draw()` is implemented, the `constexpr UIElementHandle kNotifSentinel` line and the single `setElementVisible` call in `draw()` are replaced with real `IUIBackend` calls. The `// Phase 8 REPLACE THIS: real IUIBackend element handle` comment in the Phase 3 stub is the implementer's marker.
 
-**Deficit-streak bridge testing note**: Phase 3 `CitySimulation` unit tests verify only that `getConsecutiveDeficitMonths()` returns the correct integer value. The full toast-dispatch chain (`UIManager::update()` polling to `NotificationManager::postCritical()`) is an integration test concern verified in Phase 5 using a real `UIManager` wired to a `MockUIBackend`. `MockUIManager` is NOT required — `UIManager` is always tested via its `IUIBackend` mock. See `game-over-flow.md` for the polling bridge design.
+**Deficit-streak bridge testing note**: Phase 6 `CitySimulation` unit tests verify only that `getConsecutiveDeficitMonths()` returns the correct integer value. The full toast-dispatch chain (`UIManager::update()` polling to `NotificationManager::postCritical()`) is an integration test concern verified in Phase 8 using a real `UIManager` wired to a `MockUIBackend`. `MockUIManager` is NOT required — `UIManager` is always tested via its `IUIBackend` mock. See `game-over-flow.md` for the polling bridge design.
 
 **`EXPECT_CALL` setup**: Use `InSequence seq;` and declare one `EXPECT_CALL(backend_, setElementVisible(handles::kXxxSentinel, true))` per panel in the exact back-to-front draw order specified in `ui-manager.md`. The `InSequence` guard causes GMock to fail immediately if any panel fires its sentinel out of order.
 

@@ -47,7 +47,7 @@
   VirtualPoint unproject(int physicalX, int physicalY) const;
   ```
 
-  **Note**: These signatures are locked at Phase 0 (stub implementations; Phase 1 fills in logic). Phase 1 parallel teams implementing `CameraController::OnInputEvent()` and `UIManager` input dispatch MUST use exactly these signatures to avoid integration breakage.
+  **Note**: These signatures are locked at Phase 0 (stub implementations; Phase 3 fills in logic). Phase 3 parallel teams implementing `CameraController::OnInputEvent()` and `UIManager` input dispatch MUST use exactly these signatures to avoid integration breakage.
 
 - **Mouse un-projection ownership**: `UIScaler::unproject()` MUST be applied exactly once, at the entry point of the input chain. The platform event receiver (in `src/platform/`) applies the transform before handing the resulting `InputEvent` to `UIManager::onEvent()`. Panels receive virtual-space coordinates and must not call `UIScaler` again. Panel unit tests inject pre-projected virtual-space coordinates directly, bypassing the platform receiver entirely.
 - No hardcoded pixel offsets anywhere in UI code

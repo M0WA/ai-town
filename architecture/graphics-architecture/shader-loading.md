@@ -82,26 +82,26 @@ if (!gpu) {
 
   **Note on shader version enums**: Irrlicht's GLSL backend **ignores** the `EVST_VS_*` / `EPST_PS_*` enum values entirely when compiling OpenGL GLSL shaders. These enums are meaningful only for the Direct3D HLSL backend. For GLSL, the active GLSL version is determined exclusively by the `#version` directive in the shader source file itself. Use `EVST_VS_1_1` / `EPST_PS_1_1` as the conventional placeholder values (matching Irrlicht Tutorial 10). All GLSL shader files must begin with a `#version` pragma appropriate for the features used (e.g. `#version 130` for `texture()`, `in`/`out` qualifiers, and multi-texture sampling). Do not assume that passing `EVST_VS_3_0` or higher will gate or enable any GLSL feature — it has no effect on the GLSL compilation path.
 
-## Phase 1 GLSL Stub Files — Co-Landing Requirement
+## Phase 2 GLSL Stub Files — Co-Landing Requirement
 
-The Phase 1 GLSL stub files MUST be co-landed in the same commit as `shader_stub_compile_test.cpp` that asserts they can be found and compiled. This is a hard requirement, not a convention.
+The Phase 2 GLSL stub files MUST be co-landed in the same commit as `shader_stub_compile_test.cpp` that asserts they can be found and compiled. This is a hard requirement, not a convention.
 
-**Rationale**: `shader_stub_compile_test.cpp` calls `addHighLevelShaderMaterialFromFiles()` with paths to the Phase 1 lighting shader stubs. If those files are absent on disk, Irrlicht returns immediately with a `−1` material type and the test fails with a file-not-found error. Committing the test without the GLSL files causes an immediate CI failure on every subsequent push until the files are added — this is a broken-tree state and must not enter the branch.
+**Rationale**: `shader_stub_compile_test.cpp` calls `addHighLevelShaderMaterialFromFiles()` with paths to the Phase 2 lighting shader stubs. If those files are absent on disk, Irrlicht returns immediately with a `−1` material type and the test fails with a file-not-found error. Committing the test without the GLSL files causes an immediate CI failure on every subsequent push until the files are added — this is a broken-tree state and must not enter the branch.
 
 **Exit criterion**: A green `shader_stub_compile_test` in CI is ONLY valid evidence that both the shader files AND the shader loading code are present and functional. A green result obtained by stubbing the test to skip when the files are absent is NOT a valid exit criterion — the skip must never be triggered in CI (see the `GTEST_SKIP()` guard rules in `irrlicht-device-lifecycle.md`).
 
 **Co-landing checklist (single commit must include all of the following):**
 
-- `assets/shaders/lighting.vert` — Phase 1 stub (minimal valid GLSL with `#version 130`, passthrough vertex shader)
-- `assets/shaders/lighting.frag` — Phase 1 stub (minimal valid GLSL with `#version 130`, constant color output)
-- `assets/shaders/terrain.vert` — Phase 1 stub (minimal valid GLSL with `#version 130`, passthrough vertex shader)
-- `assets/shaders/terrain.frag` — Phase 1 stub (minimal valid GLSL with `#version 130`, constant color output)
-- `assets/shaders/billboard.vert` — Phase 1 stub (minimal valid GLSL with `#version 130`, passthrough vertex shader)
-- `assets/shaders/billboard.frag` — Phase 1 stub (minimal valid GLSL with `#version 130`, constant color output)
+- `assets/shaders/lighting.vert` — Phase 2 stub (minimal valid GLSL with `#version 130`, passthrough vertex shader)
+- `assets/shaders/lighting.frag` — Phase 2 stub (minimal valid GLSL with `#version 130`, constant color output)
+- `assets/shaders/terrain.vert` — Phase 2 stub (minimal valid GLSL with `#version 130`, passthrough vertex shader)
+- `assets/shaders/terrain.frag` — Phase 2 stub (minimal valid GLSL with `#version 130`, constant color output)
+- `assets/shaders/billboard.vert` — Phase 2 stub (minimal valid GLSL with `#version 130`, passthrough vertex shader)
+- `assets/shaders/billboard.frag` — Phase 2 stub (minimal valid GLSL with `#version 130`, constant color output)
 - `tests/rendering/shader_stub_compile_test.cpp` — exercises the lighting shaders (NOTE: not shader_loading_test.cpp)
 - `src/rendering/shader_loader.cpp` (or the relevant loading code) — the implementation being tested
 
-**Note**: `shader_stub_compile_test.cpp` exercises the `lighting` shaders; all six GLSL files must be present so Phase 2 can build against them.
+**Note**: `shader_stub_compile_test.cpp` exercises the `lighting` shaders; all six GLSL files must be present so Phase 3 can build against them.
 
 If any of these artifacts is missing from the commit, the commit is incomplete and must not be merged.
 

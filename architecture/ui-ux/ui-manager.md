@@ -231,7 +231,7 @@ enum class GameState {
 };
 ```
 
-Note: `GameOver` is Scenario-mode only. An auxiliary `GameOverReason` enum (to be defined in Phase 5 when Scenario skeleton is implemented) will allow `UIManager` to distinguish `Bankruptcy` from `ScenarioTimeout` modal content.
+Note: `GameOver` is Scenario-mode only. An auxiliary `GameOverReason` enum (to be defined in Phase 6 when Scenario skeleton is implemented) will allow `UIManager` to distinguish `Bankruptcy` from `ScenarioTimeout` modal content.
 
 ## Panel Construction Order
 
@@ -256,7 +256,7 @@ Panels are constructed in this order (dependency order — later panels may read
    to wire the pointer. `PauseMenuPanel` exposes a `void setSettingsPanel(SettingsPanel* settings)` method.
    `SettingsPanel` is NOT passed at `PauseMenuPanel` construction time — the setter approach is used so both
    panels can be constructed in dependency order without forward-declaring the full `PauseMenuPanel` constructor
-   signature. Phase 1 stub: no-op setter body.
+   signature. Phase 3 stub: no-op setter body.
 9. `ModalDialog` — created last; topmost Z-order; hidden until explicitly shown
 
 All panels are visible-by-default set to false except `NotificationManager` (always rendering its toast queue), `MainMenuPanel` (visible on startup until `transitionToGameplay()` hides it), and `Minimap` (visible during gameplay). `UIManager::transitionToGameplay()` sets the correct initial visibility for all panels.

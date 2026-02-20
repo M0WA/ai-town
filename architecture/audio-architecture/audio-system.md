@@ -86,7 +86,7 @@ public:
     // V1 BEHAVIOR (Sandbox mode — no game-over condition exists):
     //   setGameOverState(true) is a NO-OP in V1. Sandbox mode has no game-over
     //   condition; Scenario mode (which introduces bankruptcy/defeat states) is
-    //   post-V1. The Phase 4 AudioSystem implementation MUST implement this method
+    //   post-V1. The Phase 7 AudioSystem implementation MUST implement this method
     //   as an early-return no-op in V1, emitting a log warning so the call is
     //   visible in diagnostic output:
     //
@@ -98,7 +98,7 @@ public:
     //     }
     //
     //   The m_gameOverFade member and the m_gameOverFadeT progress counter
-    //   (declared in the AudioSystem private section) are Phase 4 code-path stubs.
+    //   (declared in the AudioSystem private section) are Phase 7 code-path stubs.
     //   In V1 they are declared but never written by any executed code path because
     //   setGameOverState() returns before reaching any fade logic. They MUST be
     //   guarded by the Scenario-mode check when that mode is added.
@@ -203,11 +203,11 @@ private:
     LPALFILTERF               m_fnFilterf{nullptr};
     LPALDELETEFILTERS         m_fnDeleteFilters{nullptr};
     // Thread-local context:
-    // **Phase 1 stub**: only `IClock* m_clock` is declared in the Phase 1 stub header.
-    // All other private members listed in this section are Phase 4 additions.
-    // The SHUTDOWN CONTRACT comment in the Phase 1 stub header references
+    // **Phase 3 stub**: only `IClock* m_clock` is declared in the Phase 3 stub header.
+    // All other private members listed in this section are Phase 7 additions.
+    // The SHUTDOWN CONTRACT comment in the Phase 3 stub header references
     // `m_useThreadLocalCtx` by name — this member name is therefore frozen as of
-    // Phase 1 and MUST NOT be renamed in Phase 4 without updating the Phase 1 stub
+    // Phase 3 and MUST NOT be renamed in Phase 7 without updating the Phase 3 stub
     // comment simultaneously.
     bool                      m_useThreadLocalCtx{false};
     // FnSetThreadCtx is defined as a local function-pointer alias in audio_system.h —
@@ -299,7 +299,7 @@ private:
 2. If `m_fnSetThreadCtx == nullptr` (extension absent): throw `std::runtime_error("ALC_EXT_thread_local_context required")`.
 3. Only proceed to `alGenSources` and audio thread launch if extension is confirmed present.
 
-This must be a Phase 1 locked behavioral contract — Phase 4 implementation MUST NOT deviate from this by using any fallback path.
+This must be a Phase 3 locked behavioral contract — Phase 7 implementation MUST NOT deviate from this by using any fallback path.
 
 **Why no fallback is permitted**: Using `alcMakeContextCurrent` to bind the context on the main thread and then calling AL functions from the audio thread is a data race — the OpenAL specification requires that each thread operating on a context must make it current on that thread (either via `alcMakeContextCurrent` before any threading, which is single-threaded only, or via the thread-local extension). Without `ALC_EXT_thread_local_context`, there is no safe way to call AL functions from a background thread while the main thread also makes AL calls (`syncListenerToCamera`, `playSound`, `stopSound`). Failing hard at construction is the only correct behaviour.
 
