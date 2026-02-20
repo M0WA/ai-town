@@ -244,6 +244,7 @@ xvfb-run --auto-servernum ctest --test-dir build -L "^requires-opengl$" --output
 lcov --capture --directory build --base-directory . --ignore-errors mismatch --output-file coverage.info
 BUILD_DIR=build
 lcov --remove coverage.info \
+  --ignore-errors unused \
   '/usr/*' \
   "*/.fetchcontent_cache/*" \
   '*/tests/*' \
@@ -252,7 +253,9 @@ lcov --remove coverage.info \
   '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
   --output-file coverage_filtered.info
 genhtml coverage_filtered.info --output-directory coverage_html/
-lcov --fail-under-percent 80 --summary coverage_filtered.info
+lcov --summary coverage_filtered.info
+# NOTE: --fail-under-percent does not exist in lcov 2.0 (ubuntu-latest ships 2.0).
+# Phase 0 gate is informational only. Phase 2 adds a real 80% gate via awk or lcov 2.1+.
 
 # Windows
 ctest --test-dir build -C Release --output-on-failure
