@@ -129,7 +129,7 @@ private:
     LPALDELETEFILTERS         m_fnDeleteFilters{nullptr};
     // Thread-local context:
     bool                      m_useThreadLocalCtx{false};
-    LPALCSETTHREADCONTEXT     m_fnSetThreadCtx{nullptr};
+    PFNALCSETTHREADCONTEXTPROC m_fnSetThreadCtx{nullptr};  // type from <AL/alext.h>; LPALC... prefix is for AL (not ALC) extensions
     // Music ducking state machine (audio thread only for gain writes; main thread reads atomically):
     enum class DuckState { IDLE, DUCKING, DUCKED, RELEASING };
     std::atomic<DuckState>    m_duckState{DuckState::IDLE};

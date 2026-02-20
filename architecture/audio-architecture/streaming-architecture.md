@@ -22,7 +22,7 @@ Using the interleaved scalar count instead of the frame count in `alBufferData` 
   // In AudioSystem constructor, store for use by audio thread:
   m_useThreadLocalCtx = alcIsExtensionPresent(m_device, "ALC_EXT_thread_local_context") == ALC_TRUE;
   if (m_useThreadLocalCtx) {
-      m_fnSetThreadCtx = reinterpret_cast<LPALCSETTHREADCONTEXT>(
+      m_fnSetThreadCtx = reinterpret_cast<PFNALCSETTHREADCONTEXTPROC>(  // type from <AL/alext.h>; not LPALCSETTHREADCONTEXT
           alcGetProcAddress(m_device, "alcSetThreadContext"));  // Use m_device (not nullptr) — alcSetThreadContext is a device-level extension
       if (!m_fnSetThreadCtx) m_useThreadLocalCtx = false;
   }
