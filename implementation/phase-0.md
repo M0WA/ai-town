@@ -1,6 +1,6 @@
 ## Phase 0: Foundations & CI Skeleton
 
-**Status: IN PROGRESS** — All file deliverables created and reviewed. CI-dependent exit criteria pending first push to `develop`.
+**Status: DONE**
 
 ### Goal
 
@@ -578,7 +578,7 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
 - `ui_tests` smoke target (`ui_smoke_test.cpp`, `LABEL "unit"`) compiles and passes — confirms `IUIBackend.h` is present and well-formed ✅ DONE
 - `audio_tests` smoke target with vorbisfile linkage check passes in the unit ctest step on Linux and Windows — confirms `Vorbis::vorbisfile` is correctly wired ✅ DONE
 - `integration_tests` stub (`LABEL "integration"`) discovered and passes in the integration ctest step ✅ DONE
-- `all-checks-pass` gate is green on a push to `develop` ⏳ pending merge to develop
+- `all-checks-pass` gate is green on a push to `develop` ✅ DONE
 - Branch protection rules configured and enforced on both `main` and `develop` ✅ DONE
 - `dorny/test-reporter` posts test annotations on PRs ✅ DONE
 - `coverage-linux` produces an lcov HTML report (smoke test gives trivial coverage; `--fail-under-percent 0` used at Phase 0 — gate is not meaningful until Phase 2 raises it to 80%) ✅ DONE
@@ -617,3 +617,4 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
 - **RESOLVED: `<alext.h>` availability from vcpkg openal-soft** — `<AL/alext.h>` and `<AL/efx.h>` are both installed unconditionally by the vcpkg `openal-soft` port (version 1.25.0 at baseline `ce35b1a`). The upstream CMake installs the entire `include/AL/` directory; the portfile patches only `al.h`/`alc.h` and does not strip `alext.h`. Both headers land in the standard vcpkg include tree exposed by `OpenAL::OpenAL`'s `INTERFACE_INCLUDE_DIRECTORIES`. **Phase 4 type name correction**: the thread-local-context function pointer type is `PFNALCSETTHREADCONTEXTPROC` (not `LPALCSETTHREADCONTEXT` — the `LPAL...` prefix applies to AL extensions, not ALC extensions). EFX filter types (`LPALGENFILTERS`, `LPALFILTERI`, `LPALFILTERF`, `LPALDELETEFILTERS`) live in `<AL/efx.h>`, not `<AL/alext.h>`. Include both headers in `AudioSystem.cpp` at Phase 4.
 - **RESOLVED**: OGG decode library is **libvorbisfile** (vcpkg port `libvorbis` — the port name is `libvorbis`, NOT `libvorbisfile`; `libvorbisfile` does not exist as a vcpkg port). Add `"libvorbis"` to `vcpkg.json` and link with `Vorbis::vorbisfile` in `CMakeLists.txt`. Phase 4 streaming implementation uses the `ov_fopen` / `ov_read` / `ov_pcm_seek` / `ov_pcm_total` / `ov_clear` APIs from `<vorbis/vorbisfile.h>`.
 - **RESOLVED: `markdown-lint` CI job confirmed passing** — First successful CI run (run ID `22216129631`) verified `markdownlint-cli@0.47.0` exits zero on `architecture/**/*.md`, `implementation/*.md`, and `CLAUDE.md`. Job completes in ~10 s. The `all-checks-pass` gate correctly includes `markdown-lint` in its `needs:` array and passed green in the same run. `.markdownlint.json` config with MD013/MD033/MD041/MD060/MD029 suppressions and `MD024: siblings_only` is stable — zero violations after the 524-error fix pass applied at Phase 0.
+- **RESOLVED: Phase 0 fully complete** — PR #74 merged to `develop`; `all-checks-pass` gate confirmed green on `develop` (CI run: build-linux ✅, build-windows ✅, coverage-linux ✅, markdown-lint ✅, all-checks-pass ✅). Phase 0 fully complete. 2026-02-20.
