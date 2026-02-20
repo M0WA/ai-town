@@ -37,6 +37,7 @@ The following contradictions were identified during the spec review. They must b
 | `sound-artist-opensoftal` | Audio asset authoring |
 | `test-dev-cpp` | C++ testing (GTest + GMock + RapidCheck) |
 | `cicd-dev-github` | GitHub Actions CI/CD |
+| `proj-manager` | GitHub project sync (milestones, issues, Projects v2 board) |
 
 ---
 

@@ -76,6 +76,7 @@ Do not suggest alternative engines, languages, or platforms.
 ### Product
 
 - **Senior Product Owner** (`prod-owner`): Specialized in implementation planning, phase breakdown, feature prioritization, backlog management, milestone definition, and roadmap creation
+- **Senior Project Manager** (`proj-manager`): Specialized in syncing the implementation plan with the GitHub project "AI Town". Uses the configured GitHub MCP server to keep milestones, issues, and the Projects v2 board up to date. Triggered automatically after every implementation plan update.
 
 ### Team Collaboration
 
