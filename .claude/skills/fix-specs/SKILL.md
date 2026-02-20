@@ -82,11 +82,21 @@ Apply fixes one at a time, updating the spec file after each. Do not batch multi
 
 If two agents make conflicting recommendations for the same issue, explicitly note the conflict, reason about the best resolution, and apply the most appropriate fix.
 
-### Step 5 — Re-review
+### Step 5 — Markdown lint check
 
-After all fixes from this round are applied, go back to **Step 2** and run all agents again on the updated spec.
+After all fixes from this round are applied, run the markdown linter:
 
-### Step 6 — Completion check
+```bash
+markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+```
+
+If the linter exits with errors, fix every reported violation before continuing. Re-run until the linter exits zero. Only then proceed to Step 6.
+
+### Step 6 — Re-review
+
+After all fixes are applied and the linter is clean, go back to **Step 2** and run all agents again on the updated spec.
+
+### Step 7 — Completion check
 
 After each review round, check: **did every agent report NO ISSUES for CRITICAL and HIGH severity?**
 
