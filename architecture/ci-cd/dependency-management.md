@@ -53,16 +53,19 @@ find_package(OpenAL REQUIRED)
 # fmt symbols. Any target linking OpenAL::OpenAL must also link fmt::fmt to satisfy those symbols.
 find_package(fmt CONFIG REQUIRED)
 find_package(Vorbis REQUIRED)
+# Irrlicht: resolved via cmake/FindIrrlicht.cmake (find-module, not config-mode — see note below).
+# SPIKE RESOLVED: target name is bare Irrlicht (no namespace).
+find_package(Irrlicht REQUIRED)
 # Phase 0: route OpenAL, fmt, and Vorbis to aitown_audio stub library (NOT to 'aitown' — that
 # executable does not exist at Phase 0). The 'aitown' executable is the final game binary added
 # in a later phase.
 target_link_libraries(aitown_audio PRIVATE OpenAL::OpenAL fmt::fmt Vorbis::vorbisfile)
-# Irrlicht is deferred to Phase 1 (CMake target name spike required first):
-# target_link_libraries(aitown_render PRIVATE Irrlicht::Irrlicht)
+# Irrlicht links to aitown_render (PRIVATE — Irrlicht headers must NOT propagate to test targets).
+target_link_libraries(aitown_render PRIVATE Irrlicht)
 ```
 **IMPORTANT**: `target_link_libraries(aitown ...)` in the original snippet was incorrect — the `aitown` executable target does not exist at Phase 0. An implementer following the original snippet verbatim would get a CMake configure error: "Cannot specify link libraries for target aitown which is not built by this project."
 
-**Irrlicht find_package fallback**: The irrlicht vcpkg port may ship as a find-module port (using `FindIrrlicht.cmake` convention) rather than a config-mode port. If `irrlichtConfig.cmake` is absent from the vcpkg install tree, `find_package(Irrlicht REQUIRED)` fails with "Could not find a package configuration file". In that case, provide a minimal `cmake/FindIrrlicht.cmake` module that locates headers and library from the vcpkg install tree and creates an `IMPORTED` target `Irrlicht::Irrlicht`. The Phase 0 spike owner (`graphics-dev-irrlicht`) must determine which mode applies to the pinned vcpkg baseline and commit the verified approach.
+**Irrlicht find_package — find-module (RESOLVED)**: The irrlicht vcpkg port at the pinned baseline does not ship a config-mode package (`irrlichtConfig.cmake` is absent). `find_package(Irrlicht REQUIRED)` therefore falls back to CMake's module mode. A minimal `cmake/FindIrrlicht.cmake` module is committed to the repo; it locates the Irrlicht headers and library from the vcpkg install tree and creates an `IMPORTED` target named `Irrlicht` (bare, no namespace). The CMake module path is set via `list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")` before the `find_package` call. **Target name is bare `Irrlicht`** — verified via adrido/irrlicht-vcpkg CMakeLists.txt: `install(TARGETS Irrlicht EXPORT Irrlicht ...)` with no `NAMESPACE` argument. Use `target_link_libraries(aitown_render PRIVATE Irrlicht)`.
 
 On Windows: `soft_oal.dll` **and** `default.mhr` (HRTF data) copied to output via post-build commands. `libvorbisfile` is a static library in vcpkg's default triplet — no DLL copy is needed for it.
 
@@ -124,8 +127,6 @@ The spec mandates vcpkg as the "mandatory dependency manager on all platforms." 
 
 ### Irrlicht DLL on Windows (Phase 1+)
 
-When `aitown_render` is first linked against Irrlicht (Phase 1), the Irrlicht vcpkg port on `x64-windows` triplet produces `Irrlicht.dll` that must be copied to the output directory alongside `soft_oal.dll`. Options:
-1. Use `x64-windows-static` triplet for all dependencies (via `VCPKG_DEFAULT_TRIPLET=x64-windows-static` in the CMake configure step) to avoid DLL copy requirements entirely.
-2. Add `Irrlicht.dll` to the Windows DLL verification step at Phase 1.
+**RESOLVED — triplet: `x64-windows` (default dynamic).** No `VCPKG_DEFAULT_TRIPLET` override is set in CI; vcpkg defaults to `x64-windows` on Windows runners. This produces `Irrlicht.dll` as a dynamic library that must be copied to the output directory alongside `soft_oal.dll` when `aitown_render` is first linked against Irrlicht in Phase 1.
 
-The triplet choice must be resolved during the Phase 0 Irrlicht CMake target name spike and documented in the Architecture Decisions table.
+**Phase 1 action required**: Add a CMake post-build copy rule for `Irrlicht.dll` (parallel to the `soft_oal.dll` copy rule added in Phase 4) and add `Irrlicht.dll` to the Windows DLL verification step in CI alongside `soft_oal.dll`.
