@@ -144,11 +144,22 @@ markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
 
 If the linter exits with errors, fix every reported violation before continuing. Re-run until the linter exits zero. Only then proceed to Step 6.
 
-### Step 6 — Compact and re-review
+### Step 6 — Commit round changes
 
-After all fixes are applied and the linter is clean, run `/compact` to reduce context window usage, then return to **Step 2** and run all 9 agents again on the updated plan and specs. (Skip `/compact` on the final cycle when all agents report clean — just output the completion summary.)
+After the linter is clean, commit all modified files:
 
-### Step 7 — Completion check
+```bash
+git add -A
+git commit -m "fix(specs+plan): apply round-N plan+spec fixes from squad review"
+```
+
+Replace `N` with the current round number. If nothing has changed since the last commit (e.g. all agents reported NO ISSUES and no files were modified), skip the commit and proceed directly to Step 8.
+
+### Step 7 — Compact and re-review
+
+After committing, run `/compact` to reduce context window usage, then return to **Step 2** and run all 9 agents again on the updated plan and specs. (Skip `/compact` on the final cycle when all agents report clean — just output the completion summary.)
+
+### Step 8 — Completion check
 
 After each review round, check: **did every agent report NO [TARGET_SEVERITIES] issues in their domain (for the targeted phases)?**
 
@@ -165,7 +176,7 @@ Plan fixes applied: Y
 The implementation plan and architecture specs have passed a full review by all 9 agents with no [TARGET_SEVERITIES] issues remaining.
 ```
 
-- If **no** → continue from Step 4 with the new findings.
+- If **no** → continue from Step 4 with the new findings (back through Steps 4 → 5 → 6 → 7 → 8).
 
 ## Rules
 
