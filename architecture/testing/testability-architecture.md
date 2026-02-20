@@ -66,7 +66,11 @@ public:
           WindowFocusGained, WindowFocusLost  // required for UIManager pause-on-alt-tab and input arbitration
       };
       Type type;
-      int x{0}, y{0};        // cursor position in virtual 1920×1080 space
+      int x{0}, y{0};        // cursor position in virtual 1920×1080 space (for UI hit-testing in UIManager)
+      int physX{0}, physY{0}; // cursor position in physical pixels (for drag-delta in CameraController)
+                               // drag-delta MUST use physX/physY, NOT x/y — see camera-controls.md UX-1 note.
+                               // The platform IEventReceiver populates both fields: x/y from UIScaler::unproject(),
+                               // physX/physY from the raw SEvent coordinates before unproject().
       int button{0};          // 0=left, 1=right, 2=middle (for mouse button events)
       float wheelDelta{0.f};  // for MouseWheel events
       int keyCode{0};         // SDL2-style key code (for key events)
@@ -79,8 +83,8 @@ public:
   1. `CameraController_PitchClamp_AtUpperBound_ExactlyMinus20` — inject a sequence of `MouseWheel` events that would drive pitch above −20° (e.g., repeated positive wheel delta); call `getCameraState()`; assert `getCameraState().pitch == -20.0f` using `EXPECT_FLOAT_EQ` (not `EXPECT_LT` — the bound is inclusive and pitch must equal exactly −20°, not merely be less than some value above it).
   2. `CameraController_PitchClamp_AtLowerBound_ExactlyMinus70` — inject a sequence of `MouseWheel` events that would drive pitch below −70° (e.g., repeated negative wheel delta); call `getCameraState()`; assert `getCameraState().pitch == -70.0f` using `EXPECT_FLOAT_EQ` (not `EXPECT_GT` — the bound is inclusive and pitch must equal exactly −70°).
   3. `CameraController_EdgeScroll_DisabledOnFocusLoss` — record initial `getCameraState().position`; inject `InputEvent{Type::WindowFocusLost}`; inject `InputEvent{Type::MouseMove, x=0, y=540}` (cursor at left edge of 1920-wide virtual space, which would normally trigger left edge-scroll); assert `getCameraState().position` is unchanged, confirming that `m_appHasFocus = false` suppresses edge-scroll input processing.
-  4. `CameraController_RightMouseRotate_MovesYaw` — record initial yaw via `getCameraState().yaw`; inject `InputEvent{Type::MouseButtonDown, button=1}` (right mouse button) followed by `InputEvent{Type::MouseMove, x=prevX+10, y=prevY}` (horizontal drag of 10 virtual pixels); assert `getCameraState().yaw != initialYaw`, confirming that RMB drag drives yaw rotation. (Exact delta magnitude is implementation-defined; this test verifies directional sensitivity, not a precise angle.)
-  5. `CameraController_MiddleMousePan_MovesPosition` — record initial position via `getCameraState().position`; inject `InputEvent{Type::MouseButtonDown, button=2}` (middle mouse button) followed by `InputEvent{Type::MouseMove, x=prevX+5, y=prevY}` (horizontal drag of 5 virtual pixels); assert `getCameraState().position` differs from the initial position (at least one component changed), confirming that MMB drag drives camera pan.
+  4. `CameraController_RightMouseRotate_MovesYaw` — record initial yaw via `getCameraState().yaw`; inject `InputEvent{Type::MouseButtonDown, button=1}` (right mouse button) followed by `InputEvent{Type::MouseMove, physX=prevPhysX+10, physY=prevPhysY}` (horizontal drag of 10 physical pixels — `CameraController` reads `physX`/`physY` for drag-delta, NOT `x`/`y`); assert `getCameraState().yaw != initialYaw`, confirming that RMB drag drives yaw rotation. (Exact delta magnitude is implementation-defined; this test verifies directional sensitivity, not a precise angle.) Test comment must state: "physX/physY are physical pixel coordinates for drag-delta per UX-1."
+  5. `CameraController_MiddleMousePan_MovesPosition` — record initial position via `getCameraState().position`; inject `InputEvent{Type::MouseButtonDown, button=2}` (middle mouse button) followed by `InputEvent{Type::MouseMove, physX=prevPhysX+5, physY=prevPhysY}` (horizontal drag of 5 physical pixels — `CameraController` reads `physX`/`physY` for drag-delta); assert `getCameraState().position` differs from the initial position (at least one component changed), confirming that MMB drag drives camera pan. Test comment must state: "physX/physY are physical pixel coordinates for drag-delta per UX-1."
   6. `CameraController_EdgeScroll_EnabledByDefaultInFullscreen` — construct `CameraController` with `startInFullscreen=true`; immediately call `isEdgeScrollEnabled()` without any intervening call to `setEdgeScrollEnabled(true)`; assert the return value is `true`. This confirms that the constructor enables edge scroll automatically when `startInFullscreen=true`, so the player does not need to manually activate edge scrolling when launching in fullscreen mode.
 - **`QueryPanel` testability**: `QueryPanel::computePanelPosition(int cursorX, int cursorY, Rect tileBounds)` must be a pure function (no side effects, no Irrlicht dependency) returning a `Rect`. Required test cases:
   1. **Primary placement**: cursor at (100, 100) with no tile overlap → verify panel placed at (140, 140).
@@ -325,9 +329,11 @@ public:
       // Cross-reference: architecture/game-design/economy-model.md (getNextUnlockThreshold return semantics).
 
       // City rating — called by HUD to display star rating:
-      // Returns the current CityRatingTier enum value (Village/Town/City/Metropolis/Megalopolis).
-      // CityRatingTier is defined in simulation_types.h (included above via #include "simulation_types.h").
-      virtual CityRatingTier getCityRating() const = 0;  // called by HUD city-rating display
+      // Phase 1 stub: returns int [0, 5]. Phase 3 upgrades to CityRatingTier enum (Village/Town/
+      // City/Metropolis/Megalopolis) once CityRatingTier is added to simulation_types.h.
+      // See implementation/phase-3.md for the upgrade deliverable and game-progression-modes.md
+      // for the CityRatingTier enum definition.
+      virtual int getCityRating() const = 0;  // Phase 1: int [0,5]; Phase 3 upgrades to CityRatingTier
 
       // Demand pressure — called by HUD demand pressure bar per budget tick.
       // Returns the city-wide effective demand for the given zone type as a float in [0.0, 1.0].
@@ -400,8 +406,8 @@ public:
       // Returns kNoUnlockThreshold (-1.0f) when all tiers unlocked; positive dollar value otherwise.
       // Tests that exercise the "all tiers unlocked" branch must return SimulationConstants::kNoUnlockThreshold.
 
-      // City rating:
-      MOCK_METHOD(CityRatingTier, getCityRating, (), (const, override));  // Called by HUD city-rating display
+      // City rating (Phase 1: returns int [0,5]; Phase 3 upgrades to CityRatingTier):
+      MOCK_METHOD(int, getCityRating, (), (const, override));  // Phase 3 changes to CityRatingTier
 
       // Demand pressure — UI display aggregate. Returns the post-floor, post-bootstrap, post-combination
       // effective_demand_factor for the given zone type. Used by HUD demand pressure bars.
