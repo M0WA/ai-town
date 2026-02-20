@@ -8,9 +8,12 @@ V1 layout:
                                            each receives one EFX occlusion filter)
   Stinger reservation:   sources[55..56]  (2 sources, non-evictable, V1 stingers only)
                                            (kStingerCount = 2; no EFX filter)
-  Reserved (post-V1):    sources[57]      (1 source — post-V1 game-over stinger slot;
-                                           evictable in V1; no game-over stinger in V1;
-                                           no EFX filter)
+  Idle (post-V1 reserved): sources[57]    (1 source — post-V1 game-over stinger slot;
+                                           idle in V1: allocated by alGenSources but
+                                           never returned by acquireSFXSource() [0..54],
+                                           acquireStingerSource() [55..56], or
+                                           acquireStreamSource() [58..61];
+                                           no game-over stinger in V1; no EFX filter)
   Non-evictable streams: sources[58..61]  (4 sources, never evicted; no EFX filter)
     └─ streams[0..1]:  music stems (2 sources — outgoing + incoming crossfade)
     └─ streams[2..3]:  ambient bed layer (active + crossfade target)
@@ -31,7 +34,7 @@ Transient reserve: sources[51..54] (4 sources within the evictable pool) are sof
 - `AudioSourcePool::acquireSFXSource(SoundPriority p)` — evictable; considers only `sources[0..50]` for **LOW and NORMAL priority**; considers `sources[0..54]` for **HIGH and CRITICAL priority**. The distinction between NORMAL and HIGH is both acquisition range AND eviction priority: NORMAL sources cannot acquire [51..54] (transient reserve), and when the pool is full NORMAL sources are evicted before HIGH, and HIGH before CRITICAL. CRITICAL sources are last to be evicted but can still be evicted by a subsequent CRITICAL acquisition if all slots are occupied by CRITICAL.
 - `AudioSourcePool::acquireStreamSource()` — non-evictable; returns `AL_NONE` if all 4 in use
 - **Ambient beds MUST use the stream partition** (`acquireStreamSource()`), not the SFX pool. Marking ambient beds CRITICAL in the evictable pool contradicts the eviction contract — if the pool is full of HIGH/CRITICAL SFX the ambient bed source could still be theoretically targeted. The stream partition guarantees they are never evicted.
-- **Stinger source reservation — structurally enforced (V1)**: The eviction algorithm in `acquireSFXSource()` considers only `sources[0..54]` as eviction candidates (the general SFX pool below the stinger boundary). `sources[55..56]` are permanently reserved for V1 stingers and are NEVER returned by `acquireSFXSource()`. `sources[57]` is evictable in V1 (no game-over stinger). Stinger sources are acquired and released via a dedicated `acquireStingerSource(StingerType type)` accessor, where `StingerType` is an enum:
+- **Stinger source reservation — structurally enforced (V1)**: The eviction algorithm in `acquireSFXSource()` considers only `sources[0..54]` as eviction candidates (the general SFX pool below the stinger boundary). `sources[55..56]` are permanently reserved for V1 stingers and are NEVER returned by `acquireSFXSource()`. `sources[57]` is **idle in V1**: it is allocated by the single `alGenSources(62, ...)` call at pool construction but is never returned by `acquireSFXSource()` (range 0..54), `acquireStingerSource()` (indices 55..56 in V1), or `acquireStreamSource()` (indices 58..61). No code path acquires or evicts sources[57] in V1. Post-V1 promotes sources[57] to `StingerType::GAME_OVER` by: (a) adding `GAME_OVER = 57` to `StingerType`, (b) incrementing `kStingerCount` from 2 to 3, (c) extending the stinger source setup loop at pool construction from `{55, 56}` to `{55, 56, 57}`, (d) wiring the game-over stinger in `AudioSystem`. `kEvictableSFXCount`, `kTotalSources`, and the EFX filter range (0..54) are unchanged by this promotion — no pool restructuring is required. Stinger sources are acquired and released via a dedicated `acquireStingerSource(StingerType type)` accessor, where `StingerType` is an enum:
 
   ```cpp
   // V1: kStingerCount = 2
@@ -74,7 +77,7 @@ enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 **EFX lowpass filters are allocated only for evictable SFX pool sources (indices 0..54 = `kEvictableSFXCount` general-SFX boundary).**  Stinger sources (V1 indices 55..56), the reserved post-V1 slot (index 57), and stream sources (indices 58..61) do NOT receive occlusion filters:
 
 - Stinger sources (55..56) are one-shot non-positional WAV sounds (`AL_SOURCE_RELATIVE = AL_TRUE`) — occlusion filtering is not applicable.
-- Reserved slot (57) is evictable in V1 but non-positional by design — no EFX filter allocated.
+- Idle slot (57) is idle in V1 (never acquired by any code path) and non-positional by design — no EFX filter allocated.
 - Stream sources are non-positional stereo (`AL_SOURCE_RELATIVE = AL_TRUE`) — occlusion filtering is not applicable.
 
 **Critical loop bound**: All EFX filter allocation loops, cleanup loops, and occlusion update loops MUST iterate over `kEvictableSFXCount` (55 in V1), NOT `kSFXPoolSize` (58) or `kTotalSources` (62). In V1 the `m_occlusionFilter[]` array is sized `kEvictableSFXCount = 55`; the loop runs over indices 0..54 (55 iterations). Iterating beyond index 54 accesses memory outside the array and produces undefined behavior. Sources[55..57] (stingers and reserved slot) and sources[58..61] (streams) do not receive EFX occlusion filters because they are non-positional sources. See Audio Thread Shutdown spec for the mandatory filter cleanup loop bound.
@@ -90,7 +93,7 @@ enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 | Service events (fire, police, etc.) | 8 | CRITICAL priority; last to be evicted; evicted only when all general evictable SFX slots are occupied by CRITICAL-priority sources |
 | UI / notification sounds | 4 | `AL_SOURCE_RELATIVE = AL_TRUE`, non-positional; caller must set `alSourcei(src, AL_SOURCE_RELATIVE, AL_TRUE)` and `alSource3f(src, AL_POSITION, 0,0,0)` immediately after `acquireSFXSource()` returns |
 | Musical stingers (V1: crisis/milestone) | 2 | Reserved non-evictable SFX pool slots (indices 55/56); WAV PCM pre-loaded; acquired via `acquireStingerSource(StingerType)` only. Post-V1: game-over stinger added at index 57 (kStingerCount=3). |
-| Reserve (incl. post-V1 game-over slot) | 4 | Burst headroom; sources[57] is the post-V1 game-over stinger slot (evictable in V1). The 4 counts: 3 evictable-pool burst slots beyond the named categories (55 total evictable − 16 zone − 24 traffic − 8 service − 4 UI = 3) plus sources[57] = 4 total. Row sum check: 2+2+16+24+8+4+2+4 = 62 = kTotalSources. |
+| Reserve (incl. post-V1 game-over slot) | 4 | Burst headroom; sources[57] is the post-V1 game-over stinger slot (idle in V1 — allocated but never acquired by any code path). The 4 counts: 3 evictable-pool burst slots beyond the named categories (55 total evictable − 16 zone − 24 traffic − 8 service − 4 UI = 3) plus sources[57] = 4 total. Row sum check: 2+2+16+24+8+4+2+4 = 62 = kTotalSources. |
 
 ### Vehicle Engine Source Constraints
 
