@@ -287,6 +287,46 @@ This step runs as the **first named step** in the `build-linux` job — before v
     ```
 
 - **`coverage-linux` is defined as a separate job** — a job referenced in `needs:` that does not exist causes workflow YAML parsing to fail before any job runs.
+
+## markdown-lint job
+
+The `markdown-lint` job enforces consistent Markdown formatting across all spec and documentation files. It runs independently of all build jobs — no dependency on vcpkg, CMake, or any C++ toolchain — and completes in seconds.
+
+**Parallelism**: `markdown-lint` has no `needs:` dependency on any other job. It starts as soon as the workflow triggers and runs in parallel with `build-linux`, `build-windows`, and `coverage-linux`.
+
+**Prerequisite**: `.markdownlint.json` must be present at the repository root. The `markdownlint` CLI reads this file for rule configuration; if it is absent, the tool falls back to all-default rules, which will produce different results from local runs and may spuriously fail or pass. The file is committed to the repo and is guaranteed to be present after `actions/checkout`.
+
+**Job definition**:
+
+```yaml
+markdown-lint:
+  runs-on: ubuntu-latest
+  timeout-minutes: 5
+  permissions:
+    contents: read  # checkout only — no write access needed
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+    - name: Install markdownlint-cli
+      run: npm install -g markdownlint-cli
+
+    - name: Run markdownlint
+      run: markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+```
+
+**Key properties**:
+
+- `runs-on: ubuntu-latest` — Node.js/npm are pre-installed; no additional setup required.
+- `timeout-minutes: 5` — linting is fast (seconds); a 5-minute cap prevents runaway npm installs from consuming runner minutes.
+- `permissions: contents: read` — the job only checks out and reads files; no artifact upload, no check annotations, no write access needed.
+- The `npm install -g markdownlint-cli` step installs `markdownlint-cli` at the version available from npm registry. To pin to a specific version use `npm install -g markdownlint-cli@0.47.0` — pin the version explicitly if the repo requires reproducible linting behavior.
+- The `markdownlint` command runs with the glob patterns that cover all spec and documentation files: `architecture/**/*.md`, `implementation/*.md`, and `CLAUDE.md`. The shell expands these globs on `ubuntu-latest` (bash, globstar not needed for single-level `**`). If the `implementation/` directory does not yet exist the glob silently matches nothing and the step passes — this is correct behavior for an empty phase.
+- Exit code 1 on any violation — the job fails and blocks `all-checks-pass`.
+- No caching step needed — `npm install -g` for a single small package takes under 10 seconds and adds no meaningful cache key complexity.
+- No `dorny/test-reporter` step — `markdownlint` produces plain text output, not JUnit XML. CI log output is sufficient for diagnosis.
+- No artifact upload step — no binary or report output is produced.
+
 - **`validate-assets` job** — validates asset files using the Python validation script. Must run on every push and PR alongside the build jobs so asset errors are caught before any binary is produced. Runs on `ubuntu-latest` with a 10-minute timeout. Job definition:
 
   ```yaml
@@ -318,7 +358,7 @@ all-checks-pass:
   runs-on: ubuntu-latest
   if: always()
   # Phase 0 form (validate-assets added in Phase 6):
-  needs: [build-linux, build-windows, coverage-linux]
+  needs: [build-linux, build-windows, coverage-linux, markdown-lint]
   steps:
     - name: Verify all platform builds passed
       shell: bash   # REQUIRED: Bash arrays are used below; default shell on ubuntu-latest is bash but must be explicit for clarity
@@ -333,6 +373,7 @@ all-checks-pass:
           "${{ needs.build-linux.result }}"
           "${{ needs.build-windows.result }}"
           "${{ needs.coverage-linux.result }}"
+          "${{ needs.markdown-lint.result }}"
         )
         failed=0
         for result in "${results[@]}"; do
@@ -354,7 +395,7 @@ all-checks-pass:
 all-checks-pass:
   runs-on: ubuntu-latest
   if: always()
-  needs: [build-linux, build-windows, coverage-linux, validate-assets]  # ADD new jobs here
+  needs: [build-linux, build-windows, coverage-linux, markdown-lint, validate-assets]  # ADD new jobs here
   steps:
     - name: Verify all platform builds passed
       shell: bash   # REQUIRED: Bash arrays are used below; default shell on ubuntu-latest is bash but must be explicit for clarity
@@ -369,6 +410,7 @@ all-checks-pass:
           "${{ needs.build-linux.result }}"
           "${{ needs.build-windows.result }}"
           "${{ needs.coverage-linux.result }}"
+          "${{ needs.markdown-lint.result }}"
           "${{ needs.validate-assets.result }}"
         )
         failed=0

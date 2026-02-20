@@ -580,6 +580,33 @@ jobs:
           path: coverage_html/
 
   # ============================================================================
+  # markdown-lint — enforce consistent Markdown formatting across all spec files
+  # Runs independently of all build jobs (no needs:) — starts immediately on
+  # trigger and completes in seconds. No vcpkg, CMake, or C++ toolchain needed.
+  # Prerequisite: .markdownlint.json must be present at repository root.
+  # ============================================================================
+  markdown-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read  # checkout only — no write access needed
+    steps:
+      # Step 1: Checkout — makes .markdownlint.json and all .md files available on disk.
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      # Step 2: Install markdownlint-cli.
+      # Pinned to v0.47.0 for reproducible linting behavior.
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli@0.47.0
+
+      # Step 3: Run markdownlint over all spec and documentation files.
+      # Exits 1 on any violation — job fails and blocks all-checks-pass.
+      # Rule configuration is read from .markdownlint.json at repo root.
+      - name: Run markdownlint
+        run: markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+
+  # ============================================================================
   # all-checks-pass — gate job required by branch protection
   # Must run with if: always() so it executes even when dependency jobs fail.
   # The explicit Bash-array form is the canonical form — do NOT substitute with
@@ -590,6 +617,7 @@ jobs:
       - build-linux
       - build-windows
       - coverage-linux
+      - markdown-lint
       # validate-assets added in Phase 6
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -602,6 +630,7 @@ jobs:
             "${{ needs.build-linux.result }}"
             "${{ needs.build-windows.result }}"
             "${{ needs.coverage-linux.result }}"
+            "${{ needs.markdown-lint.result }}"
           )
           failed=0
           for result in "${results[@]}"; do
