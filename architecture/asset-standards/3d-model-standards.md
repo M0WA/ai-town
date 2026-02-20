@@ -5,7 +5,8 @@
 - **Coordinate system**: Y-up, Z-forward, **left-handed** (Irrlicht convention). Irrlicht uses a left-handed coordinate system: +X right, +Y up, +Z forward (into the screen). This is the opposite handedness from Blender's right-handed default. See the **Coordinate System Export Convention** section below for Blender export settings. Never label the coordinate system as "right-handed" — that produces a mirrored/rotated result in Irrlicht.
 - **Unit scale**: 1 Irrlicht unit = 1 meter
 
-#### LOD Requirements (mandatory for all city assets)
+## LOD Requirements (mandatory for all city assets)
+
 | Asset category | LOD0 (near) | LOD1 (mid) | LOD2 (far) |
 |---|---|---|---|
 | Large buildings | 2000–5000 tris | 500–1000 tris | 300–500 tris |
@@ -19,7 +20,8 @@
 
 **Note on large building LOD2 budget**: 300–500 tris is required to represent building silhouettes (setbacks, rooftop details, entry bays) at the 185–200 m switch-in distance where tall buildings still occupy 50–80 vertical pixels. A 100–200 tri cap produces a featureless slab that is visually jarring against LOD1 counterparts.
 
-#### LOD Distance Thresholds and Hysteresis
+### LOD Distance Thresholds and Hysteresis
+
 **Hysteresis bands are mandatory** to prevent LOD thrashing (continuous mesh rebind stutter) when the camera sits near a threshold:
 
 | Asset category | LOD0→LOD1 switch-out | LOD0→LOD1 switch-in | LOD1→LOD2 switch-out | LOD1→LOD2 switch-in |
@@ -34,19 +36,22 @@
 LOD meshes are exported as separate meshes and swapped in code by distance using Irrlicht's scene manager.
 
 #### Camera Pitch Range
+
 - Camera pitch is defined as the angle (degrees) between the camera's forward vector and the world XZ plane, measured as negative = looking downward. Valid range: **[−70°, −20°]** (always looking downward in city view).
 - **Minimum look-down angle**: −20° (shallow oblique — prevents looking nearly level at the horizon, which would cause z-fighting and poor city readability).
 - **Maximum look-down angle**: −70° (steep overhead — prevents gimbal lock near top-down view).
 - This range is enforced by `CameraController`; the billboard bake elevation is **45° below horizontal (camera pitch = −45°)**, the midpoint of the [−70°, −20°] operating range, minimising average mismatch error across all valid camera angles.
 
 #### Density Tier Asset Naming Convention
+
 Building assets must encode both the zone type, density tier, and a variant identifier in their filename to allow the C++ asset loader and export validation script to unambiguously associate assets with their density tier and zone:
 
-```
+```text
 <zone>_<tier>_<variant>_lod<N>.<ext>
 ```
 
 Where:
+
 - `<zone>` is one of: `res` (Residential), `com` (Commercial), `ind` (Industrial)
 - `<tier>` is one of: `low`, `med`, `high`
 - `<variant>` is a 2-digit integer (`01`, `02`, … `NN`) for visual variety within a tier
@@ -54,6 +59,7 @@ Where:
 - `<ext>` is `.b3d` (buildings) or `.dds` (billboard atlas)
 
 **Examples**:
+
 - `res_low_01_lod0.b3d` — Residential Low tier, variant 1, LOD0 geometry
 - `com_med_03_lod2.b3d` — Commercial Medium tier, variant 3, LOD2 shell
 - `res_low_01_billboard.dds` — Residential Low tier, variant 1, billboard atlas (height_floors ≤ 3)
@@ -83,6 +89,7 @@ Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON side
 **Hysteresis validation detail for check #9**: The `lod_distances` array stores switch-out distances. The corresponding switch-in distances are stored in the `LODNode` configuration (not in the `.meta` file). The export validation script verifies that the switch-out values in `lod_distances` satisfy the minimum gap constraints above. For runtime `LODNode` configuration, the switch-in distances must be authored as: `lod0_switch_in = lod_distances[0] − 5` (or more) and `lod1_switch_in = lod_distances[1] − 10` (or more), matching the hysteresis table in the **LOD Distance Thresholds and Hysteresis** section above.
 
 #### LOD File Naming Convention
+
 - **Format-aware naming**: LOD variants use the suffix `_lod<N>` before the extension, and the format follows the asset format rule:
   - **Building assets** (LOD0, LOD1, LOD2 shell): must use `.b3d` format — `<asset_name>_lod0.b3d`, `<asset_name>_lod1.b3d`, `<asset_name>_lod2.b3d`. `.b3d` is mandatory to preserve UV channel 1 (lightmap UV) on all LOD levels.
   - **NOLIGHTMAP props only**: May use `<asset_name>_lod0.obj`, `<asset_name>_lod1.obj` where explicitly marked NOLIGHTMAP in asset metadata.
@@ -96,7 +103,9 @@ Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON side
 - The C++ `LODNode` (or equivalent wrapper) loads all LOD variants at load time and swaps mesh buffers based on camera distance thresholds
 - Billboard LOD (small buildings 100m+): camera-facing quad with a **pre-baked imposter atlas** rendered from the LOD1 mesh using **8 bake angles** (every 45°). The camera-facing quad UV is selected at runtime based on the angle between the camera and the building's facing direction (snapped to nearest 45°). See [`2d-texture-standards.md` — Billboard Imposter Atlas](../asset-standards/2d-texture-standards.md#billboard-imposter-atlas) for the full format, dimensions, mip chain, bake elevation, bake lighting, wrap mode, and sRGB upload path specification.
   - **Billboard floor count limit**: Billboard impostors are only valid for buildings **≤ 3 floors** (≤ 9 m total height). Buildings taller than 3 floors exhibit unacceptable silhouette mismatch at billboard scale (the flat 128×128 px frame cannot reproduce rooftop details, setbacks, or step changes visible from the valid camera pitch range [−70°, −20°] for tall buildings). **Runtime category reassignment rule**: When a zone tile auto-upgrades to a higher density tier (e.g., Low → Medium) and the new density tier's building variant exceeds 3 floors, the C++ `LODNode` must automatically switch from the billboard LOD2 path to the geometry-shell LOD2 path. The asset pipeline must provide a `_lod2.b3d` geometry shell for any building variant exceeding 3 floors. The `<asset_name>.meta` file must specify `height_floors` per variant; `LODNode` reads this at tile upgrade time and selects the correct LOD2 strategy. Buildings exceeding 3 floors at any density tier must use the full LOD2 geometry shell (`_lod2.b3d`) at the 100 m distance threshold. The export validation script must check the `height_floors` field in `<asset_name>.meta` and flag small-building/prop assets with `height_floors > 3` that do NOT have a `_lod2.b3d` file (they should have one instead of, or in addition to, `_billboard.dds`).
+
 #### Vehicle Polygon Budget (LOD0 / LOD1)
+
 | Vehicle class | LOD0 budget | LOD1 budget |
 |---|---|---|
 | Car (sedan, hatchback, SUV) | ≤1,500 tris | ≤300 tris |
@@ -106,6 +115,7 @@ Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON side
 The LOD Requirements table above lists the general Vehicles row (1000–3000 tris LOD0, 200–500 tris LOD1) as a range covering all vehicle classes. The per-class caps above are the binding limits within that range. All vehicle assets must be exported as a **single solid mesh** (body + windows + wheels unified into one `IMesh`); modular sub-mesh assembly is not used for vehicles.
 
 #### Vehicle UV Channel Convention
+
 Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (lightmap baking) is **not required** for vehicles — vehicles are dynamic scene objects and do not participate in static lightmap baking. Exporting a UV channel 1 on vehicle assets is permitted but will be ignored by the runtime.
 
 - **UV channel 0 layout**: Vehicle UVs must map into the vehicle diffuse atlas (512×512 px per vehicle type, packed into a 2048×2048 DDS DXT1 atlas — 16 vehicle types per sheet, named `vehicles_diffuse_atlas_d.dds`). Vehicle UV islands must not overlap and must stay within [0, 1] UV space. Blender export must use the vehicle's assigned atlas cell — UV coordinates must be authored in atlas space (e.g., a vehicle in cell row 0, column 2 uses U range [2/4, 3/4] on a 4×4 grid atlas).
@@ -115,11 +125,13 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
 - **Vehicle sprite LOD2**: 16×16 px sprite representing the vehicle's roof color/type, packed into `vehicles_sprite_atlas_d.dds`. The runtime draws a camera-facing billboard quad (1 m × 0.5 m) sampling the vehicle's assigned 16×16 px atlas cell. See `building-atlas-layout.md — Vehicle Sprite Atlas` for format, resolution, mip chain, and upload path.
 
 #### Coordinate System Export Convention
+
 - Artists export from Blender using: **−Z Forward, Y Up** in Blender's export dialog — this produces Y-up, Z-forward output matching Irrlicht's coordinate expectations. **"Y Forward, Z Up" is INCORRECT** — it outputs Z-up (Blender native space) and will produce rotated assets in-engine. The correct setting is `-Z Forward, Y Up`.
 - No runtime coordinate transform is applied on import; the export settings are the single source of truth
 - Verify correct orientation on first export: the asset's front face must point down the +Z axis in Irrlicht's scene view
 
 #### Collision Meshes
+
 - Required for all buildings and terrain-blocking objects
 - **Convex footprint** (simple/rectangular buildings): single file `<asset_name>_col.obj`; maximum **24 triangles**; convex hull; no UV unwrap required
 - **Non-convex footprints** (L-shaped, U-shaped, or complex buildings): split into up to 3 convex sub-meshes named `<asset_name>_col_0.obj`, `<asset_name>_col_1.obj`, `<asset_name>_col_2.obj`. Each sub-mesh maximum 24 triangles. The C++ loader detects `_col_0` suffix and loads all numbered sub-mesh files for that asset.
@@ -134,6 +146,7 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
 - Used by terrain buildability check (slope >15° detection) and traffic road graph boundary detection
 
 #### Modular Building Kit
+
 - Buildings assembled from reusable mesh modules: base, mid-floor, roof, facade details
 - Module grid: 4 m × 4 m × 3 m per floor unit
 - **Maximum floor count**: Large buildings have a **hard cap of 10 floors** (30 m total height at 3 m/floor). At 10 floors: assembled LOD0 maximum ≈ base (400) + 8 mid-floor (8×300=2,400) + roof (500) + 10 facade details (10×100=1,000) = 4,300 tris — within the 5,000 tri LOD0 budget. 11+ floors risk budget overrun. The 10-floor limit is enforced by the export validation script using the `height_floors` field in `<asset_name>.meta`; any override requires a polygon audit and explicit approval.
@@ -185,6 +198,7 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
   The script must be run as part of the asset pipeline before any asset is checked into the repository. CI must run the script and fail the build if any asset fails validation.
 
   **Vehicle Atlas Cell Registry**: Each vehicle type must be assigned a unique atlas cell in `vehicles_diffuse_atlas_d.dds` (2048×2048 DDS DXT1, 4×4 grid of 16 cells at 512×512 px each). The registry is maintained in `tools/vehicle_atlas_registry.json` and must be updated whenever a new vehicle type is added. Format:
+
   ```json
   {
     "atlas_file": "vehicles_diffuse_atlas_d.dds",
@@ -198,4 +212,5 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
     ]
   }
   ```
+
   The export validation script reads this registry when checking vehicle UV channel 0 coordinates (check #10). A vehicle with no registry entry fails validation. A vehicle with UV coordinates outside its assigned cell fails validation. **Atlas UV calculation**: For a cell at (row R, col C) on a 4×4 grid, the atlas UV range is `U ∈ [C/4, (C+1)/4]`, `V ∈ [R/4, (R+1)/4]`. **V-axis origin convention (OpenGL)**: This formula uses **OpenGL UV convention** — V origin is at the bottom-left of the atlas; V increases upward; row 0 (R=0) is the BOTTOM row. DDS files store texels top-row-first, and Blender's UV editor shows V=0 at the top. Artists authoring vehicle UV islands in Blender must apply V-flip (`V_opengl = 1 − V_blender`) before mapping to atlas cells. The export validation script must use the OpenGL convention when checking UV coordinates against assigned cells.

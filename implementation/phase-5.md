@@ -1,9 +1,11 @@
 ## Phase 5: HUD & UI Panels
 
 ### Goal
+
 Deliver all V1 UI panels: HUD resource bar, toolbar, minimap, tax rate panel, query/inspector panel, modal dialog system, notification system, settings/pause menu, and full input arbitration.
 
 ### Deliverables
+
 - [ ] **HUD Layout**: resource/budget bar (top); time controls + speed selector (top-right); toolbar (left panel, x:8–72 px, y:64–600 px, 48×48 px icons, 8 px margin); undo button (x:8–72, y:608–656 px, `setElementEnabled` for grayed state); unsaved-changes dot (16×16 px, x:1796–1812, y:8–24 px); grace period indicator beneath resource bar with interactive tooltip on hover/click: 'During the grace period, road maintenance ($10/tile/month) and building upkeep costs are waived. These costs will begin in approximately Xs' (where X = `floor(120 − elapsed)`) 'Estimated monthly upkeep when active: $[calculated from current city].' This real-seconds wording replaces any 'month count' phrasing per `architecture/ui-ux/hud-layout.md`. Estimated figure updates each real second via `CitySimulation::estimateMonthlyUpkeep()`. Assigned jointly to `gamedesign-lookandfeel` (simulation query) and `gamedesign-ux` (tooltip display); demand pressure bar (x:8–72, y:664–744 px, R/C/I bars with ≥9pt labels or numeric tooltip); active tool indicator (x:8–72, y:752–784 px); notification bell (x:1820–1868, y:8–56 px); City Rating label in HUD resource bar (reads `CitySimulation::getCityRating()`); stinger hookup deferred to Phase 7 (ref: `architecture/ui-ux/hud-layout.md`, `architecture/game-design/game-progression-modes.md`)
 - [ ] Grace period countdown: 'Cost waiver: Xs remaining' label beneath resource bar where X = `floor(120 − elapsed)`; reads `IClock::nowSeconds()` elapsed since game start; updates every real second via wall-clock (not simulation delta). **Grace period indicator tooltip text**: "During the grace period, road maintenance ($10/tile/month) and building upkeep costs are waived. These costs will begin in approximately Xs" where X = `floor(120 − elapsed)` — this real-seconds wording replaces any 'month count' phrasing; the grace period is a real-time measurement per `architecture/ui-ux/hud-layout.md`, not month-aligned. The tooltip second sentence remains: "Estimated monthly upkeep when active: $[calculated from current city]." On expiry (elapsed ≥ 120 s), fade the indicator from full opacity to 0 over 0.5 real seconds using `IUIBackend::setElementAlpha`, then call `setElementVisible(false)`. (ref: `architecture/ui-ux/hud-layout.md`, `architecture/game-design/economy-model.md`)
 - [ ] Density unlock progress indicator in resource bar: compact display showing current monthly revenue vs. next locked density tier threshold (at difficulty-adjusted value), e.g., 'Revenue: $42K / $50K'; reads from `ICitySimulation::getNextUnlockThreshold(difficulty)` and `ICitySimulation::getCurrentMonthlyRevenue()`; hidden once all tiers unlocked (ref: `architecture/game-design/economy-model.md`, `architecture/ui-ux/hud-layout.md`)
@@ -51,6 +53,7 @@ Deliver all V1 UI panels: HUD resource bar, toolbar, minimap, tax rate panel, qu
 - [ ] **`src/ui/` coverage pre-verification checkpoint** (`test-dev-cpp`): before Phase 5 exit criteria are declared met, run `coverage-linux` on the Phase 5 branch and confirm `src/ui/` line coverage is ≥80%. Document the result as a comment (e.g., `// src/ui/ coverage: 82% — Phase 5 branch, approved`). If coverage falls short, add additional `ui_tests` before Phase 5 is closed. **Do NOT rely on Phase 9 to discover a coverage shortfall in Phase 5 work — the rework cost at Phase 9 is high.** This mirrors the Phase 2 coverage pre-raise verification pattern. Owner: `test-dev-cpp`.
 
 ### Exit Criteria
+
 - Full HUD visible in gameplay state with correct virtual-space layout at 1920×1080 and letterboxed at 1280×720
 - Tax rate panel, query panel, minimap, and modals open/close correctly; input arbitration priority verified by tests
 - Notification system CRITICAL/Normal queue, auto-pause, and auto-dismiss verified by unit tests
@@ -60,6 +63,7 @@ Deliver all V1 UI panels: HUD resource bar, toolbar, minimap, tax rate panel, qu
 - `test-dev-cpp` confirms `src/ui/` line coverage ≥80% on Phase 5 branch before Phase 5 is closed (coverage pre-verification checkpoint documented)
 
 ### Team
+
 | Role | Responsibility |
 |---|---|
 | `gamedesign-ux` | All UI panel layouts, modal content, hotkey scheme, accessibility, keyboard navigation |
@@ -68,11 +72,13 @@ Deliver all V1 UI panels: HUD resource bar, toolbar, minimap, tax rate panel, qu
 | `test-dev-cpp` | All UIManager, NotificationManager, QueryPanel, KeyBindings, UndoSystem unit tests |
 
 ### Dependencies
+
 - Requires Phase 1 complete (UIManager shell, IUIBackend)
 - Requires Phase 3 simulation (for loan dialog triggers, economy event notifications)
 - Phase 4 audio NOT required before Phase 5 — UI development uses `MockAudioSystem`; Phase 5 can begin after Phase 3 and Phase 1 are complete. Phase 4 audio must be complete before Phase 7 (where UI sound effects are wired).
 
 ### Risks & Spikes
+
 - **Pre-condition resolved**: Colorblind Mode tab placement is confirmed as Graphics tab > Accessibility subsection — both `architecture/ui-ux/settings-pause-menu.md` and `architecture/ui-ux/resolution-ui-scaling.md` are aligned. No spec change or design ruling is required before Phase 5 implementation begins. Implement directly per spec.
 - **RISK**: Synchronous `addStaticText` call within `closeModal()` for queued CRITICAL toast is a non-trivial implementation detail that tests enforce strictly. **Spike**: prototype `closeModal()` re-evaluation path with the test harness first.
 - **Pre-condition resolved**: `PauseMenuPanel` is a separate class from `SettingsPanel` per `architecture/ui-ux/ui-manager.md` and `architecture/ui-ux/settings-pause-menu.md` — no further design decision is required. `PauseMenuPanel` is constructed between `InspectorPanel` and `SettingsPanel` in the UIManager construction order; `SettingsPanel` is subordinate to `PauseMenuPanel`. Both spec files are already aligned on this structure.

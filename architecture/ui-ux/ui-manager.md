@@ -6,6 +6,7 @@
 ## Class Structure
 
 Required includes for `UIManager`:
+
 - `#include "src/ui/ui_types.h"` — provides `GameMode` enum (`Sandbox`, `Scenario`) used by `transitionToGameplay(GameMode)` and checked by `transitionToGameOver()`
 - `#include "src/interfaces/LoanTerms.h"` — provides the `LoanTerms` struct used in `showForcedLoanDialog(const LoanTerms& terms)`. Without this include, `UIManager.h` fails to compile wherever `LoanTerms` appears in method signatures.
 
@@ -143,6 +144,7 @@ On `transitionToGameOver()`: show game-over modal; simulation is paused (and sta
 ## Draw Order (per frame)
 
 Within `UIManager::draw()`, panels are drawn in this order (back to front, matching Z-order):
+
 1. MainMenuPanel (if visible — only during `GameState::MainMenu`)
 2. Minimap
 3. HUD (resource bar, toolbar, speed selector)

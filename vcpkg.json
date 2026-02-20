@@ -1,0 +1,11 @@
+{
+  "name": "aitown",
+  "version": "0.1.0",
+  "builtin-baseline": "ce35b1a53aac26d7fcdb8ee1ef7a8e4eea02d27b",
+  "dependencies": [
+    "irrlicht",
+    "openal-soft",
+    "libvorbis",
+    "fmt"
+  ]
+}

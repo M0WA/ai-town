@@ -4,6 +4,7 @@
 - **Raycast frequency**: At most **1 raycast per source per 6 frames** (10 Hz at 60 FPS); only for sources within **100 m** of the listener; **max 8 raycasts per frame total**
 - Raycasts performed against simplified collision-only scene layer (building `_col.obj` meshes + terrain; not full visual geometry)
 - **Per-source EFX filter allocation** (mandatory): Allocate **one `AL_FILTER_LOWPASS` EFX filter object per source** in the SFX pool at initialization time. Bind each source's dedicated filter at pool construction:
+
   ```cpp
   // Required guard — check ALC_EXT_EFX and load entry points before any EFX call:
   if (!alcIsExtensionPresent(m_device, "ALC_EXT_EFX")) {
@@ -30,9 +31,11 @@
       }
   }
   ```
+
   All occlusion code-paths must check `m_efxAvailable` before touching any EFX object.
 
   Full pool construction loop (executed only inside the `m_efxAvailable = true` branch above):
+
   ```cpp
   // kEvictableSFXCount=55 in V1; iterates sources[0..54] only.
   // m_efxAllocationAttempted is set to true before the first iteration and is
@@ -74,6 +77,7 @@
       m_occlusionGainTarget[i].store(1.0f, std::memory_order_relaxed); // target: 1.0 = open, 0.1 = fully occluded; store() required — m_occlusionGainTarget is std::atomic<float>
   }
   ```
+
   Do NOT use a single shared filter for multiple sources — modifying a shared filter's parameters affects all sources bound to it simultaneously.
 
   **Shutdown loop guard flags — two separate booleans required**:
@@ -82,6 +86,7 @@
   - `m_efxAvailable` (`bool`, default `false`): set to `true` only after ALL `kEvictableSFXCount` filters have been successfully allocated and configured. Runtime occlusion code paths (occlusion gain update, `onSourceRecycled()`, state-change HF writes) check `m_efxAvailable` before touching any EFX object.
 
   The cleanup loop in `~AudioSystem()` must use `m_efxAllocationAttempted` as its guard, and must skip `AL_FILTER_NULL` entries (which represent slots where `alGenFilters` returned null or were cleaned up mid-loop). After deleting each filter, reset the ID to `AL_FILTER_NULL` (consistent with the authoritative shutdown sequence in `audio-thread-shutdown.md`):
+
   ```cpp
   // In ~AudioSystem(), after m_audioThread.join():
   if (m_efxAllocationAttempted) {
@@ -99,6 +104,7 @@
 - **Occlusion gain floor**: `AL_LOWPASS_GAIN = 0.1f` (**−20 dB**) when a source is fully occluded. A gain floor of 0.25f (−12 dB) is too mild — at −12 dB the source remains clearly audible through solid building walls, losing the spatial cue that the sound is behind an obstruction. A floor of 0.1f (−20 dB) provides a perceptible but not complete attenuation; this is consistent with real-world acoustic transmission loss through light masonry at urban frequencies. (**Do not use a floor of 0.0f — complete silence from a nearby source is unnatural and breaks the spatial illusion.**)
 
 - **Pool slot recycle — mandatory occlusion state reset**: When a pool slot is recycled (re-acquired for a new sound), `m_occlusionGainCurrent[i]` and `m_occlusionGainTarget[i]` must be reset to `1.0f` immediately, and the filter must be applied without waiting for the smoothing step. Without this, a slot that was fully occluded (`cur = 0.1f`) when recycled will play the new sound at 0.1f gain for up to 200 ms — a clearly audible muffled artifact at the start of every sound assigned to a previously-occluded slot:
+
   ```cpp
   // Required in AudioSourcePool (or AudioSystem) on slot recycle:
   // THREAD SAFETY: onSourceRecycled() is called from the MAIN THREAD (at SFX pool
@@ -125,9 +131,11 @@
       }
   }
   ```
+
   This reset must occur before the new caller begins playing on the slot. `m_occlusionMutex` is a `std::mutex` member of `AudioSystem` (declared alongside `m_streamMutex`). The audio thread's `updateOcclusion()` must acquire `m_occlusionMutex` for the section of code that writes to `m_occlusionFilter[]` via EFX calls — not for the entire 10 ms wake cycle (holding the mutex across the full wake would block main-thread SFX pool operations for 10 ms). The `m_occlusionGainTarget[i]` field remains `std::atomic<float>` (written by main thread's raycast pass, read by audio thread's updateOcclusion) — the atomic type handles the gain-target reads without the mutex. Only the EFX filter writes (alSourcei, m_fnFilterf) require mutex protection.
 
 - **Per-source gain smoothing** (prevents audible binary snap on occlusion state change): Instead of writing the target gain directly to the EFX filter each frame, maintain per-source smoothed gain state. Each audio thread wake (10 ms), update the current gain toward the target. **Dirty-check optimization**: only call `m_fnFilterf` and `alSourcei` when the gain actually changed — skipping unchanged sources reduces EFX driver call volume (55 sources × 2 EFX calls × 100 wakes/s = 11,000 calls/s without the check):
+
   ```cpp
   // Per-source smoothing step (called in updateOcclusion() each audio thread wake):
   constexpr float kOcclusionGainStep = 0.05f;  // max change per 10 ms wake ≈ 200 ms full transition
@@ -151,8 +159,10 @@
       }
   }
   ```
+
   On occlusion state change for source i:
   - **Occluded**: `m_occlusionGainTarget[i].store(0.1f, std::memory_order_relaxed)`; also immediately apply `AL_LOWPASS_GAINHF = 0.3f` (−10 dB HF cut, simulating high-frequency absorption through walls). The GAINHF cut is applied at state-change (not smoothed), since the broadband gain ramp over 200 ms already masks the transition:
+
     ```cpp
     // On transition → occluded (main-thread raycast pass):
     m_occlusionGainTarget[i].store(0.1f, std::memory_order_relaxed);  // store() required — std::atomic<float>
@@ -161,7 +171,9 @@
         alSourcei(m_sources[i], AL_DIRECT_FILTER, m_occlusionFilter[i]);
     }
     ```
+
   - **Unoccluded**: `m_occlusionGainTarget[i].store(1.0f, std::memory_order_relaxed)`; also immediately restore `AL_LOWPASS_GAINHF = 1.0f` (full HF response):
+
     ```cpp
     // On transition → unoccluded (main-thread raycast pass):
     m_occlusionGainTarget[i].store(1.0f, std::memory_order_relaxed);  // store() required — std::atomic<float>
@@ -170,11 +182,12 @@
         alSourcei(m_sources[i], AL_DIRECT_FILTER, m_occlusionFilter[i]);
     }
     ```
+
   The smoothing step applies the broadband gain change gradually over ~200 ms, eliminating the audible click from a binary state snap. The GAINHF cut/restore is instantaneous on state-change — perceptually the gain ramp masks the HF change onset.
 
 - **GAINHF occluded target**: `0.3f` (−10 dB). This simulates the acoustic effect of high-frequency absorption through building walls (walls pass low frequencies more readily than high frequencies). A value of 1.0f (no HF cut) produces audibly incorrect muffling — the source gets quieter but retains its full brightness, which is unnatural for occluded sounds. A value of 0.1f (same as gain floor) over-attenuates HF and can cause listener fatigue in dense urban scenes. `0.3f` is the V1 calibrated value — adjust only in coordination with audio design review.
 
-### Source Recycle Requirement
+## Source Recycle Requirement
 
 Any operation that returns a pool source index to the evictable SFX pool MUST call `onSourceRecycled(i)` before marking the slot as available. This applies to ALL release paths without exception:
 

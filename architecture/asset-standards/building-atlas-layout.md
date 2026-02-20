@@ -45,7 +45,7 @@
 - Per-cell usable area: 240×240 px (8 px border per 2d-texture-standards.md)
 - Upload path: linear (NOT sRGB — decal mask data, not diffuse color)
 
-### Cell Assignment Table
+### Road Decal Cell Assignment Table
 
 | Cell | Decal Type | Notes |
 |---|---|---|
@@ -64,6 +64,7 @@
 See `tools/vehicle_atlas_registry.json` (stub created at **Phase 0** with the V1 vehicle type assignments and schema from `architecture/asset-standards/3d-model-standards.md` — Vehicle Atlas Cell Registry; Phase 6 completes the full registry during validate_assets.py integration).
 
 V1 minimum vehicle types:
+
 - `car_sedan` — standard passenger car
 - `car_hatchback` — compact car
 - `car_suv` — larger passenger vehicle
@@ -73,6 +74,7 @@ V1 minimum vehicle types:
 Two distinct vehicle atlases exist with separate purposes:
 
 **Vehicle Diffuse Atlas** (`vehicles_diffuse_atlas_d.dds`):
+
 - Format: DDS DXT1 sRGB
 - Resolution: 2048×2048 px
 - Cell grid: 4×4 cells at 512×512 px each (16 vehicle type slots)
@@ -82,6 +84,7 @@ Two distinct vehicle atlases exist with separate purposes:
 - Cell assignments maintained in `tools/vehicle_atlas_registry.json`
 
 **Vehicle Sprite Atlas** (`vehicles_sprite_atlas_d.dds`):
+
 - Format: DDS DXT5 (DXT5 required — alpha channel encodes the silhouette mask for non-rectangular vehicle roof shapes; DXT1 only supports 1-bit alpha, which is insufficient for smooth vehicle silhouettes)
 - Resolution: 256×256 px
 - Cell grid: 16×16 cells at 16×16 px each (256 sprite slots)

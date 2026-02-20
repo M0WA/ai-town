@@ -13,18 +13,21 @@
     - Do **NOT** store Z in the blue channel at runtime
     - Shader must reconstruct Z: `float nz = sqrt(max(0.0, 1.0 - nx*nx - ny*ny));`
     - Full shader unpack:
+
       ```glsl
       float nx = texture(normalMap, uv).a * 2.0 - 1.0;
       float ny = texture(normalMap, uv).g * 2.0 - 1.0;
       float nz = sqrt(max(0.0, 1.0 - nx*nx - ny*ny));
       vec3 normal = normalize(vec3(nx, ny, nz));
       ```
+
     - Source PNG stores full XYZ for reference; DDS export must swizzle X→alpha, Y→green before BC3 compression.
     - BC5/ATI2 migration (post-V1): BC5/ATI2 is not confirmed to have a load path in Irrlicht's standard DDS loader and must not be used in production until explicitly verified.
   - Specular/roughness (grayscale): DDS BC1; (packed multi-channel): DDS BC3
 - **Source format**: PNG (source files only — never shipped as runtime textures)
 - **Color space / sRGB**: Irrlicht's OpenGL backend does not automatically apply sRGB decode on texture sample. **Chosen approach: sRGB decode at load time** (preferred) **with shader fallback**:
   - **Extension check required** (perform once at `RenderSystem::init()` after `createDevice()`):
+
     ```cpp
     bool m_srgbTextureSupported = glewIsExtensionSupported("GL_EXT_texture_sRGB");
     // GL_EXT_texture_sRGB covers GL_COMPRESSED_SRGB_S3TC_DXT1_EXT and GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT.
@@ -32,6 +35,7 @@
     // GL_EXT_texture_sRGB alone is the correct extension to query for sRGB DXT support.
     // Expose via: bool RenderSystem::isSRGBTextureSupported() const
     ```
+
     If `GL_EXT_texture_sRGB` is unavailable (rare on modern desktop GPUs but must be handled), **fall back to shader gamma correction**: load diffuse textures as standard linear DXT1/DXT5, and add a `pow(color.rgb, vec3(2.2))` gamma decode at the start of the terrain and building fragment shaders. This fallback is less accurate (no per-channel hardware decode) but avoids undefined behavior from using unsupported extension formats.
   - **Primary path (GL_EXT_texture_sRGB present)**: Load diffuse/albedo textures with sRGB-aware internal formats:
     - Opaque diffuse (DXT1/BC1): `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`
@@ -49,7 +53,7 @@
 - Normal maps, roughness, specular, and splat maps are always authored in **linear space**.
 - **Normal map Y-channel convention**: Normal maps must use **OpenGL convention** (Y-up: green channel points toward +Y in tangent space). If sourcing from Substance Painter or other DirectX-convention bakers, flip the green channel on export. Validate with a sphere test: a light from above-left must produce a highlight on the upper-left surface of bumps (not lower-right). If the convention is wrong, lighting appears inverted on all affected surfaces — there is no runtime error. Note: when using DXT5nm packing, apply Y-flip (this step) before the DXT5nm swizzle — see the DDS export pipeline in the DXT5nm packing section above.
 
-#### DDS Authoring Pipeline
+## DDS Authoring Pipeline
 
 All DDS textures must be produced via a validated command-line pipeline rather than DCC-tool GUI exporters. The canonical pipeline entry point is `tools/export_textures.py` (to be created in Phase 2 alongside `validate_assets.py`). Direct invocation of the tools below is permitted for individual asset iteration, but CI must call only `export_textures.py`.
 
@@ -97,9 +101,11 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
   - UI sprite sheet: anisotropic filtering disabled (UI elements rendered at screen pixels)
   - **Splat maps**: anisotropic filtering **disabled** (GL_LINEAR only) — blend weights are low-frequency per-tile data (1 texel per tile at 64×64 px per chunk) and do not benefit from anisotropic filtering. The splat map GPU upload code (see Terrain Texturing & Splat Maps section) must NOT add a `GL_TEXTURE_MAX_ANISOTROPY_EXT` call.
   - **Raw GL path** (sRGB diffuse textures): after the `glTexParameteri` filter calls, add:
+
     ```cpp
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, std::min(m_maxAnisotropy, requestedAnisotropy));
     ```
+
   - **Linear pool path** (normal maps, roughness loaded via `IVideoDriver::getTexture()`): after loading, use Irrlicht's material anisotropy setting. Irrlicht exposes per-material anisotropy via `SMaterial::AnisotropicFilter = requestedAnisotropy`. The scene node's material must set this field after texture assignment (e.g., `node->getMaterial(m).AnisotropicFilter = 8u;` for 8× anisotropy). **Do NOT call `IVideoDriver::makeColorKeyTexture()` for anisotropy setup** — that API makes a specific color channel transparent for alpha-keying and is completely unrelated to anisotropic filtering. Calling it on normal maps, roughness maps, or any non-keyed texture will destructively corrupt the texture data.
   - Query `GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT` immediately after context creation (same timing as `GL_MAX_TEXTURE_SIZE`); store as `m_maxAnisotropy` in `RenderSystem`. Check `GL_EXT_texture_filter_anisotropic` extension presence; if absent, log warning and skip (graceful degradation to trilinear).
   - Player-configurable in Settings > Graphics tab as an optional quality setting.
@@ -118,7 +124,8 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
 
   All suffixes are lowercase. No other suffix patterns are valid. `validate_assets.py` must reject any DDS file whose name does not end with one of these six suffixes. The `_billboard` suffix applies exclusively to LOD2 imposter atlases — small building and prop assets that ship a `_billboard.dds` must NOT also ship a `_lod2.b3d` mesh.
 
-#### Resolution Matrix
+### Resolution Matrix
+
 | Asset category | Resolution |
 |---|---|
 | Terrain base textures | 2048×2048 |
@@ -129,9 +136,9 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
 | Lightmap bake (_lm) — small/medium buildings | 512×512 |
 | Lightmap bake (_lm) — large buildings | 1024×1024 |
 | Lightmap bake (_lm) — LOD2 shell | 256×256 |
-| Specular/roughness (_s, _sp) — building facades | 512×512 (matches facade atlas cell resolution) |
-| Specular/roughness (_s, _sp) — terrain | 1024×1024 (half of diffuse, sufficient for smooth terrain materials) |
-| Specular/roughness (_s, _sp) — props | 256×256 (half of prop diffuse maximum) |
+| Specular/roughness (_s,_sp) — building facades | 512×512 (matches facade atlas cell resolution) |
+| Specular/roughness (_s,_sp) — terrain | 1024×1024 (half of diffuse, sufficient for smooth terrain materials) |
+| Specular/roughness (_s,_sp) — props | 256×256 (half of prop diffuse maximum) |
 | Normal maps (_n) — all categories | Same resolution as specular/roughness for that category |
 | Vehicle diffuse atlas | 512×512 per vehicle type, packed into 2048×2048 DDS DXT1 atlas (16 vehicle types per sheet) |
 | Vehicle normal map | 256×256 per vehicle type, packed into a separate 2048×2048 DDS DXT5nm atlas (8×8 grid of 256×256 cells, 64 slots; same vehicle registry assignments as diffuse atlas rows/columns; named `vehicles_normal_atlas_n.dds`) |
@@ -145,6 +152,7 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
 **Road tile diffuse texture — custom shader requirement**: The road surface texture (`road_asphalt_tileable.dds`) is an sRGB raw-GL texture (raw `GLuint` in `TextureCache::m_srgbTextures`, not an `ITexture*`). Irrlicht's built-in material system cannot reference raw-GL textures. **Road tile mesh must use a custom GLSL material** (registered via `addHighLevelShaderMaterialFromFiles`) that manually binds the road texture to unit 0 (`glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, roadTexId)`) before each draw call. Do NOT assign the road texture via `SMaterial::setTexture()` — that API requires an `ITexture*`, which is unavailable for sRGB textures. The custom road shader is responsible for sampling unit 0 as the diffuse color and blending alpha-channel road markings.
 
 #### UV & Atlas Strategy
+
 - **2 UV channels per mesh**: Channel 0 = diffuse/albedo atlas; Channel 1 = lightmap baking. **Lightmap strategy**: Per-asset lightmaps (one `_lm` texture per building asset) for V1 — atlased lightmaps are preferred for VRAM efficiency post-V1. UV channel 1 unwrap must be non-overlapping across the entire mesh for correct lightmap baking.
 - **KNOWN V1 LIMITATION — Lightmap UV repacking**: Per-asset lightmap UVs (UV channel 1) will require repacking when transitioning to atlased lightmaps post-V1. This is expected and planned rework. Artists must author UV channel 1 with uniform padding and non-rotated islands to ease atlas-friendliness. Do not optimize per-asset UV packing in ways that would require manual re-unwrap for atlasing. Post-V1 atlased `_lm` files will use a separate naming convention defined at that milestone.
 - **City building atlas**: Default = **2048×2048** (safe for all OpenGL desktop hardware). A 4096×4096 atlas may be used only if a runtime `GL_MAX_TEXTURE_SIZE` check confirms support ≥ 4096; otherwise fall back to 2048×2048.
@@ -155,6 +163,7 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
   - 8-level mip chain (e.g. 2048 building atlas with mipmaps to 8×8): **128 texels per-cell border** — impractical, so the building atlas mip chain must be **clamped at 4 levels** (2048→1024→512→256, stopping there). Configure this in the TextureCache upload call (e.g., `GL_TEXTURE_MAX_LEVEL = 3`). Building atlas uses **8 texels per-cell border** (safe to mip level 3).
   - UI sprite sheet: mipmapping must be **disabled** at load time. No padding constraint applies.
   - Padding pixels must be filled with a copy of the nearest border pixel — not transparent or black.
+
 #### Shader Texture Unit Assignment Table
 
 All terrain and building shaders must use the following fixed texture unit assignments. These assignments are the authoritative binding contract between `TextureCache` (which binds textures) and GLSL shaders (which declare `uniform sampler2D` slots). Defined in `src/rendering/shader_constants.h`:
@@ -181,7 +190,9 @@ These unit assignments are **fixed across all shaders** — terrain, building, v
 - Atlas layout must be designed before modeling begins, as a joint responsibility of `graphics-artist-2d-texture` and `graphics-dev-irrlicht`
 
 #### Billboard Imposter Atlas
+
 Small buildings and props use a pre-baked imposter atlas at LOD2 (beyond 100 m). The atlas is authored by the 2D texture artist from renders of the LOD1 mesh:
+
 - **Atlas format**: DDS DXT5 **sRGB** (`GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`), **1024×128 px**, 8 frames of 128×128 px each arranged in a 1×8 horizontal strip. Uploaded via the raw-GL sRGB path (same as diffuse building textures): `glGenTextures` → `glBindTexture` → `glCompressedTexImage2D` with `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`. **Never** use Irrlicht's `addTexture()` path for the billboard atlas — it produces a linear internal format. Alpha channel encodes non-rectangular silhouette cutouts. **Alpha convention: straight (unassociated) alpha** — RGB channels store the full-intensity billboard render (flat ambient-only), and alpha stores the cutout mask independently. Do NOT premultiply alpha: premultiplied alpha would darken billboard edges during DXT5 compression block rounding, producing a dark fringe on the silhouette. The billboard shader must use `vec4 texel = texture(billboardAtlas, uv); if (texel.a < 0.5) discard;` for cutout rendering (alpha test at 0.5 threshold, not alpha blending). This avoids transparency sorting issues with billboards rendered at varying camera angles.
 - **Bake angles**: 8 directions every 45° around the vertical axis (0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°). The runtime `LODNode` selects the nearest 45° frame based on the angle between the camera and the building's facing direction.
 - **Bake elevation**: **45° below horizontal (camera pitch = −45°)** — the midpoint of the [−70°, −20°] camera pitch operating range. This minimises average mismatch error across all valid camera pitches. "Above horizon" wording is incorrect for this convention; the camera is always looking downward in city view.
@@ -200,6 +211,7 @@ Small buildings and props use a pre-baked imposter atlas at LOD2 (beyond 100 m).
 #### Road Tileable Texture
 
 Road surfaces use a dedicated tileable texture separate from terrain and building atlases:
+
 - **Format**: DDS DXT5 sRGB (`GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`); uploaded via the raw-GL sRGB path (same as diffuse building textures). DXT5 is required (not DXT1) because road markings (lane lines, crosswalk stripes) use the alpha channel for blending road marks onto the road surface via the terrain shader's blend weight mechanism.
 - **Dimensions**: 1024×1024 px (power-of-two; aspect ratio 1:1 for seamless tiling on orthogonal road quads)
 - **Color space**: sRGB (contains diffuse road surface color and lane marking color — visual data requiring gamma-correct sampling)
@@ -211,10 +223,12 @@ Road surfaces use a dedicated tileable texture separate from terrain and buildin
 - **VRAM budget**: DXT5 1024×1024 with 4-level mip: `ceil(1024/4)² × 16 × 1.33`. **Correct calculation**: `ceil(1024/4) = 256` blocks per side; `256 × 256 × 16 = 1,048,576` bytes for mip 0; with 4-level mip overhead × 1.33: `1,048,576 × 1.33 ≈ 1,394,688 bytes ≈ 1.33 MB`. This is within the road atlas budget entry of ≤2 MB in the VRAM table. **Note**: an earlier draft of this spec incorrectly stated 2.1 MB — the correct value is ~1.33 MB. The VRAM table has been updated to reflect this.
 
 #### Terrain Texturing & Splat Maps
+
 - Seamless tileable base textures required (grass, asphalt, soil, concrete) — no visible seams
 - **UV tiling frequency**: Terrain base textures tile at **4×4 repeats per 64×64 m LOD0 chunk** (16 px/m effective density at 2048 px resolution). All terrain texture artists must use this exact tiling frequency — inconsistent values produce visible density discontinuities at chunk borders. This value is fixed before terrain texture production begins.
 - **Splat/blend map format**: **DDS RGBA8 UNORM (uncompressed) — never DXT/BC compressed**. DXT compression introduces block quantization artifacts that corrupt the smooth blend weight gradients (R/G/B/A channels encode continuous 0–255 weights). At 1024×1024 uncompressed RGBA8 = 4 MB VRAM — acceptable. **1 texel per terrain tile** (e.g. 64×64 px per 64×64 m LOD0 chunk; full map: 1024×1024 px for a 1024×1024 tile map); each RGBA channel = blend weight for one terrain material layer (4 layers per RGBA map). **Splat maps must be power-of-two dimensions** — the per-chunk resolution (1 texel/tile) already satisfies POT for standard chunk sizes (64×64, 128×128), but non-standard chunk dimensions must be padded to the next POT before upload.
 - **Splat map GPU upload**: Splat maps must be uploaded as uncompressed `GL_RGBA8` via `glTexImage2D` — **never via `glCompressedTexImage2D`**. The correct upload sequence (texture object must be explicitly created and bound first — the sRGB raw-GL path requires the same discipline):
+
   ```cpp
   GLuint splatTexId = 0;
   glGenTextures(1, &splatTexId);
@@ -232,6 +246,7 @@ Road surfaces use a dedicated tileable texture separate from terrain and buildin
   // benefit from mipmapping (they are sampled at a near-uniform screen scale per terrain chunk).
   glBindTexture(GL_TEXTURE_2D, 0);
   ```
+
   Using `glCompressedTexImage2D` for splat maps is a critical error — it corrupts the smooth 0–255 blend weight gradients that require full 8-bit per-channel precision. The sRGB raw-GL path (`m_srgbTextures`, DXT-format) must not be used for splat maps. The `IVideoDriver::getTexture()` path must also not be used. `TextureCache` must handle splat maps as a distinct upload category separate from both the sRGB pool and the linear DXT pool.
 - Second splat map required if >4 terrain material layers needed (multi-pass blend strategy)
 - **Splat map channel-to-material assignment (fixed, must not be changed after texture production begins):**
@@ -254,13 +269,15 @@ Road surfaces use a dedicated tileable texture separate from terrain and buildin
 - `graphics-dev-irrlicht` implements the splatting shader/multi-texture blend via Irrlicht's material system
 
 ### Scene VRAM Budget (V1 targets, mid-range desktop GPU with 4 GB VRAM)
+
 Total texture VRAM for all simultaneously-resident assets must not exceed **1.0 GB** (leaving ~1 GB+ headroom for OS/driver/geometry/framebuffers on 4 GB hardware):
+
 | Category | Budget |
 |---|---|
 | Terrain base textures (up to **4 layers**, 2048x2048 DXT1 with 4-level mip) | ≤11 MB (`ceil(2048/4)^2 × 8 × 1.33 ≈ 2.66 MB/layer × 4 layers`). **4 layers matches the shader texture unit table** — texture units 5–8 (`kTexUnitTerrainLayer0` through `kTexUnitTerrainLayer3`) provide exactly 4 terrain detail layer slots. Claiming 6 layers here is inconsistent with the 4-slot architecture. A second splat map (described in Terrain Texturing & Splat Maps) adds 4 more layers post-V1 only. V1 VRAM budget assumes 4 layers. |
 | Splat maps (up to 2 x 1024x1024 RGBA8 UNORM, GL_TEXTURE_MAX_LEVEL=0, no mip chain) | ≤8 MB (2 × 1024 × 1024 × 4 bytes = 8 MB exact; no ×1.33 mip overhead) |
 | City building atlas (2048x2048 DXT1, 4-level mip) | ≤6 MB |
-| Per-asset lightmaps (50 active buildings x 1024x1024 DXT5/BC3, no mip chain) | ≤50 MB (corrected: ceil(1024/4)^2 * 16 = 1.0 MB/texture * 50; DXT5 used for lightmaps because the alpha channel can encode ambient occlusion or shadow density independently of RGB luminance; lightmap textures do not require mip chains — sampled at consistent scale close to camera) |
+| Per-asset lightmaps (50 active buildings x 1024x1024 DXT5/BC3, no mip chain) | ≤50 MB (corrected: ceil(1024/4)^2 *16 = 1.0 MB/texture* 50; DXT5 used for lightmaps because the alpha channel can encode ambient occlusion or shadow density independently of RGB luminance; lightmap textures do not require mip chains — sampled at consistent scale close to camera) |
 | LOD2 shell lightmaps (50 active buildings × 256×256 DXT5/BC3, no mip chain) | ≤4 MB (ceil(256/4)^2 × 16 = 0.0625 MB/texture × 50; no mip chain per lightmap exemption rule) |
 | Road atlas (1024x1024 DXT5, 4-level mip) | ≤1.5 MB (~1.33 MB exact; see Road Tileable Texture VRAM budget note) |
 | UI sprite sheet (2048x2048 RGBA8, no mips) | ≤16 MB |

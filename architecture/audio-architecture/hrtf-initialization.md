@@ -24,13 +24,16 @@ if (alcIsExtensionPresent(device_, "ALC_SOFT_HRTF")) {
         logWarning("HRTF requested but not enabled. Deploy default.mhr alongside the binary.");
 }
 ```
+
 - Ship `default.mhr` (HRTF data file) alongside `soft_oal.dll` on Windows and in the Linux package
 - HRTF failure is a warning (degrade gracefully), not a hard abort
 - **Distance model initialization**: After `alcMakeContextCurrent` succeeds and before any source is created, call:
+
   ```cpp
   alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED);
   alCheckError("alDistanceModel");
   // Set default rolloff factor for all subsequently created sources:
   // (per-source rolloff is set at source creation time per category)
   ```
+
   The `alDistanceModel` call is mandatory — the OpenAL default is `AL_INVERSE_DISTANCE` (unclamped), which allows source gain to exceed 1.0 for near-field sources below the reference distance, causing audio clipping. `AL_INVERSE_DISTANCE_CLAMPED` caps gain at the reference distance.

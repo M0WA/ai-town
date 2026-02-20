@@ -1,6 +1,8 @@
 # Shader Loading
+
 - Terrain splatting shader loaded via `IVideoDriver::addHighLevelShaderMaterialFromFiles()`
 - **Shader callback lifetime** — **Irrlicht DOES take a reference to the callback**: Irrlicht's material renderer internally calls `grab()` on the `IShaderConstantSetCallBack` when passed to `addHighLevelShaderMaterialFromFiles()`, and calls `drop()` on its own destruction. Therefore, use **raw heap allocation + `->drop()` after passing** — Irrlicht's reference count keeps the callback alive for exactly as long as the material renderer exists. **Do NOT use `std::unique_ptr` or `std::vector<std::unique_ptr<...>>`** — `unique_ptr` calls `delete` directly (bypassing `IReferenceCounted`), causing a double-free when Irrlicht also drops the callback. There is no `m_shaderCallbacks` member in `RenderSystem`.
+
   ```cpp
   // Correct pattern — matches Irrlicht Tutorial 10:
   // IMPORTANT: Capture all data needed for error messages as LOCAL VARIABLES BEFORE
@@ -23,11 +25,13 @@
       LOG("Shader compile failed: vs=" + vsFile + " fs=" + fsFile);
   }
   ```
+
   The material renderers are owned by `IVideoDriver`, which is owned by `IrrlichtDevice`, owned by `RenderSystem` — the lifetime chain is already correct without manual management. **Failure path safety**: `cb->drop()` is called unconditionally BEFORE the `-1` check. On a failure return, Irrlicht does not call `grab()`, so `drop()` reduces the ref_count from 1 to 0 and **destroys the callback** — it is not merely "may be destroyed", it IS destroyed. Any error-handling code in the `matType == -1` branch that references `cb` is a use-after-free. Error messages must be constructed from local path variables captured before the call, not from callback state.
 
   **sRGB texture binding in shader callbacks**: Because Irrlicht manages texture unit bindings internally during `drawAll()`, raw `glActiveTexture()` + `glBindTexture()` calls for sRGB diffuse textures (raw `GLuint`) must be made **inside `IShaderConstantSetCallBack::OnSetConstants()`** — not between `drawAll()` calls. GL calls made within `OnSetConstants()` execute immediately before the associated draw call and are not overridden by Irrlicht's internal state management. The shader callback receives the active `IVideoDriver*`; `TextureCache::getGLuint(filename)` provides the raw `GLuint` for the sRGB texture to bind. See texture-cache.md for the full sRGB upload and binding specification.
 
   **CRITICAL — save and restore GL_ACTIVE_TEXTURE inside OnSetConstants()**: Irrlicht's OpenGL renderer tracks its own `m_CurrentTexture` and active texture unit state. Calling `glActiveTexture()` inside `OnSetConstants()` changes the driver's active unit without updating Irrlicht's internal tracking, corrupting subsequent Irrlicht draw calls (Irrlicht may bind textures to the wrong unit on the next `setMaterial()` call). **Required pattern** — save and restore the previously active texture unit:
+
   ```cpp
   void OnSetConstants(IMaterialRendererServices* services, s32 userData) override {
       // Save Irrlicht's current active texture unit state:
@@ -52,6 +56,7 @@
       glActiveTexture(static_cast<GLenum>(savedUnit));
   }
   ```
+
   **Important**: Do NOT add an "after the draw call" unbind step — `IShaderConstantSetCallBack` has no post-draw callback. All GL state setup AND cleanup for sRGB textures must occur within `OnSetConstants()`. The pattern above (bind → set uniforms → unbind → restore unit) is the complete and correct sequence.
 
   Without this save/restore, Irrlicht's internal active-unit tracking is corrupted starting from the first frame that uses a custom sRGB shader, producing intermittent texture-on-wrong-unit artifacts that are difficult to reproduce.

@@ -1,9 +1,11 @@
 ## Phase 1: Render Skeleton & Camera
 
 ### Goal
+
 Establish the Irrlicht device lifecycle, render loop call order, camera controller, and the UIManager shell so all subsequent phases have a working display target to integrate into.
 
 ### Deliverables
+
 - [ ] `RenderSystem` class: owns `IrrlichtDevice*` (RAII, `device->drop()` in destructor); `EDT_OPENGL` on all platforms; log and abort if OpenGL unavailable (ref: `architecture/graphics-architecture/irrlicht-device-lifecycle.md`)
 - [ ] `SIrrlichtCreationParameters`: `EDT_OPENGL`, `Bits=32`, `ZBufferBits=24`, `Stencil=true`, `AntiAlias=4`, `Vsync=false`, initial window `1280×720` (ref: `architecture/graphics-architecture/irrlicht-device-lifecycle.md`)
 - [ ] Render loop call order enforced: `beginScene` → `sceneManager->drawAll()` → `guiEnvironment->drawAll()` → `endScene()`. The `IRenderer` facade exposes `endFrame()` as its abstract method name — this wraps `driver->endScene()` internally. The prohibition in `architecture/graphics-architecture/irrlicht-device-lifecycle.md` on calling `endFrame()` applies only to direct `IVideoDriver` calls; the `IRenderer::endFrame()` abstraction is the correct call from all non-rendering code. **Per-frame execution sequence rule** (`graphics-dev-irrlicht`): ALL simulation logic updates and audio updates (`CitySimulation::tick()`, `AudioSystem::syncListenerToCamera()`, `AudioSystem::update()`) MUST execute BEFORE `RenderSystem::beginFrame()` (`driver->beginScene()`) — never interleave logic updates inside the begin/end scene block. The canonical frame sequence is: (1) poll events, (2) game logic tick, (3) `syncListenerToCamera()` + `AudioSystem::update()`, (4) `CameraController::update(dt)`, (5) `RenderSystem::beginFrame()`, (6) `sceneManager->drawAll()`, (7) `guiEnvironment->drawAll()`, (8) `RenderSystem::endFrame()`. This sequence must be documented as a comment at the main loop call site. (ref: `architecture/graphics-architecture/irrlicht-device-lifecycle.md`)
@@ -58,6 +60,7 @@ Establish the Irrlicht device lifecycle, render loop call order, camera controll
 - [ ] **Atlas document re-validation gate**: `architecture/asset-standards/building-atlas-layout.md` must be reviewed and signed off by `graphics-artist-2d-texture` before Phase 6 UV authoring begins. This gate must be documented as a pre-condition in Phase 5/6 planning; tracking begins in Phase 1 so it is not overlooked. (ref: `architecture/asset-standards/building-atlas-layout.md`)
 
 ### Exit Criteria
+
 - Application window opens with blank scene on Linux and Windows
 - Camera pans, rotates, zooms correctly within pitch constraints
 - `CameraController` unit tests pass (no display required)
@@ -67,6 +70,7 @@ Establish the Irrlicht device lifecycle, render loop call order, camera controll
 - Spike result for `SMesh::addMeshBuffer()` grab/drop contract documented in BOTH `tests/rendering/lod_swap_smoke_test.cpp` AND `architecture/graphics-architecture/scene-graph-ownership.md` before Phase 2 terrain mesh construction begins. The result (whether `grab()`/`drop()` is called by `addMeshBuffer()`) must be recorded in both locations with an explanatory comment. **The Phase 2 TerrainChunk deliverable is BLOCKED on this spike result.** Phase 2 must not begin TerrainChunk mesh construction until both documents are updated with the confirmed contract.
 
 ### Team
+
 | Role | Responsibility |
 |---|---|
 | `graphics-dev-irrlicht` | `RenderSystem`, Irrlicht device lifecycle, render loop, LOD smoke test structure (body deferred to spike result), `IrrlichtUIBackend` smoke target, `TextureCache` skeleton, GLSL shader stubs, GL capability query guard |
@@ -78,13 +82,16 @@ Establish the Irrlicht device lifecycle, render loop call order, camera controll
 | `cicd-dev-github` | Verify `integration_tests` target routes correctly to `ctest -L '^integration$'` step; confirm at least one integration test is discovered and passes before Phase 1 exit criteria are declared met |
 
 ### Dependencies
+
 - Requires Phase 0 complete
 
 ### Sequencing Notes
+
 - **Intra-phase ordering**: `IAudioSystem.h` (authored by `sound-dev-opensoftal`) must be committed before `UIManager` shell implementation begins — `UIManager` constructor forward-declares `IAudioSystem*`. `ICitySimulation.h` is now a Phase 1 deliverable (see above); `UIManager` constructor may use the full interface definition rather than a forward declaration.
 - **GATE before Phase 3**: `gamedesign-lookandfeel` must sign off on all `SimulationConstants` values (starting revenue calibration $8–12K target at 50% occupancy, demand formula constants, loan thresholds) before Phase 3 coding begins. This is a one-document design review that prevents constant changes mid-Phase-3 from breaking tests written against prior values.
 
 ### Risks & Spikes
+
 - **RISK**: `setMesh()` grab/drop contract may differ in vendored Irrlicht build. **Spike**: inspect `source/Irrlicht/CMeshSceneNode.cpp` to confirm `grab()`/`drop()` calls before writing LOD swap code.
 - **RISK**: `EDT_OPENGL` unavailable on some CI runners. **Spike**: confirm Mesa OpenGL is installed and functional under `xvfb-run` on `ubuntu-latest`.
 - **RISK**: `SMesh::addMeshBuffer()` grab/drop contract may differ in vendored Irrlicht build — unlike `setMesh()`, the spec's smoke test body does not call `drop()` on the `SMeshBuffer` after `addMeshBuffer()`. **Spike**: inspect `source/Irrlicht/SMesh.h` to confirm `addMeshBuffer()` calls `grab()` on the buffer. If it does not, add `drop()` after `addMeshBuffer()` in the smoke test body and document the convention. **Gate**: the spike result must be documented in `architecture/graphics-architecture/scene-graph-ownership.md` before Phase 2 TerrainChunk work begins. If the spike changes the camera pitch range or LOD swap distances from currently documented values, `graphics-artist-3d-model` must be explicitly notified before the updated spike result is committed.

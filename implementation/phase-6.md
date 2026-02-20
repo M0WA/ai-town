@@ -1,9 +1,11 @@
 ## Phase 6: City Assets (Buildings & Vehicles)
 
 ### Goal
+
 Deliver all V1 building and vehicle 3D assets, billboard imposters, atlas textures, LOD pipeline, and collision meshes — all passing export validation.
 
 ### Deliverables
+
 - [ ] **3D Model Standards compliance**: `.b3d` for all building assets (UV2/lightmap); `.obj` only for NOLIGHTMAP props; `-Z Forward, Y Up` Blender export; 1 Irrlicht unit = 1 m; pivot at bottom-center Y=0 (ref: `architecture/asset-standards/3d-model-standards.md`)
 - [ ] **LOD requirements** per spec table: Large buildings (2000–5000 / 500–1000 / 300–500 tris LOD0/1/2); Small buildings/props (500–1500 / 100–300 tris / Billboard); Vehicles — the general 'Vehicles (1000–3000 / 200–500 tris)' range row is informational only; the binding caps are: car ≤1,500/≤300, bus/truck ≤2,500/≤450 tris LOD0/LOD1. Per-class caps supersede the general range for all production and validation purposes.; Road tile (≤48/≤16/≤8 tris); Infrastructure props (≤300/≤75/Billboard) (ref: `architecture/asset-standards/3d-model-standards.md`)
 - [ ] LOD hysteresis thresholds: Large buildings (50/45 m, 200/185 m); Small buildings/props (30/25 m, 100/90 m); Vehicles (40/35 m, 100/90 m); Road tile uses small building thresholds (ref: `architecture/asset-standards/3d-model-standards.md`)
@@ -49,6 +51,7 @@ Deliver all V1 building and vehicle 3D assets, billboard imposters, atlas textur
 - [ ] Building/vehicle LOD swap integration test in `tests/rendering/building_lod_swap_test.cpp`: verify that after `node->setMesh(newLODMesh)`, the scene node's bounding box matches the new mesh's bounding box (not the previous LOD's bounding box); labelled `requires-opengl`; run under `xvfb-run` in CI. **Test geometry specification**: LOD0 mesh: single `SMeshBuffer` with 4 vertices forming a 10 m × 10 m quad at Y=0 (expected bounding box {−5,0,−5} to {5,0,5}); LOD1 mesh: single `SMeshBuffer` with 4 vertices forming a 5 m × 5 m quad at Y=0. **Negative case**: call `setMesh(lod1Mesh)` WITHOUT calling `recalculateBoundingBox()` first; verify the scene node bounding box still reports the LOD0 10 m extents (stale box). **Positive case**: call `lod1Mesh->recalculateBoundingBox()`, then `setMesh(lod1Mesh)`; verify the node reports 5 m extents. Both meshes must have actual geometry — degenerate empty meshes produce identical bounding boxes in both cases and will cause false passes. Register via `target_sources(opengl_tests PRIVATE tests/rendering/building_lod_swap_test.cpp)` — do NOT create a new CMake target. (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
 
 ### Exit Criteria
+
 - Residential/Commercial/Industrial buildings at all three density tiers render correctly in-engine
 - Billboard LOD2 transitions are perceptually seamless at 100 m distance
 - Export validation script passes all 15 checks (13 asset checks + sidecar check #14 + road LOD2 color check #15) on all delivered assets
@@ -56,6 +59,7 @@ Deliver all V1 building and vehicle 3D assets, billboard imposters, atlas textur
 - Draw call count stays under 2,000 per frame in a city with 50 building variants
 
 ### Team
+
 | Role | Responsibility |
 |---|---|
 | `graphics-artist-3d-model` | All building models (LOD0/1/2/billboard), vehicle models, collision meshes, modular kit |
@@ -64,11 +68,13 @@ Deliver all V1 building and vehicle 3D assets, billboard imposters, atlas textur
 | `cicd-dev-github` | Update `.github/workflows/ci.yml` to add the `validate-assets` job and wire it into the `all-checks-pass` gate `needs:` list |
 
 ### Dependencies
+
 - Requires Phase 2 complete (TextureCache, sRGB upload path, SceneEntityManager)
 - Requires Phase 5 (minimap zone color coding for building placement feedback)
 - Requires Phase 2 atlas layout sign-off document (atlas layout joint approval by `graphics-artist-2d-texture` and `graphics-dev-irrlicht` — no building mesh UV channel 0 authoring may proceed until approved). **Building atlas sign-off must explicitly confirm that building variants within the same zone-tier share wall module atlas cells** (e.g., `res_low_01` and `res_low_02` both reference the `wall_residential_low` atlas cell) — the 16-cell atlas is sufficient only if this sharing is enforced. Recorded in `architecture/asset-standards/building-atlas-layout.md`. (ref: `architecture/asset-standards/building-atlas-layout.md`)
 - **Pre-condition — `LODNode::swapMesh()` prototype**: `LODNode::swapMesh()` with the full `recalculateBoundingBox()` + `setMesh()` + `drop()` sequence (delivered in Phase 2 LODNode skeleton) must pass the `SetMeshGrabDropContract` test in `tests/rendering/lod_swap_smoke_test.cpp` before any Phase 6 building LOD meshes are produced. No building asset LOD production begins until this test is green. (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
 
 ### Risks & Spikes
+
 - **RISK**: Billboard mip-3 silhouette (14×14 px) may not be recognizable for complex High-density buildings. **Spike**: author artist sign-off checklist item: downscale single frame to 14×14 in DCC tool and verify recognizability before delivery.
 - **RISK**: Road tile custom GLSL shader (sRGB texture on `kTexUnitDiffuse`, no `SMaterial::setTexture()`) requires `GL_ACTIVE_TEXTURE` save/restore in `OnSetConstants()`. **Spike**: prototype road tile draw call with shader callback before bulk road tile asset production.

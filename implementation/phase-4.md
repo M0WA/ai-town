@@ -1,9 +1,11 @@
 ## Phase 4: Audio Foundation
 
 ### Goal
+
 Deliver the complete `AudioSystem` RAII class with source pool, streaming architecture, 3D spatial audio, occlusion, and HRTF — all according to the spec's mandatory shutdown and thread-safety requirements.
 
 ### Deliverables
+
 - [ ] `AudioSystem` RAII class: `alcOpenDevice` + `alcCreateContext` with HRTF attrs; `ALC_HRTF_SOFT=ALC_TRUE`; `alcMakeContextCurrent` before any AL call; `ALC_SOFT_HRTF` presence check; `default.mhr` shipped alongside binary (ref: `architecture/audio-architecture/audio-system.md`, `architecture/audio-architecture/hrtf-initialization.md`)
 - [ ] `AudioSystem` destructor is exception-safe for partial construction: use separate nullable boolean flags (`m_deviceCreated`, `m_contextCreated`, `m_contextMadeCurrent`) checked before each cleanup step; each cleanup action is guarded by its corresponding flag so that a constructor that fails mid-sequence (e.g., `alcCreateContext` fails after `alcOpenDevice` succeeds) does not attempt to destroy resources that were never created. Document partial-construction failure paths in `src/audio/audio_system.h` comments. (ref: `architecture/audio-architecture/audio-system.md`, `architecture/audio-architecture/audio-thread-shutdown.md`)
 - [ ] `alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED)` called after `alcMakeContextCurrent` succeeds, before any source creation (ref: `architecture/audio-architecture/hrtf-initialization.md`)
@@ -18,7 +20,7 @@ Deliver the complete `AudioSystem` RAII class with source pool, streaming archit
 - [ ] Source pool: 62 pre-allocated AL sources; named constants `kEvictableSFXCount=55`, `kStingerCount=2`, `kSFXPoolSize=58`, `kStreamSourceCount=4`, `kTotalSources=62`; `kTransientReserveStart=51` (V1: stinger sources are indices 55..56 only; sources[57] is reserved evictable post-V1 game-over slot) (ref: `architecture/audio-architecture/source-pool.md`)
 - [ ] `AudioSourcePool::acquireSFXSource(SoundPriority)`: LOW/NORMAL consider sources[0..50]; HIGH/CRITICAL consider sources[0..54] (ref: `architecture/audio-architecture/source-pool.md`)
 - [ ] `AudioSourcePool::acquireStreamSource()`: returns `AL_NONE` if all 4 in use; ambient beds MUST use stream partition (ref: `architecture/audio-architecture/source-pool.md`)
-- [ ] `acquireStingerSource(StingerType)`: V1 enum `CRISIS=55, MILESTONE=56` (GAME_OVER=57 is post-V1 only); V1 stinger sources (indices 55..56) set `AL_SOURCE_RELATIVE=AL_TRUE`, `AL_ROLLOFF_FACTOR=0.f` at pool construction; sources[57] is evictable in V1 (ref: `architecture/audio-architecture/source-pool.md`)
+- [ ] `acquireStingerSource(StingerType)`: V1 enum `CRISIS=55, MILESTONE=56` (GAME_OVER=57 is post-V1 only); V1 stinger sources (indices 55..56) set `AL_SOURCE_RELATIVE=AL_TRUE`, `AL_ROLLOFF_FACTOR=0.f` at pool construction. **Implementation note — sources[57] V1 behaviour (confirmed resolved)**: sources[57] is **idle** in V1 — allocated as part of the 62-source block by `alGenSources(62, ...)` at pool construction but never returned by `acquireSFXSource()` (range 0..54), `acquireStingerSource()` (indices 55..56), or `acquireStreamSource()` (indices 58..61). No code path acquires or touches sources[57] in V1. Post-V1 game-over stinger promotion requires only: add `GAME_OVER=57` to `StingerType`, increment `kStingerCount` 2→3, extend the stinger setup loop to include index 57 — no pool restructuring required. (ref: `architecture/audio-architecture/source-pool.md`)
 - [ ] `acquireVehicleEnginePair(outIdle, outMove)`: atomic 2-slot acquisition or fail entirely; `releaseVehicleEnginePair(idle, move)` returns both atomically; eviction treats pair as unit (ref: `architecture/audio-architecture/source-pool.md`)
 - [ ] EFX occlusion: `ALC_EXT_EFX` check + entry point loading stored as `AudioSystem` members before thread launch; `kEvictableSFXCount` filters only; per-filter null check in allocation loop; **two separate boolean guards required**: `m_efxAllocationAttempted` (set `true` before first `m_fnGenFilters` call; guards destructor cleanup loop to prevent leaking partial allocations) and `m_efxAvailable` (set `true` only after ALL `kEvictableSFXCount` filters fully allocated and configured; guards all runtime occlusion paths); destructor filter cleanup loop uses `m_efxAllocationAttempted` as guard (NOT `m_efxAvailable`) to clean up partial allocations where `m_efxAvailable` was set `false` mid-loop; `AL_LOWPASS_GAIN=0.1f` occluded floor; `AL_LOWPASS_GAINHF=0.3f` on occlusion transition; smoothing step `kOcclusionGainStep=0.05f` per 10 ms wake; dirty-check optimization; `onSourceRecycled()` resets gain state under `m_occlusionMutex`; raycast ≤ 1 per source per 6 frames, ≤ 8 per frame total, only for sources within 100 m; `m_occlusionMutex` declared as `std::mutex` member of `AudioSystem`; `onSourceRecycled(int i)` acquires `m_occlusionMutex` before EFX filter writes; `updateOcclusion()` acquires `m_occlusionMutex` for the section writing to `m_occlusionFilter[]` via EFX calls (not for the entire 10 ms wake cycle) (ref: `architecture/audio-architecture/audio-occlusion.md`, `architecture/audio-architecture/audio-system.md`)
 - [ ] 3D spatial audio per-category parameters: rolloff factors, reference/max distances per spec table; listener sync `syncListenerToCamera()` updating `AL_POSITION`, `AL_VELOCITY=0`, `AL_ORIENTATION` (6-float) every frame; vehicle source `AL_VELOCITY=(0,0,0)` (no Doppler) (ref: `architecture/audio-architecture/spatial-audio.md`)
@@ -44,6 +46,7 @@ Deliver the complete `AudioSystem` RAII class with source pool, streaming archit
 - [ ] OGG header validation unit tests in `tests/audio/`: open a valid placeholder OGG via `ov_fopen()` and verify it returns 0 (success); verify channel count from `vorbis_info::channels` matches spec (stereo 2 channels for music/ambient stems; mono 1 channel for zone loops if loaded via mono pre-load path); verify sample rate from `vorbis_info::rate` is 44100 Hz for all validated assets. (ref: `architecture/audio-architecture/audio-asset-formats.md`, `architecture/audio-architecture/v1-audio-asset-manifest.md`)
 
 ### Exit Criteria
+
 - Audio thread initializes and shuts down cleanly with no AL errors on Linux and Windows
 - 3D spatial audio attenuates correctly at configured distances under xvfb/null-audio
 - Streaming music plays and loops without starvation for a 5-minute run
@@ -52,6 +55,7 @@ Deliver the complete `AudioSystem` RAII class with source pool, streaming archit
 - Unit test `AudioThread_AbsentThreadLocalContext_ConstructorThrows`: using a mock `alcIsExtensionPresent` returning `ALC_FALSE`, verifies the constructor throws `std::runtime_error` without entering the streaming loop; labelled `unit`, runs in CI without a real audio device
 
 ### Team
+
 | Role | Responsibility |
 |---|---|
 | `sound-dev-opensoftal` | `AudioSystem` RAII, source pool, streaming, occlusion, spatial audio, all OpenAL code; `IAlcFunctions` interface + `DefaultAlcFunctions` implementation |
@@ -59,9 +63,11 @@ Deliver the complete `AudioSystem` RAII class with source pool, streaming archit
 | `cicd-dev-github` | `build-windows` DLL verification hard-fail conversion (Phase 0 placeholder → hard `exit 1`); temporary music sidecar enforcement CI step |
 
 ### Dependencies
+
 - Requires Phase 0 complete (CI), Phase 1 complete (`IClock` interface available in `src/interfaces/`)
 - Phase 3 simulation (for `IClock` timing in loan gate) can proceed in parallel
 
 ### Risks & Spikes
+
 - **RISK**: `ALC_EXT_thread_local_context` absent on some Linux OpenAL versions. **Spike**: test on clean Ubuntu with OpenAL Soft from vcpkg; verify extension is present.
 - **RISK**: Streaming starvation during CI due to slow coverage-instrumented decoding. **Spike**: measure OGG decode time under `-DENABLE_COVERAGE=ON` on a CI runner.

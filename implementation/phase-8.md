@@ -1,9 +1,11 @@
 ## Phase 8: Save System & Game Flow
 
 ### Goal
+
 Deliver complete save/load, main menu game flow, scenario mode win/loss conditions, and clean game-over path.
 
 ### Deliverables
+
 - [ ] **Save System**: JSON format V1; 1 auto-save slot + 3 manual slots; auto-save every 120 real seconds OR 5 budget ticks (whichever comes first; timer pauses during pause/modal); auto-save triggered immediately when forced loan dialog becomes active (before modal is shown); auto-save triggered when player opens the Pause Menu (before displaying it); save file paths: `~/.config/aitown/saves/` (Linux), `%APPDATA%\aitown\saves\` (Windows); manual save slot selection dialog showing 3 slots with timestamps, overwrite confirmation modal; Quit-to-Desktop / Quit-to-Main-Menu unsaved-changes check and blocking modal ("You have unsaved progress. Save and Quit / Quit Without Saving / Cancel"); Load Last Save loads most recent save across all slots (auto-save or manual), sorted by timestamp; Load Last Save button grayed with tooltip "No save file found." if no save exists (ref: `architecture/game-design/save-system.md`)
 - [ ] Scenario mode save directory (`saves/scenarios/`) is NOT created in V1 — Scenario mode is grayed post-V1. The `ScenarioState` struct (with `win_condition_progress`, `elapsed_ticks`, `scenario_id`) is serialized internally and exists in the V1 code, but the directory and any scenario save files are post-V1 scope. (ref: `architecture/game-design/save-system.md`, `architecture/game-design/game-progression-modes.md`)
 - [ ] **Game Over Flow integration**: `transitionToGameOver()` only in Scenario mode (no-op in Sandbox); progressive warning system: month 1 CRITICAL toast "City Finances Critical — 2 months to bankruptcy if deficit continues" + `setSpeed(SpeedMultiplier::x1)` auto-slow (player retains speed selector control); month 2 CRITICAL toast "City Finances Critical — 1 month to bankruptcy" + persistent red flashing budget indicator in resource bar; month 3 game-over modal (title "City Bankrupt"; body: current debt, months in deficit; options: Load Last Save / Return to Main Menu); streak-break Normal toast "Deficit streak broken — finances stabilizing" when deficit recovers above −50% (red flashing indicator removed; speed not artificially constrained); streak-reset rule: streak counter resets on any tick with deficit < −50%; clean exit on any game-over modal option (clean simulation shutdown before transitioning; no abrupt exit). **`gamedesign-ux` scope for game-over modal is in-scope (wires to Sandbox no-op and Scenario triggering path). Win modal and HUD goal tracker are stub layouts only in V1 — no functional wiring; post-V1 enablement deferred.** (ref: `architecture/game-design/game-over-flow.md`, `architecture/game-design/game-progression-modes.md`)
@@ -23,6 +25,7 @@ Deliver complete save/load, main menu game flow, scenario mode win/loss conditio
   - `[ ] SaveSystem_AutoSave_SuspendedDuringModal`: use `ManualClock` to advance time 120+ real seconds while a modal dialog is open (simulated via `UIManager::setModalOpen(true)`); verify auto-save does NOT fire; close modal; advance one tick; verify auto-save fires immediately. (ref: `architecture/game-design/save-system.md`)
 
 ### Exit Criteria
+
 - Save and load round-trips preserve full city state (treasury, zones, population, roads)
 - Game-over flow triggers correctly after 3 consecutive −50% deficit months in Scenario mode
 - Main menu correctly reflects save file state (grayed/enabled/corrupted)
@@ -30,6 +33,7 @@ Deliver complete save/load, main menu game flow, scenario mode win/loss conditio
 - All save system unit tests pass with coverage gate green
 
 ### Team
+
 | Role | Responsibility |
 |---|---|
 | `gamedesign-lookandfeel` | JSON serialization schema, save slot management, Quit-to-Desktop unsaved-changes modal, game-over consequence tuning, scenario win-condition logic |
@@ -41,9 +45,11 @@ Deliver complete save/load, main menu game flow, scenario mode win/loss conditio
 > **Note**: Platform-specific save path resolution (`~/.config/aitown/saves/` on Linux, `%APPDATA%\aitown\saves\` on Windows) is documented in `architecture/game-design/save-system.md` and is owned by `gamedesign-lookandfeel` as part of the JSON serialization deliverable.
 
 ### Dependencies
+
 - Requires Phase 5 complete (modal dialog system, notification system)
 - Requires Phase 3 complete (simulation state serializable)
 - Requires Phase 7 complete (stinger audio triggered by City Rating transitions)
 
 ### Risks & Spikes
+
 - **RISK**: JSON save format schema versioning not specified in V1; adds risk for forward compatibility. **Spike**: define a `"schema_version": 1` field in the JSON root and add a version check on load before any field parsing.

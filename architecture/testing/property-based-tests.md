@@ -1,7 +1,8 @@
 # Property-Based Test Invariants (RapidCheck)
 
 - **Economy invariant**: For any valid initial state and N budget ticks, the treasury accounting must be exact (all terms signed):
-  ```
+
+  ```text
   final_treasury == initial_treasury
                   + Σ(tax_revenue_i + utility_fee_revenue_i + loan_principal_credited_i)
                   − Σ(road_placement_cost_total + road_maintenance_i + service_upkeep_i + wages_i + loan_repayment_i)
@@ -20,6 +21,7 @@
                               wages are only paid for filled positions — a city at 60% employment pays 0.60 × the full wage pool)
     interest_i              = outstanding_debt_i × (0.05 / ticks_per_year)  where ticks_per_year = 12
   ```
+
   Loan principal credited counts as positive revenue; loan repayment counts as positive expense. **First-loan debt-cap override**: When `outstanding_debt == 0` at the time a forced loan triggers, the loan amount is unconditionally `max(monthly_shortfall × 3, monthly_revenue × 0.5, $10,000)` — the 3× debt cap is NOT applied to the first loan issuance. The economy invariant property test must model this two-path formula: (a) if `outstanding_debt == 0` before the loan, credit the full first-loan amount; (b) if `outstanding_debt > 0`, credit only `max(0, 3 × max(monthly_revenue, $1,000) − outstanding_debt)`. Failing to model path (a) causes the property to compute a lower credited principal than production, producing false invariant failures on first-loan scenarios. **Interest timing**: Interest is computed on the outstanding balance **before** repayment principal is deducted that tick (i.e., `interest_i = outstanding_debt_at_start_of_tick_i × (0.05 / ticks_per_year)`), then repayment is applied, reducing the balance for the next tick. The property test must use this order explicitly — applying repayment before interest would produce a different (slightly lower) interest total and would not match the production implementation. The test must instantiate `ticks_per_year` as the named constant (= 12) — do not hardcode `0.05 / 12` inline; use the named constant from `SimulationConstants::ticks_per_year`. The test must also use `SimulationConstants::loan_repayment_ticks` (= 12) when computing `repayment_principal_per_tick = loan_principal / SimulationConstants::loan_repayment_ticks` — do not hardcode 12 or the fraction inline. `service_upkeep_i` and `wages_i` must be computed using `SimulationConstants::service_upkeep_*_per_tick` and `SimulationConstants::wage_fraction_of_revenue` (see Economy Model) — not hardcoded values.
 - **Treasury arithmetic contract**: All treasury values and monetary amounts in the simulation MUST be stored as integer types (e.g., `int64_t` representing whole dollars or cents). Floating-point interest calculations must be truncated to the nearest dollar before being applied to the treasury (truncation rule: `interest_applied = static_cast<int64_t>(outstanding_debt * 0.05 / ticks_per_year)`). This ensures the treasury invariant uses exact integer equality (`==`) rather than epsilon comparison, making the RapidCheck property deterministic and reproducible. If fractional cent amounts arise from formula design, the spec must define the rounding rule explicitly (truncation toward zero is the default).
 - **Multi-loan pooling formula**: When multiple loans are outstanding simultaneously (loan 2 issued before loan 1 is fully repaid), each loan is tracked and repaid independently at its own per-tick rate. The total loan repayment per tick is the sum of all individual loan repayment amounts: `loan_repayment_i = Σ_k(loan_k_repayment_per_tick_i)`. The property test must model this pooled repayment schedule — failing to sum across all outstanding loans will compute a lower expense total, producing false invariant failures on multi-loan scenarios. Interest is also computed on the total outstanding balance (sum of all unpaid loan principals) before repayment that tick. The `outstanding_debt` used in the debt cap invariant is the sum of all outstanding individual loan balances.
@@ -39,6 +41,7 @@
 - **Terrain generator playability invariants** (RapidCheck + fixed-seed regression, in `tests/terrain/`):
   - **`TerrainGenerator_AlwaysTerminates_WithinReSeedLimit`** (re-seed termination property): Inject a mock `ITerrainRNG` that counts the number of re-seed calls. For any generated map with any `uint64_t` seed, verify the generator calls re-seed at most 100 times before either succeeding or returning an explicit error. This property can be falsified by RapidCheck (a pathological seed could trigger > 100 re-seeds if the constraint logic is broken). **Must use the two-argument constructor form**: `TerrainGenerator(seed, &mockRng)` where `mockRng` is a `MockTerrainRNG` instance that counts `reseed()` calls. Do NOT use the single-argument production form for this test — it would construct an internal `std::mt19937_64` and the reseed count would be unobservable.
   - **`TerrainGenerator_OutputAlwaysMeetsConstraint`** (output regression check): Because this property is NOT falsifiable by RapidCheck (the generator satisfies it by construction), it must be written as a **`TEST_F` with a fixed set of seeds** rather than a bare `rc::check` loop. Using `rc::check` for a non-falsifiable property wastes RapidCheck iterations and provides no additional coverage signal. Use at least **6 seeds** covering edge cases (zero, max uint64_t, small values, large values, and known regression seeds):
+
     ```cpp
     TEST_F(TerrainGeneratorTest, OutputAlwaysMeetsConstraint) {
         for (uint64_t seed : {
@@ -54,8 +57,10 @@
         }
     }
     ```
+
     This regression check verifies that `flatTileRatio()` returns the correct value for a completed generation and that the constraint enforcement code has not been accidentally disabled.
   - **`TerrainGenerator_OutputHasContiguousFlatArea`**: For any generated map, the largest contiguous region of flat-or-sub-15° tiles spans >= 2,500 tiles (50×50). Property verifies BFS/flood-fill result. **Same caveat as `OutputAlwaysMeetsConstraint` — this is an output check, not falsifiable by RapidCheck.** It MUST be written as a `TEST_F` with a fixed set of seeds, not a bare `rc::check` loop:
+
     ```cpp
     TEST_F(TerrainGeneratorTest, OutputHasContiguousFlatArea) {
         for (uint64_t seed : {
@@ -71,7 +76,9 @@
         }
     }
     ```
+
   - **Fixed-seed regression (combined)**: Seed `0xDEADBEEF00000001` must produce **both** >=20% flat tiles AND >=2,500 contiguous flat tiles in a single `TEST_F` assertion. This combined check ensures both constraints are jointly satisfied and is the primary regression guard for the terrain generator:
+
     ```cpp
     TEST_F(TerrainGeneratorTest, PrimaryRegressionSeed_MeetsBothConstraints) {
         auto map = TerrainGenerator(0xDEADBEEF00000001ULL).generate();
@@ -79,6 +86,7 @@
         EXPECT_GE(map.largestContiguousFlatArea(), 2500u) << "contiguousFlatArea failed for primary regression seed";
     }
     ```
+
     This seed is locked in once the generator implementation passes it.
 - **Power grid service coverage unit tests** (in `tests/simulation/`, pure C++ logic):
   1. `PowerCoverage_ConnectedTiles_AreCovered`: all tiles reachable via the power grid graph from a placed power plant are covered; disconnected tiles are not.

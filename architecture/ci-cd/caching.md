@@ -3,6 +3,7 @@
 - **vcpkg packages** cached by `actions/cache`; cache key must include **all four** of: `vcpkg.json` hash, `vcpkgGitCommitId` (pinned commit), OS, and compiler version. **Compiler version must be detected dynamically**:
   - Linux: `$(gcc -dumpfullversion -dumpversion)` (no additional env setup required)
   - Windows: use `vswhere.exe` (pre-installed on GitHub Actions Windows runners). The PowerShell step to detect the MSVC version and write it to `$GITHUB_ENV` must use the `>> $env:GITHUB_ENV` redirection syntax (PowerShell 5.1 compatible — the default shell on GitHub Actions Windows runners):
+
     ```yaml
     - name: Detect MSVC version
       shell: pwsh
@@ -11,6 +12,7 @@
           -latest -property installationVersion
         "COMPILER_VERSION=$version" >> $env:GITHUB_ENV
     ```
+
     Do NOT use `cl 2>&1 | head -1` — `cl` requires the MSVC Developer Command Prompt environment initialized first; `head` is not in the Windows default shell. Do NOT use `echo "COMPILER_VERSION=$version" >> $env:GITHUB_ENV` with the `echo` command — on PowerShell 5.1, `echo` writes an `[object]` string that does not produce a valid key=value env entry. The `"KEY=VALUE" >> $env:GITHUB_ENV` form (without `echo`) is the correct PowerShell idiom. The `Set-Content` alternative (`Set-Content -Path $env:GITHUB_FILE -Value "COMPILER_VERSION=$version"`) is equivalent but more verbose; `>> $env:GITHUB_ENV` is preferred for readability.
   - Hard-coded versions (e.g. `gcc-13`) fail to invalidate the cache on runner image upgrades. Missing any of these four components allows stale pre-built packages to survive a vcpkg baseline or compiler upgrade.
   - **Step ordering is mandatory**: the compiler-version detect step must write to `$GITHUB_ENV` as a **separate, named step that runs before the `actions/cache` step** (for both Linux and Windows jobs). The `actions/cache` step reads environment variables at the step level — values written to `$GITHUB_ENV` in the same step are not yet visible. A combined detect+cache step will produce a blank or stale compiler version in the cache key. For Linux: `echo "COMPILER_VERSION=$(gcc -dumpfullversion -dumpversion)" >> $GITHUB_ENV`; for Windows: the PowerShell step shown above.

@@ -1,6 +1,7 @@
 # Framework
 
 - **Google Test (GTest) + GMock** via CMake `FetchContent`
+
 ```cmake
 include(FetchContent)
 FetchContent_Declare(
@@ -14,12 +15,14 @@ FetchContent_MakeAvailable(googletest)
 # Each test target links both:
 target_link_libraries(my_test PRIVATE GTest::gtest_main GTest::gmock)
 ```
+
 - **RapidCheck** (property-based testing) is a firm dependency, also via `FetchContent`:
+
 ```cmake
 FetchContent_Declare(
   rapidcheck
   GIT_REPOSITORY https://github.com/emil-e/rapidcheck.git
-  GIT_TAG        ff6af6fc683159deb51c543b065eba14dfcf329d  # pinned SHA — no versioned tag available
+  GIT_TAG        b96a4e626ef4c7348dcd16c500353c2f997a9f3f  # pinned SHA — no versioned tag available
 )
 set(RC_ENABLE_GTEST ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(rapidcheck)
@@ -27,17 +30,23 @@ FetchContent_MakeAvailable(rapidcheck)
 # Link RapidCheck GTest integration:
 target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
 ```
+
 - **SHA pin is mandatory** — RapidCheck has no stable release tags; always pin to a specific commit SHA. Update intentionally; do not use HEAD or branch refs.
 - All tests in a `tests/` directory mirroring `src/` structure; `enable_testing()` + `gtest_discover_tests()` enabled
-- **`gtest_discover_tests()` must specify `DISCOVERY_TIMEOUT`, `PROPERTIES TIMEOUT`, and test `LABELS`**:
+- **`gtest_discover_tests()` must specify `WORKING_DIRECTORY`, `DISCOVERY_TIMEOUT`, `PROPERTIES TIMEOUT`, and test `LABELS`**:
+
   ```cmake
   gtest_discover_tests(my_test
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"  # REQUIRED — see note below
       DISCOVERY_TIMEOUT 30    # seconds; default 5s is insufficient for coverage-instrumented binaries
       PROPERTIES TIMEOUT 120  # per-test execution timeout; RapidCheck properties can run for seconds
       LABELS "unit"           # or "integration", "requires-opengl" — applied to ALL discovered tests in this target
   )
   ```
+
   Without `DISCOVERY_TIMEOUT 30`, CMake test discovery times out on coverage-instrumented (`-DENABLE_COVERAGE=ON`) binaries on loaded CI runners, silently producing 0 discovered tests and a misleading empty-coverage lcov report. Apply to ALL test targets.
+
+  **`WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"` is mandatory.** Without it, `gtest_discover_tests` defaults to `CMAKE_CURRENT_BINARY_DIR` (the build directory). When tests run from the build directory, `GTEST_OUTPUT=xml:test_results/` writes XML to `build/test_results/` instead of `<workspace>/test_results/`. The CI step that collects XML (`test_results/*.xml`) looks in the workspace root on both Linux and Windows, so an incorrect working directory silently produces zero XML files and causes `dorny/test-reporter` to fail with "No test report files were found". This is especially visible on Windows multi-config MSBuild builds where the executable lives in `build/Release/` and the default working directory could be even further from the workspace root.
 
   **LABELS MUST be set inside `gtest_discover_tests()`, NOT via `set_tests_properties()` afterwards.** `gtest_discover_tests()` dynamically creates CTest test entries at configure time; calling `set_tests_properties()` after `gtest_discover_tests()` targets the statically-created wrapper test, not the individually-discovered test cases — the labels do not propagate to discovered tests and `-L`/`-LE` ctest filters will silently fail to include or exclude the correct tests. The `LABELS` keyword inside `gtest_discover_tests()` is the only reliable way to assign labels to all auto-discovered GTest cases.
 
@@ -51,6 +60,7 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
   See `headless-ci-testing.md` for the full `ctest` invocation commands and CI execution rules for each label.
 
   **`aitown_add_tests()` CMake helper macro** (defined in `cmake/AitownTestHelpers.cmake`): wraps `gtest_discover_tests()` with the correct required options, enforces the one-label rule, and provides per-category timeout overrides:
+
   ```cmake
   # cmake/AitownTestHelpers.cmake
   # Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl> [TIMEOUT <seconds>])
@@ -63,6 +73,7 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
           set(AITOWN_TEST_TIMEOUT 120)  # default per-test timeout
       endif()
       gtest_discover_tests(${TARGET}
+          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
           DISCOVERY_TIMEOUT 30
           PROPERTIES TIMEOUT ${AITOWN_TEST_TIMEOUT}
           LABELS "${AITOWN_TEST_LABEL}"
@@ -79,10 +90,12 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
   # Integration tests:
   # aitown_add_tests(integration_tests LABEL "integration")
   ```
+
   **Terrain test timeout**: Terrain generator tests (`tests/terrain/`) use a 300 s per-test timeout (overriding the default 120 s) because `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` runs up to 100 re-seed attempts for each RapidCheck shrinking iteration, and the multi-seed `TEST_F` cases (6 seeds × generation time) can exceed 120 s on coverage-instrumented CI runners. Call: `aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300)`.
 
 ## Source Directory Structure
-```
+
+```text
 src/
   simulation/    # economy, traffic, zoning, population — testable pure logic
   terrain/       # procedural generation — testable pure logic
@@ -128,7 +141,7 @@ aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300)
 add_executable(audio_tests tests/audio/duck_state_test.cpp ...)
 # rapidcheck and rapidcheck_gtest are included proactively: removing them later is trivial,
 # but omitting them causes a confusing link failure if a property test is added to audio_tests.
-# Vorbis::vorbisfile (vcpkg libvorbisfile, header <vorbis/vorbisfile.h>) is required because
+# Vorbis::vorbisfile (vcpkg port libvorbis, header <vorbis/vorbisfile.h>) is required because
 # Phase 4 audio tests call ov_fopen(), ov_read(), and ov_pcm_total() directly for OGG header
 # validation. stb_vorbis is not used; Vorbis::vorbisfile is the sole OGG decode library.
 target_link_libraries(audio_tests PRIVATE aitown_audio Vorbis::vorbisfile GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)

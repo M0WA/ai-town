@@ -2,6 +2,7 @@
 
 - Simulation logic must **not** depend directly on Irrlicht or OpenAL APIs
 - `UIManager` must depend on an `IUIBackend` interface for all Irrlicht `IGUIEnvironment` calls, enabling `src/ui/` to be tested with a `MockUIBackend` in unit tests without a display. The interface uses **opaque `UIElementHandle` (uint32_t)** instead of raw Irrlicht pointers — this fully severs the compile-time dependency on Irrlicht headers in any translation unit that only includes `IUIBackend.h`. The concrete `IrrlichtUIBackend` maintains an internal `std::unordered_map<UIElementHandle, IGUIElement*>` to map handles to real objects. **Source location**: `IUIBackend.h` lives in `src/ui/`; `IrrlichtUIBackend.h/.cpp` live in `src/rendering/` (since it depends on Irrlicht headers). `MockUIBackend` lives in `tests/ui/mock_ui_backend.h`. This placement ensures the `src/ui/` coverage gate does not pull in Irrlicht headers and the `src/rendering/` exclusion correctly covers `IrrlichtUIBackend`. **IMPORTANT: IUIBackend.h MUST be placed in `src/ui/` (not `src/interfaces/`). This is an intentional exception to the `src/interfaces/` pattern. IUIBackend is a UI-layer-only interface; placing it in `src/ui/` ensures its coverage is captured under the 80% coverage gate. All other shared interfaces (IClock, ISimulationRNG, ISimulationPauser, ICitySimulation) live in `src/interfaces/` as usual.**
+
 ```cpp
 using UIElementHandle = uint32_t;
 static constexpr UIElementHandle kInvalidUIElement = 0;
@@ -31,7 +32,9 @@ public:
     virtual int             getScreenHeight() const = 0;
 };
 ```
+
 `MockUIBackend` returns arbitrary non-zero integer handles (e.g., an incrementing counter) with no real objects — unit tests that call UIManager methods never dereference Irrlicht pointers, making `src/ui/` genuinely headless-testable and the 80% coverage gate achievable.
+
 - **`UIScaler` testability**: `UIScaler` must accept viewport dimensions at construction (`UIScaler(int virtualW, int virtualH, int viewportW, int viewportH, int offsetX, int offsetY)`) rather than reading from a live `IVideoDriver`. Tests construct `UIScaler(1920, 1080, 1280, 720, 0, 90)` directly to validate coordinate projection and letterbox offset math without a display.
 - **`NotificationManager` testability**: `NotificationManager` must accept `IClock*` for dismiss-after-5s timing, `IUIBackend*` for element creation, and `ISimulationPauser*` (interface: `virtual void setPaused(bool) = 0`) for auto-pause injection. **Source location**: `ISimulationPauser.h` lives in **`src/interfaces/`** (NOT `src/simulation/`) — placing it in `src/simulation/` creates a latent circular dependency when `src/ui/` headers include it (`src/ui/` → `src/simulation/` is a prohibited dependency direction; UI must not depend on simulation headers). `src/interfaces/` is a dependency-free common header directory that both `src/simulation/` and `src/ui/` may include. `MockSimulationPauser` lives in `tests/ui/mock_simulation_pauser.h` (used by UI tests that need to verify pause/resume calls without pulling in `CitySimulation`). Tests inject `ManualClock` + `MockUIBackend` + a mock `ISimulationPauser` and call `update()` with controlled time advances to verify queue ordering, auto-dismiss timing, CRITICAL vs Normal band placement, and log-fallback behavior. `NotificationManager` exposes a public `dismissCriticalToast(UIElementHandle handle)` method — this is the production API called by the UI event handler when the player clicks, presses Enter, or presses Delete on a CRITICAL toast; it is not a test-only backdoor. Tests call this method to simulate player dismissal. Additional required test cases:
   - `CriticalToast_OnPost_AutoPausesCalled`: posting a CRITICAL toast calls `setPaused(true)` exactly once when the CRITICAL queue transitions from empty to non-empty.
@@ -39,6 +42,7 @@ public:
   - `CriticalToast_SecondPost_NoDoublePause`: posting a second CRITICAL toast while one is already active does NOT call `setPaused(true)` again.
 - **`CameraController` testability**: `CameraController`'s pan/zoom/rotate input processing must be unit-testable by injecting synthetic `InputEvent` structs (defined in `src/platform/input_event.h`). The controller must accept a `CameraState` struct (position, target, pitch, yaw) and expose `getCameraState()` — tests drive events in, read state out, verify pitch clamping at [−70°, −20°] and edge-scroll behavior without a live scene node. **Source location**: `CameraController.h/.cpp` live in `src/ui/` (it is an input/UI concern, not a rendering concern); test file is `tests/ui/camera_controller_test.cpp`. This placement ensures `CameraController` is covered by the `src/ui/` 80% coverage gate.
 - **`CameraController` input abstraction**: `CameraController` must accept an `InputEvent` struct (defined in `src/platform/input_event.h`) rather than Irrlicht's `SEvent`, to avoid pulling Irrlicht headers into test translation units:
+
   ```cpp
   // src/platform/input_event.h
   struct InputEvent {
@@ -53,6 +57,7 @@ public:
       int keyCode{0};         // SDL2-style key code (for key events)
   };
   ```
+
   The concrete `IEventReceiver` implementation in `src/platform/` translates `SEvent` to `InputEvent` before forwarding to `CameraController`. Test files in `tests/ui/` construct `InputEvent` structs directly — no Irrlicht headers required. `CameraController::OnInputEvent(const InputEvent&)` replaces `IEventReceiver::OnEvent(const SEvent&)` in the `CameraController` public interface.
 - **`QueryPanel` testability**: `QueryPanel::computePanelPosition(int cursorX, int cursorY, Rect tileBounds)` must be a pure function (no side effects, no Irrlicht dependency) returning a `Rect`. Required test cases:
   1. **Primary placement**: cursor at (100, 100) with no tile overlap → verify panel placed at (140, 140).
@@ -81,6 +86,7 @@ public:
   9. `Modal_SpeedSelectorGrayed_DespiteCriticalToast_SpeedAccessible_WhenModalOnly`: when only a CRITICAL toast is active (no modal), the speed selector remains ENABLED (accessible per CRITICAL-toast-pause spec). This distinguishes modal-pause (selector grayed) from CRITICAL-toast-pause (selector accessible).
   10. `ModalDialog_OnClose_WithEmptyCriticalQueue_NoAutoRePause`: open a modal (verifies `setPaused(true)` called once), then dismiss the modal with no CRITICAL toasts in the queue, then verify: (a) `setPaused(false)` is called exactly once (simulation resumes), and (b) `setPaused(true)` is NOT called again during `closeModal()`. This is the inverse of test 8 — it confirms that the CRITICAL toast auto-pause re-evaluation in `closeModal()` does NOT call `setPaused(true)` when the CRITICAL queue is empty, preventing a spurious re-pause on normal modal dismiss.
 - **`ISimulationRNG`** — injectable RNG interface for deterministic simulation testing: Service degradation (random building selection at −10% budget surplus) and any other simulation-layer random draws must use this interface rather than `std::rand()` or a global `std::mt19937`. Tests inject a `ManualRNG` that returns a preset sequence. **Source location**: `ISimulationRNG.h` lives in `src/interfaces/`; `ManualRNG` lives in `tests/simulation/manual_rng.h` (used by simulation tests) — **not** in `src/` (it is a test double, never linked into production code).
+
   ```cpp
   class ISimulationRNG {
   public:
@@ -169,8 +175,10 @@ public:
       bool   m_strict{true};
   };
   ```
+
   `CitySimulation` accepts `ISimulationRNG*` at construction; production code passes a `std::mt19937`-backed implementation.
 - **`ITerrainRNG`** — injectable RNG interface for deterministic terrain generation testing. **Source location**: `ITerrainRNG.h` lives in `src/terrain/`; `MockTerrainRNG` lives in `tests/terrain/mock_terrain_rng.h`. The `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` property test requires an injectable mock that counts re-seed calls:
+
   ```cpp
   class ITerrainRNG {
   public:
@@ -194,10 +202,12 @@ public:
       int m_reseedCount{0};
   };
   ```
+
   `TerrainGenerator` accepts `ITerrainRNG*` at construction; production code passes a `std::mt19937_64`-backed implementation. `MockTerrainRNG` is used in `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` to verify the reseed count stays ≤ 100. **Constructor signatures**: `TerrainGenerator(uint64_t seed)` for production use (constructs an internal `std::mt19937_64`-backed `ITerrainRNG`); `TerrainGenerator(uint64_t seed, ITerrainRNG* rng)` for testing (accepts injected `ITerrainRNG*` as non-owning pointer — the mock outlives the generator in all test fixtures).
 
   **CRITICAL — production constructor coverage**: The fixed-seed regression tests (`TerrainGenerator_OutputAlwaysMeetsConstraint`, `TerrainGenerator_OutputHasContiguousFlatArea`, `TerrainGenerator_PrimaryRegressionSeed_MeetsBothConstraints`) MUST use the single-argument production constructor `TerrainGenerator(seed)` — NOT the two-argument injectable form. Using the two-argument form in fixed-seed tests would leave the production constructor path (which constructs the internal `mt19937_64` RNG) with zero test coverage. The property test `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` uses the two-argument form with `MockTerrainRNG` (to count reseeds), but this does not cover the production constructor's RNG initialization code. The three fixed-seed `TEST_F` tests cover the production constructor path. **This division is mandatory**: property test → two-argument form with mock; fixed-seed regression tests → single-argument production form.
 - **`ICitySimulation`** — interface enabling `UIManager` to call simulation control methods without depending on the concrete `CitySimulation` class. **Source location**: `ICitySimulation.h` lives in `src/interfaces/` (alongside `ISimulationRNG.h`, `IClock.h`, and `ISimulationPauser.h` — the shared dependency-free header directory that both `src/simulation/` and `src/ui/` may include). `UIManager` must accept `ICitySimulation*` (not a concrete `CitySimulation*`) to enable headless testing. `MockCitySimulation` lives in `tests/ui/mock_city_simulation.h`.
+
   ```cpp
   // src/interfaces/ICitySimulation.h
   // SpeedMultiplier is the canonical enum defined in simulation_types.h.
@@ -236,6 +246,7 @@ public:
       virtual double getUndoExpiryTimeSeconds() const = 0;  // Returns IClock::nowSeconds() value when the pending undo action expires; 0.0 if no action pending
   };
   ```
+
   ```cpp
   // tests/ui/mock_city_simulation.h
   #include "gmock/gmock.h"
@@ -266,10 +277,12 @@ public:
       MOCK_METHOD(double, getUndoExpiryTimeSeconds, (), (const, override));  // Returns IClock::nowSeconds() value when the pending undo action expires; 0.0 if no action pending
   };
   ```
+
   `UIManager` constructor accepts `ICitySimulation*` as a non-owning pointer. In the `UIManagerModalTest` fixture, `sim_` is declared as `NiceMock<MockCitySimulation>` and passed to `UIManager` at construction: `UIManager(&backend_, &audio_, &sim_)`. In tests that assert specific pause/resume call counts (modal tests 1, 3, 8, 10), `EXPECT_CALL(sim_, setPaused(...))` is set up on the `NiceMock<MockCitySimulation>` before the action under test. NiceMock is used rather than StrictMock here because the focus of these tests is on `MockUIBackend` call patterns; simulation pause/resume expectations are set selectively per test rather than requiring every possible call to be declared up front.
 - **Thread-safety annotations**: Use Clang's thread-safety analysis attributes (`GUARDED_BY`, `REQUIRES`, `EXCLUDES`) on Clang builds; document-only `// thread-safe` or `// main-thread-only` comments as fallback on MSVC. Enable `-Wthread-safety` in CMake for Clang builds.
 
-#### Interface Definitions (minimum required method signatures)
+## Interface Definitions (minimum required method signatures)
+
 ```cpp
 using TextureHandle = uint32_t;
 static constexpr TextureHandle kInvalidTexture = 0;
@@ -384,6 +397,7 @@ public:
 `IRenderer` uses opaque `TextureHandle` (uint32_t) instead of `ITexture*` — the same pattern as `IUIBackend` with `UIElementHandle`. This fully severs the compile-time dependency on Irrlicht headers in any translation unit that only includes `IRenderer.h`, including all simulation test files. `MockRenderer::loadTexture()` returns an incrementing non-zero integer. The concrete `IrrlichtRenderer` maintains `std::unordered_map<TextureHandle, ITexture*>` internally.
 
 - **Shared mock header cross-target pattern**: `MockAudioSystem` and `MockRenderer` are defined in `tests/simulation/mock_audio_system.h` and `tests/simulation/mock_renderer.h` respectively. `ManualClock` is defined in `tests/simulation/manual_clock.h`. These headers are shared across multiple CMake test targets (`simulation_tests`, `ui_tests`, `audio_tests`). To avoid ODR (One Definition Rule) violations, these headers must be HEADER-ONLY GMock declarations (using MOCK_METHOD macros only, no definitions). Each test target that uses any of these shared headers MUST add `tests/simulation/` to its `target_include_directories`. This include path coupling is intentional and must be documented explicitly in the CMakeLists.txt for each consuming target. The ODR rule is safe because each test binary links into its own separate executable scope — there is no shared library or link-time merging across test targets. Required `target_include_directories` entries for each consuming target:
+
   ```cmake
   # simulation_tests — owns the shared mock headers; also needs src/interfaces/ and ${CMAKE_SOURCE_DIR}
   # for project-root-relative includes like #include "src/interfaces/IClock.h" in simulation_smoke_test.cpp
@@ -407,8 +421,10 @@ public:
   # so that project-root-relative includes resolve correctly.
   target_include_directories(terrain_tests PRIVATE tests/simulation/ tests/terrain/ src/terrain/ ${CMAKE_SOURCE_DIR})
   ```
+
   If a test target needs a specialization, it must subclass the shared mock — not redefine it. This sharing is intentional: the same mock interface is used consistently across all simulation-adjacent tests.
 - **`IClock`** — injectable clock interface for audio timing and loan gate tests. **Source location**: `IClock.h` and `WallClock.h` live in `src/interfaces/`; `ManualClock` lives in `tests/simulation/manual_clock.h` (it is a test double used by both simulation tests and audio tests). `MockTerrainRNG` lives in `tests/terrain/mock_terrain_rng.h`. All test double headers (`manual_*.h`, `mock_*.h`) live under `tests/` — never under `src/`. See `coverage.md` for the full lcov exclusion patterns (including `mock_*` and `manual_*` exclusions).
+
   ```cpp
   class IClock {
   public:
@@ -423,8 +439,10 @@ public:
       double m_time{0.0};
   };
   ```
+
   `AudioSystem` and `CitySimulation` accept `IClock*` at construction for crossfade timing and the forced-loan real-time gate (120 s) respectively. Production code passes `WallClock` which calls `std::chrono::steady_clock`. `ManualClock` allows deterministic time advancement in tests without wall-clock dependencies.
 - **Ownership contract**: Simulation objects accept `IRenderer*` and `IAudioSystem*` as non-owning raw pointers. Ownership managed externally. In tests, fixture owns the mock and outlives the system under test:
+
 ### StrictMock Expected Call Matrix
 
 **Zero-revenue fixture clarification**: Zero-revenue tests (`BudgetSurplus_ZeroRevenue_ReturnsZero`, `ZeroRevenue_NoDeficitConsequences`, and similar) use the standard `CitySimulationUnitTest` fixture, which includes `ManualRNG rng_{std::initializer_list<int>{0}}` as a member. This is acceptable because zero-revenue code paths never call `nextInt()` or `nextFloat()` — the ManualRNG sequence is never consumed. The key invariant for zero-revenue tests is using `StrictMock<MockAudioSystem>` (any unexpected audio call fails the test immediately). The `ManualRNG` member is harmless in these tests. There is no separate zero-revenue fixture; do not create one.

@@ -7,6 +7,10 @@
 **Important**: `IAudioSystem` has no OpenAL include dependencies. It uses only game-domain types (`SoundId`, `MusicTrackId`, `StingerType`, `SimSpeed`, `CameraState`, `vec3`, `TimeOfDay`, `SoundPriority`). Never expose `ALuint`, `ALfloat`, or any `AL_*` constant through this interface.
 
 ```cpp
+// audio_types.h MUST #include <cstdint> — uint32_t is not guaranteed to be pulled in
+// transitively on all compilers (GCC strict include order exposed this; MSVC was silently
+// resolving it via other headers).  Never rely on transitive inclusion of <cstdint>.
+
 // Forward declarations — defined in game-domain headers, not in OpenAL headers:
 struct vec3;         // 3-component float vector (X, Y, Z)
 struct CameraState;  // position (vec3), forward (vec3), up (vec3)
@@ -125,7 +129,7 @@ private:
     LPALDELETEFILTERS         m_fnDeleteFilters{nullptr};
     // Thread-local context:
     bool                      m_useThreadLocalCtx{false};
-    LPALCSETTHREADCONTEXT     m_fnSetThreadCtx{nullptr};
+    PFNALCSETTHREADCONTEXTPROC m_fnSetThreadCtx{nullptr};  // type from <AL/alext.h>; LPALC... prefix is for AL (not ALC) extensions
     // Music ducking state machine (audio thread only for gain writes; main thread reads atomically):
     enum class DuckState { IDLE, DUCKING, DUCKED, RELEASING };
     std::atomic<DuckState>    m_duckState{DuckState::IDLE};
@@ -157,8 +161,10 @@ private:
     float                     m_gameOverFadeT{0.0f};   // seconds elapsed in game-over fade (0.0→2.0); advanced by audio thread dt each wake; used to compute per-stem gain during fade
 };
 ```
+
 - Owned by the application root; no other subsystem creates AL contexts
 - The `AudioSystem` constructor must launch `m_audioThread` and then wait on `m_initCV` (with a timeout of 5 seconds) before returning, so that thread-local context initialization failures are surfaced before the first audio call. The constructor wait must hold `m_initMutex` via `std::unique_lock` and use the predicate form of `wait_for` (calling `wait_for` without holding the mutex is undefined behavior):
+
   ```cpp
   {
       std::unique_lock<std::mutex> lk(m_initMutex);
@@ -167,14 +173,18 @@ private:
       if (!notified || m_initError) throw std::runtime_error("AudioSystem init failed");
   }
   ```
+
   The audio thread signals completion (success or failure) via `m_initDone`. The **success path** (after `alcSetThreadContext` succeeds) must signal before entering the streaming loop:
+
   ```cpp
   // Audio thread success path (after alcSetThreadContext succeeds):
   { std::lock_guard<std::mutex> lk(m_initMutex); m_initDone = true; }
   m_initCV.notify_one();
   // Now enter streaming loop...
   ```
+
   The **error path** must also set `m_initDone` so the constructor does not hang until timeout:
+
   ```cpp
   { std::lock_guard<std::mutex> lk(m_initMutex); m_initError = true; m_initDone = true; }
   m_initCV.notify_one();

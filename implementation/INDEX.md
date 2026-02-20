@@ -1,6 +1,6 @@
 # AI Town — Implementation Plan Index
 
-**Date**: 2026-02-18
+**Date**: 2026-02-20
 **Derived from**: All files under `architecture/` (canonical source of truth) and `CLAUDE.md`
 **V1 Scope boundary**: Enforced per `architecture/game-design/minimum-viable-simulation.md`. Post-V1 items are explicitly labelled and excluded from phase deliverables.
 
@@ -12,11 +12,13 @@ The following contradictions were identified during the spec review. They must b
 
 ### Open Contradictions
 
-2. **[OPEN] Source pool slot [57] V1 treatment** — `architecture/audio-architecture/source-pool.md` lists source[57] as "reserved post-V1 (game-over stinger)" but also notes it is "evictable in V1". This is intentional design (not a true contradiction) but teams must confirm the V1 eviction behaviour explicitly during Phase 4 implementation so that the post-V1 promotion of source[57] to non-evictable does not require source-pool restructuring. **Affected phase: Phase 4**.
+(none)
 
 ### Resolved Contradictions
 
-1. **[RESOLVED] IAudioSystem method signature and count mismatch** — `architecture/testing/testability-architecture.md` updated to match the canonical 11-method `IAudioSystem` in `architecture/audio-architecture/audio-system.md`. Both files now agree: `playSound(SoundId id, SoundPriority priority, float gain = 1.0f)`, `playPositionalSound(SoundId id, vec3 pos, SoundPriority priority, float gain = 1.0f)`, `setTimeOfDay(TimeOfDay tod)`, and `transitionToGameplay()` are all present. `MockAudioSystem` MOCK_METHOD block updated to 11 methods. **Closed in Phase 0 plan update (2026-02-18)**.
+1. **[RESOLVED] Source pool slot [57] V1 treatment** — Confirmed: sources[57] in V1 is **idle** — allocated in the 62-source block by `alGenSources(62, ...)` at pool construction but never returned by `acquireSFXSource()` (range 0..54), `acquireStingerSource()` (indices 55..56), or `acquireStreamSource()` (indices 58..61). The phrase "evictable in V1" in earlier spec drafts was misleading. Post-V1 promotion to `StingerType::GAME_OVER` requires only: add `GAME_OVER=57` to StingerType, increment kStingerCount 2→3, extend the stinger setup loop to include index 57 — no pool restructuring. Spec updated in `source-pool.md`. **Closed in Phase 4 spec pre-work (2026-02-20)**.
+
+2. **[RESOLVED] IAudioSystem method signature and count mismatch** — `architecture/testing/testability-architecture.md` updated to match the canonical 11-method `IAudioSystem` in `architecture/audio-architecture/audio-system.md`. Both files now agree: `playSound(SoundId id, SoundPriority priority, float gain = 1.0f)`, `playPositionalSound(SoundId id, vec3 pos, SoundPriority priority, float gain = 1.0f)`, `setTimeOfDay(TimeOfDay tod)`, and `transitionToGameplay()` are all present. `MockAudioSystem` MOCK_METHOD block updated to 11 methods. **Closed in Phase 0 plan update (2026-02-18)**.
 
 3. **[RESOLVED] Emergency Municipal Bond interest rate** — Both `architecture/game-design/economy-model.md` and `architecture/ui-ux/modal-dialog-system.md` agree at 5%/year. The `economy-model.md` states "5% per in-game year (the same unified rate as forced loans)"; `modal-dialog-system.md` states "5%/year (same rate as forced loans — the bond's distinguishing cost is the doubled principal and 24-tick repayment period)". An earlier draft flag referenced "8%" which was a tax rate example ("Residential: 8% → 8.8%"), not an interest rate. No spec change required; the contradiction flag is closed. All code and tests must use 5%/year per `economy-model.md`. **Closed in Phase 9**.
 
@@ -37,6 +39,7 @@ The following contradictions were identified during the spec review. They must b
 | `sound-artist-opensoftal` | Audio asset authoring |
 | `test-dev-cpp` | C++ testing (GTest + GMock + RapidCheck) |
 | `cicd-dev-github` | GitHub Actions CI/CD |
+| `proj-manager` | GitHub project sync (milestones, issues, Projects v2 board) |
 
 ---
 
@@ -44,7 +47,7 @@ The following contradictions were identified during the spec review. They must b
 
 | Phase | Name | Primary Deliverables | Team | Status |
 |---|---|---|---|---|
-| [0](phase-0.md) | Foundations & CI Skeleton | CMake scaffold, `vcpkg.json` (libvorbisfile chosen), FetchContent (GTest v1.14.0, RapidCheck SHA-pinned), `aitown_add_tests()` macro, `src/interfaces/` with `IClock.h`/`ISimulationRNG.h`/`ISimulationPauser.h`, GitHub Actions CI YAML (build-linux/build-windows/coverage-linux/all-checks-pass), supply-chain lint FIRST step, `--fail-under-percent 0` gate, branch protection + bootstrap procedure | `cicd-dev-github`, `graphics-dev-irrlicht`, `test-dev-cpp` | Planned |
+| [0](phase-0.md) | Foundations & CI Skeleton | CMake scaffold, `vcpkg.json` (libvorbisfile chosen), FetchContent (GTest v1.14.0, RapidCheck SHA-pinned), `aitown_add_tests()` macro, `src/interfaces/` with `IClock.h`/`ISimulationRNG.h`/`ISimulationPauser.h`, GitHub Actions CI YAML (build-linux/build-windows/coverage-linux/all-checks-pass), supply-chain lint FIRST step, `--fail-under-percent 0` gate, branch protection + bootstrap procedure | `cicd-dev-github`, `graphics-dev-irrlicht`, `test-dev-cpp` | In Progress — pending CI run |
 | [1](phase-1.md) | Render Skeleton & Camera | `RenderSystem` RAII (`EDT_OPENGL`, `Bits=32`, `Vsync=false`), render loop order, GL capability queries (consolidated EDT_NULL guard), `IAudioSystem.h` (11 methods, `SoundPriority`), `audio_types.h`, `ICitySimulation.h`, `IUIBackend` (14 methods in `src/ui/`), `UIManager` shell (NotificationManager-first invariant), `UIScaler` (6-param), `CameraController` in `src/ui/`, `TextureCache` skeleton, GLSL stubs, `ManualClock`/`ManualRNG`/`WallClock`/`NullSimulationPauser`/`MockSimulationPauser`, `ui_tests` + `integration_tests` targets | `graphics-dev-irrlicht`, `gamedesign-ux`, `sound-dev-opensoftal`, `test-dev-cpp`, `graphics-artist-3d-model`, `graphics-artist-2d-texture`, `cicd-dev-github` | Planned |
 | [2](phase-2.md) | Procedural Terrain | Chunked `IMeshBuffer` terrain (LOD0/1/2), `TerrainSystem` rebuild deque, `SceneEntityManager`, `TextureCache` (3 pools: linear/sRGB raw-GL/splat map raw-GL), sRGB shader + gamma fallback, splat-map shader, terrain textures (DXT1 sRGB 2048×2048), terrain normal maps (DXT5nm), `validate_assets.py` stub, atlas layout sign-off, **`--fail-under-percent` raised from 0 to 80 (BLOCKING)** | `graphics-dev-irrlicht`, `graphics-artist-2d-texture`, `graphics-artist-3d-model`, `test-dev-cpp`, `cicd-dev-github` | Planned |
 | [3](phase-3.md) | Simulation Core | `CitySimulation` (4-arg constructor), `SimulationConstants`, economy model, zoning (R/C/I demand + bootstrapping + density unlock), population growth, traffic (A* agent, smoothstep demand coupling), service coverage (fire 800 m/police 600 m/power BFS/water 700 m), undo system, game progression (Sandbox), game-over flow (Scenario skeleton), `simulation_tests` target (5 source files upfront) | `gamedesign-lookandfeel`, `test-dev-cpp` | Planned |

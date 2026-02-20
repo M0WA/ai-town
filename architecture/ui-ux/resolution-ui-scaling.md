@@ -5,13 +5,16 @@
 - All UI elements authored in virtual 1920×1080 coordinate space; scaled at runtime via `UIScaler` before passing to `IGUIEnvironment`
 - **Scaling mode**: Uniform scale with letterbox/pillarbox (preserve aspect ratio); black bars on sides or top/bottom as needed
 - **Mouse input un-projection**: Mouse coordinates from `SEvent` must be transformed back to virtual space accounting for letterbox/pillarbox offset:
-  ```
+
+  ```text
   virtual_x = (actual_x - letterbox_offset_x) × (1920.0 / viewport_width)
   virtual_y = (actual_y - letterbox_offset_y) × (1080.0 / viewport_height)
   ```
+
   where `letterbox_offset_x/y` are the pixel offsets of the active viewport within the window (non-zero when black bars are present). **Omitting the offset displaces all UI clicks when the window is not native 1920×1080.** `UIScaler` must expose `getViewportRect()` returning the active viewport dimensions and offset, and all input handlers must call it before un-projecting.
 
   **`VirtualPoint` is a nested type inside `UIScaler`** (not at namespace scope):
+
   ```cpp
   class UIScaler {
   public:
@@ -21,9 +24,11 @@
       // ... other methods
   };
   ```
+
   Callers use `UIScaler::VirtualPoint`. Placing `VirtualPoint` at namespace scope creates an ODR violation when both `UIScaler.h` and consumer translation units define `VirtualPoint` independently.
 
   Canonical C++ method signatures for `UIScaler`:
+
   ```cpp
   // Returns the active viewport rectangle in physical pixels (accounts for letterbox).
   // Call before un-projecting any input coordinate.
