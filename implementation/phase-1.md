@@ -28,8 +28,8 @@ Establish the Irrlicht device lifecycle, render loop call order, `CameraControll
 
   **CI-CRITICAL — Irrlicht.dll grace window**: The Phase 0 `Irrlicht.dll` hard-fail CI check MUST be downgraded to a warning-only check (using `Write-Warning` instead of `Write-Error` + `exit 1`) on `develop` from Phase 0 completion until the Phase 1 commit co-landing `target_link_libraries(aitown_render PRIVATE Irrlicht)` and the `add_custom_command(TARGET aitown_render POST_BUILD ...)` DLL copy rule is merged. The atomicity commit restoring the `Irrlicht.dll` hard-fail must co-land with the Irrlicht linkage lines. Without this grace window, every `develop` push between Phase 0 completion and the Phase 1 Irrlicht linkage commit will fail Windows CI immediately.
 
-- [ ] **`validate-assets` CI job stub** (`cicd-dev-github`): introduce the `validate-assets` CI job as an always-passing stub (exits 0) and wire it into `all-checks-pass` `needs:` immediately — the `all-checks-pass` Phase 1+ form must include `validate-assets` in its `needs:` list. The four-item atomicity requirement (vcpkg.json stub, CI job YAML, Run step, `all-checks-pass` needs entry) applies: all four items must land in the same commit. The Phase 1 stub job runs `python tools/validate_assets.py` on a placeholder `tools/validate_assets.py` script that exits 0. Full 4-item atomicity verification and CI-5 `actions/setup-python` SHA resolution are Phase 4 deliverables. (ref: `architecture/ci-cd/github-actions-workflow.md`)
-- [ ] **Camera pitch sign-off gate** (`graphics-artist-3d-model`): confirm the camera pitch range `[-70°, -20°]` and billboard bake midpoint `−45°` are final; record the sign-off in `architecture/asset-standards/3d-model-standards.md` Camera Pitch Range section. **Phase 7 billboard bake infrastructure MUST NOT begin without this sign-off on record.** (ref: `architecture/asset-standards/3d-model-standards.md`)
+- [ ] **`validate-assets` CI job stub** (`cicd-dev-github`): introduce the `validate-assets` CI job as an always-passing stub (exits 0) and wire it into `all-checks-pass` `needs:` immediately — the `all-checks-pass` Phase 1+ form must include `validate-assets` in its `needs:` list. The three-item atomicity requirement applies: all three items must land in the same commit — (1) `tools/validate_assets.py` placeholder script (exits 0), (2) `validate-assets` CI job YAML, (3) `all-checks-pass` needs entry update. The Phase 1 stub job runs `python tools/validate_assets.py` on the placeholder script. CI-5 `actions/setup-python` SHA resolution is a Phase 4 deliverable. (ref: `architecture/ci-cd/github-actions-workflow.md`)
+- [ ] **Camera pitch sign-off gate** (`graphics-artist-3d-model`): verify the camera pitch range `[-70°, -20°]` and billboard bake midpoint `−45°` sign-off is on record in `architecture/asset-standards/3d-model-standards.md` Camera Pitch Range section. **The sign-off is already CONFIRMED in the spec** (recorded as: "CONFIRMED — camera pitch range [−70°, −20°] and bake midpoint −45° are final. Reviewed and approved by: graphics-artist-3d-model."). The Phase 1 action is to verify this entry is present and accurate before Phase 7 billboard bake work begins. **Phase 7 billboard bake infrastructure MUST NOT begin without this sign-off on record.** (ref: `architecture/asset-standards/3d-model-standards.md`)
 
 ### Exit Criteria
 
@@ -38,7 +38,7 @@ Establish the Irrlicht device lifecycle, render loop call order, `CameraControll
 - `IrrlichtUIBackend` compiles and links against Irrlicht — full 17-method integration is a Phase 3 deliverable
 - Windows CI DLL verification step hard-fails on missing `Irrlicht.dll` — the Phase 0 baseline `ci.yml` hard-fail is already in place; the Phase 1 CMake post-build copy rule must be added so this existing hard-fail step passes
 - `validate-assets` CI job stub is wired into `all-checks-pass`; CI passes with stub always-exit-0
-- Camera pitch sign-off confirmed: `architecture/asset-standards/3d-model-standards.md` Camera Pitch Range section documents the confirmed sign-off (pitch range `[-70°, -20°]`, billboard bake midpoint `−45°`). **Phase 7 billboard bake infrastructure MUST NOT begin without this sign-off on record in `3d-model-standards.md`.**
+- Camera pitch sign-off verified: `architecture/asset-standards/3d-model-standards.md` Camera Pitch Range section confirms the sign-off is on record (pitch range `[-70°, -20°]`, billboard bake midpoint `−45°`, status: CONFIRMED). **Phase 7 billboard bake infrastructure MUST NOT begin without this sign-off on record in `3d-model-standards.md`.**
 
 ### Team
 
@@ -46,7 +46,7 @@ Establish the Irrlicht device lifecycle, render loop call order, `CameraControll
 |---|---|
 | `graphics-dev-irrlicht` | `RenderSystem` RAII + creation params, render loop call order (OAL-2 rule enforced; `UIManager::draw()` NOT `m_gui->drawAll()`), `IRenderer` interface, camera node setup (`addCameraSceneNode()` only; grab/drop-guarded animator removal loop), `CameraController` class (pan/zoom/rotate, pitch `[-70°,-20°]`, edge scroll, `m_appHasFocus`, `bool startInFullscreen`, `isEdgeScrollEnabled()`, `OnInputEvent()`, drag-delta = physical pixels), `IrrlichtUIBackend` compile target |
 | `cicd-dev-github` | `Irrlicht.dll` post-build copy rule co-landing review, CI-CRITICAL grace window downgrade, `validate-assets` CI job stub wiring |
-| `graphics-artist-3d-model` | Camera pitch sign-off gate (confirm `[-70°, -20°]` range is final; recorded in `architecture/asset-standards/3d-model-standards.md`) |
+| `graphics-artist-3d-model` | Camera pitch sign-off gate (verify sign-off is on record in `architecture/asset-standards/3d-model-standards.md`; sign-off is already CONFIRMED — Phase 7 may proceed on that basis) |
 
 ### Dependencies
 
