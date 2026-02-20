@@ -44,6 +44,7 @@ These three calls ensure the source is completely unaffected by listener positio
       alListenerfv(AL_ORIENTATION, orientation);
   }
   ```
+
   **`AL_ORIENTATION` is required for HRTF**: Without updating `AL_ORIENTATION` each frame, HRTF uses the listener's initial orientation (default: facing −Z, up +Y) for all spatialization, producing incorrect head-related transfer function results when the camera rotates. HRTF breaks silently — there is no OpenAL error; sounds simply appear from wrong directions. This is most noticeable with the "Enable HRTF" setting active (see HRTF Initialization). `AL_VELOCITY` is set to zero because Doppler effect is not modelled for camera movement (only for vehicle sources where appropriate).
 
   **Thread safety**: `syncListenerToCamera()` calls `alListener3f` and `alListenerfv` from the **main thread**. When `ALC_EXT_thread_local_context` is active:

@@ -161,8 +161,10 @@ private:
     float                     m_gameOverFadeT{0.0f};   // seconds elapsed in game-over fade (0.0→2.0); advanced by audio thread dt each wake; used to compute per-stem gain during fade
 };
 ```
+
 - Owned by the application root; no other subsystem creates AL contexts
 - The `AudioSystem` constructor must launch `m_audioThread` and then wait on `m_initCV` (with a timeout of 5 seconds) before returning, so that thread-local context initialization failures are surfaced before the first audio call. The constructor wait must hold `m_initMutex` via `std::unique_lock` and use the predicate form of `wait_for` (calling `wait_for` without holding the mutex is undefined behavior):
+
   ```cpp
   {
       std::unique_lock<std::mutex> lk(m_initMutex);
@@ -171,14 +173,18 @@ private:
       if (!notified || m_initError) throw std::runtime_error("AudioSystem init failed");
   }
   ```
+
   The audio thread signals completion (success or failure) via `m_initDone`. The **success path** (after `alcSetThreadContext` succeeds) must signal before entering the streaming loop:
+
   ```cpp
   // Audio thread success path (after alcSetThreadContext succeeds):
   { std::lock_guard<std::mutex> lk(m_initMutex); m_initDone = true; }
   m_initCV.notify_one();
   // Now enter streaming loop...
   ```
+
   The **error path** must also set `m_initDone` so the constructor does not hang until timeout:
+
   ```cpp
   { std::lock_guard<std::mutex> lk(m_initMutex); m_initError = true; m_initDone = true; }
   m_initCV.notify_one();

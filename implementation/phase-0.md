@@ -3,9 +3,11 @@
 **Status: IN PROGRESS** — All file deliverables created and reviewed. CI-dependent exit criteria pending first push to `develop`.
 
 ### Goal
+
 Establish a compilable C++ CMake project with a passing GitHub Actions pipeline covering Linux and Windows, branch protection, and all dependency management before any gameplay code is written.
 
 ### Deliverables
+
 - [x] CMake project scaffold with `CMakeLists.txt`; `vcpkg.json` with `irrlicht`, `openal-soft`, and `libvorbisfile` dependencies; `builtin-baseline` pinned (ref: `architecture/ci-cd/dependency-management.md`). **Library decision: `libvorbisfile` (vcpkg) is the chosen OGG decode library.** Add `find_package(OpenAL REQUIRED)` and `find_package(Vorbis REQUIRED)` in `CMakeLists.txt`. Use `target_link_libraries(aitown_audio PRIVATE OpenAL::OpenAL Vorbis::vorbisfile)` (not `aitown` — the `aitown` executable does not exist at Phase 0; Vorbis and OpenAL linkage targets `aitown_audio`). No FetchContent entry is needed — vcpkg manages the dependency. **Irrlicht `find_package` must also be present at Phase 0**: add `find_package(Irrlicht)` (without `REQUIRED` — see rationale below) to `CMakeLists.txt`. While the Irrlicht CMake target name spike is pending, also add `if(NOT Irrlicht_FOUND) message(WARNING "Irrlicht not found — complete the Irrlicht CMake target name spike before Phase 0 exit") endif()` immediately after. Per the Architecture Decisions table, the spike MUST be completed and its result committed before Phase 0 exit criteria are declared met; once confirmed, change to `find_package(Irrlicht REQUIRED)`. **Rationale for not using `REQUIRED` before spike completion**: `find_package(Irrlicht REQUIRED)` with a TBD target name causes `cmake --build build` to abort at configure time with a fatal error if the package is not found — a `# SPIKE PENDING` comment does not make a `REQUIRED` call conditional. The soft form (without `REQUIRED` + `message(WARNING)`) allows other Phase 0 deliverables to be built and tested while the Irrlicht spike is in progress. Per `architecture/ci-cd/dependency-management.md`, a `cmake/FindIrrlicht.cmake` fallback module may be needed if vcpkg's port doesn't ship a config-mode package.
 - [x] `FETCHCONTENT_BASE_DIR` set to `.fetchcontent_cache` (outside build tree) in CMake configure step (ref: `architecture/ci-cd/dependency-management.md`, `architecture/ci-cd/caching.md`)
 - [x] **FetchContent placement constraint** (`cicd-dev-github` + `test-dev-cpp`): all `FetchContent_Declare` and `FetchContent_MakeAvailable` calls for GTest and RapidCheck must appear ONLY in the top-level `CMakeLists.txt` or files under `cmake/`. FetchContent declarations must NOT appear in subdirectory `CMakeLists.txt` files (e.g., `tests/CMakeLists.txt`) — placing them in subdirectories causes `FETCHCONTENT_BASE_DIR` to be evaluated relative to the subdirectory, defeating the `.fetchcontent_cache` placement and breaking the FetchContent cache key. Audited by `cicd-dev-github` before Phase 0 exit criteria are declared met.
@@ -36,6 +38,7 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
 - [x] **Note on smoke testing**: Do NOT create a separate `smoke_tests` CMake target. `architecture/testing/framework.md`'s canonical six-target decomposition (`simulation_tests`, `terrain_tests`, `ui_tests`, `audio_tests`, `integration_tests`, `opengl_tests`) does not include a `smoke_tests` target — a separate `smoke_tests` target is architecturally undocumented, duplicates `simulation_tests` without basis, and confuses CI label-filter analysis. The SUCCEED() unit stub that provides the first green pass for the unit bucket is satisfied by `simulation_tests` (using `simulation_smoke_test.cpp` which already contains `SUCCEED()`). All simulation stubs go into `simulation_tests`. **Do NOT create `tests/simulation/smoke_test.cpp` as a separate file with a separate CMake target** — consolidate into `simulation_tests`.
 - [x] Stub `opengl_tests` CMake target registered via `aitown_add_tests(opengl_tests LABEL "requires-opengl")` with a single placeholder `SUCCEED()` test in `tests/rendering/stub_succeed.cpp` — ensures the three-ctest-step CI structure discovers at least one test in the `requires-opengl` bucket from the first green pass. **IMPORTANT**: The `opengl_tests` target's source list at Phase 0 must contain ONLY `stub_succeed.cpp`. The file `lod_swap_smoke_test.cpp` mentioned in `architecture/testing/framework.md`'s Phase 0 CMake snippet is a documentation artifact from an earlier draft — this file does NOT exist at Phase 0 and must NOT appear in the CMakeLists.txt source list. Adding a non-existent source file causes `cmake --build build` to fail at configure time. The `lod_swap_smoke_test.cpp` file is authored and added in Phase 6. **Required CMake entries** (both are mandatory for `cmake --build build` to succeed): `target_link_libraries(opengl_tests PRIVATE aitown_render GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)` — links GTest and RapidCheck (proactive per all-unit-targets-link-RapidCheck policy — removing later is trivial, omitting causes link failure if property tests are added in Phase 6+) and propagates the `INTERFACE src/interfaces/` include from `aitown_render`; `target_include_directories(opengl_tests PRIVATE src/interfaces/ ${CMAKE_SOURCE_DIR})` — explicit belt-and-suspenders path so that `#include "vec3.h"` inside `IRenderer.h` resolves even if `aitown_render`'s INTERFACE scope is refactored. **Note**: `IRenderer.h` must NOT include `audio_types.h` — see the `vec3.h` deliverable bullet. Without these two entries, `cmake --build build` fails at configure time with 'vec3.h: No such file or directory' when building `stub_succeed.cpp` which includes `src/interfaces/IRenderer.h`.
 - [x] Stub `audio_tests` CMake target registered via `aitown_add_tests(audio_tests LABEL "unit")` with a placeholder test in `tests/audio/audio_smoke_test.cpp`. The smoke test must do three things: (1) contain a `SUCCEED()` so the test passes; (2) include a `(void)&ov_pcm_total;` reference (with `#include <vorbis/vorbisfile.h>`) to force the linker to resolve a real libvorbisfile symbol — without this, a misconfigured `Vorbis::vorbisfile` CMake target produces a silent no-op smoke test that passes even when OGG decoding is unbuildable in Phase 4; (3) include `#include "src/audio/audio_constants.h"` and add `static_assert` checks for all six constant values — a bare `#include` without `static_assert` only verifies the header is syntactically present, NOT that the constant values are correct; a typo `kSFXPoolSize = 57` (instead of 58) compiles silently and passes without static_asserts, only failing in Phase 4 when `AudioSystem` allocates the wrong pool size. The `audio_smoke_test.cpp` must ALSO `#include "src/interfaces/IAudioSystem.h"` as a compile-check (in addition to the `(void)&ov_pcm_total;` vorbisfile check) so that a missing `#include "simulation_types.h"` in `IAudioSystem.h` is caught at Phase 0 rather than Phase 3. Example file content:
+
   ```cpp
   #include "src/interfaces/IAudioSystem.h"
   #include "src/audio/audio_constants.h"
@@ -66,10 +69,12 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
       SUCCEED();
   }
   ```
+
   Use `target_link_libraries(audio_tests PRIVATE aitown_audio Vorbis::vorbisfile GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)` — `Vorbis::vorbisfile` must be listed **explicitly** in `audio_tests`'s `target_link_libraries` — it CANNOT resolve through `aitown_audio`'s `PRIVATE` scope, which deliberately does NOT propagate to consumers. Without the explicit listing, `(void)&ov_pcm_total;` is unresolved at link time even though `aitown_audio` itself links Vorbis correctly. The `target_include_directories` for `audio_tests` MUST include `tests/simulation/` and `src/audio/` (in addition to the default project includes) so that `MockAudioSystem`, `ManualClock`, and `audio_constants.h` are reachable from audio test files without copying headers (ref: `architecture/testing/testability-architecture.md` — shared mock header cross-target pattern). Explicitly add: `target_include_directories(audio_tests PRIVATE tests/simulation/ src/audio/ src/interfaces/ ${CMAKE_SOURCE_DIR})` in the `audio_tests` CMakeLists block. Owner: `cicd-dev-github` + `test-dev-cpp`.
 - [x] `assets/audio/README.md` (not a `.gitkeep`) added to the repository documenting all of the following (this README is the production brief for audio artists; it must match `architecture/audio-architecture/v1-audio-asset-manifest.md` exactly):
   1. **JSON sidecar requirement**: OGG music stems (`music_*` assets only — `music_main_menu_01`, `music_main_menu_02`, `music_calm_01`, `music_calm_02`, `music_growth_01`, `music_growth_02`, `music_crisis_01`, `music_crisis_02`) require a `.json` sidecar file with BPM data — format: `{"bpm": 90, "beats_per_bar": 4}`. The sidecar filename matches the OGG filename (e.g., `music_calm_01.json`). **All 6 gameplay stems (`music_calm_01`, `music_calm_02`, `music_growth_01`, `music_growth_02`, `music_crisis_01`, `music_crisis_02`) MUST be authored at exactly 90 BPM, 4/4 time signature** — this is a functional requirement, not a stylistic preference. The `AudioSystem` bar-boundary crossfade system uses `"bpm": 90` from the sidecar to compute bar boundaries; submitting a stem at 120 BPM with a sidecar still reading `{"bpm": 90}` causes crossfades to fire at wrong positions (33% timing error). The sidecar `"bpm"` value must exactly match the authored BPM of the specific file. The 4 ambient beds (`ambient_*` files) do **NOT** require sidecars — they use DAW crossfade loops (not bar-aligned loops) and the `AudioSystem` never parses sidecars for them. SFX and zone loops also do NOT require sidecars. JSON sidecars follow the flat `assets/audio/` directory layout.
   2. **Tiered loudness targets** — all targets are integrated LUFS (ITU-R BS.1770-3) measured on the authored file before runtime gain or pitch shift:
+
      | Asset category | Integrated loudness | True peak ceiling |
      |---|---|---|
      | Music stems (music_calm, music_growth, music_crisis, main menu music) | −16 LUFS | −1 dBTP |
@@ -83,6 +88,7 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
      | Vehicle engine (idle/move) | −22 LUFS | −2 dBTP |
      | Zone loops | −26 LUFS | −2 dBTP |
      | UI sounds (click, toast, menu) | −22 to −24 LUFS | −1 dBTP |
+
   3. **Channel count rules**: Music stems and ambient beds: **stereo (2 channels)**; Zone loops: **mono (1 channel)** positional — mono is mandatory for `alSource3f(AL_POSITION)` 3D spatialization to work (OpenAL ignores 3D position on stereo sources); Stingers (`stinger_crisis`, `stinger_milestone`): **mono (1 channel)** — stingers are non-positional (`AL_SOURCE_RELATIVE = AL_TRUE`) but must be mono because multi-channel WAV sources with `AL_SOURCE_RELATIVE` produce undefined panning on some OpenAL implementations; **Positional SFX** (all `sfx_*` assets that are spatially placed — `sfx_fire_alert`, `sfx_police_alert`, `sfx_vehicle_horn`, `sfx_intersection_tick`, zone loops): **mono (1 channel)** — OpenAL ignores `AL_POSITION` on stereo sources entirely; stereo positional SFX is a silent correctness failure, not a runtime error; **Vehicle engine SFX** (`sfx_vehicle_engine_idle`, `sfx_vehicle_engine_move`): **mono (1 channel) OGG Vorbis** — WAV format is prohibited for vehicle engine loops (a 1–2 s WAV loop is audibly mechanical; OGG minimum duration 6 s required per item 5); UI sounds: `AL_SOURCE_RELATIVE = AL_TRUE`.
   4. **Loop authoring rules** — three distinct methods depending on asset type:
      - **Bar-aligned seamless loop** (music stems): no silence or crossfade at loop boundary; loop point must align to a bar boundary at the authored BPM (e.g., at 90 BPM with 4/4 time, a loop of N bars = N × (4 beats × 60/90 s) = N × 2.667 s); coded in the JSON sidecar; `AudioSystem` implements bar-boundary crossfade in software.
@@ -91,21 +97,26 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
   5. **Vehicle engine minimum duration**: `sfx_vehicle_engine_idle` and `sfx_vehicle_engine_move` must be **minimum 6 s** (not 4 s or 5 s); rationale: at the lowest pitch-shift ratio (0.75), a 4 s loop produces a ~3 s perceived loop — audibly mechanical; at 6 s minimum, the perceived loop is ~4.5 s, below the perceptibility threshold. **Vehicle horn minimum authored duration**: `sfx_vehicle_horn` must be a minimum of **0.4 s** authored duration — sub-0.4 s sounds are perceptually indistinguishable from UI click feedback and do not read as a horn (ref: `architecture/audio-architecture/v1-audio-asset-manifest.md`). Rate-limiting rules (2 s per-vehicle cooldown, ≤3 simultaneous horn sources, 100 m cull distance) are enforced by `AudioSystem` at runtime — these are not authoring constraints.
   6. **Flat asset path convention**: all V1 audio assets are placed directly in `assets/audio/` with no subdirectories (e.g., `assets/audio/ambient_day.ogg`, `assets/audio/sfx_build_place.wav`). JSON sidecars are also in the same flat directory (e.g., `assets/audio/music_calm_01.json`).
   7. **OGG encoding quality settings** (sourced from `architecture/audio-architecture/audio-asset-formats.md`): all OGG files must be encoded at 44100 Hz with consistent quality settings to avoid inter-file loudness variation:
+
      | Asset category | libvorbis quality | Approx. bitrate |
      |---|---|---|
      | Music stems | `-q 8` | ~256 kbps VBR stereo |
      | Ambient beds | `-q 7` | ~224 kbps VBR stereo |
      | Zone loops | `-q 6` | ~192 kbps VBR mono |
      | Vehicle engine loops (`sfx_vehicle_engine_idle`, `sfx_vehicle_engine_move`) | `-q 6` | ~192 kbps VBR mono (pre-loaded, positional) |
+
      Inconsistent encoder quality settings cause inter-file loudness variation and may produce mismatch between authored loudness targets and decoded output. Never use `-q 10` (unnecessarily large files) or `-q 4` or lower (audible compression artifacts).
+
   8. **Harmonic compatibility and crossfade audibility requirement** (ref: `architecture/audio-architecture/dynamic-soundscape.md`): All 6 gameplay stems (`music_calm_01`, `music_calm_02`, `music_growth_01`, `music_growth_02`, `music_crisis_01`, `music_crisis_02`) MUST share the same root key and mode. During bar-boundary crossfades, two stems are simultaneously audible for 3 s — different keys or modes produce audible harmonic clashes at the crossfade transition. **Mandatory delivery gate**: the audio artist must submit a crossfade audibility test (manually mix `music_calm_01` with `music_growth_01` for 3 seconds at equal gain, verify no harmonic clash) as part of the Phase 4 asset delivery package. Main menu variants (`music_main_menu_01`, `music_main_menu_02`) must share the same root key and mode as gameplay stems — `architecture/audio-architecture/dynamic-soundscape.md` states this harmonic compatibility constraint applies equally to main menu music variants (even though main menu and gameplay are mutually exclusive states that never crossfade directly stem-to-stem, harmonic compatibility is architecturally mandated; main menu variants must also be internally compatible with each other).
   This README is the production brief that audio artists consult when delivering Phase 4 assets. Owner: `sound-artist-opensoftal` must review this README before Phase 0 exit criteria are declared met.
   The asset root path must be defined in `CMakeLists.txt` as a compile-time define so `AudioSystem` resolves paths consistently on Linux and Windows. **Exact CMake snippet** (not "e.g." — this exact form is required):
+
   ```cmake
   target_compile_definitions(aitown_audio PRIVATE
       AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
   )
   ```
+
   `${CMAKE_SOURCE_DIR}/assets` is an absolute path expanded at configure time — correct for both Linux and Windows. Using `CMAKE_CURRENT_SOURCE_DIR` is incorrect if the target is configured from a subdirectory. Scoping to `aitown_audio` (not the top-level `aitown` target) ensures `AudioSystem.cpp` can resolve the path without the entire binary depending on the asset root define. (ref: `architecture/audio-architecture/v1-audio-asset-manifest.md`)
 - [x] Asset directory stubs added to the repository (alongside `assets/audio/README.md`):
   - `assets/models/buildings/.gitkeep` — subdirectory for building `.b3d` LOD meshes and `.meta` sidecars (Phase 6)
@@ -136,6 +147,7 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
   - **Irrlicht coordinate system**: Irrlicht uses a **left-handed** coordinate system (+X right, +Y up, **+Z forward into screen**). This is opposite handedness from Blender's right-handed default. Blender export MUST use `-Z Forward, Y Up` in the export dialog — this maps Blender's −Z (screen-into) to Irrlicht's +Z (forward). Using "Y Forward, Z Up" produces Z-up assets that appear rotated 90° in-engine. Verify by checking that the exported asset's front face aligns with +Z in Irrlicht's scene view after import.
   - **`NOLIGHTMAP` flag**: Props that are explicitly exempt from UV2/lightmap requirements must be marked `"lightmap_uv_channel": null` in their `.meta` sidecar and must be exported as `.obj` (not `.b3d`). The export validation script checks: if `lightmap_uv_channel` is null, the file must use `.obj` format; if it is 1, the file must use `.b3d`. This flag is documented in `architecture/asset-standards/3d-model-standards.md` as the `NOLIGHTMAP` property — prop assets exempt from lightmap baking must never be submitted as `.b3d` files.
   - Collision mesh naming (separate files, never embedded in `.b3d`): single convex footprint → `<asset_name>_col.obj` (max 24 tris); non-convex multi-piece → `<asset_name>_col_0.obj`, `<asset_name>_col_1.obj`, `<asset_name>_col_2.obj` (max 3 pieces, max 24 tris each); curved/circular footprints → `<asset_name>_col_circle.obj` (N-sided prism, N ≤ 8, side faces only). **The suffix `_collision.obj` is INCORRECT and will not be loaded by the C++ asset loader** — use `_col.obj` / `_col_0.obj` / `_col_circle.obj` per `architecture/asset-standards/3d-model-standards.md`. Triangle budget table:
+
     | Asset type | Max triangles |
     |---|---|
     | Building (convex) | 24 |
@@ -144,6 +156,7 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
     | Vehicle | 8 |
     | Terrain decoration (rocks, barriers) | 12 |
     | Very small prop (footprint < 4 m) | 2 |
+
     Note: the 24-triangle maximum applies to buildings only; vehicle collision meshes must NOT exceed 8 triangles.
 
   **Planned scripts** (to be created in Phase 2):
@@ -155,28 +168,35 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
   (ref: `architecture/asset-standards/2d-texture-standards.md`, `architecture/asset-standards/3d-model-standards.md`)
 - [x] **CMake library stub targets** — the following `add_library` stubs must be defined in `CMakeLists.txt` (or appropriate subdirectory CMakeLists) at Phase 0. Test targets link against these libraries; without the library definitions, `cmake --build build` fails at the configure step when test target `target_link_libraries` lists an undefined target:
   - `aitown_render` — `add_library(aitown_render STATIC src/rendering/placeholder.cpp)` with:
+
     ```cmake
     target_include_directories(aitown_render
         PRIVATE   src/rendering/
         PRIVATE   src/interfaces/
         INTERFACE src/interfaces/)
     ```
+
     Rationale: INTERFACE-only does NOT make `src/interfaces/` available to `aitown_render`'s own compiled sources (e.g., `RenderSystem.cpp` in Phase 1). PRIVATE `src/interfaces/` is needed for the library's own sources; INTERFACE `src/interfaces/` propagates to consumers. `PRIVATE src/rendering/` enables `RenderSystem.cpp` to find `RenderSystem`-internal headers. (Not `PUBLIC src/` — exposing the entire `src/` tree as a public include root allows consumers to include private headers from other subsystems, violating module boundaries.) `aitown_render` also needs the asset root definition so Phase 1 `RenderSystem.cpp`'s `addHighLevelShaderMaterialFromFiles()` can resolve shader paths via the same `AITOWN_ASSETS_DIR` macro used by `AudioSystem`:
+
     ```cmake
     target_compile_definitions(aitown_render PRIVATE
         AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
     )
     ```
+
     Phase 1 adds `Irrlicht::Irrlicht` to `target_link_libraries` with `PRIVATE` scope (Irrlicht must NOT propagate to test targets). Phase 1 replaces `placeholder.cpp` with `RenderSystem.cpp`.
   - `aitown_audio` — `add_library(aitown_audio STATIC src/audio/placeholder.cpp)` with:
+
     ```cmake
     target_include_directories(aitown_audio
         PRIVATE   src/audio/
         PRIVATE   src/interfaces/
         INTERFACE src/interfaces/)
     ```
+
     Rationale: INTERFACE-only does NOT make `src/interfaces/` available to `aitown_audio`'s own compiled sources (e.g., `AudioSystem.cpp` in Phase 4). PRIVATE `src/interfaces/` is needed for the library's own sources; INTERFACE `src/interfaces/` propagates to consumers. `PRIVATE src/audio/` enables `AudioSystem.cpp` to find `audio_constants.h`. Also add the `AITOWN_ASSETS_DIR` compile definition (see `assets/audio/README.md` deliverable above). **Mandatory link libraries at Phase 0** (link failures without these): `target_link_libraries(aitown_audio PRIVATE Vorbis::vorbisfile OpenAL::OpenAL)` — `PRIVATE` scope is required; `PUBLIC` would propagate OpenAL/Vorbis headers transitively to all test targets that link `aitown_audio`, violating the `IAudioSystem` interface's contract ("no OpenAL include dependencies" — see `architecture/audio-architecture/audio-system.md`). `Vorbis::vorbisfile` is required at `aitown_audio`'s own translation units; `OpenAL::OpenAL` is required so that any Phase 1+ translation unit in `src/audio/` that calls AL functions can link. Omitting either library causes a `cmake --build build` link failure on both Linux and Windows. Phase 4 replaces `placeholder.cpp` with `AudioSystem.cpp`.
   - `aitown_sim` — `add_library(aitown_sim STATIC src/simulation/placeholder.cpp)` with:
+
     ```cmake
     target_include_directories(aitown_sim
         PRIVATE   src/simulation/   # implementation headers — NOT propagated
@@ -184,8 +204,10 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
         INTERFACE src/interfaces/   # shared interfaces propagated to consumers
     )
     ```
+
     Rationale: `PRIVATE src/simulation/` keeps implementation headers internal to the library; `PRIVATE src/interfaces/` is required for the library's own compiled sources — `CitySimulation.cpp` (Phase 3) includes `IClock.h`, `IAudioSystem.h`, `ISimulationRNG.h`, `ISimulationPauser.h`, and `ICitySimulation.h`, all in `src/interfaces/`. INTERFACE-only does NOT make `src/interfaces/` available to `aitown_sim`'s own `.cpp` files (same root cause as `aitown_audio` and `aitown_render`). `INTERFACE src/interfaces/` propagates only the shared interface headers downstream. Phase 3 replaces `placeholder.cpp` with `CitySimulation.cpp`.
   - `aitown_ui` — `add_library(aitown_ui STATIC src/ui/placeholder.cpp)` with:
+
     ```cmake
     target_include_directories(aitown_ui
         PRIVATE   src/ui/           # implementation headers — also propagated via INTERFACE for IUIBackend.h consumers
@@ -194,8 +216,10 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
         INTERFACE src/ui/           # IUIBackend.h is a consumer-visible interface header; propagate to consumers
     )
     ```
+
     Rationale: `PRIVATE src/ui/` keeps implementation headers internal to the library; `PRIVATE src/interfaces/` is required for the library's own compiled sources — `UIManager.cpp` (Phase 1) includes `IClock.h`, `ICitySimulation.h`, `IAudioSystem.h`, `ISimulationPauser.h`, all in `src/interfaces/`. INTERFACE-only does NOT make `src/interfaces/` available to `aitown_ui`'s own `.cpp` files (same root cause as `aitown_audio` and `aitown_render`). `INTERFACE src/interfaces/` propagates only the shared interface headers downstream. Note: `IUIBackend.h` lives in `src/ui/` (not `src/interfaces/`) and is propagated to consumers via `INTERFACE src/ui/`. Consumers linking `aitown_ui` can include `IUIBackend.h` via the project-root-relative form `#include "src/ui/IUIBackend.h"` without adding `src/ui/` to their own `target_include_directories` (as long as `${CMAKE_SOURCE_DIR}` is on the consumer's include path, which is always present via the canonical include pattern). Phase 1 replaces `placeholder.cpp` with `UIManager.cpp`.
   - `aitown_terrain` — stub at Phase 0; Phase 2 adds `TerrainGenerator.cpp` and `ITerrainRNG.h`:
+
     ```cmake
     # aitown_terrain — stub at Phase 0; Phase 2 adds TerrainGenerator.cpp and ITerrainRNG.h
     add_library(aitown_terrain STATIC src/terrain/placeholder.cpp)
@@ -205,6 +229,7 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
         INTERFACE src/interfaces/
     )
     ```
+
     Rationale: `architecture/testing/framework.md` references `aitown_terrain` in `terrain_tests` link libraries. Without a Phase 0 stub, Phase 2 must retroactively add this target to `CMakeLists.txt`. `PRIVATE src/terrain/` keeps terrain implementation headers internal; `PRIVATE src/interfaces/` is required for the library's own compiled sources (same root cause as `aitown_audio` and `aitown_render` — INTERFACE-only does NOT make `src/interfaces/` available to `aitown_terrain`'s own `.cpp` files, such as `TerrainGenerator.cpp` in Phase 2); `INTERFACE src/interfaces/` propagates only shared interfaces to consumers.
   Each `placeholder.cpp` must contain at minimum one empty function or a `// placeholder` comment — an empty translation unit causes `ar` to emit warnings on some platforms.
 
@@ -217,6 +242,7 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
   - `src/platform/input_event.h` — `InputEvent` struct with `Type` enum and fields as specified in `architecture/testing/testability-architecture.md` (`type`, `x`, `y`, `button`, `wheelDelta`, `keyCode`). **`Type` enum must include `WindowFocusGained` and `WindowFocusLost`** values in addition to the six basic types (`MouseMove, MouseButtonDown, MouseButtonUp, MouseWheel, KeyDown, KeyUp`) — these are required by `UIManager` for pause-on-alt-tab and input arbitration focus tracking. Required by `CameraController::OnInputEvent()` and all `tests/ui/` test files.
 
 - [x] **`tests/ui/ui_smoke_test.cpp`** — compile-check test registered via `aitown_add_tests(ui_tests LABEL "unit")`. This test must do more than just `#include "src/ui/IUIBackend.h"` — it must instantiate a concrete subclass that overrides ALL 14 pure-virtual methods, forcing the compiler to verify every method signature in the interface. If a method has the wrong signature (missing parameter, wrong return type), the override will fail to compile and the issue is caught at Phase 0 rather than during Phase 1 `MockUIBackend` authoring. Exact pattern required:
+
   ```cpp
   // tests/ui/ui_smoke_test.cpp
   #include "src/ui/IUIBackend.h"
@@ -247,6 +273,7 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
       SUCCEED();
   }
   ```
+
   `target_include_directories(ui_tests PRIVATE tests/simulation/ tests/ui/ src/interfaces/ src/ui/ ${CMAKE_SOURCE_DIR})` must also be set for the shared mock path (ref: `architecture/testing/testability-architecture.md` — shared mock header cross-target pattern) — needed so `MockUIBackend`, `MockCitySimulation`, and `MockSimulationPauser` in `tests/ui/` are reachable. **`ui_tests` link libraries**: `target_link_libraries(ui_tests PRIVATE aitown_ui aitown_sim GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)` — `rapidcheck rapidcheck_gtest` are linked proactively per the all-unit-targets-link-RapidCheck policy (removing later is trivial; omitting causes a link failure if property tests are added in Phase 1+); `aitown_sim` is needed because `MockCitySimulation` (used in Phase 1 `UIManager` tests) includes `src/interfaces/ICitySimulation.h` which includes `simulation_types.h` from the `aitown_sim` include tree.
 
 - [x] **`tests/integration/integration_smoke_test.cpp`** — single `SUCCEED()` test registered via `aitown_add_tests(integration_tests LABEL "integration")`. Required so that the `ctest -L "^integration$"` CI step discovers at least one test in the `integration` bucket from the first green pass. Without this stub, the integration ctest step vacuously exits 0 with no tests, making the three-step CI structure unverifiable at Phase 0. Owner: `test-dev-cpp`. Required CMake entries: `target_link_libraries(integration_tests PRIVATE GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)` and `target_include_directories(integration_tests PRIVATE tests/simulation/ tests/ui/ src/interfaces/ src/ui/ ${CMAKE_SOURCE_DIR})` — the shared mock header paths must be present from Phase 0 even though the Phase 0 stub does not use mocks; omitting them requires retroactive CMakeLists.txt edits when Phase 1+ integration tests exercise UI paths and reference `IUIBackend.h` (in `src/ui/`) and mock headers (in `tests/ui/`).
@@ -254,6 +281,7 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
 - [x] **Stub `terrain_tests` CMake target** — `add_executable(terrain_tests tests/terrain/terrain_smoke_test.cpp)` with a single `SUCCEED()` test. Registered via `aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300)` (300 s timeout matches the spec for multi-seed property tests added in Phase 2). Link libraries: `target_link_libraries(terrain_tests PRIVATE aitown_terrain GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)`. `target_include_directories(terrain_tests PRIVATE tests/simulation/ tests/terrain/ src/terrain/ ${CMAKE_SOURCE_DIR})` — `tests/terrain/` is needed so that `mock_terrain_rng.h` (in `tests/terrain/`) is reachable from Phase 2 terrain tests; `src/terrain/` and `${CMAKE_SOURCE_DIR}` ensure `#include "src/terrain/ITerrainRNG.h"` in `mock_terrain_rng.h` resolves via project-root-relative lookup. Phase 2 replaces the stub with real terrain generator tests. Creating this stub at Phase 0 ensures the `aitown_add_tests(terrain_tests ... TIMEOUT 300)` invocation is present in CMakeLists.txt and the label/timeout is audited before Phase 2 adds real tests that depend on it. Owner: `test-dev-cpp`.
 
 - [x] **Stub `simulation_tests` CMake target** — `add_executable(simulation_tests tests/simulation/simulation_smoke_test.cpp)` with a `SUCCEED()` test. The `simulation_smoke_test.cpp` must include the shared simulation mock and interface headers to perform a compile-check, mirroring the `opengl_tests` and `ui_tests` patterns:
+
   ```cpp
   // tests/simulation/simulation_smoke_test.cpp
   #include "src/interfaces/IClock.h"
@@ -268,6 +296,7 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
       SUCCEED();
   }
   ```
+
   Registered via `aitown_add_tests(simulation_tests LABEL "unit")`. Link libraries: `target_link_libraries(simulation_tests PRIVATE aitown_sim GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)`. `target_include_directories(simulation_tests PRIVATE tests/simulation/ src/interfaces/ ${CMAKE_SOURCE_DIR})`. Phase 3 replaces the stub with real simulation tests. Owner: `test-dev-cpp`.
 
 - [x] **Shared mock header stubs** — the following header stubs must be created at Phase 0 in `tests/simulation/` so that ALL test targets (`simulation_tests`, `ui_tests`, `audio_tests`, `integration_tests`) can include them via `target_include_directories(... PRIVATE tests/simulation/)` without compile errors:
@@ -289,6 +318,7 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
   - **`TearDown()` required on all StrictMock fixtures**: explicitly reset injected dependencies (e.g., `sim_.reset()`, `audio_.reset()`) to prevent dangling-pointer UB when StrictMock's destructor calls `VerifyAndClearExpectations`. Without explicit reset, the subject-under-test may hold a raw pointer to a mock that has already been destroyed if destructors run in the wrong order.
 
 - [x] **`src/interfaces/LoanTerms.h`** — stub struct definition for forced-loan terms passed between `CitySimulation` and `UIManager`:
+
   ```cpp
   struct LoanTerms {
       float principal;        // post-cap amount already computed by CitySimulation
@@ -297,12 +327,14 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
       bool  isFirstLoan;      // true when outstanding_debt==0 at issuance (no debt-cap applied)
   };
   ```
+
   `isFirstLoan` allows `UIManager` to display different dialog text for first loan (no cap) vs. subsequent loans (debt-cap pooling per `architecture/game-design/economy-model.md`). `principal` already reflects the post-cap amount — consumers must never recompute the cap.
   Values from `architecture/game-design/economy-model.md`: principal = max(monthly_shortfall × 3, monthly_revenue × 0.5, $10,000), interest = 5%/year, repaymentTicks = 12. The value 12 is the forced loan repayment period (1 in-game year). The value 24 is the Emergency Municipal Bond repayment period (2 in-game years) — a completely different mechanism; using 24 would cause every economy test that validates loan repayment to compute double the correct duration. The `2×` principal figure is the Emergency Municipal Bond formula (`Bond amount = 2 × outstanding_debt`), not the forced loan formula. Must be in `src/interfaces/` (not `src/simulation/`) so that `UIManager` can include it without a circular `src/ui/ → src/simulation/` dependency. Owner: `gamedesign-lookandfeel`.
 
 - [x] **`src/ui/ui_types.h`** — stub header defining UI-layer type aliases and enums needed by `UIManager`, `ModalDialog`, and their tests: `enum class GameState { MainMenu, Gameplay, Paused, GameOver };` // `GameOver` is Scenario-mode only — MUST never be set when `GameMode==Sandbox`. `PostWinFreePlaying` is post-V1 and is NOT in the V1 `GameState` enum (it will be added to `architecture/ui-ux/ui-manager.md` when Scenario mode is implemented post-V1). And `enum class GameMode { Sandbox, Scenario };`. These enums are referenced by `UIManager` state machine and `ModalDialog` content switching. Placing them in `src/ui/` keeps them under the coverage gate. **Note**: `GameOver` covers BOTH bankruptcy (primary Scenario failure) AND scenario objective-timeout loss — `UIManager` must use an auxiliary flag or `GameOverReason` enum (to be defined in Phase 5) to select the correct modal content (`'City Bankrupt'` vs `'[Scenario Name] — Objective Failed'`). Owner: `gamedesign-ux`.
 
 - [x] **`src/ui/CameraController.h`** — Phase 0 stub header declaring the class stub at the locked source location `src/ui/` (NOT `src/platform/`) per `architecture/testing/testability-architecture.md` — required for `src/ui/` 80% coverage-gate compliance. Minimum declaration at Phase 0:
+
   ```cpp
   #pragma once
   #include "src/platform/input_event.h"      // InputEvent definition
@@ -316,9 +348,11 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
       CameraState getCameraState() const;
   };
   ```
+
   Also add `src/ui/CameraController.cpp` as a placeholder (empty translation unit containing only a comment: `// Phase 1 implements CameraController body`). Phase 1 fills in the full implementation. The source location `src/ui/` is locked at Phase 0 — moving it to `src/platform/` later would break the `src/ui/` coverage gate and require retroactive CMakeLists.txt edits. Owner: `gamedesign-ux`.
 
 - [x] **`src/ui/NotificationManager.h`** — Phase 0 stub header with the locked constructor signature as specified in `architecture/testing/testability-architecture.md` line 36:
+
   ```cpp
   #pragma once
   #include "src/ui/IUIBackend.h"                  // UIElementHandle, IUIBackend
@@ -330,6 +364,7 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
       void dismissCriticalToast(UIElementHandle handle);
   };
   ```
+
   All three constructor dependencies (`IUIBackend`, `IClock`, `ISimulationPauser`) are Phase 0 deliverables, making this stub authoring-safe at Phase 0. Without this stub, Phase 1 teams implementing `UIManager` may define `NotificationManager(IUIBackend*)` with only one parameter, breaking the `IClock*`-based auto-dismiss test infrastructure (which uses `ManualClock` from `tests/simulation/manual_clock.h`). The `dismissCriticalToast(UIElementHandle)` is the production API for player dismissal of CRITICAL toasts (not a test backdoor). `#include "src/ui/NotificationManager.h"` must be added to `tests/ui/ui_smoke_test.cpp` as a compile-check so the three-parameter constructor signature is verified at Phase 0 rather than at Phase 1. Owner: `gamedesign-ux`.
 
 - [x] **`src/terrain/ITerrainRNG.h`** — injectable RNG interface for terrain generation, as specified in `architecture/testing/testability-architecture.md` (`nextFloat()`, `nextInt(int, int)`, `reseed(uint64_t)`). Must be authored at Phase 0 as a scaffold stub (body can be the full interface definition with no implementation) so that Phase 2 terrain tests can add `MockTerrainRNG` without discovering a missing header. **Source location is `src/terrain/` (not `src/interfaces/`)** — `ITerrainRNG` is tightly coupled to the terrain subsystem and not shared with other subsystems.
@@ -337,6 +372,7 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
 - [x] **`src/simulation/simulation_constants.h`** — stub header defining a `struct SimulationConstants` with `constexpr` member values for simulation tuning constants that are referenced across multiple phases (e.g. `SimulationConstants::road_maintenance_cost_per_tile`, `SimulationConstants::wage_fraction_of_revenue`). Must use `struct SimulationConstants` with `constexpr` member values — NOT free constants with `k`-prefix names. The `k`-prefix naming style (e.g. `kMaxPopulationPerTile`, `kBaseTaxRate`) is incompatible with `architecture/game-design/economy-model.md` naming convention and must not be used. The grace period is 120 real seconds (wall-clock time), not a month count — add `SimulationConstants::grace_period_real_seconds = 120.0` (real seconds, NOT a month count or tick count — the economy spec defines a real-time gate using `IClock`); `kGracePeriodMonths` must NOT appear. **Single constant, dual use**: `SimulationConstants::grace_period_real_seconds = 120.0` is used for BOTH the grace period cost waiver AND the forced loan real-time gate (both activate at 120 real seconds per `architecture/game-design/economy-model.md` — they share the same unified new-player protection window). Phase 3 `CitySimulation` must reference this constant at BOTH call sites — never hardcode `120.0` at either site. **Required field**: `SimulationConstants::ticks_per_year = 12` — mandated by both `architecture/game-design/economy-model.md` and `architecture/game-design/simulation-time.md` for the interest formula `interest_per_tick = outstanding_debt × (0.05 / ticks_per_year)`. This constant must NEVER be hardcoded inline in `CitySimulation.cpp` or anywhere else — all interest calculations must reference `SimulationConstants::ticks_per_year`. Also required: `SimulationConstants::loan_repayment_ticks = 12` (forced loan repayment period, 1 in-game year) — this is the constant that populates `LoanTerms::repaymentTicks` for forced loans; emergency bonds use `24` ticks but that value must also be a named constant (can be computed as `ticks_per_year * 2` at Phase 3 or defined as a separate field). **IMPORTANT**: `grace_period_real_seconds` MUST be initialized to `120.0` (not `= 0`) — using `= 0` causes all Phase 3+ forced-loan gate and grace-period tests to validate against the wrong threshold. Constants NOT listed below with explicit `MUST be initialized` annotations may stub to `= 0` if not yet calibrated at Phase 0. The constants listed below with explicit `MUST be initialized` instructions are NOT covered by this stub permission — use their specified values. Phase 3 fills in real simulation values for remaining stubs.
 
 **Explicitly required fields with spec-default values** (all must be named constants — never hardcoded inline per `architecture/game-design/economy-model.md` and `architecture/game-design/zoning-system.md`):
+
 - `wage_fraction_of_revenue = 0.20f` — fraction of gross revenue paid as wages (economy-model.md)
 - `service_upkeep_fire_station_per_tick = 500` — monthly upkeep cost for fire stations
 - `service_upkeep_police_station_per_tick = 400` — monthly upkeep cost for police stations
@@ -368,6 +404,7 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
   - Triggers: push/PR to `main`/`develop`, `workflow_dispatch` (ref: `architecture/ci-cd/github-actions-workflow.md`)
   - `permissions: checks: write, contents: read` block (ref: `architecture/ci-cd/github-actions-workflow.md`)
   - Jobs: `build-linux` (timeout 30 min, `-DENABLE_COVERAGE=OFF`), `build-windows` (timeout 40 min), `coverage-linux` (timeout 45 min, `-DENABLE_COVERAGE=ON`), `all-checks-pass` (timeout 5 min, `if: always()`). **`all-checks-pass` explicit success check**: the job runs with `if: always()` (so it executes even when dependencies fail); the job MUST include a step that exits non-zero if any dependency did not succeed. **Do NOT use `contains(needs.*.result, 'failure')` alone** — this pattern does not catch `skipped` results (a skipped job is not a failure but means its checks did not run, which should also fail the gate). The correct pattern checks that every dependency result is exactly `'success'`:
+
   ```yaml
   - name: Verify all platform builds passed
     shell: bash
@@ -390,6 +427,7 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
       fi
       echo "All required jobs succeeded."
   ```
+
   `shell: bash` is required — Bash arrays are used. Branch protection's required status check is satisfied only when `all-checks-pass` itself reports success; without the explicit failure step the gate will pass even when CI jobs fail. The explicit Bash-array form above is the canonical form from `architecture/ci-cd/github-actions-workflow.md` — do NOT substitute with `contains(needs.*.result, 'failure')` (misses `skipped`), `grep -qv '"success"'` (broken on multi-element JSON arrays), or the `toJSON(needs.*.result)` + `tr`-based loop form. These alternative patterns are NOT acceptable. (ref: `architecture/ci-cd/github-actions-workflow.md`)
   - Compiler version detect step as a **separate named step before** `actions/cache` step on both Linux and Windows (ref: `architecture/ci-cd/caching.md`)
   - vcpkg cache keyed on `vcpkg.json` hash + `vcpkgGitCommitId` + OS + compiler version; FetchContent cache keyed on `fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}` (ref: `architecture/ci-cd/caching.md`)
@@ -397,6 +435,7 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
   - **Linux jobs** (`build-linux`, `coverage-linux`): three named ctest steps (unit tests, integration tests, OpenGL/xvfb tests); **Windows job** (`build-windows`): two named ctest steps only (unit tests and integration tests — `requires-opengl` tests are Linux-only since `xvfb-run` is unavailable on Windows runners). All steps use `GTEST_OUTPUT=xml:test_results/` directory form (ref: `architecture/ci-cd/github-actions-workflow.md`)
   - `AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` on unit and integration test steps **only**; `AITOWN_HEADLESS=1` must NOT appear on the `requires-opengl` / `xvfb-run` step (it would suppress the OpenGL context that step requires); `ALSOFT_DRIVERS=null` must appear on all three steps including the OpenGL step (ref: `architecture/ci-cd/github-actions-workflow.md`). **Windows job**: Both the `build-windows` unit test step and integration test step must also include `AITOWN_HEADLESS: '1'` and `ALSOFT_DRIVERS: 'null'` — headless Windows runners have no audio hardware and will fail AudioSystem initialization without `ALSOFT_DRIVERS=null`. The Windows job has no xvfb step so the `AITOWN_HEADLESS` prohibition (against the xvfb step) does not apply.
   - DLL verification before Windows artifact upload (ref: `architecture/ci-cd/dependency-management.md`). **Note**: the `soft_oal.dll` and `default.mhr` CMake post-build copy commands are delivered in Phase 4. At Phase 0, the DLL verification step must be a **conditional warning that always passes** (Phase 4 hardens this to a hard-fail). The PS 5.1-compatible hard-fail form `if (-not (Test-Path 'build/Release/soft_oal.dll')) { exit 1 }` is the **Phase 4+ version only** — do NOT use this form at Phase 0, as `soft_oal.dll` and `default.mhr` do not exist until Phase 4 and using the hard-fail form causes Windows CI to fail for all of Phase 0–3. The exact YAML for the Phase 0 placeholder step must be:
+
     ```yaml
     - name: Verify OpenAL DLL and HRTF data (placeholder — hardened in Phase 4)
       shell: pwsh
@@ -412,6 +451,7 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
           Write-Warning "default.mhr not found — expected after Phase 4 audio deliverable. CI continues."
         }
     ```
+
     This placeholder step MUST exit 0 (it only warns, never fails) until Phase 4 replaces it with the hard-fail check: `if (-not (Test-Path "build/Release/soft_oal.dll")) { Write-Error "soft_oal.dll not found"; exit 1 }`. Phase 4 replaces this with the hard-fail form that checks both `soft_oal.dll` and `default.mhr` per `architecture/ci-cd/dependency-management.md`. Owner: `cicd-dev-github` must commit this exact YAML placeholder at Phase 0 — a hard-fail or missing step at Phase 0 breaks CI.
   - Verify `default.mhr` is present in the OpenAL Soft HRTF data directory on Linux immediately after `cmake --build build` in the `build-linux` job (ref: `architecture/ci-cd/dependency-management.md`, `architecture/audio-architecture/hrtf-initialization.md`); step may be a documented no-op at Phase 0 with a TODO comment referencing Phase 4 where the full HRTF check is wired
   - `dorny/test-reporter` (SHA-pinned, `if: always()`, `fail-on-error: false`) in all three jobs (ref: `architecture/ci-cd/github-actions-workflow.md`)
@@ -425,7 +465,8 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
   - All third-party Actions SHA-pinned (ref: `architecture/ci-cd/caching.md`)
   - CI lint step that greps `.github/workflows/ci.yml` for placeholder strings (`<ACTION-SHA-REQUIRED>`, `<full-40-char-sha>`, any SHA not exactly 40 hexadecimal characters); fails the step if any placeholder is found — prevents accidental commit of incomplete supply-chain pins. This must be a mandatory in-YAML CI step only — a pre-commit hook is not an equivalent alternative (pre-commit hooks can be bypassed with `--no-verify`).
   - **`build-linux` job step ordering** (all constraints must be satisfied simultaneously):
-    ```
+
+    ```text
     Step 1:  actions/checkout (prerequisite — makes .github/workflows/ci.yml available on disk)
     Step 2:  Supply-chain lint (grep workflow for placeholder SHAs — first substantive step, second overall)
     Step 3:  apt-get install -y xvfb libgl1-mesa-dev mesa-utils
@@ -450,9 +491,11 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
     Step 17: dorny/test-reporter (if: always(), fail-on-error: false, SHA-pinned)
     Step 18: Upload test results artifact (if: always(), job-specific name distinct from coverage-linux)
     ```
+
     Note: this ordering satisfies all constraints simultaneously: lint is the first substantive step (after checkout), apt-get is before CMake configure so OpenGL headers and xvfb binary are available, compiler detect is before cache, cache steps read `$COMPILER_VERSION` correctly, baseline enforcement precedes vcpkg install, default.mhr check is immediately after build per dependency-management.md, test reporting steps run after all ctest steps. The apt-get step is placed at Step 3 (same canonical position as `coverage-linux`) for consistency.
   - **`build-windows` job step ordering** (all constraints must be satisfied simultaneously):
-    ```
+
+    ```text
     Step 1:  actions/checkout (prerequisite — makes .github/workflows/ci.yml available on disk)
     Step 2:  Supply-chain lint (same grep as build-linux — rejects placeholder SHAs)
     Step 3:  Detect MSVC version via vswhere.exe → write to $env:GITHUB_ENV (must be a SEPARATE named
@@ -478,9 +521,11 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
              if (-not (Test-Path)) { Write-Warning } (superficially similar to Phase 4 hard-fail form, creates copy-paste risk)
     Step 16: Upload Windows binary artifact (if: github.ref == 'refs/heads/main')
     ```
+
     Note: Steps 10 and 11 must be two SEPARATELY NAMED YAML steps (not a single combined ctest step) — the two-step structure mirrors the Linux job naming convention for CI log clarity. `AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` are required in the Windows ctest step `env:` block — headless Windows runners have no audio hardware. PowerShell syntax throughout: use `if (-not (Test-Path ...)) { ... }` (PS 5.1 compatible, not `Test-Path ... || exit 1` which requires PS 7+). Test reporting (Steps 12–13) and Upload test results artifact (Step 14) must come BEFORE DLL verification (Step 15) so annotations post even when DLL is missing at Phase 0. Owner: `cicd-dev-github`.
   - **`coverage-linux` job step ordering** (complete enumeration; supply-chain lint is Step 2, `apt-get` is Step 3 — consistent with `build-linux`):
-    ```
+
+    ```text
     Step 1:  actions/checkout
     Step 2:  Supply-chain lint (grep workflow for placeholder SHAs — same step as build-linux)
     Step 3:  Install system dependencies: apt-get install -y xvfb libgl1-mesa-dev mesa-utils
@@ -506,6 +551,7 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
              (all within a single run: block so BUILD_DIR variable persists)
     Step 18: actions/upload-artifact — coverage HTML (if: always())
     ```
+
     Rationale for step ordering: supply-chain lint runs as Step 2 (same as `build-linux`) so that both jobs enforce supply-chain pins consistently — a CI run that skips `build-linux` and only runs `coverage-linux` must still reject placeholder SHAs. `xvfb` and `libgl1-mesa-dev` are system packages not managed by vcpkg; installed at Step 3 (before CMake configure) so that OpenGL headers and xvfb binary are present during configure-time and test-time. Both `build-linux` and `coverage-linux` use the same canonical apt-get position (Step 3) for consistency. Owner: `cicd-dev-github`.
 - [x] Branch protection on `main` and `develop`: required status check `all-checks-pass`, strict mode, min 1 approving review, stale reviews dismissed, conversation resolution required, no admin bypass (ref: `architecture/ci-cd/branch-protection.md`). **Bootstrap procedure** (required because GitHub only lists check names that have been reported at least once): (1) Create a `ci/register-checks` branch off `develop`. (2) Open a throwaway PR targeting `develop` and push at least one commit. (3) Wait for ALL CI jobs to complete so that `all-checks-pass` becomes a known check name for `develop`. (4) Navigate to Settings → Branches → Branch protection rules and configure the `develop` rule — search for `all-checks-pass` in the required status checks autocomplete (it will now appear). (5) Enable "Require branches to be up to date before merging" (strict mode). (6) Close the throwaway PR WITHOUT merging. The check name registration persists after the PR is closed. Apply the same procedure to `main` (ref: `architecture/ci-cd/branch-protection.md`).
 - [x] `VCPKG_COMMIT_ID` declared at **workflow level** `env:` block (ref: `architecture/ci-cd/dependency-management.md`)
@@ -521,6 +567,7 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
 | SimSpeed vs SpeedMultiplier | `SpeedMultiplier` is the canonical enum in `simulation_types.h`; `SimSpeed` is a type alias (`using SimSpeed = SpeedMultiplier`) | Eliminates the name mismatch between `ICitySimulation.h` (uses `SpeedMultiplier`) and `IAudioSystem.h` (uses `SimSpeed`) without duplicating the enum definition. Both names compile; `SpeedMultiplier` is preferred in new code. |
 
 ### Exit Criteria
+
 - `cmake -B build -S . && cmake --build build` succeeds on Linux and Windows — **both the configure step AND the build/link step must pass** (a missing CMake target name, undefined symbol, or missing include path produces a `cmake --build build` failure that `cmake -B build -S .` alone does not catch) ✅ DONE
 - Smoke test (`simulation_tests`, `LABEL "unit"`, via `tests/simulation/simulation_smoke_test.cpp`) compiles, runs, and passes in all three CI jobs ✅ DONE
 - `ui_tests` smoke target (`ui_smoke_test.cpp`, `LABEL "unit"`) compiles and passes — confirms `IUIBackend.h` is present and well-formed ✅ DONE
@@ -538,6 +585,7 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
 - `assets/models/buildings/`, `vehicles/`, `props/` subdirectories exist and are tracked in git ✅ DONE
 
 ### Team
+
 | Role | Responsibility |
 |---|---|
 | `cicd-dev-github` | CI YAML authoring for BOTH Linux and Windows jobs, including PS 5.1-compatible step syntax for `build-windows` (e.g., `if (-not (Test-Path ...)) { exit 1 }`), DLL verification step, Windows `shell: pwsh` vs `shell: bash` distinction; caching configuration, branch protection setup (including bootstrap procedure), SHA pinning |
@@ -551,9 +599,11 @@ This header must be assigned to `src/simulation/` at Phase 0 to prevent multiple
 | `gamedesign-lookandfeel` | `simulation_constants.h` stub values review |
 
 ### Dependencies
+
 - None (first phase)
 
 ### Risks & Spikes
+
 - **RESOLVED: All third-party action SHAs pinned and verified** — All actions in `.github/workflows/ci.yml` use 40-character hex SHAs; the supply-chain lint step (grep for `<`-bracket placeholders and short SHAs) passes in CI. Verified SHAs: `actions/checkout` v4.1.1 → `b4ffde65f46336ab88eb53be808477a3936bae11`; `actions/cache` v4.3.0 → `0057852bfaa89a56745cba8c7296529d2fc39830`; `lukka/run-vcpkg` v11.5 → `5e0cab206a5ea620130caf672fce3e4a6b5666a1`; `hendrikmuhs/ccache-action` v1.2.14 → `ed74d11c0b343532753ecead8a951bb09bb34bc9`; `dorny/test-reporter` v1.9.1 → `31a54ee7ebcacc03a09ea97a7e5465a47b84aea5`; `actions/upload-artifact` v4.6.0 → `65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08`. CI pipeline green on `implementation/phase-0`.
 - **RESOLVED: `dorny/test-reporter` SHA verified** — `31a54ee7ebcacc03a09ea97a7e5465a47b84aea5` confirmed for v1.9.1 via `gh release view v1.9.1 --repo dorny/test-reporter`. SHA is pinned in all three CI jobs (`build-linux`, `build-windows`, `coverage-linux`). `dorny/test-reporter` posts test annotations; confirmed passing in green CI run.
 - **RESOLVED: Irrlicht CMake target name** — bare `Irrlicht` (no namespace). Verified via adrido/irrlicht-vcpkg CMakeLists.txt: `install(TARGETS Irrlicht EXPORT Irrlicht ...)` with no `NAMESPACE` argument; `vcpkg_fixup_cmake_targets` does not add a namespace for this port. `target_link_libraries(aitown_render PRIVATE Irrlicht)` is the correct form. Committed in `CMakeLists.txt`.

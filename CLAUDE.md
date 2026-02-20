@@ -1,22 +1,27 @@
 # AI Town - 3D City Simulator
 
 ## Project Overview
+
 AI Town is a "Sim City" style 3D city simulator built for desktop platforms (Linux/Windows). The project emphasizes realistic graphics, procedurally generated terrain, and immersive audio.
 
 ## Technical Stack
 
 ### Core Technologies
+
 - **Language**: Object-oriented C++
 - **Graphics Engine**: Irrlicht 3D Engine
 - **Audio Engine**: OpenSoft AL (OpenAL Soft)
 - **Platform**: Cross-platform desktop (Linux/Windows)
 
 ### Build System
+
 - CMake (recommended for cross-platform C++ projects)
 - Platform-specific build tools (GCC/Clang on Linux, MSVC on Windows)
 
 ### ⚠️ Tech Stack Requirements
+
 **The technical stack is fixed and must not be changed.** All development must use:
+
 - C++ (object-oriented)
 - Irrlicht 3D Engine for graphics
 - OpenSoft AL for audio
@@ -27,6 +32,7 @@ Do not suggest alternative engines, languages, or platforms.
 ## Project Structure
 
 ### Key Components
+
 1. **Terrain Generation**: Procedural terrain generation system (chunked IMeshBuffer approach)
 2. **Graphics Rendering**: Irrlicht-based 3D rendering pipeline (OpenGL on all platforms)
 3. **Audio System**: OpenAL Soft integration with 3D spatial audio and streaming music
@@ -34,6 +40,7 @@ Do not suggest alternative engines, languages, or platforms.
 5. **UI/UX**: User interface for city management
 
 ### Planned Development Areas
+
 - **Game Design**: Gameplay balance, traffic systems, economy simulation, zoning
 - **Graphics**: 3D models, 2D textures, Irrlicht engine integration
 - **Sound**: Game music, sound effects, OpenAL Soft integration
@@ -43,28 +50,35 @@ Do not suggest alternative engines, languages, or platforms.
 ## Team Structure & Specializations
 
 ### Game Design
+
 - **Senior Game Designer** (`gamedesign-lookandfeel`): Specialized in gameplay and feel of 3D city simulators - balance, traffic, economy, etc.
 - **Senior UI/UX Designer** (`gamedesign-ux`): Specialized in UI/UX of 3D city simulators
 
 ### Graphics
+
 - **Senior 3D Model Artist** (`graphics-artist-3d-model`): Specialized in 3D models for 3D city simulators
 - **Senior 2D Texture Artist** (`graphics-artist-2d-texture`): Specialized in 2D textures for 3D city simulators
 - **Senior C++ Developer** (`graphics-dev-irrlicht`): Specialized in 3D Irrlicht engine
 
 ### Sound
+
 - **Senior Sound Artist** (`sound-artist-opensoftal`): Specialized in game music and sounds for city simulators
 - **Senior C++ Developer** (`sound-dev-opensoftal`): Specialized in OpenSoft AL and audio
 
 ### Testing
+
 - **Senior C++ Test Engineer** (`test-dev-cpp`): Specialized in C++ best practices for testing
 
 ### CI/CD
+
 - **Senior GitHub Pipeline Engineer** (`cicd-dev-github`): Specialized in GitHub Actions and continuous integration/deployment
 
 ### Product
+
 - **Senior Product Owner** (`prod-owner`): Specialized in implementation planning, phase breakdown, feature prioritization, backlog management, milestone definition, and roadmap creation
 
 ### Team Collaboration
+
 **All agents can delegate to each other if necessary.** While each role has specific expertise, cross-functional collaboration is encouraged when tasks require multiple specializations or when expertise from another domain would be beneficial.
 
 ## Skills (Slash Commands)
@@ -80,11 +94,13 @@ Do not suggest alternative engines, languages, or platforms.
 ## Development Guidelines
 
 ### Code Style
+
 - Follow modern C++ best practices (C++11 or later)
 - Object-oriented design principles
 - Clear separation of concerns (rendering, logic, audio)
 
 ### Dependencies
+
 - Irrlicht 3D Engine
 - OpenAL Soft (OpenSoft AL)
 - libvorbis/libvorbisfile (OGG decoding — vcpkg port: `libvorbis`)
@@ -94,18 +110,22 @@ Do not suggest alternative engines, languages, or platforms.
 - Platform-specific build tools
 
 ### Cross-Platform Considerations
+
 - Use CMake for build configuration
 - Avoid platform-specific APIs where possible
 - Test on both Linux and Windows regularly
 - **Video driver**: Always use `EDT_OPENGL` on both platforms for consistent shader behavior
 
 ## File Exclusions
+
 The following files should be ignored when analyzing the codebase:
+
 - `epic.txt` - Project planning and team structure document
 
 ## Architecture Specification Files
 
 All detailed specifications live in the `architecture/` directory. **The `architecture/` spec files are the canonical source of truth for detailed design decisions.** `CLAUDE.md` contains project overview, guidelines, and summaries; `architecture/` files contain the full detailed spec for each section. Every change to detailed spec content MUST be made in the appropriate `architecture/` file. `CLAUDE.md` sections should remain as summaries that reference the architecture files. The index below MUST be kept up to date whenever:
+
 - A new spec section is added to `CLAUDE.md` (create a new file under `architecture/` and add the entry)
 - A spec section is renamed or moved
 - A spec file is deleted or merged
@@ -115,6 +135,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 ### Architecture File Links
 
 #### Game Design
+
 | Section | File |
 |---|---|
 | Simulation Time System | [architecture/game-design/simulation-time.md](architecture/game-design/simulation-time.md) |
@@ -131,6 +152,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Minimum Viable Simulation (V1 Scope) | [architecture/game-design/minimum-viable-simulation.md](architecture/game-design/minimum-viable-simulation.md) |
 
 #### UI/UX
+
 | Section | File |
 |---|---|
 | Main Menu & New Game Flow | [architecture/ui-ux/main-menu-new-game-flow.md](architecture/ui-ux/main-menu-new-game-flow.md) |
@@ -148,6 +170,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | UIManager | [architecture/ui-ux/ui-manager.md](architecture/ui-ux/ui-manager.md) |
 
 #### Asset Standards
+
 | Section | File |
 |---|---|
 | 3D Model Standards | [architecture/asset-standards/3d-model-standards.md](architecture/asset-standards/3d-model-standards.md) |
@@ -155,6 +178,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Building Atlas Layout | [architecture/asset-standards/building-atlas-layout.md](architecture/asset-standards/building-atlas-layout.md) |
 
 #### Graphics Architecture
+
 | Section | File |
 |---|---|
 | Irrlicht Device Lifecycle | [architecture/graphics-architecture/irrlicht-device-lifecycle.md](architecture/graphics-architecture/irrlicht-device-lifecycle.md) |
@@ -164,6 +188,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Shader Loading | [architecture/graphics-architecture/shader-loading.md](architecture/graphics-architecture/shader-loading.md) |
 
 #### Audio Architecture
+
 | Section | File |
 |---|---|
 | AudioSystem (RAII) | [architecture/audio-architecture/audio-system.md](architecture/audio-architecture/audio-system.md) |
@@ -179,6 +204,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | V1 Audio Asset Manifest | [architecture/audio-architecture/v1-audio-asset-manifest.md](architecture/audio-architecture/v1-audio-asset-manifest.md) |
 
 #### Testing
+
 | Section | File |
 |---|---|
 | Framework | [architecture/testing/framework.md](architecture/testing/framework.md) |
@@ -189,6 +215,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Procedural Generation Seeds | [architecture/testing/procedural-generation-seeds.md](architecture/testing/procedural-generation-seeds.md) |
 
 #### CI/CD
+
 | Section | File |
 |---|---|
 | GitHub Actions Workflow | [architecture/ci-cd/github-actions-workflow.md](architecture/ci-cd/github-actions-workflow.md) |
@@ -197,6 +224,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Branch Protection | [architecture/ci-cd/branch-protection.md](architecture/ci-cd/branch-protection.md) |
 
 ## Key Design Goals
+
 1. **Realistic Graphics**: High-quality 3D rendering with detailed textures
 2. **Generated Terrain**: Procedural generation for varied landscapes
 3. **Performance**: Smooth gameplay on desktop hardware
@@ -206,9 +234,11 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 ---
 
 ## Getting Started
+
 (To be populated as project structure develops)
 
 ### Building
+
 ```bash
 # Linux
 cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
@@ -220,11 +250,13 @@ cmake --build build --config Release
 ```
 
 ### Running
+
 ```bash
 ./build/aitown
 ```
 
 ### Running Tests
+
 ```bash
 # Linux — unit tests (no display needed; -LE excludes integration and OpenGL tests)
 ctest --test-dir build -LE "integration|requires-opengl" --output-on-failure
@@ -262,6 +294,7 @@ ctest --test-dir build -C Release --output-on-failure
 ```
 
 ## Notes for AI Assistants
+
 - C++ project using Irrlicht (EDT_OPENGL only) and OpenAL Soft
 - Focus on cross-platform compatibility (Linux + Windows)
 - Prioritize performance and code quality; follow OO design patterns

@@ -42,7 +42,7 @@
 
 > **`stinger_game_over` is deferred to post-V1.** Scenario mode (the only gameplay context in which a game-over stinger fires) is a post-V1 feature. `stinger_game_over` will be added to the asset manifest when Scenario mode is implemented. At that point sources[57] will be reserved as the non-evictable GAME_OVER stinger slot and `kStingerCount` will increase from 2 to 3. See dynamic-soundscape.md for the post-V1 game-over duck interaction spec.
 
-### Asset Path Convention
+## Asset Path Convention
 
 All V1 audio assets reside at `${AITOWN_ASSETS_DIR}/audio/<filename>` (flat layout, no subdirectory), where `<filename>` is the Asset Name from the table above plus its format extension (e.g., `ambient_day.ogg`, `sfx_build_place.wav`, `stinger_crisis.wav`). JSON sidecar files for music stems follow the same flat layout (e.g., `${AITOWN_ASSETS_DIR}/audio/music_calm_01.json`). `AudioSystem` must resolve all asset paths using this convention; no asset category uses a subdirectory under `audio/`.
 

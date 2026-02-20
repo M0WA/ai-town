@@ -1,9 +1,11 @@
 ## Phase 2: Procedural Terrain
 
 ### Goal
+
 Deliver a fully playable terrain generation system with chunked `IMeshBuffer` LOD, sRGB texture pipeline, splat-map blending shader, and playability guarantees.
 
 ### Deliverables
+
 - [ ] `TerrainChunk` class: accepts float heightmap buffer, `gridSize`, `cellSize`; builds `SMesh`; calls `recalculateBoundingBox()` on every `SMeshBuffer` then on `SMesh` itself before `addMeshSceneNode()`; calls `smesh->drop()` after `addMeshSceneNode()` (ref: `architecture/graphics-architecture/procedural-terrain.md`)
 - [ ] Terrain chunk LOD grids: LOD0 = 32×32, LOD1 = 16×16, LOD2 = 8×8 quads per 64×64 m chunk (ref: `architecture/asset-standards/3d-model-standards.md`)
 - [ ] LOD distance thresholds with hysteresis: terrain chunk LOD0→LOD1 switch-out > 100 m / switch-in < 92 m; LOD1→LOD2 switch-out > 300 m / switch-in < 285 m (ref: `architecture/asset-standards/3d-model-standards.md`)
@@ -49,6 +51,7 @@ Deliver a fully playable terrain generation system with chunked `IMeshBuffer` LO
 - [ ] **[BLOCKING] Coverage gate raise**: raise `--fail-under-percent` from `0` to `80` in the `coverage-linux` CI YAML lcov step (ref: `architecture/testing/coverage.md`). This is a blocking deliverable — Phase 2 is NOT complete until this change is committed, CI passes with `--fail-under-percent 80`, and the `coverage-linux` job remains green. All terrain code under `src/terrain/` must be testable without a display (EDT_NULL guards required) or coverage will fall below 80% and Phase 2 exit criteria will not be met. Owner: `cicd-dev-github` (YAML change) with `test-dev-cpp` verifying coverage numbers before the change is merged. **Depends on the coverage pre-raise verification checkbox above.**
 
 ### Exit Criteria
+
 - Terrain renders at runtime with visible height variation on a 256×256 map
 - Splat-map texture blending produces visible material transitions
 - LOD transitions occur at correct distances with hysteresis; no LOD thrashing observed
@@ -58,6 +61,7 @@ Deliver a fully playable terrain generation system with chunked `IMeshBuffer` LO
 - Atlas layout sign-off document (`architecture/asset-standards/building-atlas-layout.md`) covering city building atlas cell assignments, road marking atlas 4×4 grid, and vehicle atlas registry stubs produced and approved jointly by `graphics-artist-2d-texture` and `graphics-dev-irrlicht`. No building mesh UV channel 0 authoring proceeds until this document is complete.
 
 ### Team
+
 | Role | Responsibility |
 |---|---|
 | `graphics-dev-irrlicht` | `TerrainChunk`, `TerrainSystem`, `TextureCache` (full impl from Phase 1 skeleton), sRGB path, shader loading, `SceneEntityManager` |
@@ -67,8 +71,10 @@ Deliver a fully playable terrain generation system with chunked `IMeshBuffer` LO
 | `cicd-dev-github` | **[BLOCKING]** Raise `--fail-under-percent` from `0` to `80` in `coverage-linux` YAML lcov step as a Phase 2 exit criterion |
 
 ### Dependencies
+
 - Requires Phase 1 complete
 
 ### Risks & Spikes
+
 - **RISK**: RapidCheck shrinking on `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` may exceed 120 s default timeout on instrumented CI. **Spike**: measure worst-case shrinking time; set `TIMEOUT 300` proactively per spec.
 - **RISK**: `GL_EXT_texture_sRGB` absence on older Mesa versions in CI. **Spike**: test sRGB extension check path under `xvfb-run` with a known old Mesa version.

@@ -1,9 +1,11 @@
 ## Phase 3: Simulation Core
 
 ### Goal
+
 Deliver the full V1 city simulation engine: economy, zoning, population growth, traffic, and service coverage — all fully testable through injected interfaces.
 
 ### Deliverables
+
 - [ ] **`simulation_tests` CMake target**: `add_executable(simulation_tests tests/simulation/economy_test.cpp tests/simulation/traffic_test.cpp tests/simulation/zoning_test.cpp tests/simulation/service_coverage_test.cpp tests/simulation/population_test.cpp tests/simulation/save_system_test.cpp tests/simulation/undo_system_test.cpp)` linking `aitown_sim GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest`; registered via `aitown_add_tests(simulation_tests LABEL "unit")`. All test `.cpp` files that will EVER be added to `simulation_tests` must be listed as sources at this target's creation — do not add them incrementally. `tests/simulation/save_system_test.cpp` is listed here as a **Phase 3 stub** (`SUCCEED()` placeholder); its full implementation is Phase 8. `tests/simulation/undo_system_test.cpp` is listed here as a **Phase 3 stub** — simulation-side undo mechanics tests (`UndoState_SingleLevel_ExpiresAfterSecondBudgetTick_SimulationOnly`, `UndoState_FundsRefunded_SimulationSide`) belong in `simulation_tests` (no `MockUIBackend` needed); UI-facing undo tests (countdown display, button grayout) belong in `ui_tests` Phase 5. Listing both stubs here prevents structural CMakeLists changes in Phase 5 and Phase 8. (ref: `architecture/testing/framework.md`)
 - [ ] `CitySimulation` class accepts `IRenderer*`, `IAudioSystem*`, `ISimulationRNG*`, `IClock*` at construction (non-owning pointers); all simulation test fixture `SetUp()` calls must pass all 4 required constructor arguments: `std::make_unique<CitySimulation>(&renderer_, &audio_, &rng_, &clock_)` where `rng_` is `ManualRNG` and `clock_` is `ManualClock`. Add `ManualRNG rng_` and `ManualClock clock_` as fixture members to both `CitySimulationUnitTest` and `CitySimulationPropertyTest`. The spec fixture examples showing only 2 arguments are incomplete — all 4 are required. (ref: `architecture/testing/testability-architecture.md`)
 - [ ] `SimulationConstants` namespace with all named constants: `road_maintenance_cost_per_tile=10`, `road_placement_cost_per_tile=500`, `service_upkeep_fire_station_per_tick=500`, `service_upkeep_police_station_per_tick=400`, `service_upkeep_power_plant_per_tick=1000`, `service_upkeep_water_tower_per_tick=300`, `wage_fraction_of_revenue=0.20`, `loan_repayment_ticks=12`, `ticks_per_year=12`, `density_unlock_scale` per difficulty, `R_raw_material_rate=0.05`, `C_goods_consumption_rate=0.25`, `base_income_per_resident_low=50`, `base_income_per_resident_medium=50`, `base_income_per_resident_high=55` (**note**: `road_lod2_color` is NOT in `SimulationConstants` — it is a rendering constant placed in `src/rendering/render_constants.h` per Phase 6; `src/simulation/` must not depend on rendering artifact values) (dollars/resident/month — used in the Economy invariant property test; no inline hardcoding of these values in test bodies); bond use limits: `bond_max_uses_easy=3`, `bond_max_uses_normal=2`, `bond_max_uses_hard=1`; base day duration (post-V1 speed hook — all 1.0 in V1): `base_day_duration_easy=1.0`, `base_day_duration_normal=1.0`, `base_day_duration_hard=1.0` (ref: `architecture/game-design/economy-model.md`, `architecture/game-design/traffic-system.md`, `architecture/game-design/zoning-system.md`, `architecture/game-design/simulation-time.md`)
@@ -59,6 +61,7 @@ Deliver the full V1 city simulation engine: economy, zoning, population growth, 
 - [ ] Seed reproduction on RapidCheck failure: print `// Reproduce with seed: 0x<hex>`; add fixed-seed regression before closing finding (ref: `architecture/testing/procedural-generation-seeds.md`)
 
 ### Exit Criteria
+
 - Economy, traffic, and zoning simulations run for 60 budget ticks without crash
 - All unit and property-based tests pass with 80%+ coverage gate green on `coverage-linux`
 - Loan mechanics fire at the correct deficit thresholds and respect the 120 s real-time gate
@@ -66,15 +69,18 @@ Deliver the full V1 city simulation engine: economy, zoning, population growth, 
 - Traffic demand coupling produces visible zone-growth/decay feedback in manual play-testing
 
 ### Team
+
 | Role | Responsibility |
 |---|---|
 | `gamedesign-lookandfeel` | Economy balance, traffic thresholds, zoning demand tuning, service coverage tuning |
 | `test-dev-cpp` | All simulation unit/property tests, `ManualRNG`, `ManualClock`, `MockAudioSystem`, `MockRenderer`, StrictMock/NiceMock setup |
 
 ### Dependencies
+
 - Requires Phase 1 complete (for `IRenderer`, `IAudioSystem` interfaces; `IAudioSystem` resides in `src/interfaces/`)
 - Phase 2 terrain buildability data (slope > 15°) needed before earthworks cost can be tested end-to-end (can be stubbed in unit tests)
 
 ### Risks & Spikes
+
 - **RISK**: Loan pooling with multi-loan scenarios produces complex remainder arithmetic. **Spike**: prototype the multi-loan repayment formula in isolation and validate against the spec's $10,001 example before wiring into `CitySimulation`.
 - **RISK**: Demand coupling bootstrapping decay may cause oscillation in early game at 3× speed. **Spike**: run simulation for 10 ticks at 3× with a blank map and trace demand_factor values per zone type.

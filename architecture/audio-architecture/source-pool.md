@@ -1,6 +1,6 @@
 # Source Pool with Streaming Partition
 
-```
+```text
 Total AL sources pre-allocated: 62  (kTotalSources = 62, unchanged V1 and post-V1)
 
 V1 layout:
@@ -32,13 +32,16 @@ Transient reserve: sources[51..54] (4 sources within the evictable pool) are sof
 - `AudioSourcePool::acquireStreamSource()` — non-evictable; returns `AL_NONE` if all 4 in use
 - **Ambient beds MUST use the stream partition** (`acquireStreamSource()`), not the SFX pool. Marking ambient beds CRITICAL in the evictable pool contradicts the eviction contract — if the pool is full of HIGH/CRITICAL SFX the ambient bed source could still be theoretically targeted. The stream partition guarantees they are never evicted.
 - **Stinger source reservation — structurally enforced (V1)**: The eviction algorithm in `acquireSFXSource()` considers only `sources[0..54]` as eviction candidates (the general SFX pool below the stinger boundary). `sources[55..56]` are permanently reserved for V1 stingers and are NEVER returned by `acquireSFXSource()`. `sources[57]` is evictable in V1 (no game-over stinger). Stinger sources are acquired and released via a dedicated `acquireStingerSource(StingerType type)` accessor, where `StingerType` is an enum:
+
   ```cpp
   // V1: kStingerCount = 2
   enum class StingerType { CRISIS = 55, MILESTONE = 56 };
   // Post-V1 (Scenario mode): add GAME_OVER = 57
   ```
+
   `acquireStingerSource(StingerType)` returns the fixed source index for that stinger type directly. This makes the reservation structurally enforced in the pool implementation rather than relying on caller discipline (e.g., marking a SFX pool source CRITICAL does not prevent eviction if all general SFX slots are occupied by CRITICAL priority sounds).
 - **Stinger source non-positional setup (mandatory at pool construction)**: During `AudioSourcePool` construction (after `alGenSources` creates all 62 sources), stinger sources (V1 indices 55..56) MUST have the following attributes set **immediately at pool initialization**, before any stinger is ever played:
+
   ```cpp
   // Set for each V1 stinger source index s in {55, 56}:
   // (Post-V1: extend to {55, 56, 57} when stinger_game_over is added)
@@ -47,13 +50,15 @@ Transient reserve: sources[51..54] (4 sources within the evictable pool) are sof
   alSourcef(sources[s], AL_ROLLOFF_FACTOR, 0.f);       // no distance attenuation
   alSource3f(sources[s], AL_VELOCITY, 0.f, 0.f, 0.f);  // no Doppler
   ```
+
   **Why at construction, not at acquire time**: `acquireStingerSource()` is called on the audio thread at the moment the stinger fires. Setting up source attributes on the audio thread at acquire time is correct, but if these attributes were omitted, a stinger fired in quick succession might use stale positional attributes from a previous audio state. Setting them at construction ensures these attributes are always correct regardless of how many times the source is reused. Stream sources (indices 58..61) have `AL_SOURCE_RELATIVE = AL_TRUE` set by the streaming subsystem during `AudioStream` initialization; the pool does not set attributes for stream sources.
 
-### SoundPriority Enum
+## SoundPriority Enum
 
 ```cpp
 enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 ```
+
 - Eviction selects the **lowest-priority** source with the **greatest distance** from the listener (distance-weighted tiebreak)
 - Ambient beds: use the **stream partition** (non-evictable, `acquireStreamSource()`); not assigned a SFX pool priority
 - Service events (fire, police): CRITICAL
@@ -67,6 +72,7 @@ enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 ### EFX Occlusion Filter Allocation Scope
 
 **EFX lowpass filters are allocated only for evictable SFX pool sources (indices 0..54 = `kEvictableSFXCount` general-SFX boundary).**  Stinger sources (V1 indices 55..56), the reserved post-V1 slot (index 57), and stream sources (indices 58..61) do NOT receive occlusion filters:
+
 - Stinger sources (55..56) are one-shot non-positional WAV sounds (`AL_SOURCE_RELATIVE = AL_TRUE`) — occlusion filtering is not applicable.
 - Reserved slot (57) is evictable in V1 but non-positional by design — no EFX filter allocated.
 - Stream sources are non-positional stereo (`AL_SOURCE_RELATIVE = AL_TRUE`) — occlusion filtering is not applicable.

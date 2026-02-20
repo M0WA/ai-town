@@ -1,9 +1,11 @@
 ## Phase 9: Polish, Performance & V1 Hardening
 
 ### Goal
+
 Reach V1 release quality: performance targets verified, coverage gate green, accessibility complete, all spec contradictions resolved, and full QA pass.
 
 ### Deliverables
+
 - [ ] **Performance**: 60 FPS on mid-range desktop GPU with 10,000 vehicle agents; ≤2,000 draw calls per frame; simultaneous scene texture VRAM ≤170 MB (per Phase 6 budget table — this is the working scene budget); total resident texture VRAM ≤1.0 GB ceiling (GPU headroom on 4 GB card). Both constraints must hold simultaneously. (ref: `architecture/game-design/minimum-viable-simulation.md`, `architecture/asset-standards/2d-texture-standards.md`)
 - [ ] **Map dimensions**: minimum 256×256 tiles, maximum 1024×1024 tiles playable without performance regression (ref: `architecture/game-design/minimum-viable-simulation.md`)
 - [ ] **V1 systems confirmed in-scope and complete**: economy, traffic, population growth, zoning, basic service coverage (fire, police, power, water); **post-V1 confirmed excluded**: education, health, environment, disasters, tourism income, Scenario mode (grayed), full undo stack, binary save format, atlased lightmaps, BC5 normal maps, EFX reverb zones, additional road decals (ref: `architecture/game-design/minimum-viable-simulation.md`, `architecture/game-design/economy-model.md`, `architecture/asset-standards/2d-texture-standards.md`)
@@ -18,6 +20,7 @@ Reach V1 release quality: performance targets verified, coverage gate green, acc
 - [ ] Confirm `workflow_dispatch` trigger works for re-running stale CI on `main` (ref: `architecture/ci-cd/github-actions-workflow.md`)
 
 ### Exit Criteria
+
 - 60 FPS benchmark at 10,000 agents on reference mid-range GPU
 - `coverage-linux` gate green at ≥80%
 - All property-based tests and fixed-seed regressions pass
@@ -25,6 +28,7 @@ Reach V1 release quality: performance targets verified, coverage gate green, acc
 - No CRITICAL or HIGH spec contradictions remaining unresolved
 
 ### Team
+
 | Role | Responsibility |
 |---|---|
 | `graphics-dev-irrlicht` | Performance profiling, draw call optimization, LOD tuning |
@@ -38,8 +42,10 @@ Reach V1 release quality: performance targets verified, coverage gate green, acc
 | `cicd-dev-github` | `all-checks-pass` gate verification, `workflow_dispatch` confirmation |
 
 ### Dependencies
+
 - Requires all previous phases complete
 
 ### Risks & Spikes
+
 - **RISK**: 10,000-agent simulation performance may require traffic pathfinding optimization. **Spike**: profile A* at 10,000 agents on a 1024×1024 map with standard grid road spacing early in Phase 9.
 - **RISK**: `coverage-linux` gate may fall below 80% if `src/ui/` UIManager methods are incompletely tested via `MockUIBackend`. **Spike**: run lcov locally after Phase 5 to check `src/ui/` line coverage before declaring Phase 5 done.

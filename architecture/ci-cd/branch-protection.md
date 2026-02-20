@@ -9,7 +9,7 @@
   5. **Do not allow bypass by administrators**: The "Allow specified actors to bypass required pull requests" setting must be **disabled** for both branches. Administrators who bypass branch protection rules create a dual standard that erodes CI discipline — if admins can merge without CI passing, broken code can enter `main` invisibly. All contributors including admins must merge through PRs with passing CI. Emergency hotfixes that genuinely cannot wait for CI must go through an expedited PR (not a direct admin push), and the `workflow_dispatch` trigger on CI enables immediate re-runs without a dummy commit.
 - The same configuration applies to both branches — `develop` must be explicitly configured with all the same rules as `main`. Simply enabling protection on `main` alone leaves `develop` unprotected; GitHub does not inherit branch protection rules across branches.
 
-### `all-checks-pass` job — `if: always()` requirement
+## `all-checks-pass` job — `if: always()` requirement
 
 The `all-checks-pass` job in the CI workflow MUST use `if: always()` in its job condition AND enumerate all upstream jobs in its `needs:` list. Without `if: always()`, GitHub Actions skips the `all-checks-pass` job when any upstream job fails — a skipped job reports a "skipped" status check, not a "failed" one. Branch protection sees "pending" or "not run" rather than "failed", and the PR may remain mergeable despite failing CI. With `if: always()`, `all-checks-pass` always runs and can inspect the result of its dependencies.
 
@@ -26,6 +26,7 @@ This `if: always()` + explicit result check pattern is the only reliable way to 
 GitHub's branch protection UI only lists status check names that have been **reported at least once** for the target branch. A freshly created repository will not show `all-checks-pass` as an available status check for `develop` until CI has run at least one successful workflow on a PR targeting `develop`.
 
 **Required setup procedure for `develop`**:
+
 1. Create a throwaway branch off `develop` (e.g. `ci/register-checks`).
 2. Open a PR targeting `develop` and push at least one commit.
 3. Wait for all CI jobs to complete — this registers `all-checks-pass`, `build-linux`, `build-windows`, and `coverage-linux` as known check names for `develop`. Note: `validate-assets` does not exist at Phase 0 and will not appear here; it is added in Phase 6 (see the Phase 6 section below).
@@ -41,6 +42,7 @@ GitHub's branch protection UI only lists status check names that have been **rep
 Branch protection rules that reference `all-checks-pass` by name do not automatically pick up changes to that job's `needs:` list — the job name is stable but its upstream dependency set is not tracked by GitHub's branch protection UI. Any time a new job is added to `all-checks-pass`'s `needs:` list, operators must verify the branch protection configuration is still correct.
 
 **Phase 6 — `validate-assets` addition**: When Phase 6 introduces the `validate-assets` job and it is added to the `all-checks-pass` `needs:` list, branch protection rules for both `main` and `develop` must be re-confirmed. The `all-checks-pass` check name remains the same, so the UI rule does not need to be re-added, but the following must be verified:
+
 1. The `validate-assets` job has run at least once on a PR targeting each protected branch (so the check name is known to GitHub).
 2. `all-checks-pass` now reflects four upstream jobs — confirm the branch protection rule still shows `all-checks-pass` as the required check and that it is not stale or misconfigured.
 3. If using a merge queue, re-confirm the merge queue required-checks list also still contains `all-checks-pass`.

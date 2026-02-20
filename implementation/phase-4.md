@@ -1,9 +1,11 @@
 ## Phase 4: Audio Foundation
 
 ### Goal
+
 Deliver the complete `AudioSystem` RAII class with source pool, streaming architecture, 3D spatial audio, occlusion, and HRTF — all according to the spec's mandatory shutdown and thread-safety requirements.
 
 ### Deliverables
+
 - [ ] `AudioSystem` RAII class: `alcOpenDevice` + `alcCreateContext` with HRTF attrs; `ALC_HRTF_SOFT=ALC_TRUE`; `alcMakeContextCurrent` before any AL call; `ALC_SOFT_HRTF` presence check; `default.mhr` shipped alongside binary (ref: `architecture/audio-architecture/audio-system.md`, `architecture/audio-architecture/hrtf-initialization.md`)
 - [ ] `AudioSystem` destructor is exception-safe for partial construction: use separate nullable boolean flags (`m_deviceCreated`, `m_contextCreated`, `m_contextMadeCurrent`) checked before each cleanup step; each cleanup action is guarded by its corresponding flag so that a constructor that fails mid-sequence (e.g., `alcCreateContext` fails after `alcOpenDevice` succeeds) does not attempt to destroy resources that were never created. Document partial-construction failure paths in `src/audio/audio_system.h` comments. (ref: `architecture/audio-architecture/audio-system.md`, `architecture/audio-architecture/audio-thread-shutdown.md`)
 - [ ] `alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED)` called after `alcMakeContextCurrent` succeeds, before any source creation (ref: `architecture/audio-architecture/hrtf-initialization.md`)
@@ -44,6 +46,7 @@ Deliver the complete `AudioSystem` RAII class with source pool, streaming archit
 - [ ] OGG header validation unit tests in `tests/audio/`: open a valid placeholder OGG via `ov_fopen()` and verify it returns 0 (success); verify channel count from `vorbis_info::channels` matches spec (stereo 2 channels for music/ambient stems; mono 1 channel for zone loops if loaded via mono pre-load path); verify sample rate from `vorbis_info::rate` is 44100 Hz for all validated assets. (ref: `architecture/audio-architecture/audio-asset-formats.md`, `architecture/audio-architecture/v1-audio-asset-manifest.md`)
 
 ### Exit Criteria
+
 - Audio thread initializes and shuts down cleanly with no AL errors on Linux and Windows
 - 3D spatial audio attenuates correctly at configured distances under xvfb/null-audio
 - Streaming music plays and loops without starvation for a 5-minute run
@@ -52,6 +55,7 @@ Deliver the complete `AudioSystem` RAII class with source pool, streaming archit
 - Unit test `AudioThread_AbsentThreadLocalContext_ConstructorThrows`: using a mock `alcIsExtensionPresent` returning `ALC_FALSE`, verifies the constructor throws `std::runtime_error` without entering the streaming loop; labelled `unit`, runs in CI without a real audio device
 
 ### Team
+
 | Role | Responsibility |
 |---|---|
 | `sound-dev-opensoftal` | `AudioSystem` RAII, source pool, streaming, occlusion, spatial audio, all OpenAL code; `IAlcFunctions` interface + `DefaultAlcFunctions` implementation |
@@ -59,9 +63,11 @@ Deliver the complete `AudioSystem` RAII class with source pool, streaming archit
 | `cicd-dev-github` | `build-windows` DLL verification hard-fail conversion (Phase 0 placeholder → hard `exit 1`); temporary music sidecar enforcement CI step |
 
 ### Dependencies
+
 - Requires Phase 0 complete (CI), Phase 1 complete (`IClock` interface available in `src/interfaces/`)
 - Phase 3 simulation (for `IClock` timing in loan gate) can proceed in parallel
 
 ### Risks & Spikes
+
 - **RISK**: `ALC_EXT_thread_local_context` absent on some Linux OpenAL versions. **Spike**: test on clean Ubuntu with OpenAL Soft from vcpkg; verify extension is present.
 - **RISK**: Streaming starvation during CI due to slow coverage-instrumented decoding. **Spike**: measure OGG decode time under `-DENABLE_COVERAGE=ON` on a CI runner.
