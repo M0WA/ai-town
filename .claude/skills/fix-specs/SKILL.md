@@ -41,7 +41,7 @@ Launch ALL of the following agents **in parallel** using the Task tool, each spe
 
 Each agent prompt should be:
 
-> You are a [role title]. Review the following project specification for a 3D city simulator called AI Town built with C++, Irrlicht, and OpenAL Soft. Identify any CRITICAL or HIGH severity issues in your area of expertise. For each issue provide: severity (CRITICAL/HIGH), description of the problem, and a concrete recommendation to fix it. Be specific. If there are no issues in your domain, say "NO ISSUES FOUND".
+> You are a [role title]. Review the following project specification for a 3D city simulator called AI Town built with C++, Irrlicht, and OpenAL Soft. Identify any CRITICAL or HIGH severity issues in your area of expertise. Only report CRITICAL and HIGH issues — do not report MEDIUM or LOW issues. For each CRITICAL or HIGH issue provide: severity (CRITICAL/HIGH), description of the problem, and a concrete recommendation to fix it. Be specific. If there are no CRITICAL or HIGH issues in your domain, say "NO ISSUES FOUND".
 
 Include the full contents of the spec files in each agent's prompt.
 
@@ -92,9 +92,9 @@ markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
 
 If the linter exits with errors, fix every reported violation before continuing. Re-run until the linter exits zero. Only then proceed to Step 6.
 
-### Step 6 — Re-review
+### Step 6 — Compact and re-review
 
-After all fixes are applied and the linter is clean, go back to **Step 2** and run all agents again on the updated spec.
+After all fixes are applied and the linter is clean, run `/compact` to reduce context window usage, then go back to **Step 2** and run all agents again on the updated spec. (Skip `/compact` on the final cycle when all agents report clean — just output the completion summary.)
 
 ### Step 7 — Completion check
 
@@ -118,6 +118,6 @@ The specification has passed a full review by all agents with no CRITICAL or HIG
 - Never mark a round as complete unless ALL agents explicitly report no CRITICAL or HIGH issues in their domain
 - Do not skip any agent role — every domain must review every round
 - All agents must run in parallel each round to minimize latency
-- MEDIUM and LOW issues are noted but do not block completion
+- MEDIUM and LOW issues are out of scope — agents must not report them
 - If the same issue persists across 3 rounds without being resolved, flag it explicitly and ask the user for guidance before continuing
 - **All spec files must be maintained and extended**: fixes go into `architecture/` files (canonical detail) or `CLAUDE.md` (overview/index). Never leave a fix as a comment or note — write it into the spec. If a topic lacks an `architecture/` file, create one.

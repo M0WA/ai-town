@@ -37,7 +37,7 @@ Launch **all 9 agents simultaneously** — 5 design + 4 tech — each reviewing 
 
 Each design agent prompt:
 
-> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read the implementation plan files under `./implementation/` and the relevant architecture spec files under `architecture/`. [PHASE SCOPE IF SPECIFIED]. Review BOTH the implementation plan AND the spec files from your domain's perspective. Identify any issues, gaps, misalignments, missing deliverables, or incorrect sequencing in either the plan or the specs. Rate each issue CRITICAL, HIGH, MEDIUM, or LOW. For CRITICAL and HIGH issues state: (a) whether the fix belongs in the SPEC FILES or in the IMPLEMENTATION PLAN, and (b) a concrete recommendation. If no issues in your domain, say "NO ISSUES FOUND".
+> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read the implementation plan files under `./implementation/` and the relevant architecture spec files under `architecture/`. [PHASE SCOPE IF SPECIFIED]. Review BOTH the implementation plan AND the spec files from your domain's perspective. Only report CRITICAL and HIGH issues — do not report MEDIUM or LOW issues. For each CRITICAL or HIGH issue state: (a) whether the fix belongs in the SPEC FILES or in the IMPLEMENTATION PLAN, and (b) a concrete recommendation. If no CRITICAL or HIGH issues in your domain, say "NO ISSUES FOUND".
 
 #### Tech Squad agents (in parallel)
 
@@ -50,7 +50,7 @@ Each design agent prompt:
 
 Each tech agent prompt:
 
-> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read the implementation plan files under `./implementation/` and the relevant architecture spec files under `architecture/`. [PHASE SCOPE IF SPECIFIED]. Review BOTH the implementation plan AND the spec files from your domain's perspective. Identify any issues, gaps, misalignments, missing deliverables, incorrect sequencing, or technical risks in either the plan or the specs. Rate each issue CRITICAL, HIGH, MEDIUM, or LOW. For CRITICAL and HIGH issues state: (a) whether the fix belongs in the SPEC FILES or in the IMPLEMENTATION PLAN, and (b) a concrete recommendation. If no issues in your domain, say "NO ISSUES FOUND".
+> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read the implementation plan files under `./implementation/` and the relevant architecture spec files under `architecture/`. [PHASE SCOPE IF SPECIFIED]. Review BOTH the implementation plan AND the spec files from your domain's perspective. Only report CRITICAL and HIGH issues — do not report MEDIUM or LOW issues. For each CRITICAL or HIGH issue state: (a) whether the fix belongs in the SPEC FILES or in the IMPLEMENTATION PLAN, and (b) a concrete recommendation. If no CRITICAL or HIGH issues in your domain, say "NO ISSUES FOUND".
 
 All 9 agents run in parallel.
 
@@ -132,9 +132,9 @@ markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
 
 If the linter exits with errors, fix every reported violation before continuing. Re-run until the linter exits zero. Only then proceed to Step 6.
 
-### Step 6 — Clear context and re-review
+### Step 6 — Compact and re-review
 
-After all fixes are applied and the linter is clean, run `/clear` to reset the context window, then return to **Step 2** and run all 9 agents again on the updated plan and specs.
+After all fixes are applied and the linter is clean, run `/compact` to reduce context window usage, then return to **Step 2** and run all 9 agents again on the updated plan and specs. (Skip `/compact` on the final cycle when all agents report clean — just output the completion summary.)
 
 ### Step 7 — Completion check
 
@@ -158,7 +158,7 @@ The implementation plan and architecture specs have passed a full review by all 
 
 - The Product Owner sync step (Step 1) must complete before any squad reviews begin
 - All 9 squad agents run in parallel each review round — never skip any
-- MEDIUM and LOW issues are noted in the summary but do not block completion and are not fixed during this skill
+- MEDIUM and LOW issues are out of scope — agents must not report them
 - Spec fixes go into `architecture/` files only — never into the implementation plan
 - Plan fixes go into `implementation/phase-N.md` files only — never into spec files
 - `INDEX.md` must be updated if any structural change is made to the implementation plan

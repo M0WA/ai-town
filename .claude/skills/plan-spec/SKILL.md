@@ -25,13 +25,13 @@ Once the plan is written, launch **both squads simultaneously** using the Task t
 
 Use the `design-squad` skill behaviour: launch `gamedesign-lookandfeel`, `gamedesign-ux`, `graphics-artist-2d-texture`, `graphics-artist-3d-model`, and `sound-artist-opensoftal` in parallel. Each agent prompt:
 
-> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read `./implementation/INDEX.md` and the per-phase files under `./implementation/` and the relevant architecture spec files under `architecture/`. Review the implementation plan from your domain's perspective. Identify any issues, gaps, misalignments with the specs, missing deliverables, or incorrect sequencing. Rate each issue CRITICAL, HIGH, MEDIUM, or LOW. For CRITICAL and HIGH issues provide a concrete recommendation. If no issues in your domain, say "NO ISSUES FOUND".
+> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read `./implementation/INDEX.md` and the per-phase files under `./implementation/` and the relevant architecture spec files under `architecture/`. Review the implementation plan from your domain's perspective. Only report CRITICAL and HIGH issues — do not report MEDIUM or LOW issues. For each CRITICAL or HIGH issue provide a concrete recommendation. If no CRITICAL or HIGH issues in your domain, say "NO ISSUES FOUND".
 
 #### Tech Squad (all 4 agents in parallel)
 
 Use the `tech-squad` skill behaviour: launch `cicd-dev-github`, `graphics-dev-irrlicht`, `sound-dev-opensoftal`, and `test-dev-cpp` in parallel. Each agent prompt:
 
-> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read `./implementation/INDEX.md` and the per-phase files under `./implementation/` and the relevant architecture spec files under `architecture/`. Review the implementation plan from your domain's perspective. Identify any issues, gaps, misalignments with the specs, missing deliverables, incorrect sequencing, or technical risks. Rate each issue CRITICAL, HIGH, MEDIUM, or LOW. For CRITICAL and HIGH issues provide a concrete recommendation. If no issues in your domain, say "NO ISSUES FOUND".
+> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read `./implementation/INDEX.md` and the per-phase files under `./implementation/` and the relevant architecture spec files under `architecture/`. Review the implementation plan from your domain's perspective. Only report CRITICAL and HIGH issues — do not report MEDIUM or LOW issues. For each CRITICAL or HIGH issue provide a concrete recommendation. If no CRITICAL or HIGH issues in your domain, say "NO ISSUES FOUND".
 
 All 9 agents (5 design + 4 tech) run in parallel.
 
@@ -94,9 +94,9 @@ markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
 
 If the linter exits with errors, fix every reported violation before continuing. Re-run until the linter exits zero. Only then proceed to Step 6.
 
-### Step 6 — Re-review
+### Step 6 — Compact and re-review
 
-After all fixes are applied and the linter is clean, return to **Step 2** and run all 9 agents again on the updated plan.
+After all fixes are applied and the linter is clean, run `/compact` to reduce context window usage, then return to **Step 2** and run all 9 agents again on the updated plan. (Skip `/compact` on the final cycle when all agents report clean — just output the completion summary.)
 
 ### Step 7 — Completion check
 
@@ -119,6 +119,6 @@ The implementation plan has passed a full review by all agents with no CRITICAL 
 
 - The Product Owner step (Step 1) must complete before squad reviews begin
 - All 9 squad agents run in parallel each review round — never skip any
-- MEDIUM and LOW issues are noted but do not block completion
+- MEDIUM and LOW issues are out of scope — agents must not report them
 - If the same issue persists across 3 rounds without resolution, flag it explicitly and ask the user for guidance before continuing
 - Fixes go into `./implementation/INDEX.md` and the per-phase files only — do not modify spec files during this skill (use `/fix-specs` for that)
