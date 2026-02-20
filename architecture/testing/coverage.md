@@ -54,3 +54,49 @@ lcov --summary coverage_filtered.info
   - **CI (in GitHub Actions `run:` block)**: use `"${{ github.workspace }}/.fetchcontent_cache/*"` (absolute path — the `${{ ... }}` expression is resolved by GitHub Actions before the shell executes the command)
   - **Local developer**: use `"*/.fetchcontent_cache/*"` (glob — matches `.fetchcontent_cache` under any ancestor directory in the local workspace)
 - **`src/audio/` exclusion rationale and guidance**: The `src/audio/` exclusion from the lcov gate is intentional — `AudioSystem` directly wraps OpenAL and cannot be headlessly tested without OS-boundary mocking. Complex pure-logic audio math (constant-power crossfade curve, bar-boundary calculation, duck state machine transition logic) SHOULD be extracted into standalone header-only utility functions in `src/audio/audio_math.h` or equivalent. These remain in `src/audio/` and are excluded from the gate. Unit tests in `tests/audio/` provide functional verification even without gate enforcement. Implementers should aim for high test coverage of `tests/audio/` test files even though the corresponding source files are excluded from the lcov gate.
+
+## Phase 1 src/ui/ Coverage Baseline
+
+The Phase 1 `src/ui/` coverage baseline is expected to be low (stub-heavy code). The MINIMUM
+acceptable Phase 1 baseline is **25%** — achievable with `UIManagerDrawOrderTest`, 5 UIScaler
+tests, and 6 CameraController tests.
+
+If Phase 1 baseline is below 25%, this indicates test registration or stub-body errors that
+must be corrected before Phase 2 begins. Likely causes include:
+
+- Panel stub `draw()` methods that are no-op bodies (see `testability-architecture.md`
+  Anti-no-op requirement — a no-op `draw()` produces zero coverage on the `UIManager::draw()`
+  dispatch path, dragging `src/ui/` coverage below the 25% floor)
+- `ui_tests` CMake target missing source files (e.g., `ui_scaler_test.cpp` or
+  `camera_controller_test.cpp` not listed in `add_executable(ui_tests ...)`)
+- `gtest_discover_tests()` label misconfiguration causing tests to be excluded from the
+  `ctest -LE "integration|requires-opengl"` run that feeds the coverage report
+
+The Phase 2 80% gate assumes a Phase 1 baseline of at least 25%. If Phase 1 delivers only
+10% or below, Phase 2 must include additional `ui_tests` source files (e.g.,
+`UIManagerStateTransitionTest`) to make the 80% gate achievable.
+
+**Below 25% is a BLOCKING defect, not a MEDIUM risk.** Do not advance to Phase 2 until the
+Phase 1 `src/ui/` baseline meets or exceeds 25%.
+
+**Phase 1 `src/ui/` 25% gate — awk pipeline**:
+
+```bash
+# Verify that the least-covered src/ui/ file meets the 25% Phase 1 baseline.
+#
+# Format dependency: Assumes lcov 2.x --list output uses '|' as column delimiter.
+# If the format changes, $NF+0 coercion produces 0 -> gate FAILS with misleading
+# '0% coverage' message rather than 'lcov format mismatch'. Validate the lcov
+# --list output format manually if the pipeline produces unexpected results.
+#
+# head -1 semantics: head -1 takes the minimum (worst-case) src/ui/ file coverage
+# — this is intentional; the gate enforces that even the least-covered src/ui/
+# file meets the threshold.
+lcov --list coverage_filtered.info \
+  | grep -E "src/ui/" \
+  | grep -v "^Total" \
+  | awk -F'|' '{print $NF+0}' \
+  | sort -n \
+  | head -1 \
+  | awk '{if ($1 < 25.0) { print "FAIL: src/ui/ worst-file coverage " $1 "% < 25% Phase 1 gate"; exit 1 } else { print "PASS: src/ui/ worst-file coverage " $1 "% >= 25%"; exit 0 }}'
+```

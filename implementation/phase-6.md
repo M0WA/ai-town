@@ -6,6 +6,8 @@ Deliver all V1 building and vehicle 3D assets, billboard imposters, atlas textur
 
 ### Deliverables
 
+- [ ] **Phase 6 entry gate (BLOCKING)**: `graphics-artist-3d-model` full `3d-model-standards.md` sign-off must be on record before any Phase 6 building or vehicle geometry is authored. Sign-off must cover all 14 export validation checks, naming convention, pivot convention, 5 mm tolerance, 10-floor hard cap, collision mesh dispatch order, billboard floor count limit, and LOD2 pivot conformance. No `.b3d` mesh files may be committed until this sign-off is recorded. (ref: `architecture/asset-standards/3d-model-standards.md`)
+
 - [ ] **3D Model Standards compliance**: `.b3d` for all building assets (UV2/lightmap); `.obj` only for NOLIGHTMAP props; `-Z Forward, Y Up` Blender export; 1 Irrlicht unit = 1 m; pivot at bottom-center Y=0 (ref: `architecture/asset-standards/3d-model-standards.md`)
 - [ ] **LOD requirements** per spec table: Large buildings (2000–5000 / 500–1000 / 300–500 tris LOD0/1/2); Small buildings/props (500–1500 / 100–300 tris / Billboard); Vehicles — the general 'Vehicles (1000–3000 / 200–500 tris)' range row is informational only; the binding caps are: car ≤1,500/≤300, bus/truck ≤2,500/≤450 tris LOD0/LOD1. Per-class caps supersede the general range for all production and validation purposes.; Road tile (≤48/≤16/≤8 tris); Infrastructure props (≤300/≤75/Billboard) (ref: `architecture/asset-standards/3d-model-standards.md`)
 - [ ] LOD hysteresis thresholds: Large buildings (50/45 m, 200/185 m); Small buildings/props (30/25 m, 100/90 m); Vehicles (40/35 m, 100/90 m); Road tile uses small building thresholds (ref: `architecture/asset-standards/3d-model-standards.md`)

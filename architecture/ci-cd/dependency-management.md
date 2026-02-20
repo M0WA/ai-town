@@ -21,12 +21,12 @@
 **`fmt` is a required explicit dependency**: the `openal-soft` vcpkg portfile applies a `devendor-fmt.diff` patch that replaces OpenAL Soft's bundled copy of `{fmt}` with the external vcpkg `fmt` package. This means `libopenal.a` contains object files that reference `fmt::v12::report_error` and other `fmt` symbols. Any CMake target that links (directly or transitively) against `OpenAL::OpenAL` must also link `fmt::fmt`, or the linker will fail with `undefined reference to fmt::v12::report_error`. Adding `fmt` to `vcpkg.json` ensures the vcpkg `fmt` package is installed; `fmt::fmt` must then be linked PRIVATE to `aitown_audio` in `CMakeLists.txt`.
 
 - CMake configured with `-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake`
-- CI uses `lukka/run-vcpkg@<ACTION-SHA-REQUIRED> # v11.5` with a pinned vcpkg commit hash stored as `env.VCPKG_COMMIT_ID`. **`VCPKG_COMMIT_ID` must be declared at the workflow level** (in the top-level `env:` block of the CI YAML file, not at the job or step level) so it is available to all jobs and steps. Declaring it at the job level would make it unavailable to the baseline validation step if that step runs in a different job. Example declaration at workflow level:
+- CI uses `lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1 # v11.5` with a pinned vcpkg commit hash stored as `env.VCPKG_COMMIT_ID`. **`VCPKG_COMMIT_ID` must be declared at the workflow level** (in the top-level `env:` block of the CI YAML file, not at the job or step level) so it is available to all jobs and steps. Declaring it at the job level would make it unavailable to the baseline validation step if that step runs in a different job. Example declaration at workflow level:
 
   ```yaml
   env:
     VCPKG_COMMIT_ID: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"  # placeholder — replace with real vcpkg commit SHA matching vcpkg.json builtin-baseline
-  ``` **Implementation note**: The `<ACTION-SHA-REQUIRED>` token above is an angle-bracket placeholder that the SHA lint step (in `github-actions-workflow.md`) will catch if left unresolved. Before committing any CI YAML, replace it with the verified 40-character SHA for the intended `lukka/run-vcpkg` release tag by running `gh release view v11.5 --repo lukka/run-vcpkg --json tagName,targetCommitish`. The SHA `5e0cab206a5ea620130caf672fce3e4a6b5a793` used in earlier drafts is only 39 characters and is therefore invalid — a truncated SHA is NOT a valid supply-chain trust anchor. The action SHA pin must be updated alongside `VCPKG_COMMIT_ID` intentionally — they are both supply-chain trust anchors for the vcpkg install step.
+  ``` **Implementation note**: The `lukka/run-vcpkg` action is pinned to SHA `5e0cab206a5ea620130caf672fce3e4a6b5666a1` (v11.5). This was verified via `gh release view v11.5 --repo lukka/run-vcpkg --json tagName,targetCommitish`. The SHA `5e0cab206a5ea620130caf672fce3e4a6b5a793` used in earlier drafts was only 39 characters and therefore invalid — a truncated SHA is NOT a valid supply-chain trust anchor. The action SHA pin must be updated alongside `VCPKG_COMMIT_ID` intentionally — they are both supply-chain trust anchors for the vcpkg install step.
 - **Baseline enforcement**: A CI step must validate that `vcpkg.json`'s `builtin-baseline` matches `env.VCPKG_COMMIT_ID` before the vcpkg install step runs:
 
   ```yaml
@@ -41,6 +41,28 @@
       # Note: jq is pre-installed on ubuntu-latest and windows-latest GitHub Actions runners
       # as of mid-2024 runner images. If jq availability is uncertain, add an install step.
   ```
+
+## Linux System Package Requirements
+
+The following apt-get packages must be installed on BOTH `build-linux` AND `coverage-linux` before CMake configuration runs. These packages provide the OpenGL development headers and virtual display support required by Irrlicht, GLEW, and xvfb-based OpenGL testing.
+
+**Required packages**:
+
+- `xvfb` — X Virtual Frame Buffer; required to run `requires-opengl` tests on headless CI runners via `xvfb-run`
+- `libgl1-mesa-dev` — Mesa OpenGL development headers and stub libraries; required for CMake to find OpenGL during configuration and for linking against the Mesa software renderer
+- `mesa-utils` — Mesa GL utilities (`glxinfo`, `glxgears`); used to verify the xvfb display is operational in diagnostics
+- `libglew-dev` — GLEW development headers; required by the sRGB raw GL upload path (`glCompressedTexImage2D` and related calls); **also installed via vcpkg** (`glew` port), but the system package is needed for CMake's `find_package(GLEW)` fallback and for headers available during configuration before vcpkg runs
+
+**THIS LIST MUST BE KEPT IN SYNC BETWEEN `build-linux` AND `coverage-linux` — they are fully independent jobs and each must install all required packages before CMake configuration.**
+
+Install step (place before the CMake configure step in both jobs):
+
+```yaml
+- name: Install system dependencies
+  run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libglew-dev
+```
+
+**Why both jobs need the same list**: `build-linux` and `coverage-linux` run on independent `ubuntu-latest` runner instances. There is no shared pre-install state between them. A package installed in one job's runner has no effect on the other. Omitting any package from either job causes a CMake configuration failure or a runtime failure during the `xvfb-run` test step in that job specifically.
 
 ## Baseline Staleness Risk
 
@@ -76,6 +98,14 @@ target_link_libraries(aitown_render PRIVATE Irrlicht GLEW::GLEW)
 ```
 
 **GLEW — Windows triplet note**: On Windows with the `x64-windows` triplet active, vcpkg resolves `glew` to `glew:x64-windows` automatically — no platform-specific triplet override in `vcpkg.json` is needed. Before committing a baseline update that adds GLEW, verify the `glew` port exists at the pinned baseline using `gh api /repos/microsoft/vcpkg/contents/ports/glew`. A 200 response confirms the port is present at that baseline; a 404 means the port was removed or renamed — try an adjacent vcpkg commit. This verification is mandatory: a missing port at the pinned baseline causes a hard build failure on all platforms.
+
+**PHASE 1 EXIT CRITERION — GLEW port verification (BLOCKING)**: Before merging any Phase 1 branch, the developer MUST verify that the `glew` vcpkg port exists at the exact baseline pinned in `vcpkg.json`. Run the following command and confirm a 200 HTTP status is returned:
+
+```bash
+gh api /repos/microsoft/vcpkg/contents/ports/glew?ref=$(jq -r '."builtin-baseline"' vcpkg.json)
+```
+
+A 404 response means the `glew` port does not exist at the pinned baseline — Phase 1 MUST NOT be merged until a vcpkg baseline is found where both `irrlicht` and `glew` ports are present. This is a hard blocking exit criterion. Do not rely on a local `vcpkg install` succeeding as a proxy — local installs may use a different baseline or a cached binary. The GitHub API check against the exact pinned SHA is the authoritative verification method.
 
 **IMPORTANT**: `target_link_libraries(aitown ...)` in the original snippet was incorrect — the `aitown` executable target does not exist at Phase 0. An implementer following the original snippet verbatim would get a CMake configure error: "Cannot specify link libraries for target aitown which is not built by this project."
 
@@ -144,6 +174,27 @@ The spec mandates vcpkg as the "mandatory dependency manager on all platforms." 
 ```
 
 **Note**: Both `soft_oal.dll` AND `default.mhr` must be verified. The Phase 0 placeholder (see `implementation/phase-0.md`) is a warning-only check for both files.
+
+### Windows GLEW vcpkg Verification
+
+Before uploading Windows artifacts, a CI step must confirm that GLEW was installed by vcpkg in the Windows build. In manifest mode (the default when `vcpkg.json` is present), vcpkg installs packages into `build/vcpkg_installed/<triplet>/`. In classic mode (or when the manifest-mode install tree is absent), vcpkg installs into `$VCPKG_ROOT/installed/<triplet>/`. The verification step must check the manifest-mode path first and fall back to the classic-mode path:
+
+```yaml
+- name: Verify GLEW vcpkg install (Windows)
+  shell: pwsh
+  run: |
+    # Use explicit if-block syntax — "Test-Path ... || exit 1" is PowerShell 7+ only;
+    # GitHub Actions Windows runners default to PowerShell 5.1 where || is not supported.
+    if (-not (Test-Path "build/vcpkg_installed/x64-windows/lib/glew.lib")) {
+      if (-not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\include\GL\glew.h")) {
+        Write-Error "GLEW not found in either manifest-mode or classic-mode install"; exit 1
+      }
+    }
+```
+
+**Why both paths**: When `vcpkg.json` is present at the repo root and CMake is configured with the vcpkg toolchain file, vcpkg uses manifest mode and writes installed files under `build/vcpkg_installed/`. The `$VCPKG_ROOT/installed/` path is the classic-mode fallback for environments where the toolchain was invoked without a `vcpkg.json` in scope (e.g., a developer's global vcpkg install). Checking only one path would cause false negatives in the other mode. The `glew.lib` check (not `glew.h`) confirms the library artifact itself is present — a header-only check would not catch a build failure that produced headers but not the compiled library.
+
+**PowerShell 5.1 compatibility**: GitHub Actions Windows runners ship PowerShell 5.1 as the default shell. The `||` short-circuit operator for process exit codes is a PowerShell 7+ feature. Use the explicit `if (-not (...)) { ... }` form as shown above.
 
 ### Irrlicht DLL on Windows (Phase 1+)
 

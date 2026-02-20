@@ -37,6 +37,12 @@
   // Transforms a physical-pixel input coordinate to virtual 1920×1080 space.
   // Must be applied exactly once at the entry point of the input chain.
   // Returns a UIScaler::VirtualPoint nested struct { int x; int y; }.
+  // OUTPUT CLAMPING: if the input screen coordinates fall outside the active viewport
+  // (e.g. mouse moved into a letterbox/pillarbox black bar, or outside the window),
+  // the returned VirtualPoint is clamped to [0, virtualW] × [0, virtualH] — i.e.
+  // x is clamped to [0, 1920] and y is clamped to [0, 1080].
+  // unproject() NEVER returns negative virtual coordinates or coordinates exceeding
+  // the virtual resolution. Callers must not add their own clamp on top of this.
   struct VirtualPoint { int x; int y; };  // nested inside UIScaler — callers use UIScaler::VirtualPoint
   VirtualPoint unproject(int physicalX, int physicalY) const;
   ```

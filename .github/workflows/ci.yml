@@ -59,7 +59,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev
+          sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev libglew-dev
 
       # Step 4: Detect GCC version and write to GITHUB_ENV.
       # MUST be a SEPARATE named step before the actions/cache step.
@@ -210,7 +210,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
         with:
-          name: test-results-build-linux
+          name: test-results-build-linux-${{ github.sha }}
           path: test_results/
           retention-days: 14
 
@@ -286,7 +286,23 @@ jobs:
         with:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
 
-      # Step 8: Configure CMake (MSBuild generator; no ccache on Windows).
+      # Step 8: Verify glew vcpkg installed artifact before build.
+      # glew is required by the Irrlicht vcpkg port on Windows. If it is absent the
+      # CMake configure or link step fails with an opaque error. This step catches the
+      # missing installed artifact immediately with a clear diagnostic message.
+      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1"
+      # is PS 7+ only; GitHub Actions Windows runners use PS 5.1.
+      - name: Verify glew vcpkg port
+        shell: pwsh
+        run: |
+          $glewhdr = Join-Path $env:VCPKG_ROOT "installed\x64-windows\include\GL\glew.h"
+          if (-not (Test-Path $glewhdr)) {
+            Write-Error "ERROR: GLEW not installed — GL/glew.h not found at $glewhdr. Run: vcpkg install glew:x64-windows"
+            exit 1
+          }
+          Write-Host "GLEW installed artifact verified: $glewhdr"
+
+      # Step 9: Configure CMake (MSBuild generator; no ccache on Windows).
       - name: Configure CMake
         run: |
           cmake -B build -S . -G "Visual Studio 17 2022" `
@@ -294,12 +310,12 @@ jobs:
             -DFETCHCONTENT_BASE_DIR="${{ github.workspace }}\.fetchcontent_cache"
         shell: pwsh
 
-      # Step 9: Build (MSBuild).
+      # Step 10: Build (MSBuild).
       - name: Build
         run: cmake --build build --config Release --parallel
         shell: pwsh
 
-      # Step 10: Run unit tests.
+      # Step 11: Run unit tests.
       # AITOWN_HEADLESS=1 and ALSOFT_DRIVERS=null required — headless Windows runners
       # have no audio hardware and will fail AudioSystem initialization without null driver.
       - name: Run unit tests (no display)
@@ -312,7 +328,7 @@ jobs:
           AITOWN_HEADLESS: '1'
           ALSOFT_DRIVERS: 'null'
 
-      # Step 11: Run integration tests.
+      # Step 12: Run integration tests.
       # No xvfb step on Windows — requires-opengl tests are Linux-only.
       - name: Run integration tests (no display)
         shell: pwsh
@@ -324,7 +340,7 @@ jobs:
           AITOWN_HEADLESS: '1'
           ALSOFT_DRIVERS: 'null'
 
-      # Step 12: Verify test XML files.
+      # Step 13: Verify test XML files.
       - name: Verify test XML output
         if: always()
         shell: pwsh
@@ -336,7 +352,7 @@ jobs:
           }
           Write-Host "Found $count test result file(s)."
 
-      # Step 13: Publish test results.
+      # Step 14: Publish test results.
       - name: Publish test results
         if: always()
         uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1
@@ -346,20 +362,20 @@ jobs:
           reporter: 'java-junit'
           fail-on-error: false
 
-      # Step 14: Upload test results artifact.
+      # Step 15: Upload test results artifact.
       - name: Upload test results (build-windows)
         if: always()
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
         with:
-          name: test-results-build-windows
+          name: test-results-build-windows-${{ github.sha }}
           path: test_results/
           retention-days: 14
 
-      # Step 15: DLL verification — Irrlicht.dll hard-fails (Phase 1+); soft_oal.dll and
-      # default.mhr remain warning-only (Phase 4 deliverables not yet present).
+      # Step 16: DLL verification — Irrlicht.dll and GLEW32.dll hard-fail (Phase 1+);
+      # soft_oal.dll and default.mhr remain warning-only (Phase 4 deliverables not yet present).
       # Phase 4 hardens soft_oal.dll and default.mhr to hard-fail as well.
       # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
-      - name: Verify required DLLs (Irrlicht hard-fail; OpenAL warning-only — Phase 4)
+      - name: Verify required DLLs (Irrlicht+GLEW hard-fail; OpenAL warning-only — Phase 4)
         shell: pwsh
         run: |
           # Irrlicht.dll — hard-fail (Phase 1: aitown_render now links Irrlicht).
@@ -368,6 +384,12 @@ jobs:
             exit 1
           }
           Write-Host "Irrlicht.dll present."
+          # Phase 1 atomicity gate: GLEW32.dll check co-lands with target_link_libraries(aitown GLEW::GLEW)
+          if (-not (Test-Path "build/Release/GLEW32.dll")) {
+            Write-Error "ERROR: GLEW32.dll missing from build/Release/ — post-build CMake DLL copy rule failed"
+            exit 1
+          }
+          Write-Host "GLEW32.dll present."
           # soft_oal.dll — warning-only (Phase 4 deliverable).
           if (Test-Path "build/Release/soft_oal.dll") {
             Write-Host "soft_oal.dll found."
@@ -381,12 +403,12 @@ jobs:
             Write-Warning "default.mhr not found — expected after Phase 4 audio deliverable. CI continues."
           }
 
-      # Step 16: Upload Windows binary artifact (only on push to main).
+      # Step 17: Upload Windows binary artifact (only on push to main).
       - name: Upload Windows binary artifact
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
         with:
-          name: aitown-windows-release
+          name: aitown-windows-${{ github.sha }}
           path: build/Release/
           retention-days: 30
 
@@ -422,7 +444,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev lcov
+          sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev libglew-dev lcov
 
       # Step 4: Detect GCC version (separate step before actions/cache).
       - name: Detect GCC version
@@ -546,7 +568,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
         with:
-          name: test-results-coverage-linux
+          name: test-results-coverage-linux-${{ github.sha }}
           path: test_results/
           retention-days: 14
 
@@ -561,7 +583,7 @@ jobs:
           # errors for inline functions and lambdas in headers (e.g. GTest macros).
           # This is a known lcov/GCC 13 compatibility issue; the mismatch is benign
           # and does not affect coverage accuracy.
-          lcov --capture --directory "${BUILD_DIR}" --base-directory . \
+          lcov --capture --directory "${BUILD_DIR}" --base-directory ${{ github.workspace }} \
                --ignore-errors mismatch \
                --output-file coverage.info
           # --ignore-errors unused: lcov 2.x treats any --remove pattern that matches
@@ -590,13 +612,24 @@ jobs:
           # TODO Phase 2: replace with: lcov --summary coverage_filtered.info | awk check
           lcov --summary coverage_filtered.info
 
-      # Step 19: Upload coverage HTML artifact.
+      # Step 19: src/ui/ coverage baseline checkpoint.
+      # Informational only — does NOT fail CI in Phase 1 (src/ui/ files are stubs).
+      # Intent: baseline-detect the coverage reporting path so that when Phase 5 lands
+      # and real UI code exists, a genuine absence of src/ui/ entries is immediately
+      # visible in the CI log rather than silently missing.
+      # Phase 5 action: replace "echo WARNING" with "exit 1" once UI code is fully covered.
+      - name: Baseline-check src/ui/ coverage entries
+        shell: bash
+        run: |
+          lcov --list coverage_filtered.info | grep -E "src/ui/" || echo "WARNING: No src/ui/ coverage entries found (expected after Phase 5)"
+
+      # Step 20: Upload coverage HTML artifact.
       # if: always() — upload even if lcov gate fails for post-mortem analysis.
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
         with:
-          name: coverage-report-linux
+          name: coverage-report-linux-${{ github.sha }}
           path: coverage_html/
           retention-days: 14
 

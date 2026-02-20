@@ -2,29 +2,33 @@
 
 | Asset Name | Category | Format | Duration | Loop | Notes |
 |---|---|---|---|---|---|
-| `music_main_menu_01` | Main menu music | OGG | 90–180 s | Y | Main menu screen music; **stereo; 2 channels**; streamed; bar-aligned seamless loop (no silence at boundary); `AL_SOURCE_RELATIVE = AL_TRUE` (non-positional); **JSON sidecar mandatory** (`music_main_menu_01.json`: `{"bpm":90,"beats_per_bar":4}`); authored to **−16 LUFS / −1 dBTP** |
-| `music_main_menu_02` | Main menu music | OGG | 90–180 s | Y | Main menu music variant (same key, BPM, harmonic compatibility); **stereo; 2 channels**; streamed; bar-aligned seamless loop; `AL_SOURCE_RELATIVE = AL_TRUE`; **JSON sidecar mandatory** (`music_main_menu_02.json`); authored to **−16 LUFS / −1 dBTP** |
-| `ambient_day` | Ambient bed | OGG | 90–120 s | Y | City hum, birds, traffic; **stereo; 2 channels**; streamed; **DAW crossfade loop** (200 ms pre-baked crossfade at loop boundary; no silence floor); authored to **−20 LUFS / −1 dBTP** |
-| `ambient_night` | Ambient bed | OGG | 90–120 s | Y | Quiet, insects, distant traffic; **stereo; 2 channels**; streamed; **DAW crossfade loop**; authored to **−20 LUFS / −1 dBTP** |
-| `ambient_dawn` | Ambient bed | OGG | 90–120 s | Y | Birds, early traffic; **stereo; 2 channels**; streamed (30–60 s causes loop fatigue); **DAW crossfade loop**; authored to **−20 LUFS / −1 dBTP** |
-| `ambient_dusk` | Ambient bed | OGG | 90–120 s | Y | Evening ambient; steady moderate traffic; **stereo; 2 channels**; streamed (30–60 s causes loop fatigue); **DAW crossfade loop**; authored to **−20 LUFS / −1 dBTP** |
-| `music_calm_01` | Music stem | OGG | 90–180 s | Y | Calm exploration music; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE` (non-positional); bar-aligned seamless loop; no fade/silence at boundary; **JSON sidecar `music_calm_01.json` mandatory** (`{"bpm":90,"beats_per_bar":4}`); authored to **−16 LUFS / −1 dBTP**; **MUST share root key and mode with all 6 gameplay stems** (cross-tier harmonic compatibility — see Dynamic Soundscape spec) |
-| `music_calm_02` | Music stem | OGG | 90–180 s | Y | Calm exploration music (variant); **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **MUST share root key and mode with all 6 gameplay stems** |
-| `music_growth_01` | Music stem | OGG | 90–180 s | Y | City growing, energetic; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **MUST share root key and mode with all 6 gameplay stems** |
-| `music_growth_02` | Music stem | OGG | 90–180 s | Y | City growing (variant); **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **MUST share root key and mode with all 6 gameplay stems** |
-| `music_crisis_01` | Music stem | OGG | 90–180 s | Y | Crisis / disaster theme; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **MUST share root key and mode with all 6 gameplay stems** |
-| `music_crisis_02` | Music stem | OGG | 90–180 s | Y | Crisis variant; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **MUST share root key and mode with all 6 gameplay stems** |
-| `zone_residential` | Zone loop | OGG | 12–18 s | Y | Residential ambience; mono positional; **pre-loaded; hard cap 18 s** (pre-load tier boundary is 20 s; stay safely below); **silence-boundary loop** (−60 dBFS at head and tail); authored to **−26 LUFS / −2 dBTP** (subtle background positional — should not compete with music stems) |
-| `zone_commercial` | Zone loop | OGG | 12–18 s | Y | Commercial activity; mono positional; pre-loaded; hard cap 18 s; **silence-boundary loop**; authored to **−26 LUFS / −2 dBTP** |
-| `zone_industrial` | Zone loop | OGG | 12–18 s | Y | Factory, industrial; mono positional; pre-loaded; hard cap 18 s; **silence-boundary loop**; authored to **−26 LUFS / −2 dBTP** |
+| `music_main_menu_01` | Main menu music | OGG | 90–180 s | Y | Main menu screen music; **stereo; 2 channels**; streamed; bar-aligned seamless loop (no silence at boundary); `AL_SOURCE_RELATIVE = AL_TRUE` (non-positional); **JSON sidecar mandatory** (`music_main_menu_01.json`: `{"bpm":90,"beats_per_bar":4}`); authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error** |
+| `music_main_menu_02` | Main menu music | OGG | 90–180 s | Y | Main menu music variant (same key, BPM, harmonic compatibility); **stereo; 2 channels**; streamed; bar-aligned seamless loop; `AL_SOURCE_RELATIVE = AL_TRUE`; **JSON sidecar mandatory** (`music_main_menu_02.json`); authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error** |
+| `ambient_day` | Ambient bed | OGG | 90–120 s | Y | City hum, birds, traffic; **stereo; 2 channels**; streamed; **DAW crossfade loop** (200 ms pre-baked crossfade at loop boundary; no silence floor); authored to **−20 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **No JSON sidecar required** — ambient beds use real-time crossfade duration (constant-power curve), not bar-boundary sample counting. `music_sidecar_schema.json` and validate_assets.py Check #14 do NOT apply to ambient bed OGG files. |
+| `ambient_night` | Ambient bed | OGG | 90–120 s | Y | Quiet, insects, distant traffic; **stereo; 2 channels**; streamed; **DAW crossfade loop**; authored to **−20 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **No JSON sidecar required** — ambient beds use real-time crossfade duration (constant-power curve), not bar-boundary sample counting. `music_sidecar_schema.json` and validate_assets.py Check #14 do NOT apply to ambient bed OGG files. |
+| `ambient_dawn` | Ambient bed | OGG | 90–120 s | Y | Birds, early traffic; **stereo; 2 channels**; streamed (30–60 s causes loop fatigue); **DAW crossfade loop**; authored to **−20 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **No JSON sidecar required** — ambient beds use real-time crossfade duration (constant-power curve), not bar-boundary sample counting. `music_sidecar_schema.json` and validate_assets.py Check #14 do NOT apply to ambient bed OGG files. |
+| `ambient_dusk` | Ambient bed | OGG | 90–120 s | Y | Evening ambient; steady moderate traffic; **stereo; 2 channels**; streamed (30–60 s causes loop fatigue); **DAW crossfade loop**; authored to **−20 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **No JSON sidecar required** — ambient beds use real-time crossfade duration (constant-power curve), not bar-boundary sample counting. `music_sidecar_schema.json` and validate_assets.py Check #14 do NOT apply to ambient bed OGG files. |
+
+> **Ambient bed JSON sidecar exemption**: Phase 6 validate_assets.py Check #14 ("Music sidecar .json file present and valid for each .ogg music stem file") applies ONLY to music stem files (`music_main_menu_*.ogg`, `music_calm_*.ogg`, `music_growth_*.ogg`, `music_crisis_*.ogg`). Ambient bed OGG files (`ambient_day.ogg`, `ambient_night.ogg`, `ambient_dawn.ogg`, `ambient_dusk.ogg`) are explicitly exempted — they require no JSON sidecar. Ambient bed crossfades use a real-time constant-power curve driven by wall-clock duration; the `AudioSystem` does not read BPM or beats-per-bar data for ambient beds. The `music_sidecar_schema.json` schema and the sidecar validation step in the asset pipeline must not flag missing sidecars for files matching the `ambient_*.ogg` pattern.
+>
+> **Ambient bed OGG header validation**: `AudioSystem` validates the OGG Vorbis header of each ambient bed file at load time using the same check applied to music stems. Specifically, `AudioSystem` reads the `vorbis_info` struct (via `ov_info()`) immediately after `ov_open_callbacks()` and refuses to play the asset if `vi->rate != 44100` or `vi->channels != 2`. A mismatched ambient bed produces a logged error ("ambient bed `<filename>` has wrong sample rate or channel count — expected 44100 Hz stereo") and the stream is silenced for that bed slot for the lifetime of the session. This ensures the streaming infrastructure (sources[58..61], shared with music stems) receives only conformant PCM data.
+| `music_calm_01` | Music stem | OGG | 90–180 s | Y | Calm exploration music; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE` (non-positional); bar-aligned seamless loop; no fade/silence at boundary; **JSON sidecar `music_calm_01.json` mandatory** (`{"bpm":90,"beats_per_bar":4}`); authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **MUST share root key and mode with all 6 gameplay stems** (cross-tier harmonic compatibility — see Dynamic Soundscape spec) |
+| `music_calm_02` | Music stem | OGG | 90–180 s | Y | Calm exploration music (variant); **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **MUST share root key and mode with all 6 gameplay stems** |
+| `music_growth_01` | Music stem | OGG | 90–180 s | Y | City growing, energetic; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **MUST share root key and mode with all 6 gameplay stems** |
+| `music_growth_02` | Music stem | OGG | 90–180 s | Y | City growing (variant); **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **MUST share root key and mode with all 6 gameplay stems** |
+| `music_crisis_01` | Music stem | OGG | 90–180 s | Y | Crisis / disaster theme; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **MUST share root key and mode with all 6 gameplay stems** |
+| `music_crisis_02` | Music stem | OGG | 90–180 s | Y | Crisis variant; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **MUST share root key and mode with all 6 gameplay stems** |
+| `sfx_zone_residential` | Zone loop | OGG | 12–18 s | Y | Residential ambience; mono positional; **pre-loaded; hard cap 18 s** (pre-load tier boundary is 20 s; stay safely below); **silence-boundary loop** (−60 dBFS at head and tail); authored to **−26 LUFS / −2 dBTP** (subtle background positional — should not compete with music stems) |
+| `sfx_zone_commercial` | Zone loop | OGG | 12–18 s | Y | Commercial activity; mono positional; pre-loaded; hard cap 18 s; **silence-boundary loop**; authored to **−26 LUFS / −2 dBTP** |
+| `sfx_zone_industrial` | Zone loop | OGG | 12–18 s | Y | Factory, industrial; mono positional; pre-loaded; hard cap 18 s; **silence-boundary loop**; authored to **−26 LUFS / −2 dBTP** |
 | `sfx_build_place` | SFX | WAV | <1 s | N | Building placed; authored to **−24 LUFS / −1 dBTP** (subtle placement feedback) |
 | `sfx_build_demolish` | SFX | WAV | <1 s | N | Building demolished; authored to **−24 LUFS / −1 dBTP** |
 | `sfx_fire_alert` | SFX | WAV | 2–4 s | N | Fire service event; **mono positional** (3D spatial at building location); CRITICAL priority; authored to **−18 LUFS / −1 dBTP** (must cut through ambient/music at a crisis moment) |
 | `sfx_police_alert` | SFX | WAV | 2–4 s | N | Police service event; **mono positional** (3D spatial at building location); CRITICAL priority; authored to **−18 LUFS / −1 dBTP** |
 | `sfx_power_out` | SFX | WAV | 1–2 s | N | Power outage notification; authored to **−22 LUFS / −1 dBTP** |
 | `sfx_water_out` | SFX | WAV | 1–2 s | N | Water outage notification; authored to **−22 LUFS / −1 dBTP** |
-| `sfx_road_build` | SFX | WAV | <1 s | N | Road construction feedback; authored to **−24 LUFS / −1 dBTP** |
-| `sfx_budget_warn` | SFX | WAV | 1–2 s | N | Budget deficit warning; a sub-second chime is not long enough to register as a distinct alert separate from UI click sounds — minimum 1 s ensures perceptibility; authored to **−20 LUFS / −1 dBTP** (must be clearly audible as a warning) |
+| `sfx_road_build` | SFX | WAV | <1 s | N | Road construction feedback; **positional (3D, played at tile center — `AL_SOURCE_RELATIVE = AL_FALSE`; source position set to the world-space centroid of the road tile being built)**; authored to **−24 LUFS / −1 dBTP** |
+| `sfx_budget_warn` | SFX | WAV | 1–2 s | N | Budget deficit warning chime; fires when the city crosses the −25% deficit threshold; non-looping one-shot event alert. A sub-second chime is not long enough to register as a distinct alert separate from UI click sounds — minimum 1 s ensures perceptibility. **Confirmed WAV 1–2 s non-looping one-shot** (event chime for deficit threshold crossing, not a persistent loop). The 6 s minimum rule applies to engine loops only — non-looping one-shots have no loop fatigue concern. Resolution: 2026-02-20. Authored to **−24 LUFS / −1 dBTP** (general feedback SFX tier; recurring alert must not dominate the mix during extended budget crises). |
 | `sfx_loan_issued` | SFX | WAV | <1 s | N | Loan auto-issued; authored to **−24 LUFS / −1 dBTP** |
 | `stinger_crisis` | Music stinger | **WAV PCM** | 2–4 s | N | Crisis start; **mono; 1 channel**; one-shot; pre-loaded; reserved non-evictable SFX pool source **(index 55 — `StingerType::CRISIS`)**; **`AL_SOURCE_RELATIVE = AL_TRUE`** (non-positional — stingers represent game state, not 3D position; must not be distance-attenuated); music ducks to 0.4 gain on playback; authored to −18 LUFS / −1 dBTP |
 | `stinger_milestone` | Music stinger | **WAV PCM** | 2–3 s | N | Fires for **City Rating tier transitions** (Village→Town at 1K population; Town→City at 10K; City→Metropolis at 50K; Metropolis→Megalopolis at 500K). The 100K population milestone does NOT trigger this stinger — 100K is a population toast milestone only, not a City Rating transition. Population milestone toasts (1K/10K/50K/100K/500K) always appear regardless of whether the stinger fires. At thresholds that coincide with a City Rating transition (1K/10K/50K/500K), only the City Rating stinger fires — the population milestone toast still appears but no second stinger triggers; **mono; 1 channel**; one-shot; pre-loaded; reserved non-evictable SFX pool source (index 56); **`AL_SOURCE_RELATIVE = AL_TRUE`** (non-positional); music ducks to 0.4 gain on playback; authored to −18 LUFS / −1 dBTP. If a lightweight non-ducked sound for population-count-only milestones (e.g. 100K) is desired in future, a separate `sfx_population_notification` asset (WAV, <0.5 s, HIGH priority, no ducking) should be added post-V1. |
@@ -32,21 +36,25 @@
 | `sfx_vehicle_engine_move` | Vehicle SFX | **OGG Vorbis** | **6–20 s** | Y | Mono positional; pre-loaded; pitch varies with speed. Same duration rationale as `sfx_vehicle_engine_idle` (minimum 6 s, not 4 s). Authored to **−22 LUFS / −2 dBTP**. |
 | `sfx_vehicle_horn` | Vehicle SFX | WAV | **0.4–1 s** | N | Mono positional; **HIGH priority** (accesses the transient reserve sources[51..54]; NORMAL would be starved by engine sources in large cities); authored to **−18 LUFS / −1 dBTP**; minimum authored duration **0.4 s** (shorter sounds audibly like a click, not a horn). **Rate-limiting and source caps (enforced in AudioSystem)**: (1) **per-vehicle re-trigger cooldown**: 2 s minimum between horn triggers from the same vehicle entity; (2) **global simultaneous cap**: max 3 horn sources playing at any time across all vehicles — if already at 3 active sources, new horn requests are dropped silently; (3) **cull distance**: 100 m from listener (beyond which the horn is inaudible at `AL_INVERSE_DISTANCE_CLAMPED` max distance for vehicles). |
 | `sfx_intersection_tick` | SFX | WAV | <0.5 s | N | Traffic signal change sound; optional distance cull at >80 m; authored to **−28 LUFS / −2 dBTP** (very subtle ambient detail) |
-| `sfx_zone_upgrade` | SFX | WAV | 1–2 s | N | Zone tile auto-upgraded to higher density tier; positive/rewarding tone; authored to **−22 LUFS / −1 dBTP** |
-| `sfx_service_degrade` | SFX | WAV | 1–2 s | N | Service building entered reduced-coverage state (budget deficit degradation); warning tone distinct from `sfx_budget_warn`; authored to **−22 LUFS / −1 dBTP** |
-| `sfx_earthworks` | SFX | WAV | <1 s | N | Earthworks/terrain leveling applied at zone placement; short percussive impact; authored to **−24 LUFS / −1 dBTP** |
+| `sfx_zone_upgrade` | SFX | WAV | 1–2 s | N | Zone tile auto-upgraded to higher density tier; positive/rewarding tone; **`AL_SOURCE_RELATIVE = AL_TRUE`** (non-positional — plays at listener position regardless of world coordinates); **EFX bypass: yes (non-positional — no EFX send, no reverb insert, no lowpass occlusion applied)**; authored to **−22 LUFS / −1 dBTP** |
+| `sfx_service_degrade` | SFX | WAV | 1–2 s | N | Service building entered reduced-coverage state (budget deficit degradation); warning tone distinct from `sfx_budget_warn`; **`AL_SOURCE_RELATIVE = AL_TRUE`** (non-positional — plays at listener position regardless of world coordinates); **EFX bypass: yes (non-positional — no EFX send, no reverb insert, no lowpass occlusion applied)**; authored to **−22 LUFS / −1 dBTP** |
+| `sfx_earthworks` | SFX | WAV | <1 s | N | Earthworks/terrain leveling applied at zone placement; short percussive impact; **mono positional**; **`AL_SOURCE_RELATIVE = AL_FALSE`** (world-space — source position set to tile world-space centroid at trigger time); **`AL_DIRECT_FILTER: AL_FILTER_NULL` — EFX bypass because construction occurs on open, unoccluded tiles (design choice). This does NOT make the sound non-positional — `sfx_earthworks` remains a world-space positional source with `AL_SOURCE_RELATIVE = AL_FALSE`. Do NOT set `AL_SOURCE_RELATIVE = AL_TRUE`.** No lowpass occlusion applied; authored to **−24 LUFS / −1 dBTP** |
 | `ui_click` | UI | WAV | <0.2 s | N | Button click; **`AL_SOURCE_RELATIVE = AL_TRUE`** (non-positional); authored to **−24 LUFS / −1 dBTP** |
 | `ui_toast` | UI | WAV | <0.3 s | N | Toast notification chime; **`AL_SOURCE_RELATIVE = AL_TRUE`**; authored to **−22 LUFS / −1 dBTP** (must be clearly audible as a notification) |
 | `ui_menu_open` | UI | WAV | <0.3 s | N | Menu opened; **`AL_SOURCE_RELATIVE = AL_TRUE`**; authored to **−24 LUFS / −1 dBTP** |
 | `ui_menu_close` | UI | WAV | <0.3 s | N | Menu closed; **`AL_SOURCE_RELATIVE = AL_TRUE`**; authored to **−24 LUFS / −1 dBTP** |
 
-> **`stinger_game_over` is deferred to post-V1.** Scenario mode (the only gameplay context in which a game-over stinger fires) is a post-V1 feature. `stinger_game_over` will be added to the asset manifest when Scenario mode is implemented. At that point sources[57] will be reserved as the non-evictable GAME_OVER stinger slot and `kStingerCount` will increase from 2 to 3. See dynamic-soundscape.md for the post-V1 game-over duck interaction spec.
+**Implementation rule for `stinger_milestone`**: `stinger_milestone` fires on every City Rating tier transition event (Village→Town, Town→City, City→Metropolis, Metropolis→Megalopolis), regardless of whether the transition threshold also coincides with a population milestone count. The population milestone toast is orthogonal and always fires for 1K/10K/50K/100K/500K population counts. The "no second stinger at overlapping thresholds" rule means: if a City Rating transition and a population count milestone occur at the same tick, only ONE stinger fires (not two stingers of different types). It does NOT mean the stinger is suppressed when the transition threshold happens to match a population count.
+
+**`stinger_game_over` is deferred to post-V1.** Scenario mode (the only gameplay context in which a game-over stinger fires) is a post-V1 feature. `stinger_game_over` will be added to the asset manifest when Scenario mode is implemented. At that point sources[57] will be reserved as the non-evictable GAME_OVER stinger slot and `kStingerCount` will increase from 2 to 3. See dynamic-soundscape.md for the post-V1 game-over duck interaction spec.
 
 ## SoundId Assignment Table
 
 > **These integer values are locked. Do not reassign. `sound_ids.h` must use exactly these values.**
 
 `SoundId` 0 is reserved as the invalid/null identifier. All V1 SFX and UI assets are assigned stable integer values starting at 1. Zone loop assets are positional sound buffers loaded at startup and share the same `SoundId` namespace as other pre-loaded SFX.
+
+> **Zone loop SoundId constants use the `SFX_` prefix (not `ZONE_` alone) to distinguish them from the `ZoneType` enum values defined in `simulation_types.h`. Zone loops are positional pre-loaded sounds, not streaming audio.**
 
 | SoundId | Asset Name | Category |
 |---|---|---|
@@ -67,9 +75,9 @@
 | 14 | `sfx_vehicle_engine_move` | Vehicle SFX |
 | 15 | `sfx_vehicle_horn` | Vehicle SFX |
 | 16 | `sfx_intersection_tick` | SFX |
-| 17 | `zone_residential` | Zone loop |
-| 18 | `zone_commercial` | Zone loop |
-| 19 | `zone_industrial` | Zone loop |
+| 17 | `sfx_zone_residential` | Zone loop |
+| 18 | `sfx_zone_commercial` | Zone loop |
+| 19 | `sfx_zone_industrial` | Zone loop |
 | 20 | `stinger_crisis` | Music stinger |
 | 21 | `stinger_milestone` | Music stinger |
 | 22 | `ui_click` | UI |
@@ -85,7 +93,7 @@ Post-V1 additions (e.g., `stinger_game_over`, `sfx_population_notification`) MUS
 
 > **These integer values are locked. Do not reassign. `sound_ids.h` must use exactly these values.**
 
-`MusicTrackId` 0 is reserved as the invalid/null identifier. All V1 streamed music assets (main menu stems and gameplay stems) are assigned stable integer values starting at 1. Ambient bed streams use `SoundId` (see above) because they share the pre-loaded asset path; only assets managed exclusively by the music crossfade state machine use `MusicTrackId`.
+`MusicTrackId` 0 is reserved as the invalid/null identifier. All V1 streamed music assets (main menu stems and gameplay stems) are assigned stable integer values starting at 1. Ambient bed streams are selected internally by `AudioSystem` using the `TimeOfDay` enum — they do NOT have `SoundId` constants in `sound_ids.h` and are not passed to `playSound()` or `playPositionalSound()`. Their filenames are resolved by `AudioSystem`'s `TimeOfDay`-to-filename mapping table. Only assets managed exclusively by the music crossfade state machine use `MusicTrackId`.
 
 | MusicTrackId | Asset Name | Category |
 |---|---|---|
@@ -113,12 +121,24 @@ All V1 audio assets reside at `${AITOWN_ASSETS_DIR}/audio/<filename>` (flat layo
 | Stingers (crisis/milestone; game-over post-V1) | −18 LUFS | −1 dBTP |
 | Ambient beds | −20 LUFS | −1 dBTP |
 | CRITICAL service alerts (fire/police), vehicle horn | −18 LUFS | −1 dBTP |
-| Budget deficit warning (budget_warn) | −20 LUFS | −1 dBTP |
 | Important gameplay notifications (zone_upgrade, service_degrade, power_out, water_out) | −22 LUFS | −1 dBTP |
-| General feedback SFX (build, demolish, road, loan, earthworks) | −24 LUFS | −1 dBTP |
+| General feedback SFX (build, demolish, road, loan, earthworks, budget_warn) | −24 LUFS | −1 dBTP |
 | Very subtle ambient detail (intersection_tick) | −28 LUFS | −2 dBTP |
 | Vehicle engine (idle/move) | −22 LUFS | −2 dBTP |
 | Zone loops | −26 LUFS | −2 dBTP |
-| UI sounds (click, toast, menu) | −22 to −24 LUFS | −1 dBTP |
+| UI notification sound (ui_toast) | −22 LUFS | −1 dBTP |
+| UI action sounds (ui_click, ui_menu_open, ui_menu_close) | −24 LUFS | −1 dBTP |
 
 All loudness targets are **integrated LUFS** (ITU-R BS.1770-3) measured on the authored file before runtime gain, distance attenuation, or pitch shift. Runtime processing (OpenAL distance model, gain crossfades) affects perceived level but not the authoring target.
+
+## OGG Vorbis Encoding Quality Minimums
+
+| Asset category | Minimum OGG quality flag | Approximate bitrate |
+|---|---|---|
+| Music stems (gameplay + main menu) | `-q 8` | ~256 kbps VBR |
+| Ambient beds | `-q 7` | ~224 kbps VBR |
+| Zone loops | `-q 6` | ~192 kbps VBR |
+
+Lower quality flags are not acceptable for V1 — audible compression artifacts on
+sustained or ambient passages undermine the production quality goal.
+These floors apply to the authored OGG files; they are a delivery requirement, not a runtime concern.

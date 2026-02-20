@@ -3,8 +3,15 @@
 | Tier | Duration | Format | Loading strategy |
 |---|---|---|---|
 | Short SFX / UI | < 5 s | WAV PCM | Pre-loaded AL buffer |
-| Looping game SFX | 5–20 s | OGG Vorbis | Pre-loaded (full decode at load time into AL buffer) |
+| Looping game SFX | 5 s ≤ duration < 20 s | OGG Vorbis | Pre-loaded (full decode at load time into AL buffer) |
 | Music / long ambient | ≥ 20 s | OGG Vorbis | Streamed via buffer queue (dedicated audio thread) |
+
+**Tier 2 / Tier 3 boundary is EXCLUSIVE**: Tier 2 covers files strictly less than 20 s (i.e., duration < 20 s). Tier 3 covers files of exactly 20 s or longer (duration ≥ 20 s). A file that is exactly 20 s long is Tier 3 (streamed), not Tier 2.
+
+**Asset-to-tier mapping**:
+
+- Zone loops (`sfx_zone_residential`, `sfx_zone_commercial`, `sfx_zone_industrial`): authored at 12–18 s with a hard cap of 18 s — fall in **Tier 2** (pre-loaded, full decode into AL buffer). The 18 s hard cap ensures zone loops remain safely in Tier 2 with a 2 s margin below the 20 s boundary.
+- Ambient beds (`ambient_day`, `ambient_night`, `ambient_dawn`, `ambient_dusk`): authored at 90–120 s — fall in **Tier 3** (streamed, dual-buffer 64 KB queue on the dedicated audio thread).
 
 - Sample rate: 44100 Hz; Bit depth: 16-bit signed PCM
 - 3D positional sounds: **mono** (OpenAL spatialization requires mono)

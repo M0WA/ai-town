@@ -20,6 +20,14 @@
       newLODMesh->getMeshBuffer(i)->recalculateBoundingBox();
   newLODMesh->recalculateBoundingBox();  // must come AFTER all buffer recalculations
   node->setMesh(newLODMesh);   // Irrlicht calls grab() internally → newLODMesh ref_count becomes 2
+  // NOTE: The drop() call below assumes Irrlicht calls grab() on the mesh inside setMesh()
+  // (consistent with the Tutorial 10 pattern and CMeshSceneNode::setMesh() implementation).
+  // This assumption MUST be validated by inspecting source/Irrlicht/CMeshSceneNode.cpp
+  // in the vendored Irrlicht build — specifically whether setMesh() calls grab()/drop()
+  // on the new/old mesh. This is the Phase 1 LOD spike (lod_swap_smoke_test.cpp),
+  // NOT the GLEW availability spike. See the CONTINGENCY block below.
+  // If the spike reveals that grab() is NOT called by setMesh(), remove this drop() — see
+  // the CONTINGENCY block in this file (§"CONTINGENCY — if spike reveals grab() is NOT called").
   newLODMesh->drop();          // release caller's ref → ref_count drops to 1; scene node is now sole owner
   ```
 
@@ -33,17 +41,55 @@
       // addMeshBuffer() calls grab() on the buffer. If it does, the caller must
       // call ->drop() after addMeshBuffer(); if it does not, the caller owns the
       // buffer and must not call ->drop().
-      // Until the spike result is documented, this body must remain SUCCEED().
-      SUCCEED();
+      // Timing measurement requires a real GPU; this test is promoted to
+      // requires-opengl label in Phase 2 when the real LOD swap is implemented.
+      GTEST_SKIP() << "LOD swap timing requires real GPU; promoted to Phase 2.";
   }
   ```
 
-  Phase 6 fills in the real test body after the spike result is confirmed. The Phase 1 CMake registration of this file (with SUCCEED() body) validates CI routing for the requires-opengl label.
+  Phase 6 fills in the real test body after the spike result is confirmed. The Phase 1 CMake registration of this file (with `GTEST_SKIP()` body) validates CI routing for the requires-opengl label. **Note**: this body must remain `GTEST_SKIP()` — `SUCCEED()` produces a false-green result that implies the timing constraint has been verified.
 
   If this test fails (crash or ASAN fault), the vendored Irrlicht source must be patched before any LOD swap code is written. Inspect `source/Irrlicht/CMeshSceneNode.cpp` to confirm `setMesh()` calls `grab()`/`drop()` on the new/old mesh.
   **PENDING SPIKE — `SMesh::addMeshBuffer()` grab/drop contract**: The smoke test body above calls `newMesh->addMeshBuffer(new SMeshBuffer())`. Whether `SMesh::addMeshBuffer()` calls `grab()` on the buffer argument **must be verified** by inspecting `source/Irrlicht/SMesh.h` at Phase 1 implementation time. If `addMeshBuffer()` calls `grab()`, the caller must call `->drop()` on the `SMeshBuffer*` immediately after `addMeshBuffer()` to relinquish the caller's ownership reference — otherwise the buffer leaks (ref_count 2, never reaches 0). If `addMeshBuffer()` does NOT call `grab()`, the caller retains sole ownership and must NOT call `->drop()` after `addMeshBuffer()`. The smoke test body in `tests/rendering/lod_swap_smoke_test.cpp` must be updated to reflect the confirmed convention once the source has been read. **Record the result of this spike as a one-line comment in both `tests/rendering/lod_swap_smoke_test.cpp` and this spec file**, e.g.: `// VERIFIED: SMesh::addMeshBuffer() calls grab(); caller must drop() after addMeshBuffer().`
+  **CONTINGENCY — if spike reveals grab() is NOT called**: If the Phase 1
+  `lod_swap_smoke_test.cpp` spike reveals that the vendored Irrlicht
+  `CMeshSceneNode::setMesh()` does NOT call `grab()` on the new mesh:
+
+  1. The LOD swap sequence in this document must be corrected: remove the
+     `drop()` call after `setMesh()`. The caller must NOT drop the mesh after
+     passing it to `setMesh()`, as there is no corresponding grab to
+     counteract the drop.
+  2. The `lod_swap_smoke_test.cpp` must be updated to verify (via ASAN) that
+     the mesh survives the swap without the caller's `drop()`.
+  3. This finding is a BLOCKING gate for Phase 2 TerrainChunk implementation
+     — `scene-graph-ownership.md` must be updated before Phase 2 code touches
+     `setMesh()`.
+  4. The spec update must also be noted in `implementation/phase-1.md` exit
+     criteria as a Phase 1 spike finding that either: (a) confirms the
+     `grab()` pattern is correct and Phase 2 may proceed, or (b) documents
+     the corrected no-drop pattern.
+
   **`recalculateBoundingBox()` type requirement**: `recalculateBoundingBox()` is a method of the concrete `SMesh` class, NOT the `IMesh` interface. The mesh pointer must be typed as `SMesh*` (not `IMesh*`) at the point this method is called. After `addMeshSceneNode()` or `setMesh()`, the scene node stores the mesh as `IMesh*` — do NOT call `getMesh()` on the scene node and attempt to call `recalculateBoundingBox()` on the returned pointer; it is typed as `IMesh*` and this method is not on the interface. Always call `recalculateBoundingBox()` before `setMesh()` while the `SMesh*` is still in scope.
 - Only destroy and recreate the scene node on entity death or chunk unload. Terrain chunks always require a full node rebuild (vertex count changes between LOD levels).
+
+### WARNING — SMesh* Downcast Safety
+
+**Never use `static_cast<SMesh*>` on an `IMesh*` pointer unless you can guarantee the pointer was originally created as an `SMesh`.** Performing a `static_cast` on an `IMesh*` that actually points to an Irrlicht-internal mesh type (e.g. `CSkinnedMesh`, `CStaticMesh`, or any other concrete type returned by the asset loader) is undefined behavior — the object layout does not match `SMesh` and any subsequent member access corrupts memory silently.
+
+**The LOD asset cache must preserve the `SMesh*` type end-to-end.** Store as `SMesh*`; retrieve as `SMesh*`. Never store a `SMesh*` into an `IMesh*` container and cast it back later. The cast is unverifiable by the type system and becomes a latent UB hazard the moment any cache entry is replaced with a non-SMesh asset.
+
+**If you only have an `IMesh*`** (e.g. from a third-party loader path or a future API refactor), use `dynamic_cast<SMesh*>` with a null check in debug builds:
+
+```cpp
+#ifndef NDEBUG
+SMesh* safeMesh = dynamic_cast<SMesh*>(iMeshPtr);
+assert(safeMesh != nullptr && "IMesh* is not an SMesh — static_cast would be UB");
+#else
+SMesh* safeMesh = static_cast<SMesh*>(iMeshPtr); // only safe after debug verification
+#endif
+```
+
+Abort (assert) on null in debug builds so the error is caught before any undefined behavior occurs in release. The `dynamic_cast` guard is a debug-only safety net; the correct long-term fix is to eliminate the `IMesh*` storage path entirely and keep `SMesh*` typed throughout.
 
 ### CameraController — Preventing Animator Conflicts
 

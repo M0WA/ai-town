@@ -17,38 +17,31 @@ Using the interleaved scalar count instead of the frame count in `alBufferData` 
 ---
 
 - Dedicated **audio thread** (`std::thread` + `std::mutex` + `std::condition_variable`) wakes every **10 ms** independent of frame rate (not 20 ms — see proactive starvation prevention note below)
-- **CRITICAL — audio thread must set context current at startup**: The audio thread entry function must call `alcSetThreadContext(m_context)` as its **first action** before any AL calls. However, `alcSetThreadContext` is part of the `ALC_EXT_thread_local_context` extension and must be loaded via `alcGetProcAddress` — never called directly. Check extension availability and load the function pointer at `AudioSystem` construction:
+- **CRITICAL — audio thread must set context current at startup**: The audio thread entry function must call `m_fnSetThreadCtx(m_context)` as its **first action** before any AL calls. The constructor sequence for loading this function pointer and handling its absence is defined canonically in `audio-system.md` — this spec does not duplicate it. See `audio-system.md`, section "ALC_EXT_thread_local_context Requirement", for the full constructor sequence.
+
+  **Summary of the canonical protocol (defined in `audio-system.md`)**: `alcGetProcAddress(m_device, "alcSetThreadContext")` is the sole check — `alcIsExtensionPresent` is NOT called for this extension. If `alcGetProcAddress` returns null, the `AudioSystem` constructor throws `std::runtime_error` synchronously before launching the audio thread. `m_useThreadLocalCtx` is set to `true` only after the proc address is confirmed non-null, immediately before `m_audioThread` is launched. The audio thread therefore never runs without a valid `m_fnSetThreadCtx` — there is no in-thread missing-extension detection branch, no `m_initError = true` path for a missing extension, and no `else` branch that signals init failure for an absent extension. The only `m_initError` paths in the audio thread are for `m_fnSetThreadCtx(m_context) == ALC_FALSE` (context bind failure) and other runtime errors encountered after the thread has started.
+
+  The audio thread init block is:
 
   ```cpp
-  // In AudioSystem constructor, store for use by audio thread:
-  m_useThreadLocalCtx = alcIsExtensionPresent(m_device, "ALC_EXT_thread_local_context") == ALC_TRUE;
-  if (m_useThreadLocalCtx) {
-      m_fnSetThreadCtx = reinterpret_cast<PFNALCSETTHREADCONTEXTPROC>(  // type from <AL/alext.h>; not LPALCSETTHREADCONTEXT
-          alcGetProcAddress(m_device, "alcSetThreadContext"));  // Use m_device (not nullptr) — alcSetThreadContext is a device-level extension
-      if (!m_fnSetThreadCtx) m_useThreadLocalCtx = false;
-  }
-
   // At the top of audio thread, BEFORE any AL call:
-  if (m_useThreadLocalCtx) {
-      if (m_fnSetThreadCtx(m_context) == ALC_FALSE) {
-          { std::lock_guard<std::mutex> lk(m_initMutex); m_initError = true; m_initDone = true; }
-          m_initCV.notify_one();
-          return;
-      }
-  } else {
-      // ALC_EXT_thread_local_context is absent — this is a HARD INITIALIZATION FAILURE.
-      // Do NOT fall back to relying on alcMakeContextCurrent on the main thread.
-      // Without thread-local context, all AL calls from this thread invoke undefined behavior.
+  // m_fnSetThreadCtx is guaranteed non-null here (constructor threw if it was null).
+  if (m_fnSetThreadCtx(m_context) == ALC_FALSE) {
       { std::lock_guard<std::mutex> lk(m_initMutex); m_initError = true; m_initDone = true; }
       m_initCV.notify_one();
-      return;  // MUST return — do NOT continue into the streaming loop
+      return;
   }
+  // IMPORTANT: initialize m_lastDuckWakeTime BEFORE notify_one().
+  // notify_one() unblocks the constructor immediately; if the main thread then calls
+  // triggerStinger() before m_lastDuckWakeTime is written, the audio thread computes
+  // an epoch-sized dt on its first wake (data race / UB).  Initialize first, signal after.
+  m_lastDuckWakeTime = m_clock->nowSeconds();
   { std::lock_guard<std::mutex> lk(m_initMutex); m_initDone = true; }
   m_initCV.notify_one();
   // Now enter streaming loop...
   ```
 
-  **If the extension is absent, this is a hard initialization failure** — `ALC_EXT_thread_local_context` is required for correct multi-threaded OpenAL operation. Without it, the audio thread cannot make its context current, and all AL calls from the audio thread produce undefined behavior. The audio thread must set `m_initError = true` and signal `m_initCV`, causing the constructor to throw and AudioSystem to fail initialization. **Do not fall back to relying on `alcMakeContextCurrent` on the main thread** — that approach relies on undefined behavior where the single shared context becomes "current" on whichever thread last called `alcMakeContextCurrent`, which is not guaranteed to be the audio thread. OpenAL Soft on any reasonably modern system (≥2013) ships with `ALC_EXT_thread_local_context`; failure indicates a severely outdated OpenAL installation.
+  **If `ALC_EXT_thread_local_context` is absent, the constructor throws before the thread is ever launched** — the audio thread never observes this condition. Do not fall back to relying on `alcMakeContextCurrent` on the main thread — that approach is undefined behavior for multi-threaded OpenAL and is prohibited. OpenAL Soft on any reasonably modern system (2013 or later) ships with `ALC_EXT_thread_local_context`; a null proc address indicates a severely outdated OpenAL installation.
 - **8 buffers × 64 KB each** (~3 s total buffered audio at 44100 Hz stereo: 8 × 16384 frames / 44100 Hz ≈ 2.97 s) — main-thread update would risk starvation during large city loads
 - `AudioStream` holds `OggVorbis_File` as a **persistent member** across updates (opened via `ov_fopen` or `ov_open_callbacks`; closed via `ov_clear` in destructor; not re-opened each call)
 - **Audio thread loop structure** — check `m_stopThread` FIRST after waking, before any AL call: this ensures once `join()` returns, no AL calls are in-flight, making the main-thread shutdown sequence (stop/unqueue/delete) safe from race conditions:

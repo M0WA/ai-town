@@ -118,7 +118,7 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
 
   | Suffix | Usage |
   |---|---|
-  | `_d` | Diffuse/albedo |
+  | `_d` | Diffuse/albedo. Upload path: **sRGB raw-GL path** (`GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` / `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`) for all photographic/perceptual diffuse textures. **Exception: vehicle sprite atlas (`vehicles_sprite_atlas_d.dds`) uses `_d` suffix but LINEAR upload path** — palette swatches are not photographic diffuse data and must not be sRGB-decoded. The sprite atlas is uploaded via `IVideoDriver::getTexture()` (linear pool), NOT the sRGB raw-GL path. See `architecture/asset-standards/building-atlas-layout.md` sprite atlas section. |
   | `_n` | Normal map (DXT5nm) |
   | `_s` | Specular (grayscale) |
   | `_sp` | Specular packed (multi-channel roughness/metallic/AO) |
@@ -126,6 +126,8 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
   | `_billboard` | Billboard imposter atlas (1024×128 DXT5 sRGB, 1×8 horizontal strip) |
 
   All suffixes are lowercase. No other suffix patterns are valid. `validate_assets.py` must reject any DDS file whose name does not end with one of these six suffixes. The `_billboard` suffix applies exclusively to LOD2 imposter atlases — small building and prop assets that ship a `_billboard.dds` must NOT also ship a `_lod2.b3d` mesh.
+
+**Upload path determination**: suffix `_d` alone does NOT determine the upload path. Diffuse textures that contain photographic color must use the sRGB raw-GL path. Diffuse textures that encode stylised data (e.g. vehicle sprite atlas roof swatches) must use the linear path. The `TextureCache` upload path is determined by the texture category, not the suffix alone. See `architecture/graphics-architecture/texture-cache.md` for the dispatch table.
 
 ### Resolution Matrix
 
@@ -148,7 +150,7 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
 
 **Facade texture policy**: All building facade diffuse textures must use atlas cells — no standalone per-building non-atlas textures for facade diffuse. Each unique wall module variant occupies one 512×512 cell in the 2048×2048 city building atlas (16 unique wall module textures per atlas sheet). Effective density at 512×512 for a 4×3 m module face: ~128 px/m at LOD0 near-camera distance.
 
-**Building atlas usable content area per cell**: With 8 texels per-cell border on each of the 4 edges, the usable content area per 512×512 facade atlas cell is **496×496 px** (512 − 8 − 8 = 496 px per axis). All facade art — window detail, surface materials, trim lines — must be authored to fit within this 496×496 usable zone. Content that bleeds into the 8 px border zone will exhibit mip-level bleed at distant views (the border pixels from adjacent cells become visible). The export validation script must verify that all non-transparent atlas cell pixels fall within the [8, 504] UV texel range on both axes.
+**Building atlas usable content area per cell**: With 8 texels per-cell border on each of the 4 edges, the usable content area per 512×512 facade atlas cell is **496×496 px** (512 − 8 − 8 = 496 px per axis). All facade art — window detail, surface materials, trim lines — must be authored to fit within this 496×496 usable zone. Content that bleeds into the 8 px border zone will exhibit mip-level bleed at distant views (the border pixels from adjacent cells become visible). The export validation script must verify that all non-transparent atlas cell pixels fall within the [8, 504) UV texel range on both axes (i.e., valid texel indices 8–503 inclusive, giving 496 usable texels per axis).
 
 **Building variants within the same zone-tier combination share wall module atlas cells** — only distinct module types (wall, base, roof, facade detail) require separate cells. See `architecture/asset-standards/building-atlas-layout.md` for the confirmed binding cell-sharing decision, sign-off requirements, and the full example of `res_low_01` / `res_low_02` variant sharing. Do NOT author a new atlas cell for a building variant unless it introduces a genuinely new module type not covered by any existing cell.
 

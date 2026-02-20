@@ -30,3 +30,14 @@
 - **Growth and decay caps are relative to `max_density_for_tier`** (not `actual_population`):
   - Growth cap: `+10% of max_density_for_tier` per budget tick. A Low-density residential tile (max 100 residents) may gain at most 10 residents per tick regardless of demand or desirability.
   - Decay cap: `−15% of max_density_for_tier` per budget tick. A Low-density residential tile may lose at most 15 residents per tick. Using `max_density_for_tier` (not `actual_population`) ensures the cap is stable and not arbitrarily small when the tile is nearly empty.
+
+## SimulationConstants Mapping
+
+The following named constants in `simulation_constants.h` canonicalize values that appear as inline literals ("+10%", "−15%") in this spec. Phase 3 property-based tests MUST reference these names rather than hardcoding magic numbers. Any change to a value requires updating the constant definition only.
+
+| Constant name | Value | Spec meaning |
+|---|---|---|
+| `SimulationConstants::population_growth_cap_fraction` | `0.10f` | Maximum population growth per budget tick, expressed as a fraction of `max_density_for_tier`. Concretely: `growth_cap = max_density_for_tier × population_growth_cap_fraction`. For a Low-density Residential tile (max 100) this caps growth at 10 residents/tick. |
+| `SimulationConstants::population_decay_cap_fraction` | `0.15f` | Maximum population decay per budget tick, expressed as a fraction of `max_density_for_tier`. Concretely: `decay_cap = max_density_for_tier × population_decay_cap_fraction`. For a Low-density Residential tile (max 100) this caps decay at 15 residents/tick. The decay cap is intentionally larger than the growth cap to create asymmetric urgency — populations fall faster than they rise, incentivizing prompt infrastructure investment. |
+
+**Implementation note**: Both constants are `float`. They are applied as multipliers against `max_density_for_tier` (an integer per-tier value), yielding a floating-point delta that is then rounded to the nearest integer resident count before application. Both must be defined as `static constexpr float` members of `SimulationConstants` in `simulation_constants.h`.

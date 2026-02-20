@@ -8,7 +8,41 @@
   - **Streak-break feedback**: When the deficit recovers above −50% during an active streak (streak is broken), display a Normal toast: "Deficit streak broken — finances stabilizing." This confirms to the player that their intervention worked. The red flashing indicator is removed and simulation speed is not artificially constrained.
   - **Streak-reset rule**: The streak counter resets when any budget tick fires with deficit < −50% (even −49% breaks the streak). Streak month 1 re-fires a new CRITICAL toast only when the deficit falls to ≥ −50% again for the first time after a reset — do NOT re-fire the month-1 toast if the deficit has been continuously ≥ −50%.
   - **Speed-reduction implementation**: The auto-slow to 1× on month 1 calls `CitySimulation::setSpeed(SpeedMultiplier::x1)` and fires an `AITOWN_HEADLESS`-compatible notification event. The player retains full speed selector control — this is a suggestion enforced once, not a persistent lock. If the player increases to 3× or 10×, they have acknowledged the risk.
+  - **Auto-slow implementation rule**: `CitySimulation::tick()` calls `setSpeed(SpeedMultiplier::x1)` unconditionally when it detects that the month-1 deficit streak threshold has been crossed — it does NOT check `GameMode` before doing so. Stopping simulation time is a pure simulation concern. `UIManager` is the caller that inspects `GameMode` before triggering UI-layer responses (e.g., toasts, the flashing budget indicator, and ultimately `transitionToGameOver()`). This separation is intentional: the simulation layer owns time; the UI layer owns presentation and mode-conditional gating.
+- **ICitySimulation interface — deficit streak accessor**: The ICitySimulation interface must expose `getConsecutiveDeficitMonths() const -> int` so that the notification system can determine which progressive warning toast to fire (0 = no warning, 1 = "2 months to bankruptcy", 2 = "1 month to bankruptcy", 3+ = game-over trigger) without direct access to the concrete simulation state. This method returns 0 during the grace period. The method returns the count of completed deficit months at the END of the budget tick in which they were evaluated — i.e., after the budget tick that triggers the Nth deficit month fires, `getConsecutiveDeficitMonths()` returns N. At game-over trigger (month 3), the method returns 3. The grace-period return value of 0 is not a special override: it reflects the fact that deficit consequence evaluation is suppressed during the grace period, so the counter is never incremented.
 - **Sandbox mode**: Game-over does **not** apply in Sandbox mode (difficulty = any tier); Sandbox is open-ended
 - **Scenario mode**: Game-over applies; triggers a blocking `ModalDialog`
 - **Game-over modal content**: Title: "City Bankrupt", Body: current debt, months in deficit, options: Load Last Save / Return to Main Menu
+  - **V1 applicability — "Load Last Save" transition**: In V1, selecting "Load Last Save" transitions directly from `GameOver` to `Gameplay` synchronously; there is no discrete `Loading` state in the `GameState` enum (`{ MainMenu, Gameplay, Paused, GameOver }`). A discrete `Loading` state is post-V1 scope. Phase 8 implementers must NOT add a `Loading` state to `GameState` for V1; the `GameOver → Gameplay` direct transition is the correct and complete V1 behavior.
 - **Clean exit**: Selecting any option performs a clean simulation shutdown (saves state if possible) before transitioning; no abrupt exit
+
+## Game Mode Applicability
+
+This section is the authoritative reference for which game-over flow components are active in each game mode. Phase 3 `CitySimulation` implementers and Phase 5 `NotificationManager` implementers must follow these rules exactly.
+
+| Mechanic | Sandbox mode | Scenario mode |
+|---|---|---|
+| `getConsecutiveDeficitMonths()` counter increments normally | YES | YES |
+| Month-1 CRITICAL toast ("2 months to bankruptcy") | YES | YES |
+| Month-1 auto-slow to 1× simulation speed | YES | YES |
+| Month-2 CRITICAL toast ("1 month to bankruptcy") + red flashing budget indicator | YES | YES |
+| Streak-break "finances stabilizing" Normal toast | YES | YES |
+| Month-3 `transitionToGameOver()` + blocking `ModalDialog` | NO | YES |
+
+**Explicit rules:**
+
+- The deficit mechanic (budget tick evaluation, debt cap, forced loans, Emergency Municipal Bond) is active in both Sandbox and Scenario modes. The ≥ −50% deficit streak is tracked in both modes.
+- `getConsecutiveDeficitMonths()` returns the actual counter value in all modes. It is NOT hardcoded to 0 in Sandbox mode. Sandbox does not suppress or zero the counter — it only suppresses the final `transitionToGameOver()` call.
+- Progressive warnings (CRITICAL deficit toasts and auto-slow-to-1×) fire in Sandbox mode exactly as they do in Scenario mode. A Sandbox player running a deep deficit sees the same month-1 and month-2 warnings a Scenario player would see. These warnings are informational feedback, not game-ending triggers.
+- The sole Sandbox exemption is `transitionToGameOver()`: when `getConsecutiveDeficitMonths()` reaches 3 in Sandbox mode, the simulation does NOT transition to `GameOver` state, does NOT show the "City Bankrupt" modal, and continues running. The simulation remains in `Running` state indefinitely.
+- In Sandbox mode, when the deficit recovers above −50% after an active streak, the streak-break toast ("Deficit streak broken — finances stabilizing.") fires normally and the red flashing indicator (if active from month 2) is removed.
+
+**Implementer rule for `CitySimulation`**: `CitySimulation` must evaluate the game-over condition based purely on simulation state — specifically, whether `getConsecutiveDeficitMonths()` has reached 3 and the deficit is still ≥ −50%. `CitySimulation` must NOT reference `GameMode` (a UI-layer enum that lives in `src/ui/ui_types.h`) at any point. The deficit counter increment, auto-slow calls, and notification event dispatch all execute unconditionally when the relevant deficit threshold is crossed, with no game-mode gating inside `CitySimulation`.
+
+**Implementer rule for `UIManager`**: `UIManager` reads `getConsecutiveDeficitMonths()` from `ICitySimulation` and is the sole component responsible for checking the current `GameMode` before acting on that value. When the counter reaches 3, `UIManager::transitionToGameOver()` fires only if the current `GameMode` is `Scenario`; in `Sandbox` mode `UIManager` does nothing at month 3. All mode-conditional presentation logic — including suppressing the "City Bankrupt" modal in Sandbox — belongs exclusively in `UIManager`. `CitySimulation` fires the bankruptcy condition based purely on simulation state; `UIManager` reads that state and responds according to the current `GameMode`.
+
+**Testability of the deficit-streak polling bridge**: The polling bridge (`UIManager::update()` calls `ICitySimulation::getConsecutiveDeficitMonths()` each frame and dispatches CRITICAL toasts via `NotificationManager::postCritical()`) is verified at two distinct test phases with explicitly separated responsibilities:
+
+- **Phase 3 `CitySimulation` unit tests** verify only that `getConsecutiveDeficitMonths()` returns the correct integer value after each deficit month is processed. These tests do NOT verify toast dispatch — they confirm only that the counter increments, resets, and returns the correct value according to the rules above.
+- **Phase 5 integration tests** verify the full toast-dispatch chain: `UIManager::update()` polling `getConsecutiveDeficitMonths()` → `NotificationManager::postCritical()` triggering the CRITICAL toast. These tests use a real `UIManager` instance wired to a `MockUIBackend` (via `IUIBackend`) so that toast calls can be captured and asserted without a live display.
+- **`MockUIManager` must NOT be created.** `UIManager` is always tested through its `IUIBackend` mock. Creating a `MockUIManager` would bypass the real polling logic and produce tests that verify mock behaviour rather than production code. See `testability-architecture.md` for the full mock policy.

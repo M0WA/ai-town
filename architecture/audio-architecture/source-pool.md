@@ -29,6 +29,44 @@ Named constants (V1): kEvictableSFXCount = 55, kStingerCount = 2,
 ```
 
 **Rationale for kStreamSourceCount = 4**: At most 2 music stems are simultaneously active (outgoing + incoming crossfade) and at most 2 ambient bed sources are simultaneously active (active + crossfade target). 4 stream slots cover all simultaneous usage exactly. Allocating 6 stream slots (as in a prior draft) would permanently waste 2 non-evictable sources that can never be acquired by any code path.
+
+## Phase 1 Compile-Time Constants
+
+These constants MUST be declared as `constexpr` in `src/interfaces/audio_types.h` during Phase 1:
+
+```cpp
+// Phase 1 compile-time constants — declared in src/interfaces/audio_types.h
+constexpr int kEvictableSFXCount   = 55;  // sources[0..54]
+constexpr int kStingerCount        = 2;   // V1: sources[55..56] (CRISIS + MILESTONE)
+constexpr int kSFXPoolSize         = 58;  // 55 evictable + 2 stingers + 1 reserved (sources[57])
+constexpr int kStreamSourceCount   = 4;   // sources[58..61] (2 music + 2 ambient beds)
+constexpr int kTotalSources        = 62;  // total alGenSources(62, ...)
+constexpr int kTransientReserveStart = 51;  // acquireSFXSource(): LOW/NORMAL limited to [0..50]; HIGH/CRITICAL may use [0..54]
+static_assert(kTransientReserveStart < kEvictableSFXCount,
+              "Transient reserve start must be within the evictable SFX pool range");
+constexpr int kMaxVehiclePairs     = 12;  // max simultaneous vehicle engine source pairs (24 traffic slots / 2 per vehicle)
+static_assert(kMaxVehiclePairs * 2 <= kEvictableSFXCount,
+              "Vehicle pair capacity must not exceed evictable SFX pool");
+
+// Companion static_assert to detect layout inconsistencies at compile time:
+static_assert(kEvictableSFXCount + kStingerCount + 1 + kStreamSourceCount == kTotalSources,
+              "Source pool layout constants are inconsistent — update source-pool.md");
+```
+
+These constants must be declared in Phase 1 `audio_types.h` (at `src/interfaces/audio_types.h`) alongside the `StingerType` enum so Phase 4 pool construction uses named constants rather than magic literals, and any layout change triggers an immediate compile error.
+
+**Constant definitions**:
+
+- `kEvictableSFXCount = 55`: the count of general-purpose SFX sources subject to priority-based eviction. Also the loop bound for EFX occlusion filter allocation, the `m_occlusionFilter[]` array size, and the upper limit (exclusive) for `acquireSFXSource()` eviction candidates.
+- `kStingerCount = 2` (V1): the count of non-evictable stinger reservation slots. Post-V1 promotion to 3 (GAME_OVER) increments only this constant — all others remain unchanged.
+- `kSFXPoolSize = 58`: the boundary between the SFX region (indices 0..57) and the stream region (indices 58..61). Equals `kEvictableSFXCount + kStingerCount + 1` (the `+1` is the idle post-V1 game-over slot at index 57). Used as the upper loop bound in SFX shutdown cleanup (step 4a of audio-thread-shutdown.md).
+- `kStreamSourceCount = 4`: the count of non-evictable stream sources (2 music + 2 ambient beds). Stream sources occupy indices `[kSFXPoolSize .. kTotalSources-1]` = `[58..61]`.
+- `kTotalSources = 62`: the argument to the single `alGenSources(kTotalSources, sources)` call at `AudioSourcePool` construction.
+- `kTransientReserveStart = 51`: the first source index within the evictable SFX pool that is soft-reserved for transient HIGH/CRITICAL priority callers only. `acquireSFXSource()` enforces this boundary: LOW and NORMAL priority callers consider only `sources[0..50]` (indices 0 through `kTransientReserveStart - 1`); HIGH and CRITICAL priority callers may consider `sources[0..54]` (the full evictable pool). The 4-slot reserve (`sources[51..54]`) prevents up-to-24 NORMAL-priority vehicle engine sources from absorbing slots that must remain available for brief HIGH-priority transient events (vehicle horns, UI confirmations, build/demolish feedback). The value 51 is deliberately defined as a named constant rather than derived from `kEvictableSFXCount - 4` to make the boundary explicit and independently auditable.
+- `kMaxVehiclePairs = 12`: the maximum number of simultaneously-audible vehicle engine source pairs. Each vehicle requires 2 sources (one idle, one move), so `kMaxVehiclePairs * 2 = 24` pool slots are consumed at peak load. This matches the 24-slot Traffic/Vehicle SFX budget in the Source Budget Allocation table. The `m_vehiclePairs` array in `AudioSourcePool` is sized `kMaxVehiclePairs`; `acquireVehicleEnginePair()` enforces this limit via the pair-tracking table rather than by scanning raw source counts.
+
+**Post-V1 promotion**: When `stinger_game_over` is added, increment only `kStingerCount` from 2 to 3. The `static_assert` will pass because `55 + 3 + 1 + 4 == 63` will no longer equal `kTotalSources = 62` — this is intentional: the assert catches that `kTotalSources` must also be incremented to 63, and `kSFXPoolSize` updated to 59, before the promotion is complete.
+
 Transient reserve: sources[51..54] (4 sources within the evictable pool) are soft-reserved for transient HIGH-priority SFX (vehicle horns, UI sounds, build/demolish sounds). Zone ambient loops (LOW priority) and vehicle/traffic sources (NORMAL priority) are excluded from acquiring these 4 slots. The reserve is enforced in `acquireSFXSource()`: LOW and NORMAL priority callers only consider sources[0..50]; **HIGH and CRITICAL** priority may consider sources[0..54]. **Rationale**: vehicle/traffic sources are NORMAL priority (up to 24 sources / 12 vehicles), which at large city sizes can fill sources[0..50] entirely. Without excluding NORMAL from [51..54], vehicle sources would absorb the transient reserve, starving HIGH-priority UI sounds (build/demolish confirmation, urgency tones). Only HIGH and CRITICAL — which cover short-lived transient events — may access the reserve. kTransientReserveStart = 51.
 
 - `AudioSourcePool::acquireSFXSource(SoundPriority p)` — evictable; considers only `sources[0..50]` for **LOW and NORMAL priority**; considers `sources[0..54]` for **HIGH and CRITICAL priority**. The distinction between NORMAL and HIGH is both acquisition range AND eviction priority: NORMAL sources cannot acquire [51..54] (transient reserve), and when the pool is full NORMAL sources are evicted before HIGH, and HIGH before CRITICAL. CRITICAL sources are last to be evicted but can still be evicted by a subsequent CRITICAL acquisition if all slots are occupied by CRITICAL.
@@ -41,6 +79,30 @@ Transient reserve: sources[51..54] (4 sources within the evictable pool) are sof
   enum class StingerType { CRISIS = 55, MILESTONE = 56 };
   // Post-V1 (Scenario mode): add GAME_OVER = 57
   ```
+
+  **StingerType / pool-index coupling**: The integer values of `StingerType` (CRISIS=55, MILESTONE=56) are intentionally fixed to match their corresponding AL source pool indices. This is a known, deliberate coupling: it avoids an extra indirection table while the pool layout is frozen for V1. Changing either the enum values OR the source pool layout requires updating both simultaneously. Post-V1 changes that restructure the pool MUST update `StingerType` values at the same time.
+
+  **`triggerStinger(StingerType::X)` is the ONLY safe API for firing stingers.** Game code must never use the raw integer values (55, 56, …) directly — the coupling is an implementation detail of `AudioSourcePool`, not a public contract. Callers that bypass `triggerStinger()` and reference pool indices numerically will silently break on any post-V1 pool restructuring.
+
+  **Required compile-time guard**: `audio_types.h` (or `source-pool.h`) MUST include the following `static_assert` to validate the coupling at compile time:
+
+  ```cpp
+  static_assert(static_cast<int>(StingerType::CRISIS) == kEvictableSFXCount,
+                "StingerType::CRISIS must equal kEvictableSFXCount — update source-pool.md simultaneously");
+  static_assert(static_cast<int>(StingerType::MILESTONE) == kEvictableSFXCount + 1,
+                "StingerType::MILESTONE must equal kEvictableSFXCount + 1 — update source-pool.md simultaneously");
+  ```
+
+  This guard ensures that any edit to the `StingerType` enum or to the pool index constants triggers an immediate compile error rather than a silent runtime mismatch. Using `kEvictableSFXCount` (rather than the literal `55`) makes the assert meaningful: if `kEvictableSFXCount` changes, the assert catches the inconsistency. The old formulation (asserting `CRISIS == 55` with a literal) was a tautology — it could only fail if the enum value itself was changed, not if the pool layout constant drifted.
+
+  **Post-V1 promotion sequence (all 4 steps are required atomically — do not partial-apply)**:
+
+  1. Add the new enum value to `StingerType` (e.g., `GAME_OVER = 57`).
+  2. Increment `kStingerCount` from 2 to 3 (or from N to N+1 for further additions).
+  3. Extend the stinger source setup loop at `AudioSourcePool` construction from `{55, 56}` to `{55, 56, 57}` (attributes: `AL_SOURCE_RELATIVE`, `AL_POSITION`, `AL_ROLLOFF_FACTOR`, `AL_VELOCITY`).
+  4. Wire the new stinger type in `AudioSystem::triggerStinger()` (add a case for the new `StingerType` value).
+
+  Update the `static_assert` assertions in step 1 to cover the new enum value (add a third assert for `GAME_OVER == kEvictableSFXCount + 2`). `kEvictableSFXCount`, `kTotalSources`, and the EFX filter range (0..54) are unchanged by this promotion — no pool restructuring is required.
 
   `acquireStingerSource(StingerType)` returns the fixed source index for that stinger type directly. This makes the reservation structurally enforced in the pool implementation rather than relying on caller discipline (e.g., marking a SFX pool source CRITICAL does not prevent eviction if all general SFX slots are occupied by CRITICAL priority sounds).
 - **Stinger source non-positional setup (mandatory at pool construction)**: During `AudioSourcePool` construction (after `alGenSources` creates all 62 sources), stinger sources (V1 indices 55..56) MUST have the following attributes set **immediately at pool initialization**, before any stinger is ever played:

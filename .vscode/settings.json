@@ -1,5 +1,6 @@
 {
   "workbench.editorAssociations": {
+    "git:/**/*.md": "default",
     "*.md": "vscode.markdown.preview.editor"
   }
 }

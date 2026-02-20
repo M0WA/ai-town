@@ -14,8 +14,22 @@
 // Forward declarations — defined in game-domain headers, not in OpenAL headers:
 struct vec3;         // 3-component float vector (X, Y, Z)
 struct CameraState;  // position (vec3), forward (vec3), up (vec3)
-enum class SimSpeed;
-enum class StingerType;
+// SimSpeed is NOT a separate enum class — it is a type alias:
+//   using SimSpeed = SpeedMultiplier;   (defined in simulation_types.h)
+// IAudioSystem.h must #include "simulation_types.h" to get this alias.
+// Do NOT forward-declare SimSpeed as "enum class SimSpeed;" — type aliases
+// cannot be forward-declared in C++, and this would create a duplicate-type
+// compile error when simulation_types.h is included.
+enum class StingerType;  // Defined in audio_types.h; V1 values: CRISIS=55, MILESTONE=56.
+                         // COUPLING NOTE: The integer values of StingerType are intentionally
+                         // equal to their corresponding AL source pool indices (sources[55] and
+                         // sources[56]). This coupling is known and deliberate — it avoids an
+                         // indirection table while the V1 pool layout is frozen.
+                         // triggerStinger(StingerType::X) is the ONLY safe API; game code must
+                         // never use the numeric values (55, 56, ...) directly.
+                         // Any post-V1 pool restructuring MUST update StingerType enum values
+                         // simultaneously. See source-pool.md for the required static_assert
+                         // compile-time guard and the 4-step post-V1 promotion sequence.
 using SoundId      = uint32_t;
 using MusicTrackId = uint32_t;
 using SoundHandle  = uint32_t;  // opaque handle returned by playSound / playPositionalSound
@@ -67,8 +81,42 @@ public:
     // Must be called once per frame from the main thread after Irrlicht updates the camera.
     virtual void syncListenerToCamera(const CameraState& cam) = 0;
 
-    // Activate game-over audio fade sequence (post-V1 Scenario mode only).
-    // Sets m_gameOverFade = true; audio thread fades all stems over 2 s then stops them.
+    // Signal a game-over condition to the audio system.
+    //
+    // V1 BEHAVIOR (Sandbox mode — no game-over condition exists):
+    //   setGameOverState(true) is a NO-OP in V1. Sandbox mode has no game-over
+    //   condition; Scenario mode (which introduces bankruptcy/defeat states) is
+    //   post-V1. The Phase 4 AudioSystem implementation MUST implement this method
+    //   as an early-return no-op in V1, emitting a log warning so the call is
+    //   visible in diagnostic output:
+    //
+    //     void AudioSystem::setGameOverState(bool active) {
+    //         // V1: no-op — Sandbox mode has no game-over condition.
+    //         // Scenario mode (post-V1) will implement the full fade sequence.
+    //         LOG_WARNING("setGameOverState() called in V1 Sandbox mode — no-op");
+    //         return;
+    //     }
+    //
+    //   The m_gameOverFade member and the m_gameOverFadeT progress counter
+    //   (declared in the AudioSystem private section) are Phase 4 code-path stubs.
+    //   In V1 they are declared but never written by any executed code path because
+    //   setGameOverState() returns before reaching any fade logic. They MUST be
+    //   guarded by the Scenario-mode check when that mode is added.
+    //
+    //   Do NOT attempt to fade music stems or ambient beds on setGameOverState(true)
+    //   in V1. Any stem fade in V1 would be unreachable dead code and risks
+    //   introducing audio-thread race conditions around m_gameOverFade that are
+    //   invisible during V1 testing (Sandbox playthroughs never trigger game-over).
+    //
+    // POST-V1 BEHAVIOR (Scenario mode — when added):
+    //   setGameOverState(true) triggers the game-over stinger at sources[57]
+    //   (StingerType::GAME_OVER, added in the post-V1 promotion sequence described
+    //   in source-pool.md) and then fades all active music stems to silence over
+    //   2 seconds via the m_gameOverFade / m_gameOverFadeT mechanism on the audio
+    //   thread. Ambient beds are NOT faded by this call — only music stems are
+    //   affected. setGameOverState(false) resets m_gameOverFade and m_gameOverFadeT
+    //   to restore normal music playback (used when the player restarts from a
+    //   game-over state without returning to the main menu).
     virtual void setGameOverState(bool active) = 0;
 
     // Notify the audio system that the in-game clock has crossed a time-of-day boundary.
@@ -80,10 +128,21 @@ public:
 
     // Transition from main menu audio to gameplay audio.
     // Called by UIManager when the player starts a new game or loads a saved game.
-    // Crossfades main menu music out over 1 s (constant-power curve) on sources[58..59],
+    // Crossfades main menu music out over 1 s (constant-power curve) on sources[58..59]
+    // using m_clock for real-time crossfade duration measurement (not simulation time),
     // then hands those sources to the gameplay music system to begin the first gameplay stem.
     // Also starts the ambient bed layer (sources[60..61]) for the current time-of-day period.
     // Must not be called while gameplay audio is already active (undefined behaviour).
+    //
+    // Precondition: setTimeOfDay() must be called at least once before transitionToGameplay()
+    // is invoked (typically by CitySimulation::start() during the new-game initialization
+    // sequence). transitionToGameplay() reads m_currentTimeOfDay to determine which ambient
+    // bed to start on sources[60..61]. If transitionToGameplay() is called before any
+    // setTimeOfDay() call, the zero-initialized enum value (TimeOfDay::DAY) is used
+    // unconditionally — this is acceptable behavior but must be documented. The call sequence
+    // in UIManager::transitionToGameplay() MUST be:
+    //   (1) m_sim->start()  [which calls m_audio->setTimeOfDay(tod) internally]
+    //   (2) m_audio->transitionToGameplay()
     virtual void transitionToGameplay() = 0;
 
     // Per-frame update called from the main game loop.
@@ -101,11 +160,27 @@ public:
 ```cpp
 class AudioSystem : public IAudioSystem {
 public:
-    AudioSystem();   // alcOpenDevice + alcCreateContext (with HRTF attrs); throws on failure
+    explicit AudioSystem(IClock* clock);   // alcOpenDevice + alcCreateContext (with HRTF attrs); throws on failure
+                                  // clock: injectable for deterministic timing in tests (crossfade duck timer,
+                                  // m_lastDuckWakeTime). Production passes WallClock; tests pass ManualClock.
     ~AudioSystem();  // MUST follow the audio thread shutdown sequence below
     AudioSystem(const AudioSystem&) = delete;
     AudioSystem& operator=(const AudioSystem&) = delete;
 private:
+    // In `src/audio/audio_system.h`, `ALCdevice*` and `ALCcontext*` MUST be forward-declared
+    // using the OpenAL Soft internal typedef pattern rather than including `<AL/alc.h>`:
+    //
+    //   // Forward declarations — do NOT include <AL/alc.h> in audio_system.h
+    //   struct ALCdevice_struct;
+    //   using ALCdevice = ALCdevice_struct;
+    //   struct ALCcontext_struct;
+    //   using ALCcontext = ALCcontext_struct;
+    //
+    // The implementation file `audio_system.cpp` includes `<AL/alc.h>` normally.
+    // This pattern allows pointer-type member declarations in the header without
+    // pulling in OpenAL Soft headers. `audio_system.h` MUST include zero OpenAL
+    // headers so that unit tests remain fully headless (no AL hardware required to
+    // compile or link test binaries that include this header).
     ALCdevice*                m_device{nullptr};
     ALCcontext*               m_context{nullptr};
     std::atomic<bool>         m_stopThread{false};
@@ -128,14 +203,37 @@ private:
     LPALFILTERF               m_fnFilterf{nullptr};
     LPALDELETEFILTERS         m_fnDeleteFilters{nullptr};
     // Thread-local context:
+    // **Phase 1 stub**: only `IClock* m_clock` is declared in the Phase 1 stub header.
+    // All other private members listed in this section are Phase 4 additions.
+    // The SHUTDOWN CONTRACT comment in the Phase 1 stub header references
+    // `m_useThreadLocalCtx` by name — this member name is therefore frozen as of
+    // Phase 1 and MUST NOT be renamed in Phase 4 without updating the Phase 1 stub
+    // comment simultaneously.
     bool                      m_useThreadLocalCtx{false};
-    PFNALCSETTHREADCONTEXTPROC m_fnSetThreadCtx{nullptr};  // type from <AL/alext.h>; LPALC... prefix is for AL (not ALC) extensions
+    // FnSetThreadCtx is defined as a local function-pointer alias in audio_system.h —
+    // NOT as PFNALCSETTHREADCONTEXTPROC from <AL/alext.h> — to preserve the zero-AL-includes
+    // contract of the header.  The alias matches the alcSetThreadContext signature exactly:
+    //
+    //   // In audio_system.h (no AL header included):
+    //   using FnSetThreadCtx = int(*)(ALCcontext*);
+    //   // ALCcontext is forward-declared above via:
+    //   //   struct ALCcontext_struct; using ALCcontext = ALCcontext_struct;
+    //
+    // In audio_system.cpp the address is loaded and cast to this type:
+    //   m_fnSetThreadCtx = reinterpret_cast<FnSetThreadCtx>(
+    //       alcGetProcAddress(m_device, "alcSetThreadContext"));
+    //
+    // Never write PFNALCSETTHREADCONTEXTPROC in audio_system.h — that type requires
+    // <AL/alext.h>, which would break headless test compilation.
+    FnSetThreadCtx            m_fnSetThreadCtx{nullptr};
     // Music ducking state machine (audio thread only for gain writes; main thread reads atomically):
     enum class DuckState { IDLE, DUCKING, DUCKED, RELEASING };
     std::atomic<DuckState>    m_duckState{DuckState::IDLE};
     std::atomic<float>        m_musicDuckGain{1.0f};
     float                     m_duckTimer{0.0f};    // seconds elapsed in current duck phase (audio thread only)
     float                     m_duckStartGain{1.0f}; // gain at transition INTO DUCKING state; enables correct ramp from current gain (not 1.0) on RELEASING→DUCKING re-entry (audio thread only)
+    IClock*                   m_clock{nullptr};         // injectable clock for deterministic timing (crossfade duck timer, m_lastDuckWakeTime);
+                                                       // production: WallClock; tests: ManualClock
     double                    m_lastDuckWakeTime{0.0}; // wall-clock timestamp (seconds) of the previous audio thread wake;
                                                        // initialized to m_clock->nowSeconds() AFTER alcSetThreadContext succeeds
                                                        // and BEFORE the first condition_variable::wait_for; see dynamic-soundscape.md
@@ -174,10 +272,12 @@ private:
   }
   ```
 
-  The audio thread signals completion (success or failure) via `m_initDone`. The **success path** (after `alcSetThreadContext` succeeds) must signal before entering the streaming loop:
+  The audio thread signals completion (success or failure) via `m_initDone`. The **success path** (after `alcSetThreadContext` succeeds) must initialize `m_lastDuckWakeTime` BEFORE calling `notify_one()`, then signal before entering the streaming loop. Initializing after `notify_one()` is a data race: the constructor unblocks immediately on `notify_one()` and the main thread may call `triggerStinger()` before `m_lastDuckWakeTime` is written, producing an epoch-sized `dt` on the first audio thread wake:
 
   ```cpp
   // Audio thread success path (after alcSetThreadContext succeeds):
+  // IMPORTANT: initialize m_lastDuckWakeTime BEFORE notify_one() — see dynamic-soundscape.md
+  m_lastDuckWakeTime = m_clock->nowSeconds();
   { std::lock_guard<std::mutex> lk(m_initMutex); m_initDone = true; }
   m_initCV.notify_one();
   // Now enter streaming loop...
@@ -190,3 +290,101 @@ private:
   m_initCV.notify_one();
   return;
   ```
+
+### ALC_EXT_thread_local_context Requirement
+
+**HARD REQUIREMENT**: If `ALC_EXT_thread_local_context` is absent at `AudioSystem` construction, the constructor MUST throw `std::runtime_error` (or equivalent non-recoverable failure). There is NO fallback to using `alcMakeContextCurrent` on the main thread — that approach is incorrect for multi-threaded OpenAL and is prohibited. The check sequence:
+
+1. Load extension via `alcGetProcAddress(m_device, "alcSetThreadContext")` — store as `m_fnSetThreadCtx`.
+2. If `m_fnSetThreadCtx == nullptr` (extension absent): throw `std::runtime_error("ALC_EXT_thread_local_context required")`.
+3. Only proceed to `alGenSources` and audio thread launch if extension is confirmed present.
+
+This must be a Phase 1 locked behavioral contract — Phase 4 implementation MUST NOT deviate from this by using any fallback path.
+
+**Why no fallback is permitted**: Using `alcMakeContextCurrent` to bind the context on the main thread and then calling AL functions from the audio thread is a data race — the OpenAL specification requires that each thread operating on a context must make it current on that thread (either via `alcMakeContextCurrent` before any threading, which is single-threaded only, or via the thread-local extension). Without `ALC_EXT_thread_local_context`, there is no safe way to call AL functions from a background thread while the main thread also makes AL calls (`syncListenerToCamera`, `playSound`, `stopSound`). Failing hard at construction is the only correct behaviour.
+
+**Constructor sequence (within `AudioSystem::AudioSystem(IClock*)`):**
+
+```cpp
+// Step 1: open device and create context (throws on failure — done before thread launch)
+m_device  = alcOpenDevice(nullptr);
+if (!m_device) throw std::runtime_error("alcOpenDevice failed");
+// ... build HRTF attrs array (see hrtf-initialization.md) ...
+m_context = alcCreateContext(m_device, attribs);
+if (!m_context || alcMakeContextCurrent(m_context) == ALC_FALSE)
+    throw std::runtime_error("alcCreateContext failed");
+
+// Step 2: load ALC_EXT_thread_local_context — HARD REQUIREMENT
+// Cast to FnSetThreadCtx (defined in header as int(*)(ALCcontext*)) — NOT to
+// PFNALCSETTHREADCONTEXTPROC, which requires <AL/alext.h> and would break the
+// zero-AL-includes contract.  The cast is performed here in the .cpp file where
+// <AL/alc.h> and <AL/alext.h> may be included freely.
+m_fnSetThreadCtx = reinterpret_cast<FnSetThreadCtx>(
+    alcGetProcAddress(m_device, "alcSetThreadContext"));
+if (!m_fnSetThreadCtx)
+    throw std::runtime_error("ALC_EXT_thread_local_context required");
+
+// Step 3: undo the temporary main-thread bind (audio thread will own the context)
+alcMakeContextCurrent(nullptr);
+
+// Step 4: initialize m_occlusionGainTarget[] before thread launch (see member comment)
+for (auto& t : m_occlusionGainTarget) t.store(1.0f, std::memory_order_relaxed);
+
+// Step 5: launch audio thread — only reached if extension is confirmed present
+m_useThreadLocalCtx = true;
+m_audioThread = std::thread(&AudioSystem::audioThreadFunc, this);
+
+// Step 6: wait for audio thread to signal init complete (5 s timeout)
+{
+    std::unique_lock<std::mutex> lk(m_initMutex);
+    bool notified = m_initCV.wait_for(lk, std::chrono::seconds(5),
+        [this]{ return m_initDone; });
+    if (!notified || m_initError) throw std::runtime_error("AudioSystem init failed");
+}
+```
+
+---
+
+## Zone Loop Asset Validation
+
+`AudioSystem::loadSound()` MUST enforce an authored hard cap on zone loop asset duration at load time.
+
+### Enforcement Point
+
+The check applies when `loadSound()` is called with a `SoundId` in the zone loop range:
+
+- `sfx_zone_residential` (ID 17)
+- `sfx_zone_commercial` (ID 18)
+- `sfx_zone_industrial` (ID 19)
+
+These IDs are defined in `v1-audio-asset-manifest.md` (the Zone Ambient Loops section). The range is IDs 17–19 inclusive.
+
+### Duration Check
+
+After decoding the OGG file header to determine the clip duration, `loadSound()` MUST apply the following guard:
+
+```cpp
+if (decodedDurationSeconds > kZoneLoopMaxPreloadDurationSeconds) {
+    LOG_ERROR("Zone loop asset exceeds max pre-load duration ({}s > {}s): {}",
+              decodedDurationSeconds, kZoneLoopMaxPreloadDurationSeconds, path);
+    return kInvalidSoundHandle;  // do NOT load the asset
+}
+```
+
+`kZoneLoopMaxPreloadDurationSeconds` is declared in `audio_types.h`:
+
+```cpp
+constexpr float kZoneLoopMaxPreloadDurationSeconds = 18.0f;
+```
+
+The function returns a null/invalid handle and logs an error. The asset is NOT partially loaded.
+
+### Threshold Distinction
+
+The pre-load tier boundary used when classifying sounds into the pre-load vs. streaming partition is 20 s (sounds longer than 20 s are streamed, not pre-loaded). The authored hard cap enforced at load time for zone loops is **18 s** (`kZoneLoopMaxPreloadDurationSeconds`), providing a 2 s guard band below the tier boundary. The load-time check uses 18 s, not 20 s.
+
+### Cross-References
+
+- `constexpr float kZoneLoopMaxPreloadDurationSeconds = 18.0f;` declared in `audio_types.h`
+- Zone loop SoundId assignments (IDs 17–19): `architecture/audio-architecture/v1-audio-asset-manifest.md`
+- Pre-load vs. streaming tier boundary (20 s): `architecture/audio-architecture/streaming-architecture.md`

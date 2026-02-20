@@ -53,9 +53,39 @@ This step runs as the **first named step** in the `build-linux` job — before v
 - `<[A-Z_][A-Z0-9_-]*>` matches angle-bracket placeholder tokens left by template authors (e.g. `actions/checkout@<CHECKOUT_SHA>`). These indicate the implementer has not yet looked up and substituted the real SHA.
 - `@[0-9a-f]{1,39}\b` matches any SHA-like string after `@` that is shorter than 40 hex characters. Supply-chain attacks rely on shortened SHAs being accepted as valid references; requiring the full 40-character SHA prevents a malicious tag from silently resolving to a different commit.
 
-**Cross-reference**: The `validate-assets` job definition (later in this file) uses `actions/checkout@<SHA>` and `actions/setup-python@<SHA>` placeholder tokens — these MUST be replaced with verified 40-character SHAs before the workflow is committed. This lint step will catch any unresolved placeholders at CI time.
+**Cross-reference**: The `validate-assets` job definition (later in this file) uses `actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11` (v4.1.1, verified). The `actions/setup-python` SHA is a placeholder — the implementer must re-resolve at time of implementation — never copy a cached SHA from documentation. This lint step will catch any unresolved `@<...>` placeholder tokens at CI time.
 
-- **`build-linux` job** (`ubuntu-latest`): install xvfb + Mesa + libgl1-mesa-dev + vcpkg; CMake configure with **`-DENABLE_COVERAGE=OFF`** (coverage instrumentation disabled — this is the fast binary-verification build, not the coverage build); build; then run tests in three explicitly named steps:
+- **`build-linux` job** (`ubuntu-latest`): install xvfb + Mesa + libgl1-mesa-dev + vcpkg; CMake configure with **`-DENABLE_COVERAGE=OFF`** (coverage instrumentation disabled — this is the fast binary-verification build, not the coverage build); build; then, before running tests, verify that label routing is non-zero; then run tests in three explicitly named steps.
+
+  **Integration test routing verification (mandatory post-build step)**: After the build step and before any test execution step, add a CI step that queries the number of tests discovered under the `integration` label. If zero tests are discovered, the step exits non-zero and the job fails immediately. This prevents the false-green scenario where `gtest_discover_tests()` with a misconfigured `LABEL` silently produces zero tests and `ctest -L '^integration$'` exits 0 — a zero-test discovery does NOT constitute a passing verification:
+
+  ```yaml
+  - name: Verify integration test routing (non-zero discovery)
+    shell: bash
+    run: |
+      count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #')
+      if [[ "$count" -eq 0 ]]; then
+        echo 'ERROR: ctest -L '\''^integration$'\'' discovered 0 tests — label routing is broken'
+        exit 1
+      fi
+      echo "Integration test routing verified: $count test(s) discovered."
+  ```
+
+  **The same pattern applies to the `requires-opengl` label.** Add an analogous verification step after the integration routing check and before the `xvfb-run` step:
+
+  ```yaml
+  - name: Verify requires-opengl test routing (non-zero discovery)
+    shell: bash
+    run: |
+      count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #')
+      if [[ "$count" -eq 0 ]]; then
+        echo 'ERROR: ctest -L '\''^requires-opengl$'\'' discovered 0 tests — label routing is broken'
+        exit 1
+      fi
+      echo "Requires-opengl test routing verified: $count test(s) discovered."
+  ```
+
+  Both checks must be placed **after the CMake build step and before any ctest execution step** so that a label misconfiguration fails the job before any false-passing `ctest -L` invocation can run. Neither step requires a display or audio device — they only invoke `ctest -N` (list mode, no test execution).
 
   ```yaml
   - name: Run unit tests (no display)
@@ -92,6 +122,8 @@ This step runs as the **first named step** in the `build-linux` job — before v
   Note: label names are `integration` and `requires-opengl` per the Testing Strategy label conventions. **Do not use `--gtest_output` as a ctest flag** — it is a GTest binary flag and CTest silently ignores it. **`AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` are required on the integration test step** — integration tests use `EDT_NULL` which suppresses Irrlicht window creation, but `AudioSystem` initialization still attempts to open an audio device; `ALSOFT_DRIVERS=null` forces the null driver and prevents failures on headless runners without audio hardware. The unit test step includes `AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` as a defensive guard — these are zero-cost to apply and prevent accidental device instantiation from failing unit tests as the codebase grows. The OpenGL test step requires a real OpenGL context (via xvfb) but uses `ALSOFT_DRIVERS=null` to suppress audio device initialization on headless runners; `AITOWN_HEADLESS=1` must NOT be set for the OpenGL test step — it causes application code to skip `IrrlichtDevice` initialization, which means tests in the `requires-opengl` bucket that explicitly create `EDT_OPENGL` devices would have those paths bypassed, producing false green results. **`coverage-linux`** is the separate job that enables `-DENABLE_COVERAGE=ON` (see below).
 - **`build-linux` ccache setup**: Include `hendrikmuhs/ccache-action` before the CMake configure step (Linux job only — `if: runner.os == 'Linux'`; ccache does not support `cl.exe` on Windows). Add `-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache` to the CMake configure step. See `caching.md` for the authoritative platform-specific caching rules, ccache key format, and action SHA.
 
+  **`build-linux` job** — use the standard key (no suffix):
+
   ```yaml
   - name: Set up ccache
     if: runner.os == 'Linux'
@@ -99,6 +131,18 @@ This step runs as the **first named step** in the `build-linux` job — before v
     with:
       key: ${{ runner.os }}-ccache-${{ env.COMPILER_VERSION }}
   ```
+
+  **`coverage-linux` job** — MUST use a distinct key with a `-coverage` suffix:
+
+  ```yaml
+  - name: Set up ccache
+    if: runner.os == 'Linux'
+    uses: hendrikmuhs/ccache-action@ed74d11c0b343532753ecead8a951bb09bb34bc9  # v1.2.14 — pin to SHA
+    with:
+      key: ${{ runner.os }}-ccache-coverage-${{ env.COMPILER_VERSION }}
+  ```
+
+  The `-coverage` suffix is mandatory. GCC emits different object code when `-fprofile-arcs -ftest-coverage` is active — coverage-instrumented objects are ABI-incompatible with non-instrumented objects. Using the same ccache key for both jobs would cause stale-cache hits that silently mix instrumented and non-instrumented objects in the coverage build, producing incorrect or missing `.gcda` output. See `caching.md` for the full rationale and authoritative platform-specific caching rules.
 
 - **Windows job** (`windows-latest`): build step; then create the test results directory and run tests — use **explicit label filtering** to skip `requires-opengl` tests (no display available on Windows runners). The `requires-opengl` label is Linux-only (`xvfb-run`); Windows integration tests run under `AITOWN_HEADLESS=1`:
 
@@ -138,7 +182,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
       fail-on-error: false  # annotation failures must not mask test failures
   ```
 
-  The `if: always()` is required so results are published even when tests fail. `fail-on-error: false` prevents a `dorny/test-reporter` error (e.g., no XML when tests crash early) from overwriting the real ctest exit code. **Implementation note**: The SHA `31a54ee7ebcacc03a09ea97a7e5465a47b84aea5` is a placeholder SHA in the correct 40-character format. Before committing any CI YAML, verify it matches the actual commit for the `v1.9.1` tag by running `gh release view v1.9.1 --repo dorny/test-reporter --json tagName,targetCommitish` and substituting the returned SHA. Using an unverified SHA defeats supply-chain pinning.
+  The `if: always()` is required so results are published even when tests fail. `fail-on-error: false` prevents a `dorny/test-reporter` error (e.g., no XML when tests crash early) from overwriting the real ctest exit code. **Implementation note**: The SHA `31a54ee7ebcacc03a09ea97a7e5465a47b84aea5` has been verified against the `v1.9.1` tag as of 2026-02-19. Re-verify before any baseline update using `gh release view v1.9.1 --repo dorny/test-reporter --json tagName,targetCommitish`.
 
   **Before `dorny/test-reporter`**, all three jobs (`build-linux`, `build-windows`, `coverage-linux`) must include a verification step that fails the job if no test XML was produced:
 
@@ -158,10 +202,13 @@ This step runs as the **first named step** in the `build-linux` job — before v
   This step must use `shell: bash` (safe on both Linux and Windows runners via Git Bash) and run with `if: always()` so it catches failures even when ctest exits non-zero.
 - **Artifact upload steps** (must be explicitly included in workflow YAML — not specifying these means nothing is uploaded despite retention policy requirements):
 
+  **Artifact name uniqueness requirement**: All `upload-artifact` `name:` values MUST include `${{ github.sha }}` as a suffix. Without it, concurrent workflow runs (e.g., two PRs merging in rapid succession) upload artifacts with identical names — GitHub Actions silently overwrites the first with the second, destroying post-mortem data for the earlier run. The `${{ github.sha }}` suffix guarantees globally unique artifact names for the lifetime of the artifact retention window.
+
   ```yaml
   # After tests (all jobs, always):
   # IMPORTANT: artifact names must be job-specific — runner.os returns "Linux" on both
-  # build-linux and coverage-linux, causing a name collision. Use the job name explicitly:
+  # build-linux and coverage-linux, causing a name collision. Use the job name explicitly.
+  # ALL names MUST include ${{ github.sha }} for uniqueness across concurrent builds:
   #   build-linux job:    name: test-results-build-linux-${{ github.sha }}
   #   coverage-linux job: name: test-results-coverage-linux-${{ github.sha }}
   #   build-windows job:  name: test-results-windows-${{ github.sha }}
@@ -192,7 +239,56 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
 - **Artifact retention**: test XML retained 14 days; coverage HTML report retained 14 days; release binaries (Windows, on push to `main` only) retained 30 days
 - **`coverage-linux` is a separate, self-contained job** — it performs its own configure+build+test+lcov sequence with `-DENABLE_COVERAGE=ON`. It does NOT depend on artifacts from `build-linux` (which would require large artifact transfers). This means `coverage-linux` re-runs the full build, but with coverage instrumentation enabled; `build-linux` can run a faster non-coverage build for binary verification. Both jobs run in parallel. The `all-checks-pass` gate references both. **Naming note**: the job can be renamed `build-test-coverage-linux` for clarity, as long as the name matches in the `needs:` list.
-  - **`coverage-linux` must include three explicit, separately named YAML steps for ctest** (unit tests, integration tests without display, and OpenGL tests under xvfb) **before the lcov capture step**. A single combined `ctest` step cannot use both `-LE` and `-L` flags simultaneously; three named steps make coverage tracing explicit. The three ctest steps in `coverage-linux` must mirror the three ctest steps in `build-linux` exactly (same label filters `-LE "integration|requires-opengl"`, `-L "^integration$"`, `-L "^requires-opengl$"`) to ensure coverage data is collected for all test categories:
+  - **`coverage-linux` must include three explicit, separately named YAML steps for ctest** (unit tests, integration tests without display, and OpenGL tests under xvfb) **before the lcov capture step**. A single combined `ctest` step cannot use both `-LE` and `-L` flags simultaneously; three named steps make coverage tracing explicit. The three ctest steps in `coverage-linux` must mirror the three ctest steps in `build-linux` exactly (same label filters `-LE "integration|requires-opengl"`, `-L "^integration$"`, `-L "^requires-opengl$"`) to ensure coverage data is collected for all test categories.
+
+  **Label-routing verification in `coverage-linux` (mandatory)**: The `coverage-linux` job MUST include the same two label-routing non-zero discovery verification steps that `build-linux` includes — one for the `integration` label and one for the `requires-opengl` label. The exact step order within `coverage-linux` is:
+
+  1. Install system dependencies (`apt-get`)
+  2. Detect compiler version (write `COMPILER_VERSION` to `$GITHUB_ENV`)
+  3. `actions/cache` for vcpkg and FetchContent (reads `COMPILER_VERSION` from step 2)
+  4. `lukka/run-vcpkg` — install vcpkg packages
+  5. `hendrikmuhs/ccache-action` — set up ccache with `-coverage` key suffix
+  6. CMake configure (`cmake -B build ... -DENABLE_COVERAGE=ON`)
+  7. CMake build (`cmake --build build`)
+  8. **Verify integration test routing (non-zero discovery)** — after build, before any ctest
+  9. **Verify requires-opengl test routing (non-zero discovery)** — after build, before any ctest
+  10. Run unit tests ctest step
+  11. Run integration tests ctest step
+  12. Run OpenGL tests ctest step (xvfb)
+  13. Verify test XML output exists
+  14. Publish test results (dorny/test-reporter)
+  15. Capture and gate lcov coverage
+  16. Upload coverage artifact
+
+  Steps 8 and 9 (the two label-routing verification steps) are placed **after CMake build step (7) and before the first ctest execution step (10)**. A label misconfiguration that produces zero-test discovery in `build-linux` will equally affect `coverage-linux`; without these checks, a zero-discovery run silently under-reports coverage and exits 0.
+
+  ### coverage-linux: label-routing verification YAML
+
+  These steps are IDENTICAL to the `build-linux` forms — copy them exactly. They are reproduced here verbatim so that an implementer building `coverage-linux` from this spec alone can derive the exact YAML without referring back to the `build-linux` documentation.
+
+  ```yaml
+  - name: Verify integration test routing (non-zero discovery)
+    shell: bash
+    run: |
+      count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #')
+      if [[ "$count" -eq 0 ]]; then
+        echo 'ERROR: ctest -L '\''^integration$'\'' discovered 0 tests — label routing is broken'
+        exit 1
+      fi
+      echo "Integration test routing verified: $count test(s) discovered."
+
+  - name: Verify requires-opengl test routing (non-zero discovery)
+    shell: bash
+    run: |
+      count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #')
+      if [[ "$count" -eq 0 ]]; then
+        echo 'ERROR: ctest -L '\''^requires-opengl$'\'' discovered 0 tests — label routing is broken'
+        exit 1
+      fi
+      echo "Requires-opengl test routing verified: $count test(s) discovered."
+  ```
+
+  Both checks must be placed **after the CMake build step and before the first ctest execution step** so that a label misconfiguration fails the job before any false-passing `ctest -L` invocation can run. Neither step requires a display or audio device — they only invoke `ctest -N` (list mode, no test execution).
 
     ```yaml
     - name: Run unit tests (no display)
@@ -233,6 +329,14 @@ This step runs as the **first named step** in the `build-linux` job — before v
         # known lcov/GCC 13 compatibility issue; the mismatch is benign and does not affect
         # coverage accuracy. Without this flag lcov --capture exits non-zero and the entire
         # coverage job fails before genhtml runs.
+        # Use ${{ github.workspace }} (absolute path) rather than '.'.
+        # On GitHub-hosted runners the shell CWD is reset to $GITHUB_WORKSPACE at the
+        # start of each step, so '.' works correctly there. However, ${{ github.workspace }}
+        # is preferred because: (1) it is explicit and self-documenting — the intent is
+        # unambiguous in the YAML; (2) it works correctly on self-hosted runners where the
+        # runner's working directory convention may differ from $GITHUB_WORKSPACE.
+        # ${{ github.workspace }} is expanded by GitHub Actions at YAML evaluation time
+        # and always resolves to the absolute path of the checked-out repository root.
         lcov --capture --directory build --base-directory ${{ github.workspace }} \
              --ignore-errors mismatch \
              --output-file coverage.info
@@ -259,6 +363,39 @@ This step runs as the **first named step** in the `build-linux` job — before v
         # Phase 2 TODO: implement 80% gate via bash awk check or after confirming lcov 2.1+:
         #   lcov --summary coverage_filtered.info | awk '/lines/ {if ($2+0 < 80) exit 1}'
         lcov --summary coverage_filtered.info
+        # Phase 1 src/ui/ coverage gate (BLOCKING): enforce a 25% floor on src/ui/ files.
+        # lcov --list emits per-file coverage lines; grep filters to src/ui/ files only;
+        # awk extracts the rightmost percentage field; sort -n and head -1 find the minimum.
+        # If no src/ui/ files are present in the coverage data (empty grep output) the check
+        # also fails — an absent src/ui/ entry is treated as 0%, not a vacuous pass.
+        #
+        # IMPORTANT: Do NOT use Bash integer comparison ("$pct" -lt 25). Integer comparison
+        # truncates floats — 24.8% becomes 24, which incorrectly passes the gate. Use
+        # float-aware awk arithmetic instead. Also validate that $pct is numeric before
+        # comparison; lcov --list format changes (e.g. extra columns, missing separator) would
+        # otherwise silently pass the gate with an empty or non-numeric string.
+        pct=$(lcov --list coverage_filtered.info \
+            | grep -E "src/ui/" \
+            | grep -v "^Total" \
+            | awk -F'|' '{gsub(/%/,"",$NF); print $NF+0}' \
+            | sort -n | head -1)
+        # head -1 takes the minimum (worst-case) src/ui/ file — intentional gate behavior
+        # NOTE: awk -F'|' assumes lcov 2.x --list uses | as column delimiter.
+        # If format changes, $NF+0 coercion produces 0 -> gate FAILS with misleading
+        # '0% coverage' message rather than 'lcov format mismatch'.
+        if [[ -z "$pct" ]]; then
+          echo "ERROR: No src/ui/ coverage data found — src/ui/ files may be absent from build or excluded from coverage_filtered.info"
+          exit 1
+        fi
+        if ! [[ "$pct" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+          echo "ERROR: src/ui/ coverage value '$pct' is not numeric — lcov --list format may have changed"
+          exit 1
+        fi
+        result=$(echo "$pct 25" | awk '{if ($1+0 < $2+0) print "FAIL"; else print "PASS"}')
+        if [[ "$result" == "FAIL" ]]; then
+          echo "ERROR: src/ui/ coverage below 25% (found: ${pct}%)"
+          exit 1
+        fi
     ```
 
     The lcov capture-and-gate step must run **after all three ctest steps complete** — lcov reads the `.gcda` files produced by test execution. Running lcov before all three ctest steps complete will under-report coverage for integration-tested code paths. `BUILD_DIR` is set and used within the same `run:` block as all lcov operations, keeping variable scope self-contained.
@@ -327,18 +464,28 @@ markdown-lint:
 - No `dorny/test-reporter` step — `markdownlint` produces plain text output, not JUnit XML. CI log output is sufficient for diagnosis.
 - No artifact upload step — no binary or report output is produced.
 
-- **`validate-assets` job** — validates asset files using the Python validation script. Must run on every push and PR alongside the build jobs so asset errors are caught before any binary is produced. Runs on `ubuntu-latest` with a 10-minute timeout. Job definition:
+- **`validate-assets` job** — validates asset files using the Python validation script. Must run on every push and PR alongside the build jobs so asset errors are caught before any binary is produced. Runs on `ubuntu-latest` with a 10-minute timeout.
+
+  **Phasing**: This job is introduced in Phase 1 running `tools/validate_assets.py` as a stub that always exits 0. It is wired into `all-checks-pass` at Phase 1 creation — not deferred to a later phase. This means the stub always passes, keeping the gate green while the real check logic is absent. In Phase 2 the script gains 13 real checks; in Phase 6 a 14th sidecar check is added. The job definition and `all-checks-pass` wiring remain unchanged across all phases.
+
+  Job definition:
+
+**IMPORTANT**: Do NOT copy this SHA — you MUST resolve it live at implementation time using:
+`gh release view --repo actions/setup-python --json tagName,url`
+or equivalently via the GitHub API. The SHA shown here is a placeholder only.
 
   ```yaml
   validate-assets:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read  # checkout only — no check annotations or artifact writes needed
     steps:
       - name: Checkout
-        uses: actions/checkout@<SHA>  # verify SHA at implementation time
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1 — verified
 
       - name: Set up Python 3
-        uses: actions/setup-python@<SHA>  # verify SHA at implementation time
+        uses: actions/setup-python@<RESOLVE_AT_IMPLEMENTATION_TIME>  # resolve SHA live — see note above
         with:
           python-version: '3'
 
@@ -347,17 +494,24 @@ markdown-lint:
   ```
 
   The `python tools/validate_assets.py` command must exit non-zero on any validation error — the script is responsible for printing a human-readable error message before exiting so CI logs identify the offending asset. The `validate-assets` job must be added to the `all-checks-pass` needs list simultaneously with its creation; omitting it from `needs:` means a failing asset-validation run does not block merges.
+
 - **`all-checks-pass` gate job** — MUST include `if: always()`. **Any new CI job must be added to the `needs` list below.** See `branch-protection.md` for the full rationale and `if: always()` requirement.
 
-  **IMPORTANT — phased implementation warning**: The `all-checks-pass` job has two forms depending on the delivery phase. Do NOT copy the Phase 6+ final form verbatim at Phase 0 — referencing a non-existent `validate-assets` job in `needs:` causes the entire workflow YAML to fail to parse before any job runs. Implement the Phase 0 form first; add `validate-assets` to `needs:` only when that job is introduced in Phase 6.
+  **IMPORTANT — phased implementation warning**: The `all-checks-pass` job evolves across phases. Do NOT reference a job in `needs:` before that job exists — it causes the entire workflow YAML to fail to parse before any job runs. Follow the phased forms below exactly.
 
-### PHASE 0 FORM (validate-assets added in Phase 6)
+  **Phasing summary for `validate-assets`**:
+  - Phase 0: `validate-assets` job does not exist yet; omit from `needs:`.
+  - Phase 1: `validate-assets` job is introduced running `tools/validate_assets.py` as a stub that always exits 0. Wire it into `all-checks-pass` immediately. Adding the job (even as a stub) now means the `all-checks-pass` dependency list never needs to change in later phases — only the script gains real checks.
+  - Phase 2: the stub script gains 13 real asset checks; the job definition and `all-checks-pass` wiring are unchanged.
+  - Phase 6: a 14th sidecar check is added to the script; again no change to the job definition or wiring.
+
+### PHASE 0 FORM (validate-assets not yet introduced)
 
 ```yaml
 all-checks-pass:
   runs-on: ubuntu-latest
   if: always()
-  # Phase 0 form (validate-assets added in Phase 6):
+  # Phase 0 form — validate-assets job does not exist yet; add it in Phase 1.
   needs: [build-linux, build-windows, coverage-linux, markdown-lint]
   steps:
     - name: Verify all platform builds passed
@@ -389,7 +543,9 @@ all-checks-pass:
         echo "All required jobs succeeded."
 ```
 
-#### PHASE 6+ FINAL FORM (after validate-assets job is introduced)
+### PHASE 1+ FORM (validate-assets stub introduced and wired in Phase 1)
+
+When the `validate-assets` job is added in Phase 1, update `all-checks-pass` to include it simultaneously. The job runs `tools/validate_assets.py`, which is a stub that always exits 0 at Phase 1. Wiring it in now means the `needs:` list requires no further changes in Phase 2 (real checks) or Phase 6 (sidecar check) — only the script content changes, not the CI wiring.
 
 ```yaml
 all-checks-pass:

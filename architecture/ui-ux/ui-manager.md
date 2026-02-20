@@ -3,6 +3,124 @@
 - A `UIManager` class owns the `IGUIEnvironment` instance and all top-level `IGUIElement` panels
 - No other class directly instantiates GUI elements at the top level
 
+## IUIBackend Header Placement
+
+`IUIBackend.h` is placed in `src/ui/` (not `src/interfaces/`) because it is part of the UI subsystem abstraction boundary — it defines the contract between `UIManager` and its rendering backend. All other shared cross-subsystem interfaces live in `src/interfaces/`. See `architecture/testing/testability-architecture.md` for the authoritative placement rationale and the `MockUIBackend` (test-facing) definition.
+
+## IUIBackend Method Contract
+
+The total method count is **17**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+
+```cpp
+class IUIBackend {
+public:
+    virtual ~IUIBackend() = default;
+
+    // 1. Create a static text label. Returns an opaque handle for the element.
+    virtual UIElementHandle addStaticText(const std::string& text, int x, int y, int w, int h) = 0;
+
+    // 2. Create a clickable button. Returns an opaque handle for the element.
+    virtual UIElementHandle addButton(const std::string& label, int x, int y, int w, int h) = 0;
+
+    // 3. Destroy the element associated with the handle and release its resources.
+    virtual void removeElement(UIElementHandle handle) = 0;
+
+    // 4. Replace the displayed text of an existing element.
+    virtual void setElementText(UIElementHandle handle, const std::string& text) = 0;
+
+    // 5. Show or hide an element. Hidden elements do not receive input events.
+    virtual void setElementVisible(UIElementHandle handle, bool visible) = 0;
+
+    // 6. Query whether an element is currently visible.
+    virtual bool isElementVisible(UIElementHandle handle) const = 0;
+
+    // 7. Enable or disable an element. Disabled elements remain visible but are
+    //    grayed out and do not respond to interaction (distinct from setElementVisible).
+    //    Required for modal speed-selector graying and undo-button disabling.
+    virtual void setElementEnabled(UIElementHandle handle, bool enabled) = 0;
+
+    // 8. Query whether an element is currently enabled (interactive).
+    virtual bool isElementEnabled(UIElementHandle handle) const = 0;
+
+    // 9. Set the opacity of an element. alpha is in [0.0, 1.0].
+    virtual void setElementAlpha(UIElementHandle handle, float alpha) = 0;
+
+    // 10. Assign a texture (identified by its own UIElementHandle) to an image element.
+    //     The textureHandle must have been obtained via loadTexture() (method 17).
+    virtual void setElementImage(UIElementHandle handle, UIElementHandle textureHandle) = 0;
+
+    // 11. Return the current displayed text of an element. Used in test assertions.
+    virtual std::string getElementText(UIElementHandle handle) const = 0;
+
+    // 12. Return the bounding rectangle of an element in virtual coordinate space.
+    //     Returns Rect{x, y, w, h} (defined in IUIBackend.h — no Irrlicht dependency).
+    //     IrrlichtUIBackend::getElementRect() converts from irr::core::rect<irr::s32>
+    //     internally before returning Rect, keeping Irrlicht headers out of src/ui/.
+    //     Used in position/size assertions.
+    virtual Rect getElementRect(UIElementHandle handle) const = 0;
+
+    // 13. Return the physical screen width in pixels (driver resolution).
+    virtual int getScreenWidth() const = 0;
+
+    // 14. Return the physical screen height in pixels (driver resolution).
+    virtual int getScreenHeight() const = 0;
+
+    // 15. Return the virtual UI canvas width (always 1920 in V1).
+    //     All layout coordinates are in virtual space — see resolution-ui-scaling.md.
+    //     UIManager and all panel code must call this instead of hardcoding 1920.
+    virtual int getVirtualWidth() const = 0;
+
+    // 16. Return the virtual UI canvas height (always 1080 in V1).
+    //     UIManager and all panel code must call this instead of hardcoding 1080.
+    virtual int getVirtualHeight() const = 0;
+
+    // 17. Load a texture from disk and return an opaque handle that can be passed as the
+    //     second argument to setElementImage(). Returns kInvalidUIElement on failure (file
+    //     not found, unsupported format, or driver error). The backend owns the loaded
+    //     texture resource; call removeElement(handle) to release it when no longer needed.
+    virtual UIElementHandle loadTexture(const std::string& path) = 0;
+};
+```
+
+Cross-references:
+
+- `architecture/testing/testability-architecture.md` — `MockUIBackend` (GMock implementation), `UIElementHandle` typedef, `Rect` struct, and the rationale for `src/ui/` placement.
+- `architecture/ui-ux/resolution-ui-scaling.md` — virtual coordinate space definition and letterbox/pillarbox mapping.
+
+## IUIBackend Virtual Dimension Accessors
+
+All UI layout coordinates in AI Town are defined in **virtual 1920×1080 space** (see `architecture/ui-ux/resolution-ui-scaling.md`). `IUIBackend` exposes two methods that return the virtual canvas dimensions:
+
+```cpp
+// Returns the virtual UI canvas width (always 1920 in V1).
+virtual int getVirtualWidth()  const = 0;
+// Returns the virtual UI canvas height (always 1080 in V1).
+virtual int getVirtualHeight() const = 0;
+```
+
+`UIManager` and all panel classes **must** call `m_backend->getVirtualWidth()` and `m_backend->getVirtualHeight()` wherever the canvas extents are needed (e.g. positioning panels relative to screen edges, clamping element coordinates). Hardcoding `1920` or `1080` as literals is prohibited — doing so would break layout at non-standard virtual resolutions in any future revision that changes the virtual coordinate space.
+
+In production (`IrrlichtUIBackend`): returns 1920 and 1080 respectively, matching the V1 virtual coordinate space.
+In tests (`MockUIBackend`): stubs return 1920 and 1080 by default, so all existing panel unit tests behave correctly without additional `ON_CALL` setup.
+
+## Toolbar Carve-Out Constants
+
+The toolbar carve-out region bounds are **compile-time constants**, NOT values derived at runtime from `IUIBackend::getBounds()` or any equivalent query. The toolbar occupies a fixed layout region in the 1920×1080 virtual coordinate space. All carve-out pixel offsets are declared as `constexpr int` in `src/ui/ui_constants.h`, for example:
+
+```cpp
+// src/ui/ui_constants.h
+constexpr int kToolbarLeft   = 8;    // virtual x-coordinate (1920×1080 space)
+constexpr int kToolbarRight  = 72;   // virtual x-coordinate (1920×1080 space)
+constexpr int kToolbarTop    = 64;   // virtual y-coordinate (1920×1080 space)
+constexpr int kToolbarBottom = 784;  // virtual y-coordinate covers tool group + undo + demand + active tool
+```
+
+All carve-out constants in `ui_constants.h` MUST be in 1920×1080 virtual space — NOT in physical pixel
+values or in the 1280×720 minimum resolution space. The UIScaler converts physical pixels to 1920×1080
+virtual space; constants must match the virtual space.
+
+These constants are used directly by `UIManager` and panel code (e.g., event carve-out checks in `onEvent()`, input arbitration skip zones). Runtime `IUIBackend` calls must NOT be used to derive these values — the toolbar layout is fixed in the virtual coordinate space and must not depend on element query results. If the toolbar dimensions ever change, update only `ui_constants.h`; no runtime query path is needed.
+
 ## Class Structure
 
 Required includes for `UIManager`:
@@ -16,10 +134,16 @@ public:
     // backend: IUIBackend implementation (UIManager does NOT own it)
     // audio: IAudioSystem (for UI sound effects; UIManager does NOT own it)
     // sim: ICitySimulation (for reading and controlling simulation state; UIManager does NOT own it)
-    // NOTE: UIManager passes m_sim to NotificationManager as ISimulationPauser* — this is valid
-    // because ICitySimulation extends ISimulationPauser (see architecture/testing/testability-architecture.md).
-    // No additional constructor parameter is required.
-    UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim);
+    // clock: IClock (forwarded to NotificationManager for 5-second auto-dismiss timing, and to HUD
+    //         for undo countdown and grace-period indicator; UIManager does NOT own it).
+    //         Production passes WallClock; tests inject ManualClock for deterministic timing.
+    // NOTE: UIManager passes m_sim to NotificationManager as ICitySimulation* — this is required
+    // because NotificationManager calls m_sim->setPaused(true) on the first CRITICAL toast, and
+    // setPaused() is defined on ICitySimulation* (via ISimulationPauser inheritance). m_sim is
+    // passed directly with no cast needed (UIManager already holds it as ICitySimulation*).
+    // NotificationManager does NOT call getConsecutiveDeficitMonths() — UIManager::update() is
+    // the exclusive polling bridge for deficit-month-based toast dispatch (GD-H3).
+    UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock* clock);
     ~UIManager();
 
     // Called from main event receiver BEFORE game logic processes events.
@@ -73,11 +197,25 @@ private:
     PauseMenuPanel*         m_pauseMenu{nullptr};
     SettingsPanel*          m_settings{nullptr};
     ModalDialog*            m_modal{nullptr};          // created last (highest Z-order)
+    UIElementHandle         m_scrimHandle{kInvalidUIElement}; // full-screen 50% black overlay; created in constructor; shown/hidden when modal is active
 
     ICitySimulation*        m_sim{nullptr};   // non-owning
     IAudioSystem*           m_audio{nullptr}; // non-owning
+    IClock*                 m_clock{nullptr}; // non-owning; forwarded to NotificationManager and HUD at construction
 };
 ```
+
+## MainMenuPanel show/hide Contract
+
+`MainMenuPanel` exposes `show()` and `hide()` methods with the following defined semantics:
+
+- `show()`: makes the main menu panel visible AND resets its internal state to defaults — the selected option returns to the top-level item (New Game highlighted), any transient UI state (hover highlights, sub-menu open state, in-progress text input) is cleared. This ensures the panel always presents a clean initial state regardless of how it was last left.
+- `hide()`: makes the panel invisible. Internal state is NOT reset on hide — `show()` is responsible for the reset when the panel is made visible again.
+
+`UIManager` calls `m_mainMenuPanel.show()` in two situations:
+
+1. During initial startup (the very first frame, before any state transition) — the main menu panel is visible by default from construction, but `show()` is called explicitly to guarantee a clean reset.
+2. On return from gameplay to the main menu (if a future "Return to Main Menu" path is added). Any code path that makes the main menu visible MUST call `show()`, not `setVisible(true)` directly, to guarantee state reset.
 
 ## GameState Enum
 
@@ -110,8 +248,15 @@ Panels are constructed in this order (dependency order — later panels may read
 4. `TaxRatePanel` — hidden initially
 5. `Minimap` — always visible during gameplay
 6. `InspectorPanel` — hidden initially; shown on query tool activation
-7. `PauseMenuPanel` — hidden initially; shown by `transitionToPaused()`; owns and drives `SettingsPanel` visibility
-8. `SettingsPanel` — hidden initially; shown by `PauseMenuPanel` when the player clicks Settings; subordinate to `PauseMenuPanel`
+7. `PauseMenuPanel` — hidden initially; shown by `transitionToPaused()`
+8. `SettingsPanel` — hidden initially; shown when the player clicks Settings from either `PauseMenuPanel` or the main-menu Settings path
+
+   **PauseMenuPanel/SettingsPanel wiring contract**: `PauseMenuPanel` accepts only `IUIBackend*` in its
+   constructor. After `UIManager` constructs all panels, it calls `m_pauseMenu->setSettingsPanel(m_settings)`
+   to wire the pointer. `PauseMenuPanel` exposes a `void setSettingsPanel(SettingsPanel* settings)` method.
+   `SettingsPanel` is NOT passed at `PauseMenuPanel` construction time — the setter approach is used so both
+   panels can be constructed in dependency order without forward-declaring the full `PauseMenuPanel` constructor
+   signature. Phase 1 stub: no-op setter body.
 9. `ModalDialog` — created last; topmost Z-order; hidden until explicitly shown
 
 All panels are visible-by-default set to false except `NotificationManager` (always rendering its toast queue), `MainMenuPanel` (visible on startup until `transitionToGameplay()` hides it), and `Minimap` (visible during gameplay). `UIManager::transitionToGameplay()` sets the correct initial visibility for all panels.
@@ -143,18 +288,30 @@ On `transitionToGameOver()`: show game-over modal; simulation is paused (and sta
 
 ## Draw Order (per frame)
 
+> **NOTE**: Construction order (see §Panel Construction Order) reflects dependency — panels are constructed
+> so earlier panels can be referenced by later ones. Draw order (back-to-front) reflects Z-ordering and
+> intentionally differs from construction order. `UIManager::draw()` MUST iterate panels in draw order,
+> NOT construction order.
+
 Within `UIManager::draw()`, panels are drawn in this order (back to front, matching Z-order):
 
 1. MainMenuPanel (if visible — only during `GameState::MainMenu`)
-2. Minimap
+2. Minimap — **all Minimap chrome elements (toggle row, label strip, legend panel) are drawn inside `Minimap::draw()` at this slot**. These chrome elements are internal to the `Minimap` class and are NOT promoted to separate UIManager draw slots. HUD at slot 3 intentionally renders above any overlap with Minimap chrome. This ordering is normative and MUST NOT be changed to "fix" perceived z-order issues: moving the Minimap draw call later in the sequence would break the `UIManagerDrawOrderTest` ordering contract.
 3. HUD (resource bar, toolbar, speed selector)
 4. TaxRatePanel (if visible)
 5. InspectorPanel (if visible)
 6. NotificationManager toast stack
 7. PauseMenuPanel (if visible)
 8. SettingsPanel (if visible — subordinate to PauseMenuPanel; also reachable from main menu via `UIManager::showSettings()` during `GameState::MainMenu`. The same `SettingsPanel` instance is accessible from `PauseMenuPanel` during `GameState::Paused`.)
-9. Background scrim (if modal active — full-screen 50% black overlay; drawn above all HUD/panel elements so it visually covers them while the modal is shown)
+9. Background scrim (if modal active — full-screen 50% black overlay; drawn above all HUD/panel elements so
+   it visually covers them while the modal is shown). The scrim element (`m_scrimHandle`) is an
+   event-consuming element: while a modal is active it consumes left-click and right-click events that fall
+   outside the modal dialog bounds, preventing interaction with HUD/panel elements beneath it. Scroll-wheel,
+   MMB drag, and RMB drag events are NOT consumed by the scrim — camera events always pass through (see
+   Priority 1 in `input-arbitration.md`).
 10. ModalDialog (always topmost)
+
+**BudgetDetailPanel ownership**: `BudgetDetailPanel` is owned and drawn by the `HUD` class internally — it is a detail overlay triggered by hovering the treasury balance field in the resource bar. It is NOT a top-level `UIManager` panel and does NOT appear in UIManager's panel member list or draw order. UIManager's draw order has exactly 10 slots as specified above.
 
 `UIManager::draw()` issues explicit per-panel draw calls in the back-to-front order listed above (items 1–10). This is the normative approach: each panel exposes a `draw()` method that is called directly by UIManager in the correct sequence. `m_gui->drawAll()` is NOT used — it would bypass the explicit layering required for the background scrim, the modal overlay, and the precise Z-order defined here. Each panel's `IGUIElement` children are managed internally within that panel's own draw call.
 

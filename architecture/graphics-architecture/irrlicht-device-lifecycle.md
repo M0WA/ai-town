@@ -41,6 +41,25 @@ params.Vsync       = false; // user-configurable option
 
 ## GL Capability Query Initialization
 
+> **CRITICAL — Safe operations between `createDevice()` and `glewInit()`**
+>
+> After `createDevice()` returns non-null, the OpenGL context is active on the
+> calling thread but GLEW's function-pointer table has NOT yet been populated.
+> Therefore, NO GLEW-dependent call is safe before `glewInit()`. This includes —
+> but is not limited to — `glewIsSupported()`, `glewIsExtensionSupported()`, and
+> any raw GL extension entrypoint resolved through GLEW (e.g.
+> `glCompressedTexImage2D`). Calling any of these before `glewInit()` dereferences
+> a null function pointer and will crash immediately.
+>
+> Call `glewInit()` IMMEDIATELY as the first action after `createDevice()` returns,
+> before any OpenGL extension use.
+>
+> The ONLY operations that are safe before `glewInit()` are Irrlicht API calls
+> that do not invoke raw GL functions internally — for example, reading
+> `IrrlichtDevice` properties (window size, driver type) or querying
+> `IVideoDriver::getDriverType()`. Any direct GL extension call before
+> `glewInit()` will crash with a null function pointer.
+
 The following initialization sequence MUST occur immediately after `createDevice()` and before any `glewIsExtensionSupported()` or `glGetIntegerv()` call:
 
 1. **EDT_NULL pre-check**: Short-circuit the entire GL capability block if `IVideoDriver::getDriverType() == EDT_NULL`. No GL calls are valid in headless mode.
@@ -48,18 +67,111 @@ The following initialization sequence MUST occur immediately after `createDevice
 2. **glewInit()** must be called first:
 
    ```cpp
+   // Required on GLVND Linux — prevents GLEW_ERROR_NO_GL_VERSION when Mesa provides
+   // OpenGL via libGL.so.1 dispatch layer.
+   glewExperimental = GL_TRUE;
    GLenum glewResult = glewInit();
-   if (glewResult != GLEW_OK) {
-       // Log failure; fall back to safe defaults.
-       // glGetIntegerv(GL_MAX_TEXTURE_SIZE) may still work on some drivers.
-       // glewIsExtensionSupported() must NOT be called after a failed glewInit().
+   if (glewResult == GLEW_ERROR_NO_GL_VERSION) {
+       // NON-FATAL: GLEW could not determine the OpenGL version string, but the
+       // GL context and function pointers may still be valid.  Log a WARNING and
+       // continue — do NOT abort and do NOT fall back to EDT_NULL.
+       LOG_WARNING("glewInit() returned GLEW_ERROR_NO_GL_VERSION; "
+                   "GL version string unavailable but continuing.");
+   } else if (glewResult != GLEW_OK) {
+       // FATAL: GLEW function-pointer table was not populated.
+       // Debug builds: abort immediately (assert/terminate) so the failure is
+       //               caught during development.
+       // Release builds: fall back to EDT_NULL driver and show a user-facing
+       //                 error notification ("OpenGL initialisation failed").
+       //                 Do NOT call any GL extension entrypoints after this
+       //                 point — they will crash with null function pointers.
+       LOG_ERROR("glewInit() failed: %s", glewGetErrorString(glewResult));
+       AITOWN_ASSERT_MSG(false, "Fatal GLEW initialisation failure");
+       // Release fallback: reinitialise device with EDT_NULL and notify user.
    }
    ```
 
    Calling `glewIsExtensionSupported()` or any GLEW function pointer (e.g. `glCompressedTexImage2D`) before `glewInit()` causes a null function pointer crash.
 
-3. **GL_MAX_TEXTURE_SIZE query**: Query with `glGetIntegerv(GL_MAX_TEXTURE_SIZE, &m_maxTextureSize)` immediately after glewInit (even if glewInit failed — this call does not depend on GLEW).
+   **Two-tier distinction rationale**: `GLEW_ERROR_NO_GL_VERSION` specifically indicates GLEW cannot determine the GL version string — function pointers may still be loaded. Other errors (e.g., `GLEW_ERROR_NO_GLX_DISPLAY`) indicate the function-pointer table was not populated. The default GL 1.0 entrypoint `glGetIntegerv(GL_MAX_TEXTURE_SIZE, ...)` does not depend on the GLEW function-pointer table, but it does require a current GL context — it is safe to call only while the original OpenGL device is still alive (SUCCESS path), and must NOT be called after the device has been replaced with `EDT_NULL` (RELEASE fallback path). See step 3 for the guarded query sequence.
+
+3. **GL_MAX_TEXTURE_SIZE query**: Query with `glGetIntegerv(GL_MAX_TEXTURE_SIZE, &m_maxTextureSize)` only in the SUCCESS path (after `glewInit()` returns `GLEW_OK` or `GLEW_ERROR_NO_GL_VERSION`). A non-null return from `createDevice()` guarantees an OpenGL context is current on the calling thread, and `glGetIntegerv(GL_MAX_TEXTURE_SIZE, ...)` is a core OpenGL 1.0 entrypoint that resolves through the platform's native GL dispatch (not through GLEW's function-pointer table). Do NOT query `GL_MAX_TEXTURE_SIZE` in the RELEASE fallback path after a fatal `glewInit()` failure — at that point the original OpenGL device has been destroyed and replaced with an `EDT_NULL` device, which has no GL context. Calling `glGetIntegerv` without a current GL context invokes undefined behaviour. On RELEASE fallback, set `m_maxTextureSize` to a safe default value of 2048 without querying GL:
+
+   ```cpp
+   if (glewResult == GLEW_OK || glewResult == GLEW_ERROR_NO_GL_VERSION) {
+       // SUCCESS path: GL context is current; query the real hardware limit.
+       glGetIntegerv(GL_MAX_TEXTURE_SIZE, &m_maxTextureSize);
+   } else {
+       // RELEASE fallback: original OpenGL device destroyed; EDT_NULL has no GL context.
+       // Do NOT call glGetIntegerv — no GL context is current.
+       m_maxTextureSize = 2048;  // safe conservative default
+   }
+   ```
 
 4. **Extension queries**: Use `glewIsExtensionSupported("GL_EXT_texture_sRGB")` etc. only after a successful `glewInit()`.
 
-**GLEW availability spike**: Phase 1 must verify whether the vendored Irrlicht build exposes GLEW symbols. If GLEW is unavailable (Irrlicht compiled without GLEW), all extension checks must use `glGetString(GL_EXTENSIONS)` string matching or `IVideoDriver::queryFeature()` instead. This spike must complete before any `glewIsExtensionSupported()` code is written. The spike result must be documented in `architecture/graphics-architecture/scene-graph-ownership.md` under the Phase 1 spikes section.
+**GLEW availability spike**: Phase 1 must verify whether the vendored Irrlicht build exposes GLEW symbols. If GLEW is unavailable (Irrlicht compiled without GLEW), all extension checks must use `glGetString(GL_EXTENSIONS)` string matching or `IVideoDriver::queryFeature()` instead. This spike must complete before any `glewIsExtensionSupported()` code is written. The spike result must be documented in BOTH `architecture/graphics-architecture/irrlicht-device-lifecycle.md` under the Phase 1 Spike Results section AND as a one-line comment in `src/rendering/render_system.h` confirming the confirmed extension query path (glewIsExtensionSupported or glGetString(GL_EXTENSIONS) fallback). The code comment ensures in-code documentation for implementers; the architecture doc ensures the decision is visible to non-implementers reviewing the spec.
+
+### GLEW Spike — Two Independent Questions
+
+The GLEW availability spike answers two completely independent questions. Conflating them produces incorrect conclusions — the answer to question 1 has no bearing on the answer to question 2.
+
+**Question 1: Does the vendored Irrlicht source use GLEW internally?**
+
+Inspect `source/Irrlicht/COpenGLDriver.cpp` for `#include "glew.h"` or `glewInit()` calls. This determines only whether Irrlicht's own internal GL calls go through GLEW's function pointer table. It does NOT determine whether AI Town can link GLEW independently.
+
+**Question 2: Can AI Town link against GLEW independently and call `glewInit()`?**
+
+The answer to this question is determined solely by whether `find_package(GLEW REQUIRED)` succeeds. When the vcpkg `glew` port is installed, this is ALWAYS yes — regardless of whether Irrlicht bundles GLEW internally.
+
+`find_package(GLEW REQUIRED)` MUST remain in CMakeLists.txt regardless of the answer to question 1. AI Town calls `glewInit()` itself to populate its own function pointer table for `glCompressedTexImage2D` and `glewIsExtensionSupported()`. Question 1 only affects whether symbol duplication risk exists — which is handled by ensuring both link to the same vcpkg GLEW build.
+
+## GLEW Symbol Duplication Risk
+
+Irrlicht bundles its own copy of GLEW headers and symbols (in `source/Irrlicht/glew.h` and compiled into the Irrlicht static library). The vcpkg `glew` port provides a separate GLEW build. When both are present in the same link, the same symbols (e.g. `glewInit`, `glCompressedTexImage2D`) are defined twice, producing linker warnings or — on some toolchains — silent ODR violations that cause incorrect function pointer resolution at runtime.
+
+**Mitigations (in priority order):**
+
+1. **Check whether the Irrlicht vcpkg port already strips bundled GLEW**: The `adrido/irrlicht-vcpkg` port may apply a patch that excludes Irrlicht's bundled `glew.c` from the build, eliminating the duplication entirely. Verify by inspecting the port's `portfile.cmake` and any applied patches for `glew` exclusion before applying the mitigations below.
+2. **Link vcpkg GLEW before Irrlicht** in CMake `target_link_libraries` order — the linker takes the first definition found; placing vcpkg GLEW first ensures the correct, versioned GLEW symbols win:
+
+   ```cmake
+   target_link_libraries(aitown_render PRIVATE GLEW::GLEW Irrlicht ...)
+   ```
+
+   `aitown_render` is the static library where both GLEW and Irrlicht are first linked together. The `aitown` executable only links against `aitown_render` transitively and must not re-link GLEW or Irrlicht directly.
+
+3. **Linux fallback** — if symbol duplication cannot be resolved by link order, add `-Wl,--allow-multiple-definition` to the linker flags for Linux only:
+
+   ```cmake
+   if (UNIX AND NOT APPLE)
+       target_link_options(aitown PRIVATE -Wl,--allow-multiple-definition)
+   endif()
+   ```
+
+   This suppresses the linker error but does not guarantee the correct definition wins; link order (mitigation 2) must still be applied.
+
+**Phase 1 build verification (BUILD-BLOCKING):** The build engineer must verify that no duplicate GLEW symbols remain after applying mitigations. Run the following after a successful Linux build:
+
+```bash
+nm build/aitown | grep -i glew | sort | uniq -d
+```
+
+**Note on `-D` flag**: On a fully static Linux build, the `-D` flag inspects only the dynamic export table and will produce no output even when symbols are duplicated in the static image. Plain `nm` without `-D` must be used for statically-linked executables.
+
+If this command produces any output, duplicate GLEW symbols are present and the build is BLOCKED — the issue must be resolved before merging. The result of this check (clean or duplicate list) must be recorded in the Phase 1 Spike Results section below.
+
+## Phase 1 Spike Results
+
+<!-- Placeholder: populate this section once the Phase 1 GLEW availability spike is complete. -->
+<!-- Record here: whether the vendored Irrlicht build exposes GLEW symbols, and which extension query path was confirmed (glewIsExtensionSupported vs. glGetString(GL_EXTENSIONS) fallback). -->
+
+## Test Guard — `shader_stub_compile_test` Skip vs. Fail
+
+The `GTEST_SKIP()` guard in `shader_stub_compile_test` must only activate when
+`createDevice()` returns null AND the `DISPLAY` environment variable is unset.
+Under `xvfb-run` (where `DISPLAY` is set), a null return from
+`createDevice(EDT_OPENGL)` is a test FAILURE (`FAIL()`), not a skip — it
+indicates Mesa or OpenGL is misconfigured in CI. Conflating the two conditions
+produces a silent false-pass: the test appears green while the OpenGL context
+is broken.

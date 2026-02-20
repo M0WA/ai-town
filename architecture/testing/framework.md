@@ -63,25 +63,30 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
 
   ```cmake
   # cmake/AitownTestHelpers.cmake
-  # Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl> [TIMEOUT <seconds>])
+  # Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl>
+  #                         [TIMEOUT <seconds>] [DISCOVERY_TIMEOUT <seconds>])
   macro(aitown_add_tests TARGET)
-      cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT" "" ${ARGN})
+      cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT;DISCOVERY_TIMEOUT" "" ${ARGN})
       if(NOT AITOWN_TEST_LABEL)
           message(FATAL_ERROR "aitown_add_tests: LABEL is required (unit, integration, or requires-opengl)")
       endif()
       if(NOT AITOWN_TEST_TIMEOUT)
           set(AITOWN_TEST_TIMEOUT 120)  # default per-test timeout
       endif()
+      if(NOT AITOWN_TEST_DISCOVERY_TIMEOUT)
+          set(AITOWN_TEST_DISCOVERY_TIMEOUT 30)  # default discovery timeout; coverage-instrumented binaries may need more
+      endif()
       gtest_discover_tests(${TARGET}
           WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-          DISCOVERY_TIMEOUT 30
+          DISCOVERY_TIMEOUT ${AITOWN_TEST_DISCOVERY_TIMEOUT}
           PROPERTIES TIMEOUT ${AITOWN_TEST_TIMEOUT}
           LABELS "${AITOWN_TEST_LABEL}"
       )
   endmacro()
 
-  # Terrain tests: longer timeout for multi-seed generation property tests
-  # aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300)
+  # Terrain tests: longer timeout for multi-seed generation property tests;
+  # DISCOVERY_TIMEOUT 60 because coverage-instrumented terrain binary is large
+  # aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
   #
   # Standard unit tests:
   # aitown_add_tests(simulation_tests LABEL "unit")
@@ -91,7 +96,7 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
   # aitown_add_tests(integration_tests LABEL "integration")
   ```
 
-  **Terrain test timeout**: Terrain generator tests (`tests/terrain/`) use a 300 s per-test timeout (overriding the default 120 s) because `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` runs up to 100 re-seed attempts for each RapidCheck shrinking iteration, and the multi-seed `TEST_F` cases (6 seeds × generation time) can exceed 120 s on coverage-instrumented CI runners. Call: `aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300)`.
+  **Terrain test timeout**: Terrain generator tests (`tests/terrain/`) use a 300 s per-test timeout (overriding the default 120 s) because `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` runs up to 100 re-seed attempts for each RapidCheck shrinking iteration, and the multi-seed `TEST_F` cases (6 seeds × generation time) can exceed 120 s on coverage-instrumented CI runners. Call: `aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)`.
 
 ## Source Directory Structure
 
@@ -124,11 +129,46 @@ tests/
 
 **One CMake target per label** — do not mix labels within a target. `aitown_add_tests()` enforces this by requiring exactly one LABEL. Unit and integration tests must live in separate `add_executable` calls.
 
+**`target_sources()` policy**: `opengl_tests` PROHIBITS `target_sources()` — all source files must be listed inline in `add_executable(opengl_tests ...)` to prevent ctest discovery timing issues caused by deferred source registration. `ui_tests` also PROHIBITS `target_sources()` during Phase 1 because Test-C1 requires the consolidated five-file `add_executable` call to be committed as a single amendment; `target_sources()` is PERMITTED for `ui_tests` from Phase 2 onward. All other targets PERMIT `target_sources()`, though inline listing in `add_executable` is preferred for readability.
+
+**`ui_tests` Phase 2+ extension policy**: As new UI panel test files are added in Phase 2 and later (e.g. `tax_rate_panel_test.cpp`, `inspector_panel_test.cpp`), they MUST be appended via `target_sources(ui_tests PRIVATE tests/ui/<new_file>.cpp)` in their own CMake block — NOT by editing the top-level `add_executable(ui_tests ...)` call in the root `CMakeLists.txt`. This keeps the `ui_tests` target self-contained: each phase's additions are localized to a dedicated `target_sources()` call that can be reviewed in isolation. Modifying the root `CMakeLists.txt` `add_executable` line for every new UI test file creates unnecessary churn in a high-traffic file and risks merge conflicts. The `target_sources()` call must appear in the same `CMakeLists.txt` scope as the original `add_executable(ui_tests ...)` call (i.e., the root `CMakeLists.txt` or a dedicated `tests/ui/CMakeLists.txt` included from root), not in a subdirectory `CMakeLists.txt` where the target may not be in scope.
+
+| CMake Target | `target_sources()` Permitted? | Notes |
+|---|---|---|
+| `opengl_tests` | PROHIBITED — inline `add_executable` only | Prevents ctest discovery timing issues from deferred source registration |
+| `ui_tests` | PROHIBITED for Phase 1 (Test-C1); PERMITTED thereafter via `target_sources(ui_tests PRIVATE ...)` | Phase 1 requires consolidated 5-file `add_executable` committed as a single amendment; Phase 2+ additions MUST use `target_sources(ui_tests PRIVATE ...)` — never modify the root CMakeLists.txt |
+| `simulation_tests` | PERMITTED — inline listing preferred | |
+| `audio_tests` | PERMITTED — inline listing preferred | |
+| `terrain_tests` | PERMITTED — inline listing preferred | |
+| `integration_tests` | PERMITTED — inline listing preferred | |
+
 ```cmake
 # Example CMakeLists.txt registration:
 add_executable(simulation_tests tests/simulation/economy_test.cpp ...)
 target_link_libraries(simulation_tests PRIVATE aitown_sim GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
+# src/simulation/ is REQUIRED: simulation test files use #include "simulation_constants.h" and other
+# simulation headers (e.g. simulation_types.h, city_simulation.h) via project-relative paths that
+# resolve relative to src/simulation/. Without this entry, the compiler cannot find these headers
+# and the build fails with "fatal error: simulation_constants.h: No such file or directory".
+# Do NOT remove src/simulation/ from this list even if no current test file directly includes
+# simulation headers — future test files in tests/simulation/ will need it, and the include path
+# must be present before first use to avoid a retroactive CMakeLists.txt amendment.
+target_include_directories(simulation_tests PRIVATE
+    tests/simulation/ src/interfaces/ src/simulation/ ${CMAKE_SOURCE_DIR})
 aitown_add_tests(simulation_tests LABEL "unit")
+# Phase 1 exit criterion: All 6 ManualRNG self-tests must pass.
+# These tests live in tests/simulation/manual_rng_test.cpp and are registered
+# under the simulation_tests target. The canonical test names are:
+#   1. ManualRNG_VerifyAllConsumed_ThrowsOnOverProvision
+#   2. ManualRNG_VerifyAllConsumed_NoThrowWhenFullyConsumed
+#   3. ManualRNG_EmptyIntSeq_ThrowsAtConstruction
+#   4. ManualRNG_FloatSeqOutOfRange_ThrowsAtConstruction
+#   5. ManualRNG_EmptyFloatSeq_ThrowsAtConstruction
+#   6. ManualRNG_NextInt_OutOfRange_ThrowsAtCallTime
+# Verify with:
+#   ctest --test-dir build -LE 'integration|requires-opengl' -R ManualRNG --output-on-failure
+# All 6 must appear and pass. A test runner that shows fewer than 6 results indicates
+# a missing test body, a mismatched test name, or a CMake registration error.
 
 add_executable(terrain_tests tests/terrain/terrain_generator_test.cpp ...)
 # rapidcheck and rapidcheck_gtest are included from the start: Phase 2 adds
@@ -136,7 +176,20 @@ add_executable(terrain_tests tests/terrain/terrain_generator_test.cpp ...)
 # Linking RapidCheck at Phase 0 means Phase 2 can add property tests without retroactively
 # editing CMakeLists.txt.
 target_link_libraries(terrain_tests PRIVATE aitown_terrain GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
-aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300)
+target_include_directories(terrain_tests PRIVATE
+    tests/simulation/ tests/terrain/ src/terrain/ ${CMAKE_SOURCE_DIR})
+aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
+# Phase 1 prerequisite: `terrain_stub.cpp` references `#include "src/terrain/terrain_chunk.h"`.
+# This header does not exist as a full implementation until Phase 2. Phase 1 MUST create a
+# minimal stub at `src/terrain/terrain_chunk.h` containing:
+#
+#   #pragma once
+#   // Phase 1 stub -- Phase 2 replaces with full TerrainChunk implementation
+#   class TerrainChunk {};
+#
+# This stub is required to make `terrain_tests` compile in Phase 1. Without it, the
+# `target_include_directories(terrain_tests PRIVATE src/terrain/ ...)` path cannot be
+# exercised and verified.
 
 add_executable(audio_tests tests/audio/duck_state_test.cpp ...)
 # rapidcheck and rapidcheck_gtest are included proactively: removing them later is trivial,
@@ -173,7 +226,11 @@ add_executable(opengl_tests
     tests/rendering/lod_swap_smoke_test.cpp
 )
 target_link_libraries(opengl_tests PRIVATE aitown_render GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
-target_include_directories(opengl_tests PRIVATE src/interfaces/ ${CMAKE_SOURCE_DIR})
+# src/rendering/ required for Phase 6 lod_swap_smoke_test.cpp which needs scene-graph and mesh buffer headers.
+target_include_directories(opengl_tests PRIVATE
+    src/interfaces/
+    src/rendering/
+    ${CMAKE_SOURCE_DIR})
 aitown_add_tests(opengl_tests LABEL "requires-opengl")
 
 add_executable(integration_tests tests/integration/irrlicht_ui_backend_test.cpp)
@@ -182,6 +239,6 @@ target_link_libraries(integration_tests PRIVATE
     GTest::gtest_main GTest::gmock
     rapidcheck rapidcheck_gtest)
 target_include_directories(integration_tests PRIVATE
-    tests/simulation/ tests/ui/ src/interfaces/ src/ui/ ${CMAKE_SOURCE_DIR})
+    tests/simulation/ tests/ui/ src/interfaces/ src/ui/ src/rendering/ ${CMAKE_SOURCE_DIR})
 aitown_add_tests(integration_tests LABEL "integration")
 ```
