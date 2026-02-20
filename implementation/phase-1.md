@@ -30,6 +30,14 @@ Establish the Irrlicht device lifecycle, render loop call order, `CameraControll
 
 - [ ] **`validate-assets` CI job stub** (`cicd-dev-github`): introduce the `validate-assets` CI job as an always-passing stub (exits 0) and wire it into `all-checks-pass` `needs:` immediately — the `all-checks-pass` Phase 1+ form must include `validate-assets` in its `needs:` list. The three-item atomicity requirement applies: all three items must land in the same commit — (1) `tools/validate_assets.py` placeholder script (exits 0), (2) `validate-assets` CI job YAML, (3) `all-checks-pass` needs entry update. The Phase 1 stub job runs `python tools/validate_assets.py` on the placeholder script. CI-5 `actions/setup-python` SHA resolution is a Phase 4 deliverable. (ref: `architecture/ci-cd/github-actions-workflow.md`)
 - [ ] **Camera pitch sign-off gate** (`graphics-artist-3d-model`): verify the camera pitch range `[-70°, -20°]` and billboard bake midpoint `−45°` sign-off is on record in `architecture/asset-standards/3d-model-standards.md` Camera Pitch Range section. **The sign-off is already CONFIRMED in the spec** (recorded as: "CONFIRMED — camera pitch range [−70°, −20°] and bake midpoint −45° are final. Reviewed and approved by: graphics-artist-3d-model."). The Phase 1 action is to verify this entry is present and accurate before Phase 7 billboard bake work begins. **Phase 7 billboard bake infrastructure MUST NOT begin without this sign-off on record.** (ref: `architecture/asset-standards/3d-model-standards.md`)
+- [ ] **`tests/ui/camera_controller_test.cpp`** (`test-dev-cpp`): author all 6 named `CameraController` unit tests (registered under the `ui_tests` CMake target, label `unit`) per `architecture/testing/testability-architecture.md`. Required named test cases:
+  1. `CameraController_PitchClamp_AtUpperBound_ExactlyMinus20` — pitch must equal exactly `−20.0f` using `EXPECT_FLOAT_EQ` (inclusive bound, `std::clamp` semantics)
+  2. `CameraController_PitchClamp_AtLowerBound_ExactlyMinus70` — pitch must equal exactly `−70.0f` using `EXPECT_FLOAT_EQ`
+  3. `CameraController_EdgeScroll_DisabledOnFocusLoss` — inject `WindowFocusLost`; cursor at left edge; assert position unchanged
+  4. `CameraController_RightMouseRotate_MovesYaw` — RMB down + horizontal drag; assert yaw changed
+  5. `CameraController_MiddleMousePan_MovesPosition` — MMB down + horizontal drag; assert position changed
+  6. `CameraController_EdgeScroll_EnabledByDefaultInFullscreen` — construct with `startInFullscreen=true`; call `isEdgeScrollEnabled()` immediately; assert `true`
+  Tests inject synthetic `InputEvent` structs; `getCameraState()` used for output assertions; no live Irrlicht scene node required. (ref: `architecture/testing/testability-architecture.md`, `architecture/ui-ux/camera-controls.md`)
 
 ### Exit Criteria
 
@@ -37,7 +45,8 @@ Establish the Irrlicht device lifecycle, render loop call order, `CameraControll
 - Camera pans, rotates, and zooms correctly within pitch constraints `[-70°, -20°]`
 - `IrrlichtUIBackend` compiles and links against Irrlicht — full 17-method integration is a Phase 3 deliverable
 - Windows CI DLL verification step hard-fails on missing `Irrlicht.dll` — the Phase 0 baseline `ci.yml` hard-fail is already in place; the Phase 1 CMake post-build copy rule must be added so this existing hard-fail step passes
-- `validate-assets` CI job stub is wired into `all-checks-pass`; CI passes with stub always-exit-0
+- `validate-assets` CI job stub is present in `ci.yml` (job name `validate-assets`, runs `python tools/validate_assets.py`, always exits 0), AND appears in `all-checks-pass` `needs:` list using the Phase 1+ 5-job form: `needs: [build-linux, build-windows, coverage-linux, markdown-lint, validate-assets]` — per `architecture/ci-cd/github-actions-workflow.md` Phase 1+ form. The three-item atomicity commit (`tools/validate_assets.py` placeholder + `validate-assets` CI job YAML + `all-checks-pass` `needs:` update) must be verifiable as a single merged commit. CI passes with stub always-exit-0.
+- All 6 named `CameraController` unit tests in `tests/ui/camera_controller_test.cpp` compile and pass under `ctest -LE "integration|requires-opengl"` (label `unit`); pitch clamp tests use `EXPECT_FLOAT_EQ` for exact boundary equality per `architecture/ui-ux/camera-controls.md` inclusive-bound semantics
 - Camera pitch sign-off verified: `architecture/asset-standards/3d-model-standards.md` Camera Pitch Range section confirms the sign-off is on record (pitch range `[-70°, -20°]`, billboard bake midpoint `−45°`, status: CONFIRMED). **Phase 7 billboard bake infrastructure MUST NOT begin without this sign-off on record in `3d-model-standards.md`.**
 
 ### Team
@@ -45,7 +54,8 @@ Establish the Irrlicht device lifecycle, render loop call order, `CameraControll
 | Role | Responsibility |
 |---|---|
 | `graphics-dev-irrlicht` | `RenderSystem` RAII + creation params, render loop call order (OAL-2 rule enforced; `UIManager::draw()` NOT `m_gui->drawAll()`), `IRenderer` interface, camera node setup (`addCameraSceneNode()` only; grab/drop-guarded animator removal loop), `CameraController` class (pan/zoom/rotate, pitch `[-70°,-20°]`, edge scroll, `m_appHasFocus`, `bool startInFullscreen`, `isEdgeScrollEnabled()`, `OnInputEvent()`, drag-delta = physical pixels), `IrrlichtUIBackend` compile target |
-| `cicd-dev-github` | `Irrlicht.dll` post-build copy rule co-landing review, CI-CRITICAL grace window downgrade, `validate-assets` CI job stub wiring |
+| `cicd-dev-github` | `Irrlicht.dll` post-build copy rule co-landing review, CI-CRITICAL grace window downgrade, `validate-assets` CI job stub wiring (three-item atomicity commit: placeholder script + CI job YAML + `all-checks-pass` Phase 1+ 5-job `needs:` update) |
+| `test-dev-cpp` | `tests/ui/camera_controller_test.cpp`: all 6 named `CameraController` unit tests (pitch clamp × 2, edge-scroll focus loss, RMB rotate, MMB pan, edge-scroll fullscreen default); registered under `ui_tests` CMake target (label `unit`) |
 | `graphics-artist-3d-model` | Camera pitch sign-off gate (verify sign-off is on record in `architecture/asset-standards/3d-model-standards.md`; sign-off is already CONFIRMED — Phase 7 may proceed on that basis) |
 
 ### Dependencies
