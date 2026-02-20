@@ -42,6 +42,65 @@
 
 > **`stinger_game_over` is deferred to post-V1.** Scenario mode (the only gameplay context in which a game-over stinger fires) is a post-V1 feature. `stinger_game_over` will be added to the asset manifest when Scenario mode is implemented. At that point sources[57] will be reserved as the non-evictable GAME_OVER stinger slot and `kStingerCount` will increase from 2 to 3. See dynamic-soundscape.md for the post-V1 game-over duck interaction spec.
 
+## SoundId Assignment Table
+
+> **These integer values are locked. Do not reassign. `sound_ids.h` must use exactly these values.**
+
+`SoundId` 0 is reserved as the invalid/null identifier. All V1 SFX and UI assets are assigned stable integer values starting at 1. Zone loop assets are positional sound buffers loaded at startup and share the same `SoundId` namespace as other pre-loaded SFX.
+
+| SoundId | Asset Name | Category |
+|---|---|---|
+| 0 | *(invalid/reserved)* | — |
+| 1 | `sfx_build_place` | SFX |
+| 2 | `sfx_build_demolish` | SFX |
+| 3 | `sfx_road_build` | SFX |
+| 4 | `sfx_earthworks` | SFX |
+| 5 | `sfx_zone_upgrade` | SFX |
+| 6 | `sfx_service_degrade` | SFX |
+| 7 | `sfx_budget_warn` | SFX |
+| 8 | `sfx_loan_issued` | SFX |
+| 9 | `sfx_power_out` | SFX |
+| 10 | `sfx_water_out` | SFX |
+| 11 | `sfx_fire_alert` | SFX |
+| 12 | `sfx_police_alert` | SFX |
+| 13 | `sfx_vehicle_engine_idle` | Vehicle SFX |
+| 14 | `sfx_vehicle_engine_move` | Vehicle SFX |
+| 15 | `sfx_vehicle_horn` | Vehicle SFX |
+| 16 | `sfx_intersection_tick` | SFX |
+| 17 | `zone_residential` | Zone loop |
+| 18 | `zone_commercial` | Zone loop |
+| 19 | `zone_industrial` | Zone loop |
+| 20 | `stinger_crisis` | Music stinger |
+| 21 | `stinger_milestone` | Music stinger |
+| 22 | `ui_click` | UI |
+| 23 | `ui_toast` | UI |
+| 24 | `ui_menu_open` | UI |
+| 25 | `ui_menu_close` | UI |
+
+Stingers (IDs 20–21) are included in this table because they are loaded as static WAV PCM buffers via the same `AudioSystem::loadSound()` path as other pre-loaded SFX. Their reserved non-evictable pool source indices (55 and 56) are an orthogonal concern — the `SoundId` identifies the buffer, the pool source index identifies the playback slot.
+
+Post-V1 additions (e.g., `stinger_game_over`, `sfx_population_notification`) MUST be assigned the next available integer (26, 27, …) and appended to this table. Never reuse a retired ID.
+
+## MusicTrackId Assignment Table
+
+> **These integer values are locked. Do not reassign. `sound_ids.h` must use exactly these values.**
+
+`MusicTrackId` 0 is reserved as the invalid/null identifier. All V1 streamed music assets (main menu stems and gameplay stems) are assigned stable integer values starting at 1. Ambient bed streams use `SoundId` (see above) because they share the pre-loaded asset path; only assets managed exclusively by the music crossfade state machine use `MusicTrackId`.
+
+| MusicTrackId | Asset Name | Category |
+|---|---|---|
+| 0 | *(invalid/reserved)* | — |
+| 1 | `music_main_menu_01` | Main menu music |
+| 2 | `music_main_menu_02` | Main menu music |
+| 3 | `music_calm_01` | Music stem |
+| 4 | `music_calm_02` | Music stem |
+| 5 | `music_growth_01` | Music stem |
+| 6 | `music_growth_02` | Music stem |
+| 7 | `music_crisis_01` | Music stem |
+| 8 | `music_crisis_02` | Music stem |
+
+Post-V1 music stems MUST be assigned the next available integer (9, 10, …) and appended to this table. Never reuse a retired ID.
+
 ## Asset Path Convention
 
 All V1 audio assets reside at `${AITOWN_ASSETS_DIR}/audio/<filename>` (flat layout, no subdirectory), where `<filename>` is the Asset Name from the table above plus its format extension (e.g., `ambient_day.ogg`, `sfx_build_place.wav`, `stinger_crisis.wav`). JSON sidecar files for music stems follow the same flat layout (e.g., `${AITOWN_ASSETS_DIR}/audio/music_calm_01.json`). `AudioSystem` must resolve all asset paths using this convention; no asset category uses a subdirectory under `audio/`.

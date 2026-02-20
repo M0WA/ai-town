@@ -35,7 +35,12 @@ public:
 
 `MockUIBackend` returns arbitrary non-zero integer handles (e.g., an incrementing counter) with no real objects — unit tests that call UIManager methods never dereference Irrlicht pointers, making `src/ui/` genuinely headless-testable and the 80% coverage gate achievable.
 
-- **`UIScaler` testability**: `UIScaler` must accept viewport dimensions at construction (`UIScaler(int virtualW, int virtualH, int viewportW, int viewportH, int offsetX, int offsetY)`) rather than reading from a live `IVideoDriver`. Tests construct `UIScaler(1920, 1080, 1280, 720, 0, 90)` directly to validate coordinate projection and letterbox offset math without a display.
+- **`UIScaler` testability**: `UIScaler` must accept viewport dimensions at construction (`UIScaler(int virtualW, int virtualH, int viewportW, int viewportH, int offsetX, int offsetY)`) rather than reading from a live `IVideoDriver`. Tests construct `UIScaler(1920, 1080, 1280, 720, 0, 90)` directly to validate coordinate projection and letterbox offset math without a display. The `unproject` method returns `UIScaler::VirtualPoint` — a nested struct, NOT at namespace scope, to avoid ODR violations. The five named unit tests that must be authored in `tests/ui/ui_scaler_test.cpp` are:
+  1. `UIScaler_1280x720_LetterboxOffsets_ProjectsCorrectly`: construct with (1920, 1080, 1280, 720, 0, 90); unproject (640, 450) → virtual (960, 720).
+  2. `UIScaler_FullNative_NoOffset_ProjectsIdentity`: construct with (1920, 1080, 1920, 1080, 0, 0); unproject (960, 540) → virtual (960, 540).
+  3. `UIScaler_PillarboxOffset_UnprojectsCenterCorrectly`: construct with (1920, 1080, 1440, 1080, 240, 0); unproject (960, 540) → virtual (960, 540).
+  4. `UIScaler_MouseOutsideViewport_ClampedToEdge`: construct with (1920, 1080, 1280, 720, 0, 90); unproject (640, 80) → virtual y clamped to 0 (actual_y=80 < offsetY=90 produces negative pre-clamp virtual_y, clamped to 0).
+  5. `UIScaler_GetViewportRect_ReturnsCorrectOffsets`: construct with (1920, 1080, 1280, 720, 0, 90); `getViewportRect()` returns {x:0, y:90, w:1280, h:720}.
 - **`NotificationManager` testability**: `NotificationManager` must accept `IClock*` for dismiss-after-5s timing, `IUIBackend*` for element creation, and `ISimulationPauser*` (interface: `virtual void setPaused(bool) = 0`) for auto-pause injection. **Source location**: `ISimulationPauser.h` lives in **`src/interfaces/`** (NOT `src/simulation/`) — placing it in `src/simulation/` creates a latent circular dependency when `src/ui/` headers include it (`src/ui/` → `src/simulation/` is a prohibited dependency direction; UI must not depend on simulation headers). `src/interfaces/` is a dependency-free common header directory that both `src/simulation/` and `src/ui/` may include. `MockSimulationPauser` lives in `tests/ui/mock_simulation_pauser.h` (used by UI tests that need to verify pause/resume calls without pulling in `CitySimulation`). Tests inject `ManualClock` + `MockUIBackend` + a mock `ISimulationPauser` and call `update()` with controlled time advances to verify queue ordering, auto-dismiss timing, CRITICAL vs Normal band placement, and log-fallback behavior. `NotificationManager` exposes a public `dismissCriticalToast(UIElementHandle handle)` method — this is the production API called by the UI event handler when the player clicks, presses Enter, or presses Delete on a CRITICAL toast; it is not a test-only backdoor. Tests call this method to simulate player dismissal. Additional required test cases:
   - `CriticalToast_OnPost_AutoPausesCalled`: posting a CRITICAL toast calls `setPaused(true)` exactly once when the CRITICAL queue transitions from empty to non-empty.
   - `CriticalToast_OnLastDismiss_NoAutoResume`: calling `dismissCriticalToast(handle)` on the last remaining CRITICAL toast does **NOT** call `setPaused(false)` — auto-resume requires explicit player unpause. Verify `setPaused(false)` is never called by `NotificationManager` on CRITICAL toast dismissal.
@@ -167,6 +172,17 @@ public:
           }
           return m_floatSeq[m_floatIdx++];
       }
+      // Asserts that all values in both sequences have been consumed.
+      // Call in TearDown() for any fixture using ManualRNG in strict mode.
+      // Throws std::logic_error if either sequence has unconsumed values remaining.
+      void verifyAllConsumed() const {
+          if (m_intIdx != m_intSeq.size())
+              throw std::logic_error("ManualRNG: int sequence over-provisioned — " +
+                  std::to_string(m_intSeq.size() - m_intIdx) + " values not consumed");
+          if (m_floatIdx != m_floatSeq.size())
+              throw std::logic_error("ManualRNG: float sequence over-provisioned — " +
+                  std::to_string(m_floatSeq.size() - m_floatIdx) + " values not consumed");
+      }
   private:
       std::vector<int>   m_intSeq;
       std::vector<float> m_floatSeq;
@@ -213,6 +229,9 @@ public:
   // SpeedMultiplier is the canonical enum defined in simulation_types.h.
   // ICitySimulation.h must #include "simulation_types.h" to get SpeedMultiplier, ZoneType, and Difficulty
   // as complete types — forward declarations are insufficient for by-value parameters.
+  // NOTE: The canonical Difficulty enumerator names are Easy, Normal, Hard (PascalCase),
+  // matching Phase 0's simulation_types.h. Do NOT use EASY, NORMAL, HARD (all-caps) —
+  // those names do not exist and will cause a compile error.
   #include "simulation_types.h"
   #include "ISimulationPauser.h"
 
@@ -278,7 +297,7 @@ public:
   };
   ```
 
-  `UIManager` constructor accepts `ICitySimulation*` as a non-owning pointer. In the `UIManagerModalTest` fixture, `sim_` is declared as `NiceMock<MockCitySimulation>` and passed to `UIManager` at construction: `UIManager(&backend_, &audio_, &sim_)`. In tests that assert specific pause/resume call counts (modal tests 1, 3, 8, 10), `EXPECT_CALL(sim_, setPaused(...))` is set up on the `NiceMock<MockCitySimulation>` before the action under test. NiceMock is used rather than StrictMock here because the focus of these tests is on `MockUIBackend` call patterns; simulation pause/resume expectations are set selectively per test rather than requiring every possible call to be declared up front.
+  `UIManager` constructor accepts `ICitySimulation*` as a non-owning pointer. The full constructor signature is `UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock* clock)`. The `clock` parameter is passed to `NotificationManager` at construction (for dismiss-after-5s timing) and to the `HUD` component for grace-period and undo-countdown displays. In the `UIManagerModalTest` fixture, `sim_` is declared as `NiceMock<MockCitySimulation>` and passed to `UIManager` at construction: `UIManager(&backend_, &audio_, &sim_, &clock_)`. In tests that assert specific pause/resume call counts (modal tests 1, 3, 8, 10), `EXPECT_CALL(sim_, setPaused(...))` is set up on the `NiceMock<MockCitySimulation>` before the action under test. NiceMock is used rather than StrictMock here because the focus of these tests is on `MockUIBackend` call patterns; simulation pause/resume expectations are set selectively per test rather than requiring every possible call to be declared up front.
 - **Thread-safety annotations**: Use Clang's thread-safety analysis attributes (`GUARDED_BY`, `REQUIRES`, `EXCLUDES`) on Clang builds; document-only `// thread-safe` or `// main-thread-only` comments as fallback on MSVC. Enable `-Wthread-safety` in CMake for Clang builds.
 
 ## Interface Definitions (minimum required method signatures)
@@ -474,9 +493,10 @@ protected:
     ::testing::StrictMock<MockUIBackend>       backend_;
     ::testing::NiceMock<MockAudioSystem>       audio_;
     ::testing::NiceMock<MockCitySimulation>    sim_;
+    ManualClock                                clock_;
     std::unique_ptr<UIManager>                 ui_;
     void SetUp() override {
-        ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_);
+        ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
     }
     void TearDown() override {
         // UIManager destructor calls backend_.removeElement() for all live UI elements.

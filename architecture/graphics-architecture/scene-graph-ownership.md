@@ -28,21 +28,17 @@
 
   ```cpp
   TEST(LODSwapSmokeTest, SetMeshGrabDropContract) {
-      // Creates a minimal SMesh, calls setMesh(), verifies ref_count behaviour.
-      // If setMesh() does NOT call grab(), the subsequent drop() destroys the mesh;
-      // the next drawAll() dereferences a dangling m_pMesh pointer (crash or ASAN fault).
-      // This test MUST be labelled requires-opengl and run under xvfb-run in CI.
-      SMesh* newMesh = new SMesh();
-      newMesh->addMeshBuffer(new SMeshBuffer());
-      newMesh->recalculateBoundingBox();
-      // ref_count = 1; pass to setMesh() and immediately drop our ref.
-      testNode->setMesh(newMesh);
-      newMesh->drop();  // Mandatory drop — if setMesh() grabbed, ref_count is now 1 (node owns it).
-                        // If setMesh() did NOT grab, ref_count is now 0 — crash here or on next drawAll().
-      // If test reaches here without crash: setMesh() grab/drop contract is verified.
+      // TODO: Fill in after Phase 1 SMesh::addMeshBuffer() grab/drop spike.
+      // The spike inspects CMeshSceneNode.cpp and SMesh.h to determine whether
+      // addMeshBuffer() calls grab() on the buffer. If it does, the caller must
+      // call ->drop() after addMeshBuffer(); if it does not, the caller owns the
+      // buffer and must not call ->drop().
+      // Until the spike result is documented, this body must remain SUCCEED().
       SUCCEED();
   }
   ```
+
+  Phase 6 fills in the real test body after the spike result is confirmed. The Phase 1 CMake registration of this file (with SUCCEED() body) validates CI routing for the requires-opengl label.
 
   If this test fails (crash or ASAN fault), the vendored Irrlicht source must be patched before any LOD swap code is written. Inspect `source/Irrlicht/CMeshSceneNode.cpp` to confirm `setMesh()` calls `grab()`/`drop()` on the new/old mesh.
   **PENDING SPIKE — `SMesh::addMeshBuffer()` grab/drop contract**: The smoke test body above calls `newMesh->addMeshBuffer(new SMeshBuffer())`. Whether `SMesh::addMeshBuffer()` calls `grab()` on the buffer argument **must be verified** by inspecting `source/Irrlicht/SMesh.h` at Phase 1 implementation time. If `addMeshBuffer()` calls `grab()`, the caller must call `->drop()` on the `SMeshBuffer*` immediately after `addMeshBuffer()` to relinquish the caller's ownership reference — otherwise the buffer leaks (ref_count 2, never reaches 0). If `addMeshBuffer()` does NOT call `grab()`, the caller retains sole ownership and must NOT call `->drop()` after `addMeshBuffer()`. The smoke test body in `tests/rendering/lod_swap_smoke_test.cpp` must be updated to reflect the confirmed convention once the source has been read. **Record the result of this spike as a one-line comment in both `tests/rendering/lod_swap_smoke_test.cpp` and this spec file**, e.g.: `// VERIFIED: SMesh::addMeshBuffer() calls grab(); caller must drop() after addMeshBuffer().`
@@ -66,5 +62,5 @@ The camera scene node must be created via `sceneManager->addCameraSceneNode()` o
 
    Do NOT use the bare form `camera->removeAnimator(*camera->getAnimators().begin())` — `removeAnimator` may call `drop()` internally, leaving a dangling pointer used by the range expression before the loop body completes. The grab/drop form is required for all Irrlicht versions.
    **Why grab/drop is required**: `removeAnimator()` calls `drop()` on the animator internally. If the animator's ref_count is already 1 (only the scene node holds it), this drops it to 0 and immediately deallocates it. Without `grab()` before `removeAnimator()`, any access to `anim` after the call (including `anim->drop()`) is a use-after-free. With `grab()` first, our own ref keeps the animator alive through the `removeAnimator()` drop, and our `drop()` completes the release cleanly.
-2. `CameraController::update(float dt)` must call `camera->setPosition()` and `camera->setTarget()` every frame, before `sceneManager->drawAll()`, to ensure the scene is rendered with the current frame's camera state. Specifically, update order per frame: process input events → `CameraController::update()` → `sceneManager->drawAll()` → `IGUIEnvironment::drawAll()` → `endScene()`.
+2. `CameraController::update(float dt)` must call `camera->setPosition()` and `camera->setTarget()` every frame, before `sceneManager->drawAll()`, to ensure the scene is rendered with the current frame's camera state. Specifically, update order per frame: process input events → `CameraController::update()` → `sceneManager->drawAll()` → `UIManager::draw()` → `endScene()`.
 3. `CameraController::OnInputEvent(const InputEvent&)` must return `true` (consumed) for all relevant `InputEvent` types (mouse move, mouse button, scroll wheel). The camera controller does NOT implement `IEventReceiver` directly; it receives translated `InputEvent` from the platform/input arbitration layer. This prevents any accidentally-initialized Irrlicht camera input receiver from processing the same events at the raw `SEvent` level.

@@ -151,20 +151,37 @@ aitown_add_tests(audio_tests LABEL "unit")
 # Phase 0 / Phase 6 coexistence note: multiple .cpp source files may coexist in the same
 # CMake target. During Phase 0, a stub file (e.g. tests/rendering/stub_succeed.cpp containing
 # a single TEST that calls SUCCEED()) keeps the target buildable before real test files exist.
-# In Phase 6 and later, the real test files (e.g. `lod_swap_smoke_test.cpp`, `srgb_upload_test.cpp`) are
-# added alongside the stub. `lod_swap_smoke_test.cpp` is authored and added to `CMakeLists.txt` in **Phase 6**
-# — it must NOT appear in any `add_executable(opengl_tests ...)` source list before Phase 6, as the file
-# does not yet exist and its presence causes `cmake --build build` to fail at configure time.
-# The stub file may be removed once real tests are present, but its
+# In Phase 6 and later, the real test files (e.g. `srgb_upload_test.cpp`) are
+# added alongside the stub.
+#
+# lod_swap_smoke_test.cpp phase plan:
+#   Phase 1: tests/rendering/lod_swap_smoke_test.cpp is CREATED with a SUCCEED() placeholder body
+#            and registered in add_executable(opengl_tests ...) below. The file is created
+#            simultaneously with the CMakeLists.txt change — the file exists, so cmake --build
+#            does not fail at configure time.
+#   Phase 6: The REAL TEST BODY is filled in after the LOD spike is complete. The Phase 6
+#            restriction applies to the real test body, NOT to the file creation or CMake
+#            registration. The placeholder file may remain in CMakeLists.txt unchanged from
+#            Phase 1 through Phase 5; only the .cpp contents change in Phase 6.
+#
+# The stub file may be removed once real tests cover the target, but its
 # presence does not cause any build or link errors — both .cpp files are compiled and linked
 # into the same test binary and all discovered tests run under the same CTest entry.
-# Phase 0 opengl_tests — ONLY stub_succeed.cpp. DO NOT add lod_swap_smoke_test.cpp before Phase 6.
 add_executable(opengl_tests
-    tests/rendering/stub_succeed.cpp        # Phase 0 stub — remove when real tests cover target
-    # tests/rendering/lod_swap_smoke_test.cpp  # Phase 6 and later — uncomment in Phase 6 when file exists
-    # ... additional rendering test files added in Phase 6+
+    tests/rendering/stub_succeed.cpp
+    tests/rendering/shader_stub_compile_test.cpp
+    tests/rendering/lod_swap_smoke_test.cpp
 )
 target_link_libraries(opengl_tests PRIVATE aitown_render GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
 target_include_directories(opengl_tests PRIVATE src/interfaces/ ${CMAKE_SOURCE_DIR})
 aitown_add_tests(opengl_tests LABEL "requires-opengl")
+
+add_executable(integration_tests tests/integration/irrlicht_ui_backend_test.cpp)
+target_link_libraries(integration_tests PRIVATE
+    aitown_render aitown_ui
+    GTest::gtest_main GTest::gmock
+    rapidcheck rapidcheck_gtest)
+target_include_directories(integration_tests PRIVATE
+    tests/simulation/ tests/ui/ src/interfaces/ src/ui/ ${CMAKE_SOURCE_DIR})
+aitown_add_tests(integration_tests LABEL "integration")
 ```

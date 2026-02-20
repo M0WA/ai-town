@@ -77,6 +77,9 @@ Both tools produce standards-compliant DDS files and are CI-verified. Do not use
 | UI sprite sheet (RGBA8 uncompressed, no mip) | nvcompress | `nvcompress -rgb -nomips input.png output.dds` |
 | UI sprite sheet (RGBA8 uncompressed, no mip) | Compressonator | `compressonatorcli -fd ARGB_8888 -nomipmap input.png output.dds` |
 
+**Splat map (RGBA8 UNORM — NOT DDS)**:
+Author as a plain RGBA PNG with R channel filled to 255, G/B/A channels filled to 0 (initial state: 100% grass). Splat maps are uploaded at runtime via `glTexImage2D` with `GL_RGBA8` internal format — they are never compressed to DDS. Do NOT run `export_textures.py` or `nvcompress` on splat map source files. The `TextureCache` splat map pool (third pool, distinct from the linear and sRGB pools) loads these RGBA PNGs directly. The `--validate-only` flag in `export_textures.py` does not apply to splat maps.
+
 **DXT5nm swizzle procedure (normal maps only — must be applied in DCC tool before compression):**
 
 Normal map source PNGs store full XYZ in RGB. Before invoking the compressor, the artist must remap channels in Photoshop, Substance Painter, or equivalent:
@@ -180,6 +183,13 @@ All terrain and building shaders must use the following fixed texture unit assig
 | 7 | `kTexUnitTerrainLayer2` | Terrain detail layer 2 (DXT1 sRGB, raw-GL) |
 | 8 | `kTexUnitTerrainLayer3` | Terrain detail layer 3 (DXT1 sRGB, raw-GL) |
 | 9 | `kTexUnitBillboard` | Billboard imposter atlas (DXT5 sRGB, raw-GL) |
+
+`shader_constants.h` must include the following compile-time range guard. The bound is 15 (not 31) because the per-stage (fragment shader) minimum of `GL_MAX_TEXTURE_IMAGE_UNITS` is 16 in OpenGL 3.3 core — texture units 0–15 are guaranteed available per stage. The combined minimum (`GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS`) is 80 for OpenGL 3.x and is the wrong limit to check here; shaders bind textures per stage, so the per-stage minimum governs the safe upper bound:
+
+```cpp
+static_assert(kTexUnitBillboard <= 15,
+    "Texture unit index exceeds GL_MAX_TEXTURE_IMAGE_UNITS minimum (16 units guaranteed per stage in OpenGL 3.3)");
+```
 
 These unit assignments are **fixed across all shaders** — terrain, building, vehicle, and billboard shaders all use the same unit-to-role mapping. A shader that needs only a subset (e.g., buildings don't use splat maps) simply does not declare the unused `uniform sampler2D` slot; the unused unit binding is harmless. Deviating from this table requires updating `shader_constants.h` AND all GLSL files that reference the affected unit — document any deviation explicitly.
 

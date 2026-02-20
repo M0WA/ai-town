@@ -184,13 +184,12 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [ -z "$(ls -A test_results/*.xml 2>/dev/null)" ]; then
-            echo "WARNING: No XML test result files found in test_results/"
-            echo "         Check that GTEST_OUTPUT=xml:test_results/ is set correctly."
-          else
-            echo "Test XML files found:"
-            ls test_results/*.xml
+          count=$(find test_results -name '*.xml' 2>/dev/null | wc -l)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No test XML files in test_results/ — GTEST_OUTPUT may not have written output"
+            exit 1
           fi
+          echo "Found $count test result file(s)."
 
       # Step 17: Publish test results via dorny/test-reporter.
       # if: always() — must post annotations even when tests fail.
@@ -213,6 +212,7 @@ jobs:
         with:
           name: test-results-build-linux
           path: test_results/
+          retention-days: 14
 
   # ============================================================================
   # build-windows — Windows binary verification build
@@ -327,14 +327,14 @@ jobs:
       # Step 12: Verify test XML files.
       - name: Verify test XML output
         if: always()
-        shell: bash
+        shell: pwsh
         run: |
-          if [ -z "$(ls -A test_results/*.xml 2>/dev/null)" ]; then
-            echo "WARNING: No XML test result files found in test_results/"
-          else
-            echo "Test XML files found:"
-            ls test_results/*.xml
-          fi
+          $count = (Get-ChildItem -Path test_results -Filter '*.xml' -ErrorAction SilentlyContinue | Measure-Object).Count
+          if ($count -eq 0) {
+            Write-Error "ERROR: No test XML files in test_results/ — GTEST_OUTPUT may not have written output"
+            exit 1
+          }
+          Write-Host "Found $count test result file(s)."
 
       # Step 13: Publish test results.
       - name: Publish test results
@@ -353,19 +353,28 @@ jobs:
         with:
           name: test-results-build-windows
           path: test_results/
+          retention-days: 14
 
-      # Step 15: DLL verification placeholder (Phase 0 — warning-only, always exits 0).
-      # Phase 4 replaces with hard-fail: if (-not (Test-Path "build/Release/soft_oal.dll")) { exit 1 }
-      # NOTE: Use the if (Test-Path) { Write-Host } else { Write-Warning } form — do NOT use
-      # if (-not (Test-Path)) { Write-Warning } (superficially similar to Phase 4 hard-fail form).
-      - name: Verify OpenAL DLL and HRTF data (placeholder — hardened in Phase 4)
+      # Step 15: DLL verification — Irrlicht.dll hard-fails (Phase 1+); soft_oal.dll and
+      # default.mhr remain warning-only (Phase 4 deliverables not yet present).
+      # Phase 4 hardens soft_oal.dll and default.mhr to hard-fail as well.
+      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
+      - name: Verify required DLLs (Irrlicht hard-fail; OpenAL warning-only — Phase 4)
         shell: pwsh
         run: |
+          # Irrlicht.dll — hard-fail (Phase 1: aitown_render now links Irrlicht).
+          if (-not (Test-Path "build/Release/Irrlicht.dll")) {
+            Write-Error "ERROR: Irrlicht.dll missing from build/Release/ — post-build copy rule failed"
+            exit 1
+          }
+          Write-Host "Irrlicht.dll present."
+          # soft_oal.dll — warning-only (Phase 4 deliverable).
           if (Test-Path "build/Release/soft_oal.dll") {
             Write-Host "soft_oal.dll found."
           } else {
             Write-Warning "soft_oal.dll not found — expected after Phase 4 audio deliverable. CI continues."
           }
+          # default.mhr — warning-only (Phase 4 deliverable).
           if (Test-Path "build/Release/default.mhr") {
             Write-Host "default.mhr found."
           } else {
@@ -379,6 +388,7 @@ jobs:
         with:
           name: aitown-windows-release
           path: build/Release/
+          retention-days: 30
 
   # ============================================================================
   # coverage-linux — instrumented build with lcov HTML report
@@ -512,12 +522,12 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [ -z "$(ls -A test_results/*.xml 2>/dev/null)" ]; then
-            echo "WARNING: No XML test result files found in test_results/"
-          else
-            echo "Test XML files found:"
-            ls test_results/*.xml
+          count=$(find test_results -name '*.xml' 2>/dev/null | wc -l)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No test XML files in test_results/ — GTEST_OUTPUT may not have written output"
+            exit 1
           fi
+          echo "Found $count test result file(s)."
 
       # Step 16: Publish test results.
       # MUST run BEFORE lcov capture — if lcov fails, annotations still post.
@@ -530,7 +540,17 @@ jobs:
           reporter: 'java-junit'
           fail-on-error: false
 
-      # Step 17: lcov capture, filter, report, and gate.
+      # Step 17: Upload test results artifact (coverage-linux).
+      # if: always() — upload even on failure for post-mortem analysis.
+      - name: Upload test results (coverage-linux)
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: test-results-coverage-linux
+          path: test_results/
+          retention-days: 14
+
+      # Step 18: lcov capture, filter, report, and gate (renumbered — was Step 17 before test results upload added).
       # All within a single run: block so BUILD_DIR variable persists.
       # Required order: lcov --remove -> lcov --list -> genhtml -> lcov --fail-under-percent
       # lcov --list MUST appear before --fail-under-percent so output is visible even on gate failure.
@@ -570,7 +590,7 @@ jobs:
           # TODO Phase 2: replace with: lcov --summary coverage_filtered.info | awk check
           lcov --summary coverage_filtered.info
 
-      # Step 18: Upload coverage HTML artifact.
+      # Step 19: Upload coverage HTML artifact.
       # if: always() — upload even if lcov gate fails for post-mortem analysis.
       - name: Upload coverage report
         if: always()
@@ -578,6 +598,7 @@ jobs:
         with:
           name: coverage-report-linux
           path: coverage_html/
+          retention-days: 14
 
   # ============================================================================
   # markdown-lint — enforce consistent Markdown formatting across all spec files

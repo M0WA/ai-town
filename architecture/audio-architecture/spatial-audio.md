@@ -28,18 +28,18 @@ These three calls ensure the source is completely unaffected by listener positio
 
 - **Listener sync**: `AudioSystem::syncListenerToCamera(camera)` called **once per frame** after Irrlicht updates the camera. This function must update ALL three listener attributes — omitting any one breaks HRTF spatialization:
 
-  **Note**: These code examples use Irrlicht's `vector3df` member naming convention (`.X`, `.Y`, `.Z` uppercase). The AI Town `vec3` struct defined in `src/interfaces/vec3.h` uses **lowercase** `x`, `y`, `z` fields. Phase 4 `AudioSystem::syncListenerToCamera(const CameraState& cam)` must use `cam.position.x` (lowercase), `cam.forward.y` (lowercase), etc. — NOT `cam.position.X`. These are different types: Irrlicht's `core::vector3df` uses uppercase `.X/.Y/.Z`; AI Town's `vec3` uses lowercase `.x/.y/.z`.
+  **Note**: The AI Town `vec3` struct defined in `src/interfaces/vec3.h` uses **lowercase** `x`, `y`, `z` fields. `AudioSystem::syncListenerToCamera` takes a `const CameraState& cam` where each positional/directional member is an AI Town `vec3` — use `cam.position.x` (lowercase), `cam.forward.y` (lowercase), etc. This is distinct from Irrlicht's `core::vector3df`, which uses uppercase `.X/.Y/.Z`. Never mix the two.
 
   ```cpp
-  void AudioSystem::syncListenerToCamera(const CameraParams& cam) {
+  void AudioSystem::syncListenerToCamera(const CameraState& cam) {
       // Position
-      alListener3f(AL_POSITION, cam.position.X, cam.position.Y, cam.position.Z);
+      alListener3f(AL_POSITION, cam.position.x, cam.position.y, cam.position.z);
       // Velocity (set to zero — we do not model Doppler for camera movement)
       alListener3f(AL_VELOCITY, 0.f, 0.f, 0.f);
       // Orientation: forward vector followed by up vector (6-float array)
       ALfloat orientation[6] = {
-          cam.forward.X, cam.forward.Y, cam.forward.Z,   // "at" vector
-          cam.up.X,      cam.up.Y,      cam.up.Z          // "up" vector
+          cam.forward.x, cam.forward.y, cam.forward.z,   // "at" vector
+          cam.up.x,      cam.up.y,      cam.up.z          // "up" vector
       };
       alListenerfv(AL_ORIENTATION, orientation);
   }

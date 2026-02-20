@@ -38,3 +38,28 @@ params.Stencil     = true; // required for shadow techniques
 params.AntiAlias   = 4;    // 4× MSAA minimum for "realistic graphics" goal
 params.Vsync       = false; // user-configurable option
 ```
+
+## GL Capability Query Initialization
+
+The following initialization sequence MUST occur immediately after `createDevice()` and before any `glewIsExtensionSupported()` or `glGetIntegerv()` call:
+
+1. **EDT_NULL pre-check**: Short-circuit the entire GL capability block if `IVideoDriver::getDriverType() == EDT_NULL`. No GL calls are valid in headless mode.
+
+2. **glewInit()** must be called first:
+
+   ```cpp
+   GLenum glewResult = glewInit();
+   if (glewResult != GLEW_OK) {
+       // Log failure; fall back to safe defaults.
+       // glGetIntegerv(GL_MAX_TEXTURE_SIZE) may still work on some drivers.
+       // glewIsExtensionSupported() must NOT be called after a failed glewInit().
+   }
+   ```
+
+   Calling `glewIsExtensionSupported()` or any GLEW function pointer (e.g. `glCompressedTexImage2D`) before `glewInit()` causes a null function pointer crash.
+
+3. **GL_MAX_TEXTURE_SIZE query**: Query with `glGetIntegerv(GL_MAX_TEXTURE_SIZE, &m_maxTextureSize)` immediately after glewInit (even if glewInit failed — this call does not depend on GLEW).
+
+4. **Extension queries**: Use `glewIsExtensionSupported("GL_EXT_texture_sRGB")` etc. only after a successful `glewInit()`.
+
+**GLEW availability spike**: Phase 1 must verify whether the vendored Irrlicht build exposes GLEW symbols. If GLEW is unavailable (Irrlicht compiled without GLEW), all extension checks must use `glGetString(GL_EXTENSIONS)` string matching or `IVideoDriver::queryFeature()` instead. This spike must complete before any `glewIsExtensionSupported()` code is written. The spike result must be documented in `architecture/graphics-architecture/scene-graph-ownership.md` under the Phase 1 spikes section.

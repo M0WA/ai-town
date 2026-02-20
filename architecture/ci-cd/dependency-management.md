@@ -12,7 +12,8 @@
     "irrlicht",
     "openal-soft",
     "libvorbis",
-    "fmt"
+    "fmt",
+    "glew"
   ]
 }
 ```
@@ -64,13 +65,17 @@ find_package(Vorbis REQUIRED)
 # Irrlicht: resolved via cmake/FindIrrlicht.cmake (find-module, not config-mode — see note below).
 # SPIKE RESOLVED: target name is bare Irrlicht (no namespace).
 find_package(Irrlicht REQUIRED)
+# GLEW: required for the sRGB raw GL upload path (glCompressedTexImage2D and related calls).
+find_package(GLEW REQUIRED)
 # Phase 0: route OpenAL, fmt, and Vorbis to aitown_audio stub library (NOT to 'aitown' — that
 # executable does not exist at Phase 0). The 'aitown' executable is the final game binary added
 # in a later phase.
 target_link_libraries(aitown_audio PRIVATE OpenAL::OpenAL fmt::fmt Vorbis::vorbisfile)
-# Irrlicht links to aitown_render (PRIVATE — Irrlicht headers must NOT propagate to test targets).
-target_link_libraries(aitown_render PRIVATE Irrlicht)
+# Irrlicht and GLEW link to aitown_render (PRIVATE — headers must NOT propagate to test targets).
+target_link_libraries(aitown_render PRIVATE Irrlicht GLEW::GLEW)
 ```
+
+**GLEW — Windows triplet note**: On Windows with the `x64-windows` triplet active, vcpkg resolves `glew` to `glew:x64-windows` automatically — no platform-specific triplet override in `vcpkg.json` is needed. Before committing a baseline update that adds GLEW, verify the `glew` port exists at the pinned baseline using `gh api /repos/microsoft/vcpkg/contents/ports/glew`. A 200 response confirms the port is present at that baseline; a 404 means the port was removed or renamed — try an adjacent vcpkg commit. This verification is mandatory: a missing port at the pinned baseline causes a hard build failure on all platforms.
 
 **IMPORTANT**: `target_link_libraries(aitown ...)` in the original snippet was incorrect — the `aitown` executable target does not exist at Phase 0. An implementer following the original snippet verbatim would get a CMake configure error: "Cannot specify link libraries for target aitown which is not built by this project."
 
