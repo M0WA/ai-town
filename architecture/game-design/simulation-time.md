@@ -125,7 +125,7 @@ The accumulator lives inside `CitySimulation`, not in the main loop. This keeps 
 
 Code inspection of `src/main.cpp` at the step 2 call site (lines 135-144) confirms the DEFAULT SPEED CONTRACT block is present verbatim:
 
-```
+```cpp
 // DEFAULT SPEED CONTRACT: CitySimulation must be constructed or initialized at
 // SpeedMultiplier::x3 (not x1 or Paused) — see architecture/game-design/simulation-time.md.
 // Phase 6 MUST verify setSpeed(SpeedMultiplier::x3) or equivalent initialization is

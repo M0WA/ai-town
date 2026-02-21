@@ -65,6 +65,7 @@ Code inspection of `src/ui/CameraController.cpp`, function `getCameraState()`, n
 ### camera_state.h field layout verified
 
 Code inspection of `src/interfaces/camera_state.h` confirms the `CameraState` struct contains exactly:
+
 - `vec3 position` — camera world position
 - `vec3 forward` — normalised forward direction vector
 - `vec3 up` — camera up vector

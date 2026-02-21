@@ -322,12 +322,14 @@ jobs:
       - name: Verify glew vcpkg port
         shell: pwsh
         run: |
-          $glewhdr = Join-Path $env:VCPKG_ROOT "installed\x64-windows\include\GL\glew.h"
-          if (-not (Test-Path $glewhdr)) {
-            Write-Error "ERROR: GLEW not installed — GL/glew.h not found at $glewhdr. Run: vcpkg install glew:x64-windows"
+          # Manifest mode installs to build/vcpkg_installed/; classic mode to $VCPKG_ROOT/installed/.
+          $manifestHdr = "build\vcpkg_installed\x64-windows\include\GL\glew.h"
+          $classicHdr  = Join-Path $env:VCPKG_ROOT "installed\x64-windows\include\GL\glew.h"
+          if (-not (Test-Path $manifestHdr) -and -not (Test-Path $classicHdr)) {
+            Write-Error "ERROR: GLEW not installed — GL/glew.h not found in manifest path ($manifestHdr) or classic path ($classicHdr)."
             exit 1
           }
-          Write-Host "GLEW installed artifact verified: $glewhdr"
+          Write-Host "GLEW installed artifact verified."
 
       # Step 9: Verify GLEW vcpkg install (Windows) — sixth atomicity item.
       # Dual-path check: manifest-mode install (build/vcpkg_installed/) first,
