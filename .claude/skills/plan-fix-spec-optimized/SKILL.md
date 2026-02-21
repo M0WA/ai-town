@@ -104,7 +104,8 @@ previous clean result carries forward. Note in the round summary which agents we
 
 ### Step 3 — Launch agents in parallel
 
-For each agent selected in Step 2, launch them simultaneously using the Task tool.
+For each agent selected in Step 2, launch them simultaneously using the Task tool with
+**`model: haiku`** — review agents only read files and report structured issues.
 
 **Scope note**: if the user specified target phases, include that in every prompt.
 

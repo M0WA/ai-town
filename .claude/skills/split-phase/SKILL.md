@@ -64,8 +64,8 @@ Present the Product Owner's proposal clearly to the user before launching squad 
 
 ### Step 3 — Parallel squad reviews
 
-Launch **all 9 agents simultaneously** — 5 design + 4 tech — to review the proposed split from
-their domain perspectives.
+Launch **all 9 agents simultaneously** — 5 design + 4 tech — using **`model: haiku`** to review
+the proposed split from their domain perspectives.
 
 #### Design Squad (5 agents in parallel)
 
@@ -88,7 +88,9 @@ Each design agent prompt:
 > relevant architecture spec files under `architecture/`. From your domain's perspective, review
 > the proposed split: does it respect dependencies, make logical groupings, and produce phases of
 > reasonable scope? Flag any issues (with severity CRITICAL, HIGH, MEDIUM, or LOW) and provide
-> concrete recommendations. If you have no concerns, say "NO ISSUES FOUND".
+> concrete recommendations. Before reading any files, scan the proposal text above — if
+> [TARGET_PHASE] has no deliverables in your domain, output `NO ISSUES FOUND` immediately
+> without reading any files.
 
 #### Tech Squad (4 agents in parallel)
 

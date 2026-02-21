@@ -18,6 +18,17 @@ Parse `[TARGET_SEVERITIES]` from the user's invocation at the very start:
 
 Express `[TARGET_SEVERITIES]` as a human-readable list (e.g. "CRITICAL and HIGH", or "CRITICAL, HIGH, and MEDIUM") and use it consistently in every step below. Issues below the threshold are out of scope for the entire run — agents must not report them.
 
+---
+
+## State (maintained across cycles)
+
+| Variable | Initial value | Updated after each cycle |
+|---|---|---|
+| `ROUND` | 1 | +1 each cycle |
+| `CLEAN_DOMAINS` | `{}` | Add agent domain when it reports NO ISSUES |
+
+---
+
 ## Process
 
 ### Step 1 — Product Owner updates the implementation plan
@@ -28,23 +39,28 @@ Launch the `prod-owner` agent with the following prompt:
 
 Wait for the `prod-owner` agent to finish and confirm the plan has been written to `./implementation/INDEX.md` before continuing.
 
-### Step 2 — Parallel squad reviews
+### Step 2 — Determine which agents to run, then launch in parallel
 
-Once the plan is written, launch **both squads simultaneously** using the Task tool:
+**Round 1**: run all 9 agents.
+
+**Round 2+**: skip agents in `CLEAN_DOMAINS` — their previous clean result carries forward.
+Re-run a carried-forward agent only if fixes in the previous cycle clearly affect their domain.
+
+Once determined, launch selected agents **simultaneously** using the Task tool with **`model: haiku`**:
 
 #### Design Squad (all 5 agents in parallel)
 
-Use the `design-squad` skill behaviour: launch `gamedesign-lookandfeel`, `gamedesign-ux`, `graphics-artist-2d-texture`, `graphics-artist-3d-model`, and `sound-artist-opensoftal` in parallel. Each agent prompt:
+Launch `gamedesign-lookandfeel`, `gamedesign-ux`, `graphics-artist-2d-texture`, `graphics-artist-3d-model`, and `sound-artist-opensoftal` in parallel with `model: haiku`. Each agent prompt:
 
 > You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read `./implementation/INDEX.md` and the per-phase files under `./implementation/` and the relevant architecture spec files under `architecture/`. Review the implementation plan from your domain's perspective. Only report [TARGET_SEVERITIES] issues — do not report issues below that threshold. For each in-scope issue provide a concrete recommendation. If no [TARGET_SEVERITIES] issues in your domain, say "NO ISSUES FOUND".
 
 #### Tech Squad (all 4 agents in parallel)
 
-Use the `tech-squad` skill behaviour: launch `cicd-dev-github`, `graphics-dev-irrlicht`, `sound-dev-opensoftal`, and `test-dev-cpp` in parallel. Each agent prompt:
+Launch `cicd-dev-github`, `graphics-dev-irrlicht`, `sound-dev-opensoftal`, and `test-dev-cpp` in parallel with `model: haiku`. Each agent prompt:
 
 > You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read `./implementation/INDEX.md` and the per-phase files under `./implementation/` and the relevant architecture spec files under `architecture/`. Review the implementation plan from your domain's perspective. Only report [TARGET_SEVERITIES] issues — do not report issues below that threshold. For each in-scope issue provide a concrete recommendation. If no [TARGET_SEVERITIES] issues in your domain, say "NO ISSUES FOUND".
 
-All 9 agents (5 design + 4 tech) run in parallel.
+All selected agents run in parallel.
 
 ### Step 3 — Collect and display findings
 
@@ -98,15 +114,16 @@ If two agents make conflicting recommendations for the same issue, surface the c
 
 ### Step 6 — Re-review
 
-After all fixes are applied, return to **Step 2** and run all 9 agents again on the updated plan.
+After all fixes are applied, update `CLEAN_DOMAINS` — add any agent that reported NO ISSUES this
+round. Then return to **Step 2** for the next cycle (domain-scoped for round 2+).
 
-**Cycle synchronisation**: fixing (Step 4) may begin as soon as the first agent results arrive — there is no need to wait for all agents before starting fixes. However, do not start a new cycle (return to Step 2) until **all 9 agents from the current round have returned their results** — late-arriving results would otherwise be silently dropped, causing stale or conflicting fixes in the next round.
+**Cycle synchronisation**: fixing (Step 4) may begin as soon as the first agent results arrive — there is no need to wait for all agents before starting fixes. However, do not start a new cycle (return to Step 2) until **all selected agents from the current round have returned their results** — late-arriving results would otherwise be silently dropped, causing stale or conflicting fixes in the next round.
 
-**Context compaction**: only run `/compact` before starting a new cycle if the context window is too full to survive another full round (9 parallel agents + fix pass). Do not compact routinely — compressing when unnecessary discards useful context and slows the process. Skip `/compact` entirely on the final cycle when all agents report clean — just output the completion summary.
+**Context compaction**: only run `/compact` before starting a new cycle if the context window is too full to survive another full round. Do not compact routinely — compressing when unnecessary discards useful context and slows the process. Skip `/compact` entirely on the final cycle when all agents report clean — just output the completion summary.
 
 ### Step 7 — Completion check
 
-After each review round, check: **did every agent report NO [TARGET_SEVERITIES] issues?**
+After each review round, check: **have all 9 agents reached `CLEAN_DOMAINS`?**
 
 - If **yes** → run the markdown linter once:
 
@@ -131,7 +148,8 @@ The implementation plan has passed a full review by all agents with no [TARGET_S
 ## Rules
 
 - The Product Owner step (Step 1) must complete before squad reviews begin
-- All 9 squad agents run in parallel each review round — never skip any
+- Round 1: all 9 agents run in parallel; Round 2+: skip agents in `CLEAN_DOMAINS` unless their domain was clearly affected by recent fixes
+- Launch review agents with `model: haiku` — they only read and report
 - Issues below [TARGET_SEVERITIES] are out of scope — agents must not report them
 - If the same issue persists across 3 rounds without resolution, flag it explicitly and ask the user for guidance before continuing
 - Fixes go into `./implementation/INDEX.md` and the per-phase files only — do not modify spec files during this skill (use `/fix-specs` for that)

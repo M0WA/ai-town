@@ -5,124 +5,226 @@ description: Use this skill when the user asks to "fix specs", "review specs", "
 
 # Fix Specs
 
-Iteratively review and fix the project specification using all agent roles. Repeat until no issues at or above the configured severity remain in any domain.
+Iteratively review and fix the project specification using all agent roles — with domain-scoped
+re-reviews, diff-based prompts, structured issue reporting, and issue deduplication to minimise
+token usage and latency.
 
 ## Configuration
 
-**Severity filter** (optional, default: `CRITICAL+HIGH`): controls which issue levels agents report and which are fixed each cycle.
+**Severity filter** (optional, default: `CRITICAL+HIGH`): controls which issue levels agents
+report and which are fixed each cycle.
 
 Parse `[TARGET_SEVERITIES]` from the user's invocation at the very start:
 
 - If the user specified a list (e.g. `critical`, `critical+high+medium`, `all`), use those levels.
 - If nothing was specified, default to **CRITICAL and HIGH**.
 
-Express `[TARGET_SEVERITIES]` as a human-readable list (e.g. "CRITICAL and HIGH", or "CRITICAL, HIGH, and MEDIUM") and use it consistently in every step below. Issues below the threshold are out of scope for the entire run — agents must not report them.
+Express `[TARGET_SEVERITIES]` as a human-readable list (e.g. "CRITICAL and HIGH") and use it
+consistently throughout. Issues below the threshold are out of scope — agents must not report them.
+
+---
+
+## State (maintained across cycles)
+
+Before the first cycle, initialise the following state. Update it after every cycle.
+
+| Variable | Initial value | Updated after each cycle |
+|---|---|---|
+| `ROUND` | 1 | +1 each cycle |
+| `CLEAN_DOMAINS` | `{}` (empty set) | Add agent domain when it reports NO ISSUES |
+| `TOUCHED_DOMAINS` | `{}` (empty set) | Set to domains whose files were modified this cycle |
+| `TOUCHED_FILES` | `{}` (empty set) | Set to files written/edited this cycle |
+| `TOTAL_FIXES` | 0 | +1 per fix applied |
+
+**Domain → file mapping** (used to determine TOUCHED_DOMAINS):
+
+| Domain | Spec files |
+|---|---|
+| `gamedesign-lookandfeel` | `architecture/game-design/**`, `CLAUDE.md` |
+| `gamedesign-ux` | `architecture/ui-ux/**`, `CLAUDE.md` |
+| `graphics-artist-2d-texture` | `architecture/asset-standards/2d-texture-standards.md`, `CLAUDE.md` |
+| `graphics-artist-3d-model` | `architecture/asset-standards/3d-model-standards.md`, `architecture/asset-standards/building-atlas-layout.md`, `CLAUDE.md` |
+| `sound-artist-opensoftal` | `architecture/audio-architecture/**`, `CLAUDE.md` |
+| `cicd-dev-github` | `architecture/ci-cd/**`, `CLAUDE.md` |
+| `graphics-dev-irrlicht` | `architecture/graphics-architecture/**`, `CLAUDE.md` |
+| `sound-dev-opensoftal` | `architecture/audio-architecture/**`, `CLAUDE.md` |
+| `test-dev-cpp` | `architecture/testing/**`, `CLAUDE.md` |
+
+---
 
 ## Process
 
-### Step 1 — Identify spec files
+### Step 1 — Determine which agents to run this round
 
-Read all specification files in the project. This includes:
-- `CLAUDE.md` — primary project spec (project overview, guidelines, and index of architecture files)
-- `architecture/` — canonical detailed spec files; **all files here must be read, maintained, and extended as needed**. The `architecture/DOCUMENT_INDEX.md` lists every file. When a fix requires adding or expanding detail, update the relevant `architecture/` file (not just `CLAUDE.md`).
-- `epic.txt` — if present, raw planning document
-- Any other `.md` files at the project root that describe requirements, architecture, or design
+**Round 1**: run all 9 agents.
 
-### Step 2 — Parallel agent reviews
+**Round 2+**: run only agents that meet at least one of these conditions:
+- They reported at least one in-scope issue last round
+- Their domain is in `TOUCHED_DOMAINS` (their spec files were modified by fixes last round)
 
-Launch ALL of the following agents **in parallel** using the Task tool, each specializing in their domain.
+Agents in `CLEAN_DOMAINS` whose domain is **not** in `TOUCHED_DOMAINS` are skipped — their
+previous clean result carries forward. Note in the round summary which agents were skipped and why.
 
-**Agents to launch (all in parallel):**
+---
 
-| Agent role | Expertise |
-|---|---|
-| `gamedesign-lookandfeel` | Gameplay, balance, traffic systems, economy, simulation depth |
-| `gamedesign-ux` | UI/UX, player interaction, interface design |
-| `graphics-artist-3d-model` | 3D model requirements, asset specifications |
-| `graphics-artist-2d-texture` | 2D texture requirements, art style consistency |
-| `graphics-dev-irrlicht` | Irrlicht engine technical correctness, rendering pipeline |
-| `sound-artist-opensoftal` | Audio design, sound/music requirements |
-| `sound-dev-opensoftal` | OpenAL Soft technical correctness, audio pipeline |
-| `test-dev-cpp` | Testability, C++ testing best practices, coverage strategy |
-| `cicd-dev-github` | CI/CD pipeline completeness, GitHub Actions requirements |
+### Step 2 — Launch agents in parallel
 
-Each agent prompt should be:
+For each agent selected in Step 1, launch them **simultaneously** using the Task tool with
+**`model: haiku`** — review agents only read files and report structured issues.
 
-> You are a [role title]. Review the following project specification for a 3D city simulator called AI Town built with C++, Irrlicht, and OpenAL Soft. Only report [TARGET_SEVERITIES] issues in your area of expertise — do not report issues below that threshold. For each issue provide: severity, description of the problem, and a concrete recommendation to fix it. Be specific. If there are no [TARGET_SEVERITIES] issues in your domain, say "NO ISSUES FOUND".
+#### Round 1 prompt (full read):
 
-Include the full contents of the spec files in each agent's prompt.
+> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and
+> OpenAL Soft. Read the following spec files (and only these): [DOMAIN FILE LIST FROM TABLE ABOVE].
+> Review the spec from your domain's perspective.
+>
+> Only report [TARGET_SEVERITIES] issues. For each issue, output it in this exact schema:
+>
+> ```
+> ISSUE
+> severity: [CRITICAL|HIGH|MEDIUM|LOW]
+> domain: [your agent type, e.g. sound-dev-opensoftal]
+> file: [path/to/file.md]
+> section: [section heading or line reference]
+> description: [one sentence]
+> recommendation: [concrete fix]
+> ```
+>
+> If no [TARGET_SEVERITIES] issues in your domain, output exactly: `NO ISSUES FOUND`
 
-### Step 3 — Collect and display findings
+#### Round 2+ prompt (diff-based):
 
-After all agents respond, display a structured summary:
+> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and
+> OpenAL Soft. Since the last review round, the following files in your domain were modified:
+>
+> [TOUCHED_FILES filtered to this agent's domain — list each file with a brief change summary]
+>
+> Your previous issues from round N-1:
+> [list this agent's issues from last round, or "none" if clean]
+>
+> Read only the modified files and review the changed sections. For each of your previous issues,
+> confirm whether it was resolved or is still present. Also check whether the fixes introduced
+> any new [TARGET_SEVERITIES] issues.
+>
+> Output each issue (new or persisting) in this schema:
+>
+> ```
+> ISSUE
+> severity: [CRITICAL|HIGH|MEDIUM|LOW]
+> domain: [your agent type]
+> file: [path/to/file.md]
+> section: [section heading or line reference]
+> description: [one sentence]
+> recommendation: [concrete fix]
+> status: [NEW|PERSISTING]
+> ```
+>
+> If no [TARGET_SEVERITIES] issues remain in your domain, output exactly: `NO ISSUES FOUND`
+
+Do not start Step 3 until **all launched agents have returned their results**.
+
+---
+
+### Step 3 — Deduplicate and display findings
+
+#### 3a — Deduplicate
+
+Merge issues that target the same `(file, section)` pair from multiple agents:
+
+- Compatible recommendations → merge into one issue, note both domains.
+- Conflicting recommendations → keep both, mark `[CONFLICT]` — resolve before Step 4 begins.
+
+#### 3b — Display
 
 ```
-=== REVIEW ROUND [N] ===
+=== SPEC REVIEW — Round N ===
 Severity filter: [TARGET_SEVERITIES]
+Agents run: X / 9  (skipped: [list of skipped agents and reason])
 
-[severity] issues: X
-[severity] issues: Y
+[severity] issues: X  (new: C | persisting: D)
 
-[Agent role]
-  [SEVERITY] Issue description
+--- Senior Game Designer ---
+  [SEVERITY][NEW] architecture/game-design/file.md § Section
+    Description: ...
     → Recommendation: ...
 
-[Agent role]
-  NO ISSUES FOUND
+--- Senior UI/UX Designer ---
+  NO ISSUES FOUND  ✓ (carried forward — domain untouched)
+
+... (skipped agents show "SKIPPED — domain untouched, previously clean")
 ```
 
-### Step 4 — Fix all [TARGET_SEVERITIES] issues
+---
 
-For each in-scope issue (highest severity first):
+### Step 4 — Fix [TARGET_SEVERITIES] issues
 
-1. Present the issue and the agent's recommendation clearly
-2. Apply the fix to the relevant spec file(s):
+Resolve `[CONFLICT]` items first — reason about the best fix and pick one recommendation.
+
+Fix remaining issues highest severity first. For each:
+
+1. Apply the fix to the relevant spec file(s) using your own tools:
    - Detailed technical content → edit the appropriate `architecture/` file
    - Project overview, guidelines, or index entries → edit `CLAUDE.md`
-   - If no `architecture/` file exists for the topic, create one and add it to `architecture/DOCUMENT_INDEX.md` and the index table in `CLAUDE.md`
-3. Confirm what was changed
+   - If no `architecture/` file exists for the topic, create one and add it to
+     `architecture/DOCUMENT_INDEX.md` and the index table in `CLAUDE.md`
+2. After applying, briefly confirm the issue is resolved and no new issues were introduced.
 
-Apply fixes one at a time, updating the spec file after each. Do not batch multiple conflicting changes without verifying consistency.
+After all fixes this cycle:
+- Update `TOUCHED_FILES` with every file written or edited.
+- Update `TOUCHED_DOMAINS` based on the domain → file mapping table.
+- Update `TOTAL_FIXES`.
 
-If two agents make conflicting recommendations for the same issue, explicitly note the conflict, reason about the best resolution, and apply the most appropriate fix.
+---
 
-### Step 6 — Re-review
+### Step 5 — Completion check
 
-After all fixes are applied, go back to **Step 2** and run all agents again on the updated spec.
+Update `CLEAN_DOMAINS`:
+- Add any agent that reported `NO ISSUES FOUND` this round (or was carried forward as clean).
+- Remove any agent from `CLEAN_DOMAINS` whose domain appears in `TOUCHED_DOMAINS`.
 
-**Cycle synchronisation**: fixing (Step 4) may begin as soon as the first agent results arrive — there is no need to wait for all agents before starting fixes. However, do not start a new cycle (return to Step 2) until **all agents from the current round have returned their results** — late-arriving results would otherwise be silently dropped, causing stale or conflicting fixes in the next round.
+**Did every agent (all 9) reach `CLEAN_DOMAINS` this round?**
 
-**Context compaction**: only run `/compact` before starting a new cycle if the context window is too full to survive another full round (9 parallel agents + fix pass). Do not compact routinely — compressing when unnecessary discards useful context and slows the process. Skip `/compact` entirely on the final cycle when all agents report clean — just output the completion summary.
+- If **yes** → proceed to Step 6 (lint + summary).
+- If **no** → return to Step 1 for the next cycle. Only run `/compress` before the next cycle
+  if the context window is too full to survive another full round. Do not compress routinely.
 
-### Step 7 — Completion check
+---
 
-After each review round, check: **did every agent report NO [TARGET_SEVERITIES] issues?**
+### Step 6 — Lint and complete
 
-- If **yes** → the loop is complete. Run the markdown linter once:
+Run the markdown linter once:
 
-  ```bash
-  markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
-  ```
+```bash
+markdownlint 'architecture/**/*.md' 'CLAUDE.md'
+```
 
-  Fix any violations and re-run until the linter exits zero. Then output a final summary:
+Fix any violations and re-run until the linter exits zero.
+
+Output the final summary:
 
 ```
 === SPEC REVIEW COMPLETE ===
 
 Severity filter: [TARGET_SEVERITIES]
 Rounds completed: N
-Total issues fixed: X
+Total fixes applied: TOTAL_FIXES
+Agent runs saved: X  (domain-scoped skips across all rounds)
+Conflicts resolved: Y
 
 The specification has passed a full review by all agents with no [TARGET_SEVERITIES] issues remaining.
 ```
 
-- If **no** → continue from Step 4 with the new findings.
+---
 
 ## Rules
 
-- Never mark a round as complete unless ALL agents explicitly report no [TARGET_SEVERITIES] issues in their domain
-- Do not skip any agent role — every domain must review every round
-- All agents must run in parallel each round to minimize latency
+- All 9 agents run on round 1; later rounds are domain-scoped (Step 1)
+- Launch review agents with `model: haiku` — they only read and report structured issues
+- Never embed full file contents in agent prompts — agents read files using their own tools
+- Do not start Step 3 until all launched agents for the current round have returned
 - Issues below [TARGET_SEVERITIES] are out of scope — agents must not report them
-- If the same issue persists across 3 rounds without being resolved, flag it explicitly and ask the user for guidance before continuing
-- **All spec files must be maintained and extended**: fixes go into `architecture/` files (canonical detail) or `CLAUDE.md` (overview/index). Never leave a fix as a comment or note — write it into the spec. If a topic lacks an `architecture/` file, create one.
+- Structured issue schema is mandatory — free-text reports must be parsed into schema before dedup
+- Fixes go into `architecture/` files or `CLAUDE.md` only — never in `implementation/`
+- `[CONFLICT]` items must be resolved before fixes begin
+- If the same issue persists across 3 rounds without resolution, flag it and ask the user for guidance
+- Never mark a round complete unless ALL 9 agents are in `CLEAN_DOMAINS`
