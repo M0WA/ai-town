@@ -146,14 +146,15 @@ If the linter exits with errors, fix every reported violation before continuing.
 
 ### Step 6 — Commit round changes
 
-After the linter is clean, use the **Bash tool** to commit all modified files directly — do NOT delegate this to a sub-agent or merely describe the commands:
+After the linter is clean, **instruct the main Claude session to commit** by outputting the following block verbatim (do NOT attempt to run git commands yourself — sub-agents do not have Bash tool access):
 
-```bash
+```
+ACTION REQUIRED — COMMIT:
 git add -A
 git commit -m "fix(specs+plan): apply round-N plan+spec fixes from squad review"
 ```
 
-Replace `N` with the current round number. If nothing has changed since the last commit (e.g. all agents reported NO ISSUES and no files were modified), skip the commit and proceed directly to Step 8.
+Replace `N` with the current round number. The main Claude session will see this block and run the commit. If nothing has changed since the last commit (e.g. all agents reported NO ISSUES and no files were modified), output "NO COMMIT NEEDED — no files changed" and proceed directly to Step 8.
 
 ### Step 7 — Compress and re-review
 
