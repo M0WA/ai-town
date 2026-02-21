@@ -96,9 +96,13 @@ markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
 
 If the linter exits with errors, fix every reported violation before continuing. Re-run until the linter exits zero. Only then proceed to Step 6.
 
-### Step 6 — Compact and re-review
+### Step 6 — Re-review
 
-After all fixes are applied and the linter is clean, run `/compact` to reduce context window usage, then go back to **Step 2** and run all agents again on the updated spec. (Skip `/compact` on the final cycle when all agents report clean — just output the completion summary.)
+After all fixes are applied and the linter is clean, go back to **Step 2** and run all agents again on the updated spec.
+
+**Cycle synchronisation**: fixing (Step 4) may begin as soon as the first agent results arrive — there is no need to wait for all agents before starting fixes. However, do not start a new cycle (return to Step 2) until **all agents from the current round have returned their results** — late-arriving results would otherwise be silently dropped, causing stale or conflicting fixes in the next round.
+
+**Context compaction**: only run `/compact` before starting a new cycle if the context window is too full to survive another full round (9 parallel agents + fix pass). Do not compact routinely — compressing when unnecessary discards useful context and slows the process. Skip `/compact` entirely on the final cycle when all agents report clean — just output the completion summary.
 
 ### Step 7 — Completion check
 
