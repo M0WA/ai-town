@@ -1,13 +1,13 @@
 ---
-name: plan-fix-spec
-description: Sync the implementation plan with the current specs AND iteratively fix all CRITICAL/HIGH issues in both specs and the plan until a clean pass is achieved — using domain-scoped re-reviews, diff-based prompts, issue deduplication, fix verification, and deferred commits to minimize token usage and latency.
+name: fix-implementation
+description: Iteratively fix all CRITICAL/HIGH issues in both specs and the implementation plan until a clean pass is achieved — using domain-scoped re-reviews, diff-based prompts, issue deduplication, fix verification, and deferred commits to minimize token usage and latency. Does NOT sync the plan from specs first.
 ---
 
-# Plan Fix Spec
+# Fix Implementation
 
-Sync the implementation plan from the current architecture specs, then iteratively review and
-fix issues across both the spec files and the implementation plan — repeating until a full clean
-pass is achieved on the targeted phases.
+Iteratively review and fix issues across both the spec files and the implementation plan —
+repeating until a full clean pass is achieved on the targeted phases. The implementation plan
+is taken as-is; no Product Owner sync step is run.
 
 ---
 
@@ -72,25 +72,7 @@ Before the first cycle, initialise the following state. Update it after every cy
 
 ## Process
 
-### Step 1 — Product Owner syncs the implementation plan (Round 1 only)
-
-**Skip this step on rounds 2+.** The plan is already in sync after round 1; re-running risks
-overwriting fixes applied by squad agents in previous rounds.
-
-On round 1, launch the `prod-owner` agent:
-
-> You are a Senior Product Owner for AI Town, a 3D city simulator built with C++, Irrlicht, and
-> OpenAL Soft. Read ALL specification files under `architecture/` and `CLAUDE.md`, then update
-> the implementation plan files under `./implementation/` (per-phase files + INDEX.md) so they
-> accurately and completely reflect the current specs. Follow the Core Rule: Spec Consistency and
-> the File Layout rules defined in your agent instructions. When done, confirm what was written
-> and list any spec contradictions you flagged.
-
-Wait for the `prod-owner` agent to finish before continuing.
-
----
-
-### Step 2 — Determine which agents to run this round
+### Step 1 — Determine which agents to run this round
 
 **Round 1**: run all 9 agents (full read, no diff available yet).
 
@@ -103,9 +85,9 @@ previous clean result carries forward. Note in the round summary which agents we
 
 ---
 
-### Step 3 — Launch agents in parallel
+### Step 2 — Launch agents in parallel
 
-For each agent selected in Step 2, launch them simultaneously using the Task tool with
+For each agent selected in Step 1, launch them simultaneously using the Task tool with
 **`model: haiku`** — review agents only read files and report structured issues.
 
 **Scope note**: if the user specified target phases, include that in every prompt.
@@ -162,13 +144,13 @@ For each agent selected in Step 2, launch them simultaneously using the Task too
 >
 > If no [TARGET_SEVERITIES] issues remain in your domain, output exactly: `NO ISSUES FOUND`
 
-Do not start Step 4 until **all launched agents have returned their results**.
+Do not start Step 3 until **all launched agents have returned their results**.
 
 ---
 
-### Step 4 — Deduplicate and display findings
+### Step 3 — Deduplicate and display findings
 
-#### 4a — Deduplicate
+#### 3a — Deduplicate
 
 Before displaying findings, merge issues that target the same `(file, section)` pair from
 multiple agents:
@@ -176,12 +158,12 @@ multiple agents:
 - If two agents flag the same location with compatible recommendations, merge into one issue
   and note both domains.
 - If two agents flag the same location with conflicting recommendations, keep both but mark
-  as `[CONFLICT]` — resolve in Step 5.
+  as `[CONFLICT]` — resolve in Step 4.
 
-#### 4b — Display
+#### 3b — Display
 
 ```
-=== PLAN + SPEC REVIEW — Round N ===
+=== IMPLEMENTATION REVIEW — Round N ===
 Severity filter: [TARGET_SEVERITIES]
 Agents run: X / 9  (skipped: [list of skipped agents and reason])
 
@@ -205,7 +187,7 @@ Agents run: X / 9  (skipped: [list of skipped agents and reason])
 
 ---
 
-### Step 5 — Fix [TARGET_SEVERITIES] issues (highest severity first)
+### Step 4 — Fix [TARGET_SEVERITIES] issues (highest severity first)
 
 Issues are fixed in two parallel tracks. Resolve `[CONFLICT]` items before launching either
 track — reason about the best fix and pick one recommendation.
@@ -244,7 +226,7 @@ After both tracks finish:
 
 ---
 
-### Step 6 — Completion check
+### Step 5 — Completion check
 
 Update `CLEAN_DOMAINS`:
 - Add any agent that reported `NO ISSUES FOUND` this round (or was carried forward as clean).
@@ -253,13 +235,13 @@ Update `CLEAN_DOMAINS`:
 
 **Did every agent (all 9) reach `CLEAN_DOMAINS` this round?**
 
-- If **yes** → proceed to Step 7 (lint + commit + summary).
-- If **no** → return to Step 2 for the next cycle. Only run `/compress` before the next cycle
+- If **yes** → proceed to Step 6 (lint + commit + summary).
+- If **no** → return to Step 1 for the next cycle. Only run `/compress` before the next cycle
   if the context window is too full to survive another full round. Do not compress routinely.
 
 ---
 
-### Step 7 — Lint, commit, and complete
+### Step 6 — Lint, commit, and complete
 
 Run the markdown linter once:
 
@@ -283,7 +265,7 @@ Replace `N` with `ROUND`. If no files were modified at all (all agents clean on 
 Output the final summary:
 
 ```
-=== PLAN FIX SPEC COMPLETE ===
+=== FIX IMPLEMENTATION COMPLETE ===
 
 Severity filter: [TARGET_SEVERITIES]
 Rounds completed: N
@@ -300,9 +282,9 @@ by all 9 agents with no [TARGET_SEVERITIES] issues remaining.
 
 ## Rules
 
-- Step 1 (prod-owner sync) runs **only on round 1** — never on subsequent rounds
-- All 9 agents run on round 1; later rounds are domain-scoped (Step 2)
-- Do not start Step 4 until all launched agents for the current round have returned
+- No Product Owner plan-sync step is run — the implementation plan is taken as-is
+- All 9 agents run on round 1; later rounds are domain-scoped (Step 1)
+- Do not start Step 3 until all launched agents for the current round have returned
 - Issues below [TARGET_SEVERITIES] are out of scope — agents must not report them
 - Structured issue schema is mandatory — free-text issue reports must be parsed into schema before dedup
 - Spec fixes go into `architecture/` files only — never into the implementation plan
