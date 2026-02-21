@@ -325,13 +325,14 @@ if (!m_fnSetThreadCtx)
     throw std::runtime_error("ALC_EXT_thread_local_context required");
 
 // Step 3: initialize m_occlusionGainTarget[] before thread launch (see member comment)
-// IMPORTANT: alcMakeContextCurrent(nullptr) MUST NOT be called here or at any point
-// after alcMakeContextCurrent(m_context) above. Calling alcMakeContextCurrent(nullptr)
-// would clear the process-wide context on the main thread, breaking syncListenerToCamera()
-// which relies on that context being current. The audio thread uses alcSetThreadContext()
-// for its own thread-local context; this is per-thread only and does NOT affect the
-// process-wide context held by the main thread. The main thread retains the process-wide
-// context (set in Step 1) for the entire application lifetime.
+// IMPORTANT: alcMakeContextCurrent(nullptr) MUST NOT be called during application runtime
+// (i.e., between this constructor call and the destructor teardown sequence). The audio
+// thread uses alcSetThreadContext() for its thread-local context binding; this does not
+// affect the process-wide main-thread context. The destructor teardown sequence (step 6
+// in audio-thread-shutdown.md) DOES call alcMakeContextCurrent(nullptr) as part of
+// ordered AL resource cleanup — that call is correct and mandatory. The prohibition
+// applies only to calls that would occur while the application is running and
+// syncListenerToCamera() is being called from the main thread.
 for (auto& t : m_occlusionGainTarget) t.store(1.0f, std::memory_order_relaxed);
 
 // Step 4: launch audio thread — only reached if extension is confirmed present

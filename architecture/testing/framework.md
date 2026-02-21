@@ -208,32 +208,36 @@ aitown_add_tests(audio_tests LABEL "unit")
 # added alongside the stub.
 #
 # lod_swap_smoke_test.cpp phase plan:
-#   Phase 2: tests/rendering/lod_swap_smoke_test.cpp is CREATED with a SUCCEED() placeholder body
-#            and registered in add_executable(opengl_tests ...) below. The file is created
-#            simultaneously with the CMakeLists.txt change — the file exists, so cmake --build
-#            does not fail at configure time.
-#   Phase 5: The REAL TEST BODY is filled in after the LOD spike is complete. The Phase 5
-#            restriction applies to the real test body, NOT to the file creation or CMake
-#            registration. The placeholder file may remain in CMakeLists.txt unchanged from
-#            Phase 2 through Phase 4; only the .cpp contents change in Phase 5.
+#   Phase 0/1: add_executable(opengl_tests ...) contains ONLY stub_succeed.cpp (and
+#              shader_stub_compile_test.cpp). lod_swap_smoke_test.cpp does NOT exist yet
+#              and must NOT appear in the source list — a missing source file causes
+#              cmake --build to fail at configure time.
+#   Phase 6:   tests/rendering/lod_swap_smoke_test.cpp is CREATED and registered in
+#              add_executable(opengl_tests ...) below. The file is created simultaneously
+#              with the CMakeLists.txt change — the file exists, so cmake --build does not
+#              fail at configure time. The real test body is filled in at Phase 6 after
+#              the LOD spike work is complete.
 #
 # The stub file may be removed once real tests cover the target, but its
 # presence does not cause any build or link errors — both .cpp files are compiled and linked
 # into the same test binary and all discovered tests run under the same CTest entry.
 add_executable(opengl_tests
-    tests/rendering/stub_succeed.cpp
+    tests/rendering/stub_succeed.cpp        # Phase 0/1: only these two files exist
     tests/rendering/shader_stub_compile_test.cpp
-    tests/rendering/lod_swap_smoke_test.cpp
+    # tests/rendering/lod_swap_smoke_test.cpp  -- added in Phase 6 (see phase plan above)
 )
 target_link_libraries(opengl_tests PRIVATE aitown_render GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
-# src/rendering/ required for Phase 5 lod_swap_smoke_test.cpp which needs scene-graph and mesh buffer headers.
+# src/rendering/ required for Phase 6 lod_swap_smoke_test.cpp which needs scene-graph and mesh buffer headers.
 target_include_directories(opengl_tests PRIVATE
     src/interfaces/
     src/rendering/
     ${CMAKE_SOURCE_DIR})
 aitown_add_tests(opengl_tests LABEL "requires-opengl")
 
-add_executable(integration_tests tests/integration/irrlicht_ui_backend_test.cpp)
+# The _compile_test suffix captures the compile-only nature of this file:
+# it contains static_assert checks and no runtime test body (no TEST() or TEST_F() cases).
+# It verifies IrrlichtUIBackend is non-abstract at compile time without requiring a display.
+add_executable(integration_tests tests/integration/irrlicht_ui_backend_compile_test.cpp)
 target_link_libraries(integration_tests PRIVATE
     aitown_render aitown_ui
     GTest::gtest_main GTest::gmock

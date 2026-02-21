@@ -178,6 +178,14 @@ nm build/aitown | grep -i glew | sort | uniq -d
 
 **Note on `-D` flag**: On a fully static Linux build, the `-D` flag inspects only the dynamic export table and will produce no output even when symbols are duplicated in the static image. Plain `nm` without `-D` must be used for statically-linked executables.
 
+**Phase 1 note**: At Phase 1, the `aitown` final executable target may not yet exist. Run the symbol duplication check against the render library at Phase 1 instead:
+
+```bash
+nm build/libaitown_render.a | grep -i glew | sort | uniq -d
+```
+
+`libaitown_render.a` is the library where GLEW and Irrlicht are first linked together at Phase 1. Once the `aitown` executable exists (Phase 2+), use `nm build/aitown`. The plain `nm` without `-D` flag requirement applies to both: on a fully static build, `-D` inspects only the dynamic export table and produces no output even when symbols are duplicated in the static image.
+
 If this command produces any output, duplicate GLEW symbols are present and the build is BLOCKED — the issue must be resolved before merging. The result of this check (clean or duplicate list) must be recorded in the Phase 2 Spike Results section below.
 
 ## Phase 2 Spike Results

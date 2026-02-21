@@ -59,7 +59,9 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 - [ ] Terrain diffuse textures (`graphics-artist-2d-texture`): at least 2 biome variants; 2048×2048 DDS DXT1 sRGB (`GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`); 4-level mip chain; anisotropy ≥ 8× (terrain requirement per `architecture/asset-standards/2d-texture-standards.md`)
 - [ ] Terrain normal maps (`graphics-artist-2d-texture`): DXT5nm packed (X→alpha, Y→green, Z discarded; Y-flip before swizzle for OpenGL convention); uploaded via `loadLinear()`; anisotropy ≥ 4×
 - [ ] Splat map PNG (`graphics-artist-2d-texture`): RGBA8 PNG (blend weights, NOT a DDS/DXT compressed file); uploaded via `loadSplatMap()` → `glTexImage2D(GL_RGBA8)`; `GL_TEXTURE_MAX_LEVEL = 0`; anisotropy disabled for splat maps
-- [ ] **Atlas layout sign-off** (`graphics-artist-2d-texture`, `graphics-dev-irrlicht`): joint approval of `architecture/asset-standards/building-atlas-layout.md` confirming building variants within the same zone-tier share wall module atlas cells; 16-cell atlas is sufficient if this sharing is enforced; sign-off must explicitly confirm the sharing rule. Required before any Phase 9 building mesh UV channel 0 authoring proceeds. (ref: `architecture/asset-standards/building-atlas-layout.md`)
+- [ ] **Atlas layout sign-off** (`graphics-artist-2d-texture`, `graphics-dev-irrlicht`, `graphics-artist-3d-model`): joint approval of `architecture/asset-standards/building-atlas-layout.md` confirming building variants within the same zone-tier share wall module atlas cells; 16-cell atlas is sufficient if this sharing is enforced; sign-off must explicitly confirm the sharing rule. Required before any Phase 9 building mesh UV channel 0 authoring proceeds. (ref: `architecture/asset-standards/building-atlas-layout.md`)
+
+  **`graphics-artist-3d-model` building atlas sign-off gate** (Phase 5 exit criterion): `graphics-artist-3d-model` MUST review `architecture/asset-standards/building-atlas-layout.md` and confirm: (a) the shared atlas cell variant approach (multiple mesh variants referencing one module-type cell) is compatible with modular kit UV authoring workflows; (b) per-module UV islands can be fully authored within the 496×496 px usable area per 512×512 cell without requiring bleed into the 8 px border; (c) the 4×4 cell grid and 16-cell capacity correctly covers the V1 minimum building module set. Sign off before Phase 9 UV authoring begins.
 
 #### LOD Smoke Test Promotion
 
@@ -103,7 +105,7 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 - Terrain GLSL shaders compile and render without GL errors; gamma fallback engaged when `isSRGBTextureSupported()` is false
 - `lod_swap_smoke_test.cpp` `SetMeshGrabDropContract` test body filled in with spike result recorded; test passes under `xvfb-run`
 - `validate_assets.py` all 13 checks implemented; runs cleanly in `validate-assets` CI job
-- Atlas layout sign-off document updated in `building-atlas-layout.md` with explicit building variant sharing confirmation
+- Atlas layout sign-off document updated in `building-atlas-layout.md` with explicit building variant sharing confirmation; `graphics-artist-3d-model` sign-off recorded confirming: (a) shared atlas cell variant approach compatible with modular kit UV workflows; (b) per-module UV islands fit within 496×496 px usable area per 512×512 cell; (c) 4×4 grid and 16-cell capacity covers V1 minimum building module set
 - `coverage-linux` gate green at ≥80% on `src/simulation/`, `src/terrain/`, `src/ui/`
 
 ### Team
@@ -112,7 +114,7 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 |---|---|
 | `graphics-dev-irrlicht` | `TerrainChunk`, `TerrainSystem`, `SceneEntityManager`, `TextureCache` full implementation, terrain GLSL shaders, sRGB upload path, `lod_swap_smoke_test.cpp` promotion |
 | `graphics-artist-2d-texture` | Terrain diffuse textures (DXT1 sRGB 2048×2048), terrain normal maps (DXT5nm), splat map PNG, atlas layout sign-off |
-| `graphics-artist-3d-model` | Atlas layout co-sign |
+| `graphics-artist-3d-model` | Atlas layout co-sign; building atlas sign-off gate (confirm shared cell variant approach, 496×496 px usable area, 16-cell V1 coverage) before Phase 9 UV authoring begins |
 | `test-dev-cpp` | `TerrainChunk` tests, `TerrainSystem` rebuild deque tests, `TextureCache` tests, `terrain_tests` CMake target promotion |
 | `cicd-dev-github` | `--fail-under-percent 80` gate implementation in `coverage-linux` CI job |
 

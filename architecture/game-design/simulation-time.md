@@ -77,6 +77,16 @@ This value is derived directly from the base tick rate and month definition abov
 
 While paused (`m_currentSpeed == SpeedMultiplier::Paused`), `tick()` returns immediately. No accumulation occurs and no budget ticks fire. The accumulator value is preserved across pause/unpause transitions so that a partially accumulated month is not lost.
 
+### Grace Period Interaction
+
+The 120-real-second grace period defined in `economy-model.md` gates cost deductions (road maintenance, service upkeep) **inside** `fireBudgetTick()` — it does NOT gate the accumulation of `m_accumulatedSimSeconds` or the firing of `fireBudgetTick()` itself.
+
+- Budget ticks fire normally from tick 0.
+- Tax revenue is collected from tick 0.
+- Only the expense line items (road maintenance, service upkeep) are suppressed until the `IClock`-based gate clears at 120 real seconds.
+
+This distinction is required for the bootstrap demand mechanism (ticks 0–5) documented in `zoning-system.md` to function correctly: if tick firing were gated by the grace period, the bootstrap demand decay would not advance and the city would fail to generate initial zone demand.
+
 ### Design Rationale
 
 The accumulator lives inside `CitySimulation`, not in the main loop. This keeps the main loop unconditionally simple — it calls `tick()` every frame with the raw delta — and means time-scaling policy is fully encapsulated in one place. If a future speed setting (e.g., 30×) is added, only `CitySimulation` needs updating; the main loop is unchanged.

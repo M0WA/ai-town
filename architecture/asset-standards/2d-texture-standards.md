@@ -97,6 +97,11 @@ Both tools produce standards-compliant DDS files and are CI-verified. Do not use
 
    DXT1 sRGB should show `0x31545844`; if `nvddsinfo` or `dxinfo` are available on the workstation, these may also be used to inspect the DDS header and confirm the sRGB format flags. A linear DXT1 header will show a different FourCC value — do not commit that file.
 
+   For DXT5 (BC3) billboard atlases: the standard DDS FourCC field contains `0x35545844` (`DXT5` in ASCII little-endian), which does NOT encode the sRGB flag. The traditional FourCC inspection step alone cannot reliably detect sRGB intent for DXT5 files. Use one of the following approaches to validate sRGB intent on DXT5 billboard atlases:
+   - **DX10 extended header (recommended)**: Check the DX10 DXGI format field (`DXGI_FORMAT_BC3_UNORM_SRGB`, value 100). Files authored via `nvcompress -color` produce a DX10 extended header with this format value.
+   - **Source PNG sRGB ICC profile + authoring flag**: Verify the source PNG carries an sRGB ICC profile and was compressed with `nvcompress -color` (the `-color` flag signals sRGB intent to the compressor and sets the DX10 DXGI sRGB format).
+   Note: `glCompressedTexImage2D` with `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` requires the uploaded data to be authored in sRGB — verifying the DX10 header or source provenance before upload prevents silent gamma errors in the billboard atlas rendering.
+
 3. **Automation note.** `tools/export_textures.py` (Phase 9 deliverable) handles sRGB tagging automatically for all diffuse atlas DDS outputs. Until that script exists, manual validation per steps 1–2 above is required for every diffuse atlas DDS before committing to the asset directory.
 
 4. **Consequence of skipping validation.** A DDS file with a linear (non-sRGB) internal format header will be uploaded via `glCompressedTexImage2D` using `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` (or `_DXT5_EXT`) with the wrong GL internal format — the driver silently accepts the call without a GL error, but color rendering will be incorrect (gamma-incorrect diffuse colors) across all surfaces using that atlas. There is no runtime diagnostic for this class of error; it must be caught at authoring time.
@@ -246,7 +251,7 @@ Small buildings and props use a pre-baked imposter atlas at LOD2 (beyond 100 m).
 
 **Phase 1 dated sign-off record** (required before Phase 1 exit):
 
-> Phase 1 sign-off — [DATE]: Billboard atlas format confirmed — 1024×128 DXT5 sRGB
+> Phase 1 sign-off — 2026-02-21: Billboard atlas format confirmed — 1024×128 DXT5 sRGB
 > (`GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`), 8 frames at 128×128 px, 112×112 px usable
 > content area per frame (8-texel border on all four sides), 4-level mip chain
 > (`GL_TEXTURE_MAX_LEVEL = 3`), `nvcompress -color -bc3 -mips 4` authoring pipeline
