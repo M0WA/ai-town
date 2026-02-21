@@ -158,7 +158,9 @@ Replace `N` with the current round number. The main Claude session will see this
 
 ### Step 7 — Compress and re-review
 
-After committing, run `/compress` to reduce context window usage, then return to **Step 2** and run all 9 agents again on the updated plan and specs. (Skip `/compress` on the final cycle when all agents report clean — just output the completion summary.)
+After committing, return to **Step 2** and run all 9 agents again on the updated plan and specs.
+
+Only run `/compress` before starting a new cycle if the context window is too full to survive another full round (9 parallel agents + fix pass + commit). Do not compress routinely — compressing when unnecessary discards useful context and slows the process. Skip `/compress` entirely on the final cycle when all agents report clean — just output the completion summary.
 
 **Important**: do not start a new cycle (return to Step 2) until **all 9 agents from the current round have returned their results**. Fixing (Step 4) may begin as soon as the first agent results arrive — there is no need to wait for all 9 before starting fixes. However, a new review cycle must never begin with a partial result set — an agent whose findings arrive late would be missed, causing stale or conflicting fixes in the next round.
 
