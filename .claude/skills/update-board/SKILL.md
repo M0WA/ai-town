@@ -1,16 +1,17 @@
 ---
 name: update-board
-description: Use this skill when the user wants to sync the GitHub project board with the implementation plan, optionally for a specific phase. Examples: "update-board", "update board for phase 1", "sync the GitHub board", "update the project board for phase 3", "refresh the board".
+description: Use this skill when the user wants to push the implementation plan's current state to the GitHub project board, optionally for a specific phase. Examples: "update-board", "update board for phase 1", "sync the GitHub board", "update the project board for phase 3", "refresh the board".
 ---
 
 # Update Board
 
-Sync the GitHub project board ("AI Town") with the current implementation plan. If a phase is
-specified, only that phase is updated; otherwise all phases are synced.
+Push the current implementation plan to the GitHub project board ("AI Town"). The plan is the
+source of truth — the board is updated to reflect it. If a phase is specified, only that phase
+is updated; otherwise all phases are pushed.
 
 ## Configuration
 
-**Target phase** (optional, default: all phases): controls which phase(s) are synced to GitHub.
+**Target phase** (optional, default: all phases): controls which phase(s) are pushed to GitHub.
 
 Parse `[TARGET_PHASE]` from the user's invocation at the very start:
 
@@ -24,9 +25,10 @@ Parse `[TARGET_PHASE]` from the user's invocation at the very start:
 
 Launch the `proj-manager` agent with the following prompt, substituting `[TARGET_PHASE]`:
 
-> You are a Senior Project Manager for AI Town, a 3D city simulator. Your job is to keep the
-> GitHub project board ("AI Town") in sync with the implementation plan files under
-> `./implementation/`.
+> You are a Senior Project Manager for AI Town, a 3D city simulator. Your job is to update the
+> GitHub project board ("AI Town") to reflect the implementation plan files under
+> `./implementation/`. The implementation plan is the source of truth — do not modify any plan
+> files; only read them and push their contents to GitHub.
 >
 > **Scope**: [TARGET_PHASE]
 >
@@ -57,7 +59,7 @@ reported errors (e.g. GitHub API failures), surface them clearly so the user can
 ## Rules
 
 - Only the `proj-manager` agent is launched — no squad reviews needed.
-- Do not modify any `implementation/` files during this skill; it is read-only with respect to
-  the plan.
+- The implementation plan is the source of truth. Never modify `implementation/` files — read
+  them and push their content to GitHub only.
 - If `[TARGET_PHASE]` is a specific phase and the corresponding file does not exist, report the
   error to the user rather than silently syncing all phases.
