@@ -22,7 +22,6 @@ RenderSystem::RenderSystem() {
     params.WindowSize  = core::dimension2d<u32>(1280, 720);
     params.Bits        = 32;
     params.ZBufferBits = 24;   // required for correct depth sorting
-    params.Stencil     = true; // required for shadow techniques
     params.AntiAlias   = 4;    // 4x MSAA per "realistic graphics" goal
     params.Vsync       = false;
     params.EventReceiver = nullptr;

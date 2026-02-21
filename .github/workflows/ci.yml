@@ -313,10 +313,19 @@ jobs:
         with:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
 
-      # Step 8: Verify glew vcpkg installed artifact before build.
+      # Step 8: Configure CMake (MSBuild generator; no ccache on Windows).
+      # vcpkg manifest install runs here — build/vcpkg_installed/ is created during configure.
+      - name: Configure CMake
+        run: |
+          cmake -B build -S . -G "Visual Studio 17 2022" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DFETCHCONTENT_BASE_DIR="${{ github.workspace }}\.fetchcontent_cache"
+        shell: pwsh
+
+      # Step 9: Verify glew vcpkg installed artifact (after cmake configure).
       # glew is required by the Irrlicht vcpkg port on Windows. If it is absent the
-      # CMake configure or link step fails with an opaque error. This step catches the
-      # missing installed artifact immediately with a clear diagnostic message.
+      # link step fails with an opaque error. This step catches the missing installed
+      # artifact immediately with a clear diagnostic message.
       # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1"
       # is PS 7+ only; GitHub Actions Windows runners use PS 5.1.
       - name: Verify glew vcpkg port
@@ -331,7 +340,7 @@ jobs:
           }
           Write-Host "GLEW installed artifact verified."
 
-      # Step 9: Verify GLEW vcpkg install (Windows) — sixth atomicity item.
+      # Step 10: Verify GLEW vcpkg install (Windows) — sixth atomicity item.
       # Dual-path check: manifest-mode install (build/vcpkg_installed/) first,
       # then classic-mode fallback ($VCPKG_ROOT/installed/).
       # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
@@ -343,14 +352,6 @@ jobs:
             exit 1
           }
           Write-Host 'glew.lib found.'
-
-      # Step 10: Configure CMake (MSBuild generator; no ccache on Windows).
-      - name: Configure CMake
-        run: |
-          cmake -B build -S . -G "Visual Studio 17 2022" `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
-            -DFETCHCONTENT_BASE_DIR="${{ github.workspace }}\.fetchcontent_cache"
-        shell: pwsh
 
       # Step 11: Build (MSBuild).
       - name: Build

@@ -37,11 +37,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   lcov \
   xvfb \
   libgl1-mesa-dev \
+  libglu1-mesa-dev \
   libasound2-dev \
   libpulse-dev \
   libx11-dev \
   libxxf86vm-dev \
   libxext-dev \
+  gcc-13 \
+  g++-13 \
+  && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
+     --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Bootstrap vcpkg at the pinned baseline commit (matches vcpkg.json builtin-baseline).

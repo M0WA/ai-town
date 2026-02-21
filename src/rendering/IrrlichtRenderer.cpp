@@ -74,7 +74,7 @@ void IrrlichtRenderer::setCamera(const CameraParams& p) {
                 fprintf(stderr,
                     "[IrrlichtRenderer] WARNING: unexpected animators on addCameraSceneNode() "
                     "result — removing %zu animator(s)\n",
-                    m_camera->getAnimators().size());
+                    static_cast<size_t>(m_camera->getAnimators().size()));
             }
 #endif
             while (m_camera->getAnimators().size() > 0) {
