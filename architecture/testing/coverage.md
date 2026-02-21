@@ -58,11 +58,11 @@ lcov --summary coverage_filtered.info
 ## Phase 4 src/ui/ Coverage Baseline
 
 The Phase 4 `src/ui/` coverage baseline is expected to be low (stub-heavy code). The MINIMUM
-acceptable Phase 4 baseline is **25%** — achievable with `UIManagerDrawOrderTest`, 5 UIScaler
+acceptable Phase 4 baseline is **25%** — achievable with `UIManagerDrawOrderTest`, 6 UIScaler
 tests, and 8 CameraController tests.
 
-**Phase 1 prerequisite**: The Phase 4 25% gate assumes all Phase 1 tests (13 tests: 8
-CameraController tests in `tests/ui/camera_controller_test.cpp` + 5 UIScaler tests in
+**Phase 1 prerequisite**: The Phase 4 25% gate assumes all Phase 1 tests (14 tests: 8
+CameraController tests in `tests/ui/camera_controller_test.cpp` + 6 UIScaler tests in
 `tests/ui/ui_scaler_test.cpp`) are present and passing. The `IrrlichtUIBackendCompileCheck`
 compile test is registered under `integration_tests` (label `integration`), not `ui_tests`,
 and does not directly contribute to the `src/ui/` line-coverage percentage — but it MUST
@@ -76,9 +76,11 @@ without the CameraController and UIScaler tests supplying coverage of their resp
 If Phase 4 baseline is below 25%, this indicates test registration or stub-body errors that
 must be corrected before Phase 5 begins. Likely causes include:
 
-- Panel stub `draw()` methods that are no-op bodies (see `testability-architecture.md`
-  Anti-no-op requirement — a no-op `draw()` produces zero coverage on the `UIManager::draw()`
-  dispatch path, dragging `src/ui/` coverage below the 25% floor)
+- Panel stub `draw()` methods that are no-op bodies (anti-no-op requirement: each test-stub
+  panel's `draw()` MUST call at least one `IUIBackend` method — typically `setElementVisible`
+  — so that `UIManager::draw()` dispatch produces measurable line coverage; an empty `draw()`
+  body `{}` makes the draw-order test vacuously green and produces zero coverage on the
+  `UIManager::draw()` dispatch path, dragging `src/ui/` coverage below the 25% floor)
 - `ui_tests` CMake target missing source files (e.g., `ui_scaler_test.cpp` or
   `camera_controller_test.cpp` not listed in `add_executable(ui_tests ...)`)
 - `gtest_discover_tests()` label misconfiguration causing tests to be excluded from the

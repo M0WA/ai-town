@@ -214,8 +214,8 @@ aitown_add_tests(audio_tests LABEL "unit")
 # added alongside the stub.
 #
 # lod_swap_smoke_test.cpp phase plan:
-#   Phase 0/1: add_executable(opengl_tests ...) contains ONLY stub_succeed.cpp (and
-#              shader_stub_compile_test.cpp). lod_swap_smoke_test.cpp does NOT exist yet
+#   Phase 0/1: add_executable(opengl_tests ...) contains stub_succeed.cpp AND
+#              shader_stub_compile_test.cpp. lod_swap_smoke_test.cpp does NOT exist yet
 #              and must NOT appear in the source list — a missing source file causes
 #              cmake --build to fail at configure time.
 #   Phase 2:   tests/rendering/lod_swap_smoke_test.cpp is CREATED and registered in

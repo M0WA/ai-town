@@ -152,6 +152,13 @@ Vehicle engine uses two simultaneously-playing SFX pool sources per vehicle:
 
 **Note**: All crossfade durations use the constant-power curve (`gain_in = sin(t × π/2)`, `gain_out = cos(t × π/2)`) — never a linear ramp. The label "linear" in earlier drafts was incorrect. The Crossfade Duration column above always means "constant-power duration".
 
+**Authoring note — dawn/dusk collapse at default simulation speed**: At the default simulation speed of x3, the one-hour dawn window (05:00–06:00) and the three-hour dusk window (20:00–23:00) pass faster than the minimum hold time, so the ambient system collapses them entirely — transitions go directly day→night and night→day without ever activating the dawn or dusk intermediate bed. This is the expected behavior specified in the collapse logic above (pre-emptive collapse at speed >= x3). Sound artists MUST author the day and night ambient beds such that a direct day→night crossfade and a direct night→day crossfade both sound natural with no dawn/dusk intermediate. Specifically:
+
+- The day ambient bed must have a tail character (lower energy, less prominent bird activity toward its end) that blends acceptably into the night bed without needing the dusk bed as a bridge.
+- The night ambient bed must have an opening character that works as a direct continuation of the day bed at x3 speed and also works after a dawn bed introduction at x1 speed.
+- Deliver a crossfade audibility test (day→night at 3 s constant-power, no intermediate) as part of the ambient bed delivery package. This test must be reviewed and approved before asset lock.
+- The dawn and dusk beds are still authored and still used at x1 speed (e.g., during slow-play or pause-and-resume sessions); they must not be omitted. The authoring constraint above applies to the day and night beds only.
+
 #### Time-of-Day Music Intensity Override
 
 The time-of-day schedule takes **absolute precedence** over the simulation-state intensity selector for all non-day time periods. The simulation state (calm/growth/crisis) drives music intensity **only during day hours (06:00–20:00)**:

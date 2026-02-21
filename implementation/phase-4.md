@@ -48,13 +48,16 @@ Harden the CI pipeline (GLEW vcpkg, DLL verification, routing verification), del
   - `water_tower_coverage_radius_m = 700` (meters)
   - `service_deficit_radius_halving_threshold = -0.10f` (−10% surplus triggers radius halving)
   - `demand_bootstrapping_ticks = 6` // bootstrap subsidies apply during ticks 0 through demand_bootstrapping_ticks−1 (i.e., ticks 0–5); the correct conditional is `if (currentTick < demand_bootstrapping_ticks)`. The divisor of 6 in the zoning-system.md decay formula (`1 − tick/6`) is consistent with this value — the bootstrap period spans exactly 6 ticks (0..5).
-  - `demand_floor_R = 0.20f`
-  - `demand_floor_C = 0.10f`
-  - `demand_floor_I = 0.10f`
+  - `demand_floor_residential = 0.20f`
+  - `demand_floor_commercial = 0.10f`
+  - `demand_floor_industrial = 0.10f`
   - `density_upgrade_wave_demand_threshold = 0.75f`
   - `density_max_upgrade_rate_per_tick = 0.20f`
-  - `population_growth_cap_per_tick = 0.10f`
-  - `population_decay_cap_per_tick = 0.15f`
+  - `population_growth_cap_fraction = 0.10f`
+  - `population_decay_cap_fraction = 0.15f`
+  - `kNoUnlockThreshold = -1.0f` — sentinel returned by `ICitySimulation::getNextUnlockThreshold()` when all six density tiers are unlocked; compare via `threshold < 0.0f`; `static constexpr float`; no `int` static_assert (float constant) (ref: `architecture/game-design/economy-model.md`)
+  - `bond_repayment_ticks = 24` — Emergency Municipal Bond repayment period (24 budget ticks = 2 in-game years); distinct from `loan_repayment_ticks = 12`; `int` static_assert guard required: `static_assert(bond_repayment_ticks > 0, "must be positive")` (ref: `architecture/game-design/economy-model.md`)
+  - `SECONDS_PER_BUDGET_TICK = 30.0f` — derived from 30 in-game days × 1.0 s/day at 1× speed; `constexpr float`; no `int` static_assert required (float constant); used in `CitySimulation` tick accumulator (ref: `architecture/game-design/simulation-time.md`)
 
   **`int` `static_assert` guards required (GD-4)**: for all integer constants, add `static_assert(constant_name > 0, "must be positive")` guards immediately following each constant declaration. **`road_lod2_color` is NOT in `SimulationConstants`** — it is a rendering constant placed in `src/rendering/render_constants.h` (Phase 9 deliverable). (ref: `architecture/game-design/service-coverage.md`, `architecture/game-design/population-density-growth.md`, `architecture/game-design/zoning-system.md`)
 
@@ -88,7 +91,7 @@ Harden the CI pipeline (GLEW vcpkg, DLL verification, routing verification), del
 - `tools/vehicle_atlas_registry.json` delivered with all 5 V1 vehicle type stubs; `graphics-artist-3d-model` co-sign recorded
 - `tools/music_sidecar_schema.json` delivered
 - `shader_constants.h` contains full `kTexUnit*` table AND `static_assert(kTexUnitBillboard <= 15, ...)`
-- `simulation_constants.h` Part B locked with all 12 service/population/zoning constants + `int` static_assert guards
+- `simulation_constants.h` Part B locked with all 15 constants (12 original service/population/zoning + `kNoUnlockThreshold` + `bond_repayment_ticks` + `SECONDS_PER_BUDGET_TICK`) + `int` static_assert guards for all integer constants
 - All 5 production briefs (music SA-2/SA-3, zone loop, vehicle SFX, stinger, ambient bed) delivered and acknowledged
 - Crossfade audibility pre-production demo approved
 - Texture artist and 3D model artist sign-offs recorded

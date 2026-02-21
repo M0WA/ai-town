@@ -20,7 +20,7 @@ Named constants (values chosen at implementation time):
 
 Arrow-key pan uses the same zoom-scale formula as MMB drag pan, multiplied by a separate `kKeyboardPanRate` constant (allows Arrow-key pan to be tuned independently from mouse drag pan speed).
 
-The mouse-sensitivity slider (Phase 8 Settings panel) applies as a user-controlled multiplier on top of the zoom-scaled base rate: `effectivePanSpeed = panSpeed * sensitivityMultiplier`. This design allows Phase 1 to implement the correct zoom-scaled formula without requiring refactoring when Phase 8 adds the sensitivity slider.
+The mouse-sensitivity slider (Phase 8 Settings panel) applies as a user-controlled multiplier on top of the zoom-scaled base rate: `effectivePanSpeed = panSpeed * sensitivityMultiplier`. This design allows Phase 1 to implement the correct zoom-scaled formula without requiring refactoring when Phase 8 adds the sensitivity slider. **The mouse-sensitivity slider applies to mouse-driven pan inputs ONLY** — specifically MMB drag and edge-scroll. Arrow-key pan is controlled exclusively by `kKeyboardPanRate` and is NOT affected by the sensitivity slider; the slider must not be applied to the keyboard pan code path.
 
 - **Zoom**: Scroll wheel. Scroll wheel controls zoom distance ONLY — it does NOT control camera pitch angle.
 - **Rotate / Pitch**: Right-mouse-button (RMB) drag only (**not** Q/E — those are reserved for future camera controls). Camera pitch is controlled by RMB vertical drag — NOT by scroll wheel. Pitch clamp test cases must inject vertical RMB drag events (`MouseButtonDown button=1` + `MouseMove` with `physY` varying), not `MouseWheel` events.
