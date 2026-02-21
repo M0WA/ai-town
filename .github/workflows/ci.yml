@@ -1,0 +1,793 @@
+# AI Town CI Pipeline
+# Triggers: push/PR to main/develop, workflow_dispatch (manual re-trigger)
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+# permissions block — required for dorny/test-reporter to write PR annotations.
+# Without checks: write, dorny/test-reporter receives a 403 and silently fails.
+permissions:
+  checks: write       # required by dorny/test-reporter to post check results
+  contents: read      # required to checkout code
+
+# VCPKG_COMMIT_ID must be declared at the WORKFLOW level so it is available to all jobs
+# and steps (including the baseline validation step). Declaring at job or step level would
+# make it unavailable to other jobs.
+# The builtin-baseline in vcpkg.json must match this value exactly (enforced by baseline step).
+env:
+  VCPKG_COMMIT_ID: "ce35b1a53aac26d7fcdb8ee1ef7a8e4eea02d27b"  # matches vcpkg.json builtin-baseline
+
+jobs:
+  # ============================================================================
+  # build-linux — fast binary-verification build (ENABLE_COVERAGE=OFF)
+  # ============================================================================
+  build-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Step 1: checkout (must be first — makes ci.yml available on disk for lint step)
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      # Step 2: Supply-chain lint — first substantive step, immediately after checkout.
+      # Greps ci.yml for placeholder SHAs and rejects any SHA shorter than 40 hex chars.
+      # Prevents accidental commit of incomplete supply-chain pins.
+      - name: Lint workflow for placeholder SHAs
+        shell: bash
+        run: |
+          # Check for unresolved angle-bracket placeholder tokens (e.g. uses: owner/action@<SHA>).
+          # Exclude 'echo' lines to avoid false-positives from this step's own error messages.
+          if grep -P '<[A-Z_][A-Z0-9_-]*>' .github/workflows/ci.yml | grep -v '^\s*#' | grep -v 'echo '; then
+            echo "ERROR: Unresolved angle-bracket placeholder found in ci.yml."
+            exit 1
+          fi
+          # Check for short SHAs (fewer than 40 hex chars after '@') in uses: lines.
+          if grep -P 'uses:.*@[0-9a-f]{1,39}\b' .github/workflows/ci.yml; then
+            echo "ERROR: Short SHA detected in a uses: line in ci.yml. All pinned actions must use the full 40-character commit SHA."
+            exit 1
+          fi
+          echo "SHA lint passed — no placeholder tokens or short SHAs found."
+
+      # Step 3: Install system dependencies — xvfb and OpenGL headers.
+      # Must be BEFORE ccache setup and CMake configure so OpenGL headers and xvfb
+      # binary are available during configure-time and test-time.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev libglew-dev
+
+      # Step 4: Detect GCC version and write to GITHUB_ENV.
+      # MUST be a SEPARATE named step before the actions/cache step.
+      # $GITHUB_ENV writes are not visible within the same step.
+      - name: Detect GCC version
+        shell: bash
+        run: |
+          echo "COMPILER_VERSION=$(gcc -dumpfullversion -dumpversion)" >> $GITHUB_ENV
+
+      # Step 5: Cache vcpkg packages.
+      # Reads $COMPILER_VERSION set in step 4. Must follow step 4.
+      - name: Cache vcpkg packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: ~/.cache/vcpkg
+          key: vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT_ID }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
+
+      # Step 6: Cache FetchContent downloads.
+      # Keyed on CMakeLists.txt + cmake/** to invalidate when SHA pins change.
+      # Reads $COMPILER_VERSION set in step 4.
+      - name: Cache FetchContent downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: .fetchcontent_cache
+          key: fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
+          restore-keys: |
+            fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
+
+      # Step 7: Validate vcpkg baseline consistency.
+      # vcpkg.json builtin-baseline must match VCPKG_COMMIT_ID.
+      # Must precede vcpkg install.
+      - name: Validate vcpkg baseline consistency
+        shell: bash
+        run: |
+          MANIFEST_BASELINE=$(jq -r '."builtin-baseline"' vcpkg.json)
+          if [[ "$MANIFEST_BASELINE" != "${{ env.VCPKG_COMMIT_ID }}" ]]; then
+            echo "ERROR: vcpkg.json builtin-baseline does not match VCPKG_COMMIT_ID"
+            echo "  vcpkg.json builtin-baseline: $MANIFEST_BASELINE"
+            echo "  VCPKG_COMMIT_ID:             ${{ env.VCPKG_COMMIT_ID }}"
+            exit 1
+          fi
+          echo "vcpkg baseline validation passed: $MANIFEST_BASELINE"
+
+      # Step 8: Run vcpkg to install dependencies.
+      - name: Install vcpkg dependencies
+        uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+
+      # Step 9: Set up ccache (Linux only — ccache does not support cl.exe on Windows).
+      - name: Set up ccache
+        if: runner.os == 'Linux'
+        uses: hendrikmuhs/ccache-action@ed74d11c0b343532753ecead8a951bb09bb34bc9  # v1.2.14
+        with:
+          key: ${{ runner.os }}-ccache-${{ env.COMPILER_VERSION }}
+
+      # Step 10: Configure CMake.
+      # ENABLE_COVERAGE=OFF for the fast build-linux job.
+      # FETCHCONTENT_BASE_DIR=.fetchcontent_cache (outside build tree).
+      - name: Configure CMake
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            -DFETCHCONTENT_BASE_DIR=${{ github.workspace }}/.fetchcontent_cache \
+            -DENABLE_COVERAGE=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      # Step 11: Build.
+      - name: Build
+        run: cmake --build build --parallel
+
+      # Step 12: Verify requires-opengl test routing (non-zero discovery) — Phase 1 deliverable.
+      # Must appear BEFORE xvfb-run ctest to confirm routing before execution.
+      # The stub_succeed.cpp test from Phase 0 satisfies the non-zero discovery requirement.
+      # Phase 2 note: lod_swap_smoke_test.cpp (Phase 6) is the first real requires-opengl test body.
+      - name: Verify requires-opengl test routing (non-zero discovery)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No tests discovered under requires-opengl label. Check opengl_tests CMake registration."
+            exit 1
+          fi
+          echo "requires-opengl routing: $count test(s) discovered."
+
+      # Step 13: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
+      # IrrlichtUIBackendCompileCheck::IsNonAbstract is registered under the 'integration' label.
+      # See architecture/testing/framework.md for rationale.
+      - name: Verify integration test routing (non-zero discovery)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No tests discovered under integration label. Check integration_tests CMake registration."
+            exit 1
+          fi
+          echo "Integration routing: $count test(s) discovered."
+
+      # Step 14: Verify default.mhr HRTF data (Phase 0 placeholder — no-op).
+      # Phase 4 replaces this with:
+      #   find "${{ github.workspace }}" -name "default.mhr" | grep -q . || exit 1
+      - name: Verify default.mhr HRTF data (Phase 0 placeholder)
+        shell: bash
+        run: |
+          # TODO Phase 4: replace with: find "${{ github.workspace }}" -name "default.mhr" | grep -q . || exit 1
+          echo "WARNING: default.mhr verification deferred to Phase 4 (post-build copy rule not yet wired)."
+
+      # Step 15: Run unit tests.
+      # AITOWN_HEADLESS=1 — guard against unit tests that inadvertently trigger IrrlichtDevice init.
+      # ALSOFT_DRIVERS=null — guard against unit tests that inadvertently trigger AudioSystem init.
+      - name: Run unit tests (no display)
+        run: |
+          mkdir -p test_results
+          ctest --test-dir build -LE 'integration|requires-opengl' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 16: Run integration tests.
+      # Uses EDT_NULL Irrlicht (no display) + null audio driver.
+      - name: Run integration tests (no display, EDT_NULL)
+        run: |
+          mkdir -p test_results
+          ctest --test-dir build -L '^integration$' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 17: Run OpenGL tests under xvfb.
+      # AITOWN_HEADLESS must NOT appear here — it suppresses IrrlichtDevice init
+      # which is required for requires-opengl tests.
+      # ALSOFT_DRIVERS=null still applies (headless runner has no audio hardware).
+      - name: Run OpenGL tests (xvfb)
+        run: |
+          mkdir -p test_results
+          xvfb-run --auto-servernum ctest --test-dir build -L '^requires-opengl$' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 18: Verify test XML files were produced.
+      # if: always() — ensures this runs even if ctest fails.
+      - name: Verify test XML output
+        if: always()
+        shell: bash
+        run: |
+          count=$(find test_results -name '*.xml' 2>/dev/null | wc -l)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No test XML files in test_results/ — GTEST_OUTPUT may not have written output"
+            exit 1
+          fi
+          echo "Found $count test result file(s)."
+
+      # Step 19: Publish test results via dorny/test-reporter.
+      # if: always() — must post annotations even when tests fail.
+      # fail-on-error: false — prevents reporter errors from masking actual test failures.
+      - name: Publish test results
+        if: always()
+        uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1
+        with:
+          name: 'Linux Unit Tests'
+          path: 'test_results/*.xml'
+          reporter: 'java-junit'
+          fail-on-error: false
+
+      # Step 20: Upload test results artifact.
+      # if: always() — upload even on failure for post-mortem analysis.
+      # Job-specific name (not runner.os-based) to avoid collision with coverage-linux.
+      - name: Upload test results (build-linux)
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: test-results-build-linux-${{ github.sha }}
+          path: test_results/
+          retention-days: 14
+
+  # ============================================================================
+  # build-windows — Windows binary verification build
+  # ============================================================================
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      # Step 1: Checkout
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      # Step 2: Supply-chain lint (same grep as build-linux — rejects placeholder SHAs).
+      - name: Lint workflow for placeholder SHAs
+        shell: bash
+        run: |
+          if grep -P '<[A-Z_][A-Z0-9_-]*>' .github/workflows/ci.yml | grep -v '^\s*#' | grep -v 'echo '; then
+            echo "ERROR: Unresolved angle-bracket placeholder found in ci.yml."
+            exit 1
+          fi
+          if grep -P 'uses:.*@[0-9a-f]{1,39}\b' .github/workflows/ci.yml; then
+            echo "ERROR: Short SHA detected in a uses: line in ci.yml."
+            exit 1
+          fi
+          echo "SHA lint passed."
+
+      # Step 3: Detect MSVC version via vswhere.exe.
+      # MUST be a SEPARATE named step before actions/cache.
+      # $GITHUB_ENV writes are not visible within the same step.
+      # Use "KEY=VALUE" >> $env:GITHUB_ENV (PS 5.1 compatible, not echo).
+      - name: Detect MSVC version
+        shell: pwsh
+        run: |
+          $version = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -property installationVersion
+          "COMPILER_VERSION=$version" >> $env:GITHUB_ENV
+
+      # Step 4: Cache vcpkg packages.
+      # Reads $env:COMPILER_VERSION set in step 3.
+      - name: Cache vcpkg packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
+          key: vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT_ID }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
+
+      # Step 5: Cache FetchContent downloads.
+      - name: Cache FetchContent downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: .fetchcontent_cache
+          key: fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
+          restore-keys: |
+            fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
+
+      # Step 6: Validate vcpkg baseline consistency (must precede vcpkg install).
+      - name: Validate vcpkg baseline consistency
+        shell: bash
+        run: |
+          MANIFEST_BASELINE=$(jq -r '."builtin-baseline"' vcpkg.json)
+          if [[ "$MANIFEST_BASELINE" != "${{ env.VCPKG_COMMIT_ID }}" ]]; then
+            echo "ERROR: vcpkg.json builtin-baseline does not match VCPKG_COMMIT_ID"
+            exit 1
+          fi
+          echo "vcpkg baseline validation passed: $MANIFEST_BASELINE"
+
+      # Step 7: Run vcpkg to install dependencies.
+      - name: Install vcpkg dependencies
+        uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+
+      # Step 8: Configure CMake (MSBuild generator; no ccache on Windows).
+      # vcpkg manifest install runs here — build/vcpkg_installed/ is created during configure.
+      - name: Configure CMake
+        run: |
+          cmake -B build -S . -G "Visual Studio 17 2022" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DFETCHCONTENT_BASE_DIR="${{ github.workspace }}\.fetchcontent_cache"
+        shell: pwsh
+
+      # Step 9: Verify glew vcpkg installed artifact (after cmake configure).
+      # glew is required by the Irrlicht vcpkg port on Windows. If it is absent the
+      # link step fails with an opaque error. This step catches the missing installed
+      # artifact immediately with a clear diagnostic message.
+      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1"
+      # is PS 7+ only; GitHub Actions Windows runners use PS 5.1.
+      - name: Verify glew vcpkg port
+        shell: pwsh
+        run: |
+          # Manifest mode installs to build/vcpkg_installed/; classic mode to $VCPKG_ROOT/installed/.
+          $manifestHdr = "build\vcpkg_installed\x64-windows\include\GL\glew.h"
+          $classicHdr  = Join-Path $env:VCPKG_ROOT "installed\x64-windows\include\GL\glew.h"
+          if (-not (Test-Path $manifestHdr) -and -not (Test-Path $classicHdr)) {
+            Write-Error "ERROR: GLEW not installed — GL/glew.h not found in manifest path ($manifestHdr) or classic path ($classicHdr)."
+            exit 1
+          }
+          Write-Host "GLEW installed artifact verified."
+
+      # Step 10: Verify GLEW vcpkg install (Windows) — sixth atomicity item.
+      # Dual-path check: manifest-mode install (build/vcpkg_installed/) first,
+      # then classic-mode fallback ($VCPKG_ROOT/installed/).
+      # NOTE: On Windows, vcpkg GLEW port installs glew32.lib (not glew.lib) per portfile libname override.
+      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
+      - name: Verify GLEW vcpkg install (Windows)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'build/vcpkg_installed/x64-windows/lib/glew32.lib') -and -not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\glew32.lib")) {
+            Write-Error 'glew32.lib not found in either vcpkg install path'
+            exit 1
+          }
+          Write-Host 'glew32.lib found.'
+
+      # Step 11: Build (MSBuild).
+      - name: Build
+        run: cmake --build build --config Release --parallel
+        shell: pwsh
+
+      # Step 12: Run unit tests.
+      # AITOWN_HEADLESS=1 and ALSOFT_DRIVERS=null required — headless Windows runners
+      # have no audio hardware and will fail AudioSystem initialization without null driver.
+      - name: Run unit tests (no display)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path test_results
+          ctest --test-dir build -C Release -LE "integration|requires-opengl" --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 13: Run integration tests.
+      # No xvfb step on Windows — requires-opengl tests are Linux-only.
+      - name: Run integration tests (no display)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path test_results
+          ctest --test-dir build -C Release -L "^integration$" --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 14: Verify test XML files.
+      - name: Verify test XML output
+        if: always()
+        shell: pwsh
+        run: |
+          $count = (Get-ChildItem -Path test_results -Filter '*.xml' -ErrorAction SilentlyContinue | Measure-Object).Count
+          if ($count -eq 0) {
+            Write-Error "ERROR: No test XML files in test_results/ — GTEST_OUTPUT may not have written output"
+            exit 1
+          }
+          Write-Host "Found $count test result file(s)."
+
+      # Step 15: Publish test results.
+      - name: Publish test results
+        if: always()
+        uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1
+        with:
+          name: 'Windows Unit Tests'
+          path: 'test_results/*.xml'
+          reporter: 'java-junit'
+          fail-on-error: false
+
+      # Step 16: Upload test results artifact.
+      - name: Upload test results (build-windows)
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: test-results-build-windows-${{ github.sha }}
+          path: test_results/
+          retention-days: 14
+
+      # Step 17: DLL verification — Irrlicht.dll and GLEW32.dll hard-fail (Phase 1+);
+      # soft_oal.dll and default.mhr remain warning-only (Phase 4 deliverables not yet present).
+      # Phase 4 hardens soft_oal.dll and default.mhr to hard-fail as well.
+      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
+      - name: Verify required DLLs (Irrlicht+GLEW hard-fail; OpenAL warning-only — Phase 4)
+        shell: pwsh
+        run: |
+          # Irrlicht.dll — hard-fail (Phase 1: aitown_render now links Irrlicht).
+          if (-not (Test-Path "build/Release/Irrlicht.dll")) {
+            Write-Error "ERROR: Irrlicht.dll missing from build/Release/ — post-build copy rule failed"
+            exit 1
+          }
+          Write-Host "Irrlicht.dll present."
+          # Phase 1 atomicity gate: GLEW32.dll check co-lands with target_link_libraries(aitown_render PRIVATE GLEW::GLEW Irrlicht ...)
+          if (-not (Test-Path "build/Release/GLEW32.dll")) {
+            Write-Error "ERROR: GLEW32.dll missing from build/Release/ — post-build CMake DLL copy rule failed"
+            exit 1
+          }
+          Write-Host "GLEW32.dll present."
+          # soft_oal.dll — warning-only (Phase 4 deliverable).
+          if (Test-Path "build/Release/soft_oal.dll") {
+            Write-Host "soft_oal.dll found."
+          } else {
+            Write-Warning "soft_oal.dll not found — expected after Phase 4 audio deliverable. CI continues."
+          }
+          # default.mhr — warning-only (Phase 4 deliverable).
+          if (Test-Path "build/Release/default.mhr") {
+            Write-Host "default.mhr found."
+          } else {
+            Write-Warning "default.mhr not found — expected after Phase 4 audio deliverable. CI continues."
+          }
+
+      # Step 18: Upload Windows binary artifact (only on push to main).
+      - name: Upload Windows binary artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: aitown-windows-${{ github.sha }}
+          path: build/Release/
+          retention-days: 30
+
+  # ============================================================================
+  # coverage-linux — instrumented build with lcov HTML report
+  # Self-contained job: does NOT inherit steps from build-linux.
+  # ============================================================================
+  coverage-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # Step 1: Checkout
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      # Step 2: Supply-chain lint (same as build-linux — both jobs must enforce supply-chain pins).
+      # Rationale: a CI run that skips build-linux and only runs coverage-linux must still
+      # reject placeholder SHAs.
+      - name: Lint workflow for placeholder SHAs
+        shell: bash
+        run: |
+          if grep -P '<[A-Z_][A-Z0-9_-]*>' .github/workflows/ci.yml | grep -v '^\s*#' | grep -v 'echo '; then
+            echo "ERROR: Unresolved angle-bracket placeholder found in ci.yml."
+            exit 1
+          fi
+          if grep -P 'uses:.*@[0-9a-f]{1,39}\b' .github/workflows/ci.yml; then
+            echo "ERROR: Short SHA detected in a uses: line in ci.yml."
+            exit 1
+          fi
+          echo "SHA lint passed."
+
+      # Step 3: Install system dependencies (same canonical position as build-linux).
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev libglew-dev lcov
+
+      # Step 4: Detect GCC version (separate step before actions/cache).
+      - name: Detect GCC version
+        shell: bash
+        run: |
+          echo "COMPILER_VERSION=$(gcc -dumpfullversion -dumpversion)" >> $GITHUB_ENV
+
+      # Step 5: Cache vcpkg packages.
+      - name: Cache vcpkg packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: ~/.cache/vcpkg
+          key: vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT_ID }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
+
+      # Step 6: Cache FetchContent downloads.
+      - name: Cache FetchContent downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: .fetchcontent_cache
+          key: fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
+          restore-keys: |
+            fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
+
+      # Step 7: Validate vcpkg baseline consistency.
+      - name: Validate vcpkg baseline consistency
+        shell: bash
+        run: |
+          MANIFEST_BASELINE=$(jq -r '."builtin-baseline"' vcpkg.json)
+          if [[ "$MANIFEST_BASELINE" != "${{ env.VCPKG_COMMIT_ID }}" ]]; then
+            echo "ERROR: vcpkg.json builtin-baseline does not match VCPKG_COMMIT_ID"
+            exit 1
+          fi
+          echo "vcpkg baseline validation passed: $MANIFEST_BASELINE"
+
+      # Step 8: Run vcpkg.
+      - name: Install vcpkg dependencies
+        uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+
+      # Step 9: Set up ccache.
+      - name: Set up ccache
+        if: runner.os == 'Linux'
+        uses: hendrikmuhs/ccache-action@ed74d11c0b343532753ecead8a951bb09bb34bc9  # v1.2.14
+        with:
+          key: ${{ runner.os }}-ccache-coverage-${{ env.COMPILER_VERSION }}
+
+      # Step 10: Configure CMake with ENABLE_COVERAGE=ON.
+      - name: Configure CMake (coverage)
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            -DFETCHCONTENT_BASE_DIR=${{ github.workspace }}/.fetchcontent_cache \
+            -DENABLE_COVERAGE=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      # Step 11: Build.
+      - name: Build (coverage)
+        run: cmake --build build --parallel
+
+      # Step 12: Verify requires-opengl test routing (non-zero discovery) — Phase 1 deliverable.
+      # Must appear BEFORE xvfb-run ctest to confirm routing before execution.
+      # The stub_succeed.cpp test from Phase 0 satisfies the non-zero discovery requirement.
+      # Phase 2 note: lod_swap_smoke_test.cpp (Phase 6) is the first real requires-opengl test body.
+      - name: Verify requires-opengl test routing (non-zero discovery)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No tests discovered under requires-opengl label. Check opengl_tests CMake registration."
+            exit 1
+          fi
+          echo "requires-opengl routing: $count test(s) discovered."
+
+      # Step 13: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
+      # IrrlichtUIBackendCompileCheck::IsNonAbstract is registered under the 'integration' label.
+      # See architecture/testing/framework.md for rationale.
+      - name: Verify integration test routing (non-zero discovery)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No tests discovered under integration label. Check integration_tests CMake registration."
+            exit 1
+          fi
+          echo "Integration routing: $count test(s) discovered."
+
+      # Step 14: Run unit tests.
+      - name: Run unit tests (no display)
+        run: |
+          mkdir -p test_results
+          ctest --test-dir build -LE 'integration|requires-opengl' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 15: Run integration tests.
+      - name: Run integration tests (no display, EDT_NULL)
+        run: |
+          mkdir -p test_results
+          ctest --test-dir build -L '^integration$' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 16: Run OpenGL tests under xvfb.
+      # AITOWN_HEADLESS must NOT appear here.
+      - name: Run OpenGL tests (xvfb)
+        run: |
+          mkdir -p test_results
+          xvfb-run --auto-servernum ctest --test-dir build -L '^requires-opengl$' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 17: Verify test XML files.
+      # MUST run BEFORE dorny/test-reporter and lcov — if lcov fails, annotations still post.
+      - name: Verify test XML output
+        if: always()
+        shell: bash
+        run: |
+          count=$(find test_results -name '*.xml' 2>/dev/null | wc -l)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No test XML files in test_results/ — GTEST_OUTPUT may not have written output"
+            exit 1
+          fi
+          echo "Found $count test result file(s)."
+
+      # Step 18: Publish test results.
+      # MUST run BEFORE lcov capture — if lcov fails, annotations still post.
+      - name: Publish test results (coverage)
+        if: always()
+        uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1
+        with:
+          name: 'Linux Coverage Tests'
+          path: 'test_results/*.xml'
+          reporter: 'java-junit'
+          fail-on-error: false
+
+      # Step 19: Upload test results artifact (coverage-linux).
+      # if: always() — upload even on failure for post-mortem analysis.
+      - name: Upload test results (coverage-linux)
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: test-results-coverage-linux-${{ github.sha }}
+          path: test_results/
+          retention-days: 14
+
+      # Step 20: lcov capture, filter, report, and gate (renumbered — was Step 17 before test results upload added).
+      # All within a single run: block so BUILD_DIR variable persists.
+      # Required order: lcov --remove -> lcov --list -> genhtml -> lcov --fail-under-percent
+      # lcov --list MUST appear before --fail-under-percent so output is visible even on gate failure.
+      - name: Generate coverage report
+        run: |
+          BUILD_DIR=build
+          # --ignore-errors mismatch: GCC 13 geninfo produces "mismatched end line"
+          # errors for inline functions and lambdas in headers (e.g. GTest macros).
+          # This is a known lcov/GCC 13 compatibility issue; the mismatch is benign
+          # and does not affect coverage accuracy.
+          lcov --capture --directory "${BUILD_DIR}" --base-directory ${{ github.workspace }} \
+               --ignore-errors mismatch \
+               --output-file coverage.info
+          # --ignore-errors unused: lcov 2.x treats any --remove pattern that matches
+          # no files as a fatal error (exit 25). At Phase 0 only smoke tests exist, so
+          # many exclusion patterns (mock_*.h, manual_*.h, src/audio/*, etc.) match
+          # nothing yet. These patterns are correct future-proofing — they must stay so
+          # they suppress coverage for those paths when real code arrives in Phase 1+.
+          # Note: "${BUILD_DIR}/_deps/*" is intentionally absent — with
+          # FETCHCONTENT_BASE_DIR=.fetchcontent_cache, build/_deps/ never exists.
+          lcov --remove coverage.info \
+            --ignore-errors unused \
+            '/usr/*' \
+            "${{ github.workspace }}/.fetchcontent_cache/*" \
+            '*/tests/*' \
+            '*/mock_*.h' '*/mock_*.cpp' \
+            '*/manual_*.h' '*/manual_*.cpp' \
+            '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
+            --output-file coverage_filtered.info
+          lcov --list coverage_filtered.info
+          genhtml coverage_filtered.info --output-directory coverage_html/
+          # Phase 0: no hard coverage gate. lcov --fail-under-percent does not exist in
+          # lcov 2.0 (ubuntu-latest); it was added in lcov 2.1. At Phase 0 the gate would
+          # be 0% anyway (smoke tests give trivial coverage). Use --summary for informational
+          # output only. Phase 2 replaces this with a proper 80% gate once the tool version
+          # is confirmed or the gate is implemented via a bash percentage check.
+          # TODO Phase 5: replace with: lcov --summary coverage_filtered.info | awk check
+          lcov --summary coverage_filtered.info
+
+      # Step 21: src/ui/ coverage baseline checkpoint.
+      # Informational only — does NOT fail CI in Phase 1 (src/ui/ files are stubs).
+      # Intent: baseline-detect the coverage reporting path so that when Phase 5 lands
+      # and real UI code exists, a genuine absence of src/ui/ entries is immediately
+      # visible in the CI log rather than silently missing.
+      # Phase 5 action: replace "echo WARNING" with "exit 1" once UI code is fully covered.
+      - name: Baseline-check src/ui/ coverage entries
+        shell: bash
+        run: |
+          lcov --list coverage_filtered.info | grep -E "src/ui/" || echo "WARNING: No src/ui/ coverage entries found (expected after Phase 5)"
+
+      # Step 22: Upload coverage HTML artifact.
+      # if: always() — upload even if lcov gate fails for post-mortem analysis.
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: coverage-report-linux-${{ github.sha }}
+          path: coverage_html/
+          retention-days: 14
+
+  # ============================================================================
+  # validate-assets — validate audio/texture/model assets (Phase 1 stub: always exits 0)
+  # Phase 5 replaces with real validation. timeout-minutes: 10 is permanent.
+  # ============================================================================
+  validate-assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read  # minimum required — checkout only
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: '3.12'  # pin to specific minor version — never use '3' (floating major breaks reproducibility)
+
+      - name: Run asset validation
+        run: python tools/validate_assets.py
+
+  # ============================================================================
+  # markdown-lint — enforce consistent Markdown formatting across all spec files
+  # Runs independently of all build jobs (no needs:) — starts immediately on
+  # trigger and completes in seconds. No vcpkg, CMake, or C++ toolchain needed.
+  # Prerequisite: .markdownlint.json must be present at repository root.
+  # ============================================================================
+  markdown-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read  # checkout only — no write access needed
+    steps:
+      # Step 1: Checkout — makes .markdownlint.json and all .md files available on disk.
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      # Step 2: Install markdownlint-cli.
+      # Pinned to v0.47.0 for reproducible linting behavior.
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli@0.47.0
+
+      # Step 3: Run markdownlint over all spec and documentation files.
+      # Exits 1 on any violation — job fails and blocks all-checks-pass.
+      # Rule configuration is read from .markdownlint.json at repo root.
+      - name: Run markdownlint
+        run: markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+
+  # ============================================================================
+  # all-checks-pass — gate job required by branch protection
+  # Must run with if: always() so it executes even when dependency jobs fail.
+  # The explicit Bash-array form is the canonical form — do NOT substitute with
+  # contains(needs.*.result, 'failure') (misses skipped) or grep-based patterns.
+  # ============================================================================
+  all-checks-pass:
+    needs:
+      - build-linux
+      - build-windows
+      - coverage-linux
+      - markdown-lint
+      - validate-assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    steps:
+      - name: Verify all platform builds passed
+        shell: bash
+        run: |
+          results=(
+            "${{ needs.build-linux.result }}"
+            "${{ needs.build-windows.result }}"
+            "${{ needs.coverage-linux.result }}"
+            "${{ needs.markdown-lint.result }}"
+            "${{ needs.validate-assets.result }}"
+          )
+          failed=0
+          for result in "${results[@]}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "Job result '$result' is not 'success' — failing gate."
+              failed=1
+            fi
+          done
+          if [[ $failed -eq 1 ]]; then
+            echo "One or more required jobs did not succeed (failed, skipped, or cancelled)."
+            exit 1
+          fi
+          echo "All required jobs succeeded."

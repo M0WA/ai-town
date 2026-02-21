@@ -1,22 +1,27 @@
 # AI Town - 3D City Simulator
 
 ## Project Overview
+
 AI Town is a "Sim City" style 3D city simulator built for desktop platforms (Linux/Windows). The project emphasizes realistic graphics, procedurally generated terrain, and immersive audio.
 
 ## Technical Stack
 
 ### Core Technologies
+
 - **Language**: Object-oriented C++
 - **Graphics Engine**: Irrlicht 3D Engine
 - **Audio Engine**: OpenSoft AL (OpenAL Soft)
 - **Platform**: Cross-platform desktop (Linux/Windows)
 
 ### Build System
+
 - CMake (recommended for cross-platform C++ projects)
 - Platform-specific build tools (GCC/Clang on Linux, MSVC on Windows)
 
 ### ⚠️ Tech Stack Requirements
+
 **The technical stack is fixed and must not be changed.** All development must use:
+
 - C++ (object-oriented)
 - Irrlicht 3D Engine for graphics
 - OpenSoft AL for audio
@@ -27,6 +32,7 @@ Do not suggest alternative engines, languages, or platforms.
 ## Project Structure
 
 ### Key Components
+
 1. **Terrain Generation**: Procedural terrain generation system (chunked IMeshBuffer approach)
 2. **Graphics Rendering**: Irrlicht-based 3D rendering pipeline (OpenGL on all platforms)
 3. **Audio System**: OpenAL Soft integration with 3D spatial audio and streaming music
@@ -34,6 +40,7 @@ Do not suggest alternative engines, languages, or platforms.
 5. **UI/UX**: User interface for city management
 
 ### Planned Development Areas
+
 - **Game Design**: Gameplay balance, traffic systems, economy simulation, zoning
 - **Graphics**: 3D models, 2D textures, Irrlicht engine integration
 - **Sound**: Game music, sound effects, OpenAL Soft integration
@@ -43,28 +50,36 @@ Do not suggest alternative engines, languages, or platforms.
 ## Team Structure & Specializations
 
 ### Game Design
+
 - **Senior Game Designer** (`gamedesign-lookandfeel`): Specialized in gameplay and feel of 3D city simulators - balance, traffic, economy, etc.
 - **Senior UI/UX Designer** (`gamedesign-ux`): Specialized in UI/UX of 3D city simulators
 
 ### Graphics
+
 - **Senior 3D Model Artist** (`graphics-artist-3d-model`): Specialized in 3D models for 3D city simulators
 - **Senior 2D Texture Artist** (`graphics-artist-2d-texture`): Specialized in 2D textures for 3D city simulators
 - **Senior C++ Developer** (`graphics-dev-irrlicht`): Specialized in 3D Irrlicht engine
 
 ### Sound
+
 - **Senior Sound Artist** (`sound-artist-opensoftal`): Specialized in game music and sounds for city simulators
 - **Senior C++ Developer** (`sound-dev-opensoftal`): Specialized in OpenSoft AL and audio
 
 ### Testing
+
 - **Senior C++ Test Engineer** (`test-dev-cpp`): Specialized in C++ best practices for testing
 
 ### CI/CD
+
 - **Senior GitHub Pipeline Engineer** (`cicd-dev-github`): Specialized in GitHub Actions and continuous integration/deployment
 
 ### Product
+
 - **Senior Product Owner** (`prod-owner`): Specialized in implementation planning, phase breakdown, feature prioritization, backlog management, milestone definition, and roadmap creation
+- **Senior Project Manager** (`proj-manager`): Specialized in syncing the implementation plan with the GitHub project "AI Town". Uses the configured GitHub MCP server to keep milestones, issues, and the Projects v2 board up to date. Triggered automatically after every implementation plan update.
 
 ### Team Collaboration
+
 **All agents can delegate to each other if necessary.** While each role has specific expertise, cross-functional collaboration is encouraged when tasks require multiple specializations or when expertise from another domain would be beneficial.
 
 ## Skills (Slash Commands)
@@ -75,37 +90,46 @@ Do not suggest alternative engines, languages, or platforms.
 | Design Squad | `/design-squad` | Delegates a task to the full design squad in parallel (Game Designer, UI/UX, 2D Texture, 3D Model, Sound Artist) |
 | Tech Squad | `/tech-squad` | Delegates a task to the full technical squad in parallel (GitHub Pipeline, Irrlicht dev, OpenAL Soft dev, Test Engineer) |
 | Plan Spec | `/plan-spec` | Product Owner updates the implementation plan from specs, then design + tech squads review it in parallel and iterate until no CRITICAL/HIGH issues remain |
-| Plan Fix Spec | `/plan-fix-spec` | Product Owner syncs the implementation plan from specs, then design + tech squads review both the plan AND the spec files, fixing CRITICAL/HIGH issues in specs (via squad agents) and in the plan (via Product Owner) in parallel — repeats until a clean pass is achieved on the targeted phases |
+| Plan Fix Spec | `/plan-fix-spec` | Sync the implementation plan with current specs AND iteratively fix all CRITICAL/HIGH issues in both specs and the plan — domain-scoped re-reviews, diff-based round-2+ prompts, issue deduplication, fix verification, `model: haiku` for review agents, deferred single commit |
+| Fix Implementation | `/fix-implementation` | Same as Plan Fix Spec but skips the Product Owner plan-sync step — iteratively fixes all CRITICAL/HIGH issues in both specs and the implementation plan as-is |
+| Update Board | `/update-board` | Project Manager pushes the implementation plan to the GitHub project board (plan is source of truth); optionally scoped to a single phase (default: all phases) |
+| Split Phase | `/split-phase` | Product Owner proposes splitting a phase into multiple phases or redistributing its deliverables; design + tech squads review the proposal, then the Product Owner applies the agreed split |
 
 ## Development Guidelines
 
 ### Code Style
+
 - Follow modern C++ best practices (C++11 or later)
 - Object-oriented design principles
 - Clear separation of concerns (rendering, logic, audio)
 
 ### Dependencies
+
 - Irrlicht 3D Engine
 - OpenAL Soft (OpenSoft AL)
-- libvorbisfile (OGG decoding)
+- libvorbis/libvorbisfile (OGG decoding — vcpkg port: `libvorbis`)
 - Google Test + GMock (unit testing)
 - RapidCheck (property-based testing)
 - vcpkg (dependency management)
 - Platform-specific build tools
 
 ### Cross-Platform Considerations
+
 - Use CMake for build configuration
 - Avoid platform-specific APIs where possible
 - Test on both Linux and Windows regularly
 - **Video driver**: Always use `EDT_OPENGL` on both platforms for consistent shader behavior
 
 ## File Exclusions
+
 The following files should be ignored when analyzing the codebase:
+
 - `epic.txt` - Project planning and team structure document
 
 ## Architecture Specification Files
 
 All detailed specifications live in the `architecture/` directory. **The `architecture/` spec files are the canonical source of truth for detailed design decisions.** `CLAUDE.md` contains project overview, guidelines, and summaries; `architecture/` files contain the full detailed spec for each section. Every change to detailed spec content MUST be made in the appropriate `architecture/` file. `CLAUDE.md` sections should remain as summaries that reference the architecture files. The index below MUST be kept up to date whenever:
+
 - A new spec section is added to `CLAUDE.md` (create a new file under `architecture/` and add the entry)
 - A spec section is renamed or moved
 - A spec file is deleted or merged
@@ -115,6 +139,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 ### Architecture File Links
 
 #### Game Design
+
 | Section | File |
 |---|---|
 | Simulation Time System | [architecture/game-design/simulation-time.md](architecture/game-design/simulation-time.md) |
@@ -131,6 +156,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Minimum Viable Simulation (V1 Scope) | [architecture/game-design/minimum-viable-simulation.md](architecture/game-design/minimum-viable-simulation.md) |
 
 #### UI/UX
+
 | Section | File |
 |---|---|
 | Main Menu & New Game Flow | [architecture/ui-ux/main-menu-new-game-flow.md](architecture/ui-ux/main-menu-new-game-flow.md) |
@@ -148,6 +174,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | UIManager | [architecture/ui-ux/ui-manager.md](architecture/ui-ux/ui-manager.md) |
 
 #### Asset Standards
+
 | Section | File |
 |---|---|
 | 3D Model Standards | [architecture/asset-standards/3d-model-standards.md](architecture/asset-standards/3d-model-standards.md) |
@@ -155,6 +182,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Building Atlas Layout | [architecture/asset-standards/building-atlas-layout.md](architecture/asset-standards/building-atlas-layout.md) |
 
 #### Graphics Architecture
+
 | Section | File |
 |---|---|
 | Irrlicht Device Lifecycle | [architecture/graphics-architecture/irrlicht-device-lifecycle.md](architecture/graphics-architecture/irrlicht-device-lifecycle.md) |
@@ -164,6 +192,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Shader Loading | [architecture/graphics-architecture/shader-loading.md](architecture/graphics-architecture/shader-loading.md) |
 
 #### Audio Architecture
+
 | Section | File |
 |---|---|
 | AudioSystem (RAII) | [architecture/audio-architecture/audio-system.md](architecture/audio-architecture/audio-system.md) |
@@ -179,6 +208,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | V1 Audio Asset Manifest | [architecture/audio-architecture/v1-audio-asset-manifest.md](architecture/audio-architecture/v1-audio-asset-manifest.md) |
 
 #### Testing
+
 | Section | File |
 |---|---|
 | Framework | [architecture/testing/framework.md](architecture/testing/framework.md) |
@@ -189,6 +219,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Procedural Generation Seeds | [architecture/testing/procedural-generation-seeds.md](architecture/testing/procedural-generation-seeds.md) |
 
 #### CI/CD
+
 | Section | File |
 |---|---|
 | GitHub Actions Workflow | [architecture/ci-cd/github-actions-workflow.md](architecture/ci-cd/github-actions-workflow.md) |
@@ -197,6 +228,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Branch Protection | [architecture/ci-cd/branch-protection.md](architecture/ci-cd/branch-protection.md) |
 
 ## Key Design Goals
+
 1. **Realistic Graphics**: High-quality 3D rendering with detailed textures
 2. **Generated Terrain**: Procedural generation for varied landscapes
 3. **Performance**: Smooth gameplay on desktop hardware
@@ -206,9 +238,11 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 ---
 
 ## Getting Started
+
 (To be populated as project structure develops)
 
 ### Building
+
 ```bash
 # Linux
 cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
@@ -220,11 +254,13 @@ cmake --build build --config Release
 ```
 
 ### Running
+
 ```bash
 ./build/aitown
 ```
 
 ### Running Tests
+
 ```bash
 # Linux — unit tests (no display needed; -LE excludes integration and OpenGL tests)
 ctest --test-dir build -LE "integration|requires-opengl" --output-on-failure
@@ -241,11 +277,11 @@ cmake --build build
 ctest --test-dir build -LE "integration|requires-opengl" --output-on-failure
 ctest --test-dir build -L "^integration$" --output-on-failure
 xvfb-run --auto-servernum ctest --test-dir build -L "^requires-opengl$" --output-on-failure
-lcov --capture --directory build --base-directory . --output-file coverage.info
+lcov --capture --directory build --base-directory . --ignore-errors mismatch --output-file coverage.info
 BUILD_DIR=build
 lcov --remove coverage.info \
+  --ignore-errors unused \
   '/usr/*' \
-  "${BUILD_DIR}/_deps/*" \
   "*/.fetchcontent_cache/*" \
   '*/tests/*' \
   '*/mock_*.h' '*/mock_*.cpp' \
@@ -253,13 +289,16 @@ lcov --remove coverage.info \
   '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
   --output-file coverage_filtered.info
 genhtml coverage_filtered.info --output-directory coverage_html/
-lcov --fail-under-percent 80 --summary coverage_filtered.info
+lcov --summary coverage_filtered.info
+# NOTE: --fail-under-percent does not exist in lcov 2.0 (ubuntu-latest ships 2.0).
+# Phase 0 gate is informational only. Phase 5 adds a real 80% gate via awk or lcov 2.1+.
 
 # Windows
 ctest --test-dir build -C Release --output-on-failure
 ```
 
 ## Notes for AI Assistants
+
 - C++ project using Irrlicht (EDT_OPENGL only) and OpenAL Soft
 - Focus on cross-platform compatibility (Linux + Windows)
 - Prioritize performance and code quality; follow OO design patterns
@@ -293,7 +332,7 @@ ctest --test-dir build -C Release --output-on-failure
 - **CI step order**: compiler-version detect step must write to `$GITHUB_ENV` in a **separate step before** the `actions/cache` step — `$GITHUB_ENV` writes are not visible within the same step
 - Tests use Google Test + GMock (pinned v1.14.0) + RapidCheck (SHA-pinned); simulation injected via IRenderer/IAudioSystem; UIManager via IUIBackend (opaque UIElementHandle — no raw Irrlicht pointers in interface)
 - Mock policy: StrictMock for unit tests, NiceMock for property/integration tests; add TearDown() to explicitly reset sim_ and document destructor-path contract
-- Coverage gate (lcov 80%) Linux only; use `${BUILD_DIR}/_deps/*` glob (not library-name globs) AND `"${{ github.workspace }}/.fetchcontent_cache/*"` in CI YAML (or `"*/.fetchcontent_cache/*"` in local scripts) to exclude googletest/RapidCheck sources when `FETCHCONTENT_BASE_DIR=.fetchcontent_cache`; building atlas mip chain clamped at 4 levels
+- Coverage gate (lcov 80%) Linux only; use `"${{ github.workspace }}/.fetchcontent_cache/*"` in CI YAML (or `"*/.fetchcontent_cache/*"` in local scripts) to exclude googletest/RapidCheck sources; do NOT include `${BUILD_DIR}/_deps/*` — with `FETCHCONTENT_BASE_DIR=.fetchcontent_cache` that path never exists and newer lcov (2.x) treats unused patterns as errors (exit 25); also pass `--ignore-errors mismatch` to `lcov --capture` for GCC 13 compatibility; building atlas mip chain clamped at 4 levels
 - CI: permissions block needed (`checks: write`); `coverage-linux` is self-contained job (builds+tests+lcov with ENABLE_COVERAGE=ON); use `GTEST_OUTPUT=xml:test_results/` (directory form); `all-checks-pass` gate MUST have `if: always()` + strict branch protection; vcpkg baseline enforcement step required; cache FetchContent `_deps/` in CI; DLL verification before upload; `actions/upload-artifact` steps must be explicit
 - Linux CI: run unit tests with `ctest -LE "integration|requires-opengl"`; integration tests (no display) with `ctest -L "^integration$"`; OpenGL tests under `xvfb-run` with `ctest -L "^requires-opengl$"`
 - Windows CI: use `vswhere.exe` for MSVC version in cache key; include `AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` in test step `env:`

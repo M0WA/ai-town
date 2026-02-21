@@ -7,6 +7,7 @@
   - **CRITICAL toast auto-pause**: The simulation is automatically paused (equivalent to pressing Space/Pause) when the CRITICAL notification queue transitions from empty to non-empty. **Auto-resume requires explicit player action**: the simulation does NOT automatically resume when the CRITICAL queue is cleared (all CRITICAL toasts dismissed). The player must explicitly unpause (press Space or click the Pause button) after dismissing CRITICAL toasts. This prevents unexpected simulation restarts after the player pauses manually and then dismisses CRITICAL toasts. The `NotificationManager` calls `setPaused(true)` when the first CRITICAL toast arrives; it does NOT call `setPaused(false)` when the last CRITICAL toast is dismissed — the player is responsible for unpausing. During auto-pause triggered by a CRITICAL toast, the speed selector remains accessible (player can change speed setting for when the simulation resumes). A "Paused — [event name]" indicator appears in the Time Controls area to distinguish CRITICAL-toast-pause from player-initiated pause; after CRITICAL toast dismissal the indicator changes to the standard "Paused" label. **Priority rule**: If a blocking modal is simultaneously active, the modal takes precedence — the speed selector is grayed out regardless of CRITICAL toast state. The CRITICAL-toast auto-pause rule applies only when no blocking modal is present.
 
   **Speed selector state matrix** (to prevent ambiguity when states combine):
+
   | State | Simulation | Speed selector |
   |---|---|---|
   | No modal, no CRITICAL toast | Running | Enabled |
@@ -16,6 +17,13 @@
   | Modal dismissed, CRITICAL toast remains | Auto-paused (re-evaluated) | **Enabled** — back to CRITICAL-toast-only rule |
 
   The "modal dismissed with queued CRITICAL toast" row is the non-obvious transition: after `closeModal()`, CRITICAL toasts become visible and auto-pause is re-evaluated, but the speed selector transitions back to **ENABLED** because the modal is gone. The player must manually unpause to resume simulation (auto-resume is never performed by `NotificationManager`).
+
+  **Auto-resume disambiguation — `dismissCriticalToast()` vs. `closeModal()`**: These two operations have distinct resume semantics and must not be conflated:
+
+  - `NotificationManager::dismissCriticalToast(UIElementHandle)` — called when the player clicks the dismiss button, presses Enter, or presses Delete on a CRITICAL toast. This does NOT auto-resume the simulation. The simulation stays paused regardless of whether the CRITICAL queue becomes empty after dismissal. The player must explicitly unpause (Space or Pause button). This is the authoritative "no auto-resume" rule for CRITICAL toasts.
+  - `UIManager::closeModal()` — called when a blocking modal dialog (forced loan, game-over) is dismissed. `closeModal()` calls `m_sim->setPaused(false)` ONLY if the modal itself set `m_didPauseSim = true` when it opened (i.e., the modal was the entity that called `setPaused(true)`). If the simulation was already paused before the modal opened (e.g., by user-pressed Pause key or by a CRITICAL-toast auto-pause), the modal sets `m_didPauseSim = false` on open and `closeModal()` does NOT call `setPaused(false)`. After `closeModal()`, the CRITICAL toast system independently manages its own auto-pause state based on queued toasts; however, `closeModal()` itself never calls `setPaused(false)` based on CRITICAL-queue state — the two systems are orthogonal. In no code path does `NotificationManager` or `UIManager` automatically call `setPaused(false)` without either the `m_didPauseSim` flag being set or an explicit player action.
+
+  Summary: "auto-resume on closeModal() when CRITICAL queue empty" is NOT a specified behavior. `closeModal()` only undoes the pause it personally initiated. The simulation only resumes through the `m_didPauseSim` unwind path or when the player explicitly unpauses via the Pause button or Space key.
 
   - **Simultaneous CRITICAL toast + blocking modal behavior**: When a blocking modal becomes active, **ALL CRITICAL toasts — both currently visible and any new arrivals — are hidden**. Pre-existing visible CRITICAL toasts are returned to the front of the CRITICAL queue and their on-screen elements removed. New CRITICAL toasts arriving while a modal is active are also held in the queue without being displayed. After the modal is dismissed, all queued CRITICAL toasts become visible (up to the 2-simultaneous limit) and CRITICAL-toast auto-pause is re-evaluated. This ensures the modal has complete visual focus with no competing blocking UI layers. **Rationale for hiding pre-existing toasts**: showing pre-existing CRITICAL toasts on top of the modal scrim creates two simultaneous blocking UI layers (modal + toast), forcing the player to decide which to address first. The modal always takes full precedence. After modal dismissal the player immediately sees any outstanding CRITICAL alerts.
   - **CRITICAL toast keyboard navigation**: The two visible CRITICAL toasts are Tab-navigable. The first (oldest) CRITICAL toast receives keyboard focus automatically when it becomes visible. Tab moves focus to the second CRITICAL toast if visible. Enter or Delete dismisses the currently focused CRITICAL toast. The focus ring uses the same 2px accent-color border as modal buttons. CRITICAL toast keyboard focus is established AFTER any blocking modal is dismissed (modals hold keyboard focus exclusively while active — see Input Arbitration Priority 1).
@@ -33,7 +41,7 @@
 The notification log panel is a scrollable history overlay toggled by the bell icon or the **B** key.
 
 - **Panel dimensions**: 400×500 px (virtual/scaled)
-- **Anchor**: opens below-left of the bell icon — the bottom-left corner of the panel aligns to the bottom-left corner of the bell icon (i.e., the panel extends leftward and downward from that anchor point)
+- **Anchor**: opens below-left of the bell icon — the bottom-left corner of the panel aligns to the bottom-left corner of the bell icon (i.e., the panel extends leftward and downward from that anchor point). **Log panel anchor**: the top-right corner of the log panel aligns to the bottom-right corner of the bell icon. Bell icon virtual bounds: x:1820–1868, y:8–56. Log panel virtual bounds: x:1468–1868, y:56–556 (400×500 px). Do NOT use a bottom-left-to-bottom-left anchor — that formula yields a top-of-panel at y = 56 − 500 = −444, rendering entirely above the viewport.
 - **Z-order**: rendered above all HUD elements; when a blocking modal is active, the log panel is covered by the modal scrim (the log does NOT render above the scrim)
 - **Toggle**: **B** key or bell icon click; opening the panel resets the unread-count badge to 0
 - **Content**: Shows the last 50 notifications (CRITICAL and Normal combined), most-recent entry at the top. Each row displays:
@@ -44,3 +52,43 @@ The notification log panel is a scrollable history overlay toggled by the bell i
 - **Session persistence**: the log persists for the duration of the play session; it is NOT cleared on save or load within the same session
 - **Dismiss on outside click**: clicking anywhere outside the panel bounds closes the log panel. Outside clicks do not consume scroll-wheel or middle-mouse-button events — those pass through to the camera/3D view
 - Implementation: `NotificationManager` class creates/manages `IGUIStaticText` or custom `IGUIElement` overlays
+
+## NotificationManager API
+
+The following methods are required on the `NotificationManager` class in addition to toast-enqueueing and
+dismiss methods documented elsewhere in this spec:
+
+- `bool hasCriticalToastVisible() const` — returns `true` if any CRITICAL-severity toast is currently
+  visible in the toast stack (i.e., at least one CRITICAL toast has been displayed and not yet dismissed by
+  the player). Used by `UIManager::onEvent()` Priority 2 guard ("no CRITICAL toast is visible" condition)
+  to decide whether click/Enter/Delete events must be routed to `NotificationManager` before any other
+  handler. Phase 3 stub: returns `false`.
+- `void dismissCriticalToast(UIElementHandle handle)` — production API for player-dismissal of a specific
+  CRITICAL toast (not a test backdoor). Called when the player clicks the dismiss button, presses Enter, or
+  presses Delete on the focused CRITICAL toast.
+
+## Testing Note: Mock Selection for NotificationManager Unit Tests
+
+The `NotificationManager` constructor takes `ICitySimulation*` (not `ISimulationPauser*`). The sole reason
+for this is the `m_sim->setPaused(true)` call that fires when the first CRITICAL toast arrives. `NotificationManager`
+does NOT call `getConsecutiveDeficitMonths()` internally — that method is polled exclusively by
+`UIManager::update()`, which is the authoritative polling bridge for deficit-month-based toast dispatch
+(GD-H3). The `ICitySimulation*` parameter exists only for the auto-pause call. If a future refactor splits
+concerns, `NotificationManager` could accept `ISimulationPauser*` instead — but since `UIManager` already
+holds `ICitySimulation*` and no cast is required, `ICitySimulation*` is used.
+
+Therefore, Phase 8 auto-pause unit tests for `NotificationManager` must use
+`NiceMock<MockCitySimulation>` (which implements both `ICitySimulation` and `ISimulationPauser` via
+inheritance), NOT `MockSimulationPauser` (which only implements `ISimulationPauser` and cannot be passed as
+`ICitySimulation*`).
+
+The `MockSimulationPauser` class is available for tests of other components that take `ISimulationPauser*`
+directly (e.g. components that only need pause/resume control and have no dependency on simulation-state
+query methods).
+
+Cross-references:
+
+- `architecture/testing/testability-architecture.md` — `ICitySimulation` definition (extends
+  `ISimulationPauser`), `MockCitySimulation`, and `MockSimulationPauser` source locations.
+- `src/interfaces/ISimulationPauser.h` — minimal `setPaused(bool)` interface.
+- `src/interfaces/ICitySimulation.h` — full simulation interface including `getConsecutiveDeficitMonths()`.

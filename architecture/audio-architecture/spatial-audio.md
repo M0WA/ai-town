@@ -26,30 +26,68 @@ These three calls ensure the source is completely unaffected by listener positio
 
 **Vehicle source Doppler policy**: Vehicle engine sources must have `AL_VELOCITY = (0, 0, 0)` — Doppler pitch shift is explicitly disabled. Speed-dependent pitch uses `AL_PITCH` modulation only. See `dynamic-soundscape.md — Vehicle Engine Audio` for the full rationale, `AL_PITCH` range, and required implementation call order.
 
-- **Listener sync**: `AudioSystem::syncListenerToCamera(camera)` called **once per frame** after Irrlicht updates the camera. This function must update ALL three listener attributes — omitting any one breaks HRTF spatialization:
+- **CameraState forward/up vector computation**: `CameraController::getCameraState()` must derive the `forward` and `up` fields from the Irrlicht camera node's own computed vectors when a camera node exists. The implementer must NOT manually compute these from raw pitch/yaw angles in the live path — Irrlicht already accounts for the node's full orientation in `getTarget()` and `getUpVector()`. Using world `(0, 1, 0)` as `up` unconditionally is incorrect when camera pitch != 0 and will produce wrong HRTF spatialization.
 
-  **Note**: These code examples use Irrlicht's `vector3df` member naming convention (`.X`, `.Y`, `.Z` uppercase). The AI Town `vec3` struct defined in `src/interfaces/vec3.h` uses **lowercase** `x`, `y`, `z` fields. Phase 4 `AudioSystem::syncListenerToCamera(const CameraState& cam)` must use `cam.position.x` (lowercase), `cam.forward.y` (lowercase), etc. — NOT `cam.position.X`. These are different types: Irrlicht's `core::vector3df` uses uppercase `.X/.Y/.Z`; AI Town's `vec3` uses lowercase `.x/.y/.z`.
+  **Null-camera guard (MANDATORY)**: `getCameraState()` MUST guard against `camera == nullptr` before calling any Irrlicht getter. When `camera` is null (the unit-test seam), the implementation must return internal state without touching any Irrlicht API. Calling `camera->getAbsolutePosition()` or any other Irrlicht getter on a null pointer causes a null-pointer dereference that crashes both production and test builds. The null path is only exercised by unit tests; production always has a live camera node.
+
+  The `pitchYawToForward()` helper computes the forward unit vector from stored pitch/yaw angles in Irrlicht's left-handed coordinate system. It is used only in the null path (unit-test seam) to return a geometrically consistent forward vector without touching Irrlicht.
+
+  The required implementation is:
 
   ```cpp
-  void AudioSystem::syncListenerToCamera(const CameraParams& cam) {
+  CameraState CameraController::getCameraState() const {
+      CameraState state;
+      if (camera) {
+          state.position = toVec3(camera->getAbsolutePosition());
+          state.forward  = toVec3((camera->getTarget() -
+                                   camera->getAbsolutePosition()).normalize());
+          state.up       = toVec3(camera->getUpVector());
+      } else {
+          // Null camera (unit-test seam): return internal state without touching Irrlicht
+          state.position = m_position;
+          state.forward  = pitchYawToForward(m_pitch, m_yaw);
+          state.up       = vec3{0.f, 1.f, 0.f};  // world-up approximation for tests only
+      }
+      return state;
+  }
+  ```
+
+  Note that `getAbsolutePosition()`, `getTarget()`, and `getUpVector()` return Irrlicht `core::vector3df` values (uppercase `.X/.Y/.Z`). The `toVec3()` helper converts from `core::vector3df` to the AI Town `vec3` struct (lowercase `.x/.y/.z`) — this conversion must be applied to every value read from Irrlicht before assigning to a `CameraState` field. These computed `forward` and `up` vectors are consumed by `AudioSystem::syncListenerToCamera()` to set `AL_ORIENTATION` — see below.
+
+- **Listener sync**: `AudioSystem::syncListenerToCamera(camera)` called **once per frame** after Irrlicht updates the camera. This function must update ALL three listener attributes — omitting any one breaks HRTF spatialization:
+
+  **Note**: The AI Town `vec3` struct defined in `src/interfaces/vec3.h` uses **lowercase** `x`, `y`, `z` fields. `AudioSystem::syncListenerToCamera` takes a `const CameraState& cam` where each positional/directional member is an AI Town `vec3` — use `cam.position.x` (lowercase), `cam.forward.y` (lowercase), etc. This is distinct from Irrlicht's `core::vector3df`, which uses uppercase `.X/.Y/.Z`. Never mix the two.
+
+  **Coordinate system conversion — Z-negation required**: Irrlicht uses a **LEFT-HANDED coordinate system** (X=right, Y=up, Z=forward into screen). OpenAL uses a **RIGHT-HANDED coordinate system** (X=right, Y=up, Z=BACKWARD out of screen). When converting `CameraState` vectors (stored in Irrlicht world coordinates) to `AL_ORIENTATION`, the Z component of both `forward` and `up` must be negated: `alListenerForward = {cam.forward.x, cam.forward.y, -cam.forward.z}`, `alListenerUp = {cam.up.x, cam.up.y, -cam.up.z}`. The `syncListenerToCamera()` implementation MUST apply this Z-negation — omitting it causes all spatial audio to have inverted depth perception (sounds behind the camera appear in front). The Phase 1 stub comment at step 4a must include this Z-negation requirement verbatim.
+
+  ```cpp
+  void AudioSystem::syncListenerToCamera(const CameraState& cam) {
       // Position
-      alListener3f(AL_POSITION, cam.position.X, cam.position.Y, cam.position.Z);
+      alListener3f(AL_POSITION, cam.position.x, cam.position.y, cam.position.z);
       // Velocity (set to zero — we do not model Doppler for camera movement)
       alListener3f(AL_VELOCITY, 0.f, 0.f, 0.f);
-      // Orientation: forward vector followed by up vector (6-float array)
+      // Orientation: forward vector followed by up vector (6-float array).
+      // COORDINATE SYSTEM CONVERSION: Irrlicht is LEFT-HANDED (Z forward into screen);
+      // OpenAL is RIGHT-HANDED (Z backward out of screen). Negate Z on both vectors.
+      // Omitting this Z-negation inverts depth perception for all spatial audio.
       ALfloat orientation[6] = {
-          cam.forward.X, cam.forward.Y, cam.forward.Z,   // "at" vector
-          cam.up.X,      cam.up.Y,      cam.up.Z          // "up" vector
+          cam.forward.x, cam.forward.y, -cam.forward.z,  // "at" vector (Z negated)
+          cam.up.x,      cam.up.y,      -cam.up.z         // "up" vector (Z negated)
       };
       alListenerfv(AL_ORIENTATION, orientation);
   }
   ```
+
   **`AL_ORIENTATION` is required for HRTF**: Without updating `AL_ORIENTATION` each frame, HRTF uses the listener's initial orientation (default: facing −Z, up +Y) for all spatialization, producing incorrect head-related transfer function results when the camera rotates. HRTF breaks silently — there is no OpenAL error; sounds simply appear from wrong directions. This is most noticeable with the "Enable HRTF" setting active (see HRTF Initialization). `AL_VELOCITY` is set to zero because Doppler effect is not modelled for camera movement (only for vehicle sources where appropriate).
 
-  **Thread safety**: `syncListenerToCamera()` calls `alListener3f` and `alListenerfv` from the **main thread**. When `ALC_EXT_thread_local_context` is active:
-  - `alcMakeContextCurrent(m_context)` in the `AudioSystem` constructor establishes a **process-wide default context** visible to the main thread.
-  - `alcSetThreadContext(m_context)` on the audio thread establishes a **thread-local context override** for the audio thread only.
+  **Thread safety**: `syncListenerToCamera()` calls `alListener3f` and `alListenerfv` from the **main thread**. This is safe because of the following invariants, which are enforced by the `AudioSystem` constructor sequence:
 
-  OpenAL Soft guarantees that a thread-local context on the audio thread does NOT invalidate the process-wide context on the main thread. Each thread sees its own current context independently: the audio thread uses the thread-local context; the main thread uses the process-wide context. Therefore `syncListenerToCamera()` is safe to call from the main thread provided `alcMakeContextCurrent(m_context)` was called (in the `AudioSystem` constructor) before the audio thread is launched.
+  - `alcMakeContextCurrent(m_context)` in the `AudioSystem` constructor (Step 1) establishes a **process-wide default context** on the main thread. This binding is **permanent for the application lifetime** — `alcMakeContextCurrent(nullptr)` is NEVER called after this point, and no code path in `AudioSystem` may call it. Calling `alcMakeContextCurrent(nullptr)` after construction would clear the main-thread context and make `syncListenerToCamera()` operate on a null context (AL calls would silently no-op or crash).
 
-  **Verification requirement**: During the Phase 4 `ALC_EXT_thread_local_context` spike, confirm this guarantee holds on the OpenAL Soft version targeted for Linux and Windows CI. Log the OpenAL Soft version string at `AudioSystem` construction. If any platform shows that `alcSetThreadContext` on the audio thread displaces the main-thread context, escalate to the audio architecture review board before shipping.
+    **Scope clarification**: "After this point" refers to application runtime only — while the game loop is executing and `syncListenerToCamera()` is being called. The `AudioSystem` destructor teardown sequence (`audio-thread-shutdown.md` Step 3.5) correctly calls `alcMakeContextCurrent(m_context)` to re-bind the context before AL resource cleanup, and Step 6 calls `alcMakeContextCurrent(nullptr)` as part of ordered teardown. These destructor calls are correct and mandatory. The prohibition applies only to runtime calls that would clear the main-thread context while `syncListenerToCamera()` is in use.
+
+  - `alcSetThreadContext(m_context)` called inside the audio thread at startup establishes a **thread-local context override** for the audio thread only. This call is strictly per-thread: it affects only the calling thread's view of the current context and does NOT displace or modify the process-wide context held by the main thread.
+
+  OpenAL Soft guarantees that a thread-local context on the audio thread does NOT invalidate the process-wide context on the main thread. Each thread sees its own current context independently: the audio thread uses its thread-local context; the main thread uses the process-wide context set at construction. Therefore `syncListenerToCamera()` is safe to call from the main thread at any point after `AudioSystem` construction — the process-wide context is always current on the main thread.
+
+  **Verification requirement**: During the Phase 7 `ALC_EXT_thread_local_context` spike, confirm this guarantee holds on the OpenAL Soft version targeted for Linux and Windows CI. Log the OpenAL Soft version string at `AudioSystem` construction. If any platform shows that `alcSetThreadContext` on the audio thread displaces the main-thread context, escalate to the audio architecture review board before shipping.

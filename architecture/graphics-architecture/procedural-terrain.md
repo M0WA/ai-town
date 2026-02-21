@@ -4,6 +4,7 @@
 - Terrain built as **chunked `IMeshBuffer` grids** from runtime-generated heightmap data
 - `TerrainChunk` accepts a float heightmap buffer, `gridSize`, and `cellSize`; builds an `SMesh` and attaches it to an `IMeshSceneNode`
 - **SMesh lifetime** — correct call order:
+
   ```cpp
   SMesh* smesh = buildTerrainMesh(heightData, gridSize, cellSize);
   // MANDATORY: recalculate bounding boxes before attaching to scene graph
@@ -16,8 +17,10 @@
   smesh->drop(); // safe to drop NOW — addMeshSceneNode has already called grab()
   // NEVER call drop() before addMeshSceneNode(); that would free the mesh before the scene node acquires it
   ```
+
 - **LOD transitions**: Managed by `TerrainSystem::update(float dt)` which processes a `std::deque<ChunkRebuildRequest>` (distance-weighted, nearest-first priority); pops **at most 2 entries per call** to amortize GPU upload cost. **LOD swap strategy differs by entity type**: For buildings and static vehicles, swap the mesh reference via `node->setMesh(newLODMesh)` — this replaces the mesh on the existing scene node, preserving its position, rotation, scale, and material assignments without touching the scene graph structure. Only create a new scene node when the node must be destroyed (entity death, chunk unload). For terrain chunks, a full node rebuild is required because LOD level changes involve different vertex counts (32×32 vs 16×16 vs 8×8 grid), which cannot be swapped with `setMesh()` alone.
   - **MANDATORY — `setMesh` requires bounding box recalculation before the call**: Before calling `node->setMesh(newLODMesh)`, the new mesh's bounding boxes must be recalculated — identical to the bounding box requirement for terrain mesh attachment. A stale bounding box from the previous LOD level causes incorrect frustum culling at the new LOD (the node may be invisible or always visible regardless of camera position). Required call order:
+
     ```cpp
     for (u32 i = 0; i < newLODMesh->getMeshBufferCount(); ++i)
         newLODMesh->getMeshBuffer(i)->recalculateBoundingBox();
@@ -27,6 +30,7 @@
     // CRITICAL: do NOT access newLODMesh after this drop() — it may still exist (ref_count=1) but the
     // caller no longer has a valid reference. Only the scene node holds the mesh reference now.
     ```
+
     **`recalculateBoundingBox()` type requirement**: The mesh pointer must be typed as `SMesh*` — see `scene-graph-ownership.md — LOD Swap — Bounding Box Requirement` for the full rule (do NOT use a `getMesh()` return value typed as `IMesh*`).
   - **CRITICAL — LOD rebuild must call `node->remove()` on the old node**: When replacing a chunk's scene node with a new LOD level, the old `IMeshSceneNode*` must be explicitly removed via `SceneEntityManager::destroy()` (which calls `node->remove()`) **before** creating the new node. Failing to remove the old node leaves orphaned nodes accumulating in the scene graph each LOD transition, causing unbounded memory growth and redundant render calls.
   - **Deque pointer safety**: The `ChunkRebuildRequest` struct must store a **`uint64_t` chunk ID** (not a raw `IMeshSceneNode*`). Before processing a request, validate the chunk is still live in `TerrainSystem::m_activeChunks` by ID. If not found (chunk was unloaded while request was queued), discard the request without dereferencing any pointer.
