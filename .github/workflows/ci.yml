@@ -343,15 +343,16 @@ jobs:
       # Step 10: Verify GLEW vcpkg install (Windows) — sixth atomicity item.
       # Dual-path check: manifest-mode install (build/vcpkg_installed/) first,
       # then classic-mode fallback ($VCPKG_ROOT/installed/).
+      # NOTE: On Windows, vcpkg GLEW port installs glew32.lib (not glew.lib) per portfile libname override.
       # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
       - name: Verify GLEW vcpkg install (Windows)
         shell: pwsh
         run: |
-          if (-not (Test-Path 'build/vcpkg_installed/x64-windows/lib/glew.lib') -and -not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\glew.lib")) {
-            Write-Error 'glew.lib not found in either vcpkg install path'
+          if (-not (Test-Path 'build/vcpkg_installed/x64-windows/lib/glew32.lib') -and -not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\glew32.lib")) {
+            Write-Error 'glew32.lib not found in either vcpkg install path'
             exit 1
           }
-          Write-Host 'glew.lib found.'
+          Write-Host 'glew32.lib found.'
 
       # Step 11: Build (MSBuild).
       - name: Build

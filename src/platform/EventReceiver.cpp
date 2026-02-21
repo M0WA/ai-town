@@ -22,19 +22,13 @@ bool EventReceiver::OnEvent(const irr::SEvent& event) {
     //           dispatch chain guard (WindowFocusGained/Lost early-return) to fire.
     //   Step 2: unconditionally forward to CameraController regardless of UIManager result.
     //   Return value from UIManager::onEvent() is DISCARDED for focus events.
+    //
+    // NOTE: The Irrlicht vcpkg port (adrido/irrlicht-vcpkg, based on Irrlicht 1.8.x)
+    // does NOT expose EET_APPLICATION_EVENT / EAET_FOCUS_GAINED / EAET_FOCUS_LOST.
+    // Those event types are only available in the irrlicht-mt (Minetest) fork.
+    // Window focus events for this build must be delivered by calling
+    // dispatchFocusEvent() directly from the platform window loop (Phase 3+).
     // -------------------------------------------------------------------------
-    if (event.EventType == irr::EET_APPLICATION_EVENT) {
-        if (event.ApplicationEvent.EventType == irr::EAET_FOCUS_GAINED) {
-            ev.type = InputEvent::Type::WindowFocusGained;
-        } else if (event.ApplicationEvent.EventType == irr::EAET_FOCUS_LOST) {
-            ev.type = InputEvent::Type::WindowFocusLost;
-        } else {
-            return false;
-        }
-        if (m_uiManager) m_uiManager->onEvent(ev);          // step 1 — result discarded
-        if (m_camera)    m_camera->OnInputEvent(ev);         // step 2 — unconditional
-        return false;
-    }
 
     // -------------------------------------------------------------------------
     // Mouse events
@@ -152,4 +146,11 @@ bool EventReceiver::OnEvent(const irr::SEvent& event) {
     }
 
     return false;
+}
+
+void EventReceiver::dispatchFocusEvent(bool gained) {
+    InputEvent ev{};
+    ev.type = gained ? InputEvent::Type::WindowFocusGained : InputEvent::Type::WindowFocusLost;
+    if (m_uiManager) m_uiManager->onEvent(ev);   // step 1 — result discarded
+    if (m_camera)    m_camera->OnInputEvent(ev);  // step 2 — unconditional
 }

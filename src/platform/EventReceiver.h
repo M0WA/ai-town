@@ -41,6 +41,14 @@ public:
     // IEventReceiver override — called by Irrlicht for every input event.
     bool OnEvent(const irr::SEvent& event) override;
 
+    // dispatchFocusEvent — delivers WindowFocusGained or WindowFocusLost to the dispatch chain.
+    // Called directly from the platform window loop since the Irrlicht vcpkg port (based on
+    // Irrlicht 1.8.x) does NOT expose EET_APPLICATION_EVENT / EAET_FOCUS_GAINED / EAET_FOCUS_LOST.
+    // Dispatch contract (same as if delivered via EET_APPLICATION_EVENT):
+    //   Step 1: UIManager::onEvent() — result DISCARDED (UIManager sees event for guard).
+    //   Step 2: CameraController::OnInputEvent() — unconditional.
+    void dispatchFocusEvent(bool gained);
+
 private:
     UIScaler*        m_scaler;
     UIManager*       m_uiManager;
