@@ -127,6 +127,7 @@ Required includes for `UIManager`:
 
 - `#include "src/ui/ui_types.h"` — provides `GameMode` enum (`Sandbox`, `Scenario`) used by `transitionToGameplay(GameMode)` and checked by `transitionToGameOver()`
 - `#include "src/interfaces/LoanTerms.h"` — provides the `LoanTerms` struct used in `showForcedLoanDialog(const LoanTerms& terms)`. Without this include, `UIManager.h` fails to compile wherever `LoanTerms` appears in method signatures.
+- `#include "src/interfaces/IClock.h"` — full include required (not a forward declaration) because `UIManager::update()` calls `m_clock->nowSeconds()` and tests inject `ManualClock` via this pointer. A forward declaration is insufficient for call-site compilation; the full type definition must be visible in `UIManager.h`. Note: `IAudioSystem`, `ICitySimulation`, and `InputEvent` are forward-declared in `UIManager.h` (not `#included`) because `UIManager.h` only holds pointers/references to them and does not call their methods directly in the header. `UIManager.cpp` carries the full includes for `IAudioSystem`, `ICitySimulation`, and `InputEvent`.
 
 ```cpp
 class UIManager {

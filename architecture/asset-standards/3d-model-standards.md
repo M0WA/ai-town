@@ -85,7 +85,11 @@ Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON side
   "category": "large_building",
   "height_floors": 4,
   "atlas_cell": { "row": 0, "col": 2 },
-  "lod_distances": [40.0, 80.0, 200.0]
+  "lod_distances": [45.0, 185.0, 250.0]
+  // Values must match the LOD Distance Thresholds table for the asset's category:
+  // 45.0  = LOD0→LOD1 switch-in for large_building (table: switch-in < 45 m)
+  // 185.0 = LOD1→LOD2 switch-in for large_building (table: switch-in < 185 m)
+  // 250.0 = cull distance (65 m beyond LOD1→LOD2 switch-in, satisfying minimum 10 m margin)
 }
 ```
 

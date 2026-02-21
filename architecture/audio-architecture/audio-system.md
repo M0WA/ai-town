@@ -328,11 +328,22 @@ if (!m_fnSetThreadCtx)
 // IMPORTANT: alcMakeContextCurrent(nullptr) MUST NOT be called during application runtime
 // (i.e., between this constructor call and the destructor teardown sequence). The audio
 // thread uses alcSetThreadContext() for its thread-local context binding; this does not
-// affect the process-wide main-thread context. The destructor teardown sequence (step 6
-// in audio-thread-shutdown.md) DOES call alcMakeContextCurrent(nullptr) as part of
-// ordered AL resource cleanup — that call is correct and mandatory. The prohibition
-// applies only to calls that would occur while the application is running and
-// syncListenerToCamera() is being called from the main thread.
+// affect the process-wide main-thread context.
+//
+// Scope clarification — destructor teardown IS permitted and mandatory:
+// The prohibition applies ONLY to runtime calls while the game loop is executing and
+// syncListenerToCamera() is being called from the main thread. The destructor teardown
+// sequence (audio-thread-shutdown.md) makes TWO alcMakeContextCurrent calls that are
+// both correct and mandatory:
+//   - Step 3.5: alcMakeContextCurrent(m_context)  — re-binds context to main thread
+//               BEFORE AL resource cleanup (required because thread-local context no
+//               longer applies after the audio thread has joined).
+//   - Step 6:   alcMakeContextCurrent(nullptr)     — clears the context as part of
+//               ordered AL/ALC teardown.
+// Phase 7 MUST NOT omit the Step 3.5 re-bind under the mistaken belief that it
+// violates this runtime prohibition. Omitting Step 3.5 leaves the main thread with no
+// current context, making all subsequent AL resource deletion calls (steps 4–5) operate
+// on a null context — this is undefined behavior and will silently corrupt or crash.
 for (auto& t : m_occlusionGainTarget) t.store(1.0f, std::memory_order_relaxed);
 
 // Step 4: launch audio thread — only reached if extension is confirmed present

@@ -22,7 +22,7 @@ Add all OpenGL capability queries, the `TextureCache` three-pool skeleton, GLSL 
 
 - [ ] `GL_EXT_texture_sRGB` extension presence checked via `glewIsExtensionSupported()` immediately after `createDevice()` in `RenderSystem::init()`; result stored as `bool m_srgbTextureSupported`; `isSRGBTextureSupported() const` accessor exposed; `EDT_NULL` guard initializes to `false` (no GL context). `TextureCache` reads this flag at construction to select the upload path. (ref: `architecture/graphics-architecture/texture-cache.md`)
 
-- [ ] `GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT` queried after checking `GL_EXT_texture_filter_anisotropic` extension presence via `glewIsExtensionSupported()`; if extension absent, log warning, set `m_maxAnisotropy = 1.0f`, and skip `glGetFloatv`; if extension present, query and store as `m_maxAnisotropy`; `EDT_NULL` guard initializes to `1.0f` unconditionally WITHOUT any extension check or GL call. (ref: `architecture/asset-standards/2d-texture-standards.md`)
+- **`m_maxAnisotropy` query: completed in Phase 1** — same-timing as `m_maxTextureSize` per `architecture/asset-standards/2d-texture-standards.md`. Phase 1 delivers: `float m_maxAnisotropy` declared in `RenderSystem.h` (initialized to `1.0f`); in the `glewInit()` SUCCESS path, `GL_EXT_texture_filter_anisotropic` checked via `glewIsExtensionSupported()`; if present, `glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &m_maxAnisotropy)` called; if absent, warning logged and `m_maxAnisotropy` left at `1.0f`; EDT_NULL and RELEASE fatal-failure paths initialize `m_maxAnisotropy = 1.0f` without any GL call. Phase 2 does NOT re-query `m_maxAnisotropy` — it is already populated by Phase 1. This note replaces the Phase 2 `m_maxAnisotropy` deliverable bullet.
 
 - [ ] **`getGPUProgrammingServices()` null check**: `getGPUProgrammingServices()` must be null-checked before any `addHighLevelShaderMaterialFromFiles()` call — return early for `EDT_NULL` driver; log and abort in debug builds if null on a non-EDT_NULL driver (shader failure is fatal in debug builds per `architecture/graphics-architecture/shader-loading.md`). (ref: `architecture/graphics-architecture/shader-loading.md`)
 
@@ -173,7 +173,7 @@ Add all OpenGL capability queries, the `TextureCache` three-pool skeleton, GLSL 
 ### Exit Criteria
 
 - All GL capability queries consolidated in `RenderSystem::init()` behind `EDT_NULL` guard; `glewInit()` two-tier handling present
-- `m_maxTextureSize`, `m_srgbTextureSupported` (+ `isSRGBTextureSupported()` accessor), and `m_maxAnisotropy` populated for non-EDT_NULL devices
+- `m_maxTextureSize` and `m_srgbTextureSupported` (+ `isSRGBTextureSupported()` accessor) populated for non-EDT_NULL devices; `m_maxAnisotropy` was queried in Phase 1 (same-timing as `m_maxTextureSize`) — Phase 2 verifies the Phase 1 query is present but does not re-introduce it
 - GLEW availability spike result documented in `architecture/graphics-architecture/irrlicht-device-lifecycle.md` (under "Phase 1 Spike Results") AND as a one-line comment in `src/rendering/render_system.h`. Phase 4 sRGB texture pipeline is blocked until this is on record.
 - `find_package(GLEW REQUIRED)` added to CMakeLists.txt; `GLEW::GLEW` linked to `aitown_render`
 - GLEW vcpkg port existence verified via `gh api /repos/microsoft/vcpkg/contents/ports/glew?ref=$(jq -r '."builtin-baseline"' vcpkg.json)` — confirmed 200 HTTP response at the exact pinned baseline. A 404 response blocks Phase 2 merge.

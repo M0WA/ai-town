@@ -46,23 +46,36 @@
 
 The following apt-get packages must be installed on BOTH `build-linux` AND `coverage-linux` before CMake configuration runs. These packages provide the OpenGL development headers and virtual display support required by Irrlicht, GLEW, and xvfb-based OpenGL testing.
 
-**Required packages**:
+**Required packages (both `build-linux` and `coverage-linux`)**:
 
 - `xvfb` — X Virtual Frame Buffer; required to run `requires-opengl` tests on headless CI runners via `xvfb-run`
 - `libgl1-mesa-dev` — Mesa OpenGL development headers and stub libraries; required for CMake to find OpenGL during configuration and for linking against the Mesa software renderer
 - `mesa-utils` — Mesa GL utilities (`glxinfo`, `glxgears`); used to verify the xvfb display is operational in diagnostics
 - `libglew-dev` — GLEW development headers; required by the sRGB raw GL upload path (`glCompressedTexImage2D` and related calls); **also installed via vcpkg** (`glew` port), but the system package is needed for CMake's `find_package(GLEW)` fallback and for headers available during configuration before vcpkg runs
 
-**THIS LIST MUST BE KEPT IN SYNC BETWEEN `build-linux` AND `coverage-linux` — they are fully independent jobs and each must install all required packages before CMake configuration.**
+**Additional required package (`coverage-linux` ONLY)**:
 
-Install step (place before the CMake configure step in both jobs):
+- `lcov` — required by the `coverage-linux` job for the `lcov --capture`, `lcov --remove`, `lcov --list`, `lcov --summary`, and `genhtml` commands that generate and filter the coverage report. This package is NOT required by `build-linux` — that job uses `-DENABLE_COVERAGE=OFF` and never invokes lcov.
+
+**THIS LIST MUST BE KEPT IN SYNC BETWEEN `build-linux` AND `coverage-linux` — they are fully independent jobs and each must install all required packages before CMake configuration. `coverage-linux` installs the base set PLUS `lcov`.**
+
+Install step for `build-linux` (place before the CMake configure step):
 
 ```yaml
 - name: Install system dependencies
   run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libglew-dev
 ```
 
-**Why both jobs need the same list**: `build-linux` and `coverage-linux` run on independent `ubuntu-latest` runner instances. There is no shared pre-install state between them. A package installed in one job's runner has no effect on the other. Omitting any package from either job causes a CMake configuration failure or a runtime failure during the `xvfb-run` test step in that job specifically.
+Install step for `coverage-linux` (place before the CMake configure step — includes `lcov`):
+
+```yaml
+- name: Install system dependencies
+  run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libglew-dev lcov
+```
+
+**Why both jobs need the base list**: `build-linux` and `coverage-linux` run on independent `ubuntu-latest` runner instances. There is no shared pre-install state between them. A package installed in one job's runner has no effect on the other. Omitting any package from either job causes a CMake configuration failure or a runtime failure during the `xvfb-run` test step in that job specifically.
+
+**Why `lcov` is `coverage-linux`-only**: `build-linux` configures with `-DENABLE_COVERAGE=OFF` and never produces `.gcda` instrumentation data. Installing `lcov` in `build-linux` would be dead weight with no functional effect. `coverage-linux` configures with `-DENABLE_COVERAGE=ON`, runs all three ctest categories, and then invokes `lcov --capture` to collect `.gcda` output — without `lcov` installed, the capture step exits with "command not found" and the entire coverage job fails.
 
 ## Baseline Staleness Risk
 
