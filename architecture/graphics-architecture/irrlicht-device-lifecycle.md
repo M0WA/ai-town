@@ -172,7 +172,7 @@ Irrlicht bundles its own copy of GLEW headers and symbols (in `source/Irrlicht/g
 
 **Mitigations (in priority order):**
 
-1. **Check whether the Irrlicht vcpkg port already strips bundled GLEW**: The `adrido/irrlicht-vcpkg` port may apply a patch that excludes Irrlicht's bundled `glew.c` from the build, eliminating the duplication entirely. Verify by inspecting the port's `portfile.cmake` and any applied patches for `glew` exclusion before applying the mitigations below.
+1. **Check whether the Irrlicht vcpkg port already strips bundled GLEW**: **Spike result (Phase 1 investigation)**: The `adrido/irrlicht-vcpkg` portfile does NOT strip bundled GLEW. The port supplies a custom `CMakeLists.txt` (since Irrlicht 1.8.4 ships none) that uses `glob_c_cpp_sources(IRR_SRC_FILES source/Irrlicht)` — this glob unconditionally includes `source/Irrlicht/glew.c` and `source/Irrlicht/glew.h`. No `-DIRRLICHT_BUILD_GLEW=OFF` option, no `IRRLICHT_USE_SYSTEM_GLEW` flag, no patch file, and no `glew` entry in `Build-Depends` were found. Bundled GLEW is compiled into the Irrlicht library — duplication with vcpkg GLEW is confirmed present. Mitigation 1 (port stripping) is NOT available; mitigation 2 (link order) is mandatory.
 2. **Link vcpkg GLEW before Irrlicht** in CMake `target_link_libraries` order — the linker takes the first definition found; placing vcpkg GLEW first ensures the correct, versioned GLEW symbols win:
 
    ```cmake
