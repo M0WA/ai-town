@@ -77,7 +77,7 @@ bool CameraController::OnInputEvent(const InputEvent& event) {
                 // RMB drag: rotate (yaw and pitch)
                 // UX-1: drag-delta MUST use physX/physY, NOT virtual x/y.
                 m_yaw   += static_cast<float>(dx) * kRotateSpeed;
-                m_pitch += static_cast<float>(dy) * kRotateSpeed;
+                m_pitch -= static_cast<float>(dy) * kRotateSpeed;
                 // Clamp pitch to [-70, -20] INCLUSIVE (std::clamp semantics)
                 m_pitch = std::clamp(m_pitch, -70.0f, -20.0f);
                 consumed = true;

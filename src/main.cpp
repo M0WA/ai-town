@@ -81,7 +81,7 @@ int main() {
             fprintf(stderr,
                 "[main] WARNING: unexpected animators on addCameraSceneNode() result "
                 "— removing %zu animator(s)\n",
-                cameraNode->getAnimators().size());
+                static_cast<size_t>(cameraNode->getAnimators().size()));
         }
 #endif
         while (cameraNode->getAnimators().size() > 0) {

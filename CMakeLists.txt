@@ -75,6 +75,27 @@ find_package(Vorbis REQUIRED)
 # linking ours first ensures our symbols win the linker conflict).
 find_package(GLEW REQUIRED)
 
+# Irrlicht transitive dependencies (Linux static link only).
+# The adrido/irrlicht-vcpkg port builds Irrlicht as a STATIC library on Linux.
+# Its CMake exported target does NOT declare INTERFACE_LINK_LIBRARIES for the
+# system libs that Irrlicht links against internally.  Any executable that links
+# libIrrlicht.a must also link these explicitly:
+#   - bzip2   (CZipReader / BSP loader)
+#   - JPEG    (CImageLoaderJPG / CImageWriterJPG)
+#   - PNG     (CImageLoaderPNG / CImageWriterPNG)
+#   - ZLIB    (CZipReader compressed archives)
+#   - Xxf86vm (CIrrDeviceLinux fullscreen / gamma)
+# All four vcpkg packages are installed as transitive deps of the irrlicht port
+# (listed in ports/irrlicht/vcpkg.json at the pinned baseline).
+# libXxf86vm is a system-only library; found via find_library.
+if(UNIX AND NOT APPLE)
+    find_package(JPEG REQUIRED)
+    find_package(PNG  REQUIRED)
+    find_package(ZLIB REQUIRED)
+    find_package(BZip2 REQUIRED)
+    find_library(XXFV86VM_LIB NAMES Xxf86vm)
+endif()
+
 # ============================================================================
 # FETCHCONTENT — GTest and RapidCheck
 # All FetchContent_Declare and FetchContent_MakeAvailable calls MUST appear ONLY
@@ -273,6 +294,18 @@ target_link_libraries(aitown PRIVATE
     Irrlicht
     GLEW::GLEW
 )
+# Irrlicht transitive deps (Linux only) — see find_package block above for rationale.
+if(UNIX AND NOT APPLE)
+    target_link_libraries(aitown PRIVATE
+        JPEG::JPEG
+        PNG::PNG
+        ZLIB::ZLIB
+        BZip2::BZip2
+    )
+    if(XXFV86VM_LIB)
+        target_link_libraries(aitown PRIVATE ${XXFV86VM_LIB})
+    endif()
+endif()
 
 # Windows: copy DLLs to executable output directory (same as aitown_render post-build).
 if(WIN32)
