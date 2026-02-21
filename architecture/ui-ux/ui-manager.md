@@ -318,3 +318,25 @@ Within `UIManager::draw()`, panels are drawn in this order (back to front, match
 ## Thread Safety
 
 All `UIManager` methods are main-thread-only. `CitySimulation` callbacks (forced loan, game-over) are delivered via the main-thread event queue — they must not call `UIManager` methods directly from a background thread. Use a thread-safe event queue to marshal events from background threads to the main thread before `UIManager` dispatch.
+
+## Frame Loop Integration
+
+`UIManager::update(float realDeltaSeconds)` MUST be called once per frame on the main thread BEFORE `driver->beginScene()` (before `RenderSystem::beginFrame()`). It MUST NOT be called inside the `beginScene()`/`endScene()` block.
+
+The canonical call site is after `CameraController::update(dt)` (step 3) and is itself step 3b in the 8-step canonical frame sequence. Calling `update()` after `beginScene()` would mutate timer state mid-frame, producing one-frame-stale notification dismiss behavior — for example, a toast whose auto-dismiss timer expires during `beginScene()` would remain visible for one extra frame because the dismiss callback fires after `draw()` has already submitted the toast geometry to the GPU.
+
+The required frame sequence (abbreviated to the relevant steps) is:
+
+```text
+1. Poll OS events (IrrlichtDevice::run())
+2. Process simulation tick (CitySimulation::update(dt))
+3. CameraController::update(dt)
+3b. UIManager::update(realDeltaSeconds)    <-- MUST be here, before beginScene()
+4. RenderSystem::beginFrame()              <-- driver->beginScene() is called inside here
+5. sceneManager->drawAll()
+6. UIManager::draw()                       <-- issues per-panel draw() calls; after drawAll()
+7. RenderSystem::endFrame()                <-- driver->endScene() is called inside here
+8. IrrlichtDevice::yield() / sleep
+```
+
+`UIManager::draw()` (step 6) is called after `sceneManager->drawAll()` and before `endScene()` — this is correct and distinct from `UIManager::update()` (step 3b), which must precede `beginScene()`. The two methods serve different purposes: `update()` advances timer state and dispatches dismissal logic; `draw()` issues rendering calls that must occur within the `beginScene()`/`endScene()` block.

@@ -100,13 +100,13 @@ target_link_libraries(aitown_render PRIVATE GLEW::GLEW Irrlicht)
 
 **GLEW — Windows triplet note**: On Windows with the `x64-windows` triplet active, vcpkg resolves `glew` to `glew:x64-windows` automatically — no platform-specific triplet override in `vcpkg.json` is needed. Before committing a baseline update that adds GLEW, verify the `glew` port exists at the pinned baseline using `gh api /repos/microsoft/vcpkg/contents/ports/glew`. A 200 response confirms the port is present at that baseline; a 404 means the port was removed or renamed — try an adjacent vcpkg commit. This verification is mandatory: a missing port at the pinned baseline causes a hard build failure on all platforms.
 
-**PHASE 2 EXIT CRITERION — GLEW port verification (BLOCKING)**: Before merging any Phase 2 branch, the developer MUST verify that the `glew` vcpkg port exists at the exact baseline pinned in `vcpkg.json`. Run the following command and confirm a 200 HTTP status is returned:
+**PHASE 1 EXIT CRITERION — GLEW port verification (BLOCKING)**: Before merging the Phase 1 five-item atomicity commit, the developer MUST verify that the `glew` vcpkg port exists at the exact baseline pinned in `vcpkg.json`. This verification must occur BEFORE the Phase 1 atomicity commit merges — it must not be deferred to Phase 2. Run the following command and confirm a 200 HTTP status is returned:
 
 ```bash
 gh api /repos/microsoft/vcpkg/contents/ports/glew?ref=$(jq -r '."builtin-baseline"' vcpkg.json)
 ```
 
-A 404 response means the `glew` port does not exist at the pinned baseline — Phase 2 MUST NOT be merged until a vcpkg baseline is found where both `irrlicht` and `glew` ports are present. This is a hard blocking exit criterion. Do not rely on a local `vcpkg install` succeeding as a proxy — local installs may use a different baseline or a cached binary. The GitHub API check against the exact pinned SHA is the authoritative verification method.
+A 404 response means the `glew` port does not exist at the pinned baseline — the Phase 1 atomicity commit MUST NOT be merged until a vcpkg baseline is found where both `irrlicht` and `glew` ports are present. This is a hard blocking exit criterion. Do not rely on a local `vcpkg install` succeeding as a proxy — local installs may use a different baseline or a cached binary. The GitHub API check against the exact pinned SHA is the authoritative verification method.
 
 **IMPORTANT**: `target_link_libraries(aitown ...)` in the original snippet was incorrect — the `aitown` executable target does not exist at Phase 0. An implementer following the original snippet verbatim would get a CMake configure error: "Cannot specify link libraries for target aitown which is not built by this project."
 

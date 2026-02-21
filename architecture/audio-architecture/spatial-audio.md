@@ -26,18 +26,33 @@ These three calls ensure the source is completely unaffected by listener positio
 
 **Vehicle source Doppler policy**: Vehicle engine sources must have `AL_VELOCITY = (0, 0, 0)` — Doppler pitch shift is explicitly disabled. Speed-dependent pitch uses `AL_PITCH` modulation only. See `dynamic-soundscape.md — Vehicle Engine Audio` for the full rationale, `AL_PITCH` range, and required implementation call order.
 
-- **CameraState forward/up vector computation**: `CameraController::getCameraState()` must derive the `forward` and `up` fields from the Irrlicht camera node's own computed vectors. The implementer must NOT manually compute these from raw pitch/yaw angles — Irrlicht already accounts for the node's full orientation in `getTarget()` and `getUpVector()`. Using world `(0, 1, 0)` as `up` unconditionally is incorrect when camera pitch != 0 and will produce wrong HRTF spatialization. The required implementation is:
+- **CameraState forward/up vector computation**: `CameraController::getCameraState()` must derive the `forward` and `up` fields from the Irrlicht camera node's own computed vectors when a camera node exists. The implementer must NOT manually compute these from raw pitch/yaw angles in the live path — Irrlicht already accounts for the node's full orientation in `getTarget()` and `getUpVector()`. Using world `(0, 1, 0)` as `up` unconditionally is incorrect when camera pitch != 0 and will produce wrong HRTF spatialization.
+
+  **Null-camera guard (MANDATORY)**: `getCameraState()` MUST guard against `camera == nullptr` before calling any Irrlicht getter. When `camera` is null (the unit-test seam), the implementation must return internal state without touching any Irrlicht API. Calling `camera->getAbsolutePosition()` or any other Irrlicht getter on a null pointer causes a null-pointer dereference that crashes both production and test builds. The null path is only exercised by unit tests; production always has a live camera node.
+
+  The `pitchYawToForward()` helper computes the forward unit vector from stored pitch/yaw angles in Irrlicht's left-handed coordinate system. It is used only in the null path (unit-test seam) to return a geometrically consistent forward vector without touching Irrlicht.
+
+  The required implementation is:
 
   ```cpp
-  // In CameraController::getCameraState():
-  CameraState state;
-  state.position = camera->getAbsolutePosition();
-  state.forward = (camera->getTarget() - camera->getAbsolutePosition()).normalize();
-  state.up = camera->getUpVector();  // NOT hardcoded (0,1,0) — Irrlicht computes this from node rotation
-  return state;
+  CameraState CameraController::getCameraState() const {
+      CameraState state;
+      if (camera) {
+          state.position = toVec3(camera->getAbsolutePosition());
+          state.forward  = toVec3((camera->getTarget() -
+                                   camera->getAbsolutePosition()).normalize());
+          state.up       = toVec3(camera->getUpVector());
+      } else {
+          // Null camera (unit-test seam): return internal state without touching Irrlicht
+          state.position = m_position;
+          state.forward  = pitchYawToForward(m_pitch, m_yaw);
+          state.up       = vec3{0.f, 1.f, 0.f};  // world-up approximation for tests only
+      }
+      return state;
+  }
   ```
 
-  Note that `getAbsolutePosition()`, `getTarget()`, and `getUpVector()` return Irrlicht `core::vector3df` values (uppercase `.X/.Y/.Z`). The resulting `CameraState` fields are AI Town `vec3` structs (lowercase `.x/.y/.z`). The conversion must be done explicitly when assigning from Irrlicht types to `CameraState` fields. These computed `forward` and `up` vectors are consumed by `AudioSystem::syncListenerToCamera()` to set `AL_ORIENTATION` — see below.
+  Note that `getAbsolutePosition()`, `getTarget()`, and `getUpVector()` return Irrlicht `core::vector3df` values (uppercase `.X/.Y/.Z`). The `toVec3()` helper converts from `core::vector3df` to the AI Town `vec3` struct (lowercase `.x/.y/.z`) — this conversion must be applied to every value read from Irrlicht before assigning to a `CameraState` field. These computed `forward` and `up` vectors are consumed by `AudioSystem::syncListenerToCamera()` to set `AL_ORIENTATION` — see below.
 
 - **Listener sync**: `AudioSystem::syncListenerToCamera(camera)` called **once per frame** after Irrlicht updates the camera. This function must update ALL three listener attributes — omitting any one breaks HRTF spatialization:
 
