@@ -476,7 +476,7 @@ Establish the Irrlicht device lifecycle, render loop call order, `CameraControll
 
 - Requires Phase 0 complete
 
-**Phase 9 entry prerequisite forward-reference**: The `graphics-dev-irrlicht` camera pitch sign-off recorded in Phase 1 exit criteria is a Phase 9 entry prerequisite. Phase 9 billboard bake pipeline (City Assets) MUST NOT begin without this sign-off on record. If sign-off was not recorded at Phase 1 PR merge, Phase 9 entry is blocked pending remediation (see Camera Pitch Sign-Off Gate remediation path above).
+**Phase 9 entry prerequisite forward-reference**: The `graphics-artist-3d-model` camera pitch sign-off recorded in Phase 1 exit criteria is a Phase 9 entry prerequisite. Phase 9 billboard bake pipeline (City Assets) MUST NOT begin without this sign-off on record. If sign-off was not recorded at Phase 1 PR merge, Phase 9 entry is blocked pending remediation (see Camera Pitch Sign-Off Gate remediation path above).
 
 ### Risks & Spikes
 
