@@ -29,6 +29,19 @@ The mouse-sensitivity slider (Phase 8 Settings panel) applies as a user-controll
 - **`isEdgeScrollEnabled()` accessor**: `CameraController` must expose `bool isEdgeScrollEnabled() const` as a public method that returns the current value of `m_edgeScrollEnabled`. This accessor is required by the unit test `CameraController_EdgeScroll_EnabledByDefaultInFullscreen` (see `architecture/testing/testability-architecture.md`) to assert the constructor's initial state without performing any input injection.
 - **`setEdgeScrollEnabled()` setter**: `CameraController` MUST expose `void setEdgeScrollEnabled(bool enabled)` as a public method that updates `m_edgeScrollEnabled`. Called by the Settings panel (Settings > Controls > Edge scroll toggle) at runtime. Unlike `m_appHasFocus = false` (which suppresses edge-scroll at the processing point without changing the stored preference), `setEdgeScrollEnabled()` persists the player's explicit on/off choice. Required at Phase 1 to lock the interface before Phase 8 Settings panel wiring.
 - **Pitch clamp boundary semantics**: The pitch clamp range [−70°, −20°] is inclusive at both bounds: after clamping, `pitch` may equal exactly −70° or exactly −20°. Unit tests must assert equality at the boundary values using `std::clamp(pitch, -70.0f, -20.0f)` semantics (not strictly-less-than comparisons).
+- **Pitch/yaw → Cartesian forward-vector formula (null-camera path)**: When `camera == nullptr` (the unit-test seam), `CameraController::getCameraState()` MUST derive the `forward` vector from `m_pitch` and `m_yaw` using the following formula, expressed in Irrlicht's **left-handed, Y-up** coordinate system where yaw = 0 corresponds to looking toward +Z:
+
+  ```cpp
+  const float pitch_rad = m_pitch * (M_PI / 180.0f);
+  const float yaw_rad   = m_yaw   * (M_PI / 180.0f);
+  state.forward.x = std::cos(pitch_rad) * std::sin(yaw_rad);
+  state.forward.y = std::sin(pitch_rad);   // negative at pitch in [-70°, -20°] — camera points downward
+  state.forward.z = std::cos(pitch_rad) * std::cos(yaw_rad);
+  // World-up for null-camera path:
+  state.up = vec3{0.0f, 1.0f, 0.0f};      // approved test-seam world-up
+  ```
+
+  **Correctness verification**: At pitch = −45°, `forward.y = sin(−45°) ≈ −0.707` (negative — camera pointing downward into terrain). At yaw = 0, `forward.z = cos(−45°) ≈ 0.707` (positive — pointing toward +Z, Irrlicht's default forward). These expected values are used in the pitch-sign-convention exit criterion. A formula yielding `forward.y > 0` at pitch = −45° is a sign-convention error. The `state.up = (0, 1, 0)` world-up in the null-camera path is the explicitly **approved** test-seam behavior; only the live-camera path (`camera != nullptr`) must use `camera->getUpVector()`.
 - **Drag-delta coordinate space**: Mouse drag-delta calculations in `CameraController` MUST use physical pixel coordinates (the raw screen-space coordinate difference BEFORE `UIScaler::unproject()` is applied), not virtual-space coordinates. Applying `unproject()` to drag deltas would scale camera sensitivity with viewport scaling, producing incorrect pan/rotate speed at non-native resolutions (e.g. 1.5x faster pan at 1280×720 vs 1920×1080).
 - A dedicated `CameraController` class wraps Irrlicht's `ICameraSceneNode` and receives input events from `IEventReceiver`
 - **Camera input exception during blocking modals**: MMB drag, RMB drag, and scroll-wheel zoom pass through to `CameraController` regardless of modal state. See [`input-arbitration.md`](input-arbitration.md) for the authoritative priority chain and camera pass-through rationale.

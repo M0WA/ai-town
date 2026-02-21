@@ -107,6 +107,22 @@ The following initialization sequence MUST occur immediately after `createDevice
        LOG_ERROR("glewInit() failed: %s", glewGetErrorString(glewResult));
        AITOWN_ASSERT_MSG(false, "Fatal GLEW initialisation failure");
        // Release fallback: reinitialise device with EDT_NULL and notify user.
+       // RELEASE fallback sequence (must be performed in this exact order):
+       // 1. Drop the original OpenGL device — closes the window and destroys the GL context.
+       //    Omitting this step leaves the original OpenGL window open alongside the new
+       //    EDT_NULL device, resulting in two live devices simultaneously.
+       //    m_device->drop() triggers Irrlicht's internal cleanup and decrements the refcount.
+       //    After drop(), the pointer is invalid — null it immediately to prevent dangling access.
+       //    m_device->drop();
+       //    m_device = nullptr;
+       // 2. Re-create with EDT_NULL (no window, no GL context):
+       //    m_device = irr::createDevice(irr::video::EDT_NULL,
+       //                                 irr::core::dimension2d<irr::u32>(1280, 720));
+       // 3. Set safe defaults — no GL context is current after EDT_NULL creation:
+       //    m_maxTextureSize = 2048;      // conservative fallback (no glGetIntegerv)
+       //    m_srgbTextureSupported = false;
+       //    m_maxAnisotropy = 1.0f;
+       // 4. Show a user-facing error dialog / log entry before proceeding headlessly.
    }
    ```
 
@@ -169,6 +185,8 @@ Irrlicht bundles its own copy of GLEW headers and symbols (in `source/Irrlicht/g
    ```
 
    This suppresses the linker error but does not guarantee the correct definition wins; link order (mitigation 2) must still be applied.
+
+   **Phase 1 constraint**: The `-Wl,--allow-multiple-definition` linker option applies to the `aitown` **executable** target. At Phase 1, only `aitown_render` (a `STATIC` library) exists — the `aitown` executable may not yet be present. CMake silently ignores `target_link_options()` on `STATIC` library targets (static libraries use the archiver `ar`, not the linker). Therefore, **mitigation 3 is not available at Phase 1**. If the `nm build/libaitown_render.a` symbol-duplication check at Phase 1 finds duplicate GLEW symbols after applying mitigation 2 (link order), **the only viable resolution at Phase 1 is mitigation 1** — verify and patch the Irrlicht vcpkg portfile to strip bundled GLEW. The Phase 1 PR MUST NOT be merged with known duplicate GLEW symbols. Mitigation 3 (`-Wl` flag) can be applied once the `aitown` executable target exists in Phase 2+.
 
 **Phase 2 build verification (BUILD-BLOCKING):** The build engineer must verify that no duplicate GLEW symbols remain after applying mitigations. Run the following after a successful Linux build:
 
