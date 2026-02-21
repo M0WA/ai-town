@@ -79,13 +79,27 @@ public:
 
   The concrete `IEventReceiver` implementation in `src/platform/` translates `SEvent` to `InputEvent` before forwarding to `CameraController`. Test files in `tests/ui/` construct `InputEvent` structs directly — no Irrlicht headers required. `CameraController::OnInputEvent(const InputEvent&)` replaces `IEventReceiver::OnEvent(const SEvent&)` in the `CameraController` public interface.
 
-  **Required Named Test Cases** — all 6 test cases must be authored in `tests/ui/camera_controller_test.cpp` and registered under the `ui_tests` CMake target (label `unit`). Per `architecture/ui-ux/camera-controls.md`, pitch clamp tests must use exact equality assertions (`EXPECT_EQ` / `EXPECT_FLOAT_EQ`) rather than strictly-less-than comparisons, because the spec defines inclusive bounds using `std::clamp` semantics:
+  **Required Named Test Cases** — all 7 test cases must be authored in `tests/ui/camera_controller_test.cpp` and registered under the `ui_tests` CMake target (label `unit`). Per `architecture/ui-ux/camera-controls.md`, pitch clamp tests must use exact equality assertions (`EXPECT_EQ` / `EXPECT_FLOAT_EQ`) rather than strictly-less-than comparisons, because the spec defines inclusive bounds using `std::clamp` semantics:
   1. `CameraController_PitchClamp_AtUpperBound_ExactlyMinus20` — inject a sequence of `MouseWheel` events that would drive pitch above −20° (e.g., repeated positive wheel delta); call `getCameraState()`; assert `getCameraState().pitch == -20.0f` using `EXPECT_FLOAT_EQ` (not `EXPECT_LT` — the bound is inclusive and pitch must equal exactly −20°, not merely be less than some value above it).
   2. `CameraController_PitchClamp_AtLowerBound_ExactlyMinus70` — inject a sequence of `MouseWheel` events that would drive pitch below −70° (e.g., repeated negative wheel delta); call `getCameraState()`; assert `getCameraState().pitch == -70.0f` using `EXPECT_FLOAT_EQ` (not `EXPECT_GT` — the bound is inclusive and pitch must equal exactly −70°).
   3. `CameraController_EdgeScroll_DisabledOnFocusLoss` — record initial `getCameraState().position`; inject `InputEvent{Type::WindowFocusLost}`; inject `InputEvent{Type::MouseMove, x=0, y=540}` (cursor at left edge of 1920-wide virtual space, which would normally trigger left edge-scroll); assert `getCameraState().position` is unchanged, confirming that `m_appHasFocus = false` suppresses edge-scroll input processing.
   4. `CameraController_RightMouseRotate_MovesYaw` — record initial yaw via `getCameraState().yaw`; inject `InputEvent{Type::MouseButtonDown, button=1}` (right mouse button) followed by `InputEvent{Type::MouseMove, physX=prevPhysX+10, physY=prevPhysY}` (horizontal drag of 10 physical pixels — `CameraController` reads `physX`/`physY` for drag-delta, NOT `x`/`y`); assert `getCameraState().yaw != initialYaw`, confirming that RMB drag drives yaw rotation. (Exact delta magnitude is implementation-defined; this test verifies directional sensitivity, not a precise angle.) Test comment must state: "physX/physY are physical pixel coordinates for drag-delta per UX-1."
   5. `CameraController_MiddleMousePan_MovesPosition` — record initial position via `getCameraState().position`; inject `InputEvent{Type::MouseButtonDown, button=2}` (middle mouse button) followed by `InputEvent{Type::MouseMove, physX=prevPhysX+5, physY=prevPhysY}` (horizontal drag of 5 physical pixels — `CameraController` reads `physX`/`physY` for drag-delta); assert `getCameraState().position` differs from the initial position (at least one component changed), confirming that MMB drag drives camera pan. Test comment must state: "physX/physY are physical pixel coordinates for drag-delta per UX-1."
   6. `CameraController_EdgeScroll_EnabledByDefaultInFullscreen` — construct `CameraController` with `startInFullscreen=true`; immediately call `isEdgeScrollEnabled()` without any intervening call to `setEdgeScrollEnabled(true)`; assert the return value is `true`. This confirms that the constructor enables edge scroll automatically when `startInFullscreen=true`, so the player does not need to manually activate edge scrolling when launching in fullscreen mode.
+  7. `CameraController_SetEdgeScroll_Enabled_Then_FocusLost_DoesNotClearEnabled`
+     — Construct with `startInFullscreen=false` (edge scroll disabled by default).
+     Call `setEdgeScrollEnabled(true)` → assert `isEdgeScrollEnabled()` returns `true`.
+     Inject `InputEvent{Type::WindowFocusLost}` → assert `isEdgeScrollEnabled()` STILL
+     returns `true` (focus loss must NOT mutate `m_edgeScrollEnabled`; it only sets
+     `m_appHasFocus = false`).
+     Inject `InputEvent{Type::MouseMove, x=0, y=540}` (left edge) → assert camera
+     position UNCHANGED (edge scroll suppressed because `m_appHasFocus = false`
+     despite `m_edgeScrollEnabled = true`).
+     Inject `InputEvent{Type::WindowFocusGained}` then
+     `InputEvent{Type::MouseMove, x=0, y=540}` → assert camera position DID change
+     (edge scroll active again after focus restored, since `m_edgeScrollEnabled` was
+     never changed).
+     Use `EXPECT_EQ` for bool assertions; use `EXPECT_NE` for camera position change.
 - **`QueryPanel` testability**: `QueryPanel::computePanelPosition(int cursorX, int cursorY, Rect tileBounds)` must be a pure function (no side effects, no Irrlicht dependency) returning a `Rect`. Required test cases:
   1. **Primary placement**: cursor at (100, 100) with no tile overlap → verify panel placed at (140, 140).
   2. **Fallback placement**: primary position overlaps tile bounds → verify panel moves to above-left fallback position.

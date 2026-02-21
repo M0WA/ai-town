@@ -186,7 +186,7 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 - [ ] `UIElementHandle` (uint32_t), `kInvalidUIElement = 0`, `Rect` struct defined before `IUIBackend` in `IUIBackend.h` (ref: `architecture/testing/testability-architecture.md`)
 - [ ] `MockUIBackend` in `tests/ui/mock_ui_backend.h` (ref: `architecture/testing/testability-architecture.md`)
 - [ ] `MockSimulationPauser` in `tests/ui/mock_simulation_pauser.h` with `MOCK_METHOD(void, setPaused, (bool), (override))`. **Phase 6 `NotificationManager` auto-pause tests use `MockCitySimulation` (NOT `MockSimulationPauser`)** — `MockSimulationPauser` is used only for contexts where a bare `ISimulationPauser*` is needed. (ref: `architecture/testing/testability-architecture.md`)
-- [ ] `UIScaler` with constructor signature `UIScaler(int virtualW, int virtualH, int viewportW, int viewportH, int offsetX, int offsetY)`. **`UIScaler` must expose `VirtualPoint unproject(int physicalX, int physicalY) const;` as a public method, where `VirtualPoint` is a nested struct `{ int x; int y; }` declared INSIDE `UIScaler`.** **`UIScaler` unit tests** in `tests/ui/ui_scaler_test.cpp`:
+- [ ] **Phase 3 VERIFIES** that `UIScaler::unproject()` and `UIScaler::getViewportRect()` are implemented (Phase 1 deliverables — do NOT re-author). If either is absent or still a stub returning zero/empty, that is a Phase 1 regression requiring a fix before Phase 3 can close. Phase 3 confirms `UIScaler` has constructor signature `UIScaler(int virtualW, int virtualH, int viewportW, int viewportH, int offsetX, int offsetY)`. **`UIScaler` must expose `VirtualPoint unproject(int physicalX, int physicalY) const;` as a public method, where `VirtualPoint` is a nested struct `{ int x; int y; }` declared INSIDE `UIScaler`.** **`UIScaler` unit tests** in `tests/ui/ui_scaler_test.cpp`:
   1. `UIScaler_1280x720_LetterboxOffsets_ProjectsCorrectly`
   2. `UIScaler_FullNative_NoOffset_ProjectsIdentity`
   3. `UIScaler_PillarboxOffset_UnprojectsCenterCorrectly`
@@ -237,17 +237,18 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 
 #### Camera Controller Tests
 
-- [ ] Camera controller unit tests in `tests/ui/camera_controller_test.cpp`. The following 6 named test cases are REQUIRED and must pass before Phase 4 begins:
+- [ ] Camera controller unit tests in `tests/ui/camera_controller_test.cpp`. The following 7 named test cases (all Phase 1 deliverables) are REQUIRED to pass before Phase 4 begins:
   1. `CameraController_PitchClamp_AtUpperBound_ExactlyMinus20`
   2. `CameraController_PitchClamp_AtLowerBound_ExactlyMinus70`
   3. `CameraController_EdgeScroll_DisabledOnFocusLoss`
   4. `CameraController_RightMouseRotate_MovesYaw`
   5. `CameraController_MiddleMousePan_MovesPosition`
   6. `CameraController_EdgeScroll_EnabledByDefaultInFullscreen`
-  7. `CameraController, EdgeScrollActivatesAt20pxBand` (Phase 3 compile-only stub — body `SUCCEED()`)
-  8. `CameraController, EdgeScrollDisabledByDefaultInWindowed` (Phase 3 compile-only stub — body `SUCCEED()`)
+  7. `CameraController_SetEdgeScroll_Enabled_Then_FocusLost_DoesNotClearEnabled`
+  8. `CameraController, EdgeScrollActivatesAt20pxBand` (Phase 3 compile-only stub — body `SUCCEED()`)
+  9. `CameraController, EdgeScrollDisabledByDefaultInWindowed` (Phase 3 compile-only stub — body `SUCCEED()`)
 
-  Tests 1–6 must pass as Phase 3 exit criteria. Tests 7–8 are Phase 3 compile-only stubs; the real assertions are Phase 6 deliverables. (ref: `architecture/ui-ux/camera-controls.md`, `architecture/testing/testability-architecture.md`)
+  Tests 1–7 must pass as Phase 3 exit criteria (all authored in Phase 1). Tests 8–9 are Phase 3 compile-only stubs; the real assertions are Phase 6 deliverables. (ref: `architecture/ui-ux/camera-controls.md`, `architecture/testing/testability-architecture.md`)
 
 #### UIManager Draw-Order Tests
 
@@ -278,6 +279,10 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
   ```
 
   (ref: `architecture/testing/testability-architecture.md`, `architecture/ui-ux/input-arbitration.md`)
+
+#### CI/CD
+
+- [ ] **Integration label routing verification step** (`cicd-dev-github`): Add the 'Verify integration test routing (non-zero discovery)' CI step to `build-linux` and `coverage-linux`, co-landing with the `integration_tests` CMake target registration. This step runs `ctest -N -L '^integration$'` and fails if 0 tests are discovered. This is the phase-gated step deferred from Phase 1 per `architecture/ci-cd/github-actions-workflow.md`. **This step MUST be added in the same commit that registers the `integration_tests` CMake target** — adding it before `integration_tests` exists causes immediate CI failure with 0 discovered tests.
 
 #### CMake Test Targets
 
@@ -334,7 +339,7 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 
 - All 6 `ManualRNG` self-tests pass: `ctest --test-dir build -LE 'integration|requires-opengl' -R ManualRNG --output-on-failure`
 - All five required `UIScaler` unit tests pass; compile-only stub `UIScaler_MouseInBottomBlackBar_VirtualY_ClampedToMax` registered and passing
-- All 6 CameraController named test cases pass; compile-only stubs 7 and 8 pass in headless CI
+- All 7 CameraController named test cases (Phase 1 deliverables) pass; compile-only stubs 8 and 9 pass in headless CI
 - `UIManagerDrawOrderTest` passes: all 10 draw slots called in correct Z-order sequence with `InSequence` enforcement
 - `UIManagerModalTest.FixtureConstructsAndDestructsCleanly` passes
 - Three `KeyBindings` unit tests pass: `ctest --test-dir build -LE 'integration|requires-opengl' -R KeyBindings`
@@ -354,9 +359,10 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 | Role | Responsibility |
 |---|---|
 | `graphics-dev-irrlicht` | `IrrlichtUIBackend` full-compile target, `WallClock.cpp` implementation, `IRenderer` interface; review `key_bindings.h` CMakeLists change |
-| `gamedesign-ux` | `UIManager` shell (construction order, draw-order slots, 6-priority event chain, Priority 2 dual-guard, `transitionToGameplay(GameMode)`, `transitionToGameOver()` Sandbox guard, `showSettings()` stub, `BudgetDetailPanel` NOT in UIManager draw-order), HUD class stub (4-param constructor, `m_unsavedDotHandle`), `UIScaler` (6-parameter constructor, `VirtualPoint unproject()` nested struct), `IUIBackend` interface design, `MockSimulationPauser` stub, `NotificationManager` stub (constructor takes `ICitySimulation*`; Phase 6 signatures locked; `draw()` calls sentinel), `Minimap` stub with `getBounds() const`, `TaxRatePanel` stub, `InspectorPanel` stub |
-| `test-dev-cpp` | Camera controller unit tests (6 named cases + 2 compile-only stubs), `UIManagerDrawOrderTest` (NiceMock for ALL THREE mocks; GMock InSequence; 10 draw slots; additional test cases), `MockRenderer`, `MockUIBackend`, `MockCitySimulation` wiring, `ManualRNG` (6 self-tests, Phase 3 CMake registration), `ManualClock`, `NullSimulationPauser`, `LoanTerms.h` stub, `KeyBindings.h` stub (3 named test cases), `ui_tests` (consolidated Phase 3 form: 5 source files), `integration_tests`, `terrain_tests` CMake targets, `ITerrainRNG.h` stub, `MockTerrainRNG` (manual stub with `std::mt19937_64`, NOT GMock), `UIManagerModalTest` fixture TearDown stub (NiceMock for ALL THREE mocks; 4 compile-only stubs), `panel_sentinel_handles.h` test-only header |
+| `gamedesign-ux` | `UIManager` shell (construction order, draw-order slots, 6-priority event chain, Priority 2 dual-guard, `transitionToGameplay(GameMode)`, `transitionToGameOver()` Sandbox guard, `showSettings()` stub, `BudgetDetailPanel` NOT in UIManager draw-order), HUD class stub (4-param constructor, `m_unsavedDotHandle`), `UIScaler` VERIFY (confirm Phase 1 implemented `unproject()` + `getViewportRect()`; confirm 6-parameter constructor + `VirtualPoint unproject()` nested struct are present and correctly implemented per `architecture/ui-ux/resolution-ui-scaling.md`), `IUIBackend` interface design, `MockSimulationPauser` stub, `NotificationManager` stub (constructor takes `ICitySimulation*`; Phase 6 signatures locked; `draw()` calls sentinel), `Minimap` stub with `getBounds() const`, `TaxRatePanel` stub, `InspectorPanel` stub |
+| `test-dev-cpp` | Camera controller unit tests (verify 7 named Phase 1 cases pass + add 2 Phase 3 compile-only stubs), `UIManagerDrawOrderTest` (NiceMock for ALL THREE mocks; GMock InSequence; 10 draw slots; additional test cases), `MockRenderer`, `MockUIBackend`, `MockCitySimulation` wiring, `ManualRNG` (6 self-tests, Phase 3 CMake registration), `ManualClock`, `NullSimulationPauser`, `LoanTerms.h` stub, `KeyBindings.h` stub (3 named test cases), `ui_tests` (consolidated Phase 3 form: 5 source files), `integration_tests`, `terrain_tests` CMake targets, `ITerrainRNG.h` stub, `MockTerrainRNG` (manual stub with `std::mt19937_64`, NOT GMock), `UIManagerModalTest` fixture TearDown stub (NiceMock for ALL THREE mocks; 4 compile-only stubs), `panel_sentinel_handles.h` test-only header |
 | `sound-dev-opensoftal` | Verify and lock `IAudioSystem.h` (11 method signatures); verify and extend `audio_types.h` (canonical declaration order: constants → `StingerType` → static_assert; pool-index WARNING comment; `kZoneLoopMaxPreloadDurationSeconds = 18.0f`); author `sound_ids.h`; author `MockAudioSystem` in `tests/simulation/mock_audio_system.h`; author `AudioSystem` stub header `src/audio/audio_system.h` (no AL includes; BEHAVIORAL CONTRACT; SHUTDOWN CONTRACT); create `src/audio/al_check.h` no-op stub; verify `audio_tests` include directories cover all 4 required paths |
+| `cicd-dev-github` | Add 'Verify integration test routing (non-zero discovery)' step to `build-linux` and `coverage-linux` in the same commit as `integration_tests` CMake target registration; verify step fails if 0 integration tests discovered |
 
 ### Dependencies
 

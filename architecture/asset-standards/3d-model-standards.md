@@ -46,7 +46,13 @@ LOD meshes are exported as separate meshes and swapped in code by distance using
 - **Minimum look-down angle**: −20° (shallow oblique — prevents looking nearly level at the horizon, which would cause z-fighting and poor city readability).
 - **Maximum look-down angle**: −70° (steep overhead — prevents gimbal lock near top-down view).
 - This range is enforced by `CameraController`; the billboard bake elevation is **45° below horizontal (camera pitch = −45°)**, the midpoint of the [−70°, −20°] operating range, minimising average mismatch error across all valid camera angles.
-- **Sign-off status**: CONFIRMED — camera pitch range [−70°, −20°] and bake midpoint −45° are final. Camera pitch for billboard baking: −45° below horizontal (confirmed). Reviewed and approved by: graphics-artist-3d-model. Phase 9 billboard bake pipeline (City Assets) may proceed on this basis.
+- **Sign-off status**: CONFIRMED — camera pitch range [−70°, −20°] and bake midpoint −45° are final. Camera pitch for billboard baking: −45° below horizontal (confirmed). Reviewed and approved by: graphics-artist-3d-model. Phase 9 billboard bake pipeline may proceed once the Phase 1 dated sign-off record below is on record.
+
+**Phase 1 dated sign-off record** (required before Phase 1 exit):
+
+> Phase 1 sign-off — [DATE]: Camera pitch range [−70°, −20°] and bake midpoint −45° verified as final. This record confirms the Phase 1 exit criterion for the camera pitch sign-off gate is satisfied. Signed: graphics-artist-3d-model.
+
+<!-- Replace [DATE] with the actual Phase 1 completion date when filing this sign-off. -->
 
 #### Density Tier Asset Naming Convention
 

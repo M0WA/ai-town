@@ -97,6 +97,11 @@ The camera scene node must be created via `sceneManager->addCameraSceneNode()` o
 
 1. `addCameraSceneNode()` does **not** attach any animators by default — the post-creation animator check below is a defensive precaution only, not expected to find any animators when the node is created via `addCameraSceneNode()`. Call `camera->getAnimators()` and verify it returns an empty list; if not, remove all animators. Note: `removeAnimators()` (plural) **does exist** in the Irrlicht API (`ISceneNode::removeAnimators()`); however, use the portable grab/drop-guarded loop form shown below for safety regardless of version — the `removeAnimator` method calls `drop()` internally, which can destroy the animator before the loop advances the iterator if no grab was performed:
 
+   **Severity policy for non-empty animator list**:
+   - In DEBUG builds (`#ifndef NDEBUG`): if `camera->getAnimators()` is non-empty before the removal loop, log a WARNING to the application log: `'CameraController: unexpected animators found on addCameraSceneNode() result — removing N animator(s)'` (substitute the actual count for `N`). This is informational only — it alerts developers that a wrong camera creation variant (`addCameraSceneNodeFPS()` or `addCameraSceneNodeMaya()`) may have been used accidentally.
+   - In all builds (DEBUG and RELEASE): execute the grab/drop-guarded removal loop unconditionally, regardless of whether the list was empty at the pre-loop check.
+   - Do NOT abort or assert on a non-empty list — the removal loop is sufficient to restore correct state. The WARNING exists purely to surface the root cause (wrong camera variant) during development; it does not indicate unrecoverable state.
+
    ```cpp
    while (camera->getAnimators().size() > 0) {
        ISceneNodeAnimator* anim = *camera->getAnimators().begin();

@@ -142,3 +142,23 @@ All loudness targets are **integrated LUFS** (ITU-R BS.1770-3) measured on the a
 Lower quality flags are not acceptable for V1 — audible compression artifacts on
 sustained or ambient passages undermine the production quality goal.
 These floors apply to the authored OGG files; they are a delivery requirement, not a runtime concern.
+
+## CI Asset Validation Requirements
+
+The following checks MUST be enforced by `tools/validate_assets.py` before Phase 10 audio integration. Any failure is a hard build error — the asset pipeline must not proceed to integration if any of these checks fail. Specific check numbers will be assigned in Phase 4 when the full `validate_assets.py` check structure is defined; until then these are documented requirements.
+
+| # | File pattern | Rule | Hard error condition |
+|---|---|---|---|
+| TBD | `music_*.ogg`, `ambient_*.ogg` | Sample rate must be 44100 Hz; channel count must match spec (stereo — 2 channels — for all music stems and all ambient beds per this manifest) | Any file where `vi->rate != 44100` or `vi->channels != 2`; authoring at any other sample rate is a hard asset error |
+| TBD | `sfx_vehicle_engine_*.ogg` | Duration must be >= 6 seconds | Any engine loop file with total decoded duration < 6.0 s (see CLAUDE.md minimum loop length requirement and `sfx_vehicle_engine_idle` / `sfx_vehicle_engine_move` notes above for full rationale) |
+| TBD | `sfx_zone_*.ogg` | Duration must be <= 18 seconds; file must be mono (1 channel) | Any zone loop file with duration > 18.0 s or `vi->channels != 1` |
+| TBD | `stinger_*.wav` | Must be mono WAV PCM | Any stinger file that is not a PCM WAV or has `channels != 1` |
+| TBD | `music_*.ogg` (music stems only — NOT ambient beds) | A co-located `.json` sidecar file must be present alongside the OGG file | Any music stem OGG file with no matching `<basename>.json` sidecar in `${AITOWN_ASSETS_DIR}/audio/`; build error if absent (per audio-asset-formats.md) |
+
+**Notes on the table above:**
+
+**Ambient bed sidecar exemption**: the sidecar check (last row above) applies only to files matching `music_*.ogg`. Files matching `ambient_*.ogg` are explicitly excluded from the sidecar check — consistent with the ambient bed JSON sidecar exemption documented in the asset table and blockquote above.
+
+**Zone loop mono requirement rationale**: zone loop SFX (`sfx_zone_residential`, `sfx_zone_commercial`, `sfx_zone_industrial`) are mono positional sources played via `alSourcei(src, AL_SOURCE_RELATIVE, AL_FALSE)` with full 3D spatial positioning. OpenAL renders mono sources with HRTF and distance attenuation. Stereo files cannot be used as positional sources — OpenAL Soft will either reject the buffer or collapse the channels, producing incorrect spatialization. The 18 s hard cap keeps zone loops in the pre-load tier (boundary is 20 s); staying below 20 s avoids promotion to the streaming tier, which is reserved for music stems and ambient beds (sources[58..61]).
+
+**Check number assignment**: Phase 4 will define the full ordered check list for `validate_assets.py` and assign stable check numbers (e.g., Check #N) to each entry in this table. References in other spec files to specific check numbers (e.g., "validate_assets.py Check #14" in the ambient bed sidecar exemption blockquote above) reflect numbers assigned in a prior phase and remain valid — Phase 4 MUST preserve those assignments when integrating this requirements table.
