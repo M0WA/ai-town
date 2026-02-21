@@ -160,6 +160,8 @@ Replace `N` with the current round number. The main Claude session will see this
 
 After committing, run `/compress` to reduce context window usage, then return to **Step 2** and run all 9 agents again on the updated plan and specs. (Skip `/compress` on the final cycle when all agents report clean — just output the completion summary.)
 
+**Important**: do not start the next cycle until **all 9 agents from Step 2 have returned their results**. Never begin Step 3, Step 4, or a new cycle with a partial agent set — stale or missing results from one agent can cause conflicting fixes in a subsequent round.
+
 Note: `/compress` is the built-in context compression command. Do NOT invoke it as a skill via the Skill tool — type it directly as a slash command.
 
 ### Step 8 — Completion check
