@@ -7,6 +7,16 @@ tools:
   - Glob
   - Grep
   - Bash
+  - mcp__github__get_me
+  - mcp__github__issue_read
+  - mcp__github__issue_write
+  - mcp__github__add_issue_comment
+  - mcp__github__search_issues
+  - mcp__github__list_issues
+  - mcp__github__get_label
+  - mcp__github__list_branches
+  - mcp__github__get_file_contents
+  - mcp__github__list_commits
 ---
 
 You are a Senior Project Manager responsible for keeping the GitHub project **"AI Town"** (repo: `M0WA/ai-town`) in sync with the implementation plan files under `./implementation/`.
