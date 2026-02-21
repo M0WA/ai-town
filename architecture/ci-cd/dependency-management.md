@@ -201,3 +201,31 @@ Before uploading Windows artifacts, a CI step must confirm that GLEW was install
 **RESOLVED — triplet: `x64-windows` (default dynamic).** No `VCPKG_DEFAULT_TRIPLET` override is set in CI; vcpkg defaults to `x64-windows` on Windows runners. This produces `Irrlicht.dll` as a dynamic library that must be copied to the output directory alongside `soft_oal.dll` when `aitown_render` is first linked against Irrlicht in Phase 1.
 
 **Phase 1 action required**: Add a CMake post-build copy rule for `Irrlicht.dll` (parallel to the `soft_oal.dll` copy rule added in Phase 7) and add `Irrlicht.dll` to the Windows DLL verification step in CI alongside `soft_oal.dll`.
+
+### GLEW32.dll on Windows (Phase 1+)
+
+GLEW is linked to `aitown_render` via `GLEW::GLEW`. On Windows with the `x64-windows` triplet, vcpkg installs GLEW as a dynamic library, producing `glew32.dll` in the vcpkg bin tree. This DLL must be copied to the build output directory so that the `aitown` executable can locate it at runtime. The CI workflow already contains a hard-fail check for `build/Release/GLEW32.dll` — if no CMake copy rule is present, the Windows CI job fails immediately when Phase 1 GLEW linkage is merged.
+
+Add the following post-build copy command to `CMakeLists.txt`, alongside the `Irrlicht.dll` copy rule:
+
+```cmake
+# Windows-only: copy GLEW32.dll to build output alongside Irrlicht.dll
+if(WIN32)
+  add_custom_command(TARGET aitown_render POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      $<TARGET_FILE_DIR:GLEW::GLEW>/../bin/glew32.dll
+      $<TARGET_FILE_DIR:aitown_render>
+    COMMENT "Copying GLEW32.dll to output directory"
+  )
+endif()
+```
+
+**Phase 1 atomicity requirement**: The GLEW32.dll post-build copy command is a mandatory part of the Phase 1 atomicity commit. All five of the following changes must land in a single atomic commit — merging any subset breaks Windows CI:
+
+1. Add `glew` to `vcpkg.json` dependencies
+2. Add `find_package(GLEW REQUIRED)` to `CMakeLists.txt`
+3. Add `target_link_libraries(aitown_render PRIVATE ... GLEW::GLEW)` to `CMakeLists.txt`
+4. Add the `Irrlicht.dll` CMake post-build copy command to `CMakeLists.txt`
+5. Add the `GLEW32.dll` CMake post-build copy command to `CMakeLists.txt` (this section)
+
+Omitting item 5 causes the existing `build/Release/GLEW32.dll` hard-fail CI check to trigger on every Windows build from Phase 1 onward.

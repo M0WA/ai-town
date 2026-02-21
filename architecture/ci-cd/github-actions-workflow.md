@@ -71,9 +71,11 @@ This step runs as the **first named step** in the `build-linux` job — before v
       echo "Integration test routing verified: $count test(s) discovered."
   ```
 
-  **Phase assignment**: This `integration` label routing non-zero discovery verification step MUST NOT be added to `build-linux` or `coverage-linux` before the first integration test target is registered in the CMake build. The integration_tests CMake target is first registered in Phase 3. Adding this step in Phase 1 or Phase 2 will immediately fail CI with 0 discovered tests. Phase 3 implementers co-landing the `integration_tests` target MUST add this step in the same commit.
+  **Phase assignment (integration label routing)**: This `integration` label routing non-zero discovery verification step MUST NOT be added to `build-linux` or `coverage-linux` before the first integration test target is registered in the CMake build. The `integration_tests` CMake target is first registered in Phase 3. Adding this step in Phase 1 or Phase 2 will immediately fail CI with 0 discovered tests. Phase 3 implementers co-landing the `integration_tests` target MUST add this step in the same commit.
 
-  **The same pattern applies to the `requires-opengl` label.** Add an analogous verification step after the integration routing check and before the `xvfb-run` step:
+  **Phase assignment (requires-opengl label routing)**: The `requires-opengl` label routing non-zero discovery verification step MAY be added in Phase 1, once `opengl_tests` is linked against `aitown_render`. The `stub_succeed.cpp` test registered in Phase 0 under `opengl_tests` satisfies the non-zero discovery requirement. This step is a Phase 1 deliverable and must not be deferred to Phase 3.
+
+  Add an analogous verification step after the integration routing check and before the `xvfb-run` step:
 
   ```yaml
   - name: Verify requires-opengl test routing (non-zero discovery)
@@ -290,7 +292,9 @@ This step runs as the **first named step** in the `build-linux` job — before v
       echo "Requires-opengl test routing verified: $count test(s) discovered."
   ```
 
-  **Phase assignment**: This `integration` label routing non-zero discovery verification step MUST NOT be added to `build-linux` or `coverage-linux` before the first integration test target is registered in the CMake build. The integration_tests CMake target is first registered in Phase 3. Adding this step in Phase 1 or Phase 2 will immediately fail CI with 0 discovered tests. Phase 3 implementers co-landing the `integration_tests` target MUST add this step in the same commit.
+  **Phase assignment (integration label routing)**: This `integration` label routing non-zero discovery verification step MUST NOT be added to `build-linux` or `coverage-linux` before the first integration test target is registered in the CMake build. The `integration_tests` CMake target is first registered in Phase 3. Adding this step in Phase 1 or Phase 2 will immediately fail CI with 0 discovered tests. Phase 3 implementers co-landing the `integration_tests` target MUST add this step in the same commit.
+
+  **Phase assignment (requires-opengl label routing)**: The `requires-opengl` label routing non-zero discovery verification step MAY be added in Phase 1, once `opengl_tests` is linked against `aitown_render`. The `stub_succeed.cpp` test registered in Phase 0 under `opengl_tests` satisfies the non-zero discovery requirement. This step is a Phase 1 deliverable and must not be deferred to Phase 3.
 
   Both checks must be placed **after the CMake build step and before the first ctest execution step** so that a label misconfiguration fails the job before any false-passing `ctest -L` invocation can run. Neither step requires a display or audio device — they only invoke `ctest -N` (list mode, no test execution).
 
@@ -367,6 +371,10 @@ This step runs as the **first named step** in the `build-linux` job — before v
         # Phase 5 TODO: implement 80% gate via bash awk check or after confirming lcov 2.1+:
         #   lcov --summary coverage_filtered.info | awk '/lines/ {if ($2+0 < 80) exit 1}'
         lcov --summary coverage_filtered.info
+        # Phase 4+ only — DO NOT add this block before Phase 4.
+        # At Phase 1 and earlier, src/ui/ files are absent from the build entirely.
+        # Adding this block before Phase 4 causes the gate to exit 1 with
+        # "No src/ui/ coverage data found" on every CI run, breaking all merges.
         # Phase 4 src/ui/ coverage gate (BLOCKING): enforce a 25% floor on src/ui/ files.
         # lcov --list emits per-file coverage lines; grep filters to src/ui/ files only;
         # awk extracts the rightmost percentage field; sort -n and head -1 find the minimum.

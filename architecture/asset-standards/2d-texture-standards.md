@@ -244,6 +244,16 @@ Small buildings and props use a pre-baked imposter atlas at LOD2 (beyond 100 m).
   At mip level 3 (used beyond ~400 m view distance), each building imposter is represented by 14×14 usable pixels. **Authoring requirement**: The primary silhouette of the building must be recognisable at 14×14 px — verified by downscaling a single frame to 14×14 in the DCC tool before finalising LOD2 billboard art. Fine details (windows, ledges) are not required to be legible at mip 3; gross building form (tower vs low-rise, vertical vs horizontal dominant shape) must remain distinguishable.
 - **Naming**: `<asset_name>_billboard.dds`. Small building / prop assets must NOT ship a `_lod2.b3d` file — the billboard DDS is the LOD2 asset for these categories.
 
+**Phase 1 dated sign-off record** (required before Phase 1 exit):
+
+> Phase 1 sign-off — [DATE]: Billboard atlas format confirmed — 1024×128 DXT5 sRGB
+> (`GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`), 8 frames at 128×128 px, 112×112 px usable
+> content area per frame (8-texel border on all four sides), 4-level mip chain
+> (`GL_TEXTURE_MAX_LEVEL = 3`), `nvcompress -color -bc3 -mips 4` authoring pipeline
+> (or Compressonator equivalent), straight (unassociated) alpha convention.
+> Phase 9 billboard asset authoring may proceed on this basis.
+> Signed: graphics-artist-2d-texture.
+
 #### Road Tileable Texture
 
 Road surfaces use a dedicated tileable texture separate from terrain and building atlases:

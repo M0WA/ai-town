@@ -237,7 +237,7 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 
 #### Camera Controller Tests
 
-- [ ] Camera controller unit tests in `tests/ui/camera_controller_test.cpp`. The following 7 named test cases (all Phase 1 deliverables) are REQUIRED to pass before Phase 4 begins:
+- [ ] Camera controller unit tests in `tests/ui/camera_controller_test.cpp`. The following 8 named test cases (all Phase 1 deliverables) are REQUIRED to pass before Phase 4 begins:
   1. `CameraController_PitchClamp_AtUpperBound_ExactlyMinus20`
   2. `CameraController_PitchClamp_AtLowerBound_ExactlyMinus70`
   3. `CameraController_EdgeScroll_DisabledOnFocusLoss`
@@ -245,10 +245,10 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
   5. `CameraController_MiddleMousePan_MovesPosition`
   6. `CameraController_EdgeScroll_EnabledByDefaultInFullscreen`
   7. `CameraController_SetEdgeScroll_Enabled_Then_FocusLost_DoesNotClearEnabled`
-  8. `CameraController, EdgeScrollActivatesAt20pxBand` (Phase 3 compile-only stub — body `SUCCEED()`)
-  9. `CameraController, EdgeScrollDisabledByDefaultInWindowed` (Phase 3 compile-only stub — body `SUCCEED()`)
+  8. `CameraController_EdgeScroll_DisabledByDefaultInWindowed`
+  9. `CameraController, EdgeScrollActivatesAt20pxBand` (Phase 3 compile-only stub — body `SUCCEED()`)
 
-  Tests 1–7 must pass as Phase 3 exit criteria (all authored in Phase 1). Tests 8–9 are Phase 3 compile-only stubs; the real assertions are Phase 6 deliverables. (ref: `architecture/ui-ux/camera-controls.md`, `architecture/testing/testability-architecture.md`)
+  Tests 1–8 must pass as Phase 3 exit criteria (all authored in Phase 1). Test 9 is a Phase 3 compile-only stub; the real assertion is a Phase 6 deliverable. (ref: `architecture/ui-ux/camera-controls.md`, `architecture/testing/testability-architecture.md`)
 
 #### UIManager Draw-Order Tests
 
@@ -339,7 +339,7 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 
 - All 6 `ManualRNG` self-tests pass: `ctest --test-dir build -LE 'integration|requires-opengl' -R ManualRNG --output-on-failure`
 - All 5 named UIScaler unit tests (Phase 1 deliverables) verified to still pass; compile-only stub `UIScaler_MouseInBottomBlackBar_VirtualY_ClampedToMax` added and passing as a Phase 3 compile-only stub
-- All 7 CameraController named test cases (Phase 1 deliverables) pass; compile-only stubs 8 and 9 pass in headless CI
+- All 8 CameraController named test cases (Phase 1 deliverables) pass; compile-only stub 9 passes in headless CI
 - `UIManagerDrawOrderTest` passes: all 10 draw slots called in correct Z-order sequence with `InSequence` enforcement
 - `UIManagerModalTest.FixtureConstructsAndDestructsCleanly` passes
 - Three `KeyBindings` unit tests pass: `ctest --test-dir build -LE 'integration|requires-opengl' -R KeyBindings`
@@ -353,6 +353,7 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 - `UIManager` event dispatch chain is structurally correct: all 6 priority tiers present in `UIManager::onEvent()`, Priority 2 has both guards; verified by code review before Phase 4 begins
 - `transitionToGameOver()` Phase 3 stub contains the Sandbox guard: `if (m_gameMode != GameMode::Scenario) return;` — verified by code review before Phase 4 begins
 - `src/audio/al_check.h` exists at the canonical path with two inline no-op stubs; no OpenAL headers included transitively
+- `IAudioSystem.h` declares `syncListenerToCamera(const CameraState& cam)` with the `const CameraState&` parameter signature as specified in `architecture/audio-architecture/audio-system.md` — verified by `sound-dev-opensoftal` before Phase 3 closes
 
 ### Team
 
@@ -360,8 +361,8 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 |---|---|
 | `graphics-dev-irrlicht` | `IrrlichtUIBackend` full-compile target, `WallClock.cpp` implementation, `IRenderer` interface; review `key_bindings.h` CMakeLists change |
 | `gamedesign-ux` | `UIManager` shell (construction order, draw-order slots, 6-priority event chain, Priority 2 dual-guard, `transitionToGameplay(GameMode)`, `transitionToGameOver()` Sandbox guard, `showSettings()` stub, `BudgetDetailPanel` NOT in UIManager draw-order), HUD class stub (4-param constructor, `m_unsavedDotHandle`), `UIScaler` VERIFY (confirm Phase 1 implemented `unproject()` + `getViewportRect()`; confirm 6-parameter constructor + `VirtualPoint unproject()` nested struct are present and correctly implemented per `architecture/ui-ux/resolution-ui-scaling.md`), `IUIBackend` interface design, `MockSimulationPauser` stub, `NotificationManager` stub (constructor takes `ICitySimulation*`; Phase 6 signatures locked; `draw()` calls sentinel), `Minimap` stub with `getBounds() const`, `TaxRatePanel` stub, `InspectorPanel` stub |
-| `test-dev-cpp` | Camera controller unit tests (verify 7 named Phase 1 cases pass + add 2 Phase 3 compile-only stubs), `UIManagerDrawOrderTest` (NiceMock for ALL THREE mocks; GMock InSequence; 10 draw slots; additional test cases), `MockRenderer`, `MockUIBackend`, `MockCitySimulation` wiring, `ManualRNG` (6 self-tests, Phase 3 CMake registration), `ManualClock`, `NullSimulationPauser`, `LoanTerms.h` stub, `KeyBindings.h` stub (3 named test cases), `ui_tests` (consolidated Phase 3 form: 5 source files), `integration_tests`, `terrain_tests` CMake targets, `ITerrainRNG.h` stub, `MockTerrainRNG` (manual stub with `std::mt19937_64`, NOT GMock), `UIManagerModalTest` fixture TearDown stub (NiceMock for ALL THREE mocks; 4 compile-only stubs), `panel_sentinel_handles.h` test-only header |
-| `sound-dev-opensoftal` | Verify and lock `IAudioSystem.h` (11 method signatures); verify and extend `audio_types.h` (canonical declaration order: constants → `StingerType` → static_assert; pool-index WARNING comment; `kZoneLoopMaxPreloadDurationSeconds = 18.0f`); author `sound_ids.h`; author `MockAudioSystem` in `tests/simulation/mock_audio_system.h`; author `AudioSystem` stub header `src/audio/audio_system.h` (no AL includes; BEHAVIORAL CONTRACT; SHUTDOWN CONTRACT); create `src/audio/al_check.h` no-op stub; verify `audio_tests` include directories cover all 4 required paths |
+| `test-dev-cpp` | Camera controller unit tests (verify 8 named Phase 1 cases pass + add 1 Phase 3 compile-only stub), `UIManagerDrawOrderTest` (NiceMock for ALL THREE mocks; GMock InSequence; 10 draw slots; additional test cases), `MockRenderer`, `MockUIBackend`, `MockCitySimulation` wiring, `ManualRNG` (6 self-tests, Phase 3 CMake registration), `ManualClock`, `NullSimulationPauser`, `LoanTerms.h` stub, `KeyBindings.h` stub (3 named test cases), `ui_tests` (consolidated Phase 3 form: 5 source files), `integration_tests`, `terrain_tests` CMake targets, `ITerrainRNG.h` stub, `MockTerrainRNG` (manual stub with `std::mt19937_64`, NOT GMock), `UIManagerModalTest` fixture TearDown stub (NiceMock for ALL THREE mocks; 4 compile-only stubs), `panel_sentinel_handles.h` test-only header |
+| `sound-dev-opensoftal` | Verify and lock `IAudioSystem.h` (11 method signatures); **verify `IAudioSystem.h` declares `syncListenerToCamera(const CameraState& cam)` with the `const CameraState&` parameter signature as specified in `architecture/audio-architecture/audio-system.md`** (this is the Phase 3 lock of the forward-reference noted in Phase 1 `sound-dev-opensoftal` sign-off); verify and extend `audio_types.h` (canonical declaration order: constants → `StingerType` → static_assert; pool-index WARNING comment; `kZoneLoopMaxPreloadDurationSeconds = 18.0f`); author `sound_ids.h`; author `MockAudioSystem` in `tests/simulation/mock_audio_system.h`; author `AudioSystem` stub header `src/audio/audio_system.h` (no AL includes; BEHAVIORAL CONTRACT; SHUTDOWN CONTRACT); create `src/audio/al_check.h` no-op stub; verify `audio_tests` include directories cover all 4 required paths |
 | `cicd-dev-github` | Add 'Verify integration test routing (non-zero discovery)' step to `build-linux` and `coverage-linux` in the same commit as `integration_tests` CMake target registration; verify step fails if 0 integration tests discovered |
 
 ### Dependencies

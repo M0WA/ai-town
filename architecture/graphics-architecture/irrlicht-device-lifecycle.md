@@ -17,6 +17,25 @@ driver->endScene();
 
 `UIManager::draw()` is called between `sceneManager->drawAll()` and `endScene()` in `RenderSystem`. Per `architecture/ui-ux/ui-manager.md` line 157, `UIManager::draw()` issues explicit per-panel draw calls in Z-order via `IUIBackend` — `m_gui->drawAll()` is NOT called by `RenderSystem` because it would bypass the explicit layering required for the background scrim and modal overlay. `UIManager::draw()` must be called before `endScene()` — calling it after `endScene()` produces no output. The mandatory per-frame sequence is `sceneManager->drawAll()` → `UIManager::draw()` → `driver->endScene()`. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API. This call order is immutable and must not be changed by any subsystem.
 
+## IrrlichtRenderer and UIManager — Header Dependency Rule
+
+`IrrlichtRenderer` calls `uiManager->draw()` inside `drawScene()` (see the render loop sequence above). This runtime coupling must NOT create a compile-time header dependency from `IrrlichtRenderer.h` to `UIManager.h`. The following rules are mandatory:
+
+- `IrrlichtRenderer.h` must forward-declare `UIManager` with `class UIManager;` — it must NOT `#include "UIManager.h"` in the header file.
+- `IrrlichtRenderer.cpp` includes `UIManager.h` in the implementation file (`.cpp`) only — never in the header.
+- `UIManager.h` must NOT include any Irrlicht headers. `UIManager.h` depends only on `IUIBackend.h` in `src/ui/`. If `UIManager.h` were to include an Irrlicht header, and `IrrlichtRenderer.h` were to include `UIManager.h`, the result would be a circular include chain: Irrlicht headers pulled into any translation unit that includes `UIManager.h`, and `UIManager.h` pulled into any translation unit that includes `IrrlichtRenderer.h`.
+- The coupling is one-directional at runtime: `IrrlichtRenderer::drawScene()` calls `uiManager->draw()`. At the header level this is expressed as a forward declaration only. The full `#include "UIManager.h"` is deferred to `IrrlichtRenderer.cpp`.
+
+**Violation pattern to avoid**:
+
+```cpp
+// IrrlichtRenderer.h — WRONG: pulls Irrlicht headers into UIManager transitively
+#include "UIManager.h"   // DO NOT DO THIS
+
+// IrrlichtRenderer.h — CORRECT: forward declaration only
+class UIManager;         // forward declare; full type resolved in .cpp only
+```
+
 ## CameraController — Preventing Animator Conflicts
 
 See [`scene-graph-ownership.md` — CameraController section](scene-graph-ownership.md) for the full specification: `addCameraSceneNode()` usage, the grab/drop-guarded animator removal loop, the "Why grab/drop is required" rationale, per-frame update ordering, and `IEventReceiver` design.

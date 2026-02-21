@@ -47,7 +47,7 @@
   VirtualPoint unproject(int physicalX, int physicalY) const;
   ```
 
-  **Note**: These signatures are locked at Phase 0 (stub implementations; Phase 3 fills in logic). Phase 3 parallel teams implementing `CameraController::OnInputEvent()` and `UIManager` input dispatch MUST use exactly these signatures to avoid integration breakage.
+  **Note**: These signatures are locked at Phase 0 (stub header only — no logic). Phase 1 fills in the full `UIScaler` implementation and delivers all 5 named `UIScaler` unit tests. Phase 3 VERIFYs the Phase 1 deliverables are present and adds one compile-only stub test case — it does NOT add or change implementation logic. Teams implementing `CameraController::OnInputEvent()` and `UIManager` input dispatch MUST use exactly these signatures to avoid integration breakage.
 
 ## UIScaler Constructor
 

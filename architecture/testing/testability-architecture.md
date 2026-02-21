@@ -46,7 +46,7 @@ public:
 `MockUIBackend` returns arbitrary non-zero integer handles (e.g., an incrementing counter) with no real objects — unit tests that call UIManager methods never dereference Irrlicht pointers, making `src/ui/` genuinely headless-testable and the 80% coverage gate achievable.
 
 - **`UIScaler` testability**: `UIScaler` must accept viewport dimensions at construction (`UIScaler(int virtualW, int virtualH, int viewportW, int viewportH, int offsetX, int offsetY)`) rather than reading from a live `IVideoDriver`. Tests construct `UIScaler(1920, 1080, 1280, 720, 0, 90)` directly to validate coordinate projection and letterbox offset math without a display. The `unproject` method returns `UIScaler::VirtualPoint` — a nested struct, NOT at namespace scope, to avoid ODR violations. The five named unit tests that must be authored in `tests/ui/ui_scaler_test.cpp` are:
-  1. `UIScaler_1280x720_LetterboxOffsets_ProjectsCorrectly`: construct with (1920, 1080, 1280, 720, 0, 90); unproject (640, 450) → virtual (960, 720).
+  1. `UIScaler_1280x720_LetterboxOffsets_ProjectsCorrectly`: construct with (1920, 1080, 1280, 720, 0, 90); unproject (640, 450) → virtual (960, 540).
   2. `UIScaler_FullNative_NoOffset_ProjectsIdentity`: construct with (1920, 1080, 1920, 1080, 0, 0); unproject (960, 540) → virtual (960, 540).
   3. `UIScaler_PillarboxOffset_UnprojectsCenterCorrectly`: construct with (1920, 1080, 1440, 1080, 240, 0); unproject (960, 540) → virtual (960, 540).
   4. `UIScaler_MouseInTopBlackBar_VirtualY_ClampedToZero`: construct with (1920, 1080, 1280, 720, 0, 90); unproject (640, 80) → virtual y clamped to 0 (actual_y=80 < offsetY=90 produces negative pre-clamp virtual_y, clamped to 0).
