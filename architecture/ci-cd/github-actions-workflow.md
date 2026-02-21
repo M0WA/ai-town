@@ -213,7 +213,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
   **Artifact name uniqueness requirement**: All `upload-artifact` `name:` values MUST include `${{ github.sha }}` as a suffix. Without it, concurrent workflow runs (e.g., two PRs merging in rapid succession) upload artifacts with identical names — GitHub Actions silently overwrites the first with the second, destroying post-mortem data for the earlier run. The `${{ github.sha }}` suffix guarantees globally unique artifact names for the lifetime of the artifact retention window.
 
   ```yaml
-  # After tests (all jobs, always):
+  # After tests (build-linux job):
   # IMPORTANT: artifact names must be job-specific — runner.os returns "Linux" on both
   # build-linux and coverage-linux, causing a name collision. Use the job name explicitly.
   # ALL names MUST include ${{ github.sha }} for uniqueness across concurrent builds:
@@ -224,10 +224,29 @@ This step runs as the **first named step** in the `build-linux` job — before v
     if: always()
     uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
     with:
-      name: test-results-build-linux-${{ github.sha }}   # <-- replace "build-linux" with actual job name per job
+      name: test-results-build-linux-${{ github.sha }}
+      path: test_results/
+      retention-days: 14
+  # After tests (coverage-linux job) — retention-days: 14 is REQUIRED here explicitly:
+  # coverage-linux runs under a separate job context; the upload step must carry its own
+  # retention-days value and must NOT rely on the build-linux step definition above.
+  - name: Upload test results
+    if: always()
+    uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+    with:
+      name: test-results-coverage-linux-${{ github.sha }}
+      path: test_results/
+      retention-days: 14
+  # After tests (build-windows job):
+  - name: Upload test results
+    if: always()
+    uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+    with:
+      name: test-results-windows-${{ github.sha }}
       path: test_results/
       retention-days: 14
   # After lcov (coverage-linux job):
+  # Coverage HTML report uses 14-day retention — same as test XML (see retention policy below).
   - name: Upload coverage report
     if: always()  # Upload even on gate failure — the report is most valuable when coverage is below 80%
     uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
@@ -245,7 +264,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
       retention-days: 30
   ```
 
-- **Artifact retention**: test XML retained 14 days; coverage HTML report retained 14 days; release binaries (Windows, on push to `main` only) retained 30 days
+- **Artifact retention**: test XML retained 14 days (all three jobs: `build-linux`, `coverage-linux`, `build-windows`); coverage HTML report retained 14 days (same as test XML — both are diagnostic artifacts consumed during the CI review window); release binaries (Windows, on push to `main` only) retained 30 days. Every `upload-artifact` step MUST carry an explicit `retention-days:` value — never rely on the GitHub Actions default (90 days) or assume another job's step definition applies.
 - **`coverage-linux` is a separate, self-contained job** — it performs its own configure+build+test+lcov sequence with `-DENABLE_COVERAGE=ON`. It does NOT depend on artifacts from `build-linux` (which would require large artifact transfers). This means `coverage-linux` re-runs the full build, but with coverage instrumentation enabled; `build-linux` can run a faster non-coverage build for binary verification. Both jobs run in parallel. The `all-checks-pass` gate references both. **Naming note**: the job can be renamed `build-test-coverage-linux` for clarity, as long as the name matches in the `needs:` list.
   - **`coverage-linux` must include three explicit, separately named YAML steps for ctest** (unit tests, integration tests without display, and OpenGL tests under xvfb) **before the lcov capture step**. A single combined `ctest` step cannot use both `-LE` and `-L` flags simultaneously; three named steps make coverage tracing explicit. The three ctest steps in `coverage-linux` must mirror the three ctest steps in `build-linux` exactly (same label filters `-LE "integration|requires-opengl"`, `-L "^integration$"`, `-L "^requires-opengl$"`) to ensure coverage data is collected for all test categories.
 

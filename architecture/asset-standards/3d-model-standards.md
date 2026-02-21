@@ -217,6 +217,23 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
 
   **Phase assignment**: Check #14 is a Phase 9 addition to `validate_assets.py`. Checks #1–#13 are the Phase 5 implementation scope. Phase 5 implementers should implement exactly 13 checks (checks #1 through #13 from this list). Check #14 is reserved for Phase 9 when building asset metadata support is fully in place.
 
+  **Phase 5 stub requirement for check #14**: The Phase 5 implementation of `validate_assets.py` MUST include check #14 as a stub — present in the script's check list but not executed. The stub must contain a `# TODO Phase 9` comment that names the check and explains the deferral, for example:
+
+  ```python
+  # Check #14: .meta sidecar file presence
+  # TODO Phase 9 — deferred until building asset metadata support is fully in place.
+  # When enabled: every .b3d building or vehicle file must have a corresponding
+  # <asset_name>.meta sidecar file. Missing sidecar = validation error.
+  # Phase 9 entry prerequisite: this stub must be replaced with the full check
+  # implementation before Phase 9 asset authoring begins (see 3d-model-standards.md,
+  # Export Validation Script — Required Checks, check #14).
+  pass
+  ```
+
+  The stub must be present (not omitted) so that Phase 9 implementers can locate the check without searching the spec, and so CI check-count assertions (if any) can account for all 14 checks by name. **Check #14 stub is a Phase 5 exit criterion.**
+
+  **Phase 9 entry prerequisite — check #14**: Before Phase 9 asset authoring begins, `validate_assets.py` must have the check #14 stub replaced with a full implementation that reads `<asset_name>.meta` for every `.b3d` file found in the asset directories and emits a validation error for any missing sidecar. This prerequisite must be verified during the Phase 9 kick-off review before UV authoring or asset metadata authoring begins.
+
   The script must be run as part of the asset pipeline before any asset is checked into the repository. CI must run the script and fail the build if any asset fails validation.
 
   **Vehicle Atlas Cell Registry**: Each vehicle type must be assigned a unique atlas cell in `vehicles_diffuse_atlas_d.dds` (2048×2048 DDS DXT1, 4×4 grid of 16 cells at 512×512 px each). The registry is maintained in `tools/vehicle_atlas_registry.json` and must be updated whenever a new vehicle type is added.

@@ -237,7 +237,7 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 
 #### Camera Controller Tests
 
-- [ ] Camera controller unit tests in `tests/ui/camera_controller_test.cpp`. The following 8 named test cases (all Phase 1 deliverables) are REQUIRED to pass before Phase 4 begins:
+- [ ] Camera controller unit tests in `tests/ui/camera_controller_test.cpp`. The following 9 named test cases (all Phase 1 deliverables) are REQUIRED to pass before Phase 4 begins:
   1. `CameraController_PitchClamp_AtUpperBound_ExactlyMinus20`
   2. `CameraController_PitchClamp_AtLowerBound_ExactlyMinus70`
   3. `CameraController_EdgeScroll_DisabledOnFocusLoss`
@@ -246,9 +246,10 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
   6. `CameraController_EdgeScroll_EnabledByDefaultInFullscreen`
   7. `CameraController_SetEdgeScroll_Enabled_Then_FocusLost_DoesNotClearEnabled`
   8. `CameraController_EdgeScroll_DisabledByDefaultInWindowed`
-  9. `CameraController, EdgeScrollActivatesAt20pxBand` (Phase 3 compile-only stub — body `SUCCEED()`)
+  9. `CameraController_KeyboardPanIgnoresSensitivity` (Phase 8 enforcement point — keyboard pan must not apply sensitivityMultiplier)
+  10. `CameraController_EdgeScrollActivatesAt20pxBand` (Phase 3 compile-only stub — body `SUCCEED()`)
 
-  Tests 1–8 must pass as Phase 3 exit criteria (all authored in Phase 1). Test 9 is a Phase 3 compile-only stub; the real assertion is a Phase 6 deliverable. (ref: `architecture/ui-ux/camera-controls.md`, `architecture/testing/testability-architecture.md`)
+  Tests 1–9 must pass as Phase 3 exit criteria (all authored in Phase 1). Test 10 is a Phase 3 compile-only stub; the real assertion is a Phase 6 deliverable. (ref: `architecture/ui-ux/camera-controls.md`, `architecture/testing/testability-architecture.md`)
 
 #### UIManager Draw-Order Tests
 
@@ -339,7 +340,7 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 
 - All 6 `ManualRNG` self-tests pass: `ctest --test-dir build -LE 'integration|requires-opengl' -R ManualRNG --output-on-failure`
 - All 5 named UIScaler unit tests (Phase 1 deliverables) verified to still pass; compile-only stub `UIScaler_MouseInBottomBlackBar_VirtualY_ClampedToMax` added and passing as a Phase 3 compile-only stub
-- All 8 CameraController named test cases (Phase 1 deliverables) pass; compile-only stub 9 passes in headless CI
+- All 9 CameraController named test cases (Phase 1 deliverables) pass; compile-only stub 10 (`CameraController_EdgeScrollActivatesAt20pxBand`) passes in headless CI
 - `UIManagerDrawOrderTest` passes: all 10 draw slots called in correct Z-order sequence with `InSequence` enforcement
 - `UIManagerModalTest.FixtureConstructsAndDestructsCleanly` passes
 - Three `KeyBindings` unit tests pass: `ctest --test-dir build -LE 'integration|requires-opengl' -R KeyBindings`

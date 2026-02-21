@@ -262,16 +262,45 @@ Small buildings and props use a pre-baked imposter atlas at LOD2 (beyond 100 m).
 
 **Phase 1 dated sign-off record** (required before Phase 1 exit):
 
-> Phase 1 sign-off — 2026-02-21: Billboard atlas format confirmed — 1024×128 DXT5 sRGB
-> (`GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`), 8 frames at 128×128 px, 112×112 px usable
-> content area per frame (8-texel border on all four sides), 4-level mip chain
-> (`GL_TEXTURE_MAX_LEVEL = 3`), Compressonator `compressonatorcli -fd BC3 -miplevels 4`
-> authoring pipeline (preferred — exact 4-level DDS output); nvcompress `nvcompress -color -bc3`
-> also acceptable (full mip chain generated; GPU reads capped at 4 via GL_TEXTURE_MAX_LEVEL=3,
-> but Phase 5 validator must use `mip_count >= 4` not `== 4` if nvcompress is used),
-> straight (unassociated) alpha convention.
+> Phase 1 sign-off — 2026-02-21
+>
+> Billboard imposter atlas format accepted for Phase 1:
+>
+> - Format: 1024×128 DXT5 sRGB (`GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`), uploaded via
+>   raw-GL path (`glGenTextures` → `glBindTexture` → `glCompressedTexImage2D`).
+> - Frames: 8 frames of 128×128 px in a 1×8 horizontal strip.
+> - Usable content area: 112×112 px per frame (8-texel border on all four sides of each frame).
+> - Mip chain: 4 levels mandatory (1024×128 → 512×64 → 256×32 → 128×16);
+>   `GL_TEXTURE_MAX_LEVEL = 3` set at runtime.
+> - Alpha convention: straight (unassociated) alpha; RGB stores full-intensity ambient render,
+>   alpha stores cutout mask; do NOT premultiply.
+> - DX10 extended header required: DDS files for the billboard atlas must carry a DX10
+>   extended header (FourCC `DX10` at byte offset 84) with DXGI_FORMAT set to
+>   `DXGI_FORMAT_BC3_UNORM_SRGB` (value 78). A file lacking a DX10 header cannot encode
+>   sRGB intent in a machine-readable form and must be rejected by the Phase 5 validator.
+>
+> Mip-generation tool differences (authoring note):
+>
+> - `Compressonator -miplevels 4`: generates exactly 4 mip levels in the DDS file on disk.
+>   The `dwMipMapCount` field in the DDS header will be 4. This satisfies the `>= 4` check.
+> - `nvcompress -color -bc3`: generates a full mip chain down to 1×N (11 levels for
+>   1024×128). The `dwMipMapCount` field will be > 4. GPU reads are capped at 4 levels via
+>   `GL_TEXTURE_MAX_LEVEL = 3` at runtime, so in-game rendering is correct. This also
+>   satisfies the `>= 4` check.
+>
+> Phase 5 validator MUST use a unified `>= 4` mip count threshold regardless of authoring
+> tool. Compressonator produces exactly 4 levels (`mip_count == 4`, passes `>= 4` check);
+> nvcompress generates a full mip chain (`mip_count > 4`, also passes `>= 4` check).
+> Tool-conditional `== 4` logic is prohibited — a strict equality check would incorrectly
+> reject valid nvcompress-authored atlases.
+>
+> Preferred authoring tool: Compressonator (`compressonatorcli -fd BC3 -miplevels 4`) for
+> exact 4-level DDS output. nvcompress (`nvcompress -color -bc3`) is also acceptable; both
+> pass the unified `>= 4` validator check.
+>
 > Phase 9 billboard asset authoring may proceed on this basis.
-> Signed: graphics-artist-2d-texture.
+>
+> Signed: graphics-artist-2d-texture — 2026-02-21.
 
 #### Road Tileable Texture
 

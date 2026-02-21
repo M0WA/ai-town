@@ -121,13 +121,15 @@ The following initialization sequence MUST occur immediately after `createDevice
        // Step 3. Re-create with EDT_NULL (no window, no GL context).
        m_device = irr::createDevice(irr::video::EDT_NULL,
                                     irr::core::dimension2d<irr::u32>(1280, 720));
-       // Step 4. Log the failure and set safe defaults; no GL context is current after
-       //   EDT_NULL creation — do NOT call glGetIntegerv here.
-       //   m_maxTextureSize = 2048;      // conservative fallback (no glGetIntegerv)
-       //   m_srgbTextureSupported = false;
-       //   m_maxAnisotropy = 1.0f;
-       //   Show a user-facing error notification ("OpenGL initialisation failed") and
-       //   continue headlessly.
+       // Step 4. Set safe defaults — no GL context is current after EDT_NULL creation.
+       //   Do NOT call glGetIntegerv or any other GL function here.
+       //   These assignments are MANDATORY and must execute unconditionally in the
+       //   RELEASE fallback path; they are NOT optional comments.
+       m_maxTextureSize       = 2048;  // conservative fallback — no glGetIntegerv
+       m_srgbTextureSupported = false;
+       m_maxAnisotropy        = 1.0f;
+       // Show a user-facing error notification ("OpenGL initialisation failed") and
+       // continue headlessly.
    }
    ```
 
@@ -135,16 +137,19 @@ The following initialization sequence MUST occur immediately after `createDevice
 
    **Two-tier distinction rationale**: `GLEW_ERROR_NO_GL_VERSION` specifically indicates GLEW cannot determine the GL version string — function pointers may still be loaded. Other errors (e.g., `GLEW_ERROR_NO_GLX_DISPLAY`) indicate the function-pointer table was not populated. The default GL 1.0 entrypoint `glGetIntegerv(GL_MAX_TEXTURE_SIZE, ...)` does not depend on the GLEW function-pointer table, but it does require a current GL context — it is safe to call only while the original OpenGL device is still alive (SUCCESS path), and must NOT be called after the device has been replaced with `EDT_NULL` (RELEASE fallback path). See step 3 for the guarded query sequence.
 
-3. **GL_MAX_TEXTURE_SIZE query**: Query with `glGetIntegerv(GL_MAX_TEXTURE_SIZE, &m_maxTextureSize)` only in the SUCCESS path (after `glewInit()` returns `GLEW_OK` or `GLEW_ERROR_NO_GL_VERSION`). A non-null return from `createDevice()` guarantees an OpenGL context is current on the calling thread, and `glGetIntegerv(GL_MAX_TEXTURE_SIZE, ...)` is a core OpenGL 1.0 entrypoint that resolves through the platform's native GL dispatch (not through GLEW's function-pointer table). Do NOT query `GL_MAX_TEXTURE_SIZE` in the RELEASE fallback path after a fatal `glewInit()` failure — at that point the original OpenGL device has been destroyed and replaced with an `EDT_NULL` device, which has no GL context. Calling `glGetIntegerv` without a current GL context invokes undefined behaviour. On RELEASE fallback, set `m_maxTextureSize` to a safe default value of 2048 without querying GL:
+3. **GL_MAX_TEXTURE_SIZE query**: Query with `glGetIntegerv(GL_MAX_TEXTURE_SIZE, &m_maxTextureSize)` only in the SUCCESS path (after `glewInit()` returns `GLEW_OK` or `GLEW_ERROR_NO_GL_VERSION`). A non-null return from `createDevice()` guarantees an OpenGL context is current on the calling thread, and `glGetIntegerv(GL_MAX_TEXTURE_SIZE, ...)` is a core OpenGL 1.0 entrypoint that resolves through the platform's native GL dispatch (not through GLEW's function-pointer table). Do NOT query `GL_MAX_TEXTURE_SIZE` in the RELEASE fallback path after a fatal `glewInit()` failure — at that point the original OpenGL device has been destroyed and replaced with an `EDT_NULL` device, which has no GL context. Calling `glGetIntegerv` without a current GL context is undefined behaviour.
+
+   **Placement rule**: `glGetIntegerv(GL_MAX_TEXTURE_SIZE, ...)` MUST appear inside the SUCCESS branch of the `glewResult` check shown below — never inside the `else` (RELEASE fallback) branch and never after the `else` block executes. The RELEASE fallback's Step 4 (in the code block above) already sets `m_maxTextureSize = 2048` as a hardcoded constant without any GL call; the guarded query below applies to the SUCCESS path only.
 
    ```cpp
    if (glewResult == GLEW_OK || glewResult == GLEW_ERROR_NO_GL_VERSION) {
        // SUCCESS path: GL context is current; query the real hardware limit.
        glGetIntegerv(GL_MAX_TEXTURE_SIZE, &m_maxTextureSize);
    } else {
-       // RELEASE fallback: original OpenGL device destroyed; EDT_NULL has no GL context.
-       // Do NOT call glGetIntegerv — no GL context is current.
-       m_maxTextureSize = 2048;  // safe conservative default
+       // RELEASE fallback: original OpenGL device already destroyed and replaced with
+       // EDT_NULL (see Step 4 above) — no GL context is current.
+       // Do NOT call glGetIntegerv or any GL function here.
+       m_maxTextureSize = 2048;  // safe conservative default (already set in Step 4)
    }
    ```
 
