@@ -49,6 +49,28 @@
 
   **Note**: These signatures are locked at Phase 0 (stub implementations; Phase 3 fills in logic). Phase 3 parallel teams implementing `CameraController::OnInputEvent()` and `UIManager` input dispatch MUST use exactly these signatures to avoid integration breakage.
 
+## UIScaler Constructor
+
+The canonical constructor signature for `UIScaler` is:
+
+```cpp
+UIScaler(int virtualW, int virtualH, int viewportW, int viewportH, int offsetX, int offsetY);
+```
+
+- All six parameters are captured at construction time. `UIScaler` MUST NOT read from a live `IVideoDriver` — doing so would couple the object to a display connection and make it impossible to instantiate in headless unit tests.
+- This constructor is the testability seam used by `tests/ui/ui_scaler_test.cpp` (see `architecture/testing/testability-architecture.md` UIScaler tests section). Tests construct `UIScaler(1920, 1080, 1280, 720, 0, 90)` directly to validate coordinate projection and letterbox offset math without a display.
+
+## Rect Type Ownership
+
+`getViewportRect()` returns a `Rect` value. The `Rect` struct is defined **exclusively** in `src/ui/IUIBackend.h`:
+
+```cpp
+struct Rect { int x{0}, y{0}, w{0}, h{0}; };
+```
+
+- `UIScaler.h` MUST `#include "src/ui/IUIBackend.h"` to obtain the `Rect` type for `getViewportRect()`.
+- No other header may define or forward-declare `struct Rect`. Duplicate definitions across translation units risk ODR (One Definition Rule) violations and linker errors that are difficult to diagnose.
+
 - **Mouse un-projection ownership**: `UIScaler::unproject()` MUST be applied exactly once, at the entry point of the input chain. The platform event receiver (in `src/platform/`) applies the transform before handing the resulting `InputEvent` to `UIManager::onEvent()`. Panels receive virtual-space coordinates and must not call `UIScaler` again. Panel unit tests inject pre-projected virtual-space coordinates directly, bypassing the platform receiver entirely.
 - No hardcoded pixel offsets anywhere in UI code
 

@@ -76,7 +76,8 @@ Harden the CI pipeline (GLEW vcpkg, DLL verification, routing verification), del
 
 #### Coverage Gate
 
-- [ ] **`src/ui/` 25% Phase 4 floor** (`test-dev-cpp`, `cicd-dev-github`): after Phase 3 delivers `UIManagerDrawOrderTest`, 5 `UIScaler` tests, and 6 `CameraController` tests, run `coverage-linux` and verify `src/ui/` worst-file line coverage is ≥25%. This uses the awk pipeline from `architecture/testing/coverage.md` (Phase 1 `src/ui/` Coverage Baseline section). If below 25%, add additional `ui_tests` source files before Phase 5 begins. This gate is a BLOCKING defect, not a medium risk. **Phase 5 raises `--fail-under-percent` from 0 to 80** (the full 80% gate is a Phase 5 Procedural Terrain deliverable, not Phase 4). (ref: `architecture/testing/coverage.md`)
+- [ ] **`src/ui/` 25% Phase 4 floor** (`test-dev-cpp`, `cicd-dev-github`): after Phase 3 delivers `UIManagerDrawOrderTest`, 5 `UIScaler` tests (verified passing from Phase 1), and 7 `CameraController` tests, run `coverage-linux` and verify `src/ui/` worst-file line coverage is ≥25%. This gate is a BLOCKING defect, not a medium risk. **Phase 5 raises `--fail-under-percent` from 0 to 80** (the full 80% gate is a Phase 5 Procedural Terrain deliverable, not Phase 4). (ref: `architecture/testing/coverage.md`)
+- [ ] **`cicd-dev-github` — upgrade `src/ui/` coverage step to blocking gate**: Replace the Phase 1 informational `Baseline-check src/ui/ coverage entries` step in `coverage-linux` with the blocking 25% float-aware `awk` gate from `architecture/ci-cd/github-actions-workflow.md` (the `src/ui/` coverage gate section). This step uses `lcov --list coverage_filtered.info | grep -E "src/ui/"` piped through the `awk -F'|' '{gsub(/%/,"",$NF); print $NF+0}'` pipeline; enforces the gate with float-aware comparison (`result=$(echo "$pct 25" | awk '{if ($1+0 < $2+0) print "FAIL"; else print "PASS"}')`); fails if `$pct` is empty or non-numeric; and exits non-zero if below 25%. Do NOT use integer comparison (`-lt 25`) — it truncates floats and incorrectly passes 24.8%. (ref: `architecture/ci-cd/github-actions-workflow.md`)
 
 ### Exit Criteria
 
@@ -92,12 +93,13 @@ Harden the CI pipeline (GLEW vcpkg, DLL verification, routing verification), del
 - Crossfade audibility pre-production demo approved
 - Texture artist and 3D model artist sign-offs recorded
 - `src/ui/` worst-file line coverage ≥ 25% confirmed (awk gate green in `coverage-linux`)
+- Phase 1 informational `src/ui/` step in `coverage-linux` replaced with the blocking float-aware 25% `awk` gate from `architecture/ci-cd/github-actions-workflow.md`
 
 ### Team
 
 | Role | Responsibility |
 |---|---|
-| `cicd-dev-github` | GLEW vcpkg + DLL hard-fail, Linux GLEW artifact step, CI-3 fix, CI-4 markdown lint verification, CI-5 SHA resolution, routing verification steps, validate-assets 4-item atomicity |
+| `cicd-dev-github` | GLEW vcpkg + DLL hard-fail, Linux GLEW artifact step, CI-3 fix, CI-4 markdown lint verification, CI-5 SHA resolution, routing verification steps, validate-assets 4-item atomicity, replace Phase 1 informational `src/ui/` step with blocking float-aware 25% `awk` gate in `coverage-linux` |
 | `graphics-dev-irrlicht` | `find_package(GLEW REQUIRED)`, `target_link_libraries(aitown_render PRIVATE GLEW::GLEW)`, `shader_constants.h` correctness gate |
 | `sound-artist-opensoftal` | SA-2 music brief, SA-3 bar-count confirmation, Zone Loop brief, Vehicle SFX brief, Stinger brief, Ambient Bed brief, Crossfade audibility demo |
 | `sound-dev-opensoftal` | `tools/music_sidecar_schema.json` stub |

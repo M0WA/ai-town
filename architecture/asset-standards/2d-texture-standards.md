@@ -74,6 +74,8 @@ Both tools produce standards-compliant DDS files and are CI-verified. Do not use
 | Diffuse sRGB with alpha (DXT5 BC3, 4-mip) | Compressonator | `compressonatorcli -fd BC3 -miplevels 4 input.png output.dds` |
 | Normal map DXT5nm (BC3, 4-mip) | nvcompress | `nvcompress -normal -bc3 -mips 4 input_swizzled.png output.dds` |
 | Normal map DXT5nm (BC3, 4-mip) | Compressonator | `compressonatorcli -fd BC3 -miplevels 4 input_swizzled.png output.dds` |
+| Specular packed (BC3, linear, 4-mip) | nvcompress | `nvcompress -bc3 -mips 4 input.png output_sp.dds` |
+| Specular packed (BC3, linear, 4-mip) | Compressonator | `compressonatorcli -fd BC3 -miplevels 4 input.png output_sp.dds` |
 | UI sprite sheet (RGBA8 uncompressed, no mip) | nvcompress | `nvcompress -rgb -nomips input.png output.dds` |
 | UI sprite sheet (RGBA8 uncompressed, no mip) | Compressonator | `compressonatorcli -fd ARGB_8888 -nomipmap input.png output.dds` |
 
@@ -143,7 +145,7 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
   | `_d` | Diffuse/albedo. Upload path: **sRGB raw-GL path** (`GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` / `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`) for all photographic/perceptual diffuse textures. **Exception: vehicle sprite atlas (`vehicles_sprite_atlas_d.dds`) uses `_d` suffix but LINEAR upload path** — palette swatches are not photographic diffuse data and must not be sRGB-decoded. The sprite atlas is uploaded via `IVideoDriver::getTexture()` (linear pool), NOT the sRGB raw-GL path. See `architecture/asset-standards/building-atlas-layout.md` sprite atlas section. |
   | `_n` | Normal map (DXT5nm) |
   | `_s` | Specular (grayscale) |
-  | `_sp` | Specular packed (multi-channel roughness/metallic/AO) |
+  | `_sp` | Specular packed (multi-channel roughness/metallic/AO). Upload path: **linear pool** (standard `IVideoDriver::getTexture()`) — packed roughness/metallic/AO data is linear; sRGB decode would corrupt channel values. |
   | `_lm` | Lightmap bake (UV channel 1) |
   | `_billboard` | Billboard imposter atlas (1024×128 DXT5 sRGB, 1×8 horizontal strip) |
 

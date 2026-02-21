@@ -672,7 +672,7 @@ jobs:
       - build-windows
       - coverage-linux
       - markdown-lint
-      # validate-assets added in Phase 6
+      # validate-assets added in Phase 1 (job + tools/validate_assets.py stub are Phase 1 deliverables — not yet created on planning branch)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
