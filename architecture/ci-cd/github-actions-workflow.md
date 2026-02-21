@@ -73,7 +73,9 @@ This step runs as the **first named step** in the `build-linux` job — before v
       echo "Integration test routing verified: $count test(s) discovered."
   ```
 
-  **Phase assignment (integration label routing)**: This `integration` label routing non-zero discovery verification step MUST NOT be added to `build-linux` or `coverage-linux` before the first integration test target is registered in the CMake build. The `integration_tests` CMake target is first registered in Phase 3. Adding this step in Phase 1 or Phase 2 will immediately fail CI with 0 discovered tests. Phase 3 implementers co-landing the `integration_tests` target MUST add this step in the same commit.
+  **Phase assignment (integration label routing)**: This `integration` label routing non-zero discovery verification step CAN be added in Phase 1 (not Phase 3) because the `integration_tests` CMake target is first registered in Phase 1 with the `IrrlichtUIBackendCompileCheck::IsNonAbstract` compile-check test. That test registers under the `integration` label and satisfies the non-zero discovery requirement — `ctest -N -L '^integration$'` discovers exactly 1 test at Phase 1, so the verification step passes. Phase 3 co-lands additional integration tests with real domain assertions, but the target and the routing check are Phase 1 deliverables.
+
+  **Integration routing check semantics**: The routing check verifies label correctness (non-zero discovery under the `integration` label), NOT phase-exclusion. A compile-only verification test registered under `integration` at Phase 1 is a valid and intentional use of the label — it is a special case acknowledged in `framework.md`. The check does not impose any constraint on which phases may register tests under a given label; it only ensures that at least one test is registered, preventing a misconfigured `LABEL` from silently producing zero results.
 
   **Phase assignment (requires-opengl label routing)**: The `requires-opengl` label routing non-zero discovery verification step MAY be added in Phase 1, once `opengl_tests` is linked against `aitown_render`. The `stub_succeed.cpp` test registered in Phase 0 under `opengl_tests` satisfies the non-zero discovery requirement. This step is a Phase 1 deliverable and must not be deferred to Phase 3.
 
@@ -294,7 +296,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
       echo "Requires-opengl test routing verified: $count test(s) discovered."
   ```
 
-  **Phase assignment (integration label routing)**: This `integration` label routing non-zero discovery verification step MUST NOT be added to `build-linux` or `coverage-linux` before the first integration test target is registered in the CMake build. The `integration_tests` CMake target is first registered in Phase 3. Adding this step in Phase 1 or Phase 2 will immediately fail CI with 0 discovered tests. Phase 3 implementers co-landing the `integration_tests` target MUST add this step in the same commit.
+  **Phase assignment (integration label routing)**: This `integration` label routing non-zero discovery verification step CAN be added in Phase 1 (not Phase 3) because the `integration_tests` CMake target is first registered in Phase 1 with the `IrrlichtUIBackendCompileCheck::IsNonAbstract` compile-check test. See the first occurrence of this note (in the `build-linux` section) for full rationale. Both `build-linux` and `coverage-linux` add these routing verification steps in Phase 1; the steps are identical between the two jobs.
 
   **Phase assignment (requires-opengl label routing)**: The `requires-opengl` label routing non-zero discovery verification step MAY be added in Phase 1, once `opengl_tests` is linked against `aitown_render`. The `stub_succeed.cpp` test registered in Phase 0 under `opengl_tests` satisfies the non-zero discovery requirement. This step is a Phase 1 deliverable and must not be deferred to Phase 3.
 
@@ -481,6 +483,16 @@ markdown-lint:
 - **`validate-assets` job** — validates asset files using the Python validation script. Must run on every push and PR alongside the build jobs so asset errors are caught before any binary is produced. Runs on `ubuntu-latest` with a 10-minute timeout.
 
   **Phasing**: This job is introduced in Phase 1 running `tools/validate_assets.py` as a stub that always exits 0. It is wired into `all-checks-pass` at Phase 1 creation — not deferred to a later phase. This means the stub always passes, keeping the gate green while the real check logic is absent. In Phase 5 the script gains 13 real checks; in Phase 9 a 14th sidecar check is added. The job definition and `all-checks-pass` wiring remain unchanged across all phases.
+
+  **Phase 1 stub TODO comment requirements**: The Phase 1 `tools/validate_assets.py` stub MUST include the following TODO comment blocks so that Phase 5 implementers can locate all validation points via a single repository-wide search. These comments are the canonical markers — Phase 5 replaces each comment block with real validation logic in-place:
+
+  ```python
+  # TODO Phase 5: validate DDS textures (format, mip chain)
+  # TODO Phase 5: validate billboard atlas (dimensions, FourCC)
+  # TODO Phase 5: validate audio assets (format, duration, sample rate)
+  ```
+
+  All three TODO blocks must be present in the stub at Phase 1 commit time. Omitting any block means Phase 5 implementers cannot find that validation point via `grep -r "TODO Phase 5"` and may overlook it. The blocks must appear as standalone comment lines (not inline with code) so the grep pattern matches them unambiguously.
 
   Job definition:
 

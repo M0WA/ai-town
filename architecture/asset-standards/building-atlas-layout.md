@@ -87,7 +87,7 @@ Two distinct vehicle atlases exist with separate purposes:
 
 **Vehicle Sprite Atlas** (`vehicles_sprite_atlas_d.dds`):
 
-- Format: DDS DXT5 (DXT5 required — alpha channel encodes the silhouette mask for non-rectangular vehicle roof shapes; DXT1 only supports 1-bit alpha, which is insufficient for smooth vehicle silhouettes)
+- Format: DDS DXT5 (BC3). **The vehicle sprite atlas (`vehicles_sprite_atlas_d.dds`) MUST use DXT5 (BC3) compression — NOT DXT1 (BC1). DXT1 has no per-pixel alpha channel and cannot represent the roof-silhouette alpha required for transparent vehicle tops. DXT5 stores 4-bit alpha per pixel. This mandate applies to all LOD levels of the vehicle atlas. Using DXT1 for the vehicle atlas is a HARD ERROR — the validate-assets CI step (Phase 5) will reject any vehicle atlas with FourCC `DXT1`.** DXT1 only supports 1-bit alpha, which is insufficient for smooth vehicle silhouettes; DXT5 (BC3) is the only valid compression format for this atlas.
 - Resolution: 256×256 px
 - Cell grid: 16×16 cells at 16×16 px each (256 sprite slots)
 - Purpose: Point/sprite LOD2 representation at distances beyond 100 m — each sprite is a 16×16 px roof-color/type identifier rendered as a camera-facing billboard quad (1 m × 0.5 m)

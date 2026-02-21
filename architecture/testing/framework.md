@@ -57,6 +57,12 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
   - `integration`: tests requiring EDT_NULL Irrlicht + null audio
   - `requires-opengl`: tests requiring a real OpenGL context under xvfb-run
 
+  **Special case — Phase 1 compile-check test registered under `integration` label**: The `IrrlichtUIBackendCompileCheck::IsNonAbstract` test (in `tests/integration/irrlicht_ui_backend_compile_test.cpp`) is registered under the `integration` label at Phase 1 via the `integration_tests` CMake target. This is a deliberate special case and does NOT contradict the label convention above or the statement that "Phase 3 first registers integration tests with real domain assertions." The distinction is:
+
+  - The Phase 1 test contains only a `static_assert` (compile-time non-abstract check) and a runtime `TEST() { SUCCEED(); }` body. It has no domain-specific runtime assertions, requires no Irrlicht device (EDT_NULL or otherwise), and requires no real audio backend. It is a compile-only verification test that lives in `tests/integration/` to co-locate it with the future integration test suite.
+  - "Phase 3 first registers integration tests" refers specifically to tests with real domain assertions — tests that exercise multiple subsystems together using EDT_NULL Irrlicht and the null audio driver, requiring the full integration test infrastructure (MockRenderer, MockAudioSystem, CitySimulation wired to both) introduced in Phase 3.
+  - The Phase 1 compile-check test satisfies the non-zero discovery requirement for `ctest -L '^integration$'`. Consequently, the integration routing verification step in `build-linux` and `coverage-linux` CAN be added in Phase 1 alongside this target — it will discover exactly 1 test and pass. The label routing verification step verifies label correctness (non-zero discovery), not phase-exclusion. Registering a compile-only test under `integration` at Phase 1 is a valid and intentional use of the label.
+
   See `headless-ci-testing.md` for the full `ctest` invocation commands and CI execution rules for each label.
 
   **`aitown_add_tests()` CMake helper macro** (defined in `cmake/AitownTestHelpers.cmake`): wraps `gtest_discover_tests()` with the correct required options, enforces the one-label rule, and provides per-category timeout overrides:

@@ -61,6 +61,18 @@ The Phase 4 `src/ui/` coverage baseline is expected to be low (stub-heavy code).
 acceptable Phase 4 baseline is **25%** — achievable with `UIManagerDrawOrderTest`, 5 UIScaler
 tests, and 8 CameraController tests.
 
+**Phase 1 prerequisite**: The Phase 4 25% gate assumes all Phase 1 tests (13 tests: 8
+CameraController tests in `tests/ui/camera_controller_test.cpp` + 5 UIScaler tests in
+`tests/ui/ui_scaler_test.cpp`) are present and passing. The `IrrlichtUIBackendCompileCheck`
+compile test is registered under `integration_tests` (label `integration`), not `ui_tests`,
+and does not directly contribute to the `src/ui/` line-coverage percentage — but it MUST
+also be present and passing before the Phase 4 gate is evaluated, per
+`implementation/phase-1.md`. Phase 1 tests must be delivered per `implementation/phase-1.md`
+before the Phase 4 gate applies. If Phase 1 tests are missing, the 25% gate will fail even
+if Phase 4 code is complete — `UIManagerDrawOrderTest` alone is insufficient to reach 25%
+without the CameraController and UIScaler tests supplying coverage of their respective
+`src/ui/` translation units.
+
 If Phase 4 baseline is below 25%, this indicates test registration or stub-body errors that
 must be corrected before Phase 5 begins. Likely causes include:
 

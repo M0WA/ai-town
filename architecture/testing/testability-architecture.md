@@ -873,6 +873,32 @@ protected:
 // on any UIManager constructor call that queries simulation state without a pre-set
 // EXPECT_CALL. For tests that need strict call-count verification on backend_ or sim_,
 // use selective EXPECT_CALL with explicit Times() before the action under test.
+//
+// NICEMOCK + Times(0) CONTRACT:
+// NiceMock silently ignores any call for which no EXPECT_CALL has been set — including
+// calls that MUST NOT occur. This means that verifying the ABSENCE of a call requires
+// an explicit EXPECT_CALL(...).Times(0) even on a NiceMock. Without it, a forbidden call
+// is silently swallowed and the test passes incorrectly.
+//
+// MANDATORY APPROACH (option b — retain NiceMock, add explicit Times(0)):
+// Every "must not be called" entry in the StrictMock Expected Call Matrix (e.g.
+// setPaused(false) × 0 in test 8, setPaused(true) × 0 in test 10) MUST be expressed as
+// an explicit EXPECT_CALL on the NiceMock member BEFORE the action under test:
+//
+//   EXPECT_CALL(sim_, setPaused(false)).Times(0);   // must not be called
+//   EXPECT_CALL(sim_, setPaused(true)).Times(2);    // called exactly twice
+//   ui_->showModal(...);
+//   ui_->closeModal();
+//
+// A NiceMock without an explicit Times(0) CANNOT verify absence of calls. Every modal
+// test that lists "× 0" in the StrictMock Expected Call Matrix MUST set the corresponding
+// EXPECT_CALL(...).Times(0) in the test body. Omitting a Times(0) expectation means the
+// test is NOT verifying that the call does not happen — it is silently passing.
+//
+// NOTE: Switching sim_ to StrictMock (option a) is NOT used here because UIManager's
+// constructor queries simulation state, which would require EXPECT_CALL stubs for every
+// query in SetUp() — defeating the fixture's purpose of minimising boilerplate. The
+// NiceMock + explicit Times(0) approach (option b) is the mandatory pattern for this fixture.
 class UIManagerModalTest : public ::testing::Test {
 protected:
     ::testing::NiceMock<MockUIBackend>         backend_;

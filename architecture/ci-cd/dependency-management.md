@@ -230,3 +230,21 @@ endif()
 5. Add the `GLEW32.dll` CMake post-build copy command to `CMakeLists.txt` (this section)
 
 Omitting item 5 causes the existing `build/Release/GLEW32.dll` hard-fail CI check to trigger on every Windows build from Phase 1 onward.
+
+### DLL Verification CI YAML Co-Landing Requirement
+
+**CMakeLists.txt DLL copy rules and the CI YAML DLL verification step MUST land in the same commit.** This is the same atomicity principle as the five-item GLEW commit above, applied to the relationship between CMake and CI YAML.
+
+Specifically:
+
+- The CMakeLists.txt `add_custom_command` post-build copy rules for `Irrlicht.dll` and `GLEW32.dll` produce the DLL files in the output directory.
+- The CI YAML hard-fail verification step (`if (-not (Test-Path "build/Release/Irrlicht.dll")) { exit 1 }` and the equivalent for `GLEW32.dll`) checks that those files exist before artifact upload.
+
+A partial commit breaks CI in one of two ways:
+
+1. **CMake rules without CI YAML**: DLLs are copied correctly but no verification step exists — a regression that removes the copy rule goes undetected until a user downloads the artifact and encounters a launch crash.
+2. **CI YAML without CMake rules**: The verification step hard-fails immediately on every Windows build because the DLLs are never copied — the entire Windows CI job is broken for every PR until the CMake rules are added.
+
+Both partial states leave the repository in a broken or unverified condition. The co-landing requirement ensures CI is green immediately after the commit merges and remains green on every subsequent build.
+
+**This applies to ALL DLL copy rule and CI verification step pairs**, not only the Phase 1 GLEW/Irrlicht pair. Any future DLL that is added via a CMake post-build copy command (e.g., `soft_oal.dll` in Phase 7) must have its corresponding CI verification step added in the same commit as the CMake copy rule. The Phase 7 `soft_oal.dll` / `default.mhr` copy rules and the hard-fail CI step replacing the Phase 0 placeholder must co-land atomically.
