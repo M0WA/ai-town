@@ -98,10 +98,14 @@ public:
      Inject `InputEvent{Type::MouseMove, x=0, y=540}` (left edge) → assert camera
      position UNCHANGED (edge scroll suppressed because `m_appHasFocus = false`
      despite `m_edgeScrollEnabled = true`).
-     Inject `InputEvent{Type::WindowFocusGained}` then
-     `InputEvent{Type::MouseMove, x=0, y=540}` → assert camera position DID change
-     (edge scroll active again after focus restored, since `m_edgeScrollEnabled` was
-     never changed).
+     **MANDATORY final step** — Inject `InputEvent{Type::WindowFocusGained}` then
+     `InputEvent{Type::MouseMove, x=0, y=540}` (left edge — within the 20px activation
+     band) → assert that `getCameraState().position` DID change (edge scroll is active
+     again after focus restored, since `m_edgeScrollEnabled` was never changed).
+     This step is **not optional**: without it, a broken implementation that permanently
+     disables edge scroll after `WindowFocusLost` (never re-enabling on `WindowFocusGained`)
+     would still pass all prior assertions. The re-enablement assertion is the only step
+     that distinguishes a correct implementation from one with a latent re-enable defect.
      Use `EXPECT_EQ` for bool assertions; use `EXPECT_NE` for camera position change.
   8. `CameraController_EdgeScroll_DisabledByDefaultInWindowed` — construct `CameraController` with `startInFullscreen=false`; immediately call `isEdgeScrollEnabled()` without any intervening call to `setEdgeScrollEnabled()`; assert the return value is `false`. This is the symmetric counterpart to test case 6 and confirms the windowed-default rule from `architecture/ui-ux/camera-controls.md`.
 - **`QueryPanel` testability**: `QueryPanel::computePanelPosition(int cursorX, int cursorY, Rect tileBounds)` must be a pure function (no side effects, no Irrlicht dependency) returning a `Rect`. Required test cases:

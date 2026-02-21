@@ -94,7 +94,8 @@ find_package(GLEW REQUIRED)
 # in a later phase.
 target_link_libraries(aitown_audio PRIVATE OpenAL::OpenAL fmt::fmt Vorbis::vorbisfile)
 # Irrlicht and GLEW link to aitown_render (PRIVATE — headers must NOT propagate to test targets).
-target_link_libraries(aitown_render PRIVATE Irrlicht GLEW::GLEW)
+# GLEW::GLEW must appear before Irrlicht — required for GLEW symbol deduplication per irrlicht-device-lifecycle.md mitigation-2.
+target_link_libraries(aitown_render PRIVATE GLEW::GLEW Irrlicht)
 ```
 
 **GLEW — Windows triplet note**: On Windows with the `x64-windows` triplet active, vcpkg resolves `glew` to `glew:x64-windows` automatically — no platform-specific triplet override in `vcpkg.json` is needed. Before committing a baseline update that adds GLEW, verify the `glew` port exists at the pinned baseline using `gh api /repos/microsoft/vcpkg/contents/ports/glew`. A 200 response confirms the port is present at that baseline; a 404 means the port was removed or renamed — try an adjacent vcpkg commit. This verification is mandatory: a missing port at the pinned baseline causes a hard build failure on all platforms.

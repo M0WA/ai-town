@@ -59,7 +59,7 @@ lcov --summary coverage_filtered.info
 
 The Phase 4 `src/ui/` coverage baseline is expected to be low (stub-heavy code). The MINIMUM
 acceptable Phase 4 baseline is **25%** — achievable with `UIManagerDrawOrderTest`, 5 UIScaler
-tests, and 6 CameraController tests.
+tests, and 8 CameraController tests.
 
 If Phase 4 baseline is below 25%, this indicates test registration or stub-body errors that
 must be corrected before Phase 5 begins. Likely causes include:

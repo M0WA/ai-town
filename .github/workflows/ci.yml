@@ -384,7 +384,7 @@ jobs:
             exit 1
           }
           Write-Host "Irrlicht.dll present."
-          # Phase 1 atomicity gate: GLEW32.dll check co-lands with target_link_libraries(aitown GLEW::GLEW)
+          # Phase 1 atomicity gate: GLEW32.dll check co-lands with target_link_libraries(aitown_render PRIVATE GLEW::GLEW Irrlicht ...)
           if (-not (Test-Path "build/Release/GLEW32.dll")) {
             Write-Error "ERROR: GLEW32.dll missing from build/Release/ — post-build CMake DLL copy rule failed"
             exit 1
@@ -609,7 +609,7 @@ jobs:
           # be 0% anyway (smoke tests give trivial coverage). Use --summary for informational
           # output only. Phase 2 replaces this with a proper 80% gate once the tool version
           # is confirmed or the gate is implemented via a bash percentage check.
-          # TODO Phase 2: replace with: lcov --summary coverage_filtered.info | awk check
+          # TODO Phase 5: replace with: lcov --summary coverage_filtered.info | awk check
           lcov --summary coverage_filtered.info
 
       # Step 19: src/ui/ coverage baseline checkpoint.

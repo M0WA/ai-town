@@ -289,7 +289,7 @@ lcov --remove coverage.info \
 genhtml coverage_filtered.info --output-directory coverage_html/
 lcov --summary coverage_filtered.info
 # NOTE: --fail-under-percent does not exist in lcov 2.0 (ubuntu-latest ships 2.0).
-# Phase 0 gate is informational only. Phase 2 adds a real 80% gate via awk or lcov 2.1+.
+# Phase 0 gate is informational only. Phase 5 adds a real 80% gate via awk or lcov 2.1+.
 
 # Windows
 ctest --test-dir build -C Release --output-on-failure

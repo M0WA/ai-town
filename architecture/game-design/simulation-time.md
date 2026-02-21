@@ -87,6 +87,24 @@ The 120-real-second grace period defined in `economy-model.md` gates cost deduct
 
 This distinction is required for the bootstrap demand mechanism (ticks 0–5) documented in `zoning-system.md` to function correctly: if tick firing were gated by the grace period, the bootstrap demand decay would not advance and the city would fail to generate initial zone demand.
 
+### Frame-Loop Position Constraint
+
+`CitySimulation::tick()` (the game tick / simulation advance) **must occupy step 2 in the canonical 8-step per-frame loop**, as shown below. It must run BEFORE `CameraController::update()`, `UIManager::update()`, `syncListenerToCamera()`, `AudioSystem::update()`, and `beginScene()`. It must NOT run after `beginScene()` has been called.
+
+```text
+1. Poll events
+2. CitySimulation::tick(realDelta)    ← game tick MUST be here
+3. CameraController::update()
+3b. UIManager::update()
+4a. syncListenerToCamera(cameraState)
+4b. AudioSystem::update(realDeltaSeconds)
+5. beginScene()
+6. drawScene()  (includes UIManager::draw())
+7. endFrame()
+```
+
+Any implementation that advances the simulation tick after `beginScene()` has been called violates this ordering constraint. The city simulation must not advance while rendering for the frame is already in progress, as this would cause the rendered frame to reflect a simulation state that is inconsistent with the state that was current when camera, UI, and audio were updated.
+
 ### Design Rationale
 
 The accumulator lives inside `CitySimulation`, not in the main loop. This keeps the main loop unconditionally simple — it calls `tick()` every frame with the raw delta — and means time-scaling policy is fully encapsulated in one place. If a future speed setting (e.g., 30×) is added, only `CitySimulation` needs updating; the main loop is unchanged.

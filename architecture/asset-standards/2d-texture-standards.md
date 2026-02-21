@@ -89,13 +89,22 @@ Both tools produce standards-compliant DDS files and are CI-verified. Do not use
 
    The output must show `sRGB` (or equivalent). A source PNG without an embedded sRGB profile will produce a DDS with a linear internal format even when `-color` is passed, causing incorrect color rendering. If no sRGB profile is reported, re-export the PNG from the DCC tool with the sRGB ICC profile embed option enabled.
 
-2. **Validate the DDS header FourCC after compression.** Inspect the FourCC field at byte offset 84 of the DDS file to confirm the sRGB format tag is correctly encoded:
+2. **Validate the DDS header for sRGB encoding after compression.** The FourCC field at byte offset 84 identifies the block-compression format family, but it cannot distinguish sRGB from linear for DXT1/BC1:
 
    ```bash
    python3 -c "import struct; d=open('out.dds','rb').read(); print(hex(struct.unpack('<I',d[84:88])[0]))"
    ```
 
-   DXT1 sRGB should show `0x31545844`; if `nvddsinfo` or `dxinfo` are available on the workstation, these may also be used to inspect the DDS header and confirm the sRGB format flags. A linear DXT1 header will show a different FourCC value — do not commit that file.
+   **IMPORTANT — FourCC alone cannot identify sRGB DXT1.** The FourCC value `0x31545844` ("DXT1" in ASCII little-endian) is identical for both linear DXT1 and sRGB DXT1. A linear DXT1 file and an sRGB DXT1 file both produce `0x31545844` at byte offset 84. Do NOT use the FourCC field to determine whether a DXT1 file is sRGB-encoded; it is the wrong field to check and will always match regardless of color space.
+
+   To verify sRGB intent on a DXT1/BC1 diffuse texture, validators must parse the DX10 extension header and check the DXGI_FORMAT field:
+   - A file with a DX10 extended header is identified by a FourCC of `0x30315844` ("DX10") at byte offset 84.
+   - The DXGI_FORMAT field follows the standard DDS header and the DDS_HEADER_DXT10 structure's first 4 bytes.
+   - BC1_UNORM_SRGB = DXGI_FORMAT value **71** (sRGB DXT1/BC1 — correct for diffuse textures).
+   - BC3_UNORM_SRGB = DXGI_FORMAT value **100** (sRGB DXT5/BC3 — correct for sRGB alpha diffuse and billboard atlases).
+   - Any other DXGI_FORMAT value indicates a non-sRGB (linear) encoding — do not commit that file as a diffuse atlas.
+
+   If `nvddsinfo` or `dxinfo` are available on the workstation, these may also be used to inspect the DDS header and confirm the sRGB DXGI_FORMAT field. A file produced without DX10 header support (no "DX10" FourCC at offset 84) cannot encode sRGB intent in a machine-readable way and must be rejected.
 
    For DXT5 (BC3) billboard atlases: the standard DDS FourCC field contains `0x35545844` (`DXT5` in ASCII little-endian), which does NOT encode the sRGB flag. The traditional FourCC inspection step alone cannot reliably detect sRGB intent for DXT5 files. Use one of the following approaches to validate sRGB intent on DXT5 billboard atlases:
    - **DX10 extended header (recommended)**: Check the DX10 DXGI format field (`DXGI_FORMAT_BC3_UNORM_SRGB`, value 100). Files authored via `nvcompress -color` produce a DX10 extended header with this format value.
@@ -238,7 +247,7 @@ Small buildings and props use a pre-baked imposter atlas at LOD2 (beyond 100 m).
 - **Bake angles**: 8 directions every 45° around the vertical axis (0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°). The runtime `LODNode` selects the nearest 45° frame based on the angle between the camera and the building's facing direction.
 - **Bake elevation**: **45° below horizontal (camera pitch = −45°)** — the midpoint of the [−70°, −20°] camera pitch operating range. This minimises average mismatch error across all valid camera pitches. "Above horizon" wording is incorrect for this convention; the camera is always looking downward in city view. Sign-off status: CONFIRMED — bake midpoint −45° and camera pitch operating range [−70°, −20°] are final per `architecture/asset-standards/3d-model-standards.md` Camera Pitch Range section. Phase 9 billboard authoring may proceed on this basis.
 - **Bake lighting**: flat ambient-only (no directional light). This prevents sun-angle mismatch artifacts at different times of day. The runtime shader does not apply directional lighting to billboard quads (V1 scope).
-- **Mip chain**: 4-level mandatory (1024×128 → 512×64 → 256×32 → 128×16); set `GL_TEXTURE_MAX_LEVEL = 3`.
+- **Mip chain**: 4-level mandatory (1024×128 → 512×64 → 256×32 → 128×16); set `GL_TEXTURE_MAX_LEVEL = 3`. Validators checking billboard mip count must read the `dwMipMapCount` field from the standard DDS header: `dwMipMapCount` is at **byte offset 28** in the DDS header. The value must be >= 4 to satisfy the required 4-level mip chain. A `dwMipMapCount` of 0 or 1 indicates no mip chain was generated — do not commit that file.
 - **Texture wrap mode**: Set `GL_TEXTURE_WRAP_S = GL_CLAMP_TO_EDGE` and `GL_TEXTURE_WRAP_T = GL_CLAMP_TO_EDGE` on billboard atlas textures. The default `GL_REPEAT` wrap mode causes the atlas strip to tile at the strip boundary, producing a ghost frame from the opposite end of the 1×8 strip when the UV quad samples near the horizontal edge. Clamp-to-edge eliminates this artifact.
 - **Cell padding**: 8 texels per-cell border on each edge of each 128×128 frame — frames are packed edge-to-edge within the 1024×128 strip so the effective gutter between frames equals 16 texels (8 from each neighbour). **Border halves per mip level**: the 8-texel border at mip 0 halves at each successive mip: **8 px (mip 0) → 4 px (mip 1) → 2 px (mip 2) → 1 px (mip 3)**. At mip 3 the 1-texel border is the minimum safe margin to prevent bleed between adjacent frames in the strip. This is why a 4-level mip chain (clamped at `GL_TEXTURE_MAX_LEVEL = 3`) is the maximum safe chain for an 8-texel border — adding a 5th mip level would produce a sub-texel (0.5 px) border, which is insufficient to prevent bleed.
 - **Usable content area per frame**: **112×112 px** at mip level 0 (128 px minus 8 px border on each of the 4 sides: 128 − 8 − 8 = 112). The building silhouette, windows, and all visible geometry must be authored to fit within the 112×112 usable area of each frame. Content that bleeds into the 8 px border zone will be clipped by mip-level bleeding or the clamp-to-edge wrap mode at far distances. **Mip level progression (authoring minimum legibility requirement)**:
