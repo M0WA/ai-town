@@ -68,16 +68,18 @@ Both tools produce standards-compliant DDS files and are CI-verified. Do not use
 
 | Category | Tool | Command |
 |---|---|---|
-| Diffuse sRGB opaque (DXT1 BC1, 4-mip) | nvcompress | `nvcompress -color -bc1 -mips 4 input.png output.dds` |
+| Diffuse sRGB opaque (DXT1 BC1, 4-mip) | nvcompress | `nvcompress -color -bc1 input.png output.dds` |
 | Diffuse sRGB opaque (DXT1 BC1, 4-mip) | Compressonator | `compressonatorcli -fd BC1 -miplevels 4 input.png output.dds` |
-| Diffuse sRGB with alpha (DXT5 BC3, 4-mip) | nvcompress | `nvcompress -color -bc3 -mips 4 input.png output.dds` |
+| Diffuse sRGB with alpha (DXT5 BC3, 4-mip) | nvcompress | `nvcompress -color -bc3 input.png output.dds` |
 | Diffuse sRGB with alpha (DXT5 BC3, 4-mip) | Compressonator | `compressonatorcli -fd BC3 -miplevels 4 input.png output.dds` |
-| Normal map DXT5nm (BC3, 4-mip) | nvcompress | `nvcompress -normal -bc3 -mips 4 input_swizzled.png output.dds` |
+| Normal map DXT5nm (BC3, 4-mip) | nvcompress | `nvcompress -normal -bc3 input_swizzled.png output.dds` |
 | Normal map DXT5nm (BC3, 4-mip) | Compressonator | `compressonatorcli -fd BC3 -miplevels 4 input_swizzled.png output.dds` |
-| Specular packed (BC3, linear, 4-mip) | nvcompress | `nvcompress -bc3 -mips 4 input.png output_sp.dds` |
+| Specular packed (BC3, linear, 4-mip) | nvcompress | `nvcompress -bc3 input.png output_sp.dds` |
 | Specular packed (BC3, linear, 4-mip) | Compressonator | `compressonatorcli -fd BC3 -miplevels 4 input.png output_sp.dds` |
 | UI sprite sheet (RGBA8 uncompressed, no mip) | nvcompress | `nvcompress -rgb -nomips input.png output.dds` |
 | UI sprite sheet (RGBA8 uncompressed, no mip) | Compressonator | `compressonatorcli -fd ARGB_8888 -nomipmap input.png output.dds` |
+
+**IMPORTANT — nvcompress mip chain behaviour**: `nvcompress` does NOT support a `-miplevels N` (or `-mips N`) CLI parameter — no such flag exists in NVTT 2.x or NVTT 3.x. `nvcompress` always generates a **full mip chain** down to 1×1 (or 1×N for non-square textures) by default. For building diffuse, normal maps, and specular packed textures this is acceptable — the GPU sampler uses all levels and performance is optimal. For the **billboard atlas** (1024×128, 8-frame strip), a full chain produces 11 mip levels; the runtime sets `GL_TEXTURE_MAX_LEVEL = 3` to cap GPU reads at 4 levels, so in-game rendering is correct, but the DDS file on disk will contain extra levels. **If the Phase 5 validator enforces `mip_count == 4` exactly** (e.g. via `struct.unpack('<I', d[28:32])[0] == 4`), billboard atlases authored with `nvcompress` will fail that check. For billboard atlases requiring exactly 4 mip levels **in the DDS file**, use **Compressonator** with `-miplevels 4`.
 
 ### Validating sRGB DDS Output (mandatory before committing any diffuse atlas DDS)
 
@@ -263,8 +265,11 @@ Small buildings and props use a pre-baked imposter atlas at LOD2 (beyond 100 m).
 > Phase 1 sign-off — 2026-02-21: Billboard atlas format confirmed — 1024×128 DXT5 sRGB
 > (`GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`), 8 frames at 128×128 px, 112×112 px usable
 > content area per frame (8-texel border on all four sides), 4-level mip chain
-> (`GL_TEXTURE_MAX_LEVEL = 3`), `nvcompress -color -bc3 -mips 4` authoring pipeline
-> (or Compressonator equivalent), straight (unassociated) alpha convention.
+> (`GL_TEXTURE_MAX_LEVEL = 3`), Compressonator `compressonatorcli -fd BC3 -miplevels 4`
+> authoring pipeline (preferred — exact 4-level DDS output); nvcompress `nvcompress -color -bc3`
+> also acceptable (full mip chain generated; GPU reads capped at 4 via GL_TEXTURE_MAX_LEVEL=3,
+> but Phase 5 validator must use `mip_count >= 4` not `== 4` if nvcompress is used),
+> straight (unassociated) alpha convention.
 > Phase 9 billboard asset authoring may proceed on this basis.
 > Signed: graphics-artist-2d-texture.
 
