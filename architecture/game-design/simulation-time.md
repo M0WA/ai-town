@@ -31,8 +31,13 @@ The main loop calls `CitySimulation::tick(float realDeltaSeconds)` **every frame
 
 ```cpp
 // Main loop — pseudocode (called every rendered frame)
-float realDelta = clock.deltaSeconds();   // raw wall-clock frame time
+// IClock exposes nowSeconds() only — the main loop owns the previousTime variable and
+// computes realDelta each frame. IClock has no deltaSeconds() method.
+double now = clock.nowSeconds();
+float realDelta = static_cast<float>(now - m_previousTime);  // raw wall-clock frame time
+m_previousTime = now;
 citySimulation.tick(realDelta);           // NOT realDelta * multiplier
+// Note: m_previousTime is initialised to clock.nowSeconds() before the loop begins.
 ```
 
 ### Internal Accumulator

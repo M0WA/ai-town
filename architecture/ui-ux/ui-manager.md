@@ -325,7 +325,9 @@ All `UIManager` methods are main-thread-only. `CitySimulation` callbacks (forced
 
 The canonical call site is after `CameraController::update(dt)` (step 3) and is itself step 3b in the 8-step canonical frame sequence. Calling `update()` after `beginScene()` would mutate timer state mid-frame, producing one-frame-stale notification dismiss behavior — for example, a toast whose auto-dismiss timer expires during `beginScene()` would remain visible for one extra frame because the dismiss callback fires after `draw()` has already submitted the toast geometry to the GPU.
 
-The required frame sequence (abbreviated to the relevant steps) is:
+The required frame sequence (abbreviated to the relevant steps) is shown from two perspectives.
+
+**Main game loop view** — what `src/main.cpp` calls directly:
 
 ```text
 1. Poll OS events (IrrlichtDevice::run())
@@ -333,10 +335,21 @@ The required frame sequence (abbreviated to the relevant steps) is:
 3. CameraController::update(dt)
 3b. UIManager::update(realDeltaSeconds)    <-- MUST be here, before beginScene()
 4. RenderSystem::beginFrame()              <-- driver->beginScene() is called inside here
-5. sceneManager->drawAll()
-6. UIManager::draw()                       <-- issues per-panel draw() calls; after drawAll()
-7. RenderSystem::endFrame()                <-- driver->endScene() is called inside here
-8. IrrlichtDevice::yield() / sleep
+5. renderer->drawScene()                   <-- internally calls sceneManager->drawAll() THEN uiManager->draw()
+6. RenderSystem::endFrame()                <-- driver->endScene() is called inside here
+7. IrrlichtDevice::yield() / sleep
 ```
 
-`UIManager::draw()` (step 6) is called after `sceneManager->drawAll()` and before `endScene()` — this is correct and distinct from `UIManager::update()` (step 3b), which must precede `beginScene()`. The two methods serve different purposes: `update()` advances timer state and dispatches dismissal logic; `draw()` issues rendering calls that must occur within the `beginScene()`/`endScene()` block.
+`src/main.cpp` must not call `sceneManager->drawAll()` or `UIManager::draw()` directly. Both are internal to `IrrlichtRenderer::drawScene()`. Calling either from `main.cpp` would bypass the `IRenderer` abstraction and break the header dependency rules described in `architecture/graphics-architecture/irrlicht-device-lifecycle.md`.
+
+**IrrlichtRenderer::drawScene() internal view** — what happens inside step 5 above:
+
+```text
+Inside IrrlichtRenderer::drawScene():
+  a. sceneManager->drawAll()       // 3D scene pass
+  b. uiManager->draw()             // 2D UI pass, per-panel Z-order; inside beginScene/endScene block
+```
+
+This internal sequence is the authoritative render loop defined in `architecture/graphics-architecture/irrlicht-device-lifecycle.md`. Any change to the ordering of `sceneManager->drawAll()` and `uiManager->draw()` must be made there first.
+
+`UIManager::draw()` (internal step b) is called after `sceneManager->drawAll()` and before `endScene()` — this is correct and distinct from `UIManager::update()` (step 3b of the main loop), which must precede `beginScene()`. The two methods serve different purposes: `update()` advances timer state and dispatches dismissal logic; `draw()` issues rendering calls that must occur within the `beginScene()`/`endScene()` block.
