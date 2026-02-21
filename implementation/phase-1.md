@@ -154,7 +154,7 @@ Establish the Irrlicht device lifecycle, render loop call order, `CameraControll
     }
     ```
 
-  - (c) `void draw()` no-op stub;
+  - (c) `void draw()` no-op stub. **FORWARD-REFERENCE — anti-no-op requirement (Phases 1–3)**: All panel stub `draw()` bodies added in Phases 1–3 MUST call at least one `IUIBackend` method (e.g., `setElementVisible`) — empty `draw()` bodies `{}` will cause the Phase 4 25% `src/ui/` coverage gate to fail. See `architecture/testing/coverage.md` IMPLEMENTER CONSTRAINT section. The `UIManager` stub `draw()` itself is a legitimate no-op at Phase 1 (no panels registered yet), but any panel class introduced at Phase 1 or later that has a `draw()` must comply with this rule.
   - (d) `void update(float realDeltaSeconds)` no-op stub.
 
   Document as a compile-target stub. Phase 3 replaces the stub bodies with the full shell implementation without changing any method signatures. This prevents Phase 3 from requiring a header-breaking constructor or method signature change. The stub is required so step 3b (`UIManager::update()`) in the 8-step frame sequence compiles in Phase 1. **Clarification on "no header changes"**: This guarantee applies only to the 4 Phase 1 method signatures (constructor, `onEvent`, `draw`, `update`) — their signatures remain identical between Phase 1 and Phase 3. Phase 3 WILL add new method declarations to `UIManager.h` (e.g., `transitionToGameplay`, `showForcedLoanDialog`, and other panel management methods) — this is expected and is NOT a contradiction of the "no header changes" guarantee. The guarantee means Phase 3 does not need to restructure or rename any of the 4 Phase 1 methods; it only adds new methods alongside them.
