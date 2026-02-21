@@ -32,6 +32,8 @@ This section is the authoritative reference for which game-over flow components 
 | Streak-break "finances stabilizing" Normal toast | YES | YES |
 | Month-3 `transitionToGameOver()` + blocking `ModalDialog` | NO | YES |
 
+**Clarifying note on Sandbox vs. Scenario-only mechanics**: The `transitionToGameOver()` call is Scenario-only (no-op in Sandbox). However, ALL other deficit-streak mechanics fire in BOTH modes: the progressive CRITICAL toasts, the auto-slow to 1× on month 1, the red flashing budget indicator on month 2, and the streak-break feedback toast. `CitySimulation` MUST NOT gate the consecutive-deficit counter on `GameMode` — the counter increments in both modes. UIManager is the sole layer that gates `transitionToGameOver()` on GameMode.
+
 **Explicit rules:**
 
 - The deficit mechanic (budget tick evaluation, debt cap, forced loans, Emergency Municipal Bond) is active in both Sandbox and Scenario modes. The ≥ −50% deficit streak is tracked in both modes.

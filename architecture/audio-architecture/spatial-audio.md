@@ -58,16 +58,21 @@ These three calls ensure the source is completely unaffected by listener positio
 
   **Note**: The AI Town `vec3` struct defined in `src/interfaces/vec3.h` uses **lowercase** `x`, `y`, `z` fields. `AudioSystem::syncListenerToCamera` takes a `const CameraState& cam` where each positional/directional member is an AI Town `vec3` — use `cam.position.x` (lowercase), `cam.forward.y` (lowercase), etc. This is distinct from Irrlicht's `core::vector3df`, which uses uppercase `.X/.Y/.Z`. Never mix the two.
 
+  **Coordinate system conversion — Z-negation required**: Irrlicht uses a **LEFT-HANDED coordinate system** (X=right, Y=up, Z=forward into screen). OpenAL uses a **RIGHT-HANDED coordinate system** (X=right, Y=up, Z=BACKWARD out of screen). When converting `CameraState` vectors (stored in Irrlicht world coordinates) to `AL_ORIENTATION`, the Z component of both `forward` and `up` must be negated: `alListenerForward = {cam.forward.x, cam.forward.y, -cam.forward.z}`, `alListenerUp = {cam.up.x, cam.up.y, -cam.up.z}`. The `syncListenerToCamera()` implementation MUST apply this Z-negation — omitting it causes all spatial audio to have inverted depth perception (sounds behind the camera appear in front). The Phase 1 stub comment at step 4a must include this Z-negation requirement verbatim.
+
   ```cpp
   void AudioSystem::syncListenerToCamera(const CameraState& cam) {
       // Position
       alListener3f(AL_POSITION, cam.position.x, cam.position.y, cam.position.z);
       // Velocity (set to zero — we do not model Doppler for camera movement)
       alListener3f(AL_VELOCITY, 0.f, 0.f, 0.f);
-      // Orientation: forward vector followed by up vector (6-float array)
+      // Orientation: forward vector followed by up vector (6-float array).
+      // COORDINATE SYSTEM CONVERSION: Irrlicht is LEFT-HANDED (Z forward into screen);
+      // OpenAL is RIGHT-HANDED (Z backward out of screen). Negate Z on both vectors.
+      // Omitting this Z-negation inverts depth perception for all spatial audio.
       ALfloat orientation[6] = {
-          cam.forward.x, cam.forward.y, cam.forward.z,   // "at" vector
-          cam.up.x,      cam.up.y,      cam.up.z          // "up" vector
+          cam.forward.x, cam.forward.y, -cam.forward.z,  // "at" vector (Z negated)
+          cam.up.x,      cam.up.y,      -cam.up.z         // "up" vector (Z negated)
       };
       alListenerfv(AL_ORIENTATION, orientation);
   }

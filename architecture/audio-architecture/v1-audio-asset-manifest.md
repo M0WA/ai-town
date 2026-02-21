@@ -143,6 +143,16 @@ Lower quality flags are not acceptable for V1 — audible compression artifacts 
 sustained or ambient passages undermine the production quality goal.
 These floors apply to the authored OGG files; they are a delivery requirement, not a runtime concern.
 
+## Vehicle Engine Loop Duration Constant
+
+```cpp
+constexpr float kVehicleEngineLoopMinDurationSeconds = 6.0f;
+```
+
+This constant must be referenced by the Phase 5 `validate_assets.py` vehicle engine CI check — do NOT inline the literal 6.0. The rationale for 6.0 s minimum: at the lowest pitch-shift ratio (0.75×), a 6 s loop produces a ~4.5 s perceived loop — below the audible repetition threshold. A 5 s loop would produce ~3.75 s perceived, which is perceptibly mechanical.
+
+`kVehicleEngineLoopMinDurationSeconds` is declared in `audio_types.h` alongside `kZoneLoopMaxPreloadDurationSeconds`. The Phase 5 `validate_assets.py` check for `sfx_vehicle_engine_*.ogg` files MUST import or reference this constant (or the equivalent Python literal derived from it) rather than hardcoding `6.0` directly in the check script. This ensures that any future change to the minimum duration threshold requires a single-source update in `audio_types.h` and `v1-audio-asset-manifest.md` simultaneously, rather than a scattered literal search.
+
 ## CI Asset Validation Requirements
 
 The following checks MUST be enforced by `tools/validate_assets.py` before Phase 10 audio integration. Any failure is a hard build error — the asset pipeline must not proceed to integration if any of these checks fail. Specific check numbers will be assigned in Phase 4 when the full `validate_assets.py` check structure is defined; until then these are documented requirements.
@@ -150,7 +160,7 @@ The following checks MUST be enforced by `tools/validate_assets.py` before Phase
 | # | File pattern | Rule | Hard error condition |
 |---|---|---|---|
 | TBD | `music_*.ogg`, `ambient_*.ogg` | Sample rate must be 44100 Hz; channel count must match spec (stereo — 2 channels — for all music stems and all ambient beds per this manifest) | Any file where `vi->rate != 44100` or `vi->channels != 2`; authoring at any other sample rate is a hard asset error |
-| TBD | `sfx_vehicle_engine_*.ogg` | Duration must be >= 6 seconds; file must be mono (1 channel); sample rate must be 44100 Hz | Hard error if duration < 6.0 s OR `vi->channels != 1` OR `vi->rate != 44100` (see CLAUDE.md minimum loop length requirement and `sfx_vehicle_engine_idle` / `sfx_vehicle_engine_move` notes above for full rationale) |
+| TBD | `sfx_vehicle_engine_*.ogg` | Duration must be >= `kVehicleEngineLoopMinDurationSeconds` (6.0 s); file must be mono (1 channel); sample rate must be 44100 Hz | Hard error if duration < `kVehicleEngineLoopMinDurationSeconds` (6.0 s) OR `vi->channels != 1` OR `vi->rate != 44100`. The check script MUST reference `kVehicleEngineLoopMinDurationSeconds` — do NOT inline the literal 6.0 (see Vehicle Engine Loop Duration Constant section above for full rationale) |
 | TBD | `sfx_zone_*.ogg` | Duration must be <= 18 seconds; file must be mono (1 channel) | Any zone loop file with duration > 18.0 s or `vi->channels != 1` |
 | TBD | `stinger_*.wav` | Must be mono WAV PCM | Any stinger file that is not a PCM WAV or has `channels != 1` |
 | TBD | `music_*.ogg` | A co-located `.json` sidecar file must be present alongside the OGG file. All `music_*.ogg` files are covered — including main menu variants (`music_main_menu_*.ogg`) AND all gameplay stems (`music_calm_*.ogg`, `music_growth_*.ogg`, `music_crisis_*.ogg`). Files matching `ambient_*.ogg` are explicitly excluded. The pattern `music_*.ogg` covers both main menu and gameplay stem files. | Any `music_*.ogg` file with no matching `<basename>.json` sidecar in `${AITOWN_ASSETS_DIR}/audio/`; build error if absent (per audio-asset-formats.md) |

@@ -185,7 +185,7 @@ private:
     ALCcontext*               m_context{nullptr};
     std::atomic<bool>         m_stopThread{false};
     std::thread               m_audioThread;
-    std::mutex                m_streamMutex;
+    std::mutex                m_streamMutex;       // Crossfade command queue mutex — see "Two-Mutex Design" section below
     std::mutex                m_occlusionMutex;   // Protects EFX filter writes in onSourceRecycled() and updateOcclusion() — see audio-occlusion.md
     std::condition_variable   m_streamCV;
     // Audio thread init synchronization (constructor waits on m_initCV before returning):
@@ -347,6 +347,32 @@ m_audioThread = std::thread(&AudioSystem::audioThreadFunc, this);
     if (!notified || m_initError) throw std::runtime_error("AudioSystem init failed");
 }
 ```
+
+---
+
+## Two-Mutex Design
+
+`AudioSystem` uses exactly two mutexes for its thread-safety model. This design is intentional and complete for V1.
+
+### `m_streamMutex` — Crossfade Command Queue Mutex
+
+`m_streamMutex` is the **crossfade command queue mutex**. It protects the queue of pending crossfade commands that the main thread enqueues and the audio thread dequeues. This is the ONLY mutex used for crossfade coordination — there is no separate crossfade mutex. Phase 7 MUST NOT introduce a third mutex for crossfade commands; use `m_streamMutex` exclusively. The two-mutex design (`m_streamMutex` for stream/crossfade commands, `m_occlusionMutex` for per-source GAINHF writes) is intentional and complete for V1.
+
+`m_streamCV` is paired with `m_streamMutex` and is used to wake the audio thread when new crossfade or stream commands are enqueued.
+
+### `m_occlusionMutex` — EFX Filter Write Mutex
+
+`m_occlusionMutex` protects EFX lowpass filter parameter writes (`alFilterf` calls that set `AL_LOWPASS_GAINHF`) in `onSourceRecycled()` and `updateOcclusion()`. It is separate from `m_streamMutex` to avoid blocking crossfade command delivery while occlusion updates are in progress. See `audio-occlusion.md` for the full occlusion filter protocol.
+
+### Prohibited Additions
+
+Do NOT add a third mutex for any V1 audio subsystem. Specifically:
+
+- No separate `m_crossfadeMutex` — crossfade commands use `m_streamMutex`.
+- No separate `m_duckMutex` — music duck state uses `std::atomic<DuckState> m_duckState` and `std::atomic<float> m_musicDuckGain` (lock-free).
+- No separate `m_stingerMutex` — stinger commands are enqueued through `m_streamMutex` along with crossfade commands.
+
+The `m_initMutex` / `m_initCV` pair is a construction-time synchronization mechanism only. It is not a runtime operational mutex and does not count against the two-mutex runtime design. It is unused after `AudioSystem` construction completes.
 
 ---
 

@@ -39,15 +39,23 @@
   // Returns a UIScaler::VirtualPoint nested struct { int x; int y; }.
   // OUTPUT CLAMPING: if the input screen coordinates fall outside the active viewport
   // (e.g. mouse moved into a letterbox/pillarbox black bar, or outside the window),
-  // the returned VirtualPoint is clamped to [0, virtualW] × [0, virtualH] — i.e.
-  // x is clamped to [0, 1920] and y is clamped to [0, 1080].
-  // unproject() NEVER returns negative virtual coordinates or coordinates exceeding
+  // the returned VirtualPoint is clamped to [0, virtualW-1] × [0, virtualH-1] — i.e.
+  // x is clamped to [0, 1919] and y is clamped to [0, 1079].
+  // The maximum valid virtual X is 1919 (not 1920); the maximum valid virtual Y is
+  // 1079 (not 1080). Coordinates equal to virtualW or virtualH are out-of-bounds and
+  // MUST NOT be returned by unproject() — they would produce an off-by-one index into
+  // texture atlases and layout tables sized for [0, virtualW-1] × [0, virtualH-1].
+  // unproject() NEVER returns negative virtual coordinates or coordinates at or above
   // the virtual resolution. Callers must not add their own clamp on top of this.
   struct VirtualPoint { int x; int y; };  // nested inside UIScaler — callers use UIScaler::VirtualPoint
   VirtualPoint unproject(int physicalX, int physicalY) const;
   ```
 
   **Note**: These signatures are locked at Phase 0 (stub header only — no logic). Phase 1 fills in the full `UIScaler` implementation and delivers all 5 named `UIScaler` unit tests. Phase 3 VERIFYs the Phase 1 deliverables are present and adds one compile-only stub test case — it does NOT add or change implementation logic. Teams implementing `CameraController::OnInputEvent()` and `UIManager` input dispatch MUST use exactly these signatures to avoid integration breakage.
+
+  **Phase 1 exit criterion for UIScaler clamping**: The Phase 1 implementation MUST include unit tests verifying BOTH clamp boundaries:
+  - **Lower-bound clamp test**: a physical coordinate that maps below virtual (0, 0) (e.g. mouse in the letterbox black bar above the viewport) must return `VirtualPoint{0, 0}`, never a negative value.
+  - **Upper-bound clamp test**: a physical coordinate that maps to or beyond virtual (1920, 1080) (e.g. mouse in the pillarbox or below the viewport) must return `VirtualPoint{1919, 1079}`, never a value of 1920 or 1080. This test is mandatory alongside the lower-bound test — an implementation that clamps to `[0, virtualW]` (inclusive 1920) rather than `[0, virtualW-1]` (inclusive 1919) will pass the lower-bound test but silently produce out-of-bounds atlas indices on the high side.
 
 ## UIScaler Constructor
 

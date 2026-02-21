@@ -515,11 +515,13 @@ markdown-lint:
 
   This prints the tag name and the full 40-character commit SHA for the latest release. Record the SHA, verify it matches the tag on the `actions/setup-python` releases page, and substitute it directly into the `uses:` line. The resulting step looks like the following, where `<40-CHAR-SHA>` is replaced with the real value resolved above:
 
+  **`python-version` MUST be set to a specific minor version (e.g., `'3.12'`) — NOT a floating major version (`'3'`).** Floating major versions break supply-chain reproducibility because `python-version: '3'` resolves to different patch versions on different runner instances — GitHub-hosted runners update their pre-installed Python over time, meaning the same workflow YAML can silently execute against `3.12.x` today and `3.13.x` next month. A floating `'3'` also interacts poorly with `actions/setup-python`'s resolution logic, which may select a different minor version depending on what is cached in the runner image at the time of execution. The pinned version MUST be documented in the YAML alongside the SHA-pinned `actions/setup-python` action reference. At Phase 1 implementation, use `python-version: '3.12'` (the current Python 3 LTS minor version).
+
   ```yaml
       - name: Set up Python 3
         uses: actions/setup-python@<40-CHAR-SHA>  # replace with full SHA resolved via gh release view
         with:
-          python-version: '3'
+          python-version: '3.12'  # pin to specific minor version — never use '3' (floating major breaks reproducibility)
   ```
 
   **CRITICAL**: The token `@<40-CHAR-SHA>` above is illustrative prose — it is NOT a valid `uses:` value and MUST NEVER appear verbatim in a committed `ci.yml`. The supply-chain lint step in `build-linux` will match any `<...>` angle-bracket token and immediately fail the job, catching this mistake at CI time. Resolve the SHA live before committing.
