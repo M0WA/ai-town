@@ -27,3 +27,13 @@ enum class SpeedMultiplier {
 };
 
 using SimSpeed = SpeedMultiplier;
+
+// DensityUnlockState — snapshot of all density-unlock counters and flags.
+// Referenced by ICitySimulation::getDensityUnlockState().
+// Phase 1 stub returns a default-constructed DensityUnlockState{}.
+// Phase 3 fills in real implementation.
+// Density tiers 0-5 (6 total): one counter + one flag per tier.
+struct DensityUnlockState {
+    int  consecutive_months_above_threshold[6]{};  // 0-2 range; one counter per density tier
+    bool unlock_flags[6]{};                        // true if the corresponding tier is unlocked
+};

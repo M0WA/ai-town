@@ -6,6 +6,7 @@
     "irrlicht",
     "openal-soft",
     "libvorbis",
-    "fmt"
+    "fmt",
+    "glew"
   ]
 }

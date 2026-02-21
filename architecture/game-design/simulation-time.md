@@ -113,3 +113,45 @@ Any implementation that advances the simulation tick after `beginScene()` has be
 ### Design Rationale
 
 The accumulator lives inside `CitySimulation`, not in the main loop. This keeps the main loop unconditionally simple — it calls `tick()` every frame with the raw delta — and means time-scaling policy is fully encapsulated in one place. If a future speed setting (e.g., 30×) is added, only `CitySimulation` needs updating; the main loop is unchanged.
+
+---
+
+## Phase 1 gamedesign-lookandfeel sign-off
+
+**Date**: 2026-02-21
+**Agent**: gamedesign-lookandfeel
+
+### DEFAULT SPEED CONTRACT stub comment verified
+
+Code inspection of `src/main.cpp` at the step 2 call site (lines 135-144) confirms the DEFAULT SPEED CONTRACT block is present verbatim:
+
+```
+// DEFAULT SPEED CONTRACT: CitySimulation must be constructed or initialized at
+// SpeedMultiplier::x3 (not x1 or Paused) — see architecture/game-design/simulation-time.md.
+// Phase 6 MUST verify setSpeed(SpeedMultiplier::x3) or equivalent initialization is
+// called; initializing at x1 silently breaks the default starting speed contract.
+```
+
+The stub call `// TODO Phase 6: citySimulation.tick(realDeltaSeconds);` appears at line 144, which is step 2 in the 8-step frame loop. The `cameraController.update(realDeltaSeconds);` call appears at line 149, which is step 3. The Frame-Loop Position Constraint is satisfied: the tick stub is at step 2, before step 3 (CameraController::update), before any beginScene() call.
+
+The default starting speed of 3x (SpeedMultiplier::x3) is correctly preserved by this stub for Phase 6 implementation. Phase 6 implementers are put on notice via this comment that CitySimulation must NOT initialize at x1 or Paused.
+
+### simulation_constants.h Part A values verified
+
+Code inspection of `src/simulation/simulation_constants.h` confirms all Part A constants are set to their spec-default values:
+
+| Constant | Required value | Actual value | Status |
+|---|---|---|---|
+| `grace_period_real_seconds` | 120.0 | 120.0 | PASS |
+| `road_maintenance_cost_per_tile` | 10 | 10 | PASS |
+| `road_placement_cost` | 500 | 500 | PASS |
+| `base_day_duration_easy` | 1.0 | 1.0 | PASS |
+| `base_day_duration_normal` | 1.0 | 1.0 | PASS |
+| `base_day_duration_hard` | 1.0 | 1.0 | PASS |
+| `base_income_per_resident_low` | 50 | 50 | PASS |
+| `base_income_per_resident_medium` | 50 | 50 | PASS |
+| `base_income_per_resident_high` | 55 | 55 | PASS |
+| `utility_fee_power_per_tile` | 5 | 5 | PASS |
+| `utility_fee_water_per_tile` | 3 | 3 | PASS |
+
+All Part A constants are correctly initialized. No stubs remain at zero for these values. The Phase 3 economy and property-based tests that depend on these exact values will compute correct expected outcomes.

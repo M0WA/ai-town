@@ -28,4 +28,12 @@ public:
 
     // Unproject physical coordinates to virtual 1920x1080 space.
     VirtualPoint unproject(int physicalX, int physicalY) const;
+
+private:
+    int m_virtualW;
+    int m_virtualH;
+    int m_viewportW;
+    int m_viewportH;
+    int m_offsetX;
+    int m_offsetY;
 };

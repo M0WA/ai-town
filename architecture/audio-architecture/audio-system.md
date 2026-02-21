@@ -477,3 +477,22 @@ The pre-load tier boundary used when classifying sounds into the pre-load vs. st
 - `constexpr float kZoneLoopMaxPreloadDurationSeconds = 18.0f;` declared in `audio_types.h`
 - Zone loop SoundId assignments (IDs 17–19): `architecture/audio-architecture/v1-audio-asset-manifest.md`
 - Pre-load vs. streaming tier boundary (20 s): `architecture/audio-architecture/streaming-architecture.md`
+
+---
+
+## Phase 1 sound-dev-opensoftal Sign-Off
+
+**Date**: 2026-02-21
+**Role**: sound-dev-opensoftal
+
+The following Phase 1 items have been verified by code inspection:
+
+1. **OAL-2 frame-loop comment covers all 3 update() responsibilities**: Code inspection of `src/main.cpp` confirms the step 4b OAL-2 stub comment explicitly names all three main-thread responsibilities of `AudioSystem::update()`: (1) advance occlusion raycast budget + per-source distance cull checks (depends on listener position committed by step 4a), with the note that per-source GAINHF state-change writes MUST hold `m_occlusionMutex`; (2) process queued time-of-day transition consequences posted by `CitySimulation`; (3) queue crossfade commands to audio thread via mutex-protected command queue — MUST NOT call `alSourcef(AL_GAIN)` directly on streaming sources from the main thread. All three responsibilities are present and correctly described. VERIFIED.
+
+2. **syncListenerToCamera Z-negation documented**: Code inspection of `src/main.cpp` confirms the step 4a stub comment explicitly documents that the Z component of BOTH `cam.forward` AND `cam.up` MUST be negated when constructing the `AL_ORIENTATION` 6-float array (`{ cam.forward.x, cam.forward.y, -cam.forward.z, cam.up.x, cam.up.y, -cam.up.z }`), with the rationale that Irrlicht uses a LEFT-HANDED coordinate system (Z forward into screen) and OpenAL uses a RIGHT-HANDED coordinate system (Z backward out of screen). Reference to `architecture/audio-architecture/spatial-audio.md` is present. VERIFIED.
+
+3. **Thread-context safety note present**: Code inspection of `src/main.cpp` confirms the step 4b OAL-2 stub comment includes the TODO Phase 7 forward-reference verifying that `alcSetThreadContext(m_context)` on the audio thread does NOT displace the process-wide context set by `alcMakeContextCurrent(m_context)` on the main thread, with cross-reference to `architecture/audio-architecture/audio-system.md`. VERIFIED.
+
+4. **getCameraState() live-path uses getUpVector()**: Code inspection of `src/ui/CameraController.cpp` confirms that the live-camera path (when `camera != nullptr`) assigns `state.up = toVec3(m_camera->getUpVector())` with an explicit comment `// MUST use getUpVector(), NOT (0,1,0)`. The hardcoded `(0,1,0)` form is absent from the live path. VERIFIED.
+
+5. **onSourceRecycled() / m_occlusionMutex contract present**: Code inspection of `architecture/audio-architecture/audio-occlusion.md` confirms that the `onSourceRecycled()` implementation block explicitly shows `std::lock_guard<std::mutex> lk(m_occlusionMutex)` as the first statement before any EFX filter writes, with documentation that this is called from the main thread at SFX pool acquisition/eviction time, that the audio thread's `updateOcclusion()` holds the same mutex during EFX filter writes, and that acquiring `m_occlusionMutex` in `onSourceRecycled()` is correct and carries no deadlock risk because `m_streamMutex` and `m_occlusionMutex` are never held simultaneously by the same thread. VERIFIED.

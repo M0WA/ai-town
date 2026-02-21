@@ -193,3 +193,30 @@ The time-of-day schedule takes **absolute precedence** over the simulation-state
 **Crisis audio during nighttime disaster events**: If a crisis begins or continues during a nighttime period, the game does NOT switch to crisis music. Crisis music escalation applies during day hours only. A city under crisis at night retains the night Calm ambient bed and night Calm music stem — the crisis is communicated through notification stingers (`sfx_fire_alert`, `stinger_crisis`) rather than music intensity escalation. This is intentional: nighttime crisis music would disrupt the established day/night audio identity. Music ducking for stingers operates normally regardless of time of day.
 
 **Implementation**: `AudioSystem` tracks `m_currentTimeOfDay` (enum: DAY / DUSK / NIGHT / DAWN). When the in-game clock crosses a time-of-day boundary (supplied by `CitySimulation` via `AudioSystem::setTimeOfDay()`), re-evaluate the current music intensity and queue a crossfade if the forced-Calm override activates or deactivates.
+
+---
+
+## Phase 1 sound-artist-opensoftal sign-off
+
+**Date**: 2026-02-21
+**Role**: sound-artist-opensoftal
+
+The following d1 (design-time) items have been reviewed and confirmed for Phase 1:
+
+1. **Raw wall-clock realDeltaSeconds confirmed**: `realDeltaSeconds` passed to `AudioSystem::update()` is raw wall-clock elapsed time with no speed-multiplier pre-applied. This is confirmed correct for both music crossfade durations (minimum 2 s, default 3 s) and ambient bed crossfade and hold durations (minimum hold = 1 crossfade duration = 3 s real time). Speed-multiplier contamination would cause ambient bed hold checks to fire at incorrect real-time intervals, producing audible crossfade cascade failures.
+
+2. **OAL-2 sub-ordering confirmed compatible with Phase 10**: The step 4a/4b sub-ordering (syncListenerToCamera before update, both before beginScene) is confirmed compatible with Phase 10 streaming integration requirements. The ordering ensures the listener position is committed before the audio thread reads it for occlusion and distance cull decisions.
+
+3. **3-second minimum hold confirmed**: Ambient bed crossfades use a 3-second minimum hold. The minimum hold per crossfade equals 1 crossfade duration = 3 s real time. This constraint is acknowledged as a design requirement that Phase 10 AudioSystem implementation must satisfy.
+
+4. **Dawn/dusk collapse at speed >= x3 confirmed**: At simulation speed >= x3, time-of-day transitions collapse dawn and dusk to silence. Transitions go directly day->night and night->day without activating the dawn or dusk intermediate beds.
+
+5. **Default simulation speed = x3 acknowledged (dawn/dusk inaudible by default)**: The default simulation speed is SpeedMultiplier::x3. This means dawn and dusk ambient beds are collapsed by default and will be inaudible at the default speed setting. These beds are audible only when the player manually selects x1 or x2 speed. This perceptual trade-off is an accepted design constraint.
+
+6. **Dawn/dusk OGG assets still required for x1/x2 gameplay**: Despite being inaudible at the default speed, dawn and dusk OGG assets must still be authored for Phase 10 delivery to support x1 and x2 gameplay. The authoring note in the "Authoring note — dawn/dusk collapse at default simulation speed" section has been verified as present: the day ambient bed must have tail character blending acceptably into the night bed without the dusk bed as a bridge.
+
+7. **Music sidecar vs ambient bed sidecar distinction confirmed**: ALL `music_*.ogg` files (both main menu variants and all 6 gameplay stems) require a co-located `.json` sidecar containing `{"bpm":90,"beats_per_bar":4}`. Ambient bed OGG files (`ambient_day`, `ambient_night`, `ambient_dawn`, `ambient_dusk`) require NO sidecar — they use real-time wall-clock crossfade duration and `AudioSystem` does not read BPM for ambient beds. This distinction is understood before Phase 10 asset authoring begins. The validate_assets.py stub correctly implements the sidecar check for `music_*.ogg` only.
+
+8. **sfx_zone mono exclusion from stereo check confirmed**: The `validate_assets.py` audio format block stub comment correctly excludes `sfx_zone_*.ogg` from the stereo (channels == 2) check. Zone loops are always authored as mono (1 channel). The channels == 2 stereo check applies ONLY to `music_*.ogg` and `ambient_*.ogg` files.
+
+Note: The perceptual verification (d2) — auditioning crossfades at simulated speed x3 with real authored assets — is explicitly deferred to Phase 10 and is NOT a Phase 1 exit criterion.

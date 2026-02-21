@@ -69,6 +69,12 @@ find_package(fmt CONFIG REQUIRED)
 # "libvorbis" installs both libvorbis and libvorbisfile; CMake target is Vorbis::vorbisfile.
 find_package(Vorbis REQUIRED)
 
+# GLEW: required for RenderSystem::glewInit() call immediately after createDevice().
+# GLEW::GLEW MUST be linked BEFORE Irrlicht in aitown_render to avoid symbol duplication
+# (GLEW symbol duplication mitigation-2 — Irrlicht bundles its own GLEW subset;
+# linking ours first ensures our symbols win the linker conflict).
+find_package(GLEW REQUIRED)
+
 # ============================================================================
 # FETCHCONTENT — GTest and RapidCheck
 # All FetchContent_Declare and FetchContent_MakeAvailable calls MUST appear ONLY
@@ -116,16 +122,22 @@ include(cmake/AitownTestHelpers.cmake)
 
 # ----------------------------------------------------------------------------
 # aitown_render — Irrlicht rendering adapter
-# Links Irrlicht (PRIVATE scope — Irrlicht headers must NOT propagate to test targets).
-# Phase 1 replaces placeholder.cpp with RenderSystem.cpp.
+# GLEW::GLEW MUST be linked BEFORE Irrlicht (GLEW symbol duplication mitigation-2).
+# PRIVATE scope — Irrlicht and GLEW headers must NOT propagate to test targets.
+# Phase 1 delivers RenderSystem.cpp, IrrlichtRenderer.cpp, IrrlichtUIBackend.h (inline).
 # ----------------------------------------------------------------------------
 add_library(aitown_render STATIC
-    src/rendering/placeholder.cpp
+    src/rendering/RenderSystem.cpp
+    src/rendering/IrrlichtRenderer.cpp
 )
 target_include_directories(aitown_render
-    PRIVATE   src/rendering/       # RenderSystem-internal headers (Phase 1+)
-    PRIVATE   src/interfaces/      # needed for RenderSystem.cpp's own includes
+    PRIVATE   src/rendering/       # RenderSystem/IrrlichtRenderer internal headers
+    PRIVATE   src/interfaces/      # IClock, IRenderer, etc.
+    PRIVATE   src/ui/              # UIManager.h (included by IrrlichtRenderer.cpp)
+    PRIVATE   src/platform/        # input_event.h (included by UIManager.cpp chain)
+    PRIVATE   ${CMAKE_SOURCE_DIR}  # project-root-relative includes (src/ui/UIManager.h etc.)
     INTERFACE src/interfaces/      # propagates to consumers (test targets, etc.)
+    INTERFACE src/rendering/       # IrrlichtUIBackend.h and IrrlichtRenderer.h for consumers
 )
 # AITOWN_ASSETS_DIR — absolute path expanded at configure time.
 # Correct for both Linux and Windows. Using CMAKE_CURRENT_SOURCE_DIR is incorrect
@@ -133,11 +145,26 @@ target_include_directories(aitown_render
 target_compile_definitions(aitown_render PRIVATE
     AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
 )
-# SPIKE RESOLVED: Irrlicht CMake target name is Irrlicht (no namespace).
-# Verified via adrido/irrlicht-vcpkg CMakeLists.txt: install(EXPORT Irrlicht ...) without NAMESPACE.
-# PRIVATE scope is mandatory — Irrlicht headers must NOT propagate to test targets.
-# Phase 1 replaces placeholder.cpp with RenderSystem.cpp.
-target_link_libraries(aitown_render PRIVATE Irrlicht)
+# GLEW::GLEW BEFORE Irrlicht — mandatory link order (GLEW symbol duplication mitigation-2).
+# PRIVATE scope: Irrlicht and GLEW headers must NOT propagate to test targets.
+target_link_libraries(aitown_render PRIVATE GLEW::GLEW Irrlicht)
+
+# Windows post-build: copy Irrlicht.dll and GLEW32.dll to the output directory.
+# Hard-fail in CI if either DLL is missing (build-windows job verifies both).
+if(WIN32)
+    add_custom_command(TARGET aitown_render POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:Irrlicht>
+            $<TARGET_FILE_DIR:aitown_render>
+        COMMENT "Copying Irrlicht.dll"
+    )
+    add_custom_command(TARGET aitown_render POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:GLEW::GLEW>
+            $<TARGET_FILE_DIR:aitown_render>
+        COMMENT "Copying GLEW32.dll"
+    )
+endif()
 
 # ----------------------------------------------------------------------------
 # aitown_audio — OpenAL Soft audio adapter
@@ -183,24 +210,29 @@ target_include_directories(aitown_sim
 )
 
 # ----------------------------------------------------------------------------
-# aitown_ui — UIManager, UIScaler, NotificationManager, dialogs
-# Phase 1 replaces placeholder.cpp with UIManager.cpp.
+# aitown_ui — UIManager, UIScaler, CameraController, NotificationManager, dialogs
+# Phase 1 delivers UIManager.cpp, UIScaler.cpp, CameraController.cpp (full bodies).
 # Note: IUIBackend.h lives in src/ui/ and is propagated via INTERFACE src/ui/.
 # Consumers linking aitown_ui can include IUIBackend.h via the project-root-relative
 # form #include "src/ui/IUIBackend.h" as long as ${CMAKE_SOURCE_DIR} is on their
 # include path (always present via the canonical include pattern).
 # ----------------------------------------------------------------------------
 add_library(aitown_ui STATIC
-    src/ui/placeholder.cpp
-    src/ui/CameraController.cpp    # Phase 1 implements body; placeholder at Phase 0
+    src/ui/UIManager.cpp
+    src/ui/UIScaler.cpp
+    src/ui/CameraController.cpp
 )
 target_include_directories(aitown_ui
-    PRIVATE   src/ui/              # implementation headers
-    PRIVATE   src/interfaces/      # needed for UIManager.cpp's own includes
-                                   # (IClock, ICitySimulation, IAudioSystem, ISimulationPauser)
+    PRIVATE   src/ui/              # UIManager.h, UIScaler.h, CameraController.h
+    PRIVATE   src/interfaces/      # IClock, ICitySimulation, IAudioSystem, ISimulationPauser
+    PRIVATE   src/platform/        # input_event.h (included by UIManager.cpp)
+    PRIVATE   ${CMAKE_SOURCE_DIR}  # project-root-relative includes
     INTERFACE src/interfaces/      # shared interfaces propagated to consumers
     INTERFACE src/ui/              # IUIBackend.h is a consumer-visible interface header
 )
+# Irrlicht: CameraController.cpp includes <irrlicht.h> for ICameraSceneNode full type.
+# PRIVATE scope — Irrlicht headers must NOT propagate to test targets (testability rule).
+target_link_libraries(aitown_ui PRIVATE Irrlicht)
 
 # ----------------------------------------------------------------------------
 # aitown_terrain — Terrain generator (Phase 0 stub)
@@ -214,6 +246,49 @@ target_include_directories(aitown_terrain
     PRIVATE   src/interfaces/      # needed for TerrainGenerator.cpp's own includes (IClock, etc.)
     INTERFACE src/interfaces/      # shared interfaces propagated to consumers
 )
+
+# ============================================================================
+# MAIN EXECUTABLE
+# WallClock.cpp MUST be in the executable target (NOT in any library) to avoid
+# cross-domain dependency (aitown_audio + aitown_render both consume IClock).
+# See phase-1.md §WallClock CMake target ownership.
+# ============================================================================
+add_executable(aitown
+    src/main.cpp
+    src/platform/EventReceiver.cpp
+    src/platform/WallClock.cpp
+)
+target_include_directories(aitown PRIVATE
+    src/rendering/        # IrrlichtUIBackend.h, IrrlichtRenderer.h, RenderSystem.h
+    src/ui/               # UIManager.h, UIScaler.h, CameraController.h
+    src/platform/         # EventReceiver.h, WallClock.h (via src/interfaces/)
+    src/interfaces/       # WallClock.h, IClock.h, camera_state.h, etc.
+    ${CMAKE_SOURCE_DIR}   # project-root-relative includes
+)
+# Irrlicht: main.cpp includes <irrlicht.h> directly.
+# GLEW::GLEW: RenderSystem.cpp uses GLEW (propagated via aitown_render but we link explicitly).
+target_link_libraries(aitown PRIVATE
+    aitown_render
+    aitown_ui
+    Irrlicht
+    GLEW::GLEW
+)
+
+# Windows: copy DLLs to executable output directory (same as aitown_render post-build).
+if(WIN32)
+    add_custom_command(TARGET aitown POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:Irrlicht>
+            $<TARGET_FILE_DIR:aitown>
+        COMMENT "Copying Irrlicht.dll to aitown output"
+    )
+    add_custom_command(TARGET aitown POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:GLEW::GLEW>
+            $<TARGET_FILE_DIR:aitown>
+        COMMENT "Copying GLEW32.dll to aitown output"
+    )
+endif()
 
 # ============================================================================
 # TEST TARGETS
@@ -275,9 +350,14 @@ aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300)
 
 # ----------------------------------------------------------------------------
 # ui_tests — UIManager, NotificationManager, CameraController, QueryPanel, ModalDialog
+# Phase 1 adds camera_controller_test.cpp and ui_scaler_test.cpp.
+# Phase 3 Test-C1 replaces this entire add_executable call with the consolidated 5-file form
+# (dropping ui_smoke_test.cpp whose compile-checks are covered by Phase 3 files).
 # ----------------------------------------------------------------------------
 add_executable(ui_tests
     tests/ui/ui_smoke_test.cpp
+    tests/ui/camera_controller_test.cpp  # Phase 1: 9 CameraController unit tests
+    tests/ui/ui_scaler_test.cpp          # Phase 1: 6 UIScaler unit tests
 )
 target_link_libraries(ui_tests PRIVATE
     aitown_ui
@@ -290,8 +370,8 @@ target_link_libraries(ui_tests PRIVATE
 # tests/simulation/ — MockAudioSystem, MockRenderer, ManualClock from tests/simulation/
 # tests/ui/         — MockUIBackend, MockCitySimulation, MockSimulationPauser
 # src/interfaces/   — interface headers
-# src/ui/           — IUIBackend.h and other UI headers
-# ${CMAKE_SOURCE_DIR} — project-root-relative includes
+# src/ui/           — IUIBackend.h, CameraController.h, UIScaler.h, and other UI headers
+# ${CMAKE_SOURCE_DIR} — project-root-relative includes (e.g. src/platform/input_event.h)
 target_include_directories(ui_tests PRIVATE
     tests/simulation/
     tests/ui/
@@ -331,24 +411,34 @@ aitown_add_tests(audio_tests LABEL "unit")
 
 # ----------------------------------------------------------------------------
 # integration_tests — multi-subsystem tests with EDT_NULL Irrlicht + null audio
+# Phase 1 adds irrlicht_ui_backend_compile_test.cpp (IrrlichtUIBackend non-abstract check).
+# Links aitown_render and aitown_ui — IrrlichtUIBackend.h depends on Irrlicht headers
+# available only when aitown_render is linked.
 # ----------------------------------------------------------------------------
 add_executable(integration_tests
     tests/integration/integration_smoke_test.cpp
+    tests/integration/irrlicht_ui_backend_compile_test.cpp  # Phase 1: non-abstract compile check
 )
+# aitown_render and aitown_ui MUST be present: IrrlichtUIBackend.h depends on Irrlicht.
+# Irrlicht MUST be linked directly: IrrlichtUIBackend.h includes <irrlicht.h> at compile time;
+# aitown_render links Irrlicht PRIVATE so its include path does NOT propagate to consumers.
+# rapidcheck and rapidcheck_gtest always linked (proactive policy — architecture/testing/framework.md).
 target_link_libraries(integration_tests PRIVATE
+    aitown_render
+    aitown_ui
+    Irrlicht
     GTest::gtest_main
     GTest::gmock
     rapidcheck
     rapidcheck_gtest
 )
-# Shared mock paths must be present from Phase 0 even though Phase 0 stub does not use mocks.
-# Omitting requires retroactive CMakeLists.txt edits when Phase 1+ integration tests exercise
-# UI paths and reference IUIBackend.h and mock headers.
+# src/rendering/ MUST be present: IrrlichtUIBackend.h lives in src/rendering/.
 target_include_directories(integration_tests PRIVATE
     tests/simulation/
     tests/ui/
     src/interfaces/
     src/ui/
+    src/rendering/
     ${CMAKE_SOURCE_DIR}
 )
 aitown_add_tests(integration_tests LABEL "integration")
@@ -360,7 +450,8 @@ aitown_add_tests(integration_tests LABEL "integration")
 # lod_swap_smoke_test.cpp is a Phase 6 deliverable — DO NOT add before Phase 6.
 # ----------------------------------------------------------------------------
 add_executable(opengl_tests
-    tests/rendering/stub_succeed.cpp       # Phase 0 stub — remove when real tests cover target
+    tests/rendering/stub_succeed.cpp           # Phase 0 stub — remove when real tests cover target
+    tests/rendering/shader_stub_compile_test.cpp  # Phase 1: shader stub compile check (required by opengl_tests atomicity)
     # tests/rendering/lod_swap_smoke_test.cpp  # Phase 6 and later — uncomment when file exists
 )
 target_link_libraries(opengl_tests PRIVATE

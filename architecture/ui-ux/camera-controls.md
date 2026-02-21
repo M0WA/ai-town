@@ -45,3 +45,30 @@ The mouse-sensitivity slider (Phase 8 Settings panel) applies as a user-controll
 - **Drag-delta coordinate space**: Mouse drag-delta calculations in `CameraController` MUST use physical pixel coordinates (the raw screen-space coordinate difference BEFORE `UIScaler::unproject()` is applied), not virtual-space coordinates. Applying `unproject()` to drag deltas would scale camera sensitivity with viewport scaling, producing incorrect pan/rotate speed at non-native resolutions (e.g. 1.5x faster pan at 1280×720 vs 1920×1080).
 - A dedicated `CameraController` class wraps Irrlicht's `ICameraSceneNode` and receives input events from `IEventReceiver`
 - **Camera input exception during blocking modals**: MMB drag, RMB drag, and scroll-wheel zoom pass through to `CameraController` regardless of modal state. See [`input-arbitration.md`](input-arbitration.md) for the authoritative priority chain and camera pass-through rationale.
+
+---
+
+## Phase 1 gamedesign-lookandfeel sign-off
+
+**Date**: 2026-02-21
+**Agent**: gamedesign-lookandfeel
+
+### Pitch sign convention verified
+
+Code inspection of `src/ui/CameraController.cpp`, function `getCameraState()`, null-camera path (lines 229-265) confirms:
+
+- `state.forward.y = std::sin(pitch_rad)` is the formula used (line 247).
+- At pitch = -45 degrees, `pitch_rad = -45 * pi/180 = -0.7854 rad`, giving `sin(-0.7854) = -0.707` (negative). This means `forward.y < 0` at the standard operating pitch, confirming the camera points downward into terrain as required.
+- The inline comment at line 247 explicitly reads: `// negative for pitch in [-70°, -20°] — correct`.
+- A formula yielding `forward.y > 0` at pitch = -45 degrees would be a sign-convention error; this implementation is correct.
+
+### camera_state.h field layout verified
+
+Code inspection of `src/interfaces/camera_state.h` confirms the `CameraState` struct contains exactly:
+- `vec3 position` — camera world position
+- `vec3 forward` — normalised forward direction vector
+- `vec3 up` — camera up vector
+- `float pitch{0.0f}` — test-seam spherical coordinate (degrees)
+- `float yaw{0.0f}` — test-seam spherical coordinate (degrees)
+
+The three `vec3` fields match the locked canonical definition established in Phase 0. The `pitch` and `float yaw` fields are the newly added test-seam fields required for null-camera unit tests. Field layout is compliant with spec.
