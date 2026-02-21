@@ -34,9 +34,8 @@ All targets are integrated LUFS (ITU-R BS.1770-3) measured on the authored file 
 | Stingers (crisis/milestone; game-over post-V1) | -18 LUFS | -1 dBTP |
 | Ambient beds (ambient_day/night/dawn/dusk) | -20 LUFS | -1 dBTP |
 | CRITICAL service alerts (fire/police), vehicle horn | -18 LUFS | -1 dBTP |
-| Budget deficit warning | -20 LUFS | -1 dBTP |
 | Important gameplay notifications (zone_upgrade, service_degrade, power_out, water_out) | -22 LUFS | -1 dBTP |
-| General feedback SFX (build, demolish, road, loan, earthworks) | -24 LUFS | -1 dBTP |
+| General feedback SFX (build, demolish, road, loan, earthworks, budget_warn) | -24 LUFS | -1 dBTP |
 | Very subtle ambient detail (intersection_tick) | -28 LUFS | -2 dBTP |
 | Vehicle engine (idle/move) | -22 LUFS | -2 dBTP |
 | Zone loops | -26 LUFS | -2 dBTP |
@@ -64,15 +63,15 @@ The following table is the complete list of V1 audio assets. All assets must be 
 | `music_growth_02` | Music stem | OGG | 90–180 s | Y | Stereo | -16 LUFS / -1 dBTP | Growth variant; JSON sidecar mandatory; shared root key/mode |
 | `music_crisis_01` | Music stem | OGG | 90–180 s | Y | Stereo | -16 LUFS / -1 dBTP | Crisis/disaster theme; JSON sidecar mandatory; shared root key/mode |
 | `music_crisis_02` | Music stem | OGG | 90–180 s | Y | Stereo | -16 LUFS / -1 dBTP | Crisis variant; JSON sidecar mandatory; shared root key/mode |
-| `zone_residential` | Zone loop | OGG | 12–18 s | Y | Mono | -26 LUFS / -2 dBTP | Silence-boundary loop; pre-loaded; hard cap 18 s |
-| `zone_commercial` | Zone loop | OGG | 12–18 s | Y | Mono | -26 LUFS / -2 dBTP | Silence-boundary loop; pre-loaded; hard cap 18 s |
-| `zone_industrial` | Zone loop | OGG | 12–18 s | Y | Mono | -26 LUFS / -2 dBTP | Silence-boundary loop; pre-loaded; hard cap 18 s |
+| `sfx_zone_residential` | Zone loop | OGG | 12–18 s | Y | Mono | -26 LUFS / -2 dBTP | Silence-boundary loop; pre-loaded; hard cap 18 s |
+| `sfx_zone_commercial` | Zone loop | OGG | 12–18 s | Y | Mono | -26 LUFS / -2 dBTP | Silence-boundary loop; pre-loaded; hard cap 18 s |
+| `sfx_zone_industrial` | Zone loop | OGG | 12–18 s | Y | Mono | -26 LUFS / -2 dBTP | Silence-boundary loop; pre-loaded; hard cap 18 s |
 | `sfx_build_place` | SFX | WAV PCM | < 1 s | N | Mono or stereo | -24 LUFS / -1 dBTP | Building placed; subtle placement feedback |
 | `sfx_build_demolish` | SFX | WAV PCM | < 1 s | N | Mono or stereo | -24 LUFS / -1 dBTP | Building demolished |
 | `sfx_road_build` | SFX | WAV PCM | < 1 s | N | Mono or stereo | -24 LUFS / -1 dBTP | Road construction feedback |
 | `sfx_earthworks` | SFX | WAV PCM | < 1 s | N | Mono or stereo | -24 LUFS / -1 dBTP | Terrain leveling; short percussive impact |
 | `sfx_loan_issued` | SFX | WAV PCM | < 1 s | N | Mono or stereo | -24 LUFS / -1 dBTP | Loan auto-issued |
-| `sfx_budget_warn` | SFX | WAV PCM | 1–2 s | N | Mono or stereo | -20 LUFS / -1 dBTP | Budget deficit warning; minimum 1 s (sub-second is not perceptibly distinct from UI clicks) |
+| `sfx_budget_warn` | SFX | WAV PCM | 1–2 s | N | Mono or stereo | -24 LUFS / -1 dBTP | Budget deficit warning; minimum 1 s (sub-second is not perceptibly distinct from UI clicks) |
 | `sfx_power_out` | SFX | WAV PCM | 1–2 s | N | Mono or stereo | -22 LUFS / -1 dBTP | Power outage notification |
 | `sfx_water_out` | SFX | WAV PCM | 1–2 s | N | Mono or stereo | -22 LUFS / -1 dBTP | Water outage notification |
 | `sfx_zone_upgrade` | SFX | WAV PCM | 1–2 s | N | Mono or stereo | -22 LUFS / -1 dBTP | Zone tile auto-upgraded; positive/rewarding tone |

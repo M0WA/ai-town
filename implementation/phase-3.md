@@ -177,7 +177,7 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 - [ ] `MockRenderer` in `tests/simulation/mock_renderer.h` returning incrementing non-zero `TextureHandle` values starting from 1.
   - `TextureHandle` (uint32_t) typedef and `kInvalidTexture = 0` sentinel defined in `IRenderer.h` before the class declaration
   - `CameraParams` struct defined in the same `IRenderer.h` header
-- [ ] `WallClock` implementation in `src/platform/WallClock.cpp` — the `src/interfaces/WallClock.h` stub was delivered in Phase 0. The Phase 3 `.cpp` file adds the `nowSeconds()` body using `std::chrono::steady_clock`. (ref: `architecture/testing/testability-architecture.md`)
+- [ ] `WallClock` implementation in `src/platform/WallClock.cpp` — Phase 3 VERIFIES that `src/platform/WallClock.cpp` is present and contains a `nowSeconds()` body using `std::chrono::steady_clock` (Phase 1 deliverable — do NOT re-author). If the file is absent or the body is missing, that is a Phase 1 regression that must be fixed before Phase 3 closes. (ref: `architecture/testing/testability-architecture.md`)
 - [ ] `NullSimulationPauser` in `src/interfaces/null_simulation_pauser.h` — no-op `ISimulationPauser` implementation. (ref: `architecture/testing/testability-architecture.md`)
 
 #### UI Interface & UIManager Shell
@@ -195,7 +195,7 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
   6. `UIScaler_MouseInBottomBlackBar_VirtualY_ClampedToMax` — Phase 3 compile-only stub; Phase 6 fills real assertion.
 
   Tests 1–5 must pass before Phase 4 begins. (ref: `architecture/ui-ux/resolution-ui-scaling.md`, `architecture/testing/testability-architecture.md`)
-- [ ] `src/platform/input_event.h` created with `InputEvent` struct (`Type` enum: `MouseMove`, `MouseButtonDown`, `MouseButtonUp`, `MouseWheel`, `KeyDown`, `KeyUp`, `WindowFocusGained`, `WindowFocusLost`; fields: `x`, `y`, `button`, `wheelDelta`, `keyCode`). The concrete Irrlicht `IEventReceiver` adapter calls `UIScaler::unproject()` and stores the result in `InputEvent.x`/`InputEvent.y` before forwarding to `UIManager::onEvent()`. (ref: `architecture/testing/testability-architecture.md`)
+- [ ] `src/platform/input_event.h` — Phase 3 VERIFIES this file is present with the complete `InputEvent` struct (Phase 1 deliverable — do NOT re-author). Fields include: `x`, `y` (virtual 1920×1080 space, for UI hit-testing), `physX`, `physY` (physical pixels, for drag-delta in `CameraController`), `button`, `wheelDelta`, `keyCode`. **The `physX`/`physY` fields are Phase 1 deliverables — Phase 3 VERIFIES these fields are present, not re-authors them.** The concrete Irrlicht `IEventReceiver` adapter calls `UIScaler::unproject()` and stores the result in `InputEvent.x`/`InputEvent.y` before forwarding to `UIManager::onEvent()`. (ref: `architecture/testing/testability-architecture.md`)
 - [ ] **`NotificationManager` stub class** (`gamedesign-ux`): `src/ui/notification_manager.h` / `notification_manager.cpp`: constructor signature `NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock)`. **Reason for `ICitySimulation*` (not `ISimulationPauser*`)**: `NotificationManager` needs `getConsecutiveDeficitMonths()` which is defined on `ICitySimulation`, not on the `ISimulationPauser` subset. Phase 6 signatures locked in Phase 3 even though bodies are Phase 6 deliverables:
   - `void postCritical(const std::string& title, const std::string& body)` — no-op in Phase 3
   - `void postNormal(const std::string& title, const std::string& body)` — no-op in Phase 3
@@ -264,11 +264,13 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 - [ ] **`UIManagerModalTest` fixture TearDown contract** (`test-dev-cpp`): the `UIManagerModalTest` fixture must define an explicit `TearDown()` that calls `ui_.reset()`. **Required member declaration order**: `NiceMock<MockUIBackend> backend_` (first), `NiceMock<MockAudioSystem> audio_` (second), `NiceMock<MockCitySimulation> sim_` (third), `std::unique_ptr<UIManager> ui_` (last). **Mock policy for `UIManagerModalTest`**: ALL THREE mock members must use `NiceMock`.
 
   **Phase 3 smoke test (REQUIRED)**:
+
   ```cpp
   TEST_F(UIManagerModalTest, FixtureConstructsAndDestructsCleanly) { SUCCEED(); }
   ```
 
   **Phase 3 event routing test stubs (REQUIRED)** — compile-only (`SUCCEED()`):
+
   ```cpp
   TEST_F(UIManagerModalTest, EscapeClosesSettingsAndReturnsToPauseMenu) { SUCCEED(); }
   TEST_F(UIManagerModalTest, EscapeClosesSettingsAndReturnsToMainMenu) { SUCCEED(); }

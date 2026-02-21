@@ -22,7 +22,7 @@ Deliver all V1 audio assets and the dynamic soundscape system: adaptive music wi
   - `sfx_power_out` WAV 1–2 s, -22 LUFS/-1 dBTP
   - `sfx_water_out` WAV 1–2 s, -22 LUFS/-1 dBTP
   - `sfx_road_build` WAV <1 s, -24 LUFS/-1 dBTP
-  - `sfx_budget_warn` WAV 1–2 s minimum 1 s, -20 LUFS/-1 dBTP
+  - `sfx_budget_warn` WAV 1–2 s minimum 1 s, -24 LUFS/-1 dBTP
   - `sfx_loan_issued` WAV <1 s, -24 LUFS/-1 dBTP
   - `sfx_zone_upgrade` WAV 1–2 s, -22 LUFS/-1 dBTP
   - `sfx_service_degrade` WAV 1–2 s, -22 LUFS/-1 dBTP

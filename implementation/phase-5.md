@@ -74,7 +74,7 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 
 #### Validate Assets — Full 13-Check Implementation
 
-- [ ] `tools/validate_assets.py` full 13-check implementation (building on Phase 4 stub; body stubs filled in):
+- [ ] `tools/validate_assets.py` full 13-check implementation (building on Phase 4 stub; body stubs filled in). **Phase 5 implements checks #1–#13 per `architecture/asset-standards/3d-model-standards.md` (13 checks total). Check #14 (.meta sidecar presence) is a Phase 9 deliverable and is NOT included in Phase 5.**
   - Check #1: `.b3d` format for building `_lod0`, `_lod1` files
   - Check #2: Small building/prop `_lod2.b3d` absent when `height_floors <= 3` (billboard path)
   - Check #3 (large building): `_lod2.b3d` present, within 300–500 tri budget, `_lod2_lm.dds` uses DXT5/BC3 (not DXT1) — read DDS fourCC to determine format

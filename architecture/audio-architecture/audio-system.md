@@ -324,17 +324,21 @@ m_fnSetThreadCtx = reinterpret_cast<FnSetThreadCtx>(
 if (!m_fnSetThreadCtx)
     throw std::runtime_error("ALC_EXT_thread_local_context required");
 
-// Step 3: undo the temporary main-thread bind (audio thread will own the context)
-alcMakeContextCurrent(nullptr);
-
-// Step 4: initialize m_occlusionGainTarget[] before thread launch (see member comment)
+// Step 3: initialize m_occlusionGainTarget[] before thread launch (see member comment)
+// IMPORTANT: alcMakeContextCurrent(nullptr) MUST NOT be called here or at any point
+// after alcMakeContextCurrent(m_context) above. Calling alcMakeContextCurrent(nullptr)
+// would clear the process-wide context on the main thread, breaking syncListenerToCamera()
+// which relies on that context being current. The audio thread uses alcSetThreadContext()
+// for its own thread-local context; this is per-thread only and does NOT affect the
+// process-wide context held by the main thread. The main thread retains the process-wide
+// context (set in Step 1) for the entire application lifetime.
 for (auto& t : m_occlusionGainTarget) t.store(1.0f, std::memory_order_relaxed);
 
-// Step 5: launch audio thread — only reached if extension is confirmed present
+// Step 4: launch audio thread — only reached if extension is confirmed present
 m_useThreadLocalCtx = true;
 m_audioThread = std::thread(&AudioSystem::audioThreadFunc, this);
 
-// Step 6: wait for audio thread to signal init complete (5 s timeout)
+// Step 5: wait for audio thread to signal init complete (5 s timeout)
 {
     std::unique_lock<std::mutex> lk(m_initMutex);
     bool notified = m_initCV.wait_for(lk, std::chrono::seconds(5),

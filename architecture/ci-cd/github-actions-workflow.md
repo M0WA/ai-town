@@ -470,10 +470,6 @@ markdown-lint:
 
   Job definition:
 
-**IMPORTANT**: Do NOT copy this SHA — you MUST resolve it live at implementation time using:
-`gh release view --repo actions/setup-python --json tagName,url`
-or equivalently via the GitHub API. The SHA shown here is a placeholder only.
-
   ```yaml
   validate-assets:
     runs-on: ubuntu-latest
@@ -483,12 +479,28 @@ or equivalently via the GitHub API. The SHA shown here is a placeholder only.
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1 — verified
+  ```
 
+  The next step sets up Python 3 using `actions/setup-python`. This step MUST use a fully-resolved 40-character commit SHA pinned to the desired release tag — it must never appear in a committed `ci.yml` as a tag reference or a short SHA. To obtain the correct SHA at implementation time, run:
+
+  ```sh
+  gh release view --repo actions/setup-python --json tagName,targetCommitish
+  ```
+
+  This prints the tag name and the full 40-character commit SHA for the latest release. Record the SHA, verify it matches the tag on the `actions/setup-python` releases page, and substitute it directly into the `uses:` line. The resulting step looks like the following, where `<40-CHAR-SHA>` is replaced with the real value resolved above:
+
+  ```yaml
       - name: Set up Python 3
-        uses: actions/setup-python@<RESOLVE_AT_IMPLEMENTATION_TIME>  # resolve SHA live — see note above
+        uses: actions/setup-python@<40-CHAR-SHA>  # replace with full SHA resolved via gh release view
         with:
           python-version: '3'
+  ```
 
+  **CRITICAL**: The token `@<40-CHAR-SHA>` above is illustrative prose — it is NOT a valid `uses:` value and MUST NEVER appear verbatim in a committed `ci.yml`. The supply-chain lint step in `build-linux` will match any `<...>` angle-bracket token and immediately fail the job, catching this mistake at CI time. Resolve the SHA live before committing.
+
+  Continuing the job definition:
+
+  ```yaml
       - name: Run asset validation
         run: python tools/validate_assets.py
   ```

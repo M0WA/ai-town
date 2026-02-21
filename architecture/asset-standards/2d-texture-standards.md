@@ -77,6 +77,28 @@ Both tools produce standards-compliant DDS files and are CI-verified. Do not use
 | UI sprite sheet (RGBA8 uncompressed, no mip) | nvcompress | `nvcompress -rgb -nomips input.png output.dds` |
 | UI sprite sheet (RGBA8 uncompressed, no mip) | Compressonator | `compressonatorcli -fd ARGB_8888 -nomipmap input.png output.dds` |
 
+### Validating sRGB DDS Output (mandatory before committing any diffuse atlas DDS)
+
+1. **Verify sRGB ICC profile in source PNG before compression.** `nvcompress -color` only produces a sRGB-tagged DDS if the source PNG has an embedded sRGB ICC profile. Confirm the profile is present before running the compressor:
+
+   ```bash
+   exiftool input.png | grep -i 'color space'
+   ```
+
+   The output must show `sRGB` (or equivalent). A source PNG without an embedded sRGB profile will produce a DDS with a linear internal format even when `-color` is passed, causing incorrect color rendering. If no sRGB profile is reported, re-export the PNG from the DCC tool with the sRGB ICC profile embed option enabled.
+
+2. **Validate the DDS header FourCC after compression.** Inspect the FourCC field at byte offset 84 of the DDS file to confirm the sRGB format tag is correctly encoded:
+
+   ```bash
+   python3 -c "import struct; d=open('out.dds','rb').read(); print(hex(struct.unpack('<I',d[84:88])[0]))"
+   ```
+
+   DXT1 sRGB should show `0x31545844`; if `nvddsinfo` or `dxinfo` are available on the workstation, these may also be used to inspect the DDS header and confirm the sRGB format flags. A linear DXT1 header will show a different FourCC value — do not commit that file.
+
+3. **Automation note.** `tools/export_textures.py` (Phase 9 deliverable) handles sRGB tagging automatically for all diffuse atlas DDS outputs. Until that script exists, manual validation per steps 1–2 above is required for every diffuse atlas DDS before committing to the asset directory.
+
+4. **Consequence of skipping validation.** A DDS file with a linear (non-sRGB) internal format header will be uploaded via `glCompressedTexImage2D` using `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` (or `_DXT5_EXT`) with the wrong GL internal format — the driver silently accepts the call without a GL error, but color rendering will be incorrect (gamma-incorrect diffuse colors) across all surfaces using that atlas. There is no runtime diagnostic for this class of error; it must be caught at authoring time.
+
 **Splat map (RGBA8 UNORM — NOT DDS)**:
 Author as a plain RGBA PNG with R channel filled to 255, G/B/A channels filled to 0 (initial state: 100% grass). Splat maps are uploaded at runtime via `glTexImage2D` with `GL_RGBA8` internal format — they are never compressed to DDS. Do NOT run `export_textures.py` or `nvcompress` on splat map source files. The `TextureCache` splat map pool (third pool, distinct from the linear and sRGB pools) loads these RGBA PNGs directly. The `--validate-only` flag in `export_textures.py` does not apply to splat maps.
 
@@ -207,7 +229,7 @@ Small buildings and props use a pre-baked imposter atlas at LOD2 (beyond 100 m).
 
 - **Atlas format**: DDS DXT5 **sRGB** (`GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`), **1024×128 px**, 8 frames of 128×128 px each arranged in a 1×8 horizontal strip. Uploaded via the raw-GL sRGB path (same as diffuse building textures): `glGenTextures` → `glBindTexture` → `glCompressedTexImage2D` with `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`. **Never** use Irrlicht's `addTexture()` path for the billboard atlas — it produces a linear internal format. Alpha channel encodes non-rectangular silhouette cutouts. **Alpha convention: straight (unassociated) alpha** — RGB channels store the full-intensity billboard render (flat ambient-only), and alpha stores the cutout mask independently. Do NOT premultiply alpha: premultiplied alpha would darken billboard edges during DXT5 compression block rounding, producing a dark fringe on the silhouette. The billboard shader must use `vec4 texel = texture(billboardAtlas, uv); if (texel.a < 0.5) discard;` for cutout rendering (alpha test at 0.5 threshold, not alpha blending). This avoids transparency sorting issues with billboards rendered at varying camera angles.
 - **Bake angles**: 8 directions every 45° around the vertical axis (0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°). The runtime `LODNode` selects the nearest 45° frame based on the angle between the camera and the building's facing direction.
-- **Bake elevation**: **45° below horizontal (camera pitch = −45°)** — the midpoint of the [−70°, −20°] camera pitch operating range. This minimises average mismatch error across all valid camera pitches. "Above horizon" wording is incorrect for this convention; the camera is always looking downward in city view.
+- **Bake elevation**: **45° below horizontal (camera pitch = −45°)** — the midpoint of the [−70°, −20°] camera pitch operating range. This minimises average mismatch error across all valid camera pitches. "Above horizon" wording is incorrect for this convention; the camera is always looking downward in city view. Sign-off status: CONFIRMED — bake midpoint −45° and camera pitch operating range [−70°, −20°] are final per `architecture/asset-standards/3d-model-standards.md` Camera Pitch Range section. Phase 9 billboard authoring may proceed on this basis.
 - **Bake lighting**: flat ambient-only (no directional light). This prevents sun-angle mismatch artifacts at different times of day. The runtime shader does not apply directional lighting to billboard quads (V1 scope).
 - **Mip chain**: 4-level mandatory (1024×128 → 512×64 → 256×32 → 128×16); set `GL_TEXTURE_MAX_LEVEL = 3`.
 - **Texture wrap mode**: Set `GL_TEXTURE_WRAP_S = GL_CLAMP_TO_EDGE` and `GL_TEXTURE_WRAP_T = GL_CLAMP_TO_EDGE` on billboard atlas textures. The default `GL_REPEAT` wrap mode causes the atlas strip to tile at the strip boundary, producing a ghost frame from the opposite end of the 1×8 strip when the UV quad samples near the horizontal edge. Clamp-to-edge eliminates this artifact.
