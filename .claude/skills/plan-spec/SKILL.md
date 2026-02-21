@@ -96,19 +96,9 @@ For each in-scope issue (highest severity first):
 
 If two agents make conflicting recommendations for the same issue, surface the conflict explicitly, reason about the best resolution, and apply the most appropriate fix.
 
-### Step 5 — Markdown lint check
-
-After all fixes are applied, run the markdown linter:
-
-```bash
-markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
-```
-
-If the linter exits with errors, fix every reported violation before continuing. Re-run until the linter exits zero. Only then proceed to Step 6.
-
 ### Step 6 — Re-review
 
-After all fixes are applied and the linter is clean, return to **Step 2** and run all 9 agents again on the updated plan.
+After all fixes are applied, return to **Step 2** and run all 9 agents again on the updated plan.
 
 **Cycle synchronisation**: fixing (Step 4) may begin as soon as the first agent results arrive — there is no need to wait for all agents before starting fixes. However, do not start a new cycle (return to Step 2) until **all 9 agents from the current round have returned their results** — late-arriving results would otherwise be silently dropped, causing stale or conflicting fixes in the next round.
 
@@ -118,7 +108,13 @@ After all fixes are applied and the linter is clean, return to **Step 2** and ru
 
 After each review round, check: **did every agent report NO [TARGET_SEVERITIES] issues?**
 
-- If **yes** → output a final summary:
+- If **yes** → run the markdown linter once:
+
+  ```bash
+  markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+  ```
+
+  Fix any violations and re-run until the linter exits zero. Then output a final summary:
 
 ```
 === PLAN REVIEW COMPLETE ===

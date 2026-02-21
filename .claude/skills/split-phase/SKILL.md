@@ -178,27 +178,38 @@ Launch the `prod-owner` agent with the original proposal and the full squad find
 
 Wait for the `prod-owner` agent to finish before continuing.
 
-### Step 6 — Markdown lint check
+### Step 6 — Commit
 
-After the Product Owner applies the split, run the markdown linter:
-
-```bash
-markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
-```
-
-If the linter exits with errors, fix every reported violation before continuing. Re-run until
-the linter exits zero. Only then proceed to Step 7.
-
-### Step 7 — Commit
-
-After the linter is clean, commit all changes:
+Commit all implementation plan changes:
 
 ```bash
 git add implementation/
 git commit -m "refactor(plan): split [TARGET_PHASE] per squad review"
 ```
 
-Then output a completion summary:
+### Step 7 — Markdown lint check
+
+Run the markdown linter once after the commit:
+
+```bash
+markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+```
+
+If the linter exits with errors, fix every reported violation, re-run until zero, then amend or
+create a follow-up commit for lint fixes only.
+
+### Step 8 — Update GitHub project board
+
+Launch the `proj-manager` agent to sync the updated implementation plan to the GitHub project
+board:
+
+> You are a Senior Project Manager for AI Town. The implementation plan has just been updated
+> by a phase split. Read `./implementation/INDEX.md` and all per-phase files under
+> `./implementation/`, then update the GitHub project board ("AI Town", repo `M0WA/ai-town`)
+> to reflect the new phase structure: create or update milestones, create or close issues, and
+> move cards to the correct status columns. Report a summary of every action taken.
+
+Wait for the `proj-manager` agent to finish, then output a completion summary:
 
 ```
 === SPLIT PHASE COMPLETE ===
@@ -210,6 +221,8 @@ Deliverables redistributed: [count]
 
 Squad issues addressed: [count CRITICAL+HIGH]
 Squad issues deferred: [count MEDIUM+LOW, with reasons]
+
+GitHub board: updated (see proj-manager summary above)
 ```
 
 ## Rules

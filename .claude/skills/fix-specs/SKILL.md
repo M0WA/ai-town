@@ -86,19 +86,9 @@ Apply fixes one at a time, updating the spec file after each. Do not batch multi
 
 If two agents make conflicting recommendations for the same issue, explicitly note the conflict, reason about the best resolution, and apply the most appropriate fix.
 
-### Step 5 — Markdown lint check
-
-After all fixes from this round are applied, run the markdown linter:
-
-```bash
-markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
-```
-
-If the linter exits with errors, fix every reported violation before continuing. Re-run until the linter exits zero. Only then proceed to Step 6.
-
 ### Step 6 — Re-review
 
-After all fixes are applied and the linter is clean, go back to **Step 2** and run all agents again on the updated spec.
+After all fixes are applied, go back to **Step 2** and run all agents again on the updated spec.
 
 **Cycle synchronisation**: fixing (Step 4) may begin as soon as the first agent results arrive — there is no need to wait for all agents before starting fixes. However, do not start a new cycle (return to Step 2) until **all agents from the current round have returned their results** — late-arriving results would otherwise be silently dropped, causing stale or conflicting fixes in the next round.
 
@@ -108,7 +98,13 @@ After all fixes are applied and the linter is clean, go back to **Step 2** and r
 
 After each review round, check: **did every agent report NO [TARGET_SEVERITIES] issues?**
 
-- If **yes** → the loop is complete. Output a final summary:
+- If **yes** → the loop is complete. Run the markdown linter once:
+
+  ```bash
+  markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+  ```
+
+  Fix any violations and re-run until the linter exits zero. Then output a final summary:
 
 ```
 === SPEC REVIEW COMPLETE ===

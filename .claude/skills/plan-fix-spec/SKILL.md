@@ -134,19 +134,9 @@ Run Track A and Track B in parallel where possible. If a plan fix depends on a s
 
 If two agents make conflicting recommendations for the same issue, surface the conflict explicitly, reason about the best resolution, and apply the most appropriate fix.
 
-### Step 5 — Markdown lint check
+### Step 5 — Commit round changes
 
-After all fixes from this round are applied, run the markdown linter:
-
-```bash
-markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
-```
-
-If the linter exits with errors, fix every reported violation before continuing. Re-run until the linter exits zero. Only then proceed to Step 6.
-
-### Step 6 — Commit round changes
-
-After the linter is clean, **instruct the main Claude session to commit** by outputting the following block verbatim (do NOT attempt to run git commands yourself — sub-agents do not have Bash tool access):
+After all fixes from this round are applied, **instruct the main Claude session to commit** by outputting the following block verbatim (do NOT attempt to run git commands yourself — sub-agents do not have Bash tool access):
 
 ```
 ACTION REQUIRED — COMMIT:
@@ -170,7 +160,13 @@ Note: `/compress` is the built-in context compression command. Do NOT invoke it 
 
 After each review round, check: **did every agent report NO [TARGET_SEVERITIES] issues in their domain (for the targeted phases)?**
 
-- If **yes** → output a final summary:
+- If **yes** → run the markdown linter once:
+
+  ```bash
+  markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+  ```
+
+  Fix any violations and re-run until the linter exits zero. Then output a final summary:
 
 ```
 === PLAN FIX SPEC COMPLETE ===
@@ -183,7 +179,7 @@ Plan fixes applied: Y
 The implementation plan and architecture specs have passed a full review by all 9 agents with no [TARGET_SEVERITIES] issues remaining.
 ```
 
-- If **no** → continue from Step 4 with the new findings (back through Steps 4 → 5 → 6 → 7 → 8).
+- If **no** → continue from Step 4 with the new findings (back through Steps 4 → 5 → 6 → 7 → 8). The markdown linter is skipped during intermediate cycles — it runs only on the final clean pass.
 
 ## Rules
 
