@@ -487,9 +487,10 @@ markdown-lint:
   **Phase 1 stub TODO comment requirements**: The Phase 1 `tools/validate_assets.py` stub MUST include the following TODO comment blocks so that Phase 5 implementers can locate all validation points via a single repository-wide search. These comments are the canonical markers — Phase 5 replaces each comment block with real validation logic in-place:
 
   ```python
-  # TODO Phase 5: validate DDS textures (format, mip chain)
-  # TODO Phase 5: validate billboard atlas (dimensions, FourCC)
-  # TODO Phase 5: validate audio assets (format, duration, sample rate)
+  # TODO Phase 5: validate DDS textures (suffix-to-format table, mip chain counts)
+  # TODO Phase 5: validate billboard atlas (1024x128 px, 4 mip levels, DXT5/BC3,
+  #   DX10 DXGI_FORMAT BC3_UNORM_SRGB=100 — NOT FourCC-only, FourCC cannot confirm sRGB)
+  # TODO Phase 5: validate audio assets (OGG Vorbis format, duration, sample rate)
   ```
 
   All three TODO blocks must be present in the stub at Phase 1 commit time. Omitting any block means Phase 5 implementers cannot find that validation point via `grep -r "TODO Phase 5"` and may overlook it. The blocks must appear as standalone comment lines (not inline with code) so the grep pattern matches them unambiguously.

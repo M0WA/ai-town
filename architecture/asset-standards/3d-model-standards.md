@@ -141,7 +141,7 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
 - **UV channel 0 validation**: The export validation script must verify that all vehicle UV channel 0 coordinates fall within [0, 1] UV space and flag any vehicle with UV coordinates outside its assigned atlas cell.
 
 - Vehicle point/sprite LOD (100m+): 16×16 px solid-color sprite; authored as part of a sprite atlas
-- **Vehicle sprite LOD2**: 16×16 px sprite representing the vehicle's roof color/type, packed into `vehicles_sprite_atlas_d.dds`. The runtime draws a camera-facing billboard quad (1 m × 0.5 m) sampling the vehicle's assigned 16×16 px atlas cell. See `building-atlas-layout.md — Vehicle Sprite Atlas` for format, resolution, mip chain, and upload path.
+- **Vehicle sprite LOD2**: 16×16 px sprite representing the vehicle's roof color/type, packed into `vehicles_sprite_atlas_d.dds`. **Format: DDS DXT5/BC3 (NOT DXT1/BC1)** — full format specification, resolution, mip chain, and upload path in `building-atlas-layout.md — Vehicle Sprite Atlas`. The runtime draws a camera-facing billboard quad (1 m × 0.5 m) sampling the vehicle's assigned 16×16 px atlas cell.
 
 #### Coordinate System Export Convention
 
