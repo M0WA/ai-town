@@ -198,7 +198,34 @@ The spec mandates vcpkg as the "mandatory dependency manager on all platforms." 
 
 ### Windows GLEW vcpkg Verification
 
-Before uploading Windows artifacts, a CI step must confirm that GLEW was installed by vcpkg in the Windows build. In manifest mode (the default when `vcpkg.json` is present), vcpkg installs packages into `build/vcpkg_installed/<triplet>/`. In classic mode (or when the manifest-mode install tree is absent), vcpkg installs into `$VCPKG_ROOT/installed/<triplet>/`. The verification step must check the manifest-mode path first and fall back to the classic-mode path:
+Two sequential CI steps verify the GLEW vcpkg installation on Windows before the build step runs: a **header check** (step "Verify glew vcpkg port") and a **library check** (step "Verify GLEW vcpkg install"). Both use the same dual-path pattern — manifest-mode path first, classic-mode fallback — because vcpkg installs differ by invocation context:
+
+- **Manifest mode** (default when `vcpkg.json` is present): packages install into `build/vcpkg_installed/<triplet>/`
+- **Classic mode** (global vcpkg install, no `vcpkg.json` in scope): packages install into `$VCPKG_ROOT/installed/<triplet>/`
+
+Checking only one path causes false negatives in the other mode. Both steps are mandatory and must use PS 5.1-compatible `if (-not (...)) { exit 1 }` syntax — the `||` short-circuit for process exit codes is PowerShell 7+ only.
+
+#### Step A — Header check ("Verify glew vcpkg port")
+
+Runs **before** the CMake configure step. Confirms the GLEW development headers are present so CMake's `find_package(GLEW REQUIRED)` can locate them. If headers are absent, the configure step fails with an opaque CMake error rather than a clear diagnostic.
+
+```yaml
+- name: Verify glew vcpkg port
+  shell: pwsh
+  run: |
+    # Manifest mode installs to build/vcpkg_installed/; classic mode to $VCPKG_ROOT/installed/.
+    $manifestHdr = "build\vcpkg_installed\x64-windows\include\GL\glew.h"
+    $classicHdr  = Join-Path $env:VCPKG_ROOT "installed\x64-windows\include\GL\glew.h"
+    if (-not (Test-Path $manifestHdr) -and -not (Test-Path $classicHdr)) {
+      Write-Error "ERROR: GLEW not installed — GL/glew.h not found in manifest path ($manifestHdr) or classic path ($classicHdr)."
+      exit 1
+    }
+    Write-Host "GLEW installed artifact verified."
+```
+
+#### Step B — Library check ("Verify GLEW vcpkg install")
+
+Runs after the vcpkg install step and **before** the CMake configure step. Confirms the compiled `glew.lib` artifact is present so the linker can find it. A header-only check would not catch a scenario where headers were installed but the compiled library was not.
 
 ```yaml
 - name: Verify GLEW vcpkg install (Windows)
@@ -213,9 +240,7 @@ Before uploading Windows artifacts, a CI step must confirm that GLEW was install
     }
 ```
 
-**Why both paths**: When `vcpkg.json` is present at the repo root and CMake is configured with the vcpkg toolchain file, vcpkg uses manifest mode and writes installed files under `build/vcpkg_installed/`. The `$VCPKG_ROOT/installed/` path is the classic-mode fallback for environments where the toolchain was invoked without a `vcpkg.json` in scope (e.g., a developer's global vcpkg install). Checking only one path would cause false negatives in the other mode. The `glew.lib` check (not `glew.h`) confirms the library artifact itself is present — a header-only check would not catch a build failure that produced headers but not the compiled library.
-
-**PowerShell 5.1 compatibility**: GitHub Actions Windows runners ship PowerShell 5.1 as the default shell. The `||` short-circuit operator for process exit codes is a PowerShell 7+ feature. Use the explicit `if (-not (...)) { ... }` form as shown above.
+**PowerShell 5.1 compatibility**: GitHub Actions Windows runners ship PowerShell 5.1 as the default shell. Use the explicit `if (-not (...)) { ... }` form as shown in both steps above.
 
 ### Irrlicht DLL on Windows (Phase 1+)
 
@@ -248,7 +273,7 @@ endif()
 3. Add `target_link_libraries(aitown_render PRIVATE ... GLEW::GLEW)` to `CMakeLists.txt`
 4. Add the `Irrlicht.dll` CMake post-build copy command to `CMakeLists.txt`
 5. Add the `GLEW32.dll` CMake post-build copy command to `CMakeLists.txt` (this section)
-6. `build-windows` CI step: add a "Verify GLEW vcpkg install" step using dual-path PS 5.1-compatible syntax — `if (-not (Test-Path 'build/vcpkg_installed/x64-windows/lib/glew.lib') -and -not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\glew.lib")) { Write-Error 'glew.lib not found in either vcpkg install path'; exit 1 }`. Owner: `cicd-dev-github`.
+6. `build-windows` CI steps: add BOTH a "Verify glew vcpkg port" step (dual-path `GL/glew.h` header check — manifest path `build\vcpkg_installed\x64-windows\include\GL\glew.h` with fallback to `$VCPKG_ROOT\installed\x64-windows\include\GL\glew.h`) AND a "Verify GLEW vcpkg install" step (dual-path `glew.lib` library check — manifest path `build/vcpkg_installed/x64-windows/lib/glew.lib` with fallback to `$VCPKG_ROOT\installed\x64-windows\lib\glew.lib`). Both use PS 5.1-compatible `if (-not (Test-Path ...) -and -not (Test-Path ...)) { exit 1 }` syntax. The header check must run before the library check. See `### Windows GLEW vcpkg Verification` above for the canonical YAML for both steps. Owner: `cicd-dev-github`.
 
 Omitting item 5 causes the existing `build/Release/GLEW32.dll` hard-fail CI check to trigger on every Windows build from Phase 1 onward. Omitting item 6 leaves the Windows GLEW vcpkg installation unverified — a missing or misconfigured GLEW port would silently produce a broken binary rather than failing the CI job immediately.
 
