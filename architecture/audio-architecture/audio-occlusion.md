@@ -99,7 +99,22 @@
   }
   ```
 
-  **Thread-ordering requirement**: ALL of the above (EFX extension check → function pointer loading → filter allocation loop) MUST execute in the `AudioSystem` constructor body BEFORE `m_audioThread = std::thread(...)` is launched. The EFX function pointers and filter objects are stored as `AudioSystem` members; writing them after thread launch would create a data race (main thread writes, audio thread reads without synchronization). The `std::thread` constructor acts as a synchronization barrier ONLY for memory written BEFORE the thread is launched — not for writes that occur concurrently after launch.
+  **`alGenSources` placement requirement**: `alGenSources(kTotalSources, m_sources)` MUST be called on the **main thread in the `AudioSystem` constructor**, after `alcMakeContextCurrent(m_context)` succeeds (Step 1 of the constructor sequence in `audio-system.md`) and before the EFX filter allocation loop runs. This placement is mandatory: the EFX filter allocation loop calls `alSourcei(m_sources[i], AL_DIRECT_FILTER, m_occlusionFilter[i])` to bind each filter to its source. If `alGenSources` has not yet been called, `m_sources[i]` contains uninitialized zero values (default-initialized `ALuint` array), and `alSourcei` on source name `0` produces `AL_INVALID_NAME` — the bind is silently discarded and the filter remains unbound, causing all sources to play without occlusion regardless of `m_efxAvailable`. In the constructor sequence defined in `audio-system.md`, `alGenSources` must be inserted as a new sub-step between Step 1 (`alcMakeContextCurrent` succeeds) and Step 2 (load `ALC_EXT_thread_local_context`):
+
+  ```cpp
+  // Between Step 1 and Step 2 in the audio-system.md constructor sequence:
+  // Step 1.5: generate all AL source handles on the main thread.
+  // alcMakeContextCurrent(m_context) has already succeeded (Step 1), so this
+  // thread has a valid current context for AL calls. Source handles are stored in
+  // m_sources[0..kTotalSources-1] and must be valid before the EFX filter
+  // allocation loop (which calls alSourcei to bind each filter to its source).
+  alGenSources(kTotalSources, m_sources);
+  alCheckError("alGenSources");
+  ```
+
+  `kTotalSources` is the full pool size (62 in V1: 55 evictable SFX + 3 reserved SFX + 4 stream sources). `m_sources` is declared as `ALuint m_sources[kTotalSources]{}` in `AudioSystem`.
+
+  **Thread-ordering requirement**: ALL of the above (source generation → EFX extension check → function pointer loading → filter allocation loop) MUST execute in the `AudioSystem` constructor body BEFORE `m_audioThread = std::thread(...)` is launched. The EFX function pointers, source handles, and filter objects are stored as `AudioSystem` members; writing them after thread launch would create a data race (main thread writes, audio thread reads without synchronization). The `std::thread` constructor acts as a synchronization barrier ONLY for memory written BEFORE the thread is launched — not for writes that occur concurrently after launch.
 
 - **Occlusion gain floor**: `AL_LOWPASS_GAIN = 0.1f` (**−20 dB**) when a source is fully occluded. A gain floor of 0.25f (−12 dB) is too mild — at −12 dB the source remains clearly audible through solid building walls, losing the spatial cue that the sound is behind an obstruction. A floor of 0.1f (−20 dB) provides a perceptible but not complete attenuation; this is consistent with real-world acoustic transmission loss through light masonry at urban frequencies. (**Do not use a floor of 0.0f — complete silence from a nearby source is unnatural and breaks the spatial illusion.**)
 

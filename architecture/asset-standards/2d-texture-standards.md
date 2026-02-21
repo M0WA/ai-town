@@ -102,14 +102,14 @@ Both tools produce standards-compliant DDS files and are CI-verified. Do not use
    To verify sRGB intent on a DXT1/BC1 diffuse texture, validators must parse the DX10 extension header and check the DXGI_FORMAT field:
    - A file with a DX10 extended header is identified by a FourCC of `0x30315844` ("DX10") at byte offset 84.
    - The DXGI_FORMAT field follows the standard DDS header and the DDS_HEADER_DXT10 structure's first 4 bytes.
-   - BC1_UNORM_SRGB = DXGI_FORMAT value **71** (sRGB DXT1/BC1 — correct for diffuse textures).
-   - BC3_UNORM_SRGB = DXGI_FORMAT value **100** (sRGB DXT5/BC3 — correct for sRGB alpha diffuse and billboard atlases).
+   - BC1_UNORM_SRGB = DXGI_FORMAT value **72** (sRGB DXT1/BC1 — correct for diffuse textures).
+   - BC3_UNORM_SRGB = DXGI_FORMAT value **78** (sRGB DXT5/BC3 — correct for sRGB alpha diffuse and billboard atlases).
    - Any other DXGI_FORMAT value indicates a non-sRGB (linear) encoding — do not commit that file as a diffuse atlas.
 
    If `nvddsinfo` or `dxinfo` are available on the workstation, these may also be used to inspect the DDS header and confirm the sRGB DXGI_FORMAT field. A file produced without DX10 header support (no "DX10" FourCC at offset 84) cannot encode sRGB intent in a machine-readable way and must be rejected.
 
    For DXT5 (BC3) billboard atlases: the standard DDS FourCC field contains `0x35545844` (`DXT5` in ASCII little-endian), which does NOT encode the sRGB flag. The traditional FourCC inspection step alone cannot reliably detect sRGB intent for DXT5 files. Use one of the following approaches to validate sRGB intent on DXT5 billboard atlases:
-   - **DX10 extended header (recommended)**: Check the DX10 DXGI format field (`DXGI_FORMAT_BC3_UNORM_SRGB`, value 100). Files authored via `nvcompress -color` produce a DX10 extended header with this format value.
+   - **DX10 extended header (recommended)**: Check the DX10 DXGI format field (`DXGI_FORMAT_BC3_UNORM_SRGB`, value 78). Files authored via `nvcompress -color` produce a DX10 extended header with this format value.
    - **Source PNG sRGB ICC profile + authoring flag**: Verify the source PNG carries an sRGB ICC profile and was compressed with `nvcompress -color` (the `-color` flag signals sRGB intent to the compressor and sets the DX10 DXGI sRGB format).
    Note: `glCompressedTexImage2D` with `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` requires the uploaded data to be authored in sRGB — verifying the DX10 header or source provenance before upload prevents silent gamma errors in the billboard atlas rendering.
 

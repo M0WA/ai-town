@@ -2,21 +2,26 @@
 
 ### Goal
 
-Add all OpenGL capability queries, the `TextureCache` three-pool skeleton, GLSL shader stubs, and the LOD smoke-test infrastructure — building directly on top of the Irrlicht device shell established in Phase 1 and giving Phase 4 terrain a fully-typed `TextureCache` interface to build against.
+Add all OpenGL capability queries, the `TextureCache` three-pool skeleton, GLSL shader stubs, and the LOD smoke-test infrastructure — building directly on top of the Irrlicht device shell established in Phase 1 and giving Phase 5 (Procedural Terrain) a fully-typed `TextureCache` interface to build against.
 
 ### Deliverables
 
 #### GLEW & GL Capability Queries
 
-- [ ] **GLEW availability spike** (`graphics-dev-irrlicht`): inspect the vendored Irrlicht build's `COpenGLDriver.cpp` to confirm whether GLEW is bundled and whether `glewIsExtensionSupported()` is exposed. If Irrlicht was compiled without GLEW (custom build using ARB string parsing), `glewIsExtensionSupported()` will not link — replace all calls with `glGetString(GL_EXTENSIONS)` string matching or `IVideoDriver::queryFeature()`. Document the confirmed extension query path in BOTH `src/rendering/render_system.h` (one-line code comment, e.g., `// GLEW available in vendored Irrlicht — using glewIsExtensionSupported()`) AND `architecture/graphics-architecture/irrlicht-device-lifecycle.md` under a "Phase 1 Spike Results" subsection. **Phase 4 sRGB texture pipeline is BLOCKED on this spike result.** Owner: `graphics-dev-irrlicht`.
+- [ ] **GLEW availability spike** (`graphics-dev-irrlicht`): inspect the vendored Irrlicht build's `COpenGLDriver.cpp` to confirm whether GLEW is bundled and whether `glewIsExtensionSupported()` is exposed. If Irrlicht was compiled without GLEW (custom build using ARB string parsing), `glewIsExtensionSupported()` will not link — replace all calls with `glGetString(GL_EXTENSIONS)` string matching or `IVideoDriver::queryFeature()`. Document the confirmed extension query path in BOTH `src/rendering/render_system.h` (one-line code comment, e.g., `// GLEW available in vendored Irrlicht — using glewIsExtensionSupported()`) AND `architecture/graphics-architecture/irrlicht-device-lifecycle.md` under the **"Phase 2 Spike Results"** section. **Phase 5 sRGB texture pipeline (terrain) is BLOCKED on this spike result.** Owner: `graphics-dev-irrlicht`.
 
-  **H19 — GLEW spike file reference correction**: the spike result document location is `architecture/graphics-architecture/irrlicht-device-lifecycle.md` (under "Phase 1 Spike Results") — NOT `architecture/graphics-architecture/scene-graph-ownership.md`. Any reference in this phase to recording the GLEW availability spike result in `scene-graph-ownership.md` is incorrect and must be treated as referring to `irrlicht-device-lifecycle.md` instead.
+  **GLEW spike — two independent questions** (per `architecture/graphics-architecture/irrlicht-device-lifecycle.md` "GLEW Spike — Two Independent Questions" section): The GLEW availability spike answers two completely independent questions — conflating them produces incorrect conclusions:
+  - **Question 1**: Does the vendored Irrlicht source use GLEW internally? (Inspect `source/Irrlicht/COpenGLDriver.cpp` for `#include "glew.h"` or `glewInit()` calls.) This determines only whether Irrlicht's own internal GL calls go through GLEW's function pointer table. It does NOT determine whether AI Town can link GLEW independently.
+  - **Question 2**: Can AI Town link against GLEW independently and call `glewInit()`? The answer is determined solely by whether `find_package(GLEW REQUIRED)` succeeds — when the vcpkg `glew` port is installed, this is ALWAYS yes, regardless of whether Irrlicht bundles GLEW internally.
+  - `find_package(GLEW REQUIRED)` MUST remain in CMakeLists.txt regardless of the answer to Question 1. AI Town calls `glewInit()` itself to populate its own function pointer table for `glCompressedTexImage2D` and `glewIsExtensionSupported()`. Question 1 only affects whether symbol duplication risk exists — handled by link order.
+
+  **SPEC SECTION NAME NOTE**: The spec section in `irrlicht-device-lifecycle.md` is named **"Phase 2 Spike Results"** (not "Phase 1 Spike Results"). Any reference to "Phase 1 Spike Results" in this phase file is incorrect — results must be recorded under the spec's canonical "Phase 2 Spike Results" heading. The spec at line 148 also confirms the document location is `irrlicht-device-lifecycle.md`, NOT `scene-graph-ownership.md`.
 
   **sRGB format tokens if GLEW absent**: If GLEW is unavailable, the sRGB internal format tokens must be defined manually as their OpenGL specification hex literals before `glCompressedTexImage2D` is called: `#define GL_COMPRESSED_SRGB_S3TC_DXT1_EXT 0x8C4C` and `#define GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT 0x8C4E`. These values are from the `EXT_texture_sRGB` extension spec and are stable across platforms.
 
-- [ ] **`find_package(GLEW REQUIRED)` in CMakeLists.txt root** (`graphics-dev-irrlicht` + `cicd-dev-github`): add `find_package(GLEW REQUIRED)` to the CMakeLists.txt root and `GLEW::GLEW` to `aitown_render`'s `target_link_libraries`. This is required for the GL capability query initialization sequence in `RenderSystem`. **GLEW vcpkg port existence verification** (`cicd-dev-github`): before committing `find_package(GLEW REQUIRED)` and any `vcpkg.json` change, run `gh api /repos/microsoft/vcpkg/contents/ports/glew?ref=$(jq -r '."builtin-baseline"' vcpkg.json)` and confirm a 200 response. If the port is absent at the current baseline, `VCPKG_COMMIT_ID` and `builtin-baseline` must be updated before Phase 2 CI will pass. This pre-verification is mandatory per `architecture/ci-cd/dependency-management.md`. Owner: `graphics-dev-irrlicht` with `cicd-dev-github` reviewing the CMakeLists change. (ref: `architecture/ci-cd/dependency-management.md`)
+- **`find_package(GLEW REQUIRED)` in CMakeLists.txt root** — completed in Phase 1: `find_package(GLEW REQUIRED)` and `GLEW::GLEW` linkage to `aitown_render` were delivered as part of the Phase 1 **six-item atomicity commit**. Phase 2 verifies only that these are correctly present and consistent — no new CMakeLists change is introduced here. (ref: `architecture/ci-cd/dependency-management.md`)
 
-- [ ] **Consolidated GL capability query guard**: ALL OpenGL capability queries (`GL_MAX_TEXTURE_SIZE`, `GL_EXT_texture_sRGB` extension check, `GL_EXT_texture_filter_anisotropic` extension check, and any others) must be consolidated into a single initialization sequence in `RenderSystem::init()` guarded by an `EDT_NULL` pre-check. Under `EDT_NULL`: set `m_maxTextureSize = 2048`, `m_maxAnisotropy = 1.0f`, `m_srgbTextureSupported = false` — no GL calls made. **Under a real OpenGL device (non-EDT_NULL): call `glewInit()` as the FIRST action in this initialization sequence** before any `glewIsExtensionSupported()` or `glGetIntegerv()` call — GLEW requires initialization to populate its function pointer table; calling `glewIsExtensionSupported()` before `glewInit()` causes a null-function-pointer crash. Check `glewInit()` return value using the two-tier handling: (a) if it returns `GLEW_OK`, proceed with extension queries normally; (b) if it returns `GLEW_ERROR_NO_GL_VERSION` specifically, log WARNING and continue — function pointers may still be valid; proceed with extension queries but log that GLEW is in degraded state; (c) if it returns any other non-`GLEW_OK` code, treat as fatal in DEBUG (abort) and in RELEASE: set `m_maxTextureSize = 2048` as the safe default — **NO `glGetIntegerv` call on the RELEASE path** (the GL context is not guaranteed to be in a valid state when `glewInit` fails; calling `glGetIntegerv` with a broken function-pointer table produces undefined behaviour), then recreate `IrrlichtDevice` with `EDT_NULL`, show a user-facing error dialog "OpenGL initialisation failed", and continue in headless mode using safe defaults: `m_srgbTextureSupported = false`, `m_maxAnisotropy = 1.0f`, `m_maxTextureSize = 2048`. Leaving an OpenGL device with broken GLEW function pointers active is incorrect — it will crash on any subsequent GL extension call. For the RELEASE fallback `EDT_NULL` path, skip the `GL_MAX_TEXTURE_SIZE` query entirely. Under `GLEW_OK` and `GLEW_ERROR_NO_GL_VERSION` paths: call `glGetIntegerv(GL_MAX_TEXTURE_SIZE, &m_maxTextureSize)` after `glewInit()` returns — `GL_MAX_TEXTURE_SIZE` is a core OpenGL 1.0 entrypoint resolved via the platform's native GL dispatch table, NOT through GLEW's function-pointer table. The glewInit failure path must be documented in `src/rendering/render_system.h` with a comment. The guard sequence and order must be documented in `src/rendering/render_system.h` before Phase 4 graphics work begins. (ref: `architecture/graphics-architecture/irrlicht-device-lifecycle.md`, `architecture/asset-standards/2d-texture-standards.md`)
+- **Consolidated GL capability query guard — verification only (Phase 1 delivered)**: Phase 1 delivered the `glewInit()` initialization block, the `EDT_NULL` pre-check, and the two-tier GLEW failure handling in `RenderSystem`. Phase 2 verifies correctness of the Phase 1 implementation and documents the GLEW availability spike result — no new `glewInit()` initialization code is introduced in Phase 2. The genuinely new Phase 2 work is: (a) documenting the GLEW availability spike result in `architecture/graphics-architecture/irrlicht-device-lifecycle.md` under the **"Phase 2 Spike Results"** section and as a one-line comment in `src/rendering/render_system.h`; (b) verifying the `getGPUProgrammingServices()` null check is present before any `addHighLevelShaderMaterialFromFiles()` call. (ref: `architecture/graphics-architecture/irrlicht-device-lifecycle.md`, `architecture/asset-standards/2d-texture-standards.md`)
 
 - [ ] `GL_MAX_TEXTURE_SIZE` queried **immediately after** `createDevice()`, stored as `m_maxTextureSize`; `EDT_NULL` guard initializes to 2048 without GL query (ref: `architecture/asset-standards/2d-texture-standards.md`)
 
@@ -24,51 +29,55 @@ Add all OpenGL capability queries, the `TextureCache` three-pool skeleton, GLSL 
 
 - **`m_maxAnisotropy` query: completed in Phase 1** — same-timing as `m_maxTextureSize` per `architecture/asset-standards/2d-texture-standards.md`. Phase 1 delivers: `float m_maxAnisotropy` declared in `RenderSystem.h` (initialized to `1.0f`); in the `glewInit()` SUCCESS path, `GL_EXT_texture_filter_anisotropic` checked via `glewIsExtensionSupported()`; if present, `glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &m_maxAnisotropy)` called; if absent, warning logged and `m_maxAnisotropy` left at `1.0f`; EDT_NULL and RELEASE fatal-failure paths initialize `m_maxAnisotropy = 1.0f` without any GL call. Phase 2 does NOT re-query `m_maxAnisotropy` — it is already populated by Phase 1. This note replaces the Phase 2 `m_maxAnisotropy` deliverable bullet.
 
-- [ ] **`getGPUProgrammingServices()` null check**: `getGPUProgrammingServices()` must be null-checked before any `addHighLevelShaderMaterialFromFiles()` call — return early for `EDT_NULL` driver; log and abort in debug builds if null on a non-EDT_NULL driver (shader failure is fatal in debug builds per `architecture/graphics-architecture/shader-loading.md`). (ref: `architecture/graphics-architecture/shader-loading.md`)
+- [ ] **`getGPUProgrammingServices()` null check**: `getGPUProgrammingServices()` must be null-checked before any `addHighLevelShaderMaterialFromFiles()` call — return early for `EDT_NULL` driver; log and abort in debug builds if null on a non-EDT_NULL driver (shader failure is fatal in debug builds per `architecture/graphics-architecture/shader-loading.md`). **Atomicity requirement**: the `getGPUProgrammingServices()` null check and `shader_stub_compile_test.cpp` (the Phase 2 `ShaderLoadingTest` body, which calls `addHighLevelShaderMaterialFromFiles()`) MUST be committed in the same atomic commit as the GLSL stub files. The null check MUST be present before the shader compile test is registered in CI — committing the test without the null check means the test exercises a code path that lacks the required guard. (ref: `architecture/graphics-architecture/shader-loading.md`)
 
 #### TextureCache Skeleton
 
 - [ ] `TextureCache` class skeleton (stub) in `src/rendering/texture_cache.h`: must include all three pool structures per `architecture/graphics-architecture/texture-cache.md`:
-  - `m_driverType` member of type `irr::video::E_DRIVER_TYPE`, initialized from the constructor parameter (e.g., `explicit TextureCache(irr::video::E_DRIVER_TYPE driverType)` → `m_driverType{driverType}`). **This member is required in Phase 2** so that the `EDT_NULL` guard on the sRGB upload path in Phase 4 can check `m_driverType == irr::video::EDT_NULL` without requiring a header change.
+  - `m_driverType` member of type `irr::video::E_DRIVER_TYPE`, initialized from the constructor parameter (e.g., `explicit TextureCache(irr::video::E_DRIVER_TYPE driverType)` → `m_driverType{driverType}`). **This member is required in Phase 2** so that the `EDT_NULL` guard on the sRGB upload path in Phase 5 (terrain textures) can check `m_driverType == irr::video::EDT_NULL` without requiring a header change. (ref: `architecture/graphics-architecture/texture-cache.md` — EDT_NULL guard for `evictUnreferenced()`)
   - `m_srgbTextures` (`std::unordered_map<std::string, SRGBEntry>` stub — raw `GLuint` pool, separate from the linear `ITexture*` pool)
   - `m_splatMaps` (`std::unordered_map<std::string, SplatEntry>` stub — raw `GLuint` pool for terrain splat maps). **Canonical member name is `m_splatMaps` per `texture-cache.md` eviction code — do NOT use `m_splatMapTextures`.**
   - Eviction interface method stubs: `releaseLinear(ITexture*)`, `releaseLinear(const std::string& key)`, `releaseSRGB(const std::string& filename)`, `releaseSplatMap(const std::string& filename)` (no-op stub), `evictUnreferenced()` (covers all three pools)
   - Stub accessors: `getSRGBGLuint(const std::string&) const` returning `GLuint{0}`, `getSplatMapGLuint(const std::string&) const` returning `GLuint{0}` (parallel to `getSRGBGLuint`). **NOTE (Irrlicht-2)**: The sRGB accessor is canonically named `getSRGBGLuint` per `architecture/graphics-architecture/texture-cache.md`. An earlier draft of `shader-loading.md` referenced `getGLuint` — that name has been corrected to `getSRGBGLuint` in the spec; the plan must use `getSRGBGLuint` consistently. If any call site uses `getGLuint`, it must be renamed.
   - Stub load methods: `loadSplatMap(const std::string& path)` returning sentinel `GLuint{0}`; `loadLinear(const std::string& path)` returning `ITexture* {nullptr}`; **`loadSRGB(const std::string& path, GLenum format)` returning sentinel `GLuint{0}`** — the `GLenum format` parameter selects between `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` (opaque diffuse) and `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` (transparent diffuse)
 
-  **Irrlicht-3 — "No real GL calls" clarification**: "No real GL calls in Phase 2" means no actual GPU texture uploads happen — `loadSRGB()` does NOT call `glCompressedTexImage2D`, `glGenTextures`, or any other GL function that requires an active context. However, the mip dispatch rules (which DDS filename suffix routes to which upload path) ARE encoded as stub logic in the Phase 2 skeleton — the `loadSRGB()` stub body contains conditional dispatch comments showing the correct routing for Phase 4:
+  **Irrlicht-3 — "No real GL calls" clarification**: "No real GL calls in Phase 2" means no actual GPU texture uploads happen — `loadSRGB()` does NOT call `glCompressedTexImage2D`, `glGenTextures`, or any other GL function that requires an active context. However, the mip dispatch rules (which DDS filename suffix routes to which upload path) ARE encoded as stub logic in the Phase 2 skeleton — the `loadSRGB()` stub body contains conditional dispatch comments showing the correct routing for Phase 5 (when the full `TextureCache` three-pool implementation with real GL calls is delivered):
 
   ```cpp
   // STUB DISPATCH LOGIC (no real GL calls — logging only):
-  // if (path ends with "_d")         → sRGB upload path (Phase 4: glCompressedTexImage2D with GL_COMPRESSED_SRGB_S3TC_DXT1_EXT)
+  // if (path ends with "_d")         → sRGB upload path (Phase 5: glCompressedTexImage2D with GL_COMPRESSED_SRGB_S3TC_DXT1_EXT)
   //   EXCEPTION: "vehicles_sprite_atlas_d.dds" → LINEAR path via loadLinear()
   //   (roof color palette swatches, not photographic diffuse — must NOT be sRGB-decoded)
   //   Check filename BEFORE suffix. See architecture/asset-standards/2d-texture-standards.md.
-  // if (path ends with "_billboard") → sRGB upload path (Phase 4: GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT)
+  // if (path ends with "_billboard") → sRGB upload path (Phase 5: GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT)
   // if (path ends with "_n")         → linear path — use loadLinear() NOT loadSRGB()
   // if (path ends with "_s")         → linear path — use loadLinear() NOT loadSRGB()
-  // if (path ends with "_sprite")    → linear path — use loadLinear() NOT loadSRGB()
+  // if (path ends with "_sp")        → linear path — use loadLinear() NOT loadSRGB()
+  //   (_sp = specular packed: roughness/metallic/AO multi-channel — linear data, not sRGB photographic)
+  //   See architecture/graphics-architecture/texture-cache.md GL_TEXTURE_MAX_LEVEL dispatch table.
   // if (path ends with "_lm")        → linear path — use loadLinear() NOT loadSRGB()
   // STUB BODY (Phase 2):
   //   fprintf(stderr, "STUB: would upload %s via sRGB path\n", path.c_str());
   //   return GLuint{0};
   ```
 
-  This split makes the dispatch contract visible for Phase 4 review before any real GL calls are written. All three pools must be present so Phase 4 and Phase 5 can build against the `TextureCache` interface without structural CMakeLists changes. **If the Phase 2 GLEW availability spike reveals GLEW is absent, the `loadSRGB()` stub body comment must be updated to reflect `glGetString(GL_EXTENSIONS)` as the fallback extension check path (instead of `glewIsExtensionSupported()`). Method signatures remain unchanged — only the internal comment changes.**
+  This split makes the dispatch contract visible for Phase 5 review before any real GL calls are written. All three pools must be present so Phase 3, Phase 4, and Phase 5 can build against the `TextureCache` interface without structural CMakeLists changes. **If the Phase 2 GLEW availability spike reveals GLEW is absent, the `loadSRGB()` stub body comment must be updated to reflect `glGetString(GL_EXTENSIONS)` as the fallback extension check path (instead of `glewIsExtensionSupported()`). Method signatures remain unchanged — only the internal comment changes.**
 
-  **`loadSRGB()` stub body comment requirement**: The `loadSRGB(const std::string& path, GLenum format)` stub body MUST include the following documentation comments for the Phase 4 implementor:
+  **`loadSRGB()` stub body `_billboard` note (MANDATORY)**: The `loadSRGB()` stub body MUST include the following note for the `_billboard` dispatch case: `// NOTE: _billboard suffix applies exclusively to the per-building imposter atlas (1024×128 DXT5 sRGB strip per asset). No other billboard-type atlas uses this suffix — if a new sprite or imposter atlas type is added, verify it uses a distinct suffix before reusing _billboard routing. See architecture/asset-standards/3d-model-standards.md LOD File Naming Convention.`
+
+  **`loadSRGB()` stub body comment requirement**: The `loadSRGB(const std::string& path, GLenum format)` stub body MUST include the following documentation comments for the Phase 5 implementor (Phase 5 delivers the full `TextureCache` three-pool implementation with real GL calls per `architecture/graphics-architecture/texture-cache.md`):
 
   ```cpp
-  // Phase 4 implementation requirement: if path ends with "_billboard", set
+  // Phase 5 implementation requirement: if path ends with "_billboard", set
   // GL_TEXTURE_WRAP_S = GL_CLAMP_TO_EDGE and GL_TEXTURE_WRAP_T = GL_CLAMP_TO_EDGE
   // after glTexParameteri filter calls. Default GL_REPEAT causes ghost-frame artifacts
   // at the 1x8 horizontal strip boundary. See architecture/graphics-architecture/texture-cache.md.
   //
-  // TODO Phase 4: apply GL_TEXTURE_MAX_LEVEL dispatch table per texture-cache.md:
+  // TODO Phase 5: apply GL_TEXTURE_MAX_LEVEL dispatch table per texture-cache.md:
   //   _billboard suffix -> GL_TEXTURE_MAX_LEVEL = 3 (4-level mip chain mandatory)
   //   _d suffix (sRGB)  -> GL_TEXTURE_MAX_LEVEL = 3 (standard 4-level mip chain)
   //   splat maps        -> use loadSplatMap() NOT loadSRGB(); GL_TEXTURE_MAX_LEVEL=0 (single mip)
-  //   NOTE: _n, _s, _sprite use loadLinear() NOT loadSRGB() — no glTexParameteri access
+  //   NOTE: _n, _s, _sp use loadLinear() NOT loadSRGB() — no glTexParameteri access
   ```
 
   ```cpp
@@ -77,8 +86,27 @@ Add all OpenGL capability queries, the `TextureCache` three-pool skeleton, GLSL 
   // See texture-cache.md GL_TEXTURE_MAX_LEVEL table for the full dispatch.
   ```
 
+- [ ] **`loadLinear()` stub body `_lm` routing comment** (`graphics-dev-irrlicht`): The `loadLinear()` stub body MUST contain the following comment block:
+
   ```cpp
-  // TODO Phase 4: When binding this GLuint in OnSetConstants(), save the current
+  // NOTE: all textures with _lm suffix (e.g., buildings_atlas_lm.dds, vehicles_diffuse_atlas_lm.dds)
+  // MUST be loaded via loadLinear(). Do NOT route _lm textures through loadSRGB().
+  // Lightmap data is pre-baked linear irradiance — sRGB gamma expansion would corrupt the lighting.
+  // See architecture/graphics-architecture/texture-cache.md GL_TEXTURE_MAX_LEVEL dispatch table (_lm row).
+  ```
+
+  (ref: `architecture/asset-standards/building-atlas-layout.md` Sign-Off Checklist, `architecture/graphics-architecture/texture-cache.md`)
+
+  ```cpp
+  // TODO Phase 5: _lm suffix textures uploaded via loadLinear() MUST have GL_TEXTURE_MAX_LEVEL = 0
+  // enforced after upload; IVideoDriver::getTexture() does not expose glTexParameteri — use raw GL
+  // after load to set GL_TEXTURE_MAX_LEVEL = 0 on the lightmap texture object.
+  // Per architecture/asset-standards/2d-texture-standards.md lightmap mip exemption:
+  // lightmaps are single-mip; generating a mip chain introduces blur that corrupts lightmap precision.
+  ```
+
+  ```cpp
+  // TODO Phase 5: When binding this GLuint in OnSetConstants(), save the current
   // GL_ACTIVE_TEXTURE unit with glGetIntegerv(GL_ACTIVE_TEXTURE, &savedUnit) BEFORE
   // calling glActiveTexture(). Restore with glActiveTexture(savedUnit) AFTER unbinding.
   // Failure to restore corrupts Irrlicht's internal active-unit tracking.
@@ -91,14 +119,14 @@ Add all OpenGL capability queries, the `TextureCache` three-pool skeleton, GLSL 
   - Set `GL_TEXTURE_MAX_LEVEL = 3` for **billboard atlas textures** (`_billboard` suffix) — the 4-level mip chain (1024×128 → 512×64 → 256×32 → 128×16) is **mandatory** for billboard imposters per `architecture/asset-standards/2d-texture-standards.md`.
   - Set `GL_TEXTURE_MAX_LEVEL = 3` for **diffuse sRGB textures** (`_d` suffix) — standard 4-level mip chain.
   - **NOTE**: `_lm` (lightmap) textures are loaded via `loadLinear()` — no `GL_TEXTURE_MAX_LEVEL` control is possible through the IVideoDriver path. The `loadSRGB()` dispatch table must NOT include an `_lm` case.
-  - **NOTE**: `_n` (normal maps), `_s` (specular), and `_sprite` (sprite atlases) use `loadLinear()` NOT `loadSRGB()` — the `GL_TEXTURE_MAX_LEVEL` dispatch for these suffixes belongs in the `loadLinear()` path, not `loadSRGB()`.
+  - **NOTE**: `_n` (normal maps) and `_s` (specular) use `loadLinear()` NOT `loadSRGB()` — the `GL_TEXTURE_MAX_LEVEL` dispatch for these suffixes belongs in the `loadLinear()` path, not `loadSRGB()`. There is no `_sprite` suffix in the dispatch table — `vehicles_sprite_atlas_d.dds` is routed to the linear path via the explicit filename exception check within the `_d` dispatch, NOT via a `_sprite` suffix rule.
   - **NOTE**: splat maps use `loadSplatMap()` NOT `loadSRGB()` — the `loadSRGB()` dispatch table must NOT include a splat map case.
 
   These dispatch rules must be explicit in the `TextureCache` sRGB load path as stub comments in Phase 2. (ref: `architecture/graphics-architecture/texture-cache.md`, `architecture/asset-standards/2d-texture-standards.md`)
 
 #### shader_constants.h Stub
 
-- [ ] `src/rendering/shader_constants.h` stub created with the full `kTexUnit*` constant table (`kTexUnitDiffuse=0` through `kTexUnitBillboard=9`) as `constexpr int` values per `architecture/asset-standards/2d-texture-standards.md`; file must exist before Phase 3 begins; actual shader usage wired in Phase 4. The file MUST also include the mandatory compile-time range guard:
+- [ ] `src/rendering/shader_constants.h` stub created with the full `kTexUnit*` constant table (`kTexUnitDiffuse=0` through `kTexUnitBillboard=9`) as `constexpr int` values per `architecture/asset-standards/2d-texture-standards.md`; file must exist before Phase 3 begins; Phase 4 verifies its correctness (as a gate); actual shader usage wired in Phase 5 (terrain GLSL shaders). The file MUST also include the mandatory compile-time range guard:
 
   ```cpp
   static_assert(kTexUnitBillboard <= 15,
@@ -129,7 +157,7 @@ Add all OpenGL capability queries, the `TextureCache` three-pool skeleton, GLSL 
   // Do NOT dereference cb below this line.
   ```
 
-- [ ] **GLSL shader stub compile-time validation** (`graphics-dev-irrlicht`): `opengl_tests` target extended with `tests/rendering/shader_stub_compile_test.cpp` (label `requires-opengl`); added to the `add_executable(opengl_tests ...)` call in CMakeLists.txt alongside `stub_succeed.cpp` and `lod_swap_smoke_test.cpp`. Loads `lighting.vert` and `lighting.frag` via `gpu->addHighLevelShaderMaterialFromFiles()` on an `EDT_OPENGL` device, asserts the returned material type is not −1. This catches missing `#version` directive, syntax errors, or incorrect GLSL path resolution before Phase 4 shader infrastructure is built on top of these stubs. Must be green before Phase 3 begins. Per `architecture/testing/framework.md`, do NOT use `target_sources()` to add files to `opengl_tests` — the `add_executable` call must list all sources inline. **`target_sources()` is PROHIBITED for `opengl_tests`**: use `add_executable(opengl_tests tests/rendering/stub_succeed.cpp tests/rendering/shader_stub_compile_test.cpp tests/rendering/lod_swap_smoke_test.cpp)`. The `opengl_tests` target must link: `target_link_libraries(opengl_tests PRIVATE aitown_render GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)`. **Shader callback lifetime**: the test must follow the raw-heap + `->drop()` callback lifetime pattern — allocate the callback with `new`, call `cb->drop()` unconditionally after `addHighLevelShaderMaterialFromFiles()`. Do NOT wrap the callback in `std::unique_ptr`. **Null-device guard**: the test body must null-check the `IrrlichtDevice*` returned by `createDevice()` using the two-condition form:
+- [ ] **GLSL shader stub compile-time validation** (`graphics-dev-irrlicht`): `opengl_tests` target extended with `tests/rendering/shader_stub_compile_test.cpp` (label `requires-opengl`); added to the `add_executable(opengl_tests ...)` call in CMakeLists.txt alongside `stub_succeed.cpp` and `lod_swap_smoke_test.cpp`. Loads `lighting.vert` and `lighting.frag` via `gpu->addHighLevelShaderMaterialFromFiles()` on an `EDT_OPENGL` device, asserts the returned material type is not −1. **Canonical test case signature**: `TEST(ShaderLoadingTest, LightingShaderCompilesWithoutError)` — this exact name is required per the co-landing requirement in `architecture/graphics-architecture/shader-loading.md`. The test asserts `matType != -1` and follows the raw-heap + `->drop()` callback lifetime pattern (allocate callback with `new`, call `cb->drop()` after `addHighLevelShaderMaterialFromFiles()`). NOTE: `ctest -R ShaderStub` (Phase 1 exit criterion) and `ctest -R ShaderLoading` (Phase 2 exit criterion) are distinct — both test cases coexist in `shader_stub_compile_test.cpp` after Phase 2. This catches missing `#version` directive, syntax errors, or incorrect GLSL path resolution before Phase 5 terrain shader infrastructure is built on top of these stubs. Must be green before Phase 3 begins. Per `architecture/testing/framework.md`, do NOT use `target_sources()` to add files to `opengl_tests` — the `add_executable` call must list all sources inline. **`target_sources()` is PROHIBITED for `opengl_tests`**: use `add_executable(opengl_tests tests/rendering/stub_succeed.cpp tests/rendering/shader_stub_compile_test.cpp tests/rendering/lod_swap_smoke_test.cpp)`. The `opengl_tests` target must link: `target_link_libraries(opengl_tests PRIVATE aitown_render GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)`. **Shader callback lifetime**: the test must follow the raw-heap + `->drop()` callback lifetime pattern — allocate the callback with `new`, call `cb->drop()` unconditionally after `addHighLevelShaderMaterialFromFiles()`. Do NOT wrap the callback in `std::unique_ptr`. **Null-device guard**: the test body must null-check the `IrrlichtDevice*` returned by `createDevice()` using the two-condition form:
 
   ```cpp
   IrrlichtDevice* device = createDevice(EDT_OPENGL, ...);
@@ -152,11 +180,12 @@ Add all OpenGL capability queries, the `TextureCache` three-pool skeleton, GLSL 
   ```cpp
   TEST(LODSwapSmokeTest, SetMeshGrabDropContract) {
       // Timing measurement requires a real GPU; this test is promoted to
-      // `requires-opengl` label in Phase 4 when the real LOD swap is implemented.
+      // `requires-opengl` label in Phase 5 when the real LOD swap is implemented
+      // (after the LOD spike work in Phase 2 is complete and TerrainChunk is built).
       // Phase 2 stub asserts only the API contract (setMesh is called), not the timing.
-      // The "> 2ms is HARD BLOCKING" timing constraint is enforced by profiling in Phase 4
-      // using ASAN + release build timing, not by this unit test.
-      GTEST_SKIP() << "LOD swap timing requires real GPU; promoted to Phase 4.";
+      // The grab/drop contract is enforced by ASAN in Phase 5 after the spike confirms
+      // whether setMesh() calls grab() on the new mesh.
+      GTEST_SKIP() << "LOD swap timing requires real GPU; promoted to Phase 5.";
   }
   ```
 
@@ -174,25 +203,29 @@ Add all OpenGL capability queries, the `TextureCache` three-pool skeleton, GLSL 
 
 - All GL capability queries consolidated in `RenderSystem::init()` behind `EDT_NULL` guard; `glewInit()` two-tier handling present
 - `m_maxTextureSize` and `m_srgbTextureSupported` (+ `isSRGBTextureSupported()` accessor) populated for non-EDT_NULL devices; `m_maxAnisotropy` was queried in Phase 1 (same-timing as `m_maxTextureSize`) — Phase 2 verifies the Phase 1 query is present but does not re-introduce it
-- GLEW availability spike result documented in `architecture/graphics-architecture/irrlicht-device-lifecycle.md` (under "Phase 1 Spike Results") AND as a one-line comment in `src/rendering/render_system.h`. Phase 4 sRGB texture pipeline is blocked until this is on record.
-- `find_package(GLEW REQUIRED)` added to CMakeLists.txt; `GLEW::GLEW` linked to `aitown_render`
-- GLEW vcpkg port existence verified via `gh api /repos/microsoft/vcpkg/contents/ports/glew?ref=$(jq -r '."builtin-baseline"' vcpkg.json)` — confirmed 200 HTTP response at the exact pinned baseline. A 404 response blocks Phase 2 merge.
+- GLEW availability spike result documented in `architecture/graphics-architecture/irrlicht-device-lifecycle.md` (under the **"Phase 2 Spike Results"** section — per the canonical spec heading) AND as a one-line comment in `src/rendering/render_system.h`. Phase 5 sRGB texture pipeline (terrain) is blocked until this is on record.
+- `find_package(GLEW REQUIRED)` confirmed present in CMakeLists.txt and `GLEW::GLEW` confirmed linked to `aitown_render` (completed in Phase 1 — Phase 2 verifies only)
+- GLEW vcpkg port confirmed consistent with current `VCPKG_COMMIT_ID` baseline — port existence was verified at Phase 1; Phase 2 confirms no baseline drift has made the port unavailable
 - `TextureCache` skeleton compiles with all 3 pool structures (`m_srgbTextures`, `m_splatMaps`, linear pool), `m_driverType`, `getSRGBGLuint`/`getSplatMapGLuint` accessors, and stub load/eviction methods
 - `loadSRGB()` stub body includes BOTH the `GL_CLAMP_TO_EDGE` wrap-mode TODO comment for `_billboard` textures AND the `GL_TEXTURE_MAX_LEVEL` dispatch table TODO comment
+- `loadLinear()` stub body contains the `_lm` routing comment confirmed by code inspection before Phase 5 lightmapping work begins. (Cross-reference: `architecture/asset-standards/building-atlas-layout.md` Sign-Off Checklist.)
 - `src/rendering/shader_constants.h` exists with full `kTexUnit*` table (0–9) AND `static_assert(kTexUnitBillboard <= 15, ...)`; verified by code review before Phase 3 begins
 - All 6 GLSL stub files exist (`lighting.vert/.frag`, `terrain.vert/.frag`, `billboard.vert/.frag`), each starting with `#version 130`
 - `shader_stub_compile_test` PASSES (not skips) on ubuntu-latest with xvfb before Phase 3 begins
 - `LODSwapSmokeTest.SetMeshGrabDropContract` is registered under `requires-opengl` label and produces SKIP (not FAIL) under `xvfb-run`
+- **`requires-opengl` CI step green state (explicit)**: For the `requires-opengl` CI step (`ctest -L '^requires-opengl$' --output-on-failure` under `xvfb-run`), the step is considered green when ALL of the following are true: (a) `ShaderStubCompileTest::Placeholder` PASSES (Phase 1 stub preserved); (b) `ShaderLoadingTest::LightingShaderCompilesWithoutError` PASSES (NOT skips — a SKIP on this test is a CI failure); (c) `LODSwapSmokeTest::SetMeshGrabDropContract` SKIPS (expected deferred state). A SKIP result for `ShaderLoadingTest::LightingShaderCompilesWithoutError` indicates the test's null-device guard fired (no display available) — this is a CI configuration error that MUST be resolved before Phase 2 exits, not accepted as green.
 - LOD spike **Checkbox A** result for `SMesh::addMeshBuffer()` grab/drop contract documented in `tests/rendering/lod_swap_smoke_test.cpp` with a one-line explanatory comment
 - LOD spike **Checkbox B** result for `CMeshSceneNode::setMesh()` grab/drop contract documented in `architecture/graphics-architecture/scene-graph-ownership.md`. **The Phase 5 TerrainChunk deliverable is BLOCKED on Checkbox B (not Checkbox A).**
 - `getGPUProgrammingServices()` null-checked in RenderSystem before any `addHighLevelShaderMaterialFromFiles()` call
+- **`getSRGBGLuint` accessor name verified**: Code inspection of `src/rendering/texture_cache.h` and `tests/rendering/shader_stub_compile_test.cpp` confirms zero occurrences of `getGLuint` (unqualified) — all sRGB accessor calls use `getSRGBGLuint`. Verified by `grep -rn 'getGLuint' src/rendering/ tests/rendering/` returning zero matches. Any call site using `getGLuint` must be renamed to `getSRGBGLuint` before Phase 2 PR merges.
+- **`IUIBackend` 17-method count verified (Phase 1 cross-reference, re-confirmed at Phase 2)**: Code inspection of `src/ui/IUIBackend.h` confirms the number of pure-virtual methods is exactly 17 before the Phase 1 PR merges. The `static_assert(!std::is_abstract_v<IrrlichtUIBackend>, "IrrlichtUIBackend must override all 17 IUIBackend pure-virtual methods")` message string accurately names the count as 17. Phase 2 re-confirms this count has not changed from Phase 1 — any addition or removal of pure-virtual methods in `IUIBackend.h` between Phase 1 and Phase 2 must be explicitly reviewed and the `static_assert` message updated accordingly. Verified by code inspection before Phase 2 PR merges.
 
 ### Team
 
 | Role | Responsibility |
 |---|---|
 | `graphics-dev-irrlicht` | Consolidated GL capability query guard (`EDT_NULL` pre-check; `glewInit()` two-tier; `GL_MAX_TEXTURE_SIZE`; extension checks), GLEW availability spike (result documented in `irrlicht-device-lifecycle.md` + `render_system.h`), `find_package(GLEW REQUIRED)` + `GLEW::GLEW` linkage, `getGPUProgrammingServices()` null check, `TextureCache` skeleton (all 3 pools; `m_driverType`; `loadSRGB()` stub body comments; mip dispatch table stub; `getSRGBGLuint`/`getSplatMapGLuint`), `src/rendering/shader_constants.h` stub, GLSL shader stubs (6 files, `#version 130`), `shader_stub_compile_test.cpp`, LOD smoke test (`GTEST_SKIP()` body), LOD spikes A and B |
-| `cicd-dev-github` | Review `find_package(GLEW REQUIRED)` CMakeLists change; confirm GLEW vcpkg port exists at current `VCPKG_COMMIT_ID` before committing |
+| `cicd-dev-github` | Review that `find_package(GLEW REQUIRED)` is consistent with the already-installed vcpkg port — GLEW was added to `vcpkg.json` and the port existence was verified at Phase 1; the Phase 2 CI role is NOT performing a first-time port existence check but confirming the Phase 1 installation is consistent with `VCPKG_COMMIT_ID` and the current baseline |
 
 ### Dependencies
 
@@ -200,6 +233,6 @@ Add all OpenGL capability queries, the `TextureCache` three-pool skeleton, GLSL 
 
 ### Risks & Spikes
 
-- **RISK**: GLEW not bundled in vendored Irrlicht — `glewIsExtensionSupported()` fails to link → **Spike**: inspect `COpenGLDriver.cpp`; fallback to `glGetString(GL_EXTENSIONS)` string matching; document in `irrlicht-device-lifecycle.md` "Phase 1 Spike Results" section. Phase 4 sRGB pipeline is BLOCKED until spike is resolved.
+- **RISK**: GLEW not bundled in vendored Irrlicht — `glewIsExtensionSupported()` fails to link → **Spike**: inspect `COpenGLDriver.cpp`; fallback to `glGetString(GL_EXTENSIONS)` string matching; document in `irrlicht-device-lifecycle.md` **"Phase 2 Spike Results"** section (canonical spec heading). Phase 5 sRGB terrain pipeline is BLOCKED until spike is resolved.
 - **RISK**: `CMeshSceneNode::setMesh()` does NOT call `grab()` — LOD swap code in Phase 5 would double-free or leak → **Spike**: inspect `CMeshSceneNode.cpp`; correct `scene-graph-ownership.md` before Phase 5 `TerrainChunk` work begins (Checkbox B).
 - **RISK**: GLEW symbol duplication with Irrlicht's bundled GLEW causing linker errors → **Spike**: test with `find_package(GLEW REQUIRED)` on both Linux and Windows CI; if linker errors occur, use `GLEW_STATIC` define or exclude the system GLEW in favour of Irrlicht's bundled version.

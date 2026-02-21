@@ -65,7 +65,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
   - name: Verify integration test routing (non-zero discovery)
     shell: bash
     run: |
-      count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #')
+      count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
       if [[ "$count" -eq 0 ]]; then
         echo 'ERROR: ctest -L '\''^integration$'\'' discovered 0 tests — label routing is broken'
         exit 1
@@ -85,7 +85,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
   - name: Verify requires-opengl test routing (non-zero discovery)
     shell: bash
     run: |
-      count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #')
+      count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #' || true)
       if [[ "$count" -eq 0 ]]; then
         echo 'ERROR: ctest -L '\''^requires-opengl$'\'' discovered 0 tests — label routing is broken'
         exit 1
@@ -278,7 +278,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
   - name: Verify integration test routing (non-zero discovery)
     shell: bash
     run: |
-      count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #')
+      count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
       if [[ "$count" -eq 0 ]]; then
         echo 'ERROR: ctest -L '\''^integration$'\'' discovered 0 tests — label routing is broken'
         exit 1
@@ -288,7 +288,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
   - name: Verify requires-opengl test routing (non-zero discovery)
     shell: bash
     run: |
-      count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #')
+      count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #' || true)
       if [[ "$count" -eq 0 ]]; then
         echo 'ERROR: ctest -L '\''^requires-opengl$'\'' discovered 0 tests — label routing is broken'
         exit 1
@@ -489,7 +489,7 @@ markdown-lint:
   ```python
   # TODO Phase 5: validate DDS textures (suffix-to-format table, mip chain counts)
   # TODO Phase 5: validate billboard atlas (1024x128 px, 4 mip levels, DXT5/BC3,
-  #   DX10 DXGI_FORMAT BC3_UNORM_SRGB=100 — NOT FourCC-only, FourCC cannot confirm sRGB)
+  #   DX10 DXGI_FORMAT BC3_UNORM_SRGB=78 — NOT FourCC-only, FourCC cannot confirm sRGB)
   # TODO Phase 5: validate audio assets (OGG Vorbis format, duration, sample rate)
   ```
 

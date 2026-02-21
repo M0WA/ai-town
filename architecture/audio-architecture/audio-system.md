@@ -293,26 +293,56 @@ private:
 
 ### ALC_EXT_thread_local_context Requirement
 
-**HARD REQUIREMENT**: If `ALC_EXT_thread_local_context` is absent at `AudioSystem` construction, the constructor MUST throw `std::runtime_error` (or equivalent non-recoverable failure). There is NO fallback to using `alcMakeContextCurrent` on the main thread — that approach is incorrect for multi-threaded OpenAL and is prohibited. The check sequence:
+**HARD REQUIREMENT**: If `ALC_EXT_thread_local_context` is absent at `AudioSystem` construction, the constructor MUST throw `std::runtime_error` (or equivalent non-recoverable failure). There is NO fallback that replaces the thread-local binding on the audio thread — the `alcSetThreadContext` extension is mandatory for safe multi-threaded AL call dispatch. The check sequence:
 
 1. Load extension via `alcGetProcAddress(m_device, "alcSetThreadContext")` — store as `m_fnSetThreadCtx`.
 2. If `m_fnSetThreadCtx == nullptr` (extension absent): throw `std::runtime_error("ALC_EXT_thread_local_context required")`.
-3. Only proceed to `alGenSources` and audio thread launch if extension is confirmed present.
+3. Only proceed to audio thread launch if extension is confirmed present. (`alGenSources` and the EFX filter allocation loop run in Steps 1.5 and 1.6 of the constructor sequence below, on the main thread after `alcMakeContextCurrent` succeeds and before the extension check — see "Constructor sequence" below for the full ordering.)
 
 This must be a Phase 3 locked behavioral contract — Phase 7 implementation MUST NOT deviate from this by using any fallback path.
 
-**Why no fallback is permitted**: Using `alcMakeContextCurrent` to bind the context on the main thread and then calling AL functions from the audio thread is a data race — the OpenAL specification requires that each thread operating on a context must make it current on that thread (either via `alcMakeContextCurrent` before any threading, which is single-threaded only, or via the thread-local extension). Without `ALC_EXT_thread_local_context`, there is no safe way to call AL functions from a background thread while the main thread also makes AL calls (`syncListenerToCamera`, `playSound`, `stopSound`). Failing hard at construction is the only correct behaviour.
+**Main-thread `alcMakeContextCurrent` is mandatory and permanent**: Step 1 of the constructor sequence calls `alcMakeContextCurrent(m_context)` to establish the process-wide current context. This call is **mandatory and must remain bound for the entire application lifetime** (until the destructor teardown sequence). `syncListenerToCamera()` is called from the main thread every frame; it issues AL calls (`alListener3f`, `alListenerfv`) that require a current context on the calling thread. The process-wide binding from `alcMakeContextCurrent` satisfies this requirement for the main thread.
+
+The audio thread then **additionally** calls `alcSetThreadContext(m_context)` via `m_fnSetThreadCtx` at thread startup. This establishes a *thread-local* context binding for the audio thread only, layered on top of the process-wide binding without displacing it. The main thread retains its process-wide context through the lifetime of the audio thread. Both bindings coexist: the main thread uses the process-wide binding (established by `alcMakeContextCurrent`); the audio thread uses its thread-local binding (established by `alcSetThreadContext`). Neither displaces the other.
+
+**Why no audio-thread fallback is permitted**: The audio thread cannot safely call AL functions by relying on the process-wide `alcMakeContextCurrent` binding while the main thread also issues AL calls. The OpenAL specification requires that each thread making AL calls must have a current context on *that thread*. Without the thread-local extension, the audio thread has no mechanism to claim a per-thread context, making concurrent AL calls from both threads a data race. Failing hard at construction is the only correct behaviour.
+
+**What "no fallback" means in practice**: Phase 7 MUST NOT introduce a code path where `alcSetThreadContext` is absent and the audio thread instead relies on the process-wide `alcMakeContextCurrent` binding established in Step 1 to make its AL calls. That specific fallback is the prohibited pattern — it is not safe when the main thread also makes AL calls. The Step 1 `alcMakeContextCurrent` call itself is never the fallback; it is a separate, permanent, unconditional requirement.
 
 **Constructor sequence (within `AudioSystem::AudioSystem(IClock*)`):**
 
 ```cpp
-// Step 1: open device and create context (throws on failure — done before thread launch)
+// Step 1: open device and create context (throws on failure — done before thread launch).
+// alcMakeContextCurrent(m_context) establishes the MANDATORY, PERMANENT process-wide
+// context binding for the main thread. This binding must remain active for the entire
+// application lifetime — syncListenerToCamera() issues AL listener calls on the main
+// thread every frame and requires a current context on that thread.
+// The audio thread will ADDITIONALLY call alcSetThreadContext(m_context) for its own
+// thread-local binding; this does not displace the process-wide binding.
 m_device  = alcOpenDevice(nullptr);
 if (!m_device) throw std::runtime_error("alcOpenDevice failed");
 // ... build HRTF attrs array (see hrtf-initialization.md) ...
 m_context = alcCreateContext(m_device, attribs);
 if (!m_context || alcMakeContextCurrent(m_context) == ALC_FALSE)
     throw std::runtime_error("alcCreateContext failed");
+
+// Step 1.5: generate all AL source handles on the main thread (BEFORE EFX setup).
+// alcMakeContextCurrent(m_context) succeeded in Step 1, so this thread has a valid
+// current context for AL calls. m_sources[i] must be valid before the EFX filter
+// allocation loop (which calls alSourcei to bind each filter to its source handle).
+// See audio-occlusion.md — "alGenSources placement requirement" — for full rationale.
+alGenSources(kTotalSources, m_sources);
+alCheckError("alGenSources");
+
+// Step 1.6: enqueue pre-load commands for all "Looping game SFX" tier assets.
+// These commands will be drained by the audio thread BEFORE it signals m_initDone,
+// ensuring all pre-loaded OGG buffers are resident when the constructor returns.
+// No lock needed: the audio thread has not been launched yet; std::thread constructor
+// acts as a happens-before barrier for all writes performed in this constructor.
+// See streaming-architecture.md — "PRE-LOAD PHASE" — for the drain protocol.
+for (const auto& asset : kPreloadManifest) {
+    m_preloadQueue.push(PreloadCommand{ asset.soundId, asset.filePath, asset.looping });
+}
 
 // Step 2: load ALC_EXT_thread_local_context — HARD REQUIREMENT
 // Cast to FnSetThreadCtx (defined in header as int(*)(ALCcontext*)) — NOT to
@@ -323,6 +353,23 @@ m_fnSetThreadCtx = reinterpret_cast<FnSetThreadCtx>(
     alcGetProcAddress(m_device, "alcSetThreadContext"));
 if (!m_fnSetThreadCtx)
     throw std::runtime_error("ALC_EXT_thread_local_context required");
+
+// Step 2.5: EFX extension check, function pointer loading, and per-source filter allocation.
+// All three operations MUST run on the main thread BEFORE thread launch so that the
+// EFX function pointers and filter objects are fully written before the audio thread
+// reads them (std::thread constructor is the happens-before barrier).
+//
+// Sequence:
+//   a) alcIsExtensionPresent(m_device, "ALC_EXT_EFX") — check extension presence.
+//   b) Load m_fnGenFilters, m_fnFilteri, m_fnFilterf, m_fnDeleteFilters via alGetProcAddress.
+//   c) Run the m_efxAllocationAttempted / per-source filter allocation loop (kEvictableSFXCount
+//      iterations), binding each filter to its corresponding source handle from m_sources[].
+//
+// See audio-occlusion.md — "Per-source EFX filter allocation" — for the full loop body,
+// including the AL_FILTER_NULL failure check, partial-allocation cleanup pattern, and
+// the two-boolean flag protocol (m_efxAllocationAttempted vs m_efxAvailable).
+// This cross-reference mirrors the pattern of Step 1.5 above, which delegates
+// alGenSources placement rationale to audio-occlusion.md.
 
 // Step 3: initialize m_occlusionGainTarget[] before thread launch (see member comment)
 // IMPORTANT: alcMakeContextCurrent(nullptr) MUST NOT be called during application runtime

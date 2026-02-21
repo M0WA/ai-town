@@ -113,7 +113,7 @@ target_link_libraries(aitown_render PRIVATE GLEW::GLEW Irrlicht)
 
 **GLEW — Windows triplet note**: On Windows with the `x64-windows` triplet active, vcpkg resolves `glew` to `glew:x64-windows` automatically — no platform-specific triplet override in `vcpkg.json` is needed. Before committing a baseline update that adds GLEW, verify the `glew` port exists at the pinned baseline using `gh api /repos/microsoft/vcpkg/contents/ports/glew`. A 200 response confirms the port is present at that baseline; a 404 means the port was removed or renamed — try an adjacent vcpkg commit. This verification is mandatory: a missing port at the pinned baseline causes a hard build failure on all platforms.
 
-**PHASE 1 EXIT CRITERION — GLEW port verification (BLOCKING)**: Before merging the Phase 1 five-item atomicity commit, the developer MUST verify that the `glew` vcpkg port exists at the exact baseline pinned in `vcpkg.json`. This verification must occur BEFORE the Phase 1 atomicity commit merges — it must not be deferred to Phase 2. Run the following command and confirm a 200 HTTP status is returned:
+**PHASE 1 EXIT CRITERION — GLEW port verification (BLOCKING)**: Before merging the Phase 1 **six-item atomicity commit**, the developer MUST verify that the `glew` vcpkg port exists at the exact baseline pinned in `vcpkg.json`. This verification must occur BEFORE the Phase 1 atomicity commit merges — it must not be deferred to Phase 2. Run the following command and confirm a 200 HTTP status is returned:
 
 ```bash
 gh api /repos/microsoft/vcpkg/contents/ports/glew?ref=$(jq -r '."builtin-baseline"' vcpkg.json)
@@ -207,7 +207,7 @@ Before uploading Windows artifacts, a CI step must confirm that GLEW was install
     # Use explicit if-block syntax — "Test-Path ... || exit 1" is PowerShell 7+ only;
     # GitHub Actions Windows runners default to PowerShell 5.1 where || is not supported.
     if (-not (Test-Path "build/vcpkg_installed/x64-windows/lib/glew.lib")) {
-      if (-not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\include\GL\glew.h")) {
+      if (-not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\glew.lib")) {
         Write-Error "GLEW not found in either manifest-mode or classic-mode install"; exit 1
       }
     }
@@ -241,19 +241,20 @@ if(WIN32)
 endif()
 ```
 
-**Phase 1 atomicity requirement**: The GLEW32.dll post-build copy command is a mandatory part of the Phase 1 atomicity commit. All five of the following changes must land in a single atomic commit — merging any subset breaks Windows CI:
+**Phase 1 atomicity requirement**: The GLEW32.dll post-build copy command is a mandatory part of the Phase 1 atomicity commit. All **six** of the following changes must land in a single atomic commit — merging any subset breaks Windows CI:
 
 1. Add `glew` to `vcpkg.json` dependencies
 2. Add `find_package(GLEW REQUIRED)` to `CMakeLists.txt`
 3. Add `target_link_libraries(aitown_render PRIVATE ... GLEW::GLEW)` to `CMakeLists.txt`
 4. Add the `Irrlicht.dll` CMake post-build copy command to `CMakeLists.txt`
 5. Add the `GLEW32.dll` CMake post-build copy command to `CMakeLists.txt` (this section)
+6. `build-windows` CI step: add a "Verify GLEW vcpkg install" step using dual-path PS 5.1-compatible syntax — `if (-not (Test-Path 'build/vcpkg_installed/x64-windows/lib/glew.lib') -and -not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\glew.lib")) { Write-Error 'glew.lib not found in either vcpkg install path'; exit 1 }`. Owner: `cicd-dev-github`.
 
-Omitting item 5 causes the existing `build/Release/GLEW32.dll` hard-fail CI check to trigger on every Windows build from Phase 1 onward.
+Omitting item 5 causes the existing `build/Release/GLEW32.dll` hard-fail CI check to trigger on every Windows build from Phase 1 onward. Omitting item 6 leaves the Windows GLEW vcpkg installation unverified — a missing or misconfigured GLEW port would silently produce a broken binary rather than failing the CI job immediately.
 
 ### DLL Verification CI YAML Co-Landing Requirement
 
-**CMakeLists.txt DLL copy rules and the CI YAML DLL verification step MUST land in the same commit.** This is the same atomicity principle as the five-item GLEW commit above, applied to the relationship between CMake and CI YAML.
+**CMakeLists.txt DLL copy rules and the CI YAML DLL verification step MUST land in the same commit.** This is the same atomicity principle as the **six-item GLEW commit** above, applied to the relationship between CMake and CI YAML.
 
 Specifically:
 

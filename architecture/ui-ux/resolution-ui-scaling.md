@@ -96,6 +96,11 @@ struct Rect { int x{0}, y{0}, w{0}, h{0}; };
 - **Colorblind mode toggle**: A "Colorblind Mode" toggle is located in **Settings > Graphics tab, Accessibility subsection** — see [`settings-pause-menu.md`](settings-pause-menu.md) for the canonical tab structure definition. The toggle MUST NOT appear in any other tab or panel. It switches all color-coded UI to a colorblind-safe alternative encoding.
 - **Minimap zone palette** (colorblind mode): Replace Residential=green / Commercial=blue / Industrial=orange with a pattern-supplemented palette: each zone type uses a distinct hatching or cross-hatch pattern overlay in addition to color, ensuring deuteranopia and tritanopia users can distinguish zone types by pattern alone.
 - **Demand pressure bars** (R/C/I in HUD): Must always display zone-type letter labels (R / C / I) adjacent to or inside each bar — color is supplemental, not the sole encoding. This applies in all modes (colorblind and standard).
+
+  **Demand pressure bar hatching patterns (colorblind mode)** — When colorblind mode is active, each demand bar column MUST display a hatching overlay so that zone type is distinguishable by pattern alone, independent of color and the clamped letter label:
+  - **Residential (R)**: diagonal hatching at 45°
+  - **Commercial (C)**: horizontal lines
+  - **Industrial (I)**: cross-hatch
 - **Service Coverage overlay on minimap**: In colorblind mode, use distinct geometric pattern overlays (e.g., diagonal hatching for fire, horizontal lines for police, dotted for power, cross-hatch for water) in addition to tint colors.
 - **Zone placement preview/cursor tint**: In colorblind mode, zone type cursors must include a zone-type label overlay (small "R", "C", or "I" text) so players can confirm zone type without relying on color.
 - **Reference standard**: WCAG 2.1 Success Criterion 1.4.1 (Use of Color) — color must not be the sole means of conveying information.

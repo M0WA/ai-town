@@ -36,10 +36,75 @@ Using the interleaved scalar count instead of the frame count in `alBufferData` 
   // triggerStinger() before m_lastDuckWakeTime is written, the audio thread computes
   // an epoch-sized dt on its first wake (data race / UB).  Initialize first, signal after.
   m_lastDuckWakeTime = m_clock->nowSeconds();
+
+  // PRE-LOAD PHASE — process the pre-load command queue BEFORE signaling init complete
+  // and BEFORE entering the streaming loop.
+  //
+  // Purpose: all pre-loaded OGG SFX buffer operations (alBufferData, alBufferiv,
+  // alGetProcAddress for AL_SOFT_loop_points) must execute on the audio thread while
+  // it has a confirmed current thread-local context (established by the
+  // alcSetThreadContext call above). They must NOT be performed on the main thread
+  // after the audio thread has claimed the context — alGetProcAddress on a thread
+  // without a current context may return null on some OpenAL implementations.
+  //
+  // Enqueue protocol (main thread, inside AudioSystem constructor, BEFORE thread launch):
+  //   m_preloadQueue.push(PreloadCommand{ soundId, filePath, looping });
+  //   // ... repeat for all pre-load tier assets ...
+  //   // No lock is needed because the thread has not started yet; the std::thread
+  //   // constructor acts as a happens-before barrier for all writes performed before it.
+  //   m_audioThread = std::thread(&AudioSystem::audioThreadFunc, this);
+  //
+  // Drain protocol (audio thread, after alcSetThreadContext succeeds, before notify_one):
+  {
+      PreloadCommand cmd;
+      while (m_preloadQueue.tryPop(cmd)) {
+          // Decode OGG into AL buffer, set AL_SOFT_loop_points if available,
+          // store (cmd.soundId → bufferId) in m_preloadedBuffers map.
+          // All AL calls here are safe: thread-local context is current.
+          processPreloadCommand(cmd);
+      }
+  }
+  // m_preloadQueue is empty at this point. The streaming loop never drains it again.
+  // All subsequent pre-load requests after construction are PROHIBITED in V1 — the
+  // pre-load queue is a construction-time mechanism only. If future requirements
+  // demand runtime asset loading, a separate runtime-load command queue must be added
+  // to the streaming loop (post-V1 scope).
+
   { std::lock_guard<std::mutex> lk(m_initMutex); m_initDone = true; }
   m_initCV.notify_one();
   // Now enter streaming loop...
   ```
+
+  **Pre-load queue type — choose exactly one of the two patterns below.** The drain loop shown in the code block above calls `m_preloadQueue.tryPop(cmd)`, which is a method on an SPSC queue. A plain `std::vector` has no `tryPop()` member; mixing `std::vector` storage with the SPSC drain loop would be a compile error. Pick one pattern and use it consistently throughout the implementation:
+
+  **Pattern A (SPSC queue — matches the drain loop shown above)**:
+  `m_preloadQueue` is a non-blocking single-producer / single-consumer queue that exposes a `tryPop(cmd)` method (e.g., a lock-free ring buffer or any queue adapter implementing this interface). The drain loop already shown is correct for this type:
+
+  ```cpp
+  PreloadCommand cmd;
+  while (m_preloadQueue.tryPop(cmd)) {
+      processPreloadCommand(cmd);
+  }
+  ```
+
+  Any SPSC queue implementation that provides `tryPop(T&) -> bool` is acceptable.
+
+  **Pattern B (std::vector — alternative)**:
+  `m_preloadQueue` is a `std::vector<PreloadCommand>` populated by the constructor before thread launch. Replace the `tryPop` drain loop with a range-for iteration:
+
+  ```cpp
+  for (auto& cmd : m_preloadQueue) {
+      processPreloadCommand(cmd);
+  }
+  ```
+
+  This is valid because `m_preloadQueue` is written entirely on the main thread before `m_audioThread = std::thread(...)` is called (no concurrent access), so no lock is needed and the full vector is readable in one pass.
+
+  **IMPLEMENTER NOTE — `push()` vs `push_back()` (Pattern B only)**: The constructor sequence in `audio-system.md` Step 1.6 uses `m_preloadQueue.push(PreloadCommand{...})`. `std::vector` has no `push()` method; that call is written for the SPSC queue type used by Pattern A. When Pattern B is chosen, the implementer MUST replace every `m_preloadQueue.push(...)` call in the Step 1.6 loop with `m_preloadQueue.push_back(...)`. This substitution is an implementer responsibility when selecting Pattern B — `audio-system.md` Step 1.6 is not modified because it remains correct as written for Pattern A.
+
+  **Exactly one pattern must be chosen; do not mix SPSC `tryPop` with `std::vector` iteration.** No mutex is needed in either case because the main thread has finished writing before `m_audioThread = std::thread(...)` is called, and the audio thread is the only reader.
+
+  **Cross-reference**: The pre-load OGG threading requirement (audio thread only, loop point handling, `AL_SOFT_loop_points`) is specified fully in the "Pre-loaded looping OGG SFX — loop point handling" section of this document. The constructor sequence that enqueues pre-load commands before thread launch is described in `audio-system.md` (Section: ALC_EXT_thread_local_context Requirement, constructor sequence Steps 1–5).
 
   **If `ALC_EXT_thread_local_context` is absent, the constructor throws before the thread is ever launched** — the audio thread never observes this condition. Do not fall back to relying on `alcMakeContextCurrent` on the main thread — that approach is undefined behavior for multi-threaded OpenAL and is prohibited. OpenAL Soft on any reasonably modern system (2013 or later) ships with `ALC_EXT_thread_local_context`; a null proc address indicates a severely outdated OpenAL installation.
 - **8 buffers × 64 KB each** (~3 s total buffered audio at 44100 Hz stereo: 8 × 16384 frames / 44100 Hz ≈ 2.97 s) — main-thread update would risk starvation during large city loads

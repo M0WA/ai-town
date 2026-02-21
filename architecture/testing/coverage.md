@@ -61,6 +61,14 @@ The Phase 4 `src/ui/` coverage baseline is expected to be low (stub-heavy code).
 acceptable Phase 4 baseline is **25%** — achievable with `UIManagerDrawOrderTest`, 6 UIScaler
 tests, and 8 CameraController tests.
 
+**IMPLEMENTER CONSTRAINT (Phases 1-3)**: All panel stub `draw()` bodies added in
+Phases 1-3 MUST call at least one `IUIBackend` method (e.g., `setElementVisible`) —
+empty `draw()` bodies `{}` will cause the Phase 4 25% `src/ui/` coverage gate to fail.
+An empty `draw()` body makes the draw-order test vacuously green but produces zero
+line coverage on the `UIManager::draw()` dispatch path. This constraint applies to
+every panel stub registered with `UIManager` during Phases 1-3, regardless of whether
+full panel implementation is deferred to a later phase.
+
 **Phase 1 prerequisite**: The Phase 4 25% gate assumes all Phase 1 tests (14 tests: 8
 CameraController tests in `tests/ui/camera_controller_test.cpp` + 6 UIScaler tests in
 `tests/ui/ui_scaler_test.cpp`) are present and passing. The `IrrlichtUIBackendCompileCheck`

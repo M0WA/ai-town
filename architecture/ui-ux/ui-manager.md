@@ -268,6 +268,19 @@ All panels are visible-by-default set to false except `NotificationManager` (alw
 
 1. **Modal**: if any blocking modal is active, it consumes ALL keyboard and mouse events (Escape goes to the modal's Cancel/safe handler, not the pause menu). Camera movement events (MMB drag, RMB drag, scroll wheel) are **NOT consumed** — they pass through to Priority 6 (see `input-arbitration.md` Priority 1 for the camera pass-through rationale). Return `true` for all non-camera events while a modal is shown.
 2. **CRITICAL toast dismiss**: if any CRITICAL toast is currently visible AND no blocking modal is active, click/Enter/Delete events are consumed by `NotificationManager` before any other handler. This prevents an Enter key meant to dismiss a CRITICAL toast from activating a toolbar button behind it. Skipped entirely when: (a) no CRITICAL toast is visible, OR (b) a blocking modal is active.
+
+   **Compound guard (mandatory)** — the dispatch to `NotificationManager` MUST use both conditions as a compound guard. Checking only `criticalVisible` is insufficient per `input-arbitration.md` Priority 2 dual-guard section:
+
+   ```cpp
+   // Priority 2 dual-guard — BOTH conditions required
+   bool criticalVisible = m_notifications->hasCriticalToastVisible();
+   bool modalActive     = m_modal && m_modal->isActive();
+   if (criticalVisible && !modalActive) {
+       // dispatch to NotificationManager for CRITICAL toast dismiss
+   }
+   ```
+
+   The compound guard is mandatory — checking only `criticalVisible` is insufficient per `input-arbitration.md` Priority 2 dual-guard section. Same-frame state transitions can leave `criticalVisible == true` while a modal is simultaneously active (e.g., the game-over modal shown on the same frame a deficit CRITICAL toast is visible). Without the `!modalActive` check, Priority 2 would consume the event before Priority 1's modal handler, bypassing the modal's input lock.
 3. **QueryPanel / InspectorPanel**: if visible, forwards mouse events over its bounds and Escape; see input-arbitration.md for toolbar and minimap carve-out exceptions on dismiss-click.
 4. **TaxRatePanel**: if visible, forwards mouse events over its bounds; Escape closes it. Outside clicks are NOT consumed (pass-through).
 5. **HUD controls** (toolbar clicks, speed selector, minimap interactions; Ctrl+Z (undo) processed here). **SettingsPanel** is NOT a named priority level — when visible it intercepts events as part of this priority tier (UIManager HUD controls), returning its consumed state before the toolbar/minimap handlers run. When `SettingsPanel` is visible, Escape is consumed by `SettingsPanel` at this priority tier — it closes Settings and returns the player to PauseMenu by calling `PauseMenuPanel::show()`. `SettingsPanel::onEvent()` must return `true` for Escape events when visible. This does NOT trigger `transitionToGameplay_fromPaused()`. Escape only reaches the PauseMenu-to-gameplay transition if SettingsPanel is not currently visible. When `SettingsPanel` is NOT visible and `PauseMenuPanel` IS visible: Escape is consumed by `PauseMenuPanel`, which calls `transitionToGameplay_fromPaused()`. This is processed at Priority 5, after SettingsPanel's check, before HUD toolbar handlers.

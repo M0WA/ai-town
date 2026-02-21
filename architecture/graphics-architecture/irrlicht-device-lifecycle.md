@@ -106,23 +106,28 @@ The following initialization sequence MUST occur immediately after `createDevice
        //                 point — they will crash with null function pointers.
        LOG_ERROR("glewInit() failed: %s", glewGetErrorString(glewResult));
        AITOWN_ASSERT_MSG(false, "Fatal GLEW initialisation failure");
-       // Release fallback: reinitialise device with EDT_NULL and notify user.
-       // RELEASE fallback sequence (must be performed in this exact order):
-       // 1. Drop the original OpenGL device — closes the window and destroys the GL context.
-       //    Omitting this step leaves the original OpenGL window open alongside the new
-       //    EDT_NULL device, resulting in two live devices simultaneously.
-       //    m_device->drop() triggers Irrlicht's internal cleanup and decrements the refcount.
-       //    After drop(), the pointer is invalid — null it immediately to prevent dangling access.
-       //    m_device->drop();
-       //    m_device = nullptr;
-       // 2. Re-create with EDT_NULL (no window, no GL context):
-       //    m_device = irr::createDevice(irr::video::EDT_NULL,
-       //                                 irr::core::dimension2d<irr::u32>(1280, 720));
-       // 3. Set safe defaults — no GL context is current after EDT_NULL creation:
-       //    m_maxTextureSize = 2048;      // conservative fallback (no glGetIntegerv)
-       //    m_srgbTextureSupported = false;
-       //    m_maxAnisotropy = 1.0f;
-       // 4. Show a user-facing error dialog / log entry before proceeding headlessly.
+
+       // **MANDATORY RELEASE FALLBACK SEQUENCE (must execute in this exact order):**
+       //
+       // Step 1. Drop the original OpenGL device.
+       //   Closes the window and destroys the GL context.
+       //   Omitting this step leaves the original OpenGL window open alongside the new
+       //   EDT_NULL device, resulting in two live devices simultaneously.
+       //   m_device->drop() triggers Irrlicht's internal cleanup and decrements the refcount.
+       m_device->drop();
+       // Step 2. Null the pointer immediately.
+       //   After drop(), the pointer is invalid — null it to prevent dangling access.
+       m_device = nullptr;
+       // Step 3. Re-create with EDT_NULL (no window, no GL context).
+       m_device = irr::createDevice(irr::video::EDT_NULL,
+                                    irr::core::dimension2d<irr::u32>(1280, 720));
+       // Step 4. Log the failure and set safe defaults; no GL context is current after
+       //   EDT_NULL creation — do NOT call glGetIntegerv here.
+       //   m_maxTextureSize = 2048;      // conservative fallback (no glGetIntegerv)
+       //   m_srgbTextureSupported = false;
+       //   m_maxAnisotropy = 1.0f;
+       //   Show a user-facing error notification ("OpenGL initialisation failed") and
+       //   continue headlessly.
    }
    ```
 
