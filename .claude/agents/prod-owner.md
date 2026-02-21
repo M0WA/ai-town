@@ -90,3 +90,13 @@ Write the plan to `./implementation/` using the per-phase file structure above. 
 ```
 
 Roles available: `graphics-dev-irrlicht`, `sound-dev-opensoftal`, `gamedesign-lookandfeel`, `gamedesign-ux`, `graphics-artist-3d-model`, `graphics-artist-2d-texture`, `sound-artist-opensoftal`, `test-dev-cpp`, `cicd-dev-github`.
+
+## GitHub Project Sync Rule
+
+**After every update to any file under `./implementation/`**, you MUST trigger the `proj-manager` agent to sync the GitHub project. This is a required final step — do not omit it.
+
+Use the Task tool to launch `proj-manager` with a prompt that describes what changed. Example:
+
+> Sync the GitHub Project "AI Town" with the current implementation plan under `./implementation/`. The following changes were just made: [describe changes, e.g. "Phase 0 status changed to Done in INDEX.md", "Phase 3 deliverables list updated with two new items"]. Read INDEX.md and all affected phase files, then update the GitHub project accordingly.
+
+The `proj-manager` task may run in parallel with other wrap-up steps, but it must be launched before you report the plan update as complete.

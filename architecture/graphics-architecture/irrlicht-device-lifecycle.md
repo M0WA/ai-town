@@ -6,6 +6,7 @@
 - `RenderSystem` exposes `getDriver()`, `getSceneManager()`, `isRunning()` etc.
 
 **Render Loop Call Order (mandatory per-frame sequence)**:
+
 ```cpp
 // Required order in RenderSystem per frame:
 driver->beginScene(true, true, irr::video::SColor(255, 0, 0, 0));
@@ -13,17 +14,39 @@ sceneManager->drawAll();        // 3D scene (terrain, buildings, vehicles, sky)
 uiManager->draw();              // 2D HUD: explicit per-panel Z-order draw (m_gui->drawAll() NOT called — see ui-manager.md)
 driver->endScene();
 ```
+
 `UIManager::draw()` is called between `sceneManager->drawAll()` and `endScene()` in `RenderSystem`. Per `architecture/ui-ux/ui-manager.md` line 157, `UIManager::draw()` issues explicit per-panel draw calls in Z-order via `IUIBackend` — `m_gui->drawAll()` is NOT called by `RenderSystem` because it would bypass the explicit layering required for the background scrim and modal overlay. `UIManager::draw()` must be called before `endScene()` — calling it after `endScene()` produces no output. The mandatory per-frame sequence is `sceneManager->drawAll()` → `UIManager::draw()` → `driver->endScene()`. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API. This call order is immutable and must not be changed by any subsystem.
 
-### CameraController — Preventing Animator Conflicts
+## IrrlichtRenderer and UIManager — Header Dependency Rule
+
+`IrrlichtRenderer` calls `uiManager->draw()` inside `drawScene()` (see the render loop sequence above). This runtime coupling must NOT create a compile-time header dependency from `IrrlichtRenderer.h` to `UIManager.h`. The following rules are mandatory:
+
+- `IrrlichtRenderer.h` must forward-declare `UIManager` with `class UIManager;` — it must NOT `#include "UIManager.h"` in the header file.
+- `IrrlichtRenderer.cpp` includes `UIManager.h` in the implementation file (`.cpp`) only — never in the header.
+- `UIManager.h` must NOT include any Irrlicht headers. `UIManager.h` depends only on `IUIBackend.h` in `src/ui/`. If `UIManager.h` were to include an Irrlicht header, and `IrrlichtRenderer.h` were to include `UIManager.h`, the result would be a circular include chain: Irrlicht headers pulled into any translation unit that includes `UIManager.h`, and `UIManager.h` pulled into any translation unit that includes `IrrlichtRenderer.h`.
+- The coupling is one-directional at runtime: `IrrlichtRenderer::drawScene()` calls `uiManager->draw()`. At the header level this is expressed as a forward declaration only. The full `#include "UIManager.h"` is deferred to `IrrlichtRenderer.cpp`.
+
+**Violation pattern to avoid**:
+
+```cpp
+// IrrlichtRenderer.h — WRONG: pulls Irrlicht headers into UIManager transitively
+#include "UIManager.h"   // DO NOT DO THIS
+
+// IrrlichtRenderer.h — CORRECT: forward declaration only
+class UIManager;         // forward declare; full type resolved in .cpp only
+```
+
+## CameraController — Preventing Animator Conflicts
 
 See [`scene-graph-ownership.md` — CameraController section](scene-graph-ownership.md) for the full specification: `addCameraSceneNode()` usage, the grab/drop-guarded animator removal loop, the "Why grab/drop is required" rationale, per-frame update ordering, and `IEventReceiver` design.
 
 ### Video Driver
+
 - **Always use `EDT_OPENGL`** on both Linux and Windows
 - Enforce in `RenderSystem` constructor; log and abort if OpenGL is unavailable
 
 ### Render Quality Parameters (minimum required config)
+
 ```cpp
 irr::SIrrlichtCreationParameters params;
 params.DriverType  = irr::video::EDT_OPENGL;
@@ -34,3 +57,176 @@ params.Stencil     = true; // required for shadow techniques
 params.AntiAlias   = 4;    // 4× MSAA minimum for "realistic graphics" goal
 params.Vsync       = false; // user-configurable option
 ```
+
+## GL Capability Query Initialization
+
+> **CRITICAL — Safe operations between `createDevice()` and `glewInit()`**
+>
+> After `createDevice()` returns non-null, the OpenGL context is active on the
+> calling thread but GLEW's function-pointer table has NOT yet been populated.
+> Therefore, NO GLEW-dependent call is safe before `glewInit()`. This includes —
+> but is not limited to — `glewIsSupported()`, `glewIsExtensionSupported()`, and
+> any raw GL extension entrypoint resolved through GLEW (e.g.
+> `glCompressedTexImage2D`). Calling any of these before `glewInit()` dereferences
+> a null function pointer and will crash immediately.
+>
+> Call `glewInit()` IMMEDIATELY as the first action after `createDevice()` returns,
+> before any OpenGL extension use.
+>
+> The ONLY operations that are safe before `glewInit()` are Irrlicht API calls
+> that do not invoke raw GL functions internally — for example, reading
+> `IrrlichtDevice` properties (window size, driver type) or querying
+> `IVideoDriver::getDriverType()`. Any direct GL extension call before
+> `glewInit()` will crash with a null function pointer.
+
+The following initialization sequence MUST occur immediately after `createDevice()` and before any `glewIsExtensionSupported()` or `glGetIntegerv()` call:
+
+1. **EDT_NULL pre-check**: Short-circuit the entire GL capability block if `IVideoDriver::getDriverType() == EDT_NULL`. No GL calls are valid in headless mode.
+
+2. **glewInit()** must be called first:
+
+   ```cpp
+   // Required on GLVND Linux — prevents GLEW_ERROR_NO_GL_VERSION when Mesa provides
+   // OpenGL via libGL.so.1 dispatch layer.
+   glewExperimental = GL_TRUE;
+   GLenum glewResult = glewInit();
+   if (glewResult == GLEW_ERROR_NO_GL_VERSION) {
+       // NON-FATAL: GLEW could not determine the OpenGL version string, but the
+       // GL context and function pointers may still be valid.  Log a WARNING and
+       // continue — do NOT abort and do NOT fall back to EDT_NULL.
+       LOG_WARNING("glewInit() returned GLEW_ERROR_NO_GL_VERSION; "
+                   "GL version string unavailable but continuing.");
+   } else if (glewResult != GLEW_OK) {
+       // FATAL: GLEW function-pointer table was not populated.
+       // Debug builds: abort immediately (assert/terminate) so the failure is
+       //               caught during development.
+       // Release builds: fall back to EDT_NULL driver and show a user-facing
+       //                 error notification ("OpenGL initialisation failed").
+       //                 Do NOT call any GL extension entrypoints after this
+       //                 point — they will crash with null function pointers.
+       LOG_ERROR("glewInit() failed: %s", glewGetErrorString(glewResult));
+       AITOWN_ASSERT_MSG(false, "Fatal GLEW initialisation failure");
+
+       // **MANDATORY RELEASE FALLBACK SEQUENCE (must execute in this exact order):**
+       //
+       // Step 1. Drop the original OpenGL device.
+       //   Closes the window and destroys the GL context.
+       //   Omitting this step leaves the original OpenGL window open alongside the new
+       //   EDT_NULL device, resulting in two live devices simultaneously.
+       //   m_device->drop() triggers Irrlicht's internal cleanup and decrements the refcount.
+       m_device->drop();
+       // Step 2. Null the pointer immediately.
+       //   After drop(), the pointer is invalid — null it to prevent dangling access.
+       m_device = nullptr;
+       // Step 3. Re-create with EDT_NULL (no window, no GL context).
+       m_device = irr::createDevice(irr::video::EDT_NULL,
+                                    irr::core::dimension2d<irr::u32>(1280, 720));
+       // Step 4. Set safe defaults — no GL context is current after EDT_NULL creation.
+       //   Do NOT call glGetIntegerv or any other GL function here.
+       //   These assignments are MANDATORY and must execute unconditionally in the
+       //   RELEASE fallback path; they are NOT optional comments.
+       m_maxTextureSize       = 2048;  // conservative fallback — no glGetIntegerv
+       m_srgbTextureSupported = false;
+       m_maxAnisotropy        = 1.0f;
+       // Show a user-facing error notification ("OpenGL initialisation failed") and
+       // continue headlessly.
+   }
+   ```
+
+   Calling `glewIsExtensionSupported()` or any GLEW function pointer (e.g. `glCompressedTexImage2D`) before `glewInit()` causes a null function pointer crash.
+
+   **Two-tier distinction rationale**: `GLEW_ERROR_NO_GL_VERSION` specifically indicates GLEW cannot determine the GL version string — function pointers may still be loaded. Other errors (e.g., `GLEW_ERROR_NO_GLX_DISPLAY`) indicate the function-pointer table was not populated. The default GL 1.0 entrypoint `glGetIntegerv(GL_MAX_TEXTURE_SIZE, ...)` does not depend on the GLEW function-pointer table, but it does require a current GL context — it is safe to call only while the original OpenGL device is still alive (SUCCESS path), and must NOT be called after the device has been replaced with `EDT_NULL` (RELEASE fallback path). See step 3 for the guarded query sequence.
+
+3. **GL_MAX_TEXTURE_SIZE query**: Query with `glGetIntegerv(GL_MAX_TEXTURE_SIZE, &m_maxTextureSize)` only in the SUCCESS path (after `glewInit()` returns `GLEW_OK` or `GLEW_ERROR_NO_GL_VERSION`). A non-null return from `createDevice()` guarantees an OpenGL context is current on the calling thread, and `glGetIntegerv(GL_MAX_TEXTURE_SIZE, ...)` is a core OpenGL 1.0 entrypoint that resolves through the platform's native GL dispatch (not through GLEW's function-pointer table). Do NOT query `GL_MAX_TEXTURE_SIZE` in the RELEASE fallback path after a fatal `glewInit()` failure — at that point the original OpenGL device has been destroyed and replaced with an `EDT_NULL` device, which has no GL context. Calling `glGetIntegerv` without a current GL context is undefined behaviour.
+
+   **Placement rule**: `glGetIntegerv(GL_MAX_TEXTURE_SIZE, ...)` MUST appear inside the SUCCESS branch of the `glewResult` check shown below — never inside the `else` (RELEASE fallback) branch and never after the `else` block executes. The RELEASE fallback's Step 4 (in the code block above) already sets `m_maxTextureSize = 2048` as a hardcoded constant without any GL call; the guarded query below applies to the SUCCESS path only.
+
+   ```cpp
+   if (glewResult == GLEW_OK || glewResult == GLEW_ERROR_NO_GL_VERSION) {
+       // SUCCESS path: GL context is current; query the real hardware limit.
+       glGetIntegerv(GL_MAX_TEXTURE_SIZE, &m_maxTextureSize);
+   } else {
+       // RELEASE fallback: original OpenGL device already destroyed and replaced with
+       // EDT_NULL (see Step 4 above) — no GL context is current.
+       // Do NOT call glGetIntegerv or any GL function here.
+       m_maxTextureSize = 2048;  // safe conservative default (already set in Step 4)
+   }
+   ```
+
+4. **Extension queries**: Use `glewIsExtensionSupported("GL_EXT_texture_sRGB")` etc. only after a successful `glewInit()`.
+
+**GLEW availability spike**: Phase 2 must verify whether the vendored Irrlicht build exposes GLEW symbols. If GLEW is unavailable (Irrlicht compiled without GLEW), all extension checks must use `glGetString(GL_EXTENSIONS)` string matching or `IVideoDriver::queryFeature()` instead. This spike must complete before any `glewIsExtensionSupported()` code is written. The spike result must be documented in BOTH `architecture/graphics-architecture/irrlicht-device-lifecycle.md` under the Phase 2 Spike Results section AND as a one-line comment in `src/rendering/render_system.h` confirming the confirmed extension query path (glewIsExtensionSupported or glGetString(GL_EXTENSIONS) fallback). The code comment ensures in-code documentation for implementers; the architecture doc ensures the decision is visible to non-implementers reviewing the spec.
+
+### GLEW Spike — Two Independent Questions
+
+The GLEW availability spike answers two completely independent questions. Conflating them produces incorrect conclusions — the answer to question 1 has no bearing on the answer to question 2.
+
+**Question 1: Does the vendored Irrlicht source use GLEW internally?**
+
+Inspect `source/Irrlicht/COpenGLDriver.cpp` for `#include "glew.h"` or `glewInit()` calls. This determines only whether Irrlicht's own internal GL calls go through GLEW's function pointer table. It does NOT determine whether AI Town can link GLEW independently.
+
+**Question 2: Can AI Town link against GLEW independently and call `glewInit()`?**
+
+The answer to this question is determined solely by whether `find_package(GLEW REQUIRED)` succeeds. When the vcpkg `glew` port is installed, this is ALWAYS yes — regardless of whether Irrlicht bundles GLEW internally.
+
+`find_package(GLEW REQUIRED)` MUST remain in CMakeLists.txt regardless of the answer to question 1. AI Town calls `glewInit()` itself to populate its own function pointer table for `glCompressedTexImage2D` and `glewIsExtensionSupported()`. Question 1 only affects whether symbol duplication risk exists — which is handled by ensuring both link to the same vcpkg GLEW build.
+
+## GLEW Symbol Duplication Risk
+
+Irrlicht bundles its own copy of GLEW headers and symbols (in `source/Irrlicht/glew.h` and compiled into the Irrlicht static library). The vcpkg `glew` port provides a separate GLEW build. When both are present in the same link, the same symbols (e.g. `glewInit`, `glCompressedTexImage2D`) are defined twice, producing linker warnings or — on some toolchains — silent ODR violations that cause incorrect function pointer resolution at runtime.
+
+**Mitigations (in priority order):**
+
+1. **Check whether the Irrlicht vcpkg port already strips bundled GLEW**: **Spike result (Phase 1 investigation)**: The `adrido/irrlicht-vcpkg` portfile does NOT strip bundled GLEW. The port supplies a custom `CMakeLists.txt` (since Irrlicht 1.8.4 ships none) that uses `glob_c_cpp_sources(IRR_SRC_FILES source/Irrlicht)` — this glob unconditionally includes `source/Irrlicht/glew.c` and `source/Irrlicht/glew.h`. No `-DIRRLICHT_BUILD_GLEW=OFF` option, no `IRRLICHT_USE_SYSTEM_GLEW` flag, no patch file, and no `glew` entry in `Build-Depends` were found. Bundled GLEW is compiled into the Irrlicht library — duplication with vcpkg GLEW is confirmed present. Mitigation 1 (port stripping) is NOT available; mitigation 2 (link order) is mandatory.
+2. **Link vcpkg GLEW before Irrlicht** in CMake `target_link_libraries` order — the linker takes the first definition found; placing vcpkg GLEW first ensures the correct, versioned GLEW symbols win:
+
+   ```cmake
+   target_link_libraries(aitown_render PRIVATE GLEW::GLEW Irrlicht ...)
+   ```
+
+   `aitown_render` is the static library where both GLEW and Irrlicht are first linked together. The `aitown` executable only links against `aitown_render` transitively and must not re-link GLEW or Irrlicht directly.
+
+3. **Linux fallback** — if symbol duplication cannot be resolved by link order, add `-Wl,--allow-multiple-definition` to the linker flags for Linux only:
+
+   ```cmake
+   if (UNIX AND NOT APPLE)
+       target_link_options(aitown PRIVATE -Wl,--allow-multiple-definition)
+   endif()
+   ```
+
+   This suppresses the linker error but does not guarantee the correct definition wins; link order (mitigation 2) must still be applied.
+
+   **Phase 1 constraint**: The `-Wl,--allow-multiple-definition` linker option applies to the `aitown` **executable** target. At Phase 1, only `aitown_render` (a `STATIC` library) exists — the `aitown` executable may not yet be present. CMake silently ignores `target_link_options()` on `STATIC` library targets (static libraries use the archiver `ar`, not the linker). Therefore, **mitigation 3 is not available at Phase 1**. If the `nm build/libaitown_render.a` symbol-duplication check at Phase 1 finds duplicate GLEW symbols after applying mitigation 2 (link order), **the only viable resolution at Phase 1 is mitigation 1** — verify and patch the Irrlicht vcpkg portfile to strip bundled GLEW. The Phase 1 PR MUST NOT be merged with known duplicate GLEW symbols. Mitigation 3 (`-Wl` flag) can be applied once the `aitown` executable target exists in Phase 2+.
+
+**Phase 2 build verification (BUILD-BLOCKING):** The build engineer must verify that no duplicate GLEW symbols remain after applying mitigations. Run the following after a successful Linux build:
+
+```bash
+nm build/aitown | grep -i glew | sort | uniq -d
+```
+
+**Note on `-D` flag**: On a fully static Linux build, the `-D` flag inspects only the dynamic export table and will produce no output even when symbols are duplicated in the static image. Plain `nm` without `-D` must be used for statically-linked executables.
+
+**Phase 1 note**: At Phase 1, the `aitown` final executable target may not yet exist. Run the symbol duplication check against the render library at Phase 1 instead:
+
+```bash
+nm build/libaitown_render.a | grep -i glew | sort | uniq -d
+```
+
+`libaitown_render.a` is the library where GLEW and Irrlicht are first linked together at Phase 1. Once the `aitown` executable exists (Phase 2+), use `nm build/aitown`. The plain `nm` without `-D` flag requirement applies to both: on a fully static build, `-D` inspects only the dynamic export table and produces no output even when symbols are duplicated in the static image.
+
+If this command produces any output, duplicate GLEW symbols are present and the build is BLOCKED — the issue must be resolved before merging. The result of this check (clean or duplicate list) must be recorded in the Phase 2 Spike Results section below.
+
+## Phase 2 Spike Results
+
+<!-- Placeholder: populate this section once the Phase 2 GLEW availability spike is complete. -->
+<!-- Record here: whether the vendored Irrlicht build exposes GLEW symbols, and which extension query path was confirmed (glewIsExtensionSupported vs. glGetString(GL_EXTENSIONS) fallback). -->
+
+## Test Guard — `shader_stub_compile_test` Skip vs. Fail
+
+The `GTEST_SKIP()` guard in `shader_stub_compile_test` must only activate when
+`createDevice()` returns null AND the `DISPLAY` environment variable is unset.
+Under `xvfb-run` (where `DISPLAY` is set), a null return from
+`createDevice(EDT_OPENGL)` is a test FAILURE (`FAIL()`), not a skip — it
+indicates Mesa or OpenGL is misconfigured in CI. Conflating the two conditions
+produces a silent false-pass: the test appears green while the OpenGL context
+is broken.

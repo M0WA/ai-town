@@ -1,156 +1,315 @@
 ---
 name: plan-fix-spec
-description: Use this skill when the user wants to sync the implementation plan with the current specs AND iteratively fix all CRITICAL/HIGH issues in both the specs and the plan until a clean pass is achieved. Examples: "plan-fix-spec", "sync and fix the implementation plan", "fix the plan and specs together", "plan-fix-spec phase-3 phase-5".
+description: Sync the implementation plan with the current specs AND iteratively fix all CRITICAL/HIGH issues in both specs and the plan until a clean pass is achieved — using domain-scoped re-reviews, diff-based prompts, issue deduplication, fix verification, and deferred commits to minimize token usage and latency.
 ---
 
 # Plan Fix Spec
 
-Sync the implementation plan from the current architecture specs, then iteratively review and fix CRITICAL/HIGH issues across both the spec files and the implementation plan — repeating until a full clean pass is achieved on the targeted phases.
+Sync the implementation plan from the current architecture specs, then iteratively review and
+fix issues across both the spec files and the implementation plan — repeating until a full clean
+pass is achieved on the targeted phases.
 
-The user may optionally specify which phases to target (e.g. "phase-3 phase-5"). If no phases are specified, all phases are in scope.
+---
+
+## Configuration
+
+Parse both variables from the user's invocation at the very start, before doing anything else.
+
+**Severity filter** (optional, default: `CRITICAL+HIGH`): controls which issue levels agents
+report and which are fixed each cycle.
+
+Parse `[TARGET_SEVERITIES]`:
+
+- If the user specified a list (e.g. `critical`, `critical+high+medium`, `all`), use those levels.
+- If nothing was specified, default to **CRITICAL and HIGH**.
+
+Express `[TARGET_SEVERITIES]` as a human-readable list (e.g. "CRITICAL and HIGH") and use it
+consistently throughout. Issues below the threshold are out of scope — agents must not report them.
+
+**Phase scope** (optional, default: all phases): controls which implementation plan phases are
+reviewed and fixed.
+
+Parse `[TARGET_PHASES]`:
+
+- If the user specified phases (e.g. `phase-3`, `phase-3 phase-5`), restrict scope to those phases.
+- If nothing was specified, default to **all phases**.
+
+Express `[TARGET_PHASES]` as a human-readable phrase (e.g. "phase-3 and phase-5" or "all phases")
+and include it in every agent prompt as the `[PHASE SCOPE IF SPECIFIED]` note. Issues in
+out-of-scope phases are noted but do not block completion.
+
+---
+
+## State (maintained across cycles)
+
+Before the first cycle, initialise the following state. Update it after every cycle.
+
+| Variable | Initial value | Updated after each cycle |
+|---|---|---|
+| `ROUND` | 1 | +1 each cycle |
+| `CLEAN_DOMAINS` | `{}` (empty set) | Add agent domain when it reports NO ISSUES |
+| `TOUCHED_DOMAINS` | `{}` (empty set) | Set to domains whose files were modified this cycle |
+| `TOUCHED_FILES` | `{}` (empty set) | Set to files written/edited this cycle |
+| `ALL_ISSUES` | `{}` | Accumulate deduplicated issue list across rounds |
+| `TOTAL_SPEC_FIXES` | 0 | +1 per spec fix applied |
+| `TOTAL_PLAN_FIXES` | 0 | +1 per plan fix applied |
+
+**Domain → file mapping** (used to determine TOUCHED_DOMAINS):
+
+| Domain | Files |
+|---|---|
+| `gamedesign-lookandfeel` | `architecture/game-design/**`, `implementation/**` |
+| `gamedesign-ux` | `architecture/ui-ux/**`, `implementation/**` |
+| `graphics-artist-2d-texture` | `architecture/asset-standards/2d-texture-standards.md`, `implementation/**` |
+| `graphics-artist-3d-model` | `architecture/asset-standards/3d-model-standards.md`, `architecture/asset-standards/building-atlas-layout.md`, `implementation/**` |
+| `sound-artist-opensoftal` | `architecture/audio-architecture/**`, `implementation/**` |
+| `cicd-dev-github` | `architecture/ci-cd/**`, `implementation/**` |
+| `graphics-dev-irrlicht` | `architecture/graphics-architecture/**`, `implementation/**` |
+| `sound-dev-opensoftal` | `architecture/audio-architecture/**`, `implementation/**` |
+| `test-dev-cpp` | `architecture/testing/**`, `implementation/**` |
+
+---
 
 ## Process
 
-### Step 1 — Product Owner updates the implementation plan
+### Step 1 — Product Owner syncs the implementation plan (Round 1 only)
 
-Launch the `prod-owner` agent with the following prompt:
+**Skip this step on rounds 2+.** The plan is already in sync after round 1; re-running risks
+overwriting fixes applied by squad agents in previous rounds.
 
-> You are a Senior Product Owner for AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read ALL specification files under `architecture/` and `CLAUDE.md`, then update the implementation plan files under `./implementation/` (per-phase files + INDEX.md) so they accurately and completely reflect the current specs. Follow the Core Rule: Spec Consistency and the File Layout rules defined in your agent instructions. When done, confirm what was written and list any spec contradictions you flagged.
+On round 1, launch the `prod-owner` agent:
+
+> You are a Senior Product Owner for AI Town, a 3D city simulator built with C++, Irrlicht, and
+> OpenAL Soft. Read ALL specification files under `architecture/` and `CLAUDE.md`, then update
+> the implementation plan files under `./implementation/` (per-phase files + INDEX.md) so they
+> accurately and completely reflect the current specs. Follow the Core Rule: Spec Consistency and
+> the File Layout rules defined in your agent instructions. When done, confirm what was written
+> and list any spec contradictions you flagged.
 
 Wait for the `prod-owner` agent to finish before continuing.
 
-### Step 2 — Parallel squad reviews
+---
 
-Launch **all 9 agents simultaneously** — 5 design + 4 tech — each reviewing both the implementation plan and the relevant spec files from their domain perspective.
+### Step 2 — Determine which agents to run this round
 
-**Scope note**: if the user specified target phases, include that in every agent prompt (e.g. "Focus your review on phases 3 and 5 of the implementation plan."). Otherwise review all phases.
+**Round 1**: run all 9 agents (full read, no diff available yet).
 
-#### Design Squad agents (in parallel)
+**Round 2+**: run only agents that meet at least one of these conditions:
+- They reported at least one in-scope issue last round (they may have follow-on issues)
+- Their domain is in `TOUCHED_DOMAINS` (their files were modified by fixes last round)
 
-| Agent | Subagent type |
-|---|---|
-| Senior Game Designer | `gamedesign-lookandfeel` |
-| Senior UI/UX Designer | `gamedesign-ux` |
-| Senior 2D Texture Artist | `graphics-artist-2d-texture` |
-| Senior 3D Model Artist | `graphics-artist-3d-model` |
-| Senior Sound Artist | `sound-artist-opensoftal` |
+Agents in `CLEAN_DOMAINS` whose domain is **not** in `TOUCHED_DOMAINS` are skipped — their
+previous clean result carries forward. Note in the round summary which agents were skipped and why.
 
-Each design agent prompt:
+---
 
-> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read the implementation plan files under `./implementation/` and the relevant architecture spec files under `architecture/`. [PHASE SCOPE IF SPECIFIED]. Review BOTH the implementation plan AND the spec files from your domain's perspective. Identify any issues, gaps, misalignments, missing deliverables, or incorrect sequencing in either the plan or the specs. Rate each issue CRITICAL, HIGH, MEDIUM, or LOW. For CRITICAL and HIGH issues state: (a) whether the fix belongs in the SPEC FILES or in the IMPLEMENTATION PLAN, and (b) a concrete recommendation. If no issues in your domain, say "NO ISSUES FOUND".
+### Step 3 — Launch agents in parallel
 
-#### Tech Squad agents (in parallel)
+For each agent selected in Step 2, launch them simultaneously using the Task tool with
+**`model: haiku`** — review agents only read files and report structured issues.
 
-| Agent | Subagent type |
-|---|---|
-| Senior GitHub Pipeline Engineer | `cicd-dev-github` |
-| Senior C++ Developer (Irrlicht) | `graphics-dev-irrlicht` |
-| Senior C++ Developer (OpenAL Soft) | `sound-dev-opensoftal` |
-| Senior C++ Test Engineer | `test-dev-cpp` |
+**Scope note**: if the user specified target phases, include that in every prompt.
 
-Each tech agent prompt:
+#### Round 1 prompt (full read):
 
-> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and OpenAL Soft. Read the implementation plan files under `./implementation/` and the relevant architecture spec files under `architecture/`. [PHASE SCOPE IF SPECIFIED]. Review BOTH the implementation plan AND the spec files from your domain's perspective. Identify any issues, gaps, misalignments, missing deliverables, incorrect sequencing, or technical risks in either the plan or the specs. Rate each issue CRITICAL, HIGH, MEDIUM, or LOW. For CRITICAL and HIGH issues state: (a) whether the fix belongs in the SPEC FILES or in the IMPLEMENTATION PLAN, and (b) a concrete recommendation. If no issues in your domain, say "NO ISSUES FOUND".
+> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and
+> OpenAL Soft. Read the implementation plan files under `./implementation/` and the relevant
+> architecture spec files under `architecture/`. [PHASE SCOPE IF SPECIFIED]. Review BOTH the
+> implementation plan AND the spec files from your domain's perspective.
+>
+> Only report [TARGET_SEVERITIES] issues. For each issue, output it in this exact schema:
+>
+> ```
+> ISSUE
+> severity: [CRITICAL|HIGH|MEDIUM|LOW]
+> location: [SPEC|PLAN]
+> domain: [your agent type, e.g. sound-dev-opensoftal]
+> file: [path/to/file.md]
+> section: [section heading or line reference]
+> description: [one sentence]
+> recommendation: [concrete fix]
+> ```
+>
+> If no [TARGET_SEVERITIES] issues in your domain, output exactly: `NO ISSUES FOUND`
 
-All 9 agents run in parallel.
+#### Round 2+ prompt (diff-based):
 
-### Step 3 — Collect and display findings
+> You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and
+> OpenAL Soft. Since the last review round, the following files in your domain were modified:
+>
+> [TOUCHED_FILES filtered to this agent's domain — list each file with a brief change summary]
+>
+> Your previous issues from round N-1:
+> [list this agent's issues from last round, or "none" if clean]
+>
+> Review only the changed sections. For each of your previous issues: confirm whether it has been
+> resolved or is still present. Also check whether the fixes introduced any new [TARGET_SEVERITIES]
+> issues. [PHASE SCOPE IF SPECIFIED].
+>
+> Output each issue (new or persisting) using the same schema:
+>
+> ```
+> ISSUE
+> severity: [CRITICAL|HIGH|MEDIUM|LOW]
+> location: [SPEC|PLAN]
+> domain: [your agent type]
+> file: [path/to/file.md]
+> section: [section heading or line reference]
+> description: [one sentence]
+> recommendation: [concrete fix]
+> status: [NEW|PERSISTING]
+> ```
+>
+> If no [TARGET_SEVERITIES] issues remain in your domain, output exactly: `NO ISSUES FOUND`
 
-After all agents respond, display a structured summary:
+Do not start Step 4 until **all launched agents have returned their results**.
+
+---
+
+### Step 4 — Deduplicate and display findings
+
+#### 4a — Deduplicate
+
+Before displaying findings, merge issues that target the same `(file, section)` pair from
+multiple agents:
+
+- If two agents flag the same location with compatible recommendations, merge into one issue
+  and note both domains.
+- If two agents flag the same location with conflicting recommendations, keep both but mark
+  as `[CONFLICT]` — resolve in Step 5.
+
+#### 4b — Display
 
 ```
 === PLAN + SPEC REVIEW — Round N ===
+Severity filter: [TARGET_SEVERITIES]
+Agents run: X / 9  (skipped: [list of skipped agents and reason])
 
-CRITICAL issues: X  (spec: A | plan: B)
-HIGH issues: Y      (spec: C | plan: D)
+[severity] issues: X  (spec: A | plan: B | new: C | persisting: D)
+[severity] issues: Y  ...
 
 --- Senior Game Designer ---
-  [CRITICAL][SPEC] Issue description
+  [SEVERITY][SPEC][NEW] file.md § Section
+    Description: ...
     → Recommendation: ...
-  [HIGH][PLAN] Issue description
+
+  [SEVERITY][PLAN][PERSISTING] implementation/phase-N.md § Section
+    Description: ...
     → Recommendation: ...
 
 --- Senior UI/UX Designer ---
-  ...
+  NO ISSUES FOUND  ✓ (carried forward — domain untouched)
 
---- Senior 2D Texture Artist ---
-  ...
-
---- Senior 3D Model Artist ---
-  ...
-
---- Senior Sound Artist ---
-  ...
-
---- Senior GitHub Pipeline Engineer ---
-  ...
-
---- Senior C++ Developer (Irrlicht) ---
-  ...
-
---- Senior C++ Developer (OpenAL Soft) ---
-  ...
-
---- Senior C++ Test Engineer ---
-  ...
+... (one block per agent; skipped agents show "SKIPPED — domain untouched, previously clean")
 ```
 
-### Step 4 — Fix CRITICAL and HIGH issues (CRITICAL first)
+---
 
-Issues are fixed in two parallel tracks simultaneously:
+### Step 5 — Fix [TARGET_SEVERITIES] issues (highest severity first)
 
-#### Track A — Spec fixes (design-squad and tech-squad agents)
+Issues are fixed in two parallel tracks. Resolve `[CONFLICT]` items before launching either
+track — reason about the best fix and pick one recommendation.
 
-For all CRITICAL and HIGH issues flagged as belonging in the **spec files**:
+#### Track A — Spec fixes
 
-- Group spec fixes by domain:
-  - Game design spec issues → have the relevant `gamedesign-*` or `graphics-artist-*` or `sound-artist-*` agent fix the `architecture/` files
-  - Technical spec issues → have the relevant `graphics-dev-irrlicht`, `sound-dev-opensoftal`, `cicd-dev-github`, or `test-dev-cpp` agent fix the `architecture/` files
-- Launch all spec-fixing agents in parallel
-- Each agent edits only the `architecture/` files in their domain — never the implementation plan
-- If a fix requires a new `architecture/` file, the agent must also update `architecture/DOCUMENT_INDEX.md` and the index table in `CLAUDE.md`
+For all in-scope issues with `location: SPEC`:
 
-#### Track B — Implementation plan fixes (Product Owner)
+- Group by domain and launch fixing agents in parallel.
+- Each agent edits only the `architecture/` files in their domain.
+- If a fix requires a new `architecture/` file, the agent must also update
+  `architecture/DOCUMENT_INDEX.md` and the index table in `CLAUDE.md`.
+- After applying their fix, **each agent immediately self-reviews the changed section** and
+  confirms: (a) the issue is resolved, (b) no new issues were introduced. Report result as
+  `VERIFIED` or `NEEDS_REWORK`.
 
-For all CRITICAL and HIGH issues flagged as belonging in the **implementation plan**:
+#### Track B — Plan fixes
 
-- Launch the `prod-owner` agent with the full list of plan issues and their recommendations
-- The Product Owner applies all plan fixes to the appropriate `implementation/phase-N.md` files (and updates `INDEX.md` if structure changes)
-- The Product Owner must not modify spec files
+For all in-scope issues with `location: PLAN`:
 
-Run Track A and Track B in parallel where possible. If a plan fix depends on a spec fix being applied first, complete Track A before launching Track B for that issue.
+- Launch the `prod-owner` agent with the full list of plan issues and their recommendations.
+- The Product Owner applies all plan fixes to `implementation/phase-N.md` files (and updates
+  `INDEX.md` if structure changes).
+- The Product Owner must not modify spec files.
+- After applying fixes, the Product Owner self-reviews each changed section and confirms
+  resolution, reporting `VERIFIED` or `NEEDS_REWORK` per issue.
 
-If two agents make conflicting recommendations for the same issue, surface the conflict explicitly, reason about the best resolution, and apply the most appropriate fix.
+Run Track A and Track B in parallel. If a plan fix depends on a spec fix, complete that Track A
+item before launching the dependent Track B item.
 
-### Step 5 — Clear context and re-review
+After both tracks finish:
+- Re-work any items marked `NEEDS_REWORK` before proceeding.
+- Update `TOUCHED_FILES` with every file written or edited this cycle.
+- Update `TOUCHED_DOMAINS` based on the domain → file mapping table in State.
+- Update `TOTAL_SPEC_FIXES` and `TOTAL_PLAN_FIXES`.
 
-After all fixes from this round are applied, run `/clear` to reset the context window, then return to **Step 2** and run all 9 agents again on the updated plan and specs.
+---
 
 ### Step 6 — Completion check
 
-After each review round, check: **did every agent report NO CRITICAL or HIGH issues in their domain (for the targeted phases)?**
+Update `CLEAN_DOMAINS`:
+- Add any agent that reported `NO ISSUES FOUND` this round (or was carried forward as clean).
+- Remove any agent from `CLEAN_DOMAINS` whose domain appears in `TOUCHED_DOMAINS` (their files
+  changed, so their clean status is invalidated for the next round).
 
-- If **yes** → output a final summary:
+**Did every agent (all 9) reach `CLEAN_DOMAINS` this round?**
+
+- If **yes** → proceed to Step 7 (lint + commit + summary).
+- If **no** → return to Step 2 for the next cycle. Only run `/compress` before the next cycle
+  if the context window is too full to survive another full round. Do not compress routinely.
+
+---
+
+### Step 7 — Lint, commit, and complete
+
+Run the markdown linter once:
+
+```bash
+markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+```
+
+Fix any violations and re-run until the linter exits zero.
+
+Then commit all accumulated changes in a single commit:
+
+```
+ACTION REQUIRED — COMMIT:
+git add -A
+git commit -m "fix(specs+plan): apply plan+spec fixes from squad review (N rounds)"
+```
+
+Replace `N` with `ROUND`. If no files were modified at all (all agents clean on round 1), output
+`NO COMMIT NEEDED — no files changed`.
+
+Output the final summary:
 
 ```
 === PLAN FIX SPEC COMPLETE ===
 
+Severity filter: [TARGET_SEVERITIES]
 Rounds completed: N
-Spec fixes applied: X
-Plan fixes applied: Y
+Spec fixes applied: TOTAL_SPEC_FIXES
+Plan fixes applied: TOTAL_PLAN_FIXES
+Agent runs saved: X  (domain-scoped skips across all rounds)
+Conflicts resolved: Y
 
-The implementation plan and architecture specs have passed a full review by all 9 agents with no CRITICAL or HIGH issues remaining.
+The implementation plan and architecture specs have passed a full review
+by all 9 agents with no [TARGET_SEVERITIES] issues remaining.
 ```
 
-- If **no** → continue from Step 4 with the new findings.
+---
 
 ## Rules
 
-- The Product Owner sync step (Step 1) must complete before any squad reviews begin
-- All 9 squad agents run in parallel each review round — never skip any
-- MEDIUM and LOW issues are noted in the summary but do not block completion and are not fixed during this skill
+- Step 1 (prod-owner sync) runs **only on round 1** — never on subsequent rounds
+- All 9 agents run on round 1; later rounds are domain-scoped (Step 2)
+- Do not start Step 4 until all launched agents for the current round have returned
+- Issues below [TARGET_SEVERITIES] are out of scope — agents must not report them
+- Structured issue schema is mandatory — free-text issue reports must be parsed into schema before dedup
 - Spec fixes go into `architecture/` files only — never into the implementation plan
 - Plan fixes go into `implementation/phase-N.md` files only — never into spec files
 - `INDEX.md` must be updated if any structural change is made to the implementation plan
+- Each fixing agent must self-verify their own changes before the round closes
+- `[CONFLICT]` items must be resolved before fix tracks launch
+- Single deferred commit at the final clean pass — no per-round commits
 - If the same issue persists across 3 rounds without resolution, flag it explicitly and ask the user for guidance before continuing
-- Phase scope: if the user specified target phases, agents review and fix only those phases; issues in other phases are noted but do not block completion
+- Phase scope: agents review and fix only `[TARGET_PHASES]`; issues in out-of-scope phases are noted but do not block completion

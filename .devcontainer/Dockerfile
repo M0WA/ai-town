@@ -5,7 +5,10 @@ ENV TZ="$TZ"
 
 ARG CLAUDE_CODE_VERSION=latest
 
-# Install basic development tools and iptables/ipset
+# vcpkg baseline — must match builtin-baseline in vcpkg.json
+ARG VCPKG_COMMIT=ce35b1a53aac26d7fcdb8ee1ef7a8e4eea02d27b
+
+# Install basic development tools, iptables/ipset, and C++ build toolchain
 RUN apt-get update && apt-get install -y --no-install-recommends \
   less \
   git \
@@ -15,6 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   zsh \
   man-db \
   unzip \
+  zip \
+  curl \
   gnupg2 \
   gh \
   iptables \
@@ -25,16 +30,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   jq \
   nano \
   vim \
-  libirrlicht-dev \
-  xvfb libgl1-mesa-dev \
-  libvorbis-dev \
   build-essential \
+  cmake \
+  ninja-build \
+  pkg-config \
+  lcov \
+  xvfb \
+  libgl1-mesa-dev \
+  libglu1-mesa-dev \
+  libasound2-dev \
+  libpulse-dev \
+  libx11-dev \
+  libxxf86vm-dev \
+  libxext-dev \
+  gcc-13 \
+  g++-13 \
+  && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
+     --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# install recent go
-RUN curl -sL https://go.dev/dl/go1.25.7.linux-amd64.tar.gz -o /tmp/go.tar.gz && \
-  ls -lh /tmp/go.tar.gz && \
-  tar -C /usr -xzf /tmp/go.tar.gz
+# Bootstrap vcpkg at the pinned baseline commit (matches vcpkg.json builtin-baseline).
+# Packages are NOT pre-installed here — vcpkg manifest mode runs on first cmake configure.
+# chown so the node user can run vcpkg install without sudo.
+RUN git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg \
+  && git -C /opt/vcpkg checkout ${VCPKG_COMMIT} \
+  && /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics \
+  && chown -R node:node /opt/vcpkg
+
+ENV VCPKG_ROOT=/opt/vcpkg
+ENV VCPKG_DISABLE_METRICS=1
+ENV PATH=$PATH:/opt/vcpkg
 
 # Ensure default node user has access to /usr/local/share
 RUN mkdir -p /usr/local/share/npm-global && \
