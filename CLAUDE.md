@@ -91,6 +91,7 @@ Do not suggest alternative engines, languages, or platforms.
 | Tech Squad | `/tech-squad` | Delegates a task to the full technical squad in parallel (GitHub Pipeline, Irrlicht dev, OpenAL Soft dev, Test Engineer) |
 | Plan Spec | `/plan-spec` | Product Owner updates the implementation plan from specs, then design + tech squads review it in parallel and iterate until no CRITICAL/HIGH issues remain |
 | Plan Fix Spec | `/plan-fix-spec` | Product Owner syncs the implementation plan from specs, then design + tech squads review both the plan AND the spec files, fixing CRITICAL/HIGH issues in specs (via squad agents) and in the plan (via Product Owner) in parallel — repeats until a clean pass is achieved on the targeted phases |
+| Update Board | `/update-board` | Project Manager syncs the GitHub project board with the implementation plan; optionally scoped to a single phase (default: all phases) |
 
 ## Development Guidelines
 
