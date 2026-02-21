@@ -96,12 +96,30 @@ Phase 4 `src/ui/` baseline meets or exceeds 25%.
 **Phase 4 `src/ui/` 25% gate — awk pipeline**:
 
 ```bash
-# Verify that the least-covered src/ui/ file meets the 25% Phase 4 baseline.
+# Preflight check 1: verify src/ui/ entries exist in lcov --list output.
+# If this fails, coverage_filtered.info contains no src/ui/ data — check that
+# src/ui/ source files were compiled with -DENABLE_COVERAGE=ON and that the
+# lcov --remove step did not inadvertently exclude src/ui/.
+if ! lcov --list coverage_filtered.info | grep -q "src/ui/"; then
+  echo "PREFLIGHT FAIL: No src/ui/ entries in lcov --list output."
+  echo "Check coverage_filtered.info generation and --remove patterns."
+  exit 1
+fi
+# Preflight check 2: verify lcov --list uses '|' as column delimiter.
+# If this fails, the lcov version may have changed its output format.
+# Validate the output format manually: run 'lcov --list coverage_filtered.info'
+# and inspect whether column separator is '|'. Update awk -F'|' if format changed.
+if ! lcov --list coverage_filtered.info | grep -E "src/ui/" | grep -qF "|"; then
+  echo "PREFLIGHT FAIL: lcov --list output missing '|' column delimiter."
+  echo "lcov version may have changed output format — validate manually."
+  exit 1
+fi
 #
 # Format dependency: Assumes lcov 2.x --list output uses '|' as column delimiter.
 # If the format changes, $NF+0 coercion produces 0 -> gate FAILS with misleading
 # '0% coverage' message rather than 'lcov format mismatch'. Validate the lcov
 # --list output format manually if the pipeline produces unexpected results.
+# Preflight checks above catch the empty-data and format-mismatch cases explicitly.
 #
 # head -1 semantics: head -1 takes the minimum (worst-case) src/ui/ file coverage
 # — this is intentional; the gate enforces that even the least-covered src/ui/

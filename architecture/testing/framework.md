@@ -219,12 +219,13 @@ aitown_add_tests(audio_tests LABEL "unit")
 #              and must NOT appear in the source list — a missing source file causes
 #              cmake --build to fail at configure time.
 #   Phase 2:   tests/rendering/lod_swap_smoke_test.cpp is CREATED and registered in
-#              add_executable(opengl_tests ...) below. The file is created simultaneously
-#              with the CMakeLists.txt change — the file exists, so cmake --build does not
-#              fail at configure time. The test body contains only GTEST_SKIP() (no real
-#              OpenGL logic yet) so the test target remains buildable without a display.
+#              add_executable(opengl_tests ...) below (see implementation/phase-2.md).
+#              The file is created simultaneously with the CMakeLists.txt change — the
+#              file exists, so cmake --build does not fail at configure time. The test
+#              body contains only GTEST_SKIP() (no real OpenGL logic yet) so the test
+#              target remains buildable without a display.
 #   Phase 5:   lod_swap_smoke_test.cpp body promoted to a real OpenGL test after the LOD
-#              spike work is complete.
+#              spike work is complete (see implementation/phase-5.md).
 #
 # The stub file may be removed once real tests cover the target, but its
 # presence does not cause any build or link errors — both .cpp files are compiled and linked
@@ -251,6 +252,15 @@ aitown_add_tests(opengl_tests LABEL "requires-opengl")
 # discovered tests, which causes ctest -L "^integration$" to report no tests and the
 # CI integration step to produce an empty (misleading) result.
 # It verifies IrrlichtUIBackend is non-abstract at compile time without requiring a display.
+#
+# Phase 0 baseline state: integration_tests linked only GTest::gtest_main, GTest::gmock,
+# rapidcheck, and rapidcheck_gtest — aitown_render and aitown_ui did not exist at Phase 0.
+# aitown_add_tests(integration_tests LABEL "integration") was also absent at Phase 0
+# (pre-dates aitown_add_tests usage on this target; Phase 0 used a raw gtest_discover_tests
+# call or no macro at all). Phase 1 adds aitown_render, aitown_ui, the src/rendering/
+# include path, and the aitown_add_tests call when IrrlichtUIBackendCompileCheck is
+# registered. See implementation/phase-1.md — "IrrlichtUIBackend Non-Abstract Compile
+# Check" task for the atomicity requirement.
 add_executable(integration_tests tests/integration/irrlicht_ui_backend_compile_test.cpp)
 target_link_libraries(integration_tests PRIVATE
     aitown_render aitown_ui
