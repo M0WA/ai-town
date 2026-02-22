@@ -218,8 +218,24 @@ If this command produces any output, duplicate GLEW symbols are present and the 
 
 ## Phase 2 Spike Results
 
-<!-- Placeholder: populate this section once the Phase 2 GLEW availability spike is complete. -->
-<!-- Record here: whether the vendored Irrlicht build exposes GLEW symbols, and which extension query path was confirmed (glewIsExtensionSupported vs. glGetString(GL_EXTENSIONS) fallback). -->
+<!-- Populate this section when the Phase 2 GLEW availability spike is complete. Use the template below. -->
+
+<!-- TEMPLATE — replace each bracketed field with the actual finding:
+
+**Q1 — Does vendored Irrlicht use GLEW internally?**
+[YES / NO] — [one-line finding from source inspection of source/Irrlicht/COpenGLDriver.cpp:
+ e.g. "#include \"glew.h\" found at line N — GLEW bundled" or "no glew.h include found — GLEW absent"]
+
+**Q2 — Can AI Town link GLEW independently (find_package(GLEW REQUIRED))?**
+[CONFIRMED YES / BLOCKED — reason] — vcpkg glew port present at baseline [VCPKG_COMMIT_ID value].
+Extension query path confirmed: [glewIsExtensionSupported() | glGetString(GL_EXTENSIONS) fallback]
+
+**Symbol duplication nm check result:**
+Command: nm build/libaitown_render.a | grep -i glew | sort | uniq -d
+Result: [CLEAN — no output | DUPLICATES FOUND — list symbols]
+Resolution (if duplicates): [link-order fix applied | portfile patched | -Wl,--allow-multiple-definition added]
+
+-->
 
 ## Test Guard — `shader_stub_compile_test` Skip vs. Fail
 
