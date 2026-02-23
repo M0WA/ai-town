@@ -114,6 +114,50 @@ RenderSystem::RenderSystem() {
     }
 }
 
+// loadShader() — null-checks getGPUProgrammingServices() before calling
+// addHighLevelShaderMaterialFromFiles(). Required per architecture/graphics-architecture/shader-loading.md.
+// EDT_NULL returns null from getGPUProgrammingServices(); non-null drivers returning null are fatal in DEBUG.
+// Returns -1 if GPU programming services are unavailable (callers must check for -1).
+int RenderSystem::loadShader(
+        const char* vsFile, const char* fsFile,
+        irr::video::IShaderConstantSetCallBack* cb)
+{
+    irr::video::IVideoDriver* driver = m_device ? m_device->getVideoDriver() : nullptr;
+    if (!driver) {
+        fprintf(stderr, "[RenderSystem] loadShader: no video driver available.\n");
+        return -1;
+    }
+
+    irr::video::IGPUProgrammingServices* gpu = driver->getGPUProgrammingServices();
+    if (!gpu) {
+        // EDT_NULL or software rasterizer: GPU programs not supported — return early.
+        // Non-EDT_NULL returning null is a fatal configuration error in debug builds.
+#ifndef NDEBUG
+        if (driver->getDriverType() != irr::video::EDT_NULL) {
+            fprintf(stderr, "[RenderSystem] FATAL (DEBUG): getGPUProgrammingServices() returned null "
+                    "on a non-EDT_NULL driver — OpenGL GPU programming services missing.\n");
+            std::abort();
+        }
+#endif
+        fprintf(stderr, "[RenderSystem] loadShader: getGPUProgrammingServices() returned null "
+                "(EDT_NULL or unsupported driver) — shader loading skipped.\n");
+        return -1;
+    }
+
+    // 8-param overload: no geometry shader stage (Irrlicht GLSL backend has none in V1).
+    // EVST_VS_1_1 / EPST_PS_1_1 are placeholder enums — GLSL backend ignores them entirely.
+    // The actual GLSL version is determined by the #version directive in the shader source.
+    int matType = gpu->addHighLevelShaderMaterialFromFiles(
+        vsFile, "main", irr::video::EVST_VS_1_1,
+        fsFile, "main", irr::video::EPST_PS_1_1,
+        cb, irr::video::EMT_SOLID);
+
+    // cb->drop() is called by the CALLER after this function returns — not here.
+    // This function does not own the callback; caller allocates and drops it.
+
+    return matType;
+}
+
 RenderSystem::~RenderSystem() {
     if (m_device) {
         m_device->drop();

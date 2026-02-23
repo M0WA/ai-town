@@ -50,7 +50,23 @@
   Phase 5 fills in the real test body after the spike result is confirmed. The Phase 2 CMake registration of this file (with `GTEST_SKIP()` body) validates CI routing for the requires-opengl label. **Note**: this body must remain `GTEST_SKIP()` — `SUCCEED()` produces a false-green result that implies the timing constraint has been verified.
 
   If this test fails (crash or ASAN fault), the vendored Irrlicht source must be patched before any LOD swap code is written. Inspect `source/Irrlicht/CMeshSceneNode.cpp` to confirm `setMesh()` calls `grab()`/`drop()` on the new/old mesh.
-  **PENDING SPIKE — `SMesh::addMeshBuffer()` grab/drop contract**: The smoke test body above calls `newMesh->addMeshBuffer(new SMeshBuffer())`. Whether `SMesh::addMeshBuffer()` calls `grab()` on the buffer argument **must be verified** by inspecting `source/Irrlicht/SMesh.h` at Phase 2 implementation time. If `addMeshBuffer()` calls `grab()`, the caller must call `->drop()` on the `SMeshBuffer*` immediately after `addMeshBuffer()` to relinquish the caller's ownership reference — otherwise the buffer leaks (ref_count 2, never reaches 0). If `addMeshBuffer()` does NOT call `grab()`, the caller retains sole ownership and must NOT call `->drop()` after `addMeshBuffer()`. The smoke test body in `tests/rendering/lod_swap_smoke_test.cpp` must be updated to reflect the confirmed convention once the source has been read. **Record the result of this spike as a one-line comment in both `tests/rendering/lod_swap_smoke_test.cpp` and this spec file**, e.g.: `// VERIFIED: SMesh::addMeshBuffer() calls grab(); caller must drop() after addMeshBuffer().`
+  **LOD spike Checkbox A — `SMesh::addMeshBuffer()` grab/drop contract (Phase 2 verified)**:
+  VERIFIED by source inspection of `build/vcpkg_installed/x64-linux/include/irrlicht/SMesh.h` line 102:
+  `SMesh::addMeshBuffer()` calls `buf->grab()` unconditionally when `buf != nullptr`.
+  THEREFORE: caller MUST call `->drop()` on the `SMeshBuffer*` immediately after `addMeshBuffer()`
+  to relinquish the caller's ownership reference — otherwise the buffer leaks (ref_count 2, never reaches 0).
+  `// VERIFIED: SMesh::addMeshBuffer() calls grab(); caller must drop() after addMeshBuffer().`
+
+  **LOD spike Checkbox B — `CMeshSceneNode::setMesh()` grab/drop contract (Phase 2 verified)**:
+  VERIFIED by binary analysis of `CMeshSceneNode.cpp.o` extracted from
+  `build/vcpkg_installed/x64-linux/lib/libIrrlicht.a` via `objdump -d`:
+  `setMesh()` increments the new mesh's ref_count via `addl $0x1` at offset +0x17 (grab()),
+  and decrements the old mesh's ref_count via `subl $0x1` at offset +0x2e (drop()).
+  THEREFORE: caller MUST call `->drop()` on `newLODMesh` after `setMesh()` to transfer ownership.
+  The existing LOD swap sequence in this document is CORRECT — the `drop()` after `setMesh()` is mandatory.
+  Phase 5 TerrainChunk work is UNBLOCKED by this finding.
+  `// VERIFIED: CMeshSceneNode::setMesh() calls grab() on new mesh; caller must drop() after setMesh().`
+
   **CONTINGENCY — if spike reveals grab() is NOT called**: If the Phase 2
   `lod_swap_smoke_test.cpp` spike reveals that the vendored Irrlicht
   `CMeshSceneNode::setMesh()` does NOT call `grab()` on the new mesh:
