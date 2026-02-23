@@ -117,6 +117,12 @@ public:
     // after load to set GL_TEXTURE_MAX_LEVEL = 0 on the lightmap texture object.
     // Per architecture/asset-standards/2d-texture-standards.md lightmap mip exemption:
     // lightmaps are single-mip; generating a mip chain introduces blur that corrupts lightmap precision.
+    //
+    // TODO Phase 5: When binding this GLuint in OnSetConstants(), save the current
+    // GL_ACTIVE_TEXTURE unit with glGetIntegerv(GL_ACTIVE_TEXTURE, &savedUnit) BEFORE
+    // calling glActiveTexture(). Restore with glActiveTexture(savedUnit) AFTER unbinding.
+    // Failure to restore corrupts Irrlicht's internal active-unit tracking.
+    // See architecture/graphics-architecture/shader-loading.md — CRITICAL save/restore section.
     irr::video::ITexture* loadLinear(const std::string& path);
 
     // loadSplatMap() — load a terrain splat/blend map via raw GL (GL_RGBA8 uncompressed).
