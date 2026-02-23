@@ -485,8 +485,8 @@ aitown_add_tests(integration_tests LABEL "integration")
 # ----------------------------------------------------------------------------
 add_executable(opengl_tests
     tests/rendering/stub_succeed.cpp           # Phase 0 stub — remove when real tests cover target
-    tests/rendering/shader_stub_compile_test.cpp  # Phase 1: shader stub compile check (required by opengl_tests atomicity)
-    # lod_swap_smoke_test.cpp added in Phase 2 atomicity commit
+    tests/rendering/shader_stub_compile_test.cpp  # Phase 1+2: shader stub compile check
+    tests/rendering/lod_swap_smoke_test.cpp    # Phase 2: LOD swap grab/drop contract smoke test
 )
 target_link_libraries(opengl_tests PRIVATE
     aitown_render
