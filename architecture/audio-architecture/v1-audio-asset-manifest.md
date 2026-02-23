@@ -22,7 +22,7 @@
 | `sfx_zone_commercial` | Zone loop | OGG | 12–18 s | Y | Commercial activity; mono positional; pre-loaded; hard cap 18 s; **silence-boundary loop**; authored to **−26 LUFS / −2 dBTP** |
 | `sfx_zone_industrial` | Zone loop | OGG | 12–18 s | Y | Factory, industrial; mono positional; pre-loaded; hard cap 18 s; **silence-boundary loop**; authored to **−26 LUFS / −2 dBTP** |
 
-> **Zone loop true peak margin**: Zone loops use −2 dBTP (vs. −1 dBTP for most one-shots) because the loop boundary transient plus continuous looping content requires additional peak headroom.
+**Zone loop true peak margin**: Zone loops use −2 dBTP (vs. −1 dBTP for most one-shots) because the loop boundary transient plus continuous looping content requires additional peak headroom.
 
 | `sfx_build_place` | SFX | WAV | <1 s | N | Building placed; authored to **−24 LUFS / −1 dBTP** (subtle placement feedback) |
 | `sfx_build_demolish` | SFX | WAV | <1 s | N | Building demolished; authored to **−24 LUFS / −1 dBTP** |
