@@ -94,6 +94,8 @@ Two distinct vehicle atlases exist with separate purposes:
 - Mip chain: none (`GL_TEXTURE_MAX_LEVEL = 0`) — sprites are rendered at near-fixed screen size; mip filtering would blur 16×16 px cells into unrecognisable blobs
 - Upload path: linear pool (`IVideoDriver::getTexture()`) — sprite atlas encodes stylised roof color swatches, not photographic diffuse data; sRGB path is not required
 
+> **LINEAR UPLOAD EXCEPTION — Vehicle Sprite Atlas**: Although DXT5 (BC3) compression is used for this atlas (required for per-pixel alpha), the `upload_path` is intentionally `"linear"` — NOT `"srgb"`. This is NOT a contradiction with the sRGB diffuse rule. The sRGB upload requirement applies to photographic or painterly diffuse/albedo color data that was authored in a perceptual color space and must be gamma-expanded before lighting calculations. The vehicle sprite atlas contains only synthetic, palette-swatch roof colors (flat solid fills — typically 4–6 unique hues per vehicle type) authored directly in linear color space as design identifiers, not as photographic diffuse data. Applying sRGB gamma decode to palette swatches would incorrectly brighten the solid fills relative to their designed appearance. `TextureCache` routes this atlas through `loadLinear()` (`IVideoDriver::getTexture()`) and does NOT route it through `loadSRGB()` (the raw-GL sRGB path). This routing is intentional and must not be changed. If the sprite atlas content is ever replaced with photographic or painterly roof textures, this exception must be revisited and `upload_path` updated to `"srgb"` with a corresponding `TextureCache` routing change.
+
 These two atlases are **not interchangeable**. The diffuse atlas feeds the mesh material pipeline (UV channel 0 of LOD0/LOD1 vehicle meshes); the sprite atlas feeds the point-sprite LOD2 renderer. Do not conflate their formats, resolutions, or upload paths.
 
 **Vehicle Normal Atlas** (`vehicles_normal_atlas_n.dds`):
@@ -153,6 +155,20 @@ LOD2 billboard textures for small buildings and props use a separate 1024×128 D
 > **Billboard Imposter Atlas Mip Chain (Mandatory)**: LOD2 billboard textures (1024×128 DXT5 sRGB atlas) **require a 4-level mip chain** (`GL_TEXTURE_MAX_LEVEL = 3`; mips 0-3: 1024×128 → 512×64 → 256×32 → 128×16). The 8-texel per-frame border is sized to shrink to exactly 1 texel at mip level 3, which is the minimum safe margin to prevent bleed between adjacent frames in the strip. Do NOT set `GL_TEXTURE_MAX_LEVEL = 0` on billboard atlases. **Lightmap textures** (`_lm` suffix) are the category that uses `GL_TEXTURE_MAX_LEVEL = 0` (single mip level only) — lightmaps are sampled at a consistent scale close to camera and do not benefit from mip chains. See `architecture/asset-standards/2d-texture-standards.md` for the full lightmap exemption rationale.
 
 ## Sign-Off Checklist
+
+**Sign-off recording requirement**: Each reviewer's confirmation MUST be recorded as a dated comment block appended to this file before Phase 9 UV authoring begins. Use the following format exactly — unsigned or undated confirmations are not traceable and will not satisfy the exit criterion:
+
+```text
+<!-- SIGN-OFF: [role] [YYYY-MM-DD] — confirmed [condition] -->
+```
+
+Example:
+
+```text
+<!-- SIGN-OFF: graphics-artist-2d-texture 2026-04-15 — confirmed all V1 cell assignments are within 496x496 px usable area and road marking cells cover all V1 decal types -->
+```
+
+All three sign-off comment blocks must be present in this file before Phase 9 UV authoring begins. A missing or undated block is a blocking exit criterion failure.
 
 Before Phase 9 UV authoring begins, all three reviewers must confirm:
 

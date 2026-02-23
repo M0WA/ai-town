@@ -12,7 +12,7 @@
 | Large buildings | 2000–5000 tris | 500–1000 tris | 300–500 tris |
 | Small buildings / props (height_floors <= 3) | 500–1500 tris | 100–300 tris | Billboard (point-sprite only) |
 | Small buildings / props (height_floors >= 4) | 500–1500 tris | 100–300 tris | 300–500 tris (`_lod2.b3d` geometry shell) |
-| Vehicles | 1000–3000 tris | 200–500 tris | Point/sprite |
+| Vehicles | 1000–3000 tris (indicative range — see per-class table in § Vehicle Polygon Budget for binding limits) | 200–500 tris (indicative range — see per-class table for binding limits) | Point/sprite |
 | Terrain chunk (64×64 m) | 32×32 quad grid | 16×16 quad grid | 8×8 quad grid |
 | Road tile (4×4 m) | ≤48 tris (flat quad + kerb geometry) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
 | Infrastructure props (lamp posts, signs) | ≤300 tris | ≤75 tris | Billboard (same system as small buildings) |
@@ -132,6 +132,8 @@ Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON side
 | Truck | ≤2,500 tris | ≤450 tris |
 
 The LOD Requirements table above lists the general Vehicles row (1000–3000 tris LOD0, 200–500 tris LOD1) as a range covering all vehicle classes. The per-class caps above are the binding limits within that range. All vehicle assets must be exported as a **single solid mesh** (body + windows + wheels unified into one `IMesh`); modular sub-mesh assembly is not used for vehicles.
+
+**BINDING LIMIT NOTE**: The per-class budgets in the table above are the **binding limits**; the general range in the LOD Requirements table (1000–3000 tris LOD0, 200–500 tris LOD1) is **indicative only** — it covers the full span across all vehicle classes and must not be used as a per-class cap. For example, the general range does not permit a car to have 2,500 LOD0 triangles; the binding car LOD0 cap is ≤1,500 tris. The export validation script and artist review must use the per-class table above as the authoritative polygon budget source.
 
 #### Vehicle UV Channel Convention
 

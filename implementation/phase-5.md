@@ -57,7 +57,7 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 #### Terrain Textures
 
 - [ ] Terrain diffuse textures (`graphics-artist-2d-texture`): at least 2 biome variants; 2048×2048 DDS DXT1 sRGB (`GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`); 4-level mip chain; anisotropy ≥ 8× (terrain requirement per `architecture/asset-standards/2d-texture-standards.md`)
-- [ ] Terrain normal maps (`graphics-artist-2d-texture`): DXT5nm packed (X→alpha, Y→green, Z discarded; Y-flip before swizzle for OpenGL convention); uploaded via `loadLinear()`; anisotropy ≥ 4×
+- [ ] Terrain normal maps (`graphics-artist-2d-texture`): DXT5nm packed (X→alpha, Y→green, Z discarded; Y-flip before swizzle for OpenGL convention); uploaded via `loadLinear()`; anisotropy ≥ 4×. **Mip pre-baking required**: terrain normal map mip levels MUST be pre-baked via bicubic downsampling before DXT5nm compression to preserve normal vector normalisation; driver-generated mips are prohibited for normal maps.
 - [ ] Splat map PNG (`graphics-artist-2d-texture`): RGBA8 PNG (blend weights, NOT a DDS/DXT compressed file); uploaded via `loadSplatMap()` → `glTexImage2D(GL_RGBA8)`; `GL_TEXTURE_MAX_LEVEL = 0`; anisotropy disabled for splat maps
 - [ ] **Atlas layout sign-off** (`graphics-artist-2d-texture`, `graphics-dev-irrlicht`, `graphics-artist-3d-model`): joint approval of `architecture/asset-standards/building-atlas-layout.md` confirming building variants within the same zone-tier share wall module atlas cells; 16-cell atlas is sufficient if this sharing is enforced; sign-off must explicitly confirm the sharing rule. Required before any Phase 9 building mesh UV channel 0 authoring proceeds. (ref: `architecture/asset-standards/building-atlas-layout.md`)
 
@@ -76,7 +76,7 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 
 #### Validate Assets — Full 13-Check Implementation
 
-- [ ] `tools/validate_assets.py` full 13-check implementation (building on Phase 4 stub; body stubs filled in). **Phase 5 implements checks #1–#13 per `architecture/asset-standards/3d-model-standards.md` (13 checks total). Check #14 (.meta sidecar presence) is a Phase 9 deliverable and is NOT included in Phase 5.**
+- [ ] `tools/validate_assets.py` full 13-check implementation (building on Phase 4 stub; body stubs filled in). **Phase 5 implements checks #1–#14 per `architecture/asset-standards/3d-model-standards.md` and `architecture/audio-architecture/v1-audio-asset-manifest.md`. Check #14 (music JSON sidecar presence) IS a Phase 5 deliverable — it must be implemented in `validate_assets.py` in Phase 5.** If a separate `.meta` sidecar system is introduced post-V1, that would be Phase 9 scope — but the music JSON sidecar check is Phase 5.
   - Check #1: `.b3d` format for building `_lod0`, `_lod1` files
   - Check #2: Small building/prop `_lod2.b3d` absent when `height_floors <= 3` (billboard path)
   - Check #3 (large building): `_lod2.b3d` present, within 300–500 tri budget, `_lod2_lm.dds` uses DXT5/BC3 (not DXT1) — read DDS fourCC to determine format
@@ -87,11 +87,11 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
   - Check #8: Pivot/extent tolerance 5 mm
   - Check #9: LOD hysteresis ≥ 5 m (close), ≥ 10 m (far)
   - Check #10: Vehicle atlas UV
-  - Check #11: Small-building height check — `height_floors >= 4` requires `_lod2.b3d` geometry shell (NOT `height_floors > 3`; the spec uses `>=4` — corrected from earlier stub wording, 3D-1)
+  - Check #11: buildings with `height_floors >= 4` MUST have `_lod2.b3d`; buildings with `height_floors <= 3` MUST NOT have `_lod2.b3d` (billboard only). The boundary is inclusive at 4 — not `> 3`. This two-sided check catches both a missing LOD2 shell on tall buildings AND a spurious LOD2 mesh on short buildings that should use billboard-only LOD2. (NOT `height_floors > 3` — `>= 4` is the canonical form per spec, 3D-1)
   - Check #12: Vehicle normal atlas UV (8×8 grid of 256×256 px cells)
   - Check #13: Facade atlas cell pixels — all non-transparent pixel content within [8, 504] texel range on both U and V axes per cell; DDS fourCC determines transparency interpretation (DXT1: 1-bit alpha; DXT5/BC3: alpha > 0)
   (ref: `architecture/asset-standards/3d-model-standards.md`, `architecture/asset-standards/2d-texture-standards.md`)
-- [ ] Check #14 (sidecar file) documented in `tools/validate_assets.py` as a comment stub — body implemented in Phase 9 when music stem CI gate is wired. Check #15 (road LOD2 color) also commented stub for Phase 9. (ref: `architecture/audio-architecture/audio-asset-formats.md`)
+- [ ] **Check #14** (`validate_assets.py`): validate all `music_*.ogg` files have co-located JSON sidecars matching `music_sidecar_schema.json`. Pattern `music_*.ogg` covers both main menu variants (`music_main_menu_*.ogg`) and all gameplay stems (`music_calm_*.ogg`, `music_growth_*.ogg`, `music_crisis_*.ogg`). Files matching `ambient_*.ogg` are explicitly excluded (no sidecar required for ambient beds per `architecture/audio-architecture/v1-audio-asset-manifest.md`). A sidecar that fails schema validation (missing `bpm`, missing `beats_per_bar`, or additional properties) is a hard asset error. This check IS implemented in Phase 5 — it is NOT a Phase 9 stub. Check #15 (road LOD2 color) remains a commented stub for Phase 9. (ref: `architecture/audio-architecture/audio-asset-formats.md`, `architecture/audio-architecture/v1-audio-asset-manifest.md`)
 
 #### Coverage Gate Raise
 
@@ -104,7 +104,7 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 - `TextureCache` all three pools operational: linear, sRGB (raw-GL), splat map (raw-GL); `evictUnreferenced()` passes EDT_NULL guard test
 - Terrain GLSL shaders compile and render without GL errors; gamma fallback engaged when `isSRGBTextureSupported()` is false
 - `lod_swap_smoke_test.cpp` `SetMeshGrabDropContract` test body filled in with spike result recorded; test passes under `xvfb-run`
-- `validate_assets.py` all 13 checks implemented; runs cleanly in `validate-assets` CI job
+- `validate_assets.py` all 14 checks implemented (checks #1–#13 per 3D model standards + Check #14 music JSON sidecar validation); runs cleanly in `validate-assets` CI job
 - Atlas layout sign-off document updated in `building-atlas-layout.md` with explicit building variant sharing confirmation; `graphics-artist-3d-model` sign-off recorded confirming: (a) shared atlas cell variant approach compatible with modular kit UV workflows; (b) per-module UV islands fit within 496×496 px usable area per 512×512 cell; (c) 4×4 grid and 16-cell capacity covers V1 minimum building module set
 - `coverage-linux` gate green at ≥80% on `src/simulation/`, `src/terrain/`, `src/ui/`
 

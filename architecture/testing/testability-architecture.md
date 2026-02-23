@@ -840,9 +840,16 @@ protected:
     void SetUp() override {
         ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
     }
+    // **Mandatory**: This fixture MUST include the TearDown() override below.
+    // Explicitly calling ui_.reset() before the fixture destructs documents and enforces
+    // the destructor-path contract, preventing order-of-destruction issues with NiceMock
+    // expectations. The current member declaration order (ui_ declared last) satisfies
+    // the invariant automatically, but future reordering would silently break it.
+    // The explicit TearDown() makes the contract immune to member reordering.
     void TearDown() override {
-        // Reset ui_ before mock objects are destroyed so UIManager destructor calls
-        // (e.g. backend_.removeElement()) happen while MockUIBackend is still alive.
+        // **Mandatory**: Reset ui_ before mock objects are destroyed so UIManager
+        // destructor calls (e.g. backend_.removeElement()) happen while MockUIBackend
+        // is still alive. This enforces the destructor-path contract.
         ui_.reset();
     }
 };
@@ -910,13 +917,20 @@ protected:
     void SetUp() override {
         ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
     }
+    // **Mandatory**: Each fixture MUST include a TearDown() override that explicitly calls
+    // ui_.reset() before the fixture destructs. This documents and enforces the
+    // destructor-path contract, preventing order-of-destruction issues with NiceMock
+    // expectations. Without it, a future member reordering could cause UIManager's
+    // destructor to fire after MockUIBackend is destroyed, producing use-after-destroy.
     void TearDown() override {
-        // UIManager destructor calls backend_.removeElement() for all live UI elements.
-        // The explicit ui_.reset() here is a defensive practice — the current declaration
-        // order already satisfies the destruction invariant automatically (ui_ declared last
+        // **Mandatory**: ui_.reset() must be called here. UIManager destructor calls
+        // backend_.removeElement() for all live UI elements. Explicitly resetting ui_
+        // before mock objects are destroyed ensures those destructor calls happen while
+        // MockUIBackend is still alive, enforcing the destructor-path contract. The current
+        // declaration order already satisfies the invariant automatically (ui_ declared last
         // is destroyed first in reverse order), but future fixture modifications could
-        // inadvertently reorder members. The explicit TearDown() makes the destruction
-        // contract immune to member reordering.
+        // inadvertently reorder members. The explicit TearDown() makes the contract
+        // immune to member reordering.
         ui_.reset();
     }
 };
@@ -937,8 +951,16 @@ protected:
     void SetUp() override {
         sim_ = std::make_unique<CitySimulation>(&renderer_, &audio_, &rng_, &clock_);
     }
+    // **Mandatory**: Each fixture MUST include a TearDown() override that explicitly calls
+    // sim_.reset() before the fixture destructs. This documents and enforces the
+    // destructor-path contract, preventing order-of-destruction issues with StrictMock
+    // expectations. CitySimulation must be destroyed before its injected mock dependencies
+    // (renderer_, audio_). Without an explicit sim_.reset(), StrictMock will report
+    // unexpected calls if CitySimulation's destructor ever calls renderer_ or audio_
+    // after their expectations have been verified and cleared by the test framework.
     void TearDown() override {
-        // CitySimulation destructor must NOT call audio_ or renderer_ methods.
+        // **Mandatory**: sim_.reset() must be called here to enforce the destructor-path
+        // contract. CitySimulation destructor must NOT call audio_ or renderer_ methods.
         // This is an explicit design contract. If that contract changes, add EXPECT_CALL
         // expectations here BEFORE sim_.reset() to avoid spurious StrictMock failures.
         // IMPORTANT: Do NOT call rng_.verifyAllConsumed() here — zero-revenue tests never
@@ -976,12 +998,20 @@ protected:
     void SetUp() override {
         sim_ = std::make_unique<CitySimulation>(&renderer_, &audio_, &rng_, &clock_);
     }
+    // **Mandatory**: Each fixture MUST include a TearDown() override that explicitly calls
+    // sim_.reset() before the fixture destructs. This documents and enforces the
+    // destructor-path contract, preventing order-of-destruction issues with NiceMock
+    // expectations. NiceMock suppresses unexpected-call warnings but does NOT protect
+    // against use-after-destroy if CitySimulation's destructor calls mock methods after
+    // the mock objects have been destroyed. The explicit TearDown() ensures CitySimulation
+    // is torn down first regardless of member declaration order.
     void TearDown() override {
-        // REQUIRED: CitySimulation must be destroyed before mock objects.
-        // NiceMock suppresses unexpected-call warnings but does NOT protect
-        // against use-after-destroy if CitySimulation destructor calls mocks.
-        // Members are destroyed in reverse declaration order (sim_ last),
-        // so sim_.reset() here ensures correct destruction order.
+        // **Mandatory**: sim_.reset() must be called here to enforce the destructor-path
+        // contract. CitySimulation must be destroyed before mock objects. NiceMock
+        // suppresses unexpected-call warnings but does NOT protect against use-after-destroy
+        // if CitySimulation destructor calls mocks. Members are destroyed in reverse
+        // declaration order (sim_ last), so sim_.reset() here ensures correct destruction
+        // order regardless of any future fixture member reordering.
         // NOTE: verifyAllConsumed() is NOT called here — the shared rng_{{0}} is a
         // placeholder; property tests that drive random draws must use a local RNG.
         // See ManualRNG exemption comment above the class definition for full rationale.

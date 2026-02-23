@@ -440,6 +440,8 @@ The `m_initMutex` / `m_initCV` pair is a construction-time synchronization mecha
 
 ### Enforcement Point
 
+**This cap applies ONLY when `loadSound()` is called with a `SoundId` in the range [17, 19]. All other SoundIds are exempt from this duration check.**
+
 The check applies when `loadSound()` is called with a `SoundId` in the zone loop range:
 
 - `sfx_zone_residential` (ID 17)
