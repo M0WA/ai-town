@@ -78,7 +78,7 @@ The `<asset_name>` base (e.g. `res_low_01`) is referenced in `<asset_name>.meta`
 
 #### `.meta` Sidecar File Format
 
-Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON sidecar (check #14 in the export validation script). Required fields:
+Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON sidecar (check #15 in the export validation script). Required fields:
 
 ```json
 {
@@ -201,7 +201,7 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
   The export validation script must measure assembled totals for a representative N-floor stack at
   each density tier and reject any combination that exceeds these limits.
 
-  **Export validation script — required checks**: The export validation script (`tools/validate_assets.py` or equivalent) must perform all 14 required checks and produce a per-asset PASS/FAIL report:
+  **Export validation script — required checks**: The export validation script (`tools/validate_assets.py` or equivalent) must perform all 15 required checks and produce a per-asset PASS/FAIL report:
   1. Building `_lod0`, `_lod1` files use `.b3d` format (not `.obj`).
   2. Small building / prop `_lod2.b3d` file presence is floor-count conditional (read `height_floors` from `<asset_name>.meta`): if `height_floors <= 3`, the asset must NOT have a `_lod2.b3d` file (flag its presence as an error) and must have a `_billboard.dds` instead; if `height_floors >= 4`, the asset must have a `_lod2.b3d` geometry shell (flag its absence as an error) and must NOT rely on `_billboard.dds` for LOD2 rendering. The 4-floor threshold is the boundary: buildings with `height_floors >= 4` require a `_lod2.b3d` geometry shell for distant visibility; buildings with `height_floors <= 3` use the billboard imposter system at LOD2 (point-sprite only, no `_lod2.b3d`). (See check #11 for the symmetric geometry-shell presence requirement.)
   3. Large building `_lod2.b3d` is present, within 300–500 tri budget, and uses **DXT5/BC3 format for `_lod2_lm.dds`** (not DXT1). Validate by reading the DDS fourCC. DXT1 on a LOD2 lightmap is a silent error — DXT5 is required to preserve the alpha channel for ambient occlusion data.
@@ -215,26 +215,27 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
   11. Small building / prop assets with `height_floors >= 4` must have a `_lod2.b3d` geometry shell (not just billboard). Conversely, small building / prop assets with `height_floors <= 3` must NOT have a `_lod2.b3d` file — they use point-sprite LOD2 only. The 4-floor threshold is the boundary: buildings with `height_floors >= 4` require a `_lod2.b3d` geometry shell for distant visibility; buildings with `height_floors <= 3` use the billboard imposter system at LOD2 (point-sprite only, no `_lod2.b3d`).
   12. Vehicle normal map UV channel 0 coordinates fall within the asset's assigned atlas cell in `vehicles_normal_atlas_n.dds` (8×8 grid of 256×256 cells in 2048×2048; vehicle row/column assignments match the diffuse atlas registry in `vehicle_atlas_registry.json` — same row R and column C, but cell UV range is `U ∈ [C/8, (C+1)/8]`, `V ∈ [R/8, (R+1)/8]` since the normal atlas has an 8×8 grid). The V-axis origin convention (OpenGL, V=0 at bottom, row 0 is the bottom row) applies identically to normal atlas UV verification — artists must apply V-flip (`V_opengl = 1 − V_blender`) when authoring UV islands for the normal atlas in Blender, using the same convention documented in the Vehicle Atlas Cell Registry.
   13. Facade atlas cell pixels — all non-transparent pixel content falls within the [8, 504] texel range on both U and V axes per 512×512 cell (496×496 usable zone; 8-texel border on each edge). Validate by reading pixel alpha values in the border zone for each cell in the 2048×2048 building atlas.
-  14. `.meta` sidecar file presence — every `.b3d` building or vehicle file must have a corresponding `<asset_name>.meta` sidecar file. Missing sidecar: validation error. This check must be present in the Phase 9 `validate_assets.py` extension and active from Phase 9 onward.
+  Note: Check #14 is the music JSON sidecar validation (`validate_assets.py` checks all `music_*.ogg` files have co-located `.json` sidecars matching `tools/music_sidecar_schema.json`) — defined in `architecture/audio-architecture/v1-audio-asset-manifest.md` and implemented in Phase 5.
+  15. `.meta` sidecar file presence — every `.b3d` building or vehicle file must have a corresponding `<asset_name>.meta` sidecar file. Missing sidecar: validation error. This check must be present in the Phase 9 `validate_assets.py` extension and active from Phase 9 onward.
 
-  **Phase assignment**: Check #14 is a Phase 9 addition to `validate_assets.py`. Checks #1–#13 are the Phase 5 implementation scope. Phase 5 implementers should implement exactly 13 checks (checks #1 through #13 from this list). Check #14 is reserved for Phase 9 when building asset metadata support is fully in place.
+  **Phase assignment**: Check #15 is a Phase 9 addition to `validate_assets.py`. Checks #1–#13 are the Phase 5 implementation scope. Phase 5 implementers should implement exactly 13 checks (checks #1 through #13 from this list). Check #14 (music JSON sidecar) is also a Phase 5 check — it is defined in `architecture/audio-architecture/v1-audio-asset-manifest.md`. Check #15 is reserved for Phase 9 when building asset metadata support is fully in place.
 
-  **Phase 5 stub requirement for check #14**: The Phase 5 implementation of `validate_assets.py` MUST include check #14 as a stub — present in the script's check list but not executed. The stub must contain a `# TODO Phase 9` comment that names the check and explains the deferral, for example:
+  **Phase 5 stub requirement for check #15**: The Phase 5 implementation of `validate_assets.py` MUST include check #15 as a stub — present in the script's check list but not executed. The stub must contain a `# TODO Phase 9` comment that names the check and explains the deferral, for example:
 
   ```python
-  # Check #14: .meta sidecar file presence
+  # Check #15: .meta sidecar file presence
   # TODO Phase 9 — deferred until building asset metadata support is fully in place.
   # When enabled: every .b3d building or vehicle file must have a corresponding
   # <asset_name>.meta sidecar file. Missing sidecar = validation error.
   # Phase 9 entry prerequisite: this stub must be replaced with the full check
   # implementation before Phase 9 asset authoring begins (see 3d-model-standards.md,
-  # Export Validation Script — Required Checks, check #14).
+  # Export Validation Script — Required Checks, check #15).
   pass
   ```
 
-  The stub must be present (not omitted) so that Phase 9 implementers can locate the check without searching the spec, and so CI check-count assertions (if any) can account for all 14 checks by name. **Check #14 stub is a Phase 5 exit criterion.**
+  The stub must be present (not omitted) so that Phase 9 implementers can locate the check without searching the spec, and so CI check-count assertions (if any) can account for all 15 checks by name. **Check #15 stub is a Phase 5 exit criterion.**
 
-  **Phase 9 entry prerequisite — check #14**: Before Phase 9 asset authoring begins, `validate_assets.py` must have the check #14 stub replaced with a full implementation that reads `<asset_name>.meta` for every `.b3d` file found in the asset directories and emits a validation error for any missing sidecar. This prerequisite must be verified during the Phase 9 kick-off review before UV authoring or asset metadata authoring begins.
+  **Phase 9 entry prerequisite — check #15**: Before Phase 9 asset authoring begins, `validate_assets.py` must have the check #15 stub replaced with a full implementation that reads `<asset_name>.meta` for every `.b3d` file found in the asset directories and emits a validation error for any missing sidecar. This prerequisite must be verified during the Phase 9 kick-off review before UV authoring or asset metadata authoring begins.
 
   The script must be run as part of the asset pipeline before any asset is checked into the repository. CI must run the script and fail the build if any asset fails validation.
 

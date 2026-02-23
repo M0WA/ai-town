@@ -89,8 +89,8 @@
   > **effective_demand_factor formula used throughout:**
   > `effective_demand_factor(zone, tick) = clamp(bootstrap(zone, tick) + formula_demand_factor(zone, tick), 0.0, 1.0)`
   > where `formula_demand_factor` is the rolling-window average of `traffic_demand_factor` values.
-  > Bootstrap formulas: `R_bootstrap(t) = 0.50 × max(0, 1 − t/6)`, `C_bootstrap(t) = 0.25 × max(0, 1 − t/6)`, `I_bootstrap(t) = 0.15 × max(0, 1 − t/6)`.
-  > Bootstrap period ends after tick 5; tick 6+ is purely formula-driven.
+  > Bootstrap formulas: `R_bootstrap(t) = 0.50 × max(0, 1 − t/demand_bootstrapping_ticks)`, `C_bootstrap(t) = 0.25 × max(0, 1 − t/demand_bootstrapping_ticks)`, `I_bootstrap(t) = 0.15 × max(0, 1 − t/demand_bootstrapping_ticks)`.
+  > Bootstrap period ends after tick demand_bootstrapping_ticks − 1; tick demand_bootstrapping_ticks+ is purely formula-driven (the following worked example assumes demand_bootstrapping_ticks = 6).
   >
   > **Tick-by-tick trajectory — Residential (R), 5-tick rolling window:**
   >
