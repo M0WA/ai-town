@@ -244,7 +244,7 @@ Runs after the vcpkg install step and **before** the CMake configure step. Confi
 
 ### GLEW32.dll on Windows (Phase 1+)
 
-GLEW is linked to `aitown_render` via `GLEW::GLEW`. On Windows with the `x64-windows` triplet, vcpkg installs GLEW as a dynamic library, producing `glew32.dll` in the vcpkg bin tree. This DLL must be copied to the build output directory so that the `aitown` executable can locate it at runtime. The CI workflow already contains a hard-fail check for `build/Release/GLEW32.dll` — if no CMake copy rule is present, the Windows CI job fails immediately when Phase 1 GLEW linkage is merged.
+GLEW is linked to `aitown_render` via `GLEW::GLEW`. On Windows with the `x64-windows` triplet, vcpkg installs GLEW as a dynamic library, producing `glew32.dll` in the vcpkg bin tree. This DLL must be copied to the build output directory so that the `aitown` executable can locate it at runtime. The CI workflow already contains a hard-fail check for `build/GLEW32.dll` (Ninja single-config output path) — if no CMake copy rule is present, the Windows CI job fails immediately when Phase 1 GLEW linkage is merged.
 
 Add the following post-build copy command to `CMakeLists.txt`, alongside the `Irrlicht.dll` copy rule:
 
@@ -269,7 +269,7 @@ endif()
 5. Add the `GLEW32.dll` CMake post-build copy command to `CMakeLists.txt` (this section)
 6. `build-windows` CI steps: add BOTH a "Verify glew vcpkg port" step (dual-path `GL/glew.h` header check — manifest path `build\vcpkg_installed\x64-windows\include\GL\glew.h` with fallback to `$VCPKG_ROOT\installed\x64-windows\include\GL\glew.h`) AND a "Verify GLEW vcpkg install" step (dual-path `glew.lib` library check — manifest path `build/vcpkg_installed/x64-windows/lib/glew.lib` with fallback to `$VCPKG_ROOT\installed\x64-windows\lib\glew.lib`). Both use PS 5.1-compatible `if (-not (Test-Path ...) -and -not (Test-Path ...)) { exit 1 }` syntax. The header check must run before the library check. See `### Windows GLEW vcpkg Verification` above for the canonical YAML for both steps. Owner: `cicd-dev-github`.
 
-Omitting item 5 causes the existing `build/Release/GLEW32.dll` hard-fail CI check to trigger on every Windows build from Phase 1 onward. Omitting item 6 leaves the Windows GLEW vcpkg installation unverified — a missing or misconfigured GLEW port would silently produce a broken binary rather than failing the CI job immediately.
+Omitting item 5 causes the existing `build/GLEW32.dll` hard-fail CI check to trigger on every Windows build from Phase 1 onward. Omitting item 6 leaves the Windows GLEW vcpkg installation unverified — a missing or misconfigured GLEW port would silently produce a broken binary rather than failing the CI job immediately.
 
 ### DLL Verification CI YAML Co-Landing Requirement
 
@@ -278,7 +278,7 @@ Omitting item 5 causes the existing `build/Release/GLEW32.dll` hard-fail CI chec
 Specifically:
 
 - The CMakeLists.txt `add_custom_command` post-build copy rules for `Irrlicht.dll` and `GLEW32.dll` produce the DLL files in the output directory.
-- The CI YAML hard-fail verification step (`if (-not (Test-Path "build/Release/Irrlicht.dll")) { exit 1 }` and the equivalent for `GLEW32.dll`) checks that those files exist before artifact upload.
+- The CI YAML hard-fail verification step (`if (-not (Test-Path "build/Irrlicht.dll")) { exit 1 }` and the equivalent for `GLEW32.dll`) checks that those files exist before artifact upload (Ninja single-config: DLLs land in `build/`, not `build/Release/`).
 
 A partial commit breaks CI in one of two ways:
 
