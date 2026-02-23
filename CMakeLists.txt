@@ -150,7 +150,6 @@ include(cmake/AitownTestHelpers.cmake)
 add_library(aitown_render STATIC
     src/rendering/RenderSystem.cpp
     src/rendering/IrrlichtRenderer.cpp
-    src/rendering/texture_cache.cpp
 )
 target_include_directories(aitown_render
     PRIVATE   src/rendering/       # RenderSystem/IrrlichtRenderer internal headers
@@ -481,43 +480,27 @@ aitown_add_tests(integration_tests LABEL "integration")
 # opengl_tests — sRGB upload, setMesh grab/drop smoke test, shader compilation
 # Must run under xvfb-run on Linux.
 # Phase 0: ONLY stub_succeed.cpp in source list.
-# lod_swap_smoke_test.cpp is a Phase 6 deliverable — DO NOT add before Phase 6.
+# Phase 2 atomicity commit adds: lod_swap_smoke_test.cpp (GTEST_SKIP body), ShaderLoadingTest body,
+# 6 GLSL stubs, and getGPUProgrammingServices() null check — all four items in one commit.
 # ----------------------------------------------------------------------------
 add_executable(opengl_tests
-    tests/rendering/stub_succeed.cpp
-    tests/rendering/shader_stub_compile_test.cpp
-    tests/rendering/lod_swap_smoke_test.cpp
+    tests/rendering/stub_succeed.cpp           # Phase 0 stub — remove when real tests cover target
+    tests/rendering/shader_stub_compile_test.cpp  # Phase 1: shader stub compile check (required by opengl_tests atomicity)
+    # lod_swap_smoke_test.cpp added in Phase 2 atomicity commit
 )
 target_link_libraries(opengl_tests PRIVATE
     aitown_render
-    GLEW::GLEW
-    Irrlicht
     GTest::gtest_main
     GTest::gmock
     rapidcheck
     rapidcheck_gtest
 )
-# Irrlicht transitive deps (Linux only) — opengl_tests links Irrlicht directly and
-# requires the same transitive system libs as the aitown executable.
-if(UNIX AND NOT APPLE)
-    target_link_libraries(opengl_tests PRIVATE
-        JPEG::JPEG
-        PNG::PNG
-        ZLIB::ZLIB
-        BZip2::BZip2
-    )
-    if(XXFV86VM_LIB)
-        target_link_libraries(opengl_tests PRIVATE ${XXFV86VM_LIB})
-    endif()
-endif()
 # src/interfaces/   — IRenderer.h propagated via INTERFACE from aitown_render, but
 #                     explicit belt-and-suspenders path ensures #include "vec3.h" inside
 #                     IRenderer.h resolves even if aitown_render's INTERFACE scope is refactored.
-# src/rendering/    — shader_constants.h and texture_cache.h needed by rendering tests.
 # ${CMAKE_SOURCE_DIR} — project-root-relative includes
 target_include_directories(opengl_tests PRIVATE
     src/interfaces/
-    src/rendering/
     ${CMAKE_SOURCE_DIR}
 )
 aitown_add_tests(opengl_tests LABEL "requires-opengl")

@@ -1,4 +1,4 @@
-FROM node:20
+FROM debian:trixie
 
 ARG TZ
 ENV TZ="$TZ"
@@ -8,7 +8,23 @@ ARG CLAUDE_CODE_VERSION=latest
 # vcpkg baseline — must match builtin-baseline in vcpkg.json
 ARG VCPKG_COMMIT=ce35b1a53aac26d7fcdb8ee1ef7a8e4eea02d27b
 
+# Create node user (uid/gid 1000) to match the node:20 image convention
+RUN groupadd --gid 1000 node \
+  && useradd --uid 1000 --gid node --shell /bin/bash --create-home node
+
+# Install Node.js 20 via NodeSource (nodistro works on any Debian/Ubuntu variant)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl gnupg \
+  && mkdir -p /etc/apt/keyrings \
+  && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+  && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
+     > /etc/apt/sources.list.d/nodesource.list \
+  && apt-get update && apt-get install -y --no-install-recommends nodejs \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Install basic development tools, iptables/ipset, and C++ build toolchain
+# gcc-13 is the default compiler in Debian Trixie (testing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
   less \
   git \
@@ -20,6 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   unzip \
   zip \
   curl \
+  wget \
   gnupg2 \
   gh \
   iptables \
@@ -30,8 +47,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   jq \
   nano \
   vim \
+  autoconf \
+  automake \
+  libtool \
   build-essential \
-  cmake \
   ninja-build \
   pkg-config \
   lcov \
@@ -45,8 +64,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libxext-dev \
   gcc-13 \
   g++-13 \
+  xauth \
   && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
      --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
+  && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-13 100 \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Bootstrap vcpkg at the pinned baseline commit (matches vcpkg.json builtin-baseline).
@@ -85,8 +106,18 @@ WORKDIR /workspace
 ARG GIT_DELTA_VERSION=0.18.2
 RUN ARCH=$(dpkg --print-architecture) && \
   wget "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
-  sudo dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
+  dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
+
+# Install CMake 3.31.10 (apt version in Debian Trixie is too old for vcpkg)
+ARG CMAKE_VERSION=3.31.10
+RUN CMAKE_ARCH=$(uname -m) && \
+  wget -q "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz" && \
+  tar -xzf "cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz" -C /opt && \
+  ln -s "/opt/cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}" /opt/cmake && \
+  rm "cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz"
+
+ENV PATH=/opt/cmake/bin:$PATH
 
 # Set up non-root user
 USER node
@@ -115,11 +146,4 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
 # Install Claude
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
-
-# Copy and set up firewall script
-#COPY init-firewall.sh /usr/local/bin/
-#USER root
-#RUN chmod +x /usr/local/bin/init-firewall.sh && \
-#RUN  echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/node-firewall && \
-#  chmod 0440 /etc/sudoers.d/node-firewall
 USER node
