@@ -157,6 +157,13 @@ public:
 
     // Per-frame update — call BEFORE sceneManager->drawAll().
     // realDeltaSeconds: wall-clock delta (not simulation delta).
+    // NOTE (GD-H3 bridge): UIManager::update() is the EXCLUSIVE polling bridge for the
+    // deficit-streak CRITICAL toast (GD-H3). Each frame, update() calls
+    // m_sim->getConsecutiveDeficitMonths() and dispatches the CRITICAL toast to
+    // NotificationManager when the threshold is crossed. NotificationManager does NOT
+    // call getConsecutiveDeficitMonths() — its only simulation interaction is calling
+    // m_sim->setPaused(true) (via ISimulationPauser inheritance) when a CRITICAL toast
+    // arrives. All deficit-month polling and threshold evaluation lives here, in update().
     void update(float realDeltaSeconds);
 
     // Render all GUI panels — call AFTER sceneManager->drawAll() and BEFORE endScene().
