@@ -79,18 +79,7 @@ jobs:
           restore-keys: |
             vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
 
-      # Step 6: Cache FetchContent downloads.
-      # Keyed on CMakeLists.txt + cmake/** to invalidate when SHA pins change.
-      # Reads $COMPILER_VERSION set in step 4.
-      - name: Cache FetchContent downloads
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: .fetchcontent_cache
-          key: fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
-          restore-keys: |
-            fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
-
-      # Step 7: Validate vcpkg baseline consistency.
+      # Step 6: Validate vcpkg baseline consistency.
       # vcpkg.json builtin-baseline must match VCPKG_COMMIT_ID.
       # Must precede vcpkg install.
       - name: Validate vcpkg baseline consistency
@@ -105,36 +94,30 @@ jobs:
           fi
           echo "vcpkg baseline validation passed: $MANIFEST_BASELINE"
 
-      # Step 8: Run vcpkg to install dependencies.
+      # Step 7: Run vcpkg to install dependencies.
       - name: Install vcpkg dependencies
         uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
         with:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
 
-      # Step 9: Set up ccache (Linux only — ccache does not support cl.exe on Windows).
+      # Step 8: Set up ccache (Linux only — ccache does not support cl.exe on Windows).
       - name: Set up ccache
         if: runner.os == 'Linux'
         uses: hendrikmuhs/ccache-action@ed74d11c0b343532753ecead8a951bb09bb34bc9  # v1.2.14
         with:
           key: ${{ runner.os }}-ccache-${{ env.COMPILER_VERSION }}
 
-      # Step 10: Configure CMake.
-      # ENABLE_COVERAGE=OFF for the fast build-linux job.
-      # FETCHCONTENT_BASE_DIR=.fetchcontent_cache (outside build tree).
+      # Step 9: Configure CMake.
+      # ENABLE_COVERAGE=OFF for the fast build-linux job (via ci-linux preset).
+      # CMakePresets.json defines: Ninja generator, ccache launchers, ENABLE_COVERAGE=OFF.
       - name: Configure CMake
-        run: |
-          cmake -B build -S . \
-            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
-            -DFETCHCONTENT_BASE_DIR=${{ github.workspace }}/.fetchcontent_cache \
-            -DENABLE_COVERAGE=OFF \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        run: cmake --preset ci-linux
 
-      # Step 11: Build.
+      # Step 10: Build.
       - name: Build
         run: cmake --build build --parallel
 
-      # Step 12: Verify requires-opengl test routing (non-zero discovery) — Phase 1 deliverable.
+      # Step 11: Verify requires-opengl test routing (non-zero discovery) — Phase 1 deliverable.
       # Must appear BEFORE xvfb-run ctest to confirm routing before execution.
       # The stub_succeed.cpp test from Phase 0 satisfies the non-zero discovery requirement.
       # Phase 2 note: lod_swap_smoke_test.cpp (Phase 6) is the first real requires-opengl test body.
@@ -148,7 +131,7 @@ jobs:
           fi
           echo "requires-opengl routing: $count test(s) discovered."
 
-      # Step 13: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
+      # Step 12: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
       # IrrlichtUIBackendCompileCheck::IsNonAbstract is registered under the 'integration' label.
       # See architecture/testing/framework.md for rationale.
       - name: Verify integration test routing (non-zero discovery)
@@ -161,7 +144,7 @@ jobs:
           fi
           echo "Integration routing: $count test(s) discovered."
 
-      # Step 14: Verify default.mhr HRTF data (Phase 0 placeholder — no-op).
+      # Step 13: Verify default.mhr HRTF data (Phase 0 placeholder — no-op).
       # Phase 4 replaces this with:
       #   find "${{ github.workspace }}" -name "default.mhr" | grep -q . || exit 1
       - name: Verify default.mhr HRTF data (Phase 0 placeholder)
@@ -170,7 +153,7 @@ jobs:
           # TODO Phase 4: replace with: find "${{ github.workspace }}" -name "default.mhr" | grep -q . || exit 1
           echo "WARNING: default.mhr verification deferred to Phase 4 (post-build copy rule not yet wired)."
 
-      # Step 15: Run unit tests.
+      # Step 14: Run unit tests.
       # AITOWN_HEADLESS=1 — guard against unit tests that inadvertently trigger IrrlichtDevice init.
       # ALSOFT_DRIVERS=null — guard against unit tests that inadvertently trigger AudioSystem init.
       - name: Run unit tests (no display)
@@ -182,7 +165,7 @@ jobs:
           AITOWN_HEADLESS: '1'
           ALSOFT_DRIVERS: 'null'
 
-      # Step 16: Run integration tests.
+      # Step 15: Run integration tests.
       # Uses EDT_NULL Irrlicht (no display) + null audio driver.
       - name: Run integration tests (no display, EDT_NULL)
         run: |
@@ -193,7 +176,7 @@ jobs:
           AITOWN_HEADLESS: '1'
           ALSOFT_DRIVERS: 'null'
 
-      # Step 17: Run OpenGL tests under xvfb.
+      # Step 16: Run OpenGL tests under xvfb.
       # AITOWN_HEADLESS must NOT appear here — it suppresses IrrlichtDevice init
       # which is required for requires-opengl tests.
       # ALSOFT_DRIVERS=null still applies (headless runner has no audio hardware).
@@ -205,7 +188,7 @@ jobs:
           GTEST_OUTPUT: 'xml:test_results/'
           ALSOFT_DRIVERS: 'null'
 
-      # Step 18: Verify test XML files were produced.
+      # Step 17: Verify test XML files were produced.
       # if: always() — ensures this runs even if ctest fails.
       - name: Verify test XML output
         if: always()
@@ -218,7 +201,7 @@ jobs:
           fi
           echo "Found $count test result file(s)."
 
-      # Step 19: Publish test results via dorny/test-reporter.
+      # Step 18: Publish test results via dorny/test-reporter.
       # if: always() — must post annotations even when tests fail.
       # fail-on-error: false — prevents reporter errors from masking actual test failures.
       - name: Publish test results
@@ -230,7 +213,7 @@ jobs:
           reporter: 'java-junit'
           fail-on-error: false
 
-      # Step 20: Upload test results artifact.
+      # Step 19: Upload test results artifact.
       # if: always() — upload even on failure for post-mortem analysis.
       # Job-specific name (not runner.os-based) to avoid collision with coverage-linux.
       - name: Upload test results (build-linux)
@@ -287,16 +270,7 @@ jobs:
           restore-keys: |
             vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
 
-      # Step 5: Cache FetchContent downloads.
-      - name: Cache FetchContent downloads
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: .fetchcontent_cache
-          key: fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
-          restore-keys: |
-            fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
-
-      # Step 6: Validate vcpkg baseline consistency (must precede vcpkg install).
+      # Step 5: Validate vcpkg baseline consistency (must precede vcpkg install).
       - name: Validate vcpkg baseline consistency
         shell: bash
         run: |
@@ -307,19 +281,22 @@ jobs:
           fi
           echo "vcpkg baseline validation passed: $MANIFEST_BASELINE"
 
-      # Step 7: Run vcpkg to install dependencies.
+      # Step 6: Run vcpkg to install dependencies.
       - name: Install vcpkg dependencies
         uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
         with:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
 
-      # Step 8: Configure CMake (MSBuild generator; no ccache on Windows).
+      # Step 7: Set up MSVC environment for Ninja generator.
+      # ilammy/msvc-dev-cmd runs vcvarsall.bat x64, placing cl.exe and link.exe on PATH.
+      # Required before cmake configure when using -G Ninja (which does not auto-detect MSVC).
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c  # v1.13.0
+
+      # Step 8: Configure CMake (Ninja generator via ci-windows preset; no ccache on Windows).
       # vcpkg manifest install runs here — build/vcpkg_installed/ is created during configure.
       - name: Configure CMake
-        run: |
-          cmake -B build -S . -G "Visual Studio 17 2022" `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
-            -DFETCHCONTENT_BASE_DIR="${{ github.workspace }}\.fetchcontent_cache"
+        run: cmake --preset ci-windows
         shell: pwsh
 
       # Step 9: Verify glew vcpkg installed artifact (after cmake configure).
@@ -354,9 +331,9 @@ jobs:
           }
           Write-Host 'glew32.lib found.'
 
-      # Step 11: Build (MSBuild).
+      # Step 11: Build (Ninja single-config; no -C Release needed).
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --parallel
         shell: pwsh
 
       # Step 12: Run unit tests.
@@ -419,41 +396,44 @@ jobs:
       # soft_oal.dll and default.mhr remain warning-only (Phase 4 deliverables not yet present).
       # Phase 4 hardens soft_oal.dll and default.mhr to hard-fail as well.
       # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
+      # NOTE: Ninja single-config outputs to build/ (not build/Release/).
       - name: Verify required DLLs (Irrlicht+GLEW hard-fail; OpenAL warning-only — Phase 4)
         shell: pwsh
         run: |
           # Irrlicht.dll — hard-fail (Phase 1: aitown_render now links Irrlicht).
-          if (-not (Test-Path "build/Release/Irrlicht.dll")) {
-            Write-Error "ERROR: Irrlicht.dll missing from build/Release/ — post-build copy rule failed"
+          # Ninja single-config: DLLs are copied to build/ (not build/Release/).
+          if (-not (Test-Path "build/Irrlicht.dll")) {
+            Write-Error "ERROR: Irrlicht.dll missing from build/ — post-build copy rule failed"
             exit 1
           }
           Write-Host "Irrlicht.dll present."
           # Phase 1 atomicity gate: GLEW32.dll check co-lands with target_link_libraries(aitown_render PRIVATE GLEW::GLEW Irrlicht ...)
-          if (-not (Test-Path "build/Release/GLEW32.dll")) {
-            Write-Error "ERROR: GLEW32.dll missing from build/Release/ — post-build CMake DLL copy rule failed"
+          if (-not (Test-Path "build/GLEW32.dll")) {
+            Write-Error "ERROR: GLEW32.dll missing from build/ — post-build CMake DLL copy rule failed"
             exit 1
           }
           Write-Host "GLEW32.dll present."
           # soft_oal.dll — warning-only (Phase 4 deliverable).
-          if (Test-Path "build/Release/soft_oal.dll") {
+          if (Test-Path "build/soft_oal.dll") {
             Write-Host "soft_oal.dll found."
           } else {
             Write-Warning "soft_oal.dll not found — expected after Phase 4 audio deliverable. CI continues."
           }
           # default.mhr — warning-only (Phase 4 deliverable).
-          if (Test-Path "build/Release/default.mhr") {
+          if (Test-Path "build/default.mhr") {
             Write-Host "default.mhr found."
           } else {
             Write-Warning "default.mhr not found — expected after Phase 4 audio deliverable. CI continues."
           }
 
       # Step 18: Upload Windows binary artifact (only on push to main).
+      # Ninja single-config: executable is at build/aitown.exe (not build/Release/aitown.exe).
       - name: Upload Windows binary artifact
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
         with:
           name: aitown-windows-${{ github.sha }}
-          path: build/Release/
+          path: build/aitown.exe
           retention-days: 30
 
   # ============================================================================
@@ -505,16 +485,7 @@ jobs:
           restore-keys: |
             vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
 
-      # Step 6: Cache FetchContent downloads.
-      - name: Cache FetchContent downloads
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: .fetchcontent_cache
-          key: fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
-          restore-keys: |
-            fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
-
-      # Step 7: Validate vcpkg baseline consistency.
+      # Step 6: Validate vcpkg baseline consistency.
       - name: Validate vcpkg baseline consistency
         shell: bash
         run: |
@@ -525,34 +496,29 @@ jobs:
           fi
           echo "vcpkg baseline validation passed: $MANIFEST_BASELINE"
 
-      # Step 8: Run vcpkg.
+      # Step 7: Run vcpkg.
       - name: Install vcpkg dependencies
         uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
         with:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
 
-      # Step 9: Set up ccache.
+      # Step 8: Set up ccache.
       - name: Set up ccache
         if: runner.os == 'Linux'
         uses: hendrikmuhs/ccache-action@ed74d11c0b343532753ecead8a951bb09bb34bc9  # v1.2.14
         with:
           key: ${{ runner.os }}-ccache-coverage-${{ env.COMPILER_VERSION }}
 
-      # Step 10: Configure CMake with ENABLE_COVERAGE=ON.
+      # Step 9: Configure CMake with ENABLE_COVERAGE=ON (via ci-linux-coverage preset).
+      # CMakePresets.json defines: Ninja generator, ccache launchers, ENABLE_COVERAGE=ON.
       - name: Configure CMake (coverage)
-        run: |
-          cmake -B build -S . \
-            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
-            -DFETCHCONTENT_BASE_DIR=${{ github.workspace }}/.fetchcontent_cache \
-            -DENABLE_COVERAGE=ON \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        run: cmake --preset ci-linux-coverage
 
-      # Step 11: Build.
+      # Step 10: Build.
       - name: Build (coverage)
         run: cmake --build build --parallel
 
-      # Step 12: Verify requires-opengl test routing (non-zero discovery) — Phase 1 deliverable.
+      # Step 11: Verify requires-opengl test routing (non-zero discovery) — Phase 1 deliverable.
       # Must appear BEFORE xvfb-run ctest to confirm routing before execution.
       # The stub_succeed.cpp test from Phase 0 satisfies the non-zero discovery requirement.
       # Phase 2 note: lod_swap_smoke_test.cpp (Phase 6) is the first real requires-opengl test body.
@@ -566,7 +532,7 @@ jobs:
           fi
           echo "requires-opengl routing: $count test(s) discovered."
 
-      # Step 13: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
+      # Step 12: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
       # IrrlichtUIBackendCompileCheck::IsNonAbstract is registered under the 'integration' label.
       # See architecture/testing/framework.md for rationale.
       - name: Verify integration test routing (non-zero discovery)
@@ -579,7 +545,7 @@ jobs:
           fi
           echo "Integration routing: $count test(s) discovered."
 
-      # Step 14: Run unit tests.
+      # Step 13: Run unit tests.
       - name: Run unit tests (no display)
         run: |
           mkdir -p test_results
@@ -589,7 +555,7 @@ jobs:
           AITOWN_HEADLESS: '1'
           ALSOFT_DRIVERS: 'null'
 
-      # Step 15: Run integration tests.
+      # Step 14: Run integration tests.
       - name: Run integration tests (no display, EDT_NULL)
         run: |
           mkdir -p test_results
@@ -599,7 +565,7 @@ jobs:
           AITOWN_HEADLESS: '1'
           ALSOFT_DRIVERS: 'null'
 
-      # Step 16: Run OpenGL tests under xvfb.
+      # Step 15: Run OpenGL tests under xvfb.
       # AITOWN_HEADLESS must NOT appear here.
       - name: Run OpenGL tests (xvfb)
         run: |
@@ -609,7 +575,7 @@ jobs:
           GTEST_OUTPUT: 'xml:test_results/'
           ALSOFT_DRIVERS: 'null'
 
-      # Step 17: Verify test XML files.
+      # Step 16: Verify test XML files.
       # MUST run BEFORE dorny/test-reporter and lcov — if lcov fails, annotations still post.
       - name: Verify test XML output
         if: always()
@@ -622,7 +588,7 @@ jobs:
           fi
           echo "Found $count test result file(s)."
 
-      # Step 18: Publish test results.
+      # Step 17: Publish test results.
       # MUST run BEFORE lcov capture — if lcov fails, annotations still post.
       - name: Publish test results (coverage)
         if: always()
@@ -633,7 +599,7 @@ jobs:
           reporter: 'java-junit'
           fail-on-error: false
 
-      # Step 19: Upload test results artifact (coverage-linux).
+      # Step 18: Upload test results artifact (coverage-linux).
       # if: always() — upload even on failure for post-mortem analysis.
       - name: Upload test results (coverage-linux)
         if: always()
@@ -643,7 +609,7 @@ jobs:
           path: test_results/
           retention-days: 14
 
-      # Step 20: lcov capture, filter, report, and gate (renumbered — was Step 17 before test results upload added).
+      # Step 19: lcov capture, filter, report, and gate.
       # All within a single run: block so BUILD_DIR variable persists.
       # Required order: lcov --remove -> lcov --list -> genhtml -> lcov --fail-under-percent
       # lcov --list MUST appear before --fail-under-percent so output is visible even on gate failure.
@@ -662,12 +628,11 @@ jobs:
           # many exclusion patterns (mock_*.h, manual_*.h, src/audio/*, etc.) match
           # nothing yet. These patterns are correct future-proofing — they must stay so
           # they suppress coverage for those paths when real code arrives in Phase 1+.
-          # Note: "${BUILD_DIR}/_deps/*" is intentionally absent — with
-          # FETCHCONTENT_BASE_DIR=.fetchcontent_cache, build/_deps/ never exists.
+          # Note: "${BUILD_DIR}/_deps/*" and ".fetchcontent_cache/*" are intentionally
+          # absent — gtest and rapidcheck are now vcpkg-managed; FetchContent is not used.
           lcov --remove coverage.info \
             --ignore-errors unused \
             '/usr/*' \
-            "${{ github.workspace }}/.fetchcontent_cache/*" \
             '*/tests/*' \
             '*/mock_*.h' '*/mock_*.cpp' \
             '*/manual_*.h' '*/manual_*.cpp' \
@@ -683,7 +648,7 @@ jobs:
           # TODO Phase 5: replace with: lcov --summary coverage_filtered.info | awk check
           lcov --summary coverage_filtered.info
 
-      # Step 21: src/ui/ coverage baseline checkpoint.
+      # Step 20: src/ui/ coverage baseline checkpoint.
       # Informational only — does NOT fail CI in Phase 1 (src/ui/ files are stubs).
       # Intent: baseline-detect the coverage reporting path so that when Phase 5 lands
       # and real UI code exists, a genuine absence of src/ui/ entries is immediately
@@ -694,7 +659,7 @@ jobs:
         run: |
           lcov --list coverage_filtered.info | grep -E "src/ui/" || echo "WARNING: No src/ui/ coverage entries found (expected after Phase 5)"
 
-      # Step 22: Upload coverage HTML artifact.
+      # Step 21: Upload coverage HTML artifact.
       # if: always() — upload even if lcov gate fails for post-mortem analysis.
       - name: Upload coverage report
         if: always()

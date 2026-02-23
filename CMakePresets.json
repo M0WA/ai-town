@@ -1,0 +1,49 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "description": "Base settings shared by all CI presets. Requires VCPKG_ROOT env var.",
+      "binaryDir": "${sourceDir}/build",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+    },
+    {
+      "name": "ci-linux",
+      "displayName": "CI Linux (build, no coverage)",
+      "description": "Linux CI build: Ninja + ccache, ENABLE_COVERAGE=OFF.",
+      "inherits": "base",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "ENABLE_COVERAGE": "OFF",
+        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+      }
+    },
+    {
+      "name": "ci-linux-coverage",
+      "displayName": "CI Linux (coverage build)",
+      "description": "Linux CI coverage build: Ninja + ccache, ENABLE_COVERAGE=ON.",
+      "inherits": "ci-linux",
+      "cacheVariables": {
+        "ENABLE_COVERAGE": "ON"
+      }
+    },
+    {
+      "name": "ci-windows",
+      "displayName": "CI Windows (Ninja + MSVC)",
+      "description": "Windows CI build: Ninja generator. Requires ilammy/msvc-dev-cmd to set MSVC env before configure.",
+      "inherits": "base",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ENABLE_COVERAGE": "OFF"
+      }
+    }
+  ]
+}
