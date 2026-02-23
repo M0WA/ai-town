@@ -136,7 +136,7 @@ All mandatory top-level keys and their structure are defined below. The stub fil
   },
   "assignments": [
     {
-      "vehicle_type": "car_sedan",
+      "vehicle_id": "car_sedan",
       "row": 0, "col": 0,
       "comment": "Standard passenger car"
     }

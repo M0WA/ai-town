@@ -28,7 +28,7 @@
 ### Constructor Signature
 
 ```cpp
-HUD(IUIBackend* backend, IAudioSystem* audio, IClock* clock, ICitySimulation* sim)
+HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock* clock)
 ```
 
 All four parameters are stored as non-owning pointers. The `IAudioSystem*` parameter is stored as:

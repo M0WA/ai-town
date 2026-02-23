@@ -77,9 +77,25 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
   **Integration routing check semantics**: The routing check verifies label correctness (non-zero discovery under the `integration` label), NOT phase-exclusion. A compile-only verification test registered under `integration` at Phase 1 is a valid and intentional use of the label — it is a special case acknowledged in `framework.md`. The check does not impose any constraint on which phases may register tests under a given label; it only ensures that at least one test is registered, preventing a misconfigured `LABEL` from silently producing zero results.
 
+  **Phase assignment (unit label routing)**: The `unit` label routing non-zero discovery verification step is a Phase 4 deliverable (CI routing verification). At least one test in the `unit_tests` CMake target must be explicitly labelled `unit` — tests labelled `integration` or `requires-opengl` do NOT satisfy this check. The check ensures that `ctest -LE 'integration|requires-opengl'` (the unit test run step) will discover at least one test, preventing false-green CI from a misconfigured `LABEL` property that silently yields zero unit tests.
+
+  Add a verification step before the integration routing check:
+
+  ```yaml
+  - name: Verify unit test routing (non-zero discovery)
+    shell: bash
+    run: |
+      count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -c 'Test #' || true)
+      if [[ "$count" -eq 0 ]]; then
+        echo 'ERROR: ctest -L '\''^unit$'\'' discovered 0 tests — label routing is broken'
+        exit 1
+      fi
+      echo "Unit test routing verified: $count test(s) discovered."
+  ```
+
   **Phase assignment (requires-opengl label routing)**: The `requires-opengl` label routing non-zero discovery verification step MAY be added in Phase 1, once `opengl_tests` is linked against `aitown_render`. The `stub_succeed.cpp` test registered in Phase 0 under `opengl_tests` satisfies the non-zero discovery requirement. This step is a Phase 1 deliverable and must not be deferred to Phase 3.
 
-  Add an analogous verification step after the integration routing check and before the `xvfb-run` step:
+  Add an analogous verification step after the unit and integration routing checks and before the `xvfb-run` step:
 
   ```yaml
   - name: Verify requires-opengl test routing (non-zero discovery)
@@ -93,7 +109,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
       echo "Requires-opengl test routing verified: $count test(s) discovered."
   ```
 
-  Both checks must be placed **after the CMake build step and before any ctest execution step** so that a label misconfiguration fails the job before any false-passing `ctest -L` invocation can run. Neither step requires a display or audio device — they only invoke `ctest -N` (list mode, no test execution).
+  All three routing checks (`unit`, `integration`, `requires-opengl`) must be placed **after the CMake build step and before any ctest execution step** so that a label misconfiguration fails the job before any false-passing `ctest -L` invocation can run. Neither step requires a display or audio device — they only invoke `ctest -N` (list mode, no test execution).
 
   ```yaml
   - name: Run unit tests (no display)
@@ -291,7 +307,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
 - **`coverage-linux` is a separate, self-contained job** — it performs its own configure+build+test+lcov sequence with `-DENABLE_COVERAGE=ON`. It does NOT depend on artifacts from `build-linux` (which would require large artifact transfers). This means `coverage-linux` re-runs the full build, but with coverage instrumentation enabled; `build-linux` can run a faster non-coverage build for binary verification. Both jobs run in parallel. The `all-checks-pass` gate references both. **Naming note**: the job can be renamed `build-test-coverage-linux` for clarity, as long as the name matches in the `needs:` list.
   - **`coverage-linux` must include three explicit, separately named YAML steps for ctest** (unit tests, integration tests without display, and OpenGL tests under xvfb) **before the lcov capture step**. A single combined `ctest` step cannot use both `-LE` and `-L` flags simultaneously; three named steps make coverage tracing explicit. The three ctest steps in `coverage-linux` must mirror the three ctest steps in `build-linux` exactly (same label filters `-LE "integration|requires-opengl"`, `-L "^integration$"`, `-L "^requires-opengl$"`) to ensure coverage data is collected for all test categories.
 
-  **Label-routing verification in `coverage-linux` (mandatory)**: The `coverage-linux` job MUST include the same two label-routing non-zero discovery verification steps that `build-linux` includes — one for the `integration` label and one for the `requires-opengl` label. The exact step order within `coverage-linux` is:
+  **Label-routing verification in `coverage-linux` (mandatory)**: The `coverage-linux` job MUST include the same three label-routing non-zero discovery verification steps that `build-linux` includes — one for the `unit` label, one for the `integration` label, and one for the `requires-opengl` label. The exact step order within `coverage-linux` is:
 
   1. Install system dependencies (`apt-get`)
   2. Detect compiler version (write `COMPILER_VERSION` to `$GITHUB_ENV`)
@@ -300,23 +316,34 @@ This step runs as the **first named step** in the `build-linux` job — before v
   5. `hendrikmuhs/ccache-action` — set up ccache with `-coverage` key suffix
   6. CMake configure (`cmake --preset ci-linux-coverage`)
   7. CMake build (`cmake --build build`)
-  8. **Verify requires-opengl test routing (non-zero discovery)** — after build, before any ctest
+  8. **Verify unit test routing (non-zero discovery)** — after build, before any ctest
   9. **Verify integration test routing (non-zero discovery)** — after build, before any ctest
-  10. Run unit tests ctest step
-  11. Run integration tests ctest step
-  12. Run OpenGL tests ctest step (xvfb)
-  13. Verify test XML output exists
-  14. Publish test results (dorny/test-reporter)
-  15. Capture and gate lcov coverage
-  16. Upload coverage artifact
+  10. **Verify requires-opengl test routing (non-zero discovery)** — after build, before any ctest
+  11. Run unit tests ctest step
+  12. Run integration tests ctest step
+  13. Run OpenGL tests ctest step (xvfb)
+  14. Verify test XML output exists
+  15. Publish test results (dorny/test-reporter)
+  16. Capture and gate lcov coverage
+  17. Upload coverage artifact
 
-  Steps 8 and 9 (the two label-routing verification steps) are placed **after CMake build step (7) and before the first ctest execution step (10)**. A label misconfiguration that produces zero-test discovery in `build-linux` will equally affect `coverage-linux`; without these checks, a zero-discovery run silently under-reports coverage and exits 0.
+  Steps 8, 9, and 10 (the three label-routing verification steps) are placed **after CMake build step (7) and before the first ctest execution step (11)**. A label misconfiguration that produces zero-test discovery in `build-linux` will equally affect `coverage-linux`; without these checks, a zero-discovery run silently under-reports coverage and exits 0.
 
   ### coverage-linux: label-routing verification YAML
 
   These steps are IDENTICAL to the `build-linux` forms — copy them exactly. They are reproduced here verbatim so that an implementer building `coverage-linux` from this spec alone can derive the exact YAML without referring back to the `build-linux` documentation.
 
   ```yaml
+  - name: Verify unit test routing (non-zero discovery)
+    shell: bash
+    run: |
+      count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -c 'Test #' || true)
+      if [[ "$count" -eq 0 ]]; then
+        echo 'ERROR: ctest -L '\''^unit$'\'' discovered 0 tests — label routing is broken'
+        exit 1
+      fi
+      echo "Unit test routing verified: $count test(s) discovered."
+
   - name: Verify integration test routing (non-zero discovery)
     shell: bash
     run: |
@@ -338,11 +365,13 @@ This step runs as the **first named step** in the `build-linux` job — before v
       echo "Requires-opengl test routing verified: $count test(s) discovered."
   ```
 
+  **Phase assignment (unit label routing)**: The `unit` label routing non-zero discovery verification step is a Phase 4 deliverable. See the first occurrence of this note (in the `build-linux` section) for full rationale. Both `build-linux` and `coverage-linux` add this step in Phase 4; the steps are identical between the two jobs.
+
   **Phase assignment (integration label routing)**: This `integration` label routing non-zero discovery verification step CAN be added in Phase 1 (not Phase 3) because the `integration_tests` CMake target is first registered in Phase 1 with the `IrrlichtUIBackendCompileCheck::IsNonAbstract` compile-check test. See the first occurrence of this note (in the `build-linux` section) for full rationale. Both `build-linux` and `coverage-linux` add these routing verification steps in Phase 1; the steps are identical between the two jobs.
 
   **Phase assignment (requires-opengl label routing)**: The `requires-opengl` label routing non-zero discovery verification step MAY be added in Phase 1, once `opengl_tests` is linked against `aitown_render`. The `stub_succeed.cpp` test registered in Phase 0 under `opengl_tests` satisfies the non-zero discovery requirement. This step is a Phase 1 deliverable and must not be deferred to Phase 3.
 
-  Both checks must be placed **after the CMake build step and before the first ctest execution step** so that a label misconfiguration fails the job before any false-passing `ctest -L` invocation can run. Neither step requires a display or audio device — they only invoke `ctest -N` (list mode, no test execution).
+  All three routing checks (`unit`, `integration`, `requires-opengl`) must be placed **after the CMake build step and before the first ctest execution step** so that a label misconfiguration fails the job before any false-passing `ctest -L` invocation can run. Neither step requires a display or audio device — they only invoke `ctest -N` (list mode, no test execution).
 
     ```yaml
     - name: Run unit tests (no display)

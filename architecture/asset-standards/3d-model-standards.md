@@ -258,11 +258,11 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
     "normal_atlas_grid": { "cols": 8, "rows": 8, "cell_size_px": 256 },
     "_comment_normal_atlas": "normal atlas uses same row/col assignments but 8x8 grid, 256x256 cell_size_px",
     "assignments": [
-      { "vehicle_type": "car_sedan",   "row": 0, "col": 0 },
-      { "vehicle_type": "car_hatchback", "row": 0, "col": 1 },
-      { "vehicle_type": "car_suv",     "row": 0, "col": 2 },
-      { "vehicle_type": "bus_standard","row": 1, "col": 0 },
-      { "vehicle_type": "truck_cargo", "row": 1, "col": 1 }
+      { "vehicle_id": "car_sedan",     "row": 0, "col": 0 },
+      { "vehicle_id": "car_hatchback", "row": 0, "col": 1 },
+      { "vehicle_id": "car_suv",       "row": 0, "col": 2 },
+      { "vehicle_id": "bus_standard",  "row": 1, "col": 0 },
+      { "vehicle_id": "truck_cargo",   "row": 1, "col": 1 }
     ]
   }
   ```
