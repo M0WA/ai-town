@@ -159,7 +159,22 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
   The `-coverage` suffix is mandatory. GCC emits different object code when `-fprofile-arcs -ftest-coverage` is active — coverage-instrumented objects are ABI-incompatible with non-instrumented objects. Using the same ccache key for both jobs would cause stale-cache hits that silently mix instrumented and non-instrumented objects in the coverage build, producing incorrect or missing `.gcda` output. See `caching.md` for the full rationale and authoritative platform-specific caching rules.
 
-- **Windows job** (`windows-latest`): uses the Ninja generator (not MSBuild) via the `ci-windows` CMake preset. The `ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c` (v1.13.0) action runs `vcvarsall.bat x64` to place `cl.exe` and `link.exe` on `PATH` before `cmake --preset ci-windows` — Ninja does not auto-detect MSVC. DLL output lands at `build/` (not `build/Release/`) because Ninja is single-config and `CMAKE_BUILD_TYPE=Release` is set in the preset. Build step: `cmake --build build --parallel` (no `-C Release` needed for Ninja single-config, though `-C Release` is harmless and can be kept for ctest consistency). Then create the test results directory and run tests — use **explicit label filtering** to skip `requires-opengl` tests (no display available on Windows runners). The `requires-opengl` label is Linux-only (`xvfb-run`); Windows integration tests run under `AITOWN_HEADLESS=1`:
+- **Windows job** (`windows-latest`): uses the Ninja generator (not MSBuild) via the `ci-windows` CMake preset. The `ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c` (v1.13.0) action runs `vcvarsall.bat x64` to place `cl.exe` and `link.exe` on `PATH` before `cmake --preset ci-windows` — Ninja does not auto-detect MSVC. DLL output lands at `build/` (not `build/Release/`) because Ninja is single-config and `CMAKE_BUILD_TYPE=Release` is set in the preset. Build step: `cmake --build build --parallel` (no `-C Release` needed for Ninja single-config, though `-C Release` is harmless and can be kept for ctest consistency).
+
+  **Windows vcpkg DLL PATH requirement**: After the Build step and before any test step, add a step to append the vcpkg installed bin directory to `GITHUB_PATH`. This is required because the vcpkg `x64-windows` triplet builds GTest/GMock as **shared DLLs** (`gtest.dll`, `gmock.dll`) in `build/vcpkg_installed/x64-windows/bin/` — NOT in `build/` alongside the test executables. Without this, test binaries fail to start and ctest reports `No tests were found!!!` (silently, with exit code 0), so no XML is written.
+
+  `GITHUB_PATH` writes take effect for all subsequent steps in the job (not within the same step).
+
+  ```yaml
+  - name: Add vcpkg bin to PATH
+    shell: pwsh
+    run: |
+      "${{ github.workspace }}\build\vcpkg_installed\x64-windows\bin" >> $env:GITHUB_PATH
+  ```
+
+  **`gtest_discover_tests DISCOVERY_MODE PRE_TEST`** (mandatory for Windows): `cmake/AitownTestHelpers.cmake` MUST pass `DISCOVERY_MODE PRE_TEST` to `gtest_discover_tests`. With the default `POST_BUILD` mode, CMake runs the test binary immediately after linking (during `cmake --build`) to enumerate test cases. At build time the vcpkg bin directory has not yet been added to `PATH`, so `gtest.dll` cannot be loaded → the binary exits with a DLL load error → discovery produces empty output → ctest finds 0 tests at run time. `PRE_TEST` defers discovery to ctest time (inside the test step), where `GITHUB_PATH` already includes the vcpkg bin directory. `PRE_TEST` requires CMake ≥ 3.18; the project's `cmake_minimum_required(3.21)` satisfies this on both runners (ubuntu-latest ships CMake 3.22+; VS2022 runner ships CMake 3.28+).
+
+  Then create the test results directory and run tests — use **explicit label filtering** to skip `requires-opengl` tests (no display available on Windows runners). The `requires-opengl` label is Linux-only (`xvfb-run`); Windows integration tests run under `AITOWN_HEADLESS=1`:
 
   ```yaml
   - name: Run unit tests (no display)
