@@ -46,7 +46,7 @@ You use the GitHub MCP server (configured as `github` in `.mcp.json`) for all Gi
 - Project name: **AI Town**
 - Project type: GitHub Projects v2 (linked to repo `M0WA/ai-town`)
 - Single-select status field named `Status` with values: `Planned`, `In Progress`, `Done`
-- Single-select field named `Phase` with values `Phase 0` through `Phase 9` and `Post-V1`
+- Single-select field named `Phase` with values `Phase 0` through `Phase 12` and `Post-V1`
 - All deliverable issues are added to the board as items
 
 ---

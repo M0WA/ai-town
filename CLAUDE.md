@@ -93,6 +93,8 @@ Do not suggest alternative engines, languages, or platforms.
 | Plan Fix Spec | `/plan-fix-spec` | Sync the implementation plan with current specs AND iteratively fix all CRITICAL/HIGH issues in both specs and the plan — domain-scoped re-reviews, diff-based round-2+ prompts, issue deduplication, fix verification, `model: haiku` for review agents, deferred single commit |
 | Fix Implementation | `/fix-implementation` | Same as Plan Fix Spec but skips the Product Owner plan-sync step — iteratively fixes all CRITICAL/HIGH issues in both specs and the implementation plan as-is |
 | Update Board | `/update-board` | Project Manager pushes the implementation plan to the GitHub project board (plan is source of truth); optionally scoped to a single phase (default: all phases) |
+| Validate Phase Done | `/validate-phase-done` | Read a phase file and report whether all deliverable checkboxes and exit criteria are complete; lists every outstanding item if not |
+| Mark Phase Done | `/mark-phase-done` | Validate phase completion, then mark it as **DONE** in the implementation plan and sync the GitHub board; infers the phase from the current git branch (`planning/phase-N` → Phase N−1 done) if not specified |
 | Split Phase | `/split-phase` | Product Owner proposes splitting a phase into multiple phases or redistributing its deliverables; design + tech squads review the proposal, then the Product Owner applies the agreed split |
 
 ## Development Guidelines
@@ -241,6 +243,21 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 
 (To be populated as project structure develops)
 
+### Dev Container
+
+`.devcontainer/Dockerfile` defines the canonical build environment for AI Town. It must be kept
+up to date with **all** build-time and run-time dependencies, including:
+
+- C++ toolchain (GCC/Clang, CMake, Ninja)
+- vcpkg and all vcpkg-managed ports: Irrlicht, OpenAL Soft (`openal-soft`), libvorbis, GLEW,
+  Google Test + GMock, RapidCheck, and any future ports added to `vcpkg.json`
+- System libraries required at runtime (e.g. `libopenal`, `libGL`, X11/display libs for
+  headless CI via `xvfb`)
+- Any tools used in CI steps (e.g. `lcov`, `python3`, `nodejs` for markdownlint)
+
+**Rule**: whenever a new dependency is added to `vcpkg.json`, `CMakeLists.txt`, or the CI
+workflow, the Dockerfile must be updated in the same commit.
+
 ### Building
 
 ```bash
@@ -299,6 +316,8 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## Notes for AI Assistants
 
+- **Markdown linting**: use `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` — the bare `markdownlint` command is not installed; `npx markdownlint-cli` is the correct invocation for agents and local runs. CI/CD workflows are unchanged.
+- **Local build with gcc-12 fallback**: if the devcontainer image has not been rebuilt after the gcc-13 Dockerfile fix, `/usr/bin/c++` resolves to gcc-12 which lacks `<format>` (required by openal-soft ≥ 1.24.0). Workaround: pass `-DVCPKG_OVERLAY_PORTS=vcpkg-overlays` to cmake — the overlay pins openal-soft to 1.23.1. Once the devcontainer is rebuilt (which now sets the `c++` alternative to gcc-13), the overlay is not needed.
 - C++ project using Irrlicht (EDT_OPENGL only) and OpenAL Soft
 - Focus on cross-platform compatibility (Linux + Windows)
 - Prioritize performance and code quality; follow OO design patterns
