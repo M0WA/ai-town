@@ -218,24 +218,31 @@ If this command produces any output, duplicate GLEW symbols are present and the 
 
 ## Phase 2 Spike Results
 
-<!-- Populate this section when the Phase 2 GLEW availability spike is complete. Use the template below. -->
-
-<!-- TEMPLATE — replace each bracketed field with the actual finding:
-
 **Q1 — Does vendored Irrlicht use GLEW internally?**
-[YES / NO] — [one-line finding from source inspection of source/Irrlicht/COpenGLDriver.cpp:
- e.g. "#include \"glew.h\" found at line N — GLEW bundled" or "no glew.h include found — GLEW absent"]
+NO — binary analysis of `build/vcpkg_installed/x64-linux/lib/libIrrlicht.a` confirms zero GLEW
+symbols in libIrrlicht.a (command: `nm libIrrlicht.a | grep -iE "glew" | head -20` produced no
+output). The adrido/irrlicht-vcpkg port's CMakeLists.txt uses `glob_c_cpp_sources` which would
+include `source/Irrlicht/glew.c` if present, but inspection shows no GLEW object file in the
+archive (`ar -t libIrrlicht.a | grep -i glew` produced no output). Irrlicht's OpenGL driver
+implements extension handling via `COpenGLExtensionHandler` without GLEW. No GLEW duplication
+risk from Irrlicht.
 
 **Q2 — Can AI Town link GLEW independently (find_package(GLEW REQUIRED))?**
-[CONFIRMED YES / BLOCKED — reason] — vcpkg glew port present at baseline [VCPKG_COMMIT_ID value].
-Extension query path confirmed: [glewIsExtensionSupported() | glGetString(GL_EXTENSIONS) fallback]
+CONFIRMED YES — vcpkg glew port present and `find_package(GLEW REQUIRED)` succeeds.
+Extension query path confirmed: `glewIsExtensionSupported()` (no `glGetString(GL_EXTENSIONS)` fallback needed).
 
 **Symbol duplication nm check result:**
-Command: nm build/libaitown_render.a | grep -i glew | sort | uniq -d
-Result: [CLEAN — no output | DUPLICATES FOUND — list symbols]
-Resolution (if duplicates): [link-order fix applied | portfile patched | -Wl,--allow-multiple-definition added]
+Command: `nm build/libaitown_render.a | grep -i glew | sort | uniq -d`
+Result: CLEAN — no output (no duplicate GLEW symbols).
+Resolution: None required — Irrlicht does not bundle GLEW; link-order mitigation-2 (GLEW::GLEW
+before Irrlicht in `target_link_libraries`) is retained as belt-and-suspenders but is confirmed
+not needed for symbol correctness.
 
--->
+**LOD spike Checkbox B — `CMeshSceneNode::setMesh()` grab/drop contract:**
+VERIFIED by binary analysis of `CMeshSceneNode.cpp.o` extracted from `libIrrlicht.a` via objdump:
+`setMesh()` calls `grab()` on the new mesh and `drop()` on the old mesh.
+Caller MUST call `->drop()` on `newLODMesh` after `setMesh()`. See `scene-graph-ownership.md`.
+Phase 5 TerrainChunk work is UNBLOCKED.
 
 ## Test Guard — `shader_stub_compile_test` Skip vs. Fail
 
