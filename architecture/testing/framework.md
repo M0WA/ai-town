@@ -33,11 +33,12 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
 
 - **SHA pin is mandatory** — RapidCheck has no stable release tags; always pin to a specific commit SHA. Update intentionally; do not use HEAD or branch refs.
 - All tests in a `tests/` directory mirroring `src/` structure; `enable_testing()` + `gtest_discover_tests()` enabled
-- **`gtest_discover_tests()` must specify `WORKING_DIRECTORY`, `DISCOVERY_TIMEOUT`, `PROPERTIES TIMEOUT`, and test `LABELS`**:
+- **`gtest_discover_tests()` must specify `WORKING_DIRECTORY`, `DISCOVERY_MODE`, `DISCOVERY_TIMEOUT`, `PROPERTIES TIMEOUT`, and test `LABELS`**:
 
   ```cmake
   gtest_discover_tests(my_test
       WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"  # REQUIRED — see note below
+      DISCOVERY_MODE PRE_TEST  # REQUIRED on Windows — see note below
       DISCOVERY_TIMEOUT 30    # seconds; default 5s is insufficient for coverage-instrumented binaries
       PROPERTIES TIMEOUT 120  # per-test execution timeout; RapidCheck properties can run for seconds
       LABELS "unit"           # or "integration", "requires-opengl" — applied to ALL discovered tests in this target
@@ -46,7 +47,9 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
 
   Without `DISCOVERY_TIMEOUT 30`, CMake test discovery times out on coverage-instrumented (`-DENABLE_COVERAGE=ON`) binaries on loaded CI runners, silently producing 0 discovered tests and a misleading empty-coverage lcov report. Apply to ALL test targets.
 
-  **`WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"` is mandatory.** Without it, `gtest_discover_tests` defaults to `CMAKE_CURRENT_BINARY_DIR` (the build directory). When tests run from the build directory, `GTEST_OUTPUT=xml:test_results/` writes XML to `build/test_results/` instead of `<workspace>/test_results/`. The CI step that collects XML (`test_results/*.xml`) looks in the workspace root on both Linux and Windows, so an incorrect working directory silently produces zero XML files and causes `dorny/test-reporter` to fail with "No test report files were found". This is especially visible on Windows multi-config MSBuild builds where the executable lives in `build/Release/` and the default working directory could be even further from the workspace root.
+  **`WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"` is mandatory.** Without it, `gtest_discover_tests` defaults to `CMAKE_CURRENT_BINARY_DIR` (the build directory). When tests run from the build directory, `GTEST_OUTPUT=xml:test_results/` writes XML to `build/test_results/` instead of `<workspace>/test_results/`. The CI step that collects XML (`test_results/*.xml`) looks in the workspace root on both Linux and Windows, so an incorrect working directory silently produces zero XML files and causes `dorny/test-reporter` to fail with "No test report files were found".
+
+  **`DISCOVERY_MODE PRE_TEST` is mandatory.** The default `POST_BUILD` mode runs the test binary immediately after linking (during `cmake --build`). On Windows with the vcpkg `x64-windows` triplet, GTest/GMock are built as shared DLLs (`gtest.dll`, `gmock.dll`) in `build/vcpkg_installed/x64-windows/bin/` — not in `build/` alongside the `.exe`. The post-build discovery step runs before the CI step that adds the vcpkg bin directory to PATH, so the test binary cannot load `gtest.dll` → exits with a DLL load error → discovery produces empty output → ctest reports `No tests were found!!!` with exit code 0 → tests silently skip and no XML is written. `PRE_TEST` defers discovery to ctest time, where the vcpkg bin directory has already been added to PATH. `PRE_TEST` requires CMake ≥ 3.18; the project's `cmake_minimum_required(3.21)` satisfies this on all runners.
 
   **LABELS MUST be set inside `gtest_discover_tests()`, NOT via `set_tests_properties()` afterwards.** `gtest_discover_tests()` dynamically creates CTest test entries at configure time; calling `set_tests_properties()` after `gtest_discover_tests()` targets the statically-created wrapper test, not the individually-discovered test cases — the labels do not propagate to discovered tests and `-L`/`-LE` ctest filters will silently fail to include or exclude the correct tests. The `LABELS` keyword inside `gtest_discover_tests()` is the only reliable way to assign labels to all auto-discovered GTest cases.
 
@@ -69,30 +72,26 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
 
   ```cmake
   # cmake/AitownTestHelpers.cmake
-  # Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl>
-  #                         [TIMEOUT <seconds>] [DISCOVERY_TIMEOUT <seconds>])
+  # Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl> [TIMEOUT <seconds>])
   macro(aitown_add_tests TARGET)
-      cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT;DISCOVERY_TIMEOUT" "" ${ARGN})
+      cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT" "" ${ARGN})
       if(NOT AITOWN_TEST_LABEL)
           message(FATAL_ERROR "aitown_add_tests: LABEL is required (unit, integration, or requires-opengl)")
       endif()
       if(NOT AITOWN_TEST_TIMEOUT)
           set(AITOWN_TEST_TIMEOUT 120)  # default per-test timeout
       endif()
-      if(NOT AITOWN_TEST_DISCOVERY_TIMEOUT)
-          set(AITOWN_TEST_DISCOVERY_TIMEOUT 30)  # default discovery timeout; coverage-instrumented binaries may need more
-      endif()
       gtest_discover_tests(${TARGET}
           WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-          DISCOVERY_TIMEOUT ${AITOWN_TEST_DISCOVERY_TIMEOUT}
+          DISCOVERY_MODE PRE_TEST      # required on Windows — see DISCOVERY_MODE note above
+          DISCOVERY_TIMEOUT 30
           PROPERTIES TIMEOUT ${AITOWN_TEST_TIMEOUT}
           LABELS "${AITOWN_TEST_LABEL}"
       )
   endmacro()
 
-  # Terrain tests: longer timeout for multi-seed generation property tests;
-  # DISCOVERY_TIMEOUT 60 because coverage-instrumented terrain binary is large
-  # aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
+  # Terrain tests: longer timeout for multi-seed generation property tests
+  # aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300)
   #
   # Standard unit tests:
   # aitown_add_tests(simulation_tests LABEL "unit")
