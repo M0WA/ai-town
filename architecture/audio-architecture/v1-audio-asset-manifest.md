@@ -21,6 +21,9 @@
 | `sfx_zone_residential` | Zone loop | OGG | 12–18 s | Y | Residential ambience; mono positional; **pre-loaded; hard cap 18 s** (pre-load tier boundary is 20 s; stay safely below); **silence-boundary loop** (−60 dBFS at head and tail); authored to **−26 LUFS / −2 dBTP** (subtle background positional — should not compete with music stems) |
 | `sfx_zone_commercial` | Zone loop | OGG | 12–18 s | Y | Commercial activity; mono positional; pre-loaded; hard cap 18 s; **silence-boundary loop**; authored to **−26 LUFS / −2 dBTP** |
 | `sfx_zone_industrial` | Zone loop | OGG | 12–18 s | Y | Factory, industrial; mono positional; pre-loaded; hard cap 18 s; **silence-boundary loop**; authored to **−26 LUFS / −2 dBTP** |
+
+> **Zone loop true peak margin**: Zone loops use −2 dBTP (vs. −1 dBTP for most one-shots) because the loop boundary transient plus continuous looping content requires additional peak headroom.
+
 | `sfx_build_place` | SFX | WAV | <1 s | N | Building placed; authored to **−24 LUFS / −1 dBTP** (subtle placement feedback) |
 | `sfx_build_demolish` | SFX | WAV | <1 s | N | Building demolished; authored to **−24 LUFS / −1 dBTP** |
 | `sfx_fire_alert` | SFX | WAV | 2–4 s | N | Fire service event; **mono positional** (3D spatial at building location); CRITICAL priority; authored to **−18 LUFS / −1 dBTP** (must cut through ambient/music at a crisis moment) |
