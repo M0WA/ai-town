@@ -336,7 +336,18 @@ jobs:
         run: cmake --build build --parallel
         shell: pwsh
 
-      # Step 12: Run unit tests.
+      # Step 12: Add vcpkg installed binaries to PATH.
+      # Required for GTest DLL discovery (DISCOVERY_MODE PRE_TEST) and test execution.
+      # vcpkg x64-windows triplet builds GTest/GMock as shared DLLs (gtest.dll, gmock.dll)
+      # in build/vcpkg_installed/x64-windows/bin/ — NOT in build/ alongside the .exe.
+      # Without this, test binaries fail to start and ctest reports "No tests were found!!!".
+      # GITHUB_PATH writes take effect for all subsequent steps in this job.
+      - name: Add vcpkg bin to PATH
+        shell: pwsh
+        run: |
+          "${{ github.workspace }}\build\vcpkg_installed\x64-windows\bin" >> $env:GITHUB_PATH
+
+      # Step 13: Run unit tests.
       # AITOWN_HEADLESS=1 and ALSOFT_DRIVERS=null required — headless Windows runners
       # have no audio hardware and will fail AudioSystem initialization without null driver.
       - name: Run unit tests (no display)
@@ -349,7 +360,7 @@ jobs:
           AITOWN_HEADLESS: '1'
           ALSOFT_DRIVERS: 'null'
 
-      # Step 13: Run integration tests.
+      # Step 14: Run integration tests.
       # No xvfb step on Windows — requires-opengl tests are Linux-only.
       - name: Run integration tests (no display)
         shell: pwsh
@@ -361,7 +372,7 @@ jobs:
           AITOWN_HEADLESS: '1'
           ALSOFT_DRIVERS: 'null'
 
-      # Step 14: Verify test XML files.
+      # Step 15: Verify test XML files.
       - name: Verify test XML output
         if: always()
         shell: pwsh
@@ -373,7 +384,7 @@ jobs:
           }
           Write-Host "Found $count test result file(s)."
 
-      # Step 15: Publish test results.
+      # Step 16: Publish test results.
       - name: Publish test results
         if: always()
         uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1
@@ -383,7 +394,7 @@ jobs:
           reporter: 'java-junit'
           fail-on-error: false
 
-      # Step 16: Upload test results artifact.
+      # Step 17: Upload test results artifact.
       - name: Upload test results (build-windows)
         if: always()
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
@@ -392,7 +403,7 @@ jobs:
           path: test_results/
           retention-days: 14
 
-      # Step 17: DLL verification — Irrlicht.dll and GLEW32.dll hard-fail (Phase 1+);
+      # Step 18: DLL verification — Irrlicht.dll and GLEW32.dll hard-fail (Phase 1+);
       # soft_oal.dll and default.mhr remain warning-only (Phase 4 deliverables not yet present).
       # Phase 4 hardens soft_oal.dll and default.mhr to hard-fail as well.
       # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
@@ -426,7 +437,7 @@ jobs:
             Write-Warning "default.mhr not found — expected after Phase 4 audio deliverable. CI continues."
           }
 
-      # Step 18: Upload Windows binary artifact (only on push to main).
+      # Step 19: Upload Windows binary artifact (only on push to main).
       # Ninja single-config: executable is at build/aitown.exe (not build/Release/aitown.exe).
       - name: Upload Windows binary artifact
         if: github.ref == 'refs/heads/main'
