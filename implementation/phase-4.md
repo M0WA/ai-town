@@ -23,15 +23,29 @@ Harden the CI pipeline (GLEW vcpkg, DLL verification, routing verification), del
 #### Asset Tooling Stubs
 
 - [ ] **`tools/validate_assets.py` Part B — 4-item atomicity (CI-2 atomicity)**: the Phase 1 stub delivered the script file. Phase 4 ensures the full 4-item atomicity requirement is satisfied: verify the CI job YAML, Run step, and `all-checks-pass` needs entry are all present and wired. If any of the four items were missing from Phase 1, fix them in Phase 4. The Phase 4 stub must include a comment block documenting all 13 required checks (plus the sidecar and road LOD2 color checks added in later phases) so that Phase 5 implementers can add check bodies incrementally without structural CMakeLists changes. Check #1 through Check #13 body stubs (`pass` with a TODO comment) must be present. (ref: `architecture/asset-standards/3d-model-standards.md`, `architecture/ci-cd/github-actions-workflow.md`)
-- [ ] **`tools/vehicle_atlas_registry.json` schema stub** (`graphics-artist-3d-model`, `graphics-dev-irrlicht`): deliver `tools/vehicle_atlas_registry.json` with the canonical schema structure as defined in `architecture/asset-standards/3d-model-standards.md` (flat `"assignments"` array keyed by `"vehicle_id"`):
+- [ ] **`tools/vehicle_atlas_registry.json` schema stub** (`graphics-artist-3d-model`, `graphics-dev-irrlicht`): deliver `tools/vehicle_atlas_registry.json` with the canonical nested schema defined in `architecture/asset-standards/building-atlas-layout.md § Required JSON Schema` (nested atlas objects with `upload_path` fields, `assignments` array keyed by `"vehicle_id"`):
 
   ```json
   {
-    "atlas_file": "vehicles_diffuse_atlas_d.dds",
-    "grid": { "cols": 4, "rows": 4, "cell_size_px": 512 },
-    "normal_atlas_file": "vehicles_normal_atlas_n.dds",
-    "normal_atlas_grid": { "cols": 8, "rows": 8, "cell_size_px": 256 },
-    "_comment_normal_atlas": "normal atlas uses same row/col assignments but 8x8 grid, 256x256 cell_size_px",
+    "diffuse_atlas": {
+      "atlas_file": "vehicles_diffuse_atlas_d.dds",
+      "grid": { "cols": 4, "rows": 4, "cell_size_px": 512 },
+      "mip_levels": 4,
+      "upload_path": "srgb"
+    },
+    "normal_atlas": {
+      "atlas_file": "vehicles_normal_atlas_n.dds",
+      "grid": { "cols": 8, "rows": 8, "cell_size_px": 256 },
+      "mip_levels": 4,
+      "upload_path": "linear",
+      "_comment_normal_atlas": "same row/col assignments as diffuse but 8x8 grid; U=[C/8,(C+1)/8], V=[R/8,(R+1)/8]"
+    },
+    "sprite_atlas": {
+      "atlas_file": "vehicles_sprite_atlas_d.dds",
+      "grid": { "cols": 16, "rows": 16, "cell_size_px": 16 },
+      "mip_levels": 1,
+      "upload_path": "linear"
+    },
     "assignments": [
       { "vehicle_id": "car_sedan",     "row": 0, "col": 0 },
       { "vehicle_id": "car_hatchback", "row": 0, "col": 1 },
@@ -42,7 +56,7 @@ Harden the CI pipeline (GLEW vcpkg, DLL verification, routing verification), del
   }
   ```
 
-  The 5 V1 vehicle types (`car_sedan`, `car_hatchback`, `car_suv`, `bus_standard`, `truck_cargo`) must each have an entry stub. **LOD2 threshold confirmed**: `height_floors >= 4` → `_lod2.b3d`; `height_floors <= 3` → billboard (3D-2). **Normal atlas bicubic mip before DXT5nm**: artist must apply bicubic downsampling to each mip level before DXT5nm encoding to preserve normal vector accuracy at lower mips (3D-3). **Vehicle sprite atlas upload path** (2D-1): vehicle sprite atlas (`vehicles_sprite_atlas_d.dds`) uses the linear upload pool (`loadLinear()`), not `loadSRGB()` — because sprites encode RGBA8 color data, not sRGB diffuse. The `_d` suffix exception for vehicle sprites is documented in `architecture/asset-standards/2d-texture-standards.md`. **`graphics-artist-3d-model` co-sign required**: no `vehicle_atlas_registry.json` schema changes may be committed without explicit `graphics-artist-3d-model` sign-off. (ref: `architecture/asset-standards/3d-model-standards.md`, `architecture/asset-standards/2d-texture-standards.md`)
+  The 5 V1 vehicle types (`car_sedan`, `car_hatchback`, `car_suv`, `bus_standard`, `truck_cargo`) must each have an entry stub. **LOD2 threshold confirmed**: `height_floors >= 4` → `_lod2.b3d`; `height_floors <= 3` → billboard (3D-2). **Normal atlas bicubic mip before DXT5nm**: artist must apply bicubic downsampling to each mip level before DXT5nm encoding to preserve normal vector accuracy at lower mips (3D-3). **Vehicle sprite atlas upload path** (2D-1): `sprite_atlas.upload_path` MUST be `"linear"` — vehicle sprites encode RGBA8 roof-color swatches, not photographic diffuse; sRGB gamma decode is incorrect for palette swatches. See `architecture/asset-standards/2d-texture-standards.md` for the `_d` suffix exception. **`graphics-artist-3d-model` co-sign required**: no `vehicle_atlas_registry.json` schema changes may be committed without explicit `graphics-artist-3d-model` sign-off. (ref: `architecture/asset-standards/3d-model-standards.md`, `architecture/asset-standards/building-atlas-layout.md`, `architecture/asset-standards/2d-texture-standards.md`)
 - [ ] **`tools/music_sidecar_schema.json` stub** (`sound-dev-opensoftal`): deliver `tools/music_sidecar_schema.json` defining the required fields `bpm` (integer, positive) and `beats_per_bar` (integer, positive) for all music stem JSON sidecars. This schema is used by `validate_assets.py` Check #14. (ref: `architecture/audio-architecture/audio-asset-formats.md`)
 - [ ] **`shader_constants.h` correctness gate** (`graphics-dev-irrlicht`): verify `src/rendering/shader_constants.h` (delivered in Phase 2) contains the full `kTexUnit*` constant table AND the mandatory `static_assert(kTexUnitBillboard <= 15, ...)` guard. If either is missing, add it in Phase 4. Both must be present before Phase 5 begins. (ref: `architecture/asset-standards/2d-texture-standards.md`)
 - [ ] **`simulation_constants.h` Part B** (`gamedesign-lookandfeel`): lock the remaining simulation constants deferred from Phase 1 Part A. Part B adds constants to `src/simulation/simulation_constants.h` that depend on the service coverage and population specs:

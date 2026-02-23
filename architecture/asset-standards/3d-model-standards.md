@@ -248,15 +248,29 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
 
   ARTIST UV WARNING — V-axis convention: The atlas UV formula above uses OpenGL convention (V=0 at bottom-left of the atlas, V increases upward). Blender's UV editor shows V=0 at the top (V increases downward). Any artist authoring vehicle UV islands in Blender MUST apply `V_opengl = 1 - V_blender` before setting final UV coordinates in atlas space. Failure to apply this flip will place UV islands in the mirror-image vertical position, causing the vehicle to sample texture data from an adjacent atlas cell. The export validation script (check #10) uses OpenGL convention to verify coordinates — V-flipped Blender values will fail this check.
 
-  Format:
+  Format (canonical schema — must match `building-atlas-layout.md § Required JSON Schema`):
 
   ```json
   {
-    "atlas_file": "vehicles_diffuse_atlas_d.dds",
-    "grid": { "cols": 4, "rows": 4, "cell_size_px": 512 },
-    "normal_atlas_file": "vehicles_normal_atlas_n.dds",
-    "normal_atlas_grid": { "cols": 8, "rows": 8, "cell_size_px": 256 },
-    "_comment_normal_atlas": "normal atlas uses same row/col assignments but 8x8 grid, 256x256 cell_size_px",
+    "diffuse_atlas": {
+      "atlas_file": "vehicles_diffuse_atlas_d.dds",
+      "grid": { "cols": 4, "rows": 4, "cell_size_px": 512 },
+      "mip_levels": 4,
+      "upload_path": "srgb"
+    },
+    "normal_atlas": {
+      "atlas_file": "vehicles_normal_atlas_n.dds",
+      "grid": { "cols": 8, "rows": 8, "cell_size_px": 256 },
+      "mip_levels": 4,
+      "upload_path": "linear",
+      "_comment_normal_atlas": "same row/col assignments as diffuse but 8x8 grid; U=[C/8,(C+1)/8], V=[R/8,(R+1)/8]"
+    },
+    "sprite_atlas": {
+      "atlas_file": "vehicles_sprite_atlas_d.dds",
+      "grid": { "cols": 16, "rows": 16, "cell_size_px": 16 },
+      "mip_levels": 1,
+      "upload_path": "linear"
+    },
     "assignments": [
       { "vehicle_id": "car_sedan",     "row": 0, "col": 0 },
       { "vehicle_id": "car_hatchback", "row": 0, "col": 1 },
