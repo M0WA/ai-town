@@ -26,11 +26,26 @@ macro(aitown_add_tests TARGET)
     # the binary dir, which means GTEST_OUTPUT=xml:test_results/ writes XML into
     # build/test_results/ instead of <workspace>/test_results/.  The CI step that
     # collects test XML always looks in <workspace>/test_results/ on both Linux and
-    # Windows (multi-config MSBuild), so an incorrect working directory silently
-    # produces zero XML files and causes dorny/test-reporter to fail with
-    # "No test report files were found".
+    # Windows, so an incorrect working directory silently produces zero XML files
+    # and causes dorny/test-reporter to fail with "No test report files were found".
+    #
+    # DISCOVERY_MODE PRE_TEST: discover tests at ctest time, not at build time.
+    # With POST_BUILD (the default), CMake runs the test binary immediately after
+    # linking to enumerate test cases.  On Windows with vcpkg x64-windows triplet,
+    # GTest/GMock are built as shared DLLs (gtest.dll, gmock.dll) in
+    # build/vcpkg_installed/x64-windows/bin/ — NOT in build/ alongside the .exe.
+    # The post-build discovery runs before the CI step that adds vcpkg bin to PATH,
+    # so the test binary cannot load gtest.dll → exits with a DLL-not-found error →
+    # discovery produces empty output → ctest reports "No tests were found!!!" →
+    # tests silently skip and no XML is written.
+    # PRE_TEST defers discovery to ctest time (inside the test step), where the
+    # vcpkg bin directory has already been added to PATH.
+    # PRE_TEST was introduced in CMake 3.18; our cmake_minimum_required(3.21) satisfies
+    # this requirement on both Linux (ubuntu-latest runner) and Windows (VS2022 runner,
+    # CMake 3.28+).
     gtest_discover_tests(${TARGET}
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        DISCOVERY_MODE PRE_TEST
         DISCOVERY_TIMEOUT 30
         PROPERTIES TIMEOUT ${AITOWN_TEST_TIMEOUT}
         LABELS "${AITOWN_TEST_LABEL}"
