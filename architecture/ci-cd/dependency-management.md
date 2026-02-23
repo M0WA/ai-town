@@ -13,7 +13,9 @@
     "openal-soft",
     "libvorbis",
     "fmt",
-    "glew"
+    "glew",
+    "gtest",
+    "rapidcheck"
   ]
 }
 ```
@@ -154,29 +156,20 @@ Add the following step immediately after `cmake --build build` in the `build-lin
 
 A CMake install rule may also be needed to copy `default.mhr` from the vcpkg install tree into the binary directory on Linux builds, so that runtime lookups by the OpenAL Soft HRTF loader succeed relative to the executable path. This rule is parallel to the Windows post-build copy command already specified. The CI verification step catches the absence of this rule before a broken binary is promoted to integration tests.
 
-### FetchContent vs vcpkg Resolution
+### Testing Dependency Management
 
-The spec mandates vcpkg as the "mandatory dependency manager on all platforms." However, `googletest` and `RapidCheck` are fetched via CMake `FetchContent`. These two approaches coexist as follows:
+`googletest` and `rapidcheck` are managed via vcpkg (same as all other C++ dependencies):
 
-- **googletest and RapidCheck remain FetchContent** (they are build-time testing tools, not runtime library dependencies, and pinning them via FetchContent SHA is well-established practice)
-- **FetchContent source downloads must be cached in CI** via `actions/cache` keyed on the pinned SHA values. **FetchContent base dir must be outside the build tree** — set `FETCHCONTENT_BASE_DIR` in the CMake configure step to `.fetchcontent_cache` (a sibling of `build/`, not inside it). This prevents cache invalidation every time the build directory is cleared, and avoids the `build/_deps` path being path-dependent (CMake embeds absolute build-dir paths in `_deps`):
+- `vcpkg.json` lists `"gtest"` and `"rapidcheck"` as dependencies.
+- `CMakeLists.txt` uses `find_package(GTest CONFIG REQUIRED)` and `find_package(rapidcheck CONFIG REQUIRED)`.
+- CMake targets: `GTest::gtest_main`, `GTest::gmock` (namespaced — standard googletest export); `rapidcheck`, `rapidcheck_gtest` (bare names — rapidcheck upstream uses no NAMESPACE in install(EXPORT)).
+- `include(GoogleTest)` is retained — it is a CMake built-in module providing `gtest_discover_tests()`, independent of how googletest is obtained.
 
-  ```yaml
-  # CMake configure step — set FETCHCONTENT_BASE_DIR outside build tree:
-  - name: Configure CMake
-    run: cmake -B build -S . -DFETCHCONTENT_BASE_DIR=${{ github.workspace }}/.fetchcontent_cache ...
+**Why vcpkg (not FetchContent)**: Using vcpkg for all C++ dependencies — including test dependencies — eliminates git clone overhead at CMake configure time (FetchContent clones are sequential and add 30–60 s per CI job on cold cache). vcpkg binary caching extracts pre-built packages in seconds. All dependency versions are governed by the `builtin-baseline`, keeping the supply chain in one place.
 
-  # Cache step (runs BEFORE configure; restore-then-save on cache miss):
-  - name: Cache FetchContent downloads
-    uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0 — pin to SHA in production
-    with:
-      path: .fetchcontent_cache
-      key: fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
-  ```
+**rapidcheck_gtest target**: The vcpkg `rapidcheck` port installs `rapidcheck_gtest` as an INTERFACE library (headers only, no compiled code). It provides the `rapidcheck/gtest.h` integration header. The target does not declare a dependency on GTest — test targets that use `rapidcheck_gtest` must also link `GTest::gtest_main` or `GTest::gmock` explicitly (already the case in all CMakeLists.txt `target_link_libraries` calls).
 
-  The cache key includes `cmake/**` to invalidate the cache when googletest or RapidCheck SHA pins are updated in CMake include files. All FetchContent SHA pins (googletest `v1.14.0` tag, RapidCheck SHA `ff6af6fc...`) must reside in files covered by this glob — either in the root `CMakeLists.txt` or under `cmake/`. **`COMPILER_VERSION` must be included** — a FetchContent dependency pinned by SHA can produce ABI-incompatible binaries if the compiler version changes; a stale FetchContent cache from a prior compiler causes link errors. `COMPILER_VERSION` must be detected and written to `$GITHUB_ENV` in a **separate step that runs before the `actions/cache` step** — see Caching spec for the compiler-detect step ordering requirement. Consistent key format with caching.md is required: both files must use `fetchcontent-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}`.
-- This prevents re-cloning googletest and RapidCheck from GitHub on every CI run (adds 30–120 s and introduces GitHub availability as a failure mode)
-- The vcpkg mandate applies to all runtime dependencies (Irrlicht, OpenAL Soft). The `vcpkg.json` must NOT list `googletest` or `rapidcheck` — those remain FetchContent exclusively. **DLL verification step required before artifact upload**: the Windows CI job must verify that `soft_oal.dll` and `default.mhr` are present in the output directory before uploading artifacts — a missing DLL produces a binary that crashes on launch and would waste the 30-day artifact retention window. **PHASING**: The `soft_oal.dll` and `default.mhr` post-build CMake copy commands are not delivered until Phase 7. At Phase 0, the DLL verification step MUST be a **warning-only placeholder that always exits 0** (see `implementation/phase-0.md` for the exact YAML). This hard-fail form below is the **Phase 7+ version** — it must replace the Phase 0 placeholder at Phase 7 delivery. Committing the hard-fail form at Phase 0 breaks the Windows CI job because the files do not yet exist. Add the Phase 7+ hard-fail step:
+**DLL verification step required before artifact upload**: the Windows CI job must verify that `soft_oal.dll` and `default.mhr` are present in the output directory before uploading artifacts — a missing DLL produces a binary that crashes on launch and would waste the 30-day artifact retention window. **PHASING**: The `soft_oal.dll` and `default.mhr` post-build CMake copy commands are not delivered until Phase 7. At Phase 0, the DLL verification step MUST be a **warning-only placeholder that always exits 0** (see `implementation/phase-0.md` for the exact YAML). This hard-fail form below is the **Phase 7+ version** — it must replace the Phase 0 placeholder at Phase 7 delivery. Committing the hard-fail form at Phase 0 breaks the Windows CI job because the files do not yet exist. Add the Phase 7+ hard-fail step:
 
 ```yaml
 - name: Verify required DLLs are present
@@ -184,11 +177,12 @@ The spec mandates vcpkg as the "mandatory dependency manager on all platforms." 
   run: |
     # Use explicit if-block syntax — "Test-Path ... || exit 1" is PowerShell 7+ only;
     # GitHub Actions Windows runners default to PowerShell 5.1 where || is not supported.
-    if (-not (Test-Path "build/Release/soft_oal.dll")) {
+    # Ninja single-config: DLLs are at build/ (not build/Release/).
+    if (-not (Test-Path "build/soft_oal.dll")) {
       Write-Error "soft_oal.dll not found"
       exit 1
     }
-    if (-not (Test-Path "build/Release/default.mhr")) {
+    if (-not (Test-Path "build/default.mhr")) {
       Write-Error "default.mhr not found"
       exit 1
     }

@@ -6,14 +6,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ============================================================================
-# FETCHCONTENT BASE DIR — must be outside build tree to avoid cache invalidation
-# when the build directory is cleared. This ensures the FetchContent cache key
-# in CI (keyed on .fetchcontent_cache path, not build/_deps) works correctly.
-# ============================================================================
-set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/.fetchcontent_cache"
-    CACHE PATH "FetchContent download directory (outside build tree)")
-
-# ============================================================================
 # COVERAGE SUPPORT
 # ============================================================================
 option(ENABLE_COVERAGE "Enable gcov coverage instrumentation (Linux only)" OFF)
@@ -97,38 +89,15 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # ============================================================================
-# FETCHCONTENT — GTest and RapidCheck
-# All FetchContent_Declare and FetchContent_MakeAvailable calls MUST appear ONLY
-# in top-level CMakeLists.txt or files under cmake/. Placing them in subdirectory
-# CMakeLists.txt files causes FETCHCONTENT_BASE_DIR to be evaluated relative to
-# the subdirectory, defeating the .fetchcontent_cache placement.
+# TESTING DEPENDENCIES — GTest and RapidCheck (via vcpkg)
+# googletest: vcpkg port "gtest" — CMake targets: GTest::gtest, GTest::gtest_main,
+#             GTest::gmock, GTest::gmock_main (namespaced, same as FetchContent).
+# rapidcheck: vcpkg port "rapidcheck" — CMake targets: rapidcheck, rapidcheck_gtest
+#             (bare names — upstream installs(EXPORT ...) has no NAMESPACE argument).
+#             rapidcheck_gtest is an INTERFACE library (headers only); no GTest dep.
 # ============================================================================
-include(FetchContent)
-
-# Google Test v1.14.0 — SHA-pinned commit (NEVER use the mutable tag string "v1.14.0"
-# as GIT_TAG — it can be force-pushed; always use the full 40-character commit SHA).
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG        f8d7d77c06936315286eb55f8de22cd23c188571  # v1.14.0
-)
-# Required on Windows to prevent CRT mismatch (MSVC shared vs. static CRT).
-# Must appear AFTER FetchContent_Declare and BEFORE FetchContent_MakeAvailable.
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
-
-# RapidCheck — pinned SHA (no versioned tag available; always pin to specific commit SHA)
-FetchContent_Declare(
-    rapidcheck
-    GIT_REPOSITORY https://github.com/emil-e/rapidcheck.git
-    GIT_TAG        b96a4e626ef4c7348dcd16c500353c2f997a9f3f  # pinned SHA
-)
-# RC_ENABLE_GTEST enables the rapidcheck_gtest CMake target.
-# Omitting it means rapidcheck_gtest is unavailable at configure time and all
-# simulation/audio tests that use rc::gtest::check fail to configure.
-# Must appear AFTER FetchContent_Declare and BEFORE FetchContent_MakeAvailable.
-set(RC_ENABLE_GTEST ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(rapidcheck)
+find_package(GTest CONFIG REQUIRED)
+find_package(rapidcheck CONFIG REQUIRED)
 
 # ============================================================================
 # TESTING INFRASTRUCTURE

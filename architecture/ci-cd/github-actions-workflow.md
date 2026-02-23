@@ -128,7 +128,14 @@ This step runs as the **first named step** in the `build-linux` job — before v
   ```
 
   Note: label names are `integration` and `requires-opengl` per the Testing Strategy label conventions. **Do not use `--gtest_output` as a ctest flag** — it is a GTest binary flag and CTest silently ignores it. **`AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` are required on the integration test step** — integration tests use `EDT_NULL` which suppresses Irrlicht window creation, but `AudioSystem` initialization still attempts to open an audio device; `ALSOFT_DRIVERS=null` forces the null driver and prevents failures on headless runners without audio hardware. The unit test step includes `AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` as a defensive guard — these are zero-cost to apply and prevent accidental device instantiation from failing unit tests as the codebase grows. The OpenGL test step requires a real OpenGL context (via xvfb) but uses `ALSOFT_DRIVERS=null` to suppress audio device initialization on headless runners; `AITOWN_HEADLESS=1` must NOT be set for the OpenGL test step — it causes application code to skip `IrrlichtDevice` initialization, which means tests in the `requires-opengl` bucket that explicitly create `EDT_OPENGL` devices would have those paths bypassed, producing false green results. **`coverage-linux`** is the separate job that enables `-DENABLE_COVERAGE=ON` (see below).
-- **`build-linux` ccache setup**: Include `hendrikmuhs/ccache-action` before the CMake configure step (Linux job only — `if: runner.os == 'Linux'`; ccache does not support `cl.exe` on Windows). Add `-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache` to the CMake configure step. See `caching.md` for the authoritative platform-specific caching rules, ccache key format, and action SHA.
+- **CMakePresets.json**: All three CI jobs use named presets defined in `CMakePresets.json` at the repo root instead of long `-D` flag chains:
+  - `ci-linux` — Ninja generator, `ENABLE_COVERAGE=OFF`, ccache launchers (`build-linux` job)
+  - `ci-linux-coverage` — inherits `ci-linux`, `ENABLE_COVERAGE=ON` (`coverage-linux` job)
+  - `ci-windows` — Ninja generator, `CMAKE_BUILD_TYPE=Release`, `ENABLE_COVERAGE=OFF` (`build-windows` job)
+
+  Configure steps call `cmake --preset <name>` instead of `cmake -B build -S . -G ... -D...`. Local development: set `VCPKG_ROOT` then `cmake --preset ci-linux` (add `-DVCPKG_OVERLAY_PORTS=vcpkg-overlays` if using gcc-12 fallback).
+
+- **`build-linux` ccache setup**: Include `hendrikmuhs/ccache-action` before the CMake configure step (Linux job only — `if: runner.os == 'Linux'`; ccache does not support `cl.exe` on Windows). The `ci-linux` and `ci-linux-coverage` CMake presets include `CMAKE_C_COMPILER_LAUNCHER=ccache` and `CMAKE_CXX_COMPILER_LAUNCHER=ccache` — no additional `-D` flags are needed in the configure step. See `caching.md` for the authoritative platform-specific caching rules, ccache key format, and action SHA.
 
   **`build-linux` job** — use the standard key (no suffix):
 
@@ -152,7 +159,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
   The `-coverage` suffix is mandatory. GCC emits different object code when `-fprofile-arcs -ftest-coverage` is active — coverage-instrumented objects are ABI-incompatible with non-instrumented objects. Using the same ccache key for both jobs would cause stale-cache hits that silently mix instrumented and non-instrumented objects in the coverage build, producing incorrect or missing `.gcda` output. See `caching.md` for the full rationale and authoritative platform-specific caching rules.
 
-- **Windows job** (`windows-latest`): build step; then create the test results directory and run tests — use **explicit label filtering** to skip `requires-opengl` tests (no display available on Windows runners). The `requires-opengl` label is Linux-only (`xvfb-run`); Windows integration tests run under `AITOWN_HEADLESS=1`:
+- **Windows job** (`windows-latest`): uses the Ninja generator (not MSBuild) via the `ci-windows` CMake preset. The `ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c` (v1.13.0) action runs `vcvarsall.bat x64` to place `cl.exe` and `link.exe` on `PATH` before `cmake --preset ci-windows` — Ninja does not auto-detect MSVC. DLL output lands at `build/` (not `build/Release/`) because Ninja is single-config and `CMAKE_BUILD_TYPE=Release` is set in the preset. Build step: `cmake --build build --parallel` (no `-C Release` needed for Ninja single-config, though `-C Release` is harmless and can be kept for ctest consistency). Then create the test results directory and run tests — use **explicit label filtering** to skip `requires-opengl` tests (no display available on Windows runners). The `requires-opengl` label is Linux-only (`xvfb-run`); Windows integration tests run under `AITOWN_HEADLESS=1`:
 
   ```yaml
   - name: Run unit tests (no display)
@@ -255,12 +262,13 @@ This step runs as the **first named step** in the `build-linux` job — before v
       path: coverage_html/
       retention-days: 14
   # After DLL verification (Windows job, on push to main only):
+  # Ninja single-config: executable is at build/aitown.exe (not build/Release/aitown.exe).
   - name: Upload Windows binary
     if: github.ref == 'refs/heads/main'
     uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
     with:
       name: aitown-windows-${{ github.sha }}
-      path: build/Release/
+      path: build/aitown.exe
       retention-days: 30
   ```
 
@@ -272,13 +280,13 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
   1. Install system dependencies (`apt-get`)
   2. Detect compiler version (write `COMPILER_VERSION` to `$GITHUB_ENV`)
-  3. `actions/cache` for vcpkg and FetchContent (reads `COMPILER_VERSION` from step 2)
-  4. `lukka/run-vcpkg` — install vcpkg packages
+  3. `actions/cache` for vcpkg (reads `COMPILER_VERSION` from step 2)
+  4. `lukka/run-vcpkg` — install vcpkg packages (includes gtest and rapidcheck via vcpkg.json)
   5. `hendrikmuhs/ccache-action` — set up ccache with `-coverage` key suffix
-  6. CMake configure (`cmake -B build ... -DENABLE_COVERAGE=ON`)
+  6. CMake configure (`cmake --preset ci-linux-coverage`)
   7. CMake build (`cmake --build build`)
-  8. **Verify integration test routing (non-zero discovery)** — after build, before any ctest
-  9. **Verify requires-opengl test routing (non-zero discovery)** — after build, before any ctest
+  8. **Verify requires-opengl test routing (non-zero discovery)** — after build, before any ctest
+  9. **Verify integration test routing (non-zero discovery)** — after build, before any ctest
   10. Run unit tests ctest step
   11. Run integration tests ctest step
   12. Run OpenGL tests ctest step (xvfb)
