@@ -79,7 +79,7 @@ public:
 
   The concrete `IEventReceiver` implementation in `src/platform/` translates `SEvent` to `InputEvent` before forwarding to `CameraController`. Test files in `tests/ui/` construct `InputEvent` structs directly — no Irrlicht headers required. `CameraController::OnInputEvent(const InputEvent&)` replaces `IEventReceiver::OnEvent(const SEvent&)` in the `CameraController` public interface.
 
-  **Required Named Test Cases** — all 8 test cases must be authored in `tests/ui/camera_controller_test.cpp` and registered under the `ui_tests` CMake target (label `unit`). Per `architecture/ui-ux/camera-controls.md`, pitch clamp tests must use exact equality assertions (`EXPECT_EQ` / `EXPECT_FLOAT_EQ`) rather than strictly-less-than comparisons, because the spec defines inclusive bounds using `std::clamp` semantics:
+  **Required Named Test Cases** — all 9 test cases must be authored in `tests/ui/camera_controller_test.cpp` and registered under the `ui_tests` CMake target (label `unit`). Per `architecture/ui-ux/camera-controls.md`, pitch clamp tests must use exact equality assertions (`EXPECT_EQ` / `EXPECT_FLOAT_EQ`) rather than strictly-less-than comparisons, because the spec defines inclusive bounds using `std::clamp` semantics:
 
   Note: `MouseWheel` drives zoom distance ONLY — it MUST NOT be used in pitch-clamp test cases, as scroll wheel events do not affect pitch and produce a test that never reaches the pitch clamp boundary.
 
@@ -108,6 +108,7 @@ public:
      that distinguishes a correct implementation from one with a latent re-enable defect.
      Use `EXPECT_EQ` for bool assertions; use `EXPECT_NE` for camera position change.
   8. `CameraController_EdgeScroll_DisabledByDefaultInWindowed` — construct `CameraController` with `startInFullscreen=false`; immediately call `isEdgeScrollEnabled()` without any intervening call to `setEdgeScrollEnabled()`; assert the return value is `false`. This is the symmetric counterpart to test case 6 and confirms the windowed-default rule from `architecture/ui-ux/camera-controls.md`.
+  9. `CameraController_KeyboardPanIgnoresSensitivity` — **(Phase 8 enforcement point)** construct `CameraController` with a non-unit sensitivity multiplier (e.g., `sensitivityMultiplier=2.0`); inject a keyboard pan event (e.g., `InputEvent{Type::KeyDown, key=KEY_A}` or the left-pan hotkey from `architecture/ui-ux/hotkey-scheme.md`); assert that the camera position delta equals the expected **unscaled** pan step, confirming that keyboard pan speed is NOT multiplied by `sensitivityMultiplier`. Mouse drag pan (RMB, MMB) applies `sensitivityMultiplier`; keyboard pan must not. This test must pass from Phase 1 to establish the invariant before Phase 8 adds the sensitivity slider. Placing the test here ensures that the Phase 8 sensitivity implementation cannot accidentally apply the multiplier to keyboard pan without breaking this test.
 - **`QueryPanel` testability**: `QueryPanel::computePanelPosition(int cursorX, int cursorY, Rect tileBounds)` must be a pure function (no side effects, no Irrlicht dependency) returning a `Rect`. Required test cases:
   1. **Primary placement**: cursor at (100, 100) with no tile overlap → verify panel placed at (140, 140).
   2. **Fallback placement**: primary position overlaps tile bounds → verify panel moves to above-left fallback position.
