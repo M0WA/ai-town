@@ -488,13 +488,32 @@ add_executable(opengl_tests
     tests/rendering/shader_stub_compile_test.cpp  # Phase 1+2: shader stub compile check
     tests/rendering/lod_swap_smoke_test.cpp    # Phase 2: LOD swap grab/drop contract smoke test
 )
+# Irrlicht and GLEW::GLEW MUST be linked directly: shader_stub_compile_test.cpp includes
+# <irrlicht.h> and <GL/glew.h>; aitown_render links both PRIVATE so their include paths
+# do NOT propagate to consumers (same rationale as integration_tests linking Irrlicht directly).
 target_link_libraries(opengl_tests PRIVATE
     aitown_render
+    Irrlicht
+    GLEW::GLEW
     GTest::gtest_main
     GTest::gmock
     rapidcheck
     rapidcheck_gtest
 )
+# Irrlicht transitive deps (Linux only) — same set as aitown executable.
+# The adrido/irrlicht-vcpkg port does NOT export INTERFACE_LINK_LIBRARIES for these.
+# Required when system dynamic libs (libjpeg, libpng, etc.) are absent (e.g. devcontainer).
+if(UNIX AND NOT APPLE)
+    target_link_libraries(opengl_tests PRIVATE
+        JPEG::JPEG
+        PNG::PNG
+        ZLIB::ZLIB
+        BZip2::BZip2
+    )
+    if(XXFV86VM_LIB)
+        target_link_libraries(opengl_tests PRIVATE ${XXFV86VM_LIB})
+    endif()
+endif()
 # src/interfaces/   — IRenderer.h propagated via INTERFACE from aitown_render, but
 #                     explicit belt-and-suspenders path ensures #include "vec3.h" inside
 #                     IRenderer.h resolves even if aitown_render's INTERFACE scope is refactored.
