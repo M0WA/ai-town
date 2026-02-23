@@ -15,7 +15,10 @@
 // Consumers that need the full Irrlicht API must include <irrlicht.h> themselves.
 namespace irr {
     class IrrlichtDevice;
-    namespace video { class IVideoDriver; }
+    namespace video {
+        class IVideoDriver;
+        class IShaderConstantSetCallBack;
+    }
     namespace scene { class ISceneManager; }
 }
 
@@ -38,6 +41,12 @@ public:
     int   getMaxTextureSize()        const { return m_maxTextureSize; }
     bool  isSRGBTextureSupported()   const { return m_srgbTextureSupported; }
     float getMaxAnisotropy()         const { return m_maxAnisotropy; }
+
+    // Loads a GLSL shader pair via addHighLevelShaderMaterialFromFiles().
+    // Null-checks getGPUProgrammingServices() before calling — returns -1 if unavailable.
+    // cb: raw heap pointer; caller must drop() after this call (Irrlicht calls grab() internally).
+    int loadShader(const char* vsFile, const char* fsFile,
+                   irr::video::IShaderConstantSetCallBack* cb);
 
 private:
     irr::IrrlichtDevice* m_device{nullptr};
