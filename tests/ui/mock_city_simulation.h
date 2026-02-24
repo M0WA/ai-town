@@ -27,7 +27,7 @@ public:
     MOCK_METHOD(float, getNextUnlockThreshold,   (Difficulty d), (const, override));
 
     // City rating:
-    MOCK_METHOD(int, getCityRating, (), (const, override));
+    MOCK_METHOD(CityRatingTier, getCityRating, (), (const, override));
 
     // Demand pressure — UI display aggregate (post-floor, post-bootstrap, post-combination).
     // Used by HUD demand bars. NOT the same as getTrafficDemandFactor (see below).

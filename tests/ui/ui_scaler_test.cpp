@@ -212,3 +212,11 @@ TEST(UIScalerTest, UIScaler_MouseBeyondVirtualWidth_VirtualX_ClampedToMax)
     EXPECT_EQ(vp.y, 540)
         << "Physical Y within range must be unchanged (540)";
 }
+
+// ===========================================================================
+// Test 7: UIScaler_MouseInBottomBlackBar_VirtualY_ClampedToMax
+//
+// Phase 3 compile-only stub. Real assertion is a Phase 6 deliverable.
+// ===========================================================================
+// Phase 3 compile-only stub. Real assertion is a Phase 6 deliverable.
+TEST(UIScalerTest, UIScaler_MouseInBottomBlackBar_VirtualY_ClampedToMax) { SUCCEED(); }

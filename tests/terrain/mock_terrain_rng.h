@@ -3,19 +3,16 @@
 #include <random>
 #include <cstdint>
 
-// MockTerrainRNG — handwritten test double for ITerrainRNG.
-// Unlike the four tests/simulation/ shared mocks which use GMock,
-// MockTerrainRNG uses a real RNG engine and tracks reseed count.
-// Used by TerrainGenerator_AlwaysTerminates_WithinReSeedLimit property test
-// to verify the reseed count stays <= 100.
-// Source location: tests/terrain/ (not tests/simulation/ — terrain-specific).
-// Header-only — no .cpp file.
+// Manual stub — NOT a GMock mock. Uses mt19937_64 for deterministic test sequences.
+// Do NOT replace with MOCK_METHOD.
+// reseedCount() tracks the number of times reseed() has been called —
+// used by TerrainGenerator_AlwaysTerminates_WithinReSeedLimit to verify <= 100 reseeds.
 class MockTerrainRNG : public ITerrainRNG {
 public:
-    explicit MockTerrainRNG(uint64_t seed) : m_rng(seed) {}
+    explicit MockTerrainRNG(uint64_t seed = 42) : m_rng(seed), m_reseedCount(0) {}
 
     float nextFloat() override {
-        return std::uniform_real_distribution<float>(0.f, 1.f)(m_rng);
+        return std::uniform_real_distribution<float>(0.0f, 1.0f)(m_rng);
     }
 
     int nextInt(int min, int max) override {
@@ -31,5 +28,5 @@ public:
 
 private:
     std::mt19937_64 m_rng;
-    int m_reseedCount{0};
+    int m_reseedCount;
 };

@@ -50,7 +50,7 @@ public:
     virtual float getNextUnlockThreshold(Difficulty d) const = 0; // Called by Density Unlock Preview Tooltip
 
     // City rating — called by HUD to display star rating:
-    virtual int getCityRating() const = 0;  // 0-5 stars; called by HUD city-rating display
+    virtual CityRatingTier getCityRating() const = 0;  // called by HUD city-rating display; tier transitions trigger stinger_milestone
 
     // Demand pressure — called by HUD demand pressure bar per budget tick.
     // Returns the city-wide EFFECTIVE demand for the given zone type as a float in [0.0, 1.0].

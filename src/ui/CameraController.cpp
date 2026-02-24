@@ -13,8 +13,10 @@ static vec3 toVec3(const irr::core::vector3df& v) {
     return vec3{v.X, v.Y, v.Z};
 }
 
-CameraController::CameraController(irr::scene::ICameraSceneNode* camera, bool startInFullscreen)
+CameraController::CameraController(irr::scene::ICameraSceneNode* camera, bool startInFullscreen,
+                                   const KeyBindings& bindings)
     : m_camera(camera)
+    , m_bindings(bindings)
     , m_edgeScrollEnabled(startInFullscreen)
 {
     // startInFullscreen=true → edge-scroll ON (fullscreen default)
