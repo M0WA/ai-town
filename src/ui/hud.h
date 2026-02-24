@@ -34,5 +34,5 @@ private:
     ICitySimulation*   m_sim{nullptr};
     IClock*            m_clock{nullptr};
     BudgetDetailPanel* m_budgetDetail{nullptr};
-    UIElementHandle    m_unsavedDotHandle{0};  // kInvalidUIElement = 0; Phase 6 creates element
+    UIElementHandle    m_unsavedDotHandle{kInvalidUIElement};  // Phase 6 creates element
 };
