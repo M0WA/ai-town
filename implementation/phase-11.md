@@ -39,8 +39,8 @@ Deliver complete save/load, main menu game flow, scenario mode win/loss conditio
 | `gamedesign-lookandfeel` | JSON serialization schema, save slot management, Quit-to-Desktop unsaved-changes modal, game-over consequence tuning, scenario win-condition logic |
 | `gamedesign-ux` | Main menu flow integration, game-over and win modal UI, HUD goal tracker |
 | `graphics-dev-irrlicht` | Loading screen integration (spinner, cancel affordance, `TerrainSystem` flush call sequence) |
-| `sound-dev-opensoftal` | Stinger dispatch verification: confirm `stinger_milestone` fires only at City Rating tier transitions, NOT at raw population milestones (100K toast fires notification but NOT stinger); verify `stinger_game_over` source (sources[57]) is evictable in V1 and is not checked in DUCKED→RELEASING gate |
-| `test-dev-cpp` | Save system unit tests (`SaveSystem_RoundTrip`, `SaveSystem_CorruptedJSON`, `SaveSystem_SchemaVersion`, `SaveSystem_AutoSave`, `SaveSystem_AutoSave_SuspendedWhilePaused`, `SaveSystem_AutoSave_SuspendedDuringModal`) |
+| `sound-dev-opensoftal` | Stinger dispatch verification: confirm `stinger_milestone` fires only at City Rating tier transitions, NOT at raw population milestones (100K toast fires notification but NOT stinger); verify `stinger_game_over` source (sources[57]) is idle in V1 (allocated by `alGenSources(62, ...)` but never acquired by any code path) and is not checked in DUCKED→RELEASING gate |
+| `test-dev-cpp` | Save system unit tests (`SaveSystem_RoundTrip_PreservesFullCityState`, `SaveSystem_CorruptedJSON_ReturnsError`, `SaveSystem_SchemaVersion_MismatchIsRejected`, `SaveSystem_AutoSave_TriggersAtCorrectIntervals`, `SaveSystem_RoundTrip_CounterResetBehavior_AfterLoad`, `SaveSystem_AutoSave_SuspendedWhilePaused`, `SaveSystem_AutoSave_SuspendedDuringModal`) |
 
 > **Note**: Platform-specific save path resolution (`~/.config/aitown/saves/` on Linux, `%APPDATA%\aitown\saves\` on Windows) is documented in `architecture/game-design/save-system.md` and is owned by `gamedesign-lookandfeel` as part of the JSON serialization deliverable.
 
