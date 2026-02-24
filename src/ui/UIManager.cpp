@@ -80,9 +80,9 @@ bool UIManager::onEvent(const InputEvent& event) {
     }
 
     // Priority 3: Minimap carve-out.
-    // Phase 6: hit-test event.x/event.y against m_minimap->getBounds().
-    // If the cursor is inside the minimap bounds, route to minimap and return true.
-    // Stub: no-op (minimap getBounds() returns zero rect).
+    // UX-4: call getBounds() now so the interface contract is structurally verified
+    // at compile time. Phase 6 uses the result for hit-testing.
+    (void)m_minimap->getBounds();  // Phase 6: if (minimapBounds.contains(event.x, event.y)) route to minimap
 
     // Priority 4: Modal dialog (when active).
     // When a blocking modal is active, all non-focus input is captured here.
@@ -115,7 +115,7 @@ void UIManager::draw() {
     m_pauseMenu->draw();      // slot 7 — pause menu overlay
     m_settings->draw();       // slot 8 — settings panel
     // slot 9 — background scrim (visible only when a modal is active)
-    if (m_modal->isActive()) {
+    if (hasActiveModal()) {
         m_backend->setElementVisible(m_scrimHandle, true);
     }
     m_modal->draw();          // slot 10 — modal dialog (topmost)
@@ -132,6 +132,8 @@ void UIManager::update(float /*realDeltaSeconds*/) {
 
     // GD-H3 bridge: poll deficit streak for progressive warning toasts.
     // Phase 6 will use the delta to fire notifications at streak transitions.
+    // Null guard: constructor comment says "may be null" (test seam).
+    if (!m_sim) return;
     int deficitStreak = m_sim->getConsecutiveDeficitMonths();
     // Phase 6: compare deficitStreak vs m_lastKnownDeficitStreak and trigger
     // notifications or transitionToGameOver() at streak >= 3 (Scenario only).
@@ -192,6 +194,5 @@ void UIManager::setUnsavedChanges(bool value) {
 }
 
 bool UIManager::hasActiveModal() const {
-    // Phase 6: return m_modal->isActive();
-    return false;
+    return m_modal && m_modal->isActive();
 }

@@ -23,10 +23,14 @@ TEST(IrrlichtUIBackendTest, AddStaticText_ReturnsNonZeroHandle) {
         irr::core::dimension2d<irr::u32>(640, 480));
     ASSERT_NE(device, nullptr) << "EDT_NULL device creation failed";
 
-    IrrlichtUIBackend backend(device);
-    UIElementHandle handle = backend.addStaticText("Test", 0, 0, 100, 20);
-    EXPECT_NE(handle, static_cast<UIElementHandle>(0))
-        << "addStaticText must return a non-zero handle";
+    {
+        // Scope backend so its destructor runs before device->drop().
+        // Prevents use-after-free when Phase 8 implements real Irrlicht teardown.
+        IrrlichtUIBackend backend(device);
+        UIElementHandle handle = backend.addStaticText("Test", 0, 0, 100, 20);
+        EXPECT_NE(handle, static_cast<UIElementHandle>(0))
+            << "addStaticText must return a non-zero handle";
+    }  // backend destructor fires here
 
     device->drop();
 }

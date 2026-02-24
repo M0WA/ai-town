@@ -34,10 +34,11 @@ TEST(ManualRNG, EmptyFloatSeq_ThrowsAtConstruction) {
     EXPECT_THROW((ManualRNG{{1}, {}}), std::invalid_argument);
 }
 
-// Test 6: nextInt throws when called with exhausted sequence (strict mode default)
-// In strict mode, exhausted int sequence throws std::logic_error.
-TEST(ManualRNG, NextInt_Exhausted_ThrowsLogicError) {
-    ManualRNG rng{{5}, {0.1f}};
-    rng.nextInt(0, 100);  // consumes the only int
-    EXPECT_THROW(rng.nextInt(0, 100), std::logic_error);
+// Test 6: nextInt throws std::out_of_range when stored value is outside [min, max].
+// Tests the range-check branch in nextInt() (lines 54-56 of manual_rng.h):
+//   if (v < min || v > max) throw std::out_of_range(...)
+// Stored value 150 exceeds max 100 — the range guard fires at call time, not at construction.
+TEST(ManualRNG, NextInt_OutOfRange_ThrowsAtCallTime) {
+    ManualRNG rng{{150}, {0.5f}};
+    EXPECT_THROW(rng.nextInt(0, 100), std::out_of_range);
 }

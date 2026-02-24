@@ -174,7 +174,7 @@ Establish all cross-cutting interface contracts (`ICitySimulation`, `IUIBackend`
 
   ```cmake
   add_executable(simulation_tests
-      tests/simulation/smoke_test.cpp                 # Phase 0 — must be preserved
+      tests/simulation/simulation_smoke_test.cpp      # Phase 0 — must be preserved
       tests/simulation/manual_rng_test.cpp            # Phase 3 addition
       tests/simulation/city_simulation_stub_test.cpp  # Phase 3 addition
   )
