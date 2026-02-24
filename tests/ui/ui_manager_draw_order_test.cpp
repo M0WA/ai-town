@@ -35,6 +35,7 @@
 #include <gmock/gmock.h>
 #include <memory>
 
+using ::testing::AnyNumber;
 using ::testing::InSequence;
 using ::testing::NiceMock;
 using ::testing::_;
@@ -106,6 +107,10 @@ TEST_F(UIManagerDrawOrderTest, DrawOrder_AllSlots_CorrectZOrder) {
 // This is a targeted ordering assertion that would catch any reordering of
 // the trailing slots in UIManager::draw().
 TEST_F(UIManagerDrawOrderTest, DrawOrder_ModalFiresAfterNotificationPauseSettings) {
+    // Absorb calls to sentinels not under test (slots 1-5 and scrim).
+    // Registered before InSequence so they are not ordered; specific
+    // InSequence expectations below take priority (LIFO matching).
+    EXPECT_CALL(backend_, setElementVisible(_, _)).Times(AnyNumber());
     InSequence seq;
     EXPECT_CALL(backend_, setElementVisible(kNotificationSentinel, true));
     EXPECT_CALL(backend_, setElementVisible(kPauseMenuSentinel,    true));
@@ -120,6 +125,8 @@ TEST_F(UIManagerDrawOrderTest, DrawOrder_ModalFiresAfterNotificationPauseSetting
 // TaxPanel (slot 4). This covers the non-obvious ordering where kHudSentinel
 // (0xDEAD0106u) occupies draw slot 3 despite its sentinel value suggesting slot 6.
 TEST_F(UIManagerDrawOrderTest, DrawOrder_HudBetweenMinimapAndTaxPanel) {
+    // Absorb calls to sentinels not under test (slots 1, 5-10).
+    EXPECT_CALL(backend_, setElementVisible(_, _)).Times(AnyNumber());
     InSequence seq;
     EXPECT_CALL(backend_, setElementVisible(kMinimapSentinel,  true));
     EXPECT_CALL(backend_, setElementVisible(kHudSentinel,      true));
@@ -133,6 +140,8 @@ TEST_F(UIManagerDrawOrderTest, DrawOrder_HudBetweenMinimapAndTaxPanel) {
 // the draw order, which is unconditional in the Phase 3 UIManager::draw() body.
 TEST_F(UIManagerDrawOrderTest, DrawOrder_PauseMenuVisible_SlotSevenFiresAfterNotification) {
     ui_->transitionToPaused();  // no-op stub in Phase 3
+    // Absorb calls to sentinels not under test (slots 1-5, 8, 10).
+    EXPECT_CALL(backend_, setElementVisible(_, _)).Times(AnyNumber());
     InSequence seq;
     EXPECT_CALL(backend_, setElementVisible(kNotificationSentinel, true));
     EXPECT_CALL(backend_, setElementVisible(kPauseMenuSentinel,    true));
