@@ -51,7 +51,13 @@ public:
   3. `UIScaler_PillarboxOffset_UnprojectsCenterCorrectly`: construct with (1920, 1080, 1440, 1080, 240, 0); unproject (960, 540) → virtual (960, 540).
   4. `UIScaler_MouseInTopBlackBar_VirtualY_ClampedToZero`: construct with (1920, 1080, 1280, 720, 0, 90); unproject (640, 80) → virtual y clamped to 0 (actual_y=80 < offsetY=90 produces negative pre-clamp virtual_y, clamped to 0).
   5. `UIScaler_GetViewportRect_ReturnsCorrectOffsets`: construct with (1920, 1080, 1280, 720, 0, 90); `getViewportRect()` returns {x:0, y:90, w:1280, h:720}.
-- **`NotificationManager` testability**: `NotificationManager` must accept `IUIBackend*` for element creation, `ICitySimulation*` for auto-pause injection and deficit-streak queries, and `IClock*` for dismiss-after-5s timing. The correct constructor signature is: `NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock)`. **Source location**: `ISimulationPauser.h` lives in **`src/interfaces/`** (NOT `src/simulation/`) — placing it in `src/simulation/` creates a latent circular dependency when `src/ui/` headers include it (`src/ui/` → `src/simulation/` is a prohibited dependency direction; UI must not depend on simulation headers). `src/interfaces/` is a dependency-free common header directory that both `src/simulation/` and `src/ui/` may include. `MockCitySimulation` lives in `tests/ui/mock_city_simulation.h` (used by UI tests that need to verify pause/resume calls and simulation queries without pulling in `CitySimulation`). Tests inject `MockUIBackend` + `MockCitySimulation` + `ManualClock` and call `update()` with controlled time advances to verify queue ordering, auto-dismiss timing, CRITICAL vs Normal band placement, and log-fallback behavior. `NotificationManager` exposes a public `dismissCriticalToast(UIElementHandle handle)` method — this is the production API called by the UI event handler when the player clicks, presses Enter, or presses Delete on a CRITICAL toast; it is not a test-only backdoor. Tests call this method to simulate player dismissal. Additional required test cases:
+- **`NotificationManager` testability**: **CRITICAL — Constructor parameter type is `ICitySimulation*` (NOT `ISimulationPauser*`).** The correct constructor signature is: `NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock)`. **Reason**: `NotificationManager` calls `m_sim->setPaused(true)` on CRITICAL toast auto-pause; `setPaused()` is inherited from `ISimulationPauser`. `UIManager` already holds `m_sim` as `ICitySimulation*`, so no downcast is needed. `NotificationManager` does NOT call `getConsecutiveDeficitMonths()`; `UIManager::update()` is the exclusive polling bridge for deficit-month-based toast dispatch. If a Phase 1/2 stub mistakenly used `ISimulationPauser*`, Phase 3 MUST correct it to `ICitySimulation*`.
+
+  **Interface inheritance contract** (required for type safety): `ICitySimulation` extends `ISimulationPauser` (defined in `src/interfaces/ICitySimulation.h` line 339: `class ICitySimulation : public ISimulationPauser {`). This allows `NotificationManager` to accept `ICitySimulation*` and safely call inherited `setPaused(bool)` without an explicit cast. Tests that construct `NotificationManager` with a mock must use `NiceMock<MockCitySimulation>` (which implements both `ICitySimulation` and `ISimulationPauser` via inheritance), NOT `MockSimulationPauser` alone (which only implements `ISimulationPauser` and cannot be passed as `ICitySimulation*`).
+
+  **Source locations**: `ISimulationPauser.h` lives in `src/interfaces/` (NOT `src/simulation/` — placing it in `src/simulation/` creates a latent circular dependency when `src/ui/` headers include it, violating the `src/ui/` → `src/simulation/` prohibition). `src/interfaces/` is a dependency-free common header directory that both `src/simulation/` and `src/ui/` may safely include. `MockCitySimulation` lives in `tests/ui/mock_city_simulation.h` (used by UI tests that need to verify pause/resume calls and simulation queries without pulling in the concrete `CitySimulation`).
+
+  **Test setup**: Tests inject `MockUIBackend` + `NiceMock<MockCitySimulation>` + `ManualClock` and call `update()` with controlled time advances to verify queue ordering, auto-dismiss timing, CRITICAL vs Normal band placement, and log-fallback behavior. `NotificationManager` exposes a public `dismissCriticalToast(UIElementHandle handle)` method — this is the production API called by the UI event handler when the player clicks, presses Enter, or presses Delete on a CRITICAL toast; it is not a test-only backdoor. Tests call this method to simulate player dismissal. Additional required test cases:
   - `CriticalToast_OnPost_AutoPausesCalled`: posting a CRITICAL toast calls `setPaused(true)` exactly once when the CRITICAL queue transitions from empty to non-empty.
   - `CriticalToast_OnLastDismiss_NoAutoResume`: calling `dismissCriticalToast(handle)` on the last remaining CRITICAL toast does **NOT** call `setPaused(false)` — auto-resume requires explicit player unpause. Verify `setPaused(false)` is never called by `NotificationManager` on CRITICAL toast dismissal.
   - `CriticalToast_SecondPost_NoDoublePause`: posting a second CRITICAL toast while one is already active does NOT call `setPaused(true)` again.
@@ -343,7 +349,7 @@ public:
       virtual void setSpeed(SpeedMultiplier speed) = 0;
       // State-query methods used by UIManager panels:
       virtual bool isPaused() const = 0;
-      virtual SpeedMultiplier getSpeed() const = 0;
+      virtual SpeedMultiplier getSpeedMultiplier() const = 0;
 
       // Economy/treasury queries — called by HUD resource bar and Budget Detail Panel:
       virtual float getTreasuryBalance() const = 0;          // Called by HUD resource bar to display treasury balance
@@ -423,7 +429,7 @@ public:
       MOCK_METHOD(void, setPaused, (bool paused), (override));
       MOCK_METHOD(void, setSpeed, (SpeedMultiplier speed), (override));
       MOCK_METHOD(bool, isPaused, (), (const, override));
-      MOCK_METHOD(SpeedMultiplier, getSpeed, (), (const, override));
+      MOCK_METHOD(SpeedMultiplier, getSpeedMultiplier, (), (const, override));
 
       // Economy/treasury queries:
       MOCK_METHOD(float, getTreasuryBalance, (), (const, override));          // Called by HUD resource bar to display treasury balance

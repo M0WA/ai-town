@@ -260,6 +260,21 @@ private:
 };
 ```
 
+## IAudioSystem Header Include Requirements
+
+The file `src/interfaces/audio_system.h` must include the following headers:
+
+```cpp
+#include "simulation_types.h"    // Required: SimSpeed (type alias for SpeedMultiplier)
+#include "audio_types.h"         // Required: SoundId, MusicTrackId, SoundPriority, StingerType, TimeOfDay, SoundHandle
+#include "camera_state.h"        // Required: CameraState (used in syncListenerToCamera)
+#include "vec3.h"                // Required: vec3 (used in playPositionalSound and syncListenerToCamera)
+```
+
+**Critical dependency**: `SimSpeed` is a type alias (`using SimSpeed = SpeedMultiplier`) defined in `simulation_types.h`. IAudioSystem method signatures (line 74: `virtual void setSpeed(SimSpeed speed)`) use `SimSpeed` directly. **Forward-declaring `SimSpeed` as `enum class SimSpeed;` is prohibited** — type aliases cannot be forward-declared in C++, and attempting this will produce a duplicate-type compile error when `simulation_types.h` is included. IAudioSystem must include the full `simulation_types.h` header, not a forward declaration.
+
+---
+
 - Owned by the application root; no other subsystem creates AL contexts
 - The `AudioSystem` constructor must launch `m_audioThread` and then wait on `m_initCV` (with a timeout of 5 seconds) before returning, so that thread-local context initialization failures are surfaced before the first audio call. The constructor wait must hold `m_initMutex` via `std::unique_lock` and use the predicate form of `wait_for` (calling `wait_for` without holding the mutex is undefined behavior):
 
