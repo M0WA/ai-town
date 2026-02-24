@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 // Phase 3 stub. Phase 5 implements the full TerrainChunk.
 // LOD contract: terrain chunks use FULL NODE REBUILD (not setMesh swap).
 // Always store chunk IDs (ChunkId), never raw node pointers.
