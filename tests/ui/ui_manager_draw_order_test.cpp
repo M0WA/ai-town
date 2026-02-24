@@ -71,8 +71,8 @@ protected:
 // Verifies all 10 draw slots fire in the correct Z-order.
 // Slots 1-8 and slot 10 produce setElementVisible calls on their respective
 // sentinel handles. The scrim (slot 9) uses m_scrimHandle = kInvalidUIElement (0)
-// and fires only when the modal is active — the Phase 3 stub always returns false
-// for hasActiveModal(), so the scrim call does not appear.
+// and fires only when the modal is active — hasActiveModal() delegates to
+// m_modal->isActive(), which returns false (m_active defaults to false), so the scrim call does not appear.
 // The modal (slot 10) always calls setElementVisible(kModalSentinel, false) because
 // m_active defaults to false in the Phase 3 ModalDialog stub.
 TEST_F(UIManagerDrawOrderTest, DrawOrder_AllSlots_CorrectZOrder) {
