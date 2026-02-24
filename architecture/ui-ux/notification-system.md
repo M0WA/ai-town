@@ -49,7 +49,7 @@
 The notification log panel is a scrollable history overlay toggled by the bell icon or the **B** key.
 
 - **Panel dimensions**: 400×500 px (virtual/scaled)
-- **Anchor**: opens below-left of the bell icon — the bottom-left corner of the panel aligns to the bottom-left corner of the bell icon (i.e., the panel extends leftward and downward from that anchor point). **Log panel anchor**: the top-right corner of the log panel aligns to the bottom-right corner of the bell icon. Bell icon virtual bounds: x:1820–1868, y:8–56. Log panel virtual bounds: x:1468–1868, y:56–556 (400×500 px). Do NOT use a bottom-left-to-bottom-left anchor — that formula yields a top-of-panel at y = 56 − 500 = −444, rendering entirely above the viewport.
+- **Anchor**: the top-right corner of the log panel aligns to the bottom-right corner of the bell icon. Bell icon virtual bounds: x:1820–1868, y:8–56. Log panel virtual bounds: x:1468–1868, y:56–556 (400×500 px). Do NOT use a bottom-left-to-bottom-left anchor — that formula yields a top-of-panel at y = 56 − 500 = −444, rendering entirely above the viewport.
 - **Z-order**: rendered above all HUD elements; when a blocking modal is active, the log panel is covered by the modal scrim (the log does NOT render above the scrim)
 - **Toggle**: **B** key or bell icon click; opening the panel resets the unread-count badge to 0
 - **Content**: Shows the last 50 notifications (CRITICAL and Normal combined), most-recent entry at the top. Each row displays:
