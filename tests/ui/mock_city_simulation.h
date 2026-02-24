@@ -17,7 +17,7 @@ public:
     MOCK_METHOD(void, setPaused, (bool paused), (override));
     MOCK_METHOD(void, setSpeed,  (SpeedMultiplier speed), (override));
     MOCK_METHOD(bool, isPaused,  (), (const, override));
-    MOCK_METHOD(SpeedMultiplier, getSpeed, (), (const, override));
+    MOCK_METHOD(SpeedMultiplier, getSpeedMultiplier, (), (const, override));
 
     // Economy/treasury queries:
     MOCK_METHOD(float, getTreasuryBalance,       (), (const, override));

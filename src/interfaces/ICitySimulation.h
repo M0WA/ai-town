@@ -10,9 +10,8 @@
 // MockCitySimulation lives in: tests/ui/mock_city_simulation.h
 //
 // ICitySimulation extends ISimulationPauser so UIManager can pass m_sim to
-// NotificationManager as ISimulationPauser* without requiring a separate constructor
-// parameter. setPaused(bool) is inherited from ISimulationPauser and implemented by
-// CitySimulation — do NOT redeclare it here.
+// NotificationManager as ICitySimulation*. setPaused(bool) is inherited from
+// ISimulationPauser and implemented by CitySimulation — do NOT redeclare it here.
 //
 // Return type note: getUndoExpiryTimeSeconds() must return double (not float) — it uses
 // the IClock::nowSeconds() return type directly. All other economy query methods
@@ -41,7 +40,7 @@ public:
 
     // State-query methods used by UIManager panels:
     virtual bool isPaused() const = 0;
-    virtual SpeedMultiplier getSpeed() const = 0;
+    virtual SpeedMultiplier getSpeedMultiplier() const = 0;
 
     // Economy/treasury queries — called by HUD resource bar and Budget Detail Panel:
     virtual float getTreasuryBalance() const = 0;          // Called by HUD resource bar to display treasury balance
