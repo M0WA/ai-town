@@ -53,6 +53,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   build-essential \
   ninja-build \
   pkg-config \
+  openssh-client \
   lcov \
   xvfb \
   libgl1-mesa-dev \
