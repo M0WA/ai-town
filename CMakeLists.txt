@@ -442,6 +442,21 @@ target_link_libraries(integration_tests PRIVATE
     rapidcheck
     rapidcheck_gtest
 )
+# Irrlicht transitive deps (Linux only) — same set as opengl_tests and aitown executable.
+# The adrido/irrlicht-vcpkg port does NOT export INTERFACE_LINK_LIBRARIES for these.
+# Phase 3 adds the EDT_NULL runtime test (irrlicht_ui_backend_test.cpp) which calls
+# createDevice(), pulling in CImageLoaderJPG, CImageLoaderPNG, CIrrDeviceLinux, etc.
+if(UNIX AND NOT APPLE)
+    target_link_libraries(integration_tests PRIVATE
+        JPEG::JPEG
+        PNG::PNG
+        ZLIB::ZLIB
+        BZip2::BZip2
+    )
+    if(XXFV86VM_LIB)
+        target_link_libraries(integration_tests PRIVATE ${XXFV86VM_LIB})
+    endif()
+endif()
 # src/rendering/ MUST be present: IrrlichtUIBackend.h lives in src/rendering/.
 target_include_directories(integration_tests PRIVATE
     tests/simulation/
