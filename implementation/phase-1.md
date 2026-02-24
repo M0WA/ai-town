@@ -1,5 +1,7 @@
 ## Phase 1: Irrlicht Device Shell & Camera
 
+**Status: DONE**
+
 ### Goal
 
 Establish the Irrlicht device lifecycle, render loop call order, `CameraController`, `IRenderer` interface, and `IrrlichtUIBackend` compile target — giving all subsequent phases a working, compilation-verified display target to build against, before any GL capability queries or texture infrastructure is added in Phase 2.
