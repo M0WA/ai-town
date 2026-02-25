@@ -3,6 +3,7 @@
 #include <vector>
 #include <initializer_list>
 #include <stdexcept>
+#include <string>
 
 // ManualRNG — deterministic test double for ISimulationRNG.
 // Two separate sequences: one for nextInt(), one for nextFloat().
@@ -68,6 +69,25 @@ public:
             m_floatIdx = 0;  // non-strict: wrap around
         }
         return m_floatSeq[m_floatIdx++];
+    }
+
+    // Asserts that both sequences have been fully consumed.
+    // Call at the end of a test to catch over-provisioned sequences (test data
+    // providing more values than the code under test actually calls).
+    // Throws std::logic_error if any sequence has unconsumed values remaining.
+    void verifyAllConsumed() const {
+        if (m_intIdx != m_intSeq.size()) {
+            throw std::logic_error(
+                "ManualRNG: int sequence not fully consumed (" +
+                std::to_string(m_intIdx) + " of " +
+                std::to_string(m_intSeq.size()) + " consumed)");
+        }
+        if (m_floatIdx != m_floatSeq.size()) {
+            throw std::logic_error(
+                "ManualRNG: float sequence not fully consumed (" +
+                std::to_string(m_floatIdx) + " of " +
+                std::to_string(m_floatSeq.size()) + " consumed)");
+        }
     }
 
 private:

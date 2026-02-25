@@ -2,7 +2,7 @@
 # Helper macro wrapping gtest_discover_tests() with required options.
 # Enforces the one-label-per-target rule and provides per-category timeout overrides.
 #
-# Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl> [TIMEOUT <seconds>])
+# Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl> [TIMEOUT <seconds>] [DISCOVERY_TIMEOUT <seconds>])
 #
 # LABELS MUST be set inside gtest_discover_tests(), NOT via set_tests_properties() afterwards.
 # gtest_discover_tests() dynamically creates CTest test entries at configure time;
@@ -10,16 +10,19 @@
 # not the individually-discovered test cases — the labels do not propagate to discovered
 # tests and -L/-LE ctest filters will silently fail to include or exclude the correct tests.
 #
-# DISCOVERY_TIMEOUT 30: default 5s is insufficient for coverage-instrumented binaries
+# DISCOVERY_TIMEOUT default 30: default 5s is insufficient for coverage-instrumented binaries
 # on loaded CI runners, silently producing 0 discovered tests and a misleading empty-coverage
-# lcov report.
+# lcov report. Per-target override allows terrain_tests to use 60s.
 macro(aitown_add_tests TARGET)
-    cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT" "" ${ARGN})
+    cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT;DISCOVERY_TIMEOUT" "" ${ARGN})
     if(NOT AITOWN_TEST_LABEL)
         message(FATAL_ERROR "aitown_add_tests: LABEL is required (unit, integration, or requires-opengl)")
     endif()
     if(NOT AITOWN_TEST_TIMEOUT)
         set(AITOWN_TEST_TIMEOUT 120)  # default per-test timeout in seconds
+    endif()
+    if(NOT AITOWN_TEST_DISCOVERY_TIMEOUT)
+        set(AITOWN_TEST_DISCOVERY_TIMEOUT 30)  # default discovery timeout in seconds
     endif()
     # WORKING_DIRECTORY must be CMAKE_SOURCE_DIR (project root), NOT the default
     # CMAKE_CURRENT_BINARY_DIR (the build tree).  gtest_discover_tests defaults to
@@ -46,7 +49,7 @@ macro(aitown_add_tests TARGET)
     gtest_discover_tests(${TARGET}
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         DISCOVERY_MODE PRE_TEST
-        DISCOVERY_TIMEOUT 30
+        DISCOVERY_TIMEOUT ${AITOWN_TEST_DISCOVERY_TIMEOUT}
         PROPERTIES TIMEOUT ${AITOWN_TEST_TIMEOUT}
         LABELS "${AITOWN_TEST_LABEL}"
     )
@@ -54,8 +57,8 @@ endmacro()
 
 # Usage examples:
 #
-# Terrain tests: longer timeout for multi-seed generation property tests
-#   aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300)
+# Terrain tests: longer timeouts for multi-seed generation property tests
+#   aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
 #
 # Standard unit tests:
 #   aitown_add_tests(simulation_tests LABEL "unit")

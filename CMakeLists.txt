@@ -115,10 +115,13 @@ include(cmake/AitownTestHelpers.cmake)
 # GLEW::GLEW MUST be linked BEFORE Irrlicht (GLEW symbol duplication mitigation-2).
 # PRIVATE scope — Irrlicht and GLEW headers must NOT propagate to test targets.
 # Phase 1 delivers RenderSystem.cpp, IrrlichtRenderer.cpp, IrrlichtUIBackend.h (inline).
+# Phase 3 splits IrrlichtUIBackend into declaration-only .h + IrrlichtUIBackend.cpp
+# so that Irrlicht headers are confined to the .cpp (testability isolation rule).
 # ----------------------------------------------------------------------------
 add_library(aitown_render STATIC
     src/rendering/RenderSystem.cpp
     src/rendering/IrrlichtRenderer.cpp
+    src/rendering/IrrlichtUIBackend.cpp
 )
 target_include_directories(aitown_render
     PRIVATE   src/rendering/       # RenderSystem/IrrlichtRenderer internal headers
@@ -211,6 +214,7 @@ add_library(aitown_ui STATIC
     src/ui/UIManager.cpp
     src/ui/UIScaler.cpp
     src/ui/CameraController.cpp
+    src/ui/NotificationManager.cpp
 )
 target_include_directories(aitown_ui
     PRIVATE   src/ui/              # UIManager.h, UIScaler.h, CameraController.h
@@ -225,15 +229,13 @@ target_include_directories(aitown_ui
 target_link_libraries(aitown_ui PRIVATE Irrlicht)
 
 # ----------------------------------------------------------------------------
-# aitown_terrain — Terrain generator (Phase 0 stub)
-# Phase 2 adds TerrainGenerator.cpp and ITerrainRNG.h.
+# aitown_terrain — Terrain generator (Phase 3 stub — INTERFACE)
+# INTERFACE library: no source files to compile; all headers propagated to consumers.
+# Phase 5 promotes this to STATIC and adds TerrainGenerator.cpp.
 # ----------------------------------------------------------------------------
-add_library(aitown_terrain STATIC
-    src/terrain/placeholder.cpp
-)
+add_library(aitown_terrain INTERFACE)
 target_include_directories(aitown_terrain
-    PRIVATE   src/terrain/         # implementation headers — NOT propagated
-    PRIVATE   src/interfaces/      # needed for TerrainGenerator.cpp's own includes (IClock, etc.)
+    INTERFACE src/terrain/         # ITerrainRNG.h, terrain_chunk.h, terrain_generator.h
     INTERFACE src/interfaces/      # shared interfaces propagated to consumers
 )
 
@@ -305,6 +307,8 @@ endif()
 # ----------------------------------------------------------------------------
 add_executable(simulation_tests
     tests/simulation/simulation_smoke_test.cpp
+    tests/simulation/manual_rng_test.cpp
+    tests/simulation/city_simulation_stub_test.cpp
 )
 target_link_libraries(simulation_tests PRIVATE
     aitown_sim
@@ -327,9 +331,11 @@ aitown_add_tests(simulation_tests LABEL "unit")
 # ----------------------------------------------------------------------------
 # terrain_tests — terrain generator property tests and fixed-seed regression
 # TIMEOUT 300: multi-seed property tests can exceed 120 s on coverage-instrumented runners
+# DISCOVERY_TIMEOUT 60: allow extra time for test discovery on slow CI runners
 # ----------------------------------------------------------------------------
 add_executable(terrain_tests
     tests/terrain/terrain_smoke_test.cpp
+    tests/terrain/terrain_stub.cpp   # Phase 3: compile-only stub for all terrain headers
 )
 target_link_libraries(terrain_tests PRIVATE
     aitown_terrain
@@ -339,7 +345,7 @@ target_link_libraries(terrain_tests PRIVATE
     rapidcheck_gtest
 )
 # tests/simulation/ — for ManualClock (if timing tests added in Phase 2+)
-# tests/terrain/   — for MockTerrainRNG
+# tests/terrain/   — for MockTerrainRNG and terrain_stub.cpp project-root includes
 # src/terrain/     — for ITerrainRNG.h (included by mock_terrain_rng.h)
 # ${CMAKE_SOURCE_DIR} — for project-root-relative includes
 target_include_directories(terrain_tests PRIVATE
@@ -348,18 +354,19 @@ target_include_directories(terrain_tests PRIVATE
     src/terrain/
     ${CMAKE_SOURCE_DIR}
 )
-aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300)
+aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
 
 # ----------------------------------------------------------------------------
 # ui_tests — UIManager, NotificationManager, CameraController, QueryPanel, ModalDialog
-# Phase 1 adds camera_controller_test.cpp and ui_scaler_test.cpp.
-# Phase 3 Test-C1 replaces this entire add_executable call with the consolidated 5-file form
-# (dropping ui_smoke_test.cpp whose compile-checks are covered by Phase 3 files).
+# Phase 3 Test-C1: consolidated 5-file form (ui_smoke_test.cpp dropped — its compile
+# checks are covered by the Phase 3 files below).
 # ----------------------------------------------------------------------------
 add_executable(ui_tests
-    tests/ui/ui_smoke_test.cpp
-    tests/ui/camera_controller_test.cpp  # Phase 1: 9 CameraController unit tests
-    tests/ui/ui_scaler_test.cpp          # Phase 1: 6 UIScaler unit tests
+    tests/ui/camera_controller_test.cpp      # Phase 1: 9+1 CameraController unit tests
+    tests/ui/ui_scaler_test.cpp              # Phase 1: 6+1 UIScaler unit tests
+    tests/ui/key_bindings_test.cpp           # Phase 3: KeyBindings unit tests
+    tests/ui/ui_manager_draw_order_test.cpp  # Phase 3: UIManager 10-slot draw order
+    tests/ui/ui_manager_modal_test.cpp       # Phase 3: UIManager modal smoke tests
 )
 target_link_libraries(ui_tests PRIVATE
     aitown_ui
@@ -420,6 +427,7 @@ aitown_add_tests(audio_tests LABEL "unit")
 add_executable(integration_tests
     tests/integration/integration_smoke_test.cpp
     tests/integration/irrlicht_ui_backend_compile_test.cpp  # Phase 1: non-abstract compile check
+    tests/integration/irrlicht_ui_backend_test.cpp          # Phase 3: EDT_NULL runtime handle test
 )
 # aitown_render and aitown_ui MUST be present: IrrlichtUIBackend.h depends on Irrlicht.
 # Irrlicht MUST be linked directly: IrrlichtUIBackend.h includes <irrlicht.h> at compile time;
@@ -434,6 +442,21 @@ target_link_libraries(integration_tests PRIVATE
     rapidcheck
     rapidcheck_gtest
 )
+# Irrlicht transitive deps (Linux only) — same set as opengl_tests and aitown executable.
+# The adrido/irrlicht-vcpkg port does NOT export INTERFACE_LINK_LIBRARIES for these.
+# Phase 3 adds the EDT_NULL runtime test (irrlicht_ui_backend_test.cpp) which calls
+# createDevice(), pulling in CImageLoaderJPG, CImageLoaderPNG, CIrrDeviceLinux, etc.
+if(UNIX AND NOT APPLE)
+    target_link_libraries(integration_tests PRIVATE
+        JPEG::JPEG
+        PNG::PNG
+        ZLIB::ZLIB
+        BZip2::BZip2
+    )
+    if(XXFV86VM_LIB)
+        target_link_libraries(integration_tests PRIVATE ${XXFV86VM_LIB})
+    endif()
+endif()
 # src/rendering/ MUST be present: IrrlichtUIBackend.h lives in src/rendering/.
 target_include_directories(integration_tests PRIVATE
     tests/simulation/

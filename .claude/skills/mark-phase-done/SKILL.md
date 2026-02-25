@@ -65,24 +65,13 @@ npx markdownlint-cli 'implementation/INDEX.md'
 
 Fix any violations before continuing.
 
-### Step 5 — Sync the GitHub board
+### Step 5 — Report
 
-Launch the `proj-manager` agent with this prompt, substituting `[TARGET_PHASE]`:
-
-> Sync the GitHub Project "AI Town" with the current implementation plan.
-> The following change was just made: Phase [N] status changed to **DONE** in
-> `implementation/INDEX.md`. Read `implementation/INDEX.md` and
-> `implementation/phase-[N].md`, then update the GitHub project accordingly —
-> close the Phase [N] milestone if all issues are closed, and set all Phase [N]
-> board items to Status = Done.
-
-### Step 6 — Report
-
-After the `proj-manager` agent finishes, report to the user:
+Report to the user:
 
 ```
 Phase [N] marked DONE.
-INDEX.md updated. GitHub board synced.
+INDEX.md updated.
 ```
 
 If the validation in Step 2 required a user override, also note:
@@ -91,11 +80,9 @@ If the validation in Step 2 required a user override, also note:
 Note: phase was marked DONE with [M] incomplete deliverable(s) / [K] unmet exit criteria.
 ```
 
-If proj-manager reported any errors, surface them clearly.
-
 ## Rules
 
 - Only `INDEX.md` is modified — never per-phase files, spec files, or deliverable checkboxes.
 - Always confirm the resolved phase number before writing (Step 1 read is mandatory).
-- If the phase is already DONE, exit cleanly without writing or triggering proj-manager.
+- If the phase is already DONE, exit cleanly without writing.
 - The git branch inference is a convenience only — when ambiguous, always ask.

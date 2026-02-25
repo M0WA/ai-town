@@ -18,18 +18,44 @@ enum class SoundPriority {
     CRITICAL = 3
 };
 
-// StingerType enum values encode the fixed AL source indices.
-// CRISIS    = 55 — sources[55] (first stinger slot above the evictable pool)
-// MILESTONE = 56 — sources[56] (second stinger slot)
-// Using implicit values (CRISIS=0, MILESTONE=1) would index into the general
-// evictable SFX pool (sources[0..54]) rather than the reserved stinger slots[55..56].
-// Array sizing note: Any array indexed by static_cast<int>(StingerType) must be sized
-// kSFXPoolSize (= 58), NOT kEvictableSFXCount (= 55). CRISIS=55 and MILESTONE=56 are
-// valid indices into a 58-element SFX pool array but OOB in a 55-element array.
+// ---------------------------------------------------------------------------
+// Source pool layout constants
+// ---------------------------------------------------------------------------
+// sources[0..54]  — evictable SFX pool (55 slots)
+// sources[55..56] — stinger slots (CRISIS=55, MILESTONE=56)
+// sources[57]     — reserved post-V1 GAME_OVER stinger slot
+// sources[58..61] — streaming (2 music + 2 ambient bed)
+// Total: 62 sources
+constexpr int kEvictableSFXCount           = 55;
+constexpr int kStingerCount                = 2;
+constexpr int kSFXPoolSize                 = 58;   // kEvictableSFXCount + kStingerCount + 1
+constexpr int kStreamSourceCount           = 4;
+constexpr int kTotalSources                = 62;   // kSFXPoolSize + kStreamSourceCount
+constexpr int kTransientReserveStart       = 51;
+constexpr int kMaxVehiclePairs             = 12;
+constexpr float kZoneLoopMaxPreloadDurationSeconds   = 18.0f;
+constexpr float kVehicleEngineLoopMinDurationSeconds = 6.0f;
+
+// WARNING: Any array indexed by static_cast<int>(StingerType) must be sized
+// kSFXPoolSize (= 58), NOT kEvictableSFXCount (= 55). The stinger sources live
+// at indices 55 and 56 — beyond the evictable pool.
 enum class StingerType {
-    CRISIS    = 55,
-    MILESTONE = 56
+    CRISIS    = kEvictableSFXCount,      // = 55
+    MILESTONE = kEvictableSFXCount + 1,  // = 56
 };
+
+static_assert(kEvictableSFXCount + kStingerCount + 1 + kStreamSourceCount == kTotalSources,
+    "Source pool total mismatch");
+static_assert(static_cast<int>(StingerType::CRISIS)    == kEvictableSFXCount,
+    "StingerType::CRISIS pool index mismatch");
+static_assert(static_cast<int>(StingerType::MILESTONE) == kEvictableSFXCount + 1,
+    "StingerType::MILESTONE pool index mismatch");
+static_assert(kTransientReserveStart < kEvictableSFXCount,
+    "Transient reserve must be within evictable pool");
+static_assert(kMaxVehiclePairs * 2 <= kEvictableSFXCount,
+    "Vehicle pair pool exceeds evictable SFX pool");
+static_assert(kMaxVehiclePairs == 12,
+    "kMaxVehiclePairs changed — update audio asset manifest");
 
 // Cycle order: DAY -> DUSK -> NIGHT -> DAWN -> DAY
 // The cycle-transition formula (static_cast<int>(tod)+1)%4 belongs in

@@ -51,10 +51,18 @@ public:
   3. `UIScaler_PillarboxOffset_UnprojectsCenterCorrectly`: construct with (1920, 1080, 1440, 1080, 240, 0); unproject (960, 540) → virtual (960, 540).
   4. `UIScaler_MouseInTopBlackBar_VirtualY_ClampedToZero`: construct with (1920, 1080, 1280, 720, 0, 90); unproject (640, 80) → virtual y clamped to 0 (actual_y=80 < offsetY=90 produces negative pre-clamp virtual_y, clamped to 0).
   5. `UIScaler_GetViewportRect_ReturnsCorrectOffsets`: construct with (1920, 1080, 1280, 720, 0, 90); `getViewportRect()` returns {x:0, y:90, w:1280, h:720}.
-- **`NotificationManager` testability**: `NotificationManager` must accept `IUIBackend*` for element creation, `ICitySimulation*` for auto-pause injection and deficit-streak queries, and `IClock*` for dismiss-after-5s timing. The correct constructor signature is: `NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock)`. **Source location**: `ISimulationPauser.h` lives in **`src/interfaces/`** (NOT `src/simulation/`) — placing it in `src/simulation/` creates a latent circular dependency when `src/ui/` headers include it (`src/ui/` → `src/simulation/` is a prohibited dependency direction; UI must not depend on simulation headers). `src/interfaces/` is a dependency-free common header directory that both `src/simulation/` and `src/ui/` may include. `MockCitySimulation` lives in `tests/ui/mock_city_simulation.h` (used by UI tests that need to verify pause/resume calls and simulation queries without pulling in `CitySimulation`). Tests inject `MockUIBackend` + `MockCitySimulation` + `ManualClock` and call `update()` with controlled time advances to verify queue ordering, auto-dismiss timing, CRITICAL vs Normal band placement, and log-fallback behavior. `NotificationManager` exposes a public `dismissCriticalToast(UIElementHandle handle)` method — this is the production API called by the UI event handler when the player clicks, presses Enter, or presses Delete on a CRITICAL toast; it is not a test-only backdoor. Tests call this method to simulate player dismissal. Additional required test cases:
+- **`NotificationManager` testability**: **CRITICAL — Constructor parameter type is `ICitySimulation*` (NOT `ISimulationPauser*`).** The correct constructor signature is: `NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock)`. **Reason**: `NotificationManager` calls `m_sim->setPaused(true)` on CRITICAL toast auto-pause; `setPaused()` is inherited from `ISimulationPauser`. `UIManager` already holds `m_sim` as `ICitySimulation*`, so no downcast is needed. `NotificationManager` does NOT call `getConsecutiveDeficitMonths()`; `UIManager::update()` is the exclusive polling bridge for deficit-month-based toast dispatch. If a Phase 1/2 stub mistakenly used `ISimulationPauser*`, Phase 3 MUST correct it to `ICitySimulation*`.
+
+  **Interface inheritance contract** (required for type safety): `ICitySimulation` extends `ISimulationPauser` (defined in `src/interfaces/ICitySimulation.h` line 339: `class ICitySimulation : public ISimulationPauser {`). This allows `NotificationManager` to accept `ICitySimulation*` and safely call inherited `setPaused(bool)` without an explicit cast. Tests that construct `NotificationManager` with a mock must use `NiceMock<MockCitySimulation>` (which implements both `ICitySimulation` and `ISimulationPauser` via inheritance), NOT `MockSimulationPauser` alone (which only implements `ISimulationPauser` and cannot be passed as `ICitySimulation*`).
+
+  **Source locations**: `ISimulationPauser.h` lives in `src/interfaces/` (NOT `src/simulation/` — placing it in `src/simulation/` creates a latent circular dependency when `src/ui/` headers include it, violating the `src/ui/` → `src/simulation/` prohibition). `src/interfaces/` is a dependency-free common header directory that both `src/simulation/` and `src/ui/` may safely include. `MockCitySimulation` lives in `tests/ui/mock_city_simulation.h` (used by UI tests that need to verify pause/resume calls and simulation queries without pulling in the concrete `CitySimulation`).
+
+  **Test setup**: Tests inject `MockUIBackend` + `NiceMock<MockCitySimulation>` + `ManualClock` and call `update()` with controlled time advances to verify queue ordering, auto-dismiss timing, CRITICAL vs Normal band placement, and log-fallback behavior. `NotificationManager` exposes a public `dismissCriticalToast(UIElementHandle handle)` method — this is the production API called by the UI event handler when the player clicks, presses Enter, or presses Delete on a CRITICAL toast; it is not a test-only backdoor. Tests call this method to simulate player dismissal. Additional required test cases:
   - `CriticalToast_OnPost_AutoPausesCalled`: posting a CRITICAL toast calls `setPaused(true)` exactly once when the CRITICAL queue transitions from empty to non-empty.
   - `CriticalToast_OnLastDismiss_NoAutoResume`: calling `dismissCriticalToast(handle)` on the last remaining CRITICAL toast does **NOT** call `setPaused(false)` — auto-resume requires explicit player unpause. Verify `setPaused(false)` is never called by `NotificationManager` on CRITICAL toast dismissal.
   - `CriticalToast_SecondPost_NoDoublePause`: posting a second CRITICAL toast while one is already active does NOT call `setPaused(true)` again.
+  - `NotificationSystem_AutoPause_OnFirstCriticalToast` *(Phase 8 deliverable)*: construct `NotificationManager` with `NiceMock<MockCitySimulation>` + `MockUIBackend` + `ManualClock`; post one CRITICAL toast when the CRITICAL queue is empty; verify `setPaused(true)` is called exactly once. Primary named test for `tests/ui/notification_system_test.cpp` Phase 8 expansion.
+  - `NotificationSystem_NoPause_OnNormalToast` *(Phase 8 deliverable)*: post a Normal-severity toast (not CRITICAL) to `NotificationManager`; verify `setPaused(true)` is never called — Normal toasts must not trigger auto-pause.
 - **`CameraController` testability**: `CameraController`'s pan/zoom/rotate input processing must be unit-testable by injecting synthetic `InputEvent` structs (defined in `src/platform/input_event.h`). The controller must accept a `CameraState` struct (position, target, pitch, yaw) and expose `getCameraState()` — tests drive events in, read state out, verify pitch clamping at [−70°, −20°] and edge-scroll behavior without a live scene node. `CameraController` must also expose `bool isEdgeScrollEnabled() const` as a public accessor returning the current value of `m_edgeScrollEnabled`; this is required by test case 6 (`CameraController_EdgeScroll_EnabledByDefaultInFullscreen`) to assert constructor initial state without input injection. **Source location**: `CameraController.h/.cpp` live in `src/ui/` (it is an input/UI concern, not a rendering concern); test file is `tests/ui/camera_controller_test.cpp`. This placement ensures `CameraController` is covered by the `src/ui/` 80% coverage gate.
 - **`CameraController` input abstraction**: `CameraController` must accept an `InputEvent` struct (defined in `src/platform/input_event.h`) rather than Irrlicht's `SEvent`, to avoid pulling Irrlicht headers into test translation units:
 
@@ -79,7 +87,7 @@ public:
 
   The concrete `IEventReceiver` implementation in `src/platform/` translates `SEvent` to `InputEvent` before forwarding to `CameraController`. Test files in `tests/ui/` construct `InputEvent` structs directly — no Irrlicht headers required. `CameraController::OnInputEvent(const InputEvent&)` replaces `IEventReceiver::OnEvent(const SEvent&)` in the `CameraController` public interface.
 
-  **Required Named Test Cases** — all 8 test cases must be authored in `tests/ui/camera_controller_test.cpp` and registered under the `ui_tests` CMake target (label `unit`). Per `architecture/ui-ux/camera-controls.md`, pitch clamp tests must use exact equality assertions (`EXPECT_EQ` / `EXPECT_FLOAT_EQ`) rather than strictly-less-than comparisons, because the spec defines inclusive bounds using `std::clamp` semantics:
+  **Required Named Test Cases** — all 9 test cases must be authored in `tests/ui/camera_controller_test.cpp` and registered under the `ui_tests` CMake target (label `unit`). Per `architecture/ui-ux/camera-controls.md`, pitch clamp tests must use exact equality assertions (`EXPECT_EQ` / `EXPECT_FLOAT_EQ`) rather than strictly-less-than comparisons, because the spec defines inclusive bounds using `std::clamp` semantics:
 
   Note: `MouseWheel` drives zoom distance ONLY — it MUST NOT be used in pitch-clamp test cases, as scroll wheel events do not affect pitch and produce a test that never reaches the pitch clamp boundary.
 
@@ -108,6 +116,7 @@ public:
      that distinguishes a correct implementation from one with a latent re-enable defect.
      Use `EXPECT_EQ` for bool assertions; use `EXPECT_NE` for camera position change.
   8. `CameraController_EdgeScroll_DisabledByDefaultInWindowed` — construct `CameraController` with `startInFullscreen=false`; immediately call `isEdgeScrollEnabled()` without any intervening call to `setEdgeScrollEnabled()`; assert the return value is `false`. This is the symmetric counterpart to test case 6 and confirms the windowed-default rule from `architecture/ui-ux/camera-controls.md`.
+  9. `CameraController_KeyboardPanIgnoresSensitivity` — **(Phase 8 enforcement point)** construct `CameraController` with a non-unit sensitivity multiplier (e.g., `sensitivityMultiplier=2.0`); inject a keyboard pan event (e.g., `InputEvent{Type::KeyDown, key=KEY_A}` or the left-pan hotkey from `architecture/ui-ux/hotkey-scheme.md`); assert that the camera position delta equals the expected **unscaled** pan step, confirming that keyboard pan speed is NOT multiplied by `sensitivityMultiplier`. Mouse drag pan (RMB, MMB) applies `sensitivityMultiplier`; keyboard pan must not. This test must pass from Phase 1 to establish the invariant before Phase 8 adds the sensitivity slider. Placing the test here ensures that the Phase 8 sensitivity implementation cannot accidentally apply the multiplier to keyboard pan without breaking this test.
 - **`QueryPanel` testability**: `QueryPanel::computePanelPosition(int cursorX, int cursorY, Rect tileBounds)` must be a pure function (no side effects, no Irrlicht dependency) returning a `Rect`. Required test cases:
   1. **Primary placement**: cursor at (100, 100) with no tile overlap → verify panel placed at (140, 140).
   2. **Fallback placement**: primary position overlaps tile bounds → verify panel moves to above-left fallback position.
@@ -134,6 +143,9 @@ public:
   8. `ModalDialog_OnClose_WithQueuedCriticalToast_AutoPauseReevaluated` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: post a CRITICAL toast while a blocking modal is active (verifies no second `setPaused(true)` call during modal-active period), then dismiss the modal (`UIManager::closeModal()`), then verify: (a) the queued CRITICAL toast is now displayed (`addStaticText` called on `MockUIBackend`), and (b) `setPaused(true)` is called **once more** during `closeModal()` re-evaluation — meaning **twice total** across the test (once on modal open, once on re-evaluation in `closeModal()` because CRITICAL queue is non-empty); `setPaused(false)` is NOT called — simulation stays paused because the CRITICAL toast remains active after modal close. **Reconciliation with StrictMock matrix**: The StrictMock Expected Call Matrix entry for this test specifies `setPaused(true) × 2` (total) and `setPaused(false) × 0` — the prose description above matches this. The "exactly once" wording in prior spec drafts referred to the re-evaluation step only (one call within `closeModal()`), not the total across the test; this was ambiguous and has been corrected to "once more during closeModal()". This test exercises the deferred re-evaluation path explicitly — without it, the re-evaluation call in the `closeModal()` code path is unverified and can be silently dropped. **Deferred `addStaticText` call timing**: The CRITICAL toast's `addStaticText` call to `MockUIBackend` MUST occur synchronously within the same `closeModal()` call stack — NOT deferred to the next `update()` tick. This is a firm implementation requirement: the `closeModal()` implementation must call the display logic synchronously, not schedule it for the next frame. Tests assert the element handle's presence immediately after `closeModal()` returns, with no intervening `update()` call. Implementations that defer display to `update()` do not meet this requirement and must be refactored.
   9. `Modal_SpeedSelectorGrayed_DespiteCriticalToast_SpeedAccessible_WhenModalOnly` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: when only a CRITICAL toast is active (no modal), the speed selector remains ENABLED (accessible per CRITICAL-toast-pause spec). This distinguishes modal-pause (selector grayed) from CRITICAL-toast-pause (selector accessible).
   10. `ModalDialog_OnClose_WithEmptyCriticalQueue_NoAutoRePause` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: open a modal (verifies `setPaused(true)` called once), then dismiss the modal with no CRITICAL toasts in the queue, then verify: (a) `setPaused(false)` is called exactly once (simulation resumes), and (b) `setPaused(true)` is NOT called again during `closeModal()`. This is the inverse of test 8 — it confirms that the CRITICAL toast auto-pause re-evaluation in `closeModal()` does NOT call `setPaused(true)` when the CRITICAL queue is empty, preventing a spurious re-pause on normal modal dismiss.
+- **`HUD` testability — undo countdown and density unlock preview** (tests in `tests/ui/undo_button_test.cpp` and `tests/ui/budget_detail_panel_test.cpp`). Required Phase 8 test cases:
+  - `UndoCountdown_AmberAt10xSpeed_ImmediatelyOnAction` *(Phase 8 deliverable)*: construct `HUD` with `ManualClock` at simulation speed 10×; take an undoable action; assert that the undo button label is amber immediately at action time (`t=0`), because the total undo window at 10× speed is ≤6 real seconds, meeting the amber-on-creation threshold. Verifies `hud-layout.md` rule: "set amber if `remainingSeconds < 5.0 || totalWindowSeconds <= 6.0`" — the `totalWindowSeconds <= 6.0` branch fires at 10× speed from the moment the action is taken.
+  - `DensityUnlockPreview_HiddenWhenSentinelReturned` *(Phase 8 deliverable)*: construct `HUD` with `MockCitySimulation` stubbed to return `SimulationConstants::kNoUnlockThreshold` (`−1.0f`) from `getNextUnlockThreshold()`; call `HUD::update()`; verify `IUIBackend::setElementVisible(densityUnlockHandle, false)` is called (element hidden) and no label text is set to `"−1"` or `"−1.0"`. Verifies the sentinel guard from `hud-layout.md`: the HUD MUST intercept `kNoUnlockThreshold` before any formatting occurs and hide the element unconditionally.
 - **`ISimulationRNG`** — injectable RNG interface for deterministic simulation testing: Service degradation (random building selection at −10% budget surplus) and any other simulation-layer random draws must use this interface rather than `std::rand()` or a global `std::mt19937`. Tests inject a `ManualRNG` that returns a preset sequence. **Source location**: `ISimulationRNG.h` lives in `src/interfaces/`; `ManualRNG` lives in `tests/simulation/manual_rng.h` (used by simulation tests) — **not** in `src/` (it is a test double, never linked into production code).
 
   ```cpp
@@ -337,7 +349,7 @@ public:
       virtual void setSpeed(SpeedMultiplier speed) = 0;
       // State-query methods used by UIManager panels:
       virtual bool isPaused() const = 0;
-      virtual SpeedMultiplier getSpeed() const = 0;
+      virtual SpeedMultiplier getSpeedMultiplier() const = 0;
 
       // Economy/treasury queries — called by HUD resource bar and Budget Detail Panel:
       virtual float getTreasuryBalance() const = 0;          // Called by HUD resource bar to display treasury balance
@@ -417,7 +429,7 @@ public:
       MOCK_METHOD(void, setPaused, (bool paused), (override));
       MOCK_METHOD(void, setSpeed, (SpeedMultiplier speed), (override));
       MOCK_METHOD(bool, isPaused, (), (const, override));
-      MOCK_METHOD(SpeedMultiplier, getSpeed, (), (const, override));
+      MOCK_METHOD(SpeedMultiplier, getSpeedMultiplier, (), (const, override));
 
       // Economy/treasury queries:
       MOCK_METHOD(float, getTreasuryBalance, (), (const, override));          // Called by HUD resource bar to display treasury balance
@@ -839,9 +851,16 @@ protected:
     void SetUp() override {
         ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
     }
+    // **Mandatory**: This fixture MUST include the TearDown() override below.
+    // Explicitly calling ui_.reset() before the fixture destructs documents and enforces
+    // the destructor-path contract, preventing order-of-destruction issues with NiceMock
+    // expectations. The current member declaration order (ui_ declared last) satisfies
+    // the invariant automatically, but future reordering would silently break it.
+    // The explicit TearDown() makes the contract immune to member reordering.
     void TearDown() override {
-        // Reset ui_ before mock objects are destroyed so UIManager destructor calls
-        // (e.g. backend_.removeElement()) happen while MockUIBackend is still alive.
+        // **Mandatory**: Reset ui_ before mock objects are destroyed so UIManager
+        // destructor calls (e.g. backend_.removeElement()) happen while MockUIBackend
+        // is still alive. This enforces the destructor-path contract.
         ui_.reset();
     }
 };
@@ -909,13 +928,20 @@ protected:
     void SetUp() override {
         ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
     }
+    // **Mandatory**: Each fixture MUST include a TearDown() override that explicitly calls
+    // ui_.reset() before the fixture destructs. This documents and enforces the
+    // destructor-path contract, preventing order-of-destruction issues with NiceMock
+    // expectations. Without it, a future member reordering could cause UIManager's
+    // destructor to fire after MockUIBackend is destroyed, producing use-after-destroy.
     void TearDown() override {
-        // UIManager destructor calls backend_.removeElement() for all live UI elements.
-        // The explicit ui_.reset() here is a defensive practice — the current declaration
-        // order already satisfies the destruction invariant automatically (ui_ declared last
+        // **Mandatory**: ui_.reset() must be called here. UIManager destructor calls
+        // backend_.removeElement() for all live UI elements. Explicitly resetting ui_
+        // before mock objects are destroyed ensures those destructor calls happen while
+        // MockUIBackend is still alive, enforcing the destructor-path contract. The current
+        // declaration order already satisfies the invariant automatically (ui_ declared last
         // is destroyed first in reverse order), but future fixture modifications could
-        // inadvertently reorder members. The explicit TearDown() makes the destruction
-        // contract immune to member reordering.
+        // inadvertently reorder members. The explicit TearDown() makes the contract
+        // immune to member reordering.
         ui_.reset();
     }
 };
@@ -936,8 +962,16 @@ protected:
     void SetUp() override {
         sim_ = std::make_unique<CitySimulation>(&renderer_, &audio_, &rng_, &clock_);
     }
+    // **Mandatory**: Each fixture MUST include a TearDown() override that explicitly calls
+    // sim_.reset() before the fixture destructs. This documents and enforces the
+    // destructor-path contract, preventing order-of-destruction issues with StrictMock
+    // expectations. CitySimulation must be destroyed before its injected mock dependencies
+    // (renderer_, audio_). Without an explicit sim_.reset(), StrictMock will report
+    // unexpected calls if CitySimulation's destructor ever calls renderer_ or audio_
+    // after their expectations have been verified and cleared by the test framework.
     void TearDown() override {
-        // CitySimulation destructor must NOT call audio_ or renderer_ methods.
+        // **Mandatory**: sim_.reset() must be called here to enforce the destructor-path
+        // contract. CitySimulation destructor must NOT call audio_ or renderer_ methods.
         // This is an explicit design contract. If that contract changes, add EXPECT_CALL
         // expectations here BEFORE sim_.reset() to avoid spurious StrictMock failures.
         // IMPORTANT: Do NOT call rng_.verifyAllConsumed() here — zero-revenue tests never
@@ -975,12 +1009,20 @@ protected:
     void SetUp() override {
         sim_ = std::make_unique<CitySimulation>(&renderer_, &audio_, &rng_, &clock_);
     }
+    // **Mandatory**: Each fixture MUST include a TearDown() override that explicitly calls
+    // sim_.reset() before the fixture destructs. This documents and enforces the
+    // destructor-path contract, preventing order-of-destruction issues with NiceMock
+    // expectations. NiceMock suppresses unexpected-call warnings but does NOT protect
+    // against use-after-destroy if CitySimulation's destructor calls mock methods after
+    // the mock objects have been destroyed. The explicit TearDown() ensures CitySimulation
+    // is torn down first regardless of member declaration order.
     void TearDown() override {
-        // REQUIRED: CitySimulation must be destroyed before mock objects.
-        // NiceMock suppresses unexpected-call warnings but does NOT protect
-        // against use-after-destroy if CitySimulation destructor calls mocks.
-        // Members are destroyed in reverse declaration order (sim_ last),
-        // so sim_.reset() here ensures correct destruction order.
+        // **Mandatory**: sim_.reset() must be called here to enforce the destructor-path
+        // contract. CitySimulation must be destroyed before mock objects. NiceMock
+        // suppresses unexpected-call warnings but does NOT protect against use-after-destroy
+        // if CitySimulation destructor calls mocks. Members are destroyed in reverse
+        // declaration order (sim_ last), so sim_.reset() here ensures correct destruction
+        // order regardless of any future fixture member reordering.
         // NOTE: verifyAllConsumed() is NOT called here — the shared rng_{{0}} is a
         // placeholder; property tests that drive random draws must use a local RNG.
         // See ManualRNG exemption comment above the class definition for full rationale.

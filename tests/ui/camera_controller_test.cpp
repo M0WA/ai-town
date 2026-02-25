@@ -468,3 +468,11 @@ TEST(CameraControllerTest, CameraController_KeyboardPanIgnoresSensitivity)
     EXPECT_FLOAT_EQ(deltaA_z, deltaB_z)
         << "Keyboard pan Z delta must be identical regardless of sensitivityMultiplier";
 }
+
+// ===========================================================================
+// Test 10: CameraController_EdgeScrollActivatesAt20pxBand
+//
+// Phase 3 compile-only stub. Real assertion is a Phase 6 deliverable.
+// ===========================================================================
+// Phase 3 compile-only stub. Real assertion is a Phase 6 deliverable.
+TEST(CameraControllerTest, CameraController_EdgeScrollActivatesAt20pxBand) { SUCCEED(); }
