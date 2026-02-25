@@ -15,9 +15,21 @@ struct SimulationConstants {
     // MUST NOT be hardcoded inline in CitySimulation.cpp or anywhere else.
     static constexpr int ticks_per_year = 12;
 
+    // Budget tick interval: 1 month = 30 in-game days; 1 in-game day = 1.0 real second at 1x speed.
+    // Therefore one budget tick fires every 30.0 simulation seconds.
+    // Referenced in CitySimulation::tick() accumulator loop — MUST NOT be hardcoded inline.
+    // See architecture/game-design/simulation-time.md (Budget Tick Threshold Constant section).
+    static constexpr float SECONDS_PER_BUDGET_TICK = 30.0f;
+
     // Forced loan repayment period (1 in-game year). Populates LoanTerms::repaymentTicks.
     // Emergency bonds use 24 ticks (2 in-game years) — a different mechanism.
     static constexpr int loan_repayment_ticks = 12;
+
+    // Emergency Municipal Bond repayment period (2 in-game years = 24 budget ticks).
+    // Distinct from loan_repayment_ticks (12 ticks for forced loans).
+    // Populates LoanTerms::repaymentTicks when issuing an emergency bond.
+    // See architecture/game-design/economy-model.md (Emergency Municipal Bond terms).
+    static constexpr int bond_repayment_ticks = 24;
 
     // Grace period: 120 real seconds (wall-clock time).
     // Used for BOTH the grace period cost waiver AND the forced loan real-time gate.
@@ -77,4 +89,18 @@ struct SimulationConstants {
     static constexpr float density_unlock_scale_easy   = 0.70f;
     static constexpr float density_unlock_scale_normal = 1.00f;
     static constexpr float density_unlock_scale_hard   = 1.50f;
+
+    // Sentinel returned by ICitySimulation::getNextUnlockThreshold() when all six density tiers
+    // are unlocked and no further unlock is pending. Negative so it is unambiguously out-of-range
+    // for any valid dollar threshold (all valid thresholds are positive).
+    // HUD check: if (threshold < 0.0f) → hide density unlock progress indicator.
+    // MUST be used at every call site that checks for the sentinel — never compare against -1.0f
+    // inline. See architecture/game-design/economy-model.md (getNextUnlockThreshold() section).
+    static constexpr float kNoUnlockThreshold = -1.0f;
+
+    // Population growth and decay caps — expressed as fractions of max_density_for_tier.
+    // Applied per budget tick; rounding via static_cast<int>(std::round(max_density * fraction)).
+    // See architecture/game-design/population-density-growth.md (SimulationConstants Mapping).
+    static constexpr float population_growth_cap_fraction = 0.10f;  // max +10% of tier capacity per tick
+    static constexpr float population_decay_cap_fraction  = 0.15f;  // max -15% of tier capacity per tick (asymmetric: falls faster than rises)
 };

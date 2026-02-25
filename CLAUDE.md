@@ -76,7 +76,6 @@ Do not suggest alternative engines, languages, or platforms.
 ### Product
 
 - **Senior Product Owner** (`prod-owner`): Specialized in implementation planning, phase breakdown, feature prioritization, backlog management, milestone definition, and roadmap creation
-- **Senior Project Manager** (`proj-manager`): Specialized in syncing the implementation plan with the GitHub project "AI Town". Uses the configured GitHub MCP server to keep milestones, issues, and the Projects v2 board up to date. Triggered automatically after every implementation plan update.
 
 ### Team Collaboration
 
@@ -92,7 +91,6 @@ Do not suggest alternative engines, languages, or platforms.
 | Plan Spec | `/plan-spec` | Product Owner updates the implementation plan from specs, then design + tech squads review it in parallel and iterate until no CRITICAL/HIGH issues remain |
 | Plan Fix Spec | `/plan-fix-spec` | Sync the implementation plan with current specs AND iteratively fix all CRITICAL/HIGH issues in both specs and the plan — domain-scoped re-reviews, diff-based round-2+ prompts, issue deduplication, fix verification, `model: haiku` for review agents, deferred single commit |
 | Fix Implementation | `/fix-implementation` | Same as Plan Fix Spec but skips the Product Owner plan-sync step — iteratively fixes all CRITICAL/HIGH issues in both specs and the implementation plan as-is |
-| Update Board | `/update-board` | Project Manager pushes the implementation plan to the GitHub project board (plan is source of truth); optionally scoped to a single phase (default: all phases) |
 | Validate Phase Done | `/validate-phase-done` | Read a phase file and report whether all deliverable checkboxes and exit criteria are complete; lists every outstanding item if not |
 | Mark Phase Done | `/mark-phase-done` | Validate phase completion, then mark it as **DONE** in the implementation plan and sync the GitHub board; infers the phase from the current git branch (`planning/phase-N` → Phase N−1 done) if not specified |
 | Split Phase | `/split-phase` | Product Owner proposes splitting a phase into multiple phases or redistributing its deliverables; design + tech squads review the proposal, then the Product Owner applies the agreed split |

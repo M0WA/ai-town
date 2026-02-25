@@ -53,6 +53,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   build-essential \
   ninja-build \
   pkg-config \
+  openssh-client \
   lcov \
   xvfb \
   libgl1-mesa-dev \
@@ -96,6 +97,9 @@ RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhisto
 
 # Set `DEVCONTAINER` environment variable to help with orientation
 ENV DEVCONTAINER=true
+
+# Force Mesa software rendering (llvmpipe) — no GPU hardware in container
+ENV LIBGL_ALWAYS_SOFTWARE=1
 
 # Create workspace and config directories and set permissions
 RUN mkdir -p /workspace /home/node/.claude && \

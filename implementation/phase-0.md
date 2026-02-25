@@ -351,21 +351,21 @@ Establish a compilable C++ CMake project with a passing GitHub Actions pipeline 
 
   Also add `src/ui/CameraController.cpp` as a placeholder (empty translation unit containing only a comment: `// Phase 1 implements CameraController body`). Phase 1 fills in the full implementation. The source location `src/ui/` is locked at Phase 0 — moving it to `src/platform/` later would break the `src/ui/` coverage gate and require retroactive CMakeLists.txt edits. Owner: `gamedesign-ux`.
 
-- [x] **`src/ui/NotificationManager.h`** — Phase 0 stub header with the locked constructor signature as specified in `architecture/testing/testability-architecture.md` line 36:
+- [x] **`src/ui/NotificationManager.h`** — Phase 0 stub header with the locked constructor signature as specified in `architecture/testing/testability-architecture.md` line 54:
 
   ```cpp
   #pragma once
   #include "src/ui/IUIBackend.h"                  // UIElementHandle, IUIBackend
+  #include "src/interfaces/ICitySimulation.h"     // ICitySimulation (extends ISimulationPauser)
   #include "src/interfaces/IClock.h"               // IClock
-  #include "src/interfaces/ISimulationPauser.h"    // ISimulationPauser
   class NotificationManager {
   public:
-      NotificationManager(IUIBackend* backend, IClock* clock, ISimulationPauser* pauser);
+      NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock);
       void dismissCriticalToast(UIElementHandle handle);
   };
   ```
 
-  All three constructor dependencies (`IUIBackend`, `IClock`, `ISimulationPauser`) are Phase 0 deliverables, making this stub authoring-safe at Phase 0. Without this stub, Phase 1 teams implementing `UIManager` may define `NotificationManager(IUIBackend*)` with only one parameter, breaking the `IClock*`-based auto-dismiss test infrastructure (which uses `ManualClock` from `tests/simulation/manual_clock.h`). The `dismissCriticalToast(UIElementHandle)` is the production API for player dismissal of CRITICAL toasts (not a test backdoor). `#include "src/ui/NotificationManager.h"` must be added to `tests/ui/ui_smoke_test.cpp` as a compile-check so the three-parameter constructor signature is verified at Phase 0 rather than at Phase 1. Owner: `gamedesign-ux`.
+  All three constructor dependencies (`IUIBackend`, `ICitySimulation`, `IClock`) are Phase 0 deliverables, making this stub authoring-safe at Phase 0. **Constructor parameter type is `ICitySimulation*` (NOT `ISimulationPauser*`)**. Reason: `NotificationManager` calls `m_sim->setPaused(true)` on CRITICAL toast auto-pause (inherited from `ISimulationPauser`); `UIManager` already holds `m_sim` as `ICitySimulation*`, so no downcast is needed. See `architecture/ui-ux/notification-system.md` Testing Note for full rationale. Without this stub, Phase 1 teams implementing `UIManager` may define `NotificationManager(IUIBackend*)` with only one parameter, breaking the `IClock*`-based auto-dismiss test infrastructure (which uses `ManualClock` from `tests/simulation/manual_clock.h`). The `dismissCriticalToast(UIElementHandle)` is the production API for player dismissal of CRITICAL toasts (not a test backdoor). `#include "src/ui/NotificationManager.h"` must be added to `tests/ui/ui_smoke_test.cpp` as a compile-check so the three-parameter constructor signature is verified at Phase 0 rather than at Phase 1. Owner: `gamedesign-ux`.
 
 - [x] **`src/terrain/ITerrainRNG.h`** — injectable RNG interface for terrain generation, as specified in `architecture/testing/testability-architecture.md` (`nextFloat()`, `nextInt(int, int)`, `reseed(uint64_t)`). Must be authored at Phase 0 as a scaffold stub (body can be the full interface definition with no implementation) so that Phase 2 terrain tests can add `MockTerrainRNG` without discovering a missing header. **Source location is `src/terrain/` (not `src/interfaces/`)** — `ITerrainRNG` is tightly coupled to the terrain subsystem and not shared with other subsystems.
 

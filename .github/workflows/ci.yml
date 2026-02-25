@@ -117,7 +117,20 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      # Step 11: Verify requires-opengl test routing (non-zero discovery) — Phase 1 deliverable.
+      # Step 11: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
+      # IrrlichtUIBackendCompileCheck::IsNonAbstract is registered under the 'integration' label.
+      # See architecture/testing/framework.md for rationale.
+      - name: Verify integration test routing (non-zero discovery)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No tests discovered under integration label. Check integration_tests CMake registration."
+            exit 1
+          fi
+          echo "Integration routing: $count test(s) discovered."
+
+      # Step 12: Verify requires-opengl test routing (non-zero discovery) — Phase 1 deliverable.
       # Must appear BEFORE xvfb-run ctest to confirm routing before execution.
       # The stub_succeed.cpp test from Phase 0 satisfies the non-zero discovery requirement.
       # Phase 2 note: lod_swap_smoke_test.cpp (Phase 6) is the first real requires-opengl test body.
@@ -130,19 +143,6 @@ jobs:
             exit 1
           fi
           echo "requires-opengl routing: $count test(s) discovered."
-
-      # Step 12: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
-      # IrrlichtUIBackendCompileCheck::IsNonAbstract is registered under the 'integration' label.
-      # See architecture/testing/framework.md for rationale.
-      - name: Verify integration test routing (non-zero discovery)
-        shell: bash
-        run: |
-          count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
-          if [[ "$count" -eq 0 ]]; then
-            echo "ERROR: No tests discovered under integration label. Check integration_tests CMake registration."
-            exit 1
-          fi
-          echo "Integration routing: $count test(s) discovered."
 
       # Step 13: Verify default.mhr HRTF data (Phase 0 placeholder — no-op).
       # Phase 4 replaces this with:
@@ -529,7 +529,20 @@ jobs:
       - name: Build (coverage)
         run: cmake --build build --parallel
 
-      # Step 11: Verify requires-opengl test routing (non-zero discovery) — Phase 1 deliverable.
+      # Step 11: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
+      # IrrlichtUIBackendCompileCheck::IsNonAbstract is registered under the 'integration' label.
+      # See architecture/testing/framework.md for rationale.
+      - name: Verify integration test routing (non-zero discovery)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No tests discovered under integration label. Check integration_tests CMake registration."
+            exit 1
+          fi
+          echo "Integration routing: $count test(s) discovered."
+
+      # Step 12: Verify requires-opengl test routing (non-zero discovery) — Phase 1 deliverable.
       # Must appear BEFORE xvfb-run ctest to confirm routing before execution.
       # The stub_succeed.cpp test from Phase 0 satisfies the non-zero discovery requirement.
       # Phase 2 note: lod_swap_smoke_test.cpp (Phase 6) is the first real requires-opengl test body.
@@ -542,19 +555,6 @@ jobs:
             exit 1
           fi
           echo "requires-opengl routing: $count test(s) discovered."
-
-      # Step 12: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
-      # IrrlichtUIBackendCompileCheck::IsNonAbstract is registered under the 'integration' label.
-      # See architecture/testing/framework.md for rationale.
-      - name: Verify integration test routing (non-zero discovery)
-        shell: bash
-        run: |
-          count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
-          if [[ "$count" -eq 0 ]]; then
-            echo "ERROR: No tests discovered under integration label. Check integration_tests CMake registration."
-            exit 1
-          fi
-          echo "Integration routing: $count test(s) discovered."
 
       # Step 13: Run unit tests.
       - name: Run unit tests (no display)
@@ -639,11 +639,16 @@ jobs:
           # many exclusion patterns (mock_*.h, manual_*.h, src/audio/*, etc.) match
           # nothing yet. These patterns are correct future-proofing — they must stay so
           # they suppress coverage for those paths when real code arrives in Phase 1+.
-          # Note: "${BUILD_DIR}/_deps/*" and ".fetchcontent_cache/*" are intentionally
-          # absent — gtest and rapidcheck are now vcpkg-managed; FetchContent is not used.
+          # Note: "${BUILD_DIR}/_deps/*" is intentionally absent — gtest and rapidcheck
+          # are vcpkg-managed; FetchContent is not used and build/_deps never exists.
+          # ".fetchcontent_cache/*" is included below: FETCHCONTENT_BASE_DIR is set to
+          # .fetchcontent_cache (outside the build tree) so any future FetchContent use
+          # lands there. The --ignore-errors unused flag makes this pattern a no-op when
+          # the directory does not exist, so it is safe to include unconditionally.
           lcov --remove coverage.info \
             --ignore-errors unused \
             '/usr/*' \
+            "${{ github.workspace }}/.fetchcontent_cache/*" \
             '*/tests/*' \
             '*/mock_*.h' '*/mock_*.cpp' \
             '*/manual_*.h' '*/manual_*.cpp' \
@@ -693,7 +698,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
-      - name: Set up Python
+      - name: Set up Python 3
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: '3.12'  # pin to specific minor version — never use '3' (floating major breaks reproducibility)

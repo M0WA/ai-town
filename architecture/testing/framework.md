@@ -196,7 +196,7 @@ aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
 # `target_include_directories(terrain_tests PRIVATE src/terrain/ ...)` path cannot be
 # exercised and verified.
 
-add_executable(audio_tests tests/audio/duck_state_test.cpp ...)
+add_executable(audio_tests tests/audio/duck_state_machine_test.cpp ...)
 # rapidcheck and rapidcheck_gtest are included proactively: removing them later is trivial,
 # but omitting them causes a confusing link failure if a property test is added to audio_tests.
 # Vorbis::vorbisfile (vcpkg port libvorbis, header <vorbis/vorbisfile.h>) is required because

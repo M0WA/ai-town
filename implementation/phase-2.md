@@ -1,5 +1,7 @@
 ## Phase 2: GL Capability, TextureCache Skeleton & Shader Infrastructure
 
+**Status: DONE**
+
 ### Goal
 
 Add all OpenGL capability queries, the `TextureCache` three-pool skeleton, GLSL shader stubs, and the LOD smoke-test infrastructure — building directly on top of the Irrlicht device shell established in Phase 1 and giving Phase 5 (Procedural Terrain) a fully-typed `TextureCache` interface to build against.

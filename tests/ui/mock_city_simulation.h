@@ -17,7 +17,7 @@ public:
     MOCK_METHOD(void, setPaused, (bool paused), (override));
     MOCK_METHOD(void, setSpeed,  (SpeedMultiplier speed), (override));
     MOCK_METHOD(bool, isPaused,  (), (const, override));
-    MOCK_METHOD(SpeedMultiplier, getSpeed, (), (const, override));
+    MOCK_METHOD(SpeedMultiplier, getSpeedMultiplier, (), (const, override));
 
     // Economy/treasury queries:
     MOCK_METHOD(float, getTreasuryBalance,       (), (const, override));
@@ -27,7 +27,7 @@ public:
     MOCK_METHOD(float, getNextUnlockThreshold,   (Difficulty d), (const, override));
 
     // City rating:
-    MOCK_METHOD(int, getCityRating, (), (const, override));
+    MOCK_METHOD(CityRatingTier, getCityRating, (), (const, override));
 
     // Demand pressure — UI display aggregate (post-floor, post-bootstrap, post-combination).
     // Used by HUD demand bars. NOT the same as getTrafficDemandFactor (see below).
