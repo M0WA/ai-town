@@ -1,37 +1,22 @@
 # Framework
 
-- **Google Test (GTest) + GMock** via CMake `FetchContent`
+- **Google Test (GTest) + GMock** via **vcpkg** (port `gtest`) — FetchContent is NOT used.
 
 ```cmake
-include(FetchContent)
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG        f8d7d77c06936315286eb55f8de22cd23c188571  # v1.14.0 — SHA-pinned; never use the mutable tag string (it can be force-pushed). The CI supply-chain lint does NOT check CMakeLists.txt GIT_TAG values — this must be manually maintained. Verify: gh release view v1.14.0 --repo google/googletest --json tagName,targetCommitish
-)
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)  # required on Windows
-FetchContent_MakeAvailable(googletest)
-
-# Each test target links both:
+# Test targets link directly against vcpkg-managed GTest/GMock targets:
 target_link_libraries(my_test PRIVATE GTest::gtest_main GTest::gmock)
 ```
 
-- **RapidCheck** (property-based testing) is a firm dependency, also via `FetchContent`:
+- **RapidCheck** (property-based testing) via **vcpkg** (port `rapidcheck`) — FetchContent is NOT used:
 
 ```cmake
-FetchContent_Declare(
-  rapidcheck
-  GIT_REPOSITORY https://github.com/emil-e/rapidcheck.git
-  GIT_TAG        b96a4e626ef4c7348dcd16c500353c2f997a9f3f  # pinned SHA — no versioned tag available
-)
-set(RC_ENABLE_GTEST ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(rapidcheck)
-
-# Link RapidCheck GTest integration:
+# Bare targets (no namespace) — both required for GTest integration:
 target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
 ```
 
-- **SHA pin is mandatory** — RapidCheck has no stable release tags; always pin to a specific commit SHA. Update intentionally; do not use HEAD or branch refs.
+- Both `gtest` and `rapidcheck` are declared in `vcpkg.json` and installed by the vcpkg toolchain (see `cmake_minimum_required(3.21)` + `CMAKE_TOOLCHAIN_FILE`). **Do NOT add `FetchContent_Declare` blocks** for either library — vcpkg manages all test framework versions. The vcpkg `builtin-baseline` in `vcpkg.json` controls the pinned version; update the baseline to upgrade.
+- `RC_ENABLE_GTEST ON` is set in `CMakeLists.txt` (required for `rapidcheck_gtest` integration).
+- Windows note: `gtest` and `gmock` are built as shared DLLs (`gtest.dll`, `gmock.dll`) under the `x64-windows` vcpkg triplet; `DISCOVERY_MODE PRE_TEST` (see below) ensures DLLs are in PATH at test discovery time.
 - All tests in a `tests/` directory mirroring `src/` structure; `enable_testing()` + `gtest_discover_tests()` enabled
 - **`gtest_discover_tests()` must specify `WORKING_DIRECTORY`, `DISCOVERY_MODE`, `DISCOVERY_TIMEOUT`, `PROPERTIES TIMEOUT`, and test `LABELS`**:
 

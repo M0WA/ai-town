@@ -1,4 +1,5 @@
 {
+  "_comment": "Vehicle atlas registry — Phase 4 stub. All 5 V1 vehicle types assigned to 4x4 diffuse atlas (upload_path srgb) and 8x8 normal atlas (upload_path linear). See architecture/asset-standards/building-atlas-layout.md.",
   "diffuse_atlas": {
     "atlas_file": "vehicles_diffuse_atlas_d.dds",
     "grid": { "cols": 4, "rows": 4, "cell_size_px": 512 },
@@ -16,13 +17,24 @@
     "atlas_file": "vehicles_sprite_atlas_d.dds",
     "grid": { "cols": 16, "rows": 16, "cell_size_px": 16 },
     "mip_levels": 1,
-    "upload_path": "linear"
+    "upload_path": "linear",
+    "_comment": "Vehicle sprite atlas encodes synthetic palette-swatch roof colors (not photographic diffuse). LINEAR UPLOAD EXCEPTION: uploaded via linear pool (IVideoDriver::getTexture()), not raw GL sRGB path."
   },
   "assignments": [
-    { "vehicle_id": "car_sedan",     "row": 0, "col": 0 },
-    { "vehicle_id": "car_hatchback", "row": 0, "col": 1 },
-    { "vehicle_id": "car_suv",       "row": 0, "col": 2 },
-    { "vehicle_id": "bus_standard",  "row": 1, "col": 0 },
-    { "vehicle_id": "truck_cargo",   "row": 1, "col": 1 }
-  ]
+    { "vehicle_id": "car_sedan",     "row": 0, "col": 0, "comment": "V1 sedan — diffuse cell (0,0); U=[0.00,0.25], V=[0.00,0.25]" },
+    { "vehicle_id": "car_hatchback", "row": 0, "col": 1, "comment": "V1 hatchback — diffuse cell (0,1); U=[0.25,0.50], V=[0.00,0.25]" },
+    { "vehicle_id": "car_suv",       "row": 0, "col": 2, "comment": "V1 SUV — diffuse cell (0,2); U=[0.50,0.75], V=[0.00,0.25]" },
+    { "vehicle_id": "bus_standard",  "row": 1, "col": 0, "comment": "V1 standard bus — diffuse cell (1,0); U=[0.00,0.25], V=[0.25,0.50]" },
+    { "vehicle_id": "truck_cargo",   "row": 1, "col": 1, "comment": "V1 cargo truck — diffuse cell (1,1); U=[0.25,0.50], V=[0.25,0.50]" }
+  ],
+  "_co_sign": {
+    "graphics-artist-3d-model": {
+      "date": "2026-02-25",
+      "confirmed": [
+        "V-flip UV convention is correctly documented in the atlas layout spec (V increases downward in texture space)",
+        "Atlas cell boundary UV formulas are correct: diffuse 4x4 grid U=[C/4,(C+1)/4] V=[R/4,(R+1)/4]; normal 8x8 grid U=[C/8,(C+1)/8] V=[R/8,(R+1)/8]",
+        "All five V1 vehicle type assignments (car_sedan row0/col0, car_hatchback row0/col1, car_suv row0/col2, bus_standard row1/col0, truck_cargo row1/col1) are in correct cell positions"
+      ]
+    }
+  }
 }

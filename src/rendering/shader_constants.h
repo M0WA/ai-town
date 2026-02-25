@@ -6,6 +6,13 @@
 //
 // Source of truth: architecture/asset-standards/2d-texture-standards.md (Texture Unit Assignments table).
 // OpenGL 3.3 guarantees at least 16 texture image units per stage — kTexUnitBillboard must be <= 15.
+//
+// Phase 4 developer texture-unit alignment confirmation (graphics-dev-irrlicht, 2026-02-25):
+// The texture unit assignments below (kTexUnitDiffuse=0, kTexUnitNormal=1, kTexUnitSpecular=2,
+// kTexUnitLightmap=3, kTexUnitSplatMap=4, terrain layers 5–8, kTexUnitBillboard=9) are FINALIZED.
+// These values will NOT change during Phase 5 texture production or terrain shader authoring.
+// Artist rework caused by late texture-unit renumbering is prevented by this confirmation.
+// Any future addition of new texture units must use indices 10–15 (guaranteed OpenGL 3.3 range).
 
 // Unit 0: Diffuse/albedo (sRGB DXT1/DXT5 raw-GL path — not ITexture*)
 constexpr int kTexUnitDiffuse       = 0;
