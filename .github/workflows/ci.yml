@@ -700,29 +700,38 @@ jobs:
           lcov --summary coverage_filtered.info
 
       # Step 20: Enforce src/ui/ 25% worst-file coverage gate — Phase 4 blocking deliverable.
-      # Uses sort -n | head -1 pipeline to extract the MINIMUM (worst-file) coverage value.
+      # Parses coverage_filtered.info directly (SF/LH/LF records) — version-agnostic, works
+      # with lcov 1.x and 2.x (lcov --list changed delimiters in 2.0, so display parsing is
+      # unreliable). LH = lines hit, LF = lines found; per-file % = LH/LF*100.
+      # Uses sort -n | head -1 to extract the MINIMUM (worst-file) value.
       # Do NOT use average coverage — it masks under-covered files.
       # Do NOT use integer comparison (-lt 25) — it truncates floats and incorrectly passes 24.8%.
-      # Preflight checks ensure the pipeline fails loudly if lcov --list format changes.
       - name: Enforce src/ui/ 25% worst-file coverage gate
         shell: bash
         run: |
-          if ! lcov --list coverage_filtered.info | grep -q "src/ui/"; then
-            echo "PREFLIGHT FAIL: No src/ui/ entries in lcov --list output."
+          if ! grep -q "SF:.*src/ui/" coverage_filtered.info; then
+            echo "PREFLIGHT FAIL: No src/ui/ SF entries in coverage_filtered.info."
             echo "Expected src/ui/ files (UIManager, UIScaler, CameraController, etc.) to be covered."
             exit 1
           fi
-          if ! lcov --list coverage_filtered.info | grep -E "src/ui/" | grep -qF "|"; then
-            echo "PREFLIGHT FAIL: lcov --list output missing '|' column delimiter — format changed?"
+          worst=$(awk '
+            /^SF:.*src\/ui\// { lh=0; lf=0; in_ui=1; next }
+            /^SF:/ { in_ui=0; next }
+            in_ui && /^LH:/ { lh=substr($0,4)+0; next }
+            in_ui && /^LF:/ { lf=substr($0,4)+0; next }
+            in_ui && /^end_of_record/ { if (lf>0) print (lh/lf)*100; in_ui=0 }
+          ' coverage_filtered.info | sort -n | head -1)
+          if [ -z "$worst" ]; then
+            echo "PREFLIGHT FAIL: No src/ui/ coverage data found in coverage_filtered.info."
             exit 1
           fi
-          lcov --list coverage_filtered.info \
-            | grep -E "src/ui/" \
-            | grep -v "^Total" \
-            | awk -F'|' '{gsub(/%/,"",$NF); print $NF+0}' \
-            | sort -n \
-            | head -1 \
-            | awk '{if ($1+0 < 25.0) { print "FAIL: src/ui/ worst-file coverage " $1 "% < 25% Phase 4 gate"; exit 1 } else { print "PASS: src/ui/ worst-file coverage " $1 "% >= 25%" }}'
+          awk -v pct="$worst" 'BEGIN {
+            if (pct+0 < 25.0) {
+              print "FAIL: src/ui/ worst-file coverage " pct "% < 25% Phase 4 gate"; exit 1
+            } else {
+              print "PASS: src/ui/ worst-file coverage " pct "% >= 25%"
+            }
+          }'
 
       # Step 21: Upload coverage HTML artifact.
       # if: always() — upload even if lcov gate fails for post-mortem analysis.
