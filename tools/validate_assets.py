@@ -4,6 +4,11 @@ AI Town asset validation script.
 Phase 4 stub — always exits 0.
 Phase 5 adds real validation.
 """
+import glob
+import wave
+
+VEHICLE_ENGINE_LOOP_MIN_DURATION_S = 6.0  # mirrors kVehicleEngineLoopMinDurationSeconds in src/interfaces/audio_types.h — update both if threshold changes
+ZONE_LOOP_MAX_PRELOAD_DURATION_S = 18.0   # mirrors kZoneLoopMaxPreloadDurationSeconds in src/interfaces/audio_types.h — update both if threshold changes
 
 
 def check_1():
@@ -74,56 +79,50 @@ def check_7():
 
 
 def check_8():
-    # TODO Phase 5+: validate audio formats
-    # Rules from architecture/audio-architecture/v1-audio-asset-manifest.md:
-    # 1. music_*.ogg (incl. music_main_menu_*.ogg): 44100 Hz stereo (2 channels)
-    #    NOTE: sfx_zone_*.ogg (zone loops) are EXCLUDED from the stereo check — always mono.
-    #    TODO Phase 5: hard error if vi->channels != 2 OR vi->rate != 44100 for music_*.ogg
-    # OGG encoding quality floors (not checkable from bitstream — no way to detect encoding
-    # quality without re-encoding): music_*.ogg >= -q 8
+    # Check #8 per architecture/asset-standards/3d-model-standards.md:
+    # Pivot/extent tolerance 5 mm
+    # TODO Phase 5: hard error if any building .b3d pivot deviates more than 5 mm from expected origin
     pass
 
 
 def check_9():
-    # ambient_*.ogg: 44100 Hz stereo (2 channels)
-    # NOTE: sfx_zone_*.ogg (zone loops) are EXCLUDED from the stereo check — always mono.
-    # NOTE: ambient_*.ogg also require duration check: [90.0s, 120.0s]
-    # TODO Phase 5: hard error if ov_time_total < 90.0 OR ov_time_total > 120.0 for ambient_*.ogg
-    # TODO Phase 5: hard error if vi->channels != 2 OR vi->rate != 44100 for ambient_*.ogg
-    # OGG encoding quality floors (not checkable from bitstream — no way to detect encoding
-    # quality without re-encoding): ambient_*.ogg >= -q 7
+    # Check #9 per architecture/asset-standards/3d-model-standards.md:
+    # LOD hysteresis >= 5 m (close), >= 10 m (far)
+    # TODO Phase 5: hard error if LOD hysteresis band < 5 m (close) or < 10 m (far)
     pass
 
 
 def check_10():
-    # sfx_vehicle_engine_*.ogg: duration >= 6.0s, mono, 44100 Hz
-    # TODO Phase 5: hard error if ov_time_total < 6.0 OR vi->channels != 1 OR vi->rate != 44100
-    # PERCEPTUAL NOTE: kVehicleEngineLoopMinDurationSeconds = 6.0s is calibrated against the
-    # lowest pitch-shift ratio (0.75x) — perceived loop = 6.0/0.75 = 4.5s; any change to this
-    # constant requires sound-artist-opensoftal review before committing.
+    # Check #10 per architecture/asset-standards/3d-model-standards.md:
+    # Vehicle atlas UV
+    # TODO Phase 5: hard error if vehicle atlas UV coordinates are out of valid range
     pass
 
 
 def check_11():
-    # sfx_zone_*.ogg: duration <= kZoneLoopMaxPreloadDurationSeconds, mono, 44100 Hz
-    # TODO Phase 5: hard error if ov_time_total > kZoneLoopMaxPreloadDurationSeconds OR
-    # vi->channels != 1 OR vi->rate != 44100
-    # NOTE: kZoneLoopMaxPreloadDurationSeconds = 18.0f (NOT 20.0f) — 18s is the authored hard cap;
-    # 20s is the pre-load/streaming tier boundary; do NOT conflate these two values.
-    # OGG encoding quality floors (not checkable from bitstream — no way to detect encoding
-    # quality without re-encoding): sfx_zone_*.ogg >= -q 6
-    # lod_distances[2] is the CULL distance (not a LOD2 switch-out) — beyond this distance
-    # the billboard is not rendered. No LOD2 mesh exists for billboard imposters.
+    # Check #11 per architecture/asset-standards/3d-model-standards.md:
+    # buildings with height_floors >= 4 MUST have _lod2.b3d;
+    # buildings with height_floors <= 3 MUST NOT have _lod2.b3d (billboard only).
+    # The boundary is inclusive at 4 — not > 3. This two-sided check catches both a missing
+    # LOD2 shell on tall buildings AND a spurious LOD2 mesh on short buildings that should
+    # use billboard-only LOD2.
+    # TODO Phase 5: hard error on either missing _lod2.b3d (height_floors >= 4) or
+    # spurious _lod2.b3d (height_floors <= 3)
     pass
 
 
 def check_12():
-    # stinger_*.wav: mono WAV PCM at 44100 Hz (channels==1 AND sample_rate==44100)
-    # TODO Phase 5: hard error if channels != 1 OR sample_rate != 44100
+    # Check #12 per architecture/asset-standards/3d-model-standards.md:
+    # Vehicle normal atlas UV (8x8 grid of 256x256 px cells)
+    # TODO Phase 5: hard error if vehicle normal atlas UV layout does not match 8x8 grid spec
     pass
 
 
 def check_13():
+    # Check #13 per architecture/asset-standards/3d-model-standards.md:
+    # Facade atlas cell pixels — all non-transparent pixel content within [8, 504] texel range
+    # on both U and V axes per cell; DDS fourCC determines transparency interpretation
+    # (DXT1: 1-bit alpha; DXT5/BC3: alpha > 0)
     # CROSS-REFERENCE (ISSUE-F): Any _billboard.dds that passes the floor-count gate
     # (height_floors <= 3) MUST ALSO be authored with a DX10 extended header and
     # DXGI_FORMAT = BC3_UNORM_SRGB (value 78) per architecture/asset-standards/2d-texture-standards.md
@@ -152,9 +151,88 @@ def check_15():
     pass
 
 
+def check_16():
+    """check_16: music_*.ogg and ambient_*.ogg must be stereo, 44100 Hz."""
+    try:
+        from mutagen.oggvorbis import OggVorbis
+    except ImportError:
+        print("SKIP check_16: mutagen not installed")
+        return
+    patterns = list(glob.glob("assets/audio/music_*.ogg")) + list(glob.glob("assets/audio/ambient_*.ogg"))
+    if not patterns:
+        print("INFO check_16: no music/ambient OGG files found — no-op")
+        return
+    for path in patterns:
+        f = OggVorbis(path)
+        if f.info.channels != 2:
+            raise AssertionError(f"check_16 FAIL: {path} must be stereo (channels=2), got {f.info.channels}")
+        if f.info.sample_rate != 44100:
+            raise AssertionError(f"check_16 FAIL: {path} must be 44100 Hz, got {f.info.sample_rate}")
+    print(f"check_16 PASS: {len(patterns)} music/ambient OGG files verified stereo 44100 Hz")
+
+
+def check_17():
+    """check_17: sfx_vehicle_engine_*.ogg must be mono, 44100 Hz, duration >= VEHICLE_ENGINE_LOOP_MIN_DURATION_S."""
+    try:
+        from mutagen.oggvorbis import OggVorbis
+    except ImportError:
+        print("SKIP check_17: mutagen not installed")
+        return
+    patterns = glob.glob("assets/audio/sfx_vehicle_engine_*.ogg")
+    if not patterns:
+        print("INFO check_17: no vehicle engine OGG files found — no-op")
+        return
+    for path in patterns:
+        f = OggVorbis(path)
+        if f.info.channels != 1:
+            raise AssertionError(f"check_17 FAIL: {path} must be mono (channels=1), got {f.info.channels}")
+        if f.info.sample_rate != 44100:
+            raise AssertionError(f"check_17 FAIL: {path} must be 44100 Hz, got {f.info.sample_rate}")
+        if f.info.length < VEHICLE_ENGINE_LOOP_MIN_DURATION_S:
+            raise AssertionError(f"check_17 FAIL: {path} duration {f.info.length:.2f}s < {VEHICLE_ENGINE_LOOP_MIN_DURATION_S}s minimum")
+    print(f"check_17 PASS: {len(patterns)} vehicle engine OGG files verified")
+
+
+def check_18():
+    """check_18: sfx_zone_*.ogg must be mono, 44100 Hz, duration <= ZONE_LOOP_MAX_PRELOAD_DURATION_S."""
+    try:
+        from mutagen.oggvorbis import OggVorbis
+    except ImportError:
+        print("SKIP check_18: mutagen not installed")
+        return
+    patterns = glob.glob("assets/audio/sfx_zone_*.ogg")
+    if not patterns:
+        print("INFO check_18: no zone loop OGG files found — no-op")
+        return
+    for path in patterns:
+        f = OggVorbis(path)
+        if f.info.channels != 1:
+            raise AssertionError(f"check_18 FAIL: {path} must be mono (channels=1), got {f.info.channels}")
+        if f.info.sample_rate != 44100:
+            raise AssertionError(f"check_18 FAIL: {path} must be 44100 Hz, got {f.info.sample_rate}")
+        if f.info.length > ZONE_LOOP_MAX_PRELOAD_DURATION_S:
+            raise AssertionError(f"check_18 FAIL: {path} duration {f.info.length:.2f}s > {ZONE_LOOP_MAX_PRELOAD_DURATION_S}s maximum")
+    print(f"check_18 PASS: {len(patterns)} zone loop OGG files verified")
+
+
+def check_19():
+    """check_19: stinger_*.wav must be mono uncompressed PCM."""
+    patterns = glob.glob("assets/audio/stinger_*.wav")
+    if not patterns:
+        print("INFO check_19: no stinger WAV files found — no-op")
+        return
+    for path in patterns:
+        with wave.open(path, 'rb') as w:
+            if w.getnchannels() != 1:
+                raise AssertionError(f"check_19 FAIL: {path} must be mono, got {w.getnchannels()} channels")
+            if w.getcomptype() != 'NONE':
+                raise AssertionError(f"check_19 FAIL: {path} must be uncompressed PCM, got {w.getcomptype()}")
+    print(f"check_19 PASS: {len(patterns)} stinger WAV files verified mono PCM")
+
+
 if __name__ == '__main__':
-    print("validate_assets.py: Phase 4 stub — function stubs present, no validation performed.")
+    print("validate_assets.py: Phase 5 — audio format checks active; 3D model checks are stubs.")
     check_1(); check_2(); check_3(); check_4(); check_5()
     check_6(); check_7(); check_8(); check_9(); check_10()
     check_11(); check_12(); check_13(); check_14(); check_15()
-    # Phase 5 adds real validation bodies
+    check_16(); check_17(); check_18(); check_19()

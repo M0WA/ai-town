@@ -696,8 +696,27 @@ jobs:
           # be 0% anyway (smoke tests give trivial coverage). Use --summary for informational
           # output only. Phase 2 replaces this with a proper 80% gate once the tool version
           # is confirmed or the gate is implemented via a bash percentage check.
-          # TODO Phase 5: replace with: lcov --summary coverage_filtered.info | awk check
           lcov --summary coverage_filtered.info
+
+      - name: Enforce 80% total line coverage gate (Phase 5)
+        run: |
+          total=$(awk '
+            /^LH:/ { lh+=substr($0,4)+0 }
+            /^LF:/ { lf+=substr($0,4)+0 }
+            END { if (lf>0) printf "%.2f", (lh/lf)*100; else print 0 }
+          ' coverage_filtered.info)
+          if [ -z "$total" ]; then
+            echo "PREFLIGHT FAIL: No coverage data found in coverage_filtered.info"
+            exit 1
+          fi
+          awk -v pct="$total" 'BEGIN {
+            if (pct+0 < 80.0) {
+              print "FAIL: total line coverage " pct "% < 80% Phase 5 gate"
+              exit 1
+            } else {
+              print "PASS: total line coverage " pct "% >= 80%"
+            }
+          }'
 
       # Step 20: Enforce src/ui/ 25% worst-file coverage gate — Phase 4 blocking deliverable.
       # Parses coverage_filtered.info directly (SF/LH/LF records) — version-agnostic, works
@@ -760,6 +779,14 @@ jobs:
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: '3.12'  # pin to specific minor version — never use '3' (floating major breaks reproducibility)
+
+      - name: Verify check_15 stub present in validate_assets.py
+        run: |
+          grep -q "check_15" tools/validate_assets.py || (echo "FAIL: check_15 stub missing from validate_assets.py" && exit 1)
+          echo "PASS: check_15 stub present"
+
+      - name: Install Python dependencies
+        run: pip install mutagen
 
       - name: Run asset validation
         run: python tools/validate_assets.py

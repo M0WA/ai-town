@@ -2,14 +2,17 @@
 
 ### Goal
 
-Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` generation, `TerrainSystem` with LOD rebuild deque, `SceneEntityManager`, `TextureCache` full 3-pool implementation with sRGB and splat map upload paths, terrain GLSL shaders, terrain textures, and the full `validate_assets.py` 14-check implementation — plus raising the coverage gate to 80%.
+Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` generation, `TerrainSystem` with LOD rebuild deque, `SceneEntityManager`, `TextureCache` full 3-pool implementation with sRGB and splat map upload paths, terrain GLSL shaders, terrain textures, and the full `validate_assets.py` 19-check implementation (checks #1–#19; Check #20 is Phase 9 scope) — plus raising the coverage gate to 80%.
 
 ### Deliverables
 
 #### Terrain Generation
 
 - [ ] `TerrainChunk` class: accepts float heightmap buffer, `gridSize`, and `cellSize`; builds an `SMesh` with `IMeshBuffer` grids; correct bounding-box recalculation sequence (`recalculateBoundingBox()` on each `SMeshBuffer`, then on the `SMesh`, BEFORE `addMeshSceneNode()`); `smesh->drop()` after `addMeshSceneNode()` (safe because `addMeshSceneNode()` calls `grab()` internally). **NEVER use `ITerrainSceneNode`** — terrain is chunked `IMeshBuffer` only. (ref: `architecture/graphics-architecture/procedural-terrain.md`)
+- [ ] `TerrainChunk` heightmap query API (`graphics-dev-irrlicht`): expose `float getHeightAt(int tileX, int tileZ) const` and `float getSlopeDegrees(int tileX, int tileZ) const` using the stored heightmap buffer. Required by Phase 6 buildability check and earthworks cost formula. Tests: `TerrainChunk_GetHeightAt_ReturnsCorrectValue` and `TerrainChunk_GetSlopeDegrees_FlatTerrain_ReturnsZero`.
 - [ ] LOD grid sizes: LOD0 = 32×32, LOD1 = 16×16, LOD2 = 8×8 per chunk. Each `ChunkRebuildRequest` struct stores `uint64_t chunkId` (not raw pointer) and `targetLOD`. (ref: `architecture/graphics-architecture/procedural-terrain.md`)
+
+  **LOD hysteresis exact distances** (source: `architecture/asset-standards/3d-model-standards.md` terrain LOD threshold table): LOD0→LOD1: switch-out >100 m, switch-in <92 m (8 m hysteresis band); LOD1→LOD2: switch-out >300 m, switch-in <285 m (15 m hysteresis band). Test: `TerrainSystem_LOD_HysteresisGap_At_Least8mClose_At_Least15mFar`.
 - [ ] `TerrainSystem` class — constructor signature: `TerrainSystem(IRenderer* renderer, IClock* clock)` — `IClock*` is injected for the `flushPendingRebuilds()` 100 ms wall-clock budget. Production code passes `WallClock`; tests pass `ManualClock` to drive deterministic budget exhaustion without real-time delays. This follows the same injection pattern as `CitySimulation` and `AudioSystem` per CLAUDE.md. The `TerrainSystem_FlushPendingRebuilds_BudgetExhausted_StopsAfterBudget` test uses `ManualClock` to advance time 101 ms mid-flush and verifies that not all pending rebuilds were processed.
   - `update(float dt)` processes a `std::deque<ChunkRebuildRequest>` (distance-weighted, nearest-first priority); pops **at most 2 entries per call** to amortize GPU upload cost
   - Per-frame deduplication: `std::unordered_set<uint64_t> processedThisFrame` in `update()`; skip if chunk ID already processed this frame; also skip if `currentLOD == req.targetLOD`
@@ -17,6 +20,8 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
   - Chunk load/unload based on camera distance; `m_activeChunks` map keyed by `uint64_t` chunk ID
   - LOD rebuild calls `SceneEntityManager::destroy()` on the old node (via chunk ID lookup) BEFORE creating the new node — prevents orphaned node accumulation
   (ref: `architecture/graphics-architecture/procedural-terrain.md`)
+- [ ] `ITerrainLoadProgress` stub interface (`graphics-dev-irrlicht`): declare `struct ITerrainLoadProgress { virtual void onChunkRebuilt(int done, int total) {} virtual ~ITerrainLoadProgress() = default; }` in `src/terrain/terrain_types.h`; `TerrainSystem::flushPendingRebuilds(ITerrainLoadProgress* cb = nullptr)` calls `cb->onChunkRebuilt()` if non-null. No-op in EDT_NULL test context. Phase 11 wires the loading screen spinner to this callback.
+- [ ] Map playability guarantee (`graphics-dev-irrlicht`): `TerrainSystem::generate()` verifies (1) flat tile percentage ≥ 20% of total tiles (slope < 15°) and (2) at least one contiguous flat region ≥ 50×50 tiles exists; re-seeds up to 10 attempts if either constraint fails (per `architecture/game-design/terrain-interaction.md`). Tests: `TerrainSystem_FlatTilePercentage_MeetsMinimum` and `TerrainSystem_ContiguousFlatRegion_MeetsMinimum`.
 - [ ] `SceneEntityManager` class: authoritative entity list; sole caller of `addXxxSceneNode()` and `node->remove()`; `destroy(entity)` sequence:
   - Step 1: iterate all material slots on the scene node, call `textureCache->releaseLinear(tex)` for each `ITexture*`, clear the slot via `mat.setTexture(t, nullptr)` — `getMaterial()` called ONCE per loop iteration, result cached as `SMaterial&`
 
@@ -31,10 +36,13 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 
 #### TextureCache Full Implementation
 
-- [ ] **Phase 2 stub signature audit** (`graphics-dev-irrlicht`): before implementing any Phase 5 `TextureCache` method body, read `src/rendering/texture_cache.h` and verify the Phase 2 stub method signatures for `loadSRGB()`, `loadSplatMap()`, `releaseSRGB()`, `releaseSplatMap()`, `evictUnreferenced()`, `getSRGBGLuint()`, `getSplatMapGLuint()` exactly match the signatures specified in `architecture/graphics-architecture/texture-cache.md`. If any signature differs (e.g., `releaseSRGB(const std::string&)` vs `releaseSRGB(std::string)`), update the header declaration first. All Phase 3–4 callers must continue to compile without modification after the Phase 5 implementation is added.
-- [ ] `TextureCache` full 3-pool implementation in `src/rendering/texture_cache.h` and `texture_cache.cpp`:
+- [ ] **Phase 2 stub signature audit** (`graphics-dev-irrlicht`): before implementing any Phase 5 `TextureCache` method body, read `src/rendering/TextureCache.h` and verify the Phase 2 stub method signatures for `loadSRGB()`, `loadSplatMap()`, `releaseSRGB()`, `releaseSplatMap()`, `evictUnreferenced()`, `getSRGBGLuint()`, `getSplatMapGLuint()` exactly match the signatures specified in `architecture/graphics-architecture/texture-cache.md`. If any signature differs (e.g., `releaseSRGB(const std::string&)` vs `releaseSRGB(std::string)`), update the header declaration first. All Phase 3–4 callers must continue to compile without modification after the Phase 5 implementation is added.
+- [ ] `TextureCache` full 3-pool implementation in `src/rendering/TextureCache.h` and `TextureCache.cpp`:
   - **Linear pool** (`m_linearTextures`): `std::unordered_map<std::string, CacheEntry>` where `CacheEntry = { ITexture*, ref_count, last_access_timestamp, estimated_vram_bytes }`; loaded via `IVideoDriver::getTexture()`; `releaseLinear(ITexture*)` decrements ref_count (does NOT immediately delete); `releaseLinear(const std::string& key)` by string key; `evictUnreferenced()` calls `IVideoDriver::removeTexture()` for zero-ref linear entries
   - **sRGB pool** (`m_srgbTextures`): `std::unordered_map<std::string, SRGBEntry>` where `SRGBEntry = { GLuint texId, ref_count, last_access_timestamp, estimated_vram_bytes }`; loaded via fully raw-GL path only (`glGenTextures` + `glCompressedTexImage2D` with `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` or `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`); `releaseSRGB(filename)` decrements ref_count; `evictUnreferenced()` calls `glDeleteTextures(1, &texId)` for zero-ref sRGB entries — NO pre-delete `glBindTexture(0)` (OpenGL 3.0+ auto-unbind guarantee); `getSRGBGLuint(path) const` accessor — canonical name `getSRGBGLuint` (NOT `getGLuint`)
+
+    **Anisotropy for terrain detail layer textures** (apply after `glCompressedTexImage2D` in `loadSRGB()`): `glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, std::min(m_maxAnisotropy, 8.0f))` (requires `GL_EXT_texture_filter_anisotropic` presence check — skip if unsupported). Splat maps: anisotropy disabled (already specified). Normal maps: anisotropy ≥ 4× via `SMaterial::AnisotropicFilter = 4u` after `driver->getTexture()`.
+
   - **Splat map pool** (`m_splatMaps`): `std::unordered_map<std::string, SplatEntry>` where `SplatEntry = { GLuint texId, ref_count, last_access_timestamp, estimated_vram_bytes }`; canonical member name `m_splatMaps` (NOT `m_splatMapTextures`); loaded via `glTexImage2D(GL_RGBA8)` (NEVER via `glCompressedTexImage2D` — DXT compression destroys smooth blend weight gradients); `releaseSplatMap(filename)` decrements ref_count; `evictUnreferenced()` evicts zero-ref splat map entries in the SAME call as sRGB eviction; **`getSplatMapGLuint(const std::string& path) const`** — returns raw `GLuint` for terrain shader binding (0 if not loaded); documented in `architecture/graphics-architecture/texture-cache.md`
   - **sRGB tracking atomicity**: every `textureCache->loadSRGB(filename)` call in an entity constructor or `load()` method MUST be immediately followed by `m_srgbFilenames.push_back(filename)` (or equivalent tracking container) in the same scope, with no intervening early-returns or exception throws. Conversely, every `push_back` to the tracking container must correspond to a preceding `loadSRGB()` call in the same code path. Violating this pairing creates unbalanced ref counts that cause `evictUnreferenced()` to either leak VRAM (under-eviction) or double-delete (over-eviction). Consider a helper: `void trackSRGB(TextureCache* tc, std::vector<std::string>& tracked, const std::string& path)` that atomically calls `loadSRGB` and `push_back`.
   - **EDT_NULL guard**: `evictUnreferenced()` MUST check `m_driverType == EDT_NULL` at top and return early — no raw GL deletion under EDT_NULL
@@ -59,7 +67,16 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 
   **GLSL version**: all terrain shader files must begin with `#version 130` — required for `texture()` (not `texture2D()`), `in`/`out` qualifiers, and multiple `sampler2D` uniforms per `architecture/graphics-architecture/shader-loading.md` line 83.
 
-  **sRGB gamma fallback mechanism**: use a **uniform bool `u_srgbLinear`** (NOT two shader variants). In `OnSetConstants()`: `bool srgbLinear = !renderer->isSRGBTextureSupported(); services->setPixelShaderConstant("u_srgbLinear", &srgbLinear, 1)`. In the fragment shader: `if (u_srgbLinear) { color.rgb = pow(color.rgb, vec3(2.2)); }`. This avoids the complexity of selecting between shader variants at runtime while correctly gamma-correcting on drivers without `GL_EXT_texture_sRGB`.
+  **sRGB gamma fallback mechanism**: use a **uniform bool `u_srgbLinear`** (NOT two shader variants). In `OnSetConstants()`:
+
+  ```cpp
+  bool srgbLinear = !renderer->isSRGBTextureSupported();
+  // Must pass int*, not bool* — Irrlicht reads 4 bytes; bool is 1 byte (UB).
+  int srgbLinearInt = srgbLinear ? 1 : 0;
+  services->setPixelShaderConstant("u_srgbLinear", &srgbLinearInt, 1);
+  ```
+
+  In the fragment shader: `if (u_srgbLinear) { color.rgb = pow(color.rgb, vec3(2.2)); }`. This avoids the complexity of selecting between shader variants at runtime while correctly gamma-correcting on drivers without `GL_EXT_texture_sRGB`.
 
 - [ ] **Gamma fallback**: if `GL_EXT_texture_sRGB` absent (`isSRGBTextureSupported()` returns false), terrain fragment shader applies `pow(color.rgb, vec3(2.2))` gamma correction on the diffuse sample via the `u_srgbLinear` uniform mechanism above. This is the same fallback as the billboard imposter shader; both shaders must check the same `RenderSystem::isSRGBTextureSupported()` flag. (ref: `architecture/graphics-architecture/texture-cache.md`)
 - [ ] **sRGB texture binding to shader units**: sRGB diffuse textures are raw `GLuint` (not `ITexture*`) and cannot be set via `SMaterial::setTexture()`; binding MUST occur **inside `IShaderConstantSetCallBack::OnSetConstants()`** — NOT before/after the draw call (there is no post-draw callback). Pattern: save `GL_ACTIVE_TEXTURE` via `glGetIntegerv()`, bind via `glActiveTexture(GL_TEXTURE0 + kTexUnitDiffuse); glBindTexture(GL_TEXTURE_2D, texId);`, unbind via `glBindTexture(GL_TEXTURE_2D, 0);` before restoring the saved active unit; shader sampler uniform assigned via `glUniform1i(diffuseLocation, kTexUnitDiffuse)`. (ref: `architecture/graphics-architecture/shader-loading.md`, `architecture/graphics-architecture/texture-cache.md`)
@@ -78,6 +95,8 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 
   This sign-off is a **blocking exit criterion** — `TextureCache::loadSplatMap()` must not be implemented until it is recorded.
 
+  **Splat channel lock sequencing enforcement**: The `graphics-artist-2d-texture` splat channel sign-off (recorded as the standard block in `architecture/asset-standards/building-atlas-layout.md`) MUST appear in the git log BEFORE any commit implementing `TextureCache::loadSplatMap()`. This is a PHASE ENTRY GATE for the `loadSplatMap()` implementation — it must be verified at the PR review stage, not just as an exit criterion.
+
 - [ ] Terrain normal maps (`graphics-artist-2d-texture`): DXT5nm packed (X→alpha, Y→green, Z discarded; Y-flip before swizzle for OpenGL convention); uploaded via `loadLinear()`; anisotropy ≥ 4×. **Mip pre-baking required**: terrain normal map mip levels MUST be pre-baked via bicubic downsampling before DXT5nm compression to preserve normal vector normalisation; driver-generated mips are prohibited for normal maps.
 - [ ] Splat map PNG (`graphics-artist-2d-texture`): RGBA8 PNG (blend weights, NOT a DDS/DXT compressed file); uploaded via `loadSplatMap()` → `glTexImage2D(GL_RGBA8)`; `GL_TEXTURE_MAX_LEVEL = 0`; anisotropy disabled for splat maps
 
@@ -86,6 +105,17 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 
   **`graphics-artist-3d-model` building atlas sign-off gate** (Phase 5 exit criterion): `graphics-artist-3d-model` MUST review `architecture/asset-standards/building-atlas-layout.md` and confirm: (a) the shared atlas cell variant approach (multiple mesh variants referencing one module-type cell) is compatible with modular kit UV authoring workflows; (b) per-module UV islands can be fully authored within the 496×496 px usable area per 512×512 cell without requiring bleed into the 8 px border; (c) the 4×4 cell grid and 16-cell capacity correctly covers the V1 minimum building module set. Sign off before Phase 9 UV authoring begins.
 
+#### C++ Class File Naming (CamelCase)
+
+- [ ] **Rename snake_case C++ class files to CamelCase** (`graphics-dev-irrlicht`): all C++ class implementation files (`.cpp`) and their paired class header files (`.h`) created in Phase 5 that used snake_case naming must be renamed to CamelCase per the project code style convention (see `CLAUDE.md § Code Style`). Non-class C-style headers (e.g., `terrain_types.h`, `simulation_constants.h`) are exempt.
+  - `src/rendering/texture_cache.h` → `src/rendering/TextureCache.h`
+  - `src/rendering/texture_cache.cpp` → `src/rendering/TextureCache.cpp`
+  - `src/rendering/scene_entity_manager.h` → `src/rendering/SceneEntityManager.h` (replaces existing alias wrapper)
+  - `src/rendering/scene_entity_manager.cpp` → `src/rendering/SceneEntityManager.cpp`
+  - Update all `#include` directives project-wide to use the new CamelCase filenames
+  - Update `CMakeLists.txt` `target_sources()` calls to reference renamed files
+  - **Non-class headers that are exempt** (keep as-is): `terrain_types.h`, `simulation_constants.h`, `shader_constants.h`, and any other header containing only constants/enums/POD structs with no class definition
+
 #### LOD Smoke Test Promotion
 
 - [ ] **`lod_swap_smoke_test.cpp` promoted from Phase 2 stub to real test** (`graphics-dev-irrlicht`): fill in the `SetMeshGrabDropContract` test body (which has `GTEST_SKIP()` in Phase 2). The Phase 2 spike already confirmed the LOD swap contract (Checkbox A + B in `architecture/graphics-architecture/scene-graph-ownership.md` lines 53–68): `SMesh::addMeshBuffer()` calls `grab()` and `CMeshSceneNode::setMesh()` calls `drop()` on the old mesh and `grab()` on the new mesh. The spike result is SETTLED. Phase 5 fills in the `SetMeshGrabDropContract` test body to assert this confirmed contract. The test body MUST NOT contain `GTEST_SKIP()`. It must include at least one of: (a) verify the scene node's mesh reference count is correct after setMesh(), (b) verify the old mesh ref count decrements, or (c) ASAN/valgrind clean run confirming no double-free. This test is labelled `requires-opengl` and run under `xvfb-run` in CI. (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
@@ -93,13 +123,16 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 #### Terrain Tests
 
 - [ ] `TerrainChunk` unit tests in `tests/terrain/terrain_chunk_test.cpp` (`test-dev-cpp`): `TerrainChunk_BuildsMesh_WithCorrectVertexCount` (32×32 grid → (33×33) vertices); `TerrainChunk_BoundingBox_NotDegenerate` (verify extent > 0 in all axes after `recalculateBoundingBox()`); property-based test `TerrainChunk_ArbitraryGrid_NeverDegenerateBoundingBox` using `rc::gen::inRange(4, 64)` for gridSize
+
+  **Quad cells clarification**: LOD0 = 32×32 QUAD CELLS (not vertices); vertex count per LOD = (gridSize+1)²; LOD0 = 33×33 = 1089 vertices, LOD1 = 17×17 = 289 vertices, LOD2 = 9×9 = 81 vertices.
 - [ ] `TerrainSystem` rebuild deque tests in `tests/terrain/terrain_system_test.cpp` (`test-dev-cpp`): `TerrainSystem_RebuildDeque_ProcessesAtMostTwoPerFrame`; `TerrainSystem_RebuildDeque_DeduplicatesWithinFrame`; `TerrainSystem_RebuildDeque_SkipsIfAlreadyAtTargetLOD`; `TerrainSystem_FlushPendingRebuilds_EDT_NULL_DoesNotCrash` (label `integration`; runs in CI without GPU)
 
 > **Test label routing — MANDATORY**: `terrain_tests` target is labelled `unit` (no display, no GL context). Tests that call Irrlicht or raw-GL APIs MUST be placed in `tests/integration/` under `integration_tests` (label `integration`):
 >
 > - `SceneEntityManager_Destroy_FullSequence_ReleasesAllPools` — uses EDT_NULL device → `integration_tests`
 > - `TextureCache_EvictUnreferenced_ZeroRefSRGB_DeletesGLTexture` — calls `glDeleteTextures` → `integration_tests`
-> - `TerrainSystem_RebuildDeque_ProcessesAtMostTwoPerFrame` — calls `addMeshSceneNode()` → `integration_tests` unless `TerrainSystem` is fully abstracted behind `IRenderer`
+>
+> **Decision locked: TerrainSystem holds `IRenderer*` and never calls Irrlicht API directly. All four rebuild-deque tests belong in `terrain_tests` (label `unit`).**
 >
 > `terrain_tests` (label `unit`) may only contain tests that use no Irrlicht or GL APIs directly (pure math, data structure, algorithm tests with EDT_NULL guard in `TestBody`).
 
@@ -117,9 +150,11 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 
   **Step 5 — Circular dependency resolution**: `SceneEntityManager` calls Irrlicht APIs (`node->remove()`, `driver->setMaterial()`, material slot iteration) and **MUST** reside in `aitown_render` (NOT `aitown_terrain`) to avoid a circular `aitown_terrain ↔ aitown_render` CMake dependency. `TerrainSystem` holds a forward-declared `SceneEntityManager*` pointer; only `aitown_render` links Irrlicht directly. `aitown_terrain` links `aitown_render` (one direction only). Verify link order: `aitown_terrain` → `aitown_render` → `Irrlicht`; never `aitown_render` → `aitown_terrain`.
 
-#### Validate Assets — Full 14-Check Implementation
+- [ ] Move `SceneEntityManager` into `aitown_render` CMake target (`graphics-dev-irrlicht`): add `src/rendering/SceneEntityManager.cpp` to `aitown_render` in `CMakeLists.txt`; verify no `aitown_render → aitown_terrain` dependency is introduced. Exit criterion: `cmake --build build` succeeds with no CMake cycle error; `cmake --graphviz` confirms `aitown_terrain → aitown_render → Irrlicht` direction.
 
-- [ ] `tools/validate_assets.py` full **14-check** implementation (checks #1–#14 implemented; check #15 stub required) (building on Phase 4 stub; body stubs filled in). **Phase 5 implements checks #1–#14 per `architecture/asset-standards/3d-model-standards.md` and `architecture/audio-architecture/v1-audio-asset-manifest.md`. Check #14 (music JSON sidecar presence) IS a Phase 5 deliverable — it must be implemented in `validate_assets.py` in Phase 5.** If a separate `.meta` sidecar system is introduced post-V1, that would be Phase 9 scope — but the music JSON sidecar check is Phase 5.
+#### Validate Assets — Full 19-Check Implementation (Checks #1–#19)
+
+- [ ] `tools/validate_assets.py` checks #1–#19 implemented (checks #1–#13 per 3D model standards; check #14 music JSON sidecar; check #15 as stub with `# TODO Phase 9` comment; checks #16–#19 audio format/duration checks; Check #20 is Phase 9 scope) (building on Phase 4 stub; body stubs filled in). **Phase 5 implements checks #1–#14 and checks #16–#19 per `architecture/asset-standards/3d-model-standards.md`, `architecture/audio-architecture/v1-audio-asset-manifest.md`, and this plan. Check #14 (music JSON sidecar presence) IS a Phase 5 deliverable — it must be implemented in `validate_assets.py` in Phase 5.** Check #15 remains a stub in Phase 5; the `.meta` sidecar system is Phase 9 scope.
   - Check #1: `.b3d` format for building `_lod0`, `_lod1` files
   - Check #2: Small building/prop `_lod2.b3d` absent when `height_floors <= 3` (billboard path)
   - Check #3 (large building): `_lod2.b3d` present, within 300–500 tri budget, `_lod2_lm.dds` uses DXT5/BC3 (not DXT1) — read DDS fourCC to determine format
@@ -134,10 +169,10 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
   - Check #12: Vehicle normal atlas UV (8×8 grid of 256×256 px cells)
   - Check #13: Facade atlas cell pixels — all non-transparent pixel content within [8, 504] texel range on both U and V axes per cell; DDS fourCC determines transparency interpretation (DXT1: 1-bit alpha; DXT5/BC3: alpha > 0)
   (ref: `architecture/asset-standards/3d-model-standards.md`, `architecture/asset-standards/2d-texture-standards.md`)
-- [ ] **Check #14** (`validate_assets.py`): validate all `music_*.ogg` files have co-located JSON sidecars matching `music_sidecar_schema.json`. Pattern `music_*.ogg` covers both main menu variants (`music_main_menu_*.ogg`) and all gameplay stems (`music_calm_*.ogg`, `music_growth_*.ogg`, `music_crisis_*.ogg`). Files matching `ambient_*.ogg` are explicitly excluded (no sidecar required for ambient beds per `architecture/audio-architecture/v1-audio-asset-manifest.md`). A sidecar that fails schema validation (missing `bpm`, missing `beats_per_bar`, or additional properties) is a hard asset error. This check IS implemented in Phase 5 — it is NOT a Phase 9 stub. Check #15 (`.meta` sidecar file presence) remains a commented stub for Phase 9. The road LOD2 color validation is a future Phase 9 addition beyond Check #15 — it will receive a check number when Phase 9 is planned. (ref: `architecture/audio-architecture/audio-asset-formats.md`, `architecture/audio-architecture/v1-audio-asset-manifest.md`)
+- [ ] **Check #14** (`validate_assets.py`): validate all `music_*.ogg` files have co-located JSON sidecars matching `music_sidecar_schema.json`. Pattern `music_*.ogg` covers both main menu variants (`music_main_menu_*.ogg`) and all gameplay stems (`music_calm_*.ogg`, `music_growth_*.ogg`, `music_crisis_*.ogg`). Files matching `ambient_*.ogg` are explicitly excluded (no sidecar required for ambient beds per `architecture/audio-architecture/v1-audio-asset-manifest.md`). A sidecar that fails schema validation (missing `bpm`, missing `beats_per_bar`, or additional properties) is a hard asset error. This check IS implemented in Phase 5 — it is NOT a Phase 9 stub. Check #15 (`.meta` sidecar file presence) remains a commented stub for Phase 9. Road LOD2 color validation is Check #20 — a Phase 9 addition implemented alongside the road tile LOD2 deliverable. (ref: `architecture/audio-architecture/audio-asset-formats.md`, `architecture/audio-architecture/v1-audio-asset-manifest.md`)
 - [ ] **Check #15 stub** (Phase 9 scope): verify `pass` stub with `# TODO Phase 9: .meta sidecar file presence` comment is present in `tools/validate_assets.py`. This stub was committed in Phase 4; Phase 5 must confirm it is present and NOT accidentally removed. **Phase 5 exit criterion: check_15 stub present.**
 
-> **CHECK NUMBERING CONFLICT**: `implementation/phase-9.md` previously assigned Check #16 to road LOD2 color validation ("all 16 required checks"). With audio checks #16–#19 added to Phase 5, that road check must be renumbered to Check #20 in Phase 9. This renumbering conflict must be resolved during Phase 9 kick-off. The Phase 5 audio checks take priority because they gate audio assets earlier in the pipeline.
+Road LOD2 color validation is Check #20 (phase-9.md and 3d-model-standards.md updated).
 
 - [ ] **Check #16** (`sound-dev-opensoftal`, `cicd-dev-github`): `music_*.ogg` must be stereo (channels == 2), 44100 Hz sample rate; `ambient_*.ogg` must be stereo, 44100 Hz. Hard error on any mismatch. Graceful no-op if no matching files exist.
 - [ ] **Check #17** (`sound-dev-opensoftal`, `cicd-dev-github`): `sfx_vehicle_engine_*.ogg` must have duration ≥ 6.0 s, mono (channels == 1), 44100 Hz. Hard error if duration < 6.0 s (audibly mechanical loop). Graceful no-op if no matching files exist.
@@ -148,16 +183,17 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 
 #### Coverage Gate Raise
 
-- [ ] **`--fail-under-percent` raised from 0 to 80 (BLOCKING)**: update the `coverage-linux` CI job to add a real 80% gate via the `awk` pipeline from `architecture/testing/coverage.md` (or upgrade to `lcov 2.1+` if available). The gate covers `src/simulation/`, `src/terrain/`, `src/ui/`; `src/rendering/`, `src/audio/`, `src/platform/` remain excluded. This gate is BLOCKING — no subsequent phase is considered clean until this gate is green. (ref: `architecture/testing/coverage.md`, `architecture/ci-cd/github-actions-workflow.md`)
+- [ ] **`--fail-under-percent` raised from 0 to 80 (BLOCKING)**: update the `coverage-linux` CI job. Replace the `lcov --summary` informational step with the **Phase 5 total-line-coverage awk pipeline** from `architecture/testing/coverage.md § Phase 5 — Total Line Coverage 80% Gate` (NOT the Phase 4 worst-file `src/ui/` 25% pipeline). The gate measures aggregate LH/LF across all SF entries in `coverage_filtered.info`. The gate covers `src/simulation/`, `src/terrain/`, `src/ui/`; `src/rendering/`, `src/audio/`, `src/platform/` remain excluded. This gate is BLOCKING — no subsequent phase is considered clean until this gate is green. (ref: `architecture/testing/coverage.md`, `architecture/ci-cd/github-actions-workflow.md`)
 
 ### Exit Criteria
 
+- All Phase 5 C++ class files use CamelCase naming (`TextureCache.h/.cpp`, `SceneEntityManager.h/.cpp`); no snake_case `.cpp` files for class implementations remain; all `#include` directives and `CMakeLists.txt` references updated
 - Terrain generates and renders chunked `IMeshBuffer` LOD0/1/2 correctly in Irrlicht; no `ITerrainSceneNode` used
 - `TerrainSystem` deque processes ≤ 2 rebuilds per frame; `flushPendingRebuilds()` empties deque within 100 ms budget
 - `TextureCache` all three pools operational: linear, sRGB (raw-GL), splat map (raw-GL); `evictUnreferenced()` passes EDT_NULL guard test
 - Terrain GLSL shaders compile and render without GL errors; gamma fallback engaged when `isSRGBTextureSupported()` is false
 - `lod_swap_smoke_test.cpp` `SetMeshGrabDropContract` test body filled in with spike result recorded; test passes under `xvfb-run`
-- `validate_assets.py` all 14 checks implemented (checks #1–#13 per 3D model standards + Check #14 music JSON sidecar validation); runs cleanly in `validate-assets` CI job
+- `validate_assets.py` checks #1–#14 implemented (checks #1–#13 per 3D model standards + Check #14 music JSON sidecar validation); runs cleanly in `validate-assets` CI job
 - `tools/validate_assets.py` contains check #15 stub (`pass` with `# TODO Phase 9` comment)
 - checks #16–#19 implemented in `tools/validate_assets.py`; script exits 0 with informational no-op message when no matching audio assets are found
 - Atlas layout sign-off document updated in `building-atlas-layout.md` with explicit building variant sharing confirmation; `graphics-artist-3d-model` sign-off recorded confirming: (a) shared atlas cell variant approach compatible with modular kit UV workflows; (b) per-module UV islands fit within 496×496 px usable area per 512×512 cell; (c) 4×4 grid and 16-cell capacity covers V1 minimum building module set
@@ -168,11 +204,12 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 
 | Role | Responsibility |
 |---|---|
-| `graphics-dev-irrlicht` | `TerrainChunk`, `TerrainSystem`, `SceneEntityManager`, `TextureCache` full implementation, terrain GLSL shaders, sRGB upload path, `lod_swap_smoke_test.cpp` promotion |
+| `graphics-dev-irrlicht` | `TerrainChunk` (incl. `getHeightAt`/`getSlopeDegrees` query API), `TerrainSystem` (incl. map playability guarantee, LOD hysteresis distances, `ITerrainLoadProgress` stub), `SceneEntityManager` (incl. CMake placement in `aitown_render`), `TextureCache` full implementation (incl. anisotropy), terrain GLSL shaders (`int` intermediary for `u_srgbLinear`), sRGB upload path, `lod_swap_smoke_test.cpp` promotion |
 | `graphics-artist-2d-texture` | Terrain diffuse textures (DXT1 sRGB 2048×2048), terrain normal maps (DXT5nm), splat map PNG, atlas layout sign-off |
 | `graphics-artist-3d-model` | Atlas layout co-sign; building atlas sign-off gate (confirm shared cell variant approach, 496×496 px usable area, 16-cell V1 coverage) before Phase 9 UV authoring begins |
 | `test-dev-cpp` | `TerrainChunk` tests, `TerrainSystem` rebuild deque tests, `TextureCache` tests, `terrain_tests` CMake target promotion |
 | `sound-dev-opensoftal` | validate_assets.py audio checks #16–#19 implementation (OGG/WAV format and duration validation) |
+| `sound-artist-opensoftal` | No Phase 5 audio asset deliverables — all V1 audio assets delivered in Phase 10. Checks #16–#19 are graceful no-ops on empty `assets/audio/` directory. |
 | `cicd-dev-github` | `--fail-under-percent 80` gate implementation in `coverage-linux` CI job; `aitown_add_tests()` DISCOVERY_TIMEOUT extension (CI-8); `mutagen` install step in `validate-assets` CI job |
 
 ### Dependencies
