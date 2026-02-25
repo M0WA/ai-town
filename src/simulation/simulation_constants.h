@@ -24,12 +24,14 @@ struct SimulationConstants {
     // Forced loan repayment period (1 in-game year). Populates LoanTerms::repaymentTicks.
     // Emergency bonds use 24 ticks (2 in-game years) — a different mechanism.
     static constexpr int loan_repayment_ticks = 12;
+    static_assert(loan_repayment_ticks > 0, "must be positive");
 
     // Emergency Municipal Bond repayment period (2 in-game years = 24 budget ticks).
     // Distinct from loan_repayment_ticks (12 ticks for forced loans).
     // Populates LoanTerms::repaymentTicks when issuing an emergency bond.
     // See architecture/game-design/economy-model.md (Emergency Municipal Bond terms).
     static constexpr int bond_repayment_ticks = 24;
+    static_assert(bond_repayment_ticks > 0, "must be positive");
 
     // Grace period: 120 real seconds (wall-clock time).
     // Used for BOTH the grace period cost waiver AND the forced loan real-time gate.
@@ -50,14 +52,21 @@ struct SimulationConstants {
 
     // Service upkeep costs per budget tick (monthly)
     static constexpr int service_upkeep_fire_station_per_tick   = 500;
+    static_assert(service_upkeep_fire_station_per_tick > 0, "must be positive");
     static constexpr int service_upkeep_police_station_per_tick = 400;
+    static_assert(service_upkeep_police_station_per_tick > 0, "must be positive");
     static constexpr int service_upkeep_power_plant_per_tick    = 1000;
+    static_assert(service_upkeep_power_plant_per_tick > 0, "must be positive");
     static constexpr int service_upkeep_water_tower_per_tick    = 300;
+    static_assert(service_upkeep_water_tower_per_tick > 0, "must be positive");
 
     // Emergency Municipal Bond usage limits per difficulty
     static constexpr int bond_max_uses_easy   = 3;
+    static_assert(bond_max_uses_easy > 0, "must be positive");
     static constexpr int bond_max_uses_normal = 2;
+    static_assert(bond_max_uses_normal > 0, "must be positive");
     static constexpr int bond_max_uses_hard   = 1;
+    static_assert(bond_max_uses_hard > 0, "must be positive");
 
     // Zoning system constants (architecture/game-design/zoning-system.md)
     static constexpr float R_raw_material_rate    = 0.05f;  // Industrial zone raw material production rate
@@ -68,6 +77,7 @@ struct SimulationConstants {
     // Stubbing to 0 causes all Phase 3 economy property tests that compute expected
     // monthly expenses to compute 0 road maintenance and silently pass against wrong expectations.
     static constexpr int road_maintenance_cost_per_tile = 10;
+    static_assert(road_maintenance_cost_per_tile > 0, "must be positive");
 
     // MUST be 500 — treasury cost per road tile placed, deducted immediately at placement.
     // NOT waived during grace period.
@@ -103,4 +113,43 @@ struct SimulationConstants {
     // See architecture/game-design/population-density-growth.md (SimulationConstants Mapping).
     static constexpr float population_growth_cap_fraction = 0.10f;  // max +10% of tier capacity per tick
     static constexpr float population_decay_cap_fraction  = 0.15f;  // max -15% of tier capacity per tick (asymmetric: falls faster than rises)
+
+    // Service coverage radii (architecture/game-design/service-coverage.md)
+    static constexpr int fire_station_coverage_radius_m = 800;
+    static_assert(fire_station_coverage_radius_m > 0, "must be positive");
+    static constexpr int police_station_coverage_radius_m = 600;
+    static_assert(police_station_coverage_radius_m > 0, "must be positive");
+    static constexpr int water_tower_coverage_radius_m = 700;
+    static_assert(water_tower_coverage_radius_m > 0, "must be positive");
+    static constexpr float service_deficit_radius_halving_threshold = -0.10f;
+
+    // Demand bootstrapping (architecture/game-design/zoning-system.md)
+    // Bootstrap subsidies apply during ticks 0 through demand_bootstrapping_ticks-1 (i.e., ticks 0–5).
+    // Correct conditional: if (currentTick < demand_bootstrapping_ticks)
+    static constexpr int demand_bootstrapping_ticks = 6;
+    static_assert(demand_bootstrapping_ticks > 0, "must be positive");
+    static constexpr float demand_floor_residential = 0.20f;
+    static constexpr float demand_floor_commercial = 0.10f;
+    static constexpr float demand_floor_industrial = 0.10f;
+
+    // Density upgrade wave (architecture/game-design/zoning-system.md)
+    static constexpr float density_upgrade_wave_demand_threshold = 0.75f;
+    static constexpr float density_max_upgrade_rate_per_tick = 0.20f;
+
+    // Desirability system (architecture/game-design/zoning-system.md)
+    // desirability_base_value: starting desirability for a newly zoned tile (neutral mid-point of [0, 100])
+    static constexpr int desirability_base_value = 50;
+    static_assert(desirability_base_value > 0, "must be positive");
+    // adjacency_commercial_residential_bonus: bonus applied to Residential tile when Commercial is at Chebyshev d=1
+    static constexpr int adjacency_commercial_residential_bonus = 10;
+    static_assert(adjacency_commercial_residential_bonus > 0, "must be positive");
+    // adjacency_industrial_residential_base_penalty: penalty when Industrial is at Chebyshev d=1; linear falloff to 0 at d=5
+    static constexpr int adjacency_industrial_residential_base_penalty = 20;
+    static_assert(adjacency_industrial_residential_base_penalty > 0, "must be positive");
+    // service_uncovered_desirability_penalty_per_tick: desirability lost per budget tick for uncovered residential zone
+    static constexpr int service_uncovered_desirability_penalty_per_tick = 5;
+    static_assert(service_uncovered_desirability_penalty_per_tick > 0, "must be positive");
+    // service_recovery_desirability_per_tick: desirability recovered per tick when coverage restored (60% faster than penalty)
+    static constexpr int service_recovery_desirability_per_tick = 8;
+    static_assert(service_recovery_desirability_per_tick > 0, "must be positive");
 };

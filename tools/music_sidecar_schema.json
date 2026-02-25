@@ -1,0 +1,10 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "bpm":           { "type": "integer", "minimum": 1 },
+    "beats_per_bar": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["bpm", "beats_per_bar"],
+  "additionalProperties": false
+}
