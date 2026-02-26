@@ -68,6 +68,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   xauth \
   libnvtt-bin \
   python3-pip \
+  ffmpeg \
+  sox \
+  vorbis-tools \
+  mediainfo \
   && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
      --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
   && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-13 100 \
