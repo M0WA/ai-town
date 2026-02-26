@@ -11,7 +11,10 @@
       "hidden": true,
       "description": "Base settings shared by all CI presets. Requires VCPKG_ROOT env var.",
       "binaryDir": "${sourceDir}/build",
-      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "VCPKG_OVERLAY_PORTS": "${sourceDir}/vcpkg-overlays"
+      }
     },
     {
       "name": "ci-linux",
