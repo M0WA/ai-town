@@ -684,6 +684,8 @@ jobs:
             --ignore-errors unused \
             '/usr/*' \
             "${{ github.workspace }}/.fetchcontent_cache/*" \
+            "${{ github.workspace }}/vcpkg_installed/*" \
+            "${{ github.workspace }}/build/vcpkg_installed/*" \
             '*/tests/*' \
             '*/mock_*.h' '*/mock_*.cpp' \
             '*/manual_*.h' '*/manual_*.cpp' \
