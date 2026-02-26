@@ -51,6 +51,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   automake \
   libtool \
   build-essential \
+  ccache \
   ninja-build \
   pkg-config \
   openssh-client \
