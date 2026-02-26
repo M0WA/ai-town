@@ -195,3 +195,33 @@ Before Phase 9 UV authoring begins, all three reviewers must confirm:
 <!-- SIGN-OFF: graphics-artist-2d-texture 2026-02-25 — confirmed splat channel lock:
      R=base (biome-specific: grassland=grass, desert=sand), G=asphalt, B=soil, A=concrete;
      content-only swap rule confirmed; per-chunk splat map 16×16 px for 64×64 m chunk confirmed -->
+
+## Phase 5 Building Atlas Layout Sign-Off
+
+**`graphics-artist-3d-model` — 2026-02-25**
+
+Confirmed:
+
+1. **Shared atlas cell variant approach**: Multiple mesh variants referencing one module-type cell
+   (e.g., all residential low-rise variants UV-mapped to the same `wall_residential_low` cell) is
+   fully compatible with modular kit UV authoring workflows. Artists author UV islands per module
+   type, not per building variant — this is the standard modular kit approach. Per-variant UV
+   islands are placed within distinct sub-regions of the shared cell without conflicting UV shells.
+
+2. **Per-module UV islands within 496x496 px usable area**: With a 512x512 px cell and 8 px border
+   on all sides, the 496x496 px usable area is sufficient for all V1 building module types at the
+   planned resolution (diffuse at DXT1 256x256 effective per island, normal at DXT5nm 256x256 per
+   island). No module type requires bleed into the 8 px border.
+
+3. **4x4 grid, 16-cell capacity covers V1 minimum module set**: The 16 cells cover: residential
+   (low/mid/high wall modules, roof variants), commercial (glass facade, brick facade), industrial
+   (corrugated metal, concrete block), road modules, and civic building facades. 16 cells is
+   sufficient for V1 scope. The shared-variant approach means distinct module types consume the
+   allocated cells with 2 spare cells (row 3, col 2 and row 3, col 3) remaining available for
+   Phase 9+ use without requiring an atlas resolution increase.
+
+This sign-off satisfies the Phase 5 exit criterion for the `graphics-artist-3d-model` building
+atlas sign-off gate. Phase 9 UV authoring for building mesh UV channel 0 may proceed once all
+three required sign-off comment blocks are present in this file.
+
+<!-- SIGN-OFF: graphics-artist-3d-model 2026-02-25 — confirmed: (a) shared atlas cell variant approach (multiple mesh variants referencing one module-type cell) is compatible with modular kit UV authoring workflows; (b) per-module UV islands fit within 496x496 px usable area per 512x512 cell without bleed into 8 px border; (c) 4x4 grid 16-cell capacity covers V1 minimum building module set including all zone-tier wall/base/roof/facade-detail types across Residential/Commercial/Industrial zones -->
