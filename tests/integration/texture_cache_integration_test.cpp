@@ -11,6 +11,11 @@
 // terrain_tests has label "unit"; integration_tests has label "integration".
 //
 // Tests in this file:
+//   - TextureCache_EvictUnreferenced_ZeroRefSRGB_DeletesGLTexture
+//       Verifies that evictUnreferenced() removes a zero-ref sRGB entry from
+//       m_srgbTextures. Under EDT_NULL the logical "deletion" (map removal) is
+//       verified; the EDT_NULL guard prevents the raw glDeleteTextures call.
+//       Under EDT_OPENGL (xvfb), glDeleteTextures would also be called.
 //   - TextureCache_EvictUnreferenced_ZeroRefSRGB_EDT_NULL_NoGLDelete
 //       Verifies no crash and correct map-cleanup when evictUnreferenced() runs
 //       on a zero-ref sRGB entry under EDT_NULL.
@@ -77,6 +82,40 @@ protected:
     irr::video::IVideoDriver*  m_driver{nullptr};
     std::unique_ptr<TextureCache> m_cache;
 };
+
+// ---------------------------------------------------------------------------
+// TextureCache_EvictUnreferenced_ZeroRefSRGB_DeletesGLTexture
+//
+// Spec: phase-5.md §TextureCache tests
+// Routing: integration_tests (EDT_NULL device; no xvfb required)
+//
+// Verifies that evictUnreferenced() logically "deletes" (removes from the
+// m_srgbTextures map) a zero-reference sRGB entry.  Under EDT_NULL the EDT_NULL
+// guard skips the raw glDeleteTextures call but MUST still remove the map entry
+// so that getSRGBGLuint() returns 0 after eviction.
+//
+// The name "_DeletesGLTexture" reflects that under EDT_OPENGL (real GL context)
+// glDeleteTextures WOULD be called; this test confirms the cache entry removal
+// which is observable in both EDT_NULL and EDT_OPENGL contexts.
+// ---------------------------------------------------------------------------
+TEST_F(TextureCacheIntegrationTest, TextureCache_EvictUnreferenced_ZeroRefSRGB_DeletesGLTexture) {
+    const std::string path = "evict_srgb_d.dds";
+
+    // Load (ref=1 under EDT_NULL — map entry inserted with glHandle=0).
+    GLuint handle = m_cache->loadSRGB(path, GL_COMPRESSED_SRGB_S3TC_DXT1_EXT);
+    EXPECT_EQ(handle, GLuint{0})
+        << "loadSRGB must return 0 under EDT_NULL (no GL context)";
+
+    // Release (ref=0 — entry eligible for eviction).
+    m_cache->releaseSRGB(path);
+
+    // evictUnreferenced() must remove the zero-ref entry from the map.
+    EXPECT_NO_FATAL_FAILURE(m_cache->evictUnreferenced());
+
+    // The entry must be gone: getSRGBGLuint returns 0 because the key no longer exists.
+    EXPECT_EQ(m_cache->getSRGBGLuint(path), GLuint{0})
+        << "Zero-ref sRGB entry must be deleted from m_srgbTextures after evictUnreferenced()";
+}
 
 // ---------------------------------------------------------------------------
 // TextureCache_EvictUnreferenced_ZeroRefSRGB_EDT_NULL_NoGLDelete

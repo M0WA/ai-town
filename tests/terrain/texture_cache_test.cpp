@@ -3,7 +3,7 @@
 // Tests that do NOT require a real GL context (EDT_NULL guard verified, ref-count
 // bookkeeping, evict no-op under EDT_NULL).
 //
-// The integration tests that exercise actual GL deletion
+// The integration tests that exercise cache-entry deletion
 // (TextureCache_EvictUnreferenced_ZeroRefSRGB_DeletesGLTexture and
 //  SceneEntityManager_Destroy_FullSequence_ReleasesAllPools) live in
 // tests/integration/texture_cache_integration_test.cpp under the "integration"

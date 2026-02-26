@@ -26,13 +26,34 @@
 #include <gmock/gmock.h>
 
 #include "src/terrain/TerrainSystem.h"
+#include "src/terrain/ITerrainRNG.h"
 #include "tests/simulation/mock_renderer.h"   // NiceMock<MockRenderer>
 #include "tests/simulation/manual_clock.h"    // ManualClock
+#include "tests/terrain/mock_terrain_rng.h"   // MockTerrainRNG
 
 #include <memory>
 #include <vector>
 
 using namespace testing;
+
+// ---------------------------------------------------------------------------
+// FlatRNG — deterministic ITerrainRNG that always returns 0.0f.
+//
+// Using nextFloat()=0 produces a heightmap where every vertex height = 0.
+// This gives slope = 0 at every tile, satisfying both playability constraints:
+//   (1) 100% flat tiles (>> 20% minimum)
+//   (2) Entire map is one contiguous flat region (>> 50x50 minimum)
+//
+// Used by TerrainSystem_FlatTilePercentage_MeetsMinimum and
+// TerrainSystem_ContiguousFlatRegion_MeetsMinimum to verify generate() returns
+// true (playable) when both constraints are satisfied on the first attempt.
+// ---------------------------------------------------------------------------
+class FlatRNG : public ITerrainRNG {
+public:
+    float nextFloat() override { return 0.0f; }
+    int   nextInt(int min, int /*max*/) override { return min; }
+    void  reseed(uint64_t) override {}
+};
 
 // ---------------------------------------------------------------------------
 // BudgetExhaustionClock
@@ -260,4 +281,56 @@ TEST_F(TerrainSystemTest, LOD_HysteresisGap_At_Least8mClose_At_Least15mFar) {
         << "LOD1->LOD2 switch-in must be < 285 m per 3d-model-standards.md";
     EXPECT_GE(gap12, 15.0f)
         << "LOD1->LOD2 hysteresis gap must be >= 15 m per 3d-model-standards.md";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_FlatTilePercentage_MeetsMinimum
+//
+// Verifies playability constraint (1): generate() returns true only when at
+// least 20% of total map tiles have slope < 15 degrees.
+//
+// Approach: inject FlatRNG (nextFloat()=0) → all vertex heights = 0 → all
+// tile slopes = 0 degrees → flat tile percentage = 100% >= 20%.
+// A 100×100 tile map is used; maxRetries=0 so the first attempt must satisfy
+// the constraint.
+//
+// Spec ref: phase-5.md §Map playability guarantee
+//           architecture/game-design/terrain-interaction.md §Buildability
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, FlatTilePercentage_MeetsMinimum) {
+    FlatRNG flatRng;
+    // 100×100 tile map, 4 m cell size.  All heights = 0 → 100% flat tiles.
+    bool playable = m_sim->generate(/*mapTilesX=*/100, /*mapTilesZ=*/100,
+                                    /*cellSize=*/4.0f, &flatRng, /*maxRetries=*/0);
+    EXPECT_TRUE(playable)
+        << "generate() must return true when flat tile percentage (100%) >= 20% minimum";
+    // Verify that a non-empty heightmap was stored.
+    EXPECT_FALSE(m_sim->getGeneratedHeightmap().empty())
+        << "generate() must populate m_generatedHeightmap on success";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_ContiguousFlatRegion_MeetsMinimum
+//
+// Verifies playability constraint (2): generate() returns true only when at
+// least one contiguous flat region of >= 50×50 tiles exists.
+//
+// Approach: inject FlatRNG (nextFloat()=0) → all slopes = 0 → entire 100×100
+// map is one flat region (100×100 >> 50×50 minimum).
+// maxRetries=0 — the first attempt must satisfy both constraints.
+//
+// Spec ref: phase-5.md §Map playability guarantee
+//           architecture/game-design/terrain-interaction.md §Buildability
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, ContiguousFlatRegion_MeetsMinimum) {
+    FlatRNG flatRng;
+    // 100×100 tile map.  All heights = 0 → entire map is one flat connected
+    // component with bounding box 100×100 >> 50×50 minimum.
+    bool playable = m_sim->generate(/*mapTilesX=*/100, /*mapTilesZ=*/100,
+                                    /*cellSize=*/4.0f, &flatRng, /*maxRetries=*/0);
+    EXPECT_TRUE(playable)
+        << "generate() must return true when a contiguous flat region >= 50×50 exists";
+    // The generated heightmap must have (100+1)*(100+1) = 10201 vertices.
+    EXPECT_EQ(m_sim->getGeneratedHeightmap().size(), static_cast<size_t>(101 * 101))
+        << "Heightmap vertex count must be (mapTilesX+1)*(mapTilesZ+1) = 101*101";
 }

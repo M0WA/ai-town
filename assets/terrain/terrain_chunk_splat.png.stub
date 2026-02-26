@@ -1,4 +1,0 @@
-PLACEHOLDER: terrain_chunk_splat.png
-Size: 16x16 RGBA8 PNG
-Channels: R=grass/base, G=asphalt, B=soil, A=concrete
-Note: Replace with real PNG before Phase 9 TextureCache::loadSplatMap() testing.
