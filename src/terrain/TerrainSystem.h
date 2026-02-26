@@ -49,6 +49,9 @@
 // IClock — include full definition so test doubles (BudgetExhaustionClock) can subclass it.
 #include "../interfaces/IClock.h"
 
+// ITerrainQuery — implemented by TerrainSystem; consumed by CitySimulation for earthworks cost.
+#include "../interfaces/ITerrainQuery.h"
+
 // Forward declaration for IRenderer (used as pointer only in TerrainSystem).
 class IRenderer;
 
@@ -62,7 +65,9 @@ struct ChunkRebuildRequest {
 };
 
 // TerrainSystem — manages all terrain chunks, LOD rebuild deque, and load/unload.
-class TerrainSystem {
+// Implements ITerrainQuery so CitySimulation can query tile slopes for earthworks cost
+// without a dependency on the full TerrainSystem type.
+class TerrainSystem : public ITerrainQuery {
 public:
     // Constructor: IRenderer* and IClock* are injected.
     // renderer: used for scene graph operations (addMeshSceneNode, destroy).
@@ -115,6 +120,12 @@ public:
     // Returns true if a playability-compliant map was generated within maxRetries.
     bool generate(int mapTilesX, int mapTilesZ, float cellSize, ITerrainRNG* rng,
                   int maxRetries = 100);
+
+    // ITerrainQuery implementation —
+    // Returns slope in degrees at tile (tileX, tileZ) using the stored heightmap.
+    // Returns 0.0f for out-of-bounds tiles or before generate() is called (flat stub).
+    // Delegates the same gradient formula used by generate()'s playability check.
+    float getSlopeDegrees(int tileX, int tileZ) const override;
 
     // Accessors for testing.
     int  pendingRebuildCount() const { return static_cast<int>(m_rebuildDeque.size()); }
@@ -179,4 +190,9 @@ private:
     // Row-major: index = z * (mapTilesX + 1) + x.
     // Empty until generate() is called.
     std::vector<float> m_generatedHeightmap;
+
+    // Map dimensions stored by generate() for getSlopeDegrees() lookups.
+    int   m_mapTilesX{0};
+    int   m_mapTilesZ{0};
+    float m_cellSize{1.0f};
 };

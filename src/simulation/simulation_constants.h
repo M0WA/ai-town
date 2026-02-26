@@ -81,7 +81,15 @@ struct SimulationConstants {
 
     // MUST be 500 — treasury cost per road tile placed, deducted immediately at placement.
     // NOT waived during grace period.
-    static constexpr int road_placement_cost = 500;
+    // Named with _per_tile suffix to parallel road_maintenance_cost_per_tile and distinguish
+    // it from earthworks_base_cost_per_tile (same dollar value, different semantic).
+    static constexpr int road_placement_cost_per_tile = 500;
+
+    // MUST be 500 — base earthworks cost per tile, multiplied by slope_severity_factor.
+    // Full formula (terrain-interaction.md): cost = earthworks_base_cost_per_tile * clamp((slope_deg - 15) / 30, 0, 2)
+    // Applied at zone/road placement when slope > 15°; deducted from treasury immediately.
+    // Coincidentally equal to road_placement_cost_per_tile but semantically distinct.
+    static constexpr int earthworks_base_cost_per_tile = 500;
 
     // Income per resident by density tier (economy-model.md)
     // MUST be initialized to specified values — used directly in Phase 3 revenue calculation tests.
@@ -152,4 +160,42 @@ struct SimulationConstants {
     // service_recovery_desirability_per_tick: desirability recovered per tick when coverage restored (60% faster than penalty)
     static constexpr int service_recovery_desirability_per_tick = 8;
     static_assert(service_recovery_desirability_per_tick > 0, "must be positive");
+
+    // Starting funds by difficulty (architecture/game-design/game-progression-modes.md)
+    // Used in CitySimulation constructor and verified by StartingFunds_Easy/Normal/Hard tests.
+    static constexpr int starting_funds_easy   = 1'000'000;
+    static constexpr int starting_funds_normal =   500'000;
+    static constexpr int starting_funds_hard   =   200'000;
+    static_assert(starting_funds_easy   > starting_funds_normal, "easy must have more than normal");
+    static_assert(starting_funds_normal > starting_funds_hard,   "normal must have more than hard");
+
+    // Traffic system constants (architecture/game-design/traffic-system.md)
+    // null_path_demand_default: demand factor for tiles with no valid A* path to their destination;
+    //   neither the 0-demand extreme nor full demand — represents "technically accessible but poorly
+    //   connected" state. Value 0.5 is the midpoint of smoothstep range.
+    static constexpr float null_path_demand_default = 0.5f;
+    static_assert(null_path_demand_default > 0.0f && null_path_demand_default < 1.0f,
+                  "null_path_demand_default must be in (0, 1)");
+
+    // traffic_agent_timeout_seconds: A* agents that exceed this travel time are logged as
+    //   "extreme travel" (not null-path). 120 simulation seconds at 1x speed.
+    static constexpr float traffic_agent_timeout_seconds = 120.0f;
+    static_assert(traffic_agent_timeout_seconds > 0.0f, "timeout must be positive");
+
+    // Congestion tax-yield penalty thresholds (as fraction of max road speed):
+    //   speed > congestion_none_threshold     → no penalty
+    //   speed in (congestion_low_threshold, congestion_none_threshold] → -10% yield
+    //   speed in (congestion_high_threshold,  congestion_low_threshold] → -18% yield
+    //   speed <= congestion_high_threshold    → -25% yield (max penalty)
+    // Closed-interval boundaries: 21-30% inclusive → -18%; 31-40% inclusive → -10%.
+    static constexpr float congestion_none_threshold   = 0.40f;  // > 40% speed → no penalty
+    static constexpr float congestion_low_threshold    = 0.30f;  // 31-40% → -10%
+    static constexpr float congestion_high_threshold   = 0.20f;  // 21-30% → -18%; ≤20% → -25%
+    static constexpr float congestion_penalty_low      = 0.10f;  // 10% tax-yield reduction
+    static constexpr float congestion_penalty_medium   = 0.18f;  // 18% tax-yield reduction
+    static constexpr float congestion_penalty_high     = 0.25f;  // 25% tax-yield reduction (cap)
+    // min_speed_fraction: minimum road speed as fraction of max speed (road never fully stops)
+    static constexpr float min_speed_fraction = 0.05f;
+    static_assert(min_speed_fraction > 0.0f && min_speed_fraction < congestion_high_threshold,
+                  "min_speed_fraction must be below high-congestion threshold");
 };

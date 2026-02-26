@@ -696,7 +696,7 @@ jobs:
           # lcov --summary informational step REMOVED in Phase 5 — replaced by the
           # 80% total-line-coverage awk gate in the step below.
 
-      - name: Enforce 80% total line coverage gate (Phase 5)
+      - name: Enforce 80% total line coverage gate
         run: |
           total=$(awk '
             /^LH:/ { lh+=substr($0,4)+0 }
@@ -709,7 +709,7 @@ jobs:
           fi
           awk -v pct="$total" 'BEGIN {
             if (pct+0 < 80.0) {
-              print "FAIL: total line coverage " pct "% < 80% Phase 5 gate"
+              print "FAIL: total line coverage " pct "% < 80%"
               exit 1
             } else {
               print "PASS: total line coverage " pct "% >= 80%"
