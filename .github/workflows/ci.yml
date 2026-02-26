@@ -691,12 +691,8 @@ jobs:
             --output-file coverage_filtered.info
           lcov --list coverage_filtered.info
           genhtml coverage_filtered.info --output-directory coverage_html/
-          # Phase 0: no hard coverage gate. lcov --fail-under-percent does not exist in
-          # lcov 2.0 (ubuntu-latest); it was added in lcov 2.1. At Phase 0 the gate would
-          # be 0% anyway (smoke tests give trivial coverage). Use --summary for informational
-          # output only. Phase 2 replaces this with a proper 80% gate once the tool version
-          # is confirmed or the gate is implemented via a bash percentage check.
-          lcov --summary coverage_filtered.info
+          # lcov --summary informational step REMOVED in Phase 5 — replaced by the
+          # 80% total-line-coverage awk gate in the step below.
 
       - name: Enforce 80% total line coverage gate (Phase 5)
         run: |
