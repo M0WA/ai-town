@@ -315,6 +315,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## Notes for AI Assistants
 
+- **NEVER merge a PR without EXPLICIT user request.** Do not merge pull requests autonomously, even after CI passes. Always wait for the user to explicitly ask before merging.
 - **Markdown linting**: use `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` — the bare `markdownlint` command is not installed; `npx markdownlint-cli` is the correct invocation for agents and local runs. CI/CD workflows are unchanged.
 - **Local build with gcc-12 fallback**: if the devcontainer image has not been rebuilt after the gcc-13 Dockerfile fix, `/usr/bin/c++` resolves to gcc-12 which lacks `<format>` (required by openal-soft ≥ 1.24.0). Workaround: pass `-DVCPKG_OVERLAY_PORTS=vcpkg-overlays` to cmake — the overlay pins openal-soft to 1.23.1. Once the devcontainer is rebuilt (which now sets the `c++` alternative to gcc-13), the overlay is not needed.
 - C++ project using Irrlicht (EDT_OPENGL only) and OpenAL Soft
