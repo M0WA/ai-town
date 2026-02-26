@@ -196,7 +196,7 @@ target_link_libraries(aitown_audio PRIVATE
 # Phase 6 replaces placeholder.cpp with CitySimulation.cpp.
 # ----------------------------------------------------------------------------
 add_library(aitown_sim STATIC
-    src/simulation/placeholder.cpp
+    src/simulation/CitySimulation.cpp
 )
 target_include_directories(aitown_sim
     PRIVATE   src/simulation/      # implementation headers — NOT propagated

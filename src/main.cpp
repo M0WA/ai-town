@@ -3,7 +3,7 @@
 //
 // 8-step frame sequence:
 //   1. Poll events (device->run() + SEvent dispatch via EventReceiver)
-//   2. CitySimulation::tick(realDeltaSeconds) [STUB — Phase 6]
+//   2. CitySimulation::tick(realDeltaSeconds) [Phase 6]
 //   3. CameraController::update(dt)
 //   3b. UIManager::update(realDeltaSeconds)
 //   4a. AudioSystem::syncListenerToCamera(cameraState)
@@ -23,6 +23,9 @@
 #include "src/platform/EventReceiver.h"
 #include "src/interfaces/WallClock.h"
 #include "src/interfaces/camera_state.h"
+#include "src/simulation/CitySimulation.h"
+#include "src/simulation/StdSimulationRNG.h"
+#include "src/terrain/TerrainSystem.h"
 
 #include <irrlicht.h>
 #include <cstdio>
@@ -119,6 +122,20 @@ int main() {
     WallClock wallClock;
     double prevTime = wallClock.nowSeconds();
 
+    // -------------------------------------------------------------------------
+    // Phase 6: Simulation engine.
+    // StdSimulationRNG — production mt19937-backed ISimulationRNG.
+    // TerrainSystem — ITerrainQuery implementation (provides slope data for earthworks cost).
+    //   MUST NOT pass nullptr for terrain — earthworks cost silently returns 0 for all tiles.
+    // IAudioSystem* is nullptr until Phase 7 implements the real AudioSystem.
+    //   CitySimulation null-checks audio before each call site.
+    // Difficulty::Normal is the production default; Phase 8 wires this to the New Game flow.
+    // -------------------------------------------------------------------------
+    StdSimulationRNG simRng;
+    TerrainSystem terrainSystem(&renderer, &wallClock);
+    CitySimulation citySimulation(
+        &renderer, /*audio=*/nullptr, &simRng, &wallClock, &terrainSystem, Difficulty::Normal);
+
     // =========================================================================
     // 8-STEP FRAME LOOP
     // =========================================================================
@@ -132,16 +149,12 @@ int main() {
         // Step 1: Poll events — handled by EventReceiver::OnEvent() via device->run().
         // No explicit poll call needed — device->run() drives EventReceiver.
 
-        // Step 2: CitySimulation::tick(realDeltaSeconds) — STUB (Phase 6 deliverable).
-        // DEFAULT SPEED CONTRACT: CitySimulation must be constructed or initialized at
-        // SpeedMultiplier::x3 (not x1 or Paused) — see architecture/game-design/simulation-time.md.
-        // Phase 6 MUST verify setSpeed(SpeedMultiplier::x3) or equivalent initialization is
-        // called; initializing at x1 silently breaks the default starting speed contract.
-        // FRAME-LOOP POSITION CONSTRAINT: The tick call MUST remain at step 2 in the 8-step
-        // sequence — moving it to any later step violates the Frame-Loop Position Constraint
-        // in `architecture/game-design/simulation-time.md` and causes rendered frames to
-        // reflect an inconsistent simulation state.
-        // TODO Phase 6: citySimulation.tick(realDeltaSeconds);
+        // Step 2: CitySimulation::tick(realDeltaSeconds) — Phase 6 wired.
+        // DEFAULT SPEED CONTRACT: CitySimulation is constructed at SpeedMultiplier::x3
+        // (kDefaultSimSpeed) — see architecture/game-design/simulation-time.md.
+        // FRAME-LOOP POSITION CONSTRAINT: This tick call MUST remain at step 2 in the
+        // 8-step sequence (before camera, UI, audio, and rendering steps).
+        citySimulation.tick(realDeltaSeconds);
 
         // Step 3: CameraController::update(dt).
         // OAL-2 ordering rule: CameraController::update() MUST execute BEFORE

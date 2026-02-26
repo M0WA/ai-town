@@ -152,7 +152,7 @@ struct SimulationConstants {
     static constexpr float demand_floor_industrial = 0.10f;
 
     // Density upgrade wave (architecture/game-design/zoning-system.md)
-    static constexpr float density_upgrade_wave_demand_threshold = 0.75f;
+    static constexpr float density_upgrade_wave_demand_threshold = 0.50f;
     static constexpr float density_max_upgrade_rate_per_tick = 0.20f;
 
     // Desirability system (architecture/game-design/zoning-system.md)
