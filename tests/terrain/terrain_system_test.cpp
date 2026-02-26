@@ -519,3 +519,209 @@ TEST_F(TerrainSystemTest, Generate_FlatMap_AllHeightsZero) {
             << i;
     }
 }
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_ProcessOneRebuild_WithHeightmap_LOD1_CallsRebuildChunk
+//
+// Registers a chunk at LOD 0, supplies its LOD0 heightmap and world origin,
+// then enqueues a rebuild to LOD 1.  Expects IRenderer::rebuildTerrainChunk()
+// to be called exactly once and verifies that the chunk's tracked LOD is
+// updated to 1 after update().
+//
+// The heightmap has (kTerrainLOD0GridSize+1)^2 = 33*33 = 1089 entries (all 0.0f).
+// This exercises the targetLOD == 1 branch in processOneRebuild().
+//
+// Spec ref: architecture/graphics-architecture/procedural-terrain.md
+//           §TerrainSystem rebuild deque tests
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, ProcessOneRebuild_WithHeightmap_LOD1_CallsRebuildChunk) {
+    const uint64_t kChunkId = 200u;
+
+    // Register the chunk at LOD 0.
+    m_sim->registerChunkAtLOD(kChunkId, /*currentLOD=*/0);
+
+    // Register the LOD0 heightmap: (kTerrainLOD0GridSize+1)^2 = 33*33 = 1089 floats, all 0.0f.
+    const int kVertexCount = (kTerrainLOD0GridSize + 1) * (kTerrainLOD0GridSize + 1);
+    m_sim->registerChunkHeightmap(kChunkId, std::vector<float>(kVertexCount, 0.0f));
+
+    // Register the chunk world origin.
+    m_sim->registerChunkPosition(kChunkId, /*worldOriginX=*/0.0f, /*worldOriginZ=*/0.0f);
+
+    // Expect rebuildTerrainChunk() to be called exactly once during update().
+    EXPECT_CALL(*m_renderer, rebuildTerrainChunk(::testing::_)).Times(1);
+
+    // Enqueue rebuild to LOD 1 and process it.
+    m_sim->enqueueRebuild(kChunkId, /*targetLOD=*/1);
+    m_sim->update(0.016f);
+
+    // The chunk's tracked LOD must be updated to 1.
+    EXPECT_EQ(m_sim->getChunkLOD(kChunkId), 1)
+        << "getChunkLOD() must return 1 after a successful rebuild to LOD 1";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_ProcessOneRebuild_WithHeightmap_LOD2_CallsRebuildChunk
+//
+// Same structure as the LOD1 test above, but targets LOD 2.
+// Exercises the targetLOD >= 2 branch in processOneRebuild().
+//
+// Spec ref: architecture/graphics-architecture/procedural-terrain.md
+//           §TerrainSystem rebuild deque tests
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, ProcessOneRebuild_WithHeightmap_LOD2_CallsRebuildChunk) {
+    const uint64_t kChunkId = 201u;
+
+    // Register the chunk at LOD 0.
+    m_sim->registerChunkAtLOD(kChunkId, /*currentLOD=*/0);
+
+    // Register the LOD0 heightmap: 33*33 = 1089 floats, all 0.0f.
+    const int kVertexCount = (kTerrainLOD0GridSize + 1) * (kTerrainLOD0GridSize + 1);
+    m_sim->registerChunkHeightmap(kChunkId, std::vector<float>(kVertexCount, 0.0f));
+
+    // Register the chunk world origin.
+    m_sim->registerChunkPosition(kChunkId, /*worldOriginX=*/0.0f, /*worldOriginZ=*/0.0f);
+
+    // Expect rebuildTerrainChunk() to be called exactly once during update().
+    EXPECT_CALL(*m_renderer, rebuildTerrainChunk(::testing::_)).Times(1);
+
+    // Enqueue rebuild to LOD 2 and process it.
+    m_sim->enqueueRebuild(kChunkId, /*targetLOD=*/2);
+    m_sim->update(0.016f);
+
+    // The chunk's tracked LOD must be updated to 2.
+    EXPECT_EQ(m_sim->getChunkLOD(kChunkId), 2)
+        << "getChunkLOD() must return 2 after a successful rebuild to LOD 2";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_GetSlopeDegrees_BeforeGenerate_ReturnsZero
+//
+// Verifies that getSlopeDegrees() returns 0.0f before generate() is called.
+// The ITerrainQuery contract specifies a flat-stub return before heightmap
+// data is available.
+//
+// Spec ref: architecture/game-design/terrain-interaction.md §Buildability
+//           architecture/testing/testability-architecture.md §ITerrainQuery
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, GetSlopeDegrees_BeforeGenerate_ReturnsZero) {
+    // No generate() call — heightmap is empty.
+    EXPECT_FLOAT_EQ(m_sim->getSlopeDegrees(0, 0), 0.0f)
+        << "getSlopeDegrees() must return 0.0f before generate() is called";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_GetSlopeDegrees_AfterFlatGenerate_ReturnsZero
+//
+// After generate() with FlatRNG (all heights = 0.0f), every tile slope must
+// be 0.0f because adjacent vertex heights are equal → gradient = 0 → atan(0) = 0.
+//
+// Tests both an edge tile (0,0) and an interior tile (5,5) to confirm the slope
+// query is consistent across the generated heightmap.
+//
+// Spec ref: architecture/game-design/terrain-interaction.md §Buildability
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, GetSlopeDegrees_AfterFlatGenerate_ReturnsZero) {
+    FlatRNG flatRng;
+    m_sim->generate(/*mapTilesX=*/10, /*mapTilesZ=*/10,
+                    /*cellSize=*/4.0f, &flatRng, /*maxRetries=*/0);
+
+    EXPECT_FLOAT_EQ(m_sim->getSlopeDegrees(0, 0), 0.0f)
+        << "getSlopeDegrees(0,0) must be 0.0f on a flat heightmap";
+    EXPECT_FLOAT_EQ(m_sim->getSlopeDegrees(5, 5), 0.0f)
+        << "getSlopeDegrees(5,5) must be 0.0f on a flat heightmap";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_GetSlopeDegrees_OutOfBounds_ReturnsZero
+//
+// Verifies that getSlopeDegrees() returns 0.0f for out-of-bounds tile indices
+// (negative or >= mapTiles dimension).  Out-of-bounds access must not crash
+// and must return the flat-stub sentinel value.
+//
+// Spec ref: architecture/game-design/terrain-interaction.md §Buildability
+//           TerrainSystem.h — "Returns 0.0f for out-of-bounds tiles"
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, GetSlopeDegrees_OutOfBounds_ReturnsZero) {
+    FlatRNG flatRng;
+    // 10×10 tile map — valid tile indices are [0,9] in each axis.
+    m_sim->generate(/*mapTilesX=*/10, /*mapTilesZ=*/10,
+                    /*cellSize=*/4.0f, &flatRng, /*maxRetries=*/0);
+
+    EXPECT_FLOAT_EQ(m_sim->getSlopeDegrees(-1,  0), 0.0f)
+        << "getSlopeDegrees(-1, 0) must return 0.0f (out of bounds)";
+    EXPECT_FLOAT_EQ(m_sim->getSlopeDegrees(10,  0), 0.0f)
+        << "getSlopeDegrees(10, 0) must return 0.0f (== mapTilesX, out of bounds)";
+    EXPECT_FLOAT_EQ(m_sim->getSlopeDegrees( 0, -1), 0.0f)
+        << "getSlopeDegrees(0, -1) must return 0.0f (out of bounds)";
+    EXPECT_FLOAT_EQ(m_sim->getSlopeDegrees( 0, 10), 0.0f)
+        << "getSlopeDegrees(0, 10) must return 0.0f (== mapTilesZ, out of bounds)";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_LOD_SwitchDistance_UnknownLOD_ReturnsZero
+//
+// Verifies that lodSwitchOutDistance() and lodSwitchInDistance() return 0.0f
+// for fromLOD values that are not handled by the implementation (i.e., anything
+// other than 0 or 1).  fromLOD=2 (LOD2 cannot transition further) and
+// fromLOD=-1 (invalid) must both produce 0.0f.
+//
+// Spec ref: architecture/graphics-architecture/procedural-terrain.md
+//           §LOD hysteresis distances
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, LOD_SwitchDistance_UnknownLOD_ReturnsZero) {
+    // fromLOD=2: not a valid transition origin (LOD2 is the coarsest level).
+    EXPECT_FLOAT_EQ(TerrainSystem::lodSwitchOutDistance(2), 0.0f)
+        << "lodSwitchOutDistance(2) must return 0.0f for an unrecognised fromLOD";
+    EXPECT_FLOAT_EQ(TerrainSystem::lodSwitchInDistance(2), 0.0f)
+        << "lodSwitchInDistance(2) must return 0.0f for an unrecognised fromLOD";
+
+    // fromLOD=-1: entirely invalid.
+    EXPECT_FLOAT_EQ(TerrainSystem::lodSwitchOutDistance(-1), 0.0f)
+        << "lodSwitchOutDistance(-1) must return 0.0f for an invalid fromLOD";
+    EXPECT_FLOAT_EQ(TerrainSystem::lodSwitchInDistance(-1), 0.0f)
+        << "lodSwitchInDistance(-1) must return 0.0f for an invalid fromLOD";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_FlushPendingRebuilds_WithProgressCallback
+//
+// Verifies that flushPendingRebuilds() invokes the ITerrainLoadProgress
+// callback at least once when rebuilds are present.
+//
+// Uses a local CountingProgress stub that increments callCount each time
+// onChunkRebuilt() is called.  Three distinct chunks (IDs 300–302) are
+// enqueued so that at least one callback fires even if the budget runs out
+// after the first rebuild.
+//
+// Spec ref: TerrainSystem.h §flushPendingRebuilds()
+//           architecture/graphics-architecture/procedural-terrain.md
+//           §ITerrainLoadProgress callback
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, FlushPendingRebuilds_WithProgressCallback) {
+    // Local progress stub — counts onChunkRebuilt() invocations.
+    struct CountingProgress : public ITerrainLoadProgress {
+        int callCount{0};
+        void onChunkRebuilt(int /*done*/, int /*total*/) override {
+            ++callCount;
+        }
+    };
+
+    // Register three distinct chunks at LOD 0, supply their heightmaps and origins.
+    const int kVertexCount = (kTerrainLOD0GridSize + 1) * (kTerrainLOD0GridSize + 1);
+    for (uint64_t id = 300u; id <= 302u; ++id) {
+        m_sim->registerChunkAtLOD(id, /*currentLOD=*/0);
+        m_sim->registerChunkHeightmap(id, std::vector<float>(kVertexCount, 0.0f));
+        m_sim->registerChunkPosition(id, /*worldOriginX=*/0.0f, /*worldOriginZ=*/0.0f);
+        m_sim->enqueueRebuild(id, /*targetLOD=*/1);
+    }
+
+    ASSERT_EQ(m_sim->pendingRebuildCount(), 3)
+        << "All 3 rebuild requests must be queued before flushPendingRebuilds()";
+
+    CountingProgress progress;
+    m_sim->flushPendingRebuilds(&progress);
+
+    // At least one callback must have fired (one rebuild completed at minimum).
+    EXPECT_GE(progress.callCount, 1)
+        << "onChunkRebuilt() must be called at least once during flushPendingRebuilds()";
+}

@@ -1044,3 +1044,134 @@ TEST_F(EconomyTest, QueryTile_PlacedZone_IsZonedTrue) {
     EXPECT_EQ(r.zoneType, ZoneType::Residential);
     EXPECT_EQ(r.densityTier, DensityTier::Low);
 }
+
+// ===========================================================================
+// UNCOVERED CODE PATH TESTS
+// Tests below exercise branches not reached by the fixture-based tests above.
+// NiceMock is used throughout: these tests focus on constructor initialisation
+// and single-method branches, so unexpected mock calls must not fail the test.
+// ===========================================================================
+
+// StartingFunds_Easy_StandaloneNiceMock
+// Construct a CitySimulation with Difficulty::Easy using NiceMock so no
+// unexpected audio/renderer calls fail the test.  Verifies the treasury is
+// initialised to starting_funds_easy.
+TEST(EconomyStandaloneTest, StartingFunds_Easy_StandaloneNiceMock) {
+    NiceMock<MockRenderer>    renderer;
+    NiceMock<MockAudioSystem> audio;
+    ManualRNG          rng;   // default: {0}, {0.9f}, non-strict
+    ManualClock        clock;
+    ManualTerrainQuery terrain;
+
+    auto sim = std::make_unique<CitySimulation>(
+        &renderer, &audio, &rng, &clock, &terrain, Difficulty::Easy);
+
+    EXPECT_FLOAT_EQ(sim->getTreasuryBalance(),
+                    static_cast<float>(SimulationConstants::starting_funds_easy));
+}
+
+// StartingFunds_Hard_StandaloneNiceMock
+// Construct a CitySimulation with Difficulty::Hard using NiceMock.
+// Verifies the treasury is initialised to starting_funds_hard.
+TEST(EconomyStandaloneTest, StartingFunds_Hard_StandaloneNiceMock) {
+    NiceMock<MockRenderer>    renderer;
+    NiceMock<MockAudioSystem> audio;
+    ManualRNG          rng;
+    ManualClock        clock;
+    ManualTerrainQuery terrain;
+
+    auto sim = std::make_unique<CitySimulation>(
+        &renderer, &audio, &rng, &clock, &terrain, Difficulty::Hard);
+
+    EXPECT_FLOAT_EQ(sim->getTreasuryBalance(),
+                    static_cast<float>(SimulationConstants::starting_funds_hard));
+}
+
+// SpeedMultiplier_x10_TickDoesNotCrash
+// Exercise the speedValue(SpeedMultiplier::x10) == 10.0f branch in tick().
+// The sim is set to x10 then tick() is called with a small delta.  No assertion
+// beyond the absence of a crash is needed — this covers the switch arm.
+TEST(EconomyStandaloneTest, SpeedMultiplier_x10_TickDoesNotCrash) {
+    NiceMock<MockRenderer>    renderer;
+    NiceMock<MockAudioSystem> audio;
+    ManualRNG          rng;
+    ManualClock        clock;
+    ManualTerrainQuery terrain;
+
+    auto sim = std::make_unique<CitySimulation>(
+        &renderer, &audio, &rng, &clock, &terrain, Difficulty::Normal);
+
+    sim->setSpeed(SpeedMultiplier::x10);
+    // Advance clock so ManualClock::now() stays consistent with tick time.
+    clock.advance(0.1);
+    dynamic_cast<CitySimulation*>(sim.get())->tick(0.1f);
+    // No assertion — we are verifying the x10 branch is reachable without crash.
+}
+
+// SetPaused_False_WhenNotPaused_NoStateChange
+// Calling setPaused(false) when the speed is already x1 (not Paused) exercises
+// the inner if-branch that is NOT entered, confirming isPaused() stays false.
+TEST(EconomyStandaloneTest, SetPaused_False_WhenNotPaused_NoStateChange) {
+    NiceMock<MockRenderer>    renderer;
+    NiceMock<MockAudioSystem> audio;
+    ManualRNG          rng;
+    ManualClock        clock;
+    ManualTerrainQuery terrain;
+
+    auto sim = std::make_unique<CitySimulation>(
+        &renderer, &audio, &rng, &clock, &terrain, Difficulty::Normal);
+
+    sim->setSpeed(SpeedMultiplier::x1);
+    ASSERT_FALSE(sim->isPaused()) << "Precondition: sim must not be paused.";
+
+    // setPaused(false) when already at x1 — the "restore previous speed" branch
+    // is not entered; isPaused() must still be false.
+    sim->setPaused(false);
+    EXPECT_FALSE(sim->isPaused());
+}
+
+// GetDensityUnlockScale_Easy
+// getDensityUnlockScale() is a private helper exposed only via the public
+// difficulty-to-scale mapping.  We verify it indirectly by comparing the value
+// returned by getNextUnlockThreshold(Easy) against the expected scaled threshold.
+// This exercises the density_unlock_scale_easy branch.
+TEST(EconomyStandaloneTest, GetDensityUnlockScale_Easy) {
+    NiceMock<MockRenderer>    renderer;
+    NiceMock<MockAudioSystem> audio;
+    ManualRNG          rng;
+    ManualClock        clock;
+    ManualTerrainQuery terrain;
+
+    auto sim = std::make_unique<CitySimulation>(
+        &renderer, &audio, &rng, &clock, &terrain, Difficulty::Easy);
+    CitySimulation* cs = dynamic_cast<CitySimulation*>(sim.get());
+    ASSERT_NE(cs, nullptr);
+
+    // getDensityUnlockScale() is private; verify via getNextUnlockThreshold which
+    // calls it internally.  On Easy, scale = 0.70, first threshold = $50,000.
+    const float expected =
+        static_cast<float>(SimulationConstants::density_unlock_base_threshold_1) *
+        SimulationConstants::density_unlock_scale_easy;
+    EXPECT_FLOAT_EQ(cs->getNextUnlockThreshold(Difficulty::Easy), expected);
+}
+
+// GetDensityUnlockScale_Hard
+// Same as above but for Difficulty::Hard (scale = 1.50).
+TEST(EconomyStandaloneTest, GetDensityUnlockScale_Hard) {
+    NiceMock<MockRenderer>    renderer;
+    NiceMock<MockAudioSystem> audio;
+    ManualRNG          rng;
+    ManualClock        clock;
+    ManualTerrainQuery terrain;
+
+    auto sim = std::make_unique<CitySimulation>(
+        &renderer, &audio, &rng, &clock, &terrain, Difficulty::Hard);
+    CitySimulation* cs = dynamic_cast<CitySimulation*>(sim.get());
+    ASSERT_NE(cs, nullptr);
+
+    // On Hard, scale = 1.50, first threshold = $50,000.
+    const float expected =
+        static_cast<float>(SimulationConstants::density_unlock_base_threshold_1) *
+        SimulationConstants::density_unlock_scale_hard;
+    EXPECT_FLOAT_EQ(cs->getNextUnlockThreshold(Difficulty::Hard), expected);
+}

@@ -507,6 +507,7 @@ add_executable(integration_tests
     tests/integration/irrlicht_ui_backend_test.cpp          # Phase 3: EDT_NULL runtime handle test
     tests/integration/texture_cache_integration_test.cpp    # Phase 5: TextureCache + SceneEntityManager EDT_NULL tests
     tests/integration/simulation_60tick_test.cpp            # Phase 6: 60-tick no-crash + SimulationTime exit criterion
+    tests/integration/camera_controller_live_test.cpp       # Phase 6: CameraController live-camera path coverage
 )
 # aitown_render and aitown_ui MUST be present: IrrlichtUIBackend.h depends on Irrlicht.
 # Irrlicht MUST be linked directly: IrrlichtUIBackend.h includes <irrlicht.h> at compile time;
@@ -515,6 +516,7 @@ add_executable(integration_tests
 # and SceneEntityManager; both live in aitown_render/aitown_terrain.
 # GLEW::GLEW: TextureCache.h includes <GL/glew.h> at the top.
 # aitown_sim: Phase 6 adds simulation_60tick_test.cpp which constructs CitySimulation directly.
+# aitown_ui: Phase 6 adds camera_controller_live_test.cpp (CameraController live-camera path).
 # rapidcheck and rapidcheck_gtest always linked (proactive policy — architecture/testing/framework.md).
 target_link_libraries(integration_tests PRIVATE
     aitown_render
