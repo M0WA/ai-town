@@ -37,6 +37,9 @@
 
 #include "src/rendering/TextureCache.h"
 #include "src/rendering/SceneEntityManager.h"
+#include "src/terrain/TerrainSystem.h"
+#include "tests/simulation/mock_renderer.h"
+#include "tests/simulation/manual_clock.h"
 
 using namespace testing;
 
@@ -185,4 +188,47 @@ TEST_F(TextureCacheIntegrationTest, Destroy_FullSequence_ReleasesAllPools) {
     // --- Verify Step 1c: splat map ref_count decremented to 0 → entry evicted ---
     EXPECT_EQ(m_cache->getSplatMapGLuint(kSplatPath), GLuint{0})
         << "Step 1c + Step 3: splat map entry must be removed after destroy()";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystem_FlushPendingRebuilds_EDT_NULL_DoesNotCrash
+//
+// Phase 5 deliverable: TerrainSystem_FlushPendingRebuilds_EDT_NULL_DoesNotCrash
+// (label "integration"; runs in CI without GPU).
+//
+// Verifies that flushPendingRebuilds() completes without crash when the
+// renderer uses EDT_NULL driver type. TerrainSystem holds IRenderer* and
+// never calls Irrlicht directly — the rebuild loop must not invoke any
+// raw-GL path under EDT_NULL.
+//
+// Steps:
+//   1. Construct TerrainSystem with NiceMock<MockRenderer> and ManualClock.
+//   2. Enqueue 3 rebuild requests (distinct chunk IDs).
+//   3. Call flushPendingRebuilds() — must return without crash.
+//   4. Verify the deque is empty (all entries consumed or budget exhausted).
+//
+// This test confirms EDT_NULL safety of the flush path without any GL context.
+// Spec ref: phase-5.md §TerrainSystem rebuild deque tests (label "integration")
+//           architecture/graphics-architecture/procedural-terrain.md §flushPendingRebuilds
+// ---------------------------------------------------------------------------
+TEST(TerrainSystem_FlushPendingRebuilds_EDT_NULL_DoesNotCrash, FlushCompletesWithoutCrash) {
+    NiceMock<MockRenderer> renderer;
+    ManualClock clock;
+
+    TerrainSystem sim(&renderer, &clock);
+
+    // Enqueue 3 distinct chunk IDs at target LOD 1.
+    sim.enqueueRebuild(1u, /*targetLOD=*/1);
+    sim.enqueueRebuild(2u, /*targetLOD=*/1);
+    sim.enqueueRebuild(3u, /*targetLOD=*/1);
+
+    ASSERT_EQ(sim.pendingRebuildCount(), 3)
+        << "All 3 requests must be queued before flush";
+
+    // Must not crash under EDT_NULL (no GL context, no Irrlicht device).
+    EXPECT_NO_FATAL_FAILURE(sim.flushPendingRebuilds());
+
+    // All entries must have been consumed (deque empty after flush).
+    EXPECT_EQ(sim.pendingRebuildCount(), 0)
+        << "flushPendingRebuilds() must drain the deque completely (no budget limit hit)";
 }
