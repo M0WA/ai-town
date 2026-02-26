@@ -367,8 +367,11 @@ bool TerrainSystem::generate(int mapTilesX, int mapTilesZ, float cellSize,
         }
     }
 
-    // Store the generated heightmap for downstream use.
+    // Store the generated heightmap and map dimensions for getSlopeDegrees() lookups.
     m_generatedHeightmap = std::move(heightmap);
+    m_mapTilesX = mapTilesX;
+    m_mapTilesZ = mapTilesZ;
+    m_cellSize  = cellSize;
 
     return playable;
 }
@@ -378,4 +381,28 @@ bool TerrainSystem::generate(int mapTilesX, int mapTilesZ, float cellSize,
 // ---------------------------------------------------------------------------
 const std::vector<float>& TerrainSystem::getGeneratedHeightmap() const {
     return m_generatedHeightmap;
+}
+
+// ---------------------------------------------------------------------------
+// getSlopeDegrees() — ITerrainQuery implementation.
+// Returns 0.0f (flat) for out-of-bounds tiles or before generate() is called.
+// Uses the same gradient formula as generate()'s playability check.
+// ---------------------------------------------------------------------------
+float TerrainSystem::getSlopeDegrees(int tileX, int tileZ) const {
+    if (m_generatedHeightmap.empty() ||
+        tileX < 0 || tileX >= m_mapTilesX ||
+        tileZ < 0 || tileZ >= m_mapTilesZ) {
+        return 0.0f;
+    }
+
+    const int vertX = m_mapTilesX + 1;
+    const float h00 = m_generatedHeightmap[static_cast<size_t>( tileZ      * vertX + tileX    )];
+    const float h10 = m_generatedHeightmap[static_cast<size_t>( tileZ      * vertX + tileX + 1)];
+    const float h01 = m_generatedHeightmap[static_cast<size_t>((tileZ + 1) * vertX + tileX    )];
+
+    const float dx = (h10 - h00) / m_cellSize;
+    const float dz = (h01 - h00) / m_cellSize;
+    const float slopeRad = std::atan(std::sqrt(dx * dx + dz * dz));
+    constexpr float kRadToDeg = 180.0f / 3.14159265358979323846f;
+    return slopeRad * kRadToDeg;
 }

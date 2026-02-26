@@ -60,6 +60,11 @@ public:
     // value directly. This is NOT the raw traffic demand factor; see getTrafficDemandFactor below.
     // Required by architecture/game-design/traffic-system.md for Inspector panel demand readout.
     // Cross-reference: architecture/game-design/zoning-system.md (effective_demand_factor combination rule).
+    //
+    // RETURN RANGE NOTE: returns float in [0.0, 1.0] — NOT a percentage in [0, 100].
+    // Despite the "Pct" name, callers (HUD demand bars) must multiply by 100.0f for display.
+    // This naming inconsistency is pre-existing (Phase 1/3) and is not corrected in V1 to
+    // avoid breaking all call sites. See hud-layout.md demand bar display spec.
     virtual float getDemandPressurePct(ZoneType zone) const = 0;
 
     // Traffic demand factor — returns the INTERNAL traffic-only smoothstep multiplier in [0.0, 1.0]
