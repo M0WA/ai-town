@@ -154,6 +154,6 @@ public:
     // Phase 6 implements internal hour tracking and exposes this accessor.
     // Phase 10 (Dynamic Soundscape) consumes this value to call IAudioSystem::setTimeOfDay().
     // IAudioSystem::setTimeOfDay() is NOT called in Phase 6 — only the accessor is delivered here.
-    // TimeOfDay is defined in simulation_types.h (shared interface layer).
+    // TimeOfDay is defined in audio_types.h; forwarded via simulation_types.h.
     virtual TimeOfDay getTimeOfDay() const = 0;
 };

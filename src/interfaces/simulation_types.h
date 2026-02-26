@@ -1,8 +1,11 @@
 #pragma once
+#include "audio_types.h"
 
 // Canonical definitions for shared simulation-domain types that appear in
 // multiple interface headers. Both ICitySimulation.h and IAudioSystem.h
 // may #include this file.
+// audio_types.h is included here to provide TimeOfDay (defined there as the
+// canonical location) to all code that includes simulation_types.h.
 
 enum class ZoneType {
     Residential,
@@ -73,16 +76,9 @@ struct SimulationTime {
     int month{1};  // 1-12
 };
 
-// TimeOfDay — current in-game time of day, used by AudioSystem to select the ambient bed.
-// CitySimulation tracks in-game hour progression and exposes getTimeOfDay() for Phase 10
-// to wire IAudioSystem::setTimeOfDay() transitions.
-// Shared between src/simulation/ and src/audio/ via src/interfaces/ (dependency-free layer).
-enum class TimeOfDay {
-    Day,   // approx. 06:00–17:59
-    Dusk,  // approx. 18:00–19:59
-    Night, // approx. 20:00–05:59
-    Dawn   // approx. 04:00–05:59 (implementation may vary boundary times)
-};
+// TimeOfDay is defined in audio_types.h (included above) and forwarded here
+// for ICitySimulation::getTimeOfDay(). Phase 10 wires CitySimulation's accessor
+// to IAudioSystem::setTimeOfDay() transitions.
 
 // NotificationType — category of simulation event notification.
 // Used by ICitySimulation::pollPendingNotification() (singular) to let UIManager
