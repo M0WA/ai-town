@@ -363,11 +363,10 @@ public:
       // Cross-reference: architecture/game-design/economy-model.md (getNextUnlockThreshold return semantics).
 
       // City rating — called by HUD to display star rating:
-      // Phase 1 stub: returns int [0, 5]. Phase 3 upgrades to CityRatingTier enum (Village/Town/
-      // City/Metropolis/Megalopolis) once CityRatingTier is added to simulation_types.h.
-      // See implementation/phase-3.md for the upgrade deliverable and game-progression-modes.md
-      // for the CityRatingTier enum definition.
-      virtual int getCityRating() const = 0;  // Phase 1: int [0,5]; Phase 3 upgrades to CityRatingTier
+      // Phase 3 upgrade complete: returns CityRatingTier (Village/Town/City/Metropolis/Megalopolis).
+      // CityRatingTier is defined in simulation_types.h.
+      // See architecture/game-design/game-progression-modes.md for tier definitions.
+      virtual CityRatingTier getCityRating() const = 0;
 
       // Demand pressure — called by HUD demand pressure bar per budget tick.
       // Returns the city-wide effective demand for the given zone type as a float in [0.0, 1.0].
@@ -440,8 +439,8 @@ public:
       // Returns kNoUnlockThreshold (-1.0f) when all tiers unlocked; positive dollar value otherwise.
       // Tests that exercise the "all tiers unlocked" branch must return SimulationConstants::kNoUnlockThreshold.
 
-      // City rating (Phase 1: returns int [0,5]; Phase 3 upgrades to CityRatingTier):
-      MOCK_METHOD(int, getCityRating, (), (const, override));  // Phase 3 changes to CityRatingTier
+      // City rating — CityRatingTier (Phase 3 upgrade complete):
+      MOCK_METHOD(CityRatingTier, getCityRating, (), (const, override));
 
       // Demand pressure — UI display aggregate. Returns the post-floor, post-bootstrap, post-combination
       // effective_demand_factor for the given zone type. Used by HUD demand pressure bars.

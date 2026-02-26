@@ -1,6 +1,7 @@
 #pragma once
 #include "simulation_types.h"
 #include "ISimulationPauser.h"
+#include <vector>
 
 // ICitySimulation — interface enabling UIManager to call simulation control methods without
 // depending on the concrete CitySimulation class. Phase 0 stub contained the minimum required
@@ -59,14 +60,22 @@ public:
     // value directly. This is NOT the raw traffic demand factor; see getTrafficDemandFactor below.
     // Required by architecture/game-design/traffic-system.md for Inspector panel demand readout.
     // Cross-reference: architecture/game-design/zoning-system.md (effective_demand_factor combination rule).
+    //
+    // RETURN RANGE NOTE: returns float in [0.0, 1.0] — NOT a percentage in [0, 100].
+    // Despite the "Pct" name, callers (HUD demand bars) must multiply by 100.0f for display.
+    // This naming inconsistency is pre-existing (Phase 1/3) and is not corrected in V1 to
+    // avoid breaking all call sites. See hud-layout.md demand bar display spec.
     virtual float getDemandPressurePct(ZoneType zone) const = 0;
 
     // Traffic demand factor — returns the INTERNAL traffic-only smoothstep multiplier in [0.0, 1.0]
     // for the given zone type, derived from the rolling travel-time window BEFORE applying bootstrap
     // decay, demand floors, or capacity-ratio signals. R/C zones use a 5-tick window; I zones use
-    // a 3-tick window. Exposed for Phase 8 save/load round-trip serialization only; the HUD demand
-    // bars display getDemandPressurePct (the post-combination aggregate), not this value.
-    // Cross-reference: implementation/phase-3.md (Traffic demand factor serialization).
+    // a 3-tick window.
+    // Used by: (1) Phase 11 save/load round-trip serialization (rolling-window state persisted);
+    //          (2) Phase 6 unit tests as a direct observation point for traffic null-path behavior
+    //              (CommercialDemand_NullPath test — the only way to observe the raw smoothstep
+    //               factor without going through the post-combination getDemandPressurePct).
+    // The HUD demand bars display getDemandPressurePct (the post-combination aggregate), not this value.
     virtual float getTrafficDemandFactor(ZoneType zone) const = 0;
 
     // Population — called by HUD population display and density-unlock checks:
@@ -84,12 +93,67 @@ public:
     virtual int getConsecutiveDeficitMonths() const = 0;
 
     // Density-unlock state accessor — returns a snapshot of all density-unlock counters and flags.
-    // Required for Phase 8 save round-trip test to verify counter persistence across save/load.
-    // DensityUnlockState is defined in simulation_types.h:
-    //   struct DensityUnlockState {
-    //       int  consecutive_months_above_threshold[6];  // 0-2 range; one counter per density tier
-    //       bool unlock_flags[6];                        // true if the corresponding tier is unlocked
-    //   };
-    // Phase 1 stub returns a default-constructed DensityUnlockState{}. Phase 3 fills in real impl.
+    // Required for Phase 11 save round-trip test to verify counter persistence across save/load.
+    // DensityUnlockState is defined in simulation_types.h (counter range 0-2 in saved state).
+    // Phase 3 stub returns a default-constructed DensityUnlockState{}. Phase 6 fills in real impl.
     virtual DensityUnlockState getDensityUnlockState() const = 0;
+
+    // --- Simulation time ---
+    // Returns the current in-game date. Used by HUD resource bar to display month/year.
+    // Phase 6 deliverable. Phase 8 HUD reads this via ICitySimulation::getSimulationTime().
+    virtual SimulationTime getSimulationTime() const = 0;
+
+    // --- Simulation event queue (Phase 6 delivery) ---
+    // Drains one pending notification from the FIFO event queue per call; returns false when empty.
+    // UIManager polls this each frame and posts the appropriate toast via NotificationManager.
+    // CitySimulation does NOT call NotificationManager directly — this queue is the boundary.
+    // Events queued: ForcedLoanIssued, BondIssued, ServiceDegraded, BudgetDeficitWarn.
+    virtual bool pollPendingNotification(SimulationNotification& out) = 0;
+
+    // --- Tax rate (Phase 6 delivery) ---
+    // setTaxRate: bounds enforced at [0.01, 0.25] (1%–25%); invalid values clamped silently.
+    // getTaxRate: returns current rate for the given zone type.
+    // Both required by Phase 8 Tax Rate Panel.
+    virtual void  setTaxRate(ZoneType zone, float rate) = 0;
+    virtual float getTaxRate(ZoneType zone) const = 0;
+
+    // --- Budget line-item accessors (Phase 6 delivery) ---
+    // Required by Phase 8 BudgetDetailPanel to display 8 named line items.
+    // All values are for the most-recently-completed budget tick (not projected).
+    virtual float getTaxRevenue(ZoneType zone) const = 0;    // per-zone tax revenue
+    virtual float getWagesCost() const = 0;                  // wages expense
+    virtual float getRoadMaintenanceCost() const = 0;        // road maintenance expense
+    virtual float getServiceUpkeepCost() const = 0;          // service upkeep expense
+    virtual float getUtilityFeeRevenue() const = 0;          // utility fee revenue (power+water)
+
+    // --- Zone/road action methods (Phase 6 delivery) ---
+    // Called by UIManager input arbitration when the player places zones/roads or demolishes.
+    // All placement actions record an undo entry (expires at second budget tick after action).
+    // earthworksCostOverride: pre-computed earthworks cost from ITerrainQuery; 0 on flat tiles.
+    //   The game loop (which owns TerrainSystem) computes this before calling placeZone/placeRoad.
+    virtual void placeZone(int tileX, int tileZ, ZoneType type, DensityTier tier,
+                           int earthworksCostOverride = 0) = 0;
+    virtual void placeRoad(int tileX, int tileZ, int earthworksCostOverride = 0) = 0;
+    virtual void demolishTile(int tileX, int tileZ) = 0;
+    virtual void undoLastAction() = 0;
+
+    // --- Per-tile query (Phase 6 delivery) ---
+    // Returns tile data for the Query/Inspector Panel.
+    // If the tile coordinates are out of bounds or unzoned, returns a default QueryResult
+    // with isZoned=false. Never crashes on out-of-range coordinates.
+    virtual QueryResult queryTile(int tileX, int tileZ) const = 0;
+
+    // --- Bond use count (Phase 6 delivery) ---
+    // Returns the number of Emergency Municipal Bond uses remaining for the current difficulty.
+    // Required by Phase 8 forced loan modal Screen 2 to gray the Emergency Bond button.
+    // Initialized at construction: Easy=3, Normal=2, Hard=1 (SimulationConstants::bond_max_uses_*).
+    virtual int getOutstandingBondUses() const = 0;
+
+    // --- Time of day (Phase 6 delivery) ---
+    // Returns the current in-game time of day, derived from accumulated in-game hours.
+    // Phase 6 implements internal hour tracking and exposes this accessor.
+    // Phase 10 (Dynamic Soundscape) consumes this value to call IAudioSystem::setTimeOfDay().
+    // IAudioSystem::setTimeOfDay() is NOT called in Phase 6 — only the accessor is delivered here.
+    // TimeOfDay is defined in audio_types.h; forwarded via simulation_types.h.
+    virtual TimeOfDay getTimeOfDay() const = 0;
 };

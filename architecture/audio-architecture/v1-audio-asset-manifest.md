@@ -24,8 +24,8 @@
 
 **Zone loop true peak margin**: Zone loops use −2 dBTP (vs. −1 dBTP for most one-shots) because the loop boundary transient plus continuous looping content requires additional peak headroom.
 
-| `sfx_build_place` | SFX | WAV | <1 s | N | Building placed; authored to **−24 LUFS / −1 dBTP** (subtle placement feedback) |
-| `sfx_build_demolish` | SFX | WAV | <1 s | N | Building demolished; authored to **−24 LUFS / −1 dBTP** |
+| `sfx_build_place` | SFX | WAV | <1 s | N | Building/zone placed; **positional (3D, played at tile center — `AL_SOURCE_RELATIVE = AL_FALSE`; source position set to the world-space centroid of the placed tile)**; consistent with `sfx_road_build`; authored to **−24 LUFS / −1 dBTP** (subtle placement feedback) |
+| `sfx_build_demolish` | SFX | WAV | <1 s | N | Building demolished; **positional (3D, played at tile center — `AL_SOURCE_RELATIVE = AL_FALSE`; source position set to the world-space centroid of the demolished tile)**; authored to **−24 LUFS / −1 dBTP** |
 | `sfx_fire_alert` | SFX | WAV | 2–4 s | N | Fire service event; **mono positional** (3D spatial at building location); CRITICAL priority; authored to **−18 LUFS / −1 dBTP** (must cut through ambient/music at a crisis moment) |
 | `sfx_police_alert` | SFX | WAV | 2–4 s | N | Police service event; **mono positional** (3D spatial at building location); CRITICAL priority; authored to **−18 LUFS / −1 dBTP** |
 | `sfx_power_out` | SFX | WAV | 1–2 s | N | Power outage notification; authored to **−22 LUFS / −1 dBTP** |
