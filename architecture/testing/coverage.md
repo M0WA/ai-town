@@ -169,6 +169,28 @@ the gate (`src/rendering/`, `src/audio/`, `src/platform/`) do not count toward t
 Any simulation file below 85% individual coverage is a candidate for additional targeted tests
 before merging Phase 6.
 
+**`src/simulation/` preflight (Phase 6 CI deliverable)**: Add a preflight step before the 95%
+gate that verifies `src/simulation/` SF entries are present in `coverage_filtered.info`. Without
+this check, a broken `simulation_tests` registration (binary crash, discovery timeout, CMakeLists
+omission) would cause `lcov` to produce zero simulation coverage data — the gate computes 95%
+across only `src/terrain/` and `src/ui/`, silently passing while all simulation code is uncovered:
+
+```bash
+if ! grep -q "SF:.*src/simulation/" coverage_filtered.info; then
+  echo "PREFLIGHT FAIL: No src/simulation/ SF entries in coverage_filtered.info."
+  echo "Check simulation_tests CMake registration and DISCOVERY_TIMEOUT setting."
+  exit 1
+fi
+```
+
+**95% gate denominator**: The gate measures **total** line coverage across all files in
+`coverage_filtered.info` — this includes `src/simulation/`, `src/terrain/`, AND `src/ui/`. The
+`src/ui/` Phase 4 baseline (~25%) and Phase 5 terrain coverage must both be maintained. If the
+denominator including `src/ui/` makes 95% unachievable (Phase 8 panel stubs are still stub-heavy),
+Phase 6 implementers must add additional `ui_tests` source coverage to raise `src/ui/` to the
+level needed. The gate is deliberately challenging — any simulation directory below 85% is a
+blocker that must be fixed before merging Phase 6.
+
 **Below 25% is a BLOCKING defect, not a MEDIUM risk.** Do not advance to Phase 5 until the
 Phase 4 `src/ui/` baseline meets or exceeds 25%.
 

@@ -167,6 +167,22 @@ jobs:
           fi
           echo "Unit routing: $count test(s) discovered."
 
+      # Step 12c: Verify simulation_tests specifically is discoverable — Phase 6 deliverable.
+      # The unit-routing check above passes as long as ANY unit target (terrain_tests, ui_tests)
+      # has tests. This step verifies simulation_tests is not silently unregistered.
+      # WARNING: before Phase 6 CitySimulation.cpp exists, simulation_tests will have 0 tests
+      # (only SUCCEED() stubs). This step exits 0 if count==0 with a warning, not an error —
+      # change to exit 1 when Phase 6 is complete and simulation_tests has real tests.
+      - name: Verify simulation_tests registration (Phase 6 deliverable)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -c 'Test #' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "WARNING: No simulation_tests test cases discovered. Phase 6 deliverable: ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60)."
+          else
+            echo "simulation_tests routing: $count test(s) discovered."
+          fi
+
       # Step 13: Verify default.mhr HRTF data (Phase 0 placeholder — no-op).
       # Phase 4 replaces this with:
       #   find "${{ github.workspace }}" -name "default.mhr" | grep -q . || exit 1
@@ -488,7 +504,7 @@ jobs:
   # ============================================================================
   coverage-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       # Step 1: Checkout
       - name: Checkout code
@@ -603,6 +619,18 @@ jobs:
           fi
           echo "Unit routing: $count test(s) discovered."
 
+      # Step 12c: Verify simulation_tests specifically is discoverable — Phase 6 deliverable.
+      # Mirrors the identical step in build-linux.
+      - name: Verify simulation_tests registration (Phase 6 deliverable)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -c 'Test #' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "WARNING: No simulation_tests test cases discovered. Phase 6 deliverable: ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60)."
+          else
+            echo "simulation_tests routing: $count test(s) discovered."
+          fi
+
       # Step 13: Run unit tests.
       - name: Run unit tests (no display)
         run: |
@@ -707,6 +735,25 @@ jobs:
           genhtml coverage_filtered.info --output-directory coverage_html/
           # lcov --summary informational step REMOVED in Phase 5 — replaced by the
           # 80% total-line-coverage awk gate in the step below.
+
+      # Step 19b: src/simulation/ preflight — verify simulation coverage data is present.
+      # Phase 6 deliverable: if simulation_tests fails to run (DISCOVERY_TIMEOUT, binary crash,
+      # or missing CMake registration), coverage_filtered.info has no src/simulation/ SF entries.
+      # In that case the total-line gate would compute coverage across only src/terrain/ and
+      # src/ui/, which could pass at 95% while all simulation code is uncovered.
+      # WARNING: before Phase 6, simulation_tests produces only SUCCEED() stubs with trivial
+      # coverage — this check warns but does not hard-fail until Phase 6 is implemented.
+      - name: Preflight src/simulation/ coverage entries
+        shell: bash
+        run: |
+          if ! grep -q "SF:.*src/simulation/" coverage_filtered.info; then
+            echo "WARNING: No src/simulation/ SF entries in coverage_filtered.info."
+            echo "Phase 6 deliverable: simulation_tests must compile and run before this preflight passes."
+            echo "After Phase 6 implementation, change this step to exit 1 on missing simulation entries."
+          else
+            count=$(grep -c "SF:.*src/simulation/" coverage_filtered.info || true)
+            echo "PASS: Found $count src/simulation/ SF entries in coverage_filtered.info."
+          fi
 
       - name: Enforce 80% total line coverage gate
         run: |

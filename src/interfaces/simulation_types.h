@@ -98,7 +98,7 @@ enum class NotificationType {
 // Dequeued via ICitySimulation::pollPendingNotification() (singular, FIFO, one per call).
 struct SimulationNotification {
     NotificationType type{NotificationType::ForcedLoanIssued};
-    float  amount{0.0f};         // loan principal for loan types; 0 for others
+    int    amount{0};            // loan principal for loan types; 0 for others (int: all treasury values are integers; avoids float precision loss for large principals)
     int    repaymentTicks{0};    // repayment period for loan types; 0 for others
     int    milestoneValue{0};    // population count for PopulationMilestone;
                                  // CityRatingTier as int for CityRatingTransition; 0 for others

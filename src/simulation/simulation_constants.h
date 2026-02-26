@@ -131,6 +131,17 @@ struct SimulationConstants {
     static_assert(water_tower_coverage_radius_m > 0, "must be positive");
     static constexpr float service_deficit_radius_halving_threshold = -0.10f;
 
+    // service_degradation_probability_per_tick: probability (0.0..1.0) that a radius-based
+    // service building (Fire, Police, Water) enters reduced-coverage state on any given budget
+    // tick while budget_surplus_pct <= service_deficit_radius_halving_threshold (-10%).
+    // 0.5 = 50% chance per tick per service building at deficit. Evaluated independently per
+    // building per tick via ISimulationRNG::nextFloat() < service_degradation_probability_per_tick.
+    // See architecture/game-design/service-coverage.md (Budget deficit degradation).
+    static constexpr float service_degradation_probability_per_tick = 0.5f;
+    static_assert(service_degradation_probability_per_tick > 0.0f &&
+                  service_degradation_probability_per_tick <= 1.0f,
+                  "must be a valid probability");
+
     // Demand bootstrapping (architecture/game-design/zoning-system.md)
     // Bootstrap subsidies apply during ticks 0 through demand_bootstrapping_ticks-1 (i.e., ticks 0–5).
     // Correct conditional: if (currentTick < demand_bootstrapping_ticks)
@@ -220,6 +231,19 @@ struct SimulationConstants {
 
     // Density unlock base thresholds (treasury balance required; scaled by density_unlock_scale_*)
     // (architecture/game-design/economy-model.md, density unlock table)
+    //
+    // TIER → THRESHOLD MAPPING (6 tiers, 5 threshold values):
+    //   DensityUnlockState tier index 0 (Med-R):   uses density_unlock_base_threshold_1 ($50K)
+    //   DensityUnlockState tier index 1 (Med-C):   uses density_unlock_base_threshold_1 ($50K)  ← SAME AS Med-R
+    //   DensityUnlockState tier index 2 (Med-I):   uses density_unlock_base_threshold_2 ($75K)
+    //   DensityUnlockState tier index 3 (High-R):  uses density_unlock_base_threshold_3 ($100K) ← requires Med-I unlocked first
+    //   DensityUnlockState tier index 4 (High-C):  uses density_unlock_base_threshold_4 ($200K)
+    //   DensityUnlockState tier index 5 (High-I):  uses density_unlock_base_threshold_5 ($500K)
+    //
+    // NOTE: Med-R (tier 0) and Med-C (tier 1) share threshold_1 and unlock simultaneously.
+    // Do NOT map tier index i to density_unlock_base_threshold_i — that off-by-one error
+    // assigns $75K to Med-C (wrong) and leaves High-I with no constant.
+    // Correct mapping: use the table above; unlocks[0] and unlocks[1] both check threshold_1.
     static constexpr int density_unlock_base_threshold_1 = 50'000;
     static constexpr int density_unlock_base_threshold_2 = 75'000;
     static constexpr int density_unlock_base_threshold_3 = 100'000;
