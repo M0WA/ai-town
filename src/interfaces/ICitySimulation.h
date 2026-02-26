@@ -1,6 +1,7 @@
 #pragma once
 #include "simulation_types.h"
 #include "ISimulationPauser.h"
+#include <vector>
 
 // ICitySimulation — interface enabling UIManager to call simulation control methods without
 // depending on the concrete CitySimulation class. Phase 0 stub contained the minimum required
@@ -84,12 +85,59 @@ public:
     virtual int getConsecutiveDeficitMonths() const = 0;
 
     // Density-unlock state accessor — returns a snapshot of all density-unlock counters and flags.
-    // Required for Phase 8 save round-trip test to verify counter persistence across save/load.
-    // DensityUnlockState is defined in simulation_types.h:
-    //   struct DensityUnlockState {
-    //       int  consecutive_months_above_threshold[6];  // 0-2 range; one counter per density tier
-    //       bool unlock_flags[6];                        // true if the corresponding tier is unlocked
-    //   };
-    // Phase 1 stub returns a default-constructed DensityUnlockState{}. Phase 3 fills in real impl.
+    // Required for Phase 11 save round-trip test to verify counter persistence across save/load.
+    // DensityUnlockState is defined in simulation_types.h (counter range 0-2 in saved state).
+    // Phase 3 stub returns a default-constructed DensityUnlockState{}. Phase 6 fills in real impl.
     virtual DensityUnlockState getDensityUnlockState() const = 0;
+
+    // --- Simulation time ---
+    // Returns the current in-game date. Used by HUD resource bar to display month/year.
+    // Phase 6 deliverable. Phase 8 HUD reads this via ICitySimulation::getSimulationTime().
+    virtual SimulationTime getSimulationTime() const = 0;
+
+    // --- Simulation event queue (Phase 6 delivery) ---
+    // Drains one pending notification from the FIFO event queue per call; returns false when empty.
+    // UIManager polls this each frame and posts the appropriate toast via NotificationManager.
+    // CitySimulation does NOT call NotificationManager directly — this queue is the boundary.
+    // Events queued: ForcedLoanIssued, BondIssued, ServiceDegraded, BudgetDeficitWarn.
+    virtual bool pollPendingNotification(SimulationNotification& out) = 0;
+
+    // --- Tax rate (Phase 6 delivery) ---
+    // setTaxRate: bounds enforced at [0.01, 0.25] (1%–25%); invalid values clamped silently.
+    // getTaxRate: returns current rate for the given zone type.
+    // Both required by Phase 8 Tax Rate Panel.
+    virtual void  setTaxRate(ZoneType zone, float rate) = 0;
+    virtual float getTaxRate(ZoneType zone) const = 0;
+
+    // --- Budget line-item accessors (Phase 6 delivery) ---
+    // Required by Phase 8 BudgetDetailPanel to display 8 named line items.
+    // All values are for the most-recently-completed budget tick (not projected).
+    virtual float getTaxRevenue(ZoneType zone) const = 0;    // per-zone tax revenue
+    virtual float getWagesCost() const = 0;                  // wages expense
+    virtual float getRoadMaintenanceCost() const = 0;        // road maintenance expense
+    virtual float getServiceUpkeepCost() const = 0;          // service upkeep expense
+    virtual float getUtilityFeeRevenue() const = 0;          // utility fee revenue (power+water)
+
+    // --- Zone/road action methods (Phase 6 delivery) ---
+    // Called by UIManager input arbitration when the player places zones/roads or demolishes.
+    // All placement actions record an undo entry (expires at second budget tick after action).
+    // earthworksCostOverride: pre-computed earthworks cost from ITerrainQuery; 0 on flat tiles.
+    //   The game loop (which owns TerrainSystem) computes this before calling placeZone/placeRoad.
+    virtual void placeZone(int tileX, int tileZ, ZoneType type, DensityTier tier,
+                           int earthworksCostOverride = 0) = 0;
+    virtual void placeRoad(int tileX, int tileZ, int earthworksCostOverride = 0) = 0;
+    virtual void demolishTile(int tileX, int tileZ) = 0;
+    virtual void undoLastAction() = 0;
+
+    // --- Per-tile query (Phase 6 delivery) ---
+    // Returns tile data for the Query/Inspector Panel.
+    // If the tile coordinates are out of bounds or unzoned, returns a default QueryResult
+    // with isZoned=false. Never crashes on out-of-range coordinates.
+    virtual QueryResult queryTile(int tileX, int tileZ) const = 0;
+
+    // --- Bond use count (Phase 6 delivery) ---
+    // Returns the number of Emergency Municipal Bond uses remaining for the current difficulty.
+    // Required by Phase 8 forced loan modal Screen 2 to gray the Emergency Bond button.
+    // Initialized at construction: Easy=3, Normal=2, Hard=1 (SimulationConstants::bond_max_uses_*).
+    virtual int getOutstandingBondUses() const = 0;
 };

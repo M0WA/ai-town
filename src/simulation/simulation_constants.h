@@ -81,7 +81,15 @@ struct SimulationConstants {
 
     // MUST be 500 — treasury cost per road tile placed, deducted immediately at placement.
     // NOT waived during grace period.
-    static constexpr int road_placement_cost = 500;
+    // Named with _per_tile suffix to parallel road_maintenance_cost_per_tile and distinguish
+    // it from earthworks_base_cost_per_tile (same dollar value, different semantic).
+    static constexpr int road_placement_cost_per_tile = 500;
+
+    // MUST be 500 — base earthworks cost per tile, multiplied by slope_severity_factor.
+    // Full formula (terrain-interaction.md): cost = earthworks_base_cost_per_tile * clamp((slope_deg - 15) / 30, 0, 2)
+    // Applied at zone/road placement when slope > 15°; deducted from treasury immediately.
+    // Coincidentally equal to road_placement_cost_per_tile but semantically distinct.
+    static constexpr int earthworks_base_cost_per_tile = 500;
 
     // Income per resident by density tier (economy-model.md)
     // MUST be initialized to specified values — used directly in Phase 3 revenue calculation tests.
