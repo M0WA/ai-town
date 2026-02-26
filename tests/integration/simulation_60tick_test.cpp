@@ -6,11 +6,17 @@
 //
 // LABEL: integration  (ctest -L "^integration$"; no display required)
 //
+// Speed policy: simulation is set to x1 in SetUp() to neutralise the auto-slow
+//   mechanism (CitySimulation reduces speed to x1 after the first consecutive
+//   deficit month, which fires on tick 1 for a freshly placed city with upkeep
+//   but no revenue).  Driving at x1 with tick(30.0f) guarantees exactly one
+//   budget tick per call regardless of any subsequent auto-slow transitions.
+//
 // Time math (see simulation_constants.h + simulation_types.h for authoritative values):
 //   SECONDS_PER_BUDGET_TICK = 30.0f simulation seconds per budget tick.
-//   kDefaultSimSpeed        = x3 → speedValue = 3.0f.
-//   Real delta per tick     = 30.0f / 3.0f = 10.0f real seconds at default speed.
-//   60 budget ticks         = 60 calls to tick(10.0f) at x3 speed.
+//   Speed x1 → speedValue = 1.0f.
+//   Real delta per tick     = 30.0f / 1.0f = 30.0f real seconds at x1 speed.
+//   60 budget ticks         = 60 calls to tick(30.0f) at x1 speed.
 //
 // SimulationTime after 60 budget ticks (starting at year=1, month=1):
 //   12 ticks/year × 5 years = 60 ticks → year=6, month=1.
@@ -80,9 +86,6 @@ protected:
         CitySimulation* cs = dynamic_cast<CitySimulation*>(sim_.get());
         ASSERT_NE(cs, nullptr) << "sim_ must be a CitySimulation instance";
 
-        // Leave speed at the default kDefaultSimSpeed (x3). tick(10.0f) at x3
-        // accumulates exactly 30.0f simulation seconds → 1 budget tick per call.
-
         // ---------------------------------------------------------------
         // Place a minimal city layout.
         // ---------------------------------------------------------------
@@ -113,6 +116,14 @@ protected:
         cs->addServiceBuilding(5, 2, 2);  // WaterTower
         cs->addServiceBuilding(5, 3, 3);  // PowerPlant
 
+        // Set speed to x1 so tick(30.0f) fires exactly one budget tick per call.
+        // The auto-slow mechanism (CitySimulation.cpp) reduces speed to x1 after
+        // the first consecutive deficit month — which fires on tick 1 for a fresh
+        // city with service upkeep but no revenue.  Explicitly setting x1 here
+        // means auto-slow is a no-op and the per-tick delta is always 30.0f real
+        // seconds → 30.0f sim seconds → exactly one SECONDS_PER_BUDGET_TICK per call.
+        cs->setSpeed(SpeedMultiplier::x1);
+
         // Advance ManualClock past the 120 s grace period.
         // This clears the checkAndIssueForcedLoan() real-time gate so that any
         // forced-loan checks during the tick loop operate normally (rather than
@@ -133,8 +144,7 @@ protected:
 // ---------------------------------------------------------------------------
 // TEST: Simulation60Ticks_NocrashAndCorrectTime
 //
-// Drives 60 budget ticks at default x3 speed (10.0f real seconds per tick)
-// and asserts:
+// Drives 60 budget ticks at x1 speed (30.0f real seconds per tick) and asserts:
 //   1. No crash during any of the 60 ticks.
 //   2. SimulationTime.year  == 6  (5 complete years elapsed; year starts at 1).
 //   3. SimulationTime.month == 1  (60 mod 12 == 0 → wraps back to month 1).
@@ -143,12 +153,13 @@ TEST_F(Simulation60TickTest, Simulation60Ticks_NocrashAndCorrectTime) {
     CitySimulation* cs = dynamic_cast<CitySimulation*>(sim_.get());
     ASSERT_NE(cs, nullptr);
 
-    // At x3 speed, one budget tick fires per tick(10.0f) call:
-    //   sim_seconds accumulated = realDelta × speedValue = 10.0f × 3.0f = 30.0f
+    // At x1 speed, one budget tick fires per tick(30.0f) call:
+    //   sim_seconds accumulated = realDelta × speedValue = 30.0f × 1.0f = 30.0f
     //   budget tick threshold   = SECONDS_PER_BUDGET_TICK = 30.0f
     //   ticks fired per call    = floor(30.0f / 30.0f) = 1
+    // x1 is set in SetUp() to neutralise the auto-slow mechanism.
     static constexpr float kRealDeltaPerBudgetTick =
-        SimulationConstants::SECONDS_PER_BUDGET_TICK / 3.0f;  // = 10.0f
+        SimulationConstants::SECONDS_PER_BUDGET_TICK;  // = 30.0f at x1
 
     static constexpr int kTargetTicks = 60;
 
@@ -197,7 +208,7 @@ TEST_F(Simulation60TickTest, Simulation60Ticks_TreasuryRemainsFinite) {
     ASSERT_NE(cs, nullptr);
 
     static constexpr float kRealDeltaPerBudgetTick =
-        SimulationConstants::SECONDS_PER_BUDGET_TICK / 3.0f;
+        SimulationConstants::SECONDS_PER_BUDGET_TICK;  // = 30.0f at x1
 
     for (int i = 0; i < 60; ++i) {
         SimulationNotification notif;

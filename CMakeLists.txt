@@ -325,6 +325,18 @@ if(WIN32)
     )
 endif()
 
+# Copy default.mhr (OpenAL Soft HRTF data) to the build output directory.
+# Required at runtime for 3D spatial audio HRTF initialisation.
+# Source: vcpkg installs it to share/openal/default.mhr (set by -DALSOFT_INSTALL_DATA=ON
+# in the overlay portfile).  The copy is cross-platform — both Linux and Windows CI
+# verify its presence in the build directory.
+add_custom_command(TARGET aitown POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/openal/default.mhr"
+        "$<TARGET_FILE_DIR:aitown>/default.mhr"
+    COMMENT "Copying default.mhr (OpenAL Soft HRTF data) to aitown output"
+)
+
 # ============================================================================
 # TEST TARGETS
 # Each test target links both GTest and RapidCheck (proactively — removing later
