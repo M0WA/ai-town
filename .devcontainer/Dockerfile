@@ -6,7 +6,7 @@ ENV TZ="$TZ"
 ARG CLAUDE_CODE_VERSION=latest
 
 # vcpkg baseline — must match builtin-baseline in vcpkg.json
-ARG VCPKG_COMMIT=ce35b1a53aac26d7fcdb8ee1ef7a8e4eea02d27b
+ARG VCPKG_COMMIT=b2f068faf45a3f04145bec0f52a66526ad590227
 
 # Create node user (uid/gid 1000) to match the node:20 image convention
 RUN groupadd --gid 1000 node \
@@ -67,10 +67,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   g++-13 \
   xauth \
   libnvtt-bin \
+  python3-pip \
   && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
      --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
   && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-13 100 \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages via pip
+RUN pip3 install --break-system-packages mutagen
 
 # Bootstrap vcpkg at the pinned baseline commit (matches vcpkg.json builtin-baseline).
 # Packages are NOT pre-installed here — vcpkg manifest mode runs on first cmake configure.
