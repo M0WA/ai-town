@@ -334,3 +334,188 @@ TEST_F(TerrainSystemTest, ContiguousFlatRegion_MeetsMinimum) {
     EXPECT_EQ(m_sim->getGeneratedHeightmap().size(), static_cast<size_t>(101 * 101))
         << "Heightmap vertex count must be (mapTilesX+1)*(mapTilesZ+1) = 101*101";
 }
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_Generate_HeightmapIsNonEmpty
+//
+// Verifies that after calling generate(), getGeneratedHeightmap() returns a
+// non-empty vector of size (mapTilesX+1)*(mapTilesZ+1).
+// Uses FlatRNG (all zeros) so slope = 0 everywhere, guaranteeing playability.
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, Generate_HeightmapIsNonEmpty) {
+    FlatRNG flatRng;
+    const int tilesX = 64;
+    const int tilesZ = 64;
+
+    EXPECT_TRUE(m_sim->getGeneratedHeightmap().empty())
+        << "Heightmap must be empty before generate() is called";
+
+    m_sim->generate(tilesX, tilesZ, /*cellSize=*/2.0f, &flatRng, /*maxRetries=*/0);
+
+    const auto& hmap = m_sim->getGeneratedHeightmap();
+    EXPECT_FALSE(hmap.empty())
+        << "getGeneratedHeightmap() must be non-empty after generate()";
+    EXPECT_EQ(hmap.size(), static_cast<size_t>((tilesX + 1) * (tilesZ + 1)))
+        << "Heightmap size must be (tilesX+1)*(tilesZ+1)";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_Generate_ReturnsFalse_WhenConstraintsNotMet
+//
+// Uses a SteepRNG that always returns 1.0f, producing a heightmap with large
+// vertical variation. On a small 10×10 map the slope will be very steep,
+// making it impossible to satisfy the 50×50 contiguous-flat constraint with
+// maxRetries=0.  generate() must still return a value (false) and store the
+// heightmap — it must NOT abort or throw.
+//
+// The exact return value depends on whether the random amplitudes happen to
+// produce >= 20% flat tiles at the given cellSize, so we only assert that:
+//   (1) getGeneratedHeightmap() is populated (function completed)
+//   (2) The heightmap has the correct size
+// ---------------------------------------------------------------------------
+class SteepRNG : public ITerrainRNG {
+public:
+    float nextFloat() override { return 1.0f; } // Maximum height everywhere
+    int   nextInt(int /*min*/, int max) override { return max; }
+    void  reseed(uint64_t) override { ++m_reseedCount; }
+    int   reseedCount() const { return m_reseedCount; }
+private:
+    int m_reseedCount{0};
+};
+
+TEST_F(TerrainSystemTest, Generate_PopulatesHeightmap_EvenOnPlayabilityFailure) {
+    SteepRNG steepRng;
+    // 10×10 map — too small for 50×50 constraint regardless of terrain shape.
+    m_sim->generate(/*mapTilesX=*/10, /*mapTilesZ=*/10,
+                    /*cellSize=*/1.0f, &steepRng, /*maxRetries=*/0);
+
+    // Heightmap must always be populated regardless of playability result.
+    const auto& hmap = m_sim->getGeneratedHeightmap();
+    EXPECT_FALSE(hmap.empty())
+        << "generate() must populate the heightmap even when playability fails";
+    EXPECT_EQ(hmap.size(), static_cast<size_t>(11 * 11))
+        << "Heightmap size must be (10+1)*(10+1)=121";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_Generate_ReseededOnRetry
+//
+// Verifies that when the first attempt fails playability, generate() calls
+// rng->reseed() for each retry.  Uses a small map (10×10) that cannot satisfy
+// the 50×50 contiguous-flat constraint, so all attempts will fail.
+// After maxRetries=5 retries, reseedCount() must equal 5 (one reseed per retry,
+// but NOT on attempt 0 which uses the original seed).
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, Generate_ReseededOnRetry) {
+    SteepRNG steepRng;
+    const int maxRetries = 5;
+    // Small 10×10 map cannot satisfy 50×50 contiguous-flat constraint.
+    m_sim->generate(/*mapTilesX=*/10, /*mapTilesZ=*/10,
+                    /*cellSize=*/1.0f, &steepRng, maxRetries);
+
+    // reseed() should have been called once per retry attempt (attempts 1..5),
+    // not on attempt 0 (uses original seed).
+    EXPECT_EQ(steepRng.reseedCount(), maxRetries)
+        << "reseed() must be called exactly maxRetries times (once per retry, not on attempt 0)";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_UnregisterChunk_RemovesFromActiveMap
+//
+// Verifies that unregisterChunk() removes a previously registered chunk from
+// the active chunk map.  After unregistering, hasActiveChunk() must return
+// false and getChunkLOD() must return -1.
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, UnregisterChunk_RemovesFromActiveMap) {
+    const uint64_t kChunkId = 99u;
+
+    // Register a chunk at LOD 0.
+    m_sim->registerChunkAtLOD(kChunkId, /*currentLOD=*/0);
+    ASSERT_TRUE(m_sim->hasActiveChunk(kChunkId))
+        << "Chunk must be present after registerChunkAtLOD()";
+    ASSERT_EQ(m_sim->getChunkLOD(kChunkId), 0)
+        << "getChunkLOD() must return 0 after registering at LOD 0";
+
+    // Unregister the chunk.
+    m_sim->unregisterChunk(kChunkId);
+
+    EXPECT_FALSE(m_sim->hasActiveChunk(kChunkId))
+        << "Chunk must not be present after unregisterChunk()";
+    EXPECT_EQ(m_sim->getChunkLOD(kChunkId), -1)
+        << "getChunkLOD() must return -1 for an unregistered chunk";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_UnregisterChunk_NonExistent_IsNoop
+//
+// Verifies that calling unregisterChunk() on a chunk ID that was never
+// registered is a no-op (does not crash or corrupt state).
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, UnregisterChunk_NonExistent_IsNoop) {
+    const uint64_t kNeverRegisteredId = 12345u;
+    ASSERT_FALSE(m_sim->hasActiveChunk(kNeverRegisteredId));
+
+    // Must not crash.
+    EXPECT_NO_FATAL_FAILURE(m_sim->unregisterChunk(kNeverRegisteredId));
+    EXPECT_FALSE(m_sim->hasActiveChunk(kNeverRegisteredId));
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_GetChunkLOD_ReturnsCorrectLOD
+//
+// Verifies that getChunkLOD() returns the current LOD of a registered chunk.
+// Also verifies that after a rebuild updates the LOD, getChunkLOD() reflects
+// the new value.
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, GetChunkLOD_ReturnsCorrectLOD) {
+    const uint64_t kChunkId = 55u;
+
+    // -1 for unregistered.
+    EXPECT_EQ(m_sim->getChunkLOD(kChunkId), -1)
+        << "getChunkLOD() must return -1 for an unregistered chunk";
+
+    // Register at LOD 2.
+    m_sim->registerChunkAtLOD(kChunkId, /*currentLOD=*/2);
+    EXPECT_EQ(m_sim->getChunkLOD(kChunkId), 2)
+        << "getChunkLOD() must return 2 after registerChunkAtLOD(..., 2)";
+
+    // Process a rebuild to LOD 0 — should update the tracked LOD.
+    m_sim->enqueueRebuild(kChunkId, /*targetLOD=*/0);
+    m_sim->update(0.016f);
+
+    EXPECT_EQ(m_sim->getChunkLOD(kChunkId), 0)
+        << "getChunkLOD() must return 0 after rebuild to LOD 0";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_GetGeneratedHeightmap_EmptyBeforeGenerate
+//
+// Verifies that getGeneratedHeightmap() returns an empty vector before
+// generate() is called.
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, GetGeneratedHeightmap_EmptyBeforeGenerate) {
+    EXPECT_TRUE(m_sim->getGeneratedHeightmap().empty())
+        << "getGeneratedHeightmap() must return empty vector before generate() is called";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_Generate_FlatMap_AllHeightsZero
+//
+// Verifies that FlatRNG (nextFloat()=0) produces a heightmap where all vertex
+// heights are exactly 0.0f.  This validates that the RNG injection is actually
+// used in the heightmap construction — not a hardcoded constant.
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, Generate_FlatMap_AllHeightsZero) {
+    FlatRNG flatRng;
+    m_sim->generate(/*mapTilesX=*/10, /*mapTilesZ=*/10,
+                    /*cellSize=*/2.0f, &flatRng, /*maxRetries=*/0);
+
+    const auto& hmap = m_sim->getGeneratedHeightmap();
+    ASSERT_FALSE(hmap.empty());
+
+    for (size_t i = 0; i < hmap.size(); ++i) {
+        EXPECT_FLOAT_EQ(hmap[i], 0.0f)
+            << "All heights must be 0.0f when FlatRNG (nextFloat()=0) is used; failed at index "
+            << i;
+    }
+}

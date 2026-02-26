@@ -175,6 +175,216 @@ TEST(TerrainChunk, GetSlopeDegrees_FlatTerrain_ReturnsZero) {
 }
 
 // ---------------------------------------------------------------------------
+// TerrainChunk_FourParamConstructor_StoresChunkId
+//
+// Verifies the 4-parameter constructor: TerrainChunk(float*, int, float, ChunkId).
+// After construction the chunk must report the given ChunkId, the correct gridSize,
+// and must have a valid non-null mesh.
+// ---------------------------------------------------------------------------
+TEST(TerrainChunk, FourParamConstructor_StoresChunkId) {
+    const int gridSize     = 8;
+    const float cellSize   = 2.0f;
+    const ChunkId chunkId  = 0xDEADBEEFu;
+    auto heights = makeFlatHeightmap(gridSize);
+
+    TerrainChunk chunk(heights.data(), gridSize, cellSize, chunkId);
+
+    EXPECT_EQ(chunk.getChunkId(), chunkId)
+        << "4-param constructor must store the given ChunkId";
+    EXPECT_EQ(chunk.getGridSize(), gridSize)
+        << "4-param constructor must store the given gridSize";
+    EXPECT_FLOAT_EQ(chunk.getCellSize(), cellSize)
+        << "4-param constructor must store the given cellSize";
+    ASSERT_NE(chunk.getMesh(), nullptr)
+        << "4-param constructor must build a valid mesh";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainChunk_VectorConstructor_CorrectVertexCount
+//
+// Verifies the std::vector<float> convenience constructor:
+//   TerrainChunk(const std::vector<float>&, int, float, ChunkId)
+// After construction the vertex count must equal (gridSize+1)^2.
+// ---------------------------------------------------------------------------
+TEST(TerrainChunk, VectorConstructor_CorrectVertexCount) {
+    const int gridSize  = 16;
+    const float cellSize = 4.0f;
+    const ChunkId id    = 42u;
+    auto heights = makeFlatHeightmap(gridSize);
+
+    TerrainChunk chunk(heights, gridSize, cellSize, id);
+
+    ASSERT_NE(chunk.getMesh(), nullptr);
+    ASSERT_GT(chunk.getMesh()->getMeshBufferCount(), 0u);
+    const unsigned int expected =
+        static_cast<unsigned int>((gridSize + 1) * (gridSize + 1));
+    EXPECT_EQ(chunk.getMesh()->getMeshBuffer(0)->getVertexCount(), expected)
+        << "Vector constructor must produce (gridSize+1)^2 vertices";
+    EXPECT_EQ(chunk.getChunkId(), id)
+        << "Vector constructor must store the given ChunkId";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainChunk_VectorConstructor_DefaultChunkId_IsZero
+//
+// Verifies the std::vector<float> convenience constructor with the default
+// ChunkId (= 0 when omitted).
+// ---------------------------------------------------------------------------
+TEST(TerrainChunk, VectorConstructor_DefaultChunkId_IsZero) {
+    const int gridSize  = 8;
+    const float cellSize = 1.0f;
+    auto heights = makeFlatHeightmap(gridSize);
+
+    // Call with 3 args (ChunkId defaults to 0).
+    TerrainChunk chunk(heights, gridSize, cellSize);
+
+    EXPECT_EQ(chunk.getChunkId(), static_cast<ChunkId>(0))
+        << "Vector constructor with default ChunkId must set chunkId to 0";
+    ASSERT_NE(chunk.getMesh(), nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// TerrainChunk_VectorConstructor_UndersizedVector_PadsWithZeros
+//
+// Verifies that the vector constructor pads a too-small vector with zeros
+// rather than reading out-of-bounds memory.
+// ---------------------------------------------------------------------------
+TEST(TerrainChunk, VectorConstructor_UndersizedVector_PadsWithZeros) {
+    const int gridSize  = 8;
+    const float cellSize = 2.0f;
+    const int expectedSize = (gridSize + 1) * (gridSize + 1); // 81
+
+    // Provide only 10 heights — much less than the required 81.
+    std::vector<float> tinyHeights(10, 5.0f);
+
+    // Must not crash; constructor pads with zeros.
+    TerrainChunk chunk(tinyHeights, gridSize, cellSize);
+
+    ASSERT_NE(chunk.getMesh(), nullptr)
+        << "Vector constructor must build a mesh even with an undersized input";
+    EXPECT_EQ(chunk.getHeightmap().size(), static_cast<size_t>(expectedSize))
+        << "Heightmap must be padded to (gridSize+1)^2";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainChunk_MoveConstructor_TransfersOwnership
+//
+// Verifies TerrainChunk move constructor:
+//   - The moved-to chunk has a valid mesh pointer (original mesh).
+//   - The moved-from chunk has a null mesh pointer (ownership transferred).
+//   - The moved-to chunk reports the correct gridSize and chunkId.
+// ---------------------------------------------------------------------------
+TEST(TerrainChunk, MoveConstructor_TransfersOwnership) {
+    const int gridSize    = 8;
+    const float cellSize  = 2.0f;
+    const ChunkId chunkId = 77u;
+    auto heights = makeFlatHeightmap(gridSize);
+
+    TerrainChunk src(heights.data(), gridSize, cellSize, chunkId);
+    irr::scene::SMesh* originalMesh = src.getMesh();
+    ASSERT_NE(originalMesh, nullptr);
+
+    // Move-construct.
+    TerrainChunk dst(std::move(src));
+
+    // The destination now owns the mesh.
+    EXPECT_EQ(dst.getMesh(), originalMesh)
+        << "Move constructor must transfer mesh pointer to destination";
+    EXPECT_EQ(dst.getChunkId(), chunkId)
+        << "Move constructor must transfer chunkId";
+    EXPECT_EQ(dst.getGridSize(), gridSize)
+        << "Move constructor must transfer gridSize";
+
+    // The source must no longer own the mesh (null after move).
+    EXPECT_EQ(src.getMesh(), nullptr)
+        << "Move constructor must null the source mesh pointer after transfer";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainChunk_MoveAssignment_TransfersOwnership
+//
+// Verifies TerrainChunk move assignment operator:
+//   - The assigned-to chunk obtains the source mesh.
+//   - The source chunk's mesh pointer is null after assignment.
+//   - A prior mesh owned by the destination is dropped correctly (no crash).
+// ---------------------------------------------------------------------------
+TEST(TerrainChunk, MoveAssignment_TransfersOwnership) {
+    const int gridSize   = 8;
+    const float cellSize = 2.0f;
+    auto heights = makeFlatHeightmap(gridSize);
+
+    TerrainChunk src(heights.data(), gridSize, cellSize, /*chunkId=*/11u);
+    irr::scene::SMesh* srcMesh = src.getMesh();
+    ASSERT_NE(srcMesh, nullptr);
+
+    // Construct a separate chunk to be overwritten by move assignment.
+    TerrainChunk dst(heights.data(), gridSize, cellSize, /*chunkId=*/22u);
+    ASSERT_NE(dst.getMesh(), nullptr);
+    EXPECT_EQ(dst.getChunkId(), 22u);
+
+    // Move-assign src into dst — dst's old mesh is dropped, src mesh transferred.
+    dst = std::move(src);
+
+    EXPECT_EQ(dst.getMesh(), srcMesh)
+        << "Move assignment must transfer mesh pointer from source to destination";
+    EXPECT_EQ(dst.getChunkId(), 11u)
+        << "Move assignment must transfer chunkId from source";
+    EXPECT_EQ(src.getMesh(), nullptr)
+        << "Move assignment must null the source mesh pointer";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainChunk_MoveAssignment_SelfAssignment_IsNoop
+//
+// Verifies that move self-assignment (dst = std::move(dst)) does not crash
+// and leaves the chunk in a valid state.
+// The standard guarantees self-move is technically UB for some containers,
+// but our implementation explicitly checks this == &other.
+// ---------------------------------------------------------------------------
+TEST(TerrainChunk, MoveAssignment_SelfAssignment_IsNoop) {
+    const int gridSize   = 8;
+    const float cellSize = 2.0f;
+    auto heights = makeFlatHeightmap(gridSize);
+
+    TerrainChunk chunk(heights.data(), gridSize, cellSize, /*chunkId=*/33u);
+    irr::scene::SMesh* originalMesh = chunk.getMesh();
+    ASSERT_NE(originalMesh, nullptr);
+
+    // Self-assignment: the implementation checks (this != &other) and skips.
+    chunk = std::move(chunk);  // NOLINT(clang-analyzer-cplusplus.Move)
+
+    // Mesh pointer must remain valid.
+    EXPECT_EQ(chunk.getMesh(), originalMesh)
+        << "Move self-assignment must leave the mesh pointer unchanged";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainChunk_GetHeightmap_MatchesInputData
+//
+// Verifies that getHeightmap() returns the exact heights passed to the
+// 3-parameter constructor.
+// ---------------------------------------------------------------------------
+TEST(TerrainChunk, GetHeightmap_MatchesInputData) {
+    const int gridSize  = 4;
+    const float cellSize = 1.0f;
+    const int vertCount  = (gridSize + 1) * (gridSize + 1);
+
+    std::vector<float> heights(vertCount);
+    for (int i = 0; i < vertCount; ++i) {
+        heights[i] = static_cast<float>(i) * 0.1f;
+    }
+
+    TerrainChunk chunk(heights.data(), gridSize, cellSize);
+
+    const auto& stored = chunk.getHeightmap();
+    ASSERT_EQ(stored.size(), static_cast<size_t>(vertCount));
+    for (int i = 0; i < vertCount; ++i) {
+        EXPECT_FLOAT_EQ(stored[static_cast<size_t>(i)], heights[static_cast<size_t>(i)])
+            << "getHeightmap()[" << i << "] must match input height";
+    }
+}
+
+// ---------------------------------------------------------------------------
 // RC_GTEST_PROP: TerrainChunk_ArbitraryGrid_NeverDegenerateBoundingBox
 //
 // Property: for ANY gridSize in [4, 64] and ANY positive cellSize, the
