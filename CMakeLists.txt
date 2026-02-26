@@ -278,13 +278,21 @@ target_include_directories(aitown PRIVATE
     src/ui/               # UIManager.h, UIScaler.h, CameraController.h
     src/platform/         # EventReceiver.h, WallClock.h (via src/interfaces/)
     src/interfaces/       # WallClock.h, IClock.h, camera_state.h, etc.
+    src/simulation/       # CitySimulation.h, simulation_constants.h (Phase 6)
+    src/terrain/          # TerrainSystem.h (Phase 6 main-loop wiring)
     ${CMAKE_SOURCE_DIR}   # project-root-relative includes
 )
 # Irrlicht: main.cpp includes <irrlicht.h> directly.
 # GLEW::GLEW: RenderSystem.cpp uses GLEW (propagated via aitown_render but we link explicitly).
+# Phase 6: aitown_sim (CitySimulation::tick in main loop), aitown_terrain (TerrainSystem as
+#          ITerrainQuery* passed to CitySimulation constructor), aitown_audio (IAudioSystem*
+#          concrete implementation required by CitySimulation constructor).
 target_link_libraries(aitown PRIVATE
     aitown_render
     aitown_ui
+    aitown_sim
+    aitown_terrain
+    aitown_audio
     Irrlicht
     GLEW::GLEW
 )
