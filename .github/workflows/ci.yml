@@ -755,7 +755,7 @@ jobs:
             echo "PASS: Found $count src/simulation/ SF entries in coverage_filtered.info."
           fi
 
-      - name: Enforce 80% total line coverage gate
+      - name: Enforce 95% total line coverage gate
         run: |
           total=$(awk '
             /^LH:/ { lh+=substr($0,4)+0 }
@@ -767,11 +767,11 @@ jobs:
             exit 1
           fi
           awk -v pct="$total" 'BEGIN {
-            if (pct+0 < 80.0) {
-              print "FAIL: total line coverage " pct "% < 80%"
+            if (pct+0 < 95.0) {
+              print "FAIL: total line coverage " pct "% < 95%"
               exit 1
             } else {
-              print "PASS: total line coverage " pct "% >= 80%"
+              print "PASS: total line coverage " pct "% >= 95%"
             }
           }'
 

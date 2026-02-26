@@ -57,36 +57,40 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
 
   ```cmake
   # cmake/AitownTestHelpers.cmake
-  # Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl> [TIMEOUT <seconds>])
+  # Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl> [TIMEOUT <seconds>] [DISCOVERY_TIMEOUT <seconds>])
   macro(aitown_add_tests TARGET)
-      cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT" "" ${ARGN})
+      cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT;DISCOVERY_TIMEOUT" "" ${ARGN})
       if(NOT AITOWN_TEST_LABEL)
           message(FATAL_ERROR "aitown_add_tests: LABEL is required (unit, integration, or requires-opengl)")
       endif()
       if(NOT AITOWN_TEST_TIMEOUT)
-          set(AITOWN_TEST_TIMEOUT 120)  # default per-test timeout
+          set(AITOWN_TEST_TIMEOUT 120)  # default per-test timeout in seconds
+      endif()
+      if(NOT AITOWN_TEST_DISCOVERY_TIMEOUT)
+          set(AITOWN_TEST_DISCOVERY_TIMEOUT 30)  # default discovery timeout in seconds
       endif()
       gtest_discover_tests(${TARGET}
           WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
           DISCOVERY_MODE PRE_TEST      # required on Windows — see DISCOVERY_MODE note above
-          DISCOVERY_TIMEOUT 30
+          DISCOVERY_TIMEOUT ${AITOWN_TEST_DISCOVERY_TIMEOUT}
           PROPERTIES TIMEOUT ${AITOWN_TEST_TIMEOUT}
           LABELS "${AITOWN_TEST_LABEL}"
       )
   endmacro()
 
-  # Terrain tests: longer timeout for multi-seed generation property tests
-  # aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300)
+  # Terrain tests: longer timeouts for multi-seed generation property tests
+  # aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
   #
   # Standard unit tests:
-  # aitown_add_tests(simulation_tests LABEL "unit")
+  # aitown_add_tests(simulation_tests LABEL "unit" DISCOVERY_TIMEOUT 60)  # 60s: 8-file binary with RapidCheck property tests under coverage instrumentation
   # aitown_add_tests(ui_tests LABEL "unit")
+  # aitown_add_tests(audio_tests LABEL "unit")
   #
   # Integration tests:
   # aitown_add_tests(integration_tests LABEL "integration")
   ```
 
-  **Terrain test timeout**: Terrain generator tests (`tests/terrain/`) use a 300 s per-test timeout (overriding the default 120 s) because `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` runs up to 100 re-seed attempts for each RapidCheck shrinking iteration, and the multi-seed `TEST_F` cases (6 seeds × generation time) can exceed 120 s on coverage-instrumented CI runners. Call: `aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)`.
+  **Terrain test timeout**: Terrain generator tests (`tests/terrain/`) use a 300 s per-test timeout (overriding the default 120 s) because `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` runs up to 100 re-seed attempts for each RapidCheck shrinking iteration, and the multi-seed `TEST_F` cases (6 seeds × generation time) can exceed 120 s on coverage-instrumented CI runners. Call: `aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)`. **Discovery timeout**: The default 30 s discovery timeout (configurable via `DISCOVERY_TIMEOUT` parameter) is necessary because coverage-instrumented binaries on loaded CI runners require more time to enumerate test cases; the default CMake value (5 s) is insufficient and silently produces 0 discovered tests. Terrain tests and simulation tests override to 60 s.
 
 ## Source Directory Structure
 
