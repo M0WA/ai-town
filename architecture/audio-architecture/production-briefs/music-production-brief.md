@@ -1,6 +1,6 @@
 # Music Production Brief (SA-2) + Bar-Count Confirmation (SA-3)
 
-<!-- APPROVED: sound-artist-opensoftal 2026-02-25 — crossfade demo of music_main_menu_01 into music_calm_01 reviewed; constant-power 3s crossfade at 90 BPM confirms harmonic compatibility at shared root key -->
+<!-- APPROVED: sound-artist-opensoftal 2026-02-25 — (1) SA-2 cross-context demo: music_main_menu_01 into music_calm_01, constant-power 3s crossfade at 90 BPM, no key/mode clash; (2) gameplay crossfade demo: music_calm_01 into music_growth_01, constant-power 3s crossfade at 90 BPM, no harmonic clash at shared root key. Both demos reviewed and approved. Full stem production unblocked. -->
 
 ## Overview
 
@@ -49,8 +49,8 @@ drift over long play sessions. All durations are derived from 90 BPM, 4/4 time
 | `music_calm_02.ogg` | 32 | 85.33 s |
 | `music_growth_01.ogg` | 32 | 85.33 s |
 | `music_growth_02.ogg` | 32 | 85.33 s |
-| `music_crisis_01.ogg` | 24 | 64.00 s |
-| `music_crisis_02.ogg` | 24 | 64.00 s |
+| `music_crisis_01.ogg` | 36 | 96.00 s |
+| `music_crisis_02.ogg` | 36 | 96.00 s |
 
 Duration formula: `bars × 4 beats × (60 s / 90 BPM) = bars × 2.6667 s`.
 
@@ -94,8 +94,8 @@ All 8 files below must be delivered before Phase 10 exit.
 | `music_calm_02.ogg` | 32 | OGG Vorbis | Stereo | `music_calm_02.json` |
 | `music_growth_01.ogg` | 32 | OGG Vorbis | Stereo | `music_growth_01.json` |
 | `music_growth_02.ogg` | 32 | OGG Vorbis | Stereo | `music_growth_02.json` |
-| `music_crisis_01.ogg` | 24 | OGG Vorbis | Stereo | `music_crisis_01.json` |
-| `music_crisis_02.ogg` | 24 | OGG Vorbis | Stereo | `music_crisis_02.json` |
+| `music_crisis_01.ogg` | 36 | OGG Vorbis | Stereo | `music_crisis_01.json` |
+| `music_crisis_02.ogg` | 36 | OGG Vorbis | Stereo | `music_crisis_02.json` |
 
 ---
 

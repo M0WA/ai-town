@@ -36,4 +36,32 @@
   - **Deque pointer safety**: The `ChunkRebuildRequest` struct must store a **`uint64_t` chunk ID** (not a raw `IMeshSceneNode*`). Before processing a request, validate the chunk is still live in `TerrainSystem::m_activeChunks` by ID. If not found (chunk was unloaded while request was queued), discard the request without dereferencing any pointer.
   - **Deque deduplication** (prevents same-frame double rebuild): `TerrainSystem::update()` must maintain a per-frame `std::unordered_set<uint64_t> processedThisFrame`. Before processing a request, skip if `processedThisFrame` already contains the chunk ID. Also skip if `it->second.currentLOD == req.targetLOD` (chunk already at the requested level — prevents redundant rebuilds from stale queued requests). This ensures the "never transitions up and down in the same frame" invariant is structurally enforced, not just documented as a property of `LODNode`.
   - **`TerrainSystem::flushPendingRebuilds()`**: `TerrainSystem` exposes a `flushPendingRebuilds()` method called once during the loading screen (after all initial chunks are queued) that processes the entire rebuild deque synchronously in a single frame — **bypassing the 2-per-frame cap**. This eliminates the startup LOD thrashing that would otherwise occur over the first ~N/2 frames as the deque drains at the normal rate. The method processes until the deque is empty or a per-call GPU upload time budget (default: 100 ms) is exhausted, whichever comes first, to prevent the loading screen from stalling visibly. The loading spinner progress bar should advance during this flush.
+
+  **IClock Injection for Deterministic Testing**
+
+  `TerrainSystem` constructor signature: `TerrainSystem(IRenderer* renderer, IClock* clock)`
+
+  The `flushPendingRebuilds()` 100 ms wall-clock budget is measured via `m_clock->nowSeconds()`
+  (NOT `std::chrono::steady_clock` directly), enabling deterministic testing:
+
+  ```cpp
+  void TerrainSystem::flushPendingRebuilds() {
+      double start = m_clock->nowSeconds();
+      while (!m_rebuildDeque.empty()) {
+          if (m_clock->nowSeconds() - start >= 0.100) break;  // 100 ms budget
+          // process one rebuild...
+          m_rebuildDeque.pop_front();
+      }
+  }
+  ```
+
+  - Production: inject `WallClock` (`std::chrono::steady_clock`-based)
+  - Tests: inject `ManualClock` to advance time programmatically
+
+  `TerrainSystem_FlushPendingRebuilds_BudgetExhausted_StopsAfterBudget` test:
+
+  1. Enqueue 10 rebuilds.
+  2. Use `ManualClock` that returns `start + 0.101` on the second `nowSeconds()` call.
+  3. After `flushPendingRebuilds()`, assert that < 10 rebuilds were processed (budget was hit).
+
 - Chunks loaded/unloaded based on camera distance

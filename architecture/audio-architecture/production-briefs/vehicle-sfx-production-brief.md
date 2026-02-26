@@ -29,20 +29,14 @@ ranges in the engine. Do not conflate their specifications — zone loops are co
 
 The engine applies pitch-shift to engine loops to simulate vehicle speed. The lowest
 pitch-shift ratio applied is 0.75x (used for stopped or near-stopped vehicles). At this
-ratio, the perceived loop duration is:
+ratio, the pitch-shifted audio plays at 75% of its authored pitch, which compresses the
+perceived loop duration:
 
 ```text
-perceived_duration = authored_duration / pitch_ratio
+perceived_duration = authored_duration × pitch_ratio
 ```
 
-| Authored duration | Pitch ratio 0.75x | Perceived loop |
-|---|---|---|
-| 4 s | 0.75x | 5.33 s |
-| 5 s | 0.75x | 6.67 s |
-| 6 s (minimum) | 0.75x | 8.00 s |
-
-Wait — the relevant threshold is audible loop repetition, not raw duration. Human
-perception detects looping at approximately 4–5 s of identical audio. At 0.75x pitch:
+Human perception detects looping at approximately 4–5 s of identical audio. At 0.75x pitch:
 
 | Authored duration | Perceived loop at 0.75x |
 |---|---|

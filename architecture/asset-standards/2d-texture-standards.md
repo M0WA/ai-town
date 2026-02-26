@@ -322,6 +322,17 @@ Road surfaces use a dedicated tileable texture separate from terrain and buildin
 - Seamless tileable base textures required (grass, asphalt, soil, concrete) — no visible seams
 - **UV tiling frequency**: Terrain base textures tile at **4×4 repeats per 64×64 m LOD0 chunk** (16 px/m effective density at 2048 px resolution). All terrain texture artists must use this exact tiling frequency — inconsistent values produce visible density discontinuities at chunk borders. This value is fixed before terrain texture production begins.
 - **Splat/blend map format**: **DDS RGBA8 UNORM (uncompressed) — never DXT/BC compressed**. DXT compression introduces block quantization artifacts that corrupt the smooth blend weight gradients (R/G/B/A channels encode continuous 0–255 weights). At 1024×1024 uncompressed RGBA8 = 4 MB VRAM — acceptable. **1 texel per terrain tile** (e.g. 64×64 px per 64×64 m LOD0 chunk; full map: 1024×1024 px for a 1024×1024 tile map); each RGBA channel = blend weight for one terrain material layer (4 layers per RGBA map). **Splat maps must be power-of-two dimensions** — the per-chunk resolution (1 texel/tile) already satisfies POT for standard chunk sizes (64×64, 128×128), but non-standard chunk dimensions must be padded to the next POT before upload.
+
+  **Per-chunk splat map pixel dimensions**: 1 texel per terrain tile. Formula: `(chunk_size_m / tile_size_m)² px`.
+
+  | Map configuration | Chunk size | Tile size | Splat map per chunk |
+  |---|---|---|---|
+  | V1 (default) | 64 m | 4 m | **16×16 px** |
+  | (future) 128 m chunk | 128 m | 4 m | 32×32 px |
+
+  **V1 deliverable**: author and commit one `terrain_splat_test.png` (16×16 RGBA PNG) as the terrain
+  test fixture. Channels: R=0.8, G=0.1, B=0.05, A=0.05 (grassland-dominant blend). This fixture is
+  used by `TextureCache::loadSplatMap()` unit tests.
 - **Splat map GPU upload**: Splat maps must be uploaded as uncompressed `GL_RGBA8` via `glTexImage2D` — **never via `glCompressedTexImage2D`**. The correct upload sequence (texture object must be explicitly created and bound first — the sRGB raw-GL path requires the same discipline):
 
   ```cpp
@@ -348,19 +359,37 @@ Road surfaces use a dedicated tileable texture separate from terrain and buildin
 
   | Splat map channel | Terrain material | Texture unit | Constant name | Initial value |
   |---|---|---|---|---|
-  | R (red) | Grass | 5 | `kTexUnitTerrainLayer0` | 255 across entire map |
+  | R (red) | Base (biome-specific) | 5 | `kTexUnitTerrainLayer0` | 255 across entire map |
   | G (green) | Asphalt | 6 | `kTexUnitTerrainLayer1` | 0 |
   | B (blue) | Soil | 7 | `kTexUnitTerrainLayer2` | 0 |
   | A (alpha) | Concrete | 8 | `kTexUnitTerrainLayer3` | 0 |
 
-  This assignment is **fixed before texture production begins** and must match the texture unit binding order in the terrain shader (`kTexUnitTerrainLayer0` through `kTexUnitTerrainLayer3`). Any mismatch between the splat map channel order and the texture unit binding order causes incorrect material blending across the entire terrain surface with no compile-time or runtime error. **The R channel (grass) is initialized to 255 across the entire map** so that unpainted tiles default to grass and the blend-weight normalization divisor is always non-zero.
+  **"Base" channel semantics**: the R channel holds the primary ground cover for the current biome.
+  In V1 (grassland biome): R = grass texture. In future desert biome: R = sand texture. The channel
+  is labeled "base" rather than "grass" because the splat map architecture is biome-agnostic — only
+  the texture asset assigned to R changes between biomes; the splat map layout, UV coordinates, and
+  shader binding are identical across all biomes. V1 ships one biome (grassland). **Artist rule**:
+  when authoring a new biome variant, swap only the R-channel texture asset file; do NOT modify the
+  splat map or shader.
 
-- **Blend shader**: Sample splat map at tile UV; use R/G/B/A as blend weights for four detail textures; normalize weights to sum to 1.0; output weighted sum of sampled detail texture colors. **Division-by-zero protection**: If all four RGBA channels are simultaneously 0.0, the normalization divisor is 0. Shader must guard: `if (sum < 0.001) { weights = vec4(1,0,0,0); }` (fall back to base layer R). **Authoring rule**: The R channel (base terrain layer, e.g. grass) must be initialized to 255 across the entire splat map before any painting begins, ensuring the divisor is always non-zero on unpainted tiles.
-- **Initial splat map state**: the default splat map PNG for a new terrain chunk must have R channel = 255, G = 0, B = 0, A = 0 across the entire image — this initialises all terrain to the grass/base material layer. Before committing any splat map asset, the artist or export script must verify this initialization (e.g., via `python -c "from PIL import Image; img = Image.open('splat.png'); assert img.getextrema() == ((255,255),(0,0),(0,0),(0,0))"` or equivalent). A splat map with incorrect initial state causes the terrain shader to render black or undefined material blends at runtime.
+  This assignment is **fixed before texture production begins** and must match the texture unit binding order in the terrain shader (`kTexUnitTerrainLayer0` through `kTexUnitTerrainLayer3`). Any mismatch between the splat map channel order and the texture unit binding order causes incorrect material blending across the entire terrain surface with no compile-time or runtime error. **The R channel (base terrain layer) is initialized to 255 across the entire map** so that unpainted tiles default to the base material and the blend-weight normalization divisor is always non-zero.
+
+- **Blend shader**: Sample splat map at tile UV; use R/G/B/A as blend weights for four detail textures; normalize weights to sum to 1.0; output weighted sum of sampled detail texture colors. **Division-by-zero protection**: If all four RGBA channels are simultaneously 0.0, the normalization divisor is 0. Shader must guard: `if (sum < 0.001) { weights = vec4(1,0,0,0); }` (fall back to base layer R). **Authoring rule**: The R channel (base terrain layer) must be initialized to 255 across the entire splat map before any painting begins, ensuring the divisor is always non-zero on unpainted tiles.
+- **Initial splat map state**: the default splat map PNG for a new terrain chunk must have R channel = 255, G = 0, B = 0, A = 0 across the entire image — this initialises all terrain to the base material layer (R channel; grass in V1 grassland biome). Before committing any splat map asset, the artist or export script must verify this initialization (e.g., via `python -c "from PIL import Image; img = Image.open('splat.png'); assert img.getextrema() == ((255,255),(0,0),(0,0),(0,0))"` or equivalent). A splat map with incorrect initial state causes the terrain shader to render black or undefined material blends at runtime.
 - **Terrain normal map intensity — hard vs soft surface distinction**: Terrain normal maps must be authored with surface-appropriate intensity to avoid plastic or unnatural shading. Apply to all terrain `_n` textures:
   - **Hard surfaces** (concrete, brick, asphalt, stone): strong normal intensity; use Z-scale **1.0–1.5** in the DCC tool normal baker. High-frequency sharp detail is appropriate — pavement cracks, mortar lines, stone facets.
   - **Soft surfaces** (grass, soil, dirt, sand): gentle normal intensity; use Z-scale **0.3–0.7**. Over-strong normals on soft terrain surfaces produce a plastic or moulded appearance and must be avoided. Subtle micro-undulation (gentle height variation, soil clumping) is the correct authoring target.
   - Validate by rendering a sphere lit from a single directional light: hard-surface normals should produce sharp specular highlights along surface features; soft-surface normals should produce a diffuse, low-contrast shading variation with no sharp specular peaks.
+- **CI validation requirement (`validate_assets.py`)**: terrain normal map DDS files (`*_n.dds`
+  matching terrain naming pattern) must have `dwMipMapCount >= 4`. The `validate_assets.py` script
+  must check this field in the DDS header (bytes 28–31 of the DDS file, little-endian uint32). A
+  normal map with `dwMipMapCount = 1` (driver-generated mips) is a hard asset error — at lower mips,
+  driver-generated bilinear downsampling denormalizes the tangent-space normal vectors, producing
+  incorrect lighting at medium and far distances. The bicubic pre-bake preserves vector normalization
+  across the mip chain. **Normal map mip authoring requirement**: terrain normal maps must be authored
+  with a bicubic-downsampled mip chain (using the DCC tool's normal-map-aware mip baker, not
+  driver-generated bilinear mips) to ensure tangent-space normal vectors remain unit-length at every
+  mip level.
 - Coordinate layer count with `graphics-dev-irrlicht` before authoring terrain materials
 - `graphics-dev-irrlicht` implements the splatting shader/multi-texture blend via Irrlicht's material system
 

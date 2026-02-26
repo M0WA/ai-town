@@ -80,6 +80,87 @@ if (!gpu) {
 
   Without this save/restore, Irrlicht's internal active-unit tracking is corrupted starting from the first frame that uses a custom sRGB shader, producing intermittent texture-on-wrong-unit artifacts that are difficult to reproduce.
 
+  **Terrain Splat Shader — 5-Unit Binding Sequence in OnSetConstants()**
+
+  The terrain splat shader binds 5 raw `GLuint` textures simultaneously in `OnSetConstants()`:
+
+  - Unit 4: splat map (`getSplatMapGLuint()`)
+  - Unit 5: terrain detail layer 0 / R-channel (`getSRGBGLuint()`, biome base/grass)
+  - Unit 6: terrain detail layer 1 / G-channel (`getSRGBGLuint()`, asphalt)
+  - Unit 7: terrain detail layer 2 / B-channel (`getSRGBGLuint()`, soil)
+  - Unit 8: terrain detail layer 3 / A-channel (`getSRGBGLuint()`, concrete)
+
+  Required binding sequence (must be in exactly this order):
+
+  ```cpp
+  // Save current active unit
+  GLint savedUnit;
+  glGetIntegerv(GL_ACTIVE_TEXTURE, &savedUnit);
+
+  // Bind splat map (unit 4, linear upload — NOT sRGB)
+  glActiveTexture(GL_TEXTURE0 + kTexUnitSplatMap);  // = 4
+  glBindTexture(GL_TEXTURE_2D, tc->getSplatMapGLuint(m_splatPath));
+
+  // Bind 4 sRGB terrain detail layers (units 5–8)
+  for (int i = 0; i < 4; ++i) {
+      glActiveTexture(GL_TEXTURE0 + kTexUnitTerrainLayer0 + i);  // = 5,6,7,8
+      glBindTexture(GL_TEXTURE_2D, tc->getSRGBGLuint(m_detailPaths[i]));
+  }
+
+  // Set sampler uniforms AFTER all bindings
+  int unit4 = kTexUnitSplatMap;  // 4
+  services->setPixelShaderConstant("u_splatMap", &unit4, 1);
+  for (int i = 0; i < 4; ++i) {
+      int unit = kTexUnitTerrainLayer0 + i;  // 5–8
+      const char* names[] = {"u_layer0","u_layer1","u_layer2","u_layer3"};
+      services->setPixelShaderConstant(names[i], &unit, 1);
+  }
+
+  // Restore saved active unit
+  glActiveTexture(static_cast<GLenum>(savedUnit));
+  ```
+
+  **Do NOT unbind individual units** before restoring — Irrlicht's driver state machine
+  tracks active texture units internally. Restoring `GL_ACTIVE_TEXTURE` is sufficient.
+  The `GL_ACTIVE_TEXTURE` save/restore pattern is mandatory for ALL raw-GL texture bindings
+  in `OnSetConstants()` to prevent corrupting Irrlicht's internal texture state.
+
+  **sRGB Gamma Fallback — Uniform Bool Approach**
+
+  When `GL_EXT_texture_sRGB` is absent (`RenderSystem::isSRGBTextureSupported()` returns `false`),
+  terrain textures are uploaded as linear (not sRGB). The fragment shader must apply a manual
+  `pow(color.rgb, vec3(2.2))` gamma correction.
+
+  **Mechanism: uniform bool `u_srgbLinear`** (not two shader variants).
+
+  In `OnSetConstants()`:
+
+  ```cpp
+  bool srgbLinear = !m_renderer->isSRGBTextureSupported();
+  // Irrlicht setPixelShaderConstant passes bool as int (1 = true, 0 = false)
+  int srgbLinearInt = srgbLinear ? 1 : 0;
+  services->setPixelShaderConstant("u_srgbLinear", &srgbLinearInt, 1);
+  ```
+
+  In the terrain fragment shader:
+
+  ```glsl
+  uniform bool u_srgbLinear;
+  // ...
+  vec4 color = texture(u_layer0, uv) * splatWeights.r
+             + texture(u_layer1, uv) * splatWeights.g
+             + texture(u_layer2, uv) * splatWeights.b
+             + texture(u_layer3, uv) * splatWeights.a;
+  if (u_srgbLinear) {
+      color.rgb = pow(color.rgb, vec3(2.2));
+  }
+  gl_FragColor = color;
+  ```
+
+  **Why not two shader variants**: selecting between shader variants at runtime requires
+  storing two `s32` material IDs and branching in the render path. The uniform bool
+  is evaluated once per draw call on modern drivers with negligible overhead.
+
   **Note on shader version enums**: Irrlicht's GLSL backend **ignores** the `EVST_VS_*` / `EPST_PS_*` enum values entirely when compiling OpenGL GLSL shaders. These enums are meaningful only for the Direct3D HLSL backend. For GLSL, the active GLSL version is determined exclusively by the `#version` directive in the shader source file itself. Use `EVST_VS_1_1` / `EPST_PS_1_1` as the conventional placeholder values (matching Irrlicht Tutorial 10). All GLSL shader files must begin with a `#version` pragma appropriate for the features used (e.g. `#version 130` for `texture()`, `in`/`out` qualifiers, and multi-texture sampling). Do not assume that passing `EVST_VS_3_0` or higher will gate or enable any GLSL feature — it has no effect on the GLSL compilation path.
 
 ## Phase 2 GLSL Stub Files — Co-Landing Requirement
