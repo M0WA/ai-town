@@ -65,6 +65,13 @@ public:
     // Despite the "Pct" name, callers (HUD demand bars) must multiply by 100.0f for display.
     // This naming inconsistency is pre-existing (Phase 1/3) and is not corrected in V1 to
     // avoid breaking all call sites. See hud-layout.md demand bar display spec.
+    //
+    // INVERSE SEMANTICS WARNING vs QueryResult::demandPressurePct:
+    //   getDemandPressurePct(zone)           → [0.0, 1.0]  1.0 = maximum EFFECTIVE demand
+    //   QueryResult::demandPressurePct       → [0, 100]    100 = ZERO effective demand (fully unmet)
+    // These are complementary: queryResult.demandPressurePct = (1.0f - getDemandPressurePct(zone)) * 100.0f
+    // is NOT VALID (getDemandPressurePct is city-wide aggregate; QueryResult is per-tile effective factor).
+    // See simulation_types.h QueryResult::demandPressurePct for the canonical formula.
     virtual float getDemandPressurePct(ZoneType zone) const = 0;
 
     // Traffic demand factor — returns the INTERNAL traffic-only smoothstep multiplier in [0.0, 1.0]

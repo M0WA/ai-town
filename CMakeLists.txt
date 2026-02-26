@@ -193,7 +193,7 @@ target_link_libraries(aitown_audio PRIVATE
 
 # ----------------------------------------------------------------------------
 # aitown_sim — City simulation (economy, traffic, zoning, population)
-# Phase 3 replaces placeholder.cpp with CitySimulation.cpp.
+# Phase 6 replaces placeholder.cpp with CitySimulation.cpp.
 # ----------------------------------------------------------------------------
 add_library(aitown_sim STATIC
     src/simulation/placeholder.cpp
@@ -363,7 +363,7 @@ target_include_directories(simulation_tests PRIVATE
     src/simulation/
     ${CMAKE_SOURCE_DIR}
 )
-aitown_add_tests(simulation_tests LABEL "unit")
+aitown_add_tests(simulation_tests LABEL "unit" DISCOVERY_TIMEOUT 60)
 
 # ----------------------------------------------------------------------------
 # terrain_tests — terrain generator property tests and fixed-seed regression

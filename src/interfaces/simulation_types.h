@@ -123,8 +123,13 @@ struct QueryResult {
     DensityTier densityTier{DensityTier::Low};
     int         population{};
     float       desirability{};      // [0, 100]
-    float       demandPressurePct{}; // Per-tile unmet demand percentage: (1.0f - effective_demand_factor) * 100.
-                                      // Range [0, 100]: 0 = fully demanded (no unmet demand), 100 = zero demand.
+    float       demandPressurePct{}; // Per-tile UNMET demand percentage: (1.0f - effective_demand_factor) * 100.
+                                      // Range [0, 100]: 0 = fully satisfied demand, 100 = zero demand.
+                                      // *** INVERSE SEMANTICS vs ICitySimulation::getDemandPressurePct(ZoneType) ***
+                                      // getDemandPressurePct(ZoneType) returns EFFECTIVE demand in [0.0, 1.0]
+                                      // (1.0 = maximum demand). QueryResult::demandPressurePct is its complement
+                                      // multiplied by 100. Formula: queryResult.demandPressurePct =
+                                      // (1.0f - tileEffectiveDemandFactor) * 100.0f — NOT getDemandPressurePct() * 100.
                                       // NOT the same as getDemandPressurePct(ZoneType) which returns city-wide aggregate.
     ServiceCoverage coverage;        // per-service; -1.0f = N/A
 };

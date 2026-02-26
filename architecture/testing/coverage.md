@@ -1,6 +1,6 @@
 # Coverage (Linux only)
 
-- **Minimum 80% line coverage** on `src/simulation/`, `src/terrain/`, `src/ui/`
+- **Minimum 95% line coverage** on `src/simulation/`, `src/terrain/`, `src/ui/` (Phase 6 target; Phase 5 gate was 80%)
   - `src/ui/` coverage is achievable only via an `IUIBackend` interface (see `testability-architecture.md`). Direct Irrlicht calls in `UIManager` must be abstracted behind `IUIBackend` before `src/ui/` is added to the coverage gate.
 - Coverage enforcement scoped to the Linux GCC/Clang build only. Windows builds run all tests but do not gate on coverage percentage.
 - `gcov` / `lcov` on Linux; enable via `-DENABLE_COVERAGE=ON`
@@ -133,6 +133,41 @@ must be corrected before Phase 5 begins. Likely causes include:
 The Phase 5 80% gate assumes a Phase 4 baseline of at least 25%. If Phase 4 delivers only
 10% or below, Phase 5 must include additional `ui_tests` source files (e.g.,
 `UIManagerStateTransitionTest`) to make the 80% gate achievable.
+
+## Phase 6 — Total Line Coverage 95% Gate
+
+Phase 6 raises the **total line coverage** target from 80% (Phase 5) to **95%** across all
+files remaining in `coverage_filtered.info` after the `lcov --remove` exclusions (i.e.,
+`src/simulation/`, `src/terrain/`, `src/ui/`).
+
+**Rationale**: Phase 6 delivers the complete V1 simulation engine (economy, traffic, zoning,
+population, service coverage). All critical simulation paths are expected to be covered by
+the Phase 6 unit and property-based test suite. The 95% gate enforces this completeness
+and blocks Phase 7+ from inheriting under-tested simulation logic.
+
+**Phase 6 CI deliverable**: Update `.github/workflows/ci.yml` `coverage-linux` job —
+change the existing `80.0` threshold in the `Enforce 80% total line coverage gate` step
+to `95.0`, and rename the step to `Enforce 95% total line coverage gate`. This MUST be
+applied during Phase 6 implementation (not before — changing the threshold before Phase 6
+tests are written would break CI).
+
+**CI step** (replaces Phase 5 `awk` gate in `coverage-linux` job at Phase 6 completion):
+
+```bash
+awk -v pct="$total" 'BEGIN {
+  if (pct+0 < 95.0) {
+    print "FAIL: total line coverage " pct "% < 95% Phase 6 gate"; exit 1
+  } else {
+    print "PASS: total line coverage " pct "% >= 95%"
+  }
+}'
+```
+
+**What achieves 95%**: The Phase 6 simulation test suite (economy, traffic, zoning, population,
+service coverage) combined with the Phase 5 terrain and Phase 4 UI coverage. Files excluded from
+the gate (`src/rendering/`, `src/audio/`, `src/platform/`) do not count toward this percentage.
+Any simulation file below 85% individual coverage is a candidate for additional targeted tests
+before merging Phase 6.
 
 **Below 25% is a BLOCKING defect, not a MEDIUM risk.** Do not advance to Phase 5 until the
 Phase 4 `src/ui/` baseline meets or exceeds 25%.

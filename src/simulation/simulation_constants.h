@@ -198,4 +198,48 @@ struct SimulationConstants {
     static constexpr float min_speed_fraction = 0.05f;
     static_assert(min_speed_fraction > 0.0f && min_speed_fraction < congestion_high_threshold,
                   "min_speed_fraction must be below high-congestion threshold");
+
+    // Traffic rolling-window sizes (architecture/game-design/traffic-system.md)
+    // R and C zones use a 5-tick window; I zones use a 3-tick window.
+    // Must NOT be hardcoded as literals in the rolling-window initialization.
+    static constexpr int traffic_rolling_window_r_c = 5;
+    static_assert(traffic_rolling_window_r_c > 0, "must be positive");
+    static constexpr int traffic_rolling_window_i = 3;
+    static_assert(traffic_rolling_window_i > 0, "must be positive");
+
+    // Loan cooldown: minimum budget ticks between consecutive forced loans
+    // (architecture/game-design/economy-model.md)
+    static constexpr int loan_cooldown_ticks = 2;
+    static_assert(loan_cooldown_ticks > 0, "must be positive");
+
+    // Road geometry parameters (architecture/game-design/traffic-system.md)
+    static constexpr float road_max_speed_mps = 13.9f;  // 50 km/h
+    static_assert(road_max_speed_mps > 0.0f, "must be positive");
+    static constexpr int road_segment_capacity_per_tile = 8;  // vehicles/tile; clamped to min 1
+    static_assert(road_segment_capacity_per_tile > 0, "must be positive");
+
+    // Density unlock base thresholds (treasury balance required; scaled by density_unlock_scale_*)
+    // (architecture/game-design/economy-model.md, density unlock table)
+    static constexpr int density_unlock_base_threshold_1 = 50'000;
+    static constexpr int density_unlock_base_threshold_2 = 75'000;
+    static constexpr int density_unlock_base_threshold_3 = 100'000;
+    static constexpr int density_unlock_base_threshold_4 = 200'000;
+    static constexpr int density_unlock_base_threshold_5 = 500'000;
+    static_assert(density_unlock_base_threshold_1 < density_unlock_base_threshold_2, "unlock thresholds must be ascending");
+    static_assert(density_unlock_base_threshold_2 < density_unlock_base_threshold_3, "unlock thresholds must be ascending");
+    static_assert(density_unlock_base_threshold_3 < density_unlock_base_threshold_4, "unlock thresholds must be ascending");
+    static_assert(density_unlock_base_threshold_4 < density_unlock_base_threshold_5, "unlock thresholds must be ascending");
+
+    // Population milestone thresholds (architecture/game-design/game-progression-modes.md)
+    // Each threshold fires exactly once per playthrough (per-milestone boolean flag in CitySimulation).
+    // Must NOT be hardcoded inline in CitySimulation.cpp or test bodies.
+    static constexpr int population_milestone_threshold_1 =      1'000;
+    static constexpr int population_milestone_threshold_2 =     10'000;
+    static constexpr int population_milestone_threshold_3 =     50'000;
+    static constexpr int population_milestone_threshold_4 =    100'000;
+    static constexpr int population_milestone_threshold_5 =    500'000;
+    static_assert(population_milestone_threshold_1 < population_milestone_threshold_2, "milestones must be ascending");
+    static_assert(population_milestone_threshold_2 < population_milestone_threshold_3, "milestones must be ascending");
+    static_assert(population_milestone_threshold_3 < population_milestone_threshold_4, "milestones must be ascending");
+    static_assert(population_milestone_threshold_4 < population_milestone_threshold_5, "milestones must be ascending");
 };
