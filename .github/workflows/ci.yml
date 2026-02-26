@@ -285,12 +285,19 @@ jobs:
 
       # Step 4: Cache vcpkg packages.
       # Reads $env:COMPILER_VERSION set in step 3.
+      # restore-keys: two-tier fallback —
+      #   Tier 1 (same baseline, different vcpkg.json hash): safe partial restore — vcpkg
+      #     installs only the new/changed packages on top of the restored archive.
+      #   Tier 2 (any prior entry for this OS+compiler): last-resort fallback; may restore
+      #     a stale-baseline archive that triggers MSYS2 mirror 404s on cold-package rebuilds.
+      #     Acceptable only when no same-baseline entry exists (e.g. first run at a new baseline).
       - name: Cache vcpkg packages
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
           key: vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT_ID }}
           restore-keys: |
+            vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ env.VCPKG_COMMIT_ID }}-
             vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
 
       # Step 5: Validate vcpkg baseline consistency (must precede vcpkg install).
@@ -304,17 +311,22 @@ jobs:
           fi
           echo "vcpkg baseline validation passed: $MANIFEST_BASELINE"
 
-      # Step 6: Run vcpkg to install dependencies.
+      # Step 6: Set up MSVC environment for Ninja generator.
+      # ilammy/msvc-dev-cmd runs vcvarsall.bat x64, placing cl.exe and link.exe on PATH.
+      # MUST run BEFORE lukka/run-vcpkg: on a cold binary cache vcpkg builds packages from
+      # source and must use the same toolchain that CMake/Ninja will use. Without this,
+      # vcpkg uses its own vswhere detection which may select a different toolset version,
+      # producing ABI-mismatched archives that cause opaque link failures.
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c  # v1.13.0
+
+      # Step 7: Run vcpkg to install dependencies.
+      # Runs after msvc-dev-cmd so that cold-cache source builds use the same cl.exe
+      # that the subsequent cmake --preset ci-windows configure step will use.
       - name: Install vcpkg dependencies
         uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
         with:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
-
-      # Step 7: Set up MSVC environment for Ninja generator.
-      # ilammy/msvc-dev-cmd runs vcvarsall.bat x64, placing cl.exe and link.exe on PATH.
-      # Required before cmake configure when using -G Ninja (which does not auto-detect MSVC).
-      - name: Set up MSVC environment
-        uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c  # v1.13.0
 
       # Step 8: Configure CMake (Ninja generator via ci-windows preset; no ccache on Windows).
       # vcpkg manifest install runs here — build/vcpkg_installed/ is created during configure.
