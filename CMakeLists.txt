@@ -492,6 +492,7 @@ add_executable(integration_tests
     tests/integration/irrlicht_ui_backend_compile_test.cpp  # Phase 1: non-abstract compile check
     tests/integration/irrlicht_ui_backend_test.cpp          # Phase 3: EDT_NULL runtime handle test
     tests/integration/texture_cache_integration_test.cpp    # Phase 5: TextureCache + SceneEntityManager EDT_NULL tests
+    tests/integration/simulation_60tick_test.cpp            # Phase 6: 60-tick no-crash + SimulationTime exit criterion
 )
 # aitown_render and aitown_ui MUST be present: IrrlichtUIBackend.h depends on Irrlicht.
 # Irrlicht MUST be linked directly: IrrlichtUIBackend.h includes <irrlicht.h> at compile time;
@@ -499,11 +500,13 @@ add_executable(integration_tests
 # aitown_terrain: Phase 5 adds texture_cache_integration_test.cpp which tests TextureCache
 # and SceneEntityManager; both live in aitown_render/aitown_terrain.
 # GLEW::GLEW: TextureCache.h includes <GL/glew.h> at the top.
+# aitown_sim: Phase 6 adds simulation_60tick_test.cpp which constructs CitySimulation directly.
 # rapidcheck and rapidcheck_gtest always linked (proactive policy — architecture/testing/framework.md).
 target_link_libraries(integration_tests PRIVATE
     aitown_render
     aitown_ui
     aitown_terrain
+    aitown_sim
     Irrlicht
     GLEW::GLEW
     GTest::gtest_main
@@ -526,8 +529,9 @@ if(UNIX AND NOT APPLE)
         target_link_libraries(integration_tests PRIVATE ${XXFV86VM_LIB})
     endif()
 endif()
-# src/rendering/ MUST be present: IrrlichtUIBackend.h lives in src/rendering/.
-# src/terrain/   Phase 5: TextureCache integration tests include TerrainChunk/TerrainSystem headers.
+# src/rendering/  MUST be present: IrrlichtUIBackend.h lives in src/rendering/.
+# src/terrain/    Phase 5: TextureCache integration tests include TerrainChunk/TerrainSystem headers.
+# src/simulation/ Phase 6: simulation_60tick_test.cpp includes CitySimulation.h and simulation_constants.h.
 target_include_directories(integration_tests PRIVATE
     tests/simulation/
     tests/ui/
@@ -535,6 +539,7 @@ target_include_directories(integration_tests PRIVATE
     src/ui/
     src/rendering/
     src/terrain/
+    src/simulation/
     ${CMAKE_SOURCE_DIR}
 )
 aitown_add_tests(integration_tests LABEL "integration")

@@ -38,3 +38,87 @@
   - HUD shows progress toward each unlock threshold (current monthly revenue vs. required, at the selected difficulty level)
   - **`getNextUnlockThreshold()` return semantics**: `ICitySimulation::getNextUnlockThreshold(Difficulty d)` returns the difficulty-adjusted revenue value (in dollars) that the player must sustain for 3 consecutive months to trigger the next pending density tier unlock. The tiers are evaluated in the canonical unlock order defined above: Med-R/Med-C (same threshold), Med-I, High-R, High-C, High-I. The function returns the threshold of the **lowest-indexed tier that is not yet unlocked**. When all six density tiers are unlocked (High-I is the final tier), the function returns **`-1.0f`** as a sentinel value meaning "no further unlocks pending". The sentinel is `−1.0f` (negative one, as a float) rather than `std::numeric_limits<float>::max()` for the following reasons: (a) `float` max (~3.4 × 10^38) cannot be meaningfully formatted in a HUD label without special-casing; (b) `−1.0f` is unambiguously out-of-range for any valid threshold (all valid thresholds are positive dollar amounts), so a simple `threshold < 0.0f` guard is sufficient to detect the sentinel with no risk of false positives; (c) the value is trivially comparable in both C++ and tests without pulling in `<limits>`. **Contract**: the return value is never `0.0f` or `NaN`; it is either a positive dollar value (difficulty-adjusted) or exactly `−1.0f`. The named constant `SimulationConstants::kNoUnlockThreshold = -1.0f` MUST be used at every call site that checks for the sentinel — do not compare against the literal `−1.0f` inline. **HUD handling of the sentinel**: when `getNextUnlockThreshold(d)` returns `kNoUnlockThreshold`, the density unlock progress indicator in the resource bar MUST be hidden via `IUIBackend::setElementVisible(handle, false)` and the Density Unlock Preview Tooltip MUST NOT appear regardless of proximity calculations — both the indicator and the tooltip are suppressed for the remainder of the session once all tiers are unlocked. See [HUD Layout](../ui-ux/hud-layout.md) (Density Unlock Preview Tooltip section) for the authoritative HUD suppression rule.
   - **Density upgrade rate limiter**: When a density tier is unlocked, at most **20% of eligible tiles per zone type** (rounded up, minimum 1 per zone type) upgrade per budget tick. The 20% cap is applied independently to each zone type (R, C, I) — upgrading Residential tiles does not count against the Commercial tile cap. This prevents a mass simultaneous upgrade from spiking wages and costs in a single tick — the transition smooths over approximately 5 budget ticks. HUD shows a preview: when monthly revenue is within 10% of an unlock threshold, a projected "After Unlock" estimated monthly expense change is shown in the resource bar tooltip so the player can prepare.
+
+## Phase 6 Balance Sign-Off
+
+<!-- SIGN-OFF: gamedesign-lookandfeel 2026-02-26 — V1 economy balance constants reviewed and accepted. All items below confirmed against simulation_constants.h and CitySimulation.cpp. -->
+
+This section records the formal balance review of all V1 economy constants prior to Phase 6 completion. Each item below references the implemented constant value from `simulation_constants.h` and evaluates it against the intended gameplay pacing for the Sandbox mode (V1 scope: Sandbox only; Scenario mode is stub-only).
+
+### Starting Funds by Difficulty
+
+- Easy: `starting_funds_easy = $1,000,000` — Accepted. Provides a long runway that lets players experiment freely with zoning layouts, road networks, and service placement without early budget pressure. Appropriate for onboarding.
+- Normal: `starting_funds_normal = $500,000` — Accepted. Sufficient to place 20–30 road tiles ($10,000–$15,000), one of each service building (~$0 placement cost not shown in constants, handled at placement), and still have adequate operating capital through the 120 s grace period. The capital buffer comfortably covers 8–12 budget ticks of service upkeep ($2,200/tick for a minimal one-of-each service set) before stable tax revenue arrives.
+- Hard: `starting_funds_hard = $200,000` — Accepted. Forces disciplined early spending: road tiles at $500 each and road maintenance at $10/tile/tick mean every tile counts. A 20-road-tile opening layout costs $10,000 at placement plus $200/tick maintenance after the grace period — affordable but leaves little room for over-building services. Adds meaningful challenge without being punishing given the 120 s grace period.
+
+The three-tier static_assert chain (`easy > normal > hard`) in `simulation_constants.h` enforces the correct ordering at compile time.
+
+### Tax Revenue Formula and Base Income Constants
+
+Constants: `base_income_per_resident_low = $50`, `base_income_per_resident_medium = $50`, `base_income_per_resident_high = $55`.
+
+**Revenue calibration at Normal difficulty (10% zone tax rate, standard opening layout):**
+
+A representative opening layout of 20 R-Low / 10 C-Low / 5 I-Low tiles at 50% average occupancy produces:
+
+- R-Low tax: 20 tiles × 50 residents × $50 × 10% = $5,000/tick
+- C-Low tax: 10 tiles × 12.5 workers × $50 × 10% = $625/tick
+- I-Low tax: 5 tiles × 25 workers × $50 × 10% = $625/tick
+- Utility fees: 20 covered R-tiles × ($5 power + $3 water) = $160/tick
+- Gross total: $6,410/tick at 50% occupancy
+
+The $8,000–$12,000/tick target stated in this spec is reached at approximately 65–80% average occupancy, which occurs naturally during the bootstrap demand period (ticks 0–5 apply fixed starter demand floors, driving occupancy above 50% in early growth). Accepted: the formula and constants are correctly calibrated to the stated opening layout target.
+
+The intentional equality of `base_income_per_resident_low = base_income_per_resident_medium = $50` is confirmed as correct design — the progression incentive at Medium density comes from the 4× tile population capacity increase (100 → 400 residents), not a per-resident rate premium. The $55 premium at High density ($55 vs $50, a 10% increase) is secondary reinforcement that denser development is economically productive per resident, without over-rewarding Medium density zoning relative to High.
+
+### Wage Fraction
+
+Constant: `wage_fraction_of_revenue = 0.20` (20% of C+I tax revenue, scaled by employment fill rate).
+
+At 50% occupancy on the standard opening layout: wages = ($625 + $625) × 0.20 × 0.50 = $125/tick. This is a minor deduction (≈1.9% of gross revenue) that does not starve the city at low occupancy. At full occupancy: wages = ($1,250 + $1,250) × 0.20 × 1.00 = $500/tick — still only 7.8% of gross revenue at full occupancy on the same layout. The fraction-of-revenue model guarantees wages never exceed C/I tax income regardless of city scale. Accepted: wage fraction is balanced and does not create early-game revenue starvation.
+
+### Service Upkeep Costs
+
+Constants per budget tick: `service_upkeep_fire_station_per_tick = $500`, `service_upkeep_police_station_per_tick = $400`, `service_upkeep_power_plant_per_tick = $1,000`, `service_upkeep_water_tower_per_tick = $300`.
+
+A minimal one-of-each service set costs $2,200/tick combined. At Normal difficulty with the standard opening layout generating ~$6,285/tick net after wages, the four service buildings consume 35% of net revenue — affordable but meaningful. A player who over-builds services (e.g., two fire stations before any stable revenue) will feel the pressure, which is the intended design signal to pace service investment. The power plant carries the highest per-tick cost ($1,000) reflecting its city-wide impact and the strategic weight of placing it early. Accepted: service upkeep costs are affordable on Normal difficulty with 20+ road tiles and a functioning zone layout, without being trivially ignorable.
+
+### Road Maintenance
+
+Constant: `road_maintenance_cost_per_tile = $10` per budget tick (after grace period).
+
+At 20 road tiles: $200/tick. At 50 road tiles: $500/tick. At 100 road tiles: $1,000/tick. Even at 100 tiles — a substantial early-game road network — maintenance is only $1,000/tick, roughly equivalent to one power plant. Road maintenance scales linearly and creates a genuine incentive to avoid unnecessary road sprawl, but does not become prohibitive for any reasonable early-game road network. The $500 per-tile placement cost is NOT waived during the grace period, which correctly front-loads the road investment cost rather than letting players flood the map with free roads during the protection window. Accepted: road maintenance does not become prohibitive for early-game road networks.
+
+### Loan Mechanic Thresholds and Grace Period Gate
+
+Constants: `grace_period_real_seconds = 120.0` (shared gate for cost waiver and first forced loan); `loan_cooldown_ticks = 2` (minimum 2 budget ticks between forced loans); forced loan interest rate: 5%/year applied as `outstanding_debt × (0.05 / 12)` per tick.
+
+The 120 s real-time gate is binding regardless of simulation speed. At 10× speed a budget tick fires every 3 real seconds, so a new player at maximum speed would see 40 ticks in 120 s — far more than enough exposure to understand the basics before loan mechanics activate. At 1× speed, 120 s corresponds to 4 budget ticks (4 in-game months), giving players adequate time to zone, road, and see initial revenue before any crisis can trigger. The 2-tick loan cooldown prevents cascade spirals after the grace period ends. Accepted: the 120 s gate gives new players adequate runway across all simulation speeds.
+
+### Density Unlock Thresholds
+
+Normal-difficulty base thresholds: Med-R/Med-C $50,000 | Med-I $75,000 | High-R $100,000 | High-C $200,000 | High-I $500,000. Each requires sustained 3-month (3-tick) revenue above the threshold.
+
+**Reachability analysis at Normal difficulty:**
+
+The $50,000 Med-R/Med-C threshold requires monthly revenue roughly 8× the standard opening layout baseline at 50% occupancy ($6,410). This is reached by expanding the zone count (e.g., 80+ R-Low tiles at 50% occupancy) or by reaching higher occupancy on a larger layout. At 65% average occupancy and 40 R-Low / 20 C-Low / 10 I-Low tiles, estimated gross revenue ≈ $20,800 + $2,600 + $1,625 + $320 (utility) ≈ $25,345/tick — still below $50K, which means a player must expand meaningfully before the first unlock triggers. This puts the Med-R/Med-C unlock within a reasonable session (estimated 20–40 real minutes at Normal speed), not trivially early.
+
+The difficulty scaling constants (`density_unlock_scale_easy = 0.70`, `density_unlock_scale_normal = 1.00`, `density_unlock_scale_hard = 1.50`) correctly modulate reachability: Easy players reach Med-R/Med-C at $35,000 (faster feedback loop), Hard players must sustain $75,000 (substantially harder). The High-I $500,000 threshold is a long-term prestige milestone for Sandbox — appropriate for V1 scope where there is no scenario time limit.
+
+The 3-consecutive-month requirement (not a single threshold crossing) is enforced via the sustained counter logic in `CitySimulation`, guarded by the `kNoUnlockThreshold` sentinel. Accepted: unlock thresholds are reachable within a reasonable Normal-difficulty session and scale correctly across difficulties.
+
+### density\_upgrade\_wave\_demand\_threshold = 0.50
+
+Constant: `density_upgrade_wave_demand_threshold = 0.50f`.
+
+Tile eligibility for density upgrade requires `demand_factor >= 0.50`. The `null_path_demand_default = 0.5f` means that tiles with no valid A\* path to a destination record exactly 0.5 demand — the minimum value that satisfies the 0.50 threshold. This is a neutral value representing "technically accessible but poorly connected" and correctly allows upgrade waves to proceed even before the road network is fully built out. The threshold sits at the smoothstep midpoint, meaning tiles with any valid path connectivity above the null-path default satisfy the criterion. A threshold of 0.50 prevents upgrade waves from firing only in the degenerate case where demand has fully collapsed (which requires both null-path default and formula-driven signals simultaneously below 0.50 — a condition that indicates genuine connectivity failure, not early-game startup). Accepted: fires at neutral demand, enabling progression even before the road network is complete.
+
+### null\_path\_demand\_default = 0.5f
+
+Constant: `null_path_demand_default = 0.5f`.
+
+The 0.5 default for tiles with no valid A\* path represents a deliberate neutral value: neither 0.0 (which would collapse demand on a brand-new map before any roads exist, preventing bootstrap growth) nor 1.0 (which would falsely signal fully connected access for unrouted tiles). The static_assert in `simulation_constants.h` enforces `null_path_demand_default > 0.0f && < 1.0f`. At 0.5, null-path tiles contribute a demand value equal to the smoothstep midpoint, consistent with the "technically accessible but poorly connected" semantic documented in the traffic system spec. The value also ensures the demand floor check (R floor = 0.20, C/I floors = 0.10) is never the binding constraint for null-path tiles — 0.5 exceeds all three demand floors, so the floor is inert in the all-null-path case, as stated in the zoning-system spec. Accepted: 0.5 is the appropriate neutral value for pre-road startup and for partially connected cities.
+
+---
+
+**Sign-off summary**: All nine balance items reviewed and accepted. The V1 economy constants in `simulation_constants.h` are consistent with the spec in `architecture/game-design/economy-model.md`, with the pacing targets documented in this file, and with the V1 Sandbox-only scope defined in `architecture/game-design/minimum-viable-simulation.md`. No re-balancing is required before Phase 6 completion.
