@@ -65,9 +65,12 @@ public:
     // Traffic demand factor — returns the INTERNAL traffic-only smoothstep multiplier in [0.0, 1.0]
     // for the given zone type, derived from the rolling travel-time window BEFORE applying bootstrap
     // decay, demand floors, or capacity-ratio signals. R/C zones use a 5-tick window; I zones use
-    // a 3-tick window. Exposed for Phase 8 save/load round-trip serialization only; the HUD demand
-    // bars display getDemandPressurePct (the post-combination aggregate), not this value.
-    // Cross-reference: implementation/phase-3.md (Traffic demand factor serialization).
+    // a 3-tick window.
+    // Used by: (1) Phase 11 save/load round-trip serialization (rolling-window state persisted);
+    //          (2) Phase 6 unit tests as a direct observation point for traffic null-path behavior
+    //              (CommercialDemand_NullPath test — the only way to observe the raw smoothstep
+    //               factor without going through the post-combination getDemandPressurePct).
+    // The HUD demand bars display getDemandPressurePct (the post-combination aggregate), not this value.
     virtual float getTrafficDemandFactor(ZoneType zone) const = 0;
 
     // Population — called by HUD population display and density-unlock checks:
@@ -140,4 +143,12 @@ public:
     // Required by Phase 8 forced loan modal Screen 2 to gray the Emergency Bond button.
     // Initialized at construction: Easy=3, Normal=2, Hard=1 (SimulationConstants::bond_max_uses_*).
     virtual int getOutstandingBondUses() const = 0;
+
+    // --- Time of day (Phase 6 delivery) ---
+    // Returns the current in-game time of day, derived from accumulated in-game hours.
+    // Phase 6 implements internal hour tracking and exposes this accessor.
+    // Phase 10 (Dynamic Soundscape) consumes this value to call IAudioSystem::setTimeOfDay().
+    // IAudioSystem::setTimeOfDay() is NOT called in Phase 6 — only the accessor is delivered here.
+    // TimeOfDay is defined in simulation_types.h (shared interface layer).
+    virtual TimeOfDay getTimeOfDay() const = 0;
 };

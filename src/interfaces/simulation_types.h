@@ -56,9 +56,11 @@ enum class DensityTier {
 // Phase 1 stub returns a default-constructed DensityUnlockState{}.
 // Phase 3 fills in real implementation.
 // Density tiers 0-5 (6 total): one counter + one flag per tier.
-// Counter range: 0-3 (0=none; 1=first month; 2=second month; fires and resets on third month).
-// The unlock fires when the counter would increment to 3: counter reaches 2, next tick above threshold
-// triggers the unlock and resets to 0. Range is [0, 2] in persisted state (3 is transient).
+// Counter range: 0-2 in returned/persisted state. Value 3 is transient — within a single
+// tick's execution the counter briefly reaches 3, triggers the unlock, and resets to 0
+// before getDensityUnlockState() returns. The observable range is always [0, 2].
+// The unlock fires when the counter would increment to 3: counter reaches 2, next tick above
+// threshold triggers the unlock and resets to 0.
 struct DensityUnlockState {
     int  consecutive_months_above_threshold[6]{};  // 0-2 range in save state; one counter per density tier
     bool unlock_flags[6]{};                        // true if the corresponding tier is unlocked
@@ -71,22 +73,39 @@ struct SimulationTime {
     int month{1};  // 1-12
 };
 
+// TimeOfDay — current in-game time of day, used by AudioSystem to select the ambient bed.
+// CitySimulation tracks in-game hour progression and exposes getTimeOfDay() for Phase 10
+// to wire IAudioSystem::setTimeOfDay() transitions.
+// Shared between src/simulation/ and src/audio/ via src/interfaces/ (dependency-free layer).
+enum class TimeOfDay {
+    Day,   // approx. 06:00–17:59
+    Dusk,  // approx. 18:00–19:59
+    Night, // approx. 20:00–05:59
+    Dawn   // approx. 04:00–05:59 (implementation may vary boundary times)
+};
+
 // NotificationType — category of simulation event notification.
-// Used by ICitySimulation::pollPendingNotifications() to let UIManager
+// Used by ICitySimulation::pollPendingNotification() (singular) to let UIManager
 // post the appropriate toast via NotificationManager.
 enum class NotificationType {
     ForcedLoanIssued,    // mandatory loan; amount = principal, repaymentTicks = loan_repayment_ticks
     BondIssued,          // emergency municipal bond; amount = principal, repaymentTicks = bond_repayment_ticks
     ServiceDegraded,     // service building entered reduced-coverage state; amount unused
-    BudgetDeficitWarn    // city crossed the -25% deficit threshold; amount unused
+    BudgetDeficitWarn,   // city crossed the -25% deficit threshold; amount unused
+    PopulationMilestone, // population crossed a milestone (1K/10K/50K/100K/500K); milestoneValue = pop count
+    CityRatingTransition // city rating tier changed; milestoneValue = new CityRatingTier as int
+                         //   (Village=0, Town=1, City=2, Metropolis=3, Megalopolis=4)
+                         //   fires stinger_milestone at tier transitions ONLY; NOT at 100K raw population
 };
 
 // SimulationNotification — one queued event from CitySimulation for UIManager to process.
-// Dequeued via ICitySimulation::pollPendingNotifications() (FIFO, one per call).
+// Dequeued via ICitySimulation::pollPendingNotification() (singular, FIFO, one per call).
 struct SimulationNotification {
     NotificationType type{NotificationType::ForcedLoanIssued};
     float  amount{0.0f};         // loan principal for loan types; 0 for others
     int    repaymentTicks{0};    // repayment period for loan types; 0 for others
+    int    milestoneValue{0};    // population count for PopulationMilestone;
+                                 // CityRatingTier as int for CityRatingTransition; 0 for others
 };
 
 // ServiceCoverage — per-service coverage percentage for a tile.
@@ -108,6 +127,8 @@ struct QueryResult {
     DensityTier densityTier{DensityTier::Low};
     int         population{};
     float       desirability{};      // [0, 100]
-    float       demandPressurePct{}; // per-tile unmet demand [0, 100]; NOT getDemandPressurePct (city-wide)
+    float       demandPressurePct{}; // Per-tile unmet demand percentage: (1.0f - effective_demand_factor) * 100.
+                                      // Range [0, 100]: 0 = fully demanded (no unmet demand), 100 = zero demand.
+                                      // NOT the same as getDemandPressurePct(ZoneType) which returns city-wide aggregate.
     ServiceCoverage coverage;        // per-service; -1.0f = N/A
 };

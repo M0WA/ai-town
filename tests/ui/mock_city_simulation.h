@@ -77,4 +77,7 @@ public:
 
     // --- Bond use count (Phase 6 delivery) ---
     MOCK_METHOD(int, getOutstandingBondUses, (), (const, override));
+
+    // --- Time of day (Phase 6 delivery) ---
+    MOCK_METHOD(TimeOfDay, getTimeOfDay, (), (const, override));
 };

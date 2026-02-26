@@ -329,9 +329,14 @@ endif()
 # simulation_tests — economy, traffic, zoning, population; no display required
 # ----------------------------------------------------------------------------
 add_executable(simulation_tests
-    tests/simulation/simulation_smoke_test.cpp
+    tests/simulation/economy_test.cpp
+    tests/simulation/traffic_test.cpp
+    tests/simulation/zoning_test.cpp
+    tests/simulation/service_coverage_test.cpp
+    tests/simulation/population_test.cpp
+    tests/simulation/save_system_test.cpp        # Phase 6 stub — full impl in Phase 11
+    tests/simulation/undo_system_test.cpp        # Phase 6 stub — simulation-side undo only
     tests/simulation/manual_rng_test.cpp
-    tests/simulation/city_simulation_stub_test.cpp
 )
 target_link_libraries(simulation_tests PRIVATE
     aitown_sim
@@ -347,6 +352,7 @@ target_link_libraries(simulation_tests PRIVATE
 target_include_directories(simulation_tests PRIVATE
     tests/simulation/
     src/interfaces/
+    src/simulation/
     ${CMAKE_SOURCE_DIR}
 )
 aitown_add_tests(simulation_tests LABEL "unit")
