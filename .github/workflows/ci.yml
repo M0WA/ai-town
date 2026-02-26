@@ -20,7 +20,7 @@ permissions:
 # make it unavailable to other jobs.
 # The builtin-baseline in vcpkg.json must match this value exactly (enforced by baseline step).
 env:
-  VCPKG_COMMIT_ID: "ce35b1a53aac26d7fcdb8ee1ef7a8e4eea02d27b"  # matches vcpkg.json builtin-baseline
+  VCPKG_COMMIT_ID: "b2f068faf45a3f04145bec0f52a66526ad590227"  # matches vcpkg.json builtin-baseline
 
 jobs:
   # ============================================================================
