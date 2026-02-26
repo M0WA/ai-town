@@ -103,6 +103,16 @@ vcpkg_fixup_pkgconfig()
 
 file(REMOVE_RECURSE "${CURRENT_PACKAGES_DIR}/debug/include")
 file(REMOVE_RECURSE "${CURRENT_PACKAGES_DIR}/debug/share")
+
+# Manually install the HRTF binary data file with the modern lowercase name.
+# In openal-soft 1.23.1 the file is shipped as "Default HRTF.mhr" (spaces,
+# mixed case).  Versions ≥ 1.24 renamed it to "default.mhr".  We install the
+# 1.23.1 file as "default.mhr" so the POST_BUILD copy rule and CI verification
+# use a consistent modern filename regardless of the installed version.
+file(INSTALL "${SOURCE_PATH}/hrtf/Default HRTF.mhr"
+    DESTINATION "${CURRENT_PACKAGES_DIR}/share/openal/hrtf"
+    RENAME "default.mhr")
+
 vcpkg_install_copyright(FILE_LIST "${SOURCE_PATH}/COPYING")
 file(COPY "${CMAKE_CURRENT_LIST_DIR}/usage" DESTINATION "${CURRENT_PACKAGES_DIR}/share/${PORT}")
 
