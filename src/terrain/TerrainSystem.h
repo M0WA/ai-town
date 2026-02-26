@@ -110,11 +110,11 @@ public:
     //   mapTilesX, mapTilesZ — total tile dimensions of the map.
     //   cellSize             — world-space size of each tile in metres.
     //   rng                  — injectable RNG for deterministic test control.
-    //   maxRetries           — number of re-seed attempts (default: 10 per spec).
+    //   maxRetries           — number of re-seed attempts (default: 100 per spec).
     //
     // Returns true if a playability-compliant map was generated within maxRetries.
     bool generate(int mapTilesX, int mapTilesZ, float cellSize, ITerrainRNG* rng,
-                  int maxRetries = 10);
+                  int maxRetries = 100);
 
     // Accessors for testing.
     int  pendingRebuildCount() const { return static_cast<int>(m_rebuildDeque.size()); }
