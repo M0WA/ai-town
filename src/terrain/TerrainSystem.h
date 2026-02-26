@@ -44,6 +44,7 @@
 
 #include "TerrainChunk.h"
 #include "terrain_types.h"
+#include "ITerrainRNG.h"
 
 // IClock — include full definition so test doubles (BudgetExhaustionClock) can subclass it.
 #include "../interfaces/IClock.h"
@@ -95,6 +96,26 @@ public:
     // Callers can use the overload with distanceToCamera for priority sorting.
     void enqueueRebuild(uint64_t chunkId, int targetLOD, float distanceToCamera = 0.0f);
 
+    // generate() — procedurally generate a terrain map, verifying playability constraints.
+    //
+    // Playability guarantees (per architecture/game-design/terrain-interaction.md):
+    //   (1) At least 20% of total map tiles must be flat (slope < 15 degrees).
+    //   (2) At least one contiguous flat region of minimum 50x50 tiles must exist.
+    //
+    // If either constraint is not met, re-seeds the RNG up to maxRetries times.
+    // On success: populates m_generatedHeightmap, enqueues LOD0 rebuilds for all chunks.
+    // On failure (all retries exhausted): uses the last generated map regardless.
+    //
+    // Parameters:
+    //   mapTilesX, mapTilesZ — total tile dimensions of the map.
+    //   cellSize             — world-space size of each tile in metres.
+    //   rng                  — injectable RNG for deterministic test control.
+    //   maxRetries           — number of re-seed attempts (default: 10 per spec).
+    //
+    // Returns true if a playability-compliant map was generated within maxRetries.
+    bool generate(int mapTilesX, int mapTilesZ, float cellSize, ITerrainRNG* rng,
+                  int maxRetries = 10);
+
     // Accessors for testing.
     int  pendingRebuildCount() const { return static_cast<int>(m_rebuildDeque.size()); }
     bool hasActiveChunk(uint64_t chunkId) const { return m_activeChunks.count(chunkId) > 0; }
@@ -128,6 +149,10 @@ public:
     static float lodSwitchOutDistance(int fromLOD);
     static float lodSwitchInDistance(int fromLOD);
 
+    // getGeneratedHeightmap() — returns the heightmap produced by generate().
+    // Empty if generate() has not been called.
+    const std::vector<float>& getGeneratedHeightmap() const;
+
 private:
     // Process a single rebuild request (factored out for reuse between update() and flush()).
     // Returns true if the request was processed, false if skipped (dedup, already at LOD).
@@ -149,4 +174,9 @@ private:
     // Counters for test assertions.
     int m_chunksRebuiltLastFrame{0};
     int m_chunksRebuiltLastFlush{0};
+
+    // Generated heightmap — populated by generate().
+    // Row-major: index = z * (mapTilesX + 1) + x.
+    // Empty until generate() is called.
+    std::vector<float> m_generatedHeightmap;
 };

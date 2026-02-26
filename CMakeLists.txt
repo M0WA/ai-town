@@ -124,6 +124,7 @@ add_library(aitown_render STATIC
     src/rendering/IrrlichtUIBackend.cpp
     src/rendering/TextureCache.cpp
     src/rendering/SceneEntityManager.cpp
+    src/rendering/TerrainShaderCallback.cpp
 )
 target_include_directories(aitown_render
     PRIVATE   src/rendering/       # RenderSystem/IrrlichtRenderer internal headers
