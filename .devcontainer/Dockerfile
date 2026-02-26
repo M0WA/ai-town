@@ -66,6 +66,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   gcc-13 \
   g++-13 \
   xauth \
+  libnvtt-bin \
   && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
      --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
   && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-13 100 \
@@ -112,6 +113,17 @@ RUN ARCH=$(dpkg --print-architecture) && \
   wget "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
+
+# AMD Compressonator CLI (amd64 only — no GPU required for CPU-based DXT compression)
+ARG COMPRESSONATOR_VERSION=4.5.52
+RUN ARCH=$(dpkg --print-architecture) && \
+  if [ "$ARCH" = "amd64" ]; then \
+    wget -q "https://github.com/GPUOpen-Tools/compressonator/releases/download/V${COMPRESSONATOR_VERSION}/compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
+    dpkg -i "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
+    rm "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb"; \
+  else \
+    echo "Skipping compressonatorcli: only amd64 binaries available (arch=$ARCH)"; \
+  fi
 
 # Install CMake 3.31.10 (apt version in Debian Trixie is too old for vcpkg)
 ARG CMAKE_VERSION=3.31.10
