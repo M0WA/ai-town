@@ -31,7 +31,7 @@
     "graphics-artist-3d-model": {
       "date": "2026-02-25",
       "confirmed": [
-        "V-flip UV convention is correctly documented in the atlas layout spec (V increases downward in texture space)",
+        "V-flip UV convention is correctly documented in the atlas layout spec (OpenGL convention: V=0 at bottom-left, V increases upward; row 0 is the BOTTOM row; artists must apply V_opengl = 1 - V_blender before mapping UV islands to atlas cells in Blender)",
         "Atlas cell boundary UV formulas are correct: diffuse 4x4 grid U=[C/4,(C+1)/4] V=[R/4,(R+1)/4]; normal 8x8 grid U=[C/8,(C+1)/8] V=[R/8,(R+1)/8]",
         "All five V1 vehicle type assignments (car_sedan row0/col0, car_hatchback row0/col1, car_suv row0/col2, bus_standard row1/col0, truck_cargo row1/col1) are in correct cell positions"
       ]

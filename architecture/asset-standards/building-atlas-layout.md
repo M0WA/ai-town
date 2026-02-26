@@ -37,7 +37,11 @@
 
 **IMPORTANT — Variant sharing of wall cells (binding decision)**: Building variants within the same zone-tier combination share the same wall module atlas cells — only distinct module types (wall, base, roof, facade detail) require separate cells. For example, `res_low_01` and `res_low_02` are two variants of Low-density Residential; both reference the same `wall_residential_low` atlas cell with different mesh geometry configurations. Unique cells are NOT required per variant, only per module type. This keeps the 4×4 (16-cell) atlas within capacity for all V1 building module types. This decision is binding and confirmed here before UV authoring begins. `graphics-artist-2d-texture` and `graphics-dev-irrlicht` must both sign off that all V1 variant UVs map into the correct shared module-type cell before Phase 9 UV authoring begins.
 
-**BINDING DECISION — Shared base module and roof cells across all zone types**: The single `roof_shared` cell (row 2, col 3) is intentional — all V1 zone types and density tiers share a common rooftop texture. Similarly, Commercial and Industrial buildings share the residential base module cells (`base_residential_low` at row 0, col 3 and `base_residential_med` at row 1, col 3) for ground-floor geometry. Any zone-specific ground-floor character is encoded via facade detail pieces (row 3, cols 0–1), not separate base module cells. This decision keeps the 4×4 (16-cell) atlas within capacity for all V1 module types. The two reserved cells (row 3, col 2 and row 3, col 3) remain available for Phase 9+ use precisely because no additional base or roof cells are required in V1. **This is a binding decision — UV authoring for Phase 9 must not require additional base or roof cells.**
+**BINDING DECISION — Shared base module and roof cells across all zone types**: The single `roof_shared` cell (row 2, col 3) is intentional — all V1 zone types and density tiers share a common rooftop texture. Similarly, Commercial and Industrial buildings share the residential base module cells (`base_residential_low` at row 0, col 3 and `base_residential_med` at row 1, col 3) for ground-floor geometry. Any zone-specific ground-floor character is encoded via facade detail pieces (row 3, cols 0–1), not separate base module cells.
+
+**High-density base module (binding)**: There is no separate `base_*_high` cell in the V1 atlas. High-density (high-rise) buildings reuse `base_residential_med` (row 1, col 3) for their ground-floor base module. Any zone-specific High-density lobby character is handled via facade-detail pieces at row 3, cols 0–1, identical to Med density. Phase 9 UV artists must map High-density building base modules to row 1, col 3. A distinct High-density base cell would require one of the two reserved slots (row 3, col 2 or row 3, col 3) and is Phase 9+ scope only.
+
+This decision keeps the 4×4 (16-cell) atlas within capacity for all V1 module types. The two reserved cells (row 3, col 2 and row 3, col 3) remain available for Phase 9+ use precisely because no additional base or roof cells are required in V1. **This is a binding decision — UV authoring for Phase 9 must not require additional base or roof cells.**
 
 ## Road Marking Atlas (1024×1024)
 
@@ -213,15 +217,19 @@ Confirmed:
    planned resolution (diffuse at DXT1 256x256 effective per island, normal at DXT5nm 256x256 per
    island). No module type requires bleed into the 8 px border.
 
-3. **4x4 grid, 16-cell capacity covers V1 minimum module set**: The 16 cells cover: residential
-   (low/mid/high wall modules, roof variants), commercial (glass facade, brick facade), industrial
-   (corrugated metal, concrete block), road modules, and civic building facades. 16 cells is
-   sufficient for V1 scope. The shared-variant approach means distinct module types consume the
-   allocated cells with 2 spare cells (row 3, col 2 and row 3, col 3) remaining available for
-   Phase 9+ use without requiring an atlas resolution increase.
+3. **4x4 grid, 16-cell capacity covers V1 minimum module set**: The 16 cells cover: 9 zone-tier
+   wall module cells (Residential/Commercial/Industrial × Low/Med/High density — row 0–2, cols
+   0–2); 2 base module cells shared across all zones (base_residential_low at row 0 col 3 for
+   Low tier; base_residential_med at row 1 col 3 for Med tier — High-density buildings reuse
+   base_residential_med per the binding decision in this file); 1 shared roof cell (row 2, col 3);
+   2 facade-detail cells (balcony row 3 col 0; pilaster row 3 col 1). Road surface materials
+   are NOT in this atlas — they belong in the separate Road Marking Atlas (1024×1024) and
+   road_asphalt_tileable.dds. No civic zone exists in V1. 16 cells is sufficient for V1 scope with
+   2 spare cells (row 3, col 2 and row 3, col 3) remaining available for Phase 9+ use without
+   requiring an atlas resolution increase.
 
 This sign-off satisfies the Phase 5 exit criterion for the `graphics-artist-3d-model` building
 atlas sign-off gate. Phase 9 UV authoring for building mesh UV channel 0 may proceed once all
 three required sign-off comment blocks are present in this file.
 
-<!-- SIGN-OFF: graphics-artist-3d-model 2026-02-25 — confirmed: (a) shared atlas cell variant approach (multiple mesh variants referencing one module-type cell) is compatible with modular kit UV authoring workflows; (b) per-module UV islands fit within 496x496 px usable area per 512x512 cell without bleed into 8 px border; (c) 4x4 grid 16-cell capacity covers V1 minimum building module set including all zone-tier wall/base/roof/facade-detail types across Residential/Commercial/Industrial zones -->
+<!-- SIGN-OFF: graphics-artist-3d-model 2026-02-25 — confirmed: (a) shared atlas cell variant approach (multiple mesh variants referencing one module-type cell) is compatible with modular kit UV authoring workflows; (b) per-module UV islands fit within 496x496 px usable area per 512x512 cell without bleed into 8 px border; (c) 4x4 grid 16-cell capacity covers V1 minimum building module set: 9 zone-tier wall cells (Res/Com/Ind x Low/Med/High), 2 shared base cells (Low=row0col3, Med=row1col3; High-density buildings reuse Med base cell per binding decision), 1 shared roof cell (row2col3), 2 facade-detail cells (row3col0-1), 2 reserved. Road modules and civic zone are NOT covered here — they belong in separate atlases or do not exist in V1. [CORRECTED 2026-02-26: original sign-off text erroneously listed road modules and civic building facades as covered by this atlas; corrected per Phase 5 verification review] -->

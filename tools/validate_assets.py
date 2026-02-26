@@ -9,8 +9,10 @@ import os
 import struct
 import wave
 
-VEHICLE_ENGINE_LOOP_MIN_DURATION_S = 6.0  # mirrors kVehicleEngineLoopMinDurationSeconds in src/interfaces/audio_types.h — update both if threshold changes
-ZONE_LOOP_MAX_PRELOAD_DURATION_S = 18.0   # mirrors kZoneLoopMaxPreloadDurationSeconds in src/interfaces/audio_types.h — update both if threshold changes
+VEHICLE_ENGINE_LOOP_MIN_DURATION_S = 6.0   # mirrors kVehicleEngineLoopMinDurationSeconds in src/interfaces/audio_types.h — update both if threshold changes
+VEHICLE_ENGINE_LOOP_MAX_DURATION_S = 20.0  # upper bound: pre-load tier boundary is 20 s (audio-asset-formats.md Tier 2/3 split); engine loops >= 20 s would fall into the streaming tier, incompatible with the pre-loaded AL buffer loading strategy
+ZONE_LOOP_MIN_DURATION_S = 12.0            # lower bound from v1-audio-asset-manifest.md (12–18 s range); loops shorter than 12 s cycle too quickly and become perceptible at typical zone ambient loop repetition rates
+ZONE_LOOP_MAX_PRELOAD_DURATION_S = 18.0    # mirrors kZoneLoopMaxPreloadDurationSeconds in src/interfaces/audio_types.h — update both if threshold changes
 
 # ---------------------------------------------------------------------------
 # Helper utilities
@@ -614,7 +616,20 @@ def check_14():
                     f"check_14 FAIL: {sidecar_path} has unexpected fields {sorted(extra)} — "
                     f"music_sidecar_schema.json has additionalProperties: false"
                 )
-    print(f"check_14 PASS: {len(patterns)} music_*.ogg file(s) verified with valid JSON sidecars")
+        # V1 authoring constraint: all music stems must be authored at exactly 90 BPM.
+        # The AudioSystem bar-boundary crossfade system uses bpm=90 to compute bar
+        # boundaries; a sidecar with a different bpm value causes crossfades to fire
+        # at wrong positions (e.g. bpm=120 produces a 33% timing error).
+        # This is a V1 project constraint enforced here, not in the schema (the schema
+        # allows arbitrary positive integer BPM to remain flexible for post-V1 additions).
+        bpm_val = sidecar.get("bpm")
+        if bpm_val != 90:
+            raise AssertionError(
+                f"check_14 FAIL: {sidecar_path} 'bpm'={bpm_val!r} — "
+                f"all V1 music stems must be authored at exactly 90 BPM "
+                f"(AudioSystem bar-boundary crossfade requires bpm=90)"
+            )
+    print(f"check_14 PASS: {len(patterns)} music_*.ogg file(s) verified with valid JSON sidecars (bpm=90)")
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +686,8 @@ def check_17():
             raise AssertionError(f"check_17 FAIL: {path} must be 44100 Hz, got {f.info.sample_rate}")
         if f.info.length < VEHICLE_ENGINE_LOOP_MIN_DURATION_S:
             raise AssertionError(f"check_17 FAIL: {path} duration {f.info.length:.2f}s < {VEHICLE_ENGINE_LOOP_MIN_DURATION_S}s minimum")
+        if f.info.length >= VEHICLE_ENGINE_LOOP_MAX_DURATION_S:
+            raise AssertionError(f"check_17 FAIL: {path} duration {f.info.length:.2f}s >= {VEHICLE_ENGINE_LOOP_MAX_DURATION_S}s maximum (pre-load tier boundary; engine loops >= 20 s fall into the streaming tier, incompatible with pre-loaded AL buffer strategy)")
     print(f"check_17 PASS: {len(patterns)} vehicle engine OGG files verified")
 
 
@@ -694,6 +711,8 @@ def check_18():
             raise AssertionError(f"check_18 FAIL: {path} must be mono (channels=1), got {f.info.channels}")
         if f.info.sample_rate != 44100:
             raise AssertionError(f"check_18 FAIL: {path} must be 44100 Hz, got {f.info.sample_rate}")
+        if f.info.length < ZONE_LOOP_MIN_DURATION_S:
+            raise AssertionError(f"check_18 FAIL: {path} duration {f.info.length:.2f}s < {ZONE_LOOP_MIN_DURATION_S}s minimum (loops shorter than 12 s cycle perceptibly quickly at zone ambient repetition rates)")
         if f.info.length > ZONE_LOOP_MAX_PRELOAD_DURATION_S:
             raise AssertionError(f"check_18 FAIL: {path} duration {f.info.length:.2f}s > {ZONE_LOOP_MAX_PRELOAD_DURATION_S}s maximum")
     print(f"check_18 PASS: {len(patterns)} zone loop OGG files verified")
@@ -714,7 +733,9 @@ def check_19():
                 raise AssertionError(f"check_19 FAIL: {path} must be mono, got {w.getnchannels()} channels")
             if w.getcomptype() != 'NONE':
                 raise AssertionError(f"check_19 FAIL: {path} must be uncompressed PCM, got {w.getcomptype()}")
-    print(f"check_19 PASS: {len(patterns)} stinger WAV files verified mono PCM")
+            if w.getframerate() != 44100:
+                raise AssertionError(f"check_19 FAIL: {path} must be 44100 Hz, got {w.getframerate()} Hz")
+    print(f"check_19 PASS: {len(patterns)} stinger WAV files verified mono PCM 44100 Hz")
 
 
 if __name__ == '__main__':

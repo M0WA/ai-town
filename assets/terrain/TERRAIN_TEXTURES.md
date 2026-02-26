@@ -1,19 +1,23 @@
-# Terrain Texture Asset Placeholders
-
-Phase 5 placeholder stubs. Real DDS assets to be produced before Phase 9.
+# Terrain Texture Assets
 
 ## Grassland Biome
 
-- terrain_grass_d.dds — 2048×2048 DDS DXT1 sRGB, 4-level mip, anisotropy ≥8× (PLACEHOLDER)
-- terrain_grass_n.dds — 2048×2048 DDS DXT5nm, pre-baked mips (PLACEHOLDER)
-- terrain_asphalt_d.dds — 2048×2048 DDS DXT1 sRGB, 4-level mip (PLACEHOLDER)
-- terrain_soil_d.dds — 2048×2048 DDS DXT1 sRGB, 4-level mip (PLACEHOLDER)
-- terrain_concrete_d.dds — 2048×2048 DDS DXT1 sRGB, 4-level mip (PLACEHOLDER)
+Phase 5 procedural DDS placeholders generated 2026-02-26 by `tools/generate_terrain_textures.py`.
+Artistically authored replacements are scheduled for Phase 9.
+
+- terrain_grass_d.dds — 2048×2048 DDS DXT1/BC1, 4-level mip (2048→1024→512→256), sRGB upload path
+- terrain_grass_n.dds — 2048×2048 DDS DXT5/BC3 DXT5nm, 4 pre-baked mip levels, linear upload path
+- terrain_asphalt_d.dds — 2048×2048 DDS DXT1/BC1, 4-level mip, sRGB upload path
+- terrain_asphalt_n.dds — 2048×2048 DDS DXT5/BC3 DXT5nm, 4 pre-baked mip levels, linear upload path
+- terrain_soil_d.dds — 2048×2048 DDS DXT1/BC1, 4-level mip, sRGB upload path
+- terrain_soil_n.dds — 2048×2048 DDS DXT5/BC3 DXT5nm, 4 pre-baked mip levels, linear upload path
+- terrain_concrete_d.dds — 2048×2048 DDS DXT1/BC1, 4-level mip, sRGB upload path
+- terrain_concrete_n.dds — 2048×2048 DDS DXT5/BC3 DXT5nm, 4 pre-baked mip levels, linear upload path
 
 ## Desert Biome
 
-- terrain_sand_d.dds — 2048×2048 DDS DXT1 sRGB, 4-level mip (PLACEHOLDER)
-- terrain_sand_n.dds — 2048×2048 DDS DXT5nm, pre-baked mips (PLACEHOLDER)
+- terrain_sand_d.dds — 2048×2048 DDS DXT1 sRGB, 4-level mip (PLACEHOLDER — Phase 9)
+- terrain_sand_n.dds — 2048×2048 DDS DXT5nm, pre-baked mips (PLACEHOLDER — Phase 9)
 
 ## Splat Map
 

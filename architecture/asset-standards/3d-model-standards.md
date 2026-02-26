@@ -135,6 +135,20 @@ The LOD Requirements table above lists the general Vehicles row (1000–3000 tri
 
 **BINDING LIMIT NOTE**: The per-class budgets in the table above are the **binding limits**; the general range in the LOD Requirements table (1000–3000 tris LOD0, 200–500 tris LOD1) is **indicative only** — it covers the full span across all vehicle classes and must not be used as a per-class cap. For example, the general range does not permit a car to have 2,500 LOD0 triangles; the binding car LOD0 cap is ≤1,500 tris. The export validation script and artist review must use the per-class table above as the authoritative polygon budget source.
 
+#### Vehicle LOD File Naming Convention
+
+Vehicles use the same `_lodN` suffix pattern as buildings for LOD0 and LOD1 mesh files:
+
+- `<vehicle_id>_lod0.b3d` — LOD0 full-detail mesh (e.g. `car_sedan_lod0.b3d`)
+- `<vehicle_id>_lod1.b3d` — LOD1 reduced mesh (e.g. `car_sedan_lod1.b3d`)
+- LOD2 is NOT a separate `.b3d` or sprite file on disk — it is a 16×16 px cell entry in `vehicles_sprite_atlas_d.dds`. No `_lod2.b3d` or `_lod2_sprite` file is authored per vehicle; the sprite cell is populated during atlas authoring.
+
+The `<vehicle_id>` must match the `vehicle_id` field in `tools/vehicle_atlas_registry.json` exactly (e.g. `car_sedan`, `car_hatchback`, `car_suv`, `bus_standard`, `truck_cargo`). The export validation script derives the atlas cell assignment from this ID.
+
+**Vehicle collision mesh**: `<vehicle_id>_col.obj` — single convex hull, 8 triangles (4 side quads, no top/bottom caps), authored at Y=0. One collision mesh per vehicle type, shared across all LOD levels.
+
+**Vehicle sidecar**: `<vehicle_id>.meta` — JSON sidecar with `category: "vehicle"`, `lod_distances` (3 values), `atlas_cell` object `{"row": R, "col": C}`.
+
 #### Vehicle UV Channel Convention
 
 Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (lightmap baking) is **not required** for vehicles — vehicles are dynamic scene objects and do not participate in static lightmap baking. Exporting a UV channel 1 on vehicle assets is permitted but will be ignored by the runtime.
@@ -165,6 +179,21 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
 - **Collision mesh loader dispatch order**: The C++ loader checks suffixes in this order to determine which collision mesh type to load: (1) `_col_0.obj` exists → load multi-convex non-convex set (load all numbered `_col_0`, `_col_1`, `_col_2` files); (2) `_col_circle.obj` exists → load circular N-sided prism; (3) `_col.obj` exists → load single convex hull; (4) none found → log error and skip collision registration. This order prevents `_col_0` from shadowing `_col` on assets that have both files present.
 - A single 50-tri convex hull is **insufficient** for non-convex footprints — it will produce a collision volume that incorrectly blocks walkable/buildable areas inside concavities.
 - Used by terrain buildability check (slope >15° detection) and traffic road graph boundary detection
+
+#### V1 Minimum Building Coverage
+
+The following is the minimum building asset set required for V1 ship. Artists must deliver at least 2 variants per zone-tier combination across all three zones (Residential, Commercial, Industrial) and at minimum the Low and Mid density tiers — 2 variants × 3 zones × 2 tiers = **minimum 12 building sets for Low and Mid tiers**. High-density coverage requires at least 2 variants per zone × 3 zones = **at least 6 High-density building sets**, giving a **total V1 minimum of 18 building sets**.
+
+Each building set must include:
+
+- `<zone>_<tier>_<variant>_lod0.b3d` — LOD0 full-detail mesh
+- `<zone>_<tier>_<variant>_lod1.b3d` — LOD1 reduced mesh (≤50% of LOD0 tris)
+- For buildings with `height_floors <= 3`: `<zone>_<tier>_<variant>_billboard.dds` — billboard atlas (1024×128 DXT5 sRGB)
+- For buildings with `height_floors >= 4`: `<zone>_<tier>_<variant>_lod2.b3d` — LOD2 geometry shell (300–500 tris)
+- `<zone>_<tier>_<variant>.meta` — sidecar with `category`, `height_floors`, `atlas_cell`, `lod_distances`
+- `<zone>_<tier>_<variant>_col.obj` — collision mesh (or `_col_0/1/2.obj` / `_col_circle.obj` for non-convex/circular footprints)
+
+Variants sharing the same zone-tier slot (e.g. `res_low_01` and `res_low_02`) share the same wall module atlas cell in the 2048×2048 building atlas — they differ in mesh geometry only. See `architecture/asset-standards/building-atlas-layout.md` for the cell assignment table.
 
 #### Modular Building Kit
 

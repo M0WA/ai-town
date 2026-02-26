@@ -21,7 +21,7 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
   - LOD rebuild calls `SceneEntityManager::destroy()` on the old node (via chunk ID lookup) BEFORE creating the new node — prevents orphaned node accumulation
   (ref: `architecture/graphics-architecture/procedural-terrain.md`)
 - [x] `ITerrainLoadProgress` stub interface (`graphics-dev-irrlicht`): declare `struct ITerrainLoadProgress { virtual void onChunkRebuilt(int done, int total) {} virtual ~ITerrainLoadProgress() = default; }` in `src/terrain/terrain_types.h`; `TerrainSystem::flushPendingRebuilds(ITerrainLoadProgress* cb = nullptr)` calls `cb->onChunkRebuilt()` if non-null. No-op in EDT_NULL test context. Phase 11 wires the loading screen spinner to this callback.
-- [x] Map playability guarantee (`graphics-dev-irrlicht`): `TerrainSystem::generate()` verifies (1) flat tile percentage ≥ 20% of total tiles (slope < 15°) and (2) at least one contiguous flat region ≥ 50×50 tiles exists; re-seeds up to 10 attempts if either constraint fails (per `architecture/game-design/terrain-interaction.md`). Tests: `TerrainSystem_FlatTilePercentage_MeetsMinimum` and `TerrainSystem_ContiguousFlatRegion_MeetsMinimum`.
+- [x] Map playability guarantee (`graphics-dev-irrlicht`): `TerrainSystem::generate()` verifies (1) flat tile percentage ≥ 20% of total tiles (slope < 15°) and (2) at least one contiguous flat region ≥ 50×50 tiles exists; re-seeds up to 100 attempts if either constraint fails (per `architecture/game-design/terrain-interaction.md`). Tests: `TerrainSystem_FlatTilePercentage_MeetsMinimum` and `TerrainSystem_ContiguousFlatRegion_MeetsMinimum`.
 - [x] `SceneEntityManager` class: authoritative entity list; sole caller of `addXxxSceneNode()` and `node->remove()`; `destroy(entity)` sequence:
   - Step 1: iterate all material slots on the scene node, call `textureCache->releaseLinear(tex)` for each `ITexture*`, clear the slot via `mat.setTexture(t, nullptr)` — `getMaterial()` called ONCE per loop iteration, result cached as `SMaterial&`
 
@@ -105,6 +105,14 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
 
   **`graphics-artist-3d-model` building atlas sign-off gate** (Phase 5 exit criterion): `graphics-artist-3d-model` MUST review `architecture/asset-standards/building-atlas-layout.md` and confirm: (a) the shared atlas cell variant approach (multiple mesh variants referencing one module-type cell) is compatible with modular kit UV authoring workflows; (b) per-module UV islands can be fully authored within the 496×496 px usable area per 512×512 cell without requiring bleed into the 8 px border; (c) the 4×4 cell grid and 16-cell capacity correctly covers the V1 minimum building module set. Sign off before Phase 9 UV authoring begins.
 
+- [x] **Terrain DDS placeholder generation** (`graphics-artist-2d-texture`): generate 8 technically-valid procedural DDS placeholder files at `assets/terrain/` via `tools/generate_terrain_textures.py` (standard-library-only Python; no PIL/numpy). Files must have correct binary headers, FourCC, exactly 4 mip levels (2048→1024→512→256), and spec representative colours (grass `#7A8C3E`, asphalt `#3A3C3C` cool-biased, soil `#7A5C3C`, concrete `#C0B8A8` warm-biased; normal maps: alpha=128, green=128, blue=127, red=0). Artistic quality is Phase 9; Phase 5 requires only technically valid DDS files loadable by `TextureCache`. Files: `terrain_grass_d.dds`, `terrain_asphalt_d.dds`, `terrain_soil_d.dds`, `terrain_concrete_d.dds` (DXT1/BC1, `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`); `terrain_grass_n.dds`, `terrain_asphalt_n.dds`, `terrain_soil_n.dds`, `terrain_concrete_n.dds` (DXT5/BC3, DXT5nm swizzle, linear).
+
+- [x] **`building-atlas-layout.md` corrections** (`graphics-artist-3d-model`): (1) remove incorrect claim that "road modules" and "civic building facades" are covered by the city building atlas — road surfaces use the Road Marking Atlas and there is no civic zone in V1; (2) add binding decision: High-density buildings reuse `base_residential_med` (row 1, col 3) for their ground-floor base module (was previously undocumented, creating a Phase 9 UV authoring gap).
+
+- [x] **`3d-model-standards.md` additions** (`graphics-artist-3d-model`): (1) add `#### V1 Minimum Building Coverage` section defining the 18 minimum building sets (2 variants × 3 zones × 3 density tiers) required for V1; (2) add `#### Vehicle LOD File Naming Convention` section specifying `{vehicle_id}_lod0.b3d` / `{vehicle_id}_lod1.b3d` patterns, that LOD2 has no disk file (sprite atlas cell only), and that `vehicle_id` must match `tools/vehicle_atlas_registry.json` exactly.
+
+- [x] **`vehicle_atlas_registry.json` V-flip correction** (`graphics-artist-3d-model`): correct the co-sign confirmation text for V-flip UV convention — original text incorrectly stated "V increases downward" (Blender editor convention); corrected to OpenGL convention: "V=0 at bottom-left, V increases upward, row 0 is the BOTTOM row; artists must apply `V_opengl = 1 − V_blender`".
+
 #### C++ Class File Naming (CamelCase)
 
 - [x] **Rename snake_case C++ class files to CamelCase** (`graphics-dev-irrlicht`): all C++ class implementation files (`.cpp`) and their paired class header files (`.h`) created in Phase 5 that used snake_case naming must be renamed to CamelCase per the project code style convention (see `CLAUDE.md § Code Style`). Non-class C-style headers (e.g., `terrain_types.h`, `simulation_constants.h`) are exempt.
@@ -169,15 +177,15 @@ Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` ge
   - Check #12: Vehicle normal atlas UV (8×8 grid of 256×256 px cells)
   - Check #13: Facade atlas cell pixels — all non-transparent pixel content within [8, 504] texel range on both U and V axes per cell; DDS fourCC determines transparency interpretation (DXT1: 1-bit alpha; DXT5/BC3: alpha > 0)
   (ref: `architecture/asset-standards/3d-model-standards.md`, `architecture/asset-standards/2d-texture-standards.md`)
-- [x] **Check #14** (`validate_assets.py`): validate all `music_*.ogg` files have co-located JSON sidecars matching `music_sidecar_schema.json`. Pattern `music_*.ogg` covers both main menu variants (`music_main_menu_*.ogg`) and all gameplay stems (`music_calm_*.ogg`, `music_growth_*.ogg`, `music_crisis_*.ogg`). Files matching `ambient_*.ogg` are explicitly excluded (no sidecar required for ambient beds per `architecture/audio-architecture/v1-audio-asset-manifest.md`). A sidecar that fails schema validation (missing `bpm`, missing `beats_per_bar`, or additional properties) is a hard asset error. This check IS implemented in Phase 5 — it is NOT a Phase 9 stub. Check #15 (`.meta` sidecar file presence) remains a commented stub for Phase 9. Road LOD2 color validation is Check #20 — a Phase 9 addition implemented alongside the road tile LOD2 deliverable. (ref: `architecture/audio-architecture/audio-asset-formats.md`, `architecture/audio-architecture/v1-audio-asset-manifest.md`)
+- [x] **Check #14** (`validate_assets.py`): validate all `music_*.ogg` files have co-located JSON sidecars matching `music_sidecar_schema.json`. Pattern `music_*.ogg` covers both main menu variants (`music_main_menu_*.ogg`) and all gameplay stems (`music_calm_*.ogg`, `music_growth_*.ogg`, `music_crisis_*.ogg`). Files matching `ambient_*.ogg` are explicitly excluded (no sidecar required for ambient beds per `architecture/audio-architecture/v1-audio-asset-manifest.md`). A sidecar that fails schema validation (missing `bpm`, missing `beats_per_bar`, or additional properties) is a hard asset error. **V1 BPM enforcement**: after schema validation, check #14 additionally enforces `bpm == 90` as a post-schema V1 constraint (the `AudioSystem` bar-boundary crossfade computes bar durations from this value; a sidecar with `bpm: 120` would cause a 33% crossfade timing error at runtime). The schema itself keeps `minimum: 1` to remain reusable for post-V1 stems at different BPMs. This check IS implemented in Phase 5 — it is NOT a Phase 9 stub. Check #15 (`.meta` sidecar file presence) remains a commented stub for Phase 9. Road LOD2 color validation is Check #20 — a Phase 9 addition implemented alongside the road tile LOD2 deliverable. (ref: `architecture/audio-architecture/audio-asset-formats.md`, `architecture/audio-architecture/v1-audio-asset-manifest.md`)
 - [x] **Check #15 stub** (Phase 9 scope): verify `pass` stub with `# TODO Phase 9: .meta sidecar file presence` comment is present in `tools/validate_assets.py`. This stub was committed in Phase 4; Phase 5 must confirm it is present and NOT accidentally removed. **Phase 5 exit criterion: check_15 stub present.**
 
 Road LOD2 color validation is Check #20 (phase-9.md and 3d-model-standards.md updated).
 
 - [x] **Check #16** (`sound-dev-opensoftal`, `cicd-dev-github`): `music_*.ogg` must be stereo (channels == 2), 44100 Hz sample rate; `ambient_*.ogg` must be stereo, 44100 Hz. Hard error on any mismatch. Graceful no-op if no matching files exist.
-- [x] **Check #17** (`sound-dev-opensoftal`, `cicd-dev-github`): `sfx_vehicle_engine_*.ogg` must have duration ≥ 6.0 s, mono (channels == 1), 44100 Hz. Hard error if duration < 6.0 s (audibly mechanical loop). Graceful no-op if no matching files exist.
-- [x] **Check #18** (`sound-dev-opensoftal`, `cicd-dev-github`): `sfx_zone_*.ogg` must have duration ≤ `kZoneLoopMaxPreloadDurationSeconds` (18.0 s), mono, 44100 Hz. Hard error if duration > 18 s. Graceful no-op if no matching files exist.
-- [x] **Check #19** (`sound-dev-opensoftal`, `cicd-dev-github`): `stinger_*.wav` must be mono WAV PCM (1 channel, uncompressed). Hard error on stereo or compressed WAV. Graceful no-op if no matching files exist.
+- [x] **Check #17** (`sound-dev-opensoftal`, `cicd-dev-github`): `sfx_vehicle_engine_*.ogg` must have duration ≥ `VEHICLE_ENGINE_LOOP_MIN_DURATION_S` (6.0 s) AND < `VEHICLE_ENGINE_LOOP_MAX_DURATION_S` (20.0 s), mono (channels == 1), 44100 Hz. Hard error if duration < 6.0 s (audibly mechanical loop at 0.75× pitch-shift). Hard error if duration ≥ 20.0 s (crosses the Tier 2/Tier 3 pre-load boundary — incompatible with pre-loaded AL buffer strategy). Graceful no-op if no matching files exist.
+- [x] **Check #18** (`sound-dev-opensoftal`, `cicd-dev-github`): `sfx_zone_*.ogg` must have duration ≥ `ZONE_LOOP_MIN_DURATION_S` (12.0 s) AND ≤ `ZONE_LOOP_MAX_PRELOAD_DURATION_S` (18.0 s), mono, 44100 Hz. Hard error if duration < 12.0 s or > 18.0 s. Graceful no-op if no matching files exist.
+- [x] **Check #19** (`sound-dev-opensoftal`, `cicd-dev-github`): `stinger_*.wav` must be mono WAV PCM (1 channel, uncompressed, 44100 Hz). Hard error on stereo, compressed WAV, or non-44100 Hz sample rate. Graceful no-op if no matching files exist.
 
 > **Note**: Audio checks (#16–#19) require the `mutagen` Python library (`pip install mutagen`) for OGG/WAV duration and format inspection. The `validate-assets` CI job must install `mutagen` before running the script.
 
@@ -196,8 +204,15 @@ Road LOD2 color validation is Check #20 (phase-9.md and 3d-model-standards.md up
 - `validate_assets.py` checks #1–#14 implemented (checks #1–#13 per 3D model standards + Check #14 music JSON sidecar validation); runs cleanly in `validate-assets` CI job
 - `tools/validate_assets.py` contains check #15 stub (`pass` with `# TODO Phase 9` comment)
 - checks #16–#19 implemented in `tools/validate_assets.py`; script exits 0 with informational no-op message when no matching audio assets are found
-- Atlas layout sign-off document updated in `building-atlas-layout.md` with explicit building variant sharing confirmation; `graphics-artist-3d-model` sign-off recorded confirming: (a) shared atlas cell variant approach compatible with modular kit UV workflows; (b) per-module UV islands fit within 496×496 px usable area per 512×512 cell; (c) 4×4 grid and 16-cell capacity covers V1 minimum building module set
+- check #14 enforces `bpm == 90` as a post-schema V1 constraint (in addition to schema structural validation)
+- check #17 enforces both `≥ 6.0 s` minimum and `< 20.0 s` maximum for vehicle engine OGG loops; constants `VEHICLE_ENGINE_LOOP_MIN_DURATION_S` and `VEHICLE_ENGINE_LOOP_MAX_DURATION_S` reference C++ counterparts
+- check #18 enforces both `≥ 12.0 s` minimum and `≤ 18.0 s` maximum for zone loop OGG files; constant `ZONE_LOOP_MIN_DURATION_S` added
+- check #19 enforces 44100 Hz sample rate for stinger WAV files (in addition to mono PCM check)
+- 8 terrain DDS placeholder files present at `assets/terrain/`: `terrain_{grass,asphalt,soil,concrete}_d.dds` (DXT1/BC1, `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`) and `terrain_{grass,asphalt,soil,concrete}_n.dds` (DXT5/BC3, DXT5nm swizzle); generated via `tools/generate_terrain_textures.py`; all headers valid (magic bytes, `dwMipMapCount=4`, correct FourCC, DDSCAPS_COMPLEX|MIPMAP|TEXTURE)
+- Atlas layout sign-off document updated in `building-atlas-layout.md` with explicit building variant sharing confirmation; `graphics-artist-3d-model` sign-off recorded confirming: (a) shared atlas cell variant approach compatible with modular kit UV workflows; (b) per-module UV islands fit within 496×496 px usable area per 512×512 cell; (c) 4×4 grid and 16-cell capacity covers V1 minimum building module set; incorrect road module and civic zone references removed; High-density base cell binding decision added
 - `graphics-artist-2d-texture` splat channel lock sign-off recorded in `architecture/asset-standards/building-atlas-layout.md` using the standard block format before terrain texture production begins; `TextureCache::loadSplatMap()` not implemented until sign-off is recorded
+- `architecture/asset-standards/3d-model-standards.md` contains `#### V1 Minimum Building Coverage` section (18 minimum building sets) and `#### Vehicle LOD File Naming Convention` section
+- `tools/vehicle_atlas_registry.json` co-sign V-flip convention text corrected to OpenGL convention (V=0 at bottom-left, V increases upward, row 0 is BOTTOM row)
 - `coverage-linux` gate green at ≥80% on `src/simulation/`, `src/terrain/`, `src/ui/`
 
 ### Team
@@ -205,11 +220,11 @@ Road LOD2 color validation is Check #20 (phase-9.md and 3d-model-standards.md up
 | Role | Responsibility |
 |---|---|
 | `graphics-dev-irrlicht` | `TerrainChunk` (incl. `getHeightAt`/`getSlopeDegrees` query API), `TerrainSystem` (incl. map playability guarantee, LOD hysteresis distances, `ITerrainLoadProgress` stub), `SceneEntityManager` (incl. CMake placement in `aitown_render`), `TextureCache` full implementation (incl. anisotropy), terrain GLSL shaders (`int` intermediary for `u_srgbLinear`), sRGB upload path, `lod_swap_smoke_test.cpp` promotion |
-| `graphics-artist-2d-texture` | Terrain diffuse textures (DXT1 sRGB 2048×2048), terrain normal maps (DXT5nm), splat map PNG, atlas layout sign-off |
-| `graphics-artist-3d-model` | Atlas layout co-sign; building atlas sign-off gate (confirm shared cell variant approach, 496×496 px usable area, 16-cell V1 coverage) before Phase 9 UV authoring begins |
+| `graphics-artist-2d-texture` | Terrain diffuse textures (DXT1 sRGB 2048×2048), terrain normal maps (DXT5nm), splat map PNG, atlas layout sign-off; terrain DDS placeholder generation via `tools/generate_terrain_textures.py` (8 files at `assets/terrain/`) |
+| `graphics-artist-3d-model` | Atlas layout co-sign; building atlas sign-off gate (confirm shared cell variant approach, 496×496 px usable area, 16-cell V1 coverage) before Phase 9 UV authoring begins; `building-atlas-layout.md` corrections (road module/civic zone removal, High-density base cell binding decision); `3d-model-standards.md` additions (V1 Minimum Building Coverage, Vehicle LOD File Naming Convention); `vehicle_atlas_registry.json` V-flip correction |
 | `test-dev-cpp` | `TerrainChunk` tests, `TerrainSystem` rebuild deque tests, `TextureCache` tests, `terrain_tests` CMake target promotion |
 | `sound-dev-opensoftal` | validate_assets.py audio checks #16–#19 implementation (OGG/WAV format and duration validation) |
-| `sound-artist-opensoftal` | No Phase 5 audio asset deliverables — all V1 audio assets delivered in Phase 10. Checks #16–#19 are graceful no-ops on empty `assets/audio/` directory. |
+| `sound-artist-opensoftal` | validate_assets.py checks #14/#16–#19 review and corrections: `bpm == 90` V1 enforcement added to check #14; upper-bound duration check added to check #17 (`< 20.0 s`); lower-bound check added to check #18 (`≥ 12.0 s`); 44100 Hz sample rate check added to check #19; `assets/audio/README.md` channel-count corrections for `sfx_road_build` and `sfx_earthworks` (Mono, positional); crisis music bar-count fix in production brief (24 bars → 36 bars to meet 90 s minimum); vehicle SFX pitch-formula contradiction resolved. No binary audio asset files — all V1 audio assets delivered in Phase 10. |
 | `cicd-dev-github` | `--fail-under-percent 80` gate implementation in `coverage-linux` CI job; `aitown_add_tests()` DISCOVERY_TIMEOUT extension (CI-8); `mutagen` install step in `validate-assets` CI job |
 
 ### Dependencies
@@ -224,3 +239,32 @@ Road LOD2 color validation is Check #20 (phase-9.md and 3d-model-standards.md up
 - **RISK**: `SMesh::addMeshBuffer()` may or may not call `grab()` on the buffer — double-free or leak depending on convention. **Spike**: inspect `source/Irrlicht/SMesh.h` at implementation time; record result in `lod_swap_smoke_test.cpp` as a one-line comment; update `scene-graph-ownership.md` accordingly.
 - **RISK**: Coverage gate at 80% may not be achievable if `TerrainSystem` has high stub-to-impl ratio. **Spike**: run `coverage-linux` locally after terrain implementation and before gate raise to verify ≥80% is reachable.
 - **RISK**: Splat map PNG upload via `glTexImage2D(GL_RGBA8)` may produce incorrect blend weights if the PNG loader applies premultiplied alpha. **Spike**: verify PNG decode produces straight alpha (0–255 values unmodified) before upload; document the loader behavior in `TextureCache::loadSplatMap()` comments.
+
+### Phase 5 Sign-Off
+
+**Status**: DONE
+
+All Phase 5 deliverables completed and exit criteria satisfied. The following additional deliverables were completed during Phase 5 closure review (2026-02-26):
+
+| Deliverable | Owner | Status |
+|---|---|---|
+| 8 terrain DDS placeholder files (`assets/terrain/`) | `graphics-artist-2d-texture` | ✓ Done |
+| `tools/generate_terrain_textures.py` | `graphics-artist-2d-texture` | ✓ Done |
+| `building-atlas-layout.md` corrections (road module removal, High-density base cell) | `graphics-artist-3d-model` | ✓ Done |
+| `3d-model-standards.md` V1 Minimum Building Coverage + Vehicle LOD File Naming sections | `graphics-artist-3d-model` | ✓ Done |
+| `vehicle_atlas_registry.json` V-flip UV convention corrected to OpenGL convention | `graphics-artist-3d-model` | ✓ Done |
+| `validate_assets.py` check #14 `bpm == 90` V1 enforcement | `sound-artist-opensoftal` | ✓ Done |
+| `validate_assets.py` check #17 upper-bound `< 20.0 s` (Tier 2/3 boundary) | `sound-artist-opensoftal` | ✓ Done |
+| `validate_assets.py` check #18 lower-bound `≥ 12.0 s` | `sound-artist-opensoftal` | ✓ Done |
+| `validate_assets.py` check #19 44100 Hz sample rate enforcement | `sound-artist-opensoftal` | ✓ Done |
+| `assets/audio/README.md` channel-count corrections (`sfx_road_build`, `sfx_earthworks` → Mono/positional) | `sound-artist-opensoftal` | ✓ Done |
+| Crisis music bar-count corrected (24 bars / 64 s → 36 bars / 96 s) in production brief | `sound-artist-opensoftal` | ✓ Done |
+| Terrain re-seed cap corrected (10 → 100 attempts) in `terrain-interaction.md` | `gamedesign-lookandfeel` | ✓ Done |
+
+<!-- SIGN-OFF: graphics-artist-2d-texture 2026-02-26 — confirmed all 8 terrain DDS placeholder files generated and present at assets/terrain/; tools/generate_terrain_textures.py committed; all DDS headers valid; TERRAIN_TEXTURES.md updated to remove PLACEHOLDER tags from grassland biome files -->
+
+<!-- SIGN-OFF: graphics-artist-3d-model 2026-02-26 — confirmed building-atlas-layout.md corrected (road modules and civic zone removed from cell-coverage claim; High-density base cell binding decision added); 3d-model-standards.md V1 Minimum Building Coverage and Vehicle LOD File Naming Convention sections added; vehicle_atlas_registry.json co-sign V-flip text corrected to OpenGL convention (V=0 at bottom-left, V increases upward, row 0 is BOTTOM row) -->
+
+<!-- SIGN-OFF: sound-artist-opensoftal 2026-02-26 — confirmed validate_assets.py checks #14/#16–#19 reviewed and corrected (bpm==90 V1 enforcement, check #17 upper-bound, check #18 lower-bound, check #19 sample rate); assets/audio/README.md channel-count corrections for sfx_road_build and sfx_earthworks; crisis music bar-count corrected 24→36 bars; vehicle SFX pitch-formula contradiction resolved in production brief -->
+
+<!-- SIGN-OFF: gamedesign-lookandfeel 2026-02-26 — confirmed terrain-interaction.md re-seed cap corrected from 10 to 100 attempts with exhaustion fallback (best-effort map + non-blocking toast); phase-5.md line 24 updated to match -->
