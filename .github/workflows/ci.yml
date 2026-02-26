@@ -20,7 +20,7 @@ permissions:
 # make it unavailable to other jobs.
 # The builtin-baseline in vcpkg.json must match this value exactly (enforced by baseline step).
 env:
-  VCPKG_COMMIT_ID: "ce35b1a53aac26d7fcdb8ee1ef7a8e4eea02d27b"  # matches vcpkg.json builtin-baseline
+  VCPKG_COMMIT_ID: "b2f068faf45a3f04145bec0f52a66526ad590227"  # matches vcpkg.json builtin-baseline
 
 jobs:
   # ============================================================================
@@ -684,6 +684,8 @@ jobs:
             --ignore-errors unused \
             '/usr/*' \
             "${{ github.workspace }}/.fetchcontent_cache/*" \
+            "${{ github.workspace }}/vcpkg_installed/*" \
+            "${{ github.workspace }}/build/vcpkg_installed/*" \
             '*/tests/*' \
             '*/mock_*.h' '*/mock_*.cpp' \
             '*/manual_*.h' '*/manual_*.cpp' \
@@ -691,13 +693,28 @@ jobs:
             --output-file coverage_filtered.info
           lcov --list coverage_filtered.info
           genhtml coverage_filtered.info --output-directory coverage_html/
-          # Phase 0: no hard coverage gate. lcov --fail-under-percent does not exist in
-          # lcov 2.0 (ubuntu-latest); it was added in lcov 2.1. At Phase 0 the gate would
-          # be 0% anyway (smoke tests give trivial coverage). Use --summary for informational
-          # output only. Phase 2 replaces this with a proper 80% gate once the tool version
-          # is confirmed or the gate is implemented via a bash percentage check.
-          # TODO Phase 5: replace with: lcov --summary coverage_filtered.info | awk check
-          lcov --summary coverage_filtered.info
+          # lcov --summary informational step REMOVED in Phase 5 — replaced by the
+          # 80% total-line-coverage awk gate in the step below.
+
+      - name: Enforce 80% total line coverage gate (Phase 5)
+        run: |
+          total=$(awk '
+            /^LH:/ { lh+=substr($0,4)+0 }
+            /^LF:/ { lf+=substr($0,4)+0 }
+            END { if (lf>0) printf "%.2f", (lh/lf)*100; else print 0 }
+          ' coverage_filtered.info)
+          if [ -z "$total" ]; then
+            echo "PREFLIGHT FAIL: No coverage data found in coverage_filtered.info"
+            exit 1
+          fi
+          awk -v pct="$total" 'BEGIN {
+            if (pct+0 < 80.0) {
+              print "FAIL: total line coverage " pct "% < 80% Phase 5 gate"
+              exit 1
+            } else {
+              print "PASS: total line coverage " pct "% >= 80%"
+            }
+          }'
 
       # Step 20: Enforce src/ui/ 25% worst-file coverage gate — Phase 4 blocking deliverable.
       # Parses coverage_filtered.info directly (SF/LH/LF records) — version-agnostic, works
@@ -760,6 +777,14 @@ jobs:
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: '3.12'  # pin to specific minor version — never use '3' (floating major breaks reproducibility)
+
+      - name: Verify check_15 stub present in validate_assets.py
+        run: |
+          grep -q "check_15" tools/validate_assets.py || (echo "FAIL: check_15 stub missing from validate_assets.py" && exit 1)
+          echo "PASS: check_15 stub present"
+
+      - name: Install Python dependencies
+        run: pip install mutagen
 
       - name: Run asset validation
         run: python tools/validate_assets.py

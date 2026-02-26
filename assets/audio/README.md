@@ -68,8 +68,8 @@ The following table is the complete list of V1 audio assets. All assets must be 
 | `sfx_zone_industrial` | Zone loop | OGG | 12–18 s | Y | Mono | -26 LUFS / -2 dBTP | Silence-boundary loop; pre-loaded; hard cap 18 s |
 | `sfx_build_place` | SFX | WAV PCM | < 1 s | N | Mono or stereo | -24 LUFS / -1 dBTP | Building placed; subtle placement feedback |
 | `sfx_build_demolish` | SFX | WAV PCM | < 1 s | N | Mono or stereo | -24 LUFS / -1 dBTP | Building demolished |
-| `sfx_road_build` | SFX | WAV PCM | < 1 s | N | Mono or stereo | -24 LUFS / -1 dBTP | Road construction feedback |
-| `sfx_earthworks` | SFX | WAV PCM | < 1 s | N | Mono or stereo | -24 LUFS / -1 dBTP | Terrain leveling; short percussive impact |
+| `sfx_road_build` | SFX | WAV PCM | < 1 s | N | **Mono** | -24 LUFS / -1 dBTP | **Positional** (3D at road tile world-space centroid; `AL_SOURCE_RELATIVE = AL_FALSE`); EFX bypass (construction on open tile) |
+| `sfx_earthworks` | SFX | WAV PCM | < 1 s | N | **Mono** | -24 LUFS / -1 dBTP | **Positional** (3D at tile world-space centroid; `AL_SOURCE_RELATIVE = AL_FALSE`); EFX bypass; short percussive impact |
 | `sfx_loan_issued` | SFX | WAV PCM | < 1 s | N | Mono or stereo | -24 LUFS / -1 dBTP | Loan auto-issued |
 | `sfx_budget_warn` | SFX | WAV PCM | 1–2 s | N | Mono or stereo | -24 LUFS / -1 dBTP | Budget deficit warning; minimum 1 s (sub-second is not perceptibly distinct from UI clicks) |
 | `sfx_power_out` | SFX | WAV PCM | 1–2 s | N | Mono or stereo | -22 LUFS / -1 dBTP | Power outage notification |
@@ -101,7 +101,7 @@ JSON sidecar files (e.g. `music_calm_01.json`) are also part of the delivery and
 | Ambient beds | Stereo (2 channels) | Same validation applies |
 | Zone loops | Mono (1 channel) | Mandatory for `alSource3f(AL_POSITION)` 3D spatialization (OpenAL ignores 3D position on stereo sources) |
 | Stingers (`stinger_crisis`, `stinger_milestone`) | Mono (1 channel) | Non-positional (`AL_SOURCE_RELATIVE = AL_TRUE`) but must be mono; multi-channel WAV sources with `AL_SOURCE_RELATIVE` produce undefined panning on some OpenAL implementations |
-| Positional SFX (`sfx_fire_alert`, `sfx_police_alert`, `sfx_vehicle_horn`, `sfx_intersection_tick`, zone loops) | Mono (1 channel) | OpenAL ignores `AL_POSITION` on stereo sources entirely; stereo positional SFX is a silent correctness failure |
+| Positional SFX (`sfx_fire_alert`, `sfx_police_alert`, `sfx_vehicle_horn`, `sfx_intersection_tick`, `sfx_road_build`, `sfx_earthworks`, zone loops) | Mono (1 channel) | OpenAL ignores `AL_POSITION` on stereo sources entirely; stereo positional SFX is a silent correctness failure |
 | Vehicle engine SFX (`sfx_vehicle_engine_idle`, `sfx_vehicle_engine_move`) | Mono (1 channel) OGG Vorbis | WAV format is prohibited for vehicle engine loops (a 1-2 s WAV loop is audibly mechanical; OGG minimum 6 s required) |
 | UI sounds | Stereo or mono | `AL_SOURCE_RELATIVE = AL_TRUE` |
 

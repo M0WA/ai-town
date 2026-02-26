@@ -598,6 +598,19 @@ markdown-lint:
 
   **CRITICAL**: The token `@<40-CHAR-SHA>` above is illustrative prose — it is NOT a valid `uses:` value and MUST NEVER appear verbatim in a committed `ci.yml`. The supply-chain lint step in `build-linux` will match any `<...>` angle-bracket token and immediately fail the job, catching this mistake at CI time. Resolve the SHA live before committing.
 
+  **Phase 5 Python dependencies**: the `validate-assets` job must install `mutagen` before
+  running `validate_assets.py`. Add a pip install step immediately after the Python setup step:
+
+  ```yaml
+      - name: Install Python dependencies
+        run: pip install mutagen
+  ```
+
+  `mutagen` is required by checks #16–#19 for OGG/WAV duration and format inspection. The
+  package is available on PyPI and installs in under 5 seconds. Do NOT pin `mutagen` to a
+  specific version — use `pip install mutagen` without version pinning to always use the
+  latest compatible release.
+
   Continuing the job definition:
 
   ```yaml

@@ -135,6 +135,20 @@ The LOD Requirements table above lists the general Vehicles row (1000–3000 tri
 
 **BINDING LIMIT NOTE**: The per-class budgets in the table above are the **binding limits**; the general range in the LOD Requirements table (1000–3000 tris LOD0, 200–500 tris LOD1) is **indicative only** — it covers the full span across all vehicle classes and must not be used as a per-class cap. For example, the general range does not permit a car to have 2,500 LOD0 triangles; the binding car LOD0 cap is ≤1,500 tris. The export validation script and artist review must use the per-class table above as the authoritative polygon budget source.
 
+#### Vehicle LOD File Naming Convention
+
+Vehicles use the same `_lodN` suffix pattern as buildings for LOD0 and LOD1 mesh files:
+
+- `<vehicle_id>_lod0.b3d` — LOD0 full-detail mesh (e.g. `car_sedan_lod0.b3d`)
+- `<vehicle_id>_lod1.b3d` — LOD1 reduced mesh (e.g. `car_sedan_lod1.b3d`)
+- LOD2 is NOT a separate `.b3d` or sprite file on disk — it is a 16×16 px cell entry in `vehicles_sprite_atlas_d.dds`. No `_lod2.b3d` or `_lod2_sprite` file is authored per vehicle; the sprite cell is populated during atlas authoring.
+
+The `<vehicle_id>` must match the `vehicle_id` field in `tools/vehicle_atlas_registry.json` exactly (e.g. `car_sedan`, `car_hatchback`, `car_suv`, `bus_standard`, `truck_cargo`). The export validation script derives the atlas cell assignment from this ID.
+
+**Vehicle collision mesh**: `<vehicle_id>_col.obj` — single convex hull, 8 triangles (4 side quads, no top/bottom caps), authored at Y=0. One collision mesh per vehicle type, shared across all LOD levels.
+
+**Vehicle sidecar**: `<vehicle_id>.meta` — JSON sidecar with `category: "vehicle"`, `lod_distances` (3 values), `atlas_cell` object `{"row": R, "col": C}`.
+
 #### Vehicle UV Channel Convention
 
 Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (lightmap baking) is **not required** for vehicles — vehicles are dynamic scene objects and do not participate in static lightmap baking. Exporting a UV channel 1 on vehicle assets is permitted but will be ignored by the runtime.
@@ -165,6 +179,21 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
 - **Collision mesh loader dispatch order**: The C++ loader checks suffixes in this order to determine which collision mesh type to load: (1) `_col_0.obj` exists → load multi-convex non-convex set (load all numbered `_col_0`, `_col_1`, `_col_2` files); (2) `_col_circle.obj` exists → load circular N-sided prism; (3) `_col.obj` exists → load single convex hull; (4) none found → log error and skip collision registration. This order prevents `_col_0` from shadowing `_col` on assets that have both files present.
 - A single 50-tri convex hull is **insufficient** for non-convex footprints — it will produce a collision volume that incorrectly blocks walkable/buildable areas inside concavities.
 - Used by terrain buildability check (slope >15° detection) and traffic road graph boundary detection
+
+#### V1 Minimum Building Coverage
+
+The following is the minimum building asset set required for V1 ship. Artists must deliver at least 2 variants per zone-tier combination across all three zones (Residential, Commercial, Industrial) and at minimum the Low and Mid density tiers — 2 variants × 3 zones × 2 tiers = **minimum 12 building sets for Low and Mid tiers**. High-density coverage requires at least 2 variants per zone × 3 zones = **at least 6 High-density building sets**, giving a **total V1 minimum of 18 building sets**.
+
+Each building set must include:
+
+- `<zone>_<tier>_<variant>_lod0.b3d` — LOD0 full-detail mesh
+- `<zone>_<tier>_<variant>_lod1.b3d` — LOD1 reduced mesh (≤50% of LOD0 tris)
+- For buildings with `height_floors <= 3`: `<zone>_<tier>_<variant>_billboard.dds` — billboard atlas (1024×128 DXT5 sRGB)
+- For buildings with `height_floors >= 4`: `<zone>_<tier>_<variant>_lod2.b3d` — LOD2 geometry shell (300–500 tris)
+- `<zone>_<tier>_<variant>.meta` — sidecar with `category`, `height_floors`, `atlas_cell`, `lod_distances`
+- `<zone>_<tier>_<variant>_col.obj` — collision mesh (or `_col_0/1/2.obj` / `_col_circle.obj` for non-convex/circular footprints)
+
+Variants sharing the same zone-tier slot (e.g. `res_low_01` and `res_low_02`) share the same wall module atlas cell in the 2048×2048 building atlas — they differ in mesh geometry only. See `architecture/asset-standards/building-atlas-layout.md` for the cell assignment table.
 
 #### Modular Building Kit
 
@@ -201,7 +230,7 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
   The export validation script must measure assembled totals for a representative N-floor stack at
   each density tier and reject any combination that exceeds these limits.
 
-  **Export validation script — required checks**: The export validation script (`tools/validate_assets.py` or equivalent) must perform all 16 required checks and produce a per-asset PASS/FAIL report:
+  **Export validation script — required checks**: The export validation script (`tools/validate_assets.py` or equivalent) must perform all 20 required checks and produce a per-asset PASS/FAIL report:
   1. Building `_lod0`, `_lod1` files use `.b3d` format (not `.obj`).
   2. Small building / prop `_lod2.b3d` file presence is floor-count conditional (read `height_floors` from `<asset_name>.meta`): if `height_floors <= 3`, the asset must NOT have a `_lod2.b3d` file (flag its presence as an error) and must have a `_billboard.dds` instead; if `height_floors >= 4`, the asset must have a `_lod2.b3d` geometry shell (flag its absence as an error) and must NOT rely on `_billboard.dds` for LOD2 rendering. The 4-floor threshold is the boundary: buildings with `height_floors >= 4` require a `_lod2.b3d` geometry shell for distant visibility; buildings with `height_floors <= 3` use the billboard imposter system at LOD2 (point-sprite only, no `_lod2.b3d`). (See check #11 for the symmetric geometry-shell presence requirement.)
   3. Large building `_lod2.b3d` is present, within 300–500 tri budget, and uses **DXT5/BC3 format for `_lod2_lm.dds`** (not DXT1). Validate by reading the DDS fourCC. DXT1 on a LOD2 lightmap is a silent error — DXT5 is required to preserve the alpha channel for ambient occlusion data.
@@ -216,11 +245,14 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
   12. Vehicle normal map UV channel 0 coordinates fall within the asset's assigned atlas cell in `vehicles_normal_atlas_n.dds` (8×8 grid of 256×256 cells in 2048×2048; vehicle row/column assignments match the diffuse atlas registry in `vehicle_atlas_registry.json` — same row R and column C, but cell UV range is `U ∈ [C/8, (C+1)/8]`, `V ∈ [R/8, (R+1)/8]` since the normal atlas has an 8×8 grid). The V-axis origin convention (OpenGL, V=0 at bottom, row 0 is the bottom row) applies identically to normal atlas UV verification — artists must apply V-flip (`V_opengl = 1 − V_blender`) when authoring UV islands for the normal atlas in Blender, using the same convention documented in the Vehicle Atlas Cell Registry.
   13. Facade atlas cell pixels — all non-transparent pixel content falls within the [8, 504] texel range on both U and V axes per 512×512 cell (496×496 usable zone; 8-texel border on each edge). Validate by reading pixel alpha values in the border zone for each cell in the 2048×2048 building atlas.
   Note: Check #14 is the music JSON sidecar validation (`validate_assets.py` checks all `music_*.ogg` files have co-located `.json` sidecars matching `tools/music_sidecar_schema.json`) — defined in `architecture/audio-architecture/v1-audio-asset-manifest.md` and implemented in Phase 5.
-  15. `.meta` sidecar file presence — every `.b3d` building or vehicle file must have a corresponding `<asset_name>.meta` sidecar file. Missing sidecar: validation error. This check must be present in the Phase 9 `validate_assets.py` extension and active from Phase 9 onward.
+  15. `.meta` sidecar file presence — every `.b3d` building or vehicle file must have a corresponding `<asset_name>.meta` sidecar file. Missing sidecar: validation error. This check is a stub in Phase 5 (`# TODO Phase 9` comment); replaced with full implementation in Phase 9.
+  16. `music_*.ogg` must be stereo (channels == 2), 44100 Hz; `ambient_*.ogg` must be stereo, 44100 Hz. Hard error on mismatch. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
+  17. `sfx_vehicle_engine_*.ogg` must have duration ≥ 6.0 s, mono (channels == 1), 44100 Hz. Hard error if duration < 6.0 s. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
+  18. `sfx_zone_*.ogg` must have duration ≤ 18.0 s, mono, 44100 Hz. Hard error if duration > 18 s. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
+  19. `stinger_*.wav` must be mono WAV PCM (1 channel, uncompressed). Hard error on stereo or compressed WAV. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
+  20. Road LOD2 color validation — read `RenderConstants::road_lod2_color` from `src/rendering/render_constants.h`; decode `road_asphalt_tileable.dds` (DXT5) and compute the linear-space average RGB; verify the constant matches the computed average within a per-channel tolerance of ±3/255. Fail build on mismatch. Added in Phase 9 alongside the road tile LOD2 deliverable.
 
-  16. Road LOD2 color validation — read `RenderConstants::road_lod2_color` from `src/rendering/render_constants.h`; decode `road_asphalt_tileable.dds` (DXT5) and compute the linear-space average RGB; verify the constant matches the computed average within a per-channel tolerance of ±3/255. Fail build on mismatch. Added in Phase 9 alongside the road tile LOD2 deliverable.
-
-  **Phase assignment**: Check #15 and Check #16 are Phase 9 additions to `validate_assets.py`. Checks #1–#13 are the Phase 5 implementation scope. Phase 5 implementers should implement exactly 13 checks (checks #1 through #13 from this list). Check #14 (music JSON sidecar) is also a Phase 5 check — it is defined in `architecture/audio-architecture/v1-audio-asset-manifest.md`. Check #15 is reserved for Phase 9 when building asset metadata support is fully in place. Check #16 is added in Phase 9 when the road tile LOD2 deliverable is complete.
+  **Phase assignment**: Checks #1–#13 are the Phase 5 implementation scope. Check #14 (music JSON sidecar) is also a Phase 5 check — it is defined in `architecture/audio-architecture/v1-audio-asset-manifest.md`. Checks #15–#19 are Phase 5 additions (Check #15: .meta sidecar stub; Checks #16–#19: audio format/duration checks). Check #20 (road LOD2 color validation) is a Phase 9 addition added when the road tile LOD2 deliverable is complete. Phase 5 implementers should implement checks #1–#19; Check #20 is reserved for Phase 9.
 
   **Phase 5 stub requirement for check #15**: The Phase 5 implementation of `validate_assets.py` MUST include check #15 as a stub — present in the script's check list but not executed. The stub must contain a `# TODO Phase 9` comment that names the check and explains the deferral, for example:
 
@@ -235,7 +267,7 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
   pass
   ```
 
-  The stub must be present (not omitted) so that Phase 9 implementers can locate the check without searching the spec, and so CI check-count assertions (if any) can account for all 15 checks by name. **Check #15 stub is a Phase 5 exit criterion.**
+  The stub must be present (not omitted) so that Phase 9 implementers can locate the check without searching the spec, and so CI check-count assertions (if any) can account for all 20 checks by name. **Check #15 stub is a Phase 5 exit criterion.**
 
   **Phase 9 entry prerequisite — check #15**: Before Phase 9 asset authoring begins, `validate_assets.py` must have the check #15 stub replaced with a full implementation that reads `<asset_name>.meta` for every `.b3d` file found in the asset directories and emits a validation error for any missing sidecar. This prerequisite must be verified during the Phase 9 kick-off review before UV authoring or asset metadata authoring begins.
 

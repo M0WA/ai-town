@@ -6,7 +6,7 @@ ENV TZ="$TZ"
 ARG CLAUDE_CODE_VERSION=latest
 
 # vcpkg baseline — must match builtin-baseline in vcpkg.json
-ARG VCPKG_COMMIT=ce35b1a53aac26d7fcdb8ee1ef7a8e4eea02d27b
+ARG VCPKG_COMMIT=b2f068faf45a3f04145bec0f52a66526ad590227
 
 # Create node user (uid/gid 1000) to match the node:20 image convention
 RUN groupadd --gid 1000 node \
@@ -51,6 +51,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   automake \
   libtool \
   build-essential \
+  ccache \
   ninja-build \
   pkg-config \
   openssh-client \
@@ -66,10 +67,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   gcc-13 \
   g++-13 \
   xauth \
+  libnvtt-bin \
+  python3-pip \
+  ffmpeg \
+  sox \
+  vorbis-tools \
+  mediainfo \
   && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
      --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
   && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-13 100 \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages via pip
+RUN pip3 install --break-system-packages mutagen
 
 # Bootstrap vcpkg at the pinned baseline commit (matches vcpkg.json builtin-baseline).
 # Packages are NOT pre-installed here — vcpkg manifest mode runs on first cmake configure.
@@ -112,6 +122,17 @@ RUN ARCH=$(dpkg --print-architecture) && \
   wget "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
+
+# AMD Compressonator CLI (amd64 only — no GPU required for CPU-based DXT compression)
+ARG COMPRESSONATOR_VERSION=4.5.52
+RUN ARCH=$(dpkg --print-architecture) && \
+  if [ "$ARCH" = "amd64" ]; then \
+    wget -q "https://github.com/GPUOpen-Tools/compressonator/releases/download/V${COMPRESSONATOR_VERSION}/compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
+    dpkg -i "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
+    rm "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb"; \
+  else \
+    echo "Skipping compressonatorcli: only amd64 binaries available (arch=$ARCH)"; \
+  fi
 
 # Install CMake 3.31.10 (apt version in Debian Trixie is too old for vcpkg)
 ARG CMAKE_VERSION=3.31.10

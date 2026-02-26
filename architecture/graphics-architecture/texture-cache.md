@@ -131,6 +131,33 @@ The `GL_TEXTURE_MAX_LEVEL` parameter controls how many mip levels the GPU may sa
 
   **`getSplatMapGLuint(const std::string& path) const`**: returns the raw `GLuint` for a loaded splat map texture, for binding to a GLSL `sampler2D` uniform in the terrain shader. Returns `0` if the path is not loaded. Terrain rendering must call this to retrieve the splat map handle each frame before issuing draw calls. This is the only external accessor for the splat map pool — all other splat map management (load, release, eviction) is internal to `TextureCache`.
 
+  **PNG Decoder for Splat Maps**
+
+  `TextureCache::loadSplatMap(const std::string& path)` loads the splat PNG using
+  **Irrlicht's `IVideoDriver::createImageFromFile()`** (NOT `IVideoDriver::getTexture()`):
+
+  ```cpp
+  irr::video::IImage* img = m_driver->createImageFromFile(path.c_str());
+  // img->lock() returns RGBA pixels; Irrlicht's PNG loader does NOT premultiply alpha.
+  // Straight alpha is guaranteed — no premultiplied-alpha correction needed.
+  const void* pixels = img->lock();
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+  img->unlock();
+  img->drop();
+  ```
+
+  **Why `createImageFromFile()` not `getTexture()`**: `getTexture()` uploads to a driver-managed
+  `ITexture*` in the linear texture pool; we need raw pixel access and a raw `GLuint` handle.
+  `createImageFromFile()` returns a CPU-side `IImage*` with pixel access via `lock()`/`unlock()`.
+
+  **Alpha premultiplication**: Irrlicht's libpng-based PNG loader returns **straight alpha**
+  (not premultiplied). The splat map RGBA channels are blend weights in [0.0, 1.0];
+  premultiplied alpha would corrupt the weights. No correction step is required.
+  Document this as a verified spike result: `createImageFromFile()` → straight alpha confirmed.
+
+  **EDT_NULL guard**: `loadSplatMap()` must check `if (m_driverType == EDT_NULL) return 0;`
+  before calling any GL functions. The EDT_NULL guard is required for headless CI.
+
   **`_splat` is NOT a DDS suffix — suffix dispatch clarification**: In the `GL_TEXTURE_MAX_LEVEL` dispatch table, `_splat` appears as a logical tag identifying the texture category. It is NOT a file suffix used by the suffix dispatch table to select the sRGB raw-GL upload path. Splat maps are RGBA PNG files (`terrain_blend.png`, not `terrain_blend_splat.dds`) and are loaded via `loadSplatMap(path)` — which calls `glTexImage2D(GL_RGBA8)` — NOT via `loadSRGB()` or `glCompressedTexImage2D`. Linear color space is correct for splat maps (they encode blend weights, not perceptual color). The `_splat` tag is an internal documentation convention; there is no runtime code that dispatches on a `_splat` filename suffix. Any code that routes a `_splat`-suffixed path through `loadSRGB()` or the `glCompressedTexImage2D` path is a bug.
 
   **CRITICAL constraint — `evictUnreferenced()` must NOT be called from within `OnSetConstants()`**: If eviction fires while a draw call is in progress (inside the shader callback), `glDeleteTextures` would delete a texture that may still be referenced by the current draw command's parameter snapshot. `evictUnreferenced()` is called from `SceneEntityManager::destroy()` during the game logic update phase — strictly between `beginScene()`/`endScene()` boundaries but NOT within any `drawAll()` call. Callers must not invoke `evictUnreferenced()` from inside shader callback methods. Without calling `releaseLinear()` in Step 1, the ref_count is never decremented and `evictUnreferenced()` in Step 3 is always a no-op, causing texture memory to leak.

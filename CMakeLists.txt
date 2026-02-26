@@ -122,6 +122,9 @@ add_library(aitown_render STATIC
     src/rendering/RenderSystem.cpp
     src/rendering/IrrlichtRenderer.cpp
     src/rendering/IrrlichtUIBackend.cpp
+    src/rendering/TextureCache.cpp
+    src/rendering/SceneEntityManager.cpp
+    src/rendering/TerrainShaderCallback.cpp
 )
 target_include_directories(aitown_render
     PRIVATE   src/rendering/       # RenderSystem/IrrlichtRenderer internal headers
@@ -229,15 +232,35 @@ target_include_directories(aitown_ui
 target_link_libraries(aitown_ui PRIVATE Irrlicht)
 
 # ----------------------------------------------------------------------------
-# aitown_terrain — Terrain generator (Phase 3 stub — INTERFACE)
-# INTERFACE library: no source files to compile; all headers propagated to consumers.
-# Phase 5 promotes this to STATIC and adds TerrainGenerator.cpp.
+# aitown_terrain — Terrain chunk and system (Phase 5: promoted from INTERFACE to STATIC)
+# Phase 3: was an INTERFACE library (headers only).
+# Phase 5: promoted to STATIC; TerrainChunk.cpp and TerrainSystem.cpp are compiled in.
+# SceneEntityManager lives in aitown_render (NOT here) to avoid a circular dep:
+#   aitown_terrain -> aitown_render -> Irrlicht (one direction only)
+#   aitown_render must NEVER depend on aitown_terrain.
+# target_include_directories changed from INTERFACE to PUBLIC to maintain transitive
+# include visibility for consumers (terrain_tests, integration_tests, opengl_tests).
 # ----------------------------------------------------------------------------
-add_library(aitown_terrain INTERFACE)
-target_include_directories(aitown_terrain
-    INTERFACE src/terrain/         # ITerrainRNG.h, terrain_chunk.h, terrain_generator.h
-    INTERFACE src/interfaces/      # shared interfaces propagated to consumers
+add_library(aitown_terrain STATIC)
+target_sources(aitown_terrain PRIVATE
+    src/terrain/TerrainChunk.cpp
+    src/terrain/TerrainSystem.cpp
 )
+target_include_directories(aitown_terrain
+    PUBLIC  src/terrain/           # ITerrainRNG.h, TerrainChunk.h, TerrainSystem.h
+    PUBLIC  src/interfaces/        # shared interfaces propagated to consumers (IClock, IRenderer)
+)
+# aitown_terrain -> aitown_render: TerrainSystem holds IRenderer*, which requires
+# src/interfaces/ (already PUBLIC above) plus the rendered-side include paths.
+# Link direction is aitown_terrain -> aitown_render ONLY — never the reverse.
+#
+# GLEW::GLEW and Irrlicht are PRIVATE here: TerrainChunk.cpp builds SMesh directly
+# (Phase 5 promotion from INTERFACE to STATIC). aitown_render links them PRIVATE,
+# so they are NOT propagated to aitown_terrain via the PUBLIC aitown_render link.
+# We add them PRIVATE here so TerrainChunk.cpp can include <GL/glew.h> and <irrlicht.h>.
+# PRIVATE scope: headers must NOT re-propagate to terrain_tests (that target links them directly).
+target_link_libraries(aitown_terrain PUBLIC aitown_render)
+target_link_libraries(aitown_terrain PRIVATE GLEW::GLEW Irrlicht)
 
 # ============================================================================
 # MAIN EXECUTABLE
@@ -335,23 +358,49 @@ aitown_add_tests(simulation_tests LABEL "unit")
 # ----------------------------------------------------------------------------
 add_executable(terrain_tests
     tests/terrain/terrain_smoke_test.cpp
-    tests/terrain/terrain_stub.cpp   # Phase 3: compile-only stub for all terrain headers
+    tests/terrain/terrain_stub.cpp        # Phase 3: compile-only stub for all terrain headers
+    tests/terrain/terrain_chunk_test.cpp  # Phase 5: TerrainChunk vertex count + bounding box tests
+    tests/terrain/terrain_system_test.cpp # Phase 5: TerrainSystem rebuild deque + hysteresis tests
+    tests/terrain/texture_cache_test.cpp  # Phase 5: TextureCache unit tests (EDT_NULL guard + ref counts)
 )
+# aitown_terrain is now STATIC (Phase 5 promotion) and transitively links aitown_render
+# via PUBLIC scope.  aitown_render links Irrlicht and GLEW::GLEW PRIVATE — so terrain_tests
+# must link them directly to access Irrlicht and GLEW headers (required by TextureCache.h).
+# Irrlicht transitive deps (Linux only) — same rationale as integration_tests and opengl_tests:
+# the adrido/irrlicht-vcpkg port does NOT export INTERFACE_LINK_LIBRARIES for system libs.
 target_link_libraries(terrain_tests PRIVATE
     aitown_terrain
+    Irrlicht
+    GLEW::GLEW
     GTest::gtest_main
     GTest::gmock
     rapidcheck
     rapidcheck_gtest
 )
-# tests/simulation/ — for ManualClock (if timing tests added in Phase 2+)
-# tests/terrain/   — for MockTerrainRNG and terrain_stub.cpp project-root includes
-# src/terrain/     — for ITerrainRNG.h (included by mock_terrain_rng.h)
-# ${CMAKE_SOURCE_DIR} — for project-root-relative includes
+if(UNIX AND NOT APPLE)
+    target_link_libraries(terrain_tests PRIVATE
+        JPEG::JPEG
+        PNG::PNG
+        ZLIB::ZLIB
+        BZip2::BZip2
+    )
+    if(XXFV86VM_LIB)
+        target_link_libraries(terrain_tests PRIVATE ${XXFV86VM_LIB})
+    endif()
+endif()
+# tests/simulation/ — ManualClock (manual_clock.h) and MockRenderer (mock_renderer.h)
+# tests/terrain/   — MockTerrainRNG (mock_terrain_rng.h) and terrain_stub.cpp includes
+# src/terrain/     — ITerrainRNG.h (included by mock_terrain_rng.h)
+# src/rendering/   — TextureCache.h (referenced by texture_cache_test.cpp)
+# src/interfaces/  — IClock.h, IRenderer.h (propagated via aitown_terrain PUBLIC but
+#                    listed explicitly as belt-and-suspenders for header resolution)
+# ${CMAKE_SOURCE_DIR} — project-root-relative includes (e.g. src/terrain/TerrainChunk.h)
 target_include_directories(terrain_tests PRIVATE
     tests/simulation/
     tests/terrain/
     src/terrain/
+    src/rendering/
+    src/interfaces/
     ${CMAKE_SOURCE_DIR}
 )
 aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
@@ -428,15 +477,21 @@ add_executable(integration_tests
     tests/integration/integration_smoke_test.cpp
     tests/integration/irrlicht_ui_backend_compile_test.cpp  # Phase 1: non-abstract compile check
     tests/integration/irrlicht_ui_backend_test.cpp          # Phase 3: EDT_NULL runtime handle test
+    tests/integration/texture_cache_integration_test.cpp    # Phase 5: TextureCache + SceneEntityManager EDT_NULL tests
 )
 # aitown_render and aitown_ui MUST be present: IrrlichtUIBackend.h depends on Irrlicht.
 # Irrlicht MUST be linked directly: IrrlichtUIBackend.h includes <irrlicht.h> at compile time;
 # aitown_render links Irrlicht PRIVATE so its include path does NOT propagate to consumers.
+# aitown_terrain: Phase 5 adds texture_cache_integration_test.cpp which tests TextureCache
+# and SceneEntityManager; both live in aitown_render/aitown_terrain.
+# GLEW::GLEW: TextureCache.h includes <GL/glew.h> at the top.
 # rapidcheck and rapidcheck_gtest always linked (proactive policy — architecture/testing/framework.md).
 target_link_libraries(integration_tests PRIVATE
     aitown_render
     aitown_ui
+    aitown_terrain
     Irrlicht
+    GLEW::GLEW
     GTest::gtest_main
     GTest::gmock
     rapidcheck
@@ -458,12 +513,14 @@ if(UNIX AND NOT APPLE)
     endif()
 endif()
 # src/rendering/ MUST be present: IrrlichtUIBackend.h lives in src/rendering/.
+# src/terrain/   Phase 5: TextureCache integration tests include TerrainChunk/TerrainSystem headers.
 target_include_directories(integration_tests PRIVATE
     tests/simulation/
     tests/ui/
     src/interfaces/
     src/ui/
     src/rendering/
+    src/terrain/
     ${CMAKE_SOURCE_DIR}
 )
 aitown_add_tests(integration_tests LABEL "integration")

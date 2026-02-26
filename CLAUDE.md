@@ -102,6 +102,7 @@ Do not suggest alternative engines, languages, or platforms.
 - Follow modern C++ best practices (C++11 or later)
 - Object-oriented design principles
 - Clear separation of concerns (rendering, logic, audio)
+- **C++ class file naming**: C++ class implementation files (`.cpp`) and their paired class header files (`.h`) MUST use **CamelCase** (e.g., `TextureCache.cpp` / `TextureCache.h`, `SceneEntityManager.cpp` / `SceneEntityManager.h`, `TerrainChunk.cpp` / `TerrainChunk.h`). Non-class C-style headers that contain only constants, enums, or POD structs (e.g., `simulation_constants.h`, `terrain_types.h`, `shader_constants.h`) MAY use `snake_case`.
 
 ### Dependencies
 

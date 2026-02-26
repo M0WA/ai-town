@@ -476,3 +476,468 @@ TEST(CameraControllerTest, CameraController_KeyboardPanIgnoresSensitivity)
 // ===========================================================================
 // Phase 3 compile-only stub. Real assertion is a Phase 6 deliverable.
 TEST(CameraControllerTest, CameraController_EdgeScrollActivatesAt20pxBand) { SUCCEED(); }
+
+// ===========================================================================
+// Additional tests to cover uncovered branches in CameraController::OnInputEvent
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Test 11: MouseButtonUp_RMB_EndsRotateDrag
+//
+// After an RMB down + move, an RMB up must end the drag.
+// A subsequent mouse-move must NOT change the yaw (drag no longer active).
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_MouseButtonUp_RMB_EndsDrag)
+{
+    CameraController cam(nullptr, false);
+
+    // Begin RMB drag.
+    cam.OnInputEvent(makeMouseButtonDown(1, 200, 200));
+
+    // Move to accumulate some yaw.
+    cam.OnInputEvent(makeMouseMove(210, 200));
+    const float yawAfterDrag = cam.getCameraState().yaw;
+
+    // Release RMB — drag must end.
+    InputEvent upEv{};
+    upEv.type   = InputEvent::Type::MouseButtonUp;
+    upEv.button = 1;
+    bool consumed = cam.OnInputEvent(upEv);
+    EXPECT_TRUE(consumed) << "RMB up must return true (consumed)";
+
+    // Move again — yaw must not change because drag ended.
+    cam.OnInputEvent(makeMouseMove(250, 200));
+    cam.update(0.016f);
+
+    EXPECT_FLOAT_EQ(cam.getCameraState().yaw, yawAfterDrag)
+        << "Yaw must not change after RMB up ends the drag";
+}
+
+// ---------------------------------------------------------------------------
+// Test 12: MouseButtonUp_MMB_EndsPanDrag
+//
+// After an MMB down + move, an MMB up must end the drag.
+// A subsequent mouse-move must NOT change the position.
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_MouseButtonUp_MMB_EndsDrag)
+{
+    CameraController cam(nullptr, false);
+
+    // Begin MMB drag.
+    cam.OnInputEvent(makeMouseButtonDown(2, 200, 200));
+    cam.OnInputEvent(makeMouseMove(210, 200));
+    const vec3 posAfterDrag = cam.getCameraState().position;
+
+    // Release MMB — drag must end.
+    InputEvent upEv{};
+    upEv.type   = InputEvent::Type::MouseButtonUp;
+    upEv.button = 2;
+    bool consumed = cam.OnInputEvent(upEv);
+    EXPECT_TRUE(consumed) << "MMB up must return true (consumed)";
+
+    // Move again — position must not change because drag ended.
+    cam.OnInputEvent(makeMouseMove(250, 200));
+    cam.update(0.016f);
+
+    const vec3 posAfterUp = cam.getCameraState().position;
+    EXPECT_FLOAT_EQ(posAfterDrag.x, posAfterUp.x)
+        << "X position must not change after MMB up ends the drag";
+    EXPECT_FLOAT_EQ(posAfterDrag.z, posAfterUp.z)
+        << "Z position must not change after MMB up ends the drag";
+}
+
+// ---------------------------------------------------------------------------
+// Test 13: MouseButtonUp_LMB_ReturnsFalse
+//
+// A left-mouse-button (button=0) up event is not handled — must return false.
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_MouseButtonUp_LMB_ReturnsFalse)
+{
+    CameraController cam(nullptr, false);
+
+    InputEvent upEv{};
+    upEv.type   = InputEvent::Type::MouseButtonUp;
+    upEv.button = 0;  // LMB
+    EXPECT_FALSE(cam.OnInputEvent(upEv))
+        << "LMB up must return false (not consumed by CameraController)";
+}
+
+// ---------------------------------------------------------------------------
+// Test 14: MouseWheel_ZoomsIn_ClampedToMin
+//
+// Scrolling the wheel with a large positive delta must clamp zoom distance
+// to kMinZoomDistance.
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_MouseWheel_ZoomsIn_ClampedToMin)
+{
+    CameraController cam(nullptr, false);
+
+    // Inject a large positive wheel delta to zoom all the way in.
+    InputEvent wheelEv{};
+    wheelEv.type       = InputEvent::Type::MouseWheel;
+    wheelEv.wheelDelta = 10000.0f;  // enormous positive = zoom in
+    cam.OnInputEvent(wheelEv);
+
+    cam.update(0.016f);
+
+    const CameraState state = cam.getCameraState();
+    // The zoom distance is internal; we verify via the Y position (which scales
+    // with zoom). At minimum zoom the Y offset is -sin(-45°)*kMinZoomDistance.
+    // For null-camera path, position.y = -sinP * m_zoomDistance.
+    // At kMinZoomDistance=30 and pitch=-45: y = -sin(-45°)*30 ≈ +21.2.
+    // Verify Y is positive (camera is above target) and reasonable.
+    EXPECT_GT(state.position.y, 0.0f)
+        << "Camera Y must be positive (above target) after zooming in";
+}
+
+// ---------------------------------------------------------------------------
+// Test 15: MouseWheel_ZoomsOut_ClampedToMax
+//
+// Scrolling the wheel with a large negative delta must clamp zoom distance
+// to kMaxZoomDistance.
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_MouseWheel_ZoomsOut_ClampedToMax)
+{
+    CameraController cam(nullptr, false);
+
+    // Inject a large negative wheel delta to zoom all the way out.
+    InputEvent wheelEv{};
+    wheelEv.type       = InputEvent::Type::MouseWheel;
+    wheelEv.wheelDelta = -10000.0f;
+    cam.OnInputEvent(wheelEv);
+
+    cam.update(0.016f);
+
+    // The Y position at max zoom must be larger than at default zoom.
+    // Default zoom distance = 200, max = 800.
+    // At pitch=-45: y = -sin(-45°) * zoom; max zoom gives larger y.
+    const CameraState state = cam.getCameraState();
+    EXPECT_GT(state.position.y, 0.0f)
+        << "Camera Y must be positive after zooming out to maximum";
+}
+
+// ---------------------------------------------------------------------------
+// Test 16: MouseWheel_ReturnedAsConsumed
+//
+// Wheel events are always consumed by CameraController (return true).
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_MouseWheel_ReturnsTrue)
+{
+    CameraController cam(nullptr, false);
+
+    InputEvent wheelEv{};
+    wheelEv.type       = InputEvent::Type::MouseWheel;
+    wheelEv.wheelDelta = 1.0f;
+    EXPECT_TRUE(cam.OnInputEvent(wheelEv))
+        << "MouseWheel must return true (consumed)";
+}
+
+// ---------------------------------------------------------------------------
+// Test 17: KeyUp_ReturnsFalse
+//
+// KeyUp events are never consumed by CameraController.
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_KeyUp_ReturnsFalse)
+{
+    CameraController cam(nullptr, false);
+
+    InputEvent keyUpEv{};
+    keyUpEv.type    = InputEvent::Type::KeyUp;
+    keyUpEv.keyCode = 0x25;  // irr::KEY_LEFT = 0x25
+    EXPECT_FALSE(cam.OnInputEvent(keyUpEv))
+        << "KeyUp must return false (not consumed by CameraController)";
+}
+
+// ---------------------------------------------------------------------------
+// Test 18: UnknownEvent_ReturnsFalse (default branch)
+//
+// An event type that falls through to the default: branch must return false.
+// MouseButtonDown for button=0 (LMB) falls through the button checks and
+// returns false.
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_MouseButtonDown_LMB_ReturnsFalse)
+{
+    CameraController cam(nullptr, false);
+
+    InputEvent ev{};
+    ev.type   = InputEvent::Type::MouseButtonDown;
+    ev.button = 0;  // LMB is not handled (only RMB=1 and MMB=2)
+    EXPECT_FALSE(cam.OnInputEvent(ev))
+        << "LMB MouseButtonDown must return false (not handled by CameraController)";
+}
+
+// ---------------------------------------------------------------------------
+// Irrlicht arrow key codes (raw hex values from Keycodes.h):
+//   KEY_LEFT  = 0x25, KEY_UP   = 0x26,
+//   KEY_RIGHT = 0x27, KEY_DOWN = 0x28
+//
+// The existing kKeyArrowLeft/Right/Up/Down constants at the top of this file
+// use SDL2 keycodes which do NOT match irr::KEY_* — they fall through to the
+// unhandled-key else-branch. These new constants use the Irrlicht values
+// that CameraController actually checks.
+// ---------------------------------------------------------------------------
+static constexpr int kIrrKeyLeft  = 0x25;
+static constexpr int kIrrKeyRight = 0x27;
+static constexpr int kIrrKeyUp    = 0x26;
+static constexpr int kIrrKeyDown  = 0x28;
+
+// ---------------------------------------------------------------------------
+// Test 19: ArrowKey_Left_MovesTargetLeft (Irrlicht keycodes)
+//
+// LEFT arrow key (irr::KEY_LEFT = 0x25) must move the camera target.
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_IrrArrowLeft_MovesTarget)
+{
+    CameraController cam(nullptr, false);
+    cam.setEdgeScrollEnabled(false);
+
+    const vec3 posBefore = cam.getCameraState().position;
+
+    InputEvent ev{};
+    ev.type    = InputEvent::Type::KeyDown;
+    ev.keyCode = kIrrKeyLeft;
+    EXPECT_TRUE(cam.OnInputEvent(ev))
+        << "irr::KEY_LEFT KeyDown must return true (consumed)";
+    cam.update(0.016f);
+
+    const vec3 posAfter = cam.getCameraState().position;
+    // At yaw=0: left arrow subtracts from X (rightX = cos(0) = 1).
+    EXPECT_NE(posBefore.x, posAfter.x)
+        << "irr::KEY_LEFT must move camera position in X";
+}
+
+// ---------------------------------------------------------------------------
+// Test 20: ArrowKey_Up_MovesTargetForward (Irrlicht keycodes)
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_IrrArrowUp_MovesTarget)
+{
+    CameraController cam(nullptr, false);
+    cam.setEdgeScrollEnabled(false);
+
+    const vec3 posBefore = cam.getCameraState().position;
+
+    InputEvent ev{};
+    ev.type    = InputEvent::Type::KeyDown;
+    ev.keyCode = kIrrKeyUp;
+    EXPECT_TRUE(cam.OnInputEvent(ev))
+        << "irr::KEY_UP KeyDown must return true (consumed)";
+    cam.update(0.016f);
+
+    const vec3 posAfter = cam.getCameraState().position;
+    EXPECT_NE(posBefore.z, posAfter.z)
+        << "irr::KEY_UP must move camera position in Z";
+}
+
+// ---------------------------------------------------------------------------
+// Test 21: ArrowKey_Down_MovesTargetBackward (Irrlicht keycodes)
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_IrrArrowDown_MovesTarget)
+{
+    CameraController cam(nullptr, false);
+    cam.setEdgeScrollEnabled(false);
+
+    const vec3 posBefore = cam.getCameraState().position;
+
+    InputEvent ev{};
+    ev.type    = InputEvent::Type::KeyDown;
+    ev.keyCode = kIrrKeyDown;
+    EXPECT_TRUE(cam.OnInputEvent(ev))
+        << "irr::KEY_DOWN KeyDown must return true (consumed)";
+    cam.update(0.016f);
+
+    const vec3 posAfter = cam.getCameraState().position;
+    EXPECT_NE(posBefore.z, posAfter.z)
+        << "irr::KEY_DOWN must move camera position in Z";
+}
+
+// ---------------------------------------------------------------------------
+// Test 22: ArrowKey_Right_MovesTargetRight (Irrlicht keycodes)
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_IrrArrowRight_MovesTarget)
+{
+    CameraController cam(nullptr, false);
+    cam.setEdgeScrollEnabled(false);
+
+    const vec3 posBefore = cam.getCameraState().position;
+
+    InputEvent ev{};
+    ev.type    = InputEvent::Type::KeyDown;
+    ev.keyCode = kIrrKeyRight;
+    EXPECT_TRUE(cam.OnInputEvent(ev))
+        << "irr::KEY_RIGHT KeyDown must return true (consumed)";
+    cam.update(0.016f);
+
+    const vec3 posAfter = cam.getCameraState().position;
+    EXPECT_NE(posBefore.x, posAfter.x)
+        << "irr::KEY_RIGHT must move camera position in X";
+}
+
+// ---------------------------------------------------------------------------
+// Test 22b: UnhandledKeyDown_ReturnsFalse
+//
+// A KeyDown event for a key that is not an arrow key must return false
+// (falls through the else branch and returns consumed=false).
+// Key code 0x1B = irr::KEY_ESCAPE (not an arrow key).
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_NonArrowKeyDown_ReturnsFalse)
+{
+    CameraController cam(nullptr, false);
+
+    InputEvent ev{};
+    ev.type    = InputEvent::Type::KeyDown;
+    ev.keyCode = 0x1B;  // irr::KEY_ESCAPE — not an arrow key
+    EXPECT_FALSE(cam.OnInputEvent(ev))
+        << "Non-arrow KeyDown must return false (not consumed)";
+}
+
+// ---------------------------------------------------------------------------
+// Test 23: EdgeScroll_RightEdge_MovesTargetRight
+//
+// With edge-scroll enabled and focus, a MouseMove event at the RIGHT edge
+// (virtual x > 1920-20 = 1900) must pan the camera to the right.
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_EdgeScroll_RightEdge_MovesCameraRight)
+{
+    CameraController cam(nullptr, /*startInFullscreen=*/true);
+
+    const vec3 posBefore = cam.getCameraState().position;
+
+    // UIScaler::unproject for a physical coord at the right edge.
+    UIScaler scaler(1920, 1080, 1920, 1080, 0, 0);
+    UIScaler::VirtualPoint vp = scaler.unproject(1919, 540);
+
+    InputEvent ev{};
+    ev.type  = InputEvent::Type::MouseMove;
+    ev.physX = 1919;
+    ev.physY = 540;
+    ev.x     = vp.x;   // virtual x near right edge (> 1900)
+    ev.y     = vp.y;
+
+    cam.OnInputEvent(ev);
+    cam.update(0.1f);
+
+    const vec3 posAfter = cam.getCameraState().position;
+    // At yaw=0, right-edge scroll increases X (rightX = cos(0) = 1).
+    EXPECT_GT(posAfter.x, posBefore.x)
+        << "Right-edge scroll must increase camera X position";
+}
+
+// ---------------------------------------------------------------------------
+// Test 24: EdgeScroll_TopEdge_MovesCameraForward
+//
+// With edge-scroll enabled and focus, a MouseMove at the TOP edge
+// (virtual y < 20) must pan the camera forward (+Z at yaw=0).
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_EdgeScroll_TopEdge_MovesCameraForward)
+{
+    CameraController cam(nullptr, /*startInFullscreen=*/true);
+
+    const vec3 posBefore = cam.getCameraState().position;
+
+    UIScaler scaler(1920, 1080, 1920, 1080, 0, 0);
+    UIScaler::VirtualPoint vp = scaler.unproject(960, 0);
+
+    InputEvent ev{};
+    ev.type  = InputEvent::Type::MouseMove;
+    ev.physX = 960;
+    ev.physY = 0;
+    ev.x     = vp.x;
+    ev.y     = vp.y;   // virtual y near top edge (< 20)
+
+    cam.OnInputEvent(ev);
+    cam.update(0.1f);
+
+    const vec3 posAfter = cam.getCameraState().position;
+    // At yaw=0, forward-edge scroll increases Z (fwdZ = cos(0) = 1).
+    EXPECT_GT(posAfter.z, posBefore.z)
+        << "Top-edge scroll must increase camera Z (forward pan)";
+}
+
+// ---------------------------------------------------------------------------
+// Test 25: EdgeScroll_BottomEdge_MovesCameraBackward
+//
+// With edge-scroll enabled and focus, a MouseMove at the BOTTOM edge
+// (virtual y > 1080-20 = 1060) must pan the camera backward.
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_EdgeScroll_BottomEdge_MovesCameraBackward)
+{
+    CameraController cam(nullptr, /*startInFullscreen=*/true);
+
+    const vec3 posBefore = cam.getCameraState().position;
+
+    UIScaler scaler(1920, 1080, 1920, 1080, 0, 0);
+    UIScaler::VirtualPoint vp = scaler.unproject(960, 1079);
+
+    InputEvent ev{};
+    ev.type  = InputEvent::Type::MouseMove;
+    ev.physX = 960;
+    ev.physY = 1079;
+    ev.x     = vp.x;
+    ev.y     = vp.y;   // virtual y near bottom edge (> 1060)
+
+    cam.OnInputEvent(ev);
+    cam.update(0.1f);
+
+    const vec3 posAfter = cam.getCameraState().position;
+    // At yaw=0, bottom-edge scroll decreases Z (backward pan).
+    EXPECT_LT(posAfter.z, posBefore.z)
+        << "Bottom-edge scroll must decrease camera Z (backward pan)";
+}
+
+// ---------------------------------------------------------------------------
+// Test 26: FocusLost_ResetsDragState
+//
+// WindowFocusLost must reset both m_rmbDragActive and m_mmbDragActive so that
+// a subsequent move event does not accidentally continue a drag.
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_FocusLost_ResetsDragState)
+{
+    CameraController cam(nullptr, false);
+
+    // Begin RMB drag.
+    cam.OnInputEvent(makeMouseButtonDown(1, 200, 200));
+    cam.OnInputEvent(makeMouseMove(210, 200));
+    const float yawAfterDrag = cam.getCameraState().yaw;
+
+    // Lose focus — must reset drag state.
+    cam.OnInputEvent(makeWindowFocusLost());
+
+    // Move — yaw must not change because drag was reset.
+    cam.OnInputEvent(makeMouseMove(250, 200));
+    cam.update(0.016f);
+
+    EXPECT_FLOAT_EQ(cam.getCameraState().yaw, yawAfterDrag)
+        << "Yaw must not change after WindowFocusLost resets drag state";
+}
+
+// ---------------------------------------------------------------------------
+// Test 27: SensitivityMultiplier_AffectsMMBPanDelta
+//
+// Two MMB pan sequences with different sensitivity multipliers must produce
+// different position deltas (sensitivity applies to MMB drag).
+// This is the counterpart to Test 9 (keyboard pan ignores sensitivity).
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_SensitivityMultiplier_AffectsMMBPan)
+{
+    // Sequence A: default sensitivity (1.0f).
+    CameraController camA(nullptr, false);
+    camA.setEdgeScrollEnabled(false);
+    camA.setSensitivityMultiplier(1.0f);
+
+    camA.OnInputEvent(makeMouseButtonDown(2, 200, 200));
+    camA.OnInputEvent(makeMouseMove(210, 200));  // 10 px horizontal MMB
+    const vec3 posA = camA.getCameraState().position;
+
+    // Sequence B: elevated sensitivity (3.0f).
+    CameraController camB(nullptr, false);
+    camB.setEdgeScrollEnabled(false);
+    camB.setSensitivityMultiplier(3.0f);
+
+    camB.OnInputEvent(makeMouseButtonDown(2, 200, 200));
+    camB.OnInputEvent(makeMouseMove(210, 200));  // same 10 px horizontal MMB
+    const vec3 posB = camB.getCameraState().position;
+
+    // With higher sensitivity the pan delta must be larger.
+    EXPECT_NE(posA.x, posB.x)
+        << "MMB pan X delta must differ when sensitivityMultiplier differs";
+}

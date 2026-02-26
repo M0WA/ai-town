@@ -42,10 +42,46 @@ genhtml coverage_filtered.info --output-directory coverage_html/
 # PHASED ROLLOUT: No hard coverage gate at Phase 0. lcov --fail-under-percent does
 # not exist in lcov 2.0 (ubuntu-latest ships 2.0; the flag was added in 2.1).
 # At Phase 0 the gate would be 0% anyway (smoke tests give trivial coverage).
-# Use --summary for informational output. Phase 5 adds a real gate.
-# TODO Phase 5: implement 80% gate (bash awk check or upgrade to lcov 2.1+).
+# Use --summary for informational output. Phase 5 replaces this with the awk gate below.
 lcov --summary coverage_filtered.info
 ```
+
+## Phase 5 — Total Line Coverage 80% Gate
+
+The Phase 5 gate measures **total line coverage** across all files remaining in
+`coverage_filtered.info` after the `lcov --remove` exclusions (i.e., `src/simulation/`,
+`src/terrain/`, `src/ui/` — excludes `src/rendering/`, `src/audio/`, `src/platform/`,
+and all test files).
+
+**Why total coverage (not worst-file)**: `src/ui/` contains many panel stub headers
+with no testable lines in Phase 5. Worst-file across all three directories is
+unachievable at 80% at this stage. Total line coverage measures the aggregate health
+of the simulation and terrain code that IS tested in Phase 5.
+
+**CI step in `coverage-linux`** (replaces the Phase 0 `lcov --summary` informational step):
+
+```bash
+# Parse coverage_filtered.info directly — version-agnostic (works with lcov 1.x and 2.x).
+# LH = lines hit total, LF = lines found total across all SF entries.
+total=$(awk '
+  /^LH:/ { lh+=substr($0,4)+0 }
+  /^LF:/ { lf+=substr($0,4)+0 }
+  END { if (lf>0) printf "%.2f", (lh/lf)*100; else print 0 }
+' coverage_filtered.info)
+if [ -z "$total" ]; then
+  echo "PREFLIGHT FAIL: No coverage data found in coverage_filtered.info."; exit 1
+fi
+awk -v pct="$total" 'BEGIN {
+  if (pct+0 < 80.0) {
+    print "FAIL: total line coverage " pct "% < 80% Phase 5 gate"; exit 1
+  } else {
+    print "PASS: total line coverage " pct "% >= 80%"
+  }
+}'
+```
+
+This step replaces the current `lcov --summary coverage_filtered.info` informational step.
+Do NOT use `lcov --fail-under-percent` — it does not exist in lcov 2.0 (ubuntu-latest).
 
 **Mock exclusion patterns**: `'*/mock_*.h'` and `'*/mock_*.cpp'` are required exclusions even though mock files live under `tests/` (which is already excluded). Template instantiations of `StrictMock<MockAudioSystem>` and similar types may produce coverage data attributed to the mock header paths (`tests/*/mock_*.h`) rather than the test `.cpp` file — the mock exclusion patterns ensure these do not contribute to the gate even if the `*/tests/*` glob misses them due to path normalization differences.
 **Manual test double exclusion patterns**: `'*/manual_*.h'` and `'*/manual_*.cpp'` must be added alongside the mock exclusion patterns. `ManualRNG` (`tests/simulation/manual_rng.h`), `ManualClock` (`tests/simulation/manual_clock.h`), and similar hand-written test doubles follow the `manual_` naming convention and must be excluded from the coverage gate for the same reason as mocks — gcov may attribute their template/inline method coverage to the header file path rather than the calling test `.cpp`. Without this exclusion, manual test doubles can appear as partially-uncovered files and incorrectly lower the gate percentage. Both `mock_*` and `manual_*` patterns must appear in every lcov `--remove` invocation: in `coverage.md` (local developer script), in the `coverage-linux` CI job YAML, and in the `CLAUDE.md` coverage command reference.
