@@ -178,3 +178,10 @@ Harden the CI pipeline (GLEW vcpkg, DLL verification, routing verification), del
 
 - **RISK**: `actions/setup-python` SHA may change between Phase 4 authoring and implementation. **Spike**: resolve SHA at implementation time via `gh release view`; do NOT hard-code a value from the plan document.
 - **RISK**: `src/ui/` coverage below 25% after Phase 3 indicates test registration or stub-body errors. **Spike**: run `coverage-linux` locally after Phase 3 before declaring Phase 3 done; check for no-op `draw()` bodies in panel stubs.
+
+### Retroactive Fixes (applied 2026-02-26, Phase 6 cycle)
+
+Two Phase 4 TODO stubs discovered in code during Phase 6 were implemented retroactively:
+
+- **AudioSystem frame-loop wiring** (`sound-dev-opensoftal`): `src/main.cpp` Phase 4 TODO block wired for real — `AudioSystem audioSystem(&wallClock)` instantiated in `main()`; `cameraController.getCameraState()`, `audioSystem.syncListenerToCamera(cameraState)`, and `audioSystem.update(realDeltaSeconds)` now execute at frame-loop steps 4a/4b. All interfaces (`IAudioSystem::syncListenerToCamera`, `IAudioSystem::update`, `CameraController::getCameraState`) and mocks were already correct — only the `main.cpp` call site was stubbed.
+- **HRTF `default.mhr` CI verification hardened** (`cicd-dev-github`): `build-linux` "Verify default.mhr HRTF data" step upgraded from a no-op `echo WARNING` to a hard-fail `find`/`grep -q` check. `build-windows` step 18 `default.mhr` soft-warning hardened to `if (-not (Test-Path ...)) { exit 1 }` (PS 5.1 compatible).

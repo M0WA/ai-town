@@ -144,6 +144,20 @@ public:
     // Named registerChunkAtLOD (not registerChunk) per test API expectations.
     void registerChunkAtLOD(uint64_t chunkId, int currentLOD);
 
+    // registerChunkPosition() — store the world-space origin of a chunk.
+    // Must be called before enqueueRebuild() so that processOneRebuild() can
+    // supply the correct worldOriginX/Z in TerrainChunkRebuildParams.
+    // worldOriginX, worldOriginZ: world position of the chunk's (0,0) vertex corner.
+    void registerChunkPosition(uint64_t chunkId, float worldOriginX, float worldOriginZ);
+
+    // registerChunkHeightmap() — store the LOD0 heightmap for a chunk.
+    // Must be called before enqueueRebuild() so that processOneRebuild() can
+    // downsample it to the requested targetLOD grid size.
+    //
+    // heightmap: must contain exactly (kTerrainLOD0GridSize+1)^2 entries (LOD0 resolution).
+    // processOneRebuild() derives coarser LOD heightmaps by stride-downsampling this buffer.
+    void registerChunkHeightmap(uint64_t chunkId, std::vector<float> heightmap);
+
     // unregisterChunk() — remove a chunk from the active map.
     // Called when a chunk is unloaded (out of camera range).
     void unregisterChunk(uint64_t chunkId);
@@ -181,6 +195,24 @@ private:
     // Used to validate deque entries (discards requests for unloaded chunks).
     // Also used to skip redundant rebuilds (currentLOD == targetLOD).
     std::unordered_map<uint64_t, int> m_activeChunks;
+
+    // Chunk world-space origin positions: chunkId → {worldOriginX, worldOriginZ}.
+    // Populated by registerChunkPosition(). Used in processOneRebuild() to supply
+    // the correct world translation to IRenderer::rebuildTerrainChunk().
+    struct ChunkOrigin { float x{0.0f}; float z{0.0f}; };
+    std::unordered_map<uint64_t, ChunkOrigin> m_chunkWorldOrigins;
+
+    // Per-chunk heightmaps: chunkId → LOD0 heightmap (at full chunk resolution).
+    //
+    // LOD0 heightmap must be registered via registerChunkHeightmap() alongside the chunk's
+    // initial registerChunkAtLOD() call.  processOneRebuild() reads this map to build the
+    // downsampled heightmap for the requested targetLOD.
+    //
+    // The stored heightmap is always at LOD0 resolution — (kTerrainLOD0GridSize+1)^2 entries
+    // — so that all coarser LOD meshes can be derived by stride-downsampling.
+    //
+    // Invariant: every entry in m_activeChunks has a corresponding entry in m_chunkHeightmaps.
+    std::unordered_map<uint64_t, std::vector<float>> m_chunkHeightmaps;
 
     // Counters for test assertions.
     int m_chunksRebuiltLastFrame{0};

@@ -26,6 +26,7 @@
 #include "src/simulation/CitySimulation.h"
 #include "src/simulation/StdSimulationRNG.h"
 #include "src/terrain/TerrainSystem.h"
+#include "src/audio/audio_system.h"
 
 #include <irrlicht.h>
 #include <cstdio>
@@ -123,6 +124,16 @@ int main() {
     double prevTime = wallClock.nowSeconds();
 
     // -------------------------------------------------------------------------
+    // Phase 4: AudioSystem — production stub wired to frame loop.
+    // Injected with wallClock for deterministic timing (crossfade duck timer, etc.).
+    // Phase 7 replaces this stub with the full OpenAL Soft implementation; the
+    // constructor signature (IClock*) and all IAudioSystem method signatures are frozen.
+    // CitySimulation still receives nullptr for audio — Phase 7 wires the real
+    // AudioSystem pointer into CitySimulation when the full implementation lands.
+    // -------------------------------------------------------------------------
+    AudioSystem audioSystem(&wallClock);
+
+    // -------------------------------------------------------------------------
     // Phase 6: Simulation engine.
     // StdSimulationRNG — production mt19937-backed ISimulationRNG.
     // TerrainSystem — ITerrainQuery implementation (provides slope data for earthworks cost).
@@ -198,10 +209,9 @@ int main() {
         //   requires the process-wide context to remain valid; ALC_EXT_thread_local_context
         //   semantics guarantee thread-local context isolation but this MUST be verified at
         //   Phase 7 implementation; cross-reference: architecture/audio-architecture/audio-system.md
-        // TODO Phase 4:
-        //   CameraState cameraState = cameraController.getCameraState();
-        //   audioSystem.syncListenerToCamera(cameraState);
-        //   audioSystem.update(realDeltaSeconds);
+        CameraState cameraState = cameraController.getCameraState();
+        audioSystem.syncListenerToCamera(cameraState);
+        audioSystem.update(realDeltaSeconds);
 
         // Step 5: beginFrame (driver->beginScene).
         renderer.beginFrame();

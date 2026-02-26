@@ -63,6 +63,16 @@ void TerrainSystem::registerChunkAtLOD(uint64_t chunkId, int currentLOD) {
 
 void TerrainSystem::unregisterChunk(uint64_t chunkId) {
     m_activeChunks.erase(chunkId);
+    m_chunkWorldOrigins.erase(chunkId);
+    m_chunkHeightmaps.erase(chunkId);
+}
+
+void TerrainSystem::registerChunkPosition(uint64_t chunkId, float worldOriginX, float worldOriginZ) {
+    m_chunkWorldOrigins[chunkId] = ChunkOrigin{worldOriginX, worldOriginZ};
+}
+
+void TerrainSystem::registerChunkHeightmap(uint64_t chunkId, std::vector<float> heightmap) {
+    m_chunkHeightmaps[chunkId] = std::move(heightmap);
 }
 
 int TerrainSystem::getChunkLOD(uint64_t chunkId) const {
@@ -115,24 +125,109 @@ bool TerrainSystem::processOneRebuild(const ChunkRebuildRequest& req,
     // Mark as processed this frame/flush to prevent duplicate processing.
     processedThisFrame.insert(req.chunkId);
 
-    // Perform the LOD transition.
-    // Phase 5: TerrainSystem holds IRenderer* and does NOT call Irrlicht API directly.
-    // The actual node rebuild (destroy old + create new) is delegated to the render layer.
-    // In the Phase 5 skeleton, we update the LOD tracking only.
+    // -------------------------------------------------------------------------
+    // Steps 1–4: delegate the full node rebuild to IRenderer::rebuildTerrainChunk().
     //
     // Per architecture/graphics-architecture/procedural-terrain.md:
-    //   - FULL NODE REBUILD (not setMesh) — vertex counts differ per LOD level.
-    //   - SceneEntityManager::destroy() on old node BEFORE creating new node.
-    //   - Store chunk IDs, not raw node pointers.
+    //   FULL NODE REBUILD required (vertex counts differ per LOD level) — never setMesh.
+    //   SceneEntityManager::destroy() on old node BEFORE creating new node.
+    //   Chunk IDs stored in m_activeChunks (NOT raw node pointers).
     //
-    // TODO Phase 5 render integration: call IRenderer to:
-    //   1. SceneEntityManager::destroy(oldNode, ...)
-    //   2. Build new SMesh at targetLOD grid size
-    //   3. recalculateBoundingBox on all buffers + mesh
-    //   4. addMeshSceneNode(newMesh) + smesh->drop()
-    //   5. registerChunkAtLOD(chunkId, targetLOD)
+    // TerrainSystem must NOT call Irrlicht API directly — it holds IRenderer* only.
+    // All five steps are encapsulated in IRenderer::rebuildTerrainChunk():
+    //   Step 1: Remove old scene node (eviction sequence from scene-graph-ownership.md).
+    //   Step 2: Build new SMesh* at targetLOD grid size from the chunk's heightmap.
+    //   Step 3: recalculateBoundingBox() on every SMeshBuffer AND the SMesh (MANDATORY).
+    //   Step 4: addMeshSceneNode(smesh) + smesh->drop().
+    //   Step 5: Register new node internally keyed by chunkId.
+    //
+    // If m_renderer is null (EDT_NULL test context without a real renderer), skip the
+    // render call — the LOD tracking update below still runs, keeping the system consistent.
+    // -------------------------------------------------------------------------
+    if (m_renderer) {
+        // Determine target LOD grid size from the spec constants.
+        int targetGridSize = kTerrainLOD0GridSize; // 32 quads per side — LOD0 default
+        if (req.targetLOD == 1) {
+            targetGridSize = kTerrainLOD1GridSize; // 16 quads per side
+        } else if (req.targetLOD >= 2) {
+            targetGridSize = kTerrainLOD2GridSize; // 8 quads per side
+        }
 
-    // Update the active chunks map to reflect the new LOD (if chunk was registered).
+        // Look up the chunk's LOD0 heightmap.
+        auto hmapIt = m_chunkHeightmaps.find(req.chunkId);
+        if (hmapIt != m_chunkHeightmaps.end()) {
+            const std::vector<float>& lod0Hmap = hmapIt->second;
+            const int lod0GridSize  = kTerrainLOD0GridSize;     // 32
+            const int lod0Verts     = lod0GridSize + 1;         // 33 vertices per side
+            const int targetVerts   = targetGridSize + 1;
+
+            // Downsample the LOD0 heightmap to the target LOD resolution by
+            // stride-sampling: for each vertex (x,z) in the target grid, sample
+            // the corresponding LOD0 vertex at stride = lod0GridSize / targetGridSize.
+            //
+            // Example: LOD0=32, LOD1=16 → stride=2; LOD2=8 → stride=4.
+            // Each LOD grid vertex maps exactly to a LOD0 vertex (power-of-2 division).
+            const int stride = (targetGridSize > 0) ? (lod0GridSize / targetGridSize) : 1;
+
+            std::vector<float> downsampledHmap;
+            downsampledHmap.resize(static_cast<size_t>(targetVerts * targetVerts));
+
+            for (int tz = 0; tz < targetVerts; ++tz) {
+                for (int tx = 0; tx < targetVerts; ++tx) {
+                    int srcX = tx * stride;
+                    int srcZ = tz * stride;
+                    // Clamp to LOD0 grid bounds (handles the last vertex at gridSize).
+                    if (srcX > lod0GridSize) srcX = lod0GridSize;
+                    if (srcZ > lod0GridSize) srcZ = lod0GridSize;
+
+                    downsampledHmap[static_cast<size_t>(tz * targetVerts + tx)] =
+                        lod0Hmap[static_cast<size_t>(srcZ * lod0Verts + srcX)];
+                }
+            }
+
+            // Look up the chunk's world-space origin (defaulting to (0,0) if not registered).
+            float worldOriginX = 0.0f;
+            float worldOriginZ = 0.0f;
+            auto originIt = m_chunkWorldOrigins.find(req.chunkId);
+            if (originIt != m_chunkWorldOrigins.end()) {
+                worldOriginX = originIt->second.x;
+                worldOriginZ = originIt->second.z;
+            }
+
+            // The cell size for the rebuilt mesh: the chunk's physical extent divided by
+            // the target grid size. If cellSize is stored in m_cellSize (the map tile size),
+            // a chunk at LOD0 covers (lod0GridSize * m_cellSize) world units. The rebuilt
+            // mesh keeps the same physical footprint regardless of LOD — only vertex density
+            // changes. So cellSize per quad = (lod0GridSize * m_cellSize) / targetGridSize.
+            //
+            // When m_cellSize == 0 (not yet set via generate()), fall back to 1.0f to avoid
+            // division by zero. This is a safe fallback for test contexts.
+            const float chunkWorldSize = (m_cellSize > 0.0f)
+                ? static_cast<float>(lod0GridSize) * m_cellSize
+                : static_cast<float>(lod0GridSize);
+            const float targetCellSize = (targetGridSize > 0)
+                ? chunkWorldSize / static_cast<float>(targetGridSize)
+                : 1.0f;
+
+            TerrainChunkRebuildParams params;
+            params.chunkId      = req.chunkId;
+            params.heightmap    = std::move(downsampledHmap);
+            params.gridSize     = targetGridSize;
+            params.cellSize     = targetCellSize;
+            params.worldOriginX = worldOriginX;
+            params.worldOriginZ = worldOriginZ;
+
+            m_renderer->rebuildTerrainChunk(params);
+        }
+        // If no heightmap is registered (test context or initial enqueue before registration),
+        // skip the render call — LOD tracking update still runs below.
+    }
+
+    // -------------------------------------------------------------------------
+    // Step 5: Update the active chunks map to reflect the new LOD.
+    // This always runs (even when m_renderer is null or heightmap is absent) to keep
+    // the deque deduplication and getChunkLOD() lookups consistent.
+    // -------------------------------------------------------------------------
     if (chunkActive) {
         it->second = req.targetLOD;
     } else {
@@ -140,7 +235,7 @@ bool TerrainSystem::processOneRebuild(const ChunkRebuildRequest& req,
         m_activeChunks[req.chunkId] = req.targetLOD;
     }
 
-    return true; // rebuild was processed (even if no GL work done in Phase 5 skeleton)
+    return true; // rebuild was processed
 }
 
 // ---------------------------------------------------------------------------

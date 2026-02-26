@@ -183,14 +183,18 @@ jobs:
             echo "simulation_tests routing: $count test(s) discovered."
           fi
 
-      # Step 13: Verify default.mhr HRTF data (Phase 0 placeholder — no-op).
-      # Phase 4 replaces this with:
-      #   find "${{ github.workspace }}" -name "default.mhr" | grep -q . || exit 1
-      - name: Verify default.mhr HRTF data (Phase 0 placeholder)
+      # Step 13: Verify default.mhr HRTF data — hard-fail (Phase 4).
+      # Searches the entire workspace (vcpkg install tree) for the HRTF data file.
+      # Without this file, AudioSystem HRTF initialization fails at runtime even
+      # though the binary compiles and links successfully.
+      - name: Verify default.mhr HRTF data
         shell: bash
         run: |
-          # TODO Phase 4: replace with: find "${{ github.workspace }}" -name "default.mhr" | grep -q . || exit 1
-          echo "WARNING: default.mhr verification deferred to Phase 4 (post-build copy rule not yet wired)."
+          if ! find "${{ github.workspace }}" -name "default.mhr" | grep -q .; then
+            echo "ERROR: default.mhr not found — HRTF initialization will fail at runtime"
+            exit 1
+          fi
+          echo "default.mhr present."
 
       # Step 14: Run unit tests.
       # AITOWN_HEADLESS=1 — guard against unit tests that inadvertently trigger IrrlichtDevice init.
@@ -454,12 +458,11 @@ jobs:
           path: test_results/
           retention-days: 14
 
-      # Step 18: DLL verification — Irrlicht.dll and GLEW32.dll hard-fail (Phase 1+);
-      # soft_oal.dll and default.mhr remain warning-only (Phase 4 deliverables not yet present).
-      # Phase 4 hardens soft_oal.dll and default.mhr to hard-fail as well.
+      # Step 18: DLL verification — Irrlicht.dll, GLEW32.dll, and default.mhr hard-fail (Phase 4);
+      # soft_oal.dll remains warning-only (OpenAL runtime — presence varies by host configuration).
       # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
       # NOTE: Ninja single-config outputs to build/ (not build/Release/).
-      - name: Verify required DLLs (Irrlicht+GLEW hard-fail; OpenAL warning-only — Phase 4)
+      - name: Verify required DLLs and HRTF data (Irrlicht+GLEW+default.mhr hard-fail; soft_oal.dll warning-only)
         shell: pwsh
         run: |
           # Irrlicht.dll — hard-fail (Phase 1: aitown_render now links Irrlicht).
@@ -475,18 +478,19 @@ jobs:
             exit 1
           }
           Write-Host "GLEW32.dll present."
-          # soft_oal.dll — warning-only (Phase 4 deliverable).
+          # soft_oal.dll — warning-only (OpenAL runtime; presence varies by host configuration).
           if (Test-Path "build/soft_oal.dll") {
             Write-Host "soft_oal.dll found."
           } else {
-            Write-Warning "soft_oal.dll not found — expected after Phase 4 audio deliverable. CI continues."
+            Write-Warning "soft_oal.dll not found — OpenAL runtime not copied to build/. CI continues."
           }
-          # default.mhr — warning-only (Phase 4 deliverable).
-          if (Test-Path "build/default.mhr") {
-            Write-Host "default.mhr found."
-          } else {
-            Write-Warning "default.mhr not found — expected after Phase 4 audio deliverable. CI continues."
+          # default.mhr — hard-fail (Phase 4: post-build copy rule now wired).
+          # Without this file, AudioSystem HRTF initialization fails at runtime.
+          if (-not (Test-Path "build/default.mhr")) {
+            Write-Error "ERROR: default.mhr missing from build/ — HRTF initialization will fail at runtime"
+            exit 1
           }
+          Write-Host "default.mhr present."
 
       # Step 19: Upload Windows binary artifact (only on push to main).
       # Ninja single-config: executable is at build/aitown.exe (not build/Release/aitown.exe).
