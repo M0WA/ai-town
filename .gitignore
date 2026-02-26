@@ -2,3 +2,4 @@
 .env
 .fetchcontent_cache/
 build*/
+__pycache__
