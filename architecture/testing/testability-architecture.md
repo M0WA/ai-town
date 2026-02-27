@@ -666,6 +666,21 @@ All Phase 7 audio tests carry label `unit` and run without a display device. CTe
   ```
 
   `AudioSystem` and `CitySimulation` accept `IClock*` at construction for crossfade timing and the forced-loan real-time gate (120 s) respectively. Production code passes `WallClock` which calls `std::chrono::steady_clock`. `ManualClock` allows deterministic time advancement in tests without wall-clock dependencies.
+- **`IAlcFunctions`** — injectable interface for ALC function-pointer lookup, enabling the thread-local context extension check in `AudioSystem` to be intercepted in tests without a real OpenAL device. **Source locations**: `IAlcFunctions.h` in `src/audio/`; `DefaultAlcFunctions.h`/`DefaultAlcFunctions.cpp` in `src/audio/`; `MockAlcFunctions` is defined locally in `tests/audio/audio_thread_test.cpp` (single-use — not a shared header). All test double headers live under `tests/` — never under `src/`.
+
+  ```cpp
+  class IAlcFunctions {
+  public:
+      virtual ~IAlcFunctions() = default;
+      virtual bool isExtensionPresent(const char* extName) = 0;
+      virtual void* getProcAddress(const char* funcName) = 0;
+  };
+  ```
+
+  `AudioSystem` constructor accepts `IAlcFunctions* alcFunctions = nullptr`; passing `nullptr` activates `DefaultAlcFunctions`, which delegates to the real `alcIsExtensionPresent()` and `alcGetProcAddress()`. **Windows compatibility**: the `IAlcFunctions` seam is the primary and mandatory test path — it works on both Linux and Windows. The weak-symbol override approach is Linux-only and is a secondary option only.
+
+  `AudioThreadTest::AbsentThreadLocalContext_ConstructorThrows` injects a `MockAlcFunctions` configured to return `nullptr` for `getProcAddress("alcSetThreadContext")`, verifying the constructor throws `std::runtime_error` before entering the streaming loop (ref: `implementation/phase-7.md` line 47).
+
 - **Ownership contract**: Simulation objects accept `IRenderer*` and `IAudioSystem*` as non-owning raw pointers. Ownership managed externally. In tests, fixture owns the mock and outlives the system under test:
 
 ### StrictMock Expected Call Matrix
