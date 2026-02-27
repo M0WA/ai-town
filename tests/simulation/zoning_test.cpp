@@ -586,6 +586,108 @@ TEST_F(ZoningTestNice, DensityUpgrade_AudioCallback_FiresOnUpgrade) {
 }
 
 // ---------------------------------------------------------------------------
+// SP-B: DEMAND BOOTSTRAP AT 3x SPEED SPIKE
+//
+// Spec (architecture/game-design/traffic-system.md, zoning-system.md):
+//   Bootstrap subsidies apply during ticks 0 through demand_bootstrapping_ticks-1
+//   (ticks 0–5 inclusive, i.e., the first 6 budget ticks).
+//   At SpeedMultiplier::x3, each game second advances 3× faster, but budget ticks
+//   still fire on SECONDS_PER_BUDGET_TICK boundaries of accumulated simulation time.
+//   Bootstrap demand must not oscillate: no zone type's demand should jump by more
+//   than 1.0 per tick (full range is [0.0, 1.0], so a jump of 1.0 would be maximum
+//   possible change from complete collapse to complete saturation or vice versa).
+//
+// This test:
+//   1. Constructs CitySimulation at SpeedMultiplier::x3 with a blank map.
+//   2. Runs 10 ticks (covering the bootstrap period and beyond).
+//   3. Verifies getTrafficDemandFactor(zone) stays within [0.0, 1.0] for all zones.
+//   4. Verifies no demand value jumps by more than a reasonable delta per tick
+//      (oscillation invariant: delta per tick < 1.0 for all zone types).
+//   5. Verifies getDemandPressurePct stays in [0.0, 1.0] for all zones.
+//
+// Uses ZoningTestNice (NiceMock) per project conventions for integration tests.
+// ---------------------------------------------------------------------------
+TEST_F(ZoningTestNice, DemandBootstrap_AtX3Speed_NoBoundaryViolationAndNoOscillation) {
+    // Reconfigure to x3 speed.
+    sim_->setSpeed(SpeedMultiplier::x3);
+    EXPECT_EQ(sim_->getSpeedMultiplier(), SpeedMultiplier::x3);
+
+    // Blank map: no zones, no roads. All demand signals should stay at or near
+    // null_path_demand_default = 0.5 during bootstrap (Industrial defaults to 1.0
+    // when no I zone exists; R and C start at bootstrap values).
+    // At x3, the tick accumulator fires budget ticks on 10.0f real-second boundaries
+    // (30.0f simulation seconds / 3 = 10.0f real seconds per budget tick).
+    const float realSecondsPerBudgetTick =
+        SimulationConstants::SECONDS_PER_BUDGET_TICK / 3.0f;  // 10 s at x3
+
+    // Demand values from previous tick for oscillation check.
+    float prevR = sim_->getTrafficDemandFactor(ZoneType::Residential);
+    float prevC = sim_->getTrafficDemandFactor(ZoneType::Commercial);
+    float prevI = sim_->getTrafficDemandFactor(ZoneType::Industrial);
+
+    for (int tick = 0; tick < 10; ++tick) {
+        clock_.advance(realSecondsPerBudgetTick);
+        cs()->tick(realSecondsPerBudgetTick);
+
+        float rFactor = sim_->getTrafficDemandFactor(ZoneType::Residential);
+        float cFactor = sim_->getTrafficDemandFactor(ZoneType::Commercial);
+        float iFactor = sim_->getTrafficDemandFactor(ZoneType::Industrial);
+
+        // All traffic demand factors must be in [0.0, 1.0].
+        EXPECT_GE(rFactor, 0.0f) << "R traffic demand must be >= 0 at tick " << tick;
+        EXPECT_LE(rFactor, 1.0f) << "R traffic demand must be <= 1 at tick " << tick;
+        EXPECT_GE(cFactor, 0.0f) << "C traffic demand must be >= 0 at tick " << tick;
+        EXPECT_LE(cFactor, 1.0f) << "C traffic demand must be <= 1 at tick " << tick;
+        EXPECT_GE(iFactor, 0.0f) << "I traffic demand must be >= 0 at tick " << tick;
+        EXPECT_LE(iFactor, 1.0f) << "I traffic demand must be <= 1 at tick " << tick;
+
+        // All effective demand pressures must be in [0.0, 1.0].
+        float rPct = sim_->getDemandPressurePct(ZoneType::Residential);
+        float cPct = sim_->getDemandPressurePct(ZoneType::Commercial);
+        float iPct = sim_->getDemandPressurePct(ZoneType::Industrial);
+
+        EXPECT_GE(rPct, 0.0f) << "R demand pressure must be >= 0 at tick " << tick;
+        EXPECT_LE(rPct, 1.0f) << "R demand pressure must be <= 1 at tick " << tick;
+        EXPECT_GE(cPct, 0.0f) << "C demand pressure must be >= 0 at tick " << tick;
+        EXPECT_LE(cPct, 1.0f) << "C demand pressure must be <= 1 at tick " << tick;
+        EXPECT_GE(iPct, 0.0f) << "I demand pressure must be >= 0 at tick " << tick;
+        EXPECT_LE(iPct, 1.0f) << "I demand pressure must be <= 1 at tick " << tick;
+
+        // Oscillation invariant: no demand value may jump by more than 1.0 per tick
+        // (the full [0,1] range). Any jump >= 1.0 indicates a sign-flip oscillation.
+        // On a blank map the values should be stable (null_path_default = 0.5 or
+        // Industrial default = 1.0 when no I zones exist).
+        const float maxAllowedDeltaPerTick = 1.0f;
+        EXPECT_LT(std::abs(rFactor - prevR), maxAllowedDeltaPerTick)
+            << "R traffic demand oscillation at tick " << tick
+            << ": prev=" << prevR << " curr=" << rFactor;
+        EXPECT_LT(std::abs(cFactor - prevC), maxAllowedDeltaPerTick)
+            << "C traffic demand oscillation at tick " << tick
+            << ": prev=" << prevC << " curr=" << cFactor;
+        EXPECT_LT(std::abs(iFactor - prevI), maxAllowedDeltaPerTick)
+            << "I traffic demand oscillation at tick " << tick
+            << ": prev=" << prevI << " curr=" << iFactor;
+
+        prevR = rFactor;
+        prevC = cFactor;
+        prevI = iFactor;
+    }
+
+    // After the bootstrap period (ticks 0–5), demand must be stable.
+    // On a blank map with no zones: I_demand = 1.0 (no I zone → default max).
+    // R and C demand = 0.0 (no C/I or R zones → capacity ratio = 0).
+    // Post-bootstrap (tick 6+), demand floors apply: R >= 0.20, C >= 0.10, I >= 0.10.
+    // But demand floor only applies to growth, not to getDemandPressurePct directly
+    // (it applies to occupancy_increase). getDemandPressurePct is the effective demand.
+    // With no zones: I_demand = 1.0; R = 0; C = 0.
+    float iPostBootstrap = sim_->getDemandPressurePct(ZoneType::Industrial);
+    EXPECT_FLOAT_EQ(iPostBootstrap, 1.0f)
+        << "Industrial demand must be 1.0 on blank map (no I zones → default = 1.0)";
+
+    // Verify bootstrap period constant is correct.
+    EXPECT_EQ(SimulationConstants::demand_bootstrapping_ticks, 6);
+}
+
 // TEST 15: DemandPressurePct_MaxDemand_Returns1f
 //
 // With a well-balanced R/C/I zone layout + road, and sufficient ticks for

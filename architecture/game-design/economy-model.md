@@ -39,6 +39,28 @@
   - **`getNextUnlockThreshold()` return semantics**: `ICitySimulation::getNextUnlockThreshold(Difficulty d)` returns the difficulty-adjusted revenue value (in dollars) that the player must sustain for 3 consecutive months to trigger the next pending density tier unlock. The tiers are evaluated in the canonical unlock order defined above: Med-R/Med-C (same threshold), Med-I, High-R, High-C, High-I. The function returns the threshold of the **lowest-indexed tier that is not yet unlocked**. When all six density tiers are unlocked (High-I is the final tier), the function returns **`-1.0f`** as a sentinel value meaning "no further unlocks pending". The sentinel is `−1.0f` (negative one, as a float) rather than `std::numeric_limits<float>::max()` for the following reasons: (a) `float` max (~3.4 × 10^38) cannot be meaningfully formatted in a HUD label without special-casing; (b) `−1.0f` is unambiguously out-of-range for any valid threshold (all valid thresholds are positive dollar amounts), so a simple `threshold < 0.0f` guard is sufficient to detect the sentinel with no risk of false positives; (c) the value is trivially comparable in both C++ and tests without pulling in `<limits>`. **Contract**: the return value is never `0.0f` or `NaN`; it is either a positive dollar value (difficulty-adjusted) or exactly `−1.0f`. The named constant `SimulationConstants::kNoUnlockThreshold = -1.0f` MUST be used at every call site that checks for the sentinel — do not compare against the literal `−1.0f` inline. **HUD handling of the sentinel**: when `getNextUnlockThreshold(d)` returns `kNoUnlockThreshold`, the density unlock progress indicator in the resource bar MUST be hidden via `IUIBackend::setElementVisible(handle, false)` and the Density Unlock Preview Tooltip MUST NOT appear regardless of proximity calculations — both the indicator and the tooltip are suppressed for the remainder of the session once all tiers are unlocked. See [HUD Layout](../ui-ux/hud-layout.md) (Density Unlock Preview Tooltip section) for the authoritative HUD suppression rule.
   - **Density upgrade rate limiter**: When a density tier is unlocked, at most **20% of eligible tiles per zone type** (rounded up, minimum 1 per zone type) upgrade per budget tick. The 20% cap is applied independently to each zone type (R, C, I) — upgrading Residential tiles does not count against the Commercial tile cap. This prevents a mass simultaneous upgrade from spiking wages and costs in a single tick — the transition smooths over approximately 5 budget ticks. HUD shows a preview: when monthly revenue is within 10% of an unlock threshold, a projected "After Unlock" estimated monthly expense change is shown in the resource bar tooltip so the player can prepare.
 
+## Multi-Loan Pooling Boundary Examples
+
+The following concrete examples clarify the loan pooling formula for implementers and test authors. All values use the $1,000 minimum revenue floor for the debt cap calculation.
+
+**Scenario A — First-loan override with zero revenue (debt cap < minimum floor):**
+- `monthly_revenue = $0` → `debtCap = 3 × max($0, $1,000) = $3,000`
+- First loan: `outstanding_debt == 0` → override applies → `principal = $10,000`
+- `outstanding_debt` after first loan = `$10,000 > debtCap ($3,000)` — override permitted
+- Second loan trigger: `remaining = max(0, $3,000 − $10,000) = $0` → no issuance; bond only
+
+**Scenario B — $10,001 boundary (revenue = $3,334/month, debtCap = $10,002):**
+- First loan: minimum floor = `$10,000`; `outstanding_debt = $10,000`
+- Second loan: `remaining = max(0, $10,002 − $10,000) = $2`
+- Second loan principal = `min(computed_amount, $2) = $2`
+- Total debt = `$10,000 + $2 = $10,002 = debtCap` (pool exactly exhausted)
+
+**Scenario C — One below boundary (revenue = $3,333/month, debtCap = $9,999):**
+- First loan = `$10,000`; `outstanding_debt = $10,000`
+- Second loan: `remaining = max(0, $9,999 − $10,000) = $0` → no issuance; bond only
+
+These examples are verified by `MultiLoanPooling_FirstLoanOverride_And_DebtCapBoundary` in `tests/simulation/economy_test.cpp`.
+
 ## Phase 6 Balance Sign-Off
 
 <!-- SIGN-OFF: gamedesign-lookandfeel 2026-02-26 — V1 economy balance constants reviewed and accepted. All items below confirmed against simulation_constants.h and CitySimulation.cpp. -->

@@ -42,6 +42,9 @@
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <rapidcheck.h>
+#include <rapidcheck/gtest.h>
+#include <cmath>
 #include <memory>
 
 using ::testing::NiceMock;
@@ -477,4 +480,157 @@ TEST_F(PopulationTest, CityRating_VillageToTown_Transition_FiresStingerNotificat
     // CitySimulation does NOT call triggerStinger — that is Phase 8 scope.
 
     local_sim.reset();
+}
+
+// ---------------------------------------------------------------------------
+// Property Test: PopulationGrowthDecayCaps_ClampedToFraction
+//
+// Spec (phase-6.md, population-density-growth.md):
+//   Per-tick growth delta is capped at:
+//     growth_cap = population_growth_cap_fraction * max_density_for_tier  (+10%)
+//     decay_cap  = population_decay_cap_fraction  * max_density_for_tier  (-15%)
+//   The cap is applied to the DELTA (target - actual), not to the target itself.
+//   The cap values are stable and based on max_density_for_tier, not actual_population.
+//
+// Strategy: construct a sim, place a Low-density Residential tile (capacity = 100),
+// run one tick, then verify getTotalPopulation() did not change by more than
+// growth_cap = round(100 * 0.10) = 10 per tick (and cannot go negative or exceed 100).
+// For decay: if population is seeded high and demand collapses, verify the drop
+// per tick does not exceed decay_cap = round(100 * 0.15) = 15.
+//
+// Uses NiceMock per project policy for property-based and integration tests.
+// Uses rc::check rather than RC_PROPERTY to match the terrain_chunk_test.cpp pattern.
+// ---------------------------------------------------------------------------
+
+TEST(PopulationPropertyTest, GrowthCap_DeltaPerTickBoundedByFraction) {
+    // Property: for a Low-density Residential tile (maxPop = 100):
+    //   population change per tick <= growth_cap = round(100 * 0.10) = 10
+    // We generate a demand factor in [0.0, 1.0] by varying tax rates.
+    // Since direct demand manipulation is not exposed, we verify the
+    // observable bound: population cannot grow by more than growth_cap per tick.
+    //
+    // The rc::check generates the number of pre-warm ticks to vary starting population,
+    // then checks the per-tick delta is bounded.
+    rc::check("Growth delta per tick <= growth_cap for Low-density Residential",
+        []() {
+            // NiceMock suppresses all audio/renderer calls inside the check lambda.
+            NiceMock<MockRenderer>    renderer;
+            NiceMock<MockAudioSystem> audio;
+            ManualRNG    rng;
+            ManualClock  clock;
+            ManualTerrainQuery terrain;
+
+            auto sim_ptr = std::make_unique<CitySimulation>(
+                &renderer, &audio, &rng, &clock, &terrain, Difficulty::Normal);
+            sim_ptr->setSpeed(SpeedMultiplier::x1);
+            ICitySimulation* sim = sim_ptr.get();
+
+            // Place a Low-density Residential tile + Commercial/Industrial to
+            // generate non-zero demand. Tax rate = 0.01 (minimum) to maximise
+            // demand (lower tax rate → higher desirability → higher growth).
+            sim->setTaxRate(ZoneType::Residential,  0.01f);
+            sim->setTaxRate(ZoneType::Commercial,   0.05f);
+            sim->setTaxRate(ZoneType::Industrial,   0.05f);
+            sim->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
+            sim->placeZone(0, 1, ZoneType::Commercial,  DensityTier::Low);
+            sim->placeZone(0, 2, ZoneType::Industrial,  DensityTier::Low);
+
+            const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+            // Low-density max population = 100 per CitySimulation::maxPopulationForTile
+            const int maxPop = 100;
+            // Growth cap = round(100 * 0.10) = 10
+            const int growthCap = static_cast<int>(
+                std::round(static_cast<float>(maxPop) *
+                           SimulationConstants::population_growth_cap_fraction));
+            RC_ASSERT(growthCap == 10);  // verify constant is correct
+
+            // Run a random number of warm-up ticks in [0, 5] to vary starting state.
+            int warmupTicks = *rc::gen::inRange(0, 6);
+            for (int i = 0; i < warmupTicks; ++i) {
+                clock.advance(dt);
+                dynamic_cast<CitySimulation*>(sim_ptr.get())->tick(dt);
+            }
+
+            int popBefore = sim->getTotalPopulation();
+
+            // Run exactly one more tick.
+            clock.advance(dt);
+            dynamic_cast<CitySimulation*>(sim_ptr.get())->tick(dt);
+
+            int popAfter = sim->getTotalPopulation();
+            int delta = popAfter - popBefore;
+
+            // Growth delta must not exceed +growthCap.
+            RC_ASSERT(delta <= growthCap);
+            // Population must be non-negative.
+            RC_ASSERT(popAfter >= 0);
+            // Population must not exceed maxPop for one tile.
+            RC_ASSERT(popAfter <= maxPop);
+        });
+}
+
+TEST(PopulationPropertyTest, DecayCap_DeltaPerTickBoundedByFraction) {
+    // Property: for a Low-density Residential tile (maxPop = 100):
+    //   population decrease per tick <= decay_cap = round(100 * 0.15) = 15
+    // We force decay by growing population then removing all demand drivers.
+    //
+    // The rc::check varies the number of growth ticks to seed different
+    // starting populations, then verifies one decay tick's delta is bounded.
+    rc::check("Decay delta per tick <= decay_cap for Low-density Residential",
+        []() {
+            NiceMock<MockRenderer>    renderer;
+            NiceMock<MockAudioSystem> audio;
+            ManualRNG    rng;
+            ManualClock  clock;
+            ManualTerrainQuery terrain;
+
+            auto sim_ptr = std::make_unique<CitySimulation>(
+                &renderer, &audio, &rng, &clock, &terrain, Difficulty::Normal);
+            sim_ptr->setSpeed(SpeedMultiplier::x1);
+            ICitySimulation* sim = sim_ptr.get();
+
+            // Grow population during bootstrap: place full zone set.
+            sim->setTaxRate(ZoneType::Residential, 0.01f);
+            sim->setTaxRate(ZoneType::Commercial,  0.01f);
+            sim->setTaxRate(ZoneType::Industrial,  0.01f);
+            sim->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
+            sim->placeZone(0, 1, ZoneType::Commercial,  DensityTier::Low);
+            sim->placeZone(0, 2, ZoneType::Industrial,  DensityTier::Low);
+
+            const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+            const int maxPop = 100;
+            // Decay cap = round(100 * 0.15) = 15
+            const int decayCap = static_cast<int>(
+                std::round(static_cast<float>(maxPop) *
+                           SimulationConstants::population_decay_cap_fraction));
+            RC_ASSERT(decayCap == 15);  // verify constant is correct
+
+            // Grow for a random number of ticks in [1, 10].
+            // advance clock past grace period so expenses apply but growth ticks fire.
+            clock.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+            int growthTicks = *rc::gen::inRange(1, 11);
+            for (int i = 0; i < growthTicks; ++i) {
+                clock.advance(dt);
+                dynamic_cast<CitySimulation*>(sim_ptr.get())->tick(dt);
+            }
+
+            // Remove Commercial and Industrial to collapse demand → population decays.
+            sim->demolishTile(0, 1);
+            sim->demolishTile(0, 2);
+
+            int popBefore = sim->getTotalPopulation();
+
+            // Run exactly one decay tick.
+            clock.advance(dt);
+            dynamic_cast<CitySimulation*>(sim_ptr.get())->tick(dt);
+
+            int popAfter = sim->getTotalPopulation();
+            int decay = popBefore - popAfter;  // positive when population falls
+
+            // Decay delta must not exceed decayCap per tick.
+            // decay <= decayCap: population can only fall by at most decayCap per tick.
+            RC_ASSERT(decay <= decayCap);
+            // Population must remain non-negative.
+            RC_ASSERT(popAfter >= 0);
+        });
 }
