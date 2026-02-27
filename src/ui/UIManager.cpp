@@ -164,6 +164,8 @@ void UIManager::transitionToGameOver() {
 void UIManager::showForcedLoanDialog(const LoanTerms& /*terms*/) {
     // Phase 6: populate the 2-screen forced-loan modal (640x400 px virtual)
     // with terms.amount, terms.repaymentTicks, terms.interestRate and show it.
+    m_modal->show();
+    m_notifications->setModalActive(true);
 }
 
 void UIManager::showGameOverModal(int64_t /*totalDebt*/, int /*monthsInDeficit*/) {

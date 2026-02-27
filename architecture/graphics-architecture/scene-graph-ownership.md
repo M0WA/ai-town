@@ -36,11 +36,28 @@
 
   ```cpp
   TEST(LODSwapSmokeTest, SetMeshGrabDropContract) {
-      // TODO: Fill in after Phase 2 SMesh::addMeshBuffer() grab/drop spike.
-      // The spike inspects CMeshSceneNode.cpp and SMesh.h to determine whether
-      // addMeshBuffer() calls grab() on the buffer. If it does, the caller must
-      // call ->drop() after addMeshBuffer(); if it does not, the caller owns the
-      // buffer and must not call ->drop().
+      // Confirmed contract from Phase 2 spike (source and binary analysis):
+      //
+      // SMesh::addMeshBuffer() grab/drop contract (Phase 2 Checkbox A — VERIFIED):
+      //   SMesh::addMeshBuffer() calls buf->grab() unconditionally (SMesh.h line 102).
+      //   Caller MUST call ->drop() on the SMeshBuffer* immediately after addMeshBuffer()
+      //   to relinquish the caller's ownership reference — otherwise the buffer leaks
+      //   (ref_count stays at 2 and never reaches 0).
+      //
+      // CMeshSceneNode::setMesh() grab/drop contract (Phase 2 Checkbox B — VERIFIED):
+      //   setMesh() increments the new mesh ref_count via grab() and decrements the old
+      //   mesh ref_count via drop() (verified by objdump -d of CMeshSceneNode.cpp.o).
+      //   Caller MUST call ->drop() on newLODMesh after setMesh() to transfer ownership.
+      //
+      // SMesh* release rule — CONFIRMED: always use ->drop(), never delete.
+      //   The reference-counting contract requires ->drop() for all SMesh*/SMeshBuffer*
+      //   lifetime management. Using delete bypasses ref-counting and causes double-free
+      //   when the scene node also drops its reference.
+      //
+      // recalculateBoundingBox() sequence — CONFIRMED: call on every SMeshBuffer THEN
+      //   on the SMesh itself before addMeshSceneNode() or setMesh(). Omitting either
+      //   step leaves a degenerate bounding box that breaks frustum culling silently.
+      //
       // Timing measurement requires a real GPU; this test is promoted to
       // requires-opengl label in Phase 5 when the real LOD swap is implemented.
       GTEST_SKIP() << "LOD swap timing requires real GPU; promoted to Phase 5.";

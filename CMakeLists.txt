@@ -193,10 +193,10 @@ target_link_libraries(aitown_audio PRIVATE
 
 # ----------------------------------------------------------------------------
 # aitown_sim — City simulation (economy, traffic, zoning, population)
-# Phase 3 replaces placeholder.cpp with CitySimulation.cpp.
+# Phase 6 replaces placeholder.cpp with CitySimulation.cpp.
 # ----------------------------------------------------------------------------
 add_library(aitown_sim STATIC
-    src/simulation/placeholder.cpp
+    src/simulation/CitySimulation.cpp
 )
 target_include_directories(aitown_sim
     PRIVATE   src/simulation/      # implementation headers — NOT propagated
@@ -325,6 +325,20 @@ if(WIN32)
     )
 endif()
 
+# Copy default.mhr (OpenAL Soft HRTF data) to the build output directory.
+# Required at runtime for 3D spatial audio HRTF initialisation.
+# Source: vcpkg installs HRTF data to share/openal/hrtf/ via install(DIRECTORY hrtf ...).
+# VCPKG_OVERLAY_PORTS=vcpkg-overlays enables -DALSOFT_INSTALL_HRTF_DATA=ON in the
+# overlay portfile (openal-soft 1.23.1) so the hrtf/ directory is installed.
+# The copy is cross-platform — both Linux and Windows CI verify its presence in
+# the build directory.
+add_custom_command(TARGET aitown POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
+        "$<TARGET_FILE_DIR:aitown>/default.mhr"
+    COMMENT "Copying default.mhr (OpenAL Soft HRTF data) to aitown output"
+)
+
 # ============================================================================
 # TEST TARGETS
 # Each test target links both GTest and RapidCheck (proactively — removing later
@@ -363,7 +377,7 @@ target_include_directories(simulation_tests PRIVATE
     src/simulation/
     ${CMAKE_SOURCE_DIR}
 )
-aitown_add_tests(simulation_tests LABEL "unit")
+aitown_add_tests(simulation_tests LABEL "unit" DISCOVERY_TIMEOUT 60)
 
 # ----------------------------------------------------------------------------
 # terrain_tests — terrain generator property tests and fixed-seed regression
@@ -492,6 +506,8 @@ add_executable(integration_tests
     tests/integration/irrlicht_ui_backend_compile_test.cpp  # Phase 1: non-abstract compile check
     tests/integration/irrlicht_ui_backend_test.cpp          # Phase 3: EDT_NULL runtime handle test
     tests/integration/texture_cache_integration_test.cpp    # Phase 5: TextureCache + SceneEntityManager EDT_NULL tests
+    tests/integration/simulation_60tick_test.cpp            # Phase 6: 60-tick no-crash + SimulationTime exit criterion
+    tests/integration/camera_controller_live_test.cpp       # Phase 6: CameraController live-camera path coverage
 )
 # aitown_render and aitown_ui MUST be present: IrrlichtUIBackend.h depends on Irrlicht.
 # Irrlicht MUST be linked directly: IrrlichtUIBackend.h includes <irrlicht.h> at compile time;
@@ -499,11 +515,14 @@ add_executable(integration_tests
 # aitown_terrain: Phase 5 adds texture_cache_integration_test.cpp which tests TextureCache
 # and SceneEntityManager; both live in aitown_render/aitown_terrain.
 # GLEW::GLEW: TextureCache.h includes <GL/glew.h> at the top.
+# aitown_sim: Phase 6 adds simulation_60tick_test.cpp which constructs CitySimulation directly.
+# aitown_ui: Phase 6 adds camera_controller_live_test.cpp (CameraController live-camera path).
 # rapidcheck and rapidcheck_gtest always linked (proactive policy — architecture/testing/framework.md).
 target_link_libraries(integration_tests PRIVATE
     aitown_render
     aitown_ui
     aitown_terrain
+    aitown_sim
     Irrlicht
     GLEW::GLEW
     GTest::gtest_main
@@ -526,8 +545,9 @@ if(UNIX AND NOT APPLE)
         target_link_libraries(integration_tests PRIVATE ${XXFV86VM_LIB})
     endif()
 endif()
-# src/rendering/ MUST be present: IrrlichtUIBackend.h lives in src/rendering/.
-# src/terrain/   Phase 5: TextureCache integration tests include TerrainChunk/TerrainSystem headers.
+# src/rendering/  MUST be present: IrrlichtUIBackend.h lives in src/rendering/.
+# src/terrain/    Phase 5: TextureCache integration tests include TerrainChunk/TerrainSystem headers.
+# src/simulation/ Phase 6: simulation_60tick_test.cpp includes CitySimulation.h and simulation_constants.h.
 target_include_directories(integration_tests PRIVATE
     tests/simulation/
     tests/ui/
@@ -535,6 +555,7 @@ target_include_directories(integration_tests PRIVATE
     src/ui/
     src/rendering/
     src/terrain/
+    src/simulation/
     ${CMAKE_SOURCE_DIR}
 )
 aitown_add_tests(integration_tests LABEL "integration")

@@ -17,6 +17,11 @@
 // code under test calls nextInt()/nextFloat() more times than expected.
 class ManualRNG : public ISimulationRNG {
 public:
+    // Default constructor — int seq = {0}, float seq = {0.9f}, non-strict wrap-around.
+    // Used by SimulationTestBase and test fixtures that don't need specific sequences.
+    // 0.9f > service_degradation_probability (0.5f) so no service degrades by accident.
+    ManualRNG() : m_intSeq{0}, m_floatSeq{0.9f}, m_strict(false) {}
+
     explicit ManualRNG(std::initializer_list<int>   intSeq,
                        std::initializer_list<float> floatSeq = {0.5f},
                        bool strict = true)

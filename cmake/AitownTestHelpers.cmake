@@ -61,7 +61,7 @@ endmacro()
 #   aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
 #
 # Standard unit tests:
-#   aitown_add_tests(simulation_tests LABEL "unit")
+#   aitown_add_tests(simulation_tests LABEL "unit" DISCOVERY_TIMEOUT 60)  # 60s: 8-file binary with RapidCheck property tests under coverage instrumentation
 #   aitown_add_tests(ui_tests LABEL "unit")
 #   aitown_add_tests(audio_tests LABEL "unit")
 #

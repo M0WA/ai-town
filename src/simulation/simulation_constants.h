@@ -131,6 +131,17 @@ struct SimulationConstants {
     static_assert(water_tower_coverage_radius_m > 0, "must be positive");
     static constexpr float service_deficit_radius_halving_threshold = -0.10f;
 
+    // service_degradation_probability_per_tick: probability (0.0..1.0) that a radius-based
+    // service building (Fire, Police, Water) enters reduced-coverage state on any given budget
+    // tick while budget_surplus_pct <= service_deficit_radius_halving_threshold (-10%).
+    // 0.5 = 50% chance per tick per service building at deficit. Evaluated independently per
+    // building per tick via ISimulationRNG::nextFloat() < service_degradation_probability_per_tick.
+    // See architecture/game-design/service-coverage.md (Budget deficit degradation).
+    static constexpr float service_degradation_probability_per_tick = 0.5f;
+    static_assert(service_degradation_probability_per_tick > 0.0f &&
+                  service_degradation_probability_per_tick <= 1.0f,
+                  "must be a valid probability");
+
     // Demand bootstrapping (architecture/game-design/zoning-system.md)
     // Bootstrap subsidies apply during ticks 0 through demand_bootstrapping_ticks-1 (i.e., ticks 0–5).
     // Correct conditional: if (currentTick < demand_bootstrapping_ticks)
@@ -141,7 +152,7 @@ struct SimulationConstants {
     static constexpr float demand_floor_industrial = 0.10f;
 
     // Density upgrade wave (architecture/game-design/zoning-system.md)
-    static constexpr float density_upgrade_wave_demand_threshold = 0.75f;
+    static constexpr float density_upgrade_wave_demand_threshold = 0.50f;
     static constexpr float density_max_upgrade_rate_per_tick = 0.20f;
 
     // Desirability system (architecture/game-design/zoning-system.md)
@@ -198,4 +209,61 @@ struct SimulationConstants {
     static constexpr float min_speed_fraction = 0.05f;
     static_assert(min_speed_fraction > 0.0f && min_speed_fraction < congestion_high_threshold,
                   "min_speed_fraction must be below high-congestion threshold");
+
+    // Traffic rolling-window sizes (architecture/game-design/traffic-system.md)
+    // R and C zones use a 5-tick window; I zones use a 3-tick window.
+    // Must NOT be hardcoded as literals in the rolling-window initialization.
+    static constexpr int traffic_rolling_window_r_c = 5;
+    static_assert(traffic_rolling_window_r_c > 0, "must be positive");
+    static constexpr int traffic_rolling_window_i = 3;
+    static_assert(traffic_rolling_window_i > 0, "must be positive");
+
+    // Loan cooldown: minimum budget ticks between consecutive forced loans
+    // (architecture/game-design/economy-model.md)
+    static constexpr int loan_cooldown_ticks = 2;
+    static_assert(loan_cooldown_ticks > 0, "must be positive");
+
+    // Road geometry parameters (architecture/game-design/traffic-system.md)
+    static constexpr float road_max_speed_mps = 13.9f;  // 50 km/h
+    static_assert(road_max_speed_mps > 0.0f, "must be positive");
+    static constexpr int road_segment_capacity_per_tile = 8;  // vehicles/tile; clamped to min 1
+    static_assert(road_segment_capacity_per_tile > 0, "must be positive");
+
+    // Density unlock base thresholds (treasury balance required; scaled by density_unlock_scale_*)
+    // (architecture/game-design/economy-model.md, density unlock table)
+    //
+    // TIER → THRESHOLD MAPPING (6 tiers, 5 threshold values):
+    //   DensityUnlockState tier index 0 (Med-R):   uses density_unlock_base_threshold_1 ($50K)
+    //   DensityUnlockState tier index 1 (Med-C):   uses density_unlock_base_threshold_1 ($50K)  ← SAME AS Med-R
+    //   DensityUnlockState tier index 2 (Med-I):   uses density_unlock_base_threshold_2 ($75K)
+    //   DensityUnlockState tier index 3 (High-R):  uses density_unlock_base_threshold_3 ($100K) ← requires Med-I unlocked first
+    //   DensityUnlockState tier index 4 (High-C):  uses density_unlock_base_threshold_4 ($200K)
+    //   DensityUnlockState tier index 5 (High-I):  uses density_unlock_base_threshold_5 ($500K)
+    //
+    // NOTE: Med-R (tier 0) and Med-C (tier 1) share threshold_1 and unlock simultaneously.
+    // Do NOT map tier index i to density_unlock_base_threshold_i — that off-by-one error
+    // assigns $75K to Med-C (wrong) and leaves High-I with no constant.
+    // Correct mapping: use the table above; unlocks[0] and unlocks[1] both check threshold_1.
+    static constexpr int density_unlock_base_threshold_1 = 50'000;
+    static constexpr int density_unlock_base_threshold_2 = 75'000;
+    static constexpr int density_unlock_base_threshold_3 = 100'000;
+    static constexpr int density_unlock_base_threshold_4 = 200'000;
+    static constexpr int density_unlock_base_threshold_5 = 500'000;
+    static_assert(density_unlock_base_threshold_1 < density_unlock_base_threshold_2, "unlock thresholds must be ascending");
+    static_assert(density_unlock_base_threshold_2 < density_unlock_base_threshold_3, "unlock thresholds must be ascending");
+    static_assert(density_unlock_base_threshold_3 < density_unlock_base_threshold_4, "unlock thresholds must be ascending");
+    static_assert(density_unlock_base_threshold_4 < density_unlock_base_threshold_5, "unlock thresholds must be ascending");
+
+    // Population milestone thresholds (architecture/game-design/game-progression-modes.md)
+    // Each threshold fires exactly once per playthrough (per-milestone boolean flag in CitySimulation).
+    // Must NOT be hardcoded inline in CitySimulation.cpp or test bodies.
+    static constexpr int population_milestone_threshold_1 =      1'000;
+    static constexpr int population_milestone_threshold_2 =     10'000;
+    static constexpr int population_milestone_threshold_3 =     50'000;
+    static constexpr int population_milestone_threshold_4 =    100'000;
+    static constexpr int population_milestone_threshold_5 =    500'000;
+    static_assert(population_milestone_threshold_1 < population_milestone_threshold_2, "milestones must be ascending");
+    static_assert(population_milestone_threshold_2 < population_milestone_threshold_3, "milestones must be ascending");
+    static_assert(population_milestone_threshold_3 < population_milestone_threshold_4, "milestones must be ascending");
+    static_assert(population_milestone_threshold_4 < population_milestone_threshold_5, "milestones must be ascending");
 };

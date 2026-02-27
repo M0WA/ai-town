@@ -223,6 +223,10 @@ void CameraController::update(float /*dt*/) {
 
     m_camera->setPosition(eye);
     m_camera->setTarget(target);
+    // Flush the absolute-position cache so getCameraState() live path and any
+    // headless callers see the correct value from getAbsolutePosition() without
+    // requiring a full scene draw (ISceneManager::drawAll).
+    m_camera->updateAbsolutePosition();
 }
 
 CameraState CameraController::getCameraState() const {
