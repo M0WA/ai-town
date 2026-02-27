@@ -335,14 +335,17 @@ if(WIN32)
             $<TARGET_FILE_DIR:aitown>
         COMMENT "Copying GLEW32.dll to aitown output"
     )
-    # soft_oal.dll: $<TARGET_FILE:OpenAL::OpenAL> resolves to OpenAL32.lib (import lib)
-    # on Windows, not the DLL. Use the explicit vcpkg bin path instead — mirrors the
-    # default.mhr copy pattern below. CI build-windows verifies presence at build/soft_oal.dll.
+    # vcpkg installs OpenAL Soft on Windows as OpenAL32.dll (not soft_oal.dll).
+    # Copy it to the output dir renamed as soft_oal.dll, which is the canonical
+    # bundled name for shipping OpenAL Soft alongside a game binary. The CI
+    # build-windows hard-fail step verifies presence of build/soft_oal.dll.
+    # Note: $<TARGET_FILE:OpenAL::OpenAL> resolves to OpenAL32.lib (import lib),
+    # so we must use the explicit vcpkg bin path for the source DLL.
     add_custom_command(TARGET aitown POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin/soft_oal.dll"
+            "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin/OpenAL32.dll"
             "$<TARGET_FILE_DIR:aitown>/soft_oal.dll"
-        COMMENT "Copying soft_oal.dll (OpenAL Soft runtime) to aitown output"
+        COMMENT "Copying OpenAL32.dll (OpenAL Soft runtime) to aitown output as soft_oal.dll"
     )
 endif()
 
