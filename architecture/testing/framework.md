@@ -132,7 +132,7 @@ tests/
 | `opengl_tests` | PROHIBITED — inline `add_executable` only | Prevents ctest discovery timing issues from deferred source registration |
 | `ui_tests` | PROHIBITED for Phase 3 (Test-C1); PERMITTED thereafter via `target_sources(ui_tests PRIVATE ...)` | Phase 3 requires consolidated 5-file `add_executable` committed as a single amendment; Phase 4+ additions MUST use `target_sources(ui_tests PRIVATE ...)` — never modify the root CMakeLists.txt |
 | `simulation_tests` | PERMITTED — inline listing preferred | |
-| `audio_tests` | PERMITTED — inline listing preferred | |
+| `audio_tests` | PERMITTED — inline listing preferred | Phase 0 creates target with `audio_smoke_test.cpp` inline; Phase 7 MUST extend via `target_sources(audio_tests PRIVATE ...)` — do NOT re-call `add_executable(audio_tests ...)` (duplicate target causes CMake configure error). Phase 7 adds 4 source files: `duck_state_machine_test.cpp`, `occlusion_smoothing_test.cpp`, `audio_thread_test.cpp`, `ogg_header_validation_test.cpp`. |
 | `terrain_tests` | PERMITTED — inline listing preferred | |
 | `integration_tests` | PERMITTED — inline listing preferred | |
 
@@ -185,15 +185,23 @@ aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
 # `target_include_directories(terrain_tests PRIVATE src/terrain/ ...)` path cannot be
 # exercised and verified.
 
-add_executable(audio_tests tests/audio/duck_state_machine_test.cpp ...)
-# rapidcheck and rapidcheck_gtest are included proactively: removing them later is trivial,
-# but omitting them causes a confusing link failure if a property test is added to audio_tests.
+# Phase 0: initial target creation (smoke test only)
+add_executable(audio_tests tests/audio/audio_smoke_test.cpp)
+target_link_libraries(audio_tests PRIVATE aitown_audio GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
+target_include_directories(audio_tests PRIVATE tests/simulation/ src/interfaces/ src/audio/ ${CMAKE_SOURCE_DIR})
+aitown_add_tests(audio_tests LABEL "unit")
+# Phase 7: extend via target_sources — do NOT re-call add_executable(audio_tests) or
+# aitown_add_tests(audio_tests) — duplicate target registration causes a CMake configure error.
 # Vorbis::vorbisfile (vcpkg port libvorbis, header <vorbis/vorbisfile.h>) is required because
 # Phase 7 audio tests call ov_fopen(), ov_read(), and ov_pcm_total() directly for OGG header
 # validation. stb_vorbis is not used; Vorbis::vorbisfile is the sole OGG decode library.
-target_link_libraries(audio_tests PRIVATE aitown_audio Vorbis::vorbisfile GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
-target_include_directories(audio_tests PRIVATE tests/simulation/ src/interfaces/ src/audio/ ${CMAKE_SOURCE_DIR})
-aitown_add_tests(audio_tests LABEL "unit")
+# rapidcheck/rapidcheck_gtest already linked at Phase 0 — duplicate entries in CMake are harmless.
+target_sources(audio_tests PRIVATE
+    tests/audio/duck_state_machine_test.cpp
+    tests/audio/occlusion_smoothing_test.cpp
+    tests/audio/audio_thread_test.cpp
+    tests/audio/ogg_header_validation_test.cpp)
+target_link_libraries(audio_tests PRIVATE Vorbis::vorbisfile)
 
 # Phase 0 / Phase 5 coexistence note: multiple .cpp source files may coexist in the same
 # CMake target. During Phase 0, a stub file (e.g. tests/rendering/stub_succeed.cpp containing

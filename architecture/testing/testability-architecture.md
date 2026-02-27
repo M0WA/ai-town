@@ -602,6 +602,22 @@ public:
 
   **Canonical name note**: The exact test suite name `AudioSmokeTest` and case name `MockAudioSystem_InstantiatesCleanly` are canonical. Phase 3 deliverable and Phase 3 exit criteria must reference this exact GTest name. CTest filter: `-R MockAudioSystem_InstantiatesCleanly`. Do not use `TEST(MockAudioSmoke, Instantiates)` or any other form — name drift causes CI `-R` filter expressions to silently match nothing.
 
+**Phase 7 `audio_tests` canonical test names** — the following canonical names are mandated for the Phase 7 audio unit tests added via `target_sources(audio_tests ...)`. CTest `-R` filters reference these names exactly; name drift causes filter expressions to silently match nothing.
+
+| Test Suite | Test Case | Source File |
+|---|---|---|
+| `DuckStateMachineTest` | `IdleToReleasing_CompletesInCorrectDuration` | `tests/audio/duck_state_machine_test.cpp` |
+| `DuckStateMachineTest` | `InterruptedRelease_RampsFromCurrentGain` | `tests/audio/duck_state_machine_test.cpp` |
+| `DuckStateMachineTest` | `UsesWallClockDt_NotFixedIncrement` | `tests/audio/duck_state_machine_test.cpp` |
+| `DuckStateMachineTest` | `FirstWake_DtIsNotEpochSized` | `tests/audio/duck_state_machine_test.cpp` |
+| `OcclusionSmoothingTest` | `RecycledSlot_ResetsGainToOne` | `tests/audio/occlusion_smoothing_test.cpp` |
+| `AudioThreadTest` | `AbsentThreadLocalContext_ConstructorThrows` | `tests/audio/audio_thread_test.cpp` |
+| `OggHeaderValidationTest` | `ValidPlaceholder_ReturnsZero` | `tests/audio/ogg_header_validation_test.cpp` |
+| `OggHeaderValidationTest` | `MusicStem_IsStereo_44100Hz` | `tests/audio/ogg_header_validation_test.cpp` |
+| `OggHeaderValidationTest` | `ZoneLoop_IsMono_44100Hz` | `tests/audio/ogg_header_validation_test.cpp` |
+
+All Phase 7 audio tests carry label `unit` and run without a display device. CTest filter for all Phase 7 audio tests: `-R "DuckStateMachineTest|OcclusionSmoothingTest|AudioThreadTest|OggHeaderValidationTest"`.
+
 `IRenderer` uses opaque `TextureHandle` (uint32_t) instead of `ITexture*` — the same pattern as `IUIBackend` with `UIElementHandle`. This fully severs the compile-time dependency on Irrlicht headers in any translation unit that only includes `IRenderer.h`, including all simulation test files. `MockRenderer::loadTexture()` returns an incrementing non-zero integer. The concrete `IrrlichtRenderer` maintains `std::unordered_map<TextureHandle, ITexture*>` internally.
 
 - **Shared mock header cross-target pattern**: `MockAudioSystem` and `MockRenderer` are defined in `tests/simulation/mock_audio_system.h` and `tests/simulation/mock_renderer.h` respectively. `ManualClock` is defined in `tests/simulation/manual_clock.h`. These headers are shared across multiple CMake test targets (`simulation_tests`, `ui_tests`, `audio_tests`). To avoid ODR (One Definition Rule) violations, these headers must be HEADER-ONLY GMock declarations (using MOCK_METHOD macros only, no definitions). Each test target that uses any of these shared headers MUST add `tests/simulation/` to its `target_include_directories`. This include path coupling is intentional and must be documented explicitly in the CMakeLists.txt for each consuming target. The ODR rule is safe because each test binary links into its own separate executable scope — there is no shared library or link-time merging across test targets. Required `target_include_directories` entries for each consuming target:
