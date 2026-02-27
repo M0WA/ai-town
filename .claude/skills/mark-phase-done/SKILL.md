@@ -5,7 +5,8 @@ description: Use this skill when the user wants to mark a phase as complete in t
 
 # Mark Phase Done
 
-Mark a phase as **DONE** in `implementation/INDEX.md` and sync the GitHub project board.
+Mark a phase as **DONE** in `implementation/INDEX.md` and in the phase's own file
+(`implementation/phase-[N].md`).
 
 ## Configuration
 
@@ -53,25 +54,52 @@ Use the Skill tool to invoke `validate-phase-done` for `[TARGET_PHASE]`.
 Edit `implementation/INDEX.md`: in the Phase Overview table, change the Status cell for
 `[TARGET_PHASE]` from its current value to `**DONE**`.
 
-Do not touch any other rows, any per-phase files, or any deliverable checkboxes.
+Do not touch any other rows or any deliverable checkboxes.
 
-### Step 4 — Lint check
+### Step 4 — Update phase file
 
-Run the markdown linter to confirm no formatting was broken:
+Edit `implementation/phase-[N].md`: add the line `**Status: DONE**` on a new line immediately
+after the opening `## Phase [N]:` heading line (i.e., between the heading and the blank line
+that precedes `### Goal`).
+
+Example — before:
+
+```markdown
+## Phase 7: Audio Foundation
+
+### Goal
+```
+
+Example — after:
+
+```markdown
+## Phase 7: Audio Foundation
+
+**Status: DONE**
+
+### Goal
+```
+
+If the file already contains `**Status: DONE**` near the top, skip this step.
+
+### Step 5 — Lint check
+
+Run the markdown linter to confirm no formatting was broken in either file:
 
 ```bash
-npx markdownlint-cli 'implementation/INDEX.md'
+npx markdownlint-cli 'implementation/INDEX.md' 'implementation/phase-[N].md'
 ```
 
 Fix any violations before continuing.
 
-### Step 5 — Report
+### Step 6 — Report
 
 Report to the user:
 
 ```
 Phase [N] marked DONE.
 INDEX.md updated.
+phase-[N].md updated.
 ```
 
 If the validation in Step 2 required a user override, also note:
@@ -82,7 +110,8 @@ Note: phase was marked DONE with [M] incomplete deliverable(s) / [K] unmet exit 
 
 ## Rules
 
-- Only `INDEX.md` is modified — never per-phase files, spec files, or deliverable checkboxes.
+- Only `INDEX.md` and `phase-[N].md` are modified — never other phase files, spec files,
+  or deliverable checkboxes.
 - Always confirm the resolved phase number before writing (Step 1 read is mandatory).
-- If the phase is already DONE, exit cleanly without writing.
+- If both files already show DONE, exit cleanly without writing.
 - The git branch inference is a convenience only — when ambiguous, always ask.
