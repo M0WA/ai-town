@@ -179,3 +179,67 @@ All four format checks (check_16–check_19, Phase 5) require the `mutagen` Pyth
 **Zone loop mono requirement rationale**: zone loop SFX (`sfx_zone_residential`, `sfx_zone_commercial`, `sfx_zone_industrial`) are mono positional sources played via `alSourcei(src, AL_SOURCE_RELATIVE, AL_FALSE)` with full 3D spatial positioning. OpenAL renders mono sources with HRTF and distance attenuation. Stereo files cannot be used as positional sources — OpenAL Soft will either reject the buffer or collapse the channels, producing incorrect spatialization. The 18 s hard cap keeps zone loops in the pre-load tier (boundary is 20 s); staying below 20 s avoids promotion to the streaming tier, which is reserved for music stems and ambient beds (sources[58..61]).
 
 **Check number summary**: Check #14 (music JSON sidecar) and Check #15 (`.meta` sidecar, Phase 9 stub) were assigned in Phase 4. Check #16 (`music_*.ogg`/`ambient_*.ogg` sample rate and channel count), Check #17 (`sfx_vehicle_engine_*.ogg` duration and format), Check #18 (`sfx_zone_*.ogg` duration and format), and Check #19 (`stinger_*.wav` mono PCM) are assigned above and implemented in Phase 5. References in other spec files to specific check numbers (e.g., "validate_assets.py Check #14" in the ambient bed sidecar exemption blockquote above) remain valid.
+
+## Phase 7 Placeholder Asset Sign-Off
+
+The following synthetic placeholder OGG files were generated in Phase 7 using SoX v14.4.2
+to unblock streaming smoke tests. These files are silent (−infinity LUFS) and are NOT
+production-quality deliverables — they exist solely to satisfy header validation checks
+(`ov_fopen`, `ov_info`, `vi->rate`, `vi->channels`) and enable code-path smoke testing
+of the streaming and pre-load subsystems before final DAW-authored assets are available.
+
+### Files Created
+
+| File | Path | Rate | Channels | Duration | Format | soxi Verified |
+|---|---|---|---|---|---|---|
+| `music_placeholder.ogg` | `assets/audio/music_placeholder.ogg` | 44100 Hz | 2 (stereo) | 30.00 s | OGG Vorbis | Yes |
+| `ambient_bed_placeholder.ogg` | `assets/audio/ambient_bed_placeholder.ogg` | 44100 Hz | 2 (stereo) | 90.00 s | OGG Vorbis | Yes |
+| `placeholder_zone_loop.ogg` | `assets/audio/placeholder_zone_loop.ogg` | 44100 Hz | 1 (mono) | 15.00 s | OGG Vorbis | Yes |
+| `placeholder_vehicle_engine.ogg` | `assets/audio/placeholder_vehicle_engine.ogg` | 44100 Hz | 1 (mono) | 6.00 s | OGG Vorbis | Yes |
+
+### Music Sidecar JSON
+
+`assets/audio/music_placeholder.json` exists alongside `music_placeholder.ogg` and
+contains valid `bpm` and `beats_per_bar` fields (`{"bpm": 90, "beats_per_bar": 4}`).
+The `AudioSystem` sidecar check at music stem load time will not throw `std::runtime_error`
+for this placeholder file.
+
+### Production Authoring Notes
+
+The 200 ms pre-baked DAW crossfade tail required for production ambient beds (see
+Section 5, "DAW Crossfade Loop") is NOT present in `ambient_bed_placeholder.ogg`.
+This is acceptable for smoke-test purposes only. Production `ambient_day.ogg`,
+`ambient_night.ogg`, `ambient_dawn.ogg`, and `ambient_dusk.ogg` must each carry the
+pre-baked 200 ms crossfade tail authored in the DAW before Phase 10 exit.
+
+Zone loop placeholder `placeholder_zone_loop.ogg` (15.00 s) satisfies the
+check_18 duration constraint (12–18 s) and the mono positional source requirement.
+It does not carry the silence-boundary fade (−60 dBFS head/tail) required for
+production zone loops — silence content is intrinsically at −inf dBFS, which satisfies
+the floor numerically, but it carries no actual loop-boundary fade ramp authoring.
+
+Vehicle engine placeholder `placeholder_vehicle_engine.ogg` (6.00 s) meets the
+`kVehicleEngineLoopMinDurationSeconds = 6.0f` minimum. At the lowest pitch-shift
+ratio (0.75×) the perceived loop duration is ~4.5 s, which is at the lower bound of
+perceptibility threshold — acceptable for code-path testing, not for final delivery
+where a longer authored loop (8–12 s) is recommended.
+
+### Starvation Risk Mitigation
+
+The streaming queue uses 8 OpenAL buffers per stream slot. At 44100 Hz stereo
+(music_placeholder.ogg) that is 8 × 4096 samples × 2 channels × 2 bytes = 131,072 bytes
+(~640 ms headroom). Silent placeholder content produces no decode stalls — the OGG
+bitstream decoder returns frames immediately, keeping the queue full. Buffer starvation
+risk from placeholder files is negligible.
+
+### Sign-Off Checklist
+
+- [x] All four placeholder OGG files are valid OGG Vorbis (`ov_fopen` returns 0)
+- [x] All files are exactly 44100 Hz sample rate
+- [x] `music_placeholder.ogg` and `ambient_bed_placeholder.ogg` are stereo (2 channels)
+- [x] `placeholder_zone_loop.ogg` is mono (1 channel), duration 15.00 s (within 12–18 s)
+- [x] `placeholder_vehicle_engine.ogg` is mono (1 channel), duration 6.00 s (meets 6 s minimum)
+- [x] `music_placeholder.json` sidecar present with `{"bpm": 90, "beats_per_bar": 4}`
+- [x] Production 200 ms pre-baked DAW crossfade NOT required for placeholders (noted above)
+- [x] Starvation risk mitigated by 8-buffer streaming queue (~640 ms headroom at 44100 Hz stereo)
+- [ ] Replace all placeholder files with production DAW-authored assets before Phase 10 exit

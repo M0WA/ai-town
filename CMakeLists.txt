@@ -167,14 +167,26 @@ endif()
 # PRIVATE scope for OpenAL and Vorbis is required: PUBLIC would propagate their
 # headers transitively to all test targets that link aitown_audio, violating the
 # IAudioSystem interface's contract ("no OpenAL include dependencies").
-# Phase 4 replaces placeholder.cpp with AudioSystem.cpp.
+# Phase 7 replaces placeholder.cpp with AudioSystem.cpp, AudioSourcePool.cpp,
+# AudioStream.cpp, and al_check.cpp (real error-checking implementations).
 # ----------------------------------------------------------------------------
 add_library(aitown_audio STATIC
-    src/audio/placeholder.cpp
+    src/audio/AudioSystem.cpp
+    src/audio/AudioSourcePool.cpp
+    src/audio/AudioStream.cpp
+    # al_check.cpp provides the real alCheckError/alcCheckError for non-audio TUs that
+    # include al_check.h and expect a non-no-op implementation.  It is NOT included here
+    # because AudioSystem.cpp defines alCheckError_real/alcCheckError_real for its own use
+    # and the inline stubs in al_check.h serve test TUs that don't link aitown_audio.
+    # Including al_check.cpp in aitown_audio would cause a redefinition conflict with the
+    # inline definitions in al_check.h (both define alCheckError / alcCheckError).
+    # al_check.cpp remains available for future TUs that need the real implementations
+    # while also including al_check.h — those TUs must define AITOWN_AL_CHECK_REAL first.
 )
 target_include_directories(aitown_audio
     PRIVATE   src/audio/           # audio_constants.h and AudioSystem-internal headers
     PRIVATE   src/interfaces/      # needed for AudioSystem.cpp's own includes (IClock, etc.)
+    PRIVATE   ${CMAKE_SOURCE_DIR}  # project-root-relative includes: src/audio/AudioSystem.h etc.
     INTERFACE src/interfaces/      # propagates to consumers
 )
 target_compile_definitions(aitown_audio PRIVATE
@@ -190,6 +202,19 @@ target_link_libraries(aitown_audio PRIVATE
     Vorbis::vorbisfile
     fmt::fmt
 )
+
+# Windows post-build: copy soft_oal.dll to the output directory.
+# The CI build-windows job verifies its presence at build/soft_oal.dll (hard-fail).
+# OpenAL::OpenAL resolves to the vcpkg-installed soft_oal.dll on Windows.
+# Attached to aitown_audio so the DLL is present whenever the library is built.
+if(WIN32)
+    add_custom_command(TARGET aitown_audio POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:OpenAL::OpenAL>
+            $<TARGET_FILE_DIR:aitown_audio>
+        COMMENT "Copying soft_oal.dll"
+    )
+endif()
 
 # ----------------------------------------------------------------------------
 # aitown_sim — City simulation (economy, traffic, zoning, population)
@@ -494,6 +519,28 @@ target_include_directories(audio_tests PRIVATE
     ${CMAKE_SOURCE_DIR}
 )
 aitown_add_tests(audio_tests LABEL "unit")
+
+# Phase 7: extend audio_tests with duck state machine, occlusion, thread, and OGG validation tests
+# Do NOT call add_executable(audio_tests ...) or aitown_add_tests(audio_tests ...) again —
+# duplicate target registration causes a CMake configure error.
+# Vorbis::vorbisfile is already linked above (Phase 0); do NOT re-list it here.
+target_sources(audio_tests PRIVATE
+    tests/audio/duck_state_machine_test.cpp
+    tests/audio/occlusion_smoothing_test.cpp
+    tests/audio/audio_thread_test.cpp
+    tests/audio/ogg_header_validation_test.cpp
+)
+
+# Copy default.mhr (OpenAL Soft HRTF data) next to audio_tests binary.
+# Required when audio_tests runs on a machine with real AL hardware (HRTF init).
+# On machines without AL hardware, audio_tests uses MockAlcFunctions (no device opened).
+# The copy is cross-platform: both Linux and Windows CI include this step.
+add_custom_command(TARGET audio_tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
+        "$<TARGET_FILE_DIR:audio_tests>/default.mhr"
+    COMMENT "Copying default.mhr (OpenAL Soft HRTF data) next to audio_tests"
+)
 
 # ----------------------------------------------------------------------------
 # integration_tests — multi-subsystem tests with EDT_NULL Irrlicht + null audio

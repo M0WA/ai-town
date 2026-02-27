@@ -117,6 +117,28 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
+      # Temporary: replaced by validate_assets.py Check #14 in Phase 5 — remove when Phase 5 merges
+      # Scans assets/audio/music_*.ogg and exits non-zero if any .ogg lacks a companion .json sidecar.
+      # Step placement: immediately after Build and before first ctest invocation — asset validation
+      # must fail fast before any test phase begins.
+      - name: Verify music stem JSON sidecars
+        shell: bash
+        run: |
+          echo "Checking for music stem JSON sidecars..."
+          missing=0
+          for ogg in assets/audio/music_*.ogg; do
+            json="${ogg%.ogg}.json"
+            if [ ! -f "$json" ]; then
+              echo "MISSING sidecar: $json"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "ERROR: One or more music stems are missing their JSON sidecar."
+            exit 1
+          fi
+          echo "All music stem sidecars present."
+
       # Step 10b: Verify libGLEW.a artifact (CI-1) — Phase 4 deliverable.
       # Globbed path — triplet-agnostic; do NOT hard-code a triplet subdirectory.
       # Fails if GLEW was not built/installed by vcpkg (e.g., missing glew from vcpkg.json).
@@ -458,11 +480,11 @@ jobs:
           path: test_results/
           retention-days: 14
 
-      # Step 18: DLL verification — Irrlicht.dll, GLEW32.dll, and default.mhr hard-fail (Phase 4);
-      # soft_oal.dll remains warning-only (OpenAL runtime — presence varies by host configuration).
+      # Step 18: DLL verification — Irrlicht.dll, GLEW32.dll, soft_oal.dll, and default.mhr all hard-fail (Phase 7).
+      # soft_oal.dll and default.mhr hardened from warning-only (Phase 0 placeholder) to hard-fail in Phase 7.
       # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
       # NOTE: Ninja single-config outputs to build/ (not build/Release/).
-      - name: Verify required DLLs and HRTF data (Irrlicht+GLEW+default.mhr hard-fail; soft_oal.dll warning-only)
+      - name: Verify required DLLs and HRTF data (all hard-fail)
         shell: pwsh
         run: |
           # Irrlicht.dll — hard-fail (Phase 1: aitown_render now links Irrlicht).
@@ -478,16 +500,16 @@ jobs:
             exit 1
           }
           Write-Host "GLEW32.dll present."
-          # soft_oal.dll — warning-only (OpenAL runtime; presence varies by host configuration).
-          if (Test-Path "build/soft_oal.dll") {
-            Write-Host "soft_oal.dll found."
-          } else {
-            Write-Warning "soft_oal.dll not found — OpenAL runtime not copied to build/. CI continues."
+          # soft_oal.dll — hard-fail (Phase 7: post-build copy rule now wired; hardened from Phase 0 warning-only placeholder).
+          if (-not (Test-Path "build/soft_oal.dll")) {
+            Write-Error "soft_oal.dll not found"
+            exit 1
           }
-          # default.mhr — hard-fail (Phase 4: post-build copy rule now wired).
+          Write-Host "soft_oal.dll present."
+          # default.mhr — hard-fail (Phase 4: post-build copy rule now wired; Phase 7: also verified here alongside soft_oal.dll).
           # Without this file, AudioSystem HRTF initialization fails at runtime.
           if (-not (Test-Path "build/default.mhr")) {
-            Write-Error "ERROR: default.mhr missing from build/ — HRTF initialization will fail at runtime"
+            Write-Error "default.mhr not found"
             exit 1
           }
           Write-Host "default.mhr present."
