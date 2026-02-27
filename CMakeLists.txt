@@ -203,19 +203,6 @@ target_link_libraries(aitown_audio PRIVATE
     fmt::fmt
 )
 
-# Windows post-build: copy soft_oal.dll to the output directory.
-# The CI build-windows job verifies its presence at build/soft_oal.dll (hard-fail).
-# OpenAL::OpenAL resolves to the vcpkg-installed soft_oal.dll on Windows.
-# Attached to aitown_audio so the DLL is present whenever the library is built.
-if(WIN32)
-    add_custom_command(TARGET aitown_audio POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:OpenAL::OpenAL>
-            $<TARGET_FILE_DIR:aitown_audio>
-        COMMENT "Copying soft_oal.dll"
-    )
-endif()
-
 # ----------------------------------------------------------------------------
 # aitown_sim — City simulation (economy, traffic, zoning, population)
 # Phase 6 replaces placeholder.cpp with CitySimulation.cpp.
@@ -347,6 +334,15 @@ if(WIN32)
             $<TARGET_FILE:GLEW::GLEW>
             $<TARGET_FILE_DIR:aitown>
         COMMENT "Copying GLEW32.dll to aitown output"
+    )
+    # soft_oal.dll: $<TARGET_FILE:OpenAL::OpenAL> resolves to OpenAL32.lib (import lib)
+    # on Windows, not the DLL. Use the explicit vcpkg bin path instead — mirrors the
+    # default.mhr copy pattern below. CI build-windows verifies presence at build/soft_oal.dll.
+    add_custom_command(TARGET aitown POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin/soft_oal.dll"
+            "$<TARGET_FILE_DIR:aitown>/soft_oal.dll"
+        COMMENT "Copying soft_oal.dll (OpenAL Soft runtime) to aitown output"
     )
 endif()
 
