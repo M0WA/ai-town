@@ -25,7 +25,7 @@ if (alcIsExtensionPresent(device_, "ALC_SOFT_HRTF")) {
 }
 ```
 
-- Ship `default.mhr` (HRTF data file) alongside `soft_oal.dll` on Windows and in the Linux package
+- Ship `default.mhr` (HRTF data file) alongside the OpenAL runtime on Windows (see note below) and in the Linux package
 - HRTF failure is a warning (degrade gracefully), not a hard abort
 - **Distance model initialization**: After `alcMakeContextCurrent` succeeds and before any source is created, call:
 
@@ -37,3 +37,20 @@ if (alcIsExtensionPresent(device_, "ALC_SOFT_HRTF")) {
   ```
 
   The `alDistanceModel` call is mandatory — the OpenAL default is `AL_INVERSE_DISTANCE` (unclamped), which allows source gain to exceed 1.0 for near-field sources below the reference distance, causing audio clipping. `AL_INVERSE_DISTANCE_CLAMPED` caps gain at the reference distance.
+
+**Windows OpenAL DLL naming note**: vcpkg installs OpenAL Soft on Windows as `OpenAL32.dll` (the
+standard system-compatible name). The CMake post-build copy rule copies `OpenAL32.dll` from the
+vcpkg bin directory and places it in the output directory renamed as `soft_oal.dll` — the
+canonical bundled name for shipping OpenAL Soft alongside a game binary. The CI hard-fail
+verification step checks for `build/soft_oal.dll`, which is produced by this rename-copy.
+`$<TARGET_FILE:OpenAL::OpenAL>` resolves to `OpenAL32.lib` (the import library) on Windows and
+must NOT be used as the copy source; use the explicit vcpkg path instead:
+
+```cmake
+add_custom_command(TARGET aitown POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin/OpenAL32.dll"
+        "$<TARGET_FILE_DIR:aitown>/soft_oal.dll"
+    COMMENT "Copying OpenAL32.dll (OpenAL Soft runtime) to aitown output as soft_oal.dll"
+)
+```
