@@ -136,6 +136,8 @@ A 404 response means the `glew` port does not exist at the pinned baseline — t
 
 On Windows: `soft_oal.dll` **and** `default.mhr` (HRTF data) copied to output via post-build commands. `libvorbisfile` is a static library in vcpkg's default triplet — no DLL copy is needed for it.
 
+**OpenAL DLL naming**: vcpkg installs OpenAL Soft on Windows as `OpenAL32.dll` (not `soft_oal.dll`). The CMake post-build rule copies `OpenAL32.dll` from the vcpkg bin directory and places it in the output directory renamed as `soft_oal.dll`. The CI verification step checks for `build/soft_oal.dll`, which is correctly produced by this rename-copy. `$<TARGET_FILE:OpenAL::OpenAL>` resolves to `OpenAL32.lib` (the import library) on Windows — do not use it as the DLL copy source; use the explicit vcpkg bin path `${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin/OpenAL32.dll` instead.
+
 ### Linux default.mhr Packaging
 
 On Linux, `default.mhr` is installed by vcpkg alongside the OpenAL Soft library. After `cmake --build build` completes in the `build-linux` job, a CI verification step must confirm that `default.mhr` is accessible at the vcpkg-installed OpenAL Soft HRTF search path. Without this file, `AudioSystem` HRTF initialization fails at runtime even though the binary compiles and links successfully.
@@ -340,5 +342,16 @@ This step uses `find "${{ github.workspace }}" -name "default.mhr"` to locate th
 **Missing HRTF data risk**: `default.mhr` is the OpenAL Soft HRTF dataset used by `AudioSystem` for 3D spatial audio initialization (`ALC_HRTF_SOFT=ALC_TRUE`). If the file is absent at runtime, OpenAL Soft silently falls back to non-HRTF panning — all spatial audio cues (distance attenuation, directional cues, occlusion) degrade or disappear without any error message to the player. The hard-fail CI step ensures that a binary missing `default.mhr` is caught at build time rather than discovered by a player experiencing degraded audio. This prevents shipping a binary with silent spatial audio fallback.
 
 **Missing OpenAL runtime risk**: `soft_oal.dll` is the OpenAL Soft runtime DLL required on Windows. Without it, the `aitown.exe` binary fails to start entirely (DLL load failure). The hard-fail CI step catches this class of packaging error before any artifact is uploaded and retained for 30 days.
+
+**CMake copy rule (corrected in Phase 7 fix commit)**: vcpkg installs OpenAL Soft as `OpenAL32.dll`, not `soft_oal.dll`. The post-build copy command must use `OpenAL32.dll` as the source and rename it to `soft_oal.dll` at the destination. Attaching the copy to `aitown_audio` (a static library) is wrong — static library output dirs differ from the executable output dir. Attach only to the `aitown` executable target:
+
+```cmake
+add_custom_command(TARGET aitown POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin/OpenAL32.dll"
+        "$<TARGET_FILE_DIR:aitown>/soft_oal.dll"
+    COMMENT "Copying OpenAL32.dll (OpenAL Soft runtime) to aitown output as soft_oal.dll"
+)
+```
 
 **Music stem sidecar risk**: `AudioSystem` throws `std::runtime_error` at music stem load time when a sidecar `.json` file is absent. The temporary CI enforcement step prevents a committed `music_*.ogg` from reaching CI without its required sidecar, catching the error before the audio thread is ever launched.
