@@ -183,19 +183,28 @@ All four format checks (check_16–check_19, Phase 5) require the `mutagen` Pyth
 ## Phase 7 Placeholder Asset Sign-Off
 
 The following synthetic placeholder OGG files were generated in Phase 7 using SoX v14.4.2
-to unblock streaming smoke tests. These files are silent (−infinity LUFS) and are NOT
-production-quality deliverables — they exist solely to satisfy header validation checks
-(`ov_fopen`, `ov_info`, `vi->rate`, `vi->channels`) and enable code-path smoke testing
-of the streaming and pre-load subsystems before final DAW-authored assets are available.
+to unblock streaming smoke tests, and subsequently upgraded to functional synthetic tones
+to enable meaningful signal-path testing. These files contain real audio content (synthetic
+tones at approximately −18 to −28 LUFS depending on category) and are NOT production-quality
+deliverables — they exist to satisfy header validation checks (`ov_fopen`, `ov_info`,
+`vi->rate`, `vi->channels`), enable code-path smoke testing of the streaming and pre-load
+subsystems, and exercise the audio mixing, spatialization, and loudness code paths with
+real signal before final DAW-authored assets are available.
+
+**Note on named Phase 4 assets**: The full set of named placeholder assets in
+`implementation/phase-4.md` (music stems, ambient beds, zone loops, vehicle engine loops,
+WAV SFX, and stingers) also uses this functional synthetic tone approach. See the Phase 4
+"Missing Named Asset Placeholders" section for per-file tone design details and loudness
+levels.
 
 ### Files Created
 
-| File | Path | Rate | Channels | Duration | Format | soxi Verified |
-|---|---|---|---|---|---|---|
-| `music_placeholder.ogg` | `assets/audio/music_placeholder.ogg` | 44100 Hz | 2 (stereo) | 30.00 s | OGG Vorbis | Yes |
-| `ambient_bed_placeholder.ogg` | `assets/audio/ambient_bed_placeholder.ogg` | 44100 Hz | 2 (stereo) | 90.00 s | OGG Vorbis | Yes |
-| `placeholder_zone_loop.ogg` | `assets/audio/placeholder_zone_loop.ogg` | 44100 Hz | 1 (mono) | 15.00 s | OGG Vorbis | Yes |
-| `placeholder_vehicle_engine.ogg` | `assets/audio/placeholder_vehicle_engine.ogg` | 44100 Hz | 1 (mono) | 6.00 s | OGG Vorbis | Yes |
+| File | Path | Rate | Channels | Duration | Format | Tone Content | soxi Verified |
+|---|---|---|---|---|---|---|---|
+| `music_placeholder.ogg` | `assets/audio/music_placeholder.ogg` | 44100 Hz | 2 (stereo) | 30.00 s | OGG Vorbis | Sine drone 110 Hz + 220 Hz, −18 LUFS approx., 2 s fade-in/out | Yes |
+| `ambient_bed_placeholder.ogg` | `assets/audio/ambient_bed_placeholder.ogg` | 44100 Hz | 2 (stereo) | 90.00 s | OGG Vorbis | Pink noise, −20 LUFS approx., 3 s fade-in/out | Yes |
+| `placeholder_zone_loop.ogg` | `assets/audio/placeholder_zone_loop.ogg` | 44100 Hz | 1 (mono) | 15.00 s | OGG Vorbis | Pink noise, −26 LUFS approx., 0.5 s fade-in/out | Yes |
+| `placeholder_vehicle_engine.ogg` | `assets/audio/placeholder_vehicle_engine.ogg` | 44100 Hz | 1 (mono) | 6.00 s | OGG Vorbis | Sine harmonics 55 Hz + 110 Hz, −22 LUFS approx. | Yes |
 
 ### Music Sidecar JSON
 
@@ -208,29 +217,32 @@ for this placeholder file.
 
 The 200 ms pre-baked DAW crossfade tail required for production ambient beds (see
 Section 5, "DAW Crossfade Loop") is NOT present in `ambient_bed_placeholder.ogg`.
-This is acceptable for smoke-test purposes only. Production `ambient_day.ogg`,
-`ambient_night.ogg`, `ambient_dawn.ogg`, and `ambient_dusk.ogg` must each carry the
-pre-baked 200 ms crossfade tail authored in the DAW before Phase 10 exit.
+The fade-in/fade-out envelope present on this placeholder exercises the level-ramping
+code path, but is not a substitute for the DAW-authored loop-point crossfade required
+in production. Production `ambient_day.ogg`, `ambient_night.ogg`, `ambient_dawn.ogg`,
+and `ambient_dusk.ogg` must each carry the pre-baked 200 ms crossfade tail authored
+in the DAW before Phase 10 exit.
 
-Zone loop placeholder `placeholder_zone_loop.ogg` (15.00 s) satisfies the
-check_18 duration constraint (12–18 s) and the mono positional source requirement.
-It does not carry the silence-boundary fade (−60 dBFS head/tail) required for
-production zone loops — silence content is intrinsically at −inf dBFS, which satisfies
-the floor numerically, but it carries no actual loop-boundary fade ramp authoring.
+Zone loop placeholder `placeholder_zone_loop.ogg` (15.00 s) satisfies the check_18
+duration constraint (12–18 s) and the mono positional source requirement. The 0.5 s
+fade-in/fade-out exercises the loop-boundary handling code path. The production
+silence-boundary fade (−60 dBFS head/tail) will be authored in the DAW for final
+production zone loop assets before Phase 10 exit.
 
 Vehicle engine placeholder `placeholder_vehicle_engine.ogg` (6.00 s) meets the
-`kVehicleEngineLoopMinDurationSeconds = 6.0f` minimum. At the lowest pitch-shift
-ratio (0.75×) the perceived loop duration is ~4.5 s, which is at the lower bound of
-perceptibility threshold — acceptable for code-path testing, not for final delivery
-where a longer authored loop (8–12 s) is recommended.
+`kVehicleEngineLoopMinDurationSeconds = 6.0f` minimum. The sine harmonic content
+(55 Hz + 110 Hz) exercises the pitch-shift and distance-attenuation paths. At the
+lowest pitch-shift ratio (0.75×) the perceived loop duration is ~4.5 s, which is at
+the lower bound of the perceptibility threshold — acceptable for code-path testing,
+not for final delivery where a longer authored loop (8–12 s) is recommended.
 
 ### Starvation Risk Mitigation
 
 The streaming queue uses 8 OpenAL buffers per stream slot. At 44100 Hz stereo
-(music_placeholder.ogg) that is 8 × 4096 samples × 2 channels × 2 bytes = 131,072 bytes
-(~640 ms headroom). Silent placeholder content produces no decode stalls — the OGG
-bitstream decoder returns frames immediately, keeping the queue full. Buffer starvation
-risk from placeholder files is negligible.
+(`music_placeholder.ogg`) that is 8 × 4096 samples × 2 channels × 2 bytes = 131,072 bytes
+(~640 ms headroom). Synthetic tone content (sine waves and pink noise) produces minimal
+decode stalls — the OGG bitstream decoder returns frames immediately, keeping the queue
+full. Buffer starvation risk from placeholder files is negligible.
 
 ### Sign-Off Checklist
 
@@ -240,6 +252,8 @@ risk from placeholder files is negligible.
 - [x] `placeholder_zone_loop.ogg` is mono (1 channel), duration 15.00 s (within 12–18 s)
 - [x] `placeholder_vehicle_engine.ogg` is mono (1 channel), duration 6.00 s (meets 6 s minimum)
 - [x] `music_placeholder.json` sidecar present with `{"bpm": 90, "beats_per_bar": 4}`
+- [x] All four placeholder files contain functional synthetic tones (−18 to −26 LUFS depending on category) — NOT silent
 - [x] Production 200 ms pre-baked DAW crossfade NOT required for placeholders (noted above)
 - [x] Starvation risk mitigated by 8-buffer streaming queue (~640 ms headroom at 44100 Hz stereo)
+- [x] Named Phase 4 placeholder assets (music stems, ambient beds, zone loops, vehicle engines, WAV SFX, stingers) also upgraded to functional synthetic tones — see `implementation/phase-4.md`
 - [ ] Replace all placeholder files with production DAW-authored assets before Phase 10 exit
