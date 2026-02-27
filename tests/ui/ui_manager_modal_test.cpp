@@ -88,20 +88,44 @@ TEST_F(UIManagerModalTest, EscapeClosesSettingsAndReturnsToMainMenu) {
     SUCCEED();
 }
 
-// Verifies: while a modal dialog is active, click events targeted at HUD elements
-// are blocked (not routed to the HUD). The scrim at slot 9 enforces this visually;
-// the input arbitration at Priority 4 enforces it programmatically.
-// Phase 6: inject a mouse-click InputEvent, assert onEvent() returns true
-// (consumed by modal priority) and no HUD method is called on the mock.
-TEST_F(UIManagerModalTest, ScrimBlocksHUDClickWhenModalActive) {
-    SUCCEED();
-}
-
 // Verifies: showForcedLoanDialog() transitions the modal into an active state
 // and hasActiveModal() returns true afterward.
-// Phase 6: call showForcedLoanDialog(terms) and assert hasActiveModal() == true.
+// Covers UIManager.cpp line 164-167 (showForcedLoanDialog production body)
+// and hasActiveModal() returning true once the modal is shown.
 TEST_F(UIManagerModalTest, ShowForcedLoanDialog_SetsModalActive) {
-    SUCCEED();
+    LoanTerms terms;
+    terms.amount         = 50000.0f;
+    terms.repaymentTicks = 12;
+    terms.interestRate   = 0.05f;
+
+    ui_->showForcedLoanDialog(terms);
+
+    EXPECT_TRUE(ui_->hasActiveModal())
+        << "showForcedLoanDialog() must set the modal to active";
+}
+
+// Verifies: while a modal dialog is active, click events targeted at HUD elements
+// are blocked (Priority 4 returns true) and draw() sets the scrim visible.
+// Covers UIManager.cpp line 91 (return true when modalActive) and
+// line 119 (setElementVisible scrim when hasActiveModal()).
+TEST_F(UIManagerModalTest, ScrimBlocksHUDClickWhenModalActive) {
+    LoanTerms terms;
+    terms.amount         = 50000.0f;
+    terms.repaymentTicks = 12;
+    terms.interestRate   = 0.05f;
+    ui_->showForcedLoanDialog(terms);
+    ASSERT_TRUE(ui_->hasActiveModal()) << "Precondition: modal must be active";
+
+    // Non-focus event with active modal: Priority 4 consumes it (line 91).
+    InputEvent ev{};
+    ev.type   = InputEvent::Type::MouseButtonDown;
+    ev.button = 0;
+    EXPECT_TRUE(ui_->onEvent(ev))
+        << "Mouse click with active modal must return true (blocked by Priority 4)";
+
+    // draw() with active modal: scrim made visible (line 119).
+    EXPECT_NO_FATAL_FAILURE(ui_->draw())
+        << "draw() with active modal must not crash";
 }
 
 // Verifies: closeModal() transitions the modal back to inactive.

@@ -1,5 +1,7 @@
 ## Phase 5: Procedural Terrain
 
+**Status: DONE**
+
 ### Goal
 
 Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` generation, `TerrainSystem` with LOD rebuild deque, `SceneEntityManager`, `TextureCache` full 3-pool implementation with sRGB and splat map upload paths, terrain GLSL shaders, terrain textures, and the full `validate_assets.py` 19-check implementation (checks #1–#19; Check #20 is Phase 9 scope) — plus raising the coverage gate to 80%.
@@ -268,3 +270,10 @@ All Phase 5 deliverables completed and exit criteria satisfied. The following ad
 <!-- SIGN-OFF: sound-artist-opensoftal 2026-02-26 — confirmed validate_assets.py checks #14/#16–#19 reviewed and corrected (bpm==90 V1 enforcement, check #17 upper-bound, check #18 lower-bound, check #19 sample rate); assets/audio/README.md channel-count corrections for sfx_road_build and sfx_earthworks; crisis music bar-count corrected 24→36 bars; vehicle SFX pitch-formula contradiction resolved in production brief -->
 
 <!-- SIGN-OFF: gamedesign-lookandfeel 2026-02-26 — confirmed terrain-interaction.md re-seed cap corrected from 10 to 100 attempts with exhaustion fallback (best-effort map + non-blocking toast); phase-5.md line 24 updated to match -->
+
+### Retroactive Fixes (applied 2026-02-26, Phase 6 cycle)
+
+Two Phase 5 stubs discovered in code during Phase 6 were implemented retroactively:
+
+- **`TerrainSystem::processOneRebuild()` full implementation** (`graphics-dev-irrlicht`): The Phase 5 stub (a TODO comment block at `src/terrain/TerrainSystem.cpp`) was replaced with a full implementation. `IRenderer::rebuildTerrainChunk(TerrainChunkRebuildParams)` added as a pure virtual method on `IRenderer` (and corresponding `MOCK_METHOD` on `MockRenderer`). `IrrlichtRenderer::rebuildTerrainChunk()` implements all five spec steps: eviction sequence (C-4 `getMaterial` rule applied), `SMesh*` build at target LOD grid size, `recalculateBoundingBox()` on each `SMeshBuffer` and the `SMesh`, `addMeshSceneNode(smesh)` + `smesh->drop()`, and `m_chunkNodes[chunkId]` registration. `TerrainSystem` gained `registerChunkPosition()` and `registerChunkHeightmap()` methods; `processOneRebuild()` stride-downsamples the stored LOD0 heightmap to the target LOD resolution and delegates to `m_renderer->rebuildTerrainChunk()`. Guards: `m_renderer == nullptr` (EDT_NULL test context) and absent heightmap both fall through to the LOD tracking update unconditionally.
+- **`scene-graph-ownership.md` Phase 2 spec gap resolved** (`graphics-dev-irrlicht`): The `// TODO: Fill in after Phase 2 SMesh::addMeshBuffer() grab/drop spike.` placeholder at line ~39 was replaced with the four confirmed contract rules from the completed Phase 2 spike: (1) `SMesh::addMeshBuffer()` calls `grab()` — caller must `->drop()` after; (2) `CMeshSceneNode::setMesh()` calls `drop()` on old mesh and `grab()` on new — caller must `->drop()` after `setMesh()`; (3) `SMesh*` always released via `->drop()`, never `delete`; (4) `recalculateBoundingBox()` must be called on every `SMeshBuffer` then the `SMesh` before `addMeshSceneNode()` or `setMesh()`.

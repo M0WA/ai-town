@@ -45,7 +45,7 @@ vcpkg_cmake_configure(
         -DALSOFT_NO_CONFIG_UTIL=ON
         -DALSOFT_EXAMPLES=OFF
         -DALSOFT_CONFIG=OFF
-        -DALSOFT_HRTF_DEFS=OFF
+        -DALSOFT_INSTALL_HRTF_DATA=ON
         -DALSOFT_AMBDEC_PRESETS=OFF
         -DALSOFT_BACKEND_ALSA=${ALSOFT_REQUIRE_LINUX}
         -DALSOFT_BACKEND_OSS=OFF
@@ -64,6 +64,7 @@ vcpkg_cmake_configure(
         -DCMAKE_DISABLE_FIND_PACKAGE_WindowsSDK=ON
         -DCMAKE_POLICY_DEFAULT_CMP0057=NEW
     MAYBE_UNUSED_VARIABLES
+        ALSOFT_INSTALL_HRTF_DATA
         ALSOFT_AMBDEC_PRESETS
         ALSOFT_BACKEND_ALSA
         ALSOFT_BACKEND_COREAUDIO
@@ -77,7 +78,6 @@ vcpkg_cmake_configure(
         ALSOFT_BACKEND_SOLARIS
         ALSOFT_CONFIG
         ALSOFT_CPUEXT_NEON
-        ALSOFT_HRTF_DEFS
         ALSOFT_BACKEND_WINMM
         ALSOFT_BACKEND_DSOUND
         CMAKE_DISABLE_FIND_PACKAGE_WindowsSDK
@@ -103,6 +103,16 @@ vcpkg_fixup_pkgconfig()
 
 file(REMOVE_RECURSE "${CURRENT_PACKAGES_DIR}/debug/include")
 file(REMOVE_RECURSE "${CURRENT_PACKAGES_DIR}/debug/share")
+
+# Manually install the HRTF binary data file with the modern lowercase name.
+# In openal-soft 1.23.1 the file is shipped as "Default HRTF.mhr" (spaces,
+# mixed case).  Versions ≥ 1.24 renamed it to "default.mhr".  We install the
+# 1.23.1 file as "default.mhr" so the POST_BUILD copy rule and CI verification
+# use a consistent modern filename regardless of the installed version.
+file(INSTALL "${SOURCE_PATH}/hrtf/Default HRTF.mhr"
+    DESTINATION "${CURRENT_PACKAGES_DIR}/share/openal/hrtf"
+    RENAME "default.mhr")
+
 vcpkg_install_copyright(FILE_LIST "${SOURCE_PATH}/COPYING")
 file(COPY "${CMAKE_CURRENT_LIST_DIR}/usage" DESTINATION "${CURRENT_PACKAGES_DIR}/share/${PORT}")
 
