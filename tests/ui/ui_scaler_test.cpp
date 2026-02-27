@@ -220,3 +220,20 @@ TEST(UIScalerTest, UIScaler_MouseBeyondVirtualWidth_VirtualX_ClampedToMax)
 // ===========================================================================
 // Phase 3 compile-only stub. Real assertion is a Phase 6 deliverable.
 TEST(UIScalerTest, UIScaler_MouseInBottomBlackBar_VirtualY_ClampedToMax) { SUCCEED(); }
+
+// ===========================================================================
+// Test 8: UIScaler_ZeroViewportWidth_Unproject_ReturnsZeroPoint
+//
+// The zero-viewport guard on UIScaler.cpp line 19 returns VirtualPoint{0,0}
+// when viewportW <= 0 (guards against divide-by-zero on EDT_NULL screens).
+// This test covers that guard branch.
+// ===========================================================================
+TEST(UIScalerTest, UIScaler_ZeroViewportWidth_Unproject_ReturnsZeroPoint) {
+    // viewportW=0 triggers the divide-by-zero guard (UIScaler.cpp line 19-21).
+    UIScaler scaler(1920, 1080, 0, 720, 0, 0);
+
+    UIScaler::VirtualPoint vp = scaler.unproject(640, 360);
+
+    EXPECT_EQ(vp.x, 0) << "Zero viewportW must return VirtualPoint{0, 0}";
+    EXPECT_EQ(vp.y, 0) << "Zero viewportW must return VirtualPoint{0, 0}";
+}

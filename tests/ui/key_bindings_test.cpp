@@ -111,3 +111,12 @@ TEST(KeyBindings, DefaultOpenPauseMenu_IsEscape) {
     KeyBindings kb;
     EXPECT_EQ(kb.openPauseMenu, "Escape");
 }
+
+// ---------------------------------------------------------------------------
+// Load_StubDoesNotCrash — load() is a Phase 8 stub (empty body).
+// Calling it must not crash.  Covers the function-entry line in key_bindings.h.
+// ---------------------------------------------------------------------------
+TEST(KeyBindings, Load_StubDoesNotCrash) {
+    KeyBindings kb;
+    EXPECT_NO_FATAL_FAILURE(kb.load("/dev/null"));
+}

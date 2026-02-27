@@ -1175,3 +1175,25 @@ TEST(EconomyStandaloneTest, GetDensityUnlockScale_Hard) {
         SimulationConstants::density_unlock_scale_hard;
     EXPECT_FLOAT_EQ(cs->getNextUnlockThreshold(Difficulty::Hard), expected);
 }
+
+// EstimateMonthlyUpkeep_DuringGracePeriod_ReturnsZero
+// ManualClock starts at t=0. CitySimulation records m_constructionTimeSeconds=0
+// at construction. Within the 120s grace period, estimateMonthlyUpkeep() must
+// return 0.0f (grace-period early-return path: CitySimulation.cpp line 1601).
+TEST_F(EconomyTest, EstimateMonthlyUpkeep_DuringGracePeriod_ReturnsZero) {
+    // Clock at t=0; grace period = 120s; 0 < 120 → grace return path (L1601).
+    EXPECT_FLOAT_EQ(sim_->estimateMonthlyUpkeep(), 0.0f)
+        << "estimateMonthlyUpkeep() must return 0 within the grace period";
+}
+
+// EstimateMonthlyUpkeep_PostGrace_ReturnsNonNegative
+// After advancing the clock past 120s, the grace-period guard is no longer active
+// and the function falls through to the upkeep computation path (L1603).
+// A freshly-constructed sim with no placed zones has 0 upkeep.
+TEST_F(EconomyTest, EstimateMonthlyUpkeep_PostGrace_ReturnsNonNegative) {
+    // Advance past grace period (120s) so L1603 is reached.
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0f);
+    float upkeep = sim_->estimateMonthlyUpkeep();
+    EXPECT_GE(upkeep, 0.0f)
+        << "estimateMonthlyUpkeep() post-grace must return a non-negative value";
+}
