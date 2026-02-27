@@ -513,3 +513,46 @@ The following Phase 1 items have been verified by code inspection:
 4. **getCameraState() live-path uses getUpVector()**: Code inspection of `src/ui/CameraController.cpp` confirms that the live-camera path (when `camera != nullptr`) assigns `state.up = toVec3(m_camera->getUpVector())` with an explicit comment `// MUST use getUpVector(), NOT (0,1,0)`. The hardcoded `(0,1,0)` form is absent from the live path. VERIFIED.
 
 5. **onSourceRecycled() / m_occlusionMutex contract present**: Code inspection of `architecture/audio-architecture/audio-occlusion.md` confirms that the `onSourceRecycled()` implementation block explicitly shows `std::lock_guard<std::mutex> lk(m_occlusionMutex)` as the first statement before any EFX filter writes, with documentation that this is called from the main thread at SFX pool acquisition/eviction time, that the audio thread's `updateOcclusion()` holds the same mutex during EFX filter writes, and that acquiring `m_occlusionMutex` in `onSourceRecycled()` is correct and carries no deadlock risk because `m_streamMutex` and `m_occlusionMutex` are never held simultaneously by the same thread. VERIFIED.
+
+---
+
+## Phase 7 sound-dev-opensoftal Sign-Off
+
+**Date**: 2026-02-27
+**Role**: sound-dev-opensoftal
+
+Phase 7 full `AudioSystem` RAII implementation delivered. The following items are verified:
+
+1. **Constructor sequence**: `alcOpenDevice` → HRTF attrs context → `alcMakeContextCurrent` →
+   `alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED)` → `alGenSources(62)` → pre-load queue populate →
+   `alcGetProcAddress("alcSetThreadContext")` (throws `std::runtime_error` if null) → EFX filter
+   allocation → `m_occlusionGainTarget[]` init to 1.0f → `m_useThreadLocalCtx = true` → thread
+   launch → `m_initCV.wait_for` 5 s. VERIFIED by code inspection of
+   `src/audio/AudioSystem.cpp`.
+
+2. **Audio thread init order**: `m_fnSetThreadCtx(m_context)` FIRST action; pre-load queue drain;
+   `m_lastDuckWakeTime = m_clock->nowSeconds()` BEFORE `notify_one` (epoch-dt prevention);
+   `m_initDone = true; notify_one()`. VERIFIED — `DuckStateMachine_FirstWake_DtIsNotEpochSized`
+   test confirms epoch-dt prevention; test passes at 16/16.
+
+3. **Shutdown Step 3.5**: `if (m_context && m_useThreadLocalCtx) { alcMakeContextCurrent(m_context); }`
+   executed after `join()` before any AL cleanup. `AL_BUFFERS_QUEUED` query used (never hardcoded
+   count). `m_efxAllocationAttempted` (not `m_efxAvailable`) guards destructor filter loop.
+   VERIFIED by code inspection of destructor sequence.
+
+4. **`IAlcFunctions` seam**: `ialc_functions.h` defines interface; `DefaultAlcFunctions` wraps
+   real ALC in `AudioSystem.cpp`; `MockAlcFunctions` in `audio_thread_test.cpp` returns null for
+   all `getProcAddress` calls. `AudioThread_AbsentThreadLocalContext_ConstructorThrows` now active
+   (GTEST\_SKIP removed) and passing. VERIFIED — 16/16 tests pass.
+
+5. **Source pool layout**: `VehiclePairSlot` defined in `AudioSourcePool.h` (complete type required
+   for `std::array<VehiclePairSlot, kMaxVehiclePairs>`). `kTransientReserveStart=51` for LOW/NORMAL
+   SFX; `kEvictableSFXCount=55` for HIGH/CRITICAL. Atomic pair acquisition in
+   `acquireVehicleEnginePair` — partial acquisition prohibited. VERIFIED.
+
+6. **Bar-boundary tracking**: `m_samplesQueued` software counter incremented by decoded frames.
+   `AL_SAMPLE_OFFSET` never used. Bootstrap branch fires once when
+   `m_nextBarBoundary == 0 && m_samplesQueued > 0`. VERIFIED by code inspection.
+
+7. **Test results**: `ALSOFT_DRIVERS=null AITOWN_HEADLESS=1 ./build/audio_tests` → 16/16 PASSED,
+   0 FAILED. Full project build: 282/282 unit tests pass.

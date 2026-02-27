@@ -288,3 +288,57 @@ A partial commit breaks CI in one of two ways:
 Both partial states leave the repository in a broken or unverified condition. The co-landing requirement ensures CI is green immediately after the commit merges and remains green on every subsequent build.
 
 **This applies to ALL DLL copy rule and CI verification step pairs**, not only the Phase 1 GLEW/Irrlicht pair. Any future DLL that is added via a CMake post-build copy command (e.g., `soft_oal.dll` in Phase 7) must have its corresponding CI verification step added in the same commit as the CMake copy rule. The Phase 7 `soft_oal.dll` / `default.mhr` copy rules and the hard-fail CI step replacing the Phase 0 placeholder must co-land atomically.
+
+## Phase 7 CI Deliverables Sign-Off
+
+### Hard-Fail DLL and HRTF Data Verification (Windows)
+
+Phase 7 hardens the `build-windows` CI job's DLL verification step from the Phase 0 warning-only placeholder to a full hard-fail for both `soft_oal.dll` and `default.mhr`.
+
+**Step name**: `Verify required DLLs and HRTF data (all hard-fail)` (`.github/workflows/ci.yml`, `build-windows` job, Step 18)
+
+**Evidence — `soft_oal.dll` hard-fail**:
+
+```powershell
+if (-not (Test-Path "build/soft_oal.dll")) {
+  Write-Error "soft_oal.dll not found"
+  exit 1
+}
+```
+
+**Evidence — `default.mhr` hard-fail**:
+
+```powershell
+if (-not (Test-Path "build/default.mhr")) {
+  Write-Error "default.mhr not found"
+  exit 1
+}
+```
+
+Both checks use `if (-not (Test-Path ...)) { exit 1 }` syntax — the `||` short-circuit operator is PowerShell 7+ only; GitHub Actions Windows runners use PowerShell 5.1.
+
+### Music Stem JSON Sidecar Enforcement (Linux)
+
+Phase 7 adds a temporary sidecar enforcement step in the `build-linux` CI job.
+
+**Step name**: `Verify music stem JSON sidecars` (`.github/workflows/ci.yml`, `build-linux` job, placed immediately after the `Build` step and before the first `ctest` invocation)
+
+The step scans `assets/audio/music_*.ogg` and exits non-zero if any `.ogg` file lacks a companion `.json` sidecar. When no `music_*.ogg` files exist (glob expands to literal string), the loop body does not execute and the step exits 0 — correct behavior for a codebase with no music stems yet.
+
+**This step is temporary**: it must be removed when Phase 5 delivers Check #14 in `tools/validate_assets.py`, which provides permanent sidecar enforcement via the `validate-assets` CI job.
+
+### `default.mhr` Verification (Linux)
+
+The `build-linux` job already contains a hard-fail verification step added in Phase 4:
+
+**Step name**: `Verify default.mhr HRTF data` (`.github/workflows/ci.yml`, `build-linux` job, Step 13)
+
+This step uses `find "${{ github.workspace }}" -name "default.mhr"` to locate the HRTF data file anywhere in the workspace (including the vcpkg install tree) and exits non-zero if not found. No change required in Phase 7 — the Phase 4 hard-fail form is already in place.
+
+### Risk Mitigation
+
+**Missing HRTF data risk**: `default.mhr` is the OpenAL Soft HRTF dataset used by `AudioSystem` for 3D spatial audio initialization (`ALC_HRTF_SOFT=ALC_TRUE`). If the file is absent at runtime, OpenAL Soft silently falls back to non-HRTF panning — all spatial audio cues (distance attenuation, directional cues, occlusion) degrade or disappear without any error message to the player. The hard-fail CI step ensures that a binary missing `default.mhr` is caught at build time rather than discovered by a player experiencing degraded audio. This prevents shipping a binary with silent spatial audio fallback.
+
+**Missing OpenAL runtime risk**: `soft_oal.dll` is the OpenAL Soft runtime DLL required on Windows. Without it, the `aitown.exe` binary fails to start entirely (DLL load failure). The hard-fail CI step catches this class of packaging error before any artifact is uploaded and retained for 30 days.
+
+**Music stem sidecar risk**: `AudioSystem` throws `std::runtime_error` at music stem load time when a sidecar `.json` file is absent. The temporary CI enforcement step prevents a committed `music_*.ogg` from reaching CI without its required sidecar, catching the error before the audio thread is ever launched.
