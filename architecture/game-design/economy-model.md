@@ -44,18 +44,21 @@
 The following concrete examples clarify the loan pooling formula for implementers and test authors. All values use the $1,000 minimum revenue floor for the debt cap calculation.
 
 **Scenario A — First-loan override with zero revenue (debt cap < minimum floor):**
+
 - `monthly_revenue = $0` → `debtCap = 3 × max($0, $1,000) = $3,000`
 - First loan: `outstanding_debt == 0` → override applies → `principal = $10,000`
 - `outstanding_debt` after first loan = `$10,000 > debtCap ($3,000)` — override permitted
 - Second loan trigger: `remaining = max(0, $3,000 − $10,000) = $0` → no issuance; bond only
 
 **Scenario B — $10,001 boundary (revenue = $3,334/month, debtCap = $10,002):**
+
 - First loan: minimum floor = `$10,000`; `outstanding_debt = $10,000`
 - Second loan: `remaining = max(0, $10,002 − $10,000) = $2`
 - Second loan principal = `min(computed_amount, $2) = $2`
 - Total debt = `$10,000 + $2 = $10,002 = debtCap` (pool exactly exhausted)
 
 **Scenario C — One below boundary (revenue = $3,333/month, debtCap = $9,999):**
+
 - First loan = `$10,000`; `outstanding_debt = $10,000`
 - Second loan: `remaining = max(0, $9,999 − $10,000) = $0` → no issuance; bond only
 

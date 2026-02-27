@@ -1290,7 +1290,7 @@ TEST_F(EconomyTest, MultiLoanPooling_FirstLoanOverride_And_DebtCapBoundary) {
         int64_t debtCap_A    = debtCapMultiplier * std::max(revenue, revenueFloor);
         int64_t firstLoan    = minFloor;  // first-loan override applies
         int64_t outstanding  = firstLoan;
-        int64_t remaining    = std::max(0LL, debtCap_A - outstanding);
+        int64_t remaining    = std::max(int64_t{0}, debtCap_A - outstanding);
 
         EXPECT_EQ(debtCap_A,  3000LL)  << "debtCap for zero revenue = 3×$1,000 = $3,000";
         EXPECT_EQ(firstLoan, 10000LL)  << "first loan = $10,000 minimum floor";
@@ -1303,7 +1303,7 @@ TEST_F(EconomyTest, MultiLoanPooling_FirstLoanOverride_And_DebtCapBoundary) {
         int64_t debtCap_B    = debtCapMultiplier * std::max(revenue, revenueFloor);
         int64_t firstLoan    = minFloor;  // $10,000 minimum floor still
         int64_t outstanding  = firstLoan;
-        int64_t remaining    = std::max(0LL, debtCap_B - outstanding);
+        int64_t remaining    = std::max(int64_t{0}, debtCap_B - outstanding);
 
         EXPECT_EQ(debtCap_B,  10002LL) << "debtCap for $3,334 revenue = $10,002";
         EXPECT_EQ(remaining,      2LL) << "second loan capped at $2 (remaining capacity)";
@@ -1318,7 +1318,7 @@ TEST_F(EconomyTest, MultiLoanPooling_FirstLoanOverride_And_DebtCapBoundary) {
         int64_t debtCap_C    = debtCapMultiplier * std::max(revenue, revenueFloor);
         int64_t firstLoan    = minFloor;
         int64_t outstanding  = firstLoan;
-        int64_t remaining    = std::max(0LL, debtCap_C - outstanding);
+        int64_t remaining    = std::max(int64_t{0}, debtCap_C - outstanding);
 
         EXPECT_EQ(debtCap_C,   9999LL) << "debtCap for $3,333 revenue = $9,999";
         EXPECT_EQ(remaining,      0LL)
