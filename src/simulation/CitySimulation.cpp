@@ -128,13 +128,17 @@ CitySimulation::CitySimulation(IRenderer*      renderer,
     m_taxRates[1] = 0.05f;
     m_taxRates[2] = 0.05f;
 
-    // Initialize traffic rolling windows with null_path_demand_default
+    // Initialize traffic rolling windows to 0.0 (zero-initialised, unwritten slots
+    // excluded via partial-window averaging: divisor = min(totalTicks, window_size)).
+    // Pre-filling with null_path_demand_default would make sumR = 5×0.5 = 2.5 on
+    // tick 0 while the partial-window divisor is 1, producing a factor of 2.5 and
+    // violating the [0,1] interface contract.
     for (int i = 0; i < SimulationConstants::traffic_rolling_window_r_c; ++i) {
-        m_trafficWindowR[i] = SimulationConstants::null_path_demand_default;
-        m_trafficWindowC[i] = SimulationConstants::null_path_demand_default;
+        m_trafficWindowR[i] = 0.0f;
+        m_trafficWindowC[i] = 0.0f;
     }
     for (int i = 0; i < SimulationConstants::traffic_rolling_window_i; ++i) {
-        m_trafficWindowI[i] = SimulationConstants::null_path_demand_default;
+        m_trafficWindowI[i] = 0.0f;
     }
     m_trafficDemandFactorR = SimulationConstants::null_path_demand_default;
     m_trafficDemandFactorC = SimulationConstants::null_path_demand_default;
