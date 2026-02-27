@@ -1,5 +1,7 @@
 ## Phase 4: CI Pipeline Expansion & Asset Tooling Stubs
 
+**Status: DONE**
+
 ### Goal
 
 Harden the CI pipeline (GLEW vcpkg, DLL verification, routing verification), deliver all asset-pipeline tooling stubs and schema files, lock artist production briefs and review gates, add the `src/ui/` 25% coverage floor, and lock `simulation_constants.h` Part B — giving Phase 5 and beyond a verified, gate-enforced build environment to ship against.

@@ -1,5 +1,7 @@
 ## Phase 5: Procedural Terrain
 
+**Status: DONE**
+
 ### Goal
 
 Deliver the fully functional procedural terrain system: chunked `IMeshBuffer` generation, `TerrainSystem` with LOD rebuild deque, `SceneEntityManager`, `TextureCache` full 3-pool implementation with sRGB and splat map upload paths, terrain GLSL shaders, terrain textures, and the full `validate_assets.py` 19-check implementation (checks #1–#19; Check #20 is Phase 9 scope) — plus raising the coverage gate to 80%.
