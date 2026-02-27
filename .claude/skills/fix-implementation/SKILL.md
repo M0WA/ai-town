@@ -37,6 +37,17 @@ Parse `[TARGET_PHASES]`:
 Express `[TARGET_PHASES]` as a human-readable phrase (e.g. "phase-3 and phase-5" or "all phases").
 Issues in out-of-scope phases are noted but do not block completion.
 
+**Review agent model** (optional, default: `haiku`): controls which Claude model is used for the
+review agents launched in Step 2.
+
+Parse `[TARGET_MODEL]`:
+
+- If the user specified a model (e.g. `model=sonnet`, `model=opus`, `model=haiku`), use that value.
+- If nothing was specified, default to **`haiku`**.
+
+Valid values: `haiku`, `sonnet`, `opus`. Any unrecognised value should be rejected with an error
+message before proceeding.
+
 **Prompt substitution**: when constructing any agent prompt in Step 2, replace every occurrence of
 `[TARGET_SEVERITIES]` with the resolved severity list (e.g. "CRITICAL and HIGH"), and replace
 `[PHASE SCOPE IF SPECIFIED]` with "Focus only on [TARGET_PHASES]." — or omit that sentence
@@ -100,7 +111,8 @@ why. Increment `SKIPPED_AGENT_RUNS` by the number of agents skipped this round.
 ### Step 2 — Launch agents in parallel
 
 For each agent selected in Step 1, launch them simultaneously using the Task tool with
-**`model: haiku`** — review agents only read files and report structured issues.
+**`model: [TARGET_MODEL]`** (default: `haiku`) — review agents only read files and report
+structured issues.
 
 **Before constructing any prompt**, resolve both values and hard-code them into every agent prompt
 — including when defaults apply:
@@ -207,6 +219,7 @@ entries — a PERSISTING issue retains its original round.
 ```
 === IMPLEMENTATION REVIEW — Round N ===
 Severity filter: [TARGET_SEVERITIES]
+Review model:    [TARGET_MODEL]
 Agents run: X / 9  (skipped: [list of skipped agents and reason])
 
 [severity] issues: X  (spec: A | plan: B | new: C | persisting: D)
@@ -291,8 +304,9 @@ Update `CLEAN_DOMAINS`:
 
 ### Step 5a — Verification pass (mandatory clean confirmation)
 
-Re-run **all 9 agents** simultaneously using the **Round 1 prompt** (full read, no diff). This is
-an independent re-review from scratch — same prompt as Round 1 but on the now-fixed files.
+Re-run **all 9 agents** simultaneously using the **Round 1 prompt** (full read, no diff) and
+**`model: [TARGET_MODEL]`**. This is an independent re-review from scratch — same prompt as
+Round 1 but on the now-fixed files.
 Increment `ROUND` by 1 for this pass.
 
 Apply the same deduplication rules from Step 3a to the results.
@@ -334,6 +348,7 @@ Output the final summary:
 === FIX IMPLEMENTATION COMPLETE ===
 
 Severity filter: [TARGET_SEVERITIES]
+Review model:    [TARGET_MODEL]
 Rounds completed: N
 Spec fixes applied: TOTAL_SPEC_FIXES
 Plan fixes applied: TOTAL_PLAN_FIXES
@@ -351,7 +366,7 @@ by all 9 agents with no [TARGET_SEVERITIES] issues remaining.
 - No Product Owner plan-sync step is run — the implementation plan is taken as-is
 - All 9 agents run on round 1; later rounds are domain-scoped (Step 1)
 - Do not start Step 3 until all launched agents for the current round have returned
-- Substitute `[TARGET_SEVERITIES]` and `[PHASE SCOPE IF SPECIFIED]` in every agent prompt — never pass them as literal placeholders
+- Substitute `[TARGET_SEVERITIES]`, `[PHASE SCOPE IF SPECIFIED]`, and `[TARGET_MODEL]` in every agent prompt — never pass them as literal placeholders
 - Severity filter runs first (Step 3a): discard ISSUE blocks below `[TARGET_SEVERITIES]` before applying the contradiction rule
 - Contradiction rule applies only to in-scope ISSUE blocks; if filtering leaves no in-scope issues, the response is treated as clean
 - Issues below the severity threshold are out of scope — agents must not report them; if they do, discard silently
