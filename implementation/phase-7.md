@@ -1,5 +1,7 @@
 ## Phase 7: Audio Foundation
 
+**Status: DONE**
+
 ### Goal
 
 Deliver the complete `AudioSystem` RAII class with source pool, streaming architecture, 3D spatial audio, occlusion, and HRTF — all according to the spec's mandatory shutdown and thread-safety requirements.
