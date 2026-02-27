@@ -150,10 +150,23 @@ public:
     // Responsibilities: advance occlusion raycast budget, push time-of-day transitions,
     // and forward any pending crossfade or zone-layer source updates.
     virtual void update(float realDeltaSeconds) = 0;
+
+    // --- Phase 9 Volume Control API ---
+    // These three methods are declared here so that UIManager (Settings > Audio sliders)
+    // can call them via IAudioSystem* without knowing the concrete AudioSystem type.
+    // Phase 8 creates the Settings > Audio slider UI elements only.
+    // Phase 9 wires the sliders to the real AudioSystem implementation.
+    // All gain values are linear multipliers in the range [0.0, 1.0].
+    // Default values: master = 1.0, music = 0.8, SFX = 0.8 (see settings-pause-menu.md).
+    // Values are persisted in the settings/config file (separate from save game files)
+    // and restored on the next session load.
+    virtual void setMasterVolume(float gain) = 0;
+    virtual void setMusicVolume(float gain) = 0;
+    virtual void setSFXVolume(float gain) = 0;
 };
 ```
 
-`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all eleven methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
+`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all fourteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
 
 ---
 

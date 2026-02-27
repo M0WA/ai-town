@@ -164,7 +164,7 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
   | `_sp` | Specular packed (multi-channel roughness/metallic/AO). Upload path: **linear pool** (standard `IVideoDriver::getTexture()`) — packed roughness/metallic/AO data is linear; sRGB decode would corrupt channel values. |
   | `_lm` | Lightmap bake (UV channel 1) |
   | `_billboard` | Billboard imposter atlas (1024×128 DXT5 sRGB, 1×8 horizontal strip) |
-  | `_ui` | UI sprite sheet atlas (2048×2048 RGBA8 UNORM, uncompressed, no mip chain). Upload path: **linear pool** (`IVideoDriver::getTexture()`) — UI palette and icon data is linear; must NOT use the sRGB raw-GL path. |
+  | `_ui` | UI sprite sheet atlas (2048×2048 RGBA8 UNORM, uncompressed, no mip chain). Upload path: **raw GL `glTexImage2D` with `GL_RGBA8` internal format**; `IVideoDriver::getTexture()` is prohibited (Irrlicht's getTexture() cannot disable mip generation, which would generate a ~21 MB mip chain violating the 16 MB budget). Must NOT use the sRGB raw-GL path. See line 206 for full upload specification. |
 
   All suffixes are lowercase. No other suffix patterns are valid. `validate_assets.py` must reject any DDS file whose name does not end with one of these seven suffixes (`_d`, `_n`, `_s`, `_sp`, `_lm`, `_billboard`, `_ui`). The `_billboard` suffix applies exclusively to LOD2 imposter atlases — small building and prop assets that ship a `_billboard.dds` must NOT also ship a `_lod2.b3d` mesh.
 
