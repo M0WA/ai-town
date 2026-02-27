@@ -1,5 +1,7 @@
 ## Phase 6: Simulation Core
 
+**Status: DONE**
+
 ### Goal
 
 Deliver the full V1 city simulation engine: economy, zoning, population growth, traffic, and service coverage — all fully testable through injected interfaces.
