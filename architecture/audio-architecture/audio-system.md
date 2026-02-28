@@ -151,11 +151,14 @@ public:
     // and forward any pending crossfade or zone-layer source updates.
     virtual void update(float realDeltaSeconds) = 0;
 
-    // --- Phase 9 Volume Control API ---
+    // --- Phase 8 Volume Control API ---
     // These three methods are declared here so that UIManager (Settings > Audio sliders)
     // can call them via IAudioSystem* without knowing the concrete AudioSystem type.
-    // Phase 8 creates the Settings > Audio slider UI elements only.
-    // Phase 9 wires the sliders to the real AudioSystem implementation.
+    // Phase 8 adds these three methods to IAudioSystem as pure-virtual members, implements
+    // them in AudioSystem with the correct member declarations and thread-safety semantics
+    // (std::atomic<float> for m_musicVolume and m_sfxVolume), adds them to MockAudioSystem,
+    // and adds three SettingsPanel unit tests. Phase 9 does not need to add or modify these
+    // methods.
     // All gain values are linear multipliers in the range [0.0, 1.0].
     // Default values: master = 1.0, music = 0.8, SFX = 0.8 (see settings-pause-menu.md).
     // Values are persisted in the settings/config file (separate from save game files)
@@ -239,6 +242,16 @@ private:
     // Never write PFNALCSETTHREADCONTEXTPROC in audio_system.h — that type requires
     // <AL/alext.h>, which would break headless test compilation.
     FnSetThreadCtx            m_fnSetThreadCtx{nullptr};
+    // Volume control — cross-thread members (written by main thread, read by audio thread):
+    // m_musicVolume and m_sfxVolume use std::atomic<float> because setMusicVolume() /
+    // setSFXVolume() are called from the main thread while the audio thread reads them
+    // during per-frame source gain updates — a plain float would be a C++ data race (UB).
+    // m_masterVolume uses plain float because setMasterVolume() calls
+    // alListenerf(AL_GAIN, gain) directly on the calling (main) thread and the raw value
+    // is never stored for later audio-thread reads; no cross-thread access occurs.
+    std::atomic<float>        m_musicVolume{0.8f};   // music source gain — written by main thread via setMusicVolume(), read by audio thread during source gain updates
+    std::atomic<float>        m_sfxVolume{0.8f};     // SFX source gain — written by main thread via setSFXVolume(), read by audio thread during source gain updates
+    float                     m_masterVolume{1.0f};  // master AL listener gain — applied immediately by setMasterVolume() via alListenerf(AL_GAIN, gain); no cross-thread read
     // Music ducking state machine (audio thread only for gain writes; main thread reads atomically):
     enum class DuckState { IDLE, DUCKING, DUCKED, RELEASING };
     std::atomic<DuckState>    m_duckState{DuckState::IDLE};

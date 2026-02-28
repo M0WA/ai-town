@@ -158,6 +158,19 @@ The following initialization sequence MUST occur immediately after `createDevice
 
 4. **Extension queries**: Use `glewIsExtensionSupported("GL_EXT_texture_sRGB")` etc. only after a successful `glewInit()`.
 
+**IrrlichtUIBackend construction ordering constraint**: `IrrlichtUIBackend` depends on GLEW
+extension flags being populated (`GLEW_EXT_texture_filter_anisotropic`,
+`GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT`) to correctly initialize `m_maxAnisotropy` in its
+constructor. Therefore, `IrrlichtUIBackend` MUST be constructed **after** `glewInit()` returns
+`GLEW_OK` **or** `GLEW_ERROR_NO_GL_VERSION` (GLVND Linux returns `GLEW_ERROR_NO_GL_VERSION` as a
+valid success indicator; extension flags are still populated). Do NOT instantiate
+`IrrlichtUIBackend` in a C++ member initializer list (which runs before the constructor body
+where `glewInit()` is typically called) — construct it explicitly in the constructor body after
+the `glewInit()` call. If `IrrlichtUIBackend` is constructed before `glewInit()`,
+`GLEW_EXT_texture_filter_anisotropic` evaluates to 0 (false), and `m_maxAnisotropy` silently
+defaults to `1.0f` on all hardware, defeating the anisotropic filtering detection entirely
+without any error or warning.
+
 **GLEW availability spike**: Phase 2 must verify whether the vendored Irrlicht build exposes GLEW symbols. If GLEW is unavailable (Irrlicht compiled without GLEW), all extension checks must use `glGetString(GL_EXTENSIONS)` string matching or `IVideoDriver::queryFeature()` instead. This spike must complete before any `glewIsExtensionSupported()` code is written. The spike result must be documented in BOTH `architecture/graphics-architecture/irrlicht-device-lifecycle.md` under the Phase 2 Spike Results section AND as a one-line comment in `src/rendering/render_system.h` confirming the confirmed extension query path (glewIsExtensionSupported or glGetString(GL_EXTENSIONS) fallback). The code comment ensures in-code documentation for implementers; the architecture doc ensures the decision is visible to non-implementers reviewing the spec.
 
 ### GLEW Spike — Two Independent Questions

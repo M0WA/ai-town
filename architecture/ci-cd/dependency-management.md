@@ -327,7 +327,10 @@ Phase 7 adds a temporary sidecar enforcement step in the `build-linux` CI job.
 
 The step scans `assets/audio/music_*.ogg` and exits non-zero if any `.ogg` file lacks a companion `.json` sidecar. When no `music_*.ogg` files exist (glob expands to literal string), the loop body does not execute and the step exits 0 — correct behavior for a codebase with no music stems yet.
 
-**This step is temporary**: it must be removed when Phase 5 delivers Check #14 in `tools/validate_assets.py`, which provides permanent sidecar enforcement via the `validate-assets` CI job.
+**This step applies to BOTH `build-linux` AND `coverage-linux`** — both jobs build and test the same codebase and can expose the sidecar absence at different stages. The `coverage-linux` job must include an identical music stem sidecar enforcement step placed immediately after its `Build` step and before the first `ctest` invocation, using the same YAML as `build-linux`.
+
+**This step is temporary**: it must be removed when Phase 9 delivers Check #14 in `tools/validate_assets.py`, which provides permanent sidecar enforcement via the `validate-assets` CI job.
+This removal is a Phase 9 CI deliverable — see `implementation/phase-9.md` for the corresponding task.
 
 ### `default.mhr` Verification (Linux)
 

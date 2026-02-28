@@ -61,8 +61,42 @@ public:
   - `CriticalToast_OnPost_AutoPausesCalled`: posting a CRITICAL toast calls `setPaused(true)` exactly once when the CRITICAL queue transitions from empty to non-empty.
   - `CriticalToast_OnLastDismiss_NoAutoResume`: calling `dismissCriticalToast(handle)` on the last remaining CRITICAL toast does **NOT** call `setPaused(false)` — auto-resume requires explicit player unpause. Verify `setPaused(false)` is never called by `NotificationManager` on CRITICAL toast dismissal.
   - `CriticalToast_SecondPost_NoDoublePause`: posting a second CRITICAL toast while one is already active does NOT call `setPaused(true)` again.
-  - `NotificationSystem_AutoPause_OnFirstCriticalToast` *(Phase 8 deliverable)*: construct `NotificationManager` with `NiceMock<MockCitySimulation>` + `MockUIBackend` + `ManualClock`; post one CRITICAL toast when the CRITICAL queue is empty; verify `setPaused(true)` is called exactly once. Primary named test for `tests/ui/notification_system_test.cpp` Phase 8 expansion.
+  - `NotificationSystem_AutoPause_OnFirstCriticalToast` *(Phase 8 deliverable)*: construct `NotificationManager` with `NiceMock<MockCitySimulation>` + `NiceMock<MockUIBackend>` + `ManualClock`; post one CRITICAL toast when the CRITICAL queue is empty; verify `setPaused(true)` is called exactly once. Primary named test for `tests/ui/notification_system_test.cpp` Phase 8 expansion.
   - `NotificationSystem_NoPause_OnNormalToast` *(Phase 8 deliverable)*: post a Normal-severity toast (not CRITICAL) to `NotificationManager`; verify `setPaused(true)` is never called — Normal toasts must not trigger auto-pause.
+- **`UIManagerDeficitIntegrationTest` fixture** *(Phase 8 deliverable — canonical cross-subsystem fixture for deficit-streak CRITICAL toast dispatch)* in `tests/ui/notification_system_test.cpp`. This is a **separate fixture from `NotificationManagerTest`** — it tests the full dispatch path from `pollPendingNotification()` through `UIManager::update()` to `NotificationManager` CRITICAL toast dispatch and `IAudioSystem::triggerStinger()`. **Fixture setup**: real `UIManager` constructed with `NiceMock<MockUIBackend>`, `NiceMock<MockCitySimulation>`, `NiceMock<MockAudioSystem>`, and `ManualClock`. `MockAudioSystem` is injected as `IAudioSystem*` so that `triggerStinger` calls are interceptable and verifiable. **Include path**: `MockAudioSystem` is in `tests/simulation/mock_audio_system.h` (NOT `tests/ui/` — audio mocks live alongside simulation mocks). `TearDown()` resets `ui_` to `nullptr` before mock destruction (mandatory: MockUIBackend destruction while UIManager holds a pointer to it causes a use-after-free crash in strict-mock verification).
+
+  **Approved mock policy deviation**: `NiceMock<MockAudioSystem>` (not `StrictMock`) is used here because `UIManager`'s `if(m_audio)` null-check guard requires a non-null injectable mock; `StrictMock` would require exhaustive construction-time `EXPECT_CALL` setup for all audio interactions. This leniency is compensated by explicit `Times(0)` assertions on negative-stinger tests (`UIManagerDeficit_Month1_NoStingerFired`).
+
+  Eight required test cases:
+
+  - `UIManagerDeficit_Month1_ToastDispatched_NoStinger` *(Phase 8 deliverable)*: set up `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(1))`; place both EXPECT_CALLs **before** calling `ui_.update(dt)` — EXPECT_CALL must precede the action under test: (a) **positive assertion** `EXPECT_CALL(backend_, addStaticText(HasSubstr("2 months"), _, _, _, _)).Times(AtLeast(1))` — prevents test passing trivially if dispatch chain is never entered; (b) **negative assertion** `EXPECT_CALL(audio_, triggerStinger(_)).Times(0)` — stinger must NOT fire on month-1 (condition `== 2 AND m_lastDeficitMonths < 2` not met — currentMonths is 1, not 2); then call `ui_.update(dt)`. **ON_CALL stubs are required**: `pollPendingNotification()` is no longer the dispatch trigger for deficit toasts — toast dispatch was changed to direct polling of `getConsecutiveDeficitMonths()`; the `BudgetDeficitWarn` notification no longer drives the deficit-toast branch in `UIManager::update()`. The `pollPendingNotification()` stub returns `std::monostate{}` to prevent surprise notification processing on unrelated notification types. The critical path is entered via `getConsecutiveDeficitMonths()` returning 1; without the `getConsecutiveDeficitMonths()` stub, NiceMock returns 0 and both assertions pass trivially for the wrong reason — a silent false-pass.
+
+  - `UIManagerDeficit_Month2_ToastDispatched_StingerFires` *(Phase 8 deliverable)*: set up `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(2))`; place `EXPECT_CALL(audio_, triggerStinger(StingerType::CRISIS)).Times(1)` **before** calling `ui_.update(dt)` — EXPECT_CALL must precede the action under test (GMock anti-pattern: setting expectations after the call will cause them to be verified before the call fires, potentially failing or passing for wrong reasons); then call `ui_.update(dt)`. **Production branch condition is `== 2` AND `m_lastDeficitMonths < 2`**: implementers must use `currentMonths == 2 AND m_lastDeficitMonths < 2` in the UIManager branch predicate — using `>= 2` would cause re-fires at month 3+ violating the 'at most once per deficit streak' rule in dynamic-soundscape.md. **ON_CALL stubs are required**: `pollPendingNotification()` is no longer the dispatch trigger for deficit toasts — toast dispatch was changed to direct polling of `getConsecutiveDeficitMonths()`; the stub returns `std::monostate{}` to prevent surprise notification processing on unrelated notification types. The critical path is entered via `getConsecutiveDeficitMonths()` returning 2; without the `getConsecutiveDeficitMonths()` stub, NiceMock returns 0, the `== 2` condition is never true, and the `Times(1)` expectation fails at teardown — another silent false-pass pattern that stubs prevent.
+
+  - `UIManagerDeficit_RapidFireCooldown_SecondStingerDropped` *(Phase 8 deliverable)*: uses a 3-update sequence to isolate the cooldown as the sole suppressor. Place `EXPECT_CALL(audio_, triggerStinger(StingerType::CRISIS)).Times(1)` **before** all updates so GMock can verify the total call count across all three update cycles. Stub `getConsecutiveDeficitMonths()` using a **stateful lambda** — **`ON_CALL` does NOT support `.InSequence()` and will not compile; `InSequence` is an `EXPECT_CALL`-only modifier and MUST NOT be used with `ON_CALL`**. The correct pattern:
+
+    ```cpp
+    int seq_idx = 0;
+    std::vector<int> seq_values = {2, 2, 0, 0, 2, 2}; // 2 calls/tick × 3 ticks (illustrative)
+    ON_CALL(sim_, getConsecutiveDeficitMonths())
+        .WillByDefault([&seq_values, &seq_idx]() {
+            return seq_values[seq_idx < (int)seq_values.size()
+                              ? seq_idx++ : (int)seq_values.size()-1];
+        });
+    ```
+
+    The vector size must cover all `getConsecutiveDeficitMonths()` calls per tick × number of ticks; the illustrative `{2, 2, 0, 0, 2, 2}` covers 2 calls/tick × 3 ticks — adjust to match the actual call count in the `update()` implementation. The test flow: (1) first `ui_.update(dt)` — lambda returns 2 → edge-detect fires (2==2 AND m_lastDeficitMonths==0<2); stinger triggers; m_lastDeficitMonths set to 2; (2) advance `ManualClock` by `1.0` second; (3) second `ui_.update(dt)` — lambda returns 0 → m_lastDeficitMonths resets to 0; no stinger (count ≠ 2); (4) advance `ManualClock` by `2.0` more seconds (total 3 seconds elapsed since first stinger, less than the 5-second cooldown); (5) third `ui_.update(dt)` — lambda returns 2 → edge-detect passes (2==2 AND m_lastDeficitMonths==0<2) BUT cooldown 3 s < 5 s → stinger is suppressed by the cooldown; verify `Times(1)` at teardown — the cooldown is the sole suppressor in the third update. This test requires `ManualClock` advancement and verifies that the `IAudioSystem::triggerStinger()` 5-second minimum-between-same-type-triggers rule (per `architecture/audio-architecture/dynamic-soundscape.md`) is enforced at the `UIManager::update()` call site, not just inside `AudioSystem`. **Why the third stinger is dropped**: suppressed by the stinger cooldown (the edge-detect passes on the 0→2 re-entry, but the 5s cooldown is not yet expired).
+
+  - `UIManagerDeficit_PerStreakSingleFire_NoReFireAfterCooldown_SameStreak` *(Phase 8 deliverable)*: stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(2))`; place `EXPECT_CALL(audio_, triggerStinger(StingerType::CRISIS)).Times(1)` before the first update call; call `ui_.update(dt)` (stinger fires); advance `ManualClock` by 6.0 seconds (greater than the 5-second cooldown); call `ui_.update(dt)` a second time; verify the stinger does NOT fire again despite the cooldown having expired — distinguishes per-streak single-fire behavior from cooldown-only suppression. **ON_CALL stub note**: `pollPendingNotification()` is no longer the dispatch trigger for deficit toasts (dispatch was changed to direct polling of `getConsecutiveDeficitMonths()`); the stub returns `std::monostate{}` to prevent surprise notification processing on unrelated notification types.
+
+  - `UIManagerDeficit_CounterZero_NoToastNoStinger` *(Phase 8 deliverable)*: stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` (no notification) and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0))`; place `EXPECT_CALL(backend_, addStaticText(_,_,_,_,_)).Times(0)` and `EXPECT_CALL(audio_, triggerStinger(_)).Times(0)` BEFORE `ui_.update(dt)`; call `ui_.update(dt)`; verify the test passes — baseline quiescent state with no events and zero streak produces no toast and no stinger.
+
+  - `UIManagerDeficit_StreakBreak_RecoveryToastDispatched` *(Phase 8 deliverable)*: set `m_lastDeficitMonths` to 1 by first calling `ui_.update(dt)` with `getConsecutiveDeficitMonths()` returning 1 (advancing internal state), then stub `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0))` (streak drops from 1 to 0); place `EXPECT_CALL(backend_, addStaticText(HasSubstr("Recovering"), _, _, _, _)).Times(AtLeast(1))` BEFORE the second `ui_.update(dt)` call — verifies that when `getConsecutiveDeficitMonths()` drops from 1 to 0 (`m_lastDeficitMonths > 0 AND currentMonths == 0`), `UIManager::update()` dispatches a "Finances Recovering" Normal-queue toast to `NotificationManager`. The `HasSubstr("Recovering")` matcher must match the exact toast message string defined in `UIManager`; implementers MUST use a message containing "Recovering" in the recovery toast dispatch branch. Stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` on both update calls to prevent unrelated notification processing.
+
+  - `UIManagerDeficit_Month1StreakBreak_ReenablesFutureStreak` *(Phase 8 deliverable)*: verify that after a streak break (consecutive deficit months drops to 0), a subsequent month-1 deficit re-fires the CRITICAL toast (streak tracking resets). Three-phase sequence: (1) stub `getConsecutiveDeficitMonths()` returning 1, call `ui_.update(dt)` (month-1 CRITICAL toast fires, `m_lastDeficitMonths` set to 1); (2) stub `getConsecutiveDeficitMonths()` returning 0, call `ui_.update(dt)` (streak break, recovery toast, `m_lastDeficitMonths` reset to 0); (3) stub `getConsecutiveDeficitMonths()` returning 1, place `EXPECT_CALL(backend_, addStaticText(HasSubstr("2 months"), _, _, _, _)).Times(AtLeast(1))` BEFORE the third `ui_.update(dt)` call — verifies that `UIManager` treats the re-entry into month-1 deficit as a fresh streak start and posts the month-1 CRITICAL toast again. Without this reset, a buggy implementation that never clears `m_lastDeficitMonths` on streak break would silently suppress future month-1 toasts. Stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` on all three update calls.
+
+  - `UIManagerDeficit_Month3_SandboxMode_NoGameOverModal` *(Phase 8 deliverable)*: stub `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(3))` and stub `ON_CALL(sim_, getGameMode()).WillByDefault(Return(GameMode::Sandbox))`; place `EXPECT_CALL(backend_, showGameOverModal()).Times(0)` (or equivalent modal-trigger assertion on `MockUIBackend`) BEFORE `ui_.update(dt)`; call `ui_.update(dt)`; verify the test passes — when `GameMode::Sandbox`, a month-3 deficit streak does NOT call `transitionToGameOver()` (or its equivalent UI trigger), confirming the Sandbox guard at the UIManager game-over branch. Stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` to prevent unrelated notification processing. The `Times(0)` assertion is the primary enforcement: without it, a missing Sandbox guard would silently fire the game-over modal and the test would still pass because `NiceMock` ignores unexpected calls by default.
+
 - **`CameraController` testability**: `CameraController`'s pan/zoom/rotate input processing must be unit-testable by injecting synthetic `InputEvent` structs (defined in `src/platform/input_event.h`). The controller must accept a `CameraState` struct (position, target, pitch, yaw) and expose `getCameraState()` — tests drive events in, read state out, verify pitch clamping at [−70°, −20°] and edge-scroll behavior without a live scene node. `CameraController` must also expose `bool isEdgeScrollEnabled() const` as a public accessor returning the current value of `m_edgeScrollEnabled`; this is required by test case 6 (`CameraController_EdgeScroll_EnabledByDefaultInFullscreen`) to assert constructor initial state without input injection. **Source location**: `CameraController.h/.cpp` live in `src/ui/` (it is an input/UI concern, not a rendering concern); test file is `tests/ui/camera_controller_test.cpp`. This placement ensures `CameraController` is covered by the `src/ui/` 95% coverage gate.
 - **`CameraController` input abstraction**: `CameraController` must accept an `InputEvent` struct (defined in `src/platform/input_event.h`) rather than Irrlicht's `SEvent`, to avoid pulling Irrlicht headers into test translation units:
 
@@ -135,7 +169,20 @@ public:
 - **`ModalDialog` + auto-pause testability** (tests in `tests/ui/` and `tests/simulation/`). Required test cases:
   1. `ModalDialog_OnOpen_SimulationIsPaused` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: calling `UIManager::showModal()` calls `CitySimulation::setPaused(true)` before returning.
   2. `ModalDialog_OnOpen_SpeedSelectorIsDisabled` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: `IUIBackend::setElementEnabled(..., false)` is called on the speed selector handle (not `setElementVisible` — the selector remains visible but non-interactive).
-  3. `ModalDialog_OnClose_SimulationResumes` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: dismissing the modal calls `setPaused(false)` and calls `setElementEnabled(..., true)` on the speed selector to re-enable it.
+  3. `ModalDialog_OnClose_SimulationResumes` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: dismissing the modal calls `setPaused(false)` and calls `setElementEnabled(..., true)` on the speed selector to re-enable it. **Pre-condition**: the fixture MUST ensure `isPaused() == false` before calling `showModal()`, so that `UIManager` observes an unpaused simulation and sets its internal `m_didPauseSim` flag to `true` on modal open. Include `EXPECT_CALL(sim_, isPaused()).WillOnce(Return(false))` as part of the `showModal()` setup stub. **Assertion note**: `setPaused(false)` is called on `closeModal()` only when `m_didPauseSim == true` (i.e., only when `UIManager` paused the simulation when opening this modal); if the simulation is already paused at `showModal()` time, `m_didPauseSim` is left `false` and `setPaused(false)` will NOT be called on `closeModal()` — testing from an already-paused initial state would produce a false pass because the assertion would vacuously hold for the wrong reason. **Ordering assertion (mandatory)**: `closeModal()` MUST call `setPaused(false)` before `setModalActive(false)`. Enforce this with `::testing::InSequence seq;` declared before both `EXPECT_CALL`s so GMock fails immediately if the order is violated.
+
+     ```cpp
+     ::testing::InSequence seq;
+     // setPaused(false) must fire BEFORE setModalActive(false):
+     // closeModal() must unpause the simulation before clearing the modal-active flag
+     // so that any code observing isModalActive()==false can assume the simulation
+     // is already unpaused and will not see a transient paused+non-modal state.
+     EXPECT_CALL(sim_, setPaused(false)).Times(1);
+     EXPECT_CALL(ui_,  setModalActive(false)).Times(1);
+     uiManager_->closeModal();
+     ```
+
+     The `InSequence` guard covers exactly these two calls. Do NOT use `.After()` syntax here — `InSequence` is the preferred style for consecutive paired assertions in this test suite (consistent with `UIManagerDrawOrderTest` usage above). An implementation that reverses the order (`setModalActive(false)` before `setPaused(false)`) will fail this test with a GMock sequence violation, which is the intended enforcement.
   4. `UndoSystem_BlockedDuringModal_HotkeyIgnored` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: injecting a Ctrl+Z `InputEvent` while modal is active does NOT call any undo operation.
   5. `UndoSystem_BlockedDuringModal_ButtonGrayedOut` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: while modal is active, `setElementEnabled(..., false)` is called on the undo button element via `IUIBackend`.
   6. `CriticalToast_DuringModal_IsQueued_NotDisplayed` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: posting a CRITICAL toast while a blocking modal is active queues the toast but does NOT display it immediately (no `addStaticText` call to `IUIBackend` for the toast element). After modal dismissal, the toast becomes visible (a deferred `addStaticText` call is verified).
@@ -143,7 +190,23 @@ public:
   8. `ModalDialog_OnClose_WithQueuedCriticalToast_AutoPauseReevaluated` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: post a CRITICAL toast while a blocking modal is active (verifies no second `setPaused(true)` call during modal-active period), then dismiss the modal (`UIManager::closeModal()`), then verify: (a) the queued CRITICAL toast is now displayed (`addStaticText` called on `MockUIBackend`), and (b) `setPaused(true)` is called **once more** during `closeModal()` re-evaluation — meaning **twice total** across the test (once on modal open, once on re-evaluation in `closeModal()` because CRITICAL queue is non-empty); `setPaused(false)` is NOT called — simulation stays paused because the CRITICAL toast remains active after modal close. **Reconciliation with StrictMock matrix**: The StrictMock Expected Call Matrix entry for this test specifies `setPaused(true) × 2` (total) and `setPaused(false) × 0` — the prose description above matches this. The "exactly once" wording in prior spec drafts referred to the re-evaluation step only (one call within `closeModal()`), not the total across the test; this was ambiguous and has been corrected to "once more during closeModal()". This test exercises the deferred re-evaluation path explicitly — without it, the re-evaluation call in the `closeModal()` code path is unverified and can be silently dropped. **Deferred `addStaticText` call timing**: The CRITICAL toast's `addStaticText` call to `MockUIBackend` MUST occur synchronously within the same `closeModal()` call stack — NOT deferred to the next `update()` tick. This is a firm implementation requirement: the `closeModal()` implementation must call the display logic synchronously, not schedule it for the next frame. Tests assert the element handle's presence immediately after `closeModal()` returns, with no intervening `update()` call. Implementations that defer display to `update()` do not meet this requirement and must be refactored.
   9. `Modal_SpeedSelectorGrayed_DespiteCriticalToast_SpeedAccessible_WhenModalOnly` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: when only a CRITICAL toast is active (no modal), the speed selector remains ENABLED (accessible per CRITICAL-toast-pause spec). This distinguishes modal-pause (selector grayed) from CRITICAL-toast-pause (selector accessible).
   10. `ModalDialog_OnClose_WithEmptyCriticalQueue_NoAutoRePause` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: open a modal (verifies `setPaused(true)` called once), then dismiss the modal with no CRITICAL toasts in the queue, then verify: (a) `setPaused(false)` is called exactly once (simulation resumes), and (b) `setPaused(true)` is NOT called again during `closeModal()`. This is the inverse of test 8 — it confirms that the CRITICAL toast auto-pause re-evaluation in `closeModal()` does NOT call `setPaused(true)` when the CRITICAL queue is empty, preventing a spurious re-pause on normal modal dismiss.
-  11. `BondModal_ExhaustedUses_ButtonGrayedOut` *(Phase 8 deliverable — no Phase 3 stub; authored in full in Phase 8)*: construct `UIManager` with `StrictMock<MockUIBackend>` and `NiceMock<MockCitySimulation>` stubbed to return 0 from `ICitySimulation::getOutstandingBondUses()`; trigger the forced loan dialog Screen 2 render path (the screen showing the three action options); verify `IUIBackend::setElementEnabled(bondButtonHandle, false)` is called — confirming the Emergency Municipal Bond option is grayed when no bond uses remain. This test did not exist at Phase 3 time and has no fixture stub. Test file: `tests/ui/modal_dialog_test.cpp`. Mock policy: `StrictMock<MockUIBackend>` + `NiceMock<MockCitySimulation>`. **Fixture isolation**: `BondModalTest` MUST be a standalone test class that does NOT inherit from `UIManagerModalTest`. Inheriting would cause `UIManagerModalTest::SetUp()` to initialize `ui_` as `NiceMock<MockUIBackend>`, overriding the required `StrictMock<MockUIBackend>` and silently allowing unexpected calls that the test must catch. `BondModalTest` must own its own `StrictMock<MockUIBackend> ui_` member declared directly in the `BondModalTest` class and initialized in its own `SetUp()`. Cross-reference: `architecture/ui-ux/modal-dialog-system.md` forced loan Screen 2 spec; `architecture/game-design/economy-model.md` bond-uses-per-difficulty table.
+  11. `CriticalToast_HiddenWhileModalActive_ReappearsAfterClose` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: fixture is `NotificationManagerTest` (using `NiceMock<MockUIBackend>` + `NiceMock<MockCitySimulation>` + `ManualClock`); file is `notification_system_test.cpp`. Test sequence: (1) open a blocking modal so `isModalActive()` returns `true`; (2) post a CRITICAL toast to `NotificationManager` — verify `isElementVisible(toastHandle)` returns `false` immediately (toast is created in a hidden state because a modal is active, i.e., no `addStaticText` call or `setElementVisible(..., true)` is made while the modal-active flag is set); (3) call `closeModal()` synchronously; (4) advance `ManualClock` by one frame delta and call `NotificationManager::update(dt)` once; (5) verify `isElementVisible(toastHandle)` returns `true` — the CRITICAL toast that was hidden during modal-active state reappears (becomes visible) in the next frame after `closeModal()`. This test exercises the Priority 2 dual-guard interaction path: the modal-active guard suppresses toast display, and the post-close re-evaluation path restores visibility. The `NiceMock<MockCitySimulation>` satisfies the `ICitySimulation*` constructor parameter without requiring exhaustive stubs; the `NiceMock<MockUIBackend>` tracks `isElementVisible` state through delegated ON_CALL return values keyed by handle.
+  12. `BondModal_ExhaustedUses_ButtonGrayedOut` *(Phase 8 deliverable — no Phase 3 stub; authored in full in Phase 8)*: construct `UIManager` with `StrictMock<MockUIBackend>` and `NiceMock<MockCitySimulation>` stubbed to return 0 from `ICitySimulation::getOutstandingBondUses()`; trigger the forced loan dialog Screen 2 render path (the screen showing the three action options); verify `IUIBackend::setElementEnabled(bondButtonHandle, false)` is called — confirming the Emergency Municipal Bond option is grayed when no bond uses remain. This test did not exist at Phase 3 time and has no fixture stub. Test file: `tests/ui/modal_dialog_test.cpp`. Mock policy: `StrictMock<MockUIBackend>` + `NiceMock<MockCitySimulation>`. **Fixture isolation**: `BondModalTest` MUST be a standalone test class that does NOT inherit from `UIManagerModalTest`. Inheriting would cause `UIManagerModalTest::SetUp()` to initialize `ui_` as `NiceMock<MockUIBackend>`, overriding the required `StrictMock<MockUIBackend>` and silently allowing unexpected calls that the test must catch. `BondModalTest` must own its own `StrictMock<MockUIBackend> ui_` member declared directly in the `BondModalTest` class and initialized in its own `SetUp()`. Cross-reference: `architecture/ui-ux/modal-dialog-system.md` forced loan Screen 2 spec; `architecture/game-design/economy-model.md` bond-uses-per-difficulty table.
+
+## SettingsPanelTest Fixture (Phase 8)
+
+**Fixture setup**: `NiceMock<MockUIBackend>` + `ManualClock` + `StrictMock<MockAudioSystem> audio_`; `TearDown()` resets `panel_` (or equivalent `SettingsPanel` pointer) to `nullptr` before BOTH `MockUIBackend` AND `StrictMock<MockAudioSystem>` are destroyed. The `StrictMock<MockAudioSystem>` is the higher-risk destructor path: strict mocks fire unexpected-call errors on destruction if any unmatched call occurs during teardown, so `panel_` must be fully reset first.
+
+**Why `StrictMock` (not `NiceMock`) for `MockAudioSystem`**: The three volume-control test cases (`setMasterVolume`, `setMusicVolume`, `setSFXVolume`) exercise direct `IAudioSystem` calls made by the slider callbacks in `SettingsPanel`. These calls must be verified exactly — every slider movement must produce the correct `IAudioSystem` call with the correct gain value, and no unexpected `IAudioSystem` calls must occur. `NiceMock` would silently swallow unexpected calls, hiding regressions where a slider inadvertently triggers the wrong volume method or triggers it more times than expected. `StrictMock` enforces that only calls declared via `EXPECT_CALL` occur, making the fixture self-auditing for the volume-control path.
+
+**Three required test cases**:
+
+- `GraphicsTab_CountdownExpiry_AutoRevertsSettings` — Apply settings changes (stub a resolution change callback); advance `ManualClock` by 11 seconds (past the 10-second countdown); call `SettingsPanel::update()` after each advancement; verify that settings revert to pre-Apply values (the applied change is cancelled) — verifies the `IClock::nowSeconds()` countdown expiry path.
+
+- `GraphicsTab_ConfirmBeforeExpiry_SettingsRetained` — Apply settings changes; call confirm within 5 seconds (before 10-second expiry); advance `ManualClock` to 11 seconds; call `SettingsPanel::update()` after each advancement; verify settings are NOT reverted — verifies that player confirmation before expiry permanently applies the change.
+
+- `GraphicsTab_CountdownText_DecrementsEachSecond` — Apply settings changes; advance `ManualClock` one second at a time for 3 seconds; after each second advance, call `SettingsPanel::update()`; use `EXPECT_CALL(backend_, setElementText(countdownLabelHandle, HasSubstr("Reverting in"))).Times(AtLeast(3))` (placed before update calls) to verify the modal body label is updated with the correct per-second countdown text on each tick (ref: `architecture/ui-ux/settings-pause-menu.md` — "displayed numerically", "decrements each real second").
+
 - **`HUD` testability — undo countdown and density unlock preview** (tests in `tests/ui/undo_button_test.cpp` and `tests/ui/budget_detail_panel_test.cpp`). Required Phase 8 test cases:
   - `UndoCountdown_AmberAt10xSpeed_ImmediatelyOnAction` *(Phase 8 deliverable)*: construct `HUD` with `ManualClock` at simulation speed 10×; take an undoable action; assert that the undo button label is amber immediately at action time (`t=0`), because the total undo window at 10× speed is ≤6 real seconds, meeting the amber-on-creation threshold. Verifies `hud-layout.md` rule: "set amber if `remainingSeconds < 5.0 || totalWindowSeconds <= 6.0`" — the `totalWindowSeconds <= 6.0` branch fires at 10× speed from the moment the action is taken.
   - `DensityUnlockPreview_HiddenWhenSentinelReturned` *(Phase 8 deliverable)*: construct `HUD` with `MockCitySimulation` stubbed to return `SimulationConstants::kNoUnlockThreshold` (`−1.0f`) from `getNextUnlockThreshold()`; call `HUD::update()`; verify `IUIBackend::setElementVisible(densityUnlockHandle, false)` is called (element hidden) and no label text is set to `"−1"` or `"−1.0"`. Verifies the sentinel guard from `hud-layout.md`: the HUD MUST intercept `kNoUnlockThreshold` before any formatting occurs and hide the element unconditionally.
@@ -338,6 +401,10 @@ public:
   #include "simulation_types.h"
   #include "ISimulationPauser.h"
 
+  // BudgetDeficitWarn and SimNotification are defined in simulation_types.h (already included above):
+  //   struct BudgetDeficitWarn {};
+  //   using SimNotification = std::variant<std::monostate, BudgetDeficitWarn>;
+
   // ICitySimulation extends ISimulationPauser so that CitySimulation implements both interfaces
   // through a single concrete class. UIManager passes m_sim to NotificationManager as ICitySimulation*
   // — NotificationManager needs getConsecutiveDeficitMonths() (on ICitySimulation) as well as
@@ -416,6 +483,39 @@ public:
       //       bool unlock_flags[6];                        // true if the corresponding tier is unlocked
       //   };
       virtual DensityUnlockState getDensityUnlockState() const = 0;
+
+      // Pending-notification poll — called by UIManager::update() once per frame to drain the
+      // simulation's outbound event queue. Returns the next pending SimNotification, or
+      // std::monostate if no notification is queued.
+      //
+      // BudgetDeficitWarn semantics: enqueued by CitySimulation once per budget tick when
+      // budget_surplus_pct ≤ −0.25 (the forced-loan warning threshold at −25% deficit; see
+      // architecture/game-design/economy-model.md). It is NOT enqueued for minor deficits
+      // where budget_surplus_pct > −0.25 (deficits less severe than 25%). This ensures the
+      // event is only fired as part of the bankruptcy-warning system, not for everyday
+      // budget imbalances.
+      //
+      // UIManager reads getConsecutiveDeficitMonths() via DIRECT POLLING each frame in UIManager::update()
+      // (NOT triggered by BudgetDeficitWarn receipt). UIManager tracks m_lastDeficitMonths; the CRISIS
+      // stinger fires when currentMonths == 2 AND m_lastDeficitMonths < 2. BudgetDeficitWarn receipt
+      // determines which warning toast to dispatch only.
+      //
+      // Type aliases defined in simulation_types.h (ICitySimulation.h already includes it):
+      //   struct BudgetDeficitWarn {};  // tag type — no payload; use getConsecutiveDeficitMonths()
+      //                                  // for context
+      //   using SimNotification = std::variant<std::monostate, BudgetDeficitWarn>;
+      //   // std::monostate = no notification queued; BudgetDeficitWarn = deficit event pending.
+      //   // Additional notification types will extend SimNotification in later phases.
+      virtual SimNotification pollPendingNotification() = 0;
+
+      // Outstanding municipal bond uses — returns the number of emergency bond issues remaining
+      // for the current game session. Decremented by 1 each time the player accepts a forced loan.
+      // Difficulty tiers: Easy = 3, Normal = 2, Hard = 1. Returns 0 when all uses are exhausted.
+      // ModalDialog grays the Emergency Municipal Bond option and calls
+      //   setElementEnabled(bondButtonHandle, false)
+      // when this returns 0.
+      // Cross-reference: architecture/game-design/economy-model.md (Emergency Municipal Bond section).
+      virtual int getOutstandingBondUses() const = 0;
   };
   ```
 
@@ -469,6 +569,17 @@ public:
       // Density-unlock state accessor. Returns consecutive-month counters and unlock flags for all 6
       // density tiers. Cross-reference: implementation/phase-11.md (getDensityUnlockState deliverable).
       MOCK_METHOD(DensityUnlockState, getDensityUnlockState, (), (const, override));
+
+      // Notification polling — drains simulation event queue. Returns next SimNotification or
+      // std::monostate when queue is empty.
+      // Test usage: ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(BudgetDeficitWarn{}));
+      // Note: BudgetDeficitWarn{} is implicitly convertible to SimNotification because
+      // SimNotification = std::variant<std::monostate, BudgetDeficitWarn>.
+      MOCK_METHOD(SimNotification, pollPendingNotification, (), (override));
+
+      // Outstanding bond uses — remaining bond-issue count per difficulty (Easy=3, Normal=2, Hard=1).
+      // Returns 0 when exhausted; ModalDialog grays the Emergency Municipal Bond option.
+      MOCK_METHOD(int, getOutstandingBondUses, (), (const, override));
   };
   ```
 
@@ -503,7 +614,7 @@ public:
     virtual void          setCamera(const CameraParams& p) = 0;       // main-thread-only
 };
 
-// Canonical IAudioSystem — 11 methods. Authoritative definition in audio-architecture/audio-system.md.
+// Canonical IAudioSystem — 14 methods. Authoritative definition in audio-architecture/audio-system.md.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType, SimSpeed,
 // SoundPriority, TimeOfDay, vec3, CameraState). Never expose ALuint, ALfloat, or AL_* constants through this interface.
 // Forward declarations (defined in game-domain headers, not OpenAL headers):
@@ -567,9 +678,15 @@ public:
     // Responsibilities: advance occlusion raycast budget, push time-of-day transitions,
     // and forward any pending crossfade or zone-layer source updates.
     virtual void update(float realDeltaSeconds) = 0;
+
+    // Volume control — see audio-system.md Volume Control API section.
+    // Phase 8 creates the Settings > Audio slider UI elements; Phase 9 wires them to AudioSystem.
+    virtual void setMasterVolume(float gain) = 0;
+    virtual void setMusicVolume(float gain) = 0;
+    virtual void setSFXVolume(float gain) = 0;
 };
 
-// MockAudioSystem — GMock implementation of IAudioSystem's 11 methods.
+// MockAudioSystem — GMock implementation of IAudioSystem's 14 methods.
 // Source location: tests/simulation/mock_audio_system.h
 // Shared across simulation_tests, ui_tests, audio_tests CMake targets (header-only).
 class MockAudioSystem : public IAudioSystem {
@@ -585,6 +702,9 @@ public:
     MOCK_METHOD(void,        setTimeOfDay,          (TimeOfDay tod),                             (override));
     MOCK_METHOD(void,        transitionToGameplay,  (),                                          (override));
     MOCK_METHOD(void,        update,                (float realDeltaSeconds),                    (override));
+    MOCK_METHOD(void,        setMasterVolume,       (float gain),                                (override));
+    MOCK_METHOD(void,        setMusicVolume,        (float gain),                                (override));
+    MOCK_METHOD(void,        setSFXVolume,          (float gain),                                (override));
 };
 ```
 

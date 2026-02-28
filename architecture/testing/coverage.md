@@ -183,6 +183,34 @@ if ! grep -q "SF:.*src/simulation/" coverage_filtered.info; then
 fi
 ```
 
+**Phase 6 `src/simulation/` per-file 85% floor** (CI enforcement step, runs after the src/simulation/ SF preflight and before the 95% total gate):
+
+Add this step to the `coverage-linux` job immediately after the `src/simulation/` SF preflight step:
+
+```bash
+# Per-file 85% floor for src/simulation/ — any file below 85% is a blocking defect.
+# This enforces the "any simulation file below 85% is a blocker" rule from the spec.
+# Uses lcov --list output; assumes '|' column delimiter (validated by Phase 4 preflight).
+min_sim=$(lcov --list coverage_filtered.info \
+  | grep -E "src/simulation/" \
+  | grep -v "^Total" \
+  | awk -F'|' '{print $NF+0}' \
+  | sort -n \
+  | head -1)
+if [ -z "$min_sim" ]; then
+  echo "PREFLIGHT FAIL: No src/simulation/ files found in lcov output for per-file check."; exit 1
+fi
+awk -v pct="$min_sim" 'BEGIN {
+  if (pct+0 < 85.0) {
+    print "FAIL: worst src/simulation/ file coverage " pct "% < 85% Phase 6 per-file floor"; exit 1
+  } else {
+    print "PASS: worst src/simulation/ file coverage " pct "% >= 85%"
+  }
+}'
+```
+
+This step fails CI if any single `src/simulation/` file falls below 85% — catching under-tested simulation paths that the 95% total gate may not surface (a high-coverage majority can mask a low-coverage outlier).
+
 **95% gate denominator**: The gate measures **total** line coverage across all files in
 `coverage_filtered.info` — this includes `src/simulation/`, `src/terrain/`, AND `src/ui/`. The
 `src/ui/` Phase 4 baseline (~25%) and Phase 5 terrain coverage must both be maintained. If the

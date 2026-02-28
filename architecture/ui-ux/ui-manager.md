@@ -9,7 +9,7 @@
 
 ## IUIBackend Method Contract
 
-The total method count is **17**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+The total method count is **17**. (**Conditional**: if the Phase 8 virtual `draw()` spike confirms `IGUIElement::draw()` is non-virtual, a `virtual void drawAlphaOverlays() {}` method is appended as method 18, updating the count to **18**; both this file and `testability-architecture.md` must be updated at that point — see `implementation/phase-8.md` §IrrlichtUIBackend setElementAlpha fallback for the spike procedure.) `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
 
 ```cpp
 class IUIBackend {
@@ -186,6 +186,17 @@ public:
     void showGameOverModal(int64_t totalDebt, int monthsInDeficit);
     void closeModal();  // safe to call even if no modal active
 
+    // Terrain-load gate (called by main game loop):
+    // When loading = true, UIManager::update() returns immediately without polling
+    // pollPendingNotification() or updating any panel state. When loading = false,
+    // normal update() processing resumes.
+    // This method is NOT part of any interface — it is a public concrete method on
+    // UIManager and is called by the main loop which holds a concrete UIManager reference.
+    // It does NOT affect the IUIBackend interface.
+    // Do NOT add a Loading state to GameState — V1 uses this boolean flag instead
+    // (per architecture/game-design/game-over-flow.md line 19).
+    void setLoadingTerrain(bool loading);
+
 private:
     IUIBackend*             m_backend{nullptr}; // non-owning
     GameState               m_state{GameState::MainMenu};
@@ -210,8 +221,14 @@ private:
     ICitySimulation*        m_sim{nullptr};   // non-owning
     IAudioSystem*           m_audio{nullptr}; // non-owning
     IClock*                 m_clock{nullptr}; // non-owning; forwarded to NotificationManager and HUD at construction
+
+    bool                    m_loadingTerrain{false}; // set by setLoadingTerrain(); gates update() early-return
 };
 ```
+
+### setLoadingTerrain(bool) — Terrain-Load Gate
+
+**`setLoadingTerrain(bool loading)`**: Called by the main game loop to suppress `UIManager::update()` and HUD rendering during terrain generation. When `loading = true`, `UIManager::update()` returns immediately without polling `pollPendingNotification()` or updating any panel state. When `loading = false`, normal `update()` processing resumes. This method is NOT part of any interface — it is a public concrete method on `UIManager` and is called by the main loop which has a concrete `UIManager` reference. It does NOT affect the `IUIBackend` interface. **Do NOT add a `Loading` state to `GameState`** — V1 uses this boolean flag instead (per `architecture/game-design/game-over-flow.md` line 19).
 
 ## MainMenuPanel show/hide Contract
 
