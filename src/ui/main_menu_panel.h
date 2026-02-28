@@ -18,6 +18,16 @@ public:
     // Disables Cancel button, changes label to "Finalizing..."
     void setAbortCheckpointPassed();
 
+    // Polling API for UIManager: returns true (once) when "Start City" was clicked.
+    bool consumeStartGameRequest();
+    int getSelectedDifficulty() const { return m_selectedDifficulty; }
+
+    // Returns true when on the main menu screen (not New Game or Loading).
+    bool isOnMainMenuScreen() const { return m_screen == Screen::MainMenu; }
+
+    // Returns true when on the Settings button (UIManager opens SettingsPanel).
+    bool consumeSettingsRequest();
+
 private:
     IUIBackend* m_backend{nullptr};
     bool m_visible{false};
@@ -62,6 +72,8 @@ private:
     int m_focusedButton{0};
     int m_selectedDifficulty{1};   // 0=Easy, 1=Normal, 2=Hard
     bool m_abortCheckpointPassed{false}; // Loading: past point of no return
+    bool m_startGameRequested{false};    // "Start City" was clicked
+    bool m_settingsRequested{false};     // "Settings" was clicked
 
     // Helpers
     void showMainMenuScreen();

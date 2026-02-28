@@ -37,6 +37,9 @@ public:
     IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiManager);
     ~IrrlichtRenderer() override = default;
 
+    // Late-bind UIManager (allows construction before UIManager exists).
+    void setUIManager(UIManager* uiManager) { m_uiManager = uiManager; }
+
     // IRenderer interface — main-thread-only
     void          beginFrame() override;  // driver->beginScene(true, true, SColor(255,0,0,0))
     void          drawScene()  override;  // smgr->drawAll() + uiManager->draw() inside begin/end pair

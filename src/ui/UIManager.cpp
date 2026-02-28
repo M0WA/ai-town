@@ -260,6 +260,15 @@ bool UIManager::onEvent(const InputEvent& event) {
     }
 
     // ============================================================
+    // MainMenu state: route all input to MainMenuPanel.
+    // The main menu is a full-screen overlay that consumes all input.
+    // Must be checked before Priority 5 (HUD controls).
+    // ============================================================
+    if (m_state == GameState::MainMenu) {
+        return m_mainMenu->onEvent(event);
+    }
+
+    // ============================================================
     // Priority 5: HUD controls.
     // Toolbar clicks, speed selector, undo (Ctrl+Z), minimap,
     // bell icon, hotkeys (B/T/I/Escape).
@@ -425,6 +434,19 @@ void UIManager::draw() {
 void UIManager::update(float realDeltaSeconds) {
     // 1. Loading gate: skip all UI updates during terrain generation.
     if (m_loadingTerrain) return;
+
+    // 1b. Poll MainMenuPanel for user requests (start game, settings).
+    if (m_state == GameState::MainMenu && m_mainMenu) {
+        if (m_mainMenu->consumeStartGameRequest()) {
+            // Per spec: call m_sim->start() before transitionToGameplay() — but
+            // start() doesn't exist on ICitySimulation; the sim is already ticking.
+            transitionToGameplay(GameMode::Sandbox);
+            return; // Skip the rest of this frame's update — state just changed.
+        }
+        if (m_mainMenu->consumeSettingsRequest()) {
+            showSettings();
+        }
+    }
 
     // 2. Notification manager: auto-dismiss expired normal toasts.
     m_notifications->update();

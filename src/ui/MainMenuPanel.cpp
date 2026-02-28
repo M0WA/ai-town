@@ -183,6 +183,25 @@ void MainMenuPanel::setAbortCheckpointPassed() {
 }
 
 // ---------------------------------------------------------------------------
+// consumeStartGameRequest / consumeSettingsRequest
+// ---------------------------------------------------------------------------
+bool MainMenuPanel::consumeStartGameRequest() {
+    if (m_startGameRequested) {
+        m_startGameRequested = false;
+        return true;
+    }
+    return false;
+}
+
+bool MainMenuPanel::consumeSettingsRequest() {
+    if (m_settingsRequested) {
+        m_settingsRequested = false;
+        return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // draw
 // ---------------------------------------------------------------------------
 void MainMenuPanel::draw() {
@@ -268,7 +287,7 @@ bool MainMenuPanel::onEvent(const InputEvent& event) {
                     case 1: // Load Game (grayed)
                         return true;
                     case 2: // Settings
-                        // UIManager handles showing SettingsPanel from main menu
+                        m_settingsRequested = true;
                         return true;
                     case 3: // Quit
                         // UIManager handles shutdown
@@ -294,7 +313,7 @@ bool MainMenuPanel::onEvent(const InputEvent& event) {
                 return true;
             }
             if (hitTest(mx, my, m_btnSettings)) {
-                // UIManager handles showing SettingsPanel from main menu
+                m_settingsRequested = true;
                 return true;
             }
             if (hitTest(mx, my, m_btnQuit)) {
@@ -314,7 +333,7 @@ bool MainMenuPanel::onEvent(const InputEvent& event) {
                 return true;
             }
             if (hitTest(mx, my, m_ngBtnStartCity)) {
-                showLoadingScreen();
+                m_startGameRequested = true;
                 return true;
             }
             if (hitTest(mx, my, m_ngBtnRandomize)) {

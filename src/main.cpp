@@ -67,12 +67,6 @@ int main() {
     );
 
     // -------------------------------------------------------------------------
-    // UIManager stub (Phase 3 wires full implementation).
-    // Null audio/sim/clock pointers — Phase 1 stub does not use them.
-    // -------------------------------------------------------------------------
-    UIManager uiManager(&uiBackend, nullptr, nullptr, nullptr);
-
-    // -------------------------------------------------------------------------
     // Camera scene node — addCameraSceneNode() only (never FPS/Maya variants).
     // Post-creation: grab/drop-guarded animator removal loop per scene-graph-ownership.md.
     // -------------------------------------------------------------------------
@@ -106,14 +100,9 @@ int main() {
     // -------------------------------------------------------------------------
     // IrrlichtRenderer — owns the rendering interface.
     // Constructor signature LOCKED at Phase 1.
+    // Created with nullptr for UIManager — late-bound below after UIManager is created.
     // -------------------------------------------------------------------------
-    IrrlichtRenderer renderer(device, &uiManager);
-
-    // -------------------------------------------------------------------------
-    // EventReceiver — translates SEvent → InputEvent, dispatches per input-arbitration.md.
-    // -------------------------------------------------------------------------
-    EventReceiver eventReceiver(&uiScaler, &uiManager, &cameraController);
-    device->setEventReceiver(&eventReceiver);
+    IrrlichtRenderer renderer(device, /*uiManager=*/nullptr);
 
     // -------------------------------------------------------------------------
     // WallClock — production IClock; injects into AudioSystem/CitySimulation at Phase 4/6.
@@ -146,6 +135,22 @@ int main() {
     TerrainSystem terrainSystem(&renderer, &wallClock);
     CitySimulation citySimulation(
         &renderer, /*audio=*/nullptr, &simRng, &wallClock, &terrainSystem, Difficulty::Normal);
+
+    // -------------------------------------------------------------------------
+    // UIManager — Phase 8 full implementation.
+    // Now wired with real audio, simulation, and clock pointers.
+    // Panels (HUD, NotificationManager, etc.) receive these pointers at construction.
+    // -------------------------------------------------------------------------
+    UIManager uiManager(&uiBackend, &audioSystem, &citySimulation, &wallClock);
+
+    // Late-bind UIManager to renderer (breaks circular construction dependency).
+    renderer.setUIManager(&uiManager);
+
+    // -------------------------------------------------------------------------
+    // EventReceiver — translates SEvent → InputEvent, dispatches per input-arbitration.md.
+    // -------------------------------------------------------------------------
+    EventReceiver eventReceiver(&uiScaler, &uiManager, &cameraController);
+    device->setEventReceiver(&eventReceiver);
 
     // =========================================================================
     // 8-STEP FRAME LOOP

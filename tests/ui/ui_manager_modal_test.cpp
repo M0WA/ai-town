@@ -297,6 +297,9 @@ TEST_F(UIManagerTransitionTest, OnEvent_WindowFocusLost_ReturnsFalse) {
 // (falls through all priority levels to the default return false at Priority 6).
 // ---------------------------------------------------------------------------
 TEST_F(UIManagerTransitionTest, OnEvent_MouseMove_NoModal_NoCriticalToast_ReturnsFalse) {
+    // Transition to Gameplay first — MainMenu state correctly consumes all input.
+    ui_->transitionToGameplay(GameMode::Sandbox);
+
     InputEvent ev{};
     ev.type  = InputEvent::Type::MouseMove;
     ev.physX = 500;
