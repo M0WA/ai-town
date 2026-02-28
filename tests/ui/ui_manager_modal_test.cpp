@@ -190,13 +190,12 @@ TEST_F(UIManagerTransitionTest, TransitionToGameplay_Sandbox_ThenGameOver_IsNoop
     EXPECT_FALSE(ui_->hasActiveModal());
 }
 
-TEST_F(UIManagerTransitionTest, TransitionToGameplay_Scenario_ThenGameOver_IsNoop) {
-    // In Phase 3 the GameOver body is a stub (no actual modal shown),
-    // but the guard must still be absent for Scenario mode.
+TEST_F(UIManagerTransitionTest, TransitionToGameplay_Scenario_ThenGameOver_ShowsModal) {
+    // Phase 8: transitionToGameOver() in Scenario mode shows the game-over modal.
     ui_->transitionToGameplay(GameMode::Scenario);
     EXPECT_NO_FATAL_FAILURE(ui_->transitionToGameOver());
-    // Phase 3 stub: hasActiveModal() is still false (Phase 6 wires the real modal).
-    EXPECT_FALSE(ui_->hasActiveModal());
+    // Phase 8: hasActiveModal() must be true — game-over modal is shown.
+    EXPECT_TRUE(ui_->hasActiveModal());
 }
 
 // ---------------------------------------------------------------------------
@@ -356,12 +355,12 @@ TEST_F(NotificationManagerTest, HasCriticalToastVisible_ReturnsFalse_InPhase3) {
 }
 
 // ---------------------------------------------------------------------------
-// hasCriticalToastVisible — still false after postCritical (Phase 3 stub).
+// hasCriticalToastVisible — true after postCritical (Phase 8 real implementation).
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, HasCriticalToastVisible_StillFalseAfterPostCritical) {
+TEST_F(NotificationManagerTest, HasCriticalToastVisible_TrueAfterPostCritical) {
     notif_->postCritical("Alert", "Something bad happened");
-    EXPECT_FALSE(notif_->hasCriticalToastVisible())
-        << "Phase 3 stub: hasCriticalToastVisible() must remain false even after postCritical";
+    EXPECT_TRUE(notif_->hasCriticalToastVisible())
+        << "Phase 8: hasCriticalToastVisible() must return true after postCritical";
 }
 
 // ---------------------------------------------------------------------------

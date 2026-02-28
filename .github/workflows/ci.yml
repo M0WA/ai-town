@@ -218,6 +218,18 @@ jobs:
           fi
           echo "default.mhr present."
 
+      # Step 13b: Verify UI shader assets (Phase 8 deliverable).
+      # Confirms assets/shaders/ui_quad.vert and ui_quad.frag are present in the
+      # checked-out source tree before tests run. These files are required by the
+      # IrrlichtUIBackend raw-GL draw path — their absence causes cryptic
+      # file-not-found errors rather than a clear CI message.
+      - name: Verify UI shader assets
+        shell: bash
+        run: |
+          test -f assets/shaders/ui_quad.vert || { echo "ERROR: assets/shaders/ui_quad.vert not found"; exit 1; }
+          test -f assets/shaders/ui_quad.frag || { echo "ERROR: assets/shaders/ui_quad.frag not found"; exit 1; }
+          echo "UI shader assets verified."
+
       # Step 14: Run unit tests.
       # AITOWN_HEADLESS=1 — guard against unit tests that inadvertently trigger IrrlichtDevice init.
       # ALSOFT_DRIVERS=null — guard against unit tests that inadvertently trigger AudioSystem init.
@@ -657,6 +669,17 @@ jobs:
             echo "simulation_tests routing: $count test(s) discovered."
           fi
 
+      # Step 12d: Verify UI shader assets (Phase 8 deliverable).
+      # Identical to the build-linux shader check — confirms assets/shaders/ui_quad.vert
+      # and ui_quad.frag are present before tests run. Required by the IrrlichtUIBackend
+      # raw-GL draw path.
+      - name: Verify UI shader assets
+        shell: bash
+        run: |
+          test -f assets/shaders/ui_quad.vert || { echo "ERROR: assets/shaders/ui_quad.vert not found"; exit 1; }
+          test -f assets/shaders/ui_quad.frag || { echo "ERROR: assets/shaders/ui_quad.frag not found"; exit 1; }
+          echo "UI shader assets verified."
+
       # Step 13: Run unit tests.
       - name: Run unit tests (no display)
         run: |
@@ -834,6 +857,39 @@ jobs:
               print "PASS: src/ui/ worst-file coverage " pct "% >= 25%"
             }
           }'
+
+      # Step 17a: Check src/ui/ coverage completeness (Phase 8 deliverable).
+      # Parses coverage_filtered.info directly and exits non-zero if any src/ui/
+      # file has zero lines hit. Catches dead-code gaps that the percentage gates
+      # above cannot detect (a file with 0/0 lines or all-zero DA records passes
+      # a percentage check vacuously).
+      # MUST use if: always() — without it, GitHub Actions skips this step when
+      # the lcov gate (step 17) fails, silently bypassing dead-code detection.
+      - name: Check src/ui/ coverage completeness
+        if: always()
+        shell: bash
+        run: |
+          python3 -c "
+          import sys
+          files_with_zero = []
+          current_file = None
+          has_hit = False
+          for line in open('coverage_filtered.info'):
+              line = line.strip()
+              if line.startswith('SF:'):
+                  current_file = line[3:]
+                  has_hit = False
+              elif line.startswith('DA:') and current_file and 'src/ui/' in current_file:
+                  if not line.endswith(',0'):
+                      has_hit = True
+              elif line == 'end_of_record' and current_file and 'src/ui/' in current_file and not has_hit:
+                  files_with_zero.append(current_file)
+                  current_file = None
+          if files_with_zero:
+              print('ERROR: These src/ui/ files have 0 coverage:', files_with_zero)
+              sys.exit(1)
+          print('All src/ui/ files have coverage.')
+          "
 
       # Step 21: Upload coverage HTML artifact.
       # if: always() — upload even if lcov gate fails for post-mortem analysis.

@@ -1382,6 +1382,7 @@ void AudioSystem::triggerStinger(StingerType type) {
     ALuint src = static_cast<ALuint>(m_sources[poolIdx]);
     ALint  state = AL_STOPPED;
     alGetSourcei(src, AL_SOURCE_STATE, &state);
+    alCheckError_real("triggerStinger_stateQuery");
     if (state == AL_PLAYING) {
         return;  // Drop — in-progress
     }

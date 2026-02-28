@@ -112,6 +112,10 @@ public:
     // Used by the Priority-2 dual-guard and by tests.
     bool hasActiveModal() const;
 
+    // Set the loading-terrain gate. While true, update() is a no-op
+    // (terrain generation is in progress; no UI polling should occur).
+    void setLoadingTerrain(bool loading);
+
 private:
     IUIBackend*      m_backend{nullptr};
     IAudioSystem*    m_audio{nullptr};
@@ -125,8 +129,34 @@ private:
     // Unsaved-changes indicator state
     bool m_hasUnsavedChanges{false};
 
-    // GD-H3 bridge: last-known deficit streak; -1 means "not yet polled"
-    int m_lastKnownDeficitStreak{-1};
+    // --- Phase 8: deficit-streak polling (GD-H3 bridge) ---
+
+    // Edge-detect: last polled value of getConsecutiveDeficitMonths().
+    // Initialized to 0 so the first poll at month 1 triggers the edge.
+    int m_lastDeficitMonths{0};
+
+    // Cooldown for CRISIS stinger (5 s minimum gap).
+    // Initialized to -5.0 so the first fire always passes the cooldown check.
+    double m_lastCrisisStingerFireTime{-5.0};
+
+    // --- Phase 8: loading gate ---
+    // While true, update() returns immediately (terrain generation in progress).
+    bool m_loadingTerrain{false};
+
+    // --- Phase 8: speed selector element handle (created by HUD) ---
+    UIElementHandle m_speedSelectorHandle{kInvalidUIElement};
+
+    // --- Phase 8: modal-pause tracking ---
+    // True if UIManager called setPaused(true) when opening a modal.
+    // closeModal() only calls setPaused(false) if this flag is true.
+    bool m_didPauseSim{false};
+
+    // --- Phase 8: panel open-state tracking for input arbitration ---
+    bool m_inspectorOpen{false};
+    bool m_taxPanelOpen{false};
+
+    // --- Phase 8: Ctrl-key state tracking for Ctrl+Z ---
+    bool m_ctrlDown{false};
 
     // Background scrim element shown behind modal dialogs.
     // kInvalidUIElement (0) until Phase 6 creates the real element.

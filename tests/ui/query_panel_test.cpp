@@ -1,95 +1,21 @@
 // tests/ui/query_panel_test.cpp
 //
-// Phase 8 QueryPanel tests — pure static-function tests for
-// QueryPanel::computePanelPosition(). No mocks required.
-// No TearDown() needed (no mock objects to reset).
+// Phase 8 QueryPanel tests -- pure static-function tests for
+// InspectorPanel::computePanelPosition() PLUS QueryPanel integration tests.
 //
-// 4 test cases per architecture/testing/testability-architecture.md lines 120-128:
-//   1. Primary right-below placement (clicked tile in upper-left quadrant)
-//   2. Fallback left placement (tile in right half)
-//   3. Edge clamping — four sub-cases: cursor near left/right/top/bottom edge
-//   4. Third-fallback edge-snap (insufficient space in all quadrants)
+// computePanelPosition is a static pure function. Panel dimensions: 240x160 px.
+// Now calls the real InspectorPanel::computePanelPosition (4-parameter form).
 //
-// computePanelPosition is a pure function (no side effects, no Irrlicht dependency)
-// returning a Rect. Panel dimensions: 240x160 px.
-// Clamped to [0, 1920-240] x [0, 1080-160].
-//
-// Additional test:
-//   QueryPanel_EscapeFeedbackToast_DoesNotConsumeSubsequentEscape
+// InspectorPanel text format (from QueryPanel.cpp):
+//   Coordinates: "Tile: (X, Z)"
+//   Zone type:   "Residential (Low)" or "Unzoned"
+//   Population:  "Pop: 42"
+//   Coverage:    "Fire:80% Pol:60% Pwr:100% Wtr:90%"
+//   Desirability:"Desirability: 75"
+//   Demand:      "Demand: 55%"
 
+#include "src/ui/inspector_panel.h"
 #include "src/ui/IUIBackend.h"  // Rect
-#include <gtest/gtest.h>
-
-// --------------------------------------------------------------------------
-// computePanelPosition stub — Phase 8 delivers the real implementation.
-// For now, forward-declare the signature so tests compile.
-// Phase 8 implementation: move to InspectorPanel::computePanelPosition()
-// in inspector_panel.h / QueryPanel.cpp.
-// --------------------------------------------------------------------------
-namespace {
-// Phase 8 stub: returns a zero rect until implementation is wired.
-Rect computePanelPosition(int /*clickX*/, int /*clickY*/,
-                          int /*panelW*/, int /*panelH*/,
-                          int /*screenW*/, int /*screenH*/) {
-    return {0, 0, 0, 0};
-}
-}  // namespace
-
-// --- Test 1: Primary right-below placement ---
-TEST(QueryPanelPosition, PrimaryRightBelow_UpperLeftQuadrant) {
-    // Clicked tile at (200, 200) — upper-left quadrant.
-    // Panel should appear right-below the click point.
-    Rect r = computePanelPosition(200, 200, 240, 160, 1920, 1080);
-    // Phase 8 stub: SUCCEED() until computePanelPosition is implemented.
-    (void)r;
-    SUCCEED();
-}
-
-// --- Test 2: Fallback left placement ---
-TEST(QueryPanelPosition, FallbackLeft_TileInRightHalf) {
-    // Clicked tile at (1800, 200) — right half of screen.
-    // Panel should fall back to left placement.
-    Rect r = computePanelPosition(1800, 200, 240, 160, 1920, 1080);
-    (void)r;
-    SUCCEED();
-}
-
-// --- Test 3: Edge clamping (4 sub-cases) ---
-TEST(QueryPanelPosition, EdgeClamping_NearLeftEdge) {
-    Rect r = computePanelPosition(5, 500, 240, 160, 1920, 1080);
-    (void)r;
-    SUCCEED();
-}
-
-TEST(QueryPanelPosition, EdgeClamping_NearRightEdge) {
-    Rect r = computePanelPosition(1915, 500, 240, 160, 1920, 1080);
-    (void)r;
-    SUCCEED();
-}
-
-TEST(QueryPanelPosition, EdgeClamping_NearTopEdge) {
-    Rect r = computePanelPosition(500, 5, 240, 160, 1920, 1080);
-    (void)r;
-    SUCCEED();
-}
-
-TEST(QueryPanelPosition, EdgeClamping_NearBottomEdge) {
-    Rect r = computePanelPosition(500, 1075, 240, 160, 1920, 1080);
-    (void)r;
-    SUCCEED();
-}
-
-// --- Test 4: Third-fallback edge-snap ---
-TEST(QueryPanelPosition, ThirdFallback_EdgeSnap_InsufficientSpaceAllQuadrants) {
-    // Extreme corner: panel cannot fit in any primary/secondary position.
-    Rect r = computePanelPosition(1910, 1070, 240, 160, 1920, 1080);
-    (void)r;
-    SUCCEED();
-}
-
-// --- QueryPanel_EscapeFeedbackToast_DoesNotConsumeSubsequentEscape ---
-// Verifies the 1.5 s "Panel closed" toast does not consume a subsequent Escape.
-// Uses NiceMock<MockUIBackend> + NiceMock<MockCitySimulation> + ManualClock.
 #include "src/ui/UIManager.h"
 #include "src/ui/ui_types.h"
 #include "src/platform/input_event.h"
@@ -97,15 +23,268 @@ TEST(QueryPanelPosition, ThirdFallback_EdgeSnap_InsufficientSpaceAllQuadrants) {
 #include "tests/ui/mock_city_simulation.h"
 #include "tests/simulation/mock_audio_system.h"
 #include "tests/simulation/manual_clock.h"
+#include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>
 
 using ::testing::NiceMock;
+using ::testing::Return;
+using ::testing::_;
+using ::testing::HasSubstr;
+using ::testing::AtLeast;
+using ::testing::AnyNumber;
 
+// ============================================================================
+// QueryPanelPosition tests -- pure-function tests for computePanelPosition
+// ============================================================================
+
+// --- Test 1: Primary right-below placement ---
+TEST(QueryPanelPosition, PrimaryRightBelow_UpperLeftQuadrant) {
+    Rect r = InspectorPanel::computePanelPosition(200, 200, 1920, 1080);
+    EXPECT_GE(r.x, 200);
+    EXPECT_GE(r.y, 200);
+    EXPECT_EQ(r.w, 240);
+    EXPECT_EQ(r.h, 160);
+    EXPECT_LE(r.x + r.w, 1920);
+    EXPECT_LE(r.y + r.h, 1080);
+}
+
+// --- Test 2: Fallback left placement ---
+TEST(QueryPanelPosition, FallbackLeft_TileInRightHalf) {
+    Rect r = InspectorPanel::computePanelPosition(1800, 200, 1920, 1080);
+    EXPECT_GE(r.x, 0);
+    EXPECT_LE(r.x + r.w, 1920);
+    EXPECT_EQ(r.w, 240);
+    EXPECT_EQ(r.h, 160);
+}
+
+// --- Test 3: Edge clamping (4 sub-cases) ---
+TEST(QueryPanelPosition, EdgeClamping_NearLeftEdge) {
+    Rect r = InspectorPanel::computePanelPosition(5, 500, 1920, 1080);
+    EXPECT_GE(r.x, 0);
+    EXPECT_LE(r.x + r.w, 1920);
+    EXPECT_GE(r.y, 0);
+    EXPECT_LE(r.y + r.h, 1080);
+}
+
+TEST(QueryPanelPosition, EdgeClamping_NearRightEdge) {
+    Rect r = InspectorPanel::computePanelPosition(1915, 500, 1920, 1080);
+    EXPECT_GE(r.x, 0);
+    EXPECT_LE(r.x + r.w, 1920);
+}
+
+TEST(QueryPanelPosition, EdgeClamping_NearTopEdge) {
+    Rect r = InspectorPanel::computePanelPosition(500, 5, 1920, 1080);
+    EXPECT_GE(r.y, 0);
+    EXPECT_LE(r.y + r.h, 1080);
+}
+
+TEST(QueryPanelPosition, EdgeClamping_NearBottomEdge) {
+    Rect r = InspectorPanel::computePanelPosition(500, 1075, 1920, 1080);
+    EXPECT_GE(r.y, 0);
+    EXPECT_LE(r.y + r.h, 1080);
+}
+
+// --- Test 4: Third-fallback edge-snap ---
+TEST(QueryPanelPosition, ThirdFallback_EdgeSnap_InsufficientSpaceAllQuadrants) {
+    Rect r = InspectorPanel::computePanelPosition(1910, 1070, 1920, 1080);
+    EXPECT_GE(r.x, 0);
+    EXPECT_LE(r.x + r.w, 1920);
+    EXPECT_GE(r.y, 0);
+    EXPECT_LE(r.y + r.h, 1080);
+}
+
+// --- Test 5: Zero coordinate click ---
+TEST(QueryPanelPosition, ZeroCoordinate_PanelStaysOnScreen) {
+    Rect r = InspectorPanel::computePanelPosition(0, 0, 1920, 1080);
+    EXPECT_GE(r.x, 0);
+    EXPECT_GE(r.y, 0);
+    EXPECT_LE(r.x + r.w, 1920);
+    EXPECT_LE(r.y + r.h, 1080);
+}
+
+// --- Test 6: Center screen click ---
+TEST(QueryPanelPosition, CenterScreen_PanelPlacedRightBelow) {
+    Rect r = InspectorPanel::computePanelPosition(960, 540, 1920, 1080);
+    EXPECT_GE(r.x, 0);
+    EXPECT_LE(r.x + r.w, 1920);
+    EXPECT_GE(r.y, 0);
+    EXPECT_LE(r.y + r.h, 1080);
+}
+
+// ============================================================================
+// QueryPanel integration tests with mock backend + mock simulation
+// ============================================================================
+class QueryPanelIntegrationTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        ON_CALL(backend_, addStaticText(_, _, _, _, _)).WillByDefault(
+            [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
+        ON_CALL(backend_, addButton(_, _, _, _, _)).WillByDefault(
+            [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
+        ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
+        ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
+
+        // Query tile returns zoned data.
+        QueryResult qr;
+        qr.tileX = 5;
+        qr.tileZ = 10;
+        qr.isZoned = true;
+        qr.zoneType = ZoneType::Residential;
+        qr.densityTier = DensityTier::Low;
+        qr.population = 42;
+        qr.coverage.fire = 80.0f;
+        qr.coverage.police = 60.0f;
+        qr.coverage.power = 100.0f;
+        qr.coverage.water = 90.0f;
+        qr.desirability = 75.0f;
+        qr.demandPressurePct = 55.0f;
+        ON_CALL(sim_, queryTile(_, _)).WillByDefault(Return(qr));
+
+        panel_ = std::make_unique<InspectorPanel>(&backend_, &sim_);
+    }
+
+    void TearDown() override {
+        panel_.reset();
+    }
+
+    NiceMock<MockUIBackend>      backend_;
+    NiceMock<MockCitySimulation> sim_;
+    std::unique_ptr<InspectorPanel> panel_;
+    uint32_t                     nextHandle_{100};
+};
+
+// InspectorPanel shows tile coordinates after show() + draw().
+// Format: "Tile: (5, 10)"
+TEST_F(QueryPanelIntegrationTest, Show_DisplaysTileCoordinates) {
+    panel_->show(5, 10, 200, 200);
+    EXPECT_TRUE(panel_->isOpen());
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Tile: (5, 10)"))).Times(AtLeast(1));
+    panel_->draw();
+}
+
+// InspectorPanel shows zone type.
+// Format: "Residential (Low)"
+TEST_F(QueryPanelIntegrationTest, Draw_DisplaysZoneType) {
+    panel_->show(5, 10, 200, 200);
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Residential"))).Times(AtLeast(1));
+    panel_->draw();
+}
+
+// InspectorPanel shows population.
+// Format: "Pop: 42"
+TEST_F(QueryPanelIntegrationTest, Draw_DisplaysPopulation) {
+    panel_->show(5, 10, 200, 200);
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Pop: 42"))).Times(AtLeast(1));
+    panel_->draw();
+}
+
+// InspectorPanel shows service coverage.
+// Format: "Fire:80% Pol:60% Pwr:100% Wtr:90%"
+TEST_F(QueryPanelIntegrationTest, Draw_DisplaysServiceCoverage) {
+    panel_->show(5, 10, 200, 200);
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Fire:80%"))).Times(AtLeast(1));
+    panel_->draw();
+}
+
+// InspectorPanel shows desirability.
+// Format: "Desirability: 75"
+TEST_F(QueryPanelIntegrationTest, Draw_DisplaysDesirability) {
+    panel_->show(5, 10, 200, 200);
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Desirability: 75"))).Times(AtLeast(1));
+    panel_->draw();
+}
+
+// InspectorPanel shows demand pressure.
+// Format: "Demand: 55%"
+TEST_F(QueryPanelIntegrationTest, Draw_DisplaysDemandPressure) {
+    panel_->show(5, 10, 200, 200);
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Demand: 55%"))).Times(AtLeast(1));
+    panel_->draw();
+}
+
+// InspectorPanel shows "Unzoned" for unzoned tiles.
+TEST_F(QueryPanelIntegrationTest, Draw_DisplaysUnzoned) {
+    QueryResult qr;
+    qr.tileX = 5;
+    qr.tileZ = 10;
+    qr.isZoned = false;
+    ON_CALL(sim_, queryTile(_, _)).WillByDefault(Return(qr));
+
+    panel_->show(5, 10, 200, 200);
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, "Unzoned")).Times(AtLeast(1));
+    panel_->draw();
+}
+
+// Escape closes the panel.
+TEST_F(QueryPanelIntegrationTest, Escape_ClosesPanel) {
+    panel_->show(5, 10, 200, 200);
+    EXPECT_TRUE(panel_->isOpen());
+
+    InputEvent esc;
+    esc.type = InputEvent::Type::KeyDown;
+    esc.keyCode = 27;
+    bool consumed = panel_->onEvent(esc);
+    EXPECT_TRUE(consumed);
+    EXPECT_FALSE(panel_->isOpen());
+}
+
+// Click outside panel dismisses it (not consumed).
+TEST_F(QueryPanelIntegrationTest, ClickOutside_DismissesPanel) {
+    panel_->show(5, 10, 200, 200);
+    EXPECT_TRUE(panel_->isOpen());
+
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 1800;
+    click.y = 900;
+    bool consumed = panel_->onEvent(click);
+    EXPECT_FALSE(consumed);
+    EXPECT_FALSE(panel_->isOpen());
+}
+
+// --- QueryPanel_EscapeFeedbackToast_DoesNotConsumeSubsequentEscape ---
 TEST(QueryPanelEscape, EscapeFeedbackToast_DoesNotConsumeSubsequentEscape) {
-    // Phase 8 stub: full assertion in Phase 8 implementation.
-    // 1. Open QueryPanel
-    // 2. Fire first Escape -> toast posted
-    // 3. Fire second Escape -> reaches UIManager, opens Pause Menu
-    SUCCEED();
+    NiceMock<MockUIBackend>      backend;
+    NiceMock<MockCitySimulation> sim;
+    uint32_t nextHandle = 100;
+
+    ON_CALL(backend, addStaticText(_, _, _, _, _)).WillByDefault(
+        [&nextHandle](const std::string&, int, int, int, int) { return ++nextHandle; });
+    ON_CALL(backend, addButton(_, _, _, _, _)).WillByDefault(
+        [&nextHandle](const std::string&, int, int, int, int) { return ++nextHandle; });
+    ON_CALL(backend, getVirtualWidth()).WillByDefault(Return(1920));
+    ON_CALL(backend, getVirtualHeight()).WillByDefault(Return(1080));
+
+    InspectorPanel panel(&backend, &sim);
+    panel.show(5, 10, 200, 200);
+    EXPECT_TRUE(panel.isOpen());
+
+    InputEvent esc;
+    esc.type = InputEvent::Type::KeyDown;
+    esc.keyCode = 27;
+
+    // First Escape closes the panel (consumed).
+    bool consumed1 = panel.onEvent(esc);
+    EXPECT_TRUE(consumed1);
+    EXPECT_FALSE(panel.isOpen());
+
+    // Second Escape: panel is closed, so not consumed.
+    bool consumed2 = panel.onEvent(esc);
+    EXPECT_FALSE(consumed2);
 }
