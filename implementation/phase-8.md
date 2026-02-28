@@ -197,3 +197,133 @@ All deliverables implemented, all exit criteria met, all risks mitigated.
 **Date**: 2026-02-28
 **Branch**: `implementation/phase-8`
 **Last commit**: `836dc2f`
+
+### Post-Sign-Off Fixes
+
+Six runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (581 unit + 13 integration) after each fix.
+
+#### Fix 1: Main Menu → Gameplay Wiring (commit `67ee799`)
+
+**Problem**: UIManager was constructed with nullptr for audio/sim/clock due to circular construction dependencies. No input routing to MainMenuPanel during MainMenu state. No path from "Start City" click to `transitionToGameplay()`.
+
+**Root cause**: Circular dependency: UIManager needs CitySimulation/AudioSystem → CitySimulation needs IRenderer → IrrlichtRenderer needs UIManager.
+
+**Changes**:
+
+- `src/main.cpp`: Reordered construction; construct IrrlichtRenderer with `nullptr` UIManager, construct UIManager with real pointers, then call `renderer.setUIManager(&uiManager)` (late binding)
+- `src/rendering/IrrlichtRenderer.h`: Added `setUIManager(UIManager*)` setter
+- `src/ui/main_menu_panel.h` / `MainMenuPanel.cpp`: Added polling API (`consumeStartGameRequest()`, `consumeSettingsRequest()`) and internal flags
+- `src/ui/UIManager.cpp`: Added MainMenu state input routing in `onEvent()` and flag polling in `update()`
+
+**Specs updated**: `irrlicht-device-lifecycle.md` (Late-Binding Pattern, construction sequence), `ui-manager.md` (MainMenu State Input Routing, MainMenu Polling Communication), `main-menu-new-game-flow.md` (MainMenuPanel → UIManager Communication)
+
+#### Fix 2: Missing `guiEnvironment->drawAll()` (commit TBD)
+
+**Problem**: HUD and main menu elements were invisible despite being created correctly. Panels created real Irrlicht `IGUIElement` nodes via `IrrlichtUIBackend`, but `IGUIEnvironment::drawAll()` was never called.
+
+**Root cause**: The design spec stated "`m_gui->drawAll()` is NOT called" to preserve Z-order, but panel `draw()` methods only update element state (visibility, text, alpha) via IUIBackend setters — no code painted the elements.
+
+**Changes**:
+
+- `src/rendering/IrrlichtRenderer.cpp`: Added `guiEnv->drawAll()` as step 3 in `drawScene()`
+- `src/rendering/IrrlichtRenderer.h`: Updated per-frame sequence comment
+
+**Specs updated**: `irrlicht-device-lifecycle.md` (render loop), `ui-manager.md` (Draw Order, Frame Loop Integration)
+
+#### Fix 3: Virtual↔Physical Coordinate Scaling (commit TBD)
+
+**Problem**: Main menu buttons visible but unclickable at 1280×720. Buttons appeared off-center.
+
+**Root cause**: `IrrlichtUIBackend` passed virtual 1920×1080 coordinates directly to Irrlicht as physical pixels. Hit tests compared virtual mouse coords (from `UIScaler::unproject()`) against physical element rects — mismatch at any non-native resolution.
+
+**Changes**:
+
+- `src/rendering/IrrlichtUIBackend.cpp`: `addStaticText()`/`addButton()` scale virtual→physical; `getElementRect()` scales physical→virtual
+
+**Specs updated**: `resolution-ui-scaling.md` (IrrlichtUIBackend Coordinate Scaling)
+
+#### Fix 4: Settings Panel Event Routing in MainMenu State (commit TBD)
+
+**Problem**: Opening Settings from the main menu and pressing Escape or clicking Cancel left settings panel elements visible on screen. The player could not close settings when opened from the main menu.
+
+**Root cause**: `UIManager::onEvent()` in `GameState::MainMenu` routed ALL events to `MainMenuPanel::onEvent()`, which consumes everything. `SettingsPanel::onEvent()` was never called, so Escape/Cancel could not reach `SettingsPanel::hide()`.
+
+**Changes**:
+
+- `src/ui/UIManager.cpp`: MainMenu state routing now checks `m_settings->isVisible()` first — if settings is visible, events are dispatched to `SettingsPanel::onEvent()` before falling through to `MainMenuPanel::onEvent()`
+- `src/ui/MainMenuPanel.cpp`: Removed temporary diagnostic fprintf logging (added during Fix 3 investigation)
+- `src/rendering/IrrlichtUIBackend.cpp`: Removed temporary diagnostic fprintf logging from `addButton()`
+
+**Specs updated**: `ui-manager.md` (MainMenu State Input Routing — SettingsPanel priority)
+
+#### Fix 5: Main Menu Not Hidden When Settings Opens (commit TBD)
+
+**Problem**: Clicking "Settings" on the main menu showed the settings overlay but the main menu buttons remained visible behind it, creating visual clutter.
+
+**Root cause**: `UIManager::showSettings()` only called `m_settings->show()` without hiding `MainMenuPanel`. Main menu elements stayed visible underneath the settings panel.
+
+**Changes**:
+
+- `src/ui/UIManager.cpp`: `showSettings()` now calls `m_mainMenu->hide()` before `m_settings->show()` when in MainMenu state. The MainMenu routing block in `onEvent()` detects when settings closes and calls `m_mainMenu->show()` to restore the main menu.
+
+**Specs updated**: `ui-manager.md` (MainMenu State Input Routing — hide/restore on settings open/close)
+
+#### Fix 6: Pause Menu Not Responding to Mouse Clicks (commit TBD)
+
+**Problem**: After pressing Escape during gameplay, the pause menu appeared but its buttons (Resume, Settings, Save, Quit) did not respond to mouse clicks.
+
+**Root cause**: `UIManager::onEvent()` had no event routing to `PauseMenuPanel::onEvent()` for the Paused state. Mouse clicks fell through all Priority checks (which gate on `GameState::Gameplay` or specific panel conditions) to `return false` at Priority 6, reaching the camera controller instead. Escape was handled directly by UIManager without reaching `PauseMenuPanel::onEvent()`.
+
+**Changes**:
+
+- `src/ui/UIManager.cpp`: Added Paused state routing block between MainMenu routing and Priority 5. Routes events to SettingsPanel (if visible, from pause menu) then PauseMenuPanel. When PauseMenuPanel hides itself (Resume), `transitionToGameplay_fromPaused()` is called unless settings just opened. When SettingsPanel closes, PauseMenuPanel is restored.
+
+**Specs updated**: `ui-manager.md` (new §Paused State Input Routing)
+
+#### Fix 7: Main Menu Click Regression — Verified Working (commit TBD)
+
+**Problem**: After Fixes 5 and 6, user reported main menu buttons not responding to clicks.
+
+**Investigation**: Comprehensive runtime testing under Xvfb with xdotool-simulated mouse clicks verified all UI flows work correctly:
+
+- Main menu buttons (New Game, Settings, Quit) respond to clicks at startup
+- Settings → Escape/Cancel → main menu restore works; post-restore clicks work
+- New Game → Start City → Gameplay transition produces HUD correctly
+- Gameplay → Escape → Pause menu (Resume, Settings, Save, Quit) all visible and interactive
+- Pause → Escape → Resume returns to gameplay with HUD
+- All state transitions (MainMenu→Gameplay state=0→1, Gameplay→Paused state=1→2, Paused→Gameplay state=2→1) confirmed via event log
+
+**Root cause**: No code bug found. The reported regression was likely caused by the user testing against an intermediate build state before all six fixes were applied together. With all fixes in place, the event routing and coordinate translation work correctly end-to-end.
+
+**Changes**: Temporary diagnostic fprintf logging was added to `EventReceiver.cpp`, `UIManager.cpp`, and `MainMenuPanel.cpp` during investigation; all diagnostics were removed after verification.
+
+#### Fix 8: Quit Buttons Not Functional — Missing Polling Flags (commit TBD)
+
+**Problem**: Quit button on Main Menu, "Quit to Desktop" and "Quit to Main Menu" on Pause Menu all consumed clicks but performed no action. The polling-based communication pattern (flag + consume method) used by Start Game and Settings was never implemented for any of the three quit paths.
+
+**Root cause**: `MainMenuPanel::onEvent()` returned `true` for the Quit button click (both mouse and keyboard Enter) without setting any flag. Similarly, `PauseMenuPanel::onEvent()` returned `true` for "Quit to Desktop" and "Quit to Main Menu" without setting flags. Without flags, `UIManager::update()` had nothing to poll, so quit requests were silently swallowed.
+
+**Changes**:
+
+- `main_menu_panel.h` / `MainMenuPanel.cpp`: Added `m_quitRequested` flag and `consumeQuitRequest()` method. Set the flag on both mouse click and Enter key activation of the Quit button.
+- `pause_menu_panel.h` / `PauseMenuPanel.cpp`: Added `m_quitDesktopRequested` / `m_quitToMenuRequested` flags and `consumeQuitDesktopRequest()` / `consumeQuitToMenuRequest()` methods. Set flags and call `hide()` on activation.
+- `UIManager.h` / `UIManager.cpp`: Added `m_quitRequested` flag, `isQuitRequested()` accessor, and `transitionToMainMenu()` method. `update()` now polls all three quit consume methods: MainMenu quit and PauseMenu quit-to-desktop set `m_quitRequested`; PauseMenu quit-to-menu calls `transitionToMainMenu()`.
+- `main.cpp`: After `uiManager.update()`, checks `isQuitRequested()` and calls `device->closeDevice()` to exit the frame loop.
+- `architecture/ui-ux/ui-manager.md`: Added "PauseMenu Polling Communication" and "Application Quit Flow" sections documenting the quit mechanism.
+
+#### Fix 9: No Music or SFX — Missing Audio Wiring (commit TBD)
+
+**Problem**: No music played during gameplay and no simulation SFX (build/demolish/budget warning) were audible. The AudioSystem was fully implemented (Phase 7) but never wired to the game loop correctly.
+
+**Root cause (3 issues)**:
+
+1. `main.cpp` passed `nullptr` for the `audio` parameter to `CitySimulation` constructor. All `if (m_audio)` SFX call sites in CitySimulation were skipped. The comment said "Phase 7 wires the real AudioSystem pointer" but this was never done.
+2. `AudioSystem::transitionToGameplay()` only started the ambient bed on stream slot 2 but never called `setMusicTrack()` to start gameplay music on stream slot 0.
+3. `UIManager::transitionToGameplay()` called `m_audio->transitionToGameplay()` without first calling `setTimeOfDay(TimeOfDay::DAY)`, violating the documented precondition that setTimeOfDay must establish the ambient bed selection before transitionToGameplay reads `m_currentTimeOfDay`.
+
+**Changes**:
+
+- `main.cpp`: Changed `CitySimulation` audio parameter from `nullptr` to `&audioSystem`. Updated comments to reflect the wiring.
+- `AudioSystem.cpp`: Added `setMusicTrack(MUSIC_CALM_01)` call at the end of `transitionToGameplay()` to start the default calm music stem after the ambient bed.
+- `UIManager.cpp`: Added `m_audio->setTimeOfDay(TimeOfDay::DAY)` call before `m_audio->transitionToGameplay()` in `transitionToGameplay(GameMode)`.
+- `architecture/ui-ux/ui-manager.md`: Added "Audio Transition at Gameplay Start" and "CitySimulation Audio Wiring" sections.

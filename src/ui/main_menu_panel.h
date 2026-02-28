@@ -28,6 +28,9 @@ public:
     // Returns true when on the Settings button (UIManager opens SettingsPanel).
     bool consumeSettingsRequest();
 
+    // Returns true (once) when "Quit" was clicked or Enter-activated.
+    bool consumeQuitRequest();
+
 private:
     IUIBackend* m_backend{nullptr};
     bool m_visible{false};
@@ -74,6 +77,7 @@ private:
     bool m_abortCheckpointPassed{false}; // Loading: past point of no return
     bool m_startGameRequested{false};    // "Start City" was clicked
     bool m_settingsRequested{false};     // "Settings" was clicked
+    bool m_quitRequested{false};         // "Quit" was clicked
 
     // Helpers
     void showMainMenuScreen();

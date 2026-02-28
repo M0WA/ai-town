@@ -201,6 +201,14 @@ bool MainMenuPanel::consumeSettingsRequest() {
     return false;
 }
 
+bool MainMenuPanel::consumeQuitRequest() {
+    if (m_quitRequested) {
+        m_quitRequested = false;
+        return true;
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // draw
 // ---------------------------------------------------------------------------
@@ -290,7 +298,7 @@ bool MainMenuPanel::onEvent(const InputEvent& event) {
                         m_settingsRequested = true;
                         return true;
                     case 3: // Quit
-                        // UIManager handles shutdown
+                        m_quitRequested = true;
                         return true;
                 }
                 return true;
@@ -317,7 +325,7 @@ bool MainMenuPanel::onEvent(const InputEvent& event) {
                 return true;
             }
             if (hitTest(mx, my, m_btnQuit)) {
-                // UIManager handles shutdown
+                m_quitRequested = true;
                 return true;
             }
         }

@@ -263,9 +263,49 @@ bool UIManager::onEvent(const InputEvent& event) {
     // MainMenu state: route all input to MainMenuPanel.
     // The main menu is a full-screen overlay that consumes all input.
     // Must be checked before Priority 5 (HUD controls).
+    // When SettingsPanel is visible (opened from main menu), route
+    // events there first so Escape/Cancel can close it.
     // ============================================================
     if (m_state == GameState::MainMenu) {
+        if (m_settings && m_settings->isVisible()) {
+            bool wasVisible = true;
+            bool consumed = m_settings->onEvent(event);
+            // If settings just closed, re-show the main menu.
+            if (wasVisible && !m_settings->isVisible()) {
+                m_mainMenu->show();
+            }
+            if (consumed) return true;
+        }
         return m_mainMenu->onEvent(event);
+    }
+
+    // ============================================================
+    // Paused state: route input to PauseMenuPanel (or SettingsPanel
+    // if opened from pause menu). Must be checked before Priority 5
+    // so that Escape/clicks reach the panels instead of falling through.
+    // ============================================================
+    if (m_state == GameState::Paused) {
+        // SettingsPanel takes priority when visible (opened from pause menu).
+        if (m_settings && m_settings->isVisible()) {
+            bool consumed = m_settings->onEvent(event);
+            // If settings just closed, re-show the pause menu.
+            if (!m_settings->isVisible()) {
+                m_pauseMenu->show();
+            }
+            if (consumed) return true;
+        }
+        // Route to PauseMenuPanel when visible.
+        if (m_pauseMenu && m_pauseMenu->isVisible()) {
+            bool consumed = m_pauseMenu->onEvent(event);
+            // PauseMenuPanel hides itself on Resume (Escape/Enter/click).
+            // If it just closed and settings did NOT open, transition to gameplay.
+            if (!m_pauseMenu->isVisible()) {
+                if (!m_settings || !m_settings->isVisible()) {
+                    transitionToGameplay_fromPaused();
+                }
+            }
+            if (consumed) return true;
+        }
     }
 
     // ============================================================
@@ -435,7 +475,7 @@ void UIManager::update(float realDeltaSeconds) {
     // 1. Loading gate: skip all UI updates during terrain generation.
     if (m_loadingTerrain) return;
 
-    // 1b. Poll MainMenuPanel for user requests (start game, settings).
+    // 1b. Poll MainMenuPanel for user requests (start game, settings, quit).
     if (m_state == GameState::MainMenu && m_mainMenu) {
         if (m_mainMenu->consumeStartGameRequest()) {
             // Per spec: call m_sim->start() before transitionToGameplay() — but
@@ -445,6 +485,22 @@ void UIManager::update(float realDeltaSeconds) {
         }
         if (m_mainMenu->consumeSettingsRequest()) {
             showSettings();
+        }
+        if (m_mainMenu->consumeQuitRequest()) {
+            m_quitRequested = true;
+            return;
+        }
+    }
+
+    // 1c. Poll PauseMenuPanel for quit requests (Quit to Desktop, Quit to Main Menu).
+    if (m_pauseMenu) {
+        if (m_pauseMenu->consumeQuitDesktopRequest()) {
+            m_quitRequested = true;
+            return;
+        }
+        if (m_pauseMenu->consumeQuitToMenuRequest()) {
+            transitionToMainMenu();
+            return;
         }
     }
 
@@ -661,6 +717,10 @@ void UIManager::closeModal() {
 }
 
 void UIManager::showSettings() {
+    // Hide the calling panel before showing settings overlay.
+    if (m_state == GameState::MainMenu && m_mainMenu) {
+        m_mainMenu->hide();
+    }
     m_settings->show();
 }
 
@@ -674,7 +734,10 @@ void UIManager::transitionToGameplay(GameMode mode) {
     m_hud->show();
 
     // Transition audio from menu to gameplay.
+    // setTimeOfDay must be called before transitionToGameplay() so the
+    // ambient bed selection reads the correct time period.
     if (m_audio) {
+        m_audio->setTimeOfDay(TimeOfDay::DAY);  // New game starts at DAY
         m_audio->transitionToGameplay();
     }
 }
@@ -692,4 +755,25 @@ bool UIManager::hasActiveModal() const {
 
 void UIManager::setLoadingTerrain(bool loading) {
     m_loadingTerrain = loading;
+}
+
+bool UIManager::isQuitRequested() const {
+    return m_quitRequested;
+}
+
+void UIManager::transitionToMainMenu() {
+    // Hide gameplay panels.
+    m_hud->hide();
+    m_pauseMenu->hide();
+    m_taxPanel->hide();
+    m_taxPanelOpen = false;
+    m_inspector->hide();
+    m_inspectorOpen = false;
+
+    // TODO Phase 9+: transition audio back to menu music when
+    // IAudioSystem::transitionToMenu() is available.
+
+    // Show main menu.
+    m_state = GameState::MainMenu;
+    m_mainMenu->show();
 }

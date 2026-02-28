@@ -1472,6 +1472,9 @@ void AudioSystem::transitionToGameplay() {
             }
         }
     }
+
+    // Start default calm music stem on slot 0 (sources[58]).
+    setMusicTrack(MUSIC_CALM_01);
 }
 
 // ---------------------------------------------------------------------------

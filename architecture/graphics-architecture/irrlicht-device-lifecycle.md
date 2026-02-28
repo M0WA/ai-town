@@ -14,11 +14,37 @@ audioSystem->update(realDeltaSeconds);   // process audio command queue with upd
 uiManager->update(realDeltaSeconds);    // advance UI timer state (notification auto-dismiss, HUD undo-countdown) — MUST be called before beginScene(); see ui-manager.md §Frame Loop Integration
 driver->beginScene(true, true, irr::video::SColor(255, 0, 0, 0));
 sceneManager->drawAll();        // 3D scene (terrain, buildings, vehicles, sky)
-uiManager->draw();              // 2D HUD: explicit per-panel Z-order draw (m_gui->drawAll() NOT called — see ui-manager.md)
+uiManager->draw();              // 2D HUD: per-panel Z-order state update (visibility, text, alpha)
+guiEnvironment->drawAll();      // Render all visible GUI elements (buttons, labels, etc.)
 driver->endScene();
 ```
 
-`UIManager::draw()` is called between `sceneManager->drawAll()` and `endScene()` in `RenderSystem`. Per `architecture/ui-ux/ui-manager.md` line 157, `UIManager::draw()` issues explicit per-panel draw calls in Z-order via `IUIBackend` — `m_gui->drawAll()` is NOT called by `RenderSystem` because it would bypass the explicit layering required for the background scrim and modal overlay. `UIManager::draw()` must be called before `endScene()` — calling it after `endScene()` produces no output. The mandatory 7-step per-frame sequence is: `audioSystem->syncListenerToCamera(cam)` → `audioSystem->update(realDeltaSeconds)` → `UIManager::update(realDeltaSeconds)` → `driver->beginScene()` → `sceneManager->drawAll()` → `UIManager::draw()` → `driver->endScene()`. The two audio calls must come before `beginScene()` so that the listener position and audio command queue are fully updated before rendering begins. The Irrlicht-internal ordering (`beginScene` → `drawAll` → `draw` → `endScene`) is immutable; the audio setup calls are pre-steps that must not be moved inside the Irrlicht render block. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API.
+`IrrlichtRenderer::drawScene()` implements a 3-step rendering sequence between `beginScene()` and `endScene()`:
+
+1. `sceneManager->drawAll()` — renders the 3D scene (terrain, buildings, vehicles, sky).
+2. `uiManager->draw()` — calls each panel's `draw()` method in explicit Z-order (slots 1–10 per `ui-manager.md`). Each panel's `draw()` updates element state (visibility, text, alpha) but does NOT render pixels.
+3. `guiEnvironment->drawAll()` — renders all visible `IGUIElement` nodes. Because step 2 has already set the correct visibility on every element (non-active panels hide theirs), only the intended elements are painted.
+
+The Z-order concern (scrim must cover panels; modal must be topmost) is handled by visibility management in step 2 — panels that should be behind have their elements hidden before `drawAll()` paints. `UIManager::draw()` must be called before `guiEnvironment->drawAll()` — calling it after would render stale element state. The mandatory 8-step per-frame sequence is: `audioSystem->syncListenerToCamera(cam)` → `audioSystem->update(realDeltaSeconds)` → `UIManager::update(realDeltaSeconds)` → `driver->beginScene()` → `sceneManager->drawAll()` → `UIManager::draw()` → `guiEnvironment->drawAll()` → `driver->endScene()`. The two audio calls must come before `beginScene()` so that the listener position and audio command queue are fully updated before rendering begins. The Irrlicht-internal ordering (`beginScene` → `drawAll` → `draw` → `guiEnv->drawAll` → `endScene`) is immutable; the audio setup calls are pre-steps that must not be moved inside the Irrlicht render block. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API.
+
+## IrrlichtRenderer Late-Binding Pattern
+
+`IrrlichtRenderer` is constructed with `nullptr` for its `UIManager*` parameter. After `UIManager` is constructed (which requires `IrrlichtRenderer` to already exist for the `CitySimulation` dependency chain), `main.cpp` calls `renderer.setUIManager(&uiManager)` to wire the pointer. This breaks the circular construction dependency: `UIManager` needs `CitySimulation` and `IAudioSystem` → `CitySimulation` needs `IRenderer` → `IrrlichtRenderer` needs `UIManager`. The `setUIManager()` setter is the only late-bound pointer on `IrrlichtRenderer`; all other dependencies are injected at construction.
+
+The construction sequence in `main.cpp`:
+
+```text
+1. RenderSystem (owns IrrlichtDevice)
+2. IrrlichtUIBackend (needs device)
+3. UIScaler (needs uiBackend screen dimensions)
+4. Camera scene node + CameraController
+5. IrrlichtRenderer(device, /*uiManager=*/nullptr)
+6. WallClock, AudioSystem, CitySimulation
+7. UIManager(uiBackend, audioSystem, citySimulation, wallClock)
+8. renderer.setUIManager(&uiManager)         // late binding
+9. EventReceiver(uiScaler, uiManager, cameraController)
+10. device->setEventReceiver(&eventReceiver)
+```
 
 ## IrrlichtRenderer and UIManager — Header Dependency Rule
 

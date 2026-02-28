@@ -116,6 +116,15 @@ public:
     // (terrain generation is in progress; no UI polling should occur).
     void setLoadingTerrain(bool loading);
 
+    // Returns true when the user requested application quit
+    // (from Main Menu Quit or Pause Menu Quit to Desktop).
+    // Polled by main.cpp to break the frame loop.
+    bool isQuitRequested() const;
+
+    // Transition from Gameplay/Paused back to MainMenu state.
+    // Called when "Quit to Main Menu" is selected from PauseMenuPanel.
+    void transitionToMainMenu();
+
 private:
     IUIBackend*      m_backend{nullptr};
     IAudioSystem*    m_audio{nullptr};
@@ -142,6 +151,11 @@ private:
     // --- Phase 8: loading gate ---
     // While true, update() returns immediately (terrain generation in progress).
     bool m_loadingTerrain{false};
+
+    // --- Phase 8: application quit flag ---
+    // Set when MainMenu Quit or PauseMenu Quit to Desktop is consumed.
+    // Polled by main.cpp via isQuitRequested() to break the frame loop.
+    bool m_quitRequested{false};
 
     // --- Phase 8: speed selector element handle (created by HUD) ---
     UIElementHandle m_speedSelectorHandle{kInvalidUIElement};

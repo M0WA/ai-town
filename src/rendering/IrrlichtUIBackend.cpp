@@ -247,8 +247,19 @@ UIElementHandle IrrlichtUIBackend::addStaticText(
     // Convert std::string (ASCII/Latin-1) to Irrlicht's wchar_t string.
     irr::core::stringw wtext(text.c_str());
 
-    // Create the rectangle for the element bounds.
-    irr::core::rect<irr::s32> rect(x, y, x + w, y + h);
+    // Scale virtual coordinates (1920x1080 design space) to physical screen pixels.
+    // Panels pass virtual coords; Irrlicht positions elements in physical pixel space.
+    const int sw = getScreenWidth();
+    const int sh = getScreenHeight();
+    const int vw = getVirtualWidth();
+    const int vh = getVirtualHeight();
+    const int px = (x * sw) / vw;
+    const int py = (y * sh) / vh;
+    const int pw = (w * sw) / vw;
+    const int ph = (h * sh) / vh;
+
+    // Create the rectangle for the element bounds (physical pixel coordinates).
+    irr::core::rect<irr::s32> rect(px, py, px + pw, py + ph);
 
     // Create the static text element. border=false, wordWrap=true, parent=root.
     irr::gui::IGUIStaticText* elem = m_guiEnv->addStaticText(
@@ -272,7 +283,18 @@ UIElementHandle IrrlichtUIBackend::addButton(
     const std::string& label, int x, int y, int w, int h)
 {
     irr::core::stringw wlabel(label.c_str());
-    irr::core::rect<irr::s32> rect(x, y, x + w, y + h);
+
+    // Scale virtual coordinates (1920x1080 design space) to physical screen pixels.
+    const int sw = getScreenWidth();
+    const int sh = getScreenHeight();
+    const int vw = getVirtualWidth();
+    const int vh = getVirtualHeight();
+    const int px = (x * sw) / vw;
+    const int py = (y * sh) / vh;
+    const int pw = (w * sw) / vw;
+    const int ph = (h * sh) / vh;
+
+    irr::core::rect<irr::s32> rect(px, py, px + pw, py + ph);
 
     // Irrlicht's addButton signature: rect, parent, id, text, tooltiptext.
     irr::gui::IGUIButton* elem = m_guiEnv->addButton(
@@ -493,12 +515,20 @@ Rect IrrlichtUIBackend::getElementRect(UIElementHandle handle) const
         return Rect{};
     }
 
+    // Element positions are in physical screen pixels (Irrlicht's coordinate space).
+    // Scale back to virtual coordinates (1920x1080 design space) so callers (panels,
+    // hit tests) can compare against virtual mouse coordinates from UIScaler::unproject().
     irr::core::rect<irr::s32> absPos = it->second->getAbsolutePosition();
+    const int sw = getScreenWidth();
+    const int sh = getScreenHeight();
+    const int vw = getVirtualWidth();
+    const int vh = getVirtualHeight();
+
     Rect r;
-    r.x = absPos.UpperLeftCorner.X;
-    r.y = absPos.UpperLeftCorner.Y;
-    r.w = absPos.getWidth();
-    r.h = absPos.getHeight();
+    r.x = (sw > 0) ? (absPos.UpperLeftCorner.X * vw) / sw : absPos.UpperLeftCorner.X;
+    r.y = (sh > 0) ? (absPos.UpperLeftCorner.Y * vh) / sh : absPos.UpperLeftCorner.Y;
+    r.w = (sw > 0) ? (absPos.getWidth()  * vw) / sw : absPos.getWidth();
+    r.h = (sh > 0) ? (absPos.getHeight() * vh) / sh : absPos.getHeight();
     return r;
 }
 

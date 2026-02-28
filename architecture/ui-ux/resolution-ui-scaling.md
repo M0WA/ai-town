@@ -2,7 +2,7 @@
 
 - **Minimum supported resolution**: 1280×720
 - **Target resolution**: 1920×1080
-- All UI elements authored in virtual 1920×1080 coordinate space; scaled at runtime via `UIScaler` before passing to `IGUIEnvironment`
+- All UI elements authored in virtual 1920×1080 coordinate space; scaled at runtime via `UIScaler` (input) and `IrrlichtUIBackend` (element creation) before passing to `IGUIEnvironment`
 - **Scaling mode**: Uniform scale with letterbox/pillarbox (preserve aspect ratio); black bars on sides or top/bottom as needed
 - **Mouse input un-projection**: Mouse coordinates from `SEvent` must be transformed back to virtual space accounting for letterbox/pillarbox offset:
 
@@ -81,6 +81,22 @@ struct Rect { int x{0}, y{0}, w{0}, h{0}; };
 - **Acknowledged transitive include coupling**: Including `IUIBackend.h` in `UIScaler.h` creates a transitive dependency: any translation unit that includes `UIScaler.h` (directly or through `CameraController.h` or the platform adapter) will also see all 17 `IUIBackend` virtual method declarations. This coupling is **intentional and accepted** — `Rect` is defined in `IUIBackend.h` by design (co-location with the interface that returns it), and `UIScaler.h` is a UI-domain header legitimately coupled to the UI backend. An alternative — extracting `Rect` into a minimal `src/ui/rect.h` — was evaluated and rejected to avoid header proliferation for a single 4-field struct. Test targets (`ui_tests`) that include `UIScaler.h` must link `aitown_ui` (which provides `IUIBackend` via the `aitown_render`→`IrrlichtUIBackend` linkage chain) — this is already satisfied by the existing `target_link_libraries(ui_tests ...)` setup. If this transitive dependency ever becomes a build-time bottleneck (e.g., slow incremental compilation), the `rect.h` extraction is the clean upgrade path.
 
 - **Mouse un-projection ownership**: `UIScaler::unproject()` MUST be applied exactly once, at the entry point of the input chain. The platform event receiver (in `src/platform/`) applies the transform before handing the resulting `InputEvent` to `UIManager::onEvent()`. Panels receive virtual-space coordinates and must not call `UIScaler` again. Panel unit tests inject pre-projected virtual-space coordinates directly, bypassing the platform receiver entirely.
+
+## IrrlichtUIBackend Coordinate Scaling
+
+`IrrlichtUIBackend` is the coordinate translation layer between the virtual 1920×1080 design space used by all panels and the physical screen pixel space used by Irrlicht's `IGUIEnvironment`. Two scaling transforms are applied:
+
+- **Element creation** (`addStaticText`, `addButton`): virtual coordinates passed by panels are scaled to physical screen pixels before calling `m_guiEnv->addStaticText()` / `m_guiEnv->addButton()`. The scaling factors are `screenW / virtualW` and `screenH / virtualH`, computed from the driver's screen dimensions and the fixed virtual canvas size (1920×1080).
+- **Element rect query** (`getElementRect`): Irrlicht stores element positions in physical screen pixels. `getElementRect()` scales these back to virtual coordinates before returning a `Rect` to the caller.
+
+This ensures that:
+
+1. Panels work exclusively in virtual 1920×1080 space — no panel code touches physical coordinates.
+2. Hit tests in panel `onEvent()` handlers compare virtual mouse coordinates (from `UIScaler::unproject()`) against virtual element rects (from `getElementRect()`), so the coordinate spaces always match.
+3. Elements are positioned correctly on screen at any resolution — a button at virtual (780, 320) is centered on a 1280×720 window (physical (520, 213)) rather than placed at physical pixel 780.
+
+Without this scaling, elements are positioned at virtual-space values interpreted as physical pixels (e.g., a button intended for virtual x=780 appears at physical pixel 780 on a 1280-wide window, offset from center). Mouse un-projection converts physical clicks to virtual coordinates that do not match the misplaced element positions, making buttons unclickable.
+
 - No hardcoded pixel offsets anywhere in UI code
 
 ## Typography

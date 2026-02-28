@@ -34,15 +34,28 @@ void IrrlichtRenderer::beginFrame() {
 
 void IrrlichtRenderer::drawScene() {
     // Per-frame sequence (must be called INSIDE beginScene/endScene pair):
-    //   1. sceneManager->drawAll()  — 3D scene
-    //   2. uiManager->draw()        — 2D HUD, explicit Z-order
-    // NOTE: m_gui->drawAll() is NOT called — it would bypass the explicit Z-order layering
-    // required for the background scrim and modal overlay (per architecture/ui-ux/ui-manager.md).
+    //   1. sceneManager->drawAll()     — 3D scene
+    //   2. uiManager->draw()           — update panel element states (visibility, text, alpha)
+    //   3. guiEnvironment->drawAll()   — render all visible GUI elements
+    //
+    // Step 2 sets visibility/text/alpha on every panel's elements in explicit Z-order
+    // (slots 1-10 per ui-manager.md). Non-active panels hide their elements, so
+    // step 3's IGUIEnvironment::drawAll() only renders what should be visible.
+    // The Z-order concern is addressed by visibility management — panels that should
+    // be behind (e.g. main menu during gameplay) have their elements hidden.
     if (m_smgr) {
         m_smgr->drawAll();
     }
     if (m_uiManager) {
         m_uiManager->draw();
+    }
+    // Render all visible GUI elements. UIManager::draw() has already set the
+    // correct visibility state on every element; drawAll() paints them.
+    if (m_device) {
+        irr::gui::IGUIEnvironment* guiEnv = m_device->getGUIEnvironment();
+        if (guiEnv) {
+            guiEnv->drawAll();
+        }
     }
 }
 

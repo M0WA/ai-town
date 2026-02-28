@@ -113,12 +113,10 @@ int main() {
     double prevTime = wallClock.nowSeconds();
 
     // -------------------------------------------------------------------------
-    // Phase 4: AudioSystem — production stub wired to frame loop.
+    // Phase 7: AudioSystem — full OpenAL Soft implementation.
     // Injected with wallClock for deterministic timing (crossfade duck timer, etc.).
-    // Phase 7 replaces this stub with the full OpenAL Soft implementation; the
-    // constructor signature (IClock*) and all IAudioSystem method signatures are frozen.
-    // CitySimulation still receives nullptr for audio — Phase 7 wires the real
-    // AudioSystem pointer into CitySimulation when the full implementation lands.
+    // Constructor signature (IClock*) and all IAudioSystem method signatures are frozen.
+    // CitySimulation receives &audioSystem for SFX playback during simulation ticks.
     // -------------------------------------------------------------------------
     AudioSystem audioSystem(&wallClock);
 
@@ -127,14 +125,12 @@ int main() {
     // StdSimulationRNG — production mt19937-backed ISimulationRNG.
     // TerrainSystem — ITerrainQuery implementation (provides slope data for earthworks cost).
     //   MUST NOT pass nullptr for terrain — earthworks cost silently returns 0 for all tiles.
-    // IAudioSystem* is nullptr until Phase 7 implements the real AudioSystem.
-    //   CitySimulation null-checks audio before each call site.
     // Difficulty::Normal is the production default; Phase 8 wires this to the New Game flow.
     // -------------------------------------------------------------------------
     StdSimulationRNG simRng;
     TerrainSystem terrainSystem(&renderer, &wallClock);
     CitySimulation citySimulation(
-        &renderer, /*audio=*/nullptr, &simRng, &wallClock, &terrainSystem, Difficulty::Normal);
+        &renderer, /*audio=*/&audioSystem, &simRng, &wallClock, &terrainSystem, Difficulty::Normal);
 
     // -------------------------------------------------------------------------
     // UIManager — Phase 8 full implementation.
@@ -180,6 +176,12 @@ int main() {
         // Step 3b: UIManager::update(realDeltaSeconds) — per-frame UI state update.
         // MUST execute BEFORE beginFrame() per architecture/ui-ux/ui-manager.md.
         uiManager.update(realDeltaSeconds);
+
+        // Check for application quit request (Main Menu Quit / Pause Menu Quit to Desktop).
+        if (uiManager.isQuitRequested()) {
+            device->closeDevice();
+            continue;  // Skip rendering; device->run() returns false next iteration.
+        }
 
         // Steps 4a/4b: AudioSystem stubs — Phase 4 deliverable.
         // Step 4a: AudioSystem::syncListenerToCamera(cameraState) — commits AL_POSITION,

@@ -21,6 +21,12 @@ public:
     void setSettingsPanel(SettingsPanel* settings);
     bool isVisible() const { return m_visible; }
 
+    // Polling API for UIManager: returns true (once) when Quit to Desktop was clicked.
+    bool consumeQuitDesktopRequest();
+
+    // Polling API for UIManager: returns true (once) when Quit to Main Menu was clicked.
+    bool consumeQuitToMenuRequest();
+
 private:
     IUIBackend*    m_backend{nullptr};
     SettingsPanel* m_settings{nullptr};
@@ -38,4 +44,8 @@ private:
     // Focus tracking for keyboard navigation
     int m_focusedButton{0};
     static constexpr int kNumButtons = 5;
+
+    // Polling flags
+    bool m_quitDesktopRequested{false};
+    bool m_quitToMenuRequested{false};
 };

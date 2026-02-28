@@ -52,6 +52,25 @@ void PauseMenuPanel::setSettingsPanel(SettingsPanel* settings) {
 }
 
 // ---------------------------------------------------------------------------
+// consumeQuitDesktopRequest / consumeQuitToMenuRequest
+// ---------------------------------------------------------------------------
+bool PauseMenuPanel::consumeQuitDesktopRequest() {
+    if (m_quitDesktopRequested) {
+        m_quitDesktopRequested = false;
+        return true;
+    }
+    return false;
+}
+
+bool PauseMenuPanel::consumeQuitToMenuRequest() {
+    if (m_quitToMenuRequested) {
+        m_quitToMenuRequested = false;
+        return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // show / hide
 // ---------------------------------------------------------------------------
 void PauseMenuPanel::show() {
@@ -152,10 +171,12 @@ bool PauseMenuPanel::onEvent(const InputEvent& event) {
                     // Save slot dialog would show here (deferred to sub-dialog)
                     return true;
                 case 3: // Quit to Main Menu
-                    // Unsaved-changes check handled by UIManager
+                    m_quitToMenuRequested = true;
+                    hide();
                     return true;
                 case 4: // Quit to Desktop
-                    // Unsaved-changes check handled by UIManager
+                    m_quitDesktopRequested = true;
+                    hide();
                     return true;
                 default:
                     break;
