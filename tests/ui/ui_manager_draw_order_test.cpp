@@ -33,6 +33,7 @@
 #include "tests/ui/mock_ui_backend.h"
 #include "tests/ui/mock_city_simulation.h"
 #include "tests/simulation/mock_audio_system.h"
+#include "tests/simulation/manual_clock.h"
 #include "tests/ui/panel_sentinel_handles.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -126,5 +127,192 @@ TEST_F(UIManagerDrawOrderTest, DrawOrder_ModalActive_ScrimAndModalFireAfterPanel
     ASSERT_TRUE(ui_->hasActiveModal()) << "Modal must be active after showForcedLoanDialog";
 
     // draw() with an active modal must reach the scrim and modal slots without crash.
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// ============================================================================
+// HUD coverage tests -- exercises uncovered branches in HUD::draw() and
+// HUD::update(). Uses UIManager in Gameplay state with different sim state
+// configurations to hit all HUD draw paths.
+// ============================================================================
+
+using ::testing::Return;
+using ::testing::AtLeast;
+using ::testing::HasSubstr;
+
+class HUDCoverageTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        ON_CALL(backend_, addStaticText(_, _, _, _, _)).WillByDefault(
+            [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
+        ON_CALL(backend_, addButton(_, _, _, _, _)).WillByDefault(
+            [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
+        ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
+        ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
+        ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
+        ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
+        ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
+        ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
+        ON_CALL(sim_, getSpeedMultiplier()).WillByDefault(Return(SpeedMultiplier::x1));
+        ON_CALL(sim_, hasUndoPendingAction()).WillByDefault(Return(false));
+        ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(10000.0f));
+        ON_CALL(sim_, getOutstandingDebt()).WillByDefault(Return(0.0f));
+        ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Village));
+        ON_CALL(sim_, getTotalPopulation()).WillByDefault(Return(100));
+        ON_CALL(sim_, getSimulationTime()).WillByDefault(Return(SimulationTime{1, 1}));
+        ON_CALL(sim_, getDemandPressurePct(_)).WillByDefault(Return(0.5f));
+        ON_CALL(sim_, getUndoExpiryTimeSeconds()).WillByDefault(Return(0.0));
+
+        ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
+        ui_->transitionToGameplay(GameMode::Scenario);
+    }
+
+    void TearDown() override {
+        ui_.reset();
+    }
+
+    NiceMock<MockUIBackend>      backend_;
+    NiceMock<MockAudioSystem>    audio_;
+    NiceMock<MockCitySimulation> sim_;
+    ManualClock                  clock_;
+    std::unique_ptr<UIManager>   ui_;
+    uint32_t                     nextHandle_{700};
+};
+
+// HUD draw with Town rating.
+TEST_F(HUDCoverageTest, Draw_TownRating) {
+    ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Town));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// HUD draw with City rating.
+TEST_F(HUDCoverageTest, Draw_CityRating) {
+    ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::City));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// HUD draw with Metropolis rating.
+TEST_F(HUDCoverageTest, Draw_MetropolisRating) {
+    ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Metropolis));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// HUD draw with Megalopolis rating.
+TEST_F(HUDCoverageTest, Draw_MegalopolisRating) {
+    ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Megalopolis));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// HUD draw with negative treasury balance.
+TEST_F(HUDCoverageTest, Draw_NegativeBalance) {
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(-5000.0f));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// HUD draw with outstanding debt.
+TEST_F(HUDCoverageTest, Draw_OutstandingDebt) {
+    ON_CALL(sim_, getOutstandingDebt()).WillByDefault(Return(50000.0f));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// HUD update with deficit flash (consecutive months >= 2 triggers alpha pulse).
+TEST_F(HUDCoverageTest, Update_DeficitFlash) {
+    ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(2));
+    ui_->update(0.016f);
+    EXPECT_CALL(backend_, setElementAlpha(_, _)).Times(AtLeast(1));
+    ui_->update(0.5f);
+}
+
+// HUD draw with paused simulation shows paused speed indicator.
+TEST_F(HUDCoverageTest, Draw_PausedShowsIndicator) {
+    ON_CALL(sim_, isPaused()).WillByDefault(Return(true));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// HUD draw with x3 speed shows correct indicator.
+TEST_F(HUDCoverageTest, Draw_Speed3x) {
+    ON_CALL(sim_, getSpeedMultiplier()).WillByDefault(Return(SpeedMultiplier::x3));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// HUD draw with x10 speed shows correct indicator.
+TEST_F(HUDCoverageTest, Draw_Speed10x) {
+    ON_CALL(sim_, getSpeedMultiplier()).WillByDefault(Return(SpeedMultiplier::x10));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// HUD draw with undo action pending.
+TEST_F(HUDCoverageTest, Draw_UndoPending) {
+    ON_CALL(sim_, hasUndoPendingAction()).WillByDefault(Return(true));
+    ON_CALL(sim_, getUndoExpiryTimeSeconds()).WillByDefault(Return(8.5));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// HUD with various demand pressure percentages.
+TEST_F(HUDCoverageTest, Draw_HighDemand) {
+    ON_CALL(sim_, getDemandPressurePct(ZoneType::Residential)).WillByDefault(Return(0.9f));
+    ON_CALL(sim_, getDemandPressurePct(ZoneType::Commercial)).WillByDefault(Return(0.1f));
+    ON_CALL(sim_, getDemandPressurePct(ZoneType::Industrial)).WillByDefault(Return(0.5f));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// HUD update with no deficit resets flash timer.
+TEST_F(HUDCoverageTest, Update_NoDeficit_ResetsFlash) {
+    // First trigger flash.
+    ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(2));
+    ui_->update(0.5f);
+    // Then clear deficit.
+    ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
+    ui_->update(0.016f);
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// HUD setUnsavedChanges coverage.
+TEST_F(HUDCoverageTest, SetUnsavedChanges_True) {
+    ui_->setUnsavedChanges(true);
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+TEST_F(HUDCoverageTest, SetUnsavedChanges_False) {
+    ui_->setUnsavedChanges(false);
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// Simulation time display with different month/year.
+TEST_F(HUDCoverageTest, Draw_SimulationTime_Year5Month12) {
+    ON_CALL(sim_, getSimulationTime()).WillByDefault(Return(SimulationTime{5, 12}));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// Large population display.
+TEST_F(HUDCoverageTest, Draw_LargePopulation) {
+    ON_CALL(sim_, getTotalPopulation()).WillByDefault(Return(999999));
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// Grace period fade-out: elapsed > 120s, fade alpha decreasing.
+TEST_F(HUDCoverageTest, Update_GracePeriodFadeOut) {
+    // Advance clock past 120s grace period.
+    clock_.advance(121.0);
+    // First update: remaining <= 0, graceFadeAlpha starts decreasing (1.0 - dt/0.5).
+    ui_->update(0.3f);
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// Grace period fully expired: alpha reaches 0, label hidden.
+TEST_F(HUDCoverageTest, Update_GracePeriodFullyExpired) {
+    clock_.advance(121.0);
+    // Large dt to drive alpha to 0.
+    ui_->update(2.0f);
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// Grace period amber warning: remaining < 20s.
+TEST_F(HUDCoverageTest, Update_GracePeriodAmberWarning) {
+    // Advance to 105s (remaining = 15s, < 20s threshold).
+    clock_.advance(105.0);
+    ui_->update(0.016f);
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }

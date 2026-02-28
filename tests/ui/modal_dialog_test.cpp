@@ -519,3 +519,427 @@ TEST_F(ModalDialogKeyNavTest, GameOver_EscapeNonDismissible) {
         SUCCEED();
     }
 }
+
+// Screen 2: "Emergency Bond" option is consumed.
+TEST_F(ModalDialogKeyNavTest, ForcedLoan_Screen2_EmergencyBond) {
+    ui_->transitionToGameplay(GameMode::Scenario);
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    ui_->showForcedLoanDialog(terms);
+
+    // Tab to Decline, Enter to go to screen 2.
+    ui_->onEvent(keyDown(9));
+    ui_->onEvent(keyDown(13));
+
+    // Tab once to "Emergency Bond" (index 1 on screen 2).
+    ui_->onEvent(keyDown(9));
+
+    // Enter should activate the emergency bond option and close the dialog.
+    ui_->onEvent(keyDown(13));
+
+    EXPECT_FALSE(ui_->hasActiveModal());
+}
+
+// Screen 2: "Do Nothing" option closes the dialog.
+TEST_F(ModalDialogKeyNavTest, ForcedLoan_Screen2_DoNothing) {
+    ui_->transitionToGameplay(GameMode::Scenario);
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    ui_->showForcedLoanDialog(terms);
+
+    // Tab to Decline, Enter to go to screen 2.
+    ui_->onEvent(keyDown(9));
+    ui_->onEvent(keyDown(13));
+
+    // Tab twice to "Do Nothing" (index 2 on screen 2).
+    ui_->onEvent(keyDown(9));
+    ui_->onEvent(keyDown(9));
+
+    // Enter should close the dialog.
+    ui_->onEvent(keyDown(13));
+    EXPECT_FALSE(ui_->hasActiveModal());
+}
+
+// Screen 2: "Back" option accepts original loan and closes modal.
+TEST_F(ModalDialogKeyNavTest, ForcedLoan_Screen2_BackToScreen1) {
+    ui_->transitionToGameplay(GameMode::Scenario);
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    ui_->showForcedLoanDialog(terms);
+
+    // Tab to Decline, Enter to go to screen 2.
+    ui_->onEvent(keyDown(9));
+    ui_->onEvent(keyDown(13));
+
+    // Tab three times to "Back" (index 3 on screen 2).
+    ui_->onEvent(keyDown(9));
+    ui_->onEvent(keyDown(9));
+    ui_->onEvent(keyDown(9));
+
+    // Enter activates Back which accepts original loan and closes modal.
+    ui_->onEvent(keyDown(13));
+
+    // Modal should be closed (Back = accept original loan).
+    EXPECT_FALSE(ui_->hasActiveModal());
+}
+
+// Draw while modal active does not crash.
+TEST_F(ModalDialogKeyNavTest, ForcedLoan_DrawWhileActive_NoCrash) {
+    ui_->transitionToGameplay(GameMode::Scenario);
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    ui_->showForcedLoanDialog(terms);
+    ASSERT_TRUE(ui_->hasActiveModal());
+
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// Mouse click on primary button (Accept on screen 1) closes dialog.
+TEST_F(ModalDialogKeyNavTest, ForcedLoan_MouseClickAccept) {
+    ui_->transitionToGameplay(GameMode::Scenario);
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    ui_->showForcedLoanDialog(terms);
+
+    // Set button rects to known positions so mouse click hits them.
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(
+        Return(Rect{810, 500, 140, 40}));
+
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 830;
+    click.y = 510;
+
+    bool consumed = ui_->onEvent(click);
+    EXPECT_TRUE(consumed);
+}
+
+// Game-over modal via showGameOverModal: Enter closes dialog.
+TEST_F(ModalDialogKeyNavTest, GameOverModal_EnterClosesDialog) {
+    ui_->transitionToGameplay(GameMode::Scenario);
+    ui_->showGameOverModal(100000LL, 3);
+
+    ASSERT_TRUE(ui_->hasActiveModal());
+
+    // Enter on focused button closes the game-over dialog.
+    ui_->onEvent(keyDown(13));
+    EXPECT_FALSE(ui_->hasActiveModal());
+}
+
+// Game-over modal draw does not crash.
+TEST_F(ModalDialogKeyNavTest, GameOverModal_Draw_NoCrash) {
+    ui_->transitionToGameplay(GameMode::Scenario);
+    ui_->showGameOverModal(100000LL, 3);
+
+    EXPECT_NO_FATAL_FAILURE(ui_->draw());
+}
+
+// Tab wraps around on screen 2 (4 buttons).
+TEST_F(ModalDialogKeyNavTest, ForcedLoan_Screen2_TabWrapsAround) {
+    ui_->transitionToGameplay(GameMode::Scenario);
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    ui_->showForcedLoanDialog(terms);
+
+    // Go to screen 2.
+    ui_->onEvent(keyDown(9));
+    ui_->onEvent(keyDown(13));
+
+    // Tab 4 times should wrap back to first button.
+    ui_->onEvent(keyDown(9));
+    ui_->onEvent(keyDown(9));
+    ui_->onEvent(keyDown(9));
+    ui_->onEvent(keyDown(9)); // Wraps back to index 0
+
+    // Enter on index 0 = "Raise Tax Rates".
+    EXPECT_CALL(sim_, setTaxRate(_, _)).Times(AtLeast(3));
+    ui_->onEvent(keyDown(13));
+    EXPECT_FALSE(ui_->hasActiveModal());
+}
+
+// ============================================================================
+// ModalDialogStandaloneTest -- standalone ModalDialog tests for DemolishConfirm
+// and WASDPreset (not accessible via UIManager public API).
+// ============================================================================
+#include "src/ui/modal_dialog.h"
+
+class ModalDialogStandaloneTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        ON_CALL(backend_, addStaticText(_, _, _, _, _)).WillByDefault(
+            [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
+        ON_CALL(backend_, addButton(_, _, _, _, _)).WillByDefault(
+            [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
+        ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
+        ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
+        ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
+        ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+        ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
+        ON_CALL(sim_, getTaxRate(ZoneType::Residential)).WillByDefault(Return(0.10f));
+        ON_CALL(sim_, getTaxRate(ZoneType::Commercial)).WillByDefault(Return(0.10f));
+        ON_CALL(sim_, getTaxRate(ZoneType::Industrial)).WillByDefault(Return(0.10f));
+        ON_CALL(sim_, getOutstandingBondUses()).WillByDefault(Return(2));
+
+        dialog_ = std::make_unique<ModalDialog>(&backend_, &sim_);
+    }
+
+    void TearDown() override {
+        dialog_.reset();
+    }
+
+    InputEvent keyDown(int code) {
+        InputEvent e;
+        e.type = InputEvent::Type::KeyDown;
+        e.keyCode = code;
+        return e;
+    }
+
+    NiceMock<MockUIBackend>      backend_;
+    NiceMock<MockCitySimulation> sim_;
+    std::unique_ptr<ModalDialog> dialog_;
+    uint32_t                     nextHandle_{500};
+};
+
+TEST_F(ModalDialogStandaloneTest, DemolishConfirm_Show_IsActive) {
+    EXPECT_CALL(sim_, setPaused(true)).Times(1);
+    dialog_->showDemolishConfirm(5);
+    EXPECT_TRUE(dialog_->isActive());
+}
+
+TEST_F(ModalDialogStandaloneTest, DemolishConfirm_Draw_NoCrash) {
+    dialog_->showDemolishConfirm(3);
+    EXPECT_NO_FATAL_FAILURE(dialog_->draw());
+}
+
+TEST_F(ModalDialogStandaloneTest, DemolishConfirm_Escape_Cancels) {
+    dialog_->showDemolishConfirm(2);
+    EXPECT_CALL(sim_, setPaused(false)).Times(1);
+    dialog_->onEvent(keyDown(27));
+    EXPECT_FALSE(dialog_->isActive());
+    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Cancel);
+}
+
+TEST_F(ModalDialogStandaloneTest, DemolishConfirm_DefaultFocus_Cancel) {
+    dialog_->showDemolishConfirm(1);
+    dialog_->onEvent(keyDown(13));
+    EXPECT_FALSE(dialog_->isActive());
+    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Cancel);
+}
+
+TEST_F(ModalDialogStandaloneTest, DemolishConfirm_Tab_Yes_Accepts) {
+    dialog_->showDemolishConfirm(1);
+    dialog_->onEvent(keyDown(9));
+    dialog_->onEvent(keyDown(13));
+    EXPECT_FALSE(dialog_->isActive());
+    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Accept);
+}
+
+TEST_F(ModalDialogStandaloneTest, DemolishConfirm_MouseClick_Yes) {
+    dialog_->showDemolishConfirm(1);
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{810, 500, 140, 40}));
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 830;
+    click.y = 510;
+    dialog_->onEvent(click);
+    EXPECT_FALSE(dialog_->isActive());
+}
+
+TEST_F(ModalDialogStandaloneTest, WASDPreset_Show_IsActive) {
+    dialog_->showWASDPreset();
+    EXPECT_TRUE(dialog_->isActive());
+}
+
+TEST_F(ModalDialogStandaloneTest, WASDPreset_Draw_NoCrash) {
+    dialog_->showWASDPreset();
+    EXPECT_NO_FATAL_FAILURE(dialog_->draw());
+}
+
+TEST_F(ModalDialogStandaloneTest, WASDPreset_Escape_Cancels) {
+    dialog_->showWASDPreset();
+    dialog_->onEvent(keyDown(27));
+    EXPECT_FALSE(dialog_->isActive());
+    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Cancel);
+}
+
+TEST_F(ModalDialogStandaloneTest, WASDPreset_DefaultFocus_Cancel) {
+    dialog_->showWASDPreset();
+    dialog_->onEvent(keyDown(13));
+    EXPECT_FALSE(dialog_->isActive());
+    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Cancel);
+}
+
+TEST_F(ModalDialogStandaloneTest, WASDPreset_Tab_Apply_Accepts) {
+    dialog_->showWASDPreset();
+    dialog_->onEvent(keyDown(9));
+    dialog_->onEvent(keyDown(13));
+    EXPECT_FALSE(dialog_->isActive());
+    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Accept);
+}
+
+TEST_F(ModalDialogStandaloneTest, GameOver_Standalone_Show_IsActive) {
+    dialog_->showGameOver(100000LL, 3);
+    EXPECT_TRUE(dialog_->isActive());
+}
+
+TEST_F(ModalDialogStandaloneTest, GameOver_Standalone_Escape_NonDismissible) {
+    dialog_->showGameOver(100000LL, 3);
+    dialog_->onEvent(keyDown(27));
+    EXPECT_TRUE(dialog_->isActive());
+}
+
+TEST_F(ModalDialogStandaloneTest, GameOver_Standalone_Enter_LoadSave) {
+    dialog_->showGameOver(100000LL, 3);
+    dialog_->onEvent(keyDown(13));
+    EXPECT_FALSE(dialog_->isActive());
+    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Accept);
+}
+
+TEST_F(ModalDialogStandaloneTest, GameOver_Standalone_Tab_MainMenu) {
+    dialog_->showGameOver(100000LL, 3);
+    dialog_->onEvent(keyDown(9));
+    dialog_->onEvent(keyDown(13));
+    EXPECT_FALSE(dialog_->isActive());
+    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Decline);
+}
+
+TEST_F(ModalDialogStandaloneTest, ForcedLoan_Standalone_Show) {
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    dialog_->showForcedLoan(terms);
+    EXPECT_TRUE(dialog_->isActive());
+}
+
+TEST_F(ModalDialogStandaloneTest, ForcedLoan_Screen2_DemolishLast) {
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    dialog_->showForcedLoan(terms);
+    dialog_->onEvent(keyDown(9));
+    dialog_->onEvent(keyDown(13));
+    dialog_->onEvent(keyDown(9));
+    dialog_->onEvent(keyDown(13));
+    EXPECT_FALSE(dialog_->isActive());
+}
+
+TEST_F(ModalDialogStandaloneTest, ForcedLoan_Screen2_EmergencyBond) {
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    dialog_->showForcedLoan(terms);
+    dialog_->onEvent(keyDown(9));
+    dialog_->onEvent(keyDown(13));
+    dialog_->onEvent(keyDown(9));
+    dialog_->onEvent(keyDown(9));
+    dialog_->onEvent(keyDown(13));
+    EXPECT_FALSE(dialog_->isActive());
+}
+
+TEST_F(ModalDialogStandaloneTest, OnEvent_NotActive_ReturnsFalse) {
+    EXPECT_FALSE(dialog_->onEvent(keyDown(13)));
+}
+
+TEST_F(ModalDialogStandaloneTest, Show_IsNoop) {
+    dialog_->show();
+    EXPECT_FALSE(dialog_->isActive());
+}
+
+TEST_F(ModalDialogStandaloneTest, Hide_CallsCloseModal) {
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    dialog_->showForcedLoan(terms);
+    dialog_->hide();
+    EXPECT_FALSE(dialog_->isActive());
+}
+
+TEST_F(ModalDialogStandaloneTest, ForcedLoan_SimAlreadyPaused_NoPause) {
+    ON_CALL(sim_, isPaused()).WillByDefault(Return(true));
+    EXPECT_CALL(sim_, setPaused(_)).Times(0);
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    dialog_->showForcedLoan(terms);
+}
+
+TEST_F(ModalDialogStandaloneTest, ForcedLoan_SimAlreadyPaused_NoUnpause) {
+    ON_CALL(sim_, isPaused()).WillByDefault(Return(true));
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    dialog_->showForcedLoan(terms);
+    EXPECT_CALL(sim_, setPaused(false)).Times(0);
+    dialog_->onEvent(keyDown(13));
+    EXPECT_FALSE(dialog_->isActive());
+}
+
+TEST_F(ModalDialogStandaloneTest, ForcedLoan_Screen2_NullSim_BondDisabled) {
+    auto nullSimDialog = std::make_unique<ModalDialog>(&backend_, nullptr);
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    nullSimDialog->showForcedLoan(terms);
+    nullSimDialog->onEvent(keyDown(9));
+    nullSimDialog->onEvent(keyDown(13));
+    EXPECT_TRUE(nullSimDialog->isActive());
+    nullSimDialog.reset();
+}
+
+// Mouse click on secondary button (Decline on screen 1).
+TEST_F(ModalDialogStandaloneTest, ForcedLoan_MouseClickSecondary) {
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    dialog_->showForcedLoan(terms);
+
+    // Set secondary button rect at a known position.
+    // Handles: 501..506 = title, body, primary, secondary, tertiary, back (approx).
+    // Primary (m_btnPrimary) at rect (0,0,0,0) so it misses. Secondary at click point.
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
+
+    // We need the secondary button's rect to match. ModalDialog button handles:
+    // Constructor creates: m_lblTitle=501, m_lblBody=502, m_btnPrimary=503,
+    // m_btnSecondary=504, m_btnTertiary=505, m_btnBack=506.
+    ON_CALL(backend_, getElementRect(504)).WillByDefault(Return(Rect{810, 560, 140, 40}));
+
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 830;
+    click.y = 570;
+    bool consumed = dialog_->onEvent(click);
+    EXPECT_TRUE(consumed);
+
+    // Clicking Decline on screen 1 should transition to screen 2. Modal still active.
+    EXPECT_TRUE(dialog_->isActive());
+}
+
+// Mouse click on tertiary button (screen 2 Emergency Bond).
+TEST_F(ModalDialogStandaloneTest, ForcedLoan_Screen2_MouseClickTertiary) {
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    dialog_->showForcedLoan(terms);
+
+    // Go to screen 2 via keyboard.
+    dialog_->onEvent(keyDown(9));
+    dialog_->onEvent(keyDown(13));
+    EXPECT_TRUE(dialog_->isActive());
+
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
+    ON_CALL(backend_, getElementRect(505)).WillByDefault(Return(Rect{810, 620, 140, 40}));
+
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 830;
+    click.y = 630;
+    bool consumed = dialog_->onEvent(click);
+    EXPECT_TRUE(consumed);
+    EXPECT_FALSE(dialog_->isActive());
+}
+
+// Mouse click on back button (screen 2 Back = accept original loan).
+TEST_F(ModalDialogStandaloneTest, ForcedLoan_Screen2_MouseClickBack) {
+    LoanTerms terms{5000.0f, 12, 0.05f};
+    dialog_->showForcedLoan(terms);
+
+    // Go to screen 2.
+    dialog_->onEvent(keyDown(9));
+    dialog_->onEvent(keyDown(13));
+
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
+    ON_CALL(backend_, getElementRect(506)).WillByDefault(Return(Rect{810, 680, 140, 40}));
+
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 830;
+    click.y = 690;
+    bool consumed = dialog_->onEvent(click);
+    EXPECT_TRUE(consumed);
+    EXPECT_FALSE(dialog_->isActive());
+}

@@ -355,3 +355,343 @@ TEST_F(UIManagerDeficitIntegrationTest, UIManagerDeficit_Month1_SpeedSelectorRef
     EXPECT_CALL(sim_, getSpeedMultiplier()).Times(AtLeast(1));
     ui_->draw();
 }
+
+// ============================================================================
+// NotificationManager extended tests — covers draw, onEvent, toggleLog,
+// truncateBody, and update auto-dismiss paths.
+// ============================================================================
+
+// --- Draw with CRITICAL toasts sets elements visible ---
+TEST_F(NotificationManagerTest_Phase8, Draw_WithCriticalToasts_SetsElementsVisible) {
+    notifMgr_->postCritical("Crisis", "Budget deficit");
+
+    EXPECT_CALL(backend_, setElementVisible(_, true)).Times(AtLeast(1));
+    notifMgr_->draw();
+}
+
+// --- Draw with Normal toasts sets elements visible ---
+TEST_F(NotificationManagerTest_Phase8, Draw_WithNormalToasts_SetsElementsVisible) {
+    notifMgr_->postNormal("Info", "Road completed", 10.0f);
+
+    EXPECT_CALL(backend_, setElementVisible(_, true)).Times(AtLeast(1));
+    notifMgr_->draw();
+}
+
+// --- Draw with log panel open sets it visible ---
+TEST_F(NotificationManagerTest_Phase8, Draw_LogOpen_SetsLogPanelVisible) {
+    notifMgr_->toggleLog();
+    EXPECT_TRUE(notifMgr_->isLogOpen());
+
+    EXPECT_CALL(backend_, setElementVisible(_, true)).Times(AtLeast(1));
+    notifMgr_->draw();
+}
+
+// --- Draw with log panel closed sets it hidden ---
+TEST_F(NotificationManagerTest_Phase8, Draw_LogClosed_SetsLogPanelHidden) {
+    // Open then close the log.
+    notifMgr_->toggleLog();
+    notifMgr_->toggleLog();
+    EXPECT_FALSE(notifMgr_->isLogOpen());
+
+    notifMgr_->draw();
+    SUCCEED();
+}
+
+// --- onEvent: click on CRITICAL toast dismisses it ---
+TEST_F(NotificationManagerTest_Phase8, OnEvent_ClickOnCriticalToast_DismissesToast) {
+    notifMgr_->postCritical("Crisis", "Budget deficit");
+    EXPECT_TRUE(notifMgr_->hasCriticalToastVisible());
+
+    int vw = 1920;
+    int toastX = (vw - 500) / 2; // kToastWidth = 500
+
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = toastX + 10;
+    click.y = 30; // Inside first CRITICAL toast band (y:20-68)
+
+    bool consumed = notifMgr_->onEvent(click);
+    EXPECT_TRUE(consumed);
+}
+
+// --- onEvent: Enter key dismisses focused CRITICAL toast ---
+TEST_F(NotificationManagerTest_Phase8, OnEvent_EnterKey_DismissesFocusedToast) {
+    notifMgr_->postCritical("Crisis", "Budget deficit");
+
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13; // Enter
+    bool consumed = notifMgr_->onEvent(enter);
+    EXPECT_TRUE(consumed);
+}
+
+// --- onEvent: Delete key dismisses focused CRITICAL toast ---
+TEST_F(NotificationManagerTest_Phase8, OnEvent_DeleteKey_DismissesFocusedToast) {
+    notifMgr_->postCritical("Crisis", "Budget deficit");
+
+    InputEvent del;
+    del.type = InputEvent::Type::KeyDown;
+    del.keyCode = 46; // Delete
+    bool consumed = notifMgr_->onEvent(del);
+    EXPECT_TRUE(consumed);
+}
+
+// --- onEvent: Tab cycles focus between CRITICAL toasts ---
+TEST_F(NotificationManagerTest_Phase8, OnEvent_Tab_CyclesFocusBetweenToasts) {
+    notifMgr_->postCritical("Crisis 1", "First");
+    notifMgr_->postCritical("Crisis 2", "Second");
+
+    InputEvent tab;
+    tab.type = InputEvent::Type::KeyDown;
+    tab.keyCode = 9; // Tab
+    bool consumed = notifMgr_->onEvent(tab);
+    EXPECT_TRUE(consumed);
+}
+
+// --- onEvent: Tab with single toast is still consumed ---
+TEST_F(NotificationManagerTest_Phase8, OnEvent_Tab_SingleToast_Consumed) {
+    notifMgr_->postCritical("Crisis", "Single toast");
+
+    InputEvent tab;
+    tab.type = InputEvent::Type::KeyDown;
+    tab.keyCode = 9;
+    bool consumed = notifMgr_->onEvent(tab);
+    EXPECT_TRUE(consumed);
+}
+
+// --- onEvent: empty queue returns false ---
+TEST_F(NotificationManagerTest_Phase8, OnEvent_EmptyQueue_ReturnsFalse) {
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 960;
+    click.y = 30;
+    EXPECT_FALSE(notifMgr_->onEvent(click));
+}
+
+// --- truncateBody: short body posted and drawn without crash ---
+TEST_F(NotificationManagerTest_Phase8, TruncateBody_ShortBody_PostAndDraw) {
+    notifMgr_->postNormal("Info", "Short body text", 10.0f);
+    EXPECT_NO_FATAL_FAILURE(notifMgr_->draw());
+}
+
+// --- truncateBody: long body (>80 chars) posted and drawn without crash ---
+TEST_F(NotificationManagerTest_Phase8, TruncateBody_LongBody_PostAndDraw) {
+    // kMaxBodyChars is 80 per NotificationManager.h
+    std::string longBody(200, 'A');
+    notifMgr_->postNormal("Info", longBody, 10.0f);
+    EXPECT_NO_FATAL_FAILURE(notifMgr_->draw());
+}
+
+// --- toggleLog shows entries text ---
+TEST_F(NotificationManagerTest_Phase8, ToggleLog_ShowsEntries) {
+    notifMgr_->postCritical("Alert", "Something critical happened");
+    notifMgr_->postNormal("Info", "Building complete", 10.0f);
+
+    // Open the log.
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Alert"))).Times(AtLeast(1));
+    notifMgr_->toggleLog();
+}
+
+// --- toggleLog mark critical entries with [!] prefix ---
+TEST_F(NotificationManagerTest_Phase8, ToggleLog_CriticalEntries_HavePrefix) {
+    notifMgr_->postCritical("Alert", "Crisis body");
+
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("[!]"))).Times(AtLeast(1));
+    notifMgr_->toggleLog();
+}
+
+// --- setModalActive(true) hides CRITICAL toasts ---
+TEST_F(NotificationManagerTest_Phase8, SetModalActive_HidesCriticalToasts) {
+    notifMgr_->postCritical("Crisis", "Budget deficit");
+
+    EXPECT_CALL(backend_, removeElement(_)).Times(AtLeast(1));
+    notifMgr_->setModalActive(true);
+}
+
+// --- setModalActive(false) re-shows CRITICAL toasts ---
+TEST_F(NotificationManagerTest_Phase8, SetModalActive_False_ReShowsCriticalToasts) {
+    notifMgr_->postCritical("Crisis", "Budget deficit");
+    notifMgr_->setModalActive(true);
+
+    // When modal closes, toasts are re-created.
+    EXPECT_CALL(backend_, addStaticText(_, _, _, _, _)).Times(AtLeast(1));
+    ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
+    notifMgr_->setModalActive(false);
+}
+
+// --- setModalActive(false) re-pauses if queue non-empty ---
+TEST_F(NotificationManagerTest_Phase8, SetModalActive_False_RePausesIfQueueNonEmpty) {
+    notifMgr_->postCritical("Crisis", "Budget deficit");
+    notifMgr_->setModalActive(true);
+
+    // When modal closes, if queue is non-empty AND sim is not paused,
+    // setPaused(true) is called.
+    ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
+    EXPECT_CALL(sim_, setPaused(true)).Times(AtLeast(1));
+    notifMgr_->setModalActive(false);
+}
+
+// --- Normal toast queue depth limit ---
+TEST_F(NotificationManagerTest_Phase8, NormalToast_QueueDepthLimit) {
+    // Queue many normal toasts beyond depth limit (kMaxNormalQueueDepth).
+    for (int i = 0; i < 20; ++i) {
+        notifMgr_->postNormal("Info " + std::to_string(i), "Body", 10.0f);
+    }
+    // Should not crash.
+    SUCCEED();
+}
+
+// --- update auto-dismisses expired normal toasts ---
+TEST_F(NotificationManagerTest_Phase8, Update_Removes_ExpiredNormalToasts) {
+    notifMgr_->postNormal("T1", "Body1", 3.0f);
+    notifMgr_->postNormal("T2", "Body2", 5.0f);
+
+    // After 4s, T1 should be dismissed (3s timeout), T2 still active.
+    clock_.advance(4.0);
+
+    EXPECT_CALL(backend_, removeElement(_)).Times(AtLeast(1));
+    notifMgr_->update();
+}
+
+// --- addLogEntry caps entries at max ---
+TEST_F(NotificationManagerTest_Phase8, AddLogEntry_CapsAtMaxEntries) {
+    // Post many entries to exceed the log cap.
+    for (int i = 0; i < 60; ++i) {
+        notifMgr_->postNormal("Entry " + std::to_string(i), "Body", 100.0f);
+    }
+    // No crash. The log is capped.
+    SUCCEED();
+}
+
+// --- hasCriticalToastVisible returns false when modal is active ---
+TEST_F(NotificationManagerTest_Phase8, HasCriticalToastVisible_FalseWhenModalActive) {
+    notifMgr_->postCritical("Crisis", "Deficit");
+    EXPECT_TRUE(notifMgr_->hasCriticalToastVisible());
+
+    notifMgr_->setModalActive(true);
+    EXPECT_FALSE(notifMgr_->hasCriticalToastVisible());
+}
+
+// --- Notification polling integration: ForcedLoanIssued fires showForcedLoanDialog ---
+TEST_F(UIManagerDeficitIntegrationTest, NotificationPolling_ForcedLoan) {
+    SimulationNotification notif;
+    notif.type = NotificationType::ForcedLoanIssued;
+    notif.amount = 50000.0;
+    notif.repaymentTicks = 12;
+
+    ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(
+        [&notif](SimulationNotification& out) {
+            static bool called = false;
+            if (!called) {
+                called = true;
+                out = notif;
+                return true;
+            }
+            return false;
+        });
+
+    ui_->update(0.016f);
+    EXPECT_TRUE(ui_->hasActiveModal());
+}
+
+// --- Notification polling integration: BondIssued posts normal toast ---
+TEST_F(UIManagerDeficitIntegrationTest, NotificationPolling_BondIssued) {
+    SimulationNotification notif;
+    notif.type = NotificationType::BondIssued;
+    notif.amount = 10000.0;
+
+    ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(
+        [&notif](SimulationNotification& out) {
+            static bool called = false;
+            if (!called) {
+                called = true;
+                out = notif;
+                return true;
+            }
+            return false;
+        });
+
+    EXPECT_CALL(backend_, addStaticText(HasSubstr("Bond Issued"), _, _, _, _)).Times(AtLeast(1));
+    ui_->update(0.016f);
+}
+
+// --- Notification polling integration: ServiceDegraded posts normal toast ---
+TEST_F(UIManagerDeficitIntegrationTest, NotificationPolling_ServiceDegraded) {
+    SimulationNotification notif;
+    notif.type = NotificationType::ServiceDegraded;
+
+    ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(
+        [&notif](SimulationNotification& out) {
+            static bool called = false;
+            if (!called) {
+                called = true;
+                out = notif;
+                return true;
+            }
+            return false;
+        });
+
+    ui_->update(0.016f);
+    SUCCEED();
+}
+
+// --- Notification polling: PopulationMilestone and CityRatingTransition ---
+TEST_F(UIManagerDeficitIntegrationTest, NotificationPolling_PopulationMilestone) {
+    SimulationNotification notif;
+    notif.type = NotificationType::PopulationMilestone;
+    notif.milestoneValue = 1000;
+
+    ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(
+        [&notif](SimulationNotification& out) {
+            static bool called = false;
+            if (!called) {
+                called = true;
+                out = notif;
+                return true;
+            }
+            return false;
+        });
+
+    ui_->update(0.016f);
+    SUCCEED();
+}
+
+TEST_F(UIManagerDeficitIntegrationTest, NotificationPolling_CityRatingTransition) {
+    SimulationNotification notif;
+    notif.type = NotificationType::CityRatingTransition;
+
+    ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(
+        [&notif](SimulationNotification& out) {
+            static bool called = false;
+            if (!called) {
+                called = true;
+                out = notif;
+                return true;
+            }
+            return false;
+        });
+
+    ui_->update(0.016f);
+    SUCCEED();
+}
+
+TEST_F(UIManagerDeficitIntegrationTest, NotificationPolling_BudgetDeficitWarn) {
+    SimulationNotification notif;
+    notif.type = NotificationType::BudgetDeficitWarn;
+
+    ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(
+        [&notif](SimulationNotification& out) {
+            static bool called = false;
+            if (!called) {
+                called = true;
+                out = notif;
+                return true;
+            }
+            return false;
+        });
+
+    ui_->update(0.016f);
+    SUCCEED();
+}

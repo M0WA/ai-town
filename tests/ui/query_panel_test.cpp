@@ -288,3 +288,92 @@ TEST(QueryPanelEscape, EscapeFeedbackToast_DoesNotConsumeSubsequentEscape) {
     bool consumed2 = panel.onEvent(esc);
     EXPECT_FALSE(consumed2);
 }
+
+// Click inside panel is consumed (not dismissed).
+TEST_F(QueryPanelIntegrationTest, ClickInside_Consumed) {
+    panel_->show(5, 10, 200, 200);
+    EXPECT_TRUE(panel_->isOpen());
+
+    // Panel position near (240, 240) for click at 200,200.
+    // kPanelW=240, kPanelH=160. Primary: px=200+40=240, py=200+40=240.
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 260;
+    click.y = 260;
+    bool consumed = panel_->onEvent(click);
+    EXPECT_TRUE(consumed);
+    EXPECT_TRUE(panel_->isOpen());
+}
+
+// Non-click, non-escape event returns false when panel is open.
+TEST_F(QueryPanelIntegrationTest, NonEscapeKey_ReturnsFalse) {
+    panel_->show(5, 10, 200, 200);
+
+    InputEvent key;
+    key.type = InputEvent::Type::KeyDown;
+    key.keyCode = 65; // A key
+    bool consumed = panel_->onEvent(key);
+    EXPECT_FALSE(consumed);
+}
+
+// Commercial zone type coverage.
+TEST_F(QueryPanelIntegrationTest, Draw_CommercialZone) {
+    QueryResult qr;
+    qr.tileX = 3;
+    qr.tileZ = 7;
+    qr.isZoned = true;
+    qr.zoneType = ZoneType::Commercial;
+    qr.densityTier = DensityTier::Medium;
+    qr.population = 100;
+    qr.coverage = {50.0f, 50.0f, 50.0f, 50.0f};
+    qr.desirability = 50.0f;
+    qr.demandPressurePct = 40.0f;
+    ON_CALL(sim_, queryTile(_, _)).WillByDefault(Return(qr));
+
+    panel_->show(3, 7, 500, 500);
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Commercial"))).Times(AtLeast(1));
+    panel_->draw();
+}
+
+// Industrial zone type coverage.
+TEST_F(QueryPanelIntegrationTest, Draw_IndustrialZone) {
+    QueryResult qr;
+    qr.tileX = 8;
+    qr.tileZ = 2;
+    qr.isZoned = true;
+    qr.zoneType = ZoneType::Industrial;
+    qr.densityTier = DensityTier::High;
+    qr.population = 200;
+    qr.coverage = {90.0f, 70.0f, 100.0f, 80.0f};
+    qr.desirability = 30.0f;
+    qr.demandPressurePct = 70.0f;
+    ON_CALL(sim_, queryTile(_, _)).WillByDefault(Return(qr));
+
+    panel_->show(8, 2, 400, 300);
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Industrial"))).Times(AtLeast(1));
+    panel_->draw();
+}
+
+// Third-fallback edge-snap: both primary and fallback overlap.
+// Click near bottom-right corner of a very small screen.
+TEST(QueryPanelPosition, ThirdFallback_SmallScreen_EdgeSnap) {
+    // 320x240 screen with click near lower-right: both primary and fallback overlap.
+    Rect r = InspectorPanel::computePanelPosition(150, 120, 320, 240);
+    EXPECT_GE(r.x, 0);
+    EXPECT_LE(r.x + r.w, 320);
+    EXPECT_GE(r.y, 0);
+    EXPECT_LE(r.y + r.h, 240);
+}
+
+// Edge-snap with click in left half of screen.
+TEST(QueryPanelPosition, ThirdFallback_LeftHalf_EdgeSnap) {
+    // 480x320 screen, click at center -- forces all quadrants to overlap.
+    Rect r = InspectorPanel::computePanelPosition(120, 80, 480, 320);
+    EXPECT_GE(r.x, 0);
+    EXPECT_LE(r.x + r.w, 480);
+}
