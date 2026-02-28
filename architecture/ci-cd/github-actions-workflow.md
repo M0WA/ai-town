@@ -510,7 +510,36 @@ This step runs as the **first named step** in the `build-linux` job — before v
     ```
 
     The lcov capture-and-gate step must run **after all three ctest steps complete** — lcov reads the `.gcda` files produced by test execution. Running lcov before all three ctest steps complete will under-report coverage for integration-tested code paths. `BUILD_DIR` is set and used within the same `run:` block as all lcov operations, keeping variable scope self-contained.
-  - **`coverage-linux` test reporting steps (required)**: After all three ctest steps and **before the lcov capture step**, `coverage-linux` must include the XML verification and `dorny/test-reporter` steps. Placing these **before lcov** is intentional: if a test fails and ctest exits non-zero, the XML files may still be present; reporting them before the lcov step ensures test annotations reach the PR even when lcov subsequently fails or is skipped. Without these steps, test failures in the coverage build produce no PR annotations, silently hiding coverage-run failures from reviewers. **Step order in `coverage-linux`**: (1) unit tests ctest, (2) integration tests ctest, (3) OpenGL tests ctest under xvfb, (4) Verify test XML, (5) Publish test results via `dorny/test-reporter`, (6) lcov capture + filter + gate, (7) Upload coverage artifact. Note: the "Verify shader assets" step (step 11 in the full ordered list above) runs before any of these ctest steps. The `coverage-linux` YAML must include (after all ctest steps, before lcov):
+  - **Step 17a — Check src/ui/ zero-hit files** (Phase 8 deliverable): Immediately after the lcov capture-and-gate step (step 17) and before the Upload coverage artifact step (step 18), add the following step. This step MUST use `if: always()` so it runs even when the lcov gate fails:
+
+    ```yaml
+    - name: Check src/ui/ zero-hit files
+      if: always()
+      shell: bash
+      run: |
+        python3 -c "
+        import sys
+        files_with_zero = []
+        current_file = None
+        has_hit = False
+        for line in open('coverage_filtered.info'):
+            line = line.strip()
+            if line.startswith('SF:'):
+                current_file = line[3:]
+                has_hit = False
+            elif line.startswith('DA:') and current_file and 'src/ui/' in current_file:
+                if not line.endswith(',0'):
+                    has_hit = True
+            elif line == 'end_of_record' and current_file and 'src/ui/' in current_file and not has_hit:
+                files_with_zero.append(current_file)
+                current_file = None
+        if files_with_zero:
+            print('ERROR: These src/ui/ files have 0 coverage:', files_with_zero)
+            sys.exit(1)
+        "
+    ```
+
+  - **`coverage-linux` test reporting steps (required)**: After all three ctest steps and **before the lcov capture step**, `coverage-linux` must include the XML verification and `dorny/test-reporter` steps. Placing these **before lcov** is intentional: if a test fails and ctest exits non-zero, the XML files may still be present; reporting them before the lcov step ensures test annotations reach the PR even when lcov subsequently fails or is skipped. Without these steps, test failures in the coverage build produce no PR annotations, silently hiding coverage-run failures from reviewers. **Step order in `coverage-linux`**: (1) unit tests ctest, (2) integration tests ctest, (3) OpenGL tests ctest under xvfb, (4) Verify test XML, (5) Publish test results via `dorny/test-reporter`, (6) lcov capture + filter + gate, (6a) check src/ui/ zero-hit files (`if: always()` — Phase 8 deliverable, see step 17a YAML above), (7) Upload coverage artifact. Note: the "Verify shader assets" step (step 11 in the full ordered list above) runs before any of these ctest steps. The `coverage-linux` YAML must include (after all ctest steps, before lcov):
 
     ```yaml
     - name: Verify test XML output exists
