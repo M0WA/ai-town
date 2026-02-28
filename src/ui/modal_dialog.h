@@ -85,5 +85,5 @@ private:
     void layoutWASDPreset();
     void layoutGameOver(int64_t debt, int months);
     void hideAllDialogElements();
-    void setDialogRect(int x, int y, int w, int h);
+    void setDialogRect(int w, int h);
 };

@@ -180,6 +180,7 @@ void SettingsPanel::hideAllTabElements() {
 // ---------------------------------------------------------------------------
 void SettingsPanel::switchTab(int tabIndex) {
     m_activeTab = tabIndex;
+    m_focusedElement = 0; // Reset intra-tab focus on tab switch
     hideAllTabElements();
 
     // Update tab header visual state
@@ -302,6 +303,19 @@ bool SettingsPanel::onEvent(const InputEvent& event) {
             switchTab(newTab);
             return true;
         }
+
+        // Tab / Shift+Tab: navigate within active tab
+        if (key == 9) { // Tab
+            int count = getInteractiveElementCount();
+            if (count > 0) {
+                if (event.shiftDown) {
+                    m_focusedElement = (m_focusedElement > 0) ? m_focusedElement - 1 : count - 1;
+                } else {
+                    m_focusedElement = (m_focusedElement + 1) % count;
+                }
+            }
+            return true;
+        }
     }
 
     if (event.type == InputEvent::Type::MouseButtonDown && event.button == 0) {
@@ -373,4 +387,17 @@ bool SettingsPanel::onEvent(const InputEvent& event) {
     }
 
     return false;
+}
+
+// ---------------------------------------------------------------------------
+// getInteractiveElementCount — number of Tab-navigable controls in active tab
+// ---------------------------------------------------------------------------
+int SettingsPanel::getInteractiveElementCount() const {
+    switch (m_activeTab) {
+        case 0: return 4; // Graphics: resolution, vsync, msaa, colorblind toggle
+        case 1: return 3; // Controls: edge scroll, sensitivity, WASD preset
+        case 2: return 3; // Audio: master, music, SFX sliders
+        case 3: return 2; // Gameplay: demolish confirm, disaster toggle (grayed)
+        default: return 0;
+    }
 }

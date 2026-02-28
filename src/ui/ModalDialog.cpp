@@ -114,10 +114,17 @@ void ModalDialog::closeModal() {
 // ---------------------------------------------------------------------------
 // setDialogRect — helper to center dialog of given size
 // ---------------------------------------------------------------------------
-void ModalDialog::setDialogRect(int x, int y, int w, int h) {
-    // This is used by layout methods to position the dialog background
-    // For now, elements are positioned individually in each layout method
-    (void)x; (void)y; (void)w; (void)h;
+void ModalDialog::setDialogRect(int w, int h) {
+    if (!m_backend) return;
+
+    int x = (1920 - w) / 2;
+    int y = (1080 - h) / 2;
+
+    // Recreate dialog background at the correct size, centered in 1920x1080.
+    // Only the background is recreated; button handles are unchanged to preserve
+    // handle-based test expectations and hit-testing contracts.
+    m_backend->removeElement(m_dialogBg);
+    m_dialogBg = m_backend->addStaticText("", x, y, w, h);
 }
 
 // ---------------------------------------------------------------------------
@@ -136,9 +143,7 @@ void ModalDialog::layoutForcedLoanScreen1() {
     if (!m_backend) return;
 
     // Large dialog: 640x400, centered in 1920x1080
-    constexpr int dw = 640, dh = 400;
-    int dx = (1920 - dw) / 2;
-    int dy = (1080 - dh) / 2;
+    setDialogRect(640, 400);
 
     m_backend->setElementVisible(m_dialogBg, true);
     m_backend->setElementVisible(m_titleLabel, true);
@@ -171,6 +176,9 @@ void ModalDialog::layoutForcedLoanScreen2() {
     if (!m_backend) return;
 
     m_dialogType = DialogType::ForcedLoanScreen2;
+
+    // Large dialog: 640x400 (same as screen 1)
+    setDialogRect(640, 400);
 
     m_backend->setElementVisible(m_dialogBg, true);
     m_backend->setElementVisible(m_titleLabel, true);
@@ -216,6 +224,8 @@ void ModalDialog::layoutDemolishConfirm(int tileCount) {
     if (!m_backend) return;
 
     // Small dialog: 480x240, centered
+    setDialogRect(480, 240);
+
     m_backend->setElementVisible(m_dialogBg, true);
     m_backend->setElementVisible(m_titleLabel, true);
     m_backend->setElementVisible(m_bodyLabel, true);
@@ -249,6 +259,8 @@ void ModalDialog::layoutWASDPreset() {
     if (!m_backend) return;
 
     // Small dialog: 480x240, centered
+    setDialogRect(480, 240);
+
     m_backend->setElementVisible(m_dialogBg, true);
     m_backend->setElementVisible(m_titleLabel, true);
     m_backend->setElementVisible(m_bodyLabel, true);
@@ -286,6 +298,8 @@ void ModalDialog::layoutGameOver(int64_t debt, int months) {
     if (!m_backend) return;
 
     // Medium dialog: 560x320, centered
+    setDialogRect(560, 320);
+
     m_backend->setElementVisible(m_dialogBg, true);
     m_backend->setElementVisible(m_titleLabel, true);
     m_backend->setElementVisible(m_bodyLabel, true);
@@ -315,8 +329,16 @@ void ModalDialog::layoutGameOver(int64_t debt, int months) {
 // ---------------------------------------------------------------------------
 void ModalDialog::draw() {
     if (!m_active || !m_backend) return;
-    // All visibility is set during layout; draw is a no-op for element updates.
-    // Scrim and dialog elements are rendered by the backend's drawAll sequence.
+
+    // Focus ring: set focused button to full opacity, unfocused to dimmed.
+    // IrrlichtUIBackend interprets alpha 1.0 as the focused element and renders
+    // a 2px accent-color border around it (Phase 8 focus ring spec).
+    UIElementHandle buttons[] = {m_btnPrimary, m_btnSecondary, m_btnTertiary, m_btnBack};
+    for (int i = 0; i < 4; ++i) {
+        if (m_backend->isElementVisible(buttons[i])) {
+            m_backend->setElementAlpha(buttons[i], (i == m_focusedButton) ? 1.0f : 0.85f);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

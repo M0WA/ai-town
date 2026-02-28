@@ -14,6 +14,10 @@ public:
     void draw();
     bool onEvent(const InputEvent& event);
 
+    // Loading screen: called when terrain generation crosses the abort checkpoint.
+    // Disables Cancel button, changes label to "Finalizing..."
+    void setAbortCheckpointPassed();
+
 private:
     IUIBackend* m_backend{nullptr};
     bool m_visible{false};
@@ -57,6 +61,7 @@ private:
     // Focus tracking
     int m_focusedButton{0};
     int m_selectedDifficulty{1};   // 0=Easy, 1=Normal, 2=Hard
+    bool m_abortCheckpointPassed{false}; // Loading: past point of no return
 
     // Helpers
     void showMainMenuScreen();

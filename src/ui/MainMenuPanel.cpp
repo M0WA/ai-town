@@ -161,10 +161,25 @@ void MainMenuPanel::showNewGameScreen() {
 void MainMenuPanel::showLoadingScreen() {
     hideAllElements();
     m_screen = Screen::Loading;
+    m_abortCheckpointPassed = false;
 
     m_backend->setElementVisible(m_loadingLabel, true);
     m_backend->setElementVisible(m_loadingProgress, true);
     m_backend->setElementVisible(m_loadingCancelBtn, true);
+    m_backend->setElementEnabled(m_loadingCancelBtn, true);
+    m_backend->setElementText(m_loadingLabel, "Generating terrain...");
+    m_backend->setElementText(m_loadingCancelBtn, "Cancel");
+}
+
+// ---------------------------------------------------------------------------
+// setAbortCheckpointPassed — point of no return for terrain generation
+// ---------------------------------------------------------------------------
+void MainMenuPanel::setAbortCheckpointPassed() {
+    if (!m_backend || m_screen != Screen::Loading) return;
+    m_abortCheckpointPassed = true;
+    m_backend->setElementEnabled(m_loadingCancelBtn, false);
+    m_backend->setElementText(m_loadingCancelBtn, "Finalizing...");
+    m_backend->setElementText(m_loadingLabel, "Finalizing...");
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +212,7 @@ bool MainMenuPanel::onEvent(const InputEvent& event) {
                 return true;
             }
             if (m_screen == Screen::Loading) {
+                if (m_abortCheckpointPassed) return true; // Silently ignore after checkpoint
                 showNewGameScreen();
                 return true;
             }
@@ -206,16 +222,42 @@ bool MainMenuPanel::onEvent(const InputEvent& event) {
 
         // Up/Down arrow navigation on main menu
         if (m_screen == Screen::MainMenu) {
-            if (key == 38) { // Up
-                m_focusedButton = (m_focusedButton > 0) ? m_focusedButton - 1 : 3;
+            // Helper: map button index to handle
+            auto buttonAtIndex = [this](int idx) -> UIElementHandle {
+                switch (idx) {
+                    case 0: return m_btnNewGame;
+                    case 1: return m_btnLoadGame;
+                    case 2: return m_btnSettings;
+                    case 3: return m_btnQuit;
+                    default: return kInvalidUIElement;
+                }
+            };
+
+            if (key == 38) { // Up — skip grayed buttons
+                int next = m_focusedButton;
+                for (int i = 0; i < 4; ++i) {
+                    next = (next > 0) ? next - 1 : 3;
+                    if (m_backend->isElementEnabled(buttonAtIndex(next))) break;
+                }
+                m_focusedButton = next;
                 return true;
             }
-            if (key == 40) { // Down
-                m_focusedButton = (m_focusedButton < 3) ? m_focusedButton + 1 : 0;
+            if (key == 40) { // Down — skip grayed buttons
+                int next = m_focusedButton;
+                for (int i = 0; i < 4; ++i) {
+                    next = (next < 3) ? next + 1 : 0;
+                    if (m_backend->isElementEnabled(buttonAtIndex(next))) break;
+                }
+                m_focusedButton = next;
                 return true;
             }
-            if (key == 9) { // Tab
-                m_focusedButton = (m_focusedButton + 1) % 4;
+            if (key == 9) { // Tab — skip grayed buttons
+                int next = m_focusedButton;
+                for (int i = 0; i < 4; ++i) {
+                    next = (next + 1) % 4;
+                    if (m_backend->isElementEnabled(buttonAtIndex(next))) break;
+                }
+                m_focusedButton = next;
                 return true;
             }
             if (key == 13) { // Enter
@@ -282,7 +324,7 @@ bool MainMenuPanel::onEvent(const InputEvent& event) {
         }
 
         if (m_screen == Screen::Loading) {
-            if (hitTest(mx, my, m_loadingCancelBtn)) {
+            if (!m_abortCheckpointPassed && hitTest(mx, my, m_loadingCancelBtn)) {
                 showNewGameScreen();
                 return true;
             }

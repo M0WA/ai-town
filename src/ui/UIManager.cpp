@@ -94,6 +94,9 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
     // Wire settings panel into pause menu so Pause > Settings button works.
     m_pauseMenu->setSettingsPanel(m_settings);
 
+    // Wire pause menu into settings panel for back-navigation (Settings > back to Pause).
+    m_settings->setPauseMenu(m_pauseMenu);
+
     // Create the background scrim element (50% opacity, hidden initially).
     // The scrim sits at Z-slot 9 between the settings panel (slot 8) and
     // the modal dialog (slot 10).
@@ -346,12 +349,15 @@ bool UIManager::onEvent(const InputEvent& event) {
                 } else if (relX < 100) {
                     m_sim->setPaused(false);
                     m_sim->setSpeed(SpeedMultiplier::x1);
+                    if (m_audio) m_audio->setSpeed(SimSpeed::x1);
                 } else if (relX < 152) {
                     m_sim->setPaused(false);
                     m_sim->setSpeed(SpeedMultiplier::x3);
+                    if (m_audio) m_audio->setSpeed(SimSpeed::x3);
                 } else {
                     m_sim->setPaused(false);
                     m_sim->setSpeed(SpeedMultiplier::x10);
+                    if (m_audio) m_audio->setSpeed(SimSpeed::x10);
                 }
             }
             return true;

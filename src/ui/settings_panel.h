@@ -91,4 +91,8 @@ private:
     void showControlsTab();
     void showAudioTab();
     void showGameplayTab();
+
+    // Intra-tab focus tracking
+    int m_focusedElement{0};
+    int getInteractiveElementCount() const;
 };
