@@ -36,7 +36,10 @@ public:
     void postCritical(const std::string& title, const std::string& body);
 
     // Post a normal toast (40-63 px, auto-dismiss after timed duration).
-    void postNormal(const std::string& title, const std::string& body);
+    // timeoutSeconds: auto-dismiss delay (default 5 s; QueryPanel Escape
+    // feedback toast uses 1.5 s per architecture/ui-ux/notification-system.md).
+    void postNormal(const std::string& title, const std::string& body,
+                    float timeoutSeconds = 5.0f);
 
     // Handle an input event routed from UIManager's Priority-2 guard.
     // Returns true if the event was consumed by the notification system

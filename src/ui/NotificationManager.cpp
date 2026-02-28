@@ -21,9 +21,11 @@ void NotificationManager::postCritical(const std::string& /*title*/, const std::
     // store its handle, and call m_sim->setPaused(true) to auto-pause.
 }
 
-void NotificationManager::postNormal(const std::string& /*title*/, const std::string& /*body*/) {
+void NotificationManager::postNormal(const std::string& /*title*/, const std::string& /*body*/,
+                                     float /*timeoutSeconds*/) {
     // Phase 8: create a 40-63 px toast element via m_backend->addStaticText(),
-    // store its handle along with an expiry timestamp from m_clock->nowSeconds().
+    // store its handle along with an expiry timestamp from m_clock->nowSeconds()
+    // offset by timeoutSeconds.
 }
 
 bool NotificationManager::onEvent(const InputEvent& /*event*/) {

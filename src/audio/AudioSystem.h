@@ -157,6 +157,9 @@ public:
     void setTimeOfDay(TimeOfDay tod) override;
     void transitionToGameplay() override;
     void update(float realDeltaSeconds) override;
+    void setMasterVolume(float gain) override;
+    void setMusicVolume(float gain) override;
+    void setSFXVolume(float gain) override;
 
     // Called from AudioSourcePool on slot recycle (and from vehicle pair release).
     // Resets occlusion gain to 1.0f immediately, applying the filter reset.
@@ -311,6 +314,17 @@ private:
     // Simulation speed (for time-of-day collapse logic).
     // -----------------------------------------------------------------------
     SimSpeed m_currentSpeed{SimSpeed::x1};
+
+    // -----------------------------------------------------------------------
+    // Volume controls (Phase 8).
+    // m_masterVolume is plain float — applied via alListenerf(AL_GAIN) on
+    // the calling thread (main thread only).
+    // m_musicVolume and m_sfxVolume are std::atomic<float> — written from
+    // main thread, read from audio thread at next wake.
+    // -----------------------------------------------------------------------
+    float              m_masterVolume{1.0f};
+    std::atomic<float> m_musicVolume{0.8f};
+    std::atomic<float> m_sfxVolume{0.8f};
 
     // -----------------------------------------------------------------------
     // Time-of-day state.
