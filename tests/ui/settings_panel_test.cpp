@@ -184,6 +184,8 @@ TEST_F(SettingsPanelTest, TabCycling_WrapsAround) {
 }
 
 // --- Standalone SettingsPanel test ---
+// StrictMock<MockAudioSystem> per testability-architecture.md: every slider callback must
+// produce exactly the correct IAudioSystem call -- NiceMock would silently swallow cross-calls.
 class SettingsPanelStandaloneTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -201,9 +203,9 @@ protected:
         panel_.reset();
     }
 
-    NiceMock<MockUIBackend>   backend_;
-    NiceMock<MockAudioSystem> audio_;
-    ManualClock               clock_;
+    NiceMock<MockUIBackend>      backend_;
+    StrictMock<MockAudioSystem>  audio_;  // StrictMock per spec: every slider call must be verified exactly
+    ManualClock                  clock_;
     std::unique_ptr<SettingsPanel> panel_;
     uint32_t                  nextHandle_{100};
 };
