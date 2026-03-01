@@ -419,3 +419,14 @@ Total texture VRAM for all simultaneously-resident assets must not exceed **1.0 
 
 **Draw call ceiling**: ≤2,000 draw calls per frame (all LODs combined). Buildings sharing the same atlas texture and material can be batched or instanced into a single draw call. This drives the atlas-first design requirement.
 **Unique mesh variant cap**: ≤50 unique LOD0/LOD1/LOD2 building mesh variants simultaneously loaded. Building types exceeding 50 unique meshes must share atlas space and be explicitly approved.
+
+### Sign-Off
+
+This section holds required sign-off comment blocks for Phase gates. Each sign-off must be recorded
+as a dated HTML comment appended here before the corresponding Phase work begins. Unsigned or
+undated confirmations are not traceable and will not satisfy the blocking pre-condition.
+
+**Phase 9 — Normal/Specular Map Sign-Off** (`graphics-artist-2d-texture`, required before any
+LOD0/LOD1 UV authoring of building meshes begins):
+
+<!-- SIGN-OFF: graphics-artist-2d-texture YYYY-MM-DD — confirmed all per-module normal and specular map source PNGs meet DXT5nm authoring spec -->
