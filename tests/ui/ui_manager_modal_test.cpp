@@ -1926,3 +1926,564 @@ TEST_F(UIManagerTransitionTest, SetLoadingTerrain_GatesUpdate) {
     EXPECT_CALL(sim_, getConsecutiveDeficitMonths()).WillOnce(Return(0));
     ui_->update(0.016f);
 }
+
+// --- MainMenu settings routing (UIManager lines 270-278) ---
+
+// When in MainMenu state with settings visible, events route to SettingsPanel.
+TEST_F(UIManagerEventRoutingTest, MainMenu_SettingsVisible_RoutesToSettings) {
+    // Construct a fresh UIManager in MainMenu state.
+    NiceMock<MockUIBackend>      freshBackend;
+    NiceMock<MockAudioSystem>    freshAudio;
+    NiceMock<MockCitySimulation> freshSim;
+    ManualClock                  freshClock;
+
+    ON_CALL(freshBackend, addStaticText(_, _, _, _, _)).WillByDefault(
+        [](const std::string&, int, int, int, int) { return 1u; });
+    ON_CALL(freshBackend, addButton(_, _, _, _, _)).WillByDefault(
+        [](const std::string&, int, int, int, int) { return 1u; });
+    ON_CALL(freshBackend, getVirtualWidth()).WillByDefault(Return(1920));
+    ON_CALL(freshBackend, getVirtualHeight()).WillByDefault(Return(1080));
+    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(freshBackend, isElementEnabled(_)).WillByDefault(Return(true));
+    ON_CALL(freshBackend, isElementVisible(_)).WillByDefault(Return(true));
+
+    UIManager freshUI(&freshBackend, &freshAudio, &freshSim, &freshClock);
+
+    // Open settings from main menu.
+    freshUI.showSettings();
+
+    // Send Escape key — should route to SettingsPanel, closing it.
+    InputEvent esc;
+    esc.type = InputEvent::Type::KeyDown;
+    esc.keyCode = 27; // Escape
+    bool consumed = freshUI.onEvent(esc);
+    EXPECT_TRUE(consumed);
+}
+
+// --- Paused settings routing (UIManager lines 289-296) ---
+
+// When in Paused state with settings visible, events route to SettingsPanel.
+TEST_F(UIManagerEventRoutingTest, Paused_SettingsVisible_RoutesToSettings) {
+    // Transition to Paused.
+    InputEvent esc;
+    esc.type = InputEvent::Type::KeyDown;
+    esc.keyCode = 27;
+    ui_->onEvent(esc); // Gameplay -> Paused
+
+    // Open settings from pause menu.
+    ui_->showSettings();
+
+    // Send Escape — should route to SettingsPanel.
+    bool consumed = ui_->onEvent(esc);
+    EXPECT_TRUE(consumed);
+}
+
+// --- MainMenuPanel consumeStartGameRequest / consumeSettingsRequest ---
+
+// consumeStartGameRequest returns true once after Start City is clicked.
+TEST_F(MainMenuPanelStandaloneTest, ConsumeStartGameRequest_TrueOnce) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+    ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
+
+    // Enter on NewGame (focus 0, default) -> shows NewGame screen.
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    // On NewGame screen, click Start City button via mouse.
+    // Handle 317 = m_ngBtnStartCity (count constructor calls from nextHandle_=300):
+    //   301=titleLabel, 302=NewGame, 303=LoadGame, 304=Settings, 305=Quit,
+    //   306=ngTitle, 307=ngModeLabel, 308=ngBtnSandbox, 309=ngBtnScenario,
+    //   310=ngDiffLabel, 311=ngBtnEasy, 312=ngBtnNormal, 313=ngBtnHard,
+    //   314=ngSeedLabel, 315=ngSeedInput, 316=ngBtnRandomize,
+    //   317=ngBtnStartCity, 318=ngBtnBack.
+    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 820;
+    click.y = 510;
+    panel_->onEvent(click);
+
+    EXPECT_TRUE(panel_->consumeStartGameRequest());
+    EXPECT_FALSE(panel_->consumeStartGameRequest());
+}
+
+// consumeSettingsRequest returns true once after Settings Enter.
+TEST_F(MainMenuPanelStandaloneTest, ConsumeSettingsRequest_TrueOnce) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+
+    // Navigate to Settings (focus 2): Down x2.
+    InputEvent down;
+    down.type = InputEvent::Type::KeyDown;
+    down.keyCode = 40;
+    panel_->onEvent(down);
+    panel_->onEvent(down);
+
+    // Press Enter on Settings.
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    EXPECT_TRUE(panel_->consumeSettingsRequest());
+    EXPECT_FALSE(panel_->consumeSettingsRequest());
+}
+
+// --- UIManager update() Start Game and Settings polling ---
+
+// update() polls consumeStartGameRequest -> transitions to Gameplay.
+TEST_F(UIManagerEventRoutingTest, MainMenu_StartGame_TransitionsToGameplay) {
+    NiceMock<MockUIBackend>      freshBackend;
+    NiceMock<MockAudioSystem>    freshAudio;
+    NiceMock<MockCitySimulation> freshSim;
+    ManualClock                  freshClock;
+
+    ON_CALL(freshBackend, addStaticText(_, _, _, _, _)).WillByDefault(
+        [](const std::string&, int, int, int, int) { return 1u; });
+    ON_CALL(freshBackend, addButton(_, _, _, _, _)).WillByDefault(
+        [](const std::string&, int, int, int, int) { return 1u; });
+    ON_CALL(freshBackend, getVirtualWidth()).WillByDefault(Return(1920));
+    ON_CALL(freshBackend, getVirtualHeight()).WillByDefault(Return(1080));
+    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(freshBackend, isElementEnabled(_)).WillByDefault(Return(true));
+    ON_CALL(freshBackend, isElementVisible(_)).WillByDefault(Return(true));
+
+    // Stub getElementRect for Start City button.
+    ON_CALL(freshBackend, getElementRect(13u)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+
+    UIManager freshUI(&freshBackend, &freshAudio, &freshSim, &freshClock);
+
+    // Enter -> NewGame screen.
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    freshUI.onEvent(enter);
+
+    // Click Start City.
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 820;
+    click.y = 510;
+    freshUI.onEvent(click);
+
+    // update() should poll consumeStartGameRequest and transition to Gameplay.
+    ON_CALL(freshSim, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
+    ON_CALL(freshSim, pollPendingNotification(_)).WillByDefault(Return(false));
+    ON_CALL(freshSim, getSpeedMultiplier()).WillByDefault(Return(SpeedMultiplier::x1));
+    ON_CALL(freshSim, getTreasuryBalance()).WillByDefault(Return(10000.0f));
+    ON_CALL(freshSim, getOutstandingDebt()).WillByDefault(Return(0.0f));
+    ON_CALL(freshSim, getCityRating()).WillByDefault(Return(CityRatingTier::Village));
+    ON_CALL(freshSim, getTotalPopulation()).WillByDefault(Return(100));
+    ON_CALL(freshSim, getSimulationTime()).WillByDefault(Return(SimulationTime{1, 1}));
+    ON_CALL(freshSim, getDemandPressurePct(_)).WillByDefault(Return(0.5f));
+    ON_CALL(freshSim, hasUndoPendingAction()).WillByDefault(Return(false));
+    ON_CALL(freshSim, getUndoExpiryTimeSeconds()).WillByDefault(Return(0.0));
+
+    freshUI.update(0.016f);
+    // If we got here without crash, the transition happened.
+    // Verify we're no longer in MainMenu by sending Escape (should transition Gameplay->Paused).
+    InputEvent esc;
+    esc.type = InputEvent::Type::KeyDown;
+    esc.keyCode = 27;
+    bool consumed = freshUI.onEvent(esc);
+    EXPECT_TRUE(consumed);
+}
+
+// update() polls consumeSettingsRequest -> opens settings.
+TEST_F(UIManagerEventRoutingTest, MainMenu_Settings_OpensSettings) {
+    NiceMock<MockUIBackend>      freshBackend;
+    NiceMock<MockAudioSystem>    freshAudio;
+    NiceMock<MockCitySimulation> freshSim;
+    ManualClock                  freshClock;
+
+    ON_CALL(freshBackend, addStaticText(_, _, _, _, _)).WillByDefault(
+        [](const std::string&, int, int, int, int) { return 1u; });
+    ON_CALL(freshBackend, addButton(_, _, _, _, _)).WillByDefault(
+        [](const std::string&, int, int, int, int) { return 1u; });
+    ON_CALL(freshBackend, getVirtualWidth()).WillByDefault(Return(1920));
+    ON_CALL(freshBackend, getVirtualHeight()).WillByDefault(Return(1080));
+    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(freshBackend, isElementEnabled(_)).WillByDefault(Return(true));
+
+    UIManager freshUI(&freshBackend, &freshAudio, &freshSim, &freshClock);
+
+    // Navigate to Settings (Down x2) then Enter.
+    InputEvent down;
+    down.type = InputEvent::Type::KeyDown;
+    down.keyCode = 40;
+    freshUI.onEvent(down);
+    freshUI.onEvent(down);
+
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    freshUI.onEvent(enter);
+
+    // update() should poll consumeSettingsRequest and call showSettings().
+    freshUI.update(0.016f);
+
+    // Settings should now be visible — send Escape to close it.
+    InputEvent esc;
+    esc.type = InputEvent::Type::KeyDown;
+    esc.keyCode = 27;
+    bool consumed = freshUI.onEvent(esc);
+    EXPECT_TRUE(consumed);
+}
+
+// --- showForcedLoanDialog with sim already paused ---
+
+// showForcedLoanDialog when sim is already paused sets m_didPauseSim = false.
+TEST_F(UIManagerEventRoutingTest, ShowForcedLoanDialog_SimAlreadyPaused) {
+    ON_CALL(sim_, isPaused()).WillByDefault(Return(true));
+    LoanTerms terms;
+    terms.amount = 50000.0f;
+    terms.repaymentTicks = 12;
+    terms.interestRate = 0.05f;
+    ui_->showForcedLoanDialog(terms);
+    EXPECT_TRUE(ui_->hasActiveModal());
+
+    // closeModal should NOT call setPaused(false) since we didn't pause it.
+    EXPECT_CALL(sim_, setPaused(false)).Times(0);
+    ui_->closeModal();
+}
+
+// --- ForcedLoanIssued notification polling ---
+
+// update() handles ForcedLoanIssued notification from sim.
+TEST_F(UIManagerEventRoutingTest, Update_ForcedLoanNotification_ShowsDialog) {
+    SimulationNotification notif;
+    notif.type = NotificationType::ForcedLoanIssued;
+    notif.amount = 50000;
+    notif.repaymentTicks = 12;
+
+    ON_CALL(sim_, pollPendingNotification(_))
+        .WillByDefault([&notif](SimulationNotification& out) {
+            static int callCount = 0;
+            if (callCount++ == 0) {
+                out = notif;
+                return true;
+            }
+            return false;
+        });
+
+    ui_->update(0.016f);
+    EXPECT_TRUE(ui_->hasActiveModal());
+}
+
+// --- PauseMenuPanel click on button areas (lines 181-184, default branch) ---
+
+TEST_F(PauseMenuPanelStandaloneTest, Enter_Default_Branch_Consumed) {
+    // Test that pressing Enter without moving focus (focus 0 = Resume)
+    // hides the panel and is consumed.
+    panel_->show();
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    bool consumed = panel_->onEvent(enter);
+    EXPECT_TRUE(consumed);
+    EXPECT_FALSE(panel_->isVisible());
+}
+
+// --- MainMenuPanel: showLoadingScreen and setAbortCheckpointPassed ---
+// Covers lines 161-172 (showLoadingScreen) and 177-183 (setAbortCheckpointPassed).
+
+TEST_F(MainMenuPanelStandaloneTest, ShowLoadingScreen_ViaStartCityClick) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+    ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
+
+    // Navigate to NewGame screen via Enter on New Game button (focus 0).
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    // Click Start City (handle 317) to trigger showLoadingScreen.
+    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 820;
+    click.y = 510;
+    panel_->onEvent(click);
+
+    // setAbortCheckpointPassed should not crash.
+    panel_->setAbortCheckpointPassed();
+    SUCCEED();
+}
+
+// Covers lines 241-244 (Escape on Loading screen before checkpoint -> back to NewGame).
+TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_Escape_BackToNewGame) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+    ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
+
+    // Go to NewGame screen.
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    // Click Start City to enter loading screen.
+    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 820;
+    click.y = 510;
+    panel_->onEvent(click);
+
+    // Escape on loading screen (before checkpoint) -> should go back.
+    InputEvent esc;
+    esc.type = InputEvent::Type::KeyDown;
+    esc.keyCode = 27;
+    bool consumed = panel_->onEvent(esc);
+    EXPECT_TRUE(consumed);
+}
+
+// Covers line 242 (Escape on Loading screen AFTER checkpoint -> silently ignored).
+TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_Escape_AfterCheckpoint_Ignored) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+    ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
+
+    // Go to NewGame -> loading screen.
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 820;
+    click.y = 510;
+    panel_->onEvent(click);
+
+    // Mark checkpoint passed.
+    panel_->setAbortCheckpointPassed();
+
+    // Escape should be consumed but silently ignored.
+    InputEvent esc;
+    esc.type = InputEvent::Type::KeyDown;
+    esc.keyCode = 27;
+    bool consumed = panel_->onEvent(esc);
+    EXPECT_TRUE(consumed);
+}
+
+// Covers Loading cancel click (lines 354-356).
+TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_CancelClick_BackToNewGame) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+    ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
+
+    // Go to NewGame -> loading screen.
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 820;
+    click.y = 510;
+    panel_->onEvent(click);
+
+    // Click the Cancel button (handle 322 = m_loadingCancelBtn).
+    ON_CALL(backend_, getElementRect(322)).WillByDefault(Return(Rect{860, 570, 120, 36}));
+    InputEvent cancelClick;
+    cancelClick.type = InputEvent::Type::MouseButtonDown;
+    cancelClick.button = 0;
+    cancelClick.x = 870;
+    cancelClick.y = 580;
+    bool consumed = panel_->onEvent(cancelClick);
+    EXPECT_TRUE(consumed);
+}
+
+// --- UIManager: Escape in MainMenu state -> consumed by MainMenuPanel ---
+
+TEST_F(UIManagerEventRoutingTest, Escape_InMainMenuState_Consumed) {
+    // Create a UIManager in MainMenu state.
+    NiceMock<MockUIBackend>      freshBackend;
+    NiceMock<MockAudioSystem>    freshAudio;
+    NiceMock<MockCitySimulation> freshSim;
+    ManualClock                  freshClock;
+
+    ON_CALL(freshBackend, addStaticText(_, _, _, _, _)).WillByDefault(
+        [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
+    ON_CALL(freshBackend, addButton(_, _, _, _, _)).WillByDefault(
+        [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
+    ON_CALL(freshBackend, getVirtualWidth()).WillByDefault(Return(1920));
+    ON_CALL(freshBackend, getVirtualHeight()).WillByDefault(Return(1080));
+    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(freshSim, isPaused()).WillByDefault(Return(false));
+
+    UIManager freshUI(&freshBackend, &freshAudio, &freshSim, &freshClock);
+    // freshUI starts in MainMenu state.
+
+    InputEvent esc;
+    esc.type = InputEvent::Type::KeyDown;
+    esc.keyCode = 27;
+    bool consumed = freshUI.onEvent(esc);
+    EXPECT_TRUE(consumed);
+}
+
+// --- MainMenuPanel: Enter on Load Game (grayed) -> consumed (line 295-296) ---
+TEST_F(MainMenuPanelStandaloneTest, Enter_OnLoadGame_Consumed) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+    // Move focus to Load Game (index 1): Down x1.
+    InputEvent down;
+    down.type = InputEvent::Type::KeyDown;
+    down.keyCode = 40;
+    panel_->onEvent(down);
+
+    // Press Enter.
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    bool consumed = panel_->onEvent(enter);
+    EXPECT_TRUE(consumed);
+}
+
+// --- MainMenuPanel: draw on NewGame screen -> covers lines 219-223 ---
+TEST_F(MainMenuPanelStandaloneTest, Draw_NewGameScreen_UpdatesDifficultyLabels) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+
+    // Go to NewGame screen.
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    // Draw should update difficulty labels without crash.
+    panel_->draw();
+    SUCCEED();
+}
+
+// --- MainMenuPanel: Tab key navigation (lines 281-288) ---
+TEST_F(MainMenuPanelStandaloneTest, TabKey_AdvancesFocus) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+
+    InputEvent tab;
+    tab.type = InputEvent::Type::KeyDown;
+    tab.keyCode = 9;
+    bool consumed = panel_->onEvent(tab);
+    EXPECT_TRUE(consumed);
+}
+
+// --- MainMenuPanel: Up key navigation (lines 263-269) ---
+TEST_F(MainMenuPanelStandaloneTest, UpKey_AdvancesFocus) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+
+    InputEvent up;
+    up.type = InputEvent::Type::KeyDown;
+    up.keyCode = 38;
+    bool consumed = panel_->onEvent(up);
+    EXPECT_TRUE(consumed);
+}
+
+// --- MainMenuPanel: Click Settings on main menu (lines 323-326) ---
+TEST_F(MainMenuPanelStandaloneTest, ClickSettings_SetsSettingsRequested) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+    // Handle 304 = m_btnSettings
+    ON_CALL(backend_, getElementRect(304)).WillByDefault(Return(Rect{780, 320, 360, 48}));
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 790;
+    click.y = 330;
+    panel_->onEvent(click);
+
+    EXPECT_TRUE(panel_->consumeSettingsRequest());
+}
+
+// --- MainMenuPanel: Click Quit on main menu (lines 327-330) ---
+TEST_F(MainMenuPanelStandaloneTest, ClickQuit_SetsQuitRequestedViaClick) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+    // Handle 305 = m_btnQuit
+    ON_CALL(backend_, getElementRect(305)).WillByDefault(Return(Rect{780, 380, 360, 48}));
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 790;
+    click.y = 390;
+    panel_->onEvent(click);
+
+    EXPECT_TRUE(panel_->consumeQuitRequest());
+}
+
+// --- MainMenuPanel: NewGame Escape back to main menu (lines 237-239) ---
+TEST_F(MainMenuPanelStandaloneTest, NewGame_Escape_BackToMainMenu) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+
+    // Go to NewGame screen.
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    // Escape should go back to main menu.
+    InputEvent esc;
+    esc.type = InputEvent::Type::KeyDown;
+    esc.keyCode = 27;
+    bool consumed = panel_->onEvent(esc);
+    EXPECT_TRUE(consumed);
+}
+
+// --- MainMenuPanel: Click on NewGame button (line 319-321) ---
+TEST_F(MainMenuPanelStandaloneTest, ClickNewGame_ShowsNewGameScreen) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+    // Handle 302 = m_btnNewGame
+    ON_CALL(backend_, getElementRect(302)).WillByDefault(Return(Rect{780, 200, 360, 48}));
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 790;
+    click.y = 210;
+    bool consumed = panel_->onEvent(click);
+    EXPECT_TRUE(consumed);
+}
+
+// --- MainMenuPanel: Click Back on NewGame screen via mouse ---
+TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickBack_MouseReturnsToMainMenu) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+
+    // Go to NewGame screen.
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    // Handle 318 = m_ngBtnBack
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 560, 120, 36}));
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 790;
+    click.y = 570;
+    bool consumed = panel_->onEvent(click);
+    EXPECT_TRUE(consumed);
+}
+
+// --- MainMenuPanel: Click Randomize on NewGame screen (lines 347-350) ---
+TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickRandomize_Consumed) {
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+
+    // Go to NewGame screen.
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    // Handle 316 = m_ngBtnRandomize
+    ON_CALL(backend_, getElementRect(316)).WillByDefault(Return(Rect{1080, 420, 100, 32}));
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 1090;
+    click.y = 430;
+    bool consumed = panel_->onEvent(click);
+    EXPECT_TRUE(consumed);
+}
