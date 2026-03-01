@@ -3,7 +3,7 @@
 #include "audio_types.h"
 #include "simulation_types.h"
 
-// Canonical IAudioSystem — 11 methods.
+// Canonical IAudioSystem — 14 methods.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType,
 // SimSpeed, SoundPriority, TimeOfDay, vec3, CameraState).
 // Never expose ALuint, ALfloat, or AL_* constants through this interface.
@@ -61,4 +61,16 @@ public:
     // Responsibilities: advance occlusion raycast budget, push time-of-day transitions,
     // and forward any pending crossfade or zone-layer source updates.
     virtual void update(float realDeltaSeconds) = 0;
+
+    // Set the master volume (applied via alListenerf(AL_GAIN) on the calling thread).
+    // gain is a linear multiplier [0.0, 1.0].
+    virtual void setMasterVolume(float gain) = 0;
+
+    // Set the music volume (applied to music stream sources at next audio thread wake).
+    // gain is a linear multiplier [0.0, 1.0].
+    virtual void setMusicVolume(float gain) = 0;
+
+    // Set the SFX volume (applied to SFX sources at next audio thread wake).
+    // gain is a linear multiplier [0.0, 1.0].
+    virtual void setSFXVolume(float gain) = 0;
 };

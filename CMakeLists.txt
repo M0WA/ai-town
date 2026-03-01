@@ -243,6 +243,22 @@ target_include_directories(aitown_ui
 # PRIVATE scope — Irrlicht headers must NOT propagate to test targets (testability rule).
 target_link_libraries(aitown_ui PRIVATE Irrlicht)
 
+# Phase 8: extend aitown_ui with per-panel .cpp translation units.
+# Do NOT edit the Phase 3 add_library(aitown_ui ...) call above.
+# Each panel .cpp currently includes its header (inline stubs); Phase 8 implementation
+# will move method bodies from headers into these .cpp files.
+target_sources(aitown_ui PRIVATE
+    src/ui/HUD.cpp
+    src/ui/BudgetDetailPanel.cpp
+    src/ui/TaxRatePanel.cpp
+    src/ui/QueryPanel.cpp
+    src/ui/Minimap.cpp
+    src/ui/ModalDialog.cpp
+    src/ui/SettingsPanel.cpp
+    src/ui/PauseMenuPanel.cpp
+    src/ui/MainMenuPanel.cpp
+)
+
 # ----------------------------------------------------------------------------
 # aitown_terrain — Terrain chunk and system (Phase 5: promoted from INTERFACE to STATIC)
 # Phase 3: was an INTERFACE library (headers only).
@@ -491,6 +507,24 @@ target_include_directories(ui_tests PRIVATE
 )
 aitown_add_tests(ui_tests LABEL "unit")
 
+# Phase 8: extend ui_tests with per-panel test files.
+# Do NOT edit the Phase 3 add_executable(ui_tests ...) or aitown_add_tests(ui_tests ...) calls above.
+# Bulk add: 6 files covering modal dialog, undo button, notification system,
+# budget detail panel, query panel, and keybindings conflict-detection tests.
+target_sources(ui_tests PRIVATE
+    tests/ui/modal_dialog_test.cpp
+    tests/ui/undo_button_test.cpp
+    tests/ui/notification_system_test.cpp
+    tests/ui/budget_detail_panel_test.cpp
+    tests/ui/query_panel_test.cpp
+    tests/ui/keybindings_test.cpp
+)
+# Standalone add: settings panel test (Graphics tab countdown + volume slider tests).
+# Separate target_sources call to match phase-8.md deliverable structure.
+target_sources(ui_tests PRIVATE
+    tests/ui/settings_panel_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # audio_tests — duck state machine, occlusion smoothing, crossfade, stinger milestone tests
 # Vorbis::vorbisfile must be listed EXPLICITLY — it CANNOT resolve through aitown_audio's
@@ -528,6 +562,12 @@ target_sources(audio_tests PRIVATE
     tests/audio/occlusion_smoothing_test.cpp
     tests/audio/audio_thread_test.cpp
     tests/audio/ogg_header_validation_test.cpp
+)
+
+# Phase 8: extend audio_tests with headless volume control and stinger drop-if-playing tests.
+# Do NOT call add_executable(audio_tests ...) or aitown_add_tests(audio_tests ...) again.
+target_sources(audio_tests PRIVATE
+    tests/audio/volume_control_test.cpp
 )
 
 # Copy default.mhr (OpenAL Soft HRTF data) next to audio_tests binary.

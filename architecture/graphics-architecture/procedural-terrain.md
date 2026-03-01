@@ -64,4 +64,58 @@
   2. Use `ManualClock` that returns `start + 0.101` on the second `nowSeconds()` call.
   3. After `flushPendingRebuilds()`, assert that < 10 rebuilds were processed (budget was hit).
 
+- **Terrain Material (Phase 5 — untextured)**:
+
+  Phase 5 terrain has no assigned textures. The material uses:
+
+  - `EMF_LIGHTING = false` — completely unlit (normals computed but unused until Phase 6)
+  - `EMF_BACK_FACE_CULLING = false` — both triangle sides rendered; avoids winding-order
+    dependency before Phase 6 lighting validates the correct front-face convention
+  - Vertex colours: height-interpolated green-to-brown gradient (`SColor(255, 34, 139, 34)`
+    at sea level to `SColor(255, 139, 90, 20)` at ~80 m) for visual contrast against the
+    sky-blue clear colour. Phase 9 replaces vertex colours with textured materials.
+
+- **Triangle Winding Order (Left-Handed Coordinate System)**:
+
+  Irrlicht uses a **left-handed** coordinate system (Y-up, Z-forward). Front faces are
+  **clockwise (CW)** from the viewer's perspective. Terrain is viewed from above (+Y looking
+  toward −Y), so front-face normals must point **UP (+Y)**.
+
+  The correct winding for terrain quads (two triangles per quad cell) is:
+
+  ```cpp
+  // v0 = (row, col), v1 = (row, col+1), v2 = (row+1, col+1), v3 = (row+1, col)
+  // Triangle 1: v0 → v2 → v1  (normal = +Y)
+  // Triangle 2: v0 → v3 → v2  (normal = +Y)
+  //
+  // Proof: (v2−v0) × (v1−v0) = (cs, 0, cs) × (cs, 0, 0) = (0, +cs², 0) → +Y normal ✓
+  ```
+
+  **WRONG** winding (produces downward normals → backface culled → invisible terrain):
+
+  ```cpp
+  // v0 → v1 → v2, v0 → v2 → v3  ← DO NOT USE
+  // (v1−v0) × (v2−v0) = (cs, 0, 0) × (cs, 0, cs) = (0, −cs², 0) → −Y normal ✗
+  ```
+
+  This winding rule applies to ALL terrain mesh construction: `IrrlichtRenderer::rebuildTerrainChunk()`,
+  `TerrainChunk::buildMesh()`, and any future terrain mesh builder. Backface culling is enabled
+  by default in Irrlicht — incorrect winding silently renders nothing (black screen) with no
+  error or warning.
+
+- **Terrain Generation Startup Wiring** (in `main.cpp`):
+
+  After constructing `TerrainSystem`, the startup sequence is:
+
+  ```text
+  1. terrainSystem.generate(mapTilesX, mapTilesZ, cellSize, &rng)
+  2. terrainSystem.buildAllChunks()       // subdivides heightmap into chunks, flushes all LOD0 rebuilds
+  3. cameraController.setTarget(centerX, centerZ)  // center camera over terrain
+  4. Main loop: terrainSystem.update(dt)   // per-frame LOD rebuild processing
+  ```
+
+  `buildAllChunks()` must be called AFTER `generate()` populates the heightmap.
+  The camera target should be set to the terrain center (mapTilesX × cellSize / 2) to avoid
+  starting with the camera pointed at the terrain corner.
+
 - Chunks loaded/unloaded based on camera distance

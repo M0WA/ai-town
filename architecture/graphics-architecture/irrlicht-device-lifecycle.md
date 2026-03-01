@@ -12,13 +12,48 @@
 audioSystem->syncListenerToCamera(cam);  // commit camera position to OpenAL listener (Phase 7); cam is the current CameraState
 audioSystem->update(realDeltaSeconds);   // process audio command queue with updated listener (Phase 7 — see src/rendering/render_system.h comment; ref: implementation/phase-7.md line 31)
 uiManager->update(realDeltaSeconds);    // advance UI timer state (notification auto-dismiss, HUD undo-countdown) — MUST be called before beginScene(); see ui-manager.md §Frame Loop Integration
-driver->beginScene(true, true, irr::video::SColor(255, 0, 0, 0));
+terrainSystem->update(realDeltaSeconds); // process at most 2 terrain LOD rebuilds per frame (Phase 5); see procedural-terrain.md
+driver->beginScene(true, true, irr::video::SColor(255, 100, 149, 237));  // sky-blue clear color (cornflower blue) — provides visual feedback that the 3D viewport is active; pure black (0,0,0) is indistinguishable from "nothing rendered"
 sceneManager->drawAll();        // 3D scene (terrain, buildings, vehicles, sky)
-uiManager->draw();              // 2D HUD: explicit per-panel Z-order draw (m_gui->drawAll() NOT called — see ui-manager.md)
+uiManager->draw();              // 2D HUD: per-panel Z-order state update (visibility, text, alpha)
+guiEnvironment->drawAll();      // Render all visible GUI elements (buttons, labels, etc.)
 driver->endScene();
 ```
 
-`UIManager::draw()` is called between `sceneManager->drawAll()` and `endScene()` in `RenderSystem`. Per `architecture/ui-ux/ui-manager.md` line 157, `UIManager::draw()` issues explicit per-panel draw calls in Z-order via `IUIBackend` — `m_gui->drawAll()` is NOT called by `RenderSystem` because it would bypass the explicit layering required for the background scrim and modal overlay. `UIManager::draw()` must be called before `endScene()` — calling it after `endScene()` produces no output. The mandatory 7-step per-frame sequence is: `audioSystem->syncListenerToCamera(cam)` → `audioSystem->update(realDeltaSeconds)` → `UIManager::update(realDeltaSeconds)` → `driver->beginScene()` → `sceneManager->drawAll()` → `UIManager::draw()` → `driver->endScene()`. The two audio calls must come before `beginScene()` so that the listener position and audio command queue are fully updated before rendering begins. The Irrlicht-internal ordering (`beginScene` → `drawAll` → `draw` → `endScene`) is immutable; the audio setup calls are pre-steps that must not be moved inside the Irrlicht render block. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API.
+`IrrlichtRenderer::drawScene()` implements a 3-step rendering sequence between `beginScene()` and `endScene()`:
+
+1. `sceneManager->drawAll()` — renders the 3D scene (terrain, buildings, vehicles, sky).
+2. `uiManager->draw()` — calls each panel's `draw()` method in explicit Z-order (slots 1–10 per `ui-manager.md`). Each panel's `draw()` updates element state (visibility, text, alpha) but does NOT render pixels.
+3. `guiEnvironment->drawAll()` — renders all visible `IGUIElement` nodes. Because step 2 has already set the correct visibility on every element (non-active panels hide theirs), only the intended elements are painted.
+
+The Z-order concern (scrim must cover panels; modal must be topmost) is handled by visibility management in step 2 — panels that should be behind have their elements hidden before `drawAll()` paints. `UIManager::draw()` must be called before `guiEnvironment->drawAll()` — calling it after would render stale element state. The mandatory 9-step per-frame sequence is: `audioSystem->syncListenerToCamera(cam)` → `audioSystem->update(realDeltaSeconds)` → `UIManager::update(realDeltaSeconds)` → `terrainSystem->update(realDeltaSeconds)` → `driver->beginScene()` → `sceneManager->drawAll()` → `UIManager::draw()` → `guiEnvironment->drawAll()` → `driver->endScene()`. The two audio calls must come before `beginScene()` so that the listener position and audio command queue are fully updated before rendering begins. `terrainSystem->update()` is also a pre-render step — it processes queued LOD rebuilds before the scene is drawn. The Irrlicht-internal ordering (`beginScene` → `drawAll` → `draw` → `guiEnv->drawAll` → `endScene`) is immutable; the audio and terrain setup calls are pre-steps that must not be moved inside the Irrlicht render block. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API.
+
+## IrrlichtRenderer Late-Binding Pattern
+
+`IrrlichtRenderer` is constructed with `nullptr` for its `UIManager*` parameter. After `UIManager` is constructed (which requires `IrrlichtRenderer` to already exist for the `CitySimulation` dependency chain), `main.cpp` calls `renderer.setUIManager(&uiManager)` to wire the pointer. This breaks the circular construction dependency: `UIManager` needs `CitySimulation` and `IAudioSystem` → `CitySimulation` needs `IRenderer` → `IrrlichtRenderer` needs `UIManager`. The `setUIManager()` setter is the only late-bound pointer on `IrrlichtRenderer`; all other dependencies are injected at construction.
+
+The construction sequence in `main.cpp`:
+
+```text
+1. RenderSystem (owns IrrlichtDevice)
+2. IrrlichtUIBackend (needs device)
+   CRITICAL GL STATE RULE: IrrlichtUIBackend's constructor creates a VAO/VBO
+   for UI quad rendering. After closing the VAO scope (glBindVertexArray(0)),
+   it MUST also call glBindBuffer(GL_ARRAY_BUFFER, 0). GL_ARRAY_BUFFER is
+   global state (NOT per-VAO); leaving it bound causes Irrlicht's COpenGLDriver
+   to reinterpret client-side vertex array pointers as VBO offsets, silently
+   rendering zero geometry for ALL scene nodes.
+3. UIScaler (needs uiBackend screen dimensions)
+4. Camera scene node + CameraController
+5. IrrlichtRenderer(device, /*uiManager=*/nullptr)
+6. WallClock, AudioSystem, TerrainSystem, CitySimulation
+7. TerrainSystem::generate() + buildAllChunks()   // terrain generation before UI
+8. CameraController::setTarget(centerX, centerZ)  // center camera over terrain
+9. UIManager(uiBackend, audioSystem, citySimulation, wallClock)
+10. renderer.setUIManager(&uiManager)         // late binding
+11. EventReceiver(uiScaler, uiManager, cameraController)
+12. device->setEventReceiver(&eventReceiver)
+```
 
 ## IrrlichtRenderer and UIManager — Header Dependency Rule
 
@@ -157,6 +192,19 @@ The following initialization sequence MUST occur immediately after `createDevice
    ```
 
 4. **Extension queries**: Use `glewIsExtensionSupported("GL_EXT_texture_sRGB")` etc. only after a successful `glewInit()`.
+
+**IrrlichtUIBackend construction ordering constraint**: `IrrlichtUIBackend` depends on GLEW
+extension flags being populated (`GLEW_EXT_texture_filter_anisotropic`,
+`GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT`) to correctly initialize `m_maxAnisotropy` in its
+constructor. Therefore, `IrrlichtUIBackend` MUST be constructed **after** `glewInit()` returns
+`GLEW_OK` **or** `GLEW_ERROR_NO_GL_VERSION` (GLVND Linux returns `GLEW_ERROR_NO_GL_VERSION` as a
+valid success indicator; extension flags are still populated). Do NOT instantiate
+`IrrlichtUIBackend` in a C++ member initializer list (which runs before the constructor body
+where `glewInit()` is typically called) — construct it explicitly in the constructor body after
+the `glewInit()` call. If `IrrlichtUIBackend` is constructed before `glewInit()`,
+`GLEW_EXT_texture_filter_anisotropic` evaluates to 0 (false), and `m_maxAnisotropy` silently
+defaults to `1.0f` on all hardware, defeating the anisotropic filtering detection entirely
+without any error or warning.
 
 **GLEW availability spike**: Phase 2 must verify whether the vendored Irrlicht build exposes GLEW symbols. If GLEW is unavailable (Irrlicht compiled without GLEW), all extension checks must use `glGetString(GL_EXTENSIONS)` string matching or `IVideoDriver::queryFeature()` instead. This spike must complete before any `glewIsExtensionSupported()` code is written. The spike result must be documented in BOTH `architecture/graphics-architecture/irrlicht-device-lifecycle.md` under the Phase 2 Spike Results section AND as a one-line comment in `src/rendering/render_system.h` confirming the confirmed extension query path (glewIsExtensionSupported or glGetString(GL_EXTENSIONS) fallback). The code comment ensures in-code documentation for implementers; the architecture doc ensures the decision is visible to non-implementers reviewing the spec.
 

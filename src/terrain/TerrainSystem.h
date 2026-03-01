@@ -121,6 +121,18 @@ public:
     bool generate(int mapTilesX, int mapTilesZ, float cellSize, ITerrainRNG* rng,
                   int maxRetries = 100);
 
+    // buildAllChunks() — divide the generated heightmap into terrain chunks,
+    // register each chunk (position, heightmap, LOD), enqueue LOD0 rebuilds,
+    // and call flushPendingRebuilds() to synchronously build all scene nodes.
+    //
+    // Must be called AFTER generate() has populated m_generatedHeightmap.
+    // Each chunk covers kTerrainLOD0GridSize (32) tiles per side.
+    // cellSize is taken from the value stored by generate().
+    //
+    // Chunk IDs are assigned as (cz * chunksPerSideX + cx), starting from 0.
+    // No-op if m_generatedHeightmap is empty (generate() not yet called).
+    void buildAllChunks();
+
     // ITerrainQuery implementation —
     // Returns slope in degrees at tile (tileX, tileZ) using the stored heightmap.
     // Returns 0.0f for out-of-bounds tiles or before generate() is called (flat stub).

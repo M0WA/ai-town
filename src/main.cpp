@@ -26,6 +26,7 @@
 #include "src/simulation/CitySimulation.h"
 #include "src/simulation/StdSimulationRNG.h"
 #include "src/terrain/TerrainSystem.h"
+#include "src/terrain/StdTerrainRNG.h"
 #include "src/audio/audio_system.h"
 
 #include <irrlicht.h>
@@ -67,12 +68,6 @@ int main() {
     );
 
     // -------------------------------------------------------------------------
-    // UIManager stub (Phase 3 wires full implementation).
-    // Null audio/sim/clock pointers — Phase 1 stub does not use them.
-    // -------------------------------------------------------------------------
-    UIManager uiManager(&uiBackend, nullptr, nullptr, nullptr);
-
-    // -------------------------------------------------------------------------
     // Camera scene node — addCameraSceneNode() only (never FPS/Maya variants).
     // Post-creation: grab/drop-guarded animator removal loop per scene-graph-ownership.md.
     // -------------------------------------------------------------------------
@@ -106,14 +101,9 @@ int main() {
     // -------------------------------------------------------------------------
     // IrrlichtRenderer — owns the rendering interface.
     // Constructor signature LOCKED at Phase 1.
+    // Created with nullptr for UIManager — late-bound below after UIManager is created.
     // -------------------------------------------------------------------------
-    IrrlichtRenderer renderer(device, &uiManager);
-
-    // -------------------------------------------------------------------------
-    // EventReceiver — translates SEvent → InputEvent, dispatches per input-arbitration.md.
-    // -------------------------------------------------------------------------
-    EventReceiver eventReceiver(&uiScaler, &uiManager, &cameraController);
-    device->setEventReceiver(&eventReceiver);
+    IrrlichtRenderer renderer(device, /*uiManager=*/nullptr);
 
     // -------------------------------------------------------------------------
     // WallClock — production IClock; injects into AudioSystem/CitySimulation at Phase 4/6.
@@ -124,12 +114,10 @@ int main() {
     double prevTime = wallClock.nowSeconds();
 
     // -------------------------------------------------------------------------
-    // Phase 4: AudioSystem — production stub wired to frame loop.
+    // Phase 7: AudioSystem — full OpenAL Soft implementation.
     // Injected with wallClock for deterministic timing (crossfade duck timer, etc.).
-    // Phase 7 replaces this stub with the full OpenAL Soft implementation; the
-    // constructor signature (IClock*) and all IAudioSystem method signatures are frozen.
-    // CitySimulation still receives nullptr for audio — Phase 7 wires the real
-    // AudioSystem pointer into CitySimulation when the full implementation lands.
+    // Constructor signature (IClock*) and all IAudioSystem method signatures are frozen.
+    // CitySimulation receives &audioSystem for SFX playback during simulation ticks.
     // -------------------------------------------------------------------------
     AudioSystem audioSystem(&wallClock);
 
@@ -138,14 +126,43 @@ int main() {
     // StdSimulationRNG — production mt19937-backed ISimulationRNG.
     // TerrainSystem — ITerrainQuery implementation (provides slope data for earthworks cost).
     //   MUST NOT pass nullptr for terrain — earthworks cost silently returns 0 for all tiles.
-    // IAudioSystem* is nullptr until Phase 7 implements the real AudioSystem.
-    //   CitySimulation null-checks audio before each call site.
     // Difficulty::Normal is the production default; Phase 8 wires this to the New Game flow.
     // -------------------------------------------------------------------------
     StdSimulationRNG simRng;
     TerrainSystem terrainSystem(&renderer, &wallClock);
+
+    // -------------------------------------------------------------------------
+    // Terrain generation — generate the procedural heightmap and build all chunks.
+    // Uses 128x128 tiles (4x4 = 16 chunks at 32 tiles/chunk), cellSize = 10 m.
+    // StdTerrainRNG provides mt19937-backed randomness with reseed() support.
+    // generate() enforces playability constraints (20% flat, 50x50 contiguous region).
+    // buildAllChunks() synchronously creates all scene nodes via IRenderer.
+    // -------------------------------------------------------------------------
+    StdTerrainRNG terrainRng;
+    terrainSystem.generate(128, 128, 10.0f, &terrainRng);
+    terrainSystem.buildAllChunks();
+
+    // Position camera over the terrain center (128 tiles × 10 m / 2 = 640 m per axis).
+    cameraController.setTarget(640.0f, 640.0f);
+
     CitySimulation citySimulation(
-        &renderer, /*audio=*/nullptr, &simRng, &wallClock, &terrainSystem, Difficulty::Normal);
+        &renderer, /*audio=*/&audioSystem, &simRng, &wallClock, &terrainSystem, Difficulty::Normal);
+
+    // -------------------------------------------------------------------------
+    // UIManager — Phase 8 full implementation.
+    // Now wired with real audio, simulation, and clock pointers.
+    // Panels (HUD, NotificationManager, etc.) receive these pointers at construction.
+    // -------------------------------------------------------------------------
+    UIManager uiManager(&uiBackend, &audioSystem, &citySimulation, &wallClock);
+
+    // Late-bind UIManager to renderer (breaks circular construction dependency).
+    renderer.setUIManager(&uiManager);
+
+    // -------------------------------------------------------------------------
+    // EventReceiver — translates SEvent → InputEvent, dispatches per input-arbitration.md.
+    // -------------------------------------------------------------------------
+    EventReceiver eventReceiver(&uiScaler, &uiManager, &cameraController);
+    device->setEventReceiver(&eventReceiver);
 
     // =========================================================================
     // 8-STEP FRAME LOOP
@@ -160,6 +177,14 @@ int main() {
         // Step 1: Poll events — handled by EventReceiver::OnEvent() via device->run().
         // No explicit poll call needed — device->run() drives EventReceiver.
 
+        // Update UIScaler viewport dimensions each frame so that mouse coordinate
+        // unprojection tracks the current window size after a resize.
+        uiScaler.setViewportSize(uiBackend.getScreenWidth(), uiBackend.getScreenHeight());
+
+        // Reposition Irrlicht GUI elements when the window is resized so their
+        // physical pixel positions match the virtual 1920x1080 layout.
+        uiBackend.handleViewportResize();
+
         // Step 2: CitySimulation::tick(realDeltaSeconds) — Phase 6 wired.
         // DEFAULT SPEED CONTRACT: CitySimulation is constructed at SpeedMultiplier::x3
         // (kDefaultSimSpeed) — see architecture/game-design/simulation-time.md.
@@ -172,9 +197,19 @@ int main() {
         // AudioSystem::syncListenerToCamera() so the listener reads the updated position.
         cameraController.update(realDeltaSeconds);
 
+        // Step 3a: TerrainSystem::update(dt) — process LOD rebuild deque (at most 2 per frame).
+        // Runs after camera update so LOD decisions use the current camera position.
+        terrainSystem.update(realDeltaSeconds);
+
         // Step 3b: UIManager::update(realDeltaSeconds) — per-frame UI state update.
         // MUST execute BEFORE beginFrame() per architecture/ui-ux/ui-manager.md.
         uiManager.update(realDeltaSeconds);
+
+        // Check for application quit request (Main Menu Quit / Pause Menu Quit to Desktop).
+        if (uiManager.isQuitRequested()) {
+            device->closeDevice();
+            continue;  // Skip rendering; device->run() returns false next iteration.
+        }
 
         // Steps 4a/4b: AudioSystem stubs — Phase 4 deliverable.
         // Step 4a: AudioSystem::syncListenerToCamera(cameraState) — commits AL_POSITION,

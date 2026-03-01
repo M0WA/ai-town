@@ -150,10 +150,26 @@ public:
     // Responsibilities: advance occlusion raycast budget, push time-of-day transitions,
     // and forward any pending crossfade or zone-layer source updates.
     virtual void update(float realDeltaSeconds) = 0;
+
+    // --- Phase 8 Volume Control API ---
+    // These three methods are declared here so that UIManager (Settings > Audio sliders)
+    // can call them via IAudioSystem* without knowing the concrete AudioSystem type.
+    // Phase 8 adds these three methods to IAudioSystem as pure-virtual members, implements
+    // them in AudioSystem with the correct member declarations and thread-safety semantics
+    // (std::atomic<float> for m_musicVolume and m_sfxVolume), adds them to MockAudioSystem,
+    // and adds three SettingsPanel unit tests. Phase 9 does not need to add or modify these
+    // methods.
+    // All gain values are linear multipliers in the range [0.0, 1.0].
+    // Default values: master = 1.0, music = 0.8, SFX = 0.8 (see settings-pause-menu.md).
+    // Values are persisted in the settings/config file (separate from save game files)
+    // and restored on the next session load.
+    virtual void setMasterVolume(float gain) = 0;
+    virtual void setMusicVolume(float gain) = 0;
+    virtual void setSFXVolume(float gain) = 0;
 };
 ```
 
-`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all eleven methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
+`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all fourteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
 
 ---
 
@@ -226,6 +242,16 @@ private:
     // Never write PFNALCSETTHREADCONTEXTPROC in audio_system.h — that type requires
     // <AL/alext.h>, which would break headless test compilation.
     FnSetThreadCtx            m_fnSetThreadCtx{nullptr};
+    // Volume control — cross-thread members (written by main thread, read by audio thread):
+    // m_musicVolume and m_sfxVolume use std::atomic<float> because setMusicVolume() /
+    // setSFXVolume() are called from the main thread while the audio thread reads them
+    // during per-frame source gain updates — a plain float would be a C++ data race (UB).
+    // m_masterVolume uses plain float because setMasterVolume() calls
+    // alListenerf(AL_GAIN, gain) directly on the calling (main) thread and the raw value
+    // is never stored for later audio-thread reads; no cross-thread access occurs.
+    std::atomic<float>        m_musicVolume{0.8f};   // music source gain — written by main thread via setMusicVolume(), read by audio thread during source gain updates
+    std::atomic<float>        m_sfxVolume{0.8f};     // SFX source gain — written by main thread via setSFXVolume(), read by audio thread during source gain updates
+    float                     m_masterVolume{1.0f};  // master AL listener gain — applied immediately by setMasterVolume() via alListenerf(AL_GAIN, gain); no cross-thread read
     // Music ducking state machine (audio thread only for gain writes; main thread reads atomically):
     enum class DuckState { IDLE, DUCKING, DUCKED, RELEASING };
     std::atomic<DuckState>    m_duckState{DuckState::IDLE};

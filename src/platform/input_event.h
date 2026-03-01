@@ -28,4 +28,5 @@ struct InputEvent {
     int   button{0};         // 0=left, 1=right, 2=middle (for mouse button events)
     float wheelDelta{0.f};   // for MouseWheel events
     int   keyCode{0};        // SDL2-style key code (for key events)
+    bool  shiftDown{false};   // true when Shift is held during key event (for Shift+Tab nav)
 };
