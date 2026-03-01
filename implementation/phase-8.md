@@ -1,4 +1,4 @@
-## Phase 8: HUD & UI Panels
+## Phase 8: HUD & UI Panels — **DONE**
 
 ### Goal
 
