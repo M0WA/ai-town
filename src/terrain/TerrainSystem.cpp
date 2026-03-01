@@ -472,6 +472,69 @@ bool TerrainSystem::generate(int mapTilesX, int mapTilesZ, float cellSize,
 }
 
 // ---------------------------------------------------------------------------
+// buildAllChunks() — divide the generated heightmap into chunks, register, and flush.
+//
+// Each chunk covers kTerrainLOD0GridSize (32) tiles per side.
+// The full-map heightmap has (m_mapTilesX+1) * (m_mapTilesZ+1) vertex samples.
+// Each chunk needs (kTerrainLOD0GridSize+1)^2 = 33*33 = 1089 vertex samples.
+//
+// For partial edge chunks (map not evenly divisible by 32), the chunk's
+// heightmap is zero-padded beyond the map boundary.
+// ---------------------------------------------------------------------------
+void TerrainSystem::buildAllChunks() {
+    if (m_generatedHeightmap.empty() || m_mapTilesX <= 0 || m_mapTilesZ <= 0) {
+        return;
+    }
+
+    const int chunkTiles = kTerrainLOD0GridSize;  // 32 tiles per chunk side
+    const int chunkVerts = chunkTiles + 1;         // 33 vertices per chunk side
+    const int mapVertX   = m_mapTilesX + 1;        // full-map vertex width
+
+    // Number of chunks in each dimension (ceiling division for partial edge chunks).
+    const int chunksX = (m_mapTilesX + chunkTiles - 1) / chunkTiles;
+    const int chunksZ = (m_mapTilesZ + chunkTiles - 1) / chunkTiles;
+
+    for (int cz = 0; cz < chunksZ; ++cz) {
+        for (int cx = 0; cx < chunksX; ++cx) {
+            uint64_t chunkId = static_cast<uint64_t>(cz * chunksX + cx);
+
+            // World-space origin of this chunk's (0,0) vertex corner.
+            float worldOriginX = static_cast<float>(cx * chunkTiles) * m_cellSize;
+            float worldOriginZ = static_cast<float>(cz * chunkTiles) * m_cellSize;
+
+            // Tile offset of this chunk in the full map.
+            int tileOffsetX = cx * chunkTiles;
+            int tileOffsetZ = cz * chunkTiles;
+
+            // Extract the chunk's LOD0 heightmap from the full-map heightmap.
+            std::vector<float> chunkHmap(static_cast<size_t>(chunkVerts * chunkVerts), 0.0f);
+            for (int vz = 0; vz < chunkVerts; ++vz) {
+                for (int vx = 0; vx < chunkVerts; ++vx) {
+                    int mapX = tileOffsetX + vx;
+                    int mapZ = tileOffsetZ + vz;
+                    if (mapX < mapVertX && mapZ < (m_mapTilesZ + 1)) {
+                        chunkHmap[static_cast<size_t>(vz * chunkVerts + vx)] =
+                            m_generatedHeightmap[static_cast<size_t>(mapZ * mapVertX + mapX)];
+                    }
+                    // else: zero-padded (already 0.0f from initialization)
+                }
+            }
+
+            // Register the chunk: LOD, position, and heightmap.
+            registerChunkAtLOD(chunkId, -1);  // -1 = not yet built; enqueueRebuild will set LOD0
+            registerChunkPosition(chunkId, worldOriginX, worldOriginZ);
+            registerChunkHeightmap(chunkId, std::move(chunkHmap));
+
+            // Enqueue a LOD0 rebuild.
+            enqueueRebuild(chunkId, 0, 0.0f);
+        }
+    }
+
+    // Synchronously process all pending rebuilds (creates scene nodes via IRenderer).
+    flushPendingRebuilds();
+}
+
+// ---------------------------------------------------------------------------
 // getGeneratedHeightmap() — accessor for the heightmap produced by generate().
 // ---------------------------------------------------------------------------
 const std::vector<float>& TerrainSystem::getGeneratedHeightmap() const {

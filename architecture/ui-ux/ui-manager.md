@@ -9,7 +9,7 @@
 
 ## IUIBackend Method Contract
 
-The total method count is **17**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+The total method count is **17**. (**Conditional**: if the Phase 8 virtual `draw()` spike confirms `IGUIElement::draw()` is non-virtual, a `virtual void drawAlphaOverlays() {}` method is appended as method 18, updating the count to **18**; both this file and `testability-architecture.md` must be updated at that point — see `implementation/phase-8.md` §IrrlichtUIBackend setElementAlpha fallback for the spike procedure.) `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
 
 ```cpp
 class IUIBackend {
@@ -186,6 +186,17 @@ public:
     void showGameOverModal(int64_t totalDebt, int monthsInDeficit);
     void closeModal();  // safe to call even if no modal active
 
+    // Terrain-load gate (called by main game loop):
+    // When loading = true, UIManager::update() returns immediately without polling
+    // pollPendingNotification() or updating any panel state. When loading = false,
+    // normal update() processing resumes.
+    // This method is NOT part of any interface — it is a public concrete method on
+    // UIManager and is called by the main loop which holds a concrete UIManager reference.
+    // It does NOT affect the IUIBackend interface.
+    // Do NOT add a Loading state to GameState — V1 uses this boolean flag instead
+    // (per architecture/game-design/game-over-flow.md line 19).
+    void setLoadingTerrain(bool loading);
+
 private:
     IUIBackend*             m_backend{nullptr}; // non-owning
     GameState               m_state{GameState::MainMenu};
@@ -210,8 +221,14 @@ private:
     ICitySimulation*        m_sim{nullptr};   // non-owning
     IAudioSystem*           m_audio{nullptr}; // non-owning
     IClock*                 m_clock{nullptr}; // non-owning; forwarded to NotificationManager and HUD at construction
+
+    bool                    m_loadingTerrain{false}; // set by setLoadingTerrain(); gates update() early-return
 };
 ```
+
+### setLoadingTerrain(bool) — Terrain-Load Gate
+
+**`setLoadingTerrain(bool loading)`**: Called by the main game loop to suppress `UIManager::update()` and HUD rendering during terrain generation. When `loading = true`, `UIManager::update()` returns immediately without polling `pollPendingNotification()` or updating any panel state. When `loading = false`, normal `update()` processing resumes. This method is NOT part of any interface — it is a public concrete method on `UIManager` and is called by the main loop which has a concrete `UIManager` reference. It does NOT affect the `IUIBackend` interface. **Do NOT add a `Loading` state to `GameState`** — V1 uses this boolean flag instead (per `architecture/game-design/game-over-flow.md` line 19).
 
 ## MainMenuPanel show/hide Contract
 
@@ -334,7 +351,7 @@ Within `UIManager::draw()`, panels are drawn in this order (back to front, match
 
 **BudgetDetailPanel ownership**: `BudgetDetailPanel` is owned and drawn by the `HUD` class internally — it is a detail overlay triggered by hovering the treasury balance field in the resource bar. It is NOT a top-level `UIManager` panel and does NOT appear in UIManager's panel member list or draw order. UIManager's draw order has exactly 10 slots as specified above.
 
-`UIManager::draw()` issues explicit per-panel draw calls in the back-to-front order listed above (items 1–10). This is the normative approach: each panel exposes a `draw()` method that is called directly by UIManager in the correct sequence. `m_gui->drawAll()` is NOT used — it would bypass the explicit layering required for the background scrim, the modal overlay, and the precise Z-order defined here. Each panel's `IGUIElement` children are managed internally within that panel's own draw call.
+`UIManager::draw()` issues explicit per-panel draw calls in the back-to-front order listed above (items 1–10). This is the normative approach: each panel exposes a `draw()` method that is called directly by UIManager in the correct sequence. Each panel's `draw()` method updates element state (visibility, text, alpha) via `IUIBackend` setter methods but does NOT render pixels directly. After `UIManager::draw()` completes, `IrrlichtRenderer::drawScene()` calls `guiEnvironment->drawAll()` which renders all visible `IGUIElement` nodes to the framebuffer. Because `UIManager::draw()` has already set the correct visibility on every element (non-active panels hide theirs), `drawAll()` only paints the intended elements. The Z-order concern (scrim must cover panels; modal must be topmost) is handled by visibility management — panels control which elements are visible/hidden before `drawAll()` executes.
 
 ## Thread Safety
 
@@ -368,9 +385,54 @@ The required frame sequence (abbreviated to the relevant steps) is shown from tw
 ```text
 Inside IrrlichtRenderer::drawScene():
   a. sceneManager->drawAll()       // 3D scene pass
-  b. uiManager->draw()             // 2D UI pass, per-panel Z-order; inside beginScene/endScene block
+  b. uiManager->draw()             // per-panel Z-order state update (visibility, text, alpha)
+  c. guiEnvironment->drawAll()     // render all visible IGUIElement nodes to framebuffer
 ```
 
-This internal sequence is the authoritative render loop defined in `architecture/graphics-architecture/irrlicht-device-lifecycle.md`. Any change to the ordering of `sceneManager->drawAll()` and `uiManager->draw()` must be made there first.
+Step (b) updates element state but does not render pixels. Step (c) paints all elements that are currently visible. Because (b) has already toggled visibility for the correct game state (e.g. main menu elements hidden during gameplay), (c) only renders what should be on screen. This sequence is the authoritative render loop defined in `architecture/graphics-architecture/irrlicht-device-lifecycle.md`. Any change to the ordering must be made there first.
 
-`UIManager::draw()` (internal step b) is called after `sceneManager->drawAll()` and before `endScene()` — this is correct and distinct from `UIManager::update()` (step 3b of the main loop), which must precede `beginScene()`. The two methods serve different purposes: `update()` advances timer state and dispatches dismissal logic; `draw()` issues rendering calls that must occur within the `beginScene()`/`endScene()` block.
+`UIManager::draw()` (internal step b) is called after `sceneManager->drawAll()` and before `guiEnvironment->drawAll()` and `endScene()` — this is correct and distinct from `UIManager::update()` (step 3b of the main loop), which must precede `beginScene()`. The two methods serve different purposes: `update()` advances timer state and dispatches dismissal logic; `draw()` updates element state that must be current when `guiEnvironment->drawAll()` renders within the `beginScene()`/`endScene()` block.
+
+## MainMenu State Input Routing
+
+When `m_state == GameState::MainMenu`, `UIManager::onEvent()` routes input with SettingsPanel taking priority over MainMenuPanel. If `SettingsPanel::isVisible()` returns true, events are dispatched to `SettingsPanel::onEvent()` first — if consumed, the event does not reach MainMenuPanel. If SettingsPanel does not consume the event (or is not visible), the event falls through to `MainMenuPanel::onEvent()`. MainMenuPanel consumes all events while visible (returns `true` for everything) to prevent HUD and camera input during the main menu. This routing must be checked before Priority 5 in the dispatch chain.
+
+This priority ordering is required because `UIManager::showSettings()` (called from the MainMenu polling path) shows the SettingsPanel overlay on top of MainMenuPanel. Without SettingsPanel priority, Escape and Cancel clicks in the settings overlay are consumed by MainMenuPanel (which swallows all input), preventing the player from closing settings and leaving stale settings elements visible on screen.
+
+**Main menu hide/restore on settings open/close**: `UIManager::showSettings()` calls `m_mainMenu->hide()` before `m_settings->show()` when `m_state == GameState::MainMenu`. This prevents main menu elements from remaining visible behind the settings overlay. When the settings panel closes (Escape or Cancel), the MainMenu routing block detects that `m_settings->isVisible()` changed from true to false and calls `m_mainMenu->show()` to restore the main menu. This hide/restore cycle is transparent to both panels — neither MainMenuPanel nor SettingsPanel holds a reference to the other.
+
+## Paused State Input Routing
+
+When `m_state == GameState::Paused`, `UIManager::onEvent()` routes input to `PauseMenuPanel` (and `SettingsPanel` if opened from the pause menu) before the Priority 5 HUD controls. This ensures that mouse clicks, Escape, and Enter reach the pause menu panels instead of falling through to inactive HUD handlers.
+
+The dispatch order within the Paused state:
+
+1. **SettingsPanel (if visible)**: events go to `SettingsPanel::onEvent()` first. If settings closes (Escape or Cancel), `PauseMenuPanel::show()` is called to restore the pause menu overlay.
+2. **PauseMenuPanel (if visible)**: events go to `PauseMenuPanel::onEvent()`. If PauseMenuPanel hides itself (Resume via Escape, Enter, or button click), `UIManager` checks whether SettingsPanel just opened (PauseMenu→Settings path). If settings is NOT visible, `transitionToGameplay_fromPaused()` is called to resume gameplay. If settings IS visible, the state remains Paused (the player navigated to settings, not back to gameplay).
+
+This routing must be placed before the Priority 5 Escape handler. Without it, mouse clicks on pause menu buttons fall through to `return false` (Priority 6 — camera), and Escape in the Paused state bypasses `PauseMenuPanel::onEvent()` entirely (the Priority 5 Escape handler calls `transitionToGameplay_fromPaused()` directly without letting PauseMenuPanel update its internal state).
+
+## MainMenu Polling Communication
+
+`MainMenuPanel` uses a polling-based communication pattern instead of direct method calls on `UIManager`. When the player clicks "Start City", "Settings", or "Quit", `MainMenuPanel` sets an internal flag (`m_startGameRequested`, `m_settingsRequested`, or `m_quitRequested`) and returns `true` from `onEvent()`. `UIManager::update()` polls these flags each frame via `consumeStartGameRequest()`, `consumeSettingsRequest()`, and `consumeQuitRequest()` — these are consume-once methods that read and clear the flag atomically. This avoids a circular dependency (MainMenuPanel does not hold a UIManager pointer) and keeps the communication unidirectional: panels set flags, UIManager polls and acts.
+
+## PauseMenu Polling Communication
+
+`PauseMenuPanel` uses the same polling pattern as `MainMenuPanel`. When the player clicks "Quit to Desktop" or "Quit to Main Menu", `PauseMenuPanel` sets an internal flag (`m_quitDesktopRequested` or `m_quitToMenuRequested`), calls `hide()`, and returns `true` from `onEvent()`. `UIManager::update()` polls these flags each frame via `consumeQuitDesktopRequest()` and `consumeQuitToMenuRequest()`. "Quit to Desktop" sets `m_quitRequested` on UIManager, which `main.cpp` polls via `isQuitRequested()` to call `device->closeDevice()`. "Quit to Main Menu" calls `transitionToMainMenu()` which hides gameplay panels and shows the main menu.
+
+## Application Quit Flow
+
+Application quit is requested from two entry points:
+
+1. **Main Menu → Quit button**: `MainMenuPanel` sets `m_quitRequested`, polled by `UIManager::update()` via `consumeQuitRequest()`, which sets `UIManager::m_quitRequested`.
+2. **Pause Menu → Quit to Desktop button**: `PauseMenuPanel` sets `m_quitDesktopRequested`, polled by `UIManager::update()` via `consumeQuitDesktopRequest()`, which sets `UIManager::m_quitRequested`.
+
+In both cases, `main.cpp` checks `uiManager.isQuitRequested()` after `uiManager.update()` in the frame loop. When true, it calls `device->closeDevice()` and skips rendering for that frame. The device loop exits naturally on the next iteration when `device->run()` returns false.
+
+## Audio Transition at Gameplay Start
+
+`UIManager::transitionToGameplay()` calls `m_audio->setTimeOfDay(TimeOfDay::DAY)` before `m_audio->transitionToGameplay()`. This establishes the correct ambient bed selection (new games start at DAY). `AudioSystem::transitionToGameplay()` then starts both the ambient bed on stream slot 2 and the default calm music stem (MUSIC_CALM_01) on stream slot 0 via `setMusicTrack()`.
+
+## CitySimulation Audio Wiring
+
+`CitySimulation` receives `&audioSystem` (not `nullptr`) at construction in `main.cpp`. This enables all simulation-driven SFX: build/place sounds, demolish sounds, earthworks sounds, budget warning sounds, loan-issued sounds, and zone upgrade sounds. Each call site is guarded with `if (m_audio)` null-checks.

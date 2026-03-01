@@ -186,7 +186,23 @@ The Phase 2 GLSL stub files MUST be co-landed in the same commit as `shader_stub
 
 If any of these artifacts is missing from the commit, the commit is incomplete and must not be merged.
 
-- **Error handling**: Check return value of `−1` (shader compile/link failure):
+## Phase 8 GLSL Co-Landing Requirement
+
+The Phase 8 GLSL files MUST be co-landed in the same commit as `IrrlichtUIBackend.cpp` in Phase 8.
+
+**Co-landing checklist (single commit must include all of the following):**
+
+- `assets/shaders/ui_quad.vert` — 2D UI textured-quad vertex shader (position + UV attributes, NDC/orthographic transform, outputs interpolated UV `v_uv` to fragment stage); no sampler uniform in vertex stage
+- `assets/shaders/ui_quad.frag` — 2D UI textured-quad fragment shader (samples `u_tex` sampler uniform at interpolated `v_uv`, outputs texel colour)
+
+**Note**: These two files MUST be co-landed in the same commit as `IrrlichtUIBackend.cpp` in Phase 8. They are NOT Phase 2 files. See `implementation/phase-8.md` §IrrlichtUIBackend for the full co-landing requirement.
+
+- **Error handling — `addHighLevelShaderMaterialFromFiles()` path**: Check return value of `−1` (shader compile/link failure):
   - **Debug builds** (`NDEBUG` not defined): assert/abort with error message
   - **Release builds**: fall back to `EMT_SOLID` with magenta diffuse (highly visible error indicator); display a non-fatal error notification; log to file; do not abort. Clean shutdown proceeds normally.
 - Never apply an unvalidated (−1) material type index to a mesh node
+
+- **Exception — ui_quad raw GL path**: The ui_quad GLSL program (`ui_quad.vert` / `ui_quad.frag`) in `IrrlichtUIBackend` is compiled via raw GL calls (`glCreateShader` / `glShaderSource` / `glCompileShader` / `glLinkProgram`), NOT via `addHighLevelShaderMaterialFromFiles()`. The `−1` return code and `EMT_SOLID` fallback do NOT apply to this path. The correct fallback is:
+  - On `GL_COMPILE_STATUS == GL_FALSE` (per shader): log `glGetShaderInfoLog`, debug-assert; set `m_uiQuadProgram = 0` and return.
+  - On `GL_LINK_STATUS == GL_FALSE`: log `glGetProgramInfoLog`, debug-assert; set `m_uiQuadProgram = 0` and return.
+  - In `setElementImage`, if `m_uiQuadProgram == 0`, return immediately (silent no-op — caller falls back to Irrlicht's software renderer path for this element).

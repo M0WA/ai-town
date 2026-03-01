@@ -15,11 +15,12 @@ class UIManager;
 // IrrlichtRenderer — concrete implementation of IRenderer backed by Irrlicht.
 //
 // Per-frame sequence enforced by drawScene():
-//   1. sceneManager->drawAll()     (3D scene)
-//   2. uiManager->draw()           (2D HUD, explicit Z-order per ui-manager.md)
-//   NOTE: m_gui->drawAll() is NOT called — calling it would bypass the explicit Z-order
-//   layering required for the background scrim and modal overlay.
-//   Both calls happen inside the single beginScene/endScene pair.
+//   1. sceneManager->drawAll()       (3D scene)
+//   2. uiManager->draw()             (update panel element states: visibility, text, alpha)
+//   3. guiEnvironment->drawAll()     (render all visible GUI elements)
+//   Step 2 manages Z-order via visibility toggling (non-active panels hide their elements).
+//   Step 3 then paints only what is visible.
+//   All three calls happen inside the single beginScene/endScene pair.
 //
 // Constructor signature LOCKED at Phase 1:
 //   IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiManager)
@@ -36,6 +37,9 @@ public:
     // device must be non-null. uiManager may be null (draws nothing in that case).
     IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiManager);
     ~IrrlichtRenderer() override = default;
+
+    // Late-bind UIManager (allows construction before UIManager exists).
+    void setUIManager(UIManager* uiManager) { m_uiManager = uiManager; }
 
     // IRenderer interface — main-thread-only
     void          beginFrame() override;  // driver->beginScene(true, true, SColor(255,0,0,0))

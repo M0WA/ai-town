@@ -1382,6 +1382,7 @@ void AudioSystem::triggerStinger(StingerType type) {
     ALuint src = static_cast<ALuint>(m_sources[poolIdx]);
     ALint  state = AL_STOPPED;
     alGetSourcei(src, AL_SOURCE_STATE, &state);
+    alCheckError_real("triggerStinger_stateQuery");
     if (state == AL_PLAYING) {
         return;  // Drop — in-progress
     }
@@ -1471,6 +1472,9 @@ void AudioSystem::transitionToGameplay() {
             }
         }
     }
+
+    // Start default calm music stem on slot 0 (sources[58]).
+    setMusicTrack(MUSIC_CALM_01);
 }
 
 // ---------------------------------------------------------------------------
@@ -1504,4 +1508,31 @@ void AudioSystem::update(float /*realDeltaSeconds*/) {
             m_sfxSlots[i] = SFXSlot{};
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// setMasterVolume — applied immediately via alListenerf(AL_GAIN) on the
+// calling thread (main thread).  m_masterVolume is plain float because it
+// is only ever read/written from the main thread.
+// ---------------------------------------------------------------------------
+void AudioSystem::setMasterVolume(float gain) {
+    m_masterVolume = gain;
+    alListenerf(AL_GAIN, gain);
+    alCheckError_real("setMasterVolume");
+}
+
+// ---------------------------------------------------------------------------
+// setMusicVolume — stored atomically; picked up by the audio thread at its
+// next wake in updateStreams() (applied to music stream source gains).
+// ---------------------------------------------------------------------------
+void AudioSystem::setMusicVolume(float gain) {
+    m_musicVolume.store(gain, std::memory_order_relaxed);
+}
+
+// ---------------------------------------------------------------------------
+// setSFXVolume — stored atomically; picked up by the audio thread at its
+// next wake (applied to SFX source gains).
+// ---------------------------------------------------------------------------
+void AudioSystem::setSFXVolume(float gain) {
+    m_sfxVolume.store(gain, std::memory_order_relaxed);
 }

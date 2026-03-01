@@ -18,7 +18,7 @@ Named constants (values chosen at implementation time):
 - `kMinZoomDistance` — minimum allowed zoom (clamps pan speed to minimum)
 - `kMaxZoomDistance` — maximum allowed zoom (clamps pan speed to maximum)
 
-Arrow-key pan uses the same zoom-scale formula as MMB drag pan, multiplied by a separate `kKeyboardPanRate` constant (allows Arrow-key pan to be tuned independently from mouse drag pan speed).
+Arrow-key pan uses the same zoom-scale formula as MMB drag pan, multiplied by a separate `kKeyboardPanRate` constant (allows Arrow-key pan to be tuned independently from mouse drag pan speed). Arrow-key pan uses **continuous key-held state**: `OnInputEvent(KeyDown)` sets a boolean flag (e.g., `m_panLeft`); `OnInputEvent(KeyUp)` clears it; `update(dt)` applies `panSpeed * dt` while the flag is set. This approach is robust against OS key-repeat configuration differences (containers, VMs, X11 settings) and provides frame-rate-independent smooth panning.
 
 The mouse-sensitivity slider (Phase 8 Settings panel) applies as a user-controlled multiplier on top of the zoom-scaled base rate: `effectivePanSpeed = panSpeed * sensitivityMultiplier`. This design allows Phase 1 to implement the correct zoom-scaled formula without requiring refactoring when Phase 8 adds the sensitivity slider. **The mouse-sensitivity slider applies to mouse-driven pan inputs ONLY** — specifically MMB drag and edge-scroll. Arrow-key pan is controlled exclusively by `kKeyboardPanRate` and is NOT affected by the sensitivity slider; the slider must not be applied to the keyboard pan code path.
 

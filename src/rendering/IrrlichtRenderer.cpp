@@ -29,20 +29,35 @@ IrrlichtRenderer::IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiMan
 
 void IrrlichtRenderer::beginFrame() {
     if (!m_driver) return;
-    m_driver->beginScene(true, true, SColor(255, 0, 0, 0));
+    // Sky-blue clear color — provides visual feedback that the 3D viewport is active.
+    // Pure black (0,0,0) is indistinguishable from "nothing rendered".
+    m_driver->beginScene(true, true, SColor(255, 100, 149, 237));
 }
 
 void IrrlichtRenderer::drawScene() {
     // Per-frame sequence (must be called INSIDE beginScene/endScene pair):
-    //   1. sceneManager->drawAll()  — 3D scene
-    //   2. uiManager->draw()        — 2D HUD, explicit Z-order
-    // NOTE: m_gui->drawAll() is NOT called — it would bypass the explicit Z-order layering
-    // required for the background scrim and modal overlay (per architecture/ui-ux/ui-manager.md).
+    //   1. sceneManager->drawAll()     — 3D scene
+    //   2. uiManager->draw()           — update panel element states (visibility, text, alpha)
+    //   3. guiEnvironment->drawAll()   — render all visible GUI elements
+    //
+    // Step 2 sets visibility/text/alpha on every panel's elements in explicit Z-order
+    // (slots 1-10 per ui-manager.md). Non-active panels hide their elements, so
+    // step 3's IGUIEnvironment::drawAll() only renders what should be visible.
+    // The Z-order concern is addressed by visibility management — panels that should
+    // be behind (e.g. main menu during gameplay) have their elements hidden.
     if (m_smgr) {
         m_smgr->drawAll();
     }
     if (m_uiManager) {
         m_uiManager->draw();
+    }
+    // Render all visible GUI elements. UIManager::draw() has already set the
+    // correct visibility state on every element; drawAll() paints them.
+    if (m_device) {
+        irr::gui::IGUIEnvironment* guiEnv = m_device->getGUIEnvironment();
+        if (guiEnv) {
+            guiEnv->drawAll();
+        }
     }
 }
 
@@ -197,11 +212,25 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
                 static_cast<f32>(z) / static_cast<f32>(gridSize)
             );
 
-            buf->Vertices.push_back(S3DVertex(pos, normal, SColor(255, 255, 255, 255), uv));
+            // Height-based vertex colour: interpolate from forest green (lowlands)
+            // to brown (highlands) so terrain is clearly visible against the sky.
+            // Phase 9 replaces this with textured materials.
+            float normH = std::clamp(h / 80.0f, 0.0f, 1.0f);  // normalize to [0,1] over ~80m range
+            u8 r = static_cast<u8>(34  + normH * (139 - 34));   // 34→139
+            u8 g = static_cast<u8>(139 - normH * (139 - 90));   // 139→90
+            u8 b = static_cast<u8>(34  - normH * (34  - 20));   // 34→20
+            buf->Vertices.push_back(S3DVertex(pos, normal, SColor(255, r, g, b), uv));
         }
     }
 
-    // Build index array — CCW winding, two triangles per quad.
+    // Build index array — CW winding from above (left-handed Y-up), two triangles per quad.
+    //
+    // Irrlicht uses a LEFT-HANDED coordinate system. Front faces are CW from the viewer.
+    // Terrain is viewed from above (+Y looking toward -Y), so front-face normals must
+    // point UP (+Y). The winding v0→v2→v1 / v0→v3→v2 produces upward normals:
+    //   (v2-v0)×(v1-v0) = (cs,0,cs)×(cs,0,0) = (0, +cs², 0) → +Y normal.
+    // The previous v0→v1→v2 winding produced DOWNWARD normals, causing all terrain
+    // faces to be backface-culled when the camera is above the terrain.
     for (int row = 0; row < gridSize; ++row) {
         for (int col = 0; col < gridSize; ++col) {
             u32 v0 = static_cast<u32>(row       * verts + col);
@@ -209,13 +238,15 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
             u32 v2 = static_cast<u32>((row + 1) * verts + col + 1);
             u32 v3 = static_cast<u32>((row + 1) * verts + col);
 
+            // Triangle 1: v0→v2→v1 (normal = +Y)
             buf->Indices.push_back(v0);
+            buf->Indices.push_back(v2);
             buf->Indices.push_back(v1);
-            buf->Indices.push_back(v2);
 
+            // Triangle 2: v0→v3→v2 (normal = +Y)
             buf->Indices.push_back(v0);
-            buf->Indices.push_back(v2);
             buf->Indices.push_back(v3);
+            buf->Indices.push_back(v2);
         }
     }
 
@@ -256,6 +287,7 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
         newNode->setPosition(core::vector3df(
             params.worldOriginX, 0.0f, params.worldOriginZ));
         newNode->setMaterialFlag(EMF_LIGHTING, false);  // unlit until Phase 6 lighting pass
+        newNode->setMaterialFlag(EMF_BACK_FACE_CULLING, false);  // both sides visible — Phase 5 has no winding-dependent lighting
 
         // -------------------------------------------------------------------------
         // Step 5: Register the new node in the chunk node map.

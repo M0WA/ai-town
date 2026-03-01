@@ -2,7 +2,7 @@
 #include "src/interfaces/IAudioSystem.h"
 #include "gmock/gmock.h"
 
-// MockAudioSystem — GMock implementation of IAudioSystem's 11 methods.
+// MockAudioSystem — GMock implementation of IAudioSystem's 14 methods.
 // Source location: tests/simulation/ (shared across simulation_tests, ui_tests, audio_tests).
 // Header-only — no .cpp file. Uses MOCK_METHOD macros only, no definitions.
 class MockAudioSystem : public IAudioSystem {
@@ -18,4 +18,7 @@ public:
     MOCK_METHOD(void,        setTimeOfDay,         (TimeOfDay tod),                                           (override));
     MOCK_METHOD(void,        transitionToGameplay, (),                                                        (override));
     MOCK_METHOD(void,        update,               (float realDeltaSeconds),                                  (override));
+    MOCK_METHOD(void,        setMasterVolume,      (float gain),                                              (override));
+    MOCK_METHOD(void,        setMusicVolume,       (float gain),                                              (override));
+    MOCK_METHOD(void,        setSFXVolume,         (float gain),                                              (override));
 };

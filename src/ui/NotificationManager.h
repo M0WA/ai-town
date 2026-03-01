@@ -1,5 +1,7 @@
 #pragma once
 #include <string>
+#include <vector>
+#include <deque>
 #include "src/ui/IUIBackend.h"                // UIElementHandle, IUIBackend
 #include "src/interfaces/IClock.h"            // IClock
 #include "src/interfaces/ICitySimulation.h"   // ICitySimulation
@@ -21,7 +23,6 @@ struct InputEvent;
 //   Normal toasts:   40-63 px height; auto-dismiss after a timed duration.
 //
 // Log panel: 400x500 px, anchored to bell icon (bottom-right of screen).
-// Full implementation in Phase 8; stub bodies in Phase 3.
 class NotificationManager {
 public:
     NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock);
@@ -29,6 +30,7 @@ public:
     // Production API for player dismissal of CRITICAL toasts.
     // Called by the UI event handler when the player clicks, presses Enter,
     // or presses Delete on a CRITICAL toast. Not a test-only backdoor.
+    // NOTE: does NOT call setPaused(false) — see notification-system.md.
     void dismissCriticalToast(UIElementHandle handle);
 
     // Post a CRITICAL toast (48 px, auto-pauses game, player-dismissed).
@@ -36,7 +38,10 @@ public:
     void postCritical(const std::string& title, const std::string& body);
 
     // Post a normal toast (40-63 px, auto-dismiss after timed duration).
-    void postNormal(const std::string& title, const std::string& body);
+    // timeoutSeconds: auto-dismiss delay (default 5 s; QueryPanel Escape
+    // feedback toast uses 1.5 s per architecture/ui-ux/notification-system.md).
+    void postNormal(const std::string& title, const std::string& body,
+                    float timeoutSeconds = 5.0f);
 
     // Handle an input event routed from UIManager's Priority-2 guard.
     // Returns true if the event was consumed by the notification system
@@ -44,13 +49,11 @@ public:
     // Only called when hasCriticalToastVisible() && !modalActive (dual-guard).
     bool onEvent(const InputEvent& event);
 
-    // Returns true when at least one CRITICAL toast is currently visible
-    // and waiting for player dismissal.
+    // Returns true when at least one CRITICAL toast is queued
+    // and not suppressed by an active modal.
     bool hasCriticalToastVisible() const;
 
-    // Per-frame update: advance auto-dismiss timers for normal toasts,
-    // check deficit streak via m_sim->getConsecutiveDeficitMonths(),
-    // and fire progressive warning toasts as required by game-over-flow.md.
+    // Per-frame update: advance auto-dismiss timers for normal toasts.
     // Uses m_clock->nowSeconds() for timing — NOT accumulated deltas.
     void update();
 
@@ -61,11 +64,86 @@ public:
     // Notify NotificationManager when a modal becomes active or inactive.
     // When m_modalActive is true, Priority-2 input routing is suppressed even
     // if a CRITICAL toast is visible (part of the dual-guard compound condition).
+    // When becoming inactive, re-evaluates auto-pause synchronously.
     void setModalActive(bool active);
 
+    // Toggle the notification log panel (B key / bell icon).
+    void toggleLog();
+
+    // Returns true if the notification log panel is currently open.
+    bool isLogOpen() const;
+
 private:
+    // --- Internal toast structures ---
+
+    struct CriticalToast {
+        std::string title;
+        std::string body;
+        UIElementHandle handle{kInvalidUIElement};
+    };
+
+    struct NormalToast {
+        std::string title;
+        std::string body;
+        double expiryTime{0.0};
+        UIElementHandle handle{kInvalidUIElement};
+    };
+
+    struct LogEntry {
+        std::string title;
+        std::string body;
+        bool isCritical{false};
+        double timestamp{0.0};
+    };
+
+    // --- Helper methods ---
+
+    // Recreate/remove UI elements for CRITICAL toasts based on queue state
+    // and modal visibility. Repositions all visible toasts correctly.
+    void refreshCriticalVisibility();
+
+    // Recreate/remove UI elements for Normal toasts based on queue state
+    // and visible CRITICAL toast count.
+    void refreshNormalVisibility();
+
+    // Add an entry to the notification log (capped at kMaxLogEntries).
+    void addLogEntry(const std::string& title, const std::string& body, bool isCritical);
+
+    // Truncate body text to kMaxBodyChars with trailing ellipsis.
+    static std::string truncateBody(const std::string& body);
+
+    // --- Data members ---
+
     IUIBackend*       m_backend{nullptr};
     ICitySimulation*  m_sim{nullptr};
     IClock*           m_clock{nullptr};
     bool              m_modalActive{false};
+
+    // Toast queues — front of deque is the oldest (displayed first).
+    std::deque<CriticalToast> m_criticalQueue;
+    std::deque<NormalToast>   m_normalQueue;
+
+    // Auto-pause tracking: true if NotificationManager called setPaused(true)
+    // due to a CRITICAL toast arriving while the queue was empty.
+    bool m_hasPausedForCritical{false};
+
+    // Notification log (most-recent-first, max 50 entries).
+    std::vector<LogEntry> m_logEntries;
+    bool m_logOpen{false};
+    UIElementHandle m_logPanelHandle{kInvalidUIElement};
+
+    // CRITICAL toast keyboard focus (Tab-navigable, oldest gets focus first).
+    int m_focusedCriticalIndex{0};
+
+    // --- Toast layout constants (virtual 1920x1080 space) ---
+    static constexpr int kToastWidth          = 500;
+    static constexpr int kCriticalToastHeight = 48;
+    static constexpr int kNormalToastMaxHeight = 63;
+    static constexpr int kCriticalBandY       = 20;
+    static constexpr int kNormalBandY         = 130;
+    static constexpr int kMaxCriticalVisible  = 2;
+    static constexpr int kMaxNormalBase       = 3;
+    static constexpr int kMaxNormalQueueDepth = 10;
+    static constexpr int kMaxLogEntries       = 50;
+    static constexpr int kMaxBodyChars        = 80;
 };

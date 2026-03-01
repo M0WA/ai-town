@@ -12,7 +12,7 @@ Create `.github/workflows/ci.yml`:
   ```
 
   Without `checks: write`, `dorny/test-reporter` receives a 403 and silently fails to publish test results. This block must appear at the workflow level (applies to all jobs) or per-job level.
-- **Job timeout requirements**: All jobs must include `timeout-minutes` to prevent runaway builds from consuming runner minutes indefinitely. Recommended values: `build-linux: 30`, `build-windows: 40`, `coverage-linux: 45` (longer due to full build + instrumented tests + lcov), `all-checks-pass: 5`. Without these limits, a hung MSVC linker or stuck xvfb process can block the runner for the GitHub Actions default 6-hour maximum, wasting all allocated minutes on the repo for that billing period.
+- **Job timeout requirements**: All jobs must include `timeout-minutes` to prevent runaway builds from consuming runner minutes indefinitely. Recommended values: `build-linux: 30`, `build-windows: 40`, `coverage-linux: 60` (longer due to full build + instrumented tests + lcov; Phase 7 AudioSystem instrumented build + streaming tests + three-tier ctest execution exceeds the Phase 0 estimate; 60 min confirmed as sufficient headroom), `all-checks-pass: 5`. Without these limits, a hung MSVC linker or stuck xvfb process can block the runner for the GitHub Actions default 6-hour maximum, wasting all allocated minutes on the repo for that billing period.
 
   ```yaml
   build-linux:
@@ -110,6 +110,18 @@ This step runs as the **first named step** in the `build-linux` job — before v
   ```
 
   All three routing checks (`unit`, `integration`, `requires-opengl`) must be placed **after the CMake build step and before any ctest execution step** so that a label misconfiguration fails the job before any false-passing `ctest -L` invocation can run. Neither step requires a display or audio device — they only invoke `ctest -N` (list mode, no test execution).
+
+  **Shader asset verification (mandatory post-build step, Phase 8)**: After the CMake build step and after the label-routing verification steps, add a step that confirms both `IrrlichtUIBackend` raw-GL draw path shader files are present in the source tree before tests run. These files (`assets/shaders/ui_quad.vert` and `assets/shaders/ui_quad.frag`) are Phase 8 deliverables — their absence means the UIBackend shader path is incomplete and tests will fail with cryptic file-not-found errors rather than a clear CI message. This step must fail with an explicit error message rather than allowing the test steps to produce misleading failures:
+
+  ```yaml
+  - name: Verify shader assets
+    shell: bash
+    run: |
+      test -f assets/shaders/ui_quad.vert || { echo "Missing ui_quad.vert"; exit 1; }
+      test -f assets/shaders/ui_quad.frag || { echo "Missing ui_quad.frag"; exit 1; }
+  ```
+
+  This step is placed after all three label-routing verification steps and before the first `ctest` execution step. It requires no display, audio device, or build artifacts beyond the source tree — it checks the checked-out file tree directly.
 
   ```yaml
   - name: Run unit tests (no display)
@@ -214,7 +226,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
       GTEST_OUTPUT: "xml:test_results/"
   ```
 
-  `AITOWN_HEADLESS=1` suppresses both `AudioSystem` initialization and `IrrlichtDevice` window creation on headless runners. The Windows job runs both unit tests and integration tests but excludes `requires-opengl` tests (no xvfb available on Windows). The two-step structure mirrors the Linux job naming convention for clarity — a single combined `ctest -LE "requires-opengl"` step is equivalent but hides the unit/integration distinction in CI logs. The `New-Item` step is mandatory — `GTEST_OUTPUT=xml:test_results/` silently writes nothing if the directory does not exist. **No coverage steps**. `dorny/test-reporter` glob: `test_results/*.xml`.
+  `AITOWN_HEADLESS=1` suppresses both `AudioSystem` initialization and `IrrlichtDevice` window creation on headless runners. The Windows job runs both unit tests and integration tests but excludes `requires-opengl` tests (no xvfb available on Windows). The two-step structure mirrors the Linux job naming convention for clarity — a single combined `ctest -LE "requires-opengl"` step is equivalent but hides the unit/integration distinction in CI logs. The `New-Item` step is mandatory — `GTEST_OUTPUT=xml:test_results/` silently writes nothing if the directory does not exist. The `-C Release` flag is required for Ninja single-config builds. The `ALSOFT_DRIVERS=null` env var routes OpenAL Soft to the null (silent) driver so audio tests pass without audio hardware. **No coverage steps**. `dorny/test-reporter` glob: `test_results/*.xml`.
 - **Test reporting**: Use `dorny/test-reporter` action to publish GTest XML results as PR annotations on all three jobs (`build-linux`, `build-windows`, `coverage-linux`). The step is **required in every job** — omitting it from any job means test failures in that job produce no PR annotations, silently hiding failures from reviewers. Add the following step after the test XML verification step in each job:
 
   ```yaml
@@ -319,15 +331,17 @@ This step runs as the **first named step** in the `build-linux` job — before v
   8. **Verify unit test routing (non-zero discovery)** — after build, before any ctest
   9. **Verify integration test routing (non-zero discovery)** — after build, before any ctest
   10. **Verify requires-opengl test routing (non-zero discovery)** — after build, before any ctest
-  11. Run unit tests ctest step
-  12. Run integration tests ctest step
-  13. Run OpenGL tests ctest step (xvfb)
-  14. Verify test XML output exists
-  15. Publish test results (dorny/test-reporter)
-  16. Capture and gate lcov coverage
-  17. Upload coverage artifact
+  11. **Verify shader assets** — confirm `assets/shaders/ui_quad.vert` and `assets/shaders/ui_quad.frag` exist (Phase 8 deliverables; `IrrlichtUIBackend` raw-GL draw path requires both files at test time)
+  12. Run unit tests ctest step
+  13. Run integration tests ctest step
+  14. Run OpenGL tests ctest step (xvfb)
+  15. Verify test XML output exists
+  16. Publish test results (dorny/test-reporter)
+  17. Capture and gate lcov coverage
+  17a. Check src/ui/ zero-hit files (zero-hit coverage completeness checkpoint) — this step MUST use `if: always()` in the CI YAML so the zero-hit check runs unconditionally even when step 17 (lcov gate) exits non-zero; without `if: always()`, GitHub Actions skips step 17a after a lcov gate failure, silently bypassing dead-code detection
+  18. Upload coverage artifact
 
-  Steps 8, 9, and 10 (the three label-routing verification steps) are placed **after CMake build step (7) and before the first ctest execution step (11)**. A label misconfiguration that produces zero-test discovery in `build-linux` will equally affect `coverage-linux`; without these checks, a zero-discovery run silently under-reports coverage and exits 0.
+  Steps 8, 9, and 10 (the three label-routing verification steps) and step 11 (shader asset verification) are placed **after CMake build step (7) and before the first ctest execution step (12)**. A label misconfiguration that produces zero-test discovery in `build-linux` will equally affect `coverage-linux`; without these checks, a zero-discovery run silently under-reports coverage and exits 0.
 
   ### coverage-linux: label-routing verification YAML
 
@@ -372,6 +386,16 @@ This step runs as the **first named step** in the `build-linux` job — before v
   **Phase assignment (requires-opengl label routing)**: The `requires-opengl` label routing non-zero discovery verification step MAY be added in Phase 1, once `opengl_tests` is linked against `aitown_render`. The `stub_succeed.cpp` test registered in Phase 0 under `opengl_tests` satisfies the non-zero discovery requirement. This step is a Phase 1 deliverable and must not be deferred to Phase 3.
 
   All three routing checks (`unit`, `integration`, `requires-opengl`) must be placed **after the CMake build step and before the first ctest execution step** so that a label misconfiguration fails the job before any false-passing `ctest -L` invocation can run. Neither step requires a display or audio device — they only invoke `ctest -N` (list mode, no test execution).
+
+  **Phase assignment (shader asset verification)**: The shader asset verification step is a **Phase 8 deliverable** for both `build-linux` and `coverage-linux`. It MUST be placed after the three label-routing verification steps and before the first ctest execution step. The step verifies that `assets/shaders/ui_quad.vert` and `assets/shaders/ui_quad.frag` are present in the checked-out source tree — these files are required by the `IrrlichtUIBackend` raw-GL draw path and must exist before any test that exercises UIBackend rendering is run. The YAML is identical between the two jobs and is reproduced below:
+
+  ```yaml
+  - name: Verify shader assets
+    shell: bash
+    run: |
+      test -f assets/shaders/ui_quad.vert || { echo "Missing ui_quad.vert"; exit 1; }
+      test -f assets/shaders/ui_quad.frag || { echo "Missing ui_quad.frag"; exit 1; }
+  ```
 
     ```yaml
     - name: Run unit tests (no display)
@@ -486,7 +510,36 @@ This step runs as the **first named step** in the `build-linux` job — before v
     ```
 
     The lcov capture-and-gate step must run **after all three ctest steps complete** — lcov reads the `.gcda` files produced by test execution. Running lcov before all three ctest steps complete will under-report coverage for integration-tested code paths. `BUILD_DIR` is set and used within the same `run:` block as all lcov operations, keeping variable scope self-contained.
-  - **`coverage-linux` test reporting steps (required)**: After all three ctest steps and **before the lcov capture step**, `coverage-linux` must include the XML verification and `dorny/test-reporter` steps. Placing these **before lcov** is intentional: if a test fails and ctest exits non-zero, the XML files may still be present; reporting them before the lcov step ensures test annotations reach the PR even when lcov subsequently fails or is skipped. Without these steps, test failures in the coverage build produce no PR annotations, silently hiding coverage-run failures from reviewers. **Step order in `coverage-linux`**: (1) unit tests ctest, (2) integration tests ctest, (3) OpenGL tests ctest under xvfb, (4) Verify test XML, (5) Publish test results via `dorny/test-reporter`, (6) lcov capture + filter + gate, (7) Upload coverage artifact. The `coverage-linux` YAML must include (after all ctest steps, before lcov):
+  - **Step 17a — Check src/ui/ zero-hit files** (Phase 8 deliverable): Immediately after the lcov capture-and-gate step (step 17) and before the Upload coverage artifact step (step 18), add the following step. This step MUST use `if: always()` so it runs even when the lcov gate fails:
+
+    ```yaml
+    - name: Check src/ui/ zero-hit files
+      if: always()
+      shell: bash
+      run: |
+        python3 -c "
+        import sys
+        files_with_zero = []
+        current_file = None
+        has_hit = False
+        for line in open('coverage_filtered.info'):
+            line = line.strip()
+            if line.startswith('SF:'):
+                current_file = line[3:]
+                has_hit = False
+            elif line.startswith('DA:') and current_file and 'src/ui/' in current_file:
+                if not line.endswith(',0'):
+                    has_hit = True
+            elif line == 'end_of_record' and current_file and 'src/ui/' in current_file and not has_hit:
+                files_with_zero.append(current_file)
+                current_file = None
+        if files_with_zero:
+            print('ERROR: These src/ui/ files have 0 coverage:', files_with_zero)
+            sys.exit(1)
+        "
+    ```
+
+  - **`coverage-linux` test reporting steps (required)**: After all three ctest steps and **before the lcov capture step**, `coverage-linux` must include the XML verification and `dorny/test-reporter` steps. Placing these **before lcov** is intentional: if a test fails and ctest exits non-zero, the XML files may still be present; reporting them before the lcov step ensures test annotations reach the PR even when lcov subsequently fails or is skipped. Without these steps, test failures in the coverage build produce no PR annotations, silently hiding coverage-run failures from reviewers. **Step order in `coverage-linux`**: (1) unit tests ctest, (2) integration tests ctest, (3) OpenGL tests ctest under xvfb, (4) Verify test XML, (5) Publish test results via `dorny/test-reporter`, (6) lcov capture + filter + gate, (6a) check src/ui/ zero-hit files (`if: always()` — Phase 8 deliverable, see step 17a YAML above), (7) Upload coverage artifact. Note: the "Verify shader assets" step (step 11 in the full ordered list above) runs before any of these ctest steps. The `coverage-linux` YAML must include (after all ctest steps, before lcov):
 
     ```yaml
     - name: Verify test XML output exists

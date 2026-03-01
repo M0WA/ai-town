@@ -12,3 +12,10 @@ constexpr int kToolbarTop    = 64;   // virtual y-coordinate (1920x1080 space)
 // carve-out extends to y:784 to cover the undo button, demand bar, and active
 // tool indicator. See architecture/ui-ux/hud-layout.md for the full panel layout.
 constexpr int kToolbarBottom = 784;  // virtual y-coordinate (1920x1080 space)
+
+// Minimap widget top edge (virtual 1920x1080 space).
+// kMinimapWidgetTopOverlayActive: top edge when an overlay panel (e.g. QueryPanel)
+// is active above the minimap.
+// kMinimapWidgetTop: default top edge with no overlay active.
+constexpr int kMinimapWidgetTopOverlayActive = 732;
+constexpr int kMinimapWidgetTop = 880;
