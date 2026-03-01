@@ -200,7 +200,7 @@ All deliverables implemented, all exit criteria met, all risks mitigated.
 
 ### Post-Sign-Off Fixes
 
-Eleven runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (618 unit + 13 integration) after each fix.
+Twelve runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (618 unit + 13 integration) after each fix.
 
 #### Fix 1: Main Menu → Gameplay Wiring (commit `67ee799`)
 
@@ -359,3 +359,18 @@ Eleven runtime integration bugs were discovered after sign-off during manual run
 - `src/main.cpp`: Added `cameraController.setTarget(640.0f, 640.0f)` after terrain generation to center camera over terrain.
 
 **Specs updated**: `procedural-terrain.md` (Triangle Winding Order section, Terrain Generation Startup Wiring section), `irrlicht-device-lifecycle.md` (render loop clear color, construction sequence steps 6–8, 9-step frame sequence with terrainSystem.update)
+
+#### Fix 12: Terrain Invisible Due to Backface Culling + White Vertex Color (commit TBD)
+
+**Problem**: After Fixes 10–11, the 3D viewport showed only the cornflower blue clear color with no visible terrain. The terrain mesh was correctly generated and the camera was centered over it, but all terrain appeared blue (i.e., the clear color showed through where terrain should be).
+
+**Root cause (2 issues)**:
+
+1. `EMF_BACK_FACE_CULLING` was left at its default (`true`). Irrlicht's OpenGL driver applies a Z-flip in the projection matrix to convert from its left-handed coordinate system to OpenGL's right-handed space. This effectively reverses screen-space winding order. Without knowing the exact `glFrontFace` state set by the Irrlicht OpenGL driver at runtime, neither winding order (v0→v1→v2 nor v0→v2→v1) could be guaranteed to produce front faces. Disabling backface culling makes the terrain visible regardless of winding convention until Phase 6 lighting validates the correct convention.
+2. Vertex color was pure white `SColor(255,255,255,255)`. While technically visible against the blue sky, the uniform white gave no depth/height cues. Replaced with a height-interpolated green-to-brown gradient for immediate visual confirmation of terrain rendering and basic height differentiation.
+
+**Changes**:
+
+- `src/rendering/IrrlichtRenderer.cpp`: Added `EMF_BACK_FACE_CULLING = false` flag on terrain scene nodes. Replaced flat-white vertex color with height-based green→brown interpolation: `SColor(255, 34, 139, 34)` at sea level to `SColor(255, 139, 90, 20)` at ~80 m elevation.
+
+**Specs updated**: `procedural-terrain.md` (Terrain Material section — documents EMF_BACK_FACE_CULLING=false, EMF_LIGHTING=false, and height-based vertex colour gradient)

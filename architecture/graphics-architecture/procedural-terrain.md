@@ -64,6 +64,17 @@
   2. Use `ManualClock` that returns `start + 0.101` on the second `nowSeconds()` call.
   3. After `flushPendingRebuilds()`, assert that < 10 rebuilds were processed (budget was hit).
 
+- **Terrain Material (Phase 5 — untextured)**:
+
+  Phase 5 terrain has no assigned textures. The material uses:
+
+  - `EMF_LIGHTING = false` — completely unlit (normals computed but unused until Phase 6)
+  - `EMF_BACK_FACE_CULLING = false` — both triangle sides rendered; avoids winding-order
+    dependency before Phase 6 lighting validates the correct front-face convention
+  - Vertex colours: height-interpolated green-to-brown gradient (`SColor(255, 34, 139, 34)`
+    at sea level to `SColor(255, 139, 90, 20)` at ~80 m) for visual contrast against the
+    sky-blue clear colour. Phase 9 replaces vertex colours with textured materials.
+
 - **Triangle Winding Order (Left-Handed Coordinate System)**:
 
   Irrlicht uses a **left-handed** coordinate system (Y-up, Z-forward). Front faces are

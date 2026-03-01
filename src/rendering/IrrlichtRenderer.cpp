@@ -212,7 +212,14 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
                 static_cast<f32>(z) / static_cast<f32>(gridSize)
             );
 
-            buf->Vertices.push_back(S3DVertex(pos, normal, SColor(255, 255, 255, 255), uv));
+            // Height-based vertex colour: interpolate from forest green (lowlands)
+            // to brown (highlands) so terrain is clearly visible against the sky.
+            // Phase 9 replaces this with textured materials.
+            float normH = std::clamp(h / 80.0f, 0.0f, 1.0f);  // normalize to [0,1] over ~80m range
+            u8 r = static_cast<u8>(34  + normH * (139 - 34));   // 34→139
+            u8 g = static_cast<u8>(139 - normH * (139 - 90));   // 139→90
+            u8 b = static_cast<u8>(34  - normH * (34  - 20));   // 34→20
+            buf->Vertices.push_back(S3DVertex(pos, normal, SColor(255, r, g, b), uv));
         }
     }
 
@@ -280,6 +287,7 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
         newNode->setPosition(core::vector3df(
             params.worldOriginX, 0.0f, params.worldOriginZ));
         newNode->setMaterialFlag(EMF_LIGHTING, false);  // unlit until Phase 6 lighting pass
+        newNode->setMaterialFlag(EMF_BACK_FACE_CULLING, false);  // both sides visible — Phase 5 has no winding-dependent lighting
 
         // -------------------------------------------------------------------------
         // Step 5: Register the new node in the chunk node map.
