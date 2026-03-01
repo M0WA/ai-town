@@ -881,9 +881,10 @@ TEST_F(ModalDialogStandaloneTest, ForcedLoan_MouseClickSecondary) {
     ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
 
     // We need the secondary button's rect to match. ModalDialog button handles:
-    // Constructor creates: m_lblTitle=501, m_lblBody=502, m_btnPrimary=503,
-    // m_btnSecondary=504, m_btnTertiary=505, m_btnBack=506.
-    ON_CALL(backend_, getElementRect(504)).WillByDefault(Return(Rect{810, 560, 140, 40}));
+    // Constructor creates: m_scrim=501, m_dialogBg=502, m_titleLabel=503,
+    // m_bodyLabel=504, m_btnPrimary=505, m_btnSecondary=506, m_btnTertiary=507,
+    // m_btnBack=508.
+    ON_CALL(backend_, getElementRect(506)).WillByDefault(Return(Rect{810, 560, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -909,7 +910,7 @@ TEST_F(ModalDialogStandaloneTest, ForcedLoan_Screen2_MouseClickTertiary) {
 
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
     ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
-    ON_CALL(backend_, getElementRect(505)).WillByDefault(Return(Rect{810, 620, 140, 40}));
+    ON_CALL(backend_, getElementRect(507)).WillByDefault(Return(Rect{810, 620, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -932,7 +933,7 @@ TEST_F(ModalDialogStandaloneTest, ForcedLoan_Screen2_MouseClickBack) {
 
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
     ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
-    ON_CALL(backend_, getElementRect(506)).WillByDefault(Return(Rect{810, 680, 140, 40}));
+    ON_CALL(backend_, getElementRect(508)).WillByDefault(Return(Rect{810, 680, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;

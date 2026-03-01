@@ -941,3 +941,55 @@ TEST(CameraControllerTest, CameraController_SensitivityMultiplier_AffectsMMBPan)
     EXPECT_NE(posA.x, posB.x)
         << "MMB pan X delta must differ when sensitivityMultiplier differs";
 }
+
+// ---------------------------------------------------------------------------
+// Test: KeyUp for all four arrow keys clears pan flags
+//
+// Covers CameraController.cpp lines 179-184 (KeyUp handler for RIGHT/UP/DOWN).
+// The existing Test 17 only exercised KEY_LEFT KeyUp.
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_KeyUp_AllArrows_ClearsPanFlags)
+{
+    CameraController cam(nullptr, false);
+    cam.setEdgeScrollEnabled(false);
+
+    // Press all four keys
+    InputEvent down{};
+    down.type = InputEvent::Type::KeyDown;
+    for (int key : {kIrrKeyLeft, kIrrKeyRight, kIrrKeyUp, kIrrKeyDown}) {
+        down.keyCode = key;
+        cam.OnInputEvent(down);
+    }
+    // Update once to confirm movement
+    cam.update(0.016f);
+    const vec3 posMoving = cam.getCameraState().position;
+
+    // Release all four keys
+    InputEvent up{};
+    up.type = InputEvent::Type::KeyUp;
+    for (int key : {kIrrKeyLeft, kIrrKeyRight, kIrrKeyUp, kIrrKeyDown}) {
+        up.keyCode = key;
+        EXPECT_FALSE(cam.OnInputEvent(up))
+            << "KeyUp must return false (not consumed)";
+    }
+
+    // Update again — position should NOT change (all flags cleared)
+    cam.update(0.016f);
+    const vec3 posStopped = cam.getCameraState().position;
+    EXPECT_FLOAT_EQ(posMoving.x, posStopped.x)
+        << "Camera must stop moving after all KeyUp events";
+    EXPECT_FLOAT_EQ(posMoving.z, posStopped.z)
+        << "Camera must stop moving after all KeyUp events";
+}
+
+// ---------------------------------------------------------------------------
+// Test: Unhandled event type falls through to default: branch (lines 189-190)
+// ---------------------------------------------------------------------------
+TEST(CameraControllerTest, CameraController_WindowFocusEvent_ReturnsFalse)
+{
+    CameraController cam(nullptr, false);
+    InputEvent ev{};
+    ev.type = InputEvent::Type::WindowFocusGained;
+    EXPECT_FALSE(cam.OnInputEvent(ev))
+        << "Unhandled event types must return false (default branch)";
+}

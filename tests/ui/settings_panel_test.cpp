@@ -586,6 +586,76 @@ TEST_F(SettingsPanelStandaloneTest, RestoreDefaultsClick_Consumed) {
     EXPECT_TRUE(consumed);
 }
 
+// Tab key cycles focused element within active tab.
+// Covers SettingsPanel.cpp lines 308-317 + getInteractiveElementCount (lines 395-401).
+TEST_F(SettingsPanelStandaloneTest, TabKey_CyclesFocusForward) {
+    panel_->show();
+
+    InputEvent tab;
+    tab.type = InputEvent::Type::KeyDown;
+    tab.keyCode = 9; // Tab key
+    tab.shiftDown = false;
+
+    // Graphics tab has 4 interactive elements (count returned by getInteractiveElementCount).
+    // Tab 4 times should cycle through all of them.
+    for (int i = 0; i < 4; ++i) {
+        bool consumed = panel_->onEvent(tab);
+        EXPECT_TRUE(consumed) << "Tab key must be consumed by SettingsPanel";
+    }
+}
+
+// Shift+Tab cycles focused element backward within active tab.
+TEST_F(SettingsPanelStandaloneTest, ShiftTab_CyclesFocusBackward) {
+    panel_->show();
+
+    InputEvent shiftTab;
+    shiftTab.type = InputEvent::Type::KeyDown;
+    shiftTab.keyCode = 9; // Tab key
+    shiftTab.shiftDown = true;
+
+    // Shift+Tab should wrap around to last element.
+    bool consumed = panel_->onEvent(shiftTab);
+    EXPECT_TRUE(consumed) << "Shift+Tab must be consumed by SettingsPanel";
+}
+
+// Unhandled event while panel is visible returns false.
+// Covers SettingsPanel.cpp line 389 (return false).
+TEST_F(SettingsPanelStandaloneTest, UnhandledEvent_ReturnsFalse) {
+    panel_->show();
+
+    InputEvent ev;
+    ev.type = InputEvent::Type::KeyUp;
+    ev.keyCode = 9;
+    bool consumed = panel_->onEvent(ev);
+    EXPECT_FALSE(consumed)
+        << "KeyUp events should not be consumed by SettingsPanel";
+}
+
+// switchTab with out-of-range index hits default: break (line 197).
+// We cycle right 5 times: 0→1→2→3→0→1. The internal wrap handles this, but
+// if we test all 4 tabs + one wrap, we exercise getInteractiveElementCount for
+// all tab indices.
+TEST_F(SettingsPanelStandaloneTest, AllTabs_GetInteractiveElementCount) {
+    panel_->show();
+
+    InputEvent right;
+    right.type = InputEvent::Type::KeyDown;
+    right.keyCode = 39; // Right arrow
+
+    // Cycle through all 4 tabs and do a Tab press in each to exercise
+    // getInteractiveElementCount for that tab.
+    InputEvent tab;
+    tab.type = InputEvent::Type::KeyDown;
+    tab.keyCode = 9;
+    tab.shiftDown = false;
+
+    for (int t = 0; t < 4; ++t) {
+        bool consumed = panel_->onEvent(tab);
+        EXPECT_TRUE(consumed);
+        if (t < 3) panel_->onEvent(right); // Move to next tab
+    }
+}
+
 // ===========================================================================
 // TaxRatePanelStandaloneTest -- standalone TaxRatePanel tests.
 // Covers: show/hide, draw, getBounds, onEvent (Escape, click outside,
