@@ -216,12 +216,12 @@ void CameraController::update(float dt) {
             m_targetZ += rightZ * scale;
         }
         if (m_panForward) {
-            m_targetX += fwdX * scale;
-            m_targetZ += fwdZ * scale;
-        }
-        if (m_panBackward) {
             m_targetX -= fwdX * scale;
             m_targetZ -= fwdZ * scale;
+        }
+        if (m_panBackward) {
+            m_targetX += fwdX * scale;
+            m_targetZ += fwdZ * scale;
         }
     }
 

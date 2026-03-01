@@ -200,7 +200,7 @@ All deliverables implemented, all exit criteria met, all risks mitigated.
 
 ### Post-Sign-Off Fixes
 
-Fourteen runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (618 unit + 13 integration) after each fix.
+Fifteen runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (618 unit + 13 integration) after each fix.
 
 #### Fix 1: Main Menu → Gameplay Wiring (commit `67ee799`)
 
@@ -389,19 +389,26 @@ Irrlicht's `COpenGLDriver` only unbinds foreign buffers if it was *previously* u
 
 **Specs updated**: `irrlicht-device-lifecycle.md` (construction sequence step 2 — added CRITICAL GL STATE RULE comment about mandatory GL_ARRAY_BUFFER unbind)
 
-#### Fix 14: Arrow Keys Not Working — MainMenu Consumes Events + Per-Event Pan Too Small (commit TBD)
+#### Fix 14: Arrow Keys Not Working — Per-Event Pan Unreliable + Forward/Backward Reversed (commit TBD)
 
-**Problem**: After Fixes 10–13, terrain was rendered but arrow key camera movement did not work. Two independent issues:
+**Problem**: After Fixes 10–13, arrow key camera movement did not work. Two independent issues:
 
-1. **GameState::MainMenu blocks all input**: `MainMenuPanel::onEvent()` returns `true` for ALL input while the main menu is active. Since terrain is pre-generated at startup (not through the New Game flow), the user was stuck in MainMenu state with no obvious path to Gameplay.
-2. **Per-event pan too small**: CameraController applied a single 0.8 world-unit nudge per KeyDown event and relied on OS key-repeat for continuous movement. In containers/VMs where X11 key-repeat is disabled or very slow, the camera barely moved (0.06% of terrain width per keypress).
+1. **Per-event pan unreliable**: CameraController applied a single 0.8 world-unit nudge per KeyDown event and relied on OS key-repeat for continuous movement. In containers/VMs where X11 key-repeat is disabled or very slow, the camera barely moved.
+2. **Forward/backward reversed**: The forward vector `(sin(yaw), cos(yaw))` at yaw=0 = `(0, +1)` points toward +Z. But the camera is positioned at `targetZ + offset` (behind the target in +Z), looking toward −Z. Pressing UP arrow (forward) moved the target toward +Z (toward the camera), producing backward visual movement.
 
-**Root cause**: (1) `UIManager` starts in `GameState::MainMenu` by default. (2) `CameraController::OnInputEvent(KeyDown)` directly modified m_targetX/m_targetZ by a fixed amount instead of tracking key-held state for continuous per-frame pan.
+**Root cause**: (1) `CameraController::OnInputEvent(KeyDown)` directly modified m_targetX/m_targetZ by a fixed small amount instead of tracking key-held state for continuous per-frame pan. (2) Forward pan added `fwd * scale` to the target position when it should subtract (camera looks opposite to the fwd vector in XZ).
 
 **Changes**:
 
-- `src/main.cpp`: Added `uiManager.transitionToGameplay(GameMode::Sandbox)` after UIManager setup to skip the main menu (full New Game flow wired in Phase 11).
 - `src/ui/CameraController.h`: Added `m_panLeft`, `m_panRight`, `m_panForward`, `m_panBackward` key-held state flags.
-- `src/ui/CameraController.cpp`: KeyDown sets flags, KeyUp clears them. `update(dt)` applies continuous `panSpeed * dt` movement while flags are set. Pan logic moved before the null-camera guard so unit tests (null camera) still work.
+- `src/ui/CameraController.cpp`: KeyDown sets flags, KeyUp clears them. `update(dt)` applies continuous `panSpeed * dt` movement while flags are set. Pan logic moved before the null-camera guard so unit tests (null camera) still work. Forward pan subtracts `fwd * scale` (was added); backward pan adds `fwd * scale` (was subtracted).
 
-**Specs updated**: `camera-controls.md` (continuous key-held state documented for arrow-key pan), `irrlicht-device-lifecycle.md` (construction sequence step 11 — auto-transition to Gameplay)
+#### Fix 15: Restore Main Menu at Startup (commit TBD)
+
+**Problem**: Fix 14's first iteration added `uiManager.transitionToGameplay(Sandbox)` in main.cpp to skip the main menu. The user requested the main menu be restored.
+
+**Changes**:
+
+- `src/main.cpp`: Removed the `transitionToGameplay()` call. The game starts in `GameState::MainMenu` as designed. Users navigate New Game → Start City to enter Gameplay.
+
+**Specs updated**: `camera-controls.md` (continuous key-held state for arrow-key pan), `irrlicht-device-lifecycle.md` (reverted construction sequence back to 12 steps — removed auto-transition step)

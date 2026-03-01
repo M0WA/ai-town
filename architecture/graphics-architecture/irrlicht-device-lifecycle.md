@@ -51,9 +51,8 @@ The construction sequence in `main.cpp`:
 8. CameraController::setTarget(centerX, centerZ)  // center camera over terrain
 9. UIManager(uiBackend, audioSystem, citySimulation, wallClock)
 10. renderer.setUIManager(&uiManager)         // late binding
-11. uiManager.transitionToGameplay(Sandbox)    // auto-enter Gameplay (terrain pre-generated at startup; full New Game flow in Phase 11)
-12. EventReceiver(uiScaler, uiManager, cameraController)
-13. device->setEventReceiver(&eventReceiver)
+11. EventReceiver(uiScaler, uiManager, cameraController)
+12. device->setEventReceiver(&eventReceiver)
 ```
 
 ## IrrlichtRenderer and UIManager — Header Dependency Rule
