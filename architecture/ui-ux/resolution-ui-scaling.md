@@ -66,6 +66,7 @@ UIScaler(int virtualW, int virtualH, int viewportW, int viewportH, int offsetX, 
 ```
 
 - All six parameters are captured at construction time. `UIScaler` MUST NOT read from a live `IVideoDriver` — doing so would couple the object to a display connection and make it impossible to instantiate in headless unit tests.
+- **Viewport resize**: After window resize, `UIScaler`'s cached `m_viewportW` and `m_viewportH` become stale. `UIScaler` exposes `void setViewportSize(int viewportW, int viewportH)` to update these cached dimensions. The main loop MUST call `uiScaler.setViewportSize(uiBackend.getScreenWidth(), uiBackend.getScreenHeight())` each frame (before event processing) so that `unproject()` always uses the current physical viewport size. Without this update, mouse coordinate unprojection after resize produces incorrect virtual coordinates, making buttons unclickable despite being visually positioned correctly (IrrlichtUIBackend dynamically queries the driver's screen size for element positioning, but UIScaler would still use stale construction-time dimensions for input unprojection).
 - This constructor is the testability seam used by `tests/ui/ui_scaler_test.cpp` (see `architecture/testing/testability-architecture.md` UIScaler tests section). Tests construct `UIScaler(1920, 1080, 1280, 720, 0, 90)` directly to validate coordinate projection and letterbox offset math without a display.
 
 ## Rect Type Ownership

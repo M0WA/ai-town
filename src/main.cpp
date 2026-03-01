@@ -177,6 +177,10 @@ int main() {
         // Step 1: Poll events — handled by EventReceiver::OnEvent() via device->run().
         // No explicit poll call needed — device->run() drives EventReceiver.
 
+        // Update UIScaler viewport dimensions each frame so that mouse coordinate
+        // unprojection tracks the current window size after a resize.
+        uiScaler.setViewportSize(uiBackend.getScreenWidth(), uiBackend.getScreenHeight());
+
         // Step 2: CitySimulation::tick(realDeltaSeconds) — Phase 6 wired.
         // DEFAULT SPEED CONTRACT: CitySimulation is constructed at SpeedMultiplier::x3
         // (kDefaultSimSpeed) — see architecture/game-design/simulation-time.md.

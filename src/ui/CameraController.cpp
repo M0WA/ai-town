@@ -208,12 +208,12 @@ void CameraController::update(float dt) {
         const float fwdZ   = std::cos(yaw_rad_pan);
 
         if (m_panLeft) {
-            m_targetX -= rightX * scale;
-            m_targetZ -= rightZ * scale;
-        }
-        if (m_panRight) {
             m_targetX += rightX * scale;
             m_targetZ += rightZ * scale;
+        }
+        if (m_panRight) {
+            m_targetX -= rightX * scale;
+            m_targetZ -= rightZ * scale;
         }
         if (m_panForward) {
             m_targetX -= fwdX * scale;

@@ -29,6 +29,14 @@ public:
     // Unproject physical coordinates to virtual 1920x1080 space.
     VirtualPoint unproject(int physicalX, int physicalY) const;
 
+    // Update viewport dimensions after a window resize.
+    // Must be called each frame (or on resize) so that unproject() uses
+    // the current physical viewport size, not the stale construction-time value.
+    void setViewportSize(int viewportW, int viewportH) {
+        m_viewportW = viewportW;
+        m_viewportH = viewportH;
+    }
+
 private:
     int m_virtualW;
     int m_virtualH;

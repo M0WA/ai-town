@@ -45,16 +45,16 @@ MainMenuPanel::MainMenuPanel(IUIBackend* backend)
     m_ngTitle       = m_backend->addStaticText("New Game", kMenuX + 20, kMenuY + 16, kMenuW - 40, 36);
     y = kMenuY + 60;
     m_ngModeLabel   = m_backend->addStaticText("Mode:", kBtnX, y, 80, 32);
-    m_ngBtnSandbox  = m_backend->addButton("[Sandbox]",          kBtnX + 90,  y, 120, 32);
-    m_ngBtnScenario = m_backend->addButton("Scenario",           kBtnX + 220, y, 120, 32);
+    m_ngBtnSandbox  = m_backend->addButton("(*) Sandbox",          kBtnX + 90,  y, 120, 32);
+    m_ngBtnScenario = m_backend->addButton("( ) Scenario",         kBtnX + 220, y, 120, 32);
     m_backend->setElementEnabled(m_ngBtnScenario, false); // Grayed in V1
     y += 44;
 
-    m_ngDiffLabel = m_backend->addStaticText("Difficulty:", kBtnX, y, 120, 32);
-    m_ngBtnEasy   = m_backend->addButton("Easy ($1M)",     kBtnX + 130, y, 100, 32);
-    m_ngBtnNormal = m_backend->addButton("[Normal ($500K)]",kBtnX + 240, y, 120, 32);
-    m_ngBtnHard   = m_backend->addButton("Hard ($200K)",   kBtnX, y + 36, 120, 32);
-    y += 80;
+    m_ngDiffLabel = m_backend->addStaticText("Difficulty:", kBtnX, y, 100, 32);
+    m_ngBtnEasy   = m_backend->addButton("( ) Easy",    kBtnX + 105, y, 80, 32);
+    m_ngBtnNormal = m_backend->addButton("(*) Normal",  kBtnX + 190, y, 90, 32);
+    m_ngBtnHard   = m_backend->addButton("( ) Hard",    kBtnX + 285, y, 75, 32);
+    y += 44;
 
     m_ngSeedLabel    = m_backend->addStaticText("Map Seed:", kBtnX, y, 120, 32);
     m_ngSeedInput    = m_backend->addStaticText("",          kBtnX + 130, y, 160, 32);
@@ -217,9 +217,9 @@ void MainMenuPanel::draw() {
 
     // Update difficulty radio button labels
     if (m_screen == Screen::NewGame) {
-        m_backend->setElementText(m_ngBtnEasy,   m_selectedDifficulty == 0 ? "[Easy ($1M)]"     : "Easy ($1M)");
-        m_backend->setElementText(m_ngBtnNormal,  m_selectedDifficulty == 1 ? "[Normal ($500K)]" : "Normal ($500K)");
-        m_backend->setElementText(m_ngBtnHard,    m_selectedDifficulty == 2 ? "[Hard ($200K)]"   : "Hard ($200K)");
+        m_backend->setElementText(m_ngBtnEasy,   m_selectedDifficulty == 0 ? "(*) Easy"   : "( ) Easy");
+        m_backend->setElementText(m_ngBtnNormal, m_selectedDifficulty == 1 ? "(*) Normal" : "( ) Normal");
+        m_backend->setElementText(m_ngBtnHard,   m_selectedDifficulty == 2 ? "(*) Hard"   : "( ) Hard");
     }
 }
 

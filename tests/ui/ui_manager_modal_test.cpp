@@ -507,7 +507,7 @@ TEST_F(MainMenuPanelStandaloneTest, Enter_NewGame_ShowsNewGameScreen) {
 
     // Verify draw updates difficulty radio buttons (NewGame screen indicator).
     EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
-    EXPECT_CALL(backend_, setElementText(_, HasSubstr("[Normal ($500K)]"))).Times(AtLeast(1));
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("(*) Normal"))).Times(AtLeast(1));
     panel_->draw();
 }
 
@@ -608,9 +608,9 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickEasyDifficulty) {
     bool consumed = panel_->onEvent(click);
     EXPECT_TRUE(consumed);
 
-    // Draw should show "[Easy ($1M)]" as selected.
+    // Draw should show "(*) Easy" as selected.
     EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
-    EXPECT_CALL(backend_, setElementText(_, HasSubstr("[Easy ($1M)]"))).Times(AtLeast(1));
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("(*) Easy"))).Times(AtLeast(1));
     panel_->draw();
 }
 

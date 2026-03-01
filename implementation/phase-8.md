@@ -200,7 +200,7 @@ All deliverables implemented, all exit criteria met, all risks mitigated.
 
 ### Post-Sign-Off Fixes
 
-Fifteen runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (618 unit + 13 integration) after each fix.
+Eighteen runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (618 unit + 13 integration) after each fix.
 
 #### Fix 1: Main Menu → Gameplay Wiring (commit `67ee799`)
 
@@ -412,3 +412,39 @@ Irrlicht's `COpenGLDriver` only unbinds foreign buffers if it was *previously* u
 - `src/main.cpp`: Removed the `transitionToGameplay()` call. The game starts in `GameState::MainMenu` as designed. Users navigate New Game → Start City to enter Gameplay.
 
 **Specs updated**: `camera-controls.md` (continuous key-held state for arrow-key pan), `irrlicht-device-lifecycle.md` (reverted construction sequence back to 12 steps — removed auto-transition step)
+
+#### Fix 16: Left/Right Arrow Keys Reversed (commit TBD)
+
+**Problem**: After Fix 14/15, left and right arrow keys moved the camera in the wrong direction. Pressing LEFT arrow panned the camera to the right of screen and vice versa.
+
+**Root cause**: Same class of bug as Fix 14's forward/backward reversal. The right vector `(cos(yaw), -sin(yaw))` at yaw=0 evaluates to `(1, 0)` pointing toward +X. But the camera looks toward −Z, and in Irrlicht's left-handed coordinate system screen-right when looking toward −Z is actually −X (cross product: forward × up = (0,0,−1) × (0,1,0) = (−1,0,0) in left-handed). LEFT pan added `right * scale` (moved target in +X → camera moved left visually — backwards) instead of subtracting.
+
+**Changes**:
+
+- `src/ui/CameraController.cpp`: Swapped signs for left/right pan. LEFT now adds `right * scale` (moves target toward screen-left → camera appears to pan left). RIGHT now subtracts `right * scale`.
+
+#### Fix 17: Buttons Unclickable After Window Resize (commit TBD)
+
+**Problem**: After resizing the application window, all UI buttons became unclickable. The mouse cursor appeared to be hitting the correct visual position, but no button click events registered.
+
+**Root cause**: `UIScaler` cached viewport dimensions (`m_viewportW`, `m_viewportH`) at construction time and never updated them. `IrrlichtUIBackend` dynamically queries `m_driver->getScreenSize()` each frame, so buttons repositioned correctly after resize. But `UIScaler::unproject()` still used the original viewport dimensions, producing incorrect virtual coordinates for the mouse position. The mismatch between button positions (calculated from fresh screen size) and mouse coordinates (calculated from stale screen size) made buttons appear to not respond to clicks.
+
+**Changes**:
+
+- `src/ui/UIScaler.h`: Added `setViewportSize(int viewportW, int viewportH)` public method to update cached viewport dimensions.
+- `src/main.cpp`: Added `uiScaler.setViewportSize(uiBackend.getScreenWidth(), uiBackend.getScreenHeight())` call at the start of each frame loop iteration, before event processing, so `unproject()` always uses the current physical viewport size.
+
+**Specs updated**: `resolution-ui-scaling.md` (UIScaler Viewport Resize section — documents setViewportSize and per-frame update requirement)
+
+#### Fix 18: Difficulty Selector Layout — Radio Buttons + All On One Line (commit TBD)
+
+**Problem**: The difficulty selector in the New Game screen used bracket notation `[Normal ($500K)]` instead of radio-button-style indicators, and the "Hard" option wrapped to a new line due to insufficient horizontal space.
+
+**Root cause**: `MainMenuPanel` constructor placed the Hard button at `(kBtnX, y + 36)` — explicitly on a new line — because the three buttons with dollar-amount labels exceeded the available width. Selection was shown by wrapping the selected option's text in square brackets.
+
+**Changes**:
+
+- `src/ui/MainMenuPanel.cpp`: Replaced bracket notation with radio-button-style text: `(*) Easy` / `( ) Normal` / `( ) Hard` for selected/unselected states. Moved all three difficulty buttons onto the same line with adjusted widths (80/90/75 px). Also updated mode selector from `[Sandbox]` to `(*) Sandbox` for consistency. Reduced `y` advance from 80 to 44 px (no longer needs extra row).
+- `tests/ui/ui_manager_modal_test.cpp`: Updated test expectations from bracket notation (`[Normal ($500K)]`, `[Easy ($1M)]`) to radio-button notation (`(*) Normal`, `(*) Easy`).
+
+**Specs updated**: `main-menu-new-game-flow.md` (already specified "radio buttons" — implementation now matches spec)
