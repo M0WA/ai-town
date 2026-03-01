@@ -125,6 +125,8 @@ add_library(aitown_render STATIC
     src/rendering/TextureCache.cpp
     src/rendering/SceneEntityManager.cpp
     src/rendering/TerrainShaderCallback.cpp
+    # Phase 9: LODNode — LOD swap prototype (pre-condition for building asset production)
+    src/rendering/LODNode.cpp
 )
 target_include_directories(aitown_render
     PRIVATE   src/rendering/       # RenderSystem/IrrlichtRenderer internal headers
