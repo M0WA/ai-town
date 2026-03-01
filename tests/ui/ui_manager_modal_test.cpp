@@ -1695,3 +1695,234 @@ TEST_F(UIManagerEventRoutingTest, ShowGameOverModal_SimAlreadyPaused) {
     EXPECT_CALL(sim_, setPaused(false)).Times(0);
     ui_->closeModal();
 }
+
+// ============================================================================
+// Fix 8 / Fix 9 coverage: Quit polling, transitionToMainMenu, audio wiring.
+// These tests cover the code added in Fixes 7-9 (Phase 8 runtime fixes).
+// ============================================================================
+
+// --- MainMenuPanel consumeQuitRequest ---
+
+// Enter on Quit sets the quit flag; consumeQuitRequest returns true once.
+TEST_F(MainMenuPanelStandaloneTest, ConsumeQuitRequest_ReturnsTrueOnceAfterQuit) {
+    // isElementEnabled must return true so Down arrow navigation can cycle through buttons.
+    ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+
+    // Navigate to Quit (focus 3): Down x3.
+    InputEvent down;
+    down.type = InputEvent::Type::KeyDown;
+    down.keyCode = 40;
+    panel_->onEvent(down);
+    panel_->onEvent(down);
+    panel_->onEvent(down);
+
+    // Press Enter on Quit.
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    // First consume returns true.
+    EXPECT_TRUE(panel_->consumeQuitRequest());
+    // Second consume returns false (consume-once).
+    EXPECT_FALSE(panel_->consumeQuitRequest());
+}
+
+// consumeQuitRequest returns false when no quit was requested.
+TEST_F(MainMenuPanelStandaloneTest, ConsumeQuitRequest_FalseWhenNoQuit) {
+    EXPECT_FALSE(panel_->consumeQuitRequest());
+}
+
+// Mouse click on Quit sets the quit flag.
+TEST_F(MainMenuPanelStandaloneTest, ClickQuit_SetsQuitFlag) {
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(305)).WillByDefault(Return(Rect{780, 320, 360, 48}));
+
+    InputEvent click;
+    click.type = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x = 800;
+    click.y = 330;
+    panel_->onEvent(click);
+
+    EXPECT_TRUE(panel_->consumeQuitRequest());
+    EXPECT_FALSE(panel_->consumeQuitRequest());
+}
+
+// --- PauseMenuPanel consumeQuitDesktopRequest / consumeQuitToMenuRequest ---
+
+// Enter on QuitToMenu (focus 3) sets the quit-to-menu flag.
+TEST_F(PauseMenuPanelStandaloneTest, ConsumeQuitToMenuRequest_TrueOnce) {
+    panel_->show();
+    InputEvent down;
+    down.type = InputEvent::Type::KeyDown;
+    down.keyCode = 40;
+    panel_->onEvent(down);
+    panel_->onEvent(down);
+    panel_->onEvent(down); // Focus 3 = Quit to Menu
+
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    EXPECT_TRUE(panel_->consumeQuitToMenuRequest());
+    EXPECT_FALSE(panel_->consumeQuitToMenuRequest());
+}
+
+// Enter on QuitDesktop (focus 4) sets the quit-to-desktop flag.
+TEST_F(PauseMenuPanelStandaloneTest, ConsumeQuitDesktopRequest_TrueOnce) {
+    panel_->show();
+    InputEvent down;
+    down.type = InputEvent::Type::KeyDown;
+    down.keyCode = 40;
+    panel_->onEvent(down);
+    panel_->onEvent(down);
+    panel_->onEvent(down);
+    panel_->onEvent(down); // Focus 4 = Quit to Desktop
+
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    panel_->onEvent(enter);
+
+    EXPECT_TRUE(panel_->consumeQuitDesktopRequest());
+    EXPECT_FALSE(panel_->consumeQuitDesktopRequest());
+}
+
+// Neither quit flag set without action.
+TEST_F(PauseMenuPanelStandaloneTest, ConsumeQuitRequests_FalseWhenNoAction) {
+    EXPECT_FALSE(panel_->consumeQuitDesktopRequest());
+    EXPECT_FALSE(panel_->consumeQuitToMenuRequest());
+}
+
+// --- UIManager quit polling and transitionToMainMenu ---
+
+// isQuitRequested starts false.
+TEST_F(UIManagerTransitionTest, IsQuitRequested_InitiallyFalse) {
+    EXPECT_FALSE(ui_->isQuitRequested());
+}
+
+// After MainMenu Quit click → update() polls consumeQuitRequest and sets quit flag.
+TEST_F(UIManagerEventRoutingTest, MainMenu_QuitPolling_SetsQuitRequested) {
+    // Construct a fresh UIManager in MainMenu state for this test.
+    NiceMock<MockUIBackend>      freshBackend;
+    NiceMock<MockAudioSystem>    freshAudio;
+    NiceMock<MockCitySimulation> freshSim;
+    ManualClock                  freshClock;
+
+    ON_CALL(freshBackend, addStaticText(_, _, _, _, _)).WillByDefault(
+        [](const std::string&, int, int, int, int) { return 1u; });
+    ON_CALL(freshBackend, addButton(_, _, _, _, _)).WillByDefault(
+        [](const std::string&, int, int, int, int) { return 1u; });
+    ON_CALL(freshBackend, getVirtualWidth()).WillByDefault(Return(1920));
+    ON_CALL(freshBackend, getVirtualHeight()).WillByDefault(Return(1080));
+    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(freshBackend, isElementEnabled(_)).WillByDefault(Return(true));
+
+    UIManager freshUI(&freshBackend, &freshAudio, &freshSim, &freshClock);
+
+    EXPECT_FALSE(freshUI.isQuitRequested());
+
+    // Navigate to Quit on internal MainMenuPanel: Down x3 then Enter.
+    InputEvent down;
+    down.type = InputEvent::Type::KeyDown;
+    down.keyCode = 40;
+    freshUI.onEvent(down);
+    freshUI.onEvent(down);
+    freshUI.onEvent(down);
+
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    freshUI.onEvent(enter);
+
+    // update() polls consumeQuitRequest() and sets m_quitRequested.
+    freshUI.update(0.016f);
+    EXPECT_TRUE(freshUI.isQuitRequested());
+}
+
+// PauseMenu Quit to Desktop sets isQuitRequested via update() polling.
+TEST_F(UIManagerEventRoutingTest, PauseMenu_QuitDesktop_SetsQuitRequested) {
+    EXPECT_FALSE(ui_->isQuitRequested());
+
+    // Go to Paused state via Escape.
+    InputEvent esc;
+    esc.type = InputEvent::Type::KeyDown;
+    esc.keyCode = 27;
+    ui_->onEvent(esc);
+
+    // Navigate focus to Quit to Desktop (down x4) then Enter.
+    InputEvent down;
+    down.type = InputEvent::Type::KeyDown;
+    down.keyCode = 40;
+    ui_->onEvent(down);
+    ui_->onEvent(down);
+    ui_->onEvent(down);
+    ui_->onEvent(down);
+
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    ui_->onEvent(enter);
+
+    // update() polls consumeQuitDesktopRequest().
+    ui_->update(0.016f);
+    EXPECT_TRUE(ui_->isQuitRequested());
+}
+
+// PauseMenu Quit to Main Menu transitions back to MainMenu state (not quit).
+TEST_F(UIManagerEventRoutingTest, PauseMenu_QuitToMenu_TransitionsToMainMenu) {
+    EXPECT_FALSE(ui_->isQuitRequested());
+
+    // Go to Paused state via Escape.
+    InputEvent esc;
+    esc.type = InputEvent::Type::KeyDown;
+    esc.keyCode = 27;
+    ui_->onEvent(esc);
+
+    // Navigate focus to Quit to Main Menu (down x3) then Enter.
+    InputEvent down;
+    down.type = InputEvent::Type::KeyDown;
+    down.keyCode = 40;
+    ui_->onEvent(down);
+    ui_->onEvent(down);
+    ui_->onEvent(down);
+
+    InputEvent enter;
+    enter.type = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    ui_->onEvent(enter);
+
+    // update() polls consumeQuitToMenuRequest() and calls transitionToMainMenu().
+    ui_->update(0.016f);
+
+    // isQuitRequested should be false — we went to Main Menu, not quit.
+    EXPECT_FALSE(ui_->isQuitRequested());
+}
+
+// transitionToMainMenu does not crash.
+TEST_F(UIManagerTransitionTest, TransitionToMainMenu_NoCrash) {
+    ui_->transitionToGameplay(GameMode::Sandbox);
+    EXPECT_NO_FATAL_FAILURE(ui_->transitionToMainMenu());
+}
+
+// transitionToGameplay calls audio setTimeOfDay and transitionToGameplay.
+TEST_F(UIManagerTransitionTest, TransitionToGameplay_CallsAudioTransition) {
+    EXPECT_CALL(audio_, setTimeOfDay(TimeOfDay::DAY)).Times(1);
+    EXPECT_CALL(audio_, transitionToGameplay()).Times(1);
+    ui_->transitionToGameplay(GameMode::Sandbox);
+}
+
+// setLoadingTerrain gates update().
+TEST_F(UIManagerTransitionTest, SetLoadingTerrain_GatesUpdate) {
+    ui_->setLoadingTerrain(true);
+    // When loading, update should not poll sim at all.
+    EXPECT_CALL(sim_, getConsecutiveDeficitMonths()).Times(0);
+    ui_->update(0.016f);
+
+    // After clearing the gate, update should poll again.
+    ui_->setLoadingTerrain(false);
+    EXPECT_CALL(sim_, getConsecutiveDeficitMonths()).WillOnce(Return(0));
+    ui_->update(0.016f);
+}
