@@ -389,14 +389,19 @@ Irrlicht's `COpenGLDriver` only unbinds foreign buffers if it was *previously* u
 
 **Specs updated**: `irrlicht-device-lifecycle.md` (construction sequence step 2 — added CRITICAL GL STATE RULE comment about mandatory GL_ARRAY_BUFFER unbind)
 
-#### Fix 14: Arrow Keys Not Working — Game Starts in MainMenu State (commit TBD)
+#### Fix 14: Arrow Keys Not Working — MainMenu Consumes Events + Per-Event Pan Too Small (commit TBD)
 
-**Problem**: After Fixes 10–13, terrain was rendered but arrow key camera movement did not work. All keyboard events went through `EventReceiver` → `UIManager::onEvent()` → `MainMenuPanel::onEvent()`, which returns `true` for ALL input while the main menu is visible (line 362: `return true;`). Since terrain is pre-generated synchronously at startup in `main.cpp` (before `UIManager` is created), the New Game → Start City flow is not required for terrain generation. The user was stuck in `GameState::MainMenu` with no obvious path to `Gameplay` state for camera controls.
+**Problem**: After Fixes 10–13, terrain was rendered but arrow key camera movement did not work. Two independent issues:
 
-**Root cause**: `UIManager` starts in `GameState::MainMenu` (the initialized default). The MainMenuPanel's `onEvent()` catch-all `return true;` at the end of the method consumes all keyboard events (including arrow keys), preventing them from reaching `CameraController`. In `Gameplay` state, UIManager's Priority 5 HUD controls do not match arrow keys, so they correctly fall through to `CameraController`.
+1. **GameState::MainMenu blocks all input**: `MainMenuPanel::onEvent()` returns `true` for ALL input while the main menu is active. Since terrain is pre-generated at startup (not through the New Game flow), the user was stuck in MainMenu state with no obvious path to Gameplay.
+2. **Per-event pan too small**: CameraController applied a single 0.8 world-unit nudge per KeyDown event and relied on OS key-repeat for continuous movement. In containers/VMs where X11 key-repeat is disabled or very slow, the camera barely moved (0.06% of terrain width per keypress).
+
+**Root cause**: (1) `UIManager` starts in `GameState::MainMenu` by default. (2) `CameraController::OnInputEvent(KeyDown)` directly modified m_targetX/m_targetZ by a fixed amount instead of tracking key-held state for continuous per-frame pan.
 
 **Changes**:
 
-- `src/main.cpp`: Added `uiManager.transitionToGameplay(GameMode::Sandbox)` after `renderer.setUIManager(&uiManager)`. Since terrain is pre-generated at startup, the game enters Gameplay state immediately. The full New Game flow (menu → loading screen → generation) is wired in Phase 11.
+- `src/main.cpp`: Added `uiManager.transitionToGameplay(GameMode::Sandbox)` after UIManager setup to skip the main menu (full New Game flow wired in Phase 11).
+- `src/ui/CameraController.h`: Added `m_panLeft`, `m_panRight`, `m_panForward`, `m_panBackward` key-held state flags.
+- `src/ui/CameraController.cpp`: KeyDown sets flags, KeyUp clears them. `update(dt)` applies continuous `panSpeed * dt` movement while flags are set. Pan logic moved before the null-camera guard so unit tests (null camera) still work.
 
-**Specs updated**: `irrlicht-device-lifecycle.md` (construction sequence step 13 — added auto-transition to Gameplay after startup terrain generation)
+**Specs updated**: `camera-controls.md` (continuous key-held state documented for arrow-key pan), `irrlicht-device-lifecycle.md` (construction sequence step 11 — auto-transition to Gameplay)

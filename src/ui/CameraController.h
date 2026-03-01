@@ -91,6 +91,12 @@ private:
     int   m_prevPhysX{0};          // previous physical x for drag-delta
     int   m_prevPhysY{0};          // previous physical y for drag-delta
 
+    // Arrow-key held state (continuous pan applied in update(dt))
+    bool  m_panLeft{false};
+    bool  m_panRight{false};
+    bool  m_panForward{false};
+    bool  m_panBackward{false};
+
     // Edge scroll & focus
     bool  m_edgeScrollEnabled;     // set from startInFullscreen in constructor
     bool  m_appHasFocus{true};     // false on WindowFocusLost — suppresses edge-scroll
