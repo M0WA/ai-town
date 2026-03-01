@@ -26,6 +26,7 @@
 #include "src/simulation/CitySimulation.h"
 #include "src/simulation/StdSimulationRNG.h"
 #include "src/terrain/TerrainSystem.h"
+#include "src/terrain/StdTerrainRNG.h"
 #include "src/audio/audio_system.h"
 
 #include <irrlicht.h>
@@ -129,6 +130,18 @@ int main() {
     // -------------------------------------------------------------------------
     StdSimulationRNG simRng;
     TerrainSystem terrainSystem(&renderer, &wallClock);
+
+    // -------------------------------------------------------------------------
+    // Terrain generation — generate the procedural heightmap and build all chunks.
+    // Uses 128x128 tiles (4x4 = 16 chunks at 32 tiles/chunk), cellSize = 10 m.
+    // StdTerrainRNG provides mt19937-backed randomness with reseed() support.
+    // generate() enforces playability constraints (20% flat, 50x50 contiguous region).
+    // buildAllChunks() synchronously creates all scene nodes via IRenderer.
+    // -------------------------------------------------------------------------
+    StdTerrainRNG terrainRng;
+    terrainSystem.generate(128, 128, 10.0f, &terrainRng);
+    terrainSystem.buildAllChunks();
+
     CitySimulation citySimulation(
         &renderer, /*audio=*/&audioSystem, &simRng, &wallClock, &terrainSystem, Difficulty::Normal);
 
@@ -172,6 +185,10 @@ int main() {
         // OAL-2 ordering rule: CameraController::update() MUST execute BEFORE
         // AudioSystem::syncListenerToCamera() so the listener reads the updated position.
         cameraController.update(realDeltaSeconds);
+
+        // Step 3a: TerrainSystem::update(dt) — process LOD rebuild deque (at most 2 per frame).
+        // Runs after camera update so LOD decisions use the current camera position.
+        terrainSystem.update(realDeltaSeconds);
 
         // Step 3b: UIManager::update(realDeltaSeconds) — per-frame UI state update.
         // MUST execute BEFORE beginFrame() per architecture/ui-ux/ui-manager.md.
