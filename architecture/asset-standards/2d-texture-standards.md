@@ -429,4 +429,4 @@ undated confirmations are not traceable and will not satisfy the blocking pre-co
 **Phase 9 — Normal/Specular Map Sign-Off** (`graphics-artist-2d-texture`, required before any
 LOD0/LOD1 UV authoring of building meshes begins):
 
-<!-- SIGN-OFF: graphics-artist-2d-texture YYYY-MM-DD — confirmed all per-module normal and specular map source PNGs meet DXT5nm authoring spec -->
+<!-- SIGN-OFF: graphics-artist-2d-texture 2026-03-01 — confirmed all per-module normal and specular map source PNGs meet DXT5nm authoring spec -->
