@@ -430,3 +430,5 @@ undated confirmations are not traceable and will not satisfy the blocking pre-co
 LOD0/LOD1 UV authoring of building meshes begins):
 
 <!-- SIGN-OFF: graphics-artist-2d-texture 2026-03-01 — confirmed all per-module normal and specular map source PNGs meet DXT5nm authoring spec -->
+
+<!-- SIGN-OFF: graphics-artist-2d-texture 2026-03-01 — Billboard atlas format sign-off: confirmed DXT5 sRGB 1024×128 format (8 frames of 128×128), 4-level mip chain (GL_TEXTURE_MAX_LEVEL=3), 8-texel per-cell border (112×112 usable per frame), straight alpha, GL_CLAMP_TO_EDGE, uploaded via raw-GL sRGB path. All placeholder billboard DDS files use DX10 BC3_UNORM_SRGB (DXGI_FORMAT=78). -->

@@ -1,5 +1,5 @@
 .claude/settings.local.json
 .env
 .fetchcontent_cache/
-build*/
+/build*/
 __pycache__
