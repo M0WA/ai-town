@@ -117,28 +117,6 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      # Temporary: replaced by validate_assets.py Check #14 in Phase 5 — remove when Phase 5 merges
-      # Scans assets/audio/music_*.ogg and exits non-zero if any .ogg lacks a companion .json sidecar.
-      # Step placement: immediately after Build and before first ctest invocation — asset validation
-      # must fail fast before any test phase begins.
-      - name: Verify music stem JSON sidecars
-        shell: bash
-        run: |
-          echo "Checking for music stem JSON sidecars..."
-          missing=0
-          for ogg in assets/audio/music_*.ogg; do
-            json="${ogg%.ogg}.json"
-            if [ ! -f "$json" ]; then
-              echo "MISSING sidecar: $json"
-              missing=1
-            fi
-          done
-          if [ "$missing" -eq 1 ]; then
-            echo "ERROR: One or more music stems are missing their JSON sidecar."
-            exit 1
-          fi
-          echo "All music stem sidecars present."
-
       # Step 10b: Verify libGLEW.a artifact (CI-1) — Phase 4 deliverable.
       # Globbed path — triplet-agnostic; do NOT hard-code a triplet subdirectory.
       # Fails if GLEW was not built/installed by vcpkg (e.g., missing glew from vcpkg.json).
@@ -617,28 +595,6 @@ jobs:
       # Step 10: Build.
       - name: Build (coverage)
         run: cmake --build build --parallel
-
-      # Temporary: replaced by validate_assets.py Check #14 in Phase 5 — remove when Phase 5 merges
-      # Scans assets/audio/music_*.ogg and exits non-zero if any .ogg lacks a companion .json sidecar.
-      # Step placement: immediately after Build and before first ctest invocation — asset validation
-      # must fail fast before any test phase begins.
-      - name: Verify music stem JSON sidecars
-        shell: bash
-        run: |
-          echo "Checking for music stem JSON sidecars..."
-          missing=0
-          for ogg in assets/audio/music_*.ogg; do
-            json="${ogg%.ogg}.json"
-            if [ ! -f "$json" ]; then
-              echo "MISSING sidecar: $json"
-              missing=1
-            fi
-          done
-          if [ "$missing" -eq 1 ]; then
-            echo "ERROR: One or more music stems are missing their JSON sidecar."
-            exit 1
-          fi
-          echo "All music stem sidecars present."
 
       # Step 11: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
       # IrrlichtUIBackendCompileCheck::IsNonAbstract is registered under the 'integration' label.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AI Town asset validation script.
-Phase 5: checks #1–#14 implemented; #15 stub; #16–#19 implemented.
+Phase 9: checks #1–#19 all implemented (check #15 fully implemented in Phase 9).
 """
 import glob
 import json
@@ -633,12 +633,116 @@ def check_14():
 
 
 # ---------------------------------------------------------------------------
-# Check #15: Phase 9 stub — .meta sidecar file presence check.
+# Check #15: Every .b3d building or vehicle file must have a co-located
+# <asset_name>.meta sidecar with required fields:
+#   - height_floors (integer)
+#   - category (string)
+#   - atlas_cell (dict with "row" and "col" keys) OR atlas_col/atlas_row pair
+# Reports all missing sidecars and missing fields; does not stop at first failure.
 # ---------------------------------------------------------------------------
 def check_15():
-    # Phase 9 stub — .meta sidecar file presence check
-    # TODO Phase 9: hard error if any asset file lacks a co-located .meta sidecar
-    pass
+    """check_15: every .b3d building/vehicle file must have a co-located .meta sidecar with required fields."""
+    asset_dir = "assets/3d"
+    if not os.path.isdir(asset_dir):
+        print("INFO check_15: assets/3d/ not found — no-op")
+        return
+
+    # Collect all .b3d files that match the building/vehicle naming pattern.
+    # Building assets: *_lod0.b3d, *_lod1.b3d, *_lod2.b3d
+    # Vehicle assets: *_lod0.b3d, *_lod1.b3d (same suffix pattern)
+    # The sidecar is keyed to the asset base name (strip _lodN suffix), not the
+    # individual LOD file — one .meta per asset, covering all LOD levels.
+    b3d_files = (
+        glob.glob(os.path.join(asset_dir, "**", "*_lod0.b3d"), recursive=True) +
+        glob.glob(os.path.join(asset_dir, "**", "*_lod1.b3d"), recursive=True) +
+        glob.glob(os.path.join(asset_dir, "**", "*_lod2.b3d"), recursive=True) +
+        glob.glob(os.path.join(asset_dir, "*_lod0.b3d")) +
+        glob.glob(os.path.join(asset_dir, "*_lod1.b3d")) +
+        glob.glob(os.path.join(asset_dir, "*_lod2.b3d"))
+    )
+
+    if not b3d_files:
+        print("INFO check_15: no .b3d building/vehicle files found — no-op")
+        return
+
+    # Derive the unique set of asset base paths (strip _lodN suffix).
+    # e.g. assets/3d/buildings/office_a_lod0.b3d -> assets/3d/buildings/office_a
+    asset_bases = set()
+    for path in b3d_files:
+        base = path
+        for suffix in ("_lod0.b3d", "_lod1.b3d", "_lod2.b3d"):
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
+                break
+        asset_bases.add(base)
+
+    # Required fields in every .meta sidecar (spec: 3d-model-standards.md check #15).
+    # atlas_cell must be a dict containing "row" and "col" keys.
+    REQUIRED_FIELDS = ("height_floors", "category", "atlas_cell")
+
+    errors = []
+    checked = 0
+
+    for base in sorted(asset_bases):
+        meta_path = base + ".meta"
+        if not os.path.exists(meta_path):
+            errors.append(
+                f"check_15 FAIL: {meta_path} missing — every .b3d building/vehicle asset "
+                f"must have a co-located .meta sidecar"
+            )
+            continue
+
+        # Parse the sidecar JSON.
+        try:
+            with open(meta_path, "r") as f:
+                meta = json.load(f)
+        except Exception as e:
+            errors.append(
+                f"check_15 FAIL: {meta_path} is not valid JSON: {e}"
+            )
+            continue
+
+        # Validate required fields.
+        missing_fields = []
+        for field in REQUIRED_FIELDS:
+            if field not in meta:
+                missing_fields.append(field)
+        if missing_fields:
+            errors.append(
+                f"check_15 FAIL: {meta_path} missing required field(s): "
+                f"{missing_fields} (required: {list(REQUIRED_FIELDS)})"
+            )
+            continue
+
+        # Validate atlas_cell structure: must be a dict with "row" and "col".
+        atlas_cell = meta["atlas_cell"]
+        if not isinstance(atlas_cell, dict):
+            errors.append(
+                f"check_15 FAIL: {meta_path} 'atlas_cell' must be a dict "
+                f"with 'row' and 'col' keys, got {type(atlas_cell).__name__}"
+            )
+            continue
+        missing_cell_keys = [k for k in ("row", "col") if k not in atlas_cell]
+        if missing_cell_keys:
+            errors.append(
+                f"check_15 FAIL: {meta_path} 'atlas_cell' dict missing key(s): "
+                f"{missing_cell_keys}"
+            )
+            continue
+
+        checked += 1
+
+    if errors:
+        # Report all failures, then raise on the first to halt the pipeline.
+        for err in errors:
+            print(err)
+        raise AssertionError(errors[0])
+
+    if checked == 0:
+        print("INFO check_15: no .b3d asset bases with .meta sidecars found — no-op")
+    else:
+        print(f"check_15 PASS: {checked} building/vehicle asset(s) verified "
+              f".meta sidecar presence and required fields (height_floors, category, atlas_cell)")
 
 
 # ---------------------------------------------------------------------------
@@ -739,7 +843,7 @@ def check_19():
 
 
 if __name__ == '__main__':
-    print("validate_assets.py: Phase 5 — checks #1-#14 and #16-#19 active; check #15 is Phase 9 stub.")
+    print("validate_assets.py: Phase 9 — all checks #1-#19 active (check #15 fully implemented).")
     check_1(); check_2(); check_3(); check_4(); check_5()
     check_6(); check_7(); check_8(); check_9(); check_10()
     check_11(); check_12(); check_13(); check_14(); check_15()
