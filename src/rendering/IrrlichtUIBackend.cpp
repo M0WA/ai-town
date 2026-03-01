@@ -191,7 +191,12 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
         glEnableVertexAttribArray(1);
 
         // Close VAO recording scope.
+        // MUST also unbind GL_ARRAY_BUFFER: it is global state (NOT per-VAO).
+        // Leaving it bound causes Irrlicht's COpenGLDriver to reinterpret
+        // client-side vertex array pointers (glVertexPointer, etc.) as byte
+        // offsets into this 64-byte VBO, silently producing no geometry.
         glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 }
 

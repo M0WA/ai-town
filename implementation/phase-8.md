@@ -200,7 +200,7 @@ All deliverables implemented, all exit criteria met, all risks mitigated.
 
 ### Post-Sign-Off Fixes
 
-Twelve runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (618 unit + 13 integration) after each fix.
+Thirteen runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (618 unit + 13 integration) after each fix.
 
 #### Fix 1: Main Menu → Gameplay Wiring (commit `67ee799`)
 
@@ -374,3 +374,17 @@ Twelve runtime integration bugs were discovered after sign-off during manual run
 - `src/rendering/IrrlichtRenderer.cpp`: Added `EMF_BACK_FACE_CULLING = false` flag on terrain scene nodes. Replaced flat-white vertex color with height-based green→brown interpolation: `SColor(255, 34, 139, 34)` at sea level to `SColor(255, 139, 90, 20)` at ~80 m elevation.
 
 **Specs updated**: `procedural-terrain.md` (Terrain Material section — documents EMF_BACK_FACE_CULLING=false, EMF_LIGHTING=false, and height-based vertex colour gradient)
+
+#### Fix 13: Stale GL_ARRAY_BUFFER From IrrlichtUIBackend Kills All Scene Rendering (commit TBD)
+
+**Problem**: After Fixes 10–12, the 3D viewport still showed only the cornflower blue clear color with no visible terrain, GUI buttons, or any scene geometry. All mesh construction, bounding-box setup, material flags, and camera positioning were confirmed correct by code review and the Irrlicht domain expert.
+
+**Root cause**: `IrrlichtUIBackend`'s constructor creates a VAO/VBO for UI quad rendering. After closing the VAO recording scope with `glBindVertexArray(0)`, it did NOT unbind `GL_ARRAY_BUFFER`. Per the OpenGL specification, `GL_ARRAY_BUFFER` is **global** state (not per-VAO state). The stale VBO binding (a 64-byte UI quad buffer) caused Irrlicht's `COpenGLDriver` to reinterpret client-side vertex array pointers (`glVertexPointer`, `glNormalPointer`, `glColorPointer`, `glTexCoordPointer`) as byte-offsets into the bound VBO. These wildly out-of-range offsets silently produced no geometry on every `glDrawElements` call. Result: `beginScene()` clears to blue, `drawAll()` renders nothing, only the clear color is visible.
+
+Irrlicht's `COpenGLDriver` only unbinds foreign buffers if it was *previously* using hardware buffers (`CurrentHWBufferUsed` tracking). Since this was the first (and every) frame and `SMeshBuffer`'s default hardware mapping hint is `EHM_NEVER`, Irrlicht never called `glBindBuffer(GL_ARRAY_BUFFER, 0)` before its vertex pointer setup, so the stale binding persisted every frame.
+
+**Changes**:
+
+- `src/rendering/IrrlichtUIBackend.cpp`: Added `glBindBuffer(GL_ARRAY_BUFFER, 0)` after `glBindVertexArray(0)` in the VAO/VBO construction block.
+
+**Specs updated**: `irrlicht-device-lifecycle.md` (construction sequence step 2 — added CRITICAL GL STATE RULE comment about mandatory GL_ARRAY_BUFFER unbind)

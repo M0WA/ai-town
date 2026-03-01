@@ -37,6 +37,12 @@ The construction sequence in `main.cpp`:
 ```text
 1. RenderSystem (owns IrrlichtDevice)
 2. IrrlichtUIBackend (needs device)
+   CRITICAL GL STATE RULE: IrrlichtUIBackend's constructor creates a VAO/VBO
+   for UI quad rendering. After closing the VAO scope (glBindVertexArray(0)),
+   it MUST also call glBindBuffer(GL_ARRAY_BUFFER, 0). GL_ARRAY_BUFFER is
+   global state (NOT per-VAO); leaving it bound causes Irrlicht's COpenGLDriver
+   to reinterpret client-side vertex array pointers as VBO offsets, silently
+   rendering zero geometry for ALL scene nodes.
 3. UIScaler (needs uiBackend screen dimensions)
 4. Camera scene node + CameraController
 5. IrrlichtRenderer(device, /*uiManager=*/nullptr)
