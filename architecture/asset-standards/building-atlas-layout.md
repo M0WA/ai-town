@@ -104,7 +104,7 @@ These two atlases are **not interchangeable**. The diffuse atlas feeds the mesh 
 
 **Vehicle Normal Atlas** (`vehicles_normal_atlas_n.dds`):
 
-- Format: DDS DXT5/BC3 (linear — normal map data must not be sRGB-decoded)
+- Format: DDS DXT5nm/BC3 (X→alpha, Y→green, Z discarded; Y-flip before swizzle for OpenGL convention; linear — normal map data must not be sRGB-decoded; ref: `architecture/asset-standards/2d-texture-standards.md` DXT5nm section)
 - Resolution: 2048×2048 px
 - Cell grid: 8×8 cells at 256×256 px each (64 vehicle type slots)
 - Purpose: Tangent-space normal map for LOD0 and LOD1 vehicle meshes, providing surface-detail lighting without additional geometry
