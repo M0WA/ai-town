@@ -181,6 +181,10 @@ int main() {
         // unprojection tracks the current window size after a resize.
         uiScaler.setViewportSize(uiBackend.getScreenWidth(), uiBackend.getScreenHeight());
 
+        // Reposition Irrlicht GUI elements when the window is resized so their
+        // physical pixel positions match the virtual 1920x1080 layout.
+        uiBackend.handleViewportResize();
+
         // Step 2: CitySimulation::tick(realDeltaSeconds) — Phase 6 wired.
         // DEFAULT SPEED CONTRACT: CitySimulation is constructed at SpeedMultiplier::x3
         // (kDefaultSimSpeed) — see architecture/game-design/simulation-time.md.

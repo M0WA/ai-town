@@ -448,3 +448,21 @@ Irrlicht's `COpenGLDriver` only unbinds foreign buffers if it was *previously* u
 - `tests/ui/ui_manager_modal_test.cpp`: Updated test expectations from bracket notation (`[Normal ($500K)]`, `[Easy ($1M)]`) to radio-button notation (`(*) Normal`, `(*) Easy`).
 
 **Specs updated**: `main-menu-new-game-flow.md` (already specified "radio buttons" — implementation now matches spec)
+
+#### Fix 19: Resize-Safe Coordinate Pipeline — Stored Virtual Rects + handleViewportResize (commit TBD)
+
+**Problem**: After resizing the application window, pause menu buttons (and all other UI buttons) became unclickable. Buttons appeared visually positioned correctly but did not respond to mouse clicks.
+
+**Root cause**: `getElementRect()` performed a physical→virtual coordinate conversion using the **current** screen size, but Irrlicht GUI elements retained their physical pixel positions from **creation time**. After resize, the round-trip produced wrong virtual coordinates:
+
+- Example: Button at virtual (830, 392) → physical (553, 261) at 1280×720 creation time
+- After resize to 1600×900: `getElementRect()` divides (553, 261) by (1600, 900) → virtual (663, 313) (WRONG)
+- Mouse correctly unprojected to virtual ~(830, 392) — no match with (663, 313) → click missed
+
+**Changes**:
+
+- `src/rendering/IrrlichtUIBackend.h`: Added `ElementInfo` struct wrapping `IGUIElement*` + `Rect virtualRect`. Changed `m_elementMap` from `unordered_map<handle, IGUIElement*>` to `unordered_map<handle, ElementInfo>`. Added `m_lastScreenW` / `m_lastScreenH` for resize detection. Added public `handleViewportResize()` method.
+- `src/rendering/IrrlichtUIBackend.cpp`: `addStaticText()` / `addButton()` now store `ElementInfo{elem, Rect{x, y, w, h}}` preserving the original virtual rect. `getElementRect()` returns stored `virtualRect` directly (no round-trip). All other methods updated to access `it->second.element` (was `it->second`). Constructor snapshots initial screen size. `handleViewportResize()` detects size changes and repositions all elements via `setRelativePosition()` using stored virtual rects scaled to new physical dimensions.
+- `src/main.cpp`: Added `uiBackend.handleViewportResize()` call each frame after `uiScaler.setViewportSize()`.
+
+**Specs updated**: `resolution-ui-scaling.md` (complete rewrite of IrrlichtUIBackend Coordinate Scaling section — documents stored-virtual-rect pattern, handleViewportResize(), and coordinate pipeline summary)

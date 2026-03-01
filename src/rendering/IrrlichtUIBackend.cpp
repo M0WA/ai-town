@@ -90,6 +90,10 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
     assert(m_guiEnv  != nullptr && "IrrlichtUIBackend: getGUIEnvironment() returned null");
     assert(m_driver  != nullptr && "IrrlichtUIBackend: getVideoDriver() returned null");
 
+    // Snapshot initial screen size so handleViewportResize() has a baseline.
+    m_lastScreenW = getScreenWidth();
+    m_lastScreenH = getScreenHeight();
+
     // --- Compile and link the ui_quad shader program (raw GL path) -----------
     // Guarded: no GL calls in headless mode (EDT_NULL has no GL context).
     if (!m_isHeadless) {
@@ -276,7 +280,7 @@ UIElementHandle IrrlichtUIBackend::addStaticText(
     }
 
     UIElementHandle handle = m_nextHandle++;
-    m_elementMap[handle] = elem;
+    m_elementMap[handle] = ElementInfo{elem, Rect{x, y, w, h}};
     return handle;
 }
 
@@ -311,7 +315,7 @@ UIElementHandle IrrlichtUIBackend::addButton(
     }
 
     UIElementHandle handle = m_nextHandle++;
-    m_elementMap[handle] = elem;
+    m_elementMap[handle] = ElementInfo{elem, Rect{x, y, w, h}};
     return handle;
 }
 
@@ -324,7 +328,7 @@ void IrrlichtUIBackend::removeElement(UIElementHandle handle)
     // Check if this is a GUI element.
     auto elemIt = m_elementMap.find(handle);
     if (elemIt != m_elementMap.end()) {
-        irr::gui::IGUIElement* elem = elemIt->second;
+        irr::gui::IGUIElement* elem = elemIt->second.element;
         if (elem) {
             elem->remove();  // Detach from parent; Irrlicht manages the memory.
         }
@@ -356,11 +360,11 @@ void IrrlichtUIBackend::setElementText(UIElementHandle handle,
                                         const std::string& text)
 {
     auto it = m_elementMap.find(handle);
-    if (it == m_elementMap.end() || !it->second) {
+    if (it == m_elementMap.end() || !it->second.element) {
         return;
     }
     irr::core::stringw wtext(text.c_str());
-    it->second->setText(wtext.c_str());
+    it->second.element->setText(wtext.c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -370,10 +374,10 @@ void IrrlichtUIBackend::setElementText(UIElementHandle handle,
 void IrrlichtUIBackend::setElementVisible(UIElementHandle handle, bool visible)
 {
     auto it = m_elementMap.find(handle);
-    if (it == m_elementMap.end() || !it->second) {
+    if (it == m_elementMap.end() || !it->second.element) {
         return;
     }
-    it->second->setVisible(visible);
+    it->second.element->setVisible(visible);
 }
 
 // ---------------------------------------------------------------------------
@@ -383,10 +387,10 @@ void IrrlichtUIBackend::setElementVisible(UIElementHandle handle, bool visible)
 bool IrrlichtUIBackend::isElementVisible(UIElementHandle handle) const
 {
     auto it = m_elementMap.find(handle);
-    if (it == m_elementMap.end() || !it->second) {
+    if (it == m_elementMap.end() || !it->second.element) {
         return false;
     }
-    return it->second->isVisible();
+    return it->second.element->isVisible();
 }
 
 // ---------------------------------------------------------------------------
@@ -396,10 +400,10 @@ bool IrrlichtUIBackend::isElementVisible(UIElementHandle handle) const
 void IrrlichtUIBackend::setElementEnabled(UIElementHandle handle, bool enabled)
 {
     auto it = m_elementMap.find(handle);
-    if (it == m_elementMap.end() || !it->second) {
+    if (it == m_elementMap.end() || !it->second.element) {
         return;
     }
-    it->second->setEnabled(enabled);
+    it->second.element->setEnabled(enabled);
 }
 
 // ---------------------------------------------------------------------------
@@ -409,10 +413,10 @@ void IrrlichtUIBackend::setElementEnabled(UIElementHandle handle, bool enabled)
 bool IrrlichtUIBackend::isElementEnabled(UIElementHandle handle) const
 {
     auto it = m_elementMap.find(handle);
-    if (it == m_elementMap.end() || !it->second) {
+    if (it == m_elementMap.end() || !it->second.element) {
         return false;
     }
-    return it->second->isEnabled();
+    return it->second.element->isEnabled();
 }
 
 // ---------------------------------------------------------------------------
@@ -495,11 +499,11 @@ void IrrlichtUIBackend::setElementImage(UIElementHandle handle,
 std::string IrrlichtUIBackend::getElementText(UIElementHandle handle) const
 {
     auto it = m_elementMap.find(handle);
-    if (it == m_elementMap.end() || !it->second) {
+    if (it == m_elementMap.end() || !it->second.element) {
         return {};
     }
 
-    const wchar_t* wtext = it->second->getText();
+    const wchar_t* wtext = it->second.element->getText();
     if (!wtext) {
         return {};
     }
@@ -511,30 +515,17 @@ std::string IrrlichtUIBackend::getElementText(UIElementHandle handle) const
 
 // ---------------------------------------------------------------------------
 // 12. getElementRect
-// Returns the element's absolute bounding rectangle as a Rect.
+// Returns the element's virtual bounding rectangle (stored at creation time).
+// Returning the stored virtual rect avoids the physical→virtual round-trip
+// that produces incorrect coordinates after a window resize.
 // ---------------------------------------------------------------------------
 Rect IrrlichtUIBackend::getElementRect(UIElementHandle handle) const
 {
     auto it = m_elementMap.find(handle);
-    if (it == m_elementMap.end() || !it->second) {
+    if (it == m_elementMap.end() || !it->second.element) {
         return Rect{};
     }
-
-    // Element positions are in physical screen pixels (Irrlicht's coordinate space).
-    // Scale back to virtual coordinates (1920x1080 design space) so callers (panels,
-    // hit tests) can compare against virtual mouse coordinates from UIScaler::unproject().
-    irr::core::rect<irr::s32> absPos = it->second->getAbsolutePosition();
-    const int sw = getScreenWidth();
-    const int sh = getScreenHeight();
-    const int vw = getVirtualWidth();
-    const int vh = getVirtualHeight();
-
-    Rect r;
-    r.x = (sw > 0) ? (absPos.UpperLeftCorner.X * vw) / sw : absPos.UpperLeftCorner.X;
-    r.y = (sh > 0) ? (absPos.UpperLeftCorner.Y * vh) / sh : absPos.UpperLeftCorner.Y;
-    r.w = (sw > 0) ? (absPos.getWidth()  * vw) / sw : absPos.getWidth();
-    r.h = (sh > 0) ? (absPos.getHeight() * vh) / sh : absPos.getHeight();
-    return r;
+    return it->second.virtualRect;
 }
 
 // ---------------------------------------------------------------------------
@@ -691,4 +682,37 @@ UIElementHandle IrrlichtUIBackend::loadTexture(const std::string& path)
     UIElementHandle handle = m_nextHandle++;
     m_textureHandleMap[handle] = static_cast<uint32_t>(texId);
     return handle;
+}
+
+// ---------------------------------------------------------------------------
+// handleViewportResize
+// Detects screen size changes and repositions every GUI element so that its
+// physical pixel position matches its stored virtual coordinate at the new
+// resolution.  Call once per frame from the main loop.
+// ---------------------------------------------------------------------------
+void IrrlichtUIBackend::handleViewportResize()
+{
+    const int sw = getScreenWidth();
+    const int sh = getScreenHeight();
+
+    if (sw == m_lastScreenW && sh == m_lastScreenH) {
+        return;                      // No resize — nothing to do.
+    }
+
+    m_lastScreenW = sw;
+    m_lastScreenH = sh;
+
+    const int vw = getVirtualWidth();   // 1920
+    const int vh = getVirtualHeight();  // 1080
+
+    for (auto& [h, info] : m_elementMap) {
+        if (!info.element) continue;
+        const Rect& vr = info.virtualRect;
+        const int px = (vr.x * sw) / vw;
+        const int py = (vr.y * sh) / vh;
+        const int pw = (vr.w * sw) / vw;
+        const int ph = (vr.h * sh) / vh;
+        info.element->setRelativePosition(
+            irr::core::rect<irr::s32>(px, py, px + pw, py + ph));
+    }
 }

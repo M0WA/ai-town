@@ -87,13 +87,53 @@ struct Rect { int x{0}, y{0}, w{0}, h{0}; };
 
 `IrrlichtUIBackend` is the coordinate translation layer between the virtual 1920×1080 design space used by all panels and the physical screen pixel space used by Irrlicht's `IGUIEnvironment`. Two scaling transforms are applied:
 
-- **Element creation** (`addStaticText`, `addButton`): virtual coordinates passed by panels are scaled to physical screen pixels before calling `m_guiEnv->addStaticText()` / `m_guiEnv->addButton()`. The scaling factors are `screenW / virtualW` and `screenH / virtualH`, computed from the driver's screen dimensions and the fixed virtual canvas size (1920×1080).
-- **Element rect query** (`getElementRect`): Irrlicht stores element positions in physical screen pixels. `getElementRect()` scales these back to virtual coordinates before returning a `Rect` to the caller.
+- **Element creation** (`addStaticText`, `addButton`): virtual coordinates passed by panels are scaled to physical screen pixels before calling `m_guiEnv->addStaticText()` / `m_guiEnv->addButton()`. The scaling factors are `screenW / virtualW` and `screenH / virtualH`, computed from the driver's screen dimensions and the fixed virtual canvas size (1920×1080). The original virtual coordinates are stored alongside the Irrlicht element pointer in an `ElementInfo` struct for later retrieval.
+- **Element rect query** (`getElementRect`): returns the **stored virtual rect** captured at element creation time. This avoids a physical→virtual round-trip conversion that would produce incorrect coordinates after a window resize (the Irrlicht element's physical position reflects the screen size at creation time, not the current screen size).
+
+### Stored Virtual Rect Pattern
+
+`IrrlichtUIBackend` tracks each element using an `ElementInfo` struct:
+
+```cpp
+struct ElementInfo {
+    irr::gui::IGUIElement* element{nullptr};
+    Rect virtualRect{};  // captured at addStaticText/addButton time
+};
+std::unordered_map<UIElementHandle, ElementInfo> m_elementMap;
+```
+
+`getElementRect()` returns `it->second.virtualRect` directly — no coordinate conversion needed at query time. This eliminates the resize-dependent round-trip bug where dividing stale physical positions by the new screen size produces wrong virtual coordinates.
+
+### Viewport Resize Handling (`handleViewportResize()`)
+
+`IrrlichtUIBackend` exposes a concrete method (not on the `IUIBackend` interface):
+
+```cpp
+void handleViewportResize();
+```
+
+Called once per frame from the main loop (after `uiScaler.setViewportSize()` and before event processing). Detects screen size changes by comparing the current driver screen dimensions against cached `m_lastScreenW` / `m_lastScreenH`. When a resize is detected, iterates all elements in `m_elementMap` and repositions each Irrlicht `IGUIElement` via `setRelativePosition()` using the stored virtual rect scaled to the new physical screen dimensions. This ensures that:
+
+1. Irrlicht elements visually reposition to match the virtual layout at the new resolution.
+2. `getElementRect()` continues to return the correct (unchanged) virtual coordinates.
+3. Hit tests remain correct because both mouse coordinates (via `UIScaler::unproject()` with updated viewport) and element rects (stored virtual) use the same virtual coordinate space.
+
+Without `handleViewportResize()`, elements remain at their old physical pixel positions after a resize. `getElementRect()` would still return correct virtual coordinates (stored, not computed), but the elements would be visually mispositioned — appearing at the wrong physical location on screen.
+
+### Coordinate Pipeline Summary
+
+The complete resize-safe coordinate pipeline:
+
+1. **Per frame**: `uiScaler.setViewportSize(screenW, screenH)` updates mouse unprojection.
+2. **Per frame**: `uiBackend.handleViewportResize()` repositions Irrlicht elements if screen size changed.
+3. **On click**: `UIScaler::unproject(physX, physY)` → virtual mouse coordinates.
+4. **On hit test**: `getElementRect(handle)` → stored virtual rect (no conversion).
+5. **Comparison**: virtual mouse vs virtual rect — always in the same coordinate space.
 
 This ensures that:
 
 1. Panels work exclusively in virtual 1920×1080 space — no panel code touches physical coordinates.
-2. Hit tests in panel `onEvent()` handlers compare virtual mouse coordinates (from `UIScaler::unproject()`) against virtual element rects (from `getElementRect()`), so the coordinate spaces always match.
+2. Hit tests in panel `onEvent()` handlers compare virtual mouse coordinates (from `UIScaler::unproject()`) against virtual element rects (from `getElementRect()`), so the coordinate spaces always match regardless of resize.
 3. Elements are positioned correctly on screen at any resolution — a button at virtual (780, 320) is centered on a 1280×720 window (physical (520, 213)) rather than placed at physical pixel 780.
 
 Without this scaling, elements are positioned at virtual-space values interpreted as physical pixels (e.g., a button intended for virtual x=780 appears at physical pixel 780 on a 1280-wide window, offset from center). Mouse un-projection converts physical clicks to virtual coordinates that do not match the misplaced element positions, making buttons unclickable.

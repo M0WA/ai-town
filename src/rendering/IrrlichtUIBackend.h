@@ -56,6 +56,11 @@ public:
     IrrlichtUIBackend(IrrlichtUIBackend&&)                 = delete;
     IrrlichtUIBackend& operator=(IrrlichtUIBackend&&)      = delete;
 
+    // Detect window resize and reposition all GUI elements to match the new
+    // physical screen size.  Call once per frame from the main loop.
+    // Not part of IUIBackend — concrete method on IrrlichtUIBackend only.
+    void handleViewportResize();
+
     // -------------------------------------------------------------------------
     // IUIBackend overrides — 17 methods
     // -------------------------------------------------------------------------
@@ -137,9 +142,21 @@ private:
     // kInvalidUIElement (0) is never returned for a successful allocation.
     UIElementHandle m_nextHandle{1};
 
-    // GUI element handle → Irrlicht IGUIElement* mapping.
+    // Internal element tracking: Irrlicht element pointer + cached virtual rect.
+    // Virtual rect is captured at creation and returned by getElementRect()
+    // to avoid the physical->virtual round-trip that breaks after window resize.
+    struct ElementInfo {
+        irr::gui::IGUIElement* element{nullptr};
+        Rect virtualRect{};
+    };
+
+    // GUI element handle → ElementInfo mapping.
     // Covers both static text and button elements.
-    std::unordered_map<UIElementHandle, irr::gui::IGUIElement*> m_elementMap;
+    std::unordered_map<UIElementHandle, ElementInfo> m_elementMap;
+
+    // Last known screen dimensions for resize detection in handleViewportResize().
+    int m_lastScreenW{0};
+    int m_lastScreenH{0};
 
     // Texture handle → raw GL texture ID mapping (GLuint stored as uint32_t).
     // Textures loaded via loadTexture() are tracked here for cleanup.
