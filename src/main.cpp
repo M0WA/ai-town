@@ -158,6 +158,11 @@ int main() {
     // Late-bind UIManager to renderer (breaks circular construction dependency).
     renderer.setUIManager(&uiManager);
 
+    // Terrain was generated synchronously above (startup generation).
+    // Skip straight to Gameplay so the camera is immediately controllable.
+    // The full New Game flow (menu → loading screen → generation) is wired in Phase 11.
+    uiManager.transitionToGameplay(GameMode::Sandbox);
+
     // -------------------------------------------------------------------------
     // EventReceiver — translates SEvent → InputEvent, dispatches per input-arbitration.md.
     // -------------------------------------------------------------------------

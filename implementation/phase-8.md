@@ -200,7 +200,7 @@ All deliverables implemented, all exit criteria met, all risks mitigated.
 
 ### Post-Sign-Off Fixes
 
-Thirteen runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (618 unit + 13 integration) after each fix.
+Fourteen runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (618 unit + 13 integration) after each fix.
 
 #### Fix 1: Main Menu → Gameplay Wiring (commit `67ee799`)
 
@@ -388,3 +388,15 @@ Irrlicht's `COpenGLDriver` only unbinds foreign buffers if it was *previously* u
 - `src/rendering/IrrlichtUIBackend.cpp`: Added `glBindBuffer(GL_ARRAY_BUFFER, 0)` after `glBindVertexArray(0)` in the VAO/VBO construction block.
 
 **Specs updated**: `irrlicht-device-lifecycle.md` (construction sequence step 2 — added CRITICAL GL STATE RULE comment about mandatory GL_ARRAY_BUFFER unbind)
+
+#### Fix 14: Arrow Keys Not Working — Game Starts in MainMenu State (commit TBD)
+
+**Problem**: After Fixes 10–13, terrain was rendered but arrow key camera movement did not work. All keyboard events went through `EventReceiver` → `UIManager::onEvent()` → `MainMenuPanel::onEvent()`, which returns `true` for ALL input while the main menu is visible (line 362: `return true;`). Since terrain is pre-generated synchronously at startup in `main.cpp` (before `UIManager` is created), the New Game → Start City flow is not required for terrain generation. The user was stuck in `GameState::MainMenu` with no obvious path to `Gameplay` state for camera controls.
+
+**Root cause**: `UIManager` starts in `GameState::MainMenu` (the initialized default). The MainMenuPanel's `onEvent()` catch-all `return true;` at the end of the method consumes all keyboard events (including arrow keys), preventing them from reaching `CameraController`. In `Gameplay` state, UIManager's Priority 5 HUD controls do not match arrow keys, so they correctly fall through to `CameraController`.
+
+**Changes**:
+
+- `src/main.cpp`: Added `uiManager.transitionToGameplay(GameMode::Sandbox)` after `renderer.setUIManager(&uiManager)`. Since terrain is pre-generated at startup, the game enters Gameplay state immediately. The full New Game flow (menu → loading screen → generation) is wired in Phase 11.
+
+**Specs updated**: `irrlicht-device-lifecycle.md` (construction sequence step 13 — added auto-transition to Gameplay after startup terrain generation)
