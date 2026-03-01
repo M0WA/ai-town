@@ -29,7 +29,9 @@ IrrlichtRenderer::IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiMan
 
 void IrrlichtRenderer::beginFrame() {
     if (!m_driver) return;
-    m_driver->beginScene(true, true, SColor(255, 0, 0, 0));
+    // Sky-blue clear color — provides visual feedback that the 3D viewport is active.
+    // Pure black (0,0,0) is indistinguishable from "nothing rendered".
+    m_driver->beginScene(true, true, SColor(255, 100, 149, 237));
 }
 
 void IrrlichtRenderer::drawScene() {
@@ -214,7 +216,14 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
         }
     }
 
-    // Build index array — CCW winding, two triangles per quad.
+    // Build index array — CW winding from above (left-handed Y-up), two triangles per quad.
+    //
+    // Irrlicht uses a LEFT-HANDED coordinate system. Front faces are CW from the viewer.
+    // Terrain is viewed from above (+Y looking toward -Y), so front-face normals must
+    // point UP (+Y). The winding v0→v2→v1 / v0→v3→v2 produces upward normals:
+    //   (v2-v0)×(v1-v0) = (cs,0,cs)×(cs,0,0) = (0, +cs², 0) → +Y normal.
+    // The previous v0→v1→v2 winding produced DOWNWARD normals, causing all terrain
+    // faces to be backface-culled when the camera is above the terrain.
     for (int row = 0; row < gridSize; ++row) {
         for (int col = 0; col < gridSize; ++col) {
             u32 v0 = static_cast<u32>(row       * verts + col);
@@ -222,13 +231,15 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
             u32 v2 = static_cast<u32>((row + 1) * verts + col + 1);
             u32 v3 = static_cast<u32>((row + 1) * verts + col);
 
+            // Triangle 1: v0→v2→v1 (normal = +Y)
             buf->Indices.push_back(v0);
+            buf->Indices.push_back(v2);
             buf->Indices.push_back(v1);
-            buf->Indices.push_back(v2);
 
+            // Triangle 2: v0→v3→v2 (normal = +Y)
             buf->Indices.push_back(v0);
-            buf->Indices.push_back(v2);
             buf->Indices.push_back(v3);
+            buf->Indices.push_back(v2);
         }
     }
 

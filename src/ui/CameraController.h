@@ -68,6 +68,10 @@ public:
     float getSensitivityMultiplier() const { return m_sensitivityMultiplier; }
     void  setSensitivityMultiplier(float s) { m_sensitivityMultiplier = s; }
 
+    // Set the camera look-at target in world space (XZ plane, Y=0).
+    // Used to position the camera over the terrain center after generation.
+    void setTarget(float worldX, float worldZ) { m_targetX = worldX; m_targetZ = worldZ; }
+
 private:
     irr::scene::ICameraSceneNode* m_camera;
     KeyBindings m_bindings;  // hotkey config (Phase 8 wires Q/E to rotate)

@@ -200,7 +200,7 @@ All deliverables implemented, all exit criteria met, all risks mitigated.
 
 ### Post-Sign-Off Fixes
 
-Six runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (581 unit + 13 integration) after each fix.
+Eleven runtime integration bugs were discovered after sign-off during manual runtime testing. A seventh report (main menu click regression) was investigated and found to be a non-issue with the complete fix set applied. All tests continue to pass (618 unit + 13 integration) after each fix.
 
 #### Fix 1: Main Menu → Gameplay Wiring (commit `67ee799`)
 
@@ -327,3 +327,35 @@ Six runtime integration bugs were discovered after sign-off during manual runtim
 - `AudioSystem.cpp`: Added `setMusicTrack(MUSIC_CALM_01)` call at the end of `transitionToGameplay()` to start the default calm music stem after the ambient bed.
 - `UIManager.cpp`: Added `m_audio->setTimeOfDay(TimeOfDay::DAY)` call before `m_audio->transitionToGameplay()` in `transitionToGameplay(GameMode)`.
 - `architecture/ui-ux/ui-manager.md`: Added "Audio Transition at Gameplay Start" and "CitySimulation Audio Wiring" sections.
+
+#### Fix 10: Terrain Generation Not Wired — No Terrain in Scene (commit TBD)
+
+**Problem**: The 3D viewport showed no terrain geometry. `TerrainSystem` was constructed but `generate()` and `buildAllChunks()` were never called, so no chunks existed and no scene nodes were created.
+
+**Root cause**: `main.cpp` constructed `TerrainSystem` and called `update(dt)` each frame, but never invoked the generation pipeline. Without `generate()` there is no heightmap; without `buildAllChunks()` there are no chunk registrations or rebuild requests.
+
+**Changes**:
+
+- `src/terrain/StdTerrainRNG.h`: New file — production `ITerrainRNG` backed by `std::mt19937`, seeded from `std::random_device`.
+- `src/terrain/TerrainSystem.h` / `TerrainSystem.cpp`: Added `buildAllChunks()` — divides the generated heightmap into chunks, registers each chunk (position, heightmap, LOD), enqueues LOD0 rebuilds, and calls `flushPendingRebuilds()` for synchronous initial build.
+- `src/main.cpp`: Added `StdTerrainRNG` construction, `terrainSystem.generate(128, 128, 10.0f, &rng)`, and `terrainSystem.buildAllChunks()` calls before the main loop.
+
+**Specs updated**: `procedural-terrain.md` (Terrain Generation Startup Wiring section)
+
+#### Fix 11: Terrain Invisible — Wrong Triangle Winding + Camera at Corner (commit TBD)
+
+**Problem**: After Fix 10, terrain was generated and chunks were built, but the 3D viewport was still black. All terrain triangles had downward-facing normals and were backface-culled. The camera also pointed at the terrain corner (0,0,0) instead of its center.
+
+**Root cause (3 issues)**:
+
+1. `IrrlichtRenderer::rebuildTerrainChunk()` used `v0→v1→v2` / `v0→v2→v3` winding order, producing normals pointing DOWN (−Y): `(v1−v0)×(v2−v0) = (cs,0,0)×(cs,0,cs) = (0, −cs², 0)`. In Irrlicht's left-handed coordinate system, terrain viewed from above requires +Y normals. With backface culling enabled (default), all terrain faces were invisible.
+2. The `beginScene()` clear color was black `SColor(255,0,0,0)`, which is indistinguishable from "nothing rendered" when terrain is invisible.
+3. `CameraController` default target was `(0,0,0)` — the extreme corner of a 1280×1280 terrain (128 tiles × 10m cellSize). Even with correct winding, most terrain would be behind the camera.
+
+**Changes**:
+
+- `src/rendering/IrrlichtRenderer.cpp`: Reversed triangle winding to `v0→v2→v1` / `v0→v3→v2` producing +Y normals: `(v2−v0)×(v1−v0) = (cs,0,cs)×(cs,0,0) = (0, +cs², 0)`. Changed clear color from black to cornflower blue `SColor(255, 100, 149, 237)`.
+- `src/ui/CameraController.h`: Added `setTarget(float worldX, float worldZ)` method.
+- `src/main.cpp`: Added `cameraController.setTarget(640.0f, 640.0f)` after terrain generation to center camera over terrain.
+
+**Specs updated**: `procedural-terrain.md` (Triangle Winding Order section, Terrain Generation Startup Wiring section), `irrlicht-device-lifecycle.md` (render loop clear color, construction sequence steps 6–8, 9-step frame sequence with terrainSystem.update)

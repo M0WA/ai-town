@@ -142,6 +142,9 @@ int main() {
     terrainSystem.generate(128, 128, 10.0f, &terrainRng);
     terrainSystem.buildAllChunks();
 
+    // Position camera over the terrain center (128 tiles × 10 m / 2 = 640 m per axis).
+    cameraController.setTarget(640.0f, 640.0f);
+
     CitySimulation citySimulation(
         &renderer, /*audio=*/&audioSystem, &simRng, &wallClock, &terrainSystem, Difficulty::Normal);
 
