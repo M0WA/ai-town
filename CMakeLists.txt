@@ -127,6 +127,12 @@ add_library(aitown_render STATIC
     src/rendering/TerrainShaderCallback.cpp
     # Phase 9: LODNode — LOD swap prototype (pre-condition for building asset production)
     src/rendering/LODNode.cpp
+    # Phase 9: building facade shader callback
+    src/rendering/BuildingShaderCallback.cpp
+    # Phase 9: road tile shader callback
+    src/rendering/RoadShaderCallback.cpp
+    # Phase 9: building asset loader
+    src/rendering/BuildingAssetLoader.cpp
 )
 target_include_directories(aitown_render
     PRIVATE   src/rendering/       # RenderSystem/IrrlichtRenderer internal headers
@@ -659,6 +665,8 @@ add_executable(opengl_tests
     tests/rendering/stub_succeed.cpp           # Phase 0 stub — remove when real tests cover target
     tests/rendering/shader_stub_compile_test.cpp  # Phase 1+2: shader stub compile check
     tests/rendering/lod_swap_smoke_test.cpp    # Phase 2: LOD swap grab/drop contract smoke test
+    tests/rendering/building_lod_swap_test.cpp        # Phase 9: LOD swap bounding box integration test
+    tests/rendering/building_srgb_fallback_test.cpp   # Phase 9: building facade sRGB fallback test
 )
 # Irrlicht and GLEW::GLEW MUST be linked directly: shader_stub_compile_test.cpp includes
 # <irrlicht.h> and <GL/glew.h>; aitown_render links both PRIVATE so their include paths

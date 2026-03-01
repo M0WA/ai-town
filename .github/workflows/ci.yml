@@ -880,8 +880,9 @@ jobs:
           retention-days: 14
 
   # ============================================================================
-  # validate-assets — validate audio/texture/model assets (Phase 1 stub: always exits 0)
-  # Phase 5 replaces with real validation. timeout-minutes: 10 is permanent.
+  # validate-assets — validate audio/texture/model assets.
+  # Phase 9: all 20 checks (Checks #1–#20) implemented in tools/validate_assets.py.
+  # timeout-minutes: 10 is permanent.
   # ============================================================================
   validate-assets:
     runs-on: ubuntu-latest
@@ -897,10 +898,10 @@ jobs:
         with:
           python-version: '3.12'  # pin to specific minor version — never use '3' (floating major breaks reproducibility)
 
-      - name: Verify check_15 stub present in validate_assets.py
+      - name: Verify check_20 present in validate_assets.py
         run: |
-          grep -q "check_15" tools/validate_assets.py || (echo "FAIL: check_15 stub missing from validate_assets.py" && exit 1)
-          echo "PASS: check_15 stub present"
+          grep -q "check_20" tools/validate_assets.py || (echo "FAIL: check_20 not found in validate_assets.py" && exit 1)
+          echo "PASS: check_20 present"
 
       - name: Install Python dependencies
         run: pip install mutagen

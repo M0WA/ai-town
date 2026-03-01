@@ -1,0 +1,26 @@
+# Minimal vehicle collision mesh — side faces only, no top/bottom caps
+# 1.8m wide x 4.0m long x 1.5m tall box at Y=0
+# 8 vertices, 4 side faces (8 triangles), pivot at Y=0 base-center
+# Authored per architecture/asset-standards/3d-model-standards.md
+# Constraint: vehicle _col.obj 8 tris, side-faces only, Y=0
+o vehicle_col
+v -0.9  0.0 -2.0
+v  0.9  0.0 -2.0
+v  0.9  0.0  2.0
+v -0.9  0.0  2.0
+v -0.9  1.5 -2.0
+v  0.9  1.5 -2.0
+v  0.9  1.5  2.0
+v -0.9  1.5  2.0
+# South face (-Z side)
+f 1 2 6
+f 1 6 5
+# East face (+X side)
+f 2 3 7
+f 2 7 6
+# North face (+Z side)
+f 3 4 8
+f 3 8 7
+# West face (-X side)
+f 4 1 5
+f 4 5 8

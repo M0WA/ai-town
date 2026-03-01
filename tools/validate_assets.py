@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AI Town asset validation script.
-Phase 9: checks #1–#19 all implemented (check #15 fully implemented in Phase 9).
+Phase 9: checks #1–#20 all implemented (check #15 and check #20 fully implemented in Phase 9).
 """
 import glob
 import json
@@ -842,9 +842,202 @@ def check_19():
     print(f"check_19 PASS: {len(patterns)} stinger WAV files verified mono PCM 44100 Hz")
 
 
+# ---------------------------------------------------------------------------
+# Check #20: road_lod2_color in render_constants.h matches average RGB of
+# road_asphalt_tileable.dds (DXT5) within ±3/255 per channel.
+#
+# DXT5 block layout (16 bytes per 4×4 pixel block):
+#   Bytes  0– 7: alpha block (8 bytes, not used for RGB average)
+#   Bytes  8– 9: color0 (RGB565 endpoint)
+#   Bytes 10–11: color1 (RGB565 endpoint)
+#   Bytes 12–15: 32-bit packed 2-bit indices (16 pixels × 2 bits each)
+#
+# Index mapping per pixel:
+#   0 → color0
+#   1 → color1
+#   2 → (2/3)*color0 + (1/3)*color1
+#   3 → (1/3)*color0 + (2/3)*color1
+#
+# Average is computed in linear space (RGB565 decoded values / 255.0).
+# ---------------------------------------------------------------------------
+def check_20():
+    """check_20: road_lod2_color in render_constants.h matches average of road_asphalt_tileable.dds."""
+    import re
+
+    header_path = "src/rendering/render_constants.h"
+    dds_path = "assets/textures/roads/road_asphalt_tileable.dds"
+
+    if not os.path.exists(header_path):
+        print("INFO check_20: src/rendering/render_constants.h not found — no-op")
+        return
+    if not os.path.exists(dds_path):
+        print("INFO check_20: assets/textures/roads/road_asphalt_tileable.dds not found — no-op")
+        return
+
+    # --- Parse road_lod2_color from header ---
+    # Expected form: road_lod2_color(255, 80, 80, 85)  — (alpha, red, green, blue)
+    with open(header_path, "r") as f:
+        header_text = f.read()
+
+    pattern = r'road_lod2_color\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)'
+    m = re.search(pattern, header_text)
+    if m is None:
+        raise AssertionError(
+            "check_20 FAIL: road_lod2_color not found in src/rendering/render_constants.h — "
+            "expected form: road_lod2_color(alpha, red, green, blue)"
+        )
+    _const_alpha = int(m.group(1))
+    const_r = int(m.group(2))
+    const_g = int(m.group(3))
+    const_b = int(m.group(4))
+
+    # --- Read DDS file ---
+    with open(dds_path, "rb") as f:
+        dds_data = f.read()
+
+    # Validate DDS magic
+    if len(dds_data) < 128:
+        raise AssertionError(
+            f"check_20 FAIL: {dds_path} is too small to be a valid DDS file "
+            f"({len(dds_data)} bytes)"
+        )
+    if dds_data[0:4] != b"DDS ":
+        raise AssertionError(
+            f"check_20 FAIL: {dds_path} is not a valid DDS file "
+            f"(magic={dds_data[0:4]!r})"
+        )
+
+    # Parse width and height from DDS_HEADER.
+    # DDS_HEADER starts at file byte 4.
+    # dwHeight is at DDS_HEADER offset 8  → file bytes 12–15.
+    # dwWidth  is at DDS_HEADER offset 12 → file bytes 16–19.
+    dds_height = struct.unpack_from("<I", dds_data, 12)[0]
+    dds_width  = struct.unpack_from("<I", dds_data, 16)[0]
+
+    if dds_width == 0 or dds_height == 0:
+        raise AssertionError(
+            f"check_20 FAIL: {dds_path} reported zero dimensions "
+            f"({dds_width}×{dds_height})"
+        )
+
+    # Verify the file is DXT5 (FourCC at bytes 84–87).
+    fourcc = dds_data[84:88]
+    if fourcc != b"DXT5":
+        raise AssertionError(
+            f"check_20 FAIL: {dds_path} is not DXT5 (FourCC={fourcc!r}) — "
+            f"road_asphalt_tileable.dds must be DXT5/BC3"
+        )
+
+    # DXT5 pixel data starts at byte 128 (no DX10 extended header for plain DXT5).
+    pixel_data = dds_data[128:]
+
+    # DXT5: each 4×4 block = 16 bytes.
+    # Number of blocks: ceil(width/4) × ceil(height/4).
+    blocks_x = (dds_width  + 3) // 4
+    blocks_y = (dds_height + 3) // 4
+    num_blocks = blocks_x * blocks_y
+    expected_bytes = num_blocks * 16
+
+    if len(pixel_data) < expected_bytes:
+        raise AssertionError(
+            f"check_20 FAIL: {dds_path} pixel data too short — "
+            f"expected {expected_bytes} bytes for {num_blocks} DXT5 blocks "
+            f"({dds_width}×{dds_height}), got {len(pixel_data)} bytes"
+        )
+
+    def _decode_rgb565(word):
+        """Decode a 16-bit RGB565 value to (r, g, b) in [0, 255] integer range."""
+        r = ((word >> 11) & 0x1F)
+        g = ((word >>  5) & 0x3F)
+        b = ( word        & 0x1F)
+        # Expand 5-bit and 6-bit values to 8-bit using bit-replication.
+        r8 = (r << 3) | (r >> 2)
+        g8 = (g << 2) | (g >> 4)
+        b8 = (b << 3) | (b >> 2)
+        return r8, g8, b8
+
+    # Accumulate sum of linear RGB across all 16 pixels in each block.
+    # Working in float; divide by 255 at the end.
+    total_r = 0.0
+    total_g = 0.0
+    total_b = 0.0
+    total_pixels = 0
+
+    for block_idx in range(num_blocks):
+        offset = block_idx * 16
+        # Skip the 8-byte alpha block; read the 8-byte color block.
+        color_block_offset = offset + 8
+
+        # Unpack two RGB565 endpoints and the 32-bit index table.
+        c0_word, c1_word, idx_bits = struct.unpack_from("<HHI", pixel_data, color_block_offset)
+
+        c0r, c0g, c0b = _decode_rgb565(c0_word)
+        c1r, c1g, c1b = _decode_rgb565(c1_word)
+
+        # Precompute the four palette entries for this block.
+        # DXT5 (opaque mode — DXT5 color block always uses 4-color mode regardless of c0 vs c1).
+        palette_r = [
+            c0r,
+            c1r,
+            (2 * c0r + c1r + 1) // 3,
+            (c0r + 2 * c1r + 1) // 3,
+        ]
+        palette_g = [
+            c0g,
+            c1g,
+            (2 * c0g + c1g + 1) // 3,
+            (c0g + 2 * c1g + 1) // 3,
+        ]
+        palette_b = [
+            c0b,
+            c1b,
+            (2 * c0b + c1b + 1) // 3,
+            (c0b + 2 * c1b + 1) // 3,
+        ]
+
+        # Decode all 16 pixels in this block.
+        bits = idx_bits
+        for _pixel in range(16):
+            idx = bits & 0x3
+            bits >>= 2
+            total_r += palette_r[idx]
+            total_g += palette_g[idx]
+            total_b += palette_b[idx]
+
+        total_pixels += 16
+
+    # Compute the average linear RGB (still in [0, 255] float range).
+    avg_r = total_r / total_pixels
+    avg_g = total_g / total_pixels
+    avg_b = total_b / total_pixels
+
+    # Compare against the constant value within ±3/255 per channel.
+    # The constant is stored as integer [0, 255]; the average is float [0, 255].
+    TOLERANCE = 3.0  # ±3 in [0, 255] space
+
+    diff_r = abs(avg_r - const_r)
+    diff_g = abs(avg_g - const_g)
+    diff_b = abs(avg_b - const_b)
+
+    if diff_r > TOLERANCE or diff_g > TOLERANCE or diff_b > TOLERANCE:
+        raise AssertionError(
+            f"check_20 FAIL: road_lod2_color({const_r}, {const_g}, {const_b}) does not match "
+            f"computed DXT5 average RGB({avg_r:.2f}, {avg_g:.2f}, {avg_b:.2f}) within ±{TOLERANCE}/255 — "
+            f"per-channel deltas: R={diff_r:.2f}, G={diff_g:.2f}, B={diff_b:.2f}; "
+            f"update road_lod2_color in src/rendering/render_constants.h to match the texture average"
+        )
+
+    print(
+        f"check_20 PASS: road_lod2_color({const_r}, {const_g}, {const_b}) matches "
+        f"computed DXT5 average RGB({avg_r:.2f}, {avg_g:.2f}, {avg_b:.2f}) "
+        f"within ±{TOLERANCE}/255 per channel "
+        f"(texture: {dds_width}×{dds_height}, {num_blocks} DXT5 blocks)"
+    )
+
+
 if __name__ == '__main__':
-    print("validate_assets.py: Phase 9 — all checks #1-#19 active (check #15 fully implemented).")
+    print("validate_assets.py: all checks #1-#20 active.")
     check_1(); check_2(); check_3(); check_4(); check_5()
     check_6(); check_7(); check_8(); check_9(); check_10()
     check_11(); check_12(); check_13(); check_14(); check_15()
-    check_16(); check_17(); check_18(); check_19()
+    check_16(); check_17(); check_18(); check_19(); check_20()
