@@ -274,57 +274,32 @@ int main(int argc, char** argv)
         }
     }
 
-    // --- Ground plane: 16×16 grid of 20 m × 20 m quads ---
-    // 256 quads total → 1024 vertices (well within u16 index limit).
-    // UV repeats 4× per quad so the texture tiles densely at low angle.
+    // --- Ground plane via IGeometryCreator::createPlaneMesh() ---
+    // createPlaneMesh() guarantees correct vertex winding (top face visible
+    // from +Y) and proper UV mapping — avoids the hand-rolled winding errors
+    // that caused the previous gray-screen regression.
+    // 16×16 tiles of 20 m each = 320 m × 320 m total.
+    // UV repeats 4× per tile so the checkerboard tiles densely; the grazing
+    // camera angle (y=20, z=-180) makes anisotropy differences obvious.
     {
-        const int   TILES   = 16;
-        const float TILE_SZ = 20.0f;
-        const float UV_REP  = 4.0f;
-        const float HALF    = (TILES * TILE_SZ) * 0.5f;
-
-        irr::scene::SMesh*       gmesh = new irr::scene::SMesh();
-        irr::scene::SMeshBuffer* gbuf  = new irr::scene::SMeshBuffer();
-
-        const irr::video::SColor white(255, 255, 255, 255);
-        for (int gz = 0; gz < TILES; ++gz)
+        const irr::scene::IGeometryCreator* geo = smgr->getGeometryCreator();
+        irr::scene::IMesh* planeMesh = geo->createPlaneMesh(
+            irr::core::dimension2df(20.0f, 20.0f),   // tile size in world units
+            irr::core::dimension2du(16u,   16u),      // 16×16 tile grid
+            nullptr,                                   // no material baked in
+            irr::core::dimension2df(4.0f,  4.0f));    // UV repeats 4× per tile
+        if (planeMesh)
         {
-            for (int gx = 0; gx < TILES; ++gx)
+            irr::scene::IMeshSceneNode* gn = smgr->addMeshSceneNode(planeMesh);
+            planeMesh->drop();
+            if (gn)
             {
-                float x0 = gx * TILE_SZ - HALF;
-                float z0 = gz * TILE_SZ - HALF;
-                float x1 = x0 + TILE_SZ;
-                float z1 = z0 + TILE_SZ;
-                irr::u16 base = static_cast<irr::u16>(gbuf->Vertices.size());
-                gbuf->Vertices.push_back(irr::video::S3DVertex(
-                    x0, 0.f, z0,  0.f, 1.f, 0.f,  white,  0.f,    0.f));
-                gbuf->Vertices.push_back(irr::video::S3DVertex(
-                    x1, 0.f, z0,  0.f, 1.f, 0.f,  white,  UV_REP, 0.f));
-                gbuf->Vertices.push_back(irr::video::S3DVertex(
-                    x1, 0.f, z1,  0.f, 1.f, 0.f,  white,  UV_REP, UV_REP));
-                gbuf->Vertices.push_back(irr::video::S3DVertex(
-                    x0, 0.f, z1,  0.f, 1.f, 0.f,  white,  0.f,    UV_REP));
-                gbuf->Indices.push_back(base);
-                gbuf->Indices.push_back(static_cast<irr::u16>(base + 1));
-                gbuf->Indices.push_back(static_cast<irr::u16>(base + 2));
-                gbuf->Indices.push_back(base);
-                gbuf->Indices.push_back(static_cast<irr::u16>(base + 2));
-                gbuf->Indices.push_back(static_cast<irr::u16>(base + 3));
+                if (checkerTex) { gn->setMaterialTexture(0, checkerTex); }
+                gn->setMaterialFlag(irr::video::EMF_LIGHTING,          false);
+                gn->setMaterialFlag(irr::video::EMF_BILINEAR_FILTER,   true);
+                gn->setMaterialFlag(irr::video::EMF_TRILINEAR_FILTER,  true);
+                gn->setMaterialFlag(irr::video::EMF_BACK_FACE_CULLING, false);
             }
-        }
-        gbuf->recalculateBoundingBox();
-        gmesh->addMeshBuffer(gbuf);
-        gbuf->drop();
-        gmesh->recalculateBoundingBox();
-
-        irr::scene::IMeshSceneNode* gn = smgr->addMeshSceneNode(gmesh);
-        gmesh->drop();
-        if (gn)
-        {
-            if (checkerTex) { gn->setMaterialTexture(0, checkerTex); }
-            gn->setMaterialFlag(irr::video::EMF_LIGHTING,         false);
-            gn->setMaterialFlag(irr::video::EMF_BILINEAR_FILTER,  true);
-            gn->setMaterialFlag(irr::video::EMF_TRILINEAR_FILTER, true);
         }
     }
 
