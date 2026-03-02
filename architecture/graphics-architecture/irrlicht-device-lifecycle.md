@@ -15,8 +15,8 @@ uiManager->update(realDeltaSeconds);    // advance UI timer state (notification 
 terrainSystem->update(realDeltaSeconds); // process at most 2 terrain LOD rebuilds per frame (Phase 5); see procedural-terrain.md
 driver->beginScene(true, true, irr::video::SColor(255, 100, 149, 237));  // sky-blue clear color (cornflower blue) — provides visual feedback that the 3D viewport is active; pure black (0,0,0) is indistinguishable from "nothing rendered"
 sceneManager->drawAll();        // 3D scene (terrain, buildings, vehicles, sky)
-// (Phase 9b) hover tile highlight — on top of 3D scene, below UI; omit if m_hoveredTileMesh is null:
-if (m_hoveredTileMesh) driver->drawMeshBuffer(m_hoveredTileMesh->getMeshBuffer(0));
+// (Phase 9b) hover tile highlight — on top of 3D scene, below UI; omit if mesh absent or hidden:
+if (m_hoveredTileMesh && m_hoverVisible) driver->drawMeshBuffer(m_hoveredTileMesh->getMeshBuffer(0));
 uiManager->draw();              // 2D HUD: per-panel Z-order state update (visibility, text, alpha)
 guiEnvironment->drawAll();      // Render all visible GUI elements (buttons, labels, etc.)
 driver->endScene();
@@ -25,11 +25,33 @@ driver->endScene();
 `IrrlichtRenderer::drawScene()` implements a rendering sequence between `beginScene()` and `endScene()`:
 
 1. `sceneManager->drawAll()` — renders the 3D scene (terrain, buildings, vehicles, sky).
-2. (Phase 9b) Hover tile highlight — if `m_hoveredTileMesh` is non-null, call `driver->drawMeshBuffer(m_hoveredTileMesh->getMeshBuffer(0))` to render the hover highlight quad on top of the 3D scene and below all UI elements.
+2. (Phase 9b) Hover tile highlight — if `m_hoveredTileMesh` is non-null AND `m_hoverVisible`
+   is `true`, call `driver->drawMeshBuffer(m_hoveredTileMesh->getMeshBuffer(0))` to render the
+   hover highlight quad on top of the 3D scene and below all UI elements.
+
+   **Hover highlight mesh lifecycle**: `IrrlichtRenderer` owns two members for the hover
+   highlight:
+
+   - `SMesh* m_hoveredTileMesh` — allocated once in the `IrrlichtRenderer` constructor,
+     **never nulled during gameplay**, and never dropped until the destructor.
+   - `bool m_hoverVisible{false}` — set to `true` when a valid tile is hovered; set to
+     `false` on a clear request (`tileX == -1`).
+
+   `setTileHoverHighlight(tileX, tileZ, colour)` behaves as follows:
+
+   - **Clear request (`tileX == -1`)**: sets `m_hoverVisible = false`. Does NOT touch
+     `m_hoveredTileMesh` — the pointer remains valid and the buffer is retained for reuse.
+   - **Normal call (valid tile)**: updates vertex positions and colours in the existing buffer,
+     calls `recalculateBoundingBox()` on the buffer, then sets `m_hoverVisible = true`.
+
+   `m_hoveredTileMesh` is dropped **only** in the `IrrlichtRenderer` destructor via `->drop()`.
+   Setting the pointer to `nullptr` on clear is a bug — it loses the only reference to the
+   allocated buffer, causing a memory leak.
+
 3. `uiManager->draw()` — calls each panel's `draw()` method in explicit Z-order (slots 1–10 per `ui-manager.md`). Each panel's `draw()` updates element state (visibility, text, alpha) but does NOT render pixels.
 4. `guiEnvironment->drawAll()` — renders all visible `IGUIElement` nodes. Because step 3 has already set the correct visibility on every element (non-active panels hide theirs), only the intended elements are painted.
 
-The Z-order concern (scrim must cover panels; modal must be topmost) is handled by visibility management in step 3 — panels that should be behind have their elements hidden before `drawAll()` paints. `UIManager::draw()` must be called before `guiEnvironment->drawAll()` — calling it after would render stale element state. The mandatory 10-step per-frame sequence is: `audioSystem->syncListenerToCamera(cam)` → `audioSystem->update(realDeltaSeconds)` → `UIManager::update(realDeltaSeconds)` → `terrainSystem->update(realDeltaSeconds)` → `driver->beginScene()` → `sceneManager->drawAll()` → hover tile highlight `drawMeshBuffer()` if active (Phase 9b) → `UIManager::draw()` → `guiEnvironment->drawAll()` → `driver->endScene()`. The two audio calls must come before `beginScene()` so that the listener position and audio command queue are fully updated before rendering begins. `terrainSystem->update()` is also a pre-render step — it processes queued LOD rebuilds before the scene is drawn. The Irrlicht-internal ordering (`beginScene` → `drawAll` → `draw` → `guiEnv->drawAll` → `endScene`) is immutable; the audio and terrain setup calls are pre-steps that must not be moved inside the Irrlicht render block. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API.
+The Z-order concern (scrim must cover panels; modal must be topmost) is handled by visibility management in step 3 — panels that should be behind have their elements hidden before `drawAll()` paints. `UIManager::draw()` must be called before `guiEnvironment->drawAll()` — calling it after would render stale element state. The mandatory 10-step per-frame sequence is: `audioSystem->syncListenerToCamera(cam)` → `audioSystem->update(realDeltaSeconds)` → `UIManager::update(realDeltaSeconds)` → `terrainSystem->update(realDeltaSeconds)` → `driver->beginScene()` → `sceneManager->drawAll()` → hover tile highlight `drawMeshBuffer()` if `m_hoveredTileMesh && m_hoverVisible` (Phase 9b) → `UIManager::draw()` → `guiEnvironment->drawAll()` → `driver->endScene()`. The two audio calls must come before `beginScene()` so that the listener position and audio command queue are fully updated before rendering begins. `terrainSystem->update()` is also a pre-render step — it processes queued LOD rebuilds before the scene is drawn. The Irrlicht-internal ordering (`beginScene` → `drawAll` → `draw` → `guiEnv->drawAll` → `endScene`) is immutable; the audio and terrain setup calls are pre-steps that must not be moved inside the Irrlicht render block. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API.
 
 ## IrrlichtRenderer Late-Binding Pattern
 
