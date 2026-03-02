@@ -118,4 +118,8 @@
   The camera target should be set to the terrain center (mapTilesX × cellSize / 2) to avoid
   starting with the camera pointed at the terrain corner.
 
+- **Heightmap Query API**:
+
+  `TerrainSystem::getHeightAt(int tileX, int tileZ)` returns the exact LOD0 heightmap height sample at the grid-centre of tile `(tileX, tileZ)`. **No interpolation is performed**. This method always queries the persistent LOD0 heightmap array stored in `TerrainSystem`, never the active scene-node mesh geometry (which may be rendered at LOD1 or LOD2). This contract is authoritative for ray-march cursor-to-terrain intersection queries (e.g. `pickTerrainTile()`): the query will always return the exact grid-centre height, regardless of which LOD level is currently rendered for that tile. Cursor positions that fall between grid-centres will not interpolate; callers requiring bilinear-interpolated heights for sub-tile precision must implement interpolation on top of multiple `getHeightAt()` calls.
+
 - Chunks loaded/unloaded based on camera distance
