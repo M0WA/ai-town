@@ -197,6 +197,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Scene Graph Ownership | [architecture/graphics-architecture/scene-graph-ownership.md](architecture/graphics-architecture/scene-graph-ownership.md) |
 | Texture Cache | [architecture/graphics-architecture/texture-cache.md](architecture/graphics-architecture/texture-cache.md) |
 | Shader Loading | [architecture/graphics-architecture/shader-loading.md](architecture/graphics-architecture/shader-loading.md) |
+| Benchmark Tool | [architecture/graphics-architecture/benchmark-tool.md](architecture/graphics-architecture/benchmark-tool.md) |
 
 #### Audio Architecture
 

@@ -63,6 +63,7 @@ All files contain the full verbatim content from the master spec (`CLAUDE.md`).
 | Scene Graph Ownership Policy | [graphics-architecture/scene-graph-ownership.md](graphics-architecture/scene-graph-ownership.md) |
 | Texture Cache | [graphics-architecture/texture-cache.md](graphics-architecture/texture-cache.md) |
 | Shader Loading | [graphics-architecture/shader-loading.md](graphics-architecture/shader-loading.md) |
+| Benchmark Tool (VRAM/FPS/Anisotropy Profiler) | [graphics-architecture/benchmark-tool.md](graphics-architecture/benchmark-tool.md) |
 
 ---
 
