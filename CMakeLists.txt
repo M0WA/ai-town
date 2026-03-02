@@ -388,6 +388,53 @@ add_custom_command(TARGET aitown POST_BUILD
 )
 
 # ============================================================================
+# aitown_benchmark — standalone benchmark for VRAM/FPS/anisotropy profiling
+# Phase 9 deliverable: VRAM budget compliance tool.
+# Links aitown_render (which already links GLEW::GLEW, Irrlicht PRIVATE).
+# GLEW::GLEW and Irrlicht must be linked directly here because aitown_render
+# links them PRIVATE — their headers and symbols do not propagate to consumers.
+# Irrlicht transitive deps (Linux only) — same rationale as aitown executable.
+# Not run in CI (hardware-dependent); run manually before shipping.
+# See architecture/graphics-architecture/benchmark-tool.md for full spec.
+# ============================================================================
+add_executable(aitown_benchmark
+    src/benchmark/benchmark_main.cpp
+    src/rendering/VRAMProfiler.cpp
+)
+target_link_libraries(aitown_benchmark PRIVATE aitown_render GLEW::GLEW Irrlicht)
+target_include_directories(aitown_benchmark PRIVATE src/ ${CMAKE_SOURCE_DIR})
+target_compile_definitions(aitown_benchmark PRIVATE
+    AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+)
+# Irrlicht transitive deps (Linux only) — see find_package block above for rationale.
+if(UNIX AND NOT APPLE)
+    target_link_libraries(aitown_benchmark PRIVATE
+        JPEG::JPEG
+        PNG::PNG
+        ZLIB::ZLIB
+        BZip2::BZip2
+    )
+    if(XXFV86VM_LIB)
+        target_link_libraries(aitown_benchmark PRIVATE ${XXFV86VM_LIB})
+    endif()
+endif()
+# Windows: copy Irrlicht.dll and GLEW32.dll next to the benchmark binary.
+if(WIN32)
+    add_custom_command(TARGET aitown_benchmark POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:Irrlicht>
+            $<TARGET_FILE_DIR:aitown_benchmark>
+        COMMENT "Copying Irrlicht.dll to aitown_benchmark output"
+    )
+    add_custom_command(TARGET aitown_benchmark POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:GLEW::GLEW>
+            $<TARGET_FILE_DIR:aitown_benchmark>
+        COMMENT "Copying GLEW32.dll to aitown_benchmark output"
+    )
+endif()
+
+# ============================================================================
 # TEST TARGETS
 # Each test target links both GTest and RapidCheck (proactively — removing later
 # is trivial; omitting causes a link failure if property tests are added later).

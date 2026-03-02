@@ -1,0 +1,539 @@
+// benchmark_main.cpp — AI Town standalone benchmark tool.
+//
+// Measures FPS and VRAM usage across anisotropic filter levels and recommends
+// optimal settings for the game based on hardware capability.
+//
+// Build: linked as aitown_benchmark executable (see CMakeLists.txt).
+// Run:   ./build/aitown_benchmark [--frames N] [--target-fps N] [--width W] [--height H] [--json]
+//
+// Include order: GLEW before Irrlicht (project convention — GLEW symbol duplication mitigation).
+
+#include <GL/glew.h>
+#include <irrlicht.h>
+
+#include "rendering/VRAMProfiler.h"
+
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <string>
+#include <vector>
+
+// ---------------------------------------------------------------------------
+// GL constants that may be absent from older GLEW installs
+// ---------------------------------------------------------------------------
+#ifndef GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
+#define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
+#endif
+
+// ---------------------------------------------------------------------------
+// VRAM budget thresholds — per architecture/asset-standards/2d-texture-standards.md
+// ---------------------------------------------------------------------------
+static constexpr float kSceneVRAMBudgetMB = 170.0f;  // scene VRAM limit (MB)
+
+// Anisotropy spec minimums — per 2d-texture-standards.md §Anisotropic filtering
+static constexpr int kSpecMinTerrainAniso    = 8;  // terrain base textures + buildings
+static constexpr int kSpecMinRoadPropAniso   = 4;  // roads, props, normals, specular
+
+// ---------------------------------------------------------------------------
+// CLI options
+// ---------------------------------------------------------------------------
+struct BenchmarkOptions {
+    int   frames    = 200;
+    int   targetFPS = 30;
+    int   width     = 1280;
+    int   height    = 720;
+    bool  jsonOut   = false;
+};
+
+static void printUsage(const char* prog)
+{
+    std::printf(
+        "Usage: %s [options]\n"
+        "  --frames N       frames to render per anisotropy level (default: 200)\n"
+        "  --target-fps N   minimum acceptable FPS for recommendations (default: 30)\n"
+        "  --width W        window width (default: 1280)\n"
+        "  --height H       window height (default: 720)\n"
+        "  --json           also write results to benchmark_results.json\n"
+        "  --help           print this usage message\n",
+        prog
+    );
+}
+
+static bool parseArgs(int argc, char** argv, BenchmarkOptions& opts)
+{
+    for (int i = 1; i < argc; ++i)
+    {
+        if (std::strcmp(argv[i], "--help") == 0)
+        {
+            return false;  // caller will print usage and exit 0
+        }
+        else if (std::strcmp(argv[i], "--json") == 0)
+        {
+            opts.jsonOut = true;
+        }
+        else if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc)
+        {
+            opts.frames = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "--target-fps") == 0 && i + 1 < argc)
+        {
+            opts.targetFPS = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "--width") == 0 && i + 1 < argc)
+        {
+            opts.width = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "--height") == 0 && i + 1 < argc)
+        {
+            opts.height = std::atoi(argv[++i]);
+        }
+        else
+        {
+            std::printf("Unknown option: %s\n", argv[i]);
+            return false;
+        }
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Per-level result
+// ---------------------------------------------------------------------------
+struct LevelResult {
+    int   anisotropy;
+    float avgFPS;
+    float minFPS;
+    float maxFPS;
+    float vramUsedMB;  // -1.0f if unavailable
+};
+
+// ---------------------------------------------------------------------------
+// Apply anisotropy to all materials on a scene node (recursive)
+// ---------------------------------------------------------------------------
+static void applyAnisotropyToNode(irr::scene::ISceneNode* node, irr::u32 level)
+{
+    if (!node) { return; }
+
+    irr::u32 matCount = node->getMaterialCount();
+    for (irr::u32 m = 0; m < matCount; ++m)
+    {
+        node->getMaterial(m).AnisotropicFilter = static_cast<irr::u8>(level);
+    }
+    for (auto* child : node->getChildren())
+    {
+        applyAnisotropyToNode(child, level);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Escape a string for JSON output (minimal — printable ASCII only)
+// ---------------------------------------------------------------------------
+static std::string jsonEscape(const std::string& s)
+{
+    std::string out;
+    out.reserve(s.size() + 4);
+    for (char c : s)
+    {
+        if      (c == '"')  { out += "\\\""; }
+        else if (c == '\\') { out += "\\\\"; }
+        else                { out += c; }
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
+int main(int argc, char** argv)
+{
+    BenchmarkOptions opts;
+    bool argsOk = parseArgs(argc, argv, opts);
+    if (!argsOk)
+    {
+        printUsage(argv[0]);
+        return 0;
+    }
+
+    std::printf("=== AI Town Benchmark ===\n");
+    std::printf("Config: %d frames/level, target FPS >= %d, window %dx%d\n\n",
+        opts.frames, opts.targetFPS, opts.width, opts.height);
+
+    // -----------------------------------------------------------------------
+    // 1. Create Irrlicht device (EDT_OPENGL, no vsync)
+    // -----------------------------------------------------------------------
+    irr::SIrrlichtCreationParameters params;
+    params.DriverType       = irr::video::EDT_OPENGL;
+    params.WindowSize       = irr::core::dimension2d<irr::u32>(
+                                  static_cast<irr::u32>(opts.width),
+                                  static_cast<irr::u32>(opts.height));
+    params.Bits             = 32;
+    params.ZBufferBits      = 24;
+    params.Fullscreen       = false;
+    params.Stencilbuffer    = true;
+    params.AntiAlias        = 4;
+    params.Vsync            = false;
+    params.EventReceiver    = nullptr;
+    params.WindowTitle      = L"AI Town Benchmark";
+
+    irr::IrrlichtDevice* device = irr::createDeviceEx(params);
+    if (!device)
+    {
+        std::fprintf(stderr, "ERROR: Failed to create Irrlicht device (EDT_OPENGL). "
+                             "Ensure a display is available.\n");
+        return 1;
+    }
+
+    irr::video::IVideoDriver*  driver = device->getVideoDriver();
+    irr::scene::ISceneManager* smgr   = device->getSceneManager();
+
+    // -----------------------------------------------------------------------
+    // 2. Init GLEW and VRAMProfiler
+    // -----------------------------------------------------------------------
+    GLenum glewErr = glewInit();
+    if (glewErr != GLEW_OK)
+    {
+        std::fprintf(stderr, "WARNING: glewInit() failed: %s — VRAM queries unavailable.\n",
+                     reinterpret_cast<const char*>(glewGetErrorString(glewErr)));
+    }
+
+    VRAMProfiler vram;
+    vram.init();
+
+    // -----------------------------------------------------------------------
+    // 3. Query hardware limits
+    // -----------------------------------------------------------------------
+    const char* glVendor   = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
+    const char* glRenderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+    const char* glVersion  = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    if (!glVendor)   { glVendor   = "(unknown)"; }
+    if (!glRenderer) { glRenderer = "(unknown)"; }
+    if (!glVersion)  { glVersion  = "(unknown)"; }
+
+    // Query hardware max anisotropy.
+    GLfloat hwMaxAniso = 1.0f;
+    if (glewIsSupported("GL_EXT_texture_filter_anisotropic"))
+    {
+        glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &hwMaxAniso);
+    }
+    int hwMaxAnisoInt = static_cast<int>(hwMaxAniso);
+
+    std::printf("GPU Vendor:    %s\n", glVendor);
+    std::printf("GPU Renderer:  %s\n", glRenderer);
+    std::printf("GL Version:    %s\n", glVersion);
+    std::printf("VRAM Method:   %s\n", vram.methodName());
+    if (vram.totalMB() >= 0.0f)
+    {
+        std::printf("Total VRAM:    %.0f MB\n", vram.totalMB());
+    }
+    else
+    {
+        std::printf("Total VRAM:    unavailable\n");
+    }
+    std::printf("Max Aniso:     %d×\n\n", hwMaxAnisoInt);
+
+    // -----------------------------------------------------------------------
+    // 4. Load scene
+    // -----------------------------------------------------------------------
+    const char* meshPath = AITOWN_ASSETS_DIR "/3d/buildings/res_low_01_lod0.b3d";
+    irr::scene::IAnimatedMeshSceneNode* buildingNode = nullptr;
+    irr::scene::IAnimatedMesh* mesh = smgr->getMesh(meshPath);
+    if (mesh)
+    {
+        buildingNode = smgr->addAnimatedMeshSceneNode(mesh);
+        if (buildingNode)
+        {
+            buildingNode->setPosition(irr::core::vector3df(0.0f, 0.0f, 0.0f));
+        }
+        else
+        {
+            std::printf("WARNING: addAnimatedMeshSceneNode() returned null for '%s'.\n", meshPath);
+        }
+    }
+    else
+    {
+        std::printf("WARNING: Could not load mesh '%s'. Benchmarking with empty scene.\n", meshPath);
+    }
+
+    // Directional light.
+    irr::scene::ILightSceneNode* light = smgr->addLightSceneNode(
+        nullptr,
+        irr::core::vector3df(100.0f, 200.0f, -100.0f));
+    if (light)
+    {
+        irr::video::SLight lightData;
+        lightData.Type      = irr::video::ELT_DIRECTIONAL;
+        lightData.Direction = irr::core::vector3df(-1.0f, -2.0f, 1.0f).normalize();
+        lightData.DiffuseColor = irr::video::SColorf(1.0f, 0.98f, 0.90f, 1.0f);
+        lightData.AmbientColor = irr::video::SColorf(0.15f, 0.15f, 0.20f, 1.0f);
+        light->setLightData(lightData);
+    }
+
+    // Camera looking at the scene origin from slightly above and behind.
+    irr::scene::ICameraSceneNode* camera = smgr->addCameraSceneNode(
+        nullptr,
+        irr::core::vector3df(0.0f, 50.0f, -100.0f),  // position
+        irr::core::vector3df(0.0f,  0.0f,    0.0f)   // look-at
+    );
+    (void)camera;  // held by scene manager
+
+    // -----------------------------------------------------------------------
+    // 5. Determine anisotropy test levels (skip levels beyond hardware max)
+    // -----------------------------------------------------------------------
+    const int kTestLevels[] = {1, 2, 4, 8, 16};
+    const int kNumTestLevels = static_cast<int>(sizeof(kTestLevels) / sizeof(kTestLevels[0]));
+
+    std::printf("%-12s  %10s  %10s  %10s  %10s\n",
+        "Anisotropy", "Avg FPS", "Min FPS", "Max FPS", "VRAM (MB)");
+    std::printf("%-12s  %10s  %10s  %10s  %10s\n",
+        "----------", "-------", "-------", "-------", "---------");
+
+    std::vector<LevelResult> results;
+    results.reserve(kNumTestLevels);
+
+    for (int li = 0; li < kNumTestLevels; ++li)
+    {
+        int level = kTestLevels[li];
+        if (level > hwMaxAnisoInt)
+        {
+            std::printf("  [ANISOx%2d]  (skipped — exceeds hardware max %d×)\n",
+                level, hwMaxAnisoInt);
+            continue;
+        }
+
+        // Apply anisotropy level to all materials.
+        irr::u32 uLevel = static_cast<irr::u32>(level);
+        if (buildingNode)
+        {
+            applyAnisotropyToNode(buildingNode, uLevel);
+        }
+        // Also apply globally via driver material — affects state for subsequent draws.
+        irr::video::SMaterial globalMat;
+        globalMat.AnisotropicFilter = static_cast<irr::u8>(level);
+        driver->setMaterial(globalMat);
+
+        // Warm-up: 20 frames not timed.
+        for (int f = 0; f < 20; ++f)
+        {
+            if (!device->run()) { break; }
+            driver->beginScene(true, true, irr::video::SColor(255, 30, 30, 40));
+            smgr->drawAll();
+            driver->endScene();
+        }
+
+        // Measurement pass.
+        float minFrameTime =  1e30f;
+        float maxFrameTime = -1e30f;
+        float totalTime    =  0.0f;
+        int   frameCount   =  0;
+
+        for (int f = 0; f < opts.frames; ++f)
+        {
+            if (!device->run()) { break; }
+
+            auto t0 = std::chrono::steady_clock::now();
+            driver->beginScene(true, true, irr::video::SColor(255, 30, 30, 40));
+            smgr->drawAll();
+            driver->endScene();
+            auto t1 = std::chrono::steady_clock::now();
+
+            float dt = std::chrono::duration<float>(t1 - t0).count();
+            if (dt < minFrameTime) { minFrameTime = dt; }
+            if (dt > maxFrameTime) { maxFrameTime = dt; }
+            totalTime += dt;
+            ++frameCount;
+        }
+
+        if (frameCount == 0) { break; }
+
+        float avgFrameTime = totalTime / static_cast<float>(frameCount);
+        float avgFPS = (avgFrameTime > 0.0f) ? (1.0f / avgFrameTime) : 0.0f;
+        float minFPS = (maxFrameTime > 0.0f) ? (1.0f / maxFrameTime) : 0.0f;
+        float maxFPS = (minFrameTime > 0.0f) ? (1.0f / minFrameTime) : 0.0f;
+
+        float usedMB = vram.usedMB();
+
+        LevelResult res;
+        res.anisotropy  = level;
+        res.avgFPS      = avgFPS;
+        res.minFPS      = minFPS;
+        res.maxFPS      = maxFPS;
+        res.vramUsedMB  = usedMB;
+        results.push_back(res);
+
+        // Print row.
+        if (usedMB >= 0.0f)
+        {
+            std::printf("  [ANISOx%2d]  avg=%6.1f fps  min=%6.1f fps  max=%6.1f fps  VRAM=%6.1f MB\n",
+                level, avgFPS, minFPS, maxFPS, usedMB);
+        }
+        else
+        {
+            std::printf("  [ANISOx%2d]  avg=%6.1f fps  min=%6.1f fps  max=%6.1f fps  VRAM=unavail\n",
+                level, avgFPS, minFPS, maxFPS);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 6. Recommendation engine
+    // -----------------------------------------------------------------------
+    std::printf("\n=== Recommended Settings for this GPU ===\n");
+
+    // Find the highest anisotropy level where:
+    //   avgFPS >= targetFPS  AND  vramUsedMB <= kSceneVRAMBudgetMB (or VRAM unavailable).
+    const LevelResult* recommended = nullptr;
+    for (int i = static_cast<int>(results.size()) - 1; i >= 0; --i)
+    {
+        const LevelResult& r = results[static_cast<size_t>(i)];
+        bool fpsOk  = (r.avgFPS >= static_cast<float>(opts.targetFPS));
+        bool vramOk = (r.vramUsedMB < 0.0f) || (r.vramUsedMB <= kSceneVRAMBudgetMB);
+        if (fpsOk && vramOk)
+        {
+            recommended = &r;
+            break;
+        }
+    }
+
+    bool lowFPSWarning = false;
+    if (!recommended && !results.empty())
+    {
+        // No level met FPS threshold — recommend lowest (1×) with warning.
+        recommended  = &results.front();
+        lowFPSWarning = true;
+    }
+
+    if (!recommended)
+    {
+        std::printf("No results recorded — no recommendation available.\n");
+    }
+    else
+    {
+        // Terrain anisotropy: use recommended level, but note spec minimums.
+        int terrainAniso = recommended->anisotropy;
+        int roadAniso    = (terrainAniso >= kSpecMinRoadPropAniso)
+                               ? kSpecMinRoadPropAniso
+                               : terrainAniso;
+
+        std::printf("Terrain anisotropy:        %2d×  (spec minimum: %d×)\n",
+            terrainAniso, kSpecMinTerrainAniso);
+        std::printf("Road/prop/normal/specular: %2d×  (spec minimum: %d×)\n",
+            roadAniso, kSpecMinRoadPropAniso);
+
+        if (recommended->vramUsedMB >= 0.0f)
+        {
+            std::printf("Scene VRAM at recommended: %.1f MB / %.1f MB budget\n",
+                recommended->vramUsedMB, kSceneVRAMBudgetMB);
+        }
+        else
+        {
+            std::printf("Scene VRAM at recommended: unavailable / %.1f MB budget\n",
+                kSceneVRAMBudgetMB);
+        }
+
+        std::printf("Avg FPS at recommended:    %.1f  (target: >=%d)\n",
+            recommended->avgFPS, opts.targetFPS);
+        std::printf("Min FPS at recommended:    %.1f\n",
+            recommended->minFPS);
+
+        bool budgetPass = (recommended->vramUsedMB < 0.0f)
+                       || (recommended->vramUsedMB <= kSceneVRAMBudgetMB);
+        std::printf("Budget: %s  (scene VRAM %s)\n",
+            budgetPass ? "PASS" : "FAIL",
+            budgetPass ? "within 170 MB limit" : "EXCEEDS 170 MB limit");
+
+        if (lowFPSWarning)
+        {
+            std::printf("\nWARNING: No anisotropy level achieved target FPS (%d). "
+                        "Recommending lowest level (1×) — GPU may be underpowered.\n",
+                        opts.targetFPS);
+        }
+
+        if (terrainAniso < kSpecMinTerrainAniso)
+        {
+            std::printf("\nWARNING: Recommended terrain anisotropy (%d×) is below spec minimum (%d×). "
+                        "GPU may not meet AI Town visual quality requirements at target FPS.\n",
+                        terrainAniso, kSpecMinTerrainAniso);
+        }
+
+        if (roadAniso < kSpecMinRoadPropAniso)
+        {
+            std::printf("\nWARNING: Recommended road/prop anisotropy (%d×) is below spec minimum (%d×). "
+                        "GPU may not meet AI Town visual quality requirements at target FPS.\n",
+                        roadAniso, kSpecMinRoadPropAniso);
+        }
+
+        // -------------------------------------------------------------------
+        // 7. JSON output
+        // -------------------------------------------------------------------
+        if (opts.jsonOut)
+        {
+            std::ofstream js("benchmark_results.json");
+            if (js.is_open())
+            {
+                js << "{\n";
+                js << "  \"gpu\": \"" << jsonEscape(glRenderer) << "\",\n";
+                if (vram.totalMB() >= 0.0f)
+                    js << "  \"total_vram_mb\": " << vram.totalMB() << ",\n";
+                else
+                    js << "  \"total_vram_mb\": null,\n";
+
+                // Compact method name for JSON (strip long description).
+                std::string methodTag;
+                switch (vram.method())
+                {
+                case VRAMProfiler::Method::NVX:         methodTag = "NVX";         break;
+                case VRAMProfiler::Method::ATI:         methodTag = "ATI";         break;
+                case VRAMProfiler::Method::MANUAL:      methodTag = "MANUAL";      break;
+                case VRAMProfiler::Method::UNAVAILABLE: methodTag = "UNAVAILABLE"; break;
+                default:                                methodTag = "UNKNOWN";     break;
+                }
+                js << "  \"vram_method\": \"" << methodTag << "\",\n";
+
+                js << "  \"results\": [\n";
+                for (size_t ri = 0; ri < results.size(); ++ri)
+                {
+                    const LevelResult& r = results[ri];
+                    js << "    {";
+                    js << "\"anisotropy\": " << r.anisotropy << ", ";
+                    js << "\"avg_fps\": "    << r.avgFPS     << ", ";
+                    js << "\"min_fps\": "    << r.minFPS     << ", ";
+                    js << "\"max_fps\": "    << r.maxFPS     << ", ";
+                    if (r.vramUsedMB >= 0.0f)
+                        js << "\"vram_used_mb\": " << r.vramUsedMB;
+                    else
+                        js << "\"vram_used_mb\": null";
+                    js << "}";
+                    if (ri + 1 < results.size()) { js << ","; }
+                    js << "\n";
+                }
+                js << "  ],\n";
+
+                js << "  \"recommendation\": {\n";
+                js << "    \"terrain_anisotropy\": " << terrainAniso << ",\n";
+                js << "    \"road_prop_anisotropy\": " << roadAniso << ",\n";
+                if (recommended->vramUsedMB >= 0.0f)
+                    js << "    \"scene_vram_mb\": " << recommended->vramUsedMB << ",\n";
+                else
+                    js << "    \"scene_vram_mb\": null,\n";
+                js << "    \"avg_fps\": " << recommended->avgFPS << ",\n";
+                js << "    \"budget_pass\": " << (budgetPass ? "true" : "false") << "\n";
+                js << "  }\n";
+                js << "}\n";
+
+                std::printf("\nJSON results written to benchmark_results.json\n");
+            }
+            else
+            {
+                std::fprintf(stderr, "WARNING: Could not open benchmark_results.json for writing.\n");
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 8. Cleanup
+    // -----------------------------------------------------------------------
+    device->drop();
+
+    return 0;
+}
