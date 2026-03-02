@@ -80,16 +80,23 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   - Build a screen-to-world ray using Irrlicht's scene manager collision system:
     `smgr->getSceneCollisionManager()->getRayFromScreenCoordinates(pos, camera)`.
   - Intersect the ray with the terrain heightmap using a linear march (step size = `cellSize / 2`;
-    maximum 4096 steps or until the ray exits map bounds). At each step, sample height via
-    `TerrainChunk::getHeightAt(worldX, worldZ)` (the existing heightmap query API from Phase 5).
+    maximum 4096 steps or until the ray exits map bounds). At each step, convert the current
+    world-space ray position to tile indices (`stepTileX = static_cast<int>(rayX / cellSize)`,
+    `stepTileZ = static_cast<int>(rayZ / cellSize)`), clamp to map bounds, then sample height
+    via `m_terrain->getHeightAt(stepTileX, stepTileZ)` (the `ITerrainQuery` interface method
+    that `TerrainSystem` implements, injected via `setTerrainQuery()`). `getHeightAt()` takes
+    integer tile indices, not world-space floats — the conversion must happen at every march step.
   - Convert the world-space hit point to tile grid coordinates:
     `tileX = static_cast<int>(hitX / cellSize)`, `tileZ = static_cast<int>(hitZ / cellSize)`.
   - Clamp to map bounds `[0, mapTilesX-1] × [0, mapTilesZ-1]`; return false if no hit found.
-  - `IrrlichtRenderer` must store a non-owning pointer to `TerrainSystem` (set via a new method
-    `setTerrainSystem(TerrainSystem* ts)` called from `main.cpp` after terrain generation).
-  - **NOTE**: `IrrlichtRenderer` forward-declares `TerrainSystem`; the full include lives in
-    `.cpp` only to preserve the Irrlicht-free nature of `IRenderer.h`. (ref:
-    `architecture/graphics-architecture/procedural-terrain.md`)
+  - `IrrlichtRenderer` must store a non-owning `ITerrainQuery* m_terrain{nullptr}` pointer
+    (set via a new method `setTerrainQuery(ITerrainQuery* terrain)` called from `main.cpp`
+    after terrain generation). `IrrlichtRenderer` does NOT hold a pointer to the concrete
+    `TerrainSystem` class — only to the `ITerrainQuery` interface.
+  - **NOTE**: `IrrlichtRenderer` forward-declares `ITerrainQuery`; the full include of
+    `ITerrainQuery.h` lives in `.cpp` only to preserve the Irrlicht-free nature of `IRenderer.h`.
+    The concrete `TerrainSystem` type is never mentioned in any `IrrlichtRenderer` header. (ref:
+    `architecture/graphics-architecture/procedural-terrain.md` — Heightmap Query API)
 
 - [ ] Add `virtual bool pickTerrainTile(int, int, int&, int&) const = 0;` to `MockRenderer`
   in `tests/rendering/mock_renderer.h`. Default mock action: return `false`. (ref:
@@ -108,32 +115,70 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
   // Render a semi-transparent colour fill overlay for all zoned tiles.
   // Colour scheme: R=0x6000FF00, C=0x600000FF, I=0x60FFFF00 (alpha=0x60 ≈ 38%).
-  // overlay is a flat array of (mapTilesX * mapTilesZ) uint32_t RGBA values;
-  // index = tileZ * mapTilesX + tileX. Value 0 = no overlay (transparent).
+  // sparseOverlay maps (tileZ * mapTilesX + tileX) -> RGBA color for tiles
+  // with a non-zero zone overlay; tiles absent from the map have transparent
+  // (no) overlay. Capped at 100K simultaneous entries for V1.
   // Called once per budget tick when zone layout changes.
   // main-thread-only.
   virtual void setZoneOverlay(int mapTilesX, int mapTilesZ,
-                              const std::vector<uint32_t>& overlay) = 0;
+                              const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) = 0;
   ```
 
   (ref: `architecture/ui-ux/hud-layout.md` — active tool cursor shapes per tool mode;
   `architecture/game-design/zoning-system.md` — zone types R/C/I)
 
-- [ ] Implement `IrrlichtRenderer::setTileHoverHighlight()`: draw a single quad (four vertices at
-  the tile's world corners, Y = terrain height at tile centre, height sampled from
-  `TerrainSystem`) using `IVideoDriver::draw3DLine()` in wireframe style, or a flat overlay mesh
-  using `SMeshBuffer` with `EMT_TRANSPARENT_ALPHA_CHANNEL`. The overlay is re-drawn every frame
-  while a tile is hovered. When `tileX == -1`, clear the highlight (no draw call). (ref:
-  `architecture/graphics-architecture/scene-graph-ownership.md`)
+- [ ] Implement `IrrlichtRenderer::setTileHoverHighlight()`: build a single-quad `SMeshBuffer`
+  with four vertices at the tile's world corners (Y = terrain height at tile centre, sampled
+  from `TerrainSystem`). Set the material type to `EMT_TRANSPARENT_ALPHA_CHANNEL`. Apply the
+  hover RGBA colour to every vertex via `SMeshBuffer::Vertices[i].Color` (one `SColor` per
+  corner). After populating all vertices, call `buf->recalculateBoundingBox()` on the
+  `SMeshBuffer`, then call `m->recalculateBoundingBox()` on the parent `SMesh*`, before passing
+  the mesh to `IVideoDriver::drawMeshBuffer()` (required even when not attaching to the scene
+  graph — the renderer may perform its own frustum check against the bounding box).
+
+  **Memory lifecycle**: `IrrlichtRenderer` stores the hover highlight mesh as a private member
+  `SMesh* m_hoveredTileMesh{nullptr}`. On each call to `setTileHoverHighlight()`:
+  - If `m_hoveredTileMesh` is non-null, call `m_hoveredTileMesh->drop()` and set it to
+    `nullptr` before creating a new mesh.
+  - If `tileX == -1` (clear request): call `m_hoveredTileMesh->drop()` (if non-null), set
+    `m_hoveredTileMesh = nullptr`, and return without creating a new mesh — no draw call is
+    issued.
+  - Otherwise: create the new `SMesh*`, store it in `m_hoveredTileMesh`, and draw it via
+    `IVideoDriver::drawMeshBuffer()` directly in the render pass. The mesh is NOT added to the
+    Irrlicht scene graph (avoids scene graph overhead for per-frame rebuild).
+
+  (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
 
 - [ ] Implement `IrrlichtRenderer::setZoneOverlay()`: maintain an internal `SMesh*` overlay
-  plane (one quad per non-zero cell) rendered with `EMT_TRANSPARENT_ALPHA_CHANNEL`. Rebuild the
-  overlay mesh when `setZoneOverlay()` is called. Drop the old mesh via the standard
-  `SceneEntityManager::destroy()` sequence before rebuilding. (ref:
+  plane (one quad per entry in `sparseOverlay`) rendered with `EMT_TRANSPARENT_ALPHA_CHANNEL`.
+  Rebuild the overlay mesh when `setZoneOverlay()` is called. **Memory management order**:
+  (1) Iterate `sparseOverlay` entries; for each, compute quad position from key
+  `(tileZ * mapTilesX + tileX)` and generate a coloured quad. Out-of-bounds keys
+  (key >= mapTilesX × mapTilesZ) are silently skipped.
+  (2) Build the new `SMesh*` overlay from the valid entries. After populating all vertices
+  across all `SMeshBuffer` quads, call `buf->recalculateBoundingBox()` on each `SMeshBuffer`,
+  then call `m->recalculateBoundingBox()` on the parent `SMesh*`, before attaching the mesh to
+  a scene node — omitting this causes silent frustum culling failures where overlay quads that
+  should be visible are not rendered.
+  (3) If the new mesh is valid: call `SceneEntityManager::destroy(m_overlayNode)` on the
+  previous overlay scene node (if any) to destroy the old node, then attach the new mesh to a
+  new `ISceneNode*` and store it as `m_overlayNode` via `SceneEntityManager`. (4) If mesh
+  construction fails, log error and leave the previous overlay scene node in place. (ref:
   `architecture/graphics-architecture/scene-graph-ownership.md`,
   `architecture/graphics-architecture/texture-cache.md`)
 
-- [ ] Add no-op stubs for `setTileHoverHighlight` and `setZoneOverlay` to `MockRenderer`.
+  **Lifecycle distinction — overlay vs hover highlight**: the zone overlay mesh IS attached to
+  the Irrlicht scene graph as a persistent `ISceneNode*` (stored as `m_overlayNode` via
+  `SceneEntityManager`). On each `setZoneOverlay()` call the OLD scene node is destroyed via
+  `SceneEntityManager::destroy(m_overlayNode)` before the new mesh is created and attached.
+  This is the OPPOSITE of `setTileHoverHighlight()`, which keeps its mesh completely OUT of the
+  scene graph and draws it every frame with `IVideoDriver::drawMeshBuffer()`. The zone overlay
+  uses a scene node because it persists across many frames between placement events — attaching
+  it once and letting the scene graph render it each frame is cheaper than issuing a raw draw
+  call every frame for a mesh that rarely changes.
+
+- [ ] Add no-op stubs for `setTileHoverHighlight` and `setZoneOverlay` (with the sparse-map
+  signature) to `MockRenderer`.
 
 #### D. Game Loop — Per-Frame Hover and Left-Click Dispatch
 
@@ -164,7 +209,7 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 - [ ] **MouseMove handler** (world interaction layer, only when `m_activeTool != None`):
   - Call `m_renderer->pickTerrainTile(event.screenX, event.screenY, tileX, tileZ)`.
   - If hit: compute hover highlight colour per active tool:
-    - Zone: `0x80FFFF00` (semi-transparent yellow)
+    - Zone: `0x80FF00FF` (semi-transparent magenta)
     - Road: `0x8000FFFF` (semi-transparent cyan)
     - Utilities: `0x80FF8000` (semi-transparent orange)
     - Demolish: `0x80FF0000` (semi-transparent red)
@@ -209,16 +254,30 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   `architecture/ui-ux/modal-dialog-system.md`)
 
 - [ ] **Zone sub-panel** (Zone tool active): a compact sub-panel appears immediately to the right
-  of the toolbar (virtual x:80 px, y:64 px) showing the 9 zone-type + density combinations
-  (R/C/I × Low/Medium/High) as a 3×3 button grid. Active selection highlighted. `UIManager`
-  tracks `ZoneType m_selectedZoneType{ZoneType::Residential}` and
+  of the toolbar showing the 9 zone-type + density combinations (R/C/I × Low/Medium/High) as a
+  3×3 button grid. Active selection highlighted. `UIManager` tracks
+  `ZoneType m_selectedZoneType{ZoneType::Residential}` and
   `DensityTier m_selectedDensityTier{DensityTier::Low}`. Sub-panel is hidden when Zone tool is
-  not active. (ref: `architecture/game-design/zoning-system.md`,
-  `architecture/ui-ux/hud-layout.md`)
+  not active.
+
+  **Absolute bounds and layout**:
+  - Top-left anchor: virtual (x:80, y:64). The left edge (x:80) begins 8 px to the right of the
+    toolbar right edge (x:72), so the sub-panel does not overlap the toolbar.
+  - Each button: 64×40 px, with 4 px gap between buttons.
+  - Grid layout: 3 columns (R / C / I) × 3 rows (Low / Med / High), left-to-right, top-to-bottom.
+  - Total width: (64 × 3) + (4 × 2) = 200 px. Total height: (40 × 3) + (4 × 2) = 128 px.
+  - Sub-panel occupies virtual bounds: x:80–280, y:64–192.
+
+  **Rendering**: The Zone sub-panel IS fully rendered in Phase 9b. All 9 buttons are created via
+  `IUIBackend::addButton()` during HUD or UIManager `init()`. Visibility is toggled as a group
+  via `IUIBackend::setElementVisible()` on each button handle: visible when `m_activeTool ==
+  ActiveTool::Zone`, hidden otherwise.
+
+  (ref: `architecture/game-design/zoning-system.md`, `architecture/ui-ux/hud-layout.md`)
 
 - [ ] **Utilities sub-panel** (Utilities tool active): a compact sub-panel appears immediately to
-  the right of the toolbar (virtual x:80 px, y:176 px — aligned with the Utilities button row)
-  showing the four service building types as a 2×2 button grid:
+  the right of the toolbar (aligned with the Utilities button row) showing the four service
+  building types as a 2×2 button grid:
 
   | Column 1 | Column 2 |
   |---|---|
@@ -228,16 +287,40 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   Active selection highlighted. `UIManager` tracks
   `ServiceBuildingType m_selectedServiceBuilding{ServiceBuildingType::PowerPlant}`. Each
   button displays the building name and its placement cost (e.g. "Power Plant $10,000"). Sub-panel
-  is hidden when Utilities tool is not active. (ref:
-  `architecture/game-design/service-coverage.md` — Utilities Tool Placement Design)
+  is hidden when Utilities tool is not active.
+
+  **Absolute bounds and layout**:
+  - Top-left anchor: virtual (x:80, y:176). The left edge (x:80) begins 8 px to the right of
+    the toolbar right edge (x:72), aligned horizontally with the Utilities button row (y:176).
+  - Each button: 96×48 px, with 4 px gap between buttons.
+  - Grid layout: 2 columns × 2 rows, left-to-right, top-to-bottom.
+  - Total width: (96 × 2) + 4 = 196 px. Total height: (48 × 2) + 4 = 100 px.
+  - Sub-panel occupies virtual bounds: x:80–276, y:176–276.
+
+  **Rendering**: The Utilities sub-panel IS fully rendered in Phase 9b. All 4 buttons are created
+  via `IUIBackend::addButton()` during HUD or UIManager `init()`. Visibility is toggled as a
+  group via `IUIBackend::setElementVisible()` on each button handle: visible when `m_activeTool ==
+  ActiveTool::Utilities`, hidden otherwise.
+
+- [ ] Both sub-panels (Zone and Utilities) are fully rendered in Phase 9b — UIManager creates
+  their buttons at `init()` time and shows/hides them based on active tool via
+  `IUIBackend::setElementVisible()`.
+
+  (ref: `architecture/game-design/service-coverage.md` — Utilities Tool Placement Design)
 
 - [ ] **Zone overlay refresh**: after any `placeZone`, `placeRoad`, or `demolishTile` call that
-  succeeds (returns without throwing — `ICitySimulation` mutations are fire-and-forget), rebuild
-  the zone overlay by iterating all tiles via `m_sim->queryTile` for each tile within the
-  viewport, or by maintaining a `std::vector<uint32_t>` overlay array updated incrementally.
-  Incremental update is preferred: at placement, set `overlay[tileZ * mapW + tileX] = colour`;
-  at demolish, clear to 0. Pass to `m_renderer->setZoneOverlay()`. (ref:
-  `architecture/game-design/zoning-system.md`)
+  succeeds (returns without throwing — `ICitySimulation` mutations are fire-and-forget), update
+  the zone overlay using a `std::unordered_map<uint64_t, uint32_t> m_overlayMap` sparse overlay
+  map stored as a private member of `UIManager`, keyed by `(tileZ * mapW + tileX)`. At
+  placement, insert or update the entry: `m_overlayMap[(tileZ * mapW + tileX)] = colour`. At
+  demolish, erase the entry: `m_overlayMap.erase(tileZ * mapW + tileX)`. When calling
+  `m_renderer->setZoneOverlay(mapW, mapH, m_overlayMap)`, UIManager passes `m_overlayMap`
+  directly — the sparse map is the interface contract (tiles absent from the map are
+  transparent). The renderer generates overlay quads only for entries present in the sparse map,
+  capped at 100K simultaneous overlay quads for V1 (entries beyond this cap are silently
+  dropped). On new-game load, UIManager clears `m_overlayMap` and calls
+  `setZoneOverlay(mapW, mapH, {})` (empty sparse map) before the new map's zones are set.
+  (ref: `architecture/game-design/zoning-system.md`)
 
 #### E. `ITerrainQuery` — Tile Height Query (New Method)
 
@@ -246,9 +329,24 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   the tile centre. Returns 0.0f for out-of-bounds coordinates. `TerrainSystem` already exposes
   `getHeightAt` per Phase 5's `TerrainChunk` heightmap query API — Phase 9b promotes this to
   the `ITerrainQuery` interface so the game loop can use it for zone overlay Y-height without
-  a direct dependency on `TerrainSystem`. (ref:
+  a direct dependency on `TerrainSystem`. **LOD Contract**: `getHeightAt(int tileX, int tileZ)`
+  MUST query TerrainSystem's persistent LOD0 heightmap array, never the active scene-node mesh
+  geometry (which may be at LOD1 or LOD2 for distant chunks). The returned value is the exact
+  grid-centre height sample with no interpolation. (ref:
   `architecture/graphics-architecture/procedural-terrain.md` — `TerrainChunk` heightmap query
   API)
+
+- [ ] Extend `ManualTerrainQuery` (`tests/simulation/manual_terrain_query.h`) to implement the
+  new method:
+
+  ```cpp
+  float getHeightAt(int tileX, int tileZ) const override { return 0.0f; }
+  ```
+
+  The stub always returns 0.0f — unit tests that need specific heights inject `MockRenderer`
+  for the renderer path; no Phase 9b test requires `ManualTerrainQuery` to return non-zero
+  heights. This override is required because `getHeightAt()` is pure virtual on `ITerrainQuery`;
+  without it `ManualTerrainQuery` fails to compile, blocking all 14 Phase 9b unit tests.
 
 #### F. `InspectorPanel` — Real Tile Query Wiring
 
@@ -308,6 +406,34 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 - [ ] `WorldInteraction_HoverHighlight_ClearedOnMiss` (unit test): `pickTerrainTile` returns
   false. `EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, 0)).Times(AtLeast(1));`
 
+- [ ] `WorldInteraction_ZonePlacement_SparseOverlay_InsertsEntry` (unit test): construct
+  `UIManager` with `NiceMock<MockCitySimulation>`, `NiceMock<MockRenderer>`,
+  `ManualTerrainQuery` (slope = 0°), `NiceMock<MockUIBackend>`, `ManualClock`. Set active tool
+  to `ActiveTool::Zone`. Stub `MockRenderer::pickTerrainTile` to return `true` at tileX=3,
+  tileZ=4. Send `MouseButtonDown button=0`. After dispatch, capture the `sparseOverlay` argument
+  passed to `setZoneOverlay`. Assert that the captured map contains exactly 1 entry whose key
+  equals `(4 * mapW + 3)` (i.e. the placed tile) and whose value is non-zero.
+  `EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).WillOnce(SaveArg<2>(&capturedMap));`
+
+- [ ] `WorldInteraction_Demolish_SparseOverlay_ErasesEntry` (unit test): place a Zone tile at
+  (3, 4) via a Zone-tool left-click (same fixture as above; tile is now in `m_overlayMap`).
+  Switch active tool to `ActiveTool::Demolish`. Suppress the demolish confirmation modal
+  (Settings "Confirm before demolish" = OFF). Send a second `MouseButtonDown button=0` at
+  (3, 4). Capture the `sparseOverlay` passed to the second `setZoneOverlay` call. Assert that
+  the captured map is empty (the entry was erased on demolish).
+
+- [ ] `WorldInteraction_NewGameLoad_ClearsOverlay` (unit test): pre-populate `m_overlayMap` with
+  at least 3 entries by performing 3 zone placements. Trigger new-game load via
+  `UIManager::onNewGame()` (or equivalent reset call). Assert that `setZoneOverlay` is called
+  with an empty sparse map: the captured `sparseOverlay` argument has `size() == 0`.
+
+- [ ] `WorldInteraction_OverlayCap_100K_StillCalls` (unit test): drive `UIManager` to insert
+  100,000 entries into `m_overlayMap` by calling the internal overlay-insert path directly (or
+  via 100K simulated placements on distinct tiles). Confirm that when a 100,001st entry would be
+  inserted, the cap prevents storage but `setZoneOverlay` is still called (the call is not
+  suppressed). Use `EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AtLeast(1));` and
+  assert the captured map has `size() <= 100000`.
+
 - [ ] All new tests are labelled unit (no `requires-opengl`); added to `ui_tests` CMake target
   via `target_sources(ui_tests PRIVATE tests/ui/world_interaction_test.cpp)`. Do NOT call
   `add_executable` or `aitown_add_tests` again for `ui_tests` (duplicate target error). (ref:
@@ -315,12 +441,20 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
 #### H. `main.cpp` Wiring
 
-- [ ] After `TerrainSystem` is constructed in `main.cpp`, call:
-  - `renderer.setTerrainSystem(&terrainSystem);`
-  - `uiManager.setRenderer(&renderer);`
-  - `uiManager.setTerrainQuery(&terrainSystem);`
-  These calls replace the Phase 8 stub wiring where the UIManager had no renderer or terrain
-  reference. (ref: `architecture/graphics-architecture/irrlicht-device-lifecycle.md`)
+- [ ] After `TerrainSystem` is constructed and before entering the main game loop, call the
+  following methods in this exact order to establish all pointers before the first frame:
+  - **(1)** Call `terrainSystem.generate()` and `terrainSystem.buildAllChunks()` (called on
+    the concrete `TerrainSystem*` instance — these methods are NOT part of the `ITerrainQuery`
+    interface).
+  - **(2)** Call `renderer.setTerrainQuery(&terrainSystem)` (passes `TerrainSystem*` as
+    `ITerrainQuery*`; the renderer stores it as `m_terrain` and calls only `ITerrainQuery`
+    interface methods — no concrete `TerrainSystem` API is used inside `IrrlichtRenderer`).
+  - **(3)** Call `uiManager.setRenderer(&renderer)`.
+  - **(4)** Call `uiManager.setTerrainQuery(&terrainSystem)`.
+
+  This order guarantees all pointers are valid before the first game-loop frame calls
+  `pickTerrainTile()`. These calls replace the Phase 8 stub wiring where the UIManager had no
+  renderer or terrain reference. (ref: `architecture/graphics-architecture/irrlicht-device-lifecycle.md`)
 
 - [ ] In the main game loop (after `uiManager.update(dt)`), call
   `renderer.setZoneOverlay(...)` if the overlay dirty flag is set (set by any successful
@@ -388,7 +522,9 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   times during gameplay
 - Slope guard: when earthworks cost exceeds treasury balance, a Normal toast is shown and
   `placeZone` / `placeRoad` is NOT called
-- All 9 unit tests in `WorldInteractionTest` pass under `ctest -LE "integration|requires-opengl"`
+- All 14 unit tests in `WorldInteractionTest` pass under `ctest -LE "integration|requires-opengl"`
+  (G.1–G.9 plus I—Utilities placement, plus 4 sparse-overlay tests: SparseOverlay_InsertsEntry,
+  Demolish_SparseOverlay_ErasesEntry, NewGameLoad_ClearsOverlay, OverlayCap_100K_StillCalls)
 - `UIManager::getActiveTool()` returns the correct `ActiveTool` after each toolbar button click
   and hotkey press (verified by `WorldInteraction_NoActiveTool_LeftClickIgnored` and related tests)
 - Zone overlay is visually correct: newly placed tiles appear in the correct zone colour within
@@ -405,11 +541,10 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
 | Role | Responsibility |
 |---|---|
-| `graphics-dev-irrlicht` | `IRenderer::pickTerrainTile` + `setTileHoverHighlight` + `setZoneOverlay` implementation; `IrrlichtRenderer` terrain-system pointer wiring; `ITerrainQuery::getHeightAt` promotion; `main.cpp` wiring (`setRenderer`, `setTerrainQuery`, `setTerrainSystem`) |
+| `graphics-dev-irrlicht` | `IRenderer::pickTerrainTile` + `setTileHoverHighlight` + `setZoneOverlay` implementation; `IrrlichtRenderer` terrain-system pointer wiring; `ITerrainQuery::getHeightAt` promotion; `main.cpp` wiring (`setRenderer`, `setTerrainQuery`, `setTerrainSystem`); `InspectorPanel::populate()` real implementation; `InspectorPanel` data refresh cadence wiring |
 | `gamedesign-ux` | Zone sub-panel layout (3×3 button grid, virtual x:80 px); zone colour scheme (R/C/I); hover colour scheme per tool mode; confirm Utilities spec gap resolution with `gamedesign-lookandfeel` |
 | `gamedesign-lookandfeel` | **COMPLETE**: Utilities placement spec gap resolved (Deliverable I, 2026-03-01); earthworks cost gate confirmed consistent with economy balance; zone/road/service placement costs confirmed for V1 difficulty tiers |
-| `test-dev-cpp` | All 9 `WorldInteractionTest` unit tests in `tests/ui/world_interaction_test.cpp`; `MockRenderer` extension stubs; `ManualTerrainQuery` extension for `getHeightAt` |
-| `graphics-dev-irrlicht` | `InspectorPanel::populate()` real implementation; `InspectorPanel` data refresh cadence wiring |
+| `test-dev-cpp` | All 14 `WorldInteractionTest` unit tests in `tests/ui/world_interaction_test.cpp`; `MockRenderer` extension stubs (including sparse-map `setZoneOverlay`); `ManualTerrainQuery` extension for `getHeightAt` |
 
 ---
 
@@ -431,13 +566,17 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
 ### Risks & Spikes
 
+- **BLOCKING SPIKE** (required before Deliverable B implementation begins): Before implementing
+  `IrrlichtRenderer::pickTerrainTile()`, execute a benchmarking spike using `aitown_benchmark`.
+  Measure per-frame ray-march cost over a realistic camera path on a 1024×1024 terrain at 60 FPS.
+  If sustained cost exceeds 1 ms, the implementation MUST switch to an O(1) grid-intersection +
+  heightmap-refinement approach. Spike result must be documented in this plan before any PR for
+  Deliverable B is opened. **This is a hard blocker; Deliverable B cannot start until the spike
+  is complete and documented.**
+
 - **RISK**: `IrrlichtRenderer::pickTerrainTile` ray-march may be too slow for real-time hover
   (60 FPS budget = 16 ms; a 4096-step march on a 1024-tile map with heightmap sampling could
-  exceed 2 ms on weak hardware). **Spike**: prototype the ray-march on the benchmark tool
-  (`aitown_benchmark`) and measure per-frame cost. If > 1 ms: switch to a grid-intersection
-  approach (project camera ray onto the Y=0 plane, then use the heightmap to refine the
-  intersection — O(1) for flat terrain). Resolution required before `IrrlichtRenderer` pick
-  implementation begins.
+  exceed 2 ms on weak hardware). See BLOCKING SPIKE above for resolution.
 
 - **RISK**: Zone overlay `SMesh*` rebuild on every placement call may cause a visible 1-frame
   hitch on large maps (1024×1024 = 1M tiles, most zero). **Mitigation**: store only non-zero
