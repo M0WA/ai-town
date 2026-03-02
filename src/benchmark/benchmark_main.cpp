@@ -119,7 +119,9 @@ static void applyAnisotropyToNode(irr::scene::ISceneNode* node, irr::u32 level)
     irr::u32 matCount = node->getMaterialCount();
     for (irr::u32 m = 0; m < matCount; ++m)
     {
-        node->getMaterial(m).AnisotropicFilter = static_cast<irr::u8>(level);
+        irr::video::SMaterial& mat = node->getMaterial(m);
+        for (irr::u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t)
+            mat.TextureLayer[t].AnisotropicFilter = static_cast<irr::u8>(level);
     }
     for (auto* child : node->getChildren())
     {
@@ -175,7 +177,6 @@ int main(int argc, char** argv)
     params.AntiAlias        = 4;
     params.Vsync            = false;
     params.EventReceiver    = nullptr;
-    params.WindowTitle      = L"AI Town Benchmark";
 
     irr::IrrlichtDevice* device = irr::createDeviceEx(params);
     if (!device)
@@ -310,7 +311,8 @@ int main(int argc, char** argv)
         }
         // Also apply globally via driver material — affects state for subsequent draws.
         irr::video::SMaterial globalMat;
-        globalMat.AnisotropicFilter = static_cast<irr::u8>(level);
+        for (irr::u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t)
+            globalMat.TextureLayer[t].AnisotropicFilter = static_cast<irr::u8>(level);
         driver->setMaterial(globalMat);
 
         // Warm-up: 20 frames not timed.
