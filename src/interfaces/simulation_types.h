@@ -113,6 +113,16 @@ struct ServiceCoverage {
     float power{-1.0f};
 };
 
+// ServiceBuildingType — the four placeable service infrastructure buildings.
+// Used by ICitySimulation::placeServiceBuilding().
+// All four types are mandatory in V1; see architecture/game-design/service-coverage.md.
+enum class ServiceBuildingType {
+    PowerPlant,
+    WaterTower,
+    FireStation,
+    PoliceStation
+};
+
 // QueryResult — per-tile data returned by ICitySimulation::queryTile().
 // Consumed by the Query/Inspector Panel (Phase 8).
 struct QueryResult {

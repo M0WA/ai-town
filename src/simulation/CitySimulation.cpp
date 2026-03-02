@@ -1491,6 +1491,18 @@ void CitySimulation::demolishTile(int tileX, int tileZ) {
 // ---------------------------------------------------------------------------
 // undoLastAction
 // ---------------------------------------------------------------------------
+// placeServiceBuilding — Phase 9b stub.
+// Full implementation (cost deduction, tile occupation, undo entry, audio
+// callback) is delivered in Phase 9b.
+// ---------------------------------------------------------------------------
+
+void CitySimulation::placeServiceBuilding(int /*tileX*/, int /*tileZ*/,
+                                          ServiceBuildingType /*type*/,
+                                          int /*earthworksCostOverride*/) {
+    // Phase 9b: no-op stub. Implementation wires cost, coverage, and undo.
+}
+
+// ---------------------------------------------------------------------------
 
 void CitySimulation::undoLastAction() {
     if (!m_pendingUndo.has_value()) return;
