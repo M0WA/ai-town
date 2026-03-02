@@ -14,6 +14,7 @@
 #include "rendering/VRAMProfiler.h"
 
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -445,6 +446,7 @@ int main(int argc, char** argv)
     //   - 20 building proxy boxes with stencil shadow volumes.
     //   - Camera at same vantage as Scene 1.
     // -----------------------------------------------------------------------
+    irr::scene::ICameraSceneNode* cam2 = nullptr;
     irr::scene::ISceneManager* smgr2 = smgr->createNewSceneManager(false);
 
     if (smgr2)
@@ -473,28 +475,46 @@ int main(int argc, char** argv)
             }
         }
 
-        // --- Animated water surface ---
-        // 16×16 tiles of 10 m = 160 m × 160 m, centered in the scene at y=0.3
-        // (slightly above the ground plane to avoid z-fighting).
-        // Positioned at scene centre so it is clearly visible from the camera.
+        // --- Stone bowl (cylinder wall) enclosing the water ---
+        // The cylinder spans y = -0.5 to y = 4.5 in world space when placed at y=2.0
+        // (length=5, so half-length=2.5; centre is at y=2.0 → bottom rim at y=-0.5).
+        // Back-face culling is disabled so the inside wall is visible.
+        {
+            irr::scene::IMesh* bowlMesh = smgr2->getGeometryCreator()->createCylinderMesh(
+                22.0f, 5.0f, 32,
+                irr::video::SColor(255, 110, 95, 75),
+                false);   // closeTop=false — open top so water is visible
+            if (bowlMesh)
+            {
+                irr::scene::IMeshSceneNode* bowlNode = smgr2->addMeshSceneNode(bowlMesh);
+                bowlMesh->drop();
+                if (bowlNode)
+                {
+                    bowlNode->setPosition(irr::core::vector3df(0.0f, 2.0f, 60.0f));
+                    bowlNode->setMaterialFlag(irr::video::EMF_BACK_FACE_CULLING, false);
+                    bowlNode->setMaterialFlag(irr::video::EMF_COLOR_MATERIAL,    false);
+                    bowlNode->setMaterialFlag(irr::video::EMF_LIGHTING,          true);
+                }
+            }
+        }
+
+        // --- Animated water surface inside the stone bowl ---
+        // Wave height 0.3 → water oscillates between y=1.2 and y=1.8,
+        // which is entirely inside the bowl (bowl spans y=-0.5 to y=4.5).
         {
             irr::scene::IMesh* waterMesh = smgr2->getGeometryCreator()->createPlaneMesh(
-                irr::core::dimension2df(10.0f, 10.0f),
-                irr::core::dimension2du(16u, 16u), nullptr,
+                irr::core::dimension2df(3.0f, 3.0f),
+                irr::core::dimension2du(12u, 12u), nullptr,
                 irr::core::dimension2df(2.0f, 2.0f));
             irr::scene::ISceneNode* waterNode = smgr2->addWaterSurfaceSceneNode(
-                waterMesh, 1.5f, 300.0f, 20.0f, nullptr, -1,
-                irr::core::vector3df(0.0f, 0.3f, 60.0f));
+                waterMesh, 0.3f, 400.0f, 8.0f, nullptr, -1,
+                irr::core::vector3df(0.0f, 1.5f, 60.0f));
             waterMesh->drop();
             if (waterNode)
             {
                 // Fully opaque blue — DiffuseColor only works with EMF_COLOR_MATERIAL off.
-                waterNode->getMaterial(0).DiffuseColor  = irr::video::SColor(255,  20,  80, 180);
-                waterNode->getMaterial(0).AmbientColor  = irr::video::SColor(255,  10,  40, 100);
-                waterNode->getMaterial(0).SpecularColor = irr::video::SColor(255, 200, 220, 255);
-                waterNode->getMaterial(0).Shininess     = 64.0f;
+                waterNode->getMaterial(0).DiffuseColor = irr::video::SColor(255, 20, 80, 180);
                 waterNode->setMaterialFlag(irr::video::EMF_LIGHTING,       true);
-                // Disable vertex-color override so the blue DiffuseColor shows.
                 waterNode->setMaterialFlag(irr::video::EMF_COLOR_MATERIAL, false);
             }
         }
@@ -550,12 +570,69 @@ int main(int argc, char** argv)
             }
         }
 
-        // --- Camera Scene 2: same vantage as Scene 1 ---
-        smgr2->addCameraSceneNode(nullptr,
-            irr::core::vector3df(0.0f, 20.0f, -180.0f),
-            irr::core::vector3df(0.0f,  0.0f,   80.0f));
+        // --- Campfire particle system at (35, 0.5, 35) ---
+        // Procedural 32×32 radial-gradient fire texture — no file I/O.
+        {
+            irr::video::IImage* fireImg = driver->createImage(
+                irr::video::ECF_A8R8G8B8, irr::core::dimension2du(32u, 32u));
+            irr::video::ITexture* fireTex = nullptr;
+            if (fireImg)
+            {
+                for (irr::u32 py = 0; py < 32u; ++py)
+                for (irr::u32 px = 0; px < 32u; ++px)
+                {
+                    float dx   = (static_cast<float>(px) - 15.5f) / 15.5f;
+                    float dy   = (static_cast<float>(py) - 15.5f) / 15.5f;
+                    float dist = sqrtf(dx*dx + dy*dy);
+                    if (dist > 1.0f) dist = 1.0f;
+                    irr::u32 a = static_cast<irr::u32>((1.0f - dist) * 220.0f);
+                    irr::u32 r = 255u;
+                    irr::u32 g = static_cast<irr::u32>(200.0f * (1.0f - dist * 0.8f));
+                    irr::u32 b = static_cast<irr::u32>(50.0f  * (1.0f - dist));
+                    fireImg->setPixel(px, py, irr::video::SColor(a, r, g, b));
+                }
+                fireTex = driver->addTexture("__bench_fire", fireImg);
+                fireImg->drop();
+            }
 
-        std::printf("INFO: Scene 2 ready — sky dome + point light + shadows + water + 20 building proxies.\n\n");
+            irr::scene::IParticleSystemSceneNode* firePS =
+                smgr2->addParticleSystemSceneNode(false);
+            if (firePS)
+            {
+                irr::scene::IParticleEmitter* em = firePS->createBoxEmitter(
+                    irr::core::aabbox3d<irr::f32>(-1.5f, 0.0f, -1.5f, 1.5f, 0.5f, 1.5f),
+                    irr::core::vector3df(0.0f, 0.05f, 0.0f),   // emit upward
+                    60, 120,
+                    irr::video::SColor(0, 255, 200, 80),        // birth colour
+                    irr::video::SColor(0, 255,  80,  0),        // orange
+                    1000, 2500,
+                    20,
+                    irr::core::dimension2df(0.8f, 0.8f),
+                    irr::core::dimension2df(2.0f, 2.0f)
+                );
+                firePS->setEmitter(em);
+                em->drop();
+
+                irr::scene::IParticleAffector* fadeAff =
+                    firePS->createFadeOutParticleAffector();
+                firePS->addAffector(fadeAff);
+                fadeAff->drop();
+
+                firePS->setPosition(irr::core::vector3df(35.0f, 0.5f, 35.0f));
+                firePS->setMaterialFlag(irr::video::EMF_LIGHTING,      false);
+                firePS->setMaterialFlag(irr::video::EMF_ZWRITE_ENABLE, false);
+                firePS->getMaterial(0).MaterialType = irr::video::EMT_TRANSPARENT_ADD_COLOR;
+                if (fireTex) { firePS->setMaterialTexture(0, fireTex); }
+            }
+        }
+
+        // --- Camera Scene 2: orbiting camera (slow rotation each frame) ---
+        // cam2 is stored so the benchmark loop can update its orbit each frame.
+        cam2 = smgr2->addCameraSceneNode(nullptr,
+            irr::core::vector3df(0.0f, 40.0f, -200.0f),   // initial position
+            irr::core::vector3df(0.0f,  5.0f,   60.0f));  // orbit target
+
+        std::printf("INFO: Scene 2 ready — sky dome + point light + shadows + water + campfire + 20 building proxies.\n\n");
     }
     else
     {
@@ -657,6 +734,13 @@ int main(int argc, char** argv)
     // --- Scene 2 header ---
     std::printf("\n=== Scene 2: Light / Shadow / Water ===\n");
 
+    // Camera orbit constants for Scene 2.
+    const irr::core::vector3df kOrbitCenter(0.0f, 5.0f, 60.0f);
+    const float kOrbitRadius      = 210.0f;
+    const float kOrbitHeight      = 35.0f;
+    const float kOrbitDegPerFrame = 0.4f;   // degrees per frame — slow rotation
+    float scene2OrbitAngle        = 0.0f;
+
     if (smgr2)
     {
         for (int li = 0; li < kNumTestLevels; ++li)
@@ -684,6 +768,16 @@ int main(int argc, char** argv)
             for (int f = 0; f < 20; ++f)
             {
                 if (!device->run()) { break; }
+                if (cam2)
+                {
+                    scene2OrbitAngle += kOrbitDegPerFrame;
+                    float rad2 = scene2OrbitAngle * irr::core::DEGTORAD;
+                    cam2->setPosition(irr::core::vector3df(
+                        kOrbitCenter.X + kOrbitRadius * sinf(rad2),
+                        kOrbitCenter.Y + kOrbitHeight,
+                        kOrbitCenter.Z + kOrbitRadius * cosf(rad2)));
+                    cam2->setTarget(kOrbitCenter);
+                }
                 driver->beginScene(true, true, irr::video::SColor(255, 190, 215, 245));
                 smgr2->drawAll();
                 driver->endScene();
@@ -697,6 +791,16 @@ int main(int argc, char** argv)
 
             for (int f = 0; f < opts.frames; ++f)
             {
+                if (cam2)
+                {
+                    scene2OrbitAngle += kOrbitDegPerFrame;
+                    float rad2 = scene2OrbitAngle * irr::core::DEGTORAD;
+                    cam2->setPosition(irr::core::vector3df(
+                        kOrbitCenter.X + kOrbitRadius * sinf(rad2),
+                        kOrbitCenter.Y + kOrbitHeight,
+                        kOrbitCenter.Z + kOrbitRadius * cosf(rad2)));
+                    cam2->setTarget(kOrbitCenter);
+                }
                 if (!renderTimedFrame(device, driver, smgr2,
                                       minFrameTime, maxFrameTime, totalTime, frameCount))
                 {
