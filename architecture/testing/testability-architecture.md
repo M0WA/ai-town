@@ -151,7 +151,7 @@ public:
      Use `EXPECT_EQ` for bool assertions; use `EXPECT_NE` for camera position change.
   8. `CameraController_EdgeScroll_DisabledByDefaultInWindowed` — construct `CameraController` with `startInFullscreen=false`; immediately call `isEdgeScrollEnabled()` without any intervening call to `setEdgeScrollEnabled()`; assert the return value is `false`. This is the symmetric counterpart to test case 6 and confirms the windowed-default rule from `architecture/ui-ux/camera-controls.md`.
   9. `CameraController_KeyboardPanIgnoresSensitivity` — **(Phase 8 enforcement point)** construct `CameraController` with a non-unit sensitivity multiplier (e.g., `sensitivityMultiplier=2.0`); inject a keyboard pan event (e.g., `InputEvent{Type::KeyDown, key=KEY_A}` or the left-pan hotkey from `architecture/ui-ux/hotkey-scheme.md`); assert that the camera position delta equals the expected **unscaled** pan step, confirming that keyboard pan speed is NOT multiplied by `sensitivityMultiplier`. Mouse drag pan (RMB, MMB) applies `sensitivityMultiplier`; keyboard pan must not. This test must pass from Phase 1 to establish the invariant before Phase 8 adds the sensitivity slider. Placing the test here ensures that the Phase 8 sensitivity implementation cannot accidentally apply the multiplier to keyboard pan without breaking this test.
-- **`QueryPanel` testability**: `QueryPanel::computePanelPosition(int cursorX, int cursorY, Rect tileBounds)` must be a pure function (no side effects, no Irrlicht dependency) returning a `Rect`. Required test cases:
+- **`QueryPanel` testability**: `QueryPanel::computePanelPosition(int cursorX, int cursorY, ScreenRect tileBounds)` must be a pure function (no side effects, no Irrlicht dependency) returning a `ScreenRect` (`ScreenRect` is added to `IRenderer.h` by Phase 9b Deliverable B as `struct ScreenRect { int x{0}, y{0}, w{0}, h{0}; }` — plain POD, Irrlicht-free; `inspector_panel.h` may include `IRenderer.h` without violating the Irrlicht-free UI rule). Required test cases:
   1. **Primary placement**: cursor at (100, 100) with no tile overlap → verify panel placed at (140, 140).
   2. **Fallback placement**: primary position overlaps tile bounds → verify panel moves to above-left fallback position.
   3. **Edge clamping**: four sub-cases (left, right, top, bottom edge) verifying `clamp()` correctness — panel never extends outside [0, 1920−240] × [0, 1080−160].
@@ -787,6 +787,23 @@ All Phase 7 audio tests carry label `unit` and run without a display device. CTe
   ```
 
   `AudioSystem` and `CitySimulation` accept `IClock*` at construction for crossfade timing and the forced-loan real-time gate (120 s) respectively. Production code passes `WallClock` which calls `std::chrono::steady_clock`. `ManualClock` allows deterministic time advancement in tests without wall-clock dependencies.
+- **`ITerrainQuery`** — injectable terrain interface for world-interaction and slope-cost tests. **Source location**: `ITerrainQuery.h` lives in `src/interfaces/`; `ManualTerrainQuery` lives in `tests/simulation/manual_terrain_query.h` (alongside `manual_rng.h` and `manual_clock.h` — all test doubles for injectable simulation interfaces). `ManualTerrainQuery` is a minimal stub with hardcoded returns for deterministic testing:
+
+  ```cpp
+  class ManualTerrainQuery : public ITerrainQuery {
+  public:
+      // Returns the configurable slope — default 0° (flat terrain, zero earthworks cost).
+      float getSlopeDegrees(int /*tileX*/, int /*tileZ*/) const override { return m_slope; }
+      // Phase 9b addition: always returns 0.0f (flat world at sea level for ray-march tests).
+      float getHeightAt(int /*tileX*/, int /*tileZ*/) const override { return 0.0f; }
+      void  setSlope(float degrees) { m_slope = degrees; }  // per-test override
+  private:
+      float m_slope{0.0f};
+  };
+  ```
+
+  Used in `WorldInteractionTest` (Phase 9b) as the `terrain_` fixture member, injected via `uiManager_->setTerrainQuery(&terrain_)`. Tests that exercise the earthworks guard call `terrain_.setSlope(20.0f)` (above the 15° free-placement threshold) before triggering placement to verify slope-cost computation. The `getHeightAt()` override is required because it is pure virtual on `ITerrainQuery`; without it `ManualTerrainQuery` fails to compile, blocking all Phase 9b unit tests.
+
 - **`IAlcFunctions`** — injectable interface for ALC function-pointer lookup, enabling the thread-local context extension check in `AudioSystem` to be intercepted in tests without a real OpenAL device. **Source locations**: `IAlcFunctions.h` in `src/audio/`; `DefaultAlcFunctions.h`/`DefaultAlcFunctions.cpp` in `src/audio/`; `MockAlcFunctions` is defined locally in `tests/audio/audio_thread_test.cpp` (single-use — not a shared header). All test double headers live under `tests/` — never under `src/`.
 
   ```cpp
