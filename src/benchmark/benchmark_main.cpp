@@ -235,49 +235,143 @@ int main(int argc, char** argv)
     std::printf("Max Aniso:     %d×\n\n", hwMaxAnisoInt);
 
     // -----------------------------------------------------------------------
-    // 4. Load scene
+    // 4. Build procedural benchmark scene
+    //
+    // Stub B3D asset files carry no geometry (12-byte minimal headers).
+    // We build the scene procedurally so the benchmark always shows visible
+    // content regardless of asset build state.
+    //
+    // Scene layout:
+    //   - 16×16 tiled ground plane (320 m × 320 m) with a checkerboard
+    //     texture and high UV repetition — ideal for showing anisotropy
+    //     differences at a grazing camera angle.
+    //   - 20 colored box proxies scattered across the ground to give the
+    //     GPU draw-call and rasterisation work proportional to a city scene.
+    //   - Camera at low altitude looking along the ground surface (grazing
+    //     angle makes anisotropy filtering differences visually obvious).
     // -----------------------------------------------------------------------
-    const char* meshPath = AITOWN_ASSETS_DIR "/3d/buildings/res_low_01_lod0.b3d";
-    irr::scene::IAnimatedMeshSceneNode* buildingNode = nullptr;
-    irr::scene::IAnimatedMesh* mesh = smgr->getMesh(meshPath);
-    if (mesh)
+
+    // --- Procedural checkerboard texture (no file I/O) ---
+    const irr::u32 TEX_SZ   = 512u;
+    const irr::u32 CHECKER   = 32u;  // texels per checker square
+    irr::video::ITexture* checkerTex = nullptr;
     {
-        buildingNode = smgr->addAnimatedMeshSceneNode(mesh);
-        if (buildingNode)
+        irr::video::IImage* img = driver->createImage(
+            irr::video::ECF_A8R8G8B8,
+            irr::core::dimension2du(TEX_SZ, TEX_SZ));
+        if (img)
         {
-            buildingNode->setPosition(irr::core::vector3df(0.0f, 0.0f, 0.0f));
+            for (irr::u32 py = 0; py < TEX_SZ; ++py)
+                for (irr::u32 px = 0; px < TEX_SZ; ++px)
+                {
+                    bool light2 = ((px / CHECKER) + (py / CHECKER)) % 2 == 0;
+                    img->setPixel(px, py,
+                        light2 ? irr::video::SColor(255, 220, 220, 220)
+                               : irr::video::SColor(255,  30,  30,  30));
+                }
+            checkerTex = driver->addTexture("__bench_checker", img);
+            img->drop();
         }
-        else
-        {
-            std::printf("WARNING: addAnimatedMeshSceneNode() returned null for '%s'.\n", meshPath);
-        }
-    }
-    else
-    {
-        std::printf("WARNING: Could not load mesh '%s'. Benchmarking with empty scene.\n", meshPath);
     }
 
-    // Directional light.
-    irr::scene::ILightSceneNode* light = smgr->addLightSceneNode(
-        nullptr,
-        irr::core::vector3df(100.0f, 200.0f, -100.0f));
-    if (light)
+    // --- Ground plane: 16×16 grid of 20 m × 20 m quads ---
+    // 256 quads total → 1024 vertices (well within u16 index limit).
+    // UV repeats 4× per quad so the texture tiles densely at low angle.
     {
-        irr::video::SLight lightData;
-        lightData.Type      = irr::video::ELT_DIRECTIONAL;
-        lightData.Direction = irr::core::vector3df(-1.0f, -2.0f, 1.0f).normalize();
-        lightData.DiffuseColor = irr::video::SColorf(1.0f, 0.98f, 0.90f, 1.0f);
-        lightData.AmbientColor = irr::video::SColorf(0.15f, 0.15f, 0.20f, 1.0f);
-        light->setLightData(lightData);
+        const int   TILES   = 16;
+        const float TILE_SZ = 20.0f;
+        const float UV_REP  = 4.0f;
+        const float HALF    = (TILES * TILE_SZ) * 0.5f;
+
+        irr::scene::SMesh*       gmesh = new irr::scene::SMesh();
+        irr::scene::SMeshBuffer* gbuf  = new irr::scene::SMeshBuffer();
+
+        const irr::video::SColor white(255, 255, 255, 255);
+        for (int gz = 0; gz < TILES; ++gz)
+        {
+            for (int gx = 0; gx < TILES; ++gx)
+            {
+                float x0 = gx * TILE_SZ - HALF;
+                float z0 = gz * TILE_SZ - HALF;
+                float x1 = x0 + TILE_SZ;
+                float z1 = z0 + TILE_SZ;
+                irr::u16 base = static_cast<irr::u16>(gbuf->Vertices.size());
+                gbuf->Vertices.push_back(irr::video::S3DVertex(
+                    x0, 0.f, z0,  0.f, 1.f, 0.f,  white,  0.f,    0.f));
+                gbuf->Vertices.push_back(irr::video::S3DVertex(
+                    x1, 0.f, z0,  0.f, 1.f, 0.f,  white,  UV_REP, 0.f));
+                gbuf->Vertices.push_back(irr::video::S3DVertex(
+                    x1, 0.f, z1,  0.f, 1.f, 0.f,  white,  UV_REP, UV_REP));
+                gbuf->Vertices.push_back(irr::video::S3DVertex(
+                    x0, 0.f, z1,  0.f, 1.f, 0.f,  white,  0.f,    UV_REP));
+                gbuf->Indices.push_back(base);
+                gbuf->Indices.push_back(static_cast<irr::u16>(base + 1));
+                gbuf->Indices.push_back(static_cast<irr::u16>(base + 2));
+                gbuf->Indices.push_back(base);
+                gbuf->Indices.push_back(static_cast<irr::u16>(base + 2));
+                gbuf->Indices.push_back(static_cast<irr::u16>(base + 3));
+            }
+        }
+        gbuf->recalculateBoundingBox();
+        gmesh->addMeshBuffer(gbuf);
+        gbuf->drop();
+        gmesh->recalculateBoundingBox();
+
+        irr::scene::IMeshSceneNode* gn = smgr->addMeshSceneNode(gmesh);
+        gmesh->drop();
+        if (gn)
+        {
+            if (checkerTex) { gn->setMaterialTexture(0, checkerTex); }
+            gn->setMaterialFlag(irr::video::EMF_LIGHTING,         false);
+            gn->setMaterialFlag(irr::video::EMF_BILINEAR_FILTER,  true);
+            gn->setMaterialFlag(irr::video::EMF_TRILINEAR_FILTER, true);
+        }
     }
 
-    // Camera looking at the scene origin from slightly above and behind.
+    // --- Building proxy boxes (geometry creator — no file I/O) ---
+    {
+        const irr::scene::IGeometryCreator* geo = smgr->getGeometryCreator();
+        const int   NUM_BOXES = 20;
+        const float SPREAD    = 120.0f;
+        irr::u32 rng = 0xDEADBEEFu;
+        auto lcg = [&]() -> float {
+            rng = rng * 1664525u + 1013904223u;
+            return static_cast<float>(rng & 0xFFFFu) / 65535.0f;
+        };
+        for (int bi = 0; bi < NUM_BOXES; ++bi)
+        {
+            float bw = 8.0f  + lcg() * 10.0f;
+            float bh = 15.0f + lcg() * 40.0f;
+            float bd = 8.0f  + lcg() * 10.0f;
+            irr::scene::IMesh* box = geo->createCubeMesh(
+                irr::core::vector3df(bw, bh, bd));
+            if (!box) { continue; }
+            irr::scene::IMeshSceneNode* bn = smgr->addMeshSceneNode(box);
+            box->drop();
+            if (!bn) { continue; }
+            float px = (lcg() * 2.0f - 1.0f) * SPREAD;
+            float pz = (lcg() * 2.0f - 1.0f) * SPREAD;
+            bn->setPosition(irr::core::vector3df(px, bh * 0.5f, pz));
+            bn->getMaterial(0).DiffuseColor = irr::video::SColor(
+                255,
+                static_cast<irr::u32>(100 + lcg() * 100),
+                static_cast<irr::u32>(100 + lcg() * 100),
+                static_cast<irr::u32>(100 + lcg() * 100));
+            bn->setMaterialFlag(irr::video::EMF_LIGHTING, false);
+        }
+    }
+
+    std::printf("INFO: Scene ready — 16×16 ground grid + 20 building proxies.\n\n");
+
+    // --- Camera: low altitude looking along the ground (grazing angle) ---
+    // Grazing angle makes anisotropy differences clearly visible on the
+    // ground plane — the primary purpose of the benchmark scene layout.
     irr::scene::ICameraSceneNode* camera = smgr->addCameraSceneNode(
         nullptr,
-        irr::core::vector3df(0.0f, 50.0f, -100.0f),  // position
-        irr::core::vector3df(0.0f,  0.0f,    0.0f)   // look-at
+        irr::core::vector3df(  0.0f, 20.0f, -180.0f),  // low above ground
+        irr::core::vector3df(  0.0f,  0.0f,   80.0f)   // looking forward
     );
-    (void)camera;  // held by scene manager
+    (void)camera;
 
     // -----------------------------------------------------------------------
     // 5. Determine anisotropy test levels (skip levels beyond hardware max)
@@ -303,12 +397,10 @@ int main(int argc, char** argv)
             continue;
         }
 
-        // Apply anisotropy level to all materials.
+        // Apply anisotropy level to all scene nodes (ground + boxes).
         irr::u32 uLevel = static_cast<irr::u32>(level);
-        if (buildingNode)
-        {
-            applyAnisotropyToNode(buildingNode, uLevel);
-        }
+        applyAnisotropyToNode(smgr->getRootSceneNode(), uLevel);
+
         // Also apply globally via driver material — affects state for subsequent draws.
         irr::video::SMaterial globalMat;
         for (irr::u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t)
