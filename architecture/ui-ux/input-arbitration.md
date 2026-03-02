@@ -29,7 +29,18 @@ Checking only `!criticalVisible` is insufficient: the `modalActive` guard MUST a
   | Undo | 608–656 | `m_sim->undoLastAction()` when `hasUndoPendingAction()` (same path as Ctrl+Z) |
 
   All toolbar y-ranges are derived from `HUD.cpp` button layout constants (`kToolBtnSize=48`, `kToolPad=8`, starting y:64). Any change to HUD button positions MUST update both `HUD.cpp` and the dispatch table in `UIManager::onEvent()`.
-6. `CameraController` (lowest priority — only receives unconsumed events)
+6. `CameraController` — receives unconsumed events after all UI layers. Camera movement events (scroll-wheel zoom, middle-mouse-button drag, right-mouse-button drag, edge-scroll `MouseMove`) that were not consumed by Priorities 1–5 are processed here. Priority 6 is NOT the terminal layer — world interaction (Priority 7) executes after it for events that `CameraController` does not consume.
+7. **World Interaction layer** — the terminal layer. Processes mouse events that were not consumed by any higher-priority handler (Priorities 1–6). Rules:
+
+   (a) **`MouseMove` does NOT consume the event** (always returns `false`). Edge-scroll logic in `CameraController` (Priority 6) depends on every `MouseMove` reaching it; the World Interaction layer must not break this by returning `true` on `MouseMove` events. Hover highlight or tile-cursor update may occur as a side-effect, but event consumption is forbidden.
+
+   (b) **`MouseButtonDown button=0` (left-click) consumes the event** (`return true`) only when ALL of the following conditions hold: (1) a non-Query placement tool is active (i.e., the active tool is Zone, Road, Utilities, or Demolish — NOT QueryTool and NOT "No tool"), AND (2) `pickTerrainTile()` ray-cast returns `true` (the ray hit valid terrain). If either condition is false, the event is NOT consumed (returns `false`). In particular, a `QueryTool` left-click does NOT consume the event — it passes through so the QueryPanel open/inspect path (Priority 3) can handle it.
+
+   (c) **Modal and CRITICAL-toast suppression**: if a blocking modal (`ModalDialog`, Priority 1) or a CRITICAL toast (`NotificationManager`, Priority 2) consumed the event at a higher priority, the event never reaches Priority 7. No additional guard is required at Priority 7 for this case — the chain short-circuits naturally. However, if Priority 7 code is ever invoked speculatively (e.g., via a direct call bypassing the chain), it MUST check `m_modal->isActive() || m_notifications->hasCriticalToastVisible()` and return `false` immediately. This mirrors the identical suppression logic used at Priority 6 (`CameraController` suppresses input when a blocking modal is active).
+
+   (d) **QueryTool left-click does NOT consume the event**: when the active tool is `QueryTool`, `MouseButtonDown button=0` must return `false`. The QueryPanel open path is handled at Priority 3; the World Interaction layer must not intercept it.
+
+   (e) **Right-click (`MouseButtonDown button=1`)**: Priority 7 never consumes right-click events. These are either consumed by the scrim (Priority 1, modal active) or passed through to `CameraController` (Priority 6) for RMB-drag initiation per the RMB drag initiation forwarding contract defined at Priority 1.
 
 **Ctrl+Z routing rules**: `ModalDialog` (priority 1) blocks Ctrl+Z when any blocking modal is active — undo is unavailable while a modal is open, consistent with the Undo System spec. `QueryPanel` (priority 3) does not intercept Ctrl+Z; when the QueryPanel is open and the player presses Ctrl+Z, the event passes through QueryPanel to `UIManager` (priority 5) which handles undo normally. This is consistent with QueryPanel not being a destructive action.
 
