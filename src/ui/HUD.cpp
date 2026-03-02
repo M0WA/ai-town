@@ -345,3 +345,12 @@ void HUD::setUnsavedChanges(bool unsaved) {
         m_backend->setElementVisible(m_unsavedDotHandle, unsaved);
     }
 }
+
+// ---------------------------------------------------------------------------
+// setActiveToolLabel
+// ---------------------------------------------------------------------------
+void HUD::setActiveToolLabel(const std::string& text) {
+    if (m_backend) {
+        m_backend->setElementText(m_activeToolLabel, text);
+    }
+}
