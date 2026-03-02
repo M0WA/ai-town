@@ -146,6 +146,35 @@ static std::string jsonEscape(const std::string& s)
 }
 
 // ---------------------------------------------------------------------------
+// Render one timed pass for a given scene manager; returns true if device is still running.
+// Writes frame-time statistics into the provided accumulators.
+// ---------------------------------------------------------------------------
+static bool renderTimedFrame(
+    irr::IrrlichtDevice*       device,
+    irr::video::IVideoDriver*  driver,
+    irr::scene::ISceneManager* smgr,
+    float&                     minFrameTime,
+    float&                     maxFrameTime,
+    float&                     totalTime,
+    int&                       frameCount)
+{
+    if (!device->run()) { return false; }
+
+    auto t0 = std::chrono::steady_clock::now();
+    driver->beginScene(true, true, irr::video::SColor(255, 190, 215, 245));
+    smgr->drawAll();
+    driver->endScene();
+    auto t1 = std::chrono::steady_clock::now();
+
+    float dt = std::chrono::duration<float>(t1 - t0).count();
+    if (dt < minFrameTime) { minFrameTime = dt; }
+    if (dt > maxFrameTime) { maxFrameTime = dt; }
+    totalTime += dt;
+    ++frameCount;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv)
@@ -235,21 +264,69 @@ int main(int argc, char** argv)
     std::printf("Max Aniso:     %d×\n\n", hwMaxAnisoInt);
 
     // -----------------------------------------------------------------------
-    // 4. Build procedural benchmark scene
+    // 4. Create shared sky gradient texture
     //
-    // Stub B3D asset files carry no geometry (12-byte minimal headers).
-    // We build the scene procedurally so the benchmark always shows visible
-    // content regardless of asset build state.
+    // A 512×256 vertical gradient from deep blue zenith (row 0) to pale
+    // horizon (row 255). Used by both Scene 1 and Scene 2 sky domes.
+    // The horizon color also drives the beginScene clear colour so the sky
+    // seam is invisible.
+    // -----------------------------------------------------------------------
+    irr::video::ITexture* skyTex = nullptr;
+    {
+        irr::video::IImage* img = driver->createImage(
+            irr::video::ECF_A8R8G8B8,
+            irr::core::dimension2du(512u, 256u));
+        if (img)
+        {
+            for (irr::u32 py = 0; py < 256u; ++py)
+            {
+                float t = static_cast<float>(py) / 255.0f;
+                irr::u32 r = static_cast<irr::u32>(15.0f  + (190.0f - 15.0f)  * t);
+                irr::u32 g = static_cast<irr::u32>(60.0f  + (215.0f - 60.0f)  * t);
+                irr::u32 b = static_cast<irr::u32>(150.0f + (245.0f - 150.0f) * t);
+                irr::video::SColor col(255u, r, g, b);
+                for (irr::u32 px = 0; px < 512u; ++px)
+                    img->setPixel(px, py, col);
+            }
+            skyTex = driver->addTexture("__bench_sky", img);
+            img->drop();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 5. Build Scene 1: Anisotropy Ground
     //
     // Scene layout:
+    //   - Sky dome with procedural gradient texture.
     //   - 16×16 tiled ground plane (320 m × 320 m) with a checkerboard
     //     texture and high UV repetition — ideal for showing anisotropy
     //     differences at a grazing camera angle.
-    //   - 20 colored box proxies scattered across the ground to give the
-    //     GPU draw-call and rasterisation work proportional to a city scene.
+    //   - 20 colored box proxies lit by a directional sun light.
     //   - Camera at low altitude looking along the ground surface (grazing
     //     angle makes anisotropy filtering differences visually obvious).
     // -----------------------------------------------------------------------
+
+    // --- Sky dome Scene 1 ---
+    if (skyTex)
+    {
+        smgr->addSkyDomeSceneNode(skyTex, 16, 8, 0.95f, 2.0f);
+    }
+
+    // --- Directional sun light for Scene 1 ---
+    {
+        irr::scene::ILightSceneNode* sun1 = smgr->addLightSceneNode(nullptr,
+            irr::core::vector3df(300.0f, 600.0f, -200.0f));
+        if (sun1)
+        {
+            irr::video::SLight sd;
+            sd.Type          = irr::video::ELT_DIRECTIONAL;
+            sd.Direction     = irr::core::vector3df(-1.0f, -2.0f, 0.5f).normalize();
+            sd.DiffuseColor  = irr::video::SColorf(1.0f, 0.92f, 0.80f, 1.0f);
+            sd.AmbientColor  = irr::video::SColorf(0.25f, 0.28f, 0.35f, 1.0f);
+            sd.SpecularColor = irr::video::SColorf(0.4f, 0.4f, 0.3f, 1.0f);
+            sun1->setLightData(sd);
+        }
+    }
 
     // --- Procedural checkerboard texture (no file I/O) ---
     const irr::u32 TEX_SZ   = 512u;
@@ -304,10 +381,10 @@ int main(int argc, char** argv)
     }
 
     // --- Building proxy boxes (geometry creator — no file I/O) ---
+    // EMF_LIGHTING = true so DiffuseColor is applied by the directional sun.
     {
         const irr::scene::IGeometryCreator* geo = smgr->getGeometryCreator();
         const int   NUM_BOXES = 20;
-        const float SPREAD    = 120.0f;
         irr::u32 rng = 0xDEADBEEFu;
         auto lcg = [&]() -> float {
             rng = rng * 1664525u + 1013904223u;
@@ -324,43 +401,184 @@ int main(int argc, char** argv)
             irr::scene::IMeshSceneNode* bn = smgr->addMeshSceneNode(box);
             box->drop();
             if (!bn) { continue; }
-            float px = (lcg() * 2.0f - 1.0f) * SPREAD;
-            float pz = (lcg() * 2.0f - 1.0f) * SPREAD;
+            float px = (lcg() * 2.0f - 1.0f) * 120.0f;
+            float pz = (lcg() * 2.0f - 1.0f) * 120.0f;
             bn->setPosition(irr::core::vector3df(px, bh * 0.5f, pz));
             bn->getMaterial(0).DiffuseColor = irr::video::SColor(
                 255,
                 static_cast<irr::u32>(100 + lcg() * 100),
                 static_cast<irr::u32>(100 + lcg() * 100),
                 static_cast<irr::u32>(100 + lcg() * 100));
-            bn->setMaterialFlag(irr::video::EMF_LIGHTING, false);
+            bn->setMaterialFlag(irr::video::EMF_LIGHTING,        true);
+            // Disable vertex-color override so DiffuseColor is used for shading
+            // (createCubeMesh produces white vertices that swamp getMaterial DiffuseColor).
+            bn->setMaterialFlag(irr::video::EMF_COLOR_MATERIAL,  false);
         }
     }
 
-    std::printf("INFO: Scene ready — 16×16 ground grid + 20 building proxies.\n\n");
-
-    // --- Camera: low altitude looking along the ground (grazing angle) ---
+    // --- Camera Scene 1: low altitude looking along the ground (grazing angle) ---
     // Grazing angle makes anisotropy differences clearly visible on the
     // ground plane — the primary purpose of the benchmark scene layout.
-    irr::scene::ICameraSceneNode* camera = smgr->addCameraSceneNode(
-        nullptr,
-        irr::core::vector3df(  0.0f, 20.0f, -180.0f),  // low above ground
-        irr::core::vector3df(  0.0f,  0.0f,   80.0f)   // looking forward
-    );
-    (void)camera;
+    {
+        irr::scene::ICameraSceneNode* cam1 = smgr->addCameraSceneNode(
+            nullptr,
+            irr::core::vector3df(  0.0f, 20.0f, -180.0f),  // low above ground
+            irr::core::vector3df(  0.0f,  0.0f,   80.0f)   // looking forward
+        );
+        (void)cam1;
+    }
+
+    std::printf("INFO: Scene 1 ready — sky dome + directional light + 16x16 ground grid + 20 building proxies.\n\n");
 
     // -----------------------------------------------------------------------
-    // 5. Determine anisotropy test levels (skip levels beyond hardware max)
+    // 6. Build Scene 2: Light / Shadow / Water
+    //
+    // A separate ISceneManager rendered in the second pass of each anisotropy
+    // level. Demonstrates point lighting, stencil shadow volumes, and an
+    // animated water surface — representative of a live city district view.
+    //
+    // Contents:
+    //   - Sky dome (same gradient texture as Scene 1).
+    //   - Green grass ground plane.
+    //   - Animated water surface (WaterSurfaceSceneNode).
+    //   - Point sun light with shadow casting enabled.
+    //   - 20 building proxy boxes with stencil shadow volumes.
+    //   - Camera at same vantage as Scene 1.
     // -----------------------------------------------------------------------
-    const int kTestLevels[] = {1, 2, 4, 8, 16};
+    irr::scene::ISceneManager* smgr2 = smgr->createNewSceneManager(false);
+
+    if (smgr2)
+    {
+        // --- Sky dome Scene 2 ---
+        if (skyTex)
+        {
+            smgr2->addSkyDomeSceneNode(skyTex, 16, 8, 0.95f, 2.0f);
+        }
+
+        // --- Green grassy ground plane ---
+        {
+            irr::scene::IMesh* gnd2 = smgr2->getGeometryCreator()->createPlaneMesh(
+                irr::core::dimension2df(20.0f, 20.0f),
+                irr::core::dimension2du(16u, 16u), nullptr,
+                irr::core::dimension2df(1.0f, 1.0f));
+            irr::scene::IMeshSceneNode* gndNode2 = smgr2->addMeshSceneNode(gnd2);
+            gnd2->drop();
+            if (gndNode2)
+            {
+                gndNode2->getMaterial(0).DiffuseColor = irr::video::SColor(255, 60, 130, 60);
+                gndNode2->setMaterialFlag(irr::video::EMF_LIGHTING,          true);
+                gndNode2->setMaterialFlag(irr::video::EMF_BACK_FACE_CULLING, false);
+                // Disable vertex-color override so the green DiffuseColor is used.
+                gndNode2->setMaterialFlag(irr::video::EMF_COLOR_MATERIAL,    false);
+            }
+        }
+
+        // --- Animated water surface ---
+        // 16×16 tiles of 10 m = 160 m × 160 m, centered in the scene at y=0.3
+        // (slightly above the ground plane to avoid z-fighting).
+        // Positioned at scene centre so it is clearly visible from the camera.
+        {
+            irr::scene::IMesh* waterMesh = smgr2->getGeometryCreator()->createPlaneMesh(
+                irr::core::dimension2df(10.0f, 10.0f),
+                irr::core::dimension2du(16u, 16u), nullptr,
+                irr::core::dimension2df(2.0f, 2.0f));
+            irr::scene::ISceneNode* waterNode = smgr2->addWaterSurfaceSceneNode(
+                waterMesh, 1.5f, 300.0f, 20.0f, nullptr, -1,
+                irr::core::vector3df(0.0f, 0.3f, 60.0f));
+            waterMesh->drop();
+            if (waterNode)
+            {
+                // Fully opaque blue — DiffuseColor only works with EMF_COLOR_MATERIAL off.
+                waterNode->getMaterial(0).DiffuseColor  = irr::video::SColor(255,  20,  80, 180);
+                waterNode->getMaterial(0).AmbientColor  = irr::video::SColor(255,  10,  40, 100);
+                waterNode->getMaterial(0).SpecularColor = irr::video::SColor(255, 200, 220, 255);
+                waterNode->getMaterial(0).Shininess     = 64.0f;
+                waterNode->setMaterialFlag(irr::video::EMF_LIGHTING,       true);
+                // Disable vertex-color override so the blue DiffuseColor shows.
+                waterNode->setMaterialFlag(irr::video::EMF_COLOR_MATERIAL, false);
+            }
+        }
+
+        // --- Point sun light (required for shadow volumes) ---
+        {
+            irr::scene::ILightSceneNode* sun2 = smgr2->addLightSceneNode(nullptr,
+                irr::core::vector3df(150.0f, 400.0f, -100.0f));
+            if (sun2)
+            {
+                irr::video::SLight sd2;
+                sd2.Type          = irr::video::ELT_POINT;
+                sd2.DiffuseColor  = irr::video::SColorf(1.5f, 1.4f, 1.1f, 1.0f);
+                sd2.AmbientColor  = irr::video::SColorf(0.15f, 0.18f, 0.22f, 1.0f);
+                sd2.SpecularColor = irr::video::SColorf(1.0f, 1.0f, 0.8f, 1.0f);
+                sd2.Radius        = 1200.0f;
+                sd2.CastShadows   = true;
+                sun2->setLightData(sd2);
+            }
+            smgr2->setShadowColor(irr::video::SColor(120, 0, 0, 0));
+        }
+
+        // --- Building proxy boxes with stencil shadow volumes ---
+        // Same LCG seed as Scene 1 so box positions match across scenes.
+        {
+            irr::u32 rng2 = 0xDEADBEEFu;
+            auto lcg2 = [&]() -> float {
+                rng2 = rng2 * 1664525u + 1013904223u;
+                return static_cast<float>(rng2 & 0xFFFFu) / 65535.0f;
+            };
+            for (int bi = 0; bi < 20; ++bi)
+            {
+                float bw = 8.0f  + lcg2() * 10.0f;
+                float bh = 15.0f + lcg2() * 40.0f;
+                float bd = 8.0f  + lcg2() * 10.0f;
+                irr::scene::IMesh* box = smgr2->getGeometryCreator()->createCubeMesh(
+                    irr::core::vector3df(bw, bh, bd));
+                if (!box) { continue; }
+                irr::scene::IMeshSceneNode* bn = smgr2->addMeshSceneNode(box);
+                box->drop();
+                if (!bn) { continue; }
+                float px = (lcg2() * 2.0f - 1.0f) * 120.0f;
+                float pz = (lcg2() * 2.0f - 1.0f) * 120.0f;
+                bn->setPosition(irr::core::vector3df(px, bh * 0.5f, pz));
+                bn->getMaterial(0).DiffuseColor = irr::video::SColor(255,
+                    static_cast<irr::u32>(80 + lcg2() * 120),
+                    static_cast<irr::u32>(80 + lcg2() * 120),
+                    static_cast<irr::u32>(80 + lcg2() * 120));
+                bn->setMaterialFlag(irr::video::EMF_LIGHTING,       true);
+                // Disable vertex-color override so DiffuseColor is used for shading.
+                bn->setMaterialFlag(irr::video::EMF_COLOR_MATERIAL, false);
+                bn->addShadowVolumeSceneNode();  // stencil shadow caster
+            }
+        }
+
+        // --- Camera Scene 2: same vantage as Scene 1 ---
+        smgr2->addCameraSceneNode(nullptr,
+            irr::core::vector3df(0.0f, 20.0f, -180.0f),
+            irr::core::vector3df(0.0f,  0.0f,   80.0f));
+
+        std::printf("INFO: Scene 2 ready — sky dome + point light + shadows + water + 20 building proxies.\n\n");
+    }
+    else
+    {
+        std::fprintf(stderr, "WARNING: Failed to create Scene 2 scene manager — Scene 2 skipped.\n\n");
+    }
+
+    // -----------------------------------------------------------------------
+    // 7. Determine anisotropy test levels (skip levels beyond hardware max)
+    // -----------------------------------------------------------------------
+    const int kTestLevels[]  = {1, 2, 4, 8, 16};
     const int kNumTestLevels = static_cast<int>(sizeof(kTestLevels) / sizeof(kTestLevels[0]));
 
-    std::printf("%-12s  %10s  %10s  %10s  %10s\n",
-        "Anisotropy", "Avg FPS", "Min FPS", "Max FPS", "VRAM (MB)");
-    std::printf("%-12s  %10s  %10s  %10s  %10s\n",
-        "----------", "-------", "-------", "-------", "---------");
+    std::vector<LevelResult> results1;
+    std::vector<LevelResult> results2;
+    results1.reserve(kNumTestLevels);
+    results2.reserve(kNumTestLevels);
 
-    std::vector<LevelResult> results;
-    results.reserve(kNumTestLevels);
+    // -----------------------------------------------------------------------
+    // 8. Benchmark loop — two passes per anisotropy level (Scene 1 then Scene 2)
+    // -----------------------------------------------------------------------
+
+    // --- Scene 1 header ---
+    std::printf("=== Scene 1: Anisotropy Ground (ground plane + building proxies) ===\n");
 
     for (int li = 0; li < kNumTestLevels; ++li)
     {
@@ -372,11 +590,12 @@ int main(int argc, char** argv)
             continue;
         }
 
-        // Apply anisotropy level to all scene nodes (ground + boxes).
         irr::u32 uLevel = static_cast<irr::u32>(level);
+
+        // Apply anisotropy to Scene 1 nodes.
         applyAnisotropyToNode(smgr->getRootSceneNode(), uLevel);
 
-        // Also apply globally via driver material — affects state for subsequent draws.
+        // Apply globally via driver material state.
         irr::video::SMaterial globalMat;
         for (irr::u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t)
             globalMat.TextureLayer[t].AnisotropicFilter = static_cast<irr::u8>(level);
@@ -386,7 +605,7 @@ int main(int argc, char** argv)
         for (int f = 0; f < 20; ++f)
         {
             if (!device->run()) { break; }
-            driver->beginScene(true, true, irr::video::SColor(255, 30, 30, 40));
+            driver->beginScene(true, true, irr::video::SColor(255, 190, 215, 245));
             smgr->drawAll();
             driver->endScene();
         }
@@ -399,19 +618,11 @@ int main(int argc, char** argv)
 
         for (int f = 0; f < opts.frames; ++f)
         {
-            if (!device->run()) { break; }
-
-            auto t0 = std::chrono::steady_clock::now();
-            driver->beginScene(true, true, irr::video::SColor(255, 30, 30, 40));
-            smgr->drawAll();
-            driver->endScene();
-            auto t1 = std::chrono::steady_clock::now();
-
-            float dt = std::chrono::duration<float>(t1 - t0).count();
-            if (dt < minFrameTime) { minFrameTime = dt; }
-            if (dt > maxFrameTime) { maxFrameTime = dt; }
-            totalTime += dt;
-            ++frameCount;
+            if (!renderTimedFrame(device, driver, smgr,
+                                  minFrameTime, maxFrameTime, totalTime, frameCount))
+            {
+                break;
+            }
         }
 
         if (frameCount == 0) { break; }
@@ -429,9 +640,8 @@ int main(int argc, char** argv)
         res.minFPS      = minFPS;
         res.maxFPS      = maxFPS;
         res.vramUsedMB  = usedMB;
-        results.push_back(res);
+        results1.push_back(res);
 
-        // Print row.
         if (usedMB >= 0.0f)
         {
             std::printf("  [ANISOx%2d]  avg=%6.1f fps  min=%6.1f fps  max=%6.1f fps  VRAM=%6.1f MB\n",
@@ -444,31 +654,138 @@ int main(int argc, char** argv)
         }
     }
 
+    // --- Scene 2 header ---
+    std::printf("\n=== Scene 2: Light / Shadow / Water ===\n");
+
+    if (smgr2)
+    {
+        for (int li = 0; li < kNumTestLevels; ++li)
+        {
+            int level = kTestLevels[li];
+            if (level > hwMaxAnisoInt)
+            {
+                std::printf("  [ANISOx%2d]  (skipped — exceeds hardware max %d×)\n",
+                    level, hwMaxAnisoInt);
+                continue;
+            }
+
+            irr::u32 uLevel = static_cast<irr::u32>(level);
+
+            // Apply anisotropy to Scene 2 nodes.
+            applyAnisotropyToNode(smgr2->getRootSceneNode(), uLevel);
+
+            // Apply globally via driver material state.
+            irr::video::SMaterial globalMat2;
+            for (irr::u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t)
+                globalMat2.TextureLayer[t].AnisotropicFilter = static_cast<irr::u8>(level);
+            driver->setMaterial(globalMat2);
+
+            // Warm-up: 20 frames not timed.
+            for (int f = 0; f < 20; ++f)
+            {
+                if (!device->run()) { break; }
+                driver->beginScene(true, true, irr::video::SColor(255, 190, 215, 245));
+                smgr2->drawAll();
+                driver->endScene();
+            }
+
+            // Measurement pass.
+            float minFrameTime =  1e30f;
+            float maxFrameTime = -1e30f;
+            float totalTime    =  0.0f;
+            int   frameCount   =  0;
+
+            for (int f = 0; f < opts.frames; ++f)
+            {
+                if (!renderTimedFrame(device, driver, smgr2,
+                                      minFrameTime, maxFrameTime, totalTime, frameCount))
+                {
+                    break;
+                }
+            }
+
+            if (frameCount == 0) { break; }
+
+            float avgFrameTime = totalTime / static_cast<float>(frameCount);
+            float avgFPS = (avgFrameTime > 0.0f) ? (1.0f / avgFrameTime) : 0.0f;
+            float minFPS = (maxFrameTime > 0.0f) ? (1.0f / maxFrameTime) : 0.0f;
+            float maxFPS = (minFrameTime > 0.0f) ? (1.0f / minFrameTime) : 0.0f;
+
+            float usedMB = vram.usedMB();
+
+            LevelResult res;
+            res.anisotropy  = level;
+            res.avgFPS      = avgFPS;
+            res.minFPS      = minFPS;
+            res.maxFPS      = maxFPS;
+            res.vramUsedMB  = usedMB;
+            results2.push_back(res);
+
+            if (usedMB >= 0.0f)
+            {
+                std::printf("  [ANISOx%2d]  avg=%6.1f fps  min=%6.1f fps  max=%6.1f fps  VRAM=%6.1f MB\n",
+                    level, avgFPS, minFPS, maxFPS, usedMB);
+            }
+            else
+            {
+                std::printf("  [ANISOx%2d]  avg=%6.1f fps  min=%6.1f fps  max=%6.1f fps  VRAM=unavail\n",
+                    level, avgFPS, minFPS, maxFPS);
+            }
+        }
+    }
+    else
+    {
+        std::printf("  (Scene 2 unavailable — skipped)\n");
+    }
+
     // -----------------------------------------------------------------------
-    // 6. Recommendation engine
+    // 9. Recommendation engine
+    //
+    // Compares both scenes at each anisotropy level; uses the worst-case
+    // (minimum) avgFPS across the two scenes to drive the recommendation.
     // -----------------------------------------------------------------------
     std::printf("\n=== Recommended Settings for this GPU ===\n");
 
-    // Find the highest anisotropy level where:
-    //   avgFPS >= targetFPS  AND  vramUsedMB <= kSceneVRAMBudgetMB (or VRAM unavailable).
+    // Build a combined view: for each level recorded in results1, find the
+    // matching level in results2 (if present) and take the minimum avgFPS.
+    // Use results1 as the authoritative level list since Scene 1 always runs.
     const LevelResult* recommended = nullptr;
-    for (int i = static_cast<int>(results.size()) - 1; i >= 0; --i)
+
+    for (int i = static_cast<int>(results1.size()) - 1; i >= 0; --i)
     {
-        const LevelResult& r = results[static_cast<size_t>(i)];
-        bool fpsOk  = (r.avgFPS >= static_cast<float>(opts.targetFPS));
-        bool vramOk = (r.vramUsedMB < 0.0f) || (r.vramUsedMB <= kSceneVRAMBudgetMB);
+        const LevelResult& r1 = results1[static_cast<size_t>(i)];
+
+        // Find matching Scene 2 result (same anisotropy level).
+        float worstAvgFPS = r1.avgFPS;
+        float worstVram   = r1.vramUsedMB;
+        for (const LevelResult& r2 : results2)
+        {
+            if (r2.anisotropy == r1.anisotropy)
+            {
+                worstAvgFPS = std::min(r1.avgFPS, r2.avgFPS);
+                // Use higher VRAM reading as the conservative estimate.
+                if (r1.vramUsedMB >= 0.0f && r2.vramUsedMB >= 0.0f)
+                    worstVram = std::max(r1.vramUsedMB, r2.vramUsedMB);
+                else if (r2.vramUsedMB >= 0.0f)
+                    worstVram = r2.vramUsedMB;
+                break;
+            }
+        }
+
+        bool fpsOk  = (worstAvgFPS >= static_cast<float>(opts.targetFPS));
+        bool vramOk = (worstVram < 0.0f) || (worstVram <= kSceneVRAMBudgetMB);
         if (fpsOk && vramOk)
         {
-            recommended = &r;
+            recommended = &r1;
             break;
         }
     }
 
     bool lowFPSWarning = false;
-    if (!recommended && !results.empty())
+    if (!recommended && !results1.empty())
     {
         // No level met FPS threshold — recommend lowest (1×) with warning.
-        recommended  = &results.front();
+        recommended   = &results1.front();
         lowFPSWarning = true;
     }
 
@@ -484,15 +801,29 @@ int main(int argc, char** argv)
                                ? kSpecMinRoadPropAniso
                                : terrainAniso;
 
+        // Determine VRAM for reporting (worst of both scenes at recommended level).
+        float reportVram = recommended->vramUsedMB;
+        for (const LevelResult& r2 : results2)
+        {
+            if (r2.anisotropy == recommended->anisotropy)
+            {
+                if (recommended->vramUsedMB >= 0.0f && r2.vramUsedMB >= 0.0f)
+                    reportVram = std::max(recommended->vramUsedMB, r2.vramUsedMB);
+                else if (r2.vramUsedMB >= 0.0f)
+                    reportVram = r2.vramUsedMB;
+                break;
+            }
+        }
+
         std::printf("Terrain anisotropy:        %2d×  (spec minimum: %d×)\n",
             terrainAniso, kSpecMinTerrainAniso);
         std::printf("Road/prop/normal/specular: %2d×  (spec minimum: %d×)\n",
             roadAniso, kSpecMinRoadPropAniso);
 
-        if (recommended->vramUsedMB >= 0.0f)
+        if (reportVram >= 0.0f)
         {
             std::printf("Scene VRAM at recommended: %.1f MB / %.1f MB budget\n",
-                recommended->vramUsedMB, kSceneVRAMBudgetMB);
+                reportVram, kSceneVRAMBudgetMB);
         }
         else
         {
@@ -500,13 +831,26 @@ int main(int argc, char** argv)
                 kSceneVRAMBudgetMB);
         }
 
-        std::printf("Avg FPS at recommended:    %.1f  (target: >=%d)\n",
-            recommended->avgFPS, opts.targetFPS);
-        std::printf("Min FPS at recommended:    %.1f\n",
-            recommended->minFPS);
+        // Report worst-case avgFPS across both scenes at recommended level.
+        float reportAvgFPS = recommended->avgFPS;
+        float reportMinFPS = recommended->minFPS;
+        for (const LevelResult& r2 : results2)
+        {
+            if (r2.anisotropy == recommended->anisotropy)
+            {
+                reportAvgFPS = std::min(reportAvgFPS, r2.avgFPS);
+                reportMinFPS = std::min(reportMinFPS, r2.minFPS);
+                break;
+            }
+        }
 
-        bool budgetPass = (recommended->vramUsedMB < 0.0f)
-                       || (recommended->vramUsedMB <= kSceneVRAMBudgetMB);
+        std::printf("Avg FPS at recommended:    %.1f  (target: >=%d, worst of both scenes)\n",
+            reportAvgFPS, opts.targetFPS);
+        std::printf("Min FPS at recommended:    %.1f\n",
+            reportMinFPS);
+
+        bool budgetPass = (reportVram < 0.0f)
+                       || (reportVram <= kSceneVRAMBudgetMB);
         std::printf("Budget: %s  (scene VRAM %s)\n",
             budgetPass ? "PASS" : "FAIL",
             budgetPass ? "within 170 MB limit" : "EXCEEDS 170 MB limit");
@@ -514,26 +858,26 @@ int main(int argc, char** argv)
         if (lowFPSWarning)
         {
             std::printf("\nWARNING: No anisotropy level achieved target FPS (%d). "
-                        "Recommending lowest level (1×) — GPU may be underpowered.\n",
+                        "Recommending lowest level (1x) — GPU may be underpowered.\n",
                         opts.targetFPS);
         }
 
         if (terrainAniso < kSpecMinTerrainAniso)
         {
-            std::printf("\nWARNING: Recommended terrain anisotropy (%d×) is below spec minimum (%d×). "
+            std::printf("\nWARNING: Recommended terrain anisotropy (%dx) is below spec minimum (%dx). "
                         "GPU may not meet AI Town visual quality requirements at target FPS.\n",
                         terrainAniso, kSpecMinTerrainAniso);
         }
 
         if (roadAniso < kSpecMinRoadPropAniso)
         {
-            std::printf("\nWARNING: Recommended road/prop anisotropy (%d×) is below spec minimum (%d×). "
+            std::printf("\nWARNING: Recommended road/prop anisotropy (%dx) is below spec minimum (%dx). "
                         "GPU may not meet AI Town visual quality requirements at target FPS.\n",
                         roadAniso, kSpecMinRoadPropAniso);
         }
 
         // -------------------------------------------------------------------
-        // 7. JSON output
+        // 10. JSON output
         // -------------------------------------------------------------------
         if (opts.jsonOut)
         {
@@ -559,10 +903,11 @@ int main(int argc, char** argv)
                 }
                 js << "  \"vram_method\": \"" << methodTag << "\",\n";
 
-                js << "  \"results\": [\n";
-                for (size_t ri = 0; ri < results.size(); ++ri)
+                // Scene 1 results.
+                js << "  \"scene1_results\": [\n";
+                for (size_t ri = 0; ri < results1.size(); ++ri)
                 {
-                    const LevelResult& r = results[ri];
+                    const LevelResult& r = results1[ri];
                     js << "    {";
                     js << "\"anisotropy\": " << r.anisotropy << ", ";
                     js << "\"avg_fps\": "    << r.avgFPS     << ", ";
@@ -573,7 +918,27 @@ int main(int argc, char** argv)
                     else
                         js << "\"vram_used_mb\": null";
                     js << "}";
-                    if (ri + 1 < results.size()) { js << ","; }
+                    if (ri + 1 < results1.size()) { js << ","; }
+                    js << "\n";
+                }
+                js << "  ],\n";
+
+                // Scene 2 results.
+                js << "  \"scene2_results\": [\n";
+                for (size_t ri = 0; ri < results2.size(); ++ri)
+                {
+                    const LevelResult& r = results2[ri];
+                    js << "    {";
+                    js << "\"anisotropy\": " << r.anisotropy << ", ";
+                    js << "\"avg_fps\": "    << r.avgFPS     << ", ";
+                    js << "\"min_fps\": "    << r.minFPS     << ", ";
+                    js << "\"max_fps\": "    << r.maxFPS     << ", ";
+                    if (r.vramUsedMB >= 0.0f)
+                        js << "\"vram_used_mb\": " << r.vramUsedMB;
+                    else
+                        js << "\"vram_used_mb\": null";
+                    js << "}";
+                    if (ri + 1 < results2.size()) { js << ","; }
                     js << "\n";
                 }
                 js << "  ],\n";
@@ -581,11 +946,11 @@ int main(int argc, char** argv)
                 js << "  \"recommendation\": {\n";
                 js << "    \"terrain_anisotropy\": " << terrainAniso << ",\n";
                 js << "    \"road_prop_anisotropy\": " << roadAniso << ",\n";
-                if (recommended->vramUsedMB >= 0.0f)
-                    js << "    \"scene_vram_mb\": " << recommended->vramUsedMB << ",\n";
+                if (reportVram >= 0.0f)
+                    js << "    \"scene_vram_mb\": " << reportVram << ",\n";
                 else
                     js << "    \"scene_vram_mb\": null,\n";
-                js << "    \"avg_fps\": " << recommended->avgFPS << ",\n";
+                js << "    \"avg_fps\": " << reportAvgFPS << ",\n";
                 js << "    \"budget_pass\": " << (budgetPass ? "true" : "false") << "\n";
                 js << "  }\n";
                 js << "}\n";
@@ -600,8 +965,9 @@ int main(int argc, char** argv)
     }
 
     // -----------------------------------------------------------------------
-    // 8. Cleanup
+    // 11. Cleanup
     // -----------------------------------------------------------------------
+    if (smgr2) { smgr2->drop(); }
     device->drop();
 
     return 0;
