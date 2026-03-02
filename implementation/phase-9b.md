@@ -108,14 +108,17 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
   ```cpp
   // Render a single-tile wireframe hover highlight at the given tile grid coordinate.
-  // RGBA colour is encoded as 0xAARRGGBB. Pass kInvalidTile (-1,-1) to clear.
+  // ARGB colour encoded as 0xAARRGGBB (Irrlicht SColor format): AA=alpha, RR=red,
+  // GG=green, BB=blue. E.g. 0x6000FF00 = semi-transparent green.
+  // Pass kInvalidTile (-1,-1) to clear.
   // Called once per frame from the game loop, before endFrame().
   // main-thread-only.
-  virtual void setTileHoverHighlight(int tileX, int tileZ, uint32_t rgba) = 0;
+  virtual void setTileHoverHighlight(int tileX, int tileZ, uint32_t argb) = 0;
 
   // Render a semi-transparent colour fill overlay for all zoned tiles.
   // Colour scheme: R=0x6000FF00, C=0x600000FF, I=0x60FFFF00 (alpha=0x60 ≈ 38%).
-  // sparseOverlay maps (tileZ * mapTilesX + tileX) -> RGBA color for tiles
+  // (ARGB encoding: 0xAARRGGBB; 0x6000FF00 = green, 0x600000FF = blue, 0x60FFFF00 = yellow).
+  // sparseOverlay maps (tileZ * mapTilesX + tileX) -> ARGB color for tiles
   // with a non-zero zone overlay; tiles absent from the map have transparent
   // (no) overlay. Capped at 100K simultaneous entries for V1.
   // Called once per budget tick when zone layout changes.
@@ -130,22 +133,28 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 - [ ] Implement `IrrlichtRenderer::setTileHoverHighlight()`: build a single-quad `SMeshBuffer`
   with four vertices at the tile's world corners (Y = terrain height at tile centre, sampled
   from `TerrainSystem`). Set the material type to `EMT_TRANSPARENT_ALPHA_CHANNEL`. Apply the
-  hover RGBA colour to every vertex via `SMeshBuffer::Vertices[i].Color` (one `SColor` per
+  hover ARGB colour to every vertex via `SMeshBuffer::Vertices[i].Color` (one `SColor` per
   corner). After populating all vertices, call `buf->recalculateBoundingBox()` on the
-  `SMeshBuffer`, then call `m->recalculateBoundingBox()` on the parent `SMesh*`, before passing
-  the mesh to `IVideoDriver::drawMeshBuffer()` (required even when not attaching to the scene
-  graph — the renderer may perform its own frustum check against the bounding box).
+  `SMeshBuffer`, then call `m->recalculateBoundingBox()` on the parent `SMesh*` — required even
+  though the mesh is not scene-graph-attached; `IVideoDriver::drawMeshBuffer()` may perform its
+  own frustum check against the bounding box.
 
   **Memory lifecycle**: `IrrlichtRenderer` stores the hover highlight mesh as a private member
   `SMesh* m_hoveredTileMesh{nullptr}`. On each call to `setTileHoverHighlight()`:
   - If `m_hoveredTileMesh` is non-null, call `m_hoveredTileMesh->drop()` and set it to
     `nullptr` before creating a new mesh.
   - If `tileX == -1` (clear request): call `m_hoveredTileMesh->drop()` (if non-null), set
-    `m_hoveredTileMesh = nullptr`, and return without creating a new mesh — no draw call is
-    issued.
-  - Otherwise: create the new `SMesh*`, store it in `m_hoveredTileMesh`, and draw it via
-    `IVideoDriver::drawMeshBuffer()` directly in the render pass. The mesh is NOT added to the
-    Irrlicht scene graph (avoids scene graph overhead for per-frame rebuild).
+    `m_hoveredTileMesh = nullptr`, and return — no mesh is stored.
+  - Otherwise: create the new `SMesh*` and store it in `m_hoveredTileMesh`. The mesh is NOT
+    added to the Irrlicht scene graph (avoids scene graph overhead for per-frame rebuild).
+
+  **Render-pass draw call**: `setTileHoverHighlight()` is called from `UIManager::onEvent()`
+  during event processing — outside the render pass. The actual
+  `IVideoDriver::drawMeshBuffer(m_hoveredTileMesh)` call must live in
+  `IrrlichtRenderer::drawScene()`, immediately after `sceneManager->drawAll()` and before
+  `uiManager->draw()`, guarded by `m_hoveredTileMesh != nullptr`. This ensures the highlight
+  renders on top of 3D terrain but beneath 2D GUI elements (per the mandatory 10-step
+  per-frame sequence in `architecture/graphics-architecture/irrlicht-device-lifecycle.md`).
 
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
 
@@ -273,6 +282,13 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   via `IUIBackend::setElementVisible()` on each button handle: visible when `m_activeTool ==
   ActiveTool::Zone`, hidden otherwise.
 
+- [ ] **Zone sub-panel click handler**: when a Zone sub-panel button is clicked, update
+  `m_selectedZoneType` and `m_selectedDensityTier` based on the button's column
+  (0=Residential, 1=Commercial, 2=Industrial) and row (0=Low, 1=Medium, 2=High). The
+  active-selection button is visually indicated via `IUIBackend::setElementEnabled(btnHandle,
+  false)` (grayed-out/pressed appearance) on the selected button and `true` on all others in
+  the sub-panel.
+
   (ref: `architecture/game-design/zoning-system.md`, `architecture/ui-ux/hud-layout.md`)
 
 - [ ] **Utilities sub-panel** (Utilities tool active): a compact sub-panel appears immediately to
@@ -301,6 +317,13 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   via `IUIBackend::addButton()` during HUD or UIManager `init()`. Visibility is toggled as a
   group via `IUIBackend::setElementVisible()` on each button handle: visible when `m_activeTool ==
   ActiveTool::Utilities`, hidden otherwise.
+
+- [ ] **Utilities sub-panel click handler**: when a Utilities sub-panel button is clicked, update
+  `m_selectedServiceBuilding` to the corresponding `ServiceBuildingType`. Button layout:
+  (col0 row0)=PowerPlant, (col1 row0)=WaterTower, (col0 row1)=FireStation,
+  (col1 row1)=PoliceStation. Active selection indicated via
+  `IUIBackend::setElementEnabled(btnHandle, false)` on the selected button and `true` on all
+  others in the sub-panel.
 
 - [ ] Both sub-panels (Zone and Utilities) are fully rendered in Phase 9b — UIManager creates
   their buttons at `init()` time and shows/hides them based on active tool via
@@ -354,7 +377,11 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   (already exists as a Phase 8 stub with empty body). Fill in the real implementation: set the
   zone type / density label, demand score, desirability, tax yield/month, and demand pressure %
   fields from `result`. Panel opens at cursor + 40 px offset in virtual space per the
-  `query-inspector-panel.md` three-step cascade position rule. (ref:
+  `query-inspector-panel.md` three-step cascade position rule. UIManager must convert the
+  physical screen-space cursor coordinates captured at click time to virtual 1920×1080 space
+  via `UIScaler::unproject(physX, physY)` before passing `(cursorX_virtual, cursorY_virtual)`
+  to `InspectorPanel::computePanelPosition()` for the three-step cascade. `UIScaler::unproject`
+  was delivered in Phase 1 and is already available. (ref:
   `architecture/ui-ux/query-inspector-panel.md`)
 
 - [ ] Wire `InspectorPanel` data refresh cadence: budget/economy fields refresh once per budget
@@ -364,9 +391,22 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
 #### G. Tests
 
+- [ ] Define `WorldInteractionTest` as a Google Test fixture class. Private members (declared
+  in this order): `StrictMock<MockCitySimulation> sim_`, `StrictMock<MockRenderer> renderer_`,
+  `ManualTerrainQuery terrain_`, `StrictMock<MockUIBackend> backend_`, `ManualClock clock_`,
+  `std::unique_ptr<UIManager> uiManager_`. `SetUp()` constructs UIManager and wires
+  dependencies: `uiManager_ = std::make_unique<UIManager>(&backend_, nullptr, &sim_, &clock_);`
+  then calls `uiManager_->setRenderer(&renderer_);` and `uiManager_->setTerrainQuery(&terrain_);`
+  — these two setter calls are REQUIRED before any event is sent, otherwise `m_renderer` is null
+  and `pickTerrainTile()` null-dereferences. `TearDown()` override calls `uiManager_.reset();`
+  (destructor contract: explicitly destroys UIManager before `StrictMock<>` members are
+  destroyed, releasing raw `m_renderer`/`m_terrain` pointers safely — per
+  `architecture/testing/testability-architecture.md` canonical TearDown pattern). All G-tests
+  are methods of this fixture class and access UIManager via `uiManager_->`.
+
 - [ ] `WorldInteraction_ZonePlacement_CallsPlaceZone` (unit test in `tests/ui/`): construct
-  `UIManager` with `NiceMock<MockCitySimulation>`, `NiceMock<MockRenderer>`,
-  `ManualTerrainQuery` (slope = 0°), `NiceMock<MockUIBackend>`, `ManualClock`. Set active tool
+  `UIManager` with `StrictMock<MockCitySimulation>`, `StrictMock<MockRenderer>`,
+  `ManualTerrainQuery` (slope = 0°), `StrictMock<MockUIBackend>`, `ManualClock`. Set active tool
   to `ActiveTool::Zone`. Stub `MockRenderer::pickTerrainTile` to return `true` and set
   tileX=5, tileZ=7. Send a `MouseButtonDown button=0` event.
   `EXPECT_CALL(sim_, placeZone(5, 7, _, _, 0)).Times(1);` (ref:
@@ -407,8 +447,8 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   false. `EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, 0)).Times(AtLeast(1));`
 
 - [ ] `WorldInteraction_ZonePlacement_SparseOverlay_InsertsEntry` (unit test): construct
-  `UIManager` with `NiceMock<MockCitySimulation>`, `NiceMock<MockRenderer>`,
-  `ManualTerrainQuery` (slope = 0°), `NiceMock<MockUIBackend>`, `ManualClock`. Set active tool
+  `UIManager` with `StrictMock<MockCitySimulation>`, `StrictMock<MockRenderer>`,
+  `ManualTerrainQuery` (slope = 0°), `StrictMock<MockUIBackend>`, `ManualClock`. Set active tool
   to `ActiveTool::Zone`. Stub `MockRenderer::pickTerrainTile` to return `true` at tileX=3,
   tileZ=4. Send `MouseButtonDown button=0`. After dispatch, capture the `sparseOverlay` argument
   passed to `setZoneOverlay`. Assert that the captured map contains exactly 1 entry whose key
@@ -498,7 +538,7 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   - Add `placeServiceBuilding` stub to `CitySimulation` (Phase 9b implementation work —
     not part of this spec/interface clarification).
   - Add unit test `WorldInteraction_UtilitiesPlacement_CallsPlaceServiceBuilding`:
-    construct `UIManager` with `NiceMock<MockCitySimulation>`, `NiceMock<MockRenderer>`,
+    construct `UIManager` with `StrictMock<MockCitySimulation>`, `StrictMock<MockRenderer>`,
     `ManualTerrainQuery` (slope = 0°). Set active tool to `ActiveTool::Utilities`, selected
     building to `ServiceBuildingType::FireStation`. Stub `MockRenderer::pickTerrainTile` to
     return true at (5, 7). Send `MouseButtonDown button=0`.
@@ -523,8 +563,11 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 - Slope guard: when earthworks cost exceeds treasury balance, a Normal toast is shown and
   `placeZone` / `placeRoad` is NOT called
 - All 14 unit tests in `WorldInteractionTest` pass under `ctest -LE "integration|requires-opengl"`
-  (G.1–G.9 plus I—Utilities placement, plus 4 sparse-overlay tests: SparseOverlay_InsertsEntry,
-  Demolish_SparseOverlay_ErasesEntry, NewGameLoad_ClearsOverlay, OverlayCap_100K_StillCalls)
+  (9 named base tests: ZonePlacement, RoadPlacement, DemolishTool_SteepSlope,
+  ZoneTool_SteepSlope_InsufficientFunds, QueryTool, NoActiveTool, ModalActive,
+  HoverHighlight_SetOnMouseMove, HoverHighlight_ClearedOnMiss; plus I—Utilities placement;
+  plus 4 sparse-overlay tests: SparseOverlay_InsertsEntry, Demolish_SparseOverlay_ErasesEntry,
+  NewGameLoad_ClearsOverlay, OverlayCap_100K_StillCalls)
 - `UIManager::getActiveTool()` returns the correct `ActiveTool` after each toolbar button click
   and hotkey press (verified by `WorldInteraction_NoActiveTool_LeftClickIgnored` and related tests)
 - Zone overlay is visually correct: newly placed tiles appear in the correct zone colour within
@@ -541,8 +584,8 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
 | Role | Responsibility |
 |---|---|
-| `graphics-dev-irrlicht` | `IRenderer::pickTerrainTile` + `setTileHoverHighlight` + `setZoneOverlay` implementation; `IrrlichtRenderer` terrain-system pointer wiring; `ITerrainQuery::getHeightAt` promotion; `main.cpp` wiring (`setRenderer`, `setTerrainQuery`, `setTerrainSystem`); `InspectorPanel::populate()` real implementation; `InspectorPanel` data refresh cadence wiring |
-| `gamedesign-ux` | Zone sub-panel layout (3×3 button grid, virtual x:80 px); zone colour scheme (R/C/I); hover colour scheme per tool mode; confirm Utilities spec gap resolution with `gamedesign-lookandfeel` |
+| `graphics-dev-irrlicht` | Deliverable A (ActiveTool enum in `src/ui/ui_types.h`, `UIManager::m_activeTool` member + `getActiveTool()` getter, Priority-5 toolbar/hotkey dispatch extension); Deliverable D (UIManager world-interaction layer: MouseMove hover-highlight handler, left-click dispatch for all tool modes, overlay dirty-flag management, sub-panel visibility toggling via setElementVisible); `IRenderer::pickTerrainTile` + `setTileHoverHighlight` + `setZoneOverlay` implementation; `IrrlichtRenderer` terrain-system pointer wiring; `ITerrainQuery::getHeightAt` promotion; `main.cpp` wiring (`setRenderer`, `setTerrainQuery`, `setTerrainSystem`); `InspectorPanel::populate()` real implementation; `InspectorPanel` data refresh cadence wiring |
+| `gamedesign-ux` | Zone sub-panel layout (3×3 button grid, virtual x:80 px); Utilities sub-panel layout (2×2 button grid, virtual x:80–276 y:176–276, 96×48 px buttons with placement cost labels); zone colour scheme (R/C/I); hover colour scheme per tool mode; confirm Utilities spec gap resolution with `gamedesign-lookandfeel` |
 | `gamedesign-lookandfeel` | **COMPLETE**: Utilities placement spec gap resolved (Deliverable I, 2026-03-01); earthworks cost gate confirmed consistent with economy balance; zone/road/service placement costs confirmed for V1 difficulty tiers |
 | `test-dev-cpp` | All 14 `WorldInteractionTest` unit tests in `tests/ui/world_interaction_test.cpp`; `MockRenderer` extension stubs (including sparse-map `setZoneOverlay`); `ManualTerrainQuery` extension for `getHeightAt` |
 
