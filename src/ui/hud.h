@@ -26,6 +26,9 @@ public:
     // Mark or clear the unsaved-changes indicator dot.
     void setUnsavedChanges(bool unsaved);
 
+    // Update the active-tool indicator text (e.g. "Zone", "Road", "Query").
+    void setActiveToolLabel(const std::string& text);
+
     // Access the owned budget detail sub-panel.
     BudgetDetailPanel* getBudgetDetail() const { return m_budgetDetail; }
 

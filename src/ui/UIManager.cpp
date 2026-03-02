@@ -380,8 +380,31 @@ bool UIManager::onEvent(const InputEvent& event) {
                    kToolbarLeft, kToolbarTop,
                    kToolbarRight - kToolbarLeft,
                    kToolbarBottom - kToolbarTop)) {
-            // Toolbar click detected — consumed. Full tool-selection logic is
-            // wired when the toolbar buttons are interactable (Phase 8 HUD).
+            // Per-button hit-test. Button positions match HUD.cpp exactly
+            // (kToolBtnSize=48, kToolPad=8, starting y=64).
+            const int y = event.y;
+
+            if (y >= 64 && y < 112) {          // Zone
+                if (m_hud) m_hud->setActiveToolLabel("Zone");
+            } else if (y >= 120 && y < 168) {  // Road
+                if (m_hud) m_hud->setActiveToolLabel("Road");
+            } else if (y >= 176 && y < 224) {  // Utilities
+                if (m_hud) m_hud->setActiveToolLabel("Utilities");
+            } else if (y >= 232 && y < 280) {  // Demolish
+                if (m_hud) m_hud->setActiveToolLabel("Demolish");
+            } else if (y >= 288 && y < 336) {  // Query — toggle inspector
+                m_inspectorOpen = !m_inspectorOpen;
+                if (m_inspectorOpen) {
+                    m_inspector->show();
+                } else {
+                    m_inspector->hide();
+                }
+                if (m_hud) m_hud->setActiveToolLabel(m_inspectorOpen ? "Query" : "No tool");
+            } else if (y >= 608 && y < 656) {  // Undo
+                if (m_sim && m_sim->hasUndoPendingAction()) {
+                    m_sim->undoLastAction();
+                }
+            }
             return true;
         }
 
