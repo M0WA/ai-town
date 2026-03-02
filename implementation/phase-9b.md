@@ -188,11 +188,13 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
     `setUnsavedChanges(true)` on success. Refresh zone overlay via `m_renderer->setZoneOverlay`.
   - **Road tool**: call `m_sim->placeRoad(tileX, tileZ, earthworksCost)` (same earthworks
     computation). Same slope guard and unsaved-changes marking.
-  - **Utilities tool**: call `m_sim->placeZone(tileX, tileZ, ZoneType::Utility,
-    DensityTier::Low, earthworksCost)` — Utilities are zoned tiles in V1; the zone type
-    `ZoneType::Utility` must already be present on `ICitySimulation` per Phase 6 delivery. If
-    `ZoneType::Utility` is absent (spec gap), flag it explicitly in the Phase 9b kick-off review
-    before implementation begins. (ref: `architecture/game-design/zoning-system.md`)
+  - **Utilities tool**: call
+    `m_sim->placeServiceBuilding(tileX, tileZ, m_selectedServiceBuilding, earthworksCost)`.
+    `m_selectedServiceBuilding` is the type currently selected in the Utilities sub-panel
+    (default: `ServiceBuildingType::PowerPlant`). Same earthworks computation and
+    insufficient-funds guard as the Zone and Road tools. `CitySimulation` enforces the one-
+    building-per-tile invariant as a no-op at the API level; no UIManager pre-query is required.
+    (ref: `architecture/game-design/service-coverage.md` — Utilities Tool Placement Design)
   - **Demolish tool**: if the demolish confirmation modal has NOT been suppressed (Settings >
     Gameplay "Confirm before demolish" is ON, the default), show the Phase 8 demolish
     confirmation modal with tile count = 1. On confirmation (or if suppressed), call
@@ -213,6 +215,21 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   `DensityTier m_selectedDensityTier{DensityTier::Low}`. Sub-panel is hidden when Zone tool is
   not active. (ref: `architecture/game-design/zoning-system.md`,
   `architecture/ui-ux/hud-layout.md`)
+
+- [ ] **Utilities sub-panel** (Utilities tool active): a compact sub-panel appears immediately to
+  the right of the toolbar (virtual x:80 px, y:176 px — aligned with the Utilities button row)
+  showing the four service building types as a 2×2 button grid:
+
+  | Column 1 | Column 2 |
+  |---|---|
+  | Power Plant | Water Tower |
+  | Fire Station | Police Station |
+
+  Active selection highlighted. `UIManager` tracks
+  `ServiceBuildingType m_selectedServiceBuilding{ServiceBuildingType::PowerPlant}`. Each
+  button displays the building name and its placement cost (e.g. "Power Plant $10,000"). Sub-panel
+  is hidden when Utilities tool is not active. (ref:
+  `architecture/game-design/service-coverage.md` — Utilities Tool Placement Design)
 
 - [ ] **Zone overlay refresh**: after any `placeZone`, `placeRoad`, or `demolishTile` call that
   succeeds (returns without throwing — `ICitySimulation` mutations are fire-and-forget), rebuild
@@ -309,19 +326,49 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   `renderer.setZoneOverlay(...)` if the overlay dirty flag is set (set by any successful
   placement or demolish in the current frame). The dirty flag is managed by `UIManager`.
 
-#### I. `ZoneType::Utility` Spec Gap Investigation
+#### I. Utilities Tool Spec — Resolved
 
-- [ ] **SPEC GAP — FLAG FOR RESOLUTION**: The Utilities toolbar button (Phase 8) maps to a
-  placement action in Phase 9b, but `architecture/game-design/zoning-system.md` defines only
-  `Residential (R)`, `Commercial (C)`, and `Industrial (I)` zone types. Power plants and water
-  towers are referenced in `architecture/game-design/service-coverage.md` as service buildings
-  placed by the player, not as zone tiles. **Resolution required before Phase 9b
-  implementation**: `gamedesign-lookandfeel` must clarify whether Utilities placement maps to
-  (a) a `ZoneType::Utility` on `ICitySimulation`, (b) a separate `placeServiceBuilding(type,
-  tile)` API not yet on the interface, or (c) a different dispatch path. This is a genuine
-  spec contradiction between the HUD toolbar (which has a Utilities button implying a placement
-  action) and the zoning spec (which does not define a Utilities zone type). **The Phase 9b
-  kick-off is BLOCKED on this clarification.** Utilities tool click must NOT silently no-op.
+<!-- RESOLVED: gamedesign-lookandfeel 2026-03-01 -->
+<!-- Decision: service buildings are individually placed objects via placeServiceBuilding(), -->
+<!-- NOT zone tiles. ZoneType::Utility does not exist and must not be added. -->
+
+- [x] **SPEC GAP RESOLVED**: The Utilities toolbar button places **service infrastructure
+  buildings** (Power Plant, Water Tower, Fire Station, Police Station) as discrete placed
+  objects. This is NOT a zone type. `ZoneType::Utility` does not exist and must not be added to
+  the codebase.
+
+  **Authoritative decision** (`gamedesign-lookandfeel`, 2026-03-01):
+
+  - A new `enum class ServiceBuildingType { PowerPlant, WaterTower, FireStation, PoliceStation }`
+    has been added to `src/interfaces/simulation_types.h`.
+  - A new `virtual void placeServiceBuilding(int tileX, int tileZ, ServiceBuildingType type,
+    int earthworksCostOverride = 0) = 0;` has been added to `src/interfaces/ICitySimulation.h`.
+  - Placement costs (deducted immediately from treasury):
+    - Power Plant: $10,000 (`SimulationConstants::service_placement_cost_power_plant`)
+    - Water Tower: $3,000 (`SimulationConstants::service_placement_cost_water_tower`)
+    - Fire Station: $5,000 (`SimulationConstants::service_placement_cost_fire_station`)
+    - Police Station: $4,000 (`SimulationConstants::service_placement_cost_police_station`)
+  - Full spec in `architecture/game-design/service-coverage.md` — "Utilities Tool — Placement
+    Design (V1)" section.
+  - Phase 9b implementation may proceed. **BLOCK CLEARED.**
+
+- [ ] **Phase 9b implementation tasks arising from this resolution**:
+  - Add `ServiceBuildingType m_selectedServiceBuilding{ServiceBuildingType::PowerPlant}` to
+    `UIManager` private members.
+  - Add `placeServiceBuilding` to `MockCitySimulation` in `tests/ui/mock_city_simulation.h`.
+  - Add placement-cost constants to `simulation_constants.h`:
+    `service_placement_cost_power_plant = 10000`,
+    `service_placement_cost_water_tower = 3000`,
+    `service_placement_cost_fire_station = 5000`,
+    `service_placement_cost_police_station = 4000`.
+  - Add `placeServiceBuilding` stub to `CitySimulation` (Phase 9b implementation work —
+    not part of this spec/interface clarification).
+  - Add unit test `WorldInteraction_UtilitiesPlacement_CallsPlaceServiceBuilding`:
+    construct `UIManager` with `NiceMock<MockCitySimulation>`, `NiceMock<MockRenderer>`,
+    `ManualTerrainQuery` (slope = 0°). Set active tool to `ActiveTool::Utilities`, selected
+    building to `ServiceBuildingType::FireStation`. Stub `MockRenderer::pickTerrainTile` to
+    return true at (5, 7). Send `MouseButtonDown button=0`.
+    `EXPECT_CALL(sim_, placeServiceBuilding(5, 7, ServiceBuildingType::FireStation, 0)).Times(1);`
 
 ---
 
@@ -346,8 +393,10 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   and hotkey press (verified by `WorldInteraction_NoActiveTool_LeftClickIgnored` and related tests)
 - Zone overlay is visually correct: newly placed tiles appear in the correct zone colour within
   one frame of placement; demolished tiles clear within one frame
-- **Spec gap I resolved**: `gamedesign-lookandfeel` clarification on Utilities placement is on
-  record in `architecture/game-design/service-coverage.md` before implementation begins
+- **Spec gap I resolved**: Utilities tool places service buildings via
+  `ICitySimulation::placeServiceBuilding(tileX, tileZ, ServiceBuildingType, earthworksCost)`.
+  `ServiceBuildingType` enum is in `simulation_types.h`. Full placement design (sub-panel layout,
+  costs, placement rules) is in `architecture/game-design/service-coverage.md`. BLOCK CLEARED.
 - `all-checks-pass` CI gate remains green after Phase 9b changes land
 
 ---
@@ -358,7 +407,7 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 |---|---|
 | `graphics-dev-irrlicht` | `IRenderer::pickTerrainTile` + `setTileHoverHighlight` + `setZoneOverlay` implementation; `IrrlichtRenderer` terrain-system pointer wiring; `ITerrainQuery::getHeightAt` promotion; `main.cpp` wiring (`setRenderer`, `setTerrainQuery`, `setTerrainSystem`) |
 | `gamedesign-ux` | Zone sub-panel layout (3×3 button grid, virtual x:80 px); zone colour scheme (R/C/I); hover colour scheme per tool mode; confirm Utilities spec gap resolution with `gamedesign-lookandfeel` |
-| `gamedesign-lookandfeel` | **BLOCKING**: resolve Utilities placement spec gap (Deliverable I); confirm earthworks cost gate behaviour is consistent with economy balance; confirm zone/road placement costs are correct for V1 difficulty tiers |
+| `gamedesign-lookandfeel` | **COMPLETE**: Utilities placement spec gap resolved (Deliverable I, 2026-03-01); earthworks cost gate confirmed consistent with economy balance; zone/road/service placement costs confirmed for V1 difficulty tiers |
 | `test-dev-cpp` | All 9 `WorldInteractionTest` unit tests in `tests/ui/world_interaction_test.cpp`; `MockRenderer` extension stubs; `ManualTerrainQuery` extension for `getHeightAt` |
 | `graphics-dev-irrlicht` | `InspectorPanel::populate()` real implementation; `InspectorPanel` data refresh cadence wiring |
 
@@ -402,8 +451,6 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   cascade to Phase 8 test fixtures. If the Phase 8 tests use bare `UIManager` construction,
   the setters are safe — they are no-ops if not called (nullptr guard in dispatch).
 
-- **RISK**: `ZoneType::Utility` spec gap (Deliverable I) could block the entire phase if not
-  resolved promptly. **Spike**: `gamedesign-lookandfeel` to resolve within 3 days of Phase 9b
-  kick-off; escalate to product owner if not resolved. Interim mitigation: stub the Utilities
-  left-click to show a Normal toast "Utilities placement not yet configured" so the game loop
-  does not crash.
+- **RESOLVED**: `ZoneType::Utility` spec gap (Deliverable I) was resolved by
+  `gamedesign-lookandfeel` on 2026-03-01. Utilities placement uses `placeServiceBuilding()`.
+  No interim stub required. Implementation may proceed immediately.

@@ -144,6 +144,22 @@ public:
     virtual void demolishTile(int tileX, int tileZ) = 0;
     virtual void undoLastAction() = 0;
 
+    // Places a service building of the given type at the specified tile.
+    // Deducts the type-specific placement cost immediately from the treasury:
+    //   PowerPlant = $10,000 (SimulationConstants::service_placement_cost_power_plant)
+    //   WaterTower = $3,000  (SimulationConstants::service_placement_cost_water_tower)
+    //   FireStation = $5,000 (SimulationConstants::service_placement_cost_fire_station)
+    //   PoliceStation = $4,000 (SimulationConstants::service_placement_cost_police_station)
+    // earthworksCostOverride: pre-computed earthworks cost in dollars; 0 on flat tiles.
+    //   The game loop computes this via ITerrainQuery::getSlopeDegrees() before calling here.
+    // One building per tile: if the tile is already occupied by any service building this call
+    //   is a no-op (no cost deducted, no undo entry recorded).
+    // Records an undo entry (expires at second budget tick after action) on success.
+    // See architecture/game-design/service-coverage.md (Utilities Tool — Placement Design).
+    virtual void placeServiceBuilding(int tileX, int tileZ,
+                                      ServiceBuildingType type,
+                                      int earthworksCostOverride = 0) = 0;
+
     // --- Per-tile query (Phase 6 delivery) ---
     // Returns tile data for the Query/Inspector Panel.
     // If the tile coordinates are out of bounds or unzoned, returns a default QueryResult

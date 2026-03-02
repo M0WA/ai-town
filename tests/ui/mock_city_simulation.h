@@ -71,6 +71,10 @@ public:
     MOCK_METHOD(void, placeRoad,      (int tileX, int tileZ, int earthworksCostOverride), (override));
     MOCK_METHOD(void, demolishTile,   (int tileX, int tileZ), (override));
     MOCK_METHOD(void, undoLastAction, (), (override));
+    MOCK_METHOD(void, placeServiceBuilding,
+                (int tileX, int tileZ, ServiceBuildingType type,
+                 int earthworksCostOverride),
+                (override));
 
     // --- Per-tile query (Phase 6 delivery) ---
     MOCK_METHOD(QueryResult, queryTile, (int tileX, int tileZ), (const, override));

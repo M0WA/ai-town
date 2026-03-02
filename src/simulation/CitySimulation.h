@@ -103,6 +103,9 @@ public:
     void placeRoad(int tileX, int tileZ, int earthworksCostOverride = 0) override;
     void demolishTile(int tileX, int tileZ) override;
     void undoLastAction() override;
+    void placeServiceBuilding(int tileX, int tileZ,
+                              ServiceBuildingType type,
+                              int earthworksCostOverride = 0) override;
 
     // ---- Per-tile query ----
     QueryResult queryTile(int tileX, int tileZ) const override;
