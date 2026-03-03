@@ -124,11 +124,17 @@ private:
     irr::video::IVideoDriver*  m_driver{nullptr};
 
     // Sprite bank for IGUIButton sprite assignment.
-    // Loaded from assets/textures/ui/hud_sprites_ui.dds during construction.
+    // Loaded from assets/textures/ui/hud_sprites_ui.png during construction.
     // Contains one texture entry and 1024 position entries (32×32 grid, 64×64 px/cell).
     // Shared by every button created via addButton(); each button holds a grabbed ref.
     // Null when running headless (EDT_NULL) or when the texture file is absent.
     irr::gui::IGUISpriteBank*  m_spriteBank{nullptr};
+
+    // True only when the sprite sheet texture loaded successfully.
+    // setElementImage() must not call setSprite() when false — the sprite bank
+    // would have 0 textures but sprites referencing texture[0], causing an
+    // out-of-bounds assert in irr::core::array when Irrlicht renders the button.
+    bool m_spriteBankReady{false};
 
     // Cached driver type — avoids virtual dispatch on every method call.
     // Set once at construction from m_driver->getDriverType().

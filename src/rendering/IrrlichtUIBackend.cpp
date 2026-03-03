@@ -226,56 +226,66 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
         if (m_spriteBank) {
             m_spriteBank->grab();
 
-            // Load the sprite sheet texture via Irrlicht (linear RGBA8 path —
-            // UI sprites are not sRGB-critical; they are overlaid at screen
-            // resolution and do not require gamma-correct diffuse sampling).
+            // Load the sprite sheet texture via Irrlicht.
+            // Use PNG — Irrlicht's built-in PNG loader is unconditionally
+            // compiled in. DDS requires a plugin loader that is not always
+            // present; getTexture() would silently return null for DDS on
+            // those builds, leaving a textureless bank and causing an assert
+            // in irr::core::array when buttons are rendered.
             irr::video::ITexture* tex = m_driver->getTexture(
-                "assets/textures/ui/hud_sprites_ui.dds");
+                "assets/textures/ui/hud_sprites_ui.png");
+
             if (tex) {
                 // Add the texture as the sole texture entry (index 0).
                 m_spriteBank->addTexture(tex);
+                m_spriteBankReady = true;
             }
-            // If tex is null (file absent or EDT_NULL) the bank stays texture-
-            // less; buttons will render without icons (graceful degradation).
+            // If tex is null (file absent, headless EDT_NULL, or unsupported
+            // format), leave the bank texture-less and m_spriteBankReady false.
+            // setElementImage() will skip setSprite() calls in that case, so
+            // buttons will render without icons but will NOT crash.
 
-            // Populate position entries and sprites for all 1024 cells.
-            // Cell (col, row): top-left = (col*64, row*64),
-            //                  bottom-right = ((col+1)*64, (row+1)*64).
-            static const int kCellSize  = 64;
-            static const int kGridCols  = 32;
-            static const int kGridRows  = 32;
-            static const int kTotalCells = kGridCols * kGridRows; // 1024
+            // Populate position entries and sprites ONLY when the texture
+            // loaded successfully.  Adding sprite entries that reference
+            // textureNumber=0 when the bank has 0 textures causes an
+            // out-of-bounds assert in irr::core::array at render time.
+            if (m_spriteBankReady) {
+                static const int kCellSize   = 64;
+                static const int kGridCols   = 32;
+                static const int kGridRows   = 32;
+                static const int kTotalCells = kGridCols * kGridRows; // 1024
 
-            irr::core::array<irr::core::rect<irr::s32>>& positions =
-                m_spriteBank->getPositions();
-            irr::core::array<irr::gui::SGUISprite>& sprites =
-                m_spriteBank->getSprites();
+                irr::core::array<irr::core::rect<irr::s32>>& positions =
+                    m_spriteBank->getPositions();
+                irr::core::array<irr::gui::SGUISprite>& sprites =
+                    m_spriteBank->getSprites();
 
-            positions.reallocate(static_cast<irr::u32>(kTotalCells));
-            sprites.reallocate(static_cast<irr::u32>(kTotalCells));
+                positions.reallocate(static_cast<irr::u32>(kTotalCells));
+                sprites.reallocate(static_cast<irr::u32>(kTotalCells));
 
-            for (int cellIdx = 0; cellIdx < kTotalCells; ++cellIdx) {
-                const int col = cellIdx % kGridCols;
-                const int row = cellIdx / kGridCols;
-                const irr::s32 left   = col * kCellSize;
-                const irr::s32 top    = row * kCellSize;
-                const irr::s32 right  = left + kCellSize;
-                const irr::s32 bottom = top  + kCellSize;
+                for (int cellIdx = 0; cellIdx < kTotalCells; ++cellIdx) {
+                    const int col = cellIdx % kGridCols;
+                    const int row = cellIdx / kGridCols;
+                    const irr::s32 left   = col * kCellSize;
+                    const irr::s32 top    = row * kCellSize;
+                    const irr::s32 right  = left + kCellSize;
+                    const irr::s32 bottom = top  + kCellSize;
 
-                // Add the source rect to the position list.
-                positions.push_back(
-                    irr::core::rect<irr::s32>(left, top, right, bottom));
+                    // Add the source rect to the position list.
+                    positions.push_back(
+                        irr::core::rect<irr::s32>(left, top, right, bottom));
 
-                // Build a one-frame sprite pointing at this position entry
-                // and the sole texture (index 0).
-                irr::gui::SGUISpriteFrame frame;
-                frame.rectNumber    = static_cast<irr::u32>(cellIdx);
-                frame.textureNumber = 0u;
+                    // Build a one-frame sprite pointing at this position entry
+                    // and the sole texture (index 0).
+                    irr::gui::SGUISpriteFrame frame;
+                    frame.rectNumber    = static_cast<irr::u32>(cellIdx);
+                    frame.textureNumber = 0u;
 
-                irr::gui::SGUISprite sprite;
-                sprite.Frames.push_back(frame);
-                sprite.frameTime = 0u;  // static (no animation)
-                sprites.push_back(sprite);
+                    irr::gui::SGUISprite sprite;
+                    sprite.Frames.push_back(frame);
+                    sprite.frameTime = 0u;  // static (no animation)
+                    sprites.push_back(sprite);
+                }
             }
         }
     }
@@ -598,9 +608,12 @@ void IrrlichtUIBackend::setElementImage(UIElementHandle handle,
     irr::gui::IGUIButton* btn =
         static_cast<irr::gui::IGUIButton*>(elem);
 
-    // Guard: sprite bank must be attached (set in addButton()).
-    if (!m_spriteBank) {
-        // No sprite bank — store mapping for reference but no visual effect.
+    // Guard: sprite bank must be attached (set in addButton()) AND have loaded
+    // its texture successfully. Without the texture, the bank has 0 textures but
+    // sprites referencing textureNumber=0, causing an out-of-bounds assert in
+    // irr::core::array when the button is rendered by Irrlicht.
+    if (!m_spriteBank || !m_spriteBankReady) {
+        // No sprite bank or texture load failed — store mapping for reference.
         m_imageElementMap[handle] = spriteIndex;
         return;
     }
