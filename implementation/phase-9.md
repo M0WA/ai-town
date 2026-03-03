@@ -1,5 +1,7 @@
 ## Phase 9: City Assets (Buildings & Vehicles)
 
+**Status: DONE**
+
 ### Goal
 
 Deliver all V1 building and vehicle 3D assets, billboard imposters, atlas textures, LOD pipeline, and collision meshes — all passing export validation.
