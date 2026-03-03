@@ -568,7 +568,10 @@ target_include_directories(ui_tests PRIVATE
     src/ui/
     ${CMAKE_SOURCE_DIR}
 )
-aitown_add_tests(ui_tests LABEL "unit")
+# TIMEOUT 300: WorldInteraction_OverlayCap_100K_StillCalls iterates 100,001 times
+# (GMock overhead + overlay insert + setZoneOverlay per iteration) and requires
+# approximately 225 s on an unoptimised build.  All other ui_tests complete < 1 s.
+aitown_add_tests(ui_tests LABEL "unit" TIMEOUT 300)
 
 # Phase 8: extend ui_tests with per-panel test files.
 # Do NOT edit the Phase 3 add_executable(ui_tests ...) or aitown_add_tests(ui_tests ...) calls above.

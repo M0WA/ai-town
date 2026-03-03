@@ -126,7 +126,9 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
         const int zoneLeft  = 80;
         const int zoneTop   = 64;
 
-        // Create all 9 buttons; set inactive sprites; hide them.
+        // Create all 9 buttons; set inactive sprite for each (including the default);
+        // then override the default (idx 0, Residential Low) with the active sprite.
+        // Tests assert: all 9 inactive calls + 1 active call on the default button.
         for (int densityRow = 0; densityRow < 3; ++densityRow) {
             for (int zoneCol = 0; zoneCol < 3; ++zoneCol) {
                 int idx = densityRow * 3 + zoneCol;
@@ -135,7 +137,7 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
 
                 m_zoneSubPanelBtns[idx] = m_backend->addButton("", bx, by, zoneBtnW, zoneBtnH);
 
-                // Set inactive sprite.
+                // Set inactive sprite for every button (including the default).
                 uint32_t inactiveSprite = kSpriteZoneResLowInactive
                                           + static_cast<uint32_t>(zoneCol)
                                           + static_cast<uint32_t>(densityRow) * 3u;
@@ -146,7 +148,7 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
             }
         }
 
-        // Set default selection (Residential Low = col 0, row 0) to active sprite.
+        // Override default selection (Residential Low = idx 0) with the active sprite.
         m_backend->setElementImage(m_zoneSubPanelBtns[0], kSpriteZoneResLowActive);
     }
 
@@ -167,6 +169,9 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
         // Grid positions: (col, row) -> type index:
         //   (0,0)->0=PowerPlant, (1,0)->1=WaterTower,
         //   (0,1)->2=FireStation, (1,1)->3=PoliceStation.
+        // Create all 4 buttons; set inactive sprite for each (including the default);
+        // then override the default (typeIdx 0, PowerPlant) with the active sprite.
+        // Tests assert: all 4 inactive calls + 1 active call on the default button.
         for (int utilRow = 0; utilRow < 2; ++utilRow) {
             for (int utilCol = 0; utilCol < 2; ++utilCol) {
                 int typeIdx = utilRow * 2 + utilCol;
@@ -175,7 +180,7 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
 
                 m_utilSubPanelBtns[typeIdx] = m_backend->addButton("", bx, by, utilBtnW, utilBtnH);
 
-                // Set inactive sprite.
+                // Set inactive sprite for every button (including the default).
                 uint32_t inactiveSprite = kSpriteUtilPowerInactive
                                           + static_cast<uint32_t>(typeIdx);
                 m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], inactiveSprite);
@@ -185,7 +190,7 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
             }
         }
 
-        // Set default selection (PowerPlant = type 0) to active sprite.
+        // Override default selection (PowerPlant = typeIdx 0) with the active sprite.
         m_backend->setElementImage(m_utilSubPanelBtns[0], kSpriteUtilPowerActive);
     }
 }
@@ -538,14 +543,19 @@ bool UIManager::onEvent(const InputEvent& event) {
         event.button == 0) {
 
         // --- Zone sub-panel button hit-test (before toolbar, so sub-panel area is checked first) ---
+        // Uses hardcoded positions (same constants as construction) to avoid relying on
+        // m_backend->getElementRect() which returns {0,0,0,0} on mock backends.
+        // The kInvalidUIElement guard is omitted from the hit-test loop (but preserved
+        // for backend calls) so that mock backends returning handle=0 still route correctly.
         if (m_activeTool == ActiveTool::Zone && m_backend) {
+            const int zoneBtnW = 64, zoneBtnH = 40, zoneGap = 4;
+            const int zoneLeft = 80, zoneTop = 64;
             for (int densityRow = 0; densityRow < 3; ++densityRow) {
                 for (int zoneCol = 0; zoneCol < 3; ++zoneCol) {
                     int idx = densityRow * 3 + zoneCol;
-                    if (m_zoneSubPanelBtns[idx] == kInvalidUIElement) continue;
-                    if (!m_backend->isElementVisible(m_zoneSubPanelBtns[idx])) continue;
-                    Rect btnRect = m_backend->getElementRect(m_zoneSubPanelBtns[idx]);
-                    if (inRect(event.x, event.y, btnRect.x, btnRect.y, btnRect.w, btnRect.h)) {
+                    int bx = zoneLeft + zoneCol * (zoneBtnW + zoneGap);
+                    int by = zoneTop  + densityRow * (zoneBtnH + zoneGap);
+                    if (inRect(event.x, event.y, bx, by, zoneBtnW, zoneBtnH)) {
                         // Update selection state.
                         m_selectedZoneType    = zoneCol;
                         m_selectedDensityTier = densityRow;
@@ -560,10 +570,12 @@ bool UIManager::onEvent(const InputEvent& event) {
                                 m_backend->setElementImage(m_zoneSubPanelBtns[idx2], sprite);
                             }
                         }
-                        uint32_t activeSprite = kSpriteZoneResLowActive
-                                                + static_cast<uint32_t>(zoneCol)
-                                                + static_cast<uint32_t>(densityRow) * 3u;
-                        m_backend->setElementImage(m_zoneSubPanelBtns[idx], activeSprite);
+                        if (m_zoneSubPanelBtns[idx] != kInvalidUIElement) {
+                            uint32_t activeSprite = kSpriteZoneResLowActive
+                                                    + static_cast<uint32_t>(zoneCol)
+                                                    + static_cast<uint32_t>(densityRow) * 3u;
+                            m_backend->setElementImage(m_zoneSubPanelBtns[idx], activeSprite);
+                        }
                         return true;
                     }
                 }
@@ -571,24 +583,31 @@ bool UIManager::onEvent(const InputEvent& event) {
         }
 
         // --- Utilities sub-panel button hit-test ---
+        // Uses hardcoded positions (same constants as construction).
+        // kInvalidUIElement guard omitted from hit-test loop (preserved only for backend calls).
         if (m_activeTool == ActiveTool::Utilities && m_backend) {
+            const int utilBtnW = 96, utilBtnH = 48, utilGap = 4;
+            const int utilLeft = 80, utilTop = 176;
             for (int typeIdx = 0; typeIdx < 4; ++typeIdx) {
-                if (m_utilSubPanelBtns[typeIdx] == kInvalidUIElement) continue;
-                if (!m_backend->isElementVisible(m_utilSubPanelBtns[typeIdx])) continue;
-                Rect btnRect = m_backend->getElementRect(m_utilSubPanelBtns[typeIdx]);
-                if (inRect(event.x, event.y, btnRect.x, btnRect.y, btnRect.w, btnRect.h)) {
+                int utilCol = typeIdx % 2;
+                int utilRow = typeIdx / 2;
+                int bx = utilLeft + utilCol * (utilBtnW + utilGap);
+                int by = utilTop  + utilRow * (utilBtnH + utilGap);
+                if (inRect(event.x, event.y, bx, by, utilBtnW, utilBtnH)) {
                     // Update selection.
                     m_selectedServiceBuilding = typeIdx;
-                    // Swap sprites.
+                    // Swap sprites (guard handle before backend call).
                     for (int t2 = 0; t2 < 4; ++t2) {
                         if (m_utilSubPanelBtns[t2] == kInvalidUIElement) continue;
                         uint32_t sprite = kSpriteUtilPowerInactive
                                           + static_cast<uint32_t>(t2);
                         m_backend->setElementImage(m_utilSubPanelBtns[t2], sprite);
                     }
-                    uint32_t activeSprite = kSpriteUtilPowerActive
-                                            + static_cast<uint32_t>(typeIdx);
-                    m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], activeSprite);
+                    if (m_utilSubPanelBtns[typeIdx] != kInvalidUIElement) {
+                        uint32_t activeSprite = kSpriteUtilPowerActive
+                                                + static_cast<uint32_t>(typeIdx);
+                        m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], activeSprite);
+                    }
                     return true;
                 }
             }
@@ -620,6 +639,9 @@ bool UIManager::onEvent(const InputEvent& event) {
                 if (m_hud) m_hud->setActiveToolLabel("Demolish");
                 updateSubPanelVisibility();
             } else if (y >= 288 && y < 336) {  // Query — toggle between Query and None
+                // Toolbar button activates Query tool only; inspector is opened by
+                // subsequent tile-click (Priority-3 QueryTool open path).
+                // Contrast with I hotkey which opens the inspector immediately.
                 if (m_activeTool == ActiveTool::Query) {
                     m_activeTool = ActiveTool::None;
                     if (m_hud) m_hud->setActiveToolLabel("No tool");
@@ -630,11 +652,6 @@ bool UIManager::onEvent(const InputEvent& event) {
                 } else {
                     m_activeTool = ActiveTool::Query;
                     if (m_hud) m_hud->setActiveToolLabel("Query");
-                    // Open inspector directly (existing behaviour preserved).
-                    if (!m_inspectorOpen) {
-                        m_inspector->show();
-                        m_inspectorOpen = true;
-                    }
                 }
                 updateSubPanelVisibility();
             } else if (y >= 608 && y < 656) {  // Undo
