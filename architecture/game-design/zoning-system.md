@@ -146,6 +146,68 @@
 - **Terrain interaction**: See [Terrain Interaction](terrain-interaction.md) for the authoritative slope threshold (> 15.0°, exact), earthworks cost formula, and map playability guarantee.
 - **Player action**: Player designates zones; engine auto-populates buildings based on demand and desirability scores
 
+## Zone Overlay Colour Scheme (Phase 9b — HUD)
+
+When the Zone tool is active or when zones have been placed, the renderer draws a semi-transparent
+colour overlay on each zoned tile so the player can always identify zone type at a glance.
+
+**ARGB encoding**: `0xAARRGGBB` (Irrlicht `SColor` format; AA = alpha, RR = red, GG = green,
+BB = blue).
+
+| Zone type | ARGB constant | Appearance |
+|---|---|---|
+| Residential (R) | `0x6000FF00u` | Semi-transparent green (alpha 0x60 ≈ 38%) |
+| Commercial (C) | `0x600000FFu` | Semi-transparent blue (alpha 0x60 ≈ 38%) |
+| Industrial (I) | `0x60FFFF00u` | Semi-transparent yellow (alpha 0x60 ≈ 38%) |
+
+These constants are used by `UIManager` when constructing the sparse overlay map passed to
+`IRenderer::setZoneOverlay()`. They are **not** `SimulationConstants` (they are pure UI/rendering
+values with no simulation logic dependency). They must be defined as named `constexpr uint32_t`
+values in `src/ui/ui_constants.h` (alongside the toolbar carve-out constants) so they are a single
+authoritative source for both `UIManager` and any future rendering code that needs zone colour
+lookups:
+
+```cpp
+// src/ui/ui_constants.h — zone overlay ARGB colours (ARGB: 0xAARRGGBB)
+constexpr uint32_t kZoneOverlayColourResidential = 0x6000FF00u; // semi-transparent green
+constexpr uint32_t kZoneOverlayColourCommercial  = 0x600000FFu; // semi-transparent blue
+constexpr uint32_t kZoneOverlayColourIndustrial  = 0x60FFFF00u; // semi-transparent yellow
+```
+
+**Rationale**: Green for Residential matches the SimCity convention that players intuitively
+recognise. Blue for Commercial reflects the "cool" economic tone of business districts.
+Yellow/amber for Industrial signals industrial caution/activity. The 38% alpha (0x60) keeps the
+overlay legible without completely obscuring the terrain and building 3D geometry below it.
+
+## Tile Hover Highlight Colour Scheme (Phase 9b — HUD)
+
+When any placement tool is active and the player hovers the cursor over the terrain, a
+single-tile wireframe-style colour fill is rendered to indicate the target tile. The highlight
+colour varies by active tool to provide immediate visual feedback about the action type.
+
+**ARGB encoding**: same `0xAARRGGBB` format as the zone overlay above. Alpha 0x80 ≈ 50% —
+slightly more opaque than zone overlay to make the hover highlight stand out even over a
+pre-existing zone overlay.
+
+| Active tool | ARGB constant | Appearance |
+|---|---|---|
+| Zone | `0x80FF00FFu` | Semi-transparent magenta (indicates zone placement) |
+| Road | `0x8000FFFFu` | Semi-transparent cyan (indicates road placement) |
+| Utilities | `0x80FF8000u` | Semi-transparent orange (indicates service building placement) |
+| Demolish | `0x80FF0000u` | Semi-transparent red (indicates destructive action) |
+| Query | `0x80FFFFFFu` | Semi-transparent white (indicates inspection, no modification) |
+
+These constants must be defined as named `constexpr uint32_t` values in `src/ui/ui_constants.h`:
+
+```cpp
+// src/ui/ui_constants.h — tile hover highlight ARGB colours (ARGB: 0xAARRGGBB)
+constexpr uint32_t kHoverColourZone      = 0x80FF00FFu; // semi-transparent magenta
+constexpr uint32_t kHoverColourRoad      = 0x8000FFFFu; // semi-transparent cyan
+constexpr uint32_t kHoverColourUtilities = 0x80FF8000u; // semi-transparent orange
+constexpr uint32_t kHoverColourDemolish  = 0x80FF0000u; // semi-transparent red
+constexpr uint32_t kHoverColourQuery     = 0x80FFFFFFu; // semi-transparent white
+```
+
 ## SimulationConstants Mapping
 
 The following named constants in `simulation_constants.h` canonicalize values that appear as inline literals elsewhere in this spec. Phase 6 property-based tests MUST reference these names rather than hardcoding magic numbers. Any change to a value requires updating the constant definition only — all references pick it up automatically.

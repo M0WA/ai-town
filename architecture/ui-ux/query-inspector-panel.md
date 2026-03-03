@@ -26,6 +26,41 @@
   ```
 
   This three-step cascade (primary → fallback → edge-snap) guarantees the panel never overlaps the queried tile and is always fully on-screen.
+
+## `computePanelPosition` Function Signature (Phase 9b)
+
+`InspectorPanel::computePanelPosition` is a `static` pure-function that encapsulates the three-step
+cascade described above. Its authoritative signature (as of Phase 9b) is:
+
+```cpp
+// src/ui/inspector_panel.h (public static method)
+// Returns the panel's top-left position in virtual 1920×1080 space as a ScreenRect.
+// cursorX, cursorY: cursor position in virtual 1920×1080 space (already un-projected via UIScaler).
+// tileBounds: the queried tile's bounding box in virtual 1920×1080 space (already un-projected via UIScaler).
+// The panel rect dimensions are fixed: w=240, h=160.
+// ScreenRect is defined in IRenderer.h (struct ScreenRect { int x{0}, y{0}, w{0}, h{0}; }).
+static ScreenRect computePanelPosition(int cursorX, int cursorY, const ScreenRect& tileBounds);
+```
+
+**Usage by `UIManager`** (Phase 9b):
+
+1. Convert physical cursor coordinates to virtual space via `UIScaler::unproject(physX, physY)`.
+2. Obtain the tile's bounding box in physical pixels via `m_renderer->getTileScreenBounds(tileX, tileZ)`.
+3. Un-project all four corners of the tile bounding box via `UIScaler::unproject()` to obtain
+   `tileBounds_virtual` — a `ScreenRect` in virtual 1920×1080 space.
+4. Call `InspectorPanel::computePanelPosition(cursorX_virtual, cursorY_virtual, tileBounds_virtual)`.
+5. The returned `ScreenRect` gives the panel's top-left pixel position in virtual space; use
+   destroy-and-recreate via `IUIBackend` to position the panel elements (no `setElementPosition`
+   method exists on `IUIBackend`).
+
+**Phase 8 note**: Phase 8 implemented a stub with signature
+`static Rect computePanelPosition(int clickX, int clickY, int screenW, int screenH)`.
+Phase 9b MUST update this signature to the above. The `screenW`/`screenH` parameters are no longer
+needed — the edge-snap step derives virtual screen bounds from the fixed constants 1920 × 1080.
+Existing Phase 8 pure-function tests must be updated to pass a `ScreenRect tileBounds` argument
+instead of `screenW`/`screenH`; pass `ScreenRect{1000, 1000, 10, 10}` (off-screen — guaranteed
+non-overlapping) to keep existing placement assertions valid.
+
 - **Fields per entity type**:
   - Zone tile: demand score, desirability score, tax yield/month, zone type + density, demand pressure % (unmet demand percentage per zone type from the `demand_pressure_pct` field of `QueryResult`)
   - Road segment: current occupancy %, current speed, capacity, congestion status

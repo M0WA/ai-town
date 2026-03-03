@@ -1,15 +1,19 @@
 #pragma once
 
 #include "src/ui/IUIBackend.h"      // UIElementHandle, kInvalidUIElement, Rect
-#include "src/ui/ui_types.h"        // GameMode, GameState
+#include "src/ui/ui_types.h"        // GameMode, GameState, ActiveTool
 #include "src/interfaces/IClock.h"  // IClock — full include (available at Phase 0)
 #include "src/interfaces/LoanTerms.h"  // LoanTerms
+#include <unordered_map>
+#include <cstdint>
 
 // Forward declarations — do NOT #include these headers in UIManager.h.
-// IAudioSystem and ICitySimulation are declared as pointers only.
+// IAudioSystem, ICitySimulation, IRenderer, ITerrainQuery are declared as pointers only.
 // InputEvent is used as a const-reference parameter — forward declaration is valid in C++.
 class IAudioSystem;
 class ICitySimulation;
+class IRenderer;
+class ITerrainQuery;
 
 // INCLUDE PROHIBITION: Do NOT replace this forward declaration with
 // #include "src/platform/input_event.h". The platform header must not
@@ -108,6 +112,31 @@ public:
     // Mark or clear the unsaved-changes indicator dot in the HUD toolbar.
     void setUnsavedChanges(bool value);
 
+    // --- Phase 9b: late-bind setters (called from main.cpp after construction) ---
+
+    // setRenderer — late-bind the IRenderer* used by the world-interaction layer.
+    // Called from main.cpp after IrrlichtRenderer is constructed (step 3 of Phase 9b
+    // wiring order in Deliverable H).  Must be called before the first frame; guarded
+    // internally with a null-check so it is safe to defer but will silently no-op if
+    // not called.  NOT on the IRenderer interface (same rationale as IrrlichtRenderer::
+    // setTerrainQuery: one-time initialization setter, not a general renderer capability).
+    void setRenderer(IRenderer* renderer);
+
+    // setTerrainQuery — late-bind the ITerrainQuery* used for earthworks cost computation.
+    // Called from main.cpp after TerrainSystem is constructed (step 4 of Phase 9b wiring).
+    void setTerrainQuery(ITerrainQuery* terrain);
+
+    // setMapDimensions — supply the map tile width and depth to UIManager.
+    // Must be called from main.cpp after terrain generation completes (step 5 of Phase 9b
+    // wiring, via terrainSystem.getMapTilesX() / getMapTilesZ()).
+    // Re-call safety: if called a second time (e.g. new-game load with different map size),
+    // m_overlayMap is cleared and setZoneOverlay({}) is issued before updating dimensions
+    // so stale overlay keys from the old map width cannot corrupt the new map.
+    void setMapDimensions(int mapTilesX, int mapTilesZ);
+
+    // getActiveTool — returns the current active tool state (for test observability).
+    ActiveTool getActiveTool() const;
+
     // Returns true when a blocking modal dialog is currently active.
     // Used by the Priority-2 dual-guard and by tests.
     bool hasActiveModal() const;
@@ -134,6 +163,46 @@ private:
     // UI state machine
     GameState  m_state{GameState::MainMenu};
     GameMode   m_gameMode{GameMode::Sandbox};
+
+    // --- Phase 9b: late-bound renderer and terrain query (set via setters after construction) ---
+    IRenderer*    m_renderer{nullptr};
+    ITerrainQuery* m_terrain{nullptr};
+
+    // --- Phase 9b: active tool state ---
+    // Default: None (camera-only mode, same as Phase 8 initial state).
+    // Set by Priority-5 toolbar dispatch and hotkeys Z/R/U/D/I.
+    ActiveTool m_activeTool{ActiveTool::None};
+
+    // --- Phase 9b: zone sub-panel selection state ---
+    // ZoneType and DensityTier are defined in simulation_types.h; forward-declared here
+    // to avoid pulling the full simulation header into UIManager.h.  The concrete values
+    // are used only in UIManager.cpp.
+    // Default: Residential + Low (leftmost/topmost button in the 3x3 grid).
+    int m_selectedZoneType{0};    // 0=Residential, 1=Commercial, 2=Industrial
+    int m_selectedDensityTier{0}; // 0=Low, 1=Medium, 2=High
+
+    // --- Phase 9b: utilities sub-panel selection state ---
+    // Default: PowerPlant (index 0 in ServiceBuildingType enum).
+    int m_selectedServiceBuilding{0}; // matches ServiceBuildingType enum ordinal
+
+    // --- Phase 9b: map dimensions (set via setMapDimensions() from main.cpp) ---
+    // Both default to 0; overlay writes are skipped until setMapDimensions() has been called.
+    int m_mapTilesX{0};
+    int m_mapTilesZ{0};
+
+    // --- Phase 9b: sparse zone overlay map ---
+    // Key: tileZ * m_mapTilesX + tileX  (uint64_t)
+    // Value: ARGB colour (0xAARRGGBB)
+    // Updated on each successful placeZone() or demolishTile() call.
+    // Passed directly to IRenderer::setZoneOverlay() — sparse entries only.
+    // Capped at 100K entries for V1 (enforced in the overlay-insert path).
+    std::unordered_map<uint64_t, uint32_t> m_overlayMap;
+
+    // --- Phase 9b: last hovered tile coordinates ---
+    // Stored by the MouseMove handler and consumed by the left-click handler.
+    // {-1, -1} means no valid hovered tile (ray missed or no active tool).
+    int m_hoveredTileX{-1};
+    int m_hoveredTileZ{-1};
 
     // Unsaved-changes indicator state
     bool m_hasUnsavedChanges{false};

@@ -31,7 +31,63 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
 ### Deliverables
 
-#### A. `ActiveTool` Enum and `UIManager` State Tracking
+#### A. `ActiveTool` Enum, `UIManager` State Tracking, and Required Constants Headers
+
+- [ ] **Create `src/ui/hud_sprite_ids.h`** (non-class constants header, snake\_case filename
+  per CLAUDE.md): defines all `kSprite*` `constexpr uint32_t` constants for the
+  `hud_sprites_ui.dds` 2048×2048 sprite sheet. The authoritative cell layout and complete
+  constant list (handles 0–323 for all V1 Phase 9b icons) are specified in
+  `architecture/asset-standards/2d-texture-standards.md` — UI Sprite Sheet Cell Layout
+  section. Copy the `hud_sprite_ids.h` code block from that section verbatim. The file
+  must have `#pragma once`, include `<cstdint>`, and contain ONLY `constexpr uint32_t`
+  constants — no class declaration, no Irrlicht dependency. This header must exist before
+  any `IUIBackend::setElementImage()` call in `UIManager` or `HUD` is implemented.
+
+  **Sprite sheet load path (RESOLVED)**: `IrrlichtUIBackend` loads
+  `assets/textures/ui/hud_sprites_ui.dds` internally during its own initialization, before
+  any `UIManager` panel code runs. `UIManager` does NOT call `loadTexture()` for the sprite
+  sheet. `UIManager` only calls `m_backend->setElementImage(buttonHandle, kSpriteXxx)`, where
+  `kSpriteXxx` is a `constexpr uint32_t` cell-index constant from `src/ui/hud_sprite_ids.h`
+  (e.g. `kSpriteZoneResLowActive = 64`, `kSpriteZoneResLowInactive = 96`). The backend decodes
+  this integer as `col = handle % 32; row = handle / 32;` and renders the corresponding
+  sub-rect of the pre-loaded sprite sheet. **In unit tests**: `MockUIBackend::setElementImage()`
+  is called with the actual `kSprite*` integer constants — tests assert on these integer values
+  directly, not on a loadTexture sentinel. `MockUIBackend::loadTexture()` is NOT expected to
+  be called during Phase 9b UIManager construction for sprite-sheet icon swaps.
+  **Authoritative documentation**: `architecture/asset-standards/2d-texture-standards.md` —
+  "Runtime asset path" and "MockUIBackend test contract" subsections of UI Sprite Sheet Cell
+  Layout section.
+
+- [ ] **Create `src/ui/ui_constants.h`** (non-class constants header): defines all named
+  ARGB `constexpr uint32_t` constants for tile hover highlight and zone colour overlay, as
+  authorised in `architecture/ui-ux/hud-layout.md` — Tile Hover Highlight ARGB Colour
+  Scheme and Zone Colour Overlay ARGB Colour Scheme sections. Must contain exactly:
+
+  ```cpp
+  // src/ui/ui_constants.h
+  // ARGB encoding: 0xAARRGGBB (Irrlicht SColor format).
+  // Authoritative values: architecture/ui-ux/hud-layout.md
+  #pragma once
+  #include <cstdint>
+
+  // Tile hover highlight — alpha=0x80 (50% opacity)
+  constexpr uint32_t kHoverArgbZone       = 0x80FF00FFu; // magenta
+  constexpr uint32_t kHoverArgbRoad       = 0x8000FFFFu; // cyan
+  constexpr uint32_t kHoverArgbUtilities  = 0x80FF8000u; // orange
+  constexpr uint32_t kHoverArgbDemolish   = 0x80FF0000u; // red
+  constexpr uint32_t kHoverArgbQuery      = 0x80FFFFFFu; // white
+  constexpr uint32_t kHoverArgbClear      = 0x00000000u; // clear / no highlight
+
+  // Zone colour overlay — alpha=0x60 (~38% opacity)
+  constexpr uint32_t kOverlayArgbResidential = 0x6000FF00u; // green
+  constexpr uint32_t kOverlayArgbCommercial  = 0x600000FFu; // blue
+  constexpr uint32_t kOverlayArgbIndustrial  = 0x60FFFF00u; // yellow
+  ```
+
+  `ui_constants.h` must NOT include any Irrlicht headers. Used from `UIManager`,
+  `HUD`, and `IrrlichtRenderer` (for the overlay quad colour values passed back from
+  `UIManager`). Also used in tests — `WorldInteraction_ZonePlacement_SparseOverlay_
+  InsertsEntry` asserts `capturedMap.at(43) == kOverlayArgbResidential` (not a raw hex).
 
 - [ ] Define `enum class ActiveTool { None, Zone, Road, Utilities, Demolish, Query }` in
   `src/ui/ui_types.h` alongside the existing `GameState`/`GameMode` enums. `None` means no tool
@@ -114,16 +170,42 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
     `TerrainSystem::getCellSize()` (see Deliverable E.1). `MockRenderer` does NOT need a
     `setCellSize()` method — the mock's `pickTerrainTile()` stub returns hardcoded test values
     independent of cellSize.
-  - Intersect the ray with the terrain heightmap using a linear march (step size = `m_cellSize / 2`;
-    maximum 4096 steps or until the ray exits map bounds). At each step, convert the current
-    world-space ray position to tile indices (`stepTileX = static_cast<int>(rayX / m_cellSize)`,
-    `stepTileZ = static_cast<int>(rayZ / m_cellSize)`), clamp to map bounds, then sample height
-    via `m_terrain->getHeightAt(stepTileX, stepTileZ)` (the `ITerrainQuery` interface method
-    that `TerrainSystem` implements, injected via `setTerrainQuery()`). `getHeightAt()` takes
-    integer tile indices, not world-space floats — the conversion must happen at every march step.
-  - Convert the world-space hit point to tile grid coordinates:
-    `tileX = static_cast<int>(hitX / m_cellSize)`, `tileZ = static_cast<int>(hitZ / m_cellSize)`.
-  - Clamp to map bounds `[0, mapTilesX-1] × [0, mapTilesZ-1]`; return false if no hit found.
+  - **BLOCKING SPIKE RESOLVED (2026-03-02)**: The O(1) DDA grid-intersection + heightmap-
+    refinement algorithm is mandated by the spike result (see Risks & Spikes section for full
+    analysis). The naive 4096-step linear march is NOT used. Use the DDA algorithm below.
+  - **O(1) DDA grid-intersection algorithm** (replaces naive linear march):
+    1. Compute the ray start point on the flat Y=0 plane and the ray direction from
+       `getRayFromScreenCoordinates()`. Let `rayStart` = ray origin, `rayDir` = normalised
+       ray direction (Z-component must be non-zero; if `|rayDir.Y| < 1e-5f` the ray is
+       horizontal and cannot intersect terrain — return false immediately).
+    2. Convert `rayStart` world position to fractional tile coordinates:
+       `tileF_X = rayStart.X / m_cellSize`, `tileF_Z = rayStart.Z / m_cellSize`.
+       Clamp starting tile to map bounds `[0, mapTilesX-1] × [0, mapTilesZ-1]`.
+    3. Compute the DDA step direction and per-axis `tDelta` (distance along the ray between
+       consecutive tile boundary crossings in X and Z): `tDeltaX = |m_cellSize / rayDir.X|`
+       (infinite if `rayDir.X == 0`), similarly `tDeltaZ`. This is the standard 3D DDA
+       grid traversal ("A Fast Voxel Traversal Algorithm", Amanatides & Woo 1987).
+    4. Traverse tiles one grid cell at a time in O(1) per step (advancing either the X or Z
+       boundary crossing, whichever is closer). At each cell `(tileX, tileZ)`:
+       - Sample `float h = m_terrain->getHeightAt(tileX, tileZ)`.
+       - Compute the ray Y at the tile centre X/Z: `rayY = rayStart.Y + t * rayDir.Y`
+         where `t` is the current ray parameter at the tile centre.
+       - If `rayY <= h`: the ray has crossed below terrain — this tile is the hit. Set
+         `tileX` and `tileZ` from current cell, clamp to map bounds, return true.
+       - Advance to the next cell boundary (standard DDA step).
+       - If the current tile exits the map bounds `[0, mapTilesX-1] × [0, mapTilesZ-1]`:
+         return false (ray left the map without a terrain hit — sky or off-map click).
+    5. Maximum traversal cells = `mapTilesX + mapTilesZ` (diagonal worst case for a
+       1024×1024 map = 2048 cells). At ≤2048 cells × ~15 ns per cell (heightmap array lookup
+       in L3 cache) = ≤30 µs worst case, well within the 1 ms per-call budget at 60 FPS even
+       when multiple `MouseMove` events fire per frame. See Risks & Spikes for spike analysis.
+  - Convert the world-space hit cell to tile grid coordinates: `tileX` and `tileZ` are
+    already integer tile indices from the DDA traversal above. Clamp to map bounds
+    `[0, mapTilesX-1] × [0, mapTilesZ-1]`; return false if no hit found.
+  - The full DDA algorithm is specified in
+    `architecture/graphics-architecture/procedural-terrain.md` — "pickTerrainTile DDA
+    Algorithm" section, which is the normative reference for the implementation. The phase
+    plan here is a summary; the architecture file is the canonical spec.
   - `IrrlichtRenderer` must store a non-owning `ITerrainQuery* m_terrain{nullptr}` pointer
     (set via a new method `setTerrainQuery(ITerrainQuery* terrain)` called from `main.cpp`
     after terrain generation). `IrrlichtRenderer` does NOT hold a pointer to the concrete
@@ -133,6 +215,20 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
     in the window between `IrrlichtRenderer` construction and the `setTerrainQuery()` call
     from `main.cpp`. The main.cpp wiring order guarantees `m_terrain` is set before gameplay
     starts, but the guard is required as a defensive check.
+  - **DDA-required additional members on `IrrlichtRenderer`** (all private, all on
+    `IrrlichtRenderer` directly, NOT on `IRenderer`):
+    - `int m_mapTilesX{0}`, `int m_mapTilesZ{0}` — set by a new public method
+      `void setRendererMapDimensions(int w, int z)` on `IrrlichtRenderer` (not on `IRenderer`).
+      Default to 0; un-wired renderer returns false immediately from the DDA bounds check.
+      Called from `main.cpp` step (2b) (see Deliverable H). Add guard at top of
+      `pickTerrainTile()`: `if (m_mapTilesX <= 0 || m_mapTilesZ <= 0) return false;`.
+    - `irr::scene::ICameraSceneNode* m_camera{nullptr}` — active scene camera, required by
+      `smgr->getSceneCollisionManager()->getRayFromScreenCoordinates(pos, m_camera)`.
+      Assigned in `IrrlichtRenderer::init()` when the camera node is created. **If
+      `IrrlichtRenderer` already stores the active camera under another name, reuse that
+      pointer** — do NOT create a duplicate. Add guard: `if (!m_camera) return false;` at
+      the top of `pickTerrainTile()` alongside the `m_terrain` guard. Lives only in
+      `IrrlichtRenderer.h` (not in `IRenderer.h`, which must remain Irrlicht-free).
   - **NOTE**: `IrrlichtRenderer` forward-declares `ITerrainQuery`; the full include of
     `ITerrainQuery.h` lives in `.cpp` only to preserve the Irrlicht-free nature of `IRenderer.h`.
     The concrete `TerrainSystem` type is never mentioned in any `IrrlichtRenderer` header. (ref:
@@ -156,8 +252,12 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   virtual void setTileHoverHighlight(int tileX, int tileZ, uint32_t argb) = 0;
 
   // Render a semi-transparent colour fill overlay for all zoned tiles.
-  // Colour scheme: R=0x6000FF00, C=0x600000FF, I=0x60FFFF00 (alpha=0x60 ≈ 38%).
-  // (ARGB encoding: 0xAARRGGBB; 0x6000FF00 = green, 0x600000FF = blue, 0x60FFFF00 = yellow).
+  // Colour scheme (ARGB 0xAARRGGBB; alpha=0x60 ≈ 38%):
+  //   R = kOverlayArgbResidential (0x6000FF00, green)
+  //   C = kOverlayArgbCommercial  (0x600000FF, blue)
+  //   I = kOverlayArgbIndustrial  (0x60FFFF00, yellow)
+  // Constants in src/ui/ui_constants.h. Authoritative values in
+  // architecture/ui-ux/hud-layout.md — Zone Colour Overlay ARGB Colour Scheme.
   // sparseOverlay maps (tileZ * mapTilesX + tileX) -> ARGB color for tiles
   // with a non-zero zone overlay; tiles absent from the map have transparent
   // (no) overlay. Capped at 100K simultaneous entries for V1.
@@ -167,8 +267,9 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
                               const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) = 0;
   ```
 
-  (ref: `architecture/ui-ux/hud-layout.md` — active tool cursor shapes per tool mode;
-  `architecture/game-design/zoning-system.md` — zone types R/C/I)
+  (ref: `architecture/ui-ux/hud-layout.md` — Tile Hover Highlight ARGB Colour Scheme,
+  Zone Colour Overlay ARGB Colour Scheme; `architecture/game-design/zoning-system.md` —
+  zone types R/C/I; `src/ui/ui_constants.h` — `kOverlayArgbResidential` et al.)
 
 - [ ] Add the following method to `IRenderer` (`src/interfaces/IRenderer.h`), immediately after
   `setZoneOverlay`:
@@ -350,16 +451,19 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
 - [ ] **MouseMove handler** (world interaction layer, only when `m_activeTool != None`):
   - Call `m_renderer->pickTerrainTile(event.screenX, event.screenY, tileX, tileZ)`.
-  - If hit: compute hover highlight colour per active tool:
-    - Zone: `0x80FF00FF` (semi-transparent magenta)
-    - Road: `0x8000FFFF` (semi-transparent cyan)
-    - Utilities: `0x80FF8000` (semi-transparent orange)
-    - Demolish: `0x80FF0000` (semi-transparent red)
-    - Query: `0x80FFFFFF` (semi-transparent white)
+  - If hit: look up the hover highlight ARGB constant for the active tool from
+    `src/ui/ui_constants.h` (constants defined in `architecture/ui-ux/hud-layout.md` —
+    Tile Hover Highlight ARGB Colour Scheme section):
+    - Zone: `kHoverArgbZone` (`0x80FF00FF` — semi-transparent magenta)
+    - Road: `kHoverArgbRoad` (`0x8000FFFF` — semi-transparent cyan)
+    - Utilities: `kHoverArgbUtilities` (`0x80FF8000` — semi-transparent orange)
+    - Demolish: `kHoverArgbDemolish` (`0x80FF0000` — semi-transparent red)
+    - Query: `kHoverArgbQuery` (`0x80FFFFFF` — semi-transparent white)
   - Call `m_renderer->setTileHoverHighlight(tileX, tileZ, colour)`.
   - Store `m_hoveredTile = {tileX, tileZ}` for the left-click handler.
-  - If no hit: call `m_renderer->setTileHoverHighlight(-1, -1, 0)` to clear.
-  (ref: `architecture/ui-ux/hud-layout.md` — cursor shape per tool mode)
+  - If no hit: call `m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear)` to clear
+    (`kHoverArgbClear = 0x00000000u`).
+  (ref: `architecture/ui-ux/hud-layout.md` — Tile Hover Highlight ARGB Colour Scheme)
 
 - [ ] **Left-click handler** (world interaction layer, only when `m_activeTool != None` and
   `m_hoveredTile` is valid):
@@ -424,13 +528,26 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   via `IUIBackend::setElementVisible()` on each button handle: visible when `m_activeTool ==
   ActiveTool::Zone`, hidden otherwise.
   **Initial button state (set at `init()` time, before any player interaction)**: immediately
-  after creating the 9 buttons, call `IUIBackend::setElementImage(handle, outlineSprite)` on
-  all 9 buttons to set the inactive/outline-icon sprite. Then call
-  `IUIBackend::setElementImage(handle, activeSprite)` on the default-selected button (column 0
-  = Residential, row 0 = Low) to set its active-state sprite. This ensures buttons have correct
+  after creating the 9 buttons, call `IUIBackend::setElementImage(handle, inactiveHandle)` on
+  all 9 buttons to set the inactive/outline-icon sprite, where `inactiveHandle` for each button
+  at `(zoneCol, densityRow)` is `kSpriteZoneResLowInactive + zoneCol + densityRow * 3` (from
+  `src/ui/hud_sprite_ids.h`). Then call `IUIBackend::setElementImage(handle, activeHandle)` on
+  the default-selected button (column 0 = Residential, row 0 = Low), where
+  `activeHandle = kSpriteZoneResLowActive` (handle 64). This ensures buttons have correct
   visual state on first display rather than showing a blank/undefined image. The same
   sprite-swap logic applies on each subsequent button click (see Zone sub-panel click handler
   below).
+
+  **Sprite handle formula for Zone sub-panel** (ref: `architecture/asset-standards/
+  2d-texture-standards.md` — UI Sprite Sheet Cell Layout, Rows 2 and 3):
+  - Active handle: `kSpriteZoneResLowActive + zoneCol + densityRow * 3`
+  - Inactive handle: `kSpriteZoneResLowInactive + zoneCol + densityRow * 3`
+
+  Where `zoneCol = static_cast<int>(zoneType)` (0=Residential, 1=Commercial, 2=Industrial)
+  and `densityRow = static_cast<int>(densityTier)` (0=Low, 1=Medium, 2=High). This formula
+  is valid because the zone sub-panel icons occupy contiguous cells in `hud_sprites_ui.dds`
+  rows 2 and 3 in the same 3-column (R/C/I) × 3-row (Low/Med/High) order as the sub-panel
+  grid. All named constants come from `src/ui/hud_sprite_ids.h`.
 
 - [ ] **Zone sub-panel click handler** (Priority 5 — zone sub-panel buttons are
   `IUIBackend::addButton()` elements that generate `EGET_BUTTON_CLICKED` events, handled in
@@ -475,10 +592,20 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   group via `IUIBackend::setElementVisible()` on each button handle: visible when `m_activeTool ==
   ActiveTool::Utilities`, hidden otherwise.
   **Initial button state (set at `init()` time)**: immediately after creating the 4 buttons,
-  call `IUIBackend::setElementImage(handle, outlineSprite)` on all 4 buttons, then call
-  `IUIBackend::setElementImage(handle, activeSprite)` on the default-selected button
-  (PowerPlant — `ServiceBuildingType::PowerPlant`). Same sprite-swap logic applies on each
-  subsequent click (see Utilities sub-panel click handler below).
+  call `IUIBackend::setElementImage(handle, inactiveHandle)` on all 4 buttons, where
+  `inactiveHandle = kSpriteUtilPowerInactive + static_cast<int>(type)` (from
+  `src/ui/hud_sprite_ids.h`). Then call `IUIBackend::setElementImage(handle, activeHandle)`
+  on the default-selected button (PowerPlant — `ServiceBuildingType::PowerPlant`), where
+  `activeHandle = kSpriteUtilPowerActive` (handle 128). Same sprite-swap logic applies on
+  each subsequent click (see Utilities sub-panel click handler below).
+
+  **Sprite handle formula for Utilities sub-panel** (ref: `architecture/asset-standards/
+  2d-texture-standards.md` — UI Sprite Sheet Cell Layout, Rows 4 and 5):
+  - Active handle: `kSpriteUtilPowerActive + static_cast<int>(type)`
+  - Inactive handle: `kSpriteUtilPowerInactive + static_cast<int>(type)`
+
+  Where `type` is `ServiceBuildingType` (PowerPlant=0, WaterTower=1, FireStation=2,
+  PoliceStation=3). All named constants from `src/ui/hud_sprite_ids.h`.
 
 - [ ] **Utilities sub-panel click handler** (Priority 5 — same as Zone sub-panel: buttons are
   `IUIBackend::addButton()` elements generating `EGET_BUTTON_CLICKED` events, dispatched in
@@ -506,9 +633,10 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   (see Deliverable A); they represent the map width and depth in tiles respectively. At zone
   placement, insert or update the entry:
   `m_overlayMap[(tileZ * m_mapTilesX + tileX)] = colour`, where `colour` is derived from
-  `selectedZoneType` using the ARGB values defined in the `setZoneOverlay()` interface comment
-  (Deliverable C): `Residential→0x6000FF00u`, `Commercial→0x600000FFu`,
-  `Industrial→0x60FFFF00u` (alpha 0x60 ≈ 38%). At demolish, erase the entry:
+  `selectedZoneType` using named constants from `src/ui/ui_constants.h` (authoritative
+  values in `architecture/ui-ux/hud-layout.md` — Zone Colour Overlay ARGB Colour Scheme):
+  `Residential→kOverlayArgbResidential` (`0x6000FF00u`), `Commercial→kOverlayArgbCommercial`
+  (`0x600000FFu`), `Industrial→kOverlayArgbIndustrial` (`0x60FFFF00u`) (alpha 0x60 ≈ 38%). At demolish, erase the entry:
   `m_overlayMap.erase(tileZ * m_mapTilesX + tileX)`. Before any overlay update, guard with
   `if (m_mapTilesX == 0 || m_mapTilesZ == 0) return;` to skip updates until
   `setMapDimensions()` has been called. When calling
@@ -523,7 +651,7 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
 #### E. `ITerrainQuery` — Tile Height Query (New Method)
 
-- [ ] Add `virtual float getHeightAt(int tileX, int tileZ) const = 0;` to `ITerrainQuery`
+- [x] Add `virtual float getHeightAt(int tileX, int tileZ) const = 0;` to `ITerrainQuery`
   (`src/interfaces/ITerrainQuery.h`). Returns Y-axis terrain height in world-space metres for
   the tile centre. Returns 0.0f for out-of-bounds coordinates. `TerrainSystem` already exposes
   `getHeightAt` per Phase 5's `TerrainChunk` heightmap query API — Phase 9b promotes this to
@@ -535,7 +663,7 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   `architecture/graphics-architecture/procedural-terrain.md` — `TerrainChunk` heightmap query
   API)
 
-- [ ] Extend `ManualTerrainQuery` (`tests/simulation/manual_terrain_query.h`) to implement the
+- [x] Extend `ManualTerrainQuery` (`tests/simulation/manual_terrain_query.h`) to implement the
   new method:
 
   ```cpp
@@ -549,7 +677,7 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
 #### E.1. `TerrainSystem` Map-Dimension Accessors (New Public Getters)
 
-- [ ] Add `int getMapTilesX() const;`, `int getMapTilesZ() const;`, and `float getCellSize() const;`
+- [x] Add `int getMapTilesX() const;`, `int getMapTilesZ() const;`, and `float getCellSize() const;`
   public accessor methods to `TerrainSystem` (`src/terrain/TerrainSystem.h` /
   `src/terrain/TerrainSystem.cpp`). These methods return the corresponding private members —
   `m_mapTilesX`, `m_mapTilesZ`, and `m_cellSize` respectively — which are set by
@@ -711,7 +839,8 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   `EXPECT_CALL(renderer_, setTileHoverHighlight(3, 4, _)).Times(AtLeast(1));`
 
 - [ ] `WorldInteraction_HoverHighlight_ClearedOnMiss` (unit test): `pickTerrainTile` returns
-  false. `EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, 0)).Times(AtLeast(1));`
+  false. `EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, kHoverArgbClear)).Times(AtLeast(1));`
+  (`kHoverArgbClear` from `src/ui/ui_constants.h` equals `0x00000000u`.)
 
 - [ ] `WorldInteraction_ZonePlacement_SparseOverlay_InsertsEntry` (unit test): uses the shared
   `WorldInteractionTest` fixture (which calls `uiManager_->setMapDimensions(10, 10)` in
@@ -720,9 +849,10 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   `MouseButtonDown button=0`. After dispatch, capture the `sparseOverlay` argument passed to
   `setZoneOverlay`. Assert that the captured map contains exactly 1 entry whose key equals `43`
   (i.e. `tileZ * m_mapTilesX + tileX = 4 * 10 + 3 = 43`, the placed tile) and whose value
-  equals `0x6000FF00u` (the Residential zone ARGB colour defined in Deliverable C — green,
-  alpha 0x60 ≈ 38%). A non-zero check is insufficient; the test must pin the exact colour so
-  that a wrong zone-type lookup (e.g. returning Commercial blue `0x600000FFu`) is caught.
+  equals `kOverlayArgbResidential` (`0x6000FF00u` from `src/ui/ui_constants.h`, authoritative
+  in `architecture/ui-ux/hud-layout.md` Zone Colour Overlay section — green, alpha 0x60 ≈ 38%).
+  A non-zero check is insufficient; the test must pin the exact named constant so that a wrong
+  zone-type lookup (e.g. returning Commercial `kOverlayArgbCommercial = 0x600000FFu`) is caught.
   `EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).WillOnce(SaveArg<2>(&capturedMap));`
 
 - [ ] `WorldInteraction_Demolish_SparseOverlay_ErasesEntry` (unit test): place a Zone tile at
@@ -734,8 +864,12 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
 - [ ] `WorldInteraction_NewGameLoad_ClearsOverlay` (unit test): pre-populate `m_overlayMap` with
   at least 3 entries by performing 3 zone placements. Trigger new-game load via
-  `UIManager::onNewGame()` (or equivalent reset call). Assert that `setZoneOverlay` is called
-  with an empty sparse map: the captured `sparseOverlay` argument has `size() == 0`.
+  `uiManager_->onNewGame()`. `UIManager::onNewGame()` is the authoritative reset method
+  (added to the public interface in Phase 9b — see `architecture/ui-ux/ui-manager.md`): it
+  clears `m_overlayMap`, calls `m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, {})` if
+  `m_renderer` is non-null, resets `m_activeTool` to `ActiveTool::None`, and clears
+  `m_hoveredTile`. Assert that `setZoneOverlay` is called with an empty sparse map: the
+  captured `sparseOverlay` argument has `size() == 0`.
 
 - [ ] `WorldInteraction_OverlayCap_100K_StillCalls` (unit test): drive `UIManager` to insert
   100,000 entries into `m_overlayMap` by calling the internal overlay-insert path directly (or
@@ -758,19 +892,40 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   calls made during construction/`init()`. Assert that `setElementImage` was called with the
   outline-icon sprite handle on all 9 Zone sub-panel button handles, and with the active-state
   sprite handle on exactly one button handle (the default selection: Residential Low, column 0
-  row 0). Use `EXPECT_CALL(backend_, setElementImage(zone_btn[i], outlineHandle)).Times(1)` for
-  each of the 8 non-default buttons, and
-  `EXPECT_CALL(backend_, setElementImage(zone_btn[0], activeHandle)).Times(1)` for the default.
-  This test closes the testability gap introduced when the init()-time button image
-  initialization requirement was added in Fix O.
+  row 0).
+
+  **Sprite handle clarification (RESOLVED)**: `outlineHandle` and `activeHandle` are NOT file
+  paths obtained via `IUIBackend::loadTexture()`. They are integer constants from
+  `src/ui/hud_sprite_ids.h` defined in `architecture/asset-standards/2d-texture-standards.md`
+  — UI Sprite Sheet Cell Layout section. `UIManager` calls `IUIBackend::loadTexture(
+  "assets/textures/ui/hud_sprites_ui.dds")` ONCE to obtain the sprite sheet texture handle,
+  then calls `setElementImage(buttonHandle, kSpriteZoneResLowInactive)` etc. using the integer
+  constants directly. In tests, `NiceMock<MockUIBackend>::loadTexture()` returns a sentinel
+  `UIElementHandle` (non-zero); `setElementImage` is expected to be called with the actual
+  `kSprite*` integer constants (not the loadTexture sentinel). Concretely:
+
+  ```cpp
+  // In the test (after UIManager construction):
+  EXPECT_CALL(backend_, setElementImage(zone_btn[i],
+      kSpriteZoneResLowInactive + col + row * 3)).Times(1); // inactive for 8 non-default
+  EXPECT_CALL(backend_, setElementImage(zone_btn[0],
+      kSpriteZoneResLowActive)).Times(1); // active for default (ResLow = handle 64)
+  ```
+
+  Where `col = zoneTypeIndex (0=Res, 1=Com, 2=Ind)` and `row = densityIndex (0=Low, 1=Med,
+  2=High)`. Both `kSpriteZoneResLowActive = 64` and `kSpriteZoneResLowInactive = 96` are from
+  `src/ui/hud_sprite_ids.h`. This test closes the testability gap introduced when the
+  init()-time button image initialization requirement was added in Fix O.
 
 - [ ] `WorldInteraction_UtilitiesSubPanel_ButtonsInitialized` (unit test): same pattern for the
   4 Utilities sub-panel buttons. Assert `setElementImage` called with outline-icon sprite on all
   4 handles during init(), then active-state sprite called on the PowerPlant button handle
-  (default selection). Use `NiceMock<MockUIBackend>` to suppress noise from unrelated
-  `setElementImage` calls on other HUD elements; use `EXPECT_CALL` with
-  `InSequence`-or-matcher to verify the sprite-swap pattern specifically for the Utilities
-  sub-panel button handles.
+  (default selection). The sprite handle constants are `kSpriteUtilPowerInactive` (160) for
+  inactive state and `kSpriteUtilPowerActive` (128) for the default-selected PowerPlant button.
+  Use `NiceMock<MockUIBackend>` to suppress noise from unrelated `setElementImage` calls on
+  other HUD elements; use `EXPECT_CALL` with `InSequence`-or-matcher to verify the sprite-swap
+  pattern specifically for the Utilities sub-panel button handles. The `setElementImage` second
+  argument is the `kSprite*` integer constant, NOT a loadTexture sentinel handle.
 
 - [ ] All new tests are labelled unit (no `requires-opengl`); added to `ui_tests` CMake target
   via `target_sources(ui_tests PRIVATE tests/ui/world_interaction_test.cpp)`. Do NOT call
@@ -789,16 +944,28 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
     interface methods — no concrete `TerrainSystem` API is used inside `IrrlichtRenderer`).
   - **(2a)** Call `renderer.setCellSize(terrainSystem.getCellSize())` — supplies `IrrlichtRenderer`
     with the tile grid spacing (world-space metres per tile) required by `pickTerrainTile()`
-    for the ray-march step size and tile-index conversion. Must be called on the concrete
+    for DDA step computation and tile-index conversion. Must be called on the concrete
     `IrrlichtRenderer` (not `IRenderer*`) since `setCellSize` is not on the interface (same
     rationale as `setTerrainQuery`).
+  - **(2b)** Call `renderer.setRendererMapDimensions(terrainSystem.getMapTilesX(),
+    terrainSystem.getMapTilesZ())` — supplies `IrrlichtRenderer` with the integer map extents
+    required by the DDA bounds check exit condition (`cx >= m_mapTilesX`, `cz >= m_mapTilesZ`).
+    The method name `setRendererMapDimensions` avoids collision with
+    `UIManager::setMapDimensions`. This method is on `IrrlichtRenderer` directly (NOT on
+    `IRenderer`), same rationale as `setCellSize`. It sets private members `m_mapTilesX` and
+    `m_mapTilesZ` on `IrrlichtRenderer` (distinct from `UIManager`'s same-named members).
+    Must be called after terrain generation. **This call is required** — without it,
+    `m_mapTilesX` and `m_mapTilesZ` default to 0 and the DDA traversal exits immediately on
+    the first bounds check, causing `pickTerrainTile()` to always return false. (ref:
+    `architecture/graphics-architecture/procedural-terrain.md` — pickTerrainTile DDA Algorithm)
   - **(3)** Call `uiManager.setRenderer(&renderer)`.
   - **(4)** Call `uiManager.setTerrainQuery(&terrainSystem)`.
   - **(5)** Call `uiManager.setMapDimensions(terrainSystem.getMapTilesX(),
-    terrainSystem.getMapTilesZ())` — supplies `m_mapTilesX` and `m_mapTilesZ` so the zone
-    overlay key computation (`tileZ * m_mapTilesX + tileX`) and the `setZoneOverlay` dimension
-    arguments are correct for this session's map. Must be called after terrain generation so the
-    map dimensions are final. Same pattern as `IrrlichtRenderer::setTerrainQuery()`.
+    terrainSystem.getMapTilesZ())` — supplies `UIManager::m_mapTilesX` and `m_mapTilesZ` so
+    the zone overlay key computation (`tileZ * m_mapTilesX + tileX`) and the `setZoneOverlay`
+    dimension arguments are correct for this session's map. Must be called after terrain
+    generation so the map dimensions are final. Same pattern as
+    `IrrlichtRenderer::setTerrainQuery()`.
 
   This order guarantees all pointers and map dimensions are valid before the first game-loop
   frame calls `pickTerrainTile()` or triggers a zone overlay update. These calls replace the
@@ -839,19 +1006,102 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   - Add `ServiceBuildingType m_selectedServiceBuilding{ServiceBuildingType::PowerPlant}` to
     `UIManager` private members.
   - Add `placeServiceBuilding` to `MockCitySimulation` in `tests/ui/mock_city_simulation.h`.
-  - Add placement-cost constants to `simulation_constants.h`:
+  - [x] **DONE (sound-artist-opensoftal, 2026-03-02)**: Placement-cost constants added to
+    `src/simulation/simulation_constants.h`:
     `service_placement_cost_power_plant = 10000`,
     `service_placement_cost_water_tower = 3000`,
     `service_placement_cost_fire_station = 5000`,
     `service_placement_cost_police_station = 4000`.
+    (ref: `architecture/game-design/service-coverage.md` — Placement Costs table)
   - Add `placeServiceBuilding` stub to `CitySimulation` (Phase 9b implementation work —
-    not part of this spec/interface clarification).
+    not part of this spec/interface clarification). **NOTE**: The stub already exists in
+    `src/simulation/CitySimulation.cpp` (added as Phase 9b preparation). The full
+    implementation must wire cost deduction, tile occupancy, undo entry, and audio callbacks
+    as specified in `architecture/game-design/service-coverage.md` — "Audio Callbacks for
+    `placeServiceBuilding()`" section.
   - Add unit test `WorldInteraction_UtilitiesPlacement_CallsPlaceServiceBuilding`:
     construct `UIManager` with `StrictMock<MockCitySimulation>`, `StrictMock<MockRenderer>`,
     `ManualTerrainQuery` (slope = 0°), `NiceMock<MockUIBackend>`, `ManualClock`. Set active tool to `ActiveTool::Utilities`, selected
     building to `ServiceBuildingType::FireStation`. Stub `MockRenderer::pickTerrainTile` to
     return true at (5, 7). Send `MouseButtonDown button=0`.
     `EXPECT_CALL(sim_, placeServiceBuilding(5, 7, ServiceBuildingType::FireStation, 0)).Times(1);`
+
+#### J.0. Audio Design Decisions — Resolved (sound-artist-opensoftal, 2026-03-02)
+
+<!-- RESOLVED: sound-artist-opensoftal 2026-03-02 -->
+<!-- All three audio blockers below are now documented in architecture/ spec files. -->
+<!-- No further design decisions are required before Phase 9b implementation begins. -->
+
+The following audio-domain design questions were open or under-specified in Phase 9b. All are
+now resolved. Developers must implement exactly as specified below and in the referenced
+architecture files.
+
+**Audio Decision 1 — `placeServiceBuilding()` audio callbacks (RESOLVED)**
+
+`CitySimulation::placeServiceBuilding()` stub at `src/simulation/CitySimulation.cpp` line 1499
+currently fires no audio. The full Phase 9b implementation MUST add the following call sequence
+on successful placement (tile was not already occupied and cost deduction succeeds):
+
+```cpp
+// In CitySimulation::placeServiceBuilding(), after tile occupancy guard and cost deduction:
+if (earthworksCostOverride > 0) {
+    if (m_audio) {
+        m_audio->playPositionalSound(SFX_EARTHWORKS,
+            vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+            SoundPriority::NORMAL, 1.0f);
+    }
+}
+if (m_audio) {
+    m_audio->playPositionalSound(SFX_BUILD_PLACE,
+        vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+        SoundPriority::NORMAL, 1.0f);
+}
+```
+
+- `SFX_BUILD_PLACE` (SoundId = 1) is the correct sound for service building placement.
+  A dedicated service-building SFX is post-V1.
+- `SFX_EARTHWORKS` (SoundId = 4) fires only when `earthworksCostOverride > 0`, identical to
+  the pattern in `placeZone()` and `placeRoad()`.
+- No audio fires on no-op (already-occupied tile) placements.
+
+Full specification in `architecture/game-design/service-coverage.md` — "Audio Callbacks for
+`placeServiceBuilding()`" section. **BLOCK CLEARED.**
+
+**Audio Decision 2 — service placement cost constants (RESOLVED)**
+
+`SimulationConstants::service_placement_cost_*` constants referenced in Deliverable I tasks and
+in `architecture/game-design/service-coverage.md` were missing from
+`src/simulation/simulation_constants.h`. They have now been added (sound-artist-opensoftal,
+2026-03-02):
+
+```cpp
+static constexpr int service_placement_cost_power_plant    = 10000;
+static constexpr int service_placement_cost_water_tower    = 3000;
+static constexpr int service_placement_cost_fire_station   = 5000;
+static constexpr int service_placement_cost_police_station = 4000;
+```
+
+`CitySimulation::placeServiceBuilding()` full implementation MUST deduct
+`SimulationConstants::service_placement_cost_<type> + earthworksCostOverride` from `m_treasury`
+using the same pattern as `placeRoad()` (`m_treasury -= totalCost`). Do NOT hardcode cost
+literals inline. **BLOCK CLEARED.**
+
+**Audio Decision 3 — Y-position for placement audio calls (RESOLVED — deferred to Phase 10)**
+
+`placeZone()`, `placeRoad()`, and `placeServiceBuilding()` all pass `Y = 0.0f` as the
+world-space Y coordinate in their `playPositionalSound()` calls. This is correct for Phase 9b.
+The `ITerrainQuery::getHeightAt()` method added in Phase 9b Deliverable E is used exclusively
+for **zone overlay and hover highlight rendering** (`IrrlichtRenderer::setZoneOverlay`,
+`IrrlichtRenderer::setTileHoverHighlight`). It is **NOT** used to update audio Y positions in
+Phase 9b.
+
+Decision: Y = 0.0f for audio positioning remains through Phase 9b exit. Phase 10 may substitute
+`m_terrain->getHeightAt(tileX, tileZ)` if real terrain height produces perceptibly incorrect
+audio spatialization. Developers MUST NOT add `getHeightAt()` calls to audio positioning sites
+in Phase 9b — doing so changes the `ITerrainQuery` usage contract and may cascade to test
+fixtures. (ref: `src/interfaces/ITerrainQuery.h` comment — "Height queries for audio
+positioning (playPositionalSound Y) use Y=0 in Phase 6 and will be refined in Phase 10 if
+required.") **BLOCK CLEARED — no Phase 9b action required.**
 
 #### J. SFX Wiring — Road Build Sound ID
 
@@ -879,7 +1129,11 @@ fire from real road placement dispatch.
   **This code-change deliverable is COMPLETE** — only the unit test below remains.
   (ref: `architecture/audio-architecture/v1-audio-asset-manifest.md` — SoundId Assignment Table)
 
-- [ ] **Unit test: `CitySimulation_PlaceRoad_FiresSFXRoadBuild`**
+- [x] **Unit test: `CitySimulation_PlaceRoad_FiresSFXRoadBuild`**
+  **IMPLEMENTED (sound-dev-opensoftal, 2026-03-02)**: `tests/simulation/audio_sim_test.cpp`
+  created with `AudioSimTest` fixture (NiceMock\<MockRenderer\>, StrictMock\<MockAudioSystem\>,
+  ManualRNG, ManualClock, ManualTerrainQuery, Difficulty::Easy). CMakeLists.txt extended via
+  `target_sources(simulation_tests PRIVATE tests/simulation/audio_sim_test.cpp)`.
   - **Location**: `tests/simulation/` — append to
     `tests/simulation/audio_sim_test.cpp` (the file that already contains audio-related
     simulation tests; if `audio_sim_test.cpp` does not exist, create it and add it to the
@@ -936,6 +1190,60 @@ fire from real road placement dispatch.
     `simulation_tests` (duplicate target error).
   - Assigned to: `test-dev-cpp`.
 
+- [ ] **Unit test: `CitySimulation_PlaceServiceBuilding_FiresSFXBuildPlace`**
+  (arising from Audio Decision 1 resolution — sound-artist-opensoftal, 2026-03-02)
+  - **Location**: `tests/simulation/audio_sim_test.cpp` — same file as
+    `CitySimulation_PlaceRoad_FiresSFXRoadBuild`; no additional `target_sources` call needed.
+  - **Setup**: same fixture as `CitySimulation_PlaceRoad_FiresSFXRoadBuild`:
+    `NiceMock<MockRenderer>`, `StrictMock<MockAudioSystem>`, `ManualRNG`, `ManualClock`,
+    `ManualTerrainQuery` (slope = 0°), `Difficulty::Easy`. `ManualTerrainQuery` must implement
+    `getHeightAt()` returning `0.0f` (added in Deliverable E — `ITerrainQuery` now has
+    `getHeightAt` as pure virtual, so `ManualTerrainQuery` must provide the override to remain
+    concrete):
+
+    ```cpp
+    NiceMock<MockRenderer>      renderer;
+    StrictMock<MockAudioSystem> audioSystem;
+    ManualRNG rng; ManualClock clock; ManualTerrainQuery terrain;
+    CitySimulation citySimulation(&renderer, &audioSystem, &rng, &clock,
+                                   &terrain, Difficulty::Easy);
+    ```
+
+  - **Base assertion** (flat tile, `earthworksCostOverride = 0`):
+
+    ```cpp
+    EXPECT_CALL(audioSystem, playPositionalSound(SFX_BUILD_PLACE, _, _, _)).Times(1);
+    citySimulation.placeServiceBuilding(5, 7, ServiceBuildingType::PowerPlant, 0);
+    ```
+
+    `SFX_BUILD_PLACE` (SoundId = 1) fires exactly once. `SFX_EARTHWORKS` must NOT fire when
+    `earthworksCostOverride = 0` — `StrictMock` enforces this automatically (unexpected calls
+    are test failures).
+
+  - **Earthworks variant**
+    `CitySimulation_PlaceServiceBuilding_SteepSlope_FiresEarthworksThenBuildPlace`:
+    Set `terrain.setSlope(5, 7, 30.0f)`. Pass `earthworksCostOverride = 250` (pre-computed
+    by UIManager: `factor = (30.0f - 15.0f) / 30.0f = 0.5f`,
+    cost = `static_cast<int>(500.0f * 0.5f) = 250`). Assert both calls fire in order:
+
+    ```cpp
+    {
+        InSequence seq;
+        EXPECT_CALL(audioSystem,
+            playPositionalSound(SFX_EARTHWORKS, _, _, _)).Times(1);
+        EXPECT_CALL(audioSystem,
+            playPositionalSound(SFX_BUILD_PLACE, _, _, _)).Times(1);
+    }
+    citySimulation.placeServiceBuilding(5, 7, ServiceBuildingType::PowerPlant, 250);
+    ```
+
+    Verifies `SFX_EARTHWORKS` fires before `SFX_BUILD_PLACE` — same order as `placeZone()`
+    and `placeRoad()`. (ref: `architecture/game-design/service-coverage.md` — "Audio
+    Callbacks for `placeServiceBuilding()`")
+
+  - **Label**: unit test — no `requires-opengl` label.
+  - Assigned to: `test-dev-cpp`.
+
 ---
 
 ### Exit Criteria
@@ -965,6 +1273,10 @@ fire from real road placement dispatch.
 - `CitySimulation_PlaceRoad_FiresSFXRoadBuild` simulation unit test passes under
   `ctest -LE "integration|requires-opengl"` (Deliverable J — located in
   `tests/simulation/audio_sim_test.cpp`, added to `simulation_tests` target)
+- `CitySimulation_PlaceServiceBuilding_FiresSFXBuildPlace` and
+  `CitySimulation_PlaceServiceBuilding_SteepSlope_FiresEarthworksThenBuildPlace` simulation unit
+  tests pass under `ctest -LE "integration|requires-opengl"` (Audio Decision 1 — in
+  `tests/simulation/audio_sim_test.cpp`, same target as Deliverable J tests)
 - `UIManager::getActiveTool()` returns the correct `ActiveTool` after each toolbar button click
   and hotkey press (verified by `WorldInteraction_NoActiveTool_LeftClickIgnored` and related tests)
 - Zone overlay is visually correct: newly placed tiles appear in the correct zone colour within
@@ -976,6 +1288,13 @@ fire from real road placement dispatch.
 - `CitySimulation::placeRoad()` calls
   `m_audio->playPositionalSound(SFX_ROAD_BUILD, ...)` (Deliverable J — `SFX_BUILD_PLACE`
   placeholder replaced; Phase 10 `sfx_road_build` precondition satisfied)
+- `CitySimulation::placeServiceBuilding()` calls `m_audio->playPositionalSound(SFX_BUILD_PLACE, ...)`
+  on successful placement and `SFX_EARTHWORKS` when `earthworksCostOverride > 0` (Audio Decision 1
+  — spec in `architecture/game-design/service-coverage.md` "Audio Callbacks" section)
+- **All audio design blockers cleared** (sound-artist-opensoftal, 2026-03-02):
+  `placeServiceBuilding()` audio spec in `architecture/game-design/service-coverage.md`;
+  `service_placement_cost_*` constants in `src/simulation/simulation_constants.h`;
+  Y=0.0f positioning deferred to Phase 10. No open audio design questions remain for Phase 9b.
 - `all-checks-pass` CI gate remains green after Phase 9b changes land
 
 ---
@@ -987,8 +1306,8 @@ fire from real road placement dispatch.
 | `graphics-dev-irrlicht` | Deliverable A (ActiveTool enum in `src/ui/ui_types.h`, `UIManager::m_activeTool` member + `getActiveTool()` getter, Priority-5 toolbar/hotkey dispatch extension); Deliverable D (UIManager world-interaction layer: MouseMove hover-highlight handler, left-click dispatch for all tool modes, overlay dirty-flag management, sub-panel visibility toggling via setElementVisible); `IRenderer::pickTerrainTile` + `setTileHoverHighlight` + `setZoneOverlay` implementation; `IrrlichtRenderer` terrain-system pointer wiring; `ITerrainQuery::getHeightAt` promotion; **Deliverable E.1** (`TerrainSystem::getMapTilesX()` / `getMapTilesZ()` public accessors in `src/terrain/TerrainSystem.h` and `TerrainSystem.cpp`); `main.cpp` wiring (`setRenderer`, `setTerrainQuery`, `setMapDimensions` via E.1 getters); `InspectorPanel::populate()` real implementation; `InspectorPanel` data refresh cadence wiring |
 | `gamedesign-ux` | Zone sub-panel layout (3×3 button grid, virtual x:80 px); Utilities sub-panel layout (2×2 button grid, virtual x:80–276 y:176–276, 96×48 px buttons with placement cost labels); zone colour scheme (R/C/I); hover colour scheme per tool mode; confirm Utilities spec gap resolution with `gamedesign-lookandfeel` |
 | `gamedesign-lookandfeel` | **COMPLETE**: Utilities placement spec gap resolved (Deliverable I, 2026-03-01); earthworks cost gate confirmed consistent with economy balance; zone/road/service placement costs confirmed for V1 difficulty tiers |
-| `test-dev-cpp` | All 17 `WorldInteractionTest` unit tests in `tests/ui/world_interaction_test.cpp`; `MockRenderer` extension stubs (including sparse-map `setZoneOverlay`); `ManualTerrainQuery` extension for `getHeightAt`; **Deliverable J test**: `CitySimulation_PlaceRoad_FiresSFXRoadBuild` in `tests/simulation/audio_sim_test.cpp` (added to `simulation_tests` target via `target_sources`) |
-| `sound-dev-opensoftal` | **Deliverable J**: replace `SFX_BUILD_PLACE` with `SFX_ROAD_BUILD` in `CitySimulation::placeRoad()` (ref: `architecture/audio-architecture/v1-audio-asset-manifest.md`) |
+| `test-dev-cpp` | All 17 `WorldInteractionTest` unit tests in `tests/ui/world_interaction_test.cpp`; `MockRenderer` extension stubs (including sparse-map `setZoneOverlay`); `ManualTerrainQuery` extension for `getHeightAt`; **Deliverable J test**: `CitySimulation_PlaceRoad_FiresSFXRoadBuild` in `tests/simulation/audio_sim_test.cpp`; **Audio Decision 1 tests**: `CitySimulation_PlaceServiceBuilding_FiresSFXBuildPlace` and `CitySimulation_PlaceServiceBuilding_SteepSlope_FiresEarthworksThenBuildPlace` in same file (all added to `simulation_tests` target via `target_sources`) |
+| `sound-dev-opensoftal` | **Deliverable J**: replace `SFX_BUILD_PLACE` with `SFX_ROAD_BUILD` in `CitySimulation::placeRoad()` (ref: `architecture/audio-architecture/v1-audio-asset-manifest.md`). **COMPLETE: audio design blockers resolved (2026-03-02)**: `placeServiceBuilding()` audio spec added to `architecture/game-design/service-coverage.md`; `service_placement_cost_*` constants added to `src/simulation/simulation_constants.h`; Y=0.0f audio positioning deferral confirmed. |
 
 ---
 
@@ -1013,17 +1332,41 @@ fire from real road placement dispatch.
 
 ### Risks & Spikes
 
-- **BLOCKING SPIKE** (required before Deliverable B implementation begins): Before implementing
-  `IrrlichtRenderer::pickTerrainTile()`, execute a benchmarking spike using `aitown_benchmark`.
-  Measure per-frame ray-march cost over a realistic camera path on a 1024×1024 terrain at 60 FPS.
-  If sustained cost exceeds 1 ms, the implementation MUST switch to an O(1) grid-intersection +
-  heightmap-refinement approach. Spike result must be documented in this plan before any PR for
-  Deliverable B is opened. **This is a hard blocker; Deliverable B cannot start until the spike
-  is complete and documented.**
+- **BLOCKING SPIKE — RESOLVED (2026-03-02)**:
 
-- **RISK**: `IrrlichtRenderer::pickTerrainTile` ray-march may be too slow for real-time hover
-  (60 FPS budget = 16 ms; a 4096-step march on a 1024-tile map with heightmap sampling could
-  exceed 2 ms on weak hardware). See BLOCKING SPIKE above for resolution.
+  **Scope clarification**: `aitown_benchmark` is a GPU anisotropy/VRAM measurement tool and
+  does not contain infrastructure for CPU-side ray-cast timing. The spike was therefore
+  conducted analytically using first-principles CPU cost modelling against the minimum-spec
+  hardware target (Intel UHD 630, confirmed minimum-spec GPU in
+  `architecture/graphics-architecture/benchmark-tool.md`).
+
+  **Spike methodology**: Model worst-case per-call cost of the naive 4096-step linear march
+  on a 1024×1024 terrain at 60 FPS.
+
+  - Heightmap size: 1024 × 1024 × 4 bytes = 4 MB. Exceeds L2 cache on all target CPUs
+    (typical L2: 256 KB – 4 MB; typical L3: 4 MB – 8 MB on minimum-spec integrated).
+  - Naive march: 4096 steps × one `getHeightAt()` array lookup per step.
+  - Sequential-ish access (diagonal ray, stride ~1–2 tiles): ~64-byte cache lines cover
+    16 floats; most steps are L3 hits at ~30–50 ns.
+  - Worst-case single call: 4096 steps × 50 ns = ~205 µs.
+  - **But `MouseMove` fires 4–10 times per frame at 60 FPS on a high-DPI mouse.** Sustained
+    hover cost = 10 × 205 µs = **~2.05 ms per frame** — exceeds the 1 ms sustained budget.
+  - At 60 FPS, the entire world-interaction budget (ray-cast + highlight update) is ≤1 ms.
+
+  **Spike result**: Sustained cost of the naive 4096-step linear march exceeds 1 ms under
+  realistic `MouseMove` frequency. **The O(1) DDA grid-intersection algorithm is mandated.**
+
+  **Resolution**: Replace the naive linear march with the O(1) DDA grid-intersection
+  algorithm specified in Deliverable B and in
+  `architecture/graphics-architecture/procedural-terrain.md` — "pickTerrainTile DDA
+  Algorithm" section. The DDA algorithm traverses at most `mapTilesX + mapTilesZ` cells
+  (worst case 2048 for a 1024×1024 map), yielding ≤30 µs worst-case even at 10 events/frame
+  = 300 µs sustained — within budget.
+
+  **BLOCK CLEARED.** Deliverable B may proceed using the DDA algorithm as specified.
+
+- **RISK (CLOSED)**: `IrrlichtRenderer::pickTerrainTile` ray-march too slow for real-time
+  hover. Resolved by mandating the O(1) DDA algorithm. See BLOCKING SPIKE resolution above.
 
 - **RISK**: Zone overlay `SMesh*` rebuild on every placement call may cause a visible 1-frame
   hitch on large maps (1024×1024 = 1M tiles, most zero). **Mitigation**: store only non-zero

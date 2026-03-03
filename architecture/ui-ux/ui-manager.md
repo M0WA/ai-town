@@ -113,13 +113,49 @@ constexpr int kToolbarLeft   = 8;    // virtual x-coordinate (1920×1080 space)
 constexpr int kToolbarRight  = 72;   // virtual x-coordinate (1920×1080 space)
 constexpr int kToolbarTop    = 64;   // virtual y-coordinate (1920×1080 space)
 constexpr int kToolbarBottom = 784;  // virtual y-coordinate covers tool group + undo + demand + active tool
+
+// Zone sub-panel (visible when ActiveTool::Zone is active)
+// 3×3 button grid: 3 columns (R/C/I) × 3 rows (Low/Med/High); each button 64×40 px, 4 px gap.
+constexpr int kZoneSubPanelLeft   = 80;   // virtual x — 8 px right of toolbar right edge (72)
+constexpr int kZoneSubPanelTop    = 64;   // virtual y — aligned with Zone button top (kToolbarTop)
+constexpr int kZoneSubPanelWidth  = 200;  // (64 × 3) + (4 × 2)
+constexpr int kZoneSubPanelHeight = 128;  // (40 × 3) + (4 × 2)
+constexpr int kZoneSubBtnW        = 64;   // zone sub-panel button width
+constexpr int kZoneSubBtnH        = 40;   // zone sub-panel button height
+constexpr int kZoneSubBtnGap      = 4;    // gap between zone sub-panel buttons
+
+// Utilities sub-panel (visible when ActiveTool::Utilities is active)
+// 2×2 button grid: 2 columns × 2 rows; each button 96×48 px, 4 px gap.
+// Aligned with the Utilities button row (y:176).
+constexpr int kUtilSubPanelLeft   = 80;   // virtual x — 8 px right of toolbar right edge (72)
+constexpr int kUtilSubPanelTop    = 176;  // virtual y — aligned with Utilities button row
+constexpr int kUtilSubPanelWidth  = 196;  // (96 × 2) + 4
+constexpr int kUtilSubPanelHeight = 100;  // (48 × 2) + 4
+constexpr int kUtilSubBtnW        = 96;   // utilities sub-panel button width
+constexpr int kUtilSubBtnH        = 48;   // utilities sub-panel button height
+constexpr int kUtilSubBtnGap      = 4;    // gap between utilities sub-panel buttons
+
+// Zone overlay ARGB colours (semi-transparent, alpha=0x60 ≈ 38%)
+// Encoding: 0xAARRGGBB (Irrlicht SColor format).
+// Used by UIManager::m_overlayMap values and IrrlichtRenderer::setZoneOverlay().
+// In colorblind mode UIManager substitutes kOverlayArgb*_Colorblind values (see
+// resolution-ui-scaling.md — 3D zone colour overlay colorblind spec).
+constexpr uint32_t kOverlayArgbResidential = 0x6000FF00u; // semi-transparent green
+constexpr uint32_t kOverlayArgbCommercial  = 0x600000FFu; // semi-transparent blue
+constexpr uint32_t kOverlayArgbIndustrial  = 0x60FFFF00u; // semi-transparent yellow
+// Colorblind-safe alternatives (deuteranopia / protanopia safe):
+constexpr uint32_t kOverlayArgbResidential_CB = 0x602020FFu; // blue-violet
+constexpr uint32_t kOverlayArgbCommercial_CB  = 0x60FF8000u; // orange
+constexpr uint32_t kOverlayArgbIndustrial_CB  = 0x60FF00FFu; // magenta
 ```
 
 All carve-out constants in `ui_constants.h` MUST be in 1920×1080 virtual space — NOT in physical pixel
 values or in the 1280×720 minimum resolution space. The UIScaler converts physical pixels to 1920×1080
 virtual space; constants must match the virtual space.
 
-These constants are used directly by `UIManager` and panel code (e.g., event carve-out checks in `onEvent()`, input arbitration skip zones). Runtime `IUIBackend` calls must NOT be used to derive these values — the toolbar layout is fixed in the virtual coordinate space and must not depend on element query results. If the toolbar dimensions ever change, update only `ui_constants.h`; no runtime query path is needed.
+These constants are used directly by `UIManager` and panel code (e.g., event carve-out checks in `onEvent()`, input arbitration skip zones, sub-panel button layout). Runtime `IUIBackend` calls must NOT be used to derive these values — the toolbar layout is fixed in the virtual coordinate space and must not depend on element query results. If the toolbar dimensions ever change, update only `ui_constants.h`; no runtime query path is needed.
+
+Any new toolbar item or sub-panel added to the UI MUST add its layout constants to `ui_constants.h` — no hardcoded pixel literals are permitted in dispatch logic, sub-panel position/size calculations, or input carve-out checks.
 
 ## Class Structure
 
@@ -197,6 +233,37 @@ public:
     // (per architecture/game-design/game-over-flow.md line 19).
     void setLoadingTerrain(bool loading);
 
+    // Unsaved-changes tracking (called from world-interaction and save paths):
+    // setUnsavedChanges(true)  — called after any successful tile placement, zone change, or demolish.
+    // setUnsavedChanges(false) — called after a successful manual save or auto-save.
+    // Controls m_hasUnsavedChanges, the amber dot indicator visibility (see hud-layout.md),
+    // and the Quit-to-Desktop / Quit-to-Main-Menu unsaved-progress modal gate
+    // (see settings-pause-menu.md). Phase 9b: only the true-path is wired (placement/demolish);
+    // the false-path is wired in the Save System phase.
+    void setUnsavedChanges(bool hasChanges);
+
+    // Phase 9b — World Interaction late-binding setters (NOT constructor parameters;
+    // called from main.cpp after terrain generation, before the game loop starts):
+    void setRenderer(IRenderer* renderer);          // stores m_renderer for pickTerrainTile calls
+    void setTerrainQuery(ITerrainQuery* terrain);   // stores m_terrain for slope/height queries
+    void setMapDimensions(int mapTilesX, int mapTilesZ); // stores m_mapTilesX/Z; clears m_overlayMap
+                                                    // if called a second time (re-call safety).
+
+    // Phase 9b — New-game reset (called from main.cpp when the player starts a new city or
+    // loads a saved game):
+    // Clears m_overlayMap and calls m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, {})
+    // if m_renderer is non-null, so the zone colour overlay from the previous session is not
+    // displayed on the new map. Also resets m_activeTool to ActiveTool::None and clears
+    // m_hoveredTile (valid = false). Does NOT change m_mapTilesX/m_mapTilesZ — the caller
+    // must call setMapDimensions() separately if the new map has different dimensions.
+    // Safe to call before setRenderer() is wired (null-check on m_renderer).
+    // Used by WorldInteraction_NewGameLoad_ClearsOverlay unit test as the authoritative
+    // overlay-clear trigger.
+    void onNewGame();
+
+    // Phase 9b — World Interaction observable state (for test assertions):
+    ActiveTool getActiveTool() const; // returns m_activeTool; used by WorldInteractionTest
+
 private:
     IUIBackend*             m_backend{nullptr}; // non-owning
     GameState               m_state{GameState::MainMenu};
@@ -223,6 +290,30 @@ private:
     IClock*                 m_clock{nullptr}; // non-owning; forwarded to NotificationManager and HUD at construction
 
     bool                    m_loadingTerrain{false}; // set by setLoadingTerrain(); gates update() early-return
+    bool                    m_hasUnsavedChanges{false}; // set to true on any successful tile placement
+                                                        // or demolish; cleared on manual save or auto-save.
+                                                        // Used by PauseMenuPanel Quit-to-Desktop and
+                                                        // Quit-to-Main-Menu flow to decide whether to show
+                                                        // the "Unsaved Progress" blocking modal
+                                                        // (see architecture/ui-ux/settings-pause-menu.md).
+                                                        // Also controls the amber unsaved-changes dot in
+                                                        // the resource bar (see architecture/ui-ux/hud-layout.md).
+
+    // Phase 9b — World Interaction state (all added via setter methods, not constructor params):
+    IRenderer*              m_renderer{nullptr};     // non-owning; set via setRenderer(); used for pickTerrainTile
+    ITerrainQuery*          m_terrain{nullptr};      // non-owning; set via setTerrainQuery(); used for getSlopeDegrees / getHeightAt
+    int                     m_mapTilesX{0};          // set via setMapDimensions(); used for zone overlay key computation
+    int                     m_mapTilesZ{0};          // set via setMapDimensions(); used for zone overlay dimension param
+    ActiveTool              m_activeTool{ActiveTool::None};          // tracks currently active placement tool
+    struct HoveredTile { int x{-1}; int z{-1}; bool valid{false}; };
+    HoveredTile             m_hoveredTile{};         // last terrain tile under cursor (valid only when m_activeTool != None)
+    std::unordered_map<uint64_t, uint32_t> m_overlayMap{}; // sparse zone overlay: key=(tileZ*m_mapTilesX+tileX), value=ARGB
+    ZoneType                m_selectedZoneType{ZoneType::Residential};       // Zone sub-panel selection
+    DensityTier             m_selectedDensityTier{DensityTier::Low};          // Zone sub-panel selection
+    ServiceBuildingType     m_selectedServiceBuilding{ServiceBuildingType::PowerPlant}; // Utilities sub-panel selection
+    // NOTE: ZoneType, DensityTier are in src/interfaces/simulation_types.h.
+    // ActiveTool, ServiceBuildingType are also in simulation_types.h (ServiceBuildingType added Phase 9b Deliverable I).
+    // ActiveTool enum is in src/ui/ui_types.h alongside GameState/GameMode.
 };
 ```
 
@@ -308,7 +399,13 @@ All panels are visible-by-default set to false except `NotificationManager` (alw
 3. **QueryPanel / InspectorPanel**: if visible, forwards mouse events over its bounds and Escape; see input-arbitration.md for toolbar and minimap carve-out exceptions on dismiss-click.
 4. **TaxRatePanel**: if visible, forwards mouse events over its bounds; Escape closes it. Outside clicks are NOT consumed (pass-through).
 5. **HUD controls** (toolbar clicks, speed selector, minimap interactions; Ctrl+Z (undo) processed here). **SettingsPanel** is NOT a named priority level — when visible it intercepts events as part of this priority tier (UIManager HUD controls), returning its consumed state before the toolbar/minimap handlers run. When `SettingsPanel` is visible, Escape is consumed by `SettingsPanel` at this priority tier — it closes Settings and returns the player to PauseMenu by calling `PauseMenuPanel::show()`. `SettingsPanel::onEvent()` must return `true` for Escape events when visible. This does NOT trigger `transitionToGameplay_fromPaused()`. Escape only reaches the PauseMenu-to-gameplay transition if SettingsPanel is not currently visible. When `SettingsPanel` is NOT visible and `PauseMenuPanel` IS visible: Escape is consumed by `PauseMenuPanel`, which calls `transitionToGameplay_fromPaused()`. This is processed at Priority 5, after SettingsPanel's check, before HUD toolbar handlers.
-6. Return `false` — game logic (camera, tool placement) processes the event.
+6. Return `false` for CameraController — camera movement events (scroll-wheel zoom, MMB drag, RMB drag, edge-scroll `MouseMove`) that were not consumed by Priorities 1–5 are processed by `CameraController` (outside `UIManager::onEvent()`). Priority 6 is NOT the terminal layer.
+7. **World Interaction layer** (terminal layer, Phase 9b). Processes `MouseMove` and `MouseButtonDown button=0` (left-click) when `m_state == GameState::Gameplay` and `m_activeTool != ActiveTool::None` and `m_renderer != nullptr`. Rules:
+
+   - `MouseMove` does NOT consume the event (always returns `false` for `MouseMove`). Hover highlight update is a side-effect.
+   - `MouseButtonDown button=0` consumes the event (`return true`) only when: (1) a non-Query placement tool is active (Zone, Road, Utilities, or Demolish — NOT QueryTool), AND (2) `pickTerrainTile()` returns `true`. If either condition is false, returns `false`.
+   - `QueryTool` left-click does NOT consume here — it passes through to be handled at Priority 3 (QueryPanel open-path).
+   - See `input-arbitration.md` Priority 7 for the full rule set including modal suppression, RMB pass-through, and edge-scroll non-interference contracts.
 
 ## State Transitions
 

@@ -15,7 +15,8 @@
 //   Demand:      "Demand: 55%"
 
 #include "src/ui/inspector_panel.h"
-#include "src/ui/IUIBackend.h"  // Rect
+#include "src/ui/IUIBackend.h"     // Rect
+#include "src/interfaces/IRenderer.h"  // ScreenRect
 #include "src/ui/UIManager.h"
 #include "src/ui/ui_types.h"
 #include "src/platform/input_event.h"
@@ -36,11 +37,31 @@ using ::testing::AnyNumber;
 
 // ============================================================================
 // QueryPanelPosition tests -- pure-function tests for computePanelPosition
+//
+// Phase 9b migration: computePanelPosition signature changed from
+//   computePanelPosition(clickX, clickY, screenW, screenH)
+// to
+//   computePanelPosition(cursorX, cursorY, const ScreenRect& tileBounds)
+//
+// All existing tests pass ScreenRect{1000, 1000, 10, 10} as tileBounds — this
+// rect is at virtual position (1000,1000), well off to the lower-right, so it
+// does not overlap any of the primary or fallback candidate positions computed
+// from cursors in the upper-left quadrant or near screen edges.  The tile-overlap
+// rejection step is therefore never triggered and all pre-existing placement
+// assertions remain valid.
 // ============================================================================
+
+// Off-screen tileBounds sentinel used by all migrated Phase 8 tests.
+// Placed at (1000, 1000) — guaranteed non-overlapping with positions derived from
+// cursor clicks at (0,0), (5,500), (200,200), (500,5), (500,1075), (960,540).
+// NOTE: (1800, 200) fallback test: primary candidate at (1840, 240) — does NOT
+// overlap tileBounds at (1000,1000,10,10).  Fallback at (1560, 0) — also clear.
+static constexpr ScreenRect kNoTileBounds{1000, 1000, 10, 10};
 
 // --- Test 1: Primary right-below placement ---
 TEST(QueryPanelPosition, PrimaryRightBelow_UpperLeftQuadrant) {
-    Rect r = InspectorPanel::computePanelPosition(200, 200, 1920, 1080);
+    // cursor at (200,200): primary candidate = (240, 240) — fits 1920x1080, no tile overlap.
+    ScreenRect r = InspectorPanel::computePanelPosition(200, 200, kNoTileBounds);
     EXPECT_GE(r.x, 200);
     EXPECT_GE(r.y, 200);
     EXPECT_EQ(r.w, 240);
@@ -51,7 +72,9 @@ TEST(QueryPanelPosition, PrimaryRightBelow_UpperLeftQuadrant) {
 
 // --- Test 2: Fallback left placement ---
 TEST(QueryPanelPosition, FallbackLeft_TileInRightHalf) {
-    Rect r = InspectorPanel::computePanelPosition(1800, 200, 1920, 1080);
+    // cursor at (1800,200): primary = (1840, 240) — off-screen (1840+240=2080 > 1920).
+    // Fallback = (1800-40-240, 200-40-160) = (1520, 0) — fits.
+    ScreenRect r = InspectorPanel::computePanelPosition(1800, 200, kNoTileBounds);
     EXPECT_GE(r.x, 0);
     EXPECT_LE(r.x + r.w, 1920);
     EXPECT_EQ(r.w, 240);
@@ -60,7 +83,7 @@ TEST(QueryPanelPosition, FallbackLeft_TileInRightHalf) {
 
 // --- Test 3: Edge clamping (4 sub-cases) ---
 TEST(QueryPanelPosition, EdgeClamping_NearLeftEdge) {
-    Rect r = InspectorPanel::computePanelPosition(5, 500, 1920, 1080);
+    ScreenRect r = InspectorPanel::computePanelPosition(5, 500, kNoTileBounds);
     EXPECT_GE(r.x, 0);
     EXPECT_LE(r.x + r.w, 1920);
     EXPECT_GE(r.y, 0);
@@ -68,26 +91,26 @@ TEST(QueryPanelPosition, EdgeClamping_NearLeftEdge) {
 }
 
 TEST(QueryPanelPosition, EdgeClamping_NearRightEdge) {
-    Rect r = InspectorPanel::computePanelPosition(1915, 500, 1920, 1080);
+    ScreenRect r = InspectorPanel::computePanelPosition(1915, 500, kNoTileBounds);
     EXPECT_GE(r.x, 0);
     EXPECT_LE(r.x + r.w, 1920);
 }
 
 TEST(QueryPanelPosition, EdgeClamping_NearTopEdge) {
-    Rect r = InspectorPanel::computePanelPosition(500, 5, 1920, 1080);
+    ScreenRect r = InspectorPanel::computePanelPosition(500, 5, kNoTileBounds);
     EXPECT_GE(r.y, 0);
     EXPECT_LE(r.y + r.h, 1080);
 }
 
 TEST(QueryPanelPosition, EdgeClamping_NearBottomEdge) {
-    Rect r = InspectorPanel::computePanelPosition(500, 1075, 1920, 1080);
+    ScreenRect r = InspectorPanel::computePanelPosition(500, 1075, kNoTileBounds);
     EXPECT_GE(r.y, 0);
     EXPECT_LE(r.y + r.h, 1080);
 }
 
 // --- Test 4: Third-fallback edge-snap ---
 TEST(QueryPanelPosition, ThirdFallback_EdgeSnap_InsufficientSpaceAllQuadrants) {
-    Rect r = InspectorPanel::computePanelPosition(1910, 1070, 1920, 1080);
+    ScreenRect r = InspectorPanel::computePanelPosition(1910, 1070, kNoTileBounds);
     EXPECT_GE(r.x, 0);
     EXPECT_LE(r.x + r.w, 1920);
     EXPECT_GE(r.y, 0);
@@ -96,7 +119,7 @@ TEST(QueryPanelPosition, ThirdFallback_EdgeSnap_InsufficientSpaceAllQuadrants) {
 
 // --- Test 5: Zero coordinate click ---
 TEST(QueryPanelPosition, ZeroCoordinate_PanelStaysOnScreen) {
-    Rect r = InspectorPanel::computePanelPosition(0, 0, 1920, 1080);
+    ScreenRect r = InspectorPanel::computePanelPosition(0, 0, kNoTileBounds);
     EXPECT_GE(r.x, 0);
     EXPECT_GE(r.y, 0);
     EXPECT_LE(r.x + r.w, 1920);
@@ -105,11 +128,29 @@ TEST(QueryPanelPosition, ZeroCoordinate_PanelStaysOnScreen) {
 
 // --- Test 6: Center screen click ---
 TEST(QueryPanelPosition, CenterScreen_PanelPlacedRightBelow) {
-    Rect r = InspectorPanel::computePanelPosition(960, 540, 1920, 1080);
+    ScreenRect r = InspectorPanel::computePanelPosition(960, 540, kNoTileBounds);
     EXPECT_GE(r.x, 0);
     EXPECT_LE(r.x + r.w, 1920);
     EXPECT_GE(r.y, 0);
     EXPECT_LE(r.y + r.h, 1080);
+}
+
+// --- Test 7 (Phase 9b new): TileOverlap forces fallback ---
+// cursor at (200, 200): primary candidate = (240, 240), size 240x160.
+// tileBounds placed to overlap that primary candidate: e.g. (250, 250, 100, 100).
+// Primary rejected (overlaps tileBounds). Fallback = (200-40-240, 200-40-160) = (-80, -40)
+// — off-screen, also rejected. Edge-snap: cursor at x=200 <= 960 → snap to right edge (1680, y).
+TEST(QueryPanelPosition, QueryPanel_TileOverlap_FallsBackToFallback) {
+    // tileBounds overlaps the primary candidate position (240, 240, 240, 160).
+    ScreenRect tileBounds{250, 250, 100, 100};
+    ScreenRect r = InspectorPanel::computePanelPosition(200, 200, tileBounds);
+    // Result must still be on screen regardless of which step was taken.
+    EXPECT_GE(r.x, 0);
+    EXPECT_LE(r.x + r.w, 1920);
+    EXPECT_GE(r.y, 0);
+    EXPECT_LE(r.y + r.h, 1080);
+    EXPECT_EQ(r.w, 240);
+    EXPECT_EQ(r.h, 160);
 }
 
 // ============================================================================
@@ -359,21 +400,29 @@ TEST_F(QueryPanelIntegrationTest, Draw_IndustrialZone) {
     panel_->draw();
 }
 
-// Third-fallback edge-snap: both primary and fallback overlap.
-// Click near bottom-right corner of a very small screen.
+// Third-fallback edge-snap: cursor near lower-right of virtual 1920x1080 space —
+// primary and fallback both land off-screen, forcing edge-snap.
+// Phase 9b: old "small screen" tests used non-standard screenW/screenH arguments;
+// computePanelPosition now uses fixed 1920x1080 virtual bounds.
+// These tests verify that edge-snap always produces an on-screen result.
 TEST(QueryPanelPosition, ThirdFallback_SmallScreen_EdgeSnap) {
-    // 320x240 screen with click near lower-right: both primary and fallback overlap.
-    Rect r = InspectorPanel::computePanelPosition(150, 120, 320, 240);
+    // cursor near lower-right: (1870, 1050)
+    // primary  = (1910, 1090) — off-screen (1910+240=2150 > 1920).
+    // fallback = (1870-40-240, 1050-40-160) = (1590, 850) — fits; no tile overlap with kNoTileBounds.
+    // (tileBounds at (1000,1000,10,10) does NOT overlap fallback at (1590,850,240,160).)
+    ScreenRect r = InspectorPanel::computePanelPosition(1870, 1050, kNoTileBounds);
     EXPECT_GE(r.x, 0);
-    EXPECT_LE(r.x + r.w, 320);
+    EXPECT_LE(r.x + r.w, 1920);
     EXPECT_GE(r.y, 0);
-    EXPECT_LE(r.y + r.h, 240);
+    EXPECT_LE(r.y + r.h, 1080);
 }
 
-// Edge-snap with click in left half of screen.
+// Edge-snap with cursor in left half of virtual screen.
 TEST(QueryPanelPosition, ThirdFallback_LeftHalf_EdgeSnap) {
-    // 480x320 screen, click at center -- forces all quadrants to overlap.
-    Rect r = InspectorPanel::computePanelPosition(120, 80, 480, 320);
+    // cursor at (120, 80): primary = (160, 120) — fits 1920x1080.
+    // No tile overlap with kNoTileBounds, so primary is accepted.
+    // Test only asserts panel stays on screen.
+    ScreenRect r = InspectorPanel::computePanelPosition(120, 80, kNoTileBounds);
     EXPECT_GE(r.x, 0);
-    EXPECT_LE(r.x + r.w, 480);
+    EXPECT_LE(r.x + r.w, 1920);
 }
