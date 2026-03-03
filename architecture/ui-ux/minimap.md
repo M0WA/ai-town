@@ -18,32 +18,64 @@ The `Minimap` constructor calls `hide()` internally as its last step, so the min
 hidden. `UIManager` is responsible for calling `m_minimap->show()` and `m_minimap->hide()` at
 the correct state transition points.
 
-**Required show/hide calls in `UIManager`**:
+**Required show/hide calls in `UIManager`** (all implemented as of Phase 9b):
 
-| Transition | Required call | Rationale |
+| Transition | Required call | Status |
 |---|---|---|
-| `transitionToGameplay(mode)` | `m_minimap->show()` | Minimap must be visible during gameplay |
-| `transitionToMainMenu()` | `m_minimap->hide()` | Minimap must not render over the main menu |
-| `transitionToGameOver()` | `m_minimap->hide()` | Minimap hidden on game-over screen |
+| `transitionToGameplay(mode)` | `m_minimap->show()` | Implemented |
+| `transitionToMainMenu()` | `m_minimap->hide()` | Implemented |
+| `transitionToGameOver()` | `m_minimap->hide()` | Implemented |
 
-**Bug note (Phase 9b)**: As of Phase 9b, `UIManager::transitionToGameplay()` does NOT call
-`m_minimap->show()`. The minimap is constructed hidden and remains hidden throughout gameplay,
-making it appear absent to the player. This is an implementation bug — the spec has always
-required the minimap to be visible during gameplay. The fix is a single additional line in
-`UIManager::transitionToGameplay()`:
+## Phase 9b Minimum Viable Minimap
 
-```cpp
-m_minimap->show();  // ADD THIS — minimap must be visible during gameplay
-```
+### What the player sees in Phase 9b
 
-Similarly, `transitionToMainMenu()` must add:
+The minimap is **visually present** during gameplay as a dark rectangle in the bottom-right
+corner. This is not a full implementation — zone coding, road network lines, and the camera
+viewport rectangle are Phase 11+ features. The Phase 9b bar is deliberately low: the panel
+exists and is non-transparent so the player can see it as a distinct HUD element.
 
-```cpp
-m_minimap->hide();  // ADD THIS — minimap must not overlay the main menu
-```
+**Phase 9b visual output (implemented)**:
 
-**Phase assignment**: This fix is a **Phase 9b bug** that must be resolved in the current phase
-(not deferred). It requires one line added to `UIManager::transitionToGameplay()` and one line
-added to `UIManager::transitionToMainMenu()`. No spec changes, no interface changes, no new
-tests required beyond re-running the existing Phase 8 gameplay state tests to confirm the
-minimap is visible after `transitionToGameplay()` is called.
+- **Dark background panel** — the `m_mapBg` static-text element has a filled dark background
+  (RGBA 20, 20, 20, 230) set via `IUIBackend::setElementBackground()`. This makes the minimap
+  area a visible dark rectangle instead of being transparent.
+- **Viewport indicator** — `m_viewportRect` has a semi-transparent white fill (255, 255, 255,
+  64) to indicate the approximate camera view area within the minimap panel.
+- **Legend panel** — `m_legendPanel` has a dark fill (20, 20, 20, 210) so legend text is
+  legible when the service coverage overlay is active.
+- **Toggle button** — the "Svc" button at virtual x:1720, y:848–880 is rendered by Irrlicht's
+  default button skin.
+
+### IUIBackend method 18: setElementBackground
+
+The fix required adding `setElementBackground(handle, r, g, b, a)` as method 18 to
+`IUIBackend`. This method enables `fillBackground` on an `IGUIStaticText` element and sets its
+fill color. Implementation in `IrrlichtUIBackend` casts to `IGUIStaticText*` (guard on
+`getType() == EGUIET_STATIC_TEXT`) and calls `setBackgroundColor()` + `setDrawBackground(true)`.
+`MockUIBackend` has the corresponding `MOCK_METHOD` stub. `StubUIBackend` in `ui_smoke_test.cpp`
+has a no-op override.
+
+Channels r, g, b, a are each in `[0, 255]`. Irrlicht `SColor` constructor order is
+`(a, r, g, b)`.
+
+### What is NOT required in Phase 9b
+
+- **Zone color coding** (R=green, C=blue, I=yellow): requires `ICitySimulation::queryTile()`
+  iteration over all tiles and pixel-level drawing. This is a **Phase 11** deliverable.
+- **Road network lines**: requires iterating road tiles and drawing line primitives. **Phase 11**.
+- **Camera viewport rectangle**: requires projecting the camera frustum to minimap coordinates.
+  **Phase 11**.
+- **Render texture / off-screen camera**: the spec does NOT require a render texture for the
+  minimap at any phase. The minimap is drawn by iterating tile data and filling colored
+  rectangles via the UI backend — it is a 2D data visualization, not a 3D camera view. A
+  render texture approach would require a second Irrlicht camera and off-screen render target,
+  which is out of scope for V1. The colored-rectangle approach (tile data → pixel grid) is the
+  correct implementation for all V1 phases.
+- **Click-to-pan camera**: the `onEvent()` stub in `Minimap.cpp` already consumes the click;
+  the actual `CameraController::panTo()` call is wired in **Phase 11** when minimap coordinates
+  are mapped to world coordinates.
+- **Service coverage overlay**: **Phase 11**.
+- **Overlay toggle button functional**: the toggle button is shown in Phase 9b but clicking it
+  only flips `m_overlayActive`; no visual change results until the overlay rendering is
+  implemented in Phase 11.
