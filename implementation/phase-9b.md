@@ -1,5 +1,7 @@
 ## Phase 9b: World Interaction — Tile Placement & Ray-Cast Dispatch
 
+**Status: DONE**
+
 ### Goal
 
 Wire the player's mouse clicks to the simulation placement API: terrain tile ray-casting from
