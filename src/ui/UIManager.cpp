@@ -360,13 +360,17 @@ bool UIManager::onEvent(const InputEvent& event) {
                 kToolbarBottom - kToolbarTop)) {
 
         int hitX = -1, hitZ = -1;
-        if (m_renderer->pickTerrainTile(event.x, event.y, hitX, hitZ)) {
+        // Use physical pixel coords for ray-casting — getRayFromScreenCoordinates()
+        // requires physical (not virtual/scaled) screen coordinates.
+        if (m_renderer->pickTerrainTile(event.physX, event.physY, hitX, hitZ)) {
             if (m_sim) {
                 QueryResult result = m_sim->queryTile(hitX, hitZ);
                 // Compute virtual-space cursor and tile bounds for panel positioning.
                 ScreenRect tileBounds{};
                 tileBounds = m_renderer->getTileScreenBounds(hitX, hitZ);
                 // Open inspector at computed position.
+                // event.x/y are virtual coords (1920×1080); populate uses them for
+                // panel cascade positioning in virtual space.
                 m_inspector->populate(result, hitX, hitZ,
                                       event.x, event.y, tileBounds);
                 m_inspectorOpen = true;
@@ -757,7 +761,7 @@ bool UIManager::onEvent(const InputEvent& event) {
 
         if (event.type == InputEvent::Type::MouseMove) {
             int hitX = -1, hitZ = -1;
-            if (m_renderer->pickTerrainTile(event.x, event.y, hitX, hitZ)) {
+            if (m_renderer->pickTerrainTile(event.physX, event.physY, hitX, hitZ)) {
                 // Determine hover colour from active tool.
                 uint32_t colour = 0u;
                 switch (m_activeTool) {
@@ -798,9 +802,10 @@ bool UIManager::onEvent(const InputEvent& event) {
             }
 
             // Ray-cast from click position to find the terrain tile.
+            // Use physical pixel coords — getRayFromScreenCoordinates() requires physical pixels.
             // Do not require a prior MouseMove — the click itself provides the screen coords.
             int hitX = -1, hitZ = -1;
-            if (!m_renderer->pickTerrainTile(event.x, event.y, hitX, hitZ)) {
+            if (!m_renderer->pickTerrainTile(event.physX, event.physY, hitX, hitZ)) {
                 return false;
             }
 
