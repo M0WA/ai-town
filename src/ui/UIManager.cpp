@@ -126,6 +126,12 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
         const int zoneLeft  = 80;
         const int zoneTop   = 64;
 
+        // Zone type short names (column) and density tier short names (row).
+        // Used as text-label fallback when the sprite atlas is not yet loaded.
+        // Displayed as "Res\nLow", "Com\nMed", etc.  (two-line abbreviation)
+        static const char* kZoneTypeAbbrev[3]    = { "Res", "Com", "Ind" };
+        static const char* kDensityTierAbbrev[3] = { "Low", "Med", "High" };
+
         // Create all 9 buttons; set inactive sprite for each (including the default);
         // then override the default (idx 0, Residential Low) with the active sprite.
         // Tests assert: all 9 inactive calls + 1 active call on the default button.
@@ -135,7 +141,12 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
                 int bx  = zoneLeft + zoneCol  * (zoneBtnW + zoneGap);
                 int by  = zoneTop  + densityRow * (zoneBtnH + zoneGap);
 
-                m_zoneSubPanelBtns[idx] = m_backend->addButton("", bx, by, zoneBtnW, zoneBtnH);
+                // Build a short text label so the button is readable even when the
+                // sprite atlas (hud_sprites_ui.dds) has not yet loaded.
+                std::string label = std::string(kZoneTypeAbbrev[zoneCol])
+                                    + " " + kDensityTierAbbrev[densityRow];
+
+                m_zoneSubPanelBtns[idx] = m_backend->addButton(label.c_str(), bx, by, zoneBtnW, zoneBtnH);
 
                 // Set inactive sprite for every button (including the default).
                 uint32_t inactiveSprite = kSpriteZoneResLowInactive
@@ -323,17 +334,30 @@ bool UIManager::onEvent(const InputEvent& event) {
     }
 
     // Priority 3 — QueryTool open path.
-    // When Query tool is active, the inspector is NOT yet open, and this is a LMB click:
-    // ray-cast to find the hovered tile and open the inspector panel at that tile.
-    // This path executes AFTER the inspector-close path above so that a click outside
-    // an already-open inspector first closes it (handled above), and a subsequent click
-    // opens a new one here.
+    // When Query tool is active, the inspector is NOT yet open, and this is a LMB click
+    // on the world (not on a toolbar button or other UI region): ray-cast to find the
+    // hovered tile and open the inspector panel at that tile.
+    //
+    // Toolbar carve-out: clicks inside the left toolbar [kToolbarLeft, kToolbarRight) must
+    // reach Priority 5 (toolbar handler) regardless of active tool, so they are excluded
+    // from this block entirely.  Without this guard, a toolbar button click while Query is
+    // active would fire pickTerrainTile(), fail to hit terrain, and return — preventing
+    // Priority 5 from switching the active tool (root cause of Bugs 3 and 4).
+    //
+    // No-terrain-hit behaviour: when the ray misses all terrain (e.g. click in empty sky),
+    // do NOT return — fall through to Priority 5/7 so toolbar clicks and other interactions
+    // still process correctly.
     if (!m_inspectorOpen &&
         m_activeTool == ActiveTool::Query &&
         m_state == GameState::Gameplay &&
         event.type == InputEvent::Type::MouseButtonDown &&
         event.button == 0 &&
-        m_renderer) {
+        m_renderer &&
+        // Toolbar carve-out: skip query open path for toolbar clicks so Priority 5 handles them.
+        !inRect(event.x, event.y,
+                kToolbarLeft, kToolbarTop,
+                kToolbarRight - kToolbarLeft,
+                kToolbarBottom - kToolbarTop)) {
 
         int hitX = -1, hitZ = -1;
         if (m_renderer->pickTerrainTile(event.x, event.y, hitX, hitZ)) {
@@ -349,8 +373,9 @@ bool UIManager::onEvent(const InputEvent& event) {
             }
             return true;
         }
-        // No terrain hit — fall through (return false at end).
-        return false;
+        // No terrain hit (ray missed all geometry) — do NOT return here.
+        // Fall through to Priority 5 so toolbar buttons and other HUD regions
+        // remain responsive when Query tool is active.
     }
 
     // ============================================================
