@@ -1237,9 +1237,10 @@ void UIManager::transitionToGameplay(GameMode mode) {
     m_hasUnsavedChanges = false;
     m_state             = GameState::Gameplay;
 
-    // Hide main menu, show HUD.
+    // Hide main menu, show HUD and minimap.
     m_mainMenu->hide();
     m_hud->show();
+    m_minimap->show();
 
     // Transition audio from menu to gameplay.
     // setTimeOfDay must be called before transitionToGameplay() so the
@@ -1272,6 +1273,7 @@ bool UIManager::isQuitRequested() const {
 void UIManager::transitionToMainMenu() {
     // Hide gameplay panels.
     m_hud->hide();
+    m_minimap->hide();
     m_pauseMenu->hide();
     m_taxPanel->hide();
     m_taxPanelOpen = false;

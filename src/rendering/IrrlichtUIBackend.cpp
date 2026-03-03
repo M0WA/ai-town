@@ -209,6 +209,48 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
     // IGUIButton::setImage(m_spriteTexture, srcRect) with the per-sprite source rect.
     m_spriteTexture = m_driver->getTexture("assets/textures/ui/hud_sprites_ui.png");
     m_spriteTextureReady = (m_spriteTexture != nullptr);
+
+    // --- Load custom bitmap font for the GUI skin ---
+    //
+    // The Irrlicht built-in font is 8×13 px — unreadably small at 1280×720 and
+    // above. All addStaticText() and addButton() calls inherit the skin default
+    // font, so setting it once here applies to every GUI element in the game.
+    //
+    // Font format: Irrlicht XML bitmap font (.xml + companion .png texture).
+    // Expected path: assets/fonts/hud_font.xml
+    // The companion texture is automatically found by getFont() next to the xml.
+    //
+    // Graceful degradation: if the font file is absent (e.g. during development
+    // before the font asset is authored), the Irrlicht built-in 8px font is
+    // retained and a warning is printed to stderr.  This is NOT fatal — the game
+    // runs, but text will be tiny until the font asset is placed.
+    //
+    // Font authoring guide: use Irrlicht's FontTool (tools/GUIEditor/FontTool)
+    // or any Irrlicht-compatible bitmap font generator to export a 16 px or 18 px
+    // bitmap font to assets/fonts/hud_font.xml.  The recommended size is 18 px
+    // virtual (maps to ≥12 px physical at 1280×720) per
+    // architecture/ui-ux/resolution-ui-scaling.md — minimum body font size 14 px
+    // virtual, prefer 16+ px virtual for interactive labels.
+    {
+        irr::gui::IGUIFont* customFont =
+            m_guiEnv->getFont("assets/fonts/hud_font.xml");
+        if (customFont) {
+            // Apply as the skin's default font — affects all GUI elements globally.
+            irr::gui::IGUISkin* skin = m_guiEnv->getSkin();
+            if (skin) {
+                skin->setFont(customFont);
+            }
+        } else {
+            // Font file not found — emit a visible warning so developers notice.
+            // The built-in 8px font will be used; text will be unreadably small.
+            fprintf(stderr,
+                "[IrrlichtUIBackend] WARNING: assets/fonts/hud_font.xml not found — "
+                "falling back to Irrlicht built-in 8px font. "
+                "HUD text will be unreadably small at all resolutions. "
+                "Create a bitmap font at assets/fonts/hud_font.xml using Irrlicht's "
+                "FontTool or any compatible bitmap font generator (recommended: 18px).\n");
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

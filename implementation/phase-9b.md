@@ -1377,6 +1377,91 @@ fire from real road placement dispatch.
 - `all-checks-pass` CI gate remains green after Phase 9b changes land
   <!-- cicd-dev-github verified: all-checks-pass gate exists at ci.yml lines 945-977 with if:always() and depends on build-linux/build-windows/coverage-linux/markdown-lint/validate-assets; both build-linux (step 14) and coverage-linux (step 13) run ctest -LE 'integration|requires-opengl' which picks up ui_tests (LABEL unit, CMakeLists.txt line 574) and simulation_tests (LABEL unit, CMakeLists.txt line 475); world_interaction_test.cpp is wired via target_sources(ui_tests PRIVATE tests/ui/world_interaction_test.cpp) at CMakeLists.txt lines 597-599; audio_sim_test.cpp is wired via target_sources(simulation_tests PRIVATE tests/simulation/audio_sim_test.cpp) at CMakeLists.txt lines 481-483; neither target carries a requires-opengl label so all Phase 9b tests are included in unit-test ctest runs, 2026-03-03 -->
 
+#### Bug Fixes Required in Phase 9b (player-visible regressions)
+
+The following issues are player-visible in Phase 9b builds. The first is an **implementation bug**
+that must be resolved before Phase 9b is marked Done. Issues 2–5 are **Phase 10 missing features**
+— not regressions — documented here for Phase 10 pickup. Infrastructure fixes applied in Phase 9b
+where possible are noted inline.
+
+- [ ] **Minimap not visible during gameplay** (`UIManager::transitionToGameplay()` missing
+  `m_minimap->show()`). The `Minimap` constructor calls `hide()` as its last step; without an
+  explicit `m_minimap->show()` in `transitionToGameplay()`, the minimap panel remains hidden
+  throughout all gameplay. Fix: add `m_minimap->show();` to `UIManager::transitionToGameplay()`
+  immediately after `m_hud->show();`. Also add `m_minimap->hide();` to
+  `UIManager::transitionToMainMenu()` alongside the existing `m_hud->hide()` calls.
+  Authoritative spec: `architecture/ui-ux/minimap.md` (Minimap Lifecycle section).
+  Assigned to: `graphics-dev-irrlicht`.
+
+- [ ] **Road mesh not visible after placing road tile (Phase 10 missing feature)** —
+  After `placeRoad()` is dispatched via left-click in Road tool mode, no 3D road mesh appears on
+  the terrain. Root cause: `CitySimulation::placeRoad()` updates the `m_tiles` map and fires
+  `SFX_ROAD_BUILD` audio but never calls any `IRenderer` method to place a road scene node.
+  `IRenderer` has no `placeRoadMesh()` or equivalent method; `SceneEntityManager` and the road
+  mesh pipeline do not exist yet. **This is a Phase 10 deliverable** — Phase 9b only wires the
+  click-to-simulation dispatch; Phase 10 delivers road mesh rendering. The simulation tile state
+  is correctly updated; only the visual representation is missing. No Phase 9b code change
+  required. Spec ownership: `architecture/graphics-architecture/` (road scene node lifecycle),
+  `architecture/asset-standards/3d-model-standards.md` (road segment `.b3d` asset spec).
+  Assigned to Phase 10: `graphics-dev-irrlicht`.
+
+- [ ] **No terrain flattening when zone/road/service building placed (Phase 10 missing feature)**
+  — When a tile with steep slope has zone, road, or service building placed on it, the earthworks
+  cost is correctly deducted from the treasury (via `CitySimulation::computeEarthworksCost()`)
+  but the terrain mesh is never modified to flatten the tile visually. Root cause: the
+  `ITerrainQuery` interface has `getSlopeDegrees()` and `getHeightAt()` for reads but no
+  `setTileHeight()` or terrain modification API. `TerrainSystem` similarly has no modification
+  API. The spec (`architecture/game-design/terrain-interaction.md`) specifies earthworks as a
+  treasury deduction mechanic only — it does NOT require visual terrain mesh modification for V1.
+  **This is not a Phase 9b regression.** No visual flattening is specced. The terrain stays
+  bumpy; earthworks = cost only. If visual flattening is desired in a future phase, it requires:
+  (1) `ITerrainQuery::setTileHeight()` interface method, (2) `TerrainSystem` height-map write
+  path, (3) `rebuildTerrainChunk()` triggered on affected chunk. Deferred to post-V1.
+
+- [ ] **No building models after placing zone tiles (Phase 10 missing feature)** — After
+  `placeZone()` is dispatched via left-click in Zone tool mode, the zone colour overlay appears
+  correctly (2D overlay mesh via `IRenderer::setZoneOverlay()`) but no 3D building model spawns
+  on the tile. Root cause: `CitySimulation::placeZone()` updates the `m_tiles` map and fires
+  `SFX_BUILD_PLACE` audio but never calls any `IRenderer` method to place a building scene node.
+  `IRenderer` has no `placeBuildingMesh()` or equivalent method; `BuildingAssetLoader` and
+  `SceneEntityManager` are not connected to the simulation placement callback chain. Building
+  spawning requires simulation growth logic (population demand → building type selection →
+  `SceneEntityManager::spawnBuilding()`). **This is a Phase 10 deliverable** — building mesh
+  spawning on zone tiles is part of the city growth simulation rendering pass, not the tile
+  placement action itself. The zone overlay and tile state are correctly set; only building
+  geometry is missing. No Phase 9b code change required. Spec ownership:
+  `architecture/graphics-architecture/scene-graph-ownership.md` (building node lifecycle),
+  `architecture/asset-standards/3d-model-standards.md` (`.b3d` building asset spec).
+  Assigned to Phase 10: `graphics-dev-irrlicht`.
+
+- [x] **Font size unreadably small** — Irrlicht's built-in default GUI font renders at
+  approximately 8 physical pixels. All HUD labels (treasury balance, population count, toolbar
+  button text, demand bar labels, active tool indicator) are illegible at any supported
+  resolution. Root cause: `IrrlichtUIBackend` constructor never loaded a custom font or called
+  `m_guiEnv->getSkin()->setFont(...)`. **Partial fix applied (Phase 9b)**: `IrrlichtUIBackend`
+  constructor now attempts to load `assets/fonts/ui_font.xml` via
+  `m_guiEnv->getFont("assets/fonts/ui_font.xml")` and applies it globally via
+  `m_guiEnv->getSkin()->setFont()`. Gracefully falls back to 8px built-in with a `stderr`
+  warning if the file is absent. `assets/fonts/FONT_REQUIRED.txt` documents how to author the
+  font using Irrlicht's FontTool (18 px recommended). **Phase 10 completes this fix** by
+  delivering the actual `assets/fonts/ui_font.xml` bitmap font asset (18 px, ASCII 32–126) per
+  `architecture/ui-ux/resolution-ui-scaling.md` (minimum 14 px virtual body font).
+  <!-- graphics-dev-irrlicht: font-loading infrastructure added to IrrlichtUIBackend constructor
+  (lines 213-253); assets/fonts/FONT_REQUIRED.txt created with authoring guide, 2026-03-03 -->
+
+- [x] **Upper-left letter artefact overlapping Zone button** — Single letter characters ("Z",
+  "R", "U", "D", "Q") appeared at toolbar button positions in the upper-left of the screen.
+  These are `IGUIButton` label text strings ("Zone", "Road", "Utilities", "Demolish", "Query")
+  rendered by Irrlicht's 8px built-in font, truncated to 1 character at the physical scale of
+  1280×720. Two contributing root causes: (1) `assets/textures/ui/hud_sprites_ui.png` does not
+  yet exist so `m_spriteTextureReady` is `false` and `setElementImage()` is a no-op, leaving
+  text labels visible; (2) the 8px font makes those labels appear as confusing single-letter
+  noise. The font-loading infrastructure fix above (partial fix) means that once
+  `assets/fonts/ui_font.xml` is present, button labels will render at a readable size and be
+  clearly identifiable. **Phase 10 completes this fix** by delivering `assets/fonts/ui_font.xml`
+  (making text readable) and `assets/textures/ui/hud_sprites_ui.png` (replacing text with icons
+  entirely). Spec reference: `architecture/ui-ux/hud-layout.md` (Toolbar Button Text Fallback).
+
 ---
 
 ### Team
