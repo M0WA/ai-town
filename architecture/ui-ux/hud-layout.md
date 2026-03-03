@@ -24,6 +24,124 @@
   **Data source**: `ICitySimulation::getDemandPressurePct(ZoneType)` returns the city-wide weighted-average `demand_factor` across all tiles of that zone type, updated each budget tick. **DISPLAY SCALING**: `getDemandPressurePct()` returns `float` in `[0.0, 1.0]` — NOT a percentage in `[0, 100]`. The HUD demand bars MUST multiply by `100.0f` before display (e.g., `barFillPct = getDemandPressurePct(zone) * 100.0f`). Omitting this multiplication produces a bar always showing ≤1% fill. **INVERSE SEMANTICS**: `QueryResult::demandPressurePct` (Inspector Panel) uses the complementary definition `(1.0f − effective_demand_factor) × 100` where 100 = zero demand — opposite direction. Do NOT use `QueryResult::demandPressurePct` directly to fill the HUD demand bar. This is distinct from per-tile demand pressure available via `QueryResult::demand_pressure_pct` in the Query/Inspector Panel.
 - **Active tool indicator** (persistent badge below demand bar): virtual bounds x: 8–72 px, y: 752–784 px. Shows the current tool's 32×32 px icon with a small text label, visible from anywhere on screen without looking at the toolbar. Updates immediately when the active tool changes. Icon sprite handles are drawn from `hud_sprites_ui.dds` row 6 (`kSpriteIndicatorNone` through `kSpriteIndicatorQuery` — see `src/ui/hud_sprite_ids.h` and `architecture/asset-standards/2d-texture-standards.md` UI Sprite Sheet Cell Layout section). **Cursor shape**: each tool mode uses a distinct cursor shape from the UI sprite sheet (Zone: crosshair with zone-color tint; Road: road-segment icon; Utilities: wrench; Demolish: X marker; Query: magnifying glass). OS-level cursor shape changes require `IUIBackend::setMouseCursor()`, which does not exist in the Phase 9b interface; cursor icon rendering from the sprite sheet is **deferred to Phase 10+** (see row 7 reserved cells in the sprite sheet layout). The `m_activeTool` state set in Phase 9b is the prerequisite for Phase 10+ cursor shape selection.
 
+## Zone Sub-Panel
+
+The Zone sub-panel is a 3×3 grid of buttons that appears immediately to the right of the
+left toolbar (x:80, y:64) whenever the Zone tool is active. It is hidden for all other tool
+modes. Virtual bounds: x:80–280 px, y:64–192 px (width = (64×3)+(4×2) = 200 px,
+height = (40×3)+(4×2) = 128 px). Grid layout: 3 columns (zone type: Residential / Commercial
+/ Industrial, left-to-right) × 3 rows (density tier: Low / Medium / High, top-to-bottom).
+Each button is 64×40 px with a 4 px gap between buttons. Constants defined in
+`src/ui/ui_constants.h`: `kZoneSubPanelLeft`, `kZoneSubPanelTop`, `kZoneSubBtnW`,
+`kZoneSubBtnH`, `kZoneSubBtnGap`.
+
+### Zone Sub-Panel Button Content
+
+Each button displays a sprite icon from `hud_sprites_ui.dds` via
+`IUIBackend::setElementImage()` using the `kSpriteZone*` constants from
+`src/ui/hud_sprite_ids.h` (rows 2 and 3 of the sprite sheet — see
+`architecture/asset-standards/2d-texture-standards.md` Cell Assignment Tables). The button
+is created with an empty text label (`addButton("", ...)`); the sprite is the sole visual
+encoding.
+
+**Text label fallback (when sprite sheet asset is not yet on disk)**: If
+`hud_sprites_ui.dds` is absent or the sprite fails to load, the button will render as an
+empty square with no visual content. To prevent this from shipping as a player-facing blank
+grid, a text fallback MUST be applied: each button must be created with a short descriptive
+label matching its cell position:
+
+| Column 0 (Residential) | Column 1 (Commercial) | Column 2 (Industrial) |
+|---|---|---|
+| Row 0: "R-Lo" | "C-Lo" | "I-Lo" |
+| Row 1: "R-Med" | "C-Med" | "I-Med" |
+| Row 2: "R-Hi" | "C-Hi" | "I-Hi" |
+
+Once `hud_sprites_ui.dds` is authored and placed at `assets/textures/ui/hud_sprites_ui.dds`,
+the `IrrlichtUIBackend` loads it during initialization and the `setElementImage()` call
+replaces the text with the sprite. The text label is not visible when a sprite is present;
+it only appears when sprite loading fails. **This text fallback is the authoritative
+definition: the implementation MUST pass these strings to `addButton()` rather than empty
+string `""`.**
+
+**Tooltip**: On hover, each zone sub-panel button displays a tooltip with the full zone type
+and density name, e.g. "Residential — Low density", "Commercial — Medium density",
+"Industrial — High density". Tooltips are provided by the Irrlicht GUI environment's
+built-in `setToolTipText()` on each button element.
+
+### Zone Sub-Panel Selection State
+
+At construction, the default selection is Residential Low (row 0, col 0 — `idx = 0`). The
+selected button displays the active-state sprite (`kSpriteZoneResLowActive`, etc.). All
+other buttons display the inactive-state sprite. When the player clicks a different button,
+all buttons are set to their inactive sprite, then the clicked button is set to its
+active-state sprite. The selected zone type and density tier are stored in
+`m_selectedZoneType` and `m_selectedDensityTier` in `UIManager`.
+
+### Zone Sub-Panel Visibility Rules
+
+- The zone sub-panel is shown (`setElementVisible(btn, true)`) whenever `m_activeTool`
+  becomes `ActiveTool::Zone` — this includes: clicking the Zone toolbar button, pressing the
+  Z hotkey, and returning to Zone from any other tool mode (including from Query mode).
+- The zone sub-panel is hidden (`setElementVisible(btn, false)`) whenever `m_activeTool`
+  changes to any value other than `ActiveTool::Zone`.
+- **Hiding must occur before `m_activeTool` is set** in `updateSubPanelVisibility()` — or
+  equivalently, `updateSubPanelVisibility()` must be called immediately after every change
+  to `m_activeTool`.
+- The zone sub-panel is NOT shown when Query mode is active. It reappears the moment the
+  Zone tool is next selected.
+
+## Tool Mode State Machine
+
+The active tool is tracked in `UIManager::m_activeTool` (type `ActiveTool`, defined in
+`src/interfaces/simulation_types.h`). The valid states are: `None`, `Zone`, `Road`,
+`Utilities`, `Demolish`, `Query`. The state machine has the following transition rules:
+
+### Permitted Transitions
+
+Any tool mode may transition to any other tool mode in a single user action. There are no
+multi-step transition requirements. Specifically:
+
+- **Query to Zone**: User clicks the Zone toolbar button (y:64–112) while Query mode is
+  active. This closes the inspector panel (if open), sets `m_activeTool = Zone`, shows the
+  zone sub-panel, and updates the active tool indicator — all in one action.
+- **Query to Road / Utilities / Demolish**: Identical single-action transition from Query.
+- **Zone / Road / Utilities / Demolish to Query**: User clicks the Query toolbar button
+  (y:288–336) or presses I. This hides the zone or utilities sub-panel and activates Query
+  mode.
+- **Any tool to None**: Pressing I while Query is active toggles back to `None` (not back
+  to the previous non-Query tool). Clicking the Query toolbar button while Query is active
+  also returns to `None`.
+
+### Inspector Panel Lifecycle Within the State Machine
+
+The inspector panel (`m_inspectorOpen`) is tied to `ActiveTool::Query`:
+
+- The inspector may only be opened when `m_activeTool == ActiveTool::Query`.
+- **Leaving Query mode always closes the inspector**: whenever `m_activeTool` transitions
+  away from `ActiveTool::Query` (to Zone, Road, Utilities, Demolish, or None), the
+  inspector panel MUST be hidden (`m_inspector->hide()`) and `m_inspectorOpen` MUST be set
+  to `false` before the new tool sub-panel is shown. This applies regardless of the
+  transition trigger (toolbar button click, hotkey, or any other input path).
+- This rule is enforced in `UIManager::onEvent()` at Priority 5 (toolbar dispatch) and at
+  Priority 3 (toolbar carve-out within the inspector-open dismiss path). See
+  `input-arbitration.md` Priority 3 for the authoritative enforcement rule.
+
+### Sub-Panel Visibility Per Tool Mode
+
+| Active tool | Zone sub-panel | Utilities sub-panel | Inspector panel |
+|---|---|---|---|
+| None | Hidden | Hidden | Hidden |
+| Zone | Visible | Hidden | Hidden |
+| Road | Hidden | Hidden | Hidden |
+| Utilities | Hidden | Visible | Hidden |
+| Demolish | Hidden | Hidden | Hidden |
+| Query | Hidden | Hidden | Open (on tile click) or Hidden |
+
+`UIManager::updateSubPanelVisibility()` MUST enforce this table whenever `m_activeTool`
+changes. **Important**: the inspector panel is NOT controlled by `updateSubPanelVisibility()`
+for the Query→other transition; it is explicitly closed at the transition site before
+`updateSubPanelVisibility()` is called.
+
 ## Tile Hover Highlight — ARGB Colour Scheme
 
 The tile hover highlight is a semi-transparent wireframe quad rendered over the hovered
