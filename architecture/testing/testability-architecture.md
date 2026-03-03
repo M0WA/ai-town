@@ -604,15 +604,56 @@ struct CameraParams {
     float farClip{3000.0f};    // far clip plane distance in metres (covers 1024×1024 map + sky)
 };
 
+// ScreenRect — plain-old-data screen bounding rectangle in physical pixels.
+// Defined in IRenderer.h alongside IRenderer to keep IRenderer.h Irrlicht-free.
+// Do NOT use irr::core::rect<irr::s32> at any call site crossing the IRenderer boundary.
+struct ScreenRect { int x{0}, y{0}, w{0}, h{0}; };
+
 class IRenderer {   // main-thread-only
 public:
     virtual ~IRenderer() = default;
-    virtual void          beginFrame() = 0;              // main-thread-only
-    virtual void          endFrame() = 0;                // main-thread-only
-    virtual void          drawScene() = 0;               // main-thread-only
-    virtual TextureHandle loadTexture(const std::string& path) = 0;  // main-thread-only; returns kInvalidTexture on failure
-    virtual void          setCamera(const CameraParams& p) = 0;       // main-thread-only
+    virtual void          beginFrame() = 0;
+    virtual void          endFrame() = 0;
+    virtual void          drawScene() = 0;
+    virtual TextureHandle loadTexture(const std::string& path) = 0;
+    virtual void          setCamera(const CameraParams& p) = 0;
+    virtual void          rebuildTerrainChunk(const TerrainChunkRebuildParams& params) = 0;
+
+    // Phase 9b additions — world interaction:
+    virtual bool          pickTerrainTile(int screenX, int screenY,
+                                          int& tileX, int& tileZ) const = 0;
+    virtual void          setTileHoverHighlight(int tileX, int tileZ, uint32_t argb) = 0;
+    virtual void          setZoneOverlay(int mapTilesX, int mapTilesZ,
+                                         const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) = 0;
+    virtual ScreenRect    getTileScreenBounds(int tileX, int tileZ) const = 0;
 };
+
+// MockRenderer — GMock implementation of IRenderer (10 methods as of Phase 9b).
+// Source location: tests/simulation/mock_renderer.h
+// Shared across simulation_tests, ui_tests (via tests/simulation/ include path).
+//
+// Default ON_CALL actions (set in MockRenderer constructor):
+//   loadTexture    — returns incrementing non-zero integer
+//   pickTerrainTile — returns false (no terrain hit; tileX/tileZ unchanged)
+//   getTileScreenBounds — returns ScreenRect{} (zero-initialised)
+//
+// Phase 9b stub usage in WorldInteractionTest:
+//   EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+//       .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
+//   EXPECT_CALL(renderer_, setTileHoverHighlight(3, 4, _)).Times(AtLeast(1));
+//   EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).WillOnce(SaveArg<2>(&capturedMap));
+//
+// IMPORTANT — StrictMock in WorldInteractionTest (all non-mock-configured IRenderer methods):
+// WorldInteractionTest uses StrictMock<MockRenderer>. EVERY IRenderer call made by the
+// production code under test must be covered by an EXPECT_CALL or ON_CALL. The methods
+// beginFrame, endFrame, drawScene, setCamera, rebuildTerrainChunk are NOT called during
+// UIManager::onEvent() or UIManager::update() — they are render-pass methods called from
+// the main game loop outside UIManager. Tests that construct a real UIManager and send
+// events do NOT need EXPECT_CALL stubs for these five methods.
+//
+// The four Phase 9b methods (pickTerrainTile, setTileHoverHighlight, setZoneOverlay,
+// getTileScreenBounds) ARE called from UIManager::onEvent() during tests. Each test
+// must declare EXPECT_CALL for each of these that the production code exercises.
 
 // Canonical IAudioSystem — 14 methods. Authoritative definition in audio-architecture/audio-system.md.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType, SimSpeed,
@@ -787,22 +828,51 @@ All Phase 7 audio tests carry label `unit` and run without a display device. CTe
   ```
 
   `AudioSystem` and `CitySimulation` accept `IClock*` at construction for crossfade timing and the forced-loan real-time gate (120 s) respectively. Production code passes `WallClock` which calls `std::chrono::steady_clock`. `ManualClock` allows deterministic time advancement in tests without wall-clock dependencies.
-- **`ITerrainQuery`** — injectable terrain interface for world-interaction and slope-cost tests. **Source location**: `ITerrainQuery.h` lives in `src/interfaces/`; `ManualTerrainQuery` lives in `tests/simulation/manual_terrain_query.h` (alongside `manual_rng.h` and `manual_clock.h` — all test doubles for injectable simulation interfaces). `ManualTerrainQuery` is a minimal stub with hardcoded returns for deterministic testing:
+- **`ITerrainQuery`** — injectable terrain interface for world-interaction and slope-cost tests. **Source location**: `ITerrainQuery.h` lives in `src/interfaces/`; `ManualTerrainQuery` lives in `tests/simulation/manual_terrain_query.h` (alongside `manual_rng.h` and `manual_clock.h` — all test doubles for injectable simulation interfaces). `ManualTerrainQuery` provides two slope configuration APIs:
+
+  **Global slope** (single `float` overload): sets a uniform slope for ALL tiles. Used by `WorldInteractionTest` when one slope applies to the whole map. **Per-tile slope** (3-argument overload): overrides a specific tile. Per-tile entries take precedence over the global slope. Both APIs coexist:
 
   ```cpp
   class ManualTerrainQuery : public ITerrainQuery {
   public:
-      // Returns the configurable slope — default 0° (flat terrain, zero earthworks cost).
-      float getSlopeDegrees(int /*tileX*/, int /*tileZ*/) const override { return m_slope; }
-      // Phase 9b addition: always returns 0.0f (flat world at sea level for ray-march tests).
+      // Global slope — sets uniform slope for ALL tiles (default 0°, flat terrain).
+      // WorldInteractionTest uses this form: terrain_.setSlope(20.0f)
+      // to trigger the earthworks guard for the entire test map.
+      void setSlope(float degrees) { m_globalSlope = degrees; }
+
+      // Per-tile slope — overrides slope for a specific tile; takes precedence over
+      // the global slope. Used by CitySimulation earth-works tests needing distinct
+      // slopes per tile (e.g., slope canyon patterns).
+      void setSlope(int tileX, int tileZ, float degrees) {
+          m_slopes[makeKey(tileX, tileZ)] = degrees;
+      }
+
+      // Reset all slope configuration to 0° (flat terrain for all tiles).
+      void resetSlope() { m_globalSlope = 0.0f; m_slopes.clear(); }
+
+      // Returns per-tile slope if set, otherwise returns global slope (default 0°).
+      float getSlopeDegrees(int tileX, int tileZ) const override {
+          auto it = m_slopes.find(makeKey(tileX, tileZ));
+          return (it != m_slopes.end()) ? it->second : m_globalSlope;
+      }
+
+      // Phase 9b addition: always returns 0.0f (flat world at sea level).
+      // Required to satisfy pure-virtual contract of ITerrainQuery::getHeightAt().
+      // Phase 9b unit tests that need specific heights inject MockRenderer for the
+      // renderer path; no WorldInteractionTest requires non-zero heights here.
       float getHeightAt(int /*tileX*/, int /*tileZ*/) const override { return 0.0f; }
-      void  setSlope(float degrees) { m_slope = degrees; }  // per-test override
   private:
-      float m_slope{0.0f};
+      static int64_t makeKey(int x, int z) {
+          return (static_cast<int64_t>(x) << 32) | static_cast<uint32_t>(z);
+      }
+      float m_globalSlope{0.0f};
+      std::unordered_map<int64_t, float> m_slopes;
   };
   ```
 
-  Used in `WorldInteractionTest` (Phase 9b) as the `terrain_` fixture member, injected via `uiManager_->setTerrainQuery(&terrain_)`. Tests that exercise the earthworks guard call `terrain_.setSlope(20.0f)` (above the 15° free-placement threshold) before triggering placement to verify slope-cost computation. The `getHeightAt()` override is required because it is pure virtual on `ITerrainQuery`; without it `ManualTerrainQuery` fails to compile, blocking all Phase 9b unit tests.
+  **CRITICAL — `setSlope()` overload selection**: `WorldInteractionTest` tests that exercise the earthworks guard call the SINGLE-ARGUMENT form `terrain_.setSlope(20.0f)` to apply slope 20° to all tiles uniformly. Calling the THREE-ARGUMENT form `terrain_.setSlope(5, 7, 20.0f)` would only affect tile (5,7) — other tiles remain 0°. Tests that use `MockRenderer::pickTerrainTile` to return tile (5,7) and then expect earthworks cost must call the global-slope form `terrain_.setSlope(20.0f)`.
+
+  Used in `WorldInteractionTest` (Phase 9b) as the `terrain_` fixture member, injected via `uiManager_->setTerrainQuery(&terrain_)`. The `getHeightAt()` override is required because it is pure virtual on `ITerrainQuery`; without it `ManualTerrainQuery` fails to compile, blocking all 17 Phase 9b unit tests.
 
 - **`IAlcFunctions`** — injectable interface for ALC function-pointer lookup, enabling the thread-local context extension check in `AudioSystem` to be intercepted in tests without a real OpenAL device. **Source locations**: `IAlcFunctions.h` in `src/audio/`; `DefaultAlcFunctions.h`/`DefaultAlcFunctions.cpp` in `src/audio/`; `MockAlcFunctions` is defined locally in `tests/audio/audio_thread_test.cpp` (single-use — not a shared header). All test double headers live under `tests/` — never under `src/`.
 
@@ -836,6 +906,19 @@ For every unit test that uses `StrictMock<MockAudioSystem>` or `StrictMock<MockR
 | ModalDialog_OnOpen | `setPaused(true)` × 1 (via MockCitySimulation, not IAudioSystem) | None |
 | ModalDialog_OnClose (no queued toast) | `setPaused(false)` × 1 (via MockCitySimulation) | None |
 | `ModalDialog_OnClose_WithQueuedCriticalToast_AutoPauseReevaluated` (test 8) | Via MockCitySimulation: `setPaused(true)` × 2 (once on modal open; once on re-evaluation in `closeModal()` because CRITICAL queue is non-empty); `setPaused(false)` × 0 (NOT called — simulation stays paused because CRITICAL toast remains active after modal close) | Via MockUIBackend: `addStaticText` × 1 (queued CRITICAL toast displayed synchronously within `closeModal()`) |
+| `WorldInteraction_ZonePlacement_CallsPlaceZone` | None (NiceMock audio unused) | `pickTerrainTile(_, _, _, _)` → returns true + tileX=5 tileZ=7 × 1; `setTileHoverHighlight` not called on MouseButtonDown; `setZoneOverlay(_, _, _)` × 1 (on successful placement); `MockCitySimulation::placeZone(5, 7, _, _, 0)` × 1 |
+| `WorldInteraction_RoadPlacement_CallsPlaceRoad` | None | `pickTerrainTile(_, _, _, _)` × 1 (returns tile 5,7); `setZoneOverlay` NOT called (road placement does not update zone overlay); `MockCitySimulation::placeRoad(5, 7, 0)` × 1 |
+| `WorldInteraction_DemolishTool_SteepSlope_NoEarthworksGuard` | None | `pickTerrainTile` × 1; `MockCitySimulation::demolishTile(5, 7)` × 1 (no earthworks guard on demolish) |
+| `WorldInteraction_ZoneTool_SteepSlope_InsufficientFunds_ToastNotPlace` | None | `pickTerrainTile` × 1; `MockCitySimulation::placeZone(_, _, _, _, _)` × 0 (not called — blocked by earthworks guard); `MockUIBackend::addStaticText(HasSubstr("insufficient funds"), _, _, _, _)` × AtLeast(1) |
+| `WorldInteraction_QueryTool_CallsQueryTile` | None | `pickTerrainTile` × 1; `getTileScreenBounds(5, 7)` × 1; `MockCitySimulation::queryTile(5, 7)` × 1 |
+| `WorldInteraction_NoActiveTool_LeftClickIgnored` | None | `pickTerrainTile` × 0 (no ray-cast when no tool active); `MockCitySimulation::placeZone(_, _, _, _, _)` × 0; `MockCitySimulation::placeRoad(_, _, _)` × 0 |
+| `WorldInteraction_ModalActive_LeftClickNotDispatched` | None | `pickTerrainTile` × 0 (modal Priority 1 consumes event before world layer); `MockCitySimulation::placeZone(_, _, _, _, _)` × 0 |
+| `WorldInteraction_HoverHighlight_SetOnMouseMove` | None | `pickTerrainTile` × 1 (returns tile 3,4); `setTileHoverHighlight(3, 4, _)` × AtLeast(1) |
+| `WorldInteraction_HoverHighlight_ClearedOnMiss` | None | `pickTerrainTile` × 1 (returns false); `setTileHoverHighlight(-1, -1, 0)` × AtLeast(1) |
+| `WorldInteraction_ZonePlacement_SparseOverlay_InsertsEntry` | None | `pickTerrainTile` × 1; `setZoneOverlay(_, _, _)` × 1 (SaveArg used to capture sparse map; assert key 43 maps to `0x6000FF00u`) |
+| `WorldInteraction_Demolish_SparseOverlay_ErasesEntry` | None | `pickTerrainTile` × AtLeast(2) (zone placement + demolish); `setZoneOverlay` × 2 (one after placement, one after demolish; second call has empty map) |
+| `WorldInteraction_UtilitiesPlacement_CallsPlaceServiceBuilding` | None | `pickTerrainTile` × 1 (returns tile 5,7); `MockCitySimulation::placeServiceBuilding(5, 7, ServiceBuildingType::FireStation, 0)` × 1 |
+| `CitySimulation_PlaceRoad_FiresSFXRoadBuild` | `StrictMock<MockAudioSystem>::playPositionalSound(SFX_ROAD_BUILD, _, _, _)` × 1 | None (`NiceMock<MockRenderer>` — renderer call is incidental) |
 
 > **Post-V1 stinger scenarios**: `StingerType::GAME_OVER` (game-over stinger, fires in Scenario mode) is not defined in the V1 `StingerType` enum (`{ CRISIS, MILESTONE }` only). Do not reference `StingerType::GAME_OVER` in any V1 test or production code — it does not exist until Scenario mode is implemented post-V1. When Scenario mode is added post-V1, a new matrix row will be added here.
 
@@ -1198,3 +1281,173 @@ protected:
     }
 };
 ```
+
+### WorldInteractionTest Fixture (Phase 9b)
+
+`WorldInteractionTest` is the canonical test fixture for all Phase 9b world-interaction unit tests
+(17 tests in `tests/ui/world_interaction_test.cpp`, registered under the `ui_tests` CMake target).
+
+**Source file**: `tests/ui/world_interaction_test.cpp`
+**CMake registration**: `target_sources(ui_tests PRIVATE tests/ui/world_interaction_test.cpp)` —
+do NOT call `add_executable` or `aitown_add_tests` again (duplicate target error).
+**Label**: `unit` (no `requires-opengl`).
+
+**Fixture design**: All 17 `WorldInteractionTest` methods share a single fixture. The fixture
+uses `StrictMock<MockCitySimulation>` and `StrictMock<MockRenderer>` to catch unexpected calls.
+`NiceMock<MockUIBackend>` suppresses noise from UIManager constructor panel-creation calls
+(50+ `addStaticText`/`addButton`/`setElementVisible` calls — `StrictMock<MockUIBackend>` would
+require exhaustive construction-time `EXPECT_CALL` setup, defeating the fixture's purpose).
+
+```cpp
+// tests/ui/world_interaction_test.cpp
+class WorldInteractionTest : public ::testing::Test {
+protected:
+    // Declaration order: mocks declared BEFORE uiManager_ so that
+    // they are destroyed AFTER uiManager_ (reverse declaration order).
+    // TearDown() makes this explicit regardless of member order.
+    ::testing::StrictMock<MockCitySimulation> sim_;
+    ::testing::StrictMock<MockRenderer>       renderer_;
+    ManualTerrainQuery                        terrain_;   // global slope defaults to 0°
+    ::testing::NiceMock<MockUIBackend>        backend_;
+    ManualClock                               clock_;
+    std::unique_ptr<UIManager>                uiManager_;
+
+    void SetUp() override {
+        // Construct UIManager with its locked 4-parameter constructor.
+        // renderer_ and terrain_ are wired via setters (Phase 9b additions).
+        uiManager_ = std::make_unique<UIManager>(&backend_, nullptr, &sim_, &clock_);
+        uiManager_->setRenderer(&renderer_);
+        uiManager_->setTerrainQuery(&terrain_);
+        // setMapDimensions(10, 10) establishes m_mapTilesX=10, m_mapTilesZ=10 so that
+        // zone overlay key computations use concrete, test-predictable values:
+        //   tile (tileX=3, tileZ=4) → key = 4 * 10 + 3 = 43.
+        uiManager_->setMapDimensions(10, 10);
+    }
+
+    // **Mandatory TearDown**: explicitly destroys UIManager before StrictMock members.
+    // UIManager destructor calls backend_.removeElement() for all live UI elements;
+    // it also holds raw m_renderer_ and m_terrain_ pointers that must be released
+    // before the mock objects they point to are destroyed. Failure to reset uiManager_
+    // here causes use-after-destroy in StrictMock verification.
+    // The current member declaration order (uiManager_ declared last) automatically
+    // satisfies this invariant via reverse-destruction order, but the explicit TearDown()
+    // is mandatory to make the contract immune to future member reordering.
+    void TearDown() override {
+        uiManager_.reset();
+    }
+};
+```
+
+**SetUp sequence contract (REQUIRED)**:
+
+1. `std::make_unique<UIManager>(&backend_, nullptr, &sim_, &clock_)` — audio is `nullptr`
+   (UIManager checks `if(m_audio)` before every audio call; passing null is safe here since
+   no Phase 9b test exercises the audio path through UIManager).
+2. `uiManager_->setRenderer(&renderer_)` — REQUIRED before any event that triggers
+   `pickTerrainTile()`. Without this, the null-check guard in the world-interaction block
+   returns `false` immediately and no `placeZone`/`placeRoad` calls fire.
+3. `uiManager_->setTerrainQuery(&terrain_)` — REQUIRED before any event that triggers the
+   earthworks cost computation (slope guard). Without this, `m_terrain` is null and
+   `getSlopeDegrees()` is unreachable.
+4. `uiManager_->setMapDimensions(10, 10)` — REQUIRED before any zone overlay test. Without
+   this, `m_mapTilesX == 0` and all overlay writes are skipped by the guard.
+
+**StrictMock expectations for each test**: See the StrictMock Expected Call Matrix section above
+for the complete per-test expected call specification. Common patterns:
+
+```cpp
+// Stubbing pickTerrainTile to return tile (5,7):
+EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+    .WillOnce(::testing::DoAll(
+        ::testing::SetArgReferee<2>(5),
+        ::testing::SetArgReferee<3>(7),
+        ::testing::Return(true)));
+
+// Stub getTileScreenBounds (needed when Query tool fires a tile lookup):
+ON_CALL(renderer_, getTileScreenBounds(5, 7))
+    .WillByDefault(::testing::Return(ScreenRect{100, 100, 50, 50}));
+
+// Capture the sparse overlay map for overlay-content assertions:
+std::unordered_map<uint64_t, uint32_t> capturedMap;
+EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
+    .WillOnce(::testing::SaveArg<2>(&capturedMap));
+
+// Verify zone overlay key and colour after zone placement at (3,4):
+// key = tileZ * m_mapTilesX + tileX = 4 * 10 + 3 = 43
+ASSERT_EQ(capturedMap.size(), 1u);
+EXPECT_EQ(capturedMap.at(43u), 0x6000FF00u);  // Residential green
+```
+
+**Active tool injection**: Tests set the active tool by simulating a toolbar button click event
+or by calling `uiManager_->setActiveTool(ActiveTool::Zone)` if a direct setter is available.
+The preferred approach is via toolbar button click to exercise the full dispatch path:
+
+```cpp
+// Set active tool to Zone via toolbar button click (Priority 5 dispatch):
+InputEvent zoneBtn;
+zoneBtn.type = InputEvent::Type::MouseButtonDown;
+zoneBtn.x = 36;   // toolbar center x (virtual coords)
+zoneBtn.y = 80;   // y:64-112 = Zone button row (virtual coords)
+zoneBtn.button = 0;
+uiManager_->onEvent(zoneBtn);
+// m_activeTool is now ActiveTool::Zone
+```
+
+**Slope guard testing** (earthworks guard): Call `terrain_.setSlope(20.0f)` (global form, ≥15°
+threshold triggers earthworks) BEFORE sending the left-click event. Set
+`MockCitySimulation::getTreasuryBalance()` to return 0.0f (insufficient funds) to verify the
+slope guard fires and `placeZone` is NOT called:
+
+```cpp
+terrain_.setSlope(20.0f);  // above 15° threshold; earthworks cost = 500 * clamp((20-15)/30,0,2) > 0
+ON_CALL(sim_, getTreasuryBalance()).WillByDefault(::testing::Return(0.0f));
+EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);  // must NOT be called
+EXPECT_CALL(backend_, addStaticText(::testing::HasSubstr("insufficient funds"), _, _, _, _))
+    .Times(::testing::AtLeast(1));
+// ... send left-click event
+```
+
+**Overlay cap test** (`WorldInteraction_OverlayCap_100K_StillCalls`): driving 100,000
+placements via 100K simulated events is impractical. Instead, access the overlay map
+through a test-friend mechanism or call a hypothetical `injectOverlayEntry()` test helper.
+Absent a test-friend, place 100K entries in a single-loop test using distinct tile coordinates
+(vary tileX from 0 to 9 and tileZ from 0 to 9999 for a 10×10000 set — verify all with
+`setMapDimensions(10, 10001)` to accommodate). The test verifies the 100,001st entry is
+rejected and `setZoneOverlay` is still called with `size() <= 100000`.
+
+**NiceMock MockUIBackend rationale**: UIManager's constructor calls `addStaticText`,
+`addButton`, and `setElementVisible` for all panels (HUD, Minimap, MainMenu, etc.) during
+initialization — typically 50+ backend calls. `StrictMock<MockUIBackend>` would require
+exhaustive `EXPECT_CALL` stubs in `SetUp()` before any test-specific assertions can be set.
+`NiceMock<MockUIBackend>` suppresses all unexpected calls silently, allowing test bodies to
+declare only the specific `EXPECT_CALL` assertions relevant to the test being verified.
+This is the same rationale as `UIManagerModalTest` and `UIManagerDeficitIntegrationTest`.
+Compensating assertions: every test that needs to verify a specific `MockUIBackend` call
+(e.g., `addStaticText(HasSubstr("insufficient funds"), ...)`) sets an explicit `EXPECT_CALL`
+with `Times(AtLeast(1))` to prevent the `NiceMock` leniency from masking missing calls.
+
+**Phase 9b canonical test names** (CTest `-R` filter expressions reference these exactly):
+
+| Test Suite | Test Case | Fixture |
+|---|---|---|
+| `WorldInteractionTest` | `ZonePlacement_CallsPlaceZone` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `RoadPlacement_CallsPlaceRoad` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `DemolishTool_SteepSlope_NoEarthworksGuard` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `ZoneTool_SteepSlope_InsufficientFunds_ToastNotPlace` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `QueryTool_CallsQueryTile` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `NoActiveTool_LeftClickIgnored` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `ModalActive_LeftClickNotDispatched` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `HoverHighlight_SetOnMouseMove` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `HoverHighlight_ClearedOnMiss` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `UtilitiesPlacement_CallsPlaceServiceBuilding` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `ZonePlacement_SparseOverlay_InsertsEntry` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `Demolish_SparseOverlay_ErasesEntry` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `NewGameLoad_ClearsOverlay` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `OverlayCap_100K_StillCalls` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `SetMapDimensions_Recall_ClearsOverlay` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `ZoneSubPanel_ButtonsInitialized` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `UtilitiesSubPanel_ButtonsInitialized` | `WorldInteractionTest` |
+| `AudioSimTest` | `CitySimulation_PlaceRoad_FiresSFXRoadBuild` | `AudioSimTest` |
+
+CTest filter for all Phase 9b world-interaction tests:
+`-R "WorldInteractionTest|CitySimulation_PlaceRoad_FiresSFXRoadBuild"`
