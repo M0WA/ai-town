@@ -27,7 +27,7 @@
 // Full definitions are provided by <irrlicht.h> in IrrlichtUIBackend.cpp.
 namespace irr {
     class IrrlichtDevice;
-    namespace gui  { class IGUIEnvironment; class IGUIElement; }
+    namespace gui  { class IGUIEnvironment; class IGUIElement; class IGUISpriteBank; }
     namespace video { class IVideoDriver; }
 }  // namespace irr
 
@@ -122,6 +122,13 @@ private:
     irr::IrrlichtDevice*       m_device{nullptr};
     irr::gui::IGUIEnvironment* m_guiEnv{nullptr};
     irr::video::IVideoDriver*  m_driver{nullptr};
+
+    // Sprite bank for IGUIButton sprite assignment.
+    // Loaded from assets/textures/ui/hud_sprites_ui.dds during construction.
+    // Contains one texture entry and 1024 position entries (32×32 grid, 64×64 px/cell).
+    // Shared by every button created via addButton(); each button holds a grabbed ref.
+    // Null when running headless (EDT_NULL) or when the texture file is absent.
+    irr::gui::IGUISpriteBank*  m_spriteBank{nullptr};
 
     // Cached driver type — avoids virtual dispatch on every method call.
     // Set once at construction from m_driver->getDriverType().
