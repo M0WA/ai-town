@@ -142,6 +142,17 @@ public:
     // Used by tests to suppress the modal; production default is true (confirm ON).
     void setDemolishConfirm(bool enabled) { m_demolishConfirmEnabled = enabled; }
 
+    // setOverlayMapForTest — test-seam to pre-populate m_overlayMap without
+    // routing 100K UI events through onEvent().
+    // Used exclusively by WorldInteraction_OverlayCap_100K_StillCalls to
+    // inject exactly kOverlayCap entries so the cap-enforcement path can be
+    // exercised with a single subsequent placement. Production code never calls
+    // this method.
+    // (ref: architecture/testing/testability-architecture.md — test seam pattern)
+    void setOverlayMapForTest(const std::unordered_map<uint64_t, uint32_t>& map) {
+        m_overlayMap = map;
+    }
+
     // onNewGame — reset all world-interaction state for a new game load.
     // Clears m_overlayMap, calls setZoneOverlay({}) if renderer is non-null,
     // resets m_activeTool to None, and clears m_hoveredTileX/Z.
