@@ -118,6 +118,10 @@ public:
     // 17.
     UIElementHandle loadTexture(const std::string& path) override;
 
+    // 18. Set background fill color on a static text element (enables fillBackground).
+    //     r, g, b, a in [0, 255]. Has no visible effect on button elements.
+    void setElementBackground(UIElementHandle handle, int r, int g, int b, int a) override;
+
 private:
     irr::IrrlichtDevice*       m_device{nullptr};
     irr::gui::IGUIEnvironment* m_guiEnv{nullptr};

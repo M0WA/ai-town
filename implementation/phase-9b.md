@@ -1384,13 +1384,36 @@ that must be resolved before Phase 9b is marked Done. Issues 2–5 are **Phase 1
 — not regressions — documented here for Phase 10 pickup. Infrastructure fixes applied in Phase 9b
 where possible are noted inline.
 
-- [ ] **Minimap not visible during gameplay** (`UIManager::transitionToGameplay()` missing
-  `m_minimap->show()`). The `Minimap` constructor calls `hide()` as its last step; without an
-  explicit `m_minimap->show()` in `transitionToGameplay()`, the minimap panel remains hidden
-  throughout all gameplay. Fix: add `m_minimap->show();` to `UIManager::transitionToGameplay()`
-  immediately after `m_hud->show();`. Also add `m_minimap->hide();` to
-  `UIManager::transitionToMainMenu()` alongside the existing `m_hud->hide()` calls.
-  Authoritative spec: `architecture/ui-ux/minimap.md` (Minimap Lifecycle section).
+- [ ] **Minimap panel invisible — transparent background** (`IrrlichtUIBackend::addStaticText`
+  called with `fillBackground=false`). The `show()` / `hide()` lifecycle is now correct:
+  `UIManager::transitionToGameplay()` calls `m_minimap->show()` and
+  `UIManager::transitionToMainMenu()` calls `m_minimap->hide()`. The remaining invisibility is
+  that `m_mapBg` (the 200×200 static-text element) has no filled background — the player sees
+  straight through it to the terrain even when `show()` has been called.
+
+  **Root cause**: `IrrlichtUIBackend::addStaticText` creates its `IGUIStaticText` with
+  `fillBackground=false`. No subsequent call sets a background color. The element is logically
+  visible but renders zero pixels.
+
+  **Fix — three steps, all required**:
+
+  1. Add `virtual void setElementBackgroundColor(UIElementHandle handle, uint32_t argb) = 0;`
+     to `IUIBackend.h`. This keeps `Minimap.cpp` free of any Irrlicht dependency.
+  2. Implement in `IrrlichtUIBackend.cpp`: look up the element in `m_elementMap`, cast to
+     `IGUIStaticText*`, call `->setBackgroundColor(irr::video::SColor(argb))` and
+     `->setDrawBackground(true)`.
+  3. Add a no-op stub to `MockUIBackend` (records the call; no assertion required for Phase 9b).
+  4. In `Minimap::Minimap()`, after `m_mapBg = m_backend->addStaticText(...)`, add:
+
+     ```cpp
+     m_backend->setElementBackgroundColor(m_mapBg, 0xFF111111u); // near-black panel
+     ```
+
+  After this fix a 200×200 px dark rectangle appears at bottom-right (virtual x:1720–1920,
+  y:880–1080) whenever gameplay is active. Zone color coding, road lines, and the camera
+  viewport rectangle are Phase 11 deliverables.
+
+  Authoritative spec: `architecture/ui-ux/minimap.md` (Phase 9b Minimum Viable Minimap section).
   Assigned to: `graphics-dev-irrlicht`.
 
 - [ ] **Road mesh not visible after placing road tile (Phase 10 missing feature)** —

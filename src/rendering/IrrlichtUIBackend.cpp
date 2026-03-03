@@ -823,6 +823,46 @@ UIElementHandle IrrlichtUIBackend::loadTexture(const std::string& path)
 }
 
 // ---------------------------------------------------------------------------
+// 18. setElementBackground
+//
+// Enables background fill on an IGUIStaticText element and sets its fill color.
+// IGUIStaticText::setBackgroundColor() and setDrawBackground() are only defined
+// on IGUIStaticText — NOT on the base IGUIElement. We use getType() to confirm
+// the element is a static text before the static_cast; button elements are
+// silently ignored (buttons draw their own background via the skin).
+//
+// Color channels r, g, b, a are each in [0, 255].
+// Irrlicht SColor layout: (a, r, g, b) in that constructor order.
+// ---------------------------------------------------------------------------
+void IrrlichtUIBackend::setElementBackground(UIElementHandle handle,
+                                              int r, int g, int b, int a)
+{
+    auto it = m_elementMap.find(handle);
+    if (it == m_elementMap.end() || !it->second.element) {
+        return;
+    }
+
+    irr::gui::IGUIElement* elem = it->second.element;
+
+    // Only IGUIStaticText supports setBackgroundColor() / setDrawBackground().
+    if (elem->getType() != irr::gui::EGUIET_STATIC_TEXT) {
+        return;
+    }
+
+    irr::gui::IGUIStaticText* text =
+        static_cast<irr::gui::IGUIStaticText*>(elem);
+
+    // Clamp channels to [0, 255].
+    const irr::u32 ca = static_cast<irr::u32>(a < 0 ? 0 : a > 255 ? 255 : a);
+    const irr::u32 cr = static_cast<irr::u32>(r < 0 ? 0 : r > 255 ? 255 : r);
+    const irr::u32 cg = static_cast<irr::u32>(g < 0 ? 0 : g > 255 ? 255 : g);
+    const irr::u32 cb = static_cast<irr::u32>(b < 0 ? 0 : b > 255 ? 255 : b);
+
+    text->setBackgroundColor(irr::video::SColor(ca, cr, cg, cb));
+    text->setDrawBackground(true);
+}
+
+// ---------------------------------------------------------------------------
 // handleViewportResize
 // Detects screen size changes and repositions every GUI element so that its
 // physical pixel position matches its stored virtual coordinate at the new

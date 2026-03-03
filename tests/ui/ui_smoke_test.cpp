@@ -5,7 +5,7 @@
 #include "src/ui/NotificationManager.h"   // compile-check: verifies 3-param constructor signature at Phase 0
 #include <gtest/gtest.h>
 
-// Minimal concrete subclass — verifies all 17 pure-virtual methods compile.
+// Minimal concrete subclass — verifies all 18 pure-virtual methods compile.
 // Not a mock; does not need meaningful implementations.
 struct StubUIBackend : public IUIBackend {
     UIElementHandle addStaticText(const std::string&, int, int, int, int) override { return 1; }
@@ -25,6 +25,7 @@ struct StubUIBackend : public IUIBackend {
     int             getVirtualWidth()  const override { return 1920; }
     int             getVirtualHeight() const override { return 1080; }
     UIElementHandle loadTexture(const std::string&) override { return kInvalidUIElement; }
+    void            setElementBackground(UIElementHandle, int, int, int, int) override {}
 };
 
 TEST(UIBackendSmoke, AllMethodsCompile) {

@@ -62,4 +62,10 @@ public:
     //     not found, unsupported format, or driver error). The backend owns the loaded
     //     texture resource; call removeElement(handle) to release it when no longer needed.
     virtual UIElementHandle loadTexture(const std::string& path) = 0;
+    // 18. Set the background fill color of a static text element and enable background drawing.
+    //     r, g, b, a are in [0, 255]. Has no effect on button elements or invalid handles.
+    //     This is the only way to make a blank IGUIStaticText produce visible pixels — without
+    //     calling this, a static text with empty text and fillBackground=false is invisible.
+    virtual void            setElementBackground(UIElementHandle handle,
+                                                 int r, int g, int b, int a) = 0;
 };
