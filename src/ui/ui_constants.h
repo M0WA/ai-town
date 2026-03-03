@@ -36,3 +36,4 @@ constexpr unsigned int kHoverArgbRoad      = 0x8000FFFFu;  // semi-transparent c
 constexpr unsigned int kHoverArgbUtilities = 0x80FF8000u;  // semi-transparent orange
 constexpr unsigned int kHoverArgbDemolish  = 0x80FF0000u;  // semi-transparent red
 constexpr unsigned int kHoverArgbQuery     = 0x80FFFFFFu;  // semi-transparent white
+constexpr unsigned int kHoverArgbClear     = 0x00000000u;  // clear / no highlight

@@ -43,7 +43,7 @@ public:
     // LOCKED constructor signature (Phase 1).
     // device must be non-null. uiManager may be null (draws nothing in that case).
     IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiManager);
-    ~IrrlichtRenderer() override = default;
+    ~IrrlichtRenderer() override;
 
     // Late-bind UIManager (allows construction before UIManager exists).
     void setUIManager(UIManager* uiManager) { m_uiManager = uiManager; }
