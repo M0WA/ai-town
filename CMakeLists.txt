@@ -482,6 +482,13 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/audio_sim_test.cpp
 )
 
+# Coverage-gap tests: placeServiceBuilding variants, undoLastAction road count,
+# difficulty constructors, smoothstep, getOutstandingDebt with loans, etc.
+# Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(simulation_tests ...) again.
+target_sources(simulation_tests PRIVATE
+    tests/simulation/simulation_coverage_gap_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # terrain_tests — terrain generator property tests and fixed-seed regression
 # TIMEOUT 300: multi-seed property tests can exceed 120 s on coverage-instrumented runners
@@ -596,6 +603,15 @@ target_sources(ui_tests PRIVATE
 # that would produce a duplicate target error.
 target_sources(ui_tests PRIVATE
     tests/ui/world_interaction_test.cpp
+)
+
+# Coverage-gap tests: UIManager hotkeys, zone/utilities sub-panels, hover colors,
+# InspectorPanel populate() isZoned=true, and MainMenuPanel keyboard navigation.
+# Do NOT call add_executable(ui_tests ...) or aitown_add_tests(ui_tests ...) again.
+target_sources(ui_tests PRIVATE
+    tests/ui/coverage_gap_test.cpp
+    tests/ui/main_menu_coverage_test.cpp
+    tests/ui/query_panel_coverage_test.cpp
 )
 
 # ----------------------------------------------------------------------------
