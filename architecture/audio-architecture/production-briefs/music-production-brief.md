@@ -20,14 +20,24 @@ hard asset error that will fail `validate_assets.py` Check #14 and block Phase 1
 | Bit depth | 16-bit |
 | Channels | Stereo (2 channels) |
 | Format | OGG Vorbis |
-| Root key / mode | Shared across all 8 music files (cross-context harmonic compatibility) |
+| Root key / mode | Same root key across all 8 files; calm/growth/main-menu in major mode; crisis may use parallel minor (see note below) |
 | Loudness target | −16 LUFS integrated |
 | True-peak ceiling | −1 dBTP |
 
-All 8 music files must share the same root key and mode. This is a cross-context harmonic
+All 8 music files must share the same root key. This is a cross-context harmonic
 compatibility requirement: the engine can transition from any music context (main menu,
 calm, growth, crisis) to any other on a bar boundary, and the crossfade must not produce
 harmonic clashes.
+
+**Mode constraint (SA-2 revision 2026-03-03):** Calm, growth, and main-menu stems must
+use major mode. Crisis stems may use the parallel minor (same root, different mode).
+During a calm→crisis or growth→crisis crossfade, simultaneous major and minor material on
+a shared root produces modal mixture — a musically established technique for intensity
+transitions that does not constitute a harmonic clash. A new crossfade audibility demo
+(major calm stem into minor crisis stem, 3 s constant-power) is required before crisis
+stems in parallel minor are approved for delivery; until that demo is approved, crisis
+stems must remain in the same mode as calm/growth. The existing approval (HTML comment
+above) covers only major→major crossfades and does not extend to major→minor.
 
 **Ambient beds (`ambient_*.ogg`) are NOT covered by this brief.** They are a separate
 deliverable (see `ambient-bed-production-brief.md`). No JSON sidecar is required for
@@ -41,18 +51,23 @@ The following bar counts are locked. Non-integer bar counts cause bar-boundary c
 drift over long play sessions. All durations are derived from 90 BPM, 4/4 time
 (1 bar = 4 beats = 2.6667 s).
 
-| File | Bars | Duration at 90 BPM |
-|---|---|---|
-| `music_main_menu_01.ogg` | 48 | 128.00 s |
-| `music_main_menu_02.ogg` | 48 | 128.00 s |
-| `music_calm_01.ogg` | 32 | 85.33 s |
-| `music_calm_02.ogg` | 32 | 85.33 s |
-| `music_growth_01.ogg` | 32 | 85.33 s |
-| `music_growth_02.ogg` | 32 | 85.33 s |
-| `music_crisis_01.ogg` | 36 | 96.00 s |
-| `music_crisis_02.ogg` | 36 | 96.00 s |
+| File | Bars | Duration at 90 BPM | Sample count at 44100 Hz |
+|---|---|---|---|
+| `music_main_menu_01.ogg` | 48 | 128.00 s | 5,644,800 |
+| `music_main_menu_02.ogg` | 48 | 128.00 s | 5,644,800 |
+| `music_calm_01.ogg` | 36 | 96.00 s | 4,233,600 |
+| `music_calm_02.ogg` | 36 | 96.00 s | 4,233,600 |
+| `music_growth_01.ogg` | 36 | 96.00 s | 4,233,600 |
+| `music_growth_02.ogg` | 36 | 96.00 s | 4,233,600 |
+| `music_crisis_01.ogg` | 36 | 96.00 s | 4,233,600 |
+| `music_crisis_02.ogg` | 36 | 96.00 s | 4,233,600 |
 
 Duration formula: `bars × 4 beats × (60 s / 90 BPM) = bars × 2.6667 s`.
+
+**Sample-count arithmetic (SA-3 verified):** At 44100 Hz, 90 BPM, 4 beats/bar:
+`spb = (44100 × 60.0 / 90.0) × 4 = 117,600 samples/bar` (exact integer — zero drift).
+All bar counts above are exact multiples of 117,600. The 48000→44100 Hz resampling ratio
+(147/160) divides cleanly for every integer bar count: no fractional sample introduced.
 
 Verify bar count in the DAW before export. Export to sample-accurate length. A stem that
 is even 1 sample long or short will accumulate crossfade drift; this will be caught by
@@ -90,10 +105,10 @@ All 8 files below must be delivered before Phase 10 exit.
 |---|---|---|---|---|
 | `music_main_menu_01.ogg` | 48 | OGG Vorbis | Stereo | `music_main_menu_01.json` |
 | `music_main_menu_02.ogg` | 48 | OGG Vorbis | Stereo | `music_main_menu_02.json` |
-| `music_calm_01.ogg` | 32 | OGG Vorbis | Stereo | `music_calm_01.json` |
-| `music_calm_02.ogg` | 32 | OGG Vorbis | Stereo | `music_calm_02.json` |
-| `music_growth_01.ogg` | 32 | OGG Vorbis | Stereo | `music_growth_01.json` |
-| `music_growth_02.ogg` | 32 | OGG Vorbis | Stereo | `music_growth_02.json` |
+| `music_calm_01.ogg` | 36 | OGG Vorbis | Stereo | `music_calm_01.json` |
+| `music_calm_02.ogg` | 36 | OGG Vorbis | Stereo | `music_calm_02.json` |
+| `music_growth_01.ogg` | 36 | OGG Vorbis | Stereo | `music_growth_01.json` |
+| `music_growth_02.ogg` | 36 | OGG Vorbis | Stereo | `music_growth_02.json` |
 | `music_crisis_01.ogg` | 36 | OGG Vorbis | Stereo | `music_crisis_01.json` |
 | `music_crisis_02.ogg` | 36 | OGG Vorbis | Stereo | `music_crisis_02.json` |
 
@@ -111,7 +126,9 @@ Authoring checklist:
 - Export ends on the last sample of the final bar — not 1 sample after.
 - No DC offset at head or tail.
 - No fade-in or fade-out applied by the DAW — the engine handles gain ramping.
-- All 8 files rendered at the identical root key and mode before export.
+- All 8 files rendered at the same root key before export. Calm, growth, and main-menu
+  stems in major mode. Crisis stems in major mode (or parallel minor if the major→minor
+  crossfade demo has been approved — see Root key / mode note above).
 
 ---
 
@@ -140,7 +157,7 @@ Before submitting assets for Phase 10 exit review, confirm each of the following
 - [ ] All 8 OGG files loudness-checked: integrated LUFS = −16, true peak ≤ −1 dBTP.
 - [ ] All 8 OGG files are integer-bar length at 90 BPM (sample-accurate).
 - [x] All 8 JSON sidecars present and conformant with `tools/music_sidecar_schema.json`.
-- [ ] All 8 files share identical root key and mode.
+- [ ] All 8 files share the same root key; mode constraint verified (major for calm/growth/main-menu; crisis major or approved parallel minor).
 - [ ] Loop tail of each file aligns to bar boundary with no click.
 - [x] Crossfade demo approved (recorded above).
 
@@ -187,16 +204,16 @@ Tolerance: ±0.05 s. Bar duration at 90 BPM 4/4: 2.6667 s.
 |---|---|---|---|---|---|---|
 | `music_main_menu_01.ogg` | 48 | 128.00 | 122.17 | −5.83 | FAIL | ~45.8 |
 | `music_main_menu_02.ogg` | 48 | 128.00 | 124.94 | −3.06 | FAIL | ~46.9 |
-| `music_calm_01.ogg` | 32 | 85.33 | 90.77 | +5.44 | FAIL | ~34.0 |
-| `music_calm_02.ogg` | 32 | 85.33 | 93.89 | +8.56 | FAIL | ~35.2 |
-| `music_growth_01.ogg` | 32 | 85.33 | 92.20 | +6.87 | FAIL | ~34.6 |
-| `music_growth_02.ogg` | 32 | 85.33 | 93.38 | +8.05 | FAIL | ~35.0 |
+| `music_calm_01.ogg` | 36 | 96.00 | 90.77 | −5.23 | FAIL | ~34.0 |
+| `music_calm_02.ogg` | 36 | 96.00 | 93.89 | −2.11 | FAIL | ~35.2 |
+| `music_growth_01.ogg` | 36 | 96.00 | 92.20 | −3.80 | FAIL | ~34.6 |
+| `music_growth_02.ogg` | 36 | 96.00 | 93.38 | −2.62 | FAIL | ~35.0 |
 | `music_crisis_01.ogg` | 36 | 96.00 | 93.66 | −2.34 | FAIL | ~35.1 |
 | `music_crisis_02.ogg` | 36 | 96.00 | 90.41 | −5.59 | FAIL | ~33.9 |
 
 All 8 files fail bar-count conformance. No file lands within ±0.05 s of its SA-3 locked
-duration. These are placeholder exports; each must be re-exported from the DAW at the
-exact sample-accurate length prescribed in the SA-3 locked bar-counts table above.
+duration. Expected values for calm and growth updated from 32 bars (85.33 s) to 36 bars
+(96.00 s) per the SA-2/SA-3 deep review amendment (2026-03-03) — see amendment note below.
 
 ### Outstanding items before Phase 10 exit
 
@@ -206,13 +223,61 @@ exact sample-accurate length prescribed in the SA-3 locked bar-counts table abov
 - **True peak — 1 file over ceiling:** `music_growth_01` measures −0.8 dBFS true peak.
   Apply a true-peak limiter (ceiling −1 dBTP) before delivery.
 - **Bar-count — all 8 files non-conformant:** Every stem deviates from its SA-3 locked
-  duration by more than ±0.05 s. Re-export each file from the DAW at the exact
-  sample-accurate length in the SA-3 Locked Bar Counts table. Verify with
-  `validate_assets.py` Check #14 before Phase 10 exit review.
+  duration by more than ±0.05 s. Re-export each file from the DAW at the corrected
+  sample-accurate targets: calm/growth/crisis at **36 bars = 96.00 s = 4,233,600 samples**;
+  main-menu at **48 bars = 128.00 s = 5,644,800 samples**. Verify with `validate_assets.py`
+  Check #14 before Phase 10 exit review.
 - **Root key / mode:** Requires DAW or audio-engineer review to confirm all 8 files share
   the same root key and mode. Cannot be confirmed by automated loudness measurement.
 - **Loop tail click-check:** Requires DAW or audio-engineer review to confirm each file's
   tail aligns to the bar boundary with no click or phase artifact.
+
+---
+
+## SA-2 / SA-3 Deep Review Amendment — 2026-03-03
+
+**Reviewers:** sound-artist-opensoftal (SA-2 musical feasibility) + sound-artist-opensoftal
+(SA-3 bar-count technical analysis), independent parallel reviews.
+
+### Bar-count correction — calm and growth: 32 → 36 bars
+
+The original SA-3 locked value of 32 bars (85.33 s) for calm and growth stems was a spec
+defect: `v1-audio-asset-manifest.md` requires all music stems to be 90–180 s, and
+85.33 s is 4.67 s below that floor. The SA-3 table has been corrected to **36 bars
+(96.00 s)**.
+
+Rationale for 36 over the minimum-compliant 34 bars (90.67 s):
+
+- 36 bars yields exactly 96.000 s — integer seconds, no repeating decimal.
+- Aligns calm/growth/crisis to a single gameplay-tier bar count; only two values in the
+  full table (36 and 48).
+- Provides a 6 s margin above the 90 s manifest floor (vs. 0.67 s at 34 bars).
+- Sample arithmetic confirmed exact: 36 × 117,600 = 4,233,600 samples with zero
+  fractional residue at 44100 Hz, and 48000→44100 Hz resampling (ratio 147/160) is
+  arithmetically exact for this value.
+
+The previously-delivered calm/growth files (90–94 s, ~34–35 bars) are below the corrected
+target and must be re-exported at 36 bars = 96.00 s before Phase 10 exit.
+
+### Mode constraint relaxation — crisis parallel minor permitted
+
+The original constraint requiring all 8 stems to share identical root key AND mode is
+relaxed for crisis stems only. Crisis stems may use the parallel minor of the shared root
+key. Simultaneous major+minor material on a shared root during a crossfade produces modal
+mixture, not a harmonic clash.
+
+**Gate:** A new crossfade audibility demo (major calm stem into parallel-minor crisis stem,
+3 s constant-power, bar-aligned) must be submitted and approved before crisis stems in
+parallel minor are accepted for delivery. The existing approval (HTML comment at top of
+document) covers major→major only and does not extend to major→minor.
+
+### Variant compatibility authoring guidance
+
+Both variants within a tier must share: (a) the same bar count; (b) tonic-chord arrival
+at bar 1; (c) comparable textural density and dynamic envelope at bar 1; (d) compatible
+bass voice-leading at the loop seam (bass interval ≤ a fifth between end of variant A and
+bar 1 of variant B). Verify by setting up both variants on parallel DAW tracks aligned to
+bar 1 and auditioning a manual crossfade at the final bar boundary before export.
 
 ---
 
