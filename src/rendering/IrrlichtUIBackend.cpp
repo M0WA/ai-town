@@ -203,92 +203,12 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
         glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 
-    // --- Build IGUISpriteBank for button icon sprites ---------------------
-    // This must happen regardless of headless mode for test coverage, but
-    // the texture load is skipped (returns null) under EDT_NULL so the bank
-    // will contain no texture entry in that case — buttons will show no icon
-    // in headless mode, which is acceptable (headless tests do not validate
-    // visual output).
-    //
-    // Sprite handle encoding (from hud_sprite_ids.h + 2d-texture-standards.md):
-    //   handle = col + row * 32  →  col = handle % 32, row = handle / 32
-    //   Each cell is 64×64 px in the 2048×2048 RGBA8 sprite sheet.
-    //   Total cells: 32 columns × 32 rows = 1024 sprites.
-    //
-    // We add 1024 position entries to the bank (one per cell) and 1024
-    // one-frame sprites (each pointing at the corresponding position entry).
-    // This keeps the sprite index equal to the encoded handle value.
-    {
-        // addEmptySpriteBank() returns a new bank; the GUI environment grabs it
-        // internally. We also grab() so we can safely store the pointer and
-        // drop() it in the destructor without use-after-free.
-        m_spriteBank = m_guiEnv->addEmptySpriteBank("hud_sprites_ui");
-        if (m_spriteBank) {
-            m_spriteBank->grab();
-
-            // Load the sprite sheet texture via Irrlicht.
-            // Use PNG — Irrlicht's built-in PNG loader is unconditionally
-            // compiled in. DDS requires a plugin loader that is not always
-            // present; getTexture() would silently return null for DDS on
-            // those builds, leaving a textureless bank and causing an assert
-            // in irr::core::array when buttons are rendered.
-            irr::video::ITexture* tex = m_driver->getTexture(
-                "assets/textures/ui/hud_sprites_ui.png");
-
-            if (tex) {
-                // Add the texture as the sole texture entry (index 0).
-                m_spriteBank->addTexture(tex);
-                m_spriteBankReady = true;
-            }
-            // If tex is null (file absent, headless EDT_NULL, or unsupported
-            // format), leave the bank texture-less and m_spriteBankReady false.
-            // setElementImage() will skip setSprite() calls in that case, so
-            // buttons will render without icons but will NOT crash.
-
-            // Populate position entries and sprites ONLY when the texture
-            // loaded successfully.  Adding sprite entries that reference
-            // textureNumber=0 when the bank has 0 textures causes an
-            // out-of-bounds assert in irr::core::array at render time.
-            if (m_spriteBankReady) {
-                static const int kCellSize   = 64;
-                static const int kGridCols   = 32;
-                static const int kGridRows   = 32;
-                static const int kTotalCells = kGridCols * kGridRows; // 1024
-
-                irr::core::array<irr::core::rect<irr::s32>>& positions =
-                    m_spriteBank->getPositions();
-                irr::core::array<irr::gui::SGUISprite>& sprites =
-                    m_spriteBank->getSprites();
-
-                positions.reallocate(static_cast<irr::u32>(kTotalCells));
-                sprites.reallocate(static_cast<irr::u32>(kTotalCells));
-
-                for (int cellIdx = 0; cellIdx < kTotalCells; ++cellIdx) {
-                    const int col = cellIdx % kGridCols;
-                    const int row = cellIdx / kGridCols;
-                    const irr::s32 left   = col * kCellSize;
-                    const irr::s32 top    = row * kCellSize;
-                    const irr::s32 right  = left + kCellSize;
-                    const irr::s32 bottom = top  + kCellSize;
-
-                    // Add the source rect to the position list.
-                    positions.push_back(
-                        irr::core::rect<irr::s32>(left, top, right, bottom));
-
-                    // Build a one-frame sprite pointing at this position entry
-                    // and the sole texture (index 0).
-                    irr::gui::SGUISpriteFrame frame;
-                    frame.rectNumber    = static_cast<irr::u32>(cellIdx);
-                    frame.textureNumber = 0u;
-
-                    irr::gui::SGUISprite sprite;
-                    sprite.Frames.push_back(frame);
-                    sprite.frameTime = 0u;  // static (no animation)
-                    sprites.push_back(sprite);
-                }
-            }
-        }
-    }
+    // --- Load sprite sheet texture for button icon assignment ---
+    // Use PNG — Irrlicht's built-in PNG loader is unconditionally compiled in.
+    // The texture is shared across all buttons; setElementImage() calls
+    // IGUIButton::setImage(m_spriteTexture, srcRect) with the per-sprite source rect.
+    m_spriteTexture = m_driver->getTexture("assets/textures/ui/hud_sprites_ui.png");
+    m_spriteTextureReady = (m_spriteTexture != nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -324,13 +244,10 @@ IrrlichtUIBackend::~IrrlichtUIBackend()
         }
     }
 
-    // Drop our grab() reference on the sprite bank. The GUI environment holds
-    // its own internal reference via addEmptySpriteBank(); our drop() merely
-    // releases the extra grab() we took in the constructor.
-    if (m_spriteBank) {
-        m_spriteBank->drop();
-        m_spriteBank = nullptr;
-    }
+    // m_spriteTexture is owned by Irrlicht's driver texture cache — do NOT call drop() on it.
+    // The driver owns all textures loaded via getTexture(); we just hold a non-owning pointer.
+    m_spriteTexture = nullptr;
+    m_spriteTextureReady = false;
 
     // Clear all maps (pointers into Irrlicht's scene graph are not owned by us;
     // Irrlicht's IGUIEnvironment owns the elements and will clean them up when
@@ -407,13 +324,6 @@ UIElementHandle IrrlichtUIBackend::addButton(
 
     if (!elem) {
         return kInvalidUIElement;
-    }
-
-    // Attach the shared sprite bank so that subsequent setSprite() calls work.
-    // Without setSpriteBank(), IGUIButton ignores all setSprite() calls and
-    // renders no icon regardless of what sprite index is set.
-    if (m_spriteBank) {
-        elem->setSpriteBank(m_spriteBank);
     }
 
     UIElementHandle handle = m_nextHandle++;
@@ -563,28 +473,84 @@ void IrrlichtUIBackend::setElementAlpha(UIElementHandle handle, float alpha)
 }
 
 // ---------------------------------------------------------------------------
+// spriteRectForIndex — maps a hud_sprite_ids.h constant to the actual pixel
+// rectangle in hud_sprites_ui.png.  Source positions from hud_sprites_ui_layout.json.
+// Returns irr::core::rect<s32>(left, top, right, bottom).
+// ---------------------------------------------------------------------------
+static irr::core::rect<irr::s32> spriteRectForIndex(uint32_t id)
+{
+    // Toolbar icons — row 0, y=0, 48×48 px, 56px column spacing
+    //   (icon_tool_zone=0, road=1, utilities=2, demolish=3, query=4)
+    if (id <= 4u) {
+        const irr::s32 x = static_cast<irr::s32>(id) * 56;
+        return irr::core::rect<irr::s32>(x, 0, x + 48, 48);
+    }
+    // Toolbar icons — inactive variants (row 1 encoding, same visual as row 0)
+    if (id >= 32u && id <= 36u) {
+        const irr::s32 x = static_cast<irr::s32>(id - 32u) * 56;
+        return irr::core::rect<irr::s32>(x, 0, x + 48, 48);
+    }
+    // Zone sub-panel patterns — 64×64, row 4 (y=256) from layout JSON
+    //   Res (id%3==0), Com (id%3==1), Ind (id%3==2)
+    //   Active:   64–72 (row 2 in spec)
+    //   Inactive: 96–104 (row 3 in spec)
+    if ((id >= 64u && id <= 72u) || (id >= 96u && id <= 104u)) {
+        // Zone type determined by position within the 3-wide columns:
+        //   active:   col = (id - 64) % 3   →  id=64→0(Res), 65→1(Com), 66→2(Ind)
+        //   inactive: col = (id - 96) % 3
+        const uint32_t base = (id <= 72u) ? 64u : 96u;
+        const int zoneCol = static_cast<int>((id - base) % 3u);
+        // JSON: residential=(0,256,64,64), commercial=(72,256,64,64), industrial=(144,256,64,64)
+        const irr::s32 xOffsets[3] = {0, 72, 144};
+        const irr::s32 x = xOffsets[zoneCol];
+        return irr::core::rect<irr::s32>(x, 256, x + 64, 320);
+    }
+    // Utilities patterns — 64×64, row 5 (y=320)
+    //   Active:   128–131  (Power=128, Water=129, Fire=130, Police=131)
+    //   Inactive: 160–163
+    if ((id >= 128u && id <= 131u) || (id >= 160u && id <= 163u)) {
+        const uint32_t base = (id <= 131u) ? 128u : 160u;
+        const int t = static_cast<int>(id - base);
+        // JSON: fire=(0,320,64,64), police=(72,320,64,64), power=(144,320,64,64), water=(216,320,64,64)
+        // Our order: Power=0, Water=1, Fire=2, Police=3
+        // Map to JSON x positions:
+        const irr::s32 xOffsets[4] = {144, 216, 0, 72};  // Power, Water, Fire, Police
+        const irr::s32 x = xOffsets[t];
+        return irr::core::rect<irr::s32>(x, 320, x + 64, 384);
+    }
+    // Notification bell — JSON icon_bell: (56, 64, 48, 48)
+    if (id == 320u) {
+        return irr::core::rect<irr::s32>(56, 64, 104, 112);
+    }
+    // Clock icon — JSON icon_clock_grace: (64, 384, 16, 16)
+    if (id == 321u) {
+        return irr::core::rect<irr::s32>(64, 384, 80, 400);
+    }
+    // Unsaved dot — JSON dot_unsaved_changes: (40, 384, 16, 16)
+    if (id == 322u) {
+        return irr::core::rect<irr::s32>(40, 384, 56, 400);
+    }
+    // Undo icon — JSON icon_undo: (0, 64, 48, 48)
+    if (id == 323u) {
+        return irr::core::rect<irr::s32>(0, 64, 48, 112);
+    }
+    // Default: return a 64×64 cell using uniform grid as last-resort fallback.
+    const irr::s32 col = static_cast<irr::s32>(id % 32u);
+    const irr::s32 row = static_cast<irr::s32>(id / 32u);
+    return irr::core::rect<irr::s32>(col * 64, row * 64, col * 64 + 64, row * 64 + 64);
+}
+
+// ---------------------------------------------------------------------------
 // 10. setElementImage
 //
-// Assigns a sprite cell from hud_sprites_ui.dds to a button element.
+// Assigns a sprite region from hud_sprites_ui.png to a button element using
+// IGUIButton::setImage(texture, srcRect) with a pixel-accurate source rect
+// derived from hud_sprites_ui_layout.json via spriteRectForIndex().
 //
-// The second parameter (textureHandle) is interpreted as a sprite cell index
-// encoded as  col + row * 32  (matching the encoding in hud_sprite_ids.h and
-// the cell layout spec in architecture/asset-standards/2d-texture-standards.md).
-// Valid range: 0–1023 for the 32×32 cell grid.
-//
-// Irrlicht's IGUIButton::setSprite() maps directly onto this index because we
-// built the sprite bank with exactly 1024 sprite entries (one per cell), so
-// the encoded handle IS the sprite bank index.
-//
-// setSprite() is called for three button states so the icon is visible in all
-// normal interaction states:
-//   EGBS_BUTTON_UP    — normal (unpressed, not focused)
-//   EGBS_BUTTON_FOCUSED_NOT_PRESSED — mouse-over / keyboard focus
-//   EGBS_BUTTON_DOWN  — actively pressed
-//
-// EGBS_BUTTON_NOT_FOCUSED is intentionally omitted — it is the same visual
-// state as EGBS_BUTTON_UP on most Irrlicht themes and setting it separately
-// can cause a flash-on-focus artifact on some drivers.
+// The second parameter (spriteIndex) is a hud_sprite_ids.h constant.
+// spriteRectForIndex() maps each constant to the correct pixel rect in the
+// sprite sheet, matching the actual 56px column spacing of the toolbar icons
+// and the exact positions of all other sprite categories.
 // ---------------------------------------------------------------------------
 void IrrlichtUIBackend::setElementImage(UIElementHandle handle,
                                          UIElementHandle spriteIndex)
@@ -595,7 +561,7 @@ void IrrlichtUIBackend::setElementImage(UIElementHandle handle,
         return;
     }
 
-    // Cast to IGUIButton. Static text elements do not support setSprite().
+    // Cast to IGUIButton. Static text elements do not support setImage().
     // We use EGUI_ELEMENT_TYPE to avoid a dynamic_cast dependency.
     irr::gui::IGUIElement* elem = it->second.element;
     if (elem->getType() != irr::gui::EGUIET_BUTTON) {
@@ -605,37 +571,20 @@ void IrrlichtUIBackend::setElementImage(UIElementHandle handle,
         return;
     }
 
-    irr::gui::IGUIButton* btn =
-        static_cast<irr::gui::IGUIButton*>(elem);
+    irr::gui::IGUIButton* btn = static_cast<irr::gui::IGUIButton*>(elem);
 
-    // Guard: sprite bank must be attached (set in addButton()) AND have loaded
-    // its texture successfully. Without the texture, the bank has 0 textures but
-    // sprites referencing textureNumber=0, causing an out-of-bounds assert in
-    // irr::core::array when the button is rendered by Irrlicht.
-    if (!m_spriteBank || !m_spriteBankReady) {
-        // No sprite bank or texture load failed — store mapping for reference.
+    if (!m_spriteTextureReady || !m_spriteTexture) {
         m_imageElementMap[handle] = spriteIndex;
         return;
     }
 
-    // White full-opacity tint — preserve the authored icon colours.
-    const irr::video::SColor tint(255u, 255u, 255u, 255u);
+    // Look up the source rectangle for this sprite index.
+    irr::core::rect<irr::s32> srcRect = spriteRectForIndex(spriteIndex);
 
-    // Apply the sprite to all relevant button visual states.
-    // Enum values from IGUIButton.h in the vendored Irrlicht build:
-    //   EGBS_BUTTON_UP         — normal (unpressed, no focus)
-    //   EGBS_BUTTON_DOWN       — actively pressed
-    //   EGBS_BUTTON_MOUSE_OVER — cursor hovering over button
-    //   EGBS_BUTTON_FOCUSED    — keyboard focus
-    //   EGBS_BUTTON_NOT_FOCUSED / EGBS_BUTTON_MOUSE_OFF are also available
-    //     but not set here — they share the UP visual in the default skin.
-    const irr::s32 idx = static_cast<irr::s32>(spriteIndex);
-    btn->setSprite(irr::gui::EGBS_BUTTON_UP,         idx, tint);
-    btn->setSprite(irr::gui::EGBS_BUTTON_DOWN,        idx, tint);
-    btn->setSprite(irr::gui::EGBS_BUTTON_MOUSE_OVER,  idx, tint);
-    btn->setSprite(irr::gui::EGBS_BUTTON_FOCUSED,     idx, tint);
+    // Assign the texture region to the button (all visual states).
+    btn->setImage(m_spriteTexture, srcRect);
+    btn->setPressedImage(m_spriteTexture, srcRect);
 
-    // Also keep the mapping for any code that queries m_imageElementMap.
     m_imageElementMap[handle] = spriteIndex;
 }
 

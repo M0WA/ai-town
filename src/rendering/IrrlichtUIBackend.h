@@ -27,8 +27,8 @@
 // Full definitions are provided by <irrlicht.h> in IrrlichtUIBackend.cpp.
 namespace irr {
     class IrrlichtDevice;
-    namespace gui  { class IGUIEnvironment; class IGUIElement; class IGUISpriteBank; }
-    namespace video { class IVideoDriver; }
+    namespace gui  { class IGUIEnvironment; class IGUIElement; }
+    namespace video { class IVideoDriver; class ITexture; }
 }  // namespace irr
 
 // IrrlichtUIBackend — Full Irrlicht-backed implementation of all 17 IUIBackend
@@ -123,18 +123,14 @@ private:
     irr::gui::IGUIEnvironment* m_guiEnv{nullptr};
     irr::video::IVideoDriver*  m_driver{nullptr};
 
-    // Sprite bank for IGUIButton sprite assignment.
-    // Loaded from assets/textures/ui/hud_sprites_ui.png during construction.
-    // Contains one texture entry and 1024 position entries (32×32 grid, 64×64 px/cell).
-    // Shared by every button created via addButton(); each button holds a grabbed ref.
-    // Null when running headless (EDT_NULL) or when the texture file is absent.
-    irr::gui::IGUISpriteBank*  m_spriteBank{nullptr};
+    // Sprite sheet texture loaded from hud_sprites_ui.png.
+    // Used by setElementImage() to assign per-button images via IGUIButton::setImage().
+    // null when running headless (EDT_NULL) or when the texture file is absent.
+    irr::video::ITexture* m_spriteTexture{nullptr};
 
     // True only when the sprite sheet texture loaded successfully.
-    // setElementImage() must not call setSprite() when false — the sprite bank
-    // would have 0 textures but sprites referencing texture[0], causing an
-    // out-of-bounds assert in irr::core::array when Irrlicht renders the button.
-    bool m_spriteBankReady{false};
+    // setElementImage() must not call setImage() when false to avoid null-ptr dereference.
+    bool m_spriteTextureReady{false};
 
     // Cached driver type — avoids virtual dispatch on every method call.
     // Set once at construction from m_driver->getDriverType().
