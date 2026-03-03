@@ -741,12 +741,19 @@ bool UIManager::onEvent(const InputEvent& event) {
     // Priority 7: World-interaction layer.
     // Only active when in Gameplay state with a non-None tool selected.
     // MouseMove: hover highlight update (never consumes — returns false).
-    // LMB click: placement dispatch (consumes when a non-Query tool hits terrain).
+    //            Also triggers drag-to-place when LMB is held and tile changes.
+    // LMB down:  placement dispatch (consumes when a non-Query tool hits terrain).
+    // LMB up:    clears m_lmbHeld (never consumes).
     // Query tool LMB: handled at Priority 3 above — must not reach here.
     // ============================================================
     if (m_state == GameState::Gameplay && m_activeTool != ActiveTool::None) {
         // Guard: renderer must be set before any world-interaction can occur.
         if (!m_renderer) return false;
+
+        if (event.type == InputEvent::Type::MouseButtonUp && event.button == 0) {
+            m_lmbHeld = false;
+            return false;  // Up-events are never consumed by world-interaction.
+        }
 
         if (event.type == InputEvent::Type::MouseMove) {
             int hitX = -1, hitZ = -1;
@@ -762,6 +769,16 @@ bool UIManager::onEvent(const InputEvent& event) {
                     default:                    colour = kHoverArgbClear;     break;
                 }
                 m_renderer->setTileHoverHighlight(hitX, hitZ, colour);
+
+                // Drag-to-place: when LMB is held and the cursor moved to a new tile,
+                // run placement logic. Prevents placing the same tile 60× per second.
+                // Query tool is excluded — its handler lives at Priority 3.
+                if (m_lmbHeld &&
+                    (hitX != m_hoveredTileX || hitZ != m_hoveredTileZ) &&
+                    m_activeTool != ActiveTool::Query) {
+                    doTerrainPlacement(hitX, hitZ);
+                }
+
                 m_hoveredTileX = hitX;
                 m_hoveredTileZ = hitZ;
             } else {
@@ -773,6 +790,8 @@ bool UIManager::onEvent(const InputEvent& event) {
         }
 
         if (event.type == InputEvent::Type::MouseButtonDown && event.button == 0) {
+            m_lmbHeld = true;
+
             // Query tool left-click is handled at Priority 3 — it must not reach here.
             if (m_activeTool == ActiveTool::Query) {
                 return false;
@@ -785,108 +804,119 @@ bool UIManager::onEvent(const InputEvent& event) {
                 return false;
             }
 
-            // Earthworks cost computation.
-            float slope = 0.0f;
-            if (m_terrain) {
-                slope = m_terrain->getSlopeDegrees(hitX, hitZ);
-            }
-            float factor = std::clamp((slope - 15.0f) / 30.0f, 0.0f, 2.0f);
-            int   earthworksCost = (slope > 15.0f)
-                                   ? static_cast<int>(500.0f * factor)
-                                   : 0;
-
-            // Slope guard: insufficient funds for earthworks.
-            if (slope > 15.0f && m_sim) {
-                float balance = m_sim->getTreasuryBalance();
-                if (static_cast<float>(earthworksCost) > balance) {
-                    m_notifications->postNormal(
-                        "Earthworks Required",
-                        "Earthworks required — insufficient funds (cost: $"
-                            + std::to_string(earthworksCost) + ").");
-                    return true;
-                }
-            }
-
-            if (!m_sim) return false;
-
-            switch (m_activeTool) {
-                case ActiveTool::Zone: {
-                    // Guard: skip overlay writes until map dimensions are set.
-                    m_sim->placeZone(hitX, hitZ,
-                                     static_cast<ZoneType>(m_selectedZoneType),
-                                     static_cast<DensityTier>(m_selectedDensityTier),
-                                     earthworksCost);
-                    if (m_mapTilesX > 0 && m_mapTilesZ > 0) {
-                        // Determine overlay colour from zone type.
-                        uint32_t overlayColour = 0u;
-                        switch (static_cast<ZoneType>(m_selectedZoneType)) {
-                            case ZoneType::Residential: overlayColour = kOverlayArgbResidential; break;
-                            case ZoneType::Commercial:  overlayColour = kOverlayArgbCommercial;  break;
-                            case ZoneType::Industrial:  overlayColour = kOverlayArgbIndustrial;  break;
-                        }
-                        // Cap overlay map at 100K entries.
-                        static constexpr size_t kOverlayCap = 100000u;
-                        uint64_t key = static_cast<uint64_t>(hitZ) * static_cast<uint64_t>(m_mapTilesX)
-                                       + static_cast<uint64_t>(hitX);
-                        if (m_overlayMap.size() < kOverlayCap || m_overlayMap.count(key)) {
-                            m_overlayMap[key] = overlayColour;
-                        }
-                        if (m_renderer) {
-                            m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
-                        }
-                    }
-                    setUnsavedChanges(true);
-                    break;
-                }
-                case ActiveTool::Road: {
-                    m_sim->placeRoad(hitX, hitZ, earthworksCost);
-                    setUnsavedChanges(true);
-                    break;
-                }
-                case ActiveTool::Utilities: {
-                    m_sim->placeServiceBuilding(hitX, hitZ,
-                        static_cast<ServiceBuildingType>(m_selectedServiceBuilding),
-                        earthworksCost);
-                    setUnsavedChanges(true);
-                    break;
-                }
-                case ActiveTool::Demolish: {
-                    if (m_demolishConfirmEnabled) {
-                        // Show demolish confirmation modal (Phase 8 code path).
-                        // The actual demolishTile() call is deferred until the modal confirms.
-                        // For Phase 9b, show the modal and return — tile destruction occurs
-                        // when the modal's Accept result is polled.
-                        m_modal->showDemolishConfirm(1);
-                        // Note: demolishTile is NOT called here; the modal must confirm first.
-                        // In the current Phase 9b architecture, UIManager polls modal result
-                        // via m_modal->getLastResult() during update(). This wiring is deferred
-                        // to the full modal integration — for now the modal is shown and the
-                        // event is consumed.
-                        setUnsavedChanges(true);
-                    } else {
-                        // Confirmation suppressed — demolish immediately.
-                        m_sim->demolishTile(hitX, hitZ);
-                        if (m_mapTilesX > 0 && m_mapTilesZ > 0) {
-                            uint64_t key = static_cast<uint64_t>(hitZ)
-                                           * static_cast<uint64_t>(m_mapTilesX)
-                                           + static_cast<uint64_t>(hitX);
-                            m_overlayMap.erase(key);
-                            if (m_renderer) {
-                                m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
-                            }
-                        }
-                        setUnsavedChanges(true);
-                    }
-                    break;
-                }
-                default:
-                    break;
-            }
-            return true;
+            return doTerrainPlacement(hitX, hitZ);
         }
     }
 
     return false;
+}
+
+// ----------------------------------------------------------------
+// doTerrainPlacement — execute placement at (hitX, hitZ) for the
+// current active tool.  Called from both the MouseButtonDown handler
+// and the MouseMove drag handler (when LMB is held and tile changes).
+// Performs earthworks cost computation, slope guard, sim dispatch,
+// and overlay update.  Returns true when the event should be consumed.
+// ----------------------------------------------------------------
+bool UIManager::doTerrainPlacement(int hitX, int hitZ) {
+    // Earthworks cost computation.
+    float slope = 0.0f;
+    if (m_terrain) {
+        slope = m_terrain->getSlopeDegrees(hitX, hitZ);
+    }
+    float factor = std::clamp((slope - 15.0f) / 30.0f, 0.0f, 2.0f);
+    int   earthworksCost = (slope > 15.0f)
+                           ? static_cast<int>(500.0f * factor)
+                           : 0;
+
+    // Slope guard: insufficient funds for earthworks.
+    if (slope > 15.0f && m_sim) {
+        float balance = m_sim->getTreasuryBalance();
+        if (static_cast<float>(earthworksCost) > balance) {
+            m_notifications->postNormal(
+                "Earthworks Required",
+                "Earthworks required — insufficient funds (cost: $"
+                    + std::to_string(earthworksCost) + ").");
+            return true;
+        }
+    }
+
+    if (!m_sim) return false;
+
+    switch (m_activeTool) {
+        case ActiveTool::Zone: {
+            // Guard: skip overlay writes until map dimensions are set.
+            m_sim->placeZone(hitX, hitZ,
+                             static_cast<ZoneType>(m_selectedZoneType),
+                             static_cast<DensityTier>(m_selectedDensityTier),
+                             earthworksCost);
+            if (m_mapTilesX > 0 && m_mapTilesZ > 0) {
+                // Determine overlay colour from zone type.
+                uint32_t overlayColour = 0u;
+                switch (static_cast<ZoneType>(m_selectedZoneType)) {
+                    case ZoneType::Residential: overlayColour = kOverlayArgbResidential; break;
+                    case ZoneType::Commercial:  overlayColour = kOverlayArgbCommercial;  break;
+                    case ZoneType::Industrial:  overlayColour = kOverlayArgbIndustrial;  break;
+                }
+                // Cap overlay map at 100K entries.
+                static constexpr size_t kOverlayCap = 100000u;
+                uint64_t key = static_cast<uint64_t>(hitZ) * static_cast<uint64_t>(m_mapTilesX)
+                               + static_cast<uint64_t>(hitX);
+                if (m_overlayMap.size() < kOverlayCap || m_overlayMap.count(key)) {
+                    m_overlayMap[key] = overlayColour;
+                }
+                if (m_renderer) {
+                    m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
+                }
+            }
+            setUnsavedChanges(true);
+            break;
+        }
+        case ActiveTool::Road: {
+            m_sim->placeRoad(hitX, hitZ, earthworksCost);
+            setUnsavedChanges(true);
+            break;
+        }
+        case ActiveTool::Utilities: {
+            m_sim->placeServiceBuilding(hitX, hitZ,
+                static_cast<ServiceBuildingType>(m_selectedServiceBuilding),
+                earthworksCost);
+            setUnsavedChanges(true);
+            break;
+        }
+        case ActiveTool::Demolish: {
+            if (m_demolishConfirmEnabled) {
+                // Show demolish confirmation modal (Phase 8 code path).
+                // The actual demolishTile() call is deferred until the modal confirms.
+                // For Phase 9b, show the modal and return — tile destruction occurs
+                // when the modal's Accept result is polled.
+                m_modal->showDemolishConfirm(1);
+                // Note: demolishTile is NOT called here; the modal must confirm first.
+                // In the current Phase 9b architecture, UIManager polls modal result
+                // via m_modal->getLastResult() during update(). This wiring is deferred
+                // to the full modal integration — for now the modal is shown and the
+                // event is consumed.
+                setUnsavedChanges(true);
+            } else {
+                // Confirmation suppressed — demolish immediately.
+                m_sim->demolishTile(hitX, hitZ);
+                if (m_mapTilesX > 0 && m_mapTilesZ > 0) {
+                    uint64_t key = static_cast<uint64_t>(hitZ)
+                                   * static_cast<uint64_t>(m_mapTilesX)
+                                   + static_cast<uint64_t>(hitX);
+                    m_overlayMap.erase(key);
+                    if (m_renderer) {
+                        m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
+                    }
+                }
+                setUnsavedChanges(true);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    return true;
 }
 
 // ----------------------------------------------------------------

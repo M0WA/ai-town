@@ -226,6 +226,10 @@ private:
     int m_hoveredTileX{-1};
     int m_hoveredTileZ{-1};
 
+    // Left mouse button held state — tracked for drag-to-zone/road/demolish.
+    // Set true on MouseButtonDown button==0, false on MouseButtonUp button==0.
+    bool m_lmbHeld{false};
+
     // --- Phase 9b: Zone sub-panel button handles (3×3 grid: col=zone R/C/I, row=density Low/Med/High) ---
     // Created during UIManager construction via m_backend->addButton().
     // Stored in row-major order: m_zoneSubPanelBtns[densityRow * 3 + zoneCol].
@@ -293,6 +297,12 @@ private:
     // Helper: show/hide Zone and Utilities sub-panels based on m_activeTool.
     // Called whenever m_activeTool changes (toolbar click or hotkey).
     void updateSubPanelVisibility();
+
+    // Helper: execute terrain placement at (hitX, hitZ) for the current active tool.
+    // Called from both the MouseButtonDown handler and the MouseMove drag handler.
+    // Performs earthworks cost computation, slope guard, sim dispatch, and overlay update.
+    // Returns true if the event should be consumed (placement occurred or was blocked).
+    bool doTerrainPlacement(int hitX, int hitZ);
 
     // --- Owned panels (allocated in UIManager constructor, deleted in destructor) ---
     // Construction/destruction order is INVARIANT:
