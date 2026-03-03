@@ -875,3 +875,592 @@ TEST_F(WorldInteractionTest, WorldInteraction_UtilitiesPlacement_CallsPlaceServi
 
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
 }
+
+// ---------------------------------------------------------------------------
+// Regression tests for bug report: zone/road/query tool issues
+//
+// Bug 1: Zone sub-panel buttons have no labels/sprites (visible after activation)
+// Bug 2: Zone sub-panel button click + terrain click does nothing
+// Bug 3: Road tool — clicking terrain does nothing (tool not activated)
+// Bug 4: Query mode exit — clicking Zone toolbar does NOT switch back
+// Bug 5: After query mode — zone sub-panel does NOT re-appear
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Test 18 (Bug 1): ZoneSubPanel_ButtonsVisible_AfterZoneToolActivation
+//
+// After clicking the Zone toolbar button, all 9 zone sub-panel buttons must
+// become visible (setElementVisible(handle, true) called for each).
+// Before this, all 9 buttons are hidden (set to false during construction).
+//
+// This regression test for Bug 1 verifies that activating the Zone tool makes
+// the sub-panel visible — a precondition for the player to see any buttons at all.
+//
+// Root cause of kInvalidUIElement guard: NiceMock<MockUIBackend>::addButton()
+// returns 0 by default, which equals kInvalidUIElement. updateSubPanelVisibility()
+// guards setElementVisible calls with `!= kInvalidUIElement`, skipping all calls.
+// Solution: use ON_CALL to make addButton() return incrementing non-zero handles
+// BEFORE constructing UIManager. This is the same pattern used by QueryPanelIntegrationTest.
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, Bug1_ZoneSubPanel_ButtonsVisible_AfterZoneToolActivation)
+{
+    // Destroy the fixture UIManager (constructed with default handle=0 addButton).
+    uiManager_.reset();
+
+    // Configure addButton to return non-zero, unique handles so the kInvalidUIElement
+    // guard in updateSubPanelVisibility() does NOT skip visibility calls.
+    uint32_t nextHandle = 1;
+    ON_CALL(backend_, addButton(_, _, _, _, _))
+        .WillByDefault([&nextHandle](const std::string&, int, int, int, int)
+            -> UIElementHandle { return nextHandle++; });
+    ON_CALL(backend_, addStaticText(_, _, _, _, _))
+        .WillByDefault([&nextHandle](const std::string&, int, int, int, int)
+            -> UIElementHandle { return nextHandle++; });
+
+    // Suppress unrelated backend calls.
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(::testing::AnyNumber());
+
+    // Construct UIManager — addButton now returns non-zero handles.
+    uiManager_ = std::make_unique<UIManager>(&backend_, nullptr, &sim_, &clock_);
+    uiManager_->setRenderer(&renderer_);
+    uiManager_->setTerrainQuery(&terrain_);
+    uiManager_->setMapDimensions(10, 10);
+    uiManager_->setDemolishConfirm(false);
+
+    // Set up counting expectation for setElementVisible(_, true) calls.
+    // Register BEFORE Zone tool activation so all calls are captured.
+    int visibleTrueCount = 0;
+    EXPECT_CALL(backend_, setElementVisible(_, true))
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Invoke(
+            [&visibleTrueCount](UIElementHandle, bool) {
+                ++visibleTrueCount;
+            }));
+    // Allow setElementVisible(_, false) calls (construction hides buttons).
+    EXPECT_CALL(backend_, setElementVisible(_, false))
+        .Times(::testing::AnyNumber());
+
+    // Activate Zone tool — updateSubPanelVisibility() must show 9 zone buttons.
+    uiManager_->transitionToGameplay(GameMode::Sandbox);
+    uiManager_->onEvent(makeToolbarZoneClick());
+
+    // Assert: at least 9 zone sub-panel buttons were made visible.
+    EXPECT_GE(visibleTrueCount, 9)
+        << "Zone toolbar click must show all 9 zone sub-panel buttons "
+           "(setElementVisible called with true for each). "
+           "Bug 1: updateSubPanelVisibility() skips visibility calls because "
+           "all button handles equal kInvalidUIElement (0) in production — "
+           "addButton must return non-zero handles for the guard to pass.";
+}
+
+// ---------------------------------------------------------------------------
+// Test 19 (Bug 1): ZoneSubPanel_ButtonsHidden_AfterRoadToolActivation
+//
+// After switching from Zone tool to Road tool, all 9 zone sub-panel buttons
+// must become hidden again (setElementVisible(handle, false) called for each).
+// This verifies the sub-panel hides when a non-Zone tool is selected.
+//
+// Uses the same non-zero handle setup as Test 18 so the kInvalidUIElement
+// guard in updateSubPanelVisibility() does not skip visibility calls.
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, Bug1_ZoneSubPanel_ButtonsHidden_AfterRoadToolActivation)
+{
+    uiManager_.reset();
+
+    // Configure addButton to return non-zero handles.
+    uint32_t nextHandle = 1;
+    ON_CALL(backend_, addButton(_, _, _, _, _))
+        .WillByDefault([&nextHandle](const std::string&, int, int, int, int)
+            -> UIElementHandle { return nextHandle++; });
+    ON_CALL(backend_, addStaticText(_, _, _, _, _))
+        .WillByDefault([&nextHandle](const std::string&, int, int, int, int)
+            -> UIElementHandle { return nextHandle++; });
+
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(::testing::AnyNumber());
+
+    uiManager_ = std::make_unique<UIManager>(&backend_, nullptr, &sim_, &clock_);
+    uiManager_->setRenderer(&renderer_);
+    uiManager_->setTerrainQuery(&terrain_);
+    uiManager_->setMapDimensions(10, 10);
+    uiManager_->setDemolishConfirm(false);
+
+    // Allow all setElementVisible calls during Zone activation (showing buttons).
+    EXPECT_CALL(backend_, setElementVisible(_, ::testing::AnyOf(true, false)))
+        .Times(::testing::AnyNumber());
+
+    // Activate Zone tool first — shows 9 buttons.
+    uiManager_->transitionToGameplay(GameMode::Sandbox);
+    uiManager_->onEvent(makeToolbarZoneClick());
+    ASSERT_EQ(uiManager_->getActiveTool(), ActiveTool::Zone);
+
+    // Now count setElementVisible(_, false) calls during Road activation.
+    // Re-register EXPECT_CALL for false to count hide calls.
+    int visibleFalseCount = 0;
+    EXPECT_CALL(backend_, setElementVisible(_, false))
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Invoke(
+            [&visibleFalseCount](UIElementHandle, bool) {
+                ++visibleFalseCount;
+            }));
+
+    // Switch to Road tool — updateSubPanelVisibility() hides 9 zone buttons.
+    uiManager_->onEvent(makeToolbarRoadClick());
+
+    // Assert Road tool is now active.
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::Road)
+        << "Toolbar Road click must activate Road tool";
+
+    // Assert: at least 9 zone sub-panel buttons were hidden.
+    EXPECT_GE(visibleFalseCount, 9)
+        << "Road toolbar click must hide all 9 zone sub-panel buttons "
+           "(setElementVisible called with false for each). "
+           "Bug 1: sub-panel buttons not hidden because handles are kInvalidUIElement.";
+}
+
+// ---------------------------------------------------------------------------
+// Test 20 (Bug 2): ZoneSubPanel_ClickCommercialButton_ThenTerrain_CallsPlaceZone
+//
+// Regression test for Bug 2: clicking a zone sub-panel button then clicking
+// terrain must call placeZone with the newly selected zone type.
+//
+// Sequence:
+//   1. Activate Zone tool (default = Residential Low).
+//   2. Click Commercial Low button in sub-panel (col=1, row=0).
+//      Button x = 80 + 1*(64+4) = 148, y = 64 + 0*(40+4) = 64. Center: (180, 84).
+//   3. Click terrain at (5,7).
+//   4. Verify placeZone(5, 7, ZoneType::Commercial, DensityTier::Low, 0) called once.
+//
+// This test specifically catches the bug where sub-panel button click does not
+// update m_selectedZoneType, causing terrain click to still use the default.
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, Bug2_ZoneSubPanel_ClickCommercialButton_ThenTerrain_CallsPlaceZone)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+
+    activateZoneTool();
+
+    // Step 1: Click the Commercial Low button (col=1, row=0).
+    // Sub-panel layout: x = 80 + col*(64+4), y = 64 + row*(40+4).
+    // Commercial Low: col=1 -> bx = 148, by = 64. Hit-test center: (148+32, 64+20) = (180, 84).
+    InputEvent commercialClick{};
+    commercialClick.type   = InputEvent::Type::MouseButtonDown;
+    commercialClick.button = 0;
+    commercialClick.x      = 180;
+    commercialClick.y      = 84;
+    commercialClick.physX  = 180;
+    commercialClick.physY  = 84;
+
+    // The sub-panel click must be consumed (returns true) and must NOT call
+    // pickTerrainTile (not a world click — it's a UI sub-panel click).
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _)).Times(0);
+    bool consumed = uiManager_->onEvent(commercialClick);
+    EXPECT_TRUE(consumed)
+        << "Zone sub-panel button click must be consumed (return true)";
+
+    // Step 2: Click terrain at (5,7) — now m_selectedZoneType must be Commercial.
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
+
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AtLeast(0));
+
+    // Primary assertion: placeZone must be called with ZoneType::Commercial (1), not Residential (0).
+    EXPECT_CALL(sim_, placeZone(5, 7, ZoneType::Commercial, DensityTier::Low, 0)).Times(1);
+
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+}
+
+// ---------------------------------------------------------------------------
+// Test 21 (Bug 2): ZoneSubPanel_ClickIndustrialHighButton_ThenTerrain_CallsPlaceZone
+//
+// Clicking Industrial High (col=2, row=2) then terrain must call placeZone
+// with ZoneType::Industrial and DensityTier::High.
+// Button position: bx = 80 + 2*(64+4) = 216, by = 64 + 2*(40+4) = 152.
+// Center: (216+32, 152+20) = (248, 172).
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, Bug2_ZoneSubPanel_ClickIndustrialHighButton_ThenTerrain_CallsPlaceZone)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+
+    activateZoneTool();
+
+    // Click Industrial High button (col=2, row=2).
+    InputEvent indHighClick{};
+    indHighClick.type   = InputEvent::Type::MouseButtonDown;
+    indHighClick.button = 0;
+    indHighClick.x      = 248;  // col=2: bx = 80 + 2*68 = 216; center x = 216+32 = 248
+    indHighClick.y      = 172;  // row=2: by = 64 + 2*44 = 152; center y = 152+20 = 172
+    indHighClick.physX  = 248;
+    indHighClick.physY  = 172;
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _)).Times(0);
+    bool consumed = uiManager_->onEvent(indHighClick);
+    EXPECT_TRUE(consumed)
+        << "Zone sub-panel button click must be consumed";
+
+    // Click terrain at (3,2).
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(3), SetArgReferee<3>(2), Return(true)));
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AtLeast(0));
+
+    // Primary assertion: ZoneType::Industrial (2) + DensityTier::High (2).
+    EXPECT_CALL(sim_, placeZone(3, 2, ZoneType::Industrial, DensityTier::High, 0)).Times(1);
+
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+}
+
+// ---------------------------------------------------------------------------
+// Test 22 (Bug 3): RoadTool_ToolbarClick_ActivatesRoadTool
+//
+// Regression test for Bug 3: verify the Road toolbar button (y:120-167) actually
+// sets m_activeTool = ActiveTool::Road, which is the precondition for terrain
+// placement to dispatch placeRoad.
+//
+// Sequence:
+//   1. Transition to Gameplay.
+//   2. Click Road toolbar button at (40, 140).
+//   3. Assert getActiveTool() == ActiveTool::Road.
+//   4. Simulate terrain click and assert placeRoad is called.
+//
+// This test catches the regression where the Road toolbar button fails to
+// activate the tool (e.g., wrong y-range in the toolbar dispatch block).
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, Bug3_RoadTool_ToolbarClick_ActivatesRoadTool)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+
+    goToGameplay();
+
+    // Step 1: Click Road toolbar at (40, 140) — Road y-range: 120..167.
+    uiManager_->onEvent(makeToolbarRoadClick());
+
+    // Step 2: Assert tool is now Road (verifies toolbar click was processed).
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::Road)
+        << "Road toolbar click must activate Road tool (getActiveTool() == Road)";
+
+    // Step 3: Now click terrain and verify placeRoad is dispatched.
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(4), SetArgReferee<3>(6), Return(true)));
+    EXPECT_CALL(sim_, placeRoad(4, 6, 0)).Times(1);
+
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+}
+
+// ---------------------------------------------------------------------------
+// Test 23 (Bug 3): RoadTool_TerrainMiss_DoesNotCallPlaceRoad
+//
+// When Road tool is active but pickTerrainTile returns false (sky/off-map),
+// placeRoad must NOT be called. Verifies the terrain-miss guard in Priority 7.
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, Bug3_RoadTool_TerrainMiss_DoesNotCallPlaceRoad)
+{
+    activateRoadTool();
+    ASSERT_EQ(uiManager_->getActiveTool(), ActiveTool::Road);
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(Return(false));
+
+    // placeRoad must NOT be called when no terrain hit.
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
+
+    bool consumed = uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    EXPECT_FALSE(consumed)
+        << "World-interaction must not consume event when pickTerrainTile returns false";
+}
+
+// ---------------------------------------------------------------------------
+// Test 24 (Bug 4): QueryMode_ZoneToolbarClick_SwitchesToolToZone
+//
+// Regression test for Bug 4: when Query tool is active and the inspector is
+// NOT open, clicking the Zone toolbar button must switch the active tool to Zone,
+// NOT stay in Query mode or open the inspector.
+//
+// The fix in UIManager.cpp Priority-3 (lines 350-379): the `!inRect(...)` toolbar
+// carve-out means Priority-3 is completely skipped for toolbar coordinates (40, 80).
+// pickTerrainTile is NOT called for toolbar clicks while Query is active — the event
+// falls directly to Priority-5, which processes the Zone toolbar click.
+//
+// The test verifies: after the Zone toolbar click, getActiveTool() == Zone.
+// pickTerrainTile must NOT be called for the toolbar click (carve-out prevents it).
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, Bug4_QueryMode_ZoneToolbarClick_SwitchesToolToZone)
+{
+    // Activate Query tool via toolbar.
+    activateQueryTool();
+    ASSERT_EQ(uiManager_->getActiveTool(), ActiveTool::Query)
+        << "Precondition: Query tool must be active";
+
+    // Inspector is NOT open at this point (toolbar click does not open inspector).
+
+    // The toolbar carve-out in Priority-3 (!inRect guard) skips pickTerrainTile
+    // entirely for toolbar coordinates (40, 80). pickTerrainTile must NOT be called.
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _)).Times(0);
+
+    // queryTile must NOT be called — Priority-3 is bypassed for toolbar clicks.
+    EXPECT_CALL(sim_, queryTile(_, _)).Times(0);
+
+    // Send Zone toolbar click.
+    uiManager_->onEvent(makeToolbarZoneClick());
+
+    // Primary assertion: Priority-5 handles the toolbar click, switching to Zone.
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::Zone)
+        << "Clicking Zone toolbar while in Query mode (inspector closed) must "
+           "switch active tool to Zone. "
+           "The toolbar carve-out in Priority-3 prevents pickTerrainTile from "
+           "being called for toolbar coords, so Priority-5 processes the click.";
+}
+
+// ---------------------------------------------------------------------------
+// Test 25 (Bug 4): QueryMode_InspectorOpen_ZoneToolbarClick_SwitchesToolToZone
+//
+// Variant of Bug 4: inspector IS open. In this case Priority-3 handles the
+// toolbar click via the toolbar carve-out (L302-308): the click is in the
+// toolbar bounds, so it falls through to Priority-5 which processes it.
+// After the Zone toolbar click, the inspector closes (outside click path does
+// NOT apply because the carve-out lets the toolbar click fall through) and
+// the active tool becomes Zone.
+//
+// Sequence:
+//   1. Activate Query tool.
+//   2. Click terrain -> inspector opens.
+//   3. Click Zone toolbar -> inspector closes, tool switches to Zone.
+//   4. Assert getActiveTool() == Zone.
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, Bug4_QueryMode_InspectorOpen_ZoneToolbarClick_SwitchesToolToZone)
+{
+    // Step 1: Activate Query tool.
+    activateQueryTool();
+    ASSERT_EQ(uiManager_->getActiveTool(), ActiveTool::Query);
+
+    // Step 2: Click terrain to open inspector.
+    EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+    EXPECT_CALL(renderer_, getTileScreenBounds(5, 5))
+        .WillOnce(Return(ScreenRect{}));
+    EXPECT_CALL(sim_, queryTile(5, 5))
+        .WillOnce(Return(QueryResult{}));
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    // Inspector is now open.
+
+    // Step 3: Click Zone toolbar at (40, 80).
+    // Priority-3 inspector-open path: toolbar carve-out at L302-308 lets the click
+    // fall through to Priority-5. Priority-5 processes the Zone toolbar click.
+    // NOTE: pickTerrainTile is NOT called for this click because Priority-3 with
+    // inspector open uses the inspector bounds check + carve-out, not the QueryTool
+    // open path (which requires !m_inspectorOpen).
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _)).Times(0);
+
+    uiManager_->onEvent(makeToolbarZoneClick());
+
+    // Primary assertion: tool must switch to Zone.
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::Zone)
+        << "Clicking Zone toolbar while inspector is open (Query mode) must "
+           "switch active tool to Zone";
+}
+
+// ---------------------------------------------------------------------------
+// Test 26 (Bug 5): ZoneSubPanel_ReappearsAfterExitingQueryMode
+//
+// Regression test for Bug 5: after exiting Query mode by clicking the Zone
+// toolbar button, the zone sub-panel buttons must become visible again.
+//
+// updateSubPanelVisibility() is called by the Zone toolbar handler and must
+// set setElementVisible(handle, true) on all 9 zone sub-panel buttons.
+//
+// Sequence:
+//   1. Activate Zone tool (sub-panel shows).
+//   2. Switch to Query tool (sub-panel hides).
+//   3. Click Zone toolbar (sub-panel must show again — Bug 5).
+//   4. Assert setElementVisible(handle, true) called at least 9 times in step 3.
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, Bug5_ZoneSubPanel_ReappearsAfterExitingQueryMode)
+{
+    // Destroy fixture UIManager; reconstruct with non-zero handles so that
+    // updateSubPanelVisibility() guard (handle != kInvalidUIElement) passes.
+    uiManager_.reset();
+
+    uint32_t nextHandle = 1;
+    ON_CALL(backend_, addButton(_, _, _, _, _))
+        .WillByDefault([&nextHandle](const std::string&, int, int, int, int)
+            -> UIElementHandle { return nextHandle++; });
+    ON_CALL(backend_, addStaticText(_, _, _, _, _))
+        .WillByDefault([&nextHandle](const std::string&, int, int, int, int)
+            -> UIElementHandle { return nextHandle++; });
+
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(::testing::AnyNumber());
+
+    uiManager_ = std::make_unique<UIManager>(&backend_, nullptr, &sim_, &clock_);
+    uiManager_->setRenderer(&renderer_);
+    uiManager_->setTerrainQuery(&terrain_);
+    uiManager_->setMapDimensions(10, 10);
+    uiManager_->setDemolishConfirm(false);
+
+    // Allow all setElementVisible calls during setup.
+    EXPECT_CALL(backend_, setElementVisible(_, ::testing::AnyOf(true, false)))
+        .Times(::testing::AnyNumber());
+
+    // Step 1: Activate Zone tool — sub-panel shows.
+    uiManager_->transitionToGameplay(GameMode::Sandbox);
+    uiManager_->onEvent(makeToolbarZoneClick());
+    ASSERT_EQ(uiManager_->getActiveTool(), ActiveTool::Zone);
+
+    // Step 2: Switch to Query tool — sub-panel hides.
+    uiManager_->onEvent(makeToolbarQueryClick());
+    ASSERT_EQ(uiManager_->getActiveTool(), ActiveTool::Query);
+
+    // Step 3: Click Zone toolbar to return to Zone mode.
+    // The toolbar carve-out in Priority-3 (!inRect guard) skips Priority-3
+    // entirely for toolbar coordinates (40, 80), so pickTerrainTile is NOT
+    // called. Priority-5 processes the toolbar click directly.
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _)).Times(0);
+
+    // Count setElementVisible(_, true) triggered by updateSubPanelVisibility()
+    // when Zone is re-activated.
+    int visibleTrueCount = 0;
+    EXPECT_CALL(backend_, setElementVisible(_, true))
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Invoke(
+            [&visibleTrueCount](UIElementHandle, bool) {
+                ++visibleTrueCount;
+            }));
+
+    uiManager_->onEvent(makeToolbarZoneClick());
+
+    // Assert: tool switched back to Zone.
+    // The toolbar carve-out ensures Priority-3 is skipped for toolbar clicks,
+    // so Priority-5 handles the Zone toolbar click and switches the tool.
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::Zone)
+        << "Zone toolbar click must switch tool from Query to Zone. "
+           "Priority-3 toolbar carve-out prevents pickTerrainTile from being "
+           "called for toolbar coordinates; Priority-5 processes the click.";
+
+    // Assert: at least 9 zone sub-panel buttons made visible (Bug 5 regression).
+    EXPECT_GE(visibleTrueCount, 9)
+        << "After switching from Query to Zone, zone sub-panel must re-appear "
+           "(setElementVisible called with true for all 9 zone buttons). "
+           "Bug 5: zone sub-panel does NOT re-appear when switching back from Query mode.";
+}
+
+// ---------------------------------------------------------------------------
+// Test 27 (Bug 5): UtilitiesSubPanel_ReappearsAfterExitingQueryMode
+//
+// Analogous to Test 26 but for the Utilities sub-panel: after exiting Query
+// mode by clicking the Utilities toolbar button, all 4 utility sub-panel
+// buttons must become visible.
+//
+// Uses the same non-zero handle setup and documents the Bug 4 dependency.
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, Bug5_UtilitiesSubPanel_ReappearsAfterExitingQueryMode)
+{
+    uiManager_.reset();
+
+    uint32_t nextHandle = 1;
+    ON_CALL(backend_, addButton(_, _, _, _, _))
+        .WillByDefault([&nextHandle](const std::string&, int, int, int, int)
+            -> UIElementHandle { return nextHandle++; });
+    ON_CALL(backend_, addStaticText(_, _, _, _, _))
+        .WillByDefault([&nextHandle](const std::string&, int, int, int, int)
+            -> UIElementHandle { return nextHandle++; });
+
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(::testing::AnyNumber());
+
+    uiManager_ = std::make_unique<UIManager>(&backend_, nullptr, &sim_, &clock_);
+    uiManager_->setRenderer(&renderer_);
+    uiManager_->setTerrainQuery(&terrain_);
+    uiManager_->setMapDimensions(10, 10);
+    uiManager_->setDemolishConfirm(false);
+
+    EXPECT_CALL(backend_, setElementVisible(_, ::testing::AnyOf(true, false)))
+        .Times(::testing::AnyNumber());
+
+    // Step 1: Activate Utilities tool — sub-panel shows.
+    uiManager_->transitionToGameplay(GameMode::Sandbox);
+    uiManager_->onEvent(makeToolbarUtilitiesClick());
+    ASSERT_EQ(uiManager_->getActiveTool(), ActiveTool::Utilities);
+
+    // Step 2: Switch to Query tool — sub-panel hides.
+    uiManager_->onEvent(makeToolbarQueryClick());
+    ASSERT_EQ(uiManager_->getActiveTool(), ActiveTool::Query);
+
+    // Step 3: Click Utilities toolbar to return to Utilities mode.
+    // The toolbar carve-out in Priority-3 (!inRect guard) skips Priority-3
+    // entirely for toolbar coordinates (40, 200), so pickTerrainTile is NOT
+    // called. Priority-5 processes the toolbar click directly.
+    InputEvent utilToolbarClick{};
+    utilToolbarClick.type   = InputEvent::Type::MouseButtonDown;
+    utilToolbarClick.button = 0;
+    utilToolbarClick.x      = 40;
+    utilToolbarClick.y      = 200;  // Utilities y-range: 176..223
+    utilToolbarClick.physX  = 40;
+    utilToolbarClick.physY  = 200;
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _)).Times(0);
+
+    int visibleTrueCount = 0;
+    EXPECT_CALL(backend_, setElementVisible(_, true))
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Invoke(
+            [&visibleTrueCount](UIElementHandle, bool) {
+                ++visibleTrueCount;
+            }));
+
+    uiManager_->onEvent(utilToolbarClick);
+
+    // Assert Utilities tool activated.
+    // The toolbar carve-out ensures Priority-3 is skipped for toolbar clicks,
+    // so Priority-5 handles the Utilities toolbar click and switches the tool.
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::Utilities)
+        << "Utilities toolbar click must switch tool from Query to Utilities. "
+           "Priority-3 toolbar carve-out prevents pickTerrainTile from being "
+           "called for toolbar coordinates; Priority-5 processes the click.";
+
+    // Assert: at least 4 utility sub-panel buttons made visible (Bug 5 regression).
+    EXPECT_GE(visibleTrueCount, 4)
+        << "After switching from Query to Utilities, utility sub-panel must re-appear "
+           "(setElementVisible called with true for all 4 utility buttons). "
+           "Bug 5 (Utilities variant): utility sub-panel does NOT re-appear after "
+           "exiting Query mode.";
+}
+
+// ---------------------------------------------------------------------------
+// Test 28 (Bug 4, carve-out verification): QueryMode_ToolbarCarveout_PreventsPriorityThreeInterference
+//
+// Verifies that the Priority-3 toolbar carve-out (!inRect guard) works correctly:
+// a Zone toolbar click while Query is active bypasses Priority-3 entirely.
+//
+// Specifically:
+//   - pickTerrainTile is NOT called for toolbar coordinates (40, 80).
+//   - queryTile is NOT called (Priority-3 is skipped).
+//   - getActiveTool() == Zone (Priority-5 handles the toolbar click).
+//   - The active tool switches even when Query mode was previously active.
+//
+// This complements Test 24 by additionally verifying each sub-check:
+// no terrain ray-cast, no query call, and correct tool state.
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, Bug4_QueryMode_ToolbarCarveout_PreventsPriorityThreeInterference)
+{
+    // Activate Query tool — Priority-3 would fire for any world LMB without carve-out.
+    activateQueryTool();
+    ASSERT_EQ(uiManager_->getActiveTool(), ActiveTool::Query)
+        << "Precondition: Query tool must be active";
+
+    // Inspector is NOT open (toolbar click does not open inspector).
+
+    // The toolbar carve-out (!inRect guard) in Priority-3 must prevent pickTerrainTile
+    // from being called for toolbar coordinates (40, 80). Verify with Times(0).
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _)).Times(0);
+
+    // queryTile must NOT be called — Priority-3 is completely bypassed.
+    EXPECT_CALL(sim_, queryTile(_, _)).Times(0);
+
+    // getTileScreenBounds must NOT be called — Priority-3 bypass prevents inspector open.
+    EXPECT_CALL(renderer_, getTileScreenBounds(_, _)).Times(0);
+
+    // Send Zone toolbar click at (40, 80) — inside toolbar bounds.
+    uiManager_->onEvent(makeToolbarZoneClick());
+
+    // Primary assertion: Priority-5 handled the toolbar click; tool is now Zone.
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::Zone)
+        << "Zone toolbar click while Query is active must switch tool to Zone. "
+           "Priority-3 toolbar carve-out prevents ray-cast interference; "
+           "Priority-5 processes the toolbar click and activates Zone tool.";
+}
