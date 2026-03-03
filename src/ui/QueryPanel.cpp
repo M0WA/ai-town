@@ -116,13 +116,15 @@ InspectorPanel::InspectorPanel(IUIBackend* backend, ICitySimulation* sim)
 
     constexpr int lineH = 20;
     // Create elements at origin — we reposition them in show()
-    m_panelBg          = m_backend->addStaticText("",     0, 0, kPanelW, kPanelH);
-    m_coordsLabel      = m_backend->addStaticText("Tile", 4, 4, kPanelW - 8, lineH);
-    m_zoneLabel        = m_backend->addStaticText("Zone", 4, 24, kPanelW - 8, lineH);
-    m_popLabel         = m_backend->addStaticText("Pop",  4, 44, kPanelW - 8, lineH);
-    m_coverageLabel    = m_backend->addStaticText("Svc",  4, 64, kPanelW - 8, lineH);
-    m_desirabilityLabel= m_backend->addStaticText("Des",  4, 84, kPanelW - 8, lineH);
-    m_demandLabel      = m_backend->addStaticText("Dem",  4, 104,kPanelW - 8, lineH);
+    m_panelBg          = m_backend->addStaticText("",     0, 0,   kPanelW, kPanelH);
+    m_coordsLabel      = m_backend->addStaticText("Tile", 4, 4,   kPanelW - 8, lineH);
+    m_zoneLabel        = m_backend->addStaticText("Zone", 4, 24,  kPanelW - 8, lineH);
+    m_popLabel         = m_backend->addStaticText("Pop",  4, 44,  kPanelW - 8, lineH);
+    m_coverageLabel    = m_backend->addStaticText("Svc",  4, 64,  kPanelW - 8, lineH);
+    m_desirabilityLabel= m_backend->addStaticText("Des",  4, 84,  kPanelW - 8, lineH);
+    m_demandLabel      = m_backend->addStaticText("Dem",  4, 104, kPanelW - 8, lineH);
+    // Staleness line — shown at bottom of panel only when data is > ~1 s old.
+    m_updatedLabel     = m_backend->addStaticText("",     4, 130, kPanelW - 8, lineH);
 
     hide();
 }
@@ -141,10 +143,16 @@ void InspectorPanel::show(int tileX, int tileZ, int clickX, int clickY) {
     m_panelX = pos.x;
     m_panelY = pos.y;
 
+    // Reset refresh counters so the very first draw() call triggers an immediate
+    // economy refresh — prevents a blank-data window while waiting for the cadence.
+    m_drawFrame         = 0;
+    m_lastEconomyFrame  = -kEconomyRefreshFrames;
+    m_lastTrafficFrame  = 0;
+
     m_visible = true;
     if (!m_backend) return;
 
-    // Show all elements
+    // Show data elements; staleness label starts hidden (data not yet stale).
     m_backend->setElementVisible(m_panelBg,           true);
     m_backend->setElementVisible(m_coordsLabel,       true);
     m_backend->setElementVisible(m_zoneLabel,         true);
@@ -152,6 +160,7 @@ void InspectorPanel::show(int tileX, int tileZ, int clickX, int clickY) {
     m_backend->setElementVisible(m_coverageLabel,     true);
     m_backend->setElementVisible(m_desirabilityLabel, true);
     m_backend->setElementVisible(m_demandLabel,       true);
+    m_backend->setElementVisible(m_updatedLabel,      false);
 }
 
 void InspectorPanel::show() {
@@ -189,6 +198,7 @@ void InspectorPanel::populate(const QueryResult& result, int tileX, int tileZ,
         if (m_coverageLabel != kInvalidUIElement)     { m_backend->removeElement(m_coverageLabel);     m_coverageLabel = kInvalidUIElement; }
         if (m_desirabilityLabel != kInvalidUIElement) { m_backend->removeElement(m_desirabilityLabel); m_desirabilityLabel = kInvalidUIElement; }
         if (m_demandLabel != kInvalidUIElement)       { m_backend->removeElement(m_demandLabel);       m_demandLabel = kInvalidUIElement; }
+        if (m_updatedLabel != kInvalidUIElement)      { m_backend->removeElement(m_updatedLabel);      m_updatedLabel = kInvalidUIElement; }
 
         constexpr int lineH = 20;
         int bx = pos.x;
@@ -201,7 +211,16 @@ void InspectorPanel::populate(const QueryResult& result, int tileX, int tileZ,
         m_coverageLabel    = m_backend->addStaticText("Svc",  bx + 4,    by + 64,    kPanelW - 8, lineH);
         m_desirabilityLabel= m_backend->addStaticText("Des",  bx + 4,    by + 84,    kPanelW - 8, lineH);
         m_demandLabel      = m_backend->addStaticText("Dem",  bx + 4,    by + 104,   kPanelW - 8, lineH);
+        // Staleness label — hidden until economy data is > ~1 s old.
+        m_updatedLabel     = m_backend->addStaticText("",     bx + 4,    by + 130,   kPanelW - 8, lineH);
+        m_backend->setElementVisible(m_updatedLabel, false);
     }
+
+    // Reset refresh counters — populate() fills all fields immediately, so the
+    // next draw() refresh is not needed until kEconomyRefreshFrames frames later.
+    m_drawFrame        = 0;
+    m_lastEconomyFrame = 0;
+    m_lastTrafficFrame = 0;
 
     m_visible = true;
 
@@ -257,54 +276,98 @@ void InspectorPanel::hide() {
     m_backend->setElementVisible(m_coverageLabel,     false);
     m_backend->setElementVisible(m_desirabilityLabel, false);
     m_backend->setElementVisible(m_demandLabel,       false);
+    m_backend->setElementVisible(m_updatedLabel,      false);
 }
 
 // ---------------------------------------------------------------------------
-// draw — refresh panel data from simulation
+// draw — refresh panel data from simulation at the specified cadences.
+//
+// Economy/service fields (zone type, population, coverage, desirability,
+// demand): polled once per budget tick, approximated here as every
+// kEconomyRefreshFrames draw() calls (~2 s at 60 FPS).
+//
+// Traffic fields (road occupancy, speed, congestion): every kTrafficRefreshFrames
+// draw() calls (10 frames, ~167 ms at 60 FPS). Phase 9b shows only zone data;
+// the traffic counter machinery is wired here for the future road-tile path.
+//
+// "Updated N seconds ago" staleness label: shown at the bottom of the panel
+// when economy data is > kStalenessFrames frames old (~1 s at 60 FPS) — i.e.,
+// while the player is waiting for the next budget-tick refresh.
 // ---------------------------------------------------------------------------
 void InspectorPanel::draw() {
     if (!m_visible || !m_backend || !m_sim) return;
 
-    QueryResult qr = m_sim->queryTile(m_queryTileX, m_queryTileZ);
+    ++m_drawFrame;
 
-    // Coordinates
-    std::string coordStr = "Tile: (" + std::to_string(qr.tileX) + ", "
-                           + std::to_string(qr.tileZ) + ")";
-    m_backend->setElementText(m_coordsLabel, coordStr);
+    // ------------------------------------------------------------------
+    // Economy/service refresh — once per budget tick (~kEconomyRefreshFrames)
+    // ------------------------------------------------------------------
+    if (m_drawFrame - m_lastEconomyFrame >= kEconomyRefreshFrames) {
+        m_lastEconomyFrame = m_drawFrame;
 
-    if (qr.isZoned) {
-        // Zone type + density
-        std::string zoneStr = std::string(zoneTypeName(qr.zoneType)) + " ("
-                              + densityName(qr.densityTier) + ")";
-        m_backend->setElementText(m_zoneLabel, zoneStr);
+        QueryResult qr = m_sim->queryTile(m_queryTileX, m_queryTileZ);
 
-        // Population
-        m_backend->setElementText(m_popLabel, "Pop: " + std::to_string(qr.population));
+        std::string coordStr = "Tile: (" + std::to_string(qr.tileX) + ", "
+                               + std::to_string(qr.tileZ) + ")";
+        m_backend->setElementText(m_coordsLabel, coordStr);
 
-        // Service coverage
-        char covBuf[128];
-        std::snprintf(covBuf, sizeof(covBuf), "Fire:%.0f%% Pol:%.0f%% Pwr:%.0f%% Wtr:%.0f%%",
-                      qr.coverage.fire >= 0.0f   ? qr.coverage.fire   : 0.0f,
-                      qr.coverage.police >= 0.0f ? qr.coverage.police : 0.0f,
-                      qr.coverage.power >= 0.0f  ? qr.coverage.power  : 0.0f,
-                      qr.coverage.water >= 0.0f  ? qr.coverage.water  : 0.0f);
-        m_backend->setElementText(m_coverageLabel, covBuf);
+        if (qr.isZoned) {
+            std::string zoneStr = std::string(zoneTypeName(qr.zoneType)) + " ("
+                                  + densityName(qr.densityTier) + ")";
+            m_backend->setElementText(m_zoneLabel, zoneStr);
+            m_backend->setElementText(m_popLabel, "Pop: " + std::to_string(qr.population));
 
-        // Desirability
-        char desBuf[32];
-        std::snprintf(desBuf, sizeof(desBuf), "Desirability: %.0f", qr.desirability);
-        m_backend->setElementText(m_desirabilityLabel, desBuf);
+            char covBuf[128];
+            std::snprintf(covBuf, sizeof(covBuf),
+                          "Fire:%.0f%% Pol:%.0f%% Pwr:%.0f%% Wtr:%.0f%%",
+                          qr.coverage.fire   >= 0.0f ? qr.coverage.fire   : 0.0f,
+                          qr.coverage.police >= 0.0f ? qr.coverage.police : 0.0f,
+                          qr.coverage.power  >= 0.0f ? qr.coverage.power  : 0.0f,
+                          qr.coverage.water  >= 0.0f ? qr.coverage.water  : 0.0f);
+            m_backend->setElementText(m_coverageLabel, covBuf);
 
-        // Demand pressure (inverse semantics: 0 = satisfied, 100 = zero demand)
-        char demBuf[32];
-        std::snprintf(demBuf, sizeof(demBuf), "Demand: %.0f%%", qr.demandPressurePct);
-        m_backend->setElementText(m_demandLabel, demBuf);
-    } else {
-        m_backend->setElementText(m_zoneLabel, "Unzoned");
-        m_backend->setElementText(m_popLabel, "");
-        m_backend->setElementText(m_coverageLabel, "");
-        m_backend->setElementText(m_desirabilityLabel, "");
-        m_backend->setElementText(m_demandLabel, "");
+            char desBuf[32];
+            std::snprintf(desBuf, sizeof(desBuf), "Desirability: %.0f", qr.desirability);
+            m_backend->setElementText(m_desirabilityLabel, desBuf);
+
+            char demBuf[32];
+            std::snprintf(demBuf, sizeof(demBuf), "Demand: %.0f%%", qr.demandPressurePct);
+            m_backend->setElementText(m_demandLabel, demBuf);
+        } else {
+            m_backend->setElementText(m_zoneLabel, "Unzoned");
+            m_backend->setElementText(m_popLabel, "");
+            m_backend->setElementText(m_coverageLabel, "");
+            m_backend->setElementText(m_desirabilityLabel, "");
+            m_backend->setElementText(m_demandLabel, "");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Traffic refresh — every kTrafficRefreshFrames (~10 simulation frames)
+    // Phase 9b: zone data only — no traffic-specific fields yet.
+    // Frame counter maintained for the future road-tile inspection path.
+    // ------------------------------------------------------------------
+    if (m_drawFrame - m_lastTrafficFrame >= kTrafficRefreshFrames) {
+        m_lastTrafficFrame = m_drawFrame;
+        // Phase 9b: no traffic-specific fields — no-op.
+    }
+
+    // ------------------------------------------------------------------
+    // "Updated N seconds ago" staleness label
+    // Shown when economy data has not been refreshed for > kStalenessFrames
+    // draw() calls (~1 s at 60 FPS), signalling that the player is viewing
+    // data from a previous budget tick.
+    // ------------------------------------------------------------------
+    if (m_updatedLabel != kInvalidUIElement) {
+        int framesSince = m_drawFrame - m_lastEconomyFrame;
+        if (framesSince > kStalenessFrames) {
+            int secAgo = framesSince / 60;
+            std::string s = "Updated " + std::to_string(secAgo) + "s ago";
+            m_backend->setElementText(m_updatedLabel, s);
+            m_backend->setElementVisible(m_updatedLabel, true);
+        } else {
+            m_backend->setElementVisible(m_updatedLabel, false);
+        }
     }
 }
 
