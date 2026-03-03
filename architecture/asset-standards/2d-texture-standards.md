@@ -165,13 +165,13 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
   | `_sp` | Specular packed (multi-channel roughness/metallic/AO). Upload path: **linear pool** (standard `IVideoDriver::getTexture()`) — packed roughness/metallic/AO data is linear; sRGB decode would corrupt channel values. |
   | `_lm` | Lightmap bake (UV channel 1) |
   | `_billboard` | Billboard imposter atlas (1024×128 DXT5 sRGB, 1×8 horizontal strip) |
-  | `_ui` | UI sprite sheet atlas (2048×2048 RGBA8 UNORM, uncompressed, no mip chain). **Canonical base filename: `hud_sprites_ui`** (producing `hud_sprites_ui.png` source and `hud_sprites_ui.dds` runtime asset). Upload path: **raw GL `glTexImage2D` with `GL_RGBA8` internal format**; `IVideoDriver::getTexture()` is prohibited (Irrlicht's getTexture() cannot disable mip generation, which would generate a ~21 MB mip chain violating the 16 MB budget). Must NOT use the sRGB raw-GL path. See line 206 for full upload specification. |
+  | `_ui` | UI sprite sheet atlas (2048×2048 RGBA8 UNORM, uncompressed, no mip chain). **Canonical base filename: `hud_sprites_ui`** (authoring source: `hud_sprites_ui.dds` produced by `nvcompress -rgba -nomips`; runtime asset: `hud_sprites_ui.png` converted from the DDS for loading via `IVideoDriver::getTexture()`). Upload path: **`IVideoDriver::getTexture()`**; `IrrlichtUIBackend` MUST call `m_driver->setTextureCreationFlag(ETCF_CREATE_MIP_MAPS, false)` before calling `getTexture()` to prevent Irrlicht from generating a ~21 MB mip chain that would violate the 16 MB UI texture budget. The mip-generation flag MUST be re-enabled after loading (`ETCF_CREATE_MIP_MAPS, true`) so that subsequent `getTexture()` calls for other textures are unaffected. Must NOT use the sRGB upload path. |
 
   All suffixes are lowercase. No other suffix patterns are valid. `validate_assets.py` must reject any DDS file whose name does not end with one of these seven suffixes (`_d`, `_n`, `_s`, `_sp`, `_lm`, `_billboard`, `_ui`). The `_billboard` suffix applies exclusively to LOD2 imposter atlases — small building and prop assets that ship a `_billboard.dds` must NOT also ship a `_lod2.b3d` mesh.
 
   **Road texture suffix exception**: The two V1 road textures (`road_asphalt_tileable.dds` and `road_markings_atlas.dds`) are the sole DDS files in the V1 asset set that carry no recognized suffix. These files MUST be validated by canonical full-filename match in `validate_assets.py`, not by suffix. Any DDS file not matching these two canonical names AND not ending with one of the seven recognized suffixes MUST be rejected. This exception must be explicitly coded as an allowlist in `validate_assets.py` — the two filenames are not considered to 'have no suffix for historical reasons'; they are deliberate exception entries.
 
-  **UI sprite sheet canonical filename enforcement**: The `_ui` suffix has exactly one V1 instance: `hud_sprites_ui.dds` (runtime) produced from `hud_sprites_ui.png` (source). The Phase 9 export step (`tools/export_textures.py`) and `validate_assets.py` MUST enforce this canonical filename by exact filename match — a `_ui`-suffixed DDS file with any other base name (e.g. `ui_atlas_ui.dds`) MUST be rejected. This enforcement is separate from suffix validation: the file must end with `_ui` AND the full filename must be exactly `hud_sprites_ui.dds`.
+  **UI sprite sheet canonical filename enforcement**: The `_ui` suffix has exactly one V1 instance: `hud_sprites_ui` (authoring DDS source: `hud_sprites_ui.dds`; runtime PNG: `hud_sprites_ui.png`). The Phase 9 export step (`tools/export_textures.py`) and `validate_assets.py` MUST enforce this canonical base filename — a `_ui`-suffixed DDS file with any other base name (e.g. `ui_atlas_ui.dds`) MUST be rejected. This enforcement is separate from suffix validation: the DDS source file must end with `_ui` AND the full DDS filename must be exactly `hud_sprites_ui.dds`; the shipped runtime PNG must be exactly `hud_sprites_ui.png`.
 
 **Upload path determination**: suffix `_d` alone does NOT determine the upload path. Diffuse textures that contain photographic color must use the sRGB raw-GL path. Diffuse textures that encode stylised data (e.g. vehicle sprite atlas roof swatches) must use the linear path. The `TextureCache` upload path is determined by the texture category, not the suffix alone. See `architecture/graphics-architecture/texture-cache.md` for the dispatch table.
 
@@ -420,11 +420,26 @@ Total texture VRAM for all simultaneously-resident assets must not exceed **1.0 
 **Draw call ceiling**: ≤2,000 draw calls per frame (all LODs combined). Buildings sharing the same atlas texture and material can be batched or instanced into a single draw call. This drives the atlas-first design requirement.
 **Unique mesh variant cap**: ≤50 unique LOD0/LOD1/LOD2 building mesh variants simultaneously loaded. Building types exceeding 50 unique meshes must share atlas space and be explicitly approved.
 
-### UI Sprite Sheet Cell Layout (`hud_sprites_ui.dds`)
+### UI Sprite Sheet Cell Layout (`hud_sprites_ui.dds` → `hud_sprites_ui.png`)
 
-**Format recap**: 2048×2048 RGBA8 UNORM, no mip chain (`GL_TEXTURE_MAX_LEVEL = 0`), uploaded via
-raw `glTexImage2D` with `GL_RGBA8` / `GL_RGBA` / `GL_UNSIGNED_BYTE`. Authored with
-`nvcompress -rgba -nomips`. Full upload spec in the UV & Atlas Strategy section above.
+**Authoring format**: `hud_sprites_ui.dds` — 2048×2048 RGBA8 UNORM, no mip chain, authored
+with `nvcompress -rgba -nomips`. This is the source/authoring format; it is converted to PNG
+before shipping (see Runtime asset path below). Linear color space — do NOT author in sRGB.
+
+**Runtime format**: `hud_sprites_ui.png` — the DDS converted to PNG for loading via Irrlicht's
+`IVideoDriver::getTexture()`. `IrrlichtUIBackend` stores the result as `irr::video::ITexture*`
+and uses `IGUIButton::setImage()` for per-button icon display.
+
+**DDS→PNG conversion**: Convert the authored `hud_sprites_ui.dds` to `hud_sprites_ui.png`
+using any standard image-processing tool. Acceptable tools: GIMP (File → Export As PNG),
+ImageMagick (`convert hud_sprites_ui.dds hud_sprites_ui.png`), or any tool that preserves
+RGBA8 pixels without colour-space conversion. Do NOT apply gamma correction or sRGB encoding
+during conversion — the source file is in linear colour space and the PNG must remain in
+linear colour space. Verify that the output PNG is 2048×2048 RGBA8 with no mip chain before
+committing.
+
+**Format recap**: 2048×2048 RGBA8, no mip chain, linear color space. Full cell layout in the
+sections below.
 
 **Cell grid**: 32×32 uniform cells at **64×64 px each** (2048 / 64 = 32 columns; 32 rows).
 No inter-cell padding is required — mipmapping is disabled for the UI sprite sheet, so
@@ -441,12 +456,11 @@ is encoded as `col + row * 32`. This packs both coordinates into a single intege
 `IrrlichtUIBackend` decodes as `col = handle % 32`, `row = handle / 32`. The encoding
 produces handles 0–1023 for the 32×32 grid. No handle value exceeds 1023 in V1.
 
-**Runtime asset path (authoritative)**: `assets/textures/ui/hud_sprites_ui.dds`
+**Runtime asset path (authoritative)**: `assets/textures/ui/hud_sprites_ui.png`
 
-`IrrlichtUIBackend` loads this file internally during its own initialization (before any
-`UIManager` panel code runs) and binds the resulting OpenGL texture to its UI texture unit.
+`IrrlichtUIBackend` loads this file internally via `m_driver->getTexture("assets/textures/ui/hud_sprites_ui.png")` during its own initialization (before any `UIManager` panel code runs).
 This is an `IrrlichtUIBackend`-internal operation — `UIManager` does NOT call
-`IUIBackend::loadTexture("assets/textures/ui/hud_sprites_ui.dds")` and does NOT store a
+`IUIBackend::loadTexture("assets/textures/ui/hud_sprites_ui.png")` and does NOT store a
 sprite-sheet texture handle. `UIManager` only calls `setElementImage(buttonHandle, kSpriteXxx)`,
 where `kSpriteXxx` is a `constexpr uint32_t` cell-index from `src/ui/hud_sprite_ids.h`.
 `IrrlichtUIBackend::setElementImage()` decodes the second argument as `col = handle % 32;
@@ -653,13 +667,13 @@ commit.
 Same design as the corresponding toolbar active-state icon but at 32×32 px output size —
 use the same master artwork, scaled down for this position.
 
-**sRGB authoring**: All icons in `hud_sprites_ui.dds` must be authored in **linear color space**
-and exported as a linear RGBA PNG before running `nvcompress -rgba -nomips`. The UI sprite
-sheet uses `GL_RGBA8` linear upload — NOT the sRGB raw-GL path. Icons authored in sRGB and
-left uncorrected will appear over-darkened at runtime (the engine will not gamma-expand them
-since the `glTexImage2D` upload path does not use `GL_SRGB8_ALPHA8`). The correct authoring
-workflow in Photoshop or Krita: work in the file's native color space, disable color-space
-conversion on PNG export, and ensure the DCC tool's working color space is set to linear
+**sRGB authoring**: All icons must be authored in **linear color space** and exported as a
+linear RGBA PNG. The shipped runtime file is `hud_sprites_ui.png` (PNG, linear RGBA8), loaded
+by Irrlicht's `getTexture()`. The intermediate DDS source (`hud_sprites_ui.dds`) is produced by
+running `nvcompress -rgba -nomips` on the linear PNG export. Icons authored in sRGB and left
+uncorrected will appear over-darkened at runtime. The correct authoring workflow in Photoshop
+or Krita: work in the file's native color space, disable color-space conversion on PNG export,
+and ensure the DCC tool's working color space is set to linear
 (no ICC profile embed needed for the UI sprite sheet — the upload path assumes linear).
 
 **`hud_sprite_ids.h` header stub for Phase 9b** (required before Phase 9b implementation

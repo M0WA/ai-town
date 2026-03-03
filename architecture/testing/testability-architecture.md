@@ -780,6 +780,104 @@ public:
 
 All Phase 7 audio tests carry label `unit` and run without a display device. CTest filter for all Phase 7 audio tests: `-R "DuckStateMachineTest|OcclusionSmoothingTest|AudioThreadTest|OggHeaderValidationTest"`.
 
+**Phase 10 `audio_tests` canonical test names** — the following canonical names are mandated for the Phase 10 audio unit tests added via `target_sources(audio_tests ...)`. CTest `-R` filters reference these names exactly; name drift causes filter expressions to silently match nothing.
+
+| Test Suite | Test Case | Source File |
+|---|---|---|
+| `CrossfadeTest` | `Crossfade_InterruptedFormula_NoDomainErrorAtBoundary` | `tests/audio/crossfade_interrupted_formula_test.cpp` |
+| `StingerTest` | `StingerMilestone_OnlyAtCityRatingTransition_NotRawPopulation` | `tests/audio/stinger_milestone_test.cpp` |
+| `AudioStreamTest` | `AudioStream_BarBoundary_UsesConsistentBuffersQueuedPerWake` | `tests/audio/audio_stream_bar_boundary_test.cpp` |
+| `AudioStreamTest` | `AudioStream_BarBoundary_StreamStart_NoFalseFire` | `tests/audio/audio_stream_bar_boundary_test.cpp` |
+| `NotificationSFXTest` | `NotificationSFX_EFXBypass_DirectFilterSetToNull` | `tests/audio/notification_sfx_efx_bypass_test.cpp` |
+
+All Phase 10 audio tests carry label `unit` and run without a display device or real audio device (headless CI via `IAlcFunctions` seam and `MockAudioSystem`). CTest filter for all Phase 10 audio tests: `-R "CrossfadeTest|StingerTest|AudioStreamTest|NotificationSFXTest"`.
+
+**`StingerMilestone_OnlyAtCityRatingTransition_NotRawPopulation` test contract** — this test
+verifies that `UIManager::onCityRatingTransition()` calls `m_audio->triggerStinger(StingerType::MILESTONE)` at City Rating tier transitions and does NOT call it at raw population milestones that do not coincide with a tier transition.
+
+**Fixture**: `StrictMock<MockAudioSystem>` injected into `UIManager`. The test directly calls
+`UIManager::onCityRatingTransition(CityRating::TOWN)` (or equivalent) to trigger the tier
+transition event; it also directly calls (or simulates) a population update reaching 100K without
+a City Rating transition to verify no stinger fires for raw population milestones. No real
+`CitySimulation` instance is required — the callback is invoked directly on `UIManager`.
+
+**Test assertions**:
+
+1. `EXPECT_CALL(audio, triggerStinger(StingerType::MILESTONE)).Times(1)` — fires at Village→Town at 1K population (City Rating transition).
+2. `EXPECT_CALL(audio, triggerStinger(_)).Times(0)` — population reaches 100K but no City Rating transition occurs; no stinger fires.
+
+**Mock policy**: `StrictMock` (unit test with exact call-count expectations on `triggerStinger`).
+
+**Source file**: `tests/audio/stinger_milestone_test.cpp`
+
+**CTest filter**: `-R StingerMilestone_OnlyAtCityRatingTransition_NotRawPopulation`
+
+**`AudioStream_BarBoundary_*` test isolation note** — the two `AudioStreamTest` cases test the
+bar-boundary formula in isolation. The `AL_BUFFERS_QUEUED` read-once-per-wake ordering and the
+`computeSamplesPlayed()` / `computeNextBarBoundary()` formula are extracted to testable static
+helper functions (or non-virtual members testable via a friend fixture). The `IAlcFunctions` seam
+is used to mock `alGetSourcei(AL_BUFFERS_QUEUED)` return values, exercising the formula without
+a real audio device. Neither test constructs an audio thread or streaming loop.
+
+**`NotificationSFX_EFXBypass_DirectFilterSetToNull` test contract** — this test verifies that all
+11 EFX-bypassed SFX assets (10 non-positional + 1 positional exception) have
+`alSourcei(src, AL_DIRECT_FILTER, AL_FILTER_NULL)` called on the acquired OpenAL source before
+playback, and that the 2 positional alert SFX are explicitly excluded from the bypass.
+
+**EFX bypass list (10 non-positional assets — bypass REQUIRED)**:
+
+- `ui_click`
+- `ui_toast`
+- `ui_menu_open`
+- `ui_menu_close`
+- `sfx_power_out`
+- `sfx_water_out`
+- `sfx_budget_warn`
+- `sfx_loan_issued`
+- `sfx_zone_upgrade`
+- `sfx_service_degrade`
+
+**EFX bypass positional exception (1 positional asset — bypass REQUIRED despite world-space position)**:
+
+- `sfx_earthworks` — mono positional (`AL_SOURCE_RELATIVE = AL_FALSE`, world-space source at tile
+  centroid), but `AL_DIRECT_FILTER: AL_FILTER_NULL` is required because construction occurs on
+  open, unoccluded tiles (design choice per `v1-audio-asset-manifest.md`). `AL_SOURCE_RELATIVE`
+  must NOT be changed to `AL_TRUE` — the sound remains world-space positional.
+
+**EFX bypass exclusion list (2 positional alert assets — bypass MUST NOT be applied)**:
+
+- `sfx_fire_alert` — mono positional, CRITICAL priority; benefits from EFX occlusion at building
+  location; `AL_DIRECT_FILTER` must NOT be set to `AL_FILTER_NULL`.
+- `sfx_police_alert` — mono positional, CRITICAL priority; same rationale as `sfx_fire_alert`.
+
+**Fixture and playback path**: The test uses a minimal real `AudioSystem` instance constructed
+with a headless ALC context (`EDT_NULL` / null OpenAL device) and a `MockAlcFunctions` (via
+`IAlcFunctions` seam) that captures all `alSourcei(src, AL_DIRECT_FILTER, ...)` calls. To drive
+the playback path for each SFX asset, the test calls `AudioSystem::playUISound(SfxId)` for UI
+sounds, `AudioSystem::playNotificationSound(SfxId)` for notification-category SFX, and
+`AudioSystem::playPositionalSound(SFX_EARTHWORKS, position)` for `sfx_earthworks`. The captured
+calls are checked against the bypass list after each play invocation.
+
+**Test assertions**:
+
+1. For each of the 10 non-positional assets in the EFX bypass list: verify that
+   `alSourcei(src, AL_DIRECT_FILTER, AL_FILTER_NULL)` is called on the acquired source before
+   `alSourcePlay()`. The test injects a mock or spy on the AL function table (via the
+   `IAlcFunctions` seam or equivalent AL-function injection) to capture `alSourcei` calls.
+2. For `sfx_earthworks` (positional exception): verify that `alSourcei(src, AL_DIRECT_FILTER,
+   AL_FILTER_NULL)` is called before `alSourcePlay()`, and that `AL_SOURCE_RELATIVE` is NOT set
+   to `AL_TRUE` (the source must remain world-space positional).
+3. For `sfx_fire_alert` and `sfx_police_alert`: verify that `alSourcei(src, AL_DIRECT_FILTER,
+   AL_FILTER_NULL)` is NOT called on their acquired sources — positional sounds must not bypass
+   EFX occlusion.
+
+**Mock policy**: `NiceMock` for `MockAudioSystem` (this is a property/integration test that drives
+the audio playback path, not a unit test with strict call-count expectations on unrelated methods).
+
+**Source file**: `tests/audio/notification_sfx_efx_bypass_test.cpp`
+
+**CTest filter**: `-R NotificationSFX_EFXBypass_DirectFilterSetToNull`
+
 `IRenderer` uses opaque `TextureHandle` (uint32_t) instead of `ITexture*` — the same pattern as `IUIBackend` with `UIElementHandle`. This fully severs the compile-time dependency on Irrlicht headers in any translation unit that only includes `IRenderer.h`, including all simulation test files. `MockRenderer::loadTexture()` returns an incrementing non-zero integer. The concrete `IrrlichtRenderer` maintains `std::unordered_map<TextureHandle, ITexture*>` internally.
 
 - **Shared mock header cross-target pattern**: `MockAudioSystem` and `MockRenderer` are defined in `tests/simulation/mock_audio_system.h` and `tests/simulation/mock_renderer.h` respectively. `ManualClock` is defined in `tests/simulation/manual_clock.h`. These headers are shared across multiple CMake test targets (`simulation_tests`, `ui_tests`, `audio_tests`). To avoid ODR (One Definition Rule) violations, these headers must be HEADER-ONLY GMock declarations (using MOCK_METHOD macros only, no definitions). Each test target that uses any of these shared headers MUST add `tests/simulation/` to its `target_include_directories`. This include path coupling is intentional and must be documented explicitly in the CMakeLists.txt for each consuming target. The ODR rule is safe because each test binary links into its own separate executable scope — there is no shared library or link-time merging across test targets. Required `target_include_directories` entries for each consuming target:
