@@ -564,3 +564,39 @@ float TerrainSystem::getSlopeDegrees(int tileX, int tileZ) const {
     constexpr float kRadToDeg = 180.0f / 3.14159265358979323846f;
     return slopeRad * kRadToDeg;
 }
+
+// ---------------------------------------------------------------------------
+// getHeightAt() — ITerrainQuery implementation (Phase 9b Deliverable E).
+// Returns Y-axis terrain height in world-space metres for the tile centre at
+// grid position (tileX, tileZ). Returns 0.0f for out-of-bounds coordinates or
+// before generate() is called. Always queries the persistent LOD0 heightmap
+// array (m_generatedHeightmap) — never scene-node geometry.
+//
+// Index formula: the heightmap is (m_mapTilesX+1) * (m_mapTilesZ+1) vertex samples
+// in row-major order (z * vertX + x). The tile centre height is approximated by
+// the top-left vertex of the tile cell (index z * vertX + x), which is the same
+// sample used by getSlopeDegrees() and by buildAllChunks() for geometry generation.
+// Sub-tile interpolation is not performed — callers requiring bilinear-interpolated
+// heights must implement interpolation on top of multiple getHeightAt() calls.
+// (ref: architecture/graphics-architecture/procedural-terrain.md — Heightmap Query API)
+// ---------------------------------------------------------------------------
+float TerrainSystem::getHeightAt(int tileX, int tileZ) const {
+    if (m_generatedHeightmap.empty() ||
+        tileX < 0 || tileX >= m_mapTilesX ||
+        tileZ < 0 || tileZ >= m_mapTilesZ) {
+        return 0.0f;
+    }
+    const int vertX = m_mapTilesX + 1;
+    return m_generatedHeightmap[static_cast<size_t>(tileZ * vertX + tileX)];
+}
+
+// ---------------------------------------------------------------------------
+// getMapTilesX() / getMapTilesZ() / getCellSize() — dimension accessors.
+// Phase 9b Deliverable E.1: used by main.cpp to call
+//   uiManager.setMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ())
+//   renderer.setCellSize(terrainSystem.getCellSize())
+// after terrain generation. NOT part of ITerrainQuery — minimal interface design.
+// ---------------------------------------------------------------------------
+int   TerrainSystem::getMapTilesX() const { return m_mapTilesX; }
+int   TerrainSystem::getMapTilesZ() const { return m_mapTilesZ; }
+float TerrainSystem::getCellSize()  const { return m_cellSize; }

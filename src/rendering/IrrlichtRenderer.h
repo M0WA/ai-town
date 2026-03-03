@@ -1,9 +1,16 @@
 #pragma once
 
-#include "src/interfaces/IRenderer.h"  // IRenderer, TextureHandle, CameraParams, TerrainChunkRebuildParams
+#include "src/interfaces/IRenderer.h"  // IRenderer, TextureHandle, CameraParams, TerrainChunkRebuildParams, ScreenRect
 #include <irrlicht.h>
 #include <unordered_map>
 #include <cstdint>
+
+// Forward-declare ITerrainQuery — full include is in IrrlichtRenderer.cpp only,
+// consistent with the "Irrlicht-free nature of IRenderer.h" principle.
+// IrrlichtRenderer stores m_terrain as ITerrainQuery* (non-owning observer pointer)
+// and calls only ITerrainQuery interface methods — no concrete TerrainSystem API
+// is referenced inside IrrlichtRenderer.h.
+class ITerrainQuery;
 
 // Forward-declare UIManager — must NOT #include "UIManager.h" in this header.
 // Violation breaks headless testability: any ui_tests binary that includes UIManager.h
@@ -41,6 +48,32 @@ public:
     // Late-bind UIManager (allows construction before UIManager exists).
     void setUIManager(UIManager* uiManager) { m_uiManager = uiManager; }
 
+    // Phase 9b late-bind setters — called from main.cpp after terrain generation.
+    // NOT on the IRenderer interface (same rationale as above: one-time initialization
+    // setters, not general renderer capabilities).
+
+    // setTerrainQuery — inject the ITerrainQuery* used by pickTerrainTile(),
+    // setTileHoverHighlight(), and setZoneOverlay() for heightmap sampling.
+    // Called from main.cpp step 2 of Phase 9b wiring order (Deliverable H).
+    void setTerrainQuery(ITerrainQuery* terrain) { m_terrain = terrain; }
+
+    // setCellSize — supply the world-space width of one tile in metres (e.g. 10.0f).
+    // Obtained from TerrainSystem::getCellSize() (Deliverable E.1) and called from
+    // main.cpp step 2a of Phase 9b wiring order.  Used by pickTerrainTile() for
+    // the ray-march step size and tile-index conversion.
+    void setCellSize(float cellSize) { m_cellSize = cellSize; }
+
+    // setRendererMapDimensions — supply the map width and depth in tiles so that
+    // pickTerrainTile() and setZoneOverlay() can clamp tile indices to valid bounds.
+    // Called from main.cpp step (2b) of Phase 9b wiring order (Deliverable H), after
+    // step (2a) setCellSize().
+    // (ref: architecture/graphics-architecture/procedural-terrain.md — pickTerrainTile
+    //  DDA Algorithm — IrrlichtRenderer members table)
+    void setRendererMapDimensions(int mapTilesX, int mapTilesZ) {
+        m_mapTilesX = mapTilesX;
+        m_mapTilesZ = mapTilesZ;
+    }
+
     // IRenderer interface — main-thread-only
     void          beginFrame() override;  // driver->beginScene(true, true, SColor(255,0,0,0))
     void          drawScene()  override;  // smgr->drawAll() + uiManager->draw() inside begin/end pair
@@ -68,6 +101,14 @@ public:
     // main-thread-only.
     void rebuildTerrainChunk(const TerrainChunkRebuildParams& params) override;
 
+    // Phase 9b — IRenderer world-interaction methods.
+    bool      pickTerrainTile(int screenX, int screenY,
+                               int& tileX, int& tileZ) const override;
+    void      setTileHoverHighlight(int tileX, int tileZ, uint32_t argb) override;
+    void      setZoneOverlay(int mapTilesX, int mapTilesZ,
+                             const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) override;
+    ScreenRect getTileScreenBounds(int tileX, int tileZ) const override;
+
 private:
     irr::IrrlichtDevice*        m_device;
     UIManager*                  m_uiManager;
@@ -84,4 +125,32 @@ private:
     // Entries are erased when the old node is removed. The scene node is managed by Irrlicht's
     // scene graph; this map holds a non-owning observing pointer only.
     std::unordered_map<uint64_t, irr::scene::IMeshSceneNode*> m_chunkNodes;
+
+    // --- Phase 9b: terrain query and map geometry ---
+    // m_terrain: non-owning pointer to ITerrainQuery; set via setTerrainQuery().
+    // m_cellSize: world-space width of one tile in metres; set via setCellSize().
+    // m_mapTilesX/Z: map dimensions in tiles; set via setMapTileCount().
+    // All three default to null/0/0 and are guarded at use sites.
+    ITerrainQuery* m_terrain{nullptr};
+    float          m_cellSize{1.0f};
+    int            m_mapTilesX{0};
+    int            m_mapTilesZ{0};
+
+    // --- Phase 9b: hover tile highlight ---
+    // m_hoveredTileMesh: allocated ONCE in constructor (never null during gameplay).
+    // m_hoverBuffer:     the single SMeshBuffer inside m_hoveredTileMesh; pre-populated
+    //                    in constructor with 4 vertices + 6 indices.  Updated in-place by
+    //                    setTileHoverHighlight() — no per-event allocation/deallocation.
+    // m_hoverVisible:    true when a valid tile is highlighted; false on clear request.
+    //                    Checked in drawScene() before issuing the drawMeshBuffer() call.
+    // Ownership: m_hoveredTileMesh is dropped (->drop()) only in the IrrlichtRenderer destructor.
+    irr::scene::SMesh*       m_hoveredTileMesh{nullptr};
+    irr::scene::SMeshBuffer* m_hoverBuffer{nullptr};  // non-owning after addMeshBuffer+drop
+    bool                     m_hoverVisible{false};
+
+    // --- Phase 9b: zone overlay ---
+    // m_overlayNode: persistent scene node for the zone colour overlay.
+    // Rebuilt by setZoneOverlay(); old node is removed before new mesh is attached.
+    // null until the first non-empty setZoneOverlay() call.
+    irr::scene::IMeshSceneNode* m_overlayNode{nullptr};
 };

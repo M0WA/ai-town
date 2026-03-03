@@ -139,6 +139,15 @@ public:
     // Delegates the same gradient formula used by generate()'s playability check.
     float getSlopeDegrees(int tileX, int tileZ) const override;
 
+    // Returns Y-axis terrain height in world-space metres for the tile centre at
+    // grid position (tileX, tileZ). Returns 0.0f for out-of-bounds coordinates or
+    // before generate() is called. Always queries the persistent LOD0 heightmap
+    // array — never scene-node geometry. Required by IrrlichtRenderer for zone
+    // overlay and hover highlight Y-positioning (Phase 9b Deliverables B, C, E).
+    // LOD contract: queries m_generatedHeightmap (LOD0), never active scene-node mesh.
+    // (ref: architecture/graphics-architecture/procedural-terrain.md — Heightmap Query API)
+    float getHeightAt(int tileX, int tileZ) const override;
+
     // Accessors for testing.
     int  pendingRebuildCount() const { return static_cast<int>(m_rebuildDeque.size()); }
     bool hasActiveChunk(uint64_t chunkId) const { return m_activeChunks.count(chunkId) > 0; }
@@ -189,6 +198,16 @@ public:
     // getGeneratedHeightmap() — returns the heightmap produced by generate().
     // Empty if generate() has not been called.
     const std::vector<float>& getGeneratedHeightmap() const;
+
+    // Map dimension and cell-size accessors (Phase 9b Deliverable E.1).
+    // Return the values stored by generate(). Return 0 / 1.0f before generate() is called.
+    // Used by main.cpp to call uiManager.setMapDimensions() and renderer.setCellSize().
+    // Intentionally NOT on the ITerrainQuery interface — that interface is minimal by design
+    // (slope + height only). These getters are on the concrete TerrainSystem class only.
+    // (ref: implementation/phase-9b.md Deliverable E.1)
+    int   getMapTilesX() const;
+    int   getMapTilesZ() const;
+    float getCellSize()  const;
 
 private:
     // Process a single rebuild request (factored out for reuse between update() and flush()).

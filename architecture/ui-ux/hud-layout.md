@@ -22,7 +22,68 @@
   - **Colorblind mode** (colorblind mode ON): The tooltip-only fallback is **NOT permitted**. Color is already an insufficient encoding in colorblind mode, so removing the persistent label would leave users with no reliable zone-type identification. Instead, the HUD MUST render the single-character zone-type symbol ('R', 'C', or 'I') at the hard physical floor of **11 px physical pixels** (per `resolution-ui-scaling.md` Typography hard physical floor — `UIScaler` clamps text scale to this minimum). Alongside the clamped label, the bar column MUST also display a **pattern or hatching overlay** (see `resolution-ui-scaling.md` Colorblind Accessibility section — "Demand pressure bar hatching patterns (colorblind mode)": Residential = diagonal hatching at 45°, Commercial = horizontal lines, Industrial = cross-hatch) so that zone type can be distinguished by pattern alone, independent of both color and the small label. The tooltip remains available as supplemental information but may not be the sole encoding in colorblind mode.
 
   **Data source**: `ICitySimulation::getDemandPressurePct(ZoneType)` returns the city-wide weighted-average `demand_factor` across all tiles of that zone type, updated each budget tick. **DISPLAY SCALING**: `getDemandPressurePct()` returns `float` in `[0.0, 1.0]` — NOT a percentage in `[0, 100]`. The HUD demand bars MUST multiply by `100.0f` before display (e.g., `barFillPct = getDemandPressurePct(zone) * 100.0f`). Omitting this multiplication produces a bar always showing ≤1% fill. **INVERSE SEMANTICS**: `QueryResult::demandPressurePct` (Inspector Panel) uses the complementary definition `(1.0f − effective_demand_factor) × 100` where 100 = zero demand — opposite direction. Do NOT use `QueryResult::demandPressurePct` directly to fill the HUD demand bar. This is distinct from per-tile demand pressure available via `QueryResult::demand_pressure_pct` in the Query/Inspector Panel.
-- **Active tool indicator** (persistent badge below demand bar): virtual bounds x: 8–72 px, y: 752–784 px. Shows the current tool's 32×32 px icon with a small text label, visible from anywhere on screen without looking at the toolbar. Updates immediately when the active tool changes. **Cursor shape**: each tool mode uses a distinct cursor shape from the UI sprite sheet (Zone: crosshair with zone-color tint; Road: road-segment icon; Utilities: wrench; Demolish: X marker; Query: magnifying glass).
+- **Active tool indicator** (persistent badge below demand bar): virtual bounds x: 8–72 px, y: 752–784 px. Shows the current tool's 32×32 px icon with a small text label, visible from anywhere on screen without looking at the toolbar. Updates immediately when the active tool changes. Icon sprite handles are drawn from `hud_sprites_ui.dds` row 6 (`kSpriteIndicatorNone` through `kSpriteIndicatorQuery` — see `src/ui/hud_sprite_ids.h` and `architecture/asset-standards/2d-texture-standards.md` UI Sprite Sheet Cell Layout section). **Cursor shape**: each tool mode uses a distinct cursor shape from the UI sprite sheet (Zone: crosshair with zone-color tint; Road: road-segment icon; Utilities: wrench; Demolish: X marker; Query: magnifying glass). OS-level cursor shape changes require `IUIBackend::setMouseCursor()`, which does not exist in the Phase 9b interface; cursor icon rendering from the sprite sheet is **deferred to Phase 10+** (see row 7 reserved cells in the sprite sheet layout). The `m_activeTool` state set in Phase 9b is the prerequisite for Phase 10+ cursor shape selection.
+
+## Tile Hover Highlight — ARGB Colour Scheme
+
+The tile hover highlight is a semi-transparent wireframe quad rendered over the hovered
+terrain tile. ARGB values are encoded as `0xAARRGGBB` (Irrlicht `SColor` format;
+AA=alpha, RR=red, GG=green, BB=blue).
+
+**These values are authoritative and must be used by `UIManager::onEvent()` MouseMove
+handler when calling `IRenderer::setTileHoverHighlight()`. Do not use inline literals —
+define named constants in `src/ui/ui_constants.h`.**
+
+| Active tool | ARGB value | Colour description | Named constant |
+|---|---|---|---|
+| Zone | `0x80FF00FF` | Semi-transparent magenta (alpha=128) | `kHoverArgbZone` |
+| Road | `0x8000FFFF` | Semi-transparent cyan (alpha=128) | `kHoverArgbRoad` |
+| Utilities | `0x80FF8000` | Semi-transparent orange (alpha=128) | `kHoverArgbUtilities` |
+| Demolish | `0x80FF0000` | Semi-transparent red (alpha=128) | `kHoverArgbDemolish` |
+| Query | `0x80FFFFFF` | Semi-transparent white (alpha=128) | `kHoverArgbQuery` |
+
+Alpha value `0x80` = 128 = 50% opacity. This provides enough transparency to see terrain
+geometry beneath the highlight, while remaining clearly visible against both light and
+dark terrain surfaces. The highlight quad is rendered via
+`IVideoDriver::drawMeshBuffer()` using `EMT_TRANSPARENT_ALPHA_CHANNEL` material type,
+placed at terrain height +0.05 world units above the terrain surface (Z-fighting prevention).
+
+**Clear sentinel**: pass `tileX = -1`, `tileZ = -1`, `argb = 0` to
+`IRenderer::setTileHoverHighlight()` to remove the highlight entirely (no active tool or
+ray-cast miss). The value `kHoverArgbClear = 0x00000000u` is the canonical constant for
+this case.
+
+## Zone Colour Overlay — ARGB Colour Scheme
+
+The zone overlay is a persistent semi-transparent fill rendered over all zoned tiles.
+ARGB values are encoded as `0xAARRGGBB`. These are the **canonical zone identification
+colours** used consistently across all UI systems: zone overlay quads, minimap zone coding,
+and zone sub-panel button active-state icon tints.
+
+**These values are authoritative and must be used by `UIManager` when constructing the
+`m_overlayMap` entries passed to `IRenderer::setZoneOverlay()`. Define as named constants
+in `src/ui/ui_constants.h`.**
+
+| Zone type | ARGB value | Colour description | Named constant |
+|---|---|---|---|
+| Residential | `0x6000FF00` | Semi-transparent green (alpha=96, ~38%) | `kOverlayArgbResidential` |
+| Commercial | `0x600000FF` | Semi-transparent blue (alpha=96, ~38%) | `kOverlayArgbCommercial` |
+| Industrial | `0x60FFFF00` | Semi-transparent yellow (alpha=96, ~38%) | `kOverlayArgbIndustrial` |
+
+Alpha value `0x60` = 96 = approximately 38% opacity. This is deliberately lower than the
+hover highlight alpha (0x80 = 50%) so that the always-on zone overlay is visually recessive
+and the temporary hover highlight reads as a distinct, foreground interaction cue on top.
+
+**Overlay depth ordering**: Zone overlay quads use Y offset +0.1 world units above terrain
+surface. Hover highlight quads use Y offset +0.05 world units. This ensures the hover
+highlight always renders above the zone overlay when both are present on the same tile.
+
+**Minimap consistency**: These same three ARGB values are used for zone coding in the
+minimap top-down render (R=green, C=blue, I=yellow — consistent with the minimap spec in
+`architecture/ui-ux/minimap.md`). Do not define separate colour constants for the minimap
+zone coding; reuse `kOverlayArgbResidential`, `kOverlayArgbCommercial`, and
+`kOverlayArgbIndustrial` from `ui_constants.h`.
+
 - **Notification log bell icon**: positioned at the right end of the resource/budget bar, virtual bounds x: 1820–1868 px, y: 8–56 px (48×48 px icon). Displays an unread-count badge (small numeral overlay) that increments when new notifications arrive and resets to zero when the log is opened. Keyboard shortcut: **B** (toggles the log open/closed; rebindable in Settings > Controls with standard conflict detection).
 
 ## HUD Class Structure

@@ -150,3 +150,125 @@ The camera scene node must be created via `sceneManager->addCameraSceneNode()` o
    **Why grab/drop is required**: `removeAnimator()` calls `drop()` on the animator internally. If the animator's ref_count is already 1 (only the scene node holds it), this drops it to 0 and immediately deallocates it. Without `grab()` before `removeAnimator()`, any access to `anim` after the call (including `anim->drop()`) is a use-after-free. With `grab()` first, our own ref keeps the animator alive through the `removeAnimator()` drop, and our `drop()` completes the release cleanly.
 2. `CameraController::update(float dt)` must call `camera->setPosition()` and `camera->setTarget()` every frame, before `sceneManager->drawAll()`, to ensure the scene is rendered with the current frame's camera state. Specifically, update order per frame: process input events → `CameraController::update()` → `sceneManager->drawAll()` → `UIManager::draw()` → `endScene()`.
 3. `CameraController::OnInputEvent(const InputEvent&)` must return `true` (consumed) for all relevant `InputEvent` types (mouse move, mouse button, scroll wheel). The camera controller does NOT implement `IEventReceiver` directly; it receives translated `InputEvent` from the platform/input arbitration layer. This prevents any accidentally-initialized Irrlicht camera input receiver from processing the same events at the raw `SEvent` level.
+
+---
+
+## Tile Overlay Quad Mesh Geometry (Phase 9b)
+
+This section specifies the vertex layout and winding order for the two runtime overlay
+meshes used in `IrrlichtRenderer`: the **tile hover highlight** (`setTileHoverHighlight`) and
+the **zone colour overlay** (`setZoneOverlay`). Both meshes consist of flat quads lying on
+the terrain surface. Neither mesh is authored as an artist asset — they are constructed
+procedurally at runtime by `IrrlichtRenderer` from tile grid coordinates.
+
+Irrlicht uses a **left-handed coordinate system** (+X right, +Y up, +Z forward). Front faces
+are **clockwise (CW)** from the viewer perspective. The city camera always looks downward
+(pitch −20° to −70°), so front-face normals must point **up (+Y)** to be visible from above.
+
+### Quad Vertex Order (binding)
+
+For a tile at grid index `(tileX, tileZ)` with cell size `cellSize` and height sample
+`h = getHeightAt(tileX, tileZ)`:
+
+```text
+World-space corners (left-handed, Y-up, Z-forward):
+
+  v0 = (tileX       * cellSize,  h + yOffset,  tileZ       * cellSize)   — near-left
+  v1 = ((tileX + 1) * cellSize,  h + yOffset,  tileZ       * cellSize)   — near-right
+  v2 = ((tileX + 1) * cellSize,  h + yOffset,  (tileZ + 1) * cellSize)   — far-right
+  v3 = (tileX       * cellSize,  h + yOffset,  (tileZ + 1) * cellSize)   — far-left
+
+Indices (two CW triangles, front face = +Y normal):
+
+  Triangle 1: v0, v2, v1
+  Triangle 2: v0, v3, v2
+
+Index buffer: { 0, 2, 1, 0, 3, 2 }
+```
+
+**Winding proof** (Irrlicht left-handed, CW front):
+`(v2 − v0) × (v1 − v0)` =
+`(cellSize, 0, cellSize) × (cellSize, 0, 0)` =
+`(0*0 − cellSize*0, cellSize*cellSize − cellSize*0, 0*0 − 0*cellSize)` =
+`(0, +cellSize², 0)` → +Y normal (front face visible from above). Correct.
+
+**Wrong winding** (`v0, v1, v2` — DO NOT USE):
+`(v1 − v0) × (v2 − v0)` = `(0, −cellSize², 0)` → −Y normal (back face, culled). Incorrect.
+
+### Y-Offset Layering
+
+Three overlay layers render on top of terrain geometry. Each uses a distinct Y-offset to
+prevent depth-buffer Z-fighting against terrain and against each other:
+
+| Layer | Y-offset | Material type | Notes |
+|---|---|---|---|
+| Zone colour overlay | `+0.1f` | `EMT_TRANSPARENT_ALPHA_CHANNEL` | Persistent scene node; rebuilt on zone change |
+| Tile hover highlight | `+0.05f` | `EMT_TRANSPARENT_ALPHA_CHANNEL` | Raw `drawMeshBuffer` call in `drawScene()`; never a scene node |
+
+`EMT_TRANSPARENT_ALPHA_CHANNEL` disables depth writes but reads the depth buffer with
+`GL_LEQUAL`. Without the Y-offset, fragments at exactly terrain height may fail the depth
+test due to floating-point precision, causing flickering at any camera angle. The +0.05f
+and +0.1f lifts guarantee these quads always pass the depth test against opaque terrain.
+The 0.05 m separation between hover and overlay layers ensures the hover highlight renders
+on top of the zone colour overlay when both are present on the same tile.
+
+### UV Layout
+
+Overlay and hover quads are **untextured** — they use only vertex colour (the `Color`
+field of each `S3DVertex`). UV values must be set to `{0.f, 0.f}` on all four vertices.
+The material must have `setTexture(0, nullptr)` called on any `SMeshBuffer` used for
+these meshes, or the material must not bind a texture at all (leave slot 0 unset). Do NOT
+leave a stale texture binding from a previous mesh operation — Irrlicht will sample it and
+produce a tinted result.
+
+### Zone Overlay SMeshBuffer Batching
+
+The zone overlay mesh may contain up to **100,000 tile quads** (4 vertices, 6 indices each).
+An `SMeshBuffer` uses `u16` indices (`E_INDEX_TYPE::EIT_16BIT`), capping each buffer at
+**65,535 indices = 10,922 quads per buffer**.
+
+Therefore the overlay mesh MUST use **multiple `SMeshBuffer` instances** within the parent
+`SMesh*`:
+
+- Allocate buffers as needed: create a new `SMeshBuffer` after filling 10,922 quads
+  (65,532 indices) in the current buffer. Do NOT wait until the index value overflows — cap
+  at exactly 10,922 quads per buffer to avoid the final two-triangle pair straddling the
+  buffer boundary.
+- Each `SMeshBuffer` must have its `Material.MaterialType` set to
+  `EMT_TRANSPARENT_ALPHA_CHANNEL` **before** vertex or index data is written — the material
+  type is per-buffer, not per-mesh.
+- For the maximum 100K quad case: `ceil(100000 / 10922) = 10` `SMeshBuffer` instances in
+  the `SMesh*`. The `SMesh::addMeshBuffer()` call sequence is the same for each: allocate,
+  populate, `recalculateBoundingBox()`, `addMeshBuffer()`, `drop()` (caller releases
+  reference; `SMesh` holds the sole reference thereafter).
+- The zone type split (Residential / Commercial / Industrial) does NOT require separate
+  `SMeshBuffer` instances per zone type. All zone quads — regardless of zone type — are
+  packed into the same set of sequentially filled buffers. The zone ARGB colour is encoded
+  per vertex; no material distinction between zone types is required at the buffer level.
+
+**Single-buffer fast path**: If `sparseOverlay.size() <= 10922`, the entire overlay fits
+in a single `SMeshBuffer`. Implementations must handle both the single-buffer and
+multi-buffer cases using the same code path (a loop that fills and caps buffers
+sequentially) — not a special-cased single-buffer branch.
+
+### Hover Highlight — Single Buffer, Pre-Allocated
+
+The hover highlight uses exactly **one `SMeshBuffer`** (4 vertices, 6 indices) allocated
+once in the `IrrlichtRenderer` constructor. This buffer is NEVER replaced or re-allocated
+during gameplay — only the vertex position and colour values are updated in-place on each
+`setTileHoverHighlight()` call (see `irrlicht-device-lifecycle.md` for the full lifecycle
+contract). The pre-allocated buffer must be populated with 4 placeholder vertices and 6
+indices at construction time (positions `{0,0,0}`, Colors `SColor(0,0,0,0)`, UVs `{0,0}`,
+indices `{0, 2, 1, 0, 3, 2}`) to satisfy the in-place write contract described above.
+
+The companion `SMesh* m_hoveredTileMesh` is also allocated once at construction and holds
+the sole reference to the buffer after the constructor's `addMeshBuffer()` +
+`drop()` sequence. `m_hoveredTileMesh` is NOT added to the Irrlicht scene graph; it is
+drawn directly via `IVideoDriver::drawMeshBuffer(m_hoveredTileMesh->getMeshBuffer(0))`
+in `IrrlichtRenderer::drawScene()`, guarded by `m_hoverVisible`.
+
+This is the **opposite lifecycle** from the zone overlay `SMesh*`, which IS attached to
+the scene graph as a persistent `ISceneNode*` and rebuilt (remove-old / add-new) on every
+`setZoneOverlay()` call. The distinction is intentional: hover changes every mouse-move
+event (hot path, in-place update required); zone overlay changes only on placement events
+(cold path, full rebuild acceptable).
