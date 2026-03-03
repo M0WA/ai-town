@@ -26,12 +26,41 @@ IrrlichtRenderer::IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiMan
     , m_driver(device ? device->getVideoDriver() : nullptr)
     , m_smgr(device ? device->getSceneManager() : nullptr)
 {
+    // Allocate the hover tile mesh ONCE at construction time.
+    // SMesh and SMeshBuffer are reference-counted Irrlicht objects that do NOT
+    // require a driver — they can be safely allocated when m_driver is null
+    // (e.g. unit tests that construct IrrlichtRenderer with a null device).
+    // Pre-populate 4 vertices + 6 indices so setTileHoverHighlight() only updates
+    // vertex positions in-place rather than rebuilding the mesh each frame.
+    m_hoveredTileMesh = new SMesh();
+    SMeshBuffer* buf = new SMeshBuffer();
+
+    // Four placeholder vertices — positions are overwritten per-frame by setTileHoverHighlight().
+    for (int v = 0; v < 4; ++v) {
+        buf->Vertices.push_back(S3DVertex(
+            core::vector3df(0, 0, 0),
+            core::vector3df(0, 1, 0),
+            SColor(255, 255, 255, 255),
+            core::vector2df(0, 0)));
+    }
+    // Two triangles: v0→v2→v1, v0→v3→v2 (CW from above = +Y normal)
+    buf->Indices.push_back(0); buf->Indices.push_back(2); buf->Indices.push_back(1);
+    buf->Indices.push_back(0); buf->Indices.push_back(3); buf->Indices.push_back(2);
+
+    buf->Material.MaterialType = EMT_TRANSPARENT_ALPHA_CHANNEL;
+    buf->Material.Lighting     = false;
+    buf->Material.ZWriteEnable = false;
+
+    m_hoveredTileMesh->addMeshBuffer(buf);
+    buf->drop();  // mesh is sole owner
+
+    m_hoverBuffer = static_cast<SMeshBuffer*>(
+        m_hoveredTileMesh->getMeshBuffer(0));  // non-owning observer
 }
 
 IrrlichtRenderer::~IrrlichtRenderer() {
     // Drop the hover tile mesh (ref_count 1→0 frees the mesh and its contained buffer).
-    // The mesh is lazily allocated in setTileHoverHighlight(); m_hoveredTileMesh may be null
-    // if no valid tile was ever highlighted (e.g. in headless tests without a display).
+    // Allocated unconditionally in the constructor — m_hoveredTileMesh is always non-null.
     if (m_hoveredTileMesh) {
         m_hoveredTileMesh->drop();
         m_hoveredTileMesh = nullptr;
@@ -451,38 +480,6 @@ void IrrlichtRenderer::setTileHoverHighlight(int tileX, int tileZ, uint32_t argb
     if (!m_terrain || !m_driver) {
         m_hoverVisible = false;
         return;
-    }
-
-    // Lazy-allocate the hover mesh on first valid call.
-    // The mesh is allocated here (not in the constructor) because m_driver
-    // may be null at construction time in unit tests.
-    if (!m_hoveredTileMesh) {
-        m_hoveredTileMesh = new SMesh();
-        SMeshBuffer* buf = new SMeshBuffer();
-
-        // Pre-populate with 4 vertices + 6 indices (two CCW triangles forming a quad).
-        // Positions are overwritten below; we need the slots to exist.
-        for (int v = 0; v < 4; ++v) {
-            buf->Vertices.push_back(S3DVertex(
-                core::vector3df(0, 0, 0),
-                core::vector3df(0, 1, 0),
-                SColor(255, 255, 255, 255),
-                core::vector2df(0, 0)));
-        }
-        // Two triangles: v0-v1-v2, v0-v2-v3  (left-handed CW from above = +Y normal)
-        buf->Indices.push_back(0); buf->Indices.push_back(2); buf->Indices.push_back(1);
-        buf->Indices.push_back(0); buf->Indices.push_back(3); buf->Indices.push_back(2);
-
-        // EMT_TRANSPARENT_ALPHA_CHANNEL: respects the vertex colour alpha channel.
-        buf->Material.MaterialType = EMT_TRANSPARENT_ALPHA_CHANNEL;
-        buf->Material.Lighting = false;
-        buf->Material.ZWriteEnable = false;  // draw-over without Z-write
-
-        m_hoveredTileMesh->addMeshBuffer(buf);
-        buf->drop();  // mesh is sole owner
-
-        m_hoverBuffer = static_cast<SMeshBuffer*>(
-            m_hoveredTileMesh->getMeshBuffer(0));  // non-owning observer
     }
 
     // Decode ARGB (0xAARRGGBB) for Irrlicht SColor(A, R, G, B).
