@@ -80,6 +80,16 @@ private:
     static constexpr int kPanelW = 240;
     static constexpr int kPanelH = 160;
 
+    // Data refresh cadence — per architecture/ui-ux/query-inspector-panel.md.
+    // Economy/service refresh: once per budget tick (~2 s at 60 FPS approximation).
+    // Traffic refresh: every 10 simulation frames per spec.
+    // Staleness label: shown when economy data is >1 s old (>kStalenessFrames draw calls).
+    // m_lastEconomyFrame is initialised to -kEconomyRefreshFrames so that the very first
+    // draw() call after show() always triggers an immediate refresh (no blank-frame window).
+    static constexpr int kEconomyRefreshFrames = 120; // ~2 s at 60 FPS; approximates budget tick
+    static constexpr int kTrafficRefreshFrames  = 10;  // per spec: every 10 simulation frames
+    static constexpr int kStalenessFrames       = 60;  // show label when data is > ~1 s stale
+
     int m_panelX{0};
     int m_panelY{0};
     int m_queryTileX{0};
@@ -93,6 +103,12 @@ private:
     UIElementHandle m_coverageLabel{kInvalidUIElement};
     UIElementHandle m_desirabilityLabel{kInvalidUIElement};
     UIElementHandle m_demandLabel{kInvalidUIElement};
+    UIElementHandle m_updatedLabel{kInvalidUIElement};  // "Updated N s ago" staleness line
+
+    // Refresh cadence frame counters.
+    int m_drawFrame{0};
+    int m_lastEconomyFrame{-kEconomyRefreshFrames};  // triggers refresh on first draw()
+    int m_lastTrafficFrame{0};
 
     void positionElements();
 };
