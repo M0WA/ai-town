@@ -588,6 +588,13 @@ target_sources(ui_tests PRIVATE
     tests/ui/settings_panel_test.cpp
 )
 
+# Phase 9b: extend ui_tests with world-interaction tests (Deliverable G).
+# Do NOT call add_executable(ui_tests ...) or aitown_add_tests(ui_tests ...) again —
+# that would produce a duplicate target error.
+target_sources(ui_tests PRIVATE
+    tests/ui/world_interaction_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # audio_tests — duck state machine, occlusion smoothing, crossfade, stinger milestone tests
 # Vorbis::vorbisfile must be listed EXPLICITLY — it CANNOT resolve through aitown_audio's

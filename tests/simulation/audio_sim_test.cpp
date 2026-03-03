@@ -117,3 +117,72 @@ TEST_F(AudioSimTest, CitySimulation_PlaceRoad_FiresSFXRoadBuild) {
     // earthworksCostOverride = 0 suppresses the SFX_EARTHWORKS branch inside placeRoad().
     sim_->placeRoad(5, 7, 0);
 }
+
+// ---------------------------------------------------------------------------
+// CitySimulation_PlaceServiceBuilding_FiresSFXBuildPlace
+//
+// Verifies that CitySimulation::placeServiceBuilding() fires exactly one
+// playPositionalSound(SFX_BUILD_PLACE, ...) call on successful placement.
+//
+// SFX_BUILD_PLACE (SoundId = 1) is the correct sound for service building placement
+// (Audio Decision 1, sound-artist-opensoftal 2026-03-02). A dedicated service-building
+// SFX is post-V1.
+//
+// earthworksCostOverride = 0 (flat tile, ManualTerrainQuery default) — SFX_EARTHWORKS
+// branch must NOT fire. StrictMock<MockAudioSystem> enforces this.
+//
+// (ref: implementation/phase-9b.md Deliverable J, Audio Decision 1)
+// ---------------------------------------------------------------------------
+TEST_F(AudioSimTest, CitySimulation_PlaceServiceBuilding_FiresSFXBuildPlace) {
+    // Verify the treasury is positive so placeServiceBuilding() does not fail.
+    ASSERT_GT(sim_->getTreasuryBalance(), 0.0f)
+        << "Easy difficulty must initialise a positive treasury so placeServiceBuilding() "
+           "can proceed without an insufficient-funds early-return";
+
+    // Set up expectation BEFORE calling placeServiceBuilding().
+    // SFX_BUILD_PLACE (SoundId = 1) must fire exactly once.
+    // No SFX_EARTHWORKS expected: earthworksCostOverride = 0.
+    EXPECT_CALL(audioSystem_, playPositionalSound(SFX_BUILD_PLACE, _, _, _)).Times(1);
+
+    // Act: place a Power Plant at tile (5, 7) with zero earthworks override (flat terrain).
+    sim_->placeServiceBuilding(5, 7, ServiceBuildingType::PowerPlant, 0);
+}
+
+// ---------------------------------------------------------------------------
+// CitySimulation_PlaceServiceBuilding_SteepSlope_FiresEarthworksThenBuildPlace
+//
+// Verifies that CitySimulation::placeServiceBuilding() fires SFX_EARTHWORKS BEFORE
+// SFX_BUILD_PLACE when earthworksCostOverride > 0 (steep-slope placement).
+//
+// Using InSequence to enforce call order: SFX_EARTHWORKS must fire first,
+// then SFX_BUILD_PLACE (Audio Decision 1 call sequence in phase-9b.md Deliverable J.0).
+//
+// ManualTerrainQuery::setSlope(5, 7, 30.0f) triggers the earthworks branch in
+// CitySimulation::placeServiceBuilding() when earthworksCostOverride = 250 > 0.
+// Note: earthworksCostOverride is the override passed to placeServiceBuilding(),
+// NOT re-computed from terrain — the simulation uses the passed override directly.
+//
+// (ref: implementation/phase-9b.md Deliverable J, Audio Decision 1)
+// ---------------------------------------------------------------------------
+TEST_F(AudioSimTest, CitySimulation_PlaceServiceBuilding_SteepSlope_FiresEarthworksThenBuildPlace) {
+    // Set per-tile slope — informs the earthworks calculation if the simulation
+    // queries terrain slope internally. earthworksCostOverride = 250 drives the
+    // SFX_EARTHWORKS branch regardless of slope query.
+    terrain_.setSlope(5, 7, 30.0f);
+
+    // Verify the treasury is positive.
+    ASSERT_GT(sim_->getTreasuryBalance(), 0.0f)
+        << "Easy difficulty must initialise a positive treasury";
+
+    // InSequence: SFX_EARTHWORKS must fire BEFORE SFX_BUILD_PLACE.
+    // (ref: implementation/phase-9b.md Deliverable J.0 Audio Decision 1 call sequence)
+    {
+        ::testing::InSequence seq;
+        EXPECT_CALL(audioSystem_, playPositionalSound(SFX_EARTHWORKS, _, _, _)).Times(1);
+        EXPECT_CALL(audioSystem_, playPositionalSound(SFX_BUILD_PLACE, _, _, _)).Times(1);
+    }
+
+    // Act: place a Power Plant at (5, 7) with earthworksCostOverride = 250.
+    // earthworksCostOverride > 0 triggers the SFX_EARTHWORKS branch.
+    sim_->placeServiceBuilding(5, 7, ServiceBuildingType::PowerPlant, 250);
+}

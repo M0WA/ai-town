@@ -137,6 +137,17 @@ public:
     // getActiveTool — returns the current active tool state (for test observability).
     ActiveTool getActiveTool() const;
 
+    // setDemolishConfirm — enable/disable the demolish confirmation modal.
+    // When false, demolishTile() is called immediately without showing a modal.
+    // Used by tests to suppress the modal; production default is true (confirm ON).
+    void setDemolishConfirm(bool enabled) { m_demolishConfirmEnabled = enabled; }
+
+    // onNewGame — reset all world-interaction state for a new game load.
+    // Clears m_overlayMap, calls setZoneOverlay({}) if renderer is non-null,
+    // resets m_activeTool to None, and clears m_hoveredTileX/Z.
+    // Called from UIManager::transitionToGameplay() or test harness.
+    void onNewGame();
+
     // Returns true when a blocking modal dialog is currently active.
     // Used by the Priority-2 dual-guard and by tests.
     bool hasActiveModal() const;
@@ -204,6 +215,24 @@ private:
     int m_hoveredTileX{-1};
     int m_hoveredTileZ{-1};
 
+    // --- Phase 9b: Zone sub-panel button handles (3×3 grid: col=zone R/C/I, row=density Low/Med/High) ---
+    // Created during UIManager construction via m_backend->addButton().
+    // Stored in row-major order: m_zoneSubPanelBtns[densityRow * 3 + zoneCol].
+    // All 9 initialized to kInvalidUIElement; populated if m_backend is non-null.
+    UIElementHandle m_zoneSubPanelBtns[9]{
+        kInvalidUIElement, kInvalidUIElement, kInvalidUIElement,
+        kInvalidUIElement, kInvalidUIElement, kInvalidUIElement,
+        kInvalidUIElement, kInvalidUIElement, kInvalidUIElement
+    };
+
+    // --- Phase 9b: Utilities sub-panel button handles (2×2 grid) ---
+    // Layout: [0]=PowerPlant, [1]=WaterTower, [2]=FireStation, [3]=PoliceStation.
+    // Matches ServiceBuildingType enum ordinals.
+    UIElementHandle m_utilSubPanelBtns[4]{
+        kInvalidUIElement, kInvalidUIElement,
+        kInvalidUIElement, kInvalidUIElement
+    };
+
     // Unsaved-changes indicator state
     bool m_hasUnsavedChanges{false};
 
@@ -241,9 +270,18 @@ private:
     // --- Phase 8: Ctrl-key state tracking for Ctrl+Z ---
     bool m_ctrlDown{false};
 
+    // --- Phase 9b: demolish confirmation gate ---
+    // Mirrors Settings > Gameplay "Confirm before demolish" (default ON).
+    // Tests set this to false to suppress the modal and call demolishTile directly.
+    bool m_demolishConfirmEnabled{true};
+
     // Background scrim element shown behind modal dialogs.
     // kInvalidUIElement (0) until Phase 6 creates the real element.
     UIElementHandle m_scrimHandle{kInvalidUIElement};
+
+    // Helper: show/hide Zone and Utilities sub-panels based on m_activeTool.
+    // Called whenever m_activeTool changes (toolbar click or hotkey).
+    void updateSubPanelVisibility();
 
     // --- Owned panels (allocated in UIManager constructor, deleted in destructor) ---
     // Construction/destruction order is INVARIANT:
