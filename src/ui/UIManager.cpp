@@ -28,6 +28,8 @@
 // Explicit interface includes for method calls on forward-declared pointers.
 #include "src/interfaces/IAudioSystem.h"
 #include "src/interfaces/ICitySimulation.h"
+#include "src/interfaces/IRenderer.h"       // IRenderer — for setZoneOverlay
+#include "src/interfaces/ITerrainQuery.h"   // ITerrainQuery — for future earthworks cost
 
 #include <algorithm>
 #include <string>
@@ -799,4 +801,38 @@ void UIManager::transitionToMainMenu() {
     // Show main menu.
     m_state = GameState::MainMenu;
     m_mainMenu->show();
+}
+
+// ----------------------------------------------------------------
+// Phase 9b: late-bind setters
+// These are one-time initialization setters called from main.cpp
+// after terrain generation completes.  They are NOT on the
+// IRenderer interface — they are UIManager-specific wiring steps.
+// ----------------------------------------------------------------
+
+void UIManager::setRenderer(IRenderer* renderer) {
+    m_renderer = renderer;
+}
+
+void UIManager::setTerrainQuery(ITerrainQuery* terrain) {
+    m_terrain = terrain;
+}
+
+void UIManager::setMapDimensions(int mapTilesX, int mapTilesZ) {
+    // Re-call safety: if map size changes (e.g. new-game load with a different
+    // map), clear stale overlay keys from the previous map before updating
+    // dimensions so old indices cannot corrupt the new map's overlay.
+    if (m_mapTilesX != mapTilesX || m_mapTilesZ != mapTilesZ) {
+        m_overlayMap.clear();
+        // Push an empty setZoneOverlay call to clear the render-layer overlay mesh.
+        if (m_renderer) {
+            m_renderer->setZoneOverlay(mapTilesX, mapTilesZ, {});
+        }
+    }
+    m_mapTilesX = mapTilesX;
+    m_mapTilesZ = mapTilesZ;
+}
+
+ActiveTool UIManager::getActiveTool() const {
+    return m_activeTool;
 }

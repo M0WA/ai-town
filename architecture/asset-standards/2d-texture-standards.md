@@ -420,6 +420,373 @@ Total texture VRAM for all simultaneously-resident assets must not exceed **1.0 
 **Draw call ceiling**: ≤2,000 draw calls per frame (all LODs combined). Buildings sharing the same atlas texture and material can be batched or instanced into a single draw call. This drives the atlas-first design requirement.
 **Unique mesh variant cap**: ≤50 unique LOD0/LOD1/LOD2 building mesh variants simultaneously loaded. Building types exceeding 50 unique meshes must share atlas space and be explicitly approved.
 
+### UI Sprite Sheet Cell Layout (`hud_sprites_ui.dds`)
+
+**Format recap**: 2048×2048 RGBA8 UNORM, no mip chain (`GL_TEXTURE_MAX_LEVEL = 0`), uploaded via
+raw `glTexImage2D` with `GL_RGBA8` / `GL_RGBA` / `GL_UNSIGNED_BYTE`. Authored with
+`nvcompress -rgba -nomips`. Full upload spec in the UV & Atlas Strategy section above.
+
+**Cell grid**: 32×32 uniform cells at **64×64 px each** (2048 / 64 = 32 columns; 32 rows).
+No inter-cell padding is required — mipmapping is disabled for the UI sprite sheet, so
+there is no mip-bleed between adjacent cells. Each icon is drawn within the full 64×64 px
+cell area. Icons that are smaller than 64×64 px (e.g. the 48×48 toolbar icons) must be
+centered within the cell with transparent fill on all four sides.
+
+**Cell coordinate system**: `(col, row)` zero-indexed from the top-left corner.
+UV bottom-left origin (OpenGL convention): `U = col / 32`, `V = (31 - row) / 32`.
+UV top-left origin (DDS / direct pixel indexing): pixel `(col * 64, row * 64)`.
+
+**Sprite handle encoding**: The integer sprite handle passed to `IUIBackend::setElementImage()`
+is encoded as `col + row * 32`. This packs both coordinates into a single integer that
+`IrrlichtUIBackend` decodes as `col = handle % 32`, `row = handle / 32`. The encoding
+produces handles 0–1023 for the 32×32 grid. No handle value exceeds 1023 in V1.
+
+**Runtime asset path (authoritative)**: `assets/textures/ui/hud_sprites_ui.dds`
+
+`IrrlichtUIBackend` loads this file internally during its own initialization (before any
+`UIManager` panel code runs) and binds the resulting OpenGL texture to its UI texture unit.
+This is an `IrrlichtUIBackend`-internal operation — `UIManager` does NOT call
+`IUIBackend::loadTexture("assets/textures/ui/hud_sprites_ui.dds")` and does NOT store a
+sprite-sheet texture handle. `UIManager` only calls `setElementImage(buttonHandle, kSpriteXxx)`,
+where `kSpriteXxx` is a `constexpr uint32_t` cell-index from `src/ui/hud_sprite_ids.h`.
+`IrrlichtUIBackend::setElementImage()` decodes the second argument as `col = handle % 32;
+row = handle / 32;` and applies the corresponding UV sub-rect of the already-loaded sprite
+sheet to the button's image region.
+
+The `kSprite*` integer constants are NOT separate per-icon file paths — they are UV cell-index
+values. `IUIBackend::loadTexture()` is NOT called for sprite-sheet icon swaps. It may be
+called for other purposes (e.g. non-sprite-sheet textures in future phases) but Phase 9b
+`UIManager` code does not call it.
+
+**`MockUIBackend` test contract**: In unit tests, `MockUIBackend::setElementImage()` is
+called with the actual `kSprite*` integer constants as the second argument (e.g.
+`kSpriteZoneResLowInactive = 96`, `kSpriteZoneResLowActive = 64`). Tests verify sprite-swap
+behaviour by asserting `EXPECT_CALL(backend_, setElementImage(zone_btn[i], kSpriteZoneResLowInactive + col + row * 3))`.
+`MockUIBackend::loadTexture()` is NOT expected to be called during Phase 9b UIManager
+construction for sprite-sheet icons.
+
+Named constants for all V1 sprite handles are defined in
+`src/ui/hud_sprite_ids.h` (a non-class constants header, snake\_case filename per CLAUDE.md).
+Every `IUIBackend::setElementImage()` call in production code MUST use a named constant from
+this header — raw integer literals are prohibited. The header is auto-generated from this
+table by `tools/export_textures.py` (Phase 9 deliverable); until then it is hand-maintained.
+
+#### Cell Assignment Table — Row 0: Toolbar Tool-Mode Icons (active state)
+
+These are the filled, accent-bordered versions displayed on the toolbar button when the
+tool is active. Each is a 48×48 px icon centered within a 64×64 px cell.
+
+| Handle | Col | Row | Constant name | Description |
+|---|---|---|---|---|
+| 0 | 0 | 0 | `kSpriteToolZoneActive` | Zone tool — active state (filled, accent border) |
+| 1 | 1 | 0 | `kSpriteToolRoadActive` | Road tool — active state |
+| 2 | 2 | 0 | `kSpriteToolUtilitiesActive` | Utilities tool — active state |
+| 3 | 3 | 0 | `kSpriteToolDemolishActive` | Demolish tool — active state |
+| 4 | 4 | 0 | `kSpriteToolQueryActive` | Query tool — active state |
+
+#### Cell Assignment Table — Row 1: Toolbar Tool-Mode Icons (inactive state)
+
+These are the outline-only versions displayed on the toolbar button when the tool is
+not selected.
+
+| Handle | Col | Row | Constant name | Description |
+|---|---|---|---|---|
+| 32 | 0 | 1 | `kSpriteToolZoneInactive` | Zone tool — inactive state (outline, no border) |
+| 33 | 1 | 1 | `kSpriteToolRoadInactive` | Road tool — inactive state |
+| 34 | 2 | 1 | `kSpriteToolUtilitiesInactive` | Utilities tool — inactive state |
+| 35 | 3 | 1 | `kSpriteToolDemolishInactive` | Demolish tool — inactive state |
+| 36 | 4 | 1 | `kSpriteToolQueryInactive` | Query tool — inactive state |
+
+#### Cell Assignment Table — Row 2: Zone Sub-Panel Button Icons (active / selected state)
+
+These are the filled, accent-bordered versions displayed on a zone sub-panel button when
+that zone type + density tier is the current selection. 9 icons for 3 zone types ×
+3 density tiers. Each is a 56×40 px icon (matches the 64×40 px button minus 4 px margin
+per side on width; full height used) centered within a 64×64 px cell.
+
+| Handle | Col | Row | Constant name | Description |
+|---|---|---|---|---|
+| 64 | 0 | 2 | `kSpriteZoneResLowActive` | Residential Low density — active/selected |
+| 65 | 1 | 2 | `kSpriteZoneComLowActive` | Commercial Low density — active/selected |
+| 66 | 2 | 2 | `kSpriteZoneIndLowActive` | Industrial Low density — active/selected |
+| 67 | 3 | 2 | `kSpriteZoneResMedActive` | Residential Medium density — active/selected |
+| 68 | 4 | 2 | `kSpriteZoneComMedActive` | Commercial Medium density — active/selected |
+| 69 | 5 | 2 | `kSpriteZoneIndMedActive` | Industrial Medium density — active/selected |
+| 70 | 6 | 2 | `kSpriteZoneResHighActive` | Residential High density — active/selected |
+| 71 | 7 | 2 | `kSpriteZoneComHighActive` | Commercial High density — active/selected |
+| 72 | 8 | 2 | `kSpriteZoneIndHighActive` | Industrial High density — active/selected |
+
+#### Cell Assignment Table — Row 3: Zone Sub-Panel Button Icons (inactive / outline state)
+
+Outline-only versions for unselected zone sub-panel buttons.
+
+| Handle | Col | Row | Constant name | Description |
+|---|---|---|---|---|
+| 96 | 0 | 3 | `kSpriteZoneResLowInactive` | Residential Low density — inactive/outline |
+| 97 | 1 | 3 | `kSpriteZoneComLowInactive` | Commercial Low density — inactive/outline |
+| 98 | 2 | 3 | `kSpriteZoneIndLowInactive` | Industrial Low density — inactive/outline |
+| 99 | 3 | 3 | `kSpriteZoneResMedInactive` | Residential Medium density — inactive/outline |
+| 100 | 4 | 3 | `kSpriteZoneComMedInactive` | Commercial Medium density — inactive/outline |
+| 101 | 5 | 3 | `kSpriteZoneIndMedInactive` | Industrial Medium density — inactive/outline |
+| 102 | 6 | 3 | `kSpriteZoneResHighInactive` | Residential High density — inactive/outline |
+| 103 | 7 | 3 | `kSpriteZoneComHighInactive` | Commercial High density — inactive/outline |
+| 104 | 8 | 3 | `kSpriteZoneIndHighInactive` | Industrial High density — inactive/outline |
+
+#### Cell Assignment Table — Row 4: Utilities Sub-Panel Button Icons (active / selected state)
+
+4 icons for 4 service building types, one per column. Each is sized to fill most of the
+64×64 px cell (icon art at 56×40 px, centered). Column order matches the 2×2 sub-panel
+grid: cols 0–3 map to (col0 row0)=PowerPlant, (col1 row0)=WaterTower,
+(col0 row1)=FireStation, (col1 row1)=PoliceStation.
+
+| Handle | Col | Row | Constant name | Description |
+|---|---|---|---|---|
+| 128 | 0 | 4 | `kSpriteUtilPowerActive` | Power Plant — active/selected |
+| 129 | 1 | 4 | `kSpriteUtilWaterActive` | Water Tower — active/selected |
+| 130 | 2 | 4 | `kSpriteUtilFireActive` | Fire Station — active/selected |
+| 131 | 3 | 4 | `kSpriteUtilPoliceActive` | Police Station — active/selected |
+
+#### Cell Assignment Table — Row 5: Utilities Sub-Panel Button Icons (inactive / outline state)
+
+| Handle | Col | Row | Constant name | Description |
+|---|---|---|---|---|
+| 160 | 0 | 5 | `kSpriteUtilPowerInactive` | Power Plant — inactive/outline |
+| 161 | 1 | 5 | `kSpriteUtilWaterInactive` | Water Tower — inactive/outline |
+| 162 | 2 | 5 | `kSpriteUtilFireInactive` | Fire Station — inactive/outline |
+| 163 | 3 | 5 | `kSpriteUtilPoliceInactive` | Police Station — inactive/outline |
+
+#### Cell Assignment Table — Row 6: Active Tool Indicator Icons
+
+These are the 32×32 px icons displayed in the active tool badge (virtual x: 8–72 px,
+y: 752–784 px) immediately below the demand bar. One icon per tool mode plus a "no tool"
+placeholder.
+
+| Handle | Col | Row | Constant name | Description |
+|---|---|---|---|---|
+| 192 | 0 | 6 | `kSpriteIndicatorNone` | No tool active — neutral / camera icon |
+| 193 | 1 | 6 | `kSpriteIndicatorZone` | Zone tool active indicator |
+| 194 | 2 | 6 | `kSpriteIndicatorRoad` | Road tool active indicator |
+| 195 | 3 | 6 | `kSpriteIndicatorUtilities` | Utilities tool active indicator |
+| 196 | 4 | 6 | `kSpriteIndicatorDemolish` | Demolish tool active indicator |
+| 197 | 5 | 6 | `kSpriteIndicatorQuery` | Query tool active indicator |
+
+#### Cell Assignment Table — Row 7: Cursor-Shape Icons (deferred — Phase 10+)
+
+OS-level cursor shape changes require `IUIBackend::setMouseCursor()`, which does not exist
+in the Phase 9b 17-method `IUIBackend` interface. These cells are reserved but not
+implemented in Phase 9b. Phase 10+ fills these cells when `setMouseCursor()` is added.
+
+| Handle | Col | Row | Constant name | Description |
+|---|---|---|---|---|
+| 224 | 0 | 7 | `kSpriteCursorDefault` | Default arrow cursor |
+| 225 | 1 | 7 | `kSpriteCursorZone` | Zone crosshair with zone-color tint |
+| 226 | 2 | 7 | `kSpriteCursorRoad` | Road-segment cursor icon |
+| 227 | 3 | 7 | `kSpriteCursorUtilities` | Wrench cursor icon |
+| 228 | 4 | 7 | `kSpriteCursorDemolish` | X-marker cursor icon |
+| 229 | 5 | 7 | `kSpriteCursorQuery` | Magnifying glass cursor icon |
+
+#### Cell Assignment Table — Row 8: Minimap Overlay Toggle Icons (active state)
+
+| Handle | Col | Row | Constant name | Description |
+|---|---|---|---|---|
+| 256 | 0 | 8 | `kSpriteOverlayServiceCoverageActive` | Service coverage overlay — active (filled, accent border) |
+
+#### Cell Assignment Table — Row 9: Minimap Overlay Toggle Icons (inactive state)
+
+| Handle | Col | Row | Constant name | Description |
+|---|---|---|---|---|
+| 288 | 0 | 9 | `kSpriteOverlayServiceCoverageInactive` | Service coverage overlay — inactive (outline) |
+
+#### Cell Assignment Table — Row 10: Notification / HUD Miscellaneous Icons
+
+| Handle | Col | Row | Constant name | Description |
+|---|---|---|---|---|
+| 320 | 0 | 10 | `kSpriteNotificationBell` | Notification bell (badge-eligible) |
+| 321 | 1 | 10 | `kSpriteClockIcon` | Clock icon for grace period indicator |
+| 322 | 2 | 10 | `kSpriteUnsavedDot` | Unsaved-changes amber dot (16×16 px icon, centered in cell) |
+| 323 | 3 | 10 | `kSpriteUndoIcon` | Undo button icon (↩) |
+
+#### Reserved Rows 11–31
+
+Rows 11–31 (handles 352–1023) are reserved for future phases. Do not assign cells outside
+the ranges above without updating this table and the `hud_sprite_ids.h` header in the same
+commit.
+
+#### Authoring Notes for Phase 9b Icons
+
+**Zone sub-panel icon visual convention** (applies to rows 2 and 3):
+
+- **Active state** (rows 2): Filled solid icon using the zone's canonical colour
+  (Residential = green `#33BB44`; Commercial = blue `#3366CC`; Industrial = yellow-orange
+  `#CCAA22`). A 2 px accent-colour border surrounds the icon area within the 64×64 cell.
+  Density tier visual differentiation:
+  - Low: single-storey building silhouette (1 floor, wide footprint)
+  - Medium: mid-rise building silhouette (3–4 floors)
+  - High: tall building silhouette (6+ floors, narrow footprint)
+- **Inactive state** (row 3): Outline-only version of the same silhouette in neutral grey
+  `#888888`. No accent border. Fill is fully transparent (alpha = 0) inside the outline.
+
+**Utilities sub-panel icon visual convention** (applies to rows 4 and 5):
+
+- **Active state** (row 4): Filled icon using neutral white `#DDDDDD` on a mid-grey
+  `#444444` background fill within the cell. 2 px accent-colour border.
+  - Power Plant: lightning-bolt symbol
+  - Water Tower: cylindrical tower silhouette
+  - Fire Station: fire/flame symbol
+  - Police Station: badge/shield symbol
+- **Inactive state** (row 5): Outline-only in neutral grey `#888888`. No accent border.
+  Transparent fill.
+
+**Toolbar tool-mode icon visual convention** (applies to rows 0 and 1):
+
+- Icons are 48×48 px, centered within the 64×64 px cell (8 px transparent margin on all sides).
+- **Active state** (row 0): Filled icon, accent-colour border drawn within the 48×48 area.
+  Each tool has a unique shape:
+  - Zone: zoning grid square (four quadrants — R/C/I colour-coded)
+  - Road: single road segment (straight horizontal line with lane markings)
+  - Utilities: wrench silhouette
+  - Demolish: X mark (two crossing diagonal lines)
+  - Query: magnifying glass
+- **Inactive state** (row 1): Same shapes, outline-only, neutral grey `#888888`.
+
+**Active tool indicator convention** (row 6): All icons are 32×32 px, centered in 64×64 px cell.
+Same design as the corresponding toolbar active-state icon but at 32×32 px output size —
+use the same master artwork, scaled down for this position.
+
+**sRGB authoring**: All icons in `hud_sprites_ui.dds` must be authored in **linear color space**
+and exported as a linear RGBA PNG before running `nvcompress -rgba -nomips`. The UI sprite
+sheet uses `GL_RGBA8` linear upload — NOT the sRGB raw-GL path. Icons authored in sRGB and
+left uncorrected will appear over-darkened at runtime (the engine will not gamma-expand them
+since the `glTexImage2D` upload path does not use `GL_SRGB8_ALPHA8`). The correct authoring
+workflow in Photoshop or Krita: work in the file's native color space, disable color-space
+conversion on PNG export, and ensure the DCC tool's working color space is set to linear
+(no ICC profile embed needed for the UI sprite sheet — the upload path assumes linear).
+
+**`hud_sprite_ids.h` header stub for Phase 9b** (required before Phase 9b implementation
+begins — hand-authored until `tools/export_textures.py` generates it):
+
+```cpp
+// src/ui/hud_sprite_ids.h
+// Sprite handle constants for hud_sprites_ui.dds (2048×2048, 32×32 cell grid, 64×64 px/cell).
+// Handle encoding: col + row * 32. Authoritative table: architecture/asset-standards/2d-texture-standards.md
+// DO NOT use raw integer literals in IUIBackend::setElementImage() calls.
+#pragma once
+#include <cstdint>
+
+// Row 0 — Toolbar tool-mode icons (active state)
+constexpr uint32_t kSpriteToolZoneActive       =  0;
+constexpr uint32_t kSpriteToolRoadActive        =  1;
+constexpr uint32_t kSpriteToolUtilitiesActive   =  2;
+constexpr uint32_t kSpriteToolDemolishActive    =  3;
+constexpr uint32_t kSpriteToolQueryActive       =  4;
+
+// Row 1 — Toolbar tool-mode icons (inactive state)
+constexpr uint32_t kSpriteToolZoneInactive      = 32;
+constexpr uint32_t kSpriteToolRoadInactive      = 33;
+constexpr uint32_t kSpriteToolUtilitiesInactive = 34;
+constexpr uint32_t kSpriteToolDemolishInactive  = 35;
+constexpr uint32_t kSpriteToolQueryInactive     = 36;
+
+// Row 2 — Zone sub-panel button icons (active/selected state; order: col=zone R/C/I, row=density Low/Med/High)
+constexpr uint32_t kSpriteZoneResLowActive      = 64;
+constexpr uint32_t kSpriteZoneComLowActive      = 65;
+constexpr uint32_t kSpriteZoneIndLowActive      = 66;
+constexpr uint32_t kSpriteZoneResMedActive      = 67;
+constexpr uint32_t kSpriteZoneComMedActive      = 68;
+constexpr uint32_t kSpriteZoneIndMedActive      = 69;
+constexpr uint32_t kSpriteZoneResHighActive     = 70;
+constexpr uint32_t kSpriteZoneComHighActive     = 71;
+constexpr uint32_t kSpriteZoneIndHighActive     = 72;
+
+// Row 3 — Zone sub-panel button icons (inactive/outline state)
+constexpr uint32_t kSpriteZoneResLowInactive    = 96;
+constexpr uint32_t kSpriteZoneComLowInactive    = 97;
+constexpr uint32_t kSpriteZoneIndLowInactive    = 98;
+constexpr uint32_t kSpriteZoneResMedInactive    = 99;
+constexpr uint32_t kSpriteZoneComMedInactive    = 100;
+constexpr uint32_t kSpriteZoneIndMedInactive    = 101;
+constexpr uint32_t kSpriteZoneResHighInactive   = 102;
+constexpr uint32_t kSpriteZoneComHighInactive   = 103;
+constexpr uint32_t kSpriteZoneIndHighInactive   = 104;
+
+// Row 4 — Utilities sub-panel button icons (active/selected state)
+constexpr uint32_t kSpriteUtilPowerActive       = 128;
+constexpr uint32_t kSpriteUtilWaterActive       = 129;
+constexpr uint32_t kSpriteUtilFireActive        = 130;
+constexpr uint32_t kSpriteUtilPoliceActive      = 131;
+
+// Row 5 — Utilities sub-panel button icons (inactive/outline state)
+constexpr uint32_t kSpriteUtilPowerInactive     = 160;
+constexpr uint32_t kSpriteUtilWaterInactive     = 161;
+constexpr uint32_t kSpriteUtilFireInactive      = 162;
+constexpr uint32_t kSpriteUtilPoliceInactive    = 163;
+
+// Row 6 — Active tool indicator badge icons (32×32 px, centered in 64×64 px cell)
+constexpr uint32_t kSpriteIndicatorNone         = 192;
+constexpr uint32_t kSpriteIndicatorZone         = 193;
+constexpr uint32_t kSpriteIndicatorRoad         = 194;
+constexpr uint32_t kSpriteIndicatorUtilities    = 195;
+constexpr uint32_t kSpriteIndicatorDemolish     = 196;
+constexpr uint32_t kSpriteIndicatorQuery        = 197;
+
+// Row 7 — Cursor-shape icons (reserved; Phase 10+ only — IUIBackend::setMouseCursor() not yet added)
+constexpr uint32_t kSpriteCursorDefault         = 224;
+constexpr uint32_t kSpriteCursorZone            = 225;
+constexpr uint32_t kSpriteCursorRoad            = 226;
+constexpr uint32_t kSpriteCursorUtilities       = 227;
+constexpr uint32_t kSpriteCursorDemolish        = 228;
+constexpr uint32_t kSpriteCursorQuery           = 229;
+
+// Row 8 — Minimap overlay toggle icons (active state)
+constexpr uint32_t kSpriteOverlayServiceCoverageActive   = 256;
+
+// Row 9 — Minimap overlay toggle icons (inactive state)
+constexpr uint32_t kSpriteOverlayServiceCoverageInactive = 288;
+
+// Row 10 — Notification / HUD miscellaneous
+constexpr uint32_t kSpriteNotificationBell      = 320;
+constexpr uint32_t kSpriteClockIcon             = 321;
+constexpr uint32_t kSpriteUnsavedDot            = 322;
+constexpr uint32_t kSpriteUndoIcon              = 323;
+```
+
+**Zone sub-panel button array mapping for Phase 9b init()**: The 9 zone sub-panel buttons
+are created at init() in (zone, density) order. The active and outline handles for a given
+(zone, density) pair are computed as:
+
+```cpp
+// ZoneType::Residential=0, Commercial=1, Industrial=2
+// DensityTier::Low=0, Medium=1, High=2
+// zone_col = static_cast<int>(zoneType)      // 0, 1, or 2
+// density_row = static_cast<int>(densityTier) // 0, 1, or 2
+// Active handle:   kSpriteZoneResLowActive + zone_col + density_row * 3
+// Inactive handle: kSpriteZoneResLowInactive + zone_col + density_row * 3
+```
+
+This formula works because the zone sub-panel icons are laid out as 3 columns (R/C/I) ×
+3 rows (Low/Med/High) in the sprite sheet, matching the sub-panel's visual 3×3 grid. The
+formula is valid only for the active/inactive zone-type rows (rows 2 and 3) where all 9
+cells are contiguous in a 3-per-density-tier pattern.
+
+**Utilities sub-panel button array mapping for Phase 9b init()**:
+
+```cpp
+// ServiceBuildingType::PowerPlant=0, WaterTower=1, FireStation=2, PoliceStation=3
+// Active handle:   kSpriteUtilPowerActive   + static_cast<int>(type)
+// Inactive handle: kSpriteUtilPowerInactive + static_cast<int>(type)
+```
+
+This formula is valid only if `ServiceBuildingType` enum values are sequential from 0.
+Confirmed: the enum is defined in `src/interfaces/simulation_types.h` as
+`{ PowerPlant, WaterTower, FireStation, PoliceStation }` with default sequential values.
+
+**`IrrlichtUIBackend::setElementImage()` implementation contract**: The backend decodes
+the sprite handle as `col = handle % 32; row = handle / 32;` and computes the UV rect:
+`u0 = col / 32.0f; v0 = row / 32.0f; u1 = (col + 1) / 32.0f; v1 = (row + 1) / 32.0f;`
+(top-left UV origin, matching the DDS pixel layout). The backend then applies the UV rect
+to the button's image region. The `hud_sprites_ui.dds` texture must be bound to the UI
+texture unit before any draw call that uses sprite-sheet icons.
+
 ### Sign-Off
 
 This section holds required sign-off comment blocks for Phase gates. Each sign-off must be recorded

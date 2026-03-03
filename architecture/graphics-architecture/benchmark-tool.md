@@ -296,6 +296,25 @@ ceiling is informational only (displayed from `VRAMProfiler::totalMB()` if avail
 
 ---
 
+## Scope Limitation — CPU Ray-Cast Timing
+
+`aitown_benchmark` measures GPU-side anisotropy/VRAM performance only. It does **not** contain
+infrastructure to measure CPU-side ray-cast cost (e.g. `IrrlichtRenderer::pickTerrainTile()`
+call latency). The tool has no render loop that exercises CPU-side game logic, no heightmap
+query path, and no mechanism to report per-call CPU timings.
+
+The Phase 9b blocking spike for `pickTerrainTile()` ray-march cost was therefore conducted
+analytically (2026-03-02). See `implementation/phase-9b.md — Risks & Spikes` for the full
+analytical methodology and result. The spike conclusion mandated the O(1) DDA algorithm
+specified in the "pickTerrainTile DDA Algorithm" section of this file's sibling,
+`procedural-terrain.md`.
+
+If future phases require CPU microbenchmarks (e.g. pathfinding step cost, simulation tick
+budget breakdown), a separate `aitown_cpubench` executable or Google Benchmark integration
+should be specified — that work is out of scope for `aitown_benchmark`.
+
+---
+
 ## CI Integration
 
 The benchmark is **not** run in CI. Reasons:

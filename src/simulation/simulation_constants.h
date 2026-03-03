@@ -50,6 +50,21 @@ struct SimulationConstants {
     // Economy constants
     static constexpr float wage_fraction_of_revenue = 0.20f;
 
+    // Service building one-time placement costs (architecture/game-design/service-coverage.md)
+    // Deducted immediately from treasury at the moment of placement, before any budget tick fires.
+    // MUST NOT be hardcoded inline in CitySimulation.cpp or UIManager — all code must reference
+    // these constants. Values calibrated to Normal difficulty starting funds ($500,000):
+    // placing one of each ($22,000 total = 4.4% of starting capital) is affordable alongside
+    // a 20-road-tile opening layout without threatening early treasury.
+    static constexpr int service_placement_cost_power_plant   = 10000;
+    static_assert(service_placement_cost_power_plant > 0, "must be positive");
+    static constexpr int service_placement_cost_water_tower   = 3000;
+    static_assert(service_placement_cost_water_tower > 0, "must be positive");
+    static constexpr int service_placement_cost_fire_station  = 5000;
+    static_assert(service_placement_cost_fire_station > 0, "must be positive");
+    static constexpr int service_placement_cost_police_station = 4000;
+    static_assert(service_placement_cost_police_station > 0, "must be positive");
+
     // Service upkeep costs per budget tick (monthly)
     static constexpr int service_upkeep_fire_station_per_tick   = 500;
     static_assert(service_upkeep_fire_station_per_tick > 0, "must be positive");

@@ -60,25 +60,56 @@ The Z-order concern (scrim must cover panels; modal must be topmost) is handled 
 The construction sequence in `main.cpp`:
 
 ```text
-1. RenderSystem (owns IrrlichtDevice)
-2. IrrlichtUIBackend (needs device)
-   CRITICAL GL STATE RULE: IrrlichtUIBackend's constructor creates a VAO/VBO
-   for UI quad rendering. After closing the VAO scope (glBindVertexArray(0)),
-   it MUST also call glBindBuffer(GL_ARRAY_BUFFER, 0). GL_ARRAY_BUFFER is
-   global state (NOT per-VAO); leaving it bound causes Irrlicht's COpenGLDriver
-   to reinterpret client-side vertex array pointers as VBO offsets, silently
-   rendering zero geometry for ALL scene nodes.
-3. UIScaler (needs uiBackend screen dimensions)
-4. Camera scene node + CameraController
-5. IrrlichtRenderer(device, /*uiManager=*/nullptr)
-6. WallClock, AudioSystem, TerrainSystem, CitySimulation
-7. TerrainSystem::generate() + buildAllChunks()   // terrain generation before UI
-8. CameraController::setTarget(centerX, centerZ)  // center camera over terrain
-9. UIManager(uiBackend, audioSystem, citySimulation, wallClock)
-10. renderer.setUIManager(&uiManager)         // late binding
-11. EventReceiver(uiScaler, uiManager, cameraController)
-12. device->setEventReceiver(&eventReceiver)
+1.  RenderSystem (owns IrrlichtDevice)
+2.  IrrlichtUIBackend (needs device)
+    CRITICAL GL STATE RULE: IrrlichtUIBackend's constructor creates a VAO/VBO
+    for UI quad rendering. After closing the VAO scope (glBindVertexArray(0)),
+    it MUST also call glBindBuffer(GL_ARRAY_BUFFER, 0). GL_ARRAY_BUFFER is
+    global state (NOT per-VAO); leaving it bound causes Irrlicht's COpenGLDriver
+    to reinterpret client-side vertex array pointers as VBO offsets, silently
+    rendering zero geometry for ALL scene nodes.
+3.  UIScaler (needs uiBackend screen dimensions)
+4.  Camera scene node + CameraController
+5.  IrrlichtRenderer(device, /*uiManager=*/nullptr)
+6.  WallClock, AudioSystem, TerrainSystem, CitySimulation
+7.  TerrainSystem::generate() + buildAllChunks()   // terrain generation before UI
+8.  CameraController::setTarget(centerX, centerZ)  // center camera over terrain
+    // Phase 9b terrain-renderer wiring (steps 9a–9d must come before UIManager construction
+    // so that IrrlichtRenderer has valid terrain pointers before any event can fire):
+9a. renderer.setTerrainQuery(&terrainSystem)       // Phase 9b — ITerrainQuery* for pickTerrainTile
+9b. renderer.setCellSize(terrainSystem.getCellSize())   // Phase 9b — tile width in metres
+9c. renderer.setRendererMapDimensions(terrainSystem.getMapTilesX(),
+                                      terrainSystem.getMapTilesZ())
+    // Phase 9b — DDA bounds; see procedural-terrain.md "pickTerrainTile DDA Algorithm"
+10. UIManager(uiBackend, audioSystem, citySimulation, wallClock)
+11. renderer.setUIManager(&uiManager)              // late binding (unchanged)
+    // Phase 9b UIManager-renderer wiring (after UIManager is constructed):
+12. uiManager.setRenderer(&renderer)              // Phase 9b — for pickTerrainTile calls
+13. uiManager.setTerrainQuery(&terrainSystem)     // Phase 9b — earthworks cost computation
+14. uiManager.setMapDimensions(terrainSystem.getMapTilesX(),
+                                terrainSystem.getMapTilesZ())
+    // Phase 9b — zone overlay key (tileZ * mapTilesX + tileX)
+15. EventReceiver(uiScaler, uiManager, cameraController)
+16. device->setEventReceiver(&eventReceiver)
 ```
+
+**Phase 9b wiring notes**:
+
+- Steps 9a–9c are on `IrrlichtRenderer` directly (not `IRenderer*` interface) because
+  `setTerrainQuery`, `setCellSize`, and `setRendererMapDimensions` are one-time
+  initialization setters, not general renderer capabilities. Use the concrete
+  `IrrlichtRenderer&` reference to call them.
+- Steps 12–14 are on `UIManager` directly (also not interface methods). Same rationale:
+  one-time post-construction wiring.
+- `setRendererMapDimensions` stores `m_mapTilesX` and `m_mapTilesZ` on `IrrlichtRenderer`
+  (distinct from `UIManager`'s same-named members). These are required by the DDA bounds
+  check in `pickTerrainTile()`. Without step 9c, `pickTerrainTile()` always returns `false`
+  (bounds check exits on the first step with default 0-valued dimensions).
+- All Phase 9b wiring steps must complete before the main game loop starts. The ordering
+  constraint is: terrain generation (step 7) → steps 9a–9c → UIManager construction
+  (step 10) → steps 12–14 → event receiver (step 15). Steps 9a–9c must precede step 10
+  to ensure that any hot-path event immediately after `setEventReceiver` in step 16 finds
+  `IrrlichtRenderer` fully wired.
 
 ## IrrlichtRenderer and UIManager — Header Dependency Rule
 

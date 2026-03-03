@@ -5,7 +5,8 @@
 #include <irrlicht.h>
 
 #include "IrrlichtRenderer.h"
-#include "src/ui/UIManager.h"  // FULL include here (not in header — per Header Dependency Rule)
+#include "src/ui/UIManager.h"            // FULL include here (not in header — per Header Dependency Rule)
+#include "src/interfaces/ITerrainQuery.h" // ITerrainQuery full include (forward-decl in header only)
 
 #include <algorithm>   // std::min, std::max
 #include <cstdio>      // fprintf
@@ -294,4 +295,413 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
         // -------------------------------------------------------------------------
         m_chunkNodes[params.chunkId] = newNode;
     }
+}
+
+// -------------------------------------------------------------------------
+// pickTerrainTile — O(1) DDA grid traversal (Amanatides & Woo 1987).
+//
+// Normative algorithm per
+// architecture/graphics-architecture/procedural-terrain.md —
+// "pickTerrainTile DDA Algorithm".
+//
+// Performance: at most (mapTilesX + mapTilesZ) iterations, each O(1).
+// Worst case on a 1024×1024 map: 2048 × ~15 ns = ~30 µs per call.
+// At 10 MouseMove events/frame at 60 FPS: ~300 µs — within the 1 ms budget.
+// -------------------------------------------------------------------------
+bool IrrlichtRenderer::pickTerrainTile(int screenX, int screenY,
+                                        int& tileX, int& tileZ) const
+{
+    if (!m_terrain)               return false;
+    if (!m_camera || !m_smgr)     return false;
+    if (m_mapTilesX <= 0 || m_mapTilesZ <= 0) return false;
+    if (m_cellSize <= 0.0f)       return false;
+
+    // Obtain world-space ray through the screen pixel.
+    irr::core::line3df ray =
+        m_smgr->getSceneCollisionManager()
+            ->getRayFromScreenCoordinates(
+                irr::core::position2di(screenX, screenY), m_camera);
+
+    irr::core::vector3df ro = ray.start;
+    irr::core::vector3df rd = (ray.end - ray.start);
+    rd.normalize();
+
+    // A near-horizontal ray cannot usefully intersect the terrain grid — bail early.
+    if (std::fabs(rd.Y) < 1e-5f) return false;
+
+    // ---- DDA Step 1: Starting tile (clamp to map) ----
+    int cx = static_cast<int>(ro.X / m_cellSize);
+    int cz = static_cast<int>(ro.Z / m_cellSize);
+    cx = std::max(0, std::min(cx, m_mapTilesX - 1));
+    cz = std::max(0, std::min(cz, m_mapTilesZ - 1));
+
+    // ---- DDA Step 2: Step direction per axis ----
+    int stepX = (rd.X >= 0.0f) ? 1 : -1;
+    int stepZ = (rd.Z >= 0.0f) ? 1 : -1;
+
+    // ---- DDA Step 3: Distance to first boundary crossing ----
+    float tMaxX, tMaxZ;
+    if (std::fabs(rd.X) < 1e-6f) {
+        tMaxX = 1e30f;  // axis-aligned in Z — no X crossings
+    } else {
+        float nextBoundX = (stepX > 0)
+            ? (static_cast<float>(cx + 1) * m_cellSize)
+            : (static_cast<float>(cx)     * m_cellSize);
+        tMaxX = (nextBoundX - ro.X) / rd.X;
+    }
+    if (std::fabs(rd.Z) < 1e-6f) {
+        tMaxZ = 1e30f;
+    } else {
+        float nextBoundZ = (stepZ > 0)
+            ? (static_cast<float>(cz + 1) * m_cellSize)
+            : (static_cast<float>(cz)     * m_cellSize);
+        tMaxZ = (nextBoundZ - ro.Z) / rd.Z;
+    }
+
+    // ---- DDA Step 4: Per-axis delta (consecutive-boundary distance) ----
+    float tDeltaX = (std::fabs(rd.X) < 1e-6f) ? 1e30f : std::fabs(m_cellSize / rd.X);
+    float tDeltaZ = (std::fabs(rd.Z) < 1e-6f) ? 1e30f : std::fabs(m_cellSize / rd.Z);
+
+    // ---- DDA Step 5: Traverse at most (mapTilesX + mapTilesZ) cells ----
+    int maxSteps = m_mapTilesX + m_mapTilesZ;
+    for (int i = 0; i < maxSteps; ++i) {
+        // Ray parameter t at the centre of the current cell.
+        float tc = std::min(tMaxX, tMaxZ) - 0.5f * std::min(tDeltaX, tDeltaZ);
+        tc = std::max(tc, 0.0f);
+
+        // Ray Y at this cell's approximate centre.
+        float rayY = ro.Y + tc * rd.Y;
+
+        // Sample terrain height at the current cell.
+        float h = m_terrain->getHeightAt(cx, cz);
+
+        if (rayY <= h) {
+            // Hit — ray has entered or gone below terrain at this cell.
+            tileX = std::max(0, std::min(cx, m_mapTilesX - 1));
+            tileZ = std::max(0, std::min(cz, m_mapTilesZ - 1));
+            return true;
+        }
+
+        // Advance to the next cell boundary.
+        if (tMaxX < tMaxZ) {
+            cx    += stepX;
+            tMaxX += tDeltaX;
+        } else {
+            cz    += stepZ;
+            tMaxZ += tDeltaZ;
+        }
+
+        // Exit map bounds — ray has left the terrain grid.
+        if (cx < 0 || cx >= m_mapTilesX || cz < 0 || cz >= m_mapTilesZ)
+            return false;
+    }
+
+    return false;  // Traversed all cells without intersecting terrain.
+}
+
+// -------------------------------------------------------------------------
+// setTileHoverHighlight — update the hover-quad mesh buffer in-place.
+//
+// The mesh + buffer are allocated once in the constructor (never null during
+// gameplay).  This method only updates vertex positions and colours — no
+// heap allocation or deallocation per event.
+//
+// Pass tileX = -1 to clear (sets m_hoverVisible = false without touching
+// the buffer, so the next valid call can immediately overwrite).
+//
+// The actual drawMeshBuffer() call is deferred to drawScene(), after
+// sceneManager->drawAll(), per the Phase 9b per-frame sequence in
+// architecture/graphics-architecture/irrlicht-device-lifecycle.md.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::setTileHoverHighlight(int tileX, int tileZ, uint32_t argb)
+{
+    // Clear request.
+    if (tileX < 0) {
+        m_hoverVisible = false;
+        return;
+    }
+    if (!m_terrain || !m_driver) {
+        m_hoverVisible = false;
+        return;
+    }
+
+    // Lazy-allocate the hover mesh on first valid call.
+    // The mesh is allocated here (not in the constructor) because m_driver
+    // may be null at construction time in unit tests.
+    if (!m_hoveredTileMesh) {
+        m_hoveredTileMesh = new SMesh();
+        SMeshBuffer* buf = new SMeshBuffer();
+
+        // Pre-populate with 4 vertices + 6 indices (two CCW triangles forming a quad).
+        // Positions are overwritten below; we need the slots to exist.
+        for (int v = 0; v < 4; ++v) {
+            buf->Vertices.push_back(S3DVertex(
+                core::vector3df(0, 0, 0),
+                core::vector3df(0, 1, 0),
+                SColor(255, 255, 255, 255),
+                core::vector2df(0, 0)));
+        }
+        // Two triangles: v0-v1-v2, v0-v2-v3  (left-handed CW from above = +Y normal)
+        buf->Indices.push_back(0); buf->Indices.push_back(2); buf->Indices.push_back(1);
+        buf->Indices.push_back(0); buf->Indices.push_back(3); buf->Indices.push_back(2);
+
+        // EMT_TRANSPARENT_ALPHA_CHANNEL: respects the vertex colour alpha channel.
+        buf->Material.MaterialType = EMT_TRANSPARENT_ALPHA_CHANNEL;
+        buf->Material.Lighting = false;
+        buf->Material.ZWriteEnable = false;  // draw-over without Z-write
+
+        m_hoveredTileMesh->addMeshBuffer(buf);
+        buf->drop();  // mesh is sole owner
+
+        m_hoverBuffer = static_cast<SMeshBuffer*>(
+            m_hoveredTileMesh->getMeshBuffer(0));  // non-owning observer
+    }
+
+    // Decode ARGB (0xAARRGGBB) for Irrlicht SColor(A, R, G, B).
+    u8 a = static_cast<u8>((argb >> 24) & 0xFF);
+    u8 r = static_cast<u8>((argb >> 16) & 0xFF);
+    u8 g = static_cast<u8>((argb >>  8) & 0xFF);
+    u8 b = static_cast<u8>( argb        & 0xFF);
+    SColor colour(a, r, g, b);
+
+    // Build the four tile-corner positions slightly above terrain surface.
+    float yOffset = 0.1f;  // 10 cm above terrain to avoid Z-fighting
+    float x0 = static_cast<float>(tileX)     * m_cellSize;
+    float x1 = static_cast<float>(tileX + 1) * m_cellSize;
+    float z0 = static_cast<float>(tileZ)     * m_cellSize;
+    float z1 = static_cast<float>(tileZ + 1) * m_cellSize;
+
+    float h00 = m_terrain->getHeightAt(tileX,     tileZ)     + yOffset;
+    float h10 = m_terrain->getHeightAt(tileX + 1, tileZ)     + yOffset;
+    float h11 = m_terrain->getHeightAt(tileX + 1, tileZ + 1) + yOffset;
+    float h01 = m_terrain->getHeightAt(tileX,     tileZ + 1) + yOffset;
+
+    // Update vertex positions and colours in-place.
+    m_hoverBuffer->Vertices[0].Pos   = core::vector3df(x0, h00, z0);
+    m_hoverBuffer->Vertices[0].Color = colour;
+    m_hoverBuffer->Vertices[1].Pos   = core::vector3df(x1, h10, z0);
+    m_hoverBuffer->Vertices[1].Color = colour;
+    m_hoverBuffer->Vertices[2].Pos   = core::vector3df(x1, h11, z1);
+    m_hoverBuffer->Vertices[2].Color = colour;
+    m_hoverBuffer->Vertices[3].Pos   = core::vector3df(x0, h01, z1);
+    m_hoverBuffer->Vertices[3].Color = colour;
+
+    // Mandatory bounding box update after vertex position changes.
+    m_hoverBuffer->recalculateBoundingBox();
+    m_hoveredTileMesh->recalculateBoundingBox();
+
+    m_hoverVisible = true;
+}
+
+// -------------------------------------------------------------------------
+// setZoneOverlay — rebuild the persistent zone-colour overlay mesh.
+//
+// Each entry in sparseOverlay is one tile quad rendered semi-transparently
+// above the terrain.  The overlay node is a persistent IMeshSceneNode* that
+// is rebuilt (not just updated) whenever the zone layout changes.
+//
+// Capped at 100K overlay quads for V1 (per IRenderer.h contract).
+// Called once per budget tick — NOT every frame.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::setZoneOverlay(
+    int mapTilesX, int mapTilesZ,
+    const std::unordered_map<uint64_t, uint32_t>& sparseOverlay)
+{
+    if (!m_smgr || !m_driver) return;
+
+    // Remove the previous overlay node if present.
+    if (m_overlayNode) {
+        // Eviction sequence: clear textures, flush driver state, then remove.
+        u32 matCount = m_overlayNode->getMaterialCount();
+        for (u32 m = 0; m < matCount; ++m) {
+            SMaterial& mat = m_overlayNode->getMaterial(m);
+            for (u32 t = 0; t < MATERIAL_MAX_TEXTURES; ++t) {
+                mat.setTexture(t, nullptr);
+            }
+        }
+        m_driver->setMaterial(SMaterial{});
+        m_overlayNode->remove();
+        m_overlayNode = nullptr;
+    }
+
+    // Nothing to render — overlay cleared.
+    if (sparseOverlay.empty()) return;
+
+    // Cap at 100K quads for V1.
+    static constexpr size_t kMaxOverlayQuads = 100000u;
+
+    SMesh*       omesh = new SMesh();
+    SMeshBuffer* obuf  = new SMeshBuffer();
+
+    size_t quadCount = std::min(sparseOverlay.size(), kMaxOverlayQuads);
+    obuf->Vertices.reallocate(static_cast<u32>(quadCount * 4));
+    obuf->Indices.reallocate(static_cast<u32>(quadCount * 6));
+
+    obuf->Material.MaterialType = EMT_TRANSPARENT_ALPHA_CHANNEL;
+    obuf->Material.Lighting     = false;
+    obuf->Material.ZWriteEnable = false;
+
+    float yOffset = 0.05f;  // 5 cm above terrain — under the hover highlight (10 cm)
+
+    size_t written = 0;
+    for (const auto& kv : sparseOverlay) {
+        if (written >= kMaxOverlayQuads) break;
+
+        // Decode tile index from key.
+        int tx = static_cast<int>(kv.first % static_cast<uint64_t>(mapTilesX));
+        int tz = static_cast<int>(kv.first / static_cast<uint64_t>(mapTilesX));
+
+        // Skip out-of-bounds tiles.
+        if (tx < 0 || tx >= mapTilesX || tz < 0 || tz >= mapTilesZ) continue;
+
+        // Decode ARGB colour.
+        uint32_t ac = kv.second;
+        u8 ca = static_cast<u8>((ac >> 24) & 0xFF);
+        u8 cr = static_cast<u8>((ac >> 16) & 0xFF);
+        u8 cg = static_cast<u8>((ac >>  8) & 0xFF);
+        u8 cb = static_cast<u8>( ac        & 0xFF);
+        SColor colour(ca, cr, cg, cb);
+
+        float x0 = static_cast<float>(tx)     * m_cellSize;
+        float x1 = static_cast<float>(tx + 1) * m_cellSize;
+        float z0 = static_cast<float>(tz)     * m_cellSize;
+        float z1 = static_cast<float>(tz + 1) * m_cellSize;
+
+        float h00 = (m_terrain ? m_terrain->getHeightAt(tx,     tz)     : 0.0f) + yOffset;
+        float h10 = (m_terrain ? m_terrain->getHeightAt(tx + 1, tz)     : 0.0f) + yOffset;
+        float h11 = (m_terrain ? m_terrain->getHeightAt(tx + 1, tz + 1) : 0.0f) + yOffset;
+        float h01 = (m_terrain ? m_terrain->getHeightAt(tx,     tz + 1) : 0.0f) + yOffset;
+
+        u32 base = static_cast<u32>(written * 4);
+
+        obuf->Vertices.push_back(S3DVertex(
+            core::vector3df(x0, h00, z0), core::vector3df(0, 1, 0), colour,
+            core::vector2df(0, 0)));
+        obuf->Vertices.push_back(S3DVertex(
+            core::vector3df(x1, h10, z0), core::vector3df(0, 1, 0), colour,
+            core::vector2df(1, 0)));
+        obuf->Vertices.push_back(S3DVertex(
+            core::vector3df(x1, h11, z1), core::vector3df(0, 1, 0), colour,
+            core::vector2df(1, 1)));
+        obuf->Vertices.push_back(S3DVertex(
+            core::vector3df(x0, h01, z1), core::vector3df(0, 1, 0), colour,
+            core::vector2df(0, 1)));
+
+        // Two triangles per quad: v0→v2→v1, v0→v3→v2 (CW from above = +Y normal).
+        obuf->Indices.push_back(base + 0);
+        obuf->Indices.push_back(base + 2);
+        obuf->Indices.push_back(base + 1);
+        obuf->Indices.push_back(base + 0);
+        obuf->Indices.push_back(base + 3);
+        obuf->Indices.push_back(base + 2);
+
+        ++written;
+    }
+
+    if (written == 0) {
+        // All entries were out-of-bounds — drop and bail.
+        obuf->drop();
+        omesh->drop();
+        return;
+    }
+
+    // Mandatory bounding box calculation before attaching to scene graph.
+    obuf->recalculateBoundingBox();
+    omesh->addMeshBuffer(obuf);
+    obuf->drop();  // mesh is sole owner
+    omesh->recalculateBoundingBox();
+
+    m_overlayNode = m_smgr->addMeshSceneNode(omesh);
+    omesh->drop();  // scene node is now sole owner
+
+    if (m_overlayNode) {
+        m_overlayNode->setPosition(core::vector3df(0.0f, 0.0f, 0.0f));
+        m_overlayNode->setMaterialFlag(EMF_LIGHTING, false);
+        m_overlayNode->setMaterialFlag(EMF_BACK_FACE_CULLING, false);
+    }
+}
+
+// -------------------------------------------------------------------------
+// getTileScreenBounds — project tile corners to screen space via camera.
+//
+// Returns ScreenRect in physical pixels, or ScreenRect{} if the tile is
+// off-screen, m_terrain is null, or the tile coordinates are out of bounds.
+// Used by UIManager for the 3-step InspectorPanel position cascade.
+// -------------------------------------------------------------------------
+ScreenRect IrrlichtRenderer::getTileScreenBounds(int tileX, int tileZ) const
+{
+    if (!m_driver || !m_smgr || !m_camera) return ScreenRect{};
+    if (m_mapTilesX <= 0 || m_mapTilesZ <= 0) return ScreenRect{};
+    if (tileX < 0 || tileX >= m_mapTilesX) return ScreenRect{};
+    if (tileZ < 0 || tileZ >= m_mapTilesZ) return ScreenRect{};
+
+    float h = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+    float yWorld = h + 0.1f;  // slightly above terrain surface
+
+    float x0 = static_cast<float>(tileX)     * m_cellSize;
+    float x1 = static_cast<float>(tileX + 1) * m_cellSize;
+    float z0 = static_cast<float>(tileZ)     * m_cellSize;
+    float z1 = static_cast<float>(tileZ + 1) * m_cellSize;
+
+    irr::core::vector3df corners[4] = {
+        { x0, yWorld, z0 },
+        { x1, yWorld, z0 },
+        { x1, yWorld, z1 },
+        { x0, yWorld, z1 },
+    };
+
+    irr::core::dimension2d<u32> screenSize = m_driver->getScreenSize();
+
+    // Project each corner through the camera view+projection matrices.
+    // Irrlicht does not expose a direct worldToScreen API at the scene manager
+    // level, so we use the camera's combined view-projection matrix directly.
+    const irr::core::matrix4& view = m_camera->getViewMatrix();
+    const irr::core::matrix4& proj = m_camera->getProjectionMatrix();
+    irr::core::matrix4 vp = proj * view;
+
+    int minX = INT_MAX, minY = INT_MAX;
+    int maxX = INT_MIN, maxY = INT_MIN;
+    bool anyVisible = false;
+
+    for (int i = 0; i < 4; ++i) {
+        irr::core::vector3df p = corners[i];
+
+        // Transform to clip space: clip = VP * world.
+        float cx = vp[0]*p.X + vp[4]*p.Y + vp[8]*p.Z  + vp[12];
+        float cy = vp[1]*p.X + vp[5]*p.Y + vp[9]*p.Z  + vp[13];
+        // cz not used for 2D projection
+        float cw = vp[3]*p.X + vp[7]*p.Y + vp[11]*p.Z + vp[15];
+
+        if (cw <= 0.0f) continue;  // behind camera — skip this corner
+
+        // Perspective divide → NDC [-1, +1].
+        float ndcX = cx / cw;
+        float ndcY = cy / cw;
+
+        // Clamp to slightly beyond screen to detect near-miss cases.
+        if (ndcX < -1.2f || ndcX > 1.2f || ndcY < -1.2f || ndcY > 1.2f) continue;
+
+        // Convert NDC to pixel coordinates.
+        // NDC (+1,-1) = top-left in most conventions; Irrlicht uses Y-down screen.
+        int sx = static_cast<int>((ndcX  + 1.0f) * 0.5f * static_cast<float>(screenSize.Width));
+        int sy = static_cast<int>((1.0f - ndcY) * 0.5f * static_cast<float>(screenSize.Height));
+
+        minX = std::min(minX, sx);
+        minY = std::min(minY, sy);
+        maxX = std::max(maxX, sx);
+        maxY = std::max(maxY, sy);
+        anyVisible = true;
+    }
+
+    if (!anyVisible) return ScreenRect{};
+
+    // Clamp to screen bounds.
+    minX = std::max(minX, 0);
+    minY = std::max(minY, 0);
+    maxX = std::min(maxX, static_cast<int>(screenSize.Width)  - 1);
+    maxY = std::min(maxY, static_cast<int>(screenSize.Height) - 1);
+
+    if (maxX <= minX || maxY <= minY) return ScreenRect{};
+
+    return ScreenRect{ minX, minY, maxX - minX, maxY - minY };
 }

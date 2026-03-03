@@ -474,6 +474,14 @@ target_include_directories(simulation_tests PRIVATE
 )
 aitown_add_tests(simulation_tests LABEL "unit" DISCOVERY_TIMEOUT 60)
 
+# Phase 9b: extend simulation_tests with audio callback tests for placeRoad SFX.
+# Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(simulation_tests ...)
+# again — that would produce a duplicate target error.
+# (ref: implementation/phase-9b.md Deliverable J — CitySimulation_PlaceRoad_FiresSFXRoadBuild)
+target_sources(simulation_tests PRIVATE
+    tests/simulation/audio_sim_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # terrain_tests — terrain generator property tests and fixed-seed regression
 # TIMEOUT 300: multi-seed property tests can exceed 120 s on coverage-instrumented runners

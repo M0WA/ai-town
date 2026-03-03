@@ -122,4 +122,177 @@
 
   `TerrainSystem::getHeightAt(int tileX, int tileZ)` returns the exact LOD0 heightmap height sample at the grid-centre of tile `(tileX, tileZ)`. **No interpolation is performed**. This method always queries the persistent LOD0 heightmap array stored in `TerrainSystem`, never the active scene-node mesh geometry (which may be rendered at LOD1 or LOD2). This contract is authoritative for ray-march cursor-to-terrain intersection queries (e.g. `pickTerrainTile()`): the query will always return the exact grid-centre height, regardless of which LOD level is currently rendered for that tile. Cursor positions that fall between grid-centres will not interpolate; callers requiring bilinear-interpolated heights for sub-tile precision must implement interpolation on top of multiple `getHeightAt()` calls.
 
+  **`ITerrainQuery` interface promotion (Phase 9b)**: `getHeightAt` is promoted to the
+  `ITerrainQuery` interface (`src/interfaces/ITerrainQuery.h`) so that `IrrlichtRenderer` can
+  sample terrain height for zone overlay Y-positions and hover highlight Y-positions without
+  a direct dependency on the concrete `TerrainSystem` class. The method signature on
+  `ITerrainQuery` is:
+
+  ```cpp
+  // Returns Y-axis terrain height in world-space metres for the tile centre at (tileX, tileZ).
+  // Returns 0.0f for out-of-bounds coordinates.
+  // MUST query the persistent LOD0 heightmap array — never the active scene-node mesh geometry.
+  virtual float getHeightAt(int tileX, int tileZ) const = 0;
+  ```
+
+  `TerrainSystem` implements this via its persistent LOD0 heightmap array (trivial — the method
+  already exists on `TerrainSystem`; Phase 9b adds the `override` keyword and promotes the
+  declaration to the interface).
+
+  `ManualTerrainQuery` (test stub in `tests/simulation/manual_terrain_query.h`) must add:
+
+  ```cpp
+  float getHeightAt(int /*tileX*/, int /*tileZ*/) const override { return 0.0f; }
+  ```
+
+  This override is required because `getHeightAt()` is pure virtual on `ITerrainQuery`; without
+  it `ManualTerrainQuery` fails to compile, blocking all 17 Phase 9b unit tests.
+
+  **Map-dimension accessors** (Phase 9b, concrete `TerrainSystem` only — NOT added to `ITerrainQuery`):
+
+  ```cpp
+  // TerrainSystem.h — public accessors, consumed only from main.cpp (not via ITerrainQuery*)
+  int   getMapTilesX() const;  // returns m_mapTilesX (set by generate())
+  int   getMapTilesZ() const;  // returns m_mapTilesZ (set by generate())
+  float getCellSize()  const;  // returns m_cellSize  (set by generate())
+  ```
+
+  These are intentionally NOT on `ITerrainQuery` — that interface is minimal by design (slope +
+  height queries only). They are consumed from `main.cpp` to call `uiManager.setMapDimensions()`
+  and `renderer.setCellSize()`.
+
+- **pickTerrainTile DDA Algorithm** (normative specification for `IrrlichtRenderer::pickTerrainTile()`):
+
+  **Background**: The Phase 9b blocking spike (2026-03-02) determined that a naive 4096-step
+  linear march on a 1024×1024 terrain costs ~205 µs per call. Because `MouseMove` fires 4–10
+  times per frame at 60 FPS on high-DPI mice, sustained cost reaches ~2 ms per frame — exceeding
+  the 1 ms world-interaction budget. The O(1) DDA (Digital Differential Analyzer) grid traversal
+  algorithm is therefore mandated. It traverses at most `mapTilesX + mapTilesZ` cells (worst case
+  2048 for a 1024×1024 map), each requiring one array lookup (≈15 ns L3 hit), yielding ≤30 µs
+  worst case even at 10 `MouseMove` events per frame.
+
+  **Algorithm** (Amanatides & Woo 1987, "A Fast Voxel Traversal Algorithm"):
+
+  ```cpp
+  // Preconditions:
+  //   m_terrain != nullptr  (caller must guard)
+  //   m_cellSize > 0
+  //   mapTilesX > 0, mapTilesZ > 0  (set via IrrlichtRenderer::setTerrainQuery wiring)
+  //   ray obtained from:
+  //     irr::core::line3df ray =
+  //       smgr->getSceneCollisionManager()
+  //           ->getRayFromScreenCoordinates({screenX, screenY}, camera);
+
+  bool IrrlichtRenderer::pickTerrainTile(int screenX, int screenY,
+                                          int& tileX, int& tileZ) const
+  {
+      if (!m_terrain) return false;
+
+      irr::core::line3df ray =
+          m_smgr->getSceneCollisionManager()
+              ->getRayFromScreenCoordinates({screenX, screenY}, m_camera);
+
+      irr::core::vector3df ro = ray.start;
+      irr::core::vector3df rd = (ray.end - ray.start).normalize();
+
+      // Horizontal ray cannot intersect terrain — bail early.
+      if (std::fabs(rd.Y) < 1e-5f) return false;
+
+      // --- DDA grid traversal ---
+      // Step 1: Determine starting tile (clamp to map bounds).
+      int cx = static_cast<int>(ro.X / m_cellSize);
+      int cz = static_cast<int>(ro.Z / m_cellSize);
+      cx = std::max(0, std::min(cx, m_mapTilesX - 1));
+      cz = std::max(0, std::min(cz, m_mapTilesZ - 1));
+
+      // Step 2: DDA step direction per axis (+1 or -1).
+      int stepX = (rd.X >= 0.f) ? 1 : -1;
+      int stepZ = (rd.Z >= 0.f) ? 1 : -1;
+
+      // Step 3: Distance along ray to the first X and Z boundary crossing.
+      float tMaxX, tMaxZ;
+      if (std::fabs(rd.X) < 1e-6f) {
+          tMaxX = 1e30f;   // ray is axis-aligned in Z — no X crossings
+      } else {
+          float nextBoundX = (stepX > 0)
+              ? (static_cast<float>(cx + 1) * m_cellSize)
+              : (static_cast<float>(cx)     * m_cellSize);
+          tMaxX = (nextBoundX - ro.X) / rd.X;
+      }
+      if (std::fabs(rd.Z) < 1e-6f) {
+          tMaxZ = 1e30f;
+      } else {
+          float nextBoundZ = (stepZ > 0)
+              ? (static_cast<float>(cz + 1) * m_cellSize)
+              : (static_cast<float>(cz)     * m_cellSize);
+          tMaxZ = (nextBoundZ - ro.Z) / rd.Z;
+      }
+
+      // Step 4: Per-axis tDelta (ray distance between consecutive boundary crossings).
+      float tDeltaX = (std::fabs(rd.X) < 1e-6f) ? 1e30f : std::fabs(m_cellSize / rd.X);
+      float tDeltaZ = (std::fabs(rd.Z) < 1e-6f) ? 1e30f : std::fabs(m_cellSize / rd.Z);
+
+      // Step 5: Traverse at most (mapTilesX + mapTilesZ) cells.
+      int maxSteps = m_mapTilesX + m_mapTilesZ;
+      for (int i = 0; i < maxSteps; ++i) {
+          // Compute ray parameter t at the centre of the current cell.
+          float tc = std::min(tMaxX, tMaxZ) - 0.5f * std::min(tDeltaX, tDeltaZ);
+          tc = std::max(tc, 0.f);
+
+          // Ray Y at current cell centre.
+          float rayY = ro.Y + tc * rd.Y;
+
+          // Sample terrain height at current cell.
+          float h = m_terrain->getHeightAt(cx, cz);
+
+          if (rayY <= h) {
+              // Hit — ray has intersected terrain at this cell.
+              tileX = std::max(0, std::min(cx, m_mapTilesX - 1));
+              tileZ = std::max(0, std::min(cz, m_mapTilesZ - 1));
+              return true;
+          }
+
+          // Advance to next cell boundary.
+          if (tMaxX < tMaxZ) {
+              cx    += stepX;
+              tMaxX += tDeltaX;
+          } else {
+              cz    += stepZ;
+              tMaxZ += tDeltaZ;
+          }
+
+          // Exit map bounds check.
+          if (cx < 0 || cx >= m_mapTilesX || cz < 0 || cz >= m_mapTilesZ)
+              return false;
+      }
+
+      return false;  // ray exited map without hitting terrain
+  }
+  ```
+
+  **Performance contract**: at most `mapTilesX + mapTilesZ` iterations, each O(1). For a
+  1024×1024 map, worst case = 2048 iterations × ~15 ns = ~30 µs. At 10 `MouseMove` events
+  per frame at 60 FPS: ~300 µs sustained — within the 1 ms world-interaction budget.
+
+  **IrrlichtRenderer members required by this algorithm** (all on `IrrlichtRenderer` directly,
+  NOT on `IRenderer`):
+
+  | Member | Type | Set by | Notes |
+  |---|---|---|---|
+  | `m_terrain` | `ITerrainQuery*` | `setTerrainQuery()` from `main.cpp` | Non-owning; null until wired |
+  | `m_cellSize` | `float` | `setCellSize()` from `main.cpp` | Tile world-space width in metres |
+  | `m_mapTilesX` | `int` | `setRendererMapDimensions()` from `main.cpp` | Phase 9b step (2b); default 0 causes immediate DDA early-exit |
+  | `m_mapTilesZ` | `int` | `setRendererMapDimensions()` from `main.cpp` | Phase 9b step (2b); default 0 causes immediate DDA early-exit |
+  | `m_camera` | `irr::scene::ICameraSceneNode*` | Assigned in `IrrlichtRenderer::init()` | Irrlicht type; lives in `IrrlichtRenderer.h` only; null guard required |
+
+  **`setRendererMapDimensions(int w, int z)`**: new public method on `IrrlichtRenderer`
+  (NOT on `IRenderer`). Called from `main.cpp` at step (2b) (after step 2a `setCellSize()`).
+  Sets `m_mapTilesX = w` and `m_mapTilesZ = z`. Method name avoids collision with
+  `UIManager::setMapDimensions()`.
+
+  **`m_camera` member**: `IrrlichtRenderer` must store `irr::scene::ICameraSceneNode* m_camera`
+  pointing to the active camera (already required for `getRayFromScreenCoordinates`). This is
+  set during camera creation in `IrrlichtRenderer::init()` or via a `setActiveCamera()` call;
+  if not already a member, it must be added as part of Phase 9b Deliverable B.
+
 - Chunks loaded/unloaded based on camera distance

@@ -134,3 +134,41 @@ fire, police, power, water"). No service building type is deferred to post-V1.
 - Service buildings are demolished via the Demolish tool (same as zones and roads). The
   demolish confirmation modal applies (same setting as zone/road demolish). Demolishing a
   service building removes coverage for all previously covered tiles on the next budget tick.
+
+### Audio Callbacks for `placeServiceBuilding()` (Phase 9b)
+
+`CitySimulation::placeServiceBuilding()` fires the following audio calls on successful placement
+(i.e. the tile was not already occupied and cost deduction succeeds). No audio is emitted on
+no-op (occupied tile) placements.
+
+**Call sequence** (matches the pattern used by `placeZone()` — see `CitySimulation.cpp`):
+
+1. If `earthworksCostOverride > 0` and `m_audio` is non-null:
+
+   ```cpp
+   m_audio->playPositionalSound(SFX_EARTHWORKS,
+       vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+       SoundPriority::NORMAL, 1.0f);
+   ```
+
+2. If `m_audio` is non-null (unconditional on successful placement):
+
+   ```cpp
+   m_audio->playPositionalSound(SFX_BUILD_PLACE,
+       vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+       SoundPriority::NORMAL, 1.0f);
+   ```
+
+**SoundId rationale**: `SFX_BUILD_PLACE` (SoundId = 1, `sfx_build_place.wav`) is shared by zone
+placement and service building placement — both represent a "something was built here" feedback
+event. A dedicated service-building SFX is post-V1. `SFX_ROAD_BUILD` (SoundId = 3) is reserved
+for road placement only (distinct mechanic, distinct feedback tone).
+
+**Y-position**: All three placement calls (`placeZone`, `placeRoad`, `placeServiceBuilding`) pass
+`Y = 0.0f` for the audio world-space position. Real terrain height sampling for audio positioning
+is **deferred to Phase 10**. The `ITerrainQuery::getHeightAt()` method added in Phase 9b
+Deliverable E is used exclusively for zone overlay Y-height rendering (`IrrlichtRenderer::
+setZoneOverlay`) and hover highlight rendering (`IrrlichtRenderer::setTileHoverHighlight`) —
+it is NOT used to update audio call-site Y positions in Phase 9b. Phase 10 may refine
+audio positioning by substituting `m_terrain->getHeightAt(tileX, tileZ)` for the `0.0f`
+Y component if perceptible mispositioning is observed with real terrain heights.
