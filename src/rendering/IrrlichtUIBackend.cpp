@@ -167,7 +167,7 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
             }
         }
 
-        // --- Create VAO/VBO for quad rendering --------------------------------
+        // --- Create VAO/VBO for quad rendering (raw GL image path, future use) ---
         // 4 vertices x 4 floats each (x, y, u, v) = 16 floats, GL_DYNAMIC_DRAW.
         // Attribute layout: a_pos at location 0, a_uv at location 1.
         glGenVertexArrays(1, reinterpret_cast<GLuint*>(&m_quadVAO));
@@ -202,6 +202,83 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
         glBindVertexArray(0);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
+
+    // --- Build IGUISpriteBank for button icon sprites ---------------------
+    // This must happen regardless of headless mode for test coverage, but
+    // the texture load is skipped (returns null) under EDT_NULL so the bank
+    // will contain no texture entry in that case — buttons will show no icon
+    // in headless mode, which is acceptable (headless tests do not validate
+    // visual output).
+    //
+    // Sprite handle encoding (from hud_sprite_ids.h + 2d-texture-standards.md):
+    //   handle = col + row * 32  →  col = handle % 32, row = handle / 32
+    //   Each cell is 64×64 px in the 2048×2048 RGBA8 sprite sheet.
+    //   Total cells: 32 columns × 32 rows = 1024 sprites.
+    //
+    // We add 1024 position entries to the bank (one per cell) and 1024
+    // one-frame sprites (each pointing at the corresponding position entry).
+    // This keeps the sprite index equal to the encoded handle value.
+    {
+        // addEmptySpriteBank() returns a new bank; the GUI environment grabs it
+        // internally. We also grab() so we can safely store the pointer and
+        // drop() it in the destructor without use-after-free.
+        m_spriteBank = m_guiEnv->addEmptySpriteBank("hud_sprites_ui");
+        if (m_spriteBank) {
+            m_spriteBank->grab();
+
+            // Load the sprite sheet texture via Irrlicht (linear RGBA8 path —
+            // UI sprites are not sRGB-critical; they are overlaid at screen
+            // resolution and do not require gamma-correct diffuse sampling).
+            irr::video::ITexture* tex = m_driver->getTexture(
+                "assets/textures/ui/hud_sprites_ui.dds");
+            if (tex) {
+                // Add the texture as the sole texture entry (index 0).
+                m_spriteBank->addTexture(tex);
+            }
+            // If tex is null (file absent or EDT_NULL) the bank stays texture-
+            // less; buttons will render without icons (graceful degradation).
+
+            // Populate position entries and sprites for all 1024 cells.
+            // Cell (col, row): top-left = (col*64, row*64),
+            //                  bottom-right = ((col+1)*64, (row+1)*64).
+            static const int kCellSize  = 64;
+            static const int kGridCols  = 32;
+            static const int kGridRows  = 32;
+            static const int kTotalCells = kGridCols * kGridRows; // 1024
+
+            irr::core::array<irr::core::rect<irr::s32>>& positions =
+                m_spriteBank->getPositions();
+            irr::core::array<irr::gui::SGUISprite>& sprites =
+                m_spriteBank->getSprites();
+
+            positions.reallocate(static_cast<irr::u32>(kTotalCells));
+            sprites.reallocate(static_cast<irr::u32>(kTotalCells));
+
+            for (int cellIdx = 0; cellIdx < kTotalCells; ++cellIdx) {
+                const int col = cellIdx % kGridCols;
+                const int row = cellIdx / kGridCols;
+                const irr::s32 left   = col * kCellSize;
+                const irr::s32 top    = row * kCellSize;
+                const irr::s32 right  = left + kCellSize;
+                const irr::s32 bottom = top  + kCellSize;
+
+                // Add the source rect to the position list.
+                positions.push_back(
+                    irr::core::rect<irr::s32>(left, top, right, bottom));
+
+                // Build a one-frame sprite pointing at this position entry
+                // and the sole texture (index 0).
+                irr::gui::SGUISpriteFrame frame;
+                frame.rectNumber    = static_cast<irr::u32>(cellIdx);
+                frame.textureNumber = 0u;
+
+                irr::gui::SGUISprite sprite;
+                sprite.Frames.push_back(frame);
+                sprite.frameTime = 0u;  // static (no animation)
+                sprites.push_back(sprite);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +312,14 @@ IrrlichtUIBackend::~IrrlichtUIBackend()
             glDeleteVertexArrays(1, &vao);
             m_quadVAO = 0;
         }
+    }
+
+    // Drop our grab() reference on the sprite bank. The GUI environment holds
+    // its own internal reference via addEmptySpriteBank(); our drop() merely
+    // releases the extra grab() we took in the constructor.
+    if (m_spriteBank) {
+        m_spriteBank->drop();
+        m_spriteBank = nullptr;
     }
 
     // Clear all maps (pointers into Irrlicht's scene graph are not owned by us;
@@ -312,6 +397,13 @@ UIElementHandle IrrlichtUIBackend::addButton(
 
     if (!elem) {
         return kInvalidUIElement;
+    }
+
+    // Attach the shared sprite bank so that subsequent setSprite() calls work.
+    // Without setSpriteBank(), IGUIButton ignores all setSprite() calls and
+    // renders no icon regardless of what sprite index is set.
+    if (m_spriteBank) {
+        elem->setSpriteBank(m_spriteBank);
     }
 
     UIElementHandle handle = m_nextHandle++;
@@ -462,34 +554,76 @@ void IrrlichtUIBackend::setElementAlpha(UIElementHandle handle, float alpha)
 
 // ---------------------------------------------------------------------------
 // 10. setElementImage
-// Stores the element-to-texture handle mapping. Phase 8 is infrastructure
-// only — the per-frame rendering callsite is a Phase 9 deliverable.
 //
-// Phase 9 forward-reference note: when rendering this element each frame,
-// the draw path MUST apply the GL_ACTIVE_TEXTURE save/restore bracket per
-// architecture/graphics-architecture/shader-loading.md:
-//   (1) glGetIntegerv(GL_ACTIVE_TEXTURE, &savedUnit)
-//   (2) glActiveTexture(GL_TEXTURE0)
-//   (3) glBindTexture(GL_TEXTURE_2D, texId)
-//   (4) draw textured quad via m_quadVAO/m_quadVBO + m_uiQuadProgram
-//   (5) glBindTexture(GL_TEXTURE_2D, 0)
-//   (6) glActiveTexture(static_cast<GLenum>(savedUnit))
+// Assigns a sprite cell from hud_sprites_ui.dds to a button element.
+//
+// The second parameter (textureHandle) is interpreted as a sprite cell index
+// encoded as  col + row * 32  (matching the encoding in hud_sprite_ids.h and
+// the cell layout spec in architecture/asset-standards/2d-texture-standards.md).
+// Valid range: 0–1023 for the 32×32 cell grid.
+//
+// Irrlicht's IGUIButton::setSprite() maps directly onto this index because we
+// built the sprite bank with exactly 1024 sprite entries (one per cell), so
+// the encoded handle IS the sprite bank index.
+//
+// setSprite() is called for three button states so the icon is visible in all
+// normal interaction states:
+//   EGBS_BUTTON_UP    — normal (unpressed, not focused)
+//   EGBS_BUTTON_FOCUSED_NOT_PRESSED — mouse-over / keyboard focus
+//   EGBS_BUTTON_DOWN  — actively pressed
+//
+// EGBS_BUTTON_NOT_FOCUSED is intentionally omitted — it is the same visual
+// state as EGBS_BUTTON_UP on most Irrlicht themes and setting it separately
+// can cause a flash-on-focus artifact on some drivers.
 // ---------------------------------------------------------------------------
 void IrrlichtUIBackend::setElementImage(UIElementHandle handle,
-                                         UIElementHandle textureHandle)
+                                         UIElementHandle spriteIndex)
 {
-    // If the shader program failed to compile, this is a silent no-op.
-    // The caller falls back to Irrlicht's software renderer path for this
-    // element. (Per architecture/graphics-architecture/shader-loading.md
-    // exception — ui_quad raw GL path.)
-    if (m_uiQuadProgram == 0 && !m_isHeadless) {
+    // Look up the element — must be a button (IGUIButton).
+    auto it = m_elementMap.find(handle);
+    if (it == m_elementMap.end() || !it->second.element) {
         return;
     }
 
-    // Store the mapping. The element does NOT get attached to IGUIEnvironment's
-    // child tree for raw-GL-handle cases — rendering is handled via the
-    // VAO/VBO draw path in Phase 9.
-    m_imageElementMap[handle] = textureHandle;
+    // Cast to IGUIButton. Static text elements do not support setSprite().
+    // We use EGUI_ELEMENT_TYPE to avoid a dynamic_cast dependency.
+    irr::gui::IGUIElement* elem = it->second.element;
+    if (elem->getType() != irr::gui::EGUIET_BUTTON) {
+        // Element is not a button — fall back to storing the mapping for
+        // possible future raw-GL rendering of non-button image elements.
+        m_imageElementMap[handle] = spriteIndex;
+        return;
+    }
+
+    irr::gui::IGUIButton* btn =
+        static_cast<irr::gui::IGUIButton*>(elem);
+
+    // Guard: sprite bank must be attached (set in addButton()).
+    if (!m_spriteBank) {
+        // No sprite bank — store mapping for reference but no visual effect.
+        m_imageElementMap[handle] = spriteIndex;
+        return;
+    }
+
+    // White full-opacity tint — preserve the authored icon colours.
+    const irr::video::SColor tint(255u, 255u, 255u, 255u);
+
+    // Apply the sprite to all relevant button visual states.
+    // Enum values from IGUIButton.h in the vendored Irrlicht build:
+    //   EGBS_BUTTON_UP         — normal (unpressed, no focus)
+    //   EGBS_BUTTON_DOWN       — actively pressed
+    //   EGBS_BUTTON_MOUSE_OVER — cursor hovering over button
+    //   EGBS_BUTTON_FOCUSED    — keyboard focus
+    //   EGBS_BUTTON_NOT_FOCUSED / EGBS_BUTTON_MOUSE_OFF are also available
+    //     but not set here — they share the UP visual in the default skin.
+    const irr::s32 idx = static_cast<irr::s32>(spriteIndex);
+    btn->setSprite(irr::gui::EGBS_BUTTON_UP,         idx, tint);
+    btn->setSprite(irr::gui::EGBS_BUTTON_DOWN,        idx, tint);
+    btn->setSprite(irr::gui::EGBS_BUTTON_MOUSE_OVER,  idx, tint);
+    btn->setSprite(irr::gui::EGBS_BUTTON_FOCUSED,     idx, tint);
+
+    // Also keep the mapping for any code that queries m_imageElementMap.
+    m_imageElementMap[handle] = spriteIndex;
 }
 
 // ---------------------------------------------------------------------------
