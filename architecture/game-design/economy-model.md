@@ -39,6 +39,26 @@
   - **`getNextUnlockThreshold()` return semantics**: `ICitySimulation::getNextUnlockThreshold(Difficulty d)` returns the difficulty-adjusted revenue value (in dollars) that the player must sustain for 3 consecutive months to trigger the next pending density tier unlock. The tiers are evaluated in the canonical unlock order defined above: Med-R/Med-C (same threshold), Med-I, High-R, High-C, High-I. The function returns the threshold of the **lowest-indexed tier that is not yet unlocked**. When all six density tiers are unlocked (High-I is the final tier), the function returns **`-1.0f`** as a sentinel value meaning "no further unlocks pending". The sentinel is `−1.0f` (negative one, as a float) rather than `std::numeric_limits<float>::max()` for the following reasons: (a) `float` max (~3.4 × 10^38) cannot be meaningfully formatted in a HUD label without special-casing; (b) `−1.0f` is unambiguously out-of-range for any valid threshold (all valid thresholds are positive dollar amounts), so a simple `threshold < 0.0f` guard is sufficient to detect the sentinel with no risk of false positives; (c) the value is trivially comparable in both C++ and tests without pulling in `<limits>`. **Contract**: the return value is never `0.0f` or `NaN`; it is either a positive dollar value (difficulty-adjusted) or exactly `−1.0f`. The named constant `SimulationConstants::kNoUnlockThreshold = -1.0f` MUST be used at every call site that checks for the sentinel — do not compare against the literal `−1.0f` inline. **HUD handling of the sentinel**: when `getNextUnlockThreshold(d)` returns `kNoUnlockThreshold`, the density unlock progress indicator in the resource bar MUST be hidden via `IUIBackend::setElementVisible(handle, false)` and the Density Unlock Preview Tooltip MUST NOT appear regardless of proximity calculations — both the indicator and the tooltip are suppressed for the remainder of the session once all tiers are unlocked. See [HUD Layout](../ui-ux/hud-layout.md) (Density Unlock Preview Tooltip section) for the authoritative HUD suppression rule.
   - **Density upgrade rate limiter**: When a density tier is unlocked, at most **20% of eligible tiles per zone type** (rounded up, minimum 1 per zone type) upgrade per budget tick. The 20% cap is applied independently to each zone type (R, C, I) — upgrading Residential tiles does not count against the Commercial tile cap. This prevents a mass simultaneous upgrade from spiking wages and costs in a single tick — the transition smooths over approximately 5 budget ticks. HUD shows a preview: when monthly revenue is within 10% of an unlock threshold, a projected "After Unlock" estimated monthly expense change is shown in the resource bar tooltip so the player can prepare.
 
+## Music Intensity Tiers
+
+The adaptive music system uses three intensity tiers driven by live simulation state. These thresholds are authoritative for `CitySimulation::update()` and for the test `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem`.
+
+| Tier | Condition | Notes |
+|---|---|---|
+| CALM | `budget_surplus_pct >= 0%` | City is not in deficit. Default state when neither CRISIS nor GROWTH applies. |
+| GROWTH | Net population change is positive (population this tick > population previous tick) | Takes priority over CALM when CRISIS is not active. |
+| CRISIS | `consecutive_deficit_months >= 2` | Deficit streak has lasted 2 or more consecutive budget ticks. Highest priority tier. |
+
+**Priority rules** (applied when multiple conditions are satisfied simultaneously):
+
+1. CRISIS takes highest priority — overrides GROWTH and CALM.
+2. GROWTH takes priority over CALM when CRISIS is not active.
+3. CALM is the default when neither CRISIS nor GROWTH applies.
+
+**`consecutive_deficit_months`** is a counter incremented each budget tick in which `budget_surplus_pct < 0%` and reset to `0` on any tick where `budget_surplus_pct >= 0%`. It is subject to the same `m_firstRevenueTicked` gate as the forced loan and deficit warning — it is not incremented before at least one non-zero revenue budget tick has been processed.
+
+Phase 10 wires `CitySimulation::update()` to call `audioSystem->setMusicIntensity()` using these thresholds — see the **Music intensity interface** deliverable in `implementation/phase-10.md`.
+
 ## Multi-Loan Pooling Boundary Examples
 
 The following concrete examples clarify the loan pooling formula for implementers and test authors. All values use the $1,000 minimum revenue floor for the debt cap calculation.

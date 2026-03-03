@@ -48,6 +48,18 @@ enum class TimeOfDay { DAY, DUSK, NIGHT, DAWN };
 // See source-pool.md for the full eviction and transient-reserve rules.
 enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 
+// Defined in audio_types.h — reproduced here for interface completeness.
+// Music intensity tier driven by live simulation state.  Set by CitySimulation::update()
+// via IAudioSystem::setMusicIntensity().  AudioSystem maps each tier to the corresponding
+// gameplay stem pair (CALM→calm_01/02, GROWTH→growth_01/02, CRISIS→crisis_01/02).
+// Threshold conditions are authoritative in architecture/game-design/economy-model.md:
+//   CALM:   budget_surplus_pct >= 0%  (default state)
+//   GROWTH: net population change positive (population this tick > population previous tick)
+//   CRISIS: consecutive_deficit_months >= 2  (highest priority tier)
+// Priority order (highest first): CRISIS > GROWTH > CALM.
+// Added in Phase 10 (see implementation/phase-10.md — Music intensity interface deliverable).
+enum class MusicIntensity { CALM, GROWTH, CRISIS };
+
 class IAudioSystem {
 public:
     virtual ~IAudioSystem() = default;
@@ -166,10 +178,28 @@ public:
     virtual void setMasterVolume(float gain) = 0;
     virtual void setMusicVolume(float gain) = 0;
     virtual void setSFXVolume(float gain) = 0;
+
+    // --- Phase 10 Adaptive Music API ---
+    // Set the music intensity tier driven by live simulation state.
+    // Called by CitySimulation::update() whenever the city's fiscal or population state
+    // changes tier.  AudioSystem crossfades the active gameplay stem pair on the next
+    // beat boundary to the stem pair matching the new tier
+    // (CALM→calm_01/02, GROWTH→growth_01/02, CRISIS→crisis_01/02).
+    // Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) takes precedence internally;
+    // CitySimulation does NOT need to suppress GROWTH calls during off-hours.
+    // Calling setMusicIntensity() with the tier already active is a no-op.
+    // Thread-safety: call from the main thread only.
+    // AudioSystem implementation MUST store m_currentMusicIntensity as std::atomic<int>
+    // (or read under the audio-thread lock) because the audio thread reads it to select
+    // the next crossfade target.
+    // Threshold conditions that determine which tier to pass are defined in
+    // architecture/game-design/economy-model.md §Music Intensity Tiers.
+    // MockAudioSystem: add MOCK_METHOD(void, setMusicIntensity, (MusicIntensity), (override));
+    virtual void setMusicIntensity(MusicIntensity intensity) = 0;
 };
 ```
 
-`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all fourteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
+`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all fifteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
 
 ---
 
@@ -292,7 +322,7 @@ The file `src/interfaces/audio_system.h` must include the following headers:
 
 ```cpp
 #include "simulation_types.h"    // Required: SimSpeed (type alias for SpeedMultiplier)
-#include "audio_types.h"         // Required: SoundId, MusicTrackId, SoundPriority, StingerType, TimeOfDay, SoundHandle
+#include "audio_types.h"         // Required: SoundId, MusicTrackId, SoundPriority, StingerType, TimeOfDay, SoundHandle, MusicIntensity
 #include "camera_state.h"        // Required: CameraState (used in syncListenerToCamera)
 #include "vec3.h"                // Required: vec3 (used in playPositionalSound and syncListenerToCamera)
 ```
