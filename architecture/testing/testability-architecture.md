@@ -725,9 +725,14 @@ public:
     virtual void setMasterVolume(float gain) = 0;
     virtual void setMusicVolume(float gain) = 0;
     virtual void setSFXVolume(float gain) = 0;
+
+    // Set the music intensity tier driven by live simulation state (Phase 10).
+    // Threshold conditions: CALM (budget_surplus_pct >= 0%), GROWTH (net pop positive),
+    // CRISIS (consecutive_deficit_months >= 2). Priority: CRISIS > GROWTH > CALM.
+    virtual void setMusicIntensity(MusicIntensity intensity) = 0;
 };
 
-// MockAudioSystem — GMock implementation of IAudioSystem's 14 methods.
+// MockAudioSystem — GMock implementation of IAudioSystem's 15 methods.
 // Source location: tests/simulation/mock_audio_system.h
 // Shared across simulation_tests, ui_tests, audio_tests CMake targets (header-only).
 class MockAudioSystem : public IAudioSystem {
@@ -746,6 +751,7 @@ public:
     MOCK_METHOD(void,        setMasterVolume,       (float gain),                                (override));
     MOCK_METHOD(void,        setMusicVolume,        (float gain),                                (override));
     MOCK_METHOD(void,        setSFXVolume,          (float gain),                                (override));
+    MOCK_METHOD(void,        setMusicIntensity,     (MusicIntensity intensity),                   (override));
 };
 ```
 
@@ -791,6 +797,22 @@ All Phase 7 audio tests carry label `unit` and run without a display device. CTe
 | `NotificationSFXTest` | `NotificationSFX_EFXBypass_DirectFilterSetToNull` | `tests/audio/notification_sfx_efx_bypass_test.cpp` |
 
 All Phase 10 audio tests carry label `unit` and run without a display device or real audio device (headless CI via `IAlcFunctions` seam and `MockAudioSystem`). CTest filter for all Phase 10 audio tests: `-R "CrossfadeTest|StingerTest|AudioStreamTest|NotificationSFXTest"`.
+
+**`Crossfade_InterruptedFormula_NoDomainErrorAtBoundary` test contract** — this test verifies that the interrupted crossfade `t_offset` formula `t_offset=(2/π)×arccos(current_gain_out)` returns 0.0 when `current_gain_out=1.0` and 1.0 when `current_gain_out=0.0`, with no `arccos` domain error at either boundary.
+
+**Fixture**: No mock or device required — the formula is a pure mathematical function extracted to a static helper (or tested via a friend fixture). No audio thread construction needed.
+
+**Test assertions**:
+
+1. `EXPECT_NEAR(computeTOffset(1.0f), 0.0f, 1e-5f)` — at gain_out=1.0 (full outgoing gain), interruption at the very start → t_offset=0 (restart crossfade from scratch).
+2. `EXPECT_NEAR(computeTOffset(0.0f), 1.0f, 1e-5f)` — at gain_out=0.0 (outgoing fade complete), interruption at the very end → t_offset=1 (skip directly to end).
+3. No `std::domain_error`, `NaN`, or `Inf` at either boundary value.
+
+**Mock policy**: None required (pure formula test).
+
+**Source file**: `tests/audio/crossfade_interrupted_formula_test.cpp`
+
+**CTest filter**: `-R Crossfade_InterruptedFormula_NoDomainErrorAtBoundary`
 
 **`StingerMilestone_OnlyAtCityRatingTransition_NotRawPopulation` test contract** — this test
 verifies that `UIManager::onCityRatingTransition()` calls `m_audio->triggerStinger(StingerType::MILESTONE)` at City Rating tier transitions and does NOT call it at raw population milestones that do not coincide with a tier transition.
@@ -877,6 +899,30 @@ the audio playback path, not a unit test with strict call-count expectations on 
 **Source file**: `tests/audio/notification_sfx_efx_bypass_test.cpp`
 
 **CTest filter**: `-R NotificationSFX_EFXBypass_DirectFilterSetToNull`
+
+**Phase 10 `simulation_tests` canonical test name** — the following canonical name is mandated for the Phase 10 simulation unit test added to `simulation_tests` via `target_sources(simulation_tests PRIVATE tests/simulation/adaptive_music_intensity_test.cpp)`. This test exercises `CitySimulation::update()` with `StrictMock<MockAudioSystem>` and does NOT belong in `audio_tests`.
+
+| Test Suite | Test Case | Source File |
+|---|---|---|
+| `AdaptiveMusicIntensityTest` | `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` | `tests/simulation/adaptive_music_intensity_test.cpp` |
+
+All Phase 10 simulation tests carry label `unit`. CTest filter: `-R AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem`.
+
+**`AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` test contract** — this test verifies that `CitySimulation::update()` calls `audioSystem->setMusicIntensity()` with the correct `MusicIntensity` tier when treasury/growth/deficit state changes, matching the thresholds defined in `architecture/game-design/economy-model.md` Music Intensity Tiers section.
+
+**Fixture**: `StrictMock<MockAudioSystem>` injected into a real `CitySimulation` instance at construction. No `UIManager` instance required — the music intensity decision lives entirely in `CitySimulation::update()`.
+
+**Test assertions** (minimum three state transitions):
+
+1. Budget surplus (budget_surplus_pct ≥ 0%) with no population growth → `EXPECT_CALL(audio, setMusicIntensity(MusicIntensity::CALM))`.
+2. Positive population growth (population this tick > population previous tick), no deficit streak → `EXPECT_CALL(audio, setMusicIntensity(MusicIntensity::GROWTH))`.
+3. Two or more consecutive deficit months (consecutive_deficit_months ≥ 2) → `EXPECT_CALL(audio, setMusicIntensity(MusicIntensity::CRISIS))`.
+
+**Mock policy**: `StrictMock` (unit test with exact call-count expectations on `setMusicIntensity`). Priority order (CRISIS > GROWTH > CALM) must be verified: when both CRISIS and GROWTH conditions are true simultaneously, only `CRISIS` fires.
+
+**Source file**: `tests/simulation/adaptive_music_intensity_test.cpp`
+
+**CTest filter**: `-R AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem`
 
 `IRenderer` uses opaque `TextureHandle` (uint32_t) instead of `ITexture*` — the same pattern as `IUIBackend` with `UIElementHandle`. This fully severs the compile-time dependency on Irrlicht headers in any translation unit that only includes `IRenderer.h`, including all simulation test files. `MockRenderer::loadTexture()` returns an incrementing non-zero integer. The concrete `IrrlichtRenderer` maintains `std::unordered_map<TextureHandle, ITexture*>` internally.
 
