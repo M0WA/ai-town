@@ -11,3 +11,39 @@
 - **`getBounds()` return value semantics**: The `Minimap::getBounds()` method returns `Rect` (the struct defined in `IUIBackend.h` — `struct Rect { int x{0}, y{0}, w{0}, h{0}; }`) representing the bounding rectangle of the minimap **render area only** — the 200×200 px tile (virtual bounds x: 1720–1920 px, y: 880–1080 px). Returning `Rect` rather than `irr::core::rect<irr::s32>` keeps Irrlicht headers out of `src/ui/` translation units. It explicitly excludes the toggle row (y: 848–880 px), the label strip (y: 832–848 px when an overlay is active), and the legend overlay panel (y: 732–832 px when an overlay is active). Tests that call `getBounds()` and check its dimensions MUST compare against the 200×200 px render area, not the full minimap widget footprint including chrome. Using the full widget bounds in tests will produce incorrect hit-test and overlap results because the chrome elements can be toggled independently of the render area.
 
 - **Scrim input behavior during blocking modals**: When a blocking modal (`ModalDialog`) is active, the full-screen scrim `IGUIElement` (50% opacity fill rect) **must consume left-mouse click events and right-click context events** that would otherwise reach HUD elements behind it (minimap, toolbar, undo button, resource bar). The scrim is not merely a visual overlay — it must be an event-consuming element at Priority 1 of the input arbitration chain. Without this, left-clicks and right-clicks on the minimap (and other HUD elements) pass through the scrim while the modal is visible, allowing accidental tool activations (zone placement, road placement) during a blocking modal. **Camera pass-through (mandatory)**: The following input events must NOT be consumed by the scrim — they pass through directly to `CameraController` per input-arbitration.md Priority 1: scroll-wheel zoom, middle-mouse-button drag (pan), and right-mouse-button drag (rotate/pan). These camera interactions are non-destructive and provide useful spatial context while the player reads the modal. Only left-click and right-click context events (which could trigger tool activations or HUD interactions) are consumed.
+
+## Minimap Lifecycle — Show/Hide on State Transitions
+
+The `Minimap` constructor calls `hide()` internally as its last step, so the minimap starts
+hidden. `UIManager` is responsible for calling `m_minimap->show()` and `m_minimap->hide()` at
+the correct state transition points.
+
+**Required show/hide calls in `UIManager`**:
+
+| Transition | Required call | Rationale |
+|---|---|---|
+| `transitionToGameplay(mode)` | `m_minimap->show()` | Minimap must be visible during gameplay |
+| `transitionToMainMenu()` | `m_minimap->hide()` | Minimap must not render over the main menu |
+| `transitionToGameOver()` | `m_minimap->hide()` | Minimap hidden on game-over screen |
+
+**Bug note (Phase 9b)**: As of Phase 9b, `UIManager::transitionToGameplay()` does NOT call
+`m_minimap->show()`. The minimap is constructed hidden and remains hidden throughout gameplay,
+making it appear absent to the player. This is an implementation bug — the spec has always
+required the minimap to be visible during gameplay. The fix is a single additional line in
+`UIManager::transitionToGameplay()`:
+
+```cpp
+m_minimap->show();  // ADD THIS — minimap must be visible during gameplay
+```
+
+Similarly, `transitionToMainMenu()` must add:
+
+```cpp
+m_minimap->hide();  // ADD THIS — minimap must not overlay the main menu
+```
+
+**Phase assignment**: This fix is a **Phase 9b bug** that must be resolved in the current phase
+(not deferred). It requires one line added to `UIManager::transitionToGameplay()` and one line
+added to `UIManager::transitionToMainMenu()`. No spec changes, no interface changes, no new
+tests required beyond re-running the existing Phase 8 gameplay state tests to confirm the
+minimap is visible after `transitionToGameplay()` is called.
