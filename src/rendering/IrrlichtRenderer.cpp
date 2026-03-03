@@ -369,15 +369,22 @@ bool IrrlichtRenderer::pickTerrainTile(int screenX, int screenY,
                                         int& tileX, int& tileZ) const
 {
     if (!m_terrain)               return false;
-    if (!m_camera || !m_smgr)     return false;
+    if (!m_smgr)                  return false;
     if (m_mapTilesX <= 0 || m_mapTilesZ <= 0) return false;
     if (m_cellSize <= 0.0f)       return false;
+
+    // Use the scene manager's active camera — IrrlichtRenderer::m_camera is only
+    // populated if setCamera() is called, but in the current architecture the
+    // camera scene node is owned directly by CameraController and is the active
+    // camera in the scene graph.  getActiveCamera() returns that node reliably.
+    irr::scene::ICameraSceneNode* cam = m_smgr->getActiveCamera();
+    if (!cam) return false;
 
     // Obtain world-space ray through the screen pixel.
     irr::core::line3df ray =
         m_smgr->getSceneCollisionManager()
             ->getRayFromScreenCoordinates(
-                irr::core::position2di(screenX, screenY), m_camera);
+                irr::core::position2di(screenX, screenY), cam);
 
     irr::core::vector3df ro = ray.start;
     irr::core::vector3df rd = (ray.end - ray.start);
@@ -655,10 +662,12 @@ void IrrlichtRenderer::setZoneOverlay(
 // -------------------------------------------------------------------------
 ScreenRect IrrlichtRenderer::getTileScreenBounds(int tileX, int tileZ) const
 {
-    if (!m_driver || !m_smgr || !m_camera) return ScreenRect{};
+    if (!m_driver || !m_smgr) return ScreenRect{};
     if (m_mapTilesX <= 0 || m_mapTilesZ <= 0) return ScreenRect{};
     if (tileX < 0 || tileX >= m_mapTilesX) return ScreenRect{};
     if (tileZ < 0 || tileZ >= m_mapTilesZ) return ScreenRect{};
+    irr::scene::ICameraSceneNode* cam = m_smgr->getActiveCamera();
+    if (!cam) return ScreenRect{};
 
     float h = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
     float yWorld = h + 0.1f;  // slightly above terrain surface
@@ -680,8 +689,8 @@ ScreenRect IrrlichtRenderer::getTileScreenBounds(int tileX, int tileZ) const
     // Project each corner through the camera view+projection matrices.
     // Irrlicht does not expose a direct worldToScreen API at the scene manager
     // level, so we use the camera's combined view-projection matrix directly.
-    const irr::core::matrix4& view = m_camera->getViewMatrix();
-    const irr::core::matrix4& proj = m_camera->getProjectionMatrix();
+    const irr::core::matrix4& view = cam->getViewMatrix();
+    const irr::core::matrix4& proj = cam->getProjectionMatrix();
     irr::core::matrix4 vp = proj * view;
 
     int minX = INT_MAX, minY = INT_MAX;
