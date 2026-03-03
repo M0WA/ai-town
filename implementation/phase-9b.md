@@ -299,7 +299,7 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
   `architecture/ui-ux/query-inspector-panel.md` — Tile overlap prevention;
   `architecture/testing/testability-architecture.md`)
 
-- [ ] Implement `IrrlichtRenderer::setTileHoverHighlight()`: build a single-quad `SMeshBuffer`
+- [x] Implement `IrrlichtRenderer::setTileHoverHighlight()`: build a single-quad `SMeshBuffer`
   with four vertices at the tile's world corners (Y = terrain height at tile centre **+ 0.05f**,
   sampled from `TerrainSystem` — the +0.05f offset prevents depth-buffer Z-fighting against
   terrain geometry; `EMT_TRANSPARENT_ALPHA_CHANNEL` disables depth writes but still reads the
@@ -776,7 +776,7 @@ confirmation modal (Phase 8), and the `HUD::setActiveToolLabel` indicator (Phase
 
   (ref: `architecture/ui-ux/query-inspector-panel.md` — Tile overlap prevention)
 
-- [ ] Wire `InspectorPanel` data refresh cadence: budget/economy fields refresh once per budget
+- [x] Wire `InspectorPanel` data refresh cadence: budget/economy fields refresh once per budget
   tick (poll `m_sim->queryTile` again if `m_inspectorOpen && ticks_since_open > 0`); traffic
   data refresh every 10 simulation frames. "Updated N seconds ago" line shown when data is >1 s
   stale. (ref: `architecture/ui-ux/query-inspector-panel.md`)
