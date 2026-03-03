@@ -28,6 +28,21 @@ IrrlichtRenderer::IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiMan
 {
 }
 
+IrrlichtRenderer::~IrrlichtRenderer() {
+    // Drop the hover tile mesh (ref_count 1→0 frees the mesh and its contained buffer).
+    // The mesh is lazily allocated in setTileHoverHighlight(); m_hoveredTileMesh may be null
+    // if no valid tile was ever highlighted (e.g. in headless tests without a display).
+    if (m_hoveredTileMesh) {
+        m_hoveredTileMesh->drop();
+        m_hoveredTileMesh = nullptr;
+        m_hoverBuffer     = nullptr;  // non-owning observer — already freed by the mesh drop
+    }
+    // m_overlayNode is owned by the Irrlicht scene graph and is removed automatically
+    // when the scene manager is destroyed.  We do not call remove() here because the
+    // device/smgr may already be in a partially-torn-down state by the time this
+    // destructor runs.
+}
+
 void IrrlichtRenderer::beginFrame() {
     if (!m_driver) return;
     // Sky-blue clear color — provides visual feedback that the 3D viewport is active.
@@ -49,6 +64,19 @@ void IrrlichtRenderer::drawScene() {
     if (m_smgr) {
         m_smgr->drawAll();
     }
+
+    // Phase 9b: draw hover tile highlight immediately after 3D scene, before 2D GUI.
+    // The hover mesh is NOT in the scene graph — we issue a raw drawMeshBuffer() call.
+    // Guard: mesh must exist, be non-null, and m_hoverVisible must be true.
+    if (m_hoveredTileMesh && m_hoverVisible && m_driver) {
+        IMeshBuffer* hoverBuf = m_hoveredTileMesh->getMeshBuffer(0);
+        if (hoverBuf) {
+            m_driver->setMaterial(hoverBuf->getMaterial());
+            m_driver->setTransform(ETS_WORLD, core::IdentityMatrix);
+            m_driver->drawMeshBuffer(hoverBuf);
+        }
+    }
+
     if (m_uiManager) {
         m_uiManager->draw();
     }

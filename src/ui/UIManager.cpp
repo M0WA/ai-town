@@ -12,6 +12,7 @@
 #include "src/ui/UIManager.h"
 #include "src/platform/input_event.h"     // Full include here (NOT in UIManager.h — see prohibition comment)
 #include "src/ui/ui_constants.h"          // kToolbarLeft, kToolbarRight, kToolbarTop, kToolbarBottom
+#include "src/ui/hud_sprite_ids.h"        // kSpriteZone*, kSpriteUtil* sprite handle constants
 
 // Panel includes — full headers included only in the .cpp to avoid transitive
 // header dependencies for callers that only #include UIManager.h.
@@ -28,8 +29,9 @@
 // Explicit interface includes for method calls on forward-declared pointers.
 #include "src/interfaces/IAudioSystem.h"
 #include "src/interfaces/ICitySimulation.h"
-#include "src/interfaces/IRenderer.h"       // IRenderer — for setZoneOverlay
-#include "src/interfaces/ITerrainQuery.h"   // ITerrainQuery — for future earthworks cost
+#include "src/interfaces/IRenderer.h"       // IRenderer — for setZoneOverlay, pickTerrainTile
+#include "src/interfaces/ITerrainQuery.h"   // ITerrainQuery — for earthworks cost computation
+#include "src/interfaces/simulation_types.h"  // ZoneType, DensityTier, ServiceBuildingType
 
 #include <algorithm>
 #include <string>
@@ -42,8 +44,11 @@ namespace {
     constexpr int kKeyReturn = 13;   // Irrlicht KEY_RETURN  / SDL2 SDLK_RETURN
     constexpr int kKeyTab    = 9;    // Irrlicht KEY_TAB     / SDL2 SDLK_TAB
     constexpr int kKeyB      = 66;   // Irrlicht KEY_KEY_B
-    constexpr int kKeyT      = 84;   // Irrlicht KEY_KEY_T
+    constexpr int kKeyD      = 68;   // Irrlicht KEY_KEY_D
     constexpr int kKeyI      = 73;   // Irrlicht KEY_KEY_I
+    constexpr int kKeyR      = 82;   // Irrlicht KEY_KEY_R
+    constexpr int kKeyT      = 84;   // Irrlicht KEY_KEY_T
+    constexpr int kKeyU      = 85;   // Irrlicht KEY_KEY_U
     constexpr int kKeyZ      = 90;   // Irrlicht KEY_KEY_Z
     constexpr int kKeyLCtrl  = 162;  // Irrlicht KEY_LCONTROL
     constexpr int kKeyRCtrl  = 163;  // Irrlicht KEY_RCONTROL
@@ -107,6 +112,81 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
             0, 0, m_backend->getVirtualWidth(), m_backend->getVirtualHeight());
         m_backend->setElementAlpha(m_scrimHandle, 0.5f);
         m_backend->setElementVisible(m_scrimHandle, false);
+    }
+
+    // --- Phase 9b: Zone sub-panel buttons (3×3 grid: R/C/I × Low/Med/High) ---
+    // Top-left anchor: virtual (x:80, y:64). Each button 64×40 px with 4 px gap.
+    // Grid layout: 3 columns (zone type) × 3 rows (density tier).
+    // All buttons initially hidden (only shown when ActiveTool::Zone is active).
+    // Sprite initialization: all inactive first, then active on default selection (ResLow).
+    if (m_backend) {
+        const int zoneBtnW  = 64;
+        const int zoneBtnH  = 40;
+        const int zoneGap   = 4;
+        const int zoneLeft  = 80;
+        const int zoneTop   = 64;
+
+        // Create all 9 buttons; set inactive sprites; hide them.
+        for (int densityRow = 0; densityRow < 3; ++densityRow) {
+            for (int zoneCol = 0; zoneCol < 3; ++zoneCol) {
+                int idx = densityRow * 3 + zoneCol;
+                int bx  = zoneLeft + zoneCol  * (zoneBtnW + zoneGap);
+                int by  = zoneTop  + densityRow * (zoneBtnH + zoneGap);
+
+                m_zoneSubPanelBtns[idx] = m_backend->addButton("", bx, by, zoneBtnW, zoneBtnH);
+
+                // Set inactive sprite.
+                uint32_t inactiveSprite = kSpriteZoneResLowInactive
+                                          + static_cast<uint32_t>(zoneCol)
+                                          + static_cast<uint32_t>(densityRow) * 3u;
+                m_backend->setElementImage(m_zoneSubPanelBtns[idx], inactiveSprite);
+
+                // Initially hidden — only shown when Zone tool is active.
+                m_backend->setElementVisible(m_zoneSubPanelBtns[idx], false);
+            }
+        }
+
+        // Set default selection (Residential Low = col 0, row 0) to active sprite.
+        m_backend->setElementImage(m_zoneSubPanelBtns[0], kSpriteZoneResLowActive);
+    }
+
+    // --- Phase 9b: Utilities sub-panel buttons (2×2 grid) ---
+    // Top-left anchor: virtual (x:80, y:176). Each button 96×48 px with 4 px gap.
+    // Grid layout: 2 columns × 2 rows.
+    //   (col0,row0)=PowerPlant, (col1,row0)=WaterTower,
+    //   (col0,row1)=FireStation, (col1,row1)=PoliceStation
+    // All buttons initially hidden (only shown when ActiveTool::Utilities is active).
+    if (m_backend) {
+        const int utilBtnW  = 96;
+        const int utilBtnH  = 48;
+        const int utilGap   = 4;
+        const int utilLeft  = 80;
+        const int utilTop   = 176;
+
+        // ServiceBuildingType ordinals: PowerPlant=0, WaterTower=1, FireStation=2, PoliceStation=3.
+        // Grid positions: (col, row) -> type index:
+        //   (0,0)->0=PowerPlant, (1,0)->1=WaterTower,
+        //   (0,1)->2=FireStation, (1,1)->3=PoliceStation.
+        for (int utilRow = 0; utilRow < 2; ++utilRow) {
+            for (int utilCol = 0; utilCol < 2; ++utilCol) {
+                int typeIdx = utilRow * 2 + utilCol;
+                int bx  = utilLeft + utilCol * (utilBtnW + utilGap);
+                int by  = utilTop  + utilRow * (utilBtnH + utilGap);
+
+                m_utilSubPanelBtns[typeIdx] = m_backend->addButton("", bx, by, utilBtnW, utilBtnH);
+
+                // Set inactive sprite.
+                uint32_t inactiveSprite = kSpriteUtilPowerInactive
+                                          + static_cast<uint32_t>(typeIdx);
+                m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], inactiveSprite);
+
+                // Initially hidden.
+                m_backend->setElementVisible(m_utilSubPanelBtns[typeIdx], false);
+            }
+        }
+
+        // Set default selection (PowerPlant = type 0) to active sprite.
+        m_backend->setElementImage(m_utilSubPanelBtns[0], kSpriteUtilPowerActive);
     }
 }
 
@@ -190,10 +270,12 @@ bool UIManager::onEvent(const InputEvent& event) {
     }
 
     // ============================================================
-    // Priority 3: QueryPanel / Inspector (when open).
+    // Priority 3: QueryPanel / Inspector (when open) + QueryTool open path.
     // Consumes events within panel bounds.
     // Outside-click closes panel (unless on toolbar or minimap).
     // Escape closes the panel.
+    // QueryTool open path: if Query tool active and panel NOT open and LMB click,
+    //   ray-cast and open inspector at hit tile.
     // ============================================================
     if (m_inspectorOpen) {
         Rect inspBounds = m_inspector->getBounds();
@@ -233,6 +315,37 @@ bool UIManager::onEvent(const InputEvent& event) {
                 }
             }
         }
+    }
+
+    // Priority 3 — QueryTool open path.
+    // When Query tool is active, the inspector is NOT yet open, and this is a LMB click:
+    // ray-cast to find the hovered tile and open the inspector panel at that tile.
+    // This path executes AFTER the inspector-close path above so that a click outside
+    // an already-open inspector first closes it (handled above), and a subsequent click
+    // opens a new one here.
+    if (!m_inspectorOpen &&
+        m_activeTool == ActiveTool::Query &&
+        m_state == GameState::Gameplay &&
+        event.type == InputEvent::Type::MouseButtonDown &&
+        event.button == 0 &&
+        m_renderer) {
+
+        int hitX = -1, hitZ = -1;
+        if (m_renderer->pickTerrainTile(event.x, event.y, hitX, hitZ)) {
+            if (m_sim) {
+                QueryResult result = m_sim->queryTile(hitX, hitZ);
+                // Compute virtual-space cursor and tile bounds for panel positioning.
+                ScreenRect tileBounds{};
+                tileBounds = m_renderer->getTileScreenBounds(hitX, hitZ);
+                // Open inspector at computed position.
+                m_inspector->populate(result, hitX, hitZ,
+                                      event.x, event.y, tileBounds);
+                m_inspectorOpen = true;
+            }
+            return true;
+        }
+        // No terrain hit — fall through (return false at end).
+        return false;
     }
 
     // ============================================================
@@ -359,14 +472,61 @@ bool UIManager::onEvent(const InputEvent& event) {
                 return true;
             }
 
-            // I: toggle inspector panel
+            // Z: Zone tool hotkey
+            if (event.keyCode == kKeyZ && !m_ctrlDown) {
+                m_activeTool = ActiveTool::Zone;
+                if (m_hud) m_hud->setActiveToolLabel("Zone");
+                updateSubPanelVisibility();
+                return true;
+            }
+
+            // R: Road tool hotkey
+            if (event.keyCode == kKeyR) {
+                m_activeTool = ActiveTool::Road;
+                if (m_hud) m_hud->setActiveToolLabel("Road");
+                updateSubPanelVisibility();
+                return true;
+            }
+
+            // U: Utilities tool hotkey
+            if (event.keyCode == kKeyU) {
+                m_activeTool = ActiveTool::Utilities;
+                if (m_hud) m_hud->setActiveToolLabel("Utilities");
+                updateSubPanelVisibility();
+                return true;
+            }
+
+            // D: Demolish tool hotkey
+            if (event.keyCode == kKeyD) {
+                m_activeTool = ActiveTool::Demolish;
+                if (m_hud) m_hud->setActiveToolLabel("Demolish");
+                updateSubPanelVisibility();
+                return true;
+            }
+
+            // I: Query tool hotkey — toggles between Query and None.
+            // Per spec line 120: "existing inspector open/close logic is unchanged."
+            // Pressing I activates Query tool AND opens the inspector panel directly
+            // (same as pre-Phase-9b behaviour).  Pressing I again closes the inspector
+            // and deactivates the Query tool.
             if (event.keyCode == kKeyI) {
-                m_inspectorOpen = !m_inspectorOpen;
-                if (m_inspectorOpen) {
-                    m_inspector->show();
+                if (m_activeTool == ActiveTool::Query) {
+                    m_activeTool = ActiveTool::None;
+                    if (m_hud) m_hud->setActiveToolLabel("No tool");
+                    if (m_inspectorOpen) {
+                        m_inspector->hide();
+                        m_inspectorOpen = false;
+                    }
                 } else {
-                    m_inspector->hide();
+                    m_activeTool = ActiveTool::Query;
+                    if (m_hud) m_hud->setActiveToolLabel("Query");
+                    // Open inspector directly (existing behaviour preserved).
+                    if (!m_inspectorOpen) {
+                        m_inspector->show();
+                        m_inspectorOpen = true;
+                    }
                 }
+                updateSubPanelVisibility();
                 return true;
             }
         }
@@ -376,6 +536,63 @@ bool UIManager::onEvent(const InputEvent& event) {
     if (m_state == GameState::Gameplay &&
         event.type == InputEvent::Type::MouseButtonDown &&
         event.button == 0) {
+
+        // --- Zone sub-panel button hit-test (before toolbar, so sub-panel area is checked first) ---
+        if (m_activeTool == ActiveTool::Zone && m_backend) {
+            for (int densityRow = 0; densityRow < 3; ++densityRow) {
+                for (int zoneCol = 0; zoneCol < 3; ++zoneCol) {
+                    int idx = densityRow * 3 + zoneCol;
+                    if (m_zoneSubPanelBtns[idx] == kInvalidUIElement) continue;
+                    if (!m_backend->isElementVisible(m_zoneSubPanelBtns[idx])) continue;
+                    Rect btnRect = m_backend->getElementRect(m_zoneSubPanelBtns[idx]);
+                    if (inRect(event.x, event.y, btnRect.x, btnRect.y, btnRect.w, btnRect.h)) {
+                        // Update selection state.
+                        m_selectedZoneType    = zoneCol;
+                        m_selectedDensityTier = densityRow;
+                        // Swap sprites: set all to inactive, then clicked to active.
+                        for (int dr2 = 0; dr2 < 3; ++dr2) {
+                            for (int zc2 = 0; zc2 < 3; ++zc2) {
+                                int idx2 = dr2 * 3 + zc2;
+                                if (m_zoneSubPanelBtns[idx2] == kInvalidUIElement) continue;
+                                uint32_t sprite = kSpriteZoneResLowInactive
+                                                  + static_cast<uint32_t>(zc2)
+                                                  + static_cast<uint32_t>(dr2) * 3u;
+                                m_backend->setElementImage(m_zoneSubPanelBtns[idx2], sprite);
+                            }
+                        }
+                        uint32_t activeSprite = kSpriteZoneResLowActive
+                                                + static_cast<uint32_t>(zoneCol)
+                                                + static_cast<uint32_t>(densityRow) * 3u;
+                        m_backend->setElementImage(m_zoneSubPanelBtns[idx], activeSprite);
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // --- Utilities sub-panel button hit-test ---
+        if (m_activeTool == ActiveTool::Utilities && m_backend) {
+            for (int typeIdx = 0; typeIdx < 4; ++typeIdx) {
+                if (m_utilSubPanelBtns[typeIdx] == kInvalidUIElement) continue;
+                if (!m_backend->isElementVisible(m_utilSubPanelBtns[typeIdx])) continue;
+                Rect btnRect = m_backend->getElementRect(m_utilSubPanelBtns[typeIdx]);
+                if (inRect(event.x, event.y, btnRect.x, btnRect.y, btnRect.w, btnRect.h)) {
+                    // Update selection.
+                    m_selectedServiceBuilding = typeIdx;
+                    // Swap sprites.
+                    for (int t2 = 0; t2 < 4; ++t2) {
+                        if (m_utilSubPanelBtns[t2] == kInvalidUIElement) continue;
+                        uint32_t sprite = kSpriteUtilPowerInactive
+                                          + static_cast<uint32_t>(t2);
+                        m_backend->setElementImage(m_utilSubPanelBtns[t2], sprite);
+                    }
+                    uint32_t activeSprite = kSpriteUtilPowerActive
+                                            + static_cast<uint32_t>(typeIdx);
+                    m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], activeSprite);
+                    return true;
+                }
+            }
+        }
 
         // Toolbar carve-out (left-side toolbar: zone/road/utility/demolish/query + undo)
         if (inRect(event.x, event.y,
@@ -387,21 +604,39 @@ bool UIManager::onEvent(const InputEvent& event) {
             const int y = event.y;
 
             if (y >= 64 && y < 112) {          // Zone
+                m_activeTool = ActiveTool::Zone;
                 if (m_hud) m_hud->setActiveToolLabel("Zone");
+                updateSubPanelVisibility();
             } else if (y >= 120 && y < 168) {  // Road
+                m_activeTool = ActiveTool::Road;
                 if (m_hud) m_hud->setActiveToolLabel("Road");
+                updateSubPanelVisibility();
             } else if (y >= 176 && y < 224) {  // Utilities
+                m_activeTool = ActiveTool::Utilities;
                 if (m_hud) m_hud->setActiveToolLabel("Utilities");
+                updateSubPanelVisibility();
             } else if (y >= 232 && y < 280) {  // Demolish
+                m_activeTool = ActiveTool::Demolish;
                 if (m_hud) m_hud->setActiveToolLabel("Demolish");
-            } else if (y >= 288 && y < 336) {  // Query — toggle inspector
-                m_inspectorOpen = !m_inspectorOpen;
-                if (m_inspectorOpen) {
-                    m_inspector->show();
+                updateSubPanelVisibility();
+            } else if (y >= 288 && y < 336) {  // Query — toggle between Query and None
+                if (m_activeTool == ActiveTool::Query) {
+                    m_activeTool = ActiveTool::None;
+                    if (m_hud) m_hud->setActiveToolLabel("No tool");
+                    if (m_inspectorOpen) {
+                        m_inspector->hide();
+                        m_inspectorOpen = false;
+                    }
                 } else {
-                    m_inspector->hide();
+                    m_activeTool = ActiveTool::Query;
+                    if (m_hud) m_hud->setActiveToolLabel("Query");
+                    // Open inspector directly (existing behaviour preserved).
+                    if (!m_inspectorOpen) {
+                        m_inspector->show();
+                        m_inspectorOpen = true;
+                    }
                 }
-                if (m_hud) m_hud->setActiveToolLabel(m_inspectorOpen ? "Query" : "No tool");
+                updateSubPanelVisibility();
             } else if (y >= 608 && y < 656) {  // Undo
                 if (m_sim && m_sim->hasUndoPendingAction()) {
                     m_sim->undoLastAction();
@@ -457,10 +692,181 @@ bool UIManager::onEvent(const InputEvent& event) {
     }
 
     // ============================================================
-    // Priority 6: CameraController (lowest priority).
-    // Unconsumed events pass through to the camera system.
+    // Priority 6: CameraController — handled externally by platform adapter.
     // ============================================================
+
+    // ============================================================
+    // Priority 7: World-interaction layer.
+    // Only active when in Gameplay state with a non-None tool selected.
+    // MouseMove: hover highlight update (never consumes — returns false).
+    // LMB click: placement dispatch (consumes when a non-Query tool hits terrain).
+    // Query tool LMB: handled at Priority 3 above — must not reach here.
+    // ============================================================
+    if (m_state == GameState::Gameplay && m_activeTool != ActiveTool::None) {
+        // Guard: renderer must be set before any world-interaction can occur.
+        if (!m_renderer) return false;
+
+        if (event.type == InputEvent::Type::MouseMove) {
+            int hitX = -1, hitZ = -1;
+            if (m_renderer->pickTerrainTile(event.x, event.y, hitX, hitZ)) {
+                // Determine hover colour from active tool.
+                uint32_t colour = 0u;
+                switch (m_activeTool) {
+                    case ActiveTool::Zone:      colour = kHoverArgbZone;      break;
+                    case ActiveTool::Road:      colour = kHoverArgbRoad;      break;
+                    case ActiveTool::Utilities: colour = kHoverArgbUtilities; break;
+                    case ActiveTool::Demolish:  colour = kHoverArgbDemolish;  break;
+                    case ActiveTool::Query:     colour = kHoverArgbQuery;     break;
+                    default:                    colour = kHoverArgbClear;     break;
+                }
+                m_renderer->setTileHoverHighlight(hitX, hitZ, colour);
+                m_hoveredTileX = hitX;
+                m_hoveredTileZ = hitZ;
+            } else {
+                m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
+                m_hoveredTileX = -1;
+                m_hoveredTileZ = -1;
+            }
+            return false;  // MouseMove is never consumed by world-interaction.
+        }
+
+        if (event.type == InputEvent::Type::MouseButtonDown && event.button == 0) {
+            // Query tool left-click is handled at Priority 3 — it must not reach here.
+            if (m_activeTool == ActiveTool::Query) {
+                return false;
+            }
+
+            // Ray-cast from click position to find the terrain tile.
+            // Do not require a prior MouseMove — the click itself provides the screen coords.
+            int hitX = -1, hitZ = -1;
+            if (!m_renderer->pickTerrainTile(event.x, event.y, hitX, hitZ)) {
+                return false;
+            }
+
+            // Earthworks cost computation.
+            float slope = 0.0f;
+            if (m_terrain) {
+                slope = m_terrain->getSlopeDegrees(hitX, hitZ);
+            }
+            float factor = std::clamp((slope - 15.0f) / 30.0f, 0.0f, 2.0f);
+            int   earthworksCost = (slope > 15.0f)
+                                   ? static_cast<int>(500.0f * factor)
+                                   : 0;
+
+            // Slope guard: insufficient funds for earthworks.
+            if (slope > 15.0f && m_sim) {
+                float balance = m_sim->getTreasuryBalance();
+                if (static_cast<float>(earthworksCost) > balance) {
+                    m_notifications->postNormal(
+                        "Earthworks Required",
+                        "Earthworks required — insufficient funds (cost: $"
+                            + std::to_string(earthworksCost) + ").");
+                    return true;
+                }
+            }
+
+            if (!m_sim) return false;
+
+            switch (m_activeTool) {
+                case ActiveTool::Zone: {
+                    // Guard: skip overlay writes until map dimensions are set.
+                    m_sim->placeZone(hitX, hitZ,
+                                     static_cast<ZoneType>(m_selectedZoneType),
+                                     static_cast<DensityTier>(m_selectedDensityTier),
+                                     earthworksCost);
+                    if (m_mapTilesX > 0 && m_mapTilesZ > 0) {
+                        // Determine overlay colour from zone type.
+                        uint32_t overlayColour = 0u;
+                        switch (static_cast<ZoneType>(m_selectedZoneType)) {
+                            case ZoneType::Residential: overlayColour = kOverlayArgbResidential; break;
+                            case ZoneType::Commercial:  overlayColour = kOverlayArgbCommercial;  break;
+                            case ZoneType::Industrial:  overlayColour = kOverlayArgbIndustrial;  break;
+                        }
+                        // Cap overlay map at 100K entries.
+                        static constexpr size_t kOverlayCap = 100000u;
+                        uint64_t key = static_cast<uint64_t>(hitZ) * static_cast<uint64_t>(m_mapTilesX)
+                                       + static_cast<uint64_t>(hitX);
+                        if (m_overlayMap.size() < kOverlayCap || m_overlayMap.count(key)) {
+                            m_overlayMap[key] = overlayColour;
+                        }
+                        if (m_renderer) {
+                            m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
+                        }
+                    }
+                    setUnsavedChanges(true);
+                    break;
+                }
+                case ActiveTool::Road: {
+                    m_sim->placeRoad(hitX, hitZ, earthworksCost);
+                    setUnsavedChanges(true);
+                    break;
+                }
+                case ActiveTool::Utilities: {
+                    m_sim->placeServiceBuilding(hitX, hitZ,
+                        static_cast<ServiceBuildingType>(m_selectedServiceBuilding),
+                        earthworksCost);
+                    setUnsavedChanges(true);
+                    break;
+                }
+                case ActiveTool::Demolish: {
+                    if (m_demolishConfirmEnabled) {
+                        // Show demolish confirmation modal (Phase 8 code path).
+                        // The actual demolishTile() call is deferred until the modal confirms.
+                        // For Phase 9b, show the modal and return — tile destruction occurs
+                        // when the modal's Accept result is polled.
+                        m_modal->showDemolishConfirm(1);
+                        // Note: demolishTile is NOT called here; the modal must confirm first.
+                        // In the current Phase 9b architecture, UIManager polls modal result
+                        // via m_modal->getLastResult() during update(). This wiring is deferred
+                        // to the full modal integration — for now the modal is shown and the
+                        // event is consumed.
+                        setUnsavedChanges(true);
+                    } else {
+                        // Confirmation suppressed — demolish immediately.
+                        m_sim->demolishTile(hitX, hitZ);
+                        if (m_mapTilesX > 0 && m_mapTilesZ > 0) {
+                            uint64_t key = static_cast<uint64_t>(hitZ)
+                                           * static_cast<uint64_t>(m_mapTilesX)
+                                           + static_cast<uint64_t>(hitX);
+                            m_overlayMap.erase(key);
+                            if (m_renderer) {
+                                m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
+                            }
+                        }
+                        setUnsavedChanges(true);
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+            return true;
+        }
+    }
+
     return false;
+}
+
+// ----------------------------------------------------------------
+// updateSubPanelVisibility — show/hide Zone and Utilities sub-panels
+// based on the current active tool.  Called whenever m_activeTool changes.
+// ----------------------------------------------------------------
+void UIManager::updateSubPanelVisibility() {
+    if (!m_backend) return;
+
+    bool showZone = (m_activeTool == ActiveTool::Zone);
+    for (int i = 0; i < 9; ++i) {
+        if (m_zoneSubPanelBtns[i] != kInvalidUIElement) {
+            m_backend->setElementVisible(m_zoneSubPanelBtns[i], showZone);
+        }
+    }
+
+    bool showUtil = (m_activeTool == ActiveTool::Utilities);
+    for (int i = 0; i < 4; ++i) {
+        if (m_utilSubPanelBtns[i] != kInvalidUIElement) {
+            m_backend->setElementVisible(m_utilSubPanelBtns[i], showUtil);
+        }
+    }
 }
 
 // ----------------------------------------------------------------
@@ -819,15 +1225,22 @@ void UIManager::setTerrainQuery(ITerrainQuery* terrain) {
 }
 
 void UIManager::setMapDimensions(int mapTilesX, int mapTilesZ) {
-    // Re-call safety: if map size changes (e.g. new-game load with a different
-    // map), clear stale overlay keys from the previous map before updating
-    // dimensions so old indices cannot corrupt the new map's overlay.
-    if (m_mapTilesX != mapTilesX || m_mapTilesZ != mapTilesZ) {
+    // Re-call safety: if dimensions change AND we already had valid dimensions set,
+    // clear stale overlay keys from the previous map so old indices cannot corrupt
+    // the new map's overlay. On the FIRST call (m_mapTilesX == 0 && m_mapTilesZ == 0),
+    // there is nothing to clear — skip the setZoneOverlay call entirely.
+    bool dimensionsChanged = (m_mapTilesX != mapTilesX || m_mapTilesZ != mapTilesZ);
+    bool hadValidDimensions = (m_mapTilesX > 0 && m_mapTilesZ > 0);
+
+    if (dimensionsChanged && hadValidDimensions) {
         m_overlayMap.clear();
         // Push an empty setZoneOverlay call to clear the render-layer overlay mesh.
         if (m_renderer) {
             m_renderer->setZoneOverlay(mapTilesX, mapTilesZ, {});
         }
+    } else if (dimensionsChanged) {
+        // First call (from 0,0 to actual dimensions): just clear overlay map, no renderer call.
+        m_overlayMap.clear();
     }
     m_mapTilesX = mapTilesX;
     m_mapTilesZ = mapTilesZ;
@@ -835,4 +1248,20 @@ void UIManager::setMapDimensions(int mapTilesX, int mapTilesZ) {
 
 ActiveTool UIManager::getActiveTool() const {
     return m_activeTool;
+}
+
+// ----------------------------------------------------------------
+// onNewGame — reset world-interaction state for a new game.
+// Clears overlay map, pushes an empty setZoneOverlay() to clear
+// the render-layer overlay mesh, resets active tool and hovered tile.
+// ----------------------------------------------------------------
+void UIManager::onNewGame() {
+    m_overlayMap.clear();
+    if (m_renderer && m_mapTilesX > 0 && m_mapTilesZ > 0) {
+        m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, {});
+    }
+    m_activeTool   = ActiveTool::None;
+    m_hoveredTileX = -1;
+    m_hoveredTileZ = -1;
+    updateSubPanelVisibility();
 }

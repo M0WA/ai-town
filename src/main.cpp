@@ -142,6 +142,16 @@ int main() {
     terrainSystem.generate(128, 128, 10.0f, &terrainRng);
     terrainSystem.buildAllChunks();
 
+    // -------------------------------------------------------------------------
+    // Phase 9b: wire renderer terrain query AFTER terrain generation.
+    // Step 2:  renderer.setTerrainQuery(&terrainSystem)
+    // Step 2a: renderer.setCellSize(terrainSystem.getCellSize())
+    // Step 2b: renderer.setRendererMapDimensions(...)
+    // -------------------------------------------------------------------------
+    renderer.setTerrainQuery(&terrainSystem);
+    renderer.setCellSize(terrainSystem.getCellSize());
+    renderer.setRendererMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
+
     // Position camera over the terrain center (128 tiles × 10 m / 2 = 640 m per axis).
     cameraController.setTarget(640.0f, 640.0f);
 
@@ -157,6 +167,17 @@ int main() {
 
     // Late-bind UIManager to renderer (breaks circular construction dependency).
     renderer.setUIManager(&uiManager);
+
+    // -------------------------------------------------------------------------
+    // Phase 9b: wire UIManager terrain/renderer/map-dimensions AFTER UIManager
+    // is constructed (and after terrain generation completes).
+    // Step 3: uiManager.setRenderer(&renderer)
+    // Step 4: uiManager.setTerrainQuery(&terrainSystem)
+    // Step 5: uiManager.setMapDimensions(...)
+    // -------------------------------------------------------------------------
+    uiManager.setRenderer(&renderer);
+    uiManager.setTerrainQuery(&terrainSystem);
+    uiManager.setMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
 
     // -------------------------------------------------------------------------
     // EventReceiver — translates SEvent → InputEvent, dispatches per input-arbitration.md.

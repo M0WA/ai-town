@@ -1496,10 +1496,82 @@ void CitySimulation::demolishTile(int tileX, int tileZ) {
 // callback) is delivered in Phase 9b.
 // ---------------------------------------------------------------------------
 
-void CitySimulation::placeServiceBuilding(int /*tileX*/, int /*tileZ*/,
-                                          ServiceBuildingType /*type*/,
-                                          int /*earthworksCostOverride*/) {
-    // Phase 9b: no-op stub. Implementation wires cost, coverage, and undo.
+void CitySimulation::placeServiceBuilding(int tileX, int tileZ,
+                                          ServiceBuildingType type,
+                                          int earthworksCostOverride) {
+    // One-building-per-tile invariant: no-op if the tile is already occupied.
+    for (const ServiceBuilding& sb : m_serviceBuildings) {
+        if (sb.x == tileX && sb.z == tileZ) {
+            return;  // Already occupied — no cost, no undo entry.
+        }
+    }
+
+    // Map ServiceBuildingType (public) to ServiceType (private).
+    // ServiceBuildingType: PowerPlant=0, WaterTower=1, FireStation=2, PoliceStation=3.
+    // ServiceType:         FireStation=0, PoliceStation=1, WaterTower=2, PowerPlant=3.
+    ServiceType internalType;
+    int placementCost = 0;
+    switch (type) {
+        case ServiceBuildingType::PowerPlant:
+            internalType  = ServiceType::PowerPlant;
+            placementCost = SimulationConstants::service_placement_cost_power_plant;
+            break;
+        case ServiceBuildingType::WaterTower:
+            internalType  = ServiceType::WaterTower;
+            placementCost = SimulationConstants::service_placement_cost_water_tower;
+            break;
+        case ServiceBuildingType::FireStation:
+            internalType  = ServiceType::FireStation;
+            placementCost = SimulationConstants::service_placement_cost_fire_station;
+            break;
+        case ServiceBuildingType::PoliceStation:
+            internalType  = ServiceType::PoliceStation;
+            placementCost = SimulationConstants::service_placement_cost_police_station;
+            break;
+        default:
+            return;
+    }
+
+    // Record previous tile state for undo.
+    UndoAction undoAction;
+    undoAction.actionType = UndoAction::Type::PlaceZone;  // re-uses PlaceZone type for undo record
+    undoAction.tileX = tileX;
+    undoAction.tileZ = tileZ;
+    int64_t key = tileKey(tileX, tileZ);
+    auto it = m_tiles.find(key);
+    undoAction.previousState = (it != m_tiles.end()) ? it->second : TileData{};
+
+    int64_t totalCost = static_cast<int64_t>(placementCost)
+                        + static_cast<int64_t>(earthworksCostOverride);
+    undoAction.costPaid = totalCost;
+
+    // Deduct cost from treasury.
+    m_treasury -= totalCost;
+
+    // Register the service building.
+    ServiceBuilding sb;
+    sb.x       = tileX;
+    sb.z       = tileZ;
+    sb.type    = internalType;
+    sb.degraded = false;
+    m_serviceBuildings.push_back(sb);
+
+    // Play audio.
+    if (earthworksCostOverride > 0) {
+        if (m_audio) {
+            m_audio->playPositionalSound(SFX_EARTHWORKS,
+                vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+                SoundPriority::NORMAL, 1.0f);
+        }
+    }
+    if (m_audio) {
+        m_audio->playPositionalSound(SFX_BUILD_PLACE,
+            vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+            SoundPriority::NORMAL, 1.0f);
+    }
+
+    // Record undo entry.
+    recordUndoAction(undoAction);
 }
 
 // ---------------------------------------------------------------------------
