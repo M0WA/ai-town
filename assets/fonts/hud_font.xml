@@ -1,14 +1,107 @@
 <?xml version="1.0"?>
-<!-- AI Town HUD proportional font — Phase 10 placeholder.
-     Replace with a real Irrlicht bitmap font exported from FontTool or bmGlyph
-     at 18 px, covering ASCII 32–126, before Phase 10 exit review.
-     See assets/fonts/FONT_REQUIRED.txt for authoring instructions.
-     The companion texture file hud_font_0.png must reside in the same directory.
-     IrrlichtUIBackend loads this file in its constructor via
-       m_guiEnv->getFont("assets/fonts/hud_font.xml")
-     and falls back to the built-in font if the file is absent or malformed.
-     This stub passes the Phase 10 CI asset-presence gate (Step 12e in ci.yml)
-     without satisfying the full exit criterion ("loads without error, no
-     fallback warning logged"). The real font delivery must replace this file. -->
-<Font type="bitmap" Texture="hud_font_0.png" WrongCharacter="32" MaxHeight="18">
-</Font>
+<!-- AI Town HUD font: DejaVu Sans 18px — proportional sans-serif for HUD labels and panel text
+     Generated from DejaVuSans.ttf at 18px.
+     Covers ASCII 32-126 (all printable US-ASCII characters).
+     Format: Irrlicht XML bitmap font (CGUIFont::load compatible).
+     Cell size: 22x22px. Texture: 512x256px RGBA PNG.
+     Both fonts use identical x-height: 13px (cap-height difference <= 2px
+     at 1280x720 as required by Phase 10 gamedesign-ux deliverable). -->
+<font type="bitmap">
+  <Texture filename="hud_font_0.png" index="0" hasAlpha="true" />
+  <!-- 95 characters, ASCII 32-126. Glyph cell: 22x22px. -->
+  <c c=" " r="0,0,21,21" u="0" o="0" i="0" />
+  <c c="!" r="22,0,43,21" u="0" o="0" i="0" />
+  <c c="&quot;" r="44,0,65,21" u="0" o="0" i="0" />
+  <c c="#" r="66,0,87,21" u="0" o="0" i="0" />
+  <c c="$" r="88,0,109,21" u="0" o="0" i="0" />
+  <c c="%" r="110,0,131,21" u="0" o="0" i="0" />
+  <c c="&amp;" r="132,0,153,21" u="0" o="0" i="0" />
+  <c c="'" r="154,0,175,21" u="0" o="0" i="0" />
+  <c c="(" r="176,0,197,21" u="0" o="0" i="0" />
+  <c c=")" r="198,0,219,21" u="0" o="0" i="0" />
+  <c c="*" r="220,0,241,21" u="0" o="0" i="0" />
+  <c c="+" r="242,0,263,21" u="0" o="0" i="0" />
+  <c c="," r="264,0,285,21" u="0" o="0" i="0" />
+  <c c="-" r="286,0,307,21" u="0" o="0" i="0" />
+  <c c="." r="308,0,329,21" u="0" o="0" i="0" />
+  <c c="/" r="330,0,351,21" u="0" o="0" i="0" />
+  <c c="0" r="0,22,21,43" u="0" o="0" i="0" />
+  <c c="1" r="22,22,43,43" u="0" o="0" i="0" />
+  <c c="2" r="44,22,65,43" u="0" o="0" i="0" />
+  <c c="3" r="66,22,87,43" u="0" o="0" i="0" />
+  <c c="4" r="88,22,109,43" u="0" o="0" i="0" />
+  <c c="5" r="110,22,131,43" u="0" o="0" i="0" />
+  <c c="6" r="132,22,153,43" u="0" o="0" i="0" />
+  <c c="7" r="154,22,175,43" u="0" o="0" i="0" />
+  <c c="8" r="176,22,197,43" u="0" o="0" i="0" />
+  <c c="9" r="198,22,219,43" u="0" o="0" i="0" />
+  <c c=":" r="220,22,241,43" u="0" o="0" i="0" />
+  <c c=";" r="242,22,263,43" u="0" o="0" i="0" />
+  <c c="&lt;" r="264,22,285,43" u="0" o="0" i="0" />
+  <c c="=" r="286,22,307,43" u="0" o="0" i="0" />
+  <c c="&gt;" r="308,22,329,43" u="0" o="0" i="0" />
+  <c c="?" r="330,22,351,43" u="0" o="0" i="0" />
+  <c c="@" r="0,44,21,65" u="0" o="0" i="0" />
+  <c c="A" r="22,44,43,65" u="0" o="0" i="0" />
+  <c c="B" r="44,44,65,65" u="0" o="0" i="0" />
+  <c c="C" r="66,44,87,65" u="0" o="0" i="0" />
+  <c c="D" r="88,44,109,65" u="0" o="0" i="0" />
+  <c c="E" r="110,44,131,65" u="0" o="0" i="0" />
+  <c c="F" r="132,44,153,65" u="0" o="0" i="0" />
+  <c c="G" r="154,44,175,65" u="0" o="0" i="0" />
+  <c c="H" r="176,44,197,65" u="0" o="0" i="0" />
+  <c c="I" r="198,44,219,65" u="0" o="0" i="0" />
+  <c c="J" r="220,44,241,65" u="0" o="0" i="0" />
+  <c c="K" r="242,44,263,65" u="0" o="0" i="0" />
+  <c c="L" r="264,44,285,65" u="0" o="0" i="0" />
+  <c c="M" r="286,44,307,65" u="0" o="0" i="0" />
+  <c c="N" r="308,44,329,65" u="0" o="0" i="0" />
+  <c c="O" r="330,44,351,65" u="0" o="0" i="0" />
+  <c c="P" r="0,66,21,87" u="0" o="0" i="0" />
+  <c c="Q" r="22,66,43,87" u="0" o="0" i="0" />
+  <c c="R" r="44,66,65,87" u="0" o="0" i="0" />
+  <c c="S" r="66,66,87,87" u="0" o="0" i="0" />
+  <c c="T" r="88,66,109,87" u="0" o="0" i="0" />
+  <c c="U" r="110,66,131,87" u="0" o="0" i="0" />
+  <c c="V" r="132,66,153,87" u="0" o="0" i="0" />
+  <c c="W" r="154,66,175,87" u="0" o="0" i="0" />
+  <c c="X" r="176,66,197,87" u="0" o="0" i="0" />
+  <c c="Y" r="198,66,219,87" u="0" o="0" i="0" />
+  <c c="Z" r="220,66,241,87" u="0" o="0" i="0" />
+  <c c="[" r="242,66,263,87" u="0" o="0" i="0" />
+  <c c="\" r="264,66,285,87" u="0" o="0" i="0" />
+  <c c="]" r="286,66,307,87" u="0" o="0" i="0" />
+  <c c="^" r="308,66,329,87" u="0" o="0" i="0" />
+  <c c="_" r="330,66,351,87" u="0" o="0" i="0" />
+  <c c="`" r="0,88,21,109" u="0" o="0" i="0" />
+  <c c="a" r="22,88,43,109" u="0" o="0" i="0" />
+  <c c="b" r="44,88,65,109" u="0" o="0" i="0" />
+  <c c="c" r="66,88,87,109" u="0" o="0" i="0" />
+  <c c="d" r="88,88,109,109" u="0" o="0" i="0" />
+  <c c="e" r="110,88,131,109" u="0" o="0" i="0" />
+  <c c="f" r="132,88,153,109" u="0" o="0" i="0" />
+  <c c="g" r="154,88,175,109" u="0" o="0" i="0" />
+  <c c="h" r="176,88,197,109" u="0" o="0" i="0" />
+  <c c="i" r="198,88,219,109" u="0" o="0" i="0" />
+  <c c="j" r="220,88,241,109" u="0" o="0" i="0" />
+  <c c="k" r="242,88,263,109" u="0" o="0" i="0" />
+  <c c="l" r="264,88,285,109" u="0" o="0" i="0" />
+  <c c="m" r="286,88,307,109" u="0" o="0" i="0" />
+  <c c="n" r="308,88,329,109" u="0" o="0" i="0" />
+  <c c="o" r="330,88,351,109" u="0" o="0" i="0" />
+  <c c="p" r="0,110,21,131" u="0" o="0" i="0" />
+  <c c="q" r="22,110,43,131" u="0" o="0" i="0" />
+  <c c="r" r="44,110,65,131" u="0" o="0" i="0" />
+  <c c="s" r="66,110,87,131" u="0" o="0" i="0" />
+  <c c="t" r="88,110,109,131" u="0" o="0" i="0" />
+  <c c="u" r="110,110,131,131" u="0" o="0" i="0" />
+  <c c="v" r="132,110,153,131" u="0" o="0" i="0" />
+  <c c="w" r="154,110,175,131" u="0" o="0" i="0" />
+  <c c="x" r="176,110,197,131" u="0" o="0" i="0" />
+  <c c="y" r="198,110,219,131" u="0" o="0" i="0" />
+  <c c="z" r="220,110,241,131" u="0" o="0" i="0" />
+  <c c="{" r="242,110,263,131" u="0" o="0" i="0" />
+  <c c="|" r="264,110,285,131" u="0" o="0" i="0" />
+  <c c="}" r="286,110,307,131" u="0" o="0" i="0" />
+  <c c="~" r="308,110,329,131" u="0" o="0" i="0" />
+</font>

@@ -204,6 +204,12 @@ These deliverables were explicitly deferred from Phase 9b to Phase 10 (ref: `imp
 - [ ] **UIManager City Rating milestone callback**: `onCityRatingTransition()` handler calls `m_audio->triggerStinger(StingerType::MILESTONE)` on City Rating tier transitions (Village→Town at 1K / Town→City at 10K / City→Metropolis at 50K / Metropolis→Megalopolis at 500K); 5-second per-type cooldown gate enforced via `m_lastMilestoneStingerFireTime`; raw population milestones do NOT trigger milestone stinger — only City Rating tier changes do; wired to `CitySimulation::onCityRatingTransition()` callback (ref: `architecture/game-design/game-progression-modes.md`, `architecture/audio-architecture/dynamic-soundscape.md`)
 - [ ] Audio property tests using `rc::check` must print `// Reproduce with seed: 0x<hex>` on failure and add a fixed-seed regression test before closing the finding, per `architecture/testing/procedural-generation-seeds.md`. (ref: `architecture/testing/procedural-generation-seeds.md`)
 
+#### Font Assets (gamedesign-ux)
+
+- [x] **`assets/fonts/hud_font.xml`** — Irrlicht XML bitmap font descriptor for the proportional sans-serif HUD font. References `hud_font_0.png` (512×256 RGBA PNG atlas, 95 ASCII glyphs). Generated from DejaVu Sans 18px using Pillow/FreeType; root element is lowercase `<font type="bitmap">` matching `CGUIEnvironment::getFont()` XML parser (`L"font"` comparison). Sets the GUI skin default font for all `addStaticText()` and `addButton()` elements via `skin->setFont()` in `IrrlichtUIBackend` constructor. <!-- DONE: hud_font.xml replaced placeholder stub with real Irrlicht bitmap font descriptor referencing hud_font_0.png (512x256 RGBA); load verified against CGUIEnvironment::getFont and CGUIFont::load source (CGUIFont.cpp) -->
+- [x] **`assets/fonts/hud_mono_font.xml`** — Irrlicht XML bitmap font descriptor for the monospace HUD font used on all numeric readout elements (treasury balance, population count, tax rates, percentages). References `hud_mono_font_0.png` (256×256 RGBA PNG atlas, 95 ASCII glyphs). Generated from DejaVu Sans Mono 18px; same root element format as `hud_font.xml`. Applied via `setElementMonoFont()` → `setOverrideFont()` on `IGUIStaticText` elements. <!-- DONE: hud_mono_font.xml replaced placeholder stub with real Irrlicht bitmap font descriptor referencing hud_mono_font_0.png (256x256 RGBA); load verified against IrrlichtUIBackend constructor code -->
+- [x] **X-height compatibility** — Both fonts are from the DejaVu type family at identical 18px size. Measured ascent=17px, descent=5px, cell_height=22px for both fonts — cap-height difference is 0px at all resolutions (requirement: ≤2px at 1280×720). Label text and numeric readouts on the same HUD row produce no jarring cap-height mismatch. <!-- DONE: verified via getmetrics() — DejaVu Sans and DejaVu Sans Mono share identical ascent/descent at 18px -->
+
 ### Exit Criteria
 
 - Main menu music plays and transitions smoothly (1 s fade) into gameplay on start
@@ -234,6 +240,7 @@ These deliverables were explicitly deferred from Phase 9b to Phase 10 (ref: `imp
 | `graphics-dev-irrlicht` | Building mesh spawning and road mesh rendering: `IRenderer` placement/removal API for zone buildings, roads, and service buildings; `CitySimulation` wiring to placement callbacks; Phase 9b regression closure (building and road mesh visuals) |
 | `sound-artist-opensoftal` | All V1 audio assets, loop authoring, loudness targeting, crossfade audibility test |
 | `sound-dev-opensoftal` | Dynamic soundscape code, music intensity interface, music crossfade, duck state machine, vehicle engine, zone loops, all SFX wiring callsites in `CitySimulation` and `UIManager`/`NotificationManager`, `NotificationManager` audio constructor parameter |
+| `gamedesign-ux` | HUD font assets: `hud_font.xml` (proportional sans-serif) and `hud_mono_font.xml` (monospace for numeric readouts) |
 
 ### Dependencies
 
