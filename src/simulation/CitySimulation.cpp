@@ -2213,3 +2213,43 @@ void CitySimulation::addServiceBuilding(int x, int z, int serviceTypeInt) {
 void CitySimulation::setModalOpen(bool open) {
     m_modalOpen = open;
 }
+
+#ifdef AITOWN_TESTING_ENABLED
+// ---------------------------------------------------------------------------
+// testForceUnlockDensityTier — Phase 10 test-friend seam.
+//
+// Directly sets unlock_flags[tierIndex] = true, bypassing the 3-consecutive-month
+// revenue-streak counter. The tier index mapping is:
+//   Residential/Medium = 0, Commercial/Medium  = 1, Industrial/Medium = 2,
+//   Residential/High   = 3, Commercial/High    = 4, Industrial/High   = 5.
+//
+// DensityTier::Low has no unlock gate and is silently ignored.
+//
+// Compiled ONLY when AITOWN_TESTING_ENABLED=1 (simulation_tests target only).
+// MUST NOT be compiled into the production aitown binary.
+// (ref: implementation/phase-10.md — testForceUnlockDensityTier decision 2026-03-04)
+// ---------------------------------------------------------------------------
+void CitySimulation::testForceUnlockDensityTier(ZoneType zone, DensityTier tier) {
+    int tierIdx = -1;
+    if (tier == DensityTier::Medium) {
+        switch (zone) {
+            case ZoneType::Residential: tierIdx = 0; break;
+            case ZoneType::Commercial:  tierIdx = 1; break;
+            case ZoneType::Industrial:  tierIdx = 2; break;
+        }
+    } else if (tier == DensityTier::High) {
+        switch (zone) {
+            case ZoneType::Residential: tierIdx = 3; break;
+            case ZoneType::Commercial:  tierIdx = 4; break;
+            case ZoneType::Industrial:  tierIdx = 5; break;
+        }
+    }
+    // DensityTier::Low has no unlock gate — silently no-op.
+    if (tierIdx < 0 || tierIdx > 5) return;
+
+    m_densityUnlockState.unlock_flags[tierIdx] = true;
+    // Reset consecutive counter so doDensityUnlockTick() treats this tier as
+    // already unlocked (wasAlreadyUnlocked[] picks up the true flag next tick).
+    m_densityUnlockState.consecutive_months_above_threshold[tierIdx] = 0;
+}
+#endif  // AITOWN_TESTING_ENABLED

@@ -507,6 +507,13 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/city_simulation_render_test.cpp
 )
 
+# Phase 10: AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier()
+# for the CitySimulation_DensityUpgrade_SwapsBuildingMesh test case.
+# This compile definition MUST NOT be added to the aitown binary target — the
+# testForceUnlockDensityTier() method must not appear in production builds.
+# (ref: implementation/phase-10.md — testForceUnlockDensityTier decision 2026-03-04)
+target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
+
 # Coverage-gap tests: placeServiceBuilding variants, undoLastAction road count,
 # difficulty constructors, smoothstep, getOutstandingDebt with loans, etc.
 # Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(simulation_tests ...) again.

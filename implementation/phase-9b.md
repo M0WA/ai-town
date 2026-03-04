@@ -1418,7 +1418,7 @@ where possible are noted inline.
   Authoritative spec: `architecture/ui-ux/minimap.md` (Phase 9b Minimum Viable Minimap section).
   Assigned to: `graphics-dev-irrlicht`.
 
-- [ ] **Road mesh not visible after placing road tile (Phase 10 missing feature)** —
+- [x] **Road mesh not visible after placing road tile (Phase 10 missing feature)** —
   After `placeRoad()` is dispatched via left-click in Road tool mode, no 3D road mesh appears on
   the terrain. Root cause: `CitySimulation::placeRoad()` updates the `m_tiles` map and fires
   `SFX_ROAD_BUILD` audio but never calls any `IRenderer` method to place a road scene node.
@@ -1429,6 +1429,7 @@ where possible are noted inline.
   required. Spec ownership: `architecture/graphics-architecture/` (road scene node lifecycle),
   `architecture/asset-standards/3d-model-standards.md` (road segment `.b3d` asset spec).
   Assigned to Phase 10: `graphics-dev-irrlicht`.
+  <!-- graphics-dev-irrlicht: CLOSED — Phase 10 implements IRenderer::placeRoadMesh() / removeRoadMesh() in IrrlichtRenderer.cpp; CitySimulation::placeRoad() calls m_renderer->placeRoadMesh() on success; verified by CitySimulation_PlaceRoad_SpawnsRoadMesh unit test, 2026-03-04 -->
 
 - [ ] **No terrain flattening when zone/road/service building placed (Phase 10 missing feature)**
   — When a tile with steep slope has zone, road, or service building placed on it, the earthworks
@@ -1443,7 +1444,7 @@ where possible are noted inline.
   (1) `ITerrainQuery::setTileHeight()` interface method, (2) `TerrainSystem` height-map write
   path, (3) `rebuildTerrainChunk()` triggered on affected chunk. Deferred to post-V1.
 
-- [ ] **No building models after placing zone tiles (Phase 10 missing feature)** — After
+- [x] **No building models after placing zone tiles (Phase 10 missing feature)** — After
   `placeZone()` is dispatched via left-click in Zone tool mode, the zone colour overlay appears
   correctly (2D overlay mesh via `IRenderer::setZoneOverlay()`) but no 3D building model spawns
   on the tile. Root cause: `CitySimulation::placeZone()` updates the `m_tiles` map and fires
@@ -1458,6 +1459,7 @@ where possible are noted inline.
   `architecture/graphics-architecture/scene-graph-ownership.md` (building node lifecycle),
   `architecture/asset-standards/3d-model-standards.md` (`.b3d` building asset spec).
   Assigned to Phase 10: `graphics-dev-irrlicht`.
+  <!-- graphics-dev-irrlicht: CLOSED — Phase 10 implements IRenderer::placeBuildingMesh() / removeBuildingMesh() / placeServiceBuildingMesh() / removeServiceBuildingMesh() in IrrlichtRenderer.cpp; CitySimulation::placeZone() calls m_renderer->placeBuildingMesh() on success, placeServiceBuilding() calls placeServiceBuildingMesh(); service building visual gap also closed; verified by CitySimulation_PlaceZone_SpawnsBuilding, CitySimulation_PlaceServiceBuilding_SpawnsMesh, CitySimulation_DemolishZoneTile_RemovesBuilding unit tests, 2026-03-04 -->
 
 - [x] **Font size unreadably small** — Irrlicht's built-in default GUI font renders at
   approximately 8 physical pixels. All HUD labels (treasury balance, population count, toolbar

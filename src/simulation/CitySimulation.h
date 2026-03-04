@@ -129,6 +129,26 @@ public:
     // Tests downcast ICitySimulation* to CitySimulation* to reach this method.
     void setModalOpen(bool open);
 
+#ifdef AITOWN_TESTING_ENABLED
+    // testForceUnlockDensityTier — test-friend method for Phase 10 unit tests.
+    //
+    // Directly sets the density unlock flag for the given (ZoneType, DensityTier) pair,
+    // bypassing the 3-consecutive-month revenue-streak counter. This allows tests to
+    // drive doDensityUnlockTick() into the upgrade-wave state without running multiple
+    // budget ticks above the revenue threshold.
+    //
+    // Index mapping (matches doDensityUnlockTick tier numbering):
+    //   Residential/Medium = 0, Commercial/Medium = 1, Industrial/Medium = 2,
+    //   Residential/High   = 3, Commercial/High   = 4, Industrial/High   = 5.
+    //
+    // DensityTier::Low has no unlock gate (always available) and is ignored.
+    //
+    // This method is compiled ONLY when AITOWN_TESTING_ENABLED=1 is defined.
+    // It MUST NOT appear in production builds (aitown target never defines this macro).
+    // (ref: implementation/phase-10.md — §testForceUnlockDensityTier decision 2026-03-04)
+    void testForceUnlockDensityTier(ZoneType zone, DensityTier tier);
+#endif  // AITOWN_TESTING_ENABLED
+
 private:
     // ------------------------------------------------------------------
     // Private nested types
