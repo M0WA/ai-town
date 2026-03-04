@@ -1,0 +1,13 @@
+{
+  "height_floors": 2,
+  "category": "service",
+  "atlas_cell": {
+    "row": 0,
+    "col": 0
+  },
+  "lod_distances": [
+    50,
+    150,
+    300
+  ]
+}

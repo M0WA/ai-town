@@ -124,8 +124,26 @@
 
   **`ITerrainQuery` interface promotion (Phase 9b)**: `getHeightAt` is promoted to the
   `ITerrainQuery` interface (`src/interfaces/ITerrainQuery.h`) so that `IrrlichtRenderer` can
-  sample terrain height for zone overlay Y-positions and hover highlight Y-positions without
-  a direct dependency on the concrete `TerrainSystem` class. The method signature on
+  sample terrain height for zone overlay Y-positions, hover highlight Y-positions, and **mesh
+  placement Y-positions** without a direct dependency on the concrete `TerrainSystem` class.
+
+  **MANDATORY — building, road, and service-building scene nodes must be placed at terrain height**:
+  `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and `placeServiceBuildingMesh()`
+  must use `m_terrain->getHeightAt(tileX, tileZ)` for the scene node Y coordinate. Hardcoding
+  `y = 0.0f` places all meshes underground on elevated terrain tiles (terrain heights range
+  0–26 m on a default map). Required placement pattern:
+
+  ```cpp
+  const float terrainY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+  node->setPosition(irr::core::vector3df(
+      static_cast<float>(tileX) * kTileSize,
+      terrainY,
+      static_cast<float>(tileZ) * kTileSize));
+  ```
+
+  This applies to ALL three mesh placement methods. If `m_terrain` is null (not yet wired at
+  startup), fall back to `y = 0.0f` with the understanding that placements before terrain wiring
+  will be invisible underground. The method signature on
   `ITerrainQuery` is:
 
   ```cpp

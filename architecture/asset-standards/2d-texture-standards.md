@@ -384,58 +384,85 @@ Total texture VRAM for all simultaneously-resident assets must not exceed **1.0 
 **Draw call ceiling**: ≤2,000 draw calls per frame (all LODs combined). Buildings sharing the same atlas texture and material can be batched or instanced into a single draw call. This drives the atlas-first design requirement.
 **Unique mesh variant cap**: ≤50 unique LOD0/LOD1/LOD2 building mesh variants simultaneously loaded. Building types exceeding 50 unique meshes must share atlas space and be explicitly approved.
 
-### UI Sprite Sheet Art Style — Milk-Glass
+### UI Sprite Sheet Art Style — Frosted Glass
 
-All icons in `hud_sprites_ui.png` use a subtle frosted milk-glass style where
-the icon symbols are clearly visible and dominant, and the glass treatment is
-a restrained visual hint rather than a prominent effect. Each 64x64 cell is
-rendered at 4x internal resolution (256x256) and Lanczos-downsampled for
-clean anti-aliased edges. The generator script is `tools/generate_hud_sprites.py`.
+The sprite sheet uses a two-layer glass design.  A **milky/satinato glass
+background panel** covers the used area (rows 0-10) to provide a soft,
+diffused, semi-opaque warm white surface.  **Nearly transparent frosted-glass
+icon cells** float on top, their rounded edges revealing the milky glass
+beneath.  Icon symbols use vivid, bright colors with 3D gradient fills and
+drop shadows.  Each 64x64 cell is rendered at 4x internal resolution
+(256x256) and Lanczos-downsampled for clean anti-aliased edges.  The
+generator script is `tools/generate_hud_sprites.py`.
+
+**Milky glass background panel (behind rows 0-10):**
+
+- Rounded rectangle covering all occupied icon rows + 8 px padding, corner
+  radius ~16 px
+- Base fill: `rgba(235, 238, 242, 140)` -- warm off-white, lighter/more see-through
+- Gaussian noise (sigma ~1.5, amplitude ~8) for frosted/sandblasted
+  micro-texture -- milky glass is not perfectly smooth
+- Radial vignette: center slightly brighter `rgba(248, 250, 252)`, edges
+  slightly more grey `rgba(220, 223, 228)` -- gives depth
+- 1 px glass-edge rim: `rgba(255, 255, 255, 180)`
+- Rows 11-31 remain fully transparent (no background panel)
 
 **Cell background treatment (per icon cell):**
 
-- Rounded rectangle with ~10 px corner radius (at 64 px scale), semi-opaque
-  frosted dark glass base: `rgba(22, 32, 48, 200)`
-- Very subtle vertical gradient: top +8 brightness, bottom -8 brightness
-- Thin specular arc in top-left quadrant: white ellipse, **alpha MAX 15**,
-  Gaussian-feathered (a whisper of gloss, not a wash)
-- Top gradient overlay: white, **alpha MAX 12** (fades to 0 at midpoint)
-- 1 px inner bevel: top/left edges `rgba(255,255,255,40)`,
-  bottom/right `rgba(0,0,0,60)`
-- 2 px drop shadow offset bottom-right: `rgba(0,0,0,80)`
-- Active state: subtle outer glow (teal `rgba(0,200,200,60)` for toolbar
-  tools; zone-specific color for zone buttons; red for demolish), blur
+- Rounded rectangle with ~10 px corner radius (at 64 px scale), nearly
+  transparent frosted tint: `rgba(255, 255, 255, 55)` (alpha ~55 out of 255)
+- The cell is almost see-through; the game's own UI background shows
+  through the rounded corners
+- Rim / bevel is the primary visible framing: top/left bright
+  `rgba(255, 255, 255, 160)`, bottom/right dark `rgba(180, 185, 195, 100)`,
+  2-3 px width
+- Gloss highlight arc in top 30% of cell: white ellipse, **alpha 55**,
+  Gaussian-blurred -- this is the **strongest visual element** of the cell
+  and the main "glass" cue
+- Very subtle drop shadow below the chip: `rgba(0, 0, 0, 25)`
+- Active state: very subtle cyan-teal tint overlay `rgba(0, 200, 220, 35)`
+  (barely visible) + subtle outer glow (teal for toolbar tools;
+  zone-specific color for zone buttons; red for demolish), blur
   radius ~12 px at 4x scale
-- Inactive state: no glow, identical base tint (no desaturation shift)
-
-**Hard limits on glass overlay intensity (enforced in generator):**
-
-- Specular gloss arc alpha: **MAX 18 / 255**
-- Top gradient overlay alpha: **MAX 12 / 255**
-
-These limits ensure icons/symbols remain the dominant visual element at all
-display sizes. Exceeding these values produces a whitewash effect that
-obscures icon readability, especially on the upper half of each cell.
+- Inactive state: plain frosted `rgba(255, 255, 255, 45)`, no glow,
+  no tint overlay
 
 **Icon symbol treatment:**
 
-- Gradient fills on shapes simulating a top-left light source
-- 1-2 px specular highlight along top/left edges of major shapes
-- Drop shadow behind icon content (offset 4 px at 4x, alpha 80)
+- Vivid, bright colors (designed for any background) -- white crosshairs,
+  bright greens/blues/ambers, full-saturation fills
+- Top-left light source: gradient fills with highlights on top/left faces,
+  shadows on bottom/right
+- Drop shadow behind icon content: `rgba(0, 0, 0, 60)` offset (2,2) blur 3
+  at final scale (8,8 blur 6 at 4x working resolution)
 - Distinct silhouettes per semantic meaning (no shape reuse across
   different icon roles)
 
+**Water drop icon (Utilities sub-panel, Water Tower):**
+
+- Classic teardrop shape: narrow at top, rounded at bottom
+- Transparent crystal-clear body: glass-blue tint `rgba(120, 200, 255, 180)`
+  with lighter transparent center
+- Bright white crescent highlight on upper-left (primary visual cue)
+- Dark blue rim outline `rgba(0, 80, 150, 130)` defining the drop shape
+- Tiny bright specular dot at top-left of the bulge
+- Background: frosted glass cell with subtle blue tint overlay
+
 **Color palette:**
 
-- Base glass (all states): `rgba(22, 32, 48, 200)` with +/-8 brightness
-  vertical shift
-- Zone Residential active: dark green tint `rgba(18, 40, 28, 200)`
-- Zone Commercial active: dark blue tint `rgba(18, 28, 52, 200)`
-- Zone Industrial active: dark amber tint `rgba(48, 40, 18, 200)`
-- Demolish active: dark red tint `rgba(48, 22, 22, 200)`
-- Badge/indicator cells: darker base `rgba(18, 24, 38, 190)`
-- Icon symbols: full-color per semantic role (amber bolt, blue drop,
-  red shield, gold star, etc.) with white/cream highlights
+- Base glass (active): `rgba(255, 255, 255, 55)` -- nearly transparent
+- Base glass (inactive): `rgba(255, 255, 255, 45)` -- plain frosted
+- Active tint overlay: `rgba(0, 200, 220, 35)` (toolbar tools)
+- Zone Residential active tint: `rgba(60, 220, 90, 30)`
+- Zone Commercial active tint: `rgba(60, 130, 240, 30)`
+- Zone Industrial active tint: `rgba(220, 200, 50, 30)`
+- Demolish active tint: `rgba(240, 70, 70, 30)`
+- Badge/indicator/panel cells: `rgba(255, 255, 255, 50)` -- same frosted
+- Fire badge shield body: `rgb(220, 70, 60)` -- bright fire-engine red
+- Police badge shield body: `rgb(70, 130, 220)` -- clear sky blue
+- Icon symbols: full-color per semantic role (vivid amber bolt,
+  crystal-clear blue drop, bright-red shield, gold star on sky-blue shield,
+  etc.) with white/cream highlights
 
 ### Phase 10 Sign-Off — UI Sprite Sheet (graphics-artist-2d-texture)
 
@@ -449,9 +476,10 @@ obscures icon readability, especially on the upper half of each cell.
 >   is a Phase 9 deliverable by `graphics-dev-irrlicht`)
 > - Colour space: **linear** (NOT sRGB) -- UI elements are not photographic diffuse; sRGB
 >   decode must NOT be applied at upload time; `GL_TEXTURE_MAX_LEVEL=0` (mipmapping disabled)
-> - Art style: **glassy 3D buttons** -- rounded rectangle glass backgrounds with vertical
->   gradient, specular gloss arc, inner bevel, drop shadow, and outer glow (active state).
->   Icons rendered with 3D embossed treatment (gradient fills, highlights, shadows).
+> - Art style: **frosted-glass chips** -- nearly transparent glass cells (alpha ~55) with a
+>   strong gloss highlight arc (alpha 55) as the main "glass" visual cue, bright rim/bevel
+>   framing, and subtle outer glow (active state). Icons use vivid, bright colors with 3D
+>   gradient fills and drop shadows. Water drop icon uses crystal-clear teardrop design.
 >   Generator script: `tools/generate_hud_sprites.py` (4x supersampled, Lanczos downsample).
 > - Rows 0-6 painted: Toolbar active/inactive, Zone active/inactive, Utilities
 >   active/inactive, Active tool indicator badges

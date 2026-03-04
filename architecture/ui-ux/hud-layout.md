@@ -540,6 +540,31 @@ Phase 9b builds. Phase 10 resolves it by delivering both the font asset and the 
 Phase 9b testing, a temporary workaround is to pass an empty string `""` to `addButton()` for the
 five toolbar buttons while `hud_sprites_ui.png` is absent. This produces blank buttons (invisible
 in Irrlicht's default skin background) instead of letter characters. **Do not ship this
-workaround** — revert to the specified fallback text strings ("Zone", "Road", etc.) before Phase
-10 ships the sprite sheet, so players can identify buttons in edge-cases where sprite loading
-fails.
+workaround** — revert to the specified fallback text strings before Phase 10 ships the sprite
+sheet, so players can identify buttons in edge-cases where sprite loading fails.
+
+## Toolbar Button Label Abbreviations
+
+The five primary toolbar buttons use **abbreviated labels** chosen to fit within the physical button
+width at the minimum supported resolution (1280×720).
+
+At 1280×720, toolbar buttons are 56×48 px virtual = approximately 37×32 px physical (scale factor
+= 1280/1920 ≈ 0.667). The HUD font is 11 px physical (see `resolution-ui-scaling.md` — Bitmap Font
+Physical Size), so the maximum characters per button width is approximately 37 ÷ 11 ≈ 3 characters
+with full-width glyphs, or 5 characters with the narrower glyphs typical of DejaVu Sans 11 px.
+
+**Authoritative toolbar button labels** (passed to `addButton()` as the text fallback):
+
+| Tool | Label | Rationale |
+|---|---|---|
+| Zone | `"Zone"` | 4 chars — fits at 11 px physical |
+| Road | `"Road"` | 4 chars — fits at 11 px physical |
+| Utilities | `"Utils"` | Abbreviated from "Utilities" (9 chars too wide); 5 chars fits |
+| Demolish | `"Demol"` | Abbreviated from "Demolish" (8 chars too wide); 5 chars fits |
+| Query | `"Query"` | 5 chars — fits at 11 px physical |
+
+**Do NOT use `"Utilities"` or `"Demolish"`** as button labels — these are too wide to render within
+the physical button width at 1280×720. The abbreviated forms `"Utils"` and `"Demol"` are the
+correct fallback labels and must be used in all code that calls `addButton()` for these two buttons.
+The Utilities and Demolish tool names remain unabbreviated in tooltips, sub-panel headings, and all
+other UI text.

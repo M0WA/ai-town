@@ -253,6 +253,12 @@ void InspectorPanel::populate(const QueryResult& result, int tileX, int tileZ,
         char demBuf[32];
         std::snprintf(demBuf, sizeof(demBuf), "Demand: %.0f%%", result.demandPressurePct);
         m_backend->setElementText(m_demandLabel, demBuf);
+    } else if (result.isRoad) {
+        m_backend->setElementText(m_zoneLabel, "Road");
+        m_backend->setElementText(m_popLabel, "");
+        m_backend->setElementText(m_coverageLabel, "");
+        m_backend->setElementText(m_desirabilityLabel, "");
+        m_backend->setElementText(m_demandLabel, "");
     } else {
         m_backend->setElementText(m_zoneLabel, "Unzoned");
         m_backend->setElementText(m_popLabel, "");
@@ -333,6 +339,12 @@ void InspectorPanel::draw() {
             char demBuf[32];
             std::snprintf(demBuf, sizeof(demBuf), "Demand: %.0f%%", qr.demandPressurePct);
             m_backend->setElementText(m_demandLabel, demBuf);
+        } else if (qr.isRoad) {
+            m_backend->setElementText(m_zoneLabel, "Road");
+            m_backend->setElementText(m_popLabel, "");
+            m_backend->setElementText(m_coverageLabel, "");
+            m_backend->setElementText(m_desirabilityLabel, "");
+            m_backend->setElementText(m_demandLabel, "");
         } else {
             m_backend->setElementText(m_zoneLabel, "Unzoned");
             m_backend->setElementText(m_popLabel, "");

@@ -65,6 +65,22 @@ non-overlapping) to keep existing placement assertions valid.
   - Zone tile: demand score, desirability score, tax yield/month, zone type + density, demand pressure % (unmet demand percentage per zone type from the `demand_pressure_pct` field of `QueryResult`)
   - Road segment: current occupancy %, current speed, capacity, congestion status
   - Service building: coverage radius, current upkeep, service level %
+- **Road tile detection via `QueryResult::isRoad`**: `ICitySimulation::queryTile()` sets
+  `QueryResult::isRoad = true` for road tiles (`TileData::isRoad == true`). Road tiles have
+  `isZoned = false`, so without the explicit `isRoad` check they would fall through to the
+  "Unzoned" branch. The display priority is:
+
+  ```text
+  if result.isZoned  → show zone/density/population/coverage data
+  else if result.isRoad → show "Road" label; traffic data fields populated in future phase
+  else               → show "Unzoned"
+  ```
+
+  `QueryResult::isRoad` is declared in `src/interfaces/simulation_types.h` as `bool isRoad{false}`.
+  `queryTile()` returns early after setting `isRoad = true` — no zone/population data is filled for
+  road tiles. This is the V1 implementation; full road traffic fields (occupancy, speed, capacity,
+  congestion) are deferred until the traffic system simulation phase.
+
 - **Mutual exclusion with Tax Rate Panel**: QueryPanel and Tax Rate Panel must NOT be simultaneously open. Opening the QueryPanel closes the Tax Rate Panel if it is open. See `input-arbitration.md` Priority 3 for the authoritative mutual exclusion rule.
 - Panel populated by a `QueryResult` data struct passed from the simulation layer to `UIManager`
 - **Data refresh policy**: The QueryPanel refreshes its displayed data at different rates by data category to balance accuracy with performance:

@@ -126,6 +126,44 @@ Using the interleaved scalar count instead of the frame count in `alBufferData` 
   2. Decode PCM into a **local thread-local buffer** (outside the mutex).
   3. Acquire `m_streamMutex` again to call `alBufferData(...)` and `alSourceQueueBuffers(...)`. Release the mutex.
   Only the actual AL calls (`alBufferData`, `alSourceQueueBuffers`, `alGetSourcei(AL_BUFFERS_PROCESSED)`) require holding the mutex. This serializes all AL calls on shared streaming source handles between main thread and audio thread without blocking the main thread during decode.
+- **MANDATORY — `alGetError()` before `alBufferData` in step 3**: Before calling `alBufferData` in step 3 of the split-lock pattern, call `alGetError()` to clear any stale AL error state left by earlier calls in the same wake cycle (e.g. from step 1). `alBufferData` returns `AL_INVALID_OPERATION` if the target buffer is still attached to a source (i.e. it was processed by OpenAL but not yet unqueued by `alSourceUnqueueBuffers`). If this error is not cleared before the next `alCheckError` call in `updateStreams` (typically on `alSourcef(AL_GAIN)` in the gain loop), the stale error is attributed to the wrong callsite — producing a misleading "Invalid Operation" on `alSourcef(AL_GAIN)` that terminates the audio thread. The mandatory pattern is:
+
+  ```cpp
+  // Step 3 — inside m_streamMutex:
+  alGetError();  // clear any stale error from earlier AL calls this wake
+  alBufferData(bufHandle, format, data, byteCount, sampleRate);
+  {
+      ALenum err = alGetError();
+      if (err != AL_NO_ERROR) {
+          // Buffer still attached — skip; m_samplesQueued not incremented;
+          // same bufIdx will be retried next wake after the buffer is unqueued.
+          logError("refillStream: alBufferData failed — buffer still attached");
+          break;
+      }
+  }
+  alSourceQueueBuffers(src, 1, &bufHandle);
+  alGetError();  // consume — queue failure is non-fatal; starvation recovery handles restart
+  ```
+
+  Do NOT call `alCheckError_real` (which throws) around `alBufferData` — a buffer-still-attached failure is a recoverable transient condition, not a fatal error. The audio thread must not terminate on this condition.
+- **MANDATORY — `openStreamOGG` must flush AL buffer queue when reopening an active slot**: `openStreamOGG` may be called on a slot that is already open (e.g. when a second TOD crossfade begins while the first is still in progress). When closing the existing stream, the implementation MUST call `alSourceStop` and `alSourceUnqueueBuffers` on the slot's source before resetting `m_samplesQueued = 0`. If the AL buffers are not flushed but `m_samplesQueued` is reset to 0, `refillStream`'s round-robin index (`m_samplesQueued % kNumBuffers`) starts at 0 but the ACTUAL free buffers are the oldest ones in the queue (in FIFO order). The index is immediately out of sync: buffer at index 1 (the next round-robin slot) is still attached when `refillStream` tries to write new data into it, producing persistent `AL_INVALID_OPERATION` errors from `alBufferData` and stalling the stream permanently. Required pattern inside `openStreamOGG` for the re-open path:
+
+  ```cpp
+  if (s.isOpen && s.vf) {
+      AudioStreamUtils::closeOGG(s.vf);
+      s.isOpen = false;
+      // Flush AL state: stop source and unqueue all buffers before resetting counter.
+      alSourceStop(src);
+      ALint queued = 0;
+      alGetSourcei(src, AL_BUFFERS_QUEUED, &queued);
+      if (queued > 0) {
+          std::vector<ALuint> tmp(queued);
+          alSourceUnqueueBuffers(src, queued, tmp.data());
+      }
+      s.m_samplesQueued = 0;
+  }
+  ```
+
 - On every audio thread wake: dequeue processed buffers, re-fill and re-queue
 - **Proactive starvation prevention**: On every audio thread wake, check `AL_BUFFERS_PROCESSED`; if processed count == total buffer count (all 8 buffers consumed, none queued), immediately re-fill and re-queue all buffers before the source stops. Music stream thread interval: **10 ms** (not 20 ms) to minimize gap risk.
 - **Starvation recovery** (fallback): If source has entered `AL_STOPPED` AND `stream.m_intentionallyStopped == false`, refill buffers then call `alSourcePlay()`; log a warning. **After calling `alSourcePlay()` in starvation recovery, immediately reset the software sample counter**: `stream.m_samplesQueued = static_cast<uint64_t>(buffersQueuedAfterRequeue) * kSamplesPerBuffer;` — where `buffersQueuedAfterRequeue` is the count of buffers re-queued in this recovery cycle (typically all 8 buffers). Without this reset, `m_samplesQueued` retains its pre-starvation value (e.g., 1,000,000 frames from normal streaming), but the newly-restarted source plays from the beginning of the queue. The `computeSamplesPlayed` function would then compute a stale historical `samplesPlayed` that is far ahead of the actual playback position, causing `m_nextBarBoundary` to be computed in the distant past — triggering an immediate false crossfade on the next audio thread wake. The starvation-recovery check (`AL_STOPPED && !m_intentionallyStopped`) **must be performed in the same lock scope as `alSourceQueueBuffers`** (step 3 of the split-lock pattern). After re-queuing while still holding `m_streamMutex`, check `alGetSourcei(AL_SOURCE_STATE)` — if `AL_STOPPED && !m_intentionallyStopped`, call `alSourcePlay()`. This atomicity prevents the race where: (1) main thread acquires mutex, sets flag + calls stop, releases mutex; (2) audio thread acquires mutex in step 3, re-queues, checks state (sees AL_STOPPED), observes flag correctly, and decides whether to restart — all in one critical section. Without this, a check between step 1 (unqueue mutex release) and step 3 (queue mutex acquire) could observe a partially-updated state. **Do not restart a source that was intentionally stopped**: add a `bool m_intentionallyStopped` flag to each `AudioStream` (protected by `m_streamMutex`). The main thread must set `m_intentionallyStopped = true` **and** call `alSourceStop()` within the **same `m_streamMutex` lock scope** — these two operations must not be split across separate lock acquisitions:

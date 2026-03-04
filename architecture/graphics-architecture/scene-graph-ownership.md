@@ -126,6 +126,66 @@ SMesh* safeMesh = static_cast<SMesh*>(iMeshPtr); // only safe after debug verifi
 
 Abort (assert) on null in debug builds so the error is caught before any undefined behavior occurs in release. The `dynamic_cast` guard is a debug-only safety net; the correct long-term fix is to eliminate the `IMesh*` storage path entirely and keep `SMesh*` typed throughout.
 
+---
+
+## B3D Building Assets — IAnimatedMesh* / CMeshSceneNode Pattern (Phase 9)
+
+This section documents the **canonical pattern for B3D-loaded static building assets** and
+explains why it departs from the `SMesh*` LOD swap sequence described above.
+
+### Why B3D files cannot use SMesh* or dynamic_cast
+
+Irrlicht is compiled with `-fno-rtti` (see `Irrlicht/CMakeLists.txt`:
+`COMPILE_FLAGS -fno-rtti`). With RTTI disabled, vtables contain no typeinfo pointers, so
+`dynamic_cast` on **any** Irrlicht type will call `__dynamic_cast` which immediately
+crashes (SIGSEGV) because the required typeinfo is absent.
+
+Additionally, the B3D file loader (`CB3DMeshFileLoader`) **always** creates a
+`CSkinnedMesh` — not an `SMesh`. Even if RTTI were available, `dynamic_cast<SMesh*>`
+on a `CSkinnedMesh*` would return null. Using `static_cast<SMesh*>` on a
+`CSkinnedMesh*` is undefined behaviour regardless of RTTI.
+
+**Rule: never attempt a downcast on a mesh returned by `ISceneManager::getMesh()`.
+Work with `IAnimatedMesh*` throughout.**
+
+### Why CMeshSceneNode is required (not CAnimatedMeshSceneNode)
+
+`CAnimatedMeshSceneNode::render()` applies `AbsoluteTransformation *
+SSkinMeshBuffer::Transformation` per mesh buffer. B3D files exported with a root bone at
+a non-identity transform (even a nominally "identity" bone may carry a non-zero
+translation or rotation from the exporter) will have every mesh buffer displaced from the
+intended tile position by the bone transform.
+
+`CMeshSceneNode::render()` applies only `AbsoluteTransformation` — no bone offsets.
+For static buildings, `addMeshSceneNode(static_cast<IMesh*>(lod0))` must be used (NOT
+`addAnimatedMeshSceneNode`).
+
+### Phase 9 LOD swap contract for B3D buildings
+
+- Mesh pointers (`IAnimatedMesh*`) are **borrowed** from the Irrlicht mesh cache.
+  `ISceneManager::getMesh()` returns a non-owning pointer; the cache holds
+  `ref_count == 1`. Do NOT call `grab()` or `drop()` on these pointers.
+- `CMeshSceneNode::setMesh(IMesh*)` internally drops the old mesh and grabs the new mesh.
+  Cast `IAnimatedMesh*` to `IMesh*` (safe — `IAnimatedMesh` publicly inherits `IMesh`):
+
+  ```cpp
+  m_node->setMesh(static_cast<irr::scene::IMesh*>(newMesh));
+  // DO NOT call newMesh->drop() — the cache still holds its reference.
+  ```
+
+- `CSkinnedMesh::finalize()` (called by the B3D loader) computes the bounding box from
+  all vertices. No explicit `recalculateBoundingBox()` is required for B3D assets.
+- `LODNode` stores `IMeshSceneNode*` for `m_node` (to call `setMesh(IMesh*)`), and
+  `IAnimatedMesh*` for `m_lod0/1/2` (borrowed from cache). `getNode()` returns
+  `ISceneNode*` via implicit upcast.
+
+### Summary: when to use which pattern
+
+| Asset source | Mesh type | Scene node type | LOD swap | drop() after setMesh? |
+|---|---|---|---|---|
+| Procedural terrain / runtime | `SMesh*` | `IMeshSceneNode` | `recalculateBoundingBox()` then `setMesh()` | Yes — caller owns ref |
+| B3D file (buildings, vehicles) | `IAnimatedMesh*` | `IMeshSceneNode` (via `addMeshSceneNode`) | `setMesh(static_cast<IMesh*>(lod))` | No — borrowed from cache |
+
 ### CameraController — Preventing Animator Conflicts
 
 The camera scene node must be created via `sceneManager->addCameraSceneNode()` only (never `addCameraSceneNodeFPS()` or `addCameraSceneNodeMaya()` — these attach built-in animators that override `CameraController` state each frame). After creation:

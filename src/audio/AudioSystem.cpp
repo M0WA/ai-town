@@ -865,9 +865,27 @@ bool AudioSystem::openStreamOGG(int streamSlot, const std::string& path,
     AudioStream& s = m_streams[streamSlot];
 
     // Close any existing stream.
+    // IMPORTANT: flush the AL buffer queue BEFORE resetting m_samplesQueued.
+    // If this slot has AL buffers attached (queued but not yet processed), and we
+    // only reset m_samplesQueued without unqueuing them, refillStream's round-robin
+    // index (m_samplesQueued % kNumBuffers) will point to buffers that are still
+    // attached — causing repeated AL_INVALID_OPERATION from alBufferData.
     if (s.isOpen && s.vf) {
         AudioStreamUtils::closeOGG(s.vf);
         s.isOpen = false;
+
+        // Flush the AL source: stop it and unqueue any remaining AL buffers so
+        // the buffer pool is fully free before the new stream starts filling.
+        ALuint src = static_cast<ALuint>(s.sourceHandle);
+        alSourceStop(src);
+        ALint queued = 0;
+        alGetSourcei(src, AL_BUFFERS_QUEUED, &queued);
+        if (queued > 0) {
+            std::vector<ALuint> tmp(static_cast<size_t>(queued));
+            alSourceUnqueueBuffers(src, queued, tmp.data());
+        }
+        s.m_samplesQueued   = 0;
+        s.m_nextBarBoundary = 0;
     }
     if (!s.vf) {
         s.vf = new OggVorbis_File;
@@ -1022,9 +1040,29 @@ int AudioSystem::refillStream(int slot) {
         // --- Split-lock step 3: queue under mutex ---
         {
             std::lock_guard<std::mutex> lk(m_streamMutex);
+
+            // Clear any stale AL error before alBufferData — a buffer that is still
+            // attached to the source (queued but not yet unqueued by the previous step)
+            // causes AL_INVALID_OPERATION here.  Stale errors must be cleared before
+            // the check below so that the error is attributed to alBufferData (the
+            // actual failing call), not to a later alSourcef call in updateStreams().
+            alGetError();
             alBufferData(bufHandle, format, pcmBuf.data(), byteCount,
                          static_cast<ALsizei>(sr));
+            {
+                ALenum bufErr = alGetError();
+                if (bufErr != AL_NO_ERROR) {
+                    // Buffer still attached to source queue — skip this slot.
+                    // m_samplesQueued is NOT incremented so the same bufIdx is retried
+                    // on the next wake after the buffer has been processed and unqueued.
+                    logError("refillStream: alBufferData failed slot=" +
+                             std::to_string(slot) + " bufIdx=" +
+                             std::to_string(bufIdx));
+                    break;
+                }
+            }
             alSourceQueueBuffers(src, 1, &bufHandle);
+            alGetError();  // consume — queue error is non-fatal; starvation recovery handles restart
 
             s.m_samplesQueued += static_cast<uint64_t>(framesDecoded);
             ++queued;

@@ -59,6 +59,15 @@ The notification log panel is a scrollable history overlay toggled by the bell i
 - **Scroll**: mouse wheel scrolls the list; most-recent notification is at the top of the list
 - **Session persistence**: the log persists for the duration of the play session; it is NOT cleared on save or load within the same session
 - **Dismiss on outside click**: clicking anywhere outside the panel bounds closes the log panel. Outside clicks do not consume scroll-wheel or middle-mouse-button events — those pass through to the camera/3D view
+- **Panel background**: The log panel has a dark semi-opaque background applied via
+  `setElementBackground(handle, 20, 20, 20, 200)` immediately after the panel element is created
+  by `toggleLog()`. This produces a near-black fill (r=20, g=20, b=20) at 78% opacity (a=200),
+  ensuring log entries are legible against any terrain or city view behind the panel.
+
+  **`setElementBackground` parameter order**: the signature is `(handle, r, g, b, a)` — alpha is
+  the **LAST** parameter. Passing `(handle, 200, 20, 20, 20)` would set r=200 (red tint) and
+  a=20 (8% opacity — near-transparent), making the background invisible. The correct call is
+  `(handle, 20, 20, 20, 200)`.
 - Implementation: `NotificationManager` class creates/manages `IGUIStaticText` or custom `IGUIElement` overlays
 
 ## NotificationManager API

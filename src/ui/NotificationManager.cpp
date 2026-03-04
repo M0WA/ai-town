@@ -309,6 +309,9 @@ void NotificationManager::toggleLog() {
             // Virtual bounds: x:1468-1868, y:56-556.
             m_logPanelHandle = m_backend->addStaticText("Notification Log",
                                                         1468, 56, 400, 500);
+            // Dark semi-opaque background so the log is readable against the scene.
+            // Signature: setElementBackground(handle, r, g, b, a)
+            m_backend->setElementBackground(m_logPanelHandle, 20, 20, 20, 200);
         }
         if (m_logPanelHandle != kInvalidUIElement && m_backend) {
             // Build log text from entries.

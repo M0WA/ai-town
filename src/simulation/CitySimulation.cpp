@@ -1958,7 +1958,17 @@ QueryResult CitySimulation::queryTile(int tileX, int tileZ) const {
     result.isZoned = false;
 
     const TileData* tile = findTile(tileX, tileZ);
-    if (!tile || !tile->isZoned) {
+    if (!tile) {
+        return result;
+    }
+
+    // Road tile: report isRoad and return — no zone/population data.
+    if (tile->isRoad) {
+        result.isRoad = true;
+        return result;
+    }
+
+    if (!tile->isZoned) {
         return result;
     }
 

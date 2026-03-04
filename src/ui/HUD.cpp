@@ -7,6 +7,7 @@
 
 #include "src/ui/hud.h"
 #include "src/ui/budget_detail_panel.h"
+#include "src/ui/hud_sprite_ids.h"
 #include "src/interfaces/IAudioSystem.h"
 
 #include <cmath>
@@ -76,15 +77,20 @@ HUD::HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock*
     constexpr int kToolPad = 8;
     constexpr int kToolX = 8;
 
-    m_btnZone      = m_backend->addButton("Zone",      kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_btnZone      = m_backend->addButton("",  kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_backend->setElementImage(m_btnZone,      kSpriteToolZoneActive);
     toolY += kToolBtnSize + kToolPad;
-    m_btnRoad      = m_backend->addButton("Road",      kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_btnRoad      = m_backend->addButton("",  kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_backend->setElementImage(m_btnRoad,      kSpriteToolRoadActive);
     toolY += kToolBtnSize + kToolPad;
-    m_btnUtilities = m_backend->addButton("Utilities", kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_btnUtilities = m_backend->addButton("",  kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_backend->setElementImage(m_btnUtilities, kSpriteToolUtilitiesActive);
     toolY += kToolBtnSize + kToolPad;
-    m_btnDemolish  = m_backend->addButton("Demolish",  kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_btnDemolish  = m_backend->addButton("",  kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_backend->setElementImage(m_btnDemolish,  kSpriteToolDemolishActive);
     toolY += kToolBtnSize + kToolPad;
-    m_btnQuery     = m_backend->addButton("Query",     kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_btnQuery     = m_backend->addButton("",  kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_backend->setElementImage(m_btnQuery,     kSpriteToolQueryActive);
 
     // --- Undo button (x:8-72, y:608-656) ---
     m_btnUndo = m_backend->addButton("Undo", 8, 608, 64, 48);
@@ -105,7 +111,8 @@ HUD::HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock*
     m_activeToolLabel = m_backend->addStaticText("No tool", 8, 752, 64, 32);
 
     // --- Notification bell (x:1820-1868, y:8-56) ---
-    m_notifBell = m_backend->addButton("Bell", 1820, 8, 48, 48);
+    m_notifBell = m_backend->addButton("", 1820, 8, 48, 48);
+    m_backend->setElementImage(m_notifBell, kSpriteNotificationBell);
 
     // --- Unsaved changes dot (x:1796-1812, y:8-24) ---
     m_unsavedDotHandle = m_backend->addStaticText("*", 1796, 8, 16, 16);

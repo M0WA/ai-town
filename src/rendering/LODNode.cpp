@@ -1,17 +1,18 @@
 // LODNode.cpp — Implementation of the LOD swap sequence wrapper and hysteresis logic.
 //
-// swapMesh() implements the mandatory sequence from:
-//   architecture/graphics-architecture/scene-graph-ownership.md (§ LOD Swap)
+// swapMesh() calls IAnimatedMeshSceneNode::setMesh(IAnimatedMesh*) which internally
+// drops the old mesh and grabs the new mesh. The LOD mesh pointers are borrowed
+// references from the Irrlicht mesh cache — no additional grab/drop by this class.
 //
-// update() implements hysteresis-based LOD switching per:
-//   architecture/asset-standards/3d-model-standards.md (§ LOD Distance Thresholds)
+// Grab/drop model for borrowed mesh cache pointers:
+//   - Mesh cache holds ref_count == 1 (grabbed during addMesh, dropped by createMesh).
+//   - IAnimatedMeshSceneNode::setMesh() grabs new → ref_count == 2 (cache + node).
+//   - setMesh() drops old  → old mesh ref_count drops by 1 (back to cache-only == 1).
+//   - node->remove()       → node drops current → ref_count 2 → 1 (cache still holds).
+//   DO NOT call grab()/drop() on the IAnimatedMesh* pointers — caller does not own them.
 //
-// Grab/drop contract (Phase 2 spike — VERIFIED):
-//   Checkbox A: SMesh::addMeshBuffer() calls buf->grab(); caller must drop() after.
-//   Checkbox B: CMeshSceneNode::setMesh() calls grab() on newMesh and drop() on oldMesh.
-//               Verified by objdump -d of CMeshSceneNode.cpp.o from libIrrlicht.a.
-//   THEREFORE:  caller MUST call newMesh->drop() after setMesh() to transfer ownership.
-//               Omitting the drop() leaks the mesh (ref_count stays at 2, never reaches 0).
+// NOTE: Irrlicht is compiled with -fno-rtti. dynamic_cast on Irrlicht types crashes.
+// This file uses IAnimatedMesh* throughout to avoid any unsafe downcasts.
 
 // GLEW before any Irrlicht/OpenGL includes — prevents symbol conflicts.
 // (SceneEntityManager.h and IrrlichtRenderer.cpp use the same convention.)
@@ -39,9 +40,9 @@ LODNode::LODNode(irr::scene::IMeshSceneNode* node)
 }
 
 LODNode::LODNode(irr::scene::IMeshSceneNode* node,
-                 irr::scene::SMesh*          lod0,
-                 irr::scene::SMesh*          lod1,
-                 irr::scene::SMesh*          lod2,
+                 irr::scene::IAnimatedMesh*  lod0,
+                 irr::scene::IAnimatedMesh*  lod1,
+                 irr::scene::IAnimatedMesh*  lod2,
                  float                       lod0to1,
                  float                       lod1to2,
                  float                       cullDist)
@@ -56,7 +57,7 @@ LODNode::LODNode(irr::scene::IMeshSceneNode* node,
 {
     // node must be non-null; lod0 should be non-null for a functional LOD chain.
     // lod2 may be nullptr for small buildings (≤3 floors) that use billboard LOD2.
-    // LODNode does not call grab() on any mesh — lifetimes owned by the asset loader.
+    // LODNode does not call grab() on any mesh — they are borrowed from the cache.
 }
 
 // ---------------------------------------------------------------------------
@@ -110,7 +111,7 @@ void LODNode::update(const irr::core::vector3df& cameraPos)
     if (targetLOD == m_currentLOD) return;  // no change needed
 
     // Perform the mesh swap for the new LOD level.
-    irr::scene::SMesh* newMesh = nullptr;
+    irr::scene::IAnimatedMesh* newMesh = nullptr;
     switch (targetLOD) {
         case 0: newMesh = m_lod0; break;
         case 1: newMesh = m_lod1; break;
@@ -120,84 +121,34 @@ void LODNode::update(const irr::core::vector3df& cameraPos)
 
     if (!newMesh) return;  // safety: nullptr mesh for requested level — stay put
 
-    // ------------------------------------------------------------------
-    // Perform the LOD swap.
-    //
-    // IMPORTANT: swapMesh() calls newMesh->drop() internally (Step 4 of the
-    // mandatory grab/drop sequence). The LOD mesh pointers m_lod0/1/2 are
-    // non-owning references managed by the asset loader — dropping here would
-    // decrement the ref count by one and eventually free the mesh prematurely
-    // on repeated LOD transitions.
-    //
-    // SOLUTION: grab() the mesh before passing to swapMesh(), so that after
-    // swapMesh()'s internal drop(), the ref count returns to its prior value
-    // (held by the asset loader).  This is the correct pattern when a LODNode
-    // does not transfer ownership of its mesh pointers to swapMesh().
-    // ------------------------------------------------------------------
-    newMesh->grab();  // balance swapMesh()'s internal drop() — we are NOT transferring ownership
+    // swapMesh() calls IAnimatedMeshSceneNode::setMesh() which drops the old mesh
+    // and grabs the new one. No grab/drop by the caller — m_lod0/1/2 are borrowed
+    // references from the Irrlicht mesh cache.
     swapMesh(newMesh);
-    // After swapMesh() returns: newMesh has been drop()'d by swapMesh().
-    // The asset loader's reference (m_lod0/1/2) is the sole remaining owner.
 
     m_currentLOD = targetLOD;
 }
 
 // ---------------------------------------------------------------------------
-// swapMesh() — mandatory LOD swap sequence
+// swapMesh() — LOD mesh swap via IAnimatedMeshSceneNode::setMesh()
 // ---------------------------------------------------------------------------
 
-void LODNode::swapMesh(irr::scene::SMesh* newMesh)
+void LODNode::swapMesh(irr::scene::IAnimatedMesh* newMesh)
 {
-    // Step 1: recalculate bounding box on each SMeshBuffer.
-    //
-    // MANDATORY: call on getMeshBuffer() return value, NOT on m_node->getMesh().
-    // node->getMesh() returns IMesh* — recalculateBoundingBox() is not on the IMesh
-    // interface and calling it via an upcast would not compile. The newMesh SMesh*
-    // is still in scope here, so we call directly on the concrete type.
-    for (irr::u32 i = 0; i < newMesh->getMeshBufferCount(); ++i) {
-        newMesh->getMeshBuffer(i)->recalculateBoundingBox();
-    }
-
-    // Step 2: recalculate bounding box on the SMesh itself.
-    //
-    // MANDATORY: must follow all per-buffer recalculations. A stale bounding box
-    // from the previous LOD level causes incorrect frustum culling — the node may
-    // be invisible or always visible regardless of camera position.
-    //
-    // recalculateBoundingBox() is on SMesh (concrete class), NOT on IMesh (interface).
-    // The SMesh* type is preserved end-to-end per scene-graph-ownership.md warning
-    // (§ WARNING — SMesh* Downcast Safety): never store as IMesh* and cast back.
-    newMesh->recalculateBoundingBox();
-
-    // Step 3: setMesh — Irrlicht internally calls grab() on newMesh.
-    //
-    // VERIFIED (Phase 2 Checkbox B): CMeshSceneNode::setMesh() increments newMesh
-    // ref_count via grab() and decrements the old mesh ref_count via drop().
-    // After this call: newMesh ref_count == 2 (node + caller).
-    // The old mesh ref_count is decremented by setMesh's internal drop().
-    //
-    // Preserves node transform, rotation, scale, and material assignments.
-    // No scene graph node destruction or recreation (per scene-graph-ownership.md:
-    // only destroy/recreate the node on entity death or chunk unload).
-    m_node->setMesh(newMesh);
-
-    // Step 4: drop caller's reference.
-    //
-    // VERIFIED (Phase 2 Checkbox B): setMesh() called grab() → ref_count is now 2.
-    // After drop(): ref_count drops to 1; scene node is the sole owner.
-    // Omitting this drop would leak the mesh (ref_count stays at 2 and never reaches 0
-    // when the scene node is later destroyed, leaving ref_count at 1 instead of 0).
-    //
-    // DO NOT access newMesh after this call — caller's reference is released.
-    // Same rule as terrain SMesh attachment (procedural-terrain.md attachment sequence).
-    newMesh->drop();
+    // CMeshSceneNode::setMesh(IMesh*) drops the old mesh and grabs the new mesh.
+    // Cast IAnimatedMesh* to IMesh* (safe — IAnimatedMesh inherits from IMesh).
+    // The LOD mesh pointers are borrowed from the Irrlicht mesh cache, so:
+    //   - Before call: newMesh ref_count == 1 (cache) + N (scene node if active).
+    //   - After call:  old mesh ref_count drops by 1; newMesh ref_count increases by 1.
+    // DO NOT call grab()/drop() on newMesh — this caller does not own the reference.
+    m_node->setMesh(static_cast<irr::scene::IMesh*>(newMesh));
 }
 
 // ---------------------------------------------------------------------------
 // Accessor
 // ---------------------------------------------------------------------------
 
-irr::scene::IMeshSceneNode* LODNode::getNode() const
+irr::scene::ISceneNode* LODNode::getNode() const
 {
-    return m_node;
+    return m_node;  // implicit upcast from IMeshSceneNode* to ISceneNode*
 }

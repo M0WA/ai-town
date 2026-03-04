@@ -150,10 +150,11 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
 
                 m_zoneSubPanelBtns[idx] = m_backend->addButton(label.c_str(), bx, by, zoneBtnW, zoneBtnH);
 
-                // Set inactive sprite for every button (including the default).
+                // Set initial inactive zone pattern icon.
+                // Sprite IDs: kSpriteZoneResLowInactive(96) + zoneCol + densityRow*3.
                 uint32_t inactiveSprite = kSpriteZoneResLowInactive
-                                          + static_cast<uint32_t>(zoneCol)
-                                          + static_cast<uint32_t>(densityRow) * 3u;
+                                         + static_cast<uint32_t>(zoneCol)
+                                         + static_cast<uint32_t>(densityRow) * 3u;
                 m_backend->setElementImage(m_zoneSubPanelBtns[idx], inactiveSprite);
 
                 // Initially hidden — only shown when Zone tool is active.
@@ -161,8 +162,6 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
             }
         }
 
-        // Override default selection (Residential Low = idx 0) with the active sprite.
-        m_backend->setElementImage(m_zoneSubPanelBtns[0], kSpriteZoneResLowActive);
     }
 
     // --- Phase 9b: Utilities sub-panel buttons (2×2 grid) ---

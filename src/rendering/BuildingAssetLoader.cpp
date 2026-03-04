@@ -5,20 +5,23 @@
 //
 // Asset loading sequence:
 //   1. Parse .meta sidecar to get height_floors and lod_distances[0..2].
-//   2. Load _lod0.b3d via m_smgr->getMesh() → dynamic_cast<SMesh*>.
-//   3. Load _lod1.b3d (same path).
+//   2. Load _lod0.b3d via m_smgr->getMesh() → IAnimatedMesh* (CSkinnedMesh).
+//   3. Load _lod1.b3d (same approach).
 //   4. For height_floors >= 4: load _lod2.b3d geometry shell.
 //      For height_floors <= 3: lod2 = nullptr (billboard at this distance).
-//   5. Create scene node via addMeshSceneNode(lod0).
+//   5. Create scene node via addAnimatedMeshSceneNode(lod0).
 //   6. Construct and return LODNode(node, lod0, lod1, lod2, d0, d1, cull).
 //
-// SMesh* type safety (per architecture/graphics-architecture/scene-graph-ownership.md
-// §WARNING — SMesh* Downcast Safety):
-//   Use dynamic_cast<SMesh*> in debug builds; static_cast in release (after verification).
-//   Assert on null in debug. Store as SMesh* throughout — never as IMesh*.
+// IMPORTANT — no dynamic_cast on Irrlicht types:
+//   Irrlicht is compiled with -fno-rtti. dynamic_cast on Irrlicht types has no
+//   typeinfo in the vtable and will crash at runtime (SIGSEGV in __dynamic_cast).
+//   B3D files are always loaded as CSkinnedMesh (not SMesh), so a cast to SMesh*
+//   would return null even if RTTI were available. We work with IAnimatedMesh*
+//   throughout and use IAnimatedMeshSceneNode for the scene node.
 //
-// bounding box requirement (per scene-graph-ownership.md §LOD Swap):
-//   recalculateBoundingBox() on each SMeshBuffer then the SMesh before addMeshSceneNode().
+// Bounding box:
+//   CSkinnedMesh::finalize() (called by the B3D loader) computes the bounding box
+//   from all vertices. No explicit recalculateBoundingBox() is required here.
 
 // GLEW before any Irrlicht/GL includes — prevents symbol conflicts.
 #include <GL/glew.h>
@@ -27,7 +30,6 @@
 #include "BuildingAssetLoader.h"
 #include "LODNode.h"
 
-#include <cassert>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -49,44 +51,19 @@ BuildingAssetLoader::BuildingAssetLoader(ISceneManager* smgr, IVideoDriver* driv
 }
 
 // ---------------------------------------------------------------------------
-// Helper: load an SMesh* from a .b3d (or .obj) path.
-// Returns nullptr if the mesh cannot be loaded or is not an SMesh.
+// Helper: load an IAnimatedMesh* from a .b3d path.
+//
+// Returns the borrowed pointer from the Irrlicht mesh cache (no grab for caller).
+// Returns nullptr if the file cannot be loaded.
+//
+// NOTE: dynamic_cast on Irrlicht types is FORBIDDEN — Irrlicht is compiled with
+// -fno-rtti and __dynamic_cast will SIGSEGV. B3D files always load as CSkinnedMesh
+// (not SMesh), so IAnimatedMesh* is the correct type to work with.
 // ---------------------------------------------------------------------------
 
-static SMesh* loadSMesh(ISceneManager* smgr, const std::string& path)
+static IAnimatedMesh* loadAnimMesh(ISceneManager* smgr, const std::string& path)
 {
-    IAnimatedMesh* animMesh = smgr->getMesh(path.c_str());
-    if (!animMesh) return nullptr;
-
-    // Get frame 0 of the animated mesh as a static IMesh*.
-    IMesh* iMesh = animMesh->getMesh(0);
-    if (!iMesh) return nullptr;
-
-    // Use dynamic_cast in debug builds to verify the pointer is truly an SMesh.
-    // Per scene-graph-ownership.md §WARNING — SMesh* Downcast Safety:
-    // static_cast on a non-SMesh IMesh* is UB; dynamic_cast is required in debug.
-#ifndef NDEBUG
-    SMesh* sMesh = dynamic_cast<SMesh*>(iMesh);
-    assert(sMesh != nullptr && "IMesh* from .b3d is not an SMesh — static_cast would be UB");
-#else
-    SMesh* sMesh = static_cast<SMesh*>(iMesh); // safe after debug verification
-#endif
-
-    return sMesh;
-}
-
-// ---------------------------------------------------------------------------
-// Helper: recalculate bounding box on an SMesh and all its buffers.
-// Must be called before addMeshSceneNode() or setMesh() to avoid stale culling.
-// ---------------------------------------------------------------------------
-
-static void recalcBounds(SMesh* mesh)
-{
-    if (!mesh) return;
-    for (irr::u32 i = 0; i < mesh->getMeshBufferCount(); ++i) {
-        mesh->getMeshBuffer(i)->recalculateBoundingBox();
-    }
-    mesh->recalculateBoundingBox();
+    return smgr->getMesh(path.c_str());  // nullptr on failure; borrowed (no grab)
 }
 
 // ---------------------------------------------------------------------------
@@ -110,9 +87,10 @@ LODNode* BuildingAssetLoader::load(const std::string& basePath)
 
     // ------------------------------------------------------------------
     // Step 2: Load LOD0 mesh.
+    // Returns a borrowed IAnimatedMesh* from the mesh cache (no grab for caller).
     // ------------------------------------------------------------------
     const std::string lod0Path = basePath + "_lod0.b3d";
-    SMesh* lod0 = loadSMesh(m_smgr, lod0Path);
+    IAnimatedMesh* lod0 = loadAnimMesh(m_smgr, lod0Path);
     if (!lod0) {
         return nullptr;  // mandatory LOD0 not found
     }
@@ -121,7 +99,7 @@ LODNode* BuildingAssetLoader::load(const std::string& basePath)
     // Step 3: Load LOD1 mesh.
     // ------------------------------------------------------------------
     const std::string lod1Path = basePath + "_lod1.b3d";
-    SMesh* lod1 = loadSMesh(m_smgr, lod1Path);
+    IAnimatedMesh* lod1 = loadAnimMesh(m_smgr, lod1Path);
     if (!lod1) {
         return nullptr;  // mandatory LOD1 not found
     }
@@ -130,38 +108,37 @@ LODNode* BuildingAssetLoader::load(const std::string& basePath)
     // Step 4: Load LOD2 mesh (only for tall buildings, height_floors >= 4).
     // For buildings with height_floors <= 3, lod2 = nullptr (billboard).
     // ------------------------------------------------------------------
-    SMesh* lod2 = nullptr;
+    IAnimatedMesh* lod2 = nullptr;
     if (heightFloors >= 4) {
         const std::string lod2Path = basePath + "_lod2.b3d";
-        lod2 = loadSMesh(m_smgr, lod2Path);
+        lod2 = loadAnimMesh(m_smgr, lod2Path);
         // lod2 failure is non-fatal for tall buildings — we continue with nullptr
-        // but this will suppress the LOD2 transition. A real pipeline would warn here.
+        // but this will suppress the LOD2 transition.
     }
 
     // ------------------------------------------------------------------
-    // Step 5: Recalculate bounding boxes before creating the scene node.
-    // MANDATORY per scene-graph-ownership.md §LOD Swap — Bounding Box Requirement:
-    // stale bounding box causes incorrect frustum culling.
+    // Step 5: Create a STATIC mesh scene node (CMeshSceneNode) wrapping LOD0.
+    //
+    // addMeshSceneNode() is used (NOT addAnimatedMeshSceneNode()) to create a
+    // CMeshSceneNode. This is critical for correct building placement:
+    //   - CMeshSceneNode::render() applies only the node's world transform.
+    //   - CAnimatedMeshSceneNode::render() additionally applies per-buffer bone
+    //     transforms (SSkinMeshBuffer::Transformation), which would offset static
+    //     buildings from their intended tile positions.
+    //
+    // IAnimatedMesh* is cast to IMesh* (safe — IAnimatedMesh inherits from IMesh).
+    // addMeshSceneNode() grabs lod0 internally (ref_count: 1→2).
     // ------------------------------------------------------------------
-    recalcBounds(lod0);
-    recalcBounds(lod1);
-    recalcBounds(lod2);  // no-op when lod2 == nullptr
-
-    // ------------------------------------------------------------------
-    // Step 6: Create the scene node wrapping LOD0.
-    // addMeshSceneNode() calls grab() on lod0 internally. The returned node
-    // is parented to the root scene node and managed by SceneEntityManager.
-    // ------------------------------------------------------------------
-    IMeshSceneNode* node = m_smgr->addMeshSceneNode(lod0);
+    IMeshSceneNode* node = m_smgr->addMeshSceneNode(static_cast<IMesh*>(lod0));
     if (!node) {
         return nullptr;  // scene graph full or null scene manager
     }
 
     // ------------------------------------------------------------------
-    // Step 7: Construct and return the LODNode.
-    // LODNode stores non-owning references to lod0/1/2 — their lifetimes
-    // are managed by the Irrlicht scene manager (via addMeshSceneNode grab).
-    // The caller (SceneEntityManager) owns the returned LODNode*.
+    // Step 6: Construct and return the LODNode.
+    // LODNode stores borrowed (non-owning) pointers to lod0/1/2 — they remain
+    // alive in the Irrlicht mesh cache for the lifetime of the scene.
+    // The caller (IrrlichtRenderer) owns the returned LODNode*.
     // ------------------------------------------------------------------
     return new LODNode(node, lod0, lod1, lod2, lod0dist, lod1dist, cullDist);
 }

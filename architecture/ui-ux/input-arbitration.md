@@ -66,3 +66,53 @@ Implementation requirement: `UIManager::onEvent()` must check for `WindowFocusGa
 **After exiting Query mode via paths 1**: `m_activeTool` changes to the newly selected tool; `updateSubPanelVisibility()` immediately shows the appropriate sub-panel (e.g., zone sub-panel for Zone tool). The inspector is closed at Priority 3 before Priority 5 sets the new tool. There must be NO frame where `m_inspectorOpen == true` AND `m_activeTool != ActiveTool::Query` — this inconsistent state causes terrain clicks to be consumed by the inspector dismiss path rather than routed to world interaction.
 
 **After exiting Query mode via paths 3 and 4**: `m_activeTool` remains `ActiveTool::Query`. No sub-panel appears (zone sub-panel is hidden in Query mode). The player must either click a toolbar button (path 1) or press I (path 2) to switch to a placement tool.
+
+## CRITICAL: Irrlicht GUI Event Swallowing — IGUIButton Click Handling
+
+**Root cause**: Irrlicht's device event loop calls `GUIEnvironment->postEventFromUser(event)` BEFORE
+calling `Receiver->OnEvent(event)`. When `GUIEnvironment` handles a button click and returns `true`
+(button was activated), `Receiver->OnEvent` is **never called** for the underlying
+`EMIE_LMOUSE_PRESSED_DOWN` event. This means any `UIManager::onEvent()` handler that relies on
+receiving a raw `MouseButtonDown` event (including all `inRect`-based click handlers for the Bell
+icon, speed buttons, and toolbar buttons) is **silently never invoked** when the player clicks an
+Irrlicht `IGUIButton`.
+
+**Mandatory fix**: `EventReceiver::OnEvent()` (in `src/platform/EventReceiver.cpp`) MUST handle
+`EET_GUI_EVENT / EGET_BUTTON_CLICKED` events and synthesise a `MouseButtonDown` `InputEvent` at
+the button's physical centre, converted to virtual coordinates via `UIScaler::unproject()`. The
+synthesised event is dispatched to `UIManager::onEvent()`. The handler MUST return `false` so
+Irrlicht continues its own GUI handling (rendering button active state, etc.).
+
+**Required implementation** (in `EventReceiver::OnEvent()`):
+
+```cpp
+if (event.EventType == irr::EET_GUI_EVENT &&
+    event.GUIEvent.EventType == irr::gui::EGET_BUTTON_CLICKED) {
+    irr::gui::IGUIElement* btn = event.GUIEvent.Caller;
+    if (btn && m_scaler) {
+        irr::core::rect<irr::s32> r = btn->getAbsolutePosition();
+        const int physCx = (r.UpperLeftCorner.X + r.LowerRightCorner.X) / 2;
+        const int physCy = (r.UpperLeftCorner.Y + r.LowerRightCorner.Y) / 2;
+        UIScaler::VirtualPoint vp = m_scaler->unproject(physCx, physCy);
+        InputEvent btnEv{};
+        btnEv.type = InputEvent::Type::MouseButtonDown;
+        btnEv.button = 0;
+        btnEv.x = vp.x; btnEv.y = vp.y;
+        btnEv.physX = physCx; btnEv.physY = physCy;
+        if (m_uiManager) m_uiManager->onEvent(btnEv);
+    }
+    return false; // MUST return false — let Irrlicht finish its own GUI handling
+}
+```
+
+**This pattern is mandatory for ALL `IGUIButton` interactions in the project.** Any toolbar button,
+Bell icon, speed selector button, or other `IGUIButton`-backed UI element that relies on
+`UIManager::onEvent()` receiving a `MouseButtonDown` event MUST go through this synthesised-event
+path. The raw `EMIE_LMOUSE_PRESSED_DOWN` event is NOT delivered to `EventReceiver::OnEvent()` when
+Irrlicht's GUI layer consumes the click; the synthesised `EGET_BUTTON_CLICKED` dispatch is the
+only reliable delivery mechanism.
+
+**Why `return false`**: Returning `true` from the `EGET_BUTTON_CLICKED` handler would tell Irrlicht
+to stop processing the GUI event, preventing visual button state updates (the pressed/active
+appearance). Always return `false` for `EET_GUI_EVENT` handlers in `EventReceiver` so the Irrlicht
+GUI environment can complete its own rendering and state management.

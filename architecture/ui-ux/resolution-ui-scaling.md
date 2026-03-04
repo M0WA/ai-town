@@ -140,6 +140,28 @@ Without this scaling, elements are positioned at virtual-space values interprete
 
 - No hardcoded pixel offsets anywhere in UI code
 
+## Bitmap Font Physical Size
+
+Irrlicht bitmap fonts render at their **physical pixel size** — they do not scale with the virtual
+coordinate system. A font generated at 22 px physical renders 22-pixel-tall glyphs on screen
+regardless of virtual coordinate transformations. This means the font asset must be authored for
+the **physical window size** (minimum 1280×720), not for the virtual 1920×1080 canvas.
+
+**Correct font sizes for 1280×720 physical minimum**:
+
+- `assets/fonts/hud_font.xml` — DejaVu Sans, **11 px physical**
+- `assets/fonts/hud_mono_font.xml` — DejaVu Sans Mono, **11 px physical**
+
+**Why 22 px was wrong**: The initial font was generated at 22 px physical. The primary toolbar
+buttons are 56×48 px virtual, which maps to approximately 37×32 px physical at the 1280/1920 scale
+factor (37 = 56 × 1280/1920). At 22 px per glyph, only 1–2 characters fit horizontally within a
+37 px button — making button labels ("Zone", "Road", "Utils", "Demol", "Query") illegible. At
+11 px per glyph, all 5-character labels fit comfortably within the button width.
+
+**Rule**: When choosing a bitmap font size, compute the physical button width as
+`virtual_width × (physical_window_width / virtual_canvas_width)` and select a glyph size that
+fits the longest expected label string within that physical width with comfortable margins.
+
 ## Typography
 
 - **Minimum body font size**: 14 px virtual (1920×1080 space). At 1280×720 (scale factor ≈ 0.667), this renders to approximately 9 px physical — the minimum for compact panels. Prefer **16 px virtual** for all interactive labels.

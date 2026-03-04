@@ -833,7 +833,7 @@ void IrrlichtRenderer::destroyTileNode(
     if (it == registry.end() || !it->second) return;
 
     LODNode* lodNode = it->second;
-    scene::IMeshSceneNode* node = lodNode->getNode();
+    scene::ISceneNode* node = lodNode->getNode();
 
     if (node && m_driver) {
         // Step 1: clear material texture slots.
@@ -885,13 +885,22 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
         return;
     }
 
-    // Position the scene node at the tile's world-space origin.
-    // Pivot convention: base-centre at Y=0 (per 3d-model-standards.md).
-    if (scene::IMeshSceneNode* node = lodNode->getNode()) {
+    // Position the scene node at the tile's world-space centre.
+    // B3D placeholder meshes are 1×1×1 unit cubes centred at origin in XZ.
+    // Scale by kTileSize so they fill the full tile footprint (10×10 m).
+    // Offset by kTileSize/2 in X and Z to centre the mesh on the tile.
+    // Disable lighting — B3D assets have no lights in the scene yet; without
+    // this, Irrlicht renders the mesh black (ambient=0).
+    if (scene::ISceneNode* node = lodNode->getNode()) {
+        const float terrainY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
         node->setPosition(core::vector3df(
-            static_cast<f32>(tileX) * kTileSize,
-            0.0f,
-            static_cast<f32>(tileZ) * kTileSize));
+            static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
+            terrainY,
+            static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
+        node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
+        for (u32 m = 0; m < node->getMaterialCount(); ++m) {
+            node->getMaterial(m).Lighting = false;
+        }
     }
 
     m_buildingNodes[tileKey(tileX, tileZ)] = lodNode;
@@ -931,11 +940,18 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ)
         return;
     }
 
-    if (scene::IMeshSceneNode* node = lodNode->getNode()) {
+    if (scene::ISceneNode* node = lodNode->getNode()) {
+        const float terrainY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
         node->setPosition(core::vector3df(
-            static_cast<f32>(tileX) * kTileSize,
-            0.0f,
-            static_cast<f32>(tileZ) * kTileSize));
+            static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
+            terrainY,
+            static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
+        // Roads are flat: 1 unit in X/Z maps to kTileSize; 1 unit in Y maps to
+        // a thin 0.2 m surface so roads sit flat on the terrain.
+        node->setScale(core::vector3df(kTileSize, 0.2f, kTileSize));
+        for (u32 m = 0; m < node->getMaterialCount(); ++m) {
+            node->getMaterial(m).Lighting = false;
+        }
     }
 
     m_roadNodes[tileKey(tileX, tileZ)] = lodNode;
@@ -996,11 +1012,16 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
         return;
     }
 
-    if (scene::IMeshSceneNode* node = lodNode->getNode()) {
+    if (scene::ISceneNode* node = lodNode->getNode()) {
+        const float terrainY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
         node->setPosition(core::vector3df(
-            static_cast<f32>(tileX) * kTileSize,
-            0.0f,
-            static_cast<f32>(tileZ) * kTileSize));
+            static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
+            terrainY,
+            static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
+        node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
+        for (u32 m = 0; m < node->getMaterialCount(); ++m) {
+            node->getMaterial(m).Lighting = false;
+        }
     }
 
     // Service buildings share the m_buildingNodes registry with zone buildings:
