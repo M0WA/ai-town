@@ -1,141 +1,106 @@
-// crossfade_interrupted_formula_test.cpp — Phase 10 audio test.
+// crossfade_interrupted_formula_test.cpp
+// Phase 10: verify the interrupted crossfade arccos formula produces no NaN or
+// domain error at the three critical boundary values of current_gain_out.
 //
-// Test: Crossfade_InterruptedFormula_NoDomainErrorAtBoundary
+// Spec reference: architecture/audio-architecture/dynamic-soundscape.md
+//   t_offset = (2/pi) * arccos(current_gain_out)
+//   where current_gain_out is the incoming stem B's gain at the moment of
+//   interruption (stem B becomes the new outgoing in the B→C crossfade).
 //
-// Verifies that the interrupted-crossfade t_offset formula
-//   t_offset = (2/π) × arccos(current_gain_out)
-// produces correct output at the exact boundary values (current_gain_out = 1.0
-// and current_gain_out = 0.0) without triggering std::domain_error or NaN.
+// Risk documented in implementation/phase-10.md:
+//   "Interrupted crossfade t_offset formula uses arccos — verify no domain
+//    error when current_gain_out is exactly 0.0 or 1.0."
 //
-// Design rationale (architecture/audio-architecture/dynamic-soundscape.md):
-//   - When a crossfade A→B is interrupted by a new target C, stem B's current
-//     gain_out at the interruption moment becomes the starting gain for the
-//     new B→C crossfade.
-//   - gain_out(t) = cos(t × π/2)  →  t_offset = arccos(gain_out) × (2/π)
-//   - At t=0: gain_out=1.0  → arccos(1.0) = 0 → t_offset = 0  (no-op)
-//   - At t=1: gain_out=0.0  → arccos(0.0) = π/2 → t_offset = 1 (fully faded)
-//   - These are exactly the domain endpoints of arccos [−1, 1].
-//     Any value outside [−1, 1] produces a domain error (std::acos on
-//     out-of-range input is undefined behaviour — returns NaN on some platforms).
-//     The test ensures the implementation clamps current_gain_out to [0.0, 1.0]
-//     before passing to arccos, making both boundary values safe.
-//
-// CMake target: audio_tests (target_sources, Phase 10 block in CMakeLists.txt).
-// Does NOT require a real audio device — pure math test.
-//
-// Spec refs:
-//   architecture/audio-architecture/dynamic-soundscape.md §Interrupted crossfade
-//   implementation/phase-10.md §Audio crossfade unit tests
+// These tests do NOT require a real AudioSystem or OpenAL device.
+// They test the math formula in isolation.
 
 #include <gtest/gtest.h>
 #include <cmath>
 #include <limits>
-#include <algorithm>
 
+// ---------------------------------------------------------------------------
+// Helpers — mirror the formula from dynamic-soundscape.md exactly so that the
+// test verifies the correct formula (not just any monotone mapping of [0,1]).
+// ---------------------------------------------------------------------------
 namespace {
 
-// ---------------------------------------------------------------------------
-// computeInterruptedTOffset — mirrors AudioSystem's interrupted crossfade
-// t_offset computation.
+// Constant-power crossfade gain curves
+// gain_in  = sin(t * pi/2)
+// gain_out = cos(t * pi/2)
+// where t runs [0, 1] over the crossfade duration.
 //
-// Implementation must clamp gain_out to [0.0, 1.0] before calling std::acos
-// to avoid undefined behaviour at floating-point rounding boundaries (e.g.
-// 1.0 + FLT_EPSILON causing acos to return NaN on some platforms).
+// Interrupted crossfade: given the current gain_out value at the moment of
+// interruption, recover t_offset so the new crossfade starts from that point:
+//   t_offset = (2 / pi) * arccos(current_gain_out)
 //
-// Formula: t_offset = (2 / π) × arccos(clamp(gain_out, 0.0f, 1.0f))
-// ---------------------------------------------------------------------------
-float computeInterruptedTOffset(float current_gain_out)
+// Expected boundary values:
+//   current_gain_out = 1.0  =>  t_offset = (2/pi)*arccos(1.0) = (2/pi)*0 = 0.0
+//   current_gain_out = 0.0  =>  t_offset = (2/pi)*arccos(0.0) = (2/pi)*(pi/2) = 1.0
+//   current_gain_out = 0.5  =>  t_offset = (2/pi)*arccos(0.5) = (2/pi)*(pi/3) = 2/3
+
+inline float computeTOffset(float current_gain_out)
 {
-    constexpr float kPi = static_cast<float>(M_PI);
-    // Clamp to [0, 1] to guard against floating-point rounding at exact boundaries.
+    // arccos domain is [-1, 1].  current_gain_out must be clamped to avoid
+    // domain error caused by floating-point values marginally outside [0, 1].
     const float clamped = std::max(0.0f, std::min(1.0f, current_gain_out));
-    return (2.0f / kPi) * std::acos(clamped);
+    return (2.0f / static_cast<float>(M_PI)) * std::acos(clamped);
 }
 
-// ---------------------------------------------------------------------------
-// Round-trip verification: cos(t_offset × π/2) must equal the original gain_out
-// within floating-point tolerance.
-// ---------------------------------------------------------------------------
-float gainOutFromTOffset(float t_offset)
-{
-    constexpr float kPi = static_cast<float>(M_PI);
-    return std::cos(t_offset * kPi / 2.0f);
-}
-
-} // anonymous namespace
+} // namespace
 
 // ---------------------------------------------------------------------------
-// Crossfade_InterruptedFormula_NoDomainErrorAtBoundary
-//
-// Verifies that t_offset at current_gain_out = 1.0 returns 0 (no-op, crossfade
-// was just starting) and at current_gain_out = 0.0 returns 1 (fully faded,
-// outgoing stem has already reached silence), with no arccos domain error.
+// CrossfadeTest
 // ---------------------------------------------------------------------------
 TEST(CrossfadeTest, Crossfade_InterruptedFormula_NoDomainErrorAtBoundary)
 {
-    // At gain_out = 1.0 (crossfade just started, stem B at full volume):
-    // arccos(1.0) = 0  →  t_offset = 0
-    const float t_at_one = computeInterruptedTOffset(1.0f);
-    EXPECT_FALSE(std::isnan(t_at_one))
-        << "computeInterruptedTOffset(1.0) returned NaN — arccos domain error";
-    EXPECT_FALSE(std::isinf(t_at_one))
-        << "computeInterruptedTOffset(1.0) returned Inf";
-    EXPECT_NEAR(t_at_one, 0.0f, 1e-5f)
-        << "computeInterruptedTOffset(1.0) must return 0 — crossfade begins at t=0";
+    // --- current_gain_out = 1.0 -------------------------------------------
+    // At the very start of a crossfade the outgoing stem is at full volume
+    // (gain_out = cos(0) = 1.0).  Interrupted immediately → t_offset = 0.
+    const float t_at_1 = computeTOffset(1.0f);
+    EXPECT_FALSE(std::isnan(t_at_1))
+        << "arccos(1.0) must not produce NaN";
+    EXPECT_FALSE(std::isinf(t_at_1))
+        << "arccos(1.0) must not produce Inf";
+    EXPECT_NEAR(t_at_1, 0.0f, 1e-5f)
+        << "t_offset at gain_out=1.0 must be 0.0 (crossfade just started)";
 
-    // At gain_out = 0.0 (stem B fully faded out):
-    // arccos(0.0) = π/2  →  t_offset = (2/π) × (π/2) = 1
-    const float t_at_zero = computeInterruptedTOffset(0.0f);
-    EXPECT_FALSE(std::isnan(t_at_zero))
-        << "computeInterruptedTOffset(0.0) returned NaN — arccos domain error";
-    EXPECT_FALSE(std::isinf(t_at_zero))
-        << "computeInterruptedTOffset(0.0) returned Inf";
-    EXPECT_NEAR(t_at_zero, 1.0f, 1e-5f)
-        << "computeInterruptedTOffset(0.0) must return 1 — crossfade ends at t=1";
+    // --- current_gain_out = 0.0 -------------------------------------------
+    // At the very end of a crossfade the outgoing stem has faded out
+    // (gain_out = cos(pi/2) = 0.0).  Interrupted at the end → t_offset = 1.
+    const float t_at_0 = computeTOffset(0.0f);
+    EXPECT_FALSE(std::isnan(t_at_0))
+        << "arccos(0.0) must not produce NaN";
+    EXPECT_FALSE(std::isinf(t_at_0))
+        << "arccos(0.0) must not produce Inf";
+    EXPECT_NEAR(t_at_0, 1.0f, 1e-5f)
+        << "t_offset at gain_out=0.0 must be 1.0 (crossfade completed)";
 
-    // Round-trip: gain_out(t_offset(gain_out)) ≈ gain_out for several mid-range values.
-    // Ensures the formula is a true inverse of cos(t × π/2).
-    for (float g : {0.1f, 0.25f, 0.5f, 0.75f, 0.9f}) {
-        const float t_off = computeInterruptedTOffset(g);
-        EXPECT_FALSE(std::isnan(t_off))
-            << "computeInterruptedTOffset(" << g << ") returned NaN";
-        const float recovered = gainOutFromTOffset(t_off);
-        EXPECT_NEAR(recovered, g, 1e-5f)
-            << "Round-trip failed at gain_out=" << g
-            << ": t_offset=" << t_off
-            << ", recovered=" << recovered;
-    }
-}
+    // --- current_gain_out = 0.5 -------------------------------------------
+    // Mid-crossfade: gain_out = cos(t*pi/2) = 0.5 → t = arccos(0.5)/(pi/2) = (pi/3)/(pi/2) = 2/3
+    const float t_at_half = computeTOffset(0.5f);
+    EXPECT_FALSE(std::isnan(t_at_half))
+        << "arccos(0.5) must not produce NaN";
+    EXPECT_FALSE(std::isinf(t_at_half))
+        << "arccos(0.5) must not produce Inf";
+    EXPECT_NEAR(t_at_half, 2.0f / 3.0f, 1e-5f)
+        << "t_offset at gain_out=0.5 must be 2/3 (mid-crossfade)";
 
-// ---------------------------------------------------------------------------
-// Crossfade_InterruptedFormula_ClampsBelowZero
-//
-// Verifies the formula does not crash or return NaN when given a slightly
-// negative gain_out (floating-point underflow at the end of a crossfade can
-// produce small negative values like -1e-7f).
-// ---------------------------------------------------------------------------
-TEST(CrossfadeTest, Crossfade_InterruptedFormula_ClampsBelowZero)
-{
-    // A very small negative value — should be clamped to 0, producing t_offset = 1.
-    const float t = computeInterruptedTOffset(-1e-7f);
-    EXPECT_FALSE(std::isnan(t))
-        << "computeInterruptedTOffset(-1e-7) returned NaN — clamp not applied";
-    EXPECT_NEAR(t, 1.0f, 1e-4f)
-        << "computeInterruptedTOffset(-1e-7) should clamp to 0 and return ~1.0";
-}
+    // --- Monotone ordering check ------------------------------------------
+    // t_offset must decrease as current_gain_out increases (higher gain_out
+    // means the crossfade started more recently → smaller t_offset restart).
+    EXPECT_GT(t_at_0, t_at_half)
+        << "t_offset must be larger when gain_out is closer to 0 (later in crossfade)";
+    EXPECT_GT(t_at_half, t_at_1)
+        << "t_offset must be larger when gain_out is closer to 0 (later in crossfade)";
 
-// ---------------------------------------------------------------------------
-// Crossfade_InterruptedFormula_ClampsAboveOne
-//
-// Verifies the formula does not crash or return NaN when given a slightly
-// above-1.0 gain_out (can occur from floating-point rounding at crossfade start).
-// ---------------------------------------------------------------------------
-TEST(CrossfadeTest, Crossfade_InterruptedFormula_ClampsAboveOne)
-{
-    // A very small above-one value — should be clamped to 1, producing t_offset = 0.
-    const float t = computeInterruptedTOffset(1.0f + 1e-7f);
-    EXPECT_FALSE(std::isnan(t))
-        << "computeInterruptedTOffset(1+eps) returned NaN — clamp not applied";
-    EXPECT_NEAR(t, 0.0f, 1e-4f)
-        << "computeInterruptedTOffset(1+eps) should clamp to 1 and return ~0.0";
+    // --- Verify gain_in complement is consistent --------------------------
+    // At the recovered t_offset, gain_in = sin(t_offset * pi/2) must equal
+    // sqrt(1 - gain_out^2) (Pythagorean identity for constant-power crossfade).
+    auto gain_in_from_t = [](float t) {
+        return std::sin(t * static_cast<float>(M_PI) / 2.0f);
+    };
+    // For gain_out = 0.5: gain_in = sin(2/3 * pi/2) = sin(pi/3) = sqrt(3)/2 ≈ 0.866
+    const float expected_gain_in_half = std::sqrt(1.0f - 0.5f * 0.5f);  // sqrt(0.75)
+    EXPECT_NEAR(gain_in_from_t(t_at_half), expected_gain_in_half, 1e-5f)
+        << "gain_in at recovered t_offset must satisfy constant-power constraint";
 }

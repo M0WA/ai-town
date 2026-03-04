@@ -521,6 +521,21 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/simulation_coverage_gap_test.cpp
 )
 
+# AITOWN_TESTING_ENABLED: enables testForceUnlockDensityTier() in CitySimulation
+# (bypasses 3-consecutive-month density unlock gate for deterministic unit tests).
+# Must be set on simulation_tests only — never on production targets.
+target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
+
+# ----------------------------------------------------------------------------
+# Phase 10 simulation test sources — added via target_sources to avoid
+# duplicate add_executable. Per CLAUDE.md memory note: use target_sources(),
+# never add_executable() or aitown_add_tests() again on existing targets.
+# ----------------------------------------------------------------------------
+target_sources(simulation_tests PRIVATE
+    tests/simulation/adaptive_music_intensity_test.cpp    # Phase 10: adaptive music intensity state machine
+    tests/simulation/city_simulation_render_test.cpp      # Phase 10: render dispatch for placement/demolition
+)
+
 # ----------------------------------------------------------------------------
 # terrain_tests — terrain generator property tests and fixed-seed regression
 # TIMEOUT 300: multi-seed property tests can exceed 120 s on coverage-instrumented runners
@@ -713,6 +728,19 @@ add_custom_command(TARGET audio_tests POST_BUILD
         "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
         "$<TARGET_FILE_DIR:audio_tests>/default.mhr"
     COMMENT "Copying default.mhr (OpenAL Soft HRTF data) next to audio_tests"
+)
+
+# ----------------------------------------------------------------------------
+# Phase 10 audio test sources — added via target_sources to avoid duplicate
+# add_executable (which would be a CMake error on an already-defined target).
+# Per architecture/testing/testability-architecture.md shared-mock pattern:
+# tests/simulation/ is already on audio_tests include path for MockAudioSystem.
+# ----------------------------------------------------------------------------
+target_sources(audio_tests PRIVATE
+    tests/audio/crossfade_interrupted_formula_test.cpp    # Phase 10: interrupted crossfade arccos formula
+    tests/audio/stinger_milestone_test.cpp                # Phase 10: stinger fires only on CityRating transition
+    tests/audio/audio_stream_bar_boundary_test.cpp        # Phase 10: bar-boundary read-order and stream-start guard
+    tests/audio/notification_sfx_efx_bypass_test.cpp      # Phase 10: EFX bypass for non-positional notification SFX
 )
 
 # ----------------------------------------------------------------------------

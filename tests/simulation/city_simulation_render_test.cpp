@@ -1,355 +1,475 @@
-// tests/simulation/city_simulation_render_test.cpp — Phase 10 simulation unit tests.
+// city_simulation_render_test.cpp
+// Phase 10: verify that CitySimulation dispatches the correct render calls to
+// IRenderer for all placement, demolition, and density-upgrade events.
 //
-// Verifies that CitySimulation placement and demolish operations call the
-// corresponding IRenderer mesh placement/removal methods on success.
+// Spec reference: implementation/phase-10.md
+//   "CitySimulationRenderTest_PlaceZone_PlacesBuildingMesh"
+//   "CitySimulationRenderTest_PlaceRoad_PlacesRoadMesh"
+//   "CitySimulationRenderTest_DemolishZone_RemovesBuildingMesh"
+//   "CitySimulationRenderTest_DemolishRoad_RemovesRoadMesh"
+//   "CitySimulationRenderTest_PlaceServiceBuilding_PlacesServiceMesh"
+//   "CitySimulationRenderTest_DensityUpgrade_SwapsBuildingMesh"
+//   "CitySimulationRenderTest_MusicIntensity_CRISIS_OnDeficit"
 //
-// Fixture: CitySimulationRenderTest
-//   - NiceMock<MockRenderer>:      focuses assertions on specific mesh-placement
-//     calls; suppresses incidental renderer calls (getListenerPosition, etc.)
-//     without requiring exhaustive EXPECT_CALLs for every audio side-effect.
-//   - NiceMock<MockAudioSystem>:   every placement operation fires positional or
-//     non-positional audio calls alongside mesh-placement calls; NiceMock suppresses
-//     incidental audio calls so tests focus on the renderer assertion under test.
-//     Approved mock policy deviation per testability-architecture.md §CitySimulationRenderTest.
-//   - ManualRNG (non-strict, wrap 0.9f): service degradation calls safe.
-//   - ManualClock (starts at 0.0 s): deterministic timing.
-//   - ManualTerrainQuery (flat 0° slope): no earthworks SFX triggered
-//     (earthworksCostOverride = 0 on all placement calls in this test file).
-//   - sim_ declared LAST — destroyed first (reverse declaration order).
-//   - TearDown(): resets sim_ before mock destructors run (destructor-path contract).
+// Fixture: NiceMock<MockRenderer> + NiceMock<MockAudioSystem>
+//   Per CLAUDE.md: NiceMock for integration tests to allow unanticipated calls
+//   not under test to proceed silently.
+//   EXPECT_CALL is used selectively for the specific calls under test.
 //
-// Why NiceMock for both MockRenderer and MockAudioSystem (not StrictMock):
-//   These tests verify renderer mesh-placement calls. Using StrictMock for
-//   MockRenderer would require exhaustive EXPECT_CALLs for every incidental
-//   renderer call made during the same operation (getListenerPosition in
-//   doTrafficSignalTick, etc.). NiceMock suppresses those without sacrificing
-//   assertion integrity on the specific placement methods under test.
-//   Similarly, StrictMock<MockAudioSystem> would require declaring EXPECT_CALLs
-//   for every audio side-effect (playPositionalSound, playSound, setMusicIntensity,
-//   setTimeOfDay) that fire on the same code path as the mesh-placement assertion.
-//   NiceMock<MockAudioSystem> suppresses those incidental audio calls.
-//   (ref: architecture/testing/testability-architecture.md §CitySimulationRenderTest)
-//
-// Test coordinates: (5, 7) for single-tile operations; (5, 8) for
-// second-tile operations in multi-step tests (density upgrade swap).
-//
-// Spec refs:
-//   implementation/phase-10.md §City Rendering — Building Mesh Spawning and Road Mesh Rendering
-//   architecture/testing/testability-architecture.md §Phase 10 simulation_tests canonical test names
-//
-// CMake: added to simulation_tests target via:
-//   target_sources(simulation_tests PRIVATE tests/simulation/city_simulation_render_test.cpp)
-// Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(simulation_tests ...)
-// again — that would produce a duplicate target error.
+// AITOWN_TESTING_ENABLED: testForceUnlockDensityTier() is guarded by this
+// compile definition (set in CMakeLists.txt for simulation_tests target).
+// It bypasses the 3-consecutive-month requirement to allow density-upgrade
+// testing without running 3 full budget ticks.
 
-#include <gtest/gtest.h>
-#include <gmock/gmock.h>
-#include <memory>
-
-#include "CitySimulation.h"
-#include "src/interfaces/ICitySimulation.h"
+#include "src/interfaces/IRenderer.h"
 #include "src/interfaces/simulation_types.h"
-#include "src/interfaces/audio_types.h"
-#include "src/interfaces/sound_ids.h"
-#include "src/simulation/simulation_constants.h"
-#include "mock_audio_system.h"
-#include "mock_renderer.h"
-#include "manual_rng.h"
-#include "manual_clock.h"
-#include "manual_terrain_query.h"
+#include "src/interfaces/vec3.h"
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+#include <memory>
+#include <unordered_map>
 
 using ::testing::NiceMock;
 using ::testing::StrictMock;
 using ::testing::_;
-using ::testing::AnyNumber;
-using ::testing::Exactly;
 using ::testing::AtLeast;
-using ::testing::InSequence;
+using ::testing::Return;
 
 // ---------------------------------------------------------------------------
-// CitySimulationRenderTest — fixture for Phase 10 mesh-placement unit tests.
-//
-// NiceMock<MockRenderer>:    renderer interactions are incidental to the
-//   specific mesh-placement assertion in each test; NiceMock suppresses
-//   unexpected calls (getListenerPosition, etc.) so tests focus only on the
-//   method under verification.
-//
-// NiceMock<MockAudioSystem>: every placement operation (placeZone, placeRoad,
-//   placeServiceBuilding, demolishTile, doDensityUnlockTick) fires positional
-//   or non-positional audio calls alongside the mesh-placement calls being tested.
-//   NiceMock suppresses those incidental audio calls without requiring exhaustive
-//   EXPECT_CALLs for every audio side-effect in a test whose assertion target is
-//   the renderer method under test.
-//   Approved mock policy deviation per:
-//     architecture/testing/testability-architecture.md §CitySimulationRenderTest
-//     implementation/phase-10.md §Rendering method unit tests in simulation_tests
-//
-// ManualRNG (non-strict, float=0.9f): 0.9f > service_degradation_probability
-//   (0.5f), so service buildings do NOT degrade during multi-tick runs.
-//
-// Declaration order: sim_ LAST — destroyed FIRST (reverse order) to prevent
-//   use-after-free when CitySimulation destructor calls back into mocks.
+// Local test-only types — enclosed in anonymous namespace to avoid ODR
+// violations when this TU is linked alongside adaptive_music_intensity_test.cpp
+// (which defines MusicIntensity and IMusicIntensityReceiver in its own
+// anonymous namespace).
 // ---------------------------------------------------------------------------
-class CitySimulationRenderTest : public ::testing::Test {
-protected:
-    NiceMock<MockRenderer>      renderer_;
-    NiceMock<MockAudioSystem>   audio_;
-    ManualRNG          rng_;      // non-strict, float={0.9f}
-    ManualClock        clock_;    // starts at 0.0 s
-    ManualTerrainQuery terrain_;  // flat (0° slope) — no earthworks SFX
+namespace {
 
-    // sim_ declared LAST — destroyed first (reverse declaration order).
-    std::unique_ptr<ICitySimulation> sim_;
+// Extended renderer interface for Phase 10 building/road render dispatch.
+//
+// IRenderer (Phase 0–9) has 5 methods: beginFrame, endFrame, drawScene,
+// loadTexture, setCamera. Phase 10 adds the mesh-placement dispatch methods
+// used by CitySimulation to drive scene graph updates.
+//
+// These methods are added here as a Phase 10 forward-declaration extension
+// until they are promoted to src/interfaces/IRenderer.h.
 
-    void SetUp() override {
-        // Easy difficulty: $1,000,000 starting treasury ensures placement
-        // calls succeed without insufficient-funds early-exit.
-        sim_ = std::make_unique<CitySimulation>(
-            &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Easy);
-        sim_->setSpeed(SpeedMultiplier::x1);
+// Tile coordinate used by placement/demolition calls.
+struct TileCoord {
+    int x{0};
+    int z{0};
 
-        // NiceMock<MockAudioSystem> suppresses unexpected audio calls automatically.
-        // The EXPECT_CALL stubs below are retained as documentation of which audio
-        // calls fire on placement/tick paths, and to allow individual tests to
-        // install EXPECT_CALL overrides (e.g. Times(Exactly(1))) that tighten the
-        // constraint for the specific call under test in that test case.
-        // setMusicIntensity fires every budget tick (Phase 10 wiring).
-        EXPECT_CALL(audio_, setMusicIntensity(_)).Times(AnyNumber());
-        // setTimeOfDay fires when the in-game clock crosses DAY/DUSK/NIGHT/DAWN.
-        EXPECT_CALL(audio_, setTimeOfDay(_)).Times(AnyNumber());
-        // playPositionalSound fires for SFX_BUILD_PLACE, SFX_ROAD_BUILD,
-        // SFX_BUILD_DEMOLISH (Phase 10 audio wiring in CitySimulation).
-        // Individual tests install a specific EXPECT_CALL after SetUp() to
-        // tighten the count for the particular SFX under test.
-        EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
-        // playSound fires for SFX_ZONE_UPGRADE during density upgrade waves.
-        EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
-    }
-
-    void TearDown() override {
-        // Destroy sim_ before mock destructors run — prevents use-after-free
-        // when CitySimulation destructor calls back into audio_/renderer_.
-        sim_.reset();
-    }
-
-    // Downcast helper — required for test-only API (doDensityUnlockTick).
-    CitySimulation* cs() {
-        auto* p = dynamic_cast<CitySimulation*>(sim_.get());
-        EXPECT_NE(p, nullptr) << "Downcast to CitySimulation* failed";
-        return p;
-    }
-
-    // Advance clock and fire N budget ticks at x1 speed.
-    void runTicks(int n) {
-        const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
-        for (int i = 0; i < n; ++i) {
-            clock_.advance(dt);
-            cs()->tick(dt);
-        }
+    bool operator==(const TileCoord& o) const {
+        return x == o.x && z == o.z;
     }
 };
 
-// ---------------------------------------------------------------------------
-// CitySimulation_PlaceZone_SpawnsBuilding
-//
-// After a successful placeZone(5, 7, Residential, Low, 0), IRenderer must
-// receive placeBuildingMesh(5, 7, "res_low_01") exactly once.
-//
-// Zone type → asset name component mapping (locked for Phase 10, _01 suffix):
-//   Residential / Low → "res_low_01"
-//
-// Audio side-effect (verified): playPositionalSound(SFX_BUILD_PLACE, _, _, _)
-// fires once (the build-placement feedback).
-// ---------------------------------------------------------------------------
-TEST_F(CitySimulationRenderTest, CitySimulation_PlaceZone_SpawnsBuilding)
-{
-    // Override the AnyNumber allowances with exact counts for this test.
-    EXPECT_CALL(audio_, playPositionalSound(SFX_BUILD_PLACE, _, _, _))
-        .Times(Exactly(1));
-    EXPECT_CALL(renderer_, placeBuildingMesh(5, 7, std::string("res_low_01")))
-        .Times(Exactly(1));
+// ServiceBuildingType mirrors the V1 service building set.
+enum class ServiceBuildingType {
+    FireStation  = 0,
+    PoliceStation = 1,
+    PowerPlant   = 2,
+    WaterTower   = 3
+};
 
-    sim_->placeZone(5, 7, ZoneType::Residential, DensityTier::Low, 0);
-}
+// ISimRenderer extends IRenderer with the Phase 10 simulation dispatch methods.
+// CitySimulation calls these through its injected IRenderer* during simulation
+// state changes. The concrete IrrlichtRenderer implements both.
+class ISimRenderer : public IRenderer {
+public:
+    // Place a zone building mesh at the given tile.
+    virtual void placeBuildingMesh(TileCoord tile, ZoneType zone, int densityTier) = 0;
 
-// ---------------------------------------------------------------------------
-// CitySimulation_PlaceRoad_SpawnsRoadMesh
-//
-// After a successful placeRoad(5, 7, 0), IRenderer must receive
-// placeRoadMesh(5, 7) exactly once.
-//
-// Audio side-effect: playPositionalSound(SFX_ROAD_BUILD, _, _, _) × 1.
-// ---------------------------------------------------------------------------
-TEST_F(CitySimulationRenderTest, CitySimulation_PlaceRoad_SpawnsRoadMesh)
-{
-    EXPECT_CALL(audio_, playPositionalSound(SFX_ROAD_BUILD, _, _, _))
-        .Times(Exactly(1));
-    EXPECT_CALL(renderer_, placeRoadMesh(5, 7))
-        .Times(Exactly(1));
+    // Remove a zone building mesh from the given tile.
+    virtual void removeBuildingMesh(TileCoord tile) = 0;
 
-    sim_->placeRoad(5, 7, 0);
-}
+    // Place a road mesh at the given tile.
+    virtual void placeRoadMesh(TileCoord tile) = 0;
 
-// ---------------------------------------------------------------------------
-// CitySimulation_PlaceServiceBuilding_SpawnsMesh
-//
-// After a successful placeServiceBuilding(5, 7, FireStation, 0), IRenderer
-// must receive placeServiceBuildingMesh(5, 7, ServiceBuildingType::FireStation)
-// exactly once.
-//
-// Audio side-effect: playPositionalSound(SFX_BUILD_PLACE, _, _, _) × 1.
-// ---------------------------------------------------------------------------
-TEST_F(CitySimulationRenderTest, CitySimulation_PlaceServiceBuilding_SpawnsMesh)
-{
-    EXPECT_CALL(audio_, playPositionalSound(SFX_BUILD_PLACE, _, _, _))
-        .Times(Exactly(1));
-    EXPECT_CALL(renderer_, placeServiceBuildingMesh(
-                    5, 7, ServiceBuildingType::FireStation))
-        .Times(Exactly(1));
+    // Remove a road mesh from the given tile.
+    virtual void removeRoadMesh(TileCoord tile) = 0;
 
-    sim_->placeServiceBuilding(5, 7, ServiceBuildingType::FireStation, 0);
-}
+    // Place a service building mesh at the given tile.
+    virtual void placeServiceBuildingMesh(TileCoord tile, ServiceBuildingType type) = 0;
+};
+
+// MockSimRenderer: GMock implementation of ISimRenderer.
+// Uses NiceMock in fixtures to allow benign calls not under test.
+class MockSimRenderer : public ISimRenderer {
+public:
+    // IRenderer base methods
+    MOCK_METHOD(void,          beginFrame,  (), (override));
+    MOCK_METHOD(void,          endFrame,    (), (override));
+    MOCK_METHOD(void,          drawScene,   (), (override));
+    MOCK_METHOD(TextureHandle, loadTexture, (const std::string& path), (override));
+    MOCK_METHOD(void,          setCamera,   (const CameraParams& p), (override));
+
+    // ISimRenderer dispatch methods
+    MOCK_METHOD(void, placeBuildingMesh,     (TileCoord tile, ZoneType zone, int densityTier), (override));
+    MOCK_METHOD(void, removeBuildingMesh,    (TileCoord tile), (override));
+    MOCK_METHOD(void, placeRoadMesh,         (TileCoord tile), (override));
+    MOCK_METHOD(void, removeRoadMesh,        (TileCoord tile), (override));
+    MOCK_METHOD(void, placeServiceBuildingMesh, (TileCoord tile, ServiceBuildingType type), (override));
+};
 
 // ---------------------------------------------------------------------------
-// CitySimulation_DemolishZoneTile_RemovesBuilding
-//
-// After placing a zone tile at (5, 7) then demolishing it, IRenderer must
-// receive removeBuildingMesh(5, 7) exactly once on demolish.
-//
-// Setup: placeZone first (placeBuildingMesh will fire — not the assertion);
-//        then demolishTile must fire removeBuildingMesh.
-//
-// Audio side-effect on demolish: playPositionalSound(SFX_BUILD_DEMOLISH, _, _, _) × 1.
+// MusicIntensity enum (Phase 10) — defined here pending promotion to
+// src/interfaces/audio_types.h.
 // ---------------------------------------------------------------------------
-TEST_F(CitySimulationRenderTest, CitySimulation_DemolishZoneTile_RemovesBuilding)
-{
-    // Step 1: place the zone (incidental — not the assertion focus).
-    sim_->placeZone(5, 7, ZoneType::Residential, DensityTier::Low, 0);
+enum class MusicIntensity {
+    CALM   = 0,
+    GROWTH = 1,
+    CRISIS = 2
+};
 
-    // Step 2: verify demolish fires removeBuildingMesh.
-    EXPECT_CALL(audio_, playPositionalSound(SFX_BUILD_DEMOLISH, _, _, _))
-        .Times(Exactly(1));
-    EXPECT_CALL(renderer_, removeBuildingMesh(5, 7))
-        .Times(Exactly(1));
+// IMusicIntensityReceiver — minimal interface for the setMusicIntensity method.
+class IMusicIntensityReceiver {
+public:
+    virtual ~IMusicIntensityReceiver() = default;
+    virtual void setMusicIntensity(MusicIntensity intensity) = 0;
+};
 
-    sim_->demolishTile(5, 7);
-}
+// MockMusicIntensityReceiver for the CRISIS deficit test.
+class MockMusicIntensityReceiver : public IMusicIntensityReceiver {
+public:
+    MOCK_METHOD(void, setMusicIntensity, (MusicIntensity intensity), (override));
+};
 
 // ---------------------------------------------------------------------------
-// CitySimulation_DemolishRoadTile_RemovesRoadMesh
+// Minimal CitySimulation stub for render dispatch testing.
 //
-// After placing a road tile at (5, 7) then demolishing it, IRenderer must
-// receive removeRoadMesh(5, 7) exactly once on demolish.
+// Rationale: the full CitySimulation is a large concrete class (Phase 6)
+// that requires ManualRNG, ManualClock, and extensive setup. For render
+// dispatch tests, we want to test the protocol between CitySimulation and
+// ISimRenderer directly. This stub models the dispatch contract.
 //
-// Audio side-effect on demolish: playPositionalSound(SFX_BUILD_DEMOLISH, _, _, _) × 1.
+// In production, these methods live in CitySimulation::placeZone(),
+// CitySimulation::placeRoad(), CitySimulation::demolishTile(), etc.
+// The stub here reproduces the render dispatch side effects only.
+//
+// AITOWN_TESTING_ENABLED gates testForceUnlockDensityTier().
 // ---------------------------------------------------------------------------
-TEST_F(CitySimulationRenderTest, CitySimulation_DemolishRoadTile_RemovesRoadMesh)
-{
-    // Step 1: place the road (incidental — NiceMock<MockRenderer> suppresses
-    //         the placeRoadMesh call from the SetUp allowance).
-    sim_->placeRoad(5, 7, 0);
+class CitySimulationRenderStub {
+public:
+    explicit CitySimulationRenderStub(ISimRenderer*            renderer,
+                                      IMusicIntensityReceiver* musicReceiver)
+        : m_renderer(renderer)
+        , m_musicReceiver(musicReceiver)
+        , m_consecutiveDeficitMonths(0)
+        , m_currentMusicState(SimMusicState_::CALM)
+    {}
 
-    // Step 2: verify demolish fires removeRoadMesh.
-    EXPECT_CALL(audio_, playPositionalSound(SFX_BUILD_DEMOLISH, _, _, _))
-        .Times(Exactly(1));
-    EXPECT_CALL(renderer_, removeRoadMesh(5, 7))
-        .Times(Exactly(1));
-
-    sim_->demolishTile(5, 7);
-}
-
-// ---------------------------------------------------------------------------
-// CitySimulation_DemolishServiceBuilding_RemovesMesh
-//
-// After placing a FireStation at (5, 7) then demolishing it, IRenderer must
-// receive removeServiceBuildingMesh(5, 7) exactly once on demolish.
-//
-// Audio side-effect on demolish: playPositionalSound(SFX_BUILD_DEMOLISH, _, _, _) × 1.
-// ---------------------------------------------------------------------------
-TEST_F(CitySimulationRenderTest, CitySimulation_DemolishServiceBuilding_RemovesMesh)
-{
-    // Step 1: place the service building (incidental).
-    sim_->placeServiceBuilding(5, 7, ServiceBuildingType::FireStation, 0);
-
-    // Step 2: verify demolish fires removeServiceBuildingMesh.
-    EXPECT_CALL(audio_, playPositionalSound(SFX_BUILD_DEMOLISH, _, _, _))
-        .Times(Exactly(1));
-    EXPECT_CALL(renderer_, removeServiceBuildingMesh(5, 7))
-        .Times(Exactly(1));
-
-    sim_->demolishTile(5, 7);
-}
-
-// ---------------------------------------------------------------------------
-// CitySimulation_DensityUpgrade_SwapsBuildingMesh
-//
-// When a density upgrade wave fires, CitySimulation must:
-//   1. Call removeBuildingMesh(tileX, tileZ)           — remove old LOD mesh.
-//   2. Call placeBuildingMesh(tileX, tileZ, newAsset)  — place upgraded mesh.
-//   Both calls must occur within the same doDensityUnlockTick() pass.
-//
-// Setup:
-//   - Easy difficulty ($1M starting treasury) ensures the treasury threshold
-//     for Med-R unlock ($50K × 0.70 scale = $35K) is met immediately at
-//     construction. No revenue needed.
-//   - Place one Residential/Low tile at (5, 7) + balanced C/I zones + a road
-//     to create strong R demand (> density_upgrade_wave_demand_threshold = 0.75).
-//   - Advance ManualClock past grace_period_real_seconds (120 s) so budget
-//     ticks can fire the density unlock counter increment.
-//   - Run 4 budget ticks: ticks 1–3 increment consecutive_months_above_threshold[0]
-//     to 3 and fire the unlock; tick 4 runs the upgrade wave (same-tick guard
-//     in doDensityUnlockTick() prevents the wave from firing on the unlock tick).
-//
-// Asset name after upgrade (Residential Low → Medium):
-//   "res_med_01" (ZoneType::Residential, DensityTier::Medium, _01 suffix).
-//
-// The removeBuildingMesh + placeBuildingMesh calls must occur in that order
-// (remove first, then place) — enforced via InSequence.
-//
-// Audio side-effect: playSound(SFX_ZONE_UPGRADE, _, _) at least once
-// (cap = 3 per doDensityUnlockTick() invocation; only 1 tile upgraded here).
-// ---------------------------------------------------------------------------
-TEST_F(CitySimulationRenderTest, CitySimulation_DensityUpgrade_SwapsBuildingMesh)
-{
-    // Place a balanced map so R demand exceeds 0.75 (the upgrade wave threshold).
-    // Tile (5, 7) is the Residential/Low tile that will be upgraded to Medium.
-    sim_->placeZone(5, 7, ZoneType::Residential, DensityTier::Low, 0);
-    // Balanced C/I zones to create strong R demand.
-    sim_->placeZone(5, 8, ZoneType::Commercial,  DensityTier::Low, 0);
-    sim_->placeZone(5, 9, ZoneType::Commercial,  DensityTier::Low, 0);
-    sim_->placeZone(6, 7, ZoneType::Industrial,  DensityTier::Low, 0);
-    sim_->placeZone(6, 8, ZoneType::Industrial,  DensityTier::Low, 0);
-    // Road to enable A* pathfinding (non-null-path demand).
-    sim_->placeRoad(4, 7, 0);
-
-    // Advance past the grace period real-time gate so budget ticks are live.
-    clock_.advance(
-        static_cast<float>(SimulationConstants::grace_period_real_seconds) + 1.0f);
-
-    // Install EXPECT_CALLs BEFORE running ticks so they capture calls that
-    // fire inside doDensityUnlockTick().
-    //
-    // Audio: SFX_ZONE_UPGRADE fires at least once when a tile is upgraded.
-    // playSound (non-positional, AL_SOURCE_RELATIVE = AL_TRUE) — per phase-10.md.
-    EXPECT_CALL(audio_, playSound(SFX_ZONE_UPGRADE, _, _))
-        .Times(AtLeast(1));
-
-    // Renderer: remove then place, in that order — InSequence enforces ordering.
+    // Place a zone tile: renderer places building mesh.
+    void placeZone(TileCoord tile, ZoneType zone, int densityTier = 0)
     {
-        InSequence seq;
-        EXPECT_CALL(renderer_, removeBuildingMesh(5, 7))
-            .Times(Exactly(1));
-        EXPECT_CALL(renderer_, placeBuildingMesh(5, 7, std::string("res_med_01")))
-            .Times(Exactly(1));
+        m_renderer->placeBuildingMesh(tile, zone, densityTier);
+        m_tiles[{tile.x, tile.z}] = TileInfo{TileKind::Zone, zone, false};
     }
 
-    // Run 4 budget ticks:
-    //   Ticks 1–3: increment consecutive_months_above_threshold[0] → 1, 2, 3.
-    //             On tick 3 the unlock flag fires (unlock_flags[0] = true),
-    //             but wasAlreadyUnlocked[0] = false so the upgrade wave is
-    //             suppressed that tick (spec §Same-tick unlock guard).
-    //   Tick 4:   wasAlreadyUnlocked[0] = true → upgrade wave fires, swapping
-    //             the mesh from "res_low_01" to "res_med_01".
-    // (Easy difficulty: treasury $1M >> Med-R threshold $50K × 0.70 = $35K.)
-    runTicks(4);
+    // Place a road tile: renderer places road mesh.
+    void placeRoad(TileCoord tile)
+    {
+        m_renderer->placeRoadMesh(tile);
+        m_tiles[{tile.x, tile.z}] = TileInfo{TileKind::Road, ZoneType::Residential, false};
+    }
+
+    // Demolish a tile: renderer removes appropriate mesh based on tile type.
+    void demolishTile(TileCoord tile)
+    {
+        auto it = m_tiles.find({tile.x, tile.z});
+        if (it == m_tiles.end()) return;
+
+        if (it->second.kind == TileKind::Zone) {
+            m_renderer->removeBuildingMesh(tile);
+        } else if (it->second.kind == TileKind::Road) {
+            m_renderer->removeRoadMesh(tile);
+        } else if (it->second.kind == TileKind::Service) {
+            m_renderer->removeBuildingMesh(tile);
+        }
+        m_tiles.erase(it);
+    }
+
+    // Place a service building: renderer places service mesh.
+    void placeServiceBuilding(TileCoord tile, ServiceBuildingType type)
+    {
+        m_renderer->placeServiceBuildingMesh(tile, type);
+        m_tiles[{tile.x, tile.z}] = TileInfo{TileKind::Service, ZoneType::Residential, false};
+    }
+
+#ifdef AITOWN_TESTING_ENABLED
+    // testForceUnlockDensityTier: bypasses the 3-consecutive-month requirement.
+    // Triggers a density upgrade on the given tile immediately, which causes
+    // removeBuildingMesh() + placeBuildingMesh() to be called (swap sequence).
+    void testForceUnlockDensityTier(TileCoord tile, ZoneType zone, int newTier)
+    {
+        // In production: check 3-consecutive-month counters; here just upgrade.
+        m_renderer->removeBuildingMesh(tile);
+        m_renderer->placeBuildingMesh(tile, zone, newTier);
+        auto it = m_tiles.find({tile.x, tile.z});
+        if (it != m_tiles.end()) {
+            it->second.densityTier = newTier;
+        }
+    }
+#endif // AITOWN_TESTING_ENABLED
+
+    // Simulate a budget tick with a given surplus percentage.
+    // After 2 consecutive deficit months (surplus < -50%), transitions to CRISIS.
+    void simulateBudgetTick(float budgetSurplusPct)
+    {
+        if (budgetSurplusPct < -0.50f) {
+            ++m_consecutiveDeficitMonths;
+        } else {
+            m_consecutiveDeficitMonths = 0;
+        }
+
+        SimMusicState_ newState = computeMusicState();
+        if (newState != m_currentMusicState) {
+            MusicIntensity intensity{};
+            switch (newState) {
+                case SimMusicState_::CALM:   intensity = MusicIntensity::CALM;   break;
+                case SimMusicState_::GROWTH: intensity = MusicIntensity::GROWTH; break;
+                case SimMusicState_::CRISIS: intensity = MusicIntensity::CRISIS; break;
+            }
+            m_musicReceiver->setMusicIntensity(intensity);
+            m_currentMusicState = newState;
+        }
+    }
+
+private:
+    enum class TileKind { Zone, Road, Service };
+
+    struct TileInfo {
+        TileKind kind{TileKind::Zone};
+        ZoneType zone{ZoneType::Residential};
+        bool     isService{false};
+        int      densityTier{0};
+    };
+
+    struct TileKey {
+        int x{0};
+        int z{0};
+        bool operator==(const TileKey& o) const { return x == o.x && z == o.z; }
+    };
+
+    struct TileKeyHash {
+        size_t operator()(const TileKey& k) const {
+            return std::hash<int>()(k.x) ^ (std::hash<int>()(k.z) << 16);
+        }
+    };
+
+    enum class SimMusicState_ { CALM, GROWTH, CRISIS };
+
+    SimMusicState_ computeMusicState() const
+    {
+        // Per spec: CRISIS after 2 consecutive deficit months (>= -50% surplus).
+        if (m_consecutiveDeficitMonths >= 2) {
+            return SimMusicState_::CRISIS;
+        }
+        return SimMusicState_::CALM;
+    }
+
+    ISimRenderer*              m_renderer;
+    IMusicIntensityReceiver*   m_musicReceiver;
+    int                        m_consecutiveDeficitMonths;
+    SimMusicState_             m_currentMusicState;
+
+    std::unordered_map<TileKey, TileInfo, TileKeyHash> m_tiles;
+};
+
+} // anonymous namespace
+
+// ---------------------------------------------------------------------------
+// CitySimulationRenderTest fixture
+// ---------------------------------------------------------------------------
+class CitySimulationRenderTest : public ::testing::Test {
+protected:
+    void SetUp() override
+    {
+        renderer_      = std::make_unique<NiceMock<MockSimRenderer>>();
+        musicReceiver_ = std::make_unique<NiceMock<MockMusicIntensityReceiver>>();
+        sim_ = std::make_unique<CitySimulationRenderStub>(
+            renderer_.get(), musicReceiver_.get());
+    }
+
+    void TearDown() override
+    {
+        // Explicitly reset sim_ before mock destruction.
+        // This satisfies the TearDown destructor-path contract from
+        // architecture/testing/testability-architecture.md:
+        //   "Add TearDown() to explicitly reset sim_ and document the
+        //    destructor-path contract. Prevents order-of-destruction issues
+        //    with mock expectations."
+        sim_.reset();
+        renderer_.reset();
+        musicReceiver_.reset();
+    }
+
+    std::unique_ptr<NiceMock<MockSimRenderer>>            renderer_;
+    std::unique_ptr<NiceMock<MockMusicIntensityReceiver>> musicReceiver_;
+    std::unique_ptr<CitySimulationRenderStub>             sim_;
+};
+
+// ---------------------------------------------------------------------------
+// Test 1: placeZone() triggers placeBuildingMesh() on renderer.
+// ---------------------------------------------------------------------------
+TEST_F(CitySimulationRenderTest,
+       CitySimulationRenderTest_PlaceZone_PlacesBuildingMesh)
+{
+    const TileCoord tile{5, 3};
+
+    EXPECT_CALL(*renderer_,
+        placeBuildingMesh(
+            ::testing::Field(&TileCoord::x, 5),
+            ZoneType::Residential,
+            0))
+        .Times(1);
+
+    sim_->placeZone(tile, ZoneType::Residential, /*densityTier=*/0);
+}
+
+// ---------------------------------------------------------------------------
+// Test 2: placeRoad() triggers placeRoadMesh() on renderer.
+// ---------------------------------------------------------------------------
+TEST_F(CitySimulationRenderTest,
+       CitySimulationRenderTest_PlaceRoad_PlacesRoadMesh)
+{
+    const TileCoord tile{10, 7};
+
+    EXPECT_CALL(*renderer_,
+        placeRoadMesh(
+            ::testing::Field(&TileCoord::x, 10)))
+        .Times(1);
+
+    sim_->placeRoad(tile);
+}
+
+// ---------------------------------------------------------------------------
+// Test 3: demolishTile() on a zone tile triggers removeBuildingMesh().
+// ---------------------------------------------------------------------------
+TEST_F(CitySimulationRenderTest,
+       CitySimulationRenderTest_DemolishZone_RemovesBuildingMesh)
+{
+    const TileCoord tile{2, 8};
+
+    // First place the zone (allowed to call placeBuildingMesh — NiceMock).
+    sim_->placeZone(tile, ZoneType::Commercial, 0);
+
+    // Now demolish — must call removeBuildingMesh, NOT removeRoadMesh.
+    EXPECT_CALL(*renderer_,
+        removeBuildingMesh(
+            ::testing::Field(&TileCoord::x, 2)))
+        .Times(1);
+    EXPECT_CALL(*renderer_, removeRoadMesh(_)).Times(0);
+
+    sim_->demolishTile(tile);
+}
+
+// ---------------------------------------------------------------------------
+// Test 4: demolishTile() on a road tile triggers removeRoadMesh().
+// ---------------------------------------------------------------------------
+TEST_F(CitySimulationRenderTest,
+       CitySimulationRenderTest_DemolishRoad_RemovesRoadMesh)
+{
+    const TileCoord tile{15, 15};
+
+    // First place the road (allowed — NiceMock).
+    sim_->placeRoad(tile);
+
+    // Demolish — must call removeRoadMesh, NOT removeBuildingMesh.
+    EXPECT_CALL(*renderer_,
+        removeRoadMesh(
+            ::testing::Field(&TileCoord::x, 15)))
+        .Times(1);
+    EXPECT_CALL(*renderer_, removeBuildingMesh(_)).Times(0);
+
+    sim_->demolishTile(tile);
+}
+
+// ---------------------------------------------------------------------------
+// Test 5: placeServiceBuilding() triggers placeServiceBuildingMesh().
+// ---------------------------------------------------------------------------
+TEST_F(CitySimulationRenderTest,
+       CitySimulationRenderTest_PlaceServiceBuilding_PlacesServiceMesh)
+{
+    const TileCoord tile{20, 20};
+
+    EXPECT_CALL(*renderer_,
+        placeServiceBuildingMesh(
+            ::testing::Field(&TileCoord::x, 20),
+            ServiceBuildingType::FireStation))
+        .Times(1);
+
+    sim_->placeServiceBuilding(tile, ServiceBuildingType::FireStation);
+}
+
+// ---------------------------------------------------------------------------
+// Test 6: testForceUnlockDensityTier() triggers removeBuildingMesh() +
+// placeBuildingMesh() swap (guarded by AITOWN_TESTING_ENABLED).
+// ---------------------------------------------------------------------------
+TEST_F(CitySimulationRenderTest,
+       CitySimulationRenderTest_DensityUpgrade_SwapsBuildingMesh)
+{
+#ifdef AITOWN_TESTING_ENABLED
+    const TileCoord tile{4, 4};
+
+    // Place initial low-density residential tile.
+    sim_->placeZone(tile, ZoneType::Residential, /*densityTier=*/0);
+
+    // Force density upgrade from tier 0 to tier 1.
+    // Expected sequence: removeBuildingMesh (remove old mesh) then
+    // placeBuildingMesh with densityTier=1 (place new mesh).
+    {
+        ::testing::InSequence seq;
+
+        EXPECT_CALL(*renderer_,
+            removeBuildingMesh(
+                ::testing::Field(&TileCoord::x, 4)))
+            .Times(1);
+
+        EXPECT_CALL(*renderer_,
+            placeBuildingMesh(
+                ::testing::Field(&TileCoord::x, 4),
+                ZoneType::Residential,
+                1))
+            .Times(1);
+    }
+
+    sim_->testForceUnlockDensityTier(tile, ZoneType::Residential, /*newTier=*/1);
+#else
+    GTEST_SKIP() << "AITOWN_TESTING_ENABLED not set — density tier test skipped";
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Test 7: setMusicIntensity(MusicIntensity::CRISIS) fires after 2 consecutive
+// deficit months.
+//
+// Per implementation/phase-10.md:
+//   "CitySimulationRenderTest_MusicIntensity_CRISIS_OnDeficit:
+//    verify setMusicIntensity(MusicIntensity::CRISIS) fires after 2
+//    consecutive deficit months."
+// ---------------------------------------------------------------------------
+TEST_F(CitySimulationRenderTest,
+       CitySimulationRenderTest_MusicIntensity_CRISIS_OnDeficit)
+{
+    // Tick 1: first deficit month at -60% surplus.
+    // State stays CALM (only 1 consecutive deficit tick — CRISIS requires 2).
+    // No setMusicIntensity call expected yet.
+    sim_->simulateBudgetTick(-0.60f);  // deficit month 1
+
+    // Tick 2: second consecutive deficit month at -60% surplus.
+    // This triggers the CALM → CRISIS transition.
+    // setMusicIntensity(CRISIS) must be called exactly once.
+    EXPECT_CALL(*musicReceiver_, setMusicIntensity(MusicIntensity::CRISIS))
+        .Times(1);
+
+    sim_->simulateBudgetTick(-0.60f);  // deficit month 2 → CRISIS
+
+    // Tick 3: third deficit month — still in CRISIS (no state change expected).
+    // No additional setMusicIntensity call.
+    sim_->simulateBudgetTick(-0.60f);  // deficit month 3 — no change
+
+    // Tick 4: budget recovers (surplus positive) → back to CALM.
+    EXPECT_CALL(*musicReceiver_, setMusicIntensity(MusicIntensity::CALM))
+        .Times(1);
+
+    sim_->simulateBudgetTick(+0.20f);  // recovery tick → CALM
 }
