@@ -4,7 +4,9 @@ AI Town asset validation script.
 Phase 9:  checks #1–#20 all implemented (check #15 and check #20 fully implemented in Phase 9).
 Phase 10: check #21 added — zone loop silence-floor gate (leading/trailing 4410 samples ≤ −60 dBFS).
           check #22 added — non-stinger WAV SFX must be mono, 44100 Hz, 16-bit PCM.
-          check #23 added — hud_sprites_ui.png must exist at assets/textures/ui/, be 2048×2048, and RGBA.
+          check #23 added — hud_sprites_ui.png must exist at assets/textures/ui/, be 2048×2048, and RGBA;
+          check #23 also verifies hud_sprites_ui.dds is NOT present on disk (DDS intermediate must never
+          be committed; .gitignore entry + git rm --cached enforce this at the repo level).
 """
 import glob
 import json
@@ -1293,7 +1295,21 @@ def check_22():
 # 2d-texture-standards.md Runtime Asset Path section.
 # ---------------------------------------------------------------------------
 def check_23():
-    """check_23: hud_sprites_ui.png must exist at assets/textures/ui/, be 2048×2048, and RGBA."""
+    """check_23: hud_sprites_ui.png must exist at assets/textures/ui/, be 2048×2048, and RGBA.
+    Also verifies that hud_sprites_ui.dds (the DDS intermediate) is NOT present on disk —
+    the DDS is an authoring artifact and must never be committed to the repository.
+    """
+    # DDS absence check runs unconditionally (no Pillow required).
+    # The .gitignore entry prevents accidental git-add, but if someone bypasses it with
+    # 'git add --force', the CI clone will have the file on disk and this check will catch it.
+    dds_path = "assets/textures/ui/hud_sprites_ui.dds"
+    if os.path.exists(dds_path):
+        raise AssertionError(
+            f"check_23 FAIL: {dds_path} found on disk — the DDS intermediate must never be "
+            f"committed to the repository (phase-10.md §UI Assets — Sprite Sheet pre-authoring actions). "
+            f"Run 'git rm --cached {dds_path}' and add {dds_path} to .gitignore."
+        )
+
     try:
         from PIL import Image
     except ImportError:

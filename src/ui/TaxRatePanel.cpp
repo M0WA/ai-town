@@ -45,8 +45,10 @@ TaxRatePanel::TaxRatePanel(IUIBackend* backend, ICitySimulation* sim)
 TaxRatePanel::ZoneRow TaxRatePanel::createRow(const char* label, int y) {
     ZoneRow row;
     row.label   = m_backend->addStaticText(label,  kPanelX + 8,   y, 100, 36);
+    // label is a zone name — proportional font, do NOT call setElementMonoFont
     row.btnDec  = m_backend->addButton("-",        kPanelX + 116, y, 32,  36);
     row.readout = m_backend->addStaticText("10%",  kPanelX + 152, y, 48,  36);
+    m_backend->setElementMonoFont(row.readout);  // numeric percentage readout — monospace required (phase-10)
     row.btnInc  = m_backend->addButton("+",        kPanelX + 204, y, 32,  36);
     return row;
 }

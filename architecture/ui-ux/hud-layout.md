@@ -270,9 +270,13 @@ zone coding; reuse `kOverlayArgbResidential`, `kOverlayArgbCommercial`, and
 ## Phase 10 Audio Wiring for UI Events
 
 All UI SFX calls below use `m_audio->playSound(soundId, SoundPriority::NORMAL, 1.0f)`.
-`m_audio` is the `IAudioSystem*` stored in `HUD` (see HUD Class Structure — Constructor
-Signature). Every call is guarded by `if (m_audio)`. All UI SFX are non-positional
-(`AL_SOURCE_RELATIVE = AL_TRUE`) with EFX bypass (`AL_DIRECT_FILTER = AL_FILTER_NULL`).
+`m_audio` is the `IAudioSystem*` stored as a private member on `UIManager` (see
+`architecture/ui-ux/ui-manager.md` Class Structure private members). The `HUD` class also
+holds its own `IAudioSystem* m_audio` (see HUD Class Structure — Constructor Signature) but
+the call sites in this section (`onEvent()`, `updateSubPanelVisibility()`) are `UIManager`
+methods and therefore use `UIManager::m_audio`, not `HUD::m_audio`. Every call is guarded by
+`if (m_audio)`. All UI SFX are non-positional (`AL_SOURCE_RELATIVE = AL_TRUE`) with EFX
+bypass (`AL_DIRECT_FILTER = AL_FILTER_NULL`).
 
 ### `ui_click` — Toolbar button pressed
 

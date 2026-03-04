@@ -57,6 +57,8 @@ public:
 };
 ```
 
+`MockUIBackend` **source location**: `tests/ui/mock_ui_backend.h`. The file contains 19 `MOCK_METHOD` entries — one per `IUIBackend` virtual method — as of Phase 10 (method 19 `setElementMonoFont` added in Phase 10). **Rule**: whenever a new virtual method is added to `IUIBackend`, a matching `MOCK_METHOD` entry MUST be added to `tests/ui/mock_ui_backend.h` in the same commit. The spec description above (inline `IUIBackend` class block) and `tests/ui/mock_ui_backend.h` must always have the same method count. `ui-manager.md` §IUIBackend Method Contract is the production-facing authority; this file is the test-facing authority; both must remain consistent.
+
 `MockUIBackend` returns arbitrary non-zero integer handles (e.g., an incrementing counter) with no real objects — unit tests that call UIManager methods never dereference Irrlicht pointers, making `src/ui/` genuinely headless-testable and the 95% coverage gate achievable.
 
 - **`UIScaler` testability**: `UIScaler` must accept viewport dimensions at construction (`UIScaler(int virtualW, int virtualH, int viewportW, int viewportH, int offsetX, int offsetY)`) rather than reading from a live `IVideoDriver`. Tests construct `UIScaler(1920, 1080, 1280, 720, 0, 90)` directly to validate coordinate projection and letterbox offset math without a display. The `unproject` method returns `UIScaler::VirtualPoint` — a nested struct, NOT at namespace scope, to avoid ODR violations. The five named unit tests that must be authored in `tests/ui/ui_scaler_test.cpp` are:
@@ -1687,3 +1689,363 @@ with `Times(AtLeast(1))` to prevent the `NiceMock` leniency from masking missing
 
 CTest filter for all Phase 9b world-interaction tests:
 `-R "WorldInteractionTest|CitySimulation_PlaceRoad_FiresSFXRoadBuild"`
+
+## Phase 10 Simulation Test Table
+
+### `CitySimulationRenderTest` Fixture
+
+**Source file**: `tests/simulation/city_simulation_render_test.cpp`
+
+**CMake wiring**: `target_sources(simulation_tests PRIVATE tests/simulation/city_simulation_render_test.cpp)`.
+Do NOT call `add_executable(simulation_tests ...)` or `aitown_add_tests(simulation_tests ...)` again — that
+creates a duplicate target. Add `target_sources` only.
+
+**Fixture setup**: Uses `NiceMock<MockRenderer>` (not `StrictMock`) so each test can focus on verifying
+the specific mesh-placement call without requiring exhaustive `EXPECT_CALL`s for every audio side-effect
+on the same code path. The fixture also injects `NiceMock<MockAudioSystem>` (not `StrictMock`) because
+`placeZone()`, `placeRoad()`, `placeServiceBuilding()`, and `doDensityUnlockTick()` each fire audio calls
+alongside rendering calls — `StrictMock<MockAudioSystem>` would require full audio call stubs in every
+rendering test, coupling the rendering and audio assertions unnecessarily.
+
+```cpp
+class CitySimulationRenderTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        rng_   = std::make_unique<ManualRNG>(
+                     std::initializer_list<int>{0},
+                     std::initializer_list<float>{0.9f});  // 0.9 > 0.5 => no RNG-triggered degrade
+        clock_ = std::make_unique<ManualClock>();
+        clock_->advance(121.0);  // past 120 s forced-loan gate
+        ON_CALL(renderer_, getListenerPosition())
+            .WillByDefault(::testing::Return(vec3{0.0f, 0.0f, 0.0f}));
+        sim_ = std::make_unique<CitySimulation>(
+                   &renderer_, &audio_, rng_.get(), clock_.get(), GameMode::Sandbox);
+    }
+    void TearDown() override { sim_.reset(); }
+
+    ::testing::NiceMock<MockRenderer>     renderer_;
+    ::testing::NiceMock<MockAudioSystem>  audio_;
+    std::unique_ptr<ManualRNG>            rng_;
+    std::unique_ptr<ManualClock>          clock_;
+    std::unique_ptr<CitySimulation>       sim_;
+};
+```
+
+**Label**: `unit`. CTest filter: `-R CitySimulationRenderTest`.
+
+**Note on treasury**: `CitySimulation` is constructed with Normal-difficulty default starting funds
+($500,000). Individual tile placements are well within that budget. Tests do not need to seed funds
+unless they exercise edge cases that require a near-empty treasury.
+
+| Test Case | What is verified |
+|---|---|
+| `CitySimulation_PlaceZone_SpawnsBuilding` | `placeZone()` calls `placeBuildingMesh()` with correct tile coords and Phase 10 asset name |
+| `CitySimulation_PlaceRoad_SpawnsRoadMesh` | `placeRoad()` calls `placeRoadMesh()` with correct tile coords |
+| `CitySimulation_PlaceServiceBuilding_SpawnsMesh` | `placeServiceBuilding()` calls `placeServiceBuildingMesh()` with correct coords and type |
+| `CitySimulation_DemolishZoneTile_RemovesBuilding` | `demolishTile()` on a zone tile calls `removeBuildingMesh()` |
+| `CitySimulation_DemolishRoadTile_RemovesRoadMesh` | `demolishTile()` on a road tile calls `removeRoadMesh()` and NOT `removeBuildingMesh()` |
+| `CitySimulation_DemolishServiceBuilding_RemovesMesh` | `demolishTile()` on a service tile calls `removeServiceBuildingMesh()` and not building or road removal |
+| `CitySimulation_DensityUpgrade_SwapsBuildingMesh` | `doDensityUnlockTick()` calls `removeBuildingMesh()` then `placeBuildingMesh()` (upgraded name) in that order |
+
+#### `CitySimulation_PlaceZone_SpawnsBuilding`
+
+**Phase 10 asset name rules** (variant policy — always `_01` suffix in Phase 10, no round-robin):
+
+- `RESIDENTIAL` + `LOW` → `"res_low_01"`
+- `RESIDENTIAL` + `MEDIUM` → `"res_med_01"`
+- `RESIDENTIAL` + `HIGH` → `"res_high_01"`
+- `COMMERCIAL`  + `LOW` → `"com_low_01"`
+- `COMMERCIAL`  + `MEDIUM` → `"com_med_01"`
+- `COMMERCIAL`  + `HIGH` → `"com_high_01"`
+- `INDUSTRIAL`  + `LOW` → `"ind_low_01"`
+- `INDUSTRIAL`  + `MEDIUM` → `"ind_med_01"`
+- `INDUSTRIAL`  + `HIGH` → `"ind_high_01"`
+
+```cpp
+TEST_F(CitySimulationRenderTest, CitySimulation_PlaceZone_SpawnsBuilding) {
+    EXPECT_CALL(renderer_, placeBuildingMesh(3, 5, std::string{"res_low_01"})).Times(1);
+    sim_->placeZone(3, 5, ZoneType::RESIDENTIAL, DensityTier::LOW, /*earthworks=*/0);
+}
+```
+
+`placeBuildingMesh()` must be called AFTER treasury deduction and tile-type assignment succeed. If the
+placement fails (tile already occupied, insufficient funds), `placeBuildingMesh()` must NOT be called.
+The `Times(1)` assertion enforces this — zero or two calls both fail the test.
+
+#### `CitySimulation_PlaceRoad_SpawnsRoadMesh`
+
+```cpp
+TEST_F(CitySimulationRenderTest, CitySimulation_PlaceRoad_SpawnsRoadMesh) {
+    EXPECT_CALL(renderer_, placeRoadMesh(2, 4)).Times(1);
+    sim_->placeRoad(2, 4, /*earthworks=*/0);
+}
+```
+
+`placeRoadMesh()` is called unconditionally on successful road placement regardless of earthworks cost.
+
+#### `CitySimulation_PlaceServiceBuilding_SpawnsMesh`
+
+```cpp
+TEST_F(CitySimulationRenderTest, CitySimulation_PlaceServiceBuilding_SpawnsMesh) {
+    EXPECT_CALL(renderer_,
+        placeServiceBuildingMesh(1, 7, ServiceBuildingType::FireStation)).Times(1);
+    sim_->placeServiceBuilding(1, 7, ServiceBuildingType::FireStation, /*earthworks=*/0);
+}
+```
+
+The `ServiceBuildingType` enum value is the contract between `CitySimulation` and the mock. The internal
+asset path mapping (`svc_fire_station_lod0.b3d` etc.) is internal to `IrrlichtRenderer` and is not
+part of this test contract.
+
+#### `CitySimulation_DemolishZoneTile_RemovesBuilding`
+
+```cpp
+TEST_F(CitySimulationRenderTest, CitySimulation_DemolishZoneTile_RemovesBuilding) {
+    // Phase: place the tile first
+    EXPECT_CALL(renderer_, placeBuildingMesh(3, 5, std::string{"res_low_01"})).Times(1);
+    sim_->placeZone(3, 5, ZoneType::RESIDENTIAL, DensityTier::LOW, /*earthworks=*/0);
+
+    // Phase: demolish it
+    EXPECT_CALL(renderer_, removeBuildingMesh(3, 5)).Times(1);
+    sim_->demolishTile(3, 5);
+}
+```
+
+#### `CitySimulation_DemolishRoadTile_RemovesRoadMesh`
+
+```cpp
+TEST_F(CitySimulationRenderTest, CitySimulation_DemolishRoadTile_RemovesRoadMesh) {
+    EXPECT_CALL(renderer_, placeRoadMesh(6, 2)).Times(1);
+    sim_->placeRoad(6, 2, /*earthworks=*/0);
+
+    EXPECT_CALL(renderer_, removeRoadMesh(6, 2)).Times(1);
+    // NiceMock allows any call not listed here, but Times(0) assertions enforce absence:
+    EXPECT_CALL(renderer_, removeBuildingMesh(::testing::_, ::testing::_)).Times(0);
+    sim_->demolishTile(6, 2);
+}
+```
+
+The `Times(0)` on `removeBuildingMesh` distinguishes road demolition from zone demolition even under
+`NiceMock`. `NiceMock` suppresses unexpected calls silently but still enforces `Times(0)` when declared.
+
+#### `CitySimulation_DemolishServiceBuilding_RemovesMesh`
+
+```cpp
+TEST_F(CitySimulationRenderTest, CitySimulation_DemolishServiceBuilding_RemovesMesh) {
+    EXPECT_CALL(renderer_,
+        placeServiceBuildingMesh(4, 9, ServiceBuildingType::WaterTower)).Times(1);
+    sim_->placeServiceBuilding(4, 9, ServiceBuildingType::WaterTower, /*earthworks=*/0);
+
+    EXPECT_CALL(renderer_, removeServiceBuildingMesh(4, 9)).Times(1);
+    EXPECT_CALL(renderer_, removeBuildingMesh(::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(renderer_, removeRoadMesh(::testing::_, ::testing::_)).Times(0);
+    sim_->demolishTile(4, 9);
+}
+```
+
+#### `CitySimulation_DensityUpgrade_SwapsBuildingMesh`
+
+Verifies that `doDensityUnlockTick()` calls `removeBuildingMesh()` followed immediately by
+`placeBuildingMesh()` with the upgraded asset name. The remove MUST precede the place within the same
+tile upgrade iteration — enforced via `::testing::InSequence`.
+
+```cpp
+TEST_F(CitySimulationRenderTest, CitySimulation_DensityUpgrade_SwapsBuildingMesh) {
+    // Place a LOW density zone:
+    EXPECT_CALL(renderer_, placeBuildingMesh(0, 0, std::string{"res_low_01"})).Times(1);
+    sim_->placeZone(0, 0, ZoneType::RESIDENTIAL, DensityTier::LOW, /*earthworks=*/0);
+
+    // Verify remove-then-place in order:
+    {
+        ::testing::InSequence seq;
+        EXPECT_CALL(renderer_, removeBuildingMesh(0, 0)).Times(1);
+        EXPECT_CALL(renderer_, placeBuildingMesh(0, 0, std::string{"res_med_01"})).Times(1);
+    }
+    // Trigger the density upgrade. The test must arrange the simulation state so the tile
+    // at (0,0) is eligible for a MEDIUM upgrade. The exact mechanism to force the unlock
+    // (bypassing the 3-consecutive-month revenue gate) must be exposed via a test-friend
+    // method or equivalent. See Implementation Note below.
+    sim_->doDensityUnlockTick();
+}
+```
+
+**Implementation note on `doDensityUnlockTick()` testability**: `doDensityUnlockTick()` only upgrades
+tiles whose zone type has had its next tier unlocked internally. Reaching that state via the production
+path requires 3 consecutive budget ticks above the revenue threshold. To keep this test a pure unit
+test (no multi-tick simulation), `CitySimulation` must expose a way to force the unlock state for
+testing. The recommended approach: add `#ifdef AITOWN_TESTING_ENABLED` test-friend methods such as
+`void CitySimulation::testForceUnlockDensityTier(ZoneType, DensityTier)`. This method sets the
+internal unlock flag for the specified tier directly, bypassing the revenue-streak counter. It must NOT
+be compiled into production builds. If `AITOWN_TESTING_ENABLED` is not yet defined in `CMakeLists.txt`,
+add it as a compile definition to the `simulation_tests` target only.
+
+### `AdaptiveMusicIntensityTest` Fixture
+
+**Source file**: `tests/simulation/adaptive_music_intensity_test.cpp` (new file)
+
+**CMake wiring**: `target_sources(simulation_tests PRIVATE tests/simulation/adaptive_music_intensity_test.cpp)`.
+Do NOT call `add_executable` or `aitown_add_tests` again.
+
+**Test target**: `simulation_tests` (NOT `audio_tests`). This test exercises `CitySimulation::update()`
+with a mock audio system, matching the pattern of `tests/simulation/economy_test.cpp`.
+
+**What is verified**: `CitySimulation::update()` calls `IAudioSystem::setMusicIntensity()` with the
+correct `MusicIntensity` tier when treasury/growth/deficit state changes, per the thresholds in
+`architecture/game-design/economy-model.md` Music Intensity Tiers section.
+
+**Priority rules** (must match `economy-model.md` exactly):
+
+1. CRISIS (`consecutive_deficit_months >= 2`) — highest priority, overrides GROWTH and CALM.
+2. GROWTH (net population change positive this tick) — second, overrides CALM.
+3. CALM (`budget_surplus_pct >= 0%`, no net growth, no CRISIS) — default.
+
+**`setMusicIntensity()` call frequency**: `CitySimulation::update()` calls `setMusicIntensity()`
+unconditionally every `update()` cycle. The no-op-when-unchanged guard lives in
+`AudioSystem::setMusicIntensity()`, NOT in `CitySimulation`. Tests should therefore expect
+`setMusicIntensity()` to be called on every `update()` call, not just on state transitions.
+
+**Fixture setup**:
+
+```cpp
+class AdaptiveMusicIntensityTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        rng_   = std::make_unique<ManualRNG>(
+                     std::initializer_list<int>{0},
+                     std::initializer_list<float>{0.9f});
+        clock_ = std::make_unique<ManualClock>();
+        clock_->advance(121.0);  // past 120 s forced-loan and grace-period gate
+        // NiceMock for renderer: update() may call getListenerPosition()
+        ON_CALL(renderer_, getListenerPosition())
+            .WillByDefault(::testing::Return(vec3{0.0f, 0.0f, 0.0f}));
+        sim_ = std::make_unique<CitySimulation>(
+                   &renderer_, &audio_, rng_.get(), clock_.get(), GameMode::Sandbox);
+    }
+    void TearDown() override { sim_.reset(); }
+
+    ::testing::NiceMock<MockRenderer>     renderer_;
+    ::testing::NiceMock<MockAudioSystem>  audio_;  // NiceMock: incidental audio calls ignored
+    std::unique_ptr<ManualRNG>            rng_;
+    std::unique_ptr<ManualClock>          clock_;
+    std::unique_ptr<CitySimulation>       sim_;
+};
+```
+
+**Mock policy rationale**: `NiceMock<MockAudioSystem>` (not `StrictMock`) is used because
+`CitySimulation::update()` and the `tick()` calls needed to set up deficit state will also fire
+`playSound()` and `playPositionalSound()` calls for loan issuance, service degradation, etc. Using
+`StrictMock` would require exhaustive audio call stubs for all of these incidental calls, obscuring
+the intent of the test (verifying `setMusicIntensity()`). Explicit `EXPECT_CALL` on
+`setMusicIntensity()` with `Times(AtLeast(1))` compensates — `NiceMock` leniency cannot mask a
+missing `setMusicIntensity()` call when an explicit expectation is declared.
+
+**Required test cases**:
+
+#### `AdaptiveMusicIntensity_Default_IsCalm`
+
+No zones placed, no deficit, no population growth. `setMusicIntensity(CALM)` must be called on the
+first `update()`.
+
+```cpp
+TEST_F(AdaptiveMusicIntensityTest, AdaptiveMusicIntensity_Default_IsCalm) {
+    EXPECT_CALL(audio_, setMusicIntensity(MusicIntensity::CALM)).Times(::testing::AtLeast(1));
+    sim_->update(/*dt=*/0.016f);
+}
+```
+
+#### `AdaptiveMusicIntensity_Crisis_OverridesCalm`
+
+With `consecutive_deficit_months >= 2`, `setMusicIntensity(CRISIS)` is called. Arrange via two
+consecutive budget ticks with negative surplus (place service buildings to incur upkeep costs without
+any revenue zones).
+
+```cpp
+TEST_F(AdaptiveMusicIntensityTest, AdaptiveMusicIntensity_Crisis_OverridesCalm) {
+    // Allow CALM calls during pre-crisis setup ticks:
+    EXPECT_CALL(audio_, setMusicIntensity(MusicIntensity::CALM)).Times(::testing::AnyNumber());
+    // Allow any other audio calls (loan issuance, service degrade, etc.):
+    // (NiceMock handles these silently)
+
+    // Advance into a 2-month deficit streak via tick() calls.
+    // One approach: place high-upkeep service buildings with no revenue zones,
+    // advance ManualClock past the grace period (already done in SetUp), and call
+    // sim_->tick() twice to accumulate 2 consecutive deficit months.
+    // After 2 tick()s with deficit, consecutive_deficit_months == 2.
+
+    // Verify CRISIS fires after the streak is established:
+    EXPECT_CALL(audio_, setMusicIntensity(MusicIntensity::CRISIS)).Times(::testing::AtLeast(1));
+    sim_->update(/*dt=*/0.016f);
+}
+```
+
+#### `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem`
+
+This is the **canonical named test** required by `implementation/phase-10.md`. It verifies all three
+intensity tiers across state transitions in a single multi-step test.
+
+**Test sequence**:
+
+1. Start with no deficit, no growth → `setMusicIntensity(CALM)` expected.
+2. Arrange positive population delta (tick with demand conditions that cause growth) →
+   `setMusicIntensity(GROWTH)` expected on `update()`.
+3. Arrange `consecutive_deficit_months >= 2` → `setMusicIntensity(CRISIS)` expected on `update()`.
+4. Return to surplus (demolish upkeep sources or advance past deficit) with no growth →
+   `setMusicIntensity(CALM)` expected on `update()`.
+
+```cpp
+TEST_F(AdaptiveMusicIntensityTest, AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem) {
+    // Step 1: CALM baseline
+    EXPECT_CALL(audio_, setMusicIntensity(MusicIntensity::CALM)).Times(::testing::AtLeast(1));
+    sim_->update(0.016f);
+    ::testing::Mock::VerifyAndClearExpectations(&audio_);
+
+    // Step 2: GROWTH — arrange via tick() that causes net population increase
+    // (implementation-specific: requires zone placement and demand conditions)
+    // ...arrange growth state here...
+    EXPECT_CALL(audio_, setMusicIntensity(MusicIntensity::GROWTH)).Times(::testing::AtLeast(1));
+    sim_->update(0.016f);
+    ::testing::Mock::VerifyAndClearExpectations(&audio_);
+
+    // Step 3: CRISIS — arrange via 2 deficit-streak ticks
+    // ...arrange deficit streak state here...
+    EXPECT_CALL(audio_, setMusicIntensity(MusicIntensity::CRISIS)).Times(::testing::AtLeast(1));
+    sim_->update(0.016f);
+    ::testing::Mock::VerifyAndClearExpectations(&audio_);
+
+    // Step 4: CALM recovery
+    // ...arrange recovery state here...
+    EXPECT_CALL(audio_, setMusicIntensity(MusicIntensity::CALM)).Times(::testing::AtLeast(1));
+    sim_->update(0.016f);
+}
+```
+
+**Implementation note**: The "arrange" steps above require the implementer to drive `CitySimulation`
+into the desired economic and population states. For step 2 (GROWTH), the minimal path is: place
+Residential + Commercial zones; call `sim_->tick()` once with demand conditions favourable for growth;
+verify that `sim_->getPopulation()` has increased. For step 3 (CRISIS), place high-upkeep service
+buildings, call `sim_->tick()` twice with no revenue (no zones or zero tax rate), verify
+`sim_->getConsecutiveDeficitMonths() >= 2`. Step 4 recovery: demolish upkeep sources and call
+`sim_->tick()` once to clear the deficit streak. Exact state manipulation is left to the implementer
+because the `CitySimulation` API for querying internal state (population previous tick, exact deficit
+counter) may vary. The test must document any `CitySimulation` state-query methods it calls that are
+not on the `ICitySimulation` interface, and those methods must be present on the concrete class.
+
+**CTest filter**: `-R AdaptiveMusicIntensityTest`
+
+### Phase 10 Canonical Test Name Summary
+
+| Test Suite | Test Case | Source File | CMake Target | Label |
+|---|---|---|---|---|
+| `CitySimulationRenderTest` | `CitySimulation_PlaceZone_SpawnsBuilding` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `CitySimulationRenderTest` | `CitySimulation_PlaceRoad_SpawnsRoadMesh` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `CitySimulationRenderTest` | `CitySimulation_PlaceServiceBuilding_SpawnsMesh` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `CitySimulationRenderTest` | `CitySimulation_DemolishZoneTile_RemovesBuilding` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `CitySimulationRenderTest` | `CitySimulation_DemolishRoadTile_RemovesRoadMesh` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `CitySimulationRenderTest` | `CitySimulation_DemolishServiceBuilding_RemovesMesh` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `CitySimulationRenderTest` | `CitySimulation_DensityUpgrade_SwapsBuildingMesh` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `AdaptiveMusicIntensityTest` | `AdaptiveMusicIntensity_Default_IsCalm` | `tests/simulation/adaptive_music_intensity_test.cpp` | `simulation_tests` | `unit` |
+| `AdaptiveMusicIntensityTest` | `AdaptiveMusicIntensity_Crisis_OverridesCalm` | `tests/simulation/adaptive_music_intensity_test.cpp` | `simulation_tests` | `unit` |
+| `AdaptiveMusicIntensityTest` | `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` | `tests/simulation/adaptive_music_intensity_test.cpp` | `simulation_tests` | `unit` |
+
+CTest filter for all Phase 10 simulation render and music intensity tests:
+`-R "CitySimulationRenderTest|AdaptiveMusicIntensityTest"`

@@ -7,7 +7,10 @@
 //   - NiceMock<MockRenderer>:      focuses assertions on specific mesh-placement
 //     calls; suppresses incidental renderer calls (getListenerPosition, etc.)
 //     without requiring exhaustive EXPECT_CALLs for every audio side-effect.
-//   - StrictMock<MockAudioSystem>: verifies audio side-effects precisely.
+//   - NiceMock<MockAudioSystem>:   every placement operation fires positional or
+//     non-positional audio calls alongside mesh-placement calls; NiceMock suppresses
+//     incidental audio calls so tests focus on the renderer assertion under test.
+//     Approved mock policy deviation per testability-architecture.md §CitySimulationRenderTest.
 //   - ManualRNG (non-strict, wrap 0.9f): service degradation calls safe.
 //   - ManualClock (starts at 0.0 s): deterministic timing.
 //   - ManualTerrainQuery (flat 0° slope): no earthworks SFX triggered
@@ -15,12 +18,17 @@
 //   - sim_ declared LAST — destroyed first (reverse declaration order).
 //   - TearDown(): resets sim_ before mock destructors run (destructor-path contract).
 //
-// Why NiceMock<MockRenderer> and not StrictMock:
-//   These tests verify renderer mesh-placement calls. Using StrictMock would
-//   require exhaustive EXPECT_CALLs for every incidental renderer call made
-//   during the same operation (getListenerPosition in doTrafficSignalTick,
-//   etc.). NiceMock suppresses those without sacrificing assertion integrity
-//   on the specific placement methods under test.
+// Why NiceMock for both MockRenderer and MockAudioSystem (not StrictMock):
+//   These tests verify renderer mesh-placement calls. Using StrictMock for
+//   MockRenderer would require exhaustive EXPECT_CALLs for every incidental
+//   renderer call made during the same operation (getListenerPosition in
+//   doTrafficSignalTick, etc.). NiceMock suppresses those without sacrificing
+//   assertion integrity on the specific placement methods under test.
+//   Similarly, StrictMock<MockAudioSystem> would require declaring EXPECT_CALLs
+//   for every audio side-effect (playPositionalSound, playSound, setMusicIntensity,
+//   setTimeOfDay) that fire on the same code path as the mesh-placement assertion.
+//   NiceMock<MockAudioSystem> suppresses those incidental audio calls.
+//   (ref: architecture/testing/testability-architecture.md §CitySimulationRenderTest)
 //
 // Test coordinates: (5, 7) for single-tile operations; (5, 8) for
 // second-tile operations in multi-step tests (density upgrade swap).
@@ -61,13 +69,20 @@ using ::testing::InSequence;
 // ---------------------------------------------------------------------------
 // CitySimulationRenderTest — fixture for Phase 10 mesh-placement unit tests.
 //
-// NiceMock<MockRenderer>:      renderer interactions are incidental to the
+// NiceMock<MockRenderer>:    renderer interactions are incidental to the
 //   specific mesh-placement assertion in each test; NiceMock suppresses
 //   unexpected calls (getListenerPosition, etc.) so tests focus only on the
 //   method under verification.
 //
-// StrictMock<MockAudioSystem>: ensures only the expected audio calls fire
-//   and no extra calls are silently swallowed.
+// NiceMock<MockAudioSystem>: every placement operation (placeZone, placeRoad,
+//   placeServiceBuilding, demolishTile, doDensityUnlockTick) fires positional
+//   or non-positional audio calls alongside the mesh-placement calls being tested.
+//   NiceMock suppresses those incidental audio calls without requiring exhaustive
+//   EXPECT_CALLs for every audio side-effect in a test whose assertion target is
+//   the renderer method under test.
+//   Approved mock policy deviation per:
+//     architecture/testing/testability-architecture.md §CitySimulationRenderTest
+//     implementation/phase-10.md §Rendering method unit tests in simulation_tests
 //
 // ManualRNG (non-strict, float=0.9f): 0.9f > service_degradation_probability
 //   (0.5f), so service buildings do NOT degrade during multi-tick runs.
@@ -78,7 +93,7 @@ using ::testing::InSequence;
 class CitySimulationRenderTest : public ::testing::Test {
 protected:
     NiceMock<MockRenderer>      renderer_;
-    StrictMock<MockAudioSystem> audio_;
+    NiceMock<MockAudioSystem>   audio_;
     ManualRNG          rng_;      // non-strict, float={0.9f}
     ManualClock        clock_;    // starts at 0.0 s
     ManualTerrainQuery terrain_;  // flat (0° slope) — no earthworks SFX
@@ -93,16 +108,19 @@ protected:
             &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Easy);
         sim_->setSpeed(SpeedMultiplier::x1);
 
-        // Allow audio calls that fire from placement / tick paths so StrictMock
-        // does not fail on calls unrelated to the renderer assertion.
+        // NiceMock<MockAudioSystem> suppresses unexpected audio calls automatically.
+        // The EXPECT_CALL stubs below are retained as documentation of which audio
+        // calls fire on placement/tick paths, and to allow individual tests to
+        // install EXPECT_CALL overrides (e.g. Times(Exactly(1))) that tighten the
+        // constraint for the specific call under test in that test case.
         // setMusicIntensity fires every budget tick (Phase 10 wiring).
         EXPECT_CALL(audio_, setMusicIntensity(_)).Times(AnyNumber());
         // setTimeOfDay fires when the in-game clock crosses DAY/DUSK/NIGHT/DAWN.
         EXPECT_CALL(audio_, setTimeOfDay(_)).Times(AnyNumber());
         // playPositionalSound fires for SFX_BUILD_PLACE, SFX_ROAD_BUILD,
         // SFX_BUILD_DEMOLISH (Phase 10 audio wiring in CitySimulation).
-        // Tests that care about these calls install a specific EXPECT_CALL
-        // after SetUp() to override the AnyNumber allowance.
+        // Individual tests install a specific EXPECT_CALL after SetUp() to
+        // tighten the count for the particular SFX under test.
         EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
         // playSound fires for SFX_ZONE_UPGRADE during density upgrade waves.
         EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());

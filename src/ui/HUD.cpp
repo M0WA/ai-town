@@ -61,10 +61,14 @@ HUD::HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock*
 
     // --- Resource / budget bar (top, y:0-56) ---
     m_treasuryLabel   = m_backend->addStaticText("$0", 8, 8, 200, 48);
+    m_backend->setElementMonoFont(m_treasuryLabel);   // numeric: monospace required (phase-10)
     m_debtLabel       = m_backend->addStaticText("", 216, 8, 200, 48);
+    m_backend->setElementMonoFont(m_debtLabel);       // numeric: monospace required (phase-10)
     m_ratingLabel     = m_backend->addStaticText("Village", 424, 8, 160, 48);
     m_populationLabel = m_backend->addStaticText("Pop: 0", 592, 8, 160, 48);
+    m_backend->setElementMonoFont(m_populationLabel); // numeric: monospace required (phase-10)
     m_dateLabel       = m_backend->addStaticText("Year 1, Month 1", 760, 8, 200, 48);
+    m_backend->setElementMonoFont(m_dateLabel);       // numeric: monospace required (phase-10)
 
     // --- Primary toolbar (left, x:8-72, y:64-600), 5 tool buttons ---
     int toolY = 64;

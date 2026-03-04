@@ -982,6 +982,33 @@ jobs:
           grep -q "check_23" tools/validate_assets.py || (echo "FAIL: check_23 not found in validate_assets.py — Phase 10 hud_sprites_ui.png dimension/RGBA gate missing" && exit 1)
           echo "PASS: check_23 present"
 
+      - name: Verify hud_sprites_ui.dds not git-tracked
+        # The DDS intermediate is an authoring artifact and must never be committed.
+        # .gitignore has the entry; git rm --cached was run in Phase 10.
+        # This step catches any accidental re-addition via 'git add --force'.
+        # git ls-files exits 0 and prints the path if the file is tracked; we invert
+        # the logic so CI fails when the file IS present in the index.
+        shell: bash
+        run: |
+          if git ls-files --error-unmatch assets/textures/ui/hud_sprites_ui.dds 2>/dev/null; then
+            echo "ERROR: assets/textures/ui/hud_sprites_ui.dds is still tracked by git."
+            echo "Run 'git rm --cached assets/textures/ui/hud_sprites_ui.dds' and commit the result."
+            exit 1
+          fi
+          echo "PASS: hud_sprites_ui.dds is not git-tracked."
+
+      - name: Verify hud_sprites_ui_layout.json not git-tracked
+        # hud_sprites_ui_layout.json is an incompatible legacy layout artifact that must not
+        # be used as an authoring reference. It was removed in Phase 10 (git rm).
+        shell: bash
+        run: |
+          if git ls-files --error-unmatch assets/textures/ui/hud_sprites_ui_layout.json 2>/dev/null; then
+            echo "ERROR: assets/textures/ui/hud_sprites_ui_layout.json is still tracked by git."
+            echo "Run 'git rm assets/textures/ui/hud_sprites_ui_layout.json' and commit the result."
+            exit 1
+          fi
+          echo "PASS: hud_sprites_ui_layout.json is not git-tracked."
+
       - name: Install Python dependencies
         # mutagen: OGG/WAV metadata (checks #16–#19).
         # Pillow: PNG image dimension and mode check (check #23 — hud_sprites_ui.png 2048×2048 RGBA).
