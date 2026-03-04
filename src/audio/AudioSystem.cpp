@@ -663,9 +663,19 @@ void AudioSystem::audioThreadFunc() {
         float  dt  = static_cast<float>(now - m_lastDuckWakeTime);
         m_lastDuckWakeTime = now;
 
-        updateStreams(dt);
-        updateOcclusion();
-        updateDuckState(dt);
+        // Catch OpenAL runtime errors (e.g. "Broken pipe" when the audio
+        // backend disconnects) so the audio thread degrades gracefully instead
+        // of propagating an uncaught exception which would call std::terminate
+        // and kill the entire process.
+        try {
+            updateStreams(dt);
+            updateOcclusion();
+            updateDuckState(dt);
+        } catch (const std::exception& e) {
+            logError(std::string("AudioSystem: audio thread error, disabling audio: ") + e.what());
+            m_stopThread.store(true);
+            break;
+        }
     }
 }
 
