@@ -101,6 +101,23 @@ protected:
         // clock crosses a DAY/DUSK/NIGHT/DAWN boundary. Allow any number of calls —
         // economy tests do not assert time-of-day transitions.
         EXPECT_CALL(audio_, setTimeOfDay(_)).Times(AnyNumber());
+        // Phase 10: CitySimulation placement/demolish methods call the six IRenderer
+        // mesh placement/removal methods on success. Allow any number of calls —
+        // economy tests verify treasury arithmetic and audio SFX, not renderer output.
+        // Individual tests that verify renderer mesh calls must override with their
+        // own EXPECT_CALL after calling SetUp().
+        // placeBuildingMesh(tileX, tileZ, assetBaseName) — 3 args
+        EXPECT_CALL(renderer_, placeBuildingMesh(_, _, _)).Times(AnyNumber());
+        // removeBuildingMesh(tileX, tileZ) — 2 args
+        EXPECT_CALL(renderer_, removeBuildingMesh(_, _)).Times(AnyNumber());
+        // placeRoadMesh(tileX, tileZ) — 2 args (road mesh is always the same asset)
+        EXPECT_CALL(renderer_, placeRoadMesh(_, _)).Times(AnyNumber());
+        // removeRoadMesh(tileX, tileZ) — 2 args
+        EXPECT_CALL(renderer_, removeRoadMesh(_, _)).Times(AnyNumber());
+        // placeServiceBuildingMesh(tileX, tileZ, ServiceBuildingType) — 3 args
+        EXPECT_CALL(renderer_, placeServiceBuildingMesh(_, _, _)).Times(AnyNumber());
+        // removeServiceBuildingMesh(tileX, tileZ) — 2 args
+        EXPECT_CALL(renderer_, removeServiceBuildingMesh(_, _)).Times(AnyNumber());
     }
 
     void TearDown() override {

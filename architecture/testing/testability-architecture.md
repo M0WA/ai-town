@@ -40,15 +40,19 @@ public:
     // Load a texture from disk and return an opaque handle for setElementImage().
     // Returns kInvalidUIElement on failure. Backend owns the resource; call removeElement() to release.
     virtual UIElementHandle loadTexture(const std::string& path) = 0;
-    // Set a filled background colour on an IGUIStaticText element (packed ARGB 0xAARRGGBB).
-    // Added in Phase 9b for the Minimap dark-panel fix. Only valid for addStaticText() handles.
-    // See architecture/ui-ux/minimap.md §IUIBackend method 18.
-    virtual void setElementBackgroundColor(UIElementHandle handle, uint32_t argb) = 0;
-    // Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element.
-    // Panel code calls this immediately after addStaticText() for every numeric readout element.
-    // In IrrlichtUIBackend: calls IGUIStaticText::setOverrideFont(m_monoFont); no-op when m_monoFont is null.
-    // In MockUIBackend: MOCK_METHOD stub. Labels and button text MUST NOT call this method.
-    // Added in Phase 10. See architecture/ui-ux/hud-layout.md §Font Loading — Monospace requirement.
+    // 18. Set a filled background colour on an IGUIStaticText element.
+    //     r, g, b, a are each in [0, 255]. Added in Phase 9b for the Minimap dark-panel fix.
+    //     Only valid for addStaticText() handles. Has no effect on button elements.
+    //     NAMING NOTE: earlier spec drafts used setElementBackgroundColor(handle, uint32_t argb)
+    //     with a packed ARGB argument. The canonical form throughout the codebase uses four
+    //     separate int channels (r, g, b, a). All call sites must use this 4-channel form.
+    //     See architecture/ui-ux/minimap.md §IUIBackend method 18.
+    virtual void setElementBackground(UIElementHandle handle, int r, int g, int b, int a) = 0;
+    // 19. Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element.
+    //     Panel code calls this immediately after addStaticText() for every numeric readout element.
+    //     In IrrlichtUIBackend: calls IGUIStaticText::setOverrideFont(m_monoFont); no-op when m_monoFont is null.
+    //     In MockUIBackend: MOCK_METHOD stub. Labels and button text MUST NOT call this method.
+    //     Added in Phase 10. See architecture/ui-ux/hud-layout.md §Font Loading — Monospace requirement.
     virtual void setElementMonoFont(UIElementHandle handle) = 0;
 };
 ```
@@ -647,19 +651,54 @@ public:
     // vec3{0,0,0} by default (suitable for distance-cull tests that set a specific value
     // via ON_CALL).
     virtual vec3          getListenerPosition() const = 0;
+
+    // Phase 10 additions — building mesh spawning and road mesh rendering.
+    // Called by CitySimulation after successful placeZone/placeRoad/placeServiceBuilding/demolishTile.
+    // IrrlichtRenderer implementation: loads .b3d via BuildingAssetLoader, creates scene node via
+    // SceneEntityManager::spawnBuilding(), registers with LODNode system.
+    // No-op on empty assetBaseName or missing .b3d file (log warning, do not assert).
+    // MockRenderer: MOCK_METHOD stubs; no default ON_CALL action (returns void).
+    // See phase-10.md City Rendering deliverables section for full wiring contract.
+    virtual void          placeBuildingMesh(int tileX, int tileZ, const std::string& assetBaseName) = 0;
+    virtual void          removeBuildingMesh(int tileX, int tileZ) = 0;
+    virtual void          placeRoadMesh(int tileX, int tileZ) = 0;
+    virtual void          removeRoadMesh(int tileX, int tileZ) = 0;
+    // type is ServiceBuildingType enum value: PowerPlant=0, WaterTower=1, FireStation=2, PoliceStation=3.
+    // Asset path: assets/3d/buildings/svc_<type>_lod0.b3d per 3d-model-standards.md naming convention.
+    virtual void          placeServiceBuildingMesh(int tileX, int tileZ, ServiceBuildingType type) = 0;
+    virtual void          removeServiceBuildingMesh(int tileX, int tileZ) = 0;
 };
 
-// MockRenderer — GMock implementation of IRenderer (11 methods as of Phase 10).
+// MockRenderer — GMock implementation of IRenderer (17 methods as of Phase 10).
+// Method count: 5 base (beginFrame/endFrame/drawScene/loadTexture/setCamera) +
+//   1 (rebuildTerrainChunk) + 4 Phase 9b (pickTerrainTile/setTileHoverHighlight/setZoneOverlay/
+//   getTileScreenBounds) + 1 Phase 10 audio (getListenerPosition) +
+//   6 Phase 10 rendering (placeBuildingMesh/removeBuildingMesh/placeRoadMesh/removeRoadMesh/
+//   placeServiceBuildingMesh/removeServiceBuildingMesh) = 17 total.
 // Source location: tests/simulation/mock_renderer.h
 // Shared across simulation_tests, ui_tests (via tests/simulation/ include path).
 //
 // Default ON_CALL actions (set in MockRenderer constructor):
-//   loadTexture         — returns incrementing non-zero integer
-//   pickTerrainTile     — returns false (no terrain hit; tileX/tileZ unchanged)
-//   getTileScreenBounds — returns ScreenRect{} (zero-initialised)
-//   getListenerPosition — returns vec3{0.0f, 0.0f, 0.0f} (origin; override per-test for
-//                         distance-cull scenarios via ON_CALL(renderer_, getListenerPosition())
-//                         .WillByDefault(Return(vec3{x, y, z})))
+//   loadTexture               — returns incrementing non-zero integer
+//   pickTerrainTile           — returns false (no terrain hit; tileX/tileZ unchanged)
+//   getTileScreenBounds       — returns ScreenRect{} (zero-initialised)
+//   getListenerPosition       — returns vec3{0.0f, 0.0f, 0.0f} (origin; override per-test for
+//                               distance-cull scenarios via ON_CALL(renderer_, getListenerPosition())
+//                               .WillByDefault(Return(vec3{x, y, z})))
+//   placeBuildingMesh         — no default action (void return; NiceMock ignores; StrictMock
+//   removeBuildingMesh          requires explicit EXPECT_CALL for each call site exercised by test)
+//   placeRoadMesh             — no default action (same rule as placeBuildingMesh)
+//   removeRoadMesh            — no default action
+//   placeServiceBuildingMesh  — no default action
+//   removeServiceBuildingMesh — no default action
+//
+// IMPORTANT — CitySimulationUnitTest uses StrictMock<MockRenderer>. After Phase 10 wiring,
+// any test that exercises placeZone(), placeRoad(), placeServiceBuilding(), demolishTile(),
+// or doDensityUnlockTick() will receive calls to the 6 rendering methods above.
+// Each such test MUST declare EXPECT_CALL stubs for every rendering method call triggered
+// by the code path under test. Alternatively, switch the renderer_ fixture member to
+// NiceMock<MockRenderer> for tests where rendering method calls are incidental (not the
+// focus of the assertion). See StrictMock Expected Call Matrix below for canonical patterns.
 //
 // Phase 9b stub usage in WorldInteractionTest:
 //   EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
@@ -825,6 +864,29 @@ All Phase 7 audio tests carry label `unit` and run without a display device. CTe
 | `NotificationSFXTest` | `NotificationSFX_EFXBypass_DirectFilterSetToNull` | `tests/audio/notification_sfx_efx_bypass_test.cpp` |
 
 All Phase 10 audio tests carry label `unit` and run without a display device or real audio device (headless CI via `IAlcFunctions` seam and `MockAudioSystem`). CTest filter for all Phase 10 audio tests: `-R "CrossfadeTest|StingerTest|AudioStreamTest|NotificationSFXTest"`.
+
+**Phase 10 `ui_tests` canonical test names** — the following canonical names are mandated for the Phase 10 UI unit tests. These extend the existing `notification_system_test.cpp` and are registered under the `ui_tests` CMake target (label `unit`). CTest `-R` filters reference these names exactly.
+
+| Test Suite | Test Case | Source File |
+|---|---|---|
+| `NotificationManagerTest` | `NotificationSFX_ToastVisible_UIToastSoundFires` | `tests/ui/notification_system_test.cpp` |
+
+**`NotificationSFX_ToastVisible_UIToastSoundFires` test contract** — fixture setup: construct `NotificationManager` with `NiceMock<MockUIBackend>` + `NiceMock<MockCitySimulation>` + `ManualClock` + `NiceMock<MockAudioSystem>` (the fourth argument added in Phase 10). Place `EXPECT_CALL(audio_, playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f)).Times(1)` BEFORE posting any toast. Post a Normal toast via `postNormal()`. Advance `ManualClock` if needed for the toast to become visible (e.g. if the queue was at capacity). Verify the expectation — `UI_TOAST` must fire exactly once when the toast transitions from queued to visible, NOT at enqueue time when the queue is at capacity. **Negative assertion variant**: post a second Normal toast while the first toast occupies the only available visible slot (Normal max-visible = 1 when 2 CRITICAL toasts are visible); verify `playSound(UI_TOAST, ...)` is NOT called until the slot opens. **Mock policy**: `NiceMock<MockAudioSystem>` (not `StrictMock`) because the `NotificationManager` constructor calls no audio methods at construction time, and the test focus is on the toast-visible trigger, not on suppressing all unexpected calls. **CTest filter**: `-R NotificationSFX_ToastVisible_UIToastSoundFires`.
+
+**Phase 10 `simulation_tests` canonical test names** — the following canonical names are mandated for the Phase 10 simulation unit tests. These are added to `simulation_tests` via `target_sources(simulation_tests ...)`.
+
+| Test Suite | Test Case | Source File |
+|---|---|---|
+| `AdaptiveMusicTest` | `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` | `tests/simulation/adaptive_music_intensity_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulation_PlaceZone_SpawnsBuilding` | `tests/simulation/city_simulation_render_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulation_PlaceRoad_SpawnsRoadMesh` | `tests/simulation/city_simulation_render_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulation_PlaceServiceBuilding_SpawnsMesh` | `tests/simulation/city_simulation_render_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulation_DemolishZoneTile_RemovesBuilding` | `tests/simulation/city_simulation_render_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulation_DemolishRoadTile_RemovesRoadMesh` | `tests/simulation/city_simulation_render_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulation_DemolishServiceBuilding_RemovesMesh` | `tests/simulation/city_simulation_render_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulation_DensityUpgrade_SwapsBuildingMesh` | `tests/simulation/city_simulation_render_test.cpp` |
+
+`CitySimulationRenderTest` fixture uses `NiceMock<MockRenderer>` (not `StrictMock`) because these tests focus on verifying that the correct `MockRenderer` mesh-placement method is called — using `StrictMock` would require exhaustive EXPECT_CALLs for every audio side-effect on the same code path. All `CitySimulationRenderTest` cases carry label `unit`. CTest filter for Phase 10 simulation render tests: `-R CitySimulationRenderTest`.
 
 **`Crossfade_InterruptedFormula_NoDomainErrorAtBoundary` test contract** — this test verifies that the interrupted crossfade `t_offset` formula `t_offset=(2/π)×arccos(current_gain_out)` returns 0.0 when `current_gain_out=1.0` and 1.0 when `current_gain_out=0.0`, with no `arccos` domain error at either boundary.
 
@@ -1091,6 +1153,16 @@ For every unit test that uses `StrictMock<MockAudioSystem>` or `StrictMock<MockR
 | `WorldInteraction_Demolish_SparseOverlay_ErasesEntry` | None | `pickTerrainTile` × AtLeast(2) (zone placement + demolish); `setZoneOverlay` × 2 (one after placement, one after demolish; second call has empty map) |
 | `WorldInteraction_UtilitiesPlacement_CallsPlaceServiceBuilding` | None | `pickTerrainTile` × 1 (returns tile 5,7); `MockCitySimulation::placeServiceBuilding(5, 7, ServiceBuildingType::FireStation, 0)` × 1 |
 | `CitySimulation_PlaceRoad_FiresSFXRoadBuild` | `StrictMock<MockAudioSystem>::playPositionalSound(SFX_ROAD_BUILD, _, _, _)` × 1 | None (`NiceMock<MockRenderer>` — renderer call is incidental) |
+| **Phase 10 rendering rows — apply when `CitySimulationUnitTest` uses `StrictMock<MockRenderer>`** | | |
+| `CitySimulation_PlaceZone_SpawnsBuilding` (Phase 10) | `playPositionalSound(SFX_BUILD_PLACE, _, _, _)` × 1 | `placeBuildingMesh(5, 7, "res_low_01")` × 1 (zone type Residential Low → `assetBaseName = "res_low_01"`) |
+| `CitySimulation_PlaceRoad_SpawnsRoadMesh` (Phase 10) | `playPositionalSound(SFX_ROAD_BUILD, _, _, _)` × 1 | `placeRoadMesh(5, 7)` × 1 |
+| `CitySimulation_PlaceServiceBuilding_SpawnsMesh` (Phase 10) | `playPositionalSound(SFX_BUILD_PLACE, _, _, _)` × 1 | `placeServiceBuildingMesh(5, 7, ServiceBuildingType::FireStation)` × 1 |
+| `CitySimulation_DemolishZoneTile_RemovesBuilding` (Phase 10) | `playPositionalSound(SFX_BUILD_DEMOLISH, _, _, _)` × 1 | `removeBuildingMesh(5, 7)` × 1 |
+| `CitySimulation_DemolishRoadTile_RemovesRoadMesh` (Phase 10) | `playPositionalSound(SFX_BUILD_DEMOLISH, _, _, _)` × 1 | `removeRoadMesh(5, 7)` × 1 |
+| `CitySimulation_DemolishServiceBuilding_RemovesMesh` (Phase 10) | `playPositionalSound(SFX_BUILD_DEMOLISH, _, _, _)` × 1 | `removeServiceBuildingMesh(5, 7)` × 1 |
+| `CitySimulation_DensityUpgrade_SwapsBuildingMesh` (Phase 10) | `playSound(SFX_ZONE_UPGRADE, _, _)` × 1 (cap: up to 3 per doDensityUnlockTick() invocation) | `removeBuildingMesh(tileX, tileZ)` × 1; `placeBuildingMesh(tileX, tileZ, newAssetBaseName)` × 1 (e.g. `"res_med_01"`) |
+| Tests exercising `tick()` with earthworks cost > 0 (Phase 10) | `playPositionalSound(SFX_EARTHWORKS, _, _, _)` × 1 before `SFX_BUILD_PLACE`/`SFX_ROAD_BUILD` | `placeBuildingMesh` or `placeRoadMesh` × 1 (same tile) |
+| **Guidance**: For tests where rendering method calls are incidental to the assertion, switch `renderer_` to `NiceMock<MockRenderer>` — this avoids declaring EXPECT_CALL for every mesh placement side-effect and is the approved approach for audio-focused tests (`CitySimulation_PlaceRoad_FiresSFXRoadBuild` already uses `NiceMock<MockRenderer>` for this reason). Use `StrictMock<MockRenderer>` only when the test is asserting rendering behavior. | | |
 
 > **Post-V1 stinger scenarios**: `StingerType::GAME_OVER` (game-over stinger, fires in Scenario mode) is not defined in the V1 `StingerType` enum (`{ CRISIS, MILESTONE }` only). Do not reference `StingerType::GAME_OVER` in any V1 test or production code — it does not exist until Scenario mode is implemented post-V1. When Scenario mode is added post-V1, a new matrix row will be added here.
 

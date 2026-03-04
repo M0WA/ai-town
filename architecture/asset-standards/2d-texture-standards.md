@@ -512,6 +512,15 @@ produces handles 0–1023 for the 32×32 grid. No handle value exceeds 1023 in V
 
 **Runtime asset path (authoritative)**: `assets/textures/ui/hud_sprites_ui.png`
 
+**`validate_assets.py` scope for the UI sprite sheet**: `validate_assets.py` validates the
+committed runtime PNG at `assets/textures/ui/hud_sprites_ui.png`. The intermediate DDS
+(`hud_sprites_ui.dds`) is an authoring artifact only and is NOT committed to the repository.
+Therefore `validate_assets.py` must NOT scan for `hud_sprites_ui.dds` in the asset tree (it
+will never be present). The validator's check for the UI sprite sheet is: confirm that
+`assets/textures/ui/hud_sprites_ui.png` exists, is 2048×2048 pixels, and is mode RGBA
+(32-bit with alpha channel). The `_ui` suffix enforcement applies to the DDS authoring
+filename only; there is no `_ui`-suffixed file in the committed runtime asset tree.
+
 `IrrlichtUIBackend` loads this file internally via `m_driver->getTexture("assets/textures/ui/hud_sprites_ui.png")` during its own initialization (before any `UIManager` panel code runs).
 This is an `IrrlichtUIBackend`-internal operation — `UIManager` does NOT call
 `IUIBackend::loadTexture("assets/textures/ui/hud_sprites_ui.png")` and does NOT store a
@@ -684,7 +693,12 @@ Rows 11–31 (handles 352–1023) are reserved for future phases. Do not assign 
 the ranges above without updating this table and the `hud_sprite_ids.h` header in the same
 commit.
 
-#### Authoring Notes for Phase 9b Icons
+#### Authoring Notes for Sprite Sheet Icons (Phases 9b and 10)
+
+This section covers visual conventions for all rows authored in Phase 9b (rows 0–5) and
+Phase 10 (rows 6, 8, 9, 10). Row 7 cells are reserved stubs (transparent) — no art is
+required until Phase 12 adds `IUIBackend::setMouseCursor()`. Artists must paint rows 0–6
+and rows 8–10 before Phase 10 exits.
 
 **Zone sub-panel icon visual convention** (applies to rows 2 and 3):
 
@@ -721,9 +735,55 @@ commit.
   - Query: magnifying glass
 - **Inactive state** (row 1): Same shapes, outline-only, neutral grey `#888888`.
 
-**Active tool indicator convention** (row 6): All icons are 32×32 px, centered in 64×64 px cell.
-Same design as the corresponding toolbar active-state icon but at 32×32 px output size —
-use the same master artwork, scaled down for this position.
+**Active tool indicator icon convention** (row 6, Phase 10 deliverable): All icons are
+32×32 px, centered in a 64×64 px cell (16 px transparent margin on all sides). Use the
+same master artwork as the corresponding toolbar active-state icon (row 0), scaled to
+32×32 px output size. Apply the same filled-icon style and accent colour as the row 0
+active state. The "no tool active" indicator (`kSpriteIndicatorNone`, col 0) uses a
+simple camera or crosshair silhouette in neutral grey `#CCCCCC` — no accent colour border.
+All other indicator icons inherit the colour of their corresponding tool's active-state
+icon (Zone indicator = zone-grid; Road = road segment; Utilities = wrench; Demolish = X;
+Query = magnifying glass). Icons must remain legible at 32×32 px: simplify fine details
+(e.g. lane markings inside the road icon can be reduced to a single centre stripe at this
+size). Author all six indicators in a single 32×32 px working canvas, then paste into the
+appropriate cell columns 0–5 of row 6.
+
+**Minimap overlay toggle icon convention** (rows 8–9, Phase 10 deliverable): The single
+V1 overlay toggle is the service coverage heat-map. One cell per row (col 0 only for V1).
+
+- **Active state** (row 8, `kSpriteOverlayServiceCoverageActive`): 48×48 px icon centered
+  in the 64×64 px cell (8 px transparent margin on all sides). Use a filled minimap
+  rectangle (representing the city grid) in neutral grey `#444444`, overlaid with a
+  colour-gradient fill indicating coverage zones: covered areas in green `#33BB44` (70%
+  opacity fill), uncovered fringe in amber `#CCAA22` (70% opacity). A 2 px accent-colour
+  border surrounds the 48×48 icon area in the accent colour used across the HUD (match
+  the zone active-state border colour: green `#33BB44`). Icon conveys "coverage map is on".
+- **Inactive state** (row 9, `kSpriteOverlayServiceCoverageInactive`): Same minimap
+  rectangle outline in neutral grey `#888888`, outline-only (no fill gradient). No accent
+  border. Transparent fill inside the rectangle. Icon conveys "coverage map is off".
+- Both icons must be legible as minimap-related controls when displayed at 48×48 px on
+  screen next to the minimap panel.
+
+**Notification and HUD miscellaneous icon conventions** (row 10, Phase 10 deliverable):
+Each icon is a distinct symbol; no active/inactive pair is required for row 10 (these
+are not toggle buttons — they are indicators). All are authored at their natural useful
+size and centered with transparent fill to the full 64×64 px cell.
+
+- `kSpriteNotificationBell` (col 0): Classic bell silhouette, 44×44 px, outline and
+  filled in neutral white `#EEEEEE`. Used as the notification badge icon. Must remain
+  recognisable when rendered at 32×32 px (bell body proportions must read at small size).
+- `kSpriteClockIcon` (col 1): Circular clock face, 44×44 px outline in neutral white
+  `#EEEEEE`, filled with a mid-grey `#444444` disc, two clock hands indicating a generic
+  time (e.g. 10:10 position). Used for grace period countdown indicators.
+- `kSpriteUnsavedDot` (col 2): Solid amber circle, 16×16 px, colour `#DDAA00`, centered
+  in the 64×64 px cell (24 px transparent margin on all sides). Used as the unsaved-changes
+  indicator. Intentionally small to serve as a subtle HUD badge — do NOT scale it to fill
+  the cell. The amber colour must contrast against both the HUD background colour and the
+  adjacent text colour.
+- `kSpriteUndoIcon` (col 3): Curved arrow pointing counter-clockwise (left-return arrow,
+  ↩ style), 44×44 px, outline and filled in neutral white `#EEEEEE`. Must be immediately
+  recognisable as an undo action. Author the arrow tip to be at least 6 px wide at 44×44 px
+  so it remains legible when downscaled for display at smaller sizes.
 
 **sRGB authoring**: All icons must be authored in **linear color space** and exported as a
 linear RGBA PNG. The shipped runtime file is `hud_sprites_ui.png` (PNG, linear RGBA8), loaded
@@ -871,3 +931,26 @@ LOD0/LOD1 UV authoring of building meshes begins):
 <!-- SIGN-OFF: graphics-artist-2d-texture 2026-03-01 — confirmed all per-module normal and specular map source PNGs meet DXT5nm authoring spec -->
 
 <!-- SIGN-OFF: graphics-artist-2d-texture 2026-03-01 — Billboard atlas format sign-off: confirmed DXT5 sRGB 1024×128 format (8 frames of 128×128), 4-level mip chain (GL_TEXTURE_MAX_LEVEL=3), 8-texel per-cell border (112×112 usable per frame), straight alpha, GL_CLAMP_TO_EDGE, uploaded via raw-GL sRGB path. All placeholder billboard DDS files use DX10 BC3_UNORM_SRGB (DXGI_FORMAT=78). -->
+
+**Phase 10 — Sprite Sheet Artwork Delivery Sign-Off** (`graphics-artist-2d-texture`,
+required before Phase 10 is declared DONE):
+
+Before committing `assets/textures/ui/hud_sprites_ui.png`, the artist must confirm all of
+the following and record a sign-off comment in this section:
+
+1. All rows 0–6 and rows 8–10 are fully painted per the visual conventions in the
+   "Authoring Notes for Sprite Sheet Icons (Phases 9b and 10)" section above.
+2. Row 7 cells (handles 224–229) are fully transparent (RGBA = 0,0,0,0) — no cursor art.
+3. The source was authored in linear colour space; no sRGB ICC profile is embedded in the
+   exported PNG.
+4. The nvcompress byte-order verification spike (or approved DCC-direct PNG fallback) was
+   completed and confirmed correct RGBA byte order before converting.
+5. The exported PNG is 2048×2048 RGBA8, verified with `python3 -c "from PIL import Image;
+   img = Image.open('hud_sprites_ui.png'); assert img.size == (2048, 2048); assert
+   img.mode == 'RGBA'"` or equivalent.
+6. Spot-check: at least two cells from each authored row were decoded and pixel values
+   confirmed to match the source DCC artwork (no silent channel swap).
+
+Replace the placeholder comment below with a dated sign-off after completing verification:
+
+<!-- SIGN-OFF: graphics-artist-2d-texture YYYY-MM-DD — sprite sheet hud_sprites_ui.png delivered: rows 0–6 and 8–10 painted, row 7 transparent stubs confirmed, linear colour space, RGBA byte-order verified, 2048×2048 RGBA8 confirmed, spot-check complete -->

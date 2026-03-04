@@ -74,6 +74,32 @@ protected:
         // to most test scenarios; allow any number of calls so StrictMock does not
         // fail on time-of-day transitions that occur during multi-tick test runs.
         EXPECT_CALL(audio_, setTimeOfDay(::testing::_)).Times(::testing::AnyNumber());
+        // Phase 10: CitySimulation placement methods (placeZone, placeRoad,
+        // placeServiceBuilding, demolishTile, doDensityUnlockTick) call the six new
+        // IRenderer mesh placement/removal methods when they succeed.  These calls
+        // are incidental to simulation-logic tests; suppress them so StrictMock does
+        // not fail on unexpected renderer calls in tests that focus on treasury,
+        // traffic, or other non-rendering behaviour.
+        // Individual tests that verify specific renderer interactions must override
+        // with their own EXPECT_CALL after calling SimulationTestBase::SetUp().
+        // placeBuildingMesh(tileX, tileZ, assetBaseName) — 3 args
+        EXPECT_CALL(renderer_, placeBuildingMesh(::testing::_, ::testing::_, ::testing::_))
+            .Times(::testing::AnyNumber());
+        // removeBuildingMesh(tileX, tileZ) — 2 args
+        EXPECT_CALL(renderer_, removeBuildingMesh(::testing::_, ::testing::_))
+            .Times(::testing::AnyNumber());
+        // placeRoadMesh(tileX, tileZ) — 2 args (road mesh is always the same asset)
+        EXPECT_CALL(renderer_, placeRoadMesh(::testing::_, ::testing::_))
+            .Times(::testing::AnyNumber());
+        // removeRoadMesh(tileX, tileZ) — 2 args
+        EXPECT_CALL(renderer_, removeRoadMesh(::testing::_, ::testing::_))
+            .Times(::testing::AnyNumber());
+        // placeServiceBuildingMesh(tileX, tileZ, ServiceBuildingType) — 3 args
+        EXPECT_CALL(renderer_, placeServiceBuildingMesh(::testing::_, ::testing::_, ::testing::_))
+            .Times(::testing::AnyNumber());
+        // removeServiceBuildingMesh(tileX, tileZ) — 2 args
+        EXPECT_CALL(renderer_, removeServiceBuildingMesh(::testing::_, ::testing::_))
+            .Times(::testing::AnyNumber());
     }
 
     void TearDown() override {

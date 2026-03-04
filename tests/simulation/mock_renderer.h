@@ -10,10 +10,16 @@
 //
 // Phase 9b additions: pickTerrainTile, setTileHoverHighlight, setZoneOverlay,
 // getTileScreenBounds.  Default actions:
-//   pickTerrainTile  — returns false (no terrain hit)
+//   pickTerrainTile      — returns false (no terrain hit)
 //   setTileHoverHighlight — no-op void
-//   setZoneOverlay   — no-op void
-//   getTileScreenBounds  — returns ScreenRect{} (zero-initialised)
+//   setZoneOverlay        — no-op void
+//   getTileScreenBounds   — returns ScreenRect{} (zero-initialised)
+//
+// Phase 10 additions: getListenerPosition (returns vec3{}), placeBuildingMesh,
+// removeBuildingMesh, placeRoadMesh, removeRoadMesh, placeServiceBuildingMesh,
+// removeServiceBuildingMesh.  All six placement/removal methods are no-op void
+// by default — tests exercising CitySimulation placement callbacks must add
+// EXPECT_CALL / ON_CALL explicitly.
 //
 // NOTE: MOCK_METHOD cannot accept a type argument with a comma (e.g. map<K,V>).
 // Use a type alias in the mock class to work around this GMock limitation.
@@ -60,6 +66,32 @@ public:
 
     // Phase 10: listener position for sfx_intersection_tick distance cull.
     MOCK_METHOD(vec3, getListenerPosition, (), (const, override));
+
+    // Phase 10: building mesh spawning and road mesh rendering API.
+    // All six methods are no-op void by default — tests that need specific
+    // placement behaviour must set EXPECT_CALL / ON_CALL explicitly.
+    //
+    // Signatures MUST match IRenderer.h exactly:
+    //   placeRoadMesh     — no assetBaseName (road mesh is always the same asset)
+    //   placeServiceBuildingMesh — takes ServiceBuildingType, not a string
+    MOCK_METHOD(void, placeBuildingMesh,
+                (int tileX, int tileZ, const std::string& assetBaseName),
+                (override));
+    MOCK_METHOD(void, removeBuildingMesh,
+                (int tileX, int tileZ),
+                (override));
+    MOCK_METHOD(void, placeRoadMesh,
+                (int tileX, int tileZ),
+                (override));
+    MOCK_METHOD(void, removeRoadMesh,
+                (int tileX, int tileZ),
+                (override));
+    MOCK_METHOD(void, placeServiceBuildingMesh,
+                (int tileX, int tileZ, ServiceBuildingType type),
+                (override));
+    MOCK_METHOD(void, removeServiceBuildingMesh,
+                (int tileX, int tileZ),
+                (override));
 
 private:
     TextureHandle m_nextHandle{1};

@@ -261,6 +261,12 @@ private:
     // Initialized to -5.0 so the first fire always passes the cooldown check.
     double m_lastCrisisStingerFireTime{-5.0};
 
+    // Cooldown for MILESTONE stinger (5 s minimum gap per StingerType).
+    // Initialized to -5.0 so the first City Rating transition always fires.
+    // Phase 10: triggerStinger(MILESTONE) fires on CityRatingTransition notifications only
+    // (NOT on raw PopulationMilestone events). Edge-detected via notification queue polling.
+    double m_lastMilestoneStingerFireTime{-5.0};
+
     // --- Phase 8: loading gate ---
     // While true, update() returns immediately (terrain generation in progress).
     bool m_loadingTerrain{false};

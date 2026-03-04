@@ -79,6 +79,107 @@ their source pair is released.
 
 ---
 
+## Engine Loop Timbral Content Specification
+
+**Current status (2026-03-04)**: Both `sfx_vehicle_engine_idle.ogg` and
+`sfx_vehicle_engine_move.ogg` are 6.00 s synthetic SoX-generated sine tones. These
+are placeholder assets. Production content must be re-exported at 8–12 s with
+DAW-authored engine tone content before Phase 10 exit.
+
+### Vehicle Class Reference
+
+The engine applies a base pitch multiplier per vehicle class:
+
+- **Car**: base pitch 1.0× — the authored loops are the tonal reference.
+- **Bus / Truck**: base pitch 0.85× — a lower, heavier register than cars.
+
+The two files (`sfx_vehicle_engine_idle.ogg` and `sfx_vehicle_engine_move.ogg`) are
+the single set of loop assets used for ALL vehicle classes. Class differentiation is
+achieved at runtime via the base pitch multiplier only. The authored content must be
+neutral enough (no strong formants or character that sounds wrong at 0.85×) to work
+acceptably for both cars and buses.
+
+**Author the loops as if for a mid-sized car engine** (base pitch 1.0×). The 0.85×
+bus/truck pitch-down will shift the tonal register automatically at runtime. Do not
+attempt to author a "bus sound" at the loop level.
+
+### Timbral Character — `sfx_vehicle_engine_idle.ogg`
+
+This file represents a vehicle standing still or moving slowly (speed < 3 m/s). The
+engine idle should convey:
+
+- A low, steady mechanical rumble centred around 80–120 Hz (fundamental engine frequency
+  at idle RPM, approximately 700–900 RPM for a 4-cylinder car: 700 RPM / 60 × 2
+  ignition events/rev = ~23 Hz fundamental × 2nd harmonic = ~46 Hz — richer harmonics
+  from exhaust resonance place the perceived centre around 80–140 Hz).
+- Slow, subtle amplitude modulation at 10–15 Hz (cylinder firing rhythm at idle RPM)
+  to give organic texture.
+- Minimal high-frequency content above 3 kHz — at 0.75× pitch the upper register shifts
+  down, so any prominent high-frequency character will sound dull.
+- No strong transients or rhythmic accents that will become audible as a mechanical
+  beat at the loop boundary.
+- Quiet but present — at −22 LUFS the idle will be barely perceptible beyond 60–80 m
+  from the listener at the engine's reference distance (1 m), which is the intended
+  behaviour. Do not over-brighten to compensate — the OpenAL distance model handles
+  attenuation.
+
+### Timbral Character — `sfx_vehicle_engine_move.ogg`
+
+This file represents a vehicle moving at moderate-to-high speed (speed ≥ 8 m/s). The
+move sound should convey:
+
+- A mid-frequency mechanical drone with a higher harmonic density than idle — the higher
+  RPM produces a brighter tonal character. Aim for a perceived fundamental of 150–200 Hz
+  (corresponding to ~2,000–2,500 RPM on a 4-cylinder).
+- Tyre rolling noise as a sub-layer: broadband noise emphasis in the 500 Hz–2 kHz band,
+  reflecting road surface contact. This creates perceptual distance differentiation from
+  the idle (idle = low mechanical hum; move = mechanical hum + road noise presence).
+- Subtle exhaust breath character in the 400–800 Hz region adds realism without strong
+  periodicity that would loop-fatigue quickly.
+- Amplitude modulation slower than idle — at higher RPM the cylinder rhythm is faster
+  and smooths into continuous texture; the overall amplitude variation should be ≤ 3 dB
+  peak-to-valley to avoid pumping artifacts at the crossblend boundary.
+- The move loop must crossblend with the idle loop without clicks: at the blend threshold
+  (3–8 m/s), both sources play simultaneously at partial gain. Audition both files playing
+  together at equal gain to verify no comb-filtering or phase cancellation is audible.
+
+### Idle / Move Crossblend Verification
+
+The engine crossblends idle and move gains continuously:
+
+- At speed < 3 m/s: idle gain = 1.0, move gain = 0.0 (idle only)
+- At speed 3–8 m/s: both play simultaneously; gains interpolate linearly
+- At speed ≥ 8 m/s: idle gain = 0.0, move gain = 1.0 (move only)
+
+**Before delivery, verify the crossblend** by rendering both OGG files simultaneously
+in the DAW at equal gain (simulating the 5 m/s mid-blend point). Listen for:
+
+- No audible comb filtering (hollow, frequency-cancelled sound)
+- No unexpected resonant peaks when summed
+- Tonal continuity — the combined signal should sound like a single richer engine, not
+  two separate engines playing at once
+
+If comb filtering is present, shift the fundamental frequency of one file by 5–10 Hz
+relative to the other. This breaks the phase coherence without affecting the perceived
+tonal character independently.
+
+### Pitch-Shift Verification at Extremes
+
+Both engine loops must be verified at the pitch-shift extremes:
+
+| Pitch ratio | Speed context | Verification requirement |
+|---|---|---|
+| 0.75× (stopped) | Vehicle at rest / near-stopped | Loop boundary must be click-free; no audible mechanical beat |
+| 1.0× (authored) | Reference playback | Loop boundary must be click-free |
+| 1.35× (max speed) | Vehicle at full speed | Loop boundary must be click-free at the higher register |
+
+In the DAW, apply a pitch-shift plugin (or resample) at 0.75× and 1.35× to the exported
+OGG and listen through at least 5 loop cycles at each pitch. A loop that is click-free at
+authored pitch may produce a click at 1.35× if the phase at the loop boundary is
+misaligned.
+
+---
+
 ## One-Shot SFX Parameters
 
 ### `sfx_vehicle_horn`
@@ -94,6 +195,18 @@ their source pair is released.
 WAV PCM is correct here: at 0.4–1 s this is a one-shot with no loop fatigue concern.
 OGG Vorbis would add unnecessary decode latency for a sub-second trigger.
 
+**Timbral character**: a car horn — short honk with a clear fundamental pitch in the
+300–500 Hz range. Should be tonally assertive and recognisable as a vehicle horn without
+being aggressive or startling. A double-beep pattern (two short blasts 80–100 ms apart)
+within the 0.4–1 s window is acceptable. The onset transient must start within the first
+50 ms of the file (no pre-silence). The horn will be heard from a positional source —
+it must be distinct at distances up to 100 m. The −18 LUFS target ensures it is audible
+over engine noise and ambient beds.
+
+**Rate-limiting (enforced in AudioSystem — not an authoring concern)**: per-vehicle 2 s
+cooldown and global cap of 3 simultaneous horn sources. These are code constraints; the
+authored WAV file has no cooldown embedded.
+
 ### `sfx_intersection_tick`
 
 | Parameter | Value |
@@ -106,6 +219,14 @@ OGG Vorbis would add unnecessary decode latency for a sub-second trigger.
 
 The intersection tick is a subtle UI-adjacent positional cue. At −28 LUFS it sits well
 below engine loops (−22 LUFS) and does not compete with music stems.
+
+**Timbral character**: a very short, dry mechanical click or tick — resembling a
+relay contact or a low-gain mechanical switch. Broadband transient energy, duration
+< 100 ms of actual content plus a short decay tail (total file < 0.5 s). No reverb
+or sustained body — the tick must disappear immediately so it does not stack audibly
+across multiple simultaneous intersections. At −28 LUFS it should be inaudible beyond
+~50 m under normal city noise; the pre-acquisition distance cull at > 80 m in
+`CitySimulation::tick()` handles suppression at further distances.
 
 ---
 
@@ -132,22 +253,59 @@ below engine loops (−22 LUFS) and does not compete with music stems.
 - **Loudness metered before pitch-shift**: the −22 LUFS / −2 dBTP target is measured on
   the authored file, before the engine applies pitch-shift. The engine does not post-
   process loudness.
+- **OGG encoding quality**: encode at **libvorbis -q 6** (minimum) for vehicle engine
+  loops — they are mono and the content is tonal rather than complex harmonic, so -q 6
+  is sufficient. -q 8 is not required. Verify with `ogginfo` or `soxi` that the encoded
+  file is mono and 44100 Hz after export.
+
+---
+
+## Re-Export Procedure for Placeholder Replacement
+
+The current placeholder files (`sfx_vehicle_engine_idle.ogg`, `sfx_vehicle_engine_move.ogg`)
+both measure 6.00 s and are synthetic SoX tones. The following procedure replaces them:
+
+1. Open the DAW and create a new mono session at 44100 Hz.
+2. Build the engine idle sound using the timbral guidance above (fundamental 80–120 Hz,
+   slow AM at 10–15 Hz). Target duration: 8–12 s of loop-able content.
+3. Trim the content to a loop-friendly length (8–12 s). Set a DAW loop point covering
+   the file and audition through at least 10 cycles to verify no click at the loop
+   boundary.
+4. Render to WAV at 44100 Hz, 16-bit, mono. Measure integrated LUFS with a BS.1770-3
+   loudness meter (e.g. Youlean Loudness Meter, MeterPlugs LCAST, or ffmpeg with
+   `ebur128`). Apply makeup gain or attenuation to reach −22 LUFS. Apply a true-peak
+   limiter with ceiling −2 dBTP.
+5. Export to OGG Vorbis at -q 6 using libvorbis (e.g.
+   `oggenc -q 6 -o sfx_vehicle_engine_idle.ogg sfx_vehicle_engine_idle.wav`).
+6. Verify with `soxi sfx_vehicle_engine_idle.ogg`: channels = 1, sample rate = 44100,
+   duration ≥ 8.00 s and < 20.00 s.
+7. Apply pitch-shift verification at 0.75× and 1.35× in the DAW.
+8. Repeat steps 1–7 for `sfx_vehicle_engine_move.ogg` using the move timbral guidance.
+9. Verify crossblend by auditioning both files simultaneously at equal gain.
 
 ---
 
 ## Delivery Verification Checklist
 
-- [ ] `sfx_vehicle_engine_idle.ogg` — mono, 44100 Hz, **8–12 s recommended** (6 s minimum CI gate), −22 LUFS, ≤ −2 dBTP, seamless loop.
-- [ ] `sfx_vehicle_engine_move.ogg` — mono, 44100 Hz, **8–12 s recommended** (6 s minimum CI gate), −22 LUFS, ≤ −2 dBTP, seamless loop.
+- [ ] `sfx_vehicle_engine_idle.ogg` — mono, 44100 Hz, **8–12 s (production target)**, −22 LUFS, ≤ −2 dBTP, seamless loop.
+- [ ] `sfx_vehicle_engine_move.ogg` — mono, 44100 Hz, **8–12 s (production target)**, −22 LUFS, ≤ −2 dBTP, seamless loop.
 - [ ] **Engine loop duration target met**: both files are 8–12 s. A 6 s loop is permitted
   by the CI gate but is only acceptable for placeholder and code-path testing — it sits
   at the perceptibility boundary (4.5 s perceived at 0.75× pitch). Any file currently
   at exactly 6.00 s that was generated as a synthetic placeholder must be re-exported at
   8–12 s with production-quality DAW-authored engine tone content before Phase 10 exit.
-- [ ] `sfx_vehicle_horn.wav` — mono WAV PCM, 44100 Hz, 0.4–1 s, −18 LUFS, ≤ −1 dBTP.
-- [ ] `sfx_intersection_tick.wav` — mono WAV PCM, 44100 Hz, < 0.5 s, −28 LUFS, ≤ −2 dBTP.
+- [ ] Idle timbral verification: fundamental centred 80–120 Hz; slow AM at 10–15 Hz;
+  no prominent high-frequency content above 3 kHz.
+- [ ] Move timbral verification: higher harmonic density than idle; road noise presence
+  in 500 Hz–2 kHz band; amplitude variation ≤ 3 dB peak-to-valley.
+- [ ] Crossblend verification: both files auditioning simultaneously at equal gain in
+  the DAW produces no comb filtering or phase cancellation.
+- [ ] `sfx_vehicle_horn.wav` — mono WAV PCM, 44100 Hz, 0.4–1 s, −18 LUFS, ≤ −1 dBTP;
+  onset transient within first 50 ms.
+- [ ] `sfx_intersection_tick.wav` — mono WAV PCM, 44100 Hz, < 0.5 s, −28 LUFS, ≤ −2 dBTP;
+  broadband transient, no reverb tail.
 - [ ] No engine loop file is below 6 s (duration check mandatory).
-- [ ] No engine loop file is at exactly 20 s or longer — the Tier 2/Tier 3 boundary is exclusive; a file at exactly 20 s is Tier 3 (streamed) and will be rejected by `validate_assets.py`.
+- [ ] No engine loop file is at exactly 20 s or longer.
 - [ ] No engine loop file is in WAV format.
 - [ ] DAW loop verification completed for both engine loops at both pitch extremes (0.75× and 1.35×) — no click at loop boundary.
 - [ ] Loop pitch verification: loopback audition performed at both 0.75× and 1.35× pitch

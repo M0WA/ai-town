@@ -66,6 +66,21 @@ public:
     //     r, g, b, a are in [0, 255]. Has no effect on button elements or invalid handles.
     //     This is the only way to make a blank IGUIStaticText produce visible pixels — without
     //     calling this, a static text with empty text and fillBackground=false is invisible.
+    //     Note: the architecture spec also references this as setElementBackgroundColor(); the
+    //     4-channel (r,g,b,a) signature is the canonical implementation form throughout the codebase.
     virtual void            setElementBackground(UIElementHandle handle,
                                                  int r, int g, int b, int a) = 0;
+
+    // 19. Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element.
+    //     Panel code calls this immediately after addStaticText() for every numeric readout element
+    //     (treasury balance, population count, tax rates, percentages, density unlock progress,
+    //     in-game date/time).
+    //     In IrrlichtUIBackend: calls IGUIStaticText::setOverrideFont(m_monoFont); no-op when
+    //     m_monoFont is null (file absent or headless — graceful fallback, no assert).
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     Labels, button text, tooltips, and panel titles MUST NOT call this method.
+    //     Added in Phase 10 to replace the untestable static_cast<IrrlichtUIBackend*> pattern.
+    //     See architecture/ui-ux/hud-layout.md §Font Loading — Monospace requirement.
+    //     See architecture/ui-ux/ui-manager.md §IUIBackend Method Contract method 19.
+    virtual void            setElementMonoFont(UIElementHandle handle) = 0;
 };

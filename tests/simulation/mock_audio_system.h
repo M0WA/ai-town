@@ -2,7 +2,7 @@
 #include "src/interfaces/IAudioSystem.h"
 #include "gmock/gmock.h"
 
-// MockAudioSystem — GMock implementation of IAudioSystem's 15 methods.
+// MockAudioSystem — GMock implementation of IAudioSystem's 16 methods.
 // Source location: tests/simulation/ (shared across simulation_tests, ui_tests, audio_tests).
 // Header-only — no .cpp file. Uses MOCK_METHOD macros only, no definitions.
 class MockAudioSystem : public IAudioSystem {

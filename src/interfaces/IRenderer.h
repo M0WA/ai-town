@@ -1,6 +1,7 @@
 #pragma once
 
 #include "vec3.h"
+#include "simulation_types.h"  // ServiceBuildingType — for placeServiceBuildingMesh()
 #include <string>
 #include <cstdint>
 #include <unordered_map>
@@ -165,4 +166,66 @@ public:
     // main-thread-only.
     // (ref: implementation/phase-10.md sfx_intersection_tick wiring)
     virtual vec3 getListenerPosition() const = 0;
+
+    // -----------------------------------------------------------------------
+    // Phase 10 — Building mesh spawning and road mesh rendering API
+    //
+    // These six methods wire CitySimulation placement/removal callbacks to
+    // visible 3D scene geometry. All coordinates are in tile-space integers;
+    // IrrlichtRenderer converts to world-space via (tileX * kTileSize, 0.0f,
+    // tileZ * kTileSize). assetBaseName is the stem used to locate the .b3d
+    // LOD files under assets/3d/buildings/ or assets/3d/roads/.
+    //
+    // Implementations must be no-ops (log warning, no crash) when the asset
+    // file is absent or assetBaseName is empty.
+    // main-thread-only.
+    // (ref: implementation/phase-10.md City Rendering deliverables)
+    // -----------------------------------------------------------------------
+
+    // placeBuildingMesh — load LOD0/1/2 .b3d for assetBaseName and create a
+    // scene node at tile (tileX, tileZ) registered in SceneEntityManager.
+    virtual void placeBuildingMesh(int tileX, int tileZ,
+                                   const std::string& assetBaseName) = 0;
+
+    // removeBuildingMesh — destroy the building scene node at tile (tileX, tileZ).
+    // No-op if no building is registered for that tile.
+    virtual void removeBuildingMesh(int tileX, int tileZ) = 0;
+
+    // placeRoadMesh — create a road tile scene node at tile (tileX, tileZ).
+    //
+    // All road tiles share the same mesh: flat LOD0 quad + kerb geometry (<=48 tris) with
+    // the road custom shader and road_asphalt_tileable.dds on texture unit 0.
+    // No assetBaseName parameter — road mesh asset is fixed, not per-tile variable.
+    // LOD transitions use road tile thresholds from 3d-model-standards.md (30/25 m close,
+    // 100/90 m far).
+    // Called by CitySimulation after placeRoad() succeeds.
+    // main-thread-only.
+    virtual void placeRoadMesh(int tileX, int tileZ) = 0;
+
+    // removeRoadMesh — destroy the road tile scene node registered at (tileX, tileZ).
+    // No-op if no road is registered for that tile.
+    // Called by CitySimulation after demolishTile() on a road tile.
+    // main-thread-only.
+    virtual void removeRoadMesh(int tileX, int tileZ) = 0;
+
+    // placeServiceBuildingMesh — create a service building scene node at tile (tileX, tileZ).
+    //
+    // Asset path derived from type:
+    //   PowerPlant    → "assets/3d/buildings/svc_power_plant_lod0.b3d"
+    //   WaterTower    → "assets/3d/buildings/svc_water_tower_lod0.b3d"
+    //   FireStation   → "assets/3d/buildings/svc_fire_station_lod0.b3d"
+    //   PoliceStation → "assets/3d/buildings/svc_police_station_lod0.b3d"
+    // LOD thresholds use the small building/props category (30/25 m close, 100/90 m far,
+    // billboard LOD2) per 3d-model-standards.md Service Building Model Standards.
+    // If the .b3d file is absent, logs a warning and returns — does not assert.
+    // Called by CitySimulation after placeServiceBuilding() succeeds.
+    // main-thread-only.
+    virtual void placeServiceBuildingMesh(int tileX, int tileZ,
+                                          ServiceBuildingType type) = 0;
+
+    // removeServiceBuildingMesh — destroy the service building scene node at
+    // tile (tileX, tileZ). No-op if no service building is registered there.
+    // Called by CitySimulation after demolishTile() on a service building tile.
+    // main-thread-only.
+    virtual void removeServiceBuildingMesh(int tileX, int tileZ) = 0;
 };

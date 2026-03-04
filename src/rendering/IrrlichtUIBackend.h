@@ -131,6 +131,12 @@ public:
     //     r, g, b, a in [0, 255]. Has no visible effect on button elements.
     void setElementBackground(UIElementHandle handle, int r, int g, int b, int a) override;
 
+    // 19. Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element.
+    //     Calls IGUIStaticText::setOverrideFont(m_monoFont). No-op when m_monoFont is null
+    //     (font absent or headless CI mode) — graceful fallback, no assert.
+    //     Labels, button text, and panel titles MUST NOT call this method.
+    void setElementMonoFont(UIElementHandle handle) override;
+
 private:
     irr::IrrlichtDevice*       m_device{nullptr};
     irr::gui::IGUIEnvironment* m_guiEnv{nullptr};

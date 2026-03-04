@@ -896,6 +896,44 @@ void IrrlichtUIBackend::setElementBackground(UIElementHandle handle,
 }
 
 // ---------------------------------------------------------------------------
+// 19. setElementMonoFont
+//
+// Applies the monospace bitmap font (loaded from hud_mono_font.xml at
+// construction) to an IGUIStaticText element via setOverrideFont().
+//
+// Guards:
+//   - No-op when the handle is invalid or not in m_elementMap.
+//   - No-op when the element is not EGUIET_STATIC_TEXT (buttons have their
+//     own font machinery; do not call this on button handles).
+//   - No-op when m_monoFont is null (font file absent at construction or
+//     running headless) — graceful fallback, no assert.
+//
+// MUST NOT be called on label text, button text, tooltips, or panel title
+// elements. Those use the proportional hud_font.xml set as the env default.
+// ---------------------------------------------------------------------------
+void IrrlichtUIBackend::setElementMonoFont(UIElementHandle handle)
+{
+    if (!m_monoFont) {
+        // Font absent (file missing at load time, or headless CI) — graceful no-op.
+        return;
+    }
+
+    auto it = m_elementMap.find(handle);
+    if (it == m_elementMap.end() || !it->second.element) {
+        return;
+    }
+
+    irr::gui::IGUIElement* elem = it->second.element;
+
+    // Only IGUIStaticText supports setOverrideFont().
+    if (elem->getType() != irr::gui::EGUIET_STATIC_TEXT) {
+        return;
+    }
+
+    static_cast<irr::gui::IGUIStaticText*>(elem)->setOverrideFont(m_monoFont);
+}
+
+// ---------------------------------------------------------------------------
 // handleViewportResize
 // Detects screen size changes and repositions every GUI element so that its
 // physical pixel position matches its stored virtual coordinate at the new

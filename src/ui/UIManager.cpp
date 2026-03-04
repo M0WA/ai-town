@@ -185,13 +185,19 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
         // Create all 4 buttons; set inactive sprite for each (including the default);
         // then override the default (typeIdx 0, PowerPlant) with the active sprite.
         // Tests assert: all 4 inactive calls + 1 active call on the default button.
+        //
+        // Phase 10: text fallback labels used when hud_sprites_ui.png fails to load.
+        // Labels per architecture/ui-ux/hud-layout.md §Utilities Sub-Panel Button Content.
+        static const char* kUtilFallbackLabels[4] = { "Power", "Water", "Fire", "Police" };
+
         for (int utilRow = 0; utilRow < 2; ++utilRow) {
             for (int utilCol = 0; utilCol < 2; ++utilCol) {
                 int typeIdx = utilRow * 2 + utilCol;
                 int bx  = utilLeft + utilCol * (utilBtnW + utilGap);
                 int by  = utilTop  + utilRow * (utilBtnH + utilGap);
 
-                m_utilSubPanelBtns[typeIdx] = m_backend->addButton("", bx, by, utilBtnW, utilBtnH);
+                m_utilSubPanelBtns[typeIdx] = m_backend->addButton(
+                    kUtilFallbackLabels[typeIdx], bx, by, utilBtnW, utilBtnH);
 
                 // Set inactive sprite for every button (including the default).
                 uint32_t inactiveSprite = kSpriteUtilPowerInactive
@@ -1189,6 +1195,17 @@ void UIManager::update(float realDeltaSeconds) {
                 m_notifications->postNormal(
                     "City Rating Changed",
                     "City rating tier has changed!");
+                // Phase 10: fire MILESTONE stinger on City Rating tier transitions.
+                // Raw PopulationMilestone events do NOT trigger the stinger — only
+                // CityRatingTransition does (architecture/audio-architecture/dynamic-soundscape.md).
+                // 5-second cooldown gate, matching the CRISIS stinger pattern.
+                if (m_audio && m_clock) {
+                    double now = m_clock->nowSeconds();
+                    if ((now - m_lastMilestoneStingerFireTime) >= kStingerCooldownSeconds) {
+                        m_audio->triggerStinger(StingerType::MILESTONE);
+                        m_lastMilestoneStingerFireTime = now;
+                    }
+                }
                 break;
         }
     }

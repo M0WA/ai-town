@@ -1,8 +1,9 @@
 #pragma once
 
-#include "src/interfaces/IRenderer.h"  // IRenderer, TextureHandle, CameraParams, TerrainChunkRebuildParams, ScreenRect
+#include "src/interfaces/IRenderer.h"  // IRenderer, TextureHandle, CameraParams, TerrainChunkRebuildParams, ScreenRect, ServiceBuildingType
 #include <irrlicht.h>
 #include <unordered_map>
+#include <memory>    // std::unique_ptr
 #include <cstdint>
 
 // Forward-declare ITerrainQuery — full include is in IrrlichtRenderer.cpp only,
@@ -18,6 +19,11 @@ class ITerrainQuery;
 // Rule: IrrlichtRenderer.h forward-declares UIManager; IrrlichtRenderer.cpp #includes it.
 // Per architecture/graphics-architecture/irrlicht-device-lifecycle.md Header Dependency Rule.
 class UIManager;
+
+// Forward-declare BuildingAssetLoader and LODNode — full includes in IrrlichtRenderer.cpp.
+// IrrlichtRenderer owns a BuildingAssetLoader by unique_ptr (Phase 10).
+class BuildingAssetLoader;
+class LODNode;
 
 // IrrlichtRenderer — concrete implementation of IRenderer backed by Irrlicht.
 //
@@ -110,6 +116,24 @@ public:
     ScreenRect getTileScreenBounds(int tileX, int tileZ) const override;
     vec3       getListenerPosition() const override;
 
+    // Phase 10 — building mesh spawning and road mesh rendering API.
+    // Six overrides corresponding to the pure-virtual methods added to IRenderer
+    // in Phase 10. Implementations in IrrlichtRenderer.cpp load .b3d assets via
+    // BuildingAssetLoader and create/remove scene nodes through SceneEntityManager.
+    // All methods are no-op safe (log warning + return) when assetBaseName is empty
+    // or the asset file is missing — callers must not assume the node was created.
+    // main-thread-only.
+    void placeBuildingMesh(int tileX, int tileZ,
+                           const std::string& assetBaseName) override;
+    void removeBuildingMesh(int tileX, int tileZ) override;
+    // Road mesh: no assetBaseName — all road tiles share the same mesh asset.
+    void placeRoadMesh(int tileX, int tileZ) override;
+    void removeRoadMesh(int tileX, int tileZ) override;
+    // Service building mesh: identified by ServiceBuildingType enum, not a string.
+    void placeServiceBuildingMesh(int tileX, int tileZ,
+                                  ServiceBuildingType type) override;
+    void removeServiceBuildingMesh(int tileX, int tileZ) override;
+
 private:
     irr::IrrlichtDevice*        m_device;
     UIManager*                  m_uiManager;
@@ -159,4 +183,55 @@ private:
     // Rebuilt by setZoneOverlay(); old node is removed before new mesh is attached.
     // null until the first non-empty setZoneOverlay() call.
     irr::scene::IMeshSceneNode* m_overlayNode{nullptr};
+
+    // --- Phase 10: building and road scene node registries ---
+    //
+    // Key: tileZ * kMaxMapTiles + tileX (same encoding used for the zone overlay sparse map).
+    // Value: owning LODNode* — IrrlichtRenderer is the sole owner; each LODNode wraps an
+    //        IMeshSceneNode* that is owned by the Irrlicht scene graph.
+    //
+    // Invariant: every entry in these maps corresponds to a live scene node.
+    // On removal the LODNode is deleted (which does NOT remove the scene node — the caller
+    // must invoke the eviction sequence on the scene node separately before deleting the LODNode).
+    //
+    // kMaxMapTiles: upper bound on tile index per axis used as key multiplier.
+    // Using 4096 accommodates any V1 map dimension (max 1024) with safe headroom.
+    static constexpr int kMaxMapTiles = 4096;
+
+    // kTileSize: world-space side length of one tile in metres.
+    // Must match the tile dimensions defined in TerrainSystem / SimulationConstants.
+    // Used to convert (tileX, tileZ) → world position (tileX * kTileSize, 0, tileZ * kTileSize).
+    // Value: 10.0f metres per tile (matches physics tile grid in architecture specs).
+    static constexpr float kTileSize = 10.0f;
+
+    // Tile key helper — produces a stable uint64_t key from (tileX, tileZ).
+    static uint64_t tileKey(int tileX, int tileZ) noexcept {
+        return static_cast<uint64_t>(tileZ) * kMaxMapTiles +
+               static_cast<uint64_t>(tileX);
+    }
+
+    // Building scene node registry (zone buildings + service buildings share one map).
+    // All placed buildings (zone and service) are keyed by tile. A tile can hold at most
+    // one building at a time — the simulation enforces the one-building-per-tile invariant.
+    std::unordered_map<uint64_t, LODNode*> m_buildingNodes;
+
+    // Road tile scene node registry.
+    std::unordered_map<uint64_t, LODNode*> m_roadNodes;
+
+    // BuildingAssetLoader — created lazily (on first placeBuildingMesh call) to avoid
+    // constructing when m_smgr is null (e.g. unit tests with null device).
+    // Owned exclusively by IrrlichtRenderer; destroyed in the destructor.
+    std::unique_ptr<BuildingAssetLoader> m_buildingAssetLoader;
+
+    // Helper: destroy a LODNode entry in a tile-keyed registry.
+    // Executes the full eviction sequence on the wrapped scene node:
+    //   clear material texture slots → driver->setMaterial(SMaterial{}) → node->remove()
+    // then deletes the LODNode wrapper. Erases the map entry.
+    // No-op if the key is not in the map.
+    void destroyTileNode(std::unordered_map<uint64_t, LODNode*>& registry,
+                         int tileX, int tileZ);
+
+    // Helper: ensure m_buildingAssetLoader is created (idempotent).
+    // Returns false and logs a warning if m_smgr is null (test/headless context).
+    bool ensureAssetLoader();
 };

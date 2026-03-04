@@ -76,6 +76,72 @@ Where:
 
 The `<asset_name>` base (e.g. `res_low_01`) is referenced in `<asset_name>.meta` for `height_floors`, `category`, and atlas cell assignments. The C++ `BuildingAssetLoader` parses the naming convention to construct LOD file paths — do not use ad-hoc per-building naming.
 
+#### Variant Selection Policy (Round-Robin, Phase 11)
+
+**Phase 10 note**: Phase 10 always uses variant `_01` for every zone/tier combination — `assetBaseName` is always `"<zone>_<tier>_01"` (e.g. `"res_low_01"`, `"com_med_01"`). The round-robin counter described below is a Phase 11 enhancement; do NOT implement the counter in Phase 10. This keeps Phase 10's `CitySimulation` scope unambiguous and makes mock-renderer test assertions deterministic.
+
+**Phase 11 and later**: When `CitySimulation` places a zone tile, it selects a visual building variant from the available variants for that zone-tier combination using a **per-zone-tier round-robin counter**. The policy is:
+
+- `CitySimulation` maintains one `int` counter per unique zone-tier combination (9 combinations in V1: Res/Com/Ind × Low/Med/High). Each counter starts at `0` and increments by `1` on every successful placement for that zone-tier combination.
+- The variant index is `(counter % numVariants) + 1`, formatted as a zero-padded 2-digit string (`01`, `02`, …). `numVariants` is always `2` for V1 (two variants per zone-tier slot).
+- The resulting `assetBaseName` passed to `IRenderer::placeBuildingMesh()` is `<zone>_<tier>_<variant>` (e.g. `"res_low_01"`, `"res_low_02"`, `"res_low_01"`, …).
+- After `CitySimulation::doDensityUnlockTick()` upgrades a tile to a higher density tier, the NEW `assetBaseName` uses the upgraded tier's round-robin counter (not the original tier's counter). Example: a tile originally placed as `"res_low_02"` that upgrades to Medium becomes `"res_med_<N>"` where `<N>` is the current Residential/Medium counter value.
+- The counter is a plain `int` member of `CitySimulation` per zone-tier slot. It is not persisted in the save file in V1 — on load, all existing zone tile variants are read from the tile's stored `assetBaseName` field in the save data, not recomputed from the counter. Only newly placed tiles after a load use the counter (starting from 0). This means save/load does not change existing visible building variants. Counter serialisation is Phase 11 scope.
+- **No-repeat guarantee**: the round-robin ensures strict alternation between the two V1 variants (01, 02, 01, 02, …) without shuffling or RNG. This is intentional — using `ISimulationRNG` for variant selection would couple visible-asset selection to the simulation RNG stream, making reproduction of RNG-dependent events (service degradation, loan issuance) dependent on the number of tiles placed, which would break deterministic test replay. Visual variant selection MUST NOT use `ISimulationRNG`.
+- **Counter storage location**: `CitySimulation` stores the nine counters as `std::array<int, 9> m_buildingVariantCounters` (indexed by `zone * 3 + tier` where `zone` = 0/1/2 for Res/Com/Ind and `tier` = 0/1/2 for Low/Med/High), initialised to `{0}` in the constructor initialiser list.
+
+**`assetBaseName` construction helper** (implement as a `static` free function in `CitySimulation.cpp`):
+
+```cpp
+static std::string buildingAssetBaseName(ZoneType zone, DensityTier tier, int variantCounter) {
+    static const char* zoneStr[]  = {"res", "com", "ind"};
+    static const char* tierStr[]  = {"low", "med", "high"};
+    static const int numVariants  = 2;   // V1 constant
+    int variantIdx = (variantCounter % numVariants) + 1;
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%s_%s_%02d",
+        zoneStr[static_cast<int>(zone)],
+        tierStr[static_cast<int>(tier)],
+        variantIdx);
+    return buf;
+}
+```
+
+This function is internal to `CitySimulation.cpp` — do not expose it through `ICitySimulation`.
+
+#### `BuildingAssetLoader` LOD Loading Contract
+
+`BuildingAssetLoader::load(assetBaseName)` loads **all three LOD variants** (LOD0, LOD1, and LOD2 or billboard, depending on `height_floors`) at load time, per the `LODNode` design in `3d-model-standards.md`:
+
+> "The C++ `LODNode` (`src/rendering/LODNode.h`) loads all LOD variants at load time and swaps mesh buffers based on camera distance thresholds."
+
+The load sequence for a given `assetBaseName` (e.g. `"res_low_01"`):
+
+1. Read `assets/3d/buildings/<assetBaseName>.meta` to obtain `height_floors`, `category`, `atlas_cell`, and `lod_distances`.
+2. Load `assets/3d/buildings/<assetBaseName>_lod0.b3d` (always required — missing file: log warning, return null).
+3. Load `assets/3d/buildings/<assetBaseName>_lod1.b3d` (always required — missing file: log warning, return null).
+4. If `height_floors <= 3`: load `assets/3d/buildings/<assetBaseName>_billboard.dds` (billboard atlas for LOD2). No `_lod2.b3d` is loaded or expected.
+5. If `height_floors >= 4`: load `assets/3d/buildings/<assetBaseName>_lod2.b3d` (geometry shell for LOD2). No `_billboard.dds` is loaded or expected for LOD2.
+6. Return a `BuildingAsset` struct containing all loaded mesh pointers / texture handles and the parsed `.meta` fields.
+
+`IRenderer::placeBuildingMesh()` passes the returned `BuildingAsset` to `SceneEntityManager::spawnBuilding()` which constructs the `LODNode` with all three LOD resources. The phrasing "load the LOD0 `.b3d` mesh" in the Phase 10 deliverable description is shorthand for the full load sequence above — `placeBuildingMesh()` loads all LOD variants, not only LOD0.
+
+#### World-Space Tile Positioning (`kTileSize`)
+
+Zone building and road tile scene nodes are placed at world position:
+
+```text
+X = tileX * kTileSize
+Y = 0.0f          (pivot sits exactly at ground plane; terrain height not used in V1)
+Z = tileZ * kTileSize
+```
+
+**`kTileSize` value**: `4.0f` Irrlicht units (4 metres). Each simulation tile occupies a 4 m × 4 m footprint. This is consistent with the road tile LOD budget (road tile mesh = 4×4 m quad) and the modular building kit grid (4 m × 4 m × 3 m per floor unit).
+
+**Declaration**: `kTileSize` is declared as `constexpr float kTileSize = 4.0f;` in `src/rendering/render_constants.h` alongside `RenderConstants::road_lod2_color`. It is used by `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and `placeServiceBuildingMesh()`. Do NOT hardcode the literal `4.0f` at call sites — always use `kTileSize` so that if the tile size changes (e.g., for a future map scale change), all placement calls update in one place.
+
+**Service building tile footprint**: Service buildings occupy a single 4×4 m tile in V1. The placed scene node's world X/Z origin is identical to the formula above. The service building mesh extends beyond the 4×4 m tile boundary at LOD0 (up to 12×12 m for a power plant), but the placement origin and collision registration tile are the single 4×4 m origin tile.
+
 #### `.meta` Sidecar File Format
 
 Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON sidecar (check #15 in the export validation script). Required fields:
@@ -404,3 +470,5 @@ delivery. No 3D model asset is on the Phase 10 critical path.
 <!-- SIGN-OFF: graphics-artist-3d-model 2026-03-01 — LOD2 pivot conformance confirmed for all large building types (res_high_01/02, com_high_01/02, ind_high_01/02): (a) two stacked floor modules show no visible join gap in Irrlicht scene view; (b) LOD2 shell silhouette matches LOD1 assembled building silhouette within 10% area deviation at 8 azimuth angles at 45° increments (camera pitch = −45° below horizontal). Placeholder geometry passes formal review criteria. -->
 
 <!-- SIGN-OFF: graphics-artist-3d-model 2026-03-01 — Billboard bake geometry sign-off: placeholder billboard renders at pitch = −45°, 8 angles at 45° increments; flat ambient-only lighting; geometry silhouette at 128×128 downscaled to 14×14 px meets recognizability threshold for all small building variants (res_low_01/02, res_med_01/02, com_low_01/02, com_med_01/02, ind_low_01/02, ind_med_01/02). Straight alpha, no bleed into 8px border. -->
+
+<!-- SIGN-OFF: graphics-artist-3d-model 2026-03-04 — Phase 10 design decisions resolved. Three new sections added to this spec: (1) Variant Selection Policy (round-robin) — Phase 10 always uses _01 suffix; round-robin counter (Phase 11) spec and buildingAssetBaseName helper function documented; no-repeat guarantee via round-robin without RNG confirmed; nine per-zone-tier counters stored as std::array<int,9> m_buildingVariantCounters in CitySimulation, not persisted in V1 save; (2) BuildingAssetLoader LOD Loading Contract — placeBuildingMesh() loads all three LOD variants (LOD0, LOD1, LOD2/billboard) at load time; the "load the LOD0 .b3d mesh" phrasing in Phase 10 deliverable description is shorthand for the full sequence; BuildingAsset struct carries all loaded resources and parsed .meta fields; (3) World-Space Tile Positioning (kTileSize) — kTileSize = 4.0f constexpr float declared in src/rendering/render_constants.h; consistent with 4x4 m road tile mesh and 4x4x3 m modular building kit grid; service buildings occupy a single 4x4 m origin tile in V1 even if mesh extends beyond it; do not hardcode 4.0f at call sites. These decisions unblock Phase 10 rendering stream (graphics-dev-irrlicht) and the Phase 11 variant cycling implementation. No asset re-authoring is required. -->

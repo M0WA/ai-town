@@ -7,10 +7,13 @@
 #include "IrrlichtRenderer.h"
 #include "src/ui/UIManager.h"            // FULL include here (not in header — per Header Dependency Rule)
 #include "src/interfaces/ITerrainQuery.h" // ITerrainQuery full include (forward-decl in header only)
+#include "BuildingAssetLoader.h"          // Phase 10: load .b3d asset families via BuildingAssetLoader::load()
+#include "LODNode.h"                      // Phase 10: LOD swap wrapper returned by BuildingAssetLoader::load()
 
 #include <algorithm>   // std::min, std::max
 #include <cstdio>      // fprintf
 #include <cmath>       // M_PI
+#include <string>      // std::string for asset path construction
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -70,6 +73,25 @@ IrrlichtRenderer::~IrrlichtRenderer() {
     // when the scene manager is destroyed.  We do not call remove() here because the
     // device/smgr may already be in a partially-torn-down state by the time this
     // destructor runs.
+
+    // Phase 10: clean up all LODNode wrappers in building and road registries.
+    // LODNode objects are heap-allocated by BuildingAssetLoader::load() and owned by
+    // IrrlichtRenderer. Deleting a LODNode does NOT remove its wrapped scene node
+    // (scene node lifetime is managed by the Irrlicht scene graph, which is torn down
+    // by device->drop() in main.cpp AFTER IrrlichtRenderer is destroyed).
+    // We only delete the wrapper objects here; the underlying scene nodes are cleaned
+    // up when the scene manager is destroyed.
+    for (auto& kv : m_buildingNodes) {
+        delete kv.second;
+    }
+    m_buildingNodes.clear();
+
+    for (auto& kv : m_roadNodes) {
+        delete kv.second;
+    }
+    m_roadNodes.clear();
+
+    // m_buildingAssetLoader (unique_ptr) is destroyed automatically.
 }
 
 void IrrlichtRenderer::beginFrame() {
@@ -747,4 +769,250 @@ ScreenRect IrrlichtRenderer::getTileScreenBounds(int tileX, int tileZ) const
 vec3 IrrlichtRenderer::getListenerPosition() const
 {
     return m_lastCameraPosition;
+}
+
+// =============================================================================
+// Phase 10 — Building mesh spawning and road mesh rendering
+//
+// Implements the six IRenderer pure-virtual methods for creating and removing
+// 3D scene nodes when the simulation places or demolishes tiles.
+//
+// Building and service-building nodes are stored in m_buildingNodes.
+// Road tile nodes are stored in m_roadNodes.
+// Both maps are keyed by tileKey(tileX, tileZ) (uint64_t).
+//
+// Placement always calls ensureAssetLoader() first — returns early if m_smgr
+// is null (headless / unit-test context).
+//
+// Removal runs the eviction sequence per scene-graph-ownership.md:
+//   clear material texture slots → driver->setMaterial(SMaterial{}) → node->remove()
+// then deletes the LODNode wrapper.
+//
+// main-thread-only — do NOT call from audio thread or simulation thread.
+// =============================================================================
+
+// -------------------------------------------------------------------------
+// ensureAssetLoader — lazily construct m_buildingAssetLoader.
+// Returns true if the loader is ready; false if m_smgr is null.
+// -------------------------------------------------------------------------
+bool IrrlichtRenderer::ensureAssetLoader()
+{
+    if (m_buildingAssetLoader) return true;
+    if (!m_smgr || !m_driver) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: ensureAssetLoader() called with null "
+            "m_smgr/m_driver — scene node cannot be created\n");
+        return false;
+    }
+    m_buildingAssetLoader = std::make_unique<BuildingAssetLoader>(m_smgr, m_driver);
+    return true;
+}
+
+// -------------------------------------------------------------------------
+// destroyTileNode — eviction sequence + LODNode deletion for one registry entry.
+//
+// Per scene-graph-ownership.md eviction sequence (simplified — no TextureCache
+// here because IrrlichtRenderer does not yet maintain a TextureCache reference;
+// buildings and roads created in Phase 10 use the driver's default material pool
+// and have no sRGB/splat textures requiring explicit reference-count management):
+//   Step 1: Clear all material texture slots.
+//   Step 2: driver->setMaterial(SMaterial{}) — flush driver last-bound state.
+//   Step 3: Null the LODNode's internal node pointer BEFORE remove().
+//           (LODNode::getNode() returns the raw pointer; we call remove() on it
+//           after nulling the LODNode wrapper.)
+//   Step 4: Delete the LODNode wrapper (does not call remove() — wrapper is non-owning).
+//
+// No-op if the key is not in the registry.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::destroyTileNode(
+    std::unordered_map<uint64_t, LODNode*>& registry,
+    int tileX, int tileZ)
+{
+    uint64_t key = tileKey(tileX, tileZ);
+    auto it = registry.find(key);
+    if (it == registry.end() || !it->second) return;
+
+    LODNode* lodNode = it->second;
+    scene::IMeshSceneNode* node = lodNode->getNode();
+
+    if (node && m_driver) {
+        // Step 1: clear material texture slots.
+        u32 matCount = node->getMaterialCount();
+        for (u32 m = 0; m < matCount; ++m) {
+            SMaterial& mat = node->getMaterial(m);
+            for (u32 t = 0; t < MATERIAL_MAX_TEXTURES; ++t) {
+                mat.setTexture(t, nullptr);
+            }
+        }
+        // Step 2: flush driver last-bound state.
+        m_driver->setMaterial(SMaterial{});
+        // Step 3 + 4: remove the scene node.
+        node->remove();  // do NOT access node* after this
+    }
+
+    // Delete the LODNode wrapper (non-owning — scene node already removed above).
+    delete lodNode;
+    registry.erase(it);
+}
+
+// -------------------------------------------------------------------------
+// placeBuildingMesh — zone building placement.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
+                                          const std::string& assetBaseName)
+{
+    if (assetBaseName.empty()) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: placeBuildingMesh(%d,%d) called with "
+            "empty assetBaseName — skipping node creation\n", tileX, tileZ);
+        return;
+    }
+    if (!ensureAssetLoader()) return;
+
+    // Remove any existing building on this tile first (e.g. density upgrade swap).
+    destroyTileNode(m_buildingNodes, tileX, tileZ);
+
+    // Construct the asset base path: assets/3d/buildings/<assetBaseName>
+    // BuildingAssetLoader::load() appends _lod0.b3d, _lod1.b3d, _lod2.b3d, .meta.
+    std::string basePath = std::string(AITOWN_ASSETS_DIR) +
+                           "/3d/buildings/" + assetBaseName;
+
+    LODNode* lodNode = m_buildingAssetLoader->load(basePath);
+    if (!lodNode) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: placeBuildingMesh(%d,%d): failed to load "
+            "asset '%s' — node not created\n", tileX, tileZ, basePath.c_str());
+        return;
+    }
+
+    // Position the scene node at the tile's world-space origin.
+    // Pivot convention: base-centre at Y=0 (per 3d-model-standards.md).
+    if (scene::IMeshSceneNode* node = lodNode->getNode()) {
+        node->setPosition(core::vector3df(
+            static_cast<f32>(tileX) * kTileSize,
+            0.0f,
+            static_cast<f32>(tileZ) * kTileSize));
+    }
+
+    m_buildingNodes[tileKey(tileX, tileZ)] = lodNode;
+}
+
+// -------------------------------------------------------------------------
+// removeBuildingMesh — zone and service building removal.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::removeBuildingMesh(int tileX, int tileZ)
+{
+    destroyTileNode(m_buildingNodes, tileX, tileZ);
+}
+
+// -------------------------------------------------------------------------
+// placeRoadMesh — road tile placement.
+//
+// All road tiles share the same mesh family: flat LOD0 quad + kerb geometry
+// (<=48 tris) with the road custom shader and road_asphalt_tileable.dds.
+// Asset base path: assets/3d/roads/road_tile
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ)
+{
+    if (!ensureAssetLoader()) return;
+
+    // Remove any existing road on this tile first.
+    destroyTileNode(m_roadNodes, tileX, tileZ);
+
+    // Fixed asset path — all road tiles are identical.
+    std::string basePath = std::string(AITOWN_ASSETS_DIR) + "/3d/roads/road_tile";
+
+    LODNode* lodNode = m_buildingAssetLoader->load(basePath);
+    if (!lodNode) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: placeRoadMesh(%d,%d): failed to load "
+            "road tile asset '%s' — node not created\n",
+            tileX, tileZ, basePath.c_str());
+        return;
+    }
+
+    if (scene::IMeshSceneNode* node = lodNode->getNode()) {
+        node->setPosition(core::vector3df(
+            static_cast<f32>(tileX) * kTileSize,
+            0.0f,
+            static_cast<f32>(tileZ) * kTileSize));
+    }
+
+    m_roadNodes[tileKey(tileX, tileZ)] = lodNode;
+}
+
+// -------------------------------------------------------------------------
+// removeRoadMesh — road tile removal.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::removeRoadMesh(int tileX, int tileZ)
+{
+    destroyTileNode(m_roadNodes, tileX, tileZ);
+}
+
+// -------------------------------------------------------------------------
+// placeServiceBuildingMesh — service building placement.
+//
+// Asset path derived from ServiceBuildingType:
+//   PowerPlant    → assets/3d/buildings/svc_power_plant
+//   WaterTower    → assets/3d/buildings/svc_water_tower
+//   FireStation   → assets/3d/buildings/svc_fire_station
+//   PoliceStation → assets/3d/buildings/svc_police_station
+// LOD thresholds read from the corresponding .meta sidecar (small building
+// category: 30/25 m close, 100/90 m far, billboard LOD2).
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
+                                                  ServiceBuildingType type)
+{
+    if (!ensureAssetLoader()) return;
+
+    // Derive the asset stem from the ServiceBuildingType enum.
+    const char* stem = nullptr;
+    switch (type) {
+        case ServiceBuildingType::PowerPlant:    stem = "svc_power_plant";    break;
+        case ServiceBuildingType::WaterTower:    stem = "svc_water_tower";    break;
+        case ServiceBuildingType::FireStation:   stem = "svc_fire_station";   break;
+        case ServiceBuildingType::PoliceStation: stem = "svc_police_station"; break;
+    }
+    if (!stem) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: placeServiceBuildingMesh(%d,%d): "
+            "unknown ServiceBuildingType %d — skipping\n",
+            tileX, tileZ, static_cast<int>(type));
+        return;
+    }
+
+    // Remove any existing building on this tile first.
+    destroyTileNode(m_buildingNodes, tileX, tileZ);
+
+    std::string basePath = std::string(AITOWN_ASSETS_DIR) +
+                           "/3d/buildings/" + stem;
+
+    LODNode* lodNode = m_buildingAssetLoader->load(basePath);
+    if (!lodNode) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: placeServiceBuildingMesh(%d,%d): "
+            "failed to load asset '%s' — node not created\n",
+            tileX, tileZ, basePath.c_str());
+        return;
+    }
+
+    if (scene::IMeshSceneNode* node = lodNode->getNode()) {
+        node->setPosition(core::vector3df(
+            static_cast<f32>(tileX) * kTileSize,
+            0.0f,
+            static_cast<f32>(tileZ) * kTileSize));
+    }
+
+    // Service buildings share the m_buildingNodes registry with zone buildings:
+    // a tile can hold at most one building of any type (simulation invariant).
+    m_buildingNodes[tileKey(tileX, tileZ)] = lodNode;
+}
+
+// -------------------------------------------------------------------------
+// removeServiceBuildingMesh — service building removal.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::removeServiceBuildingMesh(int tileX, int tileZ)
+{
+    // Service buildings use the same m_buildingNodes registry as zone buildings.
+    destroyTileNode(m_buildingNodes, tileX, tileZ);
 }
