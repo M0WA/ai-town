@@ -384,26 +384,82 @@ Total texture VRAM for all simultaneously-resident assets must not exceed **1.0 
 **Draw call ceiling**: ≤2,000 draw calls per frame (all LODs combined). Buildings sharing the same atlas texture and material can be batched or instanced into a single draw call. This drives the atlas-first design requirement.
 **Unique mesh variant cap**: ≤50 unique LOD0/LOD1/LOD2 building mesh variants simultaneously loaded. Building types exceeding 50 unique meshes must share atlas space and be explicitly approved.
 
+### UI Sprite Sheet Art Style — Milk-Glass
+
+All icons in `hud_sprites_ui.png` use a subtle frosted milk-glass style where
+the icon symbols are clearly visible and dominant, and the glass treatment is
+a restrained visual hint rather than a prominent effect. Each 64x64 cell is
+rendered at 4x internal resolution (256x256) and Lanczos-downsampled for
+clean anti-aliased edges. The generator script is `tools/generate_hud_sprites.py`.
+
+**Cell background treatment (per icon cell):**
+
+- Rounded rectangle with ~10 px corner radius (at 64 px scale), semi-opaque
+  frosted dark glass base: `rgba(22, 32, 48, 200)`
+- Very subtle vertical gradient: top +8 brightness, bottom -8 brightness
+- Thin specular arc in top-left quadrant: white ellipse, **alpha MAX 15**,
+  Gaussian-feathered (a whisper of gloss, not a wash)
+- Top gradient overlay: white, **alpha MAX 12** (fades to 0 at midpoint)
+- 1 px inner bevel: top/left edges `rgba(255,255,255,40)`,
+  bottom/right `rgba(0,0,0,60)`
+- 2 px drop shadow offset bottom-right: `rgba(0,0,0,80)`
+- Active state: subtle outer glow (teal `rgba(0,200,200,60)` for toolbar
+  tools; zone-specific color for zone buttons; red for demolish), blur
+  radius ~12 px at 4x scale
+- Inactive state: no glow, identical base tint (no desaturation shift)
+
+**Hard limits on glass overlay intensity (enforced in generator):**
+
+- Specular gloss arc alpha: **MAX 18 / 255**
+- Top gradient overlay alpha: **MAX 12 / 255**
+
+These limits ensure icons/symbols remain the dominant visual element at all
+display sizes. Exceeding these values produces a whitewash effect that
+obscures icon readability, especially on the upper half of each cell.
+
+**Icon symbol treatment:**
+
+- Gradient fills on shapes simulating a top-left light source
+- 1-2 px specular highlight along top/left edges of major shapes
+- Drop shadow behind icon content (offset 4 px at 4x, alpha 80)
+- Distinct silhouettes per semantic meaning (no shape reuse across
+  different icon roles)
+
+**Color palette:**
+
+- Base glass (all states): `rgba(22, 32, 48, 200)` with +/-8 brightness
+  vertical shift
+- Zone Residential active: dark green tint `rgba(18, 40, 28, 200)`
+- Zone Commercial active: dark blue tint `rgba(18, 28, 52, 200)`
+- Zone Industrial active: dark amber tint `rgba(48, 40, 18, 200)`
+- Demolish active: dark red tint `rgba(48, 22, 22, 200)`
+- Badge/indicator cells: darker base `rgba(18, 24, 38, 190)`
+- Icon symbols: full-color per semantic role (amber bolt, blue drop,
+  red shield, gold star, etc.) with white/cream highlights
+
 ### Phase 10 Sign-Off — UI Sprite Sheet (graphics-artist-2d-texture)
 
 > Phase 10 sign-off — 2026-03-04
 >
 > `assets/textures/ui/hud_sprites_ui.png` delivered and validated:
 >
-> - Dimensions: 2048×2048 px (32 columns × 32 rows of 64×64 px cells = 1024 cells total)
+> - Dimensions: 2048x2048 px (32 columns x 32 rows of 64x64 px cells = 1024 cells total)
 > - Colour mode: RGBA (8 bits per channel, straight alpha)
 > - Format: PNG (source/authoring format; DDS export via `export_textures.py --format rgba8`
 >   is a Phase 9 deliverable by `graphics-dev-irrlicht`)
-> - Colour space: **linear** (NOT sRGB) — UI elements are not photographic diffuse; sRGB
+> - Colour space: **linear** (NOT sRGB) -- UI elements are not photographic diffuse; sRGB
 >   decode must NOT be applied at upload time; `GL_TEXTURE_MAX_LEVEL=0` (mipmapping disabled)
-> - Byte-order verified: PNG IHDR colour type 6 (RGBA), bit depth 8; confirmed with
->   `python3 tools/validate_assets.py` → `[CHECK 23 PASS]`
-> - Rows 0–6 painted: Zone, Road, Utilities, Demolish, Query, Undo, Notification icon rows
-> - Row 7: **fully transparent** (alpha=0 on all pixels) — reserved separator row
-> - Rows 8–10 painted: Cursor shapes, Minimap overlay icons, Miscellaneous UI icons
-> - Rows 11–31: fully transparent (unused; reserved for future icon expansion)
-> - Icon fill: white (255, 255, 255) or light grey (200, 200, 200) per icon type
-> - Active border: #33BB44 (accent green, 2 px inset per cell)
+> - Art style: **glassy 3D buttons** -- rounded rectangle glass backgrounds with vertical
+>   gradient, specular gloss arc, inner bevel, drop shadow, and outer glow (active state).
+>   Icons rendered with 3D embossed treatment (gradient fills, highlights, shadows).
+>   Generator script: `tools/generate_hud_sprites.py` (4x supersampled, Lanczos downsample).
+> - Rows 0-6 painted: Toolbar active/inactive, Zone active/inactive, Utilities
+>   active/inactive, Active tool indicator badges
+> - Row 7 painted: Cursor shape icons (reserved for Phase 12 `setMouseCursor()`)
+> - Rows 8-9 painted: Minimap overlay toggle (active/inactive)
+> - Row 10 painted: Notification bell, clock, unsaved dot, undo arrow
+> - Rows 11-31: fully transparent (unused; reserved for future icon expansion)
+> - 42 unique sprites total across rows 0-10 (no duplicated shapes between cells)
 > - No mip chain; no DXT compression on PNG source; atlas padding not required
 >   (mipmapping disabled removes the padding constraint per UV & Atlas Strategy section)
 >
