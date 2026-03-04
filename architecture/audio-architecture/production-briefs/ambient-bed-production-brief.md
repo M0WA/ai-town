@@ -131,6 +131,12 @@ the full ambient mix (see `stinger-production-brief.md`).
 - [ ] Night bed opens acceptably after a direct day→night crossfade (no jarring onset at start of night content).
 - [ ] Day→night direct crossfade audibility test committed to `assets/audio/crossfade_demo_day_to_night.ogg` and approved before asset lock.
 - [ ] No JSON sidecars submitted for ambient beds (they are not required and would be ignored).
+- [ ] **`assets/audio/ambient_bed_qa.md` committed** — one entry per file documenting
+  sample-0 gate result ("pass"), DAW loop cycles count (minimum 5), crossfade tail
+  present ("yes"), measured LUFS and dBTP, and author sign-off. See
+  `architecture/audio-architecture/v1-audio-asset-manifest.md` Phase 10 QA Delivery
+  Artifacts section for the required format. This document is a mandatory Phase 10
+  exit deliverable.
 
 ---
 

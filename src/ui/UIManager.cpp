@@ -28,6 +28,8 @@
 
 // Explicit interface includes for method calls on forward-declared pointers.
 #include "src/interfaces/IAudioSystem.h"
+#include "src/interfaces/sound_ids.h"       // UI_CLICK, UI_MENU_OPEN, UI_MENU_CLOSE — Phase 10 wiring
+#include "src/interfaces/audio_types.h"     // SoundPriority::NORMAL — Phase 10 wiring
 #include "src/interfaces/ICitySimulation.h"
 #include "src/interfaces/IRenderer.h"       // IRenderer — for setZoneOverlay, pickTerrainTile
 #include "src/interfaces/ITerrainQuery.h"   // ITerrainQuery — for earthworks cost computation
@@ -605,6 +607,8 @@ bool UIManager::onEvent(const InputEvent& event) {
                                                     + static_cast<uint32_t>(densityRow) * 3u;
                             m_backend->setElementImage(m_zoneSubPanelBtns[idx], activeSprite);
                         }
+                        // Phase 10: ui_click SFX on zone sub-panel button press.
+                        if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
                         return true;
                     }
                 }
@@ -637,6 +641,8 @@ bool UIManager::onEvent(const InputEvent& event) {
                                                 + static_cast<uint32_t>(typeIdx);
                         m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], activeSprite);
                     }
+                    // Phase 10: ui_click SFX on utilities sub-panel button press.
+                    if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
                     return true;
                 }
             }
@@ -655,18 +661,23 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_activeTool = ActiveTool::Zone;
                 if (m_hud) m_hud->setActiveToolLabel("Zone");
                 updateSubPanelVisibility();
+                // Phase 10: ui_click SFX on toolbar button press.
+                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 120 && y < 168) {  // Road
                 m_activeTool = ActiveTool::Road;
                 if (m_hud) m_hud->setActiveToolLabel("Road");
                 updateSubPanelVisibility();
+                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 176 && y < 224) {  // Utilities
                 m_activeTool = ActiveTool::Utilities;
                 if (m_hud) m_hud->setActiveToolLabel("Utilities");
                 updateSubPanelVisibility();
+                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 232 && y < 280) {  // Demolish
                 m_activeTool = ActiveTool::Demolish;
                 if (m_hud) m_hud->setActiveToolLabel("Demolish");
                 updateSubPanelVisibility();
+                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 288 && y < 336) {  // Query — toggle between Query and None
                 // Toolbar button activates Query tool only; inspector is opened by
                 // subsequent tile-click (Priority-3 QueryTool open path).
@@ -683,6 +694,7 @@ bool UIManager::onEvent(const InputEvent& event) {
                     if (m_hud) m_hud->setActiveToolLabel("Query");
                 }
                 updateSubPanelVisibility();
+                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 608 && y < 656) {  // Undo
                 if (m_sim && m_sim->hasUndoPendingAction()) {
                     m_sim->undoLastAction();
@@ -927,21 +939,66 @@ bool UIManager::doTerrainPlacement(int hitX, int hitZ) {
 // ----------------------------------------------------------------
 // updateSubPanelVisibility — show/hide Zone and Utilities sub-panels
 // based on the current active tool.  Called whenever m_activeTool changes.
+//
+// Phase 10 audio: fire ui_menu_open/ui_menu_close when a sub-panel transitions.
+// Close sounds precede open sounds in the same call (per phase-10.md).
+// Transition detection uses isElementVisible() on the first valid handle before
+// the setElementVisible() loop, so both Zone and Utilities are checked before
+// any visibility is changed — ensuring close fires before open on the same frame.
 // ----------------------------------------------------------------
 void UIManager::updateSubPanelVisibility() {
     if (!m_backend) return;
 
     bool showZone = (m_activeTool == ActiveTool::Zone);
+    bool showUtil = (m_activeTool == ActiveTool::Utilities);
+
+    // Phase 10: sample current visibility BEFORE making any changes, so that
+    // close/open transitions can be detected correctly.
+    bool zoneWasVisible = false;
+    for (int i = 0; i < 9; ++i) {
+        if (m_zoneSubPanelBtns[i] != kInvalidUIElement) {
+            zoneWasVisible = m_backend->isElementVisible(m_zoneSubPanelBtns[i]);
+            break;
+        }
+    }
+    bool utilWasVisible = false;
+    for (int i = 0; i < 4; ++i) {
+        if (m_utilSubPanelBtns[i] != kInvalidUIElement) {
+            utilWasVisible = m_backend->isElementVisible(m_utilSubPanelBtns[i]);
+            break;
+        }
+    }
+
+    // Phase 10: fire close sounds FIRST (before any setElementVisible calls).
+    // Guard: m_audio != nullptr; only fire when the panel is transitioning.
+    if (m_audio) {
+        if (zoneWasVisible && !showZone) {
+            m_audio->playSound(UI_MENU_CLOSE, SoundPriority::NORMAL, 1.0f);
+        }
+        if (utilWasVisible && !showUtil) {
+            m_audio->playSound(UI_MENU_CLOSE, SoundPriority::NORMAL, 1.0f);
+        }
+    }
+
+    // Apply visibility to all sub-panel elements.
     for (int i = 0; i < 9; ++i) {
         if (m_zoneSubPanelBtns[i] != kInvalidUIElement) {
             m_backend->setElementVisible(m_zoneSubPanelBtns[i], showZone);
         }
     }
-
-    bool showUtil = (m_activeTool == ActiveTool::Utilities);
     for (int i = 0; i < 4; ++i) {
         if (m_utilSubPanelBtns[i] != kInvalidUIElement) {
             m_backend->setElementVisible(m_utilSubPanelBtns[i], showUtil);
+        }
+    }
+
+    // Phase 10: fire open sounds AFTER setElementVisible (per spec: "immediately after").
+    if (m_audio) {
+        if (!zoneWasVisible && showZone) {
+            m_audio->playSound(UI_MENU_OPEN, SoundPriority::NORMAL, 1.0f);
+        }
+        if (!utilWasVisible && showUtil) {
+            m_audio->playSound(UI_MENU_OPEN, SoundPriority::NORMAL, 1.0f);
         }
     }
 }

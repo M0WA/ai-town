@@ -101,9 +101,9 @@ TEST(StingerMilestone, OnlyAtCityRatingTransition_NotRawPopulation)
     // --- Scenario 2: Village→Town City Rating transition at 1K population ---
     {
         StrictMock<MockAudioSystem> strictAudio;
+        // stinger_milestone must fire exactly once at Village→Town CityRatingTier transition.
         EXPECT_CALL(strictAudio, triggerStinger(StingerType::MILESTONE))
-            .Times(Exactly(1))
-            << "stinger_milestone must fire exactly once at Village→Town CityRatingTier transition";
+            .Times(Exactly(1));
 
         StingerMilestoneDispatcher dispatcher;
         dispatcher.audio = &strictAudio;
@@ -130,9 +130,9 @@ TEST(StingerMilestone, AllTierTransitions_EachFiresExactlyOnce)
 
     for (const CityRatingTier tier : tiers) {
         StrictMock<MockAudioSystem> strictAudio;
+        // stinger_milestone must fire exactly once per CityRatingTier transition.
         EXPECT_CALL(strictAudio, triggerStinger(StingerType::MILESTONE))
-            .Times(Exactly(1))
-            << "stinger_milestone must fire exactly once per CityRatingTier transition";
+            .Times(Exactly(1));
 
         StingerMilestoneDispatcher dispatcher;
         dispatcher.audio = &strictAudio;

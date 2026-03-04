@@ -69,6 +69,11 @@ protected:
         // assert music intensity; individual tests that do will override with their
         // own EXPECT_CALL after calling SimulationTestBase::SetUp().
         EXPECT_CALL(audio_, setMusicIntensity(::testing::_)).Times(::testing::AnyNumber());
+        // Phase 10: CitySimulation::tick() also calls setTimeOfDay() whenever the
+        // in-game clock crosses a DAY/DUSK/NIGHT/DAWN boundary.  This is incidental
+        // to most test scenarios; allow any number of calls so StrictMock does not
+        // fail on time-of-day transitions that occur during multi-tick test runs.
+        EXPECT_CALL(audio_, setTimeOfDay(::testing::_)).Times(::testing::AnyNumber());
     }
 
     void TearDown() override {

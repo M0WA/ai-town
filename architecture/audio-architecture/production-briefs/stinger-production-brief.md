@@ -36,13 +36,33 @@ acceptable for a time-critical trigger. WAV PCM decodes instantly from the stati
 
 ## Asset List
 
-| File | Duration | Loudness | Trigger Condition |
-|---|---|---|---|
-| `stinger_crisis.wav` | 2–4 s | −18 LUFS / −1 dBTP | Crisis event onset |
-| `stinger_milestone.wav` | 2–3 s | −18 LUFS / −1 dBTP | City Rating tier transition only |
-| `stinger_game_over.wav` | Deferred | — | Post-V1 (Scenario mode) |
+| File | Target duration | Duration range | Loudness | Trigger Condition |
+|---|---|---|---|---|
+| `stinger_crisis.wav` | 3 s | 2–4 s | −18 LUFS / −1 dBTP | Crisis event onset |
+| `stinger_milestone.wav` | 2.5 s | 2–3 s | −18 LUFS / −1 dBTP | City Rating tier transition only |
+| `stinger_game_over.wav` | Deferred | — | — | Post-V1 (Scenario mode) |
 
 `stinger_game_over` is not a V1 deliverable. Scenario mode is not in V1 scope.
+
+---
+
+## Onset Timing Requirement
+
+The most prominent musical content of each stinger (the main impact or peak transient)
+MUST begin no earlier than **0.25 s** into the file. This is a hard authoring requirement.
+
+**Rationale**: The music duck ramp takes 0.2 s (IDLE → DUCKING state, ramp to 0.4 gain).
+A stinger whose peak lands at t=0 plays over music still at full gain, undermining the
+intended ducked-stinger mix balance. A 0.25 s onset ensures the 0.2 s duck ramp completes
+before the stinger body hits, with 50 ms of margin. A brief attack transient or build
+envelope before the main body is acceptable and encouraged — this 0.25 s window can
+contain a fade-in, a soft pre-transient, or silence. The main body must not arrive before
+t=0.25 s.
+
+**Verification**: load the stinger WAV in the DAW and check the waveform peak position.
+The highest-amplitude region must begin at or after the 0.25 s mark. Stingers with an
+earlier peak must be time-shifted (add 0.25 s of near-silence or gentle pre-attack at the
+head) and re-exported before delivery.
 
 ---
 
@@ -90,9 +110,12 @@ clearly audible in this context.
 
 ## Delivery Verification Checklist
 
-- [ ] `stinger_crisis.wav` — mono WAV PCM, 44100 Hz, 2–4 s, −18 LUFS, ≤ −1 dBTP.
-- [ ] `stinger_milestone.wav` — mono WAV PCM, 44100 Hz, 2–3 s, −18 LUFS, ≤ −1 dBTP.
+- [ ] `stinger_crisis.wav` — mono WAV PCM, 44100 Hz, 2–4 s (target 3 s), −18 LUFS, ≤ −1 dBTP.
+- [ ] `stinger_milestone.wav` — mono WAV PCM, 44100 Hz, 2–3 s (target 2.5 s), −18 LUFS, ≤ −1 dBTP.
 - [ ] Both stingers auditioned over ambient bed at full gain + music at 0.4 gain — intelligible.
+- [ ] **Onset timing verified for each stinger**: load in DAW, confirm peak impact begins at or
+  after t=0.25 s in the file. A stinger whose main body peaks before 0.25 s must be time-shifted
+  and re-exported.
 - [ ] No stereo WAV files submitted (mono check mandatory).
 - [ ] `stinger_game_over.wav` confirmed deferred (not submitted for V1).
 

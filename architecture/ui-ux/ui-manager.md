@@ -9,7 +9,9 @@
 
 ## IUIBackend Method Contract
 
-The total method count is **17**. (**Conditional**: if the Phase 8 virtual `draw()` spike confirms `IGUIElement::draw()` is non-virtual, a `virtual void drawAlphaOverlays() {}` method is appended as method 18, updating the count to **18**; both this file and `testability-architecture.md` must be updated at that point — see `implementation/phase-8.md` §IrrlichtUIBackend setElementAlpha fallback for the spike procedure.) `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+The total method count is **19**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+
+Methods 1–17 were established in Phase 8. Method 18 (`setElementBackgroundColor`) was added in Phase 9b (minimap dark-panel fix — see `architecture/ui-ux/minimap.md` §IUIBackend method 18). Method 19 (`setElementMonoFont`) was added in Phase 10 (monospace numeric readout requirement — see below).
 
 ```cpp
 class IUIBackend {
@@ -47,6 +49,7 @@ public:
 
     // 10. Assign a texture (identified by its own UIElementHandle) to an image element.
     //     The textureHandle must have been obtained via loadTexture() (method 17).
+    //     Note: method numbering is stable — loadTexture is method 17 regardless of later additions.
     virtual void setElementImage(UIElementHandle handle, UIElementHandle textureHandle) = 0;
 
     // 11. Return the current displayed text of an element. Used in test assertions.
@@ -79,6 +82,28 @@ public:
     //     not found, unsupported format, or driver error). The backend owns the loaded
     //     texture resource; call removeElement(handle) to release it when no longer needed.
     virtual UIElementHandle loadTexture(const std::string& path) = 0;
+
+    // 18. Set a filled background colour on an IGUIStaticText element.
+    //     Enables IrrlichtUIBackend to call setDrawBackground(true) and setBackgroundColor()
+    //     on the underlying element without exposing Irrlicht types to src/ui/ callers.
+    //     colour is packed ARGB (0xAARRGGBB). Only valid for handles created via addStaticText().
+    //     Added in Phase 9b for the Minimap dark-panel fix.
+    //     See architecture/ui-ux/minimap.md §IUIBackend method 18.
+    virtual void setElementBackgroundColor(UIElementHandle handle, uint32_t argb) = 0;
+
+    // 19. Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element via
+    //     IGUIStaticText::setOverrideFont(). Only valid for handles created via addStaticText().
+    //     In IrrlichtUIBackend: looks up element, casts to IGUIStaticText*, calls
+    //     setOverrideFont(m_monoFont). If m_monoFont is null (file absent — graceful fallback),
+    //     this method is a no-op (the element keeps the environment default font).
+    //     In MockUIBackend: MOCK_METHOD stub; no-op in StubUIBackend.
+    //     Panel code calls this on every numeric IGUIStaticText element (treasury balance,
+    //     population count, tax rate fields, budget line items, density unlock threshold,
+    //     in-game date/time) immediately after addStaticText(). Labels, tooltips, and button
+    //     text MUST NOT call setElementMonoFont().
+    //     Added in Phase 10 to replace the untestable static_cast<IrrlichtUIBackend*> pattern.
+    //     See architecture/ui-ux/hud-layout.md §Font Loading — Monospace requirement.
+    virtual void setElementMonoFont(UIElementHandle handle) = 0;
 };
 ```
 

@@ -97,6 +97,10 @@ protected:
         // Allow any number of calls — economy tests do not assert music intensity tier.
         // Without this, StrictMock<MockAudioSystem> would fail on every budget tick.
         EXPECT_CALL(audio_, setMusicIntensity(_)).Times(AnyNumber());
+        // Phase 10: CitySimulation::tick() calls setTimeOfDay() whenever the in-game
+        // clock crosses a DAY/DUSK/NIGHT/DAWN boundary. Allow any number of calls —
+        // economy tests do not assert time-of-day transitions.
+        EXPECT_CALL(audio_, setTimeOfDay(_)).Times(AnyNumber());
     }
 
     void TearDown() override {

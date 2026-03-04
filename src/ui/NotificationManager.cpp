@@ -81,6 +81,14 @@ void NotificationManager::postCritical(const std::string& title, const std::stri
     // Refresh UI elements to show the new toast if room is available.
     refreshCriticalVisibility();
     refreshNormalVisibility();
+
+    // Phase 10: fire ui_toast SFX when the new CRITICAL toast became visible on screen.
+    // Fires once per appearance — not per enqueue — only when a UI element was created.
+    // Guard: !m_criticalQueue.empty() (defensive; we just pushed_back above).
+    if (m_audio && !m_criticalQueue.empty() &&
+        m_criticalQueue.back().handle != kInvalidUIElement) {
+        m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f);
+    }
 }
 
 // ----------------------------------------------------------------
@@ -101,6 +109,14 @@ void NotificationManager::postNormal(const std::string& title, const std::string
     m_normalQueue.push_back(NormalToast{title, truncateBody(body), expiryTime, kInvalidUIElement});
 
     refreshNormalVisibility();
+
+    // Phase 10: fire ui_toast SFX when the new Normal toast became visible on screen.
+    // Fires once per appearance — not per enqueue — only when a UI element was created.
+    // Guard: !m_normalQueue.empty() (defensive; we just pushed_back above).
+    if (m_audio && !m_normalQueue.empty() &&
+        m_normalQueue.back().handle != kInvalidUIElement) {
+        m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f);
+    }
 }
 
 // ----------------------------------------------------------------

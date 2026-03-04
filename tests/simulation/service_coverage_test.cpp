@@ -406,6 +406,9 @@ TEST_F(ServiceTest, ServiceDegradation_AudioCallback_FiresOncePerDegradedBuildin
     EXPECT_CALL(strict_audio, playSound(_, _, _)).Times(AnyNumber());
     // Phase 10: allow setMusicIntensity before the VerifyAndClearExpectations reset.
     EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
+    // Phase 10: CitySimulation::tick() calls setTimeOfDay() on time-of-day boundary
+    // crossings. Allow any number — incidental to service-degradation SFX test.
+    EXPECT_CALL(strict_audio, setTimeOfDay(_)).Times(AnyNumber());
 
     auto strict_sim = std::make_unique<CitySimulation>(
         &strict_renderer, &strict_audio,
@@ -437,6 +440,8 @@ TEST_F(ServiceTest, ServiceDegradation_AudioCallback_FiresOncePerDegradedBuildin
     // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick.
     // Allow any number — this test focuses on SFX_SERVICE_DEGRADE call counts only.
     EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
+    // Phase 10: setTimeOfDay() may fire on time-of-day boundary crossings.
+    EXPECT_CALL(strict_audio, setTimeOfDay(_)).Times(AnyNumber());
 
     // Fire one deficit tick (fire station upkeep with no zone revenue → deficit).
     strict_clock.advance(dt);

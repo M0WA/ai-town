@@ -170,18 +170,33 @@ jobs:
       # Step 12c: Verify simulation_tests specifically is discoverable — Phase 6 deliverable.
       # The unit-routing check above passes as long as ANY unit target (terrain_tests, ui_tests)
       # has tests. This step verifies simulation_tests is not silently unregistered.
-      # WARNING: before Phase 6 CitySimulation.cpp exists, simulation_tests will have 0 tests
-      # (only SUCCEED() stubs). This step exits 0 if count==0 with a warning, not an error —
-      # change to exit 1 when Phase 6 is complete and simulation_tests has real tests.
-      - name: Verify simulation_tests registration (Phase 6 deliverable)
+      # Phase 6 is complete (CitySimulation.cpp exists); this is now a hard-fail.
+      # Phase 10 adds adaptive_music_intensity_test.cpp to simulation_tests — if the
+      # binary fails to start (e.g. missing symbol), ctest exits 0 with "No tests found".
+      # Hard-failing here catches that silent failure before it reaches the coverage gate.
+      - name: Verify simulation_tests registration
         shell: bash
         run: |
           count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -c 'Test #' || true)
           if [[ "$count" -eq 0 ]]; then
-            echo "WARNING: No simulation_tests test cases discovered. Phase 6 deliverable: ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60)."
-          else
-            echo "simulation_tests routing: $count test(s) discovered."
+            echo "ERROR: No simulation_tests test cases discovered. Ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60) and that the binary links and starts correctly."
+            exit 1
           fi
+          echo "simulation_tests routing: $count test(s) discovered."
+
+      # Step 12e: Verify Phase 10 font assets are present in the source tree.
+      # IrrlichtUIBackend loads hud_font.xml and hud_mono_font.xml at runtime with
+      # graceful fallback (log warning, no crash) — so a missing font file does NOT
+      # cause a test-binary failure.  Without this explicit check, Phase 10 could
+      # ship to main without the font assets and CI would silently pass.
+      # Both files must be present for the Phase 10 exit criterion:
+      # "assets/fonts/hud_font.xml AND hud_mono_font.xml both load without error."
+      - name: Verify Phase 10 font assets present
+        shell: bash
+        run: |
+          test -f assets/fonts/hud_font.xml || { echo "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing"; exit 1; }
+          test -f assets/fonts/hud_mono_font.xml || { echo "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing"; exit 1; }
+          echo "Phase 10 font assets verified: hud_font.xml and hud_mono_font.xml present."
 
       # Step 13: Verify default.mhr HRTF data — hard-fail (Phase 4).
       # Searches the entire workspace (vcpkg install tree) for the HRTF data file.
@@ -637,15 +652,28 @@ jobs:
 
       # Step 12c: Verify simulation_tests specifically is discoverable — Phase 6 deliverable.
       # Mirrors the identical step in build-linux.
-      - name: Verify simulation_tests registration (Phase 6 deliverable)
+      # Phase 6 is complete; hardened from WARNING-ONLY to hard-fail.
+      # Phase 10 adds adaptive_music_intensity_test.cpp — silent 0-test ctest exit must be caught.
+      - name: Verify simulation_tests registration
         shell: bash
         run: |
           count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -c 'Test #' || true)
           if [[ "$count" -eq 0 ]]; then
-            echo "WARNING: No simulation_tests test cases discovered. Phase 6 deliverable: ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60)."
-          else
-            echo "simulation_tests routing: $count test(s) discovered."
+            echo "ERROR: No simulation_tests test cases discovered. Ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60) and that the binary links and starts correctly."
+            exit 1
           fi
+          echo "simulation_tests routing: $count test(s) discovered."
+
+      # Step 12e: Verify Phase 10 font assets are present in the source tree.
+      # Mirrors the identical step in build-linux. Coverage instrumentation does not
+      # affect asset presence — both jobs need this gate so coverage-linux cannot
+      # pass independently without the font files.
+      - name: Verify Phase 10 font assets present
+        shell: bash
+        run: |
+          test -f assets/fonts/hud_font.xml || { echo "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing"; exit 1; }
+          test -f assets/fonts/hud_mono_font.xml || { echo "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing"; exit 1; }
+          echo "Phase 10 font assets verified: hud_font.xml and hud_mono_font.xml present."
 
       # Step 12d: Verify UI shader assets (Phase 8 deliverable).
       # Identical to the build-linux shader check — confirms assets/shaders/ui_quad.vert
@@ -909,6 +937,15 @@ jobs:
         run: |
           grep -q "check_21" tools/validate_assets.py || (echo "FAIL: check_21 not found in validate_assets.py — Phase 10 zone loop silence-floor gate missing" && exit 1)
           echo "PASS: check_21 present"
+
+      - name: Verify check_22 present in validate_assets.py
+        # check_22: non-stinger WAV SFX (sfx_*.wav, ui_*.wav) must be mono, 44100 Hz, 16-bit PCM.
+        # Phase 10 mandates mono/44100/16-bit for all WAV SFX assets; check_19 covers only stingers.
+        # A missing check_22 allows stereo or mis-sampled SFX WAVs to pass CI and silently fail
+        # at runtime when OpenAL Soft rejects non-mono buffers for positional sources.
+        run: |
+          grep -q "check_22" tools/validate_assets.py || (echo "FAIL: check_22 not found in validate_assets.py — Phase 10 non-stinger WAV SFX format gate missing" && exit 1)
+          echo "PASS: check_22 present"
 
       - name: Install Python dependencies
         # mutagen: OGG/WAV metadata (checks #16–#19).

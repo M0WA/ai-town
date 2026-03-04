@@ -213,20 +213,73 @@ void CitySimulation::tick(float realDeltaSeconds) {
         // Time of day thresholds (simplified 4-phase cycle):
         // DAY:   6:00 - 17:59
         // DUSK: 18:00 - 19:59
-        // NIGHT: 20:00 - 5:59 (wraps)
-        // DAWN:  6:00 -  7:59 (overlap with DAY start — DAWN precedes DAY in the cycle)
-        // Simplified: use hour-of-day to select TimeOfDay
+        // NIGHT: 20:00 - 3:59 (wraps)
+        // DAWN:  4:00 -  5:59 (precedes DAY in the cycle)
+        TimeOfDay prevTimeOfDay = m_timeOfDay;
         if (dayHours >= 6.0f && dayHours < 18.0f) {
             m_timeOfDay = TimeOfDay::DAY;
         } else if (dayHours >= 18.0f && dayHours < 20.0f) {
             m_timeOfDay = TimeOfDay::DUSK;
-        } else if (dayHours >= 20.0f || dayHours < 6.0f) {
+        } else if (dayHours >= 4.0f && dayHours < 6.0f) {
+            m_timeOfDay = TimeOfDay::DAWN;
+        } else {
+            // dayHours >= 20.0f || dayHours < 4.0f
             m_timeOfDay = TimeOfDay::NIGHT;
         }
-        // DAWN would be 4:00-5:59 for example — keeping simple for now
+
+        // Phase 10: notify AudioSystem whenever time-of-day changes.
+        // IAudioSystem::setTimeOfDay() is idempotent when called with the same value
+        // but we only call on transition to avoid unnecessary crossfade commands.
+        if (m_audio && m_timeOfDay != prevTimeOfDay) {
+            m_audio->setTimeOfDay(m_timeOfDay);
+        }
 
         doBudgetTick();
+
+        // Phase 10: setMusicIntensity() — called after doBudgetTick() so that
+        // m_consecutiveDeficitMonths, m_budgetSurplusPct, and m_totalPopulation
+        // all reflect the just-completed tick.
+        //
+        // Priority order (highest wins): CRISIS > GROWTH > CALM.
+        //   CRISIS:  consecutive_deficit_months >= 2 (economy-model.md Music Intensity Tiers)
+        //   GROWTH:  net population this tick increased AND no deficit streak
+        //             (m_totalPopulation > m_prevPopulation && m_consecutiveDeficitMonths == 0)
+        //   CALM:    all other cases (normal/surplus budget, no pop increase)
+        //
+        // Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) is applied internally
+        // by AudioSystem; CitySimulation does NOT suppress GROWTH/CRISIS calls during
+        // off-hours.
+        //
+        // Edge-detect: only call setMusicIntensity() when tier changes — avoids
+        // redundant audio thread atomic stores every single tick.
+        if (m_audio) {
+            MusicIntensity intensity = MusicIntensity::CALM;
+            if (m_consecutiveDeficitMonths >= 2) {
+                intensity = MusicIntensity::CRISIS;
+            } else if (m_totalPopulation > m_prevPopulation &&
+                       m_consecutiveDeficitMonths == 0) {
+                // GROWTH tier: net-positive population change this tick, no deficit streak.
+                // m_prevPopulation is the snapshot from the end of the PREVIOUS tick's
+                // doPopulationTick(); m_totalPopulation is the snapshot from this tick.
+                intensity = MusicIntensity::GROWTH;
+            }
+            if (intensity != m_lastSentMusicIntensity) {
+                m_audio->setMusicIntensity(intensity);
+                m_lastSentMusicIntensity = intensity;
+            }
+        }
+
+        // Phase 10: update m_prevPopulation AFTER setMusicIntensity() so that
+        // the GROWTH comparison above uses the previous tick's value correctly.
+        m_prevPopulation = m_totalPopulation;
     }
+
+    // Phase 10: traffic signal tick — runs every frame (real-time), NOT per budget tick.
+    // Advances signal phase timers and fires sfx_intersection_tick when a signal changes
+    // phase, pre-culled at > 80 m from the listener (getListenerPosition()).
+    // Called outside the budget-tick while-loop so signals fire at real-time frequency
+    // regardless of simulation speed.
+    doTrafficSignalTick(realDeltaSeconds);
 }
 
 // ---------------------------------------------------------------------------
@@ -608,13 +661,48 @@ void CitySimulation::doDesirabilityTick() {
                 float cov = computeRadialCoverage(x, z, ServiceType::PoliceStation);
                 if (cov == 0.0f) anyUncovered = true;
             }
+
+            // Phase 10: water coverage SFX — fire SFX_WATER_OUT exactly once per
+            // coverage-loss event (wasPowered / wasWaterCovered flag gates re-fire).
+            // Only fires for residential tiles (water billing affects residential coverage).
+            bool currentlyWaterCovered = false;
             if (hasWater) {
                 float cov = computeRadialCoverage(x, z, ServiceType::WaterTower);
-                if (cov == 0.0f) anyUncovered = true;
+                if (cov == 0.0f) {
+                    anyUncovered = true;
+                } else {
+                    currentlyWaterCovered = true;
+                }
             }
+            if (tile.wasWaterCovered && !currentlyWaterCovered && hasWater) {
+                // Water just lost — fire SFX once (NORMAL priority per V1 manifest).
+                if (m_audio) {
+                    m_audio->playSound(SFX_WATER_OUT, SoundPriority::NORMAL, 1.0f);
+                }
+                tile.wasWaterCovered = false;
+            } else if (currentlyWaterCovered) {
+                tile.wasWaterCovered = true;
+            }
+
+            // Phase 10: power coverage SFX — fire SFX_POWER_OUT exactly once per
+            // coverage-loss event.
+            bool currentlyPowered = false;
             if (hasPower) {
                 float cov = computePowerCoverage(x, z);
-                if (cov == 0.0f) anyUncovered = true;
+                if (cov == 0.0f) {
+                    anyUncovered = true;
+                } else {
+                    currentlyPowered = true;
+                }
+            }
+            if (tile.wasPowered && !currentlyPowered && hasPower) {
+                // Power just lost — fire SFX once (NORMAL priority per V1 manifest).
+                if (m_audio) {
+                    m_audio->playSound(SFX_POWER_OUT, SoundPriority::NORMAL, 1.0f);
+                }
+                tile.wasPowered = false;
+            } else if (currentlyPowered) {
+                tile.wasPowered = true;
             }
 
             if (anyUncovered) {
@@ -634,6 +722,38 @@ void CitySimulation::doDesirabilityTick() {
 
         // Clamp desirability to [0, 100]
         tile.desirability = std::min(100.0f, std::max(0.0f, desirability));
+
+        // Phase 10: service-alert SFX — fire SFX_FIRE_ALERT or SFX_POLICE_ALERT
+        // exactly once per crisis episode. Fire takes priority over Police when
+        // both stations cover this tile. Only residential tiles are tested.
+        // alertFired prevents re-fire while desirability stays at or below threshold.
+        // Resets when desirability recovers above service_alert_desirability_threshold.
+        if (tile.isZoned && tile.zone == ZoneType::Residential && m_audio) {
+            if (tile.desirability <= static_cast<float>(SimulationConstants::service_alert_desirability_threshold)) {
+                if (!tile.alertFired) {
+                    // Determine which alert to fire: Fire takes priority over Police.
+                    bool hasFire  = false;
+                    bool hasPoliceForAlert = false;
+                    for (const ServiceBuilding& sb : m_serviceBuildings) {
+                        if (sb.type == ServiceType::FireStation)   hasFire = true;
+                        if (sb.type == ServiceType::PoliceStation) hasPoliceForAlert = true;
+                    }
+                    if (hasFire) {
+                        m_audio->playPositionalSound(SFX_FIRE_ALERT,
+                            vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)},
+                            SoundPriority::CRITICAL, 1.0f);
+                    } else if (hasPoliceForAlert) {
+                        m_audio->playPositionalSound(SFX_POLICE_ALERT,
+                            vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)},
+                            SoundPriority::CRITICAL, 1.0f);
+                    }
+                    tile.alertFired = true;
+                }
+            } else {
+                // Desirability recovered — allow alert to re-fire in a future episode.
+                tile.alertFired = false;
+            }
+        }
     }
 }
 
@@ -702,6 +822,11 @@ void CitySimulation::doDensityUnlockTick() {
             default: return std::numeric_limits<float>::max();
         }
     };
+
+    // Phase 10: per-wave-tick audio cap — tracks total sfx_zone_upgrade calls this tick
+    // across ALL tier loops combined. Tiles beyond the cap are upgraded silently.
+    // (SimulationConstants::sfx_zone_upgrade_per_tick_cap = 3)
+    int sfxCallsThisTick = 0;
 
     float scale = getDensityUnlockScale();
 
@@ -781,12 +906,11 @@ void CitySimulation::doDensityUnlockTick() {
             tile.density = targetDensity;
             tile.population = 0.0f;  // population grows fresh
 
-            if (m_audio) {
-                int x = static_cast<int>(key >> 32);
-                int z = static_cast<int>(static_cast<uint32_t>(key));
-                m_audio->playPositionalSound(SFX_ZONE_UPGRADE,
-                    vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)},
-                    SoundPriority::NORMAL, 1.0f);
+            // Phase 10: sfx_zone_upgrade is non-positional (AL_SOURCE_RELATIVE = AL_TRUE).
+            // Cap at sfx_zone_upgrade_per_tick_cap calls total across all tiers this tick.
+            if (m_audio && sfxCallsThisTick < SimulationConstants::sfx_zone_upgrade_per_tick_cap) {
+                m_audio->playSound(SFX_ZONE_UPGRADE, SoundPriority::NORMAL, 1.0f);
+                ++sfxCallsThisTick;
             }
             upgradeCount++;
         }
@@ -1166,6 +1290,58 @@ void CitySimulation::checkCityRatingTransition() {
             static_cast<int>(newTier)
         });
         m_cityRating = newTier;
+        // NOTE: triggerStinger(StingerType::MILESTONE) is NOT called here.
+        // Per Phase 10 spec, the stinger is UIManager's responsibility:
+        // UIManager polls CityRatingTransition notifications and calls
+        // m_audio->triggerStinger(MILESTONE) in its onCityRatingTransition() handler.
+        // See implementation/phase-10.md §UIManager City Rating milestone callback.
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10: Traffic signal tick — advance timers and fire sfx_intersection_tick.
+// ---------------------------------------------------------------------------
+//
+// Called from tick() with real delta seconds (never sim-speed-scaled).
+// Each TrafficSignal fires sfx_intersection_tick every phaseSeconds real seconds.
+// Pre-acquisition distance cull: skips the call if the listener is beyond 80 m.
+// The listener position is obtained once per tick() call via m_renderer->getListenerPosition().
+//
+// Intersection detection: a road tile is treated as an intersection when it is adjacent
+// to 2 or more other road tiles. Signals are maintained incrementally by placeRoad()
+// and demolishTile(). This ensures O(1) per-tile maintenance rather than a full
+// map scan each tick.
+
+void CitySimulation::doTrafficSignalTick(float realDeltaSeconds) {
+    if (!m_audio || m_trafficSignals.empty()) return;
+
+    // Obtain listener position once — avoids repeated virtual dispatch per signal.
+    // m_renderer may be null in tests that do not provide a renderer; guard with null check.
+    vec3 listenerPos{0.0f, 0.0f, 0.0f};
+    if (m_renderer) {
+        listenerPos = m_renderer->getListenerPosition();
+    }
+
+    const float cullDistSq =
+        SimulationConstants::traffic_signal_cull_distance_meters *
+        SimulationConstants::traffic_signal_cull_distance_meters;
+
+    for (TrafficSignal& sig : m_trafficSignals) {
+        sig.phaseTimer += realDeltaSeconds;
+        if (sig.phaseTimer < sig.phaseSeconds) continue;
+
+        // Phase changed (green→red or red→green).
+        sig.phaseTimer -= sig.phaseSeconds;
+
+        // Pre-acquisition distance cull (phase-10.md: skip if distance > 80 m).
+        vec3 signalPos{static_cast<float>(sig.tileX), 0.0f, static_cast<float>(sig.tileZ)};
+        float dx = signalPos.x - listenerPos.x;
+        float dz = signalPos.z - listenerPos.z;
+        float distSq = dx * dx + dz * dz;
+        if (distSq > cullDistSq) continue;
+
+        m_audio->playPositionalSound(SFX_INTERSECTION_TICK, signalPos,
+                                     SoundPriority::LOW, 1.0f);
     }
 }
 
@@ -1429,6 +1605,68 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
         m_roadTileCount++;
     }
 
+    // Phase 10: traffic signal maintenance.
+    // If the new road tile is adjacent to 2+ existing road tiles (in any cardinal direction),
+    // it qualifies as an intersection and receives a TrafficSignal entry.
+    // Also re-check each neighbor — a neighbor that now has 2+ road adjacencies may need
+    // a new signal added (if it didn't qualify before this road was placed).
+    // Staggered initial phaseTimer: use tileX ^ tileZ hashed to [0, phaseSeconds) to
+    // prevent all signals from firing simultaneously on the first frame.
+    // Guard: only add signals for newly-placed road tiles (wasRoad == false).
+    if (!wasRoad) {
+        const int neighbors[4][2] = {{tileX-1,tileZ},{tileX+1,tileZ},{tileX,tileZ-1},{tileX,tileZ+1}};
+
+        // Helper lambda: count road-adjacent tiles for a given position (4 cardinal dirs).
+        auto countRoadNeighbors = [&](int cx, int cz) -> int {
+            const int nbs[4][2] = {{cx-1,cz},{cx+1,cz},{cx,cz-1},{cx,cz+1}};
+            int count = 0;
+            for (auto& nb2 : nbs) {
+                int64_t nkey = tileKey(nb2[0], nb2[1]);
+                auto nit = m_tiles.find(nkey);
+                if (nit != m_tiles.end() && nit->second.isRoad) ++count;
+            }
+            return count;
+        };
+
+        // Helper lambda: check if signal already exists for a position.
+        auto hasSignal = [&](int cx, int cz) -> bool {
+            for (const TrafficSignal& sig : m_trafficSignals) {
+                if (sig.tileX == cx && sig.tileZ == cz) return true;
+            }
+            return false;
+        };
+
+        // Helper lambda: generate staggered initial phase offset from tile coordinates.
+        auto phaseOffset = [&](int cx, int cz) -> float {
+            unsigned int seed = static_cast<unsigned int>(cx * 73856093 ^ cz * 19349663);
+            return (static_cast<float>(seed & 0xFFFFu) / 65535.0f) *
+                   SimulationConstants::traffic_signal_phase_seconds;
+        };
+
+        // Check the newly placed tile.
+        if (countRoadNeighbors(tileX, tileZ) >= 2 && !hasSignal(tileX, tileZ)) {
+            TrafficSignal sig;
+            sig.tileX      = tileX;
+            sig.tileZ      = tileZ;
+            sig.phaseTimer = phaseOffset(tileX, tileZ);
+            m_trafficSignals.push_back(sig);
+        }
+
+        // Re-check each cardinal neighbor — they may now qualify as intersections.
+        for (auto& nb : neighbors) {
+            int64_t nkey = tileKey(nb[0], nb[1]);
+            auto nit = m_tiles.find(nkey);
+            if (nit == m_tiles.end() || !nit->second.isRoad) continue;
+            if (countRoadNeighbors(nb[0], nb[1]) >= 2 && !hasSignal(nb[0], nb[1])) {
+                TrafficSignal sig;
+                sig.tileX      = nb[0];
+                sig.tileZ      = nb[1];
+                sig.phaseTimer = phaseOffset(nb[0], nb[1]);
+                m_trafficSignals.push_back(sig);
+            }
+        }
+    }
+
     // Play audio
     if (earthworksCostOverride > 0) {
         if (m_audio) {
@@ -1475,6 +1713,16 @@ void CitySimulation::demolishTile(int tileX, int tileZ) {
     // Update road tile count
     if (wasRoad) {
         m_roadTileCount--;
+    }
+
+    // Phase 10: remove traffic signal for the demolished tile (if any).
+    if (wasRoad) {
+        m_trafficSignals.erase(
+            std::remove_if(m_trafficSignals.begin(), m_trafficSignals.end(),
+                [tileX, tileZ](const TrafficSignal& sig) {
+                    return sig.tileX == tileX && sig.tileZ == tileZ;
+                }),
+            m_trafficSignals.end());
     }
 
     // Play audio

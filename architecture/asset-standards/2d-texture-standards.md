@@ -426,6 +426,19 @@ Total texture VRAM for all simultaneously-resident assets must not exceed **1.0 
 with `nvcompress -rgba -nomips`. This is the source/authoring format; it is converted to PNG
 before shipping (see Runtime asset path below). Linear color space — do NOT author in sRGB.
 
+**nvcompress byte-order verification (mandatory before first DDS commit)**: `nvcompress
+-rgba -nomips` guarantees RGBA byte order on NVTT 2.x and confirmed NVTT 3.x builds. Before
+committing any `hud_sprites_ui.dds`, run the byte-order spike: create a 2×2 PNG with
+`R=255, G=0, B=0, A=255`, convert it with `nvcompress -rgba -nomips`, then decode the
+resulting DDS and verify the first pixel reads R=255, G=0, B=0. If it reads B=255 (BGRA
+output), that nvcompress build is non-standard and must NOT be used for this asset.
+**Approved fallback when nvcompress byte-order check fails**: export `hud_sprites_ui.png`
+directly from the DCC tool as a lossless 32-bit RGBA PNG and skip the DDS intermediate
+step entirely. The PNG is pixel-identical to a correct RGBA8 UNORM DDS for uncompressed
+data, and Irrlicht loads it correctly via `getTexture()`. The DDS intermediate step exists
+only to validate RGBA byte order; when that validation fails the direct-PNG export is the
+canonical alternative. Do NOT use Compressonator as a substitute under any circumstances.
+
 **Runtime format**: `hud_sprites_ui.png` — the DDS converted to PNG for loading via Irrlicht's
 `IVideoDriver::getTexture()`. `IrrlichtUIBackend` stores the result as `irr::video::ITexture*`
 and uses `IGUIButton::setImage()` for per-button icon display.
@@ -466,6 +479,18 @@ no ICC profile is embedded — this is harmless. What matters is that the PNG co
 embedded ICC profile and that the pixel data has not been gamma-corrected during export.
 Confirm with `identify -verbose hud_sprites_ui.png | grep -i profile` — the output must be
 empty (no embedded profiles), meaning the file carries no colour management metadata.
+
+**DDS FourCC field for UI sprite sheet (authoring note)**: When verifying the DDS output
+from `nvcompress -rgba -nomips`, the FourCC field at byte offset 84 may read `b'DX10'`
+(NVTT 3.x writes a DX10 extended header) or a legacy uncompressed FourCC value. Both
+outcomes are acceptable for a linear RGBA8 UI texture. The DX10 header is NOT an sRGB
+indicator by itself — the DXGI format field within the DX10 header determines sRGB. The
+only prohibited outcome is `DXGI_FORMAT_R8G8B8A8_UNORM_SRGB` (format value 29). When a
+DX10 header is present (FourCC = `b'DX10'`), verify the DXGI format: the value at byte
+offset 128 must be 28 (`DXGI_FORMAT_R8G8B8A8_UNORM`, linear) and must NOT be 29 (sRGB).
+A file produced by `nvcompress -rgba -nomips` from a source PNG with no embedded ICC
+profile will always carry format 28 and never 29; this check is a belt-and-suspenders
+verification step, not an expected failure path.
 
 **Format recap**: 2048×2048 RGBA8, no mip chain, linear color space. Full cell layout in the
 sections below.
@@ -613,11 +638,15 @@ placeholder.
 | 196 | 4 | 6 | `kSpriteIndicatorDemolish` | Demolish tool active indicator |
 | 197 | 5 | 6 | `kSpriteIndicatorQuery` | Query tool active indicator |
 
-#### Cell Assignment Table — Row 7: Cursor-Shape Icons (deferred — Phase 10+)
+#### Cell Assignment Table — Row 7: Cursor-Shape Icons (deferred — post-Phase 10)
 
 OS-level cursor shape changes require `IUIBackend::setMouseCursor()`, which does not exist
-in the Phase 9b 17-method `IUIBackend` interface. These cells are reserved but not
-implemented in Phase 9b. Phase 10+ fills these cells when `setMouseCursor()` is added.
+in the V1 `IUIBackend` interface and is not a Phase 10 deliverable. These cells are reserved
+stubs. **Phase 10 artists must leave all row 7 cells fully transparent (RGBA = 0,0,0,0) in
+the committed `hud_sprites_ui.png`.** The `kSpriteCursor*` constants in `hud_sprite_ids.h`
+are defined so that future phases can fill the cells without renumbering any existing handle.
+No cursor icon art is required until `setMouseCursor()` is added to the `IUIBackend` interface
+in a future phase.
 
 | Handle | Col | Row | Constant name | Description |
 |---|---|---|---|---|
@@ -772,7 +801,7 @@ constexpr uint32_t kSpriteIndicatorUtilities    = 195;
 constexpr uint32_t kSpriteIndicatorDemolish     = 196;
 constexpr uint32_t kSpriteIndicatorQuery        = 197;
 
-// Row 7 — Cursor-shape icons (reserved; Phase 10+ only — IUIBackend::setMouseCursor() not yet added)
+// Row 7 — Cursor-shape icons (reserved; Phase 12 — IUIBackend::setMouseCursor() added in Phase 12)
 constexpr uint32_t kSpriteCursorDefault         = 224;
 constexpr uint32_t kSpriteCursorZone            = 225;
 constexpr uint32_t kSpriteCursorRoad            = 226;

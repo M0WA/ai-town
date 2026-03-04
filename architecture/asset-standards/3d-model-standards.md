@@ -247,8 +247,16 @@ structures). This means:
 atlas (row 3, col 2 and row 3, col 3). Service buildings share atlas cell (3, 2) for all
 four types in V1 — they share a common material palette (concrete, glass, utility panels).
 A second reserved cell (3, 3) is available if a distinct material per service type is
-required in a later phase. This assignment must be confirmed by `graphics-artist-2d-texture`
-during Phase 9 UV authoring before atlas cell usage is locked.
+required in a later phase. Cell (3, 2) assignment is now recorded as binding in
+`architecture/asset-standards/building-atlas-layout.md` Cell Assignment Table (updated
+2026-03-04). The `graphics-artist-3d-model` UV packing feasibility confirmation for
+service building cell (3, 2) is recorded in `building-atlas-layout.md` (sign-off
+2026-03-04). A `graphics-artist-2d-texture` texture content confirmation for cell (3, 2)
+is separately required before Phase 9 service building UV authoring begins — tracked as a
+PENDING SIGN-OFF in `building-atlas-layout.md`. Service building mesh production (geometry,
+LOD meshes, collision meshes) is NOT blocked by this confirmation; only UV channel 0
+authoring for service building assets and validate_assets.py check #4 UV-range verification
+for those assets are blocked until the 2d-texture artist confirmation is recorded.
 
 **Collision mesh**: `svc_<type>_col.obj` — single convex hull, maximum 24 triangles,
 no top/bottom caps, flat at Y=0. All four service building types use rectangular footprints

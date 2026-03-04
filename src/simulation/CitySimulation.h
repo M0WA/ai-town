@@ -193,6 +193,24 @@ private:
         int64_t  costPaid{0};           // treasury deduction to reverse on undo
     };
 
+    // TrafficSignal — Phase 10 data structure for sfx_intersection_tick wiring.
+    // Maintained by placeRoad() (add signal at any road tile adjacent to 2+ roads)
+    // and demolishTile() (remove signal when road tile is demolished).
+    //
+    // A signal "fires" every phaseSeconds real-time seconds. Each fire represents
+    // one green→red or red→green phase change and triggers sfx_intersection_tick
+    // (pre-culled at > traffic_signal_cull_distance_meters from listener).
+    //
+    // phaseTimer: elapsed real-time seconds since last phase change.
+    //             Initialised to a random offset in [0, phaseSeconds) to prevent
+    //             all signals firing simultaneously on first frame.
+    struct TrafficSignal {
+        int   tileX{0};
+        int   tileZ{0};
+        float phaseTimer{0.0f};   // elapsed seconds since last phase change
+        float phaseSeconds{SimulationConstants::traffic_signal_phase_seconds};
+    };
+
     // ------------------------------------------------------------------
     // Injected dependencies
     // ------------------------------------------------------------------
@@ -246,6 +264,12 @@ private:
     std::vector<ServiceBuilding>           m_serviceBuildings;
     int                                    m_roadTileCount{0};
 
+    // Phase 10: traffic signals — one entry per intersection road tile.
+    // Populated by placeRoad() (when the new road tile is adjacent to 2+ existing roads)
+    // and pruned by demolishTile() (remove entry when a road tile is demolished).
+    // Each signal's phaseTimer is advanced by doTrafficSignalTick(realDeltaSeconds).
+    std::vector<TrafficSignal> m_trafficSignals;
+
     // ------------------------------------------------------------------
     // Traffic — rolling windows (circular buffers, initialized to null_path default)
     // ------------------------------------------------------------------
@@ -269,6 +293,9 @@ private:
     // Population & city rating
     // ------------------------------------------------------------------
     int            m_totalPopulation{0};
+    int            m_prevPopulation{0};    // Phase 10: snapshot from end of previous tick
+                                           // Used to detect net-positive pop delta for GROWTH tier.
+                                           // Updated at the END of doPopulationTick() each budget tick.
     CityRatingTier m_cityRating{CityRatingTier::Village};
     bool           m_milestoneFired[5]{};  // 1K/10K/50K/100K/500K (index 0–4)
 
@@ -277,6 +304,16 @@ private:
     // ------------------------------------------------------------------
     int  m_consecutiveDeficitMonths{0};
     bool m_month1AutoSlowed{false};  // resets when streak breaks
+
+    // ------------------------------------------------------------------
+    // Adaptive music intensity (Phase 10)
+    // ------------------------------------------------------------------
+    // Tracks the MusicIntensity tier that was last sent to IAudioSystem so
+    // that setMusicIntensity() is only called when the tier actually changes
+    // (edge-detect policy — avoids hammering the audio system every tick).
+    // Initialised to CALM: construction sends no setMusicIntensity call because
+    // the audio system already defaults to CALM on transitionToGameplay().
+    MusicIntensity m_lastSentMusicIntensity{MusicIntensity::CALM};
 
     // ------------------------------------------------------------------
     // Density unlock
@@ -319,6 +356,13 @@ private:
     void doEconomyTick();                 // revenue, expenses, loan repayment, deficit checks
     void doGameOverTick();                // deficit streak, auto-slow, game-over counter
     void checkCityRatingTransition();     // tier change notification
+
+    // Phase 10: advance traffic signal timers and fire sfx_intersection_tick.
+    // Called once per tick() with real delta seconds (NOT sim-speed-scaled).
+    // Signals are independent of budget ticks — they toggle every
+    // SimulationConstants::traffic_signal_phase_seconds real-time seconds.
+    // Pre-cull: skips playPositionalSound if listener distance > 80 m.
+    void doTrafficSignalTick(float realDeltaSeconds);
 
     // Economy helpers
     int64_t computeTaxRevenue(ZoneType zone) const;

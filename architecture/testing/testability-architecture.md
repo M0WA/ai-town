@@ -40,6 +40,16 @@ public:
     // Load a texture from disk and return an opaque handle for setElementImage().
     // Returns kInvalidUIElement on failure. Backend owns the resource; call removeElement() to release.
     virtual UIElementHandle loadTexture(const std::string& path) = 0;
+    // Set a filled background colour on an IGUIStaticText element (packed ARGB 0xAARRGGBB).
+    // Added in Phase 9b for the Minimap dark-panel fix. Only valid for addStaticText() handles.
+    // See architecture/ui-ux/minimap.md §IUIBackend method 18.
+    virtual void setElementBackgroundColor(UIElementHandle handle, uint32_t argb) = 0;
+    // Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element.
+    // Panel code calls this immediately after addStaticText() for every numeric readout element.
+    // In IrrlichtUIBackend: calls IGUIStaticText::setOverrideFont(m_monoFont); no-op when m_monoFont is null.
+    // In MockUIBackend: MOCK_METHOD stub. Labels and button text MUST NOT call this method.
+    // Added in Phase 10. See architecture/ui-ux/hud-layout.md §Font Loading — Monospace requirement.
+    virtual void setElementMonoFont(UIElementHandle handle) = 0;
 };
 ```
 
@@ -627,16 +637,29 @@ public:
     virtual void          setZoneOverlay(int mapTilesX, int mapTilesZ,
                                          const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) = 0;
     virtual ScreenRect    getTileScreenBounds(int tileX, int tileZ) const = 0;
+
+    // Phase 10 addition — listener position query for pre-acquisition distance culls.
+    // Returns the current camera/listener position in world space as a vec3.
+    // Used by CitySimulation::tick() to perform the 80 m pre-acquisition distance cull
+    // for sfx_intersection_tick before calling IAudioSystem::playPositionalSound().
+    // IrrlichtRenderer::getListenerPosition() returns the position component of the last
+    // CameraParams passed to setCamera(). MockRenderer::getListenerPosition() returns
+    // vec3{0,0,0} by default (suitable for distance-cull tests that set a specific value
+    // via ON_CALL).
+    virtual vec3          getListenerPosition() const = 0;
 };
 
-// MockRenderer — GMock implementation of IRenderer (10 methods as of Phase 9b).
+// MockRenderer — GMock implementation of IRenderer (11 methods as of Phase 10).
 // Source location: tests/simulation/mock_renderer.h
 // Shared across simulation_tests, ui_tests (via tests/simulation/ include path).
 //
 // Default ON_CALL actions (set in MockRenderer constructor):
-//   loadTexture    — returns incrementing non-zero integer
-//   pickTerrainTile — returns false (no terrain hit; tileX/tileZ unchanged)
+//   loadTexture         — returns incrementing non-zero integer
+//   pickTerrainTile     — returns false (no terrain hit; tileX/tileZ unchanged)
 //   getTileScreenBounds — returns ScreenRect{} (zero-initialised)
+//   getListenerPosition — returns vec3{0.0f, 0.0f, 0.0f} (origin; override per-test for
+//                         distance-cull scenarios via ON_CALL(renderer_, getListenerPosition())
+//                         .WillByDefault(Return(vec3{x, y, z})))
 //
 // Phase 9b stub usage in WorldInteractionTest:
 //   EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
@@ -655,6 +678,10 @@ public:
 // The four Phase 9b methods (pickTerrainTile, setTileHoverHighlight, setZoneOverlay,
 // getTileScreenBounds) ARE called from UIManager::onEvent() during tests. Each test
 // must declare EXPECT_CALL for each of these that the production code exercises.
+//
+// The Phase 10 method getListenerPosition() IS called from CitySimulation::tick() during
+// the sfx_intersection_tick 80 m pre-cull. Simulation tests that exercise tick() with
+// traffic signals must either set ON_CALL for getListenerPosition() or use NiceMock.
 
 // Canonical IAudioSystem — 15 methods (Phase 10 added setMusicIntensity). Authoritative definition in audio-architecture/audio-system.md.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType, SimSpeed,

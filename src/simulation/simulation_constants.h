@@ -279,6 +279,26 @@ struct SimulationConstants {
     static_assert(density_unlock_base_threshold_3 < density_unlock_base_threshold_4, "unlock thresholds must be ascending");
     static_assert(density_unlock_base_threshold_4 < density_unlock_base_threshold_5, "unlock thresholds must be ascending");
 
+    // sfx_zone_upgrade_per_tick_cap: maximum number of sfx_zone_upgrade audio calls fired per
+    // doDensityUnlockTick() invocation. Tiles beyond the cap are upgraded silently.
+    // Prevents a jarring burst when a large upgrade wave fires simultaneously.
+    // (phase-10.md §sfx_zone_upgrade wiring, architecture/game-design/zoning-system.md)
+    static constexpr int sfx_zone_upgrade_per_tick_cap = 3;
+    static_assert(sfx_zone_upgrade_per_tick_cap > 0, "cap must be positive");
+
+    // traffic_signal_phase_seconds: real-time seconds between traffic signal phase changes.
+    // Signals toggle green→red or red→green every 30 s (real time, not sim time).
+    // This value controls sfx_intersection_tick firing rate.
+    // (phase-10.md §sfx_intersection_tick wiring)
+    static constexpr float traffic_signal_phase_seconds = 30.0f;
+    static_assert(traffic_signal_phase_seconds > 0.0f, "must be positive");
+
+    // traffic_signal_cull_distance_meters: pre-cull distance for sfx_intersection_tick.
+    // Calls with distance > 80 m are skipped before acquiring a source from the pool.
+    // (phase-10.md §sfx_intersection_tick wiring, architecture/audio-architecture/v1-audio-asset-manifest.md)
+    static constexpr float traffic_signal_cull_distance_meters = 80.0f;
+    static_assert(traffic_signal_cull_distance_meters > 0.0f, "must be positive");
+
     // Population milestone thresholds (architecture/game-design/game-progression-modes.md)
     // Each threshold fires exactly once per playthrough (per-milestone boolean flag in CitySimulation).
     // Must NOT be hardcoded inline in CitySimulation.cpp or test bodies.

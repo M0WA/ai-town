@@ -203,19 +203,28 @@ tick. The upgrade wave runs inside `CitySimulation::doDensityUnlockTick()`.
 **Call site**: `CitySimulation::doDensityUnlockTick()`, immediately after a tile's density
 tier is incremented and before the 20%-per-type cap counter is updated.
 
+**Per-wave-tick audio call cap**: At most `SimulationConstants::sfx_zone_upgrade_per_tick_cap`
+(= 3) audio calls are made per single invocation of `doDensityUnlockTick()`. A local counter
+`sfxCallsThisTick` is incremented on each `playSound()` call; audio is suppressed (tile is
+still upgraded) when `sfxCallsThisTick >= sfx_zone_upgrade_per_tick_cap`. This prevents a
+jarring burst when a large upgrade wave fires across many tiles simultaneously. The cap
+communicates "upgrade wave happening" to the player without flooding the SFX pool. The
+constant must be defined in `simulation_constants.h` as
+`static constexpr int sfx_zone_upgrade_per_tick_cap = 3`.
+
 ```cpp
 // In CitySimulation::doDensityUnlockTick(), per-tile upgrade:
 tile.densityTier = nextTier;
-if (m_audio) {
+if (m_audio && sfxCallsThisTick < SimulationConstants::sfx_zone_upgrade_per_tick_cap) {
     m_audio->playSound(SFX_ZONE_UPGRADE, SoundPriority::NORMAL, 1.0f);
+    ++sfxCallsThisTick;
 }
 upgradeCountThisTick[tile.zoneType]++;
 ```
 
 `SFX_ZONE_UPGRADE` = SoundId 5 (`sfx_zone_upgrade.wav`). Non-positional
-(`AL_SOURCE_RELATIVE = AL_TRUE`), EFX bypass. One call per upgraded tile per tick; at most
-20% of eligible tiles fire per zone type per tick (the 20% cap is already enforced by the
-upgrade wave logic — no additional audio throttle is required here).
+(`AL_SOURCE_RELATIVE = AL_TRUE`), EFX bypass. At most `sfx_zone_upgrade_per_tick_cap` (= 3)
+audio calls per `doDensityUnlockTick()` invocation; tiles beyond the cap are upgraded silently.
 
 ## Zone Overlay Colour Scheme (Phase 9b — HUD)
 

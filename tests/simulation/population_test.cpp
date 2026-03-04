@@ -241,7 +241,7 @@ TEST_F(PopulationTest, CityRating_100KPopulation_NoRatingTransition_NoStingerFla
     ManualClock local_clock;
     ManualTerrainQuery local_terrain;
 
-    // Allow all non-stinger audio calls (placement SFX, budget events, etc.).
+    // Allow all incidental audio calls (placement SFX, budget events, time-of-day, etc.).
     EXPECT_CALL(strict_audio, playSound(_, _, _)).Times(AnyNumber());
     EXPECT_CALL(strict_audio, setMusicTrack(_)).Times(AnyNumber());
     EXPECT_CALL(strict_audio, setSpeed(_)).Times(AnyNumber());
@@ -255,8 +255,12 @@ TEST_F(PopulationTest, CityRating_100KPopulation_NoRatingTransition_NoStingerFla
     // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick.
     // Allow any number — this test focuses on stinger policy, not music intensity tier.
     EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
-    // CRITICAL: triggerStinger must NOT be called when population crosses 100K.
-    EXPECT_CALL(strict_audio, triggerStinger(_)).Times(0);
+    // Phase 10: CityRatingTier transitions (Village→Town at 1K, Town→City at 10K,
+    // City→Metropolis at 50K) all fire triggerStinger(MILESTONE) per spec.
+    // Allow these during the warm-up phase (population 0 → 50K+).
+    // The CRITICAL assertion (no stinger at 100K) is installed after VerifyAndClear
+    // once the city is already at Metropolis tier.
+    EXPECT_CALL(strict_audio, triggerStinger(_)).Times(AnyNumber());
 
     auto local_sim = std::make_unique<CitySimulation>(
         &nice_renderer, &strict_audio,
@@ -288,11 +292,35 @@ TEST_F(PopulationTest, CityRating_100KPopulation_NoRatingTransition_NoStingerFla
 
     const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
 
-    // Run enough ticks to cross 100K population.
+    // Warm-up phase: run until population crosses Metropolis threshold (50K).
+    // Legitimate tier transitions (Village→Town, Town→City, City→Metropolis) fire
+    // stingers here — these are correct per spec and allowed by AnyNumber() above.
+    for (int i = 0; i < 30; ++i) {
+        local_clock.advance(dt);
+        cs2->tick(dt);
+        if (local_sim->getTotalPopulation() >= 60000) break;
+    }
+    ASSERT_GE(local_sim->getTotalPopulation(), 50000)
+        << "Population must reach Metropolis tier (50K) before CRITICAL phase";
+
+    // Reset all audio expectations now that the city is at Metropolis tier.
+    // All three legitimate stingers have already fired (or will not fire again).
+    // From this point on: triggerStinger must NOT be called — 100K is NOT a tier boundary.
+    ::testing::Mock::VerifyAndClearExpectations(&strict_audio);
+    EXPECT_CALL(strict_audio, playSound(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setTimeOfDay(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+    // CRITICAL: triggerStinger must NOT be called when population crosses 100K.
+    // 100K is NOT a CityRatingTier boundary — Metropolis threshold is 50K,
+    // Megalopolis threshold is 500K.
+    EXPECT_CALL(strict_audio, triggerStinger(_)).Times(0);
+
+    // Drive population from ~60K to 100K+.
     // With 200 Low-R tiles and balanced demand:
     //   each tile capacity = 100; 10% cap = 10/tick; 200 × 10 = 2000/tick
-    //   100K / 2000 = 50 ticks needed. Run 60 to be safe.
-    for (int i = 0; i < 60; ++i) {
+    //   100K / 2000 = 50 ticks needed. Run 30 more to be safe.
+    for (int i = 0; i < 30; ++i) {
         local_clock.advance(dt);
         cs2->tick(dt);
     }

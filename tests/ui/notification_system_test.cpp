@@ -19,6 +19,7 @@
 #include "src/ui/NotificationManager.h"
 #include "src/ui/ui_types.h"
 #include "src/platform/input_event.h"
+#include "src/interfaces/sound_ids.h"      // UI_TOAST (SoundId 23) — Phase 10 audio SFX tests
 #include "tests/ui/mock_ui_backend.h"
 #include "tests/ui/mock_city_simulation.h"
 #include "tests/simulation/mock_audio_system.h"
@@ -705,4 +706,64 @@ TEST_F(UIManagerDeficitIntegrationTest, NotificationPolling_BudgetDeficitWarn) {
 
     ui_->update(0.016f);
     SUCCEED();
+}
+
+// ============================================================================
+// Phase 10 deliverable: NotificationSFX_ToastVisible_UIToastSoundFires
+//
+// Verifies that NotificationManager::postNormal() fires
+// playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f) exactly once when the
+// toast becomes visible on screen (not on enqueue when the queue is at capacity).
+//
+// Spec refs:
+//   architecture/testing/testability-architecture.md §NotificationManager testability
+//   implementation/phase-10.md §ui_toast wiring
+//   architecture/ui-ux/hud-layout.md Phase 10 Audio Wiring — ui_toast section
+//
+// Phase 10 wiring rule: NotificationManager::postCritical() and postNormal()
+// each call m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f) immediately
+// AFTER the toast element is made visible via m_backend->setElementVisible(handle, true).
+// Guard: if (m_audio). Fires once per toast appearance — not once per enqueue.
+//
+// Fixture: NotificationManagerTest_Phase8.
+//   NiceMock<MockUIBackend>:      returns incrementing handles from addStaticText/addButton.
+//   NiceMock<MockCitySimulation>: stub returns; not exercised by this test.
+//   ManualClock:                  time-independent; postNormal() does not need clock advance.
+//   NiceMock<MockAudioSystem>:    injected as IAudioSystem* (4th ctor param); intercepts
+//                                 playSound(UI_TOAST, ...) for the Times(1) assertion.
+//
+// EXPECT_CALL is placed BEFORE postNormal() per standard GMock ordering rules.
+// ============================================================================
+TEST_F(NotificationManagerTest_Phase8, NotificationSFX_ToastVisible_UIToastSoundFires) {
+    // Expect exactly one UI_TOAST sound call when the Normal toast becomes visible.
+    // SoundPriority::NORMAL and gain 1.0f are the canonical values per phase-10.md.
+    EXPECT_CALL(audio_, playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f)).Times(1);
+
+    // Post a Normal toast — NotificationManager makes the toast visible and calls
+    // m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f) once, guarded by
+    // if (m_audio), immediately after m_backend->setElementVisible(handle, true).
+    notifMgr_->postNormal("Info", "Road construction complete", 10.0f);
+}
+
+// ============================================================================
+// Phase 10 deliverable: NotificationSFX_CriticalToast_UIToastSoundFires
+//
+// Verifies that NotificationManager::postCritical() fires
+// playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f) exactly once when the
+// CRITICAL toast becomes visible on screen.
+//
+// Both postCritical() and postNormal() must wire the ui_toast SFX per
+// phase-10.md §ui_toast wiring (the spec explicitly names both methods).
+//
+// The auto-pause side-effect (setPaused(true)) is also covered by
+// CriticalToast_OnPost_AutoPausesCalled; here we verify the audio SFX companion.
+// ============================================================================
+TEST_F(NotificationManagerTest_Phase8, NotificationSFX_CriticalToast_UIToastSoundFires) {
+    // Allow the auto-pause call that fires when the CRITICAL queue goes non-empty.
+    EXPECT_CALL(sim_, setPaused(true)).Times(1);
+
+    // Expect exactly one UI_TOAST sound call when the CRITICAL toast becomes visible.
+    EXPECT_CALL(audio_, playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f)).Times(1);
+
+    notifMgr_->postCritical("Crisis", "Budget deficit detected");
 }

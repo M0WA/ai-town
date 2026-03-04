@@ -14,7 +14,7 @@
   - **`kToolbarBottom = 784`** (defined in `ui_constants.h`; see also `input-arbitration.md` Priority 3) is the **full input carve-out bottom edge**. Any mouse click with `virtual_y <= 784` **and** `virtual_x <= 72` is unconditionally consumed by the left-panel toolbar input handler, regardless of whether a visible toolbar element exists at that exact pixel. The carve-out intentionally extends below the visible icon group (from y:600 down to y:784) to cover the undo button (y:608–656), the demand bars (y:664–744), and the active tool indicator (y:752–784) — all of which are left-panel elements that would otherwise be missed if the gate used y:600.
   - **Phase 3 implementers MUST use `kToolbarBottom = 784` for the input gate.** Using y:600 is incorrect; it leaves the undo button, demand bars, and active tool indicator exposed to accidental world-clicks when the player's cursor is in the lower portion of the toolbar panel.
 - **Undo button**: Positioned directly below the tool icon group within the left toolbar panel. Virtual bounds: x: 8–72 px, y: 608–656 px (immediately below the last tool icon, 8 px gap from y:600). A 48×48 px icon button labeled "↩ Undo" (or Ctrl+Z hotkey hint). Grayed out (via `IUIBackend::setElementEnabled(..., false)`) when no undo action is available or while a blocking modal is active. Disabled state must use `setElementEnabled` (non-interactive, grayed), not `setElementVisible` (hidden) — the button remains visible at all times. **Undo countdown**: When an undoable action is pending, the button label changes to "↩ Undo (expires in Xs)" where X is the real-time seconds remaining until the second budget tick expires the undo window, updated every real second. Text turns amber when `remainingSeconds < 5.0` or when the total undo window is ≤ 6 s (i.e., at 10× simulation speed where the second tick fires in ~6 real seconds — the countdown is amber from the moment the action is taken). Implementation: compute `remainingSeconds = secondBudgetTickTimeReal − IClock::nowSeconds()`; set amber if `remainingSeconds < 5.0 || totalWindowSeconds <= 6.0`. The countdown is absent when the button is grayed out (no pending undo). Requires `IClock` injection into the component responsible for rendering the undo button. See [Undo System](../game-design/undo-system.md) for the full undo expiry specification.
-- **Unsaved changes indicator**: A dot (**16×16 px**, amber fill) placed immediately to the **left** of the notification bell icon at virtual bounds x: **1796–1812 px**, y: 8–24 px. **Must not overlap the bell icon** (bell occupies x: 1820–1868 px; the dot must end at x ≤ 1812 with at least an 8 px gap before the bell's x:1820 left edge). Appears whenever there are unsaved changes since the last manual save or auto-save. Hidden when game state matches last save. Tooltip on hover: "You have unsaved changes. Press Ctrl+S to save." 16×16 px minimum ensures the dot is visually distinct and hoverable without pixel-perfect accuracy. The dot and bell are mutually exclusive interactive targets — no shared coordinate range between them. **The dot must remain visible (not cleared) after a failed auto-save** — a failed auto-save does not constitute a successful save and must not clear the unsaved-changes state. The dot element has a fixed amber fill color authored at creation time via the backend — it does not change color dynamically. Visibility is controlled exclusively via `setElementVisible`. No `setElementColor` method is required on `IUIBackend` for V1; the `IUIBackend` 17-method interface is sufficient for the dot element.
+- **Unsaved changes indicator**: A dot (**16×16 px**, amber fill) placed immediately to the **left** of the notification bell icon at virtual bounds x: **1796–1812 px**, y: 8–24 px. **Must not overlap the bell icon** (bell occupies x: 1820–1868 px; the dot must end at x ≤ 1812 with at least an 8 px gap before the bell's x:1820 left edge). Appears whenever there are unsaved changes since the last manual save or auto-save. Hidden when game state matches last save. Tooltip on hover: "You have unsaved changes. Press Ctrl+S to save." 16×16 px minimum ensures the dot is visually distinct and hoverable without pixel-perfect accuracy. The dot and bell are mutually exclusive interactive targets — no shared coordinate range between them. **The dot must remain visible (not cleared) after a failed auto-save** — a failed auto-save does not constitute a successful save and must not clear the unsaved-changes state. The dot element has a fixed amber fill color authored at creation time via the backend — it does not change color dynamically. Visibility is controlled exclusively via `setElementVisible`. No `setElementColor` method is required on `IUIBackend` for V1; the 19-method `IUIBackend` interface (see `architecture/ui-ux/ui-manager.md` §IUIBackend Method Contract) is sufficient for the dot element.
 - **Grace period indicator**: Virtual bounds: x: 8–1912 px, y: 60–92 px (32 px height, directly beneath the resource/budget bar which occupies approximately y: 0–56 px). Displayed while the wall-clock grace period is active. Label: "Cost waiver: Xs remaining" (green text with clock icon from UI sprite sheet), where X is `floor(120 − IClock::nowSeconds() elapsed since game start)`, updated every real second. When fewer than 20 real seconds remain, the label text turns amber as a last-chance visual cue. On expiry, the indicator fades to alpha 0 over 0.5 real seconds via `setElementAlpha`, then is hidden via `setElementVisible(false)` — the grace period has ended and no countdown is needed. The 120 s duration is a wall-clock measurement and is unaffected by simulation speed — at 10× speed the same 120 real seconds apply. **Interactive tooltip**: On hover or click, shows: "During the grace period, road maintenance ($10/tile/month) and building upkeep costs are waived. These costs will begin in approximately Xs" (where X is the real-seconds countdown already shown in the indicator label — not a month count, as the grace period is real-time not month-aligned) "Estimated monthly upkeep when active: $[calculated from current city]." The estimated figure updates each real second as the player builds. Note: road tile placement cost ($500/tile) is NOT waived during the grace period — only ongoing maintenance and upkeep costs are waived. See [Economy Model](../game-design/economy-model.md) for the authoritative 120 s definition.
 - **Demand pressure bar** (compact, anchored below undo button): virtual bounds x: 8–72 px, y: **664–744 px** (8 px visual gap from the undo button bottom edge at y:656). Per-zone-type (R/C/I) unmet demand percentage indicator as three vertical bars. Updates each budget tick. (**Layout note**: the previous placement at y:608–688 px overlapped the undo button at y:608–656 px; moved down to y:664–744 px to eliminate the overlap.) **Low-resolution text legibility**: Each bar is labeled with a single-character zone-type indicator ('R', 'C', 'I') rendered above the bar column. At the virtual 64 px toolbar width, each of the 3 bars occupies ~20 px horizontally. The 'R', 'C', 'I' labels must use a **minimum 9-point font** (virtual space) at all supported resolutions to remain legible. If the UI scaling factor produces a rendered label below 9 virtual pixels high, the HUD must fall back based on the active accessibility mode:
 
@@ -22,7 +22,7 @@
   - **Colorblind mode** (colorblind mode ON): The tooltip-only fallback is **NOT permitted**. Color is already an insufficient encoding in colorblind mode, so removing the persistent label would leave users with no reliable zone-type identification. Instead, the HUD MUST render the single-character zone-type symbol ('R', 'C', or 'I') at the hard physical floor of **11 px physical pixels** (per `resolution-ui-scaling.md` Typography hard physical floor — `UIScaler` clamps text scale to this minimum). Alongside the clamped label, the bar column MUST also display a **pattern or hatching overlay** (see `resolution-ui-scaling.md` Colorblind Accessibility section — "Demand pressure bar hatching patterns (colorblind mode)": Residential = diagonal hatching at 45°, Commercial = horizontal lines, Industrial = cross-hatch) so that zone type can be distinguished by pattern alone, independent of both color and the small label. The tooltip remains available as supplemental information but may not be the sole encoding in colorblind mode.
 
   **Data source**: `ICitySimulation::getDemandPressurePct(ZoneType)` returns the city-wide weighted-average `demand_factor` across all tiles of that zone type, updated each budget tick. **DISPLAY SCALING**: `getDemandPressurePct()` returns `float` in `[0.0, 1.0]` — NOT a percentage in `[0, 100]`. The HUD demand bars MUST multiply by `100.0f` before display (e.g., `barFillPct = getDemandPressurePct(zone) * 100.0f`). Omitting this multiplication produces a bar always showing ≤1% fill. **INVERSE SEMANTICS**: `QueryResult::demandPressurePct` (Inspector Panel) uses the complementary definition `(1.0f − effective_demand_factor) × 100` where 100 = zero demand — opposite direction. Do NOT use `QueryResult::demandPressurePct` directly to fill the HUD demand bar. This is distinct from per-tile demand pressure available via `QueryResult::demand_pressure_pct` in the Query/Inspector Panel.
-- **Active tool indicator** (persistent badge below demand bar): virtual bounds x: 8–72 px, y: 752–784 px. Shows the current tool's 32×32 px icon with a small text label, visible from anywhere on screen without looking at the toolbar. Updates immediately when the active tool changes. Icon sprite handles are drawn from `hud_sprites_ui.dds` row 6 (`kSpriteIndicatorNone` through `kSpriteIndicatorQuery` — see `src/ui/hud_sprite_ids.h` and `architecture/asset-standards/2d-texture-standards.md` UI Sprite Sheet Cell Layout section). **Cursor shape**: each tool mode uses a distinct cursor shape from the UI sprite sheet (Zone: crosshair with zone-color tint; Road: road-segment icon; Utilities: wrench; Demolish: X marker; Query: magnifying glass). OS-level cursor shape changes require `IUIBackend::setMouseCursor()`, which does not exist in the Phase 9b interface; cursor icon rendering from the sprite sheet is **deferred to Phase 10+** (see row 7 reserved cells in the sprite sheet layout). The `m_activeTool` state set in Phase 9b is the prerequisite for Phase 10+ cursor shape selection.
+- **Active tool indicator** (persistent badge below demand bar): virtual bounds x: 8–72 px, y: 752–784 px. Shows the current tool's 32×32 px icon with a small text label, visible from anywhere on screen without looking at the toolbar. Updates immediately when the active tool changes. Icon sprite handles are drawn from `hud_sprites_ui.dds` row 6 (`kSpriteIndicatorNone` through `kSpriteIndicatorQuery` — see `src/ui/hud_sprite_ids.h` and `architecture/asset-standards/2d-texture-standards.md` UI Sprite Sheet Cell Layout section). **Cursor shape**: each tool mode uses a distinct cursor shape from the UI sprite sheet (Zone: crosshair with zone-color tint; Road: road-segment icon; Utilities: wrench; Demolish: X marker; Query: magnifying glass). OS-level cursor shape changes require `IUIBackend::setMouseCursor()`, which is not part of the V1 19-method `IUIBackend` interface. Cursor icon rendering from the sprite sheet is **deferred to Phase 12** (the colorblind QA pass — consistent with the hover-highlight colorblind glyph deferral in `architecture/ui-ux/resolution-ui-scaling.md` Colorblind Accessibility section). The `m_activeTool` state set in Phase 9b is the prerequisite for Phase 12 cursor shape selection. Row 7 cells in the sprite sheet (`kSpriteCursorDefault` through `kSpriteCursorQuery`) are reserved for this purpose and already authored in `assets/textures/ui/hud_sprites_ui.dds` — no further artwork is needed in Phase 12, only the `setMouseCursor()` implementation.
 
 ## Zone Sub-Panel
 
@@ -89,6 +89,69 @@ active-state sprite. The selected zone type and density tier are stored in
   to `m_activeTool`.
 - The zone sub-panel is NOT shown when Query mode is active. It reappears the moment the
   Zone tool is next selected.
+
+## Utilities Sub-Panel
+
+The Utilities sub-panel is a 2×2 grid of buttons that appears immediately to the right of the
+left toolbar (x:80, y:176) whenever the Utilities tool is active. It is hidden for all other
+tool modes. Virtual bounds: x:80–276 px, y:176–276 px (width = (96×2)+4 = 196 px,
+height = (48×2)+4 = 100 px). Grid layout: column 0 = Power Plant, column 1 = Water Tower,
+row 0 = (Power Plant, Water Tower), row 1 = (Fire Station, Police Station). Constants defined
+in `src/ui/ui_constants.h`: `kUtilSubPanelLeft`, `kUtilSubPanelTop`, `kUtilSubBtnW`,
+`kUtilSubBtnH`, `kUtilSubBtnGap`.
+
+### Utilities Sub-Panel Button Content
+
+Each button displays a sprite icon from `hud_sprites_ui.dds` via
+`IUIBackend::setElementImage()` using the `kSpriteUtil*` constants from
+`src/ui/hud_sprite_ids.h` (rows 4 and 5 of the sprite sheet — see
+`architecture/asset-standards/2d-texture-standards.md` Cell Assignment Tables). The button
+is created with a short descriptive text label; the sprite replaces the label once the
+sprite sheet is loaded.
+
+**Text label fallback (when sprite sheet asset is not yet on disk)**: If
+`hud_sprites_ui.dds` is absent or the sprite fails to load, the button will render its
+text label. The following fallback labels MUST be passed to `addButton()` at construction
+time for each Utilities sub-panel button — do NOT pass an empty string `""`:
+
+| Index | ServiceBuildingType | Fallback label |
+|---|---|---|
+| 0 | `PowerPlant` | `"Power"` |
+| 1 | `WaterTower` | `"Water"` |
+| 2 | `FireStation` | `"Fire"` |
+| 3 | `PoliceStation` | `"Police"` |
+
+Button index maps to `ServiceBuildingType` enum value: `{PowerPlant=0, WaterTower=1,
+FireStation=2, PoliceStation=3}` — sequential from 0 as defined in
+`src/interfaces/simulation_types.h`.
+
+Once `hud_sprites_ui.dds` is authored and loaded by `IrrlichtUIBackend`, `setElementImage()`
+replaces the text with the sprite icon. The fallback label is not visible when a sprite is
+loaded; it only appears when sprite loading fails. **This text fallback is the authoritative
+definition: the implementation MUST pass these strings to `addButton()` rather than empty
+string `""`.**
+
+**Tooltip**: On hover, each Utilities sub-panel button displays a tooltip with the full
+service building name: "Power Plant", "Water Tower", "Fire Station", "Police Station".
+Tooltips are provided by Irrlicht's built-in `setToolTipText()` on each button element.
+
+### Utilities Sub-Panel Selection State
+
+At construction, the default selection is Power Plant (index 0,
+`ServiceBuildingType::PowerPlant`). The selected button displays the active-state sprite
+(`kSpriteUtilPowerActive`, etc.). All other buttons display the inactive-state sprite.
+When the player clicks a different button, all buttons are set to their inactive sprite,
+then the clicked button is set to its active-state sprite. The selected building type is
+stored in `m_selectedServiceBuilding` in `UIManager`.
+
+### Utilities Sub-Panel Visibility Rules
+
+- The Utilities sub-panel is shown whenever `m_activeTool` becomes `ActiveTool::Utilities`.
+- The Utilities sub-panel is hidden whenever `m_activeTool` changes to any other value.
+- Hiding must occur before `m_activeTool` is set, or equivalently,
+  `updateSubPanelVisibility()` must be called immediately after every change to
+  `m_activeTool`.
+- The Utilities sub-panel is NOT shown when Query mode is active.
 
 ## Tool Mode State Machine
 
@@ -403,13 +466,24 @@ graceful fallback succeed — no constructor code changes are required in Phase 
 (Phase 10): Path 2 — two-font approach is selected.** `hud_font.xml` is a proportional sans-serif
 face for labels, button text, tooltips, and panel titles. A second font file
 `assets/fonts/hud_mono_font.xml` is a monospace face applied selectively to `IGUIStaticText`
-elements that display numeric values via `IGUIStaticText::setOverrideFont()` called on each
-numeric element immediately after `addStaticText()`. A single monospace face applied globally
-degrades legibility in compact panels (Query/Inspector, Tax Rate Panel) where proportional
-glyphs are narrower and allow more characters per line. The two-face approach allows each font
-to be optimised for its role. Both font files must be delivered as Phase 10 assets.
+elements that display numeric values. A single monospace face applied globally degrades legibility
+in compact panels (Query/Inspector, Tax Rate Panel) where proportional glyphs are narrower and
+allow more characters per line. The two-face approach allows each font to be optimised for its
+role. Both font files must be delivered as Phase 10 assets.
 
-Numeric elements that MUST use `hud_mono_font.xml` via `setOverrideFont()`:
+**Implementation**: `IrrlichtUIBackend` loads `hud_mono_font.xml` in its constructor and stores
+the result as `irr::gui::IGUIFont* m_monoFont{nullptr}`. Panel code applies the monospace font
+by calling `m_backend->setElementMonoFont(handle)` immediately after each `addStaticText()` call
+that creates a numeric element. `setElementMonoFont()` is method 19 on `IUIBackend`
+(see `architecture/ui-ux/ui-manager.md` §IUIBackend Method Contract). `IrrlichtUIBackend`
+implements it by calling `IGUIStaticText::setOverrideFont(m_monoFont)` on the looked-up element;
+when `m_monoFont` is null (font file absent — graceful fallback), the call is a no-op and the
+element keeps the environment default font. **Panel code MUST NOT cast `m_backend` to
+`IrrlichtUIBackend*` to access `m_monoFont` directly** — the `static_cast` pattern breaks
+unit tests that inject `MockUIBackend` (which is not an `IrrlichtUIBackend`) and produces
+undefined behavior. Use `m_backend->setElementMonoFont(handle)` exclusively.
+
+Numeric elements that MUST call `m_backend->setElementMonoFont(handle)` after `addStaticText()`:
 
 - Treasury balance display in resource bar
 - Population count display in resource bar
@@ -418,7 +492,7 @@ Numeric elements that MUST use `hud_mono_font.xml` via `setOverrideFont()`:
 - Density unlock progress threshold value in resource bar
 - In-game date/time display in resource bar
 
-Label text that uses `hud_font.xml` (no `setOverrideFont()` call):
+Label text that uses `hud_font.xml` (do NOT call `setElementMonoFont()`):
 
 - Zone type names, panel titles, button text, toolbar labels
 - Notification toast body text

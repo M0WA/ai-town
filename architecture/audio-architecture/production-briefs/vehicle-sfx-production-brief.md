@@ -137,14 +137,22 @@ below engine loops (−22 LUFS) and does not compete with music stems.
 
 ## Delivery Verification Checklist
 
-- [ ] `sfx_vehicle_engine_idle.ogg` — mono, 44100 Hz, 6 s ≤ duration < 20 s, −22 LUFS, ≤ −2 dBTP, seamless loop.
-- [ ] `sfx_vehicle_engine_move.ogg` — mono, 44100 Hz, 6 s ≤ duration < 20 s, −22 LUFS, ≤ −2 dBTP, seamless loop.
+- [ ] `sfx_vehicle_engine_idle.ogg` — mono, 44100 Hz, **8–12 s recommended** (6 s minimum CI gate), −22 LUFS, ≤ −2 dBTP, seamless loop.
+- [ ] `sfx_vehicle_engine_move.ogg` — mono, 44100 Hz, **8–12 s recommended** (6 s minimum CI gate), −22 LUFS, ≤ −2 dBTP, seamless loop.
+- [ ] **Engine loop duration target met**: both files are 8–12 s. A 6 s loop is permitted
+  by the CI gate but is only acceptable for placeholder and code-path testing — it sits
+  at the perceptibility boundary (4.5 s perceived at 0.75× pitch). Any file currently
+  at exactly 6.00 s that was generated as a synthetic placeholder must be re-exported at
+  8–12 s with production-quality DAW-authored engine tone content before Phase 10 exit.
 - [ ] `sfx_vehicle_horn.wav` — mono WAV PCM, 44100 Hz, 0.4–1 s, −18 LUFS, ≤ −1 dBTP.
 - [ ] `sfx_intersection_tick.wav` — mono WAV PCM, 44100 Hz, < 0.5 s, −28 LUFS, ≤ −2 dBTP.
 - [ ] No engine loop file is below 6 s (duration check mandatory).
 - [ ] No engine loop file is at exactly 20 s or longer — the Tier 2/Tier 3 boundary is exclusive; a file at exactly 20 s is Tier 3 (streamed) and will be rejected by `validate_assets.py`.
 - [ ] No engine loop file is in WAV format.
-- [ ] DAW loop verification completed for both engine loops (no click at loop boundary).
+- [ ] DAW loop verification completed for both engine loops at both pitch extremes (0.75× and 1.35×) — no click at loop boundary.
+- [ ] Loop pitch verification: loopback audition performed at both 0.75× and 1.35× pitch
+  in the DAW. A loop that is click-free at authored pitch may click at extreme pitch shifts
+  if phase alignment is marginal. Both extremes must be verified before delivery.
 
 ---
 

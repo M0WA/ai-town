@@ -2,8 +2,8 @@
 
 | Asset Name | Category | Format | Duration | Loop | Notes |
 |---|---|---|---|---|---|
-| `music_main_menu_01` | Main menu music | OGG | 90–180 s | Y | Main menu screen music; **stereo; 2 channels**; streamed; bar-aligned seamless loop (no silence at boundary); `AL_SOURCE_RELATIVE = AL_TRUE` (non-positional); **JSON sidecar mandatory** (`music_main_menu_01.json`: `{"bpm":90,"beats_per_bar":4}`); authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error** |
-| `music_main_menu_02` | Main menu music | OGG | 90–180 s | Y | Main menu music variant (same key, BPM, harmonic compatibility); **stereo; 2 channels**; streamed; bar-aligned seamless loop; `AL_SOURCE_RELATIVE = AL_TRUE`; **JSON sidecar mandatory** (`music_main_menu_02.json`); authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error** |
+| `music_main_menu_01` | Main menu music | OGG | **128 s (48 bars at 90 BPM)** | Y | Main menu screen music; **stereo; 2 channels**; streamed; bar-aligned seamless loop (no silence at boundary); `AL_SOURCE_RELATIVE = AL_TRUE` (non-positional); **JSON sidecar mandatory** (`music_main_menu_01.json`: `{"bpm":90,"beats_per_bar":4}`); authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **exact duration locked: 128.00 s = 5,644,800 samples at 44100 Hz** |
+| `music_main_menu_02` | Main menu music | OGG | **128 s (48 bars at 90 BPM)** | Y | Main menu music variant (same key, BPM, harmonic compatibility); **stereo; 2 channels**; streamed; bar-aligned seamless loop; `AL_SOURCE_RELATIVE = AL_TRUE`; **JSON sidecar mandatory** (`music_main_menu_02.json`); authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **exact duration locked: 128.00 s = 5,644,800 samples at 44100 Hz** |
 | `ambient_day` | Ambient bed | OGG | 90–120 s | Y | City hum, birds, traffic; **stereo; 2 channels**; streamed; **DAW crossfade loop** (200 ms pre-baked crossfade at loop boundary; no silence floor); authored to **−20 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **No JSON sidecar required** — ambient beds use real-time crossfade duration (constant-power curve), not bar-boundary sample counting. `music_sidecar_schema.json` and validate_assets.py Check #14 do NOT apply to ambient bed OGG files. |
 | `ambient_night` | Ambient bed | OGG | 90–120 s | Y | Quiet, insects, distant traffic; **stereo; 2 channels**; streamed; **DAW crossfade loop**; authored to **−20 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **No JSON sidecar required** — ambient beds use real-time crossfade duration (constant-power curve), not bar-boundary sample counting. `music_sidecar_schema.json` and validate_assets.py Check #14 do NOT apply to ambient bed OGG files. |
 | `ambient_dawn` | Ambient bed | OGG | 90–120 s | Y | Birds, early traffic; **stereo; 2 channels**; streamed (30–60 s causes loop fatigue); **DAW crossfade loop**; authored to **−20 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **No JSON sidecar required** — ambient beds use real-time crossfade duration (constant-power curve), not bar-boundary sample counting. `music_sidecar_schema.json` and validate_assets.py Check #14 do NOT apply to ambient bed OGG files. |
@@ -12,12 +12,12 @@
 > **Ambient bed JSON sidecar exemption**: Phase 5 validate_assets.py Check #14 ("Music sidecar .json file present and valid for each .ogg music stem file") applies ONLY to music stem files (`music_main_menu_*.ogg`, `music_calm_*.ogg`, `music_growth_*.ogg`, `music_crisis_*.ogg`). Ambient bed OGG files (`ambient_day.ogg`, `ambient_night.ogg`, `ambient_dawn.ogg`, `ambient_dusk.ogg`) are explicitly exempted — they require no JSON sidecar. Ambient bed crossfades use a real-time constant-power curve driven by wall-clock duration; the `AudioSystem` does not read BPM or beats-per-bar data for ambient beds. The `music_sidecar_schema.json` schema and the sidecar validation step in the asset pipeline must not flag missing sidecars for files matching the `ambient_*.ogg` pattern.
 >
 > **Ambient bed OGG header validation**: `AudioSystem` validates the OGG Vorbis header of each ambient bed file at load time using the same check applied to music stems. Specifically, `AudioSystem` reads the `vorbis_info` struct (via `ov_info()`) immediately after `ov_open_callbacks()` and refuses to play the asset if `vi->rate != 44100` or `vi->channels != 2`. A mismatched ambient bed produces a logged error ("ambient bed `<filename>` has wrong sample rate or channel count — expected 44100 Hz stereo") and the stream is silenced for that bed slot for the lifetime of the session. This ensures the streaming infrastructure (sources[58..61], shared with music stems) receives only conformant PCM data.
-| `music_calm_01` | Music stem | OGG | 90–180 s | Y | Calm exploration music; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE` (non-positional); bar-aligned seamless loop; no fade/silence at boundary; **JSON sidecar `music_calm_01.json` mandatory** (`{"bpm":90,"beats_per_bar":4}`); authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **MUST share root key and mode with all 6 gameplay stems** (cross-tier harmonic compatibility — see Dynamic Soundscape spec) |
-| `music_calm_02` | Music stem | OGG | 90–180 s | Y | Calm exploration music (variant); **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **MUST share root key and mode with all 6 gameplay stems** |
-| `music_growth_01` | Music stem | OGG | 90–180 s | Y | City growing, energetic; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **MUST share root key and mode with all 6 gameplay stems** |
-| `music_growth_02` | Music stem | OGG | 90–180 s | Y | City growing (variant); **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **MUST share root key and mode with all 6 gameplay stems** |
-| `music_crisis_01` | Music stem | OGG | 90–180 s | Y | Crisis / disaster theme; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **MUST share root key and mode with all 6 gameplay stems** |
-| `music_crisis_02` | Music stem | OGG | 90–180 s | Y | Crisis variant; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **MUST share root key and mode with all 6 gameplay stems** |
+| `music_calm_01` | Music stem | OGG | **96 s (36 bars at 90 BPM)** | Y | Calm exploration music; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE` (non-positional); bar-aligned seamless loop; no fade/silence at boundary; **JSON sidecar `music_calm_01.json` mandatory** (`{"bpm":90,"beats_per_bar":4}`); authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **exact duration locked: 96.00 s = 4,233,600 samples at 44100 Hz**; **MUST share root key and mode with all 6 gameplay stems** (cross-tier harmonic compatibility — see Dynamic Soundscape spec) |
+| `music_calm_02` | Music stem | OGG | **96 s (36 bars at 90 BPM)** | Y | Calm exploration music (variant); **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **exact duration locked: 96.00 s = 4,233,600 samples at 44100 Hz**; **MUST share root key and mode with all 6 gameplay stems** |
+| `music_growth_01` | Music stem | OGG | **96 s (36 bars at 90 BPM)** | Y | City growing, energetic; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **exact duration locked: 96.00 s = 4,233,600 samples at 44100 Hz**; **MUST share root key and mode with all 6 gameplay stems** |
+| `music_growth_02` | Music stem | OGG | **96 s (36 bars at 90 BPM)** | Y | City growing (variant); **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **exact duration locked: 96.00 s = 4,233,600 samples at 44100 Hz**; **MUST share root key and mode with all 6 gameplay stems** |
+| `music_crisis_01` | Music stem | OGG | **96 s (36 bars at 90 BPM)** | Y | Crisis / disaster theme; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **exact duration locked: 96.00 s = 4,233,600 samples at 44100 Hz**; **MUST share root key and mode with all 6 gameplay stems** |
+| `music_crisis_02` | Music stem | OGG | **96 s (36 bars at 90 BPM)** | Y | Crisis variant; **stereo; 2 channels**; `AL_SOURCE_RELATIVE = AL_TRUE`; bar-aligned seamless loop; **JSON sidecar mandatory**; authored to **−16 LUFS / −1 dBTP**; **44100 Hz, 16-bit stereo — authoring at any other sample rate is a hard asset error**; **exact duration locked: 96.00 s = 4,233,600 samples at 44100 Hz**; **MUST share root key and mode with all 6 gameplay stems** |
 | `sfx_zone_residential` | Zone loop | OGG | 12–18 s | Y | Residential ambience; mono positional; **pre-loaded; hard cap 18 s** (pre-load tier boundary is 20 s; stay safely below); **silence-boundary loop** (−60 dBFS at head and tail; **silence window: at least 100 ms at head AND at least 100 ms at tail** per `audio-asset-formats.md`; CI gate Check #21 verifies leading 4410 samples AND trailing 4410 samples ≤ −60 dBFS, two independent checks); authored to **−26 LUFS / −2 dBTP** (subtle background positional — should not compete with music stems) |
 | `sfx_zone_commercial` | Zone loop | OGG | 12–18 s | Y | Commercial activity; mono positional; pre-loaded; hard cap 18 s; **silence-boundary loop** (−60 dBFS at head and tail; same 100 ms silence requirement and Check #21 CI gate as `sfx_zone_residential`); authored to **−26 LUFS / −2 dBTP** |
 | `sfx_zone_industrial` | Zone loop | OGG | 12–18 s | Y | Factory, industrial; mono positional; pre-loaded; hard cap 18 s; **silence-boundary loop** (−60 dBFS at head and tail; same 100 ms silence requirement and Check #21 CI gate as `sfx_zone_residential`); authored to **−26 LUFS / −2 dBTP** |
@@ -248,7 +248,8 @@ outgoing stem and `music_calm_01` as the incoming stem:
 A plain-text QA sign-off document. Must contain all of the following fields:
 
 1. **Listener sign-offs**: names of all listeners (minimum: `sound-artist-opensoftal`
-   plus at least one other team member) who listened through both WAV demos (a) and (b)
+   plus `prod-owner` as the required second listener — decided 2026-03-04; any additional
+   team member may also sign off) who listened through both WAV demos (a) and (b)
    in full.
 2. **Harmonic verdict**: explicit statement that no harmonic clash, audible pop, or
    abrupt transition was detected in either demo.
@@ -351,6 +352,48 @@ density in the final 10 s) before committing the full bed.
 absence of any blocking objection within 24 h of PR open) before `ambient_day.ogg` and
 `ambient_night.ogg` are declared production-final and merged to main.
 
+### `assets/audio/ambient_bed_qa.md`
+
+A plain-text QA sign-off document for ambient bed loop boundary verification. Must be
+committed to the repository before Phase 10 exit alongside the production ambient bed
+OGG files.
+
+**Required format**: one entry per ambient bed asset, each entry containing exactly the
+following fields:
+
+```text
+Asset: ambient_day.ogg
+Sample-0 click-free gate: pass
+DAW loop cycles verified: <number — minimum 5>
+Pre-baked 200 ms crossfade tail present: yes
+LUFS integrated (measured): <value, e.g. "-20.1 LUFS">
+True peak dBTP (measured): <value, e.g. "-1.3 dBTP">
+Author sign-off: <name or role>
+```
+
+Repeat the block for each of the four ambient beds: `ambient_night.ogg`,
+`ambient_dawn.ogg`, `ambient_dusk.ogg`.
+
+**"Sample-0 click-free gate: pass"** confirms that the content at sample 0 produces no
+click, pop, level discontinuity, or silence gap when the DAW timeline loops at exactly
+sample 0 — verified by auditioning through the loop boundary a minimum of 5 times.
+This is the PRIMARY quality gate per `audio-asset-formats.md`. If this field reads
+"fail" for any asset, that asset must not be merged.
+
+**"Pre-baked 200 ms crossfade tail present: yes"** confirms the secondary authoring
+requirement: the final 200 ms of the file contains a pre-baked linear crossfade between
+tail content and head content. This safeguard is authored AFTER the sample-0 gate passes.
+
+**Loudness fields**: fill from loudness meter readings on the final exported file. Do not
+group-average — each file must independently pass −20 LUFS ±1 LU and ≤ −1 dBTP.
+Assets outside tolerance must be re-exported and re-measured before this document is filed.
+
+**Blocking condition**: a "fail" entry or out-of-tolerance loudness reading for any
+asset is a hard delivery failure. The `ambient_bed_qa.md` document must not be committed
+with any failing entries — fix the asset first, then commit the corrected entry.
+
+---
+
 ### `assets/audio/zone_loop_qa.md`
 
 A plain-text QA sign-off document for zone loop DAW loopback verification. Must be
@@ -444,6 +487,16 @@ Vehicle engine placeholder `placeholder_vehicle_engine.ogg` (6.00 s) meets the
 lowest pitch-shift ratio (0.75×) the perceived loop duration is ~4.5 s, which is at
 the lower bound of the perceptibility threshold — acceptable for code-path testing,
 not for final delivery where a longer authored loop (8–12 s) is recommended.
+
+**Named production vehicle engine files re-delivery required**: `sfx_vehicle_engine_idle.ogg`
+and `sfx_vehicle_engine_move.ogg` also measure exactly **6.00 s** and contain synthetic
+tones generated with the same placeholder approach. These files currently satisfy the
+CI gate (`duration >= 6.0 s`, `channels == 1`, `rate == 44100 Hz`) but are NOT
+production-quality deliverables. Both must be re-exported at **8–12 s** with DAW-authored
+engine tone content before Phase 10 exit. Both must pass the seamless loop click-free
+check at both pitch extremes (0.75× and 1.35×). The CI gate minimum is 6.0 s; the
+production target is 8–12 s. The Phase 10 exit criterion explicitly requires both files
+to be ≥ 8 s.
 
 ### Starvation Risk Mitigation
 

@@ -88,6 +88,18 @@ protected:
         // incidental audio calls unrelated to music intensity tier changes.
         EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
         EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
+        // CitySimulation::tick() calls setTimeOfDay() when the in-game clock crosses
+        // a time-of-day boundary (DAY/DUSK/NIGHT/DAWN). With 3 budget ticks at x1 speed
+        // after advancing past the grace period, time-of-day transitions may occur.
+        // This is incidental to the music intensity test; suppress via AnyNumber().
+        EXPECT_CALL(audio_, setTimeOfDay(_)).Times(AnyNumber());
+        // Phase 10 wires CitySimulation::tick() to call setMusicIntensity() each budget
+        // tick (CALM on initial/surplus ticks, CRISIS after 2 consecutive deficit months).
+        // The StrictMock must allow CALM calls that fire before the CRISIS threshold is
+        // reached (ticks 1 and 2 in the test sequence below).  Individual tests that
+        // verify a specific tier call (EXPECT_CALL ...CRISIS... AtLeast(1)) do so ON TOP
+        // of this blanket allowance; the blanket covers all other tiers.
+        EXPECT_CALL(audio_, setMusicIntensity(_)).Times(AnyNumber());
     }
 
     void TearDown() override {

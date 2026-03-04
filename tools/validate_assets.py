@@ -3,6 +3,7 @@
 AI Town asset validation script.
 Phase 9:  checks #1–#20 all implemented (check #15 and check #20 fully implemented in Phase 9).
 Phase 10: check #21 added — zone loop silence-floor gate (leading/trailing 4410 samples ≤ −60 dBFS).
+          check #22 added — non-stinger WAV SFX must be mono, 44100 Hz, 16-bit PCM.
 """
 import glob
 import json
@@ -1198,10 +1199,82 @@ def check_21():
         )
 
 
+# ---------------------------------------------------------------------------
+# Check #22: Non-stinger WAV SFX must be mono, 44100 Hz, 16-bit PCM.
+#
+# Phase 10 mandates: "all WAV SFX: 44100 Hz, 16-bit PCM, mono (1 channel)".
+# check_19 covers stinger_*.wav only.  This check covers the remaining V1 SFX
+# WAV files (sfx_*.wav that are NOT stingers, ui_*.wav, and sfx_vehicle_horn.wav).
+# OpenAL Soft requires mono for 3D positional spatialization; non-positional SFX
+# are also authored mono to minimise source-pool memory.
+#
+# Glob patterns (mutually exclusive from stinger_*.wav and OGG files):
+#   assets/audio/sfx_*.wav  — construction, alert, service, budget, road, intersection SFX
+#   assets/audio/ui_*.wav   — UI interaction sounds (ui_click, ui_toast, ui_menu_open/close)
+#
+# Note: stinger_*.wav is intentionally excluded — check_19 owns that set.
+# The glob "sfx_*.wav" matches sfx_vehicle_horn.wav, sfx_build_place.wav, etc.;
+# it does NOT match stinger_*.wav (different prefix).
+# ---------------------------------------------------------------------------
+def check_22():
+    """check_22: non-stinger WAV SFX (sfx_*.wav, ui_*.wav) must be mono, 44100 Hz, 16-bit PCM."""
+    patterns = (
+        glob.glob("assets/audio/sfx_*.wav") +
+        glob.glob("assets/audio/ui_*.wav")
+    )
+    # Exclude stinger_*.wav — those are covered by check_19, not this check.
+    # The glob prefixes above ("sfx_" and "ui_") do not match "stinger_" anyway,
+    # but the explicit note keeps intent clear for future maintainers.
+    if not patterns:
+        print("INFO check_22: no sfx_*.wav or ui_*.wav files found — no-op")
+        return
+    errors = []
+    for path in sorted(patterns):
+        try:
+            with wave.open(path, 'rb') as w:
+                channels = w.getnchannels()
+                comptype = w.getcomptype()
+                sample_rate = w.getframerate()
+                sampwidth = w.getsampwidth()
+                if channels != 1:
+                    errors.append(
+                        f"check_22 FAIL: {path} must be mono (1 channel), got {channels} — "
+                        f"all V1 WAV SFX must be mono per architecture/audio-architecture/v1-audio-asset-manifest.md"
+                    )
+                if comptype != 'NONE':
+                    errors.append(
+                        f"check_22 FAIL: {path} must be uncompressed PCM, got {comptype} — "
+                        f"OpenAL Soft expects linear PCM; compressed WAV is unsupported"
+                    )
+                if sample_rate != 44100:
+                    errors.append(
+                        f"check_22 FAIL: {path} must be 44100 Hz, got {sample_rate} Hz — "
+                        f"all V1 audio assets use 44100 Hz per audio-asset-formats.md"
+                    )
+                if sampwidth != 2:
+                    errors.append(
+                        f"check_22 FAIL: {path} must be 16-bit (sample width 2 bytes), got {sampwidth * 8}-bit — "
+                        f"all V1 WAV SFX must be 16-bit PCM per architecture/audio-architecture/v1-audio-asset-manifest.md"
+                    )
+        except wave.Error as exc:
+            errors.append(
+                f"check_22 FAIL: {path} could not be opened as a WAV file: {exc}"
+            )
+    if errors:
+        for e in errors:
+            print(e)
+        raise AssertionError(
+            f"check_22 FAIL: {len(errors)} non-stinger WAV SFX violation(s) — "
+            f"all sfx_*.wav and ui_*.wav files must be mono, 44100 Hz, 16-bit PCM "
+            f"(see architecture/audio-architecture/v1-audio-asset-manifest.md)"
+        )
+    print(f"check_22 PASS: {len(patterns)} non-stinger WAV SFX file(s) verified mono, 44100 Hz, 16-bit PCM")
+
+
 if __name__ == '__main__':
-    print("validate_assets.py: all checks #1-#21 active.")
+    print("validate_assets.py: all checks #1-#22 active.")
     check_1(); check_2(); check_3(); check_4(); check_5()
     check_6(); check_7(); check_8(); check_9(); check_10()
     check_11(); check_12(); check_13(); check_14(); check_15()
     check_16(); check_17(); check_18(); check_19(); check_20()
-    check_21()
+    check_21(); check_22()
