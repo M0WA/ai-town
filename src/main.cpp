@@ -277,8 +277,14 @@ int main() {
         //   semantics guarantee thread-local context isolation but this MUST be verified at
         //   Phase 7 implementation; cross-reference: architecture/audio-architecture/audio-system.md
         CameraState cameraState = cameraController.getCameraState();
-        audioSystem.syncListenerToCamera(cameraState);
-        audioSystem.update(realDeltaSeconds);
+        try {
+            audioSystem.syncListenerToCamera(cameraState);
+            audioSystem.update(realDeltaSeconds);
+        } catch (const std::exception& e) {
+            // AL backend failure (e.g. broken pipe) — audio degraded to silent.
+            // The m_deviceLost flag in AudioSystem will suppress further AL calls.
+            fprintf(stderr, "[main] Audio error (audio disabled): %s\n", e.what());
+        }
 
         // Step 5: beginFrame (driver->beginScene).
         renderer.beginFrame();

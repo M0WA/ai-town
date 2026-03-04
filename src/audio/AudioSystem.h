@@ -209,6 +209,11 @@ private:
     // Audio thread lifecycle.
     // -----------------------------------------------------------------------
     std::atomic<bool>         m_stopThread{false};
+    // Set by the audio thread when the AL backend fails (e.g. broken pipe).
+    // All main-thread AL-calling paths guard on this flag before any AL call
+    // so that a backend disconnection degrades to silent audio rather than
+    // propagating an uncaught exception that would call std::terminate.
+    std::atomic<bool>         m_deviceLost{false};
     std::thread               m_audioThread;
 
     // m_streamMutex — crossfade command queue mutex (also guards streaming AL calls).

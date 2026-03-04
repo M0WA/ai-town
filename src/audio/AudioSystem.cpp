@@ -673,6 +673,7 @@ void AudioSystem::audioThreadFunc() {
             updateDuckState(dt);
         } catch (const std::exception& e) {
             logError(std::string("AudioSystem: audio thread error, disabling audio: ") + e.what());
+            m_deviceLost.store(true);
             m_stopThread.store(true);
             break;
         }
@@ -1668,6 +1669,7 @@ void AudioSystem::stopSound(SoundHandle handle) {
 // setMusicTrack — begin crossfade to the specified music track.
 // ---------------------------------------------------------------------------
 void AudioSystem::setMusicTrack(MusicTrackId id) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     if (id == MUSIC_INVALID) return;
     std::string filename = musicTrackFilename(id);
     if (filename.empty()) {
@@ -1717,6 +1719,7 @@ void AudioSystem::setSpeed(SimSpeed speed) {
 // triggerStinger — fire a one-shot stinger (subject to cooldown rules).
 // ---------------------------------------------------------------------------
 void AudioSystem::triggerStinger(StingerType type) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     int poolIdx = static_cast<int>(type);
     if (poolIdx < kEvictableSFXCount || poolIdx >= kSFXPoolSize) {
         logError("triggerStinger: invalid StingerType " + std::to_string(poolIdx));
@@ -1781,6 +1784,7 @@ void AudioSystem::triggerStinger(StingerType type) {
 // syncListenerToCamera — update OpenAL listener state (main thread, each frame).
 // ---------------------------------------------------------------------------
 void AudioSystem::syncListenerToCamera(const CameraState& cam) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     // AL_POSITION.
     alListener3f(AL_POSITION, cam.position.x, cam.position.y, cam.position.z);
 
@@ -1823,6 +1827,7 @@ void AudioSystem::setTimeOfDay(TimeOfDay tod) {
 // transitionToGameplay — crossfade from main menu music to gameplay audio.
 // ---------------------------------------------------------------------------
 void AudioSystem::transitionToGameplay() {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     // Start ambient bed on slot 2 (sources[60]) for the current time of day.
     TimeOfDay tod = static_cast<TimeOfDay>(m_currentTimeOfDay.load(std::memory_order_relaxed));
     std::string ambPath = assetPath(ambientBedFilename(tod));
@@ -1890,6 +1895,7 @@ void AudioSystem::transitionToGameplay() {
 // update — per-frame main-thread update.
 // ---------------------------------------------------------------------------
 void AudioSystem::update(float /*realDeltaSeconds*/) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     // Phase 7 main-thread responsibilities:
     // 1. Advance occlusion raycast budget / per-source distance cull checks.
     //    (Full raycast implementation deferred to Phase 10 — occlusion gain
@@ -1926,6 +1932,7 @@ void AudioSystem::update(float /*realDeltaSeconds*/) {
 // ---------------------------------------------------------------------------
 void AudioSystem::setMasterVolume(float gain) {
     m_masterVolume = gain;
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     alListenerf(AL_GAIN, gain);
     alCheckError_real("setMasterVolume");
 }
