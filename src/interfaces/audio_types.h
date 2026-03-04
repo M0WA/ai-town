@@ -90,3 +90,12 @@ enum class MusicIntensity {
     GROWTH,
     CRISIS
 };
+
+// Zone loop pre-load hard cap (18 s) — 2 s below the 20 s streaming tier boundary.
+constexpr float kZoneLoopMaxPreloadDurationSeconds = 18.0f;
+
+// Vehicle engine loop minimum duration (6 s).
+constexpr float kVehicleEngineLoopMinDurationSeconds = 6.0f;
+
+// Maximum simultaneous vehicle engine source pairs (24 traffic slots / 2 per vehicle).
+constexpr int kMaxVehiclePairs = 12;

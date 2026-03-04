@@ -182,20 +182,13 @@ add_library(aitown_audio STATIC
     src/audio/AudioSystem.cpp
     src/audio/AudioSourcePool.cpp
     src/audio/AudioStream.cpp
-    # al_check.cpp provides the real alCheckError/alcCheckError for non-audio TUs that
-    # include al_check.h and expect a non-no-op implementation.  It is NOT included here
-    # because AudioSystem.cpp defines alCheckError_real/alcCheckError_real for its own use
-    # and the inline stubs in al_check.h serve test TUs that don't link aitown_audio.
-    # Including al_check.cpp in aitown_audio would cause a redefinition conflict with the
-    # inline definitions in al_check.h (both define alCheckError / alcCheckError).
-    # al_check.cpp remains available for future TUs that need the real implementations
-    # while also including al_check.h — those TUs must define AITOWN_AL_CHECK_REAL first.
 )
 target_include_directories(aitown_audio
     PRIVATE   src/audio/           # audio_constants.h and AudioSystem-internal headers
     PRIVATE   src/interfaces/      # needed for AudioSystem.cpp's own includes (IClock, etc.)
     PRIVATE   ${CMAKE_SOURCE_DIR}  # project-root-relative includes: src/audio/AudioSystem.h etc.
     INTERFACE src/interfaces/      # propagates to consumers
+    INTERFACE src/audio/           # AudioSystem.h visible to consumers (e.g. main.cpp)
 )
 target_compile_definitions(aitown_audio PRIVATE
     AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
@@ -222,7 +215,10 @@ target_include_directories(aitown_sim
     PRIVATE   src/simulation/      # implementation headers — NOT propagated
     PRIVATE   src/interfaces/      # needed for CitySimulation.cpp's own includes
                                    # (IClock, IAudioSystem, ISimulationRNG, ISimulationPauser, ICitySimulation)
+    PRIVATE   src/audio/           # sound_ids.h and AudioSystem.h for SFX wiring
+    PRIVATE   ${CMAKE_SOURCE_DIR}  # project-root-relative includes
     INTERFACE src/interfaces/      # shared interfaces propagated to consumers
+    INTERFACE src/simulation/      # CitySimulation.h visible to consumers
 )
 
 # ----------------------------------------------------------------------------
@@ -638,6 +634,7 @@ target_sources(ui_tests PRIVATE
 # ----------------------------------------------------------------------------
 add_executable(audio_tests
     tests/audio/audio_smoke_test.cpp
+    tests/audio/audio_crossfade_test.cpp
 )
 # Phase 10: add the four audio unit tests via target_sources (not add_executable) to
 # preserve the Phase 0 executable definition per the target_sources policy.
@@ -681,6 +678,7 @@ target_link_libraries(audio_tests PRIVATE
 # ${CMAKE_SOURCE_DIR} — project-root-relative includes
 target_include_directories(audio_tests PRIVATE
     tests/simulation/
+    tests/audio/
     src/interfaces/
     src/audio/
     ${CMAKE_SOURCE_DIR}
