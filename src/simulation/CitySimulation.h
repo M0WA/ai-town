@@ -7,6 +7,7 @@
 #include "ITerrainQuery.h"
 #include "simulation_constants.h"
 
+#include <string>
 #include <unordered_map>
 #include <vector>
 #include <queue>
@@ -377,6 +378,11 @@ private:
 
     // Population helpers
     static int   maxPopulationForTile(ZoneType zone, DensityTier density);
+
+    // Phase 10: map (ZoneType, DensityTier) to the _01 asset base name for
+    // IRenderer::placeBuildingMesh().  Round-robin variant cycling is Phase 11.
+    // Returns empty string on unknown inputs (renderer no-ops on empty baseName).
+    static std::string zoneAssetBaseName(ZoneType zone, DensityTier density);
     float        effectiveDemandForTile(const TileData& tile) const;
 
     // Service coverage helpers (tile-unit coordinates)

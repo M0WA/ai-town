@@ -11,7 +11,7 @@
 
 The total method count is **19**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
 
-Methods 1–17 were established in Phase 8. Method 18 (`setElementBackgroundColor`) was added in Phase 9b (minimap dark-panel fix — see `architecture/ui-ux/minimap.md` §IUIBackend method 18). Method 19 (`setElementMonoFont`) was added in Phase 10 (monospace numeric readout requirement — see below).
+Methods 1–17 were established in Phase 8. Method 18 (`setElementBackground`) was added in Phase 9b (minimap dark-panel fix — see `architecture/ui-ux/minimap.md` §IUIBackend method 18). Method 19 (`setElementMonoFont`) was added in Phase 10 (monospace numeric readout requirement — see below).
 
 ```cpp
 class IUIBackend {
@@ -83,13 +83,17 @@ public:
     //     texture resource; call removeElement(handle) to release it when no longer needed.
     virtual UIElementHandle loadTexture(const std::string& path) = 0;
 
-    // 18. Set a filled background colour on an IGUIStaticText element.
-    //     Enables IrrlichtUIBackend to call setDrawBackground(true) and setBackgroundColor()
-    //     on the underlying element without exposing Irrlicht types to src/ui/ callers.
-    //     colour is packed ARGB (0xAARRGGBB). Only valid for handles created via addStaticText().
+    // 18. Set a filled background colour on an IGUIStaticText element and enable background
+    //     drawing. r, g, b, a are each in [0, 255]. Enables IrrlichtUIBackend to call
+    //     setDrawBackground(true) and setBackgroundColor() on the underlying element without
+    //     exposing Irrlicht types to src/ui/ callers.
+    //     Only valid for handles created via addStaticText(). Has no effect on button elements.
     //     Added in Phase 9b for the Minimap dark-panel fix.
+    //     NAMING NOTE: earlier spec drafts used setElementBackgroundColor(handle, uint32_t argb)
+    //     with a packed ARGB argument. The canonical form throughout the codebase uses four
+    //     separate int channels (r, g, b, a). All call sites must use this 4-channel form.
     //     See architecture/ui-ux/minimap.md §IUIBackend method 18.
-    virtual void setElementBackgroundColor(UIElementHandle handle, uint32_t argb) = 0;
+    virtual void setElementBackground(UIElementHandle handle, int r, int g, int b, int a) = 0;
 
     // 19. Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element via
     //     IGUIStaticText::setOverrideFont(). Only valid for handles created via addStaticText().

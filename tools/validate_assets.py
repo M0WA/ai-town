@@ -4,6 +4,7 @@ AI Town asset validation script.
 Phase 9:  checks #1–#20 all implemented (check #15 and check #20 fully implemented in Phase 9).
 Phase 10: check #21 added — zone loop silence-floor gate (leading/trailing 4410 samples ≤ −60 dBFS).
           check #22 added — non-stinger WAV SFX must be mono, 44100 Hz, 16-bit PCM.
+          check #23 added — hud_sprites_ui.png must exist at assets/textures/ui/, be 2048×2048, and RGBA.
 """
 import glob
 import json
@@ -1271,10 +1272,74 @@ def check_22():
     print(f"check_22 PASS: {len(patterns)} non-stinger WAV SFX file(s) verified mono, 44100 Hz, 16-bit PCM")
 
 
+# ---------------------------------------------------------------------------
+# Check #23: HUD sprite sheet must exist, be 2048×2048, and be RGBA.
+#
+# Phase 10 mandates: `assets/textures/ui/hud_sprites_ui.png` is the committed
+# runtime asset for the HUD toolbar icon sprite sheet.  The validator confirms:
+#   (1) the file exists at assets/textures/ui/hud_sprites_ui.png;
+#   (2) its pixel dimensions are exactly 2048×2048;
+#   (3) its colour mode is RGBA (32-bit with alpha channel).
+#
+# The DDS intermediate (hud_sprites_ui.dds) is NEVER committed and MUST NOT be
+# scanned here.  Only the PNG at the path above is validated.
+#
+# Requires: Pillow (pip install Pillow).  If Pillow is absent the check is
+# skipped (SKIP, not FAIL) so that environments without Pillow do not break
+# builds unrelated to the sprite sheet.  CI installs Pillow explicitly so the
+# skip path is never taken there.
+#
+# Spec ref: phase-10.md §UI Assets — Sprite Sheet; architecture/asset-standards/
+# 2d-texture-standards.md Runtime Asset Path section.
+# ---------------------------------------------------------------------------
+def check_23():
+    """check_23: hud_sprites_ui.png must exist at assets/textures/ui/, be 2048×2048, and RGBA."""
+    try:
+        from PIL import Image
+    except ImportError:
+        print("SKIP check_23: Pillow not installed — install with 'pip install Pillow' to enable sprite sheet validation")
+        return
+
+    png_path = "assets/textures/ui/hud_sprites_ui.png"
+    if not os.path.exists(png_path):
+        raise AssertionError(
+            f"check_23 FAIL: {png_path} not found — Phase 10 requires the HUD sprite sheet PNG "
+            f"at this path (32-bit RGBA, 2048×2048); see phase-10.md §UI Assets — Sprite Sheet"
+        )
+
+    try:
+        img = Image.open(png_path)
+        width, height = img.size
+        mode = img.mode
+    except Exception as exc:
+        raise AssertionError(
+            f"check_23 FAIL: {png_path} could not be opened as an image: {exc}"
+        )
+
+    if width != 2048 or height != 2048:
+        raise AssertionError(
+            f"check_23 FAIL: {png_path} dimensions are {width}×{height} — "
+            f"expected 2048×2048 (phase-10.md §UI Assets — Sprite Sheet step 2)"
+        )
+
+    if mode != "RGBA":
+        raise AssertionError(
+            f"check_23 FAIL: {png_path} colour mode is '{mode}' — "
+            f"expected RGBA (32-bit with alpha channel); "
+            f"re-export from the DCC tool with alpha channel enabled "
+            f"(phase-10.md §UI Assets — Sprite Sheet step 2)"
+        )
+
+    print(
+        f"check_23 PASS: {png_path} verified — "
+        f"{width}×{height} pixels, mode={mode}"
+    )
+
+
 if __name__ == '__main__':
-    print("validate_assets.py: all checks #1-#22 active.")
+    print("validate_assets.py: all checks #1-#23 active.")
     check_1(); check_2(); check_3(); check_4(); check_5()
     check_6(); check_7(); check_8(); check_9(); check_10()
     check_11(); check_12(); check_13(); check_14(); check_15()
     check_16(); check_17(); check_18(); check_19(); check_20()
-    check_21(); check_22()
+    check_21(); check_22(); check_23()

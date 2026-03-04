@@ -31,8 +31,10 @@ namespace irr {
     namespace video { class IVideoDriver; class ITexture; }
 }  // namespace irr
 
-// IrrlichtUIBackend — Full Irrlicht-backed implementation of all 17 IUIBackend
+// IrrlichtUIBackend — Full Irrlicht-backed implementation of all 19 IUIBackend
 // pure-virtual methods. Phase 8 deliverable replacing Phase 1 stubs.
+// Method 18 (setElementBackground) added in Phase 9b.
+// Method 19 (setElementMonoFont) added in Phase 10.
 //
 // Constructor: takes irr::IrrlichtDevice* (non-null, asserted in the .cpp) and
 // a pre-cached maxAnisotropy value from RenderSystem (1.0f when extension absent).
@@ -71,7 +73,12 @@ public:
     irr::gui::IGUIFont* getMonoFont() const { return m_monoFont; }
 
     // -------------------------------------------------------------------------
-    // IUIBackend overrides — 17 methods
+    // IUIBackend overrides — 19 methods
+    // Methods 1–16: core element creation, text, visibility, alpha, image, rect,
+    //               screen dimensions, virtual dimensions, texture load.
+    // Method 17: loadTexture
+    // Method 18: setElementBackground  (Phase 9b)
+    // Method 19: setElementMonoFont    (Phase 10)
     // -------------------------------------------------------------------------
 
     // 1.

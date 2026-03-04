@@ -13,12 +13,34 @@
 #include <cassert>
 #include <cmath>
 #include <numeric>
+#include <string>
 #include <vector>
 #include <queue>
 
 // ---------------------------------------------------------------------------
 // Static helpers
 // ---------------------------------------------------------------------------
+
+// zoneAssetBaseName — map (ZoneType, DensityTier) to the Phase 10 _01 asset
+// base name used by IRenderer::placeBuildingMesh().
+// Phase 10 policy (locked): always use the _01 suffix; variant cycling (_02, _03)
+// is deferred to Phase 11.  Returns empty string on unknown combination.
+/*static*/ std::string CitySimulation::zoneAssetBaseName(ZoneType zone, DensityTier density) {
+    const char* zoneStr  = nullptr;
+    const char* densStr  = nullptr;
+    switch (zone) {
+        case ZoneType::Residential: zoneStr = "res"; break;
+        case ZoneType::Commercial:  zoneStr = "com"; break;
+        case ZoneType::Industrial:  zoneStr = "ind"; break;
+    }
+    switch (density) {
+        case DensityTier::Low:    densStr = "low";  break;
+        case DensityTier::Medium: densStr = "med";  break;
+        case DensityTier::High:   densStr = "high"; break;
+    }
+    if (!zoneStr || !densStr) return {};
+    return std::string(zoneStr) + "_" + densStr + "_01";
+}
 
 /*static*/ float CitySimulation::speedValue(SpeedMultiplier s) {
     switch (s) {
@@ -906,6 +928,17 @@ void CitySimulation::doDensityUnlockTick() {
             tile.density = targetDensity;
             tile.population = 0.0f;  // population grows fresh
 
+            // Phase 10: swap the building mesh to match the new density tier.
+            // Decode tile coordinates from the map key (key = (x << 32) | (uint32_t)z).
+            // Remove the old mesh first, then place the new one so the renderer
+            // never has two overlapping meshes at the same tile.
+            if (m_renderer) {
+                int tx = static_cast<int>(key >> 32);
+                int tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
+                m_renderer->removeBuildingMesh(tx, tz);
+                m_renderer->placeBuildingMesh(tx, tz, zoneAssetBaseName(targetZone, targetDensity));
+            }
+
             // Phase 10: sfx_zone_upgrade is non-positional (AL_SOURCE_RELATIVE = AL_TRUE).
             // Cap at sfx_zone_upgrade_per_tick_cap calls total across all tiers this tick.
             if (m_audio && sfxCallsThisTick < SimulationConstants::sfx_zone_upgrade_per_tick_cap) {
@@ -1555,6 +1588,12 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
             SoundPriority::NORMAL, 1.0f);
     }
 
+    // Phase 10: spawn building mesh for the placed zone tile.
+    // Phase 10 variant policy: always _01 suffix (round-robin deferred to Phase 11).
+    if (m_renderer) {
+        m_renderer->placeBuildingMesh(tileX, tileZ, zoneAssetBaseName(type, tier));
+    }
+
     // Record undo
     recordUndoAction(undoAction);
 }
@@ -1681,6 +1720,11 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
             SoundPriority::NORMAL, 1.0f);
     }
 
+    // Phase 10: spawn road tile mesh.
+    if (m_renderer) {
+        m_renderer->placeRoadMesh(tileX, tileZ);
+    }
+
     // Record undo
     recordUndoAction(undoAction);
 }
@@ -1692,23 +1736,36 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
 void CitySimulation::demolishTile(int tileX, int tileZ) {
     int64_t key = tileKey(tileX, tileZ);
     auto it = m_tiles.find(key);
-    if (it == m_tiles.end()) return;
 
-    // Record previous state for undo
+    // Service buildings are registered in m_serviceBuildings but do NOT create
+    // a TileData entry in m_tiles.  Check for a service building at this tile
+    // BEFORE the m_tiles guard so demolishing a service-building tile is not
+    // silently rejected.
+    bool hadServiceBuilding = false;
+    for (const ServiceBuilding& sb : m_serviceBuildings) {
+        if (sb.x == tileX && sb.z == tileZ) { hadServiceBuilding = true; break; }
+    }
+
+    // Nothing to demolish if no tile data AND no service building.
+    if (it == m_tiles.end() && !hadServiceBuilding) return;
+
+    // Record previous state for undo.
     UndoAction undoAction;
     undoAction.actionType    = UndoAction::Type::Demolish;
     undoAction.tileX         = tileX;
     undoAction.tileZ         = tileZ;
-    undoAction.previousState = it->second;
+    undoAction.previousState = (it != m_tiles.end()) ? it->second : TileData{};
     undoAction.costPaid      = 0;  // demolish is free
 
-    bool wasRoad = it->second.isRoad;
+    bool wasRoad = (it != m_tiles.end()) && it->second.isRoad;
 
-    // Clear tile
-    TileData& tile = it->second;
-    tile.isZoned    = false;
-    tile.isRoad     = false;
-    tile.population = 0.0f;
+    if (it != m_tiles.end()) {
+        // Clear tile
+        TileData& tile = it->second;
+        tile.isZoned    = false;
+        tile.isRoad     = false;
+        tile.population = 0.0f;
+    }
 
     // Update road tile count
     if (wasRoad) {
@@ -1731,6 +1788,27 @@ void CitySimulation::demolishTile(int tileX, int tileZ) {
             vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
             SoundPriority::NORMAL, 1.0f);
     }
+
+    // Phase 10: remove mesh for the demolished tile.
+    // Priority: road → service building → zone.
+    // hadServiceBuilding was computed before any mutations above.
+    if (m_renderer) {
+        if (wasRoad) {
+            m_renderer->removeRoadMesh(tileX, tileZ);
+        } else if (hadServiceBuilding) {
+            m_renderer->removeServiceBuildingMesh(tileX, tileZ);
+        } else if (undoAction.previousState.isZoned) {
+            m_renderer->removeBuildingMesh(tileX, tileZ);
+        }
+    }
+
+    // Remove any service building registered at this tile.
+    m_serviceBuildings.erase(
+        std::remove_if(m_serviceBuildings.begin(), m_serviceBuildings.end(),
+            [tileX, tileZ](const ServiceBuilding& sb) {
+                return sb.x == tileX && sb.z == tileZ;
+            }),
+        m_serviceBuildings.end());
 
     // Record undo
     recordUndoAction(undoAction);
@@ -1816,6 +1894,12 @@ void CitySimulation::placeServiceBuilding(int tileX, int tileZ,
         m_audio->playPositionalSound(SFX_BUILD_PLACE,
             vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
             SoundPriority::NORMAL, 1.0f);
+    }
+
+    // Phase 10: spawn service building mesh.
+    // type is the public ServiceBuildingType — matches IRenderer::placeServiceBuildingMesh().
+    if (m_renderer) {
+        m_renderer->placeServiceBuildingMesh(tileX, tileZ, type);
     }
 
     // Record undo entry.

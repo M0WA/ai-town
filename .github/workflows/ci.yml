@@ -912,6 +912,9 @@ jobs:
   # Phase 9:  all 20 checks (Checks #1–#20) implemented in tools/validate_assets.py.
   # Phase 10: check #21 added — zone loop silence-floor gate (sfx_zone_*.ogg leading/trailing
   #           4410 samples ≤ −60 dBFS); ffmpeg installed below for OGG PCM decode.
+  #           check #22 added — non-stinger WAV SFX (sfx_*.wav, ui_*.wav) mono/44100/16-bit gate.
+  #           check #23 added — hud_sprites_ui.png must exist at assets/textures/ui/,
+  #           be 2048×2048, and RGBA; Pillow installed below for PNG dimension check.
   # timeout-minutes: 10 is permanent.
   # ============================================================================
   validate-assets:
@@ -947,13 +950,24 @@ jobs:
           grep -q "check_22" tools/validate_assets.py || (echo "FAIL: check_22 not found in validate_assets.py — Phase 10 non-stinger WAV SFX format gate missing" && exit 1)
           echo "PASS: check_22 present"
 
+      - name: Verify check_23 present in validate_assets.py
+        # check_23: assets/textures/ui/hud_sprites_ui.png must exist, be 2048×2048, and RGBA.
+        # Phase 10 commits the HUD sprite sheet PNG as a runtime asset; a missing or malformed
+        # PNG causes IrrlichtUIBackend::m_spriteTextureReady to remain false, making toolbar
+        # buttons display fallback text instead of sprite icons in every rendered frame.
+        # A missing check_23 allows a truncated or wrong-dimensions PNG to pass CI silently.
+        run: |
+          grep -q "check_23" tools/validate_assets.py || (echo "FAIL: check_23 not found in validate_assets.py — Phase 10 hud_sprites_ui.png dimension/RGBA gate missing" && exit 1)
+          echo "PASS: check_23 present"
+
       - name: Install Python dependencies
         # mutagen: OGG/WAV metadata (checks #16–#19).
+        # Pillow: PNG image dimension and mode check (check #23 — hud_sprites_ui.png 2048×2048 RGBA).
         # ffmpeg: required by check_21 (_decode_ogg_pcm_int16) to decode sfx_zone_*.ogg to
         # raw int16 PCM for the silence-floor gate.  Installed as a system package (not pip)
         # because the Python ffmpeg bindings are wrappers around the ffmpeg binary anyway.
         run: |
-          pip install mutagen
+          pip install mutagen Pillow
           sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Run asset validation

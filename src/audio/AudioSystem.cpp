@@ -657,11 +657,13 @@ void AudioSystem::audioThreadFunc() {
         if (m_stopThread.load()) break;
 
         // Compute real-time dt using IClock (not fixed 0.01f).
+        // dt is passed to both updateStreams() and updateDuckState() so crossfade
+        // timers and duck state machine use the same real-time measurement.
         double now = m_clock->nowSeconds();
         float  dt  = static_cast<float>(now - m_lastDuckWakeTime);
         m_lastDuckWakeTime = now;
 
-        updateStreams();
+        updateStreams(dt);
         updateOcclusion();
         updateDuckState(dt);
     }
@@ -1209,7 +1211,7 @@ void AudioSystem::beginAmbientCrossfade(TimeOfDay tod) {
 // ---------------------------------------------------------------------------
 // updateStreams — called once per audio thread wake.
 // ---------------------------------------------------------------------------
-void AudioSystem::updateStreams() {
+void AudioSystem::updateStreams(float dt) {
     // ------------------------------------------------------------------
     // Phase 10: Consume pending ambient bed crossfade request.
     // setTimeOfDay() stores the new TimeOfDay in m_pendingAmbientTod; we
@@ -1258,19 +1260,23 @@ void AudioSystem::updateStreams() {
 
     // ------------------------------------------------------------------
     // Phase 10: Advance music crossfade progress.
-    // Crossfade clock uses the dt computed in audioThreadFunc().
-    // We use m_lastDuckWakeTime to compute dt here too (already computed in
-    // audioThreadFunc before calling us).  For the crossfade timer we reuse
-    // the duck wake time — both clocks are updated at the same point.
-    // NOTE: The music crossfade dt is the same 10 ms interval as the duck dt.
-    // We approximate by treating each wake as kAudioThreadWakeIntervalSeconds.
+    // dt is the real-time elapsed seconds measured by audioThreadFunc() via
+    // IClock::nowSeconds().  Using the actual measured dt (not a hardcoded
+    // 0.010 f) ensures crossfade timing is accurate under system scheduling
+    // jitter and is deterministic with ManualClock in tests.
+    // Guard: clamp dt to 0.0 to prevent negative advancement on the first wake
+    // (m_lastDuckWakeTime is initialised at thread start; dt is always >= 0).
+    // Guard: if m_musicCrossfadeDuration is 0 (defensive), treat crossfade as
+    // instant to avoid division-by-zero.
     // ------------------------------------------------------------------
-    constexpr float kWakeInterval = 0.010f;  // 10 ms nominal wake interval
-
     if (m_musicIncomingSlot >= 0) {
         float t = m_musicCrossfadeT.load(std::memory_order_relaxed);
-        t += kWakeInterval / m_musicCrossfadeDuration;
-        t  = std::min(t, 1.0f);
+        if (m_musicCrossfadeDuration > 0.0f) {
+            t += dt / m_musicCrossfadeDuration;
+        } else {
+            t = 1.0f;  // zero-duration crossfade: instant completion
+        }
+        t = std::min(t, 1.0f);
         m_musicCrossfadeT.store(t, std::memory_order_relaxed);
 
         int outSlot = 1 - m_musicIncomingSlot;  // the slot that is fading out
@@ -1292,8 +1298,12 @@ void AudioSystem::updateStreams() {
     // Phase 10: Advance ambient bed crossfade progress.
     if (m_ambientIncomingSlot >= 0) {
         float t = m_ambientCrossfadeT.load(std::memory_order_relaxed);
-        t += kWakeInterval / m_ambientCrossfadeDuration;
-        t  = std::min(t, 1.0f);
+        if (m_ambientCrossfadeDuration > 0.0f) {
+            t += dt / m_ambientCrossfadeDuration;
+        } else {
+            t = 1.0f;  // zero-duration crossfade: instant completion
+        }
+        t = std::min(t, 1.0f);
         m_ambientCrossfadeT.store(t, std::memory_order_relaxed);
 
         int ambOutSlot = (m_ambientIncomingSlot == 2) ? 3 : 2;

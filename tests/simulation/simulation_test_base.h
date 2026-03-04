@@ -100,6 +100,13 @@ protected:
         // removeServiceBuildingMesh(tileX, tileZ) — 2 args
         EXPECT_CALL(renderer_, removeServiceBuildingMesh(::testing::_, ::testing::_))
             .Times(::testing::AnyNumber());
+        // Phase 10: CitySimulation::doTrafficSignalTick() calls
+        // m_renderer->getListenerPosition() once per tick() call when
+        // m_trafficSignals is non-empty (road intersections exist).
+        // Allow any number of calls — SimulationTestBase tests do not assert
+        // listener position; individual tests that do must override after SetUp().
+        EXPECT_CALL(renderer_, getListenerPosition())
+            .Times(::testing::AnyNumber());
     }
 
     void TearDown() override {

@@ -700,11 +700,23 @@ Phase 10 (rows 6, 8, 9, 10). Row 7 cells are reserved stubs (transparent) — no
 required until Phase 12 adds `IUIBackend::setMouseCursor()`. Artists must paint rows 0–6
 and rows 8–10 before Phase 10 exits.
 
+**Global HUD accent color (binding)**: The single accent color used for all active-state
+selection borders across the sprite sheet is **`#33BB44`** (vivid green). This value is
+canonical — it is the border color on zone sub-panel active icons, toolbar tool-mode active
+icons, Utilities sub-panel active icons, and the minimap overlay toggle active border. Do
+NOT substitute a per-tool or per-zone color for the border — consistency of the selection
+ring color across all panel types is required for a coherent active-state visual language.
+For Residential icons (zone fill also `#33BB44`): the 2 px border ring falls at the outer
+edge of the 48×48 or 56×40 icon artwork area and acts as a framing ring; even a same-hue
+border is distinguishable from the icon body at 64×64 px because the border is a uniform
+ring with no internal content. No additional contrast treatment is needed.
+
 **Zone sub-panel icon visual convention** (applies to rows 2 and 3):
 
 - **Active state** (rows 2): Filled solid icon using the zone's canonical colour
   (Residential = green `#33BB44`; Commercial = blue `#3366CC`; Industrial = yellow-orange
-  `#CCAA22`). A 2 px accent-colour border surrounds the icon area within the 64×64 cell.
+  `#CCAA22`). A 2 px accent-colour border (`#33BB44`) surrounds the icon area within the
+  64×64 cell.
   Density tier visual differentiation:
   - Low: single-storey building silhouette (1 floor, wide footprint)
   - Medium: mid-rise building silhouette (3–4 floors)
@@ -715,7 +727,8 @@ and rows 8–10 before Phase 10 exits.
 **Utilities sub-panel icon visual convention** (applies to rows 4 and 5):
 
 - **Active state** (row 4): Filled icon using neutral white `#DDDDDD` on a mid-grey
-  `#444444` background fill within the cell. 2 px accent-colour border.
+  `#444444` background fill within the cell. 2 px accent-colour border (`#33BB44` — global
+  HUD accent; same value used for toolbar and minimap overlay active borders).
   - Power Plant: lightning-bolt symbol
   - Water Tower: cylindrical tower silhouette
   - Fire Station: fire/flame symbol
@@ -726,7 +739,8 @@ and rows 8–10 before Phase 10 exits.
 **Toolbar tool-mode icon visual convention** (applies to rows 0 and 1):
 
 - Icons are 48×48 px, centered within the 64×64 px cell (8 px transparent margin on all sides).
-- **Active state** (row 0): Filled icon, accent-colour border drawn within the 48×48 area.
+- **Active state** (row 0): Filled icon, 2 px accent-colour border (`#33BB44` — global HUD
+  accent) drawn within the 48×48 area.
   Each tool has a unique shape:
   - Zone: zoning grid square (four quadrants — R/C/I colour-coded)
   - Road: single road segment (straight horizontal line with lane markings)

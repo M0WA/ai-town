@@ -877,7 +877,7 @@ All Phase 10 audio tests carry label `unit` and run without a display device or 
 
 | Test Suite | Test Case | Source File |
 |---|---|---|
-| `AdaptiveMusicTest` | `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` | `tests/simulation/adaptive_music_intensity_test.cpp` |
+| `AdaptiveMusicIntensityTest` | `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` | `tests/simulation/adaptive_music_intensity_test.cpp` |
 | `CitySimulationRenderTest` | `CitySimulation_PlaceZone_SpawnsBuilding` | `tests/simulation/city_simulation_render_test.cpp` |
 | `CitySimulationRenderTest` | `CitySimulation_PlaceRoad_SpawnsRoadMesh` | `tests/simulation/city_simulation_render_test.cpp` |
 | `CitySimulationRenderTest` | `CitySimulation_PlaceServiceBuilding_SpawnsMesh` | `tests/simulation/city_simulation_render_test.cpp` |

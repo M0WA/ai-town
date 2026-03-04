@@ -492,6 +492,21 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/adaptive_music_intensity_test.cpp
 )
 
+# Phase 10: extend simulation_tests with rendering method unit tests.
+# Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(simulation_tests ...) again.
+# CitySimulationRenderTest fixture uses NiceMock<MockRenderer> (per phase-10.md — not StrictMock)
+# so tests focus on verifying the correct mesh-placement call without exhaustive EXPECT_CALLs for
+# every audio side-effect on the same code path.
+# Seven test cases: PlaceZone_SpawnsBuilding, PlaceRoad_SpawnsRoadMesh,
+# PlaceServiceBuilding_SpawnsMesh, DemolishZoneTile_RemovesBuilding,
+# DemolishRoadTile_RemovesRoadMesh, DemolishServiceBuilding_RemovesMesh,
+# DensityUpgrade_SwapsBuildingMesh.
+# (ref: implementation/phase-10.md §Rendering method unit tests in simulation_tests,
+#       architecture/testing/testability-architecture.md §Phase 10 simulation_tests canonical test names)
+target_sources(simulation_tests PRIVATE
+    tests/simulation/city_simulation_render_test.cpp
+)
+
 # Coverage-gap tests: placeServiceBuilding variants, undoLastAction road count,
 # difficulty constructors, smoothstep, getOutstandingDebt with loans, etc.
 # Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(simulation_tests ...) again.

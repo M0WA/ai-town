@@ -182,15 +182,25 @@ conventional characters — use these conventions.
 | Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`) |
 | Priority | CRITICAL |
 | EFX bypass | No |
-| Trigger | `CitySimulation::tick()` on tile desirability ≤ 20 with `!tile.alertFired` (when no fire station covers the tile) |
+| Trigger | `CitySimulation::tick()` on tile desirability ≤ 20 with `!tile.alertFired`, when the tile is within Police Station coverage radius but NOT within Fire Station coverage radius |
 
 **Character**: a police siren or emergency tone, distinct from the fire alarm. A single-
 tone or two-tone police siren pattern (wail or yelp) is appropriate. Duration 2–4 s.
 
-**Priority note**: if a tile is covered by both Fire Station and Police Station, only
-`sfx_fire_alert` fires (fire takes priority). `sfx_police_alert` fires only when the
-tile has police coverage but no fire coverage. This is a code-level decision; the artist
-only needs to author the two sounds to be distinguishable from each other.
+**Priority note**: the alert SFX selection uses the following priority logic, evaluated
+per tile each tick:
+
+1. If the tile is within Fire Station coverage: `sfx_fire_alert` fires (fire takes
+   priority regardless of police coverage).
+2. Else if the tile is within Police Station coverage only: `sfx_police_alert` fires.
+3. Else (tile is within neither Fire Station nor Police Station coverage radius): no
+   alert SFX fires. Tiles with no service coverage receive desirability penalties via
+   the normal per-tick desirability model but do not trigger either alert sound — alert
+   SFX are specifically tied to service-covered tiles entering crisis, not to
+   uncovered tiles.
+
+This is a code-level decision; the artist only needs to author the two sounds to be
+clearly distinguishable from each other in blind listening.
 
 ---
 

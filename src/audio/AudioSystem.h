@@ -402,7 +402,10 @@ private:
     void audioThreadFunc();
 
     // Streaming update — called once per audio thread wake.
-    void updateStreams();
+    // dt is the real-time elapsed seconds since the previous wake (from IClock).
+    // Used to advance music and ambient crossfade timers with accurate real-time
+    // deltas instead of a hardcoded nominal interval.
+    void updateStreams(float dt);
 
     // Occlusion gain smoothing — called once per audio thread wake.
     void updateOcclusion();
