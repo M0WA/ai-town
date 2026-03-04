@@ -1,11 +1,4 @@
 <?xml version="1.0"?>
-<!-- AI Town HUD font: DejaVu Sans Mono 18px  -  monospace for treasury balance, population, tax rates, percentages
-     Generated from DejaVuSansMono.ttf at 18px.
-     Covers ASCII 32-126 (all printable US-ASCII characters).
-     Format: Irrlicht XML bitmap font (CGUIFont::load compatible).
-     Cell size: 15x22px. Texture: 256x256px RGBA PNG.
-     Both fonts use identical x-height: 13px (cap-height difference <= 2px
-     at 1280x720 as required by Phase 10 gamedesign-ux deliverable). -->
 <font type="bitmap">
   <Texture filename="hud_mono_font_0.png" index="0" hasAlpha="true" />
   <!-- 95 characters, ASCII 32-126. Glyph cell: 15x22px. -->
