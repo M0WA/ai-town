@@ -108,6 +108,7 @@ public:
     void      setZoneOverlay(int mapTilesX, int mapTilesZ,
                              const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) override;
     ScreenRect getTileScreenBounds(int tileX, int tileZ) const override;
+    vec3       getListenerPosition() const override;
 
 private:
     irr::IrrlichtDevice*        m_device;
@@ -115,6 +116,11 @@ private:
     irr::video::IVideoDriver*   m_driver;
     irr::scene::ISceneManager*  m_smgr;
     irr::scene::ICameraSceneNode* m_camera{nullptr};
+
+    // Cached camera eye position — updated every setCamera() call.
+    // Returned by getListenerPosition() for use by CitySimulation's
+    // sfx_intersection_tick 80 m pre-acquisition distance cull.
+    vec3 m_lastCameraPosition{};
 
     // Texture handle map: TextureHandle → ITexture*
     TextureHandle                                      m_nextHandle{1};

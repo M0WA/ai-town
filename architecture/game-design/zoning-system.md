@@ -146,6 +146,77 @@
 - **Terrain interaction**: See [Terrain Interaction](terrain-interaction.md) for the authoritative slope threshold (> 15.0°, exact), earthworks cost formula, and map playability guarantee.
 - **Player action**: Player designates zones; engine auto-populates buildings based on demand and desirability scores
 
+## Phase 10 Audio Callbacks for Zone Events
+
+The following calls are made from `CitySimulation` on zone placement, demolition, and density
+upgrade events. All calls are guarded by `m_audio != nullptr`.
+
+### `sfx_build_place` and `sfx_earthworks` — Zone tile placed
+
+**Call site**: `CitySimulation::placeZone(int tileX, int tileZ, ZoneType type,
+DensityTier tier, int earthworksCostOverride)`. Called on successful zone placement (tile
+was not already occupied and cost deduction succeeds).
+
+```cpp
+// In CitySimulation::placeZone(), after treasury deduction and tile assignment:
+if (m_audio) {
+    if (earthworksCostOverride > 0) {
+        m_audio->playPositionalSound(
+            SFX_EARTHWORKS,
+            vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+            SoundPriority::NORMAL, 1.0f);
+    }
+    m_audio->playPositionalSound(
+        SFX_BUILD_PLACE,
+        vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+        SoundPriority::NORMAL, 1.0f);
+}
+```
+
+`SFX_EARTHWORKS` = SoundId 4 — positional (`AL_SOURCE_RELATIVE = AL_FALSE`), EFX bypass
+(`AL_DIRECT_FILTER = AL_FILTER_NULL`), fired only when earthworks cost > 0.
+`SFX_BUILD_PLACE` = SoundId 1 — positional (`AL_SOURCE_RELATIVE = AL_FALSE`), no EFX bypass.
+Both use `Y = 0.0f` (real terrain height is post-V1 refinement per service-coverage.md).
+
+### `sfx_build_demolish` — Zone tile demolished
+
+**Call site**: `CitySimulation::demolishTile(int tileX, int tileZ)` (or whichever method
+implements the Demolish tool for zone tiles). Called on successful demolition.
+
+```cpp
+// In CitySimulation::demolishTile(), after clearing the tile:
+if (m_audio) {
+    m_audio->playPositionalSound(
+        SFX_BUILD_DEMOLISH,
+        vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+        SoundPriority::NORMAL, 1.0f);
+}
+```
+
+`SFX_BUILD_DEMOLISH` = SoundId 2 — positional (`AL_SOURCE_RELATIVE = AL_FALSE`), no EFX bypass.
+
+### `sfx_zone_upgrade` — Zone tile auto-upgraded to higher density tier
+
+**Trigger**: Fired once per tile that is successfully upgraded during a density upgrade wave
+tick. The upgrade wave runs inside `CitySimulation::doDensityUnlockTick()`.
+
+**Call site**: `CitySimulation::doDensityUnlockTick()`, immediately after a tile's density
+tier is incremented and before the 20%-per-type cap counter is updated.
+
+```cpp
+// In CitySimulation::doDensityUnlockTick(), per-tile upgrade:
+tile.densityTier = nextTier;
+if (m_audio) {
+    m_audio->playSound(SFX_ZONE_UPGRADE, SoundPriority::NORMAL, 1.0f);
+}
+upgradeCountThisTick[tile.zoneType]++;
+```
+
+`SFX_ZONE_UPGRADE` = SoundId 5 (`sfx_zone_upgrade.wav`). Non-positional
+(`AL_SOURCE_RELATIVE = AL_TRUE`), EFX bypass. One call per upgraded tile per tick; at most
+20% of eligible tiles fire per zone type per tick (the 20% cap is already enforced by the
+upgrade wave logic — no additional audio throttle is required here).
+
 ## Zone Overlay Colour Scheme (Phase 9b — HUD)
 
 When the Zone tool is active or when zones have been placed, the renderer draws a semi-transparent

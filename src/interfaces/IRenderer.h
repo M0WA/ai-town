@@ -155,4 +155,14 @@ public:
     // (see architecture/ui-ux/query-inspector-panel.md — Tile overlap prevention).
     // main-thread-only.
     virtual ScreenRect getTileScreenBounds(int tileX, int tileZ) const = 0;
+
+    // getListenerPosition — return the current camera/listener world-space position.
+    //
+    // Returns the eye position most recently set via setCamera(). Used by
+    // CitySimulation::tick() for the sfx_intersection_tick pre-acquisition distance cull
+    // (> 80 m), preventing the SFX pool from being saturated by distant intersection ticks.
+    // Returns vec3{} (zero) before the first setCamera() call.
+    // main-thread-only.
+    // (ref: implementation/phase-10.md sfx_intersection_tick wiring)
+    virtual vec3 getListenerPosition() const = 0;
 };

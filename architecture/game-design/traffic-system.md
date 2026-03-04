@@ -15,3 +15,79 @@
 - **Null-path behavior**: When A\* finds no valid path for a zone tile (empty road graph or disconnected tile), that tick contributes `null_path_demand_default = 0.5f` as its individual `traffic_demand_factor` value in the rolling average calculation. The fallback of 0.5 when all ticks in the window are null-path is a mathematical consequence of averaging N values each equal to 0.5 — it is NOT a separate post-average override applied after computing the rolling average. Null-path ticks are included in the rolling average computation, not excluded with a fallback applied afterward. For example: a rolling window with 3 valid-path ticks and 2 null-path ticks has average = (sum of 3 valid `traffic_demand_factor` values + 2 × 0.5) / 5. If all ticks in the rolling window for that zone type have no valid path (5 ticks for Residential and Commercial; 3 ticks for Industrial — matching each zone type's rolling average window size), `demand_factor` is 0.5 (neutral) rather than 0.0, giving the player time to build road connections before demand collapses. This prevents the city from deadlocking with zero demand on a blank map. **Partial window averaging (early ticks)**: During the first few budget ticks before the rolling window has filled (i.e., `totalTicks < window_size`), divide the sum by `min(totalTicks, window_size)` — not by the constant `window_size` — to avoid diluting valid samples with zero-initialized slots. For example: at tick 2 with a 5-tick window, divide by 2, not 5. Initializing the window slots to `null_path_demand_default = 0.5f` and always dividing by the constant window size would over-weight the null-path default in early ticks and under-state demand for cities that build roads immediately. The oscillation sign-off tables in the zoning-system.md (e.g., "T+1=3 | [1.0, 1.0, 0.5, 0.5] (4 samples) | 3.0/4 = 0.750") already reflect partial-window averaging — the denominator equals the number of samples recorded so far, not the window capacity.
 - **Bootstrap oscillation invariant (testable constraint)**: During the first `demand_bootstrapping_ticks` budget ticks (ticks 0–5), demand values must not oscillate. Specifically, for any two consecutive ticks, `|demand_factor[tick+1] − demand_factor[tick]| < 1.0` for all zone types. A jump of 1.0 (the full [0.0, 1.0] range) indicates a sign-flip error in the bootstrap subsidy calculation. On a blank map at any simulation speed (including `SpeedMultiplier::x3`), `getTrafficDemandFactor()` and `getDemandPressurePct()` must remain bounded in [0.0, 1.0] with no tick-to-tick delta exceeding 1.0. Verified by `DemandBootstrap_AtX3Speed_NoBoundaryViolationAndNoOscillation` in `tests/simulation/zoning_test.cpp`.
 - **Demand pressure readouts** (C/I feedback): When Commercial or Industrial demand prerequisites are unmet, the unmet demand must be surfaced to the player. The `QueryResult` struct exposes a `demand_pressure_pct` field per tile = `(1.0f − effective_demand_factor) × 100`, where `effective_demand_factor` is the post-combination demand in [0.0, 1.0]. **Inverse semantics**: 0 means fully satisfied demand (high traffic flow, maximum demand); 100 means zero effective demand (demand collapsed). **CRITICAL — Do NOT confuse with `ICitySimulation::getDemandPressurePct(ZoneType)`**, which returns the city-wide EFFECTIVE demand in [0.0, 1.0] (1.0 = maximum demand) — the opposite direction. `QueryResult::demandPressurePct` = `(1.0f − tileEffectiveDemandFactor) × 100.0f`; it is NOT `getDemandPressurePct(zone) × 100`. See `simulation_types.h QueryResult::demandPressurePct` for the canonical definition and cross-reference. This is shown in the Inspector panel for zone tiles and as a compact HUD indicator bar per zone type (R/C/I). Without this readout, an economy flatline cannot be distinguished from a design error by the player.
+
+## Phase 10 Audio Callbacks for Traffic Events
+
+### `sfx_road_build` — Road tile placed
+
+**Call site**: `CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)`,
+immediately after successful road placement and treasury deduction.
+
+```cpp
+// In CitySimulation::placeRoad(), after tile assignment:
+if (m_audio) {
+    if (earthworksCostOverride > 0) {
+        m_audio->playPositionalSound(
+            SFX_EARTHWORKS,
+            vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+            SoundPriority::NORMAL, 1.0f);
+    }
+    m_audio->playPositionalSound(
+        SFX_ROAD_BUILD,
+        vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+        SoundPriority::NORMAL, 1.0f);
+}
+```
+
+`SFX_ROAD_BUILD` = SoundId 3 (`sfx_road_build.wav`) — positional
+(`AL_SOURCE_RELATIVE = AL_FALSE`), no EFX bypass. `SFX_EARTHWORKS` = SoundId 4 — positional,
+EFX bypass, fired only when `earthworksCostOverride > 0`. Y = 0.0f (same convention as zone
+placement calls — see service-coverage.md Audio Callbacks section).
+
+### `sfx_build_demolish` — Road tile demolished
+
+**Call site**: `CitySimulation::demolishTile(int tileX, int tileZ)` for road tiles, same
+method as zone demolish. Reuses `SFX_BUILD_DEMOLISH` (SoundId 2).
+
+```cpp
+// In CitySimulation::demolishTile(), road branch:
+if (m_audio) {
+    m_audio->playPositionalSound(
+        SFX_BUILD_DEMOLISH,
+        vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+        SoundPriority::NORMAL, 1.0f);
+}
+```
+
+### `sfx_intersection_tick` — Traffic signal phase change
+
+**Trigger**: Fires each time a traffic intersection's signal cycle completes a full phase
+transition (green→red or red→green on the controlling road segment). The intersection is
+identified by its tile coordinates `(tileX, tileZ)`.
+
+**Call site**: `CitySimulation::tick()`, inside the traffic signal update loop, at the moment
+a signal phase changes.
+
+```cpp
+// In CitySimulation::tick(), traffic signal update loop:
+if (signal.phaseChanged) {
+    if (m_audio) {
+        m_audio->playPositionalSound(
+            SFX_INTERSECTION_TICK,
+            vec3{static_cast<float>(signal.tileX), 0.0f,
+                 static_cast<float>(signal.tileZ)},
+            SoundPriority::LOW, 1.0f);
+    }
+}
+```
+
+`SFX_INTERSECTION_TICK` = SoundId 16 (`sfx_intersection_tick.wav`) — positional
+(`AL_SOURCE_RELATIVE = AL_FALSE`), no EFX bypass (subtle ambient detail — occlusion is
+acceptable). `SoundPriority::LOW` ensures this sound is the first evicted under pool
+pressure. **Distance cull**: `AudioSystem` applies an optional additional distance cull at
+> 80 m from the listener — if the source position is beyond 80 m, `AudioSystem` skips
+acquisition entirely rather than acquiring a pool slot and relying solely on
+`AL_INVERSE_DISTANCE_CLAMPED` rolloff. Implementation: before calling
+`acquireSFXSource()`, check `distance(listenerPos, signalPos) > 80.0f` and return early
+if true. This is the only SFX with an explicit pre-acquisition distance cull at the
+`AudioSystem` level.

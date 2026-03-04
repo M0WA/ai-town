@@ -204,6 +204,89 @@ zone coding; reuse `kOverlayArgbResidential`, `kOverlayArgbCommercial`, and
 
 - **Notification log bell icon**: positioned at the right end of the resource/budget bar, virtual bounds x: 1820–1868 px, y: 8–56 px (48×48 px icon). Displays an unread-count badge (small numeral overlay) that increments when new notifications arrive and resets to zero when the log is opened. Keyboard shortcut: **B** (toggles the log open/closed; rebindable in Settings > Controls with standard conflict detection).
 
+## Phase 10 Audio Wiring for UI Events
+
+All UI SFX calls below use `m_audio->playSound(soundId, SoundPriority::NORMAL, 1.0f)`.
+`m_audio` is the `IAudioSystem*` stored in `HUD` (see HUD Class Structure — Constructor
+Signature). Every call is guarded by `if (m_audio)`. All UI SFX are non-positional
+(`AL_SOURCE_RELATIVE = AL_TRUE`) with EFX bypass (`AL_DIRECT_FILTER = AL_FILTER_NULL`).
+
+### `ui_click` — Toolbar button pressed
+
+**Call site**: `UIManager::onEvent()`, at Priority 5 (toolbar dispatch), immediately after
+the active tool state is updated. Fires once per toolbar button click (Zone, Road, Utilities,
+Demolish, Query) regardless of whether the tool changed.
+
+```cpp
+// In UIManager::onEvent(), Priority 5 toolbar dispatch, after setActiveTool():
+if (m_hud && m_audio) {
+    m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
+}
+```
+
+`UI_CLICK` = SoundId 22 (`ui_click.wav`). Also fires on zone sub-panel button clicks and
+Utilities sub-panel button clicks — any button element backed by `addButton()` whose click
+is processed in the toolbar/sub-panel dispatch path triggers this SFX.
+
+### `ui_menu_open` — Sub-panel or overlay panel opened
+
+**Call site**: `UIManager::updateSubPanelVisibility()`, immediately after
+`setElementVisible(panel, true)` is called for the zone sub-panel or utilities sub-panel.
+
+```cpp
+// In UIManager::updateSubPanelVisibility(), after showing a sub-panel:
+if (m_audio) {
+    m_audio->playSound(UI_MENU_OPEN, SoundPriority::NORMAL, 1.0f);
+}
+```
+
+Also fires when the Budget Detail Panel is opened (hover → click on treasury balance field)
+and when the Tax Rate Panel opens. Call site: the panel's `show()` method or the UIManager
+handler that sets the panel visible.
+
+`UI_MENU_OPEN` = SoundId 24 (`ui_menu_open.wav`).
+
+### `ui_menu_close` — Sub-panel or overlay panel closed
+
+**Call site**: `UIManager::updateSubPanelVisibility()`, immediately after
+`setElementVisible(panel, false)` is called when a sub-panel is hidden due to a tool change.
+Also fires on Budget Detail Panel close and Tax Rate Panel close.
+
+```cpp
+// In UIManager::updateSubPanelVisibility(), after hiding a sub-panel:
+if (m_audio) {
+    m_audio->playSound(UI_MENU_CLOSE, SoundPriority::NORMAL, 1.0f);
+}
+```
+
+`UI_MENU_CLOSE` = SoundId 25 (`ui_menu_close.wav`).
+
+**Guard**: Do NOT fire `ui_menu_open` and `ui_menu_close` on the same frame (i.e. when
+`updateSubPanelVisibility()` hides one panel and shows another in the same tool-change event).
+Implementation: call `ui_menu_close` first for any newly-hidden panels, then call
+`ui_menu_open` once for any newly-shown panel. If no panel changes visibility state, no
+sound fires.
+
+### `ui_toast` — Notification toast displayed
+
+**Call site**: `NotificationManager::postCritical()` and `NotificationManager::postNormal()`,
+immediately after the toast element is created and made visible via
+`m_backend->setElementVisible(handle, true)`.
+
+```cpp
+// In NotificationManager::postCritical() / postNormal(), after toast element creation:
+if (m_audio) {
+    m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f);
+}
+```
+
+`UI_TOAST` = SoundId 23 (`ui_toast.wav`). Fires once per toast display (not once per queue
+enqueue — only when the toast becomes visible on screen). If a toast is queued but not yet
+visible (because the max simultaneous limit is reached), `ui_toast` does NOT fire until the
+toast actually appears. `NotificationManager` holds `IAudioSystem* m_audio{nullptr}` injected
+at construction (Phase 10 adds this parameter to the constructor alongside the existing
+`IUIBackend*`, `ICitySimulation*`, and `IClock*`).
+
 ## HUD Class Structure
 
 ### Constructor Signature

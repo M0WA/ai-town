@@ -167,6 +167,7 @@ void IrrlichtRenderer::setCamera(const CameraParams& p) {
     m_camera->setFOV(p.fovDegrees * static_cast<float>(M_PI / 180.0));
     m_camera->setNearValue(p.nearClip);
     m_camera->setFarValue(p.farClip);
+    m_lastCameraPosition = p.position;  // cached for getListenerPosition()
 }
 
 void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& params) {
@@ -738,4 +739,12 @@ ScreenRect IrrlichtRenderer::getTileScreenBounds(int tileX, int tileZ) const
     if (maxX <= minX || maxY <= minY) return ScreenRect{};
 
     return ScreenRect{ minX, minY, maxX - minX, maxY - minY };
+}
+
+// getListenerPosition — return the camera eye position most recently set via setCamera().
+// Used by CitySimulation::tick() for the sfx_intersection_tick 80 m pre-acquisition cull.
+// Returns vec3{} before the first setCamera() call (m_lastCameraPosition is zero-initialised).
+vec3 IrrlichtRenderer::getListenerPosition() const
+{
+    return m_lastCameraPosition;
 }

@@ -32,6 +32,8 @@ public:
             .WillByDefault(::testing::Return(false));
         ON_CALL(*this, getTileScreenBounds(::testing::_, ::testing::_))
             .WillByDefault(::testing::Return(ScreenRect{}));
+        ON_CALL(*this, getListenerPosition())
+            .WillByDefault(::testing::Return(vec3{}));
     }
 
     MOCK_METHOD(void,          beginFrame,          (),                                        (override));
@@ -55,6 +57,9 @@ public:
     MOCK_METHOD(ScreenRect, getTileScreenBounds,
                 (int tileX, int tileZ),
                 (const, override));
+
+    // Phase 10: listener position for sfx_intersection_tick distance cull.
+    MOCK_METHOD(vec3, getListenerPosition, (), (const, override));
 
 private:
     TextureHandle m_nextHandle{1};
