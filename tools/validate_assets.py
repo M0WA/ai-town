@@ -1352,6 +1352,80 @@ def check_23():
     )
 
 
+import os
+import struct
+import sys
+
+
+def check_23_hud_sprite_sheet(repo_root: str) -> bool:
+    """Check #23: HUD sprite sheet format validation.
+
+    Verifies that assets/textures/ui/hud_sprites_ui.png:
+      (1) exists and is a valid PNG file
+      (2) has dimensions exactly 2048x2048 px
+      (3) has colour mode RGBA
+
+    Returns True on pass, False on any failure (error message printed to stderr).
+    See architecture/asset-standards/2d-texture-standards.md (UI Sprite Sheet section):
+      - Runtime source format: 2048x2048 RGBA8 PNG (authoring/source format)
+      - DDS export: RGBA8 UNORM via export_textures.py --format rgba8 (Phase 9 deliverable)
+      - Colour space: linear (NOT sRGB — UI elements are linear; sRGB decode would corrupt
+        alpha-blend weights)
+    """
+    png_path = os.path.join(repo_root, "assets", "textures", "ui", "hud_sprites_ui.png")
+
+    if not os.path.isfile(png_path):
+        print(f"[CHECK 23 FAIL] hud_sprites_ui.png not found: {png_path}", file=sys.stderr)
+        return False
+
+    # Validate PNG signature (first 8 bytes)
+    PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
+    with open(png_path, 'rb') as f:
+        sig = f.read(8)
+    if sig != PNG_SIGNATURE:
+        print(f"[CHECK 23 FAIL] hud_sprites_ui.png is not a valid PNG file "
+              f"(bad signature: {sig!r})", file=sys.stderr)
+        return False
+
+    # Use PIL to read dimensions and colour mode — Pillow is required for Phase 8+ asset
+    # validation; if not available, fall back to a minimal IHDR parse.
+    try:
+        from PIL import Image
+        with Image.open(png_path) as img:
+            width, height = img.size
+            mode = img.mode
+    except ImportError:
+        # Fallback: parse PNG IHDR chunk directly (bytes 16-23 are width/height,
+        # byte 24 is bit depth, byte 25 is colour type).
+        # Colour type 6 = RGBA (truecolour with alpha).
+        with open(png_path, 'rb') as f:
+            f.seek(16)
+            ihdr = f.read(13)
+        width  = struct.unpack('>I', ihdr[0:4])[0]
+        height = struct.unpack('>I', ihdr[4:8])[0]
+        bit_depth   = ihdr[8]
+        colour_type = ihdr[9]
+        if colour_type != 6 or bit_depth != 8:
+            print(f"[CHECK 23 FAIL] hud_sprites_ui.png colour type/bit depth mismatch: "
+                  f"colour_type={colour_type} (expected 6=RGBA), "
+                  f"bit_depth={bit_depth} (expected 8)", file=sys.stderr)
+            return False
+        mode = "RGBA"
+
+    if width != 2048 or height != 2048:
+        print(f"[CHECK 23 FAIL] hud_sprites_ui.png dimensions are {width}x{height}; "
+              f"expected 2048x2048", file=sys.stderr)
+        return False
+
+    if mode != "RGBA":
+        print(f"[CHECK 23 FAIL] hud_sprites_ui.png colour mode is '{mode}'; "
+              f"expected 'RGBA'", file=sys.stderr)
+        return False
+
+    print(f"[CHECK 23 PASS] hud_sprites_ui.png: {width}x{height} {mode} PNG")
+    return True
+
+
 if __name__ == '__main__':
     print("validate_assets.py: all checks #1-#23 active.")
     check_1(); check_2(); check_3(); check_4(); check_5()
