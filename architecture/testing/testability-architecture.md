@@ -655,7 +655,7 @@ public:
 // getTileScreenBounds) ARE called from UIManager::onEvent() during tests. Each test
 // must declare EXPECT_CALL for each of these that the production code exercises.
 
-// Canonical IAudioSystem — 14 methods. Authoritative definition in audio-architecture/audio-system.md.
+// Canonical IAudioSystem — 15 methods (Phase 10 added setMusicIntensity). Authoritative definition in audio-architecture/audio-system.md.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType, SimSpeed,
 // SoundPriority, TimeOfDay, vec3, CameraState). Never expose ALuint, ALfloat, or AL_* constants through this interface.
 // Forward declarations (defined in game-domain headers, not OpenAL headers):

@@ -160,6 +160,13 @@ public:
     void setMasterVolume(float gain) override;
     void setMusicVolume(float gain) override;
     void setSFXVolume(float gain) override;
+    // Phase 10: adaptive music intensity.
+    // Implementation queues a crossfade command to the audio thread; the thread
+    // selects the stem pair for the new intensity and begins a beat-boundary crossfade.
+    // Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) is enforced internally.
+    // Calling with the tier already active is a no-op.
+    // Thread-safety: call from the main thread only.
+    void setMusicIntensity(MusicIntensity intensity) override;
 
     // Called from AudioSourcePool on slot recycle (and from vehicle pair release).
     // Resets occlusion gain to 1.0f immediately, applying the filter reset.
@@ -331,6 +338,18 @@ private:
     // -----------------------------------------------------------------------
     TimeOfDay m_currentTimeOfDay{TimeOfDay::DAY};
     bool      m_timeOfDaySet{false};
+
+    // -----------------------------------------------------------------------
+    // Adaptive music intensity state (Phase 10).
+    // Written from main thread via setMusicIntensity(); read by audio thread
+    // to select the crossfade target stem pair.  MUST be std::atomic<int>
+    // (not std::atomic<MusicIntensity>) because std::atomic requires a trivially
+    // copyable type — enums satisfy this, but the spec mandates atomic<int> to
+    // make the threading contract explicit and avoid misuse as a direct enum load.
+    // Callers cast: static_cast<MusicIntensity>(m_currentMusicIntensity.load()).
+    // Initialized to CALM (0) — no crossfade triggered before first update().
+    // -----------------------------------------------------------------------
+    std::atomic<int> m_currentMusicIntensity{static_cast<int>(MusicIntensity::CALM)};
 
     // -----------------------------------------------------------------------
     // Vehicle pair tracking — kMaxVehiclePairs pairs.

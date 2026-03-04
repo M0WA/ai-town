@@ -316,12 +316,31 @@ but lack the font file, which is why Phase 9b builds exhibit the unreadable font
 graceful fallback succeed — no constructor code changes are required in Phase 10.
 
 **Monospace requirement**: As specified in `resolution-ui-scaling.md` Typography, numeric readouts
-(treasury balance, population, tax rates, percentages) must use a monospace typeface. If a single
-`hud_font.xml` is used for all HUD text, it must be a monospace face. Alternatively, a second font
-file `assets/fonts/hud_mono_font.xml` may be applied selectively to `IGUIStaticText` elements that
-display numeric values — this is the preferred approach when a proportional face is desired for
-labels. The selective-font path requires `IGUIStaticText::setOverrideFont()` called on each
-numeric element immediately after `addStaticText()`.
+(treasury balance, population, tax rates, percentages) must use a monospace typeface. **Decision
+(Phase 10): Path 2 — two-font approach is selected.** `hud_font.xml` is a proportional sans-serif
+face for labels, button text, tooltips, and panel titles. A second font file
+`assets/fonts/hud_mono_font.xml` is a monospace face applied selectively to `IGUIStaticText`
+elements that display numeric values via `IGUIStaticText::setOverrideFont()` called on each
+numeric element immediately after `addStaticText()`. A single monospace face applied globally
+degrades legibility in compact panels (Query/Inspector, Tax Rate Panel) where proportional
+glyphs are narrower and allow more characters per line. The two-face approach allows each font
+to be optimised for its role. Both font files must be delivered as Phase 10 assets.
+
+Numeric elements that MUST use `hud_mono_font.xml` via `setOverrideFont()`:
+
+- Treasury balance display in resource bar
+- Population count display in resource bar
+- All numeric fields in Tax Rate Panel (current rate, projected rate)
+- All numeric fields in Budget Detail Panel (revenue, expense, and net balance line items)
+- Density unlock progress threshold value in resource bar
+- In-game date/time display in resource bar
+
+Label text that uses `hud_font.xml` (no `setOverrideFont()` call):
+
+- Zone type names, panel titles, button text, toolbar labels
+- Notification toast body text
+- Tooltip text
+- Non-numeric status labels (e.g. "City Rating: Town", "Cost waiver: active")
 
 ## Toolbar Button Text Fallback — Known Rendering Artefact
 

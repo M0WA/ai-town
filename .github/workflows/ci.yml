@@ -881,7 +881,9 @@ jobs:
 
   # ============================================================================
   # validate-assets — validate audio/texture/model assets.
-  # Phase 9: all 20 checks (Checks #1–#20) implemented in tools/validate_assets.py.
+  # Phase 9:  all 20 checks (Checks #1–#20) implemented in tools/validate_assets.py.
+  # Phase 10: check #21 added — zone loop silence-floor gate (sfx_zone_*.ogg leading/trailing
+  #           4410 samples ≤ −60 dBFS); ffmpeg installed below for OGG PCM decode.
   # timeout-minutes: 10 is permanent.
   # ============================================================================
   validate-assets:
@@ -903,8 +905,19 @@ jobs:
           grep -q "check_20" tools/validate_assets.py || (echo "FAIL: check_20 not found in validate_assets.py" && exit 1)
           echo "PASS: check_20 present"
 
+      - name: Verify check_21 present in validate_assets.py
+        run: |
+          grep -q "check_21" tools/validate_assets.py || (echo "FAIL: check_21 not found in validate_assets.py — Phase 10 zone loop silence-floor gate missing" && exit 1)
+          echo "PASS: check_21 present"
+
       - name: Install Python dependencies
-        run: pip install mutagen
+        # mutagen: OGG/WAV metadata (checks #16–#19).
+        # ffmpeg: required by check_21 (_decode_ogg_pcm_int16) to decode sfx_zone_*.ogg to
+        # raw int16 PCM for the silence-floor gate.  Installed as a system package (not pip)
+        # because the Python ffmpeg bindings are wrappers around the ffmpeg binary anyway.
+        run: |
+          pip install mutagen
+          sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Run asset validation
         run: python tools/validate_assets.py

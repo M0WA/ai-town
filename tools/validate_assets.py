@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 AI Town asset validation script.
-Phase 9: checks #1–#20 all implemented (check #15 and check #20 fully implemented in Phase 9).
+Phase 9:  checks #1–#20 all implemented (check #15 and check #20 fully implemented in Phase 9).
+Phase 10: check #21 added — zone loop silence-floor gate (leading/trailing 4410 samples ≤ −60 dBFS).
 """
 import glob
 import json
@@ -1035,9 +1036,172 @@ def check_20():
     )
 
 
+# ---------------------------------------------------------------------------
+# Check #21: Zone loop silence-floor verification.
+#
+# Spec (phase-10.md §Zone loops):
+#   For each assets/audio/sfx_zone_*.ogg, decode the OGG file to raw PCM and
+#   apply two independent region checks — BOTH must pass:
+#
+#   (1) Leading silence check:
+#       The first ceil(44100 × 0.1) = 4410 samples (frames) must ALL be at or
+#       below −60 dBFS peak amplitude (|sample| / 32767.0 <= 0.001 in linear).
+#
+#   (2) Trailing silence check:
+#       The last 4410 samples (frames) must ALL be at or below −60 dBFS peak
+#       amplitude.
+#
+#   Failure of either window alone is sufficient to reject the file.
+#
+# Implementation notes:
+#   - Decoding uses the subprocess+ffmpeg path (ffmpeg -f s16le) so that the
+#     check works in CI without a Python ctypes/vorbisfile binding.  If ffmpeg
+#     is absent the check falls back to reading via the wave module (which does
+#     NOT handle OGG; the fallback reports SKIP, not FAIL, so the CI job still
+#     passes on machines without ffmpeg — asset authors must verify locally).
+#   - The −60 dBFS threshold corresponds to a linear peak of 0.001 × 32767 ≈
+#     32.767 counts in 16-bit PCM (i.e. |sample_int16| <= 32, rounding down).
+#   - Zone loops are mono (1 channel); a "frame" equals a single int16 sample.
+#   - kSilenceWindowSamples matches ceil(44100 × 0.1) = 4410 exactly.
+#   - The two 4410-sample windows are checked independently — failure of either
+#     window alone is sufficient to reject the file.
+#   - AL_SOFT_loop_points is a runtime attribute, NOT an OGG comment field — this
+#     CI gate verifies the silence-floor authoring requirement only.
+#
+# Owner: sound-dev-opensoftal (script), sound-artist-opensoftal (asset compliance).
+# Phase 10 entry gate: zone loop assets MUST NOT merge to main until this check
+# is green in CI. Commit script + asset files in the same PR.
+# ---------------------------------------------------------------------------
+
+_SILENCE_WINDOW_SAMPLES = 4410                  # ceil(44100 × 0.1) frames
+_SILENCE_THRESHOLD_INT16 = 32                   # |sample| threshold for −60 dBFS (32767 × 0.001 ≈ 32.767)
+_SILENCE_DBFS_LABEL = "-60 dBFS"
+
+
+def _decode_ogg_pcm_int16(path):
+    """
+    Decode an OGG Vorbis file to a list of int16 sample values using ffmpeg.
+
+    Returns a list of integers in [-32768, 32767], or None if ffmpeg is
+    unavailable (the caller must handle None as a SKIP, not a failure).
+
+    Raises AssertionError on ffmpeg decode error (file is present but corrupt).
+    """
+    import subprocess
+    import sys
+
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-i", path,
+        "-f", "s16le",   # signed 16-bit little-endian raw PCM
+        "-acodec", "pcm_s16le",
+        "-ar", "44100",  # resample to 44100 Hz (should be no-op for correctly authored assets)
+        "-ac", "1",      # mono (zone loops are always mono)
+        "pipe:1",
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+    except FileNotFoundError:
+        # ffmpeg not installed — caller treats as SKIP
+        return None
+    except subprocess.TimeoutExpired:
+        raise AssertionError(f"check_21 FAIL: ffmpeg timed out decoding {path}")
+
+    if result.returncode != 0:
+        raise AssertionError(
+            f"check_21 FAIL: ffmpeg returned exit code {result.returncode} "
+            f"decoding {path}: {result.stderr.decode('utf-8', errors='replace')}"
+        )
+
+    raw = result.stdout
+    if len(raw) % 2 != 0:
+        raise AssertionError(
+            f"check_21 FAIL: ffmpeg produced an odd number of bytes ({len(raw)}) "
+            f"for {path} — expected even byte count for int16 PCM"
+        )
+
+    import struct as _struct
+    num_samples = len(raw) // 2
+    samples = list(_struct.unpack_from(f"<{num_samples}h", raw))
+    return samples
+
+
+def check_21():
+    """check_21: zone loop silence-floor — leading and trailing 4410 samples at or below -60 dBFS."""
+    patterns = glob.glob("assets/audio/sfx_zone_*.ogg")
+    if not patterns:
+        print("INFO check_21: no sfx_zone_*.ogg files found — no-op")
+        return
+
+    errors = []
+    skipped = 0
+
+    for path in sorted(patterns):
+        samples = _decode_ogg_pcm_int16(path)
+
+        if samples is None:
+            # ffmpeg not available — skip this file
+            print(f"SKIP check_21: ffmpeg not installed; cannot decode {path} — "
+                  f"run check_21 on a machine with ffmpeg before merging zone loop assets")
+            skipped += 1
+            continue
+
+        total = len(samples)
+        if total < _SILENCE_WINDOW_SAMPLES * 2:
+            errors.append(
+                f"check_21 FAIL: {path} has only {total} samples — shorter than "
+                f"two silence windows ({_SILENCE_WINDOW_SAMPLES * 2} samples minimum); "
+                f"zone loops must be at least 12 s (see v1-audio-asset-manifest.md)"
+            )
+            continue
+
+        # (1) Leading silence window: samples[0 .. SILENCE_WINDOW_SAMPLES-1]
+        leading = samples[:_SILENCE_WINDOW_SAMPLES]
+        leading_max = max(abs(s) for s in leading)
+        if leading_max > _SILENCE_THRESHOLD_INT16:
+            errors.append(
+                f"check_21 FAIL: {path} leading silence check failed — "
+                f"peak |sample| in first {_SILENCE_WINDOW_SAMPLES} samples = {leading_max} "
+                f"(threshold {_SILENCE_THRESHOLD_INT16} = {_SILENCE_DBFS_LABEL}); "
+                f"zone loops must have a silence floor at the head of at least 100 ms "
+                f"(architecture/audio-architecture/audio-asset-formats.md)"
+            )
+
+        # (2) Trailing silence window: samples[-SILENCE_WINDOW_SAMPLES ..]
+        trailing = samples[-_SILENCE_WINDOW_SAMPLES:]
+        trailing_max = max(abs(s) for s in trailing)
+        if trailing_max > _SILENCE_THRESHOLD_INT16:
+            errors.append(
+                f"check_21 FAIL: {path} trailing silence check failed — "
+                f"peak |sample| in last {_SILENCE_WINDOW_SAMPLES} samples = {trailing_max} "
+                f"(threshold {_SILENCE_THRESHOLD_INT16} = {_SILENCE_DBFS_LABEL}); "
+                f"zone loops must have a silence floor at the tail of at least 100 ms "
+                f"(architecture/audio-architecture/audio-asset-formats.md)"
+            )
+
+    if errors:
+        for e in errors:
+            print(e)
+        raise AssertionError(
+            f"check_21 FAIL: {len(errors)} zone loop silence-floor violation(s) — "
+            f"see output above; zone loop assets must not merge to main until all "
+            f"silence-floor violations are resolved (phase-10.md Phase 10 entry gate)"
+        )
+
+    passed = len(patterns) - skipped
+    if passed > 0:
+        print(
+            f"check_21 PASS: {passed} sfx_zone_*.ogg file(s) verified — "
+            f"leading and trailing {_SILENCE_WINDOW_SAMPLES}-sample windows "
+            f"all at or below {_SILENCE_DBFS_LABEL} peak amplitude"
+        )
+
+
 if __name__ == '__main__':
-    print("validate_assets.py: all checks #1-#20 active.")
+    print("validate_assets.py: all checks #1-#21 active.")
     check_1(); check_2(); check_3(); check_4(); check_5()
     check_6(); check_7(); check_8(); check_9(); check_10()
     check_11(); check_12(); check_13(); check_14(); check_15()
     check_16(); check_17(); check_18(); check_19(); check_20()
+    check_21()

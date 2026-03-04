@@ -1536,3 +1536,32 @@ void AudioSystem::setMusicVolume(float gain) {
 void AudioSystem::setSFXVolume(float gain) {
     m_sfxVolume.store(gain, std::memory_order_relaxed);
 }
+
+// ---------------------------------------------------------------------------
+// setMusicIntensity (Phase 10) — adaptive music tier driven by simulation state.
+//
+// Stores the requested intensity tier atomically.  The audio thread reads
+// m_currentMusicIntensity at each wake (every ~10 ms) in updateStreams() and,
+// if the tier has changed from the currently-playing tier, queues a beat-boundary
+// crossfade to the stem pair matching the new intensity:
+//   CALM   -> MUSIC_CALM_01 / MUSIC_CALM_02
+//   GROWTH -> MUSIC_GROWTH_01 / MUSIC_GROWTH_02
+//   CRISIS -> MUSIC_CRISIS_01 / MUSIC_CRISIS_02
+//
+// Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) is applied internally by
+// updateStreams(): when m_currentTimeOfDay != DAY, only CALM stems are selected
+// regardless of m_currentMusicIntensity.  CitySimulation does NOT need to
+// suppress GROWTH/CRISIS calls during off-hours.
+//
+// Calling with the tier already active is a no-op (audio thread detects no change).
+// Thread-safety: call from the main thread only (store to m_currentMusicIntensity
+// is atomic, so there is no data race with audio thread reads).
+//
+// NOTE: Phase 10 deliverable.  updateStreams() cross-fade logic that responds
+// to m_currentMusicIntensity is also a Phase 10 deliverable and is implemented
+// in the same Phase 10 commit that delivers the adaptive music stems and wires
+// CitySimulation::update().
+// ---------------------------------------------------------------------------
+void AudioSystem::setMusicIntensity(MusicIntensity intensity) {
+    m_currentMusicIntensity.store(static_cast<int>(intensity), std::memory_order_relaxed);
+}

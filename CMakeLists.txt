@@ -482,6 +482,16 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/audio_sim_test.cpp
 )
 
+# Phase 10: extend simulation_tests with adaptive music intensity test.
+# Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(simulation_tests ...) again.
+# This test exercises CitySimulation::update() with StrictMock<MockAudioSystem> to verify
+# setMusicIntensity() is called with the correct MusicIntensity tier when simulation state changes.
+# Owner: sound-dev-opensoftal (wiring CitySimulation::update() -> audioSystem->setMusicIntensity()).
+# Thresholds from architecture/game-design/economy-model.md §Music Intensity Tiers.
+target_sources(simulation_tests PRIVATE
+    tests/simulation/adaptive_music_intensity_test.cpp
+)
+
 # Coverage-gap tests: placeServiceBuilding variants, undoLastAction road count,
 # difficulty constructors, smoothstep, getOutstandingDebt with loans, etc.
 # Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(simulation_tests ...) again.
@@ -657,6 +667,19 @@ target_sources(audio_tests PRIVATE
 # Do NOT call add_executable(audio_tests ...) or aitown_add_tests(audio_tests ...) again.
 target_sources(audio_tests PRIVATE
     tests/audio/volume_control_test.cpp
+)
+
+# Phase 10: extend audio_tests with crossfade, stinger milestone, bar-boundary, and EFX bypass tests.
+# Do NOT call add_executable(audio_tests ...) or aitown_add_tests(audio_tests ...) again —
+# duplicate target registration causes a CMake configure error.
+# Four source files; audio_stream_bar_boundary_test.cpp contributes two test cases
+# (AudioStream_BarBoundary_UsesConsistentBuffersQueuedPerWake and
+#  AudioStream_BarBoundary_StreamStart_NoFalseFire) — five test cases total across four files.
+target_sources(audio_tests PRIVATE
+    tests/audio/crossfade_interrupted_formula_test.cpp
+    tests/audio/stinger_milestone_test.cpp
+    tests/audio/audio_stream_bar_boundary_test.cpp
+    tests/audio/notification_sfx_efx_bypass_test.cpp
 )
 
 # Copy default.mhr (OpenAL Soft HRTF data) next to audio_tests binary.

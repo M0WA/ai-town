@@ -20,7 +20,7 @@ hard asset error that will fail `validate_assets.py` Check #14 and block Phase 1
 | Bit depth | 16-bit |
 | Channels | Stereo (2 channels) |
 | Format | OGG Vorbis |
-| Root key / mode | Same root key across all 8 files; calm/growth/main-menu in major mode; crisis may use parallel minor (see note below) |
+| Root key / mode | **A natural minor (Aeolian mode), root A** — locked for all 8 V1 music files. All intensity tiers including crisis use A natural minor. See `architecture/audio-architecture/dynamic-soundscape.md` Cross-tier harmonic compatibility requirement and the Mode constraint section below. |
 | Loudness target | −16 LUFS integrated |
 | True-peak ceiling | −1 dBTP |
 
@@ -29,15 +29,24 @@ compatibility requirement: the engine can transition from any music context (mai
 calm, growth, crisis) to any other on a bar boundary, and the crossfade must not produce
 harmonic clashes.
 
-**Mode constraint (SA-2 revision 2026-03-03):** Calm, growth, and main-menu stems must
-use major mode. Crisis stems may use the parallel minor (same root, different mode).
-During a calm→crisis or growth→crisis crossfade, simultaneous major and minor material on
-a shared root produces modal mixture — a musically established technique for intensity
-transitions that does not constitute a harmonic clash. A new crossfade audibility demo
-(major calm stem into minor crisis stem, 3 s constant-power) is required before crisis
-stems in parallel minor are approved for delivery; until that demo is approved, crisis
-stems must remain in the same mode as calm/growth. The existing approval (HTML comment
-above) covers only major→major crossfades and does not extend to major→minor.
+**Root key and mode (V1 final decision — 2026-03-03):** All 8 music files are authored in
+**A natural minor (Aeolian mode), root A**. This applies to all intensity tiers including
+crisis. Rationale: A natural minor shares the key signature of C major (no sharps or flats)
+while its neutral-to-melancholic Aeolian character suits the city-builder aesthetic; root A
+at 440 Hz aligns to concert pitch (A440); and A natural minor provides a clear harmonic
+vocabulary for differentiating calm, growth, and crisis intensity tiers through orchestration
+weight, rhythmic density, and dissonant cluster voicings within the same scale. Crisis stems
+differentiate from calm and growth via heavier percussion, denser layering, tighter rhythmic
+syncopation, dissonant cluster voicings (e.g. diminished 7ths, tritone extensions, dense
+minor-mode stacking), and increased orchestral density — all within A natural minor. A mode
+change (e.g. parallel A major or any other mode) during a live crossfade would produce
+harmonic dissonance between the simultaneous mode-mismatched chord material; this is not
+acceptable because the engine does not control which specific chords are sounding at
+the crossfade point. **Crisis stems in any mode other than A natural minor are prohibited in V1.**
+If the sound artist later proposes parallel-major or other-mode crisis stems, a new 3 s
+constant-power crossfade demo (A natural minor calm stem into the proposed mode crisis stem,
+bar-aligned at 90 BPM) must be submitted and approved by the full team first. That
+demo has not been requested for V1.
 
 **Ambient beds (`ambient_*.ogg`) are NOT covered by this brief.** They are a separate
 deliverable (see `ambient-bed-production-brief.md`). No JSON sidecar is required for
@@ -126,9 +135,11 @@ Authoring checklist:
 - Export ends on the last sample of the final bar — not 1 sample after.
 - No DC offset at head or tail.
 - No fade-in or fade-out applied by the DAW — the engine handles gain ramping.
-- All 8 files rendered at the same root key before export. Calm, growth, and main-menu
-  stems in major mode. Crisis stems in major mode (or parallel minor if the major→minor
-  crossfade demo has been approved — see Root key / mode note above).
+- All 8 files rendered in **A natural minor (Aeolian mode), root A**. This applies to all
+  intensity tiers including crisis. Crisis stems in any other key or mode are NOT permitted
+  in V1 — a separate crossfade demo approval for any non-Aeolian mode is required first
+  and has not been obtained. See `architecture/audio-architecture/dynamic-soundscape.md`
+  and the Mode constraint section of this document.
 
 ---
 
@@ -157,7 +168,7 @@ Before submitting assets for Phase 10 exit review, confirm each of the following
 - [ ] All 8 OGG files loudness-checked: integrated LUFS = −16, true peak ≤ −1 dBTP.
 - [ ] All 8 OGG files are integer-bar length at 90 BPM (sample-accurate).
 - [x] All 8 JSON sidecars present and conformant with `tools/music_sidecar_schema.json`.
-- [ ] All 8 files share the same root key; mode constraint verified (major for calm/growth/main-menu; crisis major or approved parallel minor).
+- [ ] All 8 files confirmed in **A natural minor (Aeolian mode), root A** — verify by loading each OGG in the DAW and confirming root pitch is A and mode is Aeolian (natural minor); confirm no parallel-major or parallel-mode crisis stems are present.
 - [ ] Loop tail of each file aligns to bar boundary with no click.
 - [x] Crossfade demo approved (recorded above).
 
@@ -259,17 +270,32 @@ Rationale for 36 over the minimum-compliant 34 bars (90.67 s):
 The previously-delivered calm/growth files (90–94 s, ~34–35 bars) are below the corrected
 target and must be re-exported at 36 bars = 96.00 s before Phase 10 exit.
 
-### Mode constraint relaxation — crisis parallel minor permitted
+### Mode constraint — V1 final decision: A natural minor (Aeolian) locked for all stems
 
-The original constraint requiring all 8 stems to share identical root key AND mode is
-relaxed for crisis stems only. Crisis stems may use the parallel minor of the shared root
-key. Simultaneous major+minor material on a shared root during a crossfade produces modal
-mixture, not a harmonic clash.
+The Deep Review (2026-03-03) locked the root key and mode as **A natural minor (Aeolian),
+root A** for all 8 V1 music files. Any alternative mode (parallel major, relative major,
+or otherwise) is **permanently rejected for V1** (decision recorded in
+`implementation/phase-10.md` Music stems deliverable and
+`architecture/audio-architecture/dynamic-soundscape.md`).
 
-**Gate:** A new crossfade audibility demo (major calm stem into parallel-minor crisis stem,
-3 s constant-power, bar-aligned) must be submitted and approved before crisis stems in
-parallel minor are accepted for delivery. The existing approval (HTML comment at top of
-document) covers major→major only and does not extend to major→minor.
+Rationale for rejection:
+
+- No crossfade audibility demo for A natural minor→parallel-major has been produced or approved.
+- Producing the demo mid-Phase 10 adds schedule risk.
+- Crisis intensity is fully achievable within A natural minor through orchestration, rhythmic
+  density, and dissonant chord extensions without a mode change.
+- The engine crossfade point is non-deterministic at the chord level — a simultaneous
+  A minor calm chord and A major crisis chord at the crossfade moment would produce
+  an audible harmonic clash, not "modal mixture."
+
+**V1 final constraint**: All 8 music files (calm, growth, crisis, main-menu) are in
+**A natural minor (Aeolian mode), root A**. No exceptions. Crisis stems in any other mode will
+be rejected at the musical QA step (`crossfade_demo_qa.md`).
+
+Post-V1: parallel-major crisis stems (`music_crisis_major_01/02`) may be added as
+separate assets once a complete minor→parallel-major crossfade demo has been produced and
+approved by the full team. The demo requirement from the original Deep Review text remains
+in place for any post-V1 mode-change delivery.
 
 ### Variant compatibility authoring guidance
 
