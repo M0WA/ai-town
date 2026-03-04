@@ -154,18 +154,23 @@ TEST(AudioStreamTest,
     constexpr int32_t kBuffersProcessed           = 2;
 
     // m_samplesQueued at the start of this wake.
-    // We've pushed 10 * kSamplesPerBuffer samples through the decoder.
-    const uint64_t samplesQueued = 10u * kSamplesPerBuffer;  // = 163840
+    // We've pushed 14 * kSamplesPerBuffer samples through the decoder.
+    // With 14 buffers decoded and 8 queued to AL:
+    //   spCorrect = (14-8)*kSamplesPerBuffer = 6*16384 = 98304  → bar 0 (< 117600)
+    //   spWrong   = (14-6)*kSamplesPerBuffer = 8*16384 = 131072 → bar 1 (>= 117600)
+    // This ensures computeNextBarBoundary returns different results for
+    // correct vs wrong buffersQueued values (117600 vs 235200).
+    const uint64_t samplesQueued = 14u * kSamplesPerBuffer;  // = 229376
 
     // Correct samplesPlayed (pre-unqueue, 8 buffers in flight):
     //   samplesPlayed = samplesQueued - 8 * kSamplesPerBuffer
-    //                 = 163840 - 131072 = 32768
+    //                 = 229376 - 131072 = 98304
     const uint64_t spCorrect = computeSamplesPlayed(samplesQueued, kBuffersQueuedBeforeUnqueue);
     EXPECT_EQ(spCorrect, samplesQueued - 8u * kSamplesPerBuffer);
 
     // Wrong samplesPlayed (post-unqueue, only 6 buffers counted):
     //   samplesPlayed = samplesQueued - 6 * kSamplesPerBuffer
-    //                 = 163840 - 98304 = 65536
+    //                 = 229376 - 98304 = 131072
     const uint64_t spWrong = computeSamplesPlayed(
         samplesQueued, kBuffersQueuedBeforeUnqueue - kBuffersProcessed);
     EXPECT_EQ(spWrong, samplesQueued - 6u * kSamplesPerBuffer);
@@ -211,9 +216,10 @@ TEST(AudioStreamTest,
         << "Post-unqueue estimate would have fired the crossfade prematurely";
 
     // Additional: verify computeNextBarBoundary uses the same pre-unqueue value.
-    // At 90 BPM/4 beats with spCorrect = 32768:
-    //   barIndex = 32768 / 117600 = 0
-    //   nextBarBoundary = (0 + 1) * 117600 = 117600
+    // At 90 BPM/4 beats with spCorrect = 98304:
+    //   barIndex = 98304 / 117600 = 0  → nextBar = (0+1)*117600 = 117600
+    // With wrong (post-unqueue) spWrong = 131072:
+    //   barIndex = 131072 / 117600 = 1 → nextBar = (1+1)*117600 = 235200
     const uint64_t nextBar = computeNextBarBoundary(
         samplesQueued,
         kBuffersQueuedBeforeUnqueue,  // same pre-unqueue value

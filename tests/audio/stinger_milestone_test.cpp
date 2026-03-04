@@ -31,18 +31,9 @@ using ::testing::NiceMock;
 // ---------------------------------------------------------------------------
 namespace {
 
-// CityRatingTier mirrors the spec in architecture/game-design/game-progression-modes.md.
-// Village → Town transition is at 1,000 population.
-// All six tiers: Village(0), Town(1), City(2), Metropolis(3), Megalopolis(4).
-enum class CityRatingTier {
-    Village    = 0,
-    Town       = 1,
-    City       = 2,
-    Metropolis = 3,
-    Megalopolis = 4
-};
-
 // Minimal simulation state needed for the stinger decision logic.
+// CityRatingTier is the global enum from simulation_types.h (included via
+// mock_audio_system.h → IAudioSystem.h → simulation_types.h).
 struct SimulationState {
     int population{0};
     CityRatingTier cityRating{CityRatingTier::Village};

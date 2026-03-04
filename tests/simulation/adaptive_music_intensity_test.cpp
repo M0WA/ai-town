@@ -39,15 +39,6 @@ using ::testing::_;
 // ---------------------------------------------------------------------------
 namespace {
 
-// MusicIntensity enum — Phase 10 addition to the audio domain.
-// Defined here until it is promoted to src/interfaces/audio_types.h.
-// Maps directly to the three adaptive music states.
-enum class MusicIntensity {
-    CALM   = 0,
-    GROWTH = 1,
-    CRISIS = 2
-};
-
 // IMusicIntensityReceiver — minimal interface for the new setMusicIntensity
 // method, separated from IAudioSystem until the full Phase 10 interface update.
 class IMusicIntensityReceiver {

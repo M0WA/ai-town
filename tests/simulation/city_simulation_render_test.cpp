@@ -38,19 +38,9 @@ using ::testing::Return;
 // ---------------------------------------------------------------------------
 // Local test-only types — enclosed in anonymous namespace to avoid ODR
 // violations when this TU is linked alongside adaptive_music_intensity_test.cpp
-// (which defines MusicIntensity and IMusicIntensityReceiver in its own
-// anonymous namespace).
+// (which defines IMusicIntensityReceiver in its own anonymous namespace).
 // ---------------------------------------------------------------------------
 namespace {
-
-// Extended renderer interface for Phase 10 building/road render dispatch.
-//
-// IRenderer (Phase 0–9) has 5 methods: beginFrame, endFrame, drawScene,
-// loadTexture, setCamera. Phase 10 adds the mesh-placement dispatch methods
-// used by CitySimulation to drive scene graph updates.
-//
-// These methods are added here as a Phase 10 forward-declaration extension
-// until they are promoted to src/interfaces/IRenderer.h.
 
 // Tile coordinate used by placement/demolition calls.
 struct TileCoord {
@@ -62,19 +52,13 @@ struct TileCoord {
     }
 };
 
-// ServiceBuildingType mirrors the V1 service building set.
-enum class ServiceBuildingType {
-    FireStation  = 0,
-    PoliceStation = 1,
-    PowerPlant   = 2,
-    WaterTower   = 3
-};
-
-// ISimRenderer extends IRenderer with the Phase 10 simulation dispatch methods.
-// CitySimulation calls these through its injected IRenderer* during simulation
-// state changes. The concrete IrrlichtRenderer implements both.
-class ISimRenderer : public IRenderer {
+// ISimRenderer — standalone test-only interface for Phase 10 simulation
+// render dispatch (tile-space TileCoord API). Does NOT extend IRenderer to
+// avoid requiring all IRenderer pure virtuals be mocked here.
+class ISimRenderer {
 public:
+    virtual ~ISimRenderer() = default;
+
     // Place a zone building mesh at the given tile.
     virtual void placeBuildingMesh(TileCoord tile, ZoneType zone, int densityTier) = 0;
 
@@ -88,6 +72,7 @@ public:
     virtual void removeRoadMesh(TileCoord tile) = 0;
 
     // Place a service building mesh at the given tile.
+    // ServiceBuildingType is the global enum from simulation_types.h.
     virtual void placeServiceBuildingMesh(TileCoord tile, ServiceBuildingType type) = 0;
 };
 
@@ -95,32 +80,16 @@ public:
 // Uses NiceMock in fixtures to allow benign calls not under test.
 class MockSimRenderer : public ISimRenderer {
 public:
-    // IRenderer base methods
-    MOCK_METHOD(void,          beginFrame,  (), (override));
-    MOCK_METHOD(void,          endFrame,    (), (override));
-    MOCK_METHOD(void,          drawScene,   (), (override));
-    MOCK_METHOD(TextureHandle, loadTexture, (const std::string& path), (override));
-    MOCK_METHOD(void,          setCamera,   (const CameraParams& p), (override));
-
-    // ISimRenderer dispatch methods
-    MOCK_METHOD(void, placeBuildingMesh,     (TileCoord tile, ZoneType zone, int densityTier), (override));
-    MOCK_METHOD(void, removeBuildingMesh,    (TileCoord tile), (override));
-    MOCK_METHOD(void, placeRoadMesh,         (TileCoord tile), (override));
-    MOCK_METHOD(void, removeRoadMesh,        (TileCoord tile), (override));
-    MOCK_METHOD(void, placeServiceBuildingMesh, (TileCoord tile, ServiceBuildingType type), (override));
+    MOCK_METHOD(void, placeBuildingMesh,        (TileCoord tile, ZoneType zone, int densityTier), (override));
+    MOCK_METHOD(void, removeBuildingMesh,       (TileCoord tile),                                 (override));
+    MOCK_METHOD(void, placeRoadMesh,            (TileCoord tile),                                 (override));
+    MOCK_METHOD(void, removeRoadMesh,           (TileCoord tile),                                 (override));
+    MOCK_METHOD(void, placeServiceBuildingMesh, (TileCoord tile, ServiceBuildingType type),        (override));
 };
 
-// ---------------------------------------------------------------------------
-// MusicIntensity enum (Phase 10) — defined here pending promotion to
-// src/interfaces/audio_types.h.
-// ---------------------------------------------------------------------------
-enum class MusicIntensity {
-    CALM   = 0,
-    GROWTH = 1,
-    CRISIS = 2
-};
-
-// IMusicIntensityReceiver — minimal interface for the setMusicIntensity method.
+// IMusicIntensityReceiver — minimal test-only interface for setMusicIntensity.
+// Uses global MusicIntensity from audio_types.h (included via IRenderer.h →
+// simulation_types.h → audio_types.h).
 class IMusicIntensityReceiver {
 public:
     virtual ~IMusicIntensityReceiver() = default;
