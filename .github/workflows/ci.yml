@@ -61,6 +61,74 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev libglew-dev
 
+      # Step 3a: Install Pillow for asset validation (validate_assets.py check_23 uses PIL).
+      # Must run before the validate_assets step. pip install is idempotent and fast
+      # (Pillow is a pre-built wheel on ubuntu-latest). Placed here so the validate
+      # step always has Pillow available regardless of Python environment state.
+      - name: Install Pillow (asset validation dependency)
+        run: pip install Pillow
+
+      # Step 3b: Preflight — validate assets (checks 21, 22, 23).
+      # Runs BEFORE CMake configure so asset errors fail fast without wasting build time.
+      # check_21: zone loop silence-floor gate (zone_*.ogg head/tail <= -60 dBFS).
+      # check_22: WAV SFX format gate (44100 Hz, 16-bit PCM, stereo with mono exceptions).
+      # check_23: sprite sheet PNG gate (hud_sprites_ui.png is 2048x2048 RGBA;
+      #           hud_sprites_ui.dds and hud_sprites_ui_layout.json must NOT be git-tracked).
+      # If no zone/WAV/PNG assets exist yet, the checks are no-ops and exit 0.
+      - name: Preflight asset validation (checks 21, 22, 23)
+        run: python3 tools/validate_assets.py
+
+      # Step 3c: Preflight — font asset presence gates.
+      # hud_font.xml and hud_mono_font.xml are required at runtime by UIManager.
+      # Verify they exist before building to catch missing asset regressions early.
+      # If files are not yet delivered, CI fails here with a clear error message.
+      - name: Verify font assets present
+        shell: bash
+        run: |
+          if [ ! -f assets/fonts/hud_font.xml ]; then
+            echo "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          fi
+          echo "assets/fonts/hud_font.xml: present."
+          if [ ! -f assets/fonts/hud_mono_font.xml ]; then
+            echo "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          fi
+          echo "assets/fonts/hud_mono_font.xml: present."
+
+      # Step 3d: Preflight — Phase 10 audio asset presence gates.
+      # Hard-fail on core Phase 10 audio assets that must be present before build.
+      # This catches cases where an asset file was accidentally deleted or never committed.
+      # Assets checked: sfx_build_place.wav, sfx_build_demolish.wav,
+      #   stinger_milestone.ogg, ambient_day.ogg, zone_loop_residential.ogg.
+      # NOTE: stinger_*.wav are WAV per manifest; stinger_milestone here checks .ogg
+      # in case a sidecar was intended — if stinger_milestone ships as .wav only,
+      # this check is updated to .wav. Per phase-10.md, stingers are WAV PCM.
+      # Correction: stinger_milestone.wav (not .ogg) per manifest. The presence gate
+      # checks the canonical form. If the file does not exist yet (asset not yet
+      # delivered by sound-artist-opensoftal), CI fails here. This gate is intentional:
+      # Phase 10 CI requires these assets to be committed before the phase can be marked done.
+      - name: Verify Phase 10 audio assets present
+        shell: bash
+        run: |
+          failed=0
+          for asset in \
+            assets/audio/sfx_build_place.wav \
+            assets/audio/sfx_build_demolish.wav \
+            assets/audio/stinger_milestone.wav \
+            assets/audio/ambient_day.ogg \
+            assets/audio/zone_loop_residential.ogg; do
+            if [ ! -f "$asset" ]; then
+              echo "ERROR: $asset not found — Phase 10 audio asset missing."
+              failed=1
+            else
+              echo "$asset: present."
+            fi
+          done
+          if [ "$failed" -eq 1 ]; then
+            exit 1
+          fi
+
       # Step 4: Detect GCC version and write to GITHUB_ENV.
       # MUST be a SEPARATE named step before the actions/cache step.
       # $GITHUB_ENV writes are not visible within the same step.
@@ -318,6 +386,62 @@ jobs:
             exit 1
           fi
           echo "SHA lint passed."
+
+      # Step 2a: Install Pillow for asset validation (validate_assets.py check_23 uses PIL).
+      # pip install is idempotent; Pillow is a pre-built wheel on windows-latest.
+      - name: Install Pillow (asset validation dependency)
+        shell: pwsh
+        run: pip install Pillow
+
+      # Step 2b: Preflight — validate assets (checks 21, 22, 23).
+      # Same checks as build-linux (see build-linux comments for rationale).
+      # Runs before CMake configure so asset errors fail fast.
+      - name: Preflight asset validation (checks 21, 22, 23)
+        shell: pwsh
+        run: python tools/validate_assets.py
+
+      # Step 2c: Preflight — font asset presence gates.
+      # PS 5.1 compatible: use if (-not (Test-Path ...)) { exit 1 }
+      # "Test-Path ... || exit 1" is PS 7+ syntax only.
+      - name: Verify font assets present
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "assets/fonts/hud_font.xml")) {
+            Write-Error "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          }
+          Write-Host "assets/fonts/hud_font.xml: present."
+          if (-not (Test-Path "assets/fonts/hud_mono_font.xml")) {
+            Write-Error "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          }
+          Write-Host "assets/fonts/hud_mono_font.xml: present."
+
+      # Step 2d: Preflight — Phase 10 audio asset presence gates.
+      # PS 5.1 compatible: use if (-not (Test-Path ...)) { exit 1 }
+      # Checks the same 5 core Phase 10 audio assets as build-linux.
+      - name: Verify Phase 10 audio assets present
+        shell: pwsh
+        run: |
+          $assets = @(
+            "assets/audio/sfx_build_place.wav",
+            "assets/audio/sfx_build_demolish.wav",
+            "assets/audio/stinger_milestone.wav",
+            "assets/audio/ambient_day.ogg",
+            "assets/audio/zone_loop_residential.ogg"
+          )
+          $failed = $false
+          foreach ($asset in $assets) {
+            if (-not (Test-Path $asset)) {
+              Write-Error "ERROR: $asset not found — Phase 10 audio asset missing."
+              $failed = $true
+            } else {
+              Write-Host "${asset}: present."
+            }
+          }
+          if ($failed) {
+            exit 1
+          }
 
       # Step 3: Detect MSVC version via vswhere.exe.
       # MUST be a SEPARATE named step before actions/cache.
@@ -584,6 +708,54 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev libglew-dev lcov
+
+      # Step 3a: Install Pillow for asset validation (same as build-linux).
+      - name: Install Pillow (asset validation dependency)
+        run: pip install Pillow
+
+      # Step 3b: Preflight — validate assets (checks 21, 22, 23).
+      # Mirrors build-linux preflight — coverage-linux is self-contained and must run
+      # all gates independently. A failure in build-linux does not block coverage-linux
+      # from starting, so preflight must be repeated here.
+      - name: Preflight asset validation (checks 21, 22, 23)
+        run: python3 tools/validate_assets.py
+
+      # Step 3c: Preflight — font asset presence gates (same as build-linux).
+      - name: Verify font assets present
+        shell: bash
+        run: |
+          if [ ! -f assets/fonts/hud_font.xml ]; then
+            echo "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          fi
+          echo "assets/fonts/hud_font.xml: present."
+          if [ ! -f assets/fonts/hud_mono_font.xml ]; then
+            echo "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          fi
+          echo "assets/fonts/hud_mono_font.xml: present."
+
+      # Step 3d: Preflight — Phase 10 audio asset presence gates (same as build-linux).
+      - name: Verify Phase 10 audio assets present
+        shell: bash
+        run: |
+          failed=0
+          for asset in \
+            assets/audio/sfx_build_place.wav \
+            assets/audio/sfx_build_demolish.wav \
+            assets/audio/stinger_milestone.wav \
+            assets/audio/ambient_day.ogg \
+            assets/audio/zone_loop_residential.ogg; do
+            if [ ! -f "$asset" ]; then
+              echo "ERROR: $asset not found — Phase 10 audio asset missing."
+              failed=1
+            else
+              echo "$asset: present."
+            fi
+          done
+          if [ "$failed" -eq 1 ]; then
+            exit 1
+          fi
 
       # Step 4: Detect GCC version (separate step before actions/cache).
       - name: Detect GCC version

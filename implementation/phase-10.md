@@ -55,6 +55,62 @@ Deliver all V1 audio assets and the dynamic soundscape system: adaptive music wi
 - [x] Simulation render dispatch tests in `tests/simulation/city_simulation_render_test.cpp` (suite `CitySimulationRenderTest`): `NiceMock<MockSimRenderer>` + `NiceMock<MockMusicIntensityReceiver>`; covers `PlaceZone_PlacesBuildingMesh`, `PlaceRoad_PlacesRoadMesh`, `DemolishZone_RemovesBuildingMesh`, `DemolishRoad_RemovesRoadMesh`, `PlaceServiceBuilding_PlacesServiceMesh`, `DensityUpgrade_SwapsBuildingMesh` (guarded by `AITOWN_TESTING_ENABLED`), `MusicIntensity_CRISIS_OnDeficit` — **DONE**: wired via `target_sources(simulation_tests PRIVATE ...)` in `CMakeLists.txt`
 - [ ] Audio property tests using `rc::check` must print `// Reproduce with seed: 0x<hex>` on failure and add a fixed-seed regression test before closing the finding, per `architecture/testing/procedural-generation-seeds.md`. (ref: `architecture/testing/procedural-generation-seeds.md`)
 
+#### CI/CD Gates (cicd-dev-github)
+
+- [x] **Check #21 — Zone loop silence-floor gate** added to `tools/validate_assets.py`:
+  decodes each `zone_*.ogg` and verifies leading and trailing
+  `ceil(44100 × 0.1) = 4410` samples are all at or below −60 dBFS peak amplitude.
+  No-op when no zone loop assets exist yet. Evidence: `tools/validate_assets.py`
+  `check_21_zone_loop_silence_floor()` function.
+- [x] **Check #22 — WAV SFX format gate** added to `tools/validate_assets.py`:
+  validates all `sfx_*.wav`, `ui_*.wav`, and `stinger_*.wav` files are
+  44100 Hz, 16-bit PCM, stereo (with documented mono exceptions for positional SFX
+  and stingers). No-op when no WAV SFX assets exist yet. Evidence:
+  `tools/validate_assets.py` `check_22_wav_sfx_format()` function.
+- [x] **Check #23 — Sprite sheet PNG gate** added to `tools/validate_assets.py`:
+  validates `assets/textures/ui/hud_sprites_ui.png` is 2048×2048 RGBA;
+  verifies `hud_sprites_ui.dds` and `hud_sprites_ui_layout.json` are NOT
+  git-tracked. No-op when PNG does not exist yet. Evidence:
+  `tools/validate_assets.py` `check_23_sprite_sheet_png()` function.
+- [x] **Pillow install + preflight validate_assets.py** wired in `build-linux`,
+  `build-windows`, and `coverage-linux` jobs: `pip install Pillow` step followed
+  by `python3 tools/validate_assets.py` (Linux) / `python tools/validate_assets.py`
+  (Windows) before CMake configure. Evidence: `.github/workflows/ci.yml`
+  steps "Install Pillow (asset validation dependency)" and
+  "Preflight asset validation (checks 21, 22, 23)" in all three jobs.
+- [x] **Pillow install** added to `validate-assets` job (after `actions/setup-python`,
+  before `Run asset validation`). Evidence: `.github/workflows/ci.yml`
+  `validate-assets` job step "Install Pillow (asset validation dependency)".
+- [x] **Font asset presence gates** in `build-linux`, `build-windows`, and
+  `coverage-linux`: check `assets/fonts/hud_font.xml` and
+  `assets/fonts/hud_mono_font.xml` exist. Linux: `test -f` bash form;
+  Windows: PS 5.1 `if (-not (Test-Path ...)) { exit 1 }` form.
+  Evidence: `.github/workflows/ci.yml` step "Verify font assets present" in all
+  three jobs.
+- [x] **Phase 10 audio asset presence gates** in `build-linux`, `build-windows`, and
+  `coverage-linux`: hard-fail if any of the five core Phase 10 audio assets are
+  absent: `sfx_build_place.wav`, `sfx_build_demolish.wav`, `stinger_milestone.wav`,
+  `ambient_day.ogg`, `zone_loop_residential.ogg`. Linux: bash loop with `test -f`;
+  Windows: PS 5.1 `foreach` loop with `Test-Path`. Evidence: `.github/workflows/ci.yml`
+  step "Verify Phase 10 audio assets present" in all three jobs.
+- [x] **`AITOWN_TESTING_ENABLED=1`** compile definition added to `simulation_tests`
+  target via `target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)`.
+  NOT applied to the main `aitown` binary target. Evidence: `CMakeLists.txt`
+  `target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)`.
+- [x] **Phase 10 test source files** registered in `CMakeLists.txt` via
+  `target_sources(...)` (not `add_executable`):
+  - `audio_tests`: `crossfade_interrupted_formula_test.cpp`,
+    `stinger_milestone_test.cpp`, `audio_stream_bar_boundary_test.cpp`,
+    `notification_sfx_efx_bypass_test.cpp` (4 files).
+  - `simulation_tests`: `adaptive_music_intensity_test.cpp`,
+    `city_simulation_render_test.cpp` (2 files).
+  Evidence: `CMakeLists.txt` `target_sources(audio_tests PRIVATE ...)` and
+  `target_sources(simulation_tests PRIVATE ...)` blocks.
+- [x] **`ALSOFT_DRIVERS=null` and `AITOWN_HEADLESS=1`** already present on all
+  unit test steps in `build-linux`, `build-windows`, and `coverage-linux`
+  (from Phase 7 CI delivery). Audio tests run under these env vars in all three
+  jobs. Evidence: `.github/workflows/ci.yml` "Run unit tests (no display)" steps.
+
 ### Exit Criteria
 
 - Main menu music plays and transitions smoothly (1 s fade) into gameplay on start
@@ -76,6 +132,7 @@ Deliver all V1 audio assets and the dynamic soundscape system: adaptive music wi
 |---|---|
 | `sound-artist-opensoftal` | All V1 audio assets, loop authoring, loudness targeting, crossfade audibility test |
 | `sound-dev-opensoftal` | Dynamic soundscape code, music crossfade, duck state machine, vehicle engine, zone loops, UI SFX wiring |
+| `cicd-dev-github` | validate_assets.py checks 21/22/23, CI preflight gates, font/audio asset presence checks, AITOWN_TESTING_ENABLED, test source registration |
 
 ### Dependencies
 

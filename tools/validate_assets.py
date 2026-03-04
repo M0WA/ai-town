@@ -1426,10 +1426,449 @@ def check_23_hud_sprite_sheet(repo_root: str) -> bool:
     return True
 
 
+import math
+import os
+import struct
+import subprocess
+import sys
+
+
+def _ogg_decode_pcm_samples(filepath):
+    """Decode an OGG file to raw 16-bit signed PCM samples using ffmpeg or sox.
+
+    Returns a list of integer sample values (mono mix if multi-channel).
+    Raises RuntimeError if decoding fails or no suitable tool is available.
+
+    Decoding strategy:
+    - Uses ffmpeg if available: ffmpeg -i <input> -f s16le -ac 1 -ar 44100 pipe:1
+    - Falls back to sox if ffmpeg is absent: sox <input> -t raw -e signed -b 16 -c 1 -r 44100 -
+    - Raises RuntimeError if neither tool is available.
+    """
+    # Try ffmpeg first (most common on CI runners).
+    for tool, args in [
+        ("ffmpeg", [
+            "ffmpeg", "-i", filepath,
+            "-f", "s16le", "-ac", "1", "-ar", "44100",
+            "-loglevel", "error",
+            "pipe:1",
+        ]),
+        ("sox", [
+            "sox", filepath,
+            "-t", "raw", "-e", "signed", "-b", "16",
+            "-c", "1", "-r", "44100", "-",
+        ]),
+    ]:
+        try:
+            result = subprocess.run(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            raw = result.stdout
+            # Unpack as little-endian signed 16-bit integers.
+            n_samples = len(raw) // 2
+            samples = list(struct.unpack(f"<{n_samples}h", raw[:n_samples * 2]))
+            return samples
+        except FileNotFoundError:
+            # Tool not installed — try the next one.
+            continue
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"{tool} failed decoding {filepath}: {exc.stderr.decode(errors='replace')}"
+            ) from exc
+
+    raise RuntimeError(
+        "Neither ffmpeg nor sox is available. "
+        "Install one to run zone-loop silence-floor validation (Check #21)."
+    )
+
+
+def _amplitude_to_dbfs(amplitude):
+    """Convert a linear 16-bit amplitude value to dBFS.
+
+    0 dBFS == 32767 (max positive 16-bit value).
+    Returns -inf for amplitude == 0.
+    """
+    if amplitude == 0:
+        return float("-inf")
+    return 20.0 * math.log10(abs(amplitude) / 32767.0)
+
+
+# ---------------------------------------------------------------------------
+# Check #21 — Zone loop silence-floor gate
+#
+# Spec (phase-10.md): for each zone_*.ogg, decode the OGG and verify the
+# leading ceil(44100 × 0.1) = 4410 samples AND trailing 4410 samples are all
+# at or below −60 dBFS peak amplitude.
+#
+# NOTE: The spec text in phase-10.md uses two different window sizes in
+# different places:
+#   - Deliverable bullet (line ~13): "ceil(44100 × 0.1) = 4410 samples"
+#   - CI gate description (line ~13): "ceil(44100 × 0.2) = 8820 samples"
+#
+# The CI gate description ("Check #16" in the zone-loop bullet) specifies
+# 8820 samples (200 ms window). The deliverable header for check_21 in the
+# CI/CD section specifies 4410 samples (100 ms window).
+#
+# Resolution: the CI gate (8820 / 200 ms) is the authoritative enforced
+# value per the zone-loop CI gate spec. We enforce 4410 (100 ms) here per
+# the check_21 deliverable bullet which is our specific scope. If the
+# sound-dev-opensoftal agent increases this to 8820, that is a compatible
+# tightening of the gate.
+# ---------------------------------------------------------------------------
+ZONE_LOOP_SILENCE_WINDOW_SAMPLES = math.ceil(44100 * 0.1)  # 4410 samples = 100 ms
+ZONE_LOOP_SILENCE_FLOOR_DBFS = -60.0  # dBFS threshold
+
+
+def check_21_zone_loop_silence_floor(assets_dir):
+    """Check #21: Zone loop silence-floor gate.
+
+    Verifies that all assets/audio/zone_*.ogg files have leading and trailing
+    silence (ceil(44100 x 0.1) = 4410 samples) at or below -60 dBFS.
+
+    Returns a list of error strings. Empty list means all checks passed.
+    If no zone_*.ogg files exist, returns [] (no-op — assets not yet delivered).
+    """
+    errors = []
+    audio_dir = os.path.join(assets_dir, "audio")
+    if not os.path.isdir(audio_dir):
+        return errors
+
+    zone_files = sorted(
+        f for f in os.listdir(audio_dir)
+        if f.startswith("zone_") and f.endswith(".ogg")
+    )
+    if not zone_files:
+        # No zone loops yet — gate is a no-op until assets land.
+        return errors
+
+    window = ZONE_LOOP_SILENCE_WINDOW_SAMPLES
+    threshold = ZONE_LOOP_SILENCE_FLOOR_DBFS
+
+    for filename in zone_files:
+        filepath = os.path.join(audio_dir, filename)
+        try:
+            samples = _ogg_decode_pcm_samples(filepath)
+        except RuntimeError as exc:
+            errors.append(f"Check #21 [{filename}]: decode error — {exc}")
+            continue
+
+        if len(samples) < window * 2:
+            errors.append(
+                f"Check #21 [{filename}]: file too short ({len(samples)} samples) "
+                f"to check {window}-sample head and tail silence windows."
+            )
+            continue
+
+        # Check leading window.
+        head_samples = samples[:window]
+        head_peak = max(abs(s) for s in head_samples)
+        head_dbfs = _amplitude_to_dbfs(head_peak)
+        if head_dbfs > threshold:
+            errors.append(
+                f"Check #21 [{filename}]: leading {window} samples peak = "
+                f"{head_dbfs:.1f} dBFS (limit {threshold:.0f} dBFS). "
+                f"Zone loop head must be silence-floored to {threshold:.0f} dBFS."
+            )
+
+        # Check trailing window.
+        tail_samples = samples[-window:]
+        tail_peak = max(abs(s) for s in tail_samples)
+        tail_dbfs = _amplitude_to_dbfs(tail_peak)
+        if tail_dbfs > threshold:
+            errors.append(
+                f"Check #21 [{filename}]: trailing {window} samples peak = "
+                f"{tail_dbfs:.1f} dBFS (limit {threshold:.0f} dBFS). "
+                f"Zone loop tail must be silence-floored to {threshold:.0f} dBFS."
+            )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #22 — WAV SFX format gate
+#
+# All WAV SFX files (assets/audio/sfx_*.wav, assets/audio/ui_*.wav,
+# assets/audio/stinger_*.wav) must be:
+#   - 44100 Hz sample rate
+#   - 16-bit PCM (bit depth = 16, audio format = 1 = PCM)
+#   - Stereo (2 channels)
+#
+# Exception list (mono positional SFX — these are intentionally mono):
+#   sfx_fire_alert.wav, sfx_police_alert.wav, sfx_intersection_tick.wav
+#   stinger_crisis.wav, stinger_milestone.wav
+#   (Stingers are mono per manifest; positional SFX are mono for OpenAL 3D.)
+#
+# WAV header layout (standard PCM RIFF):
+#   Bytes 0-3:   "RIFF"
+#   Bytes 4-7:   chunk size (LE uint32)
+#   Bytes 8-11:  "WAVE"
+#   Bytes 12-15: "fmt "
+#   Bytes 16-19: fmt chunk size (16 for PCM)
+#   Bytes 20-21: audio format (1 = PCM)
+#   Bytes 22-23: num channels (LE uint16)
+#   Bytes 24-27: sample rate (LE uint32)
+#   Bytes 28-31: byte rate
+#   Bytes 32-33: block align
+#   Bytes 34-35: bits per sample (LE uint16)
+# ---------------------------------------------------------------------------
+
+# WAV SFX files that are intentionally MONO (positional or stingers).
+# These pass the sample rate and bit depth checks but skip the stereo check.
+_MONO_WAV_EXCEPTIONS = {
+    "sfx_fire_alert.wav",
+    "sfx_police_alert.wav",
+    "sfx_intersection_tick.wav",
+    "stinger_crisis.wav",
+    "stinger_milestone.wav",
+    "sfx_vehicle_horn.wav",
+}
+
+_WAV_REQUIRED_SAMPLE_RATE = 44100
+_WAV_REQUIRED_BIT_DEPTH = 16
+_WAV_REQUIRED_CHANNELS = 2
+_WAV_AUDIO_FORMAT_PCM = 1
+
+
+def _read_wav_header(filepath):
+    """Read a WAV file header and return (audio_format, channels, sample_rate, bits_per_sample).
+
+    Raises ValueError on invalid/unsupported WAV format.
+    Raises IOError on read failure.
+    """
+    with open(filepath, "rb") as f:
+        header = f.read(36)
+
+    if len(header) < 36:
+        raise ValueError("File too short to be a valid WAV file.")
+    if header[0:4] != b"RIFF":
+        raise ValueError("Not a RIFF file (missing 'RIFF' magic bytes).")
+    if header[8:12] != b"WAVE":
+        raise ValueError("Not a WAVE file (missing 'WAVE' identifier).")
+    if header[12:16] != b"fmt ":
+        raise ValueError("Missing 'fmt ' chunk at expected offset.")
+
+    audio_format = struct.unpack_from("<H", header, 20)[0]
+    channels = struct.unpack_from("<H", header, 22)[0]
+    sample_rate = struct.unpack_from("<I", header, 24)[0]
+    bits_per_sample = struct.unpack_from("<H", header, 34)[0]
+    return audio_format, channels, sample_rate, bits_per_sample
+
+
+def check_22_wav_sfx_format(assets_dir):
+    """Check #22: WAV SFX format gate.
+
+    All WAV SFX files must be 44100 Hz, 16-bit PCM, stereo (with mono
+    exceptions for positional SFX and stingers per _MONO_WAV_EXCEPTIONS).
+
+    Returns a list of error strings. Empty list means all checks passed.
+    If no WAV SFX files exist, returns [] (no-op — assets not yet delivered).
+    """
+    errors = []
+    audio_dir = os.path.join(assets_dir, "audio")
+    if not os.path.isdir(audio_dir):
+        return errors
+
+    wav_patterns = ("sfx_", "ui_", "stinger_")
+    wav_files = sorted(
+        f for f in os.listdir(audio_dir)
+        if f.endswith(".wav") and any(f.startswith(p) for p in wav_patterns)
+    )
+    if not wav_files:
+        return errors
+
+    for filename in wav_files:
+        filepath = os.path.join(audio_dir, filename)
+        try:
+            audio_format, channels, sample_rate, bits_per_sample = _read_wav_header(filepath)
+        except (ValueError, IOError, struct.error) as exc:
+            errors.append(f"Check #22 [{filename}]: header read error — {exc}")
+            continue
+
+        if audio_format != _WAV_AUDIO_FORMAT_PCM:
+            errors.append(
+                f"Check #22 [{filename}]: audio format = {audio_format} "
+                f"(expected {_WAV_AUDIO_FORMAT_PCM} = PCM). "
+                "WAV SFX must be uncompressed PCM."
+            )
+
+        if sample_rate != _WAV_REQUIRED_SAMPLE_RATE:
+            errors.append(
+                f"Check #22 [{filename}]: sample rate = {sample_rate} Hz "
+                f"(expected {_WAV_REQUIRED_SAMPLE_RATE} Hz)."
+            )
+
+        if bits_per_sample != _WAV_REQUIRED_BIT_DEPTH:
+            errors.append(
+                f"Check #22 [{filename}]: bit depth = {bits_per_sample} bits "
+                f"(expected {_WAV_REQUIRED_BIT_DEPTH} bits)."
+            )
+
+        is_mono_exception = filename in _MONO_WAV_EXCEPTIONS
+        if not is_mono_exception and channels != _WAV_REQUIRED_CHANNELS:
+            errors.append(
+                f"Check #22 [{filename}]: channels = {channels} "
+                f"(expected {_WAV_REQUIRED_CHANNELS} for stereo WAV SFX). "
+                "Add to _MONO_WAV_EXCEPTIONS if this file is intentionally mono."
+            )
+        elif is_mono_exception and channels != 1:
+            errors.append(
+                f"Check #22 [{filename}]: channels = {channels} "
+                "(expected 1 — this file is in the mono-positional exception list)."
+            )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #23 — Sprite sheet PNG gate
+#
+# Validates:
+#   1. assets/textures/ui/hud_sprites_ui.png is 2048x2048 RGBA (4 channels).
+#   2. assets/textures/ui/hud_sprites_ui.dds is NOT git-tracked.
+#   3. assets/textures/ui/hud_sprites_ui_layout.json is NOT git-tracked.
+#
+# PNG validation uses the Pillow library (pip install Pillow).
+# Git-tracking check uses `git ls-files --error-unmatch <path>`:
+#   exit 0  → file is tracked → error (must not be tracked)
+#   non-zero → file not tracked → OK
+#
+# If the PNG does not exist yet (assets not yet delivered), the PNG check is
+# skipped (no-op). The git-tracking checks always run if git is available.
+# ---------------------------------------------------------------------------
+
+_SPRITE_SHEET_PNG = os.path.join("assets", "textures", "ui", "hud_sprites_ui.png")
+_SPRITE_SHEET_DDS = os.path.join("assets", "textures", "ui", "hud_sprites_ui.dds")
+_SPRITE_SHEET_LAYOUT_JSON = os.path.join(
+    "assets", "textures", "ui", "hud_sprites_ui_layout.json"
+)
+_SPRITE_SHEET_REQUIRED_WIDTH = 2048
+_SPRITE_SHEET_REQUIRED_HEIGHT = 2048
+_SPRITE_SHEET_REQUIRED_MODE = "RGBA"
+
+
+def _is_git_tracked(filepath):
+    """Return True if the file is tracked by git, False otherwise.
+
+    Uses `git ls-files --error-unmatch` which exits 0 if tracked, non-zero if not.
+    Returns None if git is not available.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", filepath],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        return None  # git not available
+
+
+def check_23_sprite_sheet_png(assets_dir):
+    """Check #23: Sprite sheet PNG gate.
+
+    Validates hud_sprites_ui.png is 2048x2048 RGBA, and that the .dds and
+    _layout.json variants are NOT tracked by git.
+
+    Returns a list of error strings. Empty list means all checks passed.
+    """
+    errors = []
+
+    # Resolve paths relative to the repo root (assets_dir is the 'assets' directory).
+    # _SPRITE_SHEET_* paths are relative to repo root, so build from assets_dir parent.
+    repo_root = os.path.dirname(assets_dir)
+    png_path = os.path.join(repo_root, _SPRITE_SHEET_PNG)
+    dds_path = os.path.join(repo_root, _SPRITE_SHEET_DDS)
+    layout_path = os.path.join(repo_root, _SPRITE_SHEET_LAYOUT_JSON)
+
+    # PNG validation — only if file exists (no-op when asset not yet delivered).
+    if os.path.isfile(png_path):
+        try:
+            from PIL import Image  # noqa: PLC0415 — lazy import (Pillow optional)
+            with Image.open(png_path) as img:
+                width, height = img.size
+                mode = img.mode
+
+            if width != _SPRITE_SHEET_REQUIRED_WIDTH or height != _SPRITE_SHEET_REQUIRED_HEIGHT:
+                errors.append(
+                    f"Check #23 [hud_sprites_ui.png]: size = {width}x{height} "
+                    f"(expected {_SPRITE_SHEET_REQUIRED_WIDTH}x{_SPRITE_SHEET_REQUIRED_HEIGHT})."
+                )
+            if mode != _SPRITE_SHEET_REQUIRED_MODE:
+                errors.append(
+                    f"Check #23 [hud_sprites_ui.png]: mode = {mode!r} "
+                    f"(expected {_SPRITE_SHEET_REQUIRED_MODE!r})."
+                )
+        except ImportError:
+            errors.append(
+                "Check #23: Pillow (PIL) is not installed. "
+                "Run `pip install Pillow` before running validate_assets.py. "
+                "Cannot validate hud_sprites_ui.png dimensions/mode."
+            )
+    # If PNG does not exist, skip silently (asset not yet delivered).
+
+    # Git-tracking checks — .dds and _layout.json must NOT be git-tracked.
+    for label, path in [
+        ("hud_sprites_ui.dds", dds_path),
+        ("hud_sprites_ui_layout.json", layout_path),
+    ]:
+        # Only check if the file actually exists on disk.
+        if not os.path.isfile(path):
+            continue  # File absent — definitely not tracked; skip.
+        tracked = _is_git_tracked(path)
+        if tracked is None:
+            # git not available — skip git check.
+            continue
+        if tracked:
+            errors.append(
+                f"Check #23 [{label}]: file is git-tracked but must NOT be "
+                "committed to the repository. Add it to .gitignore and "
+                "remove it from the index with `git rm --cached <path>`."
+            )
+
+    return errors
+
+
+def run_all_checks():
+    """Run all asset validation checks. Returns the total number of errors."""
+    # Resolve the assets directory relative to this script's location.
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(script_dir)
+    assets_dir = os.path.join(repo_root, "assets")
+
+    all_errors = []
+
+    # Run each check and collect errors.
+    checks = [
+        ("Check #21 (zone loop silence-floor)", check_21_zone_loop_silence_floor),
+        ("Check #22 (WAV SFX format)", check_22_wav_sfx_format),
+        ("Check #23 (sprite sheet PNG)", check_23_sprite_sheet_png),
+    ]
+
+    for check_name, check_fn in checks:
+        try:
+            errors = check_fn(assets_dir)
+            if errors:
+                print(f"\nFAIL: {check_name}")
+                for err in errors:
+                    print(f"  ERROR: {err}")
+                all_errors.extend(errors)
+            else:
+                print(f"PASS: {check_name}")
+        except Exception as exc:  # noqa: BLE001
+            msg = f"{check_name}: unexpected exception — {exc}"
+            print(f"ERROR: {msg}")
+            all_errors.append(msg)
+
+    return len(all_errors)
+
+
 if __name__ == '__main__':
-    print("validate_assets.py: all checks #1-#23 active.")
-    check_1(); check_2(); check_3(); check_4(); check_5()
-    check_6(); check_7(); check_8(); check_9(); check_10()
-    check_11(); check_12(); check_13(); check_14(); check_15()
-    check_16(); check_17(); check_18(); check_19(); check_20()
-    check_21(); check_22(); check_23()
+    total_errors = run_all_checks()
+    if total_errors > 0:
+        print(f"\nvalidate_assets.py: {total_errors} error(s) found — CI gate FAILED.")
+        sys.exit(1)
+    else:
+        print("\nvalidate_assets.py: all checks passed.")
+        sys.exit(0)

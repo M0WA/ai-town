@@ -455,6 +455,18 @@ add_executable(simulation_tests
     tests/simulation/undo_system_test.cpp        # Phase 6 stub — simulation-side undo only
     tests/simulation/manual_rng_test.cpp
 )
+# Phase 10: add adaptive music intensity and city simulation render tests via
+# target_sources (not add_executable) to preserve the Phase 0 executable definition.
+# adaptive_music_intensity_test.cpp — tests music intensity state machine driven by
+#   CitySimulation state (crisis/growth/calm routing and forced-Calm time-of-day override).
+# city_simulation_render_test.cpp — tests CitySimulation render-loop integration
+#   (headless render tick with MockRenderer, time-of-day propagation to AudioSystem).
+# Both files are Phase 10 deliverables from sound-dev-opensoftal and are conditionally
+# compiled with AITOWN_TESTING_ENABLED=1 (see target_compile_definitions below).
+target_sources(simulation_tests PRIVATE
+    tests/simulation/adaptive_music_intensity_test.cpp
+    tests/simulation/city_simulation_render_test.cpp
+)
 target_link_libraries(simulation_tests PRIVATE
     aitown_sim
     GTest::gtest_main
@@ -474,67 +486,25 @@ target_include_directories(simulation_tests PRIVATE
 )
 aitown_add_tests(simulation_tests LABEL "unit" DISCOVERY_TIMEOUT 60)
 
-# Phase 9b: extend simulation_tests with audio callback tests for placeRoad SFX.
-# Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(simulation_tests ...)
-# again — that would produce a duplicate target error.
-# (ref: implementation/phase-9b.md Deliverable J — CitySimulation_PlaceRoad_FiresSFXRoadBuild)
+# Phase 9b: audio callback tests for placeRoad SFX.
 target_sources(simulation_tests PRIVATE
     tests/simulation/audio_sim_test.cpp
 )
 
-# Phase 10: extend simulation_tests with adaptive music intensity test.
-# Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(simulation_tests ...) again.
-# This test exercises CitySimulation::update() with StrictMock<MockAudioSystem> to verify
-# setMusicIntensity() is called with the correct MusicIntensity tier when simulation state changes.
-# Owner: sound-dev-opensoftal (wiring CitySimulation::update() -> audioSystem->setMusicIntensity()).
-# Thresholds from architecture/game-design/economy-model.md §Music Intensity Tiers.
+# Phase 10: simulation test sources (adaptive music intensity + render dispatch).
 target_sources(simulation_tests PRIVATE
     tests/simulation/adaptive_music_intensity_test.cpp
-)
-
-# Phase 10: extend simulation_tests with rendering method unit tests.
-# Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(simulation_tests ...) again.
-# CitySimulationRenderTest fixture uses NiceMock<MockRenderer> (per phase-10.md — not StrictMock)
-# so tests focus on verifying the correct mesh-placement call without exhaustive EXPECT_CALLs for
-# every audio side-effect on the same code path.
-# Seven test cases: PlaceZone_SpawnsBuilding, PlaceRoad_SpawnsRoadMesh,
-# PlaceServiceBuilding_SpawnsMesh, DemolishZoneTile_RemovesBuilding,
-# DemolishRoadTile_RemovesRoadMesh, DemolishServiceBuilding_RemovesMesh,
-# DensityUpgrade_SwapsBuildingMesh.
-# (ref: implementation/phase-10.md §Rendering method unit tests in simulation_tests,
-#       architecture/testing/testability-architecture.md §Phase 10 simulation_tests canonical test names)
-target_sources(simulation_tests PRIVATE
     tests/simulation/city_simulation_render_test.cpp
 )
 
-# Phase 10: AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier()
-# for the CitySimulation_DensityUpgrade_SwapsBuildingMesh test case.
-# This compile definition MUST NOT be added to the aitown binary target — the
-# testForceUnlockDensityTier() method must not appear in production builds.
-# (ref: implementation/phase-10.md — testForceUnlockDensityTier decision 2026-03-04)
-target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
-
-# Coverage-gap tests: placeServiceBuilding variants, undoLastAction road count,
-# difficulty constructors, smoothstep, getOutstandingDebt with loans, etc.
-# Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(simulation_tests ...) again.
+# Coverage-gap tests.
 target_sources(simulation_tests PRIVATE
     tests/simulation/simulation_coverage_gap_test.cpp
 )
 
-# AITOWN_TESTING_ENABLED: enables testForceUnlockDensityTier() in CitySimulation
-# (bypasses 3-consecutive-month density unlock gate for deterministic unit tests).
-# Must be set on simulation_tests only — never on production targets.
+# Phase 10: AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier().
+# MUST be on simulation_tests ONLY — never on the main aitown binary target.
 target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
-
-# ----------------------------------------------------------------------------
-# Phase 10 simulation test sources — added via target_sources to avoid
-# duplicate add_executable. Per CLAUDE.md memory note: use target_sources(),
-# never add_executable() or aitown_add_tests() again on existing targets.
-# ----------------------------------------------------------------------------
-target_sources(simulation_tests PRIVATE
-    tests/simulation/adaptive_music_intensity_test.cpp    # Phase 10: adaptive music intensity state machine
-    tests/simulation/city_simulation_render_test.cpp      # Phase 10: render dispatch for placement/demolition
-)
 
 # ----------------------------------------------------------------------------
 # terrain_tests — terrain generator property tests and fixed-seed regression
@@ -668,6 +638,34 @@ target_sources(ui_tests PRIVATE
 # ----------------------------------------------------------------------------
 add_executable(audio_tests
     tests/audio/audio_smoke_test.cpp
+)
+# Phase 10: add the four audio unit tests via target_sources (not add_executable) to
+# preserve the Phase 0 executable definition per the target_sources policy.
+#
+# crossfade_interrupted_formula_test.cpp — Crossfade_InterruptedFormula_NoDomainErrorAtBoundary:
+#   verify t_offset at current_gain_out=1.0 returns 0 and at 0.0 returns 1 with no arccos
+#   domain error; exercises the constant-power interrupted crossfade math.
+#
+# stinger_milestone_test.cpp — StingerMilestone_OnlyAtCityRatingTransition_NotRawPopulation:
+#   100K population without City Rating transition → stinger NOT triggered;
+#   1K population at Village→Town transition → stinger triggered.
+#
+# audio_stream_bar_boundary_test.cpp — AudioStream_BarBoundary_UsesConsistentBuffersQueuedPerWake
+#   and AudioStream_BarBoundary_StreamStart_NoFalseFire:
+#   verifies AL_BUFFERS_QUEUED is read once per wake; same value passed to both
+#   computeSamplesPlayed() and computeNextBarBoundary(); crossfade condition does
+#   not fire when m_samplesQueued < buffersQueued * kSamplesPerBuffer and
+#   m_nextBarBoundary == 0.
+#
+# notification_sfx_efx_bypass_test.cpp — NotificationSFX_EFXBypass_DirectFilterSetToNull:
+#   verifies alSourcei(src, AL_DIRECT_FILTER, AL_FILTER_NULL) is called on each of the
+#   10 non-positional notification-category SFX; verifies sfx_fire_alert and
+#   sfx_police_alert do NOT have EFX bypass applied.
+target_sources(audio_tests PRIVATE
+    tests/audio/crossfade_interrupted_formula_test.cpp
+    tests/audio/stinger_milestone_test.cpp
+    tests/audio/audio_stream_bar_boundary_test.cpp
+    tests/audio/notification_sfx_efx_bypass_test.cpp
 )
 target_link_libraries(audio_tests PRIVATE
     aitown_audio
