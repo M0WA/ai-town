@@ -3,7 +3,11 @@
 // Phase 8 notification system tests -- two fixtures:
 //
 //   NotificationManagerTest_Phase8: NiceMock<MockUIBackend> + NiceMock<MockCitySimulation>
-//     + ManualClock. Tests NotificationManager in isolation (constructed directly).
+//     + ManualClock + NiceMock<MockAudioSystem>. Tests NotificationManager in isolation
+//     (constructed directly). Phase 10: NiceMock<MockAudioSystem> passed as the 4th
+//     constructor parameter (IAudioSystem*) so toast audio calls do not fail.
+//     APPROVED EXCEPTION: NiceMock<MockAudioSystem> (not StrictMock) — this fixture
+//     does not assert audio call counts; it tests notification lifecycle only.
 //
 //   UIManagerDeficitIntegrationTest: NiceMock<MockUIBackend> + NiceMock<MockCitySimulation>
 //     + NiceMock<MockAudioSystem> + ManualClock. Tests UIManager deficit-polling chain.
@@ -45,15 +49,22 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
 
-        notifMgr_ = std::make_unique<NotificationManager>(&backend_, &sim_, &clock_);
+        // Phase 10: NotificationManager gains a 4th IAudioSystem* constructor parameter
+        // so postCritical()/postNormal() can call m_audio->playSound(UI_TOAST, ...).
+        // NiceMock suppresses unexpected call warnings — this fixture does not assert
+        // audio call counts; it tests notification lifecycle only.
+        notifMgr_ = std::make_unique<NotificationManager>(&backend_, &sim_, &clock_, &audio_);
     }
 
     void TearDown() override {
+        // Destroy NotificationManager before mock destructors run — prevents any
+        // destructor-path callback into audio_ after it is torn down.
         notifMgr_.reset();
     }
 
     NiceMock<MockUIBackend>      backend_;
     NiceMock<MockCitySimulation> sim_;
+    NiceMock<MockAudioSystem>    audio_;
     ManualClock                  clock_;
     std::unique_ptr<NotificationManager> notifMgr_;
     uint32_t                     nextHandle_{100};

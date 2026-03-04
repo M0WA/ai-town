@@ -142,6 +142,34 @@ private:
         float       population{0.0f};    // actual pop (float for smooth growth)
         float       desirability{static_cast<float>(SimulationConstants::desirability_base_value)};
         bool        firstDesirabilityTick{true};  // grace: skip service penalty on first tick
+
+        // Phase 10 per-tile audio transition flags.
+        // Each flag fires its corresponding SFX exactly once per coverage-loss event
+        // (not once per tick while uncovered) and resets silently when coverage is restored.
+        //
+        // wasPowered: true when this tile was power-covered on the previous tick.
+        //   CitySimulation::tick() fires SFX_POWER_OUT when wasPowered==true and the
+        //   current BFS pass finds the tile unpowered; then sets wasPowered=false.
+        //   Restored to true (no SFX) when power coverage returns.
+        //   Initialized true so that the very first brownout on a powered tile is audible.
+        bool wasPowered{true};
+
+        // wasWaterCovered: true when this tile was water-covered on the previous tick.
+        //   CitySimulation::tick() fires SFX_WATER_OUT when wasWaterCovered==true and
+        //   the current water-coverage pass finds the tile uncovered; then sets
+        //   wasWaterCovered=false. Restored to true (no SFX) when coverage returns.
+        //   Initialized true so that the first water-loss event on a covered tile is audible.
+        bool wasWaterCovered{true};
+
+        // alertFired: true while this tile is in an active service-alert episode
+        //   (desirability <= SimulationConstants::service_alert_desirability_threshold).
+        //   CitySimulation::tick() fires SFX_FIRE_ALERT or SFX_POLICE_ALERT (Fire takes
+        //   priority when both stations cover the tile) when alertFired==false and
+        //   desirability drops to or below the threshold; then sets alertFired=true.
+        //   Reset to false when desirability recovers above the threshold, allowing
+        //   the alert to re-fire in a future crisis episode.
+        //   Must be serialised in the save file (Phase 11) to prevent spurious re-fire on load.
+        bool alertFired{false};
     };
 
     struct LoanEntry {

@@ -82,6 +82,15 @@ Verify bar count in the DAW before export. Export to sample-accurate length. A s
 is even 1 sample long or short will accumulate crossfade drift; this will be caught by
 `validate_assets.py` Check #14 duration tolerance check in Phase 5.
 
+**`assets/audio/music_bar_counts.md` (SA-3 repository artifact)**: before authoring any
+production stem OGG file, commit a plain-text file at `assets/audio/music_bar_counts.md`
+listing the confirmed bar count for each of the 8 music files. If this file was produced
+during Phase 4, confirm it exists in the repository. The required file format is specified
+in `architecture/audio-architecture/v1-audio-asset-manifest.md` "Phase 10 QA Delivery
+Artifacts" section (`assets/audio/music_bar_counts.md`). The locked values are those in
+the SA-3 table above. Non-integer bar counts or values that deviate from the SA-3 targets
+are a delivery failure.
+
 ---
 
 ## JSON Sidecar Requirement

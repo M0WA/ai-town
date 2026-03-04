@@ -251,6 +251,39 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
                 "FontTool or any compatible bitmap font generator (recommended: 18px).\n");
         }
     }
+
+    // --- Load monospace bitmap font for numeric HUD elements ---
+    //
+    // hud_mono_font.xml is a monospace face applied selectively to numeric
+    // IGUIStaticText elements (treasury balance, population count, tax rate
+    // fields, monthly revenue/expense, density unlock progress) via
+    // element->setOverrideFont(getMonoFont()) after addStaticText().
+    //
+    // Rationale: a monospace face applied to numeric readouts prevents layout
+    // jitter as digits change (e.g. "1,000" vs "9,000"), while keeping
+    // proportional hud_font.xml for labels and panel titles (better legibility
+    // at small sizes in compact panels such as Query/Inspector and Tax Rate).
+    //
+    // Graceful degradation: if the file is absent the environment default
+    // (hud_font.xml, or the built-in 8px font if that also failed) is retained
+    // for numeric elements; a warning is emitted but the game continues.
+    // Callers of getMonoFont() must null-check before calling setOverrideFont().
+    {
+        irr::gui::IGUIFont* monoFont =
+            m_guiEnv->getFont("assets/fonts/hud_mono_font.xml");
+        if (monoFont) {
+            m_monoFont = monoFont;
+            // IGUIEnvironment::getFont() caches fonts internally — the returned
+            // pointer is owned by the environment; do NOT call grab() or drop().
+        } else {
+            fprintf(stderr,
+                "[IrrlichtUIBackend] WARNING: assets/fonts/hud_mono_font.xml not found — "
+                "falling back to default font for numeric HUD elements. "
+                "Treasury balance, population count, and tax rate fields will use "
+                "the proportional font until hud_mono_font.xml is placed at "
+                "assets/fonts/hud_mono_font.xml.\n");
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

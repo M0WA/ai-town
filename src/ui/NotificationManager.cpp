@@ -13,6 +13,8 @@
 
 #include "src/ui/NotificationManager.h"
 #include "src/platform/input_event.h"  // InputEvent — full include here, not in the header
+#include "src/interfaces/IAudioSystem.h"  // full include in .cpp for m_audio->playSound() calls
+#include "src/interfaces/sound_ids.h"     // UI_TOAST = SoundId 23
 
 #include <algorithm>
 #include <cstddef>
@@ -28,10 +30,12 @@ namespace {
 // ----------------------------------------------------------------
 // Constructor
 // ----------------------------------------------------------------
-NotificationManager::NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock)
+NotificationManager::NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock,
+                                         IAudioSystem* audio)
     : m_backend(backend)
     , m_sim(sim)
     , m_clock(clock)
+    , m_audio(audio)
 {}
 
 // ----------------------------------------------------------------

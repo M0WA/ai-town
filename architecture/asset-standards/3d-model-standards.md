@@ -195,6 +195,75 @@ Each building set must include:
 
 Variants sharing the same zone-tier slot (e.g. `res_low_01` and `res_low_02`) share the same wall module atlas cell in the 2048×2048 building atlas — they differ in mesh geometry only. See `architecture/asset-standards/building-atlas-layout.md` for the cell assignment table.
 
+#### Service Building Model Standards
+
+Service buildings (Fire Station, Police Station, Power Plant, Water Tower) are individually
+placed infrastructure objects, not zone buildings. They are **not** part of the modular kit
+system and do **not** participate in the zone/tier naming convention. Each service building
+type requires its own set of LOD meshes, collision mesh, and `.meta` sidecar.
+
+**Naming convention**: `svc_<type>_lod<N>.b3d` where `<type>` is one of:
+`fire_station`, `police_station`, `power_plant`, `water_tower`.
+
+Examples:
+
+- `svc_fire_station_lod0.b3d`
+- `svc_power_plant_lod1.b3d`
+- `svc_water_tower_col.obj`
+
+**LOD strategy**: Service buildings use the **small building / props** LOD category
+(height_floors = 2 for all V1 service buildings — all are single or double-storey
+structures). This means:
+
+- LOD0: 500–1500 tris (full detail)
+- LOD1: 100–300 tris (reduced)
+- LOD2: `_billboard.dds` (1024×128 DXT5 sRGB, 8-direction bake at 45° below horizontal).
+  No `_lod2.b3d` geometry shell — `height_floors = 2 <= 3` boundary applies.
+
+**Floor count**: All four V1 service building types use `height_floors = 2` in their
+`.meta` sidecar. This satisfies the `height_floors <= 3` condition for billboard LOD2.
+
+**LOD distance thresholds** (small buildings/props category):
+
+| Threshold | Distance |
+|---|---|
+| LOD0→LOD1 switch-out | > 30 m |
+| LOD0→LOD1 switch-in | < 25 m |
+| LOD1→LOD2 switch-out | > 100 m |
+| LOD1→LOD2 switch-in | < 90 m |
+
+**`.meta` sidecar fields** (mandatory for all four service building types):
+
+```json
+{
+  "category": "small_building",
+  "height_floors": 2,
+  "atlas_cell": { "row": 3, "col": 2 },
+  "lod_distances": [25.0, 90.0, 200.0]
+}
+```
+
+`atlas_cell` assignments for service buildings use the two reserved cells in the building
+atlas (row 3, col 2 and row 3, col 3). Service buildings share atlas cell (3, 2) for all
+four types in V1 — they share a common material palette (concrete, glass, utility panels).
+A second reserved cell (3, 3) is available if a distinct material per service type is
+required in a later phase. This assignment must be confirmed by `graphics-artist-2d-texture`
+during Phase 9 UV authoring before atlas cell usage is locked.
+
+**Collision mesh**: `svc_<type>_col.obj` — single convex hull, maximum 24 triangles,
+no top/bottom caps, flat at Y=0. All four service building types use rectangular footprints
+and require the `_col.obj` single-convex dispatch path.
+
+**Phase delivery**: Service building 3D models are **Phase 9 deliverables**, alongside
+the zone building sets. They are not required for Phase 10 to start.
+
+**Phase 10 audio note**: `sfx_fire_alert` and `sfx_police_alert` (positional SFX) fire at
+`vec3{tile.tileX, 0.0f, tile.tileZ}` — a tile-coordinate position derived from the
+simulation state, not from a rendered service building scene node. Vehicle engine SFX
+similarly use agent positions managed by `AudioSystem`, not scene node transforms. Phase 10
+audio wiring is therefore fully decoupled from service building and vehicle 3D model
+delivery. No 3D model asset is on the Phase 10 critical path.
+
 #### Modular Building Kit
 
 - Buildings assembled from reusable mesh modules: base, mid-floor, roof, facade details

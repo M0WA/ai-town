@@ -87,6 +87,32 @@ dismiss methods documented elsewhere in this spec:
   NotificationManager). Phase 3 stub: no-op setter body; `m_modalActive` stored but only checked in
   Phase 8 auto-pause implementation.
 
+## NotificationManager Constructor
+
+**Full constructor signature (Phase 10)**:
+
+```cpp
+NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock, IAudioSystem* audio)
+```
+
+All four parameters are stored as non-owning pointers. `m_audio` is the `IAudioSystem*` added in
+Phase 10. Before Phase 10, `nullptr` is passed; every audio call site is guarded by `if (m_audio)`.
+
+`IAudioSystem` is forward-declared in `NotificationManager.h` — the full header is included only in
+`NotificationManager.cpp`. This keeps the `src/ui/` translation units free of audio headers.
+
+**Phase 10 audio call sites in NotificationManager**:
+
+- `postCritical()`: calls `m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f)` immediately
+  after the toast element is made visible (`m_backend->setElementVisible(handle, true)`). Fires
+  once per toast display — not once per enqueue. If the toast is queued but not yet visible (because
+  the max simultaneous limit is reached), the sound does NOT fire until the toast actually appears.
+- `postNormal()`: same call site pattern as `postCritical()`.
+- Both calls are non-positional (`AL_SOURCE_RELATIVE = AL_TRUE`) with EFX bypass
+  (`AL_DIRECT_FILTER = AL_FILTER_NULL`), consistent with all UI SFX.
+
+`UI_TOAST` = `SoundId 23` (`ui_toast.wav`).
+
 ## Testing Note: Mock Selection for NotificationManager Unit Tests
 
 The `NotificationManager` constructor takes `ICitySimulation*` (not `ISimulationPauser*`). The sole reason
@@ -106,9 +132,16 @@ The `MockSimulationPauser` class is available for tests of other components that
 directly (e.g. components that only need pause/resume control and have no dependency on simulation-state
 query methods).
 
+**Phase 10 test update**: All existing `NotificationManager` test fixtures that construct the class
+directly must pass a fourth `IAudioSystem*` argument. Tests that do not exercise toast audio may pass
+`nullptr`. Tests that verify `ui_toast` SFX behaviour must inject `NiceMock<MockAudioSystem>`
+(from `tests/simulation/mock_audio_system.h`) as the fourth argument.
+
 Cross-references:
 
 - `architecture/testing/testability-architecture.md` — `ICitySimulation` definition (extends
-  `ISimulationPauser`), `MockCitySimulation`, and `MockSimulationPauser` source locations.
+  `ISimulationPauser`), `MockCitySimulation`, `MockSimulationPauser`, and `MockAudioSystem` source
+  locations.
 - `src/interfaces/ISimulationPauser.h` — minimal `setPaused(bool)` interface.
 - `src/interfaces/ICitySimulation.h` — full simulation interface including `getConsecutiveDeficitMonths()`.
+- `architecture/ui-ux/hud-layout.md` — Phase 10 Audio Wiring section (`ui_toast` call site spec).

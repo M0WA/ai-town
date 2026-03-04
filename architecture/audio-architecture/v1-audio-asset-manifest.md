@@ -184,6 +184,211 @@ All four format checks (check_16–check_19, Phase 5) require the `mutagen` Pyth
 
 **Check number summary**: Check #14 (music JSON sidecar) and Check #15 (`.meta` sidecar, Phase 9 stub) were assigned in Phase 4. Check #16 (`music_*.ogg`/`ambient_*.ogg` sample rate and channel count), Check #17 (`sfx_vehicle_engine_*.ogg` duration and format), Check #18 (`sfx_zone_*.ogg` duration and format), and Check #19 (`stinger_*.wav` mono PCM) are assigned above and implemented in Phase 5. Check #20 is reserved. Check #21 (`sfx_zone_*.ogg` silence-floor amplitude gate — Zone loop silence floor, Phase 10 — reserved/Planned) is reserved for Phase 10. References in other spec files to specific check numbers (e.g., "validate_assets.py Check #14" in the ambient bed sidecar exemption blockquote above) remain valid. Phase 10 implementers MUST assign the zone-loop silence-floor gate to Check #21 and MUST NOT reuse Check #17 or any other check number already assigned to a prior phase.
 
+## Phase 10 QA Delivery Artifacts
+
+These files are mandatory QA artifacts that must be committed to the repository before
+Phase 10 exit. They are NOT runtime game assets and are NOT loaded by `AudioSystem` at
+any point. Their sole purpose is to provide auditable evidence that authoring decisions
+(harmonic compatibility, ambient crossfade smoothness, zone loop boundary quality) have
+been verified by the sound artist.
+
+### Music Crossfade Audibility Gate Artifacts
+
+Three files must be committed to `assets/audio/crossfade_demos/` as a unit (all three
+in the same commit/PR as the music stem OGG files):
+
+#### (a) `assets/audio/crossfade_demos/crossfade_demo_calm_to_growth.wav`
+
+**Format**: WAV PCM, 44100 Hz, 16-bit, stereo (2 channels). Stereo is required so the
+constant-power crossfade curve (which sums two stereo stems) is faithfully preserved
+in the QA render — a mono downmix would mask stereo-field differences.
+
+**Duration**: exactly 15 s (660,600 stereo PCM frames at 44100 Hz).
+
+**Content**: Render of `music_calm_01` from t=0 to t=15 s with a 3 s constant-power
+crossfade into `music_growth_01` beginning at t=6 s and completing at t=9 s:
+
+- t=0–6 s: `music_calm_01` at gain 1.0 (outgoing stem, no crossfade yet).
+- t=6–9 s: constant-power overlap — `music_calm_01` fades out
+  (`gain_out = cos(t_cf × π/2)`) while `music_growth_01` fades in
+  (`gain_in = sin(t_cf × π/2)`), where `t_cf` runs 0→1 over the 3 s window.
+- t=9–15 s: `music_growth_01` at gain 1.0 (incoming stem, crossfade complete).
+
+**Purpose**: demonstrates within-tier gameplay harmonic compatibility. Both stems are in
+A natural minor (Aeolian mode, root A) at 90 BPM — they must be simultaneously audible
+from t=6 s to t=9 s with no harmonic clash or audible pop.
+
+**Loudness**: The combined render will read louder than −16 LUFS at the crossfade
+midpoint (where both stems contribute simultaneously). Do NOT apply a limiter or
+normalise this file — the raw render is the QA artifact. Loudness normalisation of the
+demo file is NOT required and would obscure the crossfade gain curve.
+
+**True peak ceiling**: apply a −0.1 dBTP true-peak limiter on the final render only to
+prevent WAV clipping; do NOT normalise for loudness.
+
+#### (b) `assets/audio/crossfade_demos/crossfade_demo_mainmenu_to_calm.wav`
+
+**Format**: WAV PCM, 44100 Hz, 16-bit, stereo (2 channels). Same rationale as (a).
+
+**Duration**: exactly 15 s.
+
+**Content**: same crossfade timing as (a), but using `music_main_menu_01` as the
+outgoing stem and `music_calm_01` as the incoming stem:
+
+- t=0–6 s: `music_main_menu_01` at gain 1.0.
+- t=6–9 s: constant-power crossfade (`music_main_menu_01` out, `music_calm_01` in).
+- t=9–15 s: `music_calm_01` at gain 1.0.
+
+**Purpose**: demonstrates cross-context (main-menu-to-gameplay) harmonic compatibility.
+
+**Loudness / true peak ceiling**: same policy as (a).
+
+#### (c) `assets/audio/crossfade_demos/crossfade_demo_qa.md`
+
+A plain-text QA sign-off document. Must contain all of the following fields:
+
+1. **Listener sign-offs**: names of all listeners (minimum: `sound-artist-opensoftal`
+   plus at least one other team member) who listened through both WAV demos (a) and (b)
+   in full.
+2. **Harmonic verdict**: explicit statement that no harmonic clash, audible pop, or
+   abrupt transition was detected in either demo.
+3. **Confirmed root key and mode**: `A natural minor (Aeolian mode), root A` — the
+   locked V1 root key per `architecture/audio-architecture/dynamic-soundscape.md` and
+   `architecture/audio-architecture/production-briefs/music-production-brief.md`.
+4. **Per-stem bar counts** for all 8 music files:
+
+   | File | Bars | Duration at 90 BPM |
+   |---|---|---|
+   | `music_main_menu_01.ogg` | 48 | 128.00 s |
+   | `music_main_menu_02.ogg` | 48 | 128.00 s |
+   | `music_calm_01.ogg` | 36 | 96.00 s |
+   | `music_calm_02.ogg` | 36 | 96.00 s |
+   | `music_growth_01.ogg` | 36 | 96.00 s |
+   | `music_growth_02.ogg` | 36 | 96.00 s |
+   | `music_crisis_01.ogg` | 36 | 96.00 s |
+   | `music_crisis_02.ogg` | 36 | 96.00 s |
+
+5. **Sign-off date**.
+
+A blocking objection (harmonic clash, audible pop, wrong key, incorrect bar count) must
+be filed as a PR comment; the artist must revise the demo WAV files and update
+`crossfade_demo_qa.md` before the PR can merge. This document is the approval record —
+no separate review meeting is required.
+
+### `assets/audio/music_bar_counts.md`
+
+This file is the Phase 4 SA-3 deliverable (bar-count confirmation). It must be
+committed before any production music stem OGG file is authored or delivered. If it was
+produced during Phase 4, confirm it exists in the repository and reference it in the
+Phase 10 PR description — do not re-author it.
+
+**Required format**: one line per music file, using the template:
+
+```text
+<filename>: N bars at 90 BPM = M.MM s (K samples at 44100 Hz)
+```
+
+Example:
+
+```text
+music_main_menu_01: 48 bars at 90 BPM = 128.00 s (5644800 samples at 44100 Hz)
+music_main_menu_02: 48 bars at 90 BPM = 128.00 s (5644800 samples at 44100 Hz)
+music_calm_01: 36 bars at 90 BPM = 96.00 s (4233600 samples at 44100 Hz)
+music_calm_02: 36 bars at 90 BPM = 96.00 s (4233600 samples at 44100 Hz)
+music_growth_01: 36 bars at 90 BPM = 96.00 s (4233600 samples at 44100 Hz)
+music_growth_02: 36 bars at 90 BPM = 96.00 s (4233600 samples at 44100 Hz)
+music_crisis_01: 36 bars at 90 BPM = 96.00 s (4233600 samples at 44100 Hz)
+music_crisis_02: 36 bars at 90 BPM = 96.00 s (4233600 samples at 44100 Hz)
+```
+
+**Constraints**: all bar counts must be positive integers. Non-integer bar counts cause
+bar-boundary crossfade drift over long sessions. Sample counts must equal
+`bars × 4 × (44100 × 60 / 90)` with no fractional residue. The values above are the
+locked SA-3 targets from
+`architecture/audio-architecture/production-briefs/music-production-brief.md`.
+
+**CI enforcement**: `validate_assets.py` Check #14 (duration tolerance check, Phase 5)
+rejects any `music_*.ogg` file whose measured duration deviates from its SA-3 target
+by more than ±0.05 s. `music_bar_counts.md` is the human-readable companion to that
+gate; both must be consistent.
+
+### `assets/audio/crossfade_demo_day_to_night.ogg`
+
+**Format**: OGG Vorbis, 44100 Hz, stereo (2 channels), OGG quality `-q 7` or better.
+
+**Duration**: 10–15 s.
+
+**Content**: a rendered demo of a direct day→night ambient crossfade (no dusk
+intermediate) using a 3 s constant-power crossfade curve:
+
+- ~4 s of `ambient_day` content alone at full gain.
+- 3 s constant-power crossfade: `gain_out = cos(t × π/2)`, `gain_in = sin(t × π/2)`,
+  where `t` runs 0→1 over the 3 s window. Both beds are simultaneously audible during
+  this window.
+- ~3 s of `ambient_night` content alone at full gain.
+
+The day segment used for the demo must come from the **tail** region of `ambient_day`
+(the final ~4 s), not the head, so that the QA render reflects the actual transition
+that will be heard in-game (the day bed will have been playing for a long time before
+the crossfade fires).
+
+**Loudness**: no loudness normalisation of the demo file. Raw render is the QA artifact.
+Apply a −0.1 dBTP true-peak limiter to prevent OGG encoder clipping only.
+
+**Acceptance criterion**: the 3 s overlap region must not produce an audible jarring
+transient, tonal clash, or sudden silence. The fade from the day bed's energy level into
+the night bed's quieter energy level must feel gradual and natural. A harsh day-tail
+character (prominent bird call or traffic burst that cuts abruptly into silence at the
+crossfade midpoint) is a failure.
+
+**When to produce this demo**: produce the demo early in ambient bed production, before
+mastering the final 90–120 s beds, so that structural tail/head content decisions can
+still be made with low rework cost. If the demo reveals a harsh transition, adjust the
+day bed's tail energy (reduce bird call prominence in the final 15 s, reduce traffic
+density in the final 10 s) before committing the full bed.
+
+**This file must be approved** (by explicit PR comment from a second team member or by
+absence of any blocking objection within 24 h of PR open) before `ambient_day.ogg` and
+`ambient_night.ogg` are declared production-final and merged to main.
+
+### `assets/audio/zone_loop_qa.md`
+
+A plain-text QA sign-off document for zone loop DAW loopback verification. Must be
+committed to the repository before Phase 10 exit.
+
+**Required format**: one entry per zone loop asset, each entry containing exactly the
+following fields:
+
+```text
+Asset: sfx_zone_residential.ogg
+DAW tool: <name and version, e.g. "Reaper 6.82" or "Audacity 3.4.2">
+Loop boundary natural rhythmic gap: yes
+Author sign-off: <name or role>
+
+Asset: sfx_zone_commercial.ogg
+DAW tool: <name and version>
+Loop boundary natural rhythmic gap: yes
+Author sign-off: <name or role>
+
+Asset: sfx_zone_industrial.ogg
+DAW tool: <name and version>
+Loop boundary natural rhythmic gap: yes
+Author sign-off: <name or role>
+```
+
+**"Loop boundary natural rhythmic gap: yes"** confirms that the combined 200 ms silence
+window at the loop boundary (100 ms tail fade-to-silence + 100 ms head fade-from-silence)
+falls during a natural pause in the content — verified by setting the DAW timeline to
+loop the exported OGG and listening through at least 5 cycles with no perceived
+interruption. A value of "no" for any asset is a delivery failure and the asset must
+be re-authored before this document can be committed.
+
+**When the field may be "no"**: if a loopback listen reveals that the 200 ms silence
+window cuts across active content (e.g., mid-hit or mid-phrase), the zone loop must be
+re-edited to move the loop start/end trim points into a natural rhythmic gap before
+re-exporting. The `zone_loop_qa.md` entry must not be filed with "yes" until the
+re-authored file passes the DAW loopback test and the CI Check #21 silence-floor gate.
+
 ## Phase 7 Placeholder Asset Sign-Off
 
 The following synthetic placeholder OGG files were generated in Phase 7 using SoX v14.4.2

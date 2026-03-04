@@ -10,12 +10,18 @@
 // translation unit that includes NotificationManager.h.
 struct InputEvent;
 
+// Forward declaration — IAudioSystem is an interface; full include not needed in header.
+class IAudioSystem;
+
 // NotificationManager — manages toast notifications with auto-dismiss timing
 // and CRITICAL-toast auto-pause injection.
 //
-// Constructor signature: (backend, sim, clock) — ICitySimulation* is the second
+// Constructor signature: (backend, sim, clock, audio) — ICitySimulation* is the second
 // parameter so NotificationManager can call sim->setPaused(true) for CRITICAL-toast
 // auto-pause. Phase 3 corrects the Phase 0 stub which mistakenly used ISimulationPauser*.
+// Phase 10 adds IAudioSystem* as the fourth parameter so postCritical()/postNormal()
+// can call m_audio->playSound(UI_TOAST, ...) when a toast becomes visible.
+// Pass nullptr for audio before Phase 10 — all audio call sites are null-guarded.
 //
 // Toast sizes (virtual 1920x1080 space):
 //   CRITICAL toasts: 48 px fixed height; auto-pause game; player-dismissed via
@@ -25,7 +31,11 @@ struct InputEvent;
 // Log panel: 400x500 px, anchored to bell icon (bottom-right of screen).
 class NotificationManager {
 public:
-    NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock);
+    // Phase 10 signature: IAudioSystem* is the fourth parameter.
+    // Callers that pre-date Phase 10 may pass nullptr for audio — every audio
+    // call site inside NotificationManager is guarded by (if m_audio).
+    NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock,
+                        IAudioSystem* audio = nullptr);
 
     // Production API for player dismissal of CRITICAL toasts.
     // Called by the UI event handler when the player clicks, presses Enter,
@@ -117,6 +127,7 @@ private:
     IUIBackend*       m_backend{nullptr};
     ICitySimulation*  m_sim{nullptr};
     IClock*           m_clock{nullptr};
+    IAudioSystem*     m_audio{nullptr};
     bool              m_modalActive{false};
 
     // Toast queues — front of deque is the oldest (displayed first).

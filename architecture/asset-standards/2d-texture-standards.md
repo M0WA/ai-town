@@ -431,12 +431,41 @@ before shipping (see Runtime asset path below). Linear color space — do NOT au
 and uses `IGUIButton::setImage()` for per-button icon display.
 
 **DDS→PNG conversion**: Convert the authored `hud_sprites_ui.dds` to `hud_sprites_ui.png`
-using any standard image-processing tool. Acceptable tools: GIMP (File → Export As PNG),
-ImageMagick (`convert hud_sprites_ui.dds hud_sprites_ui.png`), or any tool that preserves
-RGBA8 pixels without colour-space conversion. Do NOT apply gamma correction or sRGB encoding
-during conversion — the source file is in linear colour space and the PNG must remain in
-linear colour space. Verify that the output PNG is 2048×2048 RGBA8 with no mip chain before
-committing.
+using any standard image-processing tool. Acceptable tools:
+
+- **GIMP**: File → Export As → select PNG, disable all gamma/ICC-profile options on export
+- **ImageMagick** (modern `magick` CLI, ImageMagick 7+):
+  `magick hud_sprites_ui.dds hud_sprites_ui.png`
+- **ImageMagick** (legacy `convert` CLI, ImageMagick 6 and below):
+  `convert hud_sprites_ui.dds hud_sprites_ui.png`
+- Any other tool that preserves RGBA8 pixels without colour-space conversion
+
+Do NOT use `nvcompress` for DDS→PNG conversion — `nvcompress` is a DDS compressor and cannot
+decode DDS back to PNG. Do NOT apply gamma correction or sRGB encoding during conversion —
+the source file is in linear colour space and the PNG must remain in linear colour space.
+
+**Verification after conversion**: Confirm the output PNG is 2048×2048 RGBA8 with no mip
+chain before committing. Use `python3` to spot-check pixel values:
+
+```bash
+python3 -c "
+from PIL import Image
+img = Image.open('hud_sprites_ui.png')
+print('Size:', img.size)          # must be (2048, 2048)
+print('Mode:', img.mode)          # must be 'RGBA'
+# Spot-check: sample a known-coloured cell (e.g. top-left pixel of cell 0,0 — should be
+# transparent background if icon is centered in cell)
+print('Pixel 0,0:', img.getpixel((0, 0)))
+"
+```
+
+If Pillow is not installed, use `identify -verbose hud_sprites_ui.png | grep -E 'Geometry|Type|Colorspace'`
+(ImageMagick `identify` command) and verify the output reports 2048x2048 and TrueColorAlpha.
+The reported colorspace value may read "sRGB" as an ImageMagick display convention even when
+no ICC profile is embedded — this is harmless. What matters is that the PNG contains no
+embedded ICC profile and that the pixel data has not been gamma-corrected during export.
+Confirm with `identify -verbose hud_sprites_ui.png | grep -i profile` — the output must be
+empty (no embedded profiles), meaning the file carries no colour management metadata.
 
 **Format recap**: 2048×2048 RGBA8, no mip chain, linear color space. Full cell layout in the
 sections below.

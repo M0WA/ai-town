@@ -252,6 +252,9 @@ TEST_F(PopulationTest, CityRating_100KPopulation_NoRatingTransition_NoStingerFla
     EXPECT_CALL(strict_audio, syncListenerToCamera(_)).Times(AnyNumber());
     EXPECT_CALL(strict_audio, playPositionalSound(_, _, _, _)).Times(AnyNumber());
     EXPECT_CALL(strict_audio, stopSound(_)).Times(AnyNumber());
+    // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick.
+    // Allow any number — this test focuses on stinger policy, not music intensity tier.
+    EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
     // CRITICAL: triggerStinger must NOT be called when population crosses 100K.
     EXPECT_CALL(strict_audio, triggerStinger(_)).Times(0);
 
@@ -420,6 +423,9 @@ TEST_F(PopulationTest, CityRating_VillageToTown_Transition_FiresStingerNotificat
     EXPECT_CALL(strict_audio, setTimeOfDay(_)).Times(AnyNumber());
     EXPECT_CALL(strict_audio, transitionToGameplay()).Times(AnyNumber());
     EXPECT_CALL(strict_audio, syncListenerToCamera(_)).Times(AnyNumber());
+    // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick.
+    // Allow any number — this test focuses on stinger policy, not music intensity tier.
+    EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
     // Phase 6 CitySimulation must NOT call triggerStinger — that is Phase 8 scope.
     EXPECT_CALL(strict_audio, triggerStinger(_)).Times(0);
 

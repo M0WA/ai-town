@@ -2,7 +2,7 @@
 // Instantiates a concrete subclass overriding ALL 17 pure-virtual methods to verify
 // every method signature in the interface at Phase 0.
 #include "src/ui/IUIBackend.h"
-#include "src/ui/NotificationManager.h"   // compile-check: verifies 3-param constructor signature at Phase 0
+#include "src/ui/NotificationManager.h"   // compile-check: verifies constructor signature (4-param as of Phase 10; 4th arg defaults to nullptr)
 #include <gtest/gtest.h>
 
 // Minimal concrete subclass — verifies all 18 pure-virtual methods compile.

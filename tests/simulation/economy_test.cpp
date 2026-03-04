@@ -93,6 +93,10 @@ protected:
         // placeZone/placeRoad call playPositionalSound; allow any number of calls
         // so StrictMock doesn't fail on placement SFX in tests that focus on treasury.
         EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+        // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick.
+        // Allow any number of calls — economy tests do not assert music intensity tier.
+        // Without this, StrictMock<MockAudioSystem> would fail on every budget tick.
+        EXPECT_CALL(audio_, setMusicIntensity(_)).Times(AnyNumber());
     }
 
     void TearDown() override {

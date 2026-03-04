@@ -328,3 +328,28 @@ static constexpr int service_alert_desirability_threshold = 20;
 **Distance cull**: `AudioSystem` culls positional sounds beyond their `AL_MAX_DISTANCE`;
 service alert sounds are thus inaudible when the camera is far from the affected tile —
 no additional cull logic is required in `CitySimulation`.
+
+## Per-Tile Audio Transition Fields (TileData — Phase 10)
+
+The three bool fields below are added to `CitySimulation::TileData` (defined in
+`src/simulation/CitySimulation.h`) as part of Phase 10. Each guards exactly one SFX
+per coverage-loss event (not per tick while uncovered). All three must be serialised
+in the save file (Phase 11) to prevent spurious SFX re-fire on load.
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `wasPowered` | `bool` | `true` | Fires `SFX_POWER_OUT` once when power coverage is lost; restored silently on recovery. Initialized `true` so the first brownout on a newly powered tile is audible. |
+| `wasWaterCovered` | `bool` | `true` | Fires `SFX_WATER_OUT` once when water coverage is lost; restored silently on recovery. Initialized `true` so the first water-loss event on a covered tile is audible. |
+| `alertFired` | `bool` | `false` | Fires `SFX_FIRE_ALERT` or `SFX_POLICE_ALERT` once per alert episode (desirability drops to or below `service_alert_desirability_threshold`). Reset to `false` when desirability recovers above the threshold, allowing re-fire in a future episode. Fire Station takes priority when both station types cover the tile. |
+
+**Initialization rationale for `wasPowered` and `wasWaterCovered`**: Defaulting to `true`
+means that when a zone tile is first placed and power/water coverage is subsequently lost
+(e.g. the player demolishes the Power Plant), the SFX fires correctly on the first
+coverage-loss event. If initialized to `false`, the very first power-out event would be
+silenced because the guard `tile.wasPowered == true && !currentlyCovered` would never be
+true on the first evaluation, and the flag would never be set — the player would hear
+nothing on the first brownout.
+
+**Save system note**: A save file written before Phase 10 (when these fields did not exist)
+must initialize all three to their default values on load. The Phase 11 save system must
+handle this via a version tag or field-presence check to avoid uninitialised reads.

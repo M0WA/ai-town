@@ -404,6 +404,8 @@ TEST_F(ServiceTest, ServiceDegradation_AudioCallback_FiresOncePerDegradedBuildin
 
     // Allow all non-degrade audio calls (placement SFX).
     EXPECT_CALL(strict_audio, playSound(_, _, _)).Times(AnyNumber());
+    // Phase 10: allow setMusicIntensity before the VerifyAndClearExpectations reset.
+    EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
 
     auto strict_sim = std::make_unique<CitySimulation>(
         &strict_renderer, &strict_audio,
@@ -432,6 +434,9 @@ TEST_F(ServiceTest, ServiceDegradation_AudioCallback_FiresOncePerDegradedBuildin
     EXPECT_CALL(strict_audio, playSound(SFX_SERVICE_DEGRADE, _, _)).Times(2);
     EXPECT_CALL(strict_audio, playSound(::testing::Ne(SFX_SERVICE_DEGRADE), _, _))
         .Times(AnyNumber());
+    // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick.
+    // Allow any number — this test focuses on SFX_SERVICE_DEGRADE call counts only.
+    EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
 
     // Fire one deficit tick (fire station upkeep with no zone revenue → deficit).
     strict_clock.advance(dt);

@@ -88,7 +88,7 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
     , m_sim(sim)
     , m_clock(clock)
 {
-    m_notifications = new NotificationManager(m_backend, m_sim, m_clock);
+    m_notifications = new NotificationManager(m_backend, m_sim, m_clock, m_audio);
     m_mainMenu      = new MainMenuPanel(m_backend);   // calls show() in its constructor
     m_hud           = new HUD(m_backend, m_audio, m_sim, m_clock);
     m_taxPanel      = new TaxRatePanel(m_backend, m_sim);

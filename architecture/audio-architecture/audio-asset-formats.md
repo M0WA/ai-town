@@ -33,3 +33,51 @@
   **PRIMARY DELIVERY GATE: The sample-0 boundary must be click-free when looped in a DAW by placing a loop point exactly at sample 0 and auditioning through it. The 200 ms DAW crossfade tail is a SECONDARY authoring safeguard only. Any ambient bed that fails the sample-0 click-free gate must be rejected regardless of whether the crossfade tail sounds acceptable.**
 
   In practice, authors should structure the ambient bed so that: (a) bar 1 starts clean at sample 0, and (b) the file extends 200 ms past its natural loop endpoint with a pre-baked crossfade tail. The streaming runtime never decodes the crossfade tail. Non-streaming playback (e.g., preview in the DAW) hears the crossfade tail and loops cleanly through it. Both requirements can be satisfied by any well-authored ambient bed.
+
+## Phase 10 QA Artifact Formats
+
+QA artifacts are not runtime game assets. They are authoring verification files committed
+to the repository as evidence of sound artist review. The format requirements below are
+authoritative — `v1-audio-asset-manifest.md` "Phase 10 QA Delivery Artifacts" section
+contains the full content specifications for each file.
+
+### Crossfade demo WAV files
+
+`assets/audio/crossfade_demos/crossfade_demo_calm_to_growth.wav` and
+`assets/audio/crossfade_demos/crossfade_demo_mainmenu_to_calm.wav`:
+
+- **Format**: WAV PCM (uncompressed, linear PCM encoding — audio format tag 0x0001)
+- **Sample rate**: 44100 Hz
+- **Bit depth**: 16-bit signed integer
+- **Channels**: stereo (2 channels, interleaved L/R)
+- **Duration**: exactly 15 s (660,600 stereo PCM frames)
+- **True-peak ceiling on render**: apply −0.1 dBTP true-peak limiter to prevent clipping;
+  do NOT loudness-normalise — the raw gain crossfade curve must be audible in the file
+- **No OGG, no lossy encoding**: WAV PCM is mandatory for these demo files; OGG
+  encoding would introduce a decode/encode generation loss and hide any subtle gain
+  curve artifacts that the QA render is designed to surface
+
+These files are not loaded by `AudioSystem`. They are stored in the repository solely
+as auditable evidence of pre-production crossfade compatibility verification.
+
+### Day-to-night crossfade demo OGG
+
+`assets/audio/crossfade_demo_day_to_night.ogg`:
+
+- **Format**: OGG Vorbis
+- **Sample rate**: 44100 Hz
+- **Channels**: stereo (2 channels) — matches the ambient bed format so that the
+  stereo field width of the crossfade is accurately represented
+- **OGG quality**: minimum `-q 7` (approx. 224 kbps VBR) — consistent with ambient
+  bed encoding quality
+- **Duration**: 10–15 s
+- **True-peak ceiling on render**: apply −0.1 dBTP true-peak limiter before OGG
+  encoding to prevent encoder clipping; do NOT loudness-normalise
+- **No JSON sidecar required** — this file does not use bar-boundary metadata; the
+  sidecar check (`validate_assets.py` Check #14) applies only to `music_*.ogg` files
+  and does NOT apply to any file in the `crossfade_demos/` path or to this file
+
+This file is not loaded by `AudioSystem`. It is stored alongside production ambient bed
+assets solely as a day→night ambient transition QA artifact. See
+`architecture/audio-architecture/dynamic-soundscape.md` "Authoring note — dawn/dusk
+collapse at default simulation speed" for the full acceptance criterion.

@@ -186,6 +186,16 @@ struct SimulationConstants {
     // service_recovery_desirability_per_tick: desirability recovered per tick when coverage restored (60% faster than penalty)
     static constexpr int service_recovery_desirability_per_tick = 8;
     static_assert(service_recovery_desirability_per_tick > 0, "must be positive");
+    // service_alert_desirability_threshold: tile desirability at or below this value triggers
+    // sfx_fire_alert or sfx_police_alert (whichever station covers the tile; Fire takes priority).
+    // 20 out of 100 represents severe desirability collapse — well past the service-penalty floor.
+    // A per-tile tile.alertFired bool gates the call; reset when desirability recovers above
+    // this threshold. Do NOT hardcode the literal 20 at any call site.
+    // (architecture/game-design/service-coverage.md Phase 10 Audio Callbacks section)
+    static constexpr int service_alert_desirability_threshold = 20;
+    static_assert(service_alert_desirability_threshold >= 0 &&
+                  service_alert_desirability_threshold < 100,
+                  "alert threshold must be in [0, 100)");
 
     // Starting funds by difficulty (architecture/game-design/game-progression-modes.md)
     // Used in CitySimulation constructor and verified by StartingFunds_Easy/Normal/Hard tests.

@@ -16,8 +16,34 @@ Deliver all V1 audio assets and the dynamic soundscape system: adaptive music wi
   1. Author source artwork as a 2048×2048 RGBA8 image in your DCC tool (Photoshop, GIMP, Aseprite, or equivalent). The canvas must be exactly 2048×2048. Lay out a 32×32 cell grid where each cell is 64×64 px. Work in linear colour space throughout (do NOT apply sRGB gamma to a UI sprite sheet — UI textures are uploaded via the linear pool).
   2. Export the source as `hud_sprites_ui.png` (32-bit RGBA PNG). Verify the export is 2048×2048 pixels with an alpha channel.
   3. Convert to DDS using **nvcompress only** — the command is `nvcompress -rgba -nomips hud_sprites_ui.png hud_sprites_ui.dds`. **Compressonator is PROHIBITED for this file** — Compressonator's ARGB_8888 stores data in BGRA byte order, which causes a silent red-blue channel swap when uploaded via `GL_RGBA` / `GL_UNSIGNED_BYTE`. nvcompress `-rgba -nomips` guarantees true RGBA byte order and suppresses mip generation. This constraint is specified in `architecture/asset-standards/2d-texture-standards.md` DDS Authoring Pipeline (UI sprite sheet row).
-  4. Verify the DDS output: confirm it is 2048×2048, RGBA8 UNORM, 1 mip level (no mip chain), linear colour space, no sRGB flag.
-  5. Convert the verified DDS back to PNG for Irrlicht's built-in `IVideoDriver::getTexture()` loader: `nvcompress -rgba hud_sprites_ui.dds hud_sprites_ui_runtime.png` or any lossless DDS→PNG converter. Rename the result `hud_sprites_ui.png` and place it at `assets/textures/ui/hud_sprites_ui.png`. Irrlicht does not load DDS natively through `getTexture()` on all platforms; the PNG is the committed runtime asset. The DDS intermediate is not committed.
+  4. Verify the DDS output: confirm it is 2048×2048, RGBA8 UNORM, 1 mip level (no mip chain), linear colour space, no sRGB flag. Use the following command to check the DDS header:
+
+     ```bash
+     python3 -c "
+     import struct
+     d = open('hud_sprites_ui.dds', 'rb').read()
+     magic = d[0:4]
+     assert magic == b'DDS ', f'Not a DDS file: {magic}'
+     height = struct.unpack_from('<I', d, 12)[0]
+     width  = struct.unpack_from('<I', d, 16)[0]
+     mips   = struct.unpack_from('<I', d, 28)[0]
+     fourcc = d[84:88]
+     print(f'Dimensions: {width}x{height}')   # must be 2048x2048
+     print(f'Mip count: {mips}')              # must be 1 (or 0 meaning 1 level)
+     print(f'FourCC: {fourcc}')               # must NOT be b\"DX10\" (no sRGB extension header)
+     "
+     ```
+
+     The output must show 2048x2048, mip count 1 (or 0), and the FourCC must NOT be `b'DX10'`
+     (a DX10 header with a sRGB DXGI format flag is incorrect for a linear RGBA8 UI texture).
+
+  5. Convert the verified DDS back to PNG for Irrlicht's built-in `IVideoDriver::getTexture()` loader. Use one of the following tools — **do NOT use `nvcompress` for this step** (`nvcompress` compresses images to DDS and cannot decode DDS back to PNG):
+
+     - **ImageMagick (magick CLI, ImageMagick 7+)**: `magick hud_sprites_ui.dds hud_sprites_ui.png`
+     - **ImageMagick (convert CLI, ImageMagick 6)**: `convert hud_sprites_ui.dds hud_sprites_ui.png`
+     - **GIMP**: File → Open `hud_sprites_ui.dds`, then File → Export As `hud_sprites_ui.png` (disable all ICC profile / gamma options on export)
+
+     Output the result directly as `hud_sprites_ui.png` and place it at `assets/textures/ui/hud_sprites_ui.png`. Irrlicht does not load DDS natively through `getTexture()` on all platforms; the PNG is the committed runtime asset. The DDS intermediate is not committed.
   6. Verify the final PNG is 2048×2048 RGBA8 with no visible channel corruption (spot-check a few cells against the source artwork).
 
   Once this file is present on disk, `IrrlichtUIBackend::m_spriteTextureReady` becomes `true` and `setElementImage()` calls replace fallback text with icons, eliminating the letter artefact from Phase 9b builds. (ref: `architecture/ui-ux/hud-layout.md` Toolbar Button Text Fallback section, `architecture/asset-standards/2d-texture-standards.md` DDS Authoring Pipeline)
@@ -150,8 +176,38 @@ Deliver all V1 audio assets and the dynamic soundscape system: adaptive music wi
 - **`MusicIntensity` enum and `setMusicIntensity()` in `IAudioSystem`**: Phase 10 adds these. Any Phase that depends on music intensity wiring must use Phase 10 or later. The thresholds are defined in `architecture/game-design/economy-model.md` Music Intensity Tiers section: CALM = `budget_surplus_pct >= 0%`; GROWTH = net population increase this tick; CRISIS = `consecutive_deficit_months >= 2`. These thresholds are final and locked.
 - **`nvcompress` must be available in the development environment for sprite sheet authoring** — it is not installed by default on all workstations. `graphics-artist-2d-texture` must confirm `nvcompress` is available before beginning sprite sheet conversion. On Linux: install from the NVIDIA Texture Tools package or build from source. On Windows: download NVIDIA Texture Tools Exporter and add `nvcompress.exe` to PATH. Compressonator must NOT be used as a substitute for this specific asset.
 - **`NotificationManager` constructor change**: Phase 10 adds `IAudioSystem*` as a fourth constructor parameter (`NotificationManager(IUIBackend*, ICitySimulation*, IClock*, IAudioSystem*)`). All existing test fixtures that construct `NotificationManager` directly must be updated to pass a `NiceMock<MockAudioSystem>` (or null pointer if the test does not exercise toast audio). `MockAudioSystem` is in `tests/simulation/mock_audio_system.h`.
-- **`SimulationConstants::service_alert_desirability_threshold = 20`**: Phase 10 adds this constant to `simulation_constants.h`. Phase 6 may already define surrounding constants; add this value alongside `service_uncovered_desirability_penalty_per_tick` and `service_recovery_desirability_per_tick` in the same struct. Do not hardcode the literal `20` at any call site.
-- **`IRenderer::getListenerPosition()`**: `sfx_intersection_tick` wiring requires the listener world-space position for the pre-acquisition 80 m distance cull in `CitySimulation::tick()`. If `IRenderer` does not already expose this method, add `virtual vec3 getListenerPosition() const = 0` to `IRenderer` (`src/interfaces/IRenderer.h`) and implement in `IrrlichtRenderer` (returns the camera target/eye position synced by `AudioSystem::syncListenerToCamera()`). `MockRenderer` must add the corresponding `MOCK_METHOD`.
+- **`SimulationConstants::service_alert_desirability_threshold = 20`**: Added to
+  `src/simulation/simulation_constants.h` alongside `service_uncovered_desirability_penalty_per_tick`
+  and `service_recovery_desirability_per_tick`. No action required — use
+  `SimulationConstants::service_alert_desirability_threshold` at all call sites; do not hardcode
+  the literal `20`.
+- **`tile.wasPowered`, `tile.wasWaterCovered`, `tile.alertFired`**: All three per-tile bool
+  fields are declared in `CitySimulation::TileData` (`src/simulation/CitySimulation.h`).
+  Defaults: `wasPowered = true`, `wasWaterCovered = true`, `alertFired = false`. No further
+  action required — fields are ready for Phase 10 wiring. All three must be serialised in the
+  Phase 11 save system (see spike note in Risks section).
+- **`CitySimulation::doDensityUnlockTick()`**: Confirmed implemented in
+  `src/simulation/CitySimulation.cpp` and declared in `src/simulation/CitySimulation.h`.
+  `sfx_zone_upgrade` fires from within this method once per upgraded tile. No action required.
+- **`IRenderer::getListenerPosition()`**: Already present in `src/interfaces/IRenderer.h`
+  and implemented in `src/rendering/IrrlichtRenderer.cpp`. `MockRenderer` already has the
+  corresponding `MOCK_METHOD`. Use `m_renderer->getListenerPosition()` directly in the
+  `sfx_intersection_tick` 80 m pre-cull in `CitySimulation::tick()`.
+- **3D model assets — no blocker for Phase 10 start** (`graphics-artist-3d-model` review, 2026-03-04):
+  All positional SFX in Phase 10 (`sfx_fire_alert`, `sfx_police_alert`, `sfx_build_place`,
+  `sfx_build_demolish`, `sfx_road_build`, `sfx_earthworks`, `sfx_intersection_tick`) fire at
+  tile-coordinate positions (`vec3{tileX, 0.0f, tileZ}`) derived from simulation state, not
+  from rendered scene node positions. Vehicle engine SFX (`sfx_vehicle_engine_idle`,
+  `sfx_vehicle_engine_move`, `sfx_vehicle_horn`) use vehicle agent positions managed by
+  `AudioSystem`, not scene node transforms. Zone loop positional sources use zone centroid world
+  positions from the simulation, not from rendered building scene nodes. Phase 10 audio wiring
+  is therefore fully decoupled from service building and zone building 3D model delivery. No
+  3D model asset is on the Phase 10 critical path. Service building models
+  (`svc_fire_station`, `svc_police_station`, `svc_power_plant`, `svc_water_tower`) remain
+  Phase 9 deliverables; their absence does not block Phase 10 start or exit. The service
+  building model spec (naming convention, LOD budgets, atlas cell, collision mesh) is now
+  documented in `architecture/asset-standards/3d-model-standards.md` under Service Building
+  Model Standards.
 
 ### Risks & Spikes
 

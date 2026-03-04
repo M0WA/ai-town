@@ -322,7 +322,10 @@ TEST_F(UIManagerTransitionTest, OnEvent_MouseMove_NoModal_NoCriticalToast_Return
 class NotificationManagerTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        notif_ = std::make_unique<NotificationManager>(&backend_, &sim_, &clock_);
+        // Phase 10: pass NiceMock<MockAudioSystem>* as 4th parameter.
+        // Tests in this fixture do not assert on audio calls; NiceMock suppresses
+        // unexpected-call failures when postCritical/postNormal fire ui_toast SFX.
+        notif_ = std::make_unique<NotificationManager>(&backend_, &sim_, &clock_, &audio_);
     }
 
     void TearDown() override {
@@ -331,6 +334,7 @@ protected:
 
     NiceMock<MockUIBackend>      backend_;
     NiceMock<MockCitySimulation> sim_;
+    NiceMock<MockAudioSystem>    audio_;
     ManualClock                  clock_;
     std::unique_ptr<NotificationManager> notif_;
 };

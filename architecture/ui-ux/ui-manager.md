@@ -314,6 +314,37 @@ private:
     // NOTE: ZoneType, DensityTier are in src/interfaces/simulation_types.h.
     // ActiveTool, ServiceBuildingType are also in simulation_types.h (ServiceBuildingType added Phase 9b Deliverable I).
     // ActiveTool enum is in src/ui/ui_types.h alongside GameState/GameMode.
+
+    // updateSubPanelVisibility() — enforces the sub-panel visibility table from hud-layout.md.
+    // Called immediately after every m_activeTool change (toolbar button click, hotkey, or any
+    // other input path). The caller is responsible for closing the inspector panel
+    // (m_inspector->hide() / m_inspectorOpen = false) BEFORE calling this method when
+    // transitioning away from ActiveTool::Query — this method does NOT close the inspector.
+    //
+    // Contract:
+    //   1. Hide both sub-panels unconditionally (cost-free if already hidden).
+    //   2. Show the sub-panel appropriate for m_activeTool (see table below).
+    //   3. Fire audio — close BEFORE open, exactly one sound per changed panel:
+    //      a. For each panel that transitions from visible→hidden: call
+    //         m_audio->playSound(UI_MENU_CLOSE, SoundPriority::NORMAL, 1.0f) guarded by if(m_audio).
+    //      b. For the panel that transitions from hidden→visible (if any): call
+    //         m_audio->playSound(UI_MENU_OPEN, SoundPriority::NORMAL, 1.0f) guarded by if(m_audio).
+    //      c. Do NOT fire ui_menu_open and ui_menu_close on the same frame for the same panel.
+    //         Sequence: close sounds first, then open sound, within the same call.
+    //
+    // Sub-panel visibility table (authoritative — matches hud-layout.md):
+    //   ActiveTool::None      → Zone sub-panel: hidden;   Utilities sub-panel: hidden
+    //   ActiveTool::Zone      → Zone sub-panel: visible;  Utilities sub-panel: hidden
+    //   ActiveTool::Road      → Zone sub-panel: hidden;   Utilities sub-panel: hidden
+    //   ActiveTool::Utilities → Zone sub-panel: hidden;   Utilities sub-panel: visible
+    //   ActiveTool::Demolish  → Zone sub-panel: hidden;   Utilities sub-panel: hidden
+    //   ActiveTool::Query     → Zone sub-panel: hidden;   Utilities sub-panel: hidden
+    //
+    // The inspector panel (m_inspector / m_inspectorOpen) is NOT controlled by this method
+    // for the Query→other transition — the caller closes the inspector at the transition site
+    // before calling updateSubPanelVisibility(). For transitions INTO Query mode, the inspector
+    // remains hidden (it only opens on a subsequent tile click handled at Priority 3).
+    void updateSubPanelVisibility();
 };
 ```
 
@@ -358,7 +389,7 @@ Panels are constructed in this order (dependency order — later panels may read
 > `NotificationManager` does not yet exist when that call occurs the programme has undefined
 > behaviour. This invariant applies to `MainMenuPanel` and every future panel addition.
 
-1. `NotificationManager` — always first; see invariant above
+1. `NotificationManager` — always first; see invariant above. **Phase 10 constructor call**: `new NotificationManager(m_backend, m_sim, m_clock, m_audio)` — passes `m_audio` as the fourth parameter so that `postCritical()` and `postNormal()` can call `m_audio->playSound(UI_TOAST, ...)` when a toast becomes visible. Before Phase 10, `nullptr` is passed for the `IAudioSystem*` parameter; `NotificationManager` null-checks `m_audio` before every audio call.
 2. `MainMenuPanel` — constructed immediately after `NotificationManager`; visible on startup; UIManager owns its lifetime; hidden by `transitionToGameplay()`
 3. `HUD` — resource bar, speed selector, toolbar
 4. `TaxRatePanel` — hidden initially

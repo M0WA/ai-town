@@ -63,6 +63,12 @@ protected:
             &renderer_, &audio_, &rng_, &clock_, &terrain_, difficulty());
         // Default to x1 speed so tests don't accidentally fire rapid ticks
         sim_->setSpeed(SpeedMultiplier::x1);
+        // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick
+        // to communicate adaptive music intensity tier to IAudioSystem.
+        // Allow any number of calls from StrictMock — base fixture tests do not
+        // assert music intensity; individual tests that do will override with their
+        // own EXPECT_CALL after calling SimulationTestBase::SetUp().
+        EXPECT_CALL(audio_, setMusicIntensity(::testing::_)).Times(::testing::AnyNumber());
     }
 
     void TearDown() override {

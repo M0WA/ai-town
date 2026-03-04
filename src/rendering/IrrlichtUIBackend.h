@@ -27,7 +27,7 @@
 // Full definitions are provided by <irrlicht.h> in IrrlichtUIBackend.cpp.
 namespace irr {
     class IrrlichtDevice;
-    namespace gui  { class IGUIEnvironment; class IGUIElement; }
+    namespace gui  { class IGUIEnvironment; class IGUIElement; class IGUIFont; }
     namespace video { class IVideoDriver; class ITexture; }
 }  // namespace irr
 
@@ -60,6 +60,15 @@ public:
     // physical screen size.  Call once per frame from the main loop.
     // Not part of IUIBackend — concrete method on IrrlichtUIBackend only.
     void handleViewportResize();
+
+    // Return the monospace font loaded from assets/fonts/hud_mono_font.xml.
+    // Used by HUD and panel code to call element->setOverrideFont(getMonoFont())
+    // on numeric IGUIStaticText elements (treasury balance, population count,
+    // tax rate fields, monthly revenue/expense, density unlock progress).
+    // Returns nullptr when hud_mono_font.xml was absent at construction time;
+    // callers must null-check before calling setOverrideFont().
+    // Not part of IUIBackend — concrete backend detail on IrrlichtUIBackend only.
+    irr::gui::IGUIFont* getMonoFont() const { return m_monoFont; }
 
     // -------------------------------------------------------------------------
     // IUIBackend overrides — 17 methods
@@ -126,6 +135,13 @@ private:
     irr::IrrlichtDevice*       m_device{nullptr};
     irr::gui::IGUIEnvironment* m_guiEnv{nullptr};
     irr::video::IVideoDriver*  m_driver{nullptr};
+
+    // Monospace bitmap font loaded from assets/fonts/hud_mono_font.xml.
+    // null when the file is absent; callers must null-check before use.
+    // Ownership: Irrlicht's IGUIEnvironment owns the font object; this is a
+    // non-owning observing pointer (do NOT call drop() on it).
+    // Exposed via getMonoFont() for HUD and panel code to apply via setOverrideFont().
+    irr::gui::IGUIFont* m_monoFont{nullptr};
 
     // Sprite sheet texture loaded from hud_sprites_ui.png.
     // Used by setElementImage() to assign per-button images via IGUIButton::setImage().
