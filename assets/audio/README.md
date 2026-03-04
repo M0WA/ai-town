@@ -121,6 +121,7 @@ Three distinct methods depending on asset type:
 ### DAW Crossfade Loop (Ambient Beds)
 
 The ambient bed must satisfy BOTH:
+
 1. **200 ms pre-baked crossfade tail** at end of file authored in the DAW (not handled at runtime). The `.ogg` file sounds seamless at the embedded loop boundary. No silence floor permitted.
 2. **Seamless sample-0 boundary** — the streaming runtime seeks to sample 0 (`ov_pcm_seek(vf, 0)`) BEFORE the crossfade tail, bypassing it entirely. Authors must verify the sample-0 boundary is click-free and transient-free using DAW loopback-audition.
 
