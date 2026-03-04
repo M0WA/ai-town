@@ -521,6 +521,23 @@ will never be present). The validator's check for the UI sprite sheet is: confir
 (32-bit with alpha channel). The `_ui` suffix enforcement applies to the DDS authoring
 filename only; there is no `_ui`-suffixed file in the committed runtime asset tree.
 
+**`.gitignore` rule (mandatory)**: `assets/textures/ui/hud_sprites_ui.dds` MUST be listed
+in `.gitignore` (or the relevant subdirectory `.gitignore`). If the file was previously
+committed by mistake, remove it from git tracking with `git rm --cached
+assets/textures/ui/hud_sprites_ui.dds` before the Phase 10 PR merges. Committing the DDS
+intermediate is a CI error — any `hud_sprites_ui.dds` present in the repository tree at PR
+merge time must be rejected by a `validate_assets.py` check that asserts the file is absent.
+
+**`hud_sprites_ui_layout.json` is NOT an authoritative layout reference**: A file named
+`hud_sprites_ui_layout.json` may exist in `assets/textures/ui/` as a legacy authoring
+helper. It uses a non-conforming cell layout (56 px icon spacing, non-64 px cell grid) that
+is incompatible with the mandatory 32×32 grid of 64×64 px cells specified in this document
+and encoded in `src/ui/hud_sprite_ids.h`. This JSON file MUST NOT be used as an authoring
+reference for Phase 10 sprite sheet production. The canonical cell assignment and all icon
+coordinates are defined in the Cell Assignment Tables in this document. The JSON file must be
+removed from the repository before Phase 10 exits — it will cause confusion if left alongside
+the correctly-structured PNG. Remove it with `git rm assets/textures/ui/hud_sprites_ui_layout.json`.
+
 `IrrlichtUIBackend` loads this file internally via `m_driver->getTexture("assets/textures/ui/hud_sprites_ui.png")` during its own initialization (before any `UIManager` panel code runs).
 This is an `IrrlichtUIBackend`-internal operation — `UIManager` does NOT call
 `IUIBackend::loadTexture("assets/textures/ui/hud_sprites_ui.png")` and does NOT store a
@@ -945,6 +962,45 @@ LOD0/LOD1 UV authoring of building meshes begins):
 <!-- SIGN-OFF: graphics-artist-2d-texture 2026-03-01 — confirmed all per-module normal and specular map source PNGs meet DXT5nm authoring spec -->
 
 <!-- SIGN-OFF: graphics-artist-2d-texture 2026-03-01 — Billboard atlas format sign-off: confirmed DXT5 sRGB 1024×128 format (8 frames of 128×128), 4-level mip chain (GL_TEXTURE_MAX_LEVEL=3), 8-texel per-cell border (112×112 usable per frame), straight alpha, GL_CLAMP_TO_EDGE, uploaded via raw-GL sRGB path. All placeholder billboard DDS files use DX10 BC3_UNORM_SRGB (DXGI_FORMAT=78). -->
+
+**Phase 10 — Pre-Authoring Prerequisites (MUST be resolved before artwork production begins)**:
+
+The following items must be confirmed complete BEFORE painting any icon content:
+
+1. **`hud_sprites_ui.dds` removed from git**: Run `git rm --cached
+   assets/textures/ui/hud_sprites_ui.dds` to stop tracking the file. Confirm the file is
+   listed in `.gitignore`. This is a blocking prerequisite — the DDS is an authoring
+   artifact and must never be committed. Decision (2026-03-04): the `.gitignore` rule
+   `assets/textures/ui/hud_sprites_ui.dds` has been added to the root `.gitignore`.
+   The artist must verify the file is untracked before the Phase 10 PR is opened.
+
+2. **`hud_sprites_ui_layout.json` removed from git**: Run `git rm
+   assets/textures/ui/hud_sprites_ui_layout.json`. This file uses a non-conforming 56 px
+   icon spacing that conflicts with the mandatory 32×32 grid of 64×64 px cells specified
+   in this document. It must not exist in the repository when Phase 10 exits. Decision
+   (2026-03-04): the `.gitignore` rule `assets/textures/ui/hud_sprites_ui_layout.json` has
+   been added to the root `.gitignore`. Use only the Cell Assignment Tables in this document
+   and `src/ui/hud_sprite_ids.h` as layout references.
+
+3. **Existing `hud_sprites_ui.png` is a stub — full artwork required**: The PNG currently
+   committed at `assets/textures/ui/hud_sprites_ui.png` is a near-empty stub (all cells
+   are transparent or carry only dark background fill pixels). It does NOT satisfy the Phase
+   10 exit criterion. All rows 0–6 and rows 8–10 must be fully repainted from scratch per
+   the visual conventions in the "Authoring Notes for Sprite Sheet Icons (Phases 9b and 10)"
+   section above. The stub PNG must be replaced in the Phase 10 PR.
+
+4. **`nvcompress` availability check**: Confirm `nvcompress` is installed and produces
+   correct RGBA byte order by running the byte-order spike before beginning the DDS
+   intermediate step (create a 2×2 `R=255, G=0, B=0, A=255` PNG, convert with
+   `nvcompress -rgba -nomips`, decode and verify R=255 in the output — a B=255 result
+   means BGRA output and that build of nvcompress must not be used). If the check fails,
+   the approved fallback (export `hud_sprites_ui.png` directly from the DCC tool as a
+   lossless 32-bit RGBA PNG) is equally valid for Phase 10 delivery — the PNG is
+   pixel-identical to a correct RGBA8 UNORM DDS for uncompressed data. Decision
+   (2026-03-04): the nvcompress byte-order spike is a required step, not optional;
+   however, its failure does NOT block delivery because the DCC-direct PNG export is an
+   approved equivalent. Artists on workstations without nvcompress may skip the DDS
+   intermediate entirely and export the PNG directly from the DCC tool.
 
 **Phase 10 — Sprite Sheet Artwork Delivery Sign-Off** (`graphics-artist-2d-texture`,
 required before Phase 10 is declared DONE):

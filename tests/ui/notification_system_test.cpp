@@ -2,7 +2,7 @@
 //
 // Phase 8 notification system tests -- two fixtures:
 //
-//   NotificationManagerTest_Phase8: NiceMock<MockUIBackend> + NiceMock<MockCitySimulation>
+//   NotificationManagerTest: NiceMock<MockUIBackend> + NiceMock<MockCitySimulation>
 //     + ManualClock + NiceMock<MockAudioSystem>. Tests NotificationManager in isolation
 //     (constructed directly). Phase 10: NiceMock<MockAudioSystem> passed as the 4th
 //     constructor parameter (IAudioSystem*) so toast audio calls do not fail.
@@ -39,7 +39,7 @@ using ::testing::HasSubstr;
 // ============================================================================
 // NotificationManagerTest -- standalone NotificationManager tests
 // ============================================================================
-class NotificationManagerTest_Phase8 : public ::testing::Test {
+class NotificationManagerTest : public ::testing::Test {
 protected:
     void SetUp() override {
         ON_CALL(backend_, addStaticText(_, _, _, _, _)).WillByDefault(
@@ -74,7 +74,7 @@ protected:
 // --- CriticalToast_OnPost_AutoPausesCalled ---
 // Posting a CRITICAL toast calls setPaused(true) exactly once when the
 // CRITICAL queue transitions from empty to non-empty.
-TEST_F(NotificationManagerTest_Phase8, CriticalToast_OnPost_AutoPausesCalled) {
+TEST_F(NotificationManagerTest, CriticalToast_OnPost_AutoPausesCalled) {
     EXPECT_CALL(sim_, setPaused(true)).Times(1);
     notifMgr_->postCritical("Crisis", "Budget deficit detected");
 }
@@ -82,7 +82,7 @@ TEST_F(NotificationManagerTest_Phase8, CriticalToast_OnPost_AutoPausesCalled) {
 // --- CriticalToast_OnLastDismiss_NoAutoResume ---
 // Dismissing the last CRITICAL toast does NOT call setPaused(false).
 // Per notification-system.md, dismissCriticalToast does NOT un-pause.
-TEST_F(NotificationManagerTest_Phase8, CriticalToast_OnLastDismiss_NoAutoResume) {
+TEST_F(NotificationManagerTest, CriticalToast_OnLastDismiss_NoAutoResume) {
     // Post a CRITICAL toast first.
     EXPECT_CALL(sim_, setPaused(true)).Times(1);
     notifMgr_->postCritical("Crisis", "Budget deficit");
@@ -100,7 +100,7 @@ TEST_F(NotificationManagerTest_Phase8, CriticalToast_OnLastDismiss_NoAutoResume)
 // --- CriticalToast_SecondPost_NoDoublePause ---
 // Posting a second CRITICAL toast while one is already active does NOT
 // call setPaused(true) again.
-TEST_F(NotificationManagerTest_Phase8, CriticalToast_SecondPost_NoDoublePause) {
+TEST_F(NotificationManagerTest, CriticalToast_SecondPost_NoDoublePause) {
     EXPECT_CALL(sim_, setPaused(true)).Times(1); // Only once total.
     notifMgr_->postCritical("Crisis 1", "First deficit");
     notifMgr_->postCritical("Crisis 2", "Second deficit");
@@ -111,7 +111,7 @@ TEST_F(NotificationManagerTest_Phase8, CriticalToast_SecondPost_NoDoublePause) {
 
 // --- CriticalToast_HiddenWhileModalActive_ReappearsAfterClose ---
 // Prerequisite for Priority 2 dual-guard integration.
-TEST_F(NotificationManagerTest_Phase8, CriticalToast_HiddenWhileModalActive_ReappearsAfterClose) {
+TEST_F(NotificationManagerTest, CriticalToast_HiddenWhileModalActive_ReappearsAfterClose) {
     notifMgr_->postCritical("Crisis", "Budget deficit");
     EXPECT_TRUE(notifMgr_->hasCriticalToastVisible());
 
@@ -131,19 +131,19 @@ TEST_F(NotificationManagerTest_Phase8, CriticalToast_HiddenWhileModalActive_Reap
 }
 
 // --- NotificationSystem_AutoPause_OnFirstCriticalToast ---
-TEST_F(NotificationManagerTest_Phase8, NotificationSystem_AutoPause_OnFirstCriticalToast) {
+TEST_F(NotificationManagerTest, NotificationSystem_AutoPause_OnFirstCriticalToast) {
     EXPECT_CALL(sim_, setPaused(true)).Times(1);
     notifMgr_->postCritical("Crisis", "Budget deficit");
 }
 
 // --- NotificationSystem_NoPause_OnNormalToast ---
-TEST_F(NotificationManagerTest_Phase8, NotificationSystem_NoPause_OnNormalToast) {
+TEST_F(NotificationManagerTest, NotificationSystem_NoPause_OnNormalToast) {
     EXPECT_CALL(sim_, setPaused(_)).Times(0);
     notifMgr_->postNormal("Info", "New road completed");
 }
 
 // --- Normal toast auto-dismiss after timeout ---
-TEST_F(NotificationManagerTest_Phase8, NormalToast_AutoDismiss_After5Seconds) {
+TEST_F(NotificationManagerTest, NormalToast_AutoDismiss_After5Seconds) {
     notifMgr_->postNormal("Info", "New road completed", 5.0f);
 
     // Advance clock past the 5s timeout.
@@ -157,7 +157,7 @@ TEST_F(NotificationManagerTest_Phase8, NormalToast_AutoDismiss_After5Seconds) {
 }
 
 // --- Max 2 CRITICAL toasts visible (excess queued) ---
-TEST_F(NotificationManagerTest_Phase8, CriticalToast_Max2Visible) {
+TEST_F(NotificationManagerTest, CriticalToast_Max2Visible) {
     notifMgr_->postCritical("C1", "First");
     notifMgr_->postCritical("C2", "Second");
     notifMgr_->postCritical("C3", "Third");
@@ -171,7 +171,7 @@ TEST_F(NotificationManagerTest_Phase8, CriticalToast_Max2Visible) {
 }
 
 // --- Toggle log panel ---
-TEST_F(NotificationManagerTest_Phase8, ToggleLog_OpensAndCloses) {
+TEST_F(NotificationManagerTest, ToggleLog_OpensAndCloses) {
     EXPECT_FALSE(notifMgr_->isLogOpen());
     notifMgr_->toggleLog();
     EXPECT_TRUE(notifMgr_->isLogOpen());
@@ -374,7 +374,7 @@ TEST_F(UIManagerDeficitIntegrationTest, UIManagerDeficit_Month1_SpeedSelectorRef
 // ============================================================================
 
 // --- Draw with CRITICAL toasts sets elements visible ---
-TEST_F(NotificationManagerTest_Phase8, Draw_WithCriticalToasts_SetsElementsVisible) {
+TEST_F(NotificationManagerTest, Draw_WithCriticalToasts_SetsElementsVisible) {
     notifMgr_->postCritical("Crisis", "Budget deficit");
 
     EXPECT_CALL(backend_, setElementVisible(_, true)).Times(AtLeast(1));
@@ -382,7 +382,7 @@ TEST_F(NotificationManagerTest_Phase8, Draw_WithCriticalToasts_SetsElementsVisib
 }
 
 // --- Draw with Normal toasts sets elements visible ---
-TEST_F(NotificationManagerTest_Phase8, Draw_WithNormalToasts_SetsElementsVisible) {
+TEST_F(NotificationManagerTest, Draw_WithNormalToasts_SetsElementsVisible) {
     notifMgr_->postNormal("Info", "Road completed", 10.0f);
 
     EXPECT_CALL(backend_, setElementVisible(_, true)).Times(AtLeast(1));
@@ -390,7 +390,7 @@ TEST_F(NotificationManagerTest_Phase8, Draw_WithNormalToasts_SetsElementsVisible
 }
 
 // --- Draw with log panel open sets it visible ---
-TEST_F(NotificationManagerTest_Phase8, Draw_LogOpen_SetsLogPanelVisible) {
+TEST_F(NotificationManagerTest, Draw_LogOpen_SetsLogPanelVisible) {
     notifMgr_->toggleLog();
     EXPECT_TRUE(notifMgr_->isLogOpen());
 
@@ -399,7 +399,7 @@ TEST_F(NotificationManagerTest_Phase8, Draw_LogOpen_SetsLogPanelVisible) {
 }
 
 // --- Draw with log panel closed sets it hidden ---
-TEST_F(NotificationManagerTest_Phase8, Draw_LogClosed_SetsLogPanelHidden) {
+TEST_F(NotificationManagerTest, Draw_LogClosed_SetsLogPanelHidden) {
     // Open then close the log.
     notifMgr_->toggleLog();
     notifMgr_->toggleLog();
@@ -410,7 +410,7 @@ TEST_F(NotificationManagerTest_Phase8, Draw_LogClosed_SetsLogPanelHidden) {
 }
 
 // --- onEvent: click on CRITICAL toast dismisses it ---
-TEST_F(NotificationManagerTest_Phase8, OnEvent_ClickOnCriticalToast_DismissesToast) {
+TEST_F(NotificationManagerTest, OnEvent_ClickOnCriticalToast_DismissesToast) {
     notifMgr_->postCritical("Crisis", "Budget deficit");
     EXPECT_TRUE(notifMgr_->hasCriticalToastVisible());
 
@@ -428,7 +428,7 @@ TEST_F(NotificationManagerTest_Phase8, OnEvent_ClickOnCriticalToast_DismissesToa
 }
 
 // --- onEvent: Enter key dismisses focused CRITICAL toast ---
-TEST_F(NotificationManagerTest_Phase8, OnEvent_EnterKey_DismissesFocusedToast) {
+TEST_F(NotificationManagerTest, OnEvent_EnterKey_DismissesFocusedToast) {
     notifMgr_->postCritical("Crisis", "Budget deficit");
 
     InputEvent enter;
@@ -439,7 +439,7 @@ TEST_F(NotificationManagerTest_Phase8, OnEvent_EnterKey_DismissesFocusedToast) {
 }
 
 // --- onEvent: Delete key dismisses focused CRITICAL toast ---
-TEST_F(NotificationManagerTest_Phase8, OnEvent_DeleteKey_DismissesFocusedToast) {
+TEST_F(NotificationManagerTest, OnEvent_DeleteKey_DismissesFocusedToast) {
     notifMgr_->postCritical("Crisis", "Budget deficit");
 
     InputEvent del;
@@ -450,7 +450,7 @@ TEST_F(NotificationManagerTest_Phase8, OnEvent_DeleteKey_DismissesFocusedToast) 
 }
 
 // --- onEvent: Tab cycles focus between CRITICAL toasts ---
-TEST_F(NotificationManagerTest_Phase8, OnEvent_Tab_CyclesFocusBetweenToasts) {
+TEST_F(NotificationManagerTest, OnEvent_Tab_CyclesFocusBetweenToasts) {
     notifMgr_->postCritical("Crisis 1", "First");
     notifMgr_->postCritical("Crisis 2", "Second");
 
@@ -462,7 +462,7 @@ TEST_F(NotificationManagerTest_Phase8, OnEvent_Tab_CyclesFocusBetweenToasts) {
 }
 
 // --- onEvent: Tab with single toast is still consumed ---
-TEST_F(NotificationManagerTest_Phase8, OnEvent_Tab_SingleToast_Consumed) {
+TEST_F(NotificationManagerTest, OnEvent_Tab_SingleToast_Consumed) {
     notifMgr_->postCritical("Crisis", "Single toast");
 
     InputEvent tab;
@@ -473,7 +473,7 @@ TEST_F(NotificationManagerTest_Phase8, OnEvent_Tab_SingleToast_Consumed) {
 }
 
 // --- onEvent: empty queue returns false ---
-TEST_F(NotificationManagerTest_Phase8, OnEvent_EmptyQueue_ReturnsFalse) {
+TEST_F(NotificationManagerTest, OnEvent_EmptyQueue_ReturnsFalse) {
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -483,13 +483,13 @@ TEST_F(NotificationManagerTest_Phase8, OnEvent_EmptyQueue_ReturnsFalse) {
 }
 
 // --- truncateBody: short body posted and drawn without crash ---
-TEST_F(NotificationManagerTest_Phase8, TruncateBody_ShortBody_PostAndDraw) {
+TEST_F(NotificationManagerTest, TruncateBody_ShortBody_PostAndDraw) {
     notifMgr_->postNormal("Info", "Short body text", 10.0f);
     EXPECT_NO_FATAL_FAILURE(notifMgr_->draw());
 }
 
 // --- truncateBody: long body (>80 chars) posted and drawn without crash ---
-TEST_F(NotificationManagerTest_Phase8, TruncateBody_LongBody_PostAndDraw) {
+TEST_F(NotificationManagerTest, TruncateBody_LongBody_PostAndDraw) {
     // kMaxBodyChars is 80 per NotificationManager.h
     std::string longBody(200, 'A');
     notifMgr_->postNormal("Info", longBody, 10.0f);
@@ -497,7 +497,7 @@ TEST_F(NotificationManagerTest_Phase8, TruncateBody_LongBody_PostAndDraw) {
 }
 
 // --- toggleLog shows entries text ---
-TEST_F(NotificationManagerTest_Phase8, ToggleLog_ShowsEntries) {
+TEST_F(NotificationManagerTest, ToggleLog_ShowsEntries) {
     notifMgr_->postCritical("Alert", "Something critical happened");
     notifMgr_->postNormal("Info", "Building complete", 10.0f);
 
@@ -507,7 +507,7 @@ TEST_F(NotificationManagerTest_Phase8, ToggleLog_ShowsEntries) {
 }
 
 // --- toggleLog mark critical entries with [!] prefix ---
-TEST_F(NotificationManagerTest_Phase8, ToggleLog_CriticalEntries_HavePrefix) {
+TEST_F(NotificationManagerTest, ToggleLog_CriticalEntries_HavePrefix) {
     notifMgr_->postCritical("Alert", "Crisis body");
 
     EXPECT_CALL(backend_, setElementText(_, HasSubstr("[!]"))).Times(AtLeast(1));
@@ -515,7 +515,7 @@ TEST_F(NotificationManagerTest_Phase8, ToggleLog_CriticalEntries_HavePrefix) {
 }
 
 // --- setModalActive(true) hides CRITICAL toasts ---
-TEST_F(NotificationManagerTest_Phase8, SetModalActive_HidesCriticalToasts) {
+TEST_F(NotificationManagerTest, SetModalActive_HidesCriticalToasts) {
     notifMgr_->postCritical("Crisis", "Budget deficit");
 
     EXPECT_CALL(backend_, removeElement(_)).Times(AtLeast(1));
@@ -523,7 +523,7 @@ TEST_F(NotificationManagerTest_Phase8, SetModalActive_HidesCriticalToasts) {
 }
 
 // --- setModalActive(false) re-shows CRITICAL toasts ---
-TEST_F(NotificationManagerTest_Phase8, SetModalActive_False_ReShowsCriticalToasts) {
+TEST_F(NotificationManagerTest, SetModalActive_False_ReShowsCriticalToasts) {
     notifMgr_->postCritical("Crisis", "Budget deficit");
     notifMgr_->setModalActive(true);
 
@@ -534,7 +534,7 @@ TEST_F(NotificationManagerTest_Phase8, SetModalActive_False_ReShowsCriticalToast
 }
 
 // --- setModalActive(false) re-pauses if queue non-empty ---
-TEST_F(NotificationManagerTest_Phase8, SetModalActive_False_RePausesIfQueueNonEmpty) {
+TEST_F(NotificationManagerTest, SetModalActive_False_RePausesIfQueueNonEmpty) {
     notifMgr_->postCritical("Crisis", "Budget deficit");
     notifMgr_->setModalActive(true);
 
@@ -546,7 +546,7 @@ TEST_F(NotificationManagerTest_Phase8, SetModalActive_False_RePausesIfQueueNonEm
 }
 
 // --- Normal toast queue depth limit ---
-TEST_F(NotificationManagerTest_Phase8, NormalToast_QueueDepthLimit) {
+TEST_F(NotificationManagerTest, NormalToast_QueueDepthLimit) {
     // Queue many normal toasts beyond depth limit (kMaxNormalQueueDepth).
     for (int i = 0; i < 20; ++i) {
         notifMgr_->postNormal("Info " + std::to_string(i), "Body", 10.0f);
@@ -556,7 +556,7 @@ TEST_F(NotificationManagerTest_Phase8, NormalToast_QueueDepthLimit) {
 }
 
 // --- update auto-dismisses expired normal toasts ---
-TEST_F(NotificationManagerTest_Phase8, Update_Removes_ExpiredNormalToasts) {
+TEST_F(NotificationManagerTest, Update_Removes_ExpiredNormalToasts) {
     notifMgr_->postNormal("T1", "Body1", 3.0f);
     notifMgr_->postNormal("T2", "Body2", 5.0f);
 
@@ -568,7 +568,7 @@ TEST_F(NotificationManagerTest_Phase8, Update_Removes_ExpiredNormalToasts) {
 }
 
 // --- addLogEntry caps entries at max ---
-TEST_F(NotificationManagerTest_Phase8, AddLogEntry_CapsAtMaxEntries) {
+TEST_F(NotificationManagerTest, AddLogEntry_CapsAtMaxEntries) {
     // Post many entries to exceed the log cap.
     for (int i = 0; i < 60; ++i) {
         notifMgr_->postNormal("Entry " + std::to_string(i), "Body", 100.0f);
@@ -578,7 +578,7 @@ TEST_F(NotificationManagerTest_Phase8, AddLogEntry_CapsAtMaxEntries) {
 }
 
 // --- hasCriticalToastVisible returns false when modal is active ---
-TEST_F(NotificationManagerTest_Phase8, HasCriticalToastVisible_FalseWhenModalActive) {
+TEST_F(NotificationManagerTest, HasCriticalToastVisible_FalseWhenModalActive) {
     notifMgr_->postCritical("Crisis", "Deficit");
     EXPECT_TRUE(notifMgr_->hasCriticalToastVisible());
 
@@ -725,7 +725,7 @@ TEST_F(UIManagerDeficitIntegrationTest, NotificationPolling_BudgetDeficitWarn) {
 // AFTER the toast element is made visible via m_backend->setElementVisible(handle, true).
 // Guard: if (m_audio). Fires once per toast appearance — not once per enqueue.
 //
-// Fixture: NotificationManagerTest_Phase8.
+// Fixture: NotificationManagerTest.
 //   NiceMock<MockUIBackend>:      returns incrementing handles from addStaticText/addButton.
 //   NiceMock<MockCitySimulation>: stub returns; not exercised by this test.
 //   ManualClock:                  time-independent; postNormal() does not need clock advance.
@@ -734,7 +734,7 @@ TEST_F(UIManagerDeficitIntegrationTest, NotificationPolling_BudgetDeficitWarn) {
 //
 // EXPECT_CALL is placed BEFORE postNormal() per standard GMock ordering rules.
 // ============================================================================
-TEST_F(NotificationManagerTest_Phase8, NotificationSFX_ToastVisible_UIToastSoundFires) {
+TEST_F(NotificationManagerTest, NotificationSFX_ToastVisible_UIToastSoundFires) {
     // Expect exactly one UI_TOAST sound call when the Normal toast becomes visible.
     // SoundPriority::NORMAL and gain 1.0f are the canonical values per phase-10.md.
     EXPECT_CALL(audio_, playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f)).Times(1);
@@ -758,7 +758,7 @@ TEST_F(NotificationManagerTest_Phase8, NotificationSFX_ToastVisible_UIToastSound
 // The auto-pause side-effect (setPaused(true)) is also covered by
 // CriticalToast_OnPost_AutoPausesCalled; here we verify the audio SFX companion.
 // ============================================================================
-TEST_F(NotificationManagerTest_Phase8, NotificationSFX_CriticalToast_UIToastSoundFires) {
+TEST_F(NotificationManagerTest, NotificationSFX_CriticalToast_UIToastSoundFires) {
     // Allow the auto-pause call that fires when the CRITICAL queue goes non-empty.
     EXPECT_CALL(sim_, setPaused(true)).Times(1);
 

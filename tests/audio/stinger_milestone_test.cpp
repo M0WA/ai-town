@@ -80,7 +80,7 @@ struct StingerMilestoneDispatcher {
 //   - onCityRatingTransition(CityRatingTier::Town) fires.
 //   - triggerStinger(StingerType::MILESTONE) must be called exactly once.
 // ---------------------------------------------------------------------------
-TEST(StingerMilestone, OnlyAtCityRatingTransition_NotRawPopulation)
+TEST(StingerTest, StingerMilestone_OnlyAtCityRatingTransition_NotRawPopulation)
 {
     // --- Scenario 1: 100K raw population milestone only ---
     {
@@ -119,7 +119,7 @@ TEST(StingerMilestone, OnlyAtCityRatingTransition_NotRawPopulation)
 // Verifies that each distinct tier transition fires stinger_milestone exactly once.
 // Covers Town→City (10K), City→Metropolis (50K), Metropolis→Megalopolis (500K).
 // ---------------------------------------------------------------------------
-TEST(StingerMilestone, AllTierTransitions_EachFiresExactlyOnce)
+TEST(StingerTest, StingerMilestone_AllTierTransitions_EachFiresExactlyOnce)
 {
     const CityRatingTier tiers[] = {
         CityRatingTier::Town,
@@ -146,7 +146,7 @@ TEST(StingerMilestone, AllTierTransitions_EachFiresExactlyOnce)
 // Verifies that population milestones that do NOT coincide with a CityRatingTier
 // boundary (e.g. 100K between City and Metropolis) do not fire the stinger.
 // ---------------------------------------------------------------------------
-TEST(StingerMilestone, RawPopulationMilestones_NeverFireStinger)
+TEST(StingerTest, StingerMilestone_RawPopulationMilestones_NeverFireStinger)
 {
     // Population counts that are milestones but NOT City Rating tier boundaries.
     // (Tier boundaries are 1K, 10K, 50K, 500K; 100K is between City and Metropolis.)

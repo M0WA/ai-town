@@ -96,7 +96,7 @@ const std::set<SoundId> kNoBypassSet = {
 // Contract verification: the bypass set contains exactly the 11 SoundIds
 // specified in phase-10.md and does NOT include the two service alert SFX.
 // ---------------------------------------------------------------------------
-TEST(NotificationSFXEFXBypass, DirectFilterSetToNull)
+TEST(NotificationSFXTest, NotificationSFX_EFXBypass_DirectFilterSetToNull)
 {
     // --- Part 1: verify bypass set size matches spec (11 entries) ---
     EXPECT_EQ(kEfxBypassSet.size(), 11u)
@@ -156,7 +156,7 @@ const std::set<SoundId> kRelativeSourceSet = {
     // NOTE: SFX_EARTHWORKS is intentionally NOT in this list.
 };
 // ---------------------------------------------------------------------------
-TEST(NotificationSFXEFXBypass, EarthworksPositionalException_NotRelative)
+TEST(NotificationSFXTest, NotificationSFX_EarthworksPositionalException_NotRelative)
 {
     // sfx_earthworks must be in the EFX bypass set
     EXPECT_NE(kEfxBypassSet.find(SFX_EARTHWORKS), kEfxBypassSet.end())

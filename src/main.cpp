@@ -28,6 +28,7 @@
 #include "src/terrain/TerrainSystem.h"
 #include "src/terrain/StdTerrainRNG.h"
 #include "src/audio/audio_system.h"
+#include "src/interfaces/sound_ids.h"   // MUSIC_MAIN_MENU_01 — Phase 10 startup music
 
 #include <irrlicht.h>
 #include <cstdio>
@@ -178,6 +179,16 @@ int main() {
     uiManager.setRenderer(&renderer);
     uiManager.setTerrainQuery(&terrainSystem);
     uiManager.setMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
+
+    // -------------------------------------------------------------------------
+    // Phase 10: start main menu music now that the AudioSystem is ready and all
+    // wiring is complete.  setMusicTrack() queues MUSIC_MAIN_MENU_01 for streaming
+    // via the audio thread; no crossfade is needed because no music is playing yet.
+    // This is the only place in the codebase that initiates main menu music at
+    // application startup. UIManager::transitionToMainMenu() uses the same call
+    // when returning from gameplay.
+    // -------------------------------------------------------------------------
+    audioSystem.setMusicTrack(MUSIC_MAIN_MENU_01);
 
     // -------------------------------------------------------------------------
     // EventReceiver — translates SEvent → InputEvent, dispatches per input-arbitration.md.

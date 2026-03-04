@@ -1354,8 +1354,13 @@ void UIManager::transitionToMainMenu() {
     m_inspector->hide();
     m_inspectorOpen = false;
 
-    // TODO Phase 9+: transition audio back to menu music when
-    // IAudioSystem::transitionToMenu() is available.
+    // Phase 10: cross-fade back to main menu music via setMusicTrack().
+    // IAudioSystem::setMusicTrack() handles the beat-boundary crossfade from
+    // whatever gameplay stem is playing; MUSIC_MAIN_MENU_01 is always used
+    // (no random selection for the back-to-menu transition).
+    if (m_audio) {
+        m_audio->setMusicTrack(MUSIC_MAIN_MENU_01);
+    }
 
     // Show main menu.
     m_state = GameState::MainMenu;

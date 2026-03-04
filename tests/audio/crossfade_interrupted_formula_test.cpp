@@ -71,7 +71,7 @@ float gainOutFromTOffset(float t_offset)
 // was just starting) and at current_gain_out = 0.0 returns 1 (fully faded,
 // outgoing stem has already reached silence), with no arccos domain error.
 // ---------------------------------------------------------------------------
-TEST(CrossfadeInterruptedFormula, NoDomainErrorAtBoundary)
+TEST(CrossfadeTest, Crossfade_InterruptedFormula_NoDomainErrorAtBoundary)
 {
     // At gain_out = 1.0 (crossfade just started, stem B at full volume):
     // arccos(1.0) = 0  →  t_offset = 0
@@ -114,7 +114,7 @@ TEST(CrossfadeInterruptedFormula, NoDomainErrorAtBoundary)
 // negative gain_out (floating-point underflow at the end of a crossfade can
 // produce small negative values like -1e-7f).
 // ---------------------------------------------------------------------------
-TEST(CrossfadeInterruptedFormula, ClampsBelowZero)
+TEST(CrossfadeTest, Crossfade_InterruptedFormula_ClampsBelowZero)
 {
     // A very small negative value — should be clamped to 0, producing t_offset = 1.
     const float t = computeInterruptedTOffset(-1e-7f);
@@ -130,7 +130,7 @@ TEST(CrossfadeInterruptedFormula, ClampsBelowZero)
 // Verifies the formula does not crash or return NaN when given a slightly
 // above-1.0 gain_out (can occur from floating-point rounding at crossfade start).
 // ---------------------------------------------------------------------------
-TEST(CrossfadeInterruptedFormula, ClampsAboveOne)
+TEST(CrossfadeTest, Crossfade_InterruptedFormula_ClampsAboveOne)
 {
     // A very small above-one value — should be clamped to 1, producing t_offset = 0.
     const float t = computeInterruptedTOffset(1.0f + 1e-7f);

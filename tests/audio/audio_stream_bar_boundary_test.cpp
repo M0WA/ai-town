@@ -97,7 +97,7 @@ static uint64_t computeNextBarBoundary(uint64_t samplesQueued,
 // Replace the inline helper calls with the real AudioStream helpers when
 // they are extracted in Phase 10.
 // ---------------------------------------------------------------------------
-TEST(AudioStreamBarBoundary, UsesConsistentBuffersQueuedPerWake)
+TEST(AudioStreamTest, AudioStream_BarBoundary_UsesConsistentBuffersQueuedPerWake)
 {
     // Simulate a mid-stream state: 256 buffers queued to AL, 8 still in the
     // driver queue (not yet played).  At 44100 Hz stereo with 16384 frames/buffer:
@@ -156,7 +156,7 @@ TEST(AudioStreamBarBoundary, UsesConsistentBuffersQueuedPerWake)
 //
 // Phase 10 stub contract: the test body below is ALREADY the full test.
 // ---------------------------------------------------------------------------
-TEST(AudioStreamBarBoundary, StreamStart_NoFalseFire)
+TEST(AudioStreamTest, AudioStream_BarBoundary_StreamStart_NoFalseFire)
 {
     // At stream start: 8 buffers have been queued to AL (samplesQueued = 8 × 16384),
     // but the driver has not consumed any yet (buffersQueued still = 8).

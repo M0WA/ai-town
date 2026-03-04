@@ -36,7 +36,32 @@ These deliverables were explicitly deferred from Phase 9b to Phase 10 (ref: `imp
 
 #### UI Assets — Sprite Sheet (graphics-artist-2d-texture)
 
-- [ ] Sprite sheet asset: author and place `assets/textures/ui/hud_sprites_ui.png` (PNG, for Irrlicht's `IVideoDriver::getTexture()`). **Scope clarification (resolved)**: Phase 9b defined the cell-layout spec and `hud_sprite_ids.h` constants but did NOT require the actual artwork file to exist on disk — `IrrlichtUIBackend::m_spriteTextureReady` was `false` and toolbar buttons showed fallback letter text. Phase 10 is the first phase that requires the artwork file to be authored, exported, and committed. All rows defined in `architecture/asset-standards/2d-texture-standards.md` Cell Assignment Tables (rows 0–6 and 8–10) must be fully painted in this phase. Row 7 (cursor-shape icons) remains reserved blank cells — see cursor-icon scope note below. **Authoring pipeline — mandatory steps in order**:
+**Pre-authoring actions required before painting begins (decided 2026-03-04)**:
+
+- [ ] **Remove `hud_sprites_ui.dds` from git tracking** (`graphics-artist-2d-texture`):
+  Run `git rm --cached assets/textures/ui/hud_sprites_ui.dds`. The file was erroneously
+  committed; the spec explicitly prohibits committing the DDS intermediate. The root
+  `.gitignore` now lists this path. This removal must be in the same PR as the artwork delivery
+  (or a standalone cleanup PR before it). Do not open the artwork PR while this file is still
+  tracked — `validate_assets.py` must not find it in the repository tree.
+
+- [ ] **Remove `hud_sprites_ui_layout.json` from git** (`graphics-artist-2d-texture`):
+  Run `git rm assets/textures/ui/hud_sprites_ui_layout.json`. This file uses a 56 px
+  icon-spacing layout that is incompatible with the canonical 32×32 grid of 64×64 px cells.
+  It is not an authoritative reference and will mislead anyone authoring the Phase 10 icons.
+  The canonical layout is the Cell Assignment Tables in
+  `architecture/asset-standards/2d-texture-standards.md` and the constants in
+  `src/ui/hud_sprite_ids.h`. The root `.gitignore` now lists this path too.
+
+- [ ] **Replace the existing stub PNG** (`graphics-artist-2d-texture`): The PNG currently
+  committed at `assets/textures/ui/hud_sprites_ui.png` is a near-empty stub — all cells
+  are transparent or contain only dark background fill pixels (0.11% non-zero alpha coverage
+  at 4 px stride sampling). It does NOT satisfy any Phase 10 exit criterion. Paint all rows
+  0–6 and rows 8–10 from scratch per the visual conventions in
+  `architecture/asset-standards/2d-texture-standards.md` "Authoring Notes for Sprite Sheet
+  Icons (Phases 9b and 10)". The stub PNG must be replaced in the Phase 10 PR.
+
+- [ ] **Sprite sheet asset: author and place `assets/textures/ui/hud_sprites_ui.png`** (PNG, for Irrlicht's `IVideoDriver::getTexture()`). **Scope clarification (resolved)**: Phase 9b defined the cell-layout spec and `hud_sprite_ids.h` constants but did NOT require the actual artwork file to exist on disk — `IrrlichtUIBackend::m_spriteTextureReady` was `false` and toolbar buttons showed fallback letter text. Phase 10 is the first phase that requires the artwork file to be authored, exported, and committed. All rows defined in `architecture/asset-standards/2d-texture-standards.md` Cell Assignment Tables (rows 0–6 and 8–10) must be fully painted in this phase. Row 7 (cursor-shape icons) remains reserved blank cells — see cursor-icon scope note below. **Authoring pipeline — mandatory steps in order**:
   1. Author source artwork as a 2048×2048 RGBA8 image in your DCC tool (Photoshop, GIMP, Aseprite, or equivalent). The canvas must be exactly 2048×2048. Lay out a 32×32 cell grid where each cell is 64×64 px. Work in linear colour space throughout (do NOT apply sRGB gamma to a UI sprite sheet — UI textures are uploaded via the linear pool). Author icon art for rows 0–6 and rows 8–10 per the visual conventions in `architecture/asset-standards/2d-texture-standards.md` section "Authoring Notes for Sprite Sheet Icons (Phases 9b and 10)". That section covers all rows required for Phase 10, including rows 6, 8, 9, and 10 which have visual conventions added for this phase (active tool indicators at 32×32 px; minimap overlay toggle icons at 48×48 px; notification/HUD miscellaneous icons). Leave row 7 cells fully transparent (RGBA = 0,0,0,0) — cursor icon cells are reserved stubs; no art is required for Phase 10.
   2. Export the source as `hud_sprites_ui.png` (32-bit RGBA PNG). Verify the export is 2048×2048 pixels with an alpha channel.
   3. Convert to DDS using **nvcompress only** — the command is `nvcompress -rgba -nomips hud_sprites_ui.png hud_sprites_ui.dds`. **Compressonator is PROHIBITED for this file** — Compressonator's ARGB_8888 stores data in BGRA byte order, which causes a silent red-blue channel swap when uploaded via `GL_RGBA` / `GL_UNSIGNED_BYTE`. nvcompress `-rgba -nomips` guarantees true RGBA byte order and suppresses mip generation. This constraint is specified in `architecture/asset-standards/2d-texture-standards.md` DDS Authoring Pipeline (UI sprite sheet row). **nvcompress version verification (mandatory before converting)**: run the byte-order verification spike described in the Risks section before committing any DDS output. If the nvcompress version produces BGRA output (i.e., the byte-order check fails), use the approved fallback path: export the source artwork directly as a lossless 32-bit RGBA PNG (the `hud_sprites_ui.png` runtime asset) without any DDS intermediate step — the PNG is pixel-identical to the DDS pixel data for uncompressed RGBA8 and Irrlicht loads it correctly via `getTexture()`. In that case, skip steps 4 and 5 and proceed directly to step 6.

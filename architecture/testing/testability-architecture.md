@@ -886,7 +886,7 @@ All Phase 10 audio tests carry label `unit` and run without a display device or 
 | `CitySimulationRenderTest` | `CitySimulation_DemolishServiceBuilding_RemovesMesh` | `tests/simulation/city_simulation_render_test.cpp` |
 | `CitySimulationRenderTest` | `CitySimulation_DensityUpgrade_SwapsBuildingMesh` | `tests/simulation/city_simulation_render_test.cpp` |
 
-`CitySimulationRenderTest` fixture uses `NiceMock<MockRenderer>` (not `StrictMock`) because these tests focus on verifying that the correct `MockRenderer` mesh-placement method is called — using `StrictMock` would require exhaustive EXPECT_CALLs for every audio side-effect on the same code path. All `CitySimulationRenderTest` cases carry label `unit`. CTest filter for Phase 10 simulation render tests: `-R CitySimulationRenderTest`.
+`CitySimulationRenderTest` fixture uses `NiceMock<MockRenderer>` (not `StrictMock`) because these tests focus on verifying that the correct `MockRenderer` mesh-placement method is called — using `StrictMock` would require exhaustive EXPECT_CALLs for every audio side-effect on the same code path. The fixture also uses `NiceMock<MockAudioSystem>` (not `StrictMock`) for the same reason: every placement operation (placeZone, placeRoad, placeServiceBuilding, demolishTile, doDensityUnlockTick) fires positional or non-positional audio calls alongside the mesh-placement calls; a `StrictMock<MockAudioSystem>` would require declaring EXPECT_CALLs for every audio side-effect in a test whose assertion target is the renderer, defeating the test's focus. Approved mock policy deviation: `NiceMock<MockAudioSystem>` is used with explicit `EXPECT_CALL` on the renderer method under test. All `CitySimulationRenderTest` cases carry label `unit`. CTest filter for Phase 10 simulation render tests: `-R CitySimulationRenderTest`.
 
 **`Crossfade_InterruptedFormula_NoDomainErrorAtBoundary` test contract** — this test verifies that the interrupted crossfade `t_offset` formula `t_offset=(2/π)×arccos(current_gain_out)` returns 0.0 when `current_gain_out=1.0` and 1.0 when `current_gain_out=0.0`, with no `arccos` domain error at either boundary.
 
@@ -989,14 +989,6 @@ the audio playback path, not a unit test with strict call-count expectations on 
 **Source file**: `tests/audio/notification_sfx_efx_bypass_test.cpp`
 
 **CTest filter**: `-R NotificationSFX_EFXBypass_DirectFilterSetToNull`
-
-**Phase 10 `simulation_tests` canonical test name** — the following canonical name is mandated for the Phase 10 simulation unit test added to `simulation_tests` via `target_sources(simulation_tests PRIVATE tests/simulation/adaptive_music_intensity_test.cpp)`. This test exercises `CitySimulation::update()` with `StrictMock<MockAudioSystem>` and does NOT belong in `audio_tests`.
-
-| Test Suite | Test Case | Source File |
-|---|---|---|
-| `AdaptiveMusicIntensityTest` | `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` | `tests/simulation/adaptive_music_intensity_test.cpp` |
-
-All Phase 10 simulation tests carry label `unit`. CTest filter: `-R AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem`.
 
 **`AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` test contract** — this test verifies that `CitySimulation::update()` calls `audioSystem->setMusicIntensity()` with the correct `MusicIntensity` tier when treasury/growth/deficit state changes, matching the thresholds defined in `architecture/game-design/economy-model.md` Music Intensity Tiers section.
 
@@ -1153,7 +1145,7 @@ For every unit test that uses `StrictMock<MockAudioSystem>` or `StrictMock<MockR
 | `WorldInteraction_Demolish_SparseOverlay_ErasesEntry` | None | `pickTerrainTile` × AtLeast(2) (zone placement + demolish); `setZoneOverlay` × 2 (one after placement, one after demolish; second call has empty map) |
 | `WorldInteraction_UtilitiesPlacement_CallsPlaceServiceBuilding` | None | `pickTerrainTile` × 1 (returns tile 5,7); `MockCitySimulation::placeServiceBuilding(5, 7, ServiceBuildingType::FireStation, 0)` × 1 |
 | `CitySimulation_PlaceRoad_FiresSFXRoadBuild` | `StrictMock<MockAudioSystem>::playPositionalSound(SFX_ROAD_BUILD, _, _, _)` × 1 | None (`NiceMock<MockRenderer>` — renderer call is incidental) |
-| **Phase 10 rendering rows — apply when `CitySimulationUnitTest` uses `StrictMock<MockRenderer>`** | | |
+| **Phase 10 rendering rows — `CitySimulationRenderTest` cases (`NiceMock<MockRenderer>` + `NiceMock<MockAudioSystem>`); also apply to any `CitySimulationUnitTest` case that exercises these code paths with `StrictMock<MockRenderer>`** | | |
 | `CitySimulation_PlaceZone_SpawnsBuilding` (Phase 10) | `playPositionalSound(SFX_BUILD_PLACE, _, _, _)` × 1 | `placeBuildingMesh(5, 7, "res_low_01")` × 1 (zone type Residential Low → `assetBaseName = "res_low_01"`) |
 | `CitySimulation_PlaceRoad_SpawnsRoadMesh` (Phase 10) | `playPositionalSound(SFX_ROAD_BUILD, _, _, _)` × 1 | `placeRoadMesh(5, 7)` × 1 |
 | `CitySimulation_PlaceServiceBuilding_SpawnsMesh` (Phase 10) | `playPositionalSound(SFX_BUILD_PLACE, _, _, _)` × 1 | `placeServiceBuildingMesh(5, 7, ServiceBuildingType::FireStation)` × 1 |

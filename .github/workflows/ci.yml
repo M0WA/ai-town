@@ -429,6 +429,28 @@ jobs:
         run: |
           "${{ github.workspace }}\build\vcpkg_installed\x64-windows\bin" >> $env:GITHUB_PATH
 
+      # Step 12e: Verify Phase 10 font assets are present in the source tree.
+      # Mirrors the identical check in build-linux and coverage-linux.
+      # IrrlichtUIBackend loads hud_font.xml and hud_mono_font.xml at runtime with
+      # graceful fallback (log warning, no crash) — so a missing font file does NOT
+      # cause a test-binary failure.  Without this explicit check, Phase 10 could
+      # ship to main without the font assets and Windows CI would silently pass.
+      # Phase 10 exit criterion: "both load without error ... on both Linux and Windows CI".
+      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1"
+      # is PS 7+ only; GitHub Actions Windows runners use PS 5.1.
+      - name: Verify Phase 10 font assets present
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "assets/fonts/hud_font.xml")) {
+            Write-Error "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing"
+            exit 1
+          }
+          if (-not (Test-Path "assets/fonts/hud_mono_font.xml")) {
+            Write-Error "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing"
+            exit 1
+          }
+          Write-Host "Phase 10 font assets verified: hud_font.xml and hud_mono_font.xml present."
+
       # Step 13: Run unit tests.
       # AITOWN_HEADLESS=1 and ALSOFT_DRIVERS=null required — headless Windows runners
       # have no audio hardware and will fail AudioSystem initialization without null driver.

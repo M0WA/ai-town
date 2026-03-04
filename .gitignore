@@ -3,3 +3,7 @@
 .fetchcontent_cache/
 /build*/
 __pycache__
+# UI sprite sheet DDS intermediate — authoring artifact only, never committed
+assets/textures/ui/hud_sprites_ui.dds
+# Legacy non-conforming layout JSON — must not be used as authoring reference
+assets/textures/ui/hud_sprites_ui_layout.json
