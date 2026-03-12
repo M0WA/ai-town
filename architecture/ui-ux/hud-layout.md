@@ -90,6 +90,45 @@ active-state sprite. The selected zone type and density tier are stored in
 - The zone sub-panel is NOT shown when Query mode is active. It reappears the moment the
   Zone tool is next selected.
 
+### Zone Rectangular Selection (SimCity-style)
+
+The Zone tool uses a deferred rectangular fill pattern for placement. This is the sole
+placement tool that does NOT fill tiles as the cursor drags.
+
+**Interaction sequence:**
+
+1. **LMB press on terrain** — sets the anchor tile (`m_zoneAnchorX`, `m_zoneAnchorZ`) to
+   the tile under the cursor. The hover highlight updates to the anchor tile. No zone tiles
+   are placed on press. The event is consumed (`return true`).
+
+2. **Mouse drag (LMB held)** — the hover highlight updates to the current tile under the
+   cursor as the mouse moves. No zone tiles are placed during drag. The rectangle corner
+   moves with the cursor but no overlay or preview rectangle is drawn in V1 (the hover
+   highlight shows the current corner tile only — V1 Option B). The drag-to-place path
+   (`doTerrainPlacement` on `MouseMove`) is excluded for the Zone tool.
+
+3. **LMB release** — fills all tiles in the axis-aligned rectangle
+   `[min(anchorX, hoverX) .. max(anchorX, hoverX)] × [min(anchorZ, hoverZ) .. max(anchorZ, hoverZ)]`
+   by calling `doTerrainPlacement(tx, tz)` for each tile. Each tile's earthworks cost is
+   computed independently (slope checked per tile). After the fill, the anchor is reset to
+   `{-1, -1}` and the hover highlight reverts to the release tile. The release event is NOT
+   consumed (`return false`) per Priority 7 rules.
+
+**Invariants:**
+
+- A 1×1 selection (press and release on the same tile) calls `doTerrainPlacement` exactly
+  once, matching the semantics of a single click.
+- If the LMB is released while the hover tile is invalid (`m_hoveredTileX == -1`, e.g., ray
+  missed all terrain), no tiles are filled and the anchor is cleared silently.
+- When the active tool changes away from Zone (toolbar click, hotkey, or any other path),
+  `m_zoneAnchorX` and `m_zoneAnchorZ` are reset to `-1` and `m_lmbHeld` is reset to `false`
+  as part of `onNewGame()`. The tool-switch does not trigger a partial fill.
+
+**Road, Utilities, and Demolish** tools retain their original tile-by-tile drag behavior:
+`MouseButtonDown` calls `doTerrainPlacement()` immediately on press, and `MouseMove` with
+LMB held calls `doTerrainPlacement()` for each new tile the cursor enters. See
+`input-arbitration.md` Priority 7 for the authoritative per-tool behavior table.
+
 ## Utilities Sub-Panel
 
 The Utilities sub-panel is a 2×2 grid of buttons that appears immediately to the right of the

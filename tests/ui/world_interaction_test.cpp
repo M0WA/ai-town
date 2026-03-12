@@ -73,6 +73,19 @@ static InputEvent makeMouseButtonDown(int button, int virtX = 500, int virtY = 5
     return ev;
 }
 
+// LMB release helper — used for Zone rectangular-select release dispatch.
+static InputEvent makeMouseButtonUp(int button, int virtX = 500, int virtY = 500)
+{
+    InputEvent ev{};
+    ev.type   = InputEvent::Type::MouseButtonUp;
+    ev.button = button;
+    ev.x      = virtX;
+    ev.y      = virtY;
+    ev.physX  = virtX;
+    ev.physY  = virtY;
+    return ev;
+}
+
 static InputEvent makeMouseMove(int virtX, int virtY)
 {
     InputEvent ev{};
@@ -298,8 +311,10 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZonePlacement_CallsPlaceZone)
     // earthworksCostOverride=0: terrain slope is 0° (ManualTerrainQuery default).
     EXPECT_CALL(sim_, placeZone(5, 7, _, _, 0)).Times(1);
 
-    // Act: left-click at a position outside the toolbar (world area).
+    // Zone rect-select: press sets anchor (no placement yet); release fills rectangle.
+    // With anchor=(5,7) and hover=(5,7), the 1x1 rect triggers one placeZone call.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 }
 
 // ---------------------------------------------------------------------------
@@ -385,7 +400,10 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneTool_SteepSlope_InsufficientFu
     EXPECT_CALL(backend_, addStaticText(HasSubstr("insufficient funds"), _, _, _, _))
         .Times(AtLeast(1));
 
+    // Zone rect-select: press sets anchor; release triggers doTerrainPlacement
+    // which posts the toast and returns without calling placeZone.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 }
 
 // ---------------------------------------------------------------------------
@@ -545,7 +563,9 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZonePlacement_SparseOverlay_Insert
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
         .WillOnce(SaveArg<2>(&capturedMap));
 
+    // Zone rect-select: press sets anchor at (3,4); release fills the 1x1 rect.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 
     // Assert: exactly one entry; key=43; value=kOverlayArgbResidential (green, 0x6000FF00).
     ASSERT_EQ(capturedMap.size(), 1u)
@@ -581,7 +601,9 @@ TEST_F(WorldInteractionTest, WorldInteraction_Demolish_SparseOverlay_ErasesEntry
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
         .WillOnce(SaveArg<2>(&capturedAfterPlace));
 
+    // Zone rect-select: press sets anchor at (3,4); release fills the 1x1 rect.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 
     // Verify placement produced a non-empty map.
     EXPECT_EQ(capturedAfterPlace.size(), 1u);
@@ -626,7 +648,9 @@ TEST_F(WorldInteractionTest, WorldInteraction_NewGameLoad_ClearsOverlay)
             .WillOnce(DoAll(SetArgReferee<2>(t[0]), SetArgReferee<3>(t[1]), Return(true)));
         EXPECT_CALL(sim_, placeZone(t[0], t[1], _, _, 0)).Times(1);
         EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(1);
+        // Zone rect-select: press sets anchor; release fills the 1x1 rect.
         uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+        uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
     }
 
     // onNewGame() must clear m_overlayMap and push an empty setZoneOverlay call.
@@ -698,7 +722,9 @@ TEST_F(WorldInteractionTest, WorldInteraction_OverlayCap_100K_StillCalls)
             SetArgReferee<3>(250),
             Return(true)));
 
+    // Zone rect-select: press sets anchor; release fires doTerrainPlacement.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 
     // Assert: cap enforced — overlay map size must not exceed 100,000 entries.
     EXPECT_LE(static_cast<int>(captured.size()), 100000)
@@ -726,7 +752,9 @@ TEST_F(WorldInteractionTest, WorldInteraction_SetMapDimensions_Recall_ClearsOver
             .WillOnce(DoAll(SetArgReferee<2>(i), SetArgReferee<3>(0), Return(true)));
         EXPECT_CALL(sim_, placeZone(i, 0, _, _, 0)).Times(1);
         EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(1);
+        // Zone rect-select: press sets anchor; release fills the 1x1 rect.
         uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+        uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
     }
 
     // Re-call setMapDimensions with different dimensions.
@@ -1544,4 +1572,209 @@ TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_HoverUpdateOnClick_NoDoub
     EXPECT_CALL(renderer_, setTileHoverHighlight(5, 7, _)).Times(1);
     EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
     uiManager_->onEvent(makeMouseMove(500, 500));
+}
+
+// ---------------------------------------------------------------------------
+// Test 31: ZoneRectSelect_LmbPress_DoesNotPlaceImmediately
+//
+// Zone tool: LMB press must set the anchor and return consumed=true, but
+// placeZone must NOT be called on press (placement is deferred to release).
+//
+// This verifies the SimCity-style rectangular selection: the press only sets the
+// anchor corner; the actual tile fill happens on LMB release.
+// (ref: implementation/phase-10.md Zone rectangular selection)
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_LmbPress_DoesNotPlaceImmediately)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+
+    activateZoneTool();
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(::testing::AnyNumber());
+
+    // pickTerrainTile is called to resolve the anchor tile.
+    EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
+
+    // Primary assertion: placeZone must NOT be called on LMB press.
+    EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
+
+    // Act: LMB press at world position.
+    bool consumed = uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    // Event must be consumed (anchor set) but no placement called.
+    EXPECT_TRUE(consumed) << "Zone LMB press must be consumed (anchor was set)";
+}
+
+// ---------------------------------------------------------------------------
+// Test 32: ZoneRectSelect_SingleTile_PressRelease_PlacesOnce
+//
+// Zone tool: LMB press and release on the same tile must call placeZone exactly
+// once (1x1 rectangle).
+//
+// Sequence:
+//   LMB press  → anchor=(5,7), no placement
+//   LMB release (same tile, m_hoveredTileX=5, m_hoveredTileZ=7) → placeZone once
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_SingleTile_PressRelease_PlacesOnce)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(::testing::AnyNumber());
+
+    activateZoneTool();
+
+    // Step 1: LMB press — anchor set at (5,7), no placement.
+    EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
+    EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    // Step 2: LMB release — hover tile is still (5,7) from the press; rect is 1x1.
+    // placeZone(5, 7, _, _, 0) must be called exactly once.
+    EXPECT_CALL(sim_, placeZone(5, 7, _, _, 0)).Times(1);
+
+    InputEvent upEv{};
+    upEv.type   = InputEvent::Type::MouseButtonUp;
+    upEv.button = 0;
+    upEv.x      = 500;
+    upEv.y      = 500;
+    upEv.physX  = 500;
+    upEv.physY  = 500;
+    uiManager_->onEvent(upEv);
+}
+
+// ---------------------------------------------------------------------------
+// Test 33: ZoneRectSelect_MultiTileRect_FillsAllTiles
+//
+// Zone tool: drag from (2,3) to (4,5) → release must fill 3x3 = 9 tiles.
+//
+// Sequence:
+//   LMB press  → anchor=(2,3)
+//   MouseMove  → hovered tile updates to (4,5), no intermediate placement
+//   LMB release → placeZone called 9 times for all tiles in [2..4, 3..5]
+//
+// Verifies that the release iterates the full rectangle and calls doTerrainPlacement
+// for each tile independently.
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_MultiTileRect_FillsAllTiles)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(::testing::AnyNumber());
+
+    activateZoneTool();
+
+    // Step 1: LMB press — anchor set at (2,3).
+    EXPECT_CALL(renderer_, pickTerrainTile(200, 300, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(2), SetArgReferee<3>(3), Return(true)));
+    // No placement on press.
+    EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
+    uiManager_->onEvent(makeMouseButtonDown(0, 200, 300));
+
+    // Step 2: MouseMove — drag to (4,5). No placeZone during drag (Zone uses deferred fill).
+    EXPECT_CALL(renderer_, pickTerrainTile(400, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(4), SetArgReferee<3>(5), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(4, 5, _)).Times(AtLeast(1));
+    // Confirm no placeZone during MouseMove with Zone tool.
+    EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
+    uiManager_->onEvent(makeMouseMove(400, 500));
+
+    // Step 3: LMB release — fills rect [2..4] x [3..5] = 9 tiles.
+    // Each tile in the rectangle must receive exactly one placeZone call.
+    for (int tz = 3; tz <= 5; ++tz) {
+        for (int tx = 2; tx <= 4; ++tx) {
+            EXPECT_CALL(sim_, placeZone(tx, tz, _, _, 0)).Times(1);
+        }
+    }
+
+    InputEvent upEv{};
+    upEv.type   = InputEvent::Type::MouseButtonUp;
+    upEv.button = 0;
+    upEv.x      = 400;
+    upEv.y      = 500;
+    upEv.physX  = 400;
+    upEv.physY  = 500;
+    uiManager_->onEvent(upEv);
+}
+
+// ---------------------------------------------------------------------------
+// Test 34: ZoneRectSelect_RoadDragUnchanged_PlacesOnEachNewTile
+//
+// Road tool drag still uses the original tile-by-tile behavior (NOT deferred rect).
+// LMB press places tile (5,7); MouseMove to (6,7) places again; no deferred fill.
+//
+// This is a regression guard: the rectangular selection change must NOT affect Road.
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_RoadDragUnchanged_PlacesOnEachNewTile)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+
+    activateRoadTool();
+
+    // Step 1: LMB press on tile (5,7) — places immediately (road drag, not deferred).
+    EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
+    EXPECT_CALL(sim_, placeRoad(5, 7, 0)).Times(1);
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    // Step 2: MouseMove to tile (6,7) — road drag fires placement immediately.
+    EXPECT_CALL(renderer_, pickTerrainTile(600, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(7), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(6, 7, _)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(6, 7, 0)).Times(1);
+    uiManager_->onEvent(makeMouseMove(600, 500));
+
+    // Step 3: LMB release — no placement on release for Road (unlike Zone).
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
+    InputEvent upEv{};
+    upEv.type   = InputEvent::Type::MouseButtonUp;
+    upEv.button = 0;
+    upEv.x      = 600;
+    upEv.y      = 500;
+    upEv.physX  = 600;
+    upEv.physY  = 500;
+    uiManager_->onEvent(upEv);
+}
+
+// ---------------------------------------------------------------------------
+// Test 35: ZoneRectSelect_DragNoDragPlacement_ZoneToolExcluded
+//
+// Zone tool: LMB press + MouseMove to a different tile must NOT call placeZone
+// during the MouseMove (zone drag is deferred to release).
+//
+// Before this change, the MouseMove drag path would have called doTerrainPlacement
+// for zone drag. After the change, the Zone tool is excluded from the drag-to-place
+// path and placement is deferred entirely to LMB release.
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_DragNoDragPlacement_ZoneToolExcluded)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(::testing::AnyNumber());
+
+    activateZoneTool();
+
+    // Step 1: LMB press — anchor set at (2,3), no placement.
+    EXPECT_CALL(renderer_, pickTerrainTile(200, 300, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(2), SetArgReferee<3>(3), Return(true)));
+    EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
+    uiManager_->onEvent(makeMouseButtonDown(0, 200, 300));
+
+    // Step 2: MouseMove to different tile — placeZone must still NOT be called.
+    EXPECT_CALL(renderer_, pickTerrainTile(400, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(4), SetArgReferee<3>(5), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(4, 5, _)).Times(AtLeast(1));
+    EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
+    uiManager_->onEvent(makeMouseMove(400, 500));
+
+    // No LMB release in this test — just verifying no drag-to-place for Zone.
+    // The anchor and lmbHeld state will be cleaned up by TearDown.
+    // Issue a release to satisfy StrictMock (no unexpected calls on cleanup).
+    InputEvent upEv{};
+    upEv.type   = InputEvent::Type::MouseButtonUp;
+    upEv.button = 0;
+    upEv.x      = 400;
+    upEv.y      = 500;
+    upEv.physX  = 400;
+    upEv.physY  = 500;
+    // Release fills the rect — allow the 3x3 placeZone calls here.
+    EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(::testing::AnyNumber());
+    uiManager_->onEvent(upEv);
 }

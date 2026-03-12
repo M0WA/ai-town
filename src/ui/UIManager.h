@@ -230,6 +230,17 @@ private:
     // Set true on MouseButtonDown button==0, false on MouseButtonUp button==0.
     bool m_lmbHeld{false};
 
+    // --- Phase 10: Zone rectangular selection anchor ---
+    // Set to the first tile clicked when Zone tool LMB is pressed.
+    // Reset to {-1,-1} on LMB release (after filling the rectangle).
+    // While held (-1 means no active rect drag), drag does NOT fill tiles — only
+    // the hover highlight moves. On release, ALL tiles in the axis-aligned rectangle
+    // [min(anchor,current), max(anchor,current)] are filled via doTerrainPlacement().
+    // Road, Utilities, and Demolish tools retain their original tile-by-tile drag
+    // behavior; only Zone uses this deferred rectangular fill pattern.
+    int m_zoneAnchorX{-1};
+    int m_zoneAnchorZ{-1};
+
     // --- Phase 9b: Zone sub-panel button handles (3×3 grid: col=zone R/C/I, row=density Low/Med/High) ---
     // Created during UIManager construction via m_backend->addButton().
     // Stored in row-major order: m_zoneSubPanelBtns[densityRow * 3 + zoneCol].
