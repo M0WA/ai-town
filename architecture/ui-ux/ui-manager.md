@@ -9,9 +9,9 @@
 
 ## IUIBackend Method Contract
 
-The total method count is **19**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+The total method count is **20**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
 
-Methods 1–17 were established in Phase 8. Method 18 (`setElementBackground`) was added in Phase 9b (minimap dark-panel fix — see `architecture/ui-ux/minimap.md` §IUIBackend method 18). Method 19 (`setElementMonoFont`) was added in Phase 10 (monospace numeric readout requirement — see below).
+Methods 1–17 were established in Phase 8. Method 18 (`setElementBackground`) was added in Phase 9b (minimap dark-panel fix — see `architecture/ui-ux/minimap.md` §IUIBackend method 18). Method 19 (`setElementMonoFont`) was added in Phase 10 (monospace numeric readout requirement — see below). Method 20 (`setElementRect`) was added in Phase 10 (modal dialog centring fix — see `architecture/ui-ux/modal-dialog-system.md` §Element Repositioning).
 
 ```cpp
 class IUIBackend {
@@ -108,6 +108,19 @@ public:
     //     Added in Phase 10 to replace the untestable static_cast<IrrlichtUIBackend*> pattern.
     //     See architecture/ui-ux/hud-layout.md §Font Loading — Monospace requirement.
     virtual void setElementMonoFont(UIElementHandle handle) = 0;
+
+    // 20. Reposition and resize an existing element in-place without destroying
+    //     its handle. Coordinates are in virtual 1920×1080 space.
+    //     In IrrlichtUIBackend: updates the stored virtualRect (so
+    //     handleViewportResize() continues to scale correctly) and immediately
+    //     applies IGUIElement::setRelativePosition() at the current physical
+    //     resolution. Element type and all other state are preserved.
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     ModalDialog uses this to centre the dialog box and reposition its
+    //     title/body/button children without destroying and recreating handles.
+    //     Added in Phase 10 for the modal dialog centring fix.
+    //     See architecture/ui-ux/modal-dialog-system.md §Element Repositioning.
+    virtual void setElementRect(UIElementHandle handle, int x, int y, int w, int h) = 0;
 };
 ```
 

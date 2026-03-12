@@ -54,10 +54,17 @@ public:
     //     In MockUIBackend: MOCK_METHOD stub. Labels and button text MUST NOT call this method.
     //     Added in Phase 10. See architecture/ui-ux/hud-layout.md §Font Loading — Monospace requirement.
     virtual void setElementMonoFont(UIElementHandle handle) = 0;
+    // 20. Reposition and resize an existing element in-place without destroying
+    //     its handle. Coordinates are in virtual 1920×1080 space.
+    //     In IrrlichtUIBackend: updates stored virtualRect + calls setRelativePosition().
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     Added in Phase 10 for the modal dialog centring fix.
+    //     See architecture/ui-ux/modal-dialog-system.md §Element Repositioning.
+    virtual void setElementRect(UIElementHandle handle, int x, int y, int w, int h) = 0;
 };
 ```
 
-`MockUIBackend` **source location**: `tests/ui/mock_ui_backend.h`. The file contains 19 `MOCK_METHOD` entries — one per `IUIBackend` virtual method — as of Phase 10 (method 19 `setElementMonoFont` added in Phase 10). **Rule**: whenever a new virtual method is added to `IUIBackend`, a matching `MOCK_METHOD` entry MUST be added to `tests/ui/mock_ui_backend.h` in the same commit. The spec description above (inline `IUIBackend` class block) and `tests/ui/mock_ui_backend.h` must always have the same method count. `ui-manager.md` §IUIBackend Method Contract is the production-facing authority; this file is the test-facing authority; both must remain consistent.
+`MockUIBackend` **source location**: `tests/ui/mock_ui_backend.h`. The file contains 20 `MOCK_METHOD` entries — one per `IUIBackend` virtual method — as of Phase 10 (method 19 `setElementMonoFont` added in Phase 10; method 20 `setElementRect` added in Phase 10). **Rule**: whenever a new virtual method is added to `IUIBackend`, a matching `MOCK_METHOD` entry MUST be added to `tests/ui/mock_ui_backend.h` in the same commit. The spec description above (inline `IUIBackend` class block) and `tests/ui/mock_ui_backend.h` must always have the same method count. `ui-manager.md` §IUIBackend Method Contract is the production-facing authority; this file is the test-facing authority; both must remain consistent.
 
 `MockUIBackend` returns arbitrary non-zero integer handles (e.g., an incrementing counter) with no real objects — unit tests that call UIManager methods never dereference Irrlicht pointers, making `src/ui/` genuinely headless-testable and the 95% coverage gate achievable.
 
