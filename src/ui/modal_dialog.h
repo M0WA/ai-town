@@ -77,6 +77,14 @@ private:
     // Focus tracking for keyboard navigation
     int m_focusedButton{0};  // 0-based index into active buttons
 
+    // Stored dialog rectangle in virtual 1920x1080 space.
+    // Set by setDialogRect(); used by layout helpers to position content elements
+    // relative to the centred dialog box without hardcoding screen coordinates.
+    int m_dialogX{0};
+    int m_dialogY{0};
+    int m_dialogW{0};
+    int m_dialogH{0};
+
     void openModal(DialogType type);
     void closeModal();
     void layoutForcedLoanScreen1();

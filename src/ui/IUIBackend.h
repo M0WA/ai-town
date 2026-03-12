@@ -83,4 +83,17 @@ public:
     //     See architecture/ui-ux/hud-layout.md §Font Loading — Monospace requirement.
     //     See architecture/ui-ux/ui-manager.md §IUIBackend Method Contract method 19.
     virtual void            setElementMonoFont(UIElementHandle handle) = 0;
+
+    // 20. Reposition and resize an existing element without destroying it.
+    //     x, y, w, h are in virtual 1920x1080 coordinate space.
+    //     Preserves the element's handle, visibility, alpha, text, and all other
+    //     state; only its bounding rectangle changes.
+    //     In IrrlichtUIBackend: updates the stored virtualRect and calls
+    //     IGUIElement::setRelativePosition() with scaled physical coordinates.
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     ModalDialog::setDialogRect() uses this to reposition content elements
+    //     (title, body, buttons) when centering the dialog on screen — this avoids
+    //     destroying and recreating handles which would invalidate test expectations.
+    virtual void            setElementRect(UIElementHandle handle,
+                                           int x, int y, int w, int h) = 0;
 };

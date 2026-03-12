@@ -924,6 +924,38 @@ void IrrlichtUIBackend::setElementMonoFont(UIElementHandle handle)
 }
 
 // ---------------------------------------------------------------------------
+// 20. setElementRect
+// Repositions and resizes an existing element without destroying its handle.
+// Updates the stored virtualRect so that handleViewportResize() continues to
+// scale correctly, then immediately applies setRelativePosition() to reflect
+// the new coordinates at the current physical screen resolution.
+// ---------------------------------------------------------------------------
+void IrrlichtUIBackend::setElementRect(UIElementHandle handle,
+                                        int x, int y, int w, int h)
+{
+    auto it = m_elementMap.find(handle);
+    if (it == m_elementMap.end() || !it->second.element) {
+        return;
+    }
+
+    // Update the stored virtual rect so future resize handling stays correct.
+    it->second.virtualRect = Rect{x, y, w, h};
+
+    // Scale virtual coordinates to physical pixel coordinates.
+    const int sw = getScreenWidth();
+    const int sh = getScreenHeight();
+    const int vw = getVirtualWidth();   // 1920
+    const int vh = getVirtualHeight();  // 1080
+    const int px = (x * sw) / vw;
+    const int py = (y * sh) / vh;
+    const int pw = (w * sw) / vw;
+    const int ph = (h * sh) / vh;
+
+    it->second.element->setRelativePosition(
+        irr::core::rect<irr::s32>(px, py, px + pw, py + ph));
+}
+
+// ---------------------------------------------------------------------------
 // handleViewportResize
 // Detects screen size changes and repositions every GUI element so that its
 // physical pixel position matches its stored virtual coordinate at the new

@@ -32,4 +32,8 @@ public:
     // No-op in most tests; use NiceMock<MockUIBackend> to suppress unexpected-call warnings
     // when the system under test calls setElementMonoFont() during construction.
     MOCK_METHOD(void,            setElementMonoFont,   (UIElementHandle handle),                                (override));
+    // Method 20 — repositions an existing element in virtual coordinate space without
+    // destroying its handle. Used by ModalDialog::setDialogRect() to centre dialog content.
+    // No-op in most tests; NiceMock<MockUIBackend> suppresses unexpected-call warnings.
+    MOCK_METHOD(void,            setElementRect,       (UIElementHandle handle, int x, int y, int w, int h),   (override));
 };

@@ -112,19 +112,32 @@ void ModalDialog::closeModal() {
 }
 
 // ---------------------------------------------------------------------------
-// setDialogRect — helper to center dialog of given size
+// setDialogRect — helper to center dialog of given size.
+//
+// Stores the computed dialog origin so that individual layout methods can
+// position title, body, and button elements relative to the dialog box.
+// Uses setElementRect() to reposition m_dialogBg in-place — preserving its
+// handle — rather than the previous remove+re-add pattern, which broke
+// handle stability for downstream hit-test and test assertions.
+//
+// Content elements (title, body, buttons) are NOT repositioned here because
+// the number and arrangement of visible buttons depends on the specific dialog
+// type. Each layout* method calls setElementRect() on its own elements after
+// setDialogRect() returns.
 // ---------------------------------------------------------------------------
 void ModalDialog::setDialogRect(int w, int h) {
     if (!m_backend) return;
 
-    int x = (1920 - w) / 2;
-    int y = (1080 - h) / 2;
+    const int vw = m_backend->getVirtualWidth();
+    const int vh = m_backend->getVirtualHeight();
 
-    // Recreate dialog background at the correct size, centered in 1920x1080.
-    // Only the background is recreated; button handles are unchanged to preserve
-    // handle-based test expectations and hit-testing contracts.
-    m_backend->removeElement(m_dialogBg);
-    m_dialogBg = m_backend->addStaticText("", x, y, w, h);
+    m_dialogX = (vw - w) / 2;
+    m_dialogY = (vh - h) / 2;
+    m_dialogW = w;
+    m_dialogH = h;
+
+    // Reposition background panel in-place (preserves its handle).
+    m_backend->setElementRect(m_dialogBg, m_dialogX, m_dialogY, w, h);
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +157,35 @@ void ModalDialog::layoutForcedLoanScreen1() {
 
     // Large dialog: 640x400, centered in 1920x1080
     setDialogRect(640, 400);
+
+    // Padding constants (virtual pixels).
+    const int kPad    = 20;  // left/right padding inside dialog
+    const int kTop    = 16;  // gap from dialog top to title
+    const int kBtnH   = 40;  // button height
+    const int kBtnW   = 140; // button width
+    const int kBtnGap = 16;  // gap between buttons
+    const int kBtnBot = 16;  // gap from dialog bottom to button row
+
+    // Title row: spans dialog width minus padding, top of dialog.
+    m_backend->setElementRect(m_titleLabel,
+        m_dialogX + kPad, m_dialogY + kTop,
+        m_dialogW - kPad * 2, 40);
+
+    // Body: between title and button row.
+    const int bodyTop = m_dialogY + kTop + 40 + 12;
+    const int bodyBot = m_dialogY + m_dialogH - kBtnBot - kBtnH - 12;
+    m_backend->setElementRect(m_bodyLabel,
+        m_dialogX + kPad, bodyTop,
+        m_dialogW - kPad * 2, bodyBot - bodyTop);
+
+    // Two-button row: primary (Accept) left of secondary (Decline), right-aligned.
+    const int btnY = m_dialogY + m_dialogH - kBtnBot - kBtnH;
+    m_backend->setElementRect(m_btnPrimary,
+        m_dialogX + m_dialogW - kPad - kBtnW * 2 - kBtnGap, btnY,
+        kBtnW, kBtnH);
+    m_backend->setElementRect(m_btnSecondary,
+        m_dialogX + m_dialogW - kPad - kBtnW, btnY,
+        kBtnW, kBtnH);
 
     m_backend->setElementVisible(m_dialogBg, true);
     m_backend->setElementVisible(m_titleLabel, true);
@@ -179,6 +221,43 @@ void ModalDialog::layoutForcedLoanScreen2() {
 
     // Large dialog: 640x400 (same as screen 1)
     setDialogRect(640, 400);
+
+    // Padding constants (virtual pixels).
+    const int kPad    = 20;  // left/right padding inside dialog
+    const int kTop    = 16;  // gap from dialog top to title
+    const int kBtnH   = 40;  // button height
+    const int kBtnGap = 12;  // gap between stacked buttons
+    const int kBtnBot = 16;  // gap from dialog bottom to last button
+    const int kBtnW   = m_dialogW - kPad * 2;  // full-width buttons
+
+    // Title row.
+    m_backend->setElementRect(m_titleLabel,
+        m_dialogX + kPad, m_dialogY + kTop,
+        m_dialogW - kPad * 2, 40);
+
+    // Body: between title and button stack.
+    // Four buttons stack from bottom: back, tertiary, secondary, primary.
+    const int btnStackH = kBtnH * 4 + kBtnGap * 3 + kBtnBot;
+    const int bodyTop = m_dialogY + kTop + 40 + 12;
+    const int bodyBot = m_dialogY + m_dialogH - btnStackH;
+    m_backend->setElementRect(m_bodyLabel,
+        m_dialogX + kPad, bodyTop,
+        m_dialogW - kPad * 2, bodyBot - bodyTop);
+
+    // Button stack (bottom to top): Back, Tertiary, Secondary, Primary.
+    const int btnBack3Y      = m_dialogY + m_dialogH - kBtnBot - kBtnH;
+    const int btnTertiaryY   = btnBack3Y - kBtnGap - kBtnH;
+    const int btnSecondaryY  = btnTertiaryY - kBtnGap - kBtnH;
+    const int btnPrimaryY    = btnSecondaryY - kBtnGap - kBtnH;
+
+    m_backend->setElementRect(m_btnBack,
+        m_dialogX + kPad, btnBack3Y, kBtnW, kBtnH);
+    m_backend->setElementRect(m_btnTertiary,
+        m_dialogX + kPad, btnTertiaryY, kBtnW, kBtnH);
+    m_backend->setElementRect(m_btnSecondary,
+        m_dialogX + kPad, btnSecondaryY, kBtnW, kBtnH);
+    m_backend->setElementRect(m_btnPrimary,
+        m_dialogX + kPad, btnPrimaryY, kBtnW, kBtnH);
 
     m_backend->setElementVisible(m_dialogBg, true);
     m_backend->setElementVisible(m_titleLabel, true);
@@ -226,6 +305,35 @@ void ModalDialog::layoutDemolishConfirm(int tileCount) {
     // Small dialog: 480x240, centered
     setDialogRect(480, 240);
 
+    // Padding constants (virtual pixels).
+    const int kPad    = 20;
+    const int kTop    = 16;
+    const int kBtnH   = 40;
+    const int kBtnW   = 140;
+    const int kBtnGap = 16;
+    const int kBtnBot = 16;
+
+    // Title row.
+    m_backend->setElementRect(m_titleLabel,
+        m_dialogX + kPad, m_dialogY + kTop,
+        m_dialogW - kPad * 2, 40);
+
+    // Body: between title and button row.
+    const int bodyTop = m_dialogY + kTop + 40 + 12;
+    const int bodyBot = m_dialogY + m_dialogH - kBtnBot - kBtnH - 12;
+    m_backend->setElementRect(m_bodyLabel,
+        m_dialogX + kPad, bodyTop,
+        m_dialogW - kPad * 2, bodyBot - bodyTop);
+
+    // Two-button row: "Yes" (primary) left of "Cancel" (secondary), right-aligned.
+    const int btnY = m_dialogY + m_dialogH - kBtnBot - kBtnH;
+    m_backend->setElementRect(m_btnPrimary,
+        m_dialogX + m_dialogW - kPad - kBtnW * 2 - kBtnGap, btnY,
+        kBtnW, kBtnH);
+    m_backend->setElementRect(m_btnSecondary,
+        m_dialogX + m_dialogW - kPad - kBtnW, btnY,
+        kBtnW, kBtnH);
+
     m_backend->setElementVisible(m_dialogBg, true);
     m_backend->setElementVisible(m_titleLabel, true);
     m_backend->setElementVisible(m_bodyLabel, true);
@@ -260,6 +368,35 @@ void ModalDialog::layoutWASDPreset() {
 
     // Small dialog: 480x240, centered
     setDialogRect(480, 240);
+
+    // Padding constants (virtual pixels).
+    const int kPad    = 20;
+    const int kTop    = 16;
+    const int kBtnH   = 40;
+    const int kBtnW   = 140;
+    const int kBtnGap = 16;
+    const int kBtnBot = 16;
+
+    // Title row.
+    m_backend->setElementRect(m_titleLabel,
+        m_dialogX + kPad, m_dialogY + kTop,
+        m_dialogW - kPad * 2, 40);
+
+    // Body: between title and button row.
+    const int bodyTop = m_dialogY + kTop + 40 + 12;
+    const int bodyBot = m_dialogY + m_dialogH - kBtnBot - kBtnH - 12;
+    m_backend->setElementRect(m_bodyLabel,
+        m_dialogX + kPad, bodyTop,
+        m_dialogW - kPad * 2, bodyBot - bodyTop);
+
+    // Two-button row: "Apply" (primary) left of "Cancel" (secondary), right-aligned.
+    const int btnY = m_dialogY + m_dialogH - kBtnBot - kBtnH;
+    m_backend->setElementRect(m_btnPrimary,
+        m_dialogX + m_dialogW - kPad - kBtnW * 2 - kBtnGap, btnY,
+        kBtnW, kBtnH);
+    m_backend->setElementRect(m_btnSecondary,
+        m_dialogX + m_dialogW - kPad - kBtnW, btnY,
+        kBtnW, kBtnH);
 
     m_backend->setElementVisible(m_dialogBg, true);
     m_backend->setElementVisible(m_titleLabel, true);
@@ -299,6 +436,36 @@ void ModalDialog::layoutGameOver(int64_t debt, int months) {
 
     // Medium dialog: 560x320, centered
     setDialogRect(560, 320);
+
+    // Padding constants (virtual pixels).
+    const int kPad    = 20;
+    const int kTop    = 16;
+    const int kBtnH   = 40;
+    const int kBtnW   = 180; // wider buttons for longer labels
+    const int kBtnGap = 16;
+    const int kBtnBot = 16;
+
+    // Title row.
+    m_backend->setElementRect(m_titleLabel,
+        m_dialogX + kPad, m_dialogY + kTop,
+        m_dialogW - kPad * 2, 40);
+
+    // Body: between title and button row.
+    const int bodyTop = m_dialogY + kTop + 40 + 12;
+    const int bodyBot = m_dialogY + m_dialogH - kBtnBot - kBtnH - 12;
+    m_backend->setElementRect(m_bodyLabel,
+        m_dialogX + kPad, bodyTop,
+        m_dialogW - kPad * 2, bodyBot - bodyTop);
+
+    // Two-button row: "Load Last Save" (primary) left of "Return to Main Menu"
+    // (secondary), right-aligned.
+    const int btnY = m_dialogY + m_dialogH - kBtnBot - kBtnH;
+    m_backend->setElementRect(m_btnPrimary,
+        m_dialogX + m_dialogW - kPad - kBtnW * 2 - kBtnGap, btnY,
+        kBtnW, kBtnH);
+    m_backend->setElementRect(m_btnSecondary,
+        m_dialogX + m_dialogW - kPad - kBtnW, btnY,
+        kBtnW, kBtnH);
 
     m_backend->setElementVisible(m_dialogBg, true);
     m_backend->setElementVisible(m_titleLabel, true);

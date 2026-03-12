@@ -144,6 +144,12 @@ public:
     //     Labels, button text, and panel titles MUST NOT call this method.
     void setElementMonoFont(UIElementHandle handle) override;
 
+    // 20. Reposition and resize an existing element in virtual coordinate space.
+    //     Updates the stored virtualRect and calls setRelativePosition() with scaled
+    //     physical pixel coordinates. Preserves all other element state.
+    void setElementRect(UIElementHandle handle,
+                        int x, int y, int w, int h) override;
+
 private:
     irr::IrrlichtDevice*       m_device{nullptr};
     irr::gui::IGUIEnvironment* m_guiEnv{nullptr};
