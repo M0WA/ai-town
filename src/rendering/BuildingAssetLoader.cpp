@@ -18,6 +18,15 @@
 //      assignment the mesh renders solid white even after BackfaceCulling=false.
 //   7. Construct and return LODNode(node, lod0, lod1, lod2, d0, d1, cull).
 //
+// B3D mesh format note (tc_sets):
+//   B3D files use VRTS tc_sets=1 (UV channel 0 = atlas diffuse).  The Irrlicht
+//   B3D loader (CB3DMeshFileLoader::readChunkVRTS) reads exactly three VRTS
+//   header fields: flags, tex_coord_sets, tex_coord_set_size.  Using tc_sets=2
+//   causes the loader to read tc_flags[1] as tex_coord_set_size and then
+//   misinterpret the first vertex's position float as another header field,
+//   producing totally garbled (invisible) geometry.  tc_sets=1 aligns the
+//   loader's reads correctly and is sufficient for atlas-mapped buildings.
+//
 // IMPORTANT — no dynamic_cast on Irrlicht types:
 //   Irrlicht is compiled with -fno-rtti. dynamic_cast on Irrlicht types has no
 //   typeinfo in the vtable and will crash at runtime (SIGSEGV in __dynamic_cast).
@@ -146,19 +155,28 @@ LODNode* BuildingAssetLoader::load(const std::string& basePath)
     // ------------------------------------------------------------------
     // Step 6: Bind the buildings atlas texture to all material slots.
     //
-    // All placeholder B3D files have VRTS tc_sets=0 (no UV coordinates) and no
-    // TEXS/BRUS chunks.  The Irrlicht B3D loader therefore assigns the default
-    // material (EMT_SOLID, no texture, white vertex diffuse) to every mesh
-    // buffer.  Without explicit texture assignment the scene node renders solid
-    // white — BackfaceCulling=false makes faces visible but cannot supply color.
+    // B3D files embed a TEXS/BRUS chunk referencing "buildings_atlas_d.dds" by
+    // bare filename.  The Irrlicht B3D loader attempts to resolve it relative to
+    // the mesh file's directory — that look-up always fails (the file is not in
+    // assets/3d/buildings/) and produces an expected "Could not open file of
+    // texture" log line.  We override that failed binding by calling
+    // IVideoDriver::getTexture() with the full absolute path to the atlas and
+    // then calling setTexture(0, atlas) on every material slot.
     //
-    // Fix: load buildings_atlas_d.dds via IVideoDriver::getTexture() (linear
-    // pool path — the sRGB raw-GL path is used for DXT sRGB uploads, but
-    // IVideoDriver::getTexture() is correct here because:
-    //   a) the placeholder atlas is a plain DDS (no sRGB DXT flag required for
-    //      placeholder rendering quality), and
-    //   b) the raw-GL sRGB upload path is only wired for road_asphalt_tileable.dds
-    //      in Phase 10; building atlas sRGB upload is a Phase 11+ refinement.
+    // Atlas format — PNG (not DDS):
+    //   Irrlicht 1.8.5 ships with its DDS image loader DISABLED by default.
+    //   The macro _IRR_COMPILE_WITH_DDS_LOADER_ is commented out in
+    //   IrrCompileConfig.h, so IVideoDriver::getTexture() cannot load any DDS
+    //   file.  Additionally, the ddsBuffer struct contains a void* pointer (8
+    //   bytes on 64-bit) that shifts pixelFormat.fourCC to file offset 88
+    //   instead of the spec-mandated 84, causing even DXT1 files to be
+    //   misidentified as ARGB8888 on x86_64.
+    //
+    //   The V1 workaround: atlas files are authored as PNG and loaded via
+    //   IVideoDriver::getTexture() (Irrlicht's built-in PNG loader is always
+    //   enabled).  The production raw-GL sRGB DXT1 upload path (TextureCache::
+    //   loadSRGB) is planned for Phase 11+ and does not use getTexture().
+    //
     // Bind the texture to slot 0 of every material on the node.
     //
     // Note: atlasRow and atlasCol are parsed from the .meta but UV sub-rect
@@ -187,10 +205,10 @@ LODNode* BuildingAssetLoader::load(const std::string& basePath)
         const auto vehiclePos  = basePath.rfind("/3d/vehicles/");
         if (buildingPos != std::string::npos) {
             atlasPath = basePath.substr(0, buildingPos)
-                        + "/textures/buildings/buildings_atlas_d.dds";
+                        + "/textures/buildings/buildings_atlas_d.png";
         } else if (vehiclePos != std::string::npos) {
             atlasPath = basePath.substr(0, vehiclePos)
-                        + "/textures/vehicles/vehicles_diffuse_atlas_d.dds";
+                        + "/textures/vehicles/vehicles_diffuse_atlas_d.png";
         }
 
         if (!atlasPath.empty()) {
