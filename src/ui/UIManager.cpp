@@ -826,6 +826,13 @@ bool UIManager::onEvent(const InputEvent& event) {
                 return false;
             }
 
+            // Update hover tile to the clicked position so that the drag throttle in the
+            // MouseMove handler starts from the correct tile.  Without this, m_hoveredTileX
+            // remains -1 after the initial click, causing the first MouseMove to the same
+            // tile to evaluate the tile-change condition as true and double-place it.
+            m_hoveredTileX = hitX;
+            m_hoveredTileZ = hitZ;
+
             return doTerrainPlacement(hitX, hitZ);
         }
     }

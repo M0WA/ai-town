@@ -1464,3 +1464,84 @@ TEST_F(WorldInteractionTest, Bug4_QueryMode_ToolbarCarveout_PreventsPriorityThre
            "Priority-3 toolbar carve-out prevents ray-cast interference; "
            "Priority-5 processes the toolbar click and activates Zone tool.";
 }
+
+// ---------------------------------------------------------------------------
+// Test 29: RoadDrag_MovesToNewTile_PlacesOnEachNewTile
+//
+// Road tool drag sequence: LMB down on tile (5,7), then MouseMove to (6,7),
+// then MouseMove to (7,7).  Verifies placeRoad is called exactly once per
+// distinct new tile — three calls total.
+//
+// Rationale: the drag throttle condition
+//   (hitX != m_hoveredTileX || hitZ != m_hoveredTileZ)
+// must fire for each tile the cursor enters, not for every pixel move.
+// (ref: architecture/ui-ux/input-arbitration.md Priority-7 drag-to-place)
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_MovesToNewTile_PlacesOnEachNewTile)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+
+    activateRoadTool();
+
+    // Step 1: LMB down on tile (5,7) — pickTerrainTile called for the click.
+    EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
+    EXPECT_CALL(sim_, placeRoad(5, 7, 0)).Times(1);
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    // Step 2: MouseMove to tile (6,7) — drag fires because tile changed.
+    // setTileHoverHighlight is called for hover; placeRoad(6,7,0) is called once.
+    EXPECT_CALL(renderer_, pickTerrainTile(600, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(7), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(6, 7, _)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(6, 7, 0)).Times(1);
+    uiManager_->onEvent(makeMouseMove(600, 500));
+
+    // Step 3: MouseMove to tile (7,7) — drag fires again for the new tile.
+    EXPECT_CALL(renderer_, pickTerrainTile(700, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(7), SetArgReferee<3>(7), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(7, 7, _)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(7, 7, 0)).Times(1);
+    uiManager_->onEvent(makeMouseMove(700, 500));
+}
+
+// ---------------------------------------------------------------------------
+// Test 30: RoadDrag_HoverUpdateOnClick_NoDoublePlace
+//
+// Regression test for the bug where m_hoveredTileX / m_hoveredTileZ were NOT
+// updated in the MouseButtonDown handler after a successful pickTerrainTile hit.
+//
+// Sequence:
+//   - No prior hover (m_hoveredTileX = -1, m_hoveredTileZ = -1).
+//   - LMB down on tile (5,7).
+//   - MouseMove to tile (5,7) again (same pixel area — cursor did not move off tile).
+//
+// Expected: placeRoad(5,7,0) is called exactly ONCE (for the click only).
+// The MouseMove to the same tile must NOT trigger a second placement, because
+// m_hoveredTileX was updated to 5 in the MouseButtonDown handler after the fix.
+//
+// Before the fix, m_hoveredTileX remained -1 after the click, so the drag
+// condition (hitX != -1) evaluated true and double-placed the tile.
+// (ref: Priority-7 MouseButtonDown handler in UIManager.cpp)
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_HoverUpdateOnClick_NoDoublePlace)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+
+    activateRoadTool();
+
+    // Step 1: LMB down on tile (5,7) — no prior hover, m_hoveredTileX = -1.
+    EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
+    EXPECT_CALL(sim_, placeRoad(5, 7, 0)).Times(1);
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    // Step 2: MouseMove to the same tile (5,7) — cursor has not moved to a new tile.
+    // placeRoad must NOT be called again; the drag throttle must suppress it because
+    // m_hoveredTileX was correctly updated to 5 by the MouseButtonDown handler.
+    EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(5, 7, _)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
+    uiManager_->onEvent(makeMouseMove(500, 500));
+}
