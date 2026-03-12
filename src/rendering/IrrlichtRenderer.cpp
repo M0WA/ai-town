@@ -9,6 +9,9 @@
 #include "src/interfaces/ITerrainQuery.h" // ITerrainQuery full include (forward-decl in header only)
 #include "BuildingAssetLoader.h"          // Phase 10: load .b3d asset families via BuildingAssetLoader::load()
 #include "LODNode.h"                      // Phase 10: LOD swap wrapper returned by BuildingAssetLoader::load()
+#include "TextureCache.h"                 // Phase 10: sRGB texture loading for road diffuse
+#include "RoadShaderCallback.h"           // Phase 10: road.vert/road.frag shader callback
+#include "render_constants.h"             // Phase 10: RenderConstants::road_lod2_color
 
 #include <algorithm>   // std::min, std::max
 #include <cstdio>      // fprintf
@@ -91,7 +94,12 @@ IrrlichtRenderer::~IrrlichtRenderer() {
     }
     m_roadNodes.clear();
 
-    // m_buildingAssetLoader (unique_ptr) is destroyed automatically.
+    // Drop shared procedural road meshes (each ref_count 1 → 0 → freed).
+    if (m_sharedRoadMeshLOD0) { m_sharedRoadMeshLOD0->drop(); m_sharedRoadMeshLOD0 = nullptr; }
+    if (m_sharedRoadMeshLOD1) { m_sharedRoadMeshLOD1->drop(); m_sharedRoadMeshLOD1 = nullptr; }
+    if (m_sharedRoadMeshLOD2) { m_sharedRoadMeshLOD2->drop(); m_sharedRoadMeshLOD2 = nullptr; }
+
+    // m_roadTextureCache, m_buildingAssetLoader (unique_ptrs) destroyed automatically.
 }
 
 void IrrlichtRenderer::beginFrame() {
@@ -915,44 +923,331 @@ void IrrlichtRenderer::removeBuildingMesh(int tileX, int tileZ)
 }
 
 // -------------------------------------------------------------------------
-// placeRoadMesh — road tile placement.
+// initRoadShader — load road.vert/road.frag + road_asphalt_tileable.dds.
+// Idempotent: returns immediately if already initialised or if no GL context.
+// -------------------------------------------------------------------------
+bool IrrlichtRenderer::initRoadShader()
+{
+    // Already initialised: return true if shader loaded successfully (>= 0),
+    // false if shader load previously failed (-2 sentinel).
+    // -1 = not yet attempted (fall through to load).
+    if (m_roadMaterialType == -2) return false;  // failed sentinel — no retry
+    if (m_roadMaterialType >= 0) return true;    // already loaded successfully
+    if (!m_driver || !m_smgr) return false;
+
+    // Lazily create TextureCache for road diffuse texture.
+    if (!m_roadTextureCache) {
+        m_roadTextureCache = std::make_unique<TextureCache>(
+            m_driver->getDriverType(),
+            m_driver,
+            m_device ? m_device->getFileSystem() : nullptr);
+    }
+
+    // Determine sRGB support (same check as RenderSystem::initGL).
+    const bool srgbOk = (glewIsExtensionSupported("GL_EXT_texture_sRGB") == GL_TRUE);
+
+    // Load road_asphalt_tileable.dds via sRGB raw-GL path (or linear fallback).
+    const GLenum fmt = srgbOk
+        ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
+        : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+
+    const std::string texPath = std::string(AITOWN_ASSETS_DIR)
+                                + "/textures/roads/road_asphalt_tileable.dds";
+
+    GLuint texHandle = m_roadTextureCache->loadSRGB(texPath, fmt);
+    m_roadDiffuseTexGLuint = static_cast<unsigned int>(texHandle);
+    // 0 = load failed or EDT_NULL — road tiles will render without texture.
+
+    // Load road shader via GPUProgrammingServices.
+    IGPUProgrammingServices* gpu = m_driver->getGPUProgrammingServices();
+    if (!gpu) {
+        // No GPU programs (EDT_NULL or software driver) — EMT_SOLID fallback.
+        // Mark as "done" with -2 so we don't retry every frame.
+        m_roadMaterialType = -2;
+        return false;
+    }
+
+    const std::string vsPath = std::string(AITOWN_ASSETS_DIR) + "/shaders/road.vert";
+    const std::string fsPath = std::string(AITOWN_ASSETS_DIR) + "/shaders/road.frag";
+
+    RoadShaderCallback* cb = new RoadShaderCallback(srgbOk, texHandle);
+    s32 matType = gpu->addHighLevelShaderMaterialFromFiles(
+        vsPath.c_str(), "main", video::EVST_VS_1_1,
+        fsPath.c_str(), "main", video::EPST_PS_1_1,
+        cb, video::EMT_SOLID);
+    cb->drop();  // unconditional per shader-loading.md
+
+    if (matType == -1) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: road shader compile failed "
+            "(vs=%s, fs=%s) — road tiles will use EMT_SOLID fallback\n",
+            vsPath.c_str(), fsPath.c_str());
+        m_roadMaterialType = -2;  // mark done-with-failure
+        return false;
+    }
+
+    m_roadMaterialType = matType;
+    return true;
+}
+
+// -------------------------------------------------------------------------
+// ensureRoadMeshes — build shared LOD0/LOD1/LOD2 meshes (idempotent).
 //
-// All road tiles share the same mesh family: flat LOD0 quad + kerb geometry
-// (<=48 tris) with the road custom shader and road_asphalt_tileable.dds.
-// Asset base path: assets/3d/roads/road_tile
+// All road tiles are geometrically identical; one set of three SMesh* is
+// shared across every road tile scene node.
+//
+// Geometry (local space, tile centred at origin):
+//   LOD0: 4×4 m flat quad + 4 bevelled kerb strips (26 tris total).
+//   LOD1: 4×4 m flat quad only (2 tris).
+//   LOD2: 4×4 m flat quad with road_lod2_color vertex color, no texture (2 tris).
+//
+// LOD distance thresholds (from road_tile spec): LOD0→LOD1 at 50 m, LOD1→LOD2
+// at 150 m, cull at 300 m.
+//
+// UV: [0,1]×[0,1] on the quad; road.frag multiplies by 2.0 for 2× tiling.
+// Kerb verts use UV (0,0) — small strips, texture at corner looks fine.
+//
+// BackfaceCulling = false on LOD0 to avoid winding issues with kerb faces.
+// Lighting = false on all LODs (no light nodes in scene).
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::ensureRoadMeshes()
+{
+    if (m_sharedRoadMeshLOD0) return;  // already built
+
+    // Road tile half-extent (4 m tile → 2 m half).
+    static constexpr float H  = 2.0f;
+    // Kerb dimensions.
+    static constexpr float KB = 0.05f;  // bevel inset (inner slope width)
+    static constexpr float KW = 0.15f;  // total kerb width
+    static constexpr float KH = 0.10f;  // kerb height
+
+    // Effective material type for LOD0/LOD1 (road shader or EMT_SOLID fallback).
+    const E_MATERIAL_TYPE roadMat = (m_roadMaterialType >= 0)
+        ? static_cast<E_MATERIAL_TYPE>(m_roadMaterialType)
+        : EMT_SOLID;
+
+    // ------------------------------------------------------------------
+    // LOD0: flat quad (4 verts, 2 tris) + 4 kerb strips (8 verts each, 6 tris each).
+    // Total: 36 verts, 26 tris — within the <=48 tri budget.
+    // Single SMeshBuffer with BackfaceCulling=false (kerb normals vary per face).
+    // ------------------------------------------------------------------
+    {
+        SMesh* mesh = new SMesh();
+        SMeshBuffer* buf = new SMeshBuffer();
+
+        buf->Material.MaterialType    = roadMat;
+        buf->Material.Lighting        = false;
+        buf->Material.BackfaceCulling = false;  // kerb faces face multiple directions
+
+        // Helper lambda to add a vertex.
+        auto addV = [&](float x, float y, float z, float u, float v) {
+            buf->Vertices.push_back(S3DVertex(
+                core::vector3df(x, y, z),
+                core::vector3df(0.f, 1.f, 0.f),  // +Y normal (Lighting=false, unused)
+                SColor(255, 255, 255, 255),
+                core::vector2df(u, v)));
+        };
+
+        // --- Central flat quad (indices 0–3, 2 tris) ---
+        // CW from +Y: 0→2→1, 0→3→2 (matches hover tile winding convention).
+        addV(-H, 0.f, -H,  0.f, 0.f);  // v0 back-left
+        addV( H, 0.f, -H,  1.f, 0.f);  // v1 back-right
+        addV( H, 0.f,  H,  1.f, 1.f);  // v2 front-right
+        addV(-H, 0.f,  H,  0.f, 1.f);  // v3 front-left
+        buf->Indices.push_back(0); buf->Indices.push_back(2); buf->Indices.push_back(1);
+        buf->Indices.push_back(0); buf->Indices.push_back(3); buf->Indices.push_back(2);
+
+        // --- Kerb helper: add one strip (8 verts, 6 tris) ---
+        // Each strip has 4 rows of 2 verts (L=left, R=right along the edge).
+        // 3 row-pairs × 2 tris each = 6 tris per strip.
+        // Parameters: L/R coordinates for rows 0–3.
+        //   Row 0: inner road edge  (road surface level, y=0)
+        //   Row 1: bevel top        (y=KH, inset KB from edge)
+        //   Row 2: outer kerb top   (y=KH, inset KW from edge)
+        //   Row 3: outer kerb base  (y=0,  inset KW from edge)
+        //
+        // All kerb verts use UV (0,0) — small decorative strips.
+        auto addKerb = [&](
+            float lx0, float ly0, float lz0,   // row 0, left
+            float rx0, float ry0, float rz0,   // row 0, right
+            float lx1, float ly1, float lz1,   // row 1, left
+            float rx1, float ry1, float rz1,   // row 1, right
+            float lx2, float ly2, float lz2,   // row 2, left
+            float rx2, float ry2, float rz2,   // row 2, right
+            float lx3, float ly3, float lz3,   // row 3, left
+            float rx3, float ry3, float rz3)   // row 3, right
+        {
+            u16 base = static_cast<u16>(buf->Vertices.size());
+            addV(lx0, ly0, lz0, 0.f, 0.f);  // base+0
+            addV(rx0, ry0, rz0, 0.f, 0.f);  // base+1
+            addV(lx1, ly1, lz1, 0.f, 0.f);  // base+2
+            addV(rx1, ry1, rz1, 0.f, 0.f);  // base+3
+            addV(lx2, ly2, lz2, 0.f, 0.f);  // base+4
+            addV(rx2, ry2, rz2, 0.f, 0.f);  // base+5
+            addV(lx3, ly3, lz3, 0.f, 0.f);  // base+6
+            addV(rx3, ry3, rz3, 0.f, 0.f);  // base+7
+
+            // Section A (row 0 → row 1): 2 tris
+            buf->Indices.push_back(base+0); buf->Indices.push_back(base+2); buf->Indices.push_back(base+1);
+            buf->Indices.push_back(base+2); buf->Indices.push_back(base+3); buf->Indices.push_back(base+1);
+            // Section B (row 1 → row 2): 2 tris
+            buf->Indices.push_back(base+2); buf->Indices.push_back(base+4); buf->Indices.push_back(base+3);
+            buf->Indices.push_back(base+4); buf->Indices.push_back(base+5); buf->Indices.push_back(base+3);
+            // Section C (row 2 → row 3): 2 tris
+            buf->Indices.push_back(base+4); buf->Indices.push_back(base+6); buf->Indices.push_back(base+5);
+            buf->Indices.push_back(base+6); buf->Indices.push_back(base+7); buf->Indices.push_back(base+5);
+        };
+
+        // South kerb (z = -H side, extends in -Z direction)
+        addKerb(
+            -H, 0.f,  -H,          H, 0.f,  -H,          // row 0: inner edge
+            -H, KH,   -H-KB,       H, KH,   -H-KB,        // row 1: bevel top
+            -H, KH,   -H-KW,       H, KH,   -H-KW,        // row 2: outer top
+            -H, 0.f,  -H-KW,       H, 0.f,  -H-KW);       // row 3: outer base
+
+        // North kerb (z = +H side, extends in +Z direction)
+        addKerb(
+            -H, 0.f,   H,          H, 0.f,   H,            // row 0
+            -H, KH,    H+KB,       H, KH,    H+KB,          // row 1
+            -H, KH,    H+KW,       H, KH,    H+KW,          // row 2
+            -H, 0.f,   H+KW,       H, 0.f,   H+KW);         // row 3
+
+        // West kerb (x = -H side, extends in -X direction)
+        addKerb(
+            -H,    0.f, -H,        -H,    0.f,  H,          // row 0
+            -H-KB, KH,  -H,        -H-KB, KH,   H,          // row 1
+            -H-KW, KH,  -H,        -H-KW, KH,   H,          // row 2
+            -H-KW, 0.f, -H,        -H-KW, 0.f,  H);         // row 3
+
+        // East kerb (x = +H side, extends in +X direction)
+        addKerb(
+            H,    0.f, -H,         H,    0.f,  H,            // row 0
+            H+KB, KH,  -H,         H+KB, KH,   H,            // row 1
+            H+KW, KH,  -H,         H+KW, KH,   H,            // row 2
+            H+KW, 0.f, -H,         H+KW, 0.f,  H);           // row 3
+
+        buf->recalculateBoundingBox();
+        mesh->addMeshBuffer(buf);
+        buf->drop();
+        mesh->recalculateBoundingBox();
+        m_sharedRoadMeshLOD0 = mesh;
+    }
+
+    // ------------------------------------------------------------------
+    // LOD1: flat quad only (4 verts, 2 tris). Same road shader, no kerbs.
+    // ------------------------------------------------------------------
+    {
+        SMesh* mesh = new SMesh();
+        SMeshBuffer* buf = new SMeshBuffer();
+
+        buf->Material.MaterialType    = roadMat;
+        buf->Material.Lighting        = false;
+        buf->Material.BackfaceCulling = true;
+
+        buf->Vertices.push_back(S3DVertex(core::vector3df(-H, 0.f, -H), core::vector3df(0,1,0), SColor(255,255,255,255), core::vector2df(0.f, 0.f)));
+        buf->Vertices.push_back(S3DVertex(core::vector3df( H, 0.f, -H), core::vector3df(0,1,0), SColor(255,255,255,255), core::vector2df(1.f, 0.f)));
+        buf->Vertices.push_back(S3DVertex(core::vector3df( H, 0.f,  H), core::vector3df(0,1,0), SColor(255,255,255,255), core::vector2df(1.f, 1.f)));
+        buf->Vertices.push_back(S3DVertex(core::vector3df(-H, 0.f,  H), core::vector3df(0,1,0), SColor(255,255,255,255), core::vector2df(0.f, 1.f)));
+        buf->Indices.push_back(0); buf->Indices.push_back(2); buf->Indices.push_back(1);
+        buf->Indices.push_back(0); buf->Indices.push_back(3); buf->Indices.push_back(2);
+
+        buf->recalculateBoundingBox();
+        mesh->addMeshBuffer(buf);
+        buf->drop();
+        mesh->recalculateBoundingBox();
+        m_sharedRoadMeshLOD1 = mesh;
+    }
+
+    // ------------------------------------------------------------------
+    // LOD2: flat quad with road_lod2_color vertex color. No texture, EMT_SOLID.
+    // ------------------------------------------------------------------
+    {
+        SMesh* mesh = new SMesh();
+        SMeshBuffer* buf = new SMeshBuffer();
+
+        buf->Material.MaterialType    = EMT_SOLID;
+        buf->Material.Lighting        = false;
+        buf->Material.BackfaceCulling = true;
+
+        const SColor lod2Col = RenderConstants::road_lod2_color;
+        buf->Vertices.push_back(S3DVertex(core::vector3df(-H, 0.f, -H), core::vector3df(0,1,0), lod2Col, core::vector2df(0.f, 0.f)));
+        buf->Vertices.push_back(S3DVertex(core::vector3df( H, 0.f, -H), core::vector3df(0,1,0), lod2Col, core::vector2df(1.f, 0.f)));
+        buf->Vertices.push_back(S3DVertex(core::vector3df( H, 0.f,  H), core::vector3df(0,1,0), lod2Col, core::vector2df(1.f, 1.f)));
+        buf->Vertices.push_back(S3DVertex(core::vector3df(-H, 0.f,  H), core::vector3df(0,1,0), lod2Col, core::vector2df(0.f, 1.f)));
+        buf->Indices.push_back(0); buf->Indices.push_back(2); buf->Indices.push_back(1);
+        buf->Indices.push_back(0); buf->Indices.push_back(3); buf->Indices.push_back(2);
+
+        buf->recalculateBoundingBox();
+        mesh->addMeshBuffer(buf);
+        buf->drop();
+        mesh->recalculateBoundingBox();
+        m_sharedRoadMeshLOD2 = mesh;
+    }
+}
+
+// -------------------------------------------------------------------------
+// placeRoadMesh — road tile placement (procedural geometry, no .b3d files).
+//
+// All road tiles share m_sharedRoadMeshLOD0/1/2 (built once on first call).
+// Scene nodes are positioned at tile world centre; scale is (1,1,1) because
+// the geometry is authored in real metres (4×4 m road on a 10 m tile).
+// LOD distances: LOD0→LOD1 at 50 m, LOD1→LOD2 at 150 m, cull at 300 m.
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ)
 {
-    if (!ensureAssetLoader()) return;
+    if (!m_smgr || !m_driver) return;
 
     // Remove any existing road on this tile first.
     destroyTileNode(m_roadNodes, tileX, tileZ);
 
-    // Fixed asset path — all road tiles are identical.
-    std::string basePath = std::string(AITOWN_ASSETS_DIR) + "/3d/roads/road_tile";
+    // Ensure shader and shared meshes are ready (both idempotent).
+    initRoadShader();
+    ensureRoadMeshes();
 
-    LODNode* lodNode = m_buildingAssetLoader->load(basePath);
-    if (!lodNode) {
+    if (!m_sharedRoadMeshLOD0) {
         fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: placeRoadMesh(%d,%d): failed to load "
-            "road tile asset '%s' — node not created\n",
-            tileX, tileZ, basePath.c_str());
+            "[IrrlichtRenderer] WARNING: placeRoadMesh(%d,%d): mesh build failed"
+            " — node not created\n", tileX, tileZ);
         return;
     }
 
-    if (scene::ISceneNode* node = lodNode->getNode()) {
-        const float terrainY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
-        node->setPosition(core::vector3df(
-            static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
-            terrainY,
-            static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
-        // Roads are flat: 1 unit in X/Z maps to kTileSize; 1 unit in Y maps to
-        // a thin 0.2 m surface so roads sit flat on the terrain.
-        node->setScale(core::vector3df(kTileSize, 0.2f, kTileSize));
-        for (u32 m = 0; m < node->getMaterialCount(); ++m) {
-            node->getMaterial(m).Lighting = false;
-        }
+    // Create scene node from LOD0 mesh.
+    // addMeshSceneNode() calls grab() internally → shared mesh ref_count 1→2.
+    IMeshSceneNode* node = m_smgr->addMeshSceneNode(m_sharedRoadMeshLOD0);
+    if (!node) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: placeRoadMesh(%d,%d): addMeshSceneNode"
+            " failed — node not created\n", tileX, tileZ);
+        return;
     }
+
+    // Position at tile world-space centre.
+    // The road geometry is 4×4 m centred at local origin; no scale needed.
+    const float terrainY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+    node->setPosition(core::vector3df(
+        static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
+        terrainY,
+        static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
+    node->setScale(core::vector3df(1.0f, 1.0f, 1.0f));
+
+    // Disable lighting (no light nodes in scene).
+    for (u32 m = 0; m < node->getMaterialCount(); ++m) {
+        node->getMaterial(m).Lighting = false;
+    }
+
+    // Wrap in LODNode with road-specific LOD distance thresholds.
+    // LOD distances from road tile spec: [50, 150, 300].
+    static constexpr float kRoadLOD0to1 = 50.0f;
+    static constexpr float kRoadLOD1to2 = 150.0f;
+    static constexpr float kRoadCullDist = 300.0f;
+
+    LODNode* lodNode = new LODNode(node);
+    // Note: LODNode uses the legacy (node-only) constructor here.
+    // Road tile LOD transitions are driven by IrrlichtRenderer::updateRoadLOD()
+    // (future per-frame update path) using lodNode->swapMeshRaw() with
+    // m_sharedRoadMeshLOD1 / m_sharedRoadMeshLOD2.
+    // The thresholds are stored for documentation; per-frame LOD is Phase 10+.
+    (void)kRoadLOD0to1; (void)kRoadLOD1to2; (void)kRoadCullDist;
 
     m_roadNodes[tileKey(tileX, tileZ)] = lodNode;
 }

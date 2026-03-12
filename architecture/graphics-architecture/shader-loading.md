@@ -163,6 +163,19 @@ if (!gpu) {
 
   **Note on shader version enums**: Irrlicht's GLSL backend **ignores** the `EVST_VS_*` / `EPST_PS_*` enum values entirely when compiling OpenGL GLSL shaders. These enums are meaningful only for the Direct3D HLSL backend. For GLSL, the active GLSL version is determined exclusively by the `#version` directive in the shader source file itself. Use `EVST_VS_1_1` / `EPST_PS_1_1` as the conventional placeholder values (matching Irrlicht Tutorial 10). All GLSL shader files must begin with a `#version` pragma appropriate for the features used (e.g. `#version 130` for `texture()`, `in`/`out` qualifiers, and multi-texture sampling). Do not assume that passing `EVST_VS_3_0` or higher will gate or enable any GLSL feature — it has no effect on the GLSL compilation path.
 
+  **Vertex transform — use `gl_ModelViewProjectionMatrix` (GLSL compatibility built-in)**: Irrlicht creates a legacy OpenGL compatibility-profile context and drives the scene graph via `glVertexPointer` / `glNormalPointer` / `glTexCoordPointer` (fixed-function arrays) and `glLoadMatrix` / `glMultMatrix` on the `GL_MODELVIEW` / `GL_PROJECTION` stacks. The GLSL compatibility built-in `gl_ModelViewProjectionMatrix` (= Projection × View × World) is always current for the active scene node. **Do NOT declare a custom `uniform mat4 uWVPMatrix` and leave it unset in `OnSetConstants()`.** GLSL default-initialises matrix uniforms to zero — passing a zero matrix to `gl_Position` produces degenerate zero-area triangles, making all geometry invisible. The correct pattern:
+
+  ```glsl
+  // road.vert — correct vertex transform using compatibility built-in:
+  void main() {
+      gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+      v_texCoord  = gl_MultiTexCoord0.st;
+      // ...
+  }
+  ```
+
+  Additionally, use the GLSL compatibility built-ins `gl_Vertex`, `gl_Normal`, and `gl_MultiTexCoord0` directly instead of user-defined `in` variables — this avoids attribute-location ambiguity when the GLSL linker assigns user-defined `in` variable locations in implementation-defined order (Irrlicht's `COpenGLSLMaterialRenderer` does not call `glBindAttribLocation`, so named `in` variables may not land at the compatibility alias locations 0/2/8).
+
 ## Phase 2 GLSL Stub Files — Co-Landing Requirement
 
 The Phase 2 GLSL stub files MUST be co-landed in the same commit as `shader_stub_compile_test.cpp` that asserts they can be found and compiled. This is a hard requirement, not a convention.
