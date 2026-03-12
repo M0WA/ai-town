@@ -1094,7 +1094,9 @@ TEST_F(WorldInteractionTest, Bug2_ZoneSubPanel_ClickCommercialButton_ThenTerrain
     // Primary assertion: placeZone must be called with ZoneType::Commercial (1), not Residential (0).
     EXPECT_CALL(sim_, placeZone(5, 7, ZoneType::Commercial, DensityTier::Low, 0)).Times(1);
 
+    // Zone rect-select: press sets anchor; release fills the 1×1 rect.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 }
 
 // ---------------------------------------------------------------------------
@@ -1133,7 +1135,9 @@ TEST_F(WorldInteractionTest, Bug2_ZoneSubPanel_ClickIndustrialHighButton_ThenTer
     // Primary assertion: ZoneType::Industrial (2) + DensityTier::High (2).
     EXPECT_CALL(sim_, placeZone(3, 2, ZoneType::Industrial, DensityTier::High, 0)).Times(1);
 
+    // Zone rect-select: press sets anchor; release fills the 1×1 rect.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 }
 
 // ---------------------------------------------------------------------------

@@ -84,6 +84,18 @@ static InputEvent makeMouseButtonDown(int button, int virtX, int virtY)
     return ev;
 }
 
+static InputEvent makeMouseButtonUp(int button, int virtX, int virtY)
+{
+    InputEvent ev{};
+    ev.type   = InputEvent::Type::MouseButtonUp;
+    ev.button = button;
+    ev.x      = virtX;
+    ev.y      = virtY;
+    ev.physX  = virtX;
+    ev.physY  = virtY;
+    return ev;
+}
+
 static InputEvent makeMouseMove(int virtX, int virtY)
 {
     InputEvent ev{};
@@ -473,7 +485,9 @@ TEST_F(CoverageGapTest, Coverage_CommercialZone_OverlayColor)
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
         .WillOnce(SaveArg<2>(&captured));
 
+    // Zone rect-select: press sets anchor; release fills the 1×1 rect.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 
     // Verify overlay contains Commercial color.
     uint64_t key = static_cast<uint64_t>(3) * 10u + static_cast<uint64_t>(2);
@@ -503,7 +517,9 @@ TEST_F(CoverageGapTest, Coverage_IndustrialZone_OverlayColor)
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
         .WillOnce(SaveArg<2>(&captured));
 
+    // Zone rect-select: press sets anchor; release fills the 1×1 rect.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 
     uint64_t key = static_cast<uint64_t>(2) * 10u + static_cast<uint64_t>(1);
     ASSERT_TRUE(captured.count(key) > 0);
