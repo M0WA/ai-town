@@ -72,6 +72,12 @@ IrrlichtRenderer::~IrrlichtRenderer() {
         m_hoveredTileMesh = nullptr;
         m_hoverBuffer     = nullptr;  // non-owning observer — already freed by the mesh drop
     }
+
+    // Drop the placement preview mesh (null until first non-empty setTilePlacementPreview call).
+    if (m_previewMesh) {
+        m_previewMesh->drop();
+        m_previewMesh = nullptr;
+    }
     // m_overlayNode is owned by the Irrlicht scene graph and is removed automatically
     // when the scene manager is destroyed.  We do not call remove() here because the
     // device/smgr may already be in a partially-torn-down state by the time this
@@ -99,7 +105,16 @@ IrrlichtRenderer::~IrrlichtRenderer() {
     if (m_sharedRoadMeshLOD1) { m_sharedRoadMeshLOD1->drop(); m_sharedRoadMeshLOD1 = nullptr; }
     if (m_sharedRoadMeshLOD2) { m_sharedRoadMeshLOD2->drop(); m_sharedRoadMeshLOD2 = nullptr; }
 
-    // m_roadTextureCache, m_buildingAssetLoader (unique_ptrs) destroyed automatically.
+    // Phase 10: clean up all LODNode wrappers in the vehicle registry.
+    // Same rationale as building/road cleanup above: only delete the C++ wrapper;
+    // the underlying Irrlicht scene nodes are destroyed by device->drop() in main.cpp.
+    for (auto& kv : m_vehicleNodes) {
+        delete kv.second;
+    }
+    m_vehicleNodes.clear();
+
+    // m_roadTextureCache, m_buildingAssetLoader, m_vehicleAssetLoader (unique_ptrs)
+    // destroyed automatically.
 }
 
 void IrrlichtRenderer::beginFrame() {
@@ -133,6 +148,20 @@ void IrrlichtRenderer::drawScene() {
             m_driver->setMaterial(hoverBuf->getMaterial());
             m_driver->setTransform(ETS_WORLD, core::IdentityMatrix);
             m_driver->drawMeshBuffer(hoverBuf);
+        }
+    }
+
+    // Phase 10: draw multi-tile placement preview (Zone rect / Road line).
+    // Rendered after the single-tile hover highlight so it appears on top.
+    // Each SMeshBuffer in m_previewMesh is one quad; iterate all buffers.
+    if (m_previewMesh && m_previewVisible && m_driver) {
+        m_driver->setTransform(ETS_WORLD, core::IdentityMatrix);
+        for (u32 i = 0; i < m_previewMesh->getMeshBufferCount(); ++i) {
+            IMeshBuffer* buf = m_previewMesh->getMeshBuffer(i);
+            if (buf) {
+                m_driver->setMaterial(buf->getMaterial());
+                m_driver->drawMeshBuffer(buf);
+            }
         }
     }
 
@@ -557,6 +586,140 @@ void IrrlichtRenderer::setTileHoverHighlight(int tileX, int tileZ, uint32_t argb
 }
 
 // -------------------------------------------------------------------------
+// setTilePlacementPreview — rebuild the multi-tile placement preview mesh.
+//
+// Called every MouseMove while LMB is held for Zone (rect) and Road (line)
+// tools.  Each call drops the old preview mesh (if any) and builds a fresh
+// SMesh* containing one SMeshBuffer quad per tile.  This is a cold-ish path
+// (at most one rebuild per mouse-move event) so full rebuild is acceptable;
+// the tile count is bounded by the map size.
+//
+// Pass an empty vector to clear the preview (m_previewVisible = false).
+//
+// The SMeshBuffer batching limit of 10,922 quads per buffer (u16 index cap)
+// applies here too — new buffers are opened automatically when the limit is
+// reached, following the same pattern as setZoneOverlay.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::setTilePlacementPreview(
+    const std::vector<std::pair<int,int>>& tiles,
+    uint32_t argb)
+{
+    // Clear request.
+    if (tiles.empty()) {
+        m_previewVisible = false;
+        return;
+    }
+    if (!m_terrain || !m_driver) {
+        m_previewVisible = false;
+        return;
+    }
+
+    // Drop the old preview mesh before rebuilding.
+    if (m_previewMesh) {
+        m_previewMesh->drop();
+        m_previewMesh = nullptr;
+    }
+
+    // Decode ARGB (0xAARRGGBB) for Irrlicht SColor(A, R, G, B).
+    u8 a = static_cast<u8>((argb >> 24) & 0xFF);
+    u8 r = static_cast<u8>((argb >> 16) & 0xFF);
+    u8 g = static_cast<u8>((argb >>  8) & 0xFF);
+    u8 b = static_cast<u8>( argb        & 0xFF);
+    SColor colour(a, r, g, b);
+
+    const float yOffset = 0.05f;  // same as single-tile hover highlight
+
+    // Maximum quads per SMeshBuffer (u16 index cap: 65535 / 6 indices per quad).
+    static constexpr u32 kMaxQuadsPerBuffer = 10922u;
+
+    m_previewMesh = new SMesh();
+
+    SMeshBuffer* cur = nullptr;
+    u32 quadsInCur   = 0;
+
+    auto openBuffer = [&]() {
+        cur = new SMeshBuffer();
+        cur->Material.MaterialType = EMT_TRANSPARENT_ALPHA_CHANNEL;
+        cur->Material.Lighting     = false;
+        cur->Material.ZWriteEnable = false;
+        quadsInCur = 0;
+    };
+
+    auto closeBuffer = [&]() {
+        if (!cur) return;
+        cur->recalculateBoundingBox();
+        m_previewMesh->addMeshBuffer(cur);
+        cur->drop();  // mesh is now sole owner
+        cur = nullptr;
+    };
+
+    openBuffer();
+
+    for (const auto& tile : tiles) {
+        int tx = tile.first;
+        int tz = tile.second;
+
+        // Clamp to valid map bounds.
+        if (tx < 0 || tx >= m_mapTilesX || tz < 0 || tz >= m_mapTilesZ)
+            continue;
+
+        if (quadsInCur >= kMaxQuadsPerBuffer) {
+            closeBuffer();
+            openBuffer();
+        }
+
+        float x0 = static_cast<float>(tx)     * m_cellSize;
+        float x1 = static_cast<float>(tx + 1) * m_cellSize;
+        float z0 = static_cast<float>(tz)     * m_cellSize;
+        float z1 = static_cast<float>(tz + 1) * m_cellSize;
+
+        float h00 = m_terrain->getHeightAt(tx,     tz)     + yOffset;
+        float h10 = m_terrain->getHeightAt(tx + 1, tz)     + yOffset;
+        float h11 = m_terrain->getHeightAt(tx + 1, tz + 1) + yOffset;
+        float h01 = m_terrain->getHeightAt(tx,     tz + 1) + yOffset;
+
+        u32 base = quadsInCur * 4;
+
+        // Four vertices — CW winding from above (+Y normal).
+        cur->Vertices.push_back(S3DVertex(
+            core::vector3df(x0, h00, z0), core::vector3df(0,1,0), colour,
+            core::vector2df(0, 0)));
+        cur->Vertices.push_back(S3DVertex(
+            core::vector3df(x1, h10, z0), core::vector3df(0,1,0), colour,
+            core::vector2df(0, 0)));
+        cur->Vertices.push_back(S3DVertex(
+            core::vector3df(x1, h11, z1), core::vector3df(0,1,0), colour,
+            core::vector2df(0, 0)));
+        cur->Vertices.push_back(S3DVertex(
+            core::vector3df(x0, h01, z1), core::vector3df(0,1,0), colour,
+            core::vector2df(0, 0)));
+
+        // Indices: v0→v2→v1, v0→v3→v2 (CW from +Y view per scene-graph-ownership.md).
+        cur->Indices.push_back(static_cast<u16>(base + 0));
+        cur->Indices.push_back(static_cast<u16>(base + 2));
+        cur->Indices.push_back(static_cast<u16>(base + 1));
+        cur->Indices.push_back(static_cast<u16>(base + 0));
+        cur->Indices.push_back(static_cast<u16>(base + 3));
+        cur->Indices.push_back(static_cast<u16>(base + 2));
+
+        ++quadsInCur;
+    }
+
+    closeBuffer();
+
+    // If no valid tiles were added (all out-of-bounds), show nothing.
+    if (m_previewMesh->getMeshBufferCount() == 0) {
+        m_previewMesh->drop();
+        m_previewMesh   = nullptr;
+        m_previewVisible = false;
+        return;
+    }
+
+    m_previewMesh->recalculateBoundingBox();
+    m_previewVisible = true;
+}
+
+// -------------------------------------------------------------------------
 // setZoneOverlay — rebuild the persistent zone-colour overlay mesh.
 //
 // Each entry in sparseOverlay is one tile quad rendered semi-transparently
@@ -864,6 +1027,50 @@ void IrrlichtRenderer::destroyTileNode(
 }
 
 // -------------------------------------------------------------------------
+// getOrCreateZoneTexture — solid-colour placeholder texture per zone prefix.
+//
+// All placeholder B3D meshes have no UV coordinates (VRTS tc_sets=0); Irrlicht
+// defaults unset UV channels to (0,0), so every vertex samples the same texel.
+// A 4×4 uniform-colour image therefore renders as a flat solid colour regardless
+// of the absence of real UV data — giving each zone type a visually distinct look.
+//
+// The texture is created once and reused for all buildings of the same zone type.
+// Irrlicht's driver cache owns the ITexture* (no explicit drop needed here).
+// -------------------------------------------------------------------------
+irr::video::ITexture* IrrlichtRenderer::getOrCreateZoneTexture(const std::string& prefix)
+{
+    if (!m_driver) return nullptr;
+
+    auto it = m_zoneTextures.find(prefix);
+    if (it != m_zoneTextures.end()) return it->second;
+
+    // Choose a visually distinct colour per zone type.
+    irr::video::SColor color(255, 140, 140, 140);  // default: mid-gray
+    if      (prefix == "res_") color = irr::video::SColor(255, 200, 165, 110);  // warm tan
+    else if (prefix == "com_") color = irr::video::SColor(255,  90, 140, 210);  // steel blue
+    else if (prefix == "ind_") color = irr::video::SColor(255, 145, 145, 110);  // khaki gray
+    else if (prefix == "svc_") color = irr::video::SColor(255, 210, 160,  50);  // amber
+
+    // Build a 4×4 solid-colour image.
+    irr::video::IImage* img = m_driver->createImage(
+        irr::video::ECF_A8R8G8B8,
+        irr::core::dimension2d<irr::u32>(4, 4));
+    if (!img) return nullptr;
+
+    for (irr::u32 y = 0; y < 4; ++y)
+        for (irr::u32 x = 0; x < 4; ++x)
+            img->setPixel(x, y, color);
+
+    // Add to the Irrlicht driver texture cache under a unique name.
+    const std::string texName = "aitown_placeholder_bldg_" + prefix;
+    irr::video::ITexture* tex = m_driver->addTexture(texName.c_str(), img);
+    img->drop();  // driver has its own reference; release ours
+
+    m_zoneTextures[prefix] = tex;
+    return tex;
+}
+
+// -------------------------------------------------------------------------
 // placeBuildingMesh — zone building placement.
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
@@ -894,11 +1101,15 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
     }
 
     // Position the scene node at the tile's world-space centre.
-    // B3D placeholder meshes are 1×1×1 unit cubes centred at origin in XZ.
+    // B3D building meshes are 1×1×height unit boxes centred on X and Z.
     // Scale by kTileSize so they fill the full tile footprint (10×10 m).
     // Offset by kTileSize/2 in X and Z to centre the mesh on the tile.
-    // Disable lighting — B3D assets have no lights in the scene yet; without
-    // this, Irrlicht renders the mesh black (ambient=0).
+    // Disable lighting — no light nodes in the scene yet (Phase 6+).
+    //
+    // Texture fallback: BuildingAssetLoader::load() binds the buildings_atlas_d.dds
+    // to every material slot.  If the atlas fails to load (missing file, driver
+    // unsupported format) the slot remains null and the zone-coloured placeholder
+    // texture is bound instead so the building is still visually distinguishable.
     if (scene::ISceneNode* node = lodNode->getNode()) {
         const float terrainY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
         node->setPosition(core::vector3df(
@@ -906,8 +1117,22 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
             terrainY,
             static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
         node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
+
+        // Zone-colour fallback: only applied per-slot when atlas was NOT bound.
+        const std::string prefix = (assetBaseName.size() >= 4)
+            ? assetBaseName.substr(0, 4) : "dflt";
+        video::ITexture* zoneTex = getOrCreateZoneTexture(prefix);
+
         for (u32 m = 0; m < node->getMaterialCount(); ++m) {
-            node->getMaterial(m).Lighting = false;
+            video::SMaterial& mat = node->getMaterial(m);
+            mat.Lighting = false;
+            // Disable backface culling for B3D building assets.
+            // The procedural B3D generator uses CCW winding in Irrlicht left-handed
+            // space, but we keep BackfaceCulling=false as a robust default while
+            // production Blender assets are being authored.
+            mat.BackfaceCulling = false;
+            // Apply zone-coloured fallback only if atlas was not bound by loader.
+            if (!mat.getTexture(0) && zoneTex) mat.setTexture(0, zoneTex);
         }
     }
 
@@ -1014,9 +1239,11 @@ void IrrlichtRenderer::ensureRoadMeshes()
 {
     if (m_sharedRoadMeshLOD0) return;  // already built
 
-    // Road tile half-extent (4 m tile → 2 m half).
-    static constexpr float H  = 2.0f;
-    // Kerb dimensions.
+    // Road tile half-extent: tile is kTileSize (10 m) → half is 5 m.
+    // The mesh is centred at the local origin and positioned at the tile centre;
+    // H=5 makes the road quad exactly cover the full 10×10 m tile footprint.
+    static constexpr float H  = 5.0f;
+    // Kerb dimensions (world-space metres, scaled with H).
     static constexpr float KB = 0.05f;  // bevel inset (inner slope width)
     static constexpr float KW = 0.15f;  // total kerb width
     static constexpr float KH = 0.10f;  // kerb height
@@ -1314,8 +1541,17 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
             terrainY,
             static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
         node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
+
+        // Zone-colour fallback (amber) for service buildings — only used when
+        // the atlas was not successfully bound by BuildingAssetLoader::load().
+        video::ITexture* zoneTex = getOrCreateZoneTexture("svc_");
+
         for (u32 m = 0; m < node->getMaterialCount(); ++m) {
-            node->getMaterial(m).Lighting = false;
+            video::SMaterial& mat = node->getMaterial(m);
+            mat.Lighting = false;
+            // Disable backface culling — same rationale as placeBuildingMesh().
+            mat.BackfaceCulling = false;
+            if (!mat.getTexture(0) && zoneTex) mat.setTexture(0, zoneTex);
         }
     }
 
@@ -1331,4 +1567,182 @@ void IrrlichtRenderer::removeServiceBuildingMesh(int tileX, int tileZ)
 {
     // Service buildings use the same m_buildingNodes registry as zone buildings.
     destroyTileNode(m_buildingNodes, tileX, tileZ);
+}
+
+// =============================================================================
+// Phase 10 — Vehicle rendering
+//
+// Vehicles are spawned by the traffic simulation and identified by a stable
+// uint32_t vehicleId. They use the same B3D loading path as buildings
+// (BuildingAssetLoader), but with a separate loader instance and the vehicle
+// diffuse atlas (vehicles_diffuse_atlas_d.dds) rather than the buildings atlas.
+//
+// Vehicles are authored at world scale — no setScale() is applied.
+// Y-axis rotation (yawDegrees) is applied via setRotation(0, yaw, 0).
+//
+// Vehicle nodes are stored in m_vehicleNodes (keyed by vehicleId).
+// The eviction sequence on removal mirrors destroyTileNode().
+//
+// main-thread-only — do NOT call from audio thread or simulation thread.
+// =============================================================================
+
+// -------------------------------------------------------------------------
+// ensureVehicleLoader — lazily construct m_vehicleAssetLoader.
+// Returns true if the loader is ready; false if m_smgr/m_driver is null.
+// -------------------------------------------------------------------------
+bool IrrlichtRenderer::ensureVehicleLoader()
+{
+    if (m_vehicleAssetLoader) return true;
+    if (!m_smgr || !m_driver) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: ensureVehicleLoader() called with null "
+            "m_smgr/m_driver — vehicle scene node cannot be created\n");
+        return false;
+    }
+    m_vehicleAssetLoader = std::make_unique<BuildingAssetLoader>(m_smgr, m_driver);
+    return true;
+}
+
+// -------------------------------------------------------------------------
+// destroyVehicleNode — eviction sequence + LODNode deletion for one vehicle.
+//
+// Per scene-graph-ownership.md eviction sequence:
+//   Step 1: Clear all material texture slots.
+//   Step 2: driver->setMaterial(SMaterial{}) — flush driver last-bound state.
+//   Step 3: node->remove() — release from scene graph.
+//   Step 4: delete the LODNode wrapper (non-owning — scene node already removed).
+//
+// No-op if vehicleId is not in m_vehicleNodes.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::destroyVehicleNode(uint32_t vehicleId)
+{
+    auto it = m_vehicleNodes.find(vehicleId);
+    if (it == m_vehicleNodes.end() || !it->second) return;
+
+    LODNode* lodNode = it->second;
+    scene::ISceneNode* node = lodNode->getNode();
+
+    if (node && m_driver) {
+        // Step 1: clear material texture slots.
+        u32 matCount = node->getMaterialCount();
+        for (u32 m = 0; m < matCount; ++m) {
+            SMaterial& mat = node->getMaterial(m);
+            for (u32 t = 0; t < MATERIAL_MAX_TEXTURES; ++t) {
+                mat.setTexture(t, nullptr);
+            }
+        }
+        // Step 2: flush driver last-bound state.
+        m_driver->setMaterial(SMaterial{});
+        // Step 3: remove scene node from the scene graph.
+        node->remove();  // do NOT access node* after this
+    }
+
+    // Step 4: delete the LODNode wrapper.
+    delete lodNode;
+    m_vehicleNodes.erase(it);
+}
+
+// -------------------------------------------------------------------------
+// placeVehicle — load vehicle B3D assets and create a scene node.
+//
+// If vehicleId is already registered, the old node is removed first.
+// Asset base path: AITOWN_ASSETS_DIR/3d/vehicles/<assetName>
+// BuildingAssetLoader::load() appends _lod0.b3d, _lod1.b3d, .meta.
+//
+// Vehicles are authored at world scale; no setScale() is applied.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
+                                     const std::string& assetName,
+                                     float worldX, float worldY, float worldZ,
+                                     float yawDegrees)
+{
+    if (assetName.empty()) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: placeVehicle(id=%u) called with empty "
+            "assetName — skipping node creation\n", vehicleId);
+        return;
+    }
+
+    // Remove any existing node for this vehicleId before placing the new one.
+    destroyVehicleNode(vehicleId);
+
+    if (!ensureVehicleLoader()) return;
+
+    const std::string basePath = std::string(AITOWN_ASSETS_DIR)
+                                 + "/3d/vehicles/" + assetName;
+
+    LODNode* lodNode = m_vehicleAssetLoader->load(basePath);
+    if (!lodNode) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: placeVehicle(id=%u): failed to load "
+            "asset '%s' — node not created\n", vehicleId, basePath.c_str());
+        return;
+    }
+
+    scene::ISceneNode* node = lodNode->getNode();
+    if (node) {
+        // Position at the given world-space coordinates.
+        node->setPosition(core::vector3df(worldX, worldY, worldZ));
+        // Apply Y-axis yaw rotation (0=+Z forward, 90=+X right).
+        node->setRotation(core::vector3df(0.0f, yawDegrees, 0.0f));
+        // Vehicles are authored at world scale — do NOT apply tile-based setScale.
+
+        // Apply material settings.
+        // BackfaceCulling=true: vehicles have correct winding (authored by artist).
+        // Lighting=false: no light nodes in scene yet (Phase 6+).
+        // Atlas fallback: if BuildingAssetLoader did not bind the atlas (file missing),
+        // bind vehicles_diffuse_atlas_d.dds directly as a safety fallback.
+        const std::string atlasPath = std::string(AITOWN_ASSETS_DIR)
+            + "/textures/vehicles/vehicles_diffuse_atlas_d.dds";
+
+        for (u32 m = 0; m < node->getMaterialCount(); ++m) {
+            SMaterial& mat = node->getMaterial(m);
+            mat.Lighting        = false;
+            mat.BackfaceCulling = true;
+            // Bind vehicle atlas as fallback only when slot 0 is still unbound.
+            if (!mat.getTexture(0) && m_driver) {
+                ITexture* atlas = m_driver->getTexture(atlasPath.c_str());
+                if (atlas) mat.setTexture(0, atlas);
+            }
+        }
+    }
+
+    m_vehicleNodes[vehicleId] = lodNode;
+}
+
+// -------------------------------------------------------------------------
+// moveVehicle — update position/yaw of an existing vehicle node.
+//
+// If vehicleId is unknown, delegates to placeVehicle and returns.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::moveVehicle(uint32_t vehicleId,
+                                    float worldX, float worldY, float worldZ,
+                                    float yawDegrees)
+{
+    auto it = m_vehicleNodes.find(vehicleId);
+    if (it == m_vehicleNodes.end() || !it->second) {
+        // Unknown vehicleId — treat as a late-arriving place call.
+        // assetName is not available here; caller must use placeVehicle() for
+        // first-time placement.  Log and return to avoid a crash.
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: moveVehicle(id=%u): vehicleId not "
+            "registered — ignoring move (caller should use placeVehicle first)\n",
+            vehicleId);
+        return;
+    }
+
+    scene::ISceneNode* node = it->second->getNode();
+    if (node) {
+        node->setPosition(core::vector3df(worldX, worldY, worldZ));
+        node->setRotation(core::vector3df(0.0f, yawDegrees, 0.0f));
+    }
+}
+
+// -------------------------------------------------------------------------
+// removeVehicle — destroy the vehicle scene node for vehicleId.
+// No-op if vehicleId is not registered.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::removeVehicle(uint32_t vehicleId)
+{
+    destroyVehicleNode(vehicleId);
 }

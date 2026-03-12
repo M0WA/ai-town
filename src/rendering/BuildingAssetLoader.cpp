@@ -4,13 +4,19 @@
 // then creates and returns a LODNode wrapping the scene node with LOD distances.
 //
 // Asset loading sequence:
-//   1. Parse .meta sidecar to get height_floors and lod_distances[0..2].
+//   1. Parse .meta sidecar to get height_floors, lod_distances[0..2], and
+//      atlas_cell {row, col}.
 //   2. Load _lod0.b3d via m_smgr->getMesh() → IAnimatedMesh* (CSkinnedMesh).
 //   3. Load _lod1.b3d (same approach).
 //   4. For height_floors >= 4: load _lod2.b3d geometry shell.
 //      For height_floors <= 3: lod2 = nullptr (billboard at this distance).
-//   5. Create scene node via addAnimatedMeshSceneNode(lod0).
-//   6. Construct and return LODNode(node, lod0, lod1, lod2, d0, d1, cull).
+//   5. Create scene node via addMeshSceneNode(lod0).
+//   6. Bind buildings_atlas_d.dds to texture slot 0 of all material slots on the
+//      scene node.  The placeholder B3D files carry no TEXS/BRUS texture chunks and
+//      have VRTS tc_sets=0, so Irrlicht assigns the default material (EMT_SOLID,
+//      no texture, white vertex color) after loading.  Without explicit texture
+//      assignment the mesh renders solid white even after BackfaceCulling=false.
+//   7. Construct and return LODNode(node, lod0, lod1, lod2, d0, d1, cull).
 //
 // IMPORTANT — no dynamic_cast on Irrlicht types:
 //   Irrlicht is compiled with -fno-rtti. dynamic_cast on Irrlicht types has no
@@ -79,9 +85,12 @@ LODNode* BuildingAssetLoader::load(const std::string& basePath)
     float lod0dist     = 50.0f;
     float lod1dist     = 200.0f;
     float cullDist     = 500.0f;
+    int   atlasRow     = 0;
+    int   atlasCol     = 0;
 
     const std::string metaPath = basePath + ".meta";
-    if (!parseMeta(metaPath, heightFloors, lod0dist, lod1dist, cullDist)) {
+    if (!parseMeta(metaPath, heightFloors, lod0dist, lod1dist, cullDist,
+                   atlasRow, atlasCol)) {
         return nullptr;  // .meta missing or malformed
     }
 
@@ -135,7 +144,72 @@ LODNode* BuildingAssetLoader::load(const std::string& basePath)
     }
 
     // ------------------------------------------------------------------
-    // Step 6: Construct and return the LODNode.
+    // Step 6: Bind the buildings atlas texture to all material slots.
+    //
+    // All placeholder B3D files have VRTS tc_sets=0 (no UV coordinates) and no
+    // TEXS/BRUS chunks.  The Irrlicht B3D loader therefore assigns the default
+    // material (EMT_SOLID, no texture, white vertex diffuse) to every mesh
+    // buffer.  Without explicit texture assignment the scene node renders solid
+    // white — BackfaceCulling=false makes faces visible but cannot supply color.
+    //
+    // Fix: load buildings_atlas_d.dds via IVideoDriver::getTexture() (linear
+    // pool path — the sRGB raw-GL path is used for DXT sRGB uploads, but
+    // IVideoDriver::getTexture() is correct here because:
+    //   a) the placeholder atlas is a plain DDS (no sRGB DXT flag required for
+    //      placeholder rendering quality), and
+    //   b) the raw-GL sRGB upload path is only wired for road_asphalt_tileable.dds
+    //      in Phase 10; building atlas sRGB upload is a Phase 11+ refinement.
+    // Bind the texture to slot 0 of every material on the node.
+    //
+    // Note: atlasRow and atlasCol are parsed from the .meta but UV sub-rect
+    // selection is handled per-vertex in the B3D mesh (authored UV channel 0
+    // maps into the correct atlas cell).  For placeholder meshes that lack UVs
+    // the whole texture is sampled at UV (0,0) — a single atlas cell is visible,
+    // which is correct placeholder behavior.
+    // ------------------------------------------------------------------
+    if (m_driver) {
+        // Build the atlas path relative to the asset base directory.
+        // basePath is e.g. "assets/3d/buildings/res_low_01"; strip back to the
+        // assets root and append the texture sub-path.
+        // The atlas always lives at assets/textures/buildings/buildings_atlas_d.dds
+        // relative to AITOWN_ASSETS_DIR (defined in CMakeLists.txt as the absolute
+        // path to the assets/ directory).
+        //
+        // We derive the assets root from basePath by finding the last occurrence
+        // of "/3d/buildings/" and trimming everything from that point onward.
+        // This avoids a hard dependency on AITOWN_ASSETS_DIR being available here
+        // (it is only defined in IrrlichtRenderer.cpp as a compile-time macro via
+        // CMakeLists.txt).  BuildingAssetLoader receives basePath from
+        // IrrlichtRenderer which already has AITOWN_ASSETS_DIR prepended — so we
+        // can reliably strip the known suffix.
+        std::string atlasPath;
+        const auto buildingPos = basePath.rfind("/3d/buildings/");
+        const auto vehiclePos  = basePath.rfind("/3d/vehicles/");
+        if (buildingPos != std::string::npos) {
+            atlasPath = basePath.substr(0, buildingPos)
+                        + "/textures/buildings/buildings_atlas_d.dds";
+        } else if (vehiclePos != std::string::npos) {
+            atlasPath = basePath.substr(0, vehiclePos)
+                        + "/textures/vehicles/vehicles_diffuse_atlas_d.dds";
+        }
+
+        if (!atlasPath.empty()) {
+            ITexture* atlas = m_driver->getTexture(atlasPath.c_str());
+            if (atlas) {
+                u32 matCount = node->getMaterialCount();
+                for (u32 m = 0; m < matCount; ++m) {
+                    node->getMaterial(m).setTexture(0, atlas);
+                }
+            } else {
+                fprintf(stderr,
+                    "[BuildingAssetLoader] WARNING: buildings atlas not found at "
+                    "'%s' — building will render white\n", atlasPath.c_str());
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Step 7: Construct and return the LODNode.
     // LODNode stores borrowed (non-owning) pointers to lod0/1/2 — they remain
     // alive in the Irrlicht mesh cache for the lifetime of the scene.
     // The caller (IrrlichtRenderer) owns the returned LODNode*.
@@ -151,6 +225,7 @@ LODNode* BuildingAssetLoader::load(const std::string& basePath)
 //   {
 //     "height_floors": 3,
 //     "category": "residential",
+//     "atlas_cell": { "row": 0, "col": 0 },
 //     "lod_distances": [30.0, 100.0, 300.0]
 //   }
 //
@@ -160,13 +235,17 @@ LODNode* BuildingAssetLoader::load(const std::string& basePath)
 //   - Use sscanf() to extract the integer value.
 //   - Use strstr() to locate "lod_distances" key.
 //   - Scan forward for '[', then parse three floats separated by commas.
+//   - Use strstr() to locate "atlas_cell" key, then locate "row" and "col"
+//     within the braces that follow.  Both default to 0 if not found.
 // ---------------------------------------------------------------------------
 
 bool BuildingAssetLoader::parseMeta(const std::string& metaPath,
                                      int&               heightFloors,
                                      float&             lod0dist,
                                      float&             lod1dist,
-                                     float&             cullDist)
+                                     float&             cullDist,
+                                     int&               atlasRow,
+                                     int&               atlasCol)
 {
     std::ifstream file(metaPath);
     if (!file.is_open()) return false;
@@ -184,7 +263,6 @@ bool BuildingAssetLoader::parseMeta(const std::string& metaPath,
     const char* hfKey = std::strstr(data, "height_floors");
     if (!hfKey) return false;
 
-    // Advance past "height_floors" to find the colon and value.
     const char* hfColon = std::strchr(hfKey, ':');
     if (!hfColon) return false;
 
@@ -199,10 +277,46 @@ bool BuildingAssetLoader::parseMeta(const std::string& metaPath,
     const char* lBracket = std::strchr(ldKey, '[');
     if (!lBracket) return false;
 
-    // Parse three floats from "[a, b, c]".
     if (std::sscanf(lBracket + 1, " %f , %f , %f",
                     &lod0dist, &lod1dist, &cullDist) != 3) {
         return false;
+    }
+
+    // ------------------------------------------------------------------
+    // Parse "atlas_cell": { "row": R, "col": C }
+    //
+    // Optional — default to (0,0) if the key is absent (safe fallback).
+    // Search within the "atlas_cell" object only to avoid accidentally
+    // matching a "row" or "col" key from a different object.
+    // ------------------------------------------------------------------
+    atlasRow = 0;
+    atlasCol = 0;
+
+    const char* acKey = std::strstr(data, "atlas_cell");
+    if (acKey) {
+        // Advance to the opening brace of the atlas_cell object.
+        const char* acBrace = std::strchr(acKey, '{');
+        if (acBrace) {
+            const char* acEnd = std::strchr(acBrace, '}');
+            if (acEnd) {
+                // Parse "row": R within [acBrace, acEnd].
+                const char* rowKey = std::strstr(acBrace, "\"row\"");
+                if (rowKey && rowKey < acEnd) {
+                    const char* rowColon = std::strchr(rowKey, ':');
+                    if (rowColon && rowColon < acEnd) {
+                        std::sscanf(rowColon + 1, " %d", &atlasRow);
+                    }
+                }
+                // Parse "col": C within [acBrace, acEnd].
+                const char* colKey = std::strstr(acBrace, "\"col\"");
+                if (colKey && colKey < acEnd) {
+                    const char* colColon = std::strchr(colKey, ':');
+                    if (colColon && colColon < acEnd) {
+                        std::sscanf(colColon + 1, " %d", &atlasCol);
+                    }
+                }
+            }
+        }
     }
 
     return true;

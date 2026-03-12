@@ -264,6 +264,7 @@ prevent depth-buffer Z-fighting against terrain and against each other:
 |---|---|---|---|
 | Zone colour overlay | `+0.1f` | `EMT_TRANSPARENT_ALPHA_CHANNEL` | Persistent scene node; rebuilt on zone change |
 | Tile hover highlight | `+0.05f` | `EMT_TRANSPARENT_ALPHA_CHANNEL` | Raw `drawMeshBuffer` call in `drawScene()`; never a scene node |
+| Placement preview | `+0.05f` | `EMT_TRANSPARENT_ALPHA_CHANNEL` | Raw `drawMeshBuffer` calls in `drawScene()`; never a scene node; drawn after hover highlight |
 
 `EMT_TRANSPARENT_ALPHA_CHANNEL` disables depth writes but reads the depth buffer with
 `GL_LEQUAL`. Without the Y-offset, fragments at exactly terrain height may fail the depth
@@ -332,3 +333,183 @@ the scene graph as a persistent `ISceneNode*` and rebuilt (remove-old / add-new)
 `setZoneOverlay()` call. The distinction is intentional: hover changes every mouse-move
 event (hot path, in-place update required); zone overlay changes only on placement events
 (cold path, full rebuild acceptable).
+
+### Placement Preview — Dynamic Multi-Tile SMesh (Phase 10)
+
+`IRenderer::setTilePlacementPreview(tiles, argb)` renders a multi-tile highlight covering
+the Zone rectangular drag-select or Road straight-line preview while LMB is held. Unlike
+the single-tile hover highlight (pre-allocated, in-place update), the preview mesh is
+**fully rebuilt on every call** because its tile count varies from 1 to potentially
+hundreds per drag step.
+
+**Lifecycle**:
+
+- `m_previewMesh` (`SMesh*`) is `nullptr` at construction; allocated on the first non-empty
+  call to `setTilePlacementPreview()`.
+- Each call drops the old mesh (`m_previewMesh->drop()`) before allocating a new one.
+  This is a cold path (at most one rebuild per `MouseMove` event) so the allocation cost
+  is acceptable.
+- An empty `tiles` vector is the clear signal: sets `m_previewVisible = false`, skips
+  mesh allocation.
+- `m_previewMesh` is dropped in the `IrrlichtRenderer` destructor.
+- The mesh is NOT added to the Irrlicht scene graph. It is drawn in `drawScene()` after
+  the single-tile hover highlight via a loop over `m_previewMesh->getMeshBufferCount()`
+  with raw `IVideoDriver::drawMeshBuffer()` calls.
+
+**Buffer batching**: identical u16-index limit as zone overlay — max 10,922 quads per
+`SMeshBuffer`. Out-of-bounds tiles are skipped silently (clamped by `m_mapTilesX/Z`).
+
+**When the single-tile hover is suppressed**: while a Zone or Road drag is active
+(`m_lmbHeld && m_zoneAnchorX != -1`) and the preview is shown, `UIManager` calls
+`setTileHoverHighlight(-1, -1, kHoverArgbClear)` to hide the single-tile cursor and
+`setTilePlacementPreview(tiles, colour)` to show the multi-tile preview. When LMB is
+released or the tool is deselected, `setTilePlacementPreview({}, 0)` clears the preview
+and the normal single-tile hover resumes on the next `MouseMove`.
+
+---
+
+## Building and Road Mesh Material Rules (Phase 10)
+
+### BackfaceCulling — MANDATORY `false` for B3D building meshes
+
+B3D assets exported from Blender with the **"-Z Forward, Y Up"** convention produce face
+winding that Irrlicht's left-handed OpenGL renderer treats as back-facing. Irrlicht enables
+`BackfaceCulling = true` by default, which silently culls the front faces of all B3D
+building meshes — the result is a white or invisible building (only untextured back faces
+visible from some angles).
+
+**Rule**: `IrrlichtRenderer::placeBuildingMesh()` and `placeServiceBuildingMesh()` MUST
+set `mat.BackfaceCulling = false` on every material slot of the placed scene node:
+
+```cpp
+for (u32 m = 0; m < node->getMaterialCount(); ++m) {
+    irr::video::SMaterial& mat = node->getMaterial(m);
+    mat.Lighting     = false;   // no scene lights yet in V1
+    mat.BackfaceCulling = false; // B3D Blender export winding is CW in Irrlicht space
+}
+```
+
+This rule applies to **all three placement helpers** (`placeBuildingMesh`,
+`placeRoadMesh`, `placeServiceBuildingMesh`). When production B3D assets are delivered
+with correct CW winding for Irrlicht (validated by the 3D model artist), `BackfaceCulling`
+may be re-enabled per asset — but the default for all V1 placeholder B3D assets is `false`.
+
+**Do not** attempt to fix building visibility by adjusting the Blender export axis
+convention instead — the export convention is locked to "-Z Forward, Y Up" (see
+`architecture/asset-standards/3d-model-standards.md — Coordinate System Export
+Convention`). The `BackfaceCulling = false` flag is the correct engine-side fix.
+
+### Texture Propagation — MANDATORY atlas bind in `BuildingAssetLoader::load()`
+
+B3D placeholder files are minimal geometry cubes with **no `TEXS` or `BRUS` chunks**
+and **`VRTS tc_sets=0`** (no UV coordinates). The Irrlicht B3D loader therefore
+assigns the default `EMT_SOLID` material (no texture, white vertex diffuse) to every
+mesh buffer. After `addMeshSceneNode()` the scene node's material slots have
+`Texture[0] == nullptr`.
+
+`BackfaceCulling = false` (applied by `placeBuildingMesh` / `placeServiceBuildingMesh`
+after `BuildingAssetLoader::load()` returns) makes faces **visible**, but faces with no
+texture still render **solid white** — identical to the pre-fix symptom from the
+perspective of the artist.
+
+**Rule**: `BuildingAssetLoader::load()` MUST bind `buildings_atlas_d.dds` to texture
+slot 0 on every material slot of the scene node immediately after
+`addMeshSceneNode()`:
+
+```cpp
+ITexture* atlas = m_driver->getTexture(atlasPath.c_str());
+if (atlas) {
+    for (u32 m = 0; m < node->getMaterialCount(); ++m)
+        node->getMaterial(m).setTexture(0, atlas);
+}
+```
+
+The atlas path is derived from the asset `basePath` by replacing the
+`/3d/buildings/` suffix with `/textures/buildings/buildings_atlas_d.dds`.
+
+**Upload path note**: `IVideoDriver::getTexture()` is used here (linear pool). The
+full sRGB raw-GL upload path (`glGenTextures` + `glCompressedTexImage2D` with
+`GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`) applies to the building atlas for production
+quality and is a Phase 11+ refinement. Placeholder rendering is acceptable with the
+linear-pool path.
+
+**LOD swap interaction**: `LODNode::swapMesh()` calls `IMeshSceneNode::setMesh()`,
+which replaces the mesh but **preserves all material slots** on the node (Irrlicht's
+`CMeshSceneNode::setMesh()` does not reset materials). The atlas texture bound at
+placement time therefore survives LOD transitions without re-binding.
+
+---
+
+## Vehicle Node Registry (Phase 10)
+
+### Registry structure
+
+`IrrlichtRenderer` maintains `m_vehicleNodes` — an
+`std::unordered_map<uint32_t, LODNode*>` keyed by `vehicleId`. The key is the
+stable integer ID assigned by the traffic simulation for the vehicle's lifetime.
+`IrrlichtRenderer` is the sole owner of every `LODNode*` in this map.
+
+### Vehicle placement and movement lifecycle
+
+| Method | Behaviour |
+|---|---|
+| `placeVehicle(vehicleId, assetName, x, y, z, yaw)` | Calls `destroyVehicleNode(vehicleId)` first (no-op when new). Calls `ensureVehicleLoader()`, then `m_vehicleAssetLoader->load(basePath)`. Sets `node->setPosition` and `node->setRotation(0, yaw, 0)`. Applies material rules (see below). Stores `LODNode*` in `m_vehicleNodes[vehicleId]`. |
+| `moveVehicle(vehicleId, x, y, z, yaw)` | Looks up `m_vehicleNodes[vehicleId]`. If missing, logs a warning and returns (caller must use `placeVehicle` for first-time placement). Otherwise updates `node->setPosition` and `node->setRotation(0, yaw, 0)` in-place. |
+| `removeVehicle(vehicleId)` | Calls `destroyVehicleNode(vehicleId)` (no-op when not found). |
+
+### Vehicle eviction sequence
+
+`destroyVehicleNode(vehicleId)` runs the full eviction sequence per
+`scene-graph-ownership.md` (same pattern as `destroyTileNode`):
+
+1. Iterate all material slots — call `mat.setTexture(t, nullptr)` for every texture
+   unit `t` in `[0, MATERIAL_MAX_TEXTURES)`.
+2. `m_driver->setMaterial(SMaterial{})` — flush driver last-bound state.
+3. `node->remove()` — release the scene node from the scene graph. Do NOT access
+   the node pointer after this line.
+4. `delete lodNode` — delete the `LODNode*` C++ wrapper (non-owning after
+   `node->remove()`).
+5. Erase the entry from `m_vehicleNodes`.
+
+The destructor iterates `m_vehicleNodes` and calls `delete kv.second` for every
+remaining entry. It does NOT call `node->remove()` in the destructor because the
+Irrlicht scene graph is torn down by `device->drop()` in `main.cpp` after
+`IrrlichtRenderer` is destroyed — the scene nodes are freed automatically when the
+scene manager is destroyed.
+
+### Vehicle material rules
+
+Vehicle material slots are configured in `placeVehicle()` immediately after
+`BuildingAssetLoader::load()` returns:
+
+| Property | Value | Rationale |
+|---|---|---|
+| `Lighting` | `false` | No light nodes in scene (Phase 6+). |
+| `BackfaceCulling` | `true` | Vehicles are authored with correct CW winding for Irrlicht left-handed space. Differs from buildings which default to `false`. |
+| `Texture[0]` (fallback) | `vehicles_diffuse_atlas_d.dds` | Applied only when `BuildingAssetLoader::load()` did not bind a texture (atlas file missing). Loaded via `IVideoDriver::getTexture()` (linear pool). |
+
+### Vehicles are NOT tile-scaled
+
+Building nodes are scaled by `kTileSize` to fill the 10 × 10 m tile footprint.
+Vehicle nodes are **NOT** scaled — vehicles are authored at world scale (real metres).
+`placeVehicle()` calls only `setPosition` and `setRotation`; it never calls
+`setScale`.
+
+### Separate vehicle asset loader
+
+A dedicated `m_vehicleAssetLoader` (`std::unique_ptr<BuildingAssetLoader>`) is used
+for vehicles. This keeps the vehicle atlas path (`vehicles_diffuse_atlas_d.dds`)
+separate from the building atlas path (`buildings_atlas_d.dds`) without adding
+per-call branching to the building placement path.
+
+`BuildingAssetLoader::load()` derives the atlas path from the `basePath` string:
+if `basePath` contains `/3d/buildings/` it selects the buildings atlas; if it
+contains `/3d/vehicles/` it selects the vehicles atlas. Both loaders share the same
+`parseMeta()` / B3D loading code path.
+
+### `ensureVehicleLoader` — lazy init
+
+`ensureVehicleLoader()` creates `m_vehicleAssetLoader` on the first `placeVehicle`
+call. It returns `false` (and logs a warning) when `m_smgr` or `m_driver` is null
+(headless / unit-test context). `placeVehicle()` returns early without crashing when
+`ensureVehicleLoader()` returns `false`.

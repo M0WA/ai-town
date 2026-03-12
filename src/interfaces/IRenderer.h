@@ -5,6 +5,7 @@
 #include <string>
 #include <cstdint>
 #include <unordered_map>
+#include <utility>   // std::pair — used by setTilePlacementPreview tile list
 #include <vector>
 
 // Opaque texture handle — uint32_t alias instead of ITexture* so that IRenderer.h
@@ -228,4 +229,60 @@ public:
     // Called by CitySimulation after demolishTile() on a service building tile.
     // main-thread-only.
     virtual void removeServiceBuildingMesh(int tileX, int tileZ) = 0;
+
+    // -----------------------------------------------------------------------
+    // Phase 10 — Vehicle rendering API
+    //
+    // Called by the traffic simulation each frame to place, move, and remove
+    // vehicle scene nodes.  Vehicles are identified by a stable uint32_t ID
+    // assigned by the simulation for the vehicle's lifetime.
+    //
+    // assetName is the B3D asset stem, e.g. "car_sedan" or "bus_standard"
+    // (without the _lodN.b3d suffix).  B3D files are expected under
+    // assets/3d/vehicles/<assetName>_lod0.b3d etc.
+    //
+    // worldX/Y/Z: world-space position in metres.
+    // yawDegrees: Y-axis rotation (0 = +Z forward, 90 = +X right).
+    //
+    // Vehicles are authored at world scale (no tile-based setScale needed).
+    // Implementations must be no-ops (log warning, no crash) when the asset
+    // file is absent.
+    // main-thread-only.
+    // (ref: implementation/phase-10.md Vehicle Rendering deliverables)
+    // -----------------------------------------------------------------------
+
+    // placeVehicle — load LOD0/1 .b3d for assetName and create a scene node
+    // at the given world-space position.  If vehicleId is already registered,
+    // the old node is removed first (replaces in place).
+    virtual void placeVehicle(uint32_t vehicleId,
+                              const std::string& assetName,
+                              float worldX, float worldY, float worldZ,
+                              float yawDegrees) = 0;
+
+    // moveVehicle — update position/yaw of an existing vehicle node.
+    // If vehicleId is unknown, delegates to placeVehicle and returns.
+    virtual void moveVehicle(uint32_t vehicleId,
+                             float worldX, float worldY, float worldZ,
+                             float yawDegrees) = 0;
+
+    // removeVehicle — destroy the vehicle scene node for vehicleId.
+    // No-op if vehicleId is not registered.
+    virtual void removeVehicle(uint32_t vehicleId) = 0;
+
+    // setTilePlacementPreview — render a multi-tile placement preview highlight.
+    //
+    // Each entry in tiles is a (tileX, tileZ) pair.  All tiles are rendered with
+    // the same ARGB colour using the same Y-offset (+0.05f) and
+    // EMT_TRANSPARENT_ALPHA_CHANNEL material as setTileHoverHighlight().
+    //
+    // Passing an empty vector clears the preview (sets m_previewVisible = false).
+    // The preview is drawn via raw drawMeshBuffer() calls in drawScene(), after
+    // sceneManager->drawAll() and after the single-tile hover highlight, so it
+    // always renders on top of the zone colour overlay.
+    //
+    // Called from UIManager MouseMove while LMB is held for Zone (rect) and Road
+    // (straight-line) tools.  Cleared on MouseButtonUp after placement.
+    // main-thread-only.
+    virtual void setTilePlacementPreview(const std::vector<std::pair<int,int>>& tiles,
+                                         uint32_t argb) = 0;
 };

@@ -67,6 +67,13 @@ public:
     // Phase 10: listener position for sfx_intersection_tick distance cull.
     MOCK_METHOD(vec3, getListenerPosition, (), (const, override));
 
+    // Phase 10: multi-tile placement preview (Zone rect / Road line).
+    // TileList alias avoids comma-in-template-arg issue with MOCK_METHOD macro.
+    using TileList = std::vector<std::pair<int,int>>;
+    MOCK_METHOD(void, setTilePlacementPreview,
+                (const TileList& tiles, uint32_t argb),
+                (override));
+
     // Phase 10: building mesh spawning and road mesh rendering API.
     // All six methods are no-op void by default — tests that need specific
     // placement behaviour must set EXPECT_CALL / ON_CALL explicitly.
@@ -91,6 +98,27 @@ public:
                 (override));
     MOCK_METHOD(void, removeServiceBuildingMesh,
                 (int tileX, int tileZ),
+                (override));
+
+    // Phase 10: vehicle rendering API.
+    // All three methods are no-op void by default — tests that need specific
+    // vehicle placement/movement/removal behaviour must set EXPECT_CALL / ON_CALL
+    // explicitly.
+    //
+    // Signatures MUST match IRenderer.h exactly:
+    //   placeVehicle  — vehicleId + assetName + world position + yawDegrees
+    //   moveVehicle   — vehicleId + world position + yawDegrees
+    //   removeVehicle — vehicleId only
+    MOCK_METHOD(void, placeVehicle,
+                (uint32_t vehicleId, const std::string& assetName,
+                 float worldX, float worldY, float worldZ, float yawDegrees),
+                (override));
+    MOCK_METHOD(void, moveVehicle,
+                (uint32_t vehicleId,
+                 float worldX, float worldY, float worldZ, float yawDegrees),
+                (override));
+    MOCK_METHOD(void, removeVehicle,
+                (uint32_t vehicleId),
                 (override));
 
 private:

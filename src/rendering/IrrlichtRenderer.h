@@ -20,10 +20,11 @@ class ITerrainQuery;
 // Per architecture/graphics-architecture/irrlicht-device-lifecycle.md Header Dependency Rule.
 class UIManager;
 
-// Forward-declare BuildingAssetLoader and LODNode — full includes in IrrlichtRenderer.cpp.
-// IrrlichtRenderer owns a BuildingAssetLoader by unique_ptr (Phase 10).
+// Forward-declare BuildingAssetLoader, LODNode, TextureCache — full includes in IrrlichtRenderer.cpp.
+// IrrlichtRenderer owns a BuildingAssetLoader and TextureCache by unique_ptr (Phase 10).
 class BuildingAssetLoader;
 class LODNode;
+class TextureCache;
 
 // IrrlichtRenderer — concrete implementation of IRenderer backed by Irrlicht.
 //
@@ -115,6 +116,8 @@ public:
                              const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) override;
     ScreenRect getTileScreenBounds(int tileX, int tileZ) const override;
     vec3       getListenerPosition() const override;
+    void       setTilePlacementPreview(const std::vector<std::pair<int,int>>& tiles,
+                                       uint32_t argb) override;
 
     // Phase 10 — building mesh spawning and road mesh rendering API.
     // Six overrides corresponding to the pure-virtual methods added to IRenderer
@@ -133,6 +136,20 @@ public:
     void placeServiceBuildingMesh(int tileX, int tileZ,
                                   ServiceBuildingType type) override;
     void removeServiceBuildingMesh(int tileX, int tileZ) override;
+
+    // Phase 10 — Vehicle rendering API.
+    // Implementations are in IrrlichtRenderer.cpp.
+    // placeVehicle removes any existing node for vehicleId before creating the new one.
+    // moveVehicle delegates to placeVehicle when vehicleId is unknown.
+    // removeVehicle runs the full eviction sequence and deletes the LODNode wrapper.
+    void placeVehicle(uint32_t vehicleId,
+                      const std::string& assetName,
+                      float worldX, float worldY, float worldZ,
+                      float yawDegrees) override;
+    void moveVehicle(uint32_t vehicleId,
+                     float worldX, float worldY, float worldZ,
+                     float yawDegrees) override;
+    void removeVehicle(uint32_t vehicleId) override;
 
 private:
     irr::IrrlichtDevice*        m_device;
@@ -178,6 +195,15 @@ private:
     irr::scene::SMeshBuffer* m_hoverBuffer{nullptr};  // non-owning after addMeshBuffer+drop
     bool                     m_hoverVisible{false};
 
+    // --- Phase 10: multi-tile placement preview (Zone rect / Road line) ---
+    // m_previewMesh:    rebuilt on every setTilePlacementPreview() call with N quads.
+    //                   null until the first non-empty call; dropped in destructor.
+    // m_previewVisible: true when preview tiles are set; false after clear (empty tiles).
+    //                   Checked in drawScene() before issuing drawMeshBuffer() calls.
+    // Ownership: m_previewMesh is dropped (->drop()) only when replaced or in the destructor.
+    irr::scene::SMesh* m_previewMesh{nullptr};
+    bool               m_previewVisible{false};
+
     // --- Phase 9b: zone overlay ---
     // m_overlayNode: persistent scene node for the zone colour overlay.
     // Rebuilt by setZoneOverlay(); old node is removed before new mesh is attached.
@@ -222,6 +248,79 @@ private:
     // constructing when m_smgr is null (e.g. unit tests with null device).
     // Owned exclusively by IrrlichtRenderer; destroyed in the destructor.
     std::unique_ptr<BuildingAssetLoader> m_buildingAssetLoader;
+
+    // --- Phase 10: vehicle scene node registry ---
+    //
+    // Key: vehicleId (uint32_t cast to uint64_t) — stable for vehicle lifetime.
+    // Value: owning LODNode* — IrrlichtRenderer is the sole owner.
+    //
+    // Invariant: every entry corresponds to a live scene node.
+    // On removal the eviction sequence is run (clear textures → setMaterial →
+    // node->remove()) before the LODNode wrapper is deleted.
+    std::unordered_map<uint32_t, LODNode*> m_vehicleNodes;
+
+    // m_vehicleAssetLoader — separate BuildingAssetLoader instance for vehicle
+    // assets (different atlas path: vehicles_diffuse_atlas_d.dds).
+    // Created lazily on first placeVehicle() call.
+    std::unique_ptr<BuildingAssetLoader> m_vehicleAssetLoader;
+
+    // ensureVehicleLoader — lazily construct m_vehicleAssetLoader.
+    // Returns true if the loader is ready; false if m_smgr is null.
+    bool ensureVehicleLoader();
+
+    // destroyVehicleNode — eviction sequence + LODNode deletion for one vehicle
+    // registry entry.  No-op if vehicleId is not in m_vehicleNodes.
+    void destroyVehicleNode(uint32_t vehicleId);
+
+    // --- Placeholder zone textures ---
+    // Solid-color 4×4 textures created programmatically so buildings render with a
+    // recognisable zone colour even when placeholder B3D assets have no UV data.
+    // Key: zone prefix string ("res_", "com_", "ind_", "svc_", "default_").
+    // Value: ITexture* owned by the Irrlicht driver texture cache (no drop needed here).
+    std::unordered_map<std::string, irr::video::ITexture*> m_zoneTextures;
+
+    // getOrCreateZoneTexture — returns (creating on demand) the solid-colour placeholder
+    // texture for the given zone prefix.  Returns nullptr if m_driver is null.
+    irr::video::ITexture* getOrCreateZoneTexture(const std::string& prefix);
+
+    // --- Phase 10: procedural road mesh ---
+    //
+    // Road tiles are generated in C++ at runtime — no .b3d files on disk.
+    // All road tiles share the same geometry; only scene node position differs.
+    //
+    // m_roadTextureCache: lazily created on first placeRoadMesh() call.
+    //   Owns the sRGB pool entry for road_asphalt_tileable.dds.
+    std::unique_ptr<TextureCache> m_roadTextureCache;
+
+    // m_roadMaterialType: s32 material type index returned by
+    //   addHighLevelShaderMaterialFromFiles(road.vert, road.frag).
+    //   -1 = not yet loaded or shader compile failed (falls back to EMT_SOLID).
+    irr::s32 m_roadMaterialType{-1};
+
+    // m_roadDiffuseTexGLuint: raw GL handle for road_asphalt_tileable.dds.
+    //   0 = not loaded (e.g., EDT_NULL headless context).
+    //   Bound to GL_TEXTURE0 inside RoadShaderCallback::OnSetConstants().
+    unsigned int m_roadDiffuseTexGLuint{0};
+
+    // Shared procedural road tile meshes — built once, reused by every road node.
+    //   m_sharedRoadMeshLOD0: flat quad + 4 kerb strips (26 tris, road shader).
+    //   m_sharedRoadMeshLOD1: flat quad only (2 tris, road shader).
+    //   m_sharedRoadMeshLOD2: flat colored quad (2 tris, EMT_SOLID, road_lod2_color).
+    // Ownership: IrrlichtRenderer holds ref_count == 1; dropped in destructor.
+    // Scene nodes from addMeshSceneNode() grab an additional ref (ref_count == 2)
+    // and release it when the node is removed (back to 1).
+    irr::scene::SMesh* m_sharedRoadMeshLOD0{nullptr};
+    irr::scene::SMesh* m_sharedRoadMeshLOD1{nullptr};
+    irr::scene::SMesh* m_sharedRoadMeshLOD2{nullptr};
+
+    // initRoadShader() — load road shader + diffuse texture (idempotent).
+    // Returns true when ready; false if m_driver is null or shader load fails
+    // (road tiles still render via EMT_SOLID fallback).
+    bool initRoadShader();
+
+    // ensureRoadMeshes() — build shared LOD meshes (idempotent).
+    // Must be called after initRoadShader() so material type is available.
+    void ensureRoadMeshes();
 
     // Helper: destroy a LODNode entry in a tile-keyed registry.
     // Executes the full eviction sequence on the wrapped scene node:
