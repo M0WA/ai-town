@@ -1424,9 +1424,11 @@ irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
 
     // Road tile half-extent in X and Z (5 m).
     static constexpr float H  = kTileSize * 0.5f;
-    // Small Y bias: road surface sits 10 cm above terrain — matches the previous
-    // flat-road Y offset.  Polygon offset handles Z-fighting at camera distance.
-    static constexpr float B  = 0.10f;
+    // Y bias: road surface sits 25 cm above terrain.  The previous 10 cm was too
+    // small — at oblique camera azimuths the depth slope causes z-fighting even with
+    // polygon offset, making tiles partially or fully disappear.  25 cm is
+    // imperceptible at the isometric view scale (10 m tiles) and eliminates the issue.
+    static constexpr float B  = 0.25f;
     // Kerb dimensions (world-space metres).
     static constexpr float KB = 0.05f;  // bevel inset
     static constexpr float KW = 0.15f;  // total kerb width
@@ -1450,7 +1452,10 @@ irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
     buf->Material.Lighting               = false;
     buf->Material.BackfaceCulling        = false;  // kerb faces have varying normals
     buf->Material.PolygonOffsetDirection = irr::video::EPO_FRONT;
-    buf->Material.PolygonOffsetFactor    = 1;
+    // Factor 4: at oblique camera azimuths the depth slope of a 25-cm-raised flat
+    // tile is still steep enough that factor=1 leaves z-fighting.  Factor 4 fully
+    // compensates for the worst-case slope without visible depth artifacts on kerbs.
+    buf->Material.PolygonOffsetFactor    = 4;
 
     // Helper: add a vertex (position in tile-local X/Z, world-space Y).
     auto addV = [&](float x, float y, float z, float u, float v) {
