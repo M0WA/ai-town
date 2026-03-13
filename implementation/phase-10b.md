@@ -48,10 +48,13 @@ All new files introduced in this phase MUST follow project naming conventions:
     `processedThisFrame` set.
   - (ref: `architecture/graphics-architecture/procedural-terrain.md` — Deque
     deduplication section)
-- [ ] Add `float getHeightAt(int tileX, int tileZ) const override { return 0.0f; }` and
-  `void setTileHeight(int tileX, int tileZ, float height) override {}` no-op overrides to
+- [ ] Add `void setTileHeight(int tileX, int tileZ, float height) override {}` no-op to
   `ManualTerrainQuery` in `tests/simulation/manual_terrain_query.h` so that
-  `ManualTerrainQuery` remains a concrete (non-abstract) class. (ref:
+  `ManualTerrainQuery` remains a concrete (non-abstract) class against the updated
+  `ITerrainQuery`. (`getHeightAt()` override already present from Phase 9b — do NOT
+  re-add it.) **Owner of the final stateful form: `test-dev-cpp`** (see below);
+  `graphics-dev-irrlicht` must not independently commit the no-op if `test-dev-cpp` has
+  already delivered the stateful version. (ref:
   `architecture/graphics-architecture/procedural-terrain.md` — `ITerrainQuery` interface
   promotion section)
 - [ ] Update `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and
@@ -89,33 +92,37 @@ All new files introduced in this phase MUST follow project naming conventions:
 
 - [ ] `TerrainFlattening_SetTileHeight_EnqueuesRebuildForAffectedChunks`: construct a
   `TerrainSystem` with a `ManualClock`; call `setTileHeight()` on a tile at a known chunk
-  boundary; assert that `m_rebuildDeque` contains at least the expected chunk IDs (using a
-  friend-accessor or subclass seam). (ref: `architecture/graphics-architecture/procedural-terrain.md`)
+  boundary; assert `TerrainSystem::pendingRebuildCount()` is at least 1 (and at least 2
+  for a tile that straddles a chunk boundary). Use the existing
+  `TerrainSystem::pendingRebuildCount()` public test-API — do NOT add a `friend`
+  declaration or subclass seam. (ref: `architecture/graphics-architecture/procedural-terrain.md`)
 - [ ] `TerrainFlattening_NeighborBlend_ClampedToMapBounds`: call `setTileHeight()` on a
   corner tile (e.g. `(0, 0)`); assert no out-of-bounds heightmap write occurs (no crash,
   ASAN clean) and that all four in-bounds cardinal neighbours were written. (ref:
   `architecture/graphics-architecture/procedural-terrain.md`)
 - [ ] `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight`: extend
-  `MockRenderer` (in `tests/rendering/mock_renderer.h`) to record the Y position passed
+  `MockRenderer` (in `tests/simulation/mock_renderer.h`) to record the Y position passed
   to `placeBuilding`/`placeRoad`/`placeServiceBuilding` calls. Inject a
-  `ManualTerrainQuery` enhanced to be stateful: `setTileHeight()` marks it as flattened
-  and subsequent `getHeightAt()` returns the post-flattened height. Verify `MockRenderer`
-  received the post-flattened Y, not the pre-flattening height. This test runs without a
-  real OpenGL context (`unit` label). Do NOT use a real `IrrlichtRenderer` — that
-  requires `EDT_NULL` and the `requires-opengl` label. (ref:
+  `ManualTerrainQuery` configured with `m_heightBeforeFlat = 5.0f` and
+  `m_heightAfterFlat = 3.0f` so the test is non-vacuous (pre- and post-flatten heights
+  differ). Verify `MockRenderer` received `3.0f` (post-flattened Y), not `5.0f`. This
+  test exercises `CitySimulation`'s placement callback through the `IRenderer*` interface
+  — do NOT use a real `IrrlichtRenderer` (`unit` label, no OpenGL context required).
+  After Feature 3 lands, use `MockRenderer.h` (CamelCase). (ref:
   `architecture/graphics-architecture/procedural-terrain.md`)
 - [ ] Enhance `ManualTerrainQuery` in `tests/simulation/manual_terrain_query.h` to be
   stateful for Phase 10b tests: add `m_flattened` bool (default `false`),
   `m_heightBeforeFlat` (default `0.0f`), `m_heightAfterFlat` (default `0.0f`), and
   setter helpers `setHeightBeforeFlattening(float)` / `setHeightAfterFlattening(float)`.
   Override `getHeightAt()` to return `m_flattened ? m_heightAfterFlat : m_heightBeforeFlat`.
-  Override `setTileHeight()` to set `m_flattened = true`. This replaces the Phase 9b
-  no-op pattern for Phase 10b tests only; existing tests that rely on `return 0.0f` are
+  Override `setTileHeight()` to set `m_flattened = true`. **This stateful form supersedes
+  the no-op assigned to `graphics-dev-irrlicht`** — whichever lands first, the final
+  merged state must be this stateful version. Existing tests relying on `return 0.0f` are
   unaffected because `m_heightBeforeFlat` defaults to `0.0f`.
 - [ ] `CloudPlane_EDTNull_InitSkipped`: construct an `IrrlichtRenderer` with
   `EDT_NULL`, call `init()`; assert `m_cloudNode == nullptr` (cloud initialisation
-  was skipped under headless driver). Label `requires-opengl` (uses `IrrlichtRenderer`).
-  This is the minimal compile-and-no-crash gate for cloud rendering code.
+  skipped). Label `requires-opengl` and add to `opengl_tests` — Irrlicht device creation
+  requires X11 even for `EDT_NULL` on Linux; `xvfb-run` provides the X server.
 - [ ] Wire all new test cases into the appropriate test targets via `target_sources` in
   `CMakeLists.txt`: terrain tests → `terrain_tests` (label `unit`); cloud test →
   `opengl_tests` (label `requires-opengl`).
@@ -168,21 +175,41 @@ All new files introduced in this phase MUST follow project naming conventions:
   - Apply by updating the texture matrix on the cloud node's material:
     `m_cloudNode->getMaterial(0).getTextureMatrix(0).setTextureTranslate(m_cloudUVOffset.X,
     m_cloudUVOffset.Y)`. (ref: `architecture/graphics-architecture/sky-clouds.md`)
-- [ ] Guard `initCloudPlane()` and `update()` cloud logic with a null check on `m_smgr`
-  and on `m_cloudNode` for headless/EDT_NULL contexts. Under `EDT_NULL`, `getTexture()`
-  returns null and `addMeshSceneNode()` may behave unexpectedly; skip cloud initialisation
-  when the driver type is `EDT_NULL`.
+- [ ] Guard `initCloudPlane()` with `if (m_driverType == EDT_NULL) return;` as the
+  **first line** — before any mesh construction, `buildCloudMesh()`, or `getTexture()`
+  call. `m_driverType` must be stored in `IrrlichtRenderer` (set during `createDevice()`).
+  Do NOT use `m_smgr == nullptr` as the guard: `m_smgr` is non-null even under `EDT_NULL`.
+  Under `EDT_NULL`, `m_cloudNode` remains `nullptr`; the `update()` cloud scroll block
+  guards with `if (m_cloudNode)`. (ref: `architecture/graphics-architecture/sky-clouds.md`
+  — Headless / EDT_NULL Guard section)
 
 ##### cicd-dev-github
 
-- [ ] Add `assets/textures/sky/clouds.png` to the `validate-assets` CI presence gate:
-  hard-fail in `build-linux`, `build-windows`, and `coverage-linux` jobs if the file is
-  absent, using the same pattern as the Phase 10 audio asset presence gates. (ref:
-  `architecture/ci-cd/github-actions-workflow.md`)
-- [ ] Add **Check #24 — Cloud texture format gate** to `tools/validate_assets.py`: verify
-  `assets/textures/sky/clouds.png` is exactly 1024×1024 pixels and RGBA (4 channels).
-  Uses Pillow (already installed as a CI dependency from Phase 10). No-op when file does
-  not exist yet.
+- [ ] Add a dedicated step **"Verify clouds.png present"** to `build-linux`,
+  `build-windows`, and `coverage-linux` jobs in `.github/workflows/ci.yml`, placed in
+  the preflight area alongside the existing Phase 10 asset presence gates. Linux /
+  coverage-linux form (`shell: bash`):
+  `test -f assets/textures/sky/clouds.png || { echo "ERROR: assets/textures/sky/clouds.png missing"; exit 1; }`.
+  Windows form (`shell: pwsh`):
+  `if (-not (Test-Path "assets/textures/sky/clouds.png")) { Write-Error "ERROR: assets/textures/sky/clouds.png missing"; exit 1 }`.
+  Do NOT use `Test-Path ... || exit 1` — that is PowerShell 7+ syntax only; GitHub
+  Actions Windows runners use PS 5.1. Hard-fail only; no warning mode.
+  (ref: `architecture/ci-cd/github-actions-workflow.md`)
+- [ ] Add **Check #24 — Cloud texture format gate** to `tools/validate_assets.py` as
+  function `check_24_clouds_png(assets_dir)` returning a list of error strings. Verify
+  `assets/textures/sky/clouds.png` is exactly 1024×1024 pixels and RGBA (4 channels)
+  using Pillow (already installed from Phase 10). No-op (return `[]`) when the file does
+  not exist. Wire into the `run_all_checks()` dispatcher: add
+  `errors += check_24_clouds_png(assets_dir)` following the existing pattern for
+  Checks #21–#23. Also add a **"Verify check_24 present"** grep step to the
+  `validate-assets` job in `ci.yml` matching the pattern of the existing check_21/22/23
+  verification steps.
+- [ ] Update the `validate-assets` job header comment in `.github/workflows/ci.yml` to
+  reference Phase 10b / Check #24. Update the `tools/validate_assets.py` module docstring
+  to reference Phase 10b and Check #24. Update
+  `architecture/ci-cd/github-actions-workflow.md` phasing summary to add:
+  `Phase 10b: Check #24 (cloud texture format gate — clouds.png 1024×1024 RGBA) added;
+  no change to the job definition or all-checks-pass wiring.`
 
 ---
 
@@ -216,6 +243,13 @@ Move interface headers into `src/interfaces/` (currently in wrong location):
 |---|---|---|
 | `src/ui/IUIBackend.h` | `src/interfaces/IUIBackend.h` | Interface — MUST live in `src/interfaces/` |
 | `src/terrain/ITerrainRNG.h` | `src/interfaces/ITerrainRNG.h` | Interface — MUST live in `src/interfaces/` |
+| `src/audio/ialc_functions.h` | `src/interfaces/IAlcFunctions.h` | Pure-virtual interface — MUST live in `src/interfaces/`; rename to CamelCase with `I` prefix |
+
+After moving `ITerrainRNG.h`, update all relative `#include "ITerrainRNG.h"` sites to
+`#include "src/interfaces/ITerrainRNG.h"` (or the appropriate project-root-relative
+path): `src/terrain/StdTerrainRNG.h`, `src/terrain/TerrainSystem.h`,
+`src/terrain/terrain_generator.h` (forward-decl only — verify), and
+`tests/terrain/MockTerrainRNG.h`.
 
 Relocate misplaced concrete-class headers out of `src/interfaces/`:
 
@@ -232,15 +266,29 @@ Remove backward-compat shim headers (they only `#include` the CamelCase file):
 
 ##### sound-dev-opensoftal
 
-Rename `src/audio/` class headers and update all `#include` references:
+`src/audio/audio_command_queue.h` defines only a POD struct (`PreloadCommand`) and a
+type alias — per the naming convention, C-style headers with only constants, enums, or
+POD structs use `snake_case`. No rename needed for this file.
 
-| Current path | Renamed to |
-|---|---|
-| `src/audio/ialc_functions.h` | `src/audio/IAlcFunctions.h` |
-| `src/audio/audio_command_queue.h` | `src/audio/AudioCommandQueue.h` |
+`src/audio/audio_system.h` is a compatibility redirect shim — delete it and update all
+callers:
 
-`src/audio/audio_system.h` is a compatibility redirect shim — delete it and update any
-remaining `#include "audio_system.h"` to `#include "AudioSystem.h"`.
+- `src/audio/AudioSystem.h` lines 17–18: update `#include "src/audio/ialc_functions.h"`
+  to `#include "src/interfaces/IAlcFunctions.h"` (moved by `graphics-dev-irrlicht`)
+- `src/main.cpp`: change `#include "src/audio/audio_system.h"` → `#include "src/audio/AudioSystem.h"`
+- `tests/audio/audio_thread_test.cpp` lines 27–28: update `ialc_functions.h` include to
+  `src/interfaces/IAlcFunctions.h`; update `audio_system.h` include to `AudioSystem.h`
+- `tests/audio/volume_control_test.cpp` line 19: update `audio_system.h` → `AudioSystem.h`
+
+##### cicd-dev-github
+
+After all Feature 3 renames are committed, verify the rename pass is complete:
+
+- [ ] Confirm `build-linux` and `build-windows` CI jobs compile cleanly with zero
+  header-not-found errors after the rename commit — a green run on both is the gate.
+- [ ] Verify no old lowercase names remain in `CMakeLists.txt` source lists by running:
+  `grep -r "audio_command_queue\|ialc_functions\|audio_system\.h\|null_simulation_pauser\|manual_clock\|manual_rng\|manual_terrain_query\|mock_audio_system\|mock_renderer\|simulation_test_base\|mock_terrain_rng\|mock_city_simulation\|mock_simulation_pauser\|mock_ui_backend\|terrain_chunk\|terrain_generator\|budget_detail_panel\|inspector_panel\|main_menu_panel\|pause_menu_panel\|settings_panel\|tax_rate_panel" CMakeLists.txt`
+  — result must be empty.
 
 ##### test-dev-cpp
 
@@ -288,12 +336,12 @@ Rename all test-helper class headers and update every `#include` in test `.cpp` 
 
 | Role | Responsibility |
 |---|---|
-| `graphics-dev-irrlicht` | `ITerrainQuery::setTileHeight()`, `TerrainSystem` write path, neighbour blending, chunk rebuild enqueue, placement method updates, cloud plane mesh and UV scrolling |
+| `graphics-dev-irrlicht` | `ITerrainQuery::setTileHeight()`, `TerrainSystem` write path, neighbour blending, chunk rebuild enqueue, placement method updates, cloud plane mesh and UV scrolling, Feature 3 src/terrain + src/ui renames and interface relocations (incl. `IAlcFunctions`) |
 | `gamedesign-lookandfeel` | Blending falloff factor sign-off |
 | `graphics-artist-2d-texture` | `clouds.png` tileable cloud texture |
 | `test-dev-cpp` | Three terrain flattening unit tests, CMake wiring, test-helper class renames |
-| `cicd-dev-github` | Check #24 cloud texture gate, cloud asset presence gate in CI jobs |
-| `sound-dev-opensoftal` | `src/audio/` class-header renames |
+| `cicd-dev-github` | Check #24 cloud texture gate, cloud asset presence gate in CI jobs, Feature 3 CMakeLists verification |
+| `sound-dev-opensoftal` | `src/audio/` shim deletion and include-path updates |
 
 ### Dependencies
 

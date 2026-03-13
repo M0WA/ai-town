@@ -137,14 +137,14 @@ accumulation over play sessions longer than ~500 seconds.
 
 ## Depth Ordering
 
-The cloud plane is positioned at `Y=150 m`, which is physically above all opaque scene
-geometry (terrain max ~80 m, buildings max ~80 m). The depth buffer handles correct
-ordering automatically:
+The cloud plane is positioned at `Y=200 m` (`kCloudAltitude`), which is physically above
+all opaque scene geometry (terrain max ~80 m, buildings max ~80 m). The depth buffer
+handles correct ordering automatically:
 
 - The sky dome is rendered at infinite depth (Irrlicht sky dome nodes set
-  `EMF_ZBUFFER=false`); the cloud plane at `Y=150 m` renders in front of the sky dome
+  `EMF_ZBUFFER=false`); the cloud plane at `Y=200 m` renders in front of the sky dome
   via depth test.
-- Zone overlay quads are at terrain height + 0.1 m; the cloud plane at 150 m is always
+- Zone overlay quads are at terrain height + 0.1 m; the cloud plane at 200 m is always
   farther from the camera than overlay quads (camera pitch −20° to −70°, minimum camera
   height ~30 m over flat terrain).
 

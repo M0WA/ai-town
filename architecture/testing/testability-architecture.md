@@ -1026,8 +1026,8 @@ the audio playback path, not a unit test with strict call-count expectations on 
 
   # ui_tests — uses MockAudioSystem, MockRenderer, ManualClock from tests/simulation/;
   # MockUIBackend, MockCitySimulation from tests/ui/;
-  # IUIBackend.h from src/ui/; interface headers from src/interfaces/
-  target_include_directories(ui_tests PRIVATE tests/simulation/ tests/ui/ src/interfaces/ src/ui/ ${CMAKE_SOURCE_DIR})
+  # IUIBackend.h from src/interfaces/ (moved in Phase 10b); interface headers from src/interfaces/
+  target_include_directories(ui_tests PRIVATE tests/simulation/ tests/ui/ src/interfaces/ ${CMAKE_SOURCE_DIR})
 
   # audio_tests — uses MockAudioSystem from tests/simulation/;
   # IAudioSystem.h from src/interfaces/; audio_constants.h from src/audio/
