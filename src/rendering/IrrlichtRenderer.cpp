@@ -1801,18 +1801,176 @@ void IrrlichtRenderer::removeVehicle(uint32_t vehicleId)
 }
 
 // =============================================================================
-// Phase 10b — Sky cloud plane
+// Phase 10b — Sky cloud dome
 //
-// A single scrolling flat quad positioned at kCloudAltitude (200 m) above the
-// terrain. The cloud texture (clouds.png, RGBA) is loaded via getTexture() —
-// the linear pool, not TextureCache::loadSRGB(). UV translation is advanced
-// each frame by update() using std::fmod to prevent float accumulation.
+// A tessellated hemisphere dome (kDomeRings × kDomeSectors) centred above the
+// camera, scrolling the cloud texture each frame to simulate wind movement.
+// Replaces the original flat-quad approach: the dome geometry ensures cloud
+// coverage extends from directly overhead all the way to the horizon (360°).
+//
+// Design rationale:
+//   - A flat plane at Y=200 m with half-extent 1000 m covers only a limited
+//     angular range; at camera heights of 30–200 m the plane edge is well
+//     above the geometric horizon, leaving the upper sky bare.
+//   - A large dome (radius 4000 m, height 800 m) subtends angles from 90°
+//     (zenith) down to arctan(800/4000) ≈ 11° above the mathematical horizon,
+//     so clouds appear to reach the horizon from any camera position.
+//   - Vertex colour alpha fades from 255 at the top ring to 0 at the bottom
+//     ring, blending clouds into the sky colour at the horizon edge.
+//   - The dome node is repositioned to camera XZ each frame so the horizon
+//     ring is never reached regardless of player movement.
+//
+// The cloud texture (clouds.png, RGBA) is loaded via getTexture() — the linear
+// pool, not TextureCache::loadSRGB(). UV translation is advanced each frame
+// by update() using std::fmod to prevent float accumulation.
 //
 // (ref: architecture/graphics-architecture/sky-clouds.md)
 // =============================================================================
 
 // -------------------------------------------------------------------------
-// initCloudPlane — build the cloud quad mesh and create its scene node.
+// buildCloudDomeMesh — helper that constructs and returns the cloud dome SMesh.
+//
+// Dome geometry (Irrlicht left-handed, Y-up):
+//   - kDomeRings  rows of latitude from top (ring 0) to horizon (ring kDomeRings-1).
+//   - kDomeSectors columns of longitude around the dome.
+//   - Top cap: kDomeSectors triangles fanning from the apex vertex.
+//   - Body:    (kDomeRings-2) × kDomeSectors quads (2 triangles each).
+//   - Bottom ring vertices are placed at Y = kCloudAltitude (dome base), outer
+//     ring vertices at Y = kCloudAltitude + kCloudDomeHeight (apex).
+//
+// UV mapping (polar, from apex outward):
+//   Each vertex is mapped from dome-top (UV centre = 0.5,0.5) to dome base
+//   (UV radius = 0.5) scaled by kCloudUVScale so the texture tiles naturally.
+//     u = (nx * 0.5f + 0.5f) * kCloudUVScale
+//     v = (nz * 0.5f + 0.5f) * kCloudUVScale
+//   where (nx, nz) is the horizontal unit direction of the vertex.
+//
+// Vertex colour:
+//   Alpha 255 at apex, fading linearly to 0 at the bottom ring for a soft
+//   horizon blend. RGB always (255,255,255) — tint is done by the texture.
+//
+// Winding: CW from outside (camera is inside the dome, looking up and outward).
+// Irrlicht back-face culling is disabled on the material so the inner surface
+// is always rendered.
+//
+// SMesh lifetime: caller owns the returned pointer (ref_count=1) and MUST call
+// smesh->drop() after addMeshSceneNode() to release its own reference.
+// -------------------------------------------------------------------------
+static SMesh* buildCloudDomeMesh()
+{
+    constexpr int   kDomeRings         = 24;     // latitude bands — extra rings near base for smooth fade
+    constexpr int   kDomeSectors       = 32;     // longitude segments
+    constexpr float kCloudAltitude     = -200.0f; // world-space Y of dome base (below terrain — hides hard edge)
+    constexpr float kCloudDomeRadius   = 4000.0f; // horizontal radius at dome base
+    constexpr float kCloudDomeHeight   = 1200.0f; // vertical height from base to apex (apex at Y=1000 m)
+    constexpr float kCloudUVScale      = 4.0f;   // texture tiling factor
+    // Fade zone: clouds are fully opaque above this latitude parameter value.
+    // Below kFadeStart (i.e. t > kFadeStart toward the base), alpha ramps to 0
+    // using a smoothstep curve.  Setting this to 0.5 means the bottom 50% of the
+    // dome height fades out, spanning ~600 m of vertical extent.
+    constexpr float kFadeStart         = 0.5f;
+
+    SMesh*       mesh = new SMesh();
+    SMeshBuffer* buf  = new SMeshBuffer();
+
+    // Build kDomeRings+1 rings of vertices (ring 0 = apex, ring kDomeRings = base).
+    // Each ring i has kDomeSectors+1 vertices (sector 0 and kDomeSectors share the
+    // same XZ position but have distinct UV to avoid a seam fold).
+    //
+    // latitude parameter t: 0 (apex) → 1 (base).
+    //   Y       = kCloudAltitude + kCloudDomeHeight * (1 - t)
+    //   radius  = kCloudDomeRadius * t
+    //   (nx,nz) = (sin(phi), cos(phi))  where phi = sector * 2π / kDomeSectors
+    //
+    // Alpha fade formula (horizon fade):
+    //   For t <= kFadeStart : alpha = 255  (fully opaque upper dome)
+    //   For t >  kFadeStart : remap t into s = (t - kFadeStart) / (1 - kFadeStart)
+    //                         apply smoothstep: w = s * s * (3 - 2*s)
+    //                         alpha = round(255 * (1 - w))
+    // This keeps clouds at full opacity over the upper 50% of dome height and
+    // smoothly fades them to zero over the lower 50%, with a smooth S-curve that
+    // eliminates the hard visible ring at the horizon.  The base ring is placed at
+    // Y = kCloudAltitude = -200 m (below terrain), so the zero-alpha ring is
+    // never directly visible above the landscape.
+
+    const float piF = static_cast<float>(M_PI);
+
+    for (int ring = 0; ring <= kDomeRings; ++ring) {
+        const float t      = static_cast<float>(ring) / static_cast<float>(kDomeRings);
+        const float y      = kCloudAltitude + kCloudDomeHeight * (1.0f - t);
+        const float r      = kCloudDomeRadius * t;  // horizontal radius at this ring
+
+        // Gradual horizon fade: full opacity in the upper dome, smoothstep to zero
+        // in the lower fade zone, base ring fully transparent below terrain.
+        irr::u8 alpha;
+        if (t <= kFadeStart) {
+            alpha = 255u;
+        } else {
+            const float s  = (t - kFadeStart) / (1.0f - kFadeStart); // [0,1] in fade zone
+            const float w  = s * s * (3.0f - 2.0f * s);               // smoothstep
+            alpha = static_cast<irr::u8>(255.0f * (1.0f - w) + 0.5f);
+        }
+
+        for (int sec = 0; sec <= kDomeSectors; ++sec) {
+            const float phi = static_cast<float>(sec) / static_cast<float>(kDomeSectors)
+                              * 2.0f * piF;
+            const float nx  = std::sin(phi);
+            const float nz  = std::cos(phi);
+            const float px  = r * nx;
+            const float pz  = r * nz;
+
+            // UV: polar mapping centred on apex (0.5, 0.5), scaled outward to edge.
+            const float u = (nx * 0.5f * t + 0.5f) * kCloudUVScale;
+            const float v = (nz * 0.5f * t + 0.5f) * kCloudUVScale;
+
+            // Normal points inward-upward (camera is inside the dome).
+            buf->Vertices.push_back(S3DVertex(
+                core::vector3df(px, y, pz),
+                core::vector3df(-nx, 1.0f, -nz),    // approximate inward normal
+                SColor(alpha, 255, 255, 255),
+                core::vector2df(u, v)));
+        }
+    }
+
+    // Index buffer: CW winding when viewed from inside the dome.
+    // Each quad (ring r, sector s) spans vertices:
+    //   top-left  = r       * (kDomeSectors+1) + s
+    //   top-right = r       * (kDomeSectors+1) + s + 1
+    //   bot-left  = (r+1)   * (kDomeSectors+1) + s
+    //   bot-right = (r+1)   * (kDomeSectors+1) + s + 1
+    // Inside-CW winding (looking from inside upward): top-left, bot-left, top-right
+    //                                                 bot-left,  bot-right, top-right
+
+    for (int ring = 0; ring < kDomeRings; ++ring) {
+        for (int sec = 0; sec < kDomeSectors; ++sec) {
+            const irr::u16 tl = static_cast<irr::u16>( ring      * (kDomeSectors + 1) + sec);
+            const irr::u16 tr = static_cast<irr::u16>( ring      * (kDomeSectors + 1) + sec + 1);
+            const irr::u16 bl = static_cast<irr::u16>((ring + 1) * (kDomeSectors + 1) + sec);
+            const irr::u16 br = static_cast<irr::u16>((ring + 1) * (kDomeSectors + 1) + sec + 1);
+
+            // Triangle 1: tl → bl → tr  (CW from inside)
+            buf->Indices.push_back(tl);
+            buf->Indices.push_back(bl);
+            buf->Indices.push_back(tr);
+            // Triangle 2: bl → br → tr  (CW from inside)
+            buf->Indices.push_back(bl);
+            buf->Indices.push_back(br);
+            buf->Indices.push_back(tr);
+        }
+    }
+
+    // Mandatory bounding box recalculation before attaching to scene graph
+    // (per procedural-terrain.md SMesh lifetime rule).
+    buf->recalculateBoundingBox();
+    mesh->addMeshBuffer(buf);
+    buf->drop();                     // SMesh::addMeshBuffer grab()d buf → release caller ref
+    mesh->recalculateBoundingBox();  // AFTER all buffer recalculations
+
+    return mesh;  // ref_count = 1; caller must ->drop() after addMeshSceneNode()
+}
+
+// -------------------------------------------------------------------------
+// initCloudPlane — build the cloud dome mesh and create its scene node.
 //
 // Guards with if (m_driverType == EDT_NULL) return; as the FIRST line so that
 // headless CI runs (which use EDT_NULL) never construct the mesh or call
@@ -1824,44 +1982,7 @@ void IrrlichtRenderer::initCloudPlane()
 
     if (!m_smgr || !m_driver) return;
 
-    constexpr float kCloudAltitude  = 200.0f;
-    constexpr float cloudHalfExtent = 1000.0f;
-    constexpr float kCloudUVScale   = 4.0f;
-
-    SMesh*       mesh = new SMesh();       // ref_count = 1
-    SMeshBuffer* buf  = new SMeshBuffer(); // ref_count = 1
-
-    // Four vertices: single quad at Y = kCloudAltitude.
-    // CW winding from above (+Y normal per Irrlicht left-handed convention):
-    //   (v2−v0)×(v1−v0) = (2h,0,2h)×(2h,0,0) = (0,+4h²,0) → +Y normal.
-    // UV layout per sky-clouds.md: v0=(0,0), v1=(kUVS,0), v2=(kUVS,kUVS), v3=(0,kUVS).
-    buf->Vertices.push_back(S3DVertex(
-        core::vector3df(-cloudHalfExtent, kCloudAltitude, -cloudHalfExtent),
-        core::vector3df(0, 1, 0), SColor(255, 255, 255, 255),
-        core::vector2df(0.f, 0.f)));
-    buf->Vertices.push_back(S3DVertex(
-        core::vector3df( cloudHalfExtent, kCloudAltitude, -cloudHalfExtent),
-        core::vector3df(0, 1, 0), SColor(255, 255, 255, 255),
-        core::vector2df(kCloudUVScale, 0.f)));
-    buf->Vertices.push_back(S3DVertex(
-        core::vector3df( cloudHalfExtent, kCloudAltitude,  cloudHalfExtent),
-        core::vector3df(0, 1, 0), SColor(255, 255, 255, 255),
-        core::vector2df(kCloudUVScale, kCloudUVScale)));
-    buf->Vertices.push_back(S3DVertex(
-        core::vector3df(-cloudHalfExtent, kCloudAltitude,  cloudHalfExtent),
-        core::vector3df(0, 1, 0), SColor(255, 255, 255, 255),
-        core::vector2df(0.f, kCloudUVScale)));
-
-    // Index buffer: CW winding — { 0,1,2, 0,2,3 } per sky-clouds.md vertex layout.
-    buf->Indices.push_back(0); buf->Indices.push_back(1); buf->Indices.push_back(2);
-    buf->Indices.push_back(0); buf->Indices.push_back(2); buf->Indices.push_back(3);
-
-    // Mandatory bounding box recalculation before attaching to scene graph
-    // (per procedural-terrain.md SMesh lifetime rule).
-    buf->recalculateBoundingBox();
-    mesh->addMeshBuffer(buf);
-    buf->drop();  // SMesh::addMeshBuffer calls grab() → ref_count 2→1 on buf drop
-    mesh->recalculateBoundingBox();  // AFTER all buffer recalculations
+    SMesh* mesh = buildCloudDomeMesh();
 
     m_cloudNode = m_smgr->addMeshSceneNode(mesh);  // grab() called internally
     mesh->drop();  // release caller's ref — scene node is now sole owner
@@ -1872,9 +1993,13 @@ void IrrlichtRenderer::initCloudPlane()
         ITexture* tex = m_driver->getTexture("assets/textures/sky/clouds.png");
 
         auto& mat = m_cloudNode->getMaterial(0);
-        mat.MaterialType    = EMT_TRANSPARENT_ALPHA_CHANNEL;
+        mat.MaterialType    = EMT_TRANSPARENT_VERTEX_ALPHA;
         mat.Lighting        = false;
-        mat.BackfaceCulling = false;  // cloud plane visible from below (camera looks down)
+        // Back-face culling must be off: camera is inside the dome looking outward/upward,
+        // so only the inner surface is visible. Irrlicht's default CW-front-face culls the
+        // outer surface, which is correct. However, disabling culling guarantees visibility
+        // from any camera tilt without winding analysis.
+        mat.BackfaceCulling = false;
         if (tex) mat.setTexture(0, tex);
     }
 
@@ -1882,11 +2007,15 @@ void IrrlichtRenderer::initCloudPlane()
 }
 
 // -------------------------------------------------------------------------
-// update — per-frame cloud UV scrolling.
+// update — per-frame cloud UV scrolling and dome repositioning.
 //
 // Guards with if (m_cloudNode) — null under EDT_NULL (initCloudPlane early-return)
 // and before init() runs. Uses std::fmod to atomically increment and wrap each
 // UV component to [0,1) preventing float accumulation over long sessions.
+//
+// Dome repositioning: the dome node is moved to the camera's XZ position each
+// frame (Y stays at 0 — dome vertices embed absolute world-space Y coordinates).
+// This keeps the horizon ring always centred on the player regardless of movement.
 //
 // Scroll speeds (per sky-clouds.md):
 //   kCloudScrollX = 0.002f UV units/second (primary wind direction)
@@ -1905,4 +2034,12 @@ void IrrlichtRenderer::update(float dt)
     m_cloudNode->getMaterial(0)
         .getTextureMatrix(0)
         .setTextureTranslate(m_cloudUVOffset.X, m_cloudUVOffset.Y);
+
+    // Reposition dome to camera XZ so the horizon ring always surrounds the player.
+    // m_lastCameraPosition is updated by setCamera() every frame before update() runs.
+    // Y=0: dome vertex positions embed kCloudAltitude in world-space directly.
+    if (m_camera) {
+        const core::vector3df camPos = m_camera->getPosition();
+        m_cloudNode->setPosition(core::vector3df(camPos.X, 0.0f, camPos.Z));
+    }
 }
