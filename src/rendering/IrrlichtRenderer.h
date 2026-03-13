@@ -151,12 +151,31 @@ public:
                      float yawDegrees) override;
     void removeVehicle(uint32_t vehicleId) override;
 
+    // initCloudPlane() — build the scrolling cloud plane mesh and scene node.
+    // Called once from the constructor after other initialization.
+    // Guarded by m_driverType == EDT_NULL: returns immediately in headless mode,
+    // leaving m_cloudNode null. UV scrolling in update() guards with if(m_cloudNode).
+    void initCloudPlane();
+
+    // update() — per-frame animation update (UV scrolling for cloud plane).
+    // Called from main.cpp frame loop before beginFrame().
+    void update(float dt);
+
 private:
     irr::IrrlichtDevice*        m_device;
     UIManager*                  m_uiManager;
     irr::video::IVideoDriver*   m_driver;
     irr::scene::ISceneManager*  m_smgr;
     irr::scene::ICameraSceneNode* m_camera{nullptr};
+
+    // --- Phase 10b: sky cloud plane ---
+    // m_driverType: captured from the live device in the constructor body.
+    //   Used to guard initCloudPlane() against headless (EDT_NULL) contexts.
+    // m_cloudNode: scene node for the scrolling cloud quad; null under EDT_NULL.
+    // m_cloudUVOffset: accumulated UV translation, wrapped to [0,1) via fmod.
+    irr::video::E_DRIVER_TYPE       m_driverType{irr::video::EDT_NULL};
+    irr::scene::IMeshSceneNode*     m_cloudNode{nullptr};
+    irr::core::vector2df            m_cloudUVOffset{0.f, 0.f};
 
     // Cached camera eye position — updated every setCamera() call.
     // Returned by getListenerPosition() for use by CitySimulation's

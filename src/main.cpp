@@ -286,6 +286,10 @@ int main() {
             fprintf(stderr, "[main] Audio error (audio disabled): %s\n", e.what());
         }
 
+        // Phase 10b: update renderer (cloud plane UV scrolling).
+        // Runs before beginFrame() so the texture matrix is updated before drawAll().
+        renderer.update(realDeltaSeconds);
+
         // Step 5: beginFrame (driver->beginScene).
         renderer.beginFrame();
 

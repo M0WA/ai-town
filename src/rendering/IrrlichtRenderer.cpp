@@ -32,6 +32,10 @@ IrrlichtRenderer::IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiMan
     , m_driver(device ? device->getVideoDriver() : nullptr)
     , m_smgr(device ? device->getSceneManager() : nullptr)
 {
+    // Capture the driver type immediately — used by initCloudPlane() to guard
+    // against EDT_NULL headless contexts (per sky-clouds.md Headless/EDT_NULL Guard).
+    m_driverType = m_device ? m_device->getVideoDriver()->getDriverType()
+                             : irr::video::EDT_NULL;
     // Allocate the hover tile mesh ONCE at construction time.
     // SMesh and SMeshBuffer are reference-counted Irrlicht objects that do NOT
     // require a driver — they can be safely allocated when m_driver is null
@@ -62,6 +66,9 @@ IrrlichtRenderer::IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiMan
 
     m_hoverBuffer = static_cast<SMeshBuffer*>(
         m_hoveredTileMesh->getMeshBuffer(0));  // non-owning observer
+
+    // Phase 10b: build the scrolling cloud plane (no-op under EDT_NULL).
+    initCloudPlane();
 }
 
 IrrlichtRenderer::~IrrlichtRenderer() {
@@ -1757,4 +1764,111 @@ void IrrlichtRenderer::moveVehicle(uint32_t vehicleId,
 void IrrlichtRenderer::removeVehicle(uint32_t vehicleId)
 {
     destroyVehicleNode(vehicleId);
+}
+
+// =============================================================================
+// Phase 10b — Sky cloud plane
+//
+// A single scrolling flat quad positioned at kCloudAltitude (200 m) above the
+// terrain. The cloud texture (clouds.png, RGBA) is loaded via getTexture() —
+// the linear pool, not TextureCache::loadSRGB(). UV translation is advanced
+// each frame by update() using std::fmod to prevent float accumulation.
+//
+// (ref: architecture/graphics-architecture/sky-clouds.md)
+// =============================================================================
+
+// -------------------------------------------------------------------------
+// initCloudPlane — build the cloud quad mesh and create its scene node.
+//
+// Guards with if (m_driverType == EDT_NULL) return; as the FIRST line so that
+// headless CI runs (which use EDT_NULL) never construct the mesh or call
+// getTexture(), both of which are undefined under EDT_NULL.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::initCloudPlane()
+{
+    if (m_driverType == irr::video::EDT_NULL) return;  // headless guard — MUST be first
+
+    if (!m_smgr || !m_driver) return;
+
+    constexpr float kCloudAltitude  = 200.0f;
+    constexpr float cloudHalfExtent = 1000.0f;
+    constexpr float kCloudUVScale   = 4.0f;
+
+    SMesh*       mesh = new SMesh();       // ref_count = 1
+    SMeshBuffer* buf  = new SMeshBuffer(); // ref_count = 1
+
+    // Four vertices: single quad at Y = kCloudAltitude.
+    // CW winding from above (+Y normal per Irrlicht left-handed convention):
+    //   (v2−v0)×(v1−v0) = (2h,0,2h)×(2h,0,0) = (0,+4h²,0) → +Y normal.
+    // UV layout per sky-clouds.md: v0=(0,0), v1=(kUVS,0), v2=(kUVS,kUVS), v3=(0,kUVS).
+    buf->Vertices.push_back(S3DVertex(
+        core::vector3df(-cloudHalfExtent, kCloudAltitude, -cloudHalfExtent),
+        core::vector3df(0, 1, 0), SColor(255, 255, 255, 255),
+        core::vector2df(0.f, 0.f)));
+    buf->Vertices.push_back(S3DVertex(
+        core::vector3df( cloudHalfExtent, kCloudAltitude, -cloudHalfExtent),
+        core::vector3df(0, 1, 0), SColor(255, 255, 255, 255),
+        core::vector2df(kCloudUVScale, 0.f)));
+    buf->Vertices.push_back(S3DVertex(
+        core::vector3df( cloudHalfExtent, kCloudAltitude,  cloudHalfExtent),
+        core::vector3df(0, 1, 0), SColor(255, 255, 255, 255),
+        core::vector2df(kCloudUVScale, kCloudUVScale)));
+    buf->Vertices.push_back(S3DVertex(
+        core::vector3df(-cloudHalfExtent, kCloudAltitude,  cloudHalfExtent),
+        core::vector3df(0, 1, 0), SColor(255, 255, 255, 255),
+        core::vector2df(0.f, kCloudUVScale)));
+
+    // Index buffer: CW winding — { 0,1,2, 0,2,3 } per sky-clouds.md vertex layout.
+    buf->Indices.push_back(0); buf->Indices.push_back(1); buf->Indices.push_back(2);
+    buf->Indices.push_back(0); buf->Indices.push_back(2); buf->Indices.push_back(3);
+
+    // Mandatory bounding box recalculation before attaching to scene graph
+    // (per procedural-terrain.md SMesh lifetime rule).
+    buf->recalculateBoundingBox();
+    mesh->addMeshBuffer(buf);
+    buf->drop();  // SMesh::addMeshBuffer calls grab() → ref_count 2→1 on buf drop
+    mesh->recalculateBoundingBox();  // AFTER all buffer recalculations
+
+    m_cloudNode = m_smgr->addMeshSceneNode(mesh);  // grab() called internally
+    mesh->drop();  // release caller's ref — scene node is now sole owner
+
+    if (m_cloudNode) {
+        // Load cloud texture from linear pool (PNG — Irrlicht DDS loader disabled).
+        // Per sky-clouds.md: IVideoDriver::getTexture(), NOT TextureCache::loadSRGB().
+        ITexture* tex = m_driver->getTexture("assets/textures/sky/clouds.png");
+
+        auto& mat = m_cloudNode->getMaterial(0);
+        mat.MaterialType    = EMT_TRANSPARENT_ALPHA_CHANNEL;
+        mat.Lighting        = false;
+        mat.BackfaceCulling = false;  // cloud plane visible from below (camera looks down)
+        if (tex) mat.setTexture(0, tex);
+    }
+
+    // m_cloudUVOffset initialised to {0.f, 0.f} by member initialiser in header.
+}
+
+// -------------------------------------------------------------------------
+// update — per-frame cloud UV scrolling.
+//
+// Guards with if (m_cloudNode) — null under EDT_NULL (initCloudPlane early-return)
+// and before init() runs. Uses std::fmod to atomically increment and wrap each
+// UV component to [0,1) preventing float accumulation over long sessions.
+//
+// Scroll speeds (per sky-clouds.md):
+//   kCloudScrollX = 0.002f UV units/second (primary wind direction)
+//   kCloudScrollZ = 0.0008f UV units/second (secondary drift)
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::update(float dt)
+{
+    if (!m_cloudNode) return;
+
+    constexpr float kCloudScrollX = 0.002f;
+    constexpr float kCloudScrollZ = 0.0008f;
+
+    m_cloudUVOffset.X = std::fmod(m_cloudUVOffset.X + kCloudScrollX * dt, 1.0f);
+    m_cloudUVOffset.Y = std::fmod(m_cloudUVOffset.Y + kCloudScrollZ * dt, 1.0f);
+
+    m_cloudNode->getMaterial(0)
+        .getTextureMatrix(0)
+        .setTextureTranslate(m_cloudUVOffset.X, m_cloudUVOffset.Y);
 }
