@@ -26,6 +26,46 @@ using namespace irr;
 using namespace irr::video;
 using namespace irr::scene;
 
+// -------------------------------------------------------------------------
+// CloudDomeShaderCallback — IShaderConstantSetCallBack for the cloud dome
+// GLSL shader.  Sets u_tex (sampler2D, unit 0) and u_cameraY (float, world-
+// space Y of the camera) on every draw call.
+//
+// Lifetime rule (per shader-loading.md and CLAUDE.md):
+//   Unlike the original drop-after-pass pattern, this callback is kept alive
+//   by the caller (IrrlichtRenderer) so that setCameraY() can be called each
+//   frame.  The caller holds its own reference and must ->drop() it in the
+//   destructor (stored as void* m_cloudShaderCbRaw in the header).  Irrlicht
+//   also calls grab() internally, so the final drop happens when the material
+//   renderer is destroyed.  Never use std::unique_ptr — causes double-free.
+// -------------------------------------------------------------------------
+class CloudDomeShaderCallback : public irr::video::IShaderConstantSetCallBack
+{
+public:
+    void setCameraY(float y) { m_cameraY = y; }
+
+    void OnSetConstants(irr::video::IMaterialRendererServices* services,
+                        irr::s32 /*userData*/) override
+    {
+        // Bind u_tex to texture unit 0.  The cloud texture is always on unit 0
+        // (single-texture material); this call is required even though 0 is the
+        // default — some GLSL drivers report a warning if the sampler uniform is
+        // never explicitly set.
+        irr::s32 tex = 0;
+        services->setPixelShaderConstant("u_tex", &tex, 1);
+
+        // u_cameraY is used in the vertex shader for elevation-angle fade.
+        // Set via both vertex and pixel shader constant setters — Irrlicht's GLSL
+        // backend behaviour differs across platforms; setting both ensures the
+        // uniform is visible to the linked program regardless of backend quirks.
+        services->setVertexShaderConstant("u_cameraY", &m_cameraY, 1);
+        services->setPixelShaderConstant("u_cameraY", &m_cameraY, 1);
+    }
+
+private:
+    float m_cameraY{0.0f};
+};
+
 IrrlichtRenderer::IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiManager)
     : m_device(device)
     , m_uiManager(uiManager)
@@ -72,6 +112,15 @@ IrrlichtRenderer::IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiMan
 }
 
 IrrlichtRenderer::~IrrlichtRenderer() {
+    // Drop our reference to the cloud dome shader callback.  Irrlicht holds its own
+    // grab() reference internally; this drop releases only the caller's reference
+    // (the one we retained in initCloudPlane() so that setCameraY() could be called
+    // each frame).  Null check covers headless runs where the shader compile failed.
+    if (m_cloudShaderCbRaw) {
+        static_cast<CloudDomeShaderCallback*>(m_cloudShaderCbRaw)->drop();
+        m_cloudShaderCbRaw = nullptr;
+    }
+
     // Drop the hover tile mesh (ref_count 1→0 frees the mesh and its contained buffer).
     // Allocated unconditionally in the constructor — m_hoveredTileMesh is always non-null.
     if (m_hoveredTileMesh) {
@@ -2013,16 +2062,10 @@ static SMesh* buildCloudDomeMesh()
     constexpr float kCloudDomeRadius   = 6000.0f;  // horizontal radius at base ring
     constexpr float kCloudDomeHeight   = 2000.0f;  // vertical height from base to apex (apex at Y=1000 m)
     constexpr float kCloudUVScale      = 4.0f;   // texture tiling factor
-    // Two-boundary fade: clouds are fully opaque above kFadeStart, then smoothstep
-    // to fully transparent at kFadeEnd.  kFadeEnd corresponds to Y=80 m (above sea level),
-    // which is above the maximum terrain height (~26 m) plus a ~54 m safety margin.
-    // This guarantees the dome is completely transparent at and below 80 m, so no hill
-    // or terrain feature can ever be at that altitude and no arc artifact is visible.
-    //
-    // kFadeStart = 0.25 → Y = kCloudAltitude + kCloudDomeHeight * (1 - 0.25) = -1000 + 1500 = 500 m
-    // kFadeEnd   = 0.46 → Y = kCloudAltitude + kCloudDomeHeight * (1 - 0.46) = -1000 + 1080 =  80 m
-    constexpr float kFadeStart         = 0.25f; // start fading at t=0.25 (Y=500 m)
-    constexpr float kFadeEnd           = 0.46f; // fully transparent at t=0.46 (Y=80 m)
+    // Horizon fade is now handled entirely in the fragment shader via elevation angle
+    // (cloud_dome.frag, rev 2).  kFadeStart and kFadeEnd have been removed; all vertices
+    // use alpha=255.  The shader applies a smoothstep from 2° to 10° elevation, which is
+    // symmetric in all azimuths and eliminates the directional arc artifact.
 
     SMesh*       mesh = new SMesh();
     SMeshBuffer* buf  = new SMeshBuffer();
@@ -2036,16 +2079,9 @@ static SMesh* buildCloudDomeMesh()
     //   radius  = kCloudDomeRadius * t
     //   (nx,nz) = (sin(phi), cos(phi))  where phi = sector * 2π / kDomeSectors
     //
-    // Alpha fade formula (two-boundary horizon fade):
-    //   t <= kFadeStart              : alpha = 255  (fully opaque upper dome)
-    //   kFadeStart < t <= kFadeEnd   : smoothstep from 255 → 0
-    //       s = (t - kFadeStart) / (kFadeEnd - kFadeStart)   ∈ [0, 1]
-    //       w = s * s * (3 - 2*s)                             (smoothstep)
-    //       alpha = round(255 * (1 - w))
-    //   t > kFadeEnd                 : alpha = 0  (fully transparent horizon zone)
-    // kFadeEnd = 0.46 → Y = 80 m (above sea level, above max terrain height ~26 m).
-    // Everything at and below 80 m is fully transparent, so the dome never occludes
-    // terrain and no arc artifact is visible from any camera angle.
+    // All vertices use alpha=255.  Horizon fade is handled entirely in the fragment
+    // shader (cloud_dome.frag, rev 2) using the elevation angle from the camera,
+    // which is symmetric in all azimuths.  See CloudDomeShaderCallback::setCameraY().
 
     const float piF = static_cast<float>(M_PI);
 
@@ -2053,19 +2089,6 @@ static SMesh* buildCloudDomeMesh()
         const float t      = static_cast<float>(ring) / static_cast<float>(kDomeRings);
         const float y      = kCloudAltitude + kCloudDomeHeight * (1.0f - t);
         const float r      = kCloudDomeRadius * t;  // horizontal radius at this ring
-
-        // Two-boundary horizon fade: fully opaque overhead, smoothstep in the fade
-        // band, fully transparent at and below sea level (t >= kFadeEnd).
-        irr::u8 alpha;
-        if (t <= kFadeStart) {
-            alpha = 255u;
-        } else if (t >= kFadeEnd) {
-            alpha = 0u;
-        } else {
-            const float s  = (t - kFadeStart) / (kFadeEnd - kFadeStart); // [0,1] in fade band
-            const float w  = s * s * (3.0f - 2.0f * s);                  // smoothstep
-            alpha = static_cast<irr::u8>(255.0f * (1.0f - w) + 0.5f);
-        }
 
         for (int sec = 0; sec <= kDomeSectors; ++sec) {
             const float phi = static_cast<float>(sec) / static_cast<float>(kDomeSectors)
@@ -2080,10 +2103,11 @@ static SMesh* buildCloudDomeMesh()
             const float v = (nz * 0.5f * t + 0.5f) * kCloudUVScale;
 
             // Normal points inward-upward (camera is inside the dome).
+            // Alpha=255 always — the fragment shader applies the elevation-angle fade.
             buf->Vertices.push_back(S3DVertex(
                 core::vector3df(px, y, pz),
                 core::vector3df(-nx, 1.0f, -nz),    // approximate inward normal
-                SColor(alpha, 255, 255, 255),
+                SColor(255, 255, 255, 255),
                 core::vector2df(u, v)));
         }
     }
@@ -2148,15 +2172,61 @@ void IrrlichtRenderer::initCloudPlane()
         // Per sky-clouds.md: IVideoDriver::getTexture(), NOT TextureCache::loadSRGB().
         ITexture* tex = m_driver->getTexture("assets/textures/sky/clouds.png");
 
+        // --- Cloud dome shader ---
+        // Load cloud_dome.vert / cloud_dome.frag via the GPU programming services.
+        // The shader multiplies tex.a * v_fadeAlpha so that non-cloud texels (tex.a=0)
+        // are fully transparent regardless of vertex alpha.  This eliminates the blue-dome
+        // arc artefact produced by EMT_TRANSPARENT_VERTEX_ALPHA, which ignores texture
+        // alpha entirely and lets the texture's non-sky RGB show through the fade band.
+        //
+        // Base material EMT_TRANSPARENT_ALPHA_CHANNEL sets GL_SRC_ALPHA,
+        // GL_ONE_MINUS_SRC_ALPHA blending — correct for semi-transparent cloud overlays.
+        //
+        // Fallback: if shader loading fails (returns -1, e.g. no GLSL support) we fall
+        // back to EMT_TRANSPARENT_VERTEX_ALPHA, which is the original behaviour.
+        irr::s32 cloudMatType = EMT_TRANSPARENT_VERTEX_ALPHA;  // fallback
+
+        irr::video::IGPUProgrammingServices* gpu = m_driver->getGPUProgrammingServices();
+        if (gpu) {
+            const std::string vsPath =
+                std::string(AITOWN_ASSETS_DIR) + "/shaders/cloud_dome.vert";
+            const std::string fsPath =
+                std::string(AITOWN_ASSETS_DIR) + "/shaders/cloud_dome.frag";
+
+            // CloudDomeShaderCallback: raw heap allocation.  We keep our own reference
+            // (stored as m_cloudShaderCbRaw) so that setCameraY() can be called each
+            // frame in update().  Irrlicht also calls grab() internally on the passed
+            // pointer.  The caller's reference is dropped in IrrlichtRenderer::~IrrlichtRenderer().
+            // Never std::unique_ptr — causes double-free (see CLAUDE.md shader callbacks).
+            CloudDomeShaderCallback* cb = new CloudDomeShaderCallback();
+            irr::s32 matType = gpu->addHighLevelShaderMaterialFromFiles(
+                vsPath.c_str(), "main", irr::video::EVST_VS_1_1,
+                fsPath.c_str(), "main", irr::video::EPST_PS_1_1,
+                cb, irr::video::EMT_TRANSPARENT_ALPHA_CHANNEL);
+            // Do NOT drop cb unconditionally here — we store our reference for per-frame
+            // setCameraY() updates.  Drop only on shader failure (we have no use for it).
+            if (matType == -1) {
+                fprintf(stderr,
+                    "[IrrlichtRenderer] WARNING: cloud dome shader compile failed "
+                    "(vs=%s, fs=%s) — falling back to EMT_TRANSPARENT_VERTEX_ALPHA\n",
+                    vsPath.c_str(), fsPath.c_str());
+                cb->drop();   // shader failed — discard our reference
+                // cloudMatType stays EMT_TRANSPARENT_VERTEX_ALPHA (set above).
+            } else {
+                cloudMatType = matType;
+                m_cloudShaderCbRaw = cb;  // store caller's reference; dropped in destructor
+            }
+        }
+
         auto& mat = m_cloudNode->getMaterial(0);
-        mat.MaterialType    = EMT_TRANSPARENT_VERTEX_ALPHA;
+        mat.MaterialType    = static_cast<irr::video::E_MATERIAL_TYPE>(cloudMatType);
         mat.Lighting        = false;
         // Back-face culling must be off: camera is inside the dome looking outward/upward,
         // so only the inner surface is visible. Irrlicht's default CW-front-face culls the
         // outer surface, which is correct. However, disabling culling guarantees visibility
         // from any camera tilt without winding analysis.
         mat.BackfaceCulling = false;
-        // Transparent domes must NOT write to the depth buffer (Fix 4).
+        // Transparent domes must NOT write to the depth buffer.
         // If ZWriteEnable is left on (the default), the dome surface deposits depth values
         // that can occlude terrain geometry rendered in the same pass — most visibly as a
         // hard arc where the dome's partially-transparent lower band intersects the terrain
@@ -2204,5 +2274,12 @@ void IrrlichtRenderer::update(float dt)
     if (m_camera) {
         const core::vector3df camPos = m_camera->getPosition();
         m_cloudNode->setPosition(core::vector3df(camPos.X, 0.0f, camPos.Z));
+
+        // Feed camera world-space Y to the shader callback so the elevation-angle
+        // fade in cloud_dome.frag uses the correct reference height each frame.
+        if (m_cloudShaderCbRaw) {
+            static_cast<CloudDomeShaderCallback*>(m_cloudShaderCbRaw)
+                ->setCameraY(camPos.Y);
+        }
     }
 }

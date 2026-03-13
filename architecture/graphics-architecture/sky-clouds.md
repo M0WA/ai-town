@@ -31,8 +31,7 @@ This feature is delivered in **Phase 10b**.
   ensuring the hard bottom edge of the dome is never visible above the landscape even at
   the most oblique camera angles.
 - **Tessellation**: `kDomeRings = 32` latitude bands × `kDomeSectors = 32` longitude
-  segments → `33 × 33 = 1089` vertices, `32 × 32 × 2 = 2048` triangles. The ring count
-  keeps the smoothstep fade smooth across the 500 m fade band (t=0.25 → t=0.46).
+  segments → `33 × 33 = 1089` vertices, `32 × 32 × 2 = 2048` triangles.
 - **Camera tracking**: the dome node is repositioned to camera XZ each frame in
   `update()` so the horizon ring is always centred on the player. The dome vertex Y
   coordinates are absolute world-space values; only the node's XZ translation changes.
@@ -73,27 +72,10 @@ This maps the apex to UV `(0.5, 0.5) × kCloudUVScale` and the base ring to UV
 `kCloudUVScale = 4.0`: texture tiling factor — tiles the cloud texture 4× across the
 dome surface.
 
-**Vertex colour alpha** (two-boundary horizon fade):
-
-```text
-kFadeStart = 0.25  — t=0.25 → Y = -1000 + 2000×(1-0.25) = 500 m  (fade begins)
-kFadeEnd   = 0.46  — t=0.46 → Y = -1000 + 2000×(1-0.46) =  80 m  (fully transparent)
-
-For t ≤ kFadeStart:               alpha = 255   (fully opaque overhead dome)
-For kFadeStart < t ≤ kFadeEnd:    s = (t − kFadeStart) / (kFadeEnd − kFadeStart)   ∈ [0, 1]
-                                  w = smoothstep(s) = s² × (3 − 2s)
-                                  alpha = round(255 × (1 − w))
-For t > kFadeEnd:                 alpha = 0     (fully transparent horizon zone)
-```
-
-**Why two boundaries eliminate the horizon arc**: the primary fix is `farClip = 15000 m`
-(see Dome Geometry above) so OpenGL never hard-clips dome triangles. The fade provides a
-secondary layer: `kFadeEnd = 0.46` maps to Y = 80 m, which is above the maximum terrain
-height (terrain max ≈ 26 m, safety margin ≈ 54 m). This value must stay above
-`maxTerrainHeight + safetyMargin`; do not lower it below Y = 80 m without verifying the
-terrain height ceiling. Everything at and below 80 m is fully transparent, so no dome
-surface with non-zero alpha is ever visible against the terrain horizon even if minor
-z-precision issues occur at the far plane.
+**Vertex colour alpha**: all vertices use `SColor(255, 255, 255, 255)` (alpha=255).
+Horizon fade is handled entirely in the fragment shader using the elevation angle from
+the camera — see §Cloud Dome Shader below. The previous per-vertex alpha fade
+(`kFadeStart`, `kFadeEnd`) has been removed.
 
 **Winding**: Inside-CW (camera is inside the dome looking upward and outward). For
 quad `(ring r, sector s)`:
@@ -150,13 +132,126 @@ Applied to the cloud dome `IMeshSceneNode*` after `addMeshSceneNode()`:
 
 | Property | Value | Rationale |
 |---|---|---|
-| `MaterialType` | `EMT_TRANSPARENT_VERTEX_ALPHA` | Vertex colour alpha controls transparency — required so the per-vertex horizon fade (alpha=0 at base ring, alpha=255 at apex) is honoured. `EMT_TRANSPARENT_ALPHA_CHANNEL` ignores vertex alpha entirely, which would leave the base ring opaque and produce a hard circular rim at the horizon. |
+| `MaterialType` | Custom GLSL shader (see below); fallback `EMT_TRANSPARENT_VERTEX_ALPHA` | Shader multiplies `tex.a * v_fadeAlpha` so non-cloud texels are fully transparent. See §Cloud Dome Shader. |
 | `Lighting` | `false` | No scene lights in V1 |
 | `BackfaceCulling` | `false` | Camera is inside the dome; disabling culling guarantees visibility from any camera tilt |
 | `ZWriteEnable` | `false` | Transparent domes must never write to the depth buffer. If depth writes are on, the dome's partially-transparent lower band deposits depth values that can occlude terrain geometry in the same render pass, manifesting as a hard arc in the one azimuth where the dome intersects the terrain frustum. Setting `false` (Irrlicht 1.8.5 `bool`; 1.9+ uses `EZW_OFF`) disables all depth writes while depth reads remain active so the dome still sits correctly behind foreground objects. |
 | `Texture[0]` | `clouds.png` via `getTexture()` | Cloud diffuse + alpha |
 
 Do NOT use additive blending — clouds are semi-transparent overlays, not emissive.
+
+---
+
+## Cloud Dome Shader
+
+### Why Per-Vertex Alpha Caused a Directional Arc Artefact
+
+The previous implementation stored a per-vertex horizon fade in `SColor.alpha`
+and passed it to the fragment shader as `v_fadeAlpha`. Although the custom shader
+correctly gated output on `tex.a * v_fadeAlpha` (fixing the original
+`EMT_TRANSPARENT_VERTEX_ALPHA` artefact where texture alpha was ignored entirely),
+a second artefact remained:
+
+The cloud texture's alpha content varies by azimuth because polar UV mapping means
+different compass directions sample different parts of the tiling texture. In the
+per-vertex fade band (the ring of vertices at a given latitude) some azimuths had
+dense clouds visible near the horizon while others were sparse. The result was a
+**directional arc** — a visible semi-transparent band that appeared at one compass
+direction, moved with camera rotation, and was most pronounced when looking toward
+the azimuth where the texture happened to be densest near the fade boundary.
+
+### Elevation-Angle Fade (Rev 2 Fix)
+
+The fix moves all horizon fade logic into the GLSL shaders, keyed on the
+**elevation angle** from the camera to each fragment. Because elevation angle is a
+function of vertical angle only (independent of azimuth), the resulting fade band
+is a perfectly horizontal ring — symmetric in all compass directions. No directional
+arc is possible.
+
+**Fragment shader fade constants:**
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kElevFadeEnd` | `0.0349` rad (2°) | Fully transparent at or below this elevation |
+| `kElevFadeHigh` | `0.1745` rad (10°) | Fully opaque at or above this elevation |
+
+The smoothstep between 2° and 10° above the horizon produces a gradual,
+symmetric fade in all compass directions.
+
+### Shader Files
+
+| File | Purpose |
+|---|---|
+| `assets/shaders/cloud_dome.vert` | Computes `v_elevAngle` (elevation angle in radians from camera to vertex) and passes `v_texCoord` to the fragment stage. Receives `u_cameraY` uniform. |
+| `assets/shaders/cloud_dome.frag` | Samples `u_tex`; applies elevation-angle smoothstep fade; outputs `vec4(tex.rgb, tex.a * horizFade)` |
+
+The vertex shader computes:
+
+```glsl
+float horizDist = length(gl_Vertex.xz);
+float deltaY    = gl_Vertex.y - u_cameraY;
+v_elevAngle     = atan(deltaY, max(horizDist, 0.1));
+```
+
+The fragment shader computes:
+
+```glsl
+float t         = clamp((v_elevAngle - kElevFadeEnd) / (kElevFadeHigh - kElevFadeEnd), 0.0, 1.0);
+float horizFade = t * t * (3.0 - 2.0 * t);   // smoothstep
+float alpha     = tex.a * horizFade;
+gl_FragColor    = vec4(tex.rgb, alpha);
+```
+
+- `tex.a = 0` (non-cloud area) → `alpha = 0` fully transparent.
+- Elevation ≤ 2° → `horizFade = 0` → dome fades out at the horizon.
+- Elevation ≥ 10° → `horizFade = 1` → fully opaque overhead clouds.
+- Identical result in every compass direction — no directional arc.
+
+### Base Material and Blending
+
+The shader is registered with `EMT_TRANSPARENT_ALPHA_CHANNEL` as the base
+material. This sets `GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA` blending — correct
+for semi-transparent cloud overlays.
+
+### Shader Callback
+
+`CloudDomeShaderCallback` (defined inline in `IrrlichtRenderer.cpp`) sets two
+uniforms in `OnSetConstants`:
+
+- `u_tex` — sampler2D bound to texture unit 0.
+- `u_cameraY` — `float` world-space Y of the camera, updated each frame via
+  `setCameraY()` before the scene is drawn.
+
+`u_cameraY` is consumed by the vertex shader. It is set via both
+`setVertexShaderConstant` and `setPixelShaderConstant` for cross-platform
+compatibility (Irrlicht GLSL backend behaviour differs across drivers; both calls
+target the same linked program uniform).
+
+**Lifetime**: the callback is allocated on the raw heap and passed to
+`addHighLevelShaderMaterialFromFiles`. Unlike the standard drop-after-pass
+pattern, the caller (`IrrlichtRenderer`) **keeps its own reference** (stored as
+`void* m_cloudShaderCbRaw` in the header, cast to `CloudDomeShaderCallback*`
+inside the .cpp) so that `setCameraY()` can be called each frame in `update()`.
+The caller's reference is released via `->drop()` in
+`IrrlichtRenderer::~IrrlichtRenderer()`. Irrlicht also holds its own `grab()`
+reference; the final drop happens when the material renderer is destroyed.
+Never `std::unique_ptr` — causes double-free.
+
+### IrrlichtRenderer Members Required
+
+| Member | Type | Initialised by |
+|---|---|---|
+| `m_cloudNode` | `IMeshSceneNode*` | `initCloudPlane()` |
+| `m_cloudUVOffset` | `irr::core::vector2df` | member initialiser → `{0.f, 0.f}` |
+| `m_cloudShaderCbRaw` | `void*` | `initCloudPlane()` on shader success; `nullptr` on failure or EDT_NULL |
+
+### Fallback
+
+If `gpu->addHighLevelShaderMaterialFromFiles` returns `-1` (no GLSL support,
+or `EDT_NULL`), `initCloudPlane()` falls back to `EMT_TRANSPARENT_VERTEX_ALPHA`
+with a `fprintf(stderr, ...)` warning and leaves `m_cloudShaderCbRaw = nullptr`.
+The directional arc artefact will be visible in that case but the engine will not
+crash.
 
 ---
 
@@ -196,21 +291,14 @@ if (m_camera) {
 `std::fmod` wraps both components into `[0.0f, 1.0f)` to prevent float precision
 accumulation over play sessions longer than ~500 seconds.
 
-### IrrlichtRenderer Members Required
-
-| Member | Type | Initialised by |
-|---|---|---|
-| `m_cloudNode` | `IMeshSceneNode*` | `initCloudPlane()` |
-| `m_cloudUVOffset` | `irr::core::vector2df` | `initCloudPlane()` → `{0.f, 0.f}` |
-
 ---
 
 ## Depth Ordering
 
 The cloud dome base is at `Y=−1000 m` (far below terrain) and apex at `Y=1000 m`. Visible
-cloud geometry starts at `Y=80 m` (kFadeEnd boundary, below which all vertices are
-alpha=0) and reaches full opacity at `Y=500 m` (kFadeStart boundary). This range is
-well above all opaque scene geometry (terrain max ≈ 26 m, buildings max ~80 m).
+cloud geometry starts above ~2° elevation angle (the `kElevFadeEnd` shader constant) and
+reaches full opacity above ~10° (`kElevFadeHigh`). This range is well above all opaque
+scene geometry (terrain max ≈ 26 m, buildings max ~80 m).
 The depth buffer handles correct ordering automatically:
 
 - The sky dome is rendered at infinite depth (Irrlicht sky dome nodes set
@@ -218,8 +306,8 @@ The depth buffer handles correct ordering automatically:
 - Zone overlay quads are at terrain height + 0.1 m; the cloud dome is always farther
   from the camera than overlay quads (camera pitch −20° to −70°, minimum camera height
   ~30 m over flat terrain).
-- The bottom ring of the cloud dome has alpha=0 (transparent), so even if the depth
-  test ordering is imperfect near the horizon the fade makes it invisible.
+- Near-horizon fragments have `horizFade → 0` (elevation ≤ 2°), so even if the depth
+  test ordering is imperfect near the horizon the elevation-angle fade makes them invisible.
 
 The cloud dome material has `ZWriteEnable = false` so it never writes depth values that
 could occlude terrain rendered in the same pass. Depth reads remain active.

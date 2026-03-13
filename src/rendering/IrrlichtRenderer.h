@@ -179,9 +179,15 @@ private:
     //   Used to guard initCloudPlane() against headless (EDT_NULL) contexts.
     // m_cloudNode: scene node for the scrolling cloud quad; null under EDT_NULL.
     // m_cloudUVOffset: accumulated UV translation, wrapped to [0,1) via fmod.
+    // m_cloudShaderCbRaw: caller's reference to the CloudDomeShaderCallback (defined
+    //   in IrrlichtRenderer.cpp only).  Stored as void* to avoid pulling the class
+    //   definition into the header.  Cast to CloudDomeShaderCallback* at all use sites
+    //   inside the .cpp.  Null when the shader compile failed or under EDT_NULL.
+    //   Dropped in the destructor via ->drop().
     irr::video::E_DRIVER_TYPE       m_driverType{irr::video::EDT_NULL};
     irr::scene::IMeshSceneNode*     m_cloudNode{nullptr};
     irr::core::vector2df            m_cloudUVOffset{0.f, 0.f};
+    void*                           m_cloudShaderCbRaw{nullptr};
 
     // Cached camera eye position — updated every setCamera() call.
     // Returned by getListenerPosition() for use by CitySimulation's
