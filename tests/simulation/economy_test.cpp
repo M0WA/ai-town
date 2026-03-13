@@ -40,11 +40,11 @@
 #include "src/interfaces/audio_types.h"
 #include "src/simulation/CitySimulation.h"
 #include "src/simulation/simulation_constants.h"
-#include "mock_audio_system.h"
-#include "mock_renderer.h"
-#include "manual_rng.h"
-#include "manual_clock.h"
-#include "manual_terrain_query.h"
+#include "MockAudioSystem.h"
+#include "MockRenderer.h"
+#include "ManualRNG.h"
+#include "ManualClock.h"
+#include "ManualTerrainQuery.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <rapidcheck.h>

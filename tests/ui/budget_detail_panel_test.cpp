@@ -13,8 +13,8 @@
 
 #include "src/ui/BudgetDetailPanel.h"
 #include "src/simulation/simulation_constants.h"
-#include "tests/ui/mock_ui_backend.h"
-#include "tests/ui/mock_city_simulation.h"
+#include "tests/ui/MockUIBackend.h"
+#include "tests/ui/MockCitySimulation.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>

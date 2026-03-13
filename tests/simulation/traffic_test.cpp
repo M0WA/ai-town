@@ -16,16 +16,16 @@
 // The initial getTrafficDemandFactor() therefore returns 0.5f at construction
 // before any ticks have fired.
 
-#include "simulation_test_base.h"
+#include "SimulationTestBase.h"
 #include "src/interfaces/ICitySimulation.h"
 #include "src/interfaces/simulation_types.h"
 #include "src/simulation/simulation_constants.h"
 #include "src/interfaces/sound_ids.h"
-#include "mock_audio_system.h"
-#include "mock_renderer.h"
-#include "manual_rng.h"
-#include "manual_clock.h"
-#include "manual_terrain_query.h"
+#include "MockAudioSystem.h"
+#include "MockRenderer.h"
+#include "ManualRNG.h"
+#include "ManualClock.h"
+#include "ManualTerrainQuery.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>

@@ -19,7 +19,7 @@
 // integration tests") to assert setMusicIntensity is never called for raw population.
 // StrictMock is used for the unit tests so unexpected calls are caught immediately.
 
-#include "mock_audio_system.h"
+#include "MockAudioSystem.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 

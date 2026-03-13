@@ -20,7 +20,7 @@
 // spec mandates for AudioSystem::updateDuckState().
 
 #include "src/interfaces/IClock.h"
-#include "tests/simulation/manual_clock.h"
+#include "tests/simulation/ManualClock.h"
 #include <gtest/gtest.h>
 #include <cmath>
 #include <algorithm>

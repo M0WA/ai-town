@@ -21,8 +21,8 @@
 #include "src/interfaces/IUIBackend.h"
 #include "src/interfaces/IRenderer.h"
 #include "src/interfaces/simulation_types.h"
-#include "tests/ui/mock_ui_backend.h"
-#include "tests/ui/mock_city_simulation.h"
+#include "tests/ui/MockUIBackend.h"
+#include "tests/ui/MockCitySimulation.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>

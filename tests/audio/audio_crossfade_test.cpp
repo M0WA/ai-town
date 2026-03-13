@@ -11,8 +11,8 @@
 #include "src/interfaces/IAudioSystem.h"
 #include "src/audio/audio_constants.h"
 #include "src/audio/sound_ids.h"
-#include "tests/simulation/mock_audio_system.h"
-#include "tests/simulation/manual_clock.h"
+#include "tests/simulation/MockAudioSystem.h"
+#include "tests/simulation/ManualClock.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>

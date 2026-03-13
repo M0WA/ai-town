@@ -43,8 +43,8 @@
 #include "src/rendering/TextureCache.h"
 #include "src/rendering/SceneEntityManager.h"
 #include "src/terrain/TerrainSystem.h"
-#include "tests/simulation/mock_renderer.h"
-#include "tests/simulation/manual_clock.h"
+#include "tests/simulation/MockRenderer.h"
+#include "tests/simulation/ManualClock.h"
 
 using namespace testing;
 

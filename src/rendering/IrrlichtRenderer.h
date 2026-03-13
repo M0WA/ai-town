@@ -161,6 +161,12 @@ public:
     // Called from main.cpp frame loop before beginFrame().
     void update(float dt);
 
+    // cloudNodeForTest() — test-only accessor for the cloud plane scene node.
+    // Returns nullptr when constructed with EDT_NULL (headless guard triggered).
+    // Intended for use by cloud_plane_test.cpp in opengl_tests.
+    // Production code must NOT call this method.
+    irr::scene::IMeshSceneNode* cloudNodeForTest() const { return m_cloudNode; }
+
 private:
     irr::IrrlichtDevice*        m_device;
     UIManager*                  m_uiManager;

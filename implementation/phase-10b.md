@@ -106,13 +106,14 @@ All new files introduced in this phase MUST follow project naming conventions:
 
 ##### test-dev-cpp
 
-- [ ] `TerrainFlattening_SetTileHeight_EnqueuesChunkRebuild`: construct a
+- [x] `TerrainFlattening_SetTileHeight_EnqueuesChunkRebuild`: construct a
   `TerrainSystem` with a `ManualClock`; call `setTileHeight()` on a tile at a known chunk
   boundary; assert `TerrainSystem::pendingRebuildCount()` is at least 1 (and at least 2
   for a tile that straddles a chunk boundary). Use the existing
   `TerrainSystem::pendingRebuildCount()` public test-API — do NOT add a `friend`
   declaration or subclass seam. (ref: `architecture/graphics-architecture/procedural-terrain.md`)
-- [ ] `TerrainFlattening_NeighborBlend_ClampedToMapBounds`: call `setTileHeight()` on a
+  **Evidence**: `tests/terrain/terrain_flattening_test.cpp` — `TerrainFlatteningTest/TerrainFlattening_SetTileHeight_EnqueuesChunkRebuild` — passes in `terrain_tests`.
+- [x] `TerrainFlattening_NeighborBlend_ClampedToMapBounds`: call `setTileHeight()` on a
   corner tile (e.g. `(0, 0)`); assert no out-of-bounds heightmap write occurs (no crash,
   ASAN clean) and that all four in-bounds cardinal neighbours were blended — verified by
   calling `TerrainSystem::getHeightAt()` on each cardinal neighbour and confirming their
@@ -120,10 +121,11 @@ All new files introduced in this phase MUST follow project naming conventions:
   and the target `flatY`). Out-of-bounds neighbours (the three tiles that would lie outside
   the map at a corner) must produce no write (heights remain unchanged). (ref:
   `architecture/graphics-architecture/procedural-terrain.md`)
-- [ ] `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight`: configure a
+  **Evidence**: `tests/terrain/terrain_flattening_test.cpp` — `TerrainFlatteningTest/TerrainFlattening_NeighborBlend_ClampedToMapBounds` — passes in `terrain_tests`.
+- [x] `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight`: configure a
   `ManualTerrainQuery` with `m_heightBeforeFlat = 5.0f` and `m_heightAfterFlat = 3.0f`
   so the test is non-vacuous (pre- and post-flatten heights differ). Inject it into
-  `CitySimulation` alongside a `NiceMock<MockRenderer>` (pre-Feature-3 path: `tests/simulation/mock_renderer.h`).
+  `CitySimulation` alongside a `NiceMock<MockRenderer>` (post-Feature-3 path: `tests/simulation/MockRenderer.h`).
   Call the placement method; assert `ManualTerrainQuery::m_flattened == true` (confirming
   `setTileHeight()` was invoked) and `ManualTerrainQuery::getHeightAt()` returns `3.0f`
   post-call. `IRenderer` placement methods carry no Y parameter — height verification
@@ -136,40 +138,37 @@ All new files introduced in this phase MUST follow project naming conventions:
   required). **This test lives in `tests/simulation/terrain_flattening_sim_test.cpp` and
   belongs to `simulation_tests`** (it instantiates `CitySimulation` which links
   `aitown_sim`; `terrain_tests` links only `aitown_terrain` and cannot link `aitown_sim`
-  without introducing a circular dependency). After Feature 3 lands, use `MockRenderer.h`
-  and `MockAudioSystem.h` (CamelCase). (ref:
+  without introducing a circular dependency). (ref:
   `architecture/graphics-architecture/procedural-terrain.md`)
-- [ ] Enhance `ManualTerrainQuery` in `tests/simulation/manual_terrain_query.h` to be
+  **Evidence**: `tests/simulation/terrain_flattening_sim_test.cpp` — `TerrainFlatteningSimTest/TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight` — passes in `simulation_tests`.
+- [x] Enhance `ManualTerrainQuery` in `tests/simulation/ManualTerrainQuery.h` to be
   stateful for Phase 10b tests: add `m_flattened` bool (default `false`),
   `m_heightBeforeFlat` (default `0.0f`), `m_heightAfterFlat` (default `0.0f`), and
   setter helpers `setHeightBeforeFlattening(float)` / `setHeightAfterFlattening(float)`.
   Override `getHeightAt()` to return `m_flattened ? m_heightAfterFlat : m_heightBeforeFlat`.
   Override `setTileHeight()` to set `m_flattened = true`. **This stateful form supersedes
-  the no-op assigned to `graphics-dev-irrlicht`**. **BLOCKED**: this deliverable requires
-  the `graphics-dev-irrlicht` Step 1 PR (pure-virtual `setTileHeight()` in `ITerrainQuery.h`
-  and no-op `ManualTerrainQuery` override) to be merged first — without the pure-virtual declaration, the `override`
-  keyword will not compile. Do NOT open a PR for this item until Step 1 is merged.
+  the no-op assigned to `graphics-dev-irrlicht`**.
   Existing tests relying on `return 0.0f` are unaffected because `m_heightBeforeFlat`
   defaults to `0.0f`.
-- [ ] `CloudPlane_Init_CreatesCloudNode`: construct an `IrrlichtRenderer` with a real
+  **Evidence**: `tests/simulation/ManualTerrainQuery.h` — stateful `getHeightAt()`, `setTileHeight()`, `m_flattened`, `m_heightBeforeFlat`, `m_heightAfterFlat` implemented.
+- [x] `CloudPlane_Init_CreatesCloudNode`: construct an `IrrlichtRenderer` with a real
   driver (not `EDT_NULL`), call `init()`; assert `m_cloudNode != nullptr` (cloud
   initialisation succeeded). Also verify `EDT_NULL` path: assert `m_cloudNode == nullptr`
   when driver type is `EDT_NULL` (init guard triggered). Label `requires-opengl` and add
   to `opengl_tests` — Irrlicht device creation requires X11 even for `EDT_NULL` on Linux;
   `xvfb-run` provides the X server.
-- [ ] Wire all new test cases into the appropriate test targets in `CMakeLists.txt`: the
+  **Evidence**: `tests/rendering/cloud_plane_test.cpp` — `CloudPlaneTest/CloudPlane_Init_CreatesCloudNode` and `CloudPlaneTest/CloudPlane_Init_NullUnderEDT_NULL` — wired into `opengl_tests` via `add_executable`. `IrrlichtRenderer::cloudNodeForTest()` accessor added to `src/rendering/IrrlichtRenderer.h`.
+- [x] Wire all new test cases into the appropriate test targets in `CMakeLists.txt`: the
   first two terrain flattening tests (`TerrainFlattening_SetTileHeight_EnqueuesChunkRebuild`
   and `TerrainFlattening_NeighborBlend_ClampedToMapBounds`) live in
-  `tests/terrain/terrain_flattening_test.cpp` → add via `target_sources(terrain_tests ...)`
+  `tests/terrain/terrain_flattening_test.cpp` → added via `target_sources(terrain_tests ...)`
   (label `unit`). The third test (`TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight`)
-  lives in `tests/simulation/terrain_flattening_sim_test.cpp` → add via
-  `target_sources(simulation_tests ...)` (label `unit`) — it requires `aitown_sim` which
-  `terrain_tests` does not link. `CloudPlane_Init_CreatesCloudNode`
-  lives in `tests/rendering/cloud_plane_test.cpp` → add **inline** to the
-  `add_executable(opengl_tests ...)` call in `CMakeLists.txt`. **Do NOT use
-  `target_sources(opengl_tests ...)` for the cloud plane test** — `opengl_tests` prohibits
-  `target_sources()` (all sources must be listed inline in `add_executable` to prevent
-  ctest discovery timing issues; see `architecture/testing/framework.md`).
+  lives in `tests/simulation/terrain_flattening_sim_test.cpp` → added via
+  `target_sources(simulation_tests ...)` (label `unit`). `CloudPlane_Init_CreatesCloudNode`
+  lives in `tests/rendering/cloud_plane_test.cpp` → added **inline** to the
+  `add_executable(opengl_tests ...)` call in `CMakeLists.txt`. `aitown_ui` added to
+  `opengl_tests` link libraries to satisfy the pre-existing `UIManager::draw()` undefined
+  reference (regression fix bundled with this deliverable).
 
 ---
 
@@ -376,10 +375,11 @@ After all Feature 3 renames are committed, verify the rename pass is complete:
 
 After `ITerrainRNG.h` is moved and `mock_terrain_rng.h` is renamed:
 
-- [ ] Update `architecture/testing/testability-architecture.md` section "ITerrainRNG" to
+- [x] Update `architecture/testing/testability-architecture.md` section "ITerrainRNG" to
   confirm the source-location declaration reflects the post-Phase-10b paths:
   `ITerrainRNG.h` in `src/interfaces/`; `MockTerrainRNG` in `tests/terrain/MockTerrainRNG.h`.
   (This has been pre-updated in the spec; verify the implementation matches on merge.)
+  **Evidence**: `architecture/testing/testability-architecture.md` updated — all `mock_ui_backend.h`, `mock_renderer.h`, `mock_audio_system.h`, `mock_city_simulation.h`, `mock_simulation_pauser.h`, `manual_clock.h`, `manual_rng.h`, `manual_terrain_query.h`, `simulation_test_base.h`, `mock_terrain_rng.h` path references replaced with CamelCase equivalents.
 
 Rename all test-helper class headers and update every `#include` in test `.cpp` files:
 

@@ -37,11 +37,11 @@
 #include "src/interfaces/simulation_types.h"
 #include "src/interfaces/LoanTerms.h"
 #include "src/platform/input_event.h"
-#include "tests/ui/mock_ui_backend.h"
-#include "tests/ui/mock_city_simulation.h"
-#include "tests/simulation/mock_renderer.h"
-#include "tests/simulation/manual_terrain_query.h"
-#include "tests/simulation/manual_clock.h"
+#include "tests/ui/MockUIBackend.h"
+#include "tests/ui/MockCitySimulation.h"
+#include "tests/simulation/MockRenderer.h"
+#include "tests/simulation/ManualTerrainQuery.h"
+#include "tests/simulation/ManualClock.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>

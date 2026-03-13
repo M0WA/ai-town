@@ -18,7 +18,7 @@
 
 #include "src/audio/AudioSystem.h"
 #include "src/audio/audio_constants.h"
-#include "tests/simulation/manual_clock.h"
+#include "tests/simulation/ManualClock.h"
 #include <gtest/gtest.h>
 #include <stdexcept>
 

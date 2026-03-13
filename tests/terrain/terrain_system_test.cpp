@@ -27,9 +27,9 @@
 
 #include "src/terrain/TerrainSystem.h"
 #include "src/interfaces/ITerrainRNG.h"
-#include "tests/simulation/mock_renderer.h"   // NiceMock<MockRenderer>
-#include "tests/simulation/manual_clock.h"    // ManualClock
-#include "tests/terrain/mock_terrain_rng.h"   // MockTerrainRNG
+#include "tests/simulation/MockRenderer.h"   // NiceMock<MockRenderer>
+#include "tests/simulation/ManualClock.h"    // ManualClock
+#include "tests/terrain/MockTerrainRNG.h"   // MockTerrainRNG
 
 #include <memory>
 #include <vector>

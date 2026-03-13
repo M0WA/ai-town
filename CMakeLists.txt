@@ -541,6 +541,11 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/simulation_coverage_gap_test.cpp
 )
 
+# Phase 10b: terrain flattening simulation test.
+target_sources(simulation_tests PRIVATE
+    tests/simulation/terrain_flattening_sim_test.cpp
+)
+
 # Phase 10: AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier().
 # MUST be on simulation_tests ONLY — never on the main aitown binary target.
 target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
@@ -556,6 +561,7 @@ add_executable(terrain_tests
     tests/terrain/terrain_chunk_test.cpp  # Phase 5: TerrainChunk vertex count + bounding box tests
     tests/terrain/terrain_system_test.cpp # Phase 5: TerrainSystem rebuild deque + hysteresis tests
     tests/terrain/texture_cache_test.cpp  # Phase 5: TextureCache unit tests (EDT_NULL guard + ref counts)
+    tests/terrain/terrain_flattening_test.cpp # Phase 10b: setTileHeight enqueue + neighbour blend tests
 )
 # aitown_terrain is now STATIC (Phase 5 promotion) and transitively links aitown_render
 # via PUBLIC scope.  aitown_render links Irrlicht and GLEW::GLEW PRIVATE — so terrain_tests
@@ -859,12 +865,14 @@ add_executable(opengl_tests
     tests/rendering/lod_swap_smoke_test.cpp    # Phase 2: LOD swap grab/drop contract smoke test
     tests/rendering/building_lod_swap_test.cpp        # Phase 9: LOD swap bounding box integration test
     tests/rendering/building_srgb_fallback_test.cpp   # Phase 9: building facade sRGB fallback test
+    tests/rendering/cloud_plane_test.cpp       # Phase 10b: cloud plane init test (EDT_OPENGL + EDT_NULL)
 )
 # Irrlicht and GLEW::GLEW MUST be linked directly: shader_stub_compile_test.cpp includes
 # <irrlicht.h> and <GL/glew.h>; aitown_render links both PRIVATE so their include paths
 # do NOT propagate to consumers (same rationale as integration_tests linking Irrlicht directly).
 target_link_libraries(opengl_tests PRIVATE
     aitown_render
+    aitown_ui      # required: IrrlichtRenderer.cpp references UIManager::draw()
     Irrlicht
     GLEW::GLEW
     GTest::gtest_main

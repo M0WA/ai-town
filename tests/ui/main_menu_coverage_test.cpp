@@ -18,7 +18,7 @@
 
 #include "src/ui/MainMenuPanel.h"
 #include "src/platform/input_event.h"
-#include "tests/ui/mock_ui_backend.h"
+#include "tests/ui/MockUIBackend.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>
