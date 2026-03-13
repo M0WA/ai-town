@@ -2007,17 +2007,22 @@ void IrrlichtRenderer::removeVehicle(uint32_t vehicleId)
 // -------------------------------------------------------------------------
 static SMesh* buildCloudDomeMesh()
 {
-    constexpr int   kDomeRings         = 32;     // latitude bands — more rings keep fade smooth over larger geometry
+    constexpr int   kDomeRings         = 32;     // latitude bands — keep fade smooth
     constexpr int   kDomeSectors       = 32;     // longitude segments
-    constexpr float kCloudAltitude     = -1000.0f; // world-space Y of dome base (far below terrain — hides hard edge)
-    constexpr float kCloudDomeRadius   = 14000.0f; // horizontal radius — large enough that dome edge is always beyond visual horizon
-    constexpr float kCloudDomeHeight   = 2200.0f; // vertical height from base to apex (apex at Y≈1200 m)
+    constexpr float kCloudAltitude     = -1000.0f; // world-space Y of dome base (far below terrain)
+    constexpr float kCloudDomeRadius   = 6000.0f;  // horizontal radius at base ring
+    constexpr float kCloudDomeHeight   = 2000.0f;  // vertical height from base to apex (apex at Y=1000 m)
     constexpr float kCloudUVScale      = 4.0f;   // texture tiling factor
-    // Fade zone: clouds are fully opaque above this latitude parameter value.
-    // Below kFadeStart (i.e. t > kFadeStart toward the base), alpha ramps to 0
-    // using a smoothstep curve.  Setting this to 0.5 means the bottom 50% of the
-    // dome height fades out, spanning ~1100 m of vertical extent.
-    constexpr float kFadeStart         = 0.5f;
+    // Two-boundary fade: clouds are fully opaque above kFadeStart, then smoothstep
+    // to fully transparent at kFadeEnd.  kFadeEnd corresponds to Y=0 m (sea level),
+    // which is above the maximum terrain height (~80 m is typical, absolute max ~80 m).
+    // This guarantees the dome is completely transparent at or below sea level, so
+    // terrain at 0-80 m altitude is always visible through the dome with no arc artifact.
+    //
+    // kFadeStart = 0.25 → Y = kCloudAltitude + kCloudDomeHeight * (1 - 0.25) = -1000 + 1500 = 500 m
+    // kFadeEnd   = 0.50 → Y = kCloudAltitude + kCloudDomeHeight * (1 - 0.50) = -1000 + 1000 =   0 m
+    constexpr float kFadeStart         = 0.25f; // start fading at t=0.25 (Y≈500 m)
+    constexpr float kFadeEnd           = 0.50f; // fully transparent at t=0.50 (Y=0 m)
 
     SMesh*       mesh = new SMesh();
     SMeshBuffer* buf  = new SMeshBuffer();
@@ -2031,16 +2036,15 @@ static SMesh* buildCloudDomeMesh()
     //   radius  = kCloudDomeRadius * t
     //   (nx,nz) = (sin(phi), cos(phi))  where phi = sector * 2π / kDomeSectors
     //
-    // Alpha fade formula (horizon fade):
-    //   For t <= kFadeStart : alpha = 255  (fully opaque upper dome)
-    //   For t >  kFadeStart : remap t into s = (t - kFadeStart) / (1 - kFadeStart)
-    //                         apply smoothstep: w = s * s * (3 - 2*s)
-    //                         alpha = round(255 * (1 - w))
-    // This keeps clouds at full opacity over the upper 50% of dome height and
-    // smoothly fades them to zero over the lower 50%, with a smooth S-curve that
-    // eliminates the hard visible ring at the horizon.  The base ring is placed at
-    // Y = kCloudAltitude = -1000 m (far below terrain), so the zero-alpha ring is
-    // never directly visible above the landscape.
+    // Alpha fade formula (two-boundary horizon fade):
+    //   t <= kFadeStart              : alpha = 255  (fully opaque upper dome)
+    //   kFadeStart < t <= kFadeEnd   : smoothstep from 255 → 0
+    //       s = (t - kFadeStart) / (kFadeEnd - kFadeStart)   ∈ [0, 1]
+    //       w = s * s * (3 - 2*s)                             (smoothstep)
+    //       alpha = round(255 * (1 - w))
+    //   t > kFadeEnd                 : alpha = 0  (fully transparent horizon zone)
+    // kFadeEnd = 0.50 → Y = 0 m (sea level).  Everything at and below sea level is
+    // fully transparent, so the dome never occludes terrain and no arc is visible.
 
     const float piF = static_cast<float>(M_PI);
 
@@ -2049,14 +2053,16 @@ static SMesh* buildCloudDomeMesh()
         const float y      = kCloudAltitude + kCloudDomeHeight * (1.0f - t);
         const float r      = kCloudDomeRadius * t;  // horizontal radius at this ring
 
-        // Gradual horizon fade: full opacity in the upper dome, smoothstep to zero
-        // in the lower fade zone, base ring fully transparent below terrain.
+        // Two-boundary horizon fade: fully opaque overhead, smoothstep in the fade
+        // band, fully transparent at and below sea level (t >= kFadeEnd).
         irr::u8 alpha;
         if (t <= kFadeStart) {
             alpha = 255u;
+        } else if (t >= kFadeEnd) {
+            alpha = 0u;
         } else {
-            const float s  = (t - kFadeStart) / (1.0f - kFadeStart); // [0,1] in fade zone
-            const float w  = s * s * (3.0f - 2.0f * s);               // smoothstep
+            const float s  = (t - kFadeStart) / (kFadeEnd - kFadeStart); // [0,1] in fade band
+            const float w  = s * s * (3.0f - 2.0f * s);                  // smoothstep
             alpha = static_cast<irr::u8>(255.0f * (1.0f - w) + 0.5f);
         }
 
