@@ -337,16 +337,24 @@ needed for this pair.
 `src/audio/audio_system.h` is a compatibility redirect shim — delete it and update all
 callers:
 
-- `src/audio/AudioSystem.h` lines 17–18: update `#include "src/audio/ialc_functions.h"`
-  to `#include "src/interfaces/IAlcFunctions.h"` (**sequencing note**: this include
-  update is blocked on `graphics-dev-irrlicht` completing the `IAlcFunctions.h` file
-  move to `src/interfaces/`; do not merge this change until that PR lands)
-- `src/audio/AudioSystem.cpp`: update `#include "src/audio/ialc_functions.h"` to
-  `#include "src/interfaces/IAlcFunctions.h"` (same sequencing gate as above)
-- `src/main.cpp`: change `#include "src/audio/audio_system.h"` → `#include "src/audio/AudioSystem.h"`
-- `tests/audio/audio_thread_test.cpp` lines 27–28: update `ialc_functions.h` include to
-  `src/interfaces/IAlcFunctions.h`; update `audio_system.h` include to `AudioSystem.h`
-- `tests/audio/volume_control_test.cpp` line 19: update `audio_system.h` → `AudioSystem.h`
+- [x] `src/audio/AudioSystem.h` line 18: `#include "src/interfaces/IAlcFunctions.h"` —
+  already correct (was updated when `graphics-dev-irrlicht` moved `IAlcFunctions.h` to
+  `src/interfaces/`). **Evidence**: `src/audio/AudioSystem.h` line 18 reads
+  `#include "src/interfaces/IAlcFunctions.h"`.
+- [x] `src/audio/AudioSystem.cpp`: no `ialc_functions.h` reference present — already
+  uses `#include "src/interfaces/IAlcFunctions.h"` transitively via `AudioSystem.h`.
+  **Evidence**: `grep ialc_functions src/audio/AudioSystem.cpp` → no matches.
+- [x] `src/main.cpp`: already uses `#include "src/audio/AudioSystem.h"` (line 30) — no
+  stale shim reference. **Evidence**: `grep audio_system src/main.cpp` → no matches.
+- [x] `tests/audio/audio_thread_test.cpp` line 28: updated from `audio_system.h` to
+  `AudioSystem.h`; line 27 already used `src/interfaces/IAlcFunctions.h`. **Evidence**:
+  `tests/audio/audio_thread_test.cpp` lines 27–28 read
+  `#include "src/interfaces/IAlcFunctions.h"` and `#include "src/audio/AudioSystem.h"`.
+- [x] `tests/audio/volume_control_test.cpp` line 19: already uses
+  `#include "src/audio/AudioSystem.h"`. **Evidence**: `grep audio_system tests/audio/volume_control_test.cpp` → no matches.
+- [x] `src/audio/audio_system.h` (shim) deleted via `git rm`. **Evidence**: file no
+  longer exists; `git rm src/audio/audio_system.h` succeeded. Build passes: 770/770
+  unit tests pass after shim deletion.
 
 ##### cicd-dev-github
 

@@ -25,7 +25,7 @@
 // "alcSetThreadContext") and throws std::runtime_error when null is returned.
 
 #include "src/interfaces/IAlcFunctions.h"
-#include "src/audio/audio_system.h"
+#include "src/audio/AudioSystem.h"
 #include "src/audio/audio_constants.h"
 #include "tests/simulation/ManualClock.h"
 #include <gtest/gtest.h>

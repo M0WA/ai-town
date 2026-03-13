@@ -322,7 +322,7 @@ private:
 
 ## IAudioSystem Header Include Requirements
 
-The file `src/interfaces/audio_system.h` must include the following headers:
+The file `src/interfaces/IAudioSystem.h` must include the following headers:
 
 ```cpp
 #include "simulation_types.h"    // Required: SimSpeed (type alias for SpeedMultiplier)
