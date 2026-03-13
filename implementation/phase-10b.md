@@ -210,6 +210,13 @@ Rename `src/terrain/` and `src/ui/` class headers and update all `#include` refe
 | `src/ui/settings_panel.h` | `src/ui/SettingsPanel.h` |
 | `src/ui/tax_rate_panel.h` | `src/ui/TaxRatePanel.h` |
 
+Move interface headers into `src/interfaces/` (currently in wrong location):
+
+| Current path | Moved to | Reason |
+|---|---|---|
+| `src/ui/IUIBackend.h` | `src/interfaces/IUIBackend.h` | Interface — MUST live in `src/interfaces/` |
+| `src/terrain/ITerrainRNG.h` | `src/interfaces/ITerrainRNG.h` | Interface — MUST live in `src/interfaces/` |
+
 Relocate misplaced concrete-class headers out of `src/interfaces/`:
 
 | Current path | Moved to | Reason |
@@ -222,11 +229,6 @@ Remove backward-compat shim headers (they only `#include` the CamelCase file):
 | File | Action |
 |---|---|
 | `src/terrain/terrain_chunk.h` | Delete; update any remaining `#include "terrain_chunk.h"` to `#include "TerrainChunk.h"` |
-
-Documented intentional exceptions — **do not move these**:
-
-- `src/ui/IUIBackend.h`: stays in `src/ui/` (coverage gate — see file header comment)
-- `src/terrain/ITerrainRNG.h`: stays in `src/terrain/` (tightly coupled to terrain subsystem — see file header comment)
 
 ##### sound-dev-opensoftal
 
