@@ -2,30 +2,37 @@
 
 // road.frag — Phase 9 road tile fragment shader.
 // Samples road_asphalt_tileable.dds at UV × 2.0 (tiles 2× per road tile per spec).
-// Applies optional manual gamma correction when GPU sRGB decode is unavailable.
 //
 // Texture unit assignments (must match shader_constants.h):
-//   Unit 0: u_diffuseMap — road_asphalt_tileable.dds (sRGB DXT5 raw-GL path)
+//   Unit 0: u_diffuseMap — road_asphalt_tileable.dds
 //
-// sRGB gamma fallback: when GL_EXT_texture_sRGB is absent, the road texture is
-// uploaded as linear (GL_COMPRESSED_RGBA_S3TC_DXT5_EXT). The uniform int u_srgbLinear
-// (1 = apply manual gamma, 0 = GPU handles sRGB) activates a pow(color.rgb, vec3(2.2))
-// correction. This avoids the need for two shader variants.
-// See architecture/graphics-architecture/shader-loading.md §sRGB Gamma Fallback.
+// This project does NOT use an sRGB framebuffer (GL_FRAMEBUFFER_SRGB is not enabled).
+// The goal is that the authored texel values (~RGB 82,80,82 asphalt gray) appear on screen
+// with their authored colors regardless of whether GL_EXT_texture_sRGB is present.
+//
+// Two upload paths (selected in IrrlichtRenderer::initRoadShader):
+//   u_srgbLinear == 0 (sRGB extension present):
+//     Texture uploaded as GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT.
+//     GPU decodes stored sRGB values to linear on sample (~0.085 for asphalt ~82/255).
+//     Must re-encode linear → sRGB (pow(x, 1/2.2)) before writing to the non-sRGB
+//     framebuffer, recovering the authored ~RGB(82,80,82) display appearance.
+//   u_srgbLinear == 1 (sRGB extension absent):
+//     Texture uploaded as GL_COMPRESSED_RGBA_S3TC_DXT5_EXT (linear, no GPU decode).
+//     Stored bytes are the raw authored values (~0.32 for asphalt gray).
+//     Output directly — no correction needed for a non-sRGB framebuffer.
 //
 // UV tiling: spec requires UV tiles 2× per road tile (architecture/asset-standards/
 // 2d-texture-standards.md — road_asphalt_tileable.dds row). Road tile quad has UV [0,1];
 // multiplying by 2.0 in the shader produces the required 2× tiling.
 
 // Road diffuse texture — unit 0.
-// Uploaded via raw-GL sRGB path: glCompressedTexImage2D(GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT).
 uniform sampler2D u_diffuseMap;   // unit 0 — road_asphalt_tileable.dds
 
-// Gamma fallback flag: 1 = apply manual pow(x, 2.2) gamma, 0 = GPU handles sRGB decode.
+// Upload-path flag.
+// 0 = sRGB upload (GPU decoded to linear); apply pow(x, 1/2.2) inverse to recover display.
+// 1 = linear upload (raw authored values); output directly.
 // Passed as int (not bool) — Irrlicht's setPixelShaderConstant reads 4 bytes; bool is 1 byte (UB).
-// In OnSetConstants(): int v = m_srgbSupported ? 0 : 1;
-//                      services->setPixelShaderConstant("u_srgbLinear", &v, 1);
-uniform int u_srgbLinear;         // 1 = apply manual gamma, 0 = GPU handles sRGB
+uniform int u_srgbLinear;
 
 // Inputs from vertex shader.
 in vec2 v_texCoord;
@@ -39,11 +46,12 @@ void main() {
     vec2 roadUV = v_texCoord * 2.0;
     vec4 color = texture(u_diffuseMap, roadUV);
 
-    // Apply manual gamma correction when GPU sRGB decode is unavailable.
-    // Converts linear-uploaded texture to approximately linear light for
-    // correct blending. Skipped when sRGB HW path is active.
-    if (u_srgbLinear != 0) {
-        color.rgb = pow(color.rgb, vec3(2.2));
+    // Re-encode linear → sRGB when the GPU decoded the texture from sRGB format.
+    // pow(x, 1/2.2) is the approximate sRGB gamma encode (linear → display-referred sRGB).
+    // Without this, the linearly decoded values (~0.085) appear very dark on the
+    // non-sRGB framebuffer. With this correction the authored ~RGB(82,80,82) is recovered.
+    if (u_srgbLinear == 0) {
+        color.rgb = pow(color.rgb, vec3(1.0 / 2.2));
     }
 
     fragColor = color;

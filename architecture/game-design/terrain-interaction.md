@@ -56,9 +56,11 @@ only the audio cue and the unsaved-changes dot. This is expected behaviour for P
 
 ## Phase 10b: Terrain Mesh Modification on Placement
 
-Starting in Phase 10b, `IrrlichtRenderer` placement helpers (`placeBuildingMesh`,
-`placeRoadMesh`, `placeServiceBuildingMesh`) flatten all 4 corner vertices of the placed
-tile to the same height before creating the scene node. The call sequence is:
+### Buildings and service buildings — full flattening
+
+`IrrlichtRenderer` placement helpers `placeBuildingMesh` and `placeServiceBuildingMesh`
+flatten all 4 corner vertices of the placed tile to the same average height before
+creating the scene node. The call sequence is:
 
 1. Read all 4 tile-corner heights:
 
@@ -105,34 +107,199 @@ tile to the same height before creating the scene node. The call sequence is:
 
    Without this flush, `TerrainSystem::update()` processes at most 2 chunk rebuilds per
    frame. For several frames after placement the terrain geometry still shows the original
-   (pre-flatten) heights while the road/building node sits at `postY`, making the structure
-   appear sunken. Calling `flushTerrainRebuilds()` immediately after the 4 `setTileHeight()`
-   calls processes all enqueued rebuilds synchronously before the next render frame.
+   (pre-flatten) heights, making the structure appear sunken.
 
-4. Read the post-flatten height for node Y positioning and add a small vertical offset
-   to prevent Z-fighting between the mesh and the freshly rebuilt terrain quad:
+4. Use `targetH` directly for node Y positioning — **do NOT call `getHeightAt()` here**:
 
    ```cpp
-   const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
-   // Roads: postY + 0.02f  (larger offset — flat quad coplanar with terrain surface)
-   // Buildings/service: postY + 0.01f  (smaller offset — mesh sits on terrain surface)
+   // Use targetH directly — NOT getHeightAt() after setTileHeight().
+   // setTileHeight() applies neighbour blending to the 8 surrounding tiles;
+   // subsequent corner calls bleed back into vertex (tileX, tileZ), leaving
+   // its stored height below targetH. getHeightAt() would return that
+   // blended-down value and position the node below the rendered terrain surface.
+   const float postY = m_terrain ? targetH : 0.0f;
+   // Roads, buildings, service buildings: postY + 0.10f
+   // (10 cm offset covers tile-edge height interpolation bleed-back after neighbour
+   //  blending; polygon offset on the material is the primary Z-fighting defence —
+   //  see step 5 below)
    node->setPosition(irr::core::vector3df(
        static_cast<float>(tileX) * kTileSize + kTileSize * 0.5f,
-       postY + 0.02f,   // or 0.01f for buildings
+       postY + 0.10f,
        static_cast<float>(tileZ) * kTileSize + kTileSize * 0.5f));
    ```
 
-   Since all 4 corners are now equal, `getHeightAt(tileX, tileZ)` (the top-left corner)
-   equals all other corners. The offset prevents depth-test ambiguity where coplanar
-   geometry causes the terrain to render on top of the road/building mesh. When `m_terrain`
-   is null, `postY` falls back to `0.0f`.
+   **Why `targetH` and not `getHeightAt()`?** Each `setTileHeight(cornerX, cornerZ, targetH)`
+   call applies neighbour blending to the 8 surrounding tiles. When the 4 corner calls are
+   issued in sequence, each subsequent call treats the previously-set corner as a neighbour
+   and blends it 50% back toward its original value. This leaves vertex `(tileX, tileZ)`
+   at a height lower than `targetH` by the time all 4 calls complete. Calling
+   `getHeightAt(tileX, tileZ)` at that point returns the blended-down value, not `targetH`,
+   and positions the node below the rendered terrain surface — exactly the sinking bug that
+   `flushTerrainRebuilds()` alone cannot fix. Using `targetH` directly bypasses the bleed-back
+   entirely, since that is the exact height to which all 4 terrain vertices were intended to
+   be set. When `m_terrain` is null, `postY` falls back to `0.0f`.
 
-This pattern guarantees the placed structure is always flush with the terrain surface.
-Neighbour blending prevents hard seams at tile boundaries. The earthworks treasury
-deduction and `sfx_earthworks` audio cue (introduced in earlier phases) are unchanged;
-Phase 10b adds only the visual terrain change.
+   **Why a pure Y offset is insufficient**: With `nearClip = 0.1f` and `farClip = 3000.0f`,
+   24-bit depth buffer precision degrades as Z² — approximately
+   `ΔZ ≈ 2 × Z² × (far − near) / (near × far × 2²⁴)`. At 400 m this yields ~7 cm; at
+   500 m ~11 cm. A fixed Y offset that is sufficient at 300 m is swallowed by depth
+   imprecision at 400–500 m, causing intermittent Z-fighting that is impossible to cure
+   with a larger constant offset alone (making the offset large enough to prevent all
+   Z-fighting at 500 m would visually float the mesh above the terrain at close range).
+   Polygon offset (step 5) is the correct, distance-independent solution.
+
+5. **Apply polygon offset to every material slot** on the road/building scene node:
+
+   ```cpp
+   mat.PolygonOffsetDirection = irr::video::EPO_FRONT;  // push toward camera
+   mat.PolygonOffsetFactor    = 1;                       // combined slope+constant factor (0=off, 1–7)
+   ```
+
+   `EPO_FRONT` causes Irrlicht to pass a negative factor to `glPolygonOffset`, which
+   subtracts a small bias from the fragment depth before the depth test. This shifts the
+   rendered surface "closer" to the camera in clip space without changing the visual
+   geometry. The effect is distance-independent because the GPU applies the offset in
+   window-space depth units (not world-space metres). Roads, zone buildings, and service
+   buildings all use these same settings.
+
+   Note: this Irrlicht version (1.8.x, vcpkg port) exposes only `PolygonOffsetFactor`
+   (a 3-bit field, range 0–7) and `PolygonOffsetDirection`. There is no separate
+   `PolygonOffsetUnits` field; the single factor controls the combined depth bias.
+
+This pattern guarantees the placed structure is always visually flush with the terrain
+surface. Neighbour blending prevents hard seams at tile boundaries. The critical invariant
+is that `postY` must be `targetH` — not `getHeightAt(tileX, tileZ)` after the four corner
+writes — because the blending walk-back from subsequent corners corrupts the top-left
+vertex height. The earthworks treasury deduction and `sfx_earthworks` audio cue
+(introduced in earlier phases) are unchanged; Phase 10b adds only the visual terrain
+change.
+
+**Z-fighting defence summary**: the placement helpers use two complementary mechanisms:
+
+- A **10 cm Y offset** (`postY + 0.10f`) to handle the residual case where tile-edge
+  terrain vertices are fractionally above `targetH` after neighbour blending completes.
+- **Polygon offset** (`EPO_FRONT`, factor=1, units=4) applied to every material slot,
+  which provides a distance-independent depth bias that prevents Z-fighting at all camera
+  distances (pure Y offsets fail beyond ~400 m where depth precision degrades below 10 cm
+  for a 24-bit buffer with near=0.1, far=3000).
 
 For the full `setTileHeight()` implementation spec (blending formula, chunk rebuild
 enqueue, bounds clamping, rebuild budget interaction) see
 `architecture/graphics-architecture/procedural-terrain.md` — `setTileHeight()` Write
 Path and Neighbour Blending (Phase 10b).
+
+### Roads — sloped terrain-conforming mesh
+
+Roads use a different placement strategy from buildings. Rather than always flattening
+to a single average height, roads follow the terrain up to a maximum 15° incline. Full
+flattening is only applied when the natural terrain slope exceeds this limit.
+
+#### Slope calculation
+
+The tile slope is derived from the maximum height difference across the tile diagonal
+divided by the diagonal cell distance:
+
+```text
+maxDelta = max(|h11 - h00|, |h10 - h01|)
+slopeDeg = atan(maxDelta / (kTileSize * sqrt(2))) * (180 / PI)
+```
+
+`kTileSize` is the world-space side length of one tile (in metres). The two diagonal
+differences are checked because a tile is a quad with two triangles — either diagonal
+can be the steepest cross-section. The largest is the conservative bound.
+
+#### Conditional flattening
+
+- If `slopeDeg <= 15.0°`: **no flattening**. The 4 corner heights `h00`, `h10`, `h01`,
+  `h11` are used as-is. `setTileHeight()` is not called. The road mesh is built directly
+  on the natural terrain heights.
+- If `slopeDeg > 15.0°`: **minimum-adjustment flattening**. The goal is to find the
+  smallest vertical shift applied uniformly to all 4 corners that brings the slope to
+  exactly 15°. This is achieved by computing the average height and then clamping the
+  per-corner deviation so that no diagonal exceeds the 15° limit:
+
+  ```text
+  avgH     = (h00 + h10 + h01 + h11) * 0.25f
+  maxAllowed = kTileSize * sqrt(2) * tan(15° in radians)
+  ```
+
+  Each corner height is clamped to `[avgH - maxAllowed/2, avgH + maxAllowed/2]`. This
+  preserves the average elevation (no net vertical shift of the tile) while guaranteeing
+  that neither diagonal exceeds 15°. The clamped corner heights `c00`, `c10`, `c01`,
+  `c11` are then written back with `setTileHeight()`:
+
+  ```cpp
+  if (m_terrain) {
+      m_terrain->setTileHeight(tileX,     tileZ,     c00);
+      m_terrain->setTileHeight(tileX + 1, tileZ,     c10);
+      m_terrain->setTileHeight(tileX,     tileZ + 1, c01);
+      m_terrain->setTileHeight(tileX + 1, tileZ + 1, c11);
+  }
+  ```
+
+  The same `flushTerrainRebuilds()` call (step 3 of the building path) must follow.
+
+#### Terrain-conforming road mesh
+
+The road mesh is built as a per-tile quad with vertex Y positions taken from the 4
+actual corner heights after the conditional-flatten step above. The mesh is not a
+flat quad at a single Y; it follows the terrain surface. Vertices are positioned at:
+
+```text
+V00 = (tileX * kTileSize,       c00 + 0.10f, tileZ * kTileSize)
+V10 = ((tileX+1) * kTileSize,   c10 + 0.10f, tileZ * kTileSize)
+V01 = (tileX * kTileSize,       c01 + 0.10f, (tileZ+1) * kTileSize)
+V11 = ((tileX+1) * kTileSize,   c11 + 0.10f, (tileZ+1) * kTileSize)
+```
+
+The 0.10f Y offset is applied per-vertex (not to the scene node position), for the
+same Z-fighting reason as buildings. The scene node origin is placed at the tile centre
+at the average of the 4 corner heights; vertices carry the per-corner offsets relative
+to that origin.
+
+Polygon offset (`EPO_FRONT`, factor=1) is applied to every material slot on the road
+mesh node, identical to buildings.
+
+#### Neighbor edge matching
+
+When placing a road tile at `(tileX, tileZ)`, the 4 cardinal neighbors are checked
+immediately after the conditional-flatten step:
+
+- **North**: `(tileX, tileZ - 1)`
+- **South**: `(tileX, tileZ + 1)`
+- **East**: `(tileX + 1, tileZ)`
+- **West**: `(tileX - 1, tileZ)`
+
+Shared-edge continuity is guaranteed by the fact that both tiles reference the same
+`m_generatedHeightmap` vertices. For example, the shared edge between this tile and
+its North neighbor consists of vertices `(tileX, tileZ)` and `(tileX+1, tileZ)`. When
+`setTileHeight(tileX, tileZ, c00)` was called for this tile, those heightmap entries
+were updated. The North neighbor's South edge reads the same heightmap entries, so the
+geometry already matches at the shared edge — no separate coordinate negotiation is
+needed.
+
+However, the neighbor's **rendered road mesh** is now stale: it was built using the
+old pre-flatten heights. Any cardinal neighbor that already has a road tile must have
+its road mesh rebuilt to reflect the freshly-written heightmap values. The sequence is:
+
+1. Flush terrain rebuilds for the current tile (`flushTerrainRebuilds()`).
+2. For each cardinal direction `d` in `{N, S, E, W}`:
+   - If `ICitySimulation::hasTile(nx, nz)` returns a road tile at `(nx, nz)`:
+     - Call `IrrlichtRenderer::removeRoadMesh(nx, nz)` to remove the stale mesh.
+     - Call `IrrlichtRenderer::placeRoadMesh(nx, nz)` to rebuild it from current
+       heightmap values. This recursive call will itself read the updated corner heights,
+       evaluate the slope, and reconstruct the terrain-conforming quad.
+
+The recursive `placeRoadMesh` calls on neighbors do not themselves trigger further
+neighbor propagation — propagation is one level deep (only immediate cardinal neighbors
+of the originally-placed tile are rebuilt). This prevents unbounded cascading rebuilds
+across a large road network. In practice, the 4-call limit ensures at most 4 extra mesh
+rebuilds per road placement, which is acceptable.
+
+**Note on corner ownership and blending**: `setTileHeight()` applies neighbour blending
+to the 8 surrounding tiles of each written corner. This means that writing `c00` at
+`(tileX, tileZ)` also partially adjusts the surrounding terrain. The cardinal road
+neighbors are among those 8 surrounding tiles. Their terrain vertices are therefore
+already partially updated by the blending walk; the `removeRoadMesh` + `placeRoadMesh`
+rebuild on each road neighbor is still required to re-emit mesh geometry that matches
+the final heightmap state.

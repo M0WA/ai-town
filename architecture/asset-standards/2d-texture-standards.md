@@ -129,6 +129,53 @@ Both tools produce standards-compliant DDS files and are CI-verified. Do not use
 
 4. **Consequence of skipping validation.** A DDS file with a linear (non-sRGB) internal format header will be uploaded via `glCompressedTexImage2D` using `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` (or `_DXT5_EXT`) with the wrong GL internal format — the driver silently accepts the call without a GL error, but color rendering will be incorrect (gamma-incorrect diffuse colors) across all surfaces using that atlas. There is no runtime diagnostic for this class of error; it must be caught at authoring time.
 
+### DDS Mip Chain Integrity
+
+**Every mip level announced in `dwMipMapCount` MUST have its pixel data present in the DDS
+file.** The `dwMipMapCount` field at byte offset 28 of the standard DDS header declares how many
+mip levels exist. A DDS file whose `dwMipMapCount` is set to 4 but whose byte stream contains
+data only for mip level 0 is a truncated file — it is invalid and must not be committed as a
+runtime asset.
+
+**Truncated DDS files cause a silent failure in `TextureCache::loadSRGB()`**: the bespoke header
+parser reads `dwMipMapCount` and iterates that many mip levels; when it reaches a mip level
+whose expected data is absent (or shorter than the declared size), it passes a dangling or
+zero-length pointer to `glCompressedTexImage2D`. The GL driver silently accepts the call and
+produces a **black surface** for the affected mip level. Depending on which mip level is
+truncated, this manifests as:
+
+- A black atlas across the entire city at the affected LOD distance (if mip 0 is absent).
+- Normal rendering at close range but a black surface beyond a certain camera distance (if mip
+  1–3 are absent), which is the most common symptom when only the base level was written.
+
+There is no GL error, no assertion, and no log message for this failure mode. It must be caught
+at asset-authoring time, not at runtime.
+
+**Reference byte sizes** — for validation, the total file size of a correctly generated DDS
+stub (header + all mip data) is:
+
+| Format | Resolution | Mip levels | Total file size |
+|---|---|---|---|
+| DXT5/BC3 | 1024×1024 | 4 | **1,392,768 bytes** (128 header + `(262144 + 65536 + 16384 + 4096)` × 1 byte-per-raw) |
+| DXT1/BC1 | 2048×2048 | 4 | **1,398,272 bytes** (128 header + `(524288 + 131072 + 32768 + 8192)` × 1 byte-per-raw) |
+| DXT5/BC3 | 2048×2048 | 4 | **2,796,544 bytes** (128 header + `(1048576 + 262144 + 65536 + 16384)` × 1 byte-per-raw) |
+| DXT5/BC3 | 1024×128 | 4 | **192,640 bytes** (128 header + `(131072 + 32768 + 8192 + 2048)` × 1 byte-per-raw) |
+
+DXT1 block size: 8 bytes per 4×4 pixel block. DXT5 block size: 16 bytes per 4×4 pixel block.
+Mip N dimensions: `max(1, floor(W / 2^N)) × max(1, floor(H / 2^N))`, rounded up to the
+nearest 4-pixel block boundary.
+
+**Regenerating all DDS stubs** — after any change to `tools/generate_dds_stubs.py` (or if
+stubs are suspected truncated), regenerate all assets from the repository root:
+
+```bash
+python3 tools/generate_dds_stubs.py
+```
+
+This command overwrites every stub DDS file tracked by the script. Commit the regenerated files
+to ensure CI and other contributors receive complete mip chains. **Do not manually edit DDS
+binary files** — always regenerate via the script.
+
 **Splat map (RGBA8 UNORM — NOT DDS)**:
 Author as a plain RGBA PNG with R channel filled to 255, G/B/A channels filled to 0 (initial state: 100% grass). Splat maps are uploaded at runtime via `glTexImage2D` with `GL_RGBA8` internal format — they are never compressed to DDS. Do NOT run `export_textures.py` or `nvcompress` on splat map source files. The `TextureCache` splat map pool (third pool, distinct from the linear and sRGB pools) loads these RGBA PNGs directly. The `--validate-only` flag in `export_textures.py` does not apply to splat maps.
 

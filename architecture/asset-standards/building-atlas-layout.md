@@ -26,7 +26,12 @@
 
 - Resolution: 2048×2048 pixels
 - Cell grid: 4×4 cells at 512×512 px each (16 cells total for V1 module variants)
-- Mip chain: 4-level mandatory (`GL_TEXTURE_MAX_LEVEL = 3`; 2048→1024→512→256)
+- Mip chain: 4-level mandatory (`GL_TEXTURE_MAX_LEVEL = 3`; 2048→1024→512→256). All four mip
+  levels MUST be present as data in the DDS file — a file whose `dwMipMapCount` field declares
+  4 mips but contains only mip 0 data is truncated and causes `TextureCache::loadSRGB()` to
+  render a black atlas. Regenerate stubs with `python3 tools/generate_dds_stubs.py` from the
+  repo root. See `architecture/asset-standards/2d-texture-standards.md` §DDS Mip Chain
+  Integrity for reference byte sizes and the truncation failure mode.
 - Per-cell usable area: 496×496 px (8 px border on each edge, per 2d-texture-standards.md)
 - All building LOD0/LOD1 UV channel 0 maps into this atlas
 

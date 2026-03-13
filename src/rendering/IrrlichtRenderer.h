@@ -129,7 +129,7 @@ public:
     void placeBuildingMesh(int tileX, int tileZ,
                            const std::string& assetBaseName) override;
     void removeBuildingMesh(int tileX, int tileZ) override;
-    // Road mesh: no assetBaseName — all road tiles share the same mesh asset.
+    // Road mesh: no assetBaseName — road tiles get per-tile terrain-conforming geometry.
     void placeRoadMesh(int tileX, int tileZ) override;
     void removeRoadMesh(int tileX, int tileZ) override;
     // Service building mesh: identified by ServiceBuildingType enum, not a string.
@@ -311,7 +311,8 @@ private:
     // --- Phase 10: procedural road mesh ---
     //
     // Road tiles are generated in C++ at runtime — no .b3d files on disk.
-    // All road tiles share the same geometry; only scene node position differs.
+    // LOD0 mesh is now built per-tile (terrain-conforming geometry).
+    // LOD1/LOD2 meshes remain shared (flat quads used at distance).
     //
     // m_roadTextureCache: lazily created on first placeRoadMesh() call.
     //   Owns the sRGB pool entry for road_asphalt_tileable.dds.
@@ -327,10 +328,11 @@ private:
     //   Bound to GL_TEXTURE0 inside RoadShaderCallback::OnSetConstants().
     unsigned int m_roadDiffuseTexGLuint{0};
 
-    // Shared procedural road tile meshes — built once, reused by every road node.
-    //   m_sharedRoadMeshLOD0: flat quad + 4 kerb strips (26 tris, road shader).
-    //   m_sharedRoadMeshLOD1: flat quad only (2 tris, road shader).
+    // Shared procedural road tile meshes — built once, reused for LOD1/LOD2 only.
+    //   m_sharedRoadMeshLOD0: retained for possible future use (set nullptr; unused).
+    //   m_sharedRoadMeshLOD1: flat quad only (2 tris, road shader) — LOD1 fallback.
     //   m_sharedRoadMeshLOD2: flat colored quad (2 tris, EMT_SOLID, road_lod2_color).
+    // LOD0 is now per-tile (buildTileRoadMesh); m_sharedRoadMeshLOD0 is always nullptr.
     // Ownership: IrrlichtRenderer holds ref_count == 1; dropped in destructor.
     // Scene nodes from addMeshSceneNode() grab an additional ref (ref_count == 2)
     // and release it when the node is removed (back to 1).
@@ -343,9 +345,34 @@ private:
     // (road tiles still render via EMT_SOLID fallback).
     bool initRoadShader();
 
-    // ensureRoadMeshes() — build shared LOD meshes (idempotent).
+    // ensureRoadMeshes() — build shared LOD1/LOD2 meshes (idempotent).
     // Must be called after initRoadShader() so material type is available.
+    // LOD0 is not built here — it is built per-tile via buildTileRoadMesh().
     void ensureRoadMeshes();
+
+    // buildTileRoadMesh — build a per-tile terrain-conforming LOD0 road mesh.
+    //
+    // Constructs a new SMesh* with the road quad and kerb strips shaped to the
+    // actual terrain corner heights (h00, h10, h01, h11) at the 4 tile corners.
+    // Vertices are in world-space Y (h00/h10/h01/h11 are absolute world heights).
+    // The node must be placed at world position (worldX, 0, worldZ) with no Y offset;
+    // all Y displacement is baked directly into the vertex positions.
+    // The caller is responsible for calling drop() after addMeshSceneNode().
+    // Returns nullptr if m_driver is null (headless context).
+    irr::scene::SMesh* buildTileRoadMesh(float h00, float h10,
+                                          float h01, float h11) const;
+
+    // placeRoadMesh (internal extended) — core implementation called by both the
+    // public IRenderer override and recursive neighbor rebuild calls.
+    //
+    // flattenTerrain: if true, run the conditional slope-clamping setTileHeight()
+    //   sequence and flush terrain rebuilds before building the mesh.
+    //   Pass false on recursive neighbor calls (terrain is already correct).
+    // rebuildNeighbors: if true, after placing this tile rebuild all cardinal road
+    //   neighbors (mesh only, no re-flattening).
+    //   Pass false on recursive calls to prevent infinite recursion.
+    void placeRoadMesh(int tileX, int tileZ,
+                       bool flattenTerrain, bool rebuildNeighbors);
 
     // Helper: destroy a LODNode entry in a tile-keyed registry.
     // Executes the full eviction sequence on the wrapped scene node:

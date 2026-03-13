@@ -144,15 +144,44 @@ def make_dds(path: str | Path,
         data += struct.pack('<I', 0)             # miscFlags2
 
     # ------------------------------------------------------------------
-    # Pixel data for mip level 0
+    # Pixel data — all declared mip levels must be present.
+    #
+    # The DDS spec requires that every mip level announced in dwMipMapCount
+    # has its compressed data appended contiguously after the header.  A file
+    # that declares N mips but only contains mip-0 data is structurally
+    # truncated; TextureCache::loadSRGB() will log "DDS data truncated at
+    # mip 1" and fall back to a black texture.
+    #
+    # For block-compressed formats (DXT1/BC1, DXT5/BC3) each mip level's
+    # byte count is: ceil(w/4) * ceil(h/4) * bytes_per_block.
+    # For RGBA8 UNORM (DXGI_FORMAT=28) it is: w * h * 4 (uncompressed).
+    #
+    # Mip level 0 uses the caller-supplied pixel_data (or zeroes).
+    # Mip levels 1 … mip_levels-1 are filled with zeroes (acceptable for
+    # placeholder stubs — the GPU will simply sample black at distance, which
+    # is visually consistent with a solid-colour placeholder).
     # ------------------------------------------------------------------
+    def _mip_byte_count(w: int, h: int) -> int:
+        if is_dx10 and dxgi_format == 28:
+            return max(1, w) * max(1, h) * 4
+        bpb = 8 if (fourcc == b'DXT1' or (is_dx10 and dxgi_format in (71, 72))) else 16
+        return max(1, (max(1, w) + 3) // 4) * max(1, (max(1, h) + 3) // 4) * bpb
+
+    # Mip 0
+    mip0_size = linear_size  # already computed above for the header field
     if pixel_data is not None:
-        # Use the caller-supplied block; pad or trim to declared linear_size
-        if len(pixel_data) < linear_size:
-            pixel_data = pixel_data + b'\x00' * (linear_size - len(pixel_data))
-        data += pixel_data[:linear_size]
+        if len(pixel_data) < mip0_size:
+            pixel_data = pixel_data + b'\x00' * (mip0_size - len(pixel_data))
+        data += pixel_data[:mip0_size]
     else:
-        data += b'\x00' * linear_size
+        data += b'\x00' * mip0_size
+
+    # Mips 1 … mip_levels-1
+    mw, mh = width, height
+    for _level in range(1, mip_levels):
+        mw = max(1, mw // 2)
+        mh = max(1, mh // 2)
+        data += b'\x00' * _mip_byte_count(mw, mh)
 
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)

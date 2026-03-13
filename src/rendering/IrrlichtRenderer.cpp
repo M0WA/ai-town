@@ -1136,10 +1136,16 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
             m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
         }
         if (m_terrain) m_terrain->flushTerrainRebuilds();
-        const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+        // Use targetH directly — NOT getHeightAt() after setTileHeight().
+        // setTileHeight() applies neighbour blending to the 8 surrounding tiles;
+        // subsequent corner calls bleed back into vertex (tileX, tileZ), leaving
+        // its stored height below targetH. getHeightAt() would return that
+        // blended-down value and position the node below the rendered terrain surface.
+        const float postY = m_terrain ? targetH : 0.0f;
         node->setPosition(core::vector3df(
             static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
-            postY + 0.01f,   // slight offset above terrain to prevent Z-fighting
+            postY + 0.10f,   // 10 cm above terrain — covers tile-edge bleed-back after
+                             // neighbour blending; polygon offset is the primary Z-fight defence.
             static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
         node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
 
@@ -1156,6 +1162,10 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
             // space, but we keep BackfaceCulling=false as a robust default while
             // production Blender assets are being authored.
             mat.BackfaceCulling = false;
+            // Polygon offset: push the building base surface toward the camera so it
+            // wins the depth test against the co-planar terrain quad at all distances.
+            mat.PolygonOffsetDirection = irr::video::EPO_FRONT;
+            mat.PolygonOffsetFactor    = 1;
             // Apply zone-coloured fallback only if atlas was not bound by loader.
             if (!mat.getTexture(0) && zoneTex) mat.setTexture(0, zoneTex);
         }
@@ -1193,18 +1203,32 @@ bool IrrlichtRenderer::initRoadShader()
             m_device ? m_device->getFileSystem() : nullptr);
     }
 
-    // Determine sRGB support (same check as RenderSystem::initGL).
+    // Determine sRGB support — drives texture upload format and shader correction.
+    //
+    // This project does NOT use an sRGB framebuffer (GL_FRAMEBUFFER_SRGB is not enabled).
+    // The authored texel values (~RGB 82,80,82 asphalt gray) must reach the display
+    // as-authored regardless of the upload path chosen.
+    //
+    // Case A — sRGB extension present (srgbOk=true):
+    //   Upload: GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT.
+    //   GPU decodes stored sRGB values to linear on sample (~0.085 for asphalt ~82/255).
+    //   road.frag receives u_srgbLinear=0 → applies pow(x, 1/2.2) to re-encode
+    //   linear → sRGB before writing to the non-sRGB framebuffer, recovering the
+    //   authored ~RGB(82,80,82) gray.
+    //
+    // Case B — sRGB extension absent (srgbOk=false):
+    //   Upload: GL_COMPRESSED_RGBA_S3TC_DXT5_EXT (linear, no GPU sRGB decode).
+    //   Sampled values are the raw authored bytes (~0.32 for asphalt gray).
+    //   road.frag receives u_srgbLinear=1 → outputs the sample directly.
+    //   Authored ~RGB(82,80,82) appears correctly on the non-sRGB framebuffer.
     const bool srgbOk = (glewIsExtensionSupported("GL_EXT_texture_sRGB") == GL_TRUE);
-
-    // Load road_asphalt_tileable.dds via sRGB raw-GL path (or linear fallback).
-    const GLenum fmt = srgbOk
-        ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
-        : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
 
     const std::string texPath = std::string(AITOWN_ASSETS_DIR)
                                 + "/textures/roads/road_asphalt_tileable.dds";
 
-    GLuint texHandle = m_roadTextureCache->loadSRGB(texPath, fmt);
+    GLuint texHandle = m_roadTextureCache->loadSRGB(texPath,
+        srgbOk ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
+               : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT);
     m_roadDiffuseTexGLuint = static_cast<unsigned int>(texHandle);
     // 0 = load failed or EDT_NULL — road tiles will render without texture.
 
@@ -1220,6 +1244,8 @@ bool IrrlichtRenderer::initRoadShader()
     const std::string vsPath = std::string(AITOWN_ASSETS_DIR) + "/shaders/road.vert";
     const std::string fsPath = std::string(AITOWN_ASSETS_DIR) + "/shaders/road.frag";
 
+    // srgbOk drives u_srgbLinear in the callback (0 when sRGB, 1 when linear upload).
+    // road.frag uses this to decide whether to apply the linear→sRGB inverse correction.
     RoadShaderCallback* cb = new RoadShaderCallback(srgbOk, texHandle);
     s32 matType = gpu->addHighLevelShaderMaterialFromFiles(
         vsPath.c_str(), "main", video::EVST_VS_1_1,
@@ -1241,149 +1267,30 @@ bool IrrlichtRenderer::initRoadShader()
 }
 
 // -------------------------------------------------------------------------
-// ensureRoadMeshes — build shared LOD0/LOD1/LOD2 meshes (idempotent).
+// ensureRoadMeshes — build shared LOD1/LOD2 meshes (idempotent).
 //
-// All road tiles are geometrically identical; one set of three SMesh* is
-// shared across every road tile scene node.
+// LOD0 is no longer shared — it is built per-tile by buildTileRoadMesh() with
+// actual terrain heights at the 4 tile corners.  Only LOD1 and LOD2 (distance
+// fallbacks) are built here.
 //
-// Geometry (local space, tile centred at origin):
-//   LOD0: 4×4 m flat quad + 4 bevelled kerb strips (26 tris total).
-//   LOD1: 4×4 m flat quad only (2 tris).
-//   LOD2: 4×4 m flat quad with road_lod2_color vertex color, no texture (2 tris).
+// Geometry (world-space, node placed at tile world position with Y=0):
+//   LOD1: flat quad (2 tris, road shader) — 50–150 m range.
+//   LOD2: flat colored quad (2 tris, EMT_SOLID) — 150–300 m range.
 //
-// LOD distance thresholds (from road_tile spec): LOD0→LOD1 at 50 m, LOD1→LOD2
-// at 150 m, cull at 300 m.
-//
-// UV: [0,1]×[0,1] on the quad; road.frag multiplies by 2.0 for 2× tiling.
-// Kerb verts use UV (0,0) — small strips, texture at corner looks fine.
-//
-// BackfaceCulling = false on LOD0 to avoid winding issues with kerb faces.
+// BackfaceCulling = true on LOD1/LOD2 (simple flat quads, one face only).
 // Lighting = false on all LODs (no light nodes in scene).
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::ensureRoadMeshes()
 {
-    if (m_sharedRoadMeshLOD0) return;  // already built
+    if (m_sharedRoadMeshLOD1) return;  // already built (LOD1 guards both)
 
     // Road tile half-extent: tile is kTileSize (10 m) → half is 5 m.
-    // The mesh is centred at the local origin and positioned at the tile centre;
-    // H=5 makes the road quad exactly cover the full 10×10 m tile footprint.
     static constexpr float H  = 5.0f;
-    // Kerb dimensions (world-space metres, scaled with H).
-    static constexpr float KB = 0.05f;  // bevel inset (inner slope width)
-    static constexpr float KW = 0.15f;  // total kerb width
-    static constexpr float KH = 0.10f;  // kerb height
 
     // Effective material type for LOD0/LOD1 (road shader or EMT_SOLID fallback).
     const E_MATERIAL_TYPE roadMat = (m_roadMaterialType >= 0)
         ? static_cast<E_MATERIAL_TYPE>(m_roadMaterialType)
         : EMT_SOLID;
-
-    // ------------------------------------------------------------------
-    // LOD0: flat quad (4 verts, 2 tris) + 4 kerb strips (8 verts each, 6 tris each).
-    // Total: 36 verts, 26 tris — within the <=48 tri budget.
-    // Single SMeshBuffer with BackfaceCulling=false (kerb normals vary per face).
-    // ------------------------------------------------------------------
-    {
-        SMesh* mesh = new SMesh();
-        SMeshBuffer* buf = new SMeshBuffer();
-
-        buf->Material.MaterialType    = roadMat;
-        buf->Material.Lighting        = false;
-        buf->Material.BackfaceCulling = false;  // kerb faces face multiple directions
-
-        // Helper lambda to add a vertex.
-        auto addV = [&](float x, float y, float z, float u, float v) {
-            buf->Vertices.push_back(S3DVertex(
-                core::vector3df(x, y, z),
-                core::vector3df(0.f, 1.f, 0.f),  // +Y normal (Lighting=false, unused)
-                SColor(255, 255, 255, 255),
-                core::vector2df(u, v)));
-        };
-
-        // --- Central flat quad (indices 0–3, 2 tris) ---
-        // CW from +Y: 0→2→1, 0→3→2 (matches hover tile winding convention).
-        addV(-H, 0.f, -H,  0.f, 0.f);  // v0 back-left
-        addV( H, 0.f, -H,  1.f, 0.f);  // v1 back-right
-        addV( H, 0.f,  H,  1.f, 1.f);  // v2 front-right
-        addV(-H, 0.f,  H,  0.f, 1.f);  // v3 front-left
-        buf->Indices.push_back(0); buf->Indices.push_back(2); buf->Indices.push_back(1);
-        buf->Indices.push_back(0); buf->Indices.push_back(3); buf->Indices.push_back(2);
-
-        // --- Kerb helper: add one strip (8 verts, 6 tris) ---
-        // Each strip has 4 rows of 2 verts (L=left, R=right along the edge).
-        // 3 row-pairs × 2 tris each = 6 tris per strip.
-        // Parameters: L/R coordinates for rows 0–3.
-        //   Row 0: inner road edge  (road surface level, y=0)
-        //   Row 1: bevel top        (y=KH, inset KB from edge)
-        //   Row 2: outer kerb top   (y=KH, inset KW from edge)
-        //   Row 3: outer kerb base  (y=0,  inset KW from edge)
-        //
-        // All kerb verts use UV (0,0) — small decorative strips.
-        auto addKerb = [&](
-            float lx0, float ly0, float lz0,   // row 0, left
-            float rx0, float ry0, float rz0,   // row 0, right
-            float lx1, float ly1, float lz1,   // row 1, left
-            float rx1, float ry1, float rz1,   // row 1, right
-            float lx2, float ly2, float lz2,   // row 2, left
-            float rx2, float ry2, float rz2,   // row 2, right
-            float lx3, float ly3, float lz3,   // row 3, left
-            float rx3, float ry3, float rz3)   // row 3, right
-        {
-            u16 base = static_cast<u16>(buf->Vertices.size());
-            addV(lx0, ly0, lz0, 0.f, 0.f);  // base+0
-            addV(rx0, ry0, rz0, 0.f, 0.f);  // base+1
-            addV(lx1, ly1, lz1, 0.f, 0.f);  // base+2
-            addV(rx1, ry1, rz1, 0.f, 0.f);  // base+3
-            addV(lx2, ly2, lz2, 0.f, 0.f);  // base+4
-            addV(rx2, ry2, rz2, 0.f, 0.f);  // base+5
-            addV(lx3, ly3, lz3, 0.f, 0.f);  // base+6
-            addV(rx3, ry3, rz3, 0.f, 0.f);  // base+7
-
-            // Section A (row 0 → row 1): 2 tris
-            buf->Indices.push_back(base+0); buf->Indices.push_back(base+2); buf->Indices.push_back(base+1);
-            buf->Indices.push_back(base+2); buf->Indices.push_back(base+3); buf->Indices.push_back(base+1);
-            // Section B (row 1 → row 2): 2 tris
-            buf->Indices.push_back(base+2); buf->Indices.push_back(base+4); buf->Indices.push_back(base+3);
-            buf->Indices.push_back(base+4); buf->Indices.push_back(base+5); buf->Indices.push_back(base+3);
-            // Section C (row 2 → row 3): 2 tris
-            buf->Indices.push_back(base+4); buf->Indices.push_back(base+6); buf->Indices.push_back(base+5);
-            buf->Indices.push_back(base+6); buf->Indices.push_back(base+7); buf->Indices.push_back(base+5);
-        };
-
-        // South kerb (z = -H side, extends in -Z direction)
-        addKerb(
-            -H, 0.f,  -H,          H, 0.f,  -H,          // row 0: inner edge
-            -H, KH,   -H-KB,       H, KH,   -H-KB,        // row 1: bevel top
-            -H, KH,   -H-KW,       H, KH,   -H-KW,        // row 2: outer top
-            -H, 0.f,  -H-KW,       H, 0.f,  -H-KW);       // row 3: outer base
-
-        // North kerb (z = +H side, extends in +Z direction)
-        addKerb(
-            -H, 0.f,   H,          H, 0.f,   H,            // row 0
-            -H, KH,    H+KB,       H, KH,    H+KB,          // row 1
-            -H, KH,    H+KW,       H, KH,    H+KW,          // row 2
-            -H, 0.f,   H+KW,       H, 0.f,   H+KW);         // row 3
-
-        // West kerb (x = -H side, extends in -X direction)
-        addKerb(
-            -H,    0.f, -H,        -H,    0.f,  H,          // row 0
-            -H-KB, KH,  -H,        -H-KB, KH,   H,          // row 1
-            -H-KW, KH,  -H,        -H-KW, KH,   H,          // row 2
-            -H-KW, 0.f, -H,        -H-KW, 0.f,  H);         // row 3
-
-        // East kerb (x = +H side, extends in +X direction)
-        addKerb(
-            H,    0.f, -H,         H,    0.f,  H,            // row 0
-            H+KB, KH,  -H,         H+KB, KH,   H,            // row 1
-            H+KW, KH,  -H,         H+KW, KH,   H,            // row 2
-            H+KW, 0.f, -H,         H+KW, 0.f,  H);           // row 3
-
-        buf->recalculateBoundingBox();
-        mesh->addMeshBuffer(buf);
-        buf->drop();
-        mesh->recalculateBoundingBox();
-        m_sharedRoadMeshLOD0 = mesh;
-    }
 
     // ------------------------------------------------------------------
     // LOD1: flat quad only (4 verts, 2 tris). Same road shader, no kerbs.
@@ -1392,9 +1299,11 @@ void IrrlichtRenderer::ensureRoadMeshes()
         SMesh* mesh = new SMesh();
         SMeshBuffer* buf = new SMeshBuffer();
 
-        buf->Material.MaterialType    = roadMat;
-        buf->Material.Lighting        = false;
-        buf->Material.BackfaceCulling = true;
+        buf->Material.MaterialType              = roadMat;
+        buf->Material.Lighting                  = false;
+        buf->Material.BackfaceCulling           = true;
+        buf->Material.PolygonOffsetDirection    = irr::video::EPO_FRONT;
+        buf->Material.PolygonOffsetFactor       = 1;
 
         buf->Vertices.push_back(S3DVertex(core::vector3df(-H, 0.f, -H), core::vector3df(0,1,0), SColor(255,255,255,255), core::vector2df(0.f, 0.f)));
         buf->Vertices.push_back(S3DVertex(core::vector3df( H, 0.f, -H), core::vector3df(0,1,0), SColor(255,255,255,255), core::vector2df(1.f, 0.f)));
@@ -1417,9 +1326,11 @@ void IrrlichtRenderer::ensureRoadMeshes()
         SMesh* mesh = new SMesh();
         SMeshBuffer* buf = new SMeshBuffer();
 
-        buf->Material.MaterialType    = EMT_SOLID;
-        buf->Material.Lighting        = false;
-        buf->Material.BackfaceCulling = true;
+        buf->Material.MaterialType              = EMT_SOLID;
+        buf->Material.Lighting                  = false;
+        buf->Material.BackfaceCulling           = true;
+        buf->Material.PolygonOffsetDirection    = irr::video::EPO_FRONT;
+        buf->Material.PolygonOffsetFactor       = 1;
 
         const SColor lod2Col = RenderConstants::road_lod2_color;
         buf->Vertices.push_back(S3DVertex(core::vector3df(-H, 0.f, -H), core::vector3df(0,1,0), lod2Col, core::vector2df(0.f, 0.f)));
@@ -1438,34 +1349,264 @@ void IrrlichtRenderer::ensureRoadMeshes()
 }
 
 // -------------------------------------------------------------------------
-// placeRoadMesh — road tile placement (procedural geometry, no .b3d files).
+// buildTileRoadMesh — build a terrain-conforming LOD0 road mesh for one tile.
 //
-// All road tiles share m_sharedRoadMeshLOD0/1/2 (built once on first call).
-// Scene nodes are positioned at tile world centre; scale is (1,1,1) because
-// the geometry is authored in real metres (4×4 m road on a 10 m tile).
-// LOD distances: LOD0→LOD1 at 50 m, LOD1→LOD2 at 150 m, cull at 300 m.
+// Each tile gets a unique SMesh* whose 4 quad corners sit at the actual world-space
+// terrain heights (h00, h10, h01, h11).  The node is placed at world X/Z centre
+// with Y=0; all height is encoded directly in vertex Y coordinates.
+//
+// Vertex layout (corners, H = kTileSize/2 = 5 m, world-space relative to tile centre
+// in X/Z but absolute in Y):
+//   v0 = (-H, h00, -H)  back-left   (tileX,   tileZ)
+//   v1 = (+H, h10, -H)  back-right  (tileX+1, tileZ)
+//   v2 = (+H, h11, +H)  front-right (tileX+1, tileZ+1)
+//   v3 = (-H, h01, +H)  front-left  (tileX,   tileZ+1)
+//
+// A small bias (kRoadBias = 0.10 m) is added to each vertex Y so the road sits
+// slightly above the terrain and the polygon offset material flag handles Z-fighting
+// at any camera distance.
+//
+// Kerb geometry follows the same corner heights so kerbs hug the terrain edge.
+// -------------------------------------------------------------------------
+irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
+    float h00, float h10, float h01, float h11) const
+{
+    if (!m_driver) return nullptr;
+
+    // Road tile half-extent in X and Z (5 m).
+    static constexpr float H  = kTileSize * 0.5f;
+    // Small Y bias: road surface sits 10 cm above terrain — matches the previous
+    // flat-road Y offset.  Polygon offset handles Z-fighting at camera distance.
+    static constexpr float B  = 0.10f;
+    // Kerb dimensions (world-space metres).
+    static constexpr float KB = 0.05f;  // bevel inset
+    static constexpr float KW = 0.15f;  // total kerb width
+    static constexpr float KH = 0.10f;  // kerb height above road surface corner
+
+    // Effective material type (road shader or EMT_SOLID fallback).
+    const E_MATERIAL_TYPE roadMat = (m_roadMaterialType >= 0)
+        ? static_cast<E_MATERIAL_TYPE>(m_roadMaterialType)
+        : EMT_SOLID;
+
+    // Pre-compute biased corner heights.
+    const float y00 = h00 + B;   // back-left
+    const float y10 = h10 + B;   // back-right
+    const float y01 = h01 + B;   // front-left
+    const float y11 = h11 + B;   // front-right
+
+    SMesh*       mesh = new SMesh();
+    SMeshBuffer* buf  = new SMeshBuffer();
+
+    buf->Material.MaterialType           = roadMat;
+    buf->Material.Lighting               = false;
+    buf->Material.BackfaceCulling        = false;  // kerb faces have varying normals
+    buf->Material.PolygonOffsetDirection = irr::video::EPO_FRONT;
+    buf->Material.PolygonOffsetFactor    = 1;
+
+    // Helper: add a vertex (position in tile-local X/Z, world-space Y).
+    auto addV = [&](float x, float y, float z, float u, float v) {
+        buf->Vertices.push_back(S3DVertex(
+            core::vector3df(x, y, z),
+            core::vector3df(0.f, 1.f, 0.f),  // +Y normal (Lighting=false, unused)
+            SColor(255, 255, 255, 255),
+            core::vector2df(u, v)));
+    };
+
+    // --- Central terrain-conforming quad (4 verts, 2 tris) ---
+    // CW from +Y: 0→2→1, 0→3→2 (same winding as hover tile and terrain quad).
+    addV(-H, y00, -H,  0.f, 0.f);  // v0 back-left
+    addV( H, y10, -H,  1.f, 0.f);  // v1 back-right
+    addV( H, y11,  H,  1.f, 1.f);  // v2 front-right
+    addV(-H, y01,  H,  0.f, 1.f);  // v3 front-left
+    buf->Indices.push_back(0); buf->Indices.push_back(2); buf->Indices.push_back(1);
+    buf->Indices.push_back(0); buf->Indices.push_back(3); buf->Indices.push_back(2);
+
+    // Helper: bilinearly interpolate a height at (fx, fz) in [0,1]×[0,1] tile space.
+    // Used to compute kerb base heights that track the terrain edge.
+    auto hlerp = [&](float fx, float fz) -> float {
+        // fx=0 → -H edge (tileX), fx=1 → +H edge (tileX+1)
+        // fz=0 → -H edge (tileZ), fz=1 → +H edge (tileZ+1)
+        float h0z = y00 + fx * (y10 - y00);  // lerp along z=0 edge
+        float h1z = y01 + fx * (y11 - y01);  // lerp along z=1 edge
+        return h0z + fz * (h1z - h0z);
+    };
+
+    // --- Kerb helper: add one strip (8 verts, 6 tris) ---
+    // Same structure as the previous flat version; kerb base heights now track terrain.
+    auto addKerb = [&](
+        float lx0, float ly0, float lz0,
+        float rx0, float ry0, float rz0,
+        float lx1, float ly1, float lz1,
+        float rx1, float ry1, float rz1,
+        float lx2, float ly2, float lz2,
+        float rx2, float ry2, float rz2,
+        float lx3, float ly3, float lz3,
+        float rx3, float ry3, float rz3)
+    {
+        u16 base = static_cast<u16>(buf->Vertices.size());
+        addV(lx0, ly0, lz0, 0.f, 0.f);
+        addV(rx0, ry0, rz0, 0.f, 0.f);
+        addV(lx1, ly1, lz1, 0.f, 0.f);
+        addV(rx1, ry1, rz1, 0.f, 0.f);
+        addV(lx2, ly2, lz2, 0.f, 0.f);
+        addV(rx2, ry2, rz2, 0.f, 0.f);
+        addV(lx3, ly3, lz3, 0.f, 0.f);
+        addV(rx3, ry3, rz3, 0.f, 0.f);
+        buf->Indices.push_back(base+0); buf->Indices.push_back(base+2); buf->Indices.push_back(base+1);
+        buf->Indices.push_back(base+2); buf->Indices.push_back(base+3); buf->Indices.push_back(base+1);
+        buf->Indices.push_back(base+2); buf->Indices.push_back(base+4); buf->Indices.push_back(base+3);
+        buf->Indices.push_back(base+4); buf->Indices.push_back(base+5); buf->Indices.push_back(base+3);
+        buf->Indices.push_back(base+4); buf->Indices.push_back(base+6); buf->Indices.push_back(base+5);
+        buf->Indices.push_back(base+6); buf->Indices.push_back(base+7); buf->Indices.push_back(base+5);
+    };
+
+    // South kerb (z = -H side).  Base heights at z=-H edge: y00 (left) and y10 (right).
+    addKerb(
+        -H, y00,     -H,          H, y10,     -H,          // row 0: inner edge
+        -H, y00+KH,  -H-KB,       H, y10+KH,  -H-KB,       // row 1: bevel top
+        -H, y00+KH,  -H-KW,       H, y10+KH,  -H-KW,       // row 2: outer top
+        -H, y00,     -H-KW,       H, y10,     -H-KW);       // row 3: outer base
+
+    // North kerb (z = +H side).  Base heights: y01 (left) and y11 (right).
+    addKerb(
+        -H, y01,     H,           H, y11,     H,            // row 0
+        -H, y01+KH,  H+KB,        H, y11+KH,  H+KB,         // row 1
+        -H, y01+KH,  H+KW,        H, y11+KH,  H+KW,         // row 2
+        -H, y01,     H+KW,        H, y11,     H+KW);         // row 3
+
+    // West kerb (x = -H side).  Base heights: y00 (back) and y01 (front).
+    addKerb(
+        -H,    y00,     -H,        -H,    y01,     H,        // row 0
+        -H-KB, y00+KH,  -H,        -H-KB, y01+KH,  H,        // row 1
+        -H-KW, y00+KH,  -H,        -H-KW, y01+KH,  H,        // row 2
+        -H-KW, y00,     -H,        -H-KW, y01,     H);        // row 3
+
+    // East kerb (x = +H side).  Base heights: y10 (back) and y11 (front).
+    addKerb(
+        H,    y10,     -H,         H,    y11,     H,         // row 0
+        H+KB, y10+KH,  -H,         H+KB, y11+KH,  H,         // row 1
+        H+KW, y10+KH,  -H,         H+KW, y11+KH,  H,         // row 2
+        H+KW, y10,     -H,         H+KW, y11,     H);         // row 3
+
+    (void)hlerp;  // hlerp available for future use (e.g. mid-edge kerb heights)
+
+    buf->recalculateBoundingBox();
+    mesh->addMeshBuffer(buf);
+    buf->drop();
+    mesh->recalculateBoundingBox();
+    return mesh;
+}
+
+// -------------------------------------------------------------------------
+// placeRoadMesh — public IRenderer override (delegates to internal version).
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ)
 {
+    placeRoadMesh(tileX, tileZ, /*flattenTerrain=*/true, /*rebuildNeighbors=*/true);
+}
+
+// -------------------------------------------------------------------------
+// placeRoadMesh (internal) — terrain-conforming sloped road placement.
+//
+// Conditional flattening (max 15° slope):
+//   - Read the 4 tile corner heights.
+//   - Compute max slope angle across the tile diagonal pairs.
+//   - If slope > 15°, scale corner height deltas down so the slope equals 15°.
+//   - Write the (possibly adjusted) corner heights back via setTileHeight().
+//   - Flush terrain rebuilds synchronously.
+//
+// Per-tile LOD0 mesh:
+//   - Call buildTileRoadMesh(h00, h10, h01, h11) to build a terrain-conforming
+//     quad + kerb geometry with actual world-space heights baked into vertex Y.
+//   - Node is positioned at world X/Z centre with Y=0 (heights already in verts).
+//
+// Neighbor edge matching (rebuildNeighbors=true only):
+//   - After placement check all 4 cardinal neighbors.
+//   - If a neighbor has a road node, rebuild its mesh (flattenTerrain=false,
+//     rebuildNeighbors=false) so its geometry reflects the newly-written heights
+//     at the shared edge.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
+                                      bool flattenTerrain, bool rebuildNeighbors)
+{
     if (!m_smgr || !m_driver) return;
 
-    // Remove any existing road on this tile first.
+    // Remove any existing road on this tile first (before mesh build to avoid
+    // a stale node blocking the registry slot).
     destroyTileNode(m_roadNodes, tileX, tileZ);
 
-    // Ensure shader and shared meshes are ready (both idempotent).
+    // Ensure shader and shared LOD1/LOD2 meshes are ready (idempotent).
     initRoadShader();
     ensureRoadMeshes();
 
-    if (!m_sharedRoadMeshLOD0) {
+    // --- Read current corner heights ---
+    float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
+    float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
+    float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
+    float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
+
+    if (flattenTerrain && m_terrain) {
+        // --- Conditional slope flattening ---
+        // Maximum slope angle allowed for a road tile.
+        static constexpr float kMaxRoadSlopeDeg = 15.0f;
+        static constexpr float kMaxRoadSlopeRad =
+            kMaxRoadSlopeDeg * static_cast<float>(M_PI) / 180.0f;
+        const float tanMax = std::tan(kMaxRoadSlopeRad);
+
+        // Compute max gradient magnitude across the two diagonal pairs.
+        // Each diagonal spans sqrt(2)*kTileSize; approximate via max of X/Z components.
+        // dX_near: slope in X at z=0 edge;  dX_far:  slope in X at z=1 edge.
+        // dZ_near: slope in Z at x=0 edge;  dZ_far:  slope in Z at x=1 edge.
+        const float dX0 = (h10 - h00) / kTileSize;
+        const float dX1 = (h11 - h01) / kTileSize;
+        const float dZ0 = (h01 - h00) / kTileSize;
+        const float dZ1 = (h11 - h10) / kTileSize;
+
+        // Max slope magnitude across all 4 gradient samples.
+        auto grad2 = [](float a, float b) { return std::sqrt(a*a + b*b); };
+        const float slopeMax = std::max({
+            grad2(dX0, dZ0),
+            grad2(dX0, dZ1),
+            grad2(dX1, dZ0),
+            grad2(dX1, dZ1)
+        });
+        const float slopeAngle = std::atan(slopeMax);  // radians
+
+        if (slopeAngle > kMaxRoadSlopeRad) {
+            // Scale down the height differences to bring slope to exactly 15°.
+            // The scale factor reduces deltas so that max gradient = tan(15°).
+            const float scale = tanMax / slopeMax;
+
+            // Use the average as the reference (same as old flat approach), then
+            // scale each corner's deviation from the average.
+            const float avg = (h00 + h10 + h01 + h11) * 0.25f;
+            h00 = avg + (h00 - avg) * scale;
+            h10 = avg + (h10 - avg) * scale;
+            h01 = avg + (h01 - avg) * scale;
+            h11 = avg + (h11 - avg) * scale;
+        }
+        // If slopeAngle <= 15°, corners are used as-is (no flattening needed).
+
+        // Write the (possibly adjusted) corner heights back to the terrain.
+        m_terrain->setTileHeight(tileX,     tileZ,     h00);
+        m_terrain->setTileHeight(tileX + 1, tileZ,     h10);
+        m_terrain->setTileHeight(tileX,     tileZ + 1, h01);
+        m_terrain->setTileHeight(tileX + 1, tileZ + 1, h11);
+        m_terrain->flushTerrainRebuilds();
+    }
+
+    // --- Build per-tile LOD0 terrain-conforming mesh ---
+    SMesh* tileMesh = buildTileRoadMesh(h00, h10, h01, h11);
+    if (!tileMesh) {
         fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: placeRoadMesh(%d,%d): mesh build failed"
-            " — node not created\n", tileX, tileZ);
+            "[IrrlichtRenderer] WARNING: placeRoadMesh(%d,%d): buildTileRoadMesh"
+            " failed — node not created\n", tileX, tileZ);
         return;
     }
 
-    // Create scene node from LOD0 mesh.
-    // addMeshSceneNode() calls grab() internally → shared mesh ref_count 1→2.
-    IMeshSceneNode* node = m_smgr->addMeshSceneNode(m_sharedRoadMeshLOD0);
+    // Create scene node.  addMeshSceneNode() calls grab() → tileMesh ref_count 1→2.
+    IMeshSceneNode* node = m_smgr->addMeshSceneNode(tileMesh);
+    tileMesh->drop();  // release caller's ref; scene node now sole owner
     if (!node) {
         fprintf(stderr,
             "[IrrlichtRenderer] WARNING: placeRoadMesh(%d,%d): addMeshSceneNode"
@@ -1473,26 +1614,12 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ)
         return;
     }
 
-    // Position at tile world-space centre.
-    // The road geometry is 4×4 m centred at local origin; no scale needed.
-    // Four-corner terrain flattening pattern (Phase 10b): average the 4 tile corner heights
-    // then flatten each corner vertex to that average, so the road mesh sits on a flat quad.
-    const float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
-    const float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
-    const float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
-    const float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
-    const float targetH = (h00 + h10 + h01 + h11) * 0.25f;
-    if (m_terrain) {
-        m_terrain->setTileHeight(tileX,     tileZ,     targetH);
-        m_terrain->setTileHeight(tileX + 1, tileZ,     targetH);
-        m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
-        m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
-    }
-    if (m_terrain) m_terrain->flushTerrainRebuilds();
-    const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+    // Position node at tile world X/Z centre with Y=0.
+    // All height is encoded in vertex Y values (absolute world-space heights);
+    // node Y must be 0 so vertex positions are not double-offset.
     node->setPosition(core::vector3df(
         static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
-        postY + 0.02f,   // slight offset above terrain to prevent Z-fighting
+        0.0f,
         static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
     node->setScale(core::vector3df(1.0f, 1.0f, 1.0f));
 
@@ -1501,21 +1628,33 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ)
         node->getMaterial(m).Lighting = false;
     }
 
-    // Wrap in LODNode with road-specific LOD distance thresholds.
-    // LOD distances from road tile spec: [50, 150, 300].
+    // Wrap in LODNode.
+    // LOD transitions (swap to m_sharedRoadMeshLOD1/LOD2) are a future per-frame
+    // update path; distance thresholds stored for documentation.
     static constexpr float kRoadLOD0to1 = 50.0f;
     static constexpr float kRoadLOD1to2 = 150.0f;
     static constexpr float kRoadCullDist = 300.0f;
-
-    LODNode* lodNode = new LODNode(node);
-    // Note: LODNode uses the legacy (node-only) constructor here.
-    // Road tile LOD transitions are driven by IrrlichtRenderer::updateRoadLOD()
-    // (future per-frame update path) using lodNode->swapMeshRaw() with
-    // m_sharedRoadMeshLOD1 / m_sharedRoadMeshLOD2.
-    // The thresholds are stored for documentation; per-frame LOD is Phase 10+.
     (void)kRoadLOD0to1; (void)kRoadLOD1to2; (void)kRoadCullDist;
 
+    LODNode* lodNode = new LODNode(node);
     m_roadNodes[tileKey(tileX, tileZ)] = lodNode;
+
+    // --- Neighbor edge matching ---
+    // Rebuild cardinal road neighbors so their geometry reflects the newly-written
+    // shared edge heights.  Pass flattenTerrain=false (terrain already correct)
+    // and rebuildNeighbors=false (prevent infinite recursion).
+    if (rebuildNeighbors) {
+        static constexpr int kDX[4] = {-1,  1,  0, 0};
+        static constexpr int kDZ[4] = { 0,  0, -1, 1};
+        for (int d = 0; d < 4; ++d) {
+            const int nx = tileX + kDX[d];
+            const int nz = tileZ + kDZ[d];
+            if (m_roadNodes.count(tileKey(nx, nz)) > 0) {
+                placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
+                                      /*rebuildNeighbors=*/false);
+            }
+        }
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -1588,10 +1727,16 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
             m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
         }
         if (m_terrain) m_terrain->flushTerrainRebuilds();
-        const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+        // Use targetH directly — NOT getHeightAt() after setTileHeight().
+        // setTileHeight() applies neighbour blending to the 8 surrounding tiles;
+        // subsequent corner calls bleed back into vertex (tileX, tileZ), leaving
+        // its stored height below targetH. getHeightAt() would return that
+        // blended-down value and position the node below the rendered terrain surface.
+        const float postY = m_terrain ? targetH : 0.0f;
         node->setPosition(core::vector3df(
             static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
-            postY + 0.01f,   // slight offset above terrain to prevent Z-fighting
+            postY + 0.10f,   // 10 cm above terrain — covers tile-edge bleed-back after
+                             // neighbour blending; polygon offset is the primary Z-fight defence.
             static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
         node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
 
@@ -1604,6 +1749,10 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
             mat.Lighting = false;
             // Disable backface culling — same rationale as placeBuildingMesh().
             mat.BackfaceCulling = false;
+            // Polygon offset: push the service building base toward the camera so it
+            // wins the depth test against the co-planar terrain quad at all distances.
+            mat.PolygonOffsetDirection = irr::video::EPO_FRONT;
+            mat.PolygonOffsetFactor    = 1;
             if (!mat.getTexture(0) && zoneTex) mat.setTexture(0, zoneTex);
         }
     }
@@ -1858,16 +2007,16 @@ void IrrlichtRenderer::removeVehicle(uint32_t vehicleId)
 // -------------------------------------------------------------------------
 static SMesh* buildCloudDomeMesh()
 {
-    constexpr int   kDomeRings         = 24;     // latitude bands — extra rings near base for smooth fade
+    constexpr int   kDomeRings         = 32;     // latitude bands — more rings keep fade smooth over larger geometry
     constexpr int   kDomeSectors       = 32;     // longitude segments
-    constexpr float kCloudAltitude     = -200.0f; // world-space Y of dome base (below terrain — hides hard edge)
-    constexpr float kCloudDomeRadius   = 4000.0f; // horizontal radius at dome base
-    constexpr float kCloudDomeHeight   = 1200.0f; // vertical height from base to apex (apex at Y=1000 m)
+    constexpr float kCloudAltitude     = -1000.0f; // world-space Y of dome base (far below terrain — hides hard edge)
+    constexpr float kCloudDomeRadius   = 14000.0f; // horizontal radius — large enough that dome edge is always beyond visual horizon
+    constexpr float kCloudDomeHeight   = 2200.0f; // vertical height from base to apex (apex at Y≈1200 m)
     constexpr float kCloudUVScale      = 4.0f;   // texture tiling factor
     // Fade zone: clouds are fully opaque above this latitude parameter value.
     // Below kFadeStart (i.e. t > kFadeStart toward the base), alpha ramps to 0
     // using a smoothstep curve.  Setting this to 0.5 means the bottom 50% of the
-    // dome height fades out, spanning ~600 m of vertical extent.
+    // dome height fades out, spanning ~1100 m of vertical extent.
     constexpr float kFadeStart         = 0.5f;
 
     SMesh*       mesh = new SMesh();
@@ -1890,7 +2039,7 @@ static SMesh* buildCloudDomeMesh()
     // This keeps clouds at full opacity over the upper 50% of dome height and
     // smoothly fades them to zero over the lower 50%, with a smooth S-curve that
     // eliminates the hard visible ring at the horizon.  The base ring is placed at
-    // Y = kCloudAltitude = -200 m (below terrain), so the zero-alpha ring is
+    // Y = kCloudAltitude = -1000 m (far below terrain), so the zero-alpha ring is
     // never directly visible above the landscape.
 
     const float piF = static_cast<float>(M_PI);

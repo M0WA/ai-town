@@ -58,6 +58,23 @@
 
 The `GL_TEXTURE_MAX_LEVEL` parameter controls how many mip levels the GPU may sample. Irrlicht's `IVideoDriver::getTexture()` does not set this parameter — it must be set explicitly via `glTexParameteri` immediately after the texture object is created. The dispatch key is the texture category, identified by filename suffix or by which `TextureCache` method (`loadSRGB`, `loadLinear`, `loadSplatMap`) is used to load the texture.
 
+**Truncated DDS files — silent black-surface failure in `loadSRGB()`**: `loadSRGB()` reads
+`dwMipMapCount` from the DDS header at byte offset 28 and iterates that many mip levels. If the
+DDS file declares `dwMipMapCount = 4` but only mip level 0 data is present in the byte stream
+(a truncated stub), the parser passes a dangling or zero-length pointer to
+`glCompressedTexImage2D` for mip levels 1–3. The GL driver accepts the call without error and
+uploads a **black surface** for each missing level. Symptoms:
+
+- Black atlas across the city at all distances (mip 0 absent or corrupted).
+- Correct near-range rendering, black surface beyond ~100–400 m (mip 1–3 absent) — the most
+  common symptom when only the base level was written by a buggy generator.
+
+There is no GL error, assertion, or log message for this failure. It must be caught at
+asset-authoring time. After any change to `tools/generate_dds_stubs.py`, regenerate all stubs
+from the repository root (`python3 tools/generate_dds_stubs.py`) and verify file sizes match
+the reference values in `architecture/asset-standards/2d-texture-standards.md`
+§DDS Mip Chain Integrity.
+
 **Internal format derived from DDS FourCC — NOT from path suffix**: `loadSRGB()` derives the sRGB GL internal format from the actual FourCC read from the DDS file header, not from the path suffix. This avoids mismatches when the filename doesn't end in `_d` or `_billboard` (e.g., `road_asphalt_tileable.dds` which is DXT5 but not a billboard). Path suffix is used ONLY for wrap mode (`_billboard` → `GL_CLAMP_TO_EDGE`, others → `GL_REPEAT`). Format mapping: `DXT1 (0x31545844)` → `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`; `DXT5 (0x35545844)` → `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`. Passing the wrong internal format to `glCompressedTexImage2D` (e.g., DXT1 format with DXT5 data) produces silent GL errors and garbled texture output.
 
 | Texture category | Filename suffix | TextureCache method | GL internal format | `GL_TEXTURE_MAX_LEVEL` | Rationale |

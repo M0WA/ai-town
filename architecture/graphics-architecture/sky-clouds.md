@@ -15,21 +15,24 @@ This feature is delivered in **Phase 10b**.
 
 - **Mesh type**: runtime-built `SMesh*` (single `SMeshBuffer`, tessellated hemisphere
   dome). NOT an artist-authored `.b3d` file.
-- **Dome radius**: `kCloudDomeRadius = 4000.0f` metres — horizontal radius at the dome
-  base ring. This ensures the horizon ring is always beyond the far clip plane from
-  any in-game camera position.
-- **Dome height**: `kCloudDomeHeight = 1200.0f` metres — vertical extent from the dome
-  base up to the apex. Combined with the 4000 m radius and the −200 m base altitude
-  this places the apex at Y = 1000 m. The increased height gives the fade zone more
+- **Dome radius**: `kCloudDomeRadius = 14000.0f` metres — horizontal radius at the dome
+  base ring. At the maximum expected camera height of ~100 m the dome wall at eye level
+  is ~12 000 m away, which is well beyond any visible terrain. A smaller radius (e.g.
+  4 000 m) places the dome edge inside the rendered terrain view and produces a visible
+  circular arc where the dome's curved surface meets the black render background.
+- **Dome height**: `kCloudDomeHeight = 2200.0f` metres — vertical extent from the dome
+  base up to the apex. Combined with the 14 000 m radius and the −1 000 m base altitude
+  this places the apex at Y ≈ 1 200 m. The increased height gives the fade zone more
   vertical room to dissolve cleanly above terrain.
-- **Base altitude**: `kCloudAltitude = -200.0f` metres (world-space Y of the dome base
-  ring). The apex is at `Y = kCloudAltitude + kCloudDomeHeight = 1000.0f` m. The
-  negative base altitude hides the zero-alpha base ring below terrain level, so the
-  hard bottom edge of the dome is never directly visible above the landscape.
-- **Tessellation**: `kDomeRings = 24` latitude bands × `kDomeSectors = 32` longitude
-  segments → `25 × 33 = 825` vertices, `24 × 32 × 2 = 1536` triangles. The extra
-  rings (vs. the previous 16) concentrate gradient steps near the base for a finer
-  alpha transition.
+- **Base altitude**: `kCloudAltitude = -1000.0f` metres (world-space Y of the dome base
+  ring). The apex is at `Y = kCloudAltitude + kCloudDomeHeight = 1200.0f` m. The
+  deeply negative base altitude pushes the zero-alpha base ring far below terrain level,
+  ensuring the hard bottom edge of the dome is never visible above the landscape even at
+  the most oblique camera angles.
+- **Tessellation**: `kDomeRings = 32` latitude bands × `kDomeSectors = 32` longitude
+  segments → `33 × 33 = 1089` vertices, `32 × 32 × 2 = 2048` triangles. The increased
+  ring count keeps the smoothstep fade smooth over the larger geometry (the fade zone
+  now spans ~1 100 m vertically).
 - **Camera tracking**: the dome node is repositioned to camera XZ each frame in
   `update()` so the horizon ring is always centred on the player. The dome vertex Y
   coordinates are absolute world-space values; only the node's XZ translation changes.
@@ -81,7 +84,7 @@ For t >  kFadeStart: s = (t − kFadeStart) / (1 − kFadeStart)   ∈ [0, 1]
 This keeps clouds at full opacity over the upper 50 % of dome height (t ∈ [0, 0.5])
 and then smoothly fades them to zero over the lower 50 % (t ∈ [0.5, 1.0]) using an
 S-curve that eliminates the hard visible ring at the horizon. The base ring is placed
-at `Y = kCloudAltitude = −200 m` (below terrain), so the zero-alpha ring is never
+at `Y = kCloudAltitude = −1000 m` (far below terrain), so the zero-alpha ring is never
 directly visible above the landscape regardless of camera height.
 
 **Winding**: Inside-CW (camera is inside the dome looking upward and outward). For
@@ -195,8 +198,8 @@ accumulation over play sessions longer than ~500 seconds.
 
 ## Depth Ordering
 
-The cloud dome base is at `Y=−200 m` (below terrain) and apex at `Y=1000 m`. Visible
-cloud geometry starts at ~`Y=400 m` (the first ring where alpha transitions from zero)
+The cloud dome base is at `Y=−1000 m` (far below terrain) and apex at `Y=1200 m`. Visible
+cloud geometry starts at ~`Y=200 m` (the first ring where alpha transitions from zero)
 which is well above all opaque scene geometry (terrain max ~80 m, buildings max ~80 m).
 The depth buffer handles correct ordering automatically:
 
