@@ -16,11 +16,12 @@ This feature is delivered in **Phase 10b**.
 - **Mesh type**: runtime-built `SMesh*` (single `SMeshBuffer`, tessellated hemisphere
   dome). NOT an artist-authored `.b3d` file.
 - **Dome radius**: `kCloudDomeRadius = 6000.0f` metres — horizontal radius at the dome
-  base ring. The arc artifact does **not** come from the dome edge being inside the view
-  frustum; it comes from the opaque zone of the dome extending down to eye level. The
-  fix is a correct two-boundary fade (see Vertex Layout below), not an ever-larger radius.
-  A 6 000 m radius keeps the dome wall well beyond the typical 2–3 km terrain view
-  distance while avoiding the flattening distortion introduced by a 14 000 m radius.
+  base ring. The dome radius **must** be less than `farClip` (currently `15000.0f` m set
+  in `CameraParams`). With `farClip = 3000 m` OpenGL hard-clips all dome vertices beyond
+  3000 m from the camera, producing a hard circular arc ring at the frustum boundary.
+  Setting `farClip = 15000 m` ensures dome vertices (at most ~6082 m from camera) are
+  always inside the far plane. A 6 000 m radius keeps the dome wall well beyond the
+  typical 2–3 km terrain view distance.
 - **Dome height**: `kCloudDomeHeight = 2000.0f` metres — vertical extent from the dome
   base up to the apex. Combined with the 6 000 m radius and the −1 000 m base altitude
   this places the apex at Y = 1 000 m.
@@ -31,7 +32,7 @@ This feature is delivered in **Phase 10b**.
   the most oblique camera angles.
 - **Tessellation**: `kDomeRings = 32` latitude bands × `kDomeSectors = 32` longitude
   segments → `33 × 33 = 1089` vertices, `32 × 32 × 2 = 2048` triangles. The ring count
-  keeps the smoothstep fade smooth across the 500 m fade band (t=0.25 → t=0.50).
+  keeps the smoothstep fade smooth across the 500 m fade band (t=0.25 → t=0.46).
 - **Camera tracking**: the dome node is repositioned to camera XZ each frame in
   `update()` so the horizon ring is always centred on the player. The dome vertex Y
   coordinates are absolute world-space values; only the node's XZ translation changes.
@@ -69,6 +70,9 @@ v = (cos(phi) × 0.5 × t + 0.5) × kCloudUVScale
 This maps the apex to UV `(0.5, 0.5) × kCloudUVScale` and the base ring to UV
 `(0..1, 0..1) × kCloudUVScale`, tiling the texture naturally across the dome.
 
+`kCloudUVScale = 4.0`: texture tiling factor — tiles the cloud texture 4× across the
+dome surface.
+
 **Vertex colour alpha** (two-boundary horizon fade):
 
 ```text
@@ -82,17 +86,14 @@ For kFadeStart < t ≤ kFadeEnd:    s = (t − kFadeStart) / (kFadeEnd − kFade
 For t > kFadeEnd:                 alpha = 0     (fully transparent horizon zone)
 ```
 
-**Why two boundaries eliminate the arc**: with a single `kFadeStart = 0.5` boundary the
-dome is only *starting* to fade at Y ≈ 100 m (camera eye level). Looking toward the
-horizon, the still-opaque dome wall overlaps terrain and produces a visible circular arc.
-The fix is to reach **alpha = 0 at or above the maximum terrain height**. Setting
-`kFadeEnd = 0.46` maps to Y = 80 m, which is well above the maximum terrain height
-(terrain max ≈ 26 m, safety margin ≈ 54 m). This value must stay above
-`maxTerrainHeight + safetyMargin`; do not raise it below Y = 80 m without verifying the
-new terrain height ceiling. Everything at and below 80 m is fully transparent, so no
-dome surface with non-zero alpha is ever visible against the terrain horizon.
-The fade band (500 m → 80 m altitude, t ∈ [0.25, 0.46]) provides a smooth S-curve
-transition entirely above ground level.
+**Why two boundaries eliminate the horizon arc**: the primary fix is `farClip = 15000 m`
+(see Dome Geometry above) so OpenGL never hard-clips dome triangles. The fade provides a
+secondary layer: `kFadeEnd = 0.46` maps to Y = 80 m, which is above the maximum terrain
+height (terrain max ≈ 26 m, safety margin ≈ 54 m). This value must stay above
+`maxTerrainHeight + safetyMargin`; do not lower it below Y = 80 m without verifying the
+terrain height ceiling. Everything at and below 80 m is fully transparent, so no dome
+surface with non-zero alpha is ever visible against the terrain horizon even if minor
+z-precision issues occur at the far plane.
 
 **Winding**: Inside-CW (camera is inside the dome looking upward and outward). For
 quad `(ring r, sector s)`:
@@ -152,6 +153,7 @@ Applied to the cloud dome `IMeshSceneNode*` after `addMeshSceneNode()`:
 | `MaterialType` | `EMT_TRANSPARENT_VERTEX_ALPHA` | Vertex colour alpha controls transparency — required so the per-vertex horizon fade (alpha=0 at base ring, alpha=255 at apex) is honoured. `EMT_TRANSPARENT_ALPHA_CHANNEL` ignores vertex alpha entirely, which would leave the base ring opaque and produce a hard circular rim at the horizon. |
 | `Lighting` | `false` | No scene lights in V1 |
 | `BackfaceCulling` | `false` | Camera is inside the dome; disabling culling guarantees visibility from any camera tilt |
+| `ZWriteEnable` | `false` | Transparent domes must never write to the depth buffer. If depth writes are on, the dome's partially-transparent lower band deposits depth values that can occlude terrain geometry in the same render pass, manifesting as a hard arc in the one azimuth where the dome intersects the terrain frustum. Setting `false` (Irrlicht 1.8.5 `bool`; 1.9+ uses `EZW_OFF`) disables all depth writes while depth reads remain active so the dome still sits correctly behind foreground objects. |
 | `Texture[0]` | `clouds.png` via `getTexture()` | Cloud diffuse + alpha |
 
 Do NOT use additive blending — clouds are semi-transparent overlays, not emissive.
@@ -218,6 +220,9 @@ The depth buffer handles correct ordering automatically:
   ~30 m over flat terrain).
 - The bottom ring of the cloud dome has alpha=0 (transparent), so even if the depth
   test ordering is imperfect near the horizon the fade makes it invisible.
+
+The cloud dome material has `ZWriteEnable = false` so it never writes depth values that
+could occlude terrain rendered in the same pass. Depth reads remain active.
 
 No explicit render order override (`setAutomaticCulling`, `setRenderOrder`) is required
 in the normal case.

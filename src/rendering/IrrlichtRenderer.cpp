@@ -2021,7 +2021,7 @@ static SMesh* buildCloudDomeMesh()
     //
     // kFadeStart = 0.25 → Y = kCloudAltitude + kCloudDomeHeight * (1 - 0.25) = -1000 + 1500 = 500 m
     // kFadeEnd   = 0.46 → Y = kCloudAltitude + kCloudDomeHeight * (1 - 0.46) = -1000 + 1080 =  80 m
-    constexpr float kFadeStart         = 0.25f; // start fading at t=0.25 (Y≈500 m)
+    constexpr float kFadeStart         = 0.25f; // start fading at t=0.25 (Y=500 m)
     constexpr float kFadeEnd           = 0.46f; // fully transparent at t=0.46 (Y=80 m)
 
     SMesh*       mesh = new SMesh();
@@ -2156,6 +2156,13 @@ void IrrlichtRenderer::initCloudPlane()
         // outer surface, which is correct. However, disabling culling guarantees visibility
         // from any camera tilt without winding analysis.
         mat.BackfaceCulling = false;
+        // Transparent domes must NOT write to the depth buffer (Fix 4).
+        // If ZWriteEnable is left on (the default), the dome surface deposits depth values
+        // that can occlude terrain geometry rendered in the same pass — most visibly as a
+        // hard arc where the dome's partially-transparent lower band intersects the terrain
+        // frustum in one azimuth direction.  EZW_OFF disables all depth writes while still
+        // reading depth (the dome correctly sits behind foreground objects).
+        mat.ZWriteEnable    = false;  // Irrlicht 1.8.5: bool (EZW_OFF is 1.9+ only)
         if (tex) mat.setTexture(0, tex);
     }
 
