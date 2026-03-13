@@ -1111,10 +1111,16 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
     // unsupported format) the slot remains null and the zone-coloured placeholder
     // texture is bound instead so the building is still visually distinguishable.
     if (scene::ISceneNode* node = lodNode->getNode()) {
-        const float terrainY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+        // Three-step terrain flattening pattern (Phase 10b):
+        // (1) read pre-flatten height, (2) flatten, (3) read post-flatten height for placement.
+        // Passing preY as the setTileHeight argument locks the placed tile to its current height
+        // while blending neighbours — no vertical shift on the placed tile itself.
+        const float preY  = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+        if (m_terrain) m_terrain->setTileHeight(tileX, tileZ, preY);
+        const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
         node->setPosition(core::vector3df(
             static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
-            terrainY,
+            postY,
             static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
         node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
 
@@ -1450,10 +1456,13 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ)
 
     // Position at tile world-space centre.
     // The road geometry is 4×4 m centred at local origin; no scale needed.
-    const float terrainY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+    // Three-step terrain flattening pattern (Phase 10b).
+    const float preY  = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+    if (m_terrain) m_terrain->setTileHeight(tileX, tileZ, preY);
+    const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
     node->setPosition(core::vector3df(
         static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
-        terrainY,
+        postY,
         static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
     node->setScale(core::vector3df(1.0f, 1.0f, 1.0f));
 
@@ -1535,10 +1544,13 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
     }
 
     if (scene::ISceneNode* node = lodNode->getNode()) {
-        const float terrainY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+        // Three-step terrain flattening pattern (Phase 10b).
+        const float preY  = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+        if (m_terrain) m_terrain->setTileHeight(tileX, tileZ, preY);
+        const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
         node->setPosition(core::vector3df(
             static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
-            terrainY,
+            postY,
             static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
         node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
 
