@@ -184,6 +184,82 @@ All new files introduced in this phase MUST follow project naming conventions:
   Uses Pillow (already installed as a CI dependency from Phase 10). No-op when file does
   not exist yet.
 
+---
+
+#### Feature 3: Naming Convention Enforcement
+
+Rename all existing class-header files that violate the CamelCase rule, relocate
+misplaced concrete classes from `src/interfaces/`, and move interface headers outside
+`src/interfaces/` that should live there. Update every `#include` that references a
+renamed path. All CI jobs must remain green after the rename pass.
+
+##### graphics-dev-irrlicht
+
+Rename `src/terrain/` and `src/ui/` class headers and update all `#include` references:
+
+| Current path | Renamed to |
+|---|---|
+| `src/terrain/terrain_generator.h` | `src/terrain/TerrainGenerator.h` |
+| `src/ui/budget_detail_panel.h` | `src/ui/BudgetDetailPanel.h` |
+| `src/ui/hud.h` | `src/ui/HUD.h` |
+| `src/ui/inspector_panel.h` | `src/ui/InspectorPanel.h` |
+| `src/ui/main_menu_panel.h` | `src/ui/MainMenuPanel.h` |
+| `src/ui/minimap.h` | `src/ui/Minimap.h` |
+| `src/ui/modal_dialog.h` | `src/ui/ModalDialog.h` |
+| `src/ui/pause_menu_panel.h` | `src/ui/PauseMenuPanel.h` |
+| `src/ui/settings_panel.h` | `src/ui/SettingsPanel.h` |
+| `src/ui/tax_rate_panel.h` | `src/ui/TaxRatePanel.h` |
+
+Relocate misplaced concrete-class headers out of `src/interfaces/`:
+
+| Current path | Moved to | Reason |
+|---|---|---|
+| `src/interfaces/null_simulation_pauser.h` | `src/simulation/NullSimulationPauser.h` | Concrete implementation, not an interface |
+| `src/interfaces/WallClock.h` | `src/platform/WallClock.h` | Concrete implementation; `.cpp` already lives in `src/platform/` |
+
+Remove backward-compat shim headers (they only `#include` the CamelCase file):
+
+| File | Action |
+|---|---|
+| `src/terrain/terrain_chunk.h` | Delete; update any remaining `#include "terrain_chunk.h"` to `#include "TerrainChunk.h"` |
+
+Documented intentional exceptions — **do not move these**:
+
+- `src/ui/IUIBackend.h`: stays in `src/ui/` (coverage gate — see file header comment)
+- `src/terrain/ITerrainRNG.h`: stays in `src/terrain/` (tightly coupled to terrain subsystem — see file header comment)
+
+##### sound-dev-opensoftal
+
+Rename `src/audio/` class headers and update all `#include` references:
+
+| Current path | Renamed to |
+|---|---|
+| `src/audio/ialc_functions.h` | `src/audio/IAlcFunctions.h` |
+| `src/audio/audio_command_queue.h` | `src/audio/AudioCommandQueue.h` |
+
+`src/audio/audio_system.h` is a compatibility redirect shim — delete it and update any
+remaining `#include "audio_system.h"` to `#include "AudioSystem.h"`.
+
+##### test-dev-cpp
+
+Rename all test-helper class headers and update every `#include` in test `.cpp` files:
+
+| Current path | Renamed to |
+|---|---|
+| `tests/simulation/manual_clock.h` | `tests/simulation/ManualClock.h` |
+| `tests/simulation/manual_rng.h` | `tests/simulation/ManualRNG.h` |
+| `tests/simulation/manual_terrain_query.h` | `tests/simulation/ManualTerrainQuery.h` |
+| `tests/simulation/mock_audio_system.h` | `tests/simulation/MockAudioSystem.h` |
+| `tests/simulation/mock_renderer.h` | `tests/simulation/MockRenderer.h` |
+| `tests/simulation/simulation_test_base.h` | `tests/simulation/SimulationTestBase.h` |
+| `tests/terrain/mock_terrain_rng.h` | `tests/terrain/MockTerrainRNG.h` |
+| `tests/ui/mock_city_simulation.h` | `tests/ui/MockCitySimulation.h` |
+| `tests/ui/mock_simulation_pauser.h` | `tests/ui/MockSimulationPauser.h` |
+| `tests/ui/mock_ui_backend.h` | `tests/ui/MockUIBackend.h` |
+
+`tests/ui/panel_sentinel_handles.h` contains only constants/handles (no class definition) —
+`snake_case` is correct; no rename needed.
+
 ### Exit Criteria
 
 - On tile placement (zone, road, service building), the terrain under the placed tile
@@ -202,6 +278,8 @@ All new files introduced in this phase MUST follow project naming conventions:
 - Cloud plane invisible under `EDT_NULL` (headless CI runs clean; no crash or GL error);
   `CloudPlane_EDTNull_InitSkipped` passes in `opengl_tests`
 - `clouds.png` present and 1024×1024 RGBA (Check #24 green)
+- All class-header files renamed to CamelCase; misplaced concrete classes relocated out of
+  `src/interfaces/`; all `#include` paths updated; no broken includes remain; CI green
 - `all-checks-pass` CI gate remains green
 
 ### Team
@@ -211,8 +289,9 @@ All new files introduced in this phase MUST follow project naming conventions:
 | `graphics-dev-irrlicht` | `ITerrainQuery::setTileHeight()`, `TerrainSystem` write path, neighbour blending, chunk rebuild enqueue, placement method updates, cloud plane mesh and UV scrolling |
 | `gamedesign-lookandfeel` | Blending falloff factor sign-off |
 | `graphics-artist-2d-texture` | `clouds.png` tileable cloud texture |
-| `test-dev-cpp` | Three terrain flattening unit tests, CMake wiring |
+| `test-dev-cpp` | Three terrain flattening unit tests, CMake wiring, test-helper class renames |
 | `cicd-dev-github` | Check #24 cloud texture gate, cloud asset presence gate in CI jobs |
+| `sound-dev-opensoftal` | `src/audio/` class-header renames |
 
 ### Dependencies
 
