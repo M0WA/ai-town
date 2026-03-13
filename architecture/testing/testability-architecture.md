@@ -1,7 +1,12 @@
 # Testability Architecture
 
 - Simulation logic must **not** depend directly on Irrlicht or OpenAL APIs
-- `UIManager` must depend on an `IUIBackend` interface for all Irrlicht `IGUIEnvironment` calls, enabling `src/ui/` to be tested with a `MockUIBackend` in unit tests without a display. The interface uses **opaque `UIElementHandle` (uint32_t)** instead of raw Irrlicht pointers — this fully severs the compile-time dependency on Irrlicht headers in any translation unit that only includes `IUIBackend.h`. The concrete `IrrlichtUIBackend` maintains an internal `std::unordered_map<UIElementHandle, IGUIElement*>` to map handles to real objects. **Source location**: `IUIBackend.h` lives in `src/ui/`; `IrrlichtUIBackend.h/.cpp` live in `src/rendering/` (since it depends on Irrlicht headers). `MockUIBackend` lives in `tests/ui/mock_ui_backend.h`. This placement ensures the `src/ui/` coverage gate does not pull in Irrlicht headers and the `src/rendering/` exclusion correctly covers `IrrlichtUIBackend`. **IMPORTANT: IUIBackend.h MUST be placed in `src/ui/` (not `src/interfaces/`). This is an intentional exception to the `src/interfaces/` pattern. IUIBackend is a UI-layer-only interface; placing it in `src/ui/` ensures its coverage is captured under the 80% coverage gate. All other shared interfaces (IClock, ISimulationRNG, ISimulationPauser, ICitySimulation) live in `src/interfaces/` as usual.**
+- `UIManager` must depend on an `IUIBackend` interface for all Irrlicht `IGUIEnvironment` calls, enabling `src/ui/` to be tested with a `MockUIBackend` in unit tests without a display. The interface uses **opaque `UIElementHandle` (uint32_t)** instead of raw Irrlicht pointers — this fully severs the compile-time dependency on Irrlicht headers in any translation unit that only includes `IUIBackend.h`. The concrete `IrrlichtUIBackend` maintains an internal `std::unordered_map<UIElementHandle, IGUIElement*>` to map handles to real objects. **Source location**: `IUIBackend.h` lives in `src/interfaces/` (moved from `src/ui/` in
+Phase 10b Feature 3 — all pure-virtual interfaces MUST reside in `src/interfaces/` per
+project convention); `IrrlichtUIBackend.h/.cpp` live in `src/rendering/` (since it depends
+on Irrlicht headers). `MockUIBackend` lives in `tests/ui/mock_ui_backend.h` (renamed to
+`tests/ui/MockUIBackend.h` in Phase 10b Feature 3). `src/interfaces/` is not excluded from
+lcov, so coverage is captured correctly under the 80% gate.
 
 ```cpp
 using UIElementHandle = uint32_t;
@@ -1038,10 +1043,11 @@ the audio playback path, not a unit test with strict call-count expectations on 
   target_include_directories(integration_tests PRIVATE tests/simulation/ tests/ui/ src/interfaces/ src/ui/ src/rendering/ ${CMAKE_SOURCE_DIR})
 
   # terrain_tests — needs tests/simulation/ for ManualClock (if timing tests added in Phase 5+),
-  # tests/terrain/ for MockTerrainRNG, src/terrain/ for ITerrainRNG.h (included by mock_terrain_rng.h
-  # via project-root-relative path "#include "src/terrain/ITerrainRNG.h""), and ${CMAKE_SOURCE_DIR}
-  # so that project-root-relative includes resolve correctly.
-  target_include_directories(terrain_tests PRIVATE tests/simulation/ tests/terrain/ src/terrain/ ${CMAKE_SOURCE_DIR})
+  # tests/terrain/ for MockTerrainRNG; ${CMAKE_SOURCE_DIR} so project-root-relative includes
+  # resolve correctly. NOTE (Phase 10b): ITerrainRNG.h moved to src/interfaces/ — src/terrain/
+  # is no longer required for ITerrainRNG; mock_terrain_rng.h updates its include to
+  # #include "src/interfaces/ITerrainRNG.h". Drop src/terrain/ from this list after Phase 10b.
+  target_include_directories(terrain_tests PRIVATE tests/simulation/ tests/terrain/ ${CMAKE_SOURCE_DIR})
   ```
 
   If a test target needs a specialization, it must subclass the shared mock — not redefine it. This sharing is intentional: the same mock interface is used consistently across all simulation-adjacent tests.
@@ -1139,7 +1145,15 @@ the audio playback path, not a unit test with strict call-count expectations on 
   `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight` must go through
   `ManualTerrainQuery::m_flattened` and `getHeightAt()`, not through `MockRenderer`.
 
-- **`IAlcFunctions`** — injectable interface for ALC function-pointer lookup, enabling the thread-local context extension check in `AudioSystem` to be intercepted in tests without a real OpenAL device. **Source locations**: `IAlcFunctions.h` in `src/audio/`; `DefaultAlcFunctions.h`/`DefaultAlcFunctions.cpp` in `src/audio/`; `MockAlcFunctions` is defined locally in `tests/audio/audio_thread_test.cpp` (single-use — not a shared header). All test double headers live under `tests/` — never under `src/`.
+  **Phase 10b landing sequence**: the `setTileHeight()` pure-virtual addition to
+  `ITerrainQuery.h` and the `ManualTerrainQuery` override MUST land in the same commit to
+  avoid making `ManualTerrainQuery` abstract and breaking all 17+ simulation unit tests.
+  Step 1 (`graphics-dev-irrlicht` PR): add pure-virtual to `ITerrainQuery.h` AND add the
+  no-op `void setTileHeight(int, int, float) override {}` to `ManualTerrainQuery` in the
+  same commit. Step 2 (`test-dev-cpp` PR): replace the no-op with the stateful form
+  described above.
+
+- **`IAlcFunctions`** — injectable interface for ALC function-pointer lookup, enabling the thread-local context extension check in `AudioSystem` to be intercepted in tests without a real OpenAL device. **Source locations** (post-Phase 10b): `IAlcFunctions.h` in `src/interfaces/` (moved from `src/audio/ialc_functions.h` and renamed in Phase 10b Feature 3); `DefaultAlcFunctions.h`/`DefaultAlcFunctions.cpp` remain in `src/audio/`; `MockAlcFunctions` is defined locally in `tests/audio/audio_thread_test.cpp` (single-use — not a shared header). All test double headers live under `tests/` — never under `src/`.
 
   ```cpp
   class IAlcFunctions {

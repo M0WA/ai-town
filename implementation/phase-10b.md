@@ -31,7 +31,18 @@ All new files introduced in this phase MUST follow project naming conventions:
   `(tileX, tileZ)` to `height`, enqueues `ChunkRebuildRequest`s for all affected chunks,
   then triggers neighbour blending (see below). Returns immediately; chunk rebuilds are
   processed by `TerrainSystem::update()` at the 2-per-frame cap, or synchronously during
-  `flushPendingRebuilds()`. (ref: `architecture/game-design/terrain-interaction.md`,
+  `flushPendingRebuilds()`. Add with a documentation comment consistent with the existing
+  `getHeightAt()` style in `ITerrainQuery.h`:
+
+  ```cpp
+  // Sets the persistent LOD0 heightmap height at (tileX, tileZ) to height,
+  // applies weighted neighbour blending to the 8 surrounding tiles, and enqueues
+  // ChunkRebuildRequests for all affected chunks.
+  // Out-of-bounds coordinates are silently ignored.
+  virtual void setTileHeight(int tileX, int tileZ, float height) = 0;
+  ```
+
+  (ref: `architecture/game-design/terrain-interaction.md`,
   `architecture/graphics-architecture/procedural-terrain.md`)
 - [ ] Implement `TerrainSystem::setTileHeight(int tileX, int tileZ, float height)`:
   - Write `height` into the persistent LOD0 heightmap array at `(tileX, tileZ)`.
@@ -129,8 +140,10 @@ All new files introduced in this phase MUST follow project naming conventions:
   skipped). Label `requires-opengl` and add to `opengl_tests` — Irrlicht device creation
   requires X11 even for `EDT_NULL` on Linux; `xvfb-run` provides the X server.
 - [ ] Wire all new test cases into the appropriate test targets via `target_sources` in
-  `CMakeLists.txt`: terrain tests → `terrain_tests` (label `unit`); cloud test →
-  `opengl_tests` (label `requires-opengl`).
+  `CMakeLists.txt`: the three terrain flattening tests live in
+  `tests/terrain/terrain_flattening_test.cpp` → add to `terrain_tests` (label `unit`);
+  `CloudPlane_EDTNull_InitSkipped` lives in `tests/rendering/cloud_plane_test.cpp` → add
+  to `opengl_tests` (label `requires-opengl`).
 
 ---
 
@@ -210,9 +223,10 @@ All new files introduced in this phase MUST follow project naming conventions:
   `assets/textures/sky/clouds.png` is exactly 1024×1024 pixels and RGBA (4 channels)
   using Pillow (already installed from Phase 10). No-op (return `[]`) when the file does
   not exist. Wire into the `run_all_checks()` dispatcher by adding the tuple
-  `("check_24_clouds_png", check_24_clouds_png)` to the checks list — the same tuple-list
-  pattern used for Checks #21–#23 (do NOT use `errors += check_24_clouds_png(assets_dir)`
-  as a free-standing call; the dispatcher iterates the tuple list). Also add a
+  `("Check #24 (cloud texture format)", check_24_clouds_png)` to the checks list — the
+  same tuple-list pattern used for Checks #21–#23 (display-name string + function
+  reference; do NOT use `errors += check_24_clouds_png(assets_dir)` as a free-standing
+  call; the dispatcher iterates the tuple list). Also add a
   **"Verify check_24 present"** grep step to the `validate-assets` job in `ci.yml` with
   pattern `check_24_clouds_png` (full function name), matching the pattern of the existing
   check_21/22/23 verification steps.
@@ -291,12 +305,10 @@ Remove backward-compat shim headers (they only `#include` the CamelCase file):
 type alias — per the naming convention, C-style headers with only constants, enums, or
 POD structs use `snake_case`. No rename needed for this file.
 
-`src/audio/al_check.h` and `src/audio/al_check.cpp` are a paired `.h`/`.cpp` that
-implement named error-checking functions — per the naming convention, class/function
-implementation files use CamelCase. Rename to `src/audio/AlCheck.h` and
-`src/audio/AlCheck.cpp`. Update all `#include "src/audio/al_check.h"` sites in
-`src/audio/AudioSystem.cpp` and any other files that include it. Update
-`CMakeLists.txt` source list entries accordingly.
+`src/audio/al_check.h` and `src/audio/al_check.cpp` contain only inline free functions
+(`alCheckError`, `alcCheckError`) — no class definition. Per the naming convention,
+CamelCase applies to class files only; free-function headers use `snake_case`. No rename
+needed for this pair.
 
 `src/audio/audio_system.h` is a compatibility redirect shim — delete it and update all
 callers:
@@ -305,6 +317,8 @@ callers:
   to `#include "src/interfaces/IAlcFunctions.h"` (**sequencing note**: this include
   update is blocked on `graphics-dev-irrlicht` completing the `IAlcFunctions.h` file
   move to `src/interfaces/`; do not merge this change until that PR lands)
+- `src/audio/AudioSystem.cpp`: update `#include "src/audio/ialc_functions.h"` to
+  `#include "src/interfaces/IAlcFunctions.h"` (same sequencing gate as above)
 - `src/main.cpp`: change `#include "src/audio/audio_system.h"` → `#include "src/audio/AudioSystem.h"`
 - `tests/audio/audio_thread_test.cpp` lines 27–28: update `ialc_functions.h` include to
   `src/interfaces/IAlcFunctions.h`; update `audio_system.h` include to `AudioSystem.h`
@@ -317,8 +331,10 @@ After all Feature 3 renames are committed, verify the rename pass is complete:
 - [ ] Confirm `build-linux` and `build-windows` CI jobs compile cleanly with zero
   header-not-found errors after the rename commit — a green run on both is the gate.
 - [ ] Verify no old lowercase names remain in `CMakeLists.txt` source lists by running:
-  `grep -r "audio_command_queue\|ialc_functions\|audio_system\.h\|al_check\|null_simulation_pauser\|manual_clock\|manual_rng\|manual_terrain_query\|mock_audio_system\|mock_renderer\|simulation_test_base\|mock_terrain_rng\|mock_city_simulation\|mock_simulation_pauser\|mock_ui_backend\|terrain_chunk\|terrain_generator\|budget_detail_panel\|hud\.h\|inspector_panel\|main_menu_panel\|minimap\|modal_dialog\|pause_menu_panel\|settings_panel\|tax_rate_panel" CMakeLists.txt`
+  `grep -r "audio_command_queue\|ialc_functions\|audio_system\.h\|null_simulation_pauser\|manual_clock\|manual_rng\|manual_terrain_query\|mock_audio_system\|mock_renderer\|simulation_test_base\|mock_terrain_rng\|mock_city_simulation\|mock_simulation_pauser\|mock_ui_backend\|terrain_chunk\|terrain_generator\|budget_detail_panel\|hud\.h\|inspector_panel\|main_menu_panel\|minimap\|modal_dialog\|pause_menu_panel\|settings_panel\|tax_rate_panel" CMakeLists.txt`
   — result must be empty.
+- [ ] Verify no stale `src/interfaces/WallClock.h` include paths remain after the move:
+  `grep -r "src/interfaces/WallClock\.h" src/ tests/` — result must be empty.
 
 ##### test-dev-cpp
 

@@ -612,7 +612,8 @@ Phase 7 full `AudioSystem` RAII implementation delivered. The following items ar
    count). `m_efxAllocationAttempted` (not `m_efxAvailable`) guards destructor filter loop.
    VERIFIED by code inspection of destructor sequence.
 
-4. **`IAlcFunctions` seam**: `ialc_functions.h` defines interface; `DefaultAlcFunctions` wraps
+4. **`IAlcFunctions` seam**: `src/interfaces/IAlcFunctions.h` defines interface (moved from
+   `src/audio/ialc_functions.h` in Phase 10b Feature 3); `DefaultAlcFunctions` wraps
    real ALC in `AudioSystem.cpp`; `MockAlcFunctions` in `audio_thread_test.cpp` returns null for
    all `getProcAddress` calls. `AudioThread_AbsentThreadLocalContext_ConstructorThrows` now active
    (GTEST\_SKIP removed) and passing. VERIFIED — 16/16 tests pass.
