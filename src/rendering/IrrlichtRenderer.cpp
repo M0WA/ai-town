@@ -2062,10 +2062,12 @@ static SMesh* buildCloudDomeMesh()
     constexpr float kCloudDomeRadius   = 6000.0f;  // horizontal radius at base ring
     constexpr float kCloudDomeHeight   = 2000.0f;  // vertical height from base to apex (apex at Y=1000 m)
     constexpr float kCloudUVScale      = 4.0f;   // texture tiling factor
-    // Horizon fade is now handled entirely in the fragment shader via elevation angle
-    // (cloud_dome.frag, rev 2).  kFadeStart and kFadeEnd have been removed; all vertices
-    // use alpha=255.  The shader applies a smoothstep from 2° to 10° elevation, which is
-    // symmetric in all azimuths and eliminates the directional arc artifact.
+    // Horizon fade is handled entirely in the fragment shader via elevation angle
+    // (cloud_dome.frag, rev 2).  All vertices use alpha=255.  The shader applies a
+    // smoothstep from 12° to 30° elevation — well above the horizon — so no cloud
+    // texture content is visible in the lower sky band where polar UV would have caused
+    // azimuthal variation (directional arc).  UV is cylindrical (not polar) for the same
+    // reason.
 
     SMesh*       mesh = new SMesh();
     SMeshBuffer* buf  = new SMeshBuffer();
@@ -2098,9 +2100,17 @@ static SMesh* buildCloudDomeMesh()
             const float px  = r * nx;
             const float pz  = r * nz;
 
-            // UV: polar mapping centred on apex (0.5, 0.5), scaled outward to edge.
-            const float u = (nx * 0.5f * t + 0.5f) * kCloudUVScale;
-            const float v = (nz * 0.5f * t + 0.5f) * kCloudUVScale;
+            // UV: cylindrical mapping — u wraps around the azimuth (0→kCloudUVScale
+            // as phi goes 0→2π), v maps from apex (0) to base ring (kCloudUVScale).
+            // This ensures every ring samples the full texture width uniformly in all
+            // azimuth directions, so cloud density at any given elevation is statistically
+            // the same in every compass direction.  The old polar mapping (top-down
+            // projection) caused the UV sampling circle at the fade-band elevation ring to
+            // pass through denser cloud regions in some azimuths and sparse regions in
+            // others, producing an asymmetric horizon arc.
+            const float phi_norm = static_cast<float>(sec) / static_cast<float>(kDomeSectors);
+            const float u = phi_norm * kCloudUVScale;
+            const float v = t * kCloudUVScale;
 
             // Normal points inward-upward (camera is inside the dome).
             // Alpha=255 always — the fragment shader applies the elevation-angle fade.

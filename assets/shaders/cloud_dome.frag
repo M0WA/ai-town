@@ -25,8 +25,8 @@ void main() {
     vec4 tex = texture2D(u_tex, v_texCoord);
 
     // Elevation-angle horizon fade — symmetric in all compass directions.
-    const float kElevFadeEnd  = 0.0349;   // 2° in radians — transparent below this
-    const float kElevFadeHigh = 0.1745;   // 10° in radians — fully opaque above this
+    const float kElevFadeEnd  = 0.2094;   // 12° in radians — transparent below this
+    const float kElevFadeHigh = 0.5236;   // 30° in radians — fully opaque above this
 
     // smoothstep maps [kElevFadeEnd, kElevFadeHigh] → [0, 1]
     float t = clamp((v_elevAngle - kElevFadeEnd) / (kElevFadeHigh - kElevFadeEnd), 0.0, 1.0);
