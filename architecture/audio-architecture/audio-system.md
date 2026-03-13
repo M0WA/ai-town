@@ -206,7 +206,11 @@ public:
 ```cpp
 class AudioSystem : public IAudioSystem {
 public:
-    explicit AudioSystem(IClock* clock);   // alcOpenDevice + alcCreateContext (with HRTF attrs); throws on failure
+    explicit AudioSystem(IClock* clock);   // alcOpenDevice + alcCreateContext (with HRTF attrs).
+                                  // alcOpenDevice failure: logs warning, sets m_deviceLost=true, returns early
+                                  // (silent mode — all IAudioSystem calls become no-ops). Does NOT throw.
+                                  // alcCreateContext / alcMakeContextCurrent / ALC_EXT_thread_local_context
+                                  // failures still throw std::runtime_error.
                                   // clock: injectable for deterministic timing in tests (crossfade duck timer,
                                   // m_lastDuckWakeTime). Production passes WallClock; tests pass ManualClock.
     ~AudioSystem();  // MUST follow the audio thread shutdown sequence below
@@ -383,15 +387,24 @@ The audio thread then **additionally** calls `alcSetThreadContext(m_context)` vi
 **Constructor sequence (within `AudioSystem::AudioSystem(IClock*)`):**
 
 ```cpp
-// Step 1: open device and create context (throws on failure — done before thread launch).
+// Step 1: open device and create context.
 // alcMakeContextCurrent(m_context) establishes the MANDATORY, PERMANENT process-wide
 // context binding for the main thread. This binding must remain active for the entire
 // application lifetime — syncListenerToCamera() issues AL listener calls on the main
 // thread every frame and requires a current context on that thread.
 // The audio thread will ADDITIONALLY call alcSetThreadContext(m_context) for its own
 // thread-local binding; this does not displace the process-wide binding.
-m_device  = alcOpenDevice(nullptr);
-if (!m_device) throw std::runtime_error("alcOpenDevice failed");
+m_device = alcOpenDevice(nullptr);
+if (!m_device) {
+    // No audio device — degrade to silent mode rather than aborting the game.
+    // m_deviceLost=true causes all IAudioSystem methods to return early (no AL calls).
+    // All partial-construction guards (m_deviceCreated, m_contextCreated, etc.) remain
+    // false; the destructor skips all AL/ALC cleanup safely. The audio thread is never
+    // launched; m_audioThread remains default-constructed (not joinable).
+    logWarning("alcOpenDevice failed — no audio device available; running in silent mode");
+    m_deviceLost.store(true);
+    return;
+}
 // ... build HRTF attrs array (see hrtf-initialization.md) ...
 m_context = alcCreateContext(m_device, attribs);
 if (!m_context || alcMakeContextCurrent(m_context) == ALC_FALSE)
@@ -579,12 +592,15 @@ The following Phase 1 items have been verified by code inspection:
 
 Phase 7 full `AudioSystem` RAII implementation delivered. The following items are verified:
 
-1. **Constructor sequence**: `alcOpenDevice` → HRTF attrs context → `alcMakeContextCurrent` →
+1. **Constructor sequence**: `alcOpenDevice` (failure → silent mode: `m_deviceLost=true`, `return`)
+   → HRTF attrs context → `alcMakeContextCurrent` →
    `alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED)` → `alGenSources(62)` → pre-load queue populate →
    `alcGetProcAddress("alcSetThreadContext")` (throws `std::runtime_error` if null) → EFX filter
    allocation → `m_occlusionGainTarget[]` init to 1.0f → `m_useThreadLocalCtx = true` → thread
    launch → `m_initCV.wait_for` 5 s. VERIFIED by code inspection of
-   `src/audio/AudioSystem.cpp`.
+   `src/audio/AudioSystem.cpp`. Silent-mode early-return verified: all `m_deviceLost` guards
+   confirmed on `setMusicTrack`, `triggerStinger`, `syncListenerToCamera`, `transitionToGameplay`,
+   `update`, `setMasterVolume`, `playSound`, `playPositionalSound`, `stopSound`.
 
 2. **Audio thread init order**: `m_fnSetThreadCtx(m_context)` FIRST action; pre-load queue drain;
    `m_lastDuckWakeTime = m_clock->nowSeconds()` BEFORE `notify_one` (epoch-dt prevention);

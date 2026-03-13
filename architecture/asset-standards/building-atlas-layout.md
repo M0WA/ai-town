@@ -6,6 +6,24 @@
 
 - Format: DDS DXT1 sRGB (`GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`); use DXT5 sRGB (`GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`) if any atlas cell requires alpha
 - Upload path: raw-GL sRGB path (`glGenTextures` → `glBindTexture` → `glCompressedTexImage2D` with sRGB internal format) — diffuse color data requires sRGB decode. Do NOT use `IVideoDriver::getTexture()` for the building atlas.
+
+> **V1 implementation exception — PNG format via `IVideoDriver::getTexture()`**: Irrlicht 1.8.5's
+> DDS image loader (`CImageLoaderDDS`) is **disabled by default** — `_IRR_COMPILE_WITH_DDS_LOADER_`
+> is commented out in `IrrCompileConfig.h`, making `IVideoDriver::getTexture()` unable to load any
+> DDS file. Additionally, the `ddsBuffer` struct contains a `void* surface` field (8 bytes on
+> 64-bit systems) that shifts `pixelFormat.fourCC` to file offset 88 instead of the DDS-spec
+> offset 84, so even enabling the loader would silently misidentify DXT1 as ARGB8888 on x86\_64.
+>
+> **Current V1 workaround**: the on-disk atlas file is `buildings_atlas_d.png` (PNG, not DDS).
+> `BuildingAssetLoader::load()` calls `IVideoDriver::getTexture()` with the full PNG path and
+> explicitly assigns the result to every material slot via `node->getMaterial(m).setTexture(0, atlas)`.
+> This bypasses the failed B3D-embedded DDS reference entirely.
+>
+> **Production target (Phase 11+)**: migrate to `buildings_atlas_d.dds` (DXT1 sRGB) uploaded via
+> `TextureCache::loadSRGB()` (raw-GL `glCompressedTexImage2D` path), which bypasses the Irrlicht
+> image loader entirely and therefore is not affected by the disabled DDS loader or the
+> `ddsBuffer` struct alignment issue.
+
 - Resolution: 2048×2048 pixels
 - Cell grid: 4×4 cells at 512×512 px each (16 cells total for V1 module variants)
 - Mip chain: 4-level mandatory (`GL_TEXTURE_MAX_LEVEL = 3`; 2048→1024→512→256)
@@ -88,6 +106,10 @@ Two distinct vehicle atlases exist with separate purposes:
 - Mip chain: 4-level mandatory (2048→1024→512→256); `GL_TEXTURE_MAX_LEVEL = 3`
 - Upload path: raw-GL sRGB path (`GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`) — diffuse color data requires sRGB decode
 - Cell assignments maintained in `tools/vehicle_atlas_registry.json`
+
+> **V1 implementation exception — PNG format**: same constraint as the city building atlas above.
+> On-disk file is `vehicles_diffuse_atlas_d.png`. `BuildingAssetLoader::load()` loads it via
+> `IVideoDriver::getTexture()`. Production DXT1 sRGB DDS migration is Phase 11+.
 
 **Vehicle Sprite Atlas** (`vehicles_sprite_atlas_d.dds`):
 

@@ -431,6 +431,49 @@ if(WIN32)
 endif()
 
 # ============================================================================
+# aitown_model_validator — standalone interactive tool for visual asset verification.
+# Displays all V1 building and vehicle B3D assets category-by-category with an
+# orbiting camera so operators can confirm mesh, texture, and scale before release.
+# Not run in CI (requires a real OpenGL display and human visual sign-off).
+# See architecture/graphics-architecture/model-validator-tool.md for full spec.
+# ============================================================================
+add_executable(aitown_model_validator
+    src/benchmark/model_validator_main.cpp
+)
+target_link_libraries(aitown_model_validator PRIVATE aitown_render GLEW::GLEW Irrlicht)
+target_include_directories(aitown_model_validator PRIVATE src/ ${CMAKE_SOURCE_DIR})
+target_compile_definitions(aitown_model_validator PRIVATE
+    AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+)
+# Irrlicht transitive deps (Linux only) — same rationale as aitown_benchmark.
+if(UNIX AND NOT APPLE)
+    target_link_libraries(aitown_model_validator PRIVATE
+        JPEG::JPEG
+        PNG::PNG
+        ZLIB::ZLIB
+        BZip2::BZip2
+    )
+    if(XXFV86VM_LIB)
+        target_link_libraries(aitown_model_validator PRIVATE ${XXFV86VM_LIB})
+    endif()
+endif()
+# Windows: copy Irrlicht.dll and GLEW32.dll next to the model validator binary.
+if(WIN32)
+    add_custom_command(TARGET aitown_model_validator POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:Irrlicht>
+            $<TARGET_FILE_DIR:aitown_model_validator>
+        COMMENT "Copying Irrlicht.dll to aitown_model_validator output"
+    )
+    add_custom_command(TARGET aitown_model_validator POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:GLEW::GLEW>
+            $<TARGET_FILE_DIR:aitown_model_validator>
+        COMMENT "Copying GLEW32.dll to aitown_model_validator output"
+    )
+endif()
+
+# ============================================================================
 # TEST TARGETS
 # Each test target links both GTest and RapidCheck (proactively — removing later
 # is trivial; omitting causes a link failure if property tests are added later).

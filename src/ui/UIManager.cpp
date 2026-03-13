@@ -162,6 +162,12 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
             }
         }
 
+        // Override default selection (Residential Low = idx 0) with the active sprite.
+        // All 9 inactive sprites were set in the loop above; this call matches the Utilities
+        // sub-panel pattern (see below) and satisfies the test assertion:
+        //   EXPECT_CALL(backend_, setElementImage(_, kSpriteZoneResLowActive)).Times(AtLeast(1))
+        m_backend->setElementImage(m_zoneSubPanelBtns[0], kSpriteZoneResLowActive);
+
     }
 
     // --- Phase 9b: Utilities sub-panel buttons (2×2 grid) ---
@@ -759,18 +765,44 @@ bool UIManager::onEvent(const InputEvent& event) {
     // ============================================================
 
     // ============================================================
+    // Priority 6b: RMB cancels the active tool (deselects it).
+    // Only during Gameplay when a non-None tool is active.
+    // The camera drag starts after this check (EventReceiver sets m_rmbDragActive
+    // and forwards to CameraController only when UIManager returns false here).
+    // RMB down with an active tool: deselect the tool and consume the event so
+    // CameraController does NOT start a camera drag on the same press.
+    // ============================================================
+    if (m_state == GameState::Gameplay &&
+        event.type == InputEvent::Type::MouseButtonDown &&
+        event.button == 1 &&
+        m_activeTool != ActiveTool::None) {
+        // Close any open sub-panels and clear the active tool.
+        m_activeTool = ActiveTool::None;
+        if (m_hud) m_hud->setActiveToolLabel("No tool");
+        updateSubPanelVisibility();
+        // Also clear zone/road anchor and placement preview in case a drag was in progress.
+        m_zoneAnchorX = -1;
+        m_zoneAnchorZ = -1;
+        m_lmbHeld = false;
+        if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u);
+        return true;  // Consumed: tool deselected.
+    }
+
+    // ============================================================
     // Priority 7: World-interaction layer.
     // Only active when in Gameplay state with a non-None tool selected.
     //
-    // Zone tool uses rectangular selection (SimCity-style):
-    //   LMB press  → set anchor (m_zoneAnchorX/Z), update hover highlight,
-    //                do NOT place yet.
-    //   MouseMove  → update hover highlight to current tile only (no rect fill
-    //                during drag; deferred to release).
-    //   LMB release → fill all tiles in [min(anchor,current),max(anchor,current)]
-    //                 via doTerrainPlacement(); clear anchor.
+    // Zone tool: immediate placement on LMB click (single tile per click).
+    //   LMB press  → place at hovered tile immediately via doTerrainPlacement().
+    //   MouseMove  → update hover highlight only.
+    //   LMB release → clears m_lmbHeld; drag-painting places on each new tile.
     //
-    // Road, Utilities, and Demolish retain tile-by-tile drag behavior:
+    // Road tool: placement deferred to LMB release (commit on mouse-up).
+    //   LMB press  → record anchor tile; update hover highlight; do NOT place.
+    //   MouseMove  → update hover highlight only (no placement during drag).
+    //   LMB release → place at current hovered tile (single commit).
+    //
+    // Utilities and Demolish retain tile-by-tile drag behavior:
     //   LMB press  → placement dispatch (consumes when terrain hit).
     //   MouseMove  → drag-to-place when LMB held and tile changes.
     //   LMB release → clears m_lmbHeld (never consumes).
@@ -784,13 +816,10 @@ bool UIManager::onEvent(const InputEvent& event) {
         if (!m_renderer) return false;
 
         if (event.type == InputEvent::Type::MouseButtonUp && event.button == 0) {
-            // Zone rectangular fill: on LMB release, fill the full rectangle from
-            // anchor to the last hovered tile, then clear the anchor state.
+            // Zone tool: commit rectangular fill on mouse-up.
             if (m_activeTool == ActiveTool::Zone && m_zoneAnchorX != -1) {
-                // Determine the current tile under the cursor at release.
                 int releaseX = m_hoveredTileX;
                 int releaseZ = m_hoveredTileZ;
-                // Only fill when both anchor and release hit valid terrain.
                 if (releaseX != -1 && releaseZ != -1) {
                     int x0 = std::min(m_zoneAnchorX, releaseX);
                     int x1 = std::max(m_zoneAnchorX, releaseX);
@@ -802,9 +831,39 @@ bool UIManager::onEvent(const InputEvent& event) {
                         }
                     }
                 }
-                // Clear the anchor regardless of whether any tiles were filled.
                 m_zoneAnchorX = -1;
                 m_zoneAnchorZ = -1;
+                // Clear placement preview.
+                m_renderer->setTilePlacementPreview({}, 0u);
+            }
+
+            // Road tool: commit straight-line placement on mouse-up.
+            if (m_activeTool == ActiveTool::Road && m_zoneAnchorX != -1) {
+                int releaseX = m_hoveredTileX;
+                int releaseZ = m_hoveredTileZ;
+                if (releaseX != -1 && releaseZ != -1) {
+                    int dX = std::abs(releaseX - m_zoneAnchorX);
+                    int dZ = std::abs(releaseZ - m_zoneAnchorZ);
+                    if (dX >= dZ) {
+                        // Dominant axis: X — place along X at anchor Z.
+                        int x0 = std::min(m_zoneAnchorX, releaseX);
+                        int x1 = std::max(m_zoneAnchorX, releaseX);
+                        for (int tx = x0; tx <= x1; ++tx) {
+                            doTerrainPlacement(tx, m_zoneAnchorZ);
+                        }
+                    } else {
+                        // Dominant axis: Z — place along Z at anchor X.
+                        int z0 = std::min(m_zoneAnchorZ, releaseZ);
+                        int z1 = std::max(m_zoneAnchorZ, releaseZ);
+                        for (int tz = z0; tz <= z1; ++tz) {
+                            doTerrainPlacement(m_zoneAnchorX, tz);
+                        }
+                    }
+                }
+                m_zoneAnchorX = -1;
+                m_zoneAnchorZ = -1;
+                // Clear placement preview.
+                m_renderer->setTilePlacementPreview({}, 0u);
             }
 
             m_lmbHeld = false;
@@ -824,15 +883,60 @@ bool UIManager::onEvent(const InputEvent& event) {
                     case ActiveTool::Query:     colour = kHoverArgbQuery;     break;
                     default:                    colour = kHoverArgbClear;     break;
                 }
-                m_renderer->setTileHoverHighlight(hitX, hitZ, colour);
 
-                // Zone tool with active rect drag: only update hover highlight —
-                // do NOT fill tiles during drag. Tiles are filled on LMB release.
-                // Road, Utilities, and Demolish retain tile-by-tile drag behavior.
+                // Zone tool with anchor active: show rect preview instead of single-tile hover.
+                if (m_lmbHeld && m_activeTool == ActiveTool::Zone && m_zoneAnchorX != -1) {
+                    int x0 = std::min(m_zoneAnchorX, hitX);
+                    int x1 = std::max(m_zoneAnchorX, hitX);
+                    int z0 = std::min(m_zoneAnchorZ, hitZ);
+                    int z1 = std::max(m_zoneAnchorZ, hitZ);
+                    std::vector<std::pair<int,int>> previewTiles;
+                    previewTiles.reserve(static_cast<size_t>((x1 - x0 + 1) * (z1 - z0 + 1)));
+                    for (int tz = z0; tz <= z1; ++tz) {
+                        for (int tx = x0; tx <= x1; ++tx) {
+                            previewTiles.push_back({tx, tz});
+                        }
+                    }
+                    m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
+                    m_renderer->setTilePlacementPreview(previewTiles, colour);
+                }
+                // Road tool with anchor active: show axis-snapped line preview.
+                else if (m_lmbHeld && m_activeTool == ActiveTool::Road && m_zoneAnchorX != -1) {
+                    int dX = std::abs(hitX - m_zoneAnchorX);
+                    int dZ = std::abs(hitZ - m_zoneAnchorZ);
+                    std::vector<std::pair<int,int>> previewTiles;
+                    if (dX >= dZ) {
+                        int x0 = std::min(m_zoneAnchorX, hitX);
+                        int x1 = std::max(m_zoneAnchorX, hitX);
+                        previewTiles.reserve(static_cast<size_t>(x1 - x0 + 1));
+                        for (int tx = x0; tx <= x1; ++tx) {
+                            previewTiles.push_back({tx, m_zoneAnchorZ});
+                        }
+                    } else {
+                        int z0 = std::min(m_zoneAnchorZ, hitZ);
+                        int z1 = std::max(m_zoneAnchorZ, hitZ);
+                        previewTiles.reserve(static_cast<size_t>(z1 - z0 + 1));
+                        for (int tz = z0; tz <= z1; ++tz) {
+                            previewTiles.push_back({m_zoneAnchorX, tz});
+                        }
+                    }
+                    m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
+                    m_renderer->setTilePlacementPreview(previewTiles, colour);
+                }
+                // All other cases: single-tile hover highlight (no drag preview).
+                else {
+                    m_renderer->setTilePlacementPreview({}, 0u);
+                    m_renderer->setTileHoverHighlight(hitX, hitZ, colour);
+                }
+
+                // Utilities and Demolish retain tile-by-tile drag placement
+                // when LMB is held and tile changes.  Zone and Road use the
+                // deferred anchor/release pattern — no placement on move.
                 if (m_lmbHeld &&
                     (hitX != m_hoveredTileX || hitZ != m_hoveredTileZ) &&
                     m_activeTool != ActiveTool::Query &&
-                    m_activeTool != ActiveTool::Zone) {
+                    m_activeTool != ActiveTool::Zone &&
+                    m_activeTool != ActiveTool::Road) {
                     doTerrainPlacement(hitX, hitZ);
                 }
 
@@ -840,6 +944,7 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_hoveredTileZ = hitZ;
             } else {
                 m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
+                m_renderer->setTilePlacementPreview({}, 0u);
                 m_hoveredTileX = -1;
                 m_hoveredTileZ = -1;
             }
@@ -869,12 +974,24 @@ bool UIManager::onEvent(const InputEvent& event) {
             m_hoveredTileX = hitX;
             m_hoveredTileZ = hitZ;
 
-            // Zone tool: set anchor for rectangular selection — do NOT place on press.
-            // Placement is deferred to LMB release (rect fill over the full rectangle).
+            // Zone tool: record anchor on press — placement is deferred to LMB release
+            // (rectangular fill of all tiles in [anchor, release] bounding box).
+            // Clear any stale preview from a previous drag.
             if (m_activeTool == ActiveTool::Zone) {
                 m_zoneAnchorX = hitX;
                 m_zoneAnchorZ = hitZ;
-                return true;  // Consumed: anchor was set.
+                m_renderer->setTilePlacementPreview({}, 0u);
+                return true;  // Consumed: anchor recorded; no placement yet.
+            }
+
+            // Road tool: record anchor on press — placement is deferred to LMB release
+            // (straight-line along the dominant axis from anchor to release tile).
+            // Clear any stale preview from a previous drag.
+            if (m_activeTool == ActiveTool::Road) {
+                m_zoneAnchorX = hitX;
+                m_zoneAnchorZ = hitZ;
+                m_renderer->setTilePlacementPreview({}, 0u);
+                return true;  // Consumed: anchor recorded; no placement yet.
             }
 
             return doTerrainPlacement(hitX, hitZ);
@@ -1474,5 +1591,6 @@ void UIManager::onNewGame() {
     m_zoneAnchorX  = -1;
     m_zoneAnchorZ  = -1;
     m_lmbHeld      = false;
+    if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u);
     updateSubPanelVisibility();
 }

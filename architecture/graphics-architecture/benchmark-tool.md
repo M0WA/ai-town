@@ -83,6 +83,9 @@ owns the active OpenGL context.
 5. Create a shared procedural sky gradient texture (512x256, ECF_A8R8G8B8) used by both scenes.
 6. Build Scene 1 and Scene 2 (see below). Each scene uses its own `ISceneManager*`.
 
+Asset visual verification is handled by the separate `aitown_model_validator` tool.
+See [`architecture/graphics-architecture/model-validator-tool.md`](model-validator-tool.md).
+
 ### Scene 1: Anisotropy Ground
 
 Scene 1 is the primary anisotropy stress test. It is always rendered and drives the FPS
@@ -142,6 +145,9 @@ The recommendation engine takes the **minimum avgFPS** across both scenes at eac
 level and the **maximum VRAM** reading as the conservative worst-case for the threshold check.
 
 ### Output Format
+
+The two-pass benchmark (Scenes 1 and 2) produces the following output before the
+recommendation block:
 
 ```text
 === Scene 1: Anisotropy Ground (ground plane + building proxies) ===

@@ -291,7 +291,9 @@ AudioSystem::AudioSystem(IClock* clock, IAlcFunctions* alcFunctions)
     // -----------------------------------------------------------------------
     m_device = alcOpenDevice(nullptr);
     if (!m_device) {
-        throw std::runtime_error("alcOpenDevice failed — no audio device available");
+        logWarning("alcOpenDevice failed — no audio device available; running in silent mode");
+        m_deviceLost.store(true);
+        return;
     }
     m_deviceCreated = true;
 
@@ -918,22 +920,69 @@ bool AudioSystem::openStreamOGG(int streamSlot, const std::string& path,
         return false;
     }
 
-    s.isMusicStem     = isMusicStem;
-    s.m_samplesQueued = 0;
-    s.m_nextBarBoundary = 0;
-    s.isOpen          = true;
+    s.isMusicStem            = isMusicStem;
+    s.m_samplesQueued        = 0;
+    s.m_nextBarBoundary      = 0;
     s.m_intentionallyStopped = false;
-    s.crossfadeGain   = 1.0f;
+    s.crossfadeGain          = 1.0f;
+    // isOpen stays false until pre-fill and sidecar loading succeed.
 
     if (isMusicStem) {
         if (!loadMusicSidecar(path, s.bpm, s.beatsPerBar)) {
             // Missing/invalid sidecar for music stem is a hard error.
             AudioStreamUtils::closeOGG(s.vf);
-            s.isOpen = false;
             throw std::runtime_error("Missing or invalid sidecar for: " + path);
         }
     }
 
+    // Pre-fill all kNumBuffers AL buffer slots before marking the stream open.
+    //
+    // Without pre-filling, the source is in AL_STOPPED on the first audio thread
+    // wake (no buffers were queued before alSourcePlay was called by the caller).
+    // This triggers starvation recovery on every stream at startup — 4 rapid
+    // alSourcePlay calls that can overwhelm the PulseAudio backend.
+    //
+    // The audio thread checks s.isOpen and skips closed slots, so we can write
+    // AL buffers here without holding m_streamMutex or racing with the thread.
+    {
+        ALuint    src = static_cast<ALuint>(s.sourceHandle);
+        ALenum    fmt = (channels == 1) ? AL_FORMAT_MONO16 : AL_FORMAT_STEREO16;
+
+        for (int b = 0; b < AudioStream::kNumBuffers; ++b) {
+            std::vector<int16_t> pcm(
+                static_cast<size_t>(AudioStream::kSamplesPerBuffer) *
+                static_cast<size_t>(channels));
+
+            int frames = AudioStreamUtils::decodeFrames(
+                s.vf, pcm.data(),
+                static_cast<int>(AudioStream::kSamplesPerBuffer), channels);
+
+            if (frames == 0) {
+                // EOF on short file — seek to start and retry.
+                if (!AudioStreamUtils::seekToStart(s.vf)) break;
+                frames = AudioStreamUtils::decodeFrames(
+                    s.vf, pcm.data(),
+                    static_cast<int>(AudioStream::kSamplesPerBuffer), channels);
+            }
+            if (frames <= 0) break;
+
+            ALuint  bufHandle = static_cast<ALuint>(s.buffers[b]);
+            ALsizei byteCount = static_cast<ALsizei>(frames) *
+                                static_cast<ALsizei>(channels) *
+                                static_cast<ALsizei>(sizeof(int16_t));
+
+            alGetError();   // clear any stale error
+            alBufferData(bufHandle, fmt, pcm.data(), byteCount,
+                         static_cast<ALsizei>(sr));
+            if (alGetError() != AL_NO_ERROR) break;
+
+            alSourceQueueBuffers(src, 1, &bufHandle);
+            alGetError();   // consume — non-fatal if queue fails
+            s.m_samplesQueued += static_cast<uint64_t>(frames);
+        }
+    }
+
+    s.isOpen = true;
     return true;
 }
 
@@ -1085,12 +1134,15 @@ int AudioSystem::refillStream(int slot) {
                 logWarning("Stream starvation recovery — restarting source " +
                            std::to_string(slot));
                 alSourcePlay(src);
-                // Reset sample counter to avoid stale bar-boundary calculation.
-                // Count buffers now queued after the recovery requeue.
-                ALint bq2 = 0;
-                alGetSourcei(src, AL_BUFFERS_QUEUED, &bq2);
-                s.m_samplesQueued = static_cast<uint64_t>(bq2) *
-                                    AudioStream::kSamplesPerBuffer;
+                // Do NOT reset m_samplesQueued here.  It serves as the round-robin
+                // buffer index: (m_samplesQueued / kSamplesPerBuffer) % kNumBuffers.
+                // Resetting it mid-loop causes the next iteration to compute an index
+                // that collides with the buffer just queued in b==0, making
+                // alBufferData fail (buffer still attached).  Only one buffer ends up
+                // queued (~371 ms), the source starvates again next wake, and the
+                // recovery fires every 10 ms — flooding PulseAudio until SIGKILL.
+                // Reset bar-boundary only so it is recomputed after recovery.
+                s.m_nextBarBoundary = 0;
             }
         }
     }
@@ -1508,6 +1560,7 @@ void AudioSystem::onSourceRecycled(int i) {
 // ---------------------------------------------------------------------------
 SoundHandle AudioSystem::playSound(SoundId id, SoundPriority priority,
                                     float gain) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return 0;
     auto it = m_preloadedBuffers.find(id);
     if (it == m_preloadedBuffers.end()) {
         logWarning("playSound: SoundId " + std::to_string(id) + " not loaded");
@@ -1576,6 +1629,7 @@ SoundHandle AudioSystem::playSound(SoundId id, SoundPriority priority,
 SoundHandle AudioSystem::playPositionalSound(SoundId id, vec3 pos,
                                               SoundPriority priority,
                                               float gain) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return 0;
     auto it = m_preloadedBuffers.find(id);
     if (it == m_preloadedBuffers.end()) {
         logWarning("playPositionalSound: SoundId " +
@@ -1653,6 +1707,7 @@ SoundHandle AudioSystem::playPositionalSound(SoundId id, vec3 pos,
 // ---------------------------------------------------------------------------
 void AudioSystem::stopSound(SoundHandle handle) {
     if (handle == 0) return;
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     for (int i = 0; i < kEvictableSFXCount; ++i) {
         if (m_sfxSlots[i].occupied && m_sfxSlots[i].handle == handle) {
             alSourceStop(static_cast<ALuint>(m_sources[i]));

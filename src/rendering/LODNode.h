@@ -95,6 +95,13 @@ public:
     // Preserves the node's transform and material assignments.
     void swapMesh(irr::scene::IAnimatedMesh* newMesh);
 
+    // swapMeshRaw() — same as swapMesh() but accepts IMesh* directly.
+    // Used by road tile LOD transitions where procedural SMesh* (which is IMesh*
+    // but NOT IAnimatedMesh*) must be swapped in without an IAnimatedMesh cast.
+    // Caller must NOT call grab()/drop() — ownership stays with IrrlichtRenderer
+    // (m_sharedRoadMeshLOD0/1/2 are the authoritative references).
+    void swapMeshRaw(irr::scene::IMesh* mesh);
+
     // getNode() — accessor for the wrapped scene node (exposed as ISceneNode* for
     // positioning/removal/material access). Caller must not call remove() or drop().
     irr::scene::ISceneNode* getNode() const;

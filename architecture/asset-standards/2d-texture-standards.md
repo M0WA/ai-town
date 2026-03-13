@@ -23,6 +23,18 @@
 
     - Source PNG stores full XYZ for reference; DDS export must swizzle X→alpha, Y→green before BC3 compression.
     - BC5/ATI2 migration (post-V1): BC5/ATI2 is not confirmed to have a load path in Irrlicht's standard DDS loader and must not be used in production until explicitly verified.
+- **`IVideoDriver::getTexture()` cannot load DDS files** — Irrlicht 1.8.5 ships with its DDS
+  image loader disabled by default (`_IRR_COMPILE_WITH_DDS_LOADER_` is commented out in
+  `IrrCompileConfig.h`). Any call to `IVideoDriver::getTexture()` on a `.dds` path returns null.
+  There is a secondary structural bug: `ddsBuffer` in `CImageLoaderDDS.h` contains a `void*
+  surface` field (8 bytes on x86\_64), shifting `pixelFormat.fourCC` to file offset 88 instead
+  of the DDS-spec offset 84. This would cause Irrlicht to misidentify DXT1 files as ARGB8888 on
+  64-bit systems even if the loader were re-enabled. **Consequence**: textures loaded via
+  `IVideoDriver::getTexture()` (the `TextureCache` linear pool, `BuildingAssetLoader`, and any
+  other Irrlicht-path code) must use a format the built-in Irrlicht loaders support — PNG is the
+  standard choice. The raw-GL `TextureCache::loadSRGB()` path (`glCompressedTexImage2D`) is NOT
+  affected by this constraint because it reads the DDS file directly with a bespoke header parser
+  and bypasses the Irrlicht image loader entirely.
   - Specular/roughness (grayscale): DDS BC1; (packed multi-channel): DDS BC3
 - **Source format**: PNG (source files only — never shipped as runtime textures)
 - **Color space / sRGB**: Irrlicht's OpenGL backend does not automatically apply sRGB decode on texture sample. **Chosen approach: sRGB decode at load time** (preferred) **with shader fallback**:

@@ -1,6 +1,16 @@
 # Texture Cache
 
 - `TextureCache` manages **three distinct pools**: **(1) linear-format textures** loaded via `IVideoDriver::getTexture()` (normal maps, roughness — not sRGB, not splat maps); **(2) sRGB diffuse textures** uploaded via the raw OpenGL path (`glGenTextures` / `glCompressedTexImage2D` with sRGB internal format); **(3) splat maps** uploaded via raw OpenGL `glTexImage2D` with `GL_RGBA8` uncompressed format. Methods: `loadLinear(path)`, `loadSRGB(path, format)`, `loadSplatMap(path)`, `releaseLinear(ITexture*)`, `releaseSRGB(filename)`, `releaseSplatMap(filename)`. All three pools respect the LRU eviction budget. **Do not use `IVideoDriver::getTexture()` for sRGB textures or splat maps** — Irrlicht's internal decoder does not produce sRGB or uncompressed RGBA8 GL formats.
+
+  **Critical constraint — `IVideoDriver::getTexture()` cannot load DDS files**: Irrlicht 1.8.5's
+  DDS image loader is disabled by default (`_IRR_COMPILE_WITH_DDS_LOADER_` is commented out in
+  `IrrCompileConfig.h`). `loadLinear()` therefore only accepts formats that Irrlicht's active
+  image loaders support — PNG, JPG, TGA, BMP. There is also a structural bug: `ddsBuffer` in
+  `CImageLoaderDDS.h` has a `void* surface` field (8 bytes on x86\_64 with `#pragma pack(1)`),
+  which shifts `pixelFormat.fourCC` to file offset 88 instead of the correct DDS-spec offset 84,
+  causing DXT1 to be silently misidentified as ARGB8888 on 64-bit systems. **The raw-GL
+  `loadSRGB()` path is NOT affected** — it reads the DDS file with a bespoke header parser and
+  calls `glCompressedTexImage2D` directly, bypassing the Irrlicht image loader entirely.
 - **Linear pool** internal data: `std::unordered_map<std::string, CacheEntry>` where `CacheEntry` = { `ITexture*`, ref_count, last_access_timestamp, estimated_vram_bytes }
 - **Splat map pool** internal data: `std::unordered_map<std::string, SplatEntry>` where `SplatEntry` = { `GLuint texId`, ref_count, last_access_timestamp, estimated_vram_bytes }. Splat maps are uploaded via raw `glTexImage2D(GL_RGBA8)` — NEVER via `glCompressedTexImage2D` (DXT compression corrupts the smooth 0–255 blend weight gradients). `loadSplatMap(path)` performs the upload sequence described in `2d-texture-standards.md` (Splat Map GPU Upload). `evictUnreferenced()` calls `glDeleteTextures(1, &entry.texId)` for zero-reference splat map entries. The EDT_NULL guard applies to the splat map pool identically to the sRGB pool. Splat map VRAM estimation: `width × height × 4` bytes (no ×1.33 overhead — single mip level only, `GL_TEXTURE_MAX_LEVEL = 0`).
 - **sRGB pool** internal data: `std::unordered_map<std::string, SRGBEntry>` where `SRGBEntry` = { `GLuint texId`, ref_count, last_access_timestamp, estimated_vram_bytes }

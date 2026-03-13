@@ -64,6 +64,7 @@ All files contain the full verbatim content from the master spec (`CLAUDE.md`).
 | Texture Cache | [graphics-architecture/texture-cache.md](graphics-architecture/texture-cache.md) |
 | Shader Loading | [graphics-architecture/shader-loading.md](graphics-architecture/shader-loading.md) |
 | Benchmark Tool (VRAM/FPS/Anisotropy Profiler) | [graphics-architecture/benchmark-tool.md](graphics-architecture/benchmark-tool.md) |
+| Model Validator Tool (Interactive Asset Visual Check) | [graphics-architecture/model-validator-tool.md](graphics-architecture/model-validator-tool.md) |
 
 ---
 

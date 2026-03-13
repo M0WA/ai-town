@@ -311,7 +311,14 @@ TEST_F(UIManagerTransitionTest, OnEvent_MouseMove_NoModal_NoCriticalToast_Return
 }
 
 // ============================================================================
-// NotificationManagerTest — covers NotificationManager's Phase 3 stub bodies.
+// NotificationManagerStandaloneTest — covers NotificationManager's Phase 3
+// smoke-test bodies (no-crash, basic state checks).
+//
+// Renamed from NotificationManagerTest (which was defined in both this file
+// and notification_system_test.cpp) to prevent an ODR violation: when two
+// translation units define the same class name in a test binary, the linker
+// picks one SetUp() definition as the weak-symbol winner, silently discarding
+// the other fixture's ON_CALL configuration and breaking unrelated tests.
 //
 // NotificationManager is constructed internally by UIManager; to test it
 // directly we construct it standalone with the mocks.
@@ -319,7 +326,7 @@ TEST_F(UIManagerTransitionTest, OnEvent_MouseMove_NoModal_NoCriticalToast_Return
 #include "src/ui/NotificationManager.h"
 #include "src/platform/input_event.h"
 
-class NotificationManagerTest : public ::testing::Test {
+class NotificationManagerStandaloneTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Phase 10: pass NiceMock<MockAudioSystem>* as 4th parameter.
@@ -342,21 +349,21 @@ protected:
 // ---------------------------------------------------------------------------
 // postNormal — Phase 3 stub; must not crash.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, PostNormal_NoCrash) {
+TEST_F(NotificationManagerStandaloneTest, PostNormal_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->postNormal("Title", "Body text"));
 }
 
 // ---------------------------------------------------------------------------
 // postCritical — Phase 3 stub; must not crash.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, PostCritical_NoCrash) {
+TEST_F(NotificationManagerStandaloneTest, PostCritical_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->postCritical("Critical Title", "Critical body"));
 }
 
 // ---------------------------------------------------------------------------
 // hasCriticalToastVisible — Phase 3 stub always returns false.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, HasCriticalToastVisible_ReturnsFalse_InPhase3) {
+TEST_F(NotificationManagerStandaloneTest, HasCriticalToastVisible_ReturnsFalse_InPhase3) {
     EXPECT_FALSE(notif_->hasCriticalToastVisible())
         << "Phase 3 stub: hasCriticalToastVisible() must return false";
 }
@@ -364,7 +371,7 @@ TEST_F(NotificationManagerTest, HasCriticalToastVisible_ReturnsFalse_InPhase3) {
 // ---------------------------------------------------------------------------
 // hasCriticalToastVisible — true after postCritical (Phase 8 real implementation).
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, HasCriticalToastVisible_TrueAfterPostCritical) {
+TEST_F(NotificationManagerStandaloneTest, HasCriticalToastVisible_TrueAfterPostCritical) {
     notif_->postCritical("Alert", "Something bad happened");
     EXPECT_TRUE(notif_->hasCriticalToastVisible())
         << "Phase 8: hasCriticalToastVisible() must return true after postCritical";
@@ -373,14 +380,14 @@ TEST_F(NotificationManagerTest, HasCriticalToastVisible_TrueAfterPostCritical) {
 // ---------------------------------------------------------------------------
 // update — Phase 3 stub; must not crash.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, Update_NoCrash) {
+TEST_F(NotificationManagerStandaloneTest, Update_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->update());
 }
 
 // ---------------------------------------------------------------------------
 // onEvent — Phase 3 stub always returns false (event not consumed).
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, OnEvent_ReturnsFalse) {
+TEST_F(NotificationManagerStandaloneTest, OnEvent_ReturnsFalse) {
     InputEvent ev{};
     ev.type = InputEvent::Type::MouseButtonDown;
     ev.button = 0;
@@ -392,7 +399,7 @@ TEST_F(NotificationManagerTest, OnEvent_ReturnsFalse) {
 // setModalActive — sets the m_modalActive flag; no crash.
 // Phase 3: the flag is private, but the method body sets it without dereferences.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, SetModalActive_NoCrash) {
+TEST_F(NotificationManagerStandaloneTest, SetModalActive_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->setModalActive(true));
     EXPECT_NO_FATAL_FAILURE(notif_->setModalActive(false));
 }
@@ -400,7 +407,7 @@ TEST_F(NotificationManagerTest, SetModalActive_NoCrash) {
 // ---------------------------------------------------------------------------
 // dismissCriticalToast — Phase 3 stub; must not crash.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, DismissCriticalToast_NoCrash) {
+TEST_F(NotificationManagerStandaloneTest, DismissCriticalToast_NoCrash) {
     constexpr UIElementHandle kSomeHandle = 0x0001u;
     EXPECT_NO_FATAL_FAILURE(notif_->dismissCriticalToast(kSomeHandle));
 }
@@ -408,7 +415,7 @@ TEST_F(NotificationManagerTest, DismissCriticalToast_NoCrash) {
 // ---------------------------------------------------------------------------
 // draw — calls m_backend->setElementVisible(); must not crash with NiceMock.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, Draw_NoCrash) {
+TEST_F(NotificationManagerStandaloneTest, Draw_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->draw());
 }
 

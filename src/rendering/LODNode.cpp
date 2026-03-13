@@ -145,6 +145,18 @@ void LODNode::swapMesh(irr::scene::IAnimatedMesh* newMesh)
 }
 
 // ---------------------------------------------------------------------------
+// swapMeshRaw() — LOD mesh swap for procedural IMesh* (road tiles)
+// ---------------------------------------------------------------------------
+
+void LODNode::swapMeshRaw(irr::scene::IMesh* mesh)
+{
+    // Direct setMesh call — no IAnimatedMesh* indirection needed.
+    // IMeshSceneNode::setMesh(IMesh*) drops the old mesh and grabs the new one.
+    // Caller retains ownership of the mesh (IrrlichtRenderer holds the ref).
+    m_node->setMesh(mesh);
+}
+
+// ---------------------------------------------------------------------------
 // Accessor
 // ---------------------------------------------------------------------------
 

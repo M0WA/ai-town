@@ -200,11 +200,15 @@ protected:
         //
         // NOTE: setMapDimensions detects a dimension change (0→10) and calls
         // renderer_->setZoneOverlay(10, 10, {}) to clear any stale render overlay.
-        // Pre-register this expected call with AnyNumber() so StrictMock<MockRenderer>
-        // does not fail on the unconditional SetUp() call. Individual tests that need
-        // to verify specific setZoneOverlay arguments add their own EXPECT_CALL,
-        // which GMock satisfies via most-recently-added-first matching order.
+        // Pre-register catch-alls so StrictMock<MockRenderer> does not fail on
+        // unconditional UIManager calls that are not the subject of individual tests.
+        // Tests that need to verify specific arguments add their own EXPECT_CALL
+        // (GMock satisfies via most-recently-added-first matching order).
         EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(::testing::AnyNumber());
+        // setTilePlacementPreview fires on Zone/Road LMB-down (anchor set, clear preview)
+        // and on LMB-up (clear after commit).  Tests exercising the preview contents add
+        // their own EXPECT_CALL; all others suppress via this catch-all.
+        EXPECT_CALL(renderer_, setTilePlacementPreview(_, _)).Times(::testing::AnyNumber());
 
         uiManager_->setMapDimensions(10, 10);
 
@@ -330,12 +334,16 @@ TEST_F(WorldInteractionTest, WorldInteraction_RoadPlacement_CallsPlaceRoad)
 
     activateRoadTool();
 
-    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+    // Road placement is deferred to LMB release (Bug 3 fix).
+    // Step 1: LMB press — sets anchor, no placement yet.
+    EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
-
-    EXPECT_CALL(sim_, placeRoad(5, 7, 0)).Times(1);
-
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    // Step 2: LMB release — placement fires at the anchor tile.
+    EXPECT_CALL(sim_, placeRoad(5, 7, 0)).Times(1);
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 }
 
 // ---------------------------------------------------------------------------
@@ -1169,12 +1177,15 @@ TEST_F(WorldInteractionTest, Bug3_RoadTool_ToolbarClick_ActivatesRoadTool)
     EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::Road)
         << "Road toolbar click must activate Road tool (getActiveTool() == Road)";
 
-    // Step 3: Now click terrain and verify placeRoad is dispatched.
+    // Step 3: LMB press on terrain — sets anchor, no placement on press (Bug 3 fix).
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(4), SetArgReferee<3>(6), Return(true)));
-    EXPECT_CALL(sim_, placeRoad(4, 6, 0)).Times(1);
-
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    // Step 4: LMB release — placement fires at the anchor tile.
+    EXPECT_CALL(sim_, placeRoad(4, 6, 0)).Times(1);
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 }
 
 // ---------------------------------------------------------------------------
@@ -1509,32 +1520,47 @@ TEST_F(WorldInteractionTest, Bug4_QueryMode_ToolbarCarveout_PreventsPriorityThre
 // must fire for each tile the cursor enters, not for every pixel move.
 // (ref: architecture/ui-ux/input-arbitration.md Priority-7 drag-to-place)
 // ---------------------------------------------------------------------------
-TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_MovesToNewTile_PlacesOnEachNewTile)
+TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_MovesToNewTile_PlacesOnMouseUp)
 {
+    // Road tool (Bug 3 fix): placement is deferred to LMB release.
+    // Drag moves do NOT place — only the mouse-up at the final tile commits.
     ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
 
     activateRoadTool();
 
-    // Step 1: LMB down on tile (5,7) — pickTerrainTile called for the click.
+    // Step 1: LMB down on tile (5,7) — anchor set, no placement.
     EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(sim_, placeRoad(5, 7, 0)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
 
-    // Step 2: MouseMove to tile (6,7) — drag fires because tile changed.
-    // setTileHoverHighlight is called for hover; placeRoad(6,7,0) is called once.
+    // Step 2: MouseMove to tile (6,7) — line preview covers (5,7)–(6,7); no placement.
+    // With LMB held and Road anchor at (5,7), the dominant axis is X (dX=1 >= dZ=0),
+    // so the preview tiles are {(5,7),(6,7)}.  setTilePlacementPreview is called with
+    // those tiles; setTileHoverHighlight(-1,-1,_) is called to clear the single-tile hover.
     EXPECT_CALL(renderer_, pickTerrainTile(600, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(renderer_, setTileHoverHighlight(6, 7, _)).Times(1);
-    EXPECT_CALL(sim_, placeRoad(6, 7, 0)).Times(1);
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+        .Times(1);
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
     uiManager_->onEvent(makeMouseMove(600, 500));
 
-    // Step 3: MouseMove to tile (7,7) — drag fires again for the new tile.
+    // Step 3: MouseMove to tile (7,7) — line preview covers (5,7)–(7,7); still no placement.
     EXPECT_CALL(renderer_, pickTerrainTile(700, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(7), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(renderer_, setTileHoverHighlight(7, 7, _)).Times(1);
-    EXPECT_CALL(sim_, placeRoad(7, 7, 0)).Times(1);
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+        .Times(1);
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
     uiManager_->onEvent(makeMouseMove(700, 500));
+
+    // Step 4: LMB release — axis-snapped line from anchor (5,7) to hover (7,7) along X.
+    // All three tiles (5,7), (6,7), (7,7) are placed.
+    EXPECT_CALL(sim_, placeRoad(5, 7, 0)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(6, 7, 0)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(7, 7, 0)).Times(1);
+    uiManager_->onEvent(makeMouseButtonUp(0, 700, 500));
 }
 
 // ---------------------------------------------------------------------------
@@ -1558,35 +1584,40 @@ TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_MovesToNewTile_PlacesOnEa
 // ---------------------------------------------------------------------------
 TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_HoverUpdateOnClick_NoDoublePlace)
 {
+    // Road tool (Bug 3 fix): press records the anchor; move updates hover; release places.
+    // Pressing and moving to the same tile must result in exactly ONE placeRoad call (on release).
     ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
 
     activateRoadTool();
 
-    // Step 1: LMB down on tile (5,7) — no prior hover, m_hoveredTileX = -1.
+    // Step 1: LMB down on tile (5,7) — anchor set at (5,7), no placement.
     EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(sim_, placeRoad(5, 7, 0)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
 
-    // Step 2: MouseMove to the same tile (5,7) — cursor has not moved to a new tile.
-    // placeRoad must NOT be called again; the drag throttle must suppress it because
-    // m_hoveredTileX was correctly updated to 5 by the MouseButtonDown handler.
+    // Step 2: MouseMove to the same tile (5,7) — preview updated (anchor=hover=(5,7)),
+    // single-tile line.  setTilePlacementPreview called; setTileHoverHighlight(-1,-1,_)
+    // called to clear the single-tile hover.  No placement.
     EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(renderer_, setTileHoverHighlight(5, 7, _)).Times(1);
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+        .Times(1);
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
     uiManager_->onEvent(makeMouseMove(500, 500));
+
+    // Step 3: LMB release — exactly ONE placement at the anchor/hover tile (5,7).
+    EXPECT_CALL(sim_, placeRoad(5, 7, 0)).Times(1);
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 }
 
 // ---------------------------------------------------------------------------
 // Test 31: ZoneRectSelect_LmbPress_DoesNotPlaceImmediately
 //
-// Zone tool: LMB press must set the anchor and return consumed=true, but
-// placeZone must NOT be called on press (placement is deferred to release).
-//
-// This verifies the SimCity-style rectangular selection: the press only sets the
-// anchor corner; the actual tile fill happens on LMB release.
-// (ref: implementation/phase-10.md Zone rectangular selection)
+// Zone tool (rect-select): LMB press records the anchor tile — placement is
+// deferred to LMB release.  The event is consumed but placeZone is NOT called
+// on the press itself.  placeZone fires on LMB release (fills the 1×1 rect).
 // ---------------------------------------------------------------------------
 TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_LmbPress_DoesNotPlaceImmediately)
 {
@@ -1595,7 +1626,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_LmbPress_DoesNotPla
     activateZoneTool();
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(::testing::AnyNumber());
 
-    // pickTerrainTile is called to resolve the anchor tile.
+    // pickTerrainTile is called on press to resolve the anchor tile.
     EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
 
@@ -1605,19 +1636,19 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_LmbPress_DoesNotPla
     // Act: LMB press at world position.
     bool consumed = uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
 
-    // Event must be consumed (anchor set) but no placement called.
-    EXPECT_TRUE(consumed) << "Zone LMB press must be consumed (anchor was set)";
+    // Event must be consumed (anchor recorded).
+    EXPECT_TRUE(consumed) << "Zone LMB press must be consumed (anchor recorded)";
 }
 
 // ---------------------------------------------------------------------------
 // Test 32: ZoneRectSelect_SingleTile_PressRelease_PlacesOnce
 //
-// Zone tool: LMB press and release on the same tile must call placeZone exactly
-// once (1x1 rectangle).
+// Zone tool (rect-select): LMB press sets anchor (no placement); LMB release
+// on the same tile fills the 1×1 rect → exactly one placeZone call.
 //
 // Sequence:
-//   LMB press  → anchor=(5,7), no placement
-//   LMB release (same tile, m_hoveredTileX=5, m_hoveredTileZ=7) → placeZone once
+//   LMB press  → anchor set; placeZone NOT called
+//   LMB release → placeZone called once at (5,7) (1×1 rect)
 // ---------------------------------------------------------------------------
 TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_SingleTile_PressRelease_PlacesOnce)
 {
@@ -1626,38 +1657,27 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_SingleTile_PressRel
 
     activateZoneTool();
 
-    // Step 1: LMB press — anchor set at (5,7), no placement.
+    // Step 1: LMB press — anchor set at (5,7); NO placement.
     EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
     EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
 
-    // Step 2: LMB release — hover tile is still (5,7) from the press; rect is 1x1.
-    // placeZone(5, 7, _, _, 0) must be called exactly once.
+    // Step 2: LMB release — m_hoveredTileX/Z == (5,7) (set on press); 1×1 rect fires once.
     EXPECT_CALL(sim_, placeZone(5, 7, _, _, 0)).Times(1);
-
-    InputEvent upEv{};
-    upEv.type   = InputEvent::Type::MouseButtonUp;
-    upEv.button = 0;
-    upEv.x      = 500;
-    upEv.y      = 500;
-    upEv.physX  = 500;
-    upEv.physY  = 500;
-    uiManager_->onEvent(upEv);
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 }
 
 // ---------------------------------------------------------------------------
 // Test 33: ZoneRectSelect_MultiTileRect_FillsAllTiles
 //
-// Zone tool: drag from (2,3) to (4,5) → release must fill 3x3 = 9 tiles.
+// Zone tool (rect-select): LMB press at (2,3) sets anchor; MouseMove to (4,5)
+// shows a 3×3 rect preview; LMB release fills all 9 tiles.
 //
 // Sequence:
-//   LMB press  → anchor=(2,3)
-//   MouseMove  → hovered tile updates to (4,5), no intermediate placement
-//   LMB release → placeZone called 9 times for all tiles in [2..4, 3..5]
-//
-// Verifies that the release iterates the full rectangle and calls doTerrainPlacement
-// for each tile independently.
+//   LMB press at (2,3) → anchor=(2,3); no placeZone
+//   MouseMove to (4,5)  → rect preview shown; no placeZone
+//   LMB release          → placeZone called for all 9 tiles in [2..4, 3..5]
 // ---------------------------------------------------------------------------
 TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_MultiTileRect_FillsAllTiles)
 {
@@ -1666,46 +1686,40 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_MultiTileRect_Fills
 
     activateZoneTool();
 
-    // Step 1: LMB press — anchor set at (2,3).
+    // Step 1: LMB press at (2,3) — anchor set; no placement.
     EXPECT_CALL(renderer_, pickTerrainTile(200, 300, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(2), SetArgReferee<3>(3), Return(true)));
-    // No placement on press.
     EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
     uiManager_->onEvent(makeMouseButtonDown(0, 200, 300));
 
-    // Step 2: MouseMove — drag to (4,5). No placeZone during drag (Zone uses deferred fill).
+    // Step 2: MouseMove to (4,5) while LMB held — rect preview; no placement.
     EXPECT_CALL(renderer_, pickTerrainTile(400, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(4), SetArgReferee<3>(5), Return(true)));
-    EXPECT_CALL(renderer_, setTileHoverHighlight(4, 5, _)).Times(AtLeast(1));
-    // Confirm no placeZone during MouseMove with Zone tool.
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+        .Times(1);
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
     uiManager_->onEvent(makeMouseMove(400, 500));
 
-    // Step 3: LMB release — fills rect [2..4] x [3..5] = 9 tiles.
-    // Each tile in the rectangle must receive exactly one placeZone call.
-    for (int tz = 3; tz <= 5; ++tz) {
-        for (int tx = 2; tx <= 4; ++tx) {
-            EXPECT_CALL(sim_, placeZone(tx, tz, _, _, 0)).Times(1);
-        }
-    }
-
-    InputEvent upEv{};
-    upEv.type   = InputEvent::Type::MouseButtonUp;
-    upEv.button = 0;
-    upEv.x      = 400;
-    upEv.y      = 500;
-    upEv.physX  = 400;
-    upEv.physY  = 500;
-    uiManager_->onEvent(upEv);
+    // Step 3: LMB release — all 9 tiles in rect [x:2..4, z:3..5] filled.
+    // m_hoveredTileX/Z == (4,5) after the MouseMove; anchor == (2,3).
+    EXPECT_CALL(sim_, placeZone(2, 3, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(3, 3, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(4, 3, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(2, 4, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(3, 4, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(4, 4, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(2, 5, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(3, 5, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(4, 5, _, _, 0)).Times(1);
+    uiManager_->onEvent(makeMouseButtonUp(0, 400, 500));
 }
 
 // ---------------------------------------------------------------------------
 // Test 34: ZoneRectSelect_RoadDragUnchanged_PlacesOnEachNewTile
 //
-// Road tool drag still uses the original tile-by-tile behavior (NOT deferred rect).
-// LMB press places tile (5,7); MouseMove to (6,7) places again; no deferred fill.
-//
-// This is a regression guard: the rectangular selection change must NOT affect Road.
+// Road tool (straight-line): LMB press sets anchor; MouseMove shows line preview;
+// LMB release places all tiles along the dominant axis from anchor to hover.
 // ---------------------------------------------------------------------------
 TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_RoadDragUnchanged_PlacesOnEachNewTile)
 {
@@ -1713,40 +1727,34 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_RoadDragUnchanged_P
 
     activateRoadTool();
 
-    // Step 1: LMB press on tile (5,7) — places immediately (road drag, not deferred).
+    // Step 1: LMB press on tile (5,7) — anchor set, no placement.
     EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(sim_, placeRoad(5, 7, 0)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
 
-    // Step 2: MouseMove to tile (6,7) — road drag fires placement immediately.
+    // Step 2: MouseMove to tile (6,7) while LMB held — line preview (anchor(5,7)→(6,7));
+    // setTilePlacementPreview called; setTileHoverHighlight(-1,-1,_) clears single-tile hover.
     EXPECT_CALL(renderer_, pickTerrainTile(600, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(renderer_, setTileHoverHighlight(6, 7, _)).Times(1);
-    EXPECT_CALL(sim_, placeRoad(6, 7, 0)).Times(1);
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+        .Times(1);
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
     uiManager_->onEvent(makeMouseMove(600, 500));
 
-    // Step 3: LMB release — no placement on release for Road (unlike Zone).
-    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
-    InputEvent upEv{};
-    upEv.type   = InputEvent::Type::MouseButtonUp;
-    upEv.button = 0;
-    upEv.x      = 600;
-    upEv.y      = 500;
-    upEv.physX  = 600;
-    upEv.physY  = 500;
-    uiManager_->onEvent(upEv);
+    // Step 3: LMB release — line from anchor(5,7) to hover(6,7) along X: two placements.
+    EXPECT_CALL(sim_, placeRoad(5, 7, 0)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(6, 7, 0)).Times(1);
+    uiManager_->onEvent(makeMouseButtonUp(0, 600, 500));
 }
 
 // ---------------------------------------------------------------------------
 // Test 35: ZoneRectSelect_DragNoDragPlacement_ZoneToolExcluded
 //
-// Zone tool: LMB press + MouseMove to a different tile must NOT call placeZone
-// during the MouseMove (zone drag is deferred to release).
-//
-// Before this change, the MouseMove drag path would have called doTerrainPlacement
-// for zone drag. After the change, the Zone tool is excluded from the drag-to-place
-// path and placement is deferred entirely to LMB release.
+// Zone tool (rect-select): Zone is excluded from tile-by-tile drag placement.
+// LMB press sets anchor; MouseMove shows rect preview (no placement on move);
+// LMB release fills the full rectangle.
 // ---------------------------------------------------------------------------
 TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_DragNoDragPlacement_ZoneToolExcluded)
 {
@@ -1755,30 +1763,30 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_DragNoDragPlacement
 
     activateZoneTool();
 
-    // Step 1: LMB press — anchor set at (2,3), no placement.
+    // Step 1: LMB press at (2,3) — anchor set; no placement on press.
     EXPECT_CALL(renderer_, pickTerrainTile(200, 300, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(2), SetArgReferee<3>(3), Return(true)));
     EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
     uiManager_->onEvent(makeMouseButtonDown(0, 200, 300));
 
-    // Step 2: MouseMove to different tile — placeZone must still NOT be called.
+    // Step 2: MouseMove to (4,5) — rect preview shown; no placement during drag.
     EXPECT_CALL(renderer_, pickTerrainTile(400, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(4), SetArgReferee<3>(5), Return(true)));
-    EXPECT_CALL(renderer_, setTileHoverHighlight(4, 5, _)).Times(AtLeast(1));
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+        .Times(1);
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
     uiManager_->onEvent(makeMouseMove(400, 500));
 
-    // No LMB release in this test — just verifying no drag-to-place for Zone.
-    // The anchor and lmbHeld state will be cleaned up by TearDown.
-    // Issue a release to satisfy StrictMock (no unexpected calls on cleanup).
-    InputEvent upEv{};
-    upEv.type   = InputEvent::Type::MouseButtonUp;
-    upEv.button = 0;
-    upEv.x      = 400;
-    upEv.y      = 500;
-    upEv.physX  = 400;
-    upEv.physY  = 500;
-    // Release fills the rect — allow the 3x3 placeZone calls here.
-    EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(::testing::AnyNumber());
-    uiManager_->onEvent(upEv);
+    // Step 3: LMB release — rect fills all 9 tiles [x:2..4, z:3..5].
+    EXPECT_CALL(sim_, placeZone(2, 3, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(3, 3, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(4, 3, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(2, 4, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(3, 4, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(4, 4, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(2, 5, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(3, 5, _, _, 0)).Times(1);
+    EXPECT_CALL(sim_, placeZone(4, 5, _, _, 0)).Times(1);
+    uiManager_->onEvent(makeMouseButtonUp(0, 400, 500));
 }

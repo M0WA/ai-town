@@ -14,7 +14,7 @@
 | Small buildings / props (height_floors >= 4) | 500–1500 tris | 100–300 tris | 300–500 tris (`_lod2.b3d` geometry shell) |
 | Vehicles | 1000–3000 tris (indicative range — see per-class table in § Vehicle Polygon Budget for binding limits) | 200–500 tris (indicative range — see per-class table for binding limits) | Point/sprite |
 | Terrain chunk (64×64 m) | 32×32 quad grid | 16×16 quad grid | 8×8 quad grid |
-| Road tile (4×4 m) | ≤48 tris (flat quad + kerb geometry) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
+| Road tile (10×10 m) | ≤48 tris (flat quad + kerb geometry) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
 | Infrastructure props (lamp posts, signs) | ≤300 tris | ≤75 tris | Billboard (same system as small buildings) |
 
 **Road tile LOD thresholds**: Road tiles use the same LOD distance thresholds as small buildings/props (LOD0→LOD1 at 30 m / 25 m; LOD1→LOD2 at 100 m / 90 m). At LOD2 (>100 m), road tiles are rendered as flat coloured quads with no kerb or road marking geometry — road marking decals from the road atlas are disabled at LOD2. **Road LOD2 color source**: The LOD2 road quad color is sampled from the road tileable texture's average color, computed at asset pipeline generation time and stored as a named constant `RenderConstants::road_lod2_color` (type `irr::video::SColor`) in `src/rendering/render_constants.h`. This value must be a perceptual match of the center region of `road_asphalt_tileable.dds` when viewed in linear space (approximately a mid-dark gray, e.g. SColor(255, 60, 60, 60) for standard asphalt). Do NOT hardcode a magic color literal inline in rendering code — always use `RenderConstants::road_lod2_color` so that the color is updated in one place when the road texture changes. The LOD2 road quad does NOT bind a texture — it is drawn as a flat-shaded quad using the material's vertex color channel, set to `road_lod2_color` at entity construction time.
@@ -138,11 +138,11 @@ Y = 0.0f          (pivot sits exactly at ground plane; terrain height not used i
 Z = tileZ * kTileSize
 ```
 
-**`kTileSize` value**: `4.0f` Irrlicht units (4 metres). Each simulation tile occupies a 4 m × 4 m footprint. This is consistent with the road tile LOD budget (road tile mesh = 4×4 m quad) and the modular building kit grid (4 m × 4 m × 3 m per floor unit).
+**`kTileSize` value**: `10.0f` Irrlicht units (10 metres). Each simulation tile occupies a 10 m × 10 m footprint. This is consistent with the road tile LOD budget (road tile mesh = 10×10 m quad) and `CitySimulation::kTileSizeMeters = 10.0f` used for travel-time and coverage-radius computations.
 
-**Declaration**: `kTileSize` is declared as `constexpr float kTileSize = 4.0f;` in `src/rendering/render_constants.h` alongside `RenderConstants::road_lod2_color`. It is used by `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and `placeServiceBuildingMesh()`. Do NOT hardcode the literal `4.0f` at call sites — always use `kTileSize` so that if the tile size changes (e.g., for a future map scale change), all placement calls update in one place.
+**Declaration**: `kTileSize` is declared as `static constexpr float kTileSize = 10.0f;` directly on `IrrlichtRenderer` in `src/rendering/IrrlichtRenderer.h`. It is used by `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and `placeServiceBuildingMesh()`. Do NOT hardcode the literal `10.0f` at call sites — always use `kTileSize` so that if the tile size changes (e.g., for a future map scale change), all placement calls update in one place.
 
-**Service building tile footprint**: Service buildings occupy a single 4×4 m tile in V1. The placed scene node's world X/Z origin is identical to the formula above. The service building mesh extends beyond the 4×4 m tile boundary at LOD0 (up to 12×12 m for a power plant), but the placement origin and collision registration tile are the single 4×4 m origin tile.
+**Service building tile footprint**: Service buildings occupy a single 10×10 m tile in V1. The placed scene node's world X/Z origin is identical to the formula above. The service building mesh extends beyond the 10×10 m tile boundary at LOD0 (up to 30×30 m for a power plant), but the placement origin and collision registration tile are the single 10×10 m origin tile.
 
 #### `.meta` Sidecar File Format
 

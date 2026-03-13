@@ -136,6 +136,9 @@ protected:
         uiManager_->setTerrainQuery(&terrain_);
 
         EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AnyNumber());
+        // setTilePlacementPreview fires on Zone/Road anchor set and clear (LMB-down/up).
+        // Tests exercising preview contents add their own EXPECT_CALL.
+        EXPECT_CALL(renderer_, setTilePlacementPreview(_, _)).Times(AnyNumber());
         uiManager_->setMapDimensions(10, 10);
         uiManager_->setDemolishConfirm(false);
     }

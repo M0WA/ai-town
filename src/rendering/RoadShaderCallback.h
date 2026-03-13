@@ -25,7 +25,7 @@
 //   In tests, pass false to force the fallback path, or true to suppress it.
 //
 // Allocation pattern (raw-heap + ->drop() per shader-loading.md):
-//   RoadShaderCallback* cb = new RoadShaderCallback(srgbSupported);
+//   RoadShaderCallback* cb = new RoadShaderCallback(srgbSupported, diffuseTexGLuint);
 //   gpu->addHighLevelShaderMaterialFromFiles(..., cb, ...);
 //   cb->drop();  // unconditional — Irrlicht holds its own grab() reference.
 //
@@ -44,18 +44,23 @@
 // RoadShaderCallback — IShaderConstantSetCallBack for the road tile shader.
 //
 // Holds:
-//   m_srgbSupported — bool from construction; used to derive u_srgbLinear value.
+//   m_srgbSupported     — bool from construction; used to derive u_srgbLinear value.
+//   m_diffuseTexGLuint  — raw GLuint of road_asphalt_tileable.dds (sRGB or linear pool).
+//                         Bound to GL_TEXTURE0 inside OnSetConstants() before the
+//                         sampler uniform is set. 0 = no texture (e.g., headless/EDT_NULL).
 //
-// The callback is lightweight: it stores only the sRGB flag passed at construction.
-// No RenderSystem or TextureCache pointer is stored — the value is resolved once at
-// construction time.
+// The callback stores the sRGB flag and the raw GL texture handle. Both are resolved
+// once at construction time — no RenderSystem pointer is stored.
 class RoadShaderCallback : public irr::video::IShaderConstantSetCallBack {
 public:
     // Constructor.
-    // srgbSupported: pass RenderSystem::isSRGBTextureSupported() in production.
+    // srgbSupported:    pass RenderSystem::isSRGBTextureSupported() in production.
     //   true  → u_srgbLinear = 0 (sRGB upload path; no gamma correction needed)
     //   false → u_srgbLinear = 1 (linear upload path; shader applies pow(c, 2.2))
-    explicit RoadShaderCallback(bool srgbSupported);
+    // diffuseTexGLuint: raw GLuint from TextureCache::loadSRGB() (or loadLinear for
+    //   the sRGB-absent fallback). Bound to GL_TEXTURE0 in OnSetConstants().
+    //   Pass 0 in tests or when no GL context is available.
+    explicit RoadShaderCallback(bool srgbSupported, GLuint diffuseTexGLuint = 0);
 
     // OnSetConstants — called by Irrlicht immediately before each draw call that
     // uses this material. Saves/restores GL_ACTIVE_TEXTURE, sets u_diffuseMap and
@@ -82,5 +87,6 @@ public:
     int srgbLinearValue() const { return m_srgbSupported ? 0 : 1; }
 
 private:
-    bool m_srgbSupported;
+    bool   m_srgbSupported;
+    GLuint m_diffuseTexGLuint;
 };
