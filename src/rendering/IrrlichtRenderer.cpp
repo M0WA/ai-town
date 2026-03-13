@@ -1701,6 +1701,15 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
         static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
     node->setScale(core::vector3df(1.0f, 1.0f, 1.0f));
 
+    // Disable Irrlicht's automatic box frustum culling for road tiles.
+    // Road tile meshes are nearly flat (~0.1 m tall) so their AABB gives the
+    // EAC_BOX culler very little vertical headroom.  At oblique camera angles
+    // tiles near the frustum boundary can be false-rejected even after the
+    // 0.5 m Y-extent expansion applied in buildTileRoadMesh().  Road tiles are
+    // small (10 m × 10 m) and there are at most a few hundred of them; the
+    // performance cost of skipping the AABB test is negligible.
+    node->setAutomaticCulling(irr::scene::EAC_OFF);
+
     // Disable lighting (no light nodes in scene).
     for (u32 m = 0; m < node->getMaterialCount(); ++m) {
         node->getMaterial(m).Lighting = false;
