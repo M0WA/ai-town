@@ -75,6 +75,12 @@ public:
         m_flattened = true;
     }
 
+    // flushTerrainRebuilds() — no-op in tests; real TerrainSystem delegates to
+    // flushPendingRebuilds(). Required because flushTerrainRebuilds() is pure virtual
+    // on ITerrainQuery; without this override ManualTerrainQuery fails to compile.
+    void flushTerrainRebuilds() override {}
+
+
     // Height configuration helpers — set before constructing CitySimulation.
     void setHeightBeforeFlattening(float h) { m_heightBeforeFlat = h; }
     void setHeightAfterFlattening(float h)  { m_heightAfterFlat  = h; }

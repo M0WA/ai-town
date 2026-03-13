@@ -1135,10 +1135,11 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
             m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
             m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
         }
+        if (m_terrain) m_terrain->flushTerrainRebuilds();
         const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
         node->setPosition(core::vector3df(
             static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
-            postY,
+            postY + 0.01f,   // slight offset above terrain to prevent Z-fighting
             static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
         node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
 
@@ -1487,10 +1488,11 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ)
         m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
         m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
     }
+    if (m_terrain) m_terrain->flushTerrainRebuilds();
     const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
     node->setPosition(core::vector3df(
         static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
-        postY,
+        postY + 0.02f,   // slight offset above terrain to prevent Z-fighting
         static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
     node->setScale(core::vector3df(1.0f, 1.0f, 1.0f));
 
@@ -1585,10 +1587,11 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
             m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
             m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
         }
+        if (m_terrain) m_terrain->flushTerrainRebuilds();
         const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
         node->setPosition(core::vector3df(
             static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
-            postY,
+            postY + 0.01f,   // slight offset above terrain to prevent Z-fighting
             static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
         node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
 

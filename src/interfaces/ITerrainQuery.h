@@ -45,4 +45,9 @@ public:
     // ChunkRebuildRequests for all affected chunks.
     // Out-of-bounds coordinates are silently ignored.
     virtual void setTileHeight(int tileX, int tileZ, float height) = 0;
+
+    /// Flush all pending terrain chunk rebuilds synchronously.
+    /// Called after setTileHeight to ensure terrain geometry matches the new
+    /// heightmap data before the next render frame.
+    virtual void flushTerrainRebuilds() = 0;
 };

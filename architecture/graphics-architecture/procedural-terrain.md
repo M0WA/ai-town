@@ -126,8 +126,9 @@
   `ITerrainQuery` interface (`src/interfaces/ITerrainQuery.h`) so that `IrrlichtRenderer` can
   sample terrain height for zone overlay Y-positions, hover highlight Y-positions, and **mesh
   placement Y-positions** without a direct dependency on the concrete `TerrainSystem` class.
-  **Phase 10b further extends `ITerrainQuery`** with the write method `setTileHeight()` — see
-  the `setTileHeight()` Write Path and Neighbour Blending section below.
+  **Phase 10b further extends `ITerrainQuery`** with the write method `setTileHeight()` and
+  the synchronous flush method `flushTerrainRebuilds()` — see the `setTileHeight()` Write
+  Path and Neighbour Blending section below.
 
   **MANDATORY — building, road, and service-building scene nodes must be placed at terrain height**:
   `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and `placeServiceBuildingMesh()`
@@ -419,11 +420,19 @@ if (m_terrain) {
     m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
     m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
 }
+// Flush all pending chunk rebuilds synchronously so terrain geometry is updated
+// before the node is positioned. Without this, the at-most-2-per-frame cap in
+// TerrainSystem::update() would leave the terrain at the old heights for several
+// frames, making the placed mesh appear sunken.
+if (m_terrain) m_terrain->flushTerrainRebuilds();
 const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
 
+// Add a small Y offset above postY to prevent depth-test ambiguity (Z-fighting)
+// between the flat road/building mesh and the freshly rebuilt terrain quad.
+// Roads use 0.02f (coplanar flat quad); buildings use 0.01f (mesh sits on surface).
 node->setPosition(irr::core::vector3df(
     static_cast<float>(tileX) * kTileSize + kTileSize * 0.5f,
-    postY,   // post-flattened height (all 4 corners are now equal)
+    postY + 0.02f,   // or 0.01f for buildings/service buildings
     static_cast<float>(tileZ) * kTileSize + kTileSize * 0.5f));
 ```
 
@@ -438,18 +447,57 @@ only on `(tileX, tileZ)` flattened only that one vertex plus its 8 neighbours vi
 blending, leaving the other 3 tile-corner vertices at their original heights and causing
 visible T-junction misalignment at every tile edge.
 
+### flushTerrainRebuilds() — Synchronous Geometry Update After Placement
+
+`ITerrainQuery` exposes a second write-side method added in Phase 10b:
+
+```cpp
+// src/interfaces/ITerrainQuery.h
+/// Flush all pending terrain chunk rebuilds synchronously.
+/// Called after setTileHeight to ensure terrain geometry matches the new
+/// heightmap data before the next render frame.
+virtual void flushTerrainRebuilds() = 0;
+```
+
+`TerrainSystem::flushTerrainRebuilds()` delegates directly to `flushPendingRebuilds()`:
+
+```cpp
+void TerrainSystem::flushTerrainRebuilds() {
+    flushPendingRebuilds();
+}
+```
+
+**Why this is necessary**: `TerrainSystem::update()` processes at most 2 chunk rebuilds
+per frame (the normal amortised cap). After `setTileHeight()` enqueues rebuild requests
+for the affected chunks, those rebuilds would otherwise be spread across multiple frames.
+During those frames the terrain geometry still shows the original (pre-flatten) heights
+while the road/building node is already positioned at `postY` (the post-flatten height),
+making the structure appear sunken below the terrain. Calling `flushTerrainRebuilds()`
+immediately after all four `setTileHeight()` calls processes every pending rebuild
+synchronously before `getHeightAt()` is called for node positioning and before the next
+render frame is drawn.
+
+`IrrlichtRenderer` placement helpers call it as:
+
+```cpp
+if (m_terrain) m_terrain->flushTerrainRebuilds();
+```
+
+immediately after the four `setTileHeight()` calls and before reading `postY`.
+
 ### ManualTerrainQuery Stub
 
-`ManualTerrainQuery` (test stub in `tests/simulation/manual_terrain_query.h`) must add a
-no-op override to remain a concrete class:
+`ManualTerrainQuery` (test stub in `tests/simulation/manual_terrain_query.h`) must add
+no-op overrides for both write-side methods to remain a concrete class:
 
 ```cpp
 void setTileHeight(int /*tileX*/, int /*tileZ*/, float /*height*/) override {}
+void flushTerrainRebuilds() override {}
 ```
 
-This override is required because `setTileHeight()` is pure virtual on `ITerrainQuery`;
-without it, `ManualTerrainQuery` fails to compile and all simulation tests that use it are
-broken.
+These overrides are required because both methods are pure virtual on `ITerrainQuery`;
+without them, `ManualTerrainQuery` fails to compile and all simulation tests that use it
+are broken.
 
 ### pendingRebuildCount() Test API
 

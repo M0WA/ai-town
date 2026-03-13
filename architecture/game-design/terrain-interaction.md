@@ -96,16 +96,36 @@ tile to the same height before creating the scene node. The call sequence is:
    geometry. Calling `setTileHeight` on all 4 corner coordinates ensures the full tile
    quad is planar before the mesh is placed.
 
-3. Read the post-flatten height for node Y positioning:
+3. Flush all pending chunk rebuilds synchronously so the terrain geometry reflects
+   the new heightmap before the scene node is positioned:
+
+   ```cpp
+   if (m_terrain) m_terrain->flushTerrainRebuilds();
+   ```
+
+   Without this flush, `TerrainSystem::update()` processes at most 2 chunk rebuilds per
+   frame. For several frames after placement the terrain geometry still shows the original
+   (pre-flatten) heights while the road/building node sits at `postY`, making the structure
+   appear sunken. Calling `flushTerrainRebuilds()` immediately after the 4 `setTileHeight()`
+   calls processes all enqueued rebuilds synchronously before the next render frame.
+
+4. Read the post-flatten height for node Y positioning and add a small vertical offset
+   to prevent Z-fighting between the mesh and the freshly rebuilt terrain quad:
 
    ```cpp
    const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+   // Roads: postY + 0.02f  (larger offset — flat quad coplanar with terrain surface)
+   // Buildings/service: postY + 0.01f  (smaller offset — mesh sits on terrain surface)
+   node->setPosition(irr::core::vector3df(
+       static_cast<float>(tileX) * kTileSize + kTileSize * 0.5f,
+       postY + 0.02f,   // or 0.01f for buildings
+       static_cast<float>(tileZ) * kTileSize + kTileSize * 0.5f));
    ```
 
-   Use `postY` as the scene node Y coordinate so the mesh sits on the freshly flattened
-   surface. Since all 4 corners are now equal, `getHeightAt(tileX, tileZ)` (the
-   top-left corner) equals all other corners and correctly positions the flat mesh. When
-   `m_terrain` is null, `postY` falls back to `0.0f`.
+   Since all 4 corners are now equal, `getHeightAt(tileX, tileZ)` (the top-left corner)
+   equals all other corners. The offset prevents depth-test ambiguity where coplanar
+   geometry causes the terrain to render on top of the road/building mesh. When `m_terrain`
+   is null, `postY` falls back to `0.0f`.
 
 This pattern guarantees the placed structure is always flush with the terrain surface.
 Neighbour blending prevents hard seams at tile boundaries. The earthworks treasury

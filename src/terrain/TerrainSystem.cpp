@@ -300,6 +300,17 @@ void TerrainSystem::flushPendingRebuilds(ITerrainLoadProgress* cb) {
 }
 
 // ---------------------------------------------------------------------------
+// flushTerrainRebuilds() — ITerrainQuery implementation.
+// Delegates to flushPendingRebuilds() so that all enqueued chunk rebuilds
+// (from setTileHeight calls during placement) are processed synchronously
+// before the next render frame, eliminating the chunk rebuild delay that
+// would otherwise cause road/building meshes to appear sunken below the terrain.
+// ---------------------------------------------------------------------------
+void TerrainSystem::flushTerrainRebuilds() {
+    flushPendingRebuilds();
+}
+
+// ---------------------------------------------------------------------------
 // generate() — procedural map generation with playability guarantee.
 //
 // Playability constraints (architecture/game-design/terrain-interaction.md):

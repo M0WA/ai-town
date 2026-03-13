@@ -156,6 +156,11 @@ public:
     // (ref: architecture/graphics-architecture/procedural-terrain.md — setTileHeight Write Path)
     void setTileHeight(int tileX, int tileZ, float height) override;
 
+    // Flush all pending terrain chunk rebuilds synchronously.
+    // Delegates to flushPendingRebuilds(). Called after setTileHeight in placement helpers
+    // to ensure terrain geometry is updated before the next render frame.
+    void flushTerrainRebuilds() override;
+
     // Accessors for testing.
     int  pendingRebuildCount() const { return static_cast<int>(m_rebuildDeque.size()); }
     bool hasActiveChunk(uint64_t chunkId) const { return m_activeChunks.count(chunkId) > 0; }
