@@ -885,23 +885,20 @@ TEST_F(WorldInteractionTest, WorldInteraction_UtilitiesPlacement_CallsPlaceServi
     activateUtilitiesTool();
 
     // Select FireStation via Utilities sub-panel click.
-    // The Utilities sub-panel layout (spec): col0=PowerPlant, col1=WaterTower,
-    // col0row1=FireStation. Virtual position: top-left anchor (x:80, y:64),
-    // button size 64x40, gap 4. FireStation is at column 0, row 1:
-    //   x = 80 + 0*(64+4) = 80, y = 64 + 1*(40+4) = 108.
-    // Click at (80+32, 108+20) = (112, 128) to hit FireStation button.
+    // The Utilities sub-panel layout (4×1 single row): top-left anchor (x:80, y:64),
+    // button size 64x40, gap 4. All 4 buttons are in a single horizontal strip:
+    //   col0=PowerPlant, col1=WaterTower, col2=FireStation, col3=PoliceStation.
+    // FireStation is at column 2, row 0 (single row):
+    //   x = 80 + 2*(64+4) = 216, y = 64.
+    // Click at (216+32, 64+20) = (248, 84) to hit FireStation button.
     // This is a Phase 9b sub-panel click that sets m_selectedServiceBuilding.
-    // The sub-panel buttons are created by UIManager init() and respond to
-    // EGET_BUTTON_CLICKED events in the Priority 5 handler — for this test,
-    // we send a direct sub-panel region click. The exact x/y depends on the
-    // implementation. Sending a click in the FireStation button region should work.
     InputEvent fireStationClick{};
     fireStationClick.type   = InputEvent::Type::MouseButtonDown;
     fireStationClick.button = 0;
-    fireStationClick.x      = 112;  // FireStation column 0 (col0row1) in sub-panel
-    fireStationClick.y      = 128;  // Row 1: y=64+44=108, center at 128
-    fireStationClick.physX  = 112;
-    fireStationClick.physY  = 128;
+    fireStationClick.x      = 248;  // FireStation col2: x=80+2*(64+4)=216, center at 248
+    fireStationClick.y      = 84;   // Single row at y=64, center at 84
+    fireStationClick.physX  = 248;
+    fireStationClick.physY  = 84;
     uiManager_->onEvent(fireStationClick);
 
     // Now send the world click.

@@ -160,11 +160,11 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
 
     }
 
-    // --- Phase 9b: Utilities sub-panel buttons (2×2 grid) ---
+    // --- Phase 9b: Utilities sub-panel buttons (4×1 single-row grid) ---
     // Top-left anchor: virtual (x:80, y:64). Each button 64×40 px with 4 px gap.
-    // Grid layout: 2 columns × 2 rows.
-    //   (col0,row0)=PowerPlant, (col1,row0)=WaterTower,
-    //   (col0,row1)=FireStation, (col1,row1)=PoliceStation
+    // Grid layout: 4 columns × 1 row (single horizontal strip).
+    //   col0=PowerPlant, col1=WaterTower, col2=FireStation, col3=PoliceStation
+    // Total width: 4*64 + 3*4 = 268 px (x:80..348). Height: 40 px (y:64..104).
     // All buttons initially hidden (only shown when ActiveTool::Utilities is active).
     // Anchored at y:64 (same as Zone sub-panel) — sub-panels are mutually exclusive.
     if (m_backend) {
@@ -175,31 +175,27 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
         const int utilTop   = 64;
 
         // ServiceBuildingType ordinals: PowerPlant=0, WaterTower=1, FireStation=2, PoliceStation=3.
-        // Grid positions: (col, row) -> type index:
-        //   (0,0)->0=PowerPlant, (1,0)->1=WaterTower,
-        //   (0,1)->2=FireStation, (1,1)->3=PoliceStation.
+        // Single-row layout: typeIdx == column index.
+        //   col0->0=PowerPlant, col1->1=WaterTower, col2->2=FireStation, col3->3=PoliceStation.
         // Create all 4 buttons; set inactive sprite for each (including the default);
         // then override the default (typeIdx 0, PowerPlant) with the active sprite.
         // Tests assert: all 4 inactive calls + 1 active call on the default button.
         // Empty string label — sprite is the sole visual encoding (hud_sprites_ui.dds is committed).
 
-        for (int utilRow = 0; utilRow < 2; ++utilRow) {
-            for (int utilCol = 0; utilCol < 2; ++utilCol) {
-                int typeIdx = utilRow * 2 + utilCol;
-                int bx  = utilLeft + utilCol * (utilBtnW + utilGap);
-                int by  = utilTop  + utilRow * (utilBtnH + utilGap);
+        for (int typeIdx = 0; typeIdx < 4; ++typeIdx) {
+            int bx = utilLeft + typeIdx * (utilBtnW + utilGap);
+            int by = utilTop;
 
-                m_utilSubPanelBtns[typeIdx] = m_backend->addButton(
-                    "", bx, by, utilBtnW, utilBtnH);
+            m_utilSubPanelBtns[typeIdx] = m_backend->addButton(
+                "", bx, by, utilBtnW, utilBtnH);
 
-                // Set inactive sprite for every button (including the default).
-                uint32_t inactiveSprite = kSpriteUtilPowerInactive
-                                          + static_cast<uint32_t>(typeIdx);
-                m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], inactiveSprite);
+            // Set inactive sprite for every button (including the default).
+            uint32_t inactiveSprite = kSpriteUtilPowerInactive
+                                      + static_cast<uint32_t>(typeIdx);
+            m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], inactiveSprite);
 
-                // Initially hidden.
-                m_backend->setElementVisible(m_utilSubPanelBtns[typeIdx], false);
-            }
+            // Initially hidden.
+            m_backend->setElementVisible(m_utilSubPanelBtns[typeIdx], false);
         }
 
         // Override default selection (PowerPlant = typeIdx 0) with the active sprite.
@@ -621,10 +617,8 @@ bool UIManager::onEvent(const InputEvent& event) {
             const int utilBtnW = 64, utilBtnH = 40, utilGap = 4;
             const int utilLeft = 80, utilTop = 64;
             for (int typeIdx = 0; typeIdx < 4; ++typeIdx) {
-                int utilCol = typeIdx % 2;
-                int utilRow = typeIdx / 2;
-                int bx = utilLeft + utilCol * (utilBtnW + utilGap);
-                int by = utilTop  + utilRow * (utilBtnH + utilGap);
+                int bx = utilLeft + typeIdx * (utilBtnW + utilGap);
+                int by = utilTop;
                 if (inRect(event.x, event.y, bx, by, utilBtnW, utilBtnH)) {
                     // Update selection.
                     m_selectedServiceBuilding = typeIdx;

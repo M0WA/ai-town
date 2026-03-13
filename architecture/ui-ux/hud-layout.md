@@ -113,14 +113,15 @@ LMB held calls `doTerrainPlacement()` for each new tile the cursor enters. See
 
 ## Utilities Sub-Panel
 
-The Utilities sub-panel is a 2×2 grid of buttons that appears immediately to the right of the
-left toolbar (x:80, y:64) whenever the Utilities tool is active. It is hidden for all other
-tool modes. It shares the same top anchor (y:64) as the Zone sub-panel — the two sub-panels
-are mutually exclusive, so only one is ever visible at a time. Virtual bounds: x:80–212 px,
-y:64–148 px (width = (64×2)+4 = 132 px, height = (40×2)+4 = 84 px). Grid layout: column 0 =
-Power Plant, column 1 = Water Tower, row 0 = (Power Plant, Water Tower), row 1 = (Fire
-Station, Police Station). Constants defined in `src/ui/ui_constants.h`: `kUtilSubPanelLeft`,
-`kUtilSubPanelTop`, `kUtilSubBtnW`, `kUtilSubBtnH`, `kUtilSubBtnGap`.
+The Utilities sub-panel is a 4×1 single-row grid of buttons that appears immediately to the
+right of the left toolbar (x:80, y:64) whenever the Utilities tool is active. It is hidden
+for all other tool modes. It shares the same top anchor (y:64) as the Zone sub-panel — the
+two sub-panels are mutually exclusive, so only one is ever visible at a time. Virtual bounds:
+x:80–348 px, y:64–104 px (width = (64×4)+(4×3) = 268 px, height = 40 px). Grid layout: all
+4 buttons in a single horizontal strip — column 0 = Power Plant, column 1 = Water Tower,
+column 2 = Fire Station, column 3 = Police Station. Constants defined in
+`src/ui/ui_constants.h`: `kUtilSubPanelLeft`, `kUtilSubPanelTop`, `kUtilSubBtnW`,
+`kUtilSubBtnH`, `kUtilSubBtnGap`.
 
 ### Utilities Sub-Panel Button Content
 
