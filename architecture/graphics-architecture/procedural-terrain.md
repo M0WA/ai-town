@@ -313,4 +313,106 @@
   set during camera creation in `IrrlichtRenderer::init()` or via a `setActiveCamera()` call;
   if not already a member, it must be added as part of Phase 9b Deliverable B.
 
+---
+
+## `setTileHeight()` Write Path and Neighbour Blending (Phase 10b)
+
+### Purpose
+
+`ITerrainQuery::setTileHeight(int tileX, int tileZ, float height)` is the write-side
+counterpart to `getHeightAt()`. It is called by `IrrlichtRenderer` placement helpers
+(`placeBuildingMesh`, `placeRoadMesh`, `placeServiceBuildingMesh`) to flatten the terrain
+under and around a placed tile, producing smooth visual transitions instead of hard seams
+between placed structures and sloped terrain.
+
+### Interface Declaration
+
+```cpp
+// src/interfaces/ITerrainQuery.h
+// Writes `height` into the persistent LOD0 heightmap at (tileX, tileZ),
+// applies neighbour blending to the 8 surrounding tiles, and enqueues
+// ChunkRebuildRequests for all affected chunks.
+// Out-of-bounds coordinates are silently ignored.
+virtual void setTileHeight(int tileX, int tileZ, float height) = 0;
+```
+
+### TerrainSystem Implementation
+
+`TerrainSystem::setTileHeight(int tileX, int tileZ, float height)` performs three steps:
+
+**Step 1 — Centre tile write**: Write `height` into the persistent LOD0 heightmap array
+at `(tileX, tileZ)`. Clamp `(tileX, tileZ)` to `[0, m_mapTilesX-1]` ×
+`[0, m_mapTilesZ-1]` before the write.
+
+**Step 2 — Neighbour blending**: For each of the 8 surrounding tiles, compute the
+neighbour's new height by linearly interpolating toward `height`:
+
+```cpp
+// Cardinal neighbours (N, S, E, W):
+newH = lerp(currentH, height, kCardinalFalloff)
+// Diagonal neighbours (NE, NW, SE, SW):
+newH = lerp(currentH, height, kDiagonalFalloff)
+```
+
+Where `lerp(a, b, t) = a + t * (b - a)`.
+
+`kCardinalFalloff` and `kDiagonalFalloff` are confirmed by `gamedesign-lookandfeel`
+sign-off in Phase 10b (reference starting point: cardinal 0.5, diagonal 0.25). These
+values are NOT engineering defaults — they are design decisions and MUST NOT be committed
+before the sign-off is recorded.
+
+All eight neighbour coordinates must be clamped to map bounds before any read or write.
+Out-of-bounds neighbours are silently skipped (no write, no crash).
+
+**Step 3 — Chunk rebuild enqueue**: After all heightmap writes (centre + in-bounds
+neighbours), iterate over all modified tile coordinates and determine which chunk(s) each
+tile belongs to. For each unique chunk affected, enqueue a `ChunkRebuildRequest`. Chunk
+deduplication by `uint64_t` chunk ID is already enforced in `TerrainSystem::update()`'s
+`processedThisFrame` set; duplicate entries in the deque are harmless but the enqueue
+loop should avoid unnecessary enqueues by checking whether a given chunk ID is already in
+the deque (optional optimisation — not required for correctness).
+
+### Placement Integration
+
+`IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and
+`placeServiceBuildingMesh()` call `setTileHeight()` before creating the scene node:
+
+```cpp
+// Pre-placement: read current height, flatten, read post-flatten height
+const float preY  = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+if (m_terrain) m_terrain->setTileHeight(tileX, tileZ, preY);  // flatten to own current height
+const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+
+node->setPosition(irr::core::vector3df(
+    static_cast<float>(tileX) * kTileSize,
+    postY,   // post-flattened height
+    static_cast<float>(tileZ) * kTileSize));
+```
+
+Passing the tile's own current height as the target flattening height means the placed
+tile does not shift vertically — only neighbours blend toward it. This is the correct V1
+behaviour: placement "locks" the tile to its current height and smooths the surroundings.
+
+### ManualTerrainQuery Stub
+
+`ManualTerrainQuery` (test stub in `tests/simulation/manual_terrain_query.h`) must add a
+no-op override to remain a concrete class:
+
+```cpp
+void setTileHeight(int /*tileX*/, int /*tileZ*/, float /*height*/) override {}
+```
+
+This override is required because `setTileHeight()` is pure virtual on `ITerrainQuery`;
+without it, `ManualTerrainQuery` fails to compile and all simulation tests that use it are
+broken.
+
+### Rebuild Budget Interaction
+
+`setTileHeight()` enqueues up to 9 `ChunkRebuildRequest`s per call (one per modified
+tile, across at most 4 chunks for a corner placement). The standard 2-per-frame cap in
+`TerrainSystem::update()` applies; all affected chunks are fully rebuilt within at most 5
+frames at normal framerate. During loading screen `flushPendingRebuilds()` processes all
+pending rebuilds synchronously (bypassing the cap), ensuring no deferred terrain
+flattening is visible to the player after a save-load cycle.
+
 - Chunks loaded/unloaded based on camera distance

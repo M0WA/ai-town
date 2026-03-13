@@ -2,7 +2,14 @@
 
 - **Non-buildable slope**: Slopes where `atan(height_delta / cell_width) > 15.0°` (exact; no approximation) are non-buildable without earthworks.
 - **Earthworks cost**: `cost_per_tile = $500 × slope_severity_factor` where `slope_severity_factor = clamp((slope_degrees − 15) / 30, 0, 2)` (scales from 0 at exactly 15° to 2 at 45°+). Earthworks are applied automatically at zone placement and deducted from treasury immediately.
-- **Earthworks is treasury-only in V1**: The earthworks mechanic deducts cost from the treasury. It does **NOT** modify the terrain mesh or heightmap. The terrain remains visually bumpy after placement; only the financial cost is charged. This is intentional V1 scope. A future phase that adds terrain mesh modification would require: (1) a `setTileHeight()` method on `ITerrainQuery`, (2) a `TerrainSystem` heightmap write path, and (3) `rebuildTerrainChunk()` triggered on the affected chunk. Do not implement terrain mesh modification in Phase 9b or earlier.
+- **Earthworks is treasury-only through Phase 9b**: The earthworks mechanic deducts cost
+  from the treasury. Through Phase 9b the terrain mesh and heightmap are not modified; the
+  terrain remains visually bumpy after placement and only the financial cost is charged.
+  **Phase 10b delivers terrain mesh modification**: `setTileHeight()` on `ITerrainQuery`,
+  a `TerrainSystem` heightmap write path, and `rebuildTerrainChunk()` triggered on all
+  affected chunks. The earthworks treasury deduction and `sfx_earthworks` audio cue remain
+  unchanged; Phase 10b adds the visual terrain change on top of the existing mechanic. Do
+  not implement terrain mesh modification in Phase 9b or earlier than Phase 10b.
 - **Map playability guarantee**: The procedural terrain generator must guarantee **at least 20% of total map tiles are flat or sub-15° slope** to ensure viable starting conditions on all difficulty tiers. The generator re-seeds if this constraint is not met after generation. **Minimum contiguous flat area**: the generator must also guarantee at least **one contiguous region of flat-or-sub-15° tiles of minimum 50×50 tiles** (2,500 tiles) — this ensures the player always has a viable starting district large enough for roads + 2 residential zones + 1 commercial zone + 1 power plant + 1 water tower, even on mountainous maps. The generator re-seeds if this contiguous-area constraint is not met. **Re-seed attempt cap**: the generator will attempt at most **100 re-seeds** before giving up (this ceiling is a safety guard against infinite loops — correctly authored terrain noise should satisfy both constraints within a small number of attempts on any practical seed). **Exhaustion fallback**: if all 100 attempts fail to produce a valid map, the generator logs an error, issues the best-effort map from the final attempt, and the game displays a one-time non-blocking toast notification: "This map has limited flat terrain — consider a new seed if placement is difficult." The simulation proceeds normally; no crash or hard error occurs. This fallback is unreachable under normal operating conditions and exists solely as a robustness guard.
 
 ## Placement Feedback

@@ -65,6 +65,7 @@ All files contain the full verbatim content from the master spec (`CLAUDE.md`).
 | Shader Loading | [graphics-architecture/shader-loading.md](graphics-architecture/shader-loading.md) |
 | Benchmark Tool (VRAM/FPS/Anisotropy Profiler) | [graphics-architecture/benchmark-tool.md](graphics-architecture/benchmark-tool.md) |
 | Model Validator Tool (Interactive Asset Visual Check) | [graphics-architecture/model-validator-tool.md](graphics-architecture/model-validator-tool.md) |
+| Sky Clouds (Cloud Plane, UV Scrolling, Phase 10b) | [graphics-architecture/sky-clouds.md](graphics-architecture/sky-clouds.md) |
 
 ---
 

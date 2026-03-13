@@ -199,6 +199,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Shader Loading | [architecture/graphics-architecture/shader-loading.md](architecture/graphics-architecture/shader-loading.md) |
 | Benchmark Tool | [architecture/graphics-architecture/benchmark-tool.md](architecture/graphics-architecture/benchmark-tool.md) |
 | Model Validator Tool | [architecture/graphics-architecture/model-validator-tool.md](architecture/graphics-architecture/model-validator-tool.md) |
+| Sky Clouds | [architecture/graphics-architecture/sky-clouds.md](architecture/graphics-architecture/sky-clouds.md) |
 
 #### Audio Architecture
 
