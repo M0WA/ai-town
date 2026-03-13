@@ -52,9 +52,12 @@ All new files introduced in this phase MUST follow project naming conventions:
   `ManualTerrainQuery` in `tests/simulation/manual_terrain_query.h` so that
   `ManualTerrainQuery` remains a concrete (non-abstract) class against the updated
   `ITerrainQuery`. (`getHeightAt()` override already present from Phase 9b — do NOT
-  re-add it.) **Owner of the final stateful form: `test-dev-cpp`** (see below);
-  `graphics-dev-irrlicht` must not independently commit the no-op if `test-dev-cpp` has
-  already delivered the stateful version. (ref:
+  re-add it.) **Sequencing constraint**: the `setTileHeight()` pure-virtual addition to
+  `ITerrainQuery.h` and this no-op override in `ManualTerrainQuery` MUST land in the same
+  commit — merging the interface change without the override instantly makes
+  `ManualTerrainQuery` abstract, breaking all 17+ simulation unit tests that instantiate
+  it. `graphics-dev-irrlicht` is responsible for including the no-op in the same PR;
+  `test-dev-cpp` upgrades to the stateful form in a subsequent PR. (ref:
   `architecture/graphics-architecture/procedural-terrain.md` — `ITerrainQuery` interface
   promotion section)
 - [ ] Update `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and
@@ -100,15 +103,17 @@ All new files introduced in this phase MUST follow project naming conventions:
   corner tile (e.g. `(0, 0)`); assert no out-of-bounds heightmap write occurs (no crash,
   ASAN clean) and that all four in-bounds cardinal neighbours were written. (ref:
   `architecture/graphics-architecture/procedural-terrain.md`)
-- [ ] `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight`: extend
-  `MockRenderer` (in `tests/simulation/mock_renderer.h`) to record the Y position passed
-  to `placeBuilding`/`placeRoad`/`placeServiceBuilding` calls. Inject a
-  `ManualTerrainQuery` configured with `m_heightBeforeFlat = 5.0f` and
-  `m_heightAfterFlat = 3.0f` so the test is non-vacuous (pre- and post-flatten heights
-  differ). Verify `MockRenderer` received `3.0f` (post-flattened Y), not `5.0f`. This
-  test exercises `CitySimulation`'s placement callback through the `IRenderer*` interface
-  — do NOT use a real `IrrlichtRenderer` (`unit` label, no OpenGL context required).
-  After Feature 3 lands, use `MockRenderer.h` (CamelCase). (ref:
+- [ ] `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight`: configure a
+  `ManualTerrainQuery` with `m_heightBeforeFlat = 5.0f` and `m_heightAfterFlat = 3.0f`
+  so the test is non-vacuous (pre- and post-flatten heights differ). Inject it into
+  `CitySimulation` alongside a `MockRenderer` (in `tests/simulation/mock_renderer.h`).
+  Call the placement method; assert `ManualTerrainQuery::m_flattened == true` (confirming
+  `setTileHeight()` was invoked) and `ManualTerrainQuery::getHeightAt()` returns `3.0f`
+  post-call. `IRenderer` placement methods carry no Y parameter — height verification
+  must go through `ManualTerrainQuery`, not `MockRenderer`. This test exercises
+  `CitySimulation`'s placement callback through the `IRenderer*` interface — do NOT use a
+  real `IrrlichtRenderer` (`unit` label, no OpenGL context required). After Feature 3
+  lands, use `MockRenderer.h` (CamelCase). (ref:
   `architecture/graphics-architecture/procedural-terrain.md`)
 - [ ] Enhance `ManualTerrainQuery` in `tests/simulation/manual_terrain_query.h` to be
   stateful for Phase 10b tests: add `m_flattened` bool (default `false`),
@@ -175,13 +180,18 @@ All new files introduced in this phase MUST follow project naming conventions:
   - Apply by updating the texture matrix on the cloud node's material:
     `m_cloudNode->getMaterial(0).getTextureMatrix(0).setTextureTranslate(m_cloudUVOffset.X,
     m_cloudUVOffset.Y)`. (ref: `architecture/graphics-architecture/sky-clouds.md`)
+- [ ] Add `irr::video::E_DRIVER_TYPE m_driverType{irr::video::EDT_NULL}` to
+  `IrrlichtRenderer`'s private section in `IrrlichtRenderer.h`. Initialise in the
+  constructor body: `m_driverType = m_device ? m_device->getVideoDriver()->getDriverType()
+  : irr::video::EDT_NULL;`. Read from the already-live device at construction time — NOT
+  during `createDevice()` (that is `RenderSystem`'s responsibility; the device is fully
+  live when passed to `IrrlichtRenderer`'s constructor).
 - [ ] Guard `initCloudPlane()` with `if (m_driverType == EDT_NULL) return;` as the
   **first line** — before any mesh construction, `buildCloudMesh()`, or `getTexture()`
-  call. `m_driverType` must be stored in `IrrlichtRenderer` (set during `createDevice()`).
-  Do NOT use `m_smgr == nullptr` as the guard: `m_smgr` is non-null even under `EDT_NULL`.
-  Under `EDT_NULL`, `m_cloudNode` remains `nullptr`; the `update()` cloud scroll block
-  guards with `if (m_cloudNode)`. (ref: `architecture/graphics-architecture/sky-clouds.md`
-  — Headless / EDT_NULL Guard section)
+  call. Do NOT use `m_smgr == nullptr` as the guard: `m_smgr` is non-null even under
+  `EDT_NULL`. Under `EDT_NULL`, `m_cloudNode` remains `nullptr`; the `update()` cloud
+  scroll block guards with `if (m_cloudNode)`. (ref:
+  `architecture/graphics-architecture/sky-clouds.md` — Headless / EDT_NULL Guard section)
 
 ##### cicd-dev-github
 
@@ -199,11 +209,13 @@ All new files introduced in this phase MUST follow project naming conventions:
   function `check_24_clouds_png(assets_dir)` returning a list of error strings. Verify
   `assets/textures/sky/clouds.png` is exactly 1024×1024 pixels and RGBA (4 channels)
   using Pillow (already installed from Phase 10). No-op (return `[]`) when the file does
-  not exist. Wire into the `run_all_checks()` dispatcher: add
-  `errors += check_24_clouds_png(assets_dir)` following the existing pattern for
-  Checks #21–#23. Also add a **"Verify check_24 present"** grep step to the
-  `validate-assets` job in `ci.yml` matching the pattern of the existing check_21/22/23
-  verification steps.
+  not exist. Wire into the `run_all_checks()` dispatcher by adding the tuple
+  `("check_24_clouds_png", check_24_clouds_png)` to the checks list — the same tuple-list
+  pattern used for Checks #21–#23 (do NOT use `errors += check_24_clouds_png(assets_dir)`
+  as a free-standing call; the dispatcher iterates the tuple list). Also add a
+  **"Verify check_24 present"** grep step to the `validate-assets` job in `ci.yml` with
+  pattern `check_24_clouds_png` (full function name), matching the pattern of the existing
+  check_21/22/23 verification steps.
 - [ ] Update the `validate-assets` job header comment in `.github/workflows/ci.yml` to
   reference Phase 10b / Check #24. Update the `tools/validate_assets.py` module docstring
   to reference Phase 10b and Check #24. Update
@@ -251,12 +263,21 @@ path): `src/terrain/StdTerrainRNG.h`, `src/terrain/TerrainSystem.h`,
 `src/terrain/terrain_generator.h` (forward-decl only — verify), and
 `tests/terrain/MockTerrainRNG.h`.
 
+After renaming `terrain_generator.h` → `TerrainGenerator.h`, update all
+`#include "src/terrain/terrain_generator.h"` sites: `src/terrain/TerrainSystem.h`,
+`src/terrain/TerrainSystem.cpp`, and `tests/terrain/terrain_stub.cpp`. Verify with
+`grep -r "terrain_generator\.h" src/ tests/` — result must be empty after the rename.
+
 Relocate misplaced concrete-class headers out of `src/interfaces/`:
 
 | Current path | Moved to | Reason |
 |---|---|---|
 | `src/interfaces/null_simulation_pauser.h` | `src/simulation/NullSimulationPauser.h` | Concrete implementation, not an interface |
 | `src/interfaces/WallClock.h` | `src/platform/WallClock.h` | Concrete implementation; `.cpp` already lives in `src/platform/` |
+
+After moving `WallClock.h`, update `#include "src/interfaces/WallClock.h"` →
+`#include "src/platform/WallClock.h"` in `src/platform/WallClock.cpp` and
+`src/main.cpp`. Add `WallClock` to the cicd verification grep pattern.
 
 Remove backward-compat shim headers (they only `#include` the CamelCase file):
 
@@ -270,11 +291,20 @@ Remove backward-compat shim headers (they only `#include` the CamelCase file):
 type alias — per the naming convention, C-style headers with only constants, enums, or
 POD structs use `snake_case`. No rename needed for this file.
 
+`src/audio/al_check.h` and `src/audio/al_check.cpp` are a paired `.h`/`.cpp` that
+implement named error-checking functions — per the naming convention, class/function
+implementation files use CamelCase. Rename to `src/audio/AlCheck.h` and
+`src/audio/AlCheck.cpp`. Update all `#include "src/audio/al_check.h"` sites in
+`src/audio/AudioSystem.cpp` and any other files that include it. Update
+`CMakeLists.txt` source list entries accordingly.
+
 `src/audio/audio_system.h` is a compatibility redirect shim — delete it and update all
 callers:
 
 - `src/audio/AudioSystem.h` lines 17–18: update `#include "src/audio/ialc_functions.h"`
-  to `#include "src/interfaces/IAlcFunctions.h"` (moved by `graphics-dev-irrlicht`)
+  to `#include "src/interfaces/IAlcFunctions.h"` (**sequencing note**: this include
+  update is blocked on `graphics-dev-irrlicht` completing the `IAlcFunctions.h` file
+  move to `src/interfaces/`; do not merge this change until that PR lands)
 - `src/main.cpp`: change `#include "src/audio/audio_system.h"` → `#include "src/audio/AudioSystem.h"`
 - `tests/audio/audio_thread_test.cpp` lines 27–28: update `ialc_functions.h` include to
   `src/interfaces/IAlcFunctions.h`; update `audio_system.h` include to `AudioSystem.h`
@@ -287,7 +317,7 @@ After all Feature 3 renames are committed, verify the rename pass is complete:
 - [ ] Confirm `build-linux` and `build-windows` CI jobs compile cleanly with zero
   header-not-found errors after the rename commit — a green run on both is the gate.
 - [ ] Verify no old lowercase names remain in `CMakeLists.txt` source lists by running:
-  `grep -r "audio_command_queue\|ialc_functions\|audio_system\.h\|null_simulation_pauser\|manual_clock\|manual_rng\|manual_terrain_query\|mock_audio_system\|mock_renderer\|simulation_test_base\|mock_terrain_rng\|mock_city_simulation\|mock_simulation_pauser\|mock_ui_backend\|terrain_chunk\|terrain_generator\|budget_detail_panel\|inspector_panel\|main_menu_panel\|pause_menu_panel\|settings_panel\|tax_rate_panel" CMakeLists.txt`
+  `grep -r "audio_command_queue\|ialc_functions\|audio_system\.h\|al_check\|null_simulation_pauser\|manual_clock\|manual_rng\|manual_terrain_query\|mock_audio_system\|mock_renderer\|simulation_test_base\|mock_terrain_rng\|mock_city_simulation\|mock_simulation_pauser\|mock_ui_backend\|terrain_chunk\|terrain_generator\|budget_detail_panel\|hud\.h\|inspector_panel\|main_menu_panel\|minimap\|modal_dialog\|pause_menu_panel\|settings_panel\|tax_rate_panel" CMakeLists.txt`
   — result must be empty.
 
 ##### test-dev-cpp
