@@ -1832,6 +1832,51 @@ def check_23_sprite_sheet_png(assets_dir):
     return errors
 
 
+_CLOUDS_PNG = os.path.join("assets", "textures", "sky", "clouds.png")
+_CLOUDS_REQUIRED_WIDTH = 1024
+_CLOUDS_REQUIRED_HEIGHT = 1024
+_CLOUDS_REQUIRED_MODE = "RGBA"
+
+
+def check_24_clouds_png(assets_dir):
+    """Check #24: Cloud texture format gate — clouds.png must be 1024×1024 RGBA.
+
+    Returns a list of error strings. Empty list means all checks passed.
+    No-op (returns []) when the file does not exist (asset not yet delivered).
+    """
+    repo_root = os.path.dirname(assets_dir)
+    clouds_path = os.path.join(repo_root, _CLOUDS_PNG)
+
+    if not os.path.isfile(clouds_path):
+        return []  # Asset not yet delivered — skip silently.
+
+    errors = []
+    try:
+        from PIL import Image  # noqa: PLC0415 — lazy import (Pillow optional)
+        with Image.open(clouds_path) as img:
+            width, height = img.size
+            mode = img.mode
+
+        if width != _CLOUDS_REQUIRED_WIDTH or height != _CLOUDS_REQUIRED_HEIGHT:
+            errors.append(
+                f"Check #24 [clouds.png]: size = {width}x{height} "
+                f"(expected {_CLOUDS_REQUIRED_WIDTH}x{_CLOUDS_REQUIRED_HEIGHT})."
+            )
+        if mode != _CLOUDS_REQUIRED_MODE:
+            errors.append(
+                f"Check #24 [clouds.png]: mode = {mode!r} "
+                f"(expected {_CLOUDS_REQUIRED_MODE!r})."
+            )
+    except ImportError:
+        errors.append(
+            "Check #24: Pillow (PIL) is not installed. "
+            "Run `pip install Pillow` before running validate_assets.py. "
+            "Cannot validate clouds.png dimensions/mode."
+        )
+
+    return errors
+
+
 def run_all_checks():
     """Run all asset validation checks. Returns the total number of errors."""
     # Resolve the assets directory relative to this script's location.
