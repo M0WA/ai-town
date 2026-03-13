@@ -26,7 +26,7 @@ All new files introduced in this phase MUST follow project naming conventions:
 
 ##### graphics-dev-irrlicht
 
-- [ ] Add `setTileHeight(int tileX, int tileZ, float height)` as a pure-virtual method to
+- [x] Add `setTileHeight(int tileX, int tileZ, float height)` as a pure-virtual method to
   `src/interfaces/ITerrainQuery.h`. Method sets the persistent LOD0 heightmap value at
   `(tileX, tileZ)` to `height`, enqueues `ChunkRebuildRequest`s for all affected chunks,
   then triggers neighbour blending (see below). Returns immediately; chunk rebuilds are
@@ -44,7 +44,7 @@ All new files introduced in this phase MUST follow project naming conventions:
 
   (ref: `architecture/game-design/terrain-interaction.md`,
   `architecture/graphics-architecture/procedural-terrain.md`)
-- [ ] Implement `TerrainSystem::setTileHeight(int tileX, int tileZ, float height)`:
+- [x] Implement `TerrainSystem::setTileHeight(int tileX, int tileZ, float height)`:
   - Write `height` into the persistent LOD0 heightmap array at `(tileX, tileZ)`.
   - Apply neighbour blending: for each of the 8 surrounding tiles, lerp the neighbour's
     current height toward `height` using a falloff factor. Cardinal neighbours (N/S/E/W)
@@ -59,7 +59,7 @@ All new files introduced in this phase MUST follow project naming conventions:
     `processedThisFrame` set.
   - (ref: `architecture/graphics-architecture/procedural-terrain.md` — Deque
     deduplication section)
-- [ ] Add `void setTileHeight(int tileX, int tileZ, float height) override {}` no-op to
+- [x] Add `void setTileHeight(int tileX, int tileZ, float height) override {}` no-op to
   `ManualTerrainQuery` in `tests/simulation/manual_terrain_query.h` so that
   `ManualTerrainQuery` remains a concrete (non-abstract) class against the updated
   `ITerrainQuery`. (`getHeightAt()` override already present from Phase 9b — do NOT
@@ -71,7 +71,7 @@ All new files introduced in this phase MUST follow project naming conventions:
   `test-dev-cpp` upgrades to the stateful form in a subsequent PR. (ref:
   `architecture/graphics-architecture/procedural-terrain.md` — `ITerrainQuery` interface
   promotion section)
-- [ ] Update `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and
+- [x] Update `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and
   `placeServiceBuildingMesh()` using the canonical three-step pattern from
   `architecture/graphics-architecture/procedural-terrain.md` (Placement Integration section):
   (1) read the pre-flatten height as `preY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f`;
@@ -82,7 +82,7 @@ All new files introduced in this phase MUST follow project naming conventions:
   `setTileHeight()` argument and `postY` for the node position — these are two separate reads,
   not one. (ref: `architecture/graphics-architecture/procedural-terrain.md`
   — MANDATORY building/road/service-building placement pattern)
-- [ ] Confirm that `sfx_earthworks` continues to play on placement via the existing
+- [x] Confirm that `sfx_earthworks` continues to play on placement via the existing
   `CitySimulation` callback wired in Phase 10 — no new audio wiring required in this phase.
   (ref: `architecture/game-design/terrain-interaction.md` — Earthworks is treasury-only
   in V1, now extended with visual modification)
@@ -185,7 +185,7 @@ All new files introduced in this phase MUST follow project naming conventions:
 
 ##### graphics-dev-irrlicht
 
-- [ ] Implement `IrrlichtRenderer::initCloudPlane()` called once from
+- [x] Implement `IrrlichtRenderer::initCloudPlane()` called once from
   `IrrlichtRenderer::init()` after sky dome creation:
   - Build a flat `SMesh*` plane mesh (single quad, 2 triangles, CW winding for Irrlicht
     left-handed +Y normal) spanning world coordinates `(−cloudHalfExtent, kCloudAltitude,
@@ -211,19 +211,19 @@ All new files introduced in this phase MUST follow project naming conventions:
   - Store scroll speeds as constants: `kCloudScrollX = 0.002f` UV units/second,
     `kCloudScrollZ = 0.0008f` UV units/second.
   - (ref: `architecture/graphics-architecture/sky-clouds.md`)
-- [ ] Implement UV scrolling in `IrrlichtRenderer::update(float dt)` using the exact
+- [x] Implement UV scrolling in `IrrlichtRenderer::update(float dt)` using the exact
   single-expression `std::fmod` form from `architecture/graphics-architecture/sky-clouds.md`
   (Implementation section): atomically increment and wrap each component so no intermediate
   unwrapped value is stored, then apply via `setTextureTranslate`. The normative code is in
   `sky-clouds.md` — reproduce it exactly; do not split into separate increment and wrap
   statements. (ref: `architecture/graphics-architecture/sky-clouds.md` — Implementation)
-- [ ] Add `irr::video::E_DRIVER_TYPE m_driverType{irr::video::EDT_NULL}` to
+- [x] Add `irr::video::E_DRIVER_TYPE m_driverType{irr::video::EDT_NULL}` to
   `IrrlichtRenderer`'s private section in `IrrlichtRenderer.h`. Initialise in the
   constructor body: `m_driverType = m_device ? m_device->getVideoDriver()->getDriverType()
   : irr::video::EDT_NULL;`. Read from the already-live device at construction time — NOT
   during `createDevice()` (that is `RenderSystem`'s responsibility; the device is fully
   live when passed to `IrrlichtRenderer`'s constructor).
-- [ ] Guard `initCloudPlane()` with `if (m_driverType == EDT_NULL) return;` as the
+- [x] Guard `initCloudPlane()` with `if (m_driverType == EDT_NULL) return;` as the
   **first line** — before any mesh construction, `buildCloudMesh()`, or `getTexture()`
   call. Do NOT use `m_smgr == nullptr` as the guard: `m_smgr` is non-null even under
   `EDT_NULL`. Under `EDT_NULL`, `m_cloudNode` remains `nullptr`; the `update()` cloud
