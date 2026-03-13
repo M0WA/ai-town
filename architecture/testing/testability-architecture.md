@@ -1109,6 +1109,36 @@ the audio playback path, not a unit test with strict call-count expectations on 
 
   Used in `WorldInteractionTest` (Phase 9b) as the `terrain_` fixture member, injected via `uiManager_->setTerrainQuery(&terrain_)`. The `getHeightAt()` override is required because it is pure virtual on `ITerrainQuery`; without it `ManualTerrainQuery` fails to compile, blocking all 17 Phase 9b unit tests.
 
+  **Phase 10b stateful extension**: Phase 10b adds `setTileHeight()` as a pure-virtual method
+  to `ITerrainQuery`, requiring a new override in `ManualTerrainQuery`. The Phase 10b form is
+  stateful, superseding the Phase 9b return-0.0f form of `getHeightAt()`:
+
+  ```cpp
+  // Phase 10b additions — stateful terrain flattening for TerrainFlattening tests.
+  bool  m_flattened{false};
+  float m_heightBeforeFlat{0.0f};
+  float m_heightAfterFlat{0.0f};
+
+  void setHeightBeforeFlattening(float h) { m_heightBeforeFlat = h; }
+  void setHeightAfterFlattening(float h)  { m_heightAfterFlat  = h; }
+
+  // Phase 10b override — returns post-flatten height if setTileHeight() was called,
+  // otherwise pre-flatten height. Defaults to 0.0f / 0.0f so existing tests are unaffected.
+  float getHeightAt(int /*tileX*/, int /*tileZ*/) const override {
+      return m_flattened ? m_heightAfterFlat : m_heightBeforeFlat;
+  }
+
+  // Phase 10b override — records that flattening occurred; TerrainFlattening tests
+  // assert m_flattened == true to confirm setTileHeight() was invoked.
+  void setTileHeight(int /*tileX*/, int /*tileZ*/, float /*height*/) override {
+      m_flattened = true;
+  }
+  ```
+
+  `IRenderer` placement methods carry no Y parameter, so height verification in
+  `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight` must go through
+  `ManualTerrainQuery::m_flattened` and `getHeightAt()`, not through `MockRenderer`.
+
 - **`IAlcFunctions`** — injectable interface for ALC function-pointer lookup, enabling the thread-local context extension check in `AudioSystem` to be intercepted in tests without a real OpenAL device. **Source locations**: `IAlcFunctions.h` in `src/audio/`; `DefaultAlcFunctions.h`/`DefaultAlcFunctions.cpp` in `src/audio/`; `MockAlcFunctions` is defined locally in `tests/audio/audio_thread_test.cpp` (single-use — not a shared header). All test double headers live under `tests/` — never under `src/`.
 
   ```cpp

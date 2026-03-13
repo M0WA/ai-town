@@ -53,3 +53,27 @@ When `ICitySimulation::placeRoad()` succeeds, the following player-visible feedb
 overlay confirmation that a road was placed (unlike zone tiles). The sole visual confirmation
 is the 3D road mesh. Until Phase 9a road mesh rendering is complete, road placement produces
 only the audio cue and the unsaved-changes dot. This is expected behaviour for Phase 9b.
+
+## Phase 10b: Terrain Mesh Modification on Placement
+
+Starting in Phase 10b, `IrrlichtRenderer` placement helpers (`placeBuildingMesh`,
+`placeRoadMesh`, `placeServiceBuildingMesh`) flatten the terrain under and around a placed
+tile before creating the scene node. The call sequence is:
+
+1. Read the tile's current height: `preY = m_terrain->getHeightAt(tileX, tileZ)`.
+2. Flatten: `m_terrain->setTileHeight(tileX, tileZ, preY)` — writes `preY` into the
+   persistent LOD0 heightmap for the centre tile and applies neighbour blending to the 8
+   surrounding tiles (cardinal neighbours lerped 50% toward `preY`; diagonal neighbours
+   lerped 25% toward `preY`). All modified tiles' chunks are enqueued for rebuild.
+3. Read the post-flatten height: `postY = m_terrain->getHeightAt(tileX, tileZ)` — use
+   `postY` as the scene node Y coordinate so the mesh sits on the freshly flattened surface.
+
+This pattern guarantees the placed structure is always flush with the terrain surface.
+Neighbour blending prevents hard seams at tile boundaries. The earthworks treasury
+deduction and `sfx_earthworks` audio cue (introduced in earlier phases) are unchanged;
+Phase 10b adds only the visual terrain change.
+
+For the full `setTileHeight()` implementation spec (blending formula, chunk rebuild
+enqueue, bounds clamping, rebuild budget interaction) see
+`architecture/graphics-architecture/procedural-terrain.md` — `setTileHeight()` Write
+Path and Neighbour Blending (Phase 10b).

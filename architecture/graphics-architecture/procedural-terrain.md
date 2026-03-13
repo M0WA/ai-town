@@ -126,6 +126,8 @@
   `ITerrainQuery` interface (`src/interfaces/ITerrainQuery.h`) so that `IrrlichtRenderer` can
   sample terrain height for zone overlay Y-positions, hover highlight Y-positions, and **mesh
   placement Y-positions** without a direct dependency on the concrete `TerrainSystem` class.
+  **Phase 10b further extends `ITerrainQuery`** with the write method `setTileHeight()` — see
+  the `setTileHeight()` Write Path and Neighbour Blending section below.
 
   **MANDATORY — building, road, and service-building scene nodes must be placed at terrain height**:
   `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and `placeServiceBuildingMesh()`
