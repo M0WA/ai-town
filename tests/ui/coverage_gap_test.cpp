@@ -276,20 +276,20 @@ TEST_F(CoverageGapTest, Coverage_ZoneSubPanel_ButtonClick_SwapsSprites)
 // ============================================================================
 // Test: Utilities sub-panel button click updates sprites (L602-609)
 //
-// Utilities sub-panel layout: top-left (80, 176), each button 96x48, gap 4.
+// Utilities sub-panel layout: top-left (80, 64), each button 64x40, gap 4.
 // Button (typeIdx=1 = WaterTower): col=1, row=0.
-//   x = 80 + 1*(96+4) = 180, y = 176 + 0*(48+4) = 176.
-// Click at (180+48, 176+24) = (228, 200).
+//   x = 80 + 1*(64+4) = 148, y = 64 + 0*(40+4) = 64.
+// Click at (148+32, 64+20) = (180, 84).
 // ============================================================================
 TEST_F(CoverageGapTest, Coverage_UtilitiesSubPanel_ButtonClick_SwapsSprites)
 {
     // Activate Utilities tool via toolbar.
     goToGameplay();
-    uiManager_->onEvent(makeMouseButtonDown(0, 40, 200));  // Utilities: y 176..223
+    uiManager_->onEvent(makeMouseButtonDown(0, 40, 200));  // Utilities toolbar: y 176..223
 
     // WaterTower button (typeIdx=1): col=1, row=0.
-    // x = 80 + 1*(96+4) = 180, y = 176 + 0*(48+4) = 176. Center: (228, 200).
-    InputEvent click = makeMouseButtonDown(0, 228, 200);
+    // x = 80 + 1*(64+4) = 148, y = 64 + 0*(40+4) = 64. Center: (180, 84).
+    InputEvent click = makeMouseButtonDown(0, 180, 84);
     bool consumed = uiManager_->onEvent(click);
     EXPECT_TRUE(consumed);
 }

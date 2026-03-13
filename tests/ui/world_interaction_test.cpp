@@ -886,10 +886,10 @@ TEST_F(WorldInteractionTest, WorldInteraction_UtilitiesPlacement_CallsPlaceServi
 
     // Select FireStation via Utilities sub-panel click.
     // The Utilities sub-panel layout (spec): col0=PowerPlant, col1=WaterTower,
-    // col0row1=FireStation. Virtual position: top-left anchor (x:80, y:176),
-    // button size 96x48, gap 4. FireStation is at column 0, row 1:
-    //   x = 80 + 0*(96+4) = 80, y = 176 + 1*(48+4) = 228.
-    // Click at (80+48, 228+24) = (128, 252) to hit FireStation button.
+    // col0row1=FireStation. Virtual position: top-left anchor (x:80, y:64),
+    // button size 64x40, gap 4. FireStation is at column 0, row 1:
+    //   x = 80 + 0*(64+4) = 80, y = 64 + 1*(40+4) = 108.
+    // Click at (80+32, 108+20) = (112, 128) to hit FireStation button.
     // This is a Phase 9b sub-panel click that sets m_selectedServiceBuilding.
     // The sub-panel buttons are created by UIManager init() and respond to
     // EGET_BUTTON_CLICKED events in the Priority 5 handler — for this test,
@@ -898,10 +898,10 @@ TEST_F(WorldInteractionTest, WorldInteraction_UtilitiesPlacement_CallsPlaceServi
     InputEvent fireStationClick{};
     fireStationClick.type   = InputEvent::Type::MouseButtonDown;
     fireStationClick.button = 0;
-    fireStationClick.x      = 128;  // FireStation column 0 (col0row1) in sub-panel
-    fireStationClick.y      = 252;  // Row 1: y=176+52=228, center at 252
-    fireStationClick.physX  = 128;
-    fireStationClick.physY  = 252;
+    fireStationClick.x      = 112;  // FireStation column 0 (col0row1) in sub-panel
+    fireStationClick.y      = 128;  // Row 1: y=64+44=108, center at 128
+    fireStationClick.physX  = 112;
+    fireStationClick.physY  = 128;
     uiManager_->onEvent(fireStationClick);
 
     // Now send the world click.

@@ -128,27 +128,17 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
         const int zoneLeft  = 80;
         const int zoneTop   = 64;
 
-        // Zone type short names (column) and density tier short names (row).
-        // Used as text-label fallback when the sprite atlas is not yet loaded.
-        // Displayed as "Res\nLow", "Com\nMed", etc.  (two-line abbreviation)
-        static const char* kZoneTypeAbbrev[3]    = { "Res", "Com", "Ind" };
-        static const char* kDensityTierAbbrev[3] = { "Low", "Med", "High" };
-
         // Create all 9 buttons; set inactive sprite for each (including the default);
         // then override the default (idx 0, Residential Low) with the active sprite.
         // Tests assert: all 9 inactive calls + 1 active call on the default button.
+        // Empty string label — sprite is the sole visual encoding (hud_sprites_ui.dds is committed).
         for (int densityRow = 0; densityRow < 3; ++densityRow) {
             for (int zoneCol = 0; zoneCol < 3; ++zoneCol) {
                 int idx = densityRow * 3 + zoneCol;
                 int bx  = zoneLeft + zoneCol  * (zoneBtnW + zoneGap);
                 int by  = zoneTop  + densityRow * (zoneBtnH + zoneGap);
 
-                // Build a short text label so the button is readable even when the
-                // sprite atlas (hud_sprites_ui.dds) has not yet loaded.
-                std::string label = std::string(kZoneTypeAbbrev[zoneCol])
-                                    + " " + kDensityTierAbbrev[densityRow];
-
-                m_zoneSubPanelBtns[idx] = m_backend->addButton(label.c_str(), bx, by, zoneBtnW, zoneBtnH);
+                m_zoneSubPanelBtns[idx] = m_backend->addButton("", bx, by, zoneBtnW, zoneBtnH);
 
                 // Set initial inactive zone pattern icon.
                 // Sprite IDs: kSpriteZoneResLowInactive(96) + zoneCol + densityRow*3.
@@ -171,17 +161,18 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
     }
 
     // --- Phase 9b: Utilities sub-panel buttons (2×2 grid) ---
-    // Top-left anchor: virtual (x:80, y:176). Each button 96×48 px with 4 px gap.
+    // Top-left anchor: virtual (x:80, y:64). Each button 64×40 px with 4 px gap.
     // Grid layout: 2 columns × 2 rows.
     //   (col0,row0)=PowerPlant, (col1,row0)=WaterTower,
     //   (col0,row1)=FireStation, (col1,row1)=PoliceStation
     // All buttons initially hidden (only shown when ActiveTool::Utilities is active).
+    // Anchored at y:64 (same as Zone sub-panel) — sub-panels are mutually exclusive.
     if (m_backend) {
-        const int utilBtnW  = 96;
-        const int utilBtnH  = 48;
+        const int utilBtnW  = 64;
+        const int utilBtnH  = 40;
         const int utilGap   = 4;
         const int utilLeft  = 80;
-        const int utilTop   = 176;
+        const int utilTop   = 64;
 
         // ServiceBuildingType ordinals: PowerPlant=0, WaterTower=1, FireStation=2, PoliceStation=3.
         // Grid positions: (col, row) -> type index:
@@ -190,10 +181,7 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
         // Create all 4 buttons; set inactive sprite for each (including the default);
         // then override the default (typeIdx 0, PowerPlant) with the active sprite.
         // Tests assert: all 4 inactive calls + 1 active call on the default button.
-        //
-        // Phase 10: text fallback labels used when hud_sprites_ui.png fails to load.
-        // Labels per architecture/ui-ux/hud-layout.md §Utilities Sub-Panel Button Content.
-        static const char* kUtilFallbackLabels[4] = { "Power", "Water", "Fire", "Police" };
+        // Empty string label — sprite is the sole visual encoding (hud_sprites_ui.dds is committed).
 
         for (int utilRow = 0; utilRow < 2; ++utilRow) {
             for (int utilCol = 0; utilCol < 2; ++utilCol) {
@@ -202,7 +190,7 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
                 int by  = utilTop  + utilRow * (utilBtnH + utilGap);
 
                 m_utilSubPanelBtns[typeIdx] = m_backend->addButton(
-                    kUtilFallbackLabels[typeIdx], bx, by, utilBtnW, utilBtnH);
+                    "", bx, by, utilBtnW, utilBtnH);
 
                 // Set inactive sprite for every button (including the default).
                 uint32_t inactiveSprite = kSpriteUtilPowerInactive
@@ -630,8 +618,8 @@ bool UIManager::onEvent(const InputEvent& event) {
         // Uses hardcoded positions (same constants as construction).
         // kInvalidUIElement guard omitted from hit-test loop (preserved only for backend calls).
         if (m_activeTool == ActiveTool::Utilities && m_backend) {
-            const int utilBtnW = 96, utilBtnH = 48, utilGap = 4;
-            const int utilLeft = 80, utilTop = 176;
+            const int utilBtnW = 64, utilBtnH = 40, utilGap = 4;
+            const int utilLeft = 80, utilTop = 64;
             for (int typeIdx = 0; typeIdx < 4; ++typeIdx) {
                 int utilCol = typeIdx % 2;
                 int utilRow = typeIdx / 2;

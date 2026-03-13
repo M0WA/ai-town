@@ -42,26 +42,8 @@ Each button displays a sprite icon from `hud_sprites_ui.dds` via
 `src/ui/hud_sprite_ids.h` (rows 2 and 3 of the sprite sheet — see
 `architecture/asset-standards/2d-texture-standards.md` Cell Assignment Tables). The button
 is created with an empty text label (`addButton("", ...)`); the sprite is the sole visual
-encoding.
-
-**Text label fallback (when sprite sheet asset is not yet on disk)**: If
-`hud_sprites_ui.dds` is absent or the sprite fails to load, the button will render as an
-empty square with no visual content. To prevent this from shipping as a player-facing blank
-grid, a text fallback MUST be applied: each button must be created with a short descriptive
-label matching its cell position:
-
-| Column 0 (Residential) | Column 1 (Commercial) | Column 2 (Industrial) |
-|---|---|---|
-| Row 0: "R-Lo" | "C-Lo" | "I-Lo" |
-| Row 1: "R-Med" | "C-Med" | "I-Med" |
-| Row 2: "R-Hi" | "C-Hi" | "I-Hi" |
-
-Once `hud_sprites_ui.dds` is authored and placed at `assets/textures/ui/hud_sprites_ui.dds`,
-the `IrrlichtUIBackend` loads it during initialization and the `setElementImage()` call
-replaces the text with the sprite. The text label is not visible when a sprite is present;
-it only appears when sprite loading fails. **This text fallback is the authoritative
-definition: the implementation MUST pass these strings to `addButton()` rather than empty
-string `""`.**
+encoding. Do NOT pass a non-empty text string — Irrlicht renders button text on top of the
+sprite image, which would overlay the icon with a text label.
 
 **Tooltip**: On hover, each zone sub-panel button displays a tooltip with the full zone type
 and density name, e.g. "Residential — Low density", "Commercial — Medium density",
@@ -132,12 +114,13 @@ LMB held calls `doTerrainPlacement()` for each new tile the cursor enters. See
 ## Utilities Sub-Panel
 
 The Utilities sub-panel is a 2×2 grid of buttons that appears immediately to the right of the
-left toolbar (x:80, y:176) whenever the Utilities tool is active. It is hidden for all other
-tool modes. Virtual bounds: x:80–276 px, y:176–276 px (width = (96×2)+4 = 196 px,
-height = (48×2)+4 = 100 px). Grid layout: column 0 = Power Plant, column 1 = Water Tower,
-row 0 = (Power Plant, Water Tower), row 1 = (Fire Station, Police Station). Constants defined
-in `src/ui/ui_constants.h`: `kUtilSubPanelLeft`, `kUtilSubPanelTop`, `kUtilSubBtnW`,
-`kUtilSubBtnH`, `kUtilSubBtnGap`.
+left toolbar (x:80, y:64) whenever the Utilities tool is active. It is hidden for all other
+tool modes. It shares the same top anchor (y:64) as the Zone sub-panel — the two sub-panels
+are mutually exclusive, so only one is ever visible at a time. Virtual bounds: x:80–212 px,
+y:64–148 px (width = (64×2)+4 = 132 px, height = (40×2)+4 = 84 px). Grid layout: column 0 =
+Power Plant, column 1 = Water Tower, row 0 = (Power Plant, Water Tower), row 1 = (Fire
+Station, Police Station). Constants defined in `src/ui/ui_constants.h`: `kUtilSubPanelLeft`,
+`kUtilSubPanelTop`, `kUtilSubBtnW`, `kUtilSubBtnH`, `kUtilSubBtnGap`.
 
 ### Utilities Sub-Panel Button Content
 
@@ -145,30 +128,13 @@ Each button displays a sprite icon from `hud_sprites_ui.dds` via
 `IUIBackend::setElementImage()` using the `kSpriteUtil*` constants from
 `src/ui/hud_sprite_ids.h` (rows 4 and 5 of the sprite sheet — see
 `architecture/asset-standards/2d-texture-standards.md` Cell Assignment Tables). The button
-is created with a short descriptive text label; the sprite replaces the label once the
-sprite sheet is loaded.
-
-**Text label fallback (when sprite sheet asset is not yet on disk)**: If
-`hud_sprites_ui.dds` is absent or the sprite fails to load, the button will render its
-text label. The following fallback labels MUST be passed to `addButton()` at construction
-time for each Utilities sub-panel button — do NOT pass an empty string `""`:
-
-| Index | ServiceBuildingType | Fallback label |
-|---|---|---|
-| 0 | `PowerPlant` | `"Power"` |
-| 1 | `WaterTower` | `"Water"` |
-| 2 | `FireStation` | `"Fire"` |
-| 3 | `PoliceStation` | `"Police"` |
+is created with an empty text label (`addButton("", ...)`); the sprite is the sole visual
+encoding. Do NOT pass a non-empty text string — Irrlicht renders button text on top of the
+sprite image, which would overlay the icon with a text label.
 
 Button index maps to `ServiceBuildingType` enum value: `{PowerPlant=0, WaterTower=1,
 FireStation=2, PoliceStation=3}` — sequential from 0 as defined in
 `src/interfaces/simulation_types.h`.
-
-Once `hud_sprites_ui.dds` is authored and loaded by `IrrlichtUIBackend`, `setElementImage()`
-replaces the text with the sprite icon. The fallback label is not visible when a sprite is
-loaded; it only appears when sprite loading fails. **This text fallback is the authoritative
-definition: the implementation MUST pass these strings to `addButton()` rather than empty
-string `""`.**
 
 **Tooltip**: On hover, each Utilities sub-panel button displays a tooltip with the full
 service building name: "Power Plant", "Water Tower", "Fire Station", "Police Station".
@@ -544,7 +510,7 @@ Label text that uses `hud_font.xml` (do NOT call `setElementMonoFont()`):
 
 ## Toolbar Button Text Fallback — Known Rendering Artefact
 
-**Symptom**: Players see small letter characters (e.g. "Zone", "Road", "Utilities", "Demolish",
+**Symptom**: Players see small letter characters (e.g. "Zone", "Road", "Utils", "Demol",
 "Query") in the upper-left area of the screen, overlapping the toolbar icon buttons. This is NOT a
 misplaced text label — it is the **Irrlicht `IGUIButton` label text rendering as a fallback** when
 the sprite sheet asset `assets/textures/ui/hud_sprites_ui.png` is not present on disk.
@@ -556,6 +522,9 @@ sheet is loaded by `IrrlichtUIBackend`, `setElementImage()` replaces the text wi
 However, until the sprite sheet file exists, Irrlicht renders the button label text in the
 default (tiny) font at the button's physical position — which is the upper-left toolbar area at
 approximately physical pixels (5–46, 43–250) on a 1280×720 window.
+
+Note: Zone and Utilities **sub-panel** buttons are created with empty string labels
+(`addButton("", ...)`). Only the five primary **toolbar** buttons carry text labels.
 
 **Fix — two parts, both required**:
 
@@ -569,18 +538,6 @@ approximately physical pixels (5–46, 43–250) on a 1280×720 window.
    `architecture/asset-standards/2d-texture-standards.md`). Once this file is present,
    `IrrlichtUIBackend::m_spriteTextureReady` becomes `true` and `setElementImage()` calls replace
    the fallback text with icons, eliminating the letter artefact entirely.
-
-**This is NOT a spec error** — the text fallback is intentional and specified in the Zone Sub-Panel
-Button Content section above ("text fallback MUST be applied ... each button must be created with a
-short descriptive label"). The artefact is a consequence of the sprite sheet not yet existing in
-Phase 9b builds. Phase 10 resolves it by delivering both the font asset and the sprite sheet.
-
-**Phase 9b mitigation (optional)**: If the sprite sheet artefact is visually disruptive during
-Phase 9b testing, a temporary workaround is to pass an empty string `""` to `addButton()` for the
-five toolbar buttons while `hud_sprites_ui.png` is absent. This produces blank buttons (invisible
-in Irrlicht's default skin background) instead of letter characters. **Do not ship this
-workaround** — revert to the specified fallback text strings before Phase 10 ships the sprite
-sheet, so players can identify buttons in edge-cases where sprite loading fails.
 
 ## Toolbar Button Label Abbreviations
 
