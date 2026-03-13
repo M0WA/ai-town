@@ -430,76 +430,110 @@ tile belongs to. For each unique chunk affected:
 to flatten all 4 vertices of the tile quad to the average height, then place the flat
 mesh on the flattened terrain.
 
-`IrrlichtRenderer::placeRoadMesh()` uses a different strategy: **terrain-conforming sloped
-road placement** (added after Phase 10b). Roads follow the terrain up to a 15° maximum
-slope instead of being forced flat. The function signature is:
+`IrrlichtRenderer::placeRoadMesh()` uses **terrain-conforming sloped road placement**.
+Roads follow terrain up to a **5% maximum grade** (0.05 rise/run); steeper terrain is
+flattened. The function signature is:
 
 ```cpp
 // Public IRenderer override — delegates to internal extended version.
 void placeRoadMesh(int tileX, int tileZ) override;
 
 // Internal implementation (private).
-// flattenTerrain: run slope-clamping setTileHeight() sequence if true.
-// rebuildNeighbors: rebuild cardinal road neighbor meshes if true.
+// flattenTerrain: run grade-clamping setTileHeight() sequence if true.
+// rebuildNeighbors: rebuild road tile meshes in 5×5 area if true.
 void placeRoadMesh(int tileX, int tileZ, bool flattenTerrain, bool rebuildNeighbors);
 ```
 
-#### Road tile placement — conditional slope flattening
+#### Road tile placement — two-phase terrain flattening
 
-```text
-max slope angle = atan(sqrt(dX² + dZ²))  where dX = (h10 - h00) / kTileSize, etc.
-```
+`placeRoadMesh` uses a two-phase approach to ensure all road and terrain meshes remain
+consistent after placement.
 
-If `slopeAngle <= 15°`: corners are used as-is — no terrain modification, road follows
-the natural terrain.
-
-If `slopeAngle > 15°`: scale each corner's deviation from the tile average so the max
-gradient equals `tan(15°)`:
+**Phase 1 — flatten main tile only, then flush**
 
 ```cpp
-const float scale = tan(15°) / slopeMax;
-const float avg   = (h00 + h10 + h01 + h11) * 0.25f;
-h00 = avg + (h00 - avg) * scale;  // and similarly for h10, h01, h11
+static constexpr float kMaxRoadGrade = 0.05f;  // 5% = 0.05 rise/run
+
+const float dX0 = (h10 - h00) / kTileSize;  const float dX1 = (h11 - h01) / kTileSize;
+const float dZ0 = (h01 - h00) / kTileSize;  const float dZ1 = (h11 - h10) / kTileSize;
+const float gradeMax = max(mag(dX0,dZ0), mag(dX0,dZ1), mag(dX1,dZ0), mag(dX1,dZ1));
+
+if (gradeMax > kMaxRoadGrade) {
+    const float scale = kMaxRoadGrade / gradeMax;
+    const float avg   = (h00 + h10 + h01 + h11) * 0.25f;
+    h_i = avg + (h_i - avg) * scale;   // for each of h00, h10, h01, h11
+    // write all 4 corners via setTileHeight — no flush yet
+}
+m_terrain->flushTerrainRebuilds();   // single flush after all writes
 ```
 
-The (possibly adjusted) corner heights are then written back with `setTileHeight()` and
-flushed with `flushTerrainRebuilds()`.
+**Do not flatten neighbour tiles in Phase 1.** Each neighbour's `setTileHeight` reads
+already-modified shared corners, computes a different average, and writes different
+values back — Phase 2 would then re-read the corrupted values and produce an
+inconsistent main tile mesh.
 
-#### Per-tile LOD0 road mesh (terrain-conforming)
+**Phase 2 — re-read heights and build mesh**
 
-`buildTileRoadMesh(h00, h10, h01, h11)` builds a new `SMesh*` per tile. Vertex Y
-positions carry the absolute world-space terrain heights plus a 10 cm bias:
+Re-read all 4 corners from terrain after the flush (canonical values after all writes
+and blending). Build the terrain-conforming road quad:
 
 ```text
-v0 = (-H, h00+0.10, -H)   back-left   (tileX,   tileZ)
-v1 = (+H, h10+0.10, -H)   back-right  (tileX+1, tileZ)
-v2 = (+H, h11+0.10, +H)   front-right (tileX+1, tileZ+1)
-v3 = (-H, h01+0.10, +H)   front-left  (tileX,   tileZ+1)
+v0 = (-H, h00+0.25, -H)   back-left   (tileX,   tileZ)
+v1 = (+H, h10+0.25, -H)   back-right  (tileX+1, tileZ)
+v2 = (+H, h11+0.25, +H)   front-right (tileX+1, tileZ+1)
+v3 = (-H, h01+0.25, +H)   front-left  (tileX,   tileZ+1)
 ```
 
-Where `H = kTileSize / 2 = 5 m`. The scene node is positioned at world X/Z centre
-with `Y = 0` — all height is baked into vertex positions so no double-offset occurs.
+Y bias = **0.25 m**. A 0.10 m bias causes Z-fighting at oblique angles; 0.25 m
+eliminates it at all normal camera angles. The scene node Y = 0 — heights are baked
+into vertex positions. No kerb geometry — roads are plain flat quads tiling edge-to-edge
+(kerbs extended ±0.15 m beyond the tile boundary, causing Z-fight seams with neighbors).
 
-Kerb geometry uses the same corner heights so kerb bases follow the terrain edge.
-Polygon offset (`EPO_FRONT`, factor=1) is applied to the mesh buffer material as the
-primary Z-fighting defence.
+**Phase 3 — rebuild 5×5 road area**
 
-**MANDATORY — bounding box Y-extent expansion for flat meshes**: After calling
-`buf->recalculateBoundingBox()` on the road tile mesh buffer, the bounding box Y span
-must be expanded to at least **0.5 m** before calling `mesh->recalculateBoundingBox()`
-and `addMeshSceneNode()`. Road tile geometry is nearly flat: the main quad and all
-kerb vertices span only ~0.10 m in Y on flat terrain (10 cm bias + 10 cm kerb height).
-Irrlicht's default `EAC_BOX` frustum culler tests the AABB's 8 corners against each
-clip plane. For a 10 m × 0.10 m × 10 m box viewed by the isometric camera (50–200 m
-altitude, looking down), the top/bottom frustum planes can produce false-negative
-culling — tiles near the frustum boundary are incorrectly discarded even though their
-screen projection is visible. This manifests as alternating gaps along a straight or
-diagonal road. Expanding the Y extent to 0.5 m symmetrically around the geometric
-midpoint is sufficient to prevent the false cull without affecting rendered geometry:
+`setTileHeight()` applies weighted blending to the 8 surrounding vertices per call
+(cardinal ×0.5, diagonal ×0.25). The four corner writes together modify vertices up to
+2 tile-lengths away. Road tiles within ±2 in each axis can have stale meshes:
 
 ```cpp
-buf->recalculateBoundingBox();
-// Expand bounding box Y to at least 0.5 m (frustum-cull safety for flat meshes).
+for (int dz = -2; dz <= 2; ++dz)
+    for (int dx = -2; dx <= 2; ++dx) {
+        if (dx == 0 && dz == 0) continue;
+        if road tile exists at (tileX+dx, tileZ+dz):
+            placeRoadMesh(nx, nz, flattenTerrain=false, rebuildNeighbors=false);
+    }
+```
+
+`flattenTerrain=false` prevents cascading height writes; `rebuildNeighbors=false`
+prevents infinite recursion.
+
+#### Road tile scene node material requirements
+
+```cpp
+for (u32 m = 0; m < node->getMaterialCount(); ++m) {
+    SMaterial& mat = node->getMaterial(m);
+    mat.Lighting               = false;
+    mat.BackfaceCulling        = false;   // MANDATORY — see below
+    mat.PolygonOffsetDirection = irr::video::EPO_FRONT;
+    mat.PolygonOffsetFactor    = 4;
+}
+node->setAutomaticCulling(irr::scene::EAC_OFF);  // MANDATORY — see below
+```
+
+**`BackfaceCulling = false` (MANDATORY)**: Road tiles tilt up to 5% with terrain. At
+oblique angles one triangle of the quad faces away from the camera — default
+`BackfaceCulling = true` silently culls it, making half the tile disappear. Must be set
+on **both** the `SMeshBuffer` material and the node's own material copies (Irrlicht's
+`CMeshSceneNode::copyMaterials()` is version-dependent; setting explicitly on the node
+after `addMeshSceneNode()` is the only reliable guarantee).
+
+**`EAC_OFF` (MANDATORY)**: Road tile AABBs are nearly flat; oblique angles cause
+false AABB frustum rejection. Disabling automatic culling for road nodes is required.
+
+**MANDATORY — bounding box Y-extent expansion**: After `buf->recalculateBoundingBox()`,
+expand Y span to at least **0.5 m** before `addMeshSceneNode()`:
+
+```cpp
 core::aabbox3df box = buf->getBoundingBox();
 const float yMid = (box.MaxEdge.Y + box.MinEdge.Y) * 0.5f;
 if (box.MaxEdge.Y - box.MinEdge.Y < 0.5f) {
@@ -507,67 +541,46 @@ if (box.MaxEdge.Y - box.MinEdge.Y < 0.5f) {
     box.MaxEdge.Y = yMid + 0.25f;
     buf->setBoundingBox(box);
 }
-// Then attach buffer to mesh and recalculate:
 mesh->addMeshBuffer(buf);
 buf->drop();
 mesh->recalculateBoundingBox();
 ```
 
-This rule applies to **any procedural flat mesh** (road tiles, zone overlays, placement
-preview quads) whose vertex Y span is less than 0.5 m and whose node uses `EAC_BOX`
-culling.
-
 LOD1 and LOD2 remain shared flat quads (used at 50–150 m and 150–300 m respectively).
 
-#### Neighbor edge matching
+#### Buildings and service buildings — flat-quad flattening + road rebuild
 
-After placing a road tile, all 4 cardinal neighbors that already have road nodes have
-their meshes rebuilt (mesh only — no re-flattening, no recursive re-flattening):
-
-```cpp
-if (rebuildNeighbors) {
-    for each cardinal neighbor (nx, nz):
-        if m_roadNodes.count(tileKey(nx, nz)) > 0:
-            placeRoadMesh(nx, nz, /*flattenTerrain=*/false, /*rebuildNeighbors=*/false);
-}
-```
-
-This ensures neighbor road tiles always reflect the current terrain heights at their
-shared edge — eliminating visible gaps where a newly-flattened tile meets an existing
-road neighbor.
-
-#### Buildings and service buildings (unchanged)
-
-`placeBuildingMesh()` and `placeServiceBuildingMesh()` retain the original flat-quad
-flattening pattern:
+`placeBuildingMesh()` and `placeServiceBuildingMesh()` flatten all 4 corners to the
+tile average, flush, then **rebuild road tiles in the same 5×5 area** — because
+`setTileHeight()`'s blending propagates to vertices 2 tiles away, making nearby road
+meshes stale:
 
 ```cpp
-const float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
-const float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
-const float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
-const float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
 const float targetH = (h00 + h10 + h01 + h11) * 0.25f;
-if (m_terrain) {
-    m_terrain->setTileHeight(tileX,     tileZ,     targetH);
-    m_terrain->setTileHeight(tileX + 1, tileZ,     targetH);
-    m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
-    m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
-}
-if (m_terrain) m_terrain->flushTerrainRebuilds();
+m_terrain->setTileHeight(tileX,     tileZ,     targetH);
+m_terrain->setTileHeight(tileX + 1, tileZ,     targetH);
+m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
+m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
+m_terrain->flushTerrainRebuilds();
+
+// Rebuild road tiles within ±2 — same blending radius as placeRoadMesh Phase 3.
+for (int dz = -2; dz <= 2; ++dz)
+    for (int dx = -2; dx <= 2; ++dx) {
+        if (dx == 0 && dz == 0) continue;
+        if road tile exists at (tileX+dx, tileZ+dz):
+            placeRoadMesh(nx, nz, flattenTerrain=false, rebuildNeighbors=false);
+    }
 
 // Use targetH directly — NOT getHeightAt() after setTileHeight().
 const float postY = m_terrain ? targetH : 0.0f;
-node->setPosition(irr::core::vector3df(
-    static_cast<float>(tileX) * kTileSize + kTileSize * 0.5f,
-    postY + 0.10f,
-    static_cast<float>(tileZ) * kTileSize + kTileSize * 0.5f));
+node->setPosition(... postY + 0.10f ...);
 ```
 
 **Critical invariant**: `postY` must be `targetH`, not `getHeightAt(tileX, tileZ)` after
 the four corner writes. The neighbour blending from each subsequent `setTileHeight()` call
 bleeds back into the `(tileX, tileZ)` vertex, leaving it below `targetH` when all 4 calls
 complete. Reading the corrupted vertex height for Y-positioning causes the mesh to sink
-into the terrain — exactly the bug that `flushTerrainRebuilds()` alone cannot fix.
+into the terrain.
 
 ### flushTerrainRebuilds() — Synchronous Geometry Update After Placement
 

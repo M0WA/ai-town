@@ -552,3 +552,40 @@ generator script is `tools/generate_hud_sprites.py`.
 >   (mipmapping disabled removes the padding constraint per UV & Atlas Strategy section)
 >
 > Signed off by: `graphics-artist-2d-texture`
+
+### Sprite ID Encoding and Row-Conflict Pitfall
+
+Sprite IDs in `hud_sprite_ids.h` are encoded as `id = col + row * 32`. The pixel position of
+cell (col, row) in the 2048×2048 sheet is `(col * 64, row * 64)` — **every row is 64 px tall
+and every column is 64 px wide, with no exceptions.** `spriteRectForIndex()` in
+`IrrlichtUIBackend.cpp` resolves all IDs via this single formula.  No per-ID special cases
+exist or should ever be added — the generator (`tools/generate_hud_sprites.py`) places every
+icon at exactly `(col * 64, row * 64)`.
+
+**Row 1 (y = 64) is exclusively the toolbar-inactive row** (IDs 32–36, 5 icons, 64×64 px
+each at x = 0, 64, 128, 192, 256). No other sprites may be placed at y = 64 in the PNG.
+
+**Row 10 (y = 640)** holds the four notification/HUD-misc icons (IDs 320–323):
+
+| ID | Constant | Col | x | y |
+|----|----------|-----|---|---|
+| 320 | `kSpriteNotificationBell` | 0 | 0 | 640 |
+| 321 | `kSpriteClockIcon` | 1 | 64 | 640 |
+| 322 | `kSpriteUnsavedDot` | 2 | 128 | 640 |
+| 323 | `kSpriteUndoIcon` | 3 | 192 | 640 |
+
+**Known past bugs — do not reintroduce:**
+
+1. **Bell/undo/clock/dot (IDs 320–323)** — an old JSON listed `icon_bell` at `(56, 64)` and
+   `icon_undo` at `(0, 64)`, placing both inside the toolbar-inactive row (y = 64).
+   The resulting special cases in `spriteRectForIndex()` caused the notification bell button
+   to render the road-inactive icon shifted 8 px left (bell rect `x:56–104` overlapped road
+   inactive `x:64–128`).  Fixed by removing the special cases; the default grid resolves
+   all four correctly to row 10 (y = 640).
+
+2. **Utilities sub-panel icons (IDs 128–163, rows 4–5)** — an old JSON listed water, fire,
+   and police with 72 px column spacing (`x = 72, 144, 216`) instead of 64 px.  A special
+   case in `spriteRectForIndex()` used `xOffsets = {0, 72, 144, 216}`, reading Fire 16 px
+   and Police 24 px past their real start positions, clipping their left edges and making
+   them appear shifted left on the button.  Fixed by removing the special case; the
+   generator always places all four icons on the standard 64 px grid (x = 0, 64, 128, 192).

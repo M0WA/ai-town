@@ -1185,6 +1185,23 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
             m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
         }
         if (m_terrain) m_terrain->flushTerrainRebuilds();
+
+        // Rebuild road tiles within ±2 of this building tile.
+        // setTileHeight() applies weighted neighbour blending to the 8 vertices
+        // surrounding each written corner; the four-corner sequence touches vertices
+        // up to 2 tiles away.  Road tiles at those positions have stale meshes until
+        // rebuilt here (same radius as placeRoadMesh Phase 3).
+        for (int dz = -2; dz <= 2; ++dz) {
+            for (int dx = -2; dx <= 2; ++dx) {
+                if (dx == 0 && dz == 0) continue;
+                const int nx = tileX + dx;
+                const int nz = tileZ + dz;
+                if (m_roadNodes.count(tileKey(nx, nz)) > 0)
+                    placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
+                                          /*rebuildNeighbors=*/false);
+            }
+        }
+
         // Use targetH directly — NOT getHeightAt() after setTileHeight().
         // setTileHeight() applies neighbour blending to the 8 surrounding tiles;
         // subsequent corner calls bleed back into vertex (tileX, tileZ), leaving
@@ -1424,15 +1441,11 @@ irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
 
     // Road tile half-extent in X and Z (5 m).
     static constexpr float H  = kTileSize * 0.5f;
-    // Y bias: road surface sits 25 cm above terrain.  The previous 10 cm was too
-    // small — at oblique camera azimuths the depth slope causes z-fighting even with
-    // polygon offset, making tiles partially or fully disappear.  25 cm is
-    // imperceptible at the isometric view scale (10 m tiles) and eliminates the issue.
+    // Y bias: road surface sits 25 cm above terrain.  Polygon offset (factor=4, EPO_FRONT)
+    // is re-applied to the scene node's own materials in placeRoadMesh to guarantee the
+    // driver uses it.  25 cm is well above z-fighting range at all camera angles while
+    // remaining imperceptible at the 10 m tile isometric scale.
     static constexpr float B  = 0.25f;
-    // Kerb dimensions (world-space metres).
-    static constexpr float KB = 0.05f;  // bevel inset
-    static constexpr float KW = 0.15f;  // total kerb width
-    static constexpr float KH = 0.10f;  // kerb height above road surface corner
 
     // Effective material type (road shader or EMT_SOLID fallback).
     const E_MATERIAL_TYPE roadMat = (m_roadMaterialType >= 0)
@@ -1452,9 +1465,9 @@ irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
     buf->Material.Lighting               = false;
     buf->Material.BackfaceCulling        = false;  // kerb faces have varying normals
     buf->Material.PolygonOffsetDirection = irr::video::EPO_FRONT;
-    // Factor 4: at oblique camera azimuths the depth slope of a 25-cm-raised flat
-    // tile is still steep enough that factor=1 leaves z-fighting.  Factor 4 fully
-    // compensates for the worst-case slope without visible depth artifacts on kerbs.
+    // Factor 4: push road surface toward the camera relative to any co-planar or
+    // near-planar terrain fragment.  Also re-applied to the scene node's own material
+    // copies in placeRoadMesh() to guarantee the driver uses the correct value.
     buf->Material.PolygonOffsetFactor    = 4;
 
     // Helper: add a vertex (position in tile-local X/Z, world-space Y).
@@ -1475,94 +1488,10 @@ irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
     buf->Indices.push_back(0); buf->Indices.push_back(2); buf->Indices.push_back(1);
     buf->Indices.push_back(0); buf->Indices.push_back(3); buf->Indices.push_back(2);
 
-    // Helper: bilinearly interpolate a height at (fx, fz) in [0,1]×[0,1] tile space.
-    // Used to compute kerb base heights that track the terrain edge.
-    auto hlerp = [&](float fx, float fz) -> float {
-        // fx=0 → -H edge (tileX), fx=1 → +H edge (tileX+1)
-        // fz=0 → -H edge (tileZ), fz=1 → +H edge (tileZ+1)
-        float h0z = y00 + fx * (y10 - y00);  // lerp along z=0 edge
-        float h1z = y01 + fx * (y11 - y01);  // lerp along z=1 edge
-        return h0z + fz * (h1z - h0z);
-    };
-
-    // --- Kerb helper: add one strip (8 verts, 6 tris) ---
-    // Same structure as the previous flat version; kerb base heights now track terrain.
-    auto addKerb = [&](
-        float lx0, float ly0, float lz0,
-        float rx0, float ry0, float rz0,
-        float lx1, float ly1, float lz1,
-        float rx1, float ry1, float rz1,
-        float lx2, float ly2, float lz2,
-        float rx2, float ry2, float rz2,
-        float lx3, float ly3, float lz3,
-        float rx3, float ry3, float rz3)
-    {
-        u16 base = static_cast<u16>(buf->Vertices.size());
-        addV(lx0, ly0, lz0, 0.f, 0.f);
-        addV(rx0, ry0, rz0, 0.f, 0.f);
-        addV(lx1, ly1, lz1, 0.f, 0.f);
-        addV(rx1, ry1, rz1, 0.f, 0.f);
-        addV(lx2, ly2, lz2, 0.f, 0.f);
-        addV(rx2, ry2, rz2, 0.f, 0.f);
-        addV(lx3, ly3, lz3, 0.f, 0.f);
-        addV(rx3, ry3, rz3, 0.f, 0.f);
-        buf->Indices.push_back(base+0); buf->Indices.push_back(base+2); buf->Indices.push_back(base+1);
-        buf->Indices.push_back(base+2); buf->Indices.push_back(base+3); buf->Indices.push_back(base+1);
-        buf->Indices.push_back(base+2); buf->Indices.push_back(base+4); buf->Indices.push_back(base+3);
-        buf->Indices.push_back(base+4); buf->Indices.push_back(base+5); buf->Indices.push_back(base+3);
-        buf->Indices.push_back(base+4); buf->Indices.push_back(base+6); buf->Indices.push_back(base+5);
-        buf->Indices.push_back(base+6); buf->Indices.push_back(base+7); buf->Indices.push_back(base+5);
-    };
-
-    // South kerb (z = -H side).  Base heights at z=-H edge: y00 (left) and y10 (right).
-    addKerb(
-        -H, y00,     -H,          H, y10,     -H,          // row 0: inner edge
-        -H, y00+KH,  -H-KB,       H, y10+KH,  -H-KB,       // row 1: bevel top
-        -H, y00+KH,  -H-KW,       H, y10+KH,  -H-KW,       // row 2: outer top
-        -H, y00,     -H-KW,       H, y10,     -H-KW);       // row 3: outer base
-
-    // North kerb (z = +H side).  Base heights: y01 (left) and y11 (right).
-    addKerb(
-        -H, y01,     H,           H, y11,     H,            // row 0
-        -H, y01+KH,  H+KB,        H, y11+KH,  H+KB,         // row 1
-        -H, y01+KH,  H+KW,        H, y11+KH,  H+KW,         // row 2
-        -H, y01,     H+KW,        H, y11,     H+KW);         // row 3
-
-    // West kerb (x = -H side).  Base heights: y00 (back) and y01 (front).
-    addKerb(
-        -H,    y00,     -H,        -H,    y01,     H,        // row 0
-        -H-KB, y00+KH,  -H,        -H-KB, y01+KH,  H,        // row 1
-        -H-KW, y00+KH,  -H,        -H-KW, y01+KH,  H,        // row 2
-        -H-KW, y00,     -H,        -H-KW, y01,     H);        // row 3
-
-    // East kerb (x = +H side).  Base heights: y10 (back) and y11 (front).
-    addKerb(
-        H,    y10,     -H,         H,    y11,     H,         // row 0
-        H+KB, y10+KH,  -H,         H+KB, y11+KH,  H,         // row 1
-        H+KW, y10+KH,  -H,         H+KW, y11+KH,  H,         // row 2
-        H+KW, y10,     -H,         H+KW, y11,     H);         // row 3
-
-    (void)hlerp;  // hlerp available for future use (e.g. mid-edge kerb heights)
-
     buf->recalculateBoundingBox();
 
-    // Expand Y extent of the bounding box to at least 0.5 m.
-    //
-    // Road tile geometry is nearly flat: the main quad and all kerb vertices span
-    // only ~0.10 m in Y (B=0.10 bias + KH=0.10 kerb height) on flat terrain.
-    // Irrlicht's EAC_BOX frustum culler tests the AABB's 8 corners against each
-    // clip plane.  For a 10 m × 0.10 m × 10 m box viewed by the isometric camera
-    // (camera above ~50–200 m, looking down), the top/bottom frustum planes clip
-    // in a way that the box's minimal Y extent causes the support-point test to
-    // produce false negatives — tiles near the frustum boundary are incorrectly
-    // culled even though their screen projection is clearly visible.  This manifests
-    // as alternating gaps along a straight road at diagonal viewing angles.
-    //
-    // Expanding to 0.5 m (±0.25 m from the geometric midpoint) gives the frustum
-    // culler enough Y headroom without affecting the rendered geometry (the actual
-    // vertex positions are unchanged; only the AABB used for the visibility test
-    // is widened).  The box is widened symmetrically around the midpoint so that
-    // terrain-conforming tiles at varying elevations are also correctly handled.
+    // Expand Y extent to at least 0.5 m so EAC_BOX (if ever re-enabled) has enough
+    // headroom.  EAC_OFF is set on the scene node, so this is defensive only.
     {
         core::aabbox3df box = buf->getBoundingBox();
         const float yMid = (box.MaxEdge.Y + box.MinEdge.Y) * 0.5f;
@@ -1585,29 +1514,31 @@ irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ)
 {
+    // Two-phase flattening (5% max grade):
+    //   Phase 1: flatten main tile + all cardinal road neighbors → single flush
+    //   Phase 2: re-read heights → build mesh → create node
+    //   Phase 3: rebuild neighbor meshes (no re-flatten, no recurse)
     placeRoadMesh(tileX, tileZ, /*flattenTerrain=*/true, /*rebuildNeighbors=*/true);
 }
 
 // -------------------------------------------------------------------------
 // placeRoadMesh (internal) — terrain-conforming sloped road placement.
 //
-// Conditional flattening (max 15° slope):
-//   - Read the 4 tile corner heights.
-//   - Compute max slope angle across the tile diagonal pairs.
-//   - If slope > 15°, scale corner height deltas down so the slope equals 15°.
-//   - Write the (possibly adjusted) corner heights back via setTileHeight().
-//   - Flush terrain rebuilds synchronously.
+// Two-phase flattening (flattenTerrain=true only):
+//   Phase 1 — flatten: apply 5% max-grade constraint to the main tile AND
+//     every cardinal neighbor that already has a road node, then flush once.
+//     A single flush ensures all shared corners are committed to the terrain
+//     heightmap before any mesh is read back, preventing the cascade-warp
+//     that occurs when each tile writes a different average to a shared corner.
+//   Phase 2 — build: re-read the 4 corner heights from the now-consistent
+//     terrain and build the terrain-conforming LOD0 mesh + scene node.
+//   Phase 3 — neighbor rebuild: rebuild each road neighbor's mesh from the
+//     current terrain heights (flattenTerrain=false, rebuildNeighbors=false).
 //
 // Per-tile LOD0 mesh:
-//   - Call buildTileRoadMesh(h00, h10, h01, h11) to build a terrain-conforming
-//     quad + kerb geometry with actual world-space heights baked into vertex Y.
-//   - Node is positioned at world X/Z centre with Y=0 (heights already in verts).
-//
-// Neighbor edge matching (rebuildNeighbors=true only):
-//   - After placement check all 4 cardinal neighbors.
-//   - If a neighbor has a road node, rebuild its mesh (flattenTerrain=false,
-//     rebuildNeighbors=false) so its geometry reflects the newly-written heights
-//     at the shared edge.
+//   buildTileRoadMesh(h00, h10, h01, h11) returns a terrain-conforming quad
+//   with world-space heights baked into vertex Y.  Node is placed at tile
+//   world X/Z centre with Y=0 (heights already encoded in vertices).
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
                                       bool flattenTerrain, bool rebuildNeighbors)
@@ -1622,61 +1553,86 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
     initRoadShader();
     ensureRoadMeshes();
 
-    // --- Read current corner heights ---
+    // Affected tile radius for Phase 3.
+    // setTileHeight() applies weighted neighbour blending: each call modifies not
+    // only the target vertex but also its 8 surrounding vertices (cardinal ×0.5,
+    // diagonal ×0.25).  Flattening the 4 corners of this tile therefore touches
+    // vertices in the range [tileX-1..tileX+2] × [tileZ-1..tileZ+2].  A road tile
+    // at offset (dx, dz) is affected if any of its 4 corner vertices falls in that
+    // range.  The maximum Manhattan offset for such a tile is |dx| ≤ 2, |dz| ≤ 2,
+    // requiring a 5×5 rebuild area (dx, dz ∈ [-2..+2], centre excluded).
+    // Rebuilding only ±1 (8 neighbours) leaves tiles 2 steps away with road meshes
+    // built from pre-blend heights while the terrain uses post-blend heights → seam.
+
+    // --- Phase 1: flatten main tile + road neighbors, then flush once ---
+    //
+    // Maximum road grade: 5% (0.05 rise/run).  If the steepest gradient across
+    // the tile exceeds this, all four corner heights are scaled toward their
+    // average until the max gradient equals exactly 5%.  Tiles below the
+    // threshold are left as-is (roads can tilt naturally up to ~5%).
+    //
+    // Only setTileHeight() is called here — no flush, no mesh rebuild — so that
+    // all height writes for this tile and its neighbors are committed in one
+    // flushTerrainRebuilds() call.  This prevents the shared-corner cascade
+    // where a neighbor's flush overwrites a corner that this tile already read.
+    static constexpr float kMaxRoadGrade = 0.05f;  // 5% grade (0.05 rise/run)
+
+    auto flattenTile = [&](int tx, int tz) {
+        if (!m_terrain) return;
+        float f00 = m_terrain->getHeightAt(tx,     tz);
+        float f10 = m_terrain->getHeightAt(tx + 1, tz);
+        float f01 = m_terrain->getHeightAt(tx,     tz + 1);
+        float f11 = m_terrain->getHeightAt(tx + 1, tz + 1);
+
+        // Gradient magnitude at each corner (X and Z components separately,
+        // combined as sqrt(dX² + dZ²)).
+        const float dX0 = (f10 - f00) / kTileSize;
+        const float dX1 = (f11 - f01) / kTileSize;
+        const float dZ0 = (f01 - f00) / kTileSize;
+        const float dZ1 = (f11 - f10) / kTileSize;
+
+        auto mag = [](float a, float b) { return std::sqrt(a*a + b*b); };
+        const float gradeMax = std::max({
+            mag(dX0, dZ0), mag(dX0, dZ1),
+            mag(dX1, dZ0), mag(dX1, dZ1)
+        });
+
+        if (gradeMax > kMaxRoadGrade) {
+            const float scale = kMaxRoadGrade / gradeMax;
+            const float avg = (f00 + f10 + f01 + f11) * 0.25f;
+            f00 = avg + (f00 - avg) * scale;
+            f10 = avg + (f10 - avg) * scale;
+            f01 = avg + (f01 - avg) * scale;
+            f11 = avg + (f11 - avg) * scale;
+            m_terrain->setTileHeight(tx,     tz,     f00);
+            m_terrain->setTileHeight(tx + 1, tz,     f10);
+            m_terrain->setTileHeight(tx,     tz + 1, f01);
+            m_terrain->setTileHeight(tx + 1, tz + 1, f11);
+        }
+        // Grade ≤ 5%: leave heights as-is; road will naturally tilt.
+    };
+
+    if (flattenTerrain && m_terrain) {
+        // Flatten ONLY the main tile.  Flattening neighbors here would cause each
+        // neighbor's flattenTile() to read the already-modified shared corners
+        // (written by the main tile), compute a different average, and overwrite
+        // those same corners with a different value.  Phase 2 would then re-read
+        // the neighbor-corrupted values and produce an inconsistent main tile mesh.
+        // Neighbors need their meshes rebuilt from the correct terrain (Phase 3),
+        // not their terrain re-flattened.
+        flattenTile(tileX, tileZ);
+        // Single flush: commits the height writes to the terrain heightmap and
+        // triggers chunk rebuilds.  No further setTileHeight calls follow.
+        m_terrain->flushTerrainRebuilds();
+    }
+
+    // --- Phase 2: re-read heights from terrain (after all modifications) ---
+    // Reading back after the flush guarantees the mesh is built from the same
+    // height values that are now stored in the terrain, matching every neighbor.
     float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
     float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
     float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
     float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
-
-    if (flattenTerrain && m_terrain) {
-        // --- Conditional slope flattening ---
-        // Maximum slope angle allowed for a road tile.
-        static constexpr float kMaxRoadSlopeDeg = 15.0f;
-        static constexpr float kMaxRoadSlopeRad =
-            kMaxRoadSlopeDeg * static_cast<float>(M_PI) / 180.0f;
-        const float tanMax = std::tan(kMaxRoadSlopeRad);
-
-        // Compute max gradient magnitude across the two diagonal pairs.
-        // Each diagonal spans sqrt(2)*kTileSize; approximate via max of X/Z components.
-        // dX_near: slope in X at z=0 edge;  dX_far:  slope in X at z=1 edge.
-        // dZ_near: slope in Z at x=0 edge;  dZ_far:  slope in Z at x=1 edge.
-        const float dX0 = (h10 - h00) / kTileSize;
-        const float dX1 = (h11 - h01) / kTileSize;
-        const float dZ0 = (h01 - h00) / kTileSize;
-        const float dZ1 = (h11 - h10) / kTileSize;
-
-        // Max slope magnitude across all 4 gradient samples.
-        auto grad2 = [](float a, float b) { return std::sqrt(a*a + b*b); };
-        const float slopeMax = std::max({
-            grad2(dX0, dZ0),
-            grad2(dX0, dZ1),
-            grad2(dX1, dZ0),
-            grad2(dX1, dZ1)
-        });
-        const float slopeAngle = std::atan(slopeMax);  // radians
-
-        if (slopeAngle > kMaxRoadSlopeRad) {
-            // Scale down the height differences to bring slope to exactly 15°.
-            // The scale factor reduces deltas so that max gradient = tan(15°).
-            const float scale = tanMax / slopeMax;
-
-            // Use the average as the reference (same as old flat approach), then
-            // scale each corner's deviation from the average.
-            const float avg = (h00 + h10 + h01 + h11) * 0.25f;
-            h00 = avg + (h00 - avg) * scale;
-            h10 = avg + (h10 - avg) * scale;
-            h01 = avg + (h01 - avg) * scale;
-            h11 = avg + (h11 - avg) * scale;
-        }
-        // If slopeAngle <= 15°, corners are used as-is (no flattening needed).
-
-        // Write the (possibly adjusted) corner heights back to the terrain.
-        m_terrain->setTileHeight(tileX,     tileZ,     h00);
-        m_terrain->setTileHeight(tileX + 1, tileZ,     h10);
-        m_terrain->setTileHeight(tileX,     tileZ + 1, h01);
-        m_terrain->setTileHeight(tileX + 1, tileZ + 1, h11);
-        m_terrain->flushTerrainRebuilds();
-    }
 
     // --- Build per-tile LOD0 terrain-conforming mesh ---
     SMesh* tileMesh = buildTileRoadMesh(h00, h10, h01, h11);
@@ -1707,17 +1663,27 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
     node->setScale(core::vector3df(1.0f, 1.0f, 1.0f));
 
     // Disable Irrlicht's automatic box frustum culling for road tiles.
-    // Road tile meshes are nearly flat (~0.1 m tall) so their AABB gives the
-    // EAC_BOX culler very little vertical headroom.  At oblique camera angles
-    // tiles near the frustum boundary can be false-rejected even after the
-    // 0.5 m Y-extent expansion applied in buildTileRoadMesh().  Road tiles are
-    // small (10 m × 10 m) and there are at most a few hundred of them; the
-    // performance cost of skipping the AABB test is negligible.
+    // Road tile meshes are nearly flat so their AABB has little vertical headroom.
+    // At oblique camera angles tiles near the frustum boundary can be false-rejected
+    // by EAC_BOX even with the 0.5 m Y-extent expansion in buildTileRoadMesh().
+    // Road tiles are small (10 m × 10 m); skipping the AABB test is negligible.
     node->setAutomaticCulling(irr::scene::EAC_OFF);
 
-    // Disable lighting (no light nodes in scene).
+    // Disable lighting, back-face culling, and re-apply polygon offset on the node's
+    // own material copies.  Irrlicht's CMeshSceneNode initialises its internal
+    // material list from the mesh buffer materials, but the copy behaviour is not
+    // guaranteed — re-setting all three properties here ensures the driver always
+    // receives the correct values regardless of the Irrlicht version or copy path.
+    // BackfaceCulling=false: the road quad is nearly flat but can tilt up to 5%.
+    // At oblique camera angles one of the two triangles can face away, causing half
+    // the tile to disappear.  Disabling back-face culling makes both triangles always
+    // visible regardless of terrain slope or camera elevation.
     for (u32 m = 0; m < node->getMaterialCount(); ++m) {
-        node->getMaterial(m).Lighting = false;
+        SMaterial& mat = node->getMaterial(m);
+        mat.Lighting               = false;
+        mat.BackfaceCulling        = false;
+        mat.PolygonOffsetDirection = irr::video::EPO_FRONT;
+        mat.PolygonOffsetFactor    = 4;
     }
 
     // Wrap in LODNode.
@@ -1731,19 +1697,21 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
     LODNode* lodNode = new LODNode(node);
     m_roadNodes[tileKey(tileX, tileZ)] = lodNode;
 
-    // --- Neighbor edge matching ---
-    // Rebuild cardinal road neighbors so their geometry reflects the newly-written
-    // shared edge heights.  Pass flattenTerrain=false (terrain already correct)
-    // and rebuildNeighbors=false (prevent infinite recursion).
+    // --- Phase 3: rebuild road meshes in the 5×5 affected area ---
+    // Terrain was already flushed in Phase 1.  Any road tile within ±2 tiles
+    // may have had a corner vertex modified by setTileHeight's blending; rebuild
+    // all such tiles so their meshes match the updated terrain.
+    // flattenTerrain=false: no second height writes (prevents cascade).
+    // rebuildNeighbors=false: prevents infinite recursion.
     if (rebuildNeighbors) {
-        static constexpr int kDX[4] = {-1,  1,  0, 0};
-        static constexpr int kDZ[4] = { 0,  0, -1, 1};
-        for (int d = 0; d < 4; ++d) {
-            const int nx = tileX + kDX[d];
-            const int nz = tileZ + kDZ[d];
-            if (m_roadNodes.count(tileKey(nx, nz)) > 0) {
-                placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
-                                      /*rebuildNeighbors=*/false);
+        for (int dz = -2; dz <= 2; ++dz) {
+            for (int dx = -2; dx <= 2; ++dx) {
+                if (dx == 0 && dz == 0) continue;  // main tile already built above
+                const int nx = tileX + dx;
+                const int nz = tileZ + dz;
+                if (m_roadNodes.count(tileKey(nx, nz)) > 0)
+                    placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
+                                          /*rebuildNeighbors=*/false);
             }
         }
     }
@@ -1819,6 +1787,21 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
             m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
         }
         if (m_terrain) m_terrain->flushTerrainRebuilds();
+
+        // Rebuild road tiles within ±2 of this service building tile.
+        // Same rationale as placeBuildingMesh: setTileHeight() blending propagates
+        // height changes up to 2 tiles away, requiring road mesh rebuilds.
+        for (int dz = -2; dz <= 2; ++dz) {
+            for (int dx = -2; dx <= 2; ++dx) {
+                if (dx == 0 && dz == 0) continue;
+                const int nx = tileX + dx;
+                const int nz = tileZ + dz;
+                if (m_roadNodes.count(tileKey(nx, nz)) > 0)
+                    placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
+                                          /*rebuildNeighbors=*/false);
+            }
+        }
+
         // Use targetH directly — NOT getHeightAt() after setTileHeight().
         // setTileHeight() applies neighbour blending to the 8 surrounding tiles;
         // subsequent corner calls bleed back into vertex (tileX, tileZ), leaving

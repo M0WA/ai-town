@@ -554,8 +554,7 @@ void IrrlichtUIBackend::setElementAlpha(UIElementHandle handle, float alpha)
 // ---------------------------------------------------------------------------
 static irr::core::rect<irr::s32> spriteRectForIndex(uint32_t id)
 {
-    // Toolbar icons — 64×64 px, 64px column spacing (verified from actual PNG pixel layout).
-    // JSON says 48×48/56px but actual icon cells are 64×64.
+    // Toolbar icons — 64×64 px, 64px column spacing.
     // Active (IDs 0-4) at y=0; inactive (IDs 32-36) at y=64.
     if (id <= 4u) {
         const irr::s32 x = static_cast<irr::s32>(id) * 64;
@@ -565,38 +564,10 @@ static irr::core::rect<irr::s32> spriteRectForIndex(uint32_t id)
         const irr::s32 x = static_cast<irr::s32>(id - 32u) * 64;
         return irr::core::rect<irr::s32>(x, 64, x + 64, 128);
     }
-    // Zone sub-panel sprite IDs (64-104) fall through to the default 64×64 grid below.
-    // Default grid maps them correctly to y=128 (active, row 2) and y=192 (inactive, row 3).
-    // Utilities patterns — 64×64.
-    // Actual PNG layout (verified against hud_sprites_ui.png):
-    //   y=256: active icons   — Power(x=0), Water(x=72), Fire(x=144), Police(x=216)
-    //   y=320: inactive icons — Power(x=0), Water(x=72), Fire(x=144), Police(x=216)
-    // IDs: Power=0, Water=1, Fire=2, Police=3 within each band (128-131 active, 160-163 inactive).
-    if ((id >= 128u && id <= 131u) || (id >= 160u && id <= 163u)) {
-        const uint32_t base = (id <= 131u) ? 128u : 160u;
-        const int t = static_cast<int>(id - base);
-        const irr::s32 yTop = (id <= 131u) ? 256 : 320;  // active row vs inactive row
-        const irr::s32 xOffsets[4] = {0, 72, 144, 216};  // Power, Water, Fire, Police
-        const irr::s32 x = xOffsets[t];
-        return irr::core::rect<irr::s32>(x, yTop, x + 64, yTop + 64);
-    }
-    // Notification bell — JSON icon_bell: (56, 64, 48, 48)
-    if (id == 320u) {
-        return irr::core::rect<irr::s32>(56, 64, 104, 112);
-    }
-    // Clock icon — JSON icon_clock_grace: (64, 384, 16, 16)
-    if (id == 321u) {
-        return irr::core::rect<irr::s32>(64, 384, 80, 400);
-    }
-    // Unsaved dot — JSON dot_unsaved_changes: (40, 384, 16, 16)
-    if (id == 322u) {
-        return irr::core::rect<irr::s32>(40, 384, 56, 400);
-    }
-    // Undo icon — JSON icon_undo: (0, 64, 48, 48)
-    if (id == 323u) {
-        return irr::core::rect<irr::s32>(0, 64, 48, 112);
-    }
-    // Default: return a 64×64 cell using uniform grid as last-resort fallback.
+    // All remaining IDs use the standard 64×64 grid — col = id % 32, row = id / 32.
+    // The generator places every icon at (col * 64, row * 64) with no exceptions.
+    // See architecture/asset-standards/2d-texture-standards.md "Sprite ID Encoding and
+    // Row-Conflict Pitfall" for a history of past bugs caused by wrong special cases here.
     const irr::s32 col = static_cast<irr::s32>(id % 32u);
     const irr::s32 row = static_cast<irr::s32>(id / 32u);
     return irr::core::rect<irr::s32>(col * 64, row * 64, col * 64 + 64, row * 64 + 64);
