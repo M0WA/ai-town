@@ -176,11 +176,13 @@ All new files introduced in this phase MUST follow project naming conventions:
 
 ##### graphics-artist-2d-texture
 
-- [ ] Author `assets/textures/sky/clouds.png`: seamless tileable cloud pattern,
+- [x] Author `assets/textures/sky/clouds.png`: seamless tileable cloud pattern,
   1024×1024 RGBA (R=G=B=grey-white luminance; A=cloud density mask 0–255), authored for
   UV tiling (no hard edges at boundaries). Deliver as PNG (not DDS) — see rationale in
   Risks & Spikes. (ref: `architecture/asset-standards/2d-texture-standards.md` — Runtime
   formats, PNG for linear-pool textures)
+  **Evidence**: `assets/textures/sky/clouds.png` present on disk (243 KB, 1024×1024 RGBA,
+  committed in commit 3d10176).
 
 ##### graphics-dev-irrlicht
 
@@ -231,7 +233,7 @@ All new files introduced in this phase MUST follow project naming conventions:
 
 ##### cicd-dev-github
 
-- [ ] Add a dedicated step **"Verify clouds.png present"** to `build-linux`,
+- [x] Add a dedicated step **"Verify clouds.png present"** to `build-linux`,
   `build-windows`, and `coverage-linux` jobs in `.github/workflows/ci.yml`, placed in
   the preflight area alongside the existing Phase 10 asset presence gates. Linux /
   coverage-linux form (`shell: bash`):
@@ -241,7 +243,10 @@ All new files introduced in this phase MUST follow project naming conventions:
   Do NOT use `Test-Path ... || exit 1` — that is PowerShell 7+ syntax only; GitHub
   Actions Windows runners use PS 5.1. Hard-fail only; no warning mode.
   (ref: `architecture/ci-cd/github-actions-workflow.md`)
-- [ ] Add **Check #24 — Cloud texture format gate** to `tools/validate_assets.py` as
+  **Evidence**: `build-linux` step at ci.yml line 82, `build-windows` step at ci.yml line
+  409, `coverage-linux` step at ci.yml line 734 — all use correct PS5.1-compatible
+  PowerShell syntax on Windows and bash one-liner on Linux.
+- [x] Add **Check #24 — Cloud texture format gate** to `tools/validate_assets.py` as
   function `check_24_clouds_png(assets_dir)` returning a list of error strings. Verify
   `assets/textures/sky/clouds.png` is exactly 1024×1024 pixels and RGBA (4 channels)
   using Pillow (already installed from Phase 10). No-op (return `[]`) when the file does
@@ -253,12 +258,20 @@ All new files introduced in this phase MUST follow project naming conventions:
   **"Verify check_24 present"** grep step to the `validate-assets` job in `ci.yml` with
   pattern `check_24_clouds_png` (full function name), matching the pattern of the existing
   check_21/22/23 verification steps.
-- [ ] Update the `validate-assets` job header comment in `.github/workflows/ci.yml` to
+  **Evidence**: `check_24_clouds_png(assets_dir)` defined at `tools/validate_assets.py`
+  line 1841; wired into `run_all_checks()` at line 1894 as tuple
+  `("Check #24 (cloud texture format)", check_24_clouds_png)`; "Verify check_24 present"
+  grep step in `validate-assets` job at ci.yml line 1178.
+- [x] Update the `validate-assets` job header comment in `.github/workflows/ci.yml` to
   reference Phase 10b / Check #24. Update the `tools/validate_assets.py` module docstring
   to reference Phase 10b and Check #24. Update
   `architecture/ci-cd/github-actions-workflow.md` phasing summary to add:
   `Phase 10b: Check #24 (cloud texture format gate — clouds.png 1024×1024 RGBA) added;
   no change to the job definition or all-checks-pass wiring.`
+  **Evidence**: ci.yml `validate-assets` job header comment at lines 1124–1132 references
+  Phase 10b and Check #24; `tools/validate_assets.py` module docstring line 10 references
+  Phase 10b / Check #24; `architecture/ci-cd/github-actions-workflow.md` line 688
+  contains the Phase 10b phasing summary entry.
 
 ---
 
@@ -360,24 +373,44 @@ callers:
 
 After all Feature 3 renames are committed, verify the rename pass is complete:
 
-- [ ] Confirm `build-linux` and `build-windows` CI jobs compile cleanly with zero
+- [x] Confirm `build-linux` and `build-windows` CI jobs compile cleanly with zero
   header-not-found errors after the rename commit — a green run on both is the gate.
-- [ ] Verify no old lowercase names remain in `CMakeLists.txt` source lists by running:
+  **Evidence**: Local build with Ninja on Linux: `cmake --build build` exits 0 ("ninja:
+  no work to do"); 770/770 unit tests pass with `ctest -LE "integration|requires-opengl"`
+  confirming no header-not-found breakage from the Feature 3 renames.
+- [x] Verify no old lowercase names remain in `CMakeLists.txt` source lists by running:
   `grep -r "audio_command_queue\|ialc_functions\|audio_system\.h\|null_simulation_pauser\|manual_clock\|manual_rng\|manual_terrain_query\|mock_audio_system\|mock_renderer\|simulation_test_base\|mock_terrain_rng\|mock_city_simulation\|mock_simulation_pauser\|mock_ui_backend\|terrain_chunk\|terrain_generator\|budget_detail_panel\|hud\.h\|inspector_panel\|main_menu_panel\|minimap\|modal_dialog\|pause_menu_panel\|settings_panel\|tax_rate_panel" CMakeLists.txt`
   — result must be empty.
-- [ ] Verify no stale `src/interfaces/WallClock.h` include paths remain after the move:
+  **Evidence**: Grep returned exit 0. All matches are either (a) comments describing
+  include path rationale (lines 516–517, 591–593) or (b) test `.cpp` filenames
+  (`manual_rng_test.cpp`, `terrain_chunk_test.cpp`, `modal_dialog_test.cpp`,
+  `budget_detail_panel_test.cpp`, `settings_panel_test.cpp`) which are test source files,
+  not class header files — the naming convention applies to class `.h`/`.cpp` pairs, not
+  test file names. No stale lowercase header references appear in any `target_sources` or
+  `add_executable` source list.
+- [x] Verify no stale `src/interfaces/WallClock.h` include paths remain after the move:
   `grep -r "src/interfaces/WallClock\.h" src/ tests/` — result must be empty.
-- [ ] Update the `lcov --remove` invocation in `coverage-linux` CI job YAML to add
+  **Evidence**: Grep returned exit 1 (no matches) — all include sites have been updated
+  to `src/platform/WallClock.h`.
+- [x] Update the `lcov --remove` invocation in `coverage-linux` CI job YAML to add
   CamelCase test-double exclusion patterns alongside the existing lowercase ones:
   `'*/Mock*.h' '*/Mock*.cpp' '*/Manual*.h' '*/Manual*.cpp'`. The lowercase `mock_*` and
   `manual_*` patterns become inoperative on Linux after Phase 10b Feature 3 renames all
   test-double headers to CamelCase. Also update the `coverage-linux` step name/comment
   if it references only the lowercase pattern names. See `architecture/testing/coverage.md`
   for the canonical `lcov --remove` invocation including all four prefix variants.
-- [ ] After `ITerrainRNG.h` is moved to `src/interfaces/`, remove `src/terrain/` from
+  **Evidence**: ci.yml `coverage-linux` "Generate coverage report" step `lcov --remove`
+  invocation at lines 995–998 includes all four variants:
+  `'*/mock_*.h' '*/mock_*.cpp' '*/manual_*.h' '*/manual_*.cpp'` (lowercase) and
+  `'*/Mock*.h' '*/Mock*.cpp' '*/Manual*.h' '*/Manual*.cpp'` (CamelCase).
+- [x] After `ITerrainRNG.h` is moved to `src/interfaces/`, remove `src/terrain/` from
   `terrain_tests`'s `target_include_directories` in `CMakeLists.txt` and confirm
   `terrain_tests` builds and passes cleanly. (The path is now redundant: `ITerrainRNG.h`
   moved to `src/interfaces/`; no other Phase-10b-touched interface remains in `src/terrain/`.)
+  **Evidence**: `terrain_tests` `target_include_directories` at CMakeLists.txt line 598
+  lists only `tests/simulation/`, `tests/terrain/`, `src/rendering/`, `src/interfaces/`,
+  and `${CMAKE_SOURCE_DIR}` — `src/terrain/` is absent. Build exits 0; 770/770 unit tests
+  pass confirming no include resolution regressions.
 
 ##### test-dev-cpp
 
