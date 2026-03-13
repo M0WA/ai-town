@@ -106,7 +106,7 @@ All new files introduced in this phase MUST follow project naming conventions:
 
 ##### test-dev-cpp
 
-- [ ] `TerrainFlattening_SetTileHeight_EnqueuesRebuildForAffectedChunks`: construct a
+- [ ] `TerrainFlattening_SetTileHeight_EnqueuesChunkRebuild`: construct a
   `TerrainSystem` with a `ManualClock`; call `setTileHeight()` on a tile at a known chunk
   boundary; assert `TerrainSystem::pendingRebuildCount()` is at least 1 (and at least 2
   for a tile that straddles a chunk boundary). Use the existing
@@ -151,18 +151,20 @@ All new files introduced in this phase MUST follow project naming conventions:
   keyword will not compile. Do NOT open a PR for this item until Step 1 is merged.
   Existing tests relying on `return 0.0f` are unaffected because `m_heightBeforeFlat`
   defaults to `0.0f`.
-- [ ] `CloudPlane_EDTNull_InitSkipped`: construct an `IrrlichtRenderer` with
-  `EDT_NULL`, call `init()`; assert `m_cloudNode == nullptr` (cloud initialisation
-  skipped). Label `requires-opengl` and add to `opengl_tests` — Irrlicht device creation
-  requires X11 even for `EDT_NULL` on Linux; `xvfb-run` provides the X server.
+- [ ] `CloudPlane_Init_CreatesCloudNode`: construct an `IrrlichtRenderer` with a real
+  driver (not `EDT_NULL`), call `init()`; assert `m_cloudNode != nullptr` (cloud
+  initialisation succeeded). Also verify `EDT_NULL` path: assert `m_cloudNode == nullptr`
+  when driver type is `EDT_NULL` (init guard triggered). Label `requires-opengl` and add
+  to `opengl_tests` — Irrlicht device creation requires X11 even for `EDT_NULL` on Linux;
+  `xvfb-run` provides the X server.
 - [ ] Wire all new test cases into the appropriate test targets in `CMakeLists.txt`: the
-  first two terrain flattening tests (`TerrainFlattening_SetTileHeight_EnqueuesRebuildForAffectedChunks`
+  first two terrain flattening tests (`TerrainFlattening_SetTileHeight_EnqueuesChunkRebuild`
   and `TerrainFlattening_NeighborBlend_ClampedToMapBounds`) live in
   `tests/terrain/terrain_flattening_test.cpp` → add via `target_sources(terrain_tests ...)`
   (label `unit`). The third test (`TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight`)
   lives in `tests/simulation/terrain_flattening_sim_test.cpp` → add via
   `target_sources(simulation_tests ...)` (label `unit`) — it requires `aitown_sim` which
-  `terrain_tests` does not link. `CloudPlane_EDTNull_InitSkipped`
+  `terrain_tests` does not link. `CloudPlane_Init_CreatesCloudNode`
   lives in `tests/rendering/cloud_plane_test.cpp` → add **inline** to the
   `add_executable(opengl_tests ...)` call in `CMakeLists.txt`. **Do NOT use
   `target_sources(opengl_tests ...)` for the cloud plane test** — `opengl_tests` prohibits
@@ -401,7 +403,7 @@ Rename all test-helper class headers and update every `#include` in test `.cpp` 
 
 - On tile placement (zone, road, service building), the terrain under the placed tile
   visibly flattens: neighbouring tiles blend smoothly with no hard seams
-- `TerrainFlattening_SetTileHeight_EnqueuesRebuildForAffectedChunks` passes on Linux and
+- `TerrainFlattening_SetTileHeight_EnqueuesChunkRebuild` passes on Linux and
   Windows CI without a real GPU
 - `TerrainFlattening_NeighborBlend_ClampedToMapBounds` passes — ASAN clean on corner-tile
   flattening with no out-of-bounds write
@@ -413,7 +415,7 @@ Rename all test-helper class headers and update every `#include` in test `.cpp` 
 - Clouds scroll continuously in the X and Z UV axes; UV offset wraps cleanly with no
   visible seam after extended play sessions
 - Cloud plane invisible under `EDT_NULL` (headless CI runs clean; no crash or GL error);
-  `CloudPlane_EDTNull_InitSkipped` passes in `opengl_tests`
+  `CloudPlane_Init_CreatesCloudNode` passes in `opengl_tests`
 - `clouds.png` present and 1024×1024 RGBA (Check #24 green)
 - `tools/validate_assets.py` module docstring updated to reference Phase 10b and Check #24
 - `validate-assets` job header comment in `.github/workflows/ci.yml` updated to reference
