@@ -5,8 +5,8 @@
 // Centered vertically in 1920x1080 virtual space.
 // Keyboard navigation: Up/Down arrows cycle focus, Enter activates, Escape = Resume.
 
-#include "src/ui/pause_menu_panel.h"
-#include "src/ui/settings_panel.h"
+#include "src/ui/PauseMenuPanel.h"
+#include "src/ui/SettingsPanel.h"
 #include "src/platform/input_event.h"
 
 #include <string>

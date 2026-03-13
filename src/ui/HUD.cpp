@@ -5,8 +5,8 @@
 // Updates element text/visibility/alpha in draw() and update() each frame.
 // All coordinates are in virtual 1920x1080 space.
 
-#include "src/ui/hud.h"
-#include "src/ui/budget_detail_panel.h"
+#include "src/ui/HUD.h"
+#include "src/ui/BudgetDetailPanel.h"
 #include "src/ui/hud_sprite_ids.h"
 #include "src/interfaces/IAudioSystem.h"
 

@@ -1,6 +1,6 @@
-#include "src/terrain/terrain_chunk.h"
-#include "src/terrain/ITerrainRNG.h"
-#include "src/terrain/terrain_generator.h"
+#include "src/terrain/TerrainChunk.h"
+#include "src/interfaces/ITerrainRNG.h"
+#include "src/terrain/TerrainGenerator.h"
 #include "tests/terrain/mock_terrain_rng.h"
 #include <gtest/gtest.h>
 

@@ -7,10 +7,10 @@
 // Audio: master/music/SFX volume sliders wired to IAudioSystem.
 // Gameplay: difficulty (read-only), demolish confirm toggle, disaster (grayed).
 
-#include "src/ui/settings_panel.h"
+#include "src/ui/SettingsPanel.h"
 #include "src/interfaces/IAudioSystem.h"
 #include "src/interfaces/IClock.h"
-#include "src/ui/pause_menu_panel.h"
+#include "src/ui/PauseMenuPanel.h"
 #include "src/platform/input_event.h"
 
 #include <cstdio>

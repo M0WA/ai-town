@@ -16,7 +16,7 @@
 // TearDown: panel_ reset before backend_ mock destructor to prevent dangling
 // ptr callbacks during strict mock verification.
 
-#include "src/ui/main_menu_panel.h"
+#include "src/ui/MainMenuPanel.h"
 #include "src/platform/input_event.h"
 #include "tests/ui/mock_ui_backend.h"
 #include <gtest/gtest.h>

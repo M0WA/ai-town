@@ -24,7 +24,7 @@
 // actual EXPECT_THROW test. The constructor calls m_alcFunctions->getProcAddress(
 // "alcSetThreadContext") and throws std::runtime_error when null is returned.
 
-#include "src/audio/ialc_functions.h"
+#include "src/interfaces/IAlcFunctions.h"
 #include "src/audio/audio_system.h"
 #include "src/audio/audio_constants.h"
 #include "tests/simulation/manual_clock.h"

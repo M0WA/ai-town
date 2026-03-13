@@ -423,7 +423,7 @@ TEST_F(NotificationManagerStandaloneTest, Draw_NoCrash) {
 // MainMenuPanelStandaloneTest — covers MainMenuPanel construction, screen
 // transitions, draw, and keyboard/mouse input handling.
 // ============================================================================
-#include "src/ui/main_menu_panel.h"
+#include "src/ui/MainMenuPanel.h"
 
 using ::testing::_;
 using ::testing::HasSubstr;
@@ -919,8 +919,8 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickRandomize) {
 // PauseMenuPanelStandaloneTest — covers PauseMenuPanel construction, show/hide,
 // draw focus visuals, keyboard navigation, and mouse click handling.
 // ============================================================================
-#include "src/ui/pause_menu_panel.h"
-#include "src/ui/settings_panel.h"
+#include "src/ui/PauseMenuPanel.h"
+#include "src/ui/SettingsPanel.h"
 
 class PauseMenuPanelStandaloneTest : public ::testing::Test {
 protected:
@@ -1173,7 +1173,7 @@ TEST_F(PauseMenuPanelStandaloneTest, AllEventsConsumed_WhenVisible) {
 // MinimapStandaloneTest — covers Minimap construction, show/hide, draw,
 // getBounds, toggleOverlay, and onEvent handling.
 // ============================================================================
-#include "src/ui/minimap.h"
+#include "src/ui/Minimap.h"
 
 class MinimapStandaloneTest : public ::testing::Test {
 protected:

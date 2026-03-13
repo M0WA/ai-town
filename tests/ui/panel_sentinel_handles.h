@@ -1,5 +1,5 @@
 #pragma once
-#include "src/ui/IUIBackend.h"
+#include "src/interfaces/IUIBackend.h"
 
 // Test-only sentinel handles for UIManagerDrawOrderTest.
 // Production code MUST NOT include this header.

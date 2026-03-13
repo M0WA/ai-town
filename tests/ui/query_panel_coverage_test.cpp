@@ -17,8 +17,8 @@
 // Fixture: PopulateCoverageTest — NiceMock<MockUIBackend> + NiceMock<MockCitySimulation>.
 // TearDown: panel_ reset before mock destructors.
 
-#include "src/ui/inspector_panel.h"
-#include "src/ui/IUIBackend.h"
+#include "src/ui/InspectorPanel.h"
+#include "src/interfaces/IUIBackend.h"
 #include "src/interfaces/IRenderer.h"
 #include "src/interfaces/simulation_types.h"
 #include "tests/ui/mock_ui_backend.h"

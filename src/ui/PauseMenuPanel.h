@@ -1,5 +1,5 @@
 #pragma once
-#include "src/ui/IUIBackend.h"  // UIElementHandle, IUIBackend
+#include "src/interfaces/IUIBackend.h"  // UIElementHandle, IUIBackend
 
 // Forward declaration -- SettingsPanel is wired to PauseMenuPanel via setSettingsPanel()
 // to avoid a circular include between pause_menu_panel.h and settings_panel.h.

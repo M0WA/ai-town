@@ -26,7 +26,7 @@
 #include <gmock/gmock.h>
 
 #include "src/terrain/TerrainSystem.h"
-#include "src/terrain/ITerrainRNG.h"
+#include "src/interfaces/ITerrainRNG.h"
 #include "tests/simulation/mock_renderer.h"   // NiceMock<MockRenderer>
 #include "tests/simulation/manual_clock.h"    // ManualClock
 #include "tests/terrain/mock_terrain_rng.h"   // MockTerrainRNG

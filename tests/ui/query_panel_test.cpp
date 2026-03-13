@@ -14,8 +14,8 @@
 //   Desirability:"Desirability: 75"
 //   Demand:      "Demand: 55%"
 
-#include "src/ui/inspector_panel.h"
-#include "src/ui/IUIBackend.h"     // Rect
+#include "src/ui/InspectorPanel.h"
+#include "src/interfaces/IUIBackend.h"     // Rect
 #include "src/interfaces/IRenderer.h"  // ScreenRect
 #include "src/ui/UIManager.h"
 #include "src/ui/ui_types.h"

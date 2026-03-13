@@ -3,7 +3,7 @@
 // BudgetDetailPanel — 320x200 px floating panel owned by HUD.
 // Shows 8 named budget line items and an optional density unlock preview.
 
-#include "src/ui/budget_detail_panel.h"
+#include "src/ui/BudgetDetailPanel.h"
 #include "src/interfaces/ICitySimulation.h"
 
 #include <cstdio>

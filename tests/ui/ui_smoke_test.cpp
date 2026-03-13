@@ -1,7 +1,7 @@
 // ui_smoke_test.cpp — Phase 0 compile-check stub for ui_tests target.
 // Instantiates a concrete subclass overriding ALL 17 pure-virtual methods to verify
 // every method signature in the interface at Phase 0.
-#include "src/ui/IUIBackend.h"
+#include "src/interfaces/IUIBackend.h"
 #include "src/ui/NotificationManager.h"   // compile-check: verifies constructor signature (4-param as of Phase 10; 4th arg defaults to nullptr)
 #include <gtest/gtest.h>
 

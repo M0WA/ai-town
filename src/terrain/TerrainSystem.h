@@ -44,7 +44,7 @@
 
 #include "TerrainChunk.h"
 #include "terrain_types.h"
-#include "ITerrainRNG.h"
+#include "../interfaces/ITerrainRNG.h"
 
 // IClock — include full definition so test doubles (BudgetExhaustionClock) can subclass it.
 #include "../interfaces/IClock.h"

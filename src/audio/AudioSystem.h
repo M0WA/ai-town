@@ -15,7 +15,7 @@
 #include "src/interfaces/IClock.h"
 #include "src/interfaces/audio_types.h"
 #include "src/audio/audio_command_queue.h"
-#include "src/audio/ialc_functions.h"
+#include "src/interfaces/IAlcFunctions.h"
 #include "src/audio/AudioSourcePool.h"   // for VehiclePairSlot
 
 #include <atomic>

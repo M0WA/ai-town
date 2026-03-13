@@ -656,7 +656,7 @@ TEST_F(ModalDialogKeyNavTest, ForcedLoan_Screen2_TabWrapsAround) {
 // ModalDialogStandaloneTest -- standalone ModalDialog tests for DemolishConfirm
 // and WASDPreset (not accessible via UIManager public API).
 // ============================================================================
-#include "src/ui/modal_dialog.h"
+#include "src/ui/ModalDialog.h"
 
 class ModalDialogStandaloneTest : public ::testing::Test {
 protected:

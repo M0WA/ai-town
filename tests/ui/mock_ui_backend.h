@@ -1,6 +1,6 @@
 #pragma once
 
-#include "src/ui/IUIBackend.h"
+#include "src/interfaces/IUIBackend.h"
 #include "gmock/gmock.h"
 
 // MockUIBackend — GMock implementation of IUIBackend's 19 methods.

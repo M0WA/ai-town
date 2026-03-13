@@ -4,7 +4,7 @@
 // New Game flow: mode, difficulty, seed, loading screen.
 // All coordinates in virtual 1920x1080 space.
 
-#include "src/ui/main_menu_panel.h"
+#include "src/ui/MainMenuPanel.h"
 #include "src/platform/input_event.h"
 
 #include <string>

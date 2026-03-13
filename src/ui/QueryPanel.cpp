@@ -9,7 +9,7 @@
 //     Edge-snap uses fixed virtual constants 1920 x 1080.
 //   - populate() real implementation (was stub in Phase 8).
 
-#include "src/ui/inspector_panel.h"
+#include "src/ui/InspectorPanel.h"
 #include "src/interfaces/ICitySimulation.h"
 #include "src/platform/input_event.h"
 

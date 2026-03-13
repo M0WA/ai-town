@@ -17,7 +17,7 @@
 
 // IUIBackend.h — UIElementHandle, kInvalidUIElement, Rect, IUIBackend.
 // MUST be first: Rect must be a complete type before the override declaration.
-#include "src/ui/IUIBackend.h"
+#include "src/interfaces/IUIBackend.h"
 
 #include <string>
 #include <cstdint>

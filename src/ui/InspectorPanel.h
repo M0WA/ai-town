@@ -1,5 +1,5 @@
 #pragma once
-#include "src/ui/IUIBackend.h"      // UIElementHandle, IUIBackend, Rect
+#include "src/interfaces/IUIBackend.h"      // UIElementHandle, IUIBackend, Rect
 #include "src/interfaces/IRenderer.h"  // ScreenRect — Irrlicht-free bounding-box type
 
 // Forward declarations — avoid pulling full headers into every consumer.

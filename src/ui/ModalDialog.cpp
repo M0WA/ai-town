@@ -5,7 +5,7 @@
 // Auto-pause: calls m_sim->setPaused(true) on open if sim was not already paused.
 // closeModal() ordering: setPaused(false) THEN clear m_active.
 
-#include "src/ui/modal_dialog.h"
+#include "src/ui/ModalDialog.h"
 #include "src/interfaces/LoanTerms.h"
 #include "src/platform/input_event.h"
 

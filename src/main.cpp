@@ -21,7 +21,7 @@
 #include "src/ui/UIScaler.h"
 #include "src/ui/CameraController.h"
 #include "src/platform/EventReceiver.h"
-#include "src/interfaces/WallClock.h"
+#include "src/platform/WallClock.h"
 #include "src/interfaces/camera_state.h"
 #include "src/simulation/CitySimulation.h"
 #include "src/simulation/StdSimulationRNG.h"

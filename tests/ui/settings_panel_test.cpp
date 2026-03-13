@@ -20,7 +20,7 @@
 // TearDown contract: ui_ reset before mock destruction.
 
 #include "src/ui/UIManager.h"
-#include "src/ui/settings_panel.h"
+#include "src/ui/SettingsPanel.h"
 #include "src/ui/ui_types.h"
 #include "src/platform/input_event.h"
 #include "tests/ui/mock_ui_backend.h"
@@ -661,7 +661,7 @@ TEST_F(SettingsPanelStandaloneTest, AllTabs_GetInteractiveElementCount) {
 // Covers: show/hide, draw, getBounds, onEvent (Escape, click outside,
 //         inc/dec buttons, click inside consumed, boundary rate clamping).
 // ===========================================================================
-#include "src/ui/tax_rate_panel.h"
+#include "src/ui/TaxRatePanel.h"
 
 class TaxRatePanelStandaloneTest : public ::testing::Test {
 protected:

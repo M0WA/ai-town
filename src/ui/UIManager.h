@@ -1,6 +1,6 @@
 #pragma once
 
-#include "src/ui/IUIBackend.h"      // UIElementHandle, kInvalidUIElement, Rect
+#include "src/interfaces/IUIBackend.h"      // UIElementHandle, kInvalidUIElement, Rect
 #include "src/ui/ui_types.h"        // GameMode, GameState, ActiveTool
 #include "src/interfaces/IClock.h"  // IClock — full include (available at Phase 0)
 #include "src/interfaces/LoanTerms.h"  // LoanTerms

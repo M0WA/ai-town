@@ -4,7 +4,7 @@
 // Top-down zone color coding, road network, camera viewport rectangle.
 // Click-to-pan camera, service coverage overlay toggle.
 
-#include "src/ui/minimap.h"
+#include "src/ui/Minimap.h"
 #include "src/platform/input_event.h"
 
 // ---------------------------------------------------------------------------

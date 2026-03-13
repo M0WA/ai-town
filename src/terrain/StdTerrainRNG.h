@@ -1,5 +1,5 @@
 #pragma once
-#include "ITerrainRNG.h"
+#include "../interfaces/ITerrainRNG.h"
 #include <random>
 #include <cstdint>
 

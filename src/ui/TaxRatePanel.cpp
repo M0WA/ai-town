@@ -4,7 +4,7 @@
 // Anchored below resource bar, horizontally centered in 1920x1080 virtual space.
 // Rate bounds: 1%-25%, key repeat: 400ms initial, 150ms repeat, +/-5 cap per hold.
 
-#include "src/ui/tax_rate_panel.h"
+#include "src/ui/TaxRatePanel.h"
 #include "src/interfaces/ICitySimulation.h"
 #include "src/platform/input_event.h"
 

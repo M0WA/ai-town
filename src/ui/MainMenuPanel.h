@@ -1,5 +1,5 @@
 #pragma once
-#include "src/ui/IUIBackend.h"  // UIElementHandle, IUIBackend
+#include "src/interfaces/IUIBackend.h"  // UIElementHandle, IUIBackend
 
 struct InputEvent;
 

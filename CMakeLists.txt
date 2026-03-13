@@ -592,7 +592,6 @@ endif()
 target_include_directories(terrain_tests PRIVATE
     tests/simulation/
     tests/terrain/
-    src/terrain/
     src/rendering/
     src/interfaces/
     ${CMAKE_SOURCE_DIR}

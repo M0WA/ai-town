@@ -17,14 +17,14 @@
 // Panel includes — full headers included only in the .cpp to avoid transitive
 // header dependencies for callers that only #include UIManager.h.
 #include "src/ui/NotificationManager.h"
-#include "src/ui/main_menu_panel.h"
-#include "src/ui/hud.h"
-#include "src/ui/tax_rate_panel.h"
-#include "src/ui/minimap.h"
-#include "src/ui/inspector_panel.h"
-#include "src/ui/pause_menu_panel.h"
-#include "src/ui/settings_panel.h"
-#include "src/ui/modal_dialog.h"
+#include "src/ui/MainMenuPanel.h"
+#include "src/ui/HUD.h"
+#include "src/ui/TaxRatePanel.h"
+#include "src/ui/Minimap.h"
+#include "src/ui/InspectorPanel.h"
+#include "src/ui/PauseMenuPanel.h"
+#include "src/ui/SettingsPanel.h"
+#include "src/ui/ModalDialog.h"
 
 // Explicit interface includes for method calls on forward-declared pointers.
 #include "src/interfaces/IAudioSystem.h"
