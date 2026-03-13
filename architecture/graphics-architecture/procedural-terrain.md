@@ -484,6 +484,39 @@ Kerb geometry uses the same corner heights so kerb bases follow the terrain edge
 Polygon offset (`EPO_FRONT`, factor=1) is applied to the mesh buffer material as the
 primary Z-fighting defence.
 
+**MANDATORY — bounding box Y-extent expansion for flat meshes**: After calling
+`buf->recalculateBoundingBox()` on the road tile mesh buffer, the bounding box Y span
+must be expanded to at least **0.5 m** before calling `mesh->recalculateBoundingBox()`
+and `addMeshSceneNode()`. Road tile geometry is nearly flat: the main quad and all
+kerb vertices span only ~0.10 m in Y on flat terrain (10 cm bias + 10 cm kerb height).
+Irrlicht's default `EAC_BOX` frustum culler tests the AABB's 8 corners against each
+clip plane. For a 10 m × 0.10 m × 10 m box viewed by the isometric camera (50–200 m
+altitude, looking down), the top/bottom frustum planes can produce false-negative
+culling — tiles near the frustum boundary are incorrectly discarded even though their
+screen projection is visible. This manifests as alternating gaps along a straight or
+diagonal road. Expanding the Y extent to 0.5 m symmetrically around the geometric
+midpoint is sufficient to prevent the false cull without affecting rendered geometry:
+
+```cpp
+buf->recalculateBoundingBox();
+// Expand bounding box Y to at least 0.5 m (frustum-cull safety for flat meshes).
+core::aabbox3df box = buf->getBoundingBox();
+const float yMid = (box.MaxEdge.Y + box.MinEdge.Y) * 0.5f;
+if (box.MaxEdge.Y - box.MinEdge.Y < 0.5f) {
+    box.MinEdge.Y = yMid - 0.25f;
+    box.MaxEdge.Y = yMid + 0.25f;
+    buf->setBoundingBox(box);
+}
+// Then attach buffer to mesh and recalculate:
+mesh->addMeshBuffer(buf);
+buf->drop();
+mesh->recalculateBoundingBox();
+```
+
+This rule applies to **any procedural flat mesh** (road tiles, zone overlays, placement
+preview quads) whose vertex Y span is less than 0.5 m and whose node uses `EAC_BOX`
+culling.
+
 LOD1 and LOD2 remain shared flat quads (used at 50–150 m and 150–300 m respectively).
 
 #### Neighbor edge matching

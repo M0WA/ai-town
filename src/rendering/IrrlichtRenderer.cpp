@@ -1540,6 +1540,35 @@ irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
     (void)hlerp;  // hlerp available for future use (e.g. mid-edge kerb heights)
 
     buf->recalculateBoundingBox();
+
+    // Expand Y extent of the bounding box to at least 0.5 m.
+    //
+    // Road tile geometry is nearly flat: the main quad and all kerb vertices span
+    // only ~0.10 m in Y (B=0.10 bias + KH=0.10 kerb height) on flat terrain.
+    // Irrlicht's EAC_BOX frustum culler tests the AABB's 8 corners against each
+    // clip plane.  For a 10 m × 0.10 m × 10 m box viewed by the isometric camera
+    // (camera above ~50–200 m, looking down), the top/bottom frustum planes clip
+    // in a way that the box's minimal Y extent causes the support-point test to
+    // produce false negatives — tiles near the frustum boundary are incorrectly
+    // culled even though their screen projection is clearly visible.  This manifests
+    // as alternating gaps along a straight road at diagonal viewing angles.
+    //
+    // Expanding to 0.5 m (±0.25 m from the geometric midpoint) gives the frustum
+    // culler enough Y headroom without affecting the rendered geometry (the actual
+    // vertex positions are unchanged; only the AABB used for the visibility test
+    // is widened).  The box is widened symmetrically around the midpoint so that
+    // terrain-conforming tiles at varying elevations are also correctly handled.
+    {
+        core::aabbox3df box = buf->getBoundingBox();
+        const float yMid = (box.MaxEdge.Y + box.MinEdge.Y) * 0.5f;
+        const float kMinYExtent = 0.5f;
+        if (box.MaxEdge.Y - box.MinEdge.Y < kMinYExtent) {
+            box.MinEdge.Y = yMid - kMinYExtent * 0.5f;
+            box.MaxEdge.Y = yMid + kMinYExtent * 0.5f;
+            buf->setBoundingBox(box);
+        }
+    }
+
     mesh->addMeshBuffer(buf);
     buf->drop();
     mesh->recalculateBoundingBox();

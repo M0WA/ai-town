@@ -178,21 +178,40 @@ arc is possible.
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kElevFadeEnd` | `0.2094` rad (12°) | Fully transparent at or below this elevation |
-| `kElevFadeHigh` | `0.5236` rad (30°) | Fully opaque at or above this elevation |
+| `kElevAlphaEnd` | `−0.0873` rad (−5°) | Fully transparent at or below this elevation |
+| `kElevAlphaHigh` | `0.3491` rad (20°) | Fully opaque at or above this elevation |
 
-The smoothstep between 12° and 30° above the horizon produces a gradual,
-symmetric fade in all compass directions. The fade band is placed high enough
-that the cloud texture's azimuthal variation (which is strongest near the
-horizon) has no visible effect — below 12° elevation the dome is always
-fully transparent regardless of texture content.
+The smoothstep between −5° and 20° produces a gradual, symmetric fade in all
+compass directions. The fade band starts slightly below the terrain horizon (−5°),
+ensuring the hard bottom edge of the dome is never visible; it reaches full
+opacity at 20° above the horizon. Below −5° elevation the dome is always fully
+transparent regardless of texture content.
+
+### Atmospheric Haze Colour Blend
+
+In addition to the alpha fade, the fragment shader blends cloud RGB toward the
+sky background colour near the horizon. This eliminates any residual directional
+arc caused by azimuthal variation in cloud texture density near the fade boundary:
+even where the cloud texture is dense close to the horizon, those fragments appear
+as sky-coloured haze rather than dark clouds against the sky.
+
+| Property | Value |
+|---|---|
+| Sky colour constant | `vec3(0.392, 0.584, 0.929)` = `SColor(255, 100, 149, 237) / 255` |
+| `kHazeEnd` | −5° (full sky colour at this elevation and below) |
+| `kHazeHigh` | 20° (no haze at this elevation and above) |
+
+The haze blend uses the same elevation-angle smoothstep as the alpha fade:
+a `hazeBlend` factor of `1.0` at −5° (full sky colour) tapering to `0.0` at 20°
+(original cloud colour). The blended cloud colour is then combined with the
+alpha fade to produce the final output `vec4(cloudColor, tex.a * horizFade)`.
 
 ### Shader Files
 
 | File | Purpose |
 |---|---|
 | `assets/shaders/cloud_dome.vert` | Computes `v_elevAngle` (elevation angle in radians from camera to vertex) and passes `v_texCoord` to the fragment stage. Receives `u_cameraY` uniform. |
-| `assets/shaders/cloud_dome.frag` | Samples `u_tex`; applies elevation-angle smoothstep fade; outputs `vec4(tex.rgb, tex.a * horizFade)` |
+| `assets/shaders/cloud_dome.frag` | Samples `u_tex`; applies elevation-angle smoothstep alpha fade (−5° → 20°); blends cloud RGB toward sky colour `vec3(0.392, 0.584, 0.929)` near the horizon (atmospheric haze); outputs `vec4(cloudColor, tex.a * horizFade)` |
 
 The vertex shader computes:
 
@@ -205,15 +224,18 @@ v_elevAngle     = atan(deltaY, max(horizDist, 0.1));
 The fragment shader computes:
 
 ```glsl
-float t         = clamp((v_elevAngle - kElevFadeEnd) / (kElevFadeHigh - kElevFadeEnd), 0.0, 1.0);
-float horizFade = t * t * (3.0 - 2.0 * t);   // smoothstep
-float alpha     = tex.a * horizFade;
-gl_FragColor    = vec4(tex.rgb, alpha);
+float t          = clamp((v_elevAngle - kElevAlphaEnd) / (kElevAlphaHigh - kElevAlphaEnd), 0.0, 1.0);
+float horizFade  = t * t * (3.0 - 2.0 * t);   // smoothstep
+float hazeBlend  = 1.0 - horizFade;            // 1 at -5°, 0 at 20°
+vec3  skyColor   = vec3(0.392, 0.584, 0.929);
+vec3  cloudColor = mix(tex.rgb, skyColor, hazeBlend);
+gl_FragColor     = vec4(cloudColor, tex.a * horizFade);
 ```
 
 - `tex.a = 0` (non-cloud area) → `alpha = 0` fully transparent.
-- Elevation ≤ 12° → `horizFade = 0` → dome fully transparent at and below 12°.
-- Elevation ≥ 30° → `horizFade = 1` → fully opaque overhead clouds.
+- Elevation ≤ −5° → `horizFade = 0` → dome fully transparent at and below −5°.
+- Elevation ≥ 20° → `horizFade = 1`, `hazeBlend = 0` → fully opaque overhead clouds in original colour.
+- At the horizon band (−5° to 20°) cloud colour blends toward sky colour, eliminating dark-cloud artefacts.
 - Identical result in every compass direction — no directional arc.
 
 ### Base Material and Blending
@@ -305,9 +327,9 @@ accumulation over play sessions longer than ~500 seconds.
 ## Depth Ordering
 
 The cloud dome base is at `Y=−1000 m` (far below terrain) and apex at `Y=1000 m`. Visible
-cloud geometry starts above 12° elevation angle (the `kElevFadeEnd` shader constant) and
-reaches full opacity above 30° (`kElevFadeHigh`). This range is well above all opaque
-scene geometry (terrain max ≈ 26 m, buildings max ~80 m).
+cloud geometry fades in between −5° and 20° elevation angle (`kElevAlphaEnd` and
+`kElevAlphaHigh` shader constants), reaching full opacity above 20°. This range is well
+above all opaque scene geometry (terrain max ≈ 26 m, buildings max ~80 m).
 The depth buffer handles correct ordering automatically:
 
 - The sky dome is rendered at infinite depth (Irrlicht sky dome nodes set
@@ -315,7 +337,7 @@ The depth buffer handles correct ordering automatically:
 - Zone overlay quads are at terrain height + 0.1 m; the cloud dome is always farther
   from the camera than overlay quads (camera pitch −20° to −70°, minimum camera height
   ~30 m over flat terrain).
-- Near-horizon fragments have `horizFade = 0` (elevation ≤ 12°), so even if the depth
+- Near-horizon fragments have `horizFade = 0` (elevation ≤ −5°), so even if the depth
   test ordering is imperfect near the horizon the elevation-angle fade makes them invisible.
 
 The cloud dome material has `ZWriteEnable = false` so it never writes depth values that
