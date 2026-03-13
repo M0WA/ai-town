@@ -73,7 +73,7 @@ This maps the apex to UV `(0.5, 0.5) × kCloudUVScale` and the base ring to UV
 
 ```text
 kFadeStart = 0.25  — t=0.25 → Y = -1000 + 2000×(1-0.25) = 500 m  (fade begins)
-kFadeEnd   = 0.50  — t=0.50 → Y = -1000 + 2000×(1-0.50) =   0 m  (fully transparent)
+kFadeEnd   = 0.46  — t=0.46 → Y = -1000 + 2000×(1-0.46) =  80 m  (fully transparent)
 
 For t ≤ kFadeStart:               alpha = 255   (fully opaque overhead dome)
 For kFadeStart < t ≤ kFadeEnd:    s = (t − kFadeStart) / (kFadeEnd − kFadeStart)   ∈ [0, 1]
@@ -86,10 +86,12 @@ For t > kFadeEnd:                 alpha = 0     (fully transparent horizon zone)
 dome is only *starting* to fade at Y ≈ 100 m (camera eye level). Looking toward the
 horizon, the still-opaque dome wall overlaps terrain and produces a visible circular arc.
 The fix is to reach **alpha = 0 at or above the maximum terrain height**. Setting
-`kFadeEnd = 0.50` maps to Y = 0 m (sea level), which is at or below all terrain
-(terrain height range 0–80 m). Everything at and below sea level is fully transparent,
-so no dome surface with non-zero alpha is ever visible against the terrain horizon.
-The fade band (500 m → 0 m altitude, t ∈ [0.25, 0.50]) provides a smooth S-curve
+`kFadeEnd = 0.46` maps to Y = 80 m, which is well above the maximum terrain height
+(terrain max ≈ 26 m, safety margin ≈ 54 m). This value must stay above
+`maxTerrainHeight + safetyMargin`; do not raise it below Y = 80 m without verifying the
+new terrain height ceiling. Everything at and below 80 m is fully transparent, so no
+dome surface with non-zero alpha is ever visible against the terrain horizon.
+The fade band (500 m → 80 m altitude, t ∈ [0.25, 0.46]) provides a smooth S-curve
 transition entirely above ground level.
 
 **Winding**: Inside-CW (camera is inside the dome looking upward and outward). For
@@ -204,9 +206,9 @@ accumulation over play sessions longer than ~500 seconds.
 ## Depth Ordering
 
 The cloud dome base is at `Y=−1000 m` (far below terrain) and apex at `Y=1000 m`. Visible
-cloud geometry starts at `Y=0 m` (kFadeEnd boundary, below which all vertices are
+cloud geometry starts at `Y=80 m` (kFadeEnd boundary, below which all vertices are
 alpha=0) and reaches full opacity at `Y=500 m` (kFadeStart boundary). This range is
-well above all opaque scene geometry (terrain max ~80 m, buildings max ~80 m).
+well above all opaque scene geometry (terrain max ≈ 26 m, buildings max ~80 m).
 The depth buffer handles correct ordering automatically:
 
 - The sky dome is rendered at infinite depth (Irrlicht sky dome nodes set

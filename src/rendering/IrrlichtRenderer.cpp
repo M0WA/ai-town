@@ -2014,15 +2014,15 @@ static SMesh* buildCloudDomeMesh()
     constexpr float kCloudDomeHeight   = 2000.0f;  // vertical height from base to apex (apex at Y=1000 m)
     constexpr float kCloudUVScale      = 4.0f;   // texture tiling factor
     // Two-boundary fade: clouds are fully opaque above kFadeStart, then smoothstep
-    // to fully transparent at kFadeEnd.  kFadeEnd corresponds to Y=0 m (sea level),
-    // which is above the maximum terrain height (~80 m is typical, absolute max ~80 m).
-    // This guarantees the dome is completely transparent at or below sea level, so
-    // terrain at 0-80 m altitude is always visible through the dome with no arc artifact.
+    // to fully transparent at kFadeEnd.  kFadeEnd corresponds to Y=80 m (above sea level),
+    // which is above the maximum terrain height (~26 m) plus a ~54 m safety margin.
+    // This guarantees the dome is completely transparent at and below 80 m, so no hill
+    // or terrain feature can ever be at that altitude and no arc artifact is visible.
     //
     // kFadeStart = 0.25 → Y = kCloudAltitude + kCloudDomeHeight * (1 - 0.25) = -1000 + 1500 = 500 m
-    // kFadeEnd   = 0.50 → Y = kCloudAltitude + kCloudDomeHeight * (1 - 0.50) = -1000 + 1000 =   0 m
+    // kFadeEnd   = 0.46 → Y = kCloudAltitude + kCloudDomeHeight * (1 - 0.46) = -1000 + 1080 =  80 m
     constexpr float kFadeStart         = 0.25f; // start fading at t=0.25 (Y≈500 m)
-    constexpr float kFadeEnd           = 0.50f; // fully transparent at t=0.50 (Y=0 m)
+    constexpr float kFadeEnd           = 0.46f; // fully transparent at t=0.46 (Y=80 m)
 
     SMesh*       mesh = new SMesh();
     SMeshBuffer* buf  = new SMeshBuffer();
@@ -2043,8 +2043,9 @@ static SMesh* buildCloudDomeMesh()
     //       w = s * s * (3 - 2*s)                             (smoothstep)
     //       alpha = round(255 * (1 - w))
     //   t > kFadeEnd                 : alpha = 0  (fully transparent horizon zone)
-    // kFadeEnd = 0.50 → Y = 0 m (sea level).  Everything at and below sea level is
-    // fully transparent, so the dome never occludes terrain and no arc is visible.
+    // kFadeEnd = 0.46 → Y = 80 m (above sea level, above max terrain height ~26 m).
+    // Everything at and below 80 m is fully transparent, so the dome never occludes
+    // terrain and no arc artifact is visible from any camera angle.
 
     const float piF = static_cast<float>(M_PI);
 
