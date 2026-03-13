@@ -7,6 +7,19 @@ flattening writes the placed tile's height (and blended neighbour heights) back 
 persistent LOD0 heightmap and rebuilds affected chunks; a scrolling cloud plane adds a
 lightweight animated cloud layer above the sky dome.
 
+### Naming Conventions
+
+All new files introduced in this phase MUST follow project naming conventions:
+
+- **CamelCase** for C++ class files: `.cpp` and `.h` files that define a class use CamelCase
+  (e.g., `TerrainSystem.cpp`, `IrrlichtRenderer.h`).
+- **`I`-prefix for interfaces**: pure-virtual interface headers live under `src/interfaces/`
+  and are prefixed with `I` (e.g., `src/interfaces/ITerrainQuery.h`,
+  `src/interfaces/IRenderer.h`).
+- **`snake_case` for C-style non-class headers**: headers containing only constants, enums,
+  or POD structs (no class definition) use `snake_case`
+  (e.g., `shader_constants.h`, `terrain_types.h`).
+
 ### Deliverables
 
 #### Feature 1: Terrain Flattening on Placement

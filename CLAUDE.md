@@ -103,6 +103,7 @@ Do not suggest alternative engines, languages, or platforms.
 - Object-oriented design principles
 - Clear separation of concerns (rendering, logic, audio)
 - **C++ class file naming**: C++ class implementation files (`.cpp`) and their paired class header files (`.h`) MUST use **CamelCase** (e.g., `TextureCache.cpp` / `TextureCache.h`, `SceneEntityManager.cpp` / `SceneEntityManager.h`, `TerrainChunk.cpp` / `TerrainChunk.h`). Non-class C-style headers that contain only constants, enums, or POD structs (e.g., `simulation_constants.h`, `terrain_types.h`, `shader_constants.h`) MAY use `snake_case`.
+- **Interface naming**: Pure-virtual interface classes MUST be placed under `src/interfaces/` and their filenames MUST be prefixed with `I` (e.g., `IRenderer.h`, `ITerrainQuery.h`, `IAudioSystem.h`). Concrete implementations live in their domain subdirectory (e.g., `src/rendering/`, `src/audio/`) without the `I` prefix.
 
 ### Dependencies
 
