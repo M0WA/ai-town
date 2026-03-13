@@ -593,11 +593,41 @@ void TerrainSystem::setTileHeight(int tileX, int tileZ, float height)
 
     const int vertX = m_mapTilesX + 1;
 
-    // Helper: write to heightmap and record modified tile for chunk enqueue.
+    // Chunk layout constants — needed by writeHeight to sync m_chunkHeightmaps.
+    const int chunkTiles = kTerrainLOD0GridSize;  // 32 tiles per chunk side
+    const int chunkVerts = chunkTiles + 1;         // 33 vertices per chunk side
+    const int chunksX    = (m_mapTilesX + chunkTiles - 1) / chunkTiles;
+
+    // Helper: write to global heightmap AND sync the corresponding per-chunk
+    // heightmap(s) in m_chunkHeightmaps. processOneRebuild reads from
+    // m_chunkHeightmaps, so without this sync the terrain geometry never updates.
+    //
+    // A vertex at (tx, tz) is shared between up to 4 chunks when it sits on
+    // a chunk boundary (tx % chunkTiles == 0 or tz % chunkTiles == 0). All
+    // owning chunks are updated so every rebuild sees the fresh height.
     auto writeHeight = [&](int tx, int tz, float h) {
         // Clamp to bounds.
         if (tx < 0 || tx >= m_mapTilesX || tz < 0 || tz >= m_mapTilesZ) return;
+        // Update the global heightmap.
         m_generatedHeightmap[static_cast<size_t>(tz * vertX + tx)] = h;
+        // Sync every chunk heightmap that contains vertex (tx, tz).
+        int cx = tx / chunkTiles;
+        int cz = tz / chunkTiles;
+        int lx = tx % chunkTiles;
+        int lz = tz % chunkTiles;
+        auto syncChunk = [&](int ccx, int ccz, int llx, int llz) {
+            if (ccx < 0 || ccz < 0) return;
+            uint64_t cid = static_cast<uint64_t>(ccz * chunksX + ccx);
+            auto it = m_chunkHeightmaps.find(cid);
+            if (it == m_chunkHeightmaps.end()) return;
+            if (llx < 0 || llx >= chunkVerts || llz < 0 || llz >= chunkVerts) return;
+            it->second[static_cast<size_t>(llz * chunkVerts + llx)] = h;
+        };
+        syncChunk(cx,     cz,     lx,         lz);
+        if (lx == 0 && cx > 0) syncChunk(cx - 1, cz,     chunkTiles, lz);
+        if (lz == 0 && cz > 0) syncChunk(cx,     cz - 1, lx,         chunkTiles);
+        if (lx == 0 && lz == 0 && cx > 0 && cz > 0)
+            syncChunk(cx - 1, cz - 1, chunkTiles, chunkTiles);
     };
 
     // Step 1: write centre tile height.
@@ -633,10 +663,8 @@ void TerrainSystem::setTileHeight(int tileX, int tileZ, float height)
 
     // Step 3: enqueue ChunkRebuildRequest for every chunk containing a modified tile.
     // Affected tiles: centre + all 8 in-bounds neighbours.
-    // Map each tile to its chunk and enqueue a LOD0 rebuild.
     // Chunk ID = (chunkZ * chunksPerSideX + chunkX), matching buildAllChunks().
-    const int chunkTiles  = kTerrainLOD0GridSize;  // 32 tiles per chunk side
-    const int chunksX = (m_mapTilesX + chunkTiles - 1) / chunkTiles;
+    // (chunkTiles, chunksX declared above alongside writeHeight)
 
     // Collect all tile coords that were written (centre + in-bounds neighbours).
     // Use a small fixed array to avoid heap allocation on the placement hot-path.
