@@ -343,7 +343,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
   Steps 8, 9, and 10 (the three label-routing verification steps) and step 11 (shader asset verification) are placed **after CMake build step (7) and before the first ctest execution step (12)**. A label misconfiguration that produces zero-test discovery in `build-linux` will equally affect `coverage-linux`; without these checks, a zero-discovery run silently under-reports coverage and exits 0.
 
-  ### coverage-linux: label-routing verification YAML
+  **coverage-linux: label-routing verification YAML**
 
   These steps are IDENTICAL to the `build-linux` forms — copy them exactly. They are reproduced here verbatim so that an implementer building `coverage-linux` from this spec alone can derive the exact YAML without referring back to the `build-linux` documentation.
 
@@ -682,7 +682,8 @@ markdown-lint:
   - Phase 1: `validate-assets` job is introduced running `tools/validate_assets.py` as a stub that always exits 0. Wire it into `all-checks-pass` immediately. Adding the job (even as a stub) now means the `all-checks-pass` dependency list never needs to change in later phases — only the script gains real checks.
   - Phase 5: the stub script gains 18 real checks (Checks #1–#14 and Checks #16–#19) plus Check #15 as a stub placeholder; the job definition and `all-checks-pass` wiring are unchanged.
   - Phase 9: Check #15 full implementation (replacing the Phase 5 `.meta` stub) and Check #20 (road LOD2 color validation) are added to the script; again no change to the job definition or wiring.
-  - Phase 10: Check #21 (zone loop silence-floor — leading and trailing 4410-sample windows at or below −60 dBFS peak amplitude for all `sfx_zone_*.ogg` files) is added to the script; no change to the job definition or `all-checks-pass` wiring.
+  - Phase 10: Checks #21–#23 (zone loop silence-floor, vehicle atlas dimensions, HUD sprites dimensions) are added to the script; no change to the job definition or `all-checks-pass` wiring.
+  - Phase 10b: Check #24 (cloud texture format gate — `clouds.png` 1024×1024 RGBA) is added to the script; no change to the job definition or `all-checks-pass` wiring.
 
 ### PHASE 0 FORM (validate-assets not yet introduced)
 

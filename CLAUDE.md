@@ -312,6 +312,8 @@ lcov --remove coverage.info \
   '*/tests/*' \
   '*/mock_*.h' '*/mock_*.cpp' \
   '*/manual_*.h' '*/manual_*.cpp' \
+  '*/Mock*.h' '*/Mock*.cpp' \
+  '*/Manual*.h' '*/Manual*.cpp' \
   '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
   --output-file coverage_filtered.info
 genhtml coverage_filtered.info --output-directory coverage_html/

@@ -171,7 +171,9 @@ add_executable(terrain_tests tests/terrain/terrain_generator_test.cpp ...)
 # editing CMakeLists.txt.
 target_link_libraries(terrain_tests PRIVATE aitown_terrain GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
 target_include_directories(terrain_tests PRIVATE
-    tests/simulation/ tests/terrain/ src/terrain/ ${CMAKE_SOURCE_DIR})
+    tests/simulation/ tests/terrain/ src/terrain/ src/rendering/ src/interfaces/ ${CMAKE_SOURCE_DIR})
+# Phase 10b: after ITerrainRNG.h moves to src/interfaces/ (Feature 3), src/terrain/ may be
+# dropped from this list — verify terrain_tests still builds cleanly after the removal.
 aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
 # Phase 3 prerequisite: `terrain_stub.cpp` references `#include "src/terrain/terrain_chunk.h"`.
 # This header does not exist as a full implementation until Phase 5. Phase 3 MUST create a

@@ -383,7 +383,7 @@ public:
   4. `ManualRNG_FloatSeqOutOfRange_ThrowsAtConstruction` — construct `ManualRNG({0}, {1.0f})` (one int, one float equal to 1.0f which is not in [0.0, 1.0)) → expect `std::out_of_range` to be thrown at construction time, confirming the inclusive-upper-bound guard fires.
   5. `ManualRNG_EmptyFloatSeq_ThrowsAtConstruction` — construct `ManualRNG({0}, {})` (non-empty int sequence, empty float sequence) → expect `std::invalid_argument` to be thrown at construction time, not at first `nextFloat()` call. This covers the `m_floatSeq.empty()` guard in the constructor body, which is distinct from the out-of-range float guard tested in case 4.
   6. `ManualRNG_NextInt_OutOfRange_ThrowsAtCallTime` — construct `ManualRNG({5}, {0.5f})` with a stored int value of 5; call `nextInt(0, 3)` (where `5 > 3`, so the stored value is outside `[min, max]`) → expect `std::out_of_range` to be thrown at call time (not at construction time). This validates the per-call range guard in `nextInt()`: the implementation throws immediately when the stored preset value falls outside the `[min, max]` bounds supplied by the caller, catching test-data bugs in both Debug and Release builds. Note: this test exercises the call-time range check only — the constructor does not validate int sequence values at construction (unlike float values which are range-checked at construction). Also verify the converse: a within-range call does NOT throw — construct `ManualRNG({2}, {0.5f})` and call `nextInt(0, 3)` → expect return value `2` and no exception.
-- **`ITerrainRNG`** — injectable RNG interface for deterministic terrain generation testing. **Source location**: `ITerrainRNG.h` lives in `src/terrain/`; `MockTerrainRNG` lives in `tests/terrain/mock_terrain_rng.h`. The `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` property test requires an injectable mock that counts re-seed calls:
+- **`ITerrainRNG`** — injectable RNG interface for deterministic terrain generation testing. **Source location**: `ITerrainRNG.h` lives in `src/interfaces/` (moved from `src/terrain/` in Phase 10b Feature 3); `MockTerrainRNG` lives in `tests/terrain/MockTerrainRNG.h` (renamed from `mock_terrain_rng.h` to CamelCase in Phase 10b Feature 3). The `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` property test requires an injectable mock that counts re-seed calls:
 
   ```cpp
   class ITerrainRNG {
@@ -393,11 +393,11 @@ public:
       virtual int   nextInt(int min, int max) = 0; // inclusive [min, max] — discrete terrain feature counts, tile selection
       virtual void  reseed(uint64_t seed) = 0;    // called when generator retries with a new seed
   };
-  // NAMING CONVENTION NOTE: Despite the `mock_` prefix, `MockTerrainRNG` does NOT use
-  // GMock macros (`MOCK_METHOD`). It is a manual stub with a real `std::mt19937_64` engine.
-  // The `mock_` prefix is used intentionally so the `'*/mock_*.h'` lcov exclusion pattern
-  // applies to this test-double header. The name `MockTerrainRNG` (not `ManualTerrainRNG`)
-  // is canonical — do not rename.
+  // NAMING CONVENTION NOTE: `MockTerrainRNG` does NOT use GMock macros (`MOCK_METHOD`).
+  // It is a manual stub with a real `std::mt19937_64` engine. The CamelCase `Mock` prefix
+  // (after Phase 10b Feature 3 rename from `mock_terrain_rng.h`) matches the `'*/Mock*.h'`
+  // lcov exclusion pattern added in Phase 10b. The name `MockTerrainRNG` (not
+  // `ManualTerrainRNG`) is canonical — do not rename.
   class MockTerrainRNG : public ITerrainRNG {
   public:
       explicit MockTerrainRNG(uint64_t seed) : m_rng(seed) {}
@@ -1043,11 +1043,12 @@ the audio playback path, not a unit test with strict call-count expectations on 
   target_include_directories(integration_tests PRIVATE tests/simulation/ tests/ui/ src/interfaces/ src/ui/ src/rendering/ ${CMAKE_SOURCE_DIR})
 
   # terrain_tests — needs tests/simulation/ for ManualClock (if timing tests added in Phase 5+),
-  # tests/terrain/ for MockTerrainRNG; ${CMAKE_SOURCE_DIR} so project-root-relative includes
-  # resolve correctly. NOTE (Phase 10b): ITerrainRNG.h moved to src/interfaces/ — src/terrain/
-  # is no longer required for ITerrainRNG; mock_terrain_rng.h updates its include to
-  # #include "src/interfaces/ITerrainRNG.h". Drop src/terrain/ from this list after Phase 10b.
-  target_include_directories(terrain_tests PRIVATE tests/simulation/ tests/terrain/ ${CMAKE_SOURCE_DIR})
+  # tests/terrain/ for MockTerrainRNG; src/interfaces/ for ITerrainRNG.h (moved from
+  # src/terrain/ in Phase 10b Feature 3); ${CMAKE_SOURCE_DIR} so project-root-relative
+  # includes resolve correctly. Phase 10b Feature 3 also removes src/terrain/ since
+  # ITerrainRNG.h is no longer there; MockTerrainRNG.h (renamed from mock_terrain_rng.h)
+  # updates its include to #include "src/interfaces/ITerrainRNG.h".
+  target_include_directories(terrain_tests PRIVATE tests/simulation/ tests/terrain/ src/interfaces/ ${CMAKE_SOURCE_DIR})
   ```
 
   If a test target needs a specialization, it must subclass the shared mock — not redefine it. This sharing is intentional: the same mock interface is used consistently across all simulation-adjacent tests.

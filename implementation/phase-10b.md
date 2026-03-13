@@ -132,18 +132,24 @@ All new files introduced in this phase MUST follow project naming conventions:
   setter helpers `setHeightBeforeFlattening(float)` / `setHeightAfterFlattening(float)`.
   Override `getHeightAt()` to return `m_flattened ? m_heightAfterFlat : m_heightBeforeFlat`.
   Override `setTileHeight()` to set `m_flattened = true`. **This stateful form supersedes
-  the no-op assigned to `graphics-dev-irrlicht`** — whichever lands first, the final
-  merged state must be this stateful version. Existing tests relying on `return 0.0f` are
-  unaffected because `m_heightBeforeFlat` defaults to `0.0f`.
+  the no-op assigned to `graphics-dev-irrlicht`**. **BLOCKED**: this deliverable requires
+  the `graphics-dev-irrlicht` Step 1 PR (pure-virtual `setTileHeight()` in `ITerrainQuery.h`
+  and no-op `ManualTerrainQuery` override) to be merged first — without the pure-virtual declaration, the `override`
+  keyword will not compile. Do NOT open a PR for this item until Step 1 is merged.
+  Existing tests relying on `return 0.0f` are unaffected because `m_heightBeforeFlat`
+  defaults to `0.0f`.
 - [ ] `CloudPlane_EDTNull_InitSkipped`: construct an `IrrlichtRenderer` with
   `EDT_NULL`, call `init()`; assert `m_cloudNode == nullptr` (cloud initialisation
   skipped). Label `requires-opengl` and add to `opengl_tests` — Irrlicht device creation
   requires X11 even for `EDT_NULL` on Linux; `xvfb-run` provides the X server.
-- [ ] Wire all new test cases into the appropriate test targets via `target_sources` in
-  `CMakeLists.txt`: the three terrain flattening tests live in
-  `tests/terrain/terrain_flattening_test.cpp` → add to `terrain_tests` (label `unit`);
-  `CloudPlane_EDTNull_InitSkipped` lives in `tests/rendering/cloud_plane_test.cpp` → add
-  to `opengl_tests` (label `requires-opengl`).
+- [ ] Wire all new test cases into the appropriate test targets in `CMakeLists.txt`: the
+  three terrain flattening tests live in `tests/terrain/terrain_flattening_test.cpp` → add
+  via `target_sources(terrain_tests ...)` (label `unit`); `CloudPlane_EDTNull_InitSkipped`
+  lives in `tests/rendering/cloud_plane_test.cpp` → add **inline** to the
+  `add_executable(opengl_tests ...)` call in `CMakeLists.txt`. **Do NOT use
+  `target_sources(opengl_tests ...)` for the cloud plane test** — `opengl_tests` prohibits
+  `target_sources()` (all sources must be listed inline in `add_executable` to prevent
+  ctest discovery timing issues; see `architecture/testing/framework.md`).
 
 ---
 
@@ -335,8 +341,26 @@ After all Feature 3 renames are committed, verify the rename pass is complete:
   — result must be empty.
 - [ ] Verify no stale `src/interfaces/WallClock.h` include paths remain after the move:
   `grep -r "src/interfaces/WallClock\.h" src/ tests/` — result must be empty.
+- [ ] Update the `lcov --remove` invocation in `coverage-linux` CI job YAML to add
+  CamelCase test-double exclusion patterns alongside the existing lowercase ones:
+  `'*/Mock*.h' '*/Mock*.cpp' '*/Manual*.h' '*/Manual*.cpp'`. The lowercase `mock_*` and
+  `manual_*` patterns become inoperative on Linux after Phase 10b Feature 3 renames all
+  test-double headers to CamelCase. Also update the `coverage-linux` step name/comment
+  if it references only the lowercase pattern names. See `architecture/testing/coverage.md`
+  for the canonical `lcov --remove` invocation including all four prefix variants.
+- [ ] After `ITerrainRNG.h` is moved to `src/interfaces/`, remove `src/terrain/` from
+  `terrain_tests`'s `target_include_directories` in `CMakeLists.txt` and confirm
+  `terrain_tests` builds and passes cleanly. (The path is now redundant: `ITerrainRNG.h`
+  moved to `src/interfaces/`; no other Phase-10b-touched interface remains in `src/terrain/`.)
 
 ##### test-dev-cpp
+
+After `ITerrainRNG.h` is moved and `mock_terrain_rng.h` is renamed:
+
+- [ ] Update `architecture/testing/testability-architecture.md` section "ITerrainRNG" to
+  confirm the source-location declaration reflects the post-Phase-10b paths:
+  `ITerrainRNG.h` in `src/interfaces/`; `MockTerrainRNG` in `tests/terrain/MockTerrainRNG.h`.
+  (This has been pre-updated in the spec; verify the implementation matches on merge.)
 
 Rename all test-helper class headers and update every `#include` in test `.cpp` files:
 
