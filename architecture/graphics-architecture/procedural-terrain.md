@@ -346,6 +346,13 @@ virtual void setTileHeight(int tileX, int tileZ, float height) = 0;
 at `(tileX, tileZ)`. Clamp `(tileX, tileZ)` to `[0, m_mapTilesX-1]` ×
 `[0, m_mapTilesZ-1]` before the write.
 
+**CRITICAL — dual heightmap sync**: The write MUST update BOTH `m_generatedHeightmap`
+AND every entry in `m_chunkHeightmaps` that covers the modified tile. `processOneRebuild`
+reads vertex heights from `m_chunkHeightmaps` (the per-chunk copy), not from
+`m_generatedHeightmap` (the global flat array). Writing only `m_generatedHeightmap`
+causes `processOneRebuild` to rebuild the chunk mesh with the old (pre-flatten) heights,
+silently discarding the height change. Both arrays must be kept in sync on every write.
+
 **Step 2 — Neighbour blending**: For each of the 8 surrounding tiles, compute the
 neighbour's new height by linearly interpolating toward `height`:
 
@@ -368,32 +375,68 @@ Out-of-bounds neighbours are silently skipped (no write, no crash).
 
 **Step 3 — Chunk rebuild enqueue**: After all heightmap writes (centre + in-bounds
 neighbours), iterate over all modified tile coordinates and determine which chunk(s) each
-tile belongs to. For each unique chunk affected, enqueue a `ChunkRebuildRequest`. Chunk
-deduplication by `uint64_t` chunk ID is already enforced in `TerrainSystem::update()`'s
-`processedThisFrame` set; duplicate entries in the deque are harmless but the enqueue
-loop should avoid unnecessary enqueues by checking whether a given chunk ID is already in
-the deque (optional optimisation — not required for correctness).
+tile belongs to. For each unique chunk affected:
+
+1. **Mark the chunk dirty (LOD = -1) in `m_activeChunks`** before calling
+   `enqueueRebuild`. `processOneRebuild` contains an "already at target LOD" guard:
+
+   ```cpp
+   if (it->second.currentLOD == req.targetLOD) return;  // skip rebuild
+   ```
+
+   If the chunk's `currentLOD` is not reset to −1 before the enqueue, the guard
+   treats the already-rendered LOD level as "current" and silently discards the
+   height-change rebuild request. The LOD is reset during the next actual rebuild, so
+   the chunk remains permanently stuck with the old (pre-flatten) geometry.
+
+2. Enqueue a `ChunkRebuildRequest`. Chunk deduplication by `uint64_t` chunk ID is
+   already enforced in `TerrainSystem::update()`'s `processedThisFrame` set; duplicate
+   entries in the deque are harmless but the enqueue loop should avoid unnecessary
+   enqueues by checking whether a given chunk ID is already in the deque (optional
+   optimisation — not required for correctness).
 
 ### Placement Integration
 
 `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and
-`placeServiceBuildingMesh()` call `setTileHeight()` before creating the scene node:
+`placeServiceBuildingMesh()` call `setTileHeight()` four times before creating the scene
+node — once per tile corner — to guarantee all 4 vertices of the tile quad are at the
+same height before the flat mesh is placed on them:
 
 ```cpp
-// Pre-placement: read current height, flatten, read post-flatten height
-const float preY  = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
-if (m_terrain) m_terrain->setTileHeight(tileX, tileZ, preY);  // flatten to own current height
+// Four-corner terrain flattening pattern (Phase 10b):
+// Average all 4 tile-corner heights, then flatten each corner vertex to that value.
+// setTileHeight(tileX+1, tileZ, h) sets the top-left vertex of tile (tileX+1, tileZ),
+// which IS the top-right vertex of tile (tileX, tileZ) — so addressing all 4 corner
+// tile-coordinates flattens all 4 vertices of the road/building tile quad.
+const float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
+const float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
+const float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
+const float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
+const float targetH = (h00 + h10 + h01 + h11) * 0.25f;
+if (m_terrain) {
+    m_terrain->setTileHeight(tileX,     tileZ,     targetH);
+    m_terrain->setTileHeight(tileX + 1, tileZ,     targetH);
+    m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
+    m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
+}
 const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
 
 node->setPosition(irr::core::vector3df(
-    static_cast<float>(tileX) * kTileSize,
-    postY,   // post-flattened height
-    static_cast<float>(tileZ) * kTileSize));
+    static_cast<float>(tileX) * kTileSize + kTileSize * 0.5f,
+    postY,   // post-flattened height (all 4 corners are now equal)
+    static_cast<float>(tileZ) * kTileSize + kTileSize * 0.5f));
 ```
 
-Passing the tile's own current height as the target flattening height means the placed
-tile does not shift vertically — only neighbours blend toward it. This is the correct V1
-behaviour: placement "locks" the tile to its current height and smooths the surroundings.
+Using the average of all 4 corners as the target height minimises the total vertical
+displacement applied to the terrain while producing a perfectly flat tile quad. This
+eliminates T-junction seams at tile edges where the flat road/building mesh meets the
+terrain geometry. The 4 `setTileHeight()` calls each also apply neighbour blending to
+their 8 surrounding tiles, so shared vertices with adjacent tiles transition smoothly.
+
+The single-corner pattern (pre-Phase 10b fix) was incorrect: calling `setTileHeight`
+only on `(tileX, tileZ)` flattened only that one vertex plus its 8 neighbours via
+blending, leaving the other 3 tile-corner vertices at their original heights and causing
+visible T-junction misalignment at every tile edge.
 
 ### ManualTerrainQuery Stub
 

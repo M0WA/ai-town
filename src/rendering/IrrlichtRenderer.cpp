@@ -1118,12 +1118,23 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
     // unsupported format) the slot remains null and the zone-coloured placeholder
     // texture is bound instead so the building is still visually distinguishable.
     if (scene::ISceneNode* node = lodNode->getNode()) {
-        // Three-step terrain flattening pattern (Phase 10b):
-        // (1) read pre-flatten height, (2) flatten, (3) read post-flatten height for placement.
-        // Passing preY as the setTileHeight argument locks the placed tile to its current height
-        // while blending neighbours — no vertical shift on the placed tile itself.
-        const float preY  = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
-        if (m_terrain) m_terrain->setTileHeight(tileX, tileZ, preY);
+        // Four-corner terrain flattening pattern (Phase 10b):
+        // Average all 4 tile-corner vertex heights then flatten each corner to that value.
+        // setTileHeight(tileX+1, tileZ, h) sets the top-left vertex of tile (tileX+1, tileZ),
+        // which IS the top-right vertex of tile (tileX, tileZ) — so calling all 4 corner
+        // coordinates flattens all 4 vertices of this tile to the same height, eliminating
+        // T-junction seams between the road/building mesh and the terrain quad edges.
+        const float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
+        const float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
+        const float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
+        const float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
+        const float targetH = (h00 + h10 + h01 + h11) * 0.25f;
+        if (m_terrain) {
+            m_terrain->setTileHeight(tileX,     tileZ,     targetH);
+            m_terrain->setTileHeight(tileX + 1, tileZ,     targetH);
+            m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
+            m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
+        }
         const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
         node->setPosition(core::vector3df(
             static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
@@ -1463,9 +1474,19 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ)
 
     // Position at tile world-space centre.
     // The road geometry is 4×4 m centred at local origin; no scale needed.
-    // Three-step terrain flattening pattern (Phase 10b).
-    const float preY  = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
-    if (m_terrain) m_terrain->setTileHeight(tileX, tileZ, preY);
+    // Four-corner terrain flattening pattern (Phase 10b): average the 4 tile corner heights
+    // then flatten each corner vertex to that average, so the road mesh sits on a flat quad.
+    const float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
+    const float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
+    const float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
+    const float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
+    const float targetH = (h00 + h10 + h01 + h11) * 0.25f;
+    if (m_terrain) {
+        m_terrain->setTileHeight(tileX,     tileZ,     targetH);
+        m_terrain->setTileHeight(tileX + 1, tileZ,     targetH);
+        m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
+        m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
+    }
     const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
     node->setPosition(core::vector3df(
         static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,
@@ -1551,9 +1572,19 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
     }
 
     if (scene::ISceneNode* node = lodNode->getNode()) {
-        // Three-step terrain flattening pattern (Phase 10b).
-        const float preY  = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
-        if (m_terrain) m_terrain->setTileHeight(tileX, tileZ, preY);
+        // Four-corner terrain flattening pattern (Phase 10b): average the 4 tile corner heights
+        // then flatten each corner vertex to that average, eliminating T-junction seams.
+        const float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
+        const float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
+        const float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
+        const float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
+        const float targetH = (h00 + h10 + h01 + h11) * 0.25f;
+        if (m_terrain) {
+            m_terrain->setTileHeight(tileX,     tileZ,     targetH);
+            m_terrain->setTileHeight(tileX + 1, tileZ,     targetH);
+            m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
+            m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
+        }
         const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
         node->setPosition(core::vector3df(
             static_cast<f32>(tileX) * kTileSize + kTileSize * 0.5f,

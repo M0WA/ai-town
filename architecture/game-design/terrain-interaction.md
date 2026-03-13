@@ -57,23 +57,55 @@ only the audio cue and the unsaved-changes dot. This is expected behaviour for P
 ## Phase 10b: Terrain Mesh Modification on Placement
 
 Starting in Phase 10b, `IrrlichtRenderer` placement helpers (`placeBuildingMesh`,
-`placeRoadMesh`, `placeServiceBuildingMesh`) flatten the terrain under and around a placed
-tile before creating the scene node. The call sequence is:
+`placeRoadMesh`, `placeServiceBuildingMesh`) flatten all 4 corner vertices of the placed
+tile to the same height before creating the scene node. The call sequence is:
 
-1. Read the tile's current height:
-   `const float preY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;`
-2. Flatten (null-guarded):
-   `if (m_terrain) m_terrain->setTileHeight(tileX, tileZ, preY);`
-   — writes `preY` into the persistent LOD0 heightmap for the centre tile and applies
-   neighbour blending to the 8 surrounding tiles (cardinal neighbours lerped 50% toward
-   `preY`; diagonal neighbours lerped 25% toward `preY`). All modified tiles' chunks are
-   enqueued for rebuild. When `m_terrain` is null (headless unit tests, startup before
-   terrain is wired) the flatten step is skipped; this is consistent with the Phase 9b
-   null-guard fallback contract established on `ITerrainQuery*`.
-3. Read the post-flatten height:
-   `const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;`
+1. Read all 4 tile-corner heights:
+
+   ```cpp
+   const float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
+   const float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
+   const float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
+   const float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
+   const float targetH = (h00 + h10 + h01 + h11) * 0.25f;
+   ```
+
+2. Flatten all 4 corners to `targetH` (null-guarded):
+
+   ```cpp
+   if (m_terrain) {
+       m_terrain->setTileHeight(tileX,     tileZ,     targetH);
+       m_terrain->setTileHeight(tileX + 1, tileZ,     targetH);
+       m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
+       m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
+   }
+   ```
+
+   Each `setTileHeight()` call writes the target height into the persistent LOD0
+   heightmap at the addressed tile corner and applies neighbour blending to the 8
+   surrounding tiles (cardinal neighbours lerped 50% toward `targetH`; diagonal
+   neighbours lerped 25% toward `targetH`). All modified tiles' chunks are enqueued for
+   rebuild. When `m_terrain` is null (headless unit tests, startup before terrain is
+   wired) the flatten steps are skipped.
+
+   **Why 4 calls?** `getHeightAt(tileX, tileZ)` returns the TOP-LEFT vertex height of
+   tile `(tileX, tileZ)`. The tile quad has 4 distinct corner vertices — `(tileX, tileZ)`,
+   `(tileX+1, tileZ)`, `(tileX, tileZ+1)`, `(tileX+1, tileZ+1)`. Flattening only the
+   top-left corner leaves the other 3 at their original heights, producing visible
+   T-junction seams at every tile edge where the flat mesh meets the un-flattened terrain
+   geometry. Calling `setTileHeight` on all 4 corner coordinates ensures the full tile
+   quad is planar before the mesh is placed.
+
+3. Read the post-flatten height for node Y positioning:
+
+   ```cpp
+   const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+   ```
+
    Use `postY` as the scene node Y coordinate so the mesh sits on the freshly flattened
-   surface. When `m_terrain` is null, `postY` falls back to `0.0f`.
+   surface. Since all 4 corners are now equal, `getHeightAt(tileX, tileZ)` (the
+   top-left corner) equals all other corners and correctly positions the flat mesh. When
+   `m_terrain` is null, `postY` falls back to `0.0f`.
 
 This pattern guarantees the placed structure is always flush with the terrain surface.
 Neighbour blending prevents hard seams at tile boundaries. The earthworks treasury
