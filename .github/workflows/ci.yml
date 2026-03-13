@@ -68,15 +68,21 @@ jobs:
       - name: Install Pillow (asset validation dependency)
         run: pip install Pillow
 
-      # Step 3b: Preflight — validate assets (checks 21, 22, 23).
+      # Step 3b: Preflight — validate assets (checks 21, 22, 23, 24).
       # Runs BEFORE CMake configure so asset errors fail fast without wasting build time.
       # check_21: zone loop silence-floor gate (zone_*.ogg head/tail <= -60 dBFS).
       # check_22: WAV SFX format gate (44100 Hz, 16-bit PCM, stereo with mono exceptions).
       # check_23: sprite sheet PNG gate (hud_sprites_ui.png is 2048x2048 RGBA;
       #           hud_sprites_ui.dds and hud_sprites_ui_layout.json must NOT be git-tracked).
+      # check_24: cloud texture format gate (clouds.png is 1024x1024 RGBA). Phase 10b.
       # If no zone/WAV/PNG assets exist yet, the checks are no-ops and exit 0.
-      - name: Preflight asset validation (checks 21, 22, 23)
+      - name: Preflight asset validation (checks 21, 22, 23, 24)
         run: python3 tools/validate_assets.py
+
+      - name: Verify clouds.png present
+        shell: bash
+        run: |
+          test -f assets/textures/sky/clouds.png || { echo "ERROR: assets/textures/sky/clouds.png missing"; exit 1; }
 
       # Step 3c: Preflight — font asset presence gates.
       # hud_font.xml and hud_mono_font.xml are required at runtime by UIManager.
@@ -393,12 +399,17 @@ jobs:
         shell: pwsh
         run: pip install Pillow
 
-      # Step 2b: Preflight — validate assets (checks 21, 22, 23).
+      # Step 2b: Preflight — validate assets (checks 21, 22, 23, 24).
       # Same checks as build-linux (see build-linux comments for rationale).
       # Runs before CMake configure so asset errors fail fast.
-      - name: Preflight asset validation (checks 21, 22, 23)
+      - name: Preflight asset validation (checks 21, 22, 23, 24)
         shell: pwsh
         run: python tools/validate_assets.py
+
+      - name: Verify clouds.png present
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "assets/textures/sky/clouds.png")) { Write-Error "ERROR: assets/textures/sky/clouds.png missing"; exit 1 }
 
       # Step 2c: Preflight — font asset presence gates.
       # PS 5.1 compatible: use if (-not (Test-Path ...)) { exit 1 }
@@ -713,12 +724,17 @@ jobs:
       - name: Install Pillow (asset validation dependency)
         run: pip install Pillow
 
-      # Step 3b: Preflight — validate assets (checks 21, 22, 23).
+      # Step 3b: Preflight — validate assets (checks 21, 22, 23, 24).
       # Mirrors build-linux preflight — coverage-linux is self-contained and must run
       # all gates independently. A failure in build-linux does not block coverage-linux
       # from starting, so preflight must be repeated here.
-      - name: Preflight asset validation (checks 21, 22, 23)
+      - name: Preflight asset validation (checks 21, 22, 23, 24)
         run: python3 tools/validate_assets.py
+
+      - name: Verify clouds.png present
+        shell: bash
+        run: |
+          test -f assets/textures/sky/clouds.png || { echo "ERROR: assets/textures/sky/clouds.png missing"; exit 1; }
 
       # Step 3c: Preflight — font asset presence gates (same as build-linux).
       - name: Verify font assets present
@@ -978,6 +994,8 @@ jobs:
             '*/tests/*' \
             '*/mock_*.h' '*/mock_*.cpp' \
             '*/manual_*.h' '*/manual_*.cpp' \
+            '*/Mock*.h' '*/Mock*.cpp' \
+            '*/Manual*.h' '*/Manual*.cpp' \
             '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
             --output-file coverage_filtered.info
           lcov --list coverage_filtered.info
@@ -1109,6 +1127,9 @@ jobs:
   #           check #22 added — non-stinger WAV SFX (sfx_*.wav, ui_*.wav) mono/44100/16-bit gate.
   #           check #23 added — hud_sprites_ui.png must exist at assets/textures/ui/,
   #           be 2048×2048, and RGBA; Pillow installed below for PNG dimension check.
+  # Phase 10b: check #24 added — clouds.png must exist at assets/textures/sky/,
+  #            be 1024×1024, and RGBA (4 channels). No change to job definition or
+  #            all-checks-pass wiring.
   # timeout-minutes: 10 is permanent.
   # ============================================================================
   validate-assets:
@@ -1153,6 +1174,14 @@ jobs:
         run: |
           grep -q "check_23" tools/validate_assets.py || (echo "FAIL: check_23 not found in validate_assets.py — Phase 10 hud_sprites_ui.png dimension/RGBA gate missing" && exit 1)
           echo "PASS: check_23 present"
+
+      - name: Verify check_24 present in validate_assets.py
+        # check_24: assets/textures/sky/clouds.png must exist, be 1024×1024, and RGBA.
+        # Phase 10b mandates this cloud texture format gate. A missing check_24 allows
+        # a wrong-dimensions or wrong-channel clouds.png to pass CI silently.
+        run: |
+          grep -q "check_24_clouds_png" tools/validate_assets.py || (echo "FAIL: check_24_clouds_png not found in validate_assets.py — Phase 10b cloud texture format gate missing" && exit 1)
+          echo "PASS: check_24 present"
 
       - name: Verify hud_sprites_ui.dds not git-tracked
         # The DDS intermediate is an authoring artifact and must never be committed.

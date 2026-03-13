@@ -1025,9 +1025,10 @@ the audio playback path, not a unit test with strict call-count expectations on 
 - **Shared mock header cross-target pattern**: `MockAudioSystem` and `MockRenderer` are defined in `tests/simulation/mock_audio_system.h` and `tests/simulation/mock_renderer.h` respectively. `ManualClock` is defined in `tests/simulation/manual_clock.h`. These headers are shared across multiple CMake test targets (`simulation_tests`, `ui_tests`, `audio_tests`). To avoid ODR (One Definition Rule) violations, these headers must be HEADER-ONLY GMock declarations (using MOCK_METHOD macros only, no definitions). Each test target that uses any of these shared headers MUST add `tests/simulation/` to its `target_include_directories`. This include path coupling is intentional and must be documented explicitly in the CMakeLists.txt for each consuming target. The ODR rule is safe because each test binary links into its own separate executable scope — there is no shared library or link-time merging across test targets. Required `target_include_directories` entries for each consuming target:
 
   ```cmake
-  # simulation_tests — owns the shared mock headers; also needs src/interfaces/ and ${CMAKE_SOURCE_DIR}
-  # for project-root-relative includes like #include "src/interfaces/IClock.h" in simulation_smoke_test.cpp
-  target_include_directories(simulation_tests PRIVATE tests/simulation/ src/interfaces/ ${CMAKE_SOURCE_DIR})
+  # simulation_tests — owns the shared mock headers; also needs src/simulation/ (for direct
+  # includes like #include "CitySimulation.h"), src/interfaces/, and ${CMAKE_SOURCE_DIR}
+  # for project-root-relative includes like #include "src/interfaces/IClock.h"
+  target_include_directories(simulation_tests PRIVATE tests/simulation/ src/simulation/ src/interfaces/ ${CMAKE_SOURCE_DIR})
 
   # ui_tests — uses MockAudioSystem, MockRenderer, ManualClock from tests/simulation/;
   # MockUIBackend, MockCitySimulation from tests/ui/;
@@ -1919,3 +1920,15 @@ CRISIS trigger sequence.
 
 CTest filter for all Phase 10 simulation render and music intensity tests:
 `-R "CitySimulationRenderTest|AdaptiveMusicIntensityTest"`
+
+### Phase 10b Canonical Test Name Summary
+
+| Test Suite | Test Case | Source File | CMake Target | Label |
+|---|---|---|---|---|
+| `TerrainFlatteningTest` | `TerrainFlattening_SetTileHeight_EnqueuesChunkRebuild` | `tests/terrain/terrain_flattening_test.cpp` | `terrain_tests` | `unit` |
+| `TerrainFlatteningTest` | `TerrainFlattening_NeighborBlend_ClampedToMapBounds` | `tests/terrain/terrain_flattening_test.cpp` | `terrain_tests` | `unit` |
+| `TerrainFlatteningSimTest` | `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight` | `tests/simulation/terrain_flattening_sim_test.cpp` | `simulation_tests` | `unit` |
+| `CloudPlaneTest` | `CloudPlane_Init_CreatesCloudNode` | `tests/rendering/cloud_plane_test.cpp` | `opengl_tests` | `requires-opengl` |
+
+CTest filter for all Phase 10b terrain flattening and cloud plane tests:
+`-R "TerrainFlatteningTest|TerrainFlatteningSimTest|CloudPlaneTest"`

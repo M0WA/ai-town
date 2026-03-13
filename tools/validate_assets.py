@@ -7,6 +7,8 @@ Phase 10: check #21 added — zone loop silence-floor gate (leading/trailing 441
           check #23 added — hud_sprites_ui.png must exist at assets/textures/ui/, be 2048×2048, and RGBA;
           check #23 also verifies hud_sprites_ui.dds is NOT present on disk (DDS intermediate must never
           be committed; .gitignore entry + git rm --cached enforce this at the repo level).
+Phase 10b: check #24 added — clouds.png must exist at assets/textures/sky/, be 1024×1024, and RGBA
+           (4 channels). No-op when the file does not yet exist.
 """
 import glob
 import json
@@ -1844,6 +1846,7 @@ def run_all_checks():
         ("Check #21 (zone loop silence-floor)", check_21_zone_loop_silence_floor),
         ("Check #22 (WAV SFX format)", check_22_wav_sfx_format),
         ("Check #23 (sprite sheet PNG)", check_23_sprite_sheet_png),
+        ("Check #24 (cloud texture format)", check_24_clouds_png),
     ]
 
     for check_name, check_fn in checks:

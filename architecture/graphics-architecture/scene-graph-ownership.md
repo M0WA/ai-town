@@ -13,9 +13,10 @@ Not all scene nodes are managed by `SceneEntityManager`. A category of **rendere
 |---|---|---|---|
 | Sky dome | `m_skyDomeNode` | `initSkyDome()` | `device->drop()` |
 | Cloud plane | `m_cloudNode` | `initCloudPlane()` (Phase 10b) | `device->drop()` |
-| Hover highlight | `m_hoverHighlightNode` | `init()` | `device->drop()` |
 
 These nodes have no game-object counterpart and are never referenced by `SceneEntityManager`. They are created via direct `smgr->addXxxSceneNode()` / `smgr->addMeshSceneNode()` calls inside `IrrlichtRenderer`'s init helpers — this is a documented exception to the "sole place `addXxxSceneNode()` is called" policy above. The `SceneEntityManager` eviction sequence (texture clear → `setMaterial({})` → `evictUnreferenced()` → `node->remove()`) does **not** apply to renderer-internal nodes; they are released automatically by `device->drop()`.
+
+**Note — hover highlight and preview mesh are not scene nodes**: `m_hoveredTileMesh` (`SMesh*`) and `m_previewMesh` (`SMesh*`) are **not** scene nodes and must **not** be listed in the table above. They are allocated once in the `IrrlichtRenderer` constructor, drawn each frame via raw `IVideoDriver::drawMeshBuffer()` inside `drawScene()`, and dropped explicitly (via `->drop()`) in the `IrrlichtRenderer` destructor. They have no `ISceneNode*` handle; `device->drop()` does not release them. See the "Hover Highlight — Single Buffer, Pre-Allocated" section for the full `SMesh*` lifetime contract.
 
 **Rule**: any scene node created by an `IrrlichtRenderer` helper method (not in response to a game-object placement call) and stored as a private member of `IrrlichtRenderer` is a renderer-internal node. Add new renderer-internal nodes to the table above when introduced.
 

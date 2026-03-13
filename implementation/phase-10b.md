@@ -114,12 +114,16 @@ All new files introduced in this phase MUST follow project naming conventions:
   declaration or subclass seam. (ref: `architecture/graphics-architecture/procedural-terrain.md`)
 - [ ] `TerrainFlattening_NeighborBlend_ClampedToMapBounds`: call `setTileHeight()` on a
   corner tile (e.g. `(0, 0)`); assert no out-of-bounds heightmap write occurs (no crash,
-  ASAN clean) and that all four in-bounds cardinal neighbours were written. (ref:
+  ASAN clean) and that all four in-bounds cardinal neighbours were blended — verified by
+  calling `TerrainSystem::getHeightAt()` on each cardinal neighbour and confirming their
+  height moved toward the flattened value (i.e. is strictly between the original height
+  and the target `flatY`). Out-of-bounds neighbours (the three tiles that would lie outside
+  the map at a corner) must produce no write (heights remain unchanged). (ref:
   `architecture/graphics-architecture/procedural-terrain.md`)
 - [ ] `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight`: configure a
   `ManualTerrainQuery` with `m_heightBeforeFlat = 5.0f` and `m_heightAfterFlat = 3.0f`
   so the test is non-vacuous (pre- and post-flatten heights differ). Inject it into
-  `CitySimulation` alongside a `NiceMock<MockRenderer>` (in `tests/simulation/mock_renderer.h`).
+  `CitySimulation` alongside a `NiceMock<MockRenderer>` (pre-Feature-3 path: `tests/simulation/mock_renderer.h`).
   Call the placement method; assert `ManualTerrainQuery::m_flattened == true` (confirming
   `setTileHeight()` was invoked) and `ManualTerrainQuery::getHeightAt()` returns `3.0f`
   post-call. `IRenderer` placement methods carry no Y parameter — height verification

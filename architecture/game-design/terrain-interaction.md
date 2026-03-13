@@ -60,13 +60,20 @@ Starting in Phase 10b, `IrrlichtRenderer` placement helpers (`placeBuildingMesh`
 `placeRoadMesh`, `placeServiceBuildingMesh`) flatten the terrain under and around a placed
 tile before creating the scene node. The call sequence is:
 
-1. Read the tile's current height: `preY = m_terrain->getHeightAt(tileX, tileZ)`.
-2. Flatten: `m_terrain->setTileHeight(tileX, tileZ, preY)` — writes `preY` into the
-   persistent LOD0 heightmap for the centre tile and applies neighbour blending to the 8
-   surrounding tiles (cardinal neighbours lerped 50% toward `preY`; diagonal neighbours
-   lerped 25% toward `preY`). All modified tiles' chunks are enqueued for rebuild.
-3. Read the post-flatten height: `postY = m_terrain->getHeightAt(tileX, tileZ)` — use
-   `postY` as the scene node Y coordinate so the mesh sits on the freshly flattened surface.
+1. Read the tile's current height:
+   `const float preY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;`
+2. Flatten (null-guarded):
+   `if (m_terrain) m_terrain->setTileHeight(tileX, tileZ, preY);`
+   — writes `preY` into the persistent LOD0 heightmap for the centre tile and applies
+   neighbour blending to the 8 surrounding tiles (cardinal neighbours lerped 50% toward
+   `preY`; diagonal neighbours lerped 25% toward `preY`). All modified tiles' chunks are
+   enqueued for rebuild. When `m_terrain` is null (headless unit tests, startup before
+   terrain is wired) the flatten step is skipped; this is consistent with the Phase 9b
+   null-guard fallback contract established on `ITerrainQuery*`.
+3. Read the post-flatten height:
+   `const float postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;`
+   Use `postY` as the scene node Y coordinate so the mesh sits on the freshly flattened
+   surface. When `m_terrain` is null, `postY` falls back to `0.0f`.
 
 This pattern guarantees the placed structure is always flush with the terrain surface.
 Neighbour blending prevents hard seams at tile boundaries. The earthworks treasury
