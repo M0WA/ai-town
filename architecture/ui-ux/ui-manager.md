@@ -295,9 +295,11 @@ public:
     // loads a saved game):
     // Clears m_overlayMap and calls m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, {})
     // if m_renderer is non-null, so the zone colour overlay from the previous session is not
-    // displayed on the new map. Also resets m_activeTool to ActiveTool::None and clears
-    // m_hoveredTile (valid = false). Does NOT change m_mapTilesX/m_mapTilesZ — the caller
-    // must call setMapDimensions() separately if the new map has different dimensions.
+    // displayed on the new map. Also resets m_activeTool to ActiveTool::None, clears
+    // m_hoveredTileX/Z to {-1,-1}, and calls m_renderer->setTileHoverHighlight(-1,-1,
+    // kHoverArgbClear) so any frozen hover quad from the previous session is hidden.
+    // Does NOT change m_mapTilesX/m_mapTilesZ — the caller must call setMapDimensions()
+    // separately if the new map has different dimensions.
     // Safe to call before setRenderer() is wired (null-check on m_renderer).
     // Used by WorldInteraction_NewGameLoad_ClearsOverlay unit test as the authoritative
     // overlay-clear trigger.

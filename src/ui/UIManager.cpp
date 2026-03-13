@@ -785,6 +785,13 @@ bool UIManager::onEvent(const InputEvent& event) {
         m_zoneAnchorZ = -1;
         m_lmbHeld = false;
         if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u);
+        // Clear the hover highlight so the last-hovered tile quad is not frozen
+        // on screen after the tool is deselected.  The MouseMove handler at Priority 7
+        // is gated on m_activeTool != None, so without this call m_hoverVisible
+        // stays true and the quad persists until the next MouseMove.
+        if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
+        m_hoveredTileX = -1;
+        m_hoveredTileZ = -1;
         return true;  // Consumed: tool deselected.
     }
 
@@ -1592,5 +1599,6 @@ void UIManager::onNewGame() {
     m_zoneAnchorZ  = -1;
     m_lmbHeld      = false;
     if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u);
+    if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
     updateSubPanelVisibility();
 }

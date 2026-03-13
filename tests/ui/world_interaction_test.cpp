@@ -665,6 +665,9 @@ TEST_F(WorldInteractionTest, WorldInteraction_NewGameLoad_ClearsOverlay)
     ZoneOverlayMap capturedClear;
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
         .WillOnce(SaveArg<2>(&capturedClear));
+    // onNewGame() also clears the hover highlight — expect the clear call.
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1,
+        static_cast<uint32_t>(kHoverArgbClear))).Times(1);
 
     uiManager_->onNewGame();
 
@@ -1789,4 +1792,41 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_DragNoDragPlacement
     EXPECT_CALL(sim_, placeZone(3, 5, _, _, 0)).Times(1);
     EXPECT_CALL(sim_, placeZone(4, 5, _, _, 0)).Times(1);
     uiManager_->onEvent(makeMouseButtonUp(0, 400, 500));
+}
+
+// ---------------------------------------------------------------------------
+// Test: HoverHighlight_ClearedOnRmbToolClose
+//
+// Regression test for: hover highlight frozen on last tile after RMB closes tool.
+//
+// Sequence:
+//   1. Activate Zone tool.
+//   2. MouseMove to tile (3,4) — setTileHoverHighlight(3, 4, _) is called.
+//   3. RMB press — tool is deselected.
+//   4. Assert setTileHoverHighlight(-1, -1, kHoverArgbClear) was called by the
+//      RMB handler so the hover quad is hidden, not frozen at tile (3,4).
+//
+// (ref: fix for Priority-6b RMB tool-deselect path in UIManager::onEvent())
+// ---------------------------------------------------------------------------
+TEST_F(WorldInteractionTest, WorldInteraction_HoverHighlight_ClearedOnRmbToolClose)
+{
+    activateZoneTool();
+
+    // Step 1: MouseMove to tile (3,4) with Zone tool active — hover is set.
+    EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(3), SetArgReferee<3>(4), Return(true)));
+    // Allow exactly one setTileHoverHighlight call for the hover set (single-tile,
+    // since LMB is not held so no drag preview path is taken).
+    EXPECT_CALL(renderer_, setTileHoverHighlight(3, 4, _)).Times(1);
+    uiManager_->onEvent(makeMouseMove(500, 500));
+
+    // Step 2: RMB press — tool deselected; hover must be cleared.
+    // The primary assertion: setTileHoverHighlight(-1, -1, kHoverArgbClear) called
+    // exactly once by the RMB handler.
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1,
+        static_cast<uint32_t>(kHoverArgbClear))).Times(1);
+    uiManager_->onEvent(makeMouseButtonDown(1, 500, 500));
+
+    // Postcondition: active tool must be None after RMB.
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::None);
 }
