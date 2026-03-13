@@ -199,6 +199,7 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
 | Normal maps (_n) — all categories | Same resolution as specular/roughness for that category |
 | Vehicle diffuse atlas | 512×512 per vehicle type, packed into 2048×2048 DDS DXT1 atlas (16 vehicle types per sheet) |
 | Vehicle normal map | 256×256 per vehicle type, packed into a separate 2048×2048 DDS DXT5nm atlas (8×8 grid of 256×256 cells, 64 slots; same vehicle registry assignments as diffuse atlas rows/columns; named `vehicles_normal_atlas_n.dds`) |
+| Sky cloud texture (`clouds.png`) | 1024×1024 RGBA PNG (Phase 10b). No `_d`/`_n`/`_s` suffix — this is a transparency-mask cloud texture, not a diffuse surface texture. Upload path: linear pool via `IVideoDriver::getTexture()` (PNG, not DDS — Irrlicht DDS loader disabled). Located at `assets/textures/sky/clouds.png`. No mip chain (tiled at UV scale; mips would blur the density mask edges). |
 
 **Facade texture policy**: All building facade diffuse textures must use atlas cells — no standalone per-building non-atlas textures for facade diffuse. Each unique wall module variant occupies one 512×512 cell in the 2048×2048 city building atlas (16 unique wall module textures per atlas sheet). Effective density at 512×512 for a 4×3 m module face: ~128 px/m at LOD0 near-camera distance.
 

@@ -408,6 +408,21 @@ This override is required because `setTileHeight()` is pure virtual on `ITerrain
 without it, `ManualTerrainQuery` fails to compile and all simulation tests that use it are
 broken.
 
+### pendingRebuildCount() Test API
+
+```cpp
+// Returns the number of ChunkRebuildRequests currently pending in the deque.
+// Exposed for unit testing only — do NOT call in production rendering paths.
+// Returns the raw deque depth (not deduplicated); duplicate chunk IDs may be present.
+int pendingRebuildCount() const;
+```
+
+This method is used by `TerrainFlattening_SetTileHeight_EnqueuesRebuildForAffectedChunks`
+to assert that a `setTileHeight()` call enqueues at least one (or two, for a chunk-boundary
+tile) rebuild requests. It is declared `public` on `TerrainSystem` solely to avoid
+requiring `friend` declarations or subclass seams in tests. Do not call from any non-test
+code path.
+
 ### Rebuild Budget Interaction
 
 `setTileHeight()` enqueues up to 9 `ChunkRebuildRequest`s per call (one per modified

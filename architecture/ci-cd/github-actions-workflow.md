@@ -459,6 +459,8 @@ This step runs as the **first named step** in the `build-linux` job — before v
           '*/tests/*' \
           '*/mock_*.h' '*/mock_*.cpp' \
           '*/manual_*.h' '*/manual_*.cpp' \
+          '*/Mock*.h' '*/Mock*.cpp' \
+          '*/Manual*.h' '*/Manual*.cpp' \
           '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
           --output-file coverage_filtered.info
         lcov --list coverage_filtered.info
@@ -682,7 +684,7 @@ markdown-lint:
   - Phase 1: `validate-assets` job is introduced running `tools/validate_assets.py` as a stub that always exits 0. Wire it into `all-checks-pass` immediately. Adding the job (even as a stub) now means the `all-checks-pass` dependency list never needs to change in later phases — only the script gains real checks.
   - Phase 5: the stub script gains 18 real checks (Checks #1–#14 and Checks #16–#19) plus Check #15 as a stub placeholder; the job definition and `all-checks-pass` wiring are unchanged.
   - Phase 9: Check #15 full implementation (replacing the Phase 5 `.meta` stub) and Check #20 (road LOD2 color validation) are added to the script; again no change to the job definition or wiring.
-  - Phase 10: Checks #21–#23 (zone loop silence-floor, vehicle atlas dimensions, HUD sprites dimensions) are added to the script; no change to the job definition or `all-checks-pass` wiring.
+  - Phase 10: Checks #21–#23 (zone loop silence-floor, non-stinger WAV SFX format, HUD sprites dimensions) are added to the script; no change to the job definition or `all-checks-pass` wiring.
   - Phase 10b: Check #24 (cloud texture format gate — `clouds.png` 1024×1024 RGBA) is added to the script; no change to the job definition or `all-checks-pass` wiring.
 
 ### PHASE 0 FORM (validate-assets not yet introduced)

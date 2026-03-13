@@ -233,6 +233,8 @@ add_executable(opengl_tests
     tests/rendering/shader_stub_compile_test.cpp
     # tests/rendering/lod_swap_smoke_test.cpp  -- added in Phase 2 with GTEST_SKIP() body;
     #                                             promoted to real OpenGL test in Phase 5
+    # tests/rendering/cloud_plane_test.cpp   -- added INLINE here in Phase 10b;
+    #                                           target_sources() PROHIBITED for opengl_tests
 )
 target_link_libraries(opengl_tests PRIVATE aitown_render GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
 # src/rendering/ required for Phase 5 lod_swap_smoke_test.cpp (full body) which needs scene-graph and mesh buffer headers.

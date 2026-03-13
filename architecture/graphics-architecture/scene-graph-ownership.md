@@ -5,6 +5,20 @@
 - **Dangling pointer prevention**: `SceneEntityManager::destroy(entity)` must set the game object's node pointer to `nullptr` before calling `node->remove()`
 - No code outside `SceneEntityManager` calls `grab()` on scene nodes
 
+## Renderer-Internal Permanent Scene Nodes
+
+Not all scene nodes are managed by `SceneEntityManager`. A category of **renderer-internal permanent nodes** — created once at `IrrlichtRenderer::init()` and destroyed implicitly when `device->drop()` is called in `main.cpp` — are owned directly by `IrrlichtRenderer` and exempt from the `SceneEntityManager` lifecycle:
+
+| Node | Member | Created in | Destroyed by |
+|---|---|---|---|
+| Sky dome | `m_skyDomeNode` | `initSkyDome()` | `device->drop()` |
+| Cloud plane | `m_cloudNode` | `initCloudPlane()` (Phase 10b) | `device->drop()` |
+| Hover highlight | `m_hoverHighlightNode` | `init()` | `device->drop()` |
+
+These nodes have no game-object counterpart and are never referenced by `SceneEntityManager`. They are created via direct `smgr->addXxxSceneNode()` / `smgr->addMeshSceneNode()` calls inside `IrrlichtRenderer`'s init helpers — this is a documented exception to the "sole place `addXxxSceneNode()` is called" policy above. The `SceneEntityManager` eviction sequence (texture clear → `setMaterial({})` → `evictUnreferenced()` → `node->remove()`) does **not** apply to renderer-internal nodes; they are released automatically by `device->drop()`.
+
+**Rule**: any scene node created by an `IrrlichtRenderer` helper method (not in response to a game-object placement call) and stored as a private member of `IrrlichtRenderer` is a renderer-internal node. Add new renderer-internal nodes to the table above when introduced.
+
 ## LOD Swap — Bounding Box Requirement
 
 - For buildings and static vehicles, LOD levels are swapped via `node->setMesh(newLODMesh)` — this replaces the mesh on the existing scene node, preserving its position, rotation, scale, and material assignments without touching the scene graph structure.

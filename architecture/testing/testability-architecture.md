@@ -1070,7 +1070,7 @@ the audio playback path, not a unit test with strict call-count expectations on 
   ```
 
   `AudioSystem` and `CitySimulation` accept `IClock*` at construction for crossfade timing and the forced-loan real-time gate (120 s) respectively. Production code passes `WallClock` which calls `std::chrono::steady_clock`. `ManualClock` allows deterministic time advancement in tests without wall-clock dependencies.
-- **`ITerrainQuery`** — injectable terrain interface for world-interaction and slope-cost tests. **Source location**: `ITerrainQuery.h` lives in `src/interfaces/`; `ManualTerrainQuery` lives in `tests/simulation/manual_terrain_query.h` (alongside `manual_rng.h` and `manual_clock.h` — all test doubles for injectable simulation interfaces). `ManualTerrainQuery` provides two slope configuration APIs:
+- **`ITerrainQuery`** — injectable terrain interface for world-interaction and slope-cost tests. **Source location**: `ITerrainQuery.h` lives in `src/interfaces/`; `ManualTerrainQuery` lives in `tests/simulation/ManualTerrainQuery.h` (renamed from `manual_terrain_query.h` to CamelCase in Phase 10b Feature 3; alongside `ManualRNG.h` and `ManualClock.h` — all test doubles for injectable simulation interfaces). `ManualTerrainQuery` provides two slope configuration APIs:
 
   **Global slope** (single `float` overload): sets a uniform slope for ALL tiles. Used by `WorldInteractionTest` when one slope applies to the whole map. **Per-tile slope** (3-argument overload): overrides a specific tile. Per-tile entries take precedence over the global slope. Both APIs coexist:
 
@@ -1102,6 +1102,9 @@ the audio playback path, not a unit test with strict call-count expectations on 
       // Required to satisfy pure-virtual contract of ITerrainQuery::getHeightAt().
       // Phase 9b unit tests that need specific heights inject MockRenderer for the
       // renderer path; no WorldInteractionTest requires non-zero heights here.
+      // Phase 10b: this return-0.0f form is superseded by the stateful form below
+      // (see "Phase 10b stateful extension"). The stateful form overrides getHeightAt()
+      // to return m_heightAfterFlat or m_heightBeforeFlat based on m_flattened.
       float getHeightAt(int /*tileX*/, int /*tileZ*/) const override { return 0.0f; }
   private:
       static int64_t makeKey(int x, int z) {
@@ -1207,6 +1210,7 @@ For every unit test that uses `StrictMock<MockAudioSystem>` or `StrictMock<MockR
 | `CitySimulationRenderTest_DemolishRoad_RemovesRoadMesh` (Phase 10) | `playPositionalSound(SFX_BUILD_DEMOLISH, _, _, _)` × 1 (integration only) | `removeRoadMesh(tile)` × 1 |
 | `CitySimulationRenderTest_DensityUpgrade_SwapsBuildingMesh` (Phase 10) | `playSound(SFX_ZONE_UPGRADE, _, _)` × 1 (integration only; cap up to 3 per tick) | `removeBuildingMesh(tile)` × 1; `placeBuildingMesh(tile, zone, newTier)` × 1 |
 | Tests exercising `tick()` with earthworks cost > 0 (Phase 10) | `playPositionalSound(SFX_EARTHWORKS, _, _, _)` × 1 before `SFX_BUILD_PLACE`/`SFX_ROAD_BUILD` | `placeBuildingMesh` or `placeRoadMesh` × 1 (same tile) |
+| `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight` (Phase 10b) | `NiceMock<MockAudioSystem>` — audio calls (SFX_BUILD_PLACE, optionally SFX_EARTHWORKS) are incidental to the flattening assertion; no `EXPECT_CALL` needed | `NiceMock<MockRenderer>` — the assertion is on `ManualTerrainQuery::m_flattened`, not on renderer behavior; no `EXPECT_CALL` needed for `placeBuildingMesh` |
 | **Guidance**: For tests where rendering method calls are incidental to the assertion, switch `renderer_` to `NiceMock<MockRenderer>` — this avoids declaring EXPECT_CALL for every mesh placement side-effect and is the approved approach for audio-focused tests (`CitySimulation_PlaceRoad_FiresSFXRoadBuild` already uses `NiceMock<MockRenderer>` for this reason). Use `StrictMock<MockRenderer>` only when the test is asserting rendering behavior. | | |
 
 > **Post-V1 stinger scenarios**: `StingerType::GAME_OVER` (game-over stinger, fires in Scenario mode) is not defined in the V1 `StingerType` enum (`{ CRISIS, MILESTONE }` only). Do not reference `StingerType::GAME_OVER` in any V1 test or production code — it does not exist until Scenario mode is implemented post-V1. When Scenario mode is added post-V1, a new matrix row will be added here.

@@ -72,13 +72,15 @@ All new files introduced in this phase MUST follow project naming conventions:
   `architecture/graphics-architecture/procedural-terrain.md` — `ITerrainQuery` interface
   promotion section)
 - [ ] Update `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and
-  `placeServiceBuildingMesh()` to call `m_terrain->setTileHeight(tileX, tileZ, flatY)`
-  before placing the scene node, where `flatY` is derived from
-  `m_terrain->getHeightAt(tileX, tileZ)` immediately prior to flattening (the tile's
-  pre-placement height). After `setTileHeight()` returns, call
-  `m_terrain->getHeightAt(tileX, tileZ)` again to obtain the now-flattened height and use
-  that value as the scene node Y coordinate. This guarantees the placed node sits on the
-  freshly flattened surface. (ref: `architecture/graphics-architecture/procedural-terrain.md`
+  `placeServiceBuildingMesh()` using the canonical three-step pattern from
+  `architecture/graphics-architecture/procedural-terrain.md` (Placement Integration section):
+  (1) read the pre-flatten height as `preY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f`;
+  (2) flatten with `if (m_terrain) m_terrain->setTileHeight(tileX, tileZ, preY)`;
+  (3) read the post-flatten height as `postY = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f`
+  and use `postY` as the scene node Y coordinate. The null guard `if (m_terrain)` mirrors the
+  existing Phase 9b null-guard pattern already present in these methods. Use `preY` for the
+  `setTileHeight()` argument and `postY` for the node position — these are two separate reads,
+  not one. (ref: `architecture/graphics-architecture/procedural-terrain.md`
   — MANDATORY building/road/service-building placement pattern)
 - [ ] Confirm that `sfx_earthworks` continues to play on placement via the existing
   `CitySimulation` callback wired in Phase 10 — no new audio wiring required in this phase.
@@ -117,14 +119,21 @@ All new files introduced in this phase MUST follow project naming conventions:
 - [ ] `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight`: configure a
   `ManualTerrainQuery` with `m_heightBeforeFlat = 5.0f` and `m_heightAfterFlat = 3.0f`
   so the test is non-vacuous (pre- and post-flatten heights differ). Inject it into
-  `CitySimulation` alongside a `MockRenderer` (in `tests/simulation/mock_renderer.h`).
+  `CitySimulation` alongside a `NiceMock<MockRenderer>` (in `tests/simulation/mock_renderer.h`).
   Call the placement method; assert `ManualTerrainQuery::m_flattened == true` (confirming
   `setTileHeight()` was invoked) and `ManualTerrainQuery::getHeightAt()` returns `3.0f`
   post-call. `IRenderer` placement methods carry no Y parameter — height verification
-  must go through `ManualTerrainQuery`, not `MockRenderer`. This test exercises
-  `CitySimulation`'s placement callback through the `IRenderer*` interface — do NOT use a
-  real `IrrlichtRenderer` (`unit` label, no OpenGL context required). After Feature 3
-  lands, use `MockRenderer.h` (CamelCase). (ref:
+  must go through `ManualTerrainQuery`, not `MockRenderer`. Use `NiceMock<MockAudioSystem>`
+  for audio (audio calls are incidental; no `EXPECT_CALL` needed for `playPositionalSound`).
+  Use `NiceMock<MockRenderer>` for rendering (the assertion is on terrain state, not
+  renderer state; declaring `EXPECT_CALL` for `placeBuildingMesh` would obscure intent).
+  This test exercises `CitySimulation`'s placement callback through the `IRenderer*`
+  interface — do NOT use a real `IrrlichtRenderer` (`unit` label, no OpenGL context
+  required). **This test lives in `tests/simulation/terrain_flattening_sim_test.cpp` and
+  belongs to `simulation_tests`** (it instantiates `CitySimulation` which links
+  `aitown_sim`; `terrain_tests` links only `aitown_terrain` and cannot link `aitown_sim`
+  without introducing a circular dependency). After Feature 3 lands, use `MockRenderer.h`
+  and `MockAudioSystem.h` (CamelCase). (ref:
   `architecture/graphics-architecture/procedural-terrain.md`)
 - [ ] Enhance `ManualTerrainQuery` in `tests/simulation/manual_terrain_query.h` to be
   stateful for Phase 10b tests: add `m_flattened` bool (default `false`),
@@ -143,8 +152,13 @@ All new files introduced in this phase MUST follow project naming conventions:
   skipped). Label `requires-opengl` and add to `opengl_tests` — Irrlicht device creation
   requires X11 even for `EDT_NULL` on Linux; `xvfb-run` provides the X server.
 - [ ] Wire all new test cases into the appropriate test targets in `CMakeLists.txt`: the
-  three terrain flattening tests live in `tests/terrain/terrain_flattening_test.cpp` → add
-  via `target_sources(terrain_tests ...)` (label `unit`); `CloudPlane_EDTNull_InitSkipped`
+  first two terrain flattening tests (`TerrainFlattening_SetTileHeight_EnqueuesRebuildForAffectedChunks`
+  and `TerrainFlattening_NeighborBlend_ClampedToMapBounds`) live in
+  `tests/terrain/terrain_flattening_test.cpp` → add via `target_sources(terrain_tests ...)`
+  (label `unit`). The third test (`TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight`)
+  lives in `tests/simulation/terrain_flattening_sim_test.cpp` → add via
+  `target_sources(simulation_tests ...)` (label `unit`) — it requires `aitown_sim` which
+  `terrain_tests` does not link. `CloudPlane_EDTNull_InitSkipped`
   lives in `tests/rendering/cloud_plane_test.cpp` → add **inline** to the
   `add_executable(opengl_tests ...)` call in `CMakeLists.txt`. **Do NOT use
   `target_sources(opengl_tests ...)` for the cloud plane test** — `opengl_tests` prohibits
@@ -191,14 +205,12 @@ All new files introduced in this phase MUST follow project naming conventions:
   - Store scroll speeds as constants: `kCloudScrollX = 0.002f` UV units/second,
     `kCloudScrollZ = 0.0008f` UV units/second.
   - (ref: `architecture/graphics-architecture/sky-clouds.md`)
-- [ ] Implement UV scrolling in `IrrlichtRenderer::update(float dt)`:
-  - Increment `m_cloudUVOffset.X += kCloudScrollX * dt` and
-    `m_cloudUVOffset.Y += kCloudScrollZ * dt`.
-  - Wrap both components into `[0.0f, 1.0f)` via `fmod` to prevent float precision
-    accumulation over long sessions.
-  - Apply by updating the texture matrix on the cloud node's material:
-    `m_cloudNode->getMaterial(0).getTextureMatrix(0).setTextureTranslate(m_cloudUVOffset.X,
-    m_cloudUVOffset.Y)`. (ref: `architecture/graphics-architecture/sky-clouds.md`)
+- [ ] Implement UV scrolling in `IrrlichtRenderer::update(float dt)` using the exact
+  single-expression `std::fmod` form from `architecture/graphics-architecture/sky-clouds.md`
+  (Implementation section): atomically increment and wrap each component so no intermediate
+  unwrapped value is stored, then apply via `setTextureTranslate`. The normative code is in
+  `sky-clouds.md` — reproduce it exactly; do not split into separate increment and wrap
+  statements. (ref: `architecture/graphics-architecture/sky-clouds.md` — Implementation)
 - [ ] Add `irr::video::E_DRIVER_TYPE m_driverType{irr::video::EDT_NULL}` to
   `IrrlichtRenderer`'s private section in `IrrlichtRenderer.h`. Initialise in the
   constructor body: `m_driverType = m_device ? m_device->getVideoDriver()->getDriverType()
@@ -280,8 +292,9 @@ Move interface headers into `src/interfaces/` (currently in wrong location):
 After moving `ITerrainRNG.h`, update all relative `#include "ITerrainRNG.h"` sites to
 `#include "src/interfaces/ITerrainRNG.h"` (or the appropriate project-root-relative
 path): `src/terrain/StdTerrainRNG.h`, `src/terrain/TerrainSystem.h`,
-`src/terrain/terrain_generator.h` (forward-decl only — verify), and
-`tests/terrain/MockTerrainRNG.h`.
+and `tests/terrain/MockTerrainRNG.h`. (`src/terrain/terrain_generator.h` uses a
+forward-declaration `class ITerrainRNG;` only — no `#include` present — so no update
+is required in that file.)
 
 After renaming `terrain_generator.h` → `TerrainGenerator.h`, update all
 `#include "src/terrain/terrain_generator.h"` sites: `src/terrain/TerrainSystem.h`,
@@ -398,6 +411,9 @@ Rename all test-helper class headers and update every `#include` in test `.cpp` 
 - Cloud plane invisible under `EDT_NULL` (headless CI runs clean; no crash or GL error);
   `CloudPlane_EDTNull_InitSkipped` passes in `opengl_tests`
 - `clouds.png` present and 1024×1024 RGBA (Check #24 green)
+- `tools/validate_assets.py` module docstring updated to reference Phase 10b and Check #24
+- `validate-assets` job header comment in `.github/workflows/ci.yml` updated to reference
+  Phase 10b / Check #24
 - All class-header files renamed to CamelCase; misplaced concrete classes relocated out of
   `src/interfaces/`; all `#include` paths updated; no broken includes remain; CI green
 - `all-checks-pass` CI gate remains green
