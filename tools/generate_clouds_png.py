@@ -10,25 +10,42 @@ Alpha channel: cloud density mask (0 = fully transparent sky gap, 255 = dense cl
 
 Algorithm
 ---------
-Seamless tileability is achieved by constructing the noise field on a 2-D torus:
-every sample is drawn from cos/sin functions whose period is exactly the image
-width/height, so the left edge wraps perfectly to the right edge and the top to
-the bottom.
+Seamlessly tileable Perlin-style noise is achieved by:
 
-Four octaves of "tileable Perlin-style" noise are summed with decreasing amplitude
-(1/2, 1/4, 1/8, 1/16) to build an fBm field.  A non-linear power curve followed
-by a contrast remap converts the raw noise into a cloud density mask, and the same
-value is used (with a brightness boost) for the RGB luminance so the clouds look
-like soft white/grey puffs against a transparent sky.
+  1. Treating each pixel (ix, iy) as lying in a fractional grid of size
+     [0, N) where N is an integer period (power of two).
+  2. Taking all integer lattice indices modulo N before looking up the
+     gradient / permutation table.  This guarantees that lattice cell
+     (N-1, _) and lattice cell (0, _) share the same gradient, so the
+     noise field repeats perfectly after N grid cells.
+  3. For an image of size SIZE pixels and an octave at grid frequency F
+     (i.e. F complete noise tiles across the image), the period is:
+         N = SIZE / F
+     We restrict F to integer powers of 2 so N is always a power of 2.
+  4. FBM accumulates octaves at F = 1, 2, 4, 8, … grid frequencies up to
+     F = SIZE/2.
 
-No external libraries are required beyond numpy and Pillow (both standard in the
-AI Town dev environment).
+Domain warping is applied in pixel space using warp FBMs evaluated at
+F = 1 and F = 2.  Because the warp fields are themselves tileable (built
+with the same period-wrapping noise), and the displacements are small
+relative to the coarsest period, the seam error is bounded.  The
+maximum pixel displacement is 32 px, which is less than the coarsest
+cell size (SIZE / 1 = 1024 px), so the displaced sample still lives
+inside the periodic cell and the modular lookup wraps correctly.
+
+Cloud morphology is shaped by:
+  - A multi-octave FBM with domain warping for swirling cumulus billows.
+  - A low-frequency cluster envelope that creates large clear-sky regions.
+  - A thin-wisp overlay (high-power falloff) for cirrus-like edge fringing.
+  - Smoothstep contrast + power curve to separate sky gaps from cloud cores.
+  - Sqrt luminance lift so dense cloud tops are bright white and thin wisps
+    are light grey rather than mid-grey.
+
+No external libraries required beyond numpy and Pillow.
 """
 
 import math
 import os
-import struct
-import time
 
 import numpy as np
 from PIL import Image
@@ -36,118 +53,278 @@ from PIL import Image
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-SIZE = 1024
+SIZE   = 1024       # output image size in pixels (must be power of two)
+SEED   = 137
 OUTPUT_PATH = os.path.join(
     os.path.dirname(__file__), "..", "assets", "textures", "sky", "clouds.png"
 )
-SEED = 42
 
 rng = np.random.default_rng(SEED)
 
 
 # ---------------------------------------------------------------------------
-# Tileable noise helpers
+# Tileable 2-D Perlin-style gradient noise
 # ---------------------------------------------------------------------------
-def tileable_noise_octave(size: int, frequency: int, phase_x: float, phase_y: float) -> np.ndarray:
+# We use a classical Perlin permutation-table approach but wrap the integer
+# cell indices modulo the period, giving exact seamless tiling.
+
+PERM_SIZE = 512   # power of two; larger → longer before self-aliasing
+_PERM:    np.ndarray | None = None   # (PERM_SIZE * 2,) int32
+_GRAD2:   np.ndarray | None = None   # (PERM_SIZE, 2) float32
+
+
+def _init_perm() -> None:
+    global _PERM, _GRAD2
+    if _PERM is not None:
+        return
+    perm = np.arange(PERM_SIZE, dtype=np.int32)
+    rng.shuffle(perm)
+    _PERM  = np.concatenate([perm, perm]).astype(np.int32)
+    # 2-D unit gradient vectors evenly distributed on the unit circle
+    angles = np.linspace(0, 2 * math.pi, PERM_SIZE, endpoint=False,
+                         dtype=np.float32)
+    # Rotate by a random phase so we don't always start at (1,0)
+    angles += rng.uniform(0, 2 * math.pi)
+    _GRAD2 = np.stack([np.cos(angles), np.sin(angles)], axis=-1)
+
+
+def _tileable_perlin_2d(
+    px: np.ndarray,   # (H, W) float32, pixel-space x in [0, SIZE)
+    py: np.ndarray,   # (H, W) float32, pixel-space y in [0, SIZE)
+    period: int,      # grid cells before tiling; must divide SIZE evenly
+) -> np.ndarray:
     """
-    Return a (size x size) float32 array in [-1, 1] representing one octave of
-    tileable gradient noise at the given frequency.
+    Evaluate one octave of tileable 2-D gradient noise.
 
-    Tileability trick: project each pixel onto a 2-D torus via
-        u = cos(2*pi*x / size),  v = sin(2*pi*x / size)
-        s = cos(2*pi*y / size),  t = sin(2*pi*y / size)
-    and evaluate a 4-D dot-product noise that is periodic by construction.
+    px, py are coordinates in [0, SIZE).  The noise field repeats with a
+    grid period of `period` cells.  Cell size = SIZE / period pixels.
+
+    Returns (H, W) float32 in approximately [-1, 1].
     """
-    xs = np.linspace(0.0, 2.0 * math.pi * frequency, size, endpoint=False, dtype=np.float32)
-    ys = np.linspace(0.0, 2.0 * math.pi * frequency, size, endpoint=False, dtype=np.float32)
+    _init_perm()
+    P = _PERM
+    G = _GRAD2
+    PMASK = PERM_SIZE - 1
 
-    # Four torus dimensions, each periodic over the image period
-    U = np.cos(xs + phase_x)  # (size,)
-    V = np.sin(xs + phase_x)
-    S = np.cos(ys + phase_y)  # (size,)
-    T = np.sin(ys + phase_y)
+    cell_size = SIZE / period   # pixels per grid cell
 
-    # Build 2-D arrays via outer products
-    cos_x = U[np.newaxis, :]   # (1, size)
-    sin_x = V[np.newaxis, :]
-    cos_y = S[:, np.newaxis]   # (size, 1)
-    sin_y = T[:, np.newaxis]
+    # Fractional grid coordinates
+    gx = px / cell_size   # (H, W)
+    gy = py / cell_size
 
-    # Combine — sum of products keeps the result in [-2, 2]; normalise to [-1, 1]
-    field = (cos_x * cos_y + sin_x * sin_y + cos_x * sin_y + sin_x * cos_y) * 0.5
-    return field.astype(np.float32)
+    # Integer cell corners
+    ix0 = np.floor(gx).astype(np.int32)
+    iy0 = np.floor(gy).astype(np.int32)
+    ix1 = ix0 + 1
+    iy1 = iy0 + 1
+
+    # Wrap modulo period — this is what makes tiling exact
+    ix0m = ix0 % period
+    ix1m = ix1 % period
+    iy0m = iy0 % period
+    iy1m = iy1 % period
+
+    # Fractional offsets inside the cell
+    fx = gx - ix0.astype(np.float32)
+    fy = gy - iy0.astype(np.float32)
+
+    # Quintic smoothstep (C2 continuity)
+    ux = fx * fx * fx * (fx * (fx * 6.0 - 15.0) + 10.0)
+    uy = fy * fy * fy * (fy * (fy * 6.0 - 15.0) + 10.0)
+
+    # Gradient lookup via permutation table
+    def grad_dot(ixm, iym, dfx, dfy):
+        idx = P[(P[ixm & PMASK] + iym) & PMASK]
+        g   = G[idx]                     # (H, W, 2)
+        return g[..., 0] * dfx + g[..., 1] * dfy
+
+    n00 = grad_dot(ix0m, iy0m, fx,     fy    )
+    n10 = grad_dot(ix1m, iy0m, fx-1.0, fy    )
+    n01 = grad_dot(ix0m, iy1m, fx,     fy-1.0)
+    n11 = grad_dot(ix1m, iy1m, fx-1.0, fy-1.0)
+
+    # Bilinear interpolation with smoothstepped weights
+    nx0 = n00 + ux * (n10 - n00)
+    nx1 = n01 + ux * (n11 - n01)
+    return (nx0 + uy * (nx1 - nx0)).astype(np.float32)
 
 
-def build_cloud_fbm(size: int) -> np.ndarray:
+def tileable_fbm(
+    px: np.ndarray,       # (H, W) float32 pixel-x in [0, SIZE)
+    py: np.ndarray,       # (H, W) float32 pixel-y in [0, SIZE)
+    base_period: int = 2, # coarsest grid period (number of full cycles)
+    octaves:     int = 8,
+    persistence: float = 0.52,
+    lacunarity:  float = 2.0,   # must be integer or period_i*2 to stay power-of-2
+) -> np.ndarray:
     """
-    Fractional Brownian Motion: four octaves, each at a different frequency and
-    random phase.  Returns a float32 array in roughly [-1, 1].
+    Multi-octave tileable FBM.  Each octave doubles the frequency (halves
+    the cell size) so every octave period remains an integer that divides
+    SIZE.  Returns (H, W) float32 in approximately [-1, 1].
     """
-    octaves = [
-        (1, 1.0),
-        (2, 0.5),
-        (4, 0.25),
-        (8, 0.125),
-    ]
-    total_weight = sum(w for _, w in octaves)
+    field = np.zeros_like(px)
+    amp   = 1.0
+    total = 0.0
+    period = base_period
 
-    field = np.zeros((size, size), dtype=np.float32)
-    for freq, weight in octaves:
-        phase_x = rng.uniform(0.0, 2.0 * math.pi)
-        phase_y = rng.uniform(0.0, 2.0 * math.pi)
-        field += weight * tileable_noise_octave(size, freq, phase_x, phase_y)
+    for _ in range(octaves):
+        # Guard: period must be at least 1 and SIZE must be divisible
+        if period > SIZE:
+            break
+        field += amp * _tileable_perlin_2d(px, py, period)
+        total += amp
+        amp    *= persistence
+        period  = int(period * lacunarity)
+        if period > SIZE:
+            break
 
-    field /= total_weight  # normalise to [-1, 1]
-    return field
+    return (field / total).astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
-# Main generation
+# Pixel coordinate grids
 # ---------------------------------------------------------------------------
+
+def _pixel_grids(size: int) -> tuple[np.ndarray, np.ndarray]:
+    """Return (px, py) each (size, size) float32 in [0, size)."""
+    idx = np.arange(size, dtype=np.float32)
+    px  = np.broadcast_to(idx[np.newaxis, :], (size, size)).copy()
+    py  = np.broadcast_to(idx[:, np.newaxis], (size, size)).copy()
+    return px, py
+
+
+# ---------------------------------------------------------------------------
+# Cloud field construction
+# ---------------------------------------------------------------------------
+
+def build_cloud_field(size: int) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Returns (main_field, cluster_mask):
+        main_field   — (H, W) float32 in [-1, 1]
+        cluster_mask — (H, W) float32 in [ 0, 1]
+    """
+    px, py = _pixel_grids(size)
+
+    # ------------------------------------------------------------------
+    # 1. Warp fields — low-frequency tileable FBMs produce pixel offsets
+    #    Maximum displacement: warp_amp pixels.  Keeping warp_amp well
+    #    below (size / base_period) ensures the displaced sample stays
+    #    within the nearest periodic repeat.
+    # ------------------------------------------------------------------
+    print("  Computing warp fields…")
+    warp_amp = 32.0   # pixels; coarsest cell = 512 px at period=2
+    wx = tileable_fbm(px, py, base_period=2, octaves=4,
+                      persistence=0.55) * warp_amp
+    wy = tileable_fbm(px, py, base_period=2, octaves=4,
+                      persistence=0.55) * warp_amp
+
+    # Displace sampling coordinates, wrapping modulo size for perfect tiling
+    px_w = (px + wx) % size
+    py_w = (py + wy) % size
+
+    # ------------------------------------------------------------------
+    # 2. Main FBM on warped coordinates
+    # ------------------------------------------------------------------
+    print("  Computing main cloud FBM (8 octaves, warped)…")
+    field = tileable_fbm(px_w, py_w, base_period=2, octaves=8,
+                         persistence=0.52)
+
+    # ------------------------------------------------------------------
+    # 3. Cluster mask — very coarse, no warp
+    # ------------------------------------------------------------------
+    print("  Computing cluster mask…")
+    cl_raw  = tileable_fbm(px, py, base_period=1, octaves=3,
+                           persistence=0.65)
+    lo, hi  = float(cl_raw.min()), float(cl_raw.max())
+    cluster = (cl_raw - lo) / (hi - lo + 1e-9)
+    # Smoothstep → soft patch boundaries
+    cluster = cluster * cluster * (3.0 - 2.0 * cluster)
+    # Power to tune sky coverage (~55% clear sky / 45% cloud)
+    cluster = np.power(cluster, 2.0).astype(np.float32)
+
+    return field, cluster
+
+
+# ---------------------------------------------------------------------------
+# Density shaping + luminance
+# ---------------------------------------------------------------------------
+
+def shape_density(
+    field:   np.ndarray,
+    cluster: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Convert (field, cluster) → (alpha, lum) uint8."""
+    # Remap [-1,1] → [0,1]
+    density = (field + 1.0) * 0.5
+
+    # Smoothstep — soft mid-tone contrast
+    density = density * density * (3.0 - 2.0 * density)
+
+    # Power curve — compress sky gaps, preserve cloud peaks
+    density = np.power(density, 1.4)
+
+    # Bias threshold — controls sky / cloud split point
+    density = np.clip(density - 0.30, 0.0, 1.0)
+
+    # Cluster mask — large clear-sky regions
+    density = density * cluster
+
+    # Re-normalise so peak cloud = 1.0
+    peak = float(density.max())
+    if peak > 1e-6:
+        density /= peak
+
+    # Thin wisp layer — faint fringe at cloud edges (cirrus-like)
+    wisp = (field + 1.0) * 0.5
+    wisp = np.power(np.clip(wisp - 0.56, 0.0, 1.0), 3.0) * 0.22
+    density = np.clip(density + wisp, 0.0, 1.0).astype(np.float32)
+
+    # Alpha: full 0–255
+    alpha = (density * 255.0 + 0.5).astype(np.uint8)
+
+    # Luminance: sqrt lift → bright cloud tops, natural grey wisps
+    lum_f = np.sqrt(density) * 230.0 + density * 25.0
+    lum   = np.clip(lum_f, 0.0, 255.0).astype(np.uint8)
+
+    return alpha, lum
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def generate(output_path: str) -> None:
-    print(f"Generating {SIZE}x{SIZE} RGBA cloud texture…")
+    print(f"Generating {SIZE}x{SIZE} RGBA cloud texture "
+          f"(tileable Perlin FBM + domain warp)…")
 
-    fbm = build_cloud_fbm(SIZE)
+    field, cluster = build_cloud_field(SIZE)
+    alpha, lum     = shape_density(field, cluster)
 
-    # Remap [-1, 1] → [0, 1]
-    density = (fbm + 1.0) * 0.5
-
-    # Non-linear contrast curve: sharpen the transition between sky and cloud.
-    # power > 1 darkens mid-tones (makes sky gaps darker / more transparent)
-    # then we shift and clamp to push mid-grey toward transparent.
-    power = 2.2
-    density = np.power(density, power)
-
-    # Bias: shift so that roughly 55% of the sky is transparent (alpha < 10)
-    # and the remaining 45% forms cloud bodies of varying density.
-    density = density - 0.30
-    density = np.clip(density, 0.0, 1.0)
-
-    # Normalise so the brightest cloud is actually white
-    max_val = density.max()
-    if max_val > 1e-6:
-        density /= max_val
-
-    # Alpha channel: full density range [0, 255]
-    alpha = (density * 255.0).astype(np.uint8)
-
-    # RGB luminance: cloud white/grey.  Dense cloud (alpha=255) → near white (240).
-    # Thin wisps (alpha≈64) → light grey.  Linear ramp keeps it soft.
-    lum = np.clip(density * 240.0 + 40.0 * density, 0.0, 255.0).astype(np.uint8)
-
-    # Assemble RGBA image
-    rgba = np.stack([lum, lum, lum, alpha], axis=-1)  # (H, W, 4)
-    img = Image.fromarray(rgba, mode="RGBA")
+    rgba = np.stack([lum, lum, lum, alpha], axis=-1)
+    img  = Image.fromarray(rgba, mode="RGBA")
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     img.save(output_path, format="PNG")
     print(f"Saved: {os.path.abspath(output_path)}")
     print(f"  size={img.size}, mode={img.mode}")
 
-    # Quick self-check
-    with Image.open(output_path) as verify:
-        assert verify.size == (SIZE, SIZE), f"Wrong size: {verify.size}"
-        assert verify.mode == "RGBA", f"Wrong mode: {verify.mode}"
+    # Seam check
+    arr = np.array(img).astype(np.int32)
+    lr  = float(np.abs(arr[:,  0, :] - arr[:, -1, :]).mean())
+    tb  = float(np.abs(arr[0,  :, :] - arr[-1, :, :]).mean())
+    print(f"  Seam check — left/right: {lr:.2f}  top/bottom: {tb:.2f}  "
+          f"(0 = perfect seamless; < 8 is excellent)")
+
+    # Coverage stats
+    a         = alpha.astype(np.float32)
+    cov_any   = float((a >  10).sum()) / a.size * 100.0
+    cov_dense = float((a > 180).sum()) / a.size * 100.0
+    print(f"  Coverage: any cloud (alpha>10): {cov_any:.1f}%  "
+          f"dense cores (alpha>180): {cov_dense:.1f}%")
+
+    with Image.open(output_path) as v:
+        assert v.size == (SIZE, SIZE), f"Wrong size: {v.size}"
+        assert v.mode == "RGBA",       f"Wrong mode: {v.mode}"
     print("Self-check PASSED: 1024x1024 RGBA confirmed.")
 
 
