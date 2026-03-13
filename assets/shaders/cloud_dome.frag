@@ -24,16 +24,34 @@ in float v_elevAngle;   // elevation angle (radians) from camera to fragment
 void main() {
     vec4 tex = texture2D(u_tex, v_texCoord);
 
-    // Elevation-angle horizon fade — symmetric in all compass directions.
-    const float kElevFadeEnd  = 0.2094;   // 12° in radians — transparent below this
-    const float kElevFadeHigh = 0.5236;   // 30° in radians — fully opaque above this
+    // ---------- elevation-angle alpha fade ----------
+    // Clouds become fully transparent below kElevAlphaEnd (−5°, below the terrain
+    // horizon) and fully opaque above kElevAlphaHigh (20°).
+    // Extending the fade start to −5° lets clouds appear at the horizon itself and
+    // slightly below it, so the cloud layer visually reaches the ground.
+    const float kElevAlphaEnd  = -0.0873;  // −5° — transparent below the horizon
+    const float kElevAlphaHigh =  0.3491;  //  20° — fully opaque above this
 
-    // smoothstep maps [kElevFadeEnd, kElevFadeHigh] → [0, 1]
-    float t = clamp((v_elevAngle - kElevFadeEnd) / (kElevFadeHigh - kElevFadeEnd), 0.0, 1.0);
-    float horizFade = t * t * (3.0 - 2.0 * t);   // smoothstep
+    float ta = clamp((v_elevAngle - kElevAlphaEnd) / (kElevAlphaHigh - kElevAlphaEnd),
+                     0.0, 1.0);
+    float horizFade = ta * ta * (3.0 - 2.0 * ta);   // smoothstep [0, 1]
 
-    // Cloud alpha = texture cloud mask × elevation fade.
+    // ---------- atmospheric haze colour blend ----------
+    // Near the horizon any residual directional variation in the cloud texture
+    // (azimuthal non-uniformity from the cylindrical UV) would create a visible arc.
+    // Blending the cloud colour toward the sky background colour near the horizon
+    // makes even dense cloud texels look like sky haze, eliminating the contrast
+    // that made the arc perceptible.
+    // Sky background matches driver clear colour SColor(255, 100, 149, 237).
+    const vec3  kSkyColor    = vec3(0.392, 0.584, 0.929);
+    const float kHazeEnd     = -0.0873;  // full sky colour at −5° and below
+    const float kHazeHigh    =  0.3491;  //  20° — no haze above this
+
+    float th = clamp((v_elevAngle - kHazeEnd) / (kHazeHigh - kHazeEnd), 0.0, 1.0);
+    float hazeBlend = 1.0 - th * th * (3.0 - 2.0 * th); // 1 at horizon, 0 above 20°
+
+    vec3 cloudColor = mix(tex.rgb, kSkyColor, hazeBlend);
+
     float alpha = tex.a * horizFade;
-
-    gl_FragColor = vec4(tex.rgb, alpha);
+    gl_FragColor = vec4(cloudColor, alpha);
 }

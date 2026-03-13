@@ -2062,12 +2062,12 @@ static SMesh* buildCloudDomeMesh()
     constexpr float kCloudDomeRadius   = 6000.0f;  // horizontal radius at base ring
     constexpr float kCloudDomeHeight   = 2000.0f;  // vertical height from base to apex (apex at Y=1000 m)
     constexpr float kCloudUVScale      = 4.0f;   // texture tiling factor
-    // Horizon fade is handled entirely in the fragment shader via elevation angle
-    // (cloud_dome.frag, rev 2).  All vertices use alpha=255.  The shader applies a
-    // smoothstep from 12° to 30° elevation — well above the horizon — so no cloud
-    // texture content is visible in the lower sky band where polar UV would have caused
-    // azimuthal variation (directional arc).  UV is cylindrical (not polar) for the same
-    // reason.
+    // Horizon fade and atmospheric haze are handled entirely in the fragment shader
+    // (cloud_dome.frag, rev 3).  All vertices use alpha=255.
+    // Alpha fade: −5° to 20° — clouds visible at and slightly below the horizon.
+    // Atmospheric haze: near-horizon cloud RGB is blended toward sky background colour
+    // so azimuthal texture variation (directional arc) has no visible colour contrast.
+    // UV is cylindrical (not polar) for uniform texture distribution at each ring.
 
     SMesh*       mesh = new SMesh();
     SMeshBuffer* buf  = new SMeshBuffer();

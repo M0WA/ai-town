@@ -59,18 +59,24 @@ px      = r × sin(phi)
 pz      = r × cos(phi)
 ```
 
-**UV mapping** (polar, from apex outward):
+**UV mapping** (cylindrical):
 
 ```text
-u = (sin(phi) × 0.5 × t + 0.5) × kCloudUVScale
-v = (cos(phi) × 0.5 × t + 0.5) × kCloudUVScale
+phi_norm = sector / kDomeSectors          — normalised azimuth [0, 1)
+u        = phi_norm × kCloudUVScale       — wraps around dome circumference
+v        = t × kCloudUVScale              — from apex (0) to base ring (kCloudUVScale)
 ```
 
-This maps the apex to UV `(0.5, 0.5) × kCloudUVScale` and the base ring to UV
-`(0..1, 0..1) × kCloudUVScale`, tiling the texture naturally across the dome.
+Cylindrical mapping ensures that at every elevation ring, all sectors sample a
+uniformly-distributed span of the texture in the u-axis. The previous polar (top-down
+projection) mapping sampled a UV circle at each elevation ring; because the tiling
+cloud texture has non-uniform alpha content along that circle, some azimuth directions
+saw dense cloud near the horizon while others saw clear sky — producing a directional
+arc. With cylindrical UV the per-ring sample spans the full texture width regardless
+of azimuth, eliminating the directional variation.
 
-`kCloudUVScale = 4.0`: texture tiling factor — tiles the cloud texture 4× across the
-dome surface.
+`kCloudUVScale = 4.0`: texture tiling factor — tiles the cloud texture 4× around the
+dome circumference and 4× from apex to base ring.
 
 **Vertex colour alpha**: all vertices use `SColor(255, 255, 255, 255)` (alpha=255).
 Horizon fade is handled entirely in the fragment shader using the elevation angle from
@@ -172,11 +178,14 @@ arc is possible.
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kElevFadeEnd` | `0.0349` rad (2°) | Fully transparent at or below this elevation |
-| `kElevFadeHigh` | `0.1745` rad (10°) | Fully opaque at or above this elevation |
+| `kElevFadeEnd` | `0.2094` rad (12°) | Fully transparent at or below this elevation |
+| `kElevFadeHigh` | `0.5236` rad (30°) | Fully opaque at or above this elevation |
 
-The smoothstep between 2° and 10° above the horizon produces a gradual,
-symmetric fade in all compass directions.
+The smoothstep between 12° and 30° above the horizon produces a gradual,
+symmetric fade in all compass directions. The fade band is placed high enough
+that the cloud texture's azimuthal variation (which is strongest near the
+horizon) has no visible effect — below 12° elevation the dome is always
+fully transparent regardless of texture content.
 
 ### Shader Files
 
@@ -203,8 +212,8 @@ gl_FragColor    = vec4(tex.rgb, alpha);
 ```
 
 - `tex.a = 0` (non-cloud area) → `alpha = 0` fully transparent.
-- Elevation ≤ 2° → `horizFade = 0` → dome fades out at the horizon.
-- Elevation ≥ 10° → `horizFade = 1` → fully opaque overhead clouds.
+- Elevation ≤ 12° → `horizFade = 0` → dome fully transparent at and below 12°.
+- Elevation ≥ 30° → `horizFade = 1` → fully opaque overhead clouds.
 - Identical result in every compass direction — no directional arc.
 
 ### Base Material and Blending
@@ -296,8 +305,8 @@ accumulation over play sessions longer than ~500 seconds.
 ## Depth Ordering
 
 The cloud dome base is at `Y=−1000 m` (far below terrain) and apex at `Y=1000 m`. Visible
-cloud geometry starts above ~2° elevation angle (the `kElevFadeEnd` shader constant) and
-reaches full opacity above ~10° (`kElevFadeHigh`). This range is well above all opaque
+cloud geometry starts above 12° elevation angle (the `kElevFadeEnd` shader constant) and
+reaches full opacity above 30° (`kElevFadeHigh`). This range is well above all opaque
 scene geometry (terrain max ≈ 26 m, buildings max ~80 m).
 The depth buffer handles correct ordering automatically:
 
@@ -306,7 +315,7 @@ The depth buffer handles correct ordering automatically:
 - Zone overlay quads are at terrain height + 0.1 m; the cloud dome is always farther
   from the camera than overlay quads (camera pitch −20° to −70°, minimum camera height
   ~30 m over flat terrain).
-- Near-horizon fragments have `horizFade → 0` (elevation ≤ 2°), so even if the depth
+- Near-horizon fragments have `horizFade = 0` (elevation ≤ 12°), so even if the depth
   test ordering is imperfect near the horizon the elevation-angle fade makes them invisible.
 
 The cloud dome material has `ZWriteEnable = false` so it never writes depth values that
