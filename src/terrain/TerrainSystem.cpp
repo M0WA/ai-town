@@ -687,6 +687,13 @@ void TerrainSystem::setTileHeight(int tileX, int tileZ, float height)
         int chunkX = tx / chunkTiles;
         int chunkZ = tz / chunkTiles;
         uint64_t chunkId = static_cast<uint64_t>(chunkZ * chunksX + chunkX);
+        // Mark the chunk dirty (LOD = -1) so processOneRebuild's
+        // "already at LOD" guard does not discard this height-change rebuild.
+        // Without this, a LOD0 chunk receiving a LOD0 rebuild request is skipped.
+        auto activeIt = m_activeChunks.find(chunkId);
+        if (activeIt != m_activeChunks.end()) {
+            activeIt->second = -1;
+        }
         enqueueRebuild(chunkId, 0, 0.0f);
     }
 }
