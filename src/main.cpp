@@ -27,7 +27,7 @@
 #include "src/simulation/StdSimulationRNG.h"
 #include "src/terrain/TerrainSystem.h"
 #include "src/terrain/StdTerrainRNG.h"
-#include "src/audio/audio_system.h"
+#include "src/audio/AudioSystem.h"
 #include "src/interfaces/sound_ids.h"   // MUSIC_MAIN_MENU_01 — Phase 10 startup music
 
 #include <irrlicht.h>

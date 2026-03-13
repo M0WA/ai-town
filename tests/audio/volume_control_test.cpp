@@ -16,7 +16,7 @@
 // Test label: unit (no display, no real audio device required).
 // CI environment: ALSOFT_DRIVERS=null, AITOWN_HEADLESS=1.
 
-#include "src/audio/audio_system.h"
+#include "src/audio/AudioSystem.h"
 #include "src/audio/audio_constants.h"
 #include "tests/simulation/manual_clock.h"
 #include <gtest/gtest.h>
