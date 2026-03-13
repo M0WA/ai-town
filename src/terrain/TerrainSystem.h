@@ -148,6 +148,14 @@ public:
     // (ref: architecture/graphics-architecture/procedural-terrain.md — Heightmap Query API)
     float getHeightAt(int tileX, int tileZ) const override;
 
+    // Sets the persistent LOD0 heightmap height at (tileX, tileZ) to height,
+    // applies weighted neighbour blending to the 8 surrounding tiles, and enqueues
+    // ChunkRebuildRequests for all affected chunks.
+    // Out-of-bounds coordinates are silently ignored.
+    // Cardinal neighbours (N/S/E/W) are lerped at factor 0.5; diagonal (NE/NW/SE/SW) at 0.25.
+    // (ref: architecture/graphics-architecture/procedural-terrain.md — setTileHeight Write Path)
+    void setTileHeight(int tileX, int tileZ, float height) override;
+
     // Accessors for testing.
     int  pendingRebuildCount() const { return static_cast<int>(m_rebuildDeque.size()); }
     bool hasActiveChunk(uint64_t chunkId) const { return m_activeChunks.count(chunkId) > 0; }

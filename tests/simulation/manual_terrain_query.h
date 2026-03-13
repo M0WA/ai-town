@@ -67,6 +67,12 @@ public:
     // Required to satisfy pure-virtual contract of ITerrainQuery::getHeightAt().
     float getHeightAt(int /*tileX*/, int /*tileZ*/) const override { return 0.0f; }
 
+    // No-op override — satisfies pure-virtual contract of ITerrainQuery::setTileHeight().
+    // Required so ManualTerrainQuery remains a concrete (non-abstract) class after
+    // Phase 10b adds setTileHeight() as pure-virtual on ITerrainQuery.
+    // test-dev-cpp replaces this with a stateful form in a subsequent PR.
+    void setTileHeight(int /*tileX*/, int /*tileZ*/, float /*height*/) override {}
+
 private:
     static int64_t makeKey(int x, int z) {
         return (static_cast<int64_t>(x) << 32) | static_cast<uint32_t>(z);

@@ -39,4 +39,10 @@ public:
     // position overlay quads above terrain surface (Phase 9b Deliverables B, C, E).
     // (ref: architecture/graphics-architecture/procedural-terrain.md — Heightmap Query API)
     virtual float getHeightAt(int tileX, int tileZ) const = 0;
+
+    // Sets the persistent LOD0 heightmap height at (tileX, tileZ) to height,
+    // applies weighted neighbour blending to the 8 surrounding tiles, and enqueues
+    // ChunkRebuildRequests for all affected chunks.
+    // Out-of-bounds coordinates are silently ignored.
+    virtual void setTileHeight(int tileX, int tileZ, float height) = 0;
 };

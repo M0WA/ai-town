@@ -566,6 +566,104 @@ float TerrainSystem::getSlopeDegrees(int tileX, int tileZ) const {
 }
 
 // ---------------------------------------------------------------------------
+// setTileHeight() — ITerrainQuery write-side implementation (Phase 10b).
+//
+// Step 1: write height into the persistent LOD0 heightmap at (tileX, tileZ).
+// Step 2: apply neighbour blending to all 8 surrounding tiles (cardinal 0.5, diagonal 0.25).
+//         lerp(a, b, t) = a + t * (b - a)
+// Step 3: enqueue ChunkRebuildRequest for every chunk containing a modified tile.
+//         Dedup is handled by processedThisFrame in update() — duplicates are harmless.
+//
+// kCardinalFalloff = 0.5  (gamedesign-lookandfeel sign-off 2026-03-13)
+// kDiagonalFalloff = 0.25 (same sign-off)
+//
+// (ref: architecture/graphics-architecture/procedural-terrain.md — setTileHeight Write Path)
+// ---------------------------------------------------------------------------
+void TerrainSystem::setTileHeight(int tileX, int tileZ, float height)
+{
+    // Out-of-bounds centre tile: silently ignore.
+    if (m_generatedHeightmap.empty() ||
+        tileX < 0 || tileX >= m_mapTilesX ||
+        tileZ < 0 || tileZ >= m_mapTilesZ) {
+        return;
+    }
+
+    static constexpr float kCardinalFalloff = 0.5f;
+    static constexpr float kDiagonalFalloff = 0.25f;
+
+    const int vertX = m_mapTilesX + 1;
+
+    // Helper: write to heightmap and record modified tile for chunk enqueue.
+    auto writeHeight = [&](int tx, int tz, float h) {
+        // Clamp to bounds.
+        if (tx < 0 || tx >= m_mapTilesX || tz < 0 || tz >= m_mapTilesZ) return;
+        m_generatedHeightmap[static_cast<size_t>(tz * vertX + tx)] = h;
+    };
+
+    // Step 1: write centre tile height.
+    writeHeight(tileX, tileZ, height);
+
+    // Step 2: apply neighbour blending.
+    // Neighbour offsets: {dx, dz, falloff}
+    // Cardinal: N(0,-1), S(0,+1), E(+1,0), W(-1,0)
+    // Diagonal: NE(+1,-1), NW(-1,-1), SE(+1,+1), SW(-1,+1)
+    struct NeighbourDef { int dx; int dz; float falloff; };
+    static constexpr NeighbourDef kNeighbours[8] = {
+        {  0, -1, kCardinalFalloff },  // N
+        {  0, +1, kCardinalFalloff },  // S
+        { +1,  0, kCardinalFalloff },  // E
+        { -1,  0, kCardinalFalloff },  // W
+        { +1, -1, kDiagonalFalloff },  // NE
+        { -1, -1, kDiagonalFalloff },  // NW
+        { +1, +1, kDiagonalFalloff },  // SE
+        { -1, +1, kDiagonalFalloff },  // SW
+    };
+
+    for (const auto& n : kNeighbours) {
+        int nx = tileX + n.dx;
+        int nz = tileZ + n.dz;
+        // Skip out-of-bounds neighbours.
+        if (nx < 0 || nx >= m_mapTilesX || nz < 0 || nz >= m_mapTilesZ) continue;
+
+        float currentH = m_generatedHeightmap[static_cast<size_t>(nz * vertX + nx)];
+        // lerp(currentH, height, falloff) = currentH + falloff * (height - currentH)
+        float newH = currentH + n.falloff * (height - currentH);
+        writeHeight(nx, nz, newH);
+    }
+
+    // Step 3: enqueue ChunkRebuildRequest for every chunk containing a modified tile.
+    // Affected tiles: centre + all 8 in-bounds neighbours.
+    // Map each tile to its chunk and enqueue a LOD0 rebuild.
+    // Chunk ID = (chunkZ * chunksPerSideX + chunkX), matching buildAllChunks().
+    const int chunkTiles  = kTerrainLOD0GridSize;  // 32 tiles per chunk side
+    const int chunksX = (m_mapTilesX + chunkTiles - 1) / chunkTiles;
+
+    // Collect all tile coords that were written (centre + in-bounds neighbours).
+    // Use a small fixed array to avoid heap allocation on the placement hot-path.
+    struct TileCoord { int tx; int tz; };
+    TileCoord modifiedTiles[9];
+    int modifiedCount = 0;
+
+    modifiedTiles[modifiedCount++] = { tileX, tileZ };
+    for (const auto& n : kNeighbours) {
+        int nx = tileX + n.dx;
+        int nz = tileZ + n.dz;
+        if (nx >= 0 && nx < m_mapTilesX && nz >= 0 && nz < m_mapTilesZ) {
+            modifiedTiles[modifiedCount++] = { nx, nz };
+        }
+    }
+
+    for (int i = 0; i < modifiedCount; ++i) {
+        int tx = modifiedTiles[i].tx;
+        int tz = modifiedTiles[i].tz;
+        int chunkX = tx / chunkTiles;
+        int chunkZ = tz / chunkTiles;
+        uint64_t chunkId = static_cast<uint64_t>(chunkZ * chunksX + chunkX);
+        enqueueRebuild(chunkId, 0, 0.0f);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // getHeightAt() — ITerrainQuery implementation (Phase 9b Deliverable E).
 // Returns Y-axis terrain height in world-space metres for the tile centre at
 // grid position (tileX, tileZ). Returns 0.0f for out-of-bounds coordinates or
