@@ -290,9 +290,12 @@ above: multiply A_0–1 by 255.
   `kSpriteXxxHover` / `kSpriteXxx` (inactive) cell using `IGUIButton::setImage()` — no new
   `IUIBackend` interface methods required (hover switching is internal to the Irrlicht backend)
   - Before swapping images on `EGET_ELEMENT_HOVERED`, check `btn->isPressed()`; skip the image
-    swap if the button is active — the active sprite must persist even while hovering; on
-    `EGET_ELEMENT_LEFT`, check `btn->isPressed()`; if true, restore the active sprite (active
-    visual must persist); if false, restore the inactive `kSpriteXxx` cell
+    swap if the button is active — the active sprite must persist even while hovering
+  - On `EGET_ELEMENT_LEFT`, restore the **registered base sprite** unconditionally — the sprite
+    ID last set via `IUIBackend::setElementImage()`, stored in `m_imageElementMap`. Do NOT check
+    `isPressed()` or force-map to inactive: for a pressed button the base sprite is already the
+    active sprite so the result is identical; for an unpressed button the base sprite is whatever
+    the caller set. See `architecture/ui-ux/input-arbitration.md` Rules section.
 - [x] `IrrlichtUIBackend`: load `hud_font.xml` (not the old `ui_font.xml` path which no longer
   exists); this was already fixed in commit 1100241 — verify no regression
 
