@@ -282,8 +282,11 @@ above: multiply A_0–1 by 255.
 - `hud_sprites_ui.png` remains 2048×2048 RGBA (Check #23 stays green)
 - `hud_sprite_ids.h` contains `kSpritePanelToolbar`, `kSpritePanelResourceBar`,
   `kSpritePanelOverlay` constants; `hud_sprites_ui_layout.json` updated
-- `tools/generate_hud_sprites.py` produces the outlined-inactive / filled-active style on
-  regeneration
+- `tools/generate_hud_sprites.py` produces the outlined-inactive / outlined-hover / filled-active
+  three-state style on regeneration
+- Hover sprite cells (85% opacity, outlined stroke, 1 px white border) are baked into
+  `hud_sprites_ui.png`; `hud_sprite_ids.h` does **not** define `kSpriteXxxHover` constants
+  and `IrrlichtUIBackend` does **not** implement hover state switching — both are deferred
 - No regression in existing `ui_tests` or `opengl_tests`; `validate_assets.py` Check #23 green
 
 ---
