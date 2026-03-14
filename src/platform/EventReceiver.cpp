@@ -1,14 +1,17 @@
 // EventReceiver.cpp — Irrlicht SEvent → InputEvent translation and dispatch.
 #include "EventReceiver.h"
 
-#include "src/ui/UIScaler.h"          // UIScaler::unproject(), getViewportRect()
-#include "src/ui/UIManager.h"         // UIManager::onEvent()
-#include "src/ui/CameraController.h"  // CameraController::OnInputEvent()
+#include "src/ui/UIScaler.h"                    // UIScaler::unproject(), getViewportRect()
+#include "src/ui/UIManager.h"                   // UIManager::onEvent()
+#include "src/ui/CameraController.h"            // CameraController::OnInputEvent()
+#include "src/rendering/IrrlichtUIBackend.h"    // IrrlichtUIBackend::handleGuiHoverEvent()
 
-EventReceiver::EventReceiver(UIScaler* scaler, UIManager* uiManager, CameraController* camera)
+EventReceiver::EventReceiver(UIScaler* scaler, UIManager* uiManager, CameraController* camera,
+                             IrrlichtUIBackend* uiBackend)
     : m_scaler(scaler)
     , m_uiManager(uiManager)
     , m_camera(camera)
+    , m_uiBackend(uiBackend)
 {
 }
 
@@ -28,25 +31,38 @@ bool EventReceiver::OnEvent(const irr::SEvent& event) {
     // MouseButtonDown InputEvent at the button's centre in virtual coordinates.
     // UIManager's inRect-based hit-tests then handle the event normally.
     // -------------------------------------------------------------------------
-    if (event.EventType == irr::EET_GUI_EVENT &&
-        event.GUIEvent.EventType == irr::gui::EGET_BUTTON_CLICKED) {
-        irr::gui::IGUIElement* btn = event.GUIEvent.Caller;
-        if (btn && m_scaler) {
-            // Physical centre of the button.
-            irr::core::rect<irr::s32> r = btn->getAbsolutePosition();
-            const int physCx = (r.UpperLeftCorner.X + r.LowerRightCorner.X) / 2;
-            const int physCy = (r.UpperLeftCorner.Y + r.LowerRightCorner.Y) / 2;
-            UIScaler::VirtualPoint vp = m_scaler->unproject(physCx, physCy);
-            InputEvent btnEv{};
-            btnEv.type   = InputEvent::Type::MouseButtonDown;
-            btnEv.button = 0;
-            btnEv.x      = vp.x;
-            btnEv.y      = vp.y;
-            btnEv.physX  = physCx;
-            btnEv.physY  = physCy;
-            if (m_uiManager) m_uiManager->onEvent(btnEv);
+    if (event.EventType == irr::EET_GUI_EVENT) {
+        // --- Hover sprite swapping (Phase 10c Glass City Colour Pass) ---
+        // Forward EGET_ELEMENT_HOVERED / EGET_ELEMENT_LEFT to IrrlichtUIBackend
+        // so it can swap button sprite cells for hover visual feedback.
+        // Must be called before the EGET_BUTTON_CLICKED handler (order does not
+        // matter for correctness, but hover events arrive before click events).
+        // Returns false always — hover events must not be consumed here.
+        if (m_uiBackend) {
+            m_uiBackend->handleGuiHoverEvent(event);
         }
-        return false;  // let Irrlicht finish its own GUI handling
+
+        if (event.GUIEvent.EventType == irr::gui::EGET_BUTTON_CLICKED) {
+            irr::gui::IGUIElement* btn = event.GUIEvent.Caller;
+            if (btn && m_scaler) {
+                // Physical centre of the button.
+                irr::core::rect<irr::s32> r = btn->getAbsolutePosition();
+                const int physCx = (r.UpperLeftCorner.X + r.LowerRightCorner.X) / 2;
+                const int physCy = (r.UpperLeftCorner.Y + r.LowerRightCorner.Y) / 2;
+                UIScaler::VirtualPoint vp = m_scaler->unproject(physCx, physCy);
+                InputEvent btnEv{};
+                btnEv.type   = InputEvent::Type::MouseButtonDown;
+                btnEv.button = 0;
+                btnEv.x      = vp.x;
+                btnEv.y      = vp.y;
+                btnEv.physX  = physCx;
+                btnEv.physY  = physCy;
+                if (m_uiManager) m_uiManager->onEvent(btnEv);
+            }
+            return false;  // let Irrlicht finish its own GUI handling
+        }
+
+        return false;  // never consume other GUI events
     }
 
     // -------------------------------------------------------------------------

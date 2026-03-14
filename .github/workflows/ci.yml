@@ -297,6 +297,16 @@ jobs:
           test -f assets/shaders/ui_quad.frag || { echo "ERROR: assets/shaders/ui_quad.frag not found"; exit 1; }
           echo "UI shader assets verified."
 
+      - name: Verify terrain assets present
+        run: |
+          test -f assets/textures/terrain/terrain_grass_d.dds    || { echo "ERROR: terrain_grass_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_asphalt_d.dds  || { echo "ERROR: terrain_asphalt_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_soil_d.dds     || { echo "ERROR: terrain_soil_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_concrete_d.dds || { echo "ERROR: terrain_concrete_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_chunk_splat.png || { echo "ERROR: terrain_chunk_splat.png missing"; exit 1; }
+          test -f assets/shaders/terrain.vert || { echo "ERROR: terrain.vert missing"; exit 1; }
+          test -f assets/shaders/terrain.frag || { echo "ERROR: terrain.frag missing"; exit 1; }
+
       # Step 14: Run unit tests.
       # AITOWN_HEADLESS=1 — guard against unit tests that inadvertently trigger IrrlichtDevice init.
       # ALSOFT_DRIVERS=null — guard against unit tests that inadvertently trigger AudioSystem init.
@@ -585,6 +595,17 @@ jobs:
             exit 1
           }
           Write-Host "Phase 10 font assets verified: hud_font.xml and hud_mono_font.xml present."
+
+      - name: Verify terrain assets present
+        run: |
+          if (-not (Test-Path 'assets/textures/terrain/terrain_grass_d.dds'))    { Write-Error 'terrain_grass_d.dds missing'; exit 1 }
+          if (-not (Test-Path 'assets/textures/terrain/terrain_asphalt_d.dds'))  { Write-Error 'terrain_asphalt_d.dds missing'; exit 1 }
+          if (-not (Test-Path 'assets/textures/terrain/terrain_soil_d.dds'))     { Write-Error 'terrain_soil_d.dds missing'; exit 1 }
+          if (-not (Test-Path 'assets/textures/terrain/terrain_concrete_d.dds')) { Write-Error 'terrain_concrete_d.dds missing'; exit 1 }
+          if (-not (Test-Path 'assets/textures/terrain/terrain_chunk_splat.png')) { Write-Error 'terrain_chunk_splat.png missing'; exit 1 }
+          if (-not (Test-Path 'assets/shaders/terrain.vert')) { Write-Error 'terrain.vert missing'; exit 1 }
+          if (-not (Test-Path 'assets/shaders/terrain.frag')) { Write-Error 'terrain.frag missing'; exit 1 }
+        shell: powershell
 
       # Step 13: Run unit tests.
       # AITOWN_HEADLESS=1 and ALSOFT_DRIVERS=null required — headless Windows runners
@@ -895,6 +916,16 @@ jobs:
           test -f assets/shaders/ui_quad.vert || { echo "ERROR: assets/shaders/ui_quad.vert not found"; exit 1; }
           test -f assets/shaders/ui_quad.frag || { echo "ERROR: assets/shaders/ui_quad.frag not found"; exit 1; }
           echo "UI shader assets verified."
+
+      - name: Verify terrain assets present
+        run: |
+          test -f assets/textures/terrain/terrain_grass_d.dds    || { echo "ERROR: terrain_grass_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_asphalt_d.dds  || { echo "ERROR: terrain_asphalt_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_soil_d.dds     || { echo "ERROR: terrain_soil_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_concrete_d.dds || { echo "ERROR: terrain_concrete_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_chunk_splat.png || { echo "ERROR: terrain_chunk_splat.png missing"; exit 1; }
+          test -f assets/shaders/terrain.vert || { echo "ERROR: terrain.vert missing"; exit 1; }
+          test -f assets/shaders/terrain.frag || { echo "ERROR: terrain.frag missing"; exit 1; }
 
       # Step 13: Run unit tests.
       - name: Run unit tests (no display)

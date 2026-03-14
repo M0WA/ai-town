@@ -12,6 +12,8 @@
 #include "TextureCache.h"                 // Phase 10: sRGB texture loading for road diffuse
 #include "RoadShaderCallback.h"           // Phase 10: road.vert/road.frag shader callback
 #include "render_constants.h"             // Phase 10: RenderConstants::road_lod2_color
+#include "TerrainShaderCallback.h"        // Phase 10c: terrain splat-map shader callback
+#include "RenderSystem.h"                 // Phase 10c: isSRGBTextureSupported() query
 
 #include <algorithm>   // std::min, std::max
 #include <cstdio>      // fprintf
@@ -460,8 +462,17 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
     if (newNode) {
         newNode->setPosition(core::vector3df(
             params.worldOriginX, 0.0f, params.worldOriginZ));
-        newNode->setMaterialFlag(EMF_LIGHTING, false);  // unlit until Phase 6 lighting pass
+        newNode->setMaterialFlag(EMF_LIGHTING, false);  // material type set in Phase 10c — see initTerrainShader()
         newNode->setMaterialFlag(EMF_BACK_FACE_CULLING, false);  // both sides visible — Phase 5 has no winding-dependent lighting
+
+        // Assign terrain splat shader material type if available (Phase 10c).
+        irr::video::SMaterial& mat = newNode->getMaterial(0);
+        if (m_terrainMaterialType != -1) {
+            mat.MaterialType = static_cast<irr::video::E_MATERIAL_TYPE>(m_terrainMaterialType);
+        }
+        // EMF_LIGHTING stays false — per-pixel lighting is Phase 11+
+        mat.setFlag(irr::video::EMF_LIGHTING, false);
+        mat.setFlag(irr::video::EMF_BACK_FACE_CULLING, false);
 
         // -------------------------------------------------------------------------
         // Step 5: Register the new node in the chunk node map.
@@ -1330,6 +1341,88 @@ bool IrrlichtRenderer::initRoadShader()
 
     m_roadMaterialType = matType;
     return true;
+}
+
+// -------------------------------------------------------------------------
+// setRenderSystem — inject RenderSystem* and trigger terrain shader init.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::setRenderSystem(RenderSystem* rs)
+{
+    m_renderSystem = rs;
+    initTerrainShader();
+}
+
+// -------------------------------------------------------------------------
+// initTerrainShader — load terrain.vert/terrain.frag + 4 diffuse layers
+// + splat map texture.  EDT_NULL guard: no-op in headless contexts.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::initTerrainShader()
+{
+    // EDT_NULL early-return guard — no GL context available.
+    if (m_driverType == video::EDT_NULL) return;
+    if (!m_driver || !m_smgr) return;
+
+    // Lazily create TextureCache for terrain textures.
+    if (!m_terrainTextureCache) {
+        m_terrainTextureCache = std::make_unique<TextureCache>(
+            m_driver->getDriverType(),
+            m_driver,
+            m_device ? m_device->getFileSystem() : nullptr);
+    }
+
+    // Build paths for the 4 terrain diffuse layers (splat channel order: R/G/B/A).
+    const std::string assetsDir = std::string(AITOWN_ASSETS_DIR);
+    const std::string grassPath    = assetsDir + "/textures/terrain/terrain_grass_d.dds";
+    const std::string asphaltPath  = assetsDir + "/textures/terrain/terrain_asphalt_d.dds";
+    const std::string soilPath     = assetsDir + "/textures/terrain/terrain_soil_d.dds";
+    const std::string concretePath = assetsDir + "/textures/terrain/terrain_concrete_d.dds";
+    const std::string splatPath    = assetsDir + "/textures/terrain/terrain_splat.dds";
+
+    // Load 4 diffuse textures as sRGB DXT1.
+    m_terrainTextureCache->loadSRGB(grassPath,    GL_COMPRESSED_SRGB_S3TC_DXT1_EXT);
+    m_terrainTextureCache->loadSRGB(asphaltPath,  GL_COMPRESSED_SRGB_S3TC_DXT1_EXT);
+    m_terrainTextureCache->loadSRGB(soilPath,     GL_COMPRESSED_SRGB_S3TC_DXT1_EXT);
+    m_terrainTextureCache->loadSRGB(concretePath, GL_COMPRESSED_SRGB_S3TC_DXT1_EXT);
+
+    // Load splat map as linear RGBA8.
+    m_terrainTextureCache->loadSplatMap(splatPath);
+
+    // detail paths in splat channel order: R=grass, G=asphalt, B=soil, A=concrete.
+    const std::array<std::string, 4> detailPaths = {
+        grassPath, asphaltPath, soilPath, concretePath
+    };
+
+    // Construct callback — raw heap per shader-loading.md (Irrlicht calls grab() internally).
+    TerrainShaderCallback* cb = new TerrainShaderCallback(
+        m_renderSystem, m_terrainTextureCache.get(), splatPath, detailPaths);
+
+    // Build absolute shader paths.
+    const std::string vsPath = assetsDir + "/shaders/terrain.vert";
+    const std::string fsPath = assetsDir + "/shaders/terrain.frag";
+
+    // Get GPU programming services.
+    IGPUProgrammingServices* gpu = m_driver->getGPUProgrammingServices();
+    if (!gpu) {
+        cb->drop();
+        return;
+    }
+
+    s32 matType = gpu->addHighLevelShaderMaterialFromFiles(
+        vsPath.c_str(), "main", video::EVST_VS_1_1,
+        fsPath.c_str(), "main", video::EPST_PS_1_1,
+        cb, video::EMT_SOLID);
+
+    cb->drop();  // unconditional per shader-loading.md
+
+    if (matType == -1) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: terrain shader compile failed "
+            "(vs=%s, fs=%s) — terrain will use default material\n",
+            vsPath.c_str(), fsPath.c_str());
+        return;
+    }
+
+    m_terrainMaterialType = matType;
 }
 
 // -------------------------------------------------------------------------

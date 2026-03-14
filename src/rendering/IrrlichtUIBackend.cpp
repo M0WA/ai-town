@@ -14,6 +14,8 @@
 #include <GL/glew.h>                          // MUST come before irrlicht.h
 #include <irrlicht.h>                          // full Irrlicht types
 
+#include "src/ui/hud_sprite_ids.h"            // kSpriteXxxHover / Active / Inactive constants
+
 #include <cassert>
 #include <fstream>
 #include <sstream>
@@ -365,6 +367,12 @@ UIElementHandle IrrlichtUIBackend::addStaticText(
     if (!elem) {
         return kInvalidUIElement;
     }
+
+    // Phase 10c Glass City Colour Pass: default static text colour is near-white #EBF4F6.
+    // Irrlicht's IGUIStaticText::setOverrideColor() sets the text colour for all states.
+    // This establishes the baseline; callers may override for specific roles (amber numerics,
+    // mid-blue sub-labels) by calling setOverrideColor() on the returned element directly.
+    elem->setOverrideColor(irr::video::SColor(255, 235, 244, 246));
 
     UIElementHandle handle = m_nextHandle++;
     m_elementMap[handle] = ElementInfo{elem, Rect{x, y, w, h}};
@@ -957,4 +965,183 @@ void IrrlichtUIBackend::handleViewportResize()
         info.element->setRelativePosition(
             irr::core::rect<irr::s32>(px, py, px + pw, py + ph));
     }
+}
+
+// ---------------------------------------------------------------------------
+// handleGuiHoverEvent
+//
+// Handles EGET_ELEMENT_HOVERED and EGET_ELEMENT_LEFT GUI events to swap
+// button sprite cells for hover visual feedback.  Called from
+// EventReceiver::OnEvent() for all EET_GUI_EVENT events.
+//
+// Hover rules (per architecture/ui-ux/input-arbitration.md §Hover State Switching):
+//   EGET_ELEMENT_HOVERED: if NOT pressed, swap to kSpriteXxxHover cell.
+//                         if already pressed (active), skip — active sprite persists.
+//   EGET_ELEMENT_LEFT:    if pressed (active), restore kSpriteXxxActive cell.
+//                         if not pressed, restore kSpriteXxxInactive cell.
+//
+// Returns false always — hover events must never be consumed so that Irrlicht
+// can complete its own tooltip and focus handling.
+//
+// Implementation:
+//   1. Reverse-scan m_elementMap to find the UIElementHandle for the event Caller.
+//   2. Look up the currently-assigned sprite index in m_imageElementMap.
+//   3. Compute the hover/active/inactive ID from the current sprite using the
+//      known group offsets defined in hud_sprite_ids.h.
+//   4. Call IGUIButton::setImage() with the target sprite cell.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// ---------------------------------------------------------------------------
+// Sprite group helpers — compute variant IDs from any ID in a group.
+//
+// Groups and their state-ID ranges (from hud_sprite_ids.h):
+//   Toolbar: active 0-4, inactive 32-36, hover 37-41
+//   Zone:    active 64-72, inactive 96-104, hover 105-113
+//   Util:    active 128-131, inactive 160-163, hover 164-167
+//
+// For any given sprite ID, these helpers return the corresponding variant.
+// Returns kSpriteInvalid (UINT32_MAX) if the ID is not in a known hover group.
+// ---------------------------------------------------------------------------
+static constexpr uint32_t kSpriteInvalidId = UINT32_MAX;
+
+uint32_t getHoverId(uint32_t id) {
+    // Toolbar active 0-4 → hover 37-41 (offset +37)
+    if (id <= 4u)                     return id + 37u;
+    // Toolbar inactive 32-36 → hover 37-41 (offset +5)
+    if (id >= 32u && id <= 36u)       return id + 5u;
+    // Toolbar hover 37-41 → already hover
+    if (id >= 37u && id <= 41u)       return id;
+    // Zone active 64-72 → hover 105-113 (offset +41)
+    if (id >= 64u && id <= 72u)       return id + 41u;
+    // Zone inactive 96-104 → hover 105-113 (offset +9)
+    if (id >= 96u && id <= 104u)      return id + 9u;
+    // Zone hover 105-113 → already hover
+    if (id >= 105u && id <= 113u)     return id;
+    // Util active 128-131 → hover 164-167 (offset +36)
+    if (id >= 128u && id <= 131u)     return id + 36u;
+    // Util inactive 160-163 → hover 164-167 (offset +4)
+    if (id >= 160u && id <= 163u)     return id + 4u;
+    // Util hover 164-167 → already hover
+    if (id >= 164u && id <= 167u)     return id;
+    return kSpriteInvalidId;
+}
+
+uint32_t getActiveId(uint32_t id) {
+    // Toolbar active 0-4 → already active
+    if (id <= 4u)                     return id;
+    // Toolbar inactive 32-36 → active 0-4 (offset -32)
+    if (id >= 32u && id <= 36u)       return id - 32u;
+    // Toolbar hover 37-41 → active 0-4 (offset -37)
+    if (id >= 37u && id <= 41u)       return id - 37u;
+    // Zone active 64-72 → already active
+    if (id >= 64u && id <= 72u)       return id;
+    // Zone inactive 96-104 → active 64-72 (offset -32)
+    if (id >= 96u && id <= 104u)      return id - 32u;
+    // Zone hover 105-113 → active 64-72 (offset -41)
+    if (id >= 105u && id <= 113u)     return id - 41u;
+    // Util active 128-131 → already active
+    if (id >= 128u && id <= 131u)     return id;
+    // Util inactive 160-163 → active 128-131 (offset -32)
+    if (id >= 160u && id <= 163u)     return id - 32u;
+    // Util hover 164-167 → active 128-131 (offset -36)
+    if (id >= 164u && id <= 167u)     return id - 36u;
+    return kSpriteInvalidId;
+}
+
+uint32_t getInactiveId(uint32_t id) {
+    // Toolbar active 0-4 → inactive 32-36 (offset +32)
+    if (id <= 4u)                     return id + 32u;
+    // Toolbar inactive 32-36 → already inactive
+    if (id >= 32u && id <= 36u)       return id;
+    // Toolbar hover 37-41 → inactive 32-36 (offset -5)
+    if (id >= 37u && id <= 41u)       return id - 5u;
+    // Zone active 64-72 → inactive 96-104 (offset +32)
+    if (id >= 64u && id <= 72u)       return id + 32u;
+    // Zone inactive 96-104 → already inactive
+    if (id >= 96u && id <= 104u)      return id;
+    // Zone hover 105-113 → inactive 96-104 (offset -9)
+    if (id >= 105u && id <= 113u)     return id - 9u;
+    // Util active 128-131 → inactive 160-163 (offset +32)
+    if (id >= 128u && id <= 131u)     return id + 32u;
+    // Util inactive 160-163 → already inactive
+    if (id >= 160u && id <= 163u)     return id;
+    // Util hover 164-167 → inactive 160-163 (offset -4)
+    if (id >= 164u && id <= 167u)     return id - 4u;
+    return kSpriteInvalidId;
+}
+
+} // anonymous namespace
+
+bool IrrlichtUIBackend::handleGuiHoverEvent(const irr::SEvent& event)
+{
+    // Only handle GUI events — pass through everything else.
+    if (event.EventType != irr::EET_GUI_EVENT) {
+        return false;
+    }
+
+    const irr::gui::EGUI_EVENT_TYPE gevType = event.GUIEvent.EventType;
+    if (gevType != irr::gui::EGET_ELEMENT_HOVERED &&
+        gevType != irr::gui::EGET_ELEMENT_LEFT) {
+        return false;
+    }
+
+    // Must have a caller element.
+    irr::gui::IGUIElement* el = event.GUIEvent.Caller;
+    if (!el) return false;
+
+    // Only process IGUIButton elements.
+    auto* btn = dynamic_cast<irr::gui::IGUIButton*>(el);
+    if (!btn) return false;
+
+    // Sprite sheet must be loaded to do image swaps.
+    if (!m_spriteTextureReady || !m_spriteTexture) return false;
+
+    // Reverse-scan m_elementMap to find the UIElementHandle for this IGUIElement*.
+    UIElementHandle foundHandle = kInvalidUIElement;
+    for (const auto& [h, info] : m_elementMap) {
+        if (info.element == el) {
+            foundHandle = h;
+            break;
+        }
+    }
+    if (foundHandle == kInvalidUIElement) return false;
+
+    // Look up the currently-assigned sprite index.
+    auto imgIt = m_imageElementMap.find(foundHandle);
+    if (imgIt == m_imageElementMap.end()) return false;
+    const uint32_t currentSprite = imgIt->second;
+
+    if (gevType == irr::gui::EGET_ELEMENT_HOVERED) {
+        // Active (pressed) buttons must not have their image overridden by hover.
+        if (btn->isPressed()) return false;
+
+        uint32_t hoverId = getHoverId(currentSprite);
+        if (hoverId == kSpriteInvalidId) return false;
+
+        irr::core::rect<irr::s32> srcRect = spriteRectForIndex(hoverId);
+        btn->setImage(m_spriteTexture, srcRect);
+        btn->setScaleImage(true);
+        btn->setUseAlphaChannel(true);
+        btn->setDrawBorder(false);
+
+    } else {  // EGET_ELEMENT_LEFT
+        // Restore active sprite when button is pressed; inactive otherwise.
+        uint32_t restoreId;
+        if (btn->isPressed()) {
+            restoreId = getActiveId(currentSprite);
+        } else {
+            restoreId = getInactiveId(currentSprite);
+        }
+        if (restoreId == kSpriteInvalidId) return false;
+
+        irr::core::rect<irr::s32> srcRect = spriteRectForIndex(restoreId);
+        btn->setImage(m_spriteTexture, srcRect);
+        btn->setScaleImage(true);
+        btn->setUseAlphaChannel(true);
+        btn->setDrawBorder(false);
+    }
+
+    return false;  // Never consume hover events — Irrlicht must process them too.
 }

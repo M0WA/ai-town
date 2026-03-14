@@ -8,3 +8,4 @@ __pycache__
 assets/textures/ui/hud_sprites_ui.dds
 # Crossfade demo renders — QA/dev output, not runtime assets
 assets/audio/crossfade_demos/
+assets/textures/ui/hud_sprites_ui_layout.json

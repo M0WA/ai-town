@@ -20,11 +20,12 @@ class ITerrainQuery;
 // Per architecture/graphics-architecture/irrlicht-device-lifecycle.md Header Dependency Rule.
 class UIManager;
 
-// Forward-declare BuildingAssetLoader, LODNode, TextureCache — full includes in IrrlichtRenderer.cpp.
+// Forward-declare BuildingAssetLoader, LODNode, TextureCache, RenderSystem — full includes in IrrlichtRenderer.cpp.
 // IrrlichtRenderer owns a BuildingAssetLoader and TextureCache by unique_ptr (Phase 10).
 class BuildingAssetLoader;
 class LODNode;
 class TextureCache;
+class RenderSystem;
 
 // IrrlichtRenderer — concrete implementation of IRenderer backed by Irrlicht.
 //
@@ -80,6 +81,17 @@ public:
         m_mapTilesX = mapTilesX;
         m_mapTilesZ = mapTilesZ;
     }
+
+    // setRenderSystem — inject RenderSystem* for terrain shader capabilities queries.
+    // Calls initTerrainShader() after storing the pointer.
+    // Called from main.cpp after renderer construction (Phase 10c wiring order).
+    void setRenderSystem(RenderSystem* rs);
+
+    // terrainMaterialTypeForTest() — test-only accessor for the terrain shader material type.
+    // Returns -1 when initTerrainShader() has not run or shader compile failed.
+    // Production code must NOT call this method.
+    int  terrainMaterialTypeForTest() const { return m_terrainMaterialType; }
+    void setTerrainMaterialTypeForTest(int t) { m_terrainMaterialType = t; }
 
     // IRenderer interface — main-thread-only
     void          beginFrame() override;  // driver->beginScene(true, true, SColor(255,0,0,0))
@@ -345,6 +357,24 @@ private:
     irr::scene::SMesh* m_sharedRoadMeshLOD0{nullptr};
     irr::scene::SMesh* m_sharedRoadMeshLOD1{nullptr};
     irr::scene::SMesh* m_sharedRoadMeshLOD2{nullptr};
+
+    // --- Phase 10c: terrain texture wiring ---
+    //
+    // m_renderSystem: non-owning pointer to RenderSystem; set via setRenderSystem().
+    //   Used by TerrainShaderCallback for isSRGBTextureSupported() query.
+    // m_terrainTextureCache: lazily created in initTerrainShader(); owns sRGB pool
+    //   entries for the 4 diffuse terrain layers and the splat map.
+    // m_terrainMaterialType: s32 material type index returned by
+    //   addHighLevelShaderMaterialFromFiles(terrain.vert, terrain.frag).
+    //   -1 = not yet loaded or shader compile failed (falls back to default Irrlicht material).
+    RenderSystem*                       m_renderSystem{nullptr};
+    std::unique_ptr<TextureCache>       m_terrainTextureCache;
+    int                                 m_terrainMaterialType{-1};
+
+    // initTerrainShader() — load terrain splat shader + diffuse textures + splat map.
+    // Called from setRenderSystem() after m_renderSystem is assigned.
+    // EDT_NULL guard: returns immediately in headless mode.
+    void initTerrainShader();
 
     // initRoadShader() — load road shader + diffuse texture (idempotent).
     // Returns true when ready; false if m_driver is null or shader load fails

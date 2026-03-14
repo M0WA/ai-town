@@ -23,10 +23,12 @@
 #include <cstdint>
 #include <unordered_map>
 
-// Forward declarations for Irrlicht types used only in private members.
-// Full definitions are provided by <irrlicht.h> in IrrlichtUIBackend.cpp.
+// Forward declarations for Irrlicht types used only in private members and
+// public method signatures.  Full definitions are provided by <irrlicht.h>
+// in IrrlichtUIBackend.cpp.
 namespace irr {
     class IrrlichtDevice;
+    struct SEvent;                              // used in handleGuiHoverEvent signature
     namespace gui  { class IGUIEnvironment; class IGUIElement; class IGUIFont; }
     namespace video { class IVideoDriver; class ITexture; }
 }  // namespace irr
@@ -62,6 +64,16 @@ public:
     // physical screen size.  Call once per frame from the main loop.
     // Not part of IUIBackend — concrete method on IrrlichtUIBackend only.
     void handleViewportResize();
+
+    // Handle Irrlicht GUI hover events (EGET_ELEMENT_HOVERED / EGET_ELEMENT_LEFT) to
+    // swap button sprite cells for hover visual feedback.  Must be called from
+    // EventReceiver::OnEvent() for all EET_GUI_EVENT events.  Always returns false
+    // so Irrlicht continues its own GUI handling (tooltips, focus).
+    // Defined in IrrlichtUIBackend.cpp — full Irrlicht types available there.
+    // Forward-declared here using forward-declared irr::SEvent — the .cpp includes
+    // <irrlicht.h> which provides the complete type.
+    // Not part of IUIBackend — internal rendering concern.
+    bool handleGuiHoverEvent(const irr::SEvent& event);
 
     // Return the monospace font loaded from assets/fonts/hud_mono_font.xml.
     // Used by HUD and panel code to call element->setOverrideFont(getMonoFont())

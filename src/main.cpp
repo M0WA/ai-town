@@ -105,6 +105,7 @@ int main() {
     // Created with nullptr for UIManager — late-bound below after UIManager is created.
     // -------------------------------------------------------------------------
     IrrlichtRenderer renderer(device, /*uiManager=*/nullptr);
+    renderer.setRenderSystem(&renderSystem);
 
     // -------------------------------------------------------------------------
     // WallClock — production IClock; injects into AudioSystem/CitySimulation at Phase 4/6.
@@ -193,7 +194,9 @@ int main() {
     // -------------------------------------------------------------------------
     // EventReceiver — translates SEvent → InputEvent, dispatches per input-arbitration.md.
     // -------------------------------------------------------------------------
-    EventReceiver eventReceiver(&uiScaler, &uiManager, &cameraController);
+    // Pass &uiBackend so hover events are forwarded to IrrlichtUIBackend::handleGuiHoverEvent()
+    // for Glass City Colour Pass button sprite swapping (Phase 10c).
+    EventReceiver eventReceiver(&uiScaler, &uiManager, &cameraController, &uiBackend);
     device->setEventReceiver(&eventReceiver);
 
     // =========================================================================

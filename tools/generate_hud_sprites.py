@@ -2,37 +2,33 @@
 """
 Generate hud_sprites_ui.png -- 2048x2048 RGBA, 32x32 grid of 64x64 cells.
 
-Two-layer glass design:
-  1. Milky/satinato glass background panel behind rows 0-10 -- a soft,
-     diffused, semi-opaque warm white surface like real sandblasted glass:
-       - Base: rgba(235, 238, 242, 140)
-       - Gaussian noise (sigma 1.5, amp 8) for micro-texture
-       - Radial vignette (center brighter, edges greyer)
-       - 1px glass-edge rim rgba(255,255,255,180)
-  2. Nearly transparent frosted-glass icon cells that float on top:
-       - Base fill: rgba(255, 255, 255, 55)  -- nearly see-through
-       - Gloss arc (top 30%): white ellipse alpha 55, Gaussian-blurred
-       - Rim: top/left rgba(255,255,255,160), bottom/right rgba(180,185,195,100)
-       - Active state: very subtle cyan tint rgba(0,200,220,35)
-       - Inactive state: plain frosted rgba(255,255,255,45)
-
-The combination: milky glass surface creates the background glow; clear glass
-icon cells sit transparently on top, their rounded edges revealing the milky
-glass beneath.
+Glass City three-state icon design:
+  Inactive: 2 px outlined stroke at 65% opacity (near-white #EBF4F6 stroke,
+            alpha=165) on transparent cell; no fill, no glow.
+            Button tile: rgba(255,255,255,0.08) fill + 1px rgba(255,255,255,0.18)
+            border + 8px corner radius.
+  Hover:    2 px outlined stroke at 85% opacity; 1px rgba(255,255,255,0.35) tile
+            border. Button tile: rgba(255,255,255,0.15) + 1px rgba(255,255,255,0.35).
+  Active:   Filled solid silhouette at 100%; 2px rgba(0,201,200,0.75) teal border +
+            4px Gaussian baked glow (role-specific colour).
+            Button tile: rgba(0,201,200,0.22) teal wash + 2px rgba(0,201,200,0.75).
+  Panel bg: 5 dark navy cells at rows 16+; rgb(13,27,42) at 78/80/82/85/88% opacity.
 
 Row assignments (from hud_sprite_ids.h):
-  Row 0:  Toolbar tool-mode icons (active)        cols 0-4
-  Row 1:  Toolbar tool-mode icons (inactive)       cols 0-4
-  Row 2:  Zone sub-panel (active)                  cols 0-8
-  Row 3:  Zone sub-panel (inactive)                cols 0-8
-  Row 4:  Utilities sub-panel (active)             cols 0-3
-  Row 5:  Utilities sub-panel (inactive)           cols 0-3
-  Row 6:  Active tool indicator badges             cols 0-5
-  Row 7:  Cursor shapes (reserved)                 cols 0-5
-  Row 8:  Minimap overlay toggle (active)          col 0
-  Row 9:  Minimap overlay toggle (inactive)        col 0
-  Row 10: Notification / misc                      cols 0-3
-  Rows 11-31: fully transparent (reserved)
+  Row 0:  Toolbar tool-mode icons (active)          cols 0-4
+  Row 1:  Toolbar tool-mode icons (inactive)         cols 0-4; hover cols 5-9
+  Row 2:  Zone sub-panel (active)                    cols 0-8
+  Row 3:  Zone sub-panel (inactive)                  cols 0-8; hover cols 9-17
+  Row 4:  Utilities sub-panel (active)               cols 0-3
+  Row 5:  Utilities sub-panel (inactive)             cols 0-3; hover cols 4-7
+  Row 6:  Active tool indicator badges               cols 0-5
+  Row 7:  Cursor shapes (reserved)                   cols 0-5
+  Row 8:  Minimap overlay toggle (active)            col 0
+  Row 9:  Minimap overlay toggle (inactive)          col 0
+  Row 10: Notification / misc                        cols 0-3
+  Rows 11-15: fully transparent (reserved)
+  Row 16: Panel background cells                     cols 0-4
+  Rows 17-31: fully transparent (reserved)
 
 Generator: tools/generate_hud_sprites.py
 Render at 4x (256x256) then Lanczos-downsample to 64x64 for clean AA.
@@ -67,110 +63,77 @@ def clamp(v, lo=0, hi=255):
     return max(lo, min(hi, int(v)))
 
 # -----------------------------------------------------------------------
-# Frosted-glass cell background
+# Glass City button tile background (three states)
 # -----------------------------------------------------------------------
 
-def create_milkglass_cell(
-        base_color=(255, 255, 255, 55),
-        glow_color=None,
-        corner_radius=40,
-        tint_overlay=None):
+def create_glass_city_tile(state='inactive', glow_color=None):
     """
-    Create a single frosted-glass chip cell at HCELL x HCELL.
-    Nearly transparent (alpha ~55).  The gloss arc and rim are the main
-    visible framing.  Icons sit on top of this glass chip.
+    Create a Glass City button tile at HCELL x HCELL (before downsampling).
+
+    state:
+      'inactive' -- rgba(255,255,255,0.08) fill + 1px rgba(255,255,255,0.18) border
+      'hover'    -- rgba(255,255,255,0.15) fill + 1px rgba(255,255,255,0.35) border
+      'active'   -- rgba(0,201,200,0.22) teal wash + 2px rgba(0,201,200,0.75) border
+                    + 4px Gaussian baked glow in glow_color (role-specific)
+
+    Corner radius: 8px at 64px output = 32px at 4x HCELL working size.
     """
     S = HCELL
-    cr = corner_radius
-    M = 16  # margin from edge
+    cr = 32  # 8 px at 64px output, scaled 4x for working resolution
 
     img = Image.new('RGBA', (S, S), (0, 0, 0, 0))
 
-    # -- Active-state outer glow (behind everything) --
-    if glow_color:
-        glow = Image.new('RGBA', (S, S), (0, 0, 0, 0))
-        gd = ImageDraw.Draw(glow)
-        gd.rounded_rectangle((6, 6, S - 7, S - 7), radius=cr + 10,
-                              outline=glow_color, width=7)
-        glow = glow.filter(ImageFilter.GaussianBlur(radius=12))
-        img = Image.alpha_composite(img, glow)
+    if state == 'inactive':
+        fill_a = int(255 * 0.08)   # ~20
+        border_a = int(255 * 0.18) # ~46
+        fill_rgb = (255, 255, 255)
+        border_rgb = (255, 255, 255)
+        border_w = 4  # 1px at 64px output = 4px at 4x
 
-    # -- Very subtle drop shadow below the glass chip --
-    shadow = Image.new('RGBA', (S, S), (0, 0, 0, 0))
-    sd = ImageDraw.Draw(shadow)
-    sd.rounded_rectangle((M + 4, M + 6, S - M + 2, S - M + 4),
-                         radius=cr, fill=(0, 0, 0, 25))
-    shadow = shadow.filter(ImageFilter.GaussianBlur(radius=5))
-    img = Image.alpha_composite(img, shadow)
+    elif state == 'hover':
+        fill_a = int(255 * 0.15)   # ~38
+        border_a = int(255 * 0.35) # ~89
+        fill_rgb = (255, 255, 255)
+        border_rgb = (255, 255, 255)
+        border_w = 4  # 1px at 64px output = 4px at 4x
 
-    # -- Rounded-rect mask (binary shape: 255 inside, 0 outside) --
-    mask = Image.new('L', (S, S), 0)
-    md = ImageDraw.Draw(mask)
-    md.rounded_rectangle((M, M, S - M - 1, S - M - 1), radius=cr, fill=255)
+    else:  # 'active'
+        fill_a = int(255 * 0.22)   # ~56
+        border_a = int(255 * 0.75) # ~191
+        fill_rgb = (0, 201, 200)
+        border_rgb = (0, 201, 200)
+        border_w = 8  # 2px at 64px output = 8px at 4x
 
-    # -- Base fill: nearly transparent frosted tint --
-    # putalpha replaces the alpha channel, so we must scale the mask by the
-    # desired alpha to get the correct per-pixel alpha (not 255 everywhere).
-    r0, g0, b0, a0 = base_color
-    base = Image.new('RGBA', (S, S), (r0, g0, b0, 255))
-    base_alpha = np.array(mask, dtype=np.float32) * (a0 / 255.0)
-    base.putalpha(Image.fromarray(base_alpha.astype(np.uint8), 'L'))
-    img = Image.alpha_composite(img, base)
+    # -- Rounded-rect fill --
+    M = 4  # small outer margin at 4x resolution
+    fill_layer = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+    fd = ImageDraw.Draw(fill_layer)
+    fd.rounded_rectangle((M, M, S - M - 1, S - M - 1),
+                         radius=cr, fill=(*fill_rgb, fill_a))
+    img = Image.alpha_composite(img, fill_layer)
 
-    # -- Optional tint overlay (for active/zone-colored states) --
-    if tint_overlay:
-        tr, tg, tb, ta = tint_overlay
-        tint = Image.new('RGBA', (S, S), (tr, tg, tb, 255))
-        tint_alpha = np.array(mask, dtype=np.float32) * (ta / 255.0)
-        tint.putalpha(Image.fromarray(tint_alpha.astype(np.uint8), 'L'))
-        img = Image.alpha_composite(img, tint)
+    # -- Active baked glow (before border, so border sits on top) --
+    if state == 'active' and glow_color:
+        gr, gg, gb = glow_color[:3]
+        glow_layer = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(glow_layer)
+        # 4px glow at 64px output = 16px at 4x
+        gd.rounded_rectangle((M - 8, M - 8, S - M + 7, S - M + 7),
+                              radius=cr + 12, fill=(gr, gg, gb, 0))
+        gd.rounded_rectangle((M, M, S - M - 1, S - M - 1),
+                              radius=cr, outline=(gr, gg, gb, int(255 * 0.60)),
+                              width=border_w + 4)
+        glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=16))
+        img = Image.alpha_composite(img, glow_layer)
 
-    # -- Rim / bevel: the primary visible framing of the glass chip --
-    # Top/left bright rim
-    rim_bright = Image.new('RGBA', (S, S), (0, 0, 0, 0))
-    rbd = ImageDraw.Draw(rim_bright)
-    rbd.rounded_rectangle((M, M, S - M - 1, S - M - 1),
-                          radius=cr, outline=(255, 255, 255, 160), width=3)
-    # Clip to top-left half (above the diagonal)
-    rim_b_arr = np.array(rim_bright)
-    for y in range(S):
-        for x in range(S):
-            if x + y > S:
-                rim_b_arr[y, x, 3] = 0
-    rim_bright = Image.fromarray(rim_b_arr, 'RGBA')
-    img = Image.alpha_composite(img, rim_bright)
-
-    # Bottom/right darker rim
-    rim_dark = Image.new('RGBA', (S, S), (0, 0, 0, 0))
-    rdd = ImageDraw.Draw(rim_dark)
-    rdd.rounded_rectangle((M, M, S - M - 1, S - M - 1),
-                          radius=cr, outline=(180, 185, 195, 100), width=3)
-    rim_d_arr = np.array(rim_dark)
-    for y in range(S):
-        for x in range(S):
-            if x + y <= S:
-                rim_d_arr[y, x, 3] = 0
-    rim_dark = Image.fromarray(rim_d_arr, 'RGBA')
-    img = Image.alpha_composite(img, rim_dark)
-
-    # -- Gloss highlight arc (top 30%) -- the STRONGEST visual element --
-    # This gives the glass look: a bright elliptical highlight in the top
-    # portion of the cell.
-    gloss = Image.new('RGBA', (S, S), (0, 0, 0, 0))
-    gloss_d = ImageDraw.Draw(gloss)
-    gloss_top = M + 2
-    gloss_bot = M + int((S - 2 * M) * 0.30)
-    gloss_left = M + 14
-    gloss_right = S - M - 14
-    gloss_d.ellipse((gloss_left, gloss_top, gloss_right, gloss_bot),
-                    fill=(255, 255, 255, 55))
-    gloss = gloss.filter(ImageFilter.GaussianBlur(radius=10))
-    # Clip to shape mask using min(gloss_alpha, mask)
-    gloss_arr = np.array(gloss)
-    mask_arr = np.array(mask)
-    gloss_arr[:, :, 3] = np.minimum(gloss_arr[:, :, 3], mask_arr)
-    gloss_clip = Image.fromarray(gloss_arr, 'RGBA')
-    img = Image.alpha_composite(img, gloss_clip)
+    # -- Border --
+    border_layer = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(border_layer)
+    bd.rounded_rectangle((M, M, S - M - 1, S - M - 1),
+                         radius=cr,
+                         outline=(*border_rgb, border_a),
+                         width=border_w)
+    img = Image.alpha_composite(img, border_layer)
 
     return img
 
@@ -178,6 +141,45 @@ def create_milkglass_cell(
 def downsample(img):
     """Downsample from HCELL to CELL using Lanczos."""
     return img.resize((CELL, CELL), Image.LANCZOS)
+
+
+def make_outline_icon(filled_icon, stroke_alpha=165, stroke_width=8):
+    """
+    Convert a filled RGBA icon (HCELL resolution) to an outlined-stroke version
+    for the Glass City inactive/hover states.
+
+    The icon symbol is rendered as a 2 px stroke (8px at 4x working resolution)
+    against a transparent background.  stroke_alpha controls the master opacity:
+      - 165 = 65% for inactive state
+      - 217 = 85% for hover state
+    near-white #EBF4F6 = (235, 244, 246)
+
+    Strategy: extract alpha channel of the filled icon, dilate it by stroke_width,
+    subtract the inner eroded mask to get the edge ring, paint near-white at
+    stroke_alpha into those pixels, discard the fill.
+    """
+    arr = np.array(filled_icon, dtype=np.float32)
+    alpha_ch = (arr[:, :, 3] > 64).astype(np.float32)  # binary mask
+
+    # Dilate to get outer edge
+    from PIL import ImageFilter as IF
+    mask_img = Image.fromarray((alpha_ch * 255).astype(np.uint8), 'L')
+    dilated = mask_img.filter(IF.MaxFilter(stroke_width * 2 + 1))
+    eroded  = mask_img.filter(IF.MinFilter(stroke_width * 2 + 1))
+    dilated_arr = np.array(dilated, dtype=np.float32) / 255.0
+    eroded_arr  = np.array(eroded,  dtype=np.float32) / 255.0
+
+    # Edge = dilated minus eroded (the ring of pixels at the shape boundary)
+    edge = np.clip(dilated_arr - eroded_arr, 0, 1)
+
+    # Build output: near-white stroke, fully transparent elsewhere
+    out = np.zeros((HCELL, HCELL, 4), dtype=np.uint8)
+    out[:, :, 0] = 235  # #EBF4F6 near-white
+    out[:, :, 1] = 244
+    out[:, :, 2] = 246
+    out[:, :, 3] = (edge * stroke_alpha).astype(np.uint8)
+
+    return Image.fromarray(out, 'RGBA')
 
 
 def add_icon_shadow(icon_layer, offset=8, alpha=60, blur=6):
@@ -192,74 +194,97 @@ def add_icon_shadow(icon_layer, offset=8, alpha=60, blur=6):
     return Image.alpha_composite(shifted, icon_layer)
 
 
+def glass_city_composite(cell, icon_layer, state='active'):
+    """
+    Composite the icon onto the cell tile, applying Glass City state rules:
+      'active'   -- icon as-is (filled, full opacity) + shadow
+      'inactive' -- icon converted to 2px stroke at 65% (alpha=165), no shadow
+      'hover'    -- icon converted to 2px stroke at 85% (alpha=217), no shadow
+    Returns the final downsampled 64x64 cell image.
+    """
+    if state == 'active':
+        icon_with_shadow = add_icon_shadow(icon_layer)
+        return downsample(Image.alpha_composite(cell, icon_with_shadow))
+    elif state == 'hover':
+        outline = make_outline_icon(icon_layer, stroke_alpha=217)
+        return downsample(Image.alpha_composite(cell, outline))
+    else:  # 'inactive'
+        outline = make_outline_icon(icon_layer, stroke_alpha=165)
+        return downsample(Image.alpha_composite(cell, outline))
+
+
 # -----------------------------------------------------------------------
-# Glass palette presets
+# Glass City palette presets
+# Glow colours per button role (from architecture/asset-standards/2d-texture-standards.md
+# §Active Tint / Glow Colour by Button Role):
+#   Generic tools (Road, Utilities, Query, Minimap)  -> Teal  #00C9C8 = (0,201,200)
+#   Zone Residential                                  -> Green (0,255,0)
+#   Zone Commercial                                   -> Blue  (0,0,255)
+#   Zone Industrial                                   -> Yellow(255,255,0)
+#   Demolish                                          -> Red   #F04E37 = (240,78,55)
 # -----------------------------------------------------------------------
+
+GLOW_TEAL    = (0, 201, 200)
+GLOW_GREEN   = (0, 255, 0)
+GLOW_BLUE    = (0, 0, 255)
+GLOW_YELLOW  = (255, 255, 0)
+GLOW_RED     = (240, 78, 55)   # #F04E37
+
 
 def active_teal_cell():
-    """Active toolbar cell: frosted glass + very subtle cyan-teal tint."""
-    return create_milkglass_cell(
-        base_color=(255, 255, 255, 55),
-        glow_color=(0, 200, 220, 50),
-        tint_overlay=(0, 200, 220, 35))
+    """Active generic toolbar cell (Road/Utilities/Query): teal glow."""
+    return create_glass_city_tile(state='active', glow_color=GLOW_TEAL)
 
 def inactive_cell():
-    """Inactive cell: plain frosted glass."""
-    return create_milkglass_cell(
-        base_color=(255, 255, 255, 45),
-        glow_color=None)
+    """Inactive cell."""
+    return create_glass_city_tile(state='inactive')
 
-def zone_res_cell(active=True):
+def hover_cell():
+    """Hover cell (generic — no role-specific glow for hover state)."""
+    return create_glass_city_tile(state='hover')
+
+def zone_res_cell(active=True, hover=False):
+    if hover:
+        return create_glass_city_tile(state='hover')
     if active:
-        return create_milkglass_cell(
-            base_color=(255, 255, 255, 55),
-            glow_color=(60, 220, 90, 50),
-            tint_overlay=(60, 220, 90, 30))
+        return create_glass_city_tile(state='active', glow_color=GLOW_GREEN)
     return inactive_cell()
 
-def zone_com_cell(active=True):
+def zone_com_cell(active=True, hover=False):
+    if hover:
+        return create_glass_city_tile(state='hover')
     if active:
-        return create_milkglass_cell(
-            base_color=(255, 255, 255, 55),
-            glow_color=(60, 130, 240, 50),
-            tint_overlay=(60, 130, 240, 30))
+        return create_glass_city_tile(state='active', glow_color=GLOW_BLUE)
     return inactive_cell()
 
-def zone_ind_cell(active=True):
+def zone_ind_cell(active=True, hover=False):
+    if hover:
+        return create_glass_city_tile(state='hover')
     if active:
-        return create_milkglass_cell(
-            base_color=(255, 255, 255, 55),
-            glow_color=(220, 200, 50, 50),
-            tint_overlay=(220, 200, 50, 30))
+        return create_glass_city_tile(state='active', glow_color=GLOW_YELLOW)
     return inactive_cell()
 
-def demolish_cell(active=True):
+def demolish_cell(active=True, hover=False):
+    if hover:
+        return create_glass_city_tile(state='hover')
     if active:
-        return create_milkglass_cell(
-            base_color=(255, 255, 255, 55),
-            glow_color=(240, 70, 70, 50),
-            tint_overlay=(240, 70, 70, 30))
+        return create_glass_city_tile(state='active', glow_color=GLOW_RED)
     return inactive_cell()
 
 def dark_badge_cell():
-    """Badge cell: same frosted glass."""
-    return create_milkglass_cell(
-        base_color=(255, 255, 255, 50),
-        corner_radius=36)
+    """Badge / indicator cell: inactive tile style."""
+    return create_glass_city_tile(state='inactive')
 
 def dark_panel_cell():
-    """Panel/misc cell: same frosted glass."""
-    return create_milkglass_cell(
-        base_color=(255, 255, 255, 50),
-        corner_radius=38)
+    """Misc HUD icon cell: inactive tile style."""
+    return create_glass_city_tile(state='inactive')
 
-def water_cell(active=True):
-    """Water utility cell: frosted glass + subtle blue tint."""
+def water_cell(active=True, hover=False):
+    """Water utility cell."""
+    if hover:
+        return create_glass_city_tile(state='hover')
     if active:
-        return create_milkglass_cell(
-            base_color=(255, 255, 255, 55),
-            glow_color=(60, 160, 230, 50),
-            tint_overlay=(40, 140, 220, 30))
+        return create_glass_city_tile(state='active', glow_color=GLOW_TEAL)
     return inactive_cell()
 
 
@@ -295,9 +320,10 @@ def _draw_pixel_letter(d, letter, x, y, color, scale=4):
 # Vivid/bright icon colors (designed for any background)
 # -----------------------------------------------------------------------
 
-def draw_zone_toolbar_icon(active=True):
+def draw_zone_toolbar_icon(state='active'):
     """Col 0 -- Zone: 2x2 mini grid of colored tiles with crosshair."""
-    cell = active_teal_cell() if active else inactive_cell()
+    active = (state == 'active')
+    cell = active_teal_cell() if active else (hover_cell() if state == 'hover' else inactive_cell())
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -334,13 +360,13 @@ def draw_zone_toolbar_icon(active=True):
     d.line([(cx - 55, cy), (cx + 55, cy)], fill=ch_col, width=3)
     d.ellipse([(cx - 3, cy - 3), (cx + 3, cy + 3)], fill=ch_col)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def draw_road_toolbar_icon(active=True):
+def draw_road_toolbar_icon(state='active'):
     """Col 1 -- Road: top-down T-junction, grey asphalt, white dashes."""
-    cell = active_teal_cell() if active else inactive_cell()
+    active = (state == 'active')
+    cell = active_teal_cell() if active else (hover_cell() if state == 'hover' else inactive_cell())
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -373,13 +399,13 @@ def draw_road_toolbar_icon(active=True):
     # Subtle road surface texture
     d.line([(36, 80), (220, 80)], fill=(255, 255, 255, 50), width=2)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def draw_utilities_toolbar_icon(active=True):
+def draw_utilities_toolbar_icon(state='active'):
     """Col 2 -- Utilities: amber lightning bolt + blue water drop side by side."""
-    cell = active_teal_cell() if active else inactive_cell()
+    active = (state == 'active')
+    cell = active_teal_cell() if active else (hover_cell() if state == 'hover' else inactive_cell())
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -397,8 +423,7 @@ def draw_utilities_toolbar_icon(active=True):
     # Water drop (right side) -- crystal clear teardrop
     _draw_crystal_drop_small(d, cx=178, top_y=52, bot_y=200)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
 def _draw_crystal_drop_small(d, cx=178, top_y=52, bot_y=200):
@@ -425,9 +450,9 @@ def _draw_crystal_drop_small(d, cx=178, top_y=52, bot_y=200):
               fill=(255, 255, 255, 230))
 
 
-def draw_demolish_toolbar_icon(active=True):
+def draw_demolish_toolbar_icon(state='active'):
     """Col 3 -- Demolish: bold red X with sparks/debris at corners."""
-    cell = demolish_cell(active)
+    cell = demolish_cell(state == 'active', hover=(state == 'hover'))
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -453,13 +478,13 @@ def draw_demolish_toolbar_icon(active=True):
         d.ellipse([(sx - 1, sy - 1), (sx + 1, sy + 1)],
                   fill=(255, 255, 200, 230))
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def draw_query_toolbar_icon(active=True):
+def draw_query_toolbar_icon(state='active'):
     """Col 4 -- Query: magnifying glass with blue info 'i' inside lens."""
-    cell = active_teal_cell() if active else inactive_cell()
+    active = (state == 'active')
+    cell = active_teal_cell() if active else (hover_cell() if state == 'hover' else inactive_cell())
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -502,8 +527,7 @@ def draw_query_toolbar_icon(active=True):
     d.line([(hx1 - 4, hy1 - 2), (hx2 - 4, hy2 - 2)],
            fill=(255, 255, 255, 110), width=2)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
 # -----------------------------------------------------------------------
@@ -511,9 +535,9 @@ def draw_query_toolbar_icon(active=True):
 # Vivid/bright icon colors
 # -----------------------------------------------------------------------
 
-def draw_res_low(active=True):
+def draw_res_low(state='active'):
     """Small house, pitched roof, chimney with smoke puff."""
-    cell = zone_res_cell(active)
+    cell = zone_res_cell(state == 'active', hover=(state == 'hover'))
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -548,13 +572,12 @@ def draw_res_low(active=True):
     d.rectangle([(118, 184), (138, 206)], fill=(140, 95, 60, 220))
     d.ellipse([(132, 192), (136, 196)], fill=(220, 200, 100, 200))
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def draw_res_med(active=True):
+def draw_res_med(state='active'):
     """2-story townhouse, brick texture, multiple windows, dormer."""
-    cell = zone_res_cell(active)
+    cell = zone_res_cell(state == 'active', hover=(state == 'hover'))
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -590,13 +613,12 @@ def draw_res_med(active=True):
     d.rectangle([(116, 68), (140, 88)], fill=(180, 215, 245, 180))
     d.rectangle([(116, 68), (140, 88)], outline=(80, 70, 60, 170), width=2)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def draw_res_high(active=True):
+def draw_res_high(state='active'):
     """Tall apartment block, flat roof, grid of windows, balcony rails."""
-    cell = zone_res_cell(active)
+    cell = zone_res_cell(state == 'active', hover=(state == 'hover'))
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -624,13 +646,12 @@ def draw_res_high(active=True):
         for rx in [84, 118, 152, 176]:
             d.line([(rx, wy - 4), (rx, wy)], fill=(180, 185, 195, 130), width=1)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def draw_com_low(active=True):
+def draw_com_low(state='active'):
     """Small corner shop with flat awning, glass storefront, hanging sign."""
-    cell = zone_com_cell(active)
+    cell = zone_com_cell(state == 'active', hover=(state == 'hover'))
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -663,13 +684,12 @@ def draw_com_low(active=True):
     d.rectangle([(200, 100), (232, 132)], outline=(180, 150, 40, 200), width=2)
     d.line([(200, 100), (200, 132)], fill=(140, 140, 150, 200), width=3)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def draw_com_med(active=True):
+def draw_com_med(state='active'):
     """4-story office, curtain-wall glass, horizontal floor bands, logo on top."""
-    cell = zone_com_cell(active)
+    cell = zone_com_cell(state == 'active', hover=(state == 'hover'))
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -696,13 +716,12 @@ def draw_com_med(active=True):
     d.rectangle([(112, 36), (144, 48)], fill=(220, 220, 230, 200))
     d.line([(112, 36), (144, 36)], fill=(255, 255, 255, 140), width=1)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def draw_com_high(active=True):
+def draw_com_high(state='active'):
     """Sleek skyscraper, tapered spire, reflective blue glass, antenna."""
-    cell = zone_com_cell(active)
+    cell = zone_com_cell(state == 'active', hover=(state == 'hover'))
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -733,13 +752,12 @@ def draw_com_high(active=True):
 
     d.line([(88, 36), (168, 36)], fill=(200, 225, 255, 140), width=2)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def draw_ind_low(active=True):
+def draw_ind_low(state='active'):
     """Warehouse shed, corrugated roof, large rolling door, loading bay."""
-    cell = zone_ind_cell(active)
+    cell = zone_ind_cell(state == 'active', hover=(state == 'hover'))
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -769,13 +787,12 @@ def draw_ind_low(active=True):
     d.rectangle([(48, 198), (208, 210)], fill=(150, 150, 158, 225))
     d.line([(48, 198), (208, 198)], fill=(180, 180, 188, 180), width=2)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def draw_ind_med(active=True):
+def draw_ind_med(state='active'):
     """Factory with sawtooth skylights on roof, single smokestack with smoke."""
-    cell = zone_ind_cell(active)
+    cell = zone_ind_cell(state == 'active', hover=(state == 'hover'))
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -816,13 +833,12 @@ def draw_ind_med(active=True):
     d.ellipse([(192, -2), (226, 26)], fill=(200, 205, 215, 70))
     d.ellipse([(178, 0), (210, 22)], fill=(195, 200, 210, 55))
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def draw_ind_high(active=True):
+def draw_ind_high(state='active'):
     """Large industrial complex, two tall smokestacks, pipes on exterior."""
-    cell = zone_ind_cell(active)
+    cell = zone_ind_cell(state == 'active', hover=(state == 'hover'))
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -863,17 +879,17 @@ def draw_ind_high(active=True):
         d.line([(40, py), (80, py)], fill=(160, 155, 150, 180), width=3)
     d.line([(42, 108), (42, 214)], fill=(155, 150, 145, 170), width=4)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
 # -----------------------------------------------------------------------
 # Row 4/5 -- Utilities sub-panel
 # -----------------------------------------------------------------------
 
-def draw_util_power(active=True):
+def draw_util_power(state='active'):
     """Power Plant: amber lightning bolt inside circular gauge ring with ticks."""
-    cell = active_teal_cell() if active else inactive_cell()
+    active = (state == 'active')
+    cell = active_teal_cell() if active else (hover_cell() if state == 'hover' else inactive_cell())
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -907,13 +923,12 @@ def draw_util_power(active=True):
     d.polygon(bolt_inner, fill=(255, 245, 140, 100))
     d.line([(cx + 6, cy - 46), (cx - 18, cy)], fill=(255, 255, 200, 140), width=2)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def draw_util_water(active=True):
+def draw_util_water(state='active'):
     """Water Tower: crystal-clear teardrop water drop on blue-tinted glass panel."""
-    cell = water_cell(active)
+    cell = water_cell(state == 'active', hover=(state == 'hover'))
     S = HCELL
     icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(icon)
@@ -968,11 +983,10 @@ def draw_util_water(active=True):
     d.arc([(bulge_left, bulge_top), (bulge_right, bulge_bot)],
           200, 340, fill=(140, 210, 255, 100), width=3)
 
-    icon = add_icon_shadow(icon)
-    return downsample(Image.alpha_composite(cell, icon))
+    return glass_city_composite(cell, icon, state)
 
 
-def _composite_badge(badge_rgb, badge_alpha, cell, S):
+def _composite_badge(badge_rgb, badge_alpha, cell, S, state='active'):
     """Helper: composite a badge that was drawn on an opaque RGB canvas.
 
     badge_rgb  -- (S, S, 3) uint8 numpy array, the fully opaque badge artwork
@@ -990,16 +1004,16 @@ def _composite_badge(badge_rgb, badge_alpha, cell, S):
     icon[:, :, :3] = badge_rgb
     icon[:, :, 3] = badge_alpha
     icon_img = Image.fromarray(icon, 'RGBA')
-    icon_img = add_icon_shadow(icon_img)
-    return downsample(Image.alpha_composite(cell, icon_img))
+    return glass_city_composite(cell, icon_img, state)
 
 
-def draw_util_fire(active=True):
+def draw_util_fire(state='active'):
     """Fire Station: red shield badge, white flame centered, golden border.
 
     Drawn on an opaque canvas to avoid grey AA fringe on flame/shield edges.
     """
-    cell = active_teal_cell() if active else inactive_cell()
+    active = (state == 'active')
+    cell = active_teal_cell() if active else (hover_cell() if state == 'hover' else inactive_cell())
     S = HCELL
     cx, cy = S // 2, S // 2
 
@@ -1051,15 +1065,16 @@ def draw_util_fire(active=True):
     badge_rgb = np.array(canvas)
     badge_a = np.array(alpha)
 
-    return _composite_badge(badge_rgb, badge_a, cell, S)
+    return _composite_badge(badge_rgb, badge_a, cell, S, state)
 
 
-def draw_util_police(active=True):
+def draw_util_police(state='active'):
     """Police Station: blue shield badge, gold 5-point star, silver border.
 
     Drawn on an opaque canvas to avoid grey AA fringe on star/shield edges.
     """
-    cell = active_teal_cell() if active else inactive_cell()
+    active = (state == 'active')
+    cell = active_teal_cell() if active else (hover_cell() if state == 'hover' else inactive_cell())
     S = HCELL
     cx, cy = S // 2, S // 2
 
@@ -1115,7 +1130,7 @@ def draw_util_police(active=True):
     badge_rgb = np.array(canvas)
     badge_a = np.array(alpha)
 
-    return _composite_badge(badge_rgb, badge_a, cell, S)
+    return _composite_badge(badge_rgb, badge_a, cell, S, state)
 
 
 # -----------------------------------------------------------------------
@@ -1224,10 +1239,7 @@ def draw_cursor_icon(cursor_type='default'):
 def draw_minimap_toggle(active=True):
     """Teal shield with checkmark (active) or grey with grey checkmark."""
     if active:
-        cell = create_milkglass_cell(
-            base_color=(255, 255, 255, 55),
-            glow_color=(0, 200, 220, 45),
-            tint_overlay=(0, 200, 220, 30))
+        cell = create_glass_city_tile(state='active', glow_color=GLOW_TEAL)
     else:
         cell = inactive_cell()
 
@@ -1517,25 +1529,34 @@ def draw_milkyglass_background(sheet, x0, y0, x1, y1, corner_radius=16):
     sheet.paste(panel, (x0, y0), panel)
 
 
+# -----------------------------------------------------------------------
+# Panel background cells (rows 16+)
+# -----------------------------------------------------------------------
+
+def draw_panel_bg_cell(opacity_pct, corner_radius=8):
+    """
+    Generate a single 64x64 dark navy panel background tile.
+    Fill: rgb(13,27,42) at the given opacity percentage.
+    Corner radius: 8px at 64px output = 32px at 4x working resolution.
+    """
+    S = HCELL
+    cr = corner_radius * SCALE  # scale to working resolution
+    alpha = int(round(255 * opacity_pct / 100.0))
+
+    img = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((0, 0, S - 1, S - 1), radius=cr,
+                        fill=(13, 27, 42, alpha))
+    return downsample(img)
+
+
 # ============================================================
 # MAIN ASSEMBLY
 # ============================================================
 
 def main():
-    print("Generating HUD sprite sheet (2048x2048, frosted-glass style)...")
+    print("Generating HUD sprite sheet (2048x2048, Glass City style)...")
     sheet = Image.new('RGBA', (SHEET_SIZE, SHEET_SIZE), (0, 0, 0, 0))
-
-    # --- Milky glass background panel behind all used rows (0-10) ---
-    # Bounding box of used cells:
-    #   rows 0-10 (y: 0..704), max col = 8 (row 2/3 zone sub-panel, x: 0..576)
-    # Add 8 px padding on each side.
-    PAD = 8
-    bg_x0 = 0
-    bg_y0 = 0
-    bg_x1 = 9 * CELL + PAD   # col 0-8 = 576 px + 8 padding = 584
-    bg_y1 = 11 * CELL + PAD   # row 0-10 = 704 px + 8 padding = 712
-    print(f"  Background panel: ({bg_x0},{bg_y0}) to ({bg_x1},{bg_y1})")
-    draw_milkyglass_background(sheet, bg_x0, bg_y0, bg_x1, bg_y1)
 
     def place(col, row, img):
         """Place a 64x64 icon at the given grid cell."""
@@ -1543,19 +1564,24 @@ def main():
 
     # --- Row 0: Toolbar tool-mode icons (active state) ---
     print("  Row 0: Toolbar active icons")
-    place(0, 0, draw_zone_toolbar_icon(active=True))
-    place(1, 0, draw_road_toolbar_icon(active=True))
-    place(2, 0, draw_utilities_toolbar_icon(active=True))
-    place(3, 0, draw_demolish_toolbar_icon(active=True))
-    place(4, 0, draw_query_toolbar_icon(active=True))
+    place(0, 0, draw_zone_toolbar_icon(state='active'))
+    place(1, 0, draw_road_toolbar_icon(state='active'))
+    place(2, 0, draw_utilities_toolbar_icon(state='active'))
+    place(3, 0, draw_demolish_toolbar_icon(state='active'))
+    place(4, 0, draw_query_toolbar_icon(state='active'))
 
-    # --- Row 1: Toolbar tool-mode icons (inactive state) ---
-    print("  Row 1: Toolbar inactive icons")
-    place(0, 1, draw_zone_toolbar_icon(active=False))
-    place(1, 1, draw_road_toolbar_icon(active=False))
-    place(2, 1, draw_utilities_toolbar_icon(active=False))
-    place(3, 1, draw_demolish_toolbar_icon(active=False))
-    place(4, 1, draw_query_toolbar_icon(active=False))
+    # --- Row 1: Toolbar tool-mode icons (inactive cols 0-4, hover cols 5-9) ---
+    print("  Row 1: Toolbar inactive + hover icons")
+    place(0, 1, draw_zone_toolbar_icon(state='inactive'))
+    place(1, 1, draw_road_toolbar_icon(state='inactive'))
+    place(2, 1, draw_utilities_toolbar_icon(state='inactive'))
+    place(3, 1, draw_demolish_toolbar_icon(state='inactive'))
+    place(4, 1, draw_query_toolbar_icon(state='inactive'))
+    place(5, 1, draw_zone_toolbar_icon(state='hover'))
+    place(6, 1, draw_road_toolbar_icon(state='hover'))
+    place(7, 1, draw_utilities_toolbar_icon(state='hover'))
+    place(8, 1, draw_demolish_toolbar_icon(state='hover'))
+    place(9, 1, draw_query_toolbar_icon(state='hover'))
 
     # --- Row 2: Zone sub-panel (active state) ---
     print("  Row 2: Zone sub-panel active")
@@ -1573,26 +1599,32 @@ def main():
         'ind_low', 'ind_med', 'ind_high',
     ]
     for i, key in enumerate(zone_order):
-        place(i, 2, zone_draw_fns[key](active=True))
+        place(i, 2, zone_draw_fns[key](state='active'))
 
-    # --- Row 3: Zone sub-panel (inactive state) ---
-    print("  Row 3: Zone sub-panel inactive")
+    # --- Row 3: Zone sub-panel (inactive cols 0-8, hover cols 9-17) ---
+    print("  Row 3: Zone sub-panel inactive + hover")
     for i, key in enumerate(zone_order):
-        place(i, 3, zone_draw_fns[key](active=False))
+        place(i, 3, zone_draw_fns[key](state='inactive'))
+    for i, key in enumerate(zone_order):
+        place(9 + i, 3, zone_draw_fns[key](state='hover'))
 
     # --- Row 4: Utilities sub-panel (active state) ---
     print("  Row 4: Utilities sub-panel active")
-    place(0, 4, draw_util_power(active=True))
-    place(1, 4, draw_util_water(active=True))
-    place(2, 4, draw_util_fire(active=True))
-    place(3, 4, draw_util_police(active=True))
+    place(0, 4, draw_util_power(state='active'))
+    place(1, 4, draw_util_water(state='active'))
+    place(2, 4, draw_util_fire(state='active'))
+    place(3, 4, draw_util_police(state='active'))
 
-    # --- Row 5: Utilities sub-panel (inactive state) ---
-    print("  Row 5: Utilities sub-panel inactive")
-    place(0, 5, draw_util_power(active=False))
-    place(1, 5, draw_util_water(active=False))
-    place(2, 5, draw_util_fire(active=False))
-    place(3, 5, draw_util_police(active=False))
+    # --- Row 5: Utilities sub-panel (inactive cols 0-3, hover cols 4-7) ---
+    print("  Row 5: Utilities sub-panel inactive + hover")
+    place(0, 5, draw_util_power(state='inactive'))
+    place(1, 5, draw_util_water(state='inactive'))
+    place(2, 5, draw_util_fire(state='inactive'))
+    place(3, 5, draw_util_police(state='inactive'))
+    place(4, 5, draw_util_power(state='hover'))
+    place(5, 5, draw_util_water(state='hover'))
+    place(6, 5, draw_util_fire(state='hover'))
+    place(7, 5, draw_util_police(state='hover'))
 
     # --- Row 6: Active tool indicator badges ---
     print("  Row 6: Indicator badges")
@@ -1620,6 +1652,16 @@ def main():
     place(1, 10, draw_clock())
     place(2, 10, draw_unsaved_dot())
     place(3, 10, draw_undo_arrow())
+
+    # --- Row 16: Panel background cells (dark navy) ---
+    # kSpritePanelGracePeriod=512, kSpritePanelSubPanel=513, kSpritePanelToolbar=514,
+    # kSpritePanelDetail=515, kSpritePanelResourceBar=516
+    print("  Row 16: Panel background cells")
+    place(0, 16, draw_panel_bg_cell(78))   # kSpritePanelGracePeriod
+    place(1, 16, draw_panel_bg_cell(80))   # kSpritePanelSubPanel
+    place(2, 16, draw_panel_bg_cell(82))   # kSpritePanelToolbar
+    place(3, 16, draw_panel_bg_cell(85))   # kSpritePanelDetail
+    place(4, 16, draw_panel_bg_cell(88))   # kSpritePanelResourceBar
 
     # Save
     output_path = '/workspace/assets/textures/ui/hud_sprites_ui.png'

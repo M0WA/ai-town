@@ -847,6 +847,20 @@ target_include_directories(integration_tests PRIVATE
 )
 aitown_add_tests(integration_tests LABEL "integration")
 
+# Phase 10c Feature 3: terrain shader wiring integration tests.
+# Both tests (TerrainShaderWiring_EDT_NULL_InitDoesNotCrash and
+# TerrainChunk_RebuildAssignsMaterialType_WhenShaderLoaded) live in one file.
+# Do NOT call add_executable(integration_tests ...) again — duplicate target error.
+# Do NOT call aitown_add_tests(integration_tests ...) again — duplicate registration.
+# Per architecture/testing/framework.md §target_sources() policy:
+#   integration_tests PERMITS target_sources() from Phase 10c onward.
+# terrainMaterialTypeForTest() / setTerrainMaterialTypeForTest() accessors are added
+# by Feature 1 (graphics-dev-irrlicht); this file forward-compiles once those
+# accessors land in IrrlichtRenderer.h.
+target_sources(integration_tests PRIVATE
+    tests/integration/terrain_shader_wiring_test.cpp  # Phase 10c: terrain shader wiring
+)
+
 # ----------------------------------------------------------------------------
 # opengl_tests — sRGB upload, setMesh grab/drop smoke test, shader compilation
 # Must run under xvfb-run on Linux.

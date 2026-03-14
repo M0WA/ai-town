@@ -19,6 +19,13 @@ constexpr uint32_t kSpriteToolUtilitiesInactive = 34;
 constexpr uint32_t kSpriteToolDemolishInactive  = 35;
 constexpr uint32_t kSpriteToolQueryInactive     = 36;
 
+// Row 1 — Toolbar tool-mode icons (hover state; cols 5-9, adjacent to inactive cols 0-4)
+constexpr uint32_t kSpriteToolZoneHover         = 37;
+constexpr uint32_t kSpriteToolRoadHover         = 38;
+constexpr uint32_t kSpriteToolUtilitiesHover    = 39;
+constexpr uint32_t kSpriteToolDemolishHover     = 40;
+constexpr uint32_t kSpriteToolQueryHover        = 41;
+
 // Row 2 — Zone sub-panel button icons (active/selected state; order: col=zone R/C/I, row=density Low/Med/High)
 constexpr uint32_t kSpriteZoneResLowActive      = 64;
 constexpr uint32_t kSpriteZoneComLowActive      = 65;
@@ -41,6 +48,17 @@ constexpr uint32_t kSpriteZoneResHighInactive   = 102;
 constexpr uint32_t kSpriteZoneComHighInactive   = 103;
 constexpr uint32_t kSpriteZoneIndHighInactive   = 104;
 
+// Row 3 — Zone sub-panel button icons (hover state; cols 9-17, adjacent to inactive cols 0-8)
+constexpr uint32_t kSpriteZoneResLowHover       = 105;
+constexpr uint32_t kSpriteZoneComLowHover       = 106;
+constexpr uint32_t kSpriteZoneIndLowHover       = 107;
+constexpr uint32_t kSpriteZoneResMedHover       = 108;
+constexpr uint32_t kSpriteZoneComMedHover       = 109;
+constexpr uint32_t kSpriteZoneIndMedHover       = 110;
+constexpr uint32_t kSpriteZoneResHighHover      = 111;
+constexpr uint32_t kSpriteZoneComHighHover      = 112;
+constexpr uint32_t kSpriteZoneIndHighHover      = 113;
+
 // Row 4 — Utilities sub-panel button icons (active/selected state)
 constexpr uint32_t kSpriteUtilPowerActive       = 128;
 constexpr uint32_t kSpriteUtilWaterActive       = 129;
@@ -52,6 +70,12 @@ constexpr uint32_t kSpriteUtilPowerInactive     = 160;
 constexpr uint32_t kSpriteUtilWaterInactive     = 161;
 constexpr uint32_t kSpriteUtilFireInactive      = 162;
 constexpr uint32_t kSpriteUtilPoliceInactive    = 163;
+
+// Row 5 — Utilities sub-panel button icons (hover state; cols 4-7, adjacent to inactive cols 0-3)
+constexpr uint32_t kSpriteUtilPowerHover        = 164;
+constexpr uint32_t kSpriteUtilWaterHover        = 165;
+constexpr uint32_t kSpriteUtilFireHover         = 166;
+constexpr uint32_t kSpriteUtilPoliceHover       = 167;
 
 // Row 6 — Active tool indicator badge icons (32×32 px, centered in 64×64 px cell)
 constexpr uint32_t kSpriteIndicatorNone         = 192;
@@ -80,3 +104,11 @@ constexpr uint32_t kSpriteNotificationBell      = 320;
 constexpr uint32_t kSpriteClockIcon             = 321;
 constexpr uint32_t kSpriteUnsavedDot            = 322;
 constexpr uint32_t kSpriteUndoIcon              = 323;
+
+// Row 16 — Panel background cells (dark navy tiles; cols 0-4; rows 11-15 reserved)
+// Fill: rgb(13,27,42); opacity/alpha per tier; corner radius: 8 px (except resource bar = 0 px).
+constexpr uint32_t kSpritePanelGracePeriod      = 512; // 78% opacity (alpha 199)
+constexpr uint32_t kSpritePanelSubPanel         = 513; // 80% opacity (alpha 204)
+constexpr uint32_t kSpritePanelToolbar          = 514; // 82% opacity (alpha 209)
+constexpr uint32_t kSpritePanelDetail           = 515; // 85% opacity (alpha 217)
+constexpr uint32_t kSpritePanelResourceBar      = 516; // 88% opacity (alpha 224)
