@@ -96,8 +96,9 @@ constexpr uint32_t kSpriteCursorQuery           = 229;
 // Row 8 — Minimap overlay toggle icons (active state)
 constexpr uint32_t kSpriteOverlayServiceCoverageActive   = 256;
 
-// Row 9 — Minimap overlay toggle icons (inactive state)
+// Row 9 — Minimap overlay toggle icons (inactive state + hover state in adjacent cols)
 constexpr uint32_t kSpriteOverlayServiceCoverageInactive = 288;
+constexpr uint32_t kSpriteOverlayServiceCoverageHover    = 289;
 
 // Row 10 — Notification / HUD miscellaneous
 constexpr uint32_t kSpriteNotificationBell      = 320;

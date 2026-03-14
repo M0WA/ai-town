@@ -935,6 +935,34 @@ void IrrlichtUIBackend::setElementRect(UIElementHandle handle,
 }
 
 // ---------------------------------------------------------------------------
+// 21. setElementTextColor
+// Sets the override text colour on an IGUIStaticText element.
+// Used by HUD numeric readouts (treasury, debt, population, date) to apply
+// amber #F0B429 = SColor(255, 240, 180, 41) immediately after construction.
+// No-op on button elements and invalid handles.
+// ---------------------------------------------------------------------------
+void IrrlichtUIBackend::setElementTextColor(UIElementHandle handle, int r, int g, int b)
+{
+    auto it = m_elementMap.find(handle);
+    if (it == m_elementMap.end() || !it->second.element) {
+        return;
+    }
+
+    irr::gui::IGUIElement* elem = it->second.element;
+
+    // Only IGUIStaticText supports setOverrideColor().
+    if (elem->getType() != irr::gui::EGUIET_STATIC_TEXT) {
+        return;
+    }
+
+    static_cast<irr::gui::IGUIStaticText*>(elem)->setOverrideColor(
+        irr::video::SColor(255,
+            static_cast<irr::u32>(r),
+            static_cast<irr::u32>(g),
+            static_cast<irr::u32>(b)));
+}
+
+// ---------------------------------------------------------------------------
 // handleViewportResize
 // Detects screen size changes and repositions every GUI element so that its
 // physical pixel position matches its stored virtual coordinate at the new

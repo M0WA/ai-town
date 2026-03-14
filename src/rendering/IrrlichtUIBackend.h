@@ -33,10 +33,11 @@ namespace irr {
     namespace video { class IVideoDriver; class ITexture; }
 }  // namespace irr
 
-// IrrlichtUIBackend — Full Irrlicht-backed implementation of all 19 IUIBackend
+// IrrlichtUIBackend — Full Irrlicht-backed implementation of all 21 IUIBackend
 // pure-virtual methods. Phase 8 deliverable replacing Phase 1 stubs.
 // Method 18 (setElementBackground) added in Phase 9b.
 // Method 19 (setElementMonoFont) added in Phase 10.
+// Method 21 (setElementTextColor) added in Phase 10c.
 //
 // Constructor: takes irr::IrrlichtDevice* (non-null, asserted in the .cpp) and
 // a pre-cached maxAnisotropy value from RenderSystem (1.0f when extension absent).
@@ -91,6 +92,7 @@ public:
     // Method 17: loadTexture
     // Method 18: setElementBackground  (Phase 9b)
     // Method 19: setElementMonoFont    (Phase 10)
+    // Method 21: setElementTextColor   (Phase 10c)
     // -------------------------------------------------------------------------
 
     // 1.
@@ -161,6 +163,11 @@ public:
     //     physical pixel coordinates. Preserves all other element state.
     void setElementRect(UIElementHandle handle,
                         int x, int y, int w, int h) override;
+
+    // 21. Override the text colour of a static text element (amber numerics, etc.).
+    //     Calls IGUIStaticText::setOverrideColor(SColor(255, r, g, b)).
+    //     No-op on button elements or invalid handles.
+    void setElementTextColor(UIElementHandle handle, int r, int g, int b) override;
 
 private:
     irr::IrrlichtDevice*       m_device{nullptr};

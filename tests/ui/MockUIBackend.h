@@ -3,7 +3,7 @@
 #include "src/interfaces/IUIBackend.h"
 #include "gmock/gmock.h"
 
-// MockUIBackend — GMock implementation of IUIBackend's 19 methods.
+// MockUIBackend — GMock implementation of IUIBackend's 21 methods.
 // Source location: tests/ui/mock_ui_backend.h
 // Returns arbitrary non-zero integer handles (e.g., an incrementing counter)
 // with no real objects — unit tests that call UIManager methods never dereference
@@ -36,4 +36,8 @@ public:
     // destroying its handle. Used by ModalDialog::setDialogRect() to centre dialog content.
     // No-op in most tests; NiceMock<MockUIBackend> suppresses unexpected-call warnings.
     MOCK_METHOD(void,            setElementRect,       (UIElementHandle handle, int x, int y, int w, int h),   (override));
+    // Method 21 — overrides text colour on a static text element.
+    // HUD numeric readouts call this with amber #F0B429 = (240, 180, 41).
+    // No-op in most tests; NiceMock<MockUIBackend> suppresses unexpected-call warnings.
+    MOCK_METHOD(void,            setElementTextColor,  (UIElementHandle handle, int r, int g, int b),           (override));
 };

@@ -96,4 +96,14 @@ public:
     //     destroying and recreating handles which would invalidate test expectations.
     virtual void            setElementRect(UIElementHandle handle,
                                            int x, int y, int w, int h) = 0;
+
+    // 21. Override the text colour of a static text element.
+    //     r, g, b are in [0, 255]; alpha is fixed at 255 (fully opaque).
+    //     Has no effect on button elements or invalid handles.
+    //     In IrrlichtUIBackend: calls IGUIStaticText::setOverrideColor(SColor(255, r, g, b)).
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     HUD numeric readouts (treasury, debt, population, date) call this with
+    //     amber #F0B429 = (240, 180, 41) immediately after addStaticText().
+    virtual void            setElementTextColor(UIElementHandle handle,
+                                                int r, int g, int b) = 0;
 };
