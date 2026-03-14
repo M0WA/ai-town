@@ -1489,6 +1489,28 @@ where possible are noted inline.
   (making text readable) and `assets/textures/ui/hud_sprites_ui.png` (replacing text with icons
   entirely). Spec reference: `architecture/ui-ux/hud-layout.md` (Toolbar Button Text Fallback).
 
+<!-- BINDING DECISION — prod-owner 2026-03-13: Two sprite offset bugs were found and fixed
+in IrrlichtUIBackend::spriteRectForIndex() after Phase 9b delivery. Both were caused by
+incorrect special cases that deviated from the uniform 64×64 grid formula. The architecture
+spec (architecture/asset-standards/2d-texture-standards.md — "Sprite ID Encoding and
+Row-Conflict Pitfall") was updated to document both bugs as anti-patterns.
+
+1. **Bell/clock/dot/undo icons (IDs 320–323) at wrong y position**: A special case in
+   `spriteRectForIndex()` placed `icon_bell` at `(56, 64)` (inside the toolbar-inactive row)
+   instead of row 10 (y=640). The notification bell rendered the road-inactive icon shifted
+   8px left. Fix: removed the special case; IDs 320–323 now use the standard grid formula
+   (`col = id % 32, row = id / 32`), placing them correctly in row 10 at y=640.
+
+2. **Utilities sub-panel icons (IDs 128–163) with 72px column spacing**: A special case
+   used `xOffsets = {0, 72, 144, 216}` (72px steps) instead of 64px. Fire appeared 16px
+   off, Police 24px off — both had their left edges clipped. Fix: removed the special case;
+   all icons now use the uniform 64×64 grid, placing them at x = 0, 64, 128, 192.
+
+Both fixes were verified by visual inspection; `tools/generate_hud_sprites.py` already
+generated sprites at 64px columns — the bugs were in the `spriteRectForIndex()` decoder,
+not the generator. Committed in fix commit 6e2da46.
+-->
+
 ---
 
 ### Team

@@ -111,6 +111,32 @@ Deliver all V1 audio assets and the dynamic soundscape system: adaptive music wi
   (from Phase 7 CI delivery). Audio tests run under these env vars in all three
   jobs. Evidence: `.github/workflows/ci.yml` "Run unit tests (no display)" steps.
 
+<!-- BINDING DECISION — prod-owner 2026-03-13: Actual HUD font delivery diverges from the
+Phase 9b/Phase 10 plan in the following ways.
+
+1. **Font file names changed**: Phase 9b described delivering `assets/fonts/ui_font.xml`
+   (Irrlicht's FontTool output). The actual deliverables are `assets/fonts/hud_font.xml`
+   (proportional) and `assets/fonts/hud_mono_font.xml` (monospace). Phase 10 CI presence
+   gates already reflect the correct filenames (hud_font.xml / hud_mono_font.xml).
+
+2. **Font authoring tool**: Phase 9b referenced Irrlicht's FontTool for authoring. The
+   actual delivery used a new Python tool `tools/generate_hud_font.py` (205 lines) that
+   renders DejaVu Sans / DejaVu Sans Mono at 18px via Pillow. This gives precise control
+   over baseline position and negative-bearing compensation — not achievable with FontTool.
+
+3. **Cell height and baseline alignment**: Fonts are rendered at 18px into 22px-tall cells
+   (ascent=17, descent=5). All glyph rects share the same cell height. Baseline is at
+   y=17 within every cell, giving correct shared-baseline alignment across mixed
+   upper/lowercase text. Phase 9b mentioned 18px but did not specify the 22px cell height
+   or the baseline-at-y=17 contract. The contract is now documented in
+   `architecture/ui-ux/resolution-ui-scaling.md` — "Bitmap Font Baseline Alignment" section.
+
+4. **IrrlichtUIBackend loads `hud_font.xml`, not `ui_font.xml`**: The constructor now loads
+   `assets/fonts/hud_font.xml` as the proportional font and `assets/fonts/hud_mono_font.xml`
+   as the monospace font. The `assets/fonts/FONT_REQUIRED.txt` authoring guide from Phase 9b
+   is superseded by `tools/generate_hud_font.py`. Committed in fix commit 1100241.
+-->
+
 ### Exit Criteria
 
 - Main menu music plays and transitions smoothly (1 s fade) into gameplay on start
