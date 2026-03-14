@@ -207,9 +207,11 @@ target_link_libraries(aitown_audio PRIVATE
 # ----------------------------------------------------------------------------
 # aitown_sim — City simulation (economy, traffic, zoning, population)
 # Phase 6 replaces placeholder.cpp with CitySimulation.cpp.
+# Phase 11 adds SaveSystem.cpp (save/load serialization).
 # ----------------------------------------------------------------------------
 add_library(aitown_sim STATIC
     src/simulation/CitySimulation.cpp
+    src/simulation/SaveSystem.cpp
 )
 target_include_directories(aitown_sim
     PRIVATE   src/simulation/      # implementation headers — NOT propagated

@@ -11,7 +11,10 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -1588,10 +1591,25 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
             SoundPriority::NORMAL, 1.0f);
     }
 
-    // Phase 10: spawn building mesh for the placed zone tile.
-    // Phase 10 variant policy: always _01 suffix (round-robin deferred to Phase 11).
-    if (m_renderer) {
-        m_renderer->placeBuildingMesh(tileX, tileZ, zoneAssetBaseName(type, tier));
+    // Phase 11: round-robin variant cycling (_01/_02/_03).
+    // Increment counter for this (zone, tier) pair, then pick variant = counter % 3 + 1.
+    {
+        int zoneIdx = static_cast<int>(type);
+        int tierIdx = static_cast<int>(tier);
+        int idx     = zoneIdx * 3 + tierIdx;
+        m_buildingVariantCounters[idx]++;
+        int variantNum = ((m_buildingVariantCounters[idx] - 1) % 3) + 1;  // 1, 2, or 3
+
+        if (m_renderer) {
+            // Build name like "res_low_01", "res_low_02", "res_low_03"
+            std::string baseName = zoneAssetBaseName(type, tier);
+            // zoneAssetBaseName returns "zone_dens_01"; replace "01" suffix with variantNum
+            if (baseName.size() >= 2) {
+                baseName[baseName.size() - 2] = '0';
+                baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
+            }
+            m_renderer->placeBuildingMesh(tileX, tileZ, baseName);
+        }
     }
 
     // Record undo
@@ -2263,3 +2281,728 @@ void CitySimulation::testForceUnlockDensityTier(ZoneType zone, DensityTier tier)
     m_densityUnlockState.consecutive_months_above_threshold[tierIdx] = 0;
 }
 #endif  // AITOWN_TESTING_ENABLED
+
+// ---------------------------------------------------------------------------
+// getBuildingVariantCounter — Phase 11 test/save seam.
+// Returns the round-robin counter for the given (zone, tier) pair.
+// Index: zone * 3 + tier.  Range of zone: 0-2, range of tier: 0-2.
+// Out-of-range inputs return 0 (safe; treated as "no placements yet").
+// ---------------------------------------------------------------------------
+int CitySimulation::getBuildingVariantCounter(int zone, int tier) const {
+    int idx = zone * 3 + tier;
+    if (idx < 0 || idx >= static_cast<int>(m_buildingVariantCounters.size())) return 0;
+    return m_buildingVariantCounters[idx];
+}
+
+// ===========================================================================
+// Serialization helpers — hand-written minimal JSON (no external library).
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// jsonEscape — escape a string for embedding in JSON (handles backslash, quote,
+// and the common ASCII control characters).  Full Unicode pass-through is fine
+// for V1 (save files use ASCII city/scenario names only).
+// ---------------------------------------------------------------------------
+static std::string jsonEscape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 4);
+    for (unsigned char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (c < 0x20) {
+                    // Other control characters → \uXXXX
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(c));
+                    out += buf;
+                } else {
+                    out += static_cast<char>(c);
+                }
+        }
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// serializeToJson — produce full city-state JSON string (schema_version: 1).
+// ---------------------------------------------------------------------------
+std::string CitySimulation::serializeToJson() const {
+    // Accumulate outstanding_debt from all loans
+    float outstandingDebt = 0.0f;
+    for (const auto& loan : m_loans) {
+        outstandingDebt += static_cast<float>(loan.remainingPrincipal);
+    }
+
+    // speed_multiplier as int (0=Paused, 1=x1, 2=x3, 3=x10)
+    int speedInt = 0;
+    switch (m_speed) {
+        case SpeedMultiplier::Paused: speedInt = 0; break;
+        case SpeedMultiplier::x1:    speedInt = 1; break;
+        case SpeedMultiplier::x3:    speedInt = 2; break;
+        case SpeedMultiplier::x10:   speedInt = 3; break;
+    }
+
+    std::string j;
+    j.reserve(4096);
+
+    j += "{\n";
+    j += "  \"schema_version\": 1,\n";
+    j += "  \"treasury_balance\": " + std::to_string(m_treasury) + ",\n";
+
+    // tax_rates array [Res, Com, Ind]
+    j += "  \"tax_rates\": [";
+    for (int i = 0; i < 3; ++i) {
+        if (i > 0) j += ", ";
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.6f", m_taxRates[i]);
+        j += buf;
+    }
+    j += "],\n";
+
+    {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.6f", outstandingDebt);
+        j += "  \"outstanding_debt\": ";
+        j += buf;
+        j += ",\n";
+    }
+    j += "  \"outstanding_bond_uses\": " + std::to_string(m_outstandingBondUses) + ",\n";
+    j += "  \"consecutive_deficit_months\": " + std::to_string(m_consecutiveDeficitMonths) + ",\n";
+    j += "  \"speed_multiplier\": " + std::to_string(speedInt) + ",\n";
+
+    // population_milestone_fired array (5 bools)
+    j += "  \"population_milestone_fired\": [";
+    for (int i = 0; i < 5; ++i) {
+        if (i > 0) j += ", ";
+        j += (m_milestoneFired[i] ? "true" : "false");
+    }
+    j += "],\n";
+
+    // building_variant_counters array (9 ints)
+    j += "  \"building_variant_counters\": [";
+    for (int i = 0; i < 9; ++i) {
+        if (i > 0) j += ", ";
+        j += std::to_string(m_buildingVariantCounters[i]);
+    }
+    j += "],\n";
+
+    // tiles array
+    j += "  \"tiles\": [\n";
+    {
+        bool first = true;
+        for (const auto& [key, tile] : m_tiles) {
+            int tx = static_cast<int>(key >> 32);
+            int tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
+            if (!first) j += ",\n";
+            first = false;
+            char popBuf[32];
+            std::snprintf(popBuf, sizeof(popBuf), "%.6f", tile.population);
+            j += "    {\"x\": " + std::to_string(tx)
+               + ", \"z\": " + std::to_string(tz)
+               + ", \"zone\": " + std::to_string(static_cast<int>(tile.zone))
+               + ", \"tier\": " + std::to_string(static_cast<int>(tile.density))
+               + ", \"is_zoned\": " + (tile.isZoned ? "true" : "false")
+               + ", \"is_road\": " + (tile.isRoad ? "true" : "false")
+               + ", \"population\": " + popBuf
+               + ", \"alert_fired\": " + (tile.alertFired ? "true" : "false")
+               + "}";
+        }
+    }
+    j += "\n  ],\n";
+
+    // service_buildings array
+    j += "  \"service_buildings\": [\n";
+    {
+        bool first = true;
+        for (const auto& sb : m_serviceBuildings) {
+            if (!first) j += ",\n";
+            first = false;
+            j += "    {\"x\": " + std::to_string(sb.x)
+               + ", \"z\": " + std::to_string(sb.z)
+               + ", \"type\": " + std::to_string(static_cast<int>(sb.type))
+               + ", \"degraded\": " + (sb.degraded ? "true" : "false")
+               + "}";
+        }
+    }
+    j += "\n  ],\n";
+
+    // density_unlock_flags array (6 bools)
+    j += "  \"density_unlock_flags\": [";
+    for (int i = 0; i < 6; ++i) {
+        if (i > 0) j += ", ";
+        j += (m_densityUnlockState.unlock_flags[i] ? "true" : "false");
+    }
+    j += "],\n";
+
+    // density_unlock_revenue_counter array (6 ints)
+    j += "  \"density_unlock_revenue_counter\": [";
+    for (int i = 0; i < 6; ++i) {
+        if (i > 0) j += ", ";
+        j += std::to_string(m_densityUnlockState.consecutive_months_above_threshold[i]);
+    }
+    j += "],\n";
+
+    j += "  \"total_ticks\": " + std::to_string(m_totalTicks) + ",\n";
+    j += "  \"month\": " + std::to_string(m_month) + ",\n";
+    j += "  \"year\": " + std::to_string(m_year) + ",\n";
+
+    // scenario_state object
+    j += "  \"scenario_state\": {";
+    {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.6f", m_scenarioState.win_condition_progress);
+        j += "\"win_condition_progress\": ";
+        j += buf;
+    }
+    j += ", \"elapsed_ticks\": " + std::to_string(m_scenarioState.elapsed_ticks);
+    j += ", \"scenario_id\": \"" + jsonEscape(m_scenarioState.scenario_id) + "\"";
+    j += "}\n";
+
+    j += "}\n";
+    return j;
+}
+
+// ===========================================================================
+// Minimal JSON parser helpers for deserializeFromJson
+// ===========================================================================
+
+namespace {
+
+// skipWhitespace — advance pos past whitespace characters.
+static void skipWs(const std::string& s, size_t& pos) {
+    while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\r' || s[pos] == '\n'))
+        ++pos;
+}
+
+// expect — verify that s[pos..pos+len) == expected, advance pos, return false on mismatch.
+static bool expect(const std::string& s, size_t& pos, const char* expected, std::string& err) {
+    size_t len = std::strlen(expected);
+    if (pos + len > s.size() || s.substr(pos, len) != expected) {
+        err = std::string("expected '") + expected + "' at position " + std::to_string(pos);
+        return false;
+    }
+    pos += len;
+    return true;
+}
+
+// parseString — parse a JSON string starting at the current quote, returning the raw content.
+static bool parseString(const std::string& s, size_t& pos, std::string& out, std::string& err) {
+    skipWs(s, pos);
+    if (pos >= s.size() || s[pos] != '"') {
+        err = "expected '\"' at position " + std::to_string(pos);
+        return false;
+    }
+    ++pos;
+    out.clear();
+    while (pos < s.size() && s[pos] != '"') {
+        if (s[pos] == '\\') {
+            ++pos;
+            if (pos >= s.size()) { err = "unexpected end in string escape"; return false; }
+            switch (s[pos]) {
+                case '"':  out += '"';  break;
+                case '\\': out += '\\'; break;
+                case 'n':  out += '\n'; break;
+                case 'r':  out += '\r'; break;
+                case 't':  out += '\t'; break;
+                default:   out += s[pos]; break;
+            }
+        } else {
+            out += s[pos];
+        }
+        ++pos;
+    }
+    if (pos >= s.size()) { err = "unterminated string"; return false; }
+    ++pos;  // consume closing quote
+    return true;
+}
+
+// parseInt64 — parse a signed integer (no overflow check; save files stay in safe range).
+static bool parseInt64(const std::string& s, size_t& pos, int64_t& out, std::string& err) {
+    skipWs(s, pos);
+    if (pos >= s.size()) { err = "unexpected end of input parsing integer"; return false; }
+    bool neg = false;
+    if (s[pos] == '-') { neg = true; ++pos; }
+    if (pos >= s.size() || !std::isdigit(static_cast<unsigned char>(s[pos]))) {
+        err = "expected digit at position " + std::to_string(pos);
+        return false;
+    }
+    int64_t v = 0;
+    while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
+        v = v * 10 + (s[pos] - '0');
+        ++pos;
+    }
+    out = neg ? -v : v;
+    return true;
+}
+
+// parseFloat — parse a floating-point number (handles negative, decimal, exponent).
+static bool parseFloat(const std::string& s, size_t& pos, float& out, std::string& err) {
+    skipWs(s, pos);
+    size_t start = pos;
+    if (pos < s.size() && (s[pos] == '-' || s[pos] == '+')) ++pos;
+    while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) ++pos;
+    if (pos < s.size() && s[pos] == '.') {
+        ++pos;
+        while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) ++pos;
+    }
+    if (pos < s.size() && (s[pos] == 'e' || s[pos] == 'E')) {
+        ++pos;
+        if (pos < s.size() && (s[pos] == '+' || s[pos] == '-')) ++pos;
+        while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) ++pos;
+    }
+    if (start == pos) { err = "expected float at position " + std::to_string(pos); return false; }
+    try {
+        out = std::stof(s.substr(start, pos - start));
+    } catch (...) {
+        err = "invalid float at position " + std::to_string(start);
+        return false;
+    }
+    return true;
+}
+
+// parseBool — parse JSON true/false.
+static bool parseBool(const std::string& s, size_t& pos, bool& out, std::string& err) {
+    skipWs(s, pos);
+    if (pos + 4 <= s.size() && s.substr(pos, 4) == "true") {
+        out = true; pos += 4; return true;
+    }
+    if (pos + 5 <= s.size() && s.substr(pos, 5) == "false") {
+        out = false; pos += 5; return true;
+    }
+    err = "expected 'true' or 'false' at position " + std::to_string(pos);
+    return false;
+}
+
+// parseKey — parse "key": from JSON object, return the key string.
+static bool parseKey(const std::string& s, size_t& pos, std::string& key, std::string& err) {
+    skipWs(s, pos);
+    if (!parseString(s, pos, key, err)) return false;
+    skipWs(s, pos);
+    return expect(s, pos, ":", err);
+}
+
+}  // anonymous namespace
+
+// ---------------------------------------------------------------------------
+// deserializeFromJson — restore city state from a JSON string produced by
+// serializeToJson().  Returns false on any error; sets errorOut.
+// ---------------------------------------------------------------------------
+bool CitySimulation::deserializeFromJson(const std::string& json, std::string& errorOut) {
+    size_t pos = 0;
+    skipWs(json, pos);
+    if (!expect(json, pos, "{", errorOut)) return false;
+
+    // Track which required top-level keys we've seen
+    bool gotVersion = false;
+    bool gotTreasury = false;
+    bool gotTaxRates = false;
+    bool gotDebt = false;
+    bool gotBondUses = false;
+    bool gotDeficitMonths = false;
+    bool gotSpeed = false;
+    bool gotMilestones = false;
+    bool gotVariantCounters = false;
+    bool gotTiles = false;
+    bool gotServiceBuildings = false;
+    bool gotUnlockFlags = false;
+    bool gotUnlockCounter = false;
+    bool gotTotalTicks = false;
+    bool gotMonth = false;
+    bool gotYear = false;
+    bool gotScenario = false;
+
+    // Temporary storage for the deserialized data (applied atomically at the end)
+    int64_t newTreasury = 0;
+    float   newTaxRates[3] = {0.05f, 0.05f, 0.05f};
+    int     newOutstandingBondUses = 0;
+    int     newConsecutiveDeficitMonths = 0;
+    SpeedMultiplier newSpeed = SpeedMultiplier::x3;
+    bool    newMilestoneFired[5] = {};
+    std::array<int,9> newVariantCounters{};
+    std::vector<std::pair<int64_t, TileData>> newTiles;
+    std::vector<ServiceBuilding> newServiceBuildings;
+    DensityUnlockState newDensityUnlock{};
+    int     newTotalTicks = 0;
+    int     newMonth = 1;
+    int     newYear = 1;
+    ScenarioState newScenario{};
+
+    skipWs(json, pos);
+    while (pos < json.size() && json[pos] != '}') {
+        std::string key;
+        if (!parseKey(json, pos, key, errorOut)) return false;
+        skipWs(json, pos);
+
+        if (key == "schema_version") {
+            int64_t v = 0;
+            if (!parseInt64(json, pos, v, errorOut)) return false;
+            if (v != 1) { errorOut = "unsupported schema_version: " + std::to_string(v); return false; }
+            gotVersion = true;
+
+        } else if (key == "treasury_balance") {
+            if (!parseInt64(json, pos, newTreasury, errorOut)) return false;
+            gotTreasury = true;
+
+        } else if (key == "tax_rates") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            for (int i = 0; i < 3; ++i) {
+                skipWs(json, pos);
+                if (!parseFloat(json, pos, newTaxRates[i], errorOut)) return false;
+                skipWs(json, pos);
+                if (i < 2) { if (!expect(json, pos, ",", errorOut)) return false; }
+            }
+            skipWs(json, pos);
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotTaxRates = true;
+
+        } else if (key == "outstanding_debt") {
+            // We don't restore loan list from this field (loans are not individually serialized
+            // in schema v1 for simplicity); the debt figure is informational on load.
+            // We just consume the value.
+            float dummy = 0.0f;
+            if (!parseFloat(json, pos, dummy, errorOut)) return false;
+            gotDebt = true;
+
+        } else if (key == "outstanding_bond_uses") {
+            int64_t v = 0;
+            if (!parseInt64(json, pos, v, errorOut)) return false;
+            newOutstandingBondUses = static_cast<int>(v);
+            gotBondUses = true;
+
+        } else if (key == "consecutive_deficit_months") {
+            int64_t v = 0;
+            if (!parseInt64(json, pos, v, errorOut)) return false;
+            newConsecutiveDeficitMonths = static_cast<int>(v);
+            gotDeficitMonths = true;
+
+        } else if (key == "speed_multiplier") {
+            int64_t v = 0;
+            if (!parseInt64(json, pos, v, errorOut)) return false;
+            switch (v) {
+                case 0: newSpeed = SpeedMultiplier::Paused; break;
+                case 1: newSpeed = SpeedMultiplier::x1;    break;
+                case 2: newSpeed = SpeedMultiplier::x3;    break;
+                case 3: newSpeed = SpeedMultiplier::x10;   break;
+                default:
+                    errorOut = "invalid speed_multiplier value: " + std::to_string(v);
+                    return false;
+            }
+            gotSpeed = true;
+
+        } else if (key == "population_milestone_fired") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            for (int i = 0; i < 5; ++i) {
+                skipWs(json, pos);
+                if (!parseBool(json, pos, newMilestoneFired[i], errorOut)) return false;
+                skipWs(json, pos);
+                if (i < 4) { if (!expect(json, pos, ",", errorOut)) return false; }
+            }
+            skipWs(json, pos);
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotMilestones = true;
+
+        } else if (key == "building_variant_counters") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            for (int i = 0; i < 9; ++i) {
+                skipWs(json, pos);
+                int64_t v = 0;
+                if (!parseInt64(json, pos, v, errorOut)) return false;
+                newVariantCounters[i] = static_cast<int>(v);
+                skipWs(json, pos);
+                if (i < 8) { if (!expect(json, pos, ",", errorOut)) return false; }
+            }
+            skipWs(json, pos);
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotVariantCounters = true;
+
+        } else if (key == "tiles") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            skipWs(json, pos);
+            while (pos < json.size() && json[pos] != ']') {
+                skipWs(json, pos);
+                if (!expect(json, pos, "{", errorOut)) return false;
+                int tileX = 0, tileZ = 0;
+                TileData td{};
+                bool first = true;
+                skipWs(json, pos);
+                while (pos < json.size() && json[pos] != '}') {
+                    if (!first) {
+                        skipWs(json, pos);
+                        if (json[pos] == ',') { ++pos; skipWs(json, pos); }
+                    }
+                    first = false;
+                    std::string tk;
+                    if (!parseKey(json, pos, tk, errorOut)) return false;
+                    skipWs(json, pos);
+                    if (tk == "x") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false; tileX = static_cast<int>(v);
+                    } else if (tk == "z") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false; tileZ = static_cast<int>(v);
+                    } else if (tk == "zone") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+                        if (v < 0 || v > 2) { errorOut = "invalid zone value"; return false; }
+                        td.zone = static_cast<ZoneType>(v);
+                    } else if (tk == "tier") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+                        if (v < 0 || v > 2) { errorOut = "invalid tier value"; return false; }
+                        td.density = static_cast<DensityTier>(v);
+                    } else if (tk == "is_zoned") {
+                        if (!parseBool(json, pos, td.isZoned, errorOut)) return false;
+                    } else if (tk == "is_road") {
+                        if (!parseBool(json, pos, td.isRoad, errorOut)) return false;
+                    } else if (tk == "population") {
+                        if (!parseFloat(json, pos, td.population, errorOut)) return false;
+                    } else if (tk == "alert_fired") {
+                        if (!parseBool(json, pos, td.alertFired, errorOut)) return false;
+                    } else {
+                        // Unknown tile field — skip string, number, bool, or nested value
+                        // Simple skip: consume until comma or }
+                        skipWs(json, pos);
+                        if (json[pos] == '"') {
+                            std::string dummy; if (!parseString(json, pos, dummy, errorOut)) return false;
+                        } else {
+                            while (pos < json.size() && json[pos] != ',' && json[pos] != '}') ++pos;
+                        }
+                    }
+                    skipWs(json, pos);
+                }
+                if (!expect(json, pos, "}", errorOut)) return false;
+                newTiles.emplace_back(tileKey(tileX, tileZ), td);
+                skipWs(json, pos);
+                if (pos < json.size() && json[pos] == ',') { ++pos; skipWs(json, pos); }
+            }
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotTiles = true;
+
+        } else if (key == "service_buildings") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            skipWs(json, pos);
+            while (pos < json.size() && json[pos] != ']') {
+                skipWs(json, pos);
+                if (!expect(json, pos, "{", errorOut)) return false;
+                ServiceBuilding sb{};
+                bool first = true;
+                skipWs(json, pos);
+                while (pos < json.size() && json[pos] != '}') {
+                    if (!first) {
+                        skipWs(json, pos);
+                        if (json[pos] == ',') { ++pos; skipWs(json, pos); }
+                    }
+                    first = false;
+                    std::string sk;
+                    if (!parseKey(json, pos, sk, errorOut)) return false;
+                    skipWs(json, pos);
+                    if (sk == "x") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false; sb.x = static_cast<int>(v);
+                    } else if (sk == "z") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false; sb.z = static_cast<int>(v);
+                    } else if (sk == "type") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+                        if (v < 0 || v > 3) { errorOut = "invalid service building type"; return false; }
+                        sb.type = static_cast<ServiceType>(v);
+                    } else if (sk == "degraded") {
+                        if (!parseBool(json, pos, sb.degraded, errorOut)) return false;
+                    } else {
+                        skipWs(json, pos);
+                        if (json[pos] == '"') {
+                            std::string dummy; if (!parseString(json, pos, dummy, errorOut)) return false;
+                        } else {
+                            while (pos < json.size() && json[pos] != ',' && json[pos] != '}') ++pos;
+                        }
+                    }
+                    skipWs(json, pos);
+                }
+                if (!expect(json, pos, "}", errorOut)) return false;
+                newServiceBuildings.push_back(sb);
+                skipWs(json, pos);
+                if (pos < json.size() && json[pos] == ',') { ++pos; skipWs(json, pos); }
+            }
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotServiceBuildings = true;
+
+        } else if (key == "density_unlock_flags") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            for (int i = 0; i < 6; ++i) {
+                skipWs(json, pos);
+                if (!parseBool(json, pos, newDensityUnlock.unlock_flags[i], errorOut)) return false;
+                skipWs(json, pos);
+                if (i < 5) { if (!expect(json, pos, ",", errorOut)) return false; }
+            }
+            skipWs(json, pos);
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotUnlockFlags = true;
+
+        } else if (key == "density_unlock_revenue_counter") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            for (int i = 0; i < 6; ++i) {
+                skipWs(json, pos);
+                int64_t v = 0;
+                if (!parseInt64(json, pos, v, errorOut)) return false;
+                newDensityUnlock.consecutive_months_above_threshold[i] = static_cast<int>(v);
+                skipWs(json, pos);
+                if (i < 5) { if (!expect(json, pos, ",", errorOut)) return false; }
+            }
+            skipWs(json, pos);
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotUnlockCounter = true;
+
+        } else if (key == "total_ticks") {
+            int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+            newTotalTicks = static_cast<int>(v);
+            gotTotalTicks = true;
+
+        } else if (key == "month") {
+            int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+            if (v < 1 || v > 12) { errorOut = "month out of range: " + std::to_string(v); return false; }
+            newMonth = static_cast<int>(v);
+            gotMonth = true;
+
+        } else if (key == "year") {
+            int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+            newYear = static_cast<int>(v);
+            gotYear = true;
+
+        } else if (key == "scenario_state") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "{", errorOut)) return false;
+            bool first = true;
+            skipWs(json, pos);
+            while (pos < json.size() && json[pos] != '}') {
+                if (!first) {
+                    skipWs(json, pos);
+                    if (json[pos] == ',') { ++pos; skipWs(json, pos); }
+                }
+                first = false;
+                std::string sk;
+                if (!parseKey(json, pos, sk, errorOut)) return false;
+                skipWs(json, pos);
+                if (sk == "win_condition_progress") {
+                    if (!parseFloat(json, pos, newScenario.win_condition_progress, errorOut)) return false;
+                } else if (sk == "elapsed_ticks") {
+                    int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+                    newScenario.elapsed_ticks = static_cast<int>(v);
+                } else if (sk == "scenario_id") {
+                    if (!parseString(json, pos, newScenario.scenario_id, errorOut)) return false;
+                } else {
+                    skipWs(json, pos);
+                    if (json[pos] == '"') {
+                        std::string dummy; if (!parseString(json, pos, dummy, errorOut)) return false;
+                    } else {
+                        while (pos < json.size() && json[pos] != ',' && json[pos] != '}') ++pos;
+                    }
+                }
+                skipWs(json, pos);
+            }
+            if (!expect(json, pos, "}", errorOut)) return false;
+            gotScenario = true;
+
+        } else {
+            // Unknown top-level key — skip the value (string, number, bool, array, object)
+            skipWs(json, pos);
+            char c = json[pos];
+            if (c == '"') {
+                std::string dummy; if (!parseString(json, pos, dummy, errorOut)) return false;
+            } else if (c == '[' || c == '{') {
+                // Simple depth-tracking skip
+                int depth = 0;
+                while (pos < json.size()) {
+                    char ch = json[pos++];
+                    if (ch == '[' || ch == '{') ++depth;
+                    else if (ch == ']' || ch == '}') { --depth; if (depth <= 0) break; }
+                    else if (ch == '"') {
+                        // Skip string contents
+                        while (pos < json.size() && json[pos] != '"') {
+                            if (json[pos] == '\\') ++pos;
+                            ++pos;
+                        }
+                        if (pos < json.size()) ++pos;
+                    }
+                }
+            } else {
+                // number/bool/null — advance to comma or }
+                while (pos < json.size() && json[pos] != ',' && json[pos] != '}') ++pos;
+            }
+        }
+
+        skipWs(json, pos);
+        if (pos < json.size() && json[pos] == ',') { ++pos; }
+        skipWs(json, pos);
+    }
+
+    if (!expect(json, pos, "}", errorOut)) return false;
+
+    // Validate all required fields were present
+    if (!gotVersion)         { errorOut = "missing schema_version";               return false; }
+    if (!gotTreasury)        { errorOut = "missing treasury_balance";             return false; }
+    if (!gotTaxRates)        { errorOut = "missing tax_rates";                    return false; }
+    if (!gotDebt)            { errorOut = "missing outstanding_debt";             return false; }
+    if (!gotBondUses)        { errorOut = "missing outstanding_bond_uses";        return false; }
+    if (!gotDeficitMonths)   { errorOut = "missing consecutive_deficit_months";   return false; }
+    if (!gotSpeed)           { errorOut = "missing speed_multiplier";             return false; }
+    if (!gotMilestones)      { errorOut = "missing population_milestone_fired";   return false; }
+    if (!gotVariantCounters) { errorOut = "missing building_variant_counters";    return false; }
+    if (!gotTiles)           { errorOut = "missing tiles";                        return false; }
+    if (!gotServiceBuildings){ errorOut = "missing service_buildings";            return false; }
+    if (!gotUnlockFlags)     { errorOut = "missing density_unlock_flags";         return false; }
+    if (!gotUnlockCounter)   { errorOut = "missing density_unlock_revenue_counter"; return false; }
+    if (!gotTotalTicks)      { errorOut = "missing total_ticks";                  return false; }
+    if (!gotMonth)           { errorOut = "missing month";                        return false; }
+    if (!gotYear)            { errorOut = "missing year";                         return false; }
+    if (!gotScenario)        { errorOut = "missing scenario_state";               return false; }
+
+    // ---- Atomically apply the deserialized state ----
+    m_treasury               = newTreasury;
+    m_taxRates[0]            = newTaxRates[0];
+    m_taxRates[1]            = newTaxRates[1];
+    m_taxRates[2]            = newTaxRates[2];
+    m_outstandingBondUses    = newOutstandingBondUses;
+    m_consecutiveDeficitMonths = newConsecutiveDeficitMonths;
+    m_speed                  = newSpeed;
+    for (int i = 0; i < 5; ++i) m_milestoneFired[i] = newMilestoneFired[i];
+    m_buildingVariantCounters = newVariantCounters;
+
+    m_tiles.clear();
+    m_roadTileCount = 0;
+    for (auto& [k, td] : newTiles) {
+        m_tiles[k] = td;
+        if (td.isRoad) ++m_roadTileCount;
+    }
+
+    m_serviceBuildings       = std::move(newServiceBuildings);
+    m_densityUnlockState     = newDensityUnlock;
+    m_totalTicks             = newTotalTicks;
+    m_month                  = newMonth;
+    m_year                   = newYear;
+    m_scenarioState          = std::move(newScenario);
+
+    // Clear loan list on load (not serialized individually in schema v1).
+    // outstanding_bond_uses is restored for the usage-cap check.
+    m_loans.clear();
+    m_loanCooldownTicks = 0;
+
+    // Rebuild total population from tile data
+    int totalPop = 0;
+    for (const auto& [k, td] : m_tiles) {
+        totalPop += static_cast<int>(td.population);
+    }
+    m_totalPopulation = totalPop;
+    m_prevPopulation  = totalPop;
+
+    // Clear per-tick caches (will be recomputed on next tick)
+    m_pendingUndo.reset();
+    m_undoExpiryTickTarget = -1;
+    m_accumulatedSimSeconds = 0.0f;
+
+    return true;
+}

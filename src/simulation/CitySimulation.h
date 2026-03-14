@@ -7,6 +7,7 @@
 #include "ITerrainQuery.h"
 #include "simulation_constants.h"
 
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -117,6 +118,25 @@ public:
     // ---- Time of day ----
     TimeOfDay getTimeOfDay() const override;
 
+    // ---- Serialization (Phase 11) ----
+    // serializeToJson() — produce a full city-state JSON string (schema_version: 1).
+    // Called by SaveSystem::autoSave() and SaveSystem::saveToSlot().
+    // Not virtual — save/load seam; never called through ICitySimulation interface.
+    std::string serializeToJson() const;
+
+    // deserializeFromJson() — restore city state from a JSON string previously produced by
+    // serializeToJson(). Returns true on success; false on any parse error, schema mismatch,
+    // or out-of-range field.  On failure, errorOut receives a human-readable description.
+    // Callers (SaveSystem::loadFromSlot, etc.) MUST check the return value.
+    bool deserializeFromJson(const std::string& json, std::string& errorOut);
+
+    // ---- Test / save seam (not in ICitySimulation) ----
+    // getBuildingVariantCounter() — returns the round-robin variant counter for the given
+    // (zone, tier) pair.  Index: zone*3 + tier.  Used by Phase 11 serialization tests.
+    // Tests and SaveSystem downcast ICitySimulation* to CitySimulation* to reach this.
+    // Not virtual — test/save seam; never called from production paths through the interface.
+    int getBuildingVariantCounter(int zone, int tier) const;
+
     // ---- Test / internal API (not in ICitySimulation) ----
     // addServiceBuilding: inject a service building directly for unit tests.
     // serviceTypeInt: 0=FireStation, 1=PoliceStation, 2=WaterTower, 3=PowerPlant
@@ -154,6 +174,16 @@ private:
     // Private nested types
     // ------------------------------------------------------------------
     enum class ServiceType { FireStation, PoliceStation, WaterTower, PowerPlant };
+
+    // ScenarioState — placeholder for V1 scenario mode scaffolding.
+    // Serialized as the "scenario_state" object in the save JSON so that
+    // future scenario saves can round-trip without a schema bump.
+    // In V1 Sandbox mode these fields are always at their default (zero) values.
+    struct ScenarioState {
+        float       win_condition_progress{0.0f};
+        int         elapsed_ticks{0};
+        std::string scenario_id;
+    };
 
     struct TileData {
         ZoneType    zone{ZoneType::Residential};
@@ -340,6 +370,20 @@ private:
     // Density unlock
     // ------------------------------------------------------------------
     DensityUnlockState m_densityUnlockState{};
+
+    // ------------------------------------------------------------------
+    // Building variant counters (Phase 11) — round-robin asset cycling.
+    // Index: zone * 3 + tier  (zone: 0=Res, 1=Com, 2=Ind; tier: 0=Low, 1=Med, 2=High).
+    // Incremented in placeZone() each time a building is placed for that (zone, tier) pair.
+    // Used by zoneAssetBaseName() (updated in Phase 11) to pick _01/_02/_03 variants.
+    // Persisted in save files so variant continuity is maintained across save/load.
+    // ------------------------------------------------------------------
+    std::array<int, 9> m_buildingVariantCounters{};
+
+    // ------------------------------------------------------------------
+    // Scenario state (V1 stub — always zero in Sandbox mode).
+    // ------------------------------------------------------------------
+    ScenarioState m_scenarioState{};
 
     // ------------------------------------------------------------------
     // Notification queue (FIFO, polled by UIManager)
