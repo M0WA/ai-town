@@ -136,10 +136,16 @@ if (event.EventType == irr::EET_GUI_EVENT) {
             if (hoverId != kSpriteInvalid)
                 btn->setImage(getSpriteTexture(hoverId));
         } else if (event.GUIEvent.EventType == irr::gui::EGET_ELEMENT_LEFT) {
-            // restore inactive sprite cell
-            uint32_t inactiveId = lookupInactiveSpriteId(btn);
-            if (inactiveId != kSpriteInvalid)
-                btn->setImage(getSpriteTexture(inactiveId));
+            // restore sprite: active buttons keep their active appearance
+            if (btn->isPressed()) {
+                uint32_t activeId = lookupActiveSpriteId(btn);  // kSpriteXxxActive constant
+                if (activeId != kSpriteInvalid)
+                    btn->setImage(getSpriteTexture(activeId));
+            } else {
+                uint32_t inactiveId = lookupInactiveSpriteId(btn);
+                if (inactiveId != kSpriteInvalid)
+                    btn->setImage(getSpriteTexture(inactiveId));
+            }
         }
     }
     return false; // never consume hover events — Irrlicht must process them too
@@ -151,10 +157,14 @@ if (event.EventType == irr::EET_GUI_EVENT) {
 - `EGET_ELEMENT_HOVERED` → call `IGUIButton::setImage()` with the `kSpriteXxxHover` cell texture
   (85% opacity, outlined 2 px stroke, 1 px white border — see
   `architecture/asset-standards/2d-texture-standards.md` §Icon State Authoring Rules)
-- `EGET_ELEMENT_LEFT` → call `IGUIButton::setImage()` with the inactive `kSpriteXxx` cell texture
-  (65% opacity, outlined stroke — same cell shown before the hover)
-- Active buttons (`isPressed()` returns true) must NOT have their image overridden by hover events
-  — check `btn->isPressed()` before swapping and skip if true; the active sprite must persist
+- `EGET_ELEMENT_LEFT` → check `btn->isPressed()` first: if true, restore the active sprite
+  (`kSpriteXxxActive` cell — the button is still logically active and its active visual must
+  persist); if false, restore the inactive `kSpriteXxx` cell texture (65% opacity, outlined
+  stroke — same cell shown before the hover)
+- Active buttons (`isPressed()` returns true) must NOT have their image overridden by either
+  hover or leave events — check `btn->isPressed()` in both the `EGET_ELEMENT_HOVERED` and
+  `EGET_ELEMENT_LEFT` handlers and skip the image swap (or restore active appearance) if true;
+  the active sprite must persist across both hover-enter and hover-leave
 - Always `return false` — consuming hover events blocks Irrlicht's own tooltip and focus logic
 - `kSpriteXxxHover` constants live in `src/ui/hud_sprite_ids.h`; the naming convention is
   `kSprite<Name>Hover` (e.g. `kSpriteZoneResidentialHover`, `kSpriteRoadHover`)

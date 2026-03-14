@@ -134,7 +134,7 @@ tests/
 | `simulation_tests` | PERMITTED — inline listing preferred | |
 | `audio_tests` | PERMITTED — inline listing preferred | Phase 0 creates target with `audio_smoke_test.cpp` inline; Phase 7 MUST extend via `target_sources(audio_tests PRIVATE ...)` — do NOT re-call `add_executable(audio_tests ...)` (duplicate target causes CMake configure error). Phase 7 adds 4 source files: `duck_state_machine_test.cpp`, `occlusion_smoothing_test.cpp`, `audio_thread_test.cpp`, `ogg_header_validation_test.cpp`. Phase 10 further extends via `target_sources(audio_tests PRIVATE ...)` with 4 additional source files: `crossfade_interrupted_formula_test.cpp`, `stinger_milestone_test.cpp`, `audio_stream_bar_boundary_test.cpp`, `notification_sfx_efx_bypass_test.cpp` — do NOT re-call `add_executable(audio_tests ...)` or `aitown_add_tests(audio_tests ...)` (duplicate target). |
 | `terrain_tests` | PERMITTED — inline listing preferred | |
-| `integration_tests` | PERMITTED — inline listing preferred | |
+| `integration_tests` | PERMITTED — inline listing preferred; Phase 10c onward MUST use `target_sources(integration_tests PRIVATE ...)` — do NOT re-call `add_executable(integration_tests ...)` (duplicate target causes CMake configure error) | |
 
 ```cmake
 # Example CMakeLists.txt registration:

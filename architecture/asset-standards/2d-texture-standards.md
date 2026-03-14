@@ -857,7 +857,7 @@ colours for zone buttons, `#F04E37` red for demolish).
 
 | Button role | Active glow / fill colour |
 |---|---|
-| Generic toolbar tool (Zone, Road, Utilities, Demolish, Query) | Teal `#00C9C8` |
+| Generic toolbar tool (Road, Utilities, Query) | Teal `#00C9C8` |
 | Zone Residential | Green `rgba(0, 255, 0, 0.75)` (matches zone overlay) |
 | Zone Commercial | Blue `rgba(0, 0, 255, 0.75)` |
 | Zone Industrial | Yellow `rgba(255, 255, 0, 0.75)` |
@@ -868,6 +868,33 @@ colours for zone buttons, `#F04E37` red for demolish).
 The colour values above govern the **baked glow** colour in the active sprite cell. The
 2 px border around all active cells is always teal `rgba(0, 201, 200, 0.75)` regardless of
 the glow colour — the border colour is uniform across all button roles.
+
+#### Panel Background Tiles
+
+Five dedicated panel-background cells occupy unused rows (rows 16+ in the 32-row grid). These
+single-colour tiles are used by `IrrlichtUIBackend` to draw dark navy panel surfaces via
+`IGUIButton::setImage()` without any new `IUIBackend` API methods.
+
+| Cell purpose | `hud_sprite_ids.h` constant | Fill | Opacity | Alpha (SColor) | Corner radius |
+|---|---|---|---|---|---|
+| Grace period indicator background | `kSpritePanelGracePeriod` | `rgb(13,27,42)` | 78% | 199 | 8 px all edges |
+| Zone / Utilities sub-panel background | `kSpritePanelSubPanel` | `rgb(13,27,42)` | 80% | 204 | 8 px inner edges |
+| Left toolbar / minimap legend / normal toast | `kSpritePanelToolbar` | `rgb(13,27,42)` | 82% | 209 | 8 px inner edges |
+| Inspector / minimap map bg / tax rate / detail | `kSpritePanelDetail` | `rgb(13,27,42)` | 85% | 217 | 8 px inner edges |
+| Resource bar / modal / CRITICAL toast | `kSpritePanelResourceBar` | `rgb(13,27,42)` | 88% | 224 | 0 px (resource bar) / 8 px (modal, toast) |
+
+Opacity values are authoritative per-panel specs — the range `0.78–0.88` in the Glass City
+canonical palette (`architecture/ui-ux/resolution-ui-scaling.md`) spans all five tiers:
+
+- **78%** — grace period: `architecture/ui-ux/hud-layout.md`
+- **80%** — zone/utilities sub-panels: `architecture/ui-ux/hud-layout.md`
+- **82%** — left toolbar, minimap legend, normal toast: `architecture/ui-ux/hud-layout.md`,
+  `architecture/ui-ux/minimap.md`, `architecture/ui-ux/notification-system.md`
+- **85%** — inspector, minimap map bg, tax rate, budget detail:
+  `architecture/ui-ux/query-inspector-panel.md`, `architecture/ui-ux/minimap.md`,
+  `architecture/ui-ux/tax-rate-panel.md`, `architecture/ui-ux/hud-layout.md`
+- **88%** — resource bar, modal, CRITICAL toast: `architecture/ui-ux/hud-layout.md`,
+  `architecture/ui-ux/modal-dialog-system.md`, `architecture/ui-ux/notification-system.md`
 
 #### Superseded Frosted Glass Active-State Values
 

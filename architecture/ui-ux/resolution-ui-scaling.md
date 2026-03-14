@@ -276,12 +276,19 @@ events — no new methods are added to the `IUIBackend` interface.
   default inactive appearance.
 
 **`kSpriteXxxHover` naming convention**: Every icon that has an inactive/active pair gains a
-paired hover constant in `src/ui/hud_sprite_ids.h` following the pattern
-`kSpriteXxxHover` (e.g., `kSpriteZoneResidentialHover`, `kSpriteRoadHover`,
-`kSpriteUtilitiesHover`, `kSpriteDemolishHover`, `kSpriteQueryHover`). The hover sprite cell
-is always the cell immediately adjacent to the inactive cell within the same row of
-`hud_sprites_ui.png` — its exact column is determined by the sprite sheet layout documented
-in `architecture/asset-standards/2d-texture-standards.md`.
+paired hover constant in `src/ui/hud_sprite_ids.h` following the same prefix pattern as the
+existing inactive/active pairs. Representative examples by group:
+
+- **Toolbar tool-mode icons**: `kSpriteToolZoneHover`, `kSpriteToolRoadHover`,
+  `kSpriteToolUtilitiesHover`, `kSpriteToolDemolishHover`, `kSpriteToolQueryHover`
+- **Zone sub-panel icons**: `kSpriteZoneResLowHover`, `kSpriteZoneComLowHover`,
+  `kSpriteZoneIndLowHover` (and the corresponding Med/High variants)
+- **Utilities sub-panel icons**: `kSpriteUtilPowerHover`, `kSpriteUtilWaterHover`,
+  `kSpriteUtilFireHover`, `kSpriteUtilPoliceHover`
+
+The hover sprite cell is always the cell immediately adjacent to the inactive cell within the
+same row of `hud_sprites_ui.png` — its exact column is determined by the sprite sheet layout
+documented in `architecture/asset-standards/2d-texture-standards.md`.
 
 **No `IUIBackend` interface changes**: `setElementImage`, `setElementAlpha`, and the existing
 `IUIBackend` virtual method set are sufficient. The hover swap is a pure internal detail of
