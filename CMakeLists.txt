@@ -672,6 +672,11 @@ target_sources(ui_tests PRIVATE
     tests/ui/main_menu_coverage_test.cpp
 )
 
+# Phase 11: stinger_milestone per-frame polling tests.
+target_sources(ui_tests PRIVATE
+    tests/ui/ui_manager_stinger_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # audio_tests — duck state machine, occlusion smoothing, crossfade, stinger milestone tests
 # Vorbis::vorbisfile must be listed EXPLICITLY — it CANNOT resolve through aitown_audio's
@@ -797,6 +802,8 @@ add_executable(integration_tests
     tests/integration/texture_cache_integration_test.cpp    # Phase 5: TextureCache + SceneEntityManager EDT_NULL tests
     tests/integration/simulation_60tick_test.cpp            # Phase 6: 60-tick no-crash + SimulationTime exit criterion
     tests/integration/camera_controller_live_test.cpp       # Phase 6: CameraController live-camera path coverage
+    tests/integration/terrain_loading_test.cpp              # Phase 11: flushPendingRebuilds deduplication test
+    tests/integration/save_system_integration_test.cpp      # Phase 11: SaveSystem auto-save suspension during modal
 )
 # aitown_render and aitown_ui MUST be present: IrrlichtUIBackend.h depends on Irrlicht.
 # Irrlicht MUST be linked directly: IrrlichtUIBackend.h includes <irrlicht.h> at compile time;
