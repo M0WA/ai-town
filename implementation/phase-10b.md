@@ -170,6 +170,44 @@ All new files introduced in this phase MUST follow project naming conventions:
   `opengl_tests` link libraries to satisfy the pre-existing `UIManager::draw()` undefined
   reference (regression fix bundled with this deliverable).
 
+<!-- BINDING DECISION — prod-owner 2026-03-13: Actual terrain flattening implementation
+diverges from the single-tile three-step plan in the following ways. All changes are
+intentional design improvements that satisfy the Feature 1 deliverables.
+
+1. **4-corner averaging for buildings and services**: `placeBuildingMesh()` and
+   `placeServiceBuildingMesh()` average the heights of all four corners of the placement
+   tile before calling `setTileHeight()`, giving a more natural base pad that matches
+   the actual quad geometry. The plan described reading a single pre-flatten height at
+   tile centre; the implementation uses the 4-corner average as the target flatten height.
+
+2. **`flushTerrainRebuilds()` added to `ITerrainQuery` interface**: A new pure-virtual
+   method `flushTerrainRebuilds()` was added to `ITerrainQuery` to allow synchronous chunk
+   rebuild before mesh placement. `ManualTerrainQuery` has a no-op override.
+   `TerrainSystem::flushTerrainRebuilds()` drains the pending rebuild queue synchronously
+   so that height reads after flattening see the freshly-rebuilt mesh.
+
+3. **Road 5% max-grade constraint**: `placeRoadMesh()` enforces a 5% maximum grade
+   between adjacent road tiles. If the height difference between adjacent tiles would
+   exceed the grade limit, the target flatten height is clamped to the maximum allowable
+   gradient. This constraint was not in the plan.
+
+4. **Two-phase road placement**: Road placement uses a two-phase sequence:
+   (1) flatten terrain and call `flushTerrainRebuilds()` to rebuild chunk meshes from the
+   updated heightmap; (2) read post-flush heights and build the road mesh from them. This
+   ensures the road mesh Y coordinate matches the freshly-written heightmap rather than
+   the stale pre-rebuild values.
+
+5. **Neighbour road rebuilds (±2 radius)**: After building or service placement,
+   `IrrlichtRenderer` enqueues chunk rebuilds for all road tiles within a ±2 tile radius
+   of the placement footprint to prevent visual height seams at building-to-road edges.
+-->
+
+<!-- SIGN-OFF: prod-owner 2026-03-13 — Feature 1 terrain flattening verified complete.
+All checkboxes [x] with evidence. Core algorithm (0.5/0.25 blending factors, dual-heightmap
+sync, boundary clamping) matches. Binding decision above documents implementation additions
+(4-corner averaging, flushTerrainRebuilds, road grade constraint, two-phase road placement,
+±2 neighbour rebuilds) that exceed the plan deliverables. All 3 tests pass. -->
+
 ---
 
 #### Feature 2: Sky Clouds
@@ -272,6 +310,43 @@ All new files introduced in this phase MUST follow project naming conventions:
   Phase 10b and Check #24; `tools/validate_assets.py` module docstring line 10 references
   Phase 10b / Check #24; `architecture/ci-cd/github-actions-workflow.md` line 688
   contains the Phase 10b phasing summary entry.
+
+<!-- BINDING DECISION — prod-owner 2026-03-13: Actual sky clouds implementation delivered
+a tessellated hemisphere dome rather than the flat quad specified in the plan. All divergences
+follow the detailed spec in architecture/graphics-architecture/sky-clouds.md, which
+supersedes the plan for geometry and shader details.
+
+1. **Dome geometry (not flat quad)**: `buildCloudDomeMesh()` (IrrlichtRenderer.cpp:2055)
+   builds a 32×32-sector tessellated hemisphere: 6000 m radius, 2000 m tall, base at
+   Y=−1000 m (apex at Y=1000 m), 1,089 vertices / 2,048 triangles. The plan described a
+   flat 2000 m × 2000 m quad at Y=200 m. Dome geometry eliminates visible edge clipping at
+   all camera elevations and wraps the cloud layer around the horizon naturally.
+
+2. **`CloudDomeShaderCallback` class** (IrrlichtRenderer.cpp lines 42–67): An inline
+   shader callback class implements elevation-angle fade and atmospheric haze blending via
+   `cloud_dome.vert` / `cloud_dome.frag`. The plan deferred shader details to the
+   architecture spec; the callback was not explicitly mentioned. Lifetime follows the road
+   callback pattern: `m_cloudShaderCbRaw` (void* member) holds the caller's reference;
+   dropped in the destructor.
+
+3. **Dynamic camera XZ tracking**: In `update()`, the dome node is repositioned to the
+   camera's XZ position each frame so the dome horizon remains centred on the camera. The
+   plan described a static flat plane; camera XZ tracking is required for dome geometry to
+   avoid the dome edge being visible when the camera moves.
+
+4. **Cylindrical UV mapping**: UVs map azimuth angle to U and elevation angle to V (not
+   planar). `kCloudUVScale = 4.0f` is retained from the plan spec.
+
+5. **Called from constructor, not `init()`**: `initCloudPlane()` is called in the
+   `IrrlichtRenderer` constructor rather than a separate `init()` step. Same EDT_NULL
+   early-return guard applies as the first line.
+-->
+
+<!-- SIGN-OFF: prod-owner 2026-03-13 — Feature 2 sky clouds verified complete.
+All checkboxes [x] with evidence. Binding decision above documents dome geometry divergences
+from the flat-quad plan; implementation follows architecture/graphics-architecture/sky-clouds.md.
+clouds.png present and 1024×1024 RGBA. UV scroll uses std::fmod form matching spec. EDT_NULL
+guard correct. CloudPlane tests pass. Check #24 CI gate green. -->
 
 ---
 
