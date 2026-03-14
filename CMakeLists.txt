@@ -536,10 +536,7 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/city_simulation_render_test.cpp
 )
 
-# Coverage-gap tests.
-target_sources(simulation_tests PRIVATE
-    tests/simulation/simulation_coverage_gap_test.cpp
-)
+# (simulation_coverage_gap_test.cpp dissolved — tests distributed to semantic files)
 
 # Phase 10b: terrain flattening simulation test.
 target_sources(simulation_tests PRIVATE
@@ -666,13 +663,11 @@ target_sources(ui_tests PRIVATE
     tests/ui/world_interaction_test.cpp
 )
 
-# Coverage-gap tests: UIManager hotkeys, zone/utilities sub-panels, hover colors,
-# InspectorPanel populate() isZoned=true, and MainMenuPanel keyboard navigation.
-# Do NOT call add_executable(ui_tests ...) or aitown_add_tests(ui_tests ...) again.
+# (coverage_gap_test.cpp and query_panel_coverage_test.cpp dissolved —
+#  tests distributed to semantically correct files)
+# main_menu_coverage_test.cpp: MainMenuPanel keyboard navigation and lifecycle tests.
 target_sources(ui_tests PRIVATE
-    tests/ui/coverage_gap_test.cpp
     tests/ui/main_menu_coverage_test.cpp
-    tests/ui/query_panel_coverage_test.cpp
 )
 
 # ----------------------------------------------------------------------------

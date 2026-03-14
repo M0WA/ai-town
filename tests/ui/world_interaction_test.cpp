@@ -35,8 +35,10 @@
 #include "tests/ui/MockUIBackend.h"
 #include "tests/ui/MockCitySimulation.h"
 #include "tests/simulation/MockRenderer.h"
+#include "tests/simulation/MockAudioSystem.h"
 #include "tests/simulation/ManualTerrainQuery.h"
 #include "tests/simulation/ManualClock.h"
+#include "src/interfaces/sound_ids.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>
@@ -44,6 +46,7 @@
 #include <cstdint>
 
 using ::testing::_;
+using ::testing::AnyNumber;
 using ::testing::AtLeast;
 using ::testing::DoAll;
 using ::testing::HasSubstr;
@@ -94,6 +97,26 @@ static InputEvent makeMouseMove(int virtX, int virtY)
     ev.y     = virtY;
     ev.physX = virtX;
     ev.physY = virtY;
+    return ev;
+}
+
+static InputEvent makeKeyDown(int keyCode)
+{
+    InputEvent ev{};
+    ev.type    = InputEvent::Type::KeyDown;
+    ev.keyCode = keyCode;
+    return ev;
+}
+
+static InputEvent makeToolbarUndoClick()
+{
+    InputEvent ev{};
+    ev.type   = InputEvent::Type::MouseButtonDown;
+    ev.button = 0;
+    ev.x      = 40;
+    ev.y      = 630;  // Undo button y range: 608..655
+    ev.physX  = 40;
+    ev.physY  = 630;
     return ev;
 }
 
@@ -1826,4 +1849,555 @@ TEST_F(WorldInteractionTest, WorldInteraction_HoverHighlight_ClearedOnRmbToolClo
 
     // Postcondition: active tool must be None after RMB.
     EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::None);
+}
+
+// ============================================================================
+// Tests moved from coverage_gap_test.cpp (CoverageGapTest fixture)
+// These use the WorldInteractionTest fixture which matches CoverageGapTest
+// (StrictMock sim_/renderer_, NiceMock backend_, no audio).
+// ============================================================================
+
+// ============================================================================
+// Test: Escape from Paused state -> transitionToGameplay_fromPaused
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_EscapeFromPaused_TransitionsToGameplay)
+{
+    EXPECT_CALL(sim_, isPaused()).WillRepeatedly(Return(false));
+    EXPECT_CALL(sim_, setPaused(_)).Times(AnyNumber());
+
+    goToGameplay();
+    uiManager_->transitionToPaused();
+
+    bool consumed = uiManager_->onEvent(makeKeyDown(27));  // Escape
+    EXPECT_TRUE(consumed);
+}
+
+// ============================================================================
+// Test: Escape in MainMenu state -> no-op (exercises non-Gameplay/Paused path)
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_EscapeInMainMenu_ReturnsFalse)
+{
+    // UIManager starts in MainMenu state (default).
+    bool consumed = uiManager_->onEvent(makeKeyDown(27));  // Escape
+    (void)consumed;  // Result depends on MainMenuPanel; ensure no crash.
+}
+
+// ============================================================================
+// Test: Road hotkey R activates Road tool
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_HotkeyR_ActivatesRoadTool)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeKeyDown(82));  // R
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::Road);
+}
+
+// ============================================================================
+// Test: Utilities hotkey U activates Utilities tool
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_HotkeyU_ActivatesUtilitiesTool)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeKeyDown(85));  // U
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::Utilities);
+}
+
+// ============================================================================
+// Test: Demolish hotkey D activates Demolish tool
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_HotkeyD_ActivatesDemolishTool)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeKeyDown(68));  // D
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::Demolish);
+}
+
+// ============================================================================
+// Test: getActiveTool() returns None initially after Gameplay transition
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_GetActiveTool_ReturnsNoneInitially)
+{
+    goToGameplay();
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::None);
+}
+
+// ============================================================================
+// Test: Zone sub-panel button click updates sprites
+// Col=1 (Commercial Low): x=80+1*(64+4)=148, y=64. Centre: (180, 84).
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_ZoneSubPanel_ButtonClick_SwapsSprites)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeMouseButtonDown(0, 40, 80));  // Activate Zone tool
+
+    InputEvent click = makeMouseButtonDown(0, 180, 84);
+    bool consumed = uiManager_->onEvent(click);
+    EXPECT_TRUE(consumed);
+}
+
+// ============================================================================
+// Test: Utilities sub-panel button click updates sprites
+// WaterTower (typeIdx=1): x=80+1*(64+4)=148, y=64. Centre: (180, 84).
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_UtilitiesSubPanel_ButtonClick_SwapsSprites)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeMouseButtonDown(0, 40, 200));  // Activate Utilities tool
+
+    InputEvent click = makeMouseButtonDown(0, 180, 84);
+    bool consumed = uiManager_->onEvent(click);
+    EXPECT_TRUE(consumed);
+}
+
+// ============================================================================
+// Test: Query toolbar toggle-off deactivates Query tool
+// Open inspector first (Priority-3 carve-out allows toolbar click to toggle off).
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_QueryToolbarToggle_DeactivatesQueryTool)
+{
+    activateQueryTool();
+    ASSERT_EQ(uiManager_->getActiveTool(), ActiveTool::Query);
+
+    EXPECT_CALL(sim_, queryTile(5, 5)).WillOnce(Return(QueryResult{}));
+    EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+    EXPECT_CALL(renderer_, getTileScreenBounds(5, 5)).WillOnce(Return(ScreenRect{}));
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    // Inspector open — toggle off Query tool via toolbar click.
+    uiManager_->onEvent(makeToolbarQueryClick());
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::None);
+}
+
+// ============================================================================
+// Test: Undo toolbar button click calls undoLastAction
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_UndoToolbarButton_CallsUndoLastAction)
+{
+    goToGameplay();
+
+    EXPECT_CALL(sim_, hasUndoPendingAction()).WillRepeatedly(Return(true));
+    EXPECT_CALL(sim_, undoLastAction()).Times(1);
+
+    uiManager_->onEvent(makeToolbarUndoClick());
+}
+
+// ============================================================================
+// Test: Hover highlight uses Road color when Road tool is active
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_HoverHighlight_RoadColor)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeKeyDown(82));  // R = Road
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(3), SetArgReferee<3>(4), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(3, 4, _)).Times(AtLeast(1));
+
+    uiManager_->onEvent(makeMouseMove(500, 500));
+}
+
+// ============================================================================
+// Test: Hover highlight uses Utilities color when Utilities tool active
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_HoverHighlight_UtilitiesColor)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeKeyDown(85));  // U = Utilities
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(3), SetArgReferee<3>(4), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(3, 4, _)).Times(AtLeast(1));
+
+    uiManager_->onEvent(makeMouseMove(500, 500));
+}
+
+// ============================================================================
+// Test: Hover highlight uses Demolish color when Demolish tool active
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_HoverHighlight_DemolishColor)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeKeyDown(68));  // D = Demolish
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(3), SetArgReferee<3>(4), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(3, 4, _)).Times(AtLeast(1));
+
+    uiManager_->onEvent(makeMouseMove(500, 500));
+}
+
+// ============================================================================
+// Test: Hover highlight uses Query color when Query tool active
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_HoverHighlight_QueryColor)
+{
+    activateQueryTool();
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(3), SetArgReferee<3>(4), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(3, 4, _)).Times(AtLeast(1));
+
+    uiManager_->onEvent(makeMouseMove(500, 500));
+}
+
+// ============================================================================
+// Test: Hover highlight cleared when pickTerrainTile returns false
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_HoverHighlight_NoTerrain_ClearsHighlight)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeKeyDown(82));  // Road tool active
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _)).WillOnce(Return(false));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(AtLeast(1));
+
+    uiManager_->onEvent(makeMouseMove(500, 500));
+}
+
+// ============================================================================
+// Test: Query tool active, left-click on world -> no placement calls
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_QueryToolActive_WorldClick_NoPrioritySevenDispatch)
+{
+    activateQueryTool();
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
+    EXPECT_CALL(renderer_, getTileScreenBounds(5, 7))
+        .WillOnce(Return(ScreenRect{}));
+    EXPECT_CALL(sim_, queryTile(5, 7))
+        .WillOnce(Return(QueryResult{}));
+
+    EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
+
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+}
+
+// ============================================================================
+// Test: No terrain hit on left-click -> returns false
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_WorldClick_NoTerrainHit_ReturnsFalse)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeKeyDown(82));  // Road tool
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(Return(false));
+    EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
+
+    bool consumed = uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    EXPECT_FALSE(consumed);
+}
+
+// ============================================================================
+// Test: Commercial zone placement produces kOverlayArgbCommercial
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_CommercialZone_OverlayColor)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+
+    goToGameplay();
+    uiManager_->onEvent(makeMouseButtonDown(0, 40, 80));  // Zone tool
+
+    // Select Commercial (col=1): x=80+1*(64+4)=148; y=64. Click centre: (180, 84).
+    uiManager_->onEvent(makeMouseButtonDown(0, 180, 84));
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(2), SetArgReferee<3>(3), Return(true)));
+    EXPECT_CALL(sim_, placeZone(2, 3, ZoneType::Commercial, _, _)).Times(1);
+
+    ZoneOverlayMap captured;
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
+        .WillOnce(SaveArg<2>(&captured));
+
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
+
+    uint64_t key = static_cast<uint64_t>(3) * 10u + static_cast<uint64_t>(2);
+    ASSERT_TRUE(captured.count(key) > 0);
+    EXPECT_EQ(captured.at(key), static_cast<uint32_t>(kOverlayArgbCommercial));
+}
+
+// ============================================================================
+// Test: Industrial zone placement produces kOverlayArgbIndustrial
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_IndustrialZone_OverlayColor)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+
+    goToGameplay();
+    uiManager_->onEvent(makeMouseButtonDown(0, 40, 80));  // Zone tool
+
+    // Select Industrial (col=2): x=80+2*(64+4)=216; y=64. Click centre: (248, 84).
+    uiManager_->onEvent(makeMouseButtonDown(0, 248, 84));
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(1), SetArgReferee<3>(2), Return(true)));
+    EXPECT_CALL(sim_, placeZone(1, 2, ZoneType::Industrial, _, _)).Times(1);
+
+    ZoneOverlayMap captured;
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
+        .WillOnce(SaveArg<2>(&captured));
+
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
+
+    uint64_t key = static_cast<uint64_t>(2) * 10u + static_cast<uint64_t>(1);
+    ASSERT_TRUE(captured.count(key) > 0);
+    EXPECT_EQ(captured.at(key), static_cast<uint32_t>(kOverlayArgbIndustrial));
+}
+
+// ============================================================================
+// Tests moved from coverage_gap_test.cpp (ValidHandleUIManagerTest fixture)
+// New fixture: ValidHandleWorldInteractionTest — same as WorldInteractionTest
+// but with a NiceMock<MockAudioSystem> and incrementing non-zero handles.
+// ============================================================================
+
+class ValidHandleWorldInteractionTest : public ::testing::Test {
+protected:
+    StrictMock<MockCitySimulation>   sim_;
+    StrictMock<MockRenderer>         renderer_;
+    ManualTerrainQuery               terrain_;
+    ManualClock                      clock_;
+    NiceMock<MockUIBackend>          backend_;
+    NiceMock<MockAudioSystem>        audio_;
+    std::unique_ptr<UIManager>       uiManager_;
+    uint32_t                         nextHandle_{1};
+
+    void SetUp() override {
+        ON_CALL(backend_, addButton(_, _, _, _, _)).WillByDefault([this](
+            const std::string&, int, int, int, int) -> uint32_t {
+            return ++nextHandle_;
+        });
+        ON_CALL(backend_, addStaticText(_, _, _, _, _)).WillByDefault([this](
+            const std::string&, int, int, int, int) -> uint32_t {
+            return ++nextHandle_;
+        });
+        ON_CALL(backend_, loadTexture(_)).WillByDefault([this](const std::string&) -> uint32_t {
+            return ++nextHandle_;
+        });
+        ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
+        ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+        ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
+        ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
+
+        EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, setTilePlacementPreview(_, _)).Times(AnyNumber());
+
+        uiManager_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
+        uiManager_->setRenderer(&renderer_);
+        uiManager_->setTerrainQuery(&terrain_);
+        uiManager_->setMapDimensions(10, 10);
+        uiManager_->setDemolishConfirm(false);
+    }
+
+    void TearDown() override {
+        uiManager_.reset();
+    }
+
+    void goToGameplay() {
+        uiManager_->transitionToGameplay(GameMode::Sandbox);
+    }
+};
+
+// ============================================================================
+// Test: Zone sub-panel sprite swap with valid handles
+// Col=1 (Commercial Low): x=80+1*(64+4)=148, y=64. Centre: (180, 84).
+// ============================================================================
+TEST_F(ValidHandleWorldInteractionTest, ZoneSubPanel_ValidHandles_SpritesSwapped)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeMouseButtonDown(0, 40, 80));  // Zone tool
+
+    InputEvent click = makeMouseButtonDown(0, 180, 84);
+    bool consumed = uiManager_->onEvent(click);
+    EXPECT_TRUE(consumed);
+}
+
+// ============================================================================
+// Test: Utilities sub-panel sprite swap with valid handles
+// WaterTower (typeIdx=1): x=80+1*(64+4)=148, y=64. Centre: (180, 84).
+// ============================================================================
+TEST_F(ValidHandleWorldInteractionTest, UtilSubPanel_ValidHandles_SpritesSwapped)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeMouseButtonDown(0, 40, 200));  // Utilities tool
+
+    InputEvent click = makeMouseButtonDown(0, 180, 84);
+    bool consumed = uiManager_->onEvent(click);
+    EXPECT_TRUE(consumed);
+}
+
+// ============================================================================
+// Test: Sub-panel open SFX fired when Zone tool is activated
+// ============================================================================
+TEST_F(ValidHandleWorldInteractionTest, SubPanelOpenSFX_FiredWhenToolActivated)
+{
+    goToGameplay();
+
+    EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(audio_, playSound(UI_MENU_OPEN, _, _)).Times(AtLeast(1));
+
+    uiManager_->onEvent(makeMouseButtonDown(0, 40, 80));  // Zone tool
+}
+
+// ============================================================================
+// Test: Zone drag Z-dominant preview
+// Anchor (5,5), move to (6,8): dZ=3 > dX=1 → Z-dominant preview.
+// ============================================================================
+TEST_F(ValidHandleWorldInteractionTest, ZoneDrag_ZDominant_ShowsZPreview)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeMouseButtonDown(0, 40, 80));  // Zone tool
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(8), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(AnyNumber());
+    uiManager_->onEvent(makeMouseMove(510, 530));
+}
+
+// ============================================================================
+// Test: Road drag Z-dominant preview
+// Anchor (5,5), move to (5,8): dZ=3 > dX=0 → Z-dominant road preview.
+// ============================================================================
+TEST_F(ValidHandleWorldInteractionTest, RoadDrag_ZDominant_ShowsZPreview)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeKeyDown(82));  // Road tool
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(8), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(AnyNumber());
+    uiManager_->onEvent(makeMouseMove(500, 530));
+}
+
+// ============================================================================
+// Test: Demolish drag to different tile calls demolishTile on both
+// ============================================================================
+TEST_F(ValidHandleWorldInteractionTest, DemolishDrag_DifferentTile_CallsPlacement)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeKeyDown(68));  // Demolish tool
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+    EXPECT_CALL(sim_, demolishTile(5, 5)).Times(1);
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(5), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(sim_, demolishTile(6, 5)).Times(1);
+    uiManager_->onEvent(makeMouseMove(510, 500));
+}
+
+// ============================================================================
+// Test: Road drag Z-dominant release commits road placement along Z axis
+// Anchor (5,5), move to (5,8): release places roads at (5,5)-(5,6)-(5,7)-(5,8).
+// ============================================================================
+TEST_F(ValidHandleWorldInteractionTest, RoadDrag_ZDominant_ReleasePlacesRoads)
+{
+    goToGameplay();
+    uiManager_->onEvent(makeKeyDown(82));  // Road tool
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(8), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(AnyNumber());
+    uiManager_->onEvent(makeMouseMove(500, 530));
+
+    EXPECT_CALL(sim_, placeRoad(5, 5, _)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(5, 6, _)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(5, 7, _)).Times(1);
+    EXPECT_CALL(sim_, placeRoad(5, 8, _)).Times(1);
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 530));
+}
+
+// ============================================================================
+// Test: update() consumeStartGameRequest -> transitionToGameplay
+// Navigate to New Game screen (Enter), configure Start City rect,
+// click to set m_startGameRequested, then call update() to poll.
+// ============================================================================
+TEST_F(ValidHandleWorldInteractionTest, Update_ConsumesStartGameRequest_TransitionsToGameplay)
+{
+    uint32_t startCityHandle = 0;
+    ON_CALL(backend_, addButton(_, _, _, _, _)).WillByDefault(
+        [this, &startCityHandle](const std::string& label, int, int, int, int) -> uint32_t {
+            uint32_t h = ++nextHandle_;
+            if (label == "Start City") startCityHandle = h;
+            return h;
+        });
+
+    // Rebuild UIManager with updated addButton lambda.
+    uiManager_.reset();
+    uiManager_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
+    uiManager_->setRenderer(&renderer_);
+    uiManager_->setTerrainQuery(&terrain_);
+    uiManager_->setMapDimensions(10, 10);
+    uiManager_->setDemolishConfirm(false);
+
+    ASSERT_NE(startCityHandle, 0u) << "Start City handle must be non-zero";
+
+    ON_CALL(backend_, getElementRect(_)).WillByDefault([startCityHandle](uint32_t h) {
+        if (h == startCityHandle) return Rect{0, 0, 20, 20};
+        return Rect{9000, 9000, 0, 0};
+    });
+
+    // Navigate to New Game screen.
+    uiManager_->onEvent(makeKeyDown(13));  // Enter -> showNewGameScreen()
+
+    // Click Start City button.
+    uiManager_->onEvent(makeMouseButtonDown(0, 10, 10));
+
+    // Call update() — polls consumeStartGameRequest() -> transitionToGameplay.
+    EXPECT_CALL(sim_, getConsecutiveDeficitMonths()).WillRepeatedly(Return(0));
+    EXPECT_CALL(sim_, getSpeedMultiplier()).WillRepeatedly(Return(SpeedMultiplier::x1));
+    EXPECT_CALL(sim_, hasUndoPendingAction()).WillRepeatedly(Return(false));
+    EXPECT_CALL(sim_, pollPendingNotification(_)).WillRepeatedly(Return(false));
+
+    uiManager_->update(0.016f);
+
+    EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::None);
+}
+
+// ============================================================================
+// Test: Demolish with confirm modal enabled — modal defers demolition
+// When setDemolishConfirm(true) and Demolish tool is active, left-click
+// shows the modal (showDemolishConfirm) instead of calling demolishTile.
+// ============================================================================
+TEST_F(WorldInteractionTest, Coverage_DemolishWithConfirmModal_ShowsModal)
+{
+    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
+
+    uiManager_->setDemolishConfirm(true);
+
+    // showForcedLoanDialog / modal open may query isPaused/setPaused.
+    EXPECT_CALL(sim_, isPaused()).WillRepeatedly(Return(false));
+    EXPECT_CALL(sim_, setPaused(_)).Times(AnyNumber());
+
+    goToGameplay();
+    uiManager_->onEvent(makeMouseButtonDown(0, 40, 250));  // Demolish: y 232..279
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+
+    // demolishTile must NOT be called — modal defers it.
+    EXPECT_CALL(sim_, demolishTile(_, _)).Times(0);
+
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+
+    EXPECT_TRUE(uiManager_->hasActiveModal());
 }

@@ -263,3 +263,40 @@ lcov --list coverage_filtered.info \
   | head -1 \
   | awk '{if ($1 < 25.0) { print "FAIL: src/ui/ worst-file coverage " $1 "% < 25% Phase 4 gate"; exit 1 } else { print "PASS: src/ui/ worst-file coverage " $1 "% >= 25%"; exit 0 }}'
 ```
+
+## Coverage Test Placement Convention
+
+**Tests belong in semantically correct files, never in gap files.**
+
+All coverage-gap test files (`coverage_gap_test.cpp`, `simulation_coverage_gap_test.cpp`,
+`query_panel_coverage_test.cpp`) have been dissolved. Every test that was in those files has
+been moved into the appropriate semantically correct test file.
+
+### Mapping: simulation tests
+
+| Topic | Target file |
+|---|---|
+| Speed/smoothstep/traffic overload | `tests/simulation/traffic_test.cpp` |
+| `maxPopulationForTile` Commercial/Industrial | `tests/simulation/population_test.cpp` |
+| `TimeOfDay` tick path | `tests/simulation/population_test.cpp` |
+| `placeServiceBuilding`, service alerts, water/power loss, `queryTile` | `tests/simulation/service_coverage_test.cpp` |
+| `undoLastAction`, undo expiry, difficulty refund clamping | `tests/simulation/undo_system_test.cpp` |
+| Economy paths, forced loan, debt, bond, earthworks SFX, road/signal, `queryTile` road | `tests/simulation/economy_test.cpp` |
+
+### Mapping: UI tests
+
+| Topic | Target file |
+|---|---|
+| Hotkeys, toolbar, hover, overlay, query tool, `getActiveTool`, drag, sub-panel | `tests/ui/world_interaction_test.cpp` |
+| Demolish with confirm modal | `tests/ui/world_interaction_test.cpp` |
+| Escape from Paused / MainMenu | `tests/ui/world_interaction_test.cpp` |
+| `consumeStartGameRequest` via `update()` | `tests/ui/world_interaction_test.cpp` (`ValidHandleWorldInteractionTest`) |
+| `ForcedLoanIssued` notification dialog | `tests/ui/notification_system_test.cpp` |
+| Inspector `populate()`, `draw()`, `getBounds()`, road tile | `tests/ui/query_panel_test.cpp` |
+
+### Rule
+
+When adding new coverage tests, always place them in the file that matches the
+subject's domain. Do not create new `*_coverage_gap_test.cpp` files. If no
+appropriate file exists, create a properly named file (e.g., `save_system_test.cpp`
+for save/load coverage). The `coverage_gap` naming convention is permanently retired.

@@ -668,3 +668,46 @@ TEST(PopulationPropertyTest, DecayCap_DeltaPerTickBoundedByFraction) {
             RC_ASSERT(popAfter >= 0);
         });
 }
+
+// ============================================================================
+// Tests moved from simulation_coverage_gap_test.cpp
+// ============================================================================
+
+// ============================================================================
+// Test: maxPopulationForTile Commercial/Industrial branches (L73-89)
+// Place Commercial (Low/Medium/High) and Industrial (Low/Medium/High) zones,
+// run ticks — exercises maxPopulationForTile for those zone types.
+// ============================================================================
+TEST_F(PopulationTest, MaxPop_Commercial_IsExercisedByTick)
+{
+    // Place Commercial zones (Low density).
+    sim_->placeZone(0, 0, ZoneType::Commercial,  DensityTier::Low, 0);
+    sim_->placeZone(1, 0, ZoneType::Commercial,  DensityTier::Medium, 0);
+    sim_->placeZone(2, 0, ZoneType::Commercial,  DensityTier::High, 0);
+    sim_->placeZone(3, 0, ZoneType::Industrial,  DensityTier::Low, 0);
+    sim_->placeZone(4, 0, ZoneType::Industrial,  DensityTier::Medium, 0);
+    sim_->placeZone(5, 0, ZoneType::Industrial,  DensityTier::High, 0);
+
+    // Place a road to generate demand signal.
+    sim_->placeRoad(0, 1, 0);
+
+    // Advance past grace period and run several ticks.
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+    runTicks(3);
+
+    // As long as no crash occurred, maxPopulationForTile was exercised.
+    SUCCEED();
+}
+
+// ============================================================================
+// Test: TimeOfDay code path — multiple ticks run without crashing.
+// The DAY/DUSK/NIGHT branches in tick() are exercised by the tick loop.
+// 720 mod 24 = 0, so dayHours stays 0 (NIGHT) throughout — DUSK/DAY branches
+// are unreachable via this arithmetic, but the tick path is verified clean.
+// ============================================================================
+TEST_F(PopulationTest, TimeOfDay_MultipleTicks_NoCrash)
+{
+    // Run enough ticks to exercise the TimeOfDay update code path.
+    runTicks(5);
+    SUCCEED();
+}

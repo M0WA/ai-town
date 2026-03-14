@@ -34,7 +34,9 @@ using ::testing::Return;
 using ::testing::_;
 using ::testing::AtLeast;
 using ::testing::AnyNumber;
+using ::testing::DoAll;
 using ::testing::HasSubstr;
+using ::testing::SetArgReferee;
 
 // ============================================================================
 // NotificationManagerTest -- standalone NotificationManager tests
@@ -766,4 +768,32 @@ TEST_F(NotificationManagerTest, NotificationSFX_CriticalToast_UIToastSoundFires)
     EXPECT_CALL(audio_, playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f)).Times(1);
 
     notifMgr_->postCritical("Crisis", "Budget deficit detected");
+}
+
+// ============================================================================
+// Tests moved from coverage_gap_test.cpp
+// ============================================================================
+
+// ============================================================================
+// Test: update() ForcedLoanIssued notification triggers showForcedLoanDialog
+// UIManagerDeficitIntegrationTest is already in Gameplay state after SetUp().
+// ============================================================================
+TEST_F(UIManagerDeficitIntegrationTest, Coverage_Update_ForcedLoanNotification_ShowsDialog)
+{
+    ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
+    ON_CALL(sim_, setPaused(_)).WillByDefault(Return());
+
+    // First poll returns ForcedLoanIssued, subsequent return false.
+    SimulationNotification notif{};
+    notif.type           = NotificationType::ForcedLoanIssued;
+    notif.amount         = 50000;
+    notif.repaymentTicks = 12;
+    EXPECT_CALL(sim_, pollPendingNotification(_))
+        .WillOnce(DoAll(SetArgReferee<0>(notif), Return(true)))
+        .WillRepeatedly(Return(false));
+
+    ui_->update(0.016f);
+
+    // The forced loan dialog should now be shown.
+    EXPECT_TRUE(ui_->hasActiveModal());
 }

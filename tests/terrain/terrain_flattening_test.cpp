@@ -185,3 +185,112 @@ TEST_F(TerrainFlatteningTest, TerrainFlattening_NeighborBlend_ClampedToMapBounds
     EXPECT_GE(m_sim->pendingRebuildCount(), 1)
         << "setTileHeight() on corner tile (0,0) must enqueue at least one rebuild";
 }
+
+// ---------------------------------------------------------------------------
+// TerrainFlatteningTest / TerrainDimensionAccessors_ReturnGeneratedValues
+//
+// After calling generate(), the dimension accessors getMapTilesX(), getMapTilesZ(),
+// and getCellSize() must return the values passed to generate().
+//
+// Covers lines 744-746 of TerrainSystem.cpp (dimension accessor bodies).
+// ---------------------------------------------------------------------------
+TEST_F(TerrainFlatteningTest, TerrainDimensionAccessors_ReturnGeneratedValues)
+{
+    FlatRNG2 rng;
+    const int tilesX    = 64;
+    const int tilesZ    = 64;
+    const float cellSz  = 5.0f;
+    bool playable = m_sim->generate(tilesX, tilesZ, cellSz, &rng, /*maxRetries=*/0);
+    ASSERT_TRUE(playable);
+
+    EXPECT_EQ(m_sim->getMapTilesX(), tilesX);
+    EXPECT_EQ(m_sim->getMapTilesZ(), tilesZ);
+    EXPECT_FLOAT_EQ(m_sim->getCellSize(), cellSz);
+}
+
+// ---------------------------------------------------------------------------
+// TerrainFlatteningTest / FlushTerrainRebuilds_DrainsPendingRebuilds
+//
+// After setTileHeight() enqueues rebuilds, flushTerrainRebuilds() (the
+// ITerrainQuery delegate) must drain the rebuild queue synchronously.
+//
+// Covers lines 309-311 of TerrainSystem.cpp (flushTerrainRebuilds body).
+// ---------------------------------------------------------------------------
+TEST_F(TerrainFlatteningTest, FlushTerrainRebuilds_DrainsPendingRebuilds)
+{
+    ASSERT_TRUE(generateFlatMap(/*tilesX=*/100, /*tilesZ=*/100));
+
+    // Enqueue a rebuild via setTileHeight().
+    m_sim->setTileHeight(10, 10, 3.0f);
+    EXPECT_GE(m_sim->pendingRebuildCount(), 1);
+
+    // flushTerrainRebuilds() must process all pending rebuilds synchronously.
+    m_sim->flushTerrainRebuilds();
+
+    EXPECT_EQ(m_sim->pendingRebuildCount(), 0)
+        << "flushTerrainRebuilds() must drain all pending rebuilds";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainFlatteningTest / BuildAllChunks_CreatesChunksForAllTiles
+//
+// generate() populates the heightmap; buildAllChunks() then registers all
+// chunks and enqueues LOD0 rebuilds for each.  After flushPendingRebuilds(),
+// no pending rebuilds remain.
+//
+// A 64×64 map has 64/32 = 2 chunk columns, 2 chunk rows = 4 chunks total.
+// After buildAllChunks() + flushPendingRebuilds(), pendingRebuildCount() = 0.
+//
+// Covers lines 495-546 of TerrainSystem.cpp (buildAllChunks body).
+// ---------------------------------------------------------------------------
+TEST_F(TerrainFlatteningTest, BuildAllChunks_CreatesChunksForAllTiles)
+{
+    FlatRNG2 rng;
+    // 64×64 map: 2×2 = 4 chunks of 32×32 tiles each.
+    bool playable = m_sim->generate(/*mapTilesX=*/64, /*mapTilesZ=*/64,
+                                    /*cellSize=*/4.0f, &rng, /*maxRetries=*/0);
+    ASSERT_TRUE(playable);
+
+    // After generate(), call buildAllChunks() to register and enqueue rebuilds.
+    m_sim->buildAllChunks();
+
+    // Flush all rebuilds synchronously.
+    m_sim->flushPendingRebuilds();
+    EXPECT_EQ(m_sim->pendingRebuildCount(), 0)
+        << "All chunks must be rebuilt after buildAllChunks() + flushPendingRebuilds()";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainFlatteningTest / BuildAllChunks_SyncChunkHeightmap_CoveredBySetTileHeight
+//
+// Call buildAllChunks() first (populates m_chunkHeightmaps), then call
+// setTileHeight() on an interior tile.  The syncChunk lambda inside writeHeight
+// finds the chunk in m_chunkHeightmaps and updates it (lines 634-635).
+// A tile on a chunk boundary (e.g. (32, 0)) also updates the diagonal chunk
+// (line 641: cx > 0 && cz > 0 case — on a 64×64 map, tile (32, 32) has
+// cx=1, cz=1, lx=0, lz=0, so the diagonal (cx-1, cz-1) is also synced).
+//
+// Covers lines 599, 634-635, 641 of TerrainSystem.cpp.
+// ---------------------------------------------------------------------------
+TEST_F(TerrainFlatteningTest, BuildAllChunks_SyncChunkHeightmap_CoveredBySetTileHeight)
+{
+    FlatRNG2 rng;
+    bool playable = m_sim->generate(/*mapTilesX=*/64, /*mapTilesZ=*/64,
+                                    /*cellSize=*/4.0f, &rng, /*maxRetries=*/0);
+    ASSERT_TRUE(playable);
+
+    // Build all chunks so m_chunkHeightmaps is populated.
+    m_sim->buildAllChunks();
+    m_sim->flushPendingRebuilds();
+
+    // setTileHeight on tile (32, 32): lx=0, lz=0, cx=1, cz=1 →
+    // syncChunk for (1,1), (0,1), (1,0), and diagonal (0,0) → line 641.
+    m_sim->setTileHeight(32, 32, 5.0f);
+    EXPECT_GE(m_sim->pendingRebuildCount(), 1)
+        << "setTileHeight() on chunk corner must enqueue rebuilds";
+
+    // setTileHeight on tile (0, 0) with m_chunkHeightmaps populated:
+    // syncChunk(0, 0, 0, 0) must find the chunk (line 634-635).
+    m_sim->setTileHeight(0, 0, 2.0f);
+    EXPECT_GE(m_sim->pendingRebuildCount(), 1);
+}

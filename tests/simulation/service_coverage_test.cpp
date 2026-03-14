@@ -706,3 +706,171 @@ TEST_F(ServiceTest, ServiceCoverage_Police_Degrades_Independently_AtDeficit) {
 
     police_sim.reset();
 }
+
+// ============================================================================
+// Tests moved from simulation_coverage_gap_test.cpp
+// ============================================================================
+
+// ============================================================================
+// Test: placeServiceBuilding — WaterTower (exercises WaterTower switch branch)
+// Treasury must decrease by water tower placement cost.
+// ============================================================================
+TEST_F(ServiceTest, PlaceServiceBuilding_WaterTower_ReducesTreasury)
+{
+    float before = sim_->getTreasuryBalance();
+    sim_->placeServiceBuilding(5, 5, ServiceBuildingType::WaterTower, 0);
+    float after = sim_->getTreasuryBalance();
+
+    // Treasury must decrease by water tower cost.
+    EXPECT_LT(after, before);
+    EXPECT_FLOAT_EQ(before - after,
+                    static_cast<float>(SimulationConstants::service_placement_cost_water_tower));
+}
+
+// ============================================================================
+// Test: placeServiceBuilding — FireStation (exercises FireStation switch branch)
+// ============================================================================
+TEST_F(ServiceTest, PlaceServiceBuilding_FireStation_ReducesTreasury)
+{
+    float before = sim_->getTreasuryBalance();
+    sim_->placeServiceBuilding(3, 3, ServiceBuildingType::FireStation, 0);
+    float after = sim_->getTreasuryBalance();
+
+    EXPECT_LT(after, before);
+    EXPECT_FLOAT_EQ(before - after,
+                    static_cast<float>(SimulationConstants::service_placement_cost_fire_station));
+}
+
+// ============================================================================
+// Test: placeServiceBuilding — PoliceStation (exercises PoliceStation switch branch)
+// ============================================================================
+TEST_F(ServiceTest, PlaceServiceBuilding_PoliceStation_ReducesTreasury)
+{
+    float before = sim_->getTreasuryBalance();
+    sim_->placeServiceBuilding(2, 2, ServiceBuildingType::PoliceStation, 0);
+    float after = sim_->getTreasuryBalance();
+
+    EXPECT_LT(after, before);
+    EXPECT_FLOAT_EQ(before - after,
+                    static_cast<float>(SimulationConstants::service_placement_cost_police_station));
+}
+
+// ============================================================================
+// Test: placeServiceBuilding already-occupied no-op
+// Placing a second building on the same tile must not change treasury.
+// ============================================================================
+TEST_F(ServiceTest, PlaceServiceBuilding_AlreadyOccupied_NoOp)
+{
+    sim_->placeServiceBuilding(4, 4, ServiceBuildingType::PowerPlant, 0);
+    float afterFirst = sim_->getTreasuryBalance();
+
+    // Attempt second placement on same tile — should be no-op.
+    sim_->placeServiceBuilding(4, 4, ServiceBuildingType::FireStation, 0);
+    float afterSecond = sim_->getTreasuryBalance();
+
+    EXPECT_FLOAT_EQ(afterFirst, afterSecond)
+        << "Second placement on occupied tile must not change treasury";
+}
+
+// ============================================================================
+// Test: service alert SFX fired when desirability drops <= threshold (L760-772)
+// FireStation placed far from residential — tile uncovered → desirability drops.
+// After 8 ticks (50 - 8*5 = 10 <= 20) the alert SFX fires.
+// ============================================================================
+TEST_F(ServiceTest, ServiceAlert_FireAlert_FiredWhenDesirabilityLow)
+{
+    EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
+
+    // FireStation far from (0,0): dist(99,99)→(0,0) ≈ 140 > radius 80.
+    sim_->placeServiceBuilding(99, 99, ServiceBuildingType::FireStation, 0);
+    sim_->placeZone(0, 0, ZoneType::Residential, DensityTier::Low, 0);
+
+    // Advance past grace period.
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+
+    // Run 8 ticks: desirability = 50 - 8*5 = 10 ≤ threshold 20 → alert fires.
+    for (int i = 0; i < 8; ++i) {
+        runTicks(1);
+    }
+    SUCCEED();
+}
+
+// ============================================================================
+// Test: water/power coverage loss SFX (L699-704, L720-728)
+// Close buildings establish coverage, then are demolished. Far buildings keep
+// hasWater/hasPower=true. Coverage-loss SFX fires on the next tick.
+// ============================================================================
+TEST_F(ServiceTest, WaterPowerLoss_SFX_FiredOnCoverageRemoval)
+{
+    EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+
+    // Place close WaterTower and PowerPlant to establish coverage.
+    sim_->placeServiceBuilding(0, 0, ServiceBuildingType::WaterTower, 0);
+    sim_->placeServiceBuilding(1, 0, ServiceBuildingType::PowerPlant, 0);
+
+    // Place far-away WaterTower and PowerPlant — keeps hasWater/hasPower=true
+    // after the close ones are demolished, but provides NO coverage to (0,1).
+    sim_->placeServiceBuilding(99, 99, ServiceBuildingType::WaterTower, 0);
+    sim_->placeServiceBuilding(99, 98, ServiceBuildingType::PowerPlant, 0);
+
+    // Place residential tile within coverage radius of close buildings.
+    sim_->placeZone(0, 1, ZoneType::Residential, DensityTier::Low, 0);
+
+    // Advance past grace period and run one tick to set wasWaterCovered/wasPowered.
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+    runTicks(1);
+
+    // Demolish the close WaterTower and PowerPlant.
+    sim_->demolishTile(0, 0);
+    sim_->demolishTile(1, 0);
+
+    // Run one more tick — coverage loss SFX fires for water and power.
+    runTicks(1);
+    SUCCEED();
+}
+
+// ============================================================================
+// Test: service alert — PoliceStation alert fires when no FireStation present
+// PoliceStation far from residential (0,0) → anyUncovered=true → L768 fires.
+// ============================================================================
+TEST_F(ServiceTest, ServiceAlert_PoliceAlert_FiredWhenNoFireStation)
+{
+    EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
+
+    // Place PoliceStation far away — residential at (0,0) is outside coverage.
+    sim_->placeServiceBuilding(99, 99, ServiceBuildingType::PoliceStation, 0);
+
+    // No FireStation placed — hasFire=false, hasPoliceForAlert=true.
+    sim_->placeZone(0, 0, ZoneType::Residential, DensityTier::Low, 0);
+
+    // Advance past grace period.
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+
+    // Run ticks until desirability drops to <= threshold (20).
+    for (int i = 0; i < 8; ++i) {
+        runTicks(1);
+    }
+    SUCCEED();
+}
+
+// ============================================================================
+// Test: queryTile with WaterTower service building — covers water coverage branch
+// A WaterTower is present; queryTile should compute water coverage for the tile.
+// ============================================================================
+TEST_F(ServiceTest, QueryTile_WithWaterTower_ReturnsCoverageData)
+{
+    // Place a WaterTower.
+    sim_->placeServiceBuilding(0, 0, ServiceBuildingType::WaterTower, 0);
+
+    // Place a Residential zone near the tower.
+    sim_->placeZone(1, 0, ZoneType::Residential, DensityTier::Low, 0);
+
+    // queryTile should show coverage data (water coverage != -1.0f).
+    QueryResult qr = cs()->queryTile(1, 0);
+    EXPECT_TRUE(qr.isZoned);
+    // Water coverage should be >= 0 (WaterTower is close enough).
+    EXPECT_GE(qr.coverage.water, 0.0f);
+}
