@@ -29,6 +29,11 @@
 // Explicit interface includes for method calls on forward-declared pointers.
 #include "src/interfaces/IAudioSystem.h"
 #include "src/interfaces/sound_ids.h"       // UI_CLICK, UI_MENU_OPEN, UI_MENU_CLOSE — Phase 10 wiring
+#include <cstdio>    // fopen/fclose/fprintf — loadKeybindings file probe
+#include <cstdlib>   // getenv — HOME / APPDATA resolution in loadKeybindings
+#if defined(_WIN32)
+#  include <cstring> // snprintf on MSVC
+#endif
 #include "src/interfaces/audio_types.h"     // SoundPriority::NORMAL — Phase 10 wiring
 #include "src/interfaces/ICitySimulation.h"
 #include "src/interfaces/IRenderer.h"       // IRenderer — for setZoneOverlay, pickTerrainTile
@@ -1251,6 +1256,27 @@ void UIManager::update(float realDeltaSeconds) {
     m_lastDeficitMonths = currentMonths;
 
     // =============================================================
+    // 4b. STINGER_MILESTONE POLLING (Phase 11 per-frame dispatch)
+    // Per-frame getCityRating() edge-detect replaces the Phase 10
+    // notification-based dispatch to avoid double-fire on load.
+    // m_previousCityRating is seeded by onGameLoaded() so no spurious
+    // stinger fires when a saved game is first loaded.
+    // =============================================================
+    {
+        CityRatingTier currentRating = m_sim->getCityRating();
+        if (currentRating > m_previousCityRating) {
+            if (m_audio && m_clock) {
+                double now = m_clock->nowSeconds();
+                if ((now - m_lastMilestoneStingerFireTime) >= kStingerCooldownSeconds) {
+                    m_audio->triggerStinger(StingerType::MILESTONE);
+                    m_lastMilestoneStingerFireTime = now;
+                }
+            }
+        }
+        m_previousCityRating = currentRating;
+    }
+
+    // =============================================================
     // 5. SPEED SELECTOR POLLING
     // Poll sim speed every frame and update display if the handle
     // is valid (created by HUD). This is a no-op until HUD wires
@@ -1317,17 +1343,10 @@ void UIManager::update(float realDeltaSeconds) {
                 m_notifications->postNormal(
                     "City Rating Changed",
                     "City rating tier has changed!");
-                // Phase 10: fire MILESTONE stinger on City Rating tier transitions.
-                // Raw PopulationMilestone events do NOT trigger the stinger — only
-                // CityRatingTransition does (architecture/audio-architecture/dynamic-soundscape.md).
-                // 5-second cooldown gate, matching the CRISIS stinger pattern.
-                if (m_audio && m_clock) {
-                    double now = m_clock->nowSeconds();
-                    if ((now - m_lastMilestoneStingerFireTime) >= kStingerCooldownSeconds) {
-                        m_audio->triggerStinger(StingerType::MILESTONE);
-                        m_lastMilestoneStingerFireTime = now;
-                    }
-                }
+                // Phase 11: stinger_milestone is now dispatched via per-frame
+                // getCityRating() polling in section 4b above — NOT from this
+                // notification handler.  Removing the stinger call here prevents
+                // double-fire: both paths would otherwise fire on the same transition.
                 break;
         }
     }
@@ -1549,4 +1568,65 @@ void UIManager::onNewGame() {
     if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u);
     if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
     updateSubPanelVisibility();
+}
+
+// ----------------------------------------------------------------
+// Phase 11: onGameLoaded — seed stinger and deficit caches after load.
+// Called by the loading controller (main.cpp) once per load path
+// (New Game / Load Last Save) before the first update() tick.
+// ----------------------------------------------------------------
+void UIManager::onGameLoaded() {
+    if (m_sim) {
+        // Seed m_previousCityRating so the stinger_milestone per-frame
+        // detector does not fire a spurious MILESTONE on the first tick.
+        m_previousCityRating = m_sim->getCityRating();
+        // Seed m_lastDeficitMonths so deficit-streak warnings do not
+        // retroactively fire for months already counted before load.
+        m_lastDeficitMonths = m_sim->getConsecutiveDeficitMonths();
+    }
+}
+
+// ----------------------------------------------------------------
+// Phase 11: loadKeybindings — probe and (future) parse keybindings.json.
+// ----------------------------------------------------------------
+void UIManager::loadKeybindings() {
+    char path[512] = {};
+#if defined(_WIN32)
+    const char* appdata = getenv("APPDATA");
+    if (!appdata || appdata[0] == '\0') {
+        // APPDATA unset (service account, etc.): silently use defaults.
+        return;
+    }
+    snprintf(path, sizeof(path), "%s\\aitown\\keybindings.json", appdata);
+#else
+    const char* home = getenv("HOME");
+    if (!home || home[0] == '\0') {
+        // HOME unset (container without user env): silently use defaults.
+        return;
+    }
+    snprintf(path, sizeof(path), "%s/.config/aitown/keybindings.json", home);
+#endif
+
+    FILE* f = fopen(path, "r");
+    if (!f) {
+        // Absent on first run — silently use defaults, do NOT warn.
+        return;
+    }
+    fclose(f);
+
+    // File exists: log and apply overrides.
+    // Full JSON parsing is deferred to the phase that introduces KeyBindings struct.
+    fprintf(stderr,
+        "[UIManager::loadKeybindings] Found keybindings: %s (parsing deferred).\n",
+        path);
+    // TODO: parse JSON and populate m_keyBindings (future phase).
+}
+
+// ----------------------------------------------------------------
+// Phase 11: setSaveAvailable — forward to MainMenuPanel.
+// ----------------------------------------------------------------
+void UIManager::setSaveAvailable(bool available) {
+    if (m_mainMenu) {
+        m_mainMenu->setSaveAvailable(available);
+    }
 }

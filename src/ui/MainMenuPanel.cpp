@@ -210,6 +210,15 @@ bool MainMenuPanel::consumeQuitRequest() {
 }
 
 // ---------------------------------------------------------------------------
+// setSaveAvailable — Phase 11: enable/disable the Load Game button.
+// Called by UIManager::setSaveAvailable() after SaveSystem probes disk.
+// ---------------------------------------------------------------------------
+void MainMenuPanel::setSaveAvailable(bool available) {
+    if (!m_backend || m_btnLoadGame == kInvalidUIElement) return;
+    m_backend->setElementEnabled(m_btnLoadGame, available);
+}
+
+// ---------------------------------------------------------------------------
 // draw
 // ---------------------------------------------------------------------------
 void MainMenuPanel::draw() {

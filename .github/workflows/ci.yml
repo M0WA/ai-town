@@ -1053,6 +1053,30 @@ jobs:
             echo "PASS: Found $count src/simulation/ SF entries in coverage_filtered.info."
           fi
 
+      - name: Enforce src/simulation/ 85% per-file floor (Phase 11)
+        run: |
+          awk '
+            /^SF:/ { in_sim=0; fname="" }
+            /^SF:.*src\/simulation\// { in_sim=1; fname=$0; sub(/^SF:/, "", fname); lh=0; lf=0 }
+            in_sim && /^LH:/ { lh=$0; sub(/^LH:/, "", lh) }
+            in_sim && /^LF:/ { lf=$0; sub(/^LF:/, "", lf) }
+            in_sim && /^end_of_record/ {
+              if (lf+0 > 0) {
+                pct = lh/lf*100
+                if (min_pct == "" || pct < min_pct+0) { min_pct=pct; min_file=fname }
+              }
+              in_sim=0
+            }
+            END {
+              if (min_pct == "") { print "PREFLIGHT FAIL: No src/simulation/ files found in coverage_filtered.info"; exit 1 }
+              if (min_pct+0 < 85.0) {
+                printf "FAIL: worst src/simulation/ file %s coverage %.1f%% < 85%% Phase 11 per-file floor\n", min_file, min_pct; exit 1
+              } else {
+                printf "PASS: worst src/simulation/ file %s coverage %.1f%% >= 85%%\n", min_file, min_pct
+              }
+            }
+          ' coverage_filtered.info
+
       - name: Enforce 95% total line coverage gate
         run: |
           total=$(awk '

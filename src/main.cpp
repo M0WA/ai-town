@@ -25,6 +25,7 @@
 #include "src/interfaces/camera_state.h"
 #include "src/simulation/CitySimulation.h"
 #include "src/simulation/StdSimulationRNG.h"
+#include "src/simulation/SaveSystem.h"
 #include "src/terrain/TerrainSystem.h"
 #include "src/terrain/StdTerrainRNG.h"
 #include "src/audio/AudioSystem.h"
@@ -190,6 +191,33 @@ int main() {
     // when returning from gameplay.
     // -------------------------------------------------------------------------
     audioSystem.setMusicTrack(MUSIC_MAIN_MENU_01);
+
+    // -------------------------------------------------------------------------
+    // Phase 11: keybindings — load from platform config path at startup.
+    // Silently uses defaults if keybindings.json is absent (normal first-run state).
+    // -------------------------------------------------------------------------
+    uiManager.loadKeybindings();
+
+    // -------------------------------------------------------------------------
+    // Phase 11: SaveSystem — auto-save and manual slot management.
+    // Constructed with wallClock for deterministic 120 s auto-save gate.
+    // setSimulation() binds the CitySimulation to the SaveSystem before any
+    // save/load method can be called.
+    // -------------------------------------------------------------------------
+    SaveSystem saveSystem(&wallClock);
+    saveSystem.setSimulation(&citySimulation);
+
+    // Update Main Menu "Load Game" button state based on save file presence.
+    // Grayed with tooltip "No saves found." when no save files exist (first run).
+    uiManager.setSaveAvailable(saveSystem.hasSaveData());
+
+    // -------------------------------------------------------------------------
+    // Phase 11: Notify UIManager that all startup wiring is complete.
+    // Seeds m_previousCityRating and m_lastDeficitMonths caches from the loaded
+    // simulation state so the first update() tick does not fire spurious stingers
+    // or deficit warnings.  Must be called before the first UIManager::update().
+    // -------------------------------------------------------------------------
+    uiManager.onGameLoaded();
 
     // -------------------------------------------------------------------------
     // EventReceiver — translates SEvent → InputEvent, dispatches per input-arbitration.md.

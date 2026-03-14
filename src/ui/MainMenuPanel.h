@@ -31,6 +31,11 @@ public:
     // Returns true (once) when "Quit" was clicked or Enter-activated.
     bool consumeQuitRequest();
 
+    // Phase 11: Update Load Game button enabled state.
+    // When available=false (default): button grayed with tooltip "No saves found."
+    // When available=true: button enabled and interactive.
+    void setSaveAvailable(bool available);
+
 private:
     IUIBackend* m_backend{nullptr};
     bool m_visible{false};
