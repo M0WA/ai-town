@@ -1092,8 +1092,11 @@ bool IrrlichtUIBackend::handleGuiHoverEvent(const irr::SEvent& event)
     if (!el) return false;
 
     // Only process IGUIButton elements.
-    auto* btn = dynamic_cast<irr::gui::IGUIButton*>(el);
-    if (!btn) return false;
+    // Use getType() instead of dynamic_cast to avoid RTTI issues across shared-library
+    // boundaries on some GPU/driver combinations (dynamic_cast on Irrlicht types can
+    // crash if typeinfo symbols are not uniquely resolved).
+    if (el->getType() != irr::gui::EGUIET_BUTTON) return false;
+    auto* btn = static_cast<irr::gui::IGUIButton*>(el);
 
     // Sprite sheet must be loaded to do image swaps.
     if (!m_spriteTextureReady || !m_spriteTexture) return false;
@@ -1127,16 +1130,13 @@ bool IrrlichtUIBackend::handleGuiHoverEvent(const irr::SEvent& event)
         btn->setDrawBorder(false);
 
     } else {  // EGET_ELEMENT_LEFT
-        // Restore active sprite when button is pressed; inactive otherwise.
-        uint32_t restoreId;
-        if (btn->isPressed()) {
-            restoreId = getActiveId(currentSprite);
-        } else {
-            restoreId = getInactiveId(currentSprite);
-        }
-        if (restoreId == kSpriteInvalidId) return false;
-
-        irr::core::rect<irr::s32> srcRect = spriteRectForIndex(restoreId);
+        // Restore the registered base sprite (whatever setElementImage last set).
+        // currentSprite is the value stored in m_imageElementMap — the sprite shown
+        // before the hover began — which may be active OR inactive depending on
+        // whether the button was selected when the hover started.
+        // Do NOT map through getInactiveId(): that would always show the outline
+        // variant even for buttons initialized with an active (filled icon) sprite.
+        irr::core::rect<irr::s32> srcRect = spriteRectForIndex(currentSprite);
         btn->setImage(m_spriteTexture, srcRect);
         btn->setScaleImage(true);
         btn->setUseAlphaChannel(true);

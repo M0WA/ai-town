@@ -73,6 +73,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   sox \
   vorbis-tools \
   mediainfo \
+  scrot \
   && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
      --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
   && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-13 100 \

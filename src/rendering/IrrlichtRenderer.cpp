@@ -1376,7 +1376,7 @@ void IrrlichtRenderer::initTerrainShader()
     const std::string asphaltPath  = assetsDir + "/textures/terrain/terrain_asphalt_d.dds";
     const std::string soilPath     = assetsDir + "/textures/terrain/terrain_soil_d.dds";
     const std::string concretePath = assetsDir + "/textures/terrain/terrain_concrete_d.dds";
-    const std::string splatPath    = assetsDir + "/textures/terrain/terrain_splat.dds";
+    const std::string splatPath    = assetsDir + "/textures/terrain/terrain_chunk_splat.png";
 
     // Load 4 diffuse textures as sRGB DXT1.
     m_terrainTextureCache->loadSRGB(grassPath,    GL_COMPRESSED_SRGB_S3TC_DXT1_EXT);

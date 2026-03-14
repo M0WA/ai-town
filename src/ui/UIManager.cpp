@@ -128,9 +128,11 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
         const int zoneLeft  = 80;
         const int zoneTop   = 64;
 
-        // Create all 9 buttons; set inactive sprite for each (including the default);
-        // then override the default (idx 0, Residential Low) with the active sprite.
-        // Tests assert: all 9 inactive calls + 1 active call on the default button.
+        // Create all 9 buttons; set active sprite for each so icons are always visible.
+        // The selected button (default: idx 0, Residential Low) shows its active sprite.
+        // Non-selected buttons also start with their active sprites — they transition to
+        // inactive (outline) only when the player selects a different button, providing a
+        // clear selection indicator while keeping icons visible in the initial open state.
         // Empty string label — sprite is the sole visual encoding (hud_sprites_ui.dds is committed).
         for (int densityRow = 0; densityRow < 3; ++densityRow) {
             for (int zoneCol = 0; zoneCol < 3; ++zoneCol) {
@@ -140,23 +142,17 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
 
                 m_zoneSubPanelBtns[idx] = m_backend->addButton("", bx, by, zoneBtnW, zoneBtnH);
 
-                // Set initial inactive zone pattern icon.
-                // Sprite IDs: kSpriteZoneResLowInactive(96) + zoneCol + densityRow*3.
-                uint32_t inactiveSprite = kSpriteZoneResLowInactive
-                                         + static_cast<uint32_t>(zoneCol)
-                                         + static_cast<uint32_t>(densityRow) * 3u;
-                m_backend->setElementImage(m_zoneSubPanelBtns[idx], inactiveSprite);
+                // Set active sprite so the filled icon is visible from the start.
+                // Sprite IDs: kSpriteZoneResLowActive(64) + zoneCol + densityRow*3.
+                uint32_t activeSprite = kSpriteZoneResLowActive
+                                        + static_cast<uint32_t>(zoneCol)
+                                        + static_cast<uint32_t>(densityRow) * 3u;
+                m_backend->setElementImage(m_zoneSubPanelBtns[idx], activeSprite);
 
                 // Initially hidden — only shown when Zone tool is active.
                 m_backend->setElementVisible(m_zoneSubPanelBtns[idx], false);
             }
         }
-
-        // Override default selection (Residential Low = idx 0) with the active sprite.
-        // All 9 inactive sprites were set in the loop above; this call matches the Utilities
-        // sub-panel pattern (see below) and satisfies the test assertion:
-        //   EXPECT_CALL(backend_, setElementImage(_, kSpriteZoneResLowActive)).Times(AtLeast(1))
-        m_backend->setElementImage(m_zoneSubPanelBtns[0], kSpriteZoneResLowActive);
 
     }
 
@@ -177,9 +173,9 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
         // ServiceBuildingType ordinals: PowerPlant=0, WaterTower=1, FireStation=2, PoliceStation=3.
         // Single-row layout: typeIdx == column index.
         //   col0->0=PowerPlant, col1->1=WaterTower, col2->2=FireStation, col3->3=PoliceStation.
-        // Create all 4 buttons; set inactive sprite for each (including the default);
-        // then override the default (typeIdx 0, PowerPlant) with the active sprite.
-        // Tests assert: all 4 inactive calls + 1 active call on the default button.
+        // Create all 4 buttons; set active sprite for each so icons are always visible.
+        // Same pattern as Zone sub-panel: icons visible from the start; transition to
+        // inactive (outline) only for non-selected buttons when a different button is clicked.
         // Empty string label — sprite is the sole visual encoding (hud_sprites_ui.dds is committed).
 
         for (int typeIdx = 0; typeIdx < 4; ++typeIdx) {
@@ -189,17 +185,14 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
             m_utilSubPanelBtns[typeIdx] = m_backend->addButton(
                 "", bx, by, utilBtnW, utilBtnH);
 
-            // Set inactive sprite for every button (including the default).
-            uint32_t inactiveSprite = kSpriteUtilPowerInactive
-                                      + static_cast<uint32_t>(typeIdx);
-            m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], inactiveSprite);
+            // Set active sprite so the filled icon is visible from the start.
+            uint32_t activeSprite = kSpriteUtilPowerActive
+                                    + static_cast<uint32_t>(typeIdx);
+            m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], activeSprite);
 
             // Initially hidden.
             m_backend->setElementVisible(m_utilSubPanelBtns[typeIdx], false);
         }
-
-        // Override default selection (PowerPlant = typeIdx 0) with the active sprite.
-        m_backend->setElementImage(m_utilSubPanelBtns[0], kSpriteUtilPowerActive);
     }
 }
 

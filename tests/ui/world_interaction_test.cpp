@@ -808,8 +808,12 @@ TEST_F(WorldInteractionTest, WorldInteraction_SetMapDimensions_Recall_ClearsOver
 //
 // Verifies that during UIManager construction/init(), the Zone sub-panel buttons
 // receive the correct setElementImage calls:
-//   - 8 inactive/outline-icon calls (kSpriteZoneResLowInactive + col + row*3)
-//   - 1 active-state call on the default selection (kSpriteZoneResLowActive = 64)
+//   - 9 active-state calls (kSpriteZoneResLowActive + col + row*3), one per button.
+//
+// All 9 zone buttons are initialised with their active (filled-icon) sprite so that
+// icons are visible as soon as the panel opens, before the player makes any selection.
+// Non-selected buttons transition to inactive (outline) only when a different button
+// is clicked — this provides a clear selection indicator without hiding icons on open.
 //
 // Uses a dedicated NiceMock<MockUIBackend> that tracks setElementImage calls.
 // StrictMock is NOT used here because UIManager construction issues many unrelated
@@ -820,9 +824,8 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneSubPanel_ButtonsInitialized)
 {
     // Verifies Zone sub-panel button init sprite calls from UIManager construction.
     //
-    // Per spec (phase-9b.md Deliverable D): init() calls setElementImage(handle, inactiveHandle)
-    // on ALL 9 zone sub-panel buttons first, then calls setElementImage(handle, activeHandle)
-    // on the default-selected button (ResLow = kSpriteZoneResLowActive = 64).
+    // Per spec: init() calls setElementImage(handle, activeSprite) on ALL 9 zone
+    // sub-panel buttons (kSpriteZoneResLowActive + col + row*3 for each).
     //
     // GMock expectation registration order (LIFO matching):
     //   Register catch-all FIRST, then specific expectations on top.
@@ -835,19 +838,15 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneSubPanel_ButtonsInitialized)
     // Registered FIRST so it is matched LAST (GMock LIFO order).
     EXPECT_CALL(backend_, setElementImage(_, _)).Times(::testing::AnyNumber());
 
-    // All 9 inactive sprites (including ResLow which gets both inactive then active).
-    // Registered AFTER catch-all so they are tried FIRST (LIFO).
+    // All 9 active sprites — registered AFTER catch-all so they are tried FIRST (LIFO).
     for (int row = 0; row < 3; ++row) {
         for (int col = 0; col < 3; ++col) {
-            uint32_t inactiveHandle = kSpriteZoneResLowInactive +
+            uint32_t activeHandle = kSpriteZoneResLowActive +
                 static_cast<uint32_t>(col) +
                 static_cast<uint32_t>(row) * 3u;
-            EXPECT_CALL(backend_, setElementImage(_, inactiveHandle)).Times(AtLeast(1));
+            EXPECT_CALL(backend_, setElementImage(_, activeHandle)).Times(AtLeast(1));
         }
     }
-
-    // Default button (col=0, row=0 — Residential Low): active sprite = 64.
-    EXPECT_CALL(backend_, setElementImage(_, kSpriteZoneResLowActive)).Times(AtLeast(1));
 
     // Re-construct UIManager to capture the init() calls in this test's scope.
     // The SetUp UIManager is reset first; the new construction triggers init().
@@ -860,8 +859,10 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneSubPanel_ButtonsInitialized)
 //
 // Verifies that during UIManager construction/init(), the Utilities sub-panel
 // buttons receive the correct setElementImage calls:
-//   - 3 inactive/outline-icon calls (kSpriteUtilPowerInactive + static_cast<int>(type))
-//   - 1 active-state call on the PowerPlant default (kSpriteUtilPowerActive = 128)
+//   - 4 active-state calls (kSpriteUtilPowerActive + typeIdx), one per button.
+//
+// All 4 utility buttons are initialised with their active (filled-icon) sprite so
+// icons are visible as soon as the panel opens. Same pattern as the Zone sub-panel.
 //
 // (ref: implementation/phase-9b.md Deliverable G)
 // ---------------------------------------------------------------------------
@@ -869,9 +870,8 @@ TEST_F(WorldInteractionTest, WorldInteraction_UtilitiesSubPanel_ButtonsInitializ
 {
     // Verifies Utilities sub-panel button init sprite calls from UIManager construction.
     //
-    // Per spec: init() calls setElementImage(handle, inactiveHandle) on ALL 4 utility
-    // buttons first, then calls setElementImage(handle, kSpriteUtilPowerActive=128) on
-    // the default-selected PowerPlant button.
+    // Per spec: init() calls setElementImage(handle, activeSprite) on ALL 4 utility
+    // buttons (kSpriteUtilPowerActive + typeIdx for each).
     //
     // Same catch-all pattern as ZoneSubPanel test: register catch-all FIRST (matched
     // LAST in LIFO), then specific expectations (matched FIRST).
@@ -879,14 +879,11 @@ TEST_F(WorldInteractionTest, WorldInteraction_UtilitiesSubPanel_ButtonsInitializ
     // Catch-all: allow other setElementImage calls (Zone init, Minimap, etc.).
     EXPECT_CALL(backend_, setElementImage(_, _)).Times(::testing::AnyNumber());
 
-    // All 4 inactive sprites (including PowerPlant which gets both inactive then active).
-    EXPECT_CALL(backend_, setElementImage(_, kSpriteUtilPowerInactive)).Times(AtLeast(1));
-    EXPECT_CALL(backend_, setElementImage(_, kSpriteUtilWaterInactive)).Times(AtLeast(1));
-    EXPECT_CALL(backend_, setElementImage(_, kSpriteUtilFireInactive)).Times(AtLeast(1));
-    EXPECT_CALL(backend_, setElementImage(_, kSpriteUtilPoliceInactive)).Times(AtLeast(1));
-
-    // Default button (PowerPlant): active sprite = 128.
+    // All 4 active sprites.
     EXPECT_CALL(backend_, setElementImage(_, kSpriteUtilPowerActive)).Times(AtLeast(1));
+    EXPECT_CALL(backend_, setElementImage(_, kSpriteUtilWaterActive)).Times(AtLeast(1));
+    EXPECT_CALL(backend_, setElementImage(_, kSpriteUtilFireActive)).Times(AtLeast(1));
+    EXPECT_CALL(backend_, setElementImage(_, kSpriteUtilPoliceActive)).Times(AtLeast(1));
 
     // Re-construct UIManager to capture the init() calls in this test's scope.
     uiManager_.reset();
