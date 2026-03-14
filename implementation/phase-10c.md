@@ -202,6 +202,10 @@ These single-colour tiled cells let `IrrlichtUIBackend` draw navy panel backgrou
 - [ ] Update `src/ui/hud_sprite_ids.h` with `kSpritePanelToolbar`, `kSpritePanelResourceBar`,
   `kSpritePanelOverlay` constants for the new background cells (follow existing `constexpr
   uint32_t` pattern; add after the last existing constant)
+- [ ] Add `kSpriteXxxHover` constants to `src/ui/hud_sprite_ids.h` for every icon that has an
+  inactive/active pair — one hover constant per icon, named by convention `kSprite<Name>Hover`
+  (e.g. `kSpriteZoneResidentialHover`, `kSpriteRoadHover`, etc.); value = the sprite cell ID
+  of the corresponding hover cell baked into `hud_sprites_ui.png`
 - [ ] Update `tools/generate_hud_sprites.py` to produce the outlined-inactive / outlined-hover /
   filled-active three-state style for all future regenerations — no manual hand-editing of the PNG
 - [ ] Verify final PNG is still 2048×2048 RGBA (Check #23 must stay green)
@@ -252,6 +256,10 @@ above: multiply A_0–1 by 255.
 - [ ] Remove or replace any code that applies a translucent active-tint overlay via `SColor`
   with alpha-35 — the active state is now expressed entirely through the sprite (Feature 4);
   no programmatic color overlay needed on activation
+- [ ] Implement hover state switching in `IrrlichtUIBackend`: on `IGUIElement::OnEvent`
+  `EGET_ELEMENT_HOVERED` / `EGET_ELEMENT_LEFT`, swap the button image to the corresponding
+  `kSpriteXxxHover` / `kSpriteXxx` (inactive) cell using `IGUIButton::setImage()` — no new
+  `IUIBackend` interface methods required (hover switching is internal to the Irrlicht backend)
 - [ ] `IrrlichtUIBackend`: load `hud_font.xml` (not the old `ui_font.xml` path which no longer
   exists); this was already fixed in commit 1100241 — verify no regression
 
@@ -284,9 +292,8 @@ above: multiply A_0–1 by 255.
   `kSpritePanelOverlay` constants; `hud_sprites_ui_layout.json` updated
 - `tools/generate_hud_sprites.py` produces the outlined-inactive / outlined-hover / filled-active
   three-state style on regeneration
-- Hover sprite cells (85% opacity, outlined stroke, 1 px white border) are baked into
-  `hud_sprites_ui.png`; `hud_sprite_ids.h` does **not** define `kSpriteXxxHover` constants
-  and `IrrlichtUIBackend` does **not** implement hover state switching — both are deferred
+- `hud_sprite_ids.h` contains `kSpriteXxxHover` constants for every icon with an inactive/active
+  pair; hovering a button swaps its image to the hover cell and restores on mouse-leave
 - No regression in existing `ui_tests` or `opengl_tests`; `validate_assets.py` Check #23 green
 
 ---
@@ -326,11 +333,3 @@ above: multiply A_0–1 by 255.
   `IrrlichtUIBackend` and the sprite sheet; no interface changes required
 - `ui_constants.h` hover/overlay ARGB values — tile hover highlights and zone overlays are
   gameplay colours, not UI chrome; unchanged by the Glass City direction
-- **Hover sprite ID constants (`kSpriteXxxHover`) and hover state switching in
-  `IrrlichtUIBackend`** — the three-state sprite cells (inactive / hover / active) are baked
-  into `hud_sprites_ui.png` by Feature 4 so the assets exist for future use, but hover input
-  detection (mouse-over hit testing) is not implemented in this phase. Therefore:
-  - `hud_sprite_ids.h` does **not** add `kSpriteXxxHover` constants in Phase 10c; hover sprite
-    cells are accessible by offset from their inactive counterpart but have no named constant yet
-  - `IrrlichtUIBackend` does **not** implement hover state switching in Phase 10c; hover
-    rendering will be wired in a later phase when mouse-over detection is available
