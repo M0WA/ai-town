@@ -36,10 +36,15 @@
 
 ## Phase 10 QA Artifact Formats
 
-QA artifacts are not runtime game assets. They are authoring verification files committed
-to the repository as evidence of sound artist review. The format requirements below are
-authoritative — `v1-audio-asset-manifest.md` "Phase 10 QA Delivery Artifacts" section
-contains the full content specifications for each file.
+QA artifacts are not runtime game assets. They are authoring verification files produced
+as evidence of sound artist review. The format requirements below are authoritative —
+`v1-audio-asset-manifest.md` "Phase 10 QA Delivery Artifacts" section contains the full
+content specifications for each file.
+
+`assets/audio/crossfade_demos/` is `.gitignore`d — demo WAV files and the QA sign-off
+document are shared out-of-band during review and are not committed to the repository.
+`assets/audio/crossfade_demo_day_to_night.ogg` (flat root, not in `crossfade_demos/`) is
+committed as it is referenced directly in the dynamic-soundscape spec.
 
 ### Crossfade demo WAV files
 
@@ -57,8 +62,9 @@ contains the full content specifications for each file.
   encoding would introduce a decode/encode generation loss and hide any subtle gain
   curve artifacts that the QA render is designed to surface
 
-These files are not loaded by `AudioSystem`. They are stored in the repository solely
-as auditable evidence of pre-production crossfade compatibility verification.
+These files are not loaded by `AudioSystem`. They are shared out-of-band during Phase 10
+review and are not committed to the repository (`assets/audio/crossfade_demos/` is
+`.gitignore`d).
 
 ### Day-to-night crossfade demo OGG
 

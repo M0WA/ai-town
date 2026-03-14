@@ -70,7 +70,7 @@ built-in DDS loader recognises the files without requiring the DX10 extension.
 Usage
 -----
     python3 tools/generate_terrain_textures.py
-    # writes 8 DDS files to assets/terrain/
+    # writes 8 DDS files to assets/textures/terrain/
 """
 
 import struct
@@ -986,7 +986,7 @@ def _generate_normal_dds(name: str, pixel_fn, out_dir: str,
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     workspace_root = os.path.dirname(script_dir)
-    out_dir = os.path.join(workspace_root, "assets", "terrain")
+    out_dir = os.path.join(workspace_root, "assets", "textures", "terrain")
     os.makedirs(out_dir, exist_ok=True)
 
     print("AI Town — Phase 5 Terrain Texture Generator")

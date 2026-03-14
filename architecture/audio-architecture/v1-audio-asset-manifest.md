@@ -116,7 +116,14 @@ Post-V1 music stems MUST be assigned the next available integer (9, 10, …) and
 
 ## Asset Path Convention
 
-All V1 audio assets reside at `${AITOWN_ASSETS_DIR}/audio/<filename>` (flat layout, no subdirectory), where `<filename>` is the Asset Name from the table above plus its format extension (e.g., `ambient_day.ogg`, `sfx_build_place.wav`, `stinger_crisis.wav`). JSON sidecar files for music stems follow the same flat layout (e.g., `${AITOWN_ASSETS_DIR}/audio/music_calm_01.json`). `AudioSystem` must resolve all asset paths using this convention; no asset category uses a subdirectory under `audio/`.
+All V1 runtime audio assets reside at `${AITOWN_ASSETS_DIR}/audio/<filename>` (flat layout, no subdirectory), where `<filename>` is the Asset Name from the table above plus its format extension (e.g., `ambient_day.ogg`, `sfx_build_place.wav`, `stinger_crisis.wav`). JSON sidecar files for music stems follow the same flat layout (e.g., `${AITOWN_ASSETS_DIR}/audio/music_calm_01.json`). `AudioSystem` must resolve all asset paths using this convention.
+
+The `assets/audio/` directory contains two non-runtime subdirectories that are not loaded by `AudioSystem`:
+
+| Subdirectory | Purpose | Git status |
+|---|---|---|
+| `assets/audio/producer.ai/` | Raw source files — unmastered stems, session exports, reference renders. Not loaded at runtime. Tracked in git as authoring artifacts. | Tracked |
+| `assets/audio/crossfade_demos/` | QA crossfade demo renders (WAV/OGG) produced during Phase 10 audibility gate review. Not loaded at runtime. | `.gitignore`d |
 
 ### Loudness Target Summary
 
@@ -186,16 +193,18 @@ All four format checks (check_16–check_19, Phase 5) require the `mutagen` Pyth
 
 ## Phase 10 QA Delivery Artifacts
 
-These files are mandatory QA artifacts that must be committed to the repository before
-Phase 10 exit. They are NOT runtime game assets and are NOT loaded by `AudioSystem` at
-any point. Their sole purpose is to provide auditable evidence that authoring decisions
-(harmonic compatibility, ambient crossfade smoothness, zone loop boundary quality) have
-been verified by the sound artist.
+These files are mandatory QA artifacts that must be produced and reviewed before Phase 10
+exit. They are NOT runtime game assets and are NOT loaded by `AudioSystem` at any point.
+`assets/audio/crossfade_demos/` is `.gitignore`d — these files are produced locally by
+the sound artist, reviewed by the team, and then discarded. They are not committed to the
+repository. Their sole purpose is to provide auditable evidence (during review) that
+authoring decisions (harmonic compatibility, ambient crossfade smoothness, zone loop
+boundary quality) have been verified by the sound artist.
 
 ### Music Crossfade Audibility Gate Artifacts
 
-Three files must be committed to `assets/audio/crossfade_demos/` as a unit (all three
-in the same commit/PR as the music stem OGG files):
+Three files must be produced in `assets/audio/crossfade_demos/` as a unit and shared for
+review before Phase 10 exit:
 
 #### (a) `assets/audio/crossfade_demos/crossfade_demo_calm_to_growth.wav`
 
@@ -272,9 +281,11 @@ A plain-text QA sign-off document. Must contain all of the following fields:
 5. **Sign-off date**.
 
 A blocking objection (harmonic clash, audible pop, wrong key, incorrect bar count) must
-be filed as a PR comment; the artist must revise the demo WAV files and update
-`crossfade_demo_qa.md` before the PR can merge. This document is the approval record —
-no separate review meeting is required.
+be raised in the review; the artist must revise the demo WAV files and update
+`crossfade_demo_qa.md` before Phase 10 exit. This document is the approval record —
+no separate review meeting is required. Because `assets/audio/crossfade_demos/` is
+`.gitignore`d, this sign-off document is shared out-of-band (e.g. attached to the PR
+or posted in the review channel) rather than committed.
 
 ### `assets/audio/music_bar_counts.md`
 

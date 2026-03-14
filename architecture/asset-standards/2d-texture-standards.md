@@ -422,6 +422,278 @@ Road surfaces use a dedicated tileable texture separate from terrain and buildin
 - Coordinate layer count with `graphics-dev-irrlicht` before authoring terrain materials
 - `graphics-dev-irrlicht` implements the splatting shader/multi-texture blend via Irrlicht's material system
 
+##### Terrain Texture Art Style Direction
+
+**Realistic-stylized**: matching the visual register of Cities: Skylines (2015) and SimCity 4
+(2003) — richer saturation than raw photography, simplified micro-texture, strong material
+read at all zoom levels. Not photorealistic. Not cartoony.
+
+**Color temperature guideline**: warm sunlit palette overall. Grass is golden-green, soil is
+warm ochre, asphalt is cool blue-grey, concrete is warm light grey. These temperature
+contrasts aid material identification when the splat map blends between zones at road edges.
+
+**Zone overlay avoidance**: The game renders colored zone overlays (residential = green tint,
+commercial = blue tint, industrial = yellow tint). Avoid heavy use of pure green (`#00FF00`
+family) in grass or pure yellow in soil — these hues will merge with zone overlays and confuse
+zone-type readability. Shift grass toward olive-gold and soil toward rust-ochre.
+
+##### Tiling and Camera Context
+
+- Terrain chunk size: 128 m × 128 m world space; LOD0 quad grid: 32 × 32 cells at 4 m per cell
+- Texture repeat frequency: **one full tile per 4 m quad cell** at LOD0
+- At 2048 px resolution, 1 texel ≈ 1.95 mm world-space
+- Camera pitch range −70° to −20° from vertical: high-frequency micro-detail that reads
+  top-down is more valuable than low-angle surface silhouette detail
+- At mip level 3 (256 px, representing a 4 m area), each mip texel covers approximately
+  16 mm world-space — macro-scale color and value variation must read correctly at this resolution
+- All 8 textures must tile seamlessly with themselves in all directions (`GL_TEXTURE_WRAP_S/T = GL_REPEAT`)
+
+##### Diffuse Texture Specifications (Grassland Biome)
+
+All four diffuse textures are 2048 × 2048 px, DXT1/BC1, sRGB, 4 mip levels (2048→1024→512→256),
+uploaded via `TextureCache::loadSRGB()` with `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`.
+
+###### terrain\_grass\_d.dds
+
+**Semantic**: Natural grass ground cover. Fills splat channel R. The dominant biome surface
+for undeveloped and park tiles.
+
+| Role | Hex | R | G | B | Notes |
+|---|---|---|---|---|---|
+| Primary (mid-tone blade) | `#7A8C3E` | 122 | 140 | 62 | Muted olive-green; principal blade color |
+| Secondary (shadow pocket) | `#4E5C28` | 78 | 92 | 40 | Dark gap between blade clusters |
+| Tertiary (dry tip highlight) | `#A09848` | 160 | 152 | 72 | Slightly yellow-gold blade tip; sunlit |
+| Soil show-through | `#7A6448` | 122 | 100 | 72 | Warm brown visible between sparse patches |
+| Specular highlight catch | `#B4B068` | 180 | 176 | 104 | Hot highlight on near-vertical blade faces |
+
+Luminance range: min 62 (shadow pocket) — max 180 (highlight catch). Do not compress the
+range — the variance maintains read at DXT1 compression and at LOD3 (256 px mip).
+
+Surface: **isotropic stochastic**, high roughness. Use a stochastic Voronoi or fBm base with
+point-seeded blade clusters. Approximately 400–600 blade impressions at 2048 px. No
+directional bias. Approximately 15% soil show-through between sparse patches.
+
+Key constraints:
+
+- No pure-green pixels: max green channel value after sRGB encoding must be below 200/255
+- Blade minimum width 2 px in source (narrower aliases under DXT1 4×4 block compression)
+- DXT1 mitigation: keep blade colors within a 60-unit luminance spread within any 4×4 block;
+  use 0.5 px Gaussian blur on source PNG before compression to soften hard blade edges
+
+###### terrain\_asphalt\_d.dds
+
+**Semantic**: Road and paved driveway surface. Fills splat channel G.
+
+| Role | Hex | R | G | B | Notes |
+|---|---|---|---|---|---|
+| Primary (mid-tone aggregate) | `#3C3C3C` | 60 | 60 | 60 | Dark grey aggregate body |
+| Worn highlight (oxidized surface) | `#585858` | 88 | 88 | 88 | Lighter grey on worn areas |
+| Deep crack / joint gap | `#1C1C1C` | 28 | 28 | 28 | Near-black in crack recesses |
+| Aggregate specks (light) | `#6A6A6A` | 106 | 106 | 106 | Quartz aggregate pebbles |
+| Aged tar stain | `#2A2820` | 42 | 40 | 32 | Slight warm-dark for tar pools |
+
+Luminance range: min 28 — max 106 (spread 78 units). Author primary aggregate with faint
+blue bias: R ≤ G = B by approximately 2–4 units (e.g. `#3A3C3C`) to distinguish from the
+warm-grey concrete.
+
+Surface: **isotropic fine granular** with superimposed macro-crack network (Voronoi-edge,
+cell size 80–150 px, crack width 1–2 px, ≈3–5% of surface area). Road markings are NOT
+authored into this texture — they are handled by the road marking atlas.
+
+DXT1 mitigation: ensure no 4×4 block contains both a 106-luminance speck and a 28-luminance
+crack shadow without at least one intermediate-luminance texel between them.
+
+###### terrain\_soil\_d.dds
+
+**Semantic**: Bare earth, earthworks, and unpaved areas. Fills splat channel B.
+
+| Role | Hex | R | G | B | Notes |
+|---|---|---|---|---|---|
+| Primary (damp mid-tone) | `#7A5C3C` | 122 | 92 | 60 | Warm rust-brown; main soil body |
+| Dry surface highlight | `#A07850` | 160 | 120 | 80 | Lighter, slightly desaturated dry crust |
+| Wet shadow (compact) | `#4E3820` | 78 | 56 | 32 | Dark compact soil in shadow zones |
+| Aggregate grit (coarse) | `#8A7060` | 138 | 112 | 96 | Small pebbles / coarse sand grains |
+| Clay layer show-through | `#6A4830` | 106 | 72 | 48 | Darker orange-clay layer in deep ruts |
+
+Luminance range: min 56 — max 160 (spread 104 units — most visual texture of the four types).
+Hue must read as **rust-ochre-brown** (R/G ratio ≈ 1.3–1.4). No green tones: G must always
+be less than R throughout. Avoid hues near `#B4922C` (conflicts with industrial zone overlays).
+
+Surface: **isotropic granular** with desiccation crack network (cell size 120–200 px, crack
+width 2–4 px, ≈6–10% surface area) and 3–5 wheel rut impressions per 512 px area (8–16 px
+wide, 50–80 px long, random angles — do not align parallel to texture edges).
+
+###### terrain\_concrete\_d.dds
+
+**Semantic**: Paved plazas, sidewalks, parking lots, and industrial pads. Fills splat channel A.
+
+| Role | Hex | R | G | B | Notes |
+|---|---|---|---|---|---|
+| Primary (mid-tone slab) | `#C0B8A8` | 192 | 184 | 168 | Warm light grey; main slab color |
+| Fresh pour highlight | `#D8D4CC` | 216 | 212 | 204 | Lighter, slightly blue-grey new pour |
+| Shadow / expansion joint | `#7A7870` | 122 | 120 | 112 | Dark joint line between slabs |
+| Aggregate exposed (coarse) | `#A09888` | 160 | 152 | 136 | Aggregate show-through on worn surface |
+| Staining (oil / water) | `#A4A090` | 164 | 160 | 144 | Slightly darker slab with stain |
+
+Luminance range: min 116 — max 216 (brightest of the four types). **Warm grey bias**: R ≥ G > B
+by approximately 8–16 units. No strong hue variation — monochromatic warm grey only.
+
+Surface: **regular orthogonal grid (expansion joints) with isotropic aggregate fill**.
+Recommended joint period: 512 px (4×4 slabs per 2048 px tile). Joint lines: 2–3 px wide,
+luminance 116, with 1 px bright bevel (luminance 180) on each edge. Aggregate: 500–800
+granule impressions per 512 px area, ±8 luminance units contrast (low — much subtler than soil).
+Each slab face must be individually varied in luminance (±8 units) so adjacent slabs are
+distinguishable without joint lines.
+
+##### Normal Map Per-Texture Specifications
+
+The DXT5nm encoding pipeline and shader unpack are defined in the Runtime Formats section
+above. All four terrain normal maps are 2048 × 2048 px, DXT5/BC3, linear, 4 mip levels
+pre-baked via bicubic downsample (not driver-generated — bilinear mip generation does not
+preserve tangent-space normal vector normalization).
+
+Mip pre-bake procedure: bicubic downsample at each level → renormalize vector field →
+DXT5nm encode per mip level → composite into one DDS.
+
+###### terrain\_grass\_n.dds
+
+**Normal intensity**: moderate (|nx| or |ny| in range 0.15–0.40). Do not use high-intensity
+normals for grass — the matte surface means strong normals produce unrealistic specular
+highlights from the reconstructed Z.
+
+**Primary features**: blade stroke normals 8–24 px long, 1–3 px wide (matching diffuse blade
+impressions). Each blade in the diffuse must have a paired normal deflection at the same UV.
+
+**Low-frequency base**: gentle Perlin undulation (period 512–1024 px, amplitude ±0.10 nx/ny)
+representing ground microtopography beneath the grass.
+
+**Mip behavior**: at mip 2 (512 px), individual blade normals merge into a broad directional
+field; at mip 3 (256 px), only large-scale undulations remain. This is correct behavior.
+
+###### terrain\_asphalt\_n.dds
+
+**Normal intensity**: subtle (max tangential component ±0.25). The surface is macroscopically
+flat — heavy normals would produce harsh specular highlights on a predominantly diffuse material.
+
+**Primary features**: aggregate dome normals 2–8 px diameter matching diffuse pebble sizes;
+crack groove normals 2–4 px wide (slightly wider than the 1–2 px diffuse cracks for smooth
+gradient). South hemisphere of each pebble dome points slightly toward camera (negative Y in
+OpenGL tangent space) to produce aggregate sparkle under overhead directional light.
+
+###### terrain\_soil\_n.dds
+
+**Normal intensity**: strong (max tangential component ±0.50). Soil has the largest physical
+height variation (granules 5–20 mm above base; deep desiccation crack troughs).
+
+**Primary features** at 2048 × 2048:
+
+- Coarse granules (6–8 px diffuse): dome normals 8–12 px, ±0.40–0.50
+- Medium granules (3–5 px diffuse): dome normals 4–8 px, ±0.25–0.35
+- Fine granules (1–2 px diffuse): perturbation ±0.10–0.15 (merges into uniform roughness at mip 1)
+- Desiccation cracks (2–4 px wide diffuse): groove normals 4–6 px wide, beveled inward
+  deflection ±0.35 at crack edges, falling to 0 at crack center
+- Wheel ruts: concave trough normals, |ny| = 0.30–0.40 at edges (8–16 px wide, matching diffuse)
+
+**Low-frequency base**: large-scale undulation (period 256–512 px, amplitude ±0.08) to prevent
+the normal map from reading as a perfectly flat plane.
+
+###### terrain\_concrete\_n.dds
+
+**Normal intensity**: subtle (max tangential component ±0.18). Concrete is the flattest surface.
+Slab face has effectively flat normals (|nx|, |ny| < 0.05).
+
+**Primary features** at 2048 × 2048:
+
+- Slab face aggregate (1–3 px diffuse): extremely subtle perturbation ±0.05–0.10
+- Expansion joint edges (512 px grid): bevel normals 4 px wide on each side of the joint gap,
+  ±0.15 pointing outward — produces highlight on slab edge under directional light
+- Joint intersection corners: dome normal pointing slightly inward ±0.12 (raised filler plug)
+
+**Mip behavior**: at mip 2 (512 px), joint bevel normals dominate and aggregate normals
+disappear. At mip 3 (256 px), the joint grid may not be fully resolved — approaches flat
+with only the broadest joint bevel gradients remaining. Acceptable for far-distance rendering.
+
+##### Authoring Quality Checklist
+
+Before committing any terrain DDS file, verify each item:
+
+**Diffuse DDS**:
+
+- [ ] Source PNG has embedded sRGB ICC profile (`exiftool | grep -i 'color space'`)
+- [ ] DDS FourCC at byte offset 84 is `0x30315844` (DX10 extended header present)
+- [ ] DX10 DXGI\_FORMAT field = 72 (`BC1_UNORM_SRGB`) for DXT1 diffuse
+- [ ] DDS file contains exactly 4 mip levels (2048, 1024, 512, 256)
+- [ ] Texture tiles seamlessly: composite 2×2 grid at 4096×4096 — no visible seam in any direction
+- [ ] No pure-green pixels in grass texture (max G channel value 195 in sRGB)
+- [ ] No green tones in soil texture (G < R throughout)
+- [ ] Asphalt primary color has slight cool bias (R ≤ G ≤ B in primary aggregate)
+- [ ] Concrete primary color has warm bias (R ≥ G ≥ B + 8)
+- [ ] Luminance range within spec bounds stated above
+- [ ] No visible DXT1 block grid artifacts at 1:1 zoom
+
+**Normal map DDS**:
+
+- [ ] Source swizzled PNG: alpha = X, green = Y, blue = 127, red = 0
+- [ ] Flat-surface reference pixel: alpha = 128, green = 128 (decodes to nx=0, ny=0, nz=1)
+- [ ] DDS FourCC: `0x35545844` (DXT5) or DX10 header with BC3\_UNORM (DXGI 77)
+- [ ] DDS file contains exactly 4 mip levels pre-baked via bicubic downsample
+- [ ] At mip 3 (256 px): decoded normals produce no NaN (no vec with |nx|+|ny| > 1)
+- [ ] Normal intensity within the range stated per-texture above
+- [ ] No sRGB ICC profile embedded in source swizzled PNG
+
+##### Terrain Texture Export Commands
+
+```bash
+# Diffuse — NVTT (Linux preferred):
+nvcompress -color -bc1 terrain_grass_src.png terrain_grass_d.dds
+nvcompress -color -bc1 terrain_asphalt_src.png terrain_asphalt_d.dds
+nvcompress -color -bc1 terrain_soil_src.png terrain_soil_d.dds
+nvcompress -color -bc1 terrain_concrete_src.png terrain_concrete_d.dds
+
+# Diffuse — Compressonator (Windows preferred, produces exactly 4 mip levels):
+compressonatorcli -fd BC1 -miplevels 4 terrain_grass_src.png terrain_grass_d.dds
+compressonatorcli -fd BC1 -miplevels 4 terrain_asphalt_src.png terrain_asphalt_d.dds
+compressonatorcli -fd BC1 -miplevels 4 terrain_soil_src.png terrain_soil_d.dds
+compressonatorcli -fd BC1 -miplevels 4 terrain_concrete_src.png terrain_concrete_d.dds
+
+# Normal maps (after DXT5nm swizzle) — NVTT:
+nvcompress -normal -bc3 terrain_grass_swizzled.png terrain_grass_n.dds
+nvcompress -normal -bc3 terrain_asphalt_swizzled.png terrain_asphalt_n.dds
+nvcompress -normal -bc3 terrain_soil_swizzled.png terrain_soil_n.dds
+nvcompress -normal -bc3 terrain_concrete_swizzled.png terrain_concrete_n.dds
+
+# Normal maps — Compressonator:
+compressonatorcli -fd BC3 -miplevels 4 terrain_grass_swizzled.png terrain_grass_n.dds
+compressonatorcli -fd BC3 -miplevels 4 terrain_asphalt_swizzled.png terrain_asphalt_n.dds
+compressonatorcli -fd BC3 -miplevels 4 terrain_soil_swizzled.png terrain_soil_n.dds
+compressonatorcli -fd BC3 -miplevels 4 terrain_concrete_swizzled.png terrain_concrete_n.dds
+```
+
+Note: `nvcompress` generates a full mip pyramid (down to 1×1). The runtime sets
+`GL_TEXTURE_MAX_LEVEL = 3` to cap GPU reads at 4 levels, so rendering is correct.
+`validate_assets.py` must check `mip_count >= 4`, not `mip_count == 4`, so both
+compressor outputs are accepted. Use Compressonator if you need exactly 4 mip levels in
+the DDS file header.
+
+Output files go to `assets/textures/terrain/`.
+
+##### Terrain Texture VRAM Budget (per-file)
+
+| File | Format | Approx. disk/VRAM |
+|---|---|---|
+| `terrain_grass_d.dds` | DXT1/BC1, 4 mip | ~2.8 MB |
+| `terrain_asphalt_d.dds` | DXT1/BC1, 4 mip | ~2.8 MB |
+| `terrain_soil_d.dds` | DXT1/BC1, 4 mip | ~2.8 MB |
+| `terrain_concrete_d.dds` | DXT1/BC1, 4 mip | ~2.8 MB |
+| `terrain_grass_n.dds` | DXT5/BC3, 4 mip | ~5.6 MB |
+| `terrain_asphalt_n.dds` | DXT5/BC3, 4 mip | ~5.6 MB |
+| `terrain_soil_n.dds` | DXT5/BC3, 4 mip | ~5.6 MB |
+| `terrain_concrete_n.dds` | DXT5/BC3, 4 mip | ~5.6 MB |
+
+DXT1 per texture: `ceil(2048/4)² × 8 × 1.33 ≈ 2.8 MB`.
+DXT5 per texture: `ceil(2048/4)² × 16 × 1.33 ≈ 5.6 MB`.
+Total terrain detail texture VRAM: 4 × 2.8 + 4 × 5.6 = **33.6 MB** (within VRAM budget above).
+
 ### Scene VRAM Budget (V1 targets, mid-range desktop GPU with 4 GB VRAM)
 
 Total texture VRAM for all simultaneously-resident assets must not exceed **1.0 GB** (leaving ~1 GB+ headroom for OS/driver/geometry/framebuffers on 4 GB hardware):

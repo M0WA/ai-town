@@ -5,3 +5,5 @@
 __pycache__
 # UI sprite sheet DDS intermediate — authoring artifact only, never committed
 assets/textures/ui/hud_sprites_ui.dds
+# Crossfade demo renders — QA/dev output, not runtime assets
+assets/audio/crossfade_demos/
