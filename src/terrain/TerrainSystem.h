@@ -133,6 +133,15 @@ public:
     // No-op if m_generatedHeightmap is empty (generate() not yet called).
     void buildAllChunks();
 
+    // enqueueAllChunks() — register and enqueue all chunk LOD0 rebuilds WITHOUT
+    // flushing. Used by the Phase 11 loading-screen loop: call this after generate(),
+    // then drive flushPendingRebuilds() once per frame from the loading screen loop
+    // until pendingRebuildCount() reaches 0.
+    //
+    // buildAllChunks() = enqueueAllChunks() + flushPendingRebuilds().
+    // No-op if m_generatedHeightmap is empty (generate() not yet called).
+    void enqueueAllChunks();
+
     // ITerrainQuery implementation —
     // Returns slope in degrees at tile (tileX, tileZ) using the stored heightmap.
     // Returns 0.0f for out-of-bounds tiles or before generate() is called (flat stub).

@@ -135,15 +135,17 @@ int main() {
     TerrainSystem terrainSystem(&renderer, &wallClock);
 
     // -------------------------------------------------------------------------
-    // Terrain generation — generate the procedural heightmap and build all chunks.
+    // Terrain generation — generate the procedural heightmap and enqueue all chunks.
     // Uses 128x128 tiles (4x4 = 16 chunks at 32 tiles/chunk), cellSize = 10 m.
     // StdTerrainRNG provides mt19937-backed randomness with reseed() support.
     // generate() enforces playability constraints (20% flat, 50x50 contiguous region).
-    // buildAllChunks() synchronously creates all scene nodes via IRenderer.
+    // enqueueAllChunks() registers LOD0 rebuild requests WITHOUT flushing; the
+    // loading screen loop below drains the deque one flushPendingRebuilds() call
+    // per frame (100 ms CPU budget) so the UI spinner remains animated.
     // -------------------------------------------------------------------------
     StdTerrainRNG terrainRng;
     terrainSystem.generate(128, 128, 10.0f, &terrainRng);
-    terrainSystem.buildAllChunks();
+    terrainSystem.enqueueAllChunks();
 
     // -------------------------------------------------------------------------
     // Phase 9b: wire renderer terrain query AFTER terrain generation.
@@ -210,6 +212,48 @@ int main() {
     // Update Main Menu "Load Game" button state based on save file presence.
     // Grayed with tooltip "No saves found." when no save files exist (first run).
     uiManager.setSaveAvailable(saveSystem.hasSaveData());
+
+    // -------------------------------------------------------------------------
+    // Phase 11: Loading screen loop.
+    // Drains the terrain rebuild deque built by enqueueAllChunks() above.
+    // Runs one flushPendingRebuilds() call per frame (100 ms CPU budget) so that
+    // the UI spinner animates every frame rather than blocking for the full build.
+    //
+    // Frame sequence per architecture/graphics-architecture/irrlicht-device-lifecycle.md:
+    //   syncListenerToCamera → audioSystem.update → uiManager.update →
+    //   terrainSystem.update → flushPendingRebuilds (once) →
+    //   beginFrame → drawScene → endFrame.
+    //
+    // guiEnvironment->drawAll() is intentionally omitted — all loading screen
+    // elements (spinner, progress bar) are rendered via UIManager::draw() using
+    // Irrlicht draw primitives; no Irrlicht GUI environment involvement.
+    // -------------------------------------------------------------------------
+    {
+        double loadPrev = wallClock.nowSeconds();
+        while (device->run() && terrainSystem.pendingRebuildCount() > 0) {
+            const double loadNow = wallClock.nowSeconds();
+            const float  loadDt  = static_cast<float>(loadNow - loadPrev);
+            loadPrev = loadNow;
+
+            CameraState loadCam = cameraController.getCameraState();
+            try {
+                audioSystem.syncListenerToCamera(loadCam);
+                audioSystem.update(loadDt);
+            } catch (const std::exception& e) {
+                fprintf(stderr,
+                        "[main] Audio error during loading (audio disabled): %s\n",
+                        e.what());
+            }
+
+            uiManager.update(loadDt);
+            terrainSystem.update(loadDt);
+            terrainSystem.flushPendingRebuilds();  // once per frame, 100 ms budget
+
+            renderer.beginFrame();
+            renderer.drawScene();
+            renderer.endFrame();
+        }
+    }
 
     // -------------------------------------------------------------------------
     // Phase 11: Notify UIManager that all startup wiring is complete.

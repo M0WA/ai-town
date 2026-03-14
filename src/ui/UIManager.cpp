@@ -1241,8 +1241,9 @@ void UIManager::update(float realDeltaSeconds) {
         }
     }
 
-    // Month 3+ edge: transition to game-over (Sandbox guard is inside transitionToGameOver).
-    if (currentMonths >= 3 && m_lastDeficitMonths < 3) {
+    // Month 3+ edge: transition to game-over (Scenario mode only — guard at call site
+    // per phase-11.md spec; transitionToGameOver() contains no internal GameMode check).
+    if (currentMonths >= 3 && m_lastDeficitMonths < 3 && m_gameMode == GameMode::Scenario) {
         transitionToGameOver();
     }
 
@@ -1374,9 +1375,11 @@ void UIManager::transitionToGameplay_fromPaused() {
 }
 
 void UIManager::transitionToGameOver() {
-    // SANDBOX GUARD — must not fire in Sandbox mode (Scenario-only in V1).
+    // Primary guard is at the call site (UIManager::update() deficit-streak section)
+    // per phase-11.md spec. Belt-and-suspenders guard here as well so that any
+    // direct call (e.g. from test fixtures or future code paths) is also safe in
+    // Sandbox mode.
     if (m_gameMode != GameMode::Scenario) return;
-
     m_state = GameState::GameOver;
 
     // Show the game-over modal with current debt and deficit streak.

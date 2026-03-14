@@ -546,6 +546,55 @@ void TerrainSystem::buildAllChunks() {
 }
 
 // ---------------------------------------------------------------------------
+// enqueueAllChunks() — register and enqueue all LOD0 rebuilds without flushing.
+// Identical to buildAllChunks() but omits the trailing flushPendingRebuilds() call.
+// Used by the Phase 11 loading-screen loop: caller drives flushPendingRebuilds()
+// once per frame until pendingRebuildCount() reaches 0.
+// ---------------------------------------------------------------------------
+void TerrainSystem::enqueueAllChunks() {
+    if (m_generatedHeightmap.empty() || m_mapTilesX <= 0 || m_mapTilesZ <= 0) {
+        return;
+    }
+
+    const int chunkTiles = kTerrainLOD0GridSize;
+    const int chunkVerts = chunkTiles + 1;
+    const int mapVertX   = m_mapTilesX + 1;
+
+    const int chunksX = (m_mapTilesX + chunkTiles - 1) / chunkTiles;
+    const int chunksZ = (m_mapTilesZ + chunkTiles - 1) / chunkTiles;
+
+    for (int cz = 0; cz < chunksZ; ++cz) {
+        for (int cx = 0; cx < chunksX; ++cx) {
+            uint64_t chunkId = static_cast<uint64_t>(cz * chunksX + cx);
+
+            float worldOriginX = static_cast<float>(cx * chunkTiles) * m_cellSize;
+            float worldOriginZ = static_cast<float>(cz * chunkTiles) * m_cellSize;
+
+            int tileOffsetX = cx * chunkTiles;
+            int tileOffsetZ = cz * chunkTiles;
+
+            std::vector<float> chunkHmap(static_cast<size_t>(chunkVerts * chunkVerts), 0.0f);
+            for (int vz = 0; vz < chunkVerts; ++vz) {
+                for (int vx = 0; vx < chunkVerts; ++vx) {
+                    int mapX = tileOffsetX + vx;
+                    int mapZ = tileOffsetZ + vz;
+                    if (mapX < mapVertX && mapZ < (m_mapTilesZ + 1)) {
+                        chunkHmap[static_cast<size_t>(vz * chunkVerts + vx)] =
+                            m_generatedHeightmap[static_cast<size_t>(mapZ * mapVertX + mapX)];
+                    }
+                }
+            }
+
+            registerChunkAtLOD(chunkId, -1);
+            registerChunkPosition(chunkId, worldOriginX, worldOriginZ);
+            registerChunkHeightmap(chunkId, std::move(chunkHmap));
+            enqueueRebuild(chunkId, 0, 0.0f);
+        }
+    }
+    // Caller is responsible for calling flushPendingRebuilds() per-frame.
+}
+
+// ---------------------------------------------------------------------------
 // getGeneratedHeightmap() — accessor for the heightmap produced by generate().
 // ---------------------------------------------------------------------------
 const std::vector<float>& TerrainSystem::getGeneratedHeightmap() const {
