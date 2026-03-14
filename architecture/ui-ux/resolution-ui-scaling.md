@@ -254,12 +254,20 @@ operation; the glow must be part of the active-state icon art.
 | State | Style | Opacity | Border/Glow |
 |---|---|---|---|
 | Inactive | **Outlined — 2 px stroke only**, no fill | 65% | None |
+| Hover | **2 px outlined stroke** | 85% | 1 px `rgba(255,255,255,0.35)` |
 | Active | **Filled solid icon** | 100% | 2 px teal border + baked glow |
 
 Icons "gain weight" on selection: the visual transition from outlined-stroke to filled-solid
-communicates mode activation without relying solely on colour or border changes. Both
-states are separate sprite cells in `hud_sprites_ui.png` — the stroke-only cell is the
-inactive variant and the filled cell is the active variant.
+communicates mode activation without relying solely on colour or border changes. All three
+states are separate sprite cells in `hud_sprites_ui.png` — the stroke-only cell at 65%
+opacity is the inactive variant, the stroke-only cell at 85% with a white border is the
+hover variant, and the filled cell with teal border and baked glow is the active variant.
+
+### Button Tile Corner Radius
+
+Button tiles (free-floating cell elements within panels) use **8 px corner radius** on all four corners.
+This is distinct from the panel container corner radius rule (8 px inner edge / 0 px flush-screen-edge).
+Button tiles are independent interactive cells and receive uniform 8 px radius regardless of position within the panel.
 
 ### Superseded Values
 

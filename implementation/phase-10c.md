@@ -12,7 +12,10 @@ Two parallel workstreams:
 2. **Glass City UI visual rework** — regenerate the HUD sprite sheet and update
    `IrrlichtUIBackend` to match the approved Glass City visual direction: deep navy panels,
    electric teal active state with baked glow, amber numeric values, outlined-inactive /
-   filled-active icon system. Specs locked in commit 7412532.
+   filled-active icon system. Glass City direction established in commit 7412532; hover icon
+   state (85% opacity, outlined stroke) subsequently formalised in this phase's spec pass and
+   recorded in `architecture/ui-ux/resolution-ui-scaling.md` §Icon States and
+   `architecture/asset-standards/2d-texture-standards.md` §UI Sprite Sheet Art Style — Glass City.
 
 ---
 
@@ -25,24 +28,55 @@ Two parallel workstreams:
 Mirrors `initRoadShader()` (`src/rendering/IrrlichtRenderer.cpp` line 1252). New private method
 `IrrlichtRenderer::initTerrainShader()` called from the constructor after all other init steps.
 
+- [ ] Forward-declare `class RenderSystem;` in `IrrlichtRenderer.h` (alongside the existing
+  `class TextureCache;` forward declaration line)
+- [ ] Add `RenderSystem* m_renderSystem{nullptr}` private member to `IrrlichtRenderer`
+  (non-owning observer pointer — follows the `ITerrainQuery* m_terrain` pattern)
+- [ ] Add `setRenderSystem(RenderSystem* rs) { m_renderSystem = rs; }` public setter to
+  `IrrlichtRenderer.h` (follows the `setTerrainQuery()` late-bind pattern at line 65;
+  called from `main.cpp` after `IrrlichtRenderer` is constructed and before
+  `terrainSystem.buildAllChunks()`)
+- [ ] In `main.cpp`: after `IrrlichtRenderer renderer(device, nullptr);`, add
+  `renderer.setRenderSystem(&renderSystem);` (wires the `RenderSystem` that was created at
+  line 41 of `main.cpp` into the renderer before terrain chunks are built)
 - [ ] Add `int m_terrainMaterialType` member to `IrrlichtRenderer` (initialised to `-1`)
-- [ ] Add `TerrainShaderCallback* m_terrainCallback` member (raw pointer; `grab()`/`drop()` lifecycle
-  matching the road callback pattern)
 - [ ] Implement `initTerrainShader()`:
   - EDT_NULL early-return guard as first line (matches `initRoadShader()` pattern)
-  - Load 4 diffuse textures via `m_textureCache->loadSRGB(path, GL_COMPRESSED_SRGB_S3TC_DXT1_EXT)` — paths:
-    `assets/textures/terrain/terrain_grass_d.dds`, `terrain_asphalt_d.dds`, `terrain_soil_d.dds`,
-    `terrain_concrete_d.dds`
-  - Load splat map via `m_textureCache->loadSplatMap("assets/textures/terrain/terrain_chunk_splat.png")`
-  - Construct `TerrainShaderCallback` with `m_renderSystem`, `m_textureCache`, splat path, and
-    `std::array<std::string,4>` of detail paths (grass, asphalt, soil, concrete — splat channel order)
-  - Call `->grab()` on callback, assign to `m_terrainCallback`
-  - Load shader via `m_renderSystem->loadShader("assets/shaders/terrain.vert", "assets/shaders/terrain.frag", m_terrainCallback)`
-    → store result in `m_terrainMaterialType`
-  - On failure (`m_terrainMaterialType == -1`): log warning, leave `m_terrainMaterialType = -1`
-    (fallback to `EMT_SOLID` in Feature 2)
-  - Call `->drop()` after passing to `loadShader()` (matches road callback lifecycle at line 1315)
+  - Construct absolute paths using `AITOWN_ASSETS_DIR` macro (mirrors `initRoadShader()` line 1292):
+    `std::string(AITOWN_ASSETS_DIR) + "/textures/terrain/terrain_grass_d.dds"` etc.
+  - Load 4 diffuse textures via `m_textureCache->loadSRGB(path, GL_COMPRESSED_SRGB_S3TC_DXT1_EXT)` using
+    the absolute paths above (grass, asphalt, soil, concrete)
+  - Load splat map via `m_textureCache->loadSplatMap(std::string(AITOWN_ASSETS_DIR) + "/textures/terrain/terrain_chunk_splat.png")`
+  - Construct `TerrainShaderCallback* cb = new TerrainShaderCallback(...)` with `m_renderSystem`,
+    `m_textureCache`, splat path, and `std::array<std::string,4>` of detail paths in splat channel
+    order — index must be exactly (R=grass, G=asphalt, B=soil, A=concrete):
+    `{{AITOWN_ASSETS_DIR + "/textures/terrain/terrain_grass_d.dds",`
+    `AITOWN_ASSETS_DIR + "/textures/terrain/terrain_asphalt_d.dds",`
+    `AITOWN_ASSETS_DIR + "/textures/terrain/terrain_soil_d.dds",`
+    `AITOWN_ASSETS_DIR + "/textures/terrain/terrain_concrete_d.dds"}}`
+  - Build absolute shader paths: `const std::string vsPath = std::string(AITOWN_ASSETS_DIR) + "/shaders/terrain.vert";`
+    and `fsPath` (analogous to `initRoadShader()` lines 1310–1311)
+  - Get GPU services: `IGPUProgrammingServices* gpu = m_driver->getGPUProgrammingServices();` — return
+    early (set `m_terrainMaterialType = -1`) if null (EDT_NULL guard matching `initRoadShader()` line 1302–1308)
+  - Load shader via `gpu->addHighLevelShaderMaterialFromFiles(vsPath.c_str(), "main", EVST_VS_1_1,`
+    `fsPath.c_str(), "main", EPST_PS_1_1, cb, EMT_SOLID)` → store result in `m_terrainMaterialType`
+  - On failure (`m_terrainMaterialType == -1`): log warning (matches `initRoadShader()` pattern)
+  - Call `cb->drop()` unconditionally after `addHighLevelShaderMaterialFromFiles()` returns —
+    road callback pattern (line 1320 in `initRoadShader()`): `new` → Irrlicht grabs internally
+    → `drop()` releases caller's reference; Irrlicht owns the remaining reference
+  - No `m_terrainCallback` member needed — the callback requires no per-frame access
+- [ ] Add `int terrainMaterialTypeForTest() const { return m_terrainMaterialType; }` test-only
+  accessor to `IrrlichtRenderer.h` (follows the `cloudNodeForTest()` pattern at line 168)
 - [ ] Call `initTerrainShader()` from `IrrlichtRenderer` constructor after `initRoadShader()`
+- [ ] Add CI preflight check in `.github/workflows/ci.yml` (all three jobs: `build-linux`,
+  `coverage-linux`, `build-windows`) to hard-fail if any terrain texture asset is absent —
+  after the existing "Verify UI shader assets" step. Check all five files:
+  `assets/textures/terrain/terrain_grass_d.dds`, `terrain_asphalt_d.dds`, `terrain_soil_d.dds`,
+  `terrain_concrete_d.dds`, and `assets/textures/terrain/terrain_chunk_splat.png`.
+  Linux/coverage jobs: follow the bash `test -f ... || { echo "ERROR:..."; exit 1; }` pattern
+  at `ci.yml` line 293 ("Verify UI shader assets"). Windows job: use PS 5.1-compatible syntax
+  `if (-not (Test-Path 'assets/textures/terrain/terrain_grass_d.dds')) { exit 1 }` etc.
+  (NOT `Test-Path ... || exit 1` which is PS 7+ only — see CLAUDE.md "CI PowerShell" note).
 
 **Reference**: `initRoadShader()` at `src/rendering/IrrlichtRenderer.cpp:1252`; `TerrainShaderCallback`
 constructor at `src/rendering/TerrainShaderCallback.h`; splat channel order locked in
@@ -54,8 +88,10 @@ constructor at `src/rendering/TerrainShaderCallback.h`; splat channel order lock
 
 **Owner**: `graphics-dev-irrlicht`
 
-The defensive comment at `IrrlichtRenderer.cpp` line ~296 ("Phase 6+ terrain texturing") is the
-exact insertion point.
+The insertion point is inside `rebuildTerrainChunk()`, in the `if (newNode) {...}` block (line ~460),
+after the existing `setMaterialFlag()` calls (lines 463–464) and before the node is registered in
+`m_chunkNodes` (line 469). The "Phase 6+ terrain texturing" comment at line ~296 is in the node
+eviction path (teardown), not in `rebuildTerrainChunk()` — do **not** use that as the insertion point.
 
 - [ ] After `addMeshSceneNode()` returns `newNode`, assign the terrain shader material:
 
@@ -69,7 +105,8 @@ exact insertion point.
   mat.setFlag(irr::video::EMF_BACK_FACE_CULLING, false);
   ```
 
-- [ ] Remove the "Phase 6+ terrain texturing" comment placeholder
+- [ ] Update the comment at line 463 (`// unlit until Phase 6 lighting pass`) to reference
+  Phase 10c: `// material type set in Phase 10c — see initTerrainShader()`
 - [ ] No changes to vertex colour generation — vertex colours remain in the mesh; the terrain
   shader ignores them (splat weights drive blending). They serve as a fallback when
   `m_terrainMaterialType == -1`.
@@ -81,15 +118,17 @@ exact insertion point.
 **Owner**: `test-dev-cpp`
 
 - [ ] **`TerrainShaderWiring_EDT_NULL_InitDoesNotCrash`** — unit test in
-  `tests/rendering/terrain_shader_wiring_test.cpp` (label `unit`, target `terrain_tests` via
+  `tests/terrain/terrain_shader_wiring_test.cpp` (label `unit`, target `terrain_tests` via
   `target_sources`). Constructs `IrrlichtRenderer` with EDT_NULL device; verifies constructor
   completes without crash and `m_terrainMaterialType == -1` (no GL calls possible under EDT_NULL).
 - [ ] **`TerrainChunk_RebuildAssignsMaterialType_WhenShaderLoaded`** — integration test in
   `tests/integration/terrain_shader_wiring_test.cpp` (label `integration`, target `integration_tests`).
   Stubs `IrrlichtRenderer` or uses mock; verifies `rebuildTerrainChunk()` sets a non-`EMT_SOLID`
   material type on the scene node when `m_terrainMaterialType != -1`.
-- [ ] Add `tests/rendering/terrain_shader_wiring_test.cpp` to `terrain_tests` via
+- [ ] Add `tests/terrain/terrain_shader_wiring_test.cpp` to `terrain_tests` via
   `target_sources(terrain_tests PRIVATE ...)` (do NOT call `add_executable` again)
+- [ ] Add `tests/integration/terrain_shader_wiring_test.cpp` to `integration_tests` via
+  `target_sources(integration_tests PRIVATE ...)` (do NOT call `add_executable` again)
 
 ---
 
@@ -116,8 +155,18 @@ cell styles:
 | Hover | 2 px outlined stroke | 85% | 1 px `rgba(255,255,255,0.35)` | None |
 | Active | Filled solid silhouette | 100% | 2 px `rgba(0,201,200,0.75)` | 4 px Gaussian blur glow baked into cell |
 
+The Hover icon state (85% opacity, outlined stroke) is now formally specified in `architecture/ui-ux/resolution-ui-scaling.md` §Visual Design — Glass City.
+
 The glow in the active cell is baked at the source working resolution (256×256 per cell) via a
-4 px Gaussian blur of the teal border on a transparent layer, then Lanczos-downsampled to 64×64.
+4 px Gaussian blur in the role-specific glow colour (per the Active Tint / Glow Colour by Button
+Role table — see reference below) on a transparent layer, then Lanczos-downsampled to 64×64.
+The 2 px border is always teal `rgba(0,201,200,0.75)` regardless of role; the glow colour varies.
+
+**Glow colour is role-specific** — the 2 px border is always teal `rgba(0,201,200,0.75)` on all
+active cells, but the baked glow colour varies by button role. See
+`architecture/asset-standards/2d-texture-standards.md` §Active Tint / Glow Colour by Button Role
+for the full mapping (e.g. Zone Residential = green, Zone Commercial = blue, Zone Industrial =
+yellow, Demolish = red `#F04E37`, all other tools = teal `#00C9C8`).
 
 #### Button tile backgrounds
 
@@ -137,8 +186,8 @@ dark navy panel surfaces used by `IrrlichtUIBackend::addStaticText` backgrounds:
 
 | Cell purpose | Fill | Opacity | Corner radius |
 |---|---|---|---|
-| Toolbar / sub-panel background tile | `rgb(13,27,42)` | 88% | 0 px (flush screen edge) |
-| Resource bar background tile | `rgb(13,27,42)` | 95% | 0 px |
+| Toolbar / sub-panel background tile | `rgb(13,27,42)` | 78% | 0 px (flush screen edge) |
+| Resource bar background tile | `rgb(13,27,42)` | 88% | 0 px |
 | Inspector / minimap / modal panel tile | `rgb(13,27,42)` | 82% | 8 px inner edges |
 
 These single-colour tiled cells let `IrrlichtUIBackend` draw navy panel backgrounds via
@@ -153,8 +202,8 @@ These single-colour tiled cells let `IrrlichtUIBackend` draw navy panel backgrou
 - [ ] Update `src/ui/hud_sprite_ids.h` with `kSpritePanelToolbar`, `kSpritePanelResourceBar`,
   `kSpritePanelOverlay` constants for the new background cells (follow existing `constexpr
   uint32_t` pattern; add after the last existing constant)
-- [ ] Update `tools/generate_hud_sprites.py` to produce the outlined-inactive / filled-active
-  style for all future regenerations — no manual hand-editing of the PNG
+- [ ] Update `tools/generate_hud_sprites.py` to produce the outlined-inactive / outlined-hover /
+  filled-active three-state style for all future regenerations — no manual hand-editing of the PNG
 - [ ] Verify final PNG is still 2048×2048 RGBA (Check #23 must stay green)
 
 **Reference**: `architecture/ui-ux/resolution-ui-scaling.md` §Glass City Canonical Colour
@@ -178,7 +227,7 @@ interface methods are required — all changes are internal to the Irrlicht back
 | UI element | Old value | New value |
 |---|---|---|
 | Resource bar background | `SColor(140,230,230,230)` (milky white) | `SColor(224,13,27,42)` (dark navy 88%) |
-| Toolbar / left panel background | `SColor(100,220,220,220)` | `SColor(200,13,27,42)` (dark navy 78%) |
+| Toolbar / left panel background | `SColor(100,220,220,220)` | `SColor(199,13,27,42)` (dark navy 78%) |
 | Minimap / inspector panel background | `SColor(230,20,20,20)` | `SColor(209,13,27,42)` (dark navy 82%) |
 | HUD numeric text (treasury, pop, date) | white / default | `SColor(255,240,180,41)` amber `#F0B429` |
 | HUD label text (static labels) | default | `SColor(255,235,244,246)` near-white `#EBF4F6` |
@@ -274,3 +323,11 @@ above: multiply A_0–1 by 255.
   `IrrlichtUIBackend` and the sprite sheet; no interface changes required
 - `ui_constants.h` hover/overlay ARGB values — tile hover highlights and zone overlays are
   gameplay colours, not UI chrome; unchanged by the Glass City direction
+- **Hover sprite ID constants (`kSpriteXxxHover`) and hover state switching in
+  `IrrlichtUIBackend`** — the three-state sprite cells (inactive / hover / active) are baked
+  into `hud_sprites_ui.png` by Feature 4 so the assets exist for future use, but hover input
+  detection (mouse-over hit testing) is not implemented in this phase. Therefore:
+  - `hud_sprite_ids.h` does **not** add `kSpriteXxxHover` constants in Phase 10c; hover sprite
+    cells are accessible by offset from their inactive counterpart but have no named constant yet
+  - `IrrlichtUIBackend` does **not** implement hover state switching in Phase 10c; hover
+    rendering will be wired in a later phase when mouse-over detection is available

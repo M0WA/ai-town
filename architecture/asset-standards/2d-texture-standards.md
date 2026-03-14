@@ -807,7 +807,8 @@ spec governs the canonical active/inactive icon states.
 
 | State | Icon style | Opacity | Border / Glow |
 |---|---|---|---|
-| **Inactive** | **Outlined — 2 px stroke, no fill** | 65% (author at full alpha; runtime applies `setElementAlpha`) | None |
+| **Inactive** | **Outlined — 2 px stroke, no fill** | 65% (baked into sprite — stroke at `alpha = 165` against transparent cell; see note below) | None |
+| **Hover** | **Outlined — 2 px stroke** | 85% | 1 px `rgba(255,255,255,0.35)` |
 | **Active** | **Filled solid icon** | 100% | 2 px teal border `rgba(0, 201, 200, 0.75)` + 4 px outer glow, baked in |
 
 "Outlined" means the icon symbol is rendered as a 2 px anti-aliased stroke path with no
@@ -824,6 +825,11 @@ The 4 px outer glow on active cells is baked into the sprite PNG at the cell bou
 must be authored at 4x internal resolution (256×256) and Lanczos-downsampled to 64×64,
 preserving glow softness. Glow colour: `rgba(0, 201, 200, 0.60)` at 4x scale, decaying to
 transparent at the 4 px radius.
+
+The hover state (85% opacity, outlined stroke, 1 px white border) is a **separate sprite cell**
+baked into the PNG — it is not a programmatic runtime overlay. The hover tile background
+(`rgba(255, 255, 255, 0.15)`) is also a separate cell in the sprite sheet, distinct from the
+inactive and active cells.
 
 #### Panel Colour Context
 
