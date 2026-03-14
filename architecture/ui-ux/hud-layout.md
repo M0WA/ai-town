@@ -55,9 +55,8 @@ built-in `setToolTipText()` on each button element.
 At construction, **all 9 buttons display the active-state sprite**
 (`kSpriteZoneResLowActive + col + row*3`), so icons are visible as soon as the panel opens
 before any player interaction. The default selection is Residential Low (row 0, col 0 —
-`idx = 0`). When the player clicks a button, all buttons are set to their inactive sprite,
-then the clicked button is set to its active-state sprite — providing a clear selection
-indicator (one filled icon, eight outlines) after the first interaction. The selected zone type and density tier are stored in
+`idx = 0`). When the player clicks a button, **all 9 buttons keep their active-state sprite** —
+icons remain visible for every zone type at all times. The selected zone type and density tier are stored in
 `m_selectedZoneType` and `m_selectedDensityTier` in `UIManager`.
 
 ### Zone Sub-Panel Visibility Rules
@@ -147,8 +146,8 @@ Tooltips are provided by Irrlicht's built-in `setToolTipText()` on each button e
 At construction, **all 4 buttons display the active-state sprite**
 (`kSpriteUtilPowerActive + typeIdx`), so icons are visible as soon as the panel opens.
 The default selection is Power Plant (index 0, `ServiceBuildingType::PowerPlant`). When the
-player clicks a different button, all buttons are set to their inactive sprite, then the
-clicked button is set to its active-state sprite. The selected building type is
+player clicks a different button, **all 4 buttons keep their active-state sprite** — icons
+remain visible for every utility type at all times. The selected building type is
 stored in `m_selectedServiceBuilding` in `UIManager`.
 
 ### Utilities Sub-Panel Visibility Rules

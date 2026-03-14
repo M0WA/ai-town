@@ -575,26 +575,10 @@ bool UIManager::onEvent(const InputEvent& event) {
                     int bx = zoneLeft + zoneCol * (zoneBtnW + zoneGap);
                     int by = zoneTop  + densityRow * (zoneBtnH + zoneGap);
                     if (inRect(event.x, event.y, bx, by, zoneBtnW, zoneBtnH)) {
-                        // Update selection state.
+                        // Update selection state. All buttons keep their active sprite —
+                        // icons remain visible for all zone types at all times.
                         m_selectedZoneType    = zoneCol;
                         m_selectedDensityTier = densityRow;
-                        // Swap sprites: set all to inactive, then clicked to active.
-                        for (int dr2 = 0; dr2 < 3; ++dr2) {
-                            for (int zc2 = 0; zc2 < 3; ++zc2) {
-                                int idx2 = dr2 * 3 + zc2;
-                                if (m_zoneSubPanelBtns[idx2] == kInvalidUIElement) continue;
-                                uint32_t sprite = kSpriteZoneResLowInactive
-                                                  + static_cast<uint32_t>(zc2)
-                                                  + static_cast<uint32_t>(dr2) * 3u;
-                                m_backend->setElementImage(m_zoneSubPanelBtns[idx2], sprite);
-                            }
-                        }
-                        if (m_zoneSubPanelBtns[idx] != kInvalidUIElement) {
-                            uint32_t activeSprite = kSpriteZoneResLowActive
-                                                    + static_cast<uint32_t>(zoneCol)
-                                                    + static_cast<uint32_t>(densityRow) * 3u;
-                            m_backend->setElementImage(m_zoneSubPanelBtns[idx], activeSprite);
-                        }
                         // Phase 10: ui_click SFX on zone sub-panel button press.
                         if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
                         return true;
@@ -613,20 +597,9 @@ bool UIManager::onEvent(const InputEvent& event) {
                 int bx = utilLeft + typeIdx * (utilBtnW + utilGap);
                 int by = utilTop;
                 if (inRect(event.x, event.y, bx, by, utilBtnW, utilBtnH)) {
-                    // Update selection.
+                    // Update selection. All buttons keep their active sprite —
+                    // icons remain visible for all utility types at all times.
                     m_selectedServiceBuilding = typeIdx;
-                    // Swap sprites (guard handle before backend call).
-                    for (int t2 = 0; t2 < 4; ++t2) {
-                        if (m_utilSubPanelBtns[t2] == kInvalidUIElement) continue;
-                        uint32_t sprite = kSpriteUtilPowerInactive
-                                          + static_cast<uint32_t>(t2);
-                        m_backend->setElementImage(m_utilSubPanelBtns[t2], sprite);
-                    }
-                    if (m_utilSubPanelBtns[typeIdx] != kInvalidUIElement) {
-                        uint32_t activeSprite = kSpriteUtilPowerActive
-                                                + static_cast<uint32_t>(typeIdx);
-                        m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], activeSprite);
-                    }
                     // Phase 10: ui_click SFX on utilities sub-panel button press.
                     if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
                     return true;
