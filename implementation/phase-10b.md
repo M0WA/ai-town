@@ -440,6 +440,15 @@ Rename all test-helper class headers and update every `#include` in test `.cpp` 
 `tests/ui/panel_sentinel_handles.h` contains only constants/handles (no class definition) —
 `snake_case` is correct; no rename needed.
 
+<!-- SIGN-OFF: prod-owner 2026-03-13 — Feature 3 naming convention enforcement verified complete.
+All 10 src/ header renames done (TerrainGenerator, BudgetDetailPanel, HUD, InspectorPanel,
+MainMenuPanel, Minimap, ModalDialog, PauseMenuPanel, SettingsPanel, TaxRatePanel). All 3
+interface relocations done (IUIBackend, ITerrainRNG, IAlcFunctions). Both concrete class
+relocations done (NullSimulationPauser, WallClock). audio_system.h shim deleted. All 10
+test-helper renames done. src/interfaces/ contains only I-prefixed pure-virtual interfaces
+plus allowed non-class headers. No stale snake_case class headers remain in src/. All
+#include paths updated. CI green. -->
+
 ### Exit Criteria
 
 - On tile placement (zone, road, service building), the terrain under the placed tile
