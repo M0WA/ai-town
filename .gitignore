@@ -2,6 +2,7 @@
 .env
 .fetchcontent_cache/
 /build*/
+/coverage*
 __pycache__
 # UI sprite sheet DDS intermediate — authoring artifact only, never committed
 assets/textures/ui/hud_sprites_ui.dds
