@@ -1,5 +1,7 @@
 ## Phase 10b: Terrain Flattening & Sky Clouds
 
+**Status: DONE**
+
 ### Goal
 
 Deliver two visual enhancements that make placement feedback and skybox believable: terrain
