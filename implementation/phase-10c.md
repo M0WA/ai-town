@@ -1,4 +1,4 @@
-# Phase 10c: Terrain Texture Wiring & Glass City UI Rework
+# Phase 10c: Terrain Texture Wiring & Glass City UI Rework — **DONE**
 
 ## Goal
 
@@ -28,22 +28,22 @@ Two parallel workstreams:
 Mirrors `initRoadShader()` (`src/rendering/IrrlichtRenderer.cpp` line 1252). New private method
 `IrrlichtRenderer::initTerrainShader()` called from the constructor after all other init steps.
 
-- [ ] Forward-declare `class RenderSystem;` in `IrrlichtRenderer.h` (alongside the existing
+- [x] Forward-declare `class RenderSystem;` in `IrrlichtRenderer.h` (alongside the existing
   `class TextureCache;` forward declaration line)
-- [ ] Add `RenderSystem* m_renderSystem{nullptr}` private member to `IrrlichtRenderer`
+- [x] Add `RenderSystem* m_renderSystem{nullptr}` private member to `IrrlichtRenderer`
   (non-owning observer pointer — follows the `ITerrainQuery* m_terrain` pattern)
-- [ ] Add `setRenderSystem(RenderSystem* rs) { m_renderSystem = rs; }` public setter to
+- [x] Add `setRenderSystem(RenderSystem* rs) { m_renderSystem = rs; }` public setter to
   `IrrlichtRenderer.h` (follows the `setTerrainQuery()` late-bind pattern at line 65;
   called from `main.cpp` after `IrrlichtRenderer` is constructed and before
   `terrainSystem.buildAllChunks()`)
-- [ ] In `main.cpp`: after `IrrlichtRenderer renderer(device, nullptr);`, add
+- [x] In `main.cpp`: after `IrrlichtRenderer renderer(device, nullptr);`, add
   `renderer.setRenderSystem(&renderSystem);` (wires the `RenderSystem` that was created at
   line 41 of `main.cpp` into the renderer before terrain chunks are built)
-- [ ] Add `std::unique_ptr<TextureCache> m_terrainTextureCache` private member to `IrrlichtRenderer`
+- [x] Add `std::unique_ptr<TextureCache> m_terrainTextureCache` private member to `IrrlichtRenderer`
   (follows the `m_roadTextureCache` pattern at line 325 of `IrrlichtRenderer.h`; destroyed with
   `IrrlichtRenderer` — no per-chunk `releaseSRGB()` needed since textures are global to the renderer)
-- [ ] Add `int m_terrainMaterialType` member to `IrrlichtRenderer` (initialised to `-1`)
-- [ ] Implement `initTerrainShader()`:
+- [x] Add `int m_terrainMaterialType` member to `IrrlichtRenderer` (initialised to `-1`)
+- [x] Implement `initTerrainShader()`:
   - EDT_NULL early-return guard as first line (matches `initRoadShader()` pattern)
   - Lazily create `m_terrainTextureCache` at the start of `initTerrainShader()` (mirrors
     `initRoadShader()` lines 1265–1270: `m_terrainTextureCache = std::make_unique<TextureCache>(
@@ -71,16 +71,16 @@ Mirrors `initRoadShader()` (`src/rendering/IrrlichtRenderer.cpp` line 1252). New
     road callback pattern (line 1320 in `initRoadShader()`): `new` → Irrlicht grabs internally
     → `drop()` releases caller's reference; Irrlicht owns the remaining reference
   - No `m_terrainCallback` member needed — the callback requires no per-frame access
-- [ ] Add test-only accessors to `IrrlichtRenderer.h` (follows the `cloudNodeForTest()` pattern
+- [x] Add test-only accessors to `IrrlichtRenderer.h` (follows the `cloudNodeForTest()` pattern
   at line 168):
   - `int terrainMaterialTypeForTest() const { return m_terrainMaterialType; }` — read accessor
     (used by the unit test to verify `m_terrainMaterialType == -1` under EDT_NULL)
   - `void setTerrainMaterialTypeForTest(int t) { m_terrainMaterialType = t; }` — write accessor
     (used by the integration test to inject a sentinel value without a real GL shader load)
-- [ ] Call `initTerrainShader()` from `setRenderSystem()` after assigning `m_renderSystem = rs` —
+- [x] Call `initTerrainShader()` from `setRenderSystem()` after assigning `m_renderSystem = rs` —
   ensures `m_renderSystem` is non-null when `TerrainShaderCallback` is constructed (do **not**
   call from the constructor; `setRenderSystem()` is invoked from `main.cpp` after construction)
-- [ ] Add CI preflight check in `.github/workflows/ci.yml` (all three jobs) to hard-fail if any
+- [x] Add CI preflight check in `.github/workflows/ci.yml` (all three jobs) to hard-fail if any
   terrain texture or terrain shader asset is absent. Check all seven files:
   `assets/textures/terrain/terrain_grass_d.dds`,
   `assets/textures/terrain/terrain_asphalt_d.dds`,
@@ -113,7 +113,7 @@ after the existing `setMaterialFlag()` calls (lines 463–464) and before the no
 `m_chunkNodes` (line 469). The "Phase 6+ terrain texturing" comment at line ~296 is in the node
 eviction path (teardown), not in `rebuildTerrainChunk()` — do **not** use that as the insertion point.
 
-- [ ] After `addMeshSceneNode()` returns `newNode`, assign the terrain shader material:
+- [x] After `addMeshSceneNode()` returns `newNode`, assign the terrain shader material:
 
   ```cpp
   irr::video::SMaterial& mat = newNode->getMaterial(0);
@@ -125,9 +125,9 @@ eviction path (teardown), not in `rebuildTerrainChunk()` — do **not** use that
   mat.setFlag(irr::video::EMF_BACK_FACE_CULLING, false);
   ```
 
-- [ ] Update the comment at line 463 (`// unlit until Phase 6 lighting pass`) to reference
+- [x] Update the comment at line 463 (`// unlit until Phase 6 lighting pass`) to reference
   Phase 10c: `// material type set in Phase 10c — see initTerrainShader()`
-- [ ] No changes to vertex colour generation — vertex colours remain in the mesh; the terrain
+- [x] No changes to vertex colour generation — vertex colours remain in the mesh; the terrain
   shader ignores them (splat weights drive blending). They serve as a fallback when
   `m_terrainMaterialType == -1`.
 
@@ -137,19 +137,19 @@ eviction path (teardown), not in `rebuildTerrainChunk()` — do **not** use that
 
 **Owner**: `test-dev-cpp`
 
-- [ ] **`TerrainShaderWiring_EDT_NULL_InitDoesNotCrash`** — integration test in
+- [x] **`TerrainShaderWiring_EDT_NULL_InitDoesNotCrash`** — integration test in
   `tests/integration/terrain_shader_wiring_test.cpp` (label `integration`, target `integration_tests`
   via `target_sources`). Constructs `IrrlichtRenderer` with EDT_NULL device; verifies constructor
   completes without crash and `m_terrainMaterialType == -1` (no GL calls possible under EDT_NULL).
   Per `architecture/testing/framework.md`, any test that constructs an EDT_NULL `IrrlichtRenderer`
   requires Irrlicht and is therefore `integration`, not `unit`.
-- [ ] **`TerrainChunk_RebuildAssignsMaterialType_WhenShaderLoaded`** — integration test in
+- [x] **`TerrainChunk_RebuildAssignsMaterialType_WhenShaderLoaded`** — integration test in
   `tests/integration/terrain_shader_wiring_test.cpp` (label `integration`, target `integration_tests`).
   Uses a **real `IrrlichtRenderer` with EDT_NULL device** (consistent with project integration test
   policy of testing against real objects); calls `setTerrainMaterialTypeForTest(999)` to inject
   a sentinel value, then calls `rebuildTerrainChunk()`; verifies the scene node's material type
   is set to `999` (non-`EMT_SOLID`) via `getMaterial(0).MaterialType`.
-- [ ] Add `tests/integration/terrain_shader_wiring_test.cpp` to `integration_tests` via
+- [x] Add `tests/integration/terrain_shader_wiring_test.cpp` to `integration_tests` via
   `target_sources(integration_tests PRIVATE ...)` (do NOT call `add_executable` again); this
   single file contains both `TerrainShaderWiring_EDT_NULL_InitDoesNotCrash` and
   `TerrainChunk_RebuildAssignsMaterialType_WhenShaderLoaded`
@@ -221,21 +221,21 @@ These single-colour tiled cells let `IrrlichtUIBackend` draw navy panel backgrou
 
 #### Deliverables
 
-- [ ] Regenerate `assets/textures/ui/hud_sprites_ui.png` with all inactive icon cells as
+- [x] Regenerate `assets/textures/ui/hud_sprites_ui.png` with all inactive icon cells as
   outlined-stroke / hover cells at 85% / active cells as filled + teal border + baked glow
-- [ ] Add panel-background cells to rows 16+ of the sprite sheet; update
+- [x] Add panel-background cells to rows 16+ of the sprite sheet; update
   `assets/textures/ui/hud_sprites_ui_layout.json` with the new cell rects
-- [ ] Update `src/ui/hud_sprite_ids.h` with five background-cell constants for the new panel
+- [x] Update `src/ui/hud_sprite_ids.h` with five background-cell constants for the new panel
   tiles: `kSpritePanelGracePeriod` (78%), `kSpritePanelSubPanel` (80%),
   `kSpritePanelToolbar` (82%), `kSpritePanelDetail` (85%), `kSpritePanelResourceBar` (88%)
   (follow existing `constexpr uint32_t` pattern; add after the last existing constant)
-- [ ] Add `kSpriteXxxHover` constants to `src/ui/hud_sprite_ids.h` for every icon that has an
+- [x] Add `kSpriteXxxHover` constants to `src/ui/hud_sprite_ids.h` for every icon that has an
   inactive/active pair — one hover constant per icon, named by convention `kSprite<Name>Hover`
   (e.g. `kSpriteToolZoneHover`, `kSpriteZoneResLowHover`, `kSpriteUtilPowerHover`); value = the sprite cell ID
   of the corresponding hover cell baked into `hud_sprites_ui.png`
-- [ ] Update `tools/generate_hud_sprites.py` to produce the outlined-inactive / outlined-hover /
+- [x] Update `tools/generate_hud_sprites.py` to produce the outlined-inactive / outlined-hover /
   filled-active three-state style for all future regenerations — no manual hand-editing of the PNG
-- [ ] Verify final PNG is still 2048×2048 RGBA (Check #23 must stay green)
+- [x] Verify final PNG is still 2048×2048 RGBA (Check #23 must stay green)
 
 **Reference**: `architecture/ui-ux/resolution-ui-scaling.md` §Glass City Canonical Colour
 Palette; `architecture/asset-standards/2d-texture-standards.md` §UI Sprite Sheet Art Style —
@@ -274,18 +274,18 @@ above: multiply A_0–1 by 255.
 
 #### Specific method changes
 
-- [ ] `IrrlichtUIBackend` constructor: change all panel `setBackgroundColor()` calls to dark
+- [x] `IrrlichtUIBackend` constructor: change all panel `setBackgroundColor()` calls to dark
   navy values per table above
-- [ ] `IrrlichtUIBackend::addStaticText()`: set default text color to near-white `#EBF4F6`
+- [x] `IrrlichtUIBackend::addStaticText()`: set default text color to near-white `#EBF4F6`
   on the created `IGUIStaticText` (via `->setOverrideColor(SColor(255,235,244,246))`)
-- [ ] All HUD numeric value elements (treasury balance, population, date/time): set override
+- [x] All HUD numeric value elements (treasury balance, population, date/time): set override
   color to amber `#F0B429` (`SColor(255,240,180,41)`) at creation time or in the relevant
   `setElementText()` path
-- [ ] All sub-label elements (secondary info text): set override color to mid-blue `#4A7FA5`
-- [ ] Remove or replace any code that applies a translucent active-tint overlay via `SColor`
+- [x] All sub-label elements (secondary info text): set override color to mid-blue `#4A7FA5`
+- [x] Remove or replace any code that applies a translucent active-tint overlay via `SColor`
   with alpha-35 — the active state is now expressed entirely through the sprite (Feature 4);
   no programmatic color overlay needed on activation
-- [ ] Implement hover state switching in `IrrlichtUIBackend`: on `IGUIElement::OnEvent`
+- [x] Implement hover state switching in `IrrlichtUIBackend`: on `IGUIElement::OnEvent`
   `EGET_ELEMENT_HOVERED` / `EGET_ELEMENT_LEFT`, swap the button image to the corresponding
   `kSpriteXxxHover` / `kSpriteXxx` (inactive) cell using `IGUIButton::setImage()` — no new
   `IUIBackend` interface methods required (hover switching is internal to the Irrlicht backend)
@@ -293,7 +293,7 @@ above: multiply A_0–1 by 255.
     swap if the button is active — the active sprite must persist even while hovering; on
     `EGET_ELEMENT_LEFT`, check `btn->isPressed()`; if true, restore the active sprite (active
     visual must persist); if false, restore the inactive `kSpriteXxx` cell
-- [ ] `IrrlichtUIBackend`: load `hud_font.xml` (not the old `ui_font.xml` path which no longer
+- [x] `IrrlichtUIBackend`: load `hud_font.xml` (not the old `ui_font.xml` path which no longer
   exists); this was already fixed in commit 1100241 — verify no regression
 
 ---
