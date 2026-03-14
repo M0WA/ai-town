@@ -7,22 +7,15 @@
 // CMake target: ui_tests, label "unit".
 // Mock policy: StrictMock for mocks under assertion; NiceMock for background mocks.
 //
-// DESIGN NOTE: UIManager is currently a Phase 1 stub whose update() method is a
-// no-op. The stinger tests defined here establish the *contract* that the Phase 11
-// UIManager implementation must satisfy. The tests use the mock infrastructure
-// provided by the project and document precise expectations so they become
-// regression guards the moment the real UIManager update() body is delivered.
-//
-// For now (Phase 1 stub), each test calls UIManager::update() which does nothing,
-// so the "no unexpected call" assertions also pass. The PhaseN_StingerFires tests
-// are written as PENDING stubs that will be activated (by removing the GTEST_SKIP)
-// when UIManager::update() actually calls getCityRating() and triggerStinger().
-//
 // Per architecture/audio-architecture/dynamic-soundscape.md and phase-11.md:
 //   - stinger_milestone fires ONLY at City Rating tier transitions.
 //   - 100K population milestone does NOT trigger stinger_milestone.
 //   - Calling onGameLoaded() seeds the tier cache; no stinger fires on load.
 //   - A second update() in the same tier fires no additional stinger (cooldown/same-tier).
+//
+// Implementation note: UIManager::update() calls getCityRating() exactly once per frame
+// (stinger edge-detect section). m_lastMilestoneStingerFireTime is initialized to -5.0
+// so the 5 s cooldown is satisfied from t=0 on a ManualClock.
 
 #include "src/interfaces/IClock.h"
 #include "src/interfaces/IAudioSystem.h"
@@ -72,16 +65,9 @@ static void setDefaultSimCalls(NiceMock<MockCitySimulation>& sim)
 // When UIManager::update() detects a Village→Town tier transition,
 // triggerStinger(StingerType::MILESTONE) must be called exactly once.
 // A second update() in the same tier must NOT trigger another stinger.
-//
-// STATUS: PENDING — UIManager::update() is a Phase 1 stub (no-op). This test
-// will become a live assertion when Phase 11 delivers the stinger wiring.
 // ---------------------------------------------------------------------------
 TEST(UIManagerStingerTest, UIManager_StingerMilestone_FiresOnTierTransition)
 {
-    GTEST_SKIP() << "PENDING: UIManager::update() is a Phase 1 stub; "
-                    "this test activates when Phase 11 wires getCityRating() "
-                    "and triggerStinger() in UIManager::update()";
-
     NiceMock<MockUIBackend>      backend;
     NiceMock<MockCitySimulation> sim;
     NiceMock<MockAudioSystem>    audio;
@@ -89,12 +75,12 @@ TEST(UIManagerStingerTest, UIManager_StingerMilestone_FiresOnTierTransition)
 
     setDefaultSimCalls(sim);
 
-    // First update(): getCityRating() returns Village (0 → integer 0).
-    // Second update(): getCityRating() returns Town (1).
-    // Stinger must fire exactly once (Village→Town transition).
+    // First update(): getCityRating() returns Village — no tier change, no stinger.
+    // Second and subsequent: returns Town — triggers stinger on second call only
+    // (m_previousCityRating becomes Town after 2nd, so 3rd sees no transition).
     EXPECT_CALL(sim, getCityRating())
-        .WillOnce(Return(CityRatingTier::Village))   // Village on first update
-        .WillOnce(Return(CityRatingTier::Town));     // Town on second update — triggers stinger
+        .WillOnce(Return(CityRatingTier::Village))
+        .WillRepeatedly(Return(CityRatingTier::Town));
 
     EXPECT_CALL(audio, triggerStinger(StingerType::MILESTONE))
         .Times(1);
@@ -103,12 +89,8 @@ TEST(UIManagerStingerTest, UIManager_StingerMilestone_FiresOnTierTransition)
 
     uiManager.update(0.016f);  // Village — no tier change yet, no stinger
     uiManager.update(0.016f);  // Town — tier transition detected, stinger fires
-
-    // Third update with same Town rating — no additional stinger.
-    ON_CALL(sim, getCityRating()).WillByDefault(Return(CityRatingTier::Town));
-    uiManager.update(0.016f);
-    // Implicit: StrictMock on audio would catch an unexpected triggerStinger here,
-    // but since we used NiceMock, we rely on the Times(1) expectation set above.
+    uiManager.update(0.016f);  // Still Town — no transition, no stinger
+    // NiceMock on audio enforces Times(1): no second triggerStinger allowed.
 }
 
 // ---------------------------------------------------------------------------
@@ -116,16 +98,9 @@ TEST(UIManagerStingerTest, UIManager_StingerMilestone_FiresOnTierTransition)
 //
 // Calling onGameLoaded() seeds the tier cache to the current rating.
 // A subsequent update() with the same rating must NOT trigger a stinger.
-//
-// STATUS: PENDING — onGameLoaded() is not yet a UIManager method; will be
-// added in Phase 11.
 // ---------------------------------------------------------------------------
 TEST(UIManagerStingerTest, UIManager_StingerMilestone_NoStingerOnLoad)
 {
-    GTEST_SKIP() << "PENDING: UIManager::onGameLoaded() and stinger wiring "
-                    "are Phase 11 deliverables. This test activates once those "
-                    "methods are implemented.";
-
     NiceMock<MockUIBackend>      backend;
     NiceMock<MockCitySimulation> sim;
     NiceMock<MockAudioSystem>    audio;
@@ -142,8 +117,8 @@ TEST(UIManagerStingerTest, UIManager_StingerMilestone_NoStingerOnLoad)
 
     UIManager uiManager(&backend, &audio, &sim, &clock);
 
-    // onGameLoaded() seeds the cache to City (2) — no stinger on the next update.
-    // uiManager.onGameLoaded();  // Phase 11 method — not yet declared.
+    // onGameLoaded() seeds m_previousCityRating to City — no stinger on next update.
+    uiManager.onGameLoaded();
     uiManager.update(0.016f);  // Same tier as cached — no stinger.
 }
 
@@ -153,14 +128,9 @@ TEST(UIManagerStingerTest, UIManager_StingerMilestone_NoStingerOnLoad)
 // 100K population does NOT correspond to a CityRatingTier boundary.
 // Even while population is in the Metropolis range (> 50K), if the City Rating
 // tier stays at Metropolis for all calls, no stinger fires.
-//
-// STATUS: PENDING — UIManager::update() stinger wiring is a Phase 11 deliverable.
 // ---------------------------------------------------------------------------
 TEST(UIManagerStingerTest, UIManager_StingerMilestone_No100KStinger)
 {
-    GTEST_SKIP() << "PENDING: UIManager stinger wiring is a Phase 11 deliverable. "
-                    "This test activates once getCityRating() is called in update().";
-
     NiceMock<MockUIBackend>      backend;
     NiceMock<MockCitySimulation> sim;
     NiceMock<MockAudioSystem>    audio;
@@ -178,7 +148,9 @@ TEST(UIManagerStingerTest, UIManager_StingerMilestone_No100KStinger)
 
     UIManager uiManager(&backend, &audio, &sim, &clock);
 
-    // uiManager.onGameLoaded();  // Phase 11 method — not yet declared.
-    uiManager.update(0.016f);  // Metropolis tier seeded; no transition.
+    // Seed m_previousCityRating to Metropolis — population crossing 100K
+    // does not correspond to a tier boundary.
+    uiManager.onGameLoaded();
+    uiManager.update(0.016f);  // Metropolis — no transition from seeded state.
     uiManager.update(0.016f);  // Still Metropolis at 100K — no stinger.
 }
