@@ -35,7 +35,7 @@
   - **CRITICAL — LOD rebuild must call `node->remove()` on the old node**: When replacing a chunk's scene node with a new LOD level, the old `IMeshSceneNode*` must be explicitly removed via `SceneEntityManager::destroy()` (which calls `node->remove()`) **before** creating the new node. Failing to remove the old node leaves orphaned nodes accumulating in the scene graph each LOD transition, causing unbounded memory growth and redundant render calls.
   - **Deque pointer safety**: The `ChunkRebuildRequest` struct must store a **`uint64_t` chunk ID** (not a raw `IMeshSceneNode*`). Before processing a request, validate the chunk is still live in `TerrainSystem::m_activeChunks` by ID. If not found (chunk was unloaded while request was queued), discard the request without dereferencing any pointer.
   - **Deque deduplication** (prevents same-frame double rebuild): `TerrainSystem::update()` must maintain a per-frame `std::unordered_set<uint64_t> processedThisFrame`. Before processing a request, skip if `processedThisFrame` already contains the chunk ID. Also skip if `it->second.currentLOD == req.targetLOD` (chunk already at the requested level — prevents redundant rebuilds from stale queued requests). This ensures the "never transitions up and down in the same frame" invariant is structurally enforced, not just documented as a property of `LODNode`.
-  - **`TerrainSystem::flushPendingRebuilds()`**: `TerrainSystem` exposes a `flushPendingRebuilds()` method called once during the loading screen (after all initial chunks are queued) that processes the entire rebuild deque synchronously in a single frame — **bypassing the 2-per-frame cap**. This eliminates the startup LOD thrashing that would otherwise occur over the first ~N/2 frames as the deque drains at the normal rate. The method processes until the deque is empty or a per-call GPU upload time budget (default: 100 ms) is exhausted, whichever comes first, to prevent the loading screen from stalling visibly. The loading spinner progress bar should advance during this flush.
+  - **`TerrainSystem::flushPendingRebuilds()`**: `TerrainSystem` exposes a `flushPendingRebuilds()` method called **once per frame** during the loading screen loop. It bypasses the normal 2-per-frame cap and processes as many rebuild requests as possible, but it is **not** a blocking loop-until-empty: it exits after a 100 ms CPU budget per call regardless of remaining queue depth, to prevent the loading screen from stalling visibly. `TerrainSystem::update(dt)` is also called every loading-screen frame; it continues draining any requests that `flushPendingRebuilds()` did not reach within its budget. Together, the two calls drain the rebuild deque progressively over multiple frames until empty. This cooperative approach eliminates the startup LOD thrashing that would otherwise occur if only the 2-per-frame normal cap were active, while still keeping the spinner animated and the UI responsive each frame.
 
   **IClock Injection for Deterministic Testing**
 
@@ -653,8 +653,12 @@ code path.
 `setTileHeight()` enqueues up to 9 `ChunkRebuildRequest`s per call (one per modified
 tile, across at most 4 chunks for a corner placement). The standard 2-per-frame cap in
 `TerrainSystem::update()` applies; all affected chunks are fully rebuilt within at most 5
-frames at normal framerate. During loading screen `flushPendingRebuilds()` processes all
-pending rebuilds synchronously (bypassing the cap), ensuring no deferred terrain
-flattening is visible to the player after a save-load cycle.
+frames at normal framerate. During the loading screen, `flushPendingRebuilds()` is called once per frame with a
+100 ms CPU budget per call (not a blocking loop-until-empty); `terrainSystem->update(dt)`
+is also called each frame to drain any requests not reached within that budget. For
+placement-triggered rebuilds (at most ~9 chunks per `setTileHeight()` call), the 100 ms
+budget is nearly always sufficient to drain the small pending queue in the single
+`flushTerrainRebuilds()` call made immediately after placement, ensuring terrain geometry
+matches the new heightmap before the next render frame is drawn.
 
 - Chunks loaded/unloaded based on camera distance

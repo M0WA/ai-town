@@ -185,30 +185,35 @@ if ! grep -q "SF:.*src/simulation/" coverage_filtered.info; then
 fi
 ```
 
-**Phase 6 `src/simulation/` per-file 85% floor** (CI enforcement step, runs after the src/simulation/ SF preflight and before the 95% total gate):
+**Phase 11 `src/simulation/` per-file 85% floor** (Deferred from Phase 6; implemented in Phase 11) (CI enforcement step, runs after the src/simulation/ SF preflight and before the 95% total gate):
 
 Add this step to the `coverage-linux` job immediately after the `src/simulation/` SF preflight step:
 
 ```bash
 # Per-file 85% floor for src/simulation/ — any file below 85% is a blocking defect.
-# This enforces the "any simulation file below 85% is a blocker" rule from the spec.
-# Uses lcov --list output; assumes '|' column delimiter (validated by Phase 4 preflight).
-min_sim=$(lcov --list coverage_filtered.info \
-  | grep -E "src/simulation/" \
-  | grep -v "^Total" \
-  | awk -F'|' '{print $NF+0}' \
-  | sort -n \
-  | head -1)
-if [ -z "$min_sim" ]; then
-  echo "PREFLIGHT FAIL: No src/simulation/ files found in lcov output for per-file check."; exit 1
-fi
-awk -v pct="$min_sim" 'BEGIN {
-  if (pct+0 < 85.0) {
-    print "FAIL: worst src/simulation/ file coverage " pct "% < 85% Phase 6 per-file floor"; exit 1
-  } else {
-    print "PASS: worst src/simulation/ file coverage " pct "% >= 85%"
+# Direct .info file parsing (SF/LH/LF records) — version-agnostic; does NOT use
+# lcov --list output (whose column delimiter changed in lcov 2.0 and is unreliable).
+awk '
+  /^SF:/ { in_sim=0; fname="" }
+  /^SF:.*src\/simulation\// { in_sim=1; fname=$0; sub(/^SF:/, "", fname); lh=0; lf=0 }
+  in_sim && /^LH:/ { lh=$0; sub(/^LH:/, "", lh) }
+  in_sim && /^LF:/ { lf=$0; sub(/^LF:/, "", lf) }
+  in_sim && /^end_of_record/ {
+    if (lf+0 > 0) {
+      pct = lh/lf*100
+      if (min_pct == "" || pct < min_pct+0) { min_pct=pct; min_file=fname }
+    }
+    in_sim=0
   }
-}'
+  END {
+    if (min_pct == "") { print "PREFLIGHT FAIL: No src/simulation/ files found in coverage_filtered.info"; exit 1 }
+    if (min_pct+0 < 85.0) {
+      printf "FAIL: worst src/simulation/ file %s coverage %.1f%% < 85%% Phase 11 per-file floor\n", min_file, min_pct; exit 1
+    } else {
+      printf "PASS: worst src/simulation/ file %s coverage %.1f%% >= 85%%\n", min_file, min_pct
+    }
+  }
+' coverage_filtered.info
 ```
 
 This step fails CI if any single `src/simulation/` file falls below 85% — catching under-tested simulation paths that the 95% total gate may not surface (a high-coverage majority can mask a low-coverage outlier).

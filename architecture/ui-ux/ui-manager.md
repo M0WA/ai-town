@@ -242,6 +242,16 @@ public:
     // call getConsecutiveDeficitMonths() — its only simulation interaction is calling
     // m_sim->setPaused(true) (via ISimulationPauser inheritance) when a CRITICAL toast
     // arrives. All deficit-month polling and threshold evaluation lives here, in update().
+    // NOTE (Phase 11 — stinger_milestone bridge): update() also polls
+    // m_sim->getCityRating() each frame and compares it to the cached m_previousCityRating.
+    // When getCityRating() returns a value greater than m_previousCityRating (upward tier
+    // transition), update() calls m_audio->triggerStinger(StingerType::MILESTONE) exactly
+    // once and advances the cache. m_previousCityRating is NOT serialised by SaveSystem;
+    // it is re-initialised by onGameLoaded() after each load to prevent a spurious stinger
+    // on the first update() tick. CitySimulation must NOT call triggerStinger directly —
+    // UIManager is the sole dispatcher for stinger_milestone, following the same pattern
+    // established for stinger_crisis in Phase 10. See architecture/audio-architecture/
+    // dynamic-soundscape.md § stinger_milestone and implementation/phase-11.md § stinger_milestone.
     void update(float realDeltaSeconds);
 
     // Render all GUI panels — call AFTER sceneManager->drawAll() and BEFORE endScene().
@@ -304,6 +314,25 @@ public:
     // Used by WorldInteraction_NewGameLoad_ClearsOverlay unit test as the authoritative
     // overlay-clear trigger.
     void onNewGame();
+
+    // Phase 11 — Save/Load wiring (called by SaveSystem or the loading controller immediately
+    // after save deserialization completes and before gameplay resumes):
+    // Re-initializes the City Rating tier cache (m_previousCityRating) to the current
+    // simulation state by calling m_sim->getCityRating(). Without this reset, the stale
+    // m_previousCityRating value left over from a previous session (or from the default
+    // construction value) would not match the loaded city's tier, causing UIManager::update()
+    // to detect a spurious tier change on the very first tick after load and fire an
+    // unwarranted stinger_milestone audio event.
+    // Contract:
+    //   - Caller MUST invoke onGameLoaded() before the first UIManager::update() tick after
+    //     a load completes. Calling it after update() has already run produces the same
+    //     spurious stinger that it is designed to prevent.
+    //   - Safe to call when m_sim is non-null (guaranteed by the load path; no null-check
+    //     needed at call sites, but UIManager asserts m_sim != nullptr in debug builds).
+    //   - Does NOT transition GameState — the caller (loading controller) is responsible for
+    //     calling transitionToGameplay(GameMode) separately.
+    //   - Does NOT clear m_overlayMap or reset m_activeTool — call onNewGame() for that.
+    void onGameLoaded();
 
     // Phase 9b — World Interaction observable state (for test assertions):
     ActiveTool getActiveTool() const; // returns m_activeTool; used by WorldInteractionTest
