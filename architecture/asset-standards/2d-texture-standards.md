@@ -831,6 +831,15 @@ baked into the PNG — it is not a programmatic runtime overlay. The hover tile 
 (`rgba(255, 255, 255, 0.15)`) is also a separate cell in the sprite sheet, distinct from the
 inactive and active cells.
 
+**`kSpriteXxxHover` naming convention**: Every icon that has an inactive/active pair must
+also have a corresponding hover constant in `src/ui/hud_sprite_ids.h`, following the naming
+pattern `kSpriteXxxHover` (e.g., `kSpriteZoneResidentialHover`, `kSpriteRoadHover`,
+`kSpriteUtilitiesHover`, `kSpriteDemolishHover`, `kSpriteQueryHover`). Authors generating or
+updating the sprite sheet must ensure the hover cell for each icon is placed at the column
+position that the corresponding `kSpriteXxxHover` constant resolves to via the
+`id = col + row * 32` encoding. See `architecture/ui-ux/resolution-ui-scaling.md`
+§Hover State Switching for the runtime switching implementation details.
+
 #### Panel Colour Context
 
 Icons in `hud_sprites_ui.png` are designed against the Glass City panel background

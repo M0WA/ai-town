@@ -263,6 +263,31 @@ states are separate sprite cells in `hud_sprites_ui.png` — the stroke-only cel
 opacity is the inactive variant, the stroke-only cell at 85% with a white border is the
 hover variant, and the filled cell with teal border and baked glow is the active variant.
 
+#### Hover State Switching — Implementation (Phase 10c)
+
+Hover state switching is implemented entirely inside `IrrlichtUIBackend` using Irrlicht GUI
+events — no new methods are added to the `IUIBackend` interface.
+
+- **`EGET_ELEMENT_HOVERED`**: When this event fires on a toolbar button handle,
+  `IrrlichtUIBackend` calls `IGUIButton::setImage()` with the rect for the corresponding
+  `kSpriteXxxHover` cell from `hud_sprites_ui.png`.
+- **`EGET_ELEMENT_LEFT`**: When this event fires, `IrrlichtUIBackend` calls
+  `IGUIButton::setImage()` with the rect for the inactive `kSpriteXxx` cell, restoring the
+  default inactive appearance.
+
+**`kSpriteXxxHover` naming convention**: Every icon that has an inactive/active pair gains a
+paired hover constant in `src/ui/hud_sprite_ids.h` following the pattern
+`kSpriteXxxHover` (e.g., `kSpriteZoneResidentialHover`, `kSpriteRoadHover`,
+`kSpriteUtilitiesHover`, `kSpriteDemolishHover`, `kSpriteQueryHover`). The hover sprite cell
+is always the cell immediately adjacent to the inactive cell within the same row of
+`hud_sprites_ui.png` — its exact column is determined by the sprite sheet layout documented
+in `architecture/asset-standards/2d-texture-standards.md`.
+
+**No `IUIBackend` interface changes**: `setElementImage`, `setElementAlpha`, and the existing
+`IUIBackend` virtual method set are sufficient. The hover swap is a pure internal detail of
+`IrrlichtUIBackend` and is invisible to panels, `UIManager`, and tests that stub
+`IUIBackend`.
+
 ### Button Tile Corner Radius
 
 Button tiles (free-floating cell elements within panels) use **8 px corner radius** on all four corners.
