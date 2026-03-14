@@ -27,6 +27,46 @@
 
 - **WASD camera preset confirmation modal** (triggered from Settings > Controls when player clicks the "WASD" preset button): Small modal (480×240 px). Title: "Apply WASD Preset?". Body: "This will change: W=Pan Up, A=Pan Left, S=Pan Down, D=Pan Right (Demolish moved to X). Any custom bindings for W/A/S/D will be overwritten." The modal also displays the current binding of each affected key (W, A, S, D) so the player understands what will be replaced before committing. Two buttons: **Apply** (primary) and **Cancel** (safe-exit). Escape activates Cancel. Keyboard Tab order: Cancel focused by default (least destructive), Tab moves to Apply. On Apply: atomically rebind PanUp=W, PanDown=S, PanLeft=A, PanRight=D and move Demolish from D to X; write `keybindings.json`; close modal. On Cancel: no change, close modal. This modal is dismissible (Escape closes it via Cancel action). **Note**: Q and E are independently reserved for future camera controls (displayed as non-rebindable in the Controls tab regardless of preset); this is a separate constraint unrelated to the WASD preset itself.
 
+## Visual Design — Glass City
+
+All modal dialogs use the Glass City panel style regardless of dialog type.
+
+### Modal Background
+
+- **Dialog background**: `rgba(13, 27, 42, 0.88)` deep navy, **8 px corner radius** on all
+  four edges. The dialog is not flush with any screen edge so all corners receive the radius.
+- **Scrim** (full-screen behind dialog): solid `rgba(0, 0, 0, 0.50)` — unchanged from the
+  existing 50% opacity black overlay spec. The scrim colour is not part of the Glass City
+  panel palette; it is a viewport dimming layer.
+
+### Modal Text
+
+| Content | Colour |
+|---|---|
+| Title | `#EBF4F6` near-white |
+| Body text | `#EBF4F6` near-white |
+| Numeric values in body (loan amount, interest rate, monthly figures) | `#F0B429` amber |
+| Inline warning text ("This will not resolve your deficit…") | `#E8960C` warning amber |
+| Inline error / overridden-cap warning | `#F04E37` red |
+| Secondary detail text (subheadings, field names) | `#4A7FA5` mid-blue |
+
+### Modal Buttons
+
+All modal action buttons (primary, secondary, tertiary, cancel/back) use the Glass City
+button tile:
+
+- **Default / unfocused**: `rgba(255, 255, 255, 0.08)` fill, 1 px `rgba(255, 255, 255, 0.18)` border
+- **Keyboard focus / hover**: `rgba(255, 255, 255, 0.15)` fill, 1 px `rgba(255, 255, 255, 0.35)` border
+- **Primary action (when indicated)**: `rgba(0, 201, 200, 0.22)` teal wash, 2 px
+  `rgba(0, 201, 200, 0.75)` teal border + 4 px baked glow
+
+The keyboard focus ring specified in the existing spec ("2px accent-color border on the
+focused button") is satisfied by the Active tile state above — the 2 px teal border IS the
+focus ring. No additional focus ring element is needed.
+
+Grayed-out (disabled) buttons use `setElementEnabled(..., false)` and render at reduced
+opacity; the teal border is absent on disabled buttons.
+
 ## Element Repositioning
 
 `ModalDialog` elements (background, title, body, buttons) are created once at construction with placeholder coordinates and repositioned on each `openModal()` call using `IUIBackend::setElementRect(handle, x, y, w, h)` (method 20). This avoids destroying and recreating handles — which would invalidate test expectations and listener registrations — and allows the dialog to be correctly centred at any screen resolution.

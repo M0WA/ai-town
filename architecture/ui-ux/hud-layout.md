@@ -271,6 +271,70 @@ minimap top-down render (R=green, C=blue, I=yellow — consistent with the minim
 zone coding; reuse `kOverlayArgbResidential`, `kOverlayArgbCommercial`, and
 `kOverlayArgbIndustrial` from `ui_constants.h`.
 
+## Visual Design — Glass City
+
+### Panel Backgrounds
+
+All HUD panels use the Glass City deep-navy palette defined in
+`architecture/ui-ux/resolution-ui-scaling.md` Visual Design — Glass City section.
+
+| Panel | Background |
+|---|---|
+| Resource/budget bar | `rgba(13, 27, 42, 0.88)` — no corner radius |
+| Left toolbar panel | `rgba(13, 27, 42, 0.82)` — 8 px radius on right/bottom inner edges |
+| Zone sub-panel | `rgba(13, 27, 42, 0.80)` — 8 px radius on all inner edges |
+| Utilities sub-panel | `rgba(13, 27, 42, 0.80)` — 8 px radius on all inner edges |
+| Budget detail panel | `rgba(13, 27, 42, 0.85)` — 8 px radius |
+| Grace period indicator | `rgba(13, 27, 42, 0.78)` — 8 px radius |
+
+### Toolbar Icon States
+
+Toolbar tool buttons (Zone, Road, Utilities, Demolish, Query) and all sub-panel buttons
+use the icon state spec below. Both the inactive and active cells are separate sprites in
+`hud_sprites_ui.png`; the backend call `IUIBackend::setElementImage()` switches between them.
+
+| State | Icon style | Opacity | Border |
+|---|---|---|---|
+| Inactive | **Outlined — 2 px stroke, no fill** | 65% | None |
+| Active | **Filled solid icon** | 100% | 2 px teal `rgba(0, 201, 200, 0.75)` + baked glow |
+
+The teal border and glow are pre-baked into the active sprite cell. No runtime blur is
+applied. The `kSpriteZone*Active`, `kSpriteUtil*Active`, etc. constants reference the
+filled-icon cells; the inactive constants reference the stroke-only cells.
+
+### Button Tile
+
+All buttons in toolbar and sub-panels use the three-state tile:
+
+- **Inactive**: `rgba(255, 255, 255, 0.08)` background, 1 px `rgba(255, 255, 255, 0.18)` border
+- **Hover**: `rgba(255, 255, 255, 0.15)` background, 1 px `rgba(255, 255, 255, 0.35)` border
+- **Active**: `rgba(0, 201, 200, 0.22)` teal wash, 2 px `rgba(0, 201, 200, 0.75)` border + 4 px baked glow
+
+This replaces the earlier "accent-color border only" description for the active button state.
+The teal wash + 2 px border is the single authoritative active-state signal.
+
+### Text Colours in HUD
+
+All HUD text follows the Glass City palette (see `resolution-ui-scaling.md` canonical table):
+
+| Content type | Colour |
+|---|---|
+| Numeric values (treasury, population, date, demand %) | `#F0B429` warm amber |
+| Primary labels | `#EBF4F6` near-white |
+| Secondary / sub-labels | `#4A7FA5` mid-blue |
+| Deficit / error indicator | `#F04E37` red |
+| Warning (undo countdown amber, grace period near-expiry) | `#E8960C` warning amber |
+| Undo countdown text turns amber when `remainingSeconds < 5.0` | `#F0B429` (value amber, same token) |
+
+**Red flashing budget indicator** (consecutive deficit): the pulsing overlay on the treasury
+field remains red. The ARGB for the overlay pulse is `0x80F04E37` (alpha 128, red `#F04E37`)
+in Irrlicht `SColor` format, replacing any previously unspecified red tint. The alpha
+oscillates 0.3–1.0 via `setElementAlpha()` as described in the layout spec above; the colour
+component itself is fixed at `#F04E37`.
+
+**Unsaved-changes dot**: fixed amber fill `#F0B429` (value amber token). Authored at
+creation time; does not change colour dynamically.
+
 - **Notification log bell icon**: positioned at the right end of the resource/budget bar, virtual bounds x: 1820–1868 px, y: 8–56 px (48×48 px icon). Displays an unread-count badge (small numeral overlay) that increments when new notifications arrive and resets to zero when the log is opened. Keyboard shortcut: **B** (toggles the log open/closed; rebindable in Settings > Controls with standard conflict detection).
 
 ## Phase 10 Audio Wiring for UI Events

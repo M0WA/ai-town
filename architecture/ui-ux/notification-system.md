@@ -44,6 +44,58 @@
   - Combined maximum height of both bands must not exceed 320 px (virtual) to prevent the stack from reaching center screen.
 - **Notification log**: Accessible via a bell/log icon in the HUD. See [Notification Log Panel](#notification-log-panel) below for full specification.
 
+## Visual Design — Glass City
+
+### Toast Backgrounds
+
+| Toast type | Background |
+|---|---|
+| CRITICAL toast | `rgba(13, 27, 42, 0.88)` with a 2 px left accent stripe `#F04E37` red |
+| Normal toast | `rgba(13, 27, 42, 0.82)` |
+
+The left accent stripe on CRITICAL toasts is a 2 px vertical bar on the left edge of the
+toast element, authored as a separate narrow element (or part of the toast background
+element) using the `#F04E37` error red. This provides an at-a-glance severity signal
+independent of the title text.
+
+Corner radius: **8 px** on all edges of each toast.
+
+### Toast Text
+
+| Content | Colour |
+|---|---|
+| CRITICAL toast title | `#EBF4F6` near-white |
+| CRITICAL toast body | `#EBF4F6` near-white |
+| Normal toast title | `#EBF4F6` near-white |
+| Normal toast body | `#EBF4F6` near-white |
+| Dismiss affordance label (click / Enter / Delete) | `#4A7FA5` mid-blue |
+
+### Notification Log Panel Background
+
+The log panel uses the Glass City deep-navy style:
+
+- `setElementBackground(handle, 13, 27, 42, 217)` (alpha 217 ≈ 0.85 × 255)
+  replacing the Phase 10 value `setElementBackground(handle, 20, 20, 20, 200)`.
+
+  > **Transition note**: The old near-black `(20, 20, 20, 200)` value is superseded.
+  > Update the `toggleLog()` call when next modifying the notification log panel.
+
+### CRITICAL Toast Row Priority Badge
+
+In the notification log panel, CRITICAL entries use the Glass City error colour:
+
+- Priority badge: `#F04E37` red background with `#EBF4F6` near-white text
+- Normal entries: no badge; text in `#EBF4F6`
+
+### Notification Bell Icon
+
+The notification bell icon follows the Glass City icon state spec:
+
+- **Inactive (no unread)**: outlined 2 px stroke bell at 65% opacity
+- **Active / unread badge present**: filled solid bell at 100% opacity, 2 px teal
+  `rgba(0, 201, 200, 0.75)` border + baked glow
+- **Unread count badge**: `#F04E37` red circular badge with `#EBF4F6` white numeral
+
 ## Notification Log Panel
 
 The notification log panel is a scrollable history overlay toggled by the bell icon or the **B** key.

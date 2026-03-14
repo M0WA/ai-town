@@ -196,6 +196,89 @@ text line instead of sitting on the shared baseline. This was the root cause of 
 - **Typeface requirements**: Numeric readouts (tax rates, treasury balance, population counts, percentages) must use a **monospace typeface** (prevents layout shift as digits change). Labels (zone types, panel titles, button text) must use a **sans-serif typeface** for legibility at small sizes.
 - **These rules apply to all UI elements**: HUD resource bar, demand pressure bars (must supplement color with zone-type letters R/C/I), toolbar tooltip text, Query Panel fields, Tax Rate Panel rows, notification toasts, modal dialog body text, and minimap legend labels.
 
+## Visual Design — Glass City: Canonical Colour Palette
+
+The following values are the **locked canonical palette** for all UI panels, HUD elements,
+modals, and overlays in AI Town. Every file in `architecture/ui-ux/` that specifies colours
+MUST reference or conform to these values. Do not introduce other colour values for the
+categories below without updating this table first.
+
+### Panel Backgrounds
+
+| Element | Value | Usage |
+|---|---|---|
+| Resource/budget bar | `rgba(13, 27, 42, 0.88)` | Full-width top bar; 0px corner radius |
+| All other panels | `rgba(13, 27, 42, 0.78–0.88)` | Toolbar, sub-panels, inspector, minimap bg, modals |
+
+Panel backgrounds use deep navy — not milky white. The alpha range `0.78–0.88` allows
+individual panels to tune opacity; the resource bar is fixed at the upper end (`0.88`) for
+legibility against the sky.
+
+### Corner Radius
+
+- Inner panel edges: **8 px** corner radius (virtual 1920×1080 space)
+- Outer edges that are flush with the screen border (e.g. left edge of toolbar): **0 px** —
+  no radius on the screen-adjacent edge; radius only on the inward-facing edge.
+- Resource bar: **0 px** radius on all edges.
+
+### Accent and State Colours
+
+| Token | Hex | Usage |
+|---|---|---|
+| Accent / teal | `#00C9C8` | Active borders, focus rings, active-state glow |
+| Active border | `rgba(0, 201, 200, 0.75)` | 2 px border on active buttons and icon cells |
+| Amber / values | `#F0B429` | All HUD numeric values: treasury, population, demand bars, date |
+| Amber / undo warning | `#F0B429` | Undo countdown amber state |
+| Near-white / labels | `#EBF4F6` | Primary label text |
+| Mid-blue / sub-labels | `#4A7FA5` | Secondary / sub-labels, less prominent text |
+| Error / deficit red | `#F04E37` | Deficit indicators, error states |
+| Warning amber | `#E8960C` | Warning states (distinct from value amber `#F0B429`) |
+
+### Button Tile States
+
+All toolbar, sub-panel, modal, and settings buttons use this three-state tile spec:
+
+| State | Background | Border |
+|---|---|---|
+| Inactive | `rgba(255, 255, 255, 0.08)` | 1 px `rgba(255, 255, 255, 0.18)` |
+| Hover | `rgba(255, 255, 255, 0.15)` | 1 px `rgba(255, 255, 255, 0.35)` |
+| Active | `rgba(0, 201, 200, 0.22)` teal wash | 2 px `rgba(0, 201, 200, 0.75)` + 4 px baked glow |
+
+"Baked glow" on the active state means the glow is pre-authored into the sprite cell
+(see `architecture/asset-standards/2d-texture-standards.md` UI Sprite Sheet Art Style
+— Glass City), not a runtime blur. The `IUIBackend` interface does not expose a blur
+operation; the glow must be part of the active-state icon art.
+
+### Icon States
+
+| State | Style | Opacity | Border/Glow |
+|---|---|---|---|
+| Inactive | **Outlined — 2 px stroke only**, no fill | 65% | None |
+| Active | **Filled solid icon** | 100% | 2 px teal border + baked glow |
+
+Icons "gain weight" on selection: the visual transition from outlined-stroke to filled-solid
+communicates mode activation without relying solely on colour or border changes. Both
+states are separate sprite cells in `hud_sprites_ui.png` — the stroke-only cell is the
+inactive variant and the filled cell is the active variant.
+
+### Superseded Values
+
+The following values from earlier specs are **superseded** by the Glass City palette and
+must not be used for new work:
+
+| Old value | Category | Replacement |
+|---|---|---|
+| Milky/white frosted background | Panel background | `rgba(13, 27, 42, 0.78–0.88)` |
+| `rgba(0, 200, 220, 35)` active tint | Active state signal | Teal wash `rgba(0, 201, 200, 0.22)` + 2 px border |
+| Weak cyan-teal accent | Accent colour | `#00C9C8` |
+| White or default for numeric values | Value colour | `#F0B429` amber |
+
+> **Implementation note**: The superseded "Frosted Glass" sprite sheet art style section in
+> `architecture/asset-standards/2d-texture-standards.md` documents the Phase 10 signed-off
+> sprite sheet. That section is now extended (not replaced) by the Glass City spec in the
+> same file. New icon authoring follows Glass City; the signed-off Phase 10 sheet is a
+> historical record of what was delivered before Glass City was adopted.
+
 ## Colorblind Accessibility
 
 - **Colorblind mode toggle**: A "Colorblind Mode" toggle is located in **Settings > Graphics tab, Accessibility subsection** — see [`settings-pause-menu.md`](settings-pause-menu.md) for the canonical tab structure definition. The toggle MUST NOT appear in any other tab or panel. It switches all color-coded UI to a colorblind-safe alternative encoding.

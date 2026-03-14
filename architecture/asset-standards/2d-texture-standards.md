@@ -796,6 +796,79 @@ generator script is `tools/generate_hud_sprites.py`.
   crystal-clear blue drop, bright-red shield, gold star on sky-blue shield,
   etc.) with white/cream highlights
 
+### UI Sprite Sheet Art Style — Glass City (supersedes Frosted Glass for new authoring)
+
+The "Frosted Glass" art style described above documents the Phase 10 signed-off sprite sheet
+(`hud_sprites_ui.png`) and is retained as a historical record. **All new icon authoring and
+any regeneration of the sprite sheet must follow the Glass City spec below.** The Glass City
+spec governs the canonical active/inactive icon states.
+
+#### Icon State Authoring Rules
+
+| State | Icon style | Opacity | Border / Glow |
+|---|---|---|---|
+| **Inactive** | **Outlined — 2 px stroke, no fill** | 65% (author at full alpha; runtime applies `setElementAlpha`) | None |
+| **Active** | **Filled solid icon** | 100% | 2 px teal border `rgba(0, 201, 200, 0.75)` + 4 px outer glow, baked in |
+
+"Outlined" means the icon symbol is rendered as a 2 px anti-aliased stroke path with no
+interior fill — the panel background shows through the icon body. "Filled solid" means the
+icon symbol has a solid fill matching its semantic colour. The transition from stroke to fill
+is the primary active-state signal ("icons gain weight on selection").
+
+The 65% opacity for inactive icons is applied at the sprite level by authoring the stroke
+cells with the icon strokes at `alpha = 165` (65% of 255) against a fully transparent cell
+background. Do NOT author inactive cells at full alpha and rely on a runtime `setElementAlpha`
+call — the opacity is a design property of the inactive art, not a runtime effect.
+
+The 4 px outer glow on active cells is baked into the sprite PNG at the cell boundary. It
+must be authored at 4x internal resolution (256×256) and Lanczos-downsampled to 64×64,
+preserving glow softness. Glow colour: `rgba(0, 201, 200, 0.60)` at 4x scale, decaying to
+transparent at the 4 px radius.
+
+#### Panel Colour Context
+
+Icons in `hud_sprites_ui.png` are designed against the Glass City panel background
+`rgba(13, 27, 42, 0.80–0.88)`. Authors must verify legibility of both inactive (stroke) and
+active (filled) variants against this dark navy background at both 1280×720 and 1920×1080
+virtual resolutions.
+
+Icon symbol colours remain vivid and bright (per the Frosted Glass symbol treatment), now
+with the understanding that the panel is dark navy rather than milky glass. Near-white
+`#EBF4F6` stroke outlines are the recommended default for inactive icons; active fills use
+the semantic colour per button role (teal `#00C9C8` for generic tool tools, zone-specific
+colours for zone buttons, `#F04E37` red for demolish).
+
+#### Active Tint / Glow Colour by Button Role
+
+| Button role | Active glow / fill colour |
+|---|---|
+| Generic toolbar tool (Zone, Road, Utilities, Demolish, Query) | Teal `#00C9C8` |
+| Zone Residential | Green `rgba(0, 255, 0, 0.75)` (matches zone overlay) |
+| Zone Commercial | Blue `rgba(0, 0, 255, 0.75)` |
+| Zone Industrial | Yellow `rgba(255, 255, 0, 0.75)` |
+| Demolish | Red `#F04E37` |
+| Minimap overlay toggle | Teal `#00C9C8` |
+| Notification bell (unread) | Teal `#00C9C8` with red badge overlay |
+
+The colour values above govern the **baked glow** colour in the active sprite cell. The
+2 px border around all active cells is always teal `rgba(0, 201, 200, 0.75)` regardless of
+the glow colour — the border colour is uniform across all button roles.
+
+#### Superseded Frosted Glass Active-State Values
+
+The following Frosted Glass active-state values from the section above are **superseded**
+by Glass City for new authoring:
+
+| Old Frosted Glass value | Superseded by |
+|---|---|
+| Active tint overlay `rgba(0, 200, 220, 35)` (barely visible) | Teal wash `rgba(0, 201, 200, 0.22)` + 2 px border |
+| Cell background `rgba(255, 255, 255, 55)` active fill | `rgba(0, 201, 200, 0.22)` active wash |
+| Milky glass panel `rgba(235, 238, 242, 140)` | `rgba(13, 27, 42, 0.80–0.88)` deep navy |
+
+The `tools/generate_hud_sprites.py` generator script must be updated to produce Glass City
+cells when next regenerating the sprite sheet. Until the sheet is regenerated, the Phase 10
+signed-off PNG remains in use.
+
 ### Phase 10 Sign-Off — UI Sprite Sheet (graphics-artist-2d-texture)
 
 > Phase 10 sign-off — 2026-03-04
