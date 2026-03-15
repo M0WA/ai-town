@@ -36,6 +36,7 @@ jobs:
 
       # Step 2: Supply-chain lint — first substantive step, immediately after checkout.
       # Greps ci.yml for placeholder SHAs and rejects any SHA shorter than 40 hex chars.
+      # Also validates container image: lines have full sha256 digest pins.
       # Prevents accidental commit of incomplete supply-chain pins.
       - name: Lint workflow for placeholder SHAs
         shell: bash
@@ -52,6 +53,12 @@ jobs:
             exit 1
           fi
           echo "SHA lint passed — no placeholder tokens or short SHAs found."
+          echo "Checking container image digest pins..."
+          if grep -E '^\s+image:\s+' .github/workflows/ci.yml | grep -Ev '@sha256:[0-9a-f]{64}'; then
+            echo "ERROR: container image: line without full sha256 digest pin found in ci.yml."
+            exit 1
+          fi
+          echo "Container image digest lint passed."
 
       # Step 3: Install system dependencies — xvfb and OpenGL headers.
       # Must be BEFORE ccache setup and CMake configure so OpenGL headers and xvfb
@@ -391,7 +398,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
-      # Step 2: Supply-chain lint (same grep as build-linux — rejects placeholder SHAs).
+      # Step 2: Supply-chain lint (same as build-linux — rejects placeholder SHAs and
+      # validates container image digest pins).
       - name: Lint workflow for placeholder SHAs
         shell: bash
         run: |
@@ -404,6 +412,12 @@ jobs:
             exit 1
           fi
           echo "SHA lint passed."
+          echo "Checking container image digest pins..."
+          if grep -E '^\s+image:\s+' .github/workflows/ci.yml | grep -Ev '@sha256:[0-9a-f]{64}'; then
+            echo "ERROR: container image: line without full sha256 digest pin found in ci.yml."
+            exit 1
+          fi
+          echo "Container image digest lint passed."
 
       # Step 2a: Install Pillow for asset validation (validate_assets.py check_23 uses PIL).
       # pip install is idempotent; Pillow is a pre-built wheel on windows-latest.
@@ -725,7 +739,7 @@ jobs:
 
       # Step 2: Supply-chain lint (same as build-linux — both jobs must enforce supply-chain pins).
       # Rationale: a CI run that skips build-linux and only runs coverage-linux must still
-      # reject placeholder SHAs.
+      # reject placeholder SHAs and validate container image digest pins.
       - name: Lint workflow for placeholder SHAs
         shell: bash
         run: |
@@ -738,6 +752,12 @@ jobs:
             exit 1
           fi
           echo "SHA lint passed."
+          echo "Checking container image digest pins..."
+          if grep -E '^\s+image:\s+' .github/workflows/ci.yml | grep -Ev '@sha256:[0-9a-f]{64}'; then
+            echo "ERROR: container image: line without full sha256 digest pin found in ci.yml."
+            exit 1
+          fi
+          echo "Container image digest lint passed."
 
       # Step 3: Install system dependencies (same canonical position as build-linux).
       - name: Install system dependencies
@@ -1312,6 +1332,42 @@ jobs:
         run: markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
 
   # ============================================================================
+  # test-container-xvfb — Phase 11b spike: validate xvfb-run inside the pre-built
+  # CI Docker container on a GitHub-hosted runner.
+  # This job is isolated (build-linux and coverage-linux are NOT changed in this PR).
+  # After the spike is merged and the outcome documented, the main Phase 11b PR
+  # removes this job and switches build-linux/coverage-linux to container: mode.
+  # ============================================================================
+  test-container-xvfb:
+    name: "Spike — xvfb container test"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      # TODO: replace digest after running docker-ci-image.yml workflow_dispatch
+      image: ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      options: --user root
+    permissions:
+      packages: read
+      checks: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - name: Configure CMake (preset ci-linux)
+        run: cmake --preset ci-linux
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Run requires-opengl tests via xvfb-run
+        run: |
+          mkdir -p test_results
+          xvfb-run --auto-servernum \
+            ctest --test-dir build -L '^requires-opengl$' --output-on-failure
+        env:
+          GTEST_OUTPUT: "xml:test_results/"
+          AITOWN_HEADLESS: "1"
+          ALSOFT_DRIVERS: "null"
+
+  # ============================================================================
   # all-checks-pass — gate job required by branch protection
   # Must run with if: always() so it executes even when dependency jobs fail.
   # The explicit Bash-array form is the canonical form — do NOT substitute with
@@ -1324,6 +1380,7 @@ jobs:
       - coverage-linux
       - markdown-lint
       - validate-assets
+      - test-container-xvfb
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -1337,6 +1394,7 @@ jobs:
             "${{ needs.coverage-linux.result }}"
             "${{ needs.markdown-lint.result }}"
             "${{ needs.validate-assets.result }}"
+            "${{ needs.test-container-xvfb.result }}"
           )
           failed=0
           for result in "${results[@]}"; do

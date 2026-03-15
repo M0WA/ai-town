@@ -1,12 +1,12 @@
-FROM debian:trixie
+# CI base image — extends ghcr.io/m0wa/aitown-ci-linux.
+# TODO: after running docker-ci-image.yml, replace digest with the sha256 output.
+# Both this file and ci.yml MUST pin identical digests (Atomicity Contract item 5).
+FROM ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:0000000000000000000000000000000000000000000000000000000000000000
 
 ARG TZ
 ENV TZ="$TZ"
 
 ARG CLAUDE_CODE_VERSION=latest
-
-# vcpkg baseline — must match builtin-baseline in vcpkg.json
-ARG VCPKG_COMMIT=b2f068faf45a3f04145bec0f52a66526ad590227
 
 # Create node user (uid/gid 1000) to match the node:20 image convention
 RUN groupadd --gid 1000 node \
@@ -23,11 +23,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && apt-get update && apt-get install -y --no-install-recommends nodejs \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install basic development tools, iptables/ipset, and C++ build toolchain
-# gcc-13 is the default compiler in Debian Trixie (testing)
+# Install developer-ergonomics packages not present in the CI base image.
+# Excluded (already in CI image): git, curl, wget, ca-certificates, jq, pkg-config,
+#   build-essential, ccache, ninja-build, gcc-13, g++-13, xvfb, libgl1-mesa-dev,
+#   libglu1-mesa-dev, libxxf86vm-dev, libx11-dev, libxext-dev, libglew-dev,
+#   libasound2-dev, libpulse-dev, lcov, ffmpeg, sox, python3, python3-pip, vorbis-tools.
 RUN apt-get update && apt-get install -y --no-install-recommends \
   less \
-  git \
   procps \
   sudo \
   fzf \
@@ -35,8 +37,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   man-db \
   unzip \
   zip \
-  curl \
-  wget \
   gnupg2 \
   gh \
   iptables \
@@ -44,55 +44,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   iproute2 \
   dnsutils \
   aggregate \
-  jq \
   nano \
   vim \
   autoconf \
   automake \
   libtool \
-  build-essential \
-  ccache \
-  ninja-build \
-  pkg-config \
   openssh-client \
-  lcov \
-  xvfb \
-  libgl1-mesa-dev \
-  libglu1-mesa-dev \
-  libasound2-dev \
-  libpulse-dev \
-  libx11-dev \
-  libxxf86vm-dev \
-  libxext-dev \
-  gcc-13 \
-  g++-13 \
   xauth \
   libnvtt-bin \
-  python3-pip \
-  ffmpeg \
-  sox \
-  vorbis-tools \
   mediainfo \
   scrot \
-  && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
-     --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
-  && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-13 100 \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install Python packages via pip
-RUN pip3 install --break-system-packages mutagen
-
-# Bootstrap vcpkg at the pinned baseline commit (matches vcpkg.json builtin-baseline).
-# Packages are NOT pre-installed here — vcpkg manifest mode runs on first cmake configure.
-# chown so the node user can run vcpkg install without sudo.
-RUN git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg \
-  && git -C /opt/vcpkg checkout ${VCPKG_COMMIT} \
-  && /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics \
-  && chown -R node:node /opt/vcpkg
-
-ENV VCPKG_ROOT=/opt/vcpkg
-ENV VCPKG_DISABLE_METRICS=1
-ENV PATH=$PATH:/opt/vcpkg
 
 # Ensure default node user has access to /usr/local/share
 RUN mkdir -p /usr/local/share/npm-global && \
@@ -135,15 +97,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
     echo "Skipping compressonatorcli: only amd64 binaries available (arch=$ARCH)"; \
   fi
 
-# Install CMake 3.31.10 (apt version in Debian Trixie is too old for vcpkg)
-ARG CMAKE_VERSION=3.31.10
-RUN CMAKE_ARCH=$(uname -m) && \
-  wget -q "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz" && \
-  tar -xzf "cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz" -C /opt && \
-  ln -s "/opt/cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}" /opt/cmake && \
-  rm "cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz"
-
-ENV PATH=/opt/cmake/bin:$PATH
+# CMake is pre-installed in the CI base image at /opt/cmake/bin — PATH already set.
 
 # Set up non-root user
 USER node

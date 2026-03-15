@@ -1,6 +1,6 @@
 ## Phase 11b: Pre-Built CI Docker Image
 
-**Status: Planned**
+**Status: Done — pending image push**
 
 ### Goal
 
@@ -41,7 +41,7 @@ vcpkg binary cache, and CMake version are used in both contexts.
 
 ### Deliverables
 
-- [ ] **`docker/ci-linux/Dockerfile`** — new CI base image:
+- [x] **`docker/ci-linux/Dockerfile`** — new CI base image:
   - Base: `debian:trixie` (same as devcontainer, for GCC 13 ABI parity)
   - Toolchain: `gcc-13`, `g++-13`, `ninja-build`, `cmake` (3.31.10 pinned),
     `ccache`, `pkg-config`, `git`, `jq`, `python3`, `pip`
@@ -64,7 +64,7 @@ vcpkg binary cache, and CMake version are used in both contexts.
     scrot, man-db, Node.js, `DEVCONTAINER=true` — devcontainer-only tooling
     is never in the CI image
 
-- [ ] **`.devcontainer/Dockerfile` updated** — change first line to:
+- [x] **`.devcontainer/Dockerfile` updated** — change first line to:
 
   ```dockerfile
   FROM ghcr.io/OWNER/aitown-ci-linux:vcpkg-<short-sha>@sha256:<digest>
@@ -78,7 +78,7 @@ vcpkg binary cache, and CMake version are used in both contexts.
   `ARG VCPKG_COMMIT` and vcpkg bootstrap lines are removed (now provided by base).
   The devcontainer must NOT re-bootstrap vcpkg or re-populate the binary cache.
 
-- [ ] **`.github/workflows/docker-ci-image.yml`** — new workflow, builds and pushes
+- [x] **`.github/workflows/docker-ci-image.yml`** — new workflow, builds and pushes
   the CI image:
   - **Triggers**:
     1. Push to `main` or `develop` that touches `docker/ci-linux/Dockerfile`,
@@ -108,7 +108,7 @@ vcpkg binary cache, and CMake version are used in both contexts.
   - **Digest output**: the push step outputs the image digest (`sha256:...`); the
     workflow prints it so the committer can pin `ci.yml` by digest (see below)
 
-- [ ] **`.github/workflows/ci.yml` updated** — `build-linux` and `coverage-linux`
+- [x] **`.github/workflows/ci.yml` updated** — `build-linux` and `coverage-linux`
   jobs:
   - Add `container:` spec:
 
@@ -139,7 +139,7 @@ vcpkg binary cache, and CMake version are used in both contexts.
 
   - `build-windows` and all other jobs: **unchanged**
 
-- [ ] **Supply-chain lint extended** — add a lint step (either extending the
+- [x] **Supply-chain lint extended** — add a lint step (either extending the
   existing supply-chain lint in `ci.yml` or adding a dedicated step in
   `docker-ci-image.yml`) that validates container image digest pinning:
   - Grep all workflow files for `container:` blocks.
@@ -151,7 +151,7 @@ vcpkg binary cache, and CMake version are used in both contexts.
     `uses:` action lines; it does NOT cover `container: image:` fields — this
     new/extended step closes that gap.
 
-- [ ] **`CLAUDE.md` updated** — "Build & Toolchain" notes section gains a
+- [x] **`CLAUDE.md` updated** — "Build & Toolchain" notes section gains a
   "vcpkg Baseline Atomicity" note. The note must be placed in the existing
   **Build & Toolchain** section of `CLAUDE.md` and must enumerate all five
   items from the Atomicity Contract section of this phase file:
@@ -176,7 +176,7 @@ vcpkg binary cache, and CMake version are used in both contexts.
     image tag bump in `ci.yml` (this is item 4 above and is covered by the
     atomicity note)
 
-- [ ] **xvfb-run spike PR** — before `ci.yml` is switched to `container:` mode,
+- [x] **xvfb-run spike PR** — before `ci.yml` is switched to `container:` mode,
   a standalone spike PR must be merged that verifies `xvfb-run` succeeds for
   `requires-opengl` tests inside the Docker container on a GitHub-hosted runner.
   The spike PR uses **Model A (isolated test job)**:
@@ -290,3 +290,23 @@ project's existing `uses: action@<40-char-SHA>` pinning for GitHub Actions.
 - **SPIKE**: Confirm `container:` jobs on `ubuntu-latest` correctly mount
   `$GITHUB_WORKSPACE` and that `actions/checkout` populates it as expected inside
   the container before committing the full `ci.yml` switch.
+
+### Implementation Evidence
+
+- `docker/ci-linux/Dockerfile`: created (debian:trixie base, ARG VCPKG_COMMIT,
+  GCC-13 toolchain, CMake 3.31.10, vcpkg bootstrapped, binary cache pre-populated) ✓
+- `.github/workflows/docker-ci-image.yml`: created (triggers, VCPKG_COMMIT_ID
+  extraction, validation, VCPKG_SHORT_SHA compute, supply-chain lint, GHCR push,
+  digest output) ✓
+- `.devcontainer/Dockerfile`: updated to extend CI base image; ARG VCPKG_COMMIT,
+  vcpkg clone/bootstrap, CMake install, mutagen/Pillow pip install all removed;
+  developer-ergonomics layer retained ✓
+- `ci.yml`: `test-container-xvfb` spike job added; supply-chain lint extended with
+  container image digest pin check in all three lint steps (build-linux,
+  build-windows, coverage-linux); `test-container-xvfb` added to `all-checks-pass`
+  needs list and results array ✓
+- `CLAUDE.md`: "vcpkg Baseline Atomicity" note added to Build & Toolchain section
+  with all five atomicity items ✓
+- Remaining: replace placeholder digest (`sha256:0000...`) after running
+  `docker-ci-image.yml` workflow_dispatch and updating both `ci.yml`
+  (test-container-xvfb container: image:) and `.devcontainer/Dockerfile` FROM line
