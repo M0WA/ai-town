@@ -56,10 +56,17 @@ vcpkg binary cache, and CMake version are used in both contexts.
     available during the vcpkg install layer inside the image
   - vcpkg install is invoked with `--overlay-ports=/build/vcpkg-overlays` to
     ensure openal-soft builds from the 1.23.1 pin and not the upstream vcpkg port
-  - Full vcpkg binary cache pre-populated for `x64-linux` (all declared ports +
-    transitive deps compiled with GCC 13): irrlicht, openal-soft (overlay-pinned
-    1.23.1), libvorbis, fmt, glew, gtest, rapidcheck, and all transitive deps
-  - vcpkg binary cache stored at `/root/.cache/vcpkg` inside the image
+  - All declared ports + transitive deps compiled with GCC 13 and **installed
+    to `/opt/vcpkg_installed`** inside the image: irrlicht, openal-soft
+    (overlay-pinned 1.23.1), libvorbis, fmt, glew, gtest, rapidcheck, alsa,
+    bzip2, libjpeg-turbo, libogg, libpng, opengl, zlib, and all transitive deps
+  - `ENV VCPKG_INSTALLED_DIR=/opt/vcpkg_installed` — advertises the pre-installed
+    path so CI jobs can pass `-DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed` to cmake;
+    vcpkg then finds all packages already present and skips recompilation entirely.
+    **Note**: a binary cache (`--binarysource`) is NOT used because the ABI hash
+    vcpkg computes during the Docker build (different `$HOME`, no ccache launcher)
+    differs from the hash computed inside the CI container job, causing cache misses.
+    The pre-installed directory approach is hash-independent and always works.
   - **Excluded**: Claude Code, zsh/fzf/delta, compressonator, Powerline10k,
     scrot, man-db, Node.js, `DEVCONTAINER=true` — devcontainer-only tooling
     is never in the CI image
@@ -120,10 +127,12 @@ vcpkg binary cache, and CMake version are used in both contexts.
 
   - **Remove** the "Install system dependencies" `apt-get install` step
   - **Remove** the "Install Pillow" `pip install Pillow` step
-  - **Remove** `lukka/run-vcpkg` step (vcpkg binary cache is in the image)
+  - **Remove** `lukka/run-vcpkg` step (vcpkg packages are pre-installed in the image)
   - **Remove** `mutagen` `pip install` step (pre-installed in image)
+  - Pass `-DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed` to the cmake configure step
+    so vcpkg finds all packages already present and skips recompilation
   - Retain `hendrikmuhs/ccache-action` — it caches compiled project source
-    (`src/`) per-PR, which is separate from the vcpkg binary cache
+    (`src/`) per-PR, which is separate from vcpkg package installation
   - Retain the GCC version detect step (writes to `$GITHUB_ENV` before
     `actions/cache` — ordering constraint still applies per CLAUDE.md)
   - Add the following complete job-level permissions block to both `build-linux`
@@ -311,8 +320,11 @@ project's existing `uses: action@<40-char-SHA>` pinning for GitHub Actions.
   Fixes applied before success: added `autoconf automake libtool` (required by
   vcpkg alsa port), added `zip unzip tar` (required by bootstrap-vcpkg.sh), and
   quoted `--binarysource` semicolon to prevent shell splitting ✓
-- Real image digest pinned in both files (Atomicity Contract item 5):
-  `ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:536a408ad39aad3322f7c7eae3e3ce08131a31bea80607aaa4e28344a0a5e7f8` ✓
+- **Binary cache strategy replaced**: initial approach used `--binarysource` files
+  provider; ABI hash mismatch between Docker build context and CI container job
+  caused vcpkg to rebuild all packages from source. Switched to installing packages
+  directly to `/opt/vcpkg_installed` and passing `-DVCPKG_INSTALLED_DIR` to cmake.
+  Image rebuild required — digest will be updated after new build succeeds.
 - xvfb-run spike validated: `test-container-xvfb` job in CI run 23112310656
   (develop, 2026-03-15): 8/8 requires-opengl tests passed inside container via
   `xvfb-run --auto-servernum`, 100% pass rate, 0.44 s total ✓
