@@ -7,7 +7,8 @@ ARG VCPKG_COMMIT
 # Install system dependencies in one RUN layer to keep the image lean.
 # Packages included:
 #   build tools:   git, curl, wget, ca-certificates, zip, unzip, tar, jq, pkg-config,
-#                  build-essential, ccache, ninja-build, gcc-13, g++-13
+#                  build-essential, ccache, ninja-build, gcc-13, g++-13,
+#                  autoconf, automake, libtool (required by vcpkg alsa port)
 #   CI runtime:    xvfb, xauth, libgl1-mesa-dev, mesa-utils, libglu1-mesa-dev,
 #                  libxxf86vm-dev, libx11-dev, libxext-dev, libglew-dev,
 #                  libasound2-dev, libpulse-dev, lcov
@@ -27,6 +28,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ninja-build \
     gcc-13 \
     g++-13 \
+    autoconf \
+    automake \
+    libtool \
     xvfb \
     xauth \
     libgl1-mesa-dev \
@@ -82,14 +86,14 @@ COPY vcpkg.json /build/vcpkg.json
 
 # Pre-populate the vcpkg binary cache for all declared ports and their transitive deps.
 # --x-install-root: manifest-mode install root inside the build context (not /opt/vcpkg).
-# --binarysource=clear;files,/root/.cache/vcpkg,readwrite: populate the binary cache at
-#   /root/.cache/vcpkg — this is the same path that actions/cache restores in ci.yml,
-#   so a cache hit skips the compilation layer entirely on CI runners that use this image.
+# --binarysource: populate the binary cache at /root/.cache/vcpkg — this is the same path
+#   that actions/cache restores in ci.yml, so a cache hit skips compilation on CI runners.
+# NOTE: the semicolon in --binarysource must be quoted to prevent shell splitting.
 RUN cd /build && /opt/vcpkg/vcpkg install \
       --triplet x64-linux \
       --overlay-ports=/build/vcpkg-overlays \
       --x-install-root=/build/vcpkg_installed \
-      --binarysource=clear;files,/root/.cache/vcpkg,readwrite
+      "--binarysource=clear;files,/root/.cache/vcpkg,readwrite"
 
 # Force Mesa software rendering (llvmpipe) — no GPU hardware in container.
 ENV LIBGL_ALWAYS_SOFTWARE=1
