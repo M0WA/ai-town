@@ -106,7 +106,7 @@ jobs:
       # Hard-fail on core Phase 10 audio assets that must be present before build.
       # This catches cases where an asset file was accidentally deleted or never committed.
       # Assets checked: sfx_build_place.wav, sfx_build_demolish.wav,
-      #   stinger_milestone.ogg, ambient_day.ogg, sfx_zone_residential.ogg.
+      #   stinger_milestone.ogg, ambient_day.ogg, sfx_zone_residential.ogg, sfx_zone_commercial.ogg, sfx_zone_industrial.ogg.
       # NOTE: stinger_*.wav are WAV per manifest; stinger_milestone here checks .ogg
       # in case a sidecar was intended — if stinger_milestone ships as .wav only,
       # this check is updated to .wav. Per phase-10.md, stingers are WAV PCM.
@@ -123,7 +123,9 @@ jobs:
             assets/audio/sfx_build_demolish.wav \
             assets/audio/stinger_milestone.wav \
             assets/audio/ambient_day.ogg \
-            assets/audio/sfx_zone_residential.ogg; do
+            assets/audio/sfx_zone_residential.ogg \
+            assets/audio/sfx_zone_commercial.ogg \
+            assets/audio/sfx_zone_industrial.ogg; do
             if [ ! -f "$asset" ]; then
               echo "ERROR: $asset not found — Phase 10 audio asset missing."
               failed=1
@@ -449,7 +451,9 @@ jobs:
             "assets/audio/sfx_build_demolish.wav",
             "assets/audio/stinger_milestone.wav",
             "assets/audio/ambient_day.ogg",
-            "assets/audio/sfx_zone_residential.ogg"
+            "assets/audio/sfx_zone_residential.ogg",
+            "assets/audio/sfx_zone_commercial.ogg",
+            "assets/audio/sfx_zone_industrial.ogg"
           )
           $failed = $false
           foreach ($asset in $assets) {
@@ -782,7 +786,9 @@ jobs:
             assets/audio/sfx_build_demolish.wav \
             assets/audio/stinger_milestone.wav \
             assets/audio/ambient_day.ogg \
-            assets/audio/sfx_zone_residential.ogg; do
+            assets/audio/sfx_zone_residential.ogg \
+            assets/audio/sfx_zone_commercial.ogg \
+            assets/audio/sfx_zone_industrial.ogg; do
             if [ ! -f "$asset" ]; then
               echo "ERROR: $asset not found — Phase 10 audio asset missing."
               failed=1
