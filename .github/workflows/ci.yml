@@ -1343,7 +1343,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     container:
-      image: ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:536a408ad39aad3322f7c7eae3e3ce08131a31bea80607aaa4e28344a0a5e7f8
+      image: ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:bbb9992436b58871c1c2fc1935c29897698f8da20a11e8aee73f73cde785b833
       options: --user root
     permissions:
       packages: read
@@ -1353,7 +1353,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
       - name: Configure CMake (preset ci-linux)
-        run: cmake --preset ci-linux
+        # VCPKG_INSTALLED_DIR points cmake at the packages pre-installed in the Docker
+        # image, so vcpkg finds them all already present and skips recompilation.
+        run: cmake --preset ci-linux -DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed
       - name: Build
         run: cmake --build build --parallel
       - name: Run requires-opengl tests via xvfb-run
