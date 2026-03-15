@@ -1349,6 +1349,12 @@ jobs:
       packages: read
       checks: write
       contents: read
+    env:
+      # Tell vcpkg to read from the pre-built binary cache baked into the Docker
+      # image at /root/.cache/vcpkg (files provider, read-only).  Without this,
+      # vcpkg falls back to the default provider which expands ~ as /github/home
+      # inside a container job and finds nothing, rebuilding all ports from source.
+      VCPKG_BINARY_SOURCES: "clear;files,/root/.cache/vcpkg,read"
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
