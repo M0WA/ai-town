@@ -994,11 +994,16 @@ jobs:
       - name: Generate coverage report
         run: |
           BUILD_DIR=build
+          # --gcov-tool gcov-13: the Dockerfile installs gcc-13/g++-13 but does not
+          # set up a gcov alternative, so the default gcov resolves to gcov-14 on
+          # Debian trixie. gcov-14 cannot read .gcda files produced by GCC 13 (version
+          # mismatch). Explicitly passing gcov-13 matches the compiler used for the build.
           # --ignore-errors mismatch: GCC 13 geninfo produces "mismatched end line"
           # errors for inline functions and lambdas in headers (e.g. GTest macros).
           # This is a known lcov/GCC 13 compatibility issue; the mismatch is benign
           # and does not affect coverage accuracy.
-          lcov --capture --directory "${BUILD_DIR}" --base-directory ${{ github.workspace }} \
+          lcov --capture --directory "${BUILD_DIR}" --base-directory . \
+               --gcov-tool gcov-13 \
                --ignore-errors mismatch \
                --output-file coverage.info
           # --ignore-errors unused: lcov 2.x treats any --remove pattern that matches
