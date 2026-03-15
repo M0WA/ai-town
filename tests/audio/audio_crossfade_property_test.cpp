@@ -17,6 +17,10 @@
 
 namespace {
 
+// Use a portable constexpr pi instead of M_PI (not guaranteed by C++ standard).
+#ifndef M_PI
+constexpr double M_PI = 3.14159265358979323846;
+#endif
 constexpr float kPi = static_cast<float>(M_PI);
 
 // Constant-power crossfade gain curves (dynamic-soundscape.md):
