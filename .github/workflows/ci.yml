@@ -1353,9 +1353,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
       - name: Configure CMake (preset ci-linux)
-        # VCPKG_INSTALLED_DIR points cmake at the packages pre-installed in the Docker
-        # image, so vcpkg finds them all already present and skips recompilation.
-        run: cmake --preset ci-linux -DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed
+        # Point cmake at the pre-installed packages in the Docker image.
+        # VCPKG_MANIFEST_INSTALL=OFF skips the vcpkg install call entirely so cmake
+        # uses the packages already at /opt/vcpkg_installed without any compilation.
+        run: cmake --preset ci-linux -DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed -DVCPKG_MANIFEST_INSTALL=OFF
       - name: Build
         run: cmake --build build --parallel
       - name: Run requires-opengl tests via xvfb-run
