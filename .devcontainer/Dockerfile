@@ -1,6 +1,6 @@
 # CI base image — extends ghcr.io/m0wa/aitown-ci-linux.
 # Both this file and ci.yml MUST pin identical digests (Atomicity Contract item 5).
-FROM ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:b85b637272ea6931563fb6de7f837d0ecf44118393325e9a24770b9f09b0c001
+FROM ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:47a126685d4cf37593b56bc05d3224050d0f049158a6bbefe93b305c8b638093
 
 ARG TZ
 ENV TZ="$TZ"
