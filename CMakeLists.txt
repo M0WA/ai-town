@@ -726,6 +726,7 @@ target_sources(audio_tests PRIVATE
     tests/audio/stinger_milestone_test.cpp
     tests/audio/audio_stream_bar_boundary_test.cpp
     tests/audio/notification_sfx_efx_bypass_test.cpp
+    tests/audio/audio_crossfade_property_test.cpp  # Phase 10: rc::check property tests (constant-power invariant, t_offset bounds, monotonicity)
 )
 target_link_libraries(audio_tests PRIVATE
     aitown_audio
@@ -765,19 +766,6 @@ target_sources(audio_tests PRIVATE
     tests/audio/volume_control_test.cpp
 )
 
-# Phase 10: extend audio_tests with crossfade, stinger milestone, bar-boundary, and EFX bypass tests.
-# Do NOT call add_executable(audio_tests ...) or aitown_add_tests(audio_tests ...) again —
-# duplicate target registration causes a CMake configure error.
-# Four source files; audio_stream_bar_boundary_test.cpp contributes two test cases
-# (AudioStream_BarBoundary_UsesConsistentBuffersQueuedPerWake and
-#  AudioStream_BarBoundary_StreamStart_NoFalseFire) — five test cases total across four files.
-target_sources(audio_tests PRIVATE
-    tests/audio/crossfade_interrupted_formula_test.cpp
-    tests/audio/stinger_milestone_test.cpp
-    tests/audio/audio_stream_bar_boundary_test.cpp
-    tests/audio/notification_sfx_efx_bypass_test.cpp
-)
-
 # Copy default.mhr (OpenAL Soft HRTF data) next to audio_tests binary.
 # Required when audio_tests runs on a machine with real AL hardware (HRTF init).
 # On machines without AL hardware, audio_tests uses MockAlcFunctions (no device opened).
@@ -787,19 +775,6 @@ add_custom_command(TARGET audio_tests POST_BUILD
         "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
         "$<TARGET_FILE_DIR:audio_tests>/default.mhr"
     COMMENT "Copying default.mhr (OpenAL Soft HRTF data) next to audio_tests"
-)
-
-# ----------------------------------------------------------------------------
-# Phase 10 audio test sources — added via target_sources to avoid duplicate
-# add_executable (which would be a CMake error on an already-defined target).
-# Per architecture/testing/testability-architecture.md shared-mock pattern:
-# tests/simulation/ is already on audio_tests include path for MockAudioSystem.
-# ----------------------------------------------------------------------------
-target_sources(audio_tests PRIVATE
-    tests/audio/crossfade_interrupted_formula_test.cpp    # Phase 10: interrupted crossfade arccos formula
-    tests/audio/stinger_milestone_test.cpp                # Phase 10: stinger fires only on CityRating transition
-    tests/audio/audio_stream_bar_boundary_test.cpp        # Phase 10: bar-boundary read-order and stream-start guard
-    tests/audio/notification_sfx_efx_bypass_test.cpp      # Phase 10: EFX bypass for non-positional notification SFX
 )
 
 # ----------------------------------------------------------------------------

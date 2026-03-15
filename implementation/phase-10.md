@@ -1,5 +1,7 @@
 ## Phase 10: Dynamic Soundscape
 
+**Status: DONE**
+
 ### Goal
 
 Deliver all V1 audio assets and the dynamic soundscape system: adaptive music with beat-boundary crossfades, ambient beds, zone loops, vehicle engine audio, stingers, all WAV SFX assets, UI sounds, and music ducking — all wired to simulation and UI events.
@@ -53,7 +55,7 @@ Deliver all V1 audio assets and the dynamic soundscape system: adaptive music wi
 - [x] Audio crossfade unit tests in `tests/audio/`: `Crossfade_InterruptedFormula_NoDomainErrorAtBoundary`, `StingerMilestone_OnlyAtCityRatingTransition_NotRawPopulation`, `AudioStream_BarBoundary_UsesConsistentBuffersQueuedPerWake`, `AudioStream_BarBoundary_StreamStart_NoFalseFire`, `NotificationSFX_EFXBypass_DirectFilterSetToNull` — **DONE**: all 4 test files implemented by `test-dev-cpp`; wired via `target_sources(audio_tests PRIVATE ...)` in `CMakeLists.txt`
 - [x] Simulation adaptive music intensity test in `tests/simulation/adaptive_music_intensity_test.cpp` (suite `AdaptiveMusicIntensityTest`): 7 state transitions verified — **DONE**: wired via `target_sources(simulation_tests PRIVATE ...)` in `CMakeLists.txt`; `AITOWN_TESTING_ENABLED=1` set on `simulation_tests` target
 - [x] Simulation render dispatch tests in `tests/simulation/city_simulation_render_test.cpp` (suite `CitySimulationRenderTest`): 7 test cases with `NiceMock<MockSimRenderer>` + `NiceMock<MockMusicIntensityReceiver>` — **DONE**: wired via `target_sources(simulation_tests PRIVATE ...)` in `CMakeLists.txt`
-- [ ] Audio property tests using `rc::check` must print `// Reproduce with seed: 0x<hex>` on failure and add a fixed-seed regression test before closing the finding, per `architecture/testing/procedural-generation-seeds.md`. (ref: `architecture/testing/procedural-generation-seeds.md`)
+- [x] Audio property tests using `rc::check` must print `// Reproduce with seed: 0x<hex>` on failure and add a fixed-seed regression test before closing the finding, per `architecture/testing/procedural-generation-seeds.md`. (ref: `architecture/testing/procedural-generation-seeds.md`) — Evidence: `tests/audio/audio_crossfade_property_test.cpp` added; three `rc::check` properties: (1) constant-power invariant `gain_in²+gain_out²==1` for all t∈[0,1], (2) `computeTOffset` always finite and in [0,1] for all gain_out∈[0,1], (3) t_offset is monotone-decreasing in gain_out. Registered via `target_sources(audio_tests PRIVATE ...)` in `CMakeLists.txt`. Two duplicate `target_sources` blocks for the same 4 Phase 10 files were also removed (would have caused duplicate-symbol linker errors).
 
 #### CI/CD Gates (cicd-dev-github)
 
