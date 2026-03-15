@@ -79,21 +79,20 @@ ENV VCPKG_ROOT=/opt/vcpkg
 ENV VCPKG_DISABLE_METRICS=1
 ENV PATH=$PATH:/opt/vcpkg
 
-# Copy vcpkg overlay ports and manifest so we can pre-populate the binary cache.
+# Copy vcpkg overlay ports and manifest and pre-install all declared ports.
 # The openal-soft overlay pins version 1.23.1 (avoids <format> GCC-12 requirement).
+# Packages are installed to /opt/vcpkg_installed — a stable path baked into the image.
+# CI jobs set -DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed so cmake finds all packages
+# already installed and skips recompilation entirely, regardless of ABI hash differences
+# between the image build context and the runner environment.
 COPY vcpkg-overlays/ /build/vcpkg-overlays/
 COPY vcpkg.json /build/vcpkg.json
-
-# Pre-populate the vcpkg binary cache for all declared ports and their transitive deps.
-# --x-install-root: manifest-mode install root inside the build context (not /opt/vcpkg).
-# --binarysource: populate the binary cache at /root/.cache/vcpkg — this is the same path
-#   that actions/cache restores in ci.yml, so a cache hit skips compilation on CI runners.
-# NOTE: the semicolon in --binarysource must be quoted to prevent shell splitting.
 RUN cd /build && /opt/vcpkg/vcpkg install \
       --triplet x64-linux \
       --overlay-ports=/build/vcpkg-overlays \
-      --x-install-root=/build/vcpkg_installed \
-      "--binarysource=clear;files,/root/.cache/vcpkg,readwrite"
+      --x-install-root=/opt/vcpkg_installed
+
+ENV VCPKG_INSTALLED_DIR=/opt/vcpkg_installed
 
 # Force Mesa software rendering (llvmpipe) — no GPU hardware in container.
 ENV LIBGL_ALWAYS_SOFTWARE=1
