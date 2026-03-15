@@ -1,4 +1,6 @@
 .claude/settings.local.json
+.claude/*.lock
+.claude/worktrees
 .env
 .fetchcontent_cache/
 /build*/
