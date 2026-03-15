@@ -1,5 +1,13 @@
 .claude/settings.local.json
+.claude/*.lock
+.claude/worktrees
 .env
 .fetchcontent_cache/
 /build*/
+/coverage*
 __pycache__
+# UI sprite sheet intermediates — authoring artifact only, never committed
+assets/textures/ui/hud_sprites_ui.dds
+assets/textures/ui/hud_sprites_ui_layout.json
+# Crossfade demo renders — QA/dev output, not runtime assets
+assets/audio/crossfade_demos/

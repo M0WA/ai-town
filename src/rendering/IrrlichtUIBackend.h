@@ -17,22 +17,27 @@
 
 // IUIBackend.h — UIElementHandle, kInvalidUIElement, Rect, IUIBackend.
 // MUST be first: Rect must be a complete type before the override declaration.
-#include "src/ui/IUIBackend.h"
+#include "src/interfaces/IUIBackend.h"
 
 #include <string>
 #include <cstdint>
 #include <unordered_map>
 
-// Forward declarations for Irrlicht types used only in private members.
-// Full definitions are provided by <irrlicht.h> in IrrlichtUIBackend.cpp.
+// Forward declarations for Irrlicht types used only in private members and
+// public method signatures.  Full definitions are provided by <irrlicht.h>
+// in IrrlichtUIBackend.cpp.
 namespace irr {
     class IrrlichtDevice;
-    namespace gui  { class IGUIEnvironment; class IGUIElement; }
+    struct SEvent;                              // used in handleGuiHoverEvent signature
+    namespace gui  { class IGUIEnvironment; class IGUIElement; class IGUIFont; }
     namespace video { class IVideoDriver; class ITexture; }
 }  // namespace irr
 
-// IrrlichtUIBackend — Full Irrlicht-backed implementation of all 17 IUIBackend
+// IrrlichtUIBackend — Full Irrlicht-backed implementation of all 21 IUIBackend
 // pure-virtual methods. Phase 8 deliverable replacing Phase 1 stubs.
+// Method 18 (setElementBackground) added in Phase 9b.
+// Method 19 (setElementMonoFont) added in Phase 10.
+// Method 21 (setElementTextColor) added in Phase 10c.
 //
 // Constructor: takes irr::IrrlichtDevice* (non-null, asserted in the .cpp) and
 // a pre-cached maxAnisotropy value from RenderSystem (1.0f when extension absent).
@@ -61,8 +66,33 @@ public:
     // Not part of IUIBackend — concrete method on IrrlichtUIBackend only.
     void handleViewportResize();
 
+    // Handle Irrlicht GUI hover events (EGET_ELEMENT_HOVERED / EGET_ELEMENT_LEFT) to
+    // swap button sprite cells for hover visual feedback.  Must be called from
+    // EventReceiver::OnEvent() for all EET_GUI_EVENT events.  Always returns false
+    // so Irrlicht continues its own GUI handling (tooltips, focus).
+    // Defined in IrrlichtUIBackend.cpp — full Irrlicht types available there.
+    // Forward-declared here using forward-declared irr::SEvent — the .cpp includes
+    // <irrlicht.h> which provides the complete type.
+    // Not part of IUIBackend — internal rendering concern.
+    bool handleGuiHoverEvent(const irr::SEvent& event);
+
+    // Return the monospace font loaded from assets/fonts/hud_mono_font.xml.
+    // Used by HUD and panel code to call element->setOverrideFont(getMonoFont())
+    // on numeric IGUIStaticText elements (treasury balance, population count,
+    // tax rate fields, monthly revenue/expense, density unlock progress).
+    // Returns nullptr when hud_mono_font.xml was absent at construction time;
+    // callers must null-check before calling setOverrideFont().
+    // Not part of IUIBackend — concrete backend detail on IrrlichtUIBackend only.
+    irr::gui::IGUIFont* getMonoFont() const { return m_monoFont; }
+
     // -------------------------------------------------------------------------
-    // IUIBackend overrides — 17 methods
+    // IUIBackend overrides — 19 methods
+    // Methods 1–16: core element creation, text, visibility, alpha, image, rect,
+    //               screen dimensions, virtual dimensions, texture load.
+    // Method 17: loadTexture
+    // Method 18: setElementBackground  (Phase 9b)
+    // Method 19: setElementMonoFont    (Phase 10)
+    // Method 21: setElementTextColor   (Phase 10c)
     // -------------------------------------------------------------------------
 
     // 1.
@@ -122,10 +152,34 @@ public:
     //     r, g, b, a in [0, 255]. Has no visible effect on button elements.
     void setElementBackground(UIElementHandle handle, int r, int g, int b, int a) override;
 
+    // 19. Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element.
+    //     Calls IGUIStaticText::setOverrideFont(m_monoFont). No-op when m_monoFont is null
+    //     (font absent or headless CI mode) — graceful fallback, no assert.
+    //     Labels, button text, and panel titles MUST NOT call this method.
+    void setElementMonoFont(UIElementHandle handle) override;
+
+    // 20. Reposition and resize an existing element in virtual coordinate space.
+    //     Updates the stored virtualRect and calls setRelativePosition() with scaled
+    //     physical pixel coordinates. Preserves all other element state.
+    void setElementRect(UIElementHandle handle,
+                        int x, int y, int w, int h) override;
+
+    // 21. Override the text colour of a static text element (amber numerics, etc.).
+    //     Calls IGUIStaticText::setOverrideColor(SColor(255, r, g, b)).
+    //     No-op on button elements or invalid handles.
+    void setElementTextColor(UIElementHandle handle, int r, int g, int b) override;
+
 private:
     irr::IrrlichtDevice*       m_device{nullptr};
     irr::gui::IGUIEnvironment* m_guiEnv{nullptr};
     irr::video::IVideoDriver*  m_driver{nullptr};
+
+    // Monospace bitmap font loaded from assets/fonts/hud_mono_font.xml.
+    // null when the file is absent; callers must null-check before use.
+    // Ownership: Irrlicht's IGUIEnvironment owns the font object; this is a
+    // non-owning observing pointer (do NOT call drop() on it).
+    // Exposed via getMonoFont() for HUD and panel code to apply via setOverrideFont().
+    irr::gui::IGUIFont* m_monoFont{nullptr};
 
     // Sprite sheet texture loaded from hud_sprites_ui.png.
     // Used by setElementImage() to assign per-button images via IGUIButton::setImage().

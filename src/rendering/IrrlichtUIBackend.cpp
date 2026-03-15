@@ -14,6 +14,8 @@
 #include <GL/glew.h>                          // MUST come before irrlicht.h
 #include <irrlicht.h>                          // full Irrlicht types
 
+#include "src/ui/hud_sprite_ids.h"            // kSpriteXxxHover / Active / Inactive constants
+
 #include <cassert>
 #include <fstream>
 #include <sstream>
@@ -251,6 +253,39 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
                 "FontTool or any compatible bitmap font generator (recommended: 18px).\n");
         }
     }
+
+    // --- Load monospace bitmap font for numeric HUD elements ---
+    //
+    // hud_mono_font.xml is a monospace face applied selectively to numeric
+    // IGUIStaticText elements (treasury balance, population count, tax rate
+    // fields, monthly revenue/expense, density unlock progress) via
+    // element->setOverrideFont(getMonoFont()) after addStaticText().
+    //
+    // Rationale: a monospace face applied to numeric readouts prevents layout
+    // jitter as digits change (e.g. "1,000" vs "9,000"), while keeping
+    // proportional hud_font.xml for labels and panel titles (better legibility
+    // at small sizes in compact panels such as Query/Inspector and Tax Rate).
+    //
+    // Graceful degradation: if the file is absent the environment default
+    // (hud_font.xml, or the built-in 8px font if that also failed) is retained
+    // for numeric elements; a warning is emitted but the game continues.
+    // Callers of getMonoFont() must null-check before calling setOverrideFont().
+    {
+        irr::gui::IGUIFont* monoFont =
+            m_guiEnv->getFont("assets/fonts/hud_mono_font.xml");
+        if (monoFont) {
+            m_monoFont = monoFont;
+            // IGUIEnvironment::getFont() caches fonts internally — the returned
+            // pointer is owned by the environment; do NOT call grab() or drop().
+        } else {
+            fprintf(stderr,
+                "[IrrlichtUIBackend] WARNING: assets/fonts/hud_mono_font.xml not found — "
+                "falling back to default font for numeric HUD elements. "
+                "Treasury balance, population count, and tax rate fields will use "
+                "the proportional font until hud_mono_font.xml is placed at "
+                "assets/fonts/hud_mono_font.xml.\n");
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +367,12 @@ UIElementHandle IrrlichtUIBackend::addStaticText(
     if (!elem) {
         return kInvalidUIElement;
     }
+
+    // Phase 10c Glass City Colour Pass: default static text colour is near-white #EBF4F6.
+    // Irrlicht's IGUIStaticText::setOverrideColor() sets the text colour for all states.
+    // This establishes the baseline; callers may override for specific roles (amber numerics,
+    // mid-blue sub-labels) by calling setOverrideColor() on the returned element directly.
+    elem->setOverrideColor(irr::video::SColor(255, 235, 244, 246));
 
     UIElementHandle handle = m_nextHandle++;
     m_elementMap[handle] = ElementInfo{elem, Rect{x, y, w, h}};
@@ -521,62 +562,20 @@ void IrrlichtUIBackend::setElementAlpha(UIElementHandle handle, float alpha)
 // ---------------------------------------------------------------------------
 static irr::core::rect<irr::s32> spriteRectForIndex(uint32_t id)
 {
-    // Toolbar icons — row 0, y=0, 48×48 px, 56px column spacing
-    //   (icon_tool_zone=0, road=1, utilities=2, demolish=3, query=4)
+    // Toolbar icons — 64×64 px, 64px column spacing.
+    // Active (IDs 0-4) at y=0; inactive (IDs 32-36) at y=64.
     if (id <= 4u) {
-        const irr::s32 x = static_cast<irr::s32>(id) * 56;
-        return irr::core::rect<irr::s32>(x, 0, x + 48, 48);
+        const irr::s32 x = static_cast<irr::s32>(id) * 64;
+        return irr::core::rect<irr::s32>(x, 0, x + 64, 64);
     }
-    // Toolbar icons — inactive variants (row 1 encoding, same visual as row 0)
     if (id >= 32u && id <= 36u) {
-        const irr::s32 x = static_cast<irr::s32>(id - 32u) * 56;
-        return irr::core::rect<irr::s32>(x, 0, x + 48, 48);
+        const irr::s32 x = static_cast<irr::s32>(id - 32u) * 64;
+        return irr::core::rect<irr::s32>(x, 64, x + 64, 128);
     }
-    // Zone sub-panel patterns — 64×64, row 4 (y=256) from layout JSON
-    //   Res (id%3==0), Com (id%3==1), Ind (id%3==2)
-    //   Active:   64–72 (row 2 in spec)
-    //   Inactive: 96–104 (row 3 in spec)
-    if ((id >= 64u && id <= 72u) || (id >= 96u && id <= 104u)) {
-        // Zone type determined by position within the 3-wide columns:
-        //   active:   col = (id - 64) % 3   →  id=64→0(Res), 65→1(Com), 66→2(Ind)
-        //   inactive: col = (id - 96) % 3
-        const uint32_t base = (id <= 72u) ? 64u : 96u;
-        const int zoneCol = static_cast<int>((id - base) % 3u);
-        // JSON: residential=(0,256,64,64), commercial=(72,256,64,64), industrial=(144,256,64,64)
-        const irr::s32 xOffsets[3] = {0, 72, 144};
-        const irr::s32 x = xOffsets[zoneCol];
-        return irr::core::rect<irr::s32>(x, 256, x + 64, 320);
-    }
-    // Utilities patterns — 64×64, row 5 (y=320)
-    //   Active:   128–131  (Power=128, Water=129, Fire=130, Police=131)
-    //   Inactive: 160–163
-    if ((id >= 128u && id <= 131u) || (id >= 160u && id <= 163u)) {
-        const uint32_t base = (id <= 131u) ? 128u : 160u;
-        const int t = static_cast<int>(id - base);
-        // JSON: fire=(0,320,64,64), police=(72,320,64,64), power=(144,320,64,64), water=(216,320,64,64)
-        // Our order: Power=0, Water=1, Fire=2, Police=3
-        // Map to JSON x positions:
-        const irr::s32 xOffsets[4] = {144, 216, 0, 72};  // Power, Water, Fire, Police
-        const irr::s32 x = xOffsets[t];
-        return irr::core::rect<irr::s32>(x, 320, x + 64, 384);
-    }
-    // Notification bell — JSON icon_bell: (56, 64, 48, 48)
-    if (id == 320u) {
-        return irr::core::rect<irr::s32>(56, 64, 104, 112);
-    }
-    // Clock icon — JSON icon_clock_grace: (64, 384, 16, 16)
-    if (id == 321u) {
-        return irr::core::rect<irr::s32>(64, 384, 80, 400);
-    }
-    // Unsaved dot — JSON dot_unsaved_changes: (40, 384, 16, 16)
-    if (id == 322u) {
-        return irr::core::rect<irr::s32>(40, 384, 56, 400);
-    }
-    // Undo icon — JSON icon_undo: (0, 64, 48, 48)
-    if (id == 323u) {
-        return irr::core::rect<irr::s32>(0, 64, 48, 112);
-    }
-    // Default: return a 64×64 cell using uniform grid as last-resort fallback.
+    // All remaining IDs use the standard 64×64 grid — col = id % 32, row = id / 32.
+    // The generator places every icon at (col * 64, row * 64) with no exceptions.
+    // See architecture/asset-standards/2d-texture-standards.md "Sprite ID Encoding and
+    // Row-Conflict Pitfall" for a history of past bugs caused by wrong special cases here.
     const irr::s32 col = static_cast<irr::s32>(id % 32u);
     const irr::s32 row = static_cast<irr::s32>(id / 32u);
     return irr::core::rect<irr::s32>(col * 64, row * 64, col * 64 + 64, row * 64 + 64);
@@ -626,6 +625,9 @@ void IrrlichtUIBackend::setElementImage(UIElementHandle handle,
     // Assign the texture region to the button (all visual states).
     btn->setImage(m_spriteTexture, srcRect);
     btn->setPressedImage(m_spriteTexture, srcRect);
+    btn->setScaleImage(true);       // scale icon to fit button size (default is 1:1 pixel, which overflows)
+    btn->setUseAlphaChannel(true);  // enable PNG alpha channel (default is false = no transparency)
+    btn->setDrawBorder(false);      // hide Irrlicht skin background; icon provides its own background
 
     m_imageElementMap[handle] = spriteIndex;
 }
@@ -863,6 +865,104 @@ void IrrlichtUIBackend::setElementBackground(UIElementHandle handle,
 }
 
 // ---------------------------------------------------------------------------
+// 19. setElementMonoFont
+//
+// Applies the monospace bitmap font (loaded from hud_mono_font.xml at
+// construction) to an IGUIStaticText element via setOverrideFont().
+//
+// Guards:
+//   - No-op when the handle is invalid or not in m_elementMap.
+//   - No-op when the element is not EGUIET_STATIC_TEXT (buttons have their
+//     own font machinery; do not call this on button handles).
+//   - No-op when m_monoFont is null (font file absent at construction or
+//     running headless) — graceful fallback, no assert.
+//
+// MUST NOT be called on label text, button text, tooltips, or panel title
+// elements. Those use the proportional hud_font.xml set as the env default.
+// ---------------------------------------------------------------------------
+void IrrlichtUIBackend::setElementMonoFont(UIElementHandle handle)
+{
+    if (!m_monoFont) {
+        // Font absent (file missing at load time, or headless CI) — graceful no-op.
+        return;
+    }
+
+    auto it = m_elementMap.find(handle);
+    if (it == m_elementMap.end() || !it->second.element) {
+        return;
+    }
+
+    irr::gui::IGUIElement* elem = it->second.element;
+
+    // Only IGUIStaticText supports setOverrideFont().
+    if (elem->getType() != irr::gui::EGUIET_STATIC_TEXT) {
+        return;
+    }
+
+    static_cast<irr::gui::IGUIStaticText*>(elem)->setOverrideFont(m_monoFont);
+}
+
+// ---------------------------------------------------------------------------
+// 20. setElementRect
+// Repositions and resizes an existing element without destroying its handle.
+// Updates the stored virtualRect so that handleViewportResize() continues to
+// scale correctly, then immediately applies setRelativePosition() to reflect
+// the new coordinates at the current physical screen resolution.
+// ---------------------------------------------------------------------------
+void IrrlichtUIBackend::setElementRect(UIElementHandle handle,
+                                        int x, int y, int w, int h)
+{
+    auto it = m_elementMap.find(handle);
+    if (it == m_elementMap.end() || !it->second.element) {
+        return;
+    }
+
+    // Update the stored virtual rect so future resize handling stays correct.
+    it->second.virtualRect = Rect{x, y, w, h};
+
+    // Scale virtual coordinates to physical pixel coordinates.
+    const int sw = getScreenWidth();
+    const int sh = getScreenHeight();
+    const int vw = getVirtualWidth();   // 1920
+    const int vh = getVirtualHeight();  // 1080
+    const int px = (x * sw) / vw;
+    const int py = (y * sh) / vh;
+    const int pw = (w * sw) / vw;
+    const int ph = (h * sh) / vh;
+
+    it->second.element->setRelativePosition(
+        irr::core::rect<irr::s32>(px, py, px + pw, py + ph));
+}
+
+// ---------------------------------------------------------------------------
+// 21. setElementTextColor
+// Sets the override text colour on an IGUIStaticText element.
+// Used by HUD numeric readouts (treasury, debt, population, date) to apply
+// amber #F0B429 = SColor(255, 240, 180, 41) immediately after construction.
+// No-op on button elements and invalid handles.
+// ---------------------------------------------------------------------------
+void IrrlichtUIBackend::setElementTextColor(UIElementHandle handle, int r, int g, int b)
+{
+    auto it = m_elementMap.find(handle);
+    if (it == m_elementMap.end() || !it->second.element) {
+        return;
+    }
+
+    irr::gui::IGUIElement* elem = it->second.element;
+
+    // Only IGUIStaticText supports setOverrideColor().
+    if (elem->getType() != irr::gui::EGUIET_STATIC_TEXT) {
+        return;
+    }
+
+    static_cast<irr::gui::IGUIStaticText*>(elem)->setOverrideColor(
+        irr::video::SColor(255,
+            static_cast<irr::u32>(r),
+            static_cast<irr::u32>(g),
+            static_cast<irr::u32>(b)));
+}
+
+// ---------------------------------------------------------------------------
 // handleViewportResize
 // Detects screen size changes and repositions every GUI element so that its
 // physical pixel position matches its stored virtual coordinate at the new
@@ -893,4 +993,183 @@ void IrrlichtUIBackend::handleViewportResize()
         info.element->setRelativePosition(
             irr::core::rect<irr::s32>(px, py, px + pw, py + ph));
     }
+}
+
+// ---------------------------------------------------------------------------
+// handleGuiHoverEvent
+//
+// Handles EGET_ELEMENT_HOVERED and EGET_ELEMENT_LEFT GUI events to swap
+// button sprite cells for hover visual feedback.  Called from
+// EventReceiver::OnEvent() for all EET_GUI_EVENT events.
+//
+// Hover rules (per architecture/ui-ux/input-arbitration.md §Hover State Switching):
+//   EGET_ELEMENT_HOVERED: if NOT pressed, swap to kSpriteXxxHover cell.
+//                         if already pressed (active), skip — active sprite persists.
+//   EGET_ELEMENT_LEFT:    if pressed (active), restore kSpriteXxxActive cell.
+//                         if not pressed, restore kSpriteXxxInactive cell.
+//
+// Returns false always — hover events must never be consumed so that Irrlicht
+// can complete its own tooltip and focus handling.
+//
+// Implementation:
+//   1. Reverse-scan m_elementMap to find the UIElementHandle for the event Caller.
+//   2. Look up the currently-assigned sprite index in m_imageElementMap.
+//   3. Compute the hover/active/inactive ID from the current sprite using the
+//      known group offsets defined in hud_sprite_ids.h.
+//   4. Call IGUIButton::setImage() with the target sprite cell.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// ---------------------------------------------------------------------------
+// Sprite group helpers — compute variant IDs from any ID in a group.
+//
+// Groups and their state-ID ranges (from hud_sprite_ids.h):
+//   Toolbar: active 0-4, inactive 32-36, hover 37-41
+//   Zone:    active 64-72, inactive 96-104, hover 105-113
+//   Util:    active 128-131, inactive 160-163, hover 164-167
+//
+// For any given sprite ID, these helpers return the corresponding variant.
+// Returns kSpriteInvalid (UINT32_MAX) if the ID is not in a known hover group.
+// ---------------------------------------------------------------------------
+static constexpr uint32_t kSpriteInvalidId = UINT32_MAX;
+
+uint32_t getHoverId(uint32_t id) {
+    // Toolbar active 0-4 → hover 37-41 (offset +37)
+    if (id <= 4u)                     return id + 37u;
+    // Toolbar inactive 32-36 → hover 37-41 (offset +5)
+    if (id >= 32u && id <= 36u)       return id + 5u;
+    // Toolbar hover 37-41 → already hover
+    if (id >= 37u && id <= 41u)       return id;
+    // Zone active 64-72 → hover 105-113 (offset +41)
+    if (id >= 64u && id <= 72u)       return id + 41u;
+    // Zone inactive 96-104 → hover 105-113 (offset +9)
+    if (id >= 96u && id <= 104u)      return id + 9u;
+    // Zone hover 105-113 → already hover
+    if (id >= 105u && id <= 113u)     return id;
+    // Util active 128-131 → hover 164-167 (offset +36)
+    if (id >= 128u && id <= 131u)     return id + 36u;
+    // Util inactive 160-163 → hover 164-167 (offset +4)
+    if (id >= 160u && id <= 163u)     return id + 4u;
+    // Util hover 164-167 → already hover
+    if (id >= 164u && id <= 167u)     return id;
+    return kSpriteInvalidId;
+}
+
+uint32_t getActiveId(uint32_t id) {
+    // Toolbar active 0-4 → already active
+    if (id <= 4u)                     return id;
+    // Toolbar inactive 32-36 → active 0-4 (offset -32)
+    if (id >= 32u && id <= 36u)       return id - 32u;
+    // Toolbar hover 37-41 → active 0-4 (offset -37)
+    if (id >= 37u && id <= 41u)       return id - 37u;
+    // Zone active 64-72 → already active
+    if (id >= 64u && id <= 72u)       return id;
+    // Zone inactive 96-104 → active 64-72 (offset -32)
+    if (id >= 96u && id <= 104u)      return id - 32u;
+    // Zone hover 105-113 → active 64-72 (offset -41)
+    if (id >= 105u && id <= 113u)     return id - 41u;
+    // Util active 128-131 → already active
+    if (id >= 128u && id <= 131u)     return id;
+    // Util inactive 160-163 → active 128-131 (offset -32)
+    if (id >= 160u && id <= 163u)     return id - 32u;
+    // Util hover 164-167 → active 128-131 (offset -36)
+    if (id >= 164u && id <= 167u)     return id - 36u;
+    return kSpriteInvalidId;
+}
+
+uint32_t getInactiveId(uint32_t id) {
+    // Toolbar active 0-4 → inactive 32-36 (offset +32)
+    if (id <= 4u)                     return id + 32u;
+    // Toolbar inactive 32-36 → already inactive
+    if (id >= 32u && id <= 36u)       return id;
+    // Toolbar hover 37-41 → inactive 32-36 (offset -5)
+    if (id >= 37u && id <= 41u)       return id - 5u;
+    // Zone active 64-72 → inactive 96-104 (offset +32)
+    if (id >= 64u && id <= 72u)       return id + 32u;
+    // Zone inactive 96-104 → already inactive
+    if (id >= 96u && id <= 104u)      return id;
+    // Zone hover 105-113 → inactive 96-104 (offset -9)
+    if (id >= 105u && id <= 113u)     return id - 9u;
+    // Util active 128-131 → inactive 160-163 (offset +32)
+    if (id >= 128u && id <= 131u)     return id + 32u;
+    // Util inactive 160-163 → already inactive
+    if (id >= 160u && id <= 163u)     return id;
+    // Util hover 164-167 → inactive 160-163 (offset -4)
+    if (id >= 164u && id <= 167u)     return id - 4u;
+    return kSpriteInvalidId;
+}
+
+} // anonymous namespace
+
+bool IrrlichtUIBackend::handleGuiHoverEvent(const irr::SEvent& event)
+{
+    // Only handle GUI events — pass through everything else.
+    if (event.EventType != irr::EET_GUI_EVENT) {
+        return false;
+    }
+
+    const irr::gui::EGUI_EVENT_TYPE gevType = event.GUIEvent.EventType;
+    if (gevType != irr::gui::EGET_ELEMENT_HOVERED &&
+        gevType != irr::gui::EGET_ELEMENT_LEFT) {
+        return false;
+    }
+
+    // Must have a caller element.
+    irr::gui::IGUIElement* el = event.GUIEvent.Caller;
+    if (!el) return false;
+
+    // Only process IGUIButton elements.
+    // Use getType() instead of dynamic_cast to avoid RTTI issues across shared-library
+    // boundaries on some GPU/driver combinations (dynamic_cast on Irrlicht types can
+    // crash if typeinfo symbols are not uniquely resolved).
+    if (el->getType() != irr::gui::EGUIET_BUTTON) return false;
+    auto* btn = static_cast<irr::gui::IGUIButton*>(el);
+
+    // Sprite sheet must be loaded to do image swaps.
+    if (!m_spriteTextureReady || !m_spriteTexture) return false;
+
+    // Reverse-scan m_elementMap to find the UIElementHandle for this IGUIElement*.
+    UIElementHandle foundHandle = kInvalidUIElement;
+    for (const auto& [h, info] : m_elementMap) {
+        if (info.element == el) {
+            foundHandle = h;
+            break;
+        }
+    }
+    if (foundHandle == kInvalidUIElement) return false;
+
+    // Look up the currently-assigned sprite index.
+    auto imgIt = m_imageElementMap.find(foundHandle);
+    if (imgIt == m_imageElementMap.end()) return false;
+    const uint32_t currentSprite = imgIt->second;
+
+    if (gevType == irr::gui::EGET_ELEMENT_HOVERED) {
+        // Active (pressed) buttons must not have their image overridden by hover.
+        if (btn->isPressed()) return false;
+
+        uint32_t hoverId = getHoverId(currentSprite);
+        if (hoverId == kSpriteInvalidId) return false;
+
+        irr::core::rect<irr::s32> srcRect = spriteRectForIndex(hoverId);
+        btn->setImage(m_spriteTexture, srcRect);
+        btn->setScaleImage(true);
+        btn->setUseAlphaChannel(true);
+        btn->setDrawBorder(false);
+
+    } else {  // EGET_ELEMENT_LEFT
+        // Restore the registered base sprite (whatever setElementImage last set).
+        // currentSprite is the value stored in m_imageElementMap — the sprite shown
+        // before the hover began — which may be active OR inactive depending on
+        // whether the button was selected when the hover started.
+        // Do NOT map through getInactiveId(): that would always show the outline
+        // variant even for buttons initialized with an active (filled icon) sprite.
+        irr::core::rect<irr::s32> srcRect = spriteRectForIndex(currentSprite);
+        btn->setImage(m_spriteTexture, srcRect);
+        btn->setScaleImage(true);
+        btn->setUseAlphaChannel(true);
+        btn->setDrawBorder(false);
+    }
+
+    return false;  // Never consume hover events — Irrlicht must process them too.
 }

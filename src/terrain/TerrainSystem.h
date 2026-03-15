@@ -44,7 +44,7 @@
 
 #include "TerrainChunk.h"
 #include "terrain_types.h"
-#include "ITerrainRNG.h"
+#include "../interfaces/ITerrainRNG.h"
 
 // IClock — include full definition so test doubles (BudgetExhaustionClock) can subclass it.
 #include "../interfaces/IClock.h"
@@ -133,6 +133,15 @@ public:
     // No-op if m_generatedHeightmap is empty (generate() not yet called).
     void buildAllChunks();
 
+    // enqueueAllChunks() — register and enqueue all chunk LOD0 rebuilds WITHOUT
+    // flushing. Used by the Phase 11 loading-screen loop: call this after generate(),
+    // then drive flushPendingRebuilds() once per frame from the loading screen loop
+    // until pendingRebuildCount() reaches 0.
+    //
+    // buildAllChunks() = enqueueAllChunks() + flushPendingRebuilds().
+    // No-op if m_generatedHeightmap is empty (generate() not yet called).
+    void enqueueAllChunks();
+
     // ITerrainQuery implementation —
     // Returns slope in degrees at tile (tileX, tileZ) using the stored heightmap.
     // Returns 0.0f for out-of-bounds tiles or before generate() is called (flat stub).
@@ -147,6 +156,19 @@ public:
     // LOD contract: queries m_generatedHeightmap (LOD0), never active scene-node mesh.
     // (ref: architecture/graphics-architecture/procedural-terrain.md — Heightmap Query API)
     float getHeightAt(int tileX, int tileZ) const override;
+
+    // Sets the persistent LOD0 heightmap height at (tileX, tileZ) to height,
+    // applies weighted neighbour blending to the 8 surrounding tiles, and enqueues
+    // ChunkRebuildRequests for all affected chunks.
+    // Out-of-bounds coordinates are silently ignored.
+    // Cardinal neighbours (N/S/E/W) are lerped at factor 0.5; diagonal (NE/NW/SE/SW) at 0.25.
+    // (ref: architecture/graphics-architecture/procedural-terrain.md — setTileHeight Write Path)
+    void setTileHeight(int tileX, int tileZ, float height) override;
+
+    // Flush all pending terrain chunk rebuilds synchronously.
+    // Delegates to flushPendingRebuilds(). Called after setTileHeight in placement helpers
+    // to ensure terrain geometry is updated before the next render frame.
+    void flushTerrainRebuilds() override;
 
     // Accessors for testing.
     int  pendingRebuildCount() const { return static_cast<int>(m_rebuildDeque.size()); }

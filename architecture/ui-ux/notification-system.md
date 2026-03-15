@@ -29,6 +29,8 @@
 
     **Same-frame race condition — modal and CRITICAL toast activate together**: If a blocking modal and a CRITICAL toast both become active on the same frame (e.g., a forced-loan modal and a bankruptcy CRITICAL toast are enqueued in the same `update()` tick), the following rules apply in order:
 
+    **Explicit ordering rule**: `UIManager::showModal()` MUST call `m_notifications->setModalActive(true)` BEFORE calling `m_modal->open()` (or `m_modal->setPaused()`). This ensures `NotificationManager`'s `m_modalActive` flag is set before any auto-pause logic inside `ModalDialog::open()` can run. Reversing this order — calling `m_modal->open()` first — creates a window where `m_modalActive == false` while `ModalDialog` is already executing its open-path logic, allowing a CRITICAL toast's auto-pause call to fire when it should be suppressed, and producing an erroneous double-pause or incorrect `m_didPauseSim` state.
+
     1. The modal's auto-pause tracking takes precedence. If the simulation was running when the frame is processed, the modal's open path sets `m_didPauseSim = true` and calls `m_sim->setPaused(true)`. Before opening the modal, `UIManager::showModal()` (or the equivalent modal-open path) calls `m_notifications->setModalActive(true)`, so `NotificationManager` has `m_modalActive == true` by the time any CRITICAL toast auto-pause logic runs. The CRITICAL toast's own auto-pause call (`NotificationManager` transitioning from empty to non-empty queue) is **suppressed** because `m_modalActive == true` — `NotificationManager` checks its local `m_modalActive` flag before calling `setPaused(true)` and skips the call when the flag is set. This avoids double-pause calls and ensures the `m_didPauseSim` flag on the modal accurately reflects which subsystem initiated the pause. No UIManager reference is held by `NotificationManager`; the modal state is pushed in one direction only (UIManager → NotificationManager).
     2. The CRITICAL toast is held in the queue without being displayed (standard modal-hiding rule). No auto-pause side-effect fires from `NotificationManager` while the modal is active.
     3. After modal dismissal (`UIManager::closeModal()`), `closeModal()` calls `m_sim->setPaused(false)` only if `m_didPauseSim == true` (i.e., the modal was the entity that initiated the pause). Then `NotificationManager` re-evaluates: if the CRITICAL queue is non-empty **and** the simulation is not already paused (i.e., `m_sim->isPaused()` returns `false`), `NotificationManager` calls `m_sim->setPaused(true)`. If the simulation is already paused (e.g., the player manually paused before the modal appeared), `NotificationManager` does **not** call `setPaused(true)` — auto-pause is a no-op when the simulation is already paused.
@@ -43,6 +45,54 @@
     - Long notification messages that would overflow the toast body are stored in full in the notification log (bell icon) but displayed truncated with "…" in the toast. The `NotificationManager` must NOT allow toast body elements to exceed the max height; if text wraps beyond the allowed height, truncate and append "…".
   - Combined maximum height of both bands must not exceed 320 px (virtual) to prevent the stack from reaching center screen.
 - **Notification log**: Accessible via a bell/log icon in the HUD. See [Notification Log Panel](#notification-log-panel) below for full specification.
+
+## Visual Design — Glass City
+
+### Toast Backgrounds
+
+| Toast type | Background |
+|---|---|
+| CRITICAL toast | `rgba(13, 27, 42, 0.88)` with a 2 px left accent stripe `#F04E37` red |
+| Normal toast | `rgba(13, 27, 42, 0.82)` |
+
+The left accent stripe on CRITICAL toasts is a 2 px vertical bar on the left edge of the
+toast element, authored as a separate narrow element (or part of the toast background
+element) using the `#F04E37` error red. This provides an at-a-glance severity signal
+independent of the title text.
+
+Corner radius: **8 px** on all edges of each toast.
+
+### Toast Text
+
+| Content | Colour |
+|---|---|
+| CRITICAL toast title | `#EBF4F6` near-white |
+| CRITICAL toast body | `#EBF4F6` near-white |
+| Normal toast title | `#EBF4F6` near-white |
+| Normal toast body | `#EBF4F6` near-white |
+| Dismiss affordance label (click / Enter / Delete) | `#4A7FA5` mid-blue |
+
+### Notification Log Panel Background
+
+The log panel uses the Glass City deep-navy style:
+
+- `setElementBackground(handle, 13, 27, 42, 217)` (alpha 217 ≈ 0.85 × 255)
+
+### CRITICAL Toast Row Priority Badge
+
+In the notification log panel, CRITICAL entries use the Glass City error colour:
+
+- Priority badge: `#F04E37` red background with `#EBF4F6` near-white text
+- Normal entries: no badge; text in `#EBF4F6`
+
+### Notification Bell Icon
+
+The notification bell icon follows the Glass City icon state spec:
+
+- **Inactive (no unread)**: outlined 2 px stroke bell at 65% opacity
+- **Active / unread badge present**: filled solid bell at 100% opacity, 2 px teal
+  `rgba(0, 201, 200, 0.75)` border + baked glow
+- **Unread count badge**: `#F04E37` red circular badge with `#EBF4F6` white numeral
 
 ## Notification Log Panel
 
@@ -59,6 +109,15 @@ The notification log panel is a scrollable history overlay toggled by the bell i
 - **Scroll**: mouse wheel scrolls the list; most-recent notification is at the top of the list
 - **Session persistence**: the log persists for the duration of the play session; it is NOT cleared on save or load within the same session
 - **Dismiss on outside click**: clicking anywhere outside the panel bounds closes the log panel. Outside clicks do not consume scroll-wheel or middle-mouse-button events — those pass through to the camera/3D view
+- **Panel background**: The log panel has a dark semi-opaque background applied via
+  `setElementBackground(handle, 13, 27, 42, 217)` immediately after the panel element is created
+  by `toggleLog()`. This produces the Glass City deep-navy fill (r=13, g=27, b=42) at approximately
+  85% opacity (a=217), ensuring log entries are legible against any terrain or city view behind the panel.
+
+  **`setElementBackground` parameter order**: the signature is `(handle, r, g, b, a)` — alpha is
+  the **LAST** parameter. Passing `(handle, 217, 13, 27, 42)` would set r=217 (bright tint) and
+  a=42 (16% opacity — near-transparent), making the background nearly invisible. The correct call is
+  `(handle, 13, 27, 42, 217)`.
 - Implementation: `NotificationManager` class creates/manages `IGUIStaticText` or custom `IGUIElement` overlays
 
 ## NotificationManager API
@@ -87,6 +146,32 @@ dismiss methods documented elsewhere in this spec:
   NotificationManager). Phase 3 stub: no-op setter body; `m_modalActive` stored but only checked in
   Phase 8 auto-pause implementation.
 
+## NotificationManager Constructor
+
+**Full constructor signature (Phase 10)**:
+
+```cpp
+NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock, IAudioSystem* audio)
+```
+
+All four parameters are stored as non-owning pointers. `m_audio` is the `IAudioSystem*` added in
+Phase 10. Before Phase 10, `nullptr` is passed; every audio call site is guarded by `if (m_audio)`.
+
+`IAudioSystem` is forward-declared in `NotificationManager.h` — the full header is included only in
+`NotificationManager.cpp`. This keeps the `src/ui/` translation units free of audio headers.
+
+**Phase 10 audio call sites in NotificationManager**:
+
+- `postCritical()`: calls `m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f)` immediately
+  after the toast element is made visible (`m_backend->setElementVisible(handle, true)`). Fires
+  once per toast display — not once per enqueue. If the toast is queued but not yet visible (because
+  the max simultaneous limit is reached), the sound does NOT fire until the toast actually appears.
+- `postNormal()`: same call site pattern as `postCritical()`.
+- Both calls are non-positional (`AL_SOURCE_RELATIVE = AL_TRUE`) with EFX bypass
+  (`AL_DIRECT_FILTER = AL_FILTER_NULL`), consistent with all UI SFX.
+
+`UI_TOAST` = `SoundId 23` (`ui_toast.wav`).
+
 ## Testing Note: Mock Selection for NotificationManager Unit Tests
 
 The `NotificationManager` constructor takes `ICitySimulation*` (not `ISimulationPauser*`). The sole reason
@@ -106,9 +191,16 @@ The `MockSimulationPauser` class is available for tests of other components that
 directly (e.g. components that only need pause/resume control and have no dependency on simulation-state
 query methods).
 
+**Phase 10 test update**: All existing `NotificationManager` test fixtures that construct the class
+directly must pass a fourth `IAudioSystem*` argument. Tests that do not exercise toast audio may pass
+`nullptr`. Tests that verify `ui_toast` SFX behaviour must inject `NiceMock<MockAudioSystem>`
+(from `tests/simulation/mock_audio_system.h`) as the fourth argument.
+
 Cross-references:
 
 - `architecture/testing/testability-architecture.md` — `ICitySimulation` definition (extends
-  `ISimulationPauser`), `MockCitySimulation`, and `MockSimulationPauser` source locations.
+  `ISimulationPauser`), `MockCitySimulation`, `MockSimulationPauser`, and `MockAudioSystem` source
+  locations.
 - `src/interfaces/ISimulationPauser.h` — minimal `setPaused(bool)` interface.
 - `src/interfaces/ICitySimulation.h` — full simulation interface including `getConsecutiveDeficitMonths()`.
+- `architecture/ui-ux/hud-layout.md` — Phase 10 Audio Wiring section (`ui_toast` call site spec).

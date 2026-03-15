@@ -2,8 +2,8 @@
 
 - **Main Menu** (shown on launch and after "Quit to Main Menu"): Full-screen overlay with four options: **New Game**, **Load Game**, **Settings**, **Quit**. Load Game button states:
   - **Grayed out, tooltip "No saves found"**: no save files exist.
-  - **Grayed out, tooltip "Save data is corrupted — cannot load. Check [save folder path] for recovery."**: save files exist but all are unreadable (checksum failure, schema version mismatch, truncated file). The tooltip must show the actual save folder path so the player can attempt manual recovery.
-  - **Enabled**: at least one valid, loadable save file exists.
+  - **Grayed out, tooltip "Save data is corrupted — cannot load. Check [save folder path] for recovery."**: save files exist but all are unreadable (checksum failure, schema version mismatch, truncated file). The tooltip must show the actual save folder path so the player can attempt manual recovery. The path is obtained via `SaveSystem::getSaveDirectoryPath()`, which returns the platform-specific save directory (`~/.config/aitown/saves/` on Linux, `%APPDATA%\aitown\saves\` on Windows); see `architecture/game-design/save-system.md`.
+  - **Enabled**: at least one valid, loadable save file exists. On activation: the loading-screen path is used (same as New Game start) to deserialise the save and rebuild terrain; upon completion, `GameState` transitions to `Gameplay`. The loading controller must call `UIManager::onGameLoaded()` after deserialization completes and before the first `UIManager::update()` tick (see `architecture/ui-ux/ui-manager.md` § `onGameLoaded()`).
 - **New Game screen**:
   - Mode: Sandbox (V1 only; Scenario grayed out with "Post-launch" label)
   - Difficulty: Easy ($1M start) / Normal ($500K start) / Hard ($200K start) — radio buttons

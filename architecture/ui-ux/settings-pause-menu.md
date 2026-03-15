@@ -6,12 +6,49 @@
 - **Pause menu** (Escape key): Resume, Settings, Save, **Quit to Main Menu**, Quit to Desktop
   - **Quit to Desktop**: Checks `m_hasUnsavedChanges`. If `true`, shows a blocking modal: title "Unsaved Progress", body "You have unsaved changes.", buttons: "Save and Quit" (saves to current slot then exits) / "Quit Without Saving" (exits immediately) / "Cancel" (returns to pause menu). If `m_hasUnsavedChanges == false`, exits immediately.
   - **Quit to Main Menu**: Same `m_hasUnsavedChanges` check as Quit to Desktop, but transitions to the Main Menu instead of exiting the process.
-  - **Save**: Opens a slot selection dialog (3 manual slots + auto-save slot displayed as read-only reference). Saving to an occupied manual slot shows "Overwrite [slot name]? Yes / Cancel." The auto-save slot is overwritten silently on each auto-save trigger; it is not selectable as a manual save target. There is no multiple-slot management beyond this in V1.
+  - **Save (V1 implementation)**: Immediately saves to manual slot 1 and clears the unsaved-changes dot. No slot picker dialog is shown in V1. `PauseMenuPanel::onEvent()` sets `m_saveRequested = true` and hides the panel; `UIManager::update()` polls `consumeSaveRequest()` and calls `SaveSystem::saveToSlot(1)` followed by `setUnsavedChanges(false)`. Post-V1: a slot selection dialog showing 3 manual slots with timestamps; saving to an occupied slot shows "Overwrite [slot name]? Yes / Cancel." confirmation. The auto-save slot is overwritten silently and is not selectable as a manual save target.
 - **Settings panel tabs**:
   - Graphics: Resolution, Vsync, MSAA level; **Accessibility** subsection: **Colorblind Mode toggle** — this is the canonical location for the toggle. It switches minimap zone palette, demand bars, zone cursors, and service coverage overlay to colorblind-safe pattern-supplemented encodings. The toggle MUST NOT appear in any other Settings tab. See [Resolution & UI Scaling](resolution-ui-scaling.md) for the full encoding specification.
   - Controls: Edge scroll on/off, mouse sensitivity, key rebindings
   - Audio: Master volume, Music volume, SFX volume — each a float slider in range **0.0–1.0**. Default values: master = 1.0, music = 0.8, SFX = 0.8. Changes apply immediately (see "Audio and Gameplay tabs" note below). Volume settings are persisted in the settings/config file (separate from save game files) and restored on the next session load. `IAudioSystem` interface: `setMasterVolume(float)`, `setMusicVolume(float)`, `setSFXVolume(float)` — all accept a float in [0.0, 1.0]. Volume slider callbacks are fully wired in Phase 8: each slider's onChange handler calls the corresponding `IAudioSystem` method (`setMasterVolume(float)`, `setMusicVolume(float)`, `setSFXVolume(float)`), guarded with `if (m_audio)`, and the wiring is verified by `SettingsPanelTest` in Phase 8.
   - Gameplay: Difficulty tier (read-only during play — set at New Game creation only; see `main-menu-new-game-flow.md`), disaster toggle (**grayed out in V1, labeled "Post-launch"** — disasters are post-V1 scope; the control must be rendered as disabled via `IUIBackend::setElementEnabled(..., false)` with a "Post-launch" label suffix so the UI slot is reserved without implying functional availability; no disaster logic is implemented in V1)
+
+## Visual Design — Glass City
+
+### Pause Menu and Settings Panel Backgrounds
+
+Both `PauseMenuPanel` and `SettingsPanel` use the Glass City deep-navy panel style:
+
+- **Background**: `rgba(13, 27, 42, 0.88)` deep navy, **8 px corner radius** on all edges
+  (neither panel is flush with the screen border — both are floating centred panels)
+- The full-screen backdrop behind the pause menu is the existing 50% black scrim (same as
+  modals) — not a separate Glass City colour
+
+### Panel Text
+
+| Content | Colour |
+|---|---|
+| Panel title | `#EBF4F6` near-white |
+| Menu item labels (Resume, Settings, Save, Quit…) | `#EBF4F6` near-white |
+| Settings tab labels | `#EBF4F6` near-white (active tab), `#4A7FA5` mid-blue (inactive tabs) |
+| Settings field labels | `#4A7FA5` mid-blue |
+| Settings field values / readouts | `#F0B429` amber |
+| Disabled control labels (e.g. "Post-launch" disaster toggle) | `#4A7FA5` mid-blue at 50% opacity |
+| Countdown text in display-change confirm modal ("Reverting in 8s…") | `#E8960C` warning amber |
+
+### Settings Panel Buttons and Controls
+
+All Settings buttons (Apply, Cancel, Restore Defaults, tab headers) use the Glass City
+button tile:
+
+- **Inactive / unselected tab**: `rgba(255, 255, 255, 0.08)` fill, 1 px `rgba(255, 255, 255, 0.18)` border
+- **Hover**: `rgba(255, 255, 255, 0.15)` fill, 1 px `rgba(255, 255, 255, 0.35)` border
+- **Active tab / focused button**: `rgba(0, 201, 200, 0.22)` teal wash, 2 px
+  `rgba(0, 201, 200, 0.75)` teal border + 4 px baked glow
+
+Volume sliders use `#00C9C8` teal as the fill/progress colour for the filled portion of
+the slider track. The unfilled portion uses `rgba(255, 255, 255, 0.18)`.
+
 - **Settings panel keyboard navigation**: Settings is a desktop-first application; all functionality must be accessible via keyboard without a mouse.
   - **Default focused tab on open**: the previously active tab, or Graphics on first open.
   - **Tab strip navigation**: Left/Right arrow keys cycle between tab headers. `Ctrl+Tab` / `Ctrl+Shift+Tab` also cycle forward/backward (standard desktop tab-control convention).

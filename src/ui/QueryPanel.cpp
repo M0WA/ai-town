@@ -9,7 +9,7 @@
 //     Edge-snap uses fixed virtual constants 1920 x 1080.
 //   - populate() real implementation (was stub in Phase 8).
 
-#include "src/ui/inspector_panel.h"
+#include "src/ui/InspectorPanel.h"
 #include "src/interfaces/ICitySimulation.h"
 #include "src/platform/input_event.h"
 
@@ -253,6 +253,12 @@ void InspectorPanel::populate(const QueryResult& result, int tileX, int tileZ,
         char demBuf[32];
         std::snprintf(demBuf, sizeof(demBuf), "Demand: %.0f%%", result.demandPressurePct);
         m_backend->setElementText(m_demandLabel, demBuf);
+    } else if (result.isRoad) {
+        m_backend->setElementText(m_zoneLabel, "Road");
+        m_backend->setElementText(m_popLabel, "");
+        m_backend->setElementText(m_coverageLabel, "");
+        m_backend->setElementText(m_desirabilityLabel, "");
+        m_backend->setElementText(m_demandLabel, "");
     } else {
         m_backend->setElementText(m_zoneLabel, "Unzoned");
         m_backend->setElementText(m_popLabel, "");
@@ -333,6 +339,12 @@ void InspectorPanel::draw() {
             char demBuf[32];
             std::snprintf(demBuf, sizeof(demBuf), "Demand: %.0f%%", qr.demandPressurePct);
             m_backend->setElementText(m_demandLabel, demBuf);
+        } else if (qr.isRoad) {
+            m_backend->setElementText(m_zoneLabel, "Road");
+            m_backend->setElementText(m_popLabel, "");
+            m_backend->setElementText(m_coverageLabel, "");
+            m_backend->setElementText(m_desirabilityLabel, "");
+            m_backend->setElementText(m_demandLabel, "");
         } else {
             m_backend->setElementText(m_zoneLabel, "Unzoned");
             m_backend->setElementText(m_popLabel, "");

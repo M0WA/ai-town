@@ -1,4 +1,4 @@
-#include "tests/simulation/manual_rng.h"
+#include "tests/simulation/ManualRNG.h"
 #include <gtest/gtest.h>
 #include <stdexcept>
 

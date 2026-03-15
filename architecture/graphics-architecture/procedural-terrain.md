@@ -35,7 +35,7 @@
   - **CRITICAL — LOD rebuild must call `node->remove()` on the old node**: When replacing a chunk's scene node with a new LOD level, the old `IMeshSceneNode*` must be explicitly removed via `SceneEntityManager::destroy()` (which calls `node->remove()`) **before** creating the new node. Failing to remove the old node leaves orphaned nodes accumulating in the scene graph each LOD transition, causing unbounded memory growth and redundant render calls.
   - **Deque pointer safety**: The `ChunkRebuildRequest` struct must store a **`uint64_t` chunk ID** (not a raw `IMeshSceneNode*`). Before processing a request, validate the chunk is still live in `TerrainSystem::m_activeChunks` by ID. If not found (chunk was unloaded while request was queued), discard the request without dereferencing any pointer.
   - **Deque deduplication** (prevents same-frame double rebuild): `TerrainSystem::update()` must maintain a per-frame `std::unordered_set<uint64_t> processedThisFrame`. Before processing a request, skip if `processedThisFrame` already contains the chunk ID. Also skip if `it->second.currentLOD == req.targetLOD` (chunk already at the requested level — prevents redundant rebuilds from stale queued requests). This ensures the "never transitions up and down in the same frame" invariant is structurally enforced, not just documented as a property of `LODNode`.
-  - **`TerrainSystem::flushPendingRebuilds()`**: `TerrainSystem` exposes a `flushPendingRebuilds()` method called once during the loading screen (after all initial chunks are queued) that processes the entire rebuild deque synchronously in a single frame — **bypassing the 2-per-frame cap**. This eliminates the startup LOD thrashing that would otherwise occur over the first ~N/2 frames as the deque drains at the normal rate. The method processes until the deque is empty or a per-call GPU upload time budget (default: 100 ms) is exhausted, whichever comes first, to prevent the loading screen from stalling visibly. The loading spinner progress bar should advance during this flush.
+  - **`TerrainSystem::flushPendingRebuilds()`**: `TerrainSystem` exposes a `flushPendingRebuilds()` method called **once per frame** during the loading screen loop. It bypasses the normal 2-per-frame cap and processes as many rebuild requests as possible, but it is **not** a blocking loop-until-empty: it exits after a 100 ms CPU budget per call regardless of remaining queue depth, to prevent the loading screen from stalling visibly. `TerrainSystem::update(dt)` is also called every loading-screen frame; it continues draining any requests that `flushPendingRebuilds()` did not reach within its budget. Together, the two calls drain the rebuild deque progressively over multiple frames until empty. This cooperative approach eliminates the startup LOD thrashing that would otherwise occur if only the 2-per-frame normal cap were active, while still keeping the spinner animated and the UI responsive each frame.
 
   **IClock Injection for Deterministic Testing**
 
@@ -124,9 +124,57 @@
 
   **`ITerrainQuery` interface promotion (Phase 9b)**: `getHeightAt` is promoted to the
   `ITerrainQuery` interface (`src/interfaces/ITerrainQuery.h`) so that `IrrlichtRenderer` can
-  sample terrain height for zone overlay Y-positions and hover highlight Y-positions without
-  a direct dependency on the concrete `TerrainSystem` class. The method signature on
-  `ITerrainQuery` is:
+  sample terrain height for zone overlay Y-positions, hover highlight Y-positions, and **mesh
+  placement Y-positions** without a direct dependency on the concrete `TerrainSystem` class.
+  **Phase 10b further extends `ITerrainQuery`** with the write method `setTileHeight()` and
+  the synchronous flush method `flushTerrainRebuilds()` — see the `setTileHeight()` Write
+  Path and Neighbour Blending section below.
+
+  **MANDATORY — building, road, and service-building scene nodes must be placed at terrain
+  height**: `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and
+  `placeServiceBuildingMesh()` must place their scene node Y coordinate at the flattened
+  terrain height `targetH` — NOT by calling `getHeightAt()` after the four `setTileHeight()`
+  corner writes. The neighbour blending applied by each `setTileHeight()` call bleeds back
+  into adjacent corners, leaving the `(tileX, tileZ)` vertex below `targetH` by the time
+  all 4 calls complete. The correct pattern is:
+
+  ```cpp
+  // Read pre-flatten heights, compute average targetH, call setTileHeight for all 4 corners,
+  // then use targetH directly for Y positioning.
+  const float postY = m_terrain ? targetH : 0.0f;
+  node->setPosition(irr::core::vector3df(
+      static_cast<float>(tileX) * kTileSize + kTileSize * 0.5f,
+      postY + 0.10f,   // 10 cm above terrain for roads, buildings, and service buildings
+      static_cast<float>(tileZ) * kTileSize + kTileSize * 0.5f));
+  ```
+
+  Hardcoding `y = 0.0f` places all meshes underground on elevated terrain tiles (terrain
+  heights range 0–26 m on a default map). This applies to ALL three mesh placement methods.
+  If `m_terrain` is null, fall back to `postY = 0.0f`. The full four-corner flatten
+  sequence is documented in the `setTileHeight()` Placement Integration section below.
+
+  **Z-fighting: polygon offset is mandatory** alongside the Y offset. A pure Y offset is
+  insufficient at distances beyond ~400 m because 24-bit depth buffer precision degrades
+  as Z²: `ΔZ ≈ 2 × Z² × (far − near) / (near × far × 2²⁴)`. At 400 m this is ~7 cm; at
+  500 m ~11 cm — larger than any tolerable visual Y offset. All three placement helpers
+  apply polygon offset to every material slot on the placed node:
+
+  ```cpp
+  mat.PolygonOffsetDirection = irr::video::EPO_FRONT;  // glPolygonOffset(-factor, -factor)
+  mat.PolygonOffsetFactor    = 1;                       // 0 = off; 1–7 combined slope+constant bias
+  ```
+
+  Note: the vcpkg Irrlicht 1.8.x port exposes only `PolygonOffsetFactor` (3-bit, 0–7) and
+  `PolygonOffsetDirection`. There is no separate `PolygonOffsetUnits` field.
+
+  `EPO_FRONT` subtracts a small bias from fragment depth before the depth test, shifting
+  the surface "closer" to the camera without altering geometry. This is distance-independent
+  (applied in window-space depth units) and eliminates Z-fighting at all camera distances.
+  For road meshes the polygon offset is set directly on the `SMeshBuffer` material inside
+  `ensureRoadMeshes()` (all three LODs). For building and service-building nodes it is set
+  per-material-slot in the post-load material loop in `placeBuildingMesh()` and
+  `placeServiceBuildingMesh()`.
+  The method signature on `ITerrainQuery` is:
 
   ```cpp
   // Returns Y-axis terrain height in world-space metres for the tile centre at (tileX, tileZ).
@@ -294,5 +342,323 @@
   pointing to the active camera (already required for `getRayFromScreenCoordinates`). This is
   set during camera creation in `IrrlichtRenderer::init()` or via a `setActiveCamera()` call;
   if not already a member, it must be added as part of Phase 9b Deliverable B.
+
+---
+
+## `setTileHeight()` Write Path and Neighbour Blending (Phase 10b)
+
+### Purpose
+
+`ITerrainQuery::setTileHeight(int tileX, int tileZ, float height)` is the write-side
+counterpart to `getHeightAt()`. It is called by `IrrlichtRenderer` placement helpers
+(`placeBuildingMesh`, `placeRoadMesh`, `placeServiceBuildingMesh`) to flatten the terrain
+under and around a placed tile, producing smooth visual transitions instead of hard seams
+between placed structures and sloped terrain.
+
+### Interface Declaration
+
+```cpp
+// src/interfaces/ITerrainQuery.h
+// Writes `height` into the persistent LOD0 heightmap at (tileX, tileZ),
+// applies neighbour blending to the 8 surrounding tiles, and enqueues
+// ChunkRebuildRequests for all affected chunks.
+// Out-of-bounds coordinates are silently ignored.
+virtual void setTileHeight(int tileX, int tileZ, float height) = 0;
+```
+
+### TerrainSystem Implementation
+
+`TerrainSystem::setTileHeight(int tileX, int tileZ, float height)` performs three steps:
+
+**Step 1 — Centre tile write**: Write `height` into the persistent LOD0 heightmap array
+at `(tileX, tileZ)`. Clamp `(tileX, tileZ)` to `[0, m_mapTilesX-1]` ×
+`[0, m_mapTilesZ-1]` before the write.
+
+**CRITICAL — dual heightmap sync**: The write MUST update BOTH `m_generatedHeightmap`
+AND every entry in `m_chunkHeightmaps` that covers the modified tile. `processOneRebuild`
+reads vertex heights from `m_chunkHeightmaps` (the per-chunk copy), not from
+`m_generatedHeightmap` (the global flat array). Writing only `m_generatedHeightmap`
+causes `processOneRebuild` to rebuild the chunk mesh with the old (pre-flatten) heights,
+silently discarding the height change. Both arrays must be kept in sync on every write.
+
+**Step 2 — Neighbour blending**: For each of the 8 surrounding tiles, compute the
+neighbour's new height by linearly interpolating toward `height`:
+
+```cpp
+// Cardinal neighbours (N, S, E, W):
+newH = lerp(currentH, height, kCardinalFalloff)
+// Diagonal neighbours (NE, NW, SE, SW):
+newH = lerp(currentH, height, kDiagonalFalloff)
+```
+
+Where `lerp(a, b, t) = a + t * (b - a)`.
+
+`kCardinalFalloff` and `kDiagonalFalloff` are confirmed by `gamedesign-lookandfeel`
+sign-off in Phase 10b (reference starting point: cardinal 0.5, diagonal 0.25). These
+values are NOT engineering defaults — they are design decisions and MUST NOT be committed
+before the sign-off is recorded.
+
+All eight neighbour coordinates must be clamped to map bounds before any read or write.
+Out-of-bounds neighbours are silently skipped (no write, no crash).
+
+**Step 3 — Chunk rebuild enqueue**: After all heightmap writes (centre + in-bounds
+neighbours), iterate over all modified tile coordinates and determine which chunk(s) each
+tile belongs to. For each unique chunk affected:
+
+1. **Mark the chunk dirty (LOD = -1) in `m_activeChunks`** before calling
+   `enqueueRebuild`. `processOneRebuild` contains an "already at target LOD" guard:
+
+   ```cpp
+   if (it->second.currentLOD == req.targetLOD) return;  // skip rebuild
+   ```
+
+   If the chunk's `currentLOD` is not reset to −1 before the enqueue, the guard
+   treats the already-rendered LOD level as "current" and silently discards the
+   height-change rebuild request. The LOD is reset during the next actual rebuild, so
+   the chunk remains permanently stuck with the old (pre-flatten) geometry.
+
+2. Enqueue a `ChunkRebuildRequest`. Chunk deduplication by `uint64_t` chunk ID is
+   already enforced in `TerrainSystem::update()`'s `processedThisFrame` set; duplicate
+   entries in the deque are harmless but the enqueue loop should avoid unnecessary
+   enqueues by checking whether a given chunk ID is already in the deque (optional
+   optimisation — not required for correctness).
+
+### Placement Integration
+
+`IrrlichtRenderer::placeBuildingMesh()` and `placeServiceBuildingMesh()` call
+`setTileHeight()` four times before creating the scene node — once per tile corner —
+to flatten all 4 vertices of the tile quad to the average height, then place the flat
+mesh on the flattened terrain.
+
+`IrrlichtRenderer::placeRoadMesh()` uses **terrain-conforming sloped road placement**.
+Roads follow terrain up to a **5% maximum grade** (0.05 rise/run); steeper terrain is
+flattened. The function signature is:
+
+```cpp
+// Public IRenderer override — delegates to internal extended version.
+void placeRoadMesh(int tileX, int tileZ) override;
+
+// Internal implementation (private).
+// flattenTerrain: run grade-clamping setTileHeight() sequence if true.
+// rebuildNeighbors: rebuild road tile meshes in 5×5 area if true.
+void placeRoadMesh(int tileX, int tileZ, bool flattenTerrain, bool rebuildNeighbors);
+```
+
+#### Road tile placement — two-phase terrain flattening
+
+`placeRoadMesh` uses a two-phase approach to ensure all road and terrain meshes remain
+consistent after placement.
+
+**Phase 1 — flatten main tile only, then flush**
+
+```cpp
+static constexpr float kMaxRoadGrade = 0.05f;  // 5% = 0.05 rise/run
+
+const float dX0 = (h10 - h00) / kTileSize;  const float dX1 = (h11 - h01) / kTileSize;
+const float dZ0 = (h01 - h00) / kTileSize;  const float dZ1 = (h11 - h10) / kTileSize;
+const float gradeMax = max(mag(dX0,dZ0), mag(dX0,dZ1), mag(dX1,dZ0), mag(dX1,dZ1));
+
+if (gradeMax > kMaxRoadGrade) {
+    const float scale = kMaxRoadGrade / gradeMax;
+    const float avg   = (h00 + h10 + h01 + h11) * 0.25f;
+    h_i = avg + (h_i - avg) * scale;   // for each of h00, h10, h01, h11
+    // write all 4 corners via setTileHeight — no flush yet
+}
+m_terrain->flushTerrainRebuilds();   // single flush after all writes
+```
+
+**Do not flatten neighbour tiles in Phase 1.** Each neighbour's `setTileHeight` reads
+already-modified shared corners, computes a different average, and writes different
+values back — Phase 2 would then re-read the corrupted values and produce an
+inconsistent main tile mesh.
+
+**Phase 2 — re-read heights and build mesh**
+
+Re-read all 4 corners from terrain after the flush (canonical values after all writes
+and blending). Build the terrain-conforming road quad:
+
+```text
+v0 = (-H, h00+0.25, -H)   back-left   (tileX,   tileZ)
+v1 = (+H, h10+0.25, -H)   back-right  (tileX+1, tileZ)
+v2 = (+H, h11+0.25, +H)   front-right (tileX+1, tileZ+1)
+v3 = (-H, h01+0.25, +H)   front-left  (tileX,   tileZ+1)
+```
+
+Y bias = **0.25 m**. A 0.10 m bias causes Z-fighting at oblique angles; 0.25 m
+eliminates it at all normal camera angles. The scene node Y = 0 — heights are baked
+into vertex positions. No kerb geometry — roads are plain flat quads tiling edge-to-edge
+(kerbs extended ±0.15 m beyond the tile boundary, causing Z-fight seams with neighbors).
+
+**Phase 3 — rebuild 5×5 road area**
+
+`setTileHeight()` applies weighted blending to the 8 surrounding vertices per call
+(cardinal ×0.5, diagonal ×0.25). The four corner writes together modify vertices up to
+2 tile-lengths away. Road tiles within ±2 in each axis can have stale meshes:
+
+```cpp
+for (int dz = -2; dz <= 2; ++dz)
+    for (int dx = -2; dx <= 2; ++dx) {
+        if (dx == 0 && dz == 0) continue;
+        if road tile exists at (tileX+dx, tileZ+dz):
+            placeRoadMesh(nx, nz, flattenTerrain=false, rebuildNeighbors=false);
+    }
+```
+
+`flattenTerrain=false` prevents cascading height writes; `rebuildNeighbors=false`
+prevents infinite recursion.
+
+#### Road tile scene node material requirements
+
+```cpp
+for (u32 m = 0; m < node->getMaterialCount(); ++m) {
+    SMaterial& mat = node->getMaterial(m);
+    mat.Lighting               = false;
+    mat.BackfaceCulling        = false;   // MANDATORY — see below
+    mat.PolygonOffsetDirection = irr::video::EPO_FRONT;
+    mat.PolygonOffsetFactor    = 4;
+}
+node->setAutomaticCulling(irr::scene::EAC_OFF);  // MANDATORY — see below
+```
+
+**`BackfaceCulling = false` (MANDATORY)**: Road tiles tilt up to 5% with terrain. At
+oblique angles one triangle of the quad faces away from the camera — default
+`BackfaceCulling = true` silently culls it, making half the tile disappear. Must be set
+on **both** the `SMeshBuffer` material and the node's own material copies (Irrlicht's
+`CMeshSceneNode::copyMaterials()` is version-dependent; setting explicitly on the node
+after `addMeshSceneNode()` is the only reliable guarantee).
+
+**`EAC_OFF` (MANDATORY)**: Road tile AABBs are nearly flat; oblique angles cause
+false AABB frustum rejection. Disabling automatic culling for road nodes is required.
+
+**MANDATORY — bounding box Y-extent expansion**: After `buf->recalculateBoundingBox()`,
+expand Y span to at least **0.5 m** before `addMeshSceneNode()`:
+
+```cpp
+core::aabbox3df box = buf->getBoundingBox();
+const float yMid = (box.MaxEdge.Y + box.MinEdge.Y) * 0.5f;
+if (box.MaxEdge.Y - box.MinEdge.Y < 0.5f) {
+    box.MinEdge.Y = yMid - 0.25f;
+    box.MaxEdge.Y = yMid + 0.25f;
+    buf->setBoundingBox(box);
+}
+mesh->addMeshBuffer(buf);
+buf->drop();
+mesh->recalculateBoundingBox();
+```
+
+LOD1 and LOD2 remain shared flat quads (used at 50–150 m and 150–300 m respectively).
+
+#### Buildings and service buildings — flat-quad flattening + road rebuild
+
+`placeBuildingMesh()` and `placeServiceBuildingMesh()` flatten all 4 corners to the
+tile average, flush, then **rebuild road tiles in the same 5×5 area** — because
+`setTileHeight()`'s blending propagates to vertices 2 tiles away, making nearby road
+meshes stale:
+
+```cpp
+const float targetH = (h00 + h10 + h01 + h11) * 0.25f;
+m_terrain->setTileHeight(tileX,     tileZ,     targetH);
+m_terrain->setTileHeight(tileX + 1, tileZ,     targetH);
+m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
+m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
+m_terrain->flushTerrainRebuilds();
+
+// Rebuild road tiles within ±2 — same blending radius as placeRoadMesh Phase 3.
+for (int dz = -2; dz <= 2; ++dz)
+    for (int dx = -2; dx <= 2; ++dx) {
+        if (dx == 0 && dz == 0) continue;
+        if road tile exists at (tileX+dx, tileZ+dz):
+            placeRoadMesh(nx, nz, flattenTerrain=false, rebuildNeighbors=false);
+    }
+
+// Use targetH directly — NOT getHeightAt() after setTileHeight().
+const float postY = m_terrain ? targetH : 0.0f;
+node->setPosition(... postY + 0.10f ...);
+```
+
+**Critical invariant**: `postY` must be `targetH`, not `getHeightAt(tileX, tileZ)` after
+the four corner writes. The neighbour blending from each subsequent `setTileHeight()` call
+bleeds back into the `(tileX, tileZ)` vertex, leaving it below `targetH` when all 4 calls
+complete. Reading the corrupted vertex height for Y-positioning causes the mesh to sink
+into the terrain.
+
+### flushTerrainRebuilds() — Synchronous Geometry Update After Placement
+
+`ITerrainQuery` exposes a second write-side method added in Phase 10b:
+
+```cpp
+// src/interfaces/ITerrainQuery.h
+/// Flush all pending terrain chunk rebuilds synchronously.
+/// Called after setTileHeight to ensure terrain geometry matches the new
+/// heightmap data before the next render frame.
+virtual void flushTerrainRebuilds() = 0;
+```
+
+`TerrainSystem::flushTerrainRebuilds()` delegates directly to `flushPendingRebuilds()`:
+
+```cpp
+void TerrainSystem::flushTerrainRebuilds() {
+    flushPendingRebuilds();
+}
+```
+
+**Why this is necessary**: `TerrainSystem::update()` processes at most 2 chunk rebuilds
+per frame (the normal amortised cap). After `setTileHeight()` enqueues rebuild requests
+for the affected chunks, those rebuilds would otherwise be spread across multiple frames.
+During those frames the terrain geometry still shows the original (pre-flatten) heights
+while the road/building node is already positioned at `targetH`, making the terrain mesh
+appear raised above the structure until the pending rebuilds are processed. Calling
+`flushTerrainRebuilds()` immediately after all four `setTileHeight()` calls processes
+every pending rebuild synchronously before the next render frame is drawn.
+
+`IrrlichtRenderer` placement helpers call it as:
+
+```cpp
+if (m_terrain) m_terrain->flushTerrainRebuilds();
+```
+
+immediately after the four `setTileHeight()` calls and before computing `postY = targetH`.
+
+### ManualTerrainQuery Stub
+
+`ManualTerrainQuery` (test stub in `tests/simulation/manual_terrain_query.h`) must add
+no-op overrides for both write-side methods to remain a concrete class:
+
+```cpp
+void setTileHeight(int /*tileX*/, int /*tileZ*/, float /*height*/) override {}
+void flushTerrainRebuilds() override {}
+```
+
+These overrides are required because both methods are pure virtual on `ITerrainQuery`;
+without them, `ManualTerrainQuery` fails to compile and all simulation tests that use it
+are broken.
+
+### pendingRebuildCount() Test API
+
+```cpp
+// Returns the number of ChunkRebuildRequests currently pending in the deque.
+// Exposed for unit testing only — do NOT call in production rendering paths.
+// Returns the raw deque depth (not deduplicated); duplicate chunk IDs may be present.
+int pendingRebuildCount() const;
+```
+
+This method is used by `TerrainFlattening_SetTileHeight_EnqueuesRebuildForAffectedChunks`
+to assert that a `setTileHeight()` call enqueues at least one (or two, for a chunk-boundary
+tile) rebuild requests. It is declared `public` on `TerrainSystem` solely to avoid
+requiring `friend` declarations or subclass seams in tests. Do not call from any non-test
+code path.
+
+### Rebuild Budget Interaction
+
+`setTileHeight()` enqueues up to 9 `ChunkRebuildRequest`s per call (one per modified
+tile, across at most 4 chunks for a corner placement). The standard 2-per-frame cap in
+`TerrainSystem::update()` applies; all affected chunks are fully rebuilt within at most 5
+frames at normal framerate. During the loading screen, `flushPendingRebuilds()` is called once per frame with a
+100 ms CPU budget per call (not a blocking loop-until-empty); `terrainSystem->update(dt)`
+is also called each frame to drain any requests not reached within that budget. For
+placement-triggered rebuilds (at most ~9 chunks per `setTileHeight()` call), the 100 ms
+budget is nearly always sufficient to drain the small pending queue in the single
+`flushTerrainRebuilds()` call made immediately after placement, ensuring terrain geometry
+matches the new heightmap before the next render frame is drawn.
 
 - Chunks loaded/unloaded based on camera distance

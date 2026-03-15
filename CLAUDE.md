@@ -103,6 +103,7 @@ Do not suggest alternative engines, languages, or platforms.
 - Object-oriented design principles
 - Clear separation of concerns (rendering, logic, audio)
 - **C++ class file naming**: C++ class implementation files (`.cpp`) and their paired class header files (`.h`) MUST use **CamelCase** (e.g., `TextureCache.cpp` / `TextureCache.h`, `SceneEntityManager.cpp` / `SceneEntityManager.h`, `TerrainChunk.cpp` / `TerrainChunk.h`). Non-class C-style headers that contain only constants, enums, or POD structs (e.g., `simulation_constants.h`, `terrain_types.h`, `shader_constants.h`) MAY use `snake_case`.
+- **Interface naming**: Pure-virtual interface classes MUST be placed under `src/interfaces/` and their filenames MUST be prefixed with `I` (e.g., `IRenderer.h`, `ITerrainQuery.h`, `IAudioSystem.h`). Concrete implementations live in their domain subdirectory (e.g., `src/rendering/`, `src/audio/`) without the `I` prefix.
 
 ### Dependencies
 
@@ -198,6 +199,8 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Texture Cache | [architecture/graphics-architecture/texture-cache.md](architecture/graphics-architecture/texture-cache.md) |
 | Shader Loading | [architecture/graphics-architecture/shader-loading.md](architecture/graphics-architecture/shader-loading.md) |
 | Benchmark Tool | [architecture/graphics-architecture/benchmark-tool.md](architecture/graphics-architecture/benchmark-tool.md) |
+| Model Validator Tool | [architecture/graphics-architecture/model-validator-tool.md](architecture/graphics-architecture/model-validator-tool.md) |
+| Sky Clouds | [architecture/graphics-architecture/sky-clouds.md](architecture/graphics-architecture/sky-clouds.md) |
 
 #### Audio Architecture
 
@@ -309,6 +312,8 @@ lcov --remove coverage.info \
   '*/tests/*' \
   '*/mock_*.h' '*/mock_*.cpp' \
   '*/manual_*.h' '*/manual_*.cpp' \
+  '*/Mock*.h' '*/Mock*.cpp' \
+  '*/Manual*.h' '*/Manual*.cpp' \
   '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
   --output-file coverage_filtered.info
 genhtml coverage_filtered.info --output-directory coverage_html/
@@ -337,6 +342,22 @@ ctest --test-dir build -C Release --output-on-failure
 - **CI PowerShell**: use `if (-not (Test-Path ...)) { exit 1 }` — `Test-Path ... || exit 1` is PS 7+ only; GitHub Actions Windows runners use PS 5.1.
 - **CI step order**: compiler-version detect step must write to `$GITHUB_ENV` in a **separate step before** the `actions/cache` step — `$GITHUB_ENV` writes are not visible within the same step.
 - **Windows CI**: Ninja generator (not MSBuild). DLL output at `build/` (not `build/Release/`). `ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c` runs vcvarsall before configure. After Build step: append `build\vcpkg_installed\x64-windows\bin` to `$env:GITHUB_PATH` so GTest/GMock DLLs are loadable. `AitownTestHelpers.cmake` uses `DISCOVERY_MODE PRE_TEST` — without it, POST_BUILD discovery runs before PATH is updated, silently finding 0 tests (gtest.dll not in PATH → test binary fails to start → ctest exits 0 with "No tests were found!!!").
+- **vcpkg Baseline Atomicity**: any vcpkg baseline bump MUST land all five changes
+  atomically in one PR:
+  1. `vcpkg.json` — `builtin-baseline` updated
+  2. `ci.yml` — `VCPKG_COMMIT_ID` env var updated to the same commit
+  3. `docker/ci-linux/Dockerfile` — `ARG VCPKG_COMMIT` build-arg updated to the same value
+  4. `.devcontainer/Dockerfile` — `FROM` line updated to
+     `ghcr.io/m0wa/aitown-ci-linux:vcpkg-<short-sha>@sha256:<digest>` (tag for
+     human readability + digest for immutability; identical `sha256:` to item 5)
+  5. `ci.yml` AND `.devcontainer/Dockerfile` — image digest pin (`sha256:...`)
+     updated to the `sha256:` output of the `docker-ci-image.yml` push step
+     (identical value in both files; the `.devcontainer/Dockerfile` FROM line
+     includes this digest per item 4)
+
+  All five must be updated in one PR. The `docker-ci-image.yml` validation step
+  enforces items 2 and 3 agree at image-build time. The supply-chain lint enforces
+  the digest is a full 64-hex SHA256 in `container: image:` lines.
 
 ### Graphics / Irrlicht
 

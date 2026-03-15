@@ -11,14 +11,39 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <numeric>
+#include <string>
 #include <vector>
 #include <queue>
 
 // ---------------------------------------------------------------------------
 // Static helpers
 // ---------------------------------------------------------------------------
+
+// zoneAssetBaseName — map (ZoneType, DensityTier) to the Phase 10 _01 asset
+// base name used by IRenderer::placeBuildingMesh().
+// Phase 10 policy (locked): always use the _01 suffix; variant cycling (_02, _03)
+// is deferred to Phase 11.  Returns empty string on unknown combination.
+/*static*/ std::string CitySimulation::zoneAssetBaseName(ZoneType zone, DensityTier density) {
+    const char* zoneStr  = nullptr;
+    const char* densStr  = nullptr;
+    switch (zone) {
+        case ZoneType::Residential: zoneStr = "res"; break;
+        case ZoneType::Commercial:  zoneStr = "com"; break;
+        case ZoneType::Industrial:  zoneStr = "ind"; break;
+    }
+    switch (density) {
+        case DensityTier::Low:    densStr = "low";  break;
+        case DensityTier::Medium: densStr = "med";  break;
+        case DensityTier::High:   densStr = "high"; break;
+    }
+    if (!zoneStr || !densStr) return {};
+    return std::string(zoneStr) + "_" + densStr + "_01";
+}
 
 /*static*/ float CitySimulation::speedValue(SpeedMultiplier s) {
     switch (s) {
@@ -213,27 +238,87 @@ void CitySimulation::tick(float realDeltaSeconds) {
         // Time of day thresholds (simplified 4-phase cycle):
         // DAY:   6:00 - 17:59
         // DUSK: 18:00 - 19:59
-        // NIGHT: 20:00 - 5:59 (wraps)
-        // DAWN:  6:00 -  7:59 (overlap with DAY start — DAWN precedes DAY in the cycle)
-        // Simplified: use hour-of-day to select TimeOfDay
+        // NIGHT: 20:00 - 3:59 (wraps)
+        // DAWN:  4:00 -  5:59 (precedes DAY in the cycle)
+        TimeOfDay prevTimeOfDay = m_timeOfDay;
         if (dayHours >= 6.0f && dayHours < 18.0f) {
             m_timeOfDay = TimeOfDay::DAY;
         } else if (dayHours >= 18.0f && dayHours < 20.0f) {
             m_timeOfDay = TimeOfDay::DUSK;
-        } else if (dayHours >= 20.0f || dayHours < 6.0f) {
+        } else if (dayHours >= 4.0f && dayHours < 6.0f) {
+            m_timeOfDay = TimeOfDay::DAWN;
+        } else {
+            // dayHours >= 20.0f || dayHours < 4.0f
             m_timeOfDay = TimeOfDay::NIGHT;
         }
-        // DAWN would be 4:00-5:59 for example — keeping simple for now
+
+        // Phase 10: notify AudioSystem whenever time-of-day changes.
+        // IAudioSystem::setTimeOfDay() is idempotent when called with the same value
+        // but we only call on transition to avoid unnecessary crossfade commands.
+        if (m_audio && m_timeOfDay != prevTimeOfDay) {
+            m_audio->setTimeOfDay(m_timeOfDay);
+        }
 
         doBudgetTick();
+
+        // Phase 10: setMusicIntensity() — called after doBudgetTick() so that
+        // m_consecutiveDeficitMonths, m_budgetSurplusPct, and m_totalPopulation
+        // all reflect the just-completed tick.
+        //
+        // Priority order (highest wins): CRISIS > GROWTH > CALM.
+        //   CRISIS:  consecutive_deficit_months >= 2 (economy-model.md Music Intensity Tiers)
+        //   GROWTH:  net population this tick increased AND no deficit streak
+        //             (m_totalPopulation > m_prevPopulation && m_consecutiveDeficitMonths == 0)
+        //   CALM:    all other cases (normal/surplus budget, no pop increase)
+        //
+        // Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) is applied internally
+        // by AudioSystem; CitySimulation does NOT suppress GROWTH/CRISIS calls during
+        // off-hours.
+        //
+        // Edge-detect: only call setMusicIntensity() when tier changes — avoids
+        // redundant audio thread atomic stores every single tick.
+        if (m_audio) {
+            MusicIntensity intensity = MusicIntensity::CALM;
+            if (m_consecutiveDeficitMonths >= 2) {
+                intensity = MusicIntensity::CRISIS;
+            } else if (m_totalPopulation > m_prevPopulation &&
+                       m_consecutiveDeficitMonths == 0) {
+                // GROWTH tier: net-positive population change this tick, no deficit streak.
+                // m_prevPopulation is the snapshot from the end of the PREVIOUS tick's
+                // doPopulationTick(); m_totalPopulation is the snapshot from this tick.
+                intensity = MusicIntensity::GROWTH;
+            }
+            if (intensity != m_lastSentMusicIntensity) {
+                m_audio->setMusicIntensity(intensity);
+                m_lastSentMusicIntensity = intensity;
+            }
+        }
+
+        // Phase 10: update m_prevPopulation AFTER setMusicIntensity() so that
+        // the GROWTH comparison above uses the previous tick's value correctly.
+        m_prevPopulation = m_totalPopulation;
     }
+
+    // Phase 10: traffic signal tick — runs every frame (real-time), NOT per budget tick.
+    // Advances signal phase timers and fires sfx_intersection_tick when a signal changes
+    // phase, pre-culled at > 80 m from the listener (getListenerPosition()).
+    // Called outside the budget-tick while-loop so signals fire at real-time frequency
+    // regardless of simulation speed.
+    doTrafficSignalTick(realDeltaSeconds);
 }
 
 // ---------------------------------------------------------------------------
 // Budget tick orchestration
 // ---------------------------------------------------------------------------
 
+int CitySimulation::consumeBudgetTicks() {
+    int n = m_pendingBudgetTicks;
+    m_pendingBudgetTicks = 0;
+    return n;
+}
+
 void CitySimulation::doBudgetTick() {
+    ++m_pendingBudgetTicks;
     // Pre-compute m_budgetSurplusPct BEFORE doServiceDegradationTick() reads it.
     // doEconomyTick() (later in this same tick) will re-compute and also modify
     // the treasury; this block is read-only — it mirrors the same calculation.
@@ -608,13 +693,48 @@ void CitySimulation::doDesirabilityTick() {
                 float cov = computeRadialCoverage(x, z, ServiceType::PoliceStation);
                 if (cov == 0.0f) anyUncovered = true;
             }
+
+            // Phase 10: water coverage SFX — fire SFX_WATER_OUT exactly once per
+            // coverage-loss event (wasPowered / wasWaterCovered flag gates re-fire).
+            // Only fires for residential tiles (water billing affects residential coverage).
+            bool currentlyWaterCovered = false;
             if (hasWater) {
                 float cov = computeRadialCoverage(x, z, ServiceType::WaterTower);
-                if (cov == 0.0f) anyUncovered = true;
+                if (cov == 0.0f) {
+                    anyUncovered = true;
+                } else {
+                    currentlyWaterCovered = true;
+                }
             }
+            if (tile.wasWaterCovered && !currentlyWaterCovered && hasWater) {
+                // Water just lost — fire SFX once (NORMAL priority per V1 manifest).
+                if (m_audio) {
+                    m_audio->playSound(SFX_WATER_OUT, SoundPriority::NORMAL, 1.0f);
+                }
+                tile.wasWaterCovered = false;
+            } else if (currentlyWaterCovered) {
+                tile.wasWaterCovered = true;
+            }
+
+            // Phase 10: power coverage SFX — fire SFX_POWER_OUT exactly once per
+            // coverage-loss event.
+            bool currentlyPowered = false;
             if (hasPower) {
                 float cov = computePowerCoverage(x, z);
-                if (cov == 0.0f) anyUncovered = true;
+                if (cov == 0.0f) {
+                    anyUncovered = true;
+                } else {
+                    currentlyPowered = true;
+                }
+            }
+            if (tile.wasPowered && !currentlyPowered && hasPower) {
+                // Power just lost — fire SFX once (NORMAL priority per V1 manifest).
+                if (m_audio) {
+                    m_audio->playSound(SFX_POWER_OUT, SoundPriority::NORMAL, 1.0f);
+                }
+                tile.wasPowered = false;
+            } else if (currentlyPowered) {
+                tile.wasPowered = true;
             }
 
             if (anyUncovered) {
@@ -634,6 +754,38 @@ void CitySimulation::doDesirabilityTick() {
 
         // Clamp desirability to [0, 100]
         tile.desirability = std::min(100.0f, std::max(0.0f, desirability));
+
+        // Phase 10: service-alert SFX — fire SFX_FIRE_ALERT or SFX_POLICE_ALERT
+        // exactly once per crisis episode. Fire takes priority over Police when
+        // both stations cover this tile. Only residential tiles are tested.
+        // alertFired prevents re-fire while desirability stays at or below threshold.
+        // Resets when desirability recovers above service_alert_desirability_threshold.
+        if (tile.isZoned && tile.zone == ZoneType::Residential && m_audio) {
+            if (tile.desirability <= static_cast<float>(SimulationConstants::service_alert_desirability_threshold)) {
+                if (!tile.alertFired) {
+                    // Determine which alert to fire: Fire takes priority over Police.
+                    bool hasFire  = false;
+                    bool hasPoliceForAlert = false;
+                    for (const ServiceBuilding& sb : m_serviceBuildings) {
+                        if (sb.type == ServiceType::FireStation)   hasFire = true;
+                        if (sb.type == ServiceType::PoliceStation) hasPoliceForAlert = true;
+                    }
+                    if (hasFire) {
+                        m_audio->playPositionalSound(SFX_FIRE_ALERT,
+                            vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)},
+                            SoundPriority::CRITICAL, 1.0f);
+                    } else if (hasPoliceForAlert) {
+                        m_audio->playPositionalSound(SFX_POLICE_ALERT,
+                            vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)},
+                            SoundPriority::CRITICAL, 1.0f);
+                    }
+                    tile.alertFired = true;
+                }
+            } else {
+                // Desirability recovered — allow alert to re-fire in a future episode.
+                tile.alertFired = false;
+            }
+        }
     }
 }
 
@@ -702,6 +854,11 @@ void CitySimulation::doDensityUnlockTick() {
             default: return std::numeric_limits<float>::max();
         }
     };
+
+    // Phase 10: per-wave-tick audio cap — tracks total sfx_zone_upgrade calls this tick
+    // across ALL tier loops combined. Tiles beyond the cap are upgraded silently.
+    // (SimulationConstants::sfx_zone_upgrade_per_tick_cap = 3)
+    int sfxCallsThisTick = 0;
 
     float scale = getDensityUnlockScale();
 
@@ -781,12 +938,22 @@ void CitySimulation::doDensityUnlockTick() {
             tile.density = targetDensity;
             tile.population = 0.0f;  // population grows fresh
 
-            if (m_audio) {
-                int x = static_cast<int>(key >> 32);
-                int z = static_cast<int>(static_cast<uint32_t>(key));
-                m_audio->playPositionalSound(SFX_ZONE_UPGRADE,
-                    vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)},
-                    SoundPriority::NORMAL, 1.0f);
+            // Phase 10: swap the building mesh to match the new density tier.
+            // Decode tile coordinates from the map key (key = (x << 32) | (uint32_t)z).
+            // Remove the old mesh first, then place the new one so the renderer
+            // never has two overlapping meshes at the same tile.
+            if (m_renderer) {
+                int tx = static_cast<int>(key >> 32);
+                int tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
+                m_renderer->removeBuildingMesh(tx, tz);
+                m_renderer->placeBuildingMesh(tx, tz, zoneAssetBaseName(targetZone, targetDensity));
+            }
+
+            // Phase 10: sfx_zone_upgrade is non-positional (AL_SOURCE_RELATIVE = AL_TRUE).
+            // Cap at sfx_zone_upgrade_per_tick_cap calls total across all tiers this tick.
+            if (m_audio && sfxCallsThisTick < SimulationConstants::sfx_zone_upgrade_per_tick_cap) {
+                m_audio->playSound(SFX_ZONE_UPGRADE, SoundPriority::NORMAL, 1.0f);
+                ++sfxCallsThisTick;
             }
             upgradeCount++;
         }
@@ -1166,6 +1333,58 @@ void CitySimulation::checkCityRatingTransition() {
             static_cast<int>(newTier)
         });
         m_cityRating = newTier;
+        // NOTE: triggerStinger(StingerType::MILESTONE) is NOT called here.
+        // Per Phase 10 spec, the stinger is UIManager's responsibility:
+        // UIManager polls CityRatingTransition notifications and calls
+        // m_audio->triggerStinger(MILESTONE) in its onCityRatingTransition() handler.
+        // See implementation/phase-10.md §UIManager City Rating milestone callback.
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10: Traffic signal tick — advance timers and fire sfx_intersection_tick.
+// ---------------------------------------------------------------------------
+//
+// Called from tick() with real delta seconds (never sim-speed-scaled).
+// Each TrafficSignal fires sfx_intersection_tick every phaseSeconds real seconds.
+// Pre-acquisition distance cull: skips the call if the listener is beyond 80 m.
+// The listener position is obtained once per tick() call via m_renderer->getListenerPosition().
+//
+// Intersection detection: a road tile is treated as an intersection when it is adjacent
+// to 2 or more other road tiles. Signals are maintained incrementally by placeRoad()
+// and demolishTile(). This ensures O(1) per-tile maintenance rather than a full
+// map scan each tick.
+
+void CitySimulation::doTrafficSignalTick(float realDeltaSeconds) {
+    if (!m_audio || m_trafficSignals.empty()) return;
+
+    // Obtain listener position once — avoids repeated virtual dispatch per signal.
+    // m_renderer may be null in tests that do not provide a renderer; guard with null check.
+    vec3 listenerPos{0.0f, 0.0f, 0.0f};
+    if (m_renderer) {
+        listenerPos = m_renderer->getListenerPosition();
+    }
+
+    const float cullDistSq =
+        SimulationConstants::traffic_signal_cull_distance_meters *
+        SimulationConstants::traffic_signal_cull_distance_meters;
+
+    for (TrafficSignal& sig : m_trafficSignals) {
+        sig.phaseTimer += realDeltaSeconds;
+        if (sig.phaseTimer < sig.phaseSeconds) continue;
+
+        // Phase changed (green→red or red→green).
+        sig.phaseTimer -= sig.phaseSeconds;
+
+        // Pre-acquisition distance cull (phase-10.md: skip if distance > 80 m).
+        vec3 signalPos{static_cast<float>(sig.tileX), 0.0f, static_cast<float>(sig.tileZ)};
+        float dx = signalPos.x - listenerPos.x;
+        float dz = signalPos.z - listenerPos.z;
+        float distSq = dx * dx + dz * dz;
+        if (distSq > cullDistSq) continue;
+
+        m_audio->playPositionalSound(SFX_INTERSECTION_TICK, signalPos,
+                                     SoundPriority::LOW, 1.0f);
     }
 }
 
@@ -1379,6 +1598,27 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
             SoundPriority::NORMAL, 1.0f);
     }
 
+    // Phase 11: round-robin variant cycling (_01/_02/_03).
+    // Increment counter for this (zone, tier) pair, then pick variant = counter % 3 + 1.
+    {
+        int zoneIdx = static_cast<int>(type);
+        int tierIdx = static_cast<int>(tier);
+        int idx     = zoneIdx * 3 + tierIdx;
+        m_buildingVariantCounters[idx]++;
+        int variantNum = ((m_buildingVariantCounters[idx] - 1) % 3) + 1;  // 1, 2, or 3
+
+        if (m_renderer) {
+            // Build name like "res_low_01", "res_low_02", "res_low_03"
+            std::string baseName = zoneAssetBaseName(type, tier);
+            // zoneAssetBaseName returns "zone_dens_01"; replace "01" suffix with variantNum
+            if (baseName.size() >= 2) {
+                baseName[baseName.size() - 2] = '0';
+                baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
+            }
+            m_renderer->placeBuildingMesh(tileX, tileZ, baseName);
+        }
+    }
+
     // Record undo
     recordUndoAction(undoAction);
 }
@@ -1429,6 +1669,68 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
         m_roadTileCount++;
     }
 
+    // Phase 10: traffic signal maintenance.
+    // If the new road tile is adjacent to 2+ existing road tiles (in any cardinal direction),
+    // it qualifies as an intersection and receives a TrafficSignal entry.
+    // Also re-check each neighbor — a neighbor that now has 2+ road adjacencies may need
+    // a new signal added (if it didn't qualify before this road was placed).
+    // Staggered initial phaseTimer: use tileX ^ tileZ hashed to [0, phaseSeconds) to
+    // prevent all signals from firing simultaneously on the first frame.
+    // Guard: only add signals for newly-placed road tiles (wasRoad == false).
+    if (!wasRoad) {
+        const int neighbors[4][2] = {{tileX-1,tileZ},{tileX+1,tileZ},{tileX,tileZ-1},{tileX,tileZ+1}};
+
+        // Helper lambda: count road-adjacent tiles for a given position (4 cardinal dirs).
+        auto countRoadNeighbors = [&](int cx, int cz) -> int {
+            const int nbs[4][2] = {{cx-1,cz},{cx+1,cz},{cx,cz-1},{cx,cz+1}};
+            int count = 0;
+            for (auto& nb2 : nbs) {
+                int64_t nkey = tileKey(nb2[0], nb2[1]);
+                auto nit = m_tiles.find(nkey);
+                if (nit != m_tiles.end() && nit->second.isRoad) ++count;
+            }
+            return count;
+        };
+
+        // Helper lambda: check if signal already exists for a position.
+        auto hasSignal = [&](int cx, int cz) -> bool {
+            for (const TrafficSignal& sig : m_trafficSignals) {
+                if (sig.tileX == cx && sig.tileZ == cz) return true;
+            }
+            return false;
+        };
+
+        // Helper lambda: generate staggered initial phase offset from tile coordinates.
+        auto phaseOffset = [&](int cx, int cz) -> float {
+            unsigned int seed = static_cast<unsigned int>(cx * 73856093 ^ cz * 19349663);
+            return (static_cast<float>(seed & 0xFFFFu) / 65535.0f) *
+                   SimulationConstants::traffic_signal_phase_seconds;
+        };
+
+        // Check the newly placed tile.
+        if (countRoadNeighbors(tileX, tileZ) >= 2 && !hasSignal(tileX, tileZ)) {
+            TrafficSignal sig;
+            sig.tileX      = tileX;
+            sig.tileZ      = tileZ;
+            sig.phaseTimer = phaseOffset(tileX, tileZ);
+            m_trafficSignals.push_back(sig);
+        }
+
+        // Re-check each cardinal neighbor — they may now qualify as intersections.
+        for (auto& nb : neighbors) {
+            int64_t nkey = tileKey(nb[0], nb[1]);
+            auto nit = m_tiles.find(nkey);
+            if (nit == m_tiles.end() || !nit->second.isRoad) continue;
+            if (countRoadNeighbors(nb[0], nb[1]) >= 2 && !hasSignal(nb[0], nb[1])) {
+                TrafficSignal sig;
+                sig.tileX      = nb[0];
+                sig.tileZ      = nb[1];
+                sig.phaseTimer = phaseOffset(nb[0], nb[1]);
+                m_trafficSignals.push_back(sig);
+            }
+        }
+    }
+
     // Play audio
     if (earthworksCostOverride > 0) {
         if (m_audio) {
@@ -1443,6 +1745,11 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
             SoundPriority::NORMAL, 1.0f);
     }
 
+    // Phase 10: spawn road tile mesh.
+    if (m_renderer) {
+        m_renderer->placeRoadMesh(tileX, tileZ);
+    }
+
     // Record undo
     recordUndoAction(undoAction);
 }
@@ -1454,27 +1761,50 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
 void CitySimulation::demolishTile(int tileX, int tileZ) {
     int64_t key = tileKey(tileX, tileZ);
     auto it = m_tiles.find(key);
-    if (it == m_tiles.end()) return;
 
-    // Record previous state for undo
+    // Service buildings are registered in m_serviceBuildings but do NOT create
+    // a TileData entry in m_tiles.  Check for a service building at this tile
+    // BEFORE the m_tiles guard so demolishing a service-building tile is not
+    // silently rejected.
+    bool hadServiceBuilding = false;
+    for (const ServiceBuilding& sb : m_serviceBuildings) {
+        if (sb.x == tileX && sb.z == tileZ) { hadServiceBuilding = true; break; }
+    }
+
+    // Nothing to demolish if no tile data AND no service building.
+    if (it == m_tiles.end() && !hadServiceBuilding) return;
+
+    // Record previous state for undo.
     UndoAction undoAction;
     undoAction.actionType    = UndoAction::Type::Demolish;
     undoAction.tileX         = tileX;
     undoAction.tileZ         = tileZ;
-    undoAction.previousState = it->second;
+    undoAction.previousState = (it != m_tiles.end()) ? it->second : TileData{};
     undoAction.costPaid      = 0;  // demolish is free
 
-    bool wasRoad = it->second.isRoad;
+    bool wasRoad = (it != m_tiles.end()) && it->second.isRoad;
 
-    // Clear tile
-    TileData& tile = it->second;
-    tile.isZoned    = false;
-    tile.isRoad     = false;
-    tile.population = 0.0f;
+    if (it != m_tiles.end()) {
+        // Clear tile
+        TileData& tile = it->second;
+        tile.isZoned    = false;
+        tile.isRoad     = false;
+        tile.population = 0.0f;
+    }
 
     // Update road tile count
     if (wasRoad) {
         m_roadTileCount--;
+    }
+
+    // Phase 10: remove traffic signal for the demolished tile (if any).
+    if (wasRoad) {
+        m_trafficSignals.erase(
+            std::remove_if(m_trafficSignals.begin(), m_trafficSignals.end(),
+                [tileX, tileZ](const TrafficSignal& sig) {
+                    return sig.tileX == tileX && sig.tileZ == tileZ;
+                }),
+            m_trafficSignals.end());
     }
 
     // Play audio
@@ -1483,6 +1813,27 @@ void CitySimulation::demolishTile(int tileX, int tileZ) {
             vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
             SoundPriority::NORMAL, 1.0f);
     }
+
+    // Phase 10: remove mesh for the demolished tile.
+    // Priority: road → service building → zone.
+    // hadServiceBuilding was computed before any mutations above.
+    if (m_renderer) {
+        if (wasRoad) {
+            m_renderer->removeRoadMesh(tileX, tileZ);
+        } else if (hadServiceBuilding) {
+            m_renderer->removeServiceBuildingMesh(tileX, tileZ);
+        } else if (undoAction.previousState.isZoned) {
+            m_renderer->removeBuildingMesh(tileX, tileZ);
+        }
+    }
+
+    // Remove any service building registered at this tile.
+    m_serviceBuildings.erase(
+        std::remove_if(m_serviceBuildings.begin(), m_serviceBuildings.end(),
+            [tileX, tileZ](const ServiceBuilding& sb) {
+                return sb.x == tileX && sb.z == tileZ;
+            }),
+        m_serviceBuildings.end());
 
     // Record undo
     recordUndoAction(undoAction);
@@ -1570,6 +1921,12 @@ void CitySimulation::placeServiceBuilding(int tileX, int tileZ,
             SoundPriority::NORMAL, 1.0f);
     }
 
+    // Phase 10: spawn service building mesh.
+    // type is the public ServiceBuildingType — matches IRenderer::placeServiceBuildingMesh().
+    if (m_renderer) {
+        m_renderer->placeServiceBuildingMesh(tileX, tileZ, type);
+    }
+
     // Record undo entry.
     recordUndoAction(undoAction);
 }
@@ -1626,7 +1983,17 @@ QueryResult CitySimulation::queryTile(int tileX, int tileZ) const {
     result.isZoned = false;
 
     const TileData* tile = findTile(tileX, tileZ);
-    if (!tile || !tile->isZoned) {
+    if (!tile) {
+        return result;
+    }
+
+    // Road tile: report isRoad and return — no zone/population data.
+    if (tile->isRoad) {
+        result.isRoad = true;
+        return result;
+    }
+
+    if (!tile->isZoned) {
         return result;
     }
 
@@ -1880,4 +2247,769 @@ void CitySimulation::addServiceBuilding(int x, int z, int serviceTypeInt) {
 // ---------------------------------------------------------------------------
 void CitySimulation::setModalOpen(bool open) {
     m_modalOpen = open;
+}
+
+#ifdef AITOWN_TESTING_ENABLED
+// ---------------------------------------------------------------------------
+// testForceUnlockDensityTier — Phase 10 test-friend seam.
+//
+// Directly sets unlock_flags[tierIndex] = true, bypassing the 3-consecutive-month
+// revenue-streak counter. The tier index mapping is:
+//   Residential/Medium = 0, Commercial/Medium  = 1, Industrial/Medium = 2,
+//   Residential/High   = 3, Commercial/High    = 4, Industrial/High   = 5.
+//
+// DensityTier::Low has no unlock gate and is silently ignored.
+//
+// Compiled ONLY when AITOWN_TESTING_ENABLED=1 (simulation_tests target only).
+// MUST NOT be compiled into the production aitown binary.
+// (ref: implementation/phase-10.md — testForceUnlockDensityTier decision 2026-03-04)
+// ---------------------------------------------------------------------------
+void CitySimulation::testForceUnlockDensityTier(ZoneType zone, DensityTier tier) {
+    int tierIdx = -1;
+    if (tier == DensityTier::Medium) {
+        switch (zone) {
+            case ZoneType::Residential: tierIdx = 0; break;
+            case ZoneType::Commercial:  tierIdx = 1; break;
+            case ZoneType::Industrial:  tierIdx = 2; break;
+        }
+    } else if (tier == DensityTier::High) {
+        switch (zone) {
+            case ZoneType::Residential: tierIdx = 3; break;
+            case ZoneType::Commercial:  tierIdx = 4; break;
+            case ZoneType::Industrial:  tierIdx = 5; break;
+        }
+    }
+    // DensityTier::Low has no unlock gate — silently no-op.
+    if (tierIdx < 0 || tierIdx > 5) return;
+
+    m_densityUnlockState.unlock_flags[tierIdx] = true;
+    // Reset consecutive counter so doDensityUnlockTick() treats this tier as
+    // already unlocked (wasAlreadyUnlocked[] picks up the true flag next tick).
+    m_densityUnlockState.consecutive_months_above_threshold[tierIdx] = 0;
+}
+#endif  // AITOWN_TESTING_ENABLED
+
+// ---------------------------------------------------------------------------
+// getBuildingVariantCounter — Phase 11 test/save seam.
+// Returns the round-robin counter for the given (zone, tier) pair.
+// Index: zone * 3 + tier.  Range of zone: 0-2, range of tier: 0-2.
+// Out-of-range inputs return 0 (safe; treated as "no placements yet").
+// ---------------------------------------------------------------------------
+int CitySimulation::getBuildingVariantCounter(int zone, int tier) const {
+    int idx = zone * 3 + tier;
+    if (idx < 0 || idx >= static_cast<int>(m_buildingVariantCounters.size())) return 0;
+    return m_buildingVariantCounters[idx];
+}
+
+// ===========================================================================
+// Serialization helpers — hand-written minimal JSON (no external library).
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// jsonEscape — escape a string for embedding in JSON (handles backslash, quote,
+// and the common ASCII control characters).  Full Unicode pass-through is fine
+// for V1 (save files use ASCII city/scenario names only).
+// ---------------------------------------------------------------------------
+static std::string jsonEscape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 4);
+    for (unsigned char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (c < 0x20) {
+                    // Other control characters → \uXXXX
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(c));
+                    out += buf;
+                } else {
+                    out += static_cast<char>(c);
+                }
+        }
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// serializeToJson — produce full city-state JSON string (schema_version: 1).
+// ---------------------------------------------------------------------------
+std::string CitySimulation::serializeToJson() const {
+    // Accumulate outstanding_debt from all loans
+    float outstandingDebt = 0.0f;
+    for (const auto& loan : m_loans) {
+        outstandingDebt += static_cast<float>(loan.remainingPrincipal);
+    }
+
+    // speed_multiplier as int (0=Paused, 1=x1, 2=x3, 3=x10)
+    int speedInt = 0;
+    switch (m_speed) {
+        case SpeedMultiplier::Paused: speedInt = 0; break;
+        case SpeedMultiplier::x1:    speedInt = 1; break;
+        case SpeedMultiplier::x3:    speedInt = 2; break;
+        case SpeedMultiplier::x10:   speedInt = 3; break;
+    }
+
+    std::string j;
+    j.reserve(4096);
+
+    j += "{\n";
+    j += "  \"schema_version\": 1,\n";
+    j += "  \"treasury_balance\": " + std::to_string(m_treasury) + ",\n";
+
+    // tax_rates array [Res, Com, Ind]
+    j += "  \"tax_rates\": [";
+    for (int i = 0; i < 3; ++i) {
+        if (i > 0) j += ", ";
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.6f", m_taxRates[i]);
+        j += buf;
+    }
+    j += "],\n";
+
+    {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.6f", outstandingDebt);
+        j += "  \"outstanding_debt\": ";
+        j += buf;
+        j += ",\n";
+    }
+    j += "  \"outstanding_bond_uses\": " + std::to_string(m_outstandingBondUses) + ",\n";
+    j += "  \"consecutive_deficit_months\": " + std::to_string(m_consecutiveDeficitMonths) + ",\n";
+    j += "  \"speed_multiplier\": " + std::to_string(speedInt) + ",\n";
+
+    // population_milestone_fired array (5 bools)
+    j += "  \"population_milestone_fired\": [";
+    for (int i = 0; i < 5; ++i) {
+        if (i > 0) j += ", ";
+        j += (m_milestoneFired[i] ? "true" : "false");
+    }
+    j += "],\n";
+
+    // building_variant_counters array (9 ints)
+    j += "  \"building_variant_counters\": [";
+    for (int i = 0; i < 9; ++i) {
+        if (i > 0) j += ", ";
+        j += std::to_string(m_buildingVariantCounters[i]);
+    }
+    j += "],\n";
+
+    // tiles array
+    j += "  \"tiles\": [\n";
+    {
+        bool first = true;
+        for (const auto& [key, tile] : m_tiles) {
+            int tx = static_cast<int>(key >> 32);
+            int tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
+            if (!first) j += ",\n";
+            first = false;
+            char popBuf[32];
+            std::snprintf(popBuf, sizeof(popBuf), "%.6f", tile.population);
+            j += "    {\"x\": " + std::to_string(tx)
+               + ", \"z\": " + std::to_string(tz)
+               + ", \"zone\": " + std::to_string(static_cast<int>(tile.zone))
+               + ", \"tier\": " + std::to_string(static_cast<int>(tile.density))
+               + ", \"is_zoned\": " + (tile.isZoned ? "true" : "false")
+               + ", \"is_road\": " + (tile.isRoad ? "true" : "false")
+               + ", \"population\": " + popBuf
+               + ", \"alert_fired\": " + (tile.alertFired ? "true" : "false")
+               + "}";
+        }
+    }
+    j += "\n  ],\n";
+
+    // service_buildings array
+    j += "  \"service_buildings\": [\n";
+    {
+        bool first = true;
+        for (const auto& sb : m_serviceBuildings) {
+            if (!first) j += ",\n";
+            first = false;
+            j += "    {\"x\": " + std::to_string(sb.x)
+               + ", \"z\": " + std::to_string(sb.z)
+               + ", \"type\": " + std::to_string(static_cast<int>(sb.type))
+               + ", \"degraded\": " + (sb.degraded ? "true" : "false")
+               + "}";
+        }
+    }
+    j += "\n  ],\n";
+
+    // density_unlock_flags array (6 bools)
+    j += "  \"density_unlock_flags\": [";
+    for (int i = 0; i < 6; ++i) {
+        if (i > 0) j += ", ";
+        j += (m_densityUnlockState.unlock_flags[i] ? "true" : "false");
+    }
+    j += "],\n";
+
+    // density_unlock_revenue_counter array (6 ints)
+    j += "  \"density_unlock_revenue_counter\": [";
+    for (int i = 0; i < 6; ++i) {
+        if (i > 0) j += ", ";
+        j += std::to_string(m_densityUnlockState.consecutive_months_above_threshold[i]);
+    }
+    j += "],\n";
+
+    j += "  \"total_ticks\": " + std::to_string(m_totalTicks) + ",\n";
+    j += "  \"month\": " + std::to_string(m_month) + ",\n";
+    j += "  \"year\": " + std::to_string(m_year) + ",\n";
+
+    // scenario_state object
+    j += "  \"scenario_state\": {";
+    {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.6f", m_scenarioState.win_condition_progress);
+        j += "\"win_condition_progress\": ";
+        j += buf;
+    }
+    j += ", \"elapsed_ticks\": " + std::to_string(m_scenarioState.elapsed_ticks);
+    j += ", \"scenario_id\": \"" + jsonEscape(m_scenarioState.scenario_id) + "\"";
+    j += "}\n";
+
+    j += "}\n";
+    return j;
+}
+
+// ===========================================================================
+// Minimal JSON parser helpers for deserializeFromJson
+// ===========================================================================
+
+namespace {
+
+// skipWhitespace — advance pos past whitespace characters.
+static void skipWs(const std::string& s, size_t& pos) {
+    while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\r' || s[pos] == '\n'))
+        ++pos;
+}
+
+// expect — verify that s[pos..pos+len) == expected, advance pos, return false on mismatch.
+static bool expect(const std::string& s, size_t& pos, const char* expected, std::string& err) {
+    size_t len = std::strlen(expected);
+    if (pos + len > s.size() || s.substr(pos, len) != expected) {
+        err = std::string("expected '") + expected + "' at position " + std::to_string(pos);
+        return false;
+    }
+    pos += len;
+    return true;
+}
+
+// parseString — parse a JSON string starting at the current quote, returning the raw content.
+static bool parseString(const std::string& s, size_t& pos, std::string& out, std::string& err) {
+    skipWs(s, pos);
+    if (pos >= s.size() || s[pos] != '"') {
+        err = "expected '\"' at position " + std::to_string(pos);
+        return false;
+    }
+    ++pos;
+    out.clear();
+    while (pos < s.size() && s[pos] != '"') {
+        if (s[pos] == '\\') {
+            ++pos;
+            if (pos >= s.size()) { err = "unexpected end in string escape"; return false; }
+            switch (s[pos]) {
+                case '"':  out += '"';  break;
+                case '\\': out += '\\'; break;
+                case 'n':  out += '\n'; break;
+                case 'r':  out += '\r'; break;
+                case 't':  out += '\t'; break;
+                default:   out += s[pos]; break;
+            }
+        } else {
+            out += s[pos];
+        }
+        ++pos;
+    }
+    if (pos >= s.size()) { err = "unterminated string"; return false; }
+    ++pos;  // consume closing quote
+    return true;
+}
+
+// parseInt64 — parse a signed integer (no overflow check; save files stay in safe range).
+static bool parseInt64(const std::string& s, size_t& pos, int64_t& out, std::string& err) {
+    skipWs(s, pos);
+    if (pos >= s.size()) { err = "unexpected end of input parsing integer"; return false; }
+    bool neg = false;
+    if (s[pos] == '-') { neg = true; ++pos; }
+    if (pos >= s.size() || !std::isdigit(static_cast<unsigned char>(s[pos]))) {
+        err = "expected digit at position " + std::to_string(pos);
+        return false;
+    }
+    int64_t v = 0;
+    while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
+        v = v * 10 + (s[pos] - '0');
+        ++pos;
+    }
+    out = neg ? -v : v;
+    return true;
+}
+
+// parseFloat — parse a floating-point number (handles negative, decimal, exponent).
+static bool parseFloat(const std::string& s, size_t& pos, float& out, std::string& err) {
+    skipWs(s, pos);
+    size_t start = pos;
+    if (pos < s.size() && (s[pos] == '-' || s[pos] == '+')) ++pos;
+    while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) ++pos;
+    if (pos < s.size() && s[pos] == '.') {
+        ++pos;
+        while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) ++pos;
+    }
+    if (pos < s.size() && (s[pos] == 'e' || s[pos] == 'E')) {
+        ++pos;
+        if (pos < s.size() && (s[pos] == '+' || s[pos] == '-')) ++pos;
+        while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) ++pos;
+    }
+    if (start == pos) { err = "expected float at position " + std::to_string(pos); return false; }
+    try {
+        out = std::stof(s.substr(start, pos - start));
+    } catch (...) {
+        err = "invalid float at position " + std::to_string(start);
+        return false;
+    }
+    return true;
+}
+
+// parseBool — parse JSON true/false.
+static bool parseBool(const std::string& s, size_t& pos, bool& out, std::string& err) {
+    skipWs(s, pos);
+    if (pos + 4 <= s.size() && s.substr(pos, 4) == "true") {
+        out = true; pos += 4; return true;
+    }
+    if (pos + 5 <= s.size() && s.substr(pos, 5) == "false") {
+        out = false; pos += 5; return true;
+    }
+    err = "expected 'true' or 'false' at position " + std::to_string(pos);
+    return false;
+}
+
+// parseKey — parse "key": from JSON object, return the key string.
+static bool parseKey(const std::string& s, size_t& pos, std::string& key, std::string& err) {
+    skipWs(s, pos);
+    if (!parseString(s, pos, key, err)) return false;
+    skipWs(s, pos);
+    return expect(s, pos, ":", err);
+}
+
+}  // anonymous namespace
+
+// ---------------------------------------------------------------------------
+// deserializeFromJson — restore city state from a JSON string produced by
+// serializeToJson().  Returns false on any error; sets errorOut.
+// ---------------------------------------------------------------------------
+bool CitySimulation::deserializeFromJson(const std::string& json, std::string& errorOut) {
+    size_t pos = 0;
+    skipWs(json, pos);
+    if (!expect(json, pos, "{", errorOut)) return false;
+
+    // Track which required top-level keys we've seen
+    bool gotVersion = false;
+    bool gotTreasury = false;
+    bool gotTaxRates = false;
+    bool gotDebt = false;
+    bool gotBondUses = false;
+    bool gotDeficitMonths = false;
+    bool gotSpeed = false;
+    bool gotMilestones = false;
+    bool gotVariantCounters = false;
+    bool gotTiles = false;
+    bool gotServiceBuildings = false;
+    bool gotUnlockFlags = false;
+    bool gotUnlockCounter = false;
+    bool gotTotalTicks = false;
+    bool gotMonth = false;
+    bool gotYear = false;
+    bool gotScenario = false;
+
+    // Temporary storage for the deserialized data (applied atomically at the end)
+    int64_t newTreasury = 0;
+    float   newTaxRates[3] = {0.05f, 0.05f, 0.05f};
+    int     newOutstandingBondUses = 0;
+    int     newConsecutiveDeficitMonths = 0;
+    SpeedMultiplier newSpeed = SpeedMultiplier::x3;
+    bool    newMilestoneFired[5] = {};
+    std::array<int,9> newVariantCounters{};
+    std::vector<std::pair<int64_t, TileData>> newTiles;
+    std::vector<ServiceBuilding> newServiceBuildings;
+    DensityUnlockState newDensityUnlock{};
+    int     newTotalTicks = 0;
+    int     newMonth = 1;
+    int     newYear = 1;
+    ScenarioState newScenario{};
+
+    skipWs(json, pos);
+    while (pos < json.size() && json[pos] != '}') {
+        std::string key;
+        if (!parseKey(json, pos, key, errorOut)) return false;
+        skipWs(json, pos);
+
+        if (key == "schema_version") {
+            int64_t v = 0;
+            if (!parseInt64(json, pos, v, errorOut)) return false;
+            if (v != 1) { errorOut = "unsupported schema_version: " + std::to_string(v); return false; }
+            gotVersion = true;
+
+        } else if (key == "treasury_balance") {
+            if (!parseInt64(json, pos, newTreasury, errorOut)) return false;
+            gotTreasury = true;
+
+        } else if (key == "tax_rates") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            for (int i = 0; i < 3; ++i) {
+                skipWs(json, pos);
+                if (!parseFloat(json, pos, newTaxRates[i], errorOut)) return false;
+                skipWs(json, pos);
+                if (i < 2) { if (!expect(json, pos, ",", errorOut)) return false; }
+            }
+            skipWs(json, pos);
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotTaxRates = true;
+
+        } else if (key == "outstanding_debt") {
+            // We don't restore loan list from this field (loans are not individually serialized
+            // in schema v1 for simplicity); the debt figure is informational on load.
+            // We just consume the value.
+            float dummy = 0.0f;
+            if (!parseFloat(json, pos, dummy, errorOut)) return false;
+            gotDebt = true;
+
+        } else if (key == "outstanding_bond_uses") {
+            int64_t v = 0;
+            if (!parseInt64(json, pos, v, errorOut)) return false;
+            newOutstandingBondUses = static_cast<int>(v);
+            gotBondUses = true;
+
+        } else if (key == "consecutive_deficit_months") {
+            int64_t v = 0;
+            if (!parseInt64(json, pos, v, errorOut)) return false;
+            newConsecutiveDeficitMonths = static_cast<int>(v);
+            gotDeficitMonths = true;
+
+        } else if (key == "speed_multiplier") {
+            int64_t v = 0;
+            if (!parseInt64(json, pos, v, errorOut)) return false;
+            switch (v) {
+                case 0: newSpeed = SpeedMultiplier::Paused; break;
+                case 1: newSpeed = SpeedMultiplier::x1;    break;
+                case 2: newSpeed = SpeedMultiplier::x3;    break;
+                case 3: newSpeed = SpeedMultiplier::x10;   break;
+                default:
+                    errorOut = "invalid speed_multiplier value: " + std::to_string(v);
+                    return false;
+            }
+            gotSpeed = true;
+
+        } else if (key == "population_milestone_fired") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            for (int i = 0; i < 5; ++i) {
+                skipWs(json, pos);
+                if (!parseBool(json, pos, newMilestoneFired[i], errorOut)) return false;
+                skipWs(json, pos);
+                if (i < 4) { if (!expect(json, pos, ",", errorOut)) return false; }
+            }
+            skipWs(json, pos);
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotMilestones = true;
+
+        } else if (key == "building_variant_counters") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            for (int i = 0; i < 9; ++i) {
+                skipWs(json, pos);
+                int64_t v = 0;
+                if (!parseInt64(json, pos, v, errorOut)) return false;
+                newVariantCounters[i] = static_cast<int>(v);
+                skipWs(json, pos);
+                if (i < 8) { if (!expect(json, pos, ",", errorOut)) return false; }
+            }
+            skipWs(json, pos);
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotVariantCounters = true;
+
+        } else if (key == "tiles") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            skipWs(json, pos);
+            while (pos < json.size() && json[pos] != ']') {
+                skipWs(json, pos);
+                if (!expect(json, pos, "{", errorOut)) return false;
+                int tileX = 0, tileZ = 0;
+                TileData td{};
+                bool first = true;
+                skipWs(json, pos);
+                while (pos < json.size() && json[pos] != '}') {
+                    if (!first) {
+                        skipWs(json, pos);
+                        if (json[pos] == ',') { ++pos; skipWs(json, pos); }
+                    }
+                    first = false;
+                    std::string tk;
+                    if (!parseKey(json, pos, tk, errorOut)) return false;
+                    skipWs(json, pos);
+                    if (tk == "x") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false; tileX = static_cast<int>(v);
+                    } else if (tk == "z") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false; tileZ = static_cast<int>(v);
+                    } else if (tk == "zone") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+                        if (v < 0 || v > 2) { errorOut = "invalid zone value"; return false; }
+                        td.zone = static_cast<ZoneType>(v);
+                    } else if (tk == "tier") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+                        if (v < 0 || v > 2) { errorOut = "invalid tier value"; return false; }
+                        td.density = static_cast<DensityTier>(v);
+                    } else if (tk == "is_zoned") {
+                        if (!parseBool(json, pos, td.isZoned, errorOut)) return false;
+                    } else if (tk == "is_road") {
+                        if (!parseBool(json, pos, td.isRoad, errorOut)) return false;
+                    } else if (tk == "population") {
+                        if (!parseFloat(json, pos, td.population, errorOut)) return false;
+                    } else if (tk == "alert_fired") {
+                        if (!parseBool(json, pos, td.alertFired, errorOut)) return false;
+                    } else {
+                        // Unknown tile field — skip string, number, bool, or nested value
+                        // Simple skip: consume until comma or }
+                        skipWs(json, pos);
+                        if (json[pos] == '"') {
+                            std::string dummy; if (!parseString(json, pos, dummy, errorOut)) return false;
+                        } else {
+                            while (pos < json.size() && json[pos] != ',' && json[pos] != '}') ++pos;
+                        }
+                    }
+                    skipWs(json, pos);
+                }
+                if (!expect(json, pos, "}", errorOut)) return false;
+                newTiles.emplace_back(tileKey(tileX, tileZ), td);
+                skipWs(json, pos);
+                if (pos < json.size() && json[pos] == ',') { ++pos; skipWs(json, pos); }
+            }
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotTiles = true;
+
+        } else if (key == "service_buildings") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            skipWs(json, pos);
+            while (pos < json.size() && json[pos] != ']') {
+                skipWs(json, pos);
+                if (!expect(json, pos, "{", errorOut)) return false;
+                ServiceBuilding sb{};
+                bool first = true;
+                skipWs(json, pos);
+                while (pos < json.size() && json[pos] != '}') {
+                    if (!first) {
+                        skipWs(json, pos);
+                        if (json[pos] == ',') { ++pos; skipWs(json, pos); }
+                    }
+                    first = false;
+                    std::string sk;
+                    if (!parseKey(json, pos, sk, errorOut)) return false;
+                    skipWs(json, pos);
+                    if (sk == "x") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false; sb.x = static_cast<int>(v);
+                    } else if (sk == "z") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false; sb.z = static_cast<int>(v);
+                    } else if (sk == "type") {
+                        int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+                        if (v < 0 || v > 3) { errorOut = "invalid service building type"; return false; }
+                        sb.type = static_cast<ServiceType>(v);
+                    } else if (sk == "degraded") {
+                        if (!parseBool(json, pos, sb.degraded, errorOut)) return false;
+                    } else {
+                        skipWs(json, pos);
+                        if (json[pos] == '"') {
+                            std::string dummy; if (!parseString(json, pos, dummy, errorOut)) return false;
+                        } else {
+                            while (pos < json.size() && json[pos] != ',' && json[pos] != '}') ++pos;
+                        }
+                    }
+                    skipWs(json, pos);
+                }
+                if (!expect(json, pos, "}", errorOut)) return false;
+                newServiceBuildings.push_back(sb);
+                skipWs(json, pos);
+                if (pos < json.size() && json[pos] == ',') { ++pos; skipWs(json, pos); }
+            }
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotServiceBuildings = true;
+
+        } else if (key == "density_unlock_flags") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            for (int i = 0; i < 6; ++i) {
+                skipWs(json, pos);
+                if (!parseBool(json, pos, newDensityUnlock.unlock_flags[i], errorOut)) return false;
+                skipWs(json, pos);
+                if (i < 5) { if (!expect(json, pos, ",", errorOut)) return false; }
+            }
+            skipWs(json, pos);
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotUnlockFlags = true;
+
+        } else if (key == "density_unlock_revenue_counter") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "[", errorOut)) return false;
+            for (int i = 0; i < 6; ++i) {
+                skipWs(json, pos);
+                int64_t v = 0;
+                if (!parseInt64(json, pos, v, errorOut)) return false;
+                newDensityUnlock.consecutive_months_above_threshold[i] = static_cast<int>(v);
+                skipWs(json, pos);
+                if (i < 5) { if (!expect(json, pos, ",", errorOut)) return false; }
+            }
+            skipWs(json, pos);
+            if (!expect(json, pos, "]", errorOut)) return false;
+            gotUnlockCounter = true;
+
+        } else if (key == "total_ticks") {
+            int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+            newTotalTicks = static_cast<int>(v);
+            gotTotalTicks = true;
+
+        } else if (key == "month") {
+            int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+            if (v < 1 || v > 12) { errorOut = "month out of range: " + std::to_string(v); return false; }
+            newMonth = static_cast<int>(v);
+            gotMonth = true;
+
+        } else if (key == "year") {
+            int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+            newYear = static_cast<int>(v);
+            gotYear = true;
+
+        } else if (key == "scenario_state") {
+            skipWs(json, pos);
+            if (!expect(json, pos, "{", errorOut)) return false;
+            bool first = true;
+            skipWs(json, pos);
+            while (pos < json.size() && json[pos] != '}') {
+                if (!first) {
+                    skipWs(json, pos);
+                    if (json[pos] == ',') { ++pos; skipWs(json, pos); }
+                }
+                first = false;
+                std::string sk;
+                if (!parseKey(json, pos, sk, errorOut)) return false;
+                skipWs(json, pos);
+                if (sk == "win_condition_progress") {
+                    if (!parseFloat(json, pos, newScenario.win_condition_progress, errorOut)) return false;
+                } else if (sk == "elapsed_ticks") {
+                    int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
+                    newScenario.elapsed_ticks = static_cast<int>(v);
+                } else if (sk == "scenario_id") {
+                    if (!parseString(json, pos, newScenario.scenario_id, errorOut)) return false;
+                } else {
+                    skipWs(json, pos);
+                    if (json[pos] == '"') {
+                        std::string dummy; if (!parseString(json, pos, dummy, errorOut)) return false;
+                    } else {
+                        while (pos < json.size() && json[pos] != ',' && json[pos] != '}') ++pos;
+                    }
+                }
+                skipWs(json, pos);
+            }
+            if (!expect(json, pos, "}", errorOut)) return false;
+            gotScenario = true;
+
+        } else {
+            // Unknown top-level key — skip the value (string, number, bool, array, object)
+            skipWs(json, pos);
+            char c = json[pos];
+            if (c == '"') {
+                std::string dummy; if (!parseString(json, pos, dummy, errorOut)) return false;
+            } else if (c == '[' || c == '{') {
+                // Simple depth-tracking skip
+                int depth = 0;
+                while (pos < json.size()) {
+                    char ch = json[pos++];
+                    if (ch == '[' || ch == '{') ++depth;
+                    else if (ch == ']' || ch == '}') { --depth; if (depth <= 0) break; }
+                    else if (ch == '"') {
+                        // Skip string contents
+                        while (pos < json.size() && json[pos] != '"') {
+                            if (json[pos] == '\\') ++pos;
+                            ++pos;
+                        }
+                        if (pos < json.size()) ++pos;
+                    }
+                }
+            } else {
+                // number/bool/null — advance to comma or }
+                while (pos < json.size() && json[pos] != ',' && json[pos] != '}') ++pos;
+            }
+        }
+
+        skipWs(json, pos);
+        if (pos < json.size() && json[pos] == ',') { ++pos; }
+        skipWs(json, pos);
+    }
+
+    if (!expect(json, pos, "}", errorOut)) return false;
+
+    // Validate all required fields were present
+    if (!gotVersion)         { errorOut = "missing schema_version";               return false; }
+    if (!gotTreasury)        { errorOut = "missing treasury_balance";             return false; }
+    if (!gotTaxRates)        { errorOut = "missing tax_rates";                    return false; }
+    if (!gotDebt)            { errorOut = "missing outstanding_debt";             return false; }
+    if (!gotBondUses)        { errorOut = "missing outstanding_bond_uses";        return false; }
+    if (!gotDeficitMonths)   { errorOut = "missing consecutive_deficit_months";   return false; }
+    if (!gotSpeed)           { errorOut = "missing speed_multiplier";             return false; }
+    if (!gotMilestones)      { errorOut = "missing population_milestone_fired";   return false; }
+    if (!gotVariantCounters) { errorOut = "missing building_variant_counters";    return false; }
+    if (!gotTiles)           { errorOut = "missing tiles";                        return false; }
+    if (!gotServiceBuildings){ errorOut = "missing service_buildings";            return false; }
+    if (!gotUnlockFlags)     { errorOut = "missing density_unlock_flags";         return false; }
+    if (!gotUnlockCounter)   { errorOut = "missing density_unlock_revenue_counter"; return false; }
+    if (!gotTotalTicks)      { errorOut = "missing total_ticks";                  return false; }
+    if (!gotMonth)           { errorOut = "missing month";                        return false; }
+    if (!gotYear)            { errorOut = "missing year";                         return false; }
+    if (!gotScenario)        { errorOut = "missing scenario_state";               return false; }
+
+    // ---- Atomically apply the deserialized state ----
+    m_treasury               = newTreasury;
+    m_taxRates[0]            = newTaxRates[0];
+    m_taxRates[1]            = newTaxRates[1];
+    m_taxRates[2]            = newTaxRates[2];
+    m_outstandingBondUses    = newOutstandingBondUses;
+    m_consecutiveDeficitMonths = newConsecutiveDeficitMonths;
+    m_speed                  = newSpeed;
+    for (int i = 0; i < 5; ++i) m_milestoneFired[i] = newMilestoneFired[i];
+    m_buildingVariantCounters = newVariantCounters;
+
+    m_tiles.clear();
+    m_roadTileCount = 0;
+    for (auto& [k, td] : newTiles) {
+        m_tiles[k] = td;
+        if (td.isRoad) ++m_roadTileCount;
+    }
+
+    m_serviceBuildings       = std::move(newServiceBuildings);
+    m_densityUnlockState     = newDensityUnlock;
+    m_totalTicks             = newTotalTicks;
+    m_month                  = newMonth;
+    m_year                   = newYear;
+    m_scenarioState          = std::move(newScenario);
+
+    // Clear loan list on load (not serialized individually in schema v1).
+    // outstanding_bond_uses is restored for the usage-cap check.
+    m_loans.clear();
+    m_loanCooldownTicks = 0;
+
+    // Rebuild total population from tile data
+    int totalPop = 0;
+    for (const auto& [k, td] : m_tiles) {
+        totalPop += static_cast<int>(td.population);
+    }
+    m_totalPopulation = totalPop;
+    m_prevPopulation  = totalPop;
+
+    // Clear per-tick caches (will be recomputed on next tick)
+    m_pendingUndo.reset();
+    m_undoExpiryTickTarget = -1;
+    m_accumulatedSimSeconds = 0.0f;
+
+    return true;
 }

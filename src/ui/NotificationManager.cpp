@@ -13,6 +13,8 @@
 
 #include "src/ui/NotificationManager.h"
 #include "src/platform/input_event.h"  // InputEvent — full include here, not in the header
+#include "src/interfaces/IAudioSystem.h"  // full include in .cpp for m_audio->playSound() calls
+#include "src/interfaces/sound_ids.h"     // UI_TOAST = SoundId 23
 
 #include <algorithm>
 #include <cstddef>
@@ -28,10 +30,12 @@ namespace {
 // ----------------------------------------------------------------
 // Constructor
 // ----------------------------------------------------------------
-NotificationManager::NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock)
+NotificationManager::NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock,
+                                         IAudioSystem* audio)
     : m_backend(backend)
     , m_sim(sim)
     , m_clock(clock)
+    , m_audio(audio)
 {}
 
 // ----------------------------------------------------------------
@@ -77,6 +81,14 @@ void NotificationManager::postCritical(const std::string& title, const std::stri
     // Refresh UI elements to show the new toast if room is available.
     refreshCriticalVisibility();
     refreshNormalVisibility();
+
+    // Phase 10: fire ui_toast SFX when the new CRITICAL toast became visible on screen.
+    // Fires once per appearance — not per enqueue — only when a UI element was created.
+    // Guard: !m_criticalQueue.empty() (defensive; we just pushed_back above).
+    if (m_audio && !m_criticalQueue.empty() &&
+        m_criticalQueue.back().handle != kInvalidUIElement) {
+        m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f);
+    }
 }
 
 // ----------------------------------------------------------------
@@ -97,6 +109,14 @@ void NotificationManager::postNormal(const std::string& title, const std::string
     m_normalQueue.push_back(NormalToast{title, truncateBody(body), expiryTime, kInvalidUIElement});
 
     refreshNormalVisibility();
+
+    // Phase 10: fire ui_toast SFX when the new Normal toast became visible on screen.
+    // Fires once per appearance — not per enqueue — only when a UI element was created.
+    // Guard: !m_normalQueue.empty() (defensive; we just pushed_back above).
+    if (m_audio && !m_normalQueue.empty() &&
+        m_normalQueue.back().handle != kInvalidUIElement) {
+        m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f);
+    }
 }
 
 // ----------------------------------------------------------------
@@ -289,6 +309,9 @@ void NotificationManager::toggleLog() {
             // Virtual bounds: x:1468-1868, y:56-556.
             m_logPanelHandle = m_backend->addStaticText("Notification Log",
                                                         1468, 56, 400, 500);
+            // Dark navy semi-opaque background. Phase 10c Glass City Colour Pass.
+            // Signature: setElementBackground(handle, r, g, b, a)
+            m_backend->setElementBackground(m_logPanelHandle, 13, 27, 42, 209);
         }
         if (m_logPanelHandle != kInvalidUIElement && m_backend) {
             // Build log text from entries.

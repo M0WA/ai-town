@@ -6,6 +6,7 @@
 class UIScaler;
 class UIManager;
 class CameraController;
+class IrrlichtUIBackend;  // for handleGuiHoverEvent() hover sprite swapping
 
 // EventReceiver — translates Irrlicht SEvent to InputEvent and dispatches per the
 // 6-priority input arbitration chain (architecture/ui-ux/input-arbitration.md).
@@ -36,7 +37,10 @@ class CameraController;
 class EventReceiver : public irr::IEventReceiver {
 public:
     // Constructor — all pointers may be null (null-safe dispatch).
-    EventReceiver(UIScaler* scaler, UIManager* uiManager, CameraController* camera);
+    // uiBackend: may be null; when non-null, EET_GUI_EVENT hover events are
+    // forwarded to IrrlichtUIBackend::handleGuiHoverEvent() for sprite swapping.
+    EventReceiver(UIScaler* scaler, UIManager* uiManager, CameraController* camera,
+                  IrrlichtUIBackend* uiBackend = nullptr);
 
     // IEventReceiver override — called by Irrlicht for every input event.
     bool OnEvent(const irr::SEvent& event) override;
@@ -50,9 +54,10 @@ public:
     void dispatchFocusEvent(bool gained);
 
 private:
-    UIScaler*        m_scaler;
-    UIManager*       m_uiManager;
-    CameraController* m_camera;
+    UIScaler*          m_scaler;
+    UIManager*         m_uiManager;
+    CameraController*  m_camera;
+    IrrlichtUIBackend* m_uiBackend{nullptr};  // for hover sprite swapping (may be null)
 
     // Drag state — MUST be initialized to false.
     bool m_rmbDragActive{false};  // true while RMB (button=1) is held down

@@ -88,7 +88,8 @@ private:
 
     // parseMeta() — parse a .meta JSON sidecar file.
     //
-    // Extracts "height_floors":N and "lod_distances":[a,b,c] using sscanf.
+    // Extracts "height_floors":N, "lod_distances":[a,b,c], and
+    // "atlas_cell":{"row":R,"col":C} using sscanf.
     // This is a minimal hand-written parser — no external JSON library is required.
     //
     // metaPath     — full path to the .meta file.
@@ -96,12 +97,17 @@ private:
     // lod0dist     — output: lod_distances[0] (LOD0→LOD1 swap-out metres).
     // lod1dist     — output: lod_distances[1] (LOD1→LOD2 swap-out metres).
     // cullDist     — output: lod_distances[2] (cull distance metres).
+    // atlasRow     — output: atlas_cell.row (0-based row in 4×4 cell grid).
+    // atlasCol     — output: atlas_cell.col (0-based column in 4×4 cell grid).
     //
     // Returns true on success; false if the file cannot be opened or the required
-    // keys are not found.
+    // keys are not found.  atlasRow/atlasCol default to 0 if "atlas_cell" is
+    // absent (safe fallback — renders using cell (0,0) of the atlas).
     bool parseMeta(const std::string& metaPath,
                    int&               heightFloors,
                    float&             lod0dist,
                    float&             lod1dist,
-                   float&             cullDist);
+                   float&             cullDist,
+                   int&               atlasRow,
+                   int&               atlasCol);
 };

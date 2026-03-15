@@ -8,7 +8,7 @@
 //       A typo kSFXPoolSize=57 (instead of 58) compiles silently without these.
 #include "src/interfaces/IAudioSystem.h"
 #include "src/audio/audio_constants.h"
-#include "tests/simulation/mock_audio_system.h"
+#include "tests/simulation/MockAudioSystem.h"
 #include <vorbis/vorbisfile.h>
 #include <gtest/gtest.h>
 #include "gmock/gmock.h"

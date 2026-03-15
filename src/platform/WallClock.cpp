@@ -10,7 +10,7 @@
 // IMPORTANT: The raw delta from nowSeconds() MUST NEVER be pre-multiplied by a speed
 // multiplier at the call site or main loop level. CitySimulation::tick() owns all
 // speed-scaling internally per architecture/game-design/simulation-time.md.
-#include "src/interfaces/WallClock.h"
+#include "src/platform/WallClock.h"
 #include <chrono>
 
 double WallClock::nowSeconds() const {

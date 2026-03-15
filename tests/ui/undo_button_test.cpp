@@ -10,10 +10,10 @@
 #include "src/ui/UIManager.h"
 #include "src/ui/ui_types.h"
 #include "src/platform/input_event.h"
-#include "tests/ui/mock_ui_backend.h"
-#include "tests/ui/mock_city_simulation.h"
-#include "tests/simulation/mock_audio_system.h"
-#include "tests/simulation/manual_clock.h"
+#include "tests/ui/MockUIBackend.h"
+#include "tests/ui/MockCitySimulation.h"
+#include "tests/simulation/MockAudioSystem.h"
+#include "tests/simulation/ManualClock.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>

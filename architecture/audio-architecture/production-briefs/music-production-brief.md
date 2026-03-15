@@ -20,7 +20,7 @@ hard asset error that will fail `validate_assets.py` Check #14 and block Phase 1
 | Bit depth | 16-bit |
 | Channels | Stereo (2 channels) |
 | Format | OGG Vorbis |
-| Root key / mode | Same root key across all 8 files; calm/growth/main-menu in major mode; crisis may use parallel minor (see note below) |
+| Root key / mode | **A natural minor (Aeolian mode), root A** — locked for all 8 V1 music files. All intensity tiers including crisis use A natural minor. See `architecture/audio-architecture/dynamic-soundscape.md` Cross-tier harmonic compatibility requirement and the Mode constraint section below. |
 | Loudness target | −16 LUFS integrated |
 | True-peak ceiling | −1 dBTP |
 
@@ -29,15 +29,24 @@ compatibility requirement: the engine can transition from any music context (mai
 calm, growth, crisis) to any other on a bar boundary, and the crossfade must not produce
 harmonic clashes.
 
-**Mode constraint (SA-2 revision 2026-03-03):** Calm, growth, and main-menu stems must
-use major mode. Crisis stems may use the parallel minor (same root, different mode).
-During a calm→crisis or growth→crisis crossfade, simultaneous major and minor material on
-a shared root produces modal mixture — a musically established technique for intensity
-transitions that does not constitute a harmonic clash. A new crossfade audibility demo
-(major calm stem into minor crisis stem, 3 s constant-power) is required before crisis
-stems in parallel minor are approved for delivery; until that demo is approved, crisis
-stems must remain in the same mode as calm/growth. The existing approval (HTML comment
-above) covers only major→major crossfades and does not extend to major→minor.
+**Root key and mode (V1 final decision — 2026-03-03):** All 8 music files are authored in
+**A natural minor (Aeolian mode), root A**. This applies to all intensity tiers including
+crisis. Rationale: A natural minor shares the key signature of C major (no sharps or flats)
+while its neutral-to-melancholic Aeolian character suits the city-builder aesthetic; root A
+at 440 Hz aligns to concert pitch (A440); and A natural minor provides a clear harmonic
+vocabulary for differentiating calm, growth, and crisis intensity tiers through orchestration
+weight, rhythmic density, and dissonant cluster voicings within the same scale. Crisis stems
+differentiate from calm and growth via heavier percussion, denser layering, tighter rhythmic
+syncopation, dissonant cluster voicings (e.g. diminished 7ths, tritone extensions, dense
+minor-mode stacking), and increased orchestral density — all within A natural minor. A mode
+change (e.g. parallel A major or any other mode) during a live crossfade would produce
+harmonic dissonance between the simultaneous mode-mismatched chord material; this is not
+acceptable because the engine does not control which specific chords are sounding at
+the crossfade point. **Crisis stems in any mode other than A natural minor are prohibited in V1.**
+If the sound artist later proposes parallel-major or other-mode crisis stems, a new 3 s
+constant-power crossfade demo (A natural minor calm stem into the proposed mode crisis stem,
+bar-aligned at 90 BPM) must be submitted and approved by the full team first. That
+demo has not been requested for V1.
 
 **Ambient beds (`ambient_*.ogg`) are NOT covered by this brief.** They are a separate
 deliverable (see `ambient-bed-production-brief.md`). No JSON sidecar is required for
@@ -72,6 +81,15 @@ All bar counts above are exact multiples of 117,600. The 48000→44100 Hz resamp
 Verify bar count in the DAW before export. Export to sample-accurate length. A stem that
 is even 1 sample long or short will accumulate crossfade drift; this will be caught by
 `validate_assets.py` Check #14 duration tolerance check in Phase 5.
+
+**`assets/audio/music_bar_counts.md` (SA-3 repository artifact)**: before authoring any
+production stem OGG file, commit a plain-text file at `assets/audio/music_bar_counts.md`
+listing the confirmed bar count for each of the 8 music files. If this file was produced
+during Phase 4, confirm it exists in the repository. The required file format is specified
+in `architecture/audio-architecture/v1-audio-asset-manifest.md` "Phase 10 QA Delivery
+Artifacts" section (`assets/audio/music_bar_counts.md`). The locked values are those in
+the SA-3 table above. Non-integer bar counts or values that deviate from the SA-3 targets
+are a delivery failure.
 
 ---
 
@@ -126,9 +144,11 @@ Authoring checklist:
 - Export ends on the last sample of the final bar — not 1 sample after.
 - No DC offset at head or tail.
 - No fade-in or fade-out applied by the DAW — the engine handles gain ramping.
-- All 8 files rendered at the same root key before export. Calm, growth, and main-menu
-  stems in major mode. Crisis stems in major mode (or parallel minor if the major→minor
-  crossfade demo has been approved — see Root key / mode note above).
+- All 8 files rendered in **A natural minor (Aeolian mode), root A**. This applies to all
+  intensity tiers including crisis. Crisis stems in any other key or mode are NOT permitted
+  in V1 — a separate crossfade demo approval for any non-Aeolian mode is required first
+  and has not been obtained. See `architecture/audio-architecture/dynamic-soundscape.md`
+  and the Mode constraint section of this document.
 
 ---
 
@@ -147,6 +167,73 @@ production is blocked until both SA-3 and the crossfade demo are approved.
 
 The approval for this demo is recorded in the HTML comment at the top of this document.
 
+## Phase 10 Crossfade Demo Delivery Artifacts (BLOCKING Phase 10 exit)
+
+Three files must be committed to `assets/audio/crossfade_demos/` as a unit, in the same
+PR as the corrected music stem OGG files. These files are mandatory Phase 10 exit
+deliverables.
+
+**Sequencing dependency**: these demos cannot be rendered until all 8 stems are
+re-exported at the correct bar-count lengths (96.00 s for calm/growth/crisis, 128.00 s
+for main-menu). The demo files sourced from the wrong-duration placeholders are not valid
+QA artifacts. Render the demos AFTER the re-export procedure above is complete.
+
+### `assets/audio/crossfade_demos/crossfade_demo_calm_to_growth.wav`
+
+**Format**: WAV PCM, 44100 Hz, 16-bit, stereo. Duration: exactly 15 s.
+
+**Rendering procedure**:
+
+1. Load `music_calm_01.ogg` and `music_growth_01.ogg` (the re-exported versions) in the
+   DAW on two parallel stereo tracks, both starting at t=0.
+2. The outgoing track (`music_calm_01`) plays at gain 1.0 from t=0 to t=6 s.
+3. At t=6 s, begin a 3 s constant-power crossfade:
+   - `music_calm_01` fades out: `gain_out = cos(t_cf × π/2)` where `t_cf` runs 0→1
+     over 3 s. At t_cf=0 gain_out=1.0; at t_cf=0.5 gain_out≈0.707; at t_cf=1.0
+     gain_out=0.0.
+   - `music_growth_01` fades in: `gain_in = sin(t_cf × π/2)` where `t_cf` runs 0→1
+     over 3 s. At t_cf=0 gain_in=0.0; at t_cf=0.5 gain_in≈0.707; at t_cf=1.0
+     gain_in=1.0.
+   - Most DAW automation tools can produce this curve using a 3 s equal-power
+     crossfade preset. If not available, use a cubic equal-power curve or manually
+     compute points at 0.25 s intervals.
+4. At t=9 s, crossfade complete. `music_growth_01` plays at gain 1.0 from t=9 s to t=15 s.
+5. Render the 15 s region (t=0 to t=15 s) to WAV at 44100 Hz 16-bit stereo.
+6. Apply a −0.1 dBTP true-peak limiter on the render to prevent WAV clipping. Do NOT
+   loudness-normalise — the raw crossfade gain curve must be audible.
+7. Verify: both stems simultaneously audible from t=6 to t=9 s; no harmonic clash or
+   audible pop; the transition sounds natural at bar alignment.
+
+### `assets/audio/crossfade_demos/crossfade_demo_mainmenu_to_calm.wav`
+
+**Format**: WAV PCM, 44100 Hz, 16-bit, stereo. Duration: exactly 15 s.
+
+Same rendering procedure as `crossfade_demo_calm_to_growth.wav`, but using
+`music_main_menu_01.ogg` as the outgoing stem and `music_calm_01.ogg` as the incoming
+stem. The crossfade begins at t=6 s and completes at t=9 s.
+
+### `assets/audio/crossfade_demos/crossfade_demo_qa.md`
+
+A plain-text QA sign-off document. The file must contain:
+
+1. Statement that both WAV demos (`crossfade_demo_calm_to_growth.wav` and
+   `crossfade_demo_mainmenu_to_calm.wav`) were listened through in full by the sound
+   artist AND a second listener (`prod-owner` or any available team member with audio
+   playback capability).
+2. Statement that no harmonic clashes, audible pops, or abrupt transitions were detected
+   in either demo.
+3. Confirmed root key and mode: **A natural minor (Aeolian mode), root A** for all 8
+   music files.
+4. Per-stem bar count confirmation:
+   - `music_main_menu_01`, `music_main_menu_02`: 48 bars = 128.00 s
+   - `music_calm_01`, `music_calm_02`, `music_growth_01`, `music_growth_02`,
+     `music_crisis_01`, `music_crisis_02`: 36 bars = 96.00 s each
+5. Sign-off names (sound artist and second listener) and date.
+
+A blocking objection (harmonic clash, audible pop, wrong key, incorrect bar count)
+must be filed as a PR comment before the QA document is accepted. The artist revises
+the demo and the qa.md before the PR merges.
+
 ---
 
 ## Delivery Verification Checklist
@@ -154,12 +241,15 @@ The approval for this demo is recorded in the HTML comment at the top of this do
 Before submitting assets for Phase 10 exit review, confirm each of the following.
 
 - [x] All 8 OGG files exported at 44100 Hz, 16-bit, stereo.
-- [ ] All 8 OGG files loudness-checked: integrated LUFS = −16, true peak ≤ −1 dBTP.
-- [ ] All 8 OGG files are integer-bar length at 90 BPM (sample-accurate).
+- [ ] **FAIL — remediation required:** All 8 OGG files loudness-checked: integrated LUFS = −16 ±1 LU, true peak ≤ −1 dBTP. Currently: `music_calm_01`, `music_calm_02`, `music_growth_01`, `music_growth_02` measure −13.9 LUFS (apply −2.1 LU gain reduction); `music_growth_01` also clips at −0.8 dBFS true peak (apply −1 dBTP true-peak limiter after gain reduction). See Re-Export Procedure above.
+- [ ] **FAIL — remediation required:** All 8 OGG files are integer-bar length at 90 BPM (sample-accurate). Currently all 8 files fail SA-3 bar-count conformance (none within ±0.05 s of target duration). See Re-Export Procedure above.
 - [x] All 8 JSON sidecars present and conformant with `tools/music_sidecar_schema.json`.
-- [ ] All 8 files share the same root key; mode constraint verified (major for calm/growth/main-menu; crisis major or approved parallel minor).
+- [ ] All 8 files confirmed in **A natural minor (Aeolian mode), root A** — verify by loading each OGG in the DAW and confirming root pitch is A and mode is Aeolian (natural minor); confirm no parallel-major or parallel-mode crisis stems are present. Record confirmation in `crossfade_demo_qa.md`.
 - [ ] Loop tail of each file aligns to bar boundary with no click.
-- [x] Crossfade demo approved (recorded above).
+- [x] Crossfade demo (pre-production SA-2 gate) approved (recorded above in HTML comment).
+- [ ] **PENDING — blocked on re-export:** `assets/audio/crossfade_demos/crossfade_demo_calm_to_growth.wav` rendered at 44100 Hz 16-bit stereo, exactly 15 s, using corrected stems (cannot be rendered until bar-count fix is complete). See Phase 10 Crossfade Demo Delivery Artifacts section.
+- [ ] **PENDING — blocked on re-export:** `assets/audio/crossfade_demos/crossfade_demo_mainmenu_to_calm.wav` rendered at 44100 Hz 16-bit stereo, exactly 15 s, using corrected stems.
+- [ ] **PENDING:** `assets/audio/crossfade_demos/crossfade_demo_qa.md` committed with two-listener sign-off, root key confirmation, and per-stem bar count confirmation.
 
 ---
 
@@ -219,18 +309,64 @@ duration. Expected values for calm and growth updated from 32 bars (85.33 s) to 
 
 - **Loudness — 4 files hot:** `music_calm_01`, `music_calm_02`, `music_growth_01`,
   `music_growth_02` measure −13.9 LUFS integrated. Apply gain reduction of approximately
-  −2.1 LU and re-export to reach −16 LUFS target (±1 LU).
+  −2.1 LU and re-export to reach −16 LUFS target (±1 LU). See Re-Export Procedure below.
 - **True peak — 1 file over ceiling:** `music_growth_01` measures −0.8 dBFS true peak.
-  Apply a true-peak limiter (ceiling −1 dBTP) before delivery.
+  Apply a true-peak limiter (ceiling −1 dBTP) before delivery. Do this AFTER applying the
+  loudness gain reduction — the limiter must operate on the gain-reduced signal, not the
+  original hot signal, to avoid false limiting that raises the LUFS back toward −13.9.
 - **Bar-count — all 8 files non-conformant:** Every stem deviates from its SA-3 locked
   duration by more than ±0.05 s. Re-export each file from the DAW at the corrected
   sample-accurate targets: calm/growth/crisis at **36 bars = 96.00 s = 4,233,600 samples**;
   main-menu at **48 bars = 128.00 s = 5,644,800 samples**. Verify with `validate_assets.py`
-  Check #14 before Phase 10 exit review.
+  Check #14 before Phase 10 exit review. See Re-Export Procedure below.
 - **Root key / mode:** Requires DAW or audio-engineer review to confirm all 8 files share
-  the same root key and mode. Cannot be confirmed by automated loudness measurement.
+  the same root key and mode (**A natural minor, Aeolian, root A**). Cannot be confirmed by
+  automated loudness measurement. Record the confirmation in `crossfade_demo_qa.md`.
 - **Loop tail click-check:** Requires DAW or audio-engineer review to confirm each file's
   tail aligns to the bar boundary with no click or phase artifact.
+- **Crossfade demo WAV files not yet rendered:** `assets/audio/crossfade_demos/` directory
+  does not yet exist. `crossfade_demo_calm_to_growth.wav` and
+  `crossfade_demo_mainmenu_to_calm.wav` cannot be rendered until all 8 stems are re-exported
+  at the correct bar-count lengths. Sequencing: (1) fix bar counts and loudness first,
+  (2) render crossfade demos using the corrected stems, (3) commit all three files
+  (`crossfade_demo_calm_to_growth.wav`, `crossfade_demo_mainmenu_to_calm.wav`,
+  `crossfade_demo_qa.md`) in the same PR as the music stem OGG files.
+
+### Re-Export Procedure for Bar-Count and Loudness Correction
+
+The following procedure applies to all 8 stems. For stems that fail only loudness (calm,
+growth) but not only bar count, both issues must be fixed in the same re-export pass —
+do not apply gain normalisation to the wrong-duration file and then attempt to trim it.
+
+1. Open the DAW project for the stem.
+2. Set the DAW's export start to beat 1 of bar 1.
+3. Set the DAW's export end to the **last sample of bar N** (not 1 sample after):
+   - For calm/growth/crisis stems: bar 36 end = exactly 96.000 s = 4,233,600 samples at
+     44100 Hz (formula: `36 × 4 × (44100 × 60 / 90) = 36 × 117,600 = 4,233,600`).
+   - For main-menu stems: bar 48 end = exactly 128.000 s = 5,644,800 samples at 44100 Hz
+     (formula: `48 × 117,600 = 5,644,800`).
+4. Export to WAV at 44100 Hz, 16-bit, stereo. No DAW-level fade-in or fade-out.
+5. Measure integrated LUFS with a BS.1770-3 meter. Target: −16 LUFS ±1 LU (−17 to −15
+   is acceptable).
+6. For the four hot stems (calm_01, calm_02, growth_01, growth_02): apply a gain reduction
+   of approximately −2.1 dB. Measure again to verify. The meter must read −16 LUFS ±1 LU.
+7. Apply a true-peak limiter with ceiling −1 dBTP. Verify the true peak is ≤ −1 dBTP.
+   (For `music_growth_01` in particular, confirm the true peak is now ≤ −1 dBTP after
+   the −2.1 dB gain reduction — if the gain reduction alone brings the true peak to
+   ≤ −1 dBTP, the limiter is still required as a safety net but may not engage.)
+8. Export the final WAV to OGG at **libvorbis -q 8**.
+9. Verify with `soxi` or `ogginfo`: channels = 2, rate = 44100.
+10. Verify duration: use `soxi -D` to get the duration in seconds. It must be within
+    ±0.05 s of the target:
+    - Calm/growth/crisis: 96.00 s ± 0.05 s → 95.95–96.05 s.
+    - Main-menu: 128.00 s ± 0.05 s → 127.95–128.05 s.
+    OGG Vorbis encoding may add or remove a few samples due to granule padding; the
+    soxi-reported duration should be within this window. If it is not, the DAW export
+    end point was incorrect — revise the DAW trim and repeat from step 3.
+11. Run `python3 tools/validate_assets.py` locally and confirm Check #14 passes for
+    all 8 stems.
+12. Render the crossfade demos (see Crossfade Demo section) using the corrected OGG files.
+13. Commit all 8 OGG files, all 8 JSON sidecars, and the crossfade demo files in a single PR.
 
 ---
 
@@ -259,17 +395,32 @@ Rationale for 36 over the minimum-compliant 34 bars (90.67 s):
 The previously-delivered calm/growth files (90–94 s, ~34–35 bars) are below the corrected
 target and must be re-exported at 36 bars = 96.00 s before Phase 10 exit.
 
-### Mode constraint relaxation — crisis parallel minor permitted
+### Mode constraint — V1 final decision: A natural minor (Aeolian) locked for all stems
 
-The original constraint requiring all 8 stems to share identical root key AND mode is
-relaxed for crisis stems only. Crisis stems may use the parallel minor of the shared root
-key. Simultaneous major+minor material on a shared root during a crossfade produces modal
-mixture, not a harmonic clash.
+The Deep Review (2026-03-03) locked the root key and mode as **A natural minor (Aeolian),
+root A** for all 8 V1 music files. Any alternative mode (parallel major, relative major,
+or otherwise) is **permanently rejected for V1** (decision recorded in
+`implementation/phase-10.md` Music stems deliverable and
+`architecture/audio-architecture/dynamic-soundscape.md`).
 
-**Gate:** A new crossfade audibility demo (major calm stem into parallel-minor crisis stem,
-3 s constant-power, bar-aligned) must be submitted and approved before crisis stems in
-parallel minor are accepted for delivery. The existing approval (HTML comment at top of
-document) covers major→major only and does not extend to major→minor.
+Rationale for rejection:
+
+- No crossfade audibility demo for A natural minor→parallel-major has been produced or approved.
+- Producing the demo mid-Phase 10 adds schedule risk.
+- Crisis intensity is fully achievable within A natural minor through orchestration, rhythmic
+  density, and dissonant chord extensions without a mode change.
+- The engine crossfade point is non-deterministic at the chord level — a simultaneous
+  A minor calm chord and A major crisis chord at the crossfade moment would produce
+  an audible harmonic clash, not "modal mixture."
+
+**V1 final constraint**: All 8 music files (calm, growth, crisis, main-menu) are in
+**A natural minor (Aeolian mode), root A**. No exceptions. Crisis stems in any other mode will
+be rejected at the musical QA step (`crossfade_demo_qa.md`).
+
+Post-V1: parallel-major crisis stems (`music_crisis_major_01/02`) may be added as
+separate assets once a complete minor→parallel-major crossfade demo has been produced and
+approved by the full team. The demo requirement from the original Deep Review text remains
+in place for any post-V1 mode-change delivery.
 
 ### Variant compatibility authoring guidance
 

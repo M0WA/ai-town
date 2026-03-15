@@ -31,6 +31,12 @@ inline constexpr int   kBeatsPerBar          = 4;
 // Minimum hold = 1 crossfade duration before a new crossfade may begin.
 inline constexpr float kMusicCrossfadeDurationSeconds = 4.0f;
 
+// Short crossfade used when transitioning from main menu music to the first
+// gameplay stem.  The spec mandates 1 s (constant-power, real-time delta).
+// Shorter than kMusicCrossfadeDurationSeconds to keep the UI transition snappy
+// while still avoiding a jarring hard cut.
+inline constexpr float kMenuToGameplayCrossfadeDurationSeconds = 1.0f;
+
 // Music duck gain applied to music stems while a stinger is playing.
 // Ambient beds are NOT affected — this applies to music stems only.
 inline constexpr float kMusicDuckGain        = 0.4f;

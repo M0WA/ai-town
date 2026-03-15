@@ -22,16 +22,16 @@
 //   density_upgrade_wave_demand_threshold = 0.75f
 //   SECONDS_PER_BUDGET_TICK = 30.0f
 
-#include "simulation_test_base.h"
+#include "SimulationTestBase.h"
 #include "src/interfaces/ICitySimulation.h"
 #include "src/interfaces/simulation_types.h"
 #include "src/simulation/simulation_constants.h"
 #include "src/interfaces/sound_ids.h"
-#include "mock_audio_system.h"
-#include "mock_renderer.h"
-#include "manual_rng.h"
-#include "manual_clock.h"
-#include "manual_terrain_query.h"
+#include "MockAudioSystem.h"
+#include "MockRenderer.h"
+#include "ManualRNG.h"
+#include "ManualClock.h"
+#include "ManualTerrainQuery.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -549,14 +549,15 @@ TEST_F(ZoningTestNice, DensityUpgradeWave_EndsOnLowDemand_NoAutoRestart) {
 // TEST 14: DensityUpgrade_AudioCallback_FiresOnUpgrade
 //
 // When a density upgrade wave fires (demand > 0.75, Med-R unlocked), the
-// simulation must call playPositionalSound(SFX_ZONE_UPGRADE, _, _).
+// simulation must call playSound(SFX_ZONE_UPGRADE, ...) at least once.
 //
 // Uses ZoningTestNice (NiceMock) because we need to allow ALL audio calls
 // that happen during zone placement (SFX_BUILD_PLACE) AND explicitly verify
 // SFX_ZONE_UPGRADE fires at least once during the upgrade wave.
 //
-// Note: playPositionalSound is the correct method for zone upgrade audio since
-// upgrades are positional events (occur at a tile location).
+// Note: playSound (non-positional, AL_SOURCE_RELATIVE = AL_TRUE) is the correct
+// method for zone upgrade audio per phase-10.md §sfx_zone_upgrade wiring.
+// The sound fires globally (not at a tile position) with a per-wave-tick cap of 3.
 // ---------------------------------------------------------------------------
 TEST_F(ZoningTestNice, DensityUpgrade_AudioCallback_FiresOnUpgrade) {
     // Set up to trigger Med-R unlock + upgrade wave.
@@ -575,8 +576,8 @@ TEST_F(ZoningTestNice, DensityUpgrade_AudioCallback_FiresOnUpgrade) {
     clock_.advance(121.0);
 
     // Expect SFX_ZONE_UPGRADE to fire at least once during the upgrade wave.
-    // playPositionalSound is used for zone upgrade (tile-located event).
-    EXPECT_CALL(audio_, playPositionalSound(SFX_ZONE_UPGRADE, _, _, _))
+    // playSound (non-positional) is used for zone upgrade per phase-10.md.
+    EXPECT_CALL(audio_, playSound(SFX_ZONE_UPGRADE, _, _))
         .Times(AtLeast(1));
 
     // Run 3 ticks to unlock Med-R, then more ticks to allow the upgrade wave.

@@ -14,16 +14,16 @@
 //   Desirability:"Desirability: 75"
 //   Demand:      "Demand: 55%"
 
-#include "src/ui/inspector_panel.h"
-#include "src/ui/IUIBackend.h"     // Rect
+#include "src/ui/InspectorPanel.h"
+#include "src/interfaces/IUIBackend.h"     // Rect
 #include "src/interfaces/IRenderer.h"  // ScreenRect
 #include "src/ui/UIManager.h"
 #include "src/ui/ui_types.h"
 #include "src/platform/input_event.h"
-#include "tests/ui/mock_ui_backend.h"
-#include "tests/ui/mock_city_simulation.h"
-#include "tests/simulation/mock_audio_system.h"
-#include "tests/simulation/manual_clock.h"
+#include "tests/ui/MockUIBackend.h"
+#include "tests/ui/MockCitySimulation.h"
+#include "tests/simulation/MockAudioSystem.h"
+#include "tests/simulation/ManualClock.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>
@@ -481,4 +481,204 @@ TEST(QueryPanelPosition, ThirdFallback_LeftHalf_EdgeSnap) {
     ScreenRect r = InspectorPanel::computePanelPosition(120, 80, kNoTileBounds);
     EXPECT_GE(r.x, 0);
     EXPECT_LE(r.x + r.w, 1920);
+}
+
+// ============================================================================
+// Tests moved from query_panel_coverage_test.cpp (PopulateCoverageTest fixture)
+// These use QueryPanelIntegrationTest (same NiceMock<MockUIBackend> +
+// NiceMock<MockCitySimulation> + InspectorPanel* pattern).
+// ============================================================================
+
+// Helper: build a fully-populated zoned QueryResult.
+static QueryResult makeZonedQueryResult(ZoneType zone, DensityTier density)
+{
+    QueryResult qr;
+    qr.tileX  = 3;
+    qr.tileZ  = 7;
+    qr.isZoned = true;
+    qr.zoneType = zone;
+    qr.densityTier = density;
+    qr.population  = 150;
+    qr.coverage.fire   = 80.0f;
+    qr.coverage.police = 60.0f;
+    qr.coverage.power  = 100.0f;
+    qr.coverage.water  = 75.0f;
+    qr.desirability    = 65.0f;
+    qr.demandPressurePct = 45.0f;
+    return qr;
+}
+
+// ============================================================================
+// Test: populate() with Residential zone sets zone name, pop, desirability, demand
+// ============================================================================
+TEST_F(QueryPanelIntegrationTest, Populate_Residential_SetsZoneText)
+{
+    QueryResult qr = makeZonedQueryResult(ZoneType::Residential, DensityTier::Low);
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Residential"))).Times(AtLeast(1));
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Pop: 150"))).Times(AtLeast(1));
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Desirability: 65"))).Times(AtLeast(1));
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Demand: 45%"))).Times(AtLeast(1));
+
+    panel_->populate(qr, 3, 7, 500, 500, tileBounds);
+
+    EXPECT_TRUE(panel_->isOpen());
+}
+
+// ============================================================================
+// Test: populate() with Commercial zone exercises Commercial branch
+// ============================================================================
+TEST_F(QueryPanelIntegrationTest, Populate_Commercial_SetsZoneText)
+{
+    QueryResult qr = makeZonedQueryResult(ZoneType::Commercial, DensityTier::Medium);
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Commercial"))).Times(AtLeast(1));
+
+    panel_->populate(qr, 3, 7, 500, 500, tileBounds);
+}
+
+// ============================================================================
+// Test: populate() with Industrial zone exercises Industrial branch
+// ============================================================================
+TEST_F(QueryPanelIntegrationTest, Populate_Industrial_SetsZoneText)
+{
+    QueryResult qr = makeZonedQueryResult(ZoneType::Industrial, DensityTier::High);
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Industrial"))).Times(AtLeast(1));
+
+    panel_->populate(qr, 3, 7, 500, 500, tileBounds);
+}
+
+// ============================================================================
+// Test: populate() with N/A coverage (-1.0f sentinel) clamps snprintf to 0
+// ============================================================================
+TEST_F(QueryPanelIntegrationTest, Populate_CoverageNA_ClampsToZero)
+{
+    QueryResult qr = makeZonedQueryResult(ZoneType::Residential, DensityTier::Low);
+    qr.coverage.fire   = -1.0f;
+    qr.coverage.police = -1.0f;
+    qr.coverage.power  = -1.0f;
+    qr.coverage.water  = -1.0f;
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Fire:0%"))).Times(AtLeast(1));
+
+    panel_->populate(qr, 3, 7, 500, 500, tileBounds);
+}
+
+// ============================================================================
+// Test: draw() after populate() with isZoned=true refreshes economy data
+// Calls draw() kEconomyRefreshFrames+2 times to trigger the refresh block.
+// ============================================================================
+TEST_F(QueryPanelIntegrationTest, Draw_AfterPopulate_RefreshesEconomyData)
+{
+    QueryResult qr = makeZonedQueryResult(ZoneType::Residential, DensityTier::Low);
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    ON_CALL(sim_, queryTile(_, _)).WillByDefault(Return(qr));
+
+    panel_->populate(qr, 3, 7, 500, 500, tileBounds);
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementVisible(_, _)).Times(AnyNumber());
+
+    // Call draw() kEconomyRefreshFrames+2 times to trigger the refresh block.
+    for (int i = 0; i < 122; ++i) {
+        panel_->draw();
+    }
+
+    EXPECT_TRUE(panel_->isOpen());
+}
+
+// ============================================================================
+// Test: populate() with isZoned=false exercises the Unzoned path
+// ============================================================================
+TEST_F(QueryPanelIntegrationTest, Populate_Unzoned_SetsUnzonedText)
+{
+    QueryResult qr;
+    qr.tileX   = 5;
+    qr.tileZ   = 5;
+    qr.isZoned = false;
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, std::string("Unzoned"))).Times(AtLeast(1));
+
+    panel_->populate(qr, 5, 5, 500, 500, tileBounds);
+}
+
+// ============================================================================
+// Test: show() exercises positionElements() (private — called indirectly)
+// ============================================================================
+TEST_F(QueryPanelIntegrationTest, Show_ExercisesPositionElements)
+{
+    panel_->show(1, 1, 400, 400);
+    panel_->draw();
+    SUCCEED();
+}
+
+// ============================================================================
+// Test: populate() with isRoad=true exercises road tile branch
+// ============================================================================
+TEST_F(QueryPanelIntegrationTest, Populate_Road_SetsRoadText)
+{
+    QueryResult qr;
+    qr.tileX  = 2;
+    qr.tileZ  = 4;
+    qr.isZoned = false;
+    qr.isRoad  = true;
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, std::string("Road"))).Times(AtLeast(1));
+
+    panel_->populate(qr, 2, 4, 500, 500, tileBounds);
+}
+
+// ============================================================================
+// Test: draw() after populate() with isRoad=true refreshes road data
+// ============================================================================
+TEST_F(QueryPanelIntegrationTest, Draw_AfterPopulateRoad_RefreshesRoadData)
+{
+    QueryResult qr;
+    qr.tileX  = 6;
+    qr.tileZ  = 6;
+    qr.isZoned = false;
+    qr.isRoad  = true;
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    ON_CALL(sim_, queryTile(_, _)).WillByDefault(Return(qr));
+
+    panel_->populate(qr, 6, 6, 500, 500, tileBounds);
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementVisible(_, _)).Times(AnyNumber());
+
+    for (int i = 0; i < 122; ++i) {
+        panel_->draw();
+    }
+
+    EXPECT_TRUE(panel_->isOpen());
+}
+
+// ============================================================================
+// Test: getBounds() returns valid 240x160 rect after populate()
+// ============================================================================
+TEST_F(QueryPanelIntegrationTest, GetBounds_ReturnsValidRect)
+{
+    QueryResult qr = makeZonedQueryResult(ZoneType::Residential, DensityTier::Low);
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    panel_->populate(qr, 3, 7, 500, 500, tileBounds);
+
+    Rect bounds = panel_->getBounds();
+    EXPECT_EQ(bounds.w, 240);
+    EXPECT_EQ(bounds.h, 160);
 }

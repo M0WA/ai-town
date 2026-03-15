@@ -4,7 +4,7 @@
 // New Game flow: mode, difficulty, seed, loading screen.
 // All coordinates in virtual 1920x1080 space.
 
-#include "src/ui/main_menu_panel.h"
+#include "src/ui/MainMenuPanel.h"
 #include "src/platform/input_event.h"
 
 #include <string>
@@ -40,6 +40,16 @@ MainMenuPanel::MainMenuPanel(IUIBackend* backend)
 
     // Load Game grayed if no saves (default state in V1)
     m_backend->setElementEnabled(m_btnLoadGame, false);
+
+    // Status label below Load Game — shows "No saves found." or corrupted message.
+    // Load Game sits at y = kMenuY + 80 + (kBtnH + 12) (after New Game row).
+    // Its bottom edge is at that y + kBtnH. The 12-px gap to Settings fits a small label.
+    // y_loadgame_bottom = kMenuY + 80 + (kBtnH + 12) + kBtnH = kMenuY + 80 + 2*kBtnH + 12
+    m_loadStatusLabel = m_backend->addStaticText(
+        "No saves found.",
+        kBtnX, kMenuY + 80 + 2 * kBtnH + 12,
+        kBtnW, 12);
+    // Initially visible with default "No saves found." — hidden when saves are available.
 
     // --- New Game screen ---
     m_ngTitle       = m_backend->addStaticText("New Game", kMenuX + 20, kMenuY + 16, kMenuW - 40, 36);
@@ -84,6 +94,7 @@ void MainMenuPanel::hideAllElements() {
     m_backend->setElementVisible(m_titleLabel, false);
     m_backend->setElementVisible(m_btnNewGame, false);
     m_backend->setElementVisible(m_btnLoadGame, false);
+    m_backend->setElementVisible(m_loadStatusLabel, false);
     m_backend->setElementVisible(m_btnSettings, false);
     m_backend->setElementVisible(m_btnQuit, false);
 
@@ -134,6 +145,9 @@ void MainMenuPanel::showMainMenuScreen() {
     m_backend->setElementVisible(m_titleLabel, true);
     m_backend->setElementVisible(m_btnNewGame, true);
     m_backend->setElementVisible(m_btnLoadGame, true);
+    // Show status label only when Load Game is disabled (no saves / corrupted).
+    m_backend->setElementVisible(m_loadStatusLabel,
+        !m_backend->isElementEnabled(m_btnLoadGame));
     m_backend->setElementVisible(m_btnSettings, true);
     m_backend->setElementVisible(m_btnQuit, true);
 }
@@ -207,6 +221,25 @@ bool MainMenuPanel::consumeQuitRequest() {
         return true;
     }
     return false;
+}
+
+// ---------------------------------------------------------------------------
+// setSaveAvailable — Phase 11: enable/disable the Load Game button.
+// Called by UIManager::setSaveAvailable() after SaveSystem probes disk.
+// ---------------------------------------------------------------------------
+void MainMenuPanel::setSaveAvailable(bool available) {
+    if (!m_backend || m_btnLoadGame == kInvalidUIElement) return;
+    m_backend->setElementEnabled(m_btnLoadGame, available);
+    // Hide status label when saves are available; show it when grayed.
+    if (m_loadStatusLabel != kInvalidUIElement) {
+        m_backend->setElementVisible(m_loadStatusLabel, !available);
+    }
+}
+
+void MainMenuPanel::setSaveStatusText(const std::string& text) {
+    if (!m_backend || m_loadStatusLabel == kInvalidUIElement) return;
+    m_backend->setElementText(m_loadStatusLabel, text);
+    m_backend->setElementVisible(m_loadStatusLabel, !text.empty());
 }
 
 // ---------------------------------------------------------------------------

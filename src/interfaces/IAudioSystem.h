@@ -3,9 +3,9 @@
 #include "audio_types.h"
 #include "simulation_types.h"
 
-// Canonical IAudioSystem — 14 methods.
+// Canonical IAudioSystem — 15 methods.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType,
-// SimSpeed, SoundPriority, TimeOfDay, vec3, CameraState).
+// SimSpeed, SoundPriority, TimeOfDay, MusicIntensity, vec3, CameraState).
 // Never expose ALuint, ALfloat, or AL_* constants through this interface.
 //
 // Source location: src/interfaces/ (not src/audio/) so that MockAudioSystem in
@@ -73,4 +73,16 @@ public:
     // Set the SFX volume (applied to SFX sources at next audio thread wake).
     // gain is a linear multiplier [0.0, 1.0].
     virtual void setSFXVolume(float gain) = 0;
+
+    // Set the adaptive music intensity tier driven by live simulation state.
+    // Called by CitySimulation::update() whenever the city's fiscal or population
+    // state changes tier. AudioSystem crossfades the active gameplay stem pair on
+    // the next beat boundary to the stem pair matching the new tier.
+    // Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) is applied internally;
+    // CitySimulation does NOT need to suppress GROWTH/CRISIS calls during off-hours.
+    // Calling with the tier already active is a no-op.
+    // Thread-safety: call from the main thread only.
+    // Threshold conditions: see architecture/game-design/economy-model.md
+    //   §Music Intensity Tiers.
+    virtual void setMusicIntensity(MusicIntensity intensity) = 0;
 };

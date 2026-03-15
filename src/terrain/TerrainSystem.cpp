@@ -300,6 +300,17 @@ void TerrainSystem::flushPendingRebuilds(ITerrainLoadProgress* cb) {
 }
 
 // ---------------------------------------------------------------------------
+// flushTerrainRebuilds() — ITerrainQuery implementation.
+// Delegates to flushPendingRebuilds() so that all enqueued chunk rebuilds
+// (from setTileHeight calls during placement) are processed synchronously
+// before the next render frame, eliminating the chunk rebuild delay that
+// would otherwise cause road/building meshes to appear sunken below the terrain.
+// ---------------------------------------------------------------------------
+void TerrainSystem::flushTerrainRebuilds() {
+    flushPendingRebuilds();
+}
+
+// ---------------------------------------------------------------------------
 // generate() — procedural map generation with playability guarantee.
 //
 // Playability constraints (architecture/game-design/terrain-interaction.md):
@@ -535,6 +546,55 @@ void TerrainSystem::buildAllChunks() {
 }
 
 // ---------------------------------------------------------------------------
+// enqueueAllChunks() — register and enqueue all LOD0 rebuilds without flushing.
+// Identical to buildAllChunks() but omits the trailing flushPendingRebuilds() call.
+// Used by the Phase 11 loading-screen loop: caller drives flushPendingRebuilds()
+// once per frame until pendingRebuildCount() reaches 0.
+// ---------------------------------------------------------------------------
+void TerrainSystem::enqueueAllChunks() {
+    if (m_generatedHeightmap.empty() || m_mapTilesX <= 0 || m_mapTilesZ <= 0) {
+        return;
+    }
+
+    const int chunkTiles = kTerrainLOD0GridSize;
+    const int chunkVerts = chunkTiles + 1;
+    const int mapVertX   = m_mapTilesX + 1;
+
+    const int chunksX = (m_mapTilesX + chunkTiles - 1) / chunkTiles;
+    const int chunksZ = (m_mapTilesZ + chunkTiles - 1) / chunkTiles;
+
+    for (int cz = 0; cz < chunksZ; ++cz) {
+        for (int cx = 0; cx < chunksX; ++cx) {
+            uint64_t chunkId = static_cast<uint64_t>(cz * chunksX + cx);
+
+            float worldOriginX = static_cast<float>(cx * chunkTiles) * m_cellSize;
+            float worldOriginZ = static_cast<float>(cz * chunkTiles) * m_cellSize;
+
+            int tileOffsetX = cx * chunkTiles;
+            int tileOffsetZ = cz * chunkTiles;
+
+            std::vector<float> chunkHmap(static_cast<size_t>(chunkVerts * chunkVerts), 0.0f);
+            for (int vz = 0; vz < chunkVerts; ++vz) {
+                for (int vx = 0; vx < chunkVerts; ++vx) {
+                    int mapX = tileOffsetX + vx;
+                    int mapZ = tileOffsetZ + vz;
+                    if (mapX < mapVertX && mapZ < (m_mapTilesZ + 1)) {
+                        chunkHmap[static_cast<size_t>(vz * chunkVerts + vx)] =
+                            m_generatedHeightmap[static_cast<size_t>(mapZ * mapVertX + mapX)];
+                    }
+                }
+            }
+
+            registerChunkAtLOD(chunkId, -1);
+            registerChunkPosition(chunkId, worldOriginX, worldOriginZ);
+            registerChunkHeightmap(chunkId, std::move(chunkHmap));
+            enqueueRebuild(chunkId, 0, 0.0f);
+        }
+    }
+    // Caller is responsible for calling flushPendingRebuilds() per-frame.
+}
+
+// ---------------------------------------------------------------------------
 // getGeneratedHeightmap() — accessor for the heightmap produced by generate().
 // ---------------------------------------------------------------------------
 const std::vector<float>& TerrainSystem::getGeneratedHeightmap() const {
@@ -563,6 +623,139 @@ float TerrainSystem::getSlopeDegrees(int tileX, int tileZ) const {
     const float slopeRad = std::atan(std::sqrt(dx * dx + dz * dz));
     constexpr float kRadToDeg = 180.0f / 3.14159265358979323846f;
     return slopeRad * kRadToDeg;
+}
+
+// ---------------------------------------------------------------------------
+// setTileHeight() — ITerrainQuery write-side implementation (Phase 10b).
+//
+// Step 1: write height into the persistent LOD0 heightmap at (tileX, tileZ).
+// Step 2: apply neighbour blending to all 8 surrounding tiles (cardinal 0.5, diagonal 0.25).
+//         lerp(a, b, t) = a + t * (b - a)
+// Step 3: enqueue ChunkRebuildRequest for every chunk containing a modified tile.
+//         Dedup is handled by processedThisFrame in update() — duplicates are harmless.
+//
+// kCardinalFalloff = 0.5  (gamedesign-lookandfeel sign-off 2026-03-13)
+// kDiagonalFalloff = 0.25 (same sign-off)
+//
+// (ref: architecture/graphics-architecture/procedural-terrain.md — setTileHeight Write Path)
+// ---------------------------------------------------------------------------
+void TerrainSystem::setTileHeight(int tileX, int tileZ, float height)
+{
+    // Out-of-bounds centre tile: silently ignore.
+    if (m_generatedHeightmap.empty() ||
+        tileX < 0 || tileX >= m_mapTilesX ||
+        tileZ < 0 || tileZ >= m_mapTilesZ) {
+        return;
+    }
+
+    static constexpr float kCardinalFalloff = 0.5f;
+    static constexpr float kDiagonalFalloff = 0.25f;
+
+    const int vertX = m_mapTilesX + 1;
+
+    // Chunk layout constants — needed by writeHeight to sync m_chunkHeightmaps.
+    const int chunkTiles = kTerrainLOD0GridSize;  // 32 tiles per chunk side
+    const int chunkVerts = chunkTiles + 1;         // 33 vertices per chunk side
+    const int chunksX    = (m_mapTilesX + chunkTiles - 1) / chunkTiles;
+
+    // Helper: write to global heightmap AND sync the corresponding per-chunk
+    // heightmap(s) in m_chunkHeightmaps. processOneRebuild reads from
+    // m_chunkHeightmaps, so without this sync the terrain geometry never updates.
+    //
+    // A vertex at (tx, tz) is shared between up to 4 chunks when it sits on
+    // a chunk boundary (tx % chunkTiles == 0 or tz % chunkTiles == 0). All
+    // owning chunks are updated so every rebuild sees the fresh height.
+    auto writeHeight = [&](int tx, int tz, float h) {
+        // Clamp to bounds.
+        if (tx < 0 || tx >= m_mapTilesX || tz < 0 || tz >= m_mapTilesZ) return;
+        // Update the global heightmap.
+        m_generatedHeightmap[static_cast<size_t>(tz * vertX + tx)] = h;
+        // Sync every chunk heightmap that contains vertex (tx, tz).
+        int cx = tx / chunkTiles;
+        int cz = tz / chunkTiles;
+        int lx = tx % chunkTiles;
+        int lz = tz % chunkTiles;
+        auto syncChunk = [&](int ccx, int ccz, int llx, int llz) {
+            if (ccx < 0 || ccz < 0) return;
+            uint64_t cid = static_cast<uint64_t>(ccz * chunksX + ccx);
+            auto it = m_chunkHeightmaps.find(cid);
+            if (it == m_chunkHeightmaps.end()) return;
+            if (llx < 0 || llx >= chunkVerts || llz < 0 || llz >= chunkVerts) return;
+            it->second[static_cast<size_t>(llz * chunkVerts + llx)] = h;
+        };
+        syncChunk(cx,     cz,     lx,         lz);
+        if (lx == 0 && cx > 0) syncChunk(cx - 1, cz,     chunkTiles, lz);
+        if (lz == 0 && cz > 0) syncChunk(cx,     cz - 1, lx,         chunkTiles);
+        if (lx == 0 && lz == 0 && cx > 0 && cz > 0)
+            syncChunk(cx - 1, cz - 1, chunkTiles, chunkTiles);
+    };
+
+    // Step 1: write centre tile height.
+    writeHeight(tileX, tileZ, height);
+
+    // Step 2: apply neighbour blending.
+    // Neighbour offsets: {dx, dz, falloff}
+    // Cardinal: N(0,-1), S(0,+1), E(+1,0), W(-1,0)
+    // Diagonal: NE(+1,-1), NW(-1,-1), SE(+1,+1), SW(-1,+1)
+    struct NeighbourDef { int dx; int dz; float falloff; };
+    static constexpr NeighbourDef kNeighbours[8] = {
+        {  0, -1, kCardinalFalloff },  // N
+        {  0, +1, kCardinalFalloff },  // S
+        { +1,  0, kCardinalFalloff },  // E
+        { -1,  0, kCardinalFalloff },  // W
+        { +1, -1, kDiagonalFalloff },  // NE
+        { -1, -1, kDiagonalFalloff },  // NW
+        { +1, +1, kDiagonalFalloff },  // SE
+        { -1, +1, kDiagonalFalloff },  // SW
+    };
+
+    for (const auto& n : kNeighbours) {
+        int nx = tileX + n.dx;
+        int nz = tileZ + n.dz;
+        // Skip out-of-bounds neighbours.
+        if (nx < 0 || nx >= m_mapTilesX || nz < 0 || nz >= m_mapTilesZ) continue;
+
+        float currentH = m_generatedHeightmap[static_cast<size_t>(nz * vertX + nx)];
+        // lerp(currentH, height, falloff) = currentH + falloff * (height - currentH)
+        float newH = currentH + n.falloff * (height - currentH);
+        writeHeight(nx, nz, newH);
+    }
+
+    // Step 3: enqueue ChunkRebuildRequest for every chunk containing a modified tile.
+    // Affected tiles: centre + all 8 in-bounds neighbours.
+    // Chunk ID = (chunkZ * chunksPerSideX + chunkX), matching buildAllChunks().
+    // (chunkTiles, chunksX declared above alongside writeHeight)
+
+    // Collect all tile coords that were written (centre + in-bounds neighbours).
+    // Use a small fixed array to avoid heap allocation on the placement hot-path.
+    struct TileCoord { int tx; int tz; };
+    TileCoord modifiedTiles[9];
+    int modifiedCount = 0;
+
+    modifiedTiles[modifiedCount++] = { tileX, tileZ };
+    for (const auto& n : kNeighbours) {
+        int nx = tileX + n.dx;
+        int nz = tileZ + n.dz;
+        if (nx >= 0 && nx < m_mapTilesX && nz >= 0 && nz < m_mapTilesZ) {
+            modifiedTiles[modifiedCount++] = { nx, nz };
+        }
+    }
+
+    for (int i = 0; i < modifiedCount; ++i) {
+        int tx = modifiedTiles[i].tx;
+        int tz = modifiedTiles[i].tz;
+        int chunkX = tx / chunkTiles;
+        int chunkZ = tz / chunkTiles;
+        uint64_t chunkId = static_cast<uint64_t>(chunkZ * chunksX + chunkX);
+        // Mark the chunk dirty (LOD = -1) so processOneRebuild's
+        // "already at LOD" guard does not discard this height-change rebuild.
+        // Without this, a LOD0 chunk receiving a LOD0 rebuild request is skipped.
+        auto activeIt = m_activeChunks.find(chunkId);
+        if (activeIt != m_activeChunks.end()) {
+            activeIt->second = -1;
+        }
+        enqueueRebuild(chunkId, 0, 0.0f);
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -68,3 +68,26 @@ enum class TimeOfDay {
     NIGHT,
     DAWN
 };
+
+// Music intensity tier driven by live simulation state.
+// Set by CitySimulation::update() via IAudioSystem::setMusicIntensity().
+// AudioSystem maps each tier to the corresponding gameplay stem pair:
+//   CALM   -> calm_01/02
+//   GROWTH -> growth_01/02
+//   CRISIS -> crisis_01/02
+// Priority order (highest first): CRISIS > GROWTH > CALM.
+// Threshold conditions are authoritative in
+// architecture/game-design/economy-model.md §Music Intensity Tiers:
+//   CALM:   budget_surplus_pct >= 0%  (default state)
+//   GROWTH: net population change positive this tick, no deficit streak
+//   CRISIS: consecutive_deficit_months >= 2  (highest priority)
+// Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) is applied
+// internally by AudioSystem; CitySimulation does NOT suppress GROWTH/CRISIS
+// calls during off-hours.
+// Added in Phase 10 (see implementation/phase-10.md).
+enum class MusicIntensity {
+    CALM,
+    GROWTH,
+    CRISIS
+};
+

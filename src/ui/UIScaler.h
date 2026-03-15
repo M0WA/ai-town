@@ -1,6 +1,6 @@
 #pragma once
-#include "src/ui/IUIBackend.h"
-// UIScaler.h must #include "src/ui/IUIBackend.h" (project-root-relative form)
+#include "src/interfaces/IUIBackend.h"
+// UIScaler.h must #include "src/interfaces/IUIBackend.h" (project-root-relative form)
 // so that methods returning Rect compile correctly.
 // Defining Rect only in IUIBackend.h and using it in UIScaler.h without the include
 // causes an ODR violation if a translation unit includes UIScaler.h without first

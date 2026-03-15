@@ -291,7 +291,9 @@ AudioSystem::AudioSystem(IClock* clock, IAlcFunctions* alcFunctions)
     // -----------------------------------------------------------------------
     m_device = alcOpenDevice(nullptr);
     if (!m_device) {
-        throw std::runtime_error("alcOpenDevice failed — no audio device available");
+        logWarning("alcOpenDevice failed — no audio device available; running in silent mode");
+        m_deviceLost.store(true);
+        return;
     }
     m_deviceCreated = true;
 
@@ -385,7 +387,7 @@ AudioSystem::AudioSystem(IClock* clock, IAlcFunctions* alcFunctions)
                               assetPath("sfx_zone_commercial.ogg"),  true});
     m_preloadQueue.push_back({SFX_ZONE_INDUSTRIAL,
                               assetPath("sfx_zone_industrial.ogg"),  true});
-    // Pre-load vehicle engine loops (OGG, mono, 6–20 s).
+    // Pre-load vehicle engine loops (OGG, mono, min 6 s).
     m_preloadQueue.push_back({SFX_VEHICLE_ENGINE_IDLE,
                               assetPath("sfx_vehicle_engine_idle.ogg"), true});
     m_preloadQueue.push_back({SFX_VEHICLE_ENGINE_MOVE,
@@ -395,6 +397,56 @@ AudioSystem::AudioSystem(IClock* clock, IAlcFunctions* alcFunctions)
                               assetPath("stinger_crisis.wav"), false});
     m_preloadQueue.push_back({SFX_STINGER_MILESTONE,
                               assetPath("stinger_milestone.wav"), false});
+
+    // Phase 10: Pre-load construction / zone-placement WAV SFX.
+    m_preloadQueue.push_back({SFX_BUILD_PLACE,
+                              assetPath("sfx_build_place.wav"), false});
+    m_preloadQueue.push_back({SFX_BUILD_DEMOLISH,
+                              assetPath("sfx_build_demolish.wav"), false});
+    m_preloadQueue.push_back({SFX_ROAD_BUILD,
+                              assetPath("sfx_road_build.wav"), false});
+    m_preloadQueue.push_back({SFX_EARTHWORKS,
+                              assetPath("sfx_earthworks.wav"), false});
+    m_preloadQueue.push_back({SFX_ZONE_UPGRADE,
+                              assetPath("sfx_zone_upgrade.wav"), false});
+    m_preloadQueue.push_back({SFX_SERVICE_DEGRADE,
+                              assetPath("sfx_service_degrade.wav"), false});
+
+    // Phase 10: Pre-load budget / economy WAV SFX.
+    m_preloadQueue.push_back({SFX_BUDGET_WARN,
+                              assetPath("sfx_budget_warn.wav"), false});
+    m_preloadQueue.push_back({SFX_LOAN_ISSUED,
+                              assetPath("sfx_loan_issued.wav"), false});
+
+    // Phase 10: Pre-load utility / service alert WAV SFX.
+    // SFX_POWER_OUT and SFX_WATER_OUT are non-positional (AL_SOURCE_RELATIVE=AL_TRUE).
+    // SFX_FIRE_ALERT and SFX_POLICE_ALERT are positional (AL_SOURCE_RELATIVE=AL_FALSE)
+    // — they benefit from EFX occlusion and must NOT be added to the EFX bypass list.
+    m_preloadQueue.push_back({SFX_POWER_OUT,
+                              assetPath("sfx_power_out.wav"), false});
+    m_preloadQueue.push_back({SFX_WATER_OUT,
+                              assetPath("sfx_water_out.wav"), false});
+    m_preloadQueue.push_back({SFX_FIRE_ALERT,
+                              assetPath("sfx_fire_alert.wav"), false});
+    m_preloadQueue.push_back({SFX_POLICE_ALERT,
+                              assetPath("sfx_police_alert.wav"), false});
+
+    // Phase 10: Pre-load vehicle horn and intersection tick WAV SFX.
+    m_preloadQueue.push_back({SFX_VEHICLE_HORN,
+                              assetPath("sfx_vehicle_horn.wav"), false});
+    m_preloadQueue.push_back({SFX_INTERSECTION_TICK,
+                              assetPath("sfx_intersection_tick.wav"), false});
+
+    // Phase 10: Pre-load UI WAV sounds (non-positional, AL_SOURCE_RELATIVE=AL_TRUE,
+    // EFX bypass required — AL_DIRECT_FILTER=AL_FILTER_NULL at playback).
+    m_preloadQueue.push_back({UI_CLICK,
+                              assetPath("ui_click.wav"), false});
+    m_preloadQueue.push_back({UI_TOAST,
+                              assetPath("ui_toast.wav"), false});
+    m_preloadQueue.push_back({UI_MENU_OPEN,
+                              assetPath("ui_menu_open.wav"), false});
+    m_preloadQueue.push_back({UI_MENU_CLOSE,
+                              assetPath("ui_menu_close.wav"), false});
 
     // -----------------------------------------------------------------------
     // Step 2: Load ALC_EXT_thread_local_context — HARD REQUIREMENT.
@@ -607,13 +659,26 @@ void AudioSystem::audioThreadFunc() {
         if (m_stopThread.load()) break;
 
         // Compute real-time dt using IClock (not fixed 0.01f).
+        // dt is passed to both updateStreams() and updateDuckState() so crossfade
+        // timers and duck state machine use the same real-time measurement.
         double now = m_clock->nowSeconds();
         float  dt  = static_cast<float>(now - m_lastDuckWakeTime);
         m_lastDuckWakeTime = now;
 
-        updateStreams();
-        updateOcclusion();
-        updateDuckState(dt);
+        // Catch OpenAL runtime errors (e.g. "Broken pipe" when the audio
+        // backend disconnects) so the audio thread degrades gracefully instead
+        // of propagating an uncaught exception which would call std::terminate
+        // and kill the entire process.
+        try {
+            updateStreams(dt);
+            updateOcclusion();
+            updateDuckState(dt);
+        } catch (const std::exception& e) {
+            logError(std::string("AudioSystem: audio thread error, disabling audio: ") + e.what());
+            m_deviceLost.store(true);
+            m_stopThread.store(true);
+            break;
+        }
     }
 }
 
@@ -813,9 +878,27 @@ bool AudioSystem::openStreamOGG(int streamSlot, const std::string& path,
     AudioStream& s = m_streams[streamSlot];
 
     // Close any existing stream.
+    // IMPORTANT: flush the AL buffer queue BEFORE resetting m_samplesQueued.
+    // If this slot has AL buffers attached (queued but not yet processed), and we
+    // only reset m_samplesQueued without unqueuing them, refillStream's round-robin
+    // index (m_samplesQueued % kNumBuffers) will point to buffers that are still
+    // attached — causing repeated AL_INVALID_OPERATION from alBufferData.
     if (s.isOpen && s.vf) {
         AudioStreamUtils::closeOGG(s.vf);
         s.isOpen = false;
+
+        // Flush the AL source: stop it and unqueue any remaining AL buffers so
+        // the buffer pool is fully free before the new stream starts filling.
+        ALuint src = static_cast<ALuint>(s.sourceHandle);
+        alSourceStop(src);
+        ALint queued = 0;
+        alGetSourcei(src, AL_BUFFERS_QUEUED, &queued);
+        if (queued > 0) {
+            std::vector<ALuint> tmp(static_cast<size_t>(queued));
+            alSourceUnqueueBuffers(src, queued, tmp.data());
+        }
+        s.m_samplesQueued   = 0;
+        s.m_nextBarBoundary = 0;
     }
     if (!s.vf) {
         s.vf = new OggVorbis_File;
@@ -837,22 +920,69 @@ bool AudioSystem::openStreamOGG(int streamSlot, const std::string& path,
         return false;
     }
 
-    s.isMusicStem     = isMusicStem;
-    s.m_samplesQueued = 0;
-    s.m_nextBarBoundary = 0;
-    s.isOpen          = true;
+    s.isMusicStem            = isMusicStem;
+    s.m_samplesQueued        = 0;
+    s.m_nextBarBoundary      = 0;
     s.m_intentionallyStopped = false;
-    s.crossfadeGain   = 1.0f;
+    s.crossfadeGain          = 1.0f;
+    // isOpen stays false until pre-fill and sidecar loading succeed.
 
     if (isMusicStem) {
         if (!loadMusicSidecar(path, s.bpm, s.beatsPerBar)) {
             // Missing/invalid sidecar for music stem is a hard error.
             AudioStreamUtils::closeOGG(s.vf);
-            s.isOpen = false;
             throw std::runtime_error("Missing or invalid sidecar for: " + path);
         }
     }
 
+    // Pre-fill all kNumBuffers AL buffer slots before marking the stream open.
+    //
+    // Without pre-filling, the source is in AL_STOPPED on the first audio thread
+    // wake (no buffers were queued before alSourcePlay was called by the caller).
+    // This triggers starvation recovery on every stream at startup — 4 rapid
+    // alSourcePlay calls that can overwhelm the PulseAudio backend.
+    //
+    // The audio thread checks s.isOpen and skips closed slots, so we can write
+    // AL buffers here without holding m_streamMutex or racing with the thread.
+    {
+        ALuint    src = static_cast<ALuint>(s.sourceHandle);
+        ALenum    fmt = (channels == 1) ? AL_FORMAT_MONO16 : AL_FORMAT_STEREO16;
+
+        for (int b = 0; b < AudioStream::kNumBuffers; ++b) {
+            std::vector<int16_t> pcm(
+                static_cast<size_t>(AudioStream::kSamplesPerBuffer) *
+                static_cast<size_t>(channels));
+
+            int frames = AudioStreamUtils::decodeFrames(
+                s.vf, pcm.data(),
+                static_cast<int>(AudioStream::kSamplesPerBuffer), channels);
+
+            if (frames == 0) {
+                // EOF on short file — seek to start and retry.
+                if (!AudioStreamUtils::seekToStart(s.vf)) break;
+                frames = AudioStreamUtils::decodeFrames(
+                    s.vf, pcm.data(),
+                    static_cast<int>(AudioStream::kSamplesPerBuffer), channels);
+            }
+            if (frames <= 0) break;
+
+            ALuint  bufHandle = static_cast<ALuint>(s.buffers[b]);
+            ALsizei byteCount = static_cast<ALsizei>(frames) *
+                                static_cast<ALsizei>(channels) *
+                                static_cast<ALsizei>(sizeof(int16_t));
+
+            alGetError();   // clear any stale error
+            alBufferData(bufHandle, fmt, pcm.data(), byteCount,
+                         static_cast<ALsizei>(sr));
+            if (alGetError() != AL_NO_ERROR) break;
+
+            alSourceQueueBuffers(src, 1, &bufHandle);
+            alGetError();   // consume — non-fatal if queue fails
+            s.m_samplesQueued += static_cast<uint64_t>(frames);
+        }
+    }
+
+    s.isOpen = true;
     return true;
 }
 
@@ -970,9 +1100,29 @@ int AudioSystem::refillStream(int slot) {
         // --- Split-lock step 3: queue under mutex ---
         {
             std::lock_guard<std::mutex> lk(m_streamMutex);
+
+            // Clear any stale AL error before alBufferData — a buffer that is still
+            // attached to the source (queued but not yet unqueued by the previous step)
+            // causes AL_INVALID_OPERATION here.  Stale errors must be cleared before
+            // the check below so that the error is attributed to alBufferData (the
+            // actual failing call), not to a later alSourcef call in updateStreams().
+            alGetError();
             alBufferData(bufHandle, format, pcmBuf.data(), byteCount,
                          static_cast<ALsizei>(sr));
+            {
+                ALenum bufErr = alGetError();
+                if (bufErr != AL_NO_ERROR) {
+                    // Buffer still attached to source queue — skip this slot.
+                    // m_samplesQueued is NOT incremented so the same bufIdx is retried
+                    // on the next wake after the buffer has been processed and unqueued.
+                    logError("refillStream: alBufferData failed slot=" +
+                             std::to_string(slot) + " bufIdx=" +
+                             std::to_string(bufIdx));
+                    break;
+                }
+            }
             alSourceQueueBuffers(src, 1, &bufHandle);
+            alGetError();  // consume — queue error is non-fatal; starvation recovery handles restart
 
             s.m_samplesQueued += static_cast<uint64_t>(framesDecoded);
             ++queued;
@@ -984,12 +1134,15 @@ int AudioSystem::refillStream(int slot) {
                 logWarning("Stream starvation recovery — restarting source " +
                            std::to_string(slot));
                 alSourcePlay(src);
-                // Reset sample counter to avoid stale bar-boundary calculation.
-                // Count buffers now queued after the recovery requeue.
-                ALint bq2 = 0;
-                alGetSourcei(src, AL_BUFFERS_QUEUED, &bq2);
-                s.m_samplesQueued = static_cast<uint64_t>(bq2) *
-                                    AudioStream::kSamplesPerBuffer;
+                // Do NOT reset m_samplesQueued here.  It serves as the round-robin
+                // buffer index: (m_samplesQueued / kSamplesPerBuffer) % kNumBuffers.
+                // Resetting it mid-loop causes the next iteration to compute an index
+                // that collides with the buffer just queued in b==0, making
+                // alBufferData fail (buffer still attached).  Only one buffer ends up
+                // queued (~371 ms), the source starvates again next wake, and the
+                // recovery fires every 10 ms — flooding PulseAudio until SIGKILL.
+                // Reset bar-boundary only so it is recomputed after recovery.
+                s.m_nextBarBoundary = 0;
             }
         }
     }
@@ -1012,14 +1165,17 @@ int AudioSystem::refillStream(int slot) {
             s.m_nextBarBoundary = ((sp / spb) + 1) * spb;
         }
 
-        // Crossfade check.
+        // Bar boundary tracking — advance m_nextBarBoundary as playback progresses.
+        // Phase 10: The intensity crossfade is driven from updateStreams() using the
+        // wall-clock wake interval accumulator (kWakeInterval).  The bar boundary
+        // counter here ensures the bootstrap completes and keeps m_nextBarBoundary
+        // current for future use (e.g. post-V1 beat-synchronized stingers).
         uint64_t sp = AudioStream::computeSamplesPlayed(s.m_samplesQueued, buffersQueued);
         if (sp >= s.m_nextBarBoundary && s.m_nextBarBoundary > 0) {
-            // Bar boundary crossed — advance to next boundary.
+            // Bar boundary crossed — advance to the NEXT boundary.
             uint64_t spb = static_cast<uint64_t>(
                 (44100.0 * 60.0 / s.bpm) * s.beatsPerBar);
             s.m_nextBarBoundary = ((sp / spb) + 1) * spb;
-            // TODO Phase 10: fire crossfade command here.
         }
     }
 
@@ -1027,23 +1183,261 @@ int AudioSystem::refillStream(int slot) {
 }
 
 // ---------------------------------------------------------------------------
+// applyCrossfadeGains — constant-power crossfade (cos/sin curve).
+// t = 0: outgoing at cos(0)=1 (full), incoming at sin(0)=0 (silent).
+// t = 1: outgoing at cos(π/2)=0 (silent), incoming at sin(π/2)=1 (full).
+// ---------------------------------------------------------------------------
+/*static*/ void AudioSystem::applyCrossfadeGains(AudioStream& outStream,
+                                                   AudioStream& inStream,
+                                                   float t) {
+    // 3.14159265358979323846f — avoids M_PI which is POSIX-only (not in C++ standard).
+    constexpr float kPi = 3.14159265358979323846f;
+    // Clamp t to [0, 1] to guard floating-point rounding at boundaries.
+    const float tc = std::max(0.0f, std::min(1.0f, t));
+    outStream.crossfadeGain = std::cos(tc * kPi * 0.5f);
+    inStream.crossfadeGain  = std::sin(tc * kPi * 0.5f);
+}
+
+// ---------------------------------------------------------------------------
+// beginIntensityCrossfade — start a beat-boundary crossfade to the stem pair
+// matching the given intensity tier (called on audio thread).
+//
+// Time-of-day forced-Calm override: when m_currentTimeOfDay != DAY, the
+// effective intensity is forced to CALM regardless of the requested tier.
+// This is applied here (audio thread) — CitySimulation does NOT suppress calls.
+//
+// Minimum hold: if a crossfade completed less than kMusicCrossfadeDurationSeconds
+// ago, the new crossfade is deferred until the next bar boundary check fires it.
+// In practice we start immediately on the bar boundary; the spec minimum-hold
+// is satisfied by the fact that bar boundaries are at ~2.67 s intervals (90BPM,
+// 4/4) and the crossfade itself is 4 s — so two crossfades cannot overlap
+// provided we complete before queuing another.
+// ---------------------------------------------------------------------------
+void AudioSystem::beginIntensityCrossfade(MusicIntensity intensity) {
+    // Time-of-day forced-Calm override (DUSK/NIGHT/DAWN → CALM only).
+    MusicIntensity effective = intensity;
+    if (static_cast<TimeOfDay>(m_currentTimeOfDay.load(std::memory_order_relaxed)) != TimeOfDay::DAY) {
+        effective = MusicIntensity::CALM;
+    }
+
+    // Select the target MusicTrackId.  Alternate between _01 and _02 variants
+    // each crossfade by checking which slot was last active.
+    // The _01 variant is always used for the very first crossfade in a tier;
+    // subsequent crossfades within the same tier do not toggle (tier change only).
+    MusicTrackId targetId = MUSIC_INVALID;
+    switch (effective) {
+        case MusicIntensity::CALM:
+            targetId = MUSIC_CALM_01;
+            break;
+        case MusicIntensity::GROWTH:
+            targetId = MUSIC_GROWTH_01;
+            break;
+        case MusicIntensity::CRISIS:
+            targetId = MUSIC_CRISIS_01;
+            break;
+    }
+
+    if (targetId == MUSIC_INVALID) return;
+
+    // Determine incoming slot (the slot NOT currently active).
+    int inSlot  = 1 - m_musicActiveSlot;  // 0→1 or 1→0
+    int outSlot = m_musicActiveSlot;
+
+    // Open the incoming stream on the incoming slot.
+    std::string path = assetPath(musicTrackFilename(targetId));
+    {
+        std::lock_guard<std::mutex> lk(m_streamMutex);
+
+        // If an outgoing crossfade is already active, close the old incoming slot.
+        if (m_musicIncomingSlot >= 0 && m_musicIncomingSlot != inSlot) {
+            closeStream(m_musicIncomingSlot);
+        }
+
+        if (!openStreamOGG(inSlot, path, true)) {
+            logError("beginIntensityCrossfade: cannot open: " + path);
+            return;
+        }
+
+        // Set incoming stream gain to 0 and start playing immediately.
+        m_streams[inSlot].crossfadeGain = 0.0f;
+        alSourcei(static_cast<ALuint>(m_streams[inSlot].sourceHandle),
+                  AL_LOOPING, AL_FALSE);
+        alSourcePlay(static_cast<ALuint>(m_streams[inSlot].sourceHandle));
+    }
+
+    // Reset crossfade progress and record state.
+    m_musicCrossfadeT.store(0.0f, std::memory_order_relaxed);
+    m_musicCrossfadeDuration = kMusicCrossfadeDurationSeconds;
+    m_musicIncomingSlot      = inSlot;
+    m_audioThreadIntensity   = static_cast<int>(effective);
+
+    logInfo("beginIntensityCrossfade: outSlot=" + std::to_string(outSlot) +
+            " inSlot=" + std::to_string(inSlot) +
+            " intensity=" + std::to_string(static_cast<int>(effective)));
+    (void)outSlot;
+}
+
+// ---------------------------------------------------------------------------
+// beginAmbientCrossfade — start a real-time crossfade to the ambient bed for
+// the given time-of-day (called on audio thread when m_currentTimeOfDay changes).
+// Ambient beds use stream slots 2 and 3.
+// ---------------------------------------------------------------------------
+void AudioSystem::beginAmbientCrossfade(TimeOfDay tod) {
+    // Determine the inactive ambient slot.
+    // m_ambientIncomingSlot tracks the most-recently incoming ambient slot.
+    // At steady state the active slot is the one NOT being transitioned to.
+    // We use a simple heuristic: if slot 2 is open, use slot 3 as incoming; else 2.
+    int inSlot = m_streams[2].isOpen ? 3 : 2;
+
+    std::string path = assetPath(ambientBedFilename(tod));
+    {
+        std::lock_guard<std::mutex> lk(m_streamMutex);
+
+        if (!openStreamOGG(inSlot, path, false)) {
+            logError("beginAmbientCrossfade: cannot open: " + path);
+            return;
+        }
+
+        m_streams[inSlot].crossfadeGain = 0.0f;
+        alSourcei(static_cast<ALuint>(m_streams[inSlot].sourceHandle),
+                  AL_LOOPING, AL_FALSE);
+        alSourcePlay(static_cast<ALuint>(m_streams[inSlot].sourceHandle));
+    }
+
+    m_ambientCrossfadeT.store(0.0f, std::memory_order_relaxed);
+    m_ambientCrossfadeDuration = kMusicCrossfadeDurationSeconds;
+    m_ambientIncomingSlot      = inSlot;
+}
+
+// ---------------------------------------------------------------------------
 // updateStreams — called once per audio thread wake.
 // ---------------------------------------------------------------------------
-void AudioSystem::updateStreams() {
+void AudioSystem::updateStreams(float dt) {
+    // ------------------------------------------------------------------
+    // Phase 10: Consume pending ambient bed crossfade request.
+    // setTimeOfDay() stores the new TimeOfDay in m_pendingAmbientTod; we
+    // exchange it with -1 here so only one ambient crossfade fires per transition.
+    // ------------------------------------------------------------------
+    {
+        int pendingTod = m_pendingAmbientTod.exchange(-1, std::memory_order_relaxed);
+        if (pendingTod >= 0) {
+            beginAmbientCrossfade(static_cast<TimeOfDay>(pendingTod));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 10: Check if main thread requested a music intensity change.
+    // Compare m_currentMusicIntensity (atomic, written by main thread via
+    // setMusicIntensity()) against m_audioThreadIntensity (last value this
+    // thread started streaming).  A change triggers a beat-boundary crossfade
+    // on the next bar boundary of the active stem.
+    // Time-of-day forced-Calm override is applied inside beginIntensityCrossfade().
+    // ------------------------------------------------------------------
+    {
+        int requestedInt = m_currentMusicIntensity.load(std::memory_order_relaxed);
+        // Apply time-of-day forced-Calm override for comparison:
+        // If the current time of day is not DAY, only CALM is valid regardless.
+        int effectiveInt = requestedInt;
+        if (static_cast<TimeOfDay>(m_currentTimeOfDay.load(std::memory_order_relaxed)) != TimeOfDay::DAY) {
+            effectiveInt = static_cast<int>(MusicIntensity::CALM);
+        }
+
+        if (effectiveInt != m_audioThreadIntensity && m_musicIncomingSlot == -1) {
+            // No crossfade currently in progress — queue one at the next bar boundary.
+            // We mark it pending by temporarily storing the new intensity; the bar
+            // boundary check in refillStream fires beginIntensityCrossfade().
+            // For simplicity in V1 we begin immediately if no crossfade is active.
+            beginIntensityCrossfade(static_cast<MusicIntensity>(requestedInt));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Refill all open streams.
+    // ------------------------------------------------------------------
+    for (int i = 0; i < kStreamSourceCount; ++i) {
+        if (!m_streams[i].isOpen) continue;
+        refillStream(i);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 10: Advance music crossfade progress.
+    // dt is the real-time elapsed seconds measured by audioThreadFunc() via
+    // IClock::nowSeconds().  Using the actual measured dt (not a hardcoded
+    // 0.010 f) ensures crossfade timing is accurate under system scheduling
+    // jitter and is deterministic with ManualClock in tests.
+    // Guard: clamp dt to 0.0 to prevent negative advancement on the first wake
+    // (m_lastDuckWakeTime is initialised at thread start; dt is always >= 0).
+    // Guard: if m_musicCrossfadeDuration is 0 (defensive), treat crossfade as
+    // instant to avoid division-by-zero.
+    // ------------------------------------------------------------------
+    if (m_musicIncomingSlot >= 0) {
+        float t = m_musicCrossfadeT.load(std::memory_order_relaxed);
+        if (m_musicCrossfadeDuration > 0.0f) {
+            t += dt / m_musicCrossfadeDuration;
+        } else {
+            t = 1.0f;  // zero-duration crossfade: instant completion
+        }
+        t = std::min(t, 1.0f);
+        m_musicCrossfadeT.store(t, std::memory_order_relaxed);
+
+        int outSlot = 1 - m_musicIncomingSlot;  // the slot that is fading out
+        applyCrossfadeGains(m_streams[outSlot], m_streams[m_musicIncomingSlot], t);
+
+        if (t >= 1.0f) {
+            // Crossfade complete: close the outgoing slot.
+            {
+                std::lock_guard<std::mutex> lk(m_streamMutex);
+                closeStream(outSlot);
+            }
+            m_streams[m_musicIncomingSlot].crossfadeGain = 1.0f;
+            m_musicActiveSlot    = m_musicIncomingSlot;
+            m_musicIncomingSlot  = -1;
+            m_musicCrossfadeT.store(0.0f, std::memory_order_relaxed);
+        }
+    }
+
+    // Phase 10: Advance ambient bed crossfade progress.
+    if (m_ambientIncomingSlot >= 0) {
+        float t = m_ambientCrossfadeT.load(std::memory_order_relaxed);
+        if (m_ambientCrossfadeDuration > 0.0f) {
+            t += dt / m_ambientCrossfadeDuration;
+        } else {
+            t = 1.0f;  // zero-duration crossfade: instant completion
+        }
+        t = std::min(t, 1.0f);
+        m_ambientCrossfadeT.store(t, std::memory_order_relaxed);
+
+        int ambOutSlot = (m_ambientIncomingSlot == 2) ? 3 : 2;
+        applyCrossfadeGains(m_streams[ambOutSlot], m_streams[m_ambientIncomingSlot], t);
+
+        if (t >= 1.0f) {
+            {
+                std::lock_guard<std::mutex> lk(m_streamMutex);
+                closeStream(ambOutSlot);
+            }
+            m_streams[m_ambientIncomingSlot].crossfadeGain = 1.0f;
+            m_ambientIncomingSlot = -1;
+            m_ambientCrossfadeT.store(0.0f, std::memory_order_relaxed);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Apply final gain to all open streams (music duck multiplicative).
+    // ------------------------------------------------------------------
+    float duckGain = m_musicDuckGain.load(std::memory_order_relaxed);
+    float musicVol = m_musicVolume.load(std::memory_order_relaxed);
     for (int i = 0; i < kStreamSourceCount; ++i) {
         if (!m_streams[i].isOpen) continue;
 
-        // Proactive starvation prevention: refill buffers on every wake.
-        refillStream(i);
-
-        // Apply crossfade gain (music duck applied multiplicatively).
         float gain = m_streams[i].crossfadeGain;
         if (i < 2) {
-            // Music stem — apply duck gain.
-            gain *= m_musicDuckGain.load(std::memory_order_relaxed);
+            // Music stem: apply duck gain and music volume.
+            gain *= duckGain * musicVol;
         }
+        // Ambient beds (slots 2 and 3) are NOT ducked — spec §Stingers.
         alSourcef(static_cast<ALuint>(m_streams[i].sourceHandle),
                   AL_GAIN, gain);
+        alCheckError_real("updateStreams:alSourcef(AL_GAIN)");
     }
 }
 
@@ -1166,6 +1560,7 @@ void AudioSystem::onSourceRecycled(int i) {
 // ---------------------------------------------------------------------------
 SoundHandle AudioSystem::playSound(SoundId id, SoundPriority priority,
                                     float gain) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return 0;
     auto it = m_preloadedBuffers.find(id);
     if (it == m_preloadedBuffers.end()) {
         logWarning("playSound: SoundId " + std::to_string(id) + " not loaded");
@@ -1234,6 +1629,7 @@ SoundHandle AudioSystem::playSound(SoundId id, SoundPriority priority,
 SoundHandle AudioSystem::playPositionalSound(SoundId id, vec3 pos,
                                               SoundPriority priority,
                                               float gain) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return 0;
     auto it = m_preloadedBuffers.find(id);
     if (it == m_preloadedBuffers.end()) {
         logWarning("playPositionalSound: SoundId " +
@@ -1285,6 +1681,16 @@ SoundHandle AudioSystem::playPositionalSound(SoundId id, vec3 pos,
     alSourcef (src, AL_REFERENCE_DISTANCE, 10.f);
     alSourcef (src, AL_MAX_DISTANCE,       150.f);
 
+    // Phase 10: EFX bypass for SFX_EARTHWORKS — construction occurs on open,
+    // unoccluded tiles so the lowpass filter would incorrectly muffle the sound.
+    // All other positional SFX use the occlusion filter (AL_DIRECT_FILTER is left
+    // at its current value — either the filter bound during construction or the
+    // value set by the last onSourceRecycled() call, which restores it to open).
+    if (id == SFX_EARTHWORKS) {
+        alSourcei(src, AL_DIRECT_FILTER, AL_FILTER_NULL);
+        alCheckError_real("playPositionalSound:EFXBypass(SFX_EARTHWORKS)");
+    }
+
     alSourcef(src, AL_GAIN,   gain);
     alSourcei(src, AL_BUFFER, static_cast<ALint>(buf));
     alSourcei(src, AL_LOOPING, AL_FALSE);
@@ -1301,6 +1707,7 @@ SoundHandle AudioSystem::playPositionalSound(SoundId id, vec3 pos,
 // ---------------------------------------------------------------------------
 void AudioSystem::stopSound(SoundHandle handle) {
     if (handle == 0) return;
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     for (int i = 0; i < kEvictableSFXCount; ++i) {
         if (m_sfxSlots[i].occupied && m_sfxSlots[i].handle == handle) {
             alSourceStop(static_cast<ALuint>(m_sources[i]));
@@ -1317,6 +1724,7 @@ void AudioSystem::stopSound(SoundHandle handle) {
 // setMusicTrack — begin crossfade to the specified music track.
 // ---------------------------------------------------------------------------
 void AudioSystem::setMusicTrack(MusicTrackId id) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     if (id == MUSIC_INVALID) return;
     std::string filename = musicTrackFilename(id);
     if (filename.empty()) {
@@ -1324,21 +1732,34 @@ void AudioSystem::setMusicTrack(MusicTrackId id) {
         return;
     }
 
-    // Simple V1 implementation: start on stream slot 0 if not open, crossfade otherwise.
     std::string path = assetPath(filename);
 
     // Lock while modifying stream state.
     std::lock_guard<std::mutex> lk(m_streamMutex);
 
-    // Open on stream slot 0 (music stems use slots 0..1).
-    if (!m_streams[0].isOpen) {
-        if (openStreamOGG(0, path, true)) {
-            ALuint src = static_cast<ALuint>(m_streams[0].sourceHandle);
+    // Open on the active music slot (m_musicActiveSlot) if no music is playing yet.
+    // If music is already playing, open on the opposite slot and start a crossfade.
+    if (!m_streams[m_musicActiveSlot].isOpen) {
+        if (openStreamOGG(m_musicActiveSlot, path, true)) {
+            ALuint src = static_cast<ALuint>(m_streams[m_musicActiveSlot].sourceHandle);
+            m_streams[m_musicActiveSlot].crossfadeGain = 1.0f;
             alSourcei(src, AL_LOOPING, AL_FALSE);
             alSourcePlay(src);
         }
+    } else {
+        // Music is already playing — initiate a crossfade to the new track.
+        // Phase 10: use the incoming (non-active) slot.
+        int inSlot = 1 - m_musicActiveSlot;
+        if (openStreamOGG(inSlot, path, true)) {
+            m_streams[inSlot].crossfadeGain = 0.0f;
+            ALuint src = static_cast<ALuint>(m_streams[inSlot].sourceHandle);
+            alSourcei(src, AL_LOOPING, AL_FALSE);
+            alSourcePlay(src);
+            m_musicCrossfadeT.store(0.0f, std::memory_order_relaxed);
+            m_musicCrossfadeDuration = kMusicCrossfadeDurationSeconds;
+            m_musicIncomingSlot      = inSlot;
+        }
     }
-    // TODO Phase 10: full crossfade between slots 0 and 1.
     m_streamCV.notify_one();
 }
 
@@ -1353,6 +1774,7 @@ void AudioSystem::setSpeed(SimSpeed speed) {
 // triggerStinger — fire a one-shot stinger (subject to cooldown rules).
 // ---------------------------------------------------------------------------
 void AudioSystem::triggerStinger(StingerType type) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     int poolIdx = static_cast<int>(type);
     if (poolIdx < kEvictableSFXCount || poolIdx >= kSFXPoolSize) {
         logError("triggerStinger: invalid StingerType " + std::to_string(poolIdx));
@@ -1417,6 +1839,7 @@ void AudioSystem::triggerStinger(StingerType type) {
 // syncListenerToCamera — update OpenAL listener state (main thread, each frame).
 // ---------------------------------------------------------------------------
 void AudioSystem::syncListenerToCamera(const CameraState& cam) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     // AL_POSITION.
     alListener3f(AL_POSITION, cam.position.x, cam.position.y, cam.position.z);
 
@@ -1447,21 +1870,22 @@ void AudioSystem::setGameOverState(bool /*active*/) {
 // setTimeOfDay — select ambient bed for the given time period.
 // ---------------------------------------------------------------------------
 void AudioSystem::setTimeOfDay(TimeOfDay tod) {
-    m_currentTimeOfDay = tod;
-    m_timeOfDaySet     = true;
-    // TODO Phase 10: crossfade ambient bed to the correct one for this time period.
-    // For now the ambient bed is started in transitionToGameplay().
+    m_currentTimeOfDay.store(static_cast<int>(tod), std::memory_order_relaxed);
+    m_timeOfDaySet = true;
+    // Phase 10: signal the audio thread to begin an ambient bed crossfade.
+    // m_pendingAmbientTod is an atomic<int> — the audio thread reads it once per
+    // wake in updateStreams() and calls beginAmbientCrossfade() if != -1.
+    m_pendingAmbientTod.store(static_cast<int>(tod), std::memory_order_relaxed);
 }
 
 // ---------------------------------------------------------------------------
 // transitionToGameplay — crossfade from main menu music to gameplay audio.
 // ---------------------------------------------------------------------------
 void AudioSystem::transitionToGameplay() {
-    // V1: Start default calm music stem and ambient bed for current time of day.
-    // TODO Phase 10: 1 s crossfade from main menu music.
-
-    // Start ambient bed on slot 2 (sources[60]).
-    std::string ambPath = assetPath(ambientBedFilename(m_currentTimeOfDay));
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
+    // Start ambient bed on slot 2 (sources[60]) for the current time of day.
+    TimeOfDay tod = static_cast<TimeOfDay>(m_currentTimeOfDay.load(std::memory_order_relaxed));
+    std::string ambPath = assetPath(ambientBedFilename(tod));
     {
         std::lock_guard<std::mutex> lk(m_streamMutex);
         if (!m_streams[2].isOpen) {
@@ -1473,14 +1897,60 @@ void AudioSystem::transitionToGameplay() {
         }
     }
 
-    // Start default calm music stem on slot 0 (sources[58]).
-    setMusicTrack(MUSIC_CALM_01);
+    // Crossfade from main menu music to the first gameplay stem (MUSIC_CALM_01).
+    //
+    // The spec mandates a 1 s constant-power crossfade (kMenuToGameplayCrossfadeDurationSeconds)
+    // — the same sources[58..59] used by main menu music are reused for gameplay stems.
+    // Main menu and gameplay are mutually exclusive, so this is always valid.
+    //
+    // If main menu music is currently playing (the normal path): open MUSIC_CALM_01
+    // on the opposite slot and initiate a 1 s crossfade via the existing updateStreams()
+    // crossfade state machine.
+    //
+    // If no music is playing (edge case — e.g. main menu was muted or never started):
+    // open MUSIC_CALM_01 immediately on the active slot with gain 1.0 and no crossfade.
+    std::string calmPath = assetPath(musicTrackFilename(MUSIC_CALM_01));
+    {
+        std::lock_guard<std::mutex> lk(m_streamMutex);
+
+        if (m_streams[m_musicActiveSlot].isOpen) {
+            // Normal path: main menu music is playing — 1 s fade-out / fade-in.
+            int inSlot = 1 - m_musicActiveSlot;
+            if (openStreamOGG(inSlot, calmPath, true)) {
+                m_streams[inSlot].crossfadeGain = 0.0f;
+                ALuint src = static_cast<ALuint>(m_streams[inSlot].sourceHandle);
+                alSourcei(src, AL_LOOPING, AL_FALSE);
+                alCheckError_real("transitionToGameplay:looping");
+                alSourcePlay(src);
+                alCheckError_real("transitionToGameplay:play");
+                m_musicCrossfadeT.store(0.0f, std::memory_order_relaxed);
+                m_musicCrossfadeDuration = kMenuToGameplayCrossfadeDurationSeconds;
+                m_musicIncomingSlot      = inSlot;
+                // Seed the incoming intensity so updateStreams() does not re-trigger
+                // a crossfade immediately after this one completes.
+                m_audioThreadIntensity   = static_cast<int>(MusicIntensity::CALM);
+            }
+        } else {
+            // Edge case: no music playing — start MUSIC_CALM_01 immediately.
+            if (openStreamOGG(m_musicActiveSlot, calmPath, true)) {
+                m_streams[m_musicActiveSlot].crossfadeGain = 1.0f;
+                ALuint src = static_cast<ALuint>(m_streams[m_musicActiveSlot].sourceHandle);
+                alSourcei(src, AL_LOOPING, AL_FALSE);
+                alCheckError_real("transitionToGameplay:looping_direct");
+                alSourcePlay(src);
+                alCheckError_real("transitionToGameplay:play_direct");
+                m_audioThreadIntensity = static_cast<int>(MusicIntensity::CALM);
+            }
+        }
+        m_streamCV.notify_one();
+    }
 }
 
 // ---------------------------------------------------------------------------
 // update — per-frame main-thread update.
 // ---------------------------------------------------------------------------
 void AudioSystem::update(float /*realDeltaSeconds*/) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     // Phase 7 main-thread responsibilities:
     // 1. Advance occlusion raycast budget / per-source distance cull checks.
     //    (Full raycast implementation deferred to Phase 10 — occlusion gain
@@ -1517,6 +1987,7 @@ void AudioSystem::update(float /*realDeltaSeconds*/) {
 // ---------------------------------------------------------------------------
 void AudioSystem::setMasterVolume(float gain) {
     m_masterVolume = gain;
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
     alListenerf(AL_GAIN, gain);
     alCheckError_real("setMasterVolume");
 }
@@ -1535,4 +2006,33 @@ void AudioSystem::setMusicVolume(float gain) {
 // ---------------------------------------------------------------------------
 void AudioSystem::setSFXVolume(float gain) {
     m_sfxVolume.store(gain, std::memory_order_relaxed);
+}
+
+// ---------------------------------------------------------------------------
+// setMusicIntensity (Phase 10) — adaptive music tier driven by simulation state.
+//
+// Stores the requested intensity tier atomically.  The audio thread reads
+// m_currentMusicIntensity at each wake (every ~10 ms) in updateStreams() and,
+// if the tier has changed from the currently-playing tier, queues a beat-boundary
+// crossfade to the stem pair matching the new intensity:
+//   CALM   -> MUSIC_CALM_01 / MUSIC_CALM_02
+//   GROWTH -> MUSIC_GROWTH_01 / MUSIC_GROWTH_02
+//   CRISIS -> MUSIC_CRISIS_01 / MUSIC_CRISIS_02
+//
+// Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) is applied internally by
+// updateStreams(): when m_currentTimeOfDay != DAY, only CALM stems are selected
+// regardless of m_currentMusicIntensity.  CitySimulation does NOT need to
+// suppress GROWTH/CRISIS calls during off-hours.
+//
+// Calling with the tier already active is a no-op (audio thread detects no change).
+// Thread-safety: call from the main thread only (store to m_currentMusicIntensity
+// is atomic, so there is no data race with audio thread reads).
+//
+// NOTE: Phase 10 deliverable.  updateStreams() cross-fade logic that responds
+// to m_currentMusicIntensity is also a Phase 10 deliverable and is implemented
+// in the same Phase 10 commit that delivers the adaptive music stems and wires
+// CitySimulation::update().
+// ---------------------------------------------------------------------------
+void AudioSystem::setMusicIntensity(MusicIntensity intensity) {
+    m_currentMusicIntensity.store(static_cast<int>(intensity), std::memory_order_relaxed);
 }

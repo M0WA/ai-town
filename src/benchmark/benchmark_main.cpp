@@ -41,11 +41,11 @@ static constexpr int kSpecMinRoadPropAniso   = 4;  // roads, props, normals, spe
 // CLI options
 // ---------------------------------------------------------------------------
 struct BenchmarkOptions {
-    int   frames    = 200;
-    int   targetFPS = 30;
-    int   width     = 1280;
-    int   height    = 720;
-    bool  jsonOut   = false;
+    int   frames      = 200;
+    int   targetFPS   = 30;
+    int   width       = 1280;
+    int   height      = 720;
+    bool  jsonOut     = false;
 };
 
 static void printUsage(const char* prog)
