@@ -305,3 +305,9 @@ When adding new coverage tests, always place them in the file that matches the
 subject's domain. Do not create new `*_coverage_gap_test.cpp` files. If no
 appropriate file exists, create a properly named file (e.g., `save_system_test.cpp`
 for save/load coverage). The `coverage_gap` naming convention is permanently retired.
+
+**Exception — stub/real split**: if an existing `*_test.cpp` uses local stub classes
+whose names conflict with the real class headers (e.g. `save_system_test.cpp` defines
+`ISaveSystem` and `ICitySimulationSerializable` as local stubs), create a companion
+`*_real_test.cpp` that includes and exercises the real implementation. Both files belong
+to the same CMake test target. This pattern applies to `save_system_real_test.cpp`.
