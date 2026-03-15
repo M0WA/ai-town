@@ -129,6 +129,7 @@ struct QueryResult {
     int         tileX{};
     int         tileZ{};
     bool        isZoned{false};
+    bool        isRoad{false};
     ZoneType    zoneType{ZoneType::Residential};
     DensityTier densityTier{DensityTier::Low};
     int         population{};

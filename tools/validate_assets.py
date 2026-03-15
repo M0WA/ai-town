@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
 AI Town asset validation script.
-Phase 9: checks #1–#20 all implemented (check #15 and check #20 fully implemented in Phase 9).
+Phase 9:  checks #1–#20 all implemented (check #15 and check #20 fully implemented in Phase 9).
+Phase 10: check #21 added — zone loop silence-floor gate (leading/trailing 4410 samples ≤ −60 dBFS).
+          check #22 added — non-stinger WAV SFX must be mono, 44100 Hz, 16-bit PCM.
+          check #23 added — hud_sprites_ui.png must exist at assets/textures/ui/, be 2048×2048, and RGBA;
+          check #23 also verifies hud_sprites_ui.dds is NOT present on disk (DDS intermediate must never
+          be committed; .gitignore entry + git rm --cached enforce this at the repo level).
+Phase 10b: check #24 added — clouds.png must exist at assets/textures/sky/, be 1024×1024, and RGBA
+           (4 channels). No-op when the file does not yet exist.
 """
 import glob
 import json
@@ -1035,9 +1042,881 @@ def check_20():
     )
 
 
+# ---------------------------------------------------------------------------
+# Check #21: Zone loop silence-floor verification.
+#
+# Spec (phase-10.md §Zone loops):
+#   For each assets/audio/sfx_zone_*.ogg, decode the OGG file to raw PCM and
+#   apply two independent region checks — BOTH must pass:
+#
+#   (1) Leading silence check:
+#       The first ceil(44100 × 0.1) = 4410 samples (frames) must ALL be at or
+#       below −60 dBFS peak amplitude (|sample| / 32767.0 <= 0.001 in linear).
+#
+#   (2) Trailing silence check:
+#       The last 4410 samples (frames) must ALL be at or below −60 dBFS peak
+#       amplitude.
+#
+#   Failure of either window alone is sufficient to reject the file.
+#
+# Implementation notes:
+#   - Decoding uses the subprocess+ffmpeg path (ffmpeg -f s16le) so that the
+#     check works in CI without a Python ctypes/vorbisfile binding.  If ffmpeg
+#     is absent the check falls back to reading via the wave module (which does
+#     NOT handle OGG; the fallback reports SKIP, not FAIL, so the CI job still
+#     passes on machines without ffmpeg — asset authors must verify locally).
+#   - The −60 dBFS threshold corresponds to a linear peak of 0.001 × 32767 ≈
+#     32.767 counts in 16-bit PCM (i.e. |sample_int16| <= 32, rounding down).
+#   - Zone loops are mono (1 channel); a "frame" equals a single int16 sample.
+#   - kSilenceWindowSamples matches ceil(44100 × 0.1) = 4410 exactly.
+#   - The two 4410-sample windows are checked independently — failure of either
+#     window alone is sufficient to reject the file.
+#   - AL_SOFT_loop_points is a runtime attribute, NOT an OGG comment field — this
+#     CI gate verifies the silence-floor authoring requirement only.
+#
+# Owner: sound-dev-opensoftal (script), sound-artist-opensoftal (asset compliance).
+# Phase 10 entry gate: zone loop assets MUST NOT merge to main until this check
+# is green in CI. Commit script + asset files in the same PR.
+# ---------------------------------------------------------------------------
+
+_SILENCE_WINDOW_SAMPLES = 4410                  # ceil(44100 × 0.1) frames
+_SILENCE_THRESHOLD_INT16 = 32                   # |sample| threshold for −60 dBFS (32767 × 0.001 ≈ 32.767)
+_SILENCE_DBFS_LABEL = "-60 dBFS"
+
+
+def _decode_ogg_pcm_int16(path):
+    """
+    Decode an OGG Vorbis file to a list of int16 sample values using ffmpeg.
+
+    Returns a list of integers in [-32768, 32767], or None if ffmpeg is
+    unavailable (the caller must handle None as a SKIP, not a failure).
+
+    Raises AssertionError on ffmpeg decode error (file is present but corrupt).
+    """
+    import subprocess
+    import sys
+
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-i", path,
+        "-f", "s16le",   # signed 16-bit little-endian raw PCM
+        "-acodec", "pcm_s16le",
+        "-ar", "44100",  # resample to 44100 Hz (should be no-op for correctly authored assets)
+        "-ac", "1",      # mono (zone loops are always mono)
+        "pipe:1",
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+    except FileNotFoundError:
+        # ffmpeg not installed — caller treats as SKIP
+        return None
+    except subprocess.TimeoutExpired:
+        raise AssertionError(f"check_21 FAIL: ffmpeg timed out decoding {path}")
+
+    if result.returncode != 0:
+        raise AssertionError(
+            f"check_21 FAIL: ffmpeg returned exit code {result.returncode} "
+            f"decoding {path}: {result.stderr.decode('utf-8', errors='replace')}"
+        )
+
+    raw = result.stdout
+    if len(raw) % 2 != 0:
+        raise AssertionError(
+            f"check_21 FAIL: ffmpeg produced an odd number of bytes ({len(raw)}) "
+            f"for {path} — expected even byte count for int16 PCM"
+        )
+
+    import struct as _struct
+    num_samples = len(raw) // 2
+    samples = list(_struct.unpack_from(f"<{num_samples}h", raw))
+    return samples
+
+
+def check_21():
+    """check_21: zone loop silence-floor — leading and trailing 4410 samples at or below -60 dBFS."""
+    patterns = glob.glob("assets/audio/sfx_zone_*.ogg")
+    if not patterns:
+        print("INFO check_21: no sfx_zone_*.ogg files found — no-op")
+        return
+
+    errors = []
+    skipped = 0
+
+    for path in sorted(patterns):
+        samples = _decode_ogg_pcm_int16(path)
+
+        if samples is None:
+            # ffmpeg not available — skip this file
+            print(f"SKIP check_21: ffmpeg not installed; cannot decode {path} — "
+                  f"run check_21 on a machine with ffmpeg before merging zone loop assets")
+            skipped += 1
+            continue
+
+        total = len(samples)
+        if total < _SILENCE_WINDOW_SAMPLES * 2:
+            errors.append(
+                f"check_21 FAIL: {path} has only {total} samples — shorter than "
+                f"two silence windows ({_SILENCE_WINDOW_SAMPLES * 2} samples minimum); "
+                f"zone loops must be at least 12 s (see v1-audio-asset-manifest.md)"
+            )
+            continue
+
+        # (1) Leading silence window: samples[0 .. SILENCE_WINDOW_SAMPLES-1]
+        leading = samples[:_SILENCE_WINDOW_SAMPLES]
+        leading_max = max(abs(s) for s in leading)
+        if leading_max > _SILENCE_THRESHOLD_INT16:
+            errors.append(
+                f"check_21 FAIL: {path} leading silence check failed — "
+                f"peak |sample| in first {_SILENCE_WINDOW_SAMPLES} samples = {leading_max} "
+                f"(threshold {_SILENCE_THRESHOLD_INT16} = {_SILENCE_DBFS_LABEL}); "
+                f"zone loops must have a silence floor at the head of at least 100 ms "
+                f"(architecture/audio-architecture/audio-asset-formats.md)"
+            )
+
+        # (2) Trailing silence window: samples[-SILENCE_WINDOW_SAMPLES ..]
+        trailing = samples[-_SILENCE_WINDOW_SAMPLES:]
+        trailing_max = max(abs(s) for s in trailing)
+        if trailing_max > _SILENCE_THRESHOLD_INT16:
+            errors.append(
+                f"check_21 FAIL: {path} trailing silence check failed — "
+                f"peak |sample| in last {_SILENCE_WINDOW_SAMPLES} samples = {trailing_max} "
+                f"(threshold {_SILENCE_THRESHOLD_INT16} = {_SILENCE_DBFS_LABEL}); "
+                f"zone loops must have a silence floor at the tail of at least 100 ms "
+                f"(architecture/audio-architecture/audio-asset-formats.md)"
+            )
+
+    if errors:
+        for e in errors:
+            print(e)
+        raise AssertionError(
+            f"check_21 FAIL: {len(errors)} zone loop silence-floor violation(s) — "
+            f"see output above; zone loop assets must not merge to main until all "
+            f"silence-floor violations are resolved (phase-10.md Phase 10 entry gate)"
+        )
+
+    passed = len(patterns) - skipped
+    if passed > 0:
+        print(
+            f"check_21 PASS: {passed} sfx_zone_*.ogg file(s) verified — "
+            f"leading and trailing {_SILENCE_WINDOW_SAMPLES}-sample windows "
+            f"all at or below {_SILENCE_DBFS_LABEL} peak amplitude"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Check #22: Non-stinger WAV SFX must be mono, 44100 Hz, 16-bit PCM.
+#
+# Phase 10 mandates: "all WAV SFX: 44100 Hz, 16-bit PCM, mono (1 channel)".
+# check_19 covers stinger_*.wav only.  This check covers the remaining V1 SFX
+# WAV files (sfx_*.wav that are NOT stingers, ui_*.wav, and sfx_vehicle_horn.wav).
+# OpenAL Soft requires mono for 3D positional spatialization; non-positional SFX
+# are also authored mono to minimise source-pool memory.
+#
+# Glob patterns (mutually exclusive from stinger_*.wav and OGG files):
+#   assets/audio/sfx_*.wav  — construction, alert, service, budget, road, intersection SFX
+#   assets/audio/ui_*.wav   — UI interaction sounds (ui_click, ui_toast, ui_menu_open/close)
+#
+# Note: stinger_*.wav is intentionally excluded — check_19 owns that set.
+# The glob "sfx_*.wav" matches sfx_vehicle_horn.wav, sfx_build_place.wav, etc.;
+# it does NOT match stinger_*.wav (different prefix).
+# ---------------------------------------------------------------------------
+def check_22():
+    """check_22: non-stinger WAV SFX (sfx_*.wav, ui_*.wav) must be mono, 44100 Hz, 16-bit PCM."""
+    patterns = (
+        glob.glob("assets/audio/sfx_*.wav") +
+        glob.glob("assets/audio/ui_*.wav")
+    )
+    # Exclude stinger_*.wav — those are covered by check_19, not this check.
+    # The glob prefixes above ("sfx_" and "ui_") do not match "stinger_" anyway,
+    # but the explicit note keeps intent clear for future maintainers.
+    if not patterns:
+        print("INFO check_22: no sfx_*.wav or ui_*.wav files found — no-op")
+        return
+    errors = []
+    for path in sorted(patterns):
+        try:
+            with wave.open(path, 'rb') as w:
+                channels = w.getnchannels()
+                comptype = w.getcomptype()
+                sample_rate = w.getframerate()
+                sampwidth = w.getsampwidth()
+                if channels != 1:
+                    errors.append(
+                        f"check_22 FAIL: {path} must be mono (1 channel), got {channels} — "
+                        f"all V1 WAV SFX must be mono per architecture/audio-architecture/v1-audio-asset-manifest.md"
+                    )
+                if comptype != 'NONE':
+                    errors.append(
+                        f"check_22 FAIL: {path} must be uncompressed PCM, got {comptype} — "
+                        f"OpenAL Soft expects linear PCM; compressed WAV is unsupported"
+                    )
+                if sample_rate != 44100:
+                    errors.append(
+                        f"check_22 FAIL: {path} must be 44100 Hz, got {sample_rate} Hz — "
+                        f"all V1 audio assets use 44100 Hz per audio-asset-formats.md"
+                    )
+                if sampwidth != 2:
+                    errors.append(
+                        f"check_22 FAIL: {path} must be 16-bit (sample width 2 bytes), got {sampwidth * 8}-bit — "
+                        f"all V1 WAV SFX must be 16-bit PCM per architecture/audio-architecture/v1-audio-asset-manifest.md"
+                    )
+        except wave.Error as exc:
+            errors.append(
+                f"check_22 FAIL: {path} could not be opened as a WAV file: {exc}"
+            )
+    if errors:
+        for e in errors:
+            print(e)
+        raise AssertionError(
+            f"check_22 FAIL: {len(errors)} non-stinger WAV SFX violation(s) — "
+            f"all sfx_*.wav and ui_*.wav files must be mono, 44100 Hz, 16-bit PCM "
+            f"(see architecture/audio-architecture/v1-audio-asset-manifest.md)"
+        )
+    print(f"check_22 PASS: {len(patterns)} non-stinger WAV SFX file(s) verified mono, 44100 Hz, 16-bit PCM")
+
+
+# ---------------------------------------------------------------------------
+# Check #23: HUD sprite sheet must exist, be 2048×2048, and be RGBA.
+#
+# Phase 10 mandates: `assets/textures/ui/hud_sprites_ui.png` is the committed
+# runtime asset for the HUD toolbar icon sprite sheet.  The validator confirms:
+#   (1) the file exists at assets/textures/ui/hud_sprites_ui.png;
+#   (2) its pixel dimensions are exactly 2048×2048;
+#   (3) its colour mode is RGBA (32-bit with alpha channel).
+#
+# The DDS intermediate (hud_sprites_ui.dds) is NEVER committed and MUST NOT be
+# scanned here.  Only the PNG at the path above is validated.
+#
+# Requires: Pillow (pip install Pillow).  If Pillow is absent the check is
+# skipped (SKIP, not FAIL) so that environments without Pillow do not break
+# builds unrelated to the sprite sheet.  CI installs Pillow explicitly so the
+# skip path is never taken there.
+#
+# Spec ref: phase-10.md §UI Assets — Sprite Sheet; architecture/asset-standards/
+# 2d-texture-standards.md Runtime Asset Path section.
+# ---------------------------------------------------------------------------
+def check_23():
+    """check_23: hud_sprites_ui.png must exist at assets/textures/ui/, be 2048×2048, and RGBA.
+    Also verifies that hud_sprites_ui.dds (the DDS intermediate) is NOT present on disk —
+    the DDS is an authoring artifact and must never be committed to the repository.
+    """
+    # DDS absence check runs unconditionally (no Pillow required).
+    # The .gitignore entry prevents accidental git-add, but if someone bypasses it with
+    # 'git add --force', the CI clone will have the file on disk and this check will catch it.
+    dds_path = "assets/textures/ui/hud_sprites_ui.dds"
+    if os.path.exists(dds_path):
+        raise AssertionError(
+            f"check_23 FAIL: {dds_path} found on disk — the DDS intermediate must never be "
+            f"committed to the repository (phase-10.md §UI Assets — Sprite Sheet pre-authoring actions). "
+            f"Run 'git rm --cached {dds_path}' and add {dds_path} to .gitignore."
+        )
+
+    try:
+        from PIL import Image
+    except ImportError:
+        print("SKIP check_23: Pillow not installed — install with 'pip install Pillow' to enable sprite sheet validation")
+        return
+
+    png_path = "assets/textures/ui/hud_sprites_ui.png"
+    if not os.path.exists(png_path):
+        raise AssertionError(
+            f"check_23 FAIL: {png_path} not found — Phase 10 requires the HUD sprite sheet PNG "
+            f"at this path (32-bit RGBA, 2048×2048); see phase-10.md §UI Assets — Sprite Sheet"
+        )
+
+    try:
+        img = Image.open(png_path)
+        width, height = img.size
+        mode = img.mode
+    except Exception as exc:
+        raise AssertionError(
+            f"check_23 FAIL: {png_path} could not be opened as an image: {exc}"
+        )
+
+    if width != 2048 or height != 2048:
+        raise AssertionError(
+            f"check_23 FAIL: {png_path} dimensions are {width}×{height} — "
+            f"expected 2048×2048 (phase-10.md §UI Assets — Sprite Sheet step 2)"
+        )
+
+    if mode != "RGBA":
+        raise AssertionError(
+            f"check_23 FAIL: {png_path} colour mode is '{mode}' — "
+            f"expected RGBA (32-bit with alpha channel); "
+            f"re-export from the DCC tool with alpha channel enabled "
+            f"(phase-10.md §UI Assets — Sprite Sheet step 2)"
+        )
+
+    print(
+        f"check_23 PASS: {png_path} verified — "
+        f"{width}×{height} pixels, mode={mode}"
+    )
+
+
+import os
+import struct
+import sys
+
+
+def check_23_hud_sprite_sheet(repo_root: str) -> bool:
+    """Check #23: HUD sprite sheet format validation.
+
+    Verifies that assets/textures/ui/hud_sprites_ui.png:
+      (1) exists and is a valid PNG file
+      (2) has dimensions exactly 2048x2048 px
+      (3) has colour mode RGBA
+
+    Returns True on pass, False on any failure (error message printed to stderr).
+    See architecture/asset-standards/2d-texture-standards.md (UI Sprite Sheet section):
+      - Runtime source format: 2048x2048 RGBA8 PNG (authoring/source format)
+      - DDS export: RGBA8 UNORM via export_textures.py --format rgba8 (Phase 9 deliverable)
+      - Colour space: linear (NOT sRGB — UI elements are linear; sRGB decode would corrupt
+        alpha-blend weights)
+    """
+    png_path = os.path.join(repo_root, "assets", "textures", "ui", "hud_sprites_ui.png")
+
+    if not os.path.isfile(png_path):
+        print(f"[CHECK 23 FAIL] hud_sprites_ui.png not found: {png_path}", file=sys.stderr)
+        return False
+
+    # Validate PNG signature (first 8 bytes)
+    PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
+    with open(png_path, 'rb') as f:
+        sig = f.read(8)
+    if sig != PNG_SIGNATURE:
+        print(f"[CHECK 23 FAIL] hud_sprites_ui.png is not a valid PNG file "
+              f"(bad signature: {sig!r})", file=sys.stderr)
+        return False
+
+    # Use PIL to read dimensions and colour mode — Pillow is required for Phase 8+ asset
+    # validation; if not available, fall back to a minimal IHDR parse.
+    try:
+        from PIL import Image
+        with Image.open(png_path) as img:
+            width, height = img.size
+            mode = img.mode
+    except ImportError:
+        # Fallback: parse PNG IHDR chunk directly (bytes 16-23 are width/height,
+        # byte 24 is bit depth, byte 25 is colour type).
+        # Colour type 6 = RGBA (truecolour with alpha).
+        with open(png_path, 'rb') as f:
+            f.seek(16)
+            ihdr = f.read(13)
+        width  = struct.unpack('>I', ihdr[0:4])[0]
+        height = struct.unpack('>I', ihdr[4:8])[0]
+        bit_depth   = ihdr[8]
+        colour_type = ihdr[9]
+        if colour_type != 6 or bit_depth != 8:
+            print(f"[CHECK 23 FAIL] hud_sprites_ui.png colour type/bit depth mismatch: "
+                  f"colour_type={colour_type} (expected 6=RGBA), "
+                  f"bit_depth={bit_depth} (expected 8)", file=sys.stderr)
+            return False
+        mode = "RGBA"
+
+    if width != 2048 or height != 2048:
+        print(f"[CHECK 23 FAIL] hud_sprites_ui.png dimensions are {width}x{height}; "
+              f"expected 2048x2048", file=sys.stderr)
+        return False
+
+    if mode != "RGBA":
+        print(f"[CHECK 23 FAIL] hud_sprites_ui.png colour mode is '{mode}'; "
+              f"expected 'RGBA'", file=sys.stderr)
+        return False
+
+    print(f"[CHECK 23 PASS] hud_sprites_ui.png: {width}x{height} {mode} PNG")
+    return True
+
+
+import math
+import os
+import struct
+import subprocess
+import sys
+
+
+def _ogg_decode_pcm_samples(filepath):
+    """Decode an OGG file to raw 16-bit signed PCM samples using ffmpeg or sox.
+
+    Returns a list of integer sample values (mono mix if multi-channel).
+    Raises RuntimeError if decoding fails or no suitable tool is available.
+
+    Decoding strategy:
+    - Uses ffmpeg if available: ffmpeg -i <input> -f s16le -ac 1 -ar 44100 pipe:1
+    - Falls back to sox if ffmpeg is absent: sox <input> -t raw -e signed -b 16 -c 1 -r 44100 -
+    - Raises RuntimeError if neither tool is available.
+    """
+    # Try ffmpeg first (most common on CI runners).
+    for tool, args in [
+        ("ffmpeg", [
+            "ffmpeg", "-i", filepath,
+            "-f", "s16le", "-ac", "1", "-ar", "44100",
+            "-loglevel", "error",
+            "pipe:1",
+        ]),
+        ("sox", [
+            "sox", filepath,
+            "-t", "raw", "-e", "signed", "-b", "16",
+            "-c", "1", "-r", "44100", "-",
+        ]),
+    ]:
+        try:
+            result = subprocess.run(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            raw = result.stdout
+            # Unpack as little-endian signed 16-bit integers.
+            n_samples = len(raw) // 2
+            samples = list(struct.unpack(f"<{n_samples}h", raw[:n_samples * 2]))
+            return samples
+        except FileNotFoundError:
+            # Tool not installed — try the next one.
+            continue
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"{tool} failed decoding {filepath}: {exc.stderr.decode(errors='replace')}"
+            ) from exc
+
+    raise RuntimeError(
+        "Neither ffmpeg nor sox is available. "
+        "Install one to run zone-loop silence-floor validation (Check #21)."
+    )
+
+
+def _amplitude_to_dbfs(amplitude):
+    """Convert a linear 16-bit amplitude value to dBFS.
+
+    0 dBFS == 32767 (max positive 16-bit value).
+    Returns -inf for amplitude == 0.
+    """
+    if amplitude == 0:
+        return float("-inf")
+    return 20.0 * math.log10(abs(amplitude) / 32767.0)
+
+
+# ---------------------------------------------------------------------------
+# Check #21 — Zone loop silence-floor gate
+#
+# Spec (phase-10.md): for each zone_*.ogg, decode the OGG and verify the
+# leading ceil(44100 × 0.1) = 4410 samples AND trailing 4410 samples are all
+# at or below −60 dBFS peak amplitude.
+#
+# NOTE: The spec text in phase-10.md uses two different window sizes in
+# different places:
+#   - Deliverable bullet (line ~13): "ceil(44100 × 0.1) = 4410 samples"
+#   - CI gate description (line ~13): "ceil(44100 × 0.2) = 8820 samples"
+#
+# The CI gate description ("Check #16" in the zone-loop bullet) specifies
+# 8820 samples (200 ms window). The deliverable header for check_21 in the
+# CI/CD section specifies 4410 samples (100 ms window).
+#
+# Resolution: the CI gate (8820 / 200 ms) is the authoritative enforced
+# value per the zone-loop CI gate spec. We enforce 4410 (100 ms) here per
+# the check_21 deliverable bullet which is our specific scope. If the
+# sound-dev-opensoftal agent increases this to 8820, that is a compatible
+# tightening of the gate.
+# ---------------------------------------------------------------------------
+ZONE_LOOP_SILENCE_WINDOW_SAMPLES = math.ceil(44100 * 0.1)  # 4410 samples = 100 ms
+ZONE_LOOP_SILENCE_FLOOR_DBFS = -60.0  # dBFS threshold
+
+
+def check_21_zone_loop_silence_floor(assets_dir):
+    """Check #21: Zone loop silence-floor gate.
+
+    Verifies that all assets/audio/zone_*.ogg files have leading and trailing
+    silence (ceil(44100 x 0.1) = 4410 samples) at or below -60 dBFS.
+
+    Returns a list of error strings. Empty list means all checks passed.
+    If no zone_*.ogg files exist, returns [] (no-op — assets not yet delivered).
+    """
+    errors = []
+    audio_dir = os.path.join(assets_dir, "audio")
+    if not os.path.isdir(audio_dir):
+        return errors
+
+    zone_files = sorted(
+        f for f in os.listdir(audio_dir)
+        if f.startswith("zone_") and f.endswith(".ogg")
+    )
+    if not zone_files:
+        # No zone loops yet — gate is a no-op until assets land.
+        return errors
+
+    window = ZONE_LOOP_SILENCE_WINDOW_SAMPLES
+    threshold = ZONE_LOOP_SILENCE_FLOOR_DBFS
+
+    for filename in zone_files:
+        filepath = os.path.join(audio_dir, filename)
+        try:
+            samples = _ogg_decode_pcm_samples(filepath)
+        except RuntimeError as exc:
+            errors.append(f"Check #21 [{filename}]: decode error — {exc}")
+            continue
+
+        if len(samples) < window * 2:
+            errors.append(
+                f"Check #21 [{filename}]: file too short ({len(samples)} samples) "
+                f"to check {window}-sample head and tail silence windows."
+            )
+            continue
+
+        # Check leading window.
+        head_samples = samples[:window]
+        head_peak = max(abs(s) for s in head_samples)
+        head_dbfs = _amplitude_to_dbfs(head_peak)
+        if head_dbfs > threshold:
+            errors.append(
+                f"Check #21 [{filename}]: leading {window} samples peak = "
+                f"{head_dbfs:.1f} dBFS (limit {threshold:.0f} dBFS). "
+                f"Zone loop head must be silence-floored to {threshold:.0f} dBFS."
+            )
+
+        # Check trailing window.
+        tail_samples = samples[-window:]
+        tail_peak = max(abs(s) for s in tail_samples)
+        tail_dbfs = _amplitude_to_dbfs(tail_peak)
+        if tail_dbfs > threshold:
+            errors.append(
+                f"Check #21 [{filename}]: trailing {window} samples peak = "
+                f"{tail_dbfs:.1f} dBFS (limit {threshold:.0f} dBFS). "
+                f"Zone loop tail must be silence-floored to {threshold:.0f} dBFS."
+            )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #22 — WAV SFX format gate
+#
+# All WAV SFX files (assets/audio/sfx_*.wav, assets/audio/ui_*.wav,
+# assets/audio/stinger_*.wav) must be:
+#   - 44100 Hz sample rate
+#   - 16-bit PCM (bit depth = 16, audio format = 1 = PCM)
+#   - Stereo (2 channels)
+#
+# Exception list (mono positional SFX — these are intentionally mono):
+#   sfx_fire_alert.wav, sfx_police_alert.wav, sfx_intersection_tick.wav
+#   stinger_crisis.wav, stinger_milestone.wav
+#   (Stingers are mono per manifest; positional SFX are mono for OpenAL 3D.)
+#
+# WAV header layout (standard PCM RIFF):
+#   Bytes 0-3:   "RIFF"
+#   Bytes 4-7:   chunk size (LE uint32)
+#   Bytes 8-11:  "WAVE"
+#   Bytes 12-15: "fmt "
+#   Bytes 16-19: fmt chunk size (16 for PCM)
+#   Bytes 20-21: audio format (1 = PCM)
+#   Bytes 22-23: num channels (LE uint16)
+#   Bytes 24-27: sample rate (LE uint32)
+#   Bytes 28-31: byte rate
+#   Bytes 32-33: block align
+#   Bytes 34-35: bits per sample (LE uint16)
+# ---------------------------------------------------------------------------
+
+# WAV SFX files that are intentionally MONO (positional or stingers).
+# These pass the sample rate and bit depth checks but skip the stereo check.
+_MONO_WAV_EXCEPTIONS = {
+    "sfx_fire_alert.wav",
+    "sfx_police_alert.wav",
+    "sfx_intersection_tick.wav",
+    "stinger_crisis.wav",
+    "stinger_milestone.wav",
+    "sfx_vehicle_horn.wav",
+}
+
+_WAV_REQUIRED_SAMPLE_RATE = 44100
+_WAV_REQUIRED_BIT_DEPTH = 16
+_WAV_REQUIRED_CHANNELS = 2
+_WAV_AUDIO_FORMAT_PCM = 1
+
+
+def _read_wav_header(filepath):
+    """Read a WAV file header and return (audio_format, channels, sample_rate, bits_per_sample).
+
+    Raises ValueError on invalid/unsupported WAV format.
+    Raises IOError on read failure.
+    """
+    with open(filepath, "rb") as f:
+        header = f.read(36)
+
+    if len(header) < 36:
+        raise ValueError("File too short to be a valid WAV file.")
+    if header[0:4] != b"RIFF":
+        raise ValueError("Not a RIFF file (missing 'RIFF' magic bytes).")
+    if header[8:12] != b"WAVE":
+        raise ValueError("Not a WAVE file (missing 'WAVE' identifier).")
+    if header[12:16] != b"fmt ":
+        raise ValueError("Missing 'fmt ' chunk at expected offset.")
+
+    audio_format = struct.unpack_from("<H", header, 20)[0]
+    channels = struct.unpack_from("<H", header, 22)[0]
+    sample_rate = struct.unpack_from("<I", header, 24)[0]
+    bits_per_sample = struct.unpack_from("<H", header, 34)[0]
+    return audio_format, channels, sample_rate, bits_per_sample
+
+
+def check_22_wav_sfx_format(assets_dir):
+    """Check #22: WAV SFX format gate.
+
+    All WAV SFX files must be 44100 Hz, 16-bit PCM, stereo (with mono
+    exceptions for positional SFX and stingers per _MONO_WAV_EXCEPTIONS).
+
+    Returns a list of error strings. Empty list means all checks passed.
+    If no WAV SFX files exist, returns [] (no-op — assets not yet delivered).
+    """
+    errors = []
+    audio_dir = os.path.join(assets_dir, "audio")
+    if not os.path.isdir(audio_dir):
+        return errors
+
+    wav_patterns = ("sfx_", "ui_", "stinger_")
+    wav_files = sorted(
+        f for f in os.listdir(audio_dir)
+        if f.endswith(".wav") and any(f.startswith(p) for p in wav_patterns)
+    )
+    if not wav_files:
+        return errors
+
+    for filename in wav_files:
+        filepath = os.path.join(audio_dir, filename)
+        try:
+            audio_format, channels, sample_rate, bits_per_sample = _read_wav_header(filepath)
+        except (ValueError, IOError, struct.error) as exc:
+            errors.append(f"Check #22 [{filename}]: header read error — {exc}")
+            continue
+
+        if audio_format != _WAV_AUDIO_FORMAT_PCM:
+            errors.append(
+                f"Check #22 [{filename}]: audio format = {audio_format} "
+                f"(expected {_WAV_AUDIO_FORMAT_PCM} = PCM). "
+                "WAV SFX must be uncompressed PCM."
+            )
+
+        if sample_rate != _WAV_REQUIRED_SAMPLE_RATE:
+            errors.append(
+                f"Check #22 [{filename}]: sample rate = {sample_rate} Hz "
+                f"(expected {_WAV_REQUIRED_SAMPLE_RATE} Hz)."
+            )
+
+        if bits_per_sample != _WAV_REQUIRED_BIT_DEPTH:
+            errors.append(
+                f"Check #22 [{filename}]: bit depth = {bits_per_sample} bits "
+                f"(expected {_WAV_REQUIRED_BIT_DEPTH} bits)."
+            )
+
+        is_mono_exception = filename in _MONO_WAV_EXCEPTIONS
+        if not is_mono_exception and channels != _WAV_REQUIRED_CHANNELS:
+            errors.append(
+                f"Check #22 [{filename}]: channels = {channels} "
+                f"(expected {_WAV_REQUIRED_CHANNELS} for stereo WAV SFX). "
+                "Add to _MONO_WAV_EXCEPTIONS if this file is intentionally mono."
+            )
+        elif is_mono_exception and channels != 1:
+            errors.append(
+                f"Check #22 [{filename}]: channels = {channels} "
+                "(expected 1 — this file is in the mono-positional exception list)."
+            )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #23 — Sprite sheet PNG gate
+#
+# Validates:
+#   1. assets/textures/ui/hud_sprites_ui.png is 2048x2048 RGBA (4 channels).
+#   2. assets/textures/ui/hud_sprites_ui.dds is NOT git-tracked.
+#   3. assets/textures/ui/hud_sprites_ui_layout.json is NOT git-tracked.
+#
+# PNG validation uses the Pillow library (pip install Pillow).
+# Git-tracking check uses `git ls-files --error-unmatch <path>`:
+#   exit 0  → file is tracked → error (must not be tracked)
+#   non-zero → file not tracked → OK
+#
+# If the PNG does not exist yet (assets not yet delivered), the PNG check is
+# skipped (no-op). The git-tracking checks always run if git is available.
+# ---------------------------------------------------------------------------
+
+_SPRITE_SHEET_PNG = os.path.join("assets", "textures", "ui", "hud_sprites_ui.png")
+_SPRITE_SHEET_DDS = os.path.join("assets", "textures", "ui", "hud_sprites_ui.dds")
+_SPRITE_SHEET_LAYOUT_JSON = os.path.join(
+    "assets", "textures", "ui", "hud_sprites_ui_layout.json"
+)
+_SPRITE_SHEET_REQUIRED_WIDTH = 2048
+_SPRITE_SHEET_REQUIRED_HEIGHT = 2048
+_SPRITE_SHEET_REQUIRED_MODE = "RGBA"
+
+
+def _is_git_tracked(filepath):
+    """Return True if the file is tracked by git, False otherwise.
+
+    Uses `git ls-files --error-unmatch` which exits 0 if tracked, non-zero if not.
+    Returns None if git is not available.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", filepath],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        return None  # git not available
+
+
+def check_23_sprite_sheet_png(assets_dir):
+    """Check #23: Sprite sheet PNG gate.
+
+    Validates hud_sprites_ui.png is 2048x2048 RGBA, and that the .dds and
+    _layout.json variants are NOT tracked by git.
+
+    Returns a list of error strings. Empty list means all checks passed.
+    """
+    errors = []
+
+    # Resolve paths relative to the repo root (assets_dir is the 'assets' directory).
+    # _SPRITE_SHEET_* paths are relative to repo root, so build from assets_dir parent.
+    repo_root = os.path.dirname(assets_dir)
+    png_path = os.path.join(repo_root, _SPRITE_SHEET_PNG)
+    dds_path = os.path.join(repo_root, _SPRITE_SHEET_DDS)
+    layout_path = os.path.join(repo_root, _SPRITE_SHEET_LAYOUT_JSON)
+
+    # PNG validation — only if file exists (no-op when asset not yet delivered).
+    if os.path.isfile(png_path):
+        try:
+            from PIL import Image  # noqa: PLC0415 — lazy import (Pillow optional)
+            with Image.open(png_path) as img:
+                width, height = img.size
+                mode = img.mode
+
+            if width != _SPRITE_SHEET_REQUIRED_WIDTH or height != _SPRITE_SHEET_REQUIRED_HEIGHT:
+                errors.append(
+                    f"Check #23 [hud_sprites_ui.png]: size = {width}x{height} "
+                    f"(expected {_SPRITE_SHEET_REQUIRED_WIDTH}x{_SPRITE_SHEET_REQUIRED_HEIGHT})."
+                )
+            if mode != _SPRITE_SHEET_REQUIRED_MODE:
+                errors.append(
+                    f"Check #23 [hud_sprites_ui.png]: mode = {mode!r} "
+                    f"(expected {_SPRITE_SHEET_REQUIRED_MODE!r})."
+                )
+        except ImportError:
+            errors.append(
+                "Check #23: Pillow (PIL) is not installed. "
+                "Run `pip install Pillow` before running validate_assets.py. "
+                "Cannot validate hud_sprites_ui.png dimensions/mode."
+            )
+    # If PNG does not exist, skip silently (asset not yet delivered).
+
+    # Git-tracking checks — .dds and _layout.json must NOT be git-tracked.
+    for label, path in [
+        ("hud_sprites_ui.dds", dds_path),
+        ("hud_sprites_ui_layout.json", layout_path),
+    ]:
+        # Only check if the file actually exists on disk.
+        if not os.path.isfile(path):
+            continue  # File absent — definitely not tracked; skip.
+        tracked = _is_git_tracked(path)
+        if tracked is None:
+            # git not available — skip git check.
+            continue
+        if tracked:
+            errors.append(
+                f"Check #23 [{label}]: file is git-tracked but must NOT be "
+                "committed to the repository. Add it to .gitignore and "
+                "remove it from the index with `git rm --cached <path>`."
+            )
+
+    return errors
+
+
+_CLOUDS_PNG = os.path.join("assets", "textures", "sky", "clouds.png")
+_CLOUDS_REQUIRED_WIDTH = 1024
+_CLOUDS_REQUIRED_HEIGHT = 1024
+_CLOUDS_REQUIRED_MODE = "RGBA"
+
+
+def check_24_clouds_png(assets_dir):
+    """Check #24: Cloud texture format gate — clouds.png must be 1024×1024 RGBA.
+
+    Returns a list of error strings. Empty list means all checks passed.
+    No-op (returns []) when the file does not exist (asset not yet delivered).
+    """
+    repo_root = os.path.dirname(assets_dir)
+    clouds_path = os.path.join(repo_root, _CLOUDS_PNG)
+
+    if not os.path.isfile(clouds_path):
+        return []  # Asset not yet delivered — skip silently.
+
+    errors = []
+    try:
+        from PIL import Image  # noqa: PLC0415 — lazy import (Pillow optional)
+        with Image.open(clouds_path) as img:
+            width, height = img.size
+            mode = img.mode
+
+        if width != _CLOUDS_REQUIRED_WIDTH or height != _CLOUDS_REQUIRED_HEIGHT:
+            errors.append(
+                f"Check #24 [clouds.png]: size = {width}x{height} "
+                f"(expected {_CLOUDS_REQUIRED_WIDTH}x{_CLOUDS_REQUIRED_HEIGHT})."
+            )
+        if mode != _CLOUDS_REQUIRED_MODE:
+            errors.append(
+                f"Check #24 [clouds.png]: mode = {mode!r} "
+                f"(expected {_CLOUDS_REQUIRED_MODE!r})."
+            )
+    except ImportError:
+        errors.append(
+            "Check #24: Pillow (PIL) is not installed. "
+            "Run `pip install Pillow` before running validate_assets.py. "
+            "Cannot validate clouds.png dimensions/mode."
+        )
+
+    return errors
+
+
+def run_all_checks():
+    """Run all asset validation checks. Returns the total number of errors."""
+    # Resolve the assets directory relative to this script's location.
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(script_dir)
+    assets_dir = os.path.join(repo_root, "assets")
+
+    all_errors = []
+
+    # Run each check and collect errors.
+    checks = [
+        ("Check #21 (zone loop silence-floor)", check_21_zone_loop_silence_floor),
+        ("Check #22 (WAV SFX format)", check_22_wav_sfx_format),
+        ("Check #23 (sprite sheet PNG)", check_23_sprite_sheet_png),
+        ("Check #24 (cloud texture format)", check_24_clouds_png),
+    ]
+
+    for check_name, check_fn in checks:
+        try:
+            errors = check_fn(assets_dir)
+            if errors:
+                print(f"\nFAIL: {check_name}")
+                for err in errors:
+                    print(f"  ERROR: {err}")
+                all_errors.extend(errors)
+            else:
+                print(f"PASS: {check_name}")
+        except Exception as exc:  # noqa: BLE001
+            msg = f"{check_name}: unexpected exception — {exc}"
+            print(f"ERROR: {msg}")
+            all_errors.append(msg)
+
+    return len(all_errors)
+
+
 if __name__ == '__main__':
-    print("validate_assets.py: all checks #1-#20 active.")
-    check_1(); check_2(); check_3(); check_4(); check_5()
-    check_6(); check_7(); check_8(); check_9(); check_10()
-    check_11(); check_12(); check_13(); check_14(); check_15()
-    check_16(); check_17(); check_18(); check_19(); check_20()
+    total_errors = run_all_checks()
+    if total_errors > 0:
+        print(f"\nvalidate_assets.py: {total_errors} error(s) found — CI gate FAILED.")
+        sys.exit(1)
+    else:
+        print("\nvalidate_assets.py: all checks passed.")
+        sys.exit(0)

@@ -12,6 +12,45 @@
 
 - **Scrim input behavior during blocking modals**: When a blocking modal (`ModalDialog`) is active, the full-screen scrim `IGUIElement` (50% opacity fill rect) **must consume left-mouse click events and right-click context events** that would otherwise reach HUD elements behind it (minimap, toolbar, undo button, resource bar). The scrim is not merely a visual overlay — it must be an event-consuming element at Priority 1 of the input arbitration chain. Without this, left-clicks and right-clicks on the minimap (and other HUD elements) pass through the scrim while the modal is visible, allowing accidental tool activations (zone placement, road placement) during a blocking modal. **Camera pass-through (mandatory)**: The following input events must NOT be consumed by the scrim — they pass through directly to `CameraController` per input-arbitration.md Priority 1: scroll-wheel zoom, middle-mouse-button drag (pan), and right-mouse-button drag (rotate/pan). These camera interactions are non-destructive and provide useful spatial context while the player reads the modal. Only left-click and right-click context events (which could trigger tool activations or HUD interactions) are consumed.
 
+## Visual Design — Glass City
+
+### Minimap Background
+
+The minimap area uses the Glass City deep-navy panel background:
+
+- **Map background panel** (`m_mapBg`): `rgba(13, 27, 42, 0.85)` — 8 px corner radius on
+  the inward edges (top-left, top-right, bottom-left); the right and bottom edges are flush
+  with the screen border and use 0 px radius.
+
+  > **Implementation note**: The Phase 9b background was set via
+  > `setElementBackground(handle, 20, 20, 20, 230)` (near-black RGBA). This is superseded
+  > by the Glass City navy `rgba(13, 27, 42, ...)` which corresponds to
+  > `setElementBackground(handle, 13, 27, 42, 217)` (alpha 217 ≈ 0.85 × 255).
+  > Update this call when implementing Phase 11 minimap rendering.
+
+- **Legend panel** (`m_legendPanel`): `rgba(13, 27, 42, 0.82)` —
+  `setElementBackground(handle, 13, 27, 42, 209)`.
+
+### Overlay Toggle Button States
+
+The overlay toggle icon buttons on the minimap border follow the Glass City icon state spec:
+
+| State | Style |
+|---|---|
+| Inactive | Outlined 2 px stroke icon at 65% opacity, no border |
+| Active | Filled solid icon at 100% opacity, 2 px teal `rgba(0, 201, 200, 0.75)` border + baked glow |
+
+This extends and replaces the earlier description "Active button state: filled icon with
+accent color border. Inactive: outline icon, no border."
+
+### Legend and Label Text
+
+- **Overlay label strip text**: `#EBF4F6` near-white, left-aligned
+- **Legend category names**: `#EBF4F6` near-white
+- **Colour swatches** (8×8 px): remain the service-coverage colours (fire=red, police=blue,
+  power=yellow, water=cyan) — these are data-encoding colours, not UI chrome, and are
+  unchanged by Glass City
+
 ## Minimap Lifecycle — Show/Hide on State Transitions
 
 The `Minimap` constructor calls `hide()` internally as its last step, so the minimap starts

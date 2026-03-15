@@ -24,14 +24,15 @@
 // actual EXPECT_THROW test. The constructor calls m_alcFunctions->getProcAddress(
 // "alcSetThreadContext") and throws std::runtime_error when null is returned.
 
-#include "src/audio/ialc_functions.h"
-#include "src/audio/audio_system.h"
+#include "src/interfaces/IAlcFunctions.h"
+#include "src/audio/AudioSystem.h"
 #include "src/audio/audio_constants.h"
-#include "tests/simulation/manual_clock.h"
+#include "tests/simulation/ManualClock.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <stdexcept>
 #include <string_view>
+#include <cstdlib>
 
 // ---------------------------------------------------------------------------
 // MockAlcFunctions — stub IAlcFunctions implementation that returns nullptr
@@ -126,8 +127,18 @@ TEST_F(AudioThreadTest, AudioThread_AbsentThreadLocalContext_ConstructorThrows) 
     //
     // No audio hardware required: the throw happens when the constructor calls
     // m_alcFunctions->getProcAddress("alcSetThreadContext") and gets nullptr back.
-    // With ALSOFT_DRIVERS=null (set in CI env), alcOpenDevice returns a null-driver
-    // device so the constructor can proceed to the getProcAddress check before throwing.
+    // ALSOFT_DRIVERS=null tells OpenAL Soft to use its built-in null driver so that
+    // alcOpenDevice() returns a valid (non-null) device handle even in headless CI.
+    // Without this, alcOpenDevice() returns null and the constructor enters silent
+    // mode (early return) before reaching the getProcAddress check.
+    //
+    // We set the variable programmatically so the test is self-contained and does
+    // not depend on the test runner having set it in the environment.
+#if defined(_WIN32)
+    _putenv_s("ALSOFT_DRIVERS", "null");
+#else
+    setenv("ALSOFT_DRIVERS", "null", /*overwrite=*/1);
+#endif
     EXPECT_THROW(
         {
             AudioSystem audioSystem(&m_clock, &m_mockAlc);

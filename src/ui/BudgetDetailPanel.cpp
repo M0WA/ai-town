@@ -3,7 +3,7 @@
 // BudgetDetailPanel — 320x200 px floating panel owned by HUD.
 // Shows 8 named budget line items and an optional density unlock preview.
 
-#include "src/ui/budget_detail_panel.h"
+#include "src/ui/BudgetDetailPanel.h"
 #include "src/interfaces/ICitySimulation.h"
 
 #include <cstdio>
@@ -41,15 +41,16 @@ BudgetDetailPanel::BudgetDetailPanel(IUIBackend* backend, ICitySimulation* sim)
     m_panelBg = m_backend->addStaticText("Budget Detail", px, py, pw, 200);
 
     int y = py + 4;
-    m_taxRevenueR   = m_backend->addStaticText("Tax R: $0",       px + 4, y,             pw - 8, lineH); y += lineH;
-    m_taxRevenueC   = m_backend->addStaticText("Tax C: $0",       px + 4, y,             pw - 8, lineH); y += lineH;
-    m_taxRevenueI   = m_backend->addStaticText("Tax I: $0",       px + 4, y,             pw - 8, lineH); y += lineH;
-    m_wages         = m_backend->addStaticText("Wages: $0",       px + 4, y,             pw - 8, lineH); y += lineH;
-    m_roadMaint     = m_backend->addStaticText("Road Maint: $0",  px + 4, y,             pw - 8, lineH); y += lineH;
-    m_serviceUpkeep = m_backend->addStaticText("Service: $0",     px + 4, y,             pw - 8, lineH); y += lineH;
-    m_utilityFees   = m_backend->addStaticText("Utility Fees: $0",px + 4, y,             pw - 8, lineH); y += lineH;
-    m_netBalance    = m_backend->addStaticText("Net Balance: $0",  px + 4, y,            pw - 8, lineH); y += lineH;
-    m_unlockPreview = m_backend->addStaticText("",                 px + 4, y,            pw - 8, lineH);
+    // All budget line items are numeric readouts — apply monospace font (phase-10).
+    m_taxRevenueR   = m_backend->addStaticText("Tax R: $0",       px + 4, y,             pw - 8, lineH); m_backend->setElementMonoFont(m_taxRevenueR);   y += lineH;
+    m_taxRevenueC   = m_backend->addStaticText("Tax C: $0",       px + 4, y,             pw - 8, lineH); m_backend->setElementMonoFont(m_taxRevenueC);   y += lineH;
+    m_taxRevenueI   = m_backend->addStaticText("Tax I: $0",       px + 4, y,             pw - 8, lineH); m_backend->setElementMonoFont(m_taxRevenueI);   y += lineH;
+    m_wages         = m_backend->addStaticText("Wages: $0",       px + 4, y,             pw - 8, lineH); m_backend->setElementMonoFont(m_wages);         y += lineH;
+    m_roadMaint     = m_backend->addStaticText("Road Maint: $0",  px + 4, y,             pw - 8, lineH); m_backend->setElementMonoFont(m_roadMaint);     y += lineH;
+    m_serviceUpkeep = m_backend->addStaticText("Service: $0",     px + 4, y,             pw - 8, lineH); m_backend->setElementMonoFont(m_serviceUpkeep); y += lineH;
+    m_utilityFees   = m_backend->addStaticText("Utility Fees: $0",px + 4, y,             pw - 8, lineH); m_backend->setElementMonoFont(m_utilityFees);   y += lineH;
+    m_netBalance    = m_backend->addStaticText("Net Balance: $0",  px + 4, y,            pw - 8, lineH); m_backend->setElementMonoFont(m_netBalance);    y += lineH;
+    m_unlockPreview = m_backend->addStaticText("",                 px + 4, y,            pw - 8, lineH); m_backend->setElementMonoFont(m_unlockPreview);
 
     hide();
 }

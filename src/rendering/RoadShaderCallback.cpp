@@ -32,8 +32,9 @@
 using namespace irr;
 using namespace irr::video;
 
-RoadShaderCallback::RoadShaderCallback(bool srgbSupported)
+RoadShaderCallback::RoadShaderCallback(bool srgbSupported, GLuint diffuseTexGLuint)
     : m_srgbSupported{srgbSupported}
+    , m_diffuseTexGLuint{diffuseTexGLuint}
 {
 }
 
@@ -55,10 +56,14 @@ void RoadShaderCallback::OnSetConstants(IMaterialRendererServices* services,
     glGetIntegerv(GL_ACTIVE_TEXTURE, &savedUnit);
 
     // ------------------------------------------------------------------
-    // Step 2: Set u_diffuseMap sampler uniform to kTexUnitDiffuse (unit 0).
-    // The road_asphalt_tileable.dds texture is bound to unit 0 by the calling
-    // render path via TextureCache::getSRGBGLuint() or the linear pool path.
+    // Step 2: Bind road diffuse texture to unit 0, then set u_diffuseMap.
+    // m_diffuseTexGLuint is the raw GL handle from TextureCache::loadSRGB()
+    // (sRGB path) or loadLinear() (fallback). 0 = headless/EDT_NULL — skip bind.
     // ------------------------------------------------------------------
+    glActiveTexture(GL_TEXTURE0 + kTexUnitDiffuse);
+    if (m_diffuseTexGLuint != 0) {
+        glBindTexture(GL_TEXTURE_2D, m_diffuseTexGLuint);
+    }
     int diffuseUnit = kTexUnitDiffuse;
     services->setPixelShaderConstant("u_diffuseMap", &diffuseUnit, 1);
 

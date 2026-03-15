@@ -25,7 +25,7 @@
 //   In tests, pass false to force the fallback path, or true to suppress it.
 //
 // Allocation pattern (raw-heap + ->drop() per shader-loading.md):
-//   RoadShaderCallback* cb = new RoadShaderCallback(srgbSupported);
+//   RoadShaderCallback* cb = new RoadShaderCallback(srgbSupported, diffuseTexGLuint);
 //   gpu->addHighLevelShaderMaterialFromFiles(..., cb, ...);
 //   cb->drop();  // unconditional — Irrlicht holds its own grab() reference.
 //
@@ -44,18 +44,32 @@
 // RoadShaderCallback — IShaderConstantSetCallBack for the road tile shader.
 //
 // Holds:
-//   m_srgbSupported — bool from construction; used to derive u_srgbLinear value.
+//   m_srgbSupported     — bool from construction; used to derive u_srgbLinear value.
+//   m_diffuseTexGLuint  — raw GLuint of road_asphalt_tileable.dds (sRGB or linear upload).
+//                         Bound to GL_TEXTURE0 inside OnSetConstants() before the
+//                         sampler uniform is set. 0 = no texture (e.g., headless/EDT_NULL).
 //
-// The callback is lightweight: it stores only the sRGB flag passed at construction.
-// No RenderSystem or TextureCache pointer is stored — the value is resolved once at
-// construction time.
+// u_srgbLinear semantics (road.frag):
+//   u_srgbLinear == 0 (srgbSupported=true):
+//     Texture uploaded as GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT.
+//     GPU decoded sRGB→linear on sample. road.frag applies pow(x, 1/2.2) to
+//     re-encode linear→sRGB for the non-sRGB framebuffer (recovering authored colors).
+//   u_srgbLinear == 1 (srgbSupported=false):
+//     Texture uploaded as GL_COMPRESSED_RGBA_S3TC_DXT5_EXT (linear, no GPU decode).
+//     Raw authored bytes are the display values; road.frag outputs them directly.
+//
+// The callback stores the sRGB flag and the raw GL texture handle. Both are resolved
+// once at construction time — no RenderSystem pointer is stored.
 class RoadShaderCallback : public irr::video::IShaderConstantSetCallBack {
 public:
     // Constructor.
-    // srgbSupported: pass RenderSystem::isSRGBTextureSupported() in production.
-    //   true  → u_srgbLinear = 0 (sRGB upload path; no gamma correction needed)
-    //   false → u_srgbLinear = 1 (linear upload path; shader applies pow(c, 2.2))
-    explicit RoadShaderCallback(bool srgbSupported);
+    // srgbSupported:    pass (glewIsExtensionSupported("GL_EXT_texture_sRGB") == GL_TRUE).
+    //   true  → u_srgbLinear = 0; road.frag applies pow(x, 1/2.2) inverse re-encode.
+    //   false → u_srgbLinear = 1; road.frag outputs raw texture sample directly.
+    // diffuseTexGLuint: raw GLuint from TextureCache::loadSRGB().
+    //   Bound to GL_TEXTURE0 in OnSetConstants().
+    //   Pass 0 in tests or when no GL context is available.
+    explicit RoadShaderCallback(bool srgbSupported, GLuint diffuseTexGLuint = 0);
 
     // OnSetConstants — called by Irrlicht immediately before each draw call that
     // uses this material. Saves/restores GL_ACTIVE_TEXTURE, sets u_diffuseMap and
@@ -76,11 +90,14 @@ public:
     // Returns the int that will be passed to setPixelShaderConstant("u_srgbLinear", ...).
     // Allows unit-style assertions (EXPECT_EQ) without a live GL context.
     //
-    // Contract:
-    //   RoadShaderCallback(false).srgbLinearValue() == 1  (must activate correction)
-    //   RoadShaderCallback(true).srgbLinearValue()  == 0  (must not activate correction)
+    // Contract (matches road.frag semantics):
+    //   RoadShaderCallback(true).srgbLinearValue()  == 0
+    //     → sRGB upload; GPU decoded to linear; road.frag applies pow(x, 1/2.2) re-encode.
+    //   RoadShaderCallback(false).srgbLinearValue() == 1
+    //     → linear upload; raw authored values; road.frag outputs directly.
     int srgbLinearValue() const { return m_srgbSupported ? 0 : 1; }
 
 private:
-    bool m_srgbSupported;
+    bool   m_srgbSupported;
+    GLuint m_diffuseTexGLuint;
 };

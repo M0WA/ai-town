@@ -14,10 +14,12 @@
 | Small buildings / props (height_floors >= 4) | 500–1500 tris | 100–300 tris | 300–500 tris (`_lod2.b3d` geometry shell) |
 | Vehicles | 1000–3000 tris (indicative range — see per-class table in § Vehicle Polygon Budget for binding limits) | 200–500 tris (indicative range — see per-class table for binding limits) | Point/sprite |
 | Terrain chunk (64×64 m) | 32×32 quad grid | 16×16 quad grid | 8×8 quad grid |
-| Road tile (4×4 m) | ≤48 tris (flat quad + kerb geometry) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
+| Road tile (10×10 m) | ≤48 tris (flat quad + kerb geometry) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
 | Infrastructure props (lamp posts, signs) | ≤300 tris | ≤75 tris | Billboard (same system as small buildings) |
 
 **Road tile LOD thresholds**: Road tiles use the same LOD distance thresholds as small buildings/props (LOD0→LOD1 at 30 m / 25 m; LOD1→LOD2 at 100 m / 90 m). At LOD2 (>100 m), road tiles are rendered as flat coloured quads with no kerb or road marking geometry — road marking decals from the road atlas are disabled at LOD2. **Road LOD2 color source**: The LOD2 road quad color is sampled from the road tileable texture's average color, computed at asset pipeline generation time and stored as a named constant `RenderConstants::road_lod2_color` (type `irr::video::SColor`) in `src/rendering/render_constants.h`. This value must be a perceptual match of the center region of `road_asphalt_tileable.dds` when viewed in linear space (approximately a mid-dark gray, e.g. SColor(255, 60, 60, 60) for standard asphalt). Do NOT hardcode a magic color literal inline in rendering code — always use `RenderConstants::road_lod2_color` so that the color is updated in one place when the road texture changes. The LOD2 road quad does NOT bind a texture — it is drawn as a flat-shaded quad using the material's vertex color channel, set to `road_lod2_color` at entity construction time.
+
+**Road tile mesh authoring source (binding decision, `graphics-artist-3d-model`, 2026-03-04)**: Road tile LOD0 and LOD1 geometry is **procedurally generated in C++ at runtime via `SMesh`/`IMeshBuffer`** — no `.b3d` file is authored on disk for road tiles. `IrrlichtRenderer::placeRoadMesh()` constructs the LOD0 quad+kerb mesh (≤48 tris) and LOD1 flat quad mesh (≤16 tris) directly in code using hardcoded vertex data for a 4×4 m tile footprint. The LOD2 flat colored quad is also constructed in code (≤8 tris, `road_lod2_color` vertex color, no texture). Rationale: (a) road tiles do not participate in the lightmap baking pipeline and therefore do not require UV channel 1 or the `.b3d` format; (b) the road custom shader binds `road_asphalt_tileable.dds` via the raw GL path, which is incompatible with a standard `IMeshSceneNode` loaded from a `.b3d` file via the Irrlicht mesh loader; (c) no road tile `.b3d` filename appears in any phase deliverable — road geometry is implicitly a code deliverable of `graphics-dev-irrlicht`, not an artist asset. **Artist action: none**. No road tile `.b3d`, `.obj`, or `.meta` file is required from the 3D model artist pipeline. The `validate_assets.py` script must NOT look for road tile `.b3d` files — they do not exist. Road tile UV-channel 0 tiling is specified in the road shader (UV tiles 2× per 4×4 m road quad — both U and V scale by 2.0 in the vertex shader), not authored per-asset. The road kerb geometry vertices are authored inline in `IrrlichtRenderer` as a unit of 4 bevelled edge strips (each strip = 6 tris, 4 strips = 24 tris) plus a central flat quad (2 tris), totaling 26 tris for LOD0 — well within the ≤48 tri budget. LOD1 is a single flat quad (2 tris) with no kerb, within the ≤16 tri budget.
 
 **Note on large building LOD2 budget**: 300–500 tris is required to represent building silhouettes (setbacks, rooftop details, entry bays) at the 185–200 m switch-in distance where tall buildings still occupy 50–80 vertical pixels. A 100–200 tri cap produces a featureless slab that is visually jarring against LOD1 counterparts.
 
@@ -75,6 +77,72 @@ Where:
 - `res_low_01_billboard.dds` — Residential Low tier, variant 1, billboard atlas (height_floors ≤ 3)
 
 The `<asset_name>` base (e.g. `res_low_01`) is referenced in `<asset_name>.meta` for `height_floors`, `category`, and atlas cell assignments. The C++ `BuildingAssetLoader` parses the naming convention to construct LOD file paths — do not use ad-hoc per-building naming.
+
+#### Variant Selection Policy (Round-Robin, Phase 11)
+
+**Phase 10 note**: Phase 10 always uses variant `_01` for every zone/tier combination — `assetBaseName` is always `"<zone>_<tier>_01"` (e.g. `"res_low_01"`, `"com_med_01"`). The round-robin counter described below is a Phase 11 enhancement; do NOT implement the counter in Phase 10. This keeps Phase 10's `CitySimulation` scope unambiguous and makes mock-renderer test assertions deterministic.
+
+**Phase 11 and later**: When `CitySimulation` places a zone tile, it selects a visual building variant from the available variants for that zone-tier combination using a **per-zone-tier round-robin counter**. The policy is:
+
+- `CitySimulation` maintains one `int` counter per unique zone-tier combination (9 combinations in V1: Res/Com/Ind × Low/Med/High). Each counter starts at `0` and increments by `1` on every successful placement for that zone-tier combination.
+- The variant index is `(counter % numVariants) + 1`, formatted as a zero-padded 2-digit string (`01`, `02`, …). `numVariants` is always `2` for V1 (two variants per zone-tier slot).
+- The resulting `assetBaseName` passed to `IRenderer::placeBuildingMesh()` is `<zone>_<tier>_<variant>` (e.g. `"res_low_01"`, `"res_low_02"`, `"res_low_01"`, …).
+- After `CitySimulation::doDensityUnlockTick()` upgrades a tile to a higher density tier, the NEW `assetBaseName` uses the upgraded tier's round-robin counter (not the original tier's counter). Example: a tile originally placed as `"res_low_02"` that upgrades to Medium becomes `"res_med_<N>"` where `<N>` is the current Residential/Medium counter value.
+- The counter is a plain `int` member of `CitySimulation` per zone-tier slot. **Prior to Phase 11**, the counters are not persisted in the save file — on load, all existing zone tile variants are read from the tile's stored `assetBaseName` field in the save data, not recomputed from the counter; only newly placed tiles after a load use the counter (starting from 0), so save/load does not change existing visible building variants. **From Phase 11 onwards**, all 9 `m_buildingVariantCounters` are serialized to and deserialized from the save file so that post-load placements continue the pre-save sequence without restarting at 0; see `architecture/game-design/save-system.md`.
+- **No-repeat guarantee**: the round-robin ensures strict alternation between the two V1 variants (01, 02, 01, 02, …) without shuffling or RNG. This is intentional — using `ISimulationRNG` for variant selection would couple visible-asset selection to the simulation RNG stream, making reproduction of RNG-dependent events (service degradation, loan issuance) dependent on the number of tiles placed, which would break deterministic test replay. Visual variant selection MUST NOT use `ISimulationRNG`.
+- **Counter storage location**: `CitySimulation` stores the nine counters as `std::array<int, 9> m_buildingVariantCounters` (indexed by `zone * 3 + tier` where `zone` = 0/1/2 for Res/Com/Ind and `tier` = 0/1/2 for Low/Med/High), initialised to `{0}` in the constructor initialiser list.
+
+**`assetBaseName` construction helper** (implement as a `static` free function in `CitySimulation.cpp`):
+
+```cpp
+static std::string buildingAssetBaseName(ZoneType zone, DensityTier tier, int variantCounter) {
+    static const char* zoneStr[]  = {"res", "com", "ind"};
+    static const char* tierStr[]  = {"low", "med", "high"};
+    static const int numVariants  = 2;   // V1 constant
+    int variantIdx = (variantCounter % numVariants) + 1;
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%s_%s_%02d",
+        zoneStr[static_cast<int>(zone)],
+        tierStr[static_cast<int>(tier)],
+        variantIdx);
+    return buf;
+}
+```
+
+This function is internal to `CitySimulation.cpp` — do not expose it through `ICitySimulation`.
+
+#### `BuildingAssetLoader` LOD Loading Contract
+
+`BuildingAssetLoader::load(assetBaseName)` loads **all three LOD variants** (LOD0, LOD1, and LOD2 or billboard, depending on `height_floors`) at load time, per the `LODNode` design in `3d-model-standards.md`:
+
+> "The C++ `LODNode` (`src/rendering/LODNode.h`) loads all LOD variants at load time and swaps mesh buffers based on camera distance thresholds."
+
+The load sequence for a given `assetBaseName` (e.g. `"res_low_01"`):
+
+1. Read `assets/3d/buildings/<assetBaseName>.meta` to obtain `height_floors`, `category`, `atlas_cell`, and `lod_distances`.
+2. Load `assets/3d/buildings/<assetBaseName>_lod0.b3d` (always required — missing file: log warning, return null).
+3. Load `assets/3d/buildings/<assetBaseName>_lod1.b3d` (always required — missing file: log warning, return null).
+4. If `height_floors <= 3`: load `assets/3d/buildings/<assetBaseName>_billboard.dds` (billboard atlas for LOD2). No `_lod2.b3d` is loaded or expected.
+5. If `height_floors >= 4`: load `assets/3d/buildings/<assetBaseName>_lod2.b3d` (geometry shell for LOD2). No `_billboard.dds` is loaded or expected for LOD2.
+6. Return a `BuildingAsset` struct containing all loaded mesh pointers / texture handles and the parsed `.meta` fields.
+
+`IRenderer::placeBuildingMesh()` passes the returned `BuildingAsset` to `SceneEntityManager::spawnBuilding()` which constructs the `LODNode` with all three LOD resources. The phrasing "load the LOD0 `.b3d` mesh" in the Phase 10 deliverable description is shorthand for the full load sequence above — `placeBuildingMesh()` loads all LOD variants, not only LOD0.
+
+#### World-Space Tile Positioning (`kTileSize`)
+
+Zone building and road tile scene nodes are placed at world position:
+
+```text
+X = tileX * kTileSize
+Y = 0.0f          (pivot sits exactly at ground plane; terrain height not used in V1)
+Z = tileZ * kTileSize
+```
+
+**`kTileSize` value**: `10.0f` Irrlicht units (10 metres). Each simulation tile occupies a 10 m × 10 m footprint. This is consistent with the road tile LOD budget (road tile mesh = 10×10 m quad) and `CitySimulation::kTileSizeMeters = 10.0f` used for travel-time and coverage-radius computations.
+
+**Declaration**: `kTileSize` is declared as `static constexpr float kTileSize = 10.0f;` directly on `IrrlichtRenderer` in `src/rendering/IrrlichtRenderer.h`. It is used by `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and `placeServiceBuildingMesh()`. Do NOT hardcode the literal `10.0f` at call sites — always use `kTileSize` so that if the tile size changes (e.g., for a future map scale change), all placement calls update in one place.
+
+**Service building tile footprint**: Service buildings occupy a single 10×10 m tile in V1. The placed scene node's world X/Z origin is identical to the formula above. The service building mesh extends beyond the 10×10 m tile boundary at LOD0 (up to 30×30 m for a power plant), but the placement origin and collision registration tile are the single 10×10 m origin tile.
 
 #### `.meta` Sidecar File Format
 
@@ -194,6 +262,81 @@ Each building set must include:
 - `<zone>_<tier>_<variant>_col.obj` — collision mesh (or `_col_0/1/2.obj` / `_col_circle.obj` for non-convex/circular footprints)
 
 Variants sharing the same zone-tier slot (e.g. `res_low_01` and `res_low_02`) share the same wall module atlas cell in the 2048×2048 building atlas — they differ in mesh geometry only. See `architecture/asset-standards/building-atlas-layout.md` for the cell assignment table.
+
+#### Service Building Model Standards
+
+Service buildings (Fire Station, Police Station, Power Plant, Water Tower) are individually
+placed infrastructure objects, not zone buildings. They are **not** part of the modular kit
+system and do **not** participate in the zone/tier naming convention. Each service building
+type requires its own set of LOD meshes, collision mesh, and `.meta` sidecar.
+
+**Naming convention**: `svc_<type>_lod<N>.b3d` where `<type>` is one of:
+`fire_station`, `police_station`, `power_plant`, `water_tower`.
+
+Examples:
+
+- `svc_fire_station_lod0.b3d`
+- `svc_power_plant_lod1.b3d`
+- `svc_water_tower_col.obj`
+
+**LOD strategy**: Service buildings use the **small building / props** LOD category
+(height_floors = 2 for all V1 service buildings — all are single or double-storey
+structures). This means:
+
+- LOD0: 500–1500 tris (full detail)
+- LOD1: 100–300 tris (reduced)
+- LOD2: `_billboard.dds` (1024×128 DXT5 sRGB, 8-direction bake at 45° below horizontal).
+  No `_lod2.b3d` geometry shell — `height_floors = 2 <= 3` boundary applies.
+
+**Floor count**: All four V1 service building types use `height_floors = 2` in their
+`.meta` sidecar. This satisfies the `height_floors <= 3` condition for billboard LOD2.
+
+**LOD distance thresholds** (small buildings/props category):
+
+| Threshold | Distance |
+|---|---|
+| LOD0→LOD1 switch-out | > 30 m |
+| LOD0→LOD1 switch-in | < 25 m |
+| LOD1→LOD2 switch-out | > 100 m |
+| LOD1→LOD2 switch-in | < 90 m |
+
+**`.meta` sidecar fields** (mandatory for all four service building types):
+
+```json
+{
+  "category": "small_building",
+  "height_floors": 2,
+  "atlas_cell": { "row": 3, "col": 2 },
+  "lod_distances": [25.0, 90.0, 200.0]
+}
+```
+
+`atlas_cell` assignments for service buildings use the two reserved cells in the building
+atlas (row 3, col 2 and row 3, col 3). Service buildings share atlas cell (3, 2) for all
+four types in V1 — they share a common material palette (concrete, glass, utility panels).
+A second reserved cell (3, 3) is available if a distinct material per service type is
+required in a later phase. Cell (3, 2) assignment is now recorded as binding in
+`architecture/asset-standards/building-atlas-layout.md` Cell Assignment Table (updated
+2026-03-04). The `graphics-artist-3d-model` UV packing feasibility confirmation for
+service building cell (3, 2) is recorded in `building-atlas-layout.md` (sign-off
+2026-03-04). The `graphics-artist-2d-texture` texture content confirmation for cell (3, 2)
+was recorded 2026-03-04 in `building-atlas-layout.md` (sign-off block present). This gate
+is CLOSED. Phase 9 service building UV authoring and validate_assets.py check #4
+UV-range verification for service building assets are both unblocked.
+
+**Collision mesh**: `svc_<type>_col.obj` — single convex hull, maximum 24 triangles,
+no top/bottom caps, flat at Y=0. All four service building types use rectangular footprints
+and require the `_col.obj` single-convex dispatch path.
+
+**Phase delivery**: Service building 3D models are **Phase 9 deliverables**, alongside
+the zone building sets. They are not required for Phase 10 to start.
+
+**Phase 10 audio note**: `sfx_fire_alert` and `sfx_police_alert` (positional SFX) fire at
+`vec3{tile.tileX, 0.0f, tile.tileZ}` — a tile-coordinate position derived from the
+simulation state, not from a rendered service building scene node. Vehicle engine SFX
+similarly use agent positions managed by `AudioSystem`, not scene node transforms. Phase 10
+audio wiring is therefore fully decoupled from service building and vehicle 3D model
+delivery. No 3D model asset is on the Phase 10 critical path.
 
 #### Modular Building Kit
 
@@ -327,3 +470,7 @@ Variants sharing the same zone-tier slot (e.g. `res_low_01` and `res_low_02`) sh
 <!-- SIGN-OFF: graphics-artist-3d-model 2026-03-01 — LOD2 pivot conformance confirmed for all large building types (res_high_01/02, com_high_01/02, ind_high_01/02): (a) two stacked floor modules show no visible join gap in Irrlicht scene view; (b) LOD2 shell silhouette matches LOD1 assembled building silhouette within 10% area deviation at 8 azimuth angles at 45° increments (camera pitch = −45° below horizontal). Placeholder geometry passes formal review criteria. -->
 
 <!-- SIGN-OFF: graphics-artist-3d-model 2026-03-01 — Billboard bake geometry sign-off: placeholder billboard renders at pitch = −45°, 8 angles at 45° increments; flat ambient-only lighting; geometry silhouette at 128×128 downscaled to 14×14 px meets recognizability threshold for all small building variants (res_low_01/02, res_med_01/02, com_low_01/02, com_med_01/02, ind_low_01/02, ind_med_01/02). Straight alpha, no bleed into 8px border. -->
+
+<!-- SIGN-OFF: graphics-artist-3d-model 2026-03-04 — Phase 10 design decisions resolved. Three new sections added to this spec: (1) Variant Selection Policy (round-robin) — Phase 10 always uses _01 suffix; round-robin counter (Phase 11) spec and buildingAssetBaseName helper function documented; no-repeat guarantee via round-robin without RNG confirmed; nine per-zone-tier counters stored as std::array<int,9> m_buildingVariantCounters in CitySimulation, not persisted in Phase 10 save (counter serialization added in Phase 11 — see Variant Selection Policy section above and `architecture/game-design/save-system.md`); (2) BuildingAssetLoader LOD Loading Contract — placeBuildingMesh() loads all three LOD variants (LOD0, LOD1, LOD2/billboard) at load time; the "load the LOD0 .b3d mesh" phrasing in Phase 10 deliverable description is shorthand for the full sequence; BuildingAsset struct carries all loaded resources and parsed .meta fields; (3) World-Space Tile Positioning (kTileSize) — kTileSize = 4.0f constexpr float declared in src/rendering/render_constants.h; consistent with 4x4 m road tile mesh and 4x4x3 m modular building kit grid; service buildings occupy a single 4x4 m origin tile in V1 even if mesh extends beyond it; do not hardcode 4.0f at call sites. These decisions unblock Phase 10 rendering stream (graphics-dev-irrlicht) and the Phase 11 variant cycling implementation. No asset re-authoring is required. -->
+
+<!-- SIGN-OFF: graphics-artist-3d-model 2026-03-04 — Road tile mesh authoring source confirmed. Road tile LOD0/LOD1 geometry is procedurally generated in C++ at runtime (SMesh/IMeshBuffer) — no .b3d or .obj file is authored on disk for road tiles. Rationale: road tiles do not participate in the lightmap pipeline (no UV channel 1 / .b3d format requirement); the road custom shader binds road_asphalt_tileable.dds via raw GL, which is incompatible with a standard Irrlicht IMeshSceneNode loaded from .b3d; no road tile .b3d filename has appeared in any phase deliverable — road tile geometry is implicitly a graphics-dev-irrlicht C++ code deliverable. validate_assets.py must NOT check for road tile .b3d files. Artist action: none. Road kerb geometry vertex layout documented inline in the Road Tile Mesh Authoring Source section above. This decision closes the last unresolved 3D model artist item for Phase 10 start. -->

@@ -78,9 +78,9 @@ Reference: `architecture/asset-standards/2d-texture-standards.md`, `architecture
 | Lightmap (_lm) — small/medium buildings | 512x512 |
 | Lightmap (_lm) — large buildings | 1024x1024 |
 | Lightmap (_lm) — LOD2 shell | 256x256 |
-| Specular/roughness (_s, _sp) — building facades | 512x512 (matches facade atlas cell) |
-| Specular/roughness (_s, _sp) — terrain | 1024x1024 |
-| Specular/roughness (_s, _sp) — props | 256x256 |
+| Specular/roughness (`_s`, `_sp`) — building facades | 512x512 (matches facade atlas cell) |
+| Specular/roughness (`_s`, `_sp`) — terrain | 1024x1024 |
+| Specular/roughness (`_s`, `_sp`) — props | 256x256 |
 | Normal maps (_n) — all categories | Same resolution as specular/roughness for that category |
 | Vehicle diffuse atlas | 512x512 per vehicle type, packed into 2048x2048 DDS DXT1 atlas (16 vehicle types per sheet) |
 | Vehicle normal map atlas | 256x256 per vehicle type, packed into 2048x2048 DDS DXT5nm atlas (`vehicles_normal_atlas_n.dds`) |
@@ -119,6 +119,7 @@ Terrain uses a multi-layer blend system. A splat map encodes four material blend
 **Authoring rule**: Initialize the R channel (grass) to 255 across the entire splat map before painting begins. This ensures the blend-weight normalization divisor is never zero on unpainted tiles.
 
 **Terrain normal map intensity by surface type:**
+
 - Hard surfaces (concrete, brick, asphalt, stone): Z-scale 1.0–1.5 in the DCC baker. High-frequency sharp detail is appropriate — pavement cracks, mortar lines, stone facets.
 - Soft surfaces (grass, soil, dirt, sand): Z-scale 0.3–0.7. Over-strong normals on soft terrain produce a plastic appearance. Subtle micro-undulation is the correct target.
 
@@ -180,6 +181,7 @@ From Phase 2 onward, use `tools/export_textures.py` as the canonical entry point
 Two distinct vehicle atlases exist with separate purposes. They are not interchangeable.
 
 **Vehicle Diffuse Atlas** (`vehicles_diffuse_atlas_d.dds`):
+
 - Format: DDS DXT1 sRGB
 - Resolution: 2048x2048 px — 4x4 grid of 512x512 px cells (16 vehicle type slots)
 - Purpose: Diffuse/albedo color data for LOD0 and LOD1 vehicle meshes
@@ -187,6 +189,7 @@ Two distinct vehicle atlases exist with separate purposes. They are not intercha
 - Upload path: raw-GL sRGB (`GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`)
 
 **Vehicle Sprite Atlas** (`vehicles_sprite_atlas_d.dds`):
+
 - Format: DDS DXT5 (DXT5 required — alpha channel encodes silhouette mask for non-rectangular vehicle roof shapes; DXT1's 1-bit alpha is insufficient)
 - Resolution: 256x256 px — 16x16 grid of 16x16 px cells (256 sprite slots)
 - Purpose: Point/sprite LOD2 representation at distances beyond 100 m; each sprite is a 16x16 px roof-color/type identifier rendered as a camera-facing billboard quad (1 m x 0.5 m)
@@ -229,7 +232,7 @@ All DDS files must end with one of these six suffixes (enforced by `validate_ass
 
 **Road texture exception**: `road_asphalt_tileable.dds` and `road_markings_atlas.dds` in `assets/textures/roads/` are exempt from the six-suffix check — they are matched by canonical full filename in `validate_assets.py`. These are the only DDS files in the pipeline with no standard suffix.
 
-**Billboard placement**: Billboard atlas DDS files (`_billboard.dds`) are placed in `assets/textures/billboards/`. No DDS files should exist under `assets/models/` — any DDS file found there is a misplaced asset validation error.
+**Billboard placement**: Billboard atlas DDS files (`_billboard.dds`) are placed in `assets/textures/billboards/`. No DDS files should exist under `assets/3d/` — any DDS file found there is a misplaced asset validation error.
 
 ---
 
@@ -257,13 +260,13 @@ All DDS files must end with one of these six suffixes (enforced by `validate_ass
 
 | Asset type | Directory |
 |---|---|
-| Building `.b3d` meshes and `.meta` sidecars | `assets/models/buildings/` |
-| Vehicle `.b3d` meshes and `.meta` sidecars | `assets/models/vehicles/` |
-| Prop `.obj` / `.b3d` meshes and `.meta` sidecars | `assets/models/props/` |
+| Building `.b3d` meshes and `.meta` sidecars | `assets/3d/buildings/` |
+| Vehicle `.b3d` meshes and `.meta` sidecars | `assets/3d/vehicles/` |
+| Prop `.obj` / `.b3d` meshes and `.meta` sidecars | `assets/3d/props/` |
 | Collision meshes (`_col.obj` etc.) | Same directory as their parent asset |
 | Billboard atlas DDS (`_billboard.dds`) | `assets/textures/billboards/` |
 
-No DDS files should exist under `assets/models/` — any DDS file found there is a misplaced asset and will fail validation.
+No DDS files should exist under `assets/3d/` — any DDS file found there is a misplaced asset and will fail validation.
 
 ### LOD Polygon Budgets
 
@@ -330,10 +333,12 @@ Switch-out distances in `.meta` `lod_distances` must satisfy: `lod_distances[1] 
 | Prop `.obj` (NOLIGHTMAP) | Diffuse UV | Not present (`.obj` has no multi-UV support) |
 
 **UV channel 0 authoring rules:**
+
 - Building and vehicle UVs must stay within [0, 1] UV space and within the asset's assigned atlas cell (checks #4 and #10)
 - Apply the OpenGL V-flip before mapping to atlas cells: `V_opengl = 1 - V_blender`. Blender's UV editor shows V=0 at the top; OpenGL uses V=0 at the bottom-left. Failing to flip means all atlas cell assignments will be mirrored vertically
 
 **UV channel 1 (lightmap UV) authoring rules:**
+
 - Islands must be non-overlapping across the entire mesh
 - All islands must lie within [0, 1] UV space
 - Lightmap baking for LOD2 shells uses flat ambient-only lighting (same as billboard bakes), for consistency at similar viewing distances
@@ -345,6 +350,7 @@ Switch-out distances in `.meta` `lod_distances` must satisfy: `lod_distances[1] 
 `<zone>_<tier>_<variant>_lod<N>.b3d`
 
 Where:
+
 - `<zone>`: `res` (Residential), `com` (Commercial), `ind` (Industrial)
 - `<tier>`: `low`, `med`, `high`
 - `<variant>`: 2-digit integer (`01`, `02`, ...) for visual variety within a tier
@@ -394,6 +400,7 @@ Collision meshes must be separate files, never embedded in `.b3d`. Author all co
 | Very small prop (footprint < 4 m) | `<asset_name>_col.obj` | 2 |
 
 Additional authoring rules:
+
 - Non-convex buildings: maximum 3 convex sub-meshes. Do NOT silently create a `_col_3.obj` — the C++ loader will not pick it up and the discrepancy goes undetected
 - Curved/circular footprints: N-sided polygon prism where N <= 8. At N=8, side faces only = 16 triangles (within the 24-tri standard budget). Do not use a rectangular hull for circular buildings — it incorrectly blocks road tiles adjacent to the building's curved face
 - Vehicle collision mesh: single `_col.obj` used across all LOD levels (LOD0, LOD1, and the point/sprite LOD2). No LOD-specific collision meshes are authored for vehicles
@@ -404,6 +411,7 @@ Additional authoring rules:
 ### NOLIGHTMAP Flag
 
 Props explicitly exempt from UV2/lightmap requirements:
+
 - Mark `"lightmap_uv_channel": null` in their `.meta` sidecar
 - Must be exported as `.obj` (not `.b3d`)
 - `validate_assets.py` checks: if `lightmap_uv_channel` is null, file must use `.obj` format

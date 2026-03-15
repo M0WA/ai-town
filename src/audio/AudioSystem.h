@@ -15,7 +15,7 @@
 #include "src/interfaces/IClock.h"
 #include "src/interfaces/audio_types.h"
 #include "src/audio/audio_command_queue.h"
-#include "src/audio/ialc_functions.h"
+#include "src/interfaces/IAlcFunctions.h"
 #include "src/audio/AudioSourcePool.h"   // for VehiclePairSlot
 
 #include <atomic>
@@ -160,6 +160,13 @@ public:
     void setMasterVolume(float gain) override;
     void setMusicVolume(float gain) override;
     void setSFXVolume(float gain) override;
+    // Phase 10: adaptive music intensity.
+    // Implementation queues a crossfade command to the audio thread; the thread
+    // selects the stem pair for the new intensity and begins a beat-boundary crossfade.
+    // Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) is enforced internally.
+    // Calling with the tier already active is a no-op.
+    // Thread-safety: call from the main thread only.
+    void setMusicIntensity(MusicIntensity intensity) override;
 
     // Called from AudioSourcePool on slot recycle (and from vehicle pair release).
     // Resets occlusion gain to 1.0f immediately, applying the filter reset.
@@ -202,6 +209,11 @@ private:
     // Audio thread lifecycle.
     // -----------------------------------------------------------------------
     std::atomic<bool>         m_stopThread{false};
+    // Set by the audio thread when the AL backend fails (e.g. broken pipe).
+    // All main-thread AL-calling paths guard on this flag before any AL call
+    // so that a backend disconnection degrades to silent audio rather than
+    // propagating an uncaught exception that would call std::terminate.
+    std::atomic<bool>         m_deviceLost{false};
     std::thread               m_audioThread;
 
     // m_streamMutex — crossfade command queue mutex (also guards streaming AL calls).
@@ -248,8 +260,24 @@ private:
 
     // Index of incoming (new) music stream slot (0 or 1; -1 = no crossfade active).
     int m_musicIncomingSlot{-1};
+    // Index of the currently-active (outgoing) music stem slot (0 or 1).
+    // Starts at 0; swaps to 1 after first crossfade completes, then back to 0, etc.
+    // Audio-thread only — no mutex needed.
+    int m_musicActiveSlot{0};
     // Duration of the current crossfade in seconds.
     float m_musicCrossfadeDuration{0.0f};
+
+    // Phase 10: adaptive intensity — audio-thread-local copy of the last intensity
+    // it started streaming.  Compared against m_currentMusicIntensity each wake to
+    // detect a tier change that requires a new crossfade.  Audio thread only.
+    int m_audioThreadIntensity{static_cast<int>(MusicIntensity::CALM)};
+
+    // Phase 10: ambient-bed crossfade state (audio thread only).
+    // m_ambientIncomingSlot: stream slot index (2 or 3) for the incoming ambient bed
+    //   (-1 = no ambient crossfade active).
+    // m_ambientCrossfadeDuration: real-time duration (seconds) of the ambient crossfade.
+    int   m_ambientIncomingSlot{-1};
+    float m_ambientCrossfadeDuration{0.0f};
 
     // -----------------------------------------------------------------------
     // EFX occlusion state.
@@ -328,9 +356,30 @@ private:
 
     // -----------------------------------------------------------------------
     // Time-of-day state.
+    // m_currentTimeOfDay: written from main thread, read from audio thread.
+    //   Use atomic<int> to eliminate the data race (TimeOfDay is int-backed).
+    //   Cast: static_cast<TimeOfDay>(m_currentTimeOfDay.load()).
+    // m_pendingAmbientTod: set to the new TimeOfDay value (as int) when the
+    //   main thread calls setTimeOfDay() with a new value. The audio thread
+    //   reads this once per wake and, if != -1, begins an ambient crossfade
+    //   then resets it to -1.  -1 means no pending change.
+    //   Written by main thread, read by audio thread — must be atomic<int>.
     // -----------------------------------------------------------------------
-    TimeOfDay m_currentTimeOfDay{TimeOfDay::DAY};
-    bool      m_timeOfDaySet{false};
+    std::atomic<int> m_currentTimeOfDay{static_cast<int>(TimeOfDay::DAY)};
+    bool             m_timeOfDaySet{false};
+    std::atomic<int> m_pendingAmbientTod{-1};  // -1 = no pending ambient crossfade
+
+    // -----------------------------------------------------------------------
+    // Adaptive music intensity state (Phase 10).
+    // Written from main thread via setMusicIntensity(); read by audio thread
+    // to select the crossfade target stem pair.  MUST be std::atomic<int>
+    // (not std::atomic<MusicIntensity>) because std::atomic requires a trivially
+    // copyable type — enums satisfy this, but the spec mandates atomic<int> to
+    // make the threading contract explicit and avoid misuse as a direct enum load.
+    // Callers cast: static_cast<MusicIntensity>(m_currentMusicIntensity.load()).
+    // Initialized to CALM (0) — no crossfade triggered before first update().
+    // -----------------------------------------------------------------------
+    std::atomic<int> m_currentMusicIntensity{static_cast<int>(MusicIntensity::CALM)};
 
     // -----------------------------------------------------------------------
     // Vehicle pair tracking — kMaxVehiclePairs pairs.
@@ -358,7 +407,10 @@ private:
     void audioThreadFunc();
 
     // Streaming update — called once per audio thread wake.
-    void updateStreams();
+    // dt is the real-time elapsed seconds since the previous wake (from IClock).
+    // Used to advance music and ambient crossfade timers with accurate real-time
+    // deltas instead of a hardcoded nominal interval.
+    void updateStreams(float dt);
 
     // Occlusion gain smoothing — called once per audio thread wake.
     void updateOcclusion();
@@ -383,6 +435,21 @@ private:
 
     // Begin a music crossfade from current active stem to new music track.
     void beginMusicCrossfade(MusicTrackId targetId);
+
+    // Phase 10: begin a music crossfade to the stem pair matching the given
+    // intensity tier. Respects the time-of-day forced-Calm override internally.
+    // Called on the audio thread inside updateStreams() when intensity changes.
+    // Selects one of the two stems for the target tier (alternates for variety).
+    void beginIntensityCrossfade(MusicIntensity intensity);
+
+    // Phase 10: begin an ambient-bed crossfade to the bed for the given TimeOfDay.
+    // Called on the audio thread inside updateStreams() when time-of-day changes.
+    void beginAmbientCrossfade(TimeOfDay tod);
+
+    // Phase 10: apply constant-power crossfade gains to music slots 0 and 1.
+    // outSlot = outgoing (fading out); inSlot = incoming (fading in).
+    // t in [0..1]: 0 = crossfade just started (out at full), 1 = finished (in at full).
+    static void applyCrossfadeGains(AudioStream& outStream, AudioStream& inStream, float t);
 
     // Resolve asset path: AITOWN_ASSETS_DIR/audio/<filename>
     static std::string assetPath(const std::string& filename);

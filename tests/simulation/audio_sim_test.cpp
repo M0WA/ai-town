@@ -27,11 +27,11 @@
 #include <gmock/gmock.h>
 
 #include "CitySimulation.h"
-#include "mock_audio_system.h"
-#include "mock_renderer.h"
-#include "manual_rng.h"
-#include "manual_clock.h"
-#include "manual_terrain_query.h"
+#include "MockAudioSystem.h"
+#include "MockRenderer.h"
+#include "ManualRNG.h"
+#include "ManualClock.h"
+#include "ManualTerrainQuery.h"
 #include "src/interfaces/sound_ids.h"
 #include "src/interfaces/simulation_types.h"
 

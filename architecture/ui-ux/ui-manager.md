@@ -9,7 +9,9 @@
 
 ## IUIBackend Method Contract
 
-The total method count is **17**. (**Conditional**: if the Phase 8 virtual `draw()` spike confirms `IGUIElement::draw()` is non-virtual, a `virtual void drawAlphaOverlays() {}` method is appended as method 18, updating the count to **18**; both this file and `testability-architecture.md` must be updated at that point — see `implementation/phase-8.md` §IrrlichtUIBackend setElementAlpha fallback for the spike procedure.) `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+The total method count is **20**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+
+Methods 1–17 were established in Phase 8. Method 18 (`setElementBackground`) was added in Phase 9b (minimap dark-panel fix — see `architecture/ui-ux/minimap.md` §IUIBackend method 18). Method 19 (`setElementMonoFont`) was added in Phase 10 (monospace numeric readout requirement — see below). Method 20 (`setElementRect`) was added in Phase 10 (modal dialog centring fix — see `architecture/ui-ux/modal-dialog-system.md` §Element Repositioning).
 
 ```cpp
 class IUIBackend {
@@ -47,6 +49,7 @@ public:
 
     // 10. Assign a texture (identified by its own UIElementHandle) to an image element.
     //     The textureHandle must have been obtained via loadTexture() (method 17).
+    //     Note: method numbering is stable — loadTexture is method 17 regardless of later additions.
     virtual void setElementImage(UIElementHandle handle, UIElementHandle textureHandle) = 0;
 
     // 11. Return the current displayed text of an element. Used in test assertions.
@@ -79,6 +82,45 @@ public:
     //     not found, unsupported format, or driver error). The backend owns the loaded
     //     texture resource; call removeElement(handle) to release it when no longer needed.
     virtual UIElementHandle loadTexture(const std::string& path) = 0;
+
+    // 18. Set a filled background colour on an IGUIStaticText element and enable background
+    //     drawing. r, g, b, a are each in [0, 255]. Enables IrrlichtUIBackend to call
+    //     setDrawBackground(true) and setBackgroundColor() on the underlying element without
+    //     exposing Irrlicht types to src/ui/ callers.
+    //     Only valid for handles created via addStaticText(). Has no effect on button elements.
+    //     Added in Phase 9b for the Minimap dark-panel fix.
+    //     NAMING NOTE: earlier spec drafts used setElementBackgroundColor(handle, uint32_t argb)
+    //     with a packed ARGB argument. The canonical form throughout the codebase uses four
+    //     separate int channels (r, g, b, a). All call sites must use this 4-channel form.
+    //     See architecture/ui-ux/minimap.md §IUIBackend method 18.
+    virtual void setElementBackground(UIElementHandle handle, int r, int g, int b, int a) = 0;
+
+    // 19. Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element via
+    //     IGUIStaticText::setOverrideFont(). Only valid for handles created via addStaticText().
+    //     In IrrlichtUIBackend: looks up element, casts to IGUIStaticText*, calls
+    //     setOverrideFont(m_monoFont). If m_monoFont is null (file absent — graceful fallback),
+    //     this method is a no-op (the element keeps the environment default font).
+    //     In MockUIBackend: MOCK_METHOD stub; no-op in StubUIBackend.
+    //     Panel code calls this on every numeric IGUIStaticText element (treasury balance,
+    //     population count, tax rate fields, budget line items, density unlock threshold,
+    //     in-game date/time) immediately after addStaticText(). Labels, tooltips, and button
+    //     text MUST NOT call setElementMonoFont().
+    //     Added in Phase 10 to replace the untestable static_cast<IrrlichtUIBackend*> pattern.
+    //     See architecture/ui-ux/hud-layout.md §Font Loading — Monospace requirement.
+    virtual void setElementMonoFont(UIElementHandle handle) = 0;
+
+    // 20. Reposition and resize an existing element in-place without destroying
+    //     its handle. Coordinates are in virtual 1920×1080 space.
+    //     In IrrlichtUIBackend: updates the stored virtualRect (so
+    //     handleViewportResize() continues to scale correctly) and immediately
+    //     applies IGUIElement::setRelativePosition() at the current physical
+    //     resolution. Element type and all other state are preserved.
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     ModalDialog uses this to centre the dialog box and reposition its
+    //     title/body/button children without destroying and recreating handles.
+    //     Added in Phase 10 for the modal dialog centring fix.
+    //     See architecture/ui-ux/modal-dialog-system.md §Element Repositioning.
+    virtual void setElementRect(UIElementHandle handle, int x, int y, int w, int h) = 0;
 };
 ```
 
@@ -200,6 +242,16 @@ public:
     // call getConsecutiveDeficitMonths() — its only simulation interaction is calling
     // m_sim->setPaused(true) (via ISimulationPauser inheritance) when a CRITICAL toast
     // arrives. All deficit-month polling and threshold evaluation lives here, in update().
+    // NOTE (Phase 11 — stinger_milestone bridge): update() also polls
+    // m_sim->getCityRating() each frame and compares it to the cached m_previousCityRating.
+    // When getCityRating() returns a value greater than m_previousCityRating (upward tier
+    // transition), update() calls m_audio->triggerStinger(StingerType::MILESTONE) exactly
+    // once and advances the cache. m_previousCityRating is NOT serialised by SaveSystem;
+    // it is re-initialised by onGameLoaded() after each load to prevent a spurious stinger
+    // on the first update() tick. CitySimulation must NOT call triggerStinger directly —
+    // UIManager is the sole dispatcher for stinger_milestone, following the same pattern
+    // established for stinger_crisis in Phase 10. See architecture/audio-architecture/
+    // dynamic-soundscape.md § stinger_milestone and implementation/phase-11.md § stinger_milestone.
     void update(float realDeltaSeconds);
 
     // Render all GUI panels — call AFTER sceneManager->drawAll() and BEFORE endScene().
@@ -253,13 +305,34 @@ public:
     // loads a saved game):
     // Clears m_overlayMap and calls m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, {})
     // if m_renderer is non-null, so the zone colour overlay from the previous session is not
-    // displayed on the new map. Also resets m_activeTool to ActiveTool::None and clears
-    // m_hoveredTile (valid = false). Does NOT change m_mapTilesX/m_mapTilesZ — the caller
-    // must call setMapDimensions() separately if the new map has different dimensions.
+    // displayed on the new map. Also resets m_activeTool to ActiveTool::None, clears
+    // m_hoveredTileX/Z to {-1,-1}, and calls m_renderer->setTileHoverHighlight(-1,-1,
+    // kHoverArgbClear) so any frozen hover quad from the previous session is hidden.
+    // Does NOT change m_mapTilesX/m_mapTilesZ — the caller must call setMapDimensions()
+    // separately if the new map has different dimensions.
     // Safe to call before setRenderer() is wired (null-check on m_renderer).
     // Used by WorldInteraction_NewGameLoad_ClearsOverlay unit test as the authoritative
     // overlay-clear trigger.
     void onNewGame();
+
+    // Phase 11 — Save/Load wiring (called by SaveSystem or the loading controller immediately
+    // after save deserialization completes and before gameplay resumes):
+    // Re-initializes the City Rating tier cache (m_previousCityRating) to the current
+    // simulation state by calling m_sim->getCityRating(). Without this reset, the stale
+    // m_previousCityRating value left over from a previous session (or from the default
+    // construction value) would not match the loaded city's tier, causing UIManager::update()
+    // to detect a spurious tier change on the very first tick after load and fire an
+    // unwarranted stinger_milestone audio event.
+    // Contract:
+    //   - Caller MUST invoke onGameLoaded() before the first UIManager::update() tick after
+    //     a load completes. Calling it after update() has already run produces the same
+    //     spurious stinger that it is designed to prevent.
+    //   - Safe to call when m_sim is non-null (guaranteed by the load path; no null-check
+    //     needed at call sites, but UIManager asserts m_sim != nullptr in debug builds).
+    //   - Does NOT transition GameState — the caller (loading controller) is responsible for
+    //     calling transitionToGameplay(GameMode) separately.
+    //   - Does NOT clear m_overlayMap or reset m_activeTool — call onNewGame() for that.
+    void onGameLoaded();
 
     // Phase 9b — World Interaction observable state (for test assertions):
     ActiveTool getActiveTool() const; // returns m_activeTool; used by WorldInteractionTest
@@ -314,6 +387,37 @@ private:
     // NOTE: ZoneType, DensityTier are in src/interfaces/simulation_types.h.
     // ActiveTool, ServiceBuildingType are also in simulation_types.h (ServiceBuildingType added Phase 9b Deliverable I).
     // ActiveTool enum is in src/ui/ui_types.h alongside GameState/GameMode.
+
+    // updateSubPanelVisibility() — enforces the sub-panel visibility table from hud-layout.md.
+    // Called immediately after every m_activeTool change (toolbar button click, hotkey, or any
+    // other input path). The caller is responsible for closing the inspector panel
+    // (m_inspector->hide() / m_inspectorOpen = false) BEFORE calling this method when
+    // transitioning away from ActiveTool::Query — this method does NOT close the inspector.
+    //
+    // Contract:
+    //   1. Hide both sub-panels unconditionally (cost-free if already hidden).
+    //   2. Show the sub-panel appropriate for m_activeTool (see table below).
+    //   3. Fire audio — close BEFORE open, exactly one sound per changed panel:
+    //      a. For each panel that transitions from visible→hidden: call
+    //         m_audio->playSound(UI_MENU_CLOSE, SoundPriority::NORMAL, 1.0f) guarded by if(m_audio).
+    //      b. For the panel that transitions from hidden→visible (if any): call
+    //         m_audio->playSound(UI_MENU_OPEN, SoundPriority::NORMAL, 1.0f) guarded by if(m_audio).
+    //      c. Do NOT fire ui_menu_open and ui_menu_close on the same frame for the same panel.
+    //         Sequence: close sounds first, then open sound, within the same call.
+    //
+    // Sub-panel visibility table (authoritative — matches hud-layout.md):
+    //   ActiveTool::None      → Zone sub-panel: hidden;   Utilities sub-panel: hidden
+    //   ActiveTool::Zone      → Zone sub-panel: visible;  Utilities sub-panel: hidden
+    //   ActiveTool::Road      → Zone sub-panel: hidden;   Utilities sub-panel: hidden
+    //   ActiveTool::Utilities → Zone sub-panel: hidden;   Utilities sub-panel: visible
+    //   ActiveTool::Demolish  → Zone sub-panel: hidden;   Utilities sub-panel: hidden
+    //   ActiveTool::Query     → Zone sub-panel: hidden;   Utilities sub-panel: hidden
+    //
+    // The inspector panel (m_inspector / m_inspectorOpen) is NOT controlled by this method
+    // for the Query→other transition — the caller closes the inspector at the transition site
+    // before calling updateSubPanelVisibility(). For transitions INTO Query mode, the inspector
+    // remains hidden (it only opens on a subsequent tile click handled at Priority 3).
+    void updateSubPanelVisibility();
 };
 ```
 
@@ -358,7 +462,7 @@ Panels are constructed in this order (dependency order — later panels may read
 > `NotificationManager` does not yet exist when that call occurs the programme has undefined
 > behaviour. This invariant applies to `MainMenuPanel` and every future panel addition.
 
-1. `NotificationManager` — always first; see invariant above
+1. `NotificationManager` — always first; see invariant above. **Phase 10 constructor call**: `new NotificationManager(m_backend, m_sim, m_clock, m_audio)` — passes `m_audio` as the fourth parameter so that `postCritical()` and `postNormal()` can call `m_audio->playSound(UI_TOAST, ...)` when a toast becomes visible. Before Phase 10, `nullptr` is passed for the `IAudioSystem*` parameter; `NotificationManager` null-checks `m_audio` before every audio call.
 2. `MainMenuPanel` — constructed immediately after `NotificationManager`; visible on startup; UIManager owns its lifetime; hidden by `transitionToGameplay()`
 3. `HUD` — resource bar, speed selector, toolbar
 4. `TaxRatePanel` — hidden initially

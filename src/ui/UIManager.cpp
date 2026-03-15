@@ -17,21 +17,29 @@
 // Panel includes — full headers included only in the .cpp to avoid transitive
 // header dependencies for callers that only #include UIManager.h.
 #include "src/ui/NotificationManager.h"
-#include "src/ui/main_menu_panel.h"
-#include "src/ui/hud.h"
-#include "src/ui/tax_rate_panel.h"
-#include "src/ui/minimap.h"
-#include "src/ui/inspector_panel.h"
-#include "src/ui/pause_menu_panel.h"
-#include "src/ui/settings_panel.h"
-#include "src/ui/modal_dialog.h"
+#include "src/ui/MainMenuPanel.h"
+#include "src/ui/HUD.h"
+#include "src/ui/TaxRatePanel.h"
+#include "src/ui/Minimap.h"
+#include "src/ui/InspectorPanel.h"
+#include "src/ui/PauseMenuPanel.h"
+#include "src/ui/SettingsPanel.h"
+#include "src/ui/ModalDialog.h"
 
 // Explicit interface includes for method calls on forward-declared pointers.
 #include "src/interfaces/IAudioSystem.h"
+#include "src/interfaces/sound_ids.h"       // UI_CLICK, UI_MENU_OPEN, UI_MENU_CLOSE — Phase 10 wiring
+#include <cstdio>    // fopen/fclose/fprintf — loadKeybindings file probe
+#include <cstdlib>   // getenv — HOME / APPDATA resolution in loadKeybindings
+#if defined(_WIN32)
+#  include <cstring> // snprintf on MSVC
+#endif
+#include "src/interfaces/audio_types.h"     // SoundPriority::NORMAL — Phase 10 wiring
 #include "src/interfaces/ICitySimulation.h"
 #include "src/interfaces/IRenderer.h"       // IRenderer — for setZoneOverlay, pickTerrainTile
 #include "src/interfaces/ITerrainQuery.h"   // ITerrainQuery — for earthworks cost computation
 #include "src/interfaces/simulation_types.h"  // ZoneType, DensityTier, ServiceBuildingType
+#include "src/simulation/SaveSystem.h"        // SaveSystem — Phase 11 manual save + quit-guard
 
 #include <algorithm>
 #include <string>
@@ -88,7 +96,7 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
     , m_sim(sim)
     , m_clock(clock)
 {
-    m_notifications = new NotificationManager(m_backend, m_sim, m_clock);
+    m_notifications = new NotificationManager(m_backend, m_sim, m_clock, m_audio);
     m_mainMenu      = new MainMenuPanel(m_backend);   // calls show() in its constructor
     m_hud           = new HUD(m_backend, m_audio, m_sim, m_clock);
     m_taxPanel      = new TaxRatePanel(m_backend, m_sim);
@@ -126,83 +134,71 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
         const int zoneLeft  = 80;
         const int zoneTop   = 64;
 
-        // Zone type short names (column) and density tier short names (row).
-        // Used as text-label fallback when the sprite atlas is not yet loaded.
-        // Displayed as "Res\nLow", "Com\nMed", etc.  (two-line abbreviation)
-        static const char* kZoneTypeAbbrev[3]    = { "Res", "Com", "Ind" };
-        static const char* kDensityTierAbbrev[3] = { "Low", "Med", "High" };
-
-        // Create all 9 buttons; set inactive sprite for each (including the default);
-        // then override the default (idx 0, Residential Low) with the active sprite.
-        // Tests assert: all 9 inactive calls + 1 active call on the default button.
+        // Create all 9 buttons; set active sprite for each so icons are always visible.
+        // The selected button (default: idx 0, Residential Low) shows its active sprite.
+        // Non-selected buttons also start with their active sprites — they transition to
+        // inactive (outline) only when the player selects a different button, providing a
+        // clear selection indicator while keeping icons visible in the initial open state.
+        // Empty string label — sprite is the sole visual encoding (hud_sprites_ui.dds is committed).
         for (int densityRow = 0; densityRow < 3; ++densityRow) {
             for (int zoneCol = 0; zoneCol < 3; ++zoneCol) {
                 int idx = densityRow * 3 + zoneCol;
                 int bx  = zoneLeft + zoneCol  * (zoneBtnW + zoneGap);
                 int by  = zoneTop  + densityRow * (zoneBtnH + zoneGap);
 
-                // Build a short text label so the button is readable even when the
-                // sprite atlas (hud_sprites_ui.dds) has not yet loaded.
-                std::string label = std::string(kZoneTypeAbbrev[zoneCol])
-                                    + " " + kDensityTierAbbrev[densityRow];
+                m_zoneSubPanelBtns[idx] = m_backend->addButton("", bx, by, zoneBtnW, zoneBtnH);
 
-                m_zoneSubPanelBtns[idx] = m_backend->addButton(label.c_str(), bx, by, zoneBtnW, zoneBtnH);
-
-                // Set inactive sprite for every button (including the default).
-                uint32_t inactiveSprite = kSpriteZoneResLowInactive
-                                          + static_cast<uint32_t>(zoneCol)
-                                          + static_cast<uint32_t>(densityRow) * 3u;
-                m_backend->setElementImage(m_zoneSubPanelBtns[idx], inactiveSprite);
+                // Set active sprite so the filled icon is visible from the start.
+                // Sprite IDs: kSpriteZoneResLowActive(64) + zoneCol + densityRow*3.
+                uint32_t activeSprite = kSpriteZoneResLowActive
+                                        + static_cast<uint32_t>(zoneCol)
+                                        + static_cast<uint32_t>(densityRow) * 3u;
+                m_backend->setElementImage(m_zoneSubPanelBtns[idx], activeSprite);
 
                 // Initially hidden — only shown when Zone tool is active.
                 m_backend->setElementVisible(m_zoneSubPanelBtns[idx], false);
             }
         }
 
-        // Override default selection (Residential Low = idx 0) with the active sprite.
-        m_backend->setElementImage(m_zoneSubPanelBtns[0], kSpriteZoneResLowActive);
     }
 
-    // --- Phase 9b: Utilities sub-panel buttons (2×2 grid) ---
-    // Top-left anchor: virtual (x:80, y:176). Each button 96×48 px with 4 px gap.
-    // Grid layout: 2 columns × 2 rows.
-    //   (col0,row0)=PowerPlant, (col1,row0)=WaterTower,
-    //   (col0,row1)=FireStation, (col1,row1)=PoliceStation
+    // --- Phase 9b: Utilities sub-panel buttons (4×1 single-row grid) ---
+    // Top-left anchor: virtual (x:80, y:64). Each button 64×40 px with 4 px gap.
+    // Grid layout: 4 columns × 1 row (single horizontal strip).
+    //   col0=PowerPlant, col1=WaterTower, col2=FireStation, col3=PoliceStation
+    // Total width: 4*64 + 3*4 = 268 px (x:80..348). Height: 40 px (y:64..104).
     // All buttons initially hidden (only shown when ActiveTool::Utilities is active).
+    // Anchored at y:64 (same as Zone sub-panel) — sub-panels are mutually exclusive.
     if (m_backend) {
-        const int utilBtnW  = 96;
-        const int utilBtnH  = 48;
+        const int utilBtnW  = 64;
+        const int utilBtnH  = 40;
         const int utilGap   = 4;
         const int utilLeft  = 80;
-        const int utilTop   = 176;
+        const int utilTop   = 64;
 
         // ServiceBuildingType ordinals: PowerPlant=0, WaterTower=1, FireStation=2, PoliceStation=3.
-        // Grid positions: (col, row) -> type index:
-        //   (0,0)->0=PowerPlant, (1,0)->1=WaterTower,
-        //   (0,1)->2=FireStation, (1,1)->3=PoliceStation.
-        // Create all 4 buttons; set inactive sprite for each (including the default);
-        // then override the default (typeIdx 0, PowerPlant) with the active sprite.
-        // Tests assert: all 4 inactive calls + 1 active call on the default button.
-        for (int utilRow = 0; utilRow < 2; ++utilRow) {
-            for (int utilCol = 0; utilCol < 2; ++utilCol) {
-                int typeIdx = utilRow * 2 + utilCol;
-                int bx  = utilLeft + utilCol * (utilBtnW + utilGap);
-                int by  = utilTop  + utilRow * (utilBtnH + utilGap);
+        // Single-row layout: typeIdx == column index.
+        //   col0->0=PowerPlant, col1->1=WaterTower, col2->2=FireStation, col3->3=PoliceStation.
+        // Create all 4 buttons; set active sprite for each so icons are always visible.
+        // Same pattern as Zone sub-panel: icons visible from the start; transition to
+        // inactive (outline) only for non-selected buttons when a different button is clicked.
+        // Empty string label — sprite is the sole visual encoding (hud_sprites_ui.dds is committed).
 
-                m_utilSubPanelBtns[typeIdx] = m_backend->addButton("", bx, by, utilBtnW, utilBtnH);
+        for (int typeIdx = 0; typeIdx < 4; ++typeIdx) {
+            int bx = utilLeft + typeIdx * (utilBtnW + utilGap);
+            int by = utilTop;
 
-                // Set inactive sprite for every button (including the default).
-                uint32_t inactiveSprite = kSpriteUtilPowerInactive
-                                          + static_cast<uint32_t>(typeIdx);
-                m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], inactiveSprite);
+            m_utilSubPanelBtns[typeIdx] = m_backend->addButton(
+                "", bx, by, utilBtnW, utilBtnH);
 
-                // Initially hidden.
-                m_backend->setElementVisible(m_utilSubPanelBtns[typeIdx], false);
-            }
+            // Set active sprite so the filled icon is visible from the start.
+            uint32_t activeSprite = kSpriteUtilPowerActive
+                                    + static_cast<uint32_t>(typeIdx);
+            m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], activeSprite);
+
+            // Initially hidden.
+            m_backend->setElementVisible(m_utilSubPanelBtns[typeIdx], false);
         }
-
-        // Override default selection (PowerPlant = typeIdx 0) with the active sprite.
-        m_backend->setElementImage(m_utilSubPanelBtns[0], kSpriteUtilPowerActive);
     }
 }
 
@@ -585,26 +581,12 @@ bool UIManager::onEvent(const InputEvent& event) {
                     int bx = zoneLeft + zoneCol * (zoneBtnW + zoneGap);
                     int by = zoneTop  + densityRow * (zoneBtnH + zoneGap);
                     if (inRect(event.x, event.y, bx, by, zoneBtnW, zoneBtnH)) {
-                        // Update selection state.
+                        // Update selection state. All buttons keep their active sprite —
+                        // icons remain visible for all zone types at all times.
                         m_selectedZoneType    = zoneCol;
                         m_selectedDensityTier = densityRow;
-                        // Swap sprites: set all to inactive, then clicked to active.
-                        for (int dr2 = 0; dr2 < 3; ++dr2) {
-                            for (int zc2 = 0; zc2 < 3; ++zc2) {
-                                int idx2 = dr2 * 3 + zc2;
-                                if (m_zoneSubPanelBtns[idx2] == kInvalidUIElement) continue;
-                                uint32_t sprite = kSpriteZoneResLowInactive
-                                                  + static_cast<uint32_t>(zc2)
-                                                  + static_cast<uint32_t>(dr2) * 3u;
-                                m_backend->setElementImage(m_zoneSubPanelBtns[idx2], sprite);
-                            }
-                        }
-                        if (m_zoneSubPanelBtns[idx] != kInvalidUIElement) {
-                            uint32_t activeSprite = kSpriteZoneResLowActive
-                                                    + static_cast<uint32_t>(zoneCol)
-                                                    + static_cast<uint32_t>(densityRow) * 3u;
-                            m_backend->setElementImage(m_zoneSubPanelBtns[idx], activeSprite);
-                        }
+                        // Phase 10: ui_click SFX on zone sub-panel button press.
+                        if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
                         return true;
                     }
                 }
@@ -615,28 +597,17 @@ bool UIManager::onEvent(const InputEvent& event) {
         // Uses hardcoded positions (same constants as construction).
         // kInvalidUIElement guard omitted from hit-test loop (preserved only for backend calls).
         if (m_activeTool == ActiveTool::Utilities && m_backend) {
-            const int utilBtnW = 96, utilBtnH = 48, utilGap = 4;
-            const int utilLeft = 80, utilTop = 176;
+            const int utilBtnW = 64, utilBtnH = 40, utilGap = 4;
+            const int utilLeft = 80, utilTop = 64;
             for (int typeIdx = 0; typeIdx < 4; ++typeIdx) {
-                int utilCol = typeIdx % 2;
-                int utilRow = typeIdx / 2;
-                int bx = utilLeft + utilCol * (utilBtnW + utilGap);
-                int by = utilTop  + utilRow * (utilBtnH + utilGap);
+                int bx = utilLeft + typeIdx * (utilBtnW + utilGap);
+                int by = utilTop;
                 if (inRect(event.x, event.y, bx, by, utilBtnW, utilBtnH)) {
-                    // Update selection.
+                    // Update selection. All buttons keep their active sprite —
+                    // icons remain visible for all utility types at all times.
                     m_selectedServiceBuilding = typeIdx;
-                    // Swap sprites (guard handle before backend call).
-                    for (int t2 = 0; t2 < 4; ++t2) {
-                        if (m_utilSubPanelBtns[t2] == kInvalidUIElement) continue;
-                        uint32_t sprite = kSpriteUtilPowerInactive
-                                          + static_cast<uint32_t>(t2);
-                        m_backend->setElementImage(m_utilSubPanelBtns[t2], sprite);
-                    }
-                    if (m_utilSubPanelBtns[typeIdx] != kInvalidUIElement) {
-                        uint32_t activeSprite = kSpriteUtilPowerActive
-                                                + static_cast<uint32_t>(typeIdx);
-                        m_backend->setElementImage(m_utilSubPanelBtns[typeIdx], activeSprite);
-                    }
+                    // Phase 10: ui_click SFX on utilities sub-panel button press.
+                    if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
                     return true;
                 }
             }
@@ -655,18 +626,23 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_activeTool = ActiveTool::Zone;
                 if (m_hud) m_hud->setActiveToolLabel("Zone");
                 updateSubPanelVisibility();
+                // Phase 10: ui_click SFX on toolbar button press.
+                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 120 && y < 168) {  // Road
                 m_activeTool = ActiveTool::Road;
                 if (m_hud) m_hud->setActiveToolLabel("Road");
                 updateSubPanelVisibility();
+                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 176 && y < 224) {  // Utilities
                 m_activeTool = ActiveTool::Utilities;
                 if (m_hud) m_hud->setActiveToolLabel("Utilities");
                 updateSubPanelVisibility();
+                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 232 && y < 280) {  // Demolish
                 m_activeTool = ActiveTool::Demolish;
                 if (m_hud) m_hud->setActiveToolLabel("Demolish");
                 updateSubPanelVisibility();
+                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 288 && y < 336) {  // Query — toggle between Query and None
                 // Toolbar button activates Query tool only; inspector is opened by
                 // subsequent tile-click (Priority-3 QueryTool open path).
@@ -683,6 +659,7 @@ bool UIManager::onEvent(const InputEvent& event) {
                     if (m_hud) m_hud->setActiveToolLabel("Query");
                 }
                 updateSubPanelVisibility();
+                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 608 && y < 656) {  // Undo
                 if (m_sim && m_sim->hasUndoPendingAction()) {
                     m_sim->undoLastAction();
@@ -742,19 +719,114 @@ bool UIManager::onEvent(const InputEvent& event) {
     // ============================================================
 
     // ============================================================
+    // Priority 6b: RMB cancels the active tool (deselects it).
+    // Only during Gameplay when a non-None tool is active.
+    // The camera drag starts after this check (EventReceiver sets m_rmbDragActive
+    // and forwards to CameraController only when UIManager returns false here).
+    // RMB down with an active tool: deselect the tool and consume the event so
+    // CameraController does NOT start a camera drag on the same press.
+    // ============================================================
+    if (m_state == GameState::Gameplay &&
+        event.type == InputEvent::Type::MouseButtonDown &&
+        event.button == 1 &&
+        m_activeTool != ActiveTool::None) {
+        // Close any open sub-panels and clear the active tool.
+        m_activeTool = ActiveTool::None;
+        if (m_hud) m_hud->setActiveToolLabel("No tool");
+        updateSubPanelVisibility();
+        // Also clear zone/road anchor and placement preview in case a drag was in progress.
+        m_zoneAnchorX = -1;
+        m_zoneAnchorZ = -1;
+        m_lmbHeld = false;
+        if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u);
+        // Clear the hover highlight so the last-hovered tile quad is not frozen
+        // on screen after the tool is deselected.  The MouseMove handler at Priority 7
+        // is gated on m_activeTool != None, so without this call m_hoverVisible
+        // stays true and the quad persists until the next MouseMove.
+        if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
+        m_hoveredTileX = -1;
+        m_hoveredTileZ = -1;
+        return true;  // Consumed: tool deselected.
+    }
+
+    // ============================================================
     // Priority 7: World-interaction layer.
     // Only active when in Gameplay state with a non-None tool selected.
-    // MouseMove: hover highlight update (never consumes — returns false).
-    //            Also triggers drag-to-place when LMB is held and tile changes.
-    // LMB down:  placement dispatch (consumes when a non-Query tool hits terrain).
-    // LMB up:    clears m_lmbHeld (never consumes).
+    //
+    // Zone tool: immediate placement on LMB click (single tile per click).
+    //   LMB press  → place at hovered tile immediately via doTerrainPlacement().
+    //   MouseMove  → update hover highlight only.
+    //   LMB release → clears m_lmbHeld; drag-painting places on each new tile.
+    //
+    // Road tool: placement deferred to LMB release (commit on mouse-up).
+    //   LMB press  → record anchor tile; update hover highlight; do NOT place.
+    //   MouseMove  → update hover highlight only (no placement during drag).
+    //   LMB release → place at current hovered tile (single commit).
+    //
+    // Utilities and Demolish retain tile-by-tile drag behavior:
+    //   LMB press  → placement dispatch (consumes when terrain hit).
+    //   MouseMove  → drag-to-place when LMB held and tile changes.
+    //   LMB release → clears m_lmbHeld (never consumes).
+    //
     // Query tool LMB: handled at Priority 3 above — must not reach here.
+    // MouseMove: never consumes — returns false (edge-scroll must still reach
+    //            CameraController).
     // ============================================================
     if (m_state == GameState::Gameplay && m_activeTool != ActiveTool::None) {
         // Guard: renderer must be set before any world-interaction can occur.
         if (!m_renderer) return false;
 
         if (event.type == InputEvent::Type::MouseButtonUp && event.button == 0) {
+            // Zone tool: commit rectangular fill on mouse-up.
+            if (m_activeTool == ActiveTool::Zone && m_zoneAnchorX != -1) {
+                int releaseX = m_hoveredTileX;
+                int releaseZ = m_hoveredTileZ;
+                if (releaseX != -1 && releaseZ != -1) {
+                    int x0 = std::min(m_zoneAnchorX, releaseX);
+                    int x1 = std::max(m_zoneAnchorX, releaseX);
+                    int z0 = std::min(m_zoneAnchorZ, releaseZ);
+                    int z1 = std::max(m_zoneAnchorZ, releaseZ);
+                    for (int tz = z0; tz <= z1; ++tz) {
+                        for (int tx = x0; tx <= x1; ++tx) {
+                            doTerrainPlacement(tx, tz);
+                        }
+                    }
+                }
+                m_zoneAnchorX = -1;
+                m_zoneAnchorZ = -1;
+                // Clear placement preview.
+                m_renderer->setTilePlacementPreview({}, 0u);
+            }
+
+            // Road tool: commit straight-line placement on mouse-up.
+            if (m_activeTool == ActiveTool::Road && m_zoneAnchorX != -1) {
+                int releaseX = m_hoveredTileX;
+                int releaseZ = m_hoveredTileZ;
+                if (releaseX != -1 && releaseZ != -1) {
+                    int dX = std::abs(releaseX - m_zoneAnchorX);
+                    int dZ = std::abs(releaseZ - m_zoneAnchorZ);
+                    if (dX >= dZ) {
+                        // Dominant axis: X — place along X at anchor Z.
+                        int x0 = std::min(m_zoneAnchorX, releaseX);
+                        int x1 = std::max(m_zoneAnchorX, releaseX);
+                        for (int tx = x0; tx <= x1; ++tx) {
+                            doTerrainPlacement(tx, m_zoneAnchorZ);
+                        }
+                    } else {
+                        // Dominant axis: Z — place along Z at anchor X.
+                        int z0 = std::min(m_zoneAnchorZ, releaseZ);
+                        int z1 = std::max(m_zoneAnchorZ, releaseZ);
+                        for (int tz = z0; tz <= z1; ++tz) {
+                            doTerrainPlacement(m_zoneAnchorX, tz);
+                        }
+                    }
+                }
+                m_zoneAnchorX = -1;
+                m_zoneAnchorZ = -1;
+                // Clear placement preview.
+                m_renderer->setTilePlacementPreview({}, 0u);
+            }
+
             m_lmbHeld = false;
             return false;  // Up-events are never consumed by world-interaction.
         }
@@ -772,14 +844,60 @@ bool UIManager::onEvent(const InputEvent& event) {
                     case ActiveTool::Query:     colour = kHoverArgbQuery;     break;
                     default:                    colour = kHoverArgbClear;     break;
                 }
-                m_renderer->setTileHoverHighlight(hitX, hitZ, colour);
 
-                // Drag-to-place: when LMB is held and the cursor moved to a new tile,
-                // run placement logic. Prevents placing the same tile 60× per second.
-                // Query tool is excluded — its handler lives at Priority 3.
+                // Zone tool with anchor active: show rect preview instead of single-tile hover.
+                if (m_lmbHeld && m_activeTool == ActiveTool::Zone && m_zoneAnchorX != -1) {
+                    int x0 = std::min(m_zoneAnchorX, hitX);
+                    int x1 = std::max(m_zoneAnchorX, hitX);
+                    int z0 = std::min(m_zoneAnchorZ, hitZ);
+                    int z1 = std::max(m_zoneAnchorZ, hitZ);
+                    std::vector<std::pair<int,int>> previewTiles;
+                    previewTiles.reserve(static_cast<size_t>((x1 - x0 + 1) * (z1 - z0 + 1)));
+                    for (int tz = z0; tz <= z1; ++tz) {
+                        for (int tx = x0; tx <= x1; ++tx) {
+                            previewTiles.push_back({tx, tz});
+                        }
+                    }
+                    m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
+                    m_renderer->setTilePlacementPreview(previewTiles, colour);
+                }
+                // Road tool with anchor active: show axis-snapped line preview.
+                else if (m_lmbHeld && m_activeTool == ActiveTool::Road && m_zoneAnchorX != -1) {
+                    int dX = std::abs(hitX - m_zoneAnchorX);
+                    int dZ = std::abs(hitZ - m_zoneAnchorZ);
+                    std::vector<std::pair<int,int>> previewTiles;
+                    if (dX >= dZ) {
+                        int x0 = std::min(m_zoneAnchorX, hitX);
+                        int x1 = std::max(m_zoneAnchorX, hitX);
+                        previewTiles.reserve(static_cast<size_t>(x1 - x0 + 1));
+                        for (int tx = x0; tx <= x1; ++tx) {
+                            previewTiles.push_back({tx, m_zoneAnchorZ});
+                        }
+                    } else {
+                        int z0 = std::min(m_zoneAnchorZ, hitZ);
+                        int z1 = std::max(m_zoneAnchorZ, hitZ);
+                        previewTiles.reserve(static_cast<size_t>(z1 - z0 + 1));
+                        for (int tz = z0; tz <= z1; ++tz) {
+                            previewTiles.push_back({m_zoneAnchorX, tz});
+                        }
+                    }
+                    m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
+                    m_renderer->setTilePlacementPreview(previewTiles, colour);
+                }
+                // All other cases: single-tile hover highlight (no drag preview).
+                else {
+                    m_renderer->setTilePlacementPreview({}, 0u);
+                    m_renderer->setTileHoverHighlight(hitX, hitZ, colour);
+                }
+
+                // Utilities and Demolish retain tile-by-tile drag placement
+                // when LMB is held and tile changes.  Zone and Road use the
+                // deferred anchor/release pattern — no placement on move.
                 if (m_lmbHeld &&
                     (hitX != m_hoveredTileX || hitZ != m_hoveredTileZ) &&
-                    m_activeTool != ActiveTool::Query) {
+                    m_activeTool != ActiveTool::Query &&
+                    m_activeTool != ActiveTool::Zone &&
+                    m_activeTool != ActiveTool::Road) {
                     doTerrainPlacement(hitX, hitZ);
                 }
 
@@ -787,6 +905,7 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_hoveredTileZ = hitZ;
             } else {
                 m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
+                m_renderer->setTilePlacementPreview({}, 0u);
                 m_hoveredTileX = -1;
                 m_hoveredTileZ = -1;
             }
@@ -807,6 +926,33 @@ bool UIManager::onEvent(const InputEvent& event) {
             int hitX = -1, hitZ = -1;
             if (!m_renderer->pickTerrainTile(event.physX, event.physY, hitX, hitZ)) {
                 return false;
+            }
+
+            // Update hover tile to the clicked position so that the drag throttle in the
+            // MouseMove handler starts from the correct tile.  Without this, m_hoveredTileX
+            // remains -1 after the initial click, causing the first MouseMove to the same
+            // tile to evaluate the tile-change condition as true and double-place it.
+            m_hoveredTileX = hitX;
+            m_hoveredTileZ = hitZ;
+
+            // Zone tool: record anchor on press — placement is deferred to LMB release
+            // (rectangular fill of all tiles in [anchor, release] bounding box).
+            // Clear any stale preview from a previous drag.
+            if (m_activeTool == ActiveTool::Zone) {
+                m_zoneAnchorX = hitX;
+                m_zoneAnchorZ = hitZ;
+                m_renderer->setTilePlacementPreview({}, 0u);
+                return true;  // Consumed: anchor recorded; no placement yet.
+            }
+
+            // Road tool: record anchor on press — placement is deferred to LMB release
+            // (straight-line along the dominant axis from anchor to release tile).
+            // Clear any stale preview from a previous drag.
+            if (m_activeTool == ActiveTool::Road) {
+                m_zoneAnchorX = hitX;
+                m_zoneAnchorZ = hitZ;
+                m_renderer->setTilePlacementPreview({}, 0u);
+                return true;  // Consumed: anchor recorded; no placement yet.
             }
 
             return doTerrainPlacement(hitX, hitZ);
@@ -927,21 +1073,66 @@ bool UIManager::doTerrainPlacement(int hitX, int hitZ) {
 // ----------------------------------------------------------------
 // updateSubPanelVisibility — show/hide Zone and Utilities sub-panels
 // based on the current active tool.  Called whenever m_activeTool changes.
+//
+// Phase 10 audio: fire ui_menu_open/ui_menu_close when a sub-panel transitions.
+// Close sounds precede open sounds in the same call (per phase-10.md).
+// Transition detection uses isElementVisible() on the first valid handle before
+// the setElementVisible() loop, so both Zone and Utilities are checked before
+// any visibility is changed — ensuring close fires before open on the same frame.
 // ----------------------------------------------------------------
 void UIManager::updateSubPanelVisibility() {
     if (!m_backend) return;
 
     bool showZone = (m_activeTool == ActiveTool::Zone);
+    bool showUtil = (m_activeTool == ActiveTool::Utilities);
+
+    // Phase 10: sample current visibility BEFORE making any changes, so that
+    // close/open transitions can be detected correctly.
+    bool zoneWasVisible = false;
+    for (int i = 0; i < 9; ++i) {
+        if (m_zoneSubPanelBtns[i] != kInvalidUIElement) {
+            zoneWasVisible = m_backend->isElementVisible(m_zoneSubPanelBtns[i]);
+            break;
+        }
+    }
+    bool utilWasVisible = false;
+    for (int i = 0; i < 4; ++i) {
+        if (m_utilSubPanelBtns[i] != kInvalidUIElement) {
+            utilWasVisible = m_backend->isElementVisible(m_utilSubPanelBtns[i]);
+            break;
+        }
+    }
+
+    // Phase 10: fire close sounds FIRST (before any setElementVisible calls).
+    // Guard: m_audio != nullptr; only fire when the panel is transitioning.
+    if (m_audio) {
+        if (zoneWasVisible && !showZone) {
+            m_audio->playSound(UI_MENU_CLOSE, SoundPriority::NORMAL, 1.0f);
+        }
+        if (utilWasVisible && !showUtil) {
+            m_audio->playSound(UI_MENU_CLOSE, SoundPriority::NORMAL, 1.0f);
+        }
+    }
+
+    // Apply visibility to all sub-panel elements.
     for (int i = 0; i < 9; ++i) {
         if (m_zoneSubPanelBtns[i] != kInvalidUIElement) {
             m_backend->setElementVisible(m_zoneSubPanelBtns[i], showZone);
         }
     }
-
-    bool showUtil = (m_activeTool == ActiveTool::Utilities);
     for (int i = 0; i < 4; ++i) {
         if (m_utilSubPanelBtns[i] != kInvalidUIElement) {
             m_backend->setElementVisible(m_utilSubPanelBtns[i], showUtil);
+        }
+    }
+
+    // Phase 10: fire open sounds AFTER setElementVisible (per spec: "immediately after").
+    if (m_audio) {
+        if (!zoneWasVisible && showZone) {
+            m_audio->playSound(UI_MENU_OPEN, SoundPriority::NORMAL, 1.0f);
+        }
+        if (!utilWasVisible && showUtil) {
+            m_audio->playSound(UI_MENU_OPEN, SoundPriority::NORMAL, 1.0f);
         }
     }
 }
@@ -1000,15 +1191,75 @@ void UIManager::update(float realDeltaSeconds) {
         }
     }
 
-    // 1c. Poll PauseMenuPanel for quit requests (Quit to Desktop, Quit to Main Menu).
+    // 1c. Poll PauseMenuPanel for save/quit requests.
     if (m_pauseMenu) {
+        // Manual save: call saveToSlot(1) if SaveSystem is available.
+        if (m_pauseMenu->consumeSaveRequest()) {
+            if (m_saveSystem) {
+                m_saveSystem->saveToSlot(1);
+                setUnsavedChanges(false);
+            }
+        }
+
+        // Quit to Desktop: check unsaved-changes guard.
         if (m_pauseMenu->consumeQuitDesktopRequest()) {
-            m_quitRequested = true;
+            if (m_hasUnsavedChanges && m_modal) {
+                m_pendingQuit = PendingQuitAction::Desktop;
+                m_modal->showUnsavedQuit(true);
+            } else {
+                m_quitRequested = true;
+            }
             return;
         }
+
+        // Quit to Main Menu: check unsaved-changes guard.
         if (m_pauseMenu->consumeQuitToMenuRequest()) {
-            transitionToMainMenu();
+            if (m_hasUnsavedChanges && m_modal) {
+                m_pendingQuit = PendingQuitAction::ToMenu;
+                m_modal->showUnsavedQuit(false);
+            } else {
+                transitionToMainMenu();
+            }
             return;
+        }
+    }
+
+    // 1d. Handle pending quit action after unsaved-changes modal closes.
+    if (m_pendingQuit != PendingQuitAction::None && m_modal && !m_modal->isActive()) {
+        auto result  = m_modal->getLastResult();
+        auto pending = m_pendingQuit;
+        m_pendingQuit = PendingQuitAction::None;
+
+        if (result == ModalDialog::DialogResult::Accept) {
+            // "Save and Quit" — save first then dispatch.
+            if (m_saveSystem) {
+                m_saveSystem->autoSave();
+                setUnsavedChanges(false);
+            }
+            if (pending == PendingQuitAction::Desktop) {
+                m_quitRequested = true;
+            } else {
+                transitionToMainMenu();
+            }
+            return;
+        }
+        if (result == ModalDialog::DialogResult::Decline) {
+            // "Quit Without Saving" — dispatch immediately.
+            if (pending == PendingQuitAction::Desktop) {
+                m_quitRequested = true;
+            } else {
+                transitionToMainMenu();
+            }
+            return;
+        }
+        // DialogResult::Cancel — do nothing, user stays in the game.
+    }
+
+    // 1e. Forward budget ticks from CitySimulation to SaveSystem (5-tick auto-save gate).
+    if (m_sim && m_saveSystem) {
+        int ticks = m_sim->consumeBudgetTicks();
+        for (int i = 0; i < ticks; ++i) {
+            m_saveSystem->onBudgetTick();
         }
     }
 
@@ -1028,11 +1279,16 @@ void UIManager::update(float realDeltaSeconds) {
     // =============================================================
     int currentMonths = m_sim->getConsecutiveDeficitMonths();
 
-    // Month 1 edge: post CRITICAL "2 months to bankruptcy" toast.
+    // Month 1 edge: post CRITICAL "2 months to bankruptcy" toast and auto-slow to 1×
+    // (player retains speed selector control — per architecture/game-design/game-over-flow.md).
     if (currentMonths == 1 && m_lastDeficitMonths < 1) {
         m_notifications->postCritical(
             "City Finances Critical",
             "2 months to bankruptcy if deficit continues");
+        if (m_sim) {
+            m_sim->setSpeed(SpeedMultiplier::x1);
+            if (m_audio) m_audio->setSpeed(SimSpeed::x1);
+        }
     }
 
     // Month 2 edge: post CRITICAL "1 month to bankruptcy" toast AND fire stinger.
@@ -1051,8 +1307,9 @@ void UIManager::update(float realDeltaSeconds) {
         }
     }
 
-    // Month 3+ edge: transition to game-over (Sandbox guard is inside transitionToGameOver).
-    if (currentMonths >= 3 && m_lastDeficitMonths < 3) {
+    // Month 3+ edge: transition to game-over (Scenario mode only — guard at call site
+    // per phase-11.md spec; transitionToGameOver() contains no internal GameMode check).
+    if (currentMonths >= 3 && m_lastDeficitMonths < 3 && m_gameMode == GameMode::Scenario) {
         transitionToGameOver();
     }
 
@@ -1064,6 +1321,27 @@ void UIManager::update(float realDeltaSeconds) {
     }
 
     m_lastDeficitMonths = currentMonths;
+
+    // =============================================================
+    // 4b. STINGER_MILESTONE POLLING (Phase 11 per-frame dispatch)
+    // Per-frame getCityRating() edge-detect replaces the Phase 10
+    // notification-based dispatch to avoid double-fire on load.
+    // m_previousCityRating is seeded by onGameLoaded() so no spurious
+    // stinger fires when a saved game is first loaded.
+    // =============================================================
+    {
+        CityRatingTier currentRating = m_sim->getCityRating();
+        if (currentRating > m_previousCityRating) {
+            if (m_audio && m_clock) {
+                double now = m_clock->nowSeconds();
+                if ((now - m_lastMilestoneStingerFireTime) >= kStingerCooldownSeconds) {
+                    m_audio->triggerStinger(StingerType::MILESTONE);
+                    m_lastMilestoneStingerFireTime = now;
+                }
+            }
+        }
+        m_previousCityRating = currentRating;
+    }
 
     // =============================================================
     // 5. SPEED SELECTOR POLLING
@@ -1132,6 +1410,10 @@ void UIManager::update(float realDeltaSeconds) {
                 m_notifications->postNormal(
                     "City Rating Changed",
                     "City rating tier has changed!");
+                // Phase 11: stinger_milestone is now dispatched via per-frame
+                // getCityRating() polling in section 4b above — NOT from this
+                // notification handler.  Removing the stinger call here prevents
+                // double-fire: both paths would otherwise fire on the same transition.
                 break;
         }
     }
@@ -1143,6 +1425,10 @@ void UIManager::update(float realDeltaSeconds) {
 
 void UIManager::transitionToPaused() {
     m_state = GameState::Paused;
+    // Auto-save before displaying the pause menu (per save-system.md).
+    if (m_saveSystem) {
+        m_saveSystem->onPauseMenuOpened();
+    }
     m_pauseMenu->show();
     if (m_sim) {
         m_sim->setPaused(true);
@@ -1159,9 +1445,11 @@ void UIManager::transitionToGameplay_fromPaused() {
 }
 
 void UIManager::transitionToGameOver() {
-    // SANDBOX GUARD — must not fire in Sandbox mode (Scenario-only in V1).
+    // Primary guard is at the call site (UIManager::update() deficit-streak section)
+    // per phase-11.md spec. Belt-and-suspenders guard here as well so that any
+    // direct call (e.g. from test fixtures or future code paths) is also safe in
+    // Sandbox mode.
     if (m_gameMode != GameMode::Scenario) return;
-
     m_state = GameState::GameOver;
 
     // Show the game-over modal with current debt and deficit streak.
@@ -1175,6 +1463,11 @@ void UIManager::transitionToGameOver() {
 }
 
 void UIManager::showForcedLoanDialog(const LoanTerms& terms) {
+    // Auto-save immediately before showing the forced-loan modal (per save-system.md).
+    if (m_saveSystem) {
+        m_saveSystem->onForcedLoanDialogActive();
+    }
+
     // Modal open sequence (notification-system.md):
     // 1. Set modal active on notifications FIRST (hides CRITICAL toasts).
     m_notifications->setModalActive(true);
@@ -1280,8 +1573,13 @@ void UIManager::transitionToMainMenu() {
     m_inspector->hide();
     m_inspectorOpen = false;
 
-    // TODO Phase 9+: transition audio back to menu music when
-    // IAudioSystem::transitionToMenu() is available.
+    // Phase 10: cross-fade back to main menu music via setMusicTrack().
+    // IAudioSystem::setMusicTrack() handles the beat-boundary crossfade from
+    // whatever gameplay stem is playing; MUSIC_MAIN_MENU_01 is always used
+    // (no random selection for the back-to-menu transition).
+    if (m_audio) {
+        m_audio->setMusicTrack(MUSIC_MAIN_MENU_01);
+    }
 
     // Show main menu.
     m_state = GameState::MainMenu;
@@ -1342,5 +1640,83 @@ void UIManager::onNewGame() {
     m_activeTool   = ActiveTool::None;
     m_hoveredTileX = -1;
     m_hoveredTileZ = -1;
+    m_zoneAnchorX  = -1;
+    m_zoneAnchorZ  = -1;
+    m_lmbHeld      = false;
+    if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u);
+    if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
     updateSubPanelVisibility();
+}
+
+// ----------------------------------------------------------------
+// Phase 11: onGameLoaded — seed stinger and deficit caches after load.
+// Called by the loading controller (main.cpp) once per load path
+// (New Game / Load Last Save) before the first update() tick.
+// ----------------------------------------------------------------
+void UIManager::onGameLoaded() {
+    if (m_sim) {
+        // Seed m_previousCityRating so the stinger_milestone per-frame
+        // detector does not fire a spurious MILESTONE on the first tick.
+        m_previousCityRating = m_sim->getCityRating();
+        // Seed m_lastDeficitMonths so deficit-streak warnings do not
+        // retroactively fire for months already counted before load.
+        m_lastDeficitMonths = m_sim->getConsecutiveDeficitMonths();
+    }
+}
+
+// ----------------------------------------------------------------
+// Phase 11: loadKeybindings — probe and (future) parse keybindings.json.
+// ----------------------------------------------------------------
+void UIManager::loadKeybindings() {
+    char path[512] = {};
+#if defined(_WIN32)
+    const char* appdata = getenv("APPDATA");
+    if (!appdata || appdata[0] == '\0') {
+        // APPDATA unset (service account, etc.): silently use defaults.
+        return;
+    }
+    snprintf(path, sizeof(path), "%s\\aitown\\keybindings.json", appdata);
+#else
+    const char* home = getenv("HOME");
+    if (!home || home[0] == '\0') {
+        // HOME unset (container without user env): silently use defaults.
+        return;
+    }
+    snprintf(path, sizeof(path), "%s/.config/aitown/keybindings.json", home);
+#endif
+
+    FILE* f = fopen(path, "r");
+    if (!f) {
+        // Absent on first run — silently use defaults, do NOT warn.
+        return;
+    }
+    fclose(f);
+
+    // File exists: parse and apply overrides.
+    m_keyBindings.load(path);
+}
+
+// ----------------------------------------------------------------
+// Phase 11: setSaveSystem — bind the SaveSystem for manual save and quit-guard.
+// ----------------------------------------------------------------
+void UIManager::setSaveSystem(SaveSystem* saveSystem) {
+    m_saveSystem = saveSystem;
+}
+
+// ----------------------------------------------------------------
+// Phase 11: setSaveAvailable — forward to MainMenuPanel.
+// ----------------------------------------------------------------
+void UIManager::setSaveAvailable(bool available) {
+    if (m_mainMenu) {
+        m_mainMenu->setSaveAvailable(available);
+    }
+}
+
+// ----------------------------------------------------------------
+// Phase 11: setSaveStatusText — forward status label text to MainMenuPanel.
+// ----------------------------------------------------------------
+void UIManager::setSaveStatusText(const std::string& text) {
+    if (m_mainMenu) {
+        m_mainMenu->setSaveStatusText(text);
+    }
 }

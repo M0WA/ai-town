@@ -34,11 +34,11 @@
 #include "src/interfaces/ICitySimulation.h"
 #include "src/interfaces/simulation_types.h"
 #include "src/simulation/simulation_constants.h"
-#include "mock_audio_system.h"
-#include "mock_renderer.h"
-#include "manual_rng.h"
-#include "manual_clock.h"
-#include "manual_terrain_query.h"
+#include "MockAudioSystem.h"
+#include "MockRenderer.h"
+#include "ManualRNG.h"
+#include "ManualClock.h"
+#include "ManualTerrainQuery.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -241,7 +241,7 @@ TEST_F(PopulationTest, CityRating_100KPopulation_NoRatingTransition_NoStingerFla
     ManualClock local_clock;
     ManualTerrainQuery local_terrain;
 
-    // Allow all non-stinger audio calls (placement SFX, budget events, etc.).
+    // Allow all incidental audio calls (placement SFX, budget events, time-of-day, etc.).
     EXPECT_CALL(strict_audio, playSound(_, _, _)).Times(AnyNumber());
     EXPECT_CALL(strict_audio, setMusicTrack(_)).Times(AnyNumber());
     EXPECT_CALL(strict_audio, setSpeed(_)).Times(AnyNumber());
@@ -252,8 +252,15 @@ TEST_F(PopulationTest, CityRating_100KPopulation_NoRatingTransition_NoStingerFla
     EXPECT_CALL(strict_audio, syncListenerToCamera(_)).Times(AnyNumber());
     EXPECT_CALL(strict_audio, playPositionalSound(_, _, _, _)).Times(AnyNumber());
     EXPECT_CALL(strict_audio, stopSound(_)).Times(AnyNumber());
-    // CRITICAL: triggerStinger must NOT be called when population crosses 100K.
-    EXPECT_CALL(strict_audio, triggerStinger(_)).Times(0);
+    // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick.
+    // Allow any number — this test focuses on stinger policy, not music intensity tier.
+    EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
+    // Phase 10: CityRatingTier transitions (Village→Town at 1K, Town→City at 10K,
+    // City→Metropolis at 50K) all fire triggerStinger(MILESTONE) per spec.
+    // Allow these during the warm-up phase (population 0 → 50K+).
+    // The CRITICAL assertion (no stinger at 100K) is installed after VerifyAndClear
+    // once the city is already at Metropolis tier.
+    EXPECT_CALL(strict_audio, triggerStinger(_)).Times(AnyNumber());
 
     auto local_sim = std::make_unique<CitySimulation>(
         &nice_renderer, &strict_audio,
@@ -285,11 +292,35 @@ TEST_F(PopulationTest, CityRating_100KPopulation_NoRatingTransition_NoStingerFla
 
     const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
 
-    // Run enough ticks to cross 100K population.
+    // Warm-up phase: run until population crosses Metropolis threshold (50K).
+    // Legitimate tier transitions (Village→Town, Town→City, City→Metropolis) fire
+    // stingers here — these are correct per spec and allowed by AnyNumber() above.
+    for (int i = 0; i < 30; ++i) {
+        local_clock.advance(dt);
+        cs2->tick(dt);
+        if (local_sim->getTotalPopulation() >= 60000) break;
+    }
+    ASSERT_GE(local_sim->getTotalPopulation(), 50000)
+        << "Population must reach Metropolis tier (50K) before CRITICAL phase";
+
+    // Reset all audio expectations now that the city is at Metropolis tier.
+    // All three legitimate stingers have already fired (or will not fire again).
+    // From this point on: triggerStinger must NOT be called — 100K is NOT a tier boundary.
+    ::testing::Mock::VerifyAndClearExpectations(&strict_audio);
+    EXPECT_CALL(strict_audio, playSound(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setTimeOfDay(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+    // CRITICAL: triggerStinger must NOT be called when population crosses 100K.
+    // 100K is NOT a CityRatingTier boundary — Metropolis threshold is 50K,
+    // Megalopolis threshold is 500K.
+    EXPECT_CALL(strict_audio, triggerStinger(_)).Times(0);
+
+    // Drive population from ~60K to 100K+.
     // With 200 Low-R tiles and balanced demand:
     //   each tile capacity = 100; 10% cap = 10/tick; 200 × 10 = 2000/tick
-    //   100K / 2000 = 50 ticks needed. Run 60 to be safe.
-    for (int i = 0; i < 60; ++i) {
+    //   100K / 2000 = 50 ticks needed. Run 30 more to be safe.
+    for (int i = 0; i < 30; ++i) {
         local_clock.advance(dt);
         cs2->tick(dt);
     }
@@ -420,6 +451,9 @@ TEST_F(PopulationTest, CityRating_VillageToTown_Transition_FiresStingerNotificat
     EXPECT_CALL(strict_audio, setTimeOfDay(_)).Times(AnyNumber());
     EXPECT_CALL(strict_audio, transitionToGameplay()).Times(AnyNumber());
     EXPECT_CALL(strict_audio, syncListenerToCamera(_)).Times(AnyNumber());
+    // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick.
+    // Allow any number — this test focuses on stinger policy, not music intensity tier.
+    EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
     // Phase 6 CitySimulation must NOT call triggerStinger — that is Phase 8 scope.
     EXPECT_CALL(strict_audio, triggerStinger(_)).Times(0);
 
@@ -633,4 +667,47 @@ TEST(PopulationPropertyTest, DecayCap_DeltaPerTickBoundedByFraction) {
             // Population must remain non-negative.
             RC_ASSERT(popAfter >= 0);
         });
+}
+
+// ============================================================================
+// Tests moved from simulation_coverage_gap_test.cpp
+// ============================================================================
+
+// ============================================================================
+// Test: maxPopulationForTile Commercial/Industrial branches (L73-89)
+// Place Commercial (Low/Medium/High) and Industrial (Low/Medium/High) zones,
+// run ticks — exercises maxPopulationForTile for those zone types.
+// ============================================================================
+TEST_F(PopulationTest, MaxPop_Commercial_IsExercisedByTick)
+{
+    // Place Commercial zones (Low density).
+    sim_->placeZone(0, 0, ZoneType::Commercial,  DensityTier::Low, 0);
+    sim_->placeZone(1, 0, ZoneType::Commercial,  DensityTier::Medium, 0);
+    sim_->placeZone(2, 0, ZoneType::Commercial,  DensityTier::High, 0);
+    sim_->placeZone(3, 0, ZoneType::Industrial,  DensityTier::Low, 0);
+    sim_->placeZone(4, 0, ZoneType::Industrial,  DensityTier::Medium, 0);
+    sim_->placeZone(5, 0, ZoneType::Industrial,  DensityTier::High, 0);
+
+    // Place a road to generate demand signal.
+    sim_->placeRoad(0, 1, 0);
+
+    // Advance past grace period and run several ticks.
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+    runTicks(3);
+
+    // As long as no crash occurred, maxPopulationForTile was exercised.
+    SUCCEED();
+}
+
+// ============================================================================
+// Test: TimeOfDay code path — multiple ticks run without crashing.
+// The DAY/DUSK/NIGHT branches in tick() are exercised by the tick loop.
+// 720 mod 24 = 0, so dayHours stays 0 (NIGHT) throughout — DUSK/DAY branches
+// are unreachable via this arithmetic, but the tick path is verified clean.
+// ============================================================================
+TEST_F(PopulationTest, TimeOfDay_MultipleTicks_NoCrash)
+{
+    // Run enough ticks to exercise the TimeOfDay update code path.
+    runTicks(5);
+    SUCCEED();
 }

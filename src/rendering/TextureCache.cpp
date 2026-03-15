@@ -166,13 +166,10 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
         return GLuint{0};
     }
 
-    // ----- Determine internal sRGB GL format and mip cap -----
-    // _billboard suffix → DXT5 sRGB (RGBA), clamp-to-edge, max level 3
-    // _d suffix (or explicit format param) → DXT1 sRGB (no alpha), repeat, max level 3
+    // ----- Determine path-based properties (wrap mode, mip cap) -----
+    // These are path-suffix-based hints that do NOT affect the internal GL format.
+    // The internal GL format is derived from the actual DDS FourCC (see below).
     bool isBillboard = hasSuffix(path, "_billboard");
-    GLenum internalFormat = isBillboard
-                                ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
-                                : GL_COMPRESSED_SRGB_S3TC_DXT1_EXT;
     int maxMipLevel = 3; // 4-level mip chain mandatory
 
     // ----- Load DDS file from disk via Irrlicht's filesystem -----
@@ -223,6 +220,20 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
                 fourCC, path.c_str());
         return GLuint{0};
     }
+
+    // ----- Determine internal sRGB GL format from actual DDS FourCC -----
+    // Derive from the file's own fourCC — NOT from the path suffix.
+    // Path-suffix detection was incorrect for DXT5 textures that don't end in _billboard
+    // (e.g., road_asphalt_tileable.dds which is DXT5 but not a billboard).
+    // Using the path suffix would upload DXT5 data with a DXT1 internal format, causing
+    // GL_INVALID_OPERATION or garbled output.
+    //
+    // Mapping:
+    //   kFOURCC_DXT1 → GL_COMPRESSED_SRGB_S3TC_DXT1_EXT  (opaque, 4 bpp)
+    //   kFOURCC_DXT5 → GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT  (alpha, 8 bpp)
+    GLenum internalFormat = (fourCC == kFOURCC_DXT5)
+                                ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
+                                : GL_COMPRESSED_SRGB_S3TC_DXT1_EXT;
 
     // Clamp mip chain to maxMipLevel + 1.
     if (mipCount > static_cast<uint32_t>(maxMipLevel + 1)) {

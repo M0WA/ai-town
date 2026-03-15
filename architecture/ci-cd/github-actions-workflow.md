@@ -339,11 +339,13 @@ This step runs as the **first named step** in the `build-linux` job — before v
   16. Publish test results (dorny/test-reporter)
   17. Capture and gate lcov coverage
   17a. Check src/ui/ zero-hit files (zero-hit coverage completeness checkpoint) — this step MUST use `if: always()` in the CI YAML so the zero-hit check runs unconditionally even when step 17 (lcov gate) exits non-zero; without `if: always()`, GitHub Actions skips step 17a after a lcov gate failure, silently bypassing dead-code detection
+  17b. **Phase 6 deliverable** — `src/simulation/` SF preflight: verifies that `coverage_filtered.info` contains at least one `SF:` entry for `src/simulation/`. Placement: inside step 17 (the lcov capture-and-gate `run:` block), immediately before the 95% total gate awk step. See `architecture/testing/coverage.md` § Phase 6 for the exact bash snippet.
+  17c. **Phase 11 deliverable** — `src/simulation/` per-file 85% floor gate: awk step that fails the build if any single `src/simulation/` file is below 85% line coverage. Placement: inside step 17 (the lcov capture-and-gate `run:` block), immediately after the `src/simulation/` SF preflight (step 17b) and before the 95% total gate. See `architecture/testing/coverage.md` § Phase 11 for the exact awk code.
   18. Upload coverage artifact
 
   Steps 8, 9, and 10 (the three label-routing verification steps) and step 11 (shader asset verification) are placed **after CMake build step (7) and before the first ctest execution step (12)**. A label misconfiguration that produces zero-test discovery in `build-linux` will equally affect `coverage-linux`; without these checks, a zero-discovery run silently under-reports coverage and exits 0.
 
-  ### coverage-linux: label-routing verification YAML
+  **coverage-linux: label-routing verification YAML**
 
   These steps are IDENTICAL to the `build-linux` forms — copy them exactly. They are reproduced here verbatim so that an implementer building `coverage-linux` from this spec alone can derive the exact YAML without referring back to the `build-linux` documentation.
 
@@ -459,6 +461,8 @@ This step runs as the **first named step** in the `build-linux` job — before v
           '*/tests/*' \
           '*/mock_*.h' '*/mock_*.cpp' \
           '*/manual_*.h' '*/manual_*.cpp' \
+          '*/Mock*.h' '*/Mock*.cpp' \
+          '*/Manual*.h' '*/Manual*.cpp' \
           '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
           --output-file coverage_filtered.info
         lcov --list coverage_filtered.info
@@ -539,6 +543,14 @@ This step runs as the **first named step** in the `build-linux` job — before v
         "
     ```
 
+  - **Step 17c — Phase 11 `src/simulation/` per-file 85% floor gate** (Phase 11 deliverable): Add this block inside the lcov capture-and-gate `run:` step (step 17), immediately after the `src/simulation/` SF preflight check (step 17b) and before the 95% total line coverage awk gate. It fails CI if any single `src/simulation/` file falls below 85% line coverage — catching under-tested outlier files that the aggregate 95% gate may not surface. For the exact awk code, see `architecture/testing/coverage.md` § Phase 11 (`**Phase 11 `src/simulation/` per-file 85% floor**`). Summary of behavior:
+
+    - Parses `coverage_filtered.info` directly via SF/LH/LF records in a single awk pass — version-agnostic; does NOT use `lcov --list` output (whose column delimiter changed in lcov 2.0 and is unreliable for parsing). Computes per-file coverage as `LH / LF * 100` for each `src/simulation/` SF entry and tracks the minimum.
+    - Preflight-fails if no `src/simulation/` SF entries are found in `coverage_filtered.info` (treats absent data as 0%, not a vacuous pass).
+    - Fails CI with `"FAIL: worst src/simulation/ file coverage <pct>% < 85% Phase 11 per-file floor"` if the minimum file coverage is below 85.0%.
+
+    **Placement constraint**: This step MUST run after the `src/simulation/` SF preflight (step 17b, Phase 6 deliverable) and before the 95% total gate awk step. The SF preflight guarantees that `src/simulation/` SF entries are present in `coverage_filtered.info` before the per-file awk runs; without it, an absent `src/simulation/` block would cause the per-file check to exit with a misleading preflight error rather than a coverage failure. Do NOT add this block before Phase 11 — the per-file floor was deferred from Phase 6 and is only enforced once Phase 11 simulation coverage is complete.
+
   - **`coverage-linux` test reporting steps (required)**: After all three ctest steps and **before the lcov capture step**, `coverage-linux` must include the XML verification and `dorny/test-reporter` steps. Placing these **before lcov** is intentional: if a test fails and ctest exits non-zero, the XML files may still be present; reporting them before the lcov step ensures test annotations reach the PR even when lcov subsequently fails or is skipped. Without these steps, test failures in the coverage build produce no PR annotations, silently hiding coverage-run failures from reviewers. **Step order in `coverage-linux`**: (1) unit tests ctest, (2) integration tests ctest, (3) OpenGL tests ctest under xvfb, (4) Verify test XML, (5) Publish test results via `dorny/test-reporter`, (6) lcov capture + filter + gate, (6a) check src/ui/ zero-hit files (`if: always()` — Phase 8 deliverable, see step 17a YAML above), (7) Upload coverage artifact. Note: the "Verify shader assets" step (step 11 in the full ordered list above) runs before any of these ctest steps. The `coverage-linux` YAML must include (after all ctest steps, before lcov):
 
     ```yaml
@@ -606,7 +618,7 @@ markdown-lint:
 
 - **`validate-assets` job** — validates asset files using the Python validation script. Must run on every push and PR alongside the build jobs so asset errors are caught before any binary is produced. Runs on `ubuntu-latest` with a 10-minute timeout.
 
-  **Phasing**: This job is introduced in Phase 1 running `tools/validate_assets.py` as a stub that always exits 0. It is wired into `all-checks-pass` at Phase 1 creation — not deferred to a later phase. This means the stub always passes, keeping the gate green while the real check logic is absent. In Phase 5 the script gains 18 real checks (Checks #1–#14 and Checks #16–#19) plus Check #15 as a stub placeholder; in Phase 9 two additions are made: a full implementation of the Check #15 `.meta` sidecar stub (replacing the `# TODO Phase 9` placeholder), and Check #20 (road LOD2 color validation against `RenderConstants::road_lod2_color`). The job definition and `all-checks-pass` wiring remain unchanged across all phases.
+  **Phasing**: This job is introduced in Phase 1 running `tools/validate_assets.py` as a stub that always exits 0. It is wired into `all-checks-pass` at Phase 1 creation — not deferred to a later phase. This means the stub always passes, keeping the gate green while the real check logic is absent. In Phase 5 the script gains 18 real checks (Checks #1–#14 and Checks #16–#19) plus Check #15 as a stub placeholder; in Phase 9 two additions are made: a full implementation of the Check #15 `.meta` sidecar stub (replacing the `# TODO Phase 9` placeholder), and Check #20 (road LOD2 color validation against `RenderConstants::road_lod2_color`); in Phase 10, Checks #21–#23 (zone loop silence-floor, non-stinger WAV SFX format, HUD sprites dimensions) are added to the script; in Phase 10b, Check #24 (cloud texture format — clouds.png 1024×1024 RGBA) is added. The job definition and `all-checks-pass` wiring remain unchanged across all phases.
 
   **Phase 1 stub TODO comment requirements**: The Phase 1 `tools/validate_assets.py` stub MUST include the following TODO comment blocks so that Phase 5 implementers can locate all validation points via a single repository-wide search. These comments are the canonical markers — Phase 5 replaces each comment block with real validation logic in-place:
 
@@ -682,6 +694,8 @@ markdown-lint:
   - Phase 1: `validate-assets` job is introduced running `tools/validate_assets.py` as a stub that always exits 0. Wire it into `all-checks-pass` immediately. Adding the job (even as a stub) now means the `all-checks-pass` dependency list never needs to change in later phases — only the script gains real checks.
   - Phase 5: the stub script gains 18 real checks (Checks #1–#14 and Checks #16–#19) plus Check #15 as a stub placeholder; the job definition and `all-checks-pass` wiring are unchanged.
   - Phase 9: Check #15 full implementation (replacing the Phase 5 `.meta` stub) and Check #20 (road LOD2 color validation) are added to the script; again no change to the job definition or wiring.
+  - Phase 10: Checks #21–#23 (zone loop silence-floor, non-stinger WAV SFX format, HUD sprites dimensions) are added to the script; no change to the job definition or `all-checks-pass` wiring.
+  - Phase 10b: Check #24 (cloud texture format gate — `clouds.png` 1024×1024 RGBA) is added to the script; no change to the job definition or `all-checks-pass` wiring.
 
 ### PHASE 0 FORM (validate-assets not yet introduced)
 
@@ -723,7 +737,7 @@ all-checks-pass:
 
 ### PHASE 1+ FORM (validate-assets stub introduced and wired in Phase 1)
 
-When the `validate-assets` job is added in Phase 1, update `all-checks-pass` to include it simultaneously. The job runs `tools/validate_assets.py`, which is a stub that always exits 0 at Phase 1. Wiring it in now means the `needs:` list requires no further changes in Phase 5 (real checks) or Phase 9 (Check #15 full implementation and Check #20) — only the script content changes, not the CI wiring.
+When the `validate-assets` job is added in Phase 1, update `all-checks-pass` to include it simultaneously. The job runs `tools/validate_assets.py`, which is a stub that always exits 0 at Phase 1. Wiring it in now means the `needs:` list requires no further changes in Phase 5 (real checks), Phase 9 (Check #15 full implementation and Check #20), or Phase 10 (Check #21 zone loop silence-floor) — only the script content changes, not the CI wiring.
 
 ```yaml
 all-checks-pass:

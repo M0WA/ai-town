@@ -40,11 +40,11 @@
 #include "src/interfaces/audio_types.h"
 #include "src/simulation/CitySimulation.h"
 #include "src/simulation/simulation_constants.h"
-#include "mock_audio_system.h"
-#include "mock_renderer.h"
-#include "manual_rng.h"
-#include "manual_clock.h"
-#include "manual_terrain_query.h"
+#include "MockAudioSystem.h"
+#include "MockRenderer.h"
+#include "ManualRNG.h"
+#include "ManualClock.h"
+#include "ManualTerrainQuery.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <rapidcheck.h>
@@ -59,6 +59,7 @@ using ::testing::NiceMock;
 using ::testing::_;
 using ::testing::Return;
 using ::testing::AnyNumber;
+using ::testing::AtLeast;
 
 // ---------------------------------------------------------------------------
 // EconomyTest — primary fixture for all economy unit tests.
@@ -93,6 +94,31 @@ protected:
         // placeZone/placeRoad call playPositionalSound; allow any number of calls
         // so StrictMock doesn't fail on placement SFX in tests that focus on treasury.
         EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+        // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick.
+        // Allow any number of calls — economy tests do not assert music intensity tier.
+        // Without this, StrictMock<MockAudioSystem> would fail on every budget tick.
+        EXPECT_CALL(audio_, setMusicIntensity(_)).Times(AnyNumber());
+        // Phase 10: CitySimulation::tick() calls setTimeOfDay() whenever the in-game
+        // clock crosses a DAY/DUSK/NIGHT/DAWN boundary. Allow any number of calls —
+        // economy tests do not assert time-of-day transitions.
+        EXPECT_CALL(audio_, setTimeOfDay(_)).Times(AnyNumber());
+        // Phase 10: CitySimulation placement/demolish methods call the six IRenderer
+        // mesh placement/removal methods on success. Allow any number of calls —
+        // economy tests verify treasury arithmetic and audio SFX, not renderer output.
+        // Individual tests that verify renderer mesh calls must override with their
+        // own EXPECT_CALL after calling SetUp().
+        // placeBuildingMesh(tileX, tileZ, assetBaseName) — 3 args
+        EXPECT_CALL(renderer_, placeBuildingMesh(_, _, _)).Times(AnyNumber());
+        // removeBuildingMesh(tileX, tileZ) — 2 args
+        EXPECT_CALL(renderer_, removeBuildingMesh(_, _)).Times(AnyNumber());
+        // placeRoadMesh(tileX, tileZ) — 2 args (road mesh is always the same asset)
+        EXPECT_CALL(renderer_, placeRoadMesh(_, _)).Times(AnyNumber());
+        // removeRoadMesh(tileX, tileZ) — 2 args
+        EXPECT_CALL(renderer_, removeRoadMesh(_, _)).Times(AnyNumber());
+        // placeServiceBuildingMesh(tileX, tileZ, ServiceBuildingType) — 3 args
+        EXPECT_CALL(renderer_, placeServiceBuildingMesh(_, _, _)).Times(AnyNumber());
+        // removeServiceBuildingMesh(tileX, tileZ) — 2 args
+        EXPECT_CALL(renderer_, removeServiceBuildingMesh(_, _)).Times(AnyNumber());
     }
 
     void TearDown() override {
@@ -1439,4 +1465,237 @@ TEST(EconomyPropertyTest, Treasury_TaxRevenue_NoOverflow) {
             const int64_t maxExpectedRevenue = 15'000'000LL;  // generous upper bound
             RC_ASSERT(taxRevenue <= maxExpectedRevenue);
         });
+}
+
+// ============================================================================
+// Tests moved from simulation_coverage_gap_test.cpp
+// ============================================================================
+
+// ============================================================================
+// Test: getNextUnlockThreshold — Hard difficulty returns scaled threshold
+// getNextUnlockThreshold(Hard) returns scale > Normal (harder thresholds).
+// ============================================================================
+TEST_F(EconomyHardTest, GetNextUnlockThreshold_Hard_ReturnsScaledThreshold)
+{
+    float threshold = sim_->getNextUnlockThreshold(Difficulty::Hard);
+    EXPECT_GT(threshold, 0.0f);
+
+    float normalT = sim_->getNextUnlockThreshold(Difficulty::Normal);
+    EXPECT_GT(normalT, 0.0f);
+
+    // Hard threshold >= Normal threshold (stricter).
+    EXPECT_GE(threshold, normalT);
+}
+
+// ============================================================================
+// Test: getNextUnlockThreshold exercises Easy/Normal/Hard scale branches
+// With no tiers unlocked, calls all three difficulty overloads.
+// ============================================================================
+TEST_F(EconomyTest, GetNextUnlockThreshold_ExercisesScaleBranches)
+{
+    // Default state: all tiers locked. getThreshold(0) * scale for each difficulty.
+    float tNormal = sim_->getNextUnlockThreshold(Difficulty::Normal);
+    EXPECT_GT(tNormal, 0.0f);
+
+    float tEasy = sim_->getNextUnlockThreshold(Difficulty::Easy);
+    EXPECT_GT(tEasy, 0.0f);
+    // Easy scale < Normal scale, so Easy threshold is smaller.
+    EXPECT_LE(tEasy, tNormal);
+
+    float tHard = sim_->getNextUnlockThreshold(Difficulty::Hard);
+    EXPECT_GT(tHard, 0.0f);
+    // Hard scale > Normal scale, so Hard threshold is larger.
+    EXPECT_GE(tHard, tNormal);
+}
+
+// ============================================================================
+// Test: getOutstandingDebt with active loans returns >= 0
+// Drain treasury via expensive buildings, then tick to trigger forced loan.
+// ============================================================================
+TEST_F(EconomyTest, GetOutstandingDebt_WithActiveLoan_ReturnsPositive)
+{
+    // Budget warn / loan issued SFX fires when forced loan triggers during tick().
+    EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
+
+    // Advance past grace period.
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+
+    // Drain treasury: place 50 power plants (~10,000 each = 500,000 total).
+    for (int i = 0; i < 50; ++i) {
+        sim_->placeServiceBuilding(i, 99, ServiceBuildingType::PowerPlant, 0);
+    }
+
+    // Run ticks to trigger forced loan.
+    runTicks(3);
+
+    // getOutstandingDebt returns >= 0 regardless of whether loan fired.
+    float debt = sim_->getOutstandingDebt();
+    EXPECT_GE(debt, 0.0f);
+}
+
+// ============================================================================
+// Test: forced loan fires with utility revenue — exercises economy tick path
+// Place WaterTower + residential zone so utility fee sets m_firstRevenueTicked.
+// ============================================================================
+TEST_F(EconomyTest, ForcedLoan_WithUtilityRevenue_ExercisesEconomyPath)
+{
+    // Forced loan fires SFX_BUDGET_WARN (playSound 7) and SFX_LOAN_ISSUED (playSound 8).
+    // StrictMock requires explicit allowance for any playSound calls during tick().
+    EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
+
+    // Place WaterTower + residential zone so utility fee sets m_firstRevenueTicked.
+    sim_->placeServiceBuilding(0, 0, ServiceBuildingType::WaterTower, 0);
+    sim_->placeZone(1, 0, ZoneType::Residential, DensityTier::Low, 0);
+
+    // Advance past grace period.
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+
+    // Run a tick: utility fee revenue > 0, deficit deep → forced loan fires.
+    runTicks(1);
+
+    float debt = sim_->getOutstandingDebt();
+    EXPECT_GT(debt, 0.0f)
+        << "Forced loan must fire when utility fee revenue > 0 and expenses >> revenue";
+}
+
+// ============================================================================
+// Test: getDensityUnlockScale Hard — creates Hard sim, runs tick so
+// getDensityUnlockScale() is called internally during density-unlock processing.
+// ============================================================================
+TEST_F(EconomyHardTest, GetDensityUnlockScale_HardDifficulty_ReturnsHardScale)
+{
+    // Place zones and run a tick — density-unlock wave calls getDensityUnlockScale().
+    sim_->placeZone(0, 0, ZoneType::Residential, DensityTier::Low, 0);
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+    runTicks(1);
+    SUCCEED();
+}
+
+// ============================================================================
+// Test: placeServiceBuilding with earthworks cost > 0 plays SFX_EARTHWORKS
+// When earthworksCostOverride > 0, SFX_EARTHWORKS is played via playPositionalSound.
+// ============================================================================
+TEST_F(EconomyTest, PlaceServiceBuilding_WithEarthworks_PlaysEarthworksSFX)
+{
+    // Allow the SFX_BUILD_PLACE call that always fires after the earthworks SFX.
+    EXPECT_CALL(audio_, playPositionalSound(SFX_BUILD_PLACE, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(audio_, playPositionalSound(SFX_EARTHWORKS, _, _, _)).Times(AtLeast(1));
+
+    sim_->placeServiceBuilding(6, 6, ServiceBuildingType::FireStation, 500);
+}
+
+// ============================================================================
+// Test: placeRoad with earthworks cost > 0 plays SFX_EARTHWORKS
+// When earthworksCostOverride > 0, SFX_EARTHWORKS is played, then SFX_ROAD_BUILD.
+// ============================================================================
+TEST_F(EconomyTest, PlaceRoad_WithEarthworks_PlaysEarthworksSFX)
+{
+    // Allow the SFX_ROAD_BUILD call that always fires after the earthworks SFX.
+    EXPECT_CALL(audio_, playPositionalSound(SFX_ROAD_BUILD, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(audio_, playPositionalSound(SFX_EARTHWORKS, _, _, _)).Times(AtLeast(1));
+
+    sim_->placeRoad(7, 7, 500);
+}
+
+// ============================================================================
+// Test: placeZone over road decrements road tile count
+// Place a road, then zone over it — triggers m_roadTileCount--.
+// ============================================================================
+TEST_F(EconomyTest, PlaceZoneOverRoad_DecrementsRoadTileCount)
+{
+    // Place a road at (5,5).
+    sim_->placeRoad(5, 5, 0);
+
+    // Zone over the road — replaces road tile with zone, triggers road count decrement.
+    sim_->placeZone(5, 5, ZoneType::Residential, DensityTier::Low, 0);
+
+    // The road is gone — queryTile should report isRoad=false, isZoned=true.
+    QueryResult qr = sim_->queryTile(5, 5);
+    EXPECT_FALSE(qr.isRoad);
+    EXPECT_TRUE(qr.isZoned);
+}
+
+// ============================================================================
+// Test: placeZone with earthworks cost > 0 plays SFX_EARTHWORKS
+// When earthworksCostOverride > 0, placeZone() plays SFX_EARTHWORKS.
+// ============================================================================
+TEST_F(EconomyTest, PlaceZone_WithEarthworksCost_PlaysEarthworksSFX)
+{
+    // Register catch-all FIRST so specific expectation (registered last) takes priority.
+    EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
+    // Specific expectation registered LAST → checked first by GMock (LIFO).
+    EXPECT_CALL(audio_, playPositionalSound(SFX_EARTHWORKS, _, _, _)).Times(AtLeast(1));
+
+    // earthworksCostOverride=500 → fires the earthworks SFX path.
+    sim_->placeZone(3, 3, ZoneType::Commercial, DensityTier::Low, 500);
+}
+
+// ============================================================================
+// Test: queryTile on a road tile returns isRoad=true
+// Place a road at (7,7) then call queryTile(7,7) — road branch returns isRoad=true.
+// ============================================================================
+TEST_F(EconomyTest, QueryTile_OnRoadTile_ReturnsIsRoad)
+{
+    sim_->placeRoad(7, 7, 0);
+
+    QueryResult qr = sim_->queryTile(7, 7);
+    EXPECT_TRUE(qr.isRoad);
+    EXPECT_FALSE(qr.isZoned);
+}
+
+// ============================================================================
+// Test: demolishTile on a road tile decrements road count and removes signals
+// Place a road at (2,2) and demolish it — exercises wasRoad=true branch.
+// ============================================================================
+TEST_F(EconomyTest, DemolishRoadTile_DecrementsRoadCount)
+{
+    sim_->placeRoad(2, 2, 0);
+    sim_->demolishTile(2, 2);
+
+    // After demolition, queryTile should report neither road nor zone.
+    QueryResult qr = sim_->queryTile(2, 2);
+    EXPECT_FALSE(qr.isRoad);
+    EXPECT_FALSE(qr.isZoned);
+}
+
+// ============================================================================
+// Test: traffic signal created when new road forms an intersection
+// Place N/S/E/W arms then the center (1,1) — 4 road neighbors → signal created.
+// Also exercise L1699-1703 by placing (3,1) so (2,1) gains a second road neighbor.
+// ============================================================================
+TEST_F(EconomyTest, PlaceRoad_FormingIntersection_CreatesTrafficSignal)
+{
+    // Build a cross: place N/S/E/W arms first, then the center (1,1).
+    sim_->placeRoad(1, 0, 0);   // North arm
+    sim_->placeRoad(1, 2, 0);   // South arm
+    sim_->placeRoad(0, 1, 0);   // West arm
+    sim_->placeRoad(2, 1, 0);   // East arm
+    // Center: 4 road neighbors ≥ 2 → signal created.
+    sim_->placeRoad(1, 1, 0);
+
+    // Trigger neighbor re-check: (2,1) gains E neighbor at (3,1) → 2 neighbors ≥ 2.
+    sim_->placeRoad(3, 1, 0);
+
+    SUCCEED();
+}
+
+// ============================================================================
+// Test: demolishTile on a road WITH a traffic signal — exercises remove_if lambda
+// Build a cross intersection (signal at (1,1)), then demolish (1,1).
+// ============================================================================
+TEST_F(EconomyTest, DemolishRoadWithSignal_ExecutesRemoveIfLambda)
+{
+    // Create a cross intersection — (1,1) gets a traffic signal.
+    sim_->placeRoad(1, 0, 0);
+    sim_->placeRoad(1, 2, 0);
+    sim_->placeRoad(0, 1, 0);
+    sim_->placeRoad(2, 1, 0);
+    sim_->placeRoad(1, 1, 0);  // Signal created at (1,1).
+
+    // Demolish (1,1) — wasRoad=true triggers signal removal lambda.
+    sim_->demolishTile(1, 1);
+
+    QueryResult qr = sim_->queryTile(1, 1);
+    EXPECT_FALSE(qr.isRoad);
 }

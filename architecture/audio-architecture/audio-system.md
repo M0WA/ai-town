@@ -48,6 +48,18 @@ enum class TimeOfDay { DAY, DUSK, NIGHT, DAWN };
 // See source-pool.md for the full eviction and transient-reserve rules.
 enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 
+// Defined in audio_types.h — reproduced here for interface completeness.
+// Music intensity tier driven by live simulation state.  Set by CitySimulation::update()
+// via IAudioSystem::setMusicIntensity().  AudioSystem maps each tier to the corresponding
+// gameplay stem pair (CALM→calm_01/02, GROWTH→growth_01/02, CRISIS→crisis_01/02).
+// Threshold conditions are authoritative in architecture/game-design/economy-model.md:
+//   CALM:   budget_surplus_pct >= 0%  (default state)
+//   GROWTH: net population change positive (population this tick > population previous tick)
+//   CRISIS: consecutive_deficit_months >= 2  (highest priority tier)
+// Priority order (highest first): CRISIS > GROWTH > CALM.
+// Added in Phase 10 (see implementation/phase-10.md — Music intensity interface deliverable).
+enum class MusicIntensity { CALM, GROWTH, CRISIS };
+
 class IAudioSystem {
 public:
     virtual ~IAudioSystem() = default;
@@ -166,17 +178,39 @@ public:
     virtual void setMasterVolume(float gain) = 0;
     virtual void setMusicVolume(float gain) = 0;
     virtual void setSFXVolume(float gain) = 0;
+
+    // --- Phase 10 Adaptive Music API ---
+    // Set the music intensity tier driven by live simulation state.
+    // Called by CitySimulation::update() whenever the city's fiscal or population state
+    // changes tier.  AudioSystem crossfades the active gameplay stem pair on the next
+    // beat boundary to the stem pair matching the new tier
+    // (CALM→calm_01/02, GROWTH→growth_01/02, CRISIS→crisis_01/02).
+    // Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) takes precedence internally;
+    // CitySimulation does NOT need to suppress GROWTH calls during off-hours.
+    // Calling setMusicIntensity() with the tier already active is a no-op.
+    // Thread-safety: call from the main thread only.
+    // AudioSystem implementation MUST store m_currentMusicIntensity as std::atomic<int>
+    // (or read under the audio-thread lock) because the audio thread reads it to select
+    // the next crossfade target.
+    // Threshold conditions that determine which tier to pass are defined in
+    // architecture/game-design/economy-model.md §Music Intensity Tiers.
+    // MockAudioSystem: add MOCK_METHOD(void, setMusicIntensity, (MusicIntensity), (override));
+    virtual void setMusicIntensity(MusicIntensity intensity) = 0;
 };
 ```
 
-`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all fourteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
+`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all fifteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
 
 ---
 
 ```cpp
 class AudioSystem : public IAudioSystem {
 public:
-    explicit AudioSystem(IClock* clock);   // alcOpenDevice + alcCreateContext (with HRTF attrs); throws on failure
+    explicit AudioSystem(IClock* clock);   // alcOpenDevice + alcCreateContext (with HRTF attrs).
+                                  // alcOpenDevice failure: logs warning, sets m_deviceLost=true, returns early
+                                  // (silent mode — all IAudioSystem calls become no-ops). Does NOT throw.
+                                  // alcCreateContext / alcMakeContextCurrent / ALC_EXT_thread_local_context
+                                  // failures still throw std::runtime_error.
                                   // clock: injectable for deterministic timing in tests (crossfade duck timer,
                                   // m_lastDuckWakeTime). Production passes WallClock; tests pass ManualClock.
     ~AudioSystem();  // MUST follow the audio thread shutdown sequence below
@@ -288,11 +322,11 @@ private:
 
 ## IAudioSystem Header Include Requirements
 
-The file `src/interfaces/audio_system.h` must include the following headers:
+The file `src/interfaces/IAudioSystem.h` must include the following headers:
 
 ```cpp
 #include "simulation_types.h"    // Required: SimSpeed (type alias for SpeedMultiplier)
-#include "audio_types.h"         // Required: SoundId, MusicTrackId, SoundPriority, StingerType, TimeOfDay, SoundHandle
+#include "audio_types.h"         // Required: SoundId, MusicTrackId, SoundPriority, StingerType, TimeOfDay, SoundHandle, MusicIntensity
 #include "camera_state.h"        // Required: CameraState (used in syncListenerToCamera)
 #include "vec3.h"                // Required: vec3 (used in playPositionalSound and syncListenerToCamera)
 ```
@@ -353,15 +387,24 @@ The audio thread then **additionally** calls `alcSetThreadContext(m_context)` vi
 **Constructor sequence (within `AudioSystem::AudioSystem(IClock*)`):**
 
 ```cpp
-// Step 1: open device and create context (throws on failure — done before thread launch).
+// Step 1: open device and create context.
 // alcMakeContextCurrent(m_context) establishes the MANDATORY, PERMANENT process-wide
 // context binding for the main thread. This binding must remain active for the entire
 // application lifetime — syncListenerToCamera() issues AL listener calls on the main
 // thread every frame and requires a current context on that thread.
 // The audio thread will ADDITIONALLY call alcSetThreadContext(m_context) for its own
 // thread-local binding; this does not displace the process-wide binding.
-m_device  = alcOpenDevice(nullptr);
-if (!m_device) throw std::runtime_error("alcOpenDevice failed");
+m_device = alcOpenDevice(nullptr);
+if (!m_device) {
+    // No audio device — degrade to silent mode rather than aborting the game.
+    // m_deviceLost=true causes all IAudioSystem methods to return early (no AL calls).
+    // All partial-construction guards (m_deviceCreated, m_contextCreated, etc.) remain
+    // false; the destructor skips all AL/ALC cleanup safely. The audio thread is never
+    // launched; m_audioThread remains default-constructed (not joinable).
+    logWarning("alcOpenDevice failed — no audio device available; running in silent mode");
+    m_deviceLost.store(true);
+    return;
+}
 // ... build HRTF attrs array (see hrtf-initialization.md) ...
 m_context = alcCreateContext(m_device, attribs);
 if (!m_context || alcMakeContextCurrent(m_context) == ALC_FALSE)
@@ -549,12 +592,15 @@ The following Phase 1 items have been verified by code inspection:
 
 Phase 7 full `AudioSystem` RAII implementation delivered. The following items are verified:
 
-1. **Constructor sequence**: `alcOpenDevice` → HRTF attrs context → `alcMakeContextCurrent` →
+1. **Constructor sequence**: `alcOpenDevice` (failure → silent mode: `m_deviceLost=true`, `return`)
+   → HRTF attrs context → `alcMakeContextCurrent` →
    `alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED)` → `alGenSources(62)` → pre-load queue populate →
    `alcGetProcAddress("alcSetThreadContext")` (throws `std::runtime_error` if null) → EFX filter
    allocation → `m_occlusionGainTarget[]` init to 1.0f → `m_useThreadLocalCtx = true` → thread
    launch → `m_initCV.wait_for` 5 s. VERIFIED by code inspection of
-   `src/audio/AudioSystem.cpp`.
+   `src/audio/AudioSystem.cpp`. Silent-mode early-return verified: all `m_deviceLost` guards
+   confirmed on `setMusicTrack`, `triggerStinger`, `syncListenerToCamera`, `transitionToGameplay`,
+   `update`, `setMasterVolume`, `playSound`, `playPositionalSound`, `stopSound`.
 
 2. **Audio thread init order**: `m_fnSetThreadCtx(m_context)` FIRST action; pre-load queue drain;
    `m_lastDuckWakeTime = m_clock->nowSeconds()` BEFORE `notify_one` (epoch-dt prevention);
@@ -566,7 +612,8 @@ Phase 7 full `AudioSystem` RAII implementation delivered. The following items ar
    count). `m_efxAllocationAttempted` (not `m_efxAvailable`) guards destructor filter loop.
    VERIFIED by code inspection of destructor sequence.
 
-4. **`IAlcFunctions` seam**: `ialc_functions.h` defines interface; `DefaultAlcFunctions` wraps
+4. **`IAlcFunctions` seam**: `src/interfaces/IAlcFunctions.h` defines interface (moved from
+   `src/audio/ialc_functions.h` in Phase 10b Feature 3); `DefaultAlcFunctions` wraps
    real ALC in `AudioSystem.cpp`; `MockAlcFunctions` in `audio_thread_test.cpp` returns null for
    all `getProcAddress` calls. `AudioThread_AbsentThreadLocalContext_ConstructorThrows` now active
    (GTEST\_SKIP removed) and passing. VERIFIED — 16/16 tests pass.

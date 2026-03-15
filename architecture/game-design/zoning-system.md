@@ -146,6 +146,86 @@
 - **Terrain interaction**: See [Terrain Interaction](terrain-interaction.md) for the authoritative slope threshold (> 15.0°, exact), earthworks cost formula, and map playability guarantee.
 - **Player action**: Player designates zones; engine auto-populates buildings based on demand and desirability scores
 
+## Phase 10 Audio Callbacks for Zone Events
+
+The following calls are made from `CitySimulation` on zone placement, demolition, and density
+upgrade events. All calls are guarded by `m_audio != nullptr`.
+
+### `sfx_build_place` and `sfx_earthworks` — Zone tile placed
+
+**Call site**: `CitySimulation::placeZone(int tileX, int tileZ, ZoneType type,
+DensityTier tier, int earthworksCostOverride)`. Called on successful zone placement (tile
+was not already occupied and cost deduction succeeds).
+
+```cpp
+// In CitySimulation::placeZone(), after treasury deduction and tile assignment:
+if (m_audio) {
+    if (earthworksCostOverride > 0) {
+        m_audio->playPositionalSound(
+            SFX_EARTHWORKS,
+            vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+            SoundPriority::NORMAL, 1.0f);
+    }
+    m_audio->playPositionalSound(
+        SFX_BUILD_PLACE,
+        vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+        SoundPriority::NORMAL, 1.0f);
+}
+```
+
+`SFX_EARTHWORKS` = SoundId 4 — positional (`AL_SOURCE_RELATIVE = AL_FALSE`), EFX bypass
+(`AL_DIRECT_FILTER = AL_FILTER_NULL`), fired only when earthworks cost > 0.
+`SFX_BUILD_PLACE` = SoundId 1 — positional (`AL_SOURCE_RELATIVE = AL_FALSE`), no EFX bypass.
+Both use `Y = 0.0f` (real terrain height is post-V1 refinement per service-coverage.md).
+
+### `sfx_build_demolish` — Zone tile demolished
+
+**Call site**: `CitySimulation::demolishTile(int tileX, int tileZ)` (or whichever method
+implements the Demolish tool for zone tiles). Called on successful demolition.
+
+```cpp
+// In CitySimulation::demolishTile(), after clearing the tile:
+if (m_audio) {
+    m_audio->playPositionalSound(
+        SFX_BUILD_DEMOLISH,
+        vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+        SoundPriority::NORMAL, 1.0f);
+}
+```
+
+`SFX_BUILD_DEMOLISH` = SoundId 2 — positional (`AL_SOURCE_RELATIVE = AL_FALSE`), no EFX bypass.
+
+### `sfx_zone_upgrade` — Zone tile auto-upgraded to higher density tier
+
+**Trigger**: Fired once per tile that is successfully upgraded during a density upgrade wave
+tick. The upgrade wave runs inside `CitySimulation::doDensityUnlockTick()`.
+
+**Call site**: `CitySimulation::doDensityUnlockTick()`, immediately after a tile's density
+tier is incremented and before the 20%-per-type cap counter is updated.
+
+**Per-wave-tick audio call cap**: At most `SimulationConstants::sfx_zone_upgrade_per_tick_cap`
+(= 3) audio calls are made per single invocation of `doDensityUnlockTick()`. A local counter
+`sfxCallsThisTick` is incremented on each `playSound()` call; audio is suppressed (tile is
+still upgraded) when `sfxCallsThisTick >= sfx_zone_upgrade_per_tick_cap`. This prevents a
+jarring burst when a large upgrade wave fires across many tiles simultaneously. The cap
+communicates "upgrade wave happening" to the player without flooding the SFX pool. The
+constant must be defined in `simulation_constants.h` as
+`static constexpr int sfx_zone_upgrade_per_tick_cap = 3`.
+
+```cpp
+// In CitySimulation::doDensityUnlockTick(), per-tile upgrade:
+tile.densityTier = nextTier;
+if (m_audio && sfxCallsThisTick < SimulationConstants::sfx_zone_upgrade_per_tick_cap) {
+    m_audio->playSound(SFX_ZONE_UPGRADE, SoundPriority::NORMAL, 1.0f);
+    ++sfxCallsThisTick;
+}
+upgradeCountThisTick[tile.zoneType]++;
+```
+
+`SFX_ZONE_UPGRADE` = SoundId 5 (`sfx_zone_upgrade.wav`). Non-positional
+(`AL_SOURCE_RELATIVE = AL_TRUE`), EFX bypass. At most `sfx_zone_upgrade_per_tick_cap` (= 3)
+audio calls per `doDensityUnlockTick()` invocation; tiles beyond the cap are upgraded silently.
+
 ## Zone Overlay Colour Scheme (Phase 9b — HUD)
 
 When the Zone tool is active or when zones have been placed, the renderer draws a semi-transparent

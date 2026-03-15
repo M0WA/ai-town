@@ -7,6 +7,8 @@
 #include "ITerrainQuery.h"
 #include "simulation_constants.h"
 
+#include <array>
+#include <string>
 #include <unordered_map>
 #include <vector>
 #include <queue>
@@ -116,6 +118,28 @@ public:
     // ---- Time of day ----
     TimeOfDay getTimeOfDay() const override;
 
+    // ---- Serialization (Phase 11) ----
+    // serializeToJson() — produce a full city-state JSON string (schema_version: 1).
+    // consumeBudgetTicks — returns and clears the count of budget ticks fired since last call.
+    int consumeBudgetTicks() override;
+
+    // Called by SaveSystem::autoSave() and SaveSystem::saveToSlot().
+    // Not virtual — save/load seam; never called through ICitySimulation interface.
+    std::string serializeToJson() const;
+
+    // deserializeFromJson() — restore city state from a JSON string previously produced by
+    // serializeToJson(). Returns true on success; false on any parse error, schema mismatch,
+    // or out-of-range field.  On failure, errorOut receives a human-readable description.
+    // Callers (SaveSystem::loadFromSlot, etc.) MUST check the return value.
+    bool deserializeFromJson(const std::string& json, std::string& errorOut);
+
+    // ---- Test / save seam (not in ICitySimulation) ----
+    // getBuildingVariantCounter() — returns the round-robin variant counter for the given
+    // (zone, tier) pair.  Index: zone*3 + tier.  Used by Phase 11 serialization tests.
+    // Tests and SaveSystem downcast ICitySimulation* to CitySimulation* to reach this.
+    // Not virtual — test/save seam; never called from production paths through the interface.
+    int getBuildingVariantCounter(int zone, int tier) const;
+
     // ---- Test / internal API (not in ICitySimulation) ----
     // addServiceBuilding: inject a service building directly for unit tests.
     // serviceTypeInt: 0=FireStation, 1=PoliceStation, 2=WaterTower, 3=PowerPlant
@@ -128,11 +152,41 @@ public:
     // Tests downcast ICitySimulation* to CitySimulation* to reach this method.
     void setModalOpen(bool open);
 
+#ifdef AITOWN_TESTING_ENABLED
+    // testForceUnlockDensityTier — test-friend method for Phase 10 unit tests.
+    //
+    // Directly sets the density unlock flag for the given (ZoneType, DensityTier) pair,
+    // bypassing the 3-consecutive-month revenue-streak counter. This allows tests to
+    // drive doDensityUnlockTick() into the upgrade-wave state without running multiple
+    // budget ticks above the revenue threshold.
+    //
+    // Index mapping (matches doDensityUnlockTick tier numbering):
+    //   Residential/Medium = 0, Commercial/Medium = 1, Industrial/Medium = 2,
+    //   Residential/High   = 3, Commercial/High   = 4, Industrial/High   = 5.
+    //
+    // DensityTier::Low has no unlock gate (always available) and is ignored.
+    //
+    // This method is compiled ONLY when AITOWN_TESTING_ENABLED=1 is defined.
+    // It MUST NOT appear in production builds (aitown target never defines this macro).
+    // (ref: implementation/phase-10.md — §testForceUnlockDensityTier decision 2026-03-04)
+    void testForceUnlockDensityTier(ZoneType zone, DensityTier tier);
+#endif  // AITOWN_TESTING_ENABLED
+
 private:
     // ------------------------------------------------------------------
     // Private nested types
     // ------------------------------------------------------------------
     enum class ServiceType { FireStation, PoliceStation, WaterTower, PowerPlant };
+
+    // ScenarioState — placeholder for V1 scenario mode scaffolding.
+    // Serialized as the "scenario_state" object in the save JSON so that
+    // future scenario saves can round-trip without a schema bump.
+    // In V1 Sandbox mode these fields are always at their default (zero) values.
+    struct ScenarioState {
+        float       win_condition_progress{0.0f};
+        int         elapsed_ticks{0};
+        std::string scenario_id;
+    };
 
     struct TileData {
         ZoneType    zone{ZoneType::Residential};
@@ -142,6 +196,34 @@ private:
         float       population{0.0f};    // actual pop (float for smooth growth)
         float       desirability{static_cast<float>(SimulationConstants::desirability_base_value)};
         bool        firstDesirabilityTick{true};  // grace: skip service penalty on first tick
+
+        // Phase 10 per-tile audio transition flags.
+        // Each flag fires its corresponding SFX exactly once per coverage-loss event
+        // (not once per tick while uncovered) and resets silently when coverage is restored.
+        //
+        // wasPowered: true when this tile was power-covered on the previous tick.
+        //   CitySimulation::tick() fires SFX_POWER_OUT when wasPowered==true and the
+        //   current BFS pass finds the tile unpowered; then sets wasPowered=false.
+        //   Restored to true (no SFX) when power coverage returns.
+        //   Initialized true so that the very first brownout on a powered tile is audible.
+        bool wasPowered{true};
+
+        // wasWaterCovered: true when this tile was water-covered on the previous tick.
+        //   CitySimulation::tick() fires SFX_WATER_OUT when wasWaterCovered==true and
+        //   the current water-coverage pass finds the tile uncovered; then sets
+        //   wasWaterCovered=false. Restored to true (no SFX) when coverage returns.
+        //   Initialized true so that the first water-loss event on a covered tile is audible.
+        bool wasWaterCovered{true};
+
+        // alertFired: true while this tile is in an active service-alert episode
+        //   (desirability <= SimulationConstants::service_alert_desirability_threshold).
+        //   CitySimulation::tick() fires SFX_FIRE_ALERT or SFX_POLICE_ALERT (Fire takes
+        //   priority when both stations cover the tile) when alertFired==false and
+        //   desirability drops to or below the threshold; then sets alertFired=true.
+        //   Reset to false when desirability recovers above the threshold, allowing
+        //   the alert to re-fire in a future crisis episode.
+        //   Must be serialised in the save file (Phase 11) to prevent spurious re-fire on load.
+        bool alertFired{false};
     };
 
     struct LoanEntry {
@@ -165,6 +247,24 @@ private:
         int64_t  costPaid{0};           // treasury deduction to reverse on undo
     };
 
+    // TrafficSignal — Phase 10 data structure for sfx_intersection_tick wiring.
+    // Maintained by placeRoad() (add signal at any road tile adjacent to 2+ roads)
+    // and demolishTile() (remove signal when road tile is demolished).
+    //
+    // A signal "fires" every phaseSeconds real-time seconds. Each fire represents
+    // one green→red or red→green phase change and triggers sfx_intersection_tick
+    // (pre-culled at > traffic_signal_cull_distance_meters from listener).
+    //
+    // phaseTimer: elapsed real-time seconds since last phase change.
+    //             Initialised to a random offset in [0, phaseSeconds) to prevent
+    //             all signals firing simultaneously on first frame.
+    struct TrafficSignal {
+        int   tileX{0};
+        int   tileZ{0};
+        float phaseTimer{0.0f};   // elapsed seconds since last phase change
+        float phaseSeconds{SimulationConstants::traffic_signal_phase_seconds};
+    };
+
     // ------------------------------------------------------------------
     // Injected dependencies
     // ------------------------------------------------------------------
@@ -181,6 +281,7 @@ private:
     float           m_accumulatedSimSeconds{0.0f};   // sub-tick accumulator
     double          m_constructionTimeSeconds{0.0};  // clock at construction (grace period base)
     int             m_totalTicks{0};                 // budget ticks fired so far
+    int             m_pendingBudgetTicks{0};         // ticks fired since last consumeBudgetTicks()
     int             m_month{1};                      // 1–12
     int             m_year{1};
     SpeedMultiplier m_speed{kDefaultSimSpeed};       // starts at x3
@@ -218,6 +319,12 @@ private:
     std::vector<ServiceBuilding>           m_serviceBuildings;
     int                                    m_roadTileCount{0};
 
+    // Phase 10: traffic signals — one entry per intersection road tile.
+    // Populated by placeRoad() (when the new road tile is adjacent to 2+ existing roads)
+    // and pruned by demolishTile() (remove entry when a road tile is demolished).
+    // Each signal's phaseTimer is advanced by doTrafficSignalTick(realDeltaSeconds).
+    std::vector<TrafficSignal> m_trafficSignals;
+
     // ------------------------------------------------------------------
     // Traffic — rolling windows (circular buffers, initialized to null_path default)
     // ------------------------------------------------------------------
@@ -241,6 +348,9 @@ private:
     // Population & city rating
     // ------------------------------------------------------------------
     int            m_totalPopulation{0};
+    int            m_prevPopulation{0};    // Phase 10: snapshot from end of previous tick
+                                           // Used to detect net-positive pop delta for GROWTH tier.
+                                           // Updated at the END of doPopulationTick() each budget tick.
     CityRatingTier m_cityRating{CityRatingTier::Village};
     bool           m_milestoneFired[5]{};  // 1K/10K/50K/100K/500K (index 0–4)
 
@@ -251,9 +361,33 @@ private:
     bool m_month1AutoSlowed{false};  // resets when streak breaks
 
     // ------------------------------------------------------------------
+    // Adaptive music intensity (Phase 10)
+    // ------------------------------------------------------------------
+    // Tracks the MusicIntensity tier that was last sent to IAudioSystem so
+    // that setMusicIntensity() is only called when the tier actually changes
+    // (edge-detect policy — avoids hammering the audio system every tick).
+    // Initialised to CALM: construction sends no setMusicIntensity call because
+    // the audio system already defaults to CALM on transitionToGameplay().
+    MusicIntensity m_lastSentMusicIntensity{MusicIntensity::CALM};
+
+    // ------------------------------------------------------------------
     // Density unlock
     // ------------------------------------------------------------------
     DensityUnlockState m_densityUnlockState{};
+
+    // ------------------------------------------------------------------
+    // Building variant counters (Phase 11) — round-robin asset cycling.
+    // Index: zone * 3 + tier  (zone: 0=Res, 1=Com, 2=Ind; tier: 0=Low, 1=Med, 2=High).
+    // Incremented in placeZone() each time a building is placed for that (zone, tier) pair.
+    // Used by zoneAssetBaseName() (updated in Phase 11) to pick _01/_02/_03 variants.
+    // Persisted in save files so variant continuity is maintained across save/load.
+    // ------------------------------------------------------------------
+    std::array<int, 9> m_buildingVariantCounters{};
+
+    // ------------------------------------------------------------------
+    // Scenario state (V1 stub — always zero in Sandbox mode).
+    // ------------------------------------------------------------------
+    ScenarioState m_scenarioState{};
 
     // ------------------------------------------------------------------
     // Notification queue (FIFO, polled by UIManager)
@@ -292,6 +426,13 @@ private:
     void doGameOverTick();                // deficit streak, auto-slow, game-over counter
     void checkCityRatingTransition();     // tier change notification
 
+    // Phase 10: advance traffic signal timers and fire sfx_intersection_tick.
+    // Called once per tick() with real delta seconds (NOT sim-speed-scaled).
+    // Signals are independent of budget ticks — they toggle every
+    // SimulationConstants::traffic_signal_phase_seconds real-time seconds.
+    // Pre-cull: skips playPositionalSound if listener distance > 80 m.
+    void doTrafficSignalTick(float realDeltaSeconds);
+
     // Economy helpers
     int64_t computeTaxRevenue(ZoneType zone) const;
     int64_t computeWagesCost(int64_t totalCIRevenue) const;
@@ -305,6 +446,11 @@ private:
 
     // Population helpers
     static int   maxPopulationForTile(ZoneType zone, DensityTier density);
+
+    // Phase 10: map (ZoneType, DensityTier) to the _01 asset base name for
+    // IRenderer::placeBuildingMesh().  Round-robin variant cycling is Phase 11.
+    // Returns empty string on unknown inputs (renderer no-ops on empty baseName).
+    static std::string zoneAssetBaseName(ZoneType zone, DensityTier density);
     float        effectiveDemandForTile(const TileData& tile) const;
 
     // Service coverage helpers (tile-unit coordinates)

@@ -1,9 +1,11 @@
 #pragma once
 
-#include "src/ui/IUIBackend.h"      // UIElementHandle, kInvalidUIElement, Rect
+#include "src/interfaces/IUIBackend.h"      // UIElementHandle, kInvalidUIElement, Rect
 #include "src/ui/ui_types.h"        // GameMode, GameState, ActiveTool
 #include "src/interfaces/IClock.h"  // IClock — full include (available at Phase 0)
+#include "src/interfaces/simulation_types.h"  // CityRatingTier — used as m_previousCityRating type
 #include "src/interfaces/LoanTerms.h"  // LoanTerms
+#include "key_bindings.h"           // KeyBindings — loaded at startup from keybindings.json
 #include <unordered_map>
 #include <cstdint>
 
@@ -14,6 +16,7 @@ class IAudioSystem;
 class ICitySimulation;
 class IRenderer;
 class ITerrainQuery;
+class SaveSystem;
 
 // INCLUDE PROHIBITION: Do NOT replace this forward declaration with
 // #include "src/platform/input_event.h". The platform header must not
@@ -167,6 +170,33 @@ public:
     // (terrain generation is in progress; no UI polling should occur).
     void setLoadingTerrain(bool loading);
 
+    // Phase 11: Called once by the loading controller after terrain build and
+    // deserialization completes, before the first UIManager::update() tick.
+    // Seeds m_previousCityRating from the current sim state so that the per-frame
+    // stinger_milestone detector does not fire a spurious MILESTONE on the first frame.
+    // Also seeds m_lastDeficitMonths to prevent spurious game-over warnings on load.
+    void onGameLoaded();
+
+    // Phase 11: Load keybindings from the platform-specific config path:
+    //   Linux   — ~/.config/aitown/keybindings.json
+    //   Windows — %APPDATA%\aitown\keybindings.json
+    // Silently uses defaults if the file is absent (normal first-run state).
+    void loadKeybindings();
+
+    // Phase 11: Wire the SaveSystem to UIManager for manual save and quit-guard.
+    // Called from main.cpp after SaveSystem is constructed.
+    void setSaveSystem(SaveSystem* saveSystem);
+
+    // Phase 11: Update Load Game button enabled state in MainMenuPanel.
+    // When available=false (default): button grayed, tooltip "No saves found."
+    // When available=true: button enabled.
+    // Called from main.cpp after SaveSystem::hasSaveData() is checked.
+    void setSaveAvailable(bool available);
+
+    // Phase 11: Set the save-state status text beneath the Load Game button.
+    // "" hides the label. "No saves found." for first run; corrupted message for bad saves.
+    void setSaveStatusText(const std::string& text);
+
     // Returns true when the user requested application quit
     // (from Main Menu Quit or Pause Menu Quit to Desktop).
     // Polled by main.cpp to break the frame loop.
@@ -230,6 +260,17 @@ private:
     // Set true on MouseButtonDown button==0, false on MouseButtonUp button==0.
     bool m_lmbHeld{false};
 
+    // --- Phase 10: Zone rectangular selection anchor ---
+    // Set to the first tile clicked when Zone tool LMB is pressed.
+    // Reset to {-1,-1} on LMB release (after filling the rectangle).
+    // While held (-1 means no active rect drag), drag does NOT fill tiles — only
+    // the hover highlight moves. On release, ALL tiles in the axis-aligned rectangle
+    // [min(anchor,current), max(anchor,current)] are filled via doTerrainPlacement().
+    // Road, Utilities, and Demolish tools retain their original tile-by-tile drag
+    // behavior; only Zone uses this deferred rectangular fill pattern.
+    int m_zoneAnchorX{-1};
+    int m_zoneAnchorZ{-1};
+
     // --- Phase 9b: Zone sub-panel button handles (3×3 grid: col=zone R/C/I, row=density Low/Med/High) ---
     // Created during UIManager construction via m_backend->addButton().
     // Stored in row-major order: m_zoneSubPanelBtns[densityRow * 3 + zoneCol].
@@ -261,9 +302,36 @@ private:
     // Initialized to -5.0 so the first fire always passes the cooldown check.
     double m_lastCrisisStingerFireTime{-5.0};
 
+    // Cooldown for MILESTONE stinger (5 s minimum gap per StingerType).
+    // Initialized to -5.0 so the first City Rating transition always fires.
+    // Phase 11: triggerStinger(MILESTONE) fires via per-frame getCityRating() polling
+    // (replaces Phase 10 notification-based dispatch to prevent double-fire on load).
+    double m_lastMilestoneStingerFireTime{-5.0};
+
+    // Phase 11: stinger_milestone per-frame cache.
+    // Stores the city rating seen on the previous frame so update() can detect upward
+    // transitions and call triggerStinger(StingerType::MILESTONE) exactly once.
+    // Seeded by onGameLoaded() after deserialization to prevent a spurious stinger on
+    // the first update() tick of a loaded game. NOT serialized by SaveSystem.
+    // Default Village (smallest tier) — matches a new-game / pre-load state.
+    CityRatingTier m_previousCityRating{CityRatingTier::Village};
+
     // --- Phase 8: loading gate ---
     // While true, update() returns immediately (terrain generation in progress).
     bool m_loadingTerrain{false};
+
+    // --- Phase 11: SaveSystem pointer (optional — null until setSaveSystem() is called) ---
+    SaveSystem* m_saveSystem{nullptr};
+
+    // --- Phase 11: key bindings loaded from keybindings.json at startup ---
+    // Defaults are set by KeyBindings member initialisers; overridden by load().
+    KeyBindings m_keyBindings{};
+
+    // --- Phase 11: pending quit action after unsaved-changes modal ---
+    // Set when a quit is requested while m_hasUnsavedChanges is true.
+    // Cleared after the blocking modal resolves.
+    enum class PendingQuitAction { None, Desktop, ToMenu };
+    PendingQuitAction m_pendingQuit{PendingQuitAction::None};
 
     // --- Phase 8: application quit flag ---
     // Set when MainMenu Quit or PauseMenu Quit to Desktop is consumed.

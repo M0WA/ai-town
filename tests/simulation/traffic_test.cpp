@@ -16,16 +16,16 @@
 // The initial getTrafficDemandFactor() therefore returns 0.5f at construction
 // before any ticks have fired.
 
-#include "simulation_test_base.h"
+#include "SimulationTestBase.h"
 #include "src/interfaces/ICitySimulation.h"
 #include "src/interfaces/simulation_types.h"
 #include "src/simulation/simulation_constants.h"
 #include "src/interfaces/sound_ids.h"
-#include "mock_audio_system.h"
-#include "mock_renderer.h"
-#include "manual_rng.h"
-#include "manual_clock.h"
-#include "manual_terrain_query.h"
+#include "MockAudioSystem.h"
+#include "MockRenderer.h"
+#include "ManualRNG.h"
+#include "ManualClock.h"
+#include "ManualTerrainQuery.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -467,4 +467,84 @@ TEST_F(NiceTrafficTest, TrafficCongestion_GraduatedPenalty_ExactlyAt41Pct_NoPena
     // So: effective_revenue = base_revenue × 1.0 (no reduction).
     // The congestion_none_threshold constant must equal 0.40.
     EXPECT_FLOAT_EQ(SimulationConstants::congestion_none_threshold, 0.40f);
+}
+
+// ---------------------------------------------------------------------------
+// speedValue(Paused) — tick accumulates 0 simSeconds when Paused.
+// Moved from simulation_coverage_gap_test.cpp.
+// ---------------------------------------------------------------------------
+TEST_F(NiceTrafficTest, SpeedValue_Paused_TickDoesNotAccumulate)
+{
+    sim_->setSpeed(SpeedMultiplier::Paused);
+    EXPECT_EQ(sim_->getSpeedMultiplier(), SpeedMultiplier::Paused);
+
+    // Ticking with speed=Paused should not fire budget ticks.
+    clock_.advance(SimulationConstants::SECONDS_PER_BUDGET_TICK * 2.0);
+    cs()->tick(SimulationConstants::SECONDS_PER_BUDGET_TICK);
+
+    // Treasury should be unchanged from starting amount (no budget tick).
+    float initialTreasury = sim_->getTreasuryBalance();
+    EXPECT_GT(initialTreasury, 0.0f);
+}
+
+// ---------------------------------------------------------------------------
+// speedValue x10 — verifies the x10 switch case.
+// Moved from simulation_coverage_gap_test.cpp.
+// ---------------------------------------------------------------------------
+TEST_F(NiceTrafficTest, SpeedValue_x10_SetsCorrectSpeed)
+{
+    sim_->setSpeed(SpeedMultiplier::x10);
+    EXPECT_EQ(sim_->getSpeedMultiplier(), SpeedMultiplier::x10);
+}
+
+// ---------------------------------------------------------------------------
+// smoothstep is exercised by travelTimeDemand via traffic tick.
+// Place zones and roads to generate a real traffic demand sample.
+// Moved from simulation_coverage_gap_test.cpp.
+// ---------------------------------------------------------------------------
+TEST_F(NiceTrafficTest, Smoothstep_ExercisedByTrafficTick)
+{
+    sim_->placeZone(0, 0, ZoneType::Residential, DensityTier::Low, 0);
+    sim_->placeZone(1, 0, ZoneType::Commercial,  DensityTier::Low, 0);
+    sim_->placeRoad(0, 1, 0);
+    sim_->placeRoad(1, 1, 0);
+
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+    runTicks(4);
+
+    float resD = sim_->getDemandPressurePct(ZoneType::Residential);
+    EXPECT_GE(resD, 0.0f);
+    EXPECT_LE(resD, 100.0f);
+}
+
+// ---------------------------------------------------------------------------
+// trafficLoad > 1.0f fires the Commercial (L431) and Industrial (L441) timeout
+// paths in computeTrafficDemand().
+//
+// Layout: 1 road tile, 1 Commercial adjacent, 1 Industrial adjacent, 7 Residential
+// (non-adjacent) → totalZonedTiles=9 > roadCapacity=8 → trafficLoad > 1.0.
+// Moved from simulation_coverage_gap_test.cpp.
+// ---------------------------------------------------------------------------
+TEST_F(NiceTrafficTest, TrafficOverload_Commercial_Industrial_FiresTimeout)
+{
+    // Road at (5,5). Commercial and Industrial directly adjacent.
+    sim_->placeRoad(5, 5, 0);
+    sim_->placeZone(4, 5, ZoneType::Commercial,  DensityTier::Low, 0);
+    sim_->placeZone(6, 5, ZoneType::Industrial,  DensityTier::Low, 0);
+
+    // 7 more Residential tiles: totalZonedTiles=9 > capacity 8.
+    sim_->placeZone(0, 0, ZoneType::Residential, DensityTier::Low, 0);
+    sim_->placeZone(1, 0, ZoneType::Residential, DensityTier::Low, 0);
+    sim_->placeZone(2, 0, ZoneType::Residential, DensityTier::Low, 0);
+    sim_->placeZone(3, 0, ZoneType::Residential, DensityTier::Low, 0);
+    sim_->placeZone(0, 1, ZoneType::Residential, DensityTier::Low, 0);
+    sim_->placeZone(1, 1, ZoneType::Residential, DensityTier::Low, 0);
+    sim_->placeZone(2, 1, ZoneType::Residential, DensityTier::Low, 0);
+
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+    runTicks(1);
+
+    float comD = sim_->getDemandPressurePct(ZoneType::Commercial);
+    EXPECT_GE(comD, 0.0f);
+    EXPECT_LE(comD, 100.0f);
 }

@@ -21,13 +21,15 @@
 #include "src/ui/UIScaler.h"
 #include "src/ui/CameraController.h"
 #include "src/platform/EventReceiver.h"
-#include "src/interfaces/WallClock.h"
+#include "src/platform/WallClock.h"
 #include "src/interfaces/camera_state.h"
 #include "src/simulation/CitySimulation.h"
 #include "src/simulation/StdSimulationRNG.h"
+#include "src/simulation/SaveSystem.h"
 #include "src/terrain/TerrainSystem.h"
 #include "src/terrain/StdTerrainRNG.h"
-#include "src/audio/audio_system.h"
+#include "src/audio/AudioSystem.h"
+#include "src/interfaces/sound_ids.h"   // MUSIC_MAIN_MENU_01 — Phase 10 startup music
 
 #include <irrlicht.h>
 #include <cstdio>
@@ -104,6 +106,7 @@ int main() {
     // Created with nullptr for UIManager — late-bound below after UIManager is created.
     // -------------------------------------------------------------------------
     IrrlichtRenderer renderer(device, /*uiManager=*/nullptr);
+    renderer.setRenderSystem(&renderSystem);
 
     // -------------------------------------------------------------------------
     // WallClock — production IClock; injects into AudioSystem/CitySimulation at Phase 4/6.
@@ -132,15 +135,17 @@ int main() {
     TerrainSystem terrainSystem(&renderer, &wallClock);
 
     // -------------------------------------------------------------------------
-    // Terrain generation — generate the procedural heightmap and build all chunks.
+    // Terrain generation — generate the procedural heightmap and enqueue all chunks.
     // Uses 128x128 tiles (4x4 = 16 chunks at 32 tiles/chunk), cellSize = 10 m.
     // StdTerrainRNG provides mt19937-backed randomness with reseed() support.
     // generate() enforces playability constraints (20% flat, 50x50 contiguous region).
-    // buildAllChunks() synchronously creates all scene nodes via IRenderer.
+    // enqueueAllChunks() registers LOD0 rebuild requests WITHOUT flushing; the
+    // loading screen loop below drains the deque one flushPendingRebuilds() call
+    // per frame (100 ms CPU budget) so the UI spinner remains animated.
     // -------------------------------------------------------------------------
     StdTerrainRNG terrainRng;
     terrainSystem.generate(128, 128, 10.0f, &terrainRng);
-    terrainSystem.buildAllChunks();
+    terrainSystem.enqueueAllChunks();
 
     // -------------------------------------------------------------------------
     // Phase 9b: wire renderer terrain query AFTER terrain generation.
@@ -180,9 +185,105 @@ int main() {
     uiManager.setMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
 
     // -------------------------------------------------------------------------
+    // Phase 10: start main menu music now that the AudioSystem is ready and all
+    // wiring is complete.  setMusicTrack() queues MUSIC_MAIN_MENU_01 for streaming
+    // via the audio thread; no crossfade is needed because no music is playing yet.
+    // This is the only place in the codebase that initiates main menu music at
+    // application startup. UIManager::transitionToMainMenu() uses the same call
+    // when returning from gameplay.
+    // -------------------------------------------------------------------------
+    audioSystem.setMusicTrack(MUSIC_MAIN_MENU_01);
+
+    // -------------------------------------------------------------------------
+    // Phase 11: keybindings — load from platform config path at startup.
+    // Silently uses defaults if keybindings.json is absent (normal first-run state).
+    // -------------------------------------------------------------------------
+    uiManager.loadKeybindings();
+
+    // -------------------------------------------------------------------------
+    // Phase 11: SaveSystem — auto-save and manual slot management.
+    // Constructed with wallClock for deterministic 120 s auto-save gate.
+    // setSimulation() binds the CitySimulation to the SaveSystem before any
+    // save/load method can be called.
+    // -------------------------------------------------------------------------
+    SaveSystem saveSystem(&wallClock);
+    saveSystem.setSimulation(&citySimulation);
+
+    // Update Main Menu "Load Game" button state (3 states per main-menu-new-game-flow.md):
+    //   enabled         — at least one valid save exists
+    //   grayed+corrupt  — saves exist but are unreadable (schema mismatch, malformed JSON)
+    //   grayed+no-saves — no save files present (first run)
+    {
+        const bool hasData   = saveSystem.hasSaveData();
+        const bool corrupted = hasData && saveSystem.isSaveCorrupted();
+        uiManager.setSaveAvailable(hasData && !corrupted);
+        if (corrupted) {
+            uiManager.setSaveStatusText(
+                "Save data corrupted — check " + saveSystem.getSaveDirectoryPath());
+        } else if (!hasData) {
+            uiManager.setSaveStatusText("No saves found.");
+        } else {
+            uiManager.setSaveStatusText("");  // hide label when saves are available
+        }
+    }
+    uiManager.setSaveSystem(&saveSystem);
+
+    // -------------------------------------------------------------------------
+    // Phase 11: Loading screen loop.
+    // Drains the terrain rebuild deque built by enqueueAllChunks() above.
+    // Runs one flushPendingRebuilds() call per frame (100 ms CPU budget) so that
+    // the UI spinner animates every frame rather than blocking for the full build.
+    //
+    // Frame sequence per architecture/graphics-architecture/irrlicht-device-lifecycle.md:
+    //   syncListenerToCamera → audioSystem.update → uiManager.update →
+    //   terrainSystem.update → flushPendingRebuilds (once) →
+    //   beginFrame → drawScene → endFrame.
+    //
+    // guiEnvironment->drawAll() is intentionally omitted — all loading screen
+    // elements (spinner, progress bar) are rendered via UIManager::draw() using
+    // Irrlicht draw primitives; no Irrlicht GUI environment involvement.
+    // -------------------------------------------------------------------------
+    {
+        double loadPrev = wallClock.nowSeconds();
+        while (device->run() && terrainSystem.pendingRebuildCount() > 0) {
+            const double loadNow = wallClock.nowSeconds();
+            const float  loadDt  = static_cast<float>(loadNow - loadPrev);
+            loadPrev = loadNow;
+
+            CameraState loadCam = cameraController.getCameraState();
+            try {
+                audioSystem.syncListenerToCamera(loadCam);
+                audioSystem.update(loadDt);
+            } catch (const std::exception& e) {
+                fprintf(stderr,
+                        "[main] Audio error during loading (audio disabled): %s\n",
+                        e.what());
+            }
+
+            uiManager.update(loadDt);
+            terrainSystem.update(loadDt);
+            terrainSystem.flushPendingRebuilds();  // once per frame, 100 ms budget
+
+            renderer.beginFrame();
+            renderer.drawScene();
+            renderer.endFrame();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 11: Notify UIManager that all startup wiring is complete.
+    // Seeds m_previousCityRating and m_lastDeficitMonths caches from the loaded
+    // simulation state so the first update() tick does not fire spurious stingers
+    // or deficit warnings.  Must be called before the first UIManager::update().
+    // -------------------------------------------------------------------------
+    uiManager.onGameLoaded();
+
+    // -------------------------------------------------------------------------
     // EventReceiver — translates SEvent → InputEvent, dispatches per input-arbitration.md.
     // -------------------------------------------------------------------------
-    EventReceiver eventReceiver(&uiScaler, &uiManager, &cameraController);
+    // Pass &uiBackend so hover events are forwarded to IrrlichtUIBackend::handleGuiHoverEvent()
+    // for Glass City Colour Pass button sprite swapping (Phase 10c).
+    EventReceiver eventReceiver(&uiScaler, &uiManager, &cameraController, &uiBackend);
     device->setEventReceiver(&eventReceiver);
 
     // =========================================================================
@@ -226,6 +327,11 @@ int main() {
         // MUST execute BEFORE beginFrame() per architecture/ui-ux/ui-manager.md.
         uiManager.update(realDeltaSeconds);
 
+        // Step 3c: SaveSystem::update(realDeltaSeconds) — advance auto-save timer.
+        // MUST execute after UIManager::update() so that the save-requested flag
+        // set by UIManager (from PauseMenuPanel) is consumed before the timer check.
+        saveSystem.update(realDeltaSeconds);
+
         // Check for application quit request (Main Menu Quit / Pause Menu Quit to Desktop).
         if (uiManager.isQuitRequested()) {
             device->closeDevice();
@@ -266,8 +372,18 @@ int main() {
         //   semantics guarantee thread-local context isolation but this MUST be verified at
         //   Phase 7 implementation; cross-reference: architecture/audio-architecture/audio-system.md
         CameraState cameraState = cameraController.getCameraState();
-        audioSystem.syncListenerToCamera(cameraState);
-        audioSystem.update(realDeltaSeconds);
+        try {
+            audioSystem.syncListenerToCamera(cameraState);
+            audioSystem.update(realDeltaSeconds);
+        } catch (const std::exception& e) {
+            // AL backend failure (e.g. broken pipe) — audio degraded to silent.
+            // The m_deviceLost flag in AudioSystem will suppress further AL calls.
+            fprintf(stderr, "[main] Audio error (audio disabled): %s\n", e.what());
+        }
+
+        // Phase 10b: update renderer (cloud plane UV scrolling).
+        // Runs before beginFrame() so the texture matrix is updated before drawAll().
+        renderer.update(realDeltaSeconds);
 
         // Step 5: beginFrame (driver->beginScene).
         renderer.beginFrame();

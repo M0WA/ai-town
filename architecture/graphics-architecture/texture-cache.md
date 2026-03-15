@@ -1,6 +1,16 @@
 # Texture Cache
 
 - `TextureCache` manages **three distinct pools**: **(1) linear-format textures** loaded via `IVideoDriver::getTexture()` (normal maps, roughness — not sRGB, not splat maps); **(2) sRGB diffuse textures** uploaded via the raw OpenGL path (`glGenTextures` / `glCompressedTexImage2D` with sRGB internal format); **(3) splat maps** uploaded via raw OpenGL `glTexImage2D` with `GL_RGBA8` uncompressed format. Methods: `loadLinear(path)`, `loadSRGB(path, format)`, `loadSplatMap(path)`, `releaseLinear(ITexture*)`, `releaseSRGB(filename)`, `releaseSplatMap(filename)`. All three pools respect the LRU eviction budget. **Do not use `IVideoDriver::getTexture()` for sRGB textures or splat maps** — Irrlicht's internal decoder does not produce sRGB or uncompressed RGBA8 GL formats.
+
+  **Critical constraint — `IVideoDriver::getTexture()` cannot load DDS files**: Irrlicht 1.8.5's
+  DDS image loader is disabled by default (`_IRR_COMPILE_WITH_DDS_LOADER_` is commented out in
+  `IrrCompileConfig.h`). `loadLinear()` therefore only accepts formats that Irrlicht's active
+  image loaders support — PNG, JPG, TGA, BMP. There is also a structural bug: `ddsBuffer` in
+  `CImageLoaderDDS.h` has a `void* surface` field (8 bytes on x86\_64 with `#pragma pack(1)`),
+  which shifts `pixelFormat.fourCC` to file offset 88 instead of the correct DDS-spec offset 84,
+  causing DXT1 to be silently misidentified as ARGB8888 on 64-bit systems. **The raw-GL
+  `loadSRGB()` path is NOT affected** — it reads the DDS file with a bespoke header parser and
+  calls `glCompressedTexImage2D` directly, bypassing the Irrlicht image loader entirely.
 - **Linear pool** internal data: `std::unordered_map<std::string, CacheEntry>` where `CacheEntry` = { `ITexture*`, ref_count, last_access_timestamp, estimated_vram_bytes }
 - **Splat map pool** internal data: `std::unordered_map<std::string, SplatEntry>` where `SplatEntry` = { `GLuint texId`, ref_count, last_access_timestamp, estimated_vram_bytes }. Splat maps are uploaded via raw `glTexImage2D(GL_RGBA8)` — NEVER via `glCompressedTexImage2D` (DXT compression corrupts the smooth 0–255 blend weight gradients). `loadSplatMap(path)` performs the upload sequence described in `2d-texture-standards.md` (Splat Map GPU Upload). `evictUnreferenced()` calls `glDeleteTextures(1, &entry.texId)` for zero-reference splat map entries. The EDT_NULL guard applies to the splat map pool identically to the sRGB pool. Splat map VRAM estimation: `width × height × 4` bytes (no ×1.33 overhead — single mip level only, `GL_TEXTURE_MAX_LEVEL = 0`).
 - **sRGB pool** internal data: `std::unordered_map<std::string, SRGBEntry>` where `SRGBEntry` = { `GLuint texId`, ref_count, last_access_timestamp, estimated_vram_bytes }
@@ -48,10 +58,30 @@
 
 The `GL_TEXTURE_MAX_LEVEL` parameter controls how many mip levels the GPU may sample. Irrlicht's `IVideoDriver::getTexture()` does not set this parameter — it must be set explicitly via `glTexParameteri` immediately after the texture object is created. The dispatch key is the texture category, identified by filename suffix or by which `TextureCache` method (`loadSRGB`, `loadLinear`, `loadSplatMap`) is used to load the texture.
 
+**Truncated DDS files — silent black-surface failure in `loadSRGB()`**: `loadSRGB()` reads
+`dwMipMapCount` from the DDS header at byte offset 28 and iterates that many mip levels. If the
+DDS file declares `dwMipMapCount = 4` but only mip level 0 data is present in the byte stream
+(a truncated stub), the parser passes a dangling or zero-length pointer to
+`glCompressedTexImage2D` for mip levels 1–3. The GL driver accepts the call without error and
+uploads a **black surface** for each missing level. Symptoms:
+
+- Black atlas across the city at all distances (mip 0 absent or corrupted).
+- Correct near-range rendering, black surface beyond ~100–400 m (mip 1–3 absent) — the most
+  common symptom when only the base level was written by a buggy generator.
+
+There is no GL error, assertion, or log message for this failure. It must be caught at
+asset-authoring time. After any change to `tools/generate_dds_stubs.py`, regenerate all stubs
+from the repository root (`python3 tools/generate_dds_stubs.py`) and verify file sizes match
+the reference values in `architecture/asset-standards/2d-texture-standards.md`
+§DDS Mip Chain Integrity.
+
+**Internal format derived from DDS FourCC — NOT from path suffix**: `loadSRGB()` derives the sRGB GL internal format from the actual FourCC read from the DDS file header, not from the path suffix. This avoids mismatches when the filename doesn't end in `_d` or `_billboard` (e.g., `road_asphalt_tileable.dds` which is DXT5 but not a billboard). Path suffix is used ONLY for wrap mode (`_billboard` → `GL_CLAMP_TO_EDGE`, others → `GL_REPEAT`). Format mapping: `DXT1 (0x31545844)` → `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`; `DXT5 (0x35545844)` → `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`. Passing the wrong internal format to `glCompressedTexImage2D` (e.g., DXT1 format with DXT5 data) produces silent GL errors and garbled texture output.
+
 | Texture category | Filename suffix | TextureCache method | GL internal format | `GL_TEXTURE_MAX_LEVEL` | Rationale |
 |---|---|---|---|---|---|
-| Diffuse atlas (sRGB DXT1) | `_d` | `loadSRGB()` | `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` | **3** | 4-level mip chain mandatory (CLAUDE.md); building atlas mip chain clamped at 4 levels. |
-| Billboard imposter atlas (sRGB DXT5) | `_billboard` | `loadSRGB()` | `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` | **3** | 4-level mip chain mandatory (billboard imposter spec). |
+| Diffuse atlas (sRGB DXT1) | `_d` | `loadSRGB()` | `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` (from FourCC) | **3** | 4-level mip chain mandatory (CLAUDE.md); building atlas mip chain clamped at 4 levels. |
+| Billboard imposter atlas (sRGB DXT5) | `_billboard` | `loadSRGB()` | `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` (from FourCC) | **3** | 4-level mip chain mandatory (billboard imposter spec). |
+| Road tileable texture (sRGB DXT5) | `_tileable` | `loadSRGB()` | `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` (from FourCC) | **3** | Repeat wrap; road_asphalt_tileable.dds is 1024×1024 DXT5 sRGB with alpha. |
 | Lightmap (linear, baked) | `_lm` | `loadLinear()` (or dedicated `loadLightmap()` if added) | `GL_RGB` / `GL_RGBA` linear | _(driver default)_ | Single mip only; lightmaps are pre-filtered at bake time; hardware mip filtering would corrupt the baked radiance values. `GL_TEXTURE_MAX_LEVEL` cannot be set via `glTexParameteri` through the `IVideoDriver` path — see note below. |
 | Splat map (terrain blend) | `_splat` | `loadSplatMap()` | `GL_RGBA8` uncompressed | **0** | Single mip only; smooth 0–255 blend weight gradients must not be filtered across mip levels (DXT compression and mip-averaging destroy the gradient precision). Documented in Splat map pool section above. |
 | Normal map (linear DXT5nm) | `_n` | `loadLinear()` | `GL_COMPRESSED_RGBA_S3TC_DXT5_EXT` | _(driver default)_ | See note below — `GL_TEXTURE_MAX_LEVEL` cannot be set via `glTexParameteri` through the `IVideoDriver` path. |

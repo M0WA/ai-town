@@ -4,7 +4,7 @@
 // Top-down zone color coding, road network, camera viewport rectangle.
 // Click-to-pan camera, service coverage overlay toggle.
 
-#include "src/ui/minimap.h"
+#include "src/ui/Minimap.h"
 #include "src/platform/input_event.h"
 
 // ---------------------------------------------------------------------------
@@ -21,9 +21,10 @@ Minimap::Minimap(IUIBackend* backend)
     // fillBackground=false by default in addStaticText — invisible without an explicit
     // background color.  Call setElementBackground() immediately after creation to paint
     // the minimap area as a dark near-opaque rectangle so it is always visible even before
-    // zone/road tile data is available.  Color: dark grey, fully opaque (20, 20, 20, 230).
+    // zone/road tile data is available.  Color: dark navy 88% opaque (13, 27, 42, 217).
+    // Phase 10c Glass City Colour Pass: dark navy replaces dark grey.
     m_mapBg = m_backend->addStaticText("", kMapX, kMapY, kMapW, kMapH);
-    m_backend->setElementBackground(m_mapBg, 20, 20, 20, 230);
+    m_backend->setElementBackground(m_mapBg, 13, 27, 42, 217);
 
     // Viewport indicator rectangle — semi-transparent dark overlay, centered at 50,50
     // within the minimap; rendered as a 100x100 filled rect to indicate the camera view.
@@ -35,9 +36,9 @@ Minimap::Minimap(IUIBackend* backend)
     m_toggleBtn = m_backend->addButton("Svc", 1720, 848, 32, 32);
 
     // Legend panel: 80x100 above toggle row, at x:1720, y:732-832.
-    // Dark background so text is readable.
+    // Dark navy background so text is readable. Phase 10c Glass City Colour Pass.
     m_legendPanel = m_backend->addStaticText("", 1720, 732, 80, 100);
-    m_backend->setElementBackground(m_legendPanel, 20, 20, 20, 210);
+    m_backend->setElementBackground(m_legendPanel, 13, 27, 42, 209);
     m_legendLabel = m_backend->addStaticText(
         "Fire: Red\nPolice: Blue\nPower: Yellow\nWater: Cyan",
         1724, 736, 72, 92);

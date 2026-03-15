@@ -1,11 +1,11 @@
 // ogg_header_validation_test.cpp — Phase 7 OGG header validation unit tests.
 //
-// Tests that placeholder OGG assets meet the spec-mandated format requirements
+// Tests that OGG assets meet the spec-mandated format requirements
 // using ov_fopen() and vorbis_info directly (Vorbis::vorbisfile linkage required).
 //
 // Asset format requirements from architecture/audio-architecture/audio-asset-formats.md
 // and architecture/audio-architecture/v1-audio-asset-manifest.md:
-//   - Music stems (music_placeholder.ogg): 44100 Hz, stereo (2 channels)
+//   - Music stems (all 8 production stems): 44100 Hz, stereo (2 channels)
 //   - Ambient bed (ambient_bed_placeholder.ogg): 44100 Hz, stereo (2 channels)
 //   - Zone loop (placeholder_zone_loop.ogg): 44100 Hz, mono (1 channel)
 //   - Vehicle engine SFX (placeholder_vehicle_engine.ogg): 44100 Hz, mono (1 channel)
@@ -49,8 +49,8 @@ static const std::string kAudioAssetDir = "assets/audio/";
     } while (0)
 
 // ---------------------------------------------------------------------------
-// OggHeaderValidationTest fixture — uses StrictMock policy (no mocks needed
-// here since tests use ov_fopen directly; fixture provides TearDown contract).
+// OggHeaderValidationTest fixture — base fixture for non-parameterized tests.
+// Uses TearDown guard to close OggVorbis_File even if an assertion fails midway.
 // ---------------------------------------------------------------------------
 class OggHeaderValidationTest : public ::testing::Test {
 protected:
@@ -62,18 +62,12 @@ protected:
     }
 
     void TearDown() override {
-        // Destructor-path contract: always close the OGG file if opened.
-        // This prevents resource leaks even if a test assertion fails midway.
-        // ov_clear() is safe to call on a zero-initialized OggVorbis_File
-        // only if it was successfully opened via ov_fopen. Guard with m_vfOpen.
         if (m_vfOpen) {
             ov_clear(&m_vf);
             m_vfOpen = false;
         }
     }
 
-    // Open an OGG file into m_vf and set m_vfOpen = true on success.
-    // Returns the ov_fopen return code (0 = success).
     int openOgg(const std::string& filename) {
         std::string path = kAudioAssetDir + filename;
         int ret = ov_fopen(path.c_str(), &m_vf);
@@ -83,70 +77,103 @@ protected:
         return ret;
     }
 
-    // Returns vorbis_info for stream 0 (the primary logical bitstream).
-    // Must be called only after a successful openOgg().
     const vorbis_info* getInfo() const {
         return ov_info(const_cast<OggVorbis_File*>(&m_vf), -1);
     }
 };
 
 // ---------------------------------------------------------------------------
-// Test A: music_placeholder.ogg opens successfully via ov_fopen
+// MusicStemHeaderTest — parameterized fixture covering all 8 production stems.
 //
-// Verifies ov_fopen() returns 0 (success) for the music stem placeholder.
-// Failure indicates the file is missing (run sound-artist-opensoftal first)
-// or is corrupt (re-generate from spec).
+// Each stem must be:
+//   - openable via ov_fopen (valid OGG Vorbis, not corrupt/missing)
+//   - stereo (2 channels) — mono would silently corrupt bar-boundary calculations
+//   - 44100 Hz — any other sample rate is a hard asset error per the manifest
+//
+// v1-audio-asset-manifest.md: "44100 Hz, 16-bit stereo — authoring at any other
+// sample rate is a hard asset error"; exact duration locked per stem.
 // ---------------------------------------------------------------------------
-TEST_F(OggHeaderValidationTest, OggHeader_MusicPlaceholder_OpensSuccessfully) {
-    int ret = openOgg("music_placeholder.ogg");
-    if (ret != 0) {
-        GTEST_SKIP() << "music_placeholder.ogg not found — "
-                        "run sound-artist-opensoftal Phase 7 task first";
+class MusicStemHeaderTest : public ::testing::TestWithParam<std::string> {
+protected:
+    OggVorbis_File m_vf;
+    bool           m_vfOpen{false};
+
+    void SetUp() override {
+        std::memset(&m_vf, 0, sizeof(m_vf));
     }
-    EXPECT_EQ(ret, 0) << "ov_fopen must return 0 (success) for music_placeholder.ogg";
+
+    void TearDown() override {
+        if (m_vfOpen) {
+            ov_clear(&m_vf);
+            m_vfOpen = false;
+        }
+    }
+
+    int openOgg(const std::string& filename) {
+        std::string path = kAudioAssetDir + filename;
+        int ret = ov_fopen(path.c_str(), &m_vf);
+        if (ret == 0) {
+            m_vfOpen = true;
+        }
+        return ret;
+    }
+
+    const vorbis_info* getInfo() const {
+        return ov_info(const_cast<OggVorbis_File*>(&m_vf), -1);
+    }
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    ProductionStems,
+    MusicStemHeaderTest,
+    ::testing::Values(
+        "music_main_menu_01.ogg",
+        "music_main_menu_02.ogg",
+        "music_calm_01.ogg",
+        "music_calm_02.ogg",
+        "music_growth_01.ogg",
+        "music_growth_02.ogg",
+        "music_crisis_01.ogg",
+        "music_crisis_02.ogg"
+    )
+);
+
+// Test A (parameterized): each stem opens successfully via ov_fopen.
+TEST_P(MusicStemHeaderTest, OpensSuccessfully) {
+    const std::string& stem = GetParam();
+    int ret = openOgg(stem);
+    if (ret != 0) {
+        GTEST_SKIP() << stem << " not found or failed to open (ov_fopen=" << ret << ")";
+    }
+    EXPECT_EQ(ret, 0) << "ov_fopen must return 0 for " << stem;
     EXPECT_TRUE(m_vfOpen);
 }
 
-// ---------------------------------------------------------------------------
-// Test B: music_placeholder.ogg is stereo (2 channels)
-//
-// Music stems must be stereo per architecture/audio-architecture/audio-asset-formats.md:
-//   "Music stems must be 44100 Hz stereo — throw std::runtime_error on mismatch"
-// Verified via vorbis_info::channels.
-// ---------------------------------------------------------------------------
-TEST_F(OggHeaderValidationTest, OggHeader_MusicPlaceholder_IsStereo) {
-    int ret = openOgg("music_placeholder.ogg");
+// Test B (parameterized): each stem is stereo (2 channels).
+TEST_P(MusicStemHeaderTest, IsStereo) {
+    const std::string& stem = GetParam();
+    int ret = openOgg(stem);
     if (ret != 0) {
-        GTEST_SKIP() << "music_placeholder.ogg not found — "
-                        "run sound-artist-opensoftal Phase 7 task first";
+        GTEST_SKIP() << stem << " not found — skipping format check";
     }
-
     const vorbis_info* info = getInfo();
-    ASSERT_NE(info, nullptr) << "ov_info must return valid vorbis_info for music_placeholder.ogg";
+    ASSERT_NE(info, nullptr) << "ov_info must return valid vorbis_info for " << stem;
     EXPECT_EQ(info->channels, 2)
-        << "music_placeholder.ogg must be stereo (2 channels); "
-           "got " << info->channels << " channel(s). "
+        << stem << " must be stereo (2 channels); got " << info->channels << " channel(s). "
            "Mono music files would silently corrupt m_samplesQueued bar-boundary calculations.";
 }
 
-// ---------------------------------------------------------------------------
-// Test C: music_placeholder.ogg is 44100 Hz
-//
-// Verified via vorbis_info::rate.
-// A mismatch would silently corrupt bar-boundary calculations in m_samplesQueued.
-// ---------------------------------------------------------------------------
-TEST_F(OggHeaderValidationTest, OggHeader_MusicPlaceholder_Is44100Hz) {
-    int ret = openOgg("music_placeholder.ogg");
+// Test C (parameterized): each stem is 44100 Hz.
+TEST_P(MusicStemHeaderTest, Is44100Hz) {
+    const std::string& stem = GetParam();
+    int ret = openOgg(stem);
     if (ret != 0) {
-        GTEST_SKIP() << "music_placeholder.ogg not found — "
-                        "run sound-artist-opensoftal Phase 7 task first";
+        GTEST_SKIP() << stem << " not found — skipping format check";
     }
-
     const vorbis_info* info = getInfo();
-    ASSERT_NE(info, nullptr) << "ov_info must return valid vorbis_info for music_placeholder.ogg";
+    ASSERT_NE(info, nullptr) << "ov_info must return valid vorbis_info for " << stem;
     EXPECT_EQ(info->rate, 44100L)
-        << "music_placeholder.ogg must be 44100 Hz; "
-           "got " << info->rate << " Hz. "
+        << stem << " must be 44100 Hz; got " << info->rate << " Hz. "
            "Mismatched sample rate would corrupt kSamplesPerBuffer bar-boundary calculations.";
 }
 

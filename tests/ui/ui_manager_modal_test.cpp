@@ -21,10 +21,10 @@
 #include "src/ui/ui_types.h"
 #include "src/interfaces/LoanTerms.h"
 #include "src/platform/input_event.h"
-#include "tests/ui/mock_ui_backend.h"
-#include "tests/ui/mock_city_simulation.h"
-#include "tests/simulation/mock_audio_system.h"
-#include "tests/simulation/manual_clock.h"
+#include "tests/ui/MockUIBackend.h"
+#include "tests/ui/MockCitySimulation.h"
+#include "tests/simulation/MockAudioSystem.h"
+#include "tests/simulation/ManualClock.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>
@@ -311,7 +311,14 @@ TEST_F(UIManagerTransitionTest, OnEvent_MouseMove_NoModal_NoCriticalToast_Return
 }
 
 // ============================================================================
-// NotificationManagerTest — covers NotificationManager's Phase 3 stub bodies.
+// NotificationManagerStandaloneTest — covers NotificationManager's Phase 3
+// smoke-test bodies (no-crash, basic state checks).
+//
+// Renamed from NotificationManagerTest (which was defined in both this file
+// and notification_system_test.cpp) to prevent an ODR violation: when two
+// translation units define the same class name in a test binary, the linker
+// picks one SetUp() definition as the weak-symbol winner, silently discarding
+// the other fixture's ON_CALL configuration and breaking unrelated tests.
 //
 // NotificationManager is constructed internally by UIManager; to test it
 // directly we construct it standalone with the mocks.
@@ -319,10 +326,13 @@ TEST_F(UIManagerTransitionTest, OnEvent_MouseMove_NoModal_NoCriticalToast_Return
 #include "src/ui/NotificationManager.h"
 #include "src/platform/input_event.h"
 
-class NotificationManagerTest : public ::testing::Test {
+class NotificationManagerStandaloneTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        notif_ = std::make_unique<NotificationManager>(&backend_, &sim_, &clock_);
+        // Phase 10: pass NiceMock<MockAudioSystem>* as 4th parameter.
+        // Tests in this fixture do not assert on audio calls; NiceMock suppresses
+        // unexpected-call failures when postCritical/postNormal fire ui_toast SFX.
+        notif_ = std::make_unique<NotificationManager>(&backend_, &sim_, &clock_, &audio_);
     }
 
     void TearDown() override {
@@ -331,6 +341,7 @@ protected:
 
     NiceMock<MockUIBackend>      backend_;
     NiceMock<MockCitySimulation> sim_;
+    NiceMock<MockAudioSystem>    audio_;
     ManualClock                  clock_;
     std::unique_ptr<NotificationManager> notif_;
 };
@@ -338,21 +349,21 @@ protected:
 // ---------------------------------------------------------------------------
 // postNormal — Phase 3 stub; must not crash.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, PostNormal_NoCrash) {
+TEST_F(NotificationManagerStandaloneTest, PostNormal_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->postNormal("Title", "Body text"));
 }
 
 // ---------------------------------------------------------------------------
 // postCritical — Phase 3 stub; must not crash.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, PostCritical_NoCrash) {
+TEST_F(NotificationManagerStandaloneTest, PostCritical_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->postCritical("Critical Title", "Critical body"));
 }
 
 // ---------------------------------------------------------------------------
 // hasCriticalToastVisible — Phase 3 stub always returns false.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, HasCriticalToastVisible_ReturnsFalse_InPhase3) {
+TEST_F(NotificationManagerStandaloneTest, HasCriticalToastVisible_ReturnsFalse_InPhase3) {
     EXPECT_FALSE(notif_->hasCriticalToastVisible())
         << "Phase 3 stub: hasCriticalToastVisible() must return false";
 }
@@ -360,7 +371,7 @@ TEST_F(NotificationManagerTest, HasCriticalToastVisible_ReturnsFalse_InPhase3) {
 // ---------------------------------------------------------------------------
 // hasCriticalToastVisible — true after postCritical (Phase 8 real implementation).
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, HasCriticalToastVisible_TrueAfterPostCritical) {
+TEST_F(NotificationManagerStandaloneTest, HasCriticalToastVisible_TrueAfterPostCritical) {
     notif_->postCritical("Alert", "Something bad happened");
     EXPECT_TRUE(notif_->hasCriticalToastVisible())
         << "Phase 8: hasCriticalToastVisible() must return true after postCritical";
@@ -369,14 +380,14 @@ TEST_F(NotificationManagerTest, HasCriticalToastVisible_TrueAfterPostCritical) {
 // ---------------------------------------------------------------------------
 // update — Phase 3 stub; must not crash.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, Update_NoCrash) {
+TEST_F(NotificationManagerStandaloneTest, Update_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->update());
 }
 
 // ---------------------------------------------------------------------------
 // onEvent — Phase 3 stub always returns false (event not consumed).
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, OnEvent_ReturnsFalse) {
+TEST_F(NotificationManagerStandaloneTest, OnEvent_ReturnsFalse) {
     InputEvent ev{};
     ev.type = InputEvent::Type::MouseButtonDown;
     ev.button = 0;
@@ -388,7 +399,7 @@ TEST_F(NotificationManagerTest, OnEvent_ReturnsFalse) {
 // setModalActive — sets the m_modalActive flag; no crash.
 // Phase 3: the flag is private, but the method body sets it without dereferences.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, SetModalActive_NoCrash) {
+TEST_F(NotificationManagerStandaloneTest, SetModalActive_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->setModalActive(true));
     EXPECT_NO_FATAL_FAILURE(notif_->setModalActive(false));
 }
@@ -396,7 +407,7 @@ TEST_F(NotificationManagerTest, SetModalActive_NoCrash) {
 // ---------------------------------------------------------------------------
 // dismissCriticalToast — Phase 3 stub; must not crash.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, DismissCriticalToast_NoCrash) {
+TEST_F(NotificationManagerStandaloneTest, DismissCriticalToast_NoCrash) {
     constexpr UIElementHandle kSomeHandle = 0x0001u;
     EXPECT_NO_FATAL_FAILURE(notif_->dismissCriticalToast(kSomeHandle));
 }
@@ -404,7 +415,7 @@ TEST_F(NotificationManagerTest, DismissCriticalToast_NoCrash) {
 // ---------------------------------------------------------------------------
 // draw — calls m_backend->setElementVisible(); must not crash with NiceMock.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerTest, Draw_NoCrash) {
+TEST_F(NotificationManagerStandaloneTest, Draw_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->draw());
 }
 
@@ -412,7 +423,7 @@ TEST_F(NotificationManagerTest, Draw_NoCrash) {
 // MainMenuPanelStandaloneTest — covers MainMenuPanel construction, screen
 // transitions, draw, and keyboard/mouse input handling.
 // ============================================================================
-#include "src/ui/main_menu_panel.h"
+#include "src/ui/MainMenuPanel.h"
 
 using ::testing::_;
 using ::testing::HasSubstr;
@@ -718,11 +729,12 @@ TEST_F(MainMenuPanelStandaloneTest, Draw_WhenHidden_NoCrash) {
 // --- MainMenuPanel loading screen coverage ---
 // Handle assignment: nextHandle_ starts at 300, prefix ++ gives:
 //   301=titleLabel, 302=btnNewGame, 303=btnLoadGame, 304=btnSettings, 305=btnQuit,
-//   306=ngTitle, 307=ngModeLabel, 308=ngBtnSandbox, 309=ngBtnScenario,
-//   310=ngDiffLabel, 311=ngBtnEasy, 312=ngBtnNormal, 313=ngBtnHard,
-//   314=ngSeedLabel, 315=ngSeedInput, 316=ngBtnRandomize,
-//   317=ngBtnStartCity, 318=ngBtnBack, 319=ngErrorLabel,
-//   320=loadingLabel, 321=loadingProgress, 322=loadingCancelBtn.
+//   306=loadStatusLabel,
+//   307=ngTitle, 308=ngModeLabel, 309=ngBtnSandbox, 310=ngBtnScenario,
+//   311=ngDiffLabel, 312=ngBtnEasy, 313=ngBtnNormal, 314=ngBtnHard,
+//   315=ngSeedLabel, 316=ngSeedInput, 317=ngBtnRandomize,
+//   318=ngBtnStartCity, 319=ngBtnBack, 320=ngErrorLabel,
+//   321=loadingLabel, 322=loadingProgress, 323=loadingCancelBtn.
 
 // Click on "Start City" navigates from NewGame to Loading screen.
 TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickStartCity_NavigatesToLoading) {
@@ -732,8 +744,8 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickStartCity_NavigatesToLoading) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    // Set only m_ngBtnStartCity (handle 317) rect; others default to (0,0,0,0).
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{780, 480, 360, 48}));
+    // Set only m_ngBtnStartCity (handle 318) rect; others default to (0,0,0,0).
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 480, 360, 48}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -755,7 +767,7 @@ TEST_F(MainMenuPanelStandaloneTest, Loading_EscapeToNewGame) {
     enter.keyCode = 13;
     panel_->onEvent(enter); // MainMenu -> NewGame
 
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{780, 480, 360, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 480, 360, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -779,7 +791,7 @@ TEST_F(MainMenuPanelStandaloneTest, Loading_CancelButtonClick) {
     enter.keyCode = 13;
     panel_->onEvent(enter); // MainMenu -> NewGame
 
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{780, 480, 360, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 480, 360, 48}));
     InputEvent startClick;
     startClick.type = InputEvent::Type::MouseButtonDown;
     startClick.button = 0;
@@ -787,9 +799,9 @@ TEST_F(MainMenuPanelStandaloneTest, Loading_CancelButtonClick) {
     startClick.y = 490;
     panel_->onEvent(startClick); // NewGame -> Loading
 
-    // Reset rects, then set only m_loadingCancelBtn (handle 322).
+    // Reset rects, then set only m_loadingCancelBtn (handle 323).
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(322)).WillByDefault(Return(Rect{900, 570, 120, 36}));
+    ON_CALL(backend_, getElementRect(323)).WillByDefault(Return(Rect{900, 570, 120, 36}));
 
     InputEvent cancelClick;
     cancelClick.type = InputEvent::Type::MouseButtonDown;
@@ -836,7 +848,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickNormalDifficulty) {
     panel_->onEvent(enter); // MainMenu -> NewGame
 
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(312)).WillByDefault(Return(Rect{1000, 300, 120, 32}));
+    ON_CALL(backend_, getElementRect(313)).WillByDefault(Return(Rect{1000, 300, 120, 32}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -855,7 +867,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickHardDifficulty) {
     panel_->onEvent(enter);
 
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(313)).WillByDefault(Return(Rect{780, 340, 120, 32}));
+    ON_CALL(backend_, getElementRect(314)).WillByDefault(Return(Rect{780, 340, 120, 32}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -874,7 +886,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickBack) {
     panel_->onEvent(enter);
 
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 530, 120, 36}));
+    ON_CALL(backend_, getElementRect(319)).WillByDefault(Return(Rect{780, 530, 120, 36}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -893,7 +905,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickRandomize) {
     panel_->onEvent(enter);
 
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(316)).WillByDefault(Return(Rect{1060, 280, 100, 32}));
+    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{1060, 280, 100, 32}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -908,8 +920,8 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickRandomize) {
 // PauseMenuPanelStandaloneTest — covers PauseMenuPanel construction, show/hide,
 // draw focus visuals, keyboard navigation, and mouse click handling.
 // ============================================================================
-#include "src/ui/pause_menu_panel.h"
-#include "src/ui/settings_panel.h"
+#include "src/ui/PauseMenuPanel.h"
+#include "src/ui/SettingsPanel.h"
 
 class PauseMenuPanelStandaloneTest : public ::testing::Test {
 protected:
@@ -1162,7 +1174,7 @@ TEST_F(PauseMenuPanelStandaloneTest, AllEventsConsumed_WhenVisible) {
 // MinimapStandaloneTest — covers Minimap construction, show/hide, draw,
 // getBounds, toggleOverlay, and onEvent handling.
 // ============================================================================
-#include "src/ui/minimap.h"
+#include "src/ui/Minimap.h"
 
 class MinimapStandaloneTest : public ::testing::Test {
 protected:
@@ -1992,13 +2004,14 @@ TEST_F(MainMenuPanelStandaloneTest, ConsumeStartGameRequest_TrueOnce) {
     panel_->onEvent(enter);
 
     // On NewGame screen, click Start City button via mouse.
-    // Handle 317 = m_ngBtnStartCity (count constructor calls from nextHandle_=300):
-    //   301=titleLabel, 302=NewGame, 303=LoadGame, 304=Settings, 305=Quit,
-    //   306=ngTitle, 307=ngModeLabel, 308=ngBtnSandbox, 309=ngBtnScenario,
-    //   310=ngDiffLabel, 311=ngBtnEasy, 312=ngBtnNormal, 313=ngBtnHard,
-    //   314=ngSeedLabel, 315=ngSeedInput, 316=ngBtnRandomize,
-    //   317=ngBtnStartCity, 318=ngBtnBack.
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    // Handle 318 = m_ngBtnStartCity (count constructor calls from nextHandle_=300):
+    //   301=titleLabel, 302=btnNewGame, 303=btnLoadGame, 304=btnSettings, 305=btnQuit,
+    //   306=loadStatusLabel,
+    //   307=ngTitle, 308=ngModeLabel, 309=ngBtnSandbox, 310=ngBtnScenario,
+    //   311=ngDiffLabel, 312=ngBtnEasy, 313=ngBtnNormal, 314=ngBtnHard,
+    //   315=ngSeedLabel, 316=ngSeedInput, 317=ngBtnRandomize,
+    //   318=ngBtnStartCity, 319=ngBtnBack.
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2200,8 +2213,8 @@ TEST_F(MainMenuPanelStandaloneTest, ShowLoadingScreen_ViaStartCityClick) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    // Click Start City (handle 317) to trigger showLoadingScreen.
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    // Click Start City (handle 318) to trigger showLoadingScreen.
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2226,7 +2239,7 @@ TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_Escape_BackToNewGame) {
     panel_->onEvent(enter);
 
     // Click Start City to enter loading screen.
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2253,7 +2266,7 @@ TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_Escape_AfterCheckpoint_Ignored
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2283,7 +2296,7 @@ TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_CancelClick_BackToNewGame) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2291,8 +2304,8 @@ TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_CancelClick_BackToNewGame) {
     click.y = 510;
     panel_->onEvent(click);
 
-    // Click the Cancel button (handle 322 = m_loadingCancelBtn).
-    ON_CALL(backend_, getElementRect(322)).WillByDefault(Return(Rect{860, 570, 120, 36}));
+    // Click the Cancel button (handle 323 = m_loadingCancelBtn).
+    ON_CALL(backend_, getElementRect(323)).WillByDefault(Return(Rect{860, 570, 120, 36}));
     InputEvent cancelClick;
     cancelClick.type = InputEvent::Type::MouseButtonDown;
     cancelClick.button = 0;
@@ -2456,8 +2469,8 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickBack_MouseReturnsToMainMenu) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    // Handle 318 = m_ngBtnBack
-    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 560, 120, 36}));
+    // Handle 319 = m_ngBtnBack
+    ON_CALL(backend_, getElementRect(319)).WillByDefault(Return(Rect{780, 560, 120, 36}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2477,8 +2490,8 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickRandomize_Consumed) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    // Handle 316 = m_ngBtnRandomize
-    ON_CALL(backend_, getElementRect(316)).WillByDefault(Return(Rect{1080, 420, 100, 32}));
+    // Handle 317 = m_ngBtnRandomize
+    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{1080, 420, 100, 32}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;

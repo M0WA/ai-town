@@ -117,6 +117,11 @@ public:
     // Events queued: ForcedLoanIssued, BondIssued, ServiceDegraded, BudgetDeficitWarn.
     virtual bool pollPendingNotification(SimulationNotification& out) = 0;
 
+    // consumeBudgetTicks — returns the number of budget ticks that fired since the last call
+    // and resets the internal counter to zero.  Called once per frame by UIManager to forward
+    // tick counts to SaveSystem::onBudgetTick() for the 5-tick auto-save gate.
+    virtual int consumeBudgetTicks() = 0;
+
     // --- Tax rate (Phase 6 delivery) ---
     // setTaxRate: bounds enforced at [0.01, 0.25] (1%–25%); invalid values clamped silently.
     // getTaxRate: returns current rate for the given zone type.

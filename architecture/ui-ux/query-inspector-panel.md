@@ -65,6 +65,22 @@ non-overlapping) to keep existing placement assertions valid.
   - Zone tile: demand score, desirability score, tax yield/month, zone type + density, demand pressure % (unmet demand percentage per zone type from the `demand_pressure_pct` field of `QueryResult`)
   - Road segment: current occupancy %, current speed, capacity, congestion status
   - Service building: coverage radius, current upkeep, service level %
+- **Road tile detection via `QueryResult::isRoad`**: `ICitySimulation::queryTile()` sets
+  `QueryResult::isRoad = true` for road tiles (`TileData::isRoad == true`). Road tiles have
+  `isZoned = false`, so without the explicit `isRoad` check they would fall through to the
+  "Unzoned" branch. The display priority is:
+
+  ```text
+  if result.isZoned  → show zone/density/population/coverage data
+  else if result.isRoad → show "Road" label; traffic data fields populated in future phase
+  else               → show "Unzoned"
+  ```
+
+  `QueryResult::isRoad` is declared in `src/interfaces/simulation_types.h` as `bool isRoad{false}`.
+  `queryTile()` returns early after setting `isRoad = true` — no zone/population data is filled for
+  road tiles. This is the V1 implementation; full road traffic fields (occupancy, speed, capacity,
+  congestion) are deferred until the traffic system simulation phase.
+
 - **Mutual exclusion with Tax Rate Panel**: QueryPanel and Tax Rate Panel must NOT be simultaneously open. Opening the QueryPanel closes the Tax Rate Panel if it is open. See `input-arbitration.md` Priority 3 for the authoritative mutual exclusion rule.
 - Panel populated by a `QueryResult` data struct passed from the simulation layer to `UIManager`
 - **Data refresh policy**: The QueryPanel refreshes its displayed data at different rates by data category to balance accuracy with performance:
@@ -72,4 +88,24 @@ non-overlapping) to keep existing placement assertions valid.
   - **Traffic data** (road occupancy %, current speed, congestion status): refreshed every **10 simulation frames** (approximately every 167 ms at 60 FPS) — traffic state changes frequently enough that per-budget-tick updates would be stale, but per-frame updates are unnecessary. Implemented as `kTrafficRefreshFrames = 10` draw frames.
   - **Service data** (coverage radius, upkeep, service level %): refreshed once per budget tick (coverage changes only on build/demolish or budget deficit events). Uses the same `kEconomyRefreshFrames = 120` frame proxy as economy data.
   - A small "Updated N seconds ago" line is displayed at the bottom of the panel showing the age of the most recently refreshed data category. If all categories are current within 1 s, this line is hidden. **Implementation note**: staleness is detected by comparing draw-frame counts using `kStalenessFrames = 60` (≈1 s at 60 FPS); the label is rendered via a `m_updatedLabel` `UIElementHandle`.
+
+## Visual Design — Glass City
+
+The inspector panel uses the Glass City panel style:
+
+- **Background**: `rgba(13, 27, 42, 0.85)` deep navy, 8 px corner radius on all edges
+- **Panel title / field labels**: `#EBF4F6` near-white for primary labels; `#4A7FA5` mid-blue
+  for field-name sub-labels
+- **Numeric values** (demand score, desirability score, tax yield, demand pressure %, road
+  occupancy %, speed, capacity, coverage radius, upkeep, service level %):
+  `#F0B429` warm amber monospace font via `setElementMonoFont(handle)`
+- **Error / unavailable**: `#F04E37` red for fields that report a deficiency (e.g. service
+  level 0%)
+- **"Updated N seconds ago" staleness label**: `#4A7FA5` mid-blue (secondary label)
+- **Focus / hover border on panel close affordance**: 2 px teal `rgba(0, 201, 200, 0.75)`
+
+The `isRoad` and `isZoned` display-priority paths use the same label colours: the
+"Road", "Unzoned", zone-type, and density tier strings are near-white `#EBF4F6`; their
+corresponding data values are amber `#F0B429`.
+
 - **Dismissed** by pressing I again, clicking elsewhere, or pressing **Escape**. The Escape key is **consumed by the QueryPanel** when the panel is open — it closes the QueryPanel and does NOT trigger the Pause Menu. This is enforced by the input arbitration priority order (see Input Arbitration spec). If the QueryPanel is closed, Escape passes through to `UIManager` which opens the Pause Menu. **Escape feedback** (prevents "why didn't the game pause?" confusion): When Escape closes the QueryPanel, display a brief Normal-queue toast (1.5 s, auto-dismiss, non-blocking): "Panel closed — press Escape again to open Pause Menu." This communicates to the player that their first Escape press was consumed by the panel and the simulation is still running. The toast must not appear if the player was already at speed=0 (paused) when they pressed Escape — in that case no "will not pause" feedback is needed since the simulation is already stopped. **The Escape-feedback toast is a passive display element — it must NOT intercept or consume any input events.** If the player presses Escape while the toast is still visible (within the 1.5 s display window), that Escape event passes through the toast to `UIManager` and opens the Pause Menu normally. The toast has no input priority in the arbitration chain; it is rendered on-screen but takes no ownership of events. Failing to enforce this produces a bug where the player tries to pause after the QueryPanel closes but the toast "absorbs" their Escape press and nothing happens.

@@ -132,9 +132,9 @@ tests/
 | `opengl_tests` | PROHIBITED — inline `add_executable` only | Prevents ctest discovery timing issues from deferred source registration |
 | `ui_tests` | PROHIBITED for Phase 3 (Test-C1); PERMITTED thereafter via `target_sources(ui_tests PRIVATE ...)` | Phase 3 requires consolidated 5-file `add_executable` committed as a single amendment; Phase 4+ additions MUST use `target_sources(ui_tests PRIVATE ...)` — never modify the root CMakeLists.txt |
 | `simulation_tests` | PERMITTED — inline listing preferred | |
-| `audio_tests` | PERMITTED — inline listing preferred | Phase 0 creates target with `audio_smoke_test.cpp` inline; Phase 7 MUST extend via `target_sources(audio_tests PRIVATE ...)` — do NOT re-call `add_executable(audio_tests ...)` (duplicate target causes CMake configure error). Phase 7 adds 4 source files: `duck_state_machine_test.cpp`, `occlusion_smoothing_test.cpp`, `audio_thread_test.cpp`, `ogg_header_validation_test.cpp`. |
+| `audio_tests` | PERMITTED — inline listing preferred | Phase 0 creates target with `audio_smoke_test.cpp` inline; Phase 7 MUST extend via `target_sources(audio_tests PRIVATE ...)` — do NOT re-call `add_executable(audio_tests ...)` (duplicate target causes CMake configure error). Phase 7 adds 4 source files: `duck_state_machine_test.cpp`, `occlusion_smoothing_test.cpp`, `audio_thread_test.cpp`, `ogg_header_validation_test.cpp`. Phase 10 further extends via `target_sources(audio_tests PRIVATE ...)` with 4 additional source files: `crossfade_interrupted_formula_test.cpp`, `stinger_milestone_test.cpp`, `audio_stream_bar_boundary_test.cpp`, `notification_sfx_efx_bypass_test.cpp` — do NOT re-call `add_executable(audio_tests ...)` or `aitown_add_tests(audio_tests ...)` (duplicate target). |
 | `terrain_tests` | PERMITTED — inline listing preferred | |
-| `integration_tests` | PERMITTED — inline listing preferred | |
+| `integration_tests` | PERMITTED — inline listing preferred; Phase 10c onward MUST use `target_sources(integration_tests PRIVATE ...)` — do NOT re-call `add_executable(integration_tests ...)` (duplicate target causes CMake configure error) | |
 
 ```cmake
 # Example CMakeLists.txt registration:
@@ -171,7 +171,9 @@ add_executable(terrain_tests tests/terrain/terrain_generator_test.cpp ...)
 # editing CMakeLists.txt.
 target_link_libraries(terrain_tests PRIVATE aitown_terrain GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
 target_include_directories(terrain_tests PRIVATE
-    tests/simulation/ tests/terrain/ src/terrain/ ${CMAKE_SOURCE_DIR})
+    tests/simulation/ tests/terrain/ src/terrain/ src/rendering/ src/interfaces/ ${CMAKE_SOURCE_DIR})
+# Phase 10b: after ITerrainRNG.h moves to src/interfaces/ (Feature 3), src/terrain/ may be
+# dropped from this list — verify terrain_tests still builds cleanly after the removal.
 aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
 # Phase 3 prerequisite: `terrain_stub.cpp` references `#include "src/terrain/terrain_chunk.h"`.
 # This header does not exist as a full implementation until Phase 5. Phase 3 MUST create a
@@ -231,6 +233,8 @@ add_executable(opengl_tests
     tests/rendering/shader_stub_compile_test.cpp
     # tests/rendering/lod_swap_smoke_test.cpp  -- added in Phase 2 with GTEST_SKIP() body;
     #                                             promoted to real OpenGL test in Phase 5
+    # tests/rendering/cloud_plane_test.cpp   -- added INLINE here in Phase 10b;
+    #                                           target_sources() PROHIBITED for opengl_tests
 )
 target_link_libraries(opengl_tests PRIVATE aitown_render GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
 # src/rendering/ required for Phase 5 lod_swap_smoke_test.cpp (full body) which needs scene-graph and mesh buffer headers.

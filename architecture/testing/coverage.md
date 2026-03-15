@@ -29,6 +29,8 @@ lcov --remove coverage.info \
   '*/tests/*' \
   '*/mock_*.h' '*/mock_*.cpp' \
   '*/manual_*.h' '*/manual_*.cpp' \
+  '*/Mock*.h' '*/Mock*.cpp' \
+  '*/Manual*.h' '*/Manual*.cpp' \
   '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
   --output-file coverage_filtered.info
 # List files and line-coverage summary for debugging gate failures.
@@ -83,8 +85,8 @@ awk -v pct="$total" 'BEGIN {
 This step replaces the current `lcov --summary coverage_filtered.info` informational step.
 Do NOT use `lcov --fail-under-percent` — it does not exist in lcov 2.0 (ubuntu-latest).
 
-**Mock exclusion patterns**: `'*/mock_*.h'` and `'*/mock_*.cpp'` are required exclusions even though mock files live under `tests/` (which is already excluded). Template instantiations of `StrictMock<MockAudioSystem>` and similar types may produce coverage data attributed to the mock header paths (`tests/*/mock_*.h`) rather than the test `.cpp` file — the mock exclusion patterns ensure these do not contribute to the gate even if the `*/tests/*` glob misses them due to path normalization differences.
-**Manual test double exclusion patterns**: `'*/manual_*.h'` and `'*/manual_*.cpp'` must be added alongside the mock exclusion patterns. `ManualRNG` (`tests/simulation/manual_rng.h`), `ManualClock` (`tests/simulation/manual_clock.h`), and similar hand-written test doubles follow the `manual_` naming convention and must be excluded from the coverage gate for the same reason as mocks — gcov may attribute their template/inline method coverage to the header file path rather than the calling test `.cpp`. Without this exclusion, manual test doubles can appear as partially-uncovered files and incorrectly lower the gate percentage. Both `mock_*` and `manual_*` patterns must appear in every lcov `--remove` invocation: in `coverage.md` (local developer script), in the `coverage-linux` CI job YAML, and in the `CLAUDE.md` coverage command reference.
+**Mock exclusion patterns**: `'*/mock_*.h'` and `'*/mock_*.cpp'` are required exclusions even though mock files live under `tests/` (which is already excluded). Template instantiations of `StrictMock<MockAudioSystem>` and similar types may produce coverage data attributed to the mock header paths (`tests/*/mock_*.h`) rather than the test `.cpp` file — the mock exclusion patterns ensure these do not contribute to the gate even if the `*/tests/*` glob misses them due to path normalization differences. **Phase 10b renames all test-helper class headers to CamelCase** (`MockAudioSystem.h`, `MockRenderer.h`, `ManualClock.h`, etc.) — the lowercase `mock_*` and `manual_*` globs will not match CamelCase filenames on Linux (case-sensitive). CamelCase variants `'*/Mock*.h'`, `'*/Mock*.cpp'`, `'*/Manual*.h'`, `'*/Manual*.cpp'` MUST be added alongside the lowercase patterns in Phase 10b Feature 3.
+**Manual test double exclusion patterns**: `'*/manual_*.h'` and `'*/manual_*.cpp'` must be added alongside the mock exclusion patterns (and their CamelCase counterparts after Phase 10b). `ManualRNG`, `ManualClock`, and similar hand-written test doubles must be excluded from the coverage gate for the same reason as mocks — gcov may attribute their template/inline method coverage to the header file path rather than the calling test `.cpp`. Without this exclusion, manual test doubles can appear as partially-uncovered files and incorrectly lower the gate percentage. All four prefix patterns (`mock_*`, `manual_*`, `Mock*`, `Manual*`) must appear in every lcov `--remove` invocation: in `coverage.md` (local developer script), in the `coverage-linux` CI job YAML, and in the `CLAUDE.md` coverage command reference.
 
 - **Do NOT use `${BUILD_DIR}/_deps/*`** when `FETCHCONTENT_BASE_DIR` is set outside the build tree. With `FETCHCONTENT_BASE_DIR=.fetchcontent_cache`, FetchContent writes to `.fetchcontent_cache/` not `build/_deps/`, so that glob matches nothing. Newer lcov (2.x) treats unused `--remove` patterns as fatal errors (exit code 25). Use the FetchContent cache path instead:
   - **CI (in GitHub Actions `run:` block)**: use `"${{ github.workspace }}/.fetchcontent_cache/*"` (absolute path — the `${{ ... }}` expression is resolved by GitHub Actions before the shell executes the command)
@@ -183,30 +185,35 @@ if ! grep -q "SF:.*src/simulation/" coverage_filtered.info; then
 fi
 ```
 
-**Phase 6 `src/simulation/` per-file 85% floor** (CI enforcement step, runs after the src/simulation/ SF preflight and before the 95% total gate):
+**Phase 11 `src/simulation/` per-file 85% floor** (Deferred from Phase 6; implemented in Phase 11) (CI enforcement step, runs after the src/simulation/ SF preflight and before the 95% total gate):
 
 Add this step to the `coverage-linux` job immediately after the `src/simulation/` SF preflight step:
 
 ```bash
 # Per-file 85% floor for src/simulation/ — any file below 85% is a blocking defect.
-# This enforces the "any simulation file below 85% is a blocker" rule from the spec.
-# Uses lcov --list output; assumes '|' column delimiter (validated by Phase 4 preflight).
-min_sim=$(lcov --list coverage_filtered.info \
-  | grep -E "src/simulation/" \
-  | grep -v "^Total" \
-  | awk -F'|' '{print $NF+0}' \
-  | sort -n \
-  | head -1)
-if [ -z "$min_sim" ]; then
-  echo "PREFLIGHT FAIL: No src/simulation/ files found in lcov output for per-file check."; exit 1
-fi
-awk -v pct="$min_sim" 'BEGIN {
-  if (pct+0 < 85.0) {
-    print "FAIL: worst src/simulation/ file coverage " pct "% < 85% Phase 6 per-file floor"; exit 1
-  } else {
-    print "PASS: worst src/simulation/ file coverage " pct "% >= 85%"
+# Direct .info file parsing (SF/LH/LF records) — version-agnostic; does NOT use
+# lcov --list output (whose column delimiter changed in lcov 2.0 and is unreliable).
+awk '
+  /^SF:/ { in_sim=0; fname="" }
+  /^SF:.*src\/simulation\// { in_sim=1; fname=$0; sub(/^SF:/, "", fname); lh=0; lf=0 }
+  in_sim && /^LH:/ { lh=$0; sub(/^LH:/, "", lh) }
+  in_sim && /^LF:/ { lf=$0; sub(/^LF:/, "", lf) }
+  in_sim && /^end_of_record/ {
+    if (lf+0 > 0) {
+      pct = lh/lf*100
+      if (min_pct == "" || pct < min_pct+0) { min_pct=pct; min_file=fname }
+    }
+    in_sim=0
   }
-}'
+  END {
+    if (min_pct == "") { print "PREFLIGHT FAIL: No src/simulation/ files found in coverage_filtered.info"; exit 1 }
+    if (min_pct+0 < 85.0) {
+      printf "FAIL: worst src/simulation/ file %s coverage %.1f%% < 85%% Phase 11 per-file floor\n", min_file, min_pct; exit 1
+    } else {
+      printf "PASS: worst src/simulation/ file %s coverage %.1f%% >= 85%%\n", min_file, min_pct
+    }
+  }
+' coverage_filtered.info
 ```
 
 This step fails CI if any single `src/simulation/` file falls below 85% — catching under-tested simulation paths that the 95% total gate may not surface (a high-coverage majority can mask a low-coverage outlier).
@@ -261,3 +268,46 @@ lcov --list coverage_filtered.info \
   | head -1 \
   | awk '{if ($1 < 25.0) { print "FAIL: src/ui/ worst-file coverage " $1 "% < 25% Phase 4 gate"; exit 1 } else { print "PASS: src/ui/ worst-file coverage " $1 "% >= 25%"; exit 0 }}'
 ```
+
+## Coverage Test Placement Convention
+
+**Tests belong in semantically correct files, never in gap files.**
+
+All coverage-gap test files (`coverage_gap_test.cpp`, `simulation_coverage_gap_test.cpp`,
+`query_panel_coverage_test.cpp`) have been dissolved. Every test that was in those files has
+been moved into the appropriate semantically correct test file.
+
+### Mapping: simulation tests
+
+| Topic | Target file |
+|---|---|
+| Speed/smoothstep/traffic overload | `tests/simulation/traffic_test.cpp` |
+| `maxPopulationForTile` Commercial/Industrial | `tests/simulation/population_test.cpp` |
+| `TimeOfDay` tick path | `tests/simulation/population_test.cpp` |
+| `placeServiceBuilding`, service alerts, water/power loss, `queryTile` | `tests/simulation/service_coverage_test.cpp` |
+| `undoLastAction`, undo expiry, difficulty refund clamping | `tests/simulation/undo_system_test.cpp` |
+| Economy paths, forced loan, debt, bond, earthworks SFX, road/signal, `queryTile` road | `tests/simulation/economy_test.cpp` |
+
+### Mapping: UI tests
+
+| Topic | Target file |
+|---|---|
+| Hotkeys, toolbar, hover, overlay, query tool, `getActiveTool`, drag, sub-panel | `tests/ui/world_interaction_test.cpp` |
+| Demolish with confirm modal | `tests/ui/world_interaction_test.cpp` |
+| Escape from Paused / MainMenu | `tests/ui/world_interaction_test.cpp` |
+| `consumeStartGameRequest` via `update()` | `tests/ui/world_interaction_test.cpp` (`ValidHandleWorldInteractionTest`) |
+| `ForcedLoanIssued` notification dialog | `tests/ui/notification_system_test.cpp` |
+| Inspector `populate()`, `draw()`, `getBounds()`, road tile | `tests/ui/query_panel_test.cpp` |
+
+### Rule
+
+When adding new coverage tests, always place them in the file that matches the
+subject's domain. Do not create new `*_coverage_gap_test.cpp` files. If no
+appropriate file exists, create a properly named file (e.g., `save_system_test.cpp`
+for save/load coverage). The `coverage_gap` naming convention is permanently retired.
+
+**Exception — stub/real split**: if an existing `*_test.cpp` uses local stub classes
+whose names conflict with the real class headers (e.g. `save_system_test.cpp` defines
+`ISaveSystem` and `ICitySimulationSerializable` as local stubs), create a companion
+`*_real_test.cpp` that includes and exercises the real implementation. Both files belong
+to the same CMake test target. This pattern applies to `save_system_real_test.cpp`.

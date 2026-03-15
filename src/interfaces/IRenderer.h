@@ -1,9 +1,11 @@
 #pragma once
 
 #include "vec3.h"
+#include "simulation_types.h"  // ServiceBuildingType — for placeServiceBuildingMesh()
 #include <string>
 #include <cstdint>
 #include <unordered_map>
+#include <utility>   // std::pair — used by setTilePlacementPreview tile list
 #include <vector>
 
 // Opaque texture handle — uint32_t alias instead of ITexture* so that IRenderer.h
@@ -23,7 +25,12 @@ struct CameraParams {
     vec3  target{};            // world-space look-at target (NOT a direction vector)
     float fovDegrees{45.0f};   // horizontal field of view in degrees
     float nearClip{0.1f};      // near clip plane distance in metres
-    float farClip{3000.0f};    // far clip plane distance in metres (covers 1024x1024 map + sky)
+    float farClip{15000.0f};   // far clip plane distance in metres — must exceed cloud dome radius
+                               // (kCloudDomeRadius=6000 m; dome vertices at ~6082 m from camera).
+                               // With near=0.1 the depth ratio is 150000; roads use polygon offset
+                               // (EPO_FRONT, factor=1) so z-fighting is handled. farClip=3000 caused
+                               // OpenGL to hard-clip dome triangles beyond 3000 m, producing a visible
+                               // circular arc ring at the frustum boundary.
 };
 
 // TerrainChunkRebuildParams — all data needed by IRenderer::rebuildTerrainChunk().
@@ -155,4 +162,132 @@ public:
     // (see architecture/ui-ux/query-inspector-panel.md — Tile overlap prevention).
     // main-thread-only.
     virtual ScreenRect getTileScreenBounds(int tileX, int tileZ) const = 0;
+
+    // getListenerPosition — return the current camera/listener world-space position.
+    //
+    // Returns the eye position most recently set via setCamera(). Used by
+    // CitySimulation::tick() for the sfx_intersection_tick pre-acquisition distance cull
+    // (> 80 m), preventing the SFX pool from being saturated by distant intersection ticks.
+    // Returns vec3{} (zero) before the first setCamera() call.
+    // main-thread-only.
+    // (ref: implementation/phase-10.md sfx_intersection_tick wiring)
+    virtual vec3 getListenerPosition() const = 0;
+
+    // -----------------------------------------------------------------------
+    // Phase 10 — Building mesh spawning and road mesh rendering API
+    //
+    // These six methods wire CitySimulation placement/removal callbacks to
+    // visible 3D scene geometry. All coordinates are in tile-space integers;
+    // IrrlichtRenderer converts to world-space via (tileX * kTileSize, 0.0f,
+    // tileZ * kTileSize). assetBaseName is the stem used to locate the .b3d
+    // LOD files under assets/3d/buildings/ or assets/3d/roads/.
+    //
+    // Implementations must be no-ops (log warning, no crash) when the asset
+    // file is absent or assetBaseName is empty.
+    // main-thread-only.
+    // (ref: implementation/phase-10.md City Rendering deliverables)
+    // -----------------------------------------------------------------------
+
+    // placeBuildingMesh — load LOD0/1/2 .b3d for assetBaseName and create a
+    // scene node at tile (tileX, tileZ) registered in SceneEntityManager.
+    virtual void placeBuildingMesh(int tileX, int tileZ,
+                                   const std::string& assetBaseName) = 0;
+
+    // removeBuildingMesh — destroy the building scene node at tile (tileX, tileZ).
+    // No-op if no building is registered for that tile.
+    virtual void removeBuildingMesh(int tileX, int tileZ) = 0;
+
+    // placeRoadMesh — create a road tile scene node at tile (tileX, tileZ).
+    //
+    // All road tiles share the same mesh: flat LOD0 quad + kerb geometry (<=48 tris) with
+    // the road custom shader and road_asphalt_tileable.dds on texture unit 0.
+    // No assetBaseName parameter — road mesh asset is fixed, not per-tile variable.
+    // LOD transitions use road tile thresholds from 3d-model-standards.md (30/25 m close,
+    // 100/90 m far).
+    // Called by CitySimulation after placeRoad() succeeds.
+    // main-thread-only.
+    virtual void placeRoadMesh(int tileX, int tileZ) = 0;
+
+    // removeRoadMesh — destroy the road tile scene node registered at (tileX, tileZ).
+    // No-op if no road is registered for that tile.
+    // Called by CitySimulation after demolishTile() on a road tile.
+    // main-thread-only.
+    virtual void removeRoadMesh(int tileX, int tileZ) = 0;
+
+    // placeServiceBuildingMesh — create a service building scene node at tile (tileX, tileZ).
+    //
+    // Asset path derived from type:
+    //   PowerPlant    → "assets/3d/buildings/svc_power_plant_lod0.b3d"
+    //   WaterTower    → "assets/3d/buildings/svc_water_tower_lod0.b3d"
+    //   FireStation   → "assets/3d/buildings/svc_fire_station_lod0.b3d"
+    //   PoliceStation → "assets/3d/buildings/svc_police_station_lod0.b3d"
+    // LOD thresholds use the small building/props category (30/25 m close, 100/90 m far,
+    // billboard LOD2) per 3d-model-standards.md Service Building Model Standards.
+    // If the .b3d file is absent, logs a warning and returns — does not assert.
+    // Called by CitySimulation after placeServiceBuilding() succeeds.
+    // main-thread-only.
+    virtual void placeServiceBuildingMesh(int tileX, int tileZ,
+                                          ServiceBuildingType type) = 0;
+
+    // removeServiceBuildingMesh — destroy the service building scene node at
+    // tile (tileX, tileZ). No-op if no service building is registered there.
+    // Called by CitySimulation after demolishTile() on a service building tile.
+    // main-thread-only.
+    virtual void removeServiceBuildingMesh(int tileX, int tileZ) = 0;
+
+    // -----------------------------------------------------------------------
+    // Phase 10 — Vehicle rendering API
+    //
+    // Called by the traffic simulation each frame to place, move, and remove
+    // vehicle scene nodes.  Vehicles are identified by a stable uint32_t ID
+    // assigned by the simulation for the vehicle's lifetime.
+    //
+    // assetName is the B3D asset stem, e.g. "car_sedan" or "bus_standard"
+    // (without the _lodN.b3d suffix).  B3D files are expected under
+    // assets/3d/vehicles/<assetName>_lod0.b3d etc.
+    //
+    // worldX/Y/Z: world-space position in metres.
+    // yawDegrees: Y-axis rotation (0 = +Z forward, 90 = +X right).
+    //
+    // Vehicles are authored at world scale (no tile-based setScale needed).
+    // Implementations must be no-ops (log warning, no crash) when the asset
+    // file is absent.
+    // main-thread-only.
+    // (ref: implementation/phase-10.md Vehicle Rendering deliverables)
+    // -----------------------------------------------------------------------
+
+    // placeVehicle — load LOD0/1 .b3d for assetName and create a scene node
+    // at the given world-space position.  If vehicleId is already registered,
+    // the old node is removed first (replaces in place).
+    virtual void placeVehicle(uint32_t vehicleId,
+                              const std::string& assetName,
+                              float worldX, float worldY, float worldZ,
+                              float yawDegrees) = 0;
+
+    // moveVehicle — update position/yaw of an existing vehicle node.
+    // If vehicleId is unknown, delegates to placeVehicle and returns.
+    virtual void moveVehicle(uint32_t vehicleId,
+                             float worldX, float worldY, float worldZ,
+                             float yawDegrees) = 0;
+
+    // removeVehicle — destroy the vehicle scene node for vehicleId.
+    // No-op if vehicleId is not registered.
+    virtual void removeVehicle(uint32_t vehicleId) = 0;
+
+    // setTilePlacementPreview — render a multi-tile placement preview highlight.
+    //
+    // Each entry in tiles is a (tileX, tileZ) pair.  All tiles are rendered with
+    // the same ARGB colour using the same Y-offset (+0.05f) and
+    // EMT_TRANSPARENT_ALPHA_CHANNEL material as setTileHoverHighlight().
+    //
+    // Passing an empty vector clears the preview (sets m_previewVisible = false).
+    // The preview is drawn via raw drawMeshBuffer() calls in drawScene(), after
+    // sceneManager->drawAll() and after the single-tile hover highlight, so it
+    // always renders on top of the zone colour overlay.
+    //
+    // Called from UIManager MouseMove while LMB is held for Zone (rect) and Road
+    // (straight-line) tools.  Cleared on MouseButtonUp after placement.
+    // main-thread-only.
+    virtual void setTilePlacementPreview(const std::vector<std::pair<int,int>>& tiles,
+                                         uint32_t argb) = 0;
 };

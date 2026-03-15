@@ -5,8 +5,9 @@
 // Updates element text/visibility/alpha in draw() and update() each frame.
 // All coordinates are in virtual 1920x1080 space.
 
-#include "src/ui/hud.h"
-#include "src/ui/budget_detail_panel.h"
+#include "src/ui/HUD.h"
+#include "src/ui/BudgetDetailPanel.h"
+#include "src/ui/hud_sprite_ids.h"
 #include "src/interfaces/IAudioSystem.h"
 
 #include <cmath>
@@ -61,10 +62,18 @@ HUD::HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock*
 
     // --- Resource / budget bar (top, y:0-56) ---
     m_treasuryLabel   = m_backend->addStaticText("$0", 8, 8, 200, 48);
+    m_backend->setElementMonoFont(m_treasuryLabel);              // numeric: monospace required (phase-10)
+    m_backend->setElementTextColor(m_treasuryLabel, 240, 180, 41); // amber #F0B429 (phase-10c)
     m_debtLabel       = m_backend->addStaticText("", 216, 8, 200, 48);
+    m_backend->setElementMonoFont(m_debtLabel);                  // numeric: monospace required (phase-10)
+    m_backend->setElementTextColor(m_debtLabel, 240, 180, 41);     // amber #F0B429 (phase-10c)
     m_ratingLabel     = m_backend->addStaticText("Village", 424, 8, 160, 48);
     m_populationLabel = m_backend->addStaticText("Pop: 0", 592, 8, 160, 48);
+    m_backend->setElementMonoFont(m_populationLabel);            // numeric: monospace required (phase-10)
+    m_backend->setElementTextColor(m_populationLabel, 240, 180, 41); // amber #F0B429 (phase-10c)
     m_dateLabel       = m_backend->addStaticText("Year 1, Month 1", 760, 8, 200, 48);
+    m_backend->setElementMonoFont(m_dateLabel);                  // numeric: monospace required (phase-10)
+    m_backend->setElementTextColor(m_dateLabel, 240, 180, 41);      // amber #F0B429 (phase-10c)
 
     // --- Primary toolbar (left, x:8-72, y:64-600), 5 tool buttons ---
     int toolY = 64;
@@ -72,15 +81,20 @@ HUD::HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock*
     constexpr int kToolPad = 8;
     constexpr int kToolX = 8;
 
-    m_btnZone      = m_backend->addButton("Zone",      kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_btnZone      = m_backend->addButton("",  kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_backend->setElementImage(m_btnZone,      kSpriteToolZoneActive);
     toolY += kToolBtnSize + kToolPad;
-    m_btnRoad      = m_backend->addButton("Road",      kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_btnRoad      = m_backend->addButton("",  kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_backend->setElementImage(m_btnRoad,      kSpriteToolRoadActive);
     toolY += kToolBtnSize + kToolPad;
-    m_btnUtilities = m_backend->addButton("Utilities", kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_btnUtilities = m_backend->addButton("",  kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_backend->setElementImage(m_btnUtilities, kSpriteToolUtilitiesActive);
     toolY += kToolBtnSize + kToolPad;
-    m_btnDemolish  = m_backend->addButton("Demolish",  kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_btnDemolish  = m_backend->addButton("",  kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_backend->setElementImage(m_btnDemolish,  kSpriteToolDemolishActive);
     toolY += kToolBtnSize + kToolPad;
-    m_btnQuery     = m_backend->addButton("Query",     kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_btnQuery     = m_backend->addButton("",  kToolX, toolY, kToolBtnSize + 8, kToolBtnSize);
+    m_backend->setElementImage(m_btnQuery,     kSpriteToolQueryActive);
 
     // --- Undo button (x:8-72, y:608-656) ---
     m_btnUndo = m_backend->addButton("Undo", 8, 608, 64, 48);
@@ -101,7 +115,8 @@ HUD::HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock*
     m_activeToolLabel = m_backend->addStaticText("No tool", 8, 752, 64, 32);
 
     // --- Notification bell (x:1820-1868, y:8-56) ---
-    m_notifBell = m_backend->addButton("Bell", 1820, 8, 48, 48);
+    m_notifBell = m_backend->addButton("", 1820, 8, 48, 48);
+    m_backend->setElementImage(m_notifBell, kSpriteNotificationBell);
 
     // --- Unsaved changes dot (x:1796-1812, y:8-24) ---
     m_unsavedDotHandle = m_backend->addStaticText("*", 1796, 8, 16, 16);

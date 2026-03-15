@@ -1418,7 +1418,7 @@ where possible are noted inline.
   Authoritative spec: `architecture/ui-ux/minimap.md` (Phase 9b Minimum Viable Minimap section).
   Assigned to: `graphics-dev-irrlicht`.
 
-- [ ] **Road mesh not visible after placing road tile (Phase 10 missing feature)** —
+- [x] **Road mesh not visible after placing road tile (Phase 10 missing feature)** —
   After `placeRoad()` is dispatched via left-click in Road tool mode, no 3D road mesh appears on
   the terrain. Root cause: `CitySimulation::placeRoad()` updates the `m_tiles` map and fires
   `SFX_ROAD_BUILD` audio but never calls any `IRenderer` method to place a road scene node.
@@ -1429,6 +1429,7 @@ where possible are noted inline.
   required. Spec ownership: `architecture/graphics-architecture/` (road scene node lifecycle),
   `architecture/asset-standards/3d-model-standards.md` (road segment `.b3d` asset spec).
   Assigned to Phase 10: `graphics-dev-irrlicht`.
+  <!-- graphics-dev-irrlicht: CLOSED — Phase 10 implements IRenderer::placeRoadMesh() / removeRoadMesh() in IrrlichtRenderer.cpp; CitySimulation::placeRoad() calls m_renderer->placeRoadMesh() on success; verified by CitySimulation_PlaceRoad_SpawnsRoadMesh unit test, 2026-03-04 -->
 
 - [ ] **No terrain flattening when zone/road/service building placed (Phase 10 missing feature)**
   — When a tile with steep slope has zone, road, or service building placed on it, the earthworks
@@ -1443,7 +1444,7 @@ where possible are noted inline.
   (1) `ITerrainQuery::setTileHeight()` interface method, (2) `TerrainSystem` height-map write
   path, (3) `rebuildTerrainChunk()` triggered on affected chunk. Deferred to post-V1.
 
-- [ ] **No building models after placing zone tiles (Phase 10 missing feature)** — After
+- [x] **No building models after placing zone tiles (Phase 10 missing feature)** — After
   `placeZone()` is dispatched via left-click in Zone tool mode, the zone colour overlay appears
   correctly (2D overlay mesh via `IRenderer::setZoneOverlay()`) but no 3D building model spawns
   on the tile. Root cause: `CitySimulation::placeZone()` updates the `m_tiles` map and fires
@@ -1458,6 +1459,7 @@ where possible are noted inline.
   `architecture/graphics-architecture/scene-graph-ownership.md` (building node lifecycle),
   `architecture/asset-standards/3d-model-standards.md` (`.b3d` building asset spec).
   Assigned to Phase 10: `graphics-dev-irrlicht`.
+  <!-- graphics-dev-irrlicht: CLOSED — Phase 10 implements IRenderer::placeBuildingMesh() / removeBuildingMesh() / placeServiceBuildingMesh() / removeServiceBuildingMesh() in IrrlichtRenderer.cpp; CitySimulation::placeZone() calls m_renderer->placeBuildingMesh() on success, placeServiceBuilding() calls placeServiceBuildingMesh(); service building visual gap also closed; verified by CitySimulation_PlaceZone_SpawnsBuilding, CitySimulation_PlaceServiceBuilding_SpawnsMesh, CitySimulation_DemolishZoneTile_RemovesBuilding unit tests, 2026-03-04 -->
 
 - [x] **Font size unreadably small** — Irrlicht's built-in default GUI font renders at
   approximately 8 physical pixels. All HUD labels (treasury balance, population count, toolbar
@@ -1486,6 +1488,28 @@ where possible are noted inline.
   clearly identifiable. **Phase 10 completes this fix** by delivering `assets/fonts/ui_font.xml`
   (making text readable) and `assets/textures/ui/hud_sprites_ui.png` (replacing text with icons
   entirely). Spec reference: `architecture/ui-ux/hud-layout.md` (Toolbar Button Text Fallback).
+
+<!-- BINDING DECISION — prod-owner 2026-03-13: Two sprite offset bugs were found and fixed
+in IrrlichtUIBackend::spriteRectForIndex() after Phase 9b delivery. Both were caused by
+incorrect special cases that deviated from the uniform 64×64 grid formula. The architecture
+spec (architecture/asset-standards/2d-texture-standards.md — "Sprite ID Encoding and
+Row-Conflict Pitfall") was updated to document both bugs as anti-patterns.
+
+1. **Bell/clock/dot/undo icons (IDs 320–323) at wrong y position**: A special case in
+   `spriteRectForIndex()` placed `icon_bell` at `(56, 64)` (inside the toolbar-inactive row)
+   instead of row 10 (y=640). The notification bell rendered the road-inactive icon shifted
+   8px left. Fix: removed the special case; IDs 320–323 now use the standard grid formula
+   (`col = id % 32, row = id / 32`), placing them correctly in row 10 at y=640.
+
+2. **Utilities sub-panel icons (IDs 128–163) with 72px column spacing**: A special case
+   used `xOffsets = {0, 72, 144, 216}` (72px steps) instead of 64px. Fire appeared 16px
+   off, Police 24px off — both had their left edges clipped. Fix: removed the special case;
+   all icons now use the uniform 64×64 grid, placing them at x = 0, 64, 128, 192.
+
+Both fixes were verified by visual inspection; `tools/generate_hud_sprites.py` already
+generated sprites at 64px columns — the bugs were in the `spriteRectForIndex()` decoder,
+not the generator. Committed in fix commit 6e2da46.
+-->
 
 ---
 

@@ -2,7 +2,7 @@
 
 Events flow through `IEventReceiver` in this priority order — each handler returns `true` (consumed) or `false` (pass-through):
 
-1. `ModalDialog` (highest priority — blocks all others while active, including Ctrl+Z and Escape). **Camera input exception**: `ModalDialog` does NOT consume camera movement events (middle-mouse-button drag, right-mouse-button drag, scroll-wheel zoom). These pass through to `CameraController` at Priority 6 regardless of modal state. **Rationale**: camera movement is non-destructive; the player benefits from being able to zoom and pan while reading a blocking modal. All keyboard events, left-mouse clicks, and right-click context events ARE consumed by the modal. **Scrim event consumption**: When a blocking modal is active, the full-screen scrim element rendered by `UIManager` must consume left-click and right-click context events in `UIManager::onEvent()` at Priority 1. Camera pass-through events (scroll wheel, middle-mouse-button drag, right-mouse-button drag for pan) must NOT be consumed by the scrim. The scrim is not merely a visual overlay — it must be an event-consuming element that prevents zone placement and road tools from receiving clicks while a modal is shown. Window focus events (`WindowFocusGained`, `WindowFocusLost`) are additionally exempt from the short-circuit rule — they must always reach `CameraController` so `m_appHasFocus` is kept accurate regardless of modal state. `UIManager` consuming a `WindowFocusLost` event would prevent `CameraController` from suppressing edge-scroll on Alt+Tab. **RMB drag initiation forwarding contract**: The initial `MouseButtonDown button=1` (right-mouse-button press) is dispatched to `UIManager::onEvent()` first. If `UIManager` returns `false` (scrim not active — no blocking modal), the platform adapter sets `m_rmbDragActive = true` AND forwards the event to `CameraController::onInputEvent()`. If `UIManager` returns `true` (scrim consumed it — modal active), `m_rmbDragActive` is NOT set and the event does not reach `CameraController`. Subsequent `MouseMove` events while `m_rmbDragActive == true` always pass through to `CameraController` unconditionally. Without forwarding the `MouseButtonDown button=1` to `CameraController` when the scrim is inactive, `CameraController::m_rmbDragActive` is never set to `true` and RMB drag is permanently non-functional.
+1. `ModalDialog` (highest priority — blocks all others while active, including Ctrl+Z and Escape). **Camera input exception**: `ModalDialog` does NOT consume camera movement events (middle-mouse-button drag, right-mouse-button drag, scroll-wheel zoom). These pass through to `CameraController` at Priority 6 regardless of modal state. **Rationale**: camera movement is non-destructive; the player benefits from being able to zoom and pan while reading a blocking modal. All keyboard events, left-mouse clicks, and right-click context events ARE consumed by the modal. **Scrim event consumption**: When a blocking modal is active, the full-screen scrim element rendered by `UIManager` must consume left-click and right-click context events in `UIManager::onEvent()` at Priority 1. Camera pass-through events (scroll wheel, middle-mouse-button drag, right-mouse-button drag for pan) must NOT be consumed by the scrim. The scrim is not merely a visual overlay — it must be an event-consuming element that prevents zone placement and road tools from receiving clicks while a modal is shown. Window focus events (`WindowFocusGained`, `WindowFocusLost`) are additionally exempt from the short-circuit rule — they must always reach `CameraController` so `m_appHasFocus` is kept accurate regardless of modal state. `UIManager` consuming a `WindowFocusLost` event would prevent `CameraController` from suppressing edge-scroll on Alt+Tab. **RMB drag initiation forwarding contract**: The initial `MouseButtonDown button=1` (right-mouse-button press) is dispatched to `UIManager::onEvent()` first. If `UIManager` returns `false` (scrim not active AND no tool is active), the platform adapter sets `m_rmbDragActive = true` AND forwards the event to `CameraController::onInputEvent()`. If `UIManager` returns `true` — either because the scrim consumed it (modal active) OR because the tool-deselect handler (Priority 6b/7e) consumed it (a tool was active and has now been deselected) — `m_rmbDragActive` is NOT set and the event does not reach `CameraController`. In the tool-deselect case this is intentional: the right-click that cancels the active tool should not also begin a camera drag. Subsequent `MouseMove` events while `m_rmbDragActive == true` always pass through to `CameraController` unconditionally. Without forwarding the `MouseButtonDown button=1` to `CameraController` when the scrim is inactive, `CameraController::m_rmbDragActive` is never set to `true` and RMB drag is permanently non-functional.
 2. **CRITICAL toast dismiss** — click, Enter, or Delete while a CRITICAL toast is in the foreground are consumed by `NotificationManager` before any other handler sees them. This prevents an Enter key meant to dismiss a CRITICAL toast from accidentally activating a toolbar button behind it. **Priority 2 is entirely skipped when: (a) no CRITICAL toast is currently visible, OR (b) a blocking modal is currently active** (Priority 1 holds full input control; CRITICAL toasts are hidden while a modal is active per Notification System spec, so this condition naturally holds — but must be enforced explicitly to avoid Priority 2 consuming events that the modal should see if toast visibility state is transiently inconsistent). In both cases, events fall through to lower priorities normally. **Implementation contract**: Both conditions MUST be evaluated independently as a compound guard. The correct guard is:
 
 ```cpp
@@ -36,13 +36,13 @@ Checking only `!criticalVisible` is insufficient: the `modalActive` guard MUST a
 
    (a) **`MouseMove` does NOT consume the event** (always returns `false`). Edge-scroll logic in `CameraController` (Priority 6) depends on every `MouseMove` reaching it; the World Interaction layer must not break this by returning `true` on `MouseMove` events. Hover highlight or tile-cursor update may occur as a side-effect, but event consumption is forbidden.
 
-   (b) **`MouseButtonDown button=0` (left-click) consumes the event** (`return true`) only when ALL of the following conditions hold: (1) a non-Query placement tool is active (i.e., the active tool is Zone, Road, Utilities, or Demolish — NOT QueryTool and NOT "No tool"), AND (2) `pickTerrainTile()` ray-cast returns `true` (the ray hit valid terrain). If either condition is false, the event is NOT consumed (returns `false`). In particular, a `QueryTool` left-click does NOT consume the event — it passes through so the QueryPanel open/inspect path (Priority 3) can handle it.
+   (b) **`MouseButtonDown button=0` (left-click) consumes the event** (`return true`) only when ALL of the following conditions hold: (1) a non-Query placement tool is active (i.e., the active tool is Zone, Road, Utilities, or Demolish — NOT QueryTool and NOT "No tool"), AND (2) `pickTerrainTile()` ray-cast returns `true` (the ray hit valid terrain). If either condition is false, the event is NOT consumed (returns `false`). In particular, a `QueryTool` left-click does NOT consume the event — it passes through so the QueryPanel open/inspect path (Priority 3) can handle it. **Hover-tile update on click (drag throttle invariant)**: after a successful `pickTerrainTile()` hit in the `MouseButtonDown` handler, `m_hoveredTileX` and `m_hoveredTileZ` MUST be updated to the clicked tile coordinates before any placement occurs. Without this update, the drag throttle condition `(hitX != m_hoveredTileX || hitZ != m_hoveredTileZ)` in the subsequent `MouseMove` handler evaluates `true` for the same tile (because `m_hoveredTileX` still holds the stale pre-click value, often −1), causing the initial tile to be double-placed on the first drag step. **Zone tool — rectangular drag-select**: `MouseButtonDown` records the anchor tile in `m_zoneAnchorX`/`m_zoneAnchorZ` and returns `true` (consumed) without placing anything. `MouseMove` while LMB is held computes the axis-aligned rectangle from anchor to current hover tile and calls `IRenderer::setTilePlacementPreview()` with all tiles in that rectangle; `setTileHoverHighlight(-1,-1,_)` is called to clear the single-tile hover cursor while the preview is active. `MouseButtonUp button=0` fills all tiles in `[min(anchor,hover), max(anchor,hover)]` by calling `doTerrainPlacement(tx, tz)` for each tile, then clears the anchor and calls `setTilePlacementPreview({}, 0)` to remove the preview. A single click-and-release (no drag) fills a 1×1 rectangle — exactly one tile. **Road tool — straight-line drag-select**: `MouseButtonDown` records the anchor tile in `m_zoneAnchorX`/`m_zoneAnchorZ` and returns `true` (consumed) without placing anything. `MouseMove` while LMB is held snaps to the dominant axis (whichever of |dX| vs |dZ| is larger) and calls `IRenderer::setTilePlacementPreview()` with the straight line of tiles from anchor to current hover along that axis; `setTileHoverHighlight(-1,-1,_)` clears the single-tile hover. `MouseButtonUp button=0` places all tiles along the snapped line by calling `doTerrainPlacement()` for each, then clears the anchor and preview. A single click-and-release places exactly one road tile. **Utilities and Demolish tools**: `MouseButtonDown` calls `doTerrainPlacement()` immediately, and `MouseMove` while LMB is held calls `doTerrainPlacement()` for each new tile entered (tile-by-tile drag behavior). These tools do not use `setTilePlacementPreview()`.
 
    (c) **Modal and CRITICAL-toast suppression**: if a blocking modal (`ModalDialog`, Priority 1) or a CRITICAL toast (`NotificationManager`, Priority 2) consumed the event at a higher priority, the event never reaches Priority 7. No additional guard is required at Priority 7 for this case — the chain short-circuits naturally. However, if Priority 7 code is ever invoked speculatively (e.g., via a direct call bypassing the chain), it MUST check `m_modal->isActive() || m_notifications->hasCriticalToastVisible()` and return `false` immediately. This mirrors the identical suppression logic used at Priority 6 (`CameraController` suppresses input when a blocking modal is active).
 
    (d) **QueryTool left-click does NOT consume the event**: when the active tool is `QueryTool`, `MouseButtonDown button=0` must return `false`. The QueryPanel open path is handled at Priority 3; the World Interaction layer must not intercept it.
 
-   (e) **Right-click (`MouseButtonDown button=1`)**: Priority 7 never consumes right-click events. These are either consumed by the scrim (Priority 1, modal active) or passed through to `CameraController` (Priority 6) for RMB-drag initiation per the RMB drag initiation forwarding contract defined at Priority 1.
+   (e) **Right-click (`MouseButtonDown button=1`) — tool deselect**: When a non-None tool is active (`m_activeTool != ActiveTool::None`), `UIManager::onEvent()` consumes the RMB press at this layer: it resets `m_activeTool` to `None`, clears `m_lmbHeld`, clears any in-progress anchor state (`m_zoneAnchorX`/`m_zoneAnchorZ`), calls `IRenderer::setTilePlacementPreview({}, 0)` to clear any active drag preview, calls `IRenderer::setTileHoverHighlight(-1, -1, kHoverArgbClear)` to clear the hover quad, resets `m_hoveredTileX`/`m_hoveredTileZ` to `{-1,-1}`, calls `updateSubPanelVisibility()`, and returns `true` (consumed). **Hover-clear invariant**: the hover highlight MUST be cleared synchronously in this handler. Without it, `m_hoverVisible` stays `true` in the renderer and the last-hovered tile quad remains frozen on screen — the MouseMove handler at Priority 7 is gated on `m_activeTool != None` and is therefore never reached after the tool is deselected, so no subsequent frame will correct the stale highlight. Returning `true` also prevents `EventReceiver` from setting `m_rmbDragActive` — so no camera RMB-drag starts on the same press. When no tool is active (`m_activeTool == ActiveTool::None`), the RMB event is NOT consumed here and falls through to `CameraController` (Priority 6) for RMB-drag initiation per the forwarding contract defined at Priority 1. This handler logically sits between Priority 6 and 7 (after CameraController receives scroll/MMB events, but before the terminal world-interaction layer). Priority 7 itself never consumes right-click events — only this layer does when a tool is active.
 
 **Ctrl+Z routing rules**: `ModalDialog` (priority 1) blocks Ctrl+Z when any blocking modal is active — undo is unavailable while a modal is open, consistent with the Undo System spec. `QueryPanel` (priority 3) does not intercept Ctrl+Z; when the QueryPanel is open and the player presses Ctrl+Z, the event passes through QueryPanel to `UIManager` (priority 5) which handles undo normally. This is consistent with QueryPanel not being a destructive action.
 
@@ -51,6 +51,13 @@ Checking only `!criticalVisible` is insufficient: the `modalActive` guard MUST a
 - If `m_state == GameState::Paused`: close Settings and call `PauseMenuPanel::show()`
 - If `m_state == GameState::MainMenu`: close Settings and restore `MainMenuPanel` focus — call `MainMenuPanel::show()` (NOT `PauseMenuPanel::show()`; calling PauseMenuPanel during MainMenu state would incorrectly surface the pause overlay)
 The PauseMenu-to-gameplay transition is NOT triggered. When `PauseMenuPanel` is open and `SettingsPanel` is NOT open: Escape is consumed by `PauseMenuPanel` (closes Pause Menu; resumes gameplay via `transitionToGameplay_fromPaused()`). If none of these are open, Escape passes to `UIManager` which opens the Pause Menu. `CameraController` never sees Escape.
+
+**Pre-gameplay Escape routing (MainMenu and NewGame screens)**: When `GameState == MainMenu` or `GameState == NewGame`, Escape is routed to the Back/Main-Menu action — it is NOT routed to the Pause Menu. This routing is enforced in `UIManager::onEvent()` by checking the current `GameState` before any Escape dispatch:
+
+- `GameState::MainMenu`: Escape is a no-op (the player is already at the top-level screen; there is no parent screen to navigate Back to). The event is consumed to prevent fall-through.
+- `GameState::NewGame`: Escape maps to the Back button action — it dismisses the New Game screen and returns to Main Menu (identical to clicking the Back button in the New Game flow). No confirmation dialog is shown (no simulation state has been created yet). This is consistent with the Back-button spec in `main-menu-new-game-flow.md`.
+
+This pre-gameplay Escape check MUST appear before the Pause-Menu-open path in `UIManager::onEvent()`. Without it, pressing Escape on the New Game screen would open the Pause Menu overlay on top of a pre-gameplay screen, which has no defined dismiss path and produces an inconsistent state.
 
 **WindowFocusGained / WindowFocusLost pass-through contract**: `WindowFocusGained` and `WindowFocusLost` events MUST always pass through unconditionally to `CameraController` (the application focus handler) — they MUST NOT be consumed by `UIManager::onEvent()` at any priority level, including Priority 1 (modal active) and the scrim event-consumer path. These events are the sole mechanism by which `CameraController` sets `m_appHasFocus`. Consuming either event in `UIManager` would permanently desynchronise `m_appHasFocus` from actual OS window focus: for example, consuming `WindowFocusLost` on Alt+Tab would leave `m_appHasFocus = true`, causing edge-scroll to continue firing while the application window has no focus.
 
@@ -66,3 +73,108 @@ Implementation requirement: `UIManager::onEvent()` must check for `WindowFocusGa
 **After exiting Query mode via paths 1**: `m_activeTool` changes to the newly selected tool; `updateSubPanelVisibility()` immediately shows the appropriate sub-panel (e.g., zone sub-panel for Zone tool). The inspector is closed at Priority 3 before Priority 5 sets the new tool. There must be NO frame where `m_inspectorOpen == true` AND `m_activeTool != ActiveTool::Query` — this inconsistent state causes terrain clicks to be consumed by the inspector dismiss path rather than routed to world interaction.
 
 **After exiting Query mode via paths 3 and 4**: `m_activeTool` remains `ActiveTool::Query`. No sub-panel appears (zone sub-panel is hidden in Query mode). The player must either click a toolbar button (path 1) or press I (path 2) to switch to a placement tool.
+
+## CRITICAL: Irrlicht GUI Event Swallowing — IGUIButton Click Handling
+
+**Root cause**: Irrlicht's device event loop calls `GUIEnvironment->postEventFromUser(event)` BEFORE
+calling `Receiver->OnEvent(event)`. When `GUIEnvironment` handles a button click and returns `true`
+(button was activated), `Receiver->OnEvent` is **never called** for the underlying
+`EMIE_LMOUSE_PRESSED_DOWN` event. This means any `UIManager::onEvent()` handler that relies on
+receiving a raw `MouseButtonDown` event (including all `inRect`-based click handlers for the Bell
+icon, speed buttons, and toolbar buttons) is **silently never invoked** when the player clicks an
+Irrlicht `IGUIButton`.
+
+**Mandatory fix**: `EventReceiver::OnEvent()` (in `src/platform/EventReceiver.cpp`) MUST handle
+`EET_GUI_EVENT / EGET_BUTTON_CLICKED` events and synthesise a `MouseButtonDown` `InputEvent` at
+the button's physical centre, converted to virtual coordinates via `UIScaler::unproject()`. The
+synthesised event is dispatched to `UIManager::onEvent()`. The handler MUST return `false` so
+Irrlicht continues its own GUI handling (rendering button active state, etc.).
+
+**Required implementation** (in `EventReceiver::OnEvent()`):
+
+```cpp
+if (event.EventType == irr::EET_GUI_EVENT &&
+    event.GUIEvent.EventType == irr::gui::EGET_BUTTON_CLICKED) {
+    irr::gui::IGUIElement* btn = event.GUIEvent.Caller;
+    if (btn && m_scaler) {
+        irr::core::rect<irr::s32> r = btn->getAbsolutePosition();
+        const int physCx = (r.UpperLeftCorner.X + r.LowerRightCorner.X) / 2;
+        const int physCy = (r.UpperLeftCorner.Y + r.LowerRightCorner.Y) / 2;
+        UIScaler::VirtualPoint vp = m_scaler->unproject(physCx, physCy);
+        InputEvent btnEv{};
+        btnEv.type = InputEvent::Type::MouseButtonDown;
+        btnEv.button = 0;
+        btnEv.x = vp.x; btnEv.y = vp.y;
+        btnEv.physX = physCx; btnEv.physY = physCy;
+        if (m_uiManager) m_uiManager->onEvent(btnEv);
+    }
+    return false; // MUST return false — let Irrlicht finish its own GUI handling
+}
+```
+
+**This pattern is mandatory for ALL `IGUIButton` interactions in the project.** Any toolbar button,
+Bell icon, speed selector button, or other `IGUIButton`-backed UI element that relies on
+`UIManager::onEvent()` receiving a `MouseButtonDown` event MUST go through this synthesised-event
+path. The raw `EMIE_LMOUSE_PRESSED_DOWN` event is NOT delivered to `EventReceiver::OnEvent()` when
+Irrlicht's GUI layer consumes the click; the synthesised `EGET_BUTTON_CLICKED` dispatch is the
+only reliable delivery mechanism.
+
+**Why `return false`**: Returning `true` from the `EGET_BUTTON_CLICKED` handler would tell Irrlicht
+to stop processing the GUI event, preventing visual button state updates (the pressed/active
+appearance). Always return `false` for `EET_GUI_EVENT` handlers in `EventReceiver` so the Irrlicht
+GUI environment can complete its own rendering and state management.
+
+## Hover State Switching — IGUIButton Image Swap
+
+Hover visual feedback is implemented entirely inside `IrrlichtUIBackend` by handling
+`EGET_ELEMENT_HOVERED` and `EGET_ELEMENT_LEFT` GUI events. No `IUIBackend` interface methods are
+added — this is an internal rendering concern.
+
+**Required implementation** (in `IrrlichtUIBackend::OnEvent()` or equivalent GUI event hook):
+
+```cpp
+if (event.EventType == irr::EET_GUI_EVENT) {
+    irr::gui::IGUIElement* el = event.GUIEvent.Caller;
+    // Use getType() instead of dynamic_cast to avoid RTTI issues across shared-library
+    // boundaries on some GPU/driver combinations.
+    if (el && el->getType() == irr::gui::EGUIET_BUTTON) {
+        auto* btn = static_cast<irr::gui::IGUIButton*>(el);
+        if (event.GUIEvent.EventType == irr::gui::EGET_ELEMENT_HOVERED) {
+            if (!btn->isPressed()) {
+                // swap to hover sprite cell (skip if button is in active/pressed state)
+                uint32_t hoverId = lookupHoverSpriteId(btn);  // kSpriteXxxHover constant
+                if (hoverId != kSpriteInvalid)
+                    btn->setImage(getSpriteTexture(hoverId));
+            }
+        } else if (event.GUIEvent.EventType == irr::gui::EGET_ELEMENT_LEFT) {
+            // Restore the registered base sprite (whatever setElementImage last set).
+            // This may be an active OR inactive sprite — do NOT force-map to inactive,
+            // as buttons are often initialized with active sprites and must remain so.
+            uint32_t baseId = lookupRegisteredSpriteId(btn);  // value from m_imageElementMap
+            if (baseId != kSpriteInvalid)
+                btn->setImage(getSpriteTexture(baseId));
+        }
+    }
+    return false; // never consume hover events — Irrlicht must process them too
+}
+```
+
+**Rules:**
+
+- `EGET_ELEMENT_HOVERED` → if `btn->isPressed()` is true, skip (active sprite persists);
+  otherwise call `IGUIButton::setImage()` with the `kSpriteXxxHover` cell texture (85% opacity,
+  outlined 2 px stroke, 1 px white border — see
+  `architecture/asset-standards/2d-texture-standards.md` §Icon State Authoring Rules)
+- `EGET_ELEMENT_LEFT` → restore the **registered base sprite** — the sprite ID last set via
+  `IUIBackend::setElementImage()`, stored in `m_imageElementMap`. This is the sprite that was
+  visible before the hover began; it may be an active sprite (filled icon) or an inactive sprite
+  (outline), depending on what the caller set. Do NOT force-map to inactive — that incorrectly
+  erases icons from buttons initialised with active sprites (e.g. toolbar buttons, which always
+  show filled icons regardless of tool selection state).
+- Active buttons (`isPressed()` returns true) must NOT have their image overridden on
+  `EGET_ELEMENT_HOVERED`; they are skipped entirely so the active sprite persists across
+  hover-enter. On `EGET_ELEMENT_LEFT` the registered base sprite is restored unconditionally
+  (for a pressed button the base sprite is the active sprite, so the result is the same).
+- Always `return false` — consuming hover events blocks Irrlicht's own tooltip and focus logic
+- `kSpriteXxxHover` constants live in `src/ui/hud_sprite_ids.h`; the naming convention is
+  `kSprite<Name>Hover` (e.g. `kSpriteZoneResidentialHover`, `kSpriteRoadHover`)
