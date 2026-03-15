@@ -552,6 +552,12 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/save_system_real_test.cpp
 )
 
+# Coverage gap tests: target the ~30.8% miss identified in CI (static helpers,
+# speed/pause control, accessors, JSON round-trip, signal logic, demolish branches).
+target_sources(simulation_tests PRIVATE
+    tests/simulation/city_simulation_coverage_test.cpp
+)
+
 # Phase 10: AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier().
 # MUST be on simulation_tests ONLY — never on the main aitown binary target.
 target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
