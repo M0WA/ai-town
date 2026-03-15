@@ -32,7 +32,10 @@ docker/ci-linux/Dockerfile     ← CI base image (toolchain + vcpkg binary cache
 .github/workflows/ci.yml       ← build-linux / coverage-linux use container: image:
 ```
 
-The devcontainer extends the CI image via `FROM ghcr.io/OWNER/aitown-ci-linux:<tag>`.
+The devcontainer extends the CI image via
+`FROM ghcr.io/OWNER/aitown-ci-linux:vcpkg-<short-sha>@sha256:<digest>`
+(tag for human readability; digest for immutability — both files pin the same
+`sha256:` value, per the Image Pinning Policy).
 This gives zero-drift between local dev and CI: the same toolchain, system libraries,
 vcpkg binary cache, and CMake version are used in both contexts.
 
@@ -43,11 +46,11 @@ vcpkg binary cache, and CMake version are used in both contexts.
   - Toolchain: `gcc-13`, `g++-13`, `ninja-build`, `cmake` (3.31.10 pinned),
     `ccache`, `pkg-config`, `git`, `jq`, `python3`, `pip`
   - CI runtime tools: `xvfb`, `libgl1-mesa-dev`, `mesa-utils`, `libxxf86vm-dev`,
-    `libglew-dev`, `lcov`, `ffmpeg`, `sox`
+    `libglew-dev`, `lcov`, `ffmpeg`, `sox`, `libasound2-dev`, `libpulse-dev`
   - Python packages: `mutagen`, `Pillow`
   - `ARG VCPKG_COMMIT` — must match `VCPKG_COMMIT_ID` in `ci.yml` (enforced by
     validation step in `docker-ci-image.yml`; see Atomicity Contract below)
-  - vcpkg cloned and bootstrapped at `$VCPKG_COMMIT`
+  - vcpkg cloned to `/opt/vcpkg` and bootstrapped at commit `$VCPKG_COMMIT`
   - `COPY vcpkg-overlays/ /build/vcpkg-overlays/` — the overlay directory is
     copied into the Docker build context so that the openal-soft 1.23.1 pin is
     available during the vcpkg install layer inside the image
@@ -64,8 +67,11 @@ vcpkg binary cache, and CMake version are used in both contexts.
 - [ ] **`.devcontainer/Dockerfile` updated** — change first line to:
 
   ```dockerfile
-  FROM ghcr.io/OWNER/aitown-ci-linux:<content-addressed-tag>
+  FROM ghcr.io/OWNER/aitown-ci-linux:vcpkg-<short-sha>@sha256:<digest>
   ```
+
+  (tag for human readability + digest for immutability; matches the digest in
+  `ci.yml` exactly — see Atomicity Contract item 4 and Image Pinning Policy)
 
   then layer all existing developer-ergonomics tooling on top (Node.js, zsh, fzf,
   git-delta, Claude Code, compressonator, markdownlint-cli, etc.). All existing
@@ -145,20 +151,45 @@ vcpkg binary cache, and CMake version are used in both contexts.
     `uses:` action lines; it does NOT cover `container: image:` fields — this
     new/extended step closes that gap.
 
-- [ ] **`CLAUDE.md` updated** — "Build & Toolchain" notes section gains:
-  - CI image tag update procedure as part of the vcpkg baseline update protocol.
-    This phase **introduces** a five-item atomicity rule for vcpkg baseline bumps
-    (it is not an extension of any prior rule). The five items are: `vcpkg.json`,
-    `VCPKG_COMMIT_ID` in `ci.yml`, `ARG VCPKG_COMMIT` in
-    `docker/ci-linux/Dockerfile`, Dockerfile image tag in `ci.yml` and
-    `.devcontainer/Dockerfile`, digest pin in `ci.yml`
+- [ ] **`CLAUDE.md` updated** — "Build & Toolchain" notes section gains a
+  "vcpkg Baseline Atomicity" note. The note must be placed in the existing
+  **Build & Toolchain** section of `CLAUDE.md` and must enumerate all five
+  items from the Atomicity Contract section of this phase file:
+  1. `vcpkg.json` — `builtin-baseline` updated
+  2. `VCPKG_COMMIT_ID` in `ci.yml` updated
+  3. `ARG VCPKG_COMMIT` in `docker/ci-linux/Dockerfile` updated to the same value
+  4. `FROM` line in `.devcontainer/Dockerfile` updated to
+     `ghcr.io/OWNER/aitown-ci-linux:vcpkg-<short-sha>@sha256:<digest>` (tag
+     for human readability + digest for immutability; `sha256:` value is
+     identical to item 5)
+  5. Image digest pin in `ci.yml` AND `.devcontainer/Dockerfile` (identical
+     value in both files) updated to the `sha256:...` output of the
+     `docker-ci-image.yml` push step (`.devcontainer/Dockerfile` FROM line
+     already includes this digest per item 4)
+
+  The note must also state that all five must be updated atomically in a single
+  PR. A reviewer can verify completion by opening `CLAUDE.md`, navigating to the
+  Build & Toolchain section, and confirming that a "vcpkg Baseline Atomicity"
+  note is present and lists all five items with the "identical value in both
+  files" qualifier on item 5.
   - Note: devcontainer `FROM` tag must be updated in the same PR as the CI
-    image tag bump in `ci.yml`
+    image tag bump in `ci.yml` (this is item 4 above and is covered by the
+    atomicity note)
 
 - [ ] **xvfb-run spike PR** — before `ci.yml` is switched to `container:` mode,
   a standalone spike PR must be merged that verifies `xvfb-run` succeeds for
   `requires-opengl` tests inside the Docker container on a GitHub-hosted runner.
-  The spike PR description must document the outcome (pass or required workaround).
+  The spike PR uses **Model A (isolated test job)**:
+
+  1. Add a temporary dedicated job `test-container-xvfb` to `ci.yml` that uses a
+     `container:` block with the pre-built CI image and runs **only** the
+     `requires-opengl` tests via `xvfb-run --auto-servernum ctest -L "^requires-opengl$"`.
+  2. This job is completely isolated — the main `build-linux` and `coverage-linux`
+     jobs are **not changed** in the spike PR (they remain on bare `ubuntu-latest`).
+  3. The spike PR description documents the outcome (pass, fail, or workaround needed).
+  4. After the spike PR is merged, the main Phase 11b PR removes `test-container-xvfb`
+     and switches both `build-linux` and `coverage-linux` to `container:` mode.
+
   This spike is a blocking prerequisite for the Exit Criteria gate below.
 
 ### Atomicity Contract
@@ -168,9 +199,14 @@ Any vcpkg baseline bump MUST land these five changes atomically in one PR:
 1. `vcpkg.json` — `builtin-baseline` updated
 2. `ci.yml` — `VCPKG_COMMIT_ID` env var updated
 3. `docker/ci-linux/Dockerfile` — `ARG VCPKG_COMMIT` updated to same value
-4. `.devcontainer/Dockerfile` — `FROM` tag updated to new `:vcpkg-<short-sha>`
-5. `ci.yml` and `.devcontainer/Dockerfile` — image digest pin updated to the
-   `sha256:...` value output by the `docker-ci-image.yml` push step
+4. `.devcontainer/Dockerfile` — `FROM` line updated to
+   `ghcr.io/OWNER/aitown-ci-linux:vcpkg-<short-sha>@sha256:<digest>` (tag for
+   human readability + digest for immutability; the `sha256:` value is the same
+   digest as item 5)
+5. `ci.yml` and `.devcontainer/Dockerfile` — image digest pin (`sha256:...`)
+   updated to the value output by the `docker-ci-image.yml` push step (identical
+   in both files; the `.devcontainer/Dockerfile` FROM line already includes this
+   digest per item 4)
 
 The `docker-ci-image.yml` validation step enforces items 2 and 3 agree at
 image build time. The supply-chain lint step (see "Supply-chain lint extended"
@@ -180,6 +216,11 @@ container-image lint step is required to cover `container: image:` fields.
 
 **Sequencing prerequisite**: the xvfb-run spike PR (see Deliverables above)
 must be merged before any PR that switches `ci.yml` to `container:` mode.
+The spike uses Model A: it adds a temporary isolated `test-container-xvfb` job
+that validates `xvfb-run` with `requires-opengl` tests inside the pre-built CI
+container, while leaving `build-linux` and `coverage-linux` on bare `ubuntu-latest`.
+Only after that spike PR is merged may the main Phase 11b PR remove
+`test-container-xvfb` and switch both main jobs to `container:` mode.
 This is a hard sequencing constraint independent of the five-item atomicity
 rule above.
 
@@ -212,9 +253,12 @@ project's existing `uses: action@<40-char-SHA>` pinning for GitHub Actions.
 
 - xvfb-run spike PR merged and outcome documented before `ci.yml` is switched
   to `container:` mode (blocking gate — see xvfb-run spike deliverable above).
-  Specifically: "A standalone spike PR confirms that `xvfb-run` succeeds for
-  `requires-opengl` tests inside the Docker container on a GitHub-hosted runner,
-  and the outcome is documented in the PR description."
+  Specifically: "A standalone spike PR adds a temporary isolated
+  `test-container-xvfb` job (Model A) that runs only the `requires-opengl` tests
+  via `xvfb-run` inside the pre-built CI container, with `build-linux` and
+  `coverage-linux` unchanged. The PR is merged and the outcome (pass or required
+  workaround) is documented in its description before any PR switches those main
+  jobs to `container:` mode."
 - `docker-ci-image.yml` builds and pushes successfully; digest is printed
 - `build-linux` and `coverage-linux` jobs use the container image and omit
   `apt-get install`, `pip install`, and `lukka/run-vcpkg` steps

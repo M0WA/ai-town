@@ -616,6 +616,13 @@ target_include_directories(terrain_tests PRIVATE
 )
 aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
 
+# Coverage gap: enqueueAllChunks() — used by Phase 11 loading-screen loop.
+# Not covered by any existing terrain test.  target_sources keeps the
+# Phase 5 add_executable(terrain_tests ...) definition intact.
+target_sources(terrain_tests PRIVATE
+    tests/terrain/terrain_enqueue_all_chunks_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # ui_tests — UIManager, NotificationManager, CameraController, QueryPanel, ModalDialog
 # Phase 3 Test-C1: consolidated 5-file form (ui_smoke_test.cpp dropped — its compile
@@ -694,6 +701,18 @@ target_sources(ui_tests PRIVATE
 # absent file, unknown key, partial JSON).
 target_sources(ui_tests PRIVATE
     tests/ui/keybindings_load_test.cpp
+)
+
+# Coverage gap: HUD ratingName() variants, formatDollar() negative branch,
+# grace-period fade/expire, budget-flash setElementAlpha.
+target_sources(ui_tests PRIVATE
+    tests/ui/hud_coverage_test.cpp
+)
+
+# Coverage gap: UIManager pending-quit state machine (unsaved-changes modal,
+# PendingQuitAction::Desktop/ToMenu dispatch), setSaveSystem/setSaveAvailable/setSaveStatusText.
+target_sources(ui_tests PRIVATE
+    tests/ui/ui_manager_quit_coverage_test.cpp
 )
 
 # ----------------------------------------------------------------------------
