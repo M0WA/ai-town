@@ -14,12 +14,12 @@
 // These tests do NOT require a real AudioSystem or OpenAL device.
 // They test the math formula in isolation.
 
-#include <gtest/gtest.h>
 #if defined(_WIN32)
-#  define _USE_MATH_DEFINES  // required for M_PI on MSVC
+#  define _USE_MATH_DEFINES  // must come before any header that includes <cmath>
 #endif
 #include <cmath>
 #include <limits>
+#include <gtest/gtest.h>
 
 // ---------------------------------------------------------------------------
 // Helpers — mirror the formula from dynamic-soundscape.md exactly so that the
