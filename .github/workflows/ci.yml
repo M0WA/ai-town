@@ -20,7 +20,7 @@ permissions:
 # make it unavailable to other jobs.
 # The builtin-baseline in vcpkg.json must match this value exactly (enforced by baseline step).
 env:
-  VCPKG_COMMIT_ID: "b2f068faf45a3f04145bec0f52a66526ad590227"  # matches vcpkg.json builtin-baseline
+  VCPKG_COMMIT_ID: "b2f068faf45a3f04145bec0f52a66526ad590227"
 
 jobs:
   # ============================================================================
@@ -36,6 +36,7 @@ jobs:
 
       # Step 2: Supply-chain lint — first substantive step, immediately after checkout.
       # Greps ci.yml for placeholder SHAs and rejects any SHA shorter than 40 hex chars.
+      # Also validates container image: lines have full sha256 digest pins.
       # Prevents accidental commit of incomplete supply-chain pins.
       - name: Lint workflow for placeholder SHAs
         shell: bash
@@ -52,6 +53,12 @@ jobs:
             exit 1
           fi
           echo "SHA lint passed — no placeholder tokens or short SHAs found."
+          echo "Checking container image digest pins..."
+          if grep -E '^\s+image:\s+' .github/workflows/ci.yml | grep -Ev '@sha256:[0-9a-f]{64}'; then
+            echo "ERROR: container image: line without full sha256 digest pin found in ci.yml."
+            exit 1
+          fi
+          echo "Container image digest lint passed."
 
       # Step 3: Install system dependencies — xvfb and OpenGL headers.
       # Must be BEFORE ccache setup and CMake configure so OpenGL headers and xvfb
@@ -60,6 +67,82 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev libglew-dev
+
+      # Step 3a: Install Pillow for asset validation (validate_assets.py check_23 uses PIL).
+      # Must run before the validate_assets step. pip install is idempotent and fast
+      # (Pillow is a pre-built wheel on ubuntu-latest). Placed here so the validate
+      # step always has Pillow available regardless of Python environment state.
+      - name: Install Pillow (asset validation dependency)
+        run: pip install Pillow
+
+      # Step 3b: Preflight — validate assets (checks 21, 22, 23, 24).
+      # Runs BEFORE CMake configure so asset errors fail fast without wasting build time.
+      # check_21: zone loop silence-floor gate (zone_*.ogg head/tail <= -60 dBFS).
+      # check_22: WAV SFX format gate (44100 Hz, 16-bit PCM, stereo with mono exceptions).
+      # check_23: sprite sheet PNG gate (hud_sprites_ui.png is 2048x2048 RGBA;
+      #           hud_sprites_ui.dds and hud_sprites_ui_layout.json must NOT be git-tracked).
+      # check_24: cloud texture format gate (clouds.png is 1024x1024 RGBA). Phase 10b.
+      # If no zone/WAV/PNG assets exist yet, the checks are no-ops and exit 0.
+      - name: Preflight asset validation (checks 21, 22, 23, 24)
+        run: python3 tools/validate_assets.py
+
+      - name: Verify clouds.png present
+        shell: bash
+        run: |
+          test -f assets/textures/sky/clouds.png || { echo "ERROR: assets/textures/sky/clouds.png missing"; exit 1; }
+
+      # Step 3c: Preflight — font asset presence gates.
+      # hud_font.xml and hud_mono_font.xml are required at runtime by UIManager.
+      # Verify they exist before building to catch missing asset regressions early.
+      # If files are not yet delivered, CI fails here with a clear error message.
+      - name: Verify font assets present
+        shell: bash
+        run: |
+          if [ ! -f assets/fonts/hud_font.xml ]; then
+            echo "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          fi
+          echo "assets/fonts/hud_font.xml: present."
+          if [ ! -f assets/fonts/hud_mono_font.xml ]; then
+            echo "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          fi
+          echo "assets/fonts/hud_mono_font.xml: present."
+
+      # Step 3d: Preflight — Phase 10 audio asset presence gates.
+      # Hard-fail on core Phase 10 audio assets that must be present before build.
+      # This catches cases where an asset file was accidentally deleted or never committed.
+      # Assets checked: sfx_build_place.wav, sfx_build_demolish.wav,
+      #   stinger_milestone.ogg, ambient_day.ogg, sfx_zone_residential.ogg, sfx_zone_commercial.ogg, sfx_zone_industrial.ogg.
+      # NOTE: stinger_*.wav are WAV per manifest; stinger_milestone here checks .ogg
+      # in case a sidecar was intended — if stinger_milestone ships as .wav only,
+      # this check is updated to .wav. Per phase-10.md, stingers are WAV PCM.
+      # Correction: stinger_milestone.wav (not .ogg) per manifest. The presence gate
+      # checks the canonical form. If the file does not exist yet (asset not yet
+      # delivered by sound-artist-opensoftal), CI fails here. This gate is intentional:
+      # Phase 10 CI requires these assets to be committed before the phase can be marked done.
+      - name: Verify Phase 10 audio assets present
+        shell: bash
+        run: |
+          failed=0
+          for asset in \
+            assets/audio/sfx_build_place.wav \
+            assets/audio/sfx_build_demolish.wav \
+            assets/audio/stinger_milestone.wav \
+            assets/audio/ambient_day.ogg \
+            assets/audio/sfx_zone_residential.ogg \
+            assets/audio/sfx_zone_commercial.ogg \
+            assets/audio/sfx_zone_industrial.ogg; do
+            if [ ! -f "$asset" ]; then
+              echo "ERROR: $asset not found — Phase 10 audio asset missing."
+              failed=1
+            else
+              echo "$asset: present."
+            fi
+          done
+          if [ "$failed" -eq 1 ]; then
+            exit 1
+          fi
 
       # Step 4: Detect GCC version and write to GITHUB_ENV.
       # MUST be a SEPARATE named step before the actions/cache step.
@@ -170,18 +253,33 @@ jobs:
       # Step 12c: Verify simulation_tests specifically is discoverable — Phase 6 deliverable.
       # The unit-routing check above passes as long as ANY unit target (terrain_tests, ui_tests)
       # has tests. This step verifies simulation_tests is not silently unregistered.
-      # WARNING: before Phase 6 CitySimulation.cpp exists, simulation_tests will have 0 tests
-      # (only SUCCEED() stubs). This step exits 0 if count==0 with a warning, not an error —
-      # change to exit 1 when Phase 6 is complete and simulation_tests has real tests.
-      - name: Verify simulation_tests registration (Phase 6 deliverable)
+      # Phase 6 is complete (CitySimulation.cpp exists); this is now a hard-fail.
+      # Phase 10 adds adaptive_music_intensity_test.cpp to simulation_tests — if the
+      # binary fails to start (e.g. missing symbol), ctest exits 0 with "No tests found".
+      # Hard-failing here catches that silent failure before it reaches the coverage gate.
+      - name: Verify simulation_tests registration
         shell: bash
         run: |
           count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -c 'Test #' || true)
           if [[ "$count" -eq 0 ]]; then
-            echo "WARNING: No simulation_tests test cases discovered. Phase 6 deliverable: ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60)."
-          else
-            echo "simulation_tests routing: $count test(s) discovered."
+            echo "ERROR: No simulation_tests test cases discovered. Ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60) and that the binary links and starts correctly."
+            exit 1
           fi
+          echo "simulation_tests routing: $count test(s) discovered."
+
+      # Step 12e: Verify Phase 10 font assets are present in the source tree.
+      # IrrlichtUIBackend loads hud_font.xml and hud_mono_font.xml at runtime with
+      # graceful fallback (log warning, no crash) — so a missing font file does NOT
+      # cause a test-binary failure.  Without this explicit check, Phase 10 could
+      # ship to main without the font assets and CI would silently pass.
+      # Both files must be present for the Phase 10 exit criterion:
+      # "assets/fonts/hud_font.xml AND hud_mono_font.xml both load without error."
+      - name: Verify Phase 10 font assets present
+        shell: bash
+        run: |
+          test -f assets/fonts/hud_font.xml || { echo "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing"; exit 1; }
+          test -f assets/fonts/hud_mono_font.xml || { echo "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing"; exit 1; }
+          echo "Phase 10 font assets verified: hud_font.xml and hud_mono_font.xml present."
 
       # Step 13: Verify default.mhr HRTF data — hard-fail (Phase 4).
       # Searches the entire workspace (vcpkg install tree) for the HRTF data file.
@@ -207,6 +305,16 @@ jobs:
           test -f assets/shaders/ui_quad.vert || { echo "ERROR: assets/shaders/ui_quad.vert not found"; exit 1; }
           test -f assets/shaders/ui_quad.frag || { echo "ERROR: assets/shaders/ui_quad.frag not found"; exit 1; }
           echo "UI shader assets verified."
+
+      - name: Verify terrain assets present
+        run: |
+          test -f assets/textures/terrain/terrain_grass_d.dds    || { echo "ERROR: terrain_grass_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_asphalt_d.dds  || { echo "ERROR: terrain_asphalt_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_soil_d.dds     || { echo "ERROR: terrain_soil_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_concrete_d.dds || { echo "ERROR: terrain_concrete_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_chunk_splat.png || { echo "ERROR: terrain_chunk_splat.png missing"; exit 1; }
+          test -f assets/shaders/terrain.vert || { echo "ERROR: terrain.vert missing"; exit 1; }
+          test -f assets/shaders/terrain.frag || { echo "ERROR: terrain.frag missing"; exit 1; }
 
       # Step 14: Run unit tests.
       # AITOWN_HEADLESS=1 — guard against unit tests that inadvertently trigger IrrlichtDevice init.
@@ -290,7 +398,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
-      # Step 2: Supply-chain lint (same grep as build-linux — rejects placeholder SHAs).
+      # Step 2: Supply-chain lint (same as build-linux — rejects placeholder SHAs and
+      # validates container image digest pins).
       - name: Lint workflow for placeholder SHAs
         shell: bash
         run: |
@@ -303,6 +412,75 @@ jobs:
             exit 1
           fi
           echo "SHA lint passed."
+          echo "Checking container image digest pins..."
+          if grep -E '^\s+image:\s+' .github/workflows/ci.yml | grep -Ev '@sha256:[0-9a-f]{64}'; then
+            echo "ERROR: container image: line without full sha256 digest pin found in ci.yml."
+            exit 1
+          fi
+          echo "Container image digest lint passed."
+
+      # Step 2a: Install Pillow for asset validation (validate_assets.py check_23 uses PIL).
+      # pip install is idempotent; Pillow is a pre-built wheel on windows-latest.
+      - name: Install Pillow (asset validation dependency)
+        shell: pwsh
+        run: pip install Pillow
+
+      # Step 2b: Preflight — validate assets (checks 21, 22, 23, 24).
+      # Same checks as build-linux (see build-linux comments for rationale).
+      # Runs before CMake configure so asset errors fail fast.
+      - name: Preflight asset validation (checks 21, 22, 23, 24)
+        shell: pwsh
+        run: python tools/validate_assets.py
+
+      - name: Verify clouds.png present
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "assets/textures/sky/clouds.png")) { Write-Error "ERROR: assets/textures/sky/clouds.png missing"; exit 1 }
+
+      # Step 2c: Preflight — font asset presence gates.
+      # PS 5.1 compatible: use if (-not (Test-Path ...)) { exit 1 }
+      # "Test-Path ... || exit 1" is PS 7+ syntax only.
+      - name: Verify font assets present
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "assets/fonts/hud_font.xml")) {
+            Write-Error "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          }
+          Write-Host "assets/fonts/hud_font.xml: present."
+          if (-not (Test-Path "assets/fonts/hud_mono_font.xml")) {
+            Write-Error "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          }
+          Write-Host "assets/fonts/hud_mono_font.xml: present."
+
+      # Step 2d: Preflight — Phase 10 audio asset presence gates.
+      # PS 5.1 compatible: use if (-not (Test-Path ...)) { exit 1 }
+      # Checks the same 5 core Phase 10 audio assets as build-linux.
+      - name: Verify Phase 10 audio assets present
+        shell: pwsh
+        run: |
+          $assets = @(
+            "assets/audio/sfx_build_place.wav",
+            "assets/audio/sfx_build_demolish.wav",
+            "assets/audio/stinger_milestone.wav",
+            "assets/audio/ambient_day.ogg",
+            "assets/audio/sfx_zone_residential.ogg",
+            "assets/audio/sfx_zone_commercial.ogg",
+            "assets/audio/sfx_zone_industrial.ogg"
+          )
+          $failed = $false
+          foreach ($asset in $assets) {
+            if (-not (Test-Path $asset)) {
+              Write-Error "ERROR: $asset not found — Phase 10 audio asset missing."
+              $failed = $true
+            } else {
+              Write-Host "${asset}: present."
+            }
+          }
+          if ($failed) {
+            exit 1
+          }
 
       # Step 3: Detect MSVC version via vswhere.exe.
       # MUST be a SEPARATE named step before actions/cache.
@@ -413,6 +591,39 @@ jobs:
         shell: pwsh
         run: |
           "${{ github.workspace }}\build\vcpkg_installed\x64-windows\bin" >> $env:GITHUB_PATH
+
+      # Step 12e: Verify Phase 10 font assets are present in the source tree.
+      # Mirrors the identical check in build-linux and coverage-linux.
+      # IrrlichtUIBackend loads hud_font.xml and hud_mono_font.xml at runtime with
+      # graceful fallback (log warning, no crash) — so a missing font file does NOT
+      # cause a test-binary failure.  Without this explicit check, Phase 10 could
+      # ship to main without the font assets and Windows CI would silently pass.
+      # Phase 10 exit criterion: "both load without error ... on both Linux and Windows CI".
+      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1"
+      # is PS 7+ only; GitHub Actions Windows runners use PS 5.1.
+      - name: Verify Phase 10 font assets present
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "assets/fonts/hud_font.xml")) {
+            Write-Error "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing"
+            exit 1
+          }
+          if (-not (Test-Path "assets/fonts/hud_mono_font.xml")) {
+            Write-Error "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing"
+            exit 1
+          }
+          Write-Host "Phase 10 font assets verified: hud_font.xml and hud_mono_font.xml present."
+
+      - name: Verify terrain assets present
+        run: |
+          if (-not (Test-Path 'assets/textures/terrain/terrain_grass_d.dds'))    { Write-Error 'terrain_grass_d.dds missing'; exit 1 }
+          if (-not (Test-Path 'assets/textures/terrain/terrain_asphalt_d.dds'))  { Write-Error 'terrain_asphalt_d.dds missing'; exit 1 }
+          if (-not (Test-Path 'assets/textures/terrain/terrain_soil_d.dds'))     { Write-Error 'terrain_soil_d.dds missing'; exit 1 }
+          if (-not (Test-Path 'assets/textures/terrain/terrain_concrete_d.dds')) { Write-Error 'terrain_concrete_d.dds missing'; exit 1 }
+          if (-not (Test-Path 'assets/textures/terrain/terrain_chunk_splat.png')) { Write-Error 'terrain_chunk_splat.png missing'; exit 1 }
+          if (-not (Test-Path 'assets/shaders/terrain.vert')) { Write-Error 'terrain.vert missing'; exit 1 }
+          if (-not (Test-Path 'assets/shaders/terrain.frag')) { Write-Error 'terrain.frag missing'; exit 1 }
+        shell: powershell
 
       # Step 13: Run unit tests.
       # AITOWN_HEADLESS=1 and ALSOFT_DRIVERS=null required — headless Windows runners
@@ -528,7 +739,7 @@ jobs:
 
       # Step 2: Supply-chain lint (same as build-linux — both jobs must enforce supply-chain pins).
       # Rationale: a CI run that skips build-linux and only runs coverage-linux must still
-      # reject placeholder SHAs.
+      # reject placeholder SHAs and validate container image digest pins.
       - name: Lint workflow for placeholder SHAs
         shell: bash
         run: |
@@ -541,12 +752,73 @@ jobs:
             exit 1
           fi
           echo "SHA lint passed."
+          echo "Checking container image digest pins..."
+          if grep -E '^\s+image:\s+' .github/workflows/ci.yml | grep -Ev '@sha256:[0-9a-f]{64}'; then
+            echo "ERROR: container image: line without full sha256 digest pin found in ci.yml."
+            exit 1
+          fi
+          echo "Container image digest lint passed."
 
       # Step 3: Install system dependencies (same canonical position as build-linux).
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev libglew-dev lcov
+
+      # Step 3a: Install Pillow for asset validation (same as build-linux).
+      - name: Install Pillow (asset validation dependency)
+        run: pip install Pillow
+
+      # Step 3b: Preflight — validate assets (checks 21, 22, 23, 24).
+      # Mirrors build-linux preflight — coverage-linux is self-contained and must run
+      # all gates independently. A failure in build-linux does not block coverage-linux
+      # from starting, so preflight must be repeated here.
+      - name: Preflight asset validation (checks 21, 22, 23, 24)
+        run: python3 tools/validate_assets.py
+
+      - name: Verify clouds.png present
+        shell: bash
+        run: |
+          test -f assets/textures/sky/clouds.png || { echo "ERROR: assets/textures/sky/clouds.png missing"; exit 1; }
+
+      # Step 3c: Preflight — font asset presence gates (same as build-linux).
+      - name: Verify font assets present
+        shell: bash
+        run: |
+          if [ ! -f assets/fonts/hud_font.xml ]; then
+            echo "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          fi
+          echo "assets/fonts/hud_font.xml: present."
+          if [ ! -f assets/fonts/hud_mono_font.xml ]; then
+            echo "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          fi
+          echo "assets/fonts/hud_mono_font.xml: present."
+
+      # Step 3d: Preflight — Phase 10 audio asset presence gates (same as build-linux).
+      - name: Verify Phase 10 audio assets present
+        shell: bash
+        run: |
+          failed=0
+          for asset in \
+            assets/audio/sfx_build_place.wav \
+            assets/audio/sfx_build_demolish.wav \
+            assets/audio/stinger_milestone.wav \
+            assets/audio/ambient_day.ogg \
+            assets/audio/sfx_zone_residential.ogg \
+            assets/audio/sfx_zone_commercial.ogg \
+            assets/audio/sfx_zone_industrial.ogg; do
+            if [ ! -f "$asset" ]; then
+              echo "ERROR: $asset not found — Phase 10 audio asset missing."
+              failed=1
+            else
+              echo "$asset: present."
+            fi
+          done
+          if [ "$failed" -eq 1 ]; then
+            exit 1
+          fi
 
       # Step 4: Detect GCC version (separate step before actions/cache).
       - name: Detect GCC version
@@ -637,15 +909,28 @@ jobs:
 
       # Step 12c: Verify simulation_tests specifically is discoverable — Phase 6 deliverable.
       # Mirrors the identical step in build-linux.
-      - name: Verify simulation_tests registration (Phase 6 deliverable)
+      # Phase 6 is complete; hardened from WARNING-ONLY to hard-fail.
+      # Phase 10 adds adaptive_music_intensity_test.cpp — silent 0-test ctest exit must be caught.
+      - name: Verify simulation_tests registration
         shell: bash
         run: |
           count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -c 'Test #' || true)
           if [[ "$count" -eq 0 ]]; then
-            echo "WARNING: No simulation_tests test cases discovered. Phase 6 deliverable: ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60)."
-          else
-            echo "simulation_tests routing: $count test(s) discovered."
+            echo "ERROR: No simulation_tests test cases discovered. Ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60) and that the binary links and starts correctly."
+            exit 1
           fi
+          echo "simulation_tests routing: $count test(s) discovered."
+
+      # Step 12e: Verify Phase 10 font assets are present in the source tree.
+      # Mirrors the identical step in build-linux. Coverage instrumentation does not
+      # affect asset presence — both jobs need this gate so coverage-linux cannot
+      # pass independently without the font files.
+      - name: Verify Phase 10 font assets present
+        shell: bash
+        run: |
+          test -f assets/fonts/hud_font.xml || { echo "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing"; exit 1; }
+          test -f assets/fonts/hud_mono_font.xml || { echo "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing"; exit 1; }
+          echo "Phase 10 font assets verified: hud_font.xml and hud_mono_font.xml present."
 
       # Step 12d: Verify UI shader assets (Phase 8 deliverable).
       # Identical to the build-linux shader check — confirms assets/shaders/ui_quad.vert
@@ -657,6 +942,16 @@ jobs:
           test -f assets/shaders/ui_quad.vert || { echo "ERROR: assets/shaders/ui_quad.vert not found"; exit 1; }
           test -f assets/shaders/ui_quad.frag || { echo "ERROR: assets/shaders/ui_quad.frag not found"; exit 1; }
           echo "UI shader assets verified."
+
+      - name: Verify terrain assets present
+        run: |
+          test -f assets/textures/terrain/terrain_grass_d.dds    || { echo "ERROR: terrain_grass_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_asphalt_d.dds  || { echo "ERROR: terrain_asphalt_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_soil_d.dds     || { echo "ERROR: terrain_soil_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_concrete_d.dds || { echo "ERROR: terrain_concrete_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_chunk_splat.png || { echo "ERROR: terrain_chunk_splat.png missing"; exit 1; }
+          test -f assets/shaders/terrain.vert || { echo "ERROR: terrain.vert missing"; exit 1; }
+          test -f assets/shaders/terrain.frag || { echo "ERROR: terrain.frag missing"; exit 1; }
 
       # Step 13: Run unit tests.
       - name: Run unit tests (no display)
@@ -756,6 +1051,8 @@ jobs:
             '*/tests/*' \
             '*/mock_*.h' '*/mock_*.cpp' \
             '*/manual_*.h' '*/manual_*.cpp' \
+            '*/Mock*.h' '*/Mock*.cpp' \
+            '*/Manual*.h' '*/Manual*.cpp' \
             '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
             --output-file coverage_filtered.info
           lcov --list coverage_filtered.info
@@ -781,6 +1078,30 @@ jobs:
             count=$(grep -c "SF:.*src/simulation/" coverage_filtered.info || true)
             echo "PASS: Found $count src/simulation/ SF entries in coverage_filtered.info."
           fi
+
+      - name: Enforce src/simulation/ 85% per-file floor (Phase 11)
+        run: |
+          awk '
+            /^SF:/ { in_sim=0; fname="" }
+            /^SF:.*src\/simulation\// { in_sim=1; fname=$0; sub(/^SF:/, "", fname); lh=0; lf=0 }
+            in_sim && /^LH:/ { lh=$0; sub(/^LH:/, "", lh) }
+            in_sim && /^LF:/ { lf=$0; sub(/^LF:/, "", lf) }
+            in_sim && /^end_of_record/ {
+              if (lf+0 > 0) {
+                pct = lh/lf*100
+                if (min_pct == "" || pct < min_pct+0) { min_pct=pct; min_file=fname }
+              }
+              in_sim=0
+            }
+            END {
+              if (min_pct == "") { print "PREFLIGHT FAIL: No src/simulation/ files found in coverage_filtered.info"; exit 1 }
+              if (min_pct+0 < 85.0) {
+                printf "FAIL: worst src/simulation/ file %s coverage %.1f%% < 85%% Phase 11 per-file floor\n", min_file, min_pct; exit 1
+              } else {
+                printf "PASS: worst src/simulation/ file %s coverage %.1f%% >= 85%%\n", min_file, min_pct
+              }
+            }
+          ' coverage_filtered.info
 
       - name: Enforce 95% total line coverage gate
         run: |
@@ -881,7 +1202,15 @@ jobs:
 
   # ============================================================================
   # validate-assets — validate audio/texture/model assets.
-  # Phase 9: all 20 checks (Checks #1–#20) implemented in tools/validate_assets.py.
+  # Phase 9:  all 20 checks (Checks #1–#20) implemented in tools/validate_assets.py.
+  # Phase 10: check #21 added — zone loop silence-floor gate (sfx_zone_*.ogg leading/trailing
+  #           4410 samples ≤ −60 dBFS); ffmpeg installed below for OGG PCM decode.
+  #           check #22 added — non-stinger WAV SFX (sfx_*.wav, ui_*.wav) mono/44100/16-bit gate.
+  #           check #23 added — hud_sprites_ui.png must exist at assets/textures/ui/,
+  #           be 2048×2048, and RGBA; Pillow installed below for PNG dimension check.
+  # Phase 10b: check #24 added — clouds.png must exist at assets/textures/sky/,
+  #            be 1024×1024, and RGBA (4 channels). No change to job definition or
+  #            all-checks-pass wiring.
   # timeout-minutes: 10 is permanent.
   # ============================================================================
   validate-assets:
@@ -903,8 +1232,74 @@ jobs:
           grep -q "check_20" tools/validate_assets.py || (echo "FAIL: check_20 not found in validate_assets.py" && exit 1)
           echo "PASS: check_20 present"
 
+      - name: Verify check_21 present in validate_assets.py
+        run: |
+          grep -q "check_21" tools/validate_assets.py || (echo "FAIL: check_21 not found in validate_assets.py — Phase 10 zone loop silence-floor gate missing" && exit 1)
+          echo "PASS: check_21 present"
+
+      - name: Verify check_22 present in validate_assets.py
+        # check_22: non-stinger WAV SFX (sfx_*.wav, ui_*.wav) must be mono, 44100 Hz, 16-bit PCM.
+        # Phase 10 mandates mono/44100/16-bit for all WAV SFX assets; check_19 covers only stingers.
+        # A missing check_22 allows stereo or mis-sampled SFX WAVs to pass CI and silently fail
+        # at runtime when OpenAL Soft rejects non-mono buffers for positional sources.
+        run: |
+          grep -q "check_22" tools/validate_assets.py || (echo "FAIL: check_22 not found in validate_assets.py — Phase 10 non-stinger WAV SFX format gate missing" && exit 1)
+          echo "PASS: check_22 present"
+
+      - name: Verify check_23 present in validate_assets.py
+        # check_23: assets/textures/ui/hud_sprites_ui.png must exist, be 2048×2048, and RGBA.
+        # Phase 10 commits the HUD sprite sheet PNG as a runtime asset; a missing or malformed
+        # PNG causes IrrlichtUIBackend::m_spriteTextureReady to remain false, making toolbar
+        # buttons display fallback text instead of sprite icons in every rendered frame.
+        # A missing check_23 allows a truncated or wrong-dimensions PNG to pass CI silently.
+        run: |
+          grep -q "check_23" tools/validate_assets.py || (echo "FAIL: check_23 not found in validate_assets.py — Phase 10 hud_sprites_ui.png dimension/RGBA gate missing" && exit 1)
+          echo "PASS: check_23 present"
+
+      - name: Verify check_24 present in validate_assets.py
+        # check_24: assets/textures/sky/clouds.png must exist, be 1024×1024, and RGBA.
+        # Phase 10b mandates this cloud texture format gate. A missing check_24 allows
+        # a wrong-dimensions or wrong-channel clouds.png to pass CI silently.
+        run: |
+          grep -q "check_24_clouds_png" tools/validate_assets.py || (echo "FAIL: check_24_clouds_png not found in validate_assets.py — Phase 10b cloud texture format gate missing" && exit 1)
+          echo "PASS: check_24 present"
+
+      - name: Verify hud_sprites_ui.dds not git-tracked
+        # The DDS intermediate is an authoring artifact and must never be committed.
+        # .gitignore has the entry; git rm --cached was run in Phase 10.
+        # This step catches any accidental re-addition via 'git add --force'.
+        # git ls-files exits 0 and prints the path if the file is tracked; we invert
+        # the logic so CI fails when the file IS present in the index.
+        shell: bash
+        run: |
+          if git ls-files --error-unmatch assets/textures/ui/hud_sprites_ui.dds 2>/dev/null; then
+            echo "ERROR: assets/textures/ui/hud_sprites_ui.dds is still tracked by git."
+            echo "Run 'git rm --cached assets/textures/ui/hud_sprites_ui.dds' and commit the result."
+            exit 1
+          fi
+          echo "PASS: hud_sprites_ui.dds is not git-tracked."
+
+      - name: Verify hud_sprites_ui_layout.json not git-tracked
+        # hud_sprites_ui_layout.json is an incompatible legacy layout artifact that must not
+        # be used as an authoring reference. It was removed in Phase 10 (git rm).
+        shell: bash
+        run: |
+          if git ls-files --error-unmatch assets/textures/ui/hud_sprites_ui_layout.json 2>/dev/null; then
+            echo "ERROR: assets/textures/ui/hud_sprites_ui_layout.json is still tracked by git."
+            echo "Run 'git rm assets/textures/ui/hud_sprites_ui_layout.json' and commit the result."
+            exit 1
+          fi
+          echo "PASS: hud_sprites_ui_layout.json is not git-tracked."
+
       - name: Install Python dependencies
-        run: pip install mutagen
+        # mutagen: OGG/WAV metadata (checks #16–#19).
+        # Pillow: PNG image dimension and mode check (check #23 — hud_sprites_ui.png 2048×2048 RGBA).
+        # ffmpeg: required by check_21 (_decode_ogg_pcm_int16) to decode sfx_zone_*.ogg to
+        # raw int16 PCM for the silence-floor gate.  Installed as a system package (not pip)
+        # because the Python ffmpeg bindings are wrappers around the ffmpeg binary anyway.
+        run: |
+          pip install mutagen Pillow
+          sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Run asset validation
         run: python tools/validate_assets.py
@@ -937,6 +1332,42 @@ jobs:
         run: markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
 
   # ============================================================================
+  # test-container-xvfb — Phase 11b spike: validate xvfb-run inside the pre-built
+  # CI Docker container on a GitHub-hosted runner.
+  # This job is isolated (build-linux and coverage-linux are NOT changed in this PR).
+  # After the spike is merged and the outcome documented, the main Phase 11b PR
+  # removes this job and switches build-linux/coverage-linux to container: mode.
+  # ============================================================================
+  test-container-xvfb:
+    name: "Spike — xvfb container test"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      # TODO: replace digest after running docker-ci-image.yml workflow_dispatch
+      image: ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      options: --user root
+    permissions:
+      packages: read
+      checks: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - name: Configure CMake (preset ci-linux)
+        run: cmake --preset ci-linux
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Run requires-opengl tests via xvfb-run
+        run: |
+          mkdir -p test_results
+          xvfb-run --auto-servernum \
+            ctest --test-dir build -L '^requires-opengl$' --output-on-failure
+        env:
+          GTEST_OUTPUT: "xml:test_results/"
+          AITOWN_HEADLESS: "1"
+          ALSOFT_DRIVERS: "null"
+
+  # ============================================================================
   # all-checks-pass — gate job required by branch protection
   # Must run with if: always() so it executes even when dependency jobs fail.
   # The explicit Bash-array form is the canonical form — do NOT substitute with
@@ -949,6 +1380,7 @@ jobs:
       - coverage-linux
       - markdown-lint
       - validate-assets
+      - test-container-xvfb
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -962,6 +1394,7 @@ jobs:
             "${{ needs.coverage-linux.result }}"
             "${{ needs.markdown-lint.result }}"
             "${{ needs.validate-assets.result }}"
+            "${{ needs.test-container-xvfb.result }}"
           )
           failed=0
           for result in "${results[@]}"; do
