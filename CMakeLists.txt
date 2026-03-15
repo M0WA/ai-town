@@ -546,6 +546,12 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/terrain_flattening_sim_test.cpp
 )
 
+# Phase 11: real SaveSystem coverage tests (exercises SaveSystem.cpp directly;
+# existing save_system_test.cpp uses stubs and contributes 0% lcov coverage).
+target_sources(simulation_tests PRIVATE
+    tests/simulation/save_system_real_test.cpp
+)
+
 # Phase 10: AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier().
 # MUST be on simulation_tests ONLY — never on the main aitown binary target.
 target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
