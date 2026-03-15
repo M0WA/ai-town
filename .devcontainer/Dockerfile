@@ -1,7 +1,6 @@
 # CI base image — extends ghcr.io/m0wa/aitown-ci-linux.
-# TODO: after running docker-ci-image.yml, replace digest with the sha256 output.
 # Both this file and ci.yml MUST pin identical digests (Atomicity Contract item 5).
-FROM ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:0000000000000000000000000000000000000000000000000000000000000000
+FROM ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:536a408ad39aad3322f7c7eae3e3ce08131a31bea80607aaa4e28344a0a5e7f8
 
 ARG TZ
 ENV TZ="$TZ"

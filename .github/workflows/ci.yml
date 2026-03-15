@@ -1343,8 +1343,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     container:
-      # TODO: replace digest after running docker-ci-image.yml workflow_dispatch
-      image: ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      image: ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:536a408ad39aad3322f7c7eae3e3ce08131a31bea80607aaa4e28344a0a5e7f8
       options: --user root
     permissions:
       packages: read
