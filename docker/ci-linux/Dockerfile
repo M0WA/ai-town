@@ -6,8 +6,8 @@ ARG VCPKG_COMMIT
 
 # Install system dependencies in one RUN layer to keep the image lean.
 # Packages included:
-#   build tools:   git, curl, wget, ca-certificates, jq, pkg-config, build-essential,
-#                  ccache, ninja-build, gcc-13, g++-13
+#   build tools:   git, curl, wget, ca-certificates, zip, unzip, tar, jq, pkg-config,
+#                  build-essential, ccache, ninja-build, gcc-13, g++-13
 #   CI runtime:    xvfb, xauth, libgl1-mesa-dev, mesa-utils, libglu1-mesa-dev,
 #                  libxxf86vm-dev, libx11-dev, libxext-dev, libglew-dev,
 #                  libasound2-dev, libpulse-dev, lcov
@@ -17,6 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
     ca-certificates \
+    zip \
+    unzip \
+    tar \
     jq \
     pkg-config \
     build-essential \
