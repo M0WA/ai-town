@@ -366,7 +366,7 @@ if(WIN32)
     # so we must use the explicit vcpkg bin path for the source DLL.
     add_custom_command(TARGET aitown POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin/OpenAL32.dll"
+            "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/OpenAL32.dll"
             "$<TARGET_FILE_DIR:aitown>/soft_oal.dll"
         COMMENT "Copying OpenAL32.dll (OpenAL Soft runtime) to aitown output as soft_oal.dll"
     )
@@ -381,7 +381,7 @@ endif()
 # the build directory.
 add_custom_command(TARGET aitown POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
+        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
         "$<TARGET_FILE_DIR:aitown>/default.mhr"
     COMMENT "Copying default.mhr (OpenAL Soft HRTF data) to aitown output"
 )
@@ -797,7 +797,7 @@ target_sources(audio_tests PRIVATE
 # The copy is cross-platform: both Linux and Windows CI include this step.
 add_custom_command(TARGET audio_tests POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
+        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
         "$<TARGET_FILE_DIR:audio_tests>/default.mhr"
     COMMENT "Copying default.mhr (OpenAL Soft HRTF data) next to audio_tests"
 )
