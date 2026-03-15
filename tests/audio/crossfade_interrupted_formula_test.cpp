@@ -15,6 +15,9 @@
 // They test the math formula in isolation.
 
 #include <gtest/gtest.h>
+#if defined(_WIN32)
+#  define _USE_MATH_DEFINES  // required for M_PI on MSVC
+#endif
 #include <cmath>
 #include <limits>
 
