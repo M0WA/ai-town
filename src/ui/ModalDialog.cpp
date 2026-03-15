@@ -492,6 +492,71 @@ void ModalDialog::layoutGameOver(int64_t debt, int months) {
 }
 
 // ---------------------------------------------------------------------------
+// showUnsavedQuit / layoutUnsavedQuit
+// Phase 11: "You have unsaved progress." blocking modal.
+// Primary   = "Save and Quit"      → DialogResult::Accept
+// Secondary = "Quit Without Saving" → DialogResult::Decline
+// Tertiary  = "Cancel"              → DialogResult::Cancel
+// ---------------------------------------------------------------------------
+void ModalDialog::showUnsavedQuit(bool quitToDesktop) {
+    openModal(DialogType::UnsavedQuit);
+    layoutUnsavedQuit(quitToDesktop);
+}
+
+void ModalDialog::layoutUnsavedQuit(bool /*quitToDesktop*/) {
+    if (!m_backend) return;
+
+    // Medium dialog: 520x240, centered
+    setDialogRect(520, 240);
+
+    const int kPad    = 20;
+    const int kTop    = 16;
+    const int kBtnH   = 40;
+    const int kBtnW   = 160;
+    const int kBtnGap = 12;
+    const int kBtnBot = 16;
+
+    // Title row.
+    m_backend->setElementRect(m_titleLabel,
+        m_dialogX + kPad, m_dialogY + kTop,
+        m_dialogW - kPad * 2, 40);
+
+    // Body: between title and button row.
+    const int bodyTop = m_dialogY + kTop + 40 + 12;
+    const int bodyBot = m_dialogY + m_dialogH - kBtnBot - kBtnH - 12;
+    m_backend->setElementRect(m_bodyLabel,
+        m_dialogX + kPad, bodyTop,
+        m_dialogW - kPad * 2, bodyBot - bodyTop);
+
+    // Three-button row right-aligned: Cancel | Quit Without Saving | Save and Quit
+    const int btnY = m_dialogY + m_dialogH - kBtnBot - kBtnH;
+    m_backend->setElementRect(m_btnPrimary,
+        m_dialogX + m_dialogW - kPad - kBtnW, btnY, kBtnW, kBtnH);
+    m_backend->setElementRect(m_btnSecondary,
+        m_dialogX + m_dialogW - kPad - kBtnW * 2 - kBtnGap, btnY, kBtnW, kBtnH);
+    m_backend->setElementRect(m_btnTertiary,
+        m_dialogX + m_dialogW - kPad - kBtnW * 3 - kBtnGap * 2, btnY, kBtnW, kBtnH);
+
+    m_backend->setElementVisible(m_dialogBg,    true);
+    m_backend->setElementVisible(m_titleLabel,  true);
+    m_backend->setElementVisible(m_bodyLabel,   true);
+    m_backend->setElementVisible(m_btnPrimary,  true);   // Save and Quit
+    m_backend->setElementVisible(m_btnSecondary,true);   // Quit Without Saving
+    m_backend->setElementVisible(m_btnTertiary, true);   // Cancel
+    m_backend->setElementVisible(m_btnBack,     false);
+
+    m_backend->setElementText(m_titleLabel, "Unsaved Progress");
+    m_backend->setElementText(m_bodyLabel,
+        "You have unsaved progress. What would you like to do?");
+    m_backend->setElementText(m_btnPrimary,   "Save and Quit");
+    m_backend->setElementText(m_btnSecondary, "Quit Without Saving");
+    m_backend->setElementText(m_btnTertiary,  "Cancel");
+
+    // Default focus on Save and Quit (least destructive).
+    m_focusedButton = 0;
+}
+
+// ---------------------------------------------------------------------------
 // draw
 // ---------------------------------------------------------------------------
 void ModalDialog::draw() {
@@ -522,6 +587,7 @@ bool ModalDialog::onEvent(const InputEvent& event) {
         if (key == 9) { // Tab
             int maxButtons = 2;
             if (m_dialogType == DialogType::ForcedLoanScreen2) maxButtons = 4;
+            if (m_dialogType == DialogType::UnsavedQuit)       maxButtons = 3;
             m_focusedButton = (m_focusedButton + 1) % maxButtons;
             return true;
         }
@@ -595,6 +661,17 @@ bool ModalDialog::onEvent(const InputEvent& event) {
                     closeModal();
                     return true;
 
+                case DialogType::UnsavedQuit:
+                    if (m_focusedButton == 0) {
+                        m_lastResult = DialogResult::Accept;   // Save and Quit
+                    } else if (m_focusedButton == 1) {
+                        m_lastResult = DialogResult::Decline;  // Quit Without Saving
+                    } else {
+                        m_lastResult = DialogResult::Cancel;   // Cancel
+                    }
+                    closeModal();
+                    return true;
+
                 default:
                     break;
             }
@@ -613,6 +690,7 @@ bool ModalDialog::onEvent(const InputEvent& event) {
                     return true;
                 case DialogType::DemolishConfirm:
                 case DialogType::WASDPreset:
+                case DialogType::UnsavedQuit:
                     m_lastResult = DialogResult::Cancel;
                     closeModal();
                     return true;

@@ -729,11 +729,12 @@ TEST_F(MainMenuPanelStandaloneTest, Draw_WhenHidden_NoCrash) {
 // --- MainMenuPanel loading screen coverage ---
 // Handle assignment: nextHandle_ starts at 300, prefix ++ gives:
 //   301=titleLabel, 302=btnNewGame, 303=btnLoadGame, 304=btnSettings, 305=btnQuit,
-//   306=ngTitle, 307=ngModeLabel, 308=ngBtnSandbox, 309=ngBtnScenario,
-//   310=ngDiffLabel, 311=ngBtnEasy, 312=ngBtnNormal, 313=ngBtnHard,
-//   314=ngSeedLabel, 315=ngSeedInput, 316=ngBtnRandomize,
-//   317=ngBtnStartCity, 318=ngBtnBack, 319=ngErrorLabel,
-//   320=loadingLabel, 321=loadingProgress, 322=loadingCancelBtn.
+//   306=loadStatusLabel,
+//   307=ngTitle, 308=ngModeLabel, 309=ngBtnSandbox, 310=ngBtnScenario,
+//   311=ngDiffLabel, 312=ngBtnEasy, 313=ngBtnNormal, 314=ngBtnHard,
+//   315=ngSeedLabel, 316=ngSeedInput, 317=ngBtnRandomize,
+//   318=ngBtnStartCity, 319=ngBtnBack, 320=ngErrorLabel,
+//   321=loadingLabel, 322=loadingProgress, 323=loadingCancelBtn.
 
 // Click on "Start City" navigates from NewGame to Loading screen.
 TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickStartCity_NavigatesToLoading) {
@@ -743,8 +744,8 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickStartCity_NavigatesToLoading) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    // Set only m_ngBtnStartCity (handle 317) rect; others default to (0,0,0,0).
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{780, 480, 360, 48}));
+    // Set only m_ngBtnStartCity (handle 318) rect; others default to (0,0,0,0).
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 480, 360, 48}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -766,7 +767,7 @@ TEST_F(MainMenuPanelStandaloneTest, Loading_EscapeToNewGame) {
     enter.keyCode = 13;
     panel_->onEvent(enter); // MainMenu -> NewGame
 
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{780, 480, 360, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 480, 360, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -790,7 +791,7 @@ TEST_F(MainMenuPanelStandaloneTest, Loading_CancelButtonClick) {
     enter.keyCode = 13;
     panel_->onEvent(enter); // MainMenu -> NewGame
 
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{780, 480, 360, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 480, 360, 48}));
     InputEvent startClick;
     startClick.type = InputEvent::Type::MouseButtonDown;
     startClick.button = 0;
@@ -798,9 +799,9 @@ TEST_F(MainMenuPanelStandaloneTest, Loading_CancelButtonClick) {
     startClick.y = 490;
     panel_->onEvent(startClick); // NewGame -> Loading
 
-    // Reset rects, then set only m_loadingCancelBtn (handle 322).
+    // Reset rects, then set only m_loadingCancelBtn (handle 323).
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(322)).WillByDefault(Return(Rect{900, 570, 120, 36}));
+    ON_CALL(backend_, getElementRect(323)).WillByDefault(Return(Rect{900, 570, 120, 36}));
 
     InputEvent cancelClick;
     cancelClick.type = InputEvent::Type::MouseButtonDown;
@@ -847,7 +848,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickNormalDifficulty) {
     panel_->onEvent(enter); // MainMenu -> NewGame
 
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(312)).WillByDefault(Return(Rect{1000, 300, 120, 32}));
+    ON_CALL(backend_, getElementRect(313)).WillByDefault(Return(Rect{1000, 300, 120, 32}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -866,7 +867,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickHardDifficulty) {
     panel_->onEvent(enter);
 
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(313)).WillByDefault(Return(Rect{780, 340, 120, 32}));
+    ON_CALL(backend_, getElementRect(314)).WillByDefault(Return(Rect{780, 340, 120, 32}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -885,7 +886,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickBack) {
     panel_->onEvent(enter);
 
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 530, 120, 36}));
+    ON_CALL(backend_, getElementRect(319)).WillByDefault(Return(Rect{780, 530, 120, 36}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -904,7 +905,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickRandomize) {
     panel_->onEvent(enter);
 
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(316)).WillByDefault(Return(Rect{1060, 280, 100, 32}));
+    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{1060, 280, 100, 32}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -2003,13 +2004,14 @@ TEST_F(MainMenuPanelStandaloneTest, ConsumeStartGameRequest_TrueOnce) {
     panel_->onEvent(enter);
 
     // On NewGame screen, click Start City button via mouse.
-    // Handle 317 = m_ngBtnStartCity (count constructor calls from nextHandle_=300):
-    //   301=titleLabel, 302=NewGame, 303=LoadGame, 304=Settings, 305=Quit,
-    //   306=ngTitle, 307=ngModeLabel, 308=ngBtnSandbox, 309=ngBtnScenario,
-    //   310=ngDiffLabel, 311=ngBtnEasy, 312=ngBtnNormal, 313=ngBtnHard,
-    //   314=ngSeedLabel, 315=ngSeedInput, 316=ngBtnRandomize,
-    //   317=ngBtnStartCity, 318=ngBtnBack.
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    // Handle 318 = m_ngBtnStartCity (count constructor calls from nextHandle_=300):
+    //   301=titleLabel, 302=btnNewGame, 303=btnLoadGame, 304=btnSettings, 305=btnQuit,
+    //   306=loadStatusLabel,
+    //   307=ngTitle, 308=ngModeLabel, 309=ngBtnSandbox, 310=ngBtnScenario,
+    //   311=ngDiffLabel, 312=ngBtnEasy, 313=ngBtnNormal, 314=ngBtnHard,
+    //   315=ngSeedLabel, 316=ngSeedInput, 317=ngBtnRandomize,
+    //   318=ngBtnStartCity, 319=ngBtnBack.
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2211,8 +2213,8 @@ TEST_F(MainMenuPanelStandaloneTest, ShowLoadingScreen_ViaStartCityClick) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    // Click Start City (handle 317) to trigger showLoadingScreen.
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    // Click Start City (handle 318) to trigger showLoadingScreen.
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2237,7 +2239,7 @@ TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_Escape_BackToNewGame) {
     panel_->onEvent(enter);
 
     // Click Start City to enter loading screen.
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2264,7 +2266,7 @@ TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_Escape_AfterCheckpoint_Ignored
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2294,7 +2296,7 @@ TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_CancelClick_BackToNewGame) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2302,8 +2304,8 @@ TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_CancelClick_BackToNewGame) {
     click.y = 510;
     panel_->onEvent(click);
 
-    // Click the Cancel button (handle 322 = m_loadingCancelBtn).
-    ON_CALL(backend_, getElementRect(322)).WillByDefault(Return(Rect{860, 570, 120, 36}));
+    // Click the Cancel button (handle 323 = m_loadingCancelBtn).
+    ON_CALL(backend_, getElementRect(323)).WillByDefault(Return(Rect{860, 570, 120, 36}));
     InputEvent cancelClick;
     cancelClick.type = InputEvent::Type::MouseButtonDown;
     cancelClick.button = 0;
@@ -2467,8 +2469,8 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickBack_MouseReturnsToMainMenu) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    // Handle 318 = m_ngBtnBack
-    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 560, 120, 36}));
+    // Handle 319 = m_ngBtnBack
+    ON_CALL(backend_, getElementRect(319)).WillByDefault(Return(Rect{780, 560, 120, 36}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2488,8 +2490,8 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickRandomize_Consumed) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    // Handle 316 = m_ngBtnRandomize
-    ON_CALL(backend_, getElementRect(316)).WillByDefault(Return(Rect{1080, 420, 100, 32}));
+    // Handle 317 = m_ngBtnRandomize
+    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{1080, 420, 100, 32}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;

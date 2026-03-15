@@ -21,6 +21,9 @@ public:
     void setSettingsPanel(SettingsPanel* settings);
     bool isVisible() const { return m_visible; }
 
+    // Polling API for UIManager: returns true (once) when Save was clicked.
+    bool consumeSaveRequest();
+
     // Polling API for UIManager: returns true (once) when Quit to Desktop was clicked.
     bool consumeQuitDesktopRequest();
 
@@ -46,6 +49,7 @@ private:
     static constexpr int kNumButtons = 5;
 
     // Polling flags
+    bool m_saveRequested{false};
     bool m_quitDesktopRequested{false};
     bool m_quitToMenuRequested{false};
 };

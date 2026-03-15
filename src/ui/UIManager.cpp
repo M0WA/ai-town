@@ -39,6 +39,7 @@
 #include "src/interfaces/IRenderer.h"       // IRenderer — for setZoneOverlay, pickTerrainTile
 #include "src/interfaces/ITerrainQuery.h"   // ITerrainQuery — for earthworks cost computation
 #include "src/interfaces/simulation_types.h"  // ZoneType, DensityTier, ServiceBuildingType
+#include "src/simulation/SaveSystem.h"        // SaveSystem — Phase 11 manual save + quit-guard
 
 #include <algorithm>
 #include <string>
@@ -1190,15 +1191,75 @@ void UIManager::update(float realDeltaSeconds) {
         }
     }
 
-    // 1c. Poll PauseMenuPanel for quit requests (Quit to Desktop, Quit to Main Menu).
+    // 1c. Poll PauseMenuPanel for save/quit requests.
     if (m_pauseMenu) {
+        // Manual save: call saveToSlot(1) if SaveSystem is available.
+        if (m_pauseMenu->consumeSaveRequest()) {
+            if (m_saveSystem) {
+                m_saveSystem->saveToSlot(1);
+                setUnsavedChanges(false);
+            }
+        }
+
+        // Quit to Desktop: check unsaved-changes guard.
         if (m_pauseMenu->consumeQuitDesktopRequest()) {
-            m_quitRequested = true;
+            if (m_hasUnsavedChanges && m_modal) {
+                m_pendingQuit = PendingQuitAction::Desktop;
+                m_modal->showUnsavedQuit(true);
+            } else {
+                m_quitRequested = true;
+            }
             return;
         }
+
+        // Quit to Main Menu: check unsaved-changes guard.
         if (m_pauseMenu->consumeQuitToMenuRequest()) {
-            transitionToMainMenu();
+            if (m_hasUnsavedChanges && m_modal) {
+                m_pendingQuit = PendingQuitAction::ToMenu;
+                m_modal->showUnsavedQuit(false);
+            } else {
+                transitionToMainMenu();
+            }
             return;
+        }
+    }
+
+    // 1d. Handle pending quit action after unsaved-changes modal closes.
+    if (m_pendingQuit != PendingQuitAction::None && m_modal && !m_modal->isActive()) {
+        auto result  = m_modal->getLastResult();
+        auto pending = m_pendingQuit;
+        m_pendingQuit = PendingQuitAction::None;
+
+        if (result == ModalDialog::DialogResult::Accept) {
+            // "Save and Quit" — save first then dispatch.
+            if (m_saveSystem) {
+                m_saveSystem->autoSave();
+                setUnsavedChanges(false);
+            }
+            if (pending == PendingQuitAction::Desktop) {
+                m_quitRequested = true;
+            } else {
+                transitionToMainMenu();
+            }
+            return;
+        }
+        if (result == ModalDialog::DialogResult::Decline) {
+            // "Quit Without Saving" — dispatch immediately.
+            if (pending == PendingQuitAction::Desktop) {
+                m_quitRequested = true;
+            } else {
+                transitionToMainMenu();
+            }
+            return;
+        }
+        // DialogResult::Cancel — do nothing, user stays in the game.
+    }
+
+    // 1e. Forward budget ticks from CitySimulation to SaveSystem (5-tick auto-save gate).
+    if (m_sim && m_saveSystem) {
+        int ticks = m_sim->consumeBudgetTicks();
+        for (int i = 0; i < ticks; ++i) {
+            m_saveSystem->onBudgetTick();
         }
     }
 
@@ -1218,11 +1279,16 @@ void UIManager::update(float realDeltaSeconds) {
     // =============================================================
     int currentMonths = m_sim->getConsecutiveDeficitMonths();
 
-    // Month 1 edge: post CRITICAL "2 months to bankruptcy" toast.
+    // Month 1 edge: post CRITICAL "2 months to bankruptcy" toast and auto-slow to 1×
+    // (player retains speed selector control — per architecture/game-design/game-over-flow.md).
     if (currentMonths == 1 && m_lastDeficitMonths < 1) {
         m_notifications->postCritical(
             "City Finances Critical",
             "2 months to bankruptcy if deficit continues");
+        if (m_sim) {
+            m_sim->setSpeed(SpeedMultiplier::x1);
+            if (m_audio) m_audio->setSpeed(SimSpeed::x1);
+        }
     }
 
     // Month 2 edge: post CRITICAL "1 month to bankruptcy" toast AND fire stinger.
@@ -1359,6 +1425,10 @@ void UIManager::update(float realDeltaSeconds) {
 
 void UIManager::transitionToPaused() {
     m_state = GameState::Paused;
+    // Auto-save before displaying the pause menu (per save-system.md).
+    if (m_saveSystem) {
+        m_saveSystem->onPauseMenuOpened();
+    }
     m_pauseMenu->show();
     if (m_sim) {
         m_sim->setPaused(true);
@@ -1393,6 +1463,11 @@ void UIManager::transitionToGameOver() {
 }
 
 void UIManager::showForcedLoanDialog(const LoanTerms& terms) {
+    // Auto-save immediately before showing the forced-loan modal (per save-system.md).
+    if (m_saveSystem) {
+        m_saveSystem->onForcedLoanDialogActive();
+    }
+
     // Modal open sequence (notification-system.md):
     // 1. Set modal active on notifications FIRST (hides CRITICAL toasts).
     m_notifications->setModalActive(true);
@@ -1617,12 +1692,15 @@ void UIManager::loadKeybindings() {
     }
     fclose(f);
 
-    // File exists: log and apply overrides.
-    // Full JSON parsing is deferred to the phase that introduces KeyBindings struct.
-    fprintf(stderr,
-        "[UIManager::loadKeybindings] Found keybindings: %s (parsing deferred).\n",
-        path);
-    // TODO: parse JSON and populate m_keyBindings (future phase).
+    // File exists: parse and apply overrides.
+    m_keyBindings.load(path);
+}
+
+// ----------------------------------------------------------------
+// Phase 11: setSaveSystem — bind the SaveSystem for manual save and quit-guard.
+// ----------------------------------------------------------------
+void UIManager::setSaveSystem(SaveSystem* saveSystem) {
+    m_saveSystem = saveSystem;
 }
 
 // ----------------------------------------------------------------
@@ -1631,5 +1709,14 @@ void UIManager::loadKeybindings() {
 void UIManager::setSaveAvailable(bool available) {
     if (m_mainMenu) {
         m_mainMenu->setSaveAvailable(available);
+    }
+}
+
+// ----------------------------------------------------------------
+// Phase 11: setSaveStatusText — forward status label text to MainMenuPanel.
+// ----------------------------------------------------------------
+void UIManager::setSaveStatusText(const std::string& text) {
+    if (m_mainMenu) {
+        m_mainMenu->setSaveStatusText(text);
     }
 }

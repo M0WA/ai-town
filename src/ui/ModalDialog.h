@@ -29,6 +29,10 @@ public:
     void showDemolishConfirm(int tileCount);
     void showWASDPreset();
     void showGameOver(int64_t debt, int months);
+    // Phase 11: unsaved-changes quit guard ("Save and Quit / Quit Without Saving / Cancel").
+    // quitToDesktop=true for Quit to Desktop; false for Quit to Main Menu.
+    // Accept = Save and Quit, Decline = Quit Without Saving, Cancel = stay in game.
+    void showUnsavedQuit(bool quitToDesktop);
 
     // Result accessors for UIManager to check after dialog closes
     enum class DialogResult { None, Accept, Decline, Cancel };
@@ -49,7 +53,8 @@ private:
         ForcedLoanScreen2,
         DemolishConfirm,
         WASDPreset,
-        GameOver
+        GameOver,
+        UnsavedQuit
     };
     DialogType m_dialogType{DialogType::None};
 
@@ -92,6 +97,7 @@ private:
     void layoutDemolishConfirm(int tileCount);
     void layoutWASDPreset();
     void layoutGameOver(int64_t debt, int months);
+    void layoutUnsavedQuit(bool quitToDesktop);
     void hideAllDialogElements();
     void setDialogRect(int w, int h);
 };

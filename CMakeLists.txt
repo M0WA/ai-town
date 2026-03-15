@@ -247,7 +247,8 @@ target_include_directories(aitown_ui
 )
 # Irrlicht: CameraController.cpp includes <irrlicht.h> for ICameraSceneNode full type.
 # PRIVATE scope — Irrlicht headers must NOT propagate to test targets (testability rule).
-target_link_libraries(aitown_ui PRIVATE Irrlicht)
+# aitown_sim: UIManager.cpp includes SaveSystem.h (Phase 11 save wiring).
+target_link_libraries(aitown_ui PRIVATE Irrlicht aitown_sim)
 
 # Phase 8: extend aitown_ui with per-panel .cpp translation units.
 # Do NOT edit the Phase 3 add_library(aitown_ui ...) call above.
@@ -675,6 +676,12 @@ target_sources(ui_tests PRIVATE
 # Phase 11: stinger_milestone per-frame polling tests.
 target_sources(ui_tests PRIVATE
     tests/ui/ui_manager_stinger_test.cpp
+)
+
+# Phase 11: KeyBindings::load() unit tests (6 cases: all-fields, Q/E reserved rejection,
+# absent file, unknown key, partial JSON).
+target_sources(ui_tests PRIVATE
+    tests/ui/keybindings_load_test.cpp
 )
 
 # ----------------------------------------------------------------------------

@@ -52,8 +52,16 @@ void PauseMenuPanel::setSettingsPanel(SettingsPanel* settings) {
 }
 
 // ---------------------------------------------------------------------------
-// consumeQuitDesktopRequest / consumeQuitToMenuRequest
+// consumeSaveRequest / consumeQuitDesktopRequest / consumeQuitToMenuRequest
 // ---------------------------------------------------------------------------
+bool PauseMenuPanel::consumeSaveRequest() {
+    if (m_saveRequested) {
+        m_saveRequested = false;
+        return true;
+    }
+    return false;
+}
+
 bool PauseMenuPanel::consumeQuitDesktopRequest() {
     if (m_quitDesktopRequested) {
         m_quitDesktopRequested = false;
@@ -168,7 +176,8 @@ bool PauseMenuPanel::onEvent(const InputEvent& event) {
                     }
                     return true;
                 case 2: // Save
-                    // Save slot dialog would show here (deferred to sub-dialog)
+                    m_saveRequested = true;
+                    hide();
                     return true;
                 case 3: // Quit to Main Menu
                     m_quitToMenuRequested = true;

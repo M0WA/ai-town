@@ -92,10 +92,11 @@ public:
 
 // StubCitySimulation — minimal serialisable stub.
 // serializeToJson always produces a valid V1 JSON document.
-// deserializeFromJson validates schema_version and rejects unknown versions.
+// deserializeFromJson validates schema_version and parses all fields back.
 struct StubCitySimulation : public ICitySimulationSerializable {
     // Mutable fields representing saved state for round-trip verification.
     float  treasury{1234.5f};
+    float  speedMultiplier{1.0f};
     int    populationMilestoneFired[10]{};
     int    buildingVariantCounters[3][9]{};
 
@@ -104,8 +105,14 @@ struct StubCitySimulation : public ICitySimulationSerializable {
         out += "\"schema_version\":1,";
         out += "\"treasury\":";
         out += std::to_string(static_cast<int>(treasury));
-        out += ",\"speed_multiplier\":1";
-        out += ",\"population_milestone_fired\":[0,0,0,0,0,1,0,0,0,0]";
+        out += ",\"speed_multiplier\":";
+        out += std::to_string(static_cast<int>(speedMultiplier));
+        out += ",\"population_milestone_fired\":[";
+        for (int i = 0; i < 10; ++i) {
+            out += std::to_string(populationMilestoneFired[i]);
+            if (i < 9) out += ",";
+        }
+        out += "]";
         out += ",\"building_variant_counters\":[";
         for (int z = 0; z < 3; ++z) {
             out += "[";
@@ -146,6 +153,64 @@ struct StubCitySimulation : public ICitySimulationSerializable {
             error = "schema_version mismatch: expected 1, got " + std::to_string(version);
             return false;
         }
+
+        // Parse treasury.
+        auto tp = json.find("\"treasury\":");
+        if (tp != std::string::npos) {
+            auto tc = json.find(':', tp);
+            treasury = static_cast<float>(std::stoi(json.substr(tc + 1)));
+        }
+
+        // Parse speed_multiplier.
+        auto sp = json.find("\"speed_multiplier\":");
+        if (sp != std::string::npos) {
+            auto sc = json.find(':', sp);
+            speedMultiplier = static_cast<float>(std::stoi(json.substr(sc + 1)));
+        }
+
+        // Parse population_milestone_fired:[v0,...,v9].
+        auto mp = json.find("\"population_milestone_fired\":[");
+        if (mp != std::string::npos) {
+            auto lb = json.find('[', mp);
+            auto rb = json.find(']', lb);
+            std::string arr = json.substr(lb + 1, rb - lb - 1);
+            int idx = 0;
+            size_t start = 0;
+            while (idx < 10) {
+                auto comma = arr.find(',', start);
+                std::string val = (comma != std::string::npos)
+                    ? arr.substr(start, comma - start)
+                    : arr.substr(start);
+                populationMilestoneFired[idx++] = std::stoi(val);
+                if (comma == std::string::npos) break;
+                start = comma + 1;
+            }
+        }
+
+        // Parse building_variant_counters:[[...],[...],[...]].
+        auto bp = json.find("\"building_variant_counters\":[");
+        if (bp != std::string::npos) {
+            auto outer_lb = json.find('[', bp);
+            for (int z = 0; z < 3; ++z) {
+                auto inner_lb = json.find('[', outer_lb + 1);
+                if (inner_lb == std::string::npos) break;
+                auto inner_rb = json.find(']', inner_lb);
+                std::string row = json.substr(inner_lb + 1, inner_rb - inner_lb - 1);
+                int t = 0;
+                size_t rstart = 0;
+                while (t < 9) {
+                    auto comma = row.find(',', rstart);
+                    std::string val = (comma != std::string::npos)
+                        ? row.substr(rstart, comma - rstart)
+                        : row.substr(rstart);
+                    buildingVariantCounters[z][t++] = std::stoi(val);
+                    if (comma == std::string::npos) break;
+                    rstart = comma + 1;
+                }
+                outer_lb = inner_rb;
+            }
+        }
+
         return true;
     }
 
@@ -241,6 +306,8 @@ TEST(SaveSystemTest, SaveSystem_RoundTrip_PreservesFullCityState)
 {
     StubCitySimulation src;
     src.treasury = 99999.0f;
+    src.speedMultiplier = 2.0f;
+    src.populationMilestoneFired[5] = 1;    // milestone index 5 fired
     src.buildingVariantCounters[0][0] = 3;  // Residential tier 0
     src.buildingVariantCounters[1][4] = 7;  // Commercial tier 4
     src.buildingVariantCounters[2][8] = 1;  // Industrial tier 8
@@ -261,10 +328,25 @@ TEST(SaveSystemTest, SaveSystem_RoundTrip_PreservesFullCityState)
     ASSERT_TRUE(dst.deserializeFromJson(json, err))
         << "deserializeFromJson must succeed on valid V1 JSON; error: " << err;
 
-    // Verify building variant counters survived.
-    EXPECT_EQ(src.getBuildingVariantCounter(0, 0), 3);
-    EXPECT_EQ(src.getBuildingVariantCounter(1, 4), 7);
-    EXPECT_EQ(src.getBuildingVariantCounter(2, 8), 1);
+    // Verify treasury survived the round-trip.
+    EXPECT_FLOAT_EQ(dst.treasury, 99999.0f)
+        << "treasury must survive serialise/deserialise round-trip";
+
+    // Verify speed_multiplier survived the round-trip.
+    EXPECT_FLOAT_EQ(dst.speedMultiplier, 2.0f)
+        << "speed_multiplier must survive serialise/deserialise round-trip";
+
+    // Verify population_milestone_fired[5] survived the round-trip.
+    EXPECT_EQ(dst.populationMilestoneFired[5], 1)
+        << "population_milestone_fired[5] must survive serialise/deserialise round-trip";
+
+    // Verify building variant counters survived the round-trip (on dst, not src).
+    EXPECT_EQ(dst.getBuildingVariantCounter(0, 0), 3)
+        << "buildingVariantCounters[0][0] must survive round-trip";
+    EXPECT_EQ(dst.getBuildingVariantCounter(1, 4), 7)
+        << "buildingVariantCounters[1][4] must survive round-trip";
+    EXPECT_EQ(dst.getBuildingVariantCounter(2, 8), 1)
+        << "buildingVariantCounters[2][8] must survive round-trip";
 
     // Verify schema_version field is present in the output.
     EXPECT_NE(json.find("schema_version"), std::string::npos);

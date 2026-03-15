@@ -311,7 +311,14 @@ void CitySimulation::tick(float realDeltaSeconds) {
 // Budget tick orchestration
 // ---------------------------------------------------------------------------
 
+int CitySimulation::consumeBudgetTicks() {
+    int n = m_pendingBudgetTicks;
+    m_pendingBudgetTicks = 0;
+    return n;
+}
+
 void CitySimulation::doBudgetTick() {
+    ++m_pendingBudgetTicks;
     // Pre-compute m_budgetSurplusPct BEFORE doServiceDegradationTick() reads it.
     // doEconomyTick() (later in this same tick) will re-compute and also modify
     // the treasury; this block is read-only — it mirrors the same calculation.

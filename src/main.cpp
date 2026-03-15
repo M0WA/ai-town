@@ -209,9 +209,24 @@ int main() {
     SaveSystem saveSystem(&wallClock);
     saveSystem.setSimulation(&citySimulation);
 
-    // Update Main Menu "Load Game" button state based on save file presence.
-    // Grayed with tooltip "No saves found." when no save files exist (first run).
-    uiManager.setSaveAvailable(saveSystem.hasSaveData());
+    // Update Main Menu "Load Game" button state (3 states per main-menu-new-game-flow.md):
+    //   enabled         — at least one valid save exists
+    //   grayed+corrupt  — saves exist but are unreadable (schema mismatch, malformed JSON)
+    //   grayed+no-saves — no save files present (first run)
+    {
+        const bool hasData   = saveSystem.hasSaveData();
+        const bool corrupted = hasData && saveSystem.isSaveCorrupted();
+        uiManager.setSaveAvailable(hasData && !corrupted);
+        if (corrupted) {
+            uiManager.setSaveStatusText(
+                "Save data corrupted — check " + saveSystem.getSaveDirectoryPath());
+        } else if (!hasData) {
+            uiManager.setSaveStatusText("No saves found.");
+        } else {
+            uiManager.setSaveStatusText("");  // hide label when saves are available
+        }
+    }
+    uiManager.setSaveSystem(&saveSystem);
 
     // -------------------------------------------------------------------------
     // Phase 11: Loading screen loop.
@@ -311,6 +326,11 @@ int main() {
         // Step 3b: UIManager::update(realDeltaSeconds) — per-frame UI state update.
         // MUST execute BEFORE beginFrame() per architecture/ui-ux/ui-manager.md.
         uiManager.update(realDeltaSeconds);
+
+        // Step 3c: SaveSystem::update(realDeltaSeconds) — advance auto-save timer.
+        // MUST execute after UIManager::update() so that the save-requested flag
+        // set by UIManager (from PauseMenuPanel) is consumed before the timer check.
+        saveSystem.update(realDeltaSeconds);
 
         // Check for application quit request (Main Menu Quit / Pause Menu Quit to Desktop).
         if (uiManager.isQuitRequested()) {

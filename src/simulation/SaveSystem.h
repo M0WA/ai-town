@@ -111,6 +111,11 @@ public:
     // hasSaveData — returns true if at least one save file exists (any slot).
     bool hasSaveData() const;
 
+    // isSaveCorrupted — returns true if save files exist but the most recent one
+    // cannot be loaded (schema mismatch, malformed JSON, truncated file).
+    // Returns false when hasSaveData() is false (absent file ≠ corrupted).
+    bool isSaveCorrupted() const;
+
     // getSaveDirectoryPath — return the platform-specific save directory path.
     // The directory is created on first access (by autoSave/saveToSlot).
     std::string getSaveDirectoryPath() const;

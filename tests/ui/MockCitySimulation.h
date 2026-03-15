@@ -53,6 +53,7 @@ public:
 
     // --- Simulation event queue (Phase 6 delivery) ---
     MOCK_METHOD(bool, pollPendingNotification, (SimulationNotification& out), (override));
+    MOCK_METHOD(int,  consumeBudgetTicks, (), (override));
 
     // --- Tax rate (Phase 6 delivery) ---
     MOCK_METHOD(void,  setTaxRate, (ZoneType zone, float rate), (override));

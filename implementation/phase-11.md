@@ -1,5 +1,7 @@
 ## Phase 11: Save System & Game Flow
 
+**Status: DONE**
+
 ### Goal
 
 Deliver complete save/load, main menu game flow, scenario mode win/loss conditions, and clean game-over path.

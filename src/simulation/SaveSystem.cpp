@@ -168,6 +168,14 @@ bool SaveSystem::hasSaveData() const {
     return false;
 }
 
+bool SaveSystem::isSaveCorrupted() const {
+    if (!hasSaveData()) return false;
+    // Try the most recent save; if it fails to load, all save slots are effectively
+    // corrupted (or at least the best candidate is unreadable).
+    LoadResult r = loadMostRecentSave();
+    return !r.ok;
+}
+
 std::string SaveSystem::getSaveDirectoryPath() const {
     return ensureSaveDirectory();
 }

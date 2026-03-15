@@ -120,6 +120,9 @@ public:
 
     // ---- Serialization (Phase 11) ----
     // serializeToJson() — produce a full city-state JSON string (schema_version: 1).
+    // consumeBudgetTicks — returns and clears the count of budget ticks fired since last call.
+    int consumeBudgetTicks() override;
+
     // Called by SaveSystem::autoSave() and SaveSystem::saveToSlot().
     // Not virtual — save/load seam; never called through ICitySimulation interface.
     std::string serializeToJson() const;
@@ -278,6 +281,7 @@ private:
     float           m_accumulatedSimSeconds{0.0f};   // sub-tick accumulator
     double          m_constructionTimeSeconds{0.0};  // clock at construction (grace period base)
     int             m_totalTicks{0};                 // budget ticks fired so far
+    int             m_pendingBudgetTicks{0};         // ticks fired since last consumeBudgetTicks()
     int             m_month{1};                      // 1–12
     int             m_year{1};
     SpeedMultiplier m_speed{kDefaultSimSpeed};       // starts at x3

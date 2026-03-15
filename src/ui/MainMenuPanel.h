@@ -1,5 +1,6 @@
 #pragma once
 #include "src/interfaces/IUIBackend.h"  // UIElementHandle, IUIBackend
+#include <string>
 
 struct InputEvent;
 
@@ -36,6 +37,11 @@ public:
     // When available=true: button enabled and interactive.
     void setSaveAvailable(bool available);
 
+    // Phase 11: Show save status text beneath the Load Game button.
+    // text="" hides the label. Used for "No saves found." and
+    // "Save data corrupted — check [path]" messages.
+    void setSaveStatusText(const std::string& text);
+
 private:
     IUIBackend* m_backend{nullptr};
     bool m_visible{false};
@@ -52,6 +58,7 @@ private:
     UIElementHandle m_titleLabel{kInvalidUIElement};
     UIElementHandle m_btnNewGame{kInvalidUIElement};
     UIElementHandle m_btnLoadGame{kInvalidUIElement};
+    UIElementHandle m_loadStatusLabel{kInvalidUIElement};  // "No saves found." / "Corrupted…"
     UIElementHandle m_btnSettings{kInvalidUIElement};
     UIElementHandle m_btnQuit{kInvalidUIElement};
 
