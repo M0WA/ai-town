@@ -1,6 +1,6 @@
 ## Phase 11b: Pre-Built CI Docker Image
 
-**Status: Done — pending image push**
+**Status: Done**
 
 ### Goal
 
@@ -307,6 +307,12 @@ project's existing `uses: action@<40-char-SHA>` pinning for GitHub Actions.
   needs list and results array ✓
 - `CLAUDE.md`: "vcpkg Baseline Atomicity" note added to Build & Toolchain section
   with all five atomicity items ✓
-- Remaining: replace placeholder digest (`sha256:0000...`) after running
-  `docker-ci-image.yml` workflow_dispatch and updating both `ci.yml`
-  (test-container-xvfb container: image:) and `.devcontainer/Dockerfile` FROM line
+- `docker-ci-image.yml` first successful build: run 23112048004 (2026-03-15).
+  Fixes applied before success: added `autoconf automake libtool` (required by
+  vcpkg alsa port), added `zip unzip tar` (required by bootstrap-vcpkg.sh), and
+  quoted `--binarysource` semicolon to prevent shell splitting ✓
+- Real image digest pinned in both files (Atomicity Contract item 5):
+  `ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:536a408ad39aad3322f7c7eae3e3ce08131a31bea80607aaa4e28344a0a5e7f8` ✓
+- xvfb-run spike validated: `test-container-xvfb` job in CI run 23112310656
+  (develop, 2026-03-15): 8/8 requires-opengl tests passed inside container via
+  `xvfb-run --auto-servernum`, 100% pass rate, 0.44 s total ✓
