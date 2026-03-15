@@ -29,6 +29,13 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    container:
+      image: ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:b85b637272ea6931563fb6de7f837d0ecf44118393325e9a24770b9f09b0c001
+      options: --user root
+    permissions:
+      packages: read    # pull from GHCR
+      checks: write     # required by dorny/test-reporter
+      contents: read    # required by actions/checkout
     steps:
       # Step 1: checkout (must be first — makes ci.yml available on disk for lint step)
       - name: Checkout code
@@ -59,21 +66,6 @@ jobs:
             exit 1
           fi
           echo "Container image digest lint passed."
-
-      # Step 3: Install system dependencies — xvfb and OpenGL headers.
-      # Must be BEFORE ccache setup and CMake configure so OpenGL headers and xvfb
-      # binary are available during configure-time and test-time.
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev libglew-dev
-
-      # Step 3a: Install Pillow for asset validation (validate_assets.py check_23 uses PIL).
-      # Must run before the validate_assets step. pip install is idempotent and fast
-      # (Pillow is a pre-built wheel on ubuntu-latest). Placed here so the validate
-      # step always has Pillow available regardless of Python environment state.
-      - name: Install Pillow (asset validation dependency)
-        run: pip install Pillow
 
       # Step 3b: Preflight — validate assets (checks 21, 22, 23, 24).
       # Runs BEFORE CMake configure so asset errors fail fast without wasting build time.
@@ -152,16 +144,6 @@ jobs:
         run: |
           echo "COMPILER_VERSION=$(gcc -dumpfullversion -dumpversion)" >> $GITHUB_ENV
 
-      # Step 5: Cache vcpkg packages.
-      # Reads $COMPILER_VERSION set in step 4. Must follow step 4.
-      - name: Cache vcpkg packages
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: ~/.cache/vcpkg
-          key: vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT_ID }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
-
       # Step 6: Validate vcpkg baseline consistency.
       # vcpkg.json builtin-baseline must match VCPKG_COMMIT_ID.
       # Must precede vcpkg install.
@@ -177,12 +159,6 @@ jobs:
           fi
           echo "vcpkg baseline validation passed: $MANIFEST_BASELINE"
 
-      # Step 7: Run vcpkg to install dependencies.
-      - name: Install vcpkg dependencies
-        uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
-        with:
-          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
-
       # Step 8: Set up ccache (Linux only — ccache does not support cl.exe on Windows).
       - name: Set up ccache
         if: runner.os == 'Linux'
@@ -194,7 +170,7 @@ jobs:
       # ENABLE_COVERAGE=OFF for the fast build-linux job (via ci-linux preset).
       # CMakePresets.json defines: Ninja generator, ccache launchers, ENABLE_COVERAGE=OFF.
       - name: Configure CMake
-        run: cmake --preset ci-linux
+        run: cmake --preset ci-linux -DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed -DVCPKG_MANIFEST_INSTALL=OFF
 
       # Step 10: Build.
       - name: Build
@@ -206,8 +182,8 @@ jobs:
       - name: Verify libGLEW.a artifact (CI-1)
         shell: bash
         run: |
-          find build/vcpkg_installed -name "libGLEW.a" | grep -q "libGLEW.a" || \
-            { echo "ERROR: libGLEW.a not found under build/vcpkg_installed. Ensure glew is in vcpkg.json."; exit 1; }
+          find /opt/vcpkg_installed -name "libGLEW.a" | grep -q "libGLEW.a" || \
+            { echo "ERROR: libGLEW.a not found under /opt/vcpkg_installed. Ensure glew is in vcpkg.json."; exit 1; }
           echo "libGLEW.a found."
 
       # Step 11: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
@@ -732,6 +708,13 @@ jobs:
   coverage-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    container:
+      image: ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:b85b637272ea6931563fb6de7f837d0ecf44118393325e9a24770b9f09b0c001
+      options: --user root
+    permissions:
+      packages: read    # pull from GHCR
+      checks: write     # required by dorny/test-reporter
+      contents: read    # required by actions/checkout
     steps:
       # Step 1: Checkout
       - name: Checkout code
@@ -758,16 +741,6 @@ jobs:
             exit 1
           fi
           echo "Container image digest lint passed."
-
-      # Step 3: Install system dependencies (same canonical position as build-linux).
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libxxf86vm-dev libglew-dev lcov
-
-      # Step 3a: Install Pillow for asset validation (same as build-linux).
-      - name: Install Pillow (asset validation dependency)
-        run: pip install Pillow
 
       # Step 3b: Preflight — validate assets (checks 21, 22, 23, 24).
       # Mirrors build-linux preflight — coverage-linux is self-contained and must run
@@ -826,15 +799,6 @@ jobs:
         run: |
           echo "COMPILER_VERSION=$(gcc -dumpfullversion -dumpversion)" >> $GITHUB_ENV
 
-      # Step 5: Cache vcpkg packages.
-      - name: Cache vcpkg packages
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: ~/.cache/vcpkg
-          key: vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT_ID }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
-
       # Step 6: Validate vcpkg baseline consistency.
       - name: Validate vcpkg baseline consistency
         shell: bash
@@ -846,12 +810,6 @@ jobs:
           fi
           echo "vcpkg baseline validation passed: $MANIFEST_BASELINE"
 
-      # Step 7: Run vcpkg.
-      - name: Install vcpkg dependencies
-        uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
-        with:
-          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
-
       # Step 8: Set up ccache.
       - name: Set up ccache
         if: runner.os == 'Linux'
@@ -862,7 +820,7 @@ jobs:
       # Step 9: Configure CMake with ENABLE_COVERAGE=ON (via ci-linux-coverage preset).
       # CMakePresets.json defines: Ninja generator, ccache launchers, ENABLE_COVERAGE=ON.
       - name: Configure CMake (coverage)
-        run: cmake --preset ci-linux-coverage
+        run: cmake --preset ci-linux-coverage -DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed -DVCPKG_MANIFEST_INSTALL=OFF
 
       # Step 10: Build.
       - name: Build (coverage)
@@ -1332,44 +1290,6 @@ jobs:
         run: markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
 
   # ============================================================================
-  # test-container-xvfb — Phase 11b spike: validate xvfb-run inside the pre-built
-  # CI Docker container on a GitHub-hosted runner.
-  # This job is isolated (build-linux and coverage-linux are NOT changed in this PR).
-  # After the spike is merged and the outcome documented, the main Phase 11b PR
-  # removes this job and switches build-linux/coverage-linux to container: mode.
-  # ============================================================================
-  test-container-xvfb:
-    name: "Spike — xvfb container test"
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    container:
-      image: ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:bbb9992436b58871c1c2fc1935c29897698f8da20a11e8aee73f73cde785b833
-      options: --user root
-    permissions:
-      packages: read
-      checks: write
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
-      - name: Configure CMake (preset ci-linux)
-        # Point cmake at the pre-installed packages in the Docker image.
-        # VCPKG_MANIFEST_INSTALL=OFF skips the vcpkg install call entirely so cmake
-        # uses the packages already at /opt/vcpkg_installed without any compilation.
-        run: cmake --preset ci-linux -DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed -DVCPKG_MANIFEST_INSTALL=OFF
-      - name: Build
-        run: cmake --build build --parallel
-      - name: Run requires-opengl tests via xvfb-run
-        run: |
-          mkdir -p test_results
-          xvfb-run --auto-servernum \
-            ctest --test-dir build -L '^requires-opengl$' --output-on-failure
-        env:
-          GTEST_OUTPUT: "xml:test_results/"
-          AITOWN_HEADLESS: "1"
-          ALSOFT_DRIVERS: "null"
-
-  # ============================================================================
   # all-checks-pass — gate job required by branch protection
   # Must run with if: always() so it executes even when dependency jobs fail.
   # The explicit Bash-array form is the canonical form — do NOT substitute with
@@ -1382,7 +1302,6 @@ jobs:
       - coverage-linux
       - markdown-lint
       - validate-assets
-      - test-container-xvfb
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -1396,7 +1315,6 @@ jobs:
             "${{ needs.coverage-linux.result }}"
             "${{ needs.markdown-lint.result }}"
             "${{ needs.validate-assets.result }}"
-            "${{ needs.test-container-xvfb.result }}"
           )
           failed=0
           for result in "${results[@]}"; do
