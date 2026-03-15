@@ -1020,6 +1020,7 @@ jobs:
           lcov --remove coverage.info \
             --ignore-errors unused \
             '/usr/*' \
+            '/opt/vcpkg_installed/*' \
             "${{ github.workspace }}/.fetchcontent_cache/*" \
             "${{ github.workspace }}/vcpkg_installed/*" \
             "${{ github.workspace }}/build/vcpkg_installed/*" \
