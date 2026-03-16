@@ -280,6 +280,7 @@ private:
     // ------------------------------------------------------------------
     float           m_accumulatedSimSeconds{0.0f};   // sub-tick accumulator
     double          m_constructionTimeSeconds{0.0};  // clock at construction (grace period base)
+    double          m_lastPlacementSoundTime{-1.0};  // cooldown: placement SFX fire at most once per 100ms
     int             m_totalTicks{0};                 // budget ticks fired so far
     int             m_pendingBudgetTicks{0};         // ticks fired since last consumeBudgetTicks()
     int             m_month{1};                      // 1–12

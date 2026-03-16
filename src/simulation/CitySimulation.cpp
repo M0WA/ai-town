@@ -1584,18 +1584,20 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
     tile.population  = 0.0f;
     tile.desirability = static_cast<float>(SimulationConstants::desirability_base_value);
 
-    // Play audio
-    if (earthworksCostOverride > 0) {
-        if (m_audio) {
-            m_audio->playPositionalSound(SFX_EARTHWORKS,
-                vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
-                SoundPriority::NORMAL, 1.0f);
+    // Play audio — gated by 100ms cooldown so batch operations (large zone
+    // drags placing N tiles in one frame) only trigger the sound once.
+    if (m_audio && m_clock) {
+        const double now = m_clock->nowSeconds();
+        if (now - m_lastPlacementSoundTime >= 0.1) {
+            m_lastPlacementSoundTime = now;
+            const vec3 pos{static_cast<float>(tileX), 0.0f,
+                           static_cast<float>(tileZ)};
+            if (earthworksCostOverride > 0)
+                m_audio->playPositionalSound(SFX_EARTHWORKS, pos,
+                                             SoundPriority::NORMAL, 1.0f);
+            m_audio->playPositionalSound(SFX_BUILD_PLACE, pos,
+                                         SoundPriority::NORMAL, 1.0f);
         }
-    }
-    if (m_audio) {
-        m_audio->playPositionalSound(SFX_BUILD_PLACE,
-            vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
-            SoundPriority::NORMAL, 1.0f);
     }
 
     // Phase 11: round-robin variant cycling (_01/_02/_03).
@@ -1732,18 +1734,20 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
         }
     }
 
-    // Play audio
-    if (earthworksCostOverride > 0) {
-        if (m_audio) {
-            m_audio->playPositionalSound(SFX_EARTHWORKS,
-                vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
-                SoundPriority::NORMAL, 1.0f);
+    // Play audio — gated by 100ms cooldown so batch road placement (dragging
+    // a long road in one gesture) only triggers the sound once.
+    if (m_audio && m_clock) {
+        const double now = m_clock->nowSeconds();
+        if (now - m_lastPlacementSoundTime >= 0.1) {
+            m_lastPlacementSoundTime = now;
+            const vec3 pos{static_cast<float>(tileX), 0.0f,
+                           static_cast<float>(tileZ)};
+            if (earthworksCostOverride > 0)
+                m_audio->playPositionalSound(SFX_EARTHWORKS, pos,
+                                             SoundPriority::NORMAL, 1.0f);
+            m_audio->playPositionalSound(SFX_ROAD_BUILD, pos,
+                                         SoundPriority::NORMAL, 1.0f);
         }
-    }
-    if (m_audio) {
-        m_audio->playPositionalSound(SFX_ROAD_BUILD,
-            vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
-            SoundPriority::NORMAL, 1.0f);
     }
 
     // Phase 10: spawn road tile mesh.
