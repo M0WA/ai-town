@@ -933,8 +933,10 @@ TEST_F(ModalDialogStandaloneTest, PollResult_WhenIdle_ReturnsNone) {
 }
 
 TEST_F(ModalDialogStandaloneTest, PollResult_AfterAccept_ReturnsAcceptThenNone) {
-    // Open and immediately accept a demolish confirm dialog.
+    // Open demolish confirm dialog. Default focus is button 1 (Cancel);
+    // Tab to button 0 (Accept), then press Enter.
     dialog_->showDemolishConfirm(1);
+    dialog_->onEvent(keyDown(9));  // Tab → focus moves to button 0 (Accept)
     dialog_->onEvent(keyDown(13)); // Enter = Accept
     EXPECT_FALSE(dialog_->isActive());
 
