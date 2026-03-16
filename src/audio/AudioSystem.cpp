@@ -313,20 +313,19 @@ AudioSystem::AudioSystem(IClock* clock, IAlcFunctions* alcFunctions)
         const char* tmpConf = "/tmp/aitown_alsoft.conf";
         FILE* cf = fopen(tmpConf, "w");
         if (cf) {
-            // rt-prio = 0: disables rtkit RT scheduling for the OpenAL mixing
-            //   thread.  Without this, rtkit grants SCHED_RR to the mixing
-            //   thread AND sets RLIMIT_RTTIME=200ms on ALL threads in the
-            //   process.  During heavy road/zone placement (mesh rebuilds,
-            //   terrain flushes), the mixing thread can accumulate >200ms of
-            //   continuous RT CPU time, triggering a kernel SIGKILL that
-            //   cannot be caught.  Disabling rtkit removes RLIMIT_RTTIME
-            //   entirely.  Audio glitches are preferable to silent crashes.
+            // rt-prio = 0: prevents rtkit from granting SCHED_RR to the
+            //   OpenAL mixing thread.  When rtkit grants SCHED_RR it also
+            //   sets RLIMIT_RTTIME=200ms on both the soft and hard limit
+            //   process-wide.  A non-privileged process cannot raise the
+            //   hard limit back (setrlimit fails with EPERM), so the only
+            //   way to avoid the kernel SIGKILL is to prevent rtkit from
+            //   being contacted in the first place.
             // device=pulse: routes through PulseAudio ALSA plugin instead of
-            //   PipeWire's native ALSA plugin (belt-and-suspenders: the
-            //   PipeWire ALSA plugin also calls kill(getpid(), SIGKILL) on
-            //   repeated underruns, but rt-prio=0 is the primary fix).
+            //   PipeWire's native ALSA plugin.  The PipeWire ALSA plugin calls
+            //   kill(getpid(), SIGKILL) when its stream is destroyed after
+            //   repeated underruns; PulseAudio does not.
             // period_size=4096, periods=8: ~744ms buffer at 44100Hz for
-            //   headroom against any remaining frame spikes.
+            //   headroom against frame spikes during heavy road/zone placement.
             fprintf(cf,
                 "[general]\n"
                 "rt-prio = 0\n"
@@ -337,8 +336,8 @@ AudioSystem::AudioSystem(IClock* clock, IAlcFunctions* alcFunctions)
             fclose(cf);
             setenv("ALSOFT_CONF", tmpConf, /*overwrite=*/0);
             logInfo("AudioSystem: configured ALSA backend: rt-prio=0 "
-                    "(disables rtkit RLIMIT_RTTIME SIGKILL), device=pulse, "
-                    "period_size=4096, periods=8 (~744ms buffer)");
+                    "(prevents rtkit RLIMIT_RTTIME=200ms SIGKILL), "
+                    "device=pulse, period_size=4096, periods=8 (~744ms buffer)");
         }
     }
 
