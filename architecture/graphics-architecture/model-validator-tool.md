@@ -86,7 +86,8 @@ The fallback when `getGPUProgrammingServices()` returns null (e.g. software driv
 ### Camera
 
 Fixed orbit: radius 65 m, height 15 m, centre (0, 5, 0), advancing 0.3°/frame.
-The 65 m radius keeps the full 6-model row (±30 m span) comfortably in view.
+The 65 m radius keeps the maximum 5-model vehicle row (±24 m span) comfortably in view.
+Zone-tier categories have 4 models (±18 m span); service has 4 models.
 
 | Orbit parameter | Value |
 |---|---|
@@ -99,15 +100,62 @@ The 65 m radius keeps the full 6-model row (±30 m span) comfortably in view.
 
 ## Asset Categories
 
-Categories are displayed in order; **Spacebar** advances to the next:
+Categories are displayed in order; **Spacebar** advances to the next.
 
-| # | Name | Assets |
+Phase 11d expands to **11 categories**: each zone tier (Low / Med / High) is a separate category
+with **4 variants** each. Commercial High is listed as its own "Skyscrapers" sub-category because
+`com_high_*` uses a distinct tall-tower geometry and must be validated separately from low-rise
+commercial buildings. Service buildings are 1 unique model each (no variants).
+
+| # | Name | Assets (LOD0) |
 |---|---|---|
-| 1 | Residential | res\_low\_01, res\_low\_02, res\_med\_01, res\_med\_02, res\_high\_01, res\_high\_02 |
-| 2 | Commercial | com\_low\_01, com\_low\_02, com\_med\_01, com\_med\_02, com\_high\_01, com\_high\_02 |
-| 3 | Industrial | ind\_low\_01, ind\_low\_02, ind\_med\_01, ind\_med\_02, ind\_high\_01, ind\_high\_02 |
-| 4 | Service | svc\_fire\_station, svc\_police\_station, svc\_power\_plant, svc\_water\_tower |
-| 5 | Vehicles | car\_sedan, car\_hatchback, car\_suv, bus\_standard, truck\_cargo |
+| 1 | Residential Low | res\_low\_01, res\_low\_02, res\_low\_03, res\_low\_04 |
+| 2 | Residential Med | res\_med\_01, res\_med\_02, res\_med\_03, res\_med\_04 |
+| 3 | Residential High | res\_high\_01, res\_high\_02, res\_high\_03, res\_high\_04 |
+| 4 | Commercial Low | com\_low\_01, com\_low\_02, com\_low\_03, com\_low\_04 |
+| 5 | Commercial Med | com\_med\_01, com\_med\_02, com\_med\_03, com\_med\_04 |
+| 6 | Commercial High (Skyscrapers) | com\_high\_01, com\_high\_02, com\_high\_03, com\_high\_04 |
+| 7 | Industrial Low | ind\_low\_01, ind\_low\_02, ind\_low\_03, ind\_low\_04 |
+| 8 | Industrial Med | ind\_med\_01, ind\_med\_02, ind\_med\_03, ind\_med\_04 |
+| 9 | Industrial High | ind\_high\_01, ind\_high\_02, ind\_high\_03, ind\_high\_04 |
+| 10 | Service | svc\_fire\_station, svc\_police\_station, svc\_power\_plant, svc\_water\_tower |
+| 11 | Vehicles | car\_sedan, car\_hatchback, car\_suv, bus\_standard, truck\_cargo |
+
+The validator displays LOD0 (`.b3d` at `_lod0.b3d` suffix) for all building/service categories.
+LOD1 (`_lod1.b3d`) and LOD2 (geometry shells `_lod2.b3d` for High-density zones, billboard
+imposters for Low/Med) are not displayed by the validator — validate LOD2 assets visually in the
+game at distances > 40 m.
+
+---
+
+## Phase 11d Asset Inventory
+
+V1 total `.b3d` files validated by the tool (LOD0 categories 1–11 above):
+
+| Asset type | Count | Notes |
+|---|---|---|
+| Zone building LOD0 | 36 | 4 variants × 9 zone-tiers |
+| Zone building LOD1 | 36 | 4 variants × 9 zone-tiers |
+| Zone building LOD2 geometry shells | 12 | High-density only (res/com/ind high × 4 variants); Low/Med use billboard imposters |
+| Service building LOD0 | 4 | 1 unique model each (fire, police, power, water) |
+| Service building LOD1 | 4 | 1 unique model each |
+| **Total `.b3d`** | **92** | |
+| Billboard DDS (`*_billboard.dds`) | 28 | 24 zone (Low/Med × 3 zone-types × 4 variants) + 4 service; High excluded (uses `_lod2.b3d`) |
+
+The validator tool exercises the 45 LOD0 `.b3d` files across categories 1–11. LOD1 and LOD2
+assets are validated by `validate_assets.py` (CI) and manual game playback at appropriate distances.
+
+**Phase 11d polygon budget reference** (see `architecture/asset-standards/3d-model-standards.md`
+§Vehicle Polygon Budget and §Building Polygon Budget for full specs):
+
+| Asset | LOD0 target | LOD1 target |
+|---|---|---|
+| Small buildings (Low/Med all zones) | ≤ spec ceiling (800–900 tris) | 300–400 tris |
+| Large buildings (High all zones) | ≤ spec ceiling (1,200–2,000 tris) | 300–400 tris |
+| Commercial High (skyscrapers) | ≤ 2,000 tris | 300–400 tris |
+| Cars (`car_sedan`, `car_hatchback`, `car_suv`) | 1,800–2,000 tris | ≥ 300 tris |
+| Bus (`bus_standard`) | ≤ 2,000 tris | ≥ 400 tris |
+| Truck (`truck_cargo`) | ≤ 2,000 tris | ≥ 400 tris |
 
 ---
 
@@ -144,17 +192,31 @@ category.
 === AI Town Model Validator ===
 Controls: SPACE = next category   ESC = exit
 
-=== [1/5]: Residential — 6 models loaded, press SPACE for next (ESC to exit) ===
-  Loaded: res_low_01 res_low_02 res_med_01 res_med_02 res_high_01 res_high_02
+=== [1/11]: Residential Low — 4 models loaded, press SPACE for next (ESC to exit) ===
+  Loaded: res_low_01 res_low_02 res_low_03 res_low_04
   Category displayed for 312 frames (avg 104.0 fps)
 
-=== [2/5]: Commercial — 6 models loaded, press SPACE for next (ESC to exit) ===
-  Loaded: com_low_01 com_low_02 com_med_01 com_med_02 com_high_01 com_high_02
-  Category displayed for 412 frames (avg 87.3 fps)
+=== [2/11]: Residential Med — 4 models loaded, press SPACE for next (ESC to exit) ===
+  Loaded: res_med_01 res_med_02 res_med_03 res_med_04
+  Category displayed for 298 frames (avg 99.3 fps)
 
 ...
 
-=== Model Validator complete — all 5 categories displayed ===
+=== [6/11]: Commercial High (Skyscrapers) — 4 models loaded, press SPACE for next (ESC to exit) ===
+  Loaded: com_high_01 com_high_02 com_high_03 com_high_04
+  Category displayed for 350 frames (avg 87.5 fps)
+
+...
+
+=== [10/11]: Service — 4 models loaded, press SPACE for next (ESC to exit) ===
+  Loaded: svc_fire_station svc_police_station svc_power_plant svc_water_tower
+  Category displayed for 280 frames (avg 93.3 fps)
+
+=== [11/11]: Vehicles — 5 models loaded, press SPACE for next (ESC to exit) ===
+  Loaded: car_sedan car_hatchback car_suv bus_standard truck_cargo
+  Category displayed for 412 frames (avg 87.3 fps)
+
+=== Model Validator complete — all 11 categories displayed ===
 ```
 
 Failed loads appear on stderr:
@@ -209,9 +271,10 @@ The model validator is **not** run in CI. Reasons:
 **Required manual runs**:
 
 - Before each major release: run on a representative development machine and step through
-  all 5 categories confirming correct mesh, texture, and scale for every model.
+  all 11 categories confirming correct mesh, texture, and scale for every model.
 - After any change to B3D assets, atlas textures (currently PNG — see V1 exception in
-  `architecture/asset-standards/building-atlas-layout.md`), or `BuildingAssetLoader`.
+  `architecture/asset-standards/building-atlas-layout.md`), `BuildingAssetLoader`, or
+  any `*_billboard.dds` asset rework.
 - After any change to `road_asphalt_tileable.dds`, `road.vert`/`road.frag`, or
   `RoadShaderCallback`.
 - After any change to `LODNode` or the `IrrlichtRenderer` building-placement scale.

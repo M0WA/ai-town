@@ -99,6 +99,11 @@ non-overlapping) to keep existing placement assertions valid.
   `UIManager` reads `QueryResult::degraded` and passes it to
   `IRenderer::showServiceCoverageOverlay(tileX, tileZ, serviceType, degraded)` so the renderer
   can tint the overlay to indicate degraded service.
+  **Overlay lifecycle**: When the Inspector panel is dismissed (player presses **I** again,
+  clicks a non-tile target, or presses **Escape**), or when a different tile is queried and
+  the result is not a service building, `UIManager` calls `IRenderer::hideServiceCoverageOverlay()`
+  to clear the previously displayed overlay. Only the coverage overlay of the currently-queried
+  service building should be visible at any time.
 
 - **Mutual exclusion with Tax Rate Panel**: QueryPanel and Tax Rate Panel must NOT be simultaneously open. Opening the QueryPanel closes the Tax Rate Panel if it is open. See `input-arbitration.md` Priority 3 for the authoritative mutual exclusion rule.
 - Panel populated by a `QueryResult` data struct passed from the simulation layer to `UIManager`

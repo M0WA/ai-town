@@ -16,7 +16,8 @@ struct vec3;         // 3-component float vector (X, Y, Z)
 struct CameraState;  // position (vec3), forward (vec3), up (vec3)
 // SimSpeed is NOT a separate enum class — it is a type alias:
 //   using SimSpeed = SpeedMultiplier;   (defined in simulation_types.h)
-// IAudioSystem.h must #include "simulation_types.h" to get this alias.
+// ZoneType is also defined in simulation_types.h (enum class: Residential, Commercial, Industrial).
+// IAudioSystem.h must #include "simulation_types.h" to get both SimSpeed and ZoneType.
 // Do NOT forward-declare SimSpeed as "enum class SimSpeed;" — type aliases
 // cannot be forward-declared in C++, and this would create a duplicate-type
 // compile error when simulation_types.h is included.
@@ -60,6 +61,10 @@ enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 // Added in Phase 10 (see implementation/phase-10.md — Music intensity interface deliverable).
 enum class MusicIntensity { CALM, GROWTH, CRISIS };
 
+// IAudioSystem — 18 pure-virtual methods.
+// Phase history: Phase 7 (base 14 methods) → Phase 10 (+setMusicIntensity = 15) →
+// Phase 11d (+acquireVehicleEnginePair, +releaseVehicleEnginePair, +updateVehicleAudio = 18).
+// Authoritative source for testability-architecture.md method-count comment.
 class IAudioSystem {
 public:
     virtual ~IAudioSystem() = default;
@@ -244,10 +249,31 @@ public:
     // MockAudioSystem: add
     //   MOCK_METHOD(void, releaseVehicleEnginePair, (int, int), (override));
     virtual void releaseVehicleEnginePair(int idleIdx, int moveIdx) = 0;
+
+    // Per-frame vehicle engine audio state update.
+    // Called by main.cpp once per render frame for each active vehicle, inside the
+    // per-frame agent sync loop, AFTER calling getAgentPositions() and BEFORE drawScene().
+    // AudioSystem uses these values to:
+    //   - Set AL_PITCH on both sources: basePitch × lerp(0.75, 1.35, speedFraction),
+    //     where basePitch is 1.0 (car) or 0.85 (bus/truck — determined from zone type at
+    //     acquire time and stored internally by AudioSystem).
+    //   - Set AL_GAIN crossblend: idle gain = max(0, 1 − (speedFraction − 0.21) / 0.36);
+    //     move gain = 1 − idle gain (see dynamic-soundscape.md §Vehicle Engine Audio).
+    //     Derivation: speedFraction = currentSpeed / 13.9 m/s (max road speed per traffic-system.md);
+    //     0.21 ≈ 3/13.9 (idle-full-on threshold); 0.36 ≈ (8−3)/13.9 (ramp width).
+    //   - Set AL_POSITION on both sources to (worldX, 0.0f, worldZ) for 3D spatial rolloff.
+    // idleIdx / moveIdx must be the values returned by acquireVehicleEnginePair(); passing
+    // {-1, -1} (a failed acquisition) is a no-op.
+    //
+    // MockAudioSystem: add
+    //   MOCK_METHOD(void, updateVehicleAudio, (int, int, float, float, float), (override));
+    virtual void updateVehicleAudio(int idleIdx, int moveIdx,
+                                    float speedFraction,
+                                    float worldX, float worldZ) = 0;
 };
 ```
 
-`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all seventeen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
+`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all eighteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
 
 ---
 
@@ -373,7 +399,7 @@ private:
 The file `src/interfaces/IAudioSystem.h` must include the following headers:
 
 ```cpp
-#include "simulation_types.h"    // Required: SimSpeed (type alias for SpeedMultiplier)
+#include "simulation_types.h"    // Required: SimSpeed (type alias for SpeedMultiplier), ZoneType (enum class; Phase 11d)
 #include "audio_types.h"         // Required: SoundId, MusicTrackId, SoundPriority, StingerType, TimeOfDay, SoundHandle, MusicIntensity
 #include "camera_state.h"        // Required: CameraState (used in syncListenerToCamera)
 #include "vec3.h"                // Required: vec3 (used in playPositionalSound and syncListenerToCamera)

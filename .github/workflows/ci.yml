@@ -1259,6 +1259,61 @@ jobs:
           grep -q "check_24_clouds_png" tools/validate_assets.py || (echo "FAIL: check_24_clouds_png not found in validate_assets.py — Phase 10b cloud texture format gate missing" && exit 1)
           echo "PASS: check_24 present"
 
+      - name: Verify check_25 present in validate_assets.py
+        # check_25: vehicles_diffuse_atlas_d.dds must be 2048x2048, BC1_UNORM_SRGB (DXGI_FORMAT=72),
+        # DX10 header present, exactly 4 mip levels.
+        # A missing check_25 allows a vehicle diffuse atlas with wrong format or dimensions to
+        # pass CI silently -- resulting in incorrect sRGB encoding at runtime.
+        run: |
+          grep -q "check_25" tools/validate_assets.py || (echo "FAIL: check_25 not found in validate_assets.py -- Phase 11d vehicle diffuse atlas DDS format gate missing" && exit 1)
+          echo "PASS: check_25 present"
+
+      - name: Verify check_26 present in validate_assets.py
+        # check_26: vehicles_sprite_atlas_d.dds must be 256x256, BC3_UNORM linear (DXGI_FORMAT=77),
+        # DX10 header present, exactly 1 mip level (dwMipMapCount=1, GL_TEXTURE_MAX_LEVEL=0).
+        # A missing check_26 allows a vehicle sprite atlas with wrong mip count or format to
+        # pass CI silently -- extra mip levels on the sprite atlas cause blurred colour swatches.
+        run: |
+          grep -q "check_26" tools/validate_assets.py || (echo "FAIL: check_26 not found in validate_assets.py -- Phase 11d vehicle sprite atlas DDS format gate missing" && exit 1)
+          echo "PASS: check_26 present"
+
+      - name: Verify check_27 present in validate_assets.py
+        # check_27: vehicles_normal_atlas_n.dds must be 2048x2048, BC3_UNORM linear (DXT5nm,
+        # DXGI_FORMAT=77), DX10 header present, exactly 4 mip levels.
+        # A missing check_27 allows a vehicle normal atlas with wrong format or mip count to
+        # pass CI silently -- an sRGB-encoded normal atlas produces incorrect lighting at runtime.
+        run: |
+          grep -q "check_27" tools/validate_assets.py || (echo "FAIL: check_27 not found in validate_assets.py -- Phase 11d vehicle normal atlas DDS format gate missing" && exit 1)
+          echo "PASS: check_27 present"
+
+      - name: Verify check_28 present in validate_assets.py
+        # check_28: buildings_atlas_d.png wall-cell luminance stddev gate (< 8.0 = CI failure).
+        # For each of the 9 zone-type wall cells (rows 0-2, cols 0-2) within buildings_atlas_d.png,
+        # computes the standard deviation of pixel luminance within the 496x496 px usable area.
+        # A missing check_28 allows a near-solid placeholder atlas to pass CI silently.
+        run: |
+          grep -q "check_28" tools/validate_assets.py || (echo "FAIL: check_28 not found in validate_assets.py -- Phase 11d building atlas diffuse variance gate missing" && exit 1)
+          echo "PASS: check_28 present"
+
+      - name: Verify check_29 present in validate_assets.py
+        # check_29: building atlas normal-map green-channel MAD gate (< 3.0 = CI failure).
+        # For each corresponding normal-map cell, computes the mean absolute deviation of the
+        # green channel; a value below 3.0 indicates a flat normal map with no authored surface
+        # relief. A missing check_29 allows a flat normal map to pass CI silently.
+        run: |
+          grep -q "check_29" tools/validate_assets.py || (echo "FAIL: check_29 not found in validate_assets.py -- Phase 11d building atlas normal-map non-flat gate missing" && exit 1)
+          echo "PASS: check_29 present"
+
+      - name: Verify check_30 present in validate_assets.py
+        # check_30: billboard atlas DDS dimensions/format/mip/size gate.
+        # For each *_billboard.dds file: (a) dimensions exactly 1024x128 px, (b) DX10 header
+        # present with DXGI_FORMAT BC3_UNORM_SRGB (value 78), (c) dwMipMapCount equals exactly 4,
+        # (d) total file size matches the reference 192,640 bytes for DXT5/BC3 1024x128 at 4 mips.
+        # A missing check_30 allows an incorrectly formatted billboard atlas to pass CI silently.
+        run: |
+          grep -q "check_30" tools/validate_assets.py || (echo "FAIL: check_30 not found in validate_assets.py -- Phase 11d billboard atlas format/mip verification gate missing" && exit 1)
+          echo "PASS: check_30 present"
+
       - name: Verify hud_sprites_ui.dds not git-tracked
         # The DDS intermediate is an authoring artifact and must never be committed.
         # .gitignore has the entry; git rm --cached was run in Phase 10.

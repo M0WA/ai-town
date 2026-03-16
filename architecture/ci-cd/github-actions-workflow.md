@@ -696,7 +696,54 @@ markdown-lint:
   - Phase 9: Check #15 full implementation (replacing the Phase 5 `.meta` stub) and Check #20 (road LOD2 color validation) are added to the script; again no change to the job definition or wiring.
   - Phase 10: Checks #21–#23 (zone loop silence-floor, non-stinger WAV SFX format, HUD sprites dimensions) are added to the script; no change to the job definition or `all-checks-pass` wiring.
   - Phase 10b: Check #24 (cloud texture format gate — `clouds.png` 1024×1024 RGBA) is added to the script; no change to the job definition or `all-checks-pass` wiring.
-  - Phase 11d: Checks #25–27 (vehicle atlas DDS format validation — `vehicles_diffuse_atlas_d.dds` BC1_UNORM_SRGB 4-mip, `vehicles_sprite_atlas_d.dds` BC3_UNORM linear 1-mip, `vehicles_normal_atlas_n.dds` BC3_UNORM linear 4-mip) are added to the script; guard steps `Verify check_25 present`, `Verify check_26 present`, `Verify check_27 present` are added to the `validate-assets` job following the Phase 10b pattern; no change to `all-checks-pass` wiring.
+  - Phase 11d: Checks #25–30 are added to the script in two groups:
+    - Checks #25–27 (vehicle atlas DDS format validation — `vehicles_diffuse_atlas_d.dds`
+      2048×2048 BC1_UNORM_SRGB 4-mip, `vehicles_sprite_atlas_d.dds` 256×256 BC3_UNORM
+      linear 1-mip, `vehicles_normal_atlas_n.dds` 2048×2048 BC3_UNORM linear 4-mip).
+    - Check #28 (building atlas diffuse minimum variance): for each of the 9 zone-type wall
+      cells (rows 0–2, cols 0–2) within `buildings_atlas_d.png`, compute the standard
+      deviation of pixel luminance within the 496×496 px usable area; a cell with luminance
+      stddev < 8.0 (0–255 scale) indicates a near-solid placeholder fill and is a CI failure.
+    - Check #29 (building atlas normal map non-flat check): for each corresponding normal-map
+      cell in the normal-map source PNG, compute the mean absolute deviation of the green
+      channel; a value below 3.0 indicates a flat normal map with no authored surface relief
+      and is a CI failure. Both checks #28 and #29 run on the source PNG (not the DDS) to
+      avoid DXT1/DXT5 block-artefact noise in the measurement.
+    - Check #30 (billboard atlas format and mip verification): for each `*_billboard.dds`
+      file, verify (a) DDS dimensions are exactly 1024×128 px, (b) DX10 header present with
+      DXGI_FORMAT BC3_UNORM_SRGB (value 78), (c) `dwMipMapCount` equals exactly 4, (d) total
+      file size matches the reference 192,640 bytes for DXT5/BC3 1024×128 at 4 mip levels.
+
+    Guard steps `Verify check_25 present`, `Verify check_26 present`, `Verify check_27
+    present`, `Verify check_28 present`, `Verify check_29 present`, `Verify check_30 present`
+    are added to the `validate-assets` job following the Phase 10b pattern (a `grep -q`
+    step that exits 1 with a descriptive message if the named symbol is absent from
+    `tools/validate_assets.py`); no change to `all-checks-pass` wiring.
+
+    Example guard steps for checks #28–30 (append after the check_27 guard step):
+
+    ```yaml
+        - name: Verify check_28 present in validate_assets.py
+          # check_28: buildings_atlas_d.png wall-cell luminance stddev gate (< 8.0 = CI failure).
+          # A missing check_28 allows a near-solid placeholder atlas to pass CI silently.
+          run: |
+            grep -q "check_28" tools/validate_assets.py || (echo "FAIL: check_28 not found in validate_assets.py — Phase 11d building atlas diffuse variance gate missing" && exit 1)
+            echo "PASS: check_28 present"
+
+        - name: Verify check_29 present in validate_assets.py
+          # check_29: building atlas normal-map green-channel MAD gate (< 3.0 = CI failure).
+          # A missing check_29 allows a flat normal map (no surface relief) to pass CI silently.
+          run: |
+            grep -q "check_29" tools/validate_assets.py || (echo "FAIL: check_29 not found in validate_assets.py — Phase 11d building atlas normal-map non-flat gate missing" && exit 1)
+            echo "PASS: check_29 present"
+
+        - name: Verify check_30 present in validate_assets.py
+          # check_30: billboard atlas DDS dimensions/format/mip/size gate.
+          # A missing check_30 allows an incorrectly formatted billboard atlas to pass CI silently.
+          run: |
+            grep -q "check_30" tools/validate_assets.py || (echo "FAIL: check_30 not found in validate_assets.py — Phase 11d billboard atlas format/mip verification gate missing" && exit 1)
+            echo "PASS: check_30 present"
+    ```
 
 ### PHASE 0 FORM (validate-assets not yet introduced)
 

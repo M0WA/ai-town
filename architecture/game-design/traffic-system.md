@@ -6,7 +6,7 @@
 - **Road parameters**: Default road max_speed = 50 km/h (in simulation units, 1 unit = 1 m/s, so max_speed = 13.9 units/s). Road segment capacity = 8 vehicles per tile of road length. A 4-tile road block has capacity 32. These values are calibrated so that at 10,000 agents spread across a 1024×1024 map with standard grid road spacing, congestion emerges as a meaningful late-game challenge, not an early-game constant state.
 - **Zone-to-road adjacency ("serves" definition)**: A zone tile is served by a road segment if any **edge-adjacent tile** (4-directional cardinal neighbors only — north, south, east, west; diagonal neighbors do not count) contains a road segment. If no edge-adjacent tile of a zone tile contains a road, that zone tile has no valid path and falls into the null-path behavior defined below. This definition is used both for traffic demand coupling and for congestion tax-yield penalties.
 - **Congestion threshold**: Graduated penalty applied to all zones served by a congested road segment:
-  - Average segment speed 31–40% of max → −10% tax yield
+  - Average segment speed 31–39% of max → −10% tax yield (speeds ≥ 40% are free-flow; no penalty — matches `#27AE60` Green band in `architecture/ui-ux/minimap.md` §Traffic Congestion overlay)
   - Average segment speed 21–30% of max → −18% tax yield
   - Average segment speed ≤ 20% of max → **−25% tax yield** (cap; does not stack further)
   - Tax yield penalty applies only to the zone's current-tick tax collection; does not affect stored treasury or demand scores

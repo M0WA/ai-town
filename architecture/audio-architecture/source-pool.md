@@ -161,8 +161,8 @@ enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 
 The 24 Traffic/Vehicle SFX pool slots support a maximum of **12 simultaneously-audible vehicles** because each vehicle requires 2 sources (one for `sfx_vehicle_engine_idle`, one for `sfx_vehicle_engine_move`, crossblended in real time).
 
-- **Paired acquisition**: `AudioSourcePool::acquireVehicleEnginePair(ALuint& outIdle, ALuint& outMove)` must atomically reserve 2 SFX pool slots or return `false` and reserve neither. This prevents orphaned single-source vehicles.
-- **Paired release**: `AudioSourcePool::releaseVehicleEnginePair(ALuint idle, ALuint move)` returns both sources to the pool atomically. Never release only one of a pair.
+- **Paired acquisition**: `AudioSourcePool::acquireVehicleEnginePair(ZoneType zone)` must atomically reserve 2 SFX pool slots and return `std::pair<int,int>{idleIdx, moveIdx}`, or return `{-1, -1}` and reserve neither if the pool is exhausted. Indices are opaque pool-internal integers — not `ALuint` handles. This prevents orphaned single-source vehicles.
+- **Paired release**: `AudioSourcePool::releaseVehicleEnginePair(int idleIdx, int moveIdx)` returns both sources to the pool atomically. Never release only one of a pair.
 - **Eviction unit**: When the pool must evict to satisfy a new vehicle acquisition request, the eviction candidate selection must find the lowest-priority vehicle pair (both sources share the same vehicle entity priority and distance) and evict both together.
 - **Audio LOD cull**: Vehicle engine sources are culled (pair released) when the vehicle exceeds **150 m** from the listener. This aligns with the `AL_INVERSE_DISTANCE_CLAMPED` max distance of 150 m for traffic/vehicles — beyond this distance the attenuation model produces inaudible output anyway.
 - **Re-entry**: When a culled vehicle re-enters the 150 m range, a new `acquireVehicleEnginePair()` call is attempted. If the pool is full (12 vehicles already active), the re-entering vehicle receives no engine audio until a slot becomes available via eviction.

@@ -349,23 +349,48 @@ the scene graph as a persistent `ISceneNode*` and rebuilt (remove-old / add-new)
 event (hot path, in-place update required); zone overlay changes only on placement events
 (cold path, full rebuild acceptable).
 
-### Placement Preview — Dynamic Multi-Tile SMesh (Phase 10)
+### Placement Preview — Dynamic Multi-Tile SMesh (Phase 10 / extended Phase 11d)
 
-`IRenderer::setTilePlacementPreview(tiles, argb)` renders a multi-tile highlight covering
-the Zone rectangular drag-select or Road straight-line preview while LMB is held. Unlike
-the single-tile hover highlight (pre-allocated, in-place update), the preview mesh is
+`IRenderer::setTilePlacementPreview` renders a multi-tile highlight covering the Zone
+rectangular drag-select or Road straight-line preview while LMB is held. Unlike the
+single-tile hover highlight (pre-allocated, in-place update), the preview mesh is
 **fully rebuilt on every call** because its tile count varies from 1 to potentially
 hundreds per drag step.
 
+**Signature (Phase 11d two-list API)**:
+
+```cpp
+void setTilePlacementPreview(
+    const std::vector<std::pair<int,int>>& freeTiles,
+    uint32_t freeArgb,
+    const std::vector<std::pair<int,int>>& blockedTiles = {});
+```
+
+- `freeTiles` — tiles where placement would succeed (unoccupied). Rendered with
+  `freeArgb` (caller-supplied colour, typically `kHoverArgb` — the green/teal
+  preview colour).
+- `freeArgb` — ARGB colour applied to every vertex of every free-tile quad.
+- `blockedTiles` — tiles already occupied by an existing zone or road (placement
+  would be skipped). Defaults to empty for backward compatibility with callers that
+  do not distinguish free from blocked. Rendered with the fixed constant
+  `kHoverArgbBlocked` (0xBBFF2222 — semi-transparent red). The caller does NOT
+  supply a colour for blocked tiles; the renderer uses `kHoverArgbBlocked`
+  unconditionally.
+
+Both tile lists are packed into the same rebuilt `SMesh*` in a single call — one mesh
+covers all tiles (free and blocked combined). The SMesh rebuild behaviour is unchanged
+from Phase 10: one full rebuild per call, old mesh dropped before allocation.
+
+**Clear signal**: pass empty `freeTiles` (and empty or omitted `blockedTiles`) to hide
+the preview — sets `m_previewVisible = false`, skips mesh allocation.
+
 **Lifecycle**:
 
-- `m_previewMesh` (`SMesh*`) is `nullptr` at construction; allocated on the first non-empty
-  call to `setTilePlacementPreview()`.
+- `m_previewMesh` (`SMesh*`) is `nullptr` at construction; allocated on the first
+  non-empty call to `setTilePlacementPreview()`.
 - Each call drops the old mesh (`m_previewMesh->drop()`) before allocating a new one.
-  This is a cold path (at most one rebuild per `MouseMove` event) so the allocation cost
-  is acceptable.
-- An empty `tiles` vector is the clear signal: sets `m_previewVisible = false`, skips
-  mesh allocation.
+  This is a cold path (at most one rebuild per `MouseMove` event) so the allocation
+  cost is acceptable.
 - `m_previewMesh` is dropped in the `IrrlichtRenderer` destructor.
 - The mesh is NOT added to the Irrlicht scene graph. It is drawn in `drawScene()` after
   the single-tile hover highlight via a loop over `m_previewMesh->getMeshBufferCount()`
@@ -373,13 +398,16 @@ hundreds per drag step.
 
 **Buffer batching**: identical u16-index limit as zone overlay — max 10,922 quads per
 `SMeshBuffer`. Out-of-bounds tiles are skipped silently (clamped by `m_mapTilesX/Z`).
+Free-tile quads and blocked-tile quads share the same set of sequentially filled
+buffers — no separate buffer allocation per colour group is required.
 
 **When the single-tile hover is suppressed**: while a Zone or Road drag is active
 (`m_lmbHeld && m_zoneAnchorX != -1`) and the preview is shown, `UIManager` calls
 `setTileHoverHighlight(-1, -1, kHoverArgbClear)` to hide the single-tile cursor and
-`setTilePlacementPreview(tiles, colour)` to show the multi-tile preview. When LMB is
-released or the tool is deselected, `setTilePlacementPreview({}, 0)` clears the preview
-and the normal single-tile hover resumes on the next `MouseMove`.
+`setTilePlacementPreview(freeTiles, kHoverArgb, blockedTiles)` to show the multi-tile
+preview. When LMB is released or the tool is deselected,
+`setTilePlacementPreview({}, 0)` clears the preview and the normal single-tile hover
+resumes on the next `MouseMove`.
 
 ---
 
@@ -550,14 +578,30 @@ any number of manually placed vehicle nodes.
 
 **Lifecycle rules**:
 
-1. `spawnVehicleAgent(AgentHandle, tileX, tileZ, zone)` → creates `IAnimatedMeshSceneNode*`,
-   loads LOD0 mesh for `zone`, inserts into `m_agentNodes[handle]`.
+1. `spawnVehicleAgent(AgentHandle, tileX, tileZ, zone)` → creates `IMeshSceneNode*`
+   (CMeshSceneNode) via `addMeshSceneNode(static_cast<IMesh*>(vehicleMesh))` — NOT
+   `addAnimatedMeshSceneNode` (same constraint as buildings, per §Why CMeshSceneNode is
+   required); loads LOD0 mesh for `zone`, inserts into `m_agentNodes[handle]`.
 2. `moveVehicleAgent(handle, tileX, tileZ, headingDeg)` → looks up node, updates position and
    Y-rotation; does nothing if handle is absent (agent was culled).
-3. `despawnVehicleAgent(handle)` → calls `node->remove()`, erases from `m_agentNodes`.
+3. `despawnVehicleAgent(handle)` → runs the following eviction sequence, then erases from
+   `m_agentNodes`:
+   1. Iterate all material slots — call `mat.setTexture(t, nullptr)` for every texture unit
+      `t` in `[0, MATERIAL_MAX_TEXTURES)` (same pattern as `destroyVehicleNode` / Phase 10).
+   2. `m_driver->setMaterial(SMaterial{})` — flush driver last-bound state.
+   3. `node->remove()` — release the scene node. Do NOT access the node pointer after this
+      line. (Agent nodes use raw `IMeshSceneNode*`, not `LODNode*` — no wrapper to delete.)
+   4. Erase the entry from `m_agentNodes`.
+
+   **TextureCache note**: vehicle atlas textures (`vehicles_diffuse_atlas_d.dds` etc.) are
+   loaded **once at renderer init**, not per-agent-spawn. `spawnVehicleAgent` does NOT call
+   `TextureCache::loadSRGB`; therefore `despawnVehicleAgent` does NOT call
+   `TextureCache::releaseSRGB`. Steps 1–2 above release the node's texture reference without
+   disturbing the shared atlas.
 
 **Cull policy**: agents beyond 150 m from the camera are not spawned (simulation skips calling
 `spawnVehicleAgent` for them); agents that move beyond 150 m trigger `despawnVehicleAgent`.
 
-**SMesh / drop() rules**: agent nodes use `IAnimatedMesh` loaded via `ISceneManager::getMesh()` —
-the scene manager owns the mesh; `IrrlichtRenderer` must NOT call `->drop()` on it.
+**SMesh / drop() rules**: agent nodes use `IAnimatedMesh*` loaded via `ISceneManager::getMesh()`
+and cast to `IMesh*` for `addMeshSceneNode` — the scene manager owns the mesh;
+`IrrlichtRenderer` must NOT call `->drop()` on it.

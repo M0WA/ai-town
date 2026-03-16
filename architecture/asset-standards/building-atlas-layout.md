@@ -39,17 +39,17 @@
 
 | Cell Row | Cell Col | Module Type | Zone | Tier | Notes |
 |---|---|---|---|---|---|
-| 0 | 0 | wall_residential_low | Residential | Low density | Phase 9 UV authoring complete. Variants `res_low_01` and `res_low_02` share this cell. |
-| 0 | 1 | wall_commercial_low | Commercial | Low density | Phase 9 UV authoring complete. Variants `com_low_01` and `com_low_02` share this cell. |
-| 0 | 2 | wall_industrial_low | Industrial | Low density | Phase 9 UV authoring complete. Variants `ind_low_01` and `ind_low_02` share this cell. |
+| 0 | 0 | wall_residential_low | Residential | Low density | Phase 9 UV authoring complete. Variants `res_low_01` through `res_low_04` share this cell. |
+| 0 | 1 | wall_commercial_low | Commercial | Low density | Phase 9 UV authoring complete. Variants `com_low_01` through `com_low_04` share this cell. |
+| 0 | 2 | wall_industrial_low | Industrial | Low density | Phase 9 UV authoring complete. Variants `ind_low_01` through `ind_low_04` share this cell. |
 | 0 | 3 | base_shared_low | Residential / Commercial / Industrial | Low density | Phase 9 UV authoring complete. Shared base module for all zone types at Low density (per binding decision below). |
-| 1 | 0 | wall_residential_med | Residential | Med density | Phase 9 UV authoring complete. Variants `res_med_01` and `res_med_02` share this cell. |
-| 1 | 1 | wall_commercial_med | Commercial | Med density | Phase 9 UV authoring complete. Variants `com_med_01` and `com_med_02` share this cell. |
-| 1 | 2 | wall_industrial_med | Industrial | Med density | Phase 9 UV authoring complete. Variants `ind_med_01` and `ind_med_02` share this cell. |
+| 1 | 0 | wall_residential_med | Residential | Med density | Phase 9 UV authoring complete. Variants `res_med_01` through `res_med_04` share this cell. |
+| 1 | 1 | wall_commercial_med | Commercial | Med density | Phase 9 UV authoring complete. Variants `com_med_01` through `com_med_04` share this cell. |
+| 1 | 2 | wall_industrial_med | Industrial | Med density | Phase 9 UV authoring complete. Variants `ind_med_01` through `ind_med_04` share this cell. |
 | 1 | 3 | base_shared_med | Residential / Commercial / Industrial | Med / High density | Phase 9 UV authoring complete. Shared base module for all zone types at Med density; High-density buildings also reuse this cell (binding decision below). |
-| 2 | 0 | wall_residential_high | Residential | High density | Phase 9 UV authoring complete. Variants `res_high_01` and `res_high_02` share this cell. |
-| 2 | 1 | wall_commercial_high | Commercial | High density | Phase 9 UV authoring complete. Variants `com_high_01` and `com_high_02` share this cell. |
-| 2 | 2 | wall_industrial_high | Industrial | High density | Phase 9 UV authoring complete. Variants `ind_high_01` and `ind_high_02` share this cell. |
+| 2 | 0 | wall_residential_high | Residential | High density | Phase 9 UV authoring complete. Variants `res_high_01` through `res_high_04` share this cell. |
+| 2 | 1 | wall_commercial_high | Commercial | High density | Phase 9 UV authoring complete. Variants `com_high_01` through `com_high_04` share this cell. |
+| 2 | 2 | wall_industrial_high | Industrial | High density | Phase 9 UV authoring complete. Variants `ind_high_01` through `ind_high_04` share this cell. |
 | 2 | 3 | roof_shared | All zones | All tiers | Phase 9 UV authoring complete. All V1 zone types and density tiers share this rooftop cell. |
 | 3 | 0 | facade_detail_balcony | All zones | Med/High | Phase 9 UV authoring complete. Balcony and window-bay facade detail pieces for Med and High density buildings. |
 | 3 | 1 | facade_detail_pilaster | All zones | Med/High | Phase 9 UV authoring complete. Pilaster and cornice facade detail pieces for Med and High density buildings. |
@@ -58,7 +58,7 @@
 
 **Note**: All zone building module cells (0,0)–(3,1) have Phase 9 UV authoring complete. Cell (3,2) is assigned to service buildings with UV authoring complete (geometry); the `graphics-artist-2d-texture` texture content quality sign-off was recorded 2026-03-04 (see sign-off block below) — this gate is CLOSED. Cell (3,3) remains reserved. The service building cell (3,2) assignment is binding and must not be reallocated.
 
-**IMPORTANT — Variant sharing of wall cells (binding decision)**: Building variants within the same zone-tier combination share the same wall module atlas cells — only distinct module types (wall, base, roof, facade detail) require separate cells. For example, `res_low_01` and `res_low_02` are two variants of Low-density Residential; both reference the same `wall_residential_low` atlas cell with different mesh geometry configurations. Unique cells are NOT required per variant, only per module type. This keeps the 4×4 (16-cell) atlas within capacity for all V1 building module types. This decision is binding and confirmed here before UV authoring begins. `graphics-artist-2d-texture` and `graphics-dev-irrlicht` must both sign off that all V1 variant UVs map into the correct shared module-type cell before Phase 9 UV authoring begins.
+**IMPORTANT — Variant sharing of wall cells (binding decision)**: Building variants within the same zone-tier combination share the same wall module atlas cells — only distinct module types (wall, base, roof, facade detail) require separate cells. For example, `res_low_01` through `res_low_04` are the four variants of Low-density Residential; all four reference the same `wall_residential_low` atlas cell with different mesh geometry configurations. Unique cells are NOT required per variant, only per module type. This keeps the 4×4 (16-cell) atlas within capacity for all V1 building module types. This decision is binding and confirmed here before UV authoring begins. `graphics-artist-2d-texture` and `graphics-dev-irrlicht` must both sign off that all V1 variant UVs map into the correct shared module-type cell before Phase 9 UV authoring begins.
 
 **BINDING DECISION — Shared base module and roof cells across all zone types**: The single `roof_shared` cell (row 2, col 3) is intentional — all V1 zone types and density tiers share a common rooftop texture. Similarly, Commercial and Industrial buildings share the residential base module cells (`base_residential_low` at row 0, col 3 and `base_residential_med` at row 1, col 3) for ground-floor geometry. Any zone-specific ground-floor character is encoded via facade detail pieces (row 3, cols 0–1), not separate base module cells.
 

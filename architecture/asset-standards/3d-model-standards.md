@@ -9,20 +9,30 @@
 
 | Asset category | LOD0 (near) | LOD1 (mid) | LOD2 (far) |
 |---|---|---|---|
-| Large buildings | 2000–5000 tris | 500–1000 tris | 300–500 tris |
-| Small buildings / props (height_floors <= 3) | 500–1500 tris | 100–300 tris | Billboard (point-sprite only) |
-| Small buildings / props (height_floors >= 4) | 500–1500 tris | 100–300 tris | 300–500 tris (`_lod2.b3d` geometry shell) |
-| Vehicles | 1000–3000 tris (indicative range — see per-class table in § Vehicle Polygon Budget for binding limits) | 200–500 tris (indicative range — see per-class table for binding limits) | Point/sprite |
+| Large buildings (general) | 4,000–8,000 tris | 800–1,500 tris | 400–600 tris |
+| Large buildings — Commercial High only (skyscrapers) | 7,000–10,000 tris | 1,200–2,000 tris | 500–700 tris |
+| Small buildings / props (height\_floors <= 3) | 1,500–3,000 tris | 200–400 tris | Billboard (point-sprite only) |
+| Small buildings / props (height\_floors >= 4) | 1,500–3,000 tris | 200–400 tris | 400–600 tris (`_lod2.b3d` geometry shell) |
+| Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | 2,000–4,000 tris | 200–400 tris | Billboard |
+| Vehicles (cars) | ≤2,000 tris | ≤400 tris | Point/sprite |
+| Vehicles (bus, truck) | ≤3,000 tris | ≤500 tris | Point/sprite |
+| Vehicles (general indicative range) | 1,000–3,000 tris (indicative range — see per-class table in § Vehicle Polygon Budget for binding limits) | 200–500 tris (indicative range — see per-class table for binding limits) | Point/sprite |
 | Terrain chunk (64×64 m) | 32×32 quad grid | 16×16 quad grid | 8×8 quad grid |
 | Road tile (10×10 m) | ≤48 tris (flat quad + kerb geometry) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
 | Infrastructure props (lamp posts, signs) | ≤300 tris | ≤75 tris | Billboard (same system as small buildings) |
-| Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | 2,000–5,000 tris | 100–300 tris | Billboard (no geometry shell required — `height_floors = 2` for all V1 service buildings; `_lod2.b3d` is not authored) |
+
+**Commercial High skyscraper sub-row**: The `com_high_*` row (7,000–10,000 tris LOD0) applies
+exclusively to V1 skyscrapers — glass towers with `height_floors` 15–30. These buildings feature
+stepped or tapered forms, glass curtain-wall facades, and distinctive crown treatments (spire,
+antenna cluster, or setback pyramid) that require a higher polygon budget to preserve their
+silhouette fidelity at LOD0 and LOD1 viewing distances. See the **Commercial High Skyscraper
+Standards** section below for full design requirements.
 
 **Road tile LOD thresholds**: Road tiles use the same LOD distance thresholds as small buildings/props (LOD0→LOD1 at 30 m / 25 m; LOD1→LOD2 at 100 m / 90 m). At LOD2 (>100 m), road tiles are rendered as flat coloured quads with no kerb or road marking geometry — road marking decals from the road atlas are disabled at LOD2. **Road LOD2 color source**: The LOD2 road quad color is sampled from the road tileable texture's average color, computed at asset pipeline generation time and stored as a named constant `RenderConstants::road_lod2_color` (type `irr::video::SColor`) in `src/rendering/render_constants.h`. This value must be a perceptual match of the center region of `road_asphalt_tileable.dds` when viewed in linear space (approximately a mid-dark gray, e.g. SColor(255, 60, 60, 60) for standard asphalt). Do NOT hardcode a magic color literal inline in rendering code — always use `RenderConstants::road_lod2_color` so that the color is updated in one place when the road texture changes. The LOD2 road quad does NOT bind a texture — it is drawn as a flat-shaded quad using the material's vertex color channel, set to `road_lod2_color` at entity construction time.
 
 **Road tile mesh authoring source (binding decision, `graphics-artist-3d-model`, 2026-03-04)**: Road tile LOD0 and LOD1 geometry is **procedurally generated in C++ at runtime via `SMesh`/`IMeshBuffer`** — no `.b3d` file is authored on disk for road tiles. `IrrlichtRenderer::placeRoadMesh()` constructs the LOD0 quad+kerb mesh (≤48 tris) and LOD1 flat quad mesh (≤16 tris) directly in code using hardcoded vertex data for a 4×4 m tile footprint. The LOD2 flat colored quad is also constructed in code (≤8 tris, `road_lod2_color` vertex color, no texture). Rationale: (a) road tiles do not participate in the lightmap baking pipeline and therefore do not require UV channel 1 or the `.b3d` format; (b) the road custom shader binds `road_asphalt_tileable.dds` via the raw GL path, which is incompatible with a standard `IMeshSceneNode` loaded from a `.b3d` file via the Irrlicht mesh loader; (c) no road tile `.b3d` filename appears in any phase deliverable — road geometry is implicitly a code deliverable of `graphics-dev-irrlicht`, not an artist asset. **Artist action: none**. No road tile `.b3d`, `.obj`, or `.meta` file is required from the 3D model artist pipeline. The `validate_assets.py` script must NOT look for road tile `.b3d` files — they do not exist. Road tile UV-channel 0 tiling is specified in the road shader (UV tiles 2× per 4×4 m road quad — both U and V scale by 2.0 in the vertex shader), not authored per-asset. The road kerb geometry vertices are authored inline in `IrrlichtRenderer` as a unit of 4 bevelled edge strips (each strip = 6 tris, 4 strips = 24 tris) plus a central flat quad (2 tris), totaling 26 tris for LOD0 — well within the ≤48 tri budget. LOD1 is a single flat quad (2 tris) with no kerb, within the ≤16 tri budget.
 
-**Note on large building LOD2 budget**: 300–500 tris is required to represent building silhouettes (setbacks, rooftop details, entry bays) at the 185–200 m switch-in distance where tall buildings still occupy 50–80 vertical pixels. A 100–200 tri cap produces a featureless slab that is visually jarring against LOD1 counterparts.
+**Note on large building LOD2 budget**: 400–600 tris is required to represent building silhouettes (setbacks, rooftop details, entry bays) at the 185–200 m switch-in distance where tall buildings still occupy 50–80 vertical pixels. A 100–200 tri cap produces a featureless slab that is visually jarring against LOD1 counterparts.
 
 ### LOD Distance Thresholds and Hysteresis
 
@@ -77,10 +87,43 @@ Where:
 **Examples**:
 
 - `res_low_01_lod0.b3d` — Residential Low tier, variant 1, LOD0 geometry
-- `com_med_03_lod2.b3d` — Commercial Medium tier, variant 3, LOD2 shell
+- `res_low_02_lod0.b3d` — Residential Low tier, variant 2, LOD0 geometry
+- `res_low_03_lod0.b3d` — Residential Low tier, variant 3, LOD0 geometry
+- `res_low_04_lod0.b3d` — Residential Low tier, variant 4, LOD0 geometry
+- `com_high_03_lod2.b3d` — Commercial High tier (skyscraper), variant 3, LOD2 shell
 - `res_low_01_billboard.dds` — Residential Low tier, variant 1, billboard atlas (height_floors ≤ 3)
 
 The `<asset_name>` base (e.g. `res_low_01`) is referenced in `<asset_name>.meta` for `height_floors`, `category`, and atlas cell assignments. The C++ `BuildingAssetLoader` parses the naming convention to construct LOD file paths — do not use ad-hoc per-building naming.
+
+#### Commercial High Skyscraper Standards
+
+`com_high_*` buildings are V1 skyscrapers: glass towers with `height_floors` 15–30, stepped or
+tapered form, glass curtain-wall facade, and a distinctive crown. These assets are subject to
+the Commercial High sub-row budgets in the LOD Requirements table (7,000–10,000 tris LOD0,
+1,200–2,000 tris LOD1, 500–700 tris LOD2 geometry shell).
+
+**Design requirements** (binding for all four V1 `com_high_*` variants):
+
+- **Floor count**: `height_floors` must be in the range 15–30 for all `com_high_*` variants.
+- **Form language**: Each variant must have a distinct massing silhouette chosen from:
+  - `com_high_01`: narrow tower (tall, slender rectangular shaft)
+  - `com_high_02`: wide slab (broad, flat rectangular form)
+  - `com_high_03`: tapered pyramid (floor plates that step inward as they rise)
+  - `com_high_04`: stepped ziggurat (tiered horizontal setbacks at regular intervals)
+- **Facade**: Glass curtain-wall material using the `wall_commercial_high` atlas cell
+  (row 2, col 1). Horizontal spandrel bands are permitted as facade articulation detail.
+- **Crown treatment**: Each variant must have a unique top treatment. Approved crown types:
+  - Spire (tapered needle or broadcast antenna cluster)
+  - Setback pyramid (faceted glass cap)
+  - Antenna cluster (multi-element broadcast or cellular array)
+  - Flat mechanical penthouse (equipment enclosure with parapet)
+  No two `com_high_*` variants may share the same crown type.
+- **LOD2 strategy**: `height_floors >= 4` — all `com_high_*` variants must ship
+  `_lod2.b3d` geometry shells (500–700 tris). No `_billboard.dds` is used at LOD2 for
+  these assets. The geometry shell must preserve the crown silhouette and overall
+  massing outline visible at 185–200 m.
+- **Variant count**: exactly four variants (`com_high_01` through `com_high_04`),
+  consistent with the binding 4-variant-per-zone-tier policy.
 
 #### Variant Selection Policy (Round-Robin, Phase 11)
 
@@ -89,12 +132,17 @@ The `<asset_name>` base (e.g. `res_low_01`) is referenced in `<asset_name>.meta`
 **Phase 11 and later**: When `CitySimulation` places a zone tile, it selects a visual building variant from the available variants for that zone-tier combination using a **per-zone-tier round-robin counter**. The policy is:
 
 - `CitySimulation` maintains one `int` counter per unique zone-tier combination (9 combinations in V1: Res/Com/Ind × Low/Med/High). Each counter starts at `0` and increments by `1` on every successful placement for that zone-tier combination.
-- The variant index is `(counter % numVariants) + 1`, formatted as a zero-padded 2-digit string (`01`, `02`, …). `numVariants` is always `2` for V1 (two variants per zone-tier slot).
-- The resulting `assetBaseName` passed to `IRenderer::placeBuildingMesh()` is `<zone>_<tier>_<variant>` (e.g. `"res_low_01"`, `"res_low_02"`, `"res_low_01"`, …).
+- The variant index is `(counter % numVariants) + 1`, formatted as a zero-padded 2-digit string (`01`, `02`, `03`, `04`). `numVariants` is `4` for V1 (four variants per zone-tier slot). Service buildings have no variant system and do not use this counter.
+- The resulting `assetBaseName` passed to `IRenderer::placeBuildingMesh()` is `<zone>_<tier>_<variant>` (e.g. `"res_low_01"`, `"res_low_02"`, `"res_low_03"`, `"res_low_04"`, `"res_low_01"`, …).
 - After `CitySimulation::doDensityUnlockTick()` upgrades a tile to a higher density tier, the NEW `assetBaseName` uses the upgraded tier's round-robin counter (not the original tier's counter). Example: a tile originally placed as `"res_low_02"` that upgrades to Medium becomes `"res_med_<N>"` where `<N>` is the current Residential/Medium counter value.
 - The counter is a plain `int` member of `CitySimulation` per zone-tier slot. **Prior to Phase 11**, the counters are not persisted in the save file — on load, all existing zone tile variants are read from the tile's stored `assetBaseName` field in the save data, not recomputed from the counter; only newly placed tiles after a load use the counter (starting from 0), so save/load does not change existing visible building variants. **From Phase 11 onwards**, all 9 `m_buildingVariantCounters` are serialized to and deserialized from the save file so that post-load placements continue the pre-save sequence without restarting at 0; see `architecture/game-design/save-system.md`.
-- **No-repeat guarantee**: the round-robin ensures strict alternation between the two V1 variants (01, 02, 01, 02, …) without shuffling or RNG. This is intentional — using `ISimulationRNG` for variant selection would couple visible-asset selection to the simulation RNG stream, making reproduction of RNG-dependent events (service degradation, loan issuance) dependent on the number of tiles placed, which would break deterministic test replay. Visual variant selection MUST NOT use `ISimulationRNG`.
+- **No-repeat guarantee**: the round-robin cycles through the four V1 variants (01, 02, 03, 04, 01, 02, …) without shuffling or RNG. This is intentional — using `ISimulationRNG` for variant selection would couple visible-asset selection to the simulation RNG stream, making reproduction of RNG-dependent events (service degradation, loan issuance) dependent on the number of tiles placed, which would break deterministic test replay. Visual variant selection MUST NOT use `ISimulationRNG`.
 - **Counter storage location**: `CitySimulation` stores the nine counters as `std::array<int, 9> m_buildingVariantCounters` (indexed by `zone * 3 + tier` where `zone` = 0/1/2 for Res/Com/Ind and `tier` = 0/1/2 for Low/Med/High), initialised to `{0}` in the constructor initialiser list.
+- **Service buildings**: Service buildings (`svc_fire_station`, `svc_police_station`,
+  `svc_power_plant`, `svc_water_tower`) have **no variant system**. Each is a single
+  unique model. There is no round-robin counter for service buildings, and no variant
+  suffix (`_01`, `_02`, etc.) appears in their filenames. The `placeServiceBuildingMesh()`
+  call always uses the canonical base name directly (e.g. `"svc_fire_station"`).
 
 **`assetBaseName` construction helper** (implement as a `static` free function in `CitySimulation.cpp`):
 
@@ -102,7 +150,7 @@ The `<asset_name>` base (e.g. `res_low_01`) is referenced in `<asset_name>.meta`
 static std::string buildingAssetBaseName(ZoneType zone, DensityTier tier, int variantCounter) {
     static const char* zoneStr[]  = {"res", "com", "ind"};
     static const char* tierStr[]  = {"low", "med", "high"};
-    static const int numVariants  = 2;   // V1 constant
+    static const int numVariants  = 4;   // V1 constant
     int variantIdx = (variantCounter % numVariants) + 1;
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%s_%s_%02d",
@@ -199,13 +247,13 @@ Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON side
 
 | Vehicle class | LOD0 budget | LOD1 budget |
 |---|---|---|
-| Car (sedan, hatchback, SUV) | ≤1,500 tris | ≤300 tris |
-| Bus | ≤2,500 tris | ≤450 tris |
-| Truck | ≤2,500 tris | ≤450 tris |
+| Car (sedan, hatchback, SUV) | ≤2,000 tris | ≤400 tris |
+| Bus | ≤3,000 tris | ≤500 tris |
+| Truck | ≤3,000 tris | ≤500 tris |
 
 The LOD Requirements table above lists the general Vehicles row (1000–3000 tris LOD0, 200–500 tris LOD1) as a range covering all vehicle classes. The per-class caps above are the binding limits within that range. All vehicle assets must be exported as a **single solid mesh** (body + windows + wheels unified into one `IMesh`); modular sub-mesh assembly is not used for vehicles.
 
-**BINDING LIMIT NOTE**: The per-class budgets in the table above are the **binding limits**; the general range in the LOD Requirements table (1000–3000 tris LOD0, 200–500 tris LOD1) is **indicative only** — it covers the full span across all vehicle classes and must not be used as a per-class cap. For example, the general range does not permit a car to have 2,500 LOD0 triangles; the binding car LOD0 cap is ≤1,500 tris. The export validation script and artist review must use the per-class table above as the authoritative polygon budget source.
+**BINDING LIMIT NOTE**: The per-class budgets in the table above are the **binding limits**; the general range in the LOD Requirements table (1000–3000 tris LOD0, 200–500 tris LOD1) is **indicative only** — it covers the full span across all vehicle classes and must not be used as a per-class cap. For example, the general range does not permit a car to have 3,000 LOD0 triangles; the binding car LOD0 cap is ≤2,000 tris. The export validation script and artist review must use the per-class table above as the authoritative polygon budget source.
 
 #### Vehicle LOD File Naming Convention
 
@@ -254,18 +302,18 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
 
 #### V1 Minimum Building Coverage
 
-Artists must deliver a minimum of **18 building sets** across all zone/tier combinations: 2 variants × 3 zones (Residential/Commercial/Industrial) × 3 density tiers (Low/Mid/High) = 18 sets total. Sub-breakdown: 12 Low+Mid sets (2 variants × 3 zones × 2 tiers) and 6 High-density sets (2 variants × 3 zones × 1 tier). High-density buildings (`height_floors >= 4`) require `_lod2.b3d` geometry shells; Low/Mid buildings (`height_floors <= 3`) require `_billboard.dds` billboard imposters for LOD2.
+Artists must deliver a minimum of **36 building sets** across all zone/tier combinations: 4 variants × 3 zones (Residential/Commercial/Industrial) × 3 density tiers (Low/Mid/High) = 36 sets total. Sub-breakdown: 24 Low+Mid sets (4 variants × 3 zones × 2 tiers) and 12 High-density sets (4 variants × 3 zones × 1 tier). High-density buildings (`height_floors >= 4`) require `_lod2.b3d` geometry shells; Low/Mid buildings (`height_floors <= 3`) require `_billboard.dds` billboard imposters for LOD2.
 
 Each building set must include:
 
 - `<zone>_<tier>_<variant>_lod0.b3d` — LOD0 full-detail mesh
 - `<zone>_<tier>_<variant>_lod1.b3d` — LOD1 reduced mesh (≤50% of LOD0 tris)
 - For buildings with `height_floors <= 3`: `<zone>_<tier>_<variant>_billboard.dds` — billboard atlas (1024×128 DXT5 sRGB)
-- For buildings with `height_floors >= 4`: `<zone>_<tier>_<variant>_lod2.b3d` — LOD2 geometry shell (300–500 tris)
+- For buildings with `height_floors >= 4`: `<zone>_<tier>_<variant>_lod2.b3d` — LOD2 geometry shell (400–600 tris)
 - `<zone>_<tier>_<variant>.meta` — sidecar with `category`, `height_floors`, `atlas_cell`, `lod_distances`
 - `<zone>_<tier>_<variant>_col.obj` — collision mesh (or `_col_0/1/2.obj` / `_col_circle.obj` for non-convex/circular footprints)
 
-Variants sharing the same zone-tier slot (e.g. `res_low_01` and `res_low_02`) share the same wall module atlas cell in the 2048×2048 building atlas — they differ in mesh geometry only. See `architecture/asset-standards/building-atlas-layout.md` for the cell assignment table.
+Variants sharing the same zone-tier slot (e.g. `res_low_01` through `res_low_04`) share the same wall module atlas cell in the 2048×2048 building atlas — they differ in mesh geometry only. See `architecture/asset-standards/building-atlas-layout.md` for the cell assignment table.
 
 #### Service Building Model Standards
 
@@ -289,8 +337,8 @@ double-storey structures). LOD0 polygon budgets are raised in Phase 11d to suppo
 recognisable per-type architectural detail (antenna masts, equipment geometry, garage
 bay insets). This means:
 
-- LOD0: 2,000–5,000 tris (full detail — Phase 11d raised budget)
-- LOD1: 100–300 tris (reduced)
+- LOD0: 2,000–4,000 tris (full detail — binding budget per LOD Requirements table)
+- LOD1: 200–400 tris (reduced)
 - LOD2: `_billboard.dds` (1024×128 DXT5 sRGB, 8-direction bake at 45° below horizontal).
   No `_lod2.b3d` geometry shell — `height_floors = 2 <= 3` boundary applies.
 
