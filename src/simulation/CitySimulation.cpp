@@ -1605,7 +1605,7 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
         int tierIdx = static_cast<int>(tier);
         int idx     = zoneIdx * 3 + tierIdx;
         m_buildingVariantCounters[idx]++;
-        int variantNum = ((m_buildingVariantCounters[idx] - 1) % 3) + 1;  // 1, 2, or 3
+        int variantNum = ((m_buildingVariantCounters[idx] - 1) % 2) + 1;  // 1 or 2
 
         if (m_renderer) {
             // Build name like "res_low_01", "res_low_02", "res_low_03"
