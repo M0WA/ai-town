@@ -1029,7 +1029,8 @@ jobs:
           # lands there. The --ignore-errors unused flag makes this pattern a no-op when
           # the directory does not exist, so it is safe to include unconditionally.
           lcov --remove coverage.info \
-            --ignore-errors unused \
+            --ignore-errors unused,inconsistent \
+            --rc check_data_consistency=0 \
             '/usr/*' \
             '/opt/vcpkg_installed/*' \
             "${{ github.workspace }}/.fetchcontent_cache/*" \
