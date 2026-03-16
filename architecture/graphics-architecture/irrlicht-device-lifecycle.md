@@ -55,7 +55,51 @@ The Z-order concern (scrim must cover panels; modal must be topmost) is handled 
 
 **Loading screen exception**: Loading screen render loops may omit `guiEnvironment->drawAll()`. The loading screen UI (progress bar, status text) is rendered by `UIManager::draw()` using direct draw primitives (not Irrlicht `IGUIElement` nodes), so there are no GUI elements for `guiEnvironment->drawAll()` to paint. Calling `guiEnvironment->drawAll()` during the loading screen is harmless but unnecessary; omitting it is intentional and correct. The gameplay render loop (post-load) MUST include `guiEnvironment->drawAll()` as normal.
 
-The mandatory 10-step per-frame sequence is: `audioSystem->syncListenerToCamera(cam)` → `audioSystem->update(realDeltaSeconds)` → `UIManager::update(realDeltaSeconds)` → `terrainSystem->update(realDeltaSeconds)` → `driver->beginScene()` → `sceneManager->drawAll()` → hover tile highlight `drawMeshBuffer()` if `m_hoveredTileMesh && m_hoverVisible` (Phase 9b) → `UIManager::draw()` → `guiEnvironment->drawAll()` → `driver->endScene()`. The two audio calls must come before `beginScene()` so that the listener position and audio command queue are fully updated before rendering begins. `terrainSystem->update()` is also a pre-render step — it processes queued LOD rebuilds before the scene is drawn. The Irrlicht-internal ordering (`beginScene` → `drawAll` → `draw` → `guiEnv->drawAll` → `endScene`) is immutable; the audio and terrain setup calls are pre-steps that must not be moved inside the Irrlicht render block. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API.
+The mandatory 11-step per-frame sequence is: `audioSystem->syncListenerToCamera(cam)` → `audioSystem->update(realDeltaSeconds)` → `UIManager::update(realDeltaSeconds)` → `terrainSystem->update(realDeltaSeconds)` → `renderer->update(realDeltaSeconds)` (cloud UV scroll) → `driver->beginScene()` → `sceneManager->drawAll()` → hover tile highlight `drawMeshBuffer()` if `m_hoveredTileMesh && m_hoverVisible` (Phase 9b) → `UIManager::draw()` → `guiEnvironment->drawAll()` → `driver->endScene()` → **60 FPS frame cap sleep**. The two audio calls must come before `beginScene()` so that the listener position and audio command queue are fully updated before rendering begins. `terrainSystem->update()` is also a pre-render step — it processes queued LOD rebuilds before the scene is drawn. The Irrlicht-internal ordering (`beginScene` → `drawAll` → `draw` → `guiEnv->drawAll` → `endScene`) is immutable; the audio and terrain setup calls are pre-steps that must not be moved inside the Irrlicht render block. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API.
+
+## Frame Rate Cap
+
+The game loop targets **60 FPS** by sleeping out the remainder of each 16.67 ms budget after `driver->endScene()`. Without this cap, the loop pins a CPU core at 100% on software renderers (llvmpipe), causing thermal throttling and irregular frame-time spikes. The sleep uses `std::this_thread::sleep_for` and is skipped when the frame already took ≥ 16.67 ms (i.e. the cap never forces frames to be slower than natural rendering allows).
+
+```cpp
+static constexpr double kTargetFrameSeconds = 1.0 / 60.0;
+double elapsed  = wallClock.nowSeconds() - frameStartTime;
+double remaining = kTargetFrameSeconds - elapsed;
+if (remaining > 0.001)
+    std::this_thread::sleep_for(std::chrono::duration<double>(remaining));
+```
+
+**V1 note on llvmpipe**: `driver->endScene()` is where llvmpipe performs its software rasterisation flush — measured at ~81 ms per frame on a devcontainer CPU (12 FPS potential). All other per-frame steps combined cost < 0.5 ms. On a real GPU `endScene()` is a command-queue submit and returns in < 1 ms. The cap is necessary for the devcontainer development environment; it is neutral on hardware with a real GPU (those frames complete in < 1 ms and the sleep absorbs the rest of the 16.67 ms budget).
+
+## `--frames N` Profiling Argument
+
+`main()` accepts `--frames N`: run exactly N frames, print a per-step timing report to stderr, then exit cleanly. Intended for profiling and regression benchmarks.
+
+```bash
+./build/aitown --frames 300
+```
+
+Output (example on llvmpipe):
+
+```text
+=== FRAME TIMING REPORT (300 frames) ===
+  simulation tick :     1.38 µs/frame
+  camera update   :     6.23 µs/frame
+  terrain update  :     1.94 µs/frame
+  UI update       :     3.74 µs/frame
+  audio update    :     3.85 µs/frame
+  render (3D+GUI) : 82911.89 µs/frame
+    ├ renderer.update  :     1.91 µs/frame
+    ├ beginScene       :    70.03 µs/frame
+    ├ drawScene        :  1964.67 µs/frame
+    └ endScene (flush) : 80874.46 µs/frame
+  TOTAL measured  : 82932.00 µs/frame  (12.1 FPS potential)
+==========================================
+```
+
+`drawScene` is further broken down by `IrrlichtRenderer::drawScene()` which prints a `[drawScene]` line every 300 frames showing the split between `sceneManager->drawAll()` (3D), hover/preview mesh draws, `UIManager::draw()` (state update), and `guiEnvironment->drawAll()` (GUI pixel fill).
+
+**Key finding (llvmpipe)**: `endScene()` accounts for 97.5% of frame time — all software rasterisation is deferred to the flush. The 3D scene and GUI together cost only ~2 ms. There is no worthwhile optimisation target in the game code itself on a software renderer; performance is determined entirely by the GPU/CPU.
 
 ## IrrlichtRenderer Late-Binding Pattern
 

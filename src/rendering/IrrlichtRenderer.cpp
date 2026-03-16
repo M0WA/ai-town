@@ -16,6 +16,7 @@
 #include "RenderSystem.h"                 // Phase 10c: isSRGBTextureSupported() query
 
 #include <algorithm>   // std::min, std::max
+#include <chrono>      // drawScene sub-step profiling
 #include <cstdio>      // fprintf
 #include <cmath>       // M_PI
 #include <string>      // std::string for asset path construction
@@ -193,9 +194,15 @@ void IrrlichtRenderer::drawScene() {
     // step 3's IGUIEnvironment::drawAll() only renders what should be visible.
     // The Z-order concern is addressed by visibility management — panels that should
     // be behind (e.g. main menu during gameplay) have their elements hidden.
+    using hrc = std::chrono::high_resolution_clock;
+    auto micros = [](hrc::time_point a, hrc::time_point b) {
+        return std::chrono::duration<double,std::micro>(b - a).count();
+    };
+    auto t0 = hrc::now();
     if (m_smgr) {
         m_smgr->drawAll();
     }
+    auto t1 = hrc::now();
 
     // Phase 9b: draw hover tile highlight immediately after 3D scene, before 2D GUI.
     // The hover mesh is NOT in the scene graph — we issue a raw drawMeshBuffer() call.
@@ -223,9 +230,11 @@ void IrrlichtRenderer::drawScene() {
         }
     }
 
+    auto t2 = hrc::now();
     if (m_uiManager) {
         m_uiManager->draw();
     }
+    auto t3 = hrc::now();
     // Render all visible GUI elements. UIManager::draw() has already set the
     // correct visibility state on every element; drawAll() paints them.
     if (m_device) {
@@ -233,6 +242,21 @@ void IrrlichtRenderer::drawScene() {
         if (guiEnv) {
             guiEnv->drawAll();
         }
+    }
+    auto t4 = hrc::now();
+
+    // Accumulate sub-timings for drawScene profiling report.
+    m_prof3D    += micros(t0, t1);
+    m_profHover += micros(t1, t2);
+    m_profUIDraw+= micros(t2, t3);
+    m_profGUI   += micros(t3, t4);
+    ++m_profFrames;
+    if (m_profFrames % 300 == 0) {
+        double n = static_cast<double>(m_profFrames);
+        fprintf(stderr, "[drawScene] 3D=%.0fµs  hover/preview=%.0fµs"
+                "  uiDraw=%.0fµs  guiDrawAll=%.0fµs  (avg over %d frames)\n",
+                m_prof3D/n, m_profHover/n, m_profUIDraw/n, m_profGUI/n,
+                m_profFrames);
     }
 }
 

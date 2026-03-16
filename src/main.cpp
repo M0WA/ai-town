@@ -307,6 +307,13 @@ int main(int argc, char** argv) {
     // 8-STEP FRAME LOOP
     // =========================================================================
     int frameCount = 0;
+    double tSim=0, tCam=0, tTerrain=0, tUI=0, tAudio=0, tRender=0, tTotal=0;
+    double tBeginScene=0, tBeginFrame=0, tDrawScene=0, tEndFrame=0;
+    using hrc = std::chrono::high_resolution_clock;
+    auto T = [&]() -> double {
+        return std::chrono::duration<double,std::micro>(
+            hrc::now().time_since_epoch()).count();
+    };
     while (device->run()) {
         if (maxFrames > 0 && frameCount >= maxFrames) {
             device->closeDevice();
@@ -320,13 +327,6 @@ int main(int argc, char** argv) {
         const float  realDeltaSeconds = static_cast<float>(currentTime - prevTime);
         prevTime = currentTime;
 
-        // Per-step timing accumulators (microseconds) — active only when --frames is set.
-        using hrc = std::chrono::high_resolution_clock;
-        static double tSim=0, tCam=0, tTerrain=0, tUI=0, tAudio=0, tRender=0, tTotal=0;
-        auto T = [&]() -> double {
-            return std::chrono::duration<double,std::micro>(
-                hrc::now().time_since_epoch()).count();
-        };
         double t0 = T();
 
         // Step 1: Poll events — handled by EventReceiver::OnEvent() via device->run().
@@ -352,15 +352,21 @@ int main(int argc, char** argv) {
         // Step 3: CameraController::update(dt).
         // OAL-2 ordering rule: CameraController::update() MUST execute BEFORE
         // AudioSystem::syncListenerToCamera() so the listener reads the updated position.
+        double t2 = T();
         cameraController.update(realDeltaSeconds);
+        tCam += T() - t2;
 
         // Step 3a: TerrainSystem::update(dt) — process LOD rebuild deque (at most 2 per frame).
         // Runs after camera update so LOD decisions use the current camera position.
+        double t3 = T();
         terrainSystem.update(realDeltaSeconds);
+        tTerrain += T() - t3;
 
         // Step 3b: UIManager::update(realDeltaSeconds) — per-frame UI state update.
         // MUST execute BEFORE beginFrame() per architecture/ui-ux/ui-manager.md.
+        double t4 = T();
         uiManager.update(realDeltaSeconds);
+        tUI += T() - t4;
 
         // Step 3c: SaveSystem::update(realDeltaSeconds) — advance auto-save timer.
         // MUST execute after UIManager::update() so that the save-requested flag
@@ -407,6 +413,7 @@ int main(int argc, char** argv) {
         //   semantics guarantee thread-local context isolation but this MUST be verified at
         //   Phase 7 implementation; cross-reference: architecture/audio-architecture/audio-system.md
         CameraState cameraState = cameraController.getCameraState();
+        double t5 = T();
         try {
             audioSystem.syncListenerToCamera(cameraState);
             audioSystem.update(realDeltaSeconds);
@@ -415,19 +422,30 @@ int main(int argc, char** argv) {
             // The m_deviceLost flag in AudioSystem will suppress further AL calls.
             fprintf(stderr, "[main] Audio error (audio disabled): %s\n", e.what());
         }
+        tAudio += T() - t5;
 
         // Phase 10b: update renderer (cloud plane UV scrolling).
         // Runs before beginFrame() so the texture matrix is updated before drawAll().
+        // Phase 10b: update renderer (cloud plane UV scrolling).
+        // Runs before beginFrame() so the texture matrix is updated before drawAll().
+        double t6 = T();
         renderer.update(realDeltaSeconds);
 
         // Step 5: beginFrame (driver->beginScene).
+        double t6b = T(); tBeginScene += t6b - t6;
         renderer.beginFrame();
 
         // Step 6: drawScene (sceneManager->drawAll() + uiManager->draw()).
+        double t6c = T(); tBeginFrame += t6c - t6b;
         renderer.drawScene();
 
         // Step 7: endFrame (driver->endScene).
+        double t6d = T(); tDrawScene += t6d - t6c;
         renderer.endFrame();
+        tEndFrame += T() - t6d;
+        tRender   += T() - t6;
+
+        tTotal += T() - t0;
 
         // Step 8: Frame rate cap — sleep to target 60 FPS (≈16.67 ms/frame).
         // Prevents CPU spin at 100% on software renderers (llvmpipe) and avoids
@@ -442,6 +460,25 @@ int main(int argc, char** argv) {
                     std::chrono::duration<double>(remaining));
             }
         }
+    }
+
+    // Print per-step timing report when --frames was used.
+    if (maxFrames > 0 && frameCount > 0) {
+        double n = static_cast<double>(frameCount);
+        fprintf(stderr, "\n=== FRAME TIMING REPORT (%d frames) ===\n", frameCount);
+        fprintf(stderr, "  simulation tick : %7.2f µs/frame\n", tSim    / n);
+        fprintf(stderr, "  camera update   : %7.2f µs/frame\n", tCam    / n);
+        fprintf(stderr, "  terrain update  : %7.2f µs/frame\n", tTerrain/ n);
+        fprintf(stderr, "  UI update       : %7.2f µs/frame\n", tUI     / n);
+        fprintf(stderr, "  audio update    : %7.2f µs/frame\n", tAudio  / n);
+        fprintf(stderr, "  render (3D+GUI) : %7.2f µs/frame\n", tRender / n);
+        fprintf(stderr, "    ├ renderer.update  : %7.2f µs/frame\n", tBeginScene / n);
+        fprintf(stderr, "    ├ beginScene       : %7.2f µs/frame\n", tBeginFrame / n);
+        fprintf(stderr, "    ├ drawScene        : %7.2f µs/frame\n", tDrawScene  / n);
+        fprintf(stderr, "    └ endScene (flush) : %7.2f µs/frame\n", tEndFrame   / n);
+        fprintf(stderr, "  TOTAL measured  : %7.2f µs/frame  (%.1f FPS potential)\n",
+                tTotal / n, 1e6 / (tTotal / n));
+        fprintf(stderr, "==========================================\n");
     }
 
     return 0;
