@@ -1,4 +1,4 @@
-// ui_coverage_extra_test.cpp — Extra UI coverage tests targeting uncovered paths.
+// ui_panel_test.cpp — Tests for UI panel components and manager paths.
 //
 // Targets the uncovered paths identified in the lcov report:
 //

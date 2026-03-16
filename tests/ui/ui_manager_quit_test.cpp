@@ -1,4 +1,4 @@
-// ui_manager_quit_coverage_test.cpp — Coverage tests for UIManager quit and save paths.
+// ui_manager_quit_test.cpp — Tests for UIManager quit and save paths.
 //
 // Covers UIManager::update() sections 1c and 1d:
 //   1c. PauseMenuPanel save request polling (with SaveSystem wired).

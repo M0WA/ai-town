@@ -1,6 +1,6 @@
-// tests/ui/main_menu_coverage_test.cpp
+// tests/ui/main_menu_flow_test.cpp
 //
-// Coverage-gap tests for MainMenuPanel.cpp uncovered lines.
+// Tests for MainMenuPanel.cpp flow and lifecycle paths.
 //
 // Uncovered paths addressed:
 //   - showLoadingScreen() L161-172: transition to loading screen

@@ -1,4 +1,4 @@
-// hud_coverage_test.cpp — Targeted coverage tests for HUD.cpp uncovered branches.
+// hud_display_test.cpp — Tests for HUD display branches and rendering logic.
 //
 // Covers:
 //   1. ratingName() switch: Town, City, Metropolis, Megalopolis variants.
