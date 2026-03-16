@@ -422,7 +422,4 @@ private:
     // Returns false and logs a warning if m_smgr is null (test/headless context).
     bool ensureAssetLoader();
 
-    // drawScene sub-step profiling accumulators (µs)
-    double m_prof3D{0}, m_profHover{0}, m_profUIDraw{0}, m_profGUI{0};
-    int    m_profFrames{0};
 };

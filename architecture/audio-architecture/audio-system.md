@@ -566,6 +566,59 @@ The pre-load tier boundary used when classifying sounds into the pre-load vs. st
 
 ---
 
+## Linux SIGKILL Prevention — rtkit and PipeWire
+
+On Linux, two separate mechanisms can deliver an **uncatchable SIGKILL** to the process
+during heavy road/zone placement operations (terrain flushes, mesh rebuilds):
+
+### 1. rtkit RLIMIT_RTTIME (primary)
+
+When OpenAL Soft contacts **rtkit-daemon** via the system D-Bus to request `SCHED_RR`
+scheduling for its mixing thread, rtkit also calls `setrlimit(RLIMIT_RTTIME, 200ms)`,
+which applies **process-wide** (all threads). If the mixing thread then accumulates
+more than 200 ms of continuous RT CPU time without blocking — for example, catching up
+on a large backlog of samples after a long frame — the kernel delivers SIGKILL
+unconditionally (no signal handler fires).
+
+**Fix**: `rt-prio = 0` in the `[general]` section of the ALSOFT config disables rtkit
+integration entirely. The mixing thread runs as `SCHED_OTHER`; no `RLIMIT_RTTIME` is
+set on any thread.
+
+**Verified by**: monitoring `/proc/<pid>/task/*/limits` — with the fix all threads show
+`Max realtime timeout: unlimited`; without it the mixing thread shows `SCHED_RR` and
+all threads show `Max realtime timeout: 200000 µs`.
+
+### 2. PipeWire ALSA plugin kill() (secondary)
+
+The PipeWire ALSA plugin (`libasound_module_pcm_pipewire.so`) calls
+`kill(getpid(), SIGKILL)` when its stream is destroyed after repeated underruns.
+The PulseAudio ALSA plugin (`libasound_module_pcm_pulse.so`) does not have this
+behaviour.
+
+**Fix**: `device = pulse` in the `[alsa]` section routes OpenAL through the PulseAudio
+ALSA plugin instead of PipeWire's native ALSA plugin.
+
+### ALSOFT Config Written by AudioSystem
+
+`AudioSystem::AudioSystem()` writes `/tmp/aitown_alsoft.conf` (if `ALSOFT_CONF` is not
+already set) with both fixes before the first `alcOpenDevice()` call:
+
+```ini
+[general]
+rt-prio = 0
+period_size = 4096
+periods = 8
+
+[alsa]
+device = pulse
+```
+
+`period_size=4096, periods=8` gives a ~744 ms buffer at 44100 Hz as additional headroom
+against any remaining frame spikes. `ALSOFT_CONF` is set with `overwrite=0` so a user
+can override with their own config.
+
+---
+
 ## Phase 1 sound-dev-opensoftal Sign-Off
 
 **Date**: 2026-02-21

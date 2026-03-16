@@ -16,7 +16,6 @@
 #include "RenderSystem.h"                 // Phase 10c: isSRGBTextureSupported() query
 
 #include <algorithm>   // std::min, std::max
-#include <chrono>      // drawScene sub-step profiling
 #include <cstdio>      // fprintf
 #include <cmath>       // M_PI
 #include <string>      // std::string for asset path construction
@@ -194,15 +193,9 @@ void IrrlichtRenderer::drawScene() {
     // step 3's IGUIEnvironment::drawAll() only renders what should be visible.
     // The Z-order concern is addressed by visibility management — panels that should
     // be behind (e.g. main menu during gameplay) have their elements hidden.
-    using hrc = std::chrono::high_resolution_clock;
-    auto micros = [](hrc::time_point a, hrc::time_point b) {
-        return std::chrono::duration<double,std::micro>(b - a).count();
-    };
-    auto t0 = hrc::now();
     if (m_smgr) {
         m_smgr->drawAll();
     }
-    auto t1 = hrc::now();
 
     // Phase 9b: draw hover tile highlight immediately after 3D scene, before 2D GUI.
     // The hover mesh is NOT in the scene graph — we issue a raw drawMeshBuffer() call.
@@ -230,11 +223,9 @@ void IrrlichtRenderer::drawScene() {
         }
     }
 
-    auto t2 = hrc::now();
     if (m_uiManager) {
         m_uiManager->draw();
     }
-    auto t3 = hrc::now();
     // Render all visible GUI elements. UIManager::draw() has already set the
     // correct visibility state on every element; drawAll() paints them.
     if (m_device) {
@@ -242,21 +233,6 @@ void IrrlichtRenderer::drawScene() {
         if (guiEnv) {
             guiEnv->drawAll();
         }
-    }
-    auto t4 = hrc::now();
-
-    // Accumulate sub-timings for drawScene profiling report.
-    m_prof3D    += micros(t0, t1);
-    m_profHover += micros(t1, t2);
-    m_profUIDraw+= micros(t2, t3);
-    m_profGUI   += micros(t3, t4);
-    ++m_profFrames;
-    if (m_profFrames % 300 == 0) {
-        double n = static_cast<double>(m_profFrames);
-        fprintf(stderr, "[drawScene] 3D=%.0fµs  hover/preview=%.0fµs"
-                "  uiDraw=%.0fµs  guiDrawAll=%.0fµs  (avg over %d frames)\n",
-                m_prof3D/n, m_profHover/n, m_profUIDraw/n, m_profGUI/n,
-                m_profFrames);
     }
 }
 
@@ -344,7 +320,7 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
         }
 
         // Step 1b: flush driver last-bound material state.
-        m_driver->setMaterial(SMaterial{});
+        
 
         // Step 1c: null the map entry BEFORE remove() — dangling-pointer prevention.
         nodeIt->second = nullptr;
@@ -818,6 +794,8 @@ void IrrlichtRenderer::setTilePlacementPreview(
 // is rebuilt (not just updated) whenever the zone layout changes.
 //
 // Capped at 100K overlay quads for V1 (per IRenderer.h contract).
+// Multiple SMeshBuffers are used because u16 indices cap at 16383 quads each
+// (vertex index 4*16383+3 = 65535 = u16 max; 16384 would overflow to 0).
 // Called once per budget tick — NOT every frame.
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::setZoneOverlay(
@@ -836,7 +814,7 @@ void IrrlichtRenderer::setZoneOverlay(
                 mat.setTexture(t, nullptr);
             }
         }
-        m_driver->setMaterial(SMaterial{});
+        
         m_overlayNode->remove();
         m_overlayNode = nullptr;
     }
@@ -846,19 +824,33 @@ void IrrlichtRenderer::setZoneOverlay(
 
     // Cap at 100K quads for V1.
     static constexpr size_t kMaxOverlayQuads = 100000u;
-
-    SMesh*       omesh = new SMesh();
-    SMeshBuffer* obuf  = new SMeshBuffer();
-
-    size_t quadCount = std::min(sparseOverlay.size(), kMaxOverlayQuads);
-    obuf->Vertices.reallocate(static_cast<u32>(quadCount * 4));
-    obuf->Indices.reallocate(static_cast<u32>(quadCount * 6));
-
-    obuf->Material.MaterialType = EMT_TRANSPARENT_ALPHA_CHANNEL;
-    obuf->Material.Lighting     = false;
-    obuf->Material.ZWriteEnable = false;
+    // u16 index cap: max vertex index per buffer = 65535; 4 vertices per quad
+    // → max 16383 quads per buffer (16384th quad's base index = 65536 > u16 max).
+    static constexpr u32 kMaxQuadsPerBuffer = 16383u;
 
     float yOffset = 0.05f;  // 5 cm above terrain — under the hover highlight (10 cm)
+
+    SMesh*       omesh     = new SMesh();
+    SMeshBuffer* cur       = nullptr;
+    u32          quadsInCur = 0;
+
+    auto openBuffer = [&]() {
+        cur = new SMeshBuffer();
+        cur->Material.MaterialType = EMT_TRANSPARENT_ALPHA_CHANNEL;
+        cur->Material.Lighting     = false;
+        cur->Material.ZWriteEnable = false;
+        quadsInCur = 0;
+    };
+
+    auto closeBuffer = [&]() {
+        if (!cur) return;
+        cur->recalculateBoundingBox();
+        omesh->addMeshBuffer(cur);
+        cur->drop();  // mesh is sole owner
+        cur = nullptr;
+    };
+
+    openBuffer();
 
     size_t written = 0;
     for (const auto& kv : sparseOverlay) {
@@ -870,6 +862,11 @@ void IrrlichtRenderer::setZoneOverlay(
 
         // Skip out-of-bounds tiles.
         if (tx < 0 || tx >= mapTilesX || tz < 0 || tz >= mapTilesZ) continue;
+
+        if (quadsInCur >= kMaxQuadsPerBuffer) {
+            closeBuffer();
+            openBuffer();
+        }
 
         // Decode ARGB colour.
         uint32_t ac = kv.second;
@@ -889,43 +886,41 @@ void IrrlichtRenderer::setZoneOverlay(
         float h11 = (m_terrain ? m_terrain->getHeightAt(tx + 1, tz + 1) : 0.0f) + yOffset;
         float h01 = (m_terrain ? m_terrain->getHeightAt(tx,     tz + 1) : 0.0f) + yOffset;
 
-        u32 base = static_cast<u32>(written * 4);
+        u32 base = quadsInCur * 4;
 
-        obuf->Vertices.push_back(S3DVertex(
+        cur->Vertices.push_back(S3DVertex(
             core::vector3df(x0, h00, z0), core::vector3df(0, 1, 0), colour,
             core::vector2df(0, 0)));
-        obuf->Vertices.push_back(S3DVertex(
+        cur->Vertices.push_back(S3DVertex(
             core::vector3df(x1, h10, z0), core::vector3df(0, 1, 0), colour,
             core::vector2df(1, 0)));
-        obuf->Vertices.push_back(S3DVertex(
+        cur->Vertices.push_back(S3DVertex(
             core::vector3df(x1, h11, z1), core::vector3df(0, 1, 0), colour,
             core::vector2df(1, 1)));
-        obuf->Vertices.push_back(S3DVertex(
+        cur->Vertices.push_back(S3DVertex(
             core::vector3df(x0, h01, z1), core::vector3df(0, 1, 0), colour,
             core::vector2df(0, 1)));
 
         // Two triangles per quad: v0→v2→v1, v0→v3→v2 (CW from above = +Y normal).
-        obuf->Indices.push_back(base + 0);
-        obuf->Indices.push_back(base + 2);
-        obuf->Indices.push_back(base + 1);
-        obuf->Indices.push_back(base + 0);
-        obuf->Indices.push_back(base + 3);
-        obuf->Indices.push_back(base + 2);
+        cur->Indices.push_back(static_cast<u16>(base + 0));
+        cur->Indices.push_back(static_cast<u16>(base + 2));
+        cur->Indices.push_back(static_cast<u16>(base + 1));
+        cur->Indices.push_back(static_cast<u16>(base + 0));
+        cur->Indices.push_back(static_cast<u16>(base + 3));
+        cur->Indices.push_back(static_cast<u16>(base + 2));
 
+        ++quadsInCur;
         ++written;
     }
 
-    if (written == 0) {
+    closeBuffer();
+
+    if (omesh->getMeshBufferCount() == 0) {
         // All entries were out-of-bounds — drop and bail.
-        obuf->drop();
         omesh->drop();
         return;
     }
 
-    // Mandatory bounding box calculation before attaching to scene graph.
-    obuf->recalculateBoundingBox();
-    omesh->addMeshBuffer(obuf);
-    obuf->drop();  // mesh is sole owner
     omesh->recalculateBoundingBox();
 
     m_overlayNode = m_smgr->addMeshSceneNode(omesh);
@@ -1107,7 +1102,7 @@ void IrrlichtRenderer::destroyTileNode(
             }
         }
         // Step 2: flush driver last-bound state.
-        m_driver->setMaterial(SMaterial{});
+        
         // Step 3 + 4: remove the scene node.
         node->remove();  // do NOT access node* after this
     }
@@ -1295,6 +1290,7 @@ bool IrrlichtRenderer::initRoadShader()
     if (m_roadMaterialType == -2) return false;  // failed sentinel — no retry
     if (m_roadMaterialType >= 0) return true;    // already loaded successfully
     if (!m_driver || !m_smgr) return false;
+
 
     // Lazily create TextureCache for road diffuse texture.
     if (!m_roadTextureCache) {
@@ -1826,9 +1822,10 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
                 if (dx == 0 && dz == 0) continue;  // main tile already built above
                 const int nx = tileX + dx;
                 const int nz = tileZ + dz;
-                if (m_roadNodes.count(tileKey(nx, nz)) > 0)
+                if (m_roadNodes.count(tileKey(nx, nz)) > 0) {
                     placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
                                           /*rebuildNeighbors=*/false);
+                }
             }
         }
     }
@@ -2026,7 +2023,7 @@ void IrrlichtRenderer::destroyVehicleNode(uint32_t vehicleId)
             }
         }
         // Step 2: flush driver last-bound state.
-        m_driver->setMaterial(SMaterial{});
+        
         // Step 3: remove scene node from the scene graph.
         node->remove();  // do NOT access node* after this
     }

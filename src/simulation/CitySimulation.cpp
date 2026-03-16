@@ -1702,7 +1702,8 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
 
         // Helper lambda: generate staggered initial phase offset from tile coordinates.
         auto phaseOffset = [&](int cx, int cz) -> float {
-            unsigned int seed = static_cast<unsigned int>(cx * 73856093 ^ cz * 19349663);
+            unsigned int seed = (static_cast<unsigned int>(cx) * 73856093u)
+                              ^ (static_cast<unsigned int>(cz) * 19349663u);
             return (static_cast<float>(seed & 0xFFFFu) / 65535.0f) *
                    SimulationConstants::traffic_signal_phase_seconds;
         };

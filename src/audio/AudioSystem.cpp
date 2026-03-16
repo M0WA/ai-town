@@ -31,6 +31,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <cstdlib>   // setenv
 
 // ---------------------------------------------------------------------------
 // Compile-time check that the local EFX function-pointer typedefs match <efx.h>.
@@ -288,7 +289,59 @@ AudioSystem::AudioSystem(IClock* clock, IAlcFunctions* alcFunctions)
 {
     // -----------------------------------------------------------------------
     // Step 1: Open device.
+    //
+    // On Linux, two separate mechanisms can deliver an uncatchable SIGKILL:
+    //
+    //   1. rtkit (primary): When OpenAL Soft contacts rtkit via D-Bus to
+    //      request SCHED_RR for its mixing thread, rtkit also sets
+    //      RLIMIT_RTTIME=200ms on ALL threads in the process.  During heavy
+    //      road/zone placement the mixing thread can accumulate >200ms of
+    //      continuous RT CPU time, and the kernel fires SIGKILL.
+    //      Fix: rt-prio=0 in the [general] section — disables rtkit entirely.
+    //
+    //   2. PipeWire ALSA plugin (secondary): libasound_module_pcm_pipewire.so
+    //      calls kill(getpid(), SIGKILL) when its stream is destroyed after
+    //      repeated underruns.  The PulseAudio ALSA plugin does not do this.
+    //      Fix: device=pulse in [alsa] — routes through PulseAudio instead.
+    //
+    // Write a minimal alsoft.conf to /tmp with both fixes, then point
+    // ALSOFT_CONF at it BEFORE the first alcOpenDevice call (OpenAL Soft
+    // reads the config on that call).
+    // Only do this if ALSOFT_CONF is not already set by the user/environment.
     // -----------------------------------------------------------------------
+    if (!getenv("ALSOFT_CONF")) {
+        const char* tmpConf = "/tmp/aitown_alsoft.conf";
+        FILE* cf = fopen(tmpConf, "w");
+        if (cf) {
+            // rt-prio = 0: disables rtkit RT scheduling for the OpenAL mixing
+            //   thread.  Without this, rtkit grants SCHED_RR to the mixing
+            //   thread AND sets RLIMIT_RTTIME=200ms on ALL threads in the
+            //   process.  During heavy road/zone placement (mesh rebuilds,
+            //   terrain flushes), the mixing thread can accumulate >200ms of
+            //   continuous RT CPU time, triggering a kernel SIGKILL that
+            //   cannot be caught.  Disabling rtkit removes RLIMIT_RTTIME
+            //   entirely.  Audio glitches are preferable to silent crashes.
+            // device=pulse: routes through PulseAudio ALSA plugin instead of
+            //   PipeWire's native ALSA plugin (belt-and-suspenders: the
+            //   PipeWire ALSA plugin also calls kill(getpid(), SIGKILL) on
+            //   repeated underruns, but rt-prio=0 is the primary fix).
+            // period_size=4096, periods=8: ~744ms buffer at 44100Hz for
+            //   headroom against any remaining frame spikes.
+            fprintf(cf,
+                "[general]\n"
+                "rt-prio = 0\n"
+                "period_size = 4096\n"
+                "periods = 8\n"
+                "[alsa]\n"
+                "device = pulse\n");
+            fclose(cf);
+            setenv("ALSOFT_CONF", tmpConf, /*overwrite=*/0);
+            logInfo("AudioSystem: configured ALSA backend: rt-prio=0 "
+                    "(disables rtkit RLIMIT_RTTIME SIGKILL), device=pulse, "
+                    "period_size=4096, periods=8 (~744ms buffer)");
+        }
+    }
+
     m_device = alcOpenDevice(nullptr);
     if (!m_device) {
         logWarning("alcOpenDevice failed — no audio device available; running in silent mode");
@@ -657,6 +710,20 @@ void AudioSystem::audioThreadFunc() {
 
         // CRITICAL: check m_stopThread FIRST before any AL call.
         if (m_stopThread.load()) break;
+
+        // Check ALC_EXT_disconnect: if the device was lost (e.g. PulseAudio
+        // broken pipe), stop the audio thread immediately to prevent flooding
+        // the dead backend and provoking an external SIGKILL.
+        {
+            ALCint connected = 1;
+            alcGetIntegerv(m_device, ALC_CONNECTED, 1, &connected);
+            if (!connected) {
+                logInfo("AudioSystem: device disconnected — stopping audio thread");
+                m_deviceLost.store(true);
+                m_stopThread.store(true);
+                break;
+            }
+        }
 
         // Compute real-time dt using IClock (not fixed 0.01f).
         // dt is passed to both updateStreams() and updateDuckState() so crossfade
