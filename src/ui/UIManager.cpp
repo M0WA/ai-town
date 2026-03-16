@@ -118,6 +118,15 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
     // m_modal is constructed immediately before this call (see line above).
     m_settings->setModal(m_modal);
 
+    // Wire keybindings apply callback: SettingsPanel calls this on Controls Apply.
+    m_settings->setKeybindingsApplyFn([this](const KeyBindings& b){ applyKeybindings(b); });
+
+    // Seed SettingsPanel with the current (default) keybindings so the Controls tab
+    // opens with the right state. (loadKeybindings() may not have been called yet —
+    // setCurrentBindings is re-called after loadKeybindings() in main.cpp. The seeding
+    // here ensures the Controls tab is never open with uninitialised bindings.)
+    m_settings->setCurrentBindings(m_keyBindings);
+
     // Create the background scrim element (50% opacity, hidden initially).
     // The scrim sits at Z-slot 9 between the settings panel (slot 8) and
     // the modal dialog (slot 10).
@@ -1745,6 +1754,39 @@ void UIManager::loadKeybindings() {
 
     // File exists: parse and apply overrides.
     m_keyBindings.load(path);
+
+    // Propagate loaded bindings to SettingsPanel so Controls tab reopens correctly.
+    if (m_settings) m_settings->setCurrentBindings(m_keyBindings);
+}
+
+// ----------------------------------------------------------------
+// Phase 11c: saveKeybindings — write m_keyBindings to disk.
+// ----------------------------------------------------------------
+void UIManager::saveKeybindings(const KeyBindings& b) {
+    m_keyBindings.copyMutableFrom(b);
+
+    char path[512] = {};
+#if defined(_WIN32)
+    const char* appdata = getenv("APPDATA");
+    if (!appdata || appdata[0] == '\0') return;
+    snprintf(path, sizeof(path), "%s\\aitown\\keybindings.json", appdata);
+#else
+    const char* home = getenv("HOME");
+    if (!home || home[0] == '\0') return;
+    snprintf(path, sizeof(path), "%s/.config/aitown/keybindings.json", home);
+#endif
+
+    m_keyBindings.writeToFile(path);
+}
+
+// ----------------------------------------------------------------
+// Phase 11c: applyKeybindings — update in-memory bindings, persist, update panel.
+// ----------------------------------------------------------------
+void UIManager::applyKeybindings(const KeyBindings& b) {
+    saveKeybindings(b);
+    // Inform SettingsPanel of the newly-applied bindings so the Controls tab
+    // reopens with the correct state next time.
+    if (m_settings) m_settings->setCurrentBindings(b);
 }
 
 // ----------------------------------------------------------------

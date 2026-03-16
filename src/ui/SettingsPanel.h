@@ -1,5 +1,7 @@
 #pragma once
 #include "src/interfaces/IUIBackend.h"  // UIElementHandle, IUIBackend
+#include "src/ui/key_bindings.h"        // KeyBindings
+#include <functional>
 
 // Forward declarations
 class IAudioSystem;
@@ -29,6 +31,18 @@ public:
     // Late-bind the ModalDialog pointer (called from UIManager after modal construction).
     void setModal(ModalDialog* modal);
     bool isVisible() const { return m_visible; }
+
+    // Set the callback invoked when the player clicks Apply on the Controls tab.
+    // Called from UIManager constructor to wire keybindings persistence.
+    void setKeybindingsApplyFn(std::function<void(const KeyBindings&)> fn);
+
+    // Set the currently-applied keybindings (used to seed Controls tab on open).
+    // Called from UIManager after loadKeybindings() and after each successful apply.
+    void setCurrentBindings(const KeyBindings& b);
+
+    // Apply keybindings — public entry point called by UIManager for external updates.
+    // Calls applyKeybindings internally; exposed for test observability.
+    void applyKeybindings(const KeyBindings& b);
 
 private:
     IUIBackend*       m_backend{nullptr};
@@ -100,6 +114,17 @@ private:
 
     // Demolish confirm toggle state
     bool m_demolishConfirm{true};
+
+    // --- Keybindings callback and state ---
+    // Callback set by UIManager to persist keybindings on Controls Apply.
+    std::function<void(const KeyBindings&)> m_keybindingsApplyFn;
+    // The last applied (persisted) bindings — used to seed the Controls tab on open.
+    KeyBindings m_appliedBindings{};
+
+    // --- WASD preset modal polling state ---
+    bool m_wasdPresetPending{false};
+    // --- Restore Defaults modal polling state ---
+    bool m_restoreDefaultsPending{false};
 
     void switchTab(int tabIndex);
     void hideAllTabElements();

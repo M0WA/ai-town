@@ -183,6 +183,10 @@ public:
     // Silently uses defaults if the file is absent (normal first-run state).
     void loadKeybindings();
 
+    // Phase 11c: Apply keybindings — update m_keyBindings and persist to disk.
+    // Called from SettingsPanel via the m_keybindingsApplyFn callback.
+    void applyKeybindings(const KeyBindings& b);
+
     // Phase 11: Wire the SaveSystem to UIManager for manual save and quit-guard.
     // Accepts ISaveSystem* so tests can pass MockSaveSystem without a real SaveSystem.
     // Called from main.cpp after SaveSystem is constructed.
@@ -367,6 +371,10 @@ private:
     // Background scrim element shown behind modal dialogs.
     // kInvalidUIElement (0) until Phase 6 creates the real element.
     UIElementHandle m_scrimHandle{kInvalidUIElement};
+
+    // Helper: update m_keyBindings and write keybindings.json.
+    // Called from applyKeybindings().
+    void saveKeybindings(const KeyBindings& b);
 
     // Helper: show/hide Zone and Utilities sub-panels based on m_activeTool.
     // Called whenever m_activeTool changes (toolbar click or hotkey).

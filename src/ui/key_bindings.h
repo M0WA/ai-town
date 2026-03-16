@@ -129,4 +129,51 @@ struct KeyBindings {
     bool isReservedKey(const std::string& key) const {
         return key == "Q" || key == "E";
     }
+
+    // Copy only the mutable (rebindable) fields from `src` into this struct.
+    // Required because the const fields `undo` and `save` make the copy-assignment
+    // operator implicitly deleted.  All sites that need to "assign" a KeyBindings
+    // must call this helper instead of operator=.
+    void copyMutableFrom(const KeyBindings& src) {
+        camPanUp       = src.camPanUp;
+        camPanDown     = src.camPanDown;
+        camPanLeft     = src.camPanLeft;
+        camPanRight    = src.camPanRight;
+        toolZone       = src.toolZone;
+        toolRoad       = src.toolRoad;
+        toolUtilities  = src.toolUtilities;
+        toolDemolish   = src.toolDemolish;
+        toolInspector  = src.toolInspector;
+        toggleTaxPanel = src.toggleTaxPanel;
+        toggleNotifLog = src.toggleNotifLog;
+        togglePause    = src.togglePause;
+        speedIncrease  = src.speedIncrease;
+        speedDecrease  = src.speedDecrease;
+        openPauseMenu  = src.openPauseMenu;
+    }
+
+    // Write the 11 rebindable fields to a flat JSON file at `path`.
+    // Uses fopen/fprintf — no external JSON library.
+    // If `path` is empty or the file cannot be opened, silently returns.
+    // Does not write the const fields `undo` and `save`.
+    // Named writeToFile to avoid collision with the const field `save`.
+    void writeToFile(const std::string& path) const {
+        if (path.empty()) return;
+        FILE* f = fopen(path.c_str(), "w");
+        if (!f) return;
+        fprintf(f, "{\n");
+        fprintf(f, "  \"camPanUp\": \"%s\",\n",       camPanUp.c_str());
+        fprintf(f, "  \"camPanDown\": \"%s\",\n",     camPanDown.c_str());
+        fprintf(f, "  \"camPanLeft\": \"%s\",\n",     camPanLeft.c_str());
+        fprintf(f, "  \"camPanRight\": \"%s\",\n",    camPanRight.c_str());
+        fprintf(f, "  \"toolZone\": \"%s\",\n",       toolZone.c_str());
+        fprintf(f, "  \"toolRoad\": \"%s\",\n",       toolRoad.c_str());
+        fprintf(f, "  \"toolUtilities\": \"%s\",\n",  toolUtilities.c_str());
+        fprintf(f, "  \"toolDemolish\": \"%s\",\n",   toolDemolish.c_str());
+        fprintf(f, "  \"toolInspector\": \"%s\",\n",  toolInspector.c_str());
+        fprintf(f, "  \"toggleTaxPanel\": \"%s\",\n", toggleTaxPanel.c_str());
+        fprintf(f, "  \"toggleNotifLog\": \"%s\"\n",  toggleNotifLog.c_str());
+        fprintf(f, "}\n");
+        fclose(f);
+    }
 };

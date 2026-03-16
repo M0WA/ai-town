@@ -104,6 +104,8 @@ KeyBindingsPanel::KeyBindingsPanel(IUIBackend* backend, ModalDialog* modal)
         m_rowChip[i] = m_backend->addButton(
             "",
             kContentX + kContentW - kChipW, y, kChipW, kLineH);
+        // Chip background: inactive tile rgba(255,255,255,0.08) approximated as alpha=20/255
+        m_backend->setElementBackground(m_rowChip[i], 255, 255, 255, 20);
         // Inline message label (initially empty/hidden)
         m_rowMsg[i] = m_backend->addStaticText(
             "",

@@ -96,9 +96,11 @@ city feel lived-in at close and mid range.
   (ref: `architecture/asset-standards/3d-model-standards.md` §LOD Distance Thresholds)
 
 - [ ] **`validate_assets.py` regression-clean**: after re-export, confirm all models pass the
-  19-check `validate_assets.py` suite (established in Phase 5 and extended through Phase 9).
-  The `validate-assets` CI job must remain green. No new checks are added in this phase —
-  this is a clean-pass verification only.
+  `validate_assets.py` suite (established in Phase 5 and extended through Phase 9).
+  The `validate-assets` CI job must remain green. Checks #25–27 added for vehicle atlas
+  format and mip-level validation (`vehicles_diffuse_atlas_d.dds`, `vehicles_sprite_atlas_d.dds`,
+  `vehicles_normal_atlas_n.dds`). The cicd-dev-github engineer adds these checks as part of
+  Deliverable 2b verification.
   (ref: `architecture/ci-cd/github-actions-workflow.md`)
 
 - [ ] **`graphics-artist-3d-model` sign-off gate** (blocking): before committing any reworked
@@ -119,17 +121,17 @@ city feel lived-in at close and mid range.
   corner rounding, side mirror bodies.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
-- [ ] **Bus, truck, motorcycle, bicycle LOD0 geometry** — re-export all remaining vehicle
-  types targeting their respective upper binding limits (bus ≤3,000 tris, truck ≤2,500 tris,
-  motorcycle ≤1,000 tris, bicycle ≤600 tris — per the Vehicle Polygon Budget per-class table
-  in `architecture/asset-standards/3d-model-standards.md`). Added detail proportional to each
+- [ ] **Bus and truck LOD0 geometry** — re-export bus (`bus_standard`) and truck
+  (`truck_cargo`) models targeting their respective upper binding limits (bus ≤3,000 tris,
+  truck ≤2,500 tris — per the Vehicle Polygon Budget per-class table in
+  `architecture/asset-standards/3d-model-standards.md`). Added detail proportional to each
   vehicle type's silhouette complexity.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
 - [ ] **Vehicle LOD1 geometry** — re-export all vehicle LOD1 meshes targeting
-  **400–500 tris** for car/bus/truck and **150–200 tris** for motorcycle/bicycle (spec:
-  200–500 tris indicative range per `architecture/asset-standards/3d-model-standards.md`).
-  LOD1 retains the body silhouette; wheels are simplified to flat discs.
+  **400–500 tris** for car/bus/truck (spec: 200–500 tris indicative range per
+  `architecture/asset-standards/3d-model-standards.md`). LOD1 retains the body silhouette;
+  wheels are simplified to flat discs.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
 ---
@@ -422,10 +424,16 @@ is selected, and a coverage overlay layer on the minimap.
   4,000–5,000 tris; Small: 1,200–1,500 tris; Service: 3,000–5,000 tris)
 - All reworked vehicle LOD0 meshes confirmed at or below their per-class binding limits from
   `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget
-- `validate_assets.py` 19-check suite passes with zero errors on all reworked `.b3d` and
+- `validate_assets.py` 24-check suite passes with zero errors on all reworked `.b3d` and
   `.dds` files; `validate-assets` CI job remains green
 - `buildings_atlas_d.dds` DX10 header confirmed BC1_UNORM_SRGB (DXGI_FORMAT = 72); all four
   mip levels present; no UV bleed across atlas cell borders
+- `vehicles_diffuse_atlas_d.dds` passes DX10 header validation: BC1_UNORM_SRGB
+  (DXGI_FORMAT = 72), 4-mip chain, 2048×2048.
+- `vehicles_sprite_atlas_d.dds` passes DX10 header validation: BC3_UNORM (DXT5 linear),
+  1-mip, 256×256.
+- `vehicles_normal_atlas_n.dds` passes DX10 header validation: BC3_UNORM (DXT5nm linear),
+  4-mip chain, 2048×2048.
 - Vehicle agents visibly move along roads in gameplay; despawn correctly on timeout (120
   simulation seconds per `architecture/game-design/traffic-system.md`)
 - Intersection signal billboard quads toggle green/red in sync with `CitySimulation` tick

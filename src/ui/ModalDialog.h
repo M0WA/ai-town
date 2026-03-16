@@ -39,9 +39,24 @@ public:
     // Escape activates Cancel.
     void showSaveFailure(const std::string& reason);
 
+    // Phase 11c: Restore Defaults confirmation modal (480x240 px virtual).
+    // Accept = "Yes" (restore defaults), Cancel = stay as-is.
+    // Default focus Cancel (least destructive).
+    void showRestoreDefaultsConfirm();
+
     // Result accessors for UIManager to check after dialog closes
     enum class DialogResult { None, Accept, Decline, Cancel };
     DialogResult getLastResult() const { return m_lastResult; }
+
+    // Poll and consume the last dialog result. Returns getLastResult() and then
+    // resets m_lastResult to None, so the caller is notified exactly once.
+    // Returns None if no result is available yet (modal still open or idle).
+    DialogResult pollResult() {
+        if (m_active) return DialogResult::None;
+        DialogResult r = m_lastResult;
+        m_lastResult = DialogResult::None;
+        return r;
+    }
 
 private:
     IUIBackend*      m_backend{nullptr};
@@ -60,7 +75,8 @@ private:
         WASDPreset,
         GameOver,
         UnsavedQuit,
-        SaveFailure
+        SaveFailure,
+        RestoreDefaultsConfirm
     };
     DialogType m_dialogType{DialogType::None};
 
@@ -108,6 +124,7 @@ private:
     void layoutGameOver(int64_t debt, int months);
     void layoutUnsavedQuit(bool quitToDesktop);
     void layoutSaveFailure(const std::string& reason);
+    void layoutRestoreDefaultsConfirm();
     void hideAllDialogElements();
     void setDialogRect(int w, int h);
 };
