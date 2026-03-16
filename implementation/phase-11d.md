@@ -446,6 +446,196 @@ is selected, and a coverage overlay layer on the minimap.
 
 ---
 
+#### 5. Placement Conflict Prevention
+
+Zones and roads must not silently overwrite existing tiles. Currently `placeZone` replaces
+road tiles and `placeRoad` replaces zone tiles; this deliverable adds early-return guards
+so that any attempt to place on an occupied tile is a no-op (no cost deducted, no undo
+recorded, no renderer call made). Players must explicitly demolish (`demolishTile`) before
+re-zoning or re-roading a tile.
+
+##### 5a. Simulation Guard — `placeZone`
+
+- [ ] **Guard in `CitySimulation::placeZone`**: at the top of the function, before any
+  cost deduction or undo-state capture, check whether the target tile is already occupied:
+
+  ```cpp
+  auto it = m_tiles.find(key);
+  if (it != m_tiles.end() && (it->second.isRoad || it->second.isZoned)) {
+      return; // tile occupied — demolish first
+  }
+  ```
+
+  If the tile is already a road (`isRoad == true`) or already zoned (`isZoned == true`),
+  `placeZone` must return immediately with no side effects: no treasury deduction, no
+  `recordUndoAction`, no renderer call, no audio event.
+  (ref: `architecture/game-design/zoning-system.md`,
+  `architecture/game-design/undo-system.md`)
+
+- [ ] **Remove the now-dead `isRoad` branch** inside `placeZone` that decremented
+  `m_roadTileCount` when replacing a road tile — this code path can no longer be reached
+  after the guard is in place. Remove it to eliminate dead code.
+  (ref: `src/simulation/CitySimulation.cpp`)
+
+##### 5b. Simulation Guard — `placeRoad`
+
+- [ ] **Guard in `CitySimulation::placeRoad`**: at the top of the function, before any
+  cost deduction or undo-state capture, add:
+
+  ```cpp
+  auto it = m_tiles.find(key);
+  if (it != m_tiles.end() && (it->second.isRoad || it->second.isZoned)) {
+      return; // tile occupied — demolish first
+  }
+  ```
+
+  If the tile is already a road (`isRoad == true`) or already zoned (`isZoned == true`),
+  `placeRoad` must return immediately with no side effects: no treasury deduction, no
+  `recordUndoAction`, no renderer call, no audio event.
+  (ref: `architecture/game-design/zoning-system.md`,
+  `architecture/game-design/undo-system.md`)
+
+- [ ] **Remove the now-dead `isZoned` branch** inside `placeRoad` that handled replacing a
+  zone tile with a road — this code path can no longer be reached after the guard is in
+  place. Remove it to eliminate dead code.
+  (ref: `src/simulation/CitySimulation.cpp`)
+
+##### 5c. Placement Conflict Tests
+
+- [ ] **`PlaceZone_OnRoadTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
+  place a road tile at `(3, 3)`, then call `placeZone` on the same tile. Assert: the tile
+  remains `isRoad == true` and `isZoned == false`; `m_roadTileCount` is unchanged; treasury
+  is unchanged; renderer receives no `placeBuildingMesh` call (use `MockRenderer` with
+  `EXPECT_CALL(...).Times(0)`); undo stack depth is unchanged.
+  (ref: `architecture/testing/testability-architecture.md`)
+
+- [ ] **`PlaceZone_OnZonedTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
+  place a Residential zone at `(4, 4)`, then call `placeZone` with Commercial on the same
+  tile. Assert: tile zone remains `Residential`; treasury unchanged after the second call;
+  renderer receives no second `placeBuildingMesh` call; undo stack depth is unchanged after
+  the second call.
+
+- [ ] **`PlaceRoad_OnZonedTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
+  place a Residential zone at `(5, 5)`, then call `placeRoad` on the same tile. Assert:
+  tile remains `isZoned == true` and `isRoad == false`; `m_roadTileCount` is zero; treasury
+  is unchanged after the `placeRoad` call; renderer receives no `placeRoadMesh` call; undo
+  stack depth is unchanged after the `placeRoad` call.
+
+- [ ] **`PlaceRoad_OnRoadTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
+  place a road at `(6, 6)`, then call `placeRoad` again on the same tile. Assert:
+  `m_roadTileCount == 1` (not 2); treasury deduction happens only once; renderer receives
+  exactly one `placeRoadMesh` call; undo stack depth is 1 after both calls.
+
+- [ ] **`CMakeLists extension`** — add via `target_sources(simulation_tests PRIVATE
+  tests/simulation/placement_conflict_test.cpp)`. Do NOT call `add_executable` again.
+
+##### 5d. UI-Level Placement Guard with Red Preview Feedback
+
+The simulation guards in 5a/5b are silent no-ops. This sub-deliverable adds visible feedback
+so the player knows why a placement is being rejected, and makes it impossible to even
+initiate a placement click on an occupied tile.
+
+- [ ] **`kHoverArgbBlocked` constant** — add `constexpr uint32_t kHoverArgbBlocked =
+  0xBBFF2222u;` (semi-transparent red) to the anonymous constants block at the top of
+  `UIManager.cpp`, alongside `kHoverArgbZone`, `kHoverArgbRoad`, etc.
+  (ref: `architecture/ui-ux/hud-layout.md`)
+
+- [ ] **`IRenderer::setTilePlacementPreview` signature extension** — change the existing
+  single-list overload to accept a second tile list for blocked tiles:
+
+  ```cpp
+  void setTilePlacementPreview(
+      const std::vector<std::pair<int,int>>& freeTiles,  uint32_t freeArgb,
+      const std::vector<std::pair<int,int>>& blockedTiles = {}) override;
+  ```
+
+  `blockedTiles` are always rendered with `kHoverArgbBlocked`. The renderer draws both
+  lists in a single `drawMeshBuffer` pass using the existing `m_previewMesh` (dynamically
+  rebuilt each call to include both free and blocked quads; blocked quads use the hardcoded
+  red ARGB rather than `freeArgb`). Update `IRenderer.h`, `IrrlichtRenderer.h/cpp`, and
+  `MockRenderer` (`MOCK_METHOD` signature) to match the new signature. All existing
+  call sites that pass only `freeTiles` remain valid (default `blockedTiles = {}`).
+  (ref: `architecture/graphics-architecture/scene-graph-ownership.md` §Placement Preview,
+  `architecture/testing/testability-architecture.md`)
+
+- [ ] **Single-tile hover color override** — in the `UIManager::onEvent` MouseMove handler,
+  after `colour` is determined from the active tool switch, add an occupancy override for
+  Zone and Road tools:
+
+  ```cpp
+  if ((m_activeTool == ActiveTool::Zone || m_activeTool == ActiveTool::Road) && m_sim) {
+      QueryResult tileInfo = m_sim->queryTile(hitX, hitZ);
+      if (tileInfo.isRoad || tileInfo.isZoned) {
+          colour = kHoverArgbBlocked;
+      }
+  }
+  ```
+
+  This ensures `setTileHoverHighlight` (single-tile path) receives red when the hovered
+  tile is occupied.
+  (ref: `architecture/ui-ux/hud-layout.md`, `architecture/ui-ux/input-arbitration.md`)
+
+- [ ] **Drag preview partitioning — Zone rect** — in the MouseMove branch that builds the
+  Zone rect preview (`m_lmbHeld && m_activeTool == ActiveTool::Zone && m_zoneAnchorX != -1`),
+  after assembling the full `previewTiles` vector, partition it into `freeTiles` and
+  `blockedTiles` by calling `m_sim->queryTile(tx, tz)` on each tile and checking
+  `isRoad || isZoned`. Pass both lists to the extended `setTilePlacementPreview`.
+  The `colour` passed as `freeArgb` is the tool-normal `kHoverArgbZone` (not overridden
+  to red even if some tiles are blocked — only blocked tiles show red; free tiles remain
+  the zone colour).
+  (ref: `architecture/ui-ux/input-arbitration.md` §Priority 7)
+
+- [ ] **Drag preview partitioning — Road line** — same partitioning as Zone rect, applied
+  to the Road line preview branch (`m_lmbHeld && m_activeTool == ActiveTool::Road &&
+  m_zoneAnchorX != -1`). Pass `freeTiles` and `blockedTiles` to the extended
+  `setTilePlacementPreview` with `freeArgb = kHoverArgbRoad`.
+  (ref: `architecture/ui-ux/input-arbitration.md` §Priority 7)
+
+- [ ] **Commit loop — skip occupied tiles (Zone)** — in the `MouseButtonUp` Zone commit
+  block that iterates `[x0..x1] × [z0..z1]` and calls `doTerrainPlacement(tx, tz)`, wrap
+  each call in an occupancy guard:
+
+  ```cpp
+  if (m_sim) {
+      QueryResult ti = m_sim->queryTile(tx, tz);
+      if (ti.isRoad || ti.isZoned) continue;
+  }
+  doTerrainPlacement(tx, tz);
+  ```
+
+  (ref: `architecture/ui-ux/input-arbitration.md` §Priority 7)
+
+- [ ] **Commit loop — skip occupied tiles (Road)** — same guard applied to the Road line
+  commit loop (both the X-axis and Z-axis segments).
+  (ref: `architecture/ui-ux/input-arbitration.md` §Priority 7)
+
+##### 5e. Placement Conflict UI Tests
+
+- [ ] **`PlacementPreview_ZoneTool_OccupiedTile_ShowsRedHighlight`** (label `unit`,
+  CMake target `ui_tests`): set up `MockCitySimulation::queryTile` to return
+  `QueryResult{.isRoad = true}` for tile `(2, 2)`. Inject into a `UIManager` with
+  `MockRenderer`. Synthesise a `MouseMove` event that ray-casts to tile `(2, 2)` with
+  Zone tool active. Assert `MockRenderer::setTileHoverHighlight` was called with
+  `argb == kHoverArgbBlocked`.
+  (ref: `architecture/testing/testability-architecture.md`)
+
+- [ ] **`PlacementPreview_ZoneDrag_PartiallyOccupied_BlockedTilesRed`** (label `unit`,
+  CMake target `ui_tests`): `queryTile` returns `isRoad=true` for tile `(1,1)` and
+  unoccupied for `(2,1)`. Simulate LMB-held Zone drag from `(1,1)` to `(2,1)`.
+  Assert `setTilePlacementPreview` received `blockedTiles == {(1,1)}` and
+  `freeTiles == {(2,1)}`.
+
+- [ ] **`PlacementCommit_ZoneTool_OccupiedTileSkipped`** (label `unit`,
+  CMake target `ui_tests`): `queryTile` returns `isRoad=true` for `(3,3)` and unoccupied
+  for `(4,3)`. Simulate LMB drag-release over both tiles with Zone tool. Assert
+  `MockCitySimulation::placeZone` was called exactly once — for `(4,3)` only, never
+  for `(3,3)`.
+
+- [ ] **`CMakeLists extension`** — add via `target_sources(ui_tests PRIVATE
+  tests/ui/placement_conflict_ui_test.cpp)`. Do NOT call `add_executable` again.
+
+---
+
 ### Exit Criteria
 
 - All reworked building LOD0 meshes confirmed within the upper polygon ranges (Large:
@@ -476,7 +666,23 @@ is selected, and a coverage overlay layer on the minimap.
 - All new unit tests pass (`AgentRenderSync_SpawnDespawn_MatchesSimulationOutput`,
   `AgentRenderSync_CullDistance_AgentsBeyond150m_NotSpawned`,
   `ServiceCoverageOverlay_QueryServiceTile_ShowsOverlay`,
-  `ServiceCoverageOverlay_InspectorClose_HidesOverlay`)
+  `ServiceCoverageOverlay_InspectorClose_HidesOverlay`,
+  `PlaceZone_OnRoadTile_IsNoOp`, `PlaceZone_OnZonedTile_IsNoOp`,
+  `PlaceRoad_OnZonedTile_IsNoOp`, `PlaceRoad_OnRoadTile_IsNoOp`)
+- `placeZone` and `placeRoad` are confirmed no-ops when the target tile is occupied:
+  no cost deducted, no undo entry recorded, no renderer call issued
+- Single-tile hover shows red (`kHoverArgbBlocked`) when Zone or Road tool is active and
+  the hovered tile is occupied (road or zone)
+- Zone rect drag preview and Road line drag preview show free tiles in tool colour and
+  blocked tiles in red simultaneously via the extended `setTilePlacementPreview` two-list API
+- Zone and Road commit loops on LMB release skip all occupied tiles (no `doTerrainPlacement`
+  call, no cost, no undo entry)
+- All new unit tests pass (sim-level: `PlaceZone_OnRoadTile_IsNoOp`,
+  `PlaceZone_OnZonedTile_IsNoOp`, `PlaceRoad_OnZonedTile_IsNoOp`,
+  `PlaceRoad_OnRoadTile_IsNoOp`; UI-level:
+  `PlacementPreview_ZoneTool_OccupiedTile_ShowsRedHighlight`,
+  `PlacementPreview_ZoneDrag_PartiallyOccupied_BlockedTilesRed`,
+  `PlacementCommit_ZoneTool_OccupiedTileSkipped`)
 - `all-checks-pass` gate green
 
 ### Team
@@ -485,10 +691,10 @@ is selected, and a coverage overlay layer on the minimap.
 |---|---|
 | `graphics-artist-3d-model` | Rework all building and vehicle LOD0/LOD1 `.b3d` meshes to upper polygon-budget detail; re-bake all billboard atlases at −45° pitch; sign off per deliverable 1a/1b sign-off gate |
 | `graphics-artist-2d-texture` | Rework `buildings_atlas_d.png` all 14 assigned cells to production detail; author all three vehicle atlases (`vehicles_diffuse_atlas_d.dds` DXT1 sRGB 4-mip, `vehicles_sprite_atlas_d.dds` DXT5 linear 1-mip, `vehicles_normal_atlas_n.dds` DXT5nm linear 4-mip); rework billboard atlases; re-export all DDS files via `tools/export_textures.py`; sign off per deliverable 2a sign-off gate |
-| `graphics-dev-irrlicht` | Implement `IRenderer` methods for vehicle agent spawn/move/despawn, intersection signal state, service coverage overlays; add minimap traffic and service coverage overlay modes; add `ICitySimulation` query methods (`getAgentPositions`, `getIntersectionSignalStates`, `getRoadSegmentSpeeds`, `getServiceCoverage`); per-frame agent sync loop in `main.cpp` |
+| `graphics-dev-irrlicht` | Implement `IRenderer` methods for vehicle agent spawn/move/despawn, intersection signal state, service coverage overlays; add minimap traffic and service coverage overlay modes; add `ICitySimulation` query methods (`getAgentPositions`, `getIntersectionSignalStates`, `getRoadSegmentSpeeds`, `getServiceCoverage`); per-frame agent sync loop in `main.cpp`; add placement conflict guards in `placeZone` and `placeRoad` (Deliverable 5a/5b); extend `IRenderer::setTilePlacementPreview` to accept `blockedTiles` second list (Deliverable 5d) |
 | `gamedesign-lookandfeel` | Confirm coverage radius colours, minimap tint palette, and signal visual behaviour match simulation intent; verify no V1 scope creep in visual wiring |
-| `gamedesign-ux` | Verify Inspector panel coverage-overlay UX (show on open, hide on close); confirm minimap overlay toggle interaction matches `architecture/ui-ux/minimap.md` |
-| `test-dev-cpp` | Deliverable 0 (Day-One Commit): extend `MockRenderer` with `MOCK_METHOD` stubs for all seven new `IRenderer` methods (`spawnVehicleAgent`, `moveVehicleAgent`, `despawnVehicleAgent`, `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`, `getListenerPosition`) before any test files for Deliverables 3d or 4c are written; author all four new unit tests; extend `simulation_tests` CMake target |
+| `gamedesign-ux` | Verify Inspector panel coverage-overlay UX (show on open, hide on close); confirm minimap overlay toggle interaction matches `architecture/ui-ux/minimap.md`; sign off on red preview feedback colour and blocked-tile drag-preview split (Deliverable 5d) |
+| `test-dev-cpp` | Deliverable 0 (Day-One Commit): extend `MockRenderer` with updated `MOCK_METHOD` for `setTilePlacementPreview` (new two-list signature) and stubs for all seven new `IRenderer` methods before any test files for Deliverables 3d, 4c, 5c, or 5e are written; author all eleven new unit tests (four traffic/coverage tests + four sim-level placement conflict tests + three UI-level placement feedback tests); extend `simulation_tests` and `ui_tests` CMake targets |
 | `cicd-dev-github` | Verify `validate-assets` CI job remains green after DDS rework; confirm `all-checks-pass` gate green |
 
 ### Dependencies
