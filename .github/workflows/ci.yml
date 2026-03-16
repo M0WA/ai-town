@@ -1043,8 +1043,12 @@ jobs:
             '*/Manual*.h' '*/Manual*.cpp' \
             '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
             --output-file coverage_filtered.info
-          lcov --list coverage_filtered.info
-          genhtml coverage_filtered.info --output-directory coverage_html/
+          lcov --list coverage_filtered.info \
+            --ignore-errors inconsistent \
+            --rc check_data_consistency=0
+          genhtml coverage_filtered.info --output-directory coverage_html/ \
+            --ignore-errors inconsistent \
+            --rc check_data_consistency=0
           # lcov --summary informational step REMOVED in Phase 5 — replaced by the
           # 80% total-line-coverage awk gate in the step below.
 
