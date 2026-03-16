@@ -1,6 +1,6 @@
 ## Phase 11c: Settings, Controls & Save/Load Dialog Polish
 
-**Status: Planned**
+**Status: DONE**
 
 ### Goal
 
@@ -34,7 +34,7 @@ UI was never wired; (3) the save-slot picker and Load Game dialogs are incomplet
   - Background: `rgba(13, 27, 42, 0.88)`, 8 px corner radius, floating centred
   - Scrim: `rgba(0, 0, 0, 0.50)` full-screen layer beneath the panel
 
-- [ ] **Tab strip visual state**: Settings tab headers use Glass City button tiles:
+- [x] **Tab strip visual state**: Settings tab headers use Glass City button tiles:
   - **Active tab**: `rgba(0, 201, 200, 0.22)` teal wash + 2 px `rgba(0, 201, 200, 0.75)`
     teal border + 4 px baked glow
   - **Inactive tab**: `rgba(255, 255, 255, 0.08)` fill + 1 px `rgba(255, 255, 255, 0.18)`
@@ -44,14 +44,14 @@ UI was never wired; (3) the save-slot picker and Load Game dialogs are incomplet
     style — `rgba(0, 201, 200, 0.22)` teal wash + 2 px `rgba(0, 201, 200, 0.75)` border +
     4 px baked glow. Desktop keyboard accessibility requires a visible focus indicator.
 
-- [ ] **Text colour pass** — Settings panel text must match the Glass City palette:
+- [x] **Text colour pass** — Settings panel text must match the Glass City palette:
   - Panel title: `#EBF4F6` near-white
   - Active tab label: `#EBF4F6`; inactive tab label: `#4A7FA5` mid-blue
   - Field labels: `#4A7FA5`; field value readouts: `#F0B429` amber
   - Disabled control labels (e.g. "Post-launch" disaster toggle): `#4A7FA5` at 50% opacity
     (implemented via `IUIBackend::setElementAlpha` + `setElementEnabled(..., false)`)
 
-- [ ] **Apply / Cancel / Restore Defaults buttons** on all tabs: Glass City button tile
+- [x] **Apply / Cancel / Restore Defaults buttons** on all tabs: Glass City button tile
   (inactive default style; hover and focus states per tab-strip rules above)
 
 - [x] **`SettingsPanelBackgroundTest`** (label `unit`, CMake target `ui_tests`): uses
@@ -74,7 +74,7 @@ wires the full rebinding table specified in `architecture/ui-ux/hotkey-scheme.md
   - Renders the rebinding table within the Controls tab content area
   - Owns the capture-mode state machine (Idle → Capturing → ConflictPending → Idle)
 
-- [ ] **Rebinding table rows** — one capturable row per V1 rebindable action (per
+- [x] **Rebinding table rows** — one capturable row per V1 rebindable action (per
   `architecture/ui-ux/hotkey-scheme.md` §V1 rebindable actions): Zone tool (Z), Road tool
   (R), Utilities tool (U), Demolish tool (D), Inspector/Query tool (I), Toggle Tax Rate
   Panel (T), Toggle Notification Log (B), Pan Up (ArrowUp), Pan Down (ArrowDown), Pan Left
@@ -88,12 +88,12 @@ wires the full rebinding table specified in `architecture/ui-ux/hotkey-scheme.md
     2 px `rgba(0, 201, 200, 0.75)` border) — signals "recording"; row label changes to
     "Press a key…"
 
-- [ ] **Non-rebindable informational rows** (Ctrl+Z — Undo, Ctrl+S — Save):
+- [x] **Non-rebindable informational rows** (Ctrl+Z — Undo, Ctrl+S — Save):
   - Label: `#4A7FA5` mid-blue; chip: `#4A7FA5` mid-blue background (no capture on click)
   - Displayed as "Ctrl+Z — Undo (not rebindable in V1)" and
     "Ctrl+S — Save (not rebindable in V1)"
 
-- [ ] **Reserved-key rows** (Q and E):
+- [x] **Reserved-key rows** (Q and E):
   - Displayed as "Q — Reserved for future camera controls — unavailable" and
     "E — Reserved for future camera controls — unavailable"; label colour `#4A7FA5` at 50%
     opacity; the text "This key is reserved and cannot be assigned" is displayed inline as
@@ -103,7 +103,7 @@ wires the full rebinding table specified in `architecture/ui-ux/hotkey-scheme.md
   - Q/E reserved-key rows are NOT Tab-navigable and do not respond to Enter or Space.
     Keyboard Tab navigation skips these rows. The row chip has no click effect.
 
-- [ ] **Capture flow**:
+- [x] **Capture flow**:
   1. Player clicks a bindable key chip → row enters Capturing state
   2. Next key press (excluding Escape) is read as the candidate new key
   3. **Q/E guard**: if the candidate is Q or E, immediately display inline red text
@@ -120,7 +120,7 @@ wires the full rebinding table specified in `architecture/ui-ux/hotkey-scheme.md
      Idle state is visible to the player (per
      `architecture/ui-ux/settings-pause-menu.md` §Controls tab)
 
-- [ ] **WASD preset button**: a "WASD" preset button at the bottom of the Controls tab
+- [x] **WASD preset button**: a "WASD" preset button at the bottom of the Controls tab
   content area (above Apply/Cancel/Restore Defaults). Clicking it opens the WASD preset
   confirmation modal (Small, 480×240 px) per
   `architecture/ui-ux/modal-dialog-system.md` §WASD camera preset confirmation modal:
@@ -132,17 +132,17 @@ wires the full rebinding table specified in `architecture/ui-ux/hotkey-scheme.md
   - On Apply: atomically rebind PanUp=W, PanDown=S, PanLeft=A, PanRight=D, Demolish=X;
     write `keybindings.json`; close modal; refresh all chip labels in the table
 
-- [ ] **Apply button (Controls tab)**: writes `keybindings.json` only when the in-memory
+- [x] **Apply button (Controls tab)**: writes `keybindings.json` only when the in-memory
   `KeyBindings` state is conflict-free (no two actions share a key). If the panel somehow
   reaches Apply with a conflict still present, Apply is grayed out and a summary line
   shows `#F04E37` "Resolve all key conflicts before saving"
 
-- [ ] **Cancel button (Controls tab)**: reverts all in-session rebinding changes in the
+- [x] **Cancel button (Controls tab)**: reverts all in-session rebinding changes in the
   `KeyBindings` struct to the state at the time the Controls tab was last opened (or the
   persisted state if never modified this session); closes Settings (returns to Pause Menu
   or Main Menu, matching the Escape-from-tab behaviour)
 
-- [ ] **Restore Defaults (Controls tab)**: shows "Reset all Controls settings to defaults?
+- [x] **Restore Defaults (Controls tab)**: shows "Reset all Controls settings to defaults?
   Yes / Cancel." confirmation; on Yes, resets the in-memory `KeyBindings` struct to
   defaults and refreshes all chip labels (does NOT write to disk until Apply)
 
@@ -224,7 +224,7 @@ components (see `architecture/testing/testability-architecture.md`).
 
 ##### 3a. Unsaved-Changes Modal
 
-- [ ] **`ModalDialog::showUnsavedQuit()`** properly wired in `UIManager`:
+- [x] **`ModalDialog::showUnsavedQuit()`** properly wired in `UIManager`:
   - Called when `m_pendingQuit != None` and `m_hasUnsavedChanges == true` (see
     `architecture/game-design/save-system.md` §Quit-to-Desktop/Quit-to-Main-Menu safety)
   - Three buttons: **Save and Quit** / **Quit Without Saving** / **Cancel**
