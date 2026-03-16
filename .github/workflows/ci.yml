@@ -1001,16 +1001,21 @@ jobs:
           # set up a gcov alternative, so the default gcov resolves to gcov-14 on
           # Debian trixie. gcov-14 cannot read .gcda files produced by GCC 13 (version
           # mismatch). Explicitly passing gcov-13 matches the compiler used for the build.
-          # --ignore-errors mismatch,inconsistent: GCC 13 + lcov 2.x compatibility.
-          # lcov 2.0 only forwards the FIRST --ignore-errors value to the geninfo subprocess,
-          # so both categories MUST be in a single comma-separated flag. Two separate flags
-          # would only forward "mismatch" and silently drop "inconsistent". GCC 13 produces:
-          #   - "mismatched end line" warnings (mismatch)
-          #   - "function not hit but line is" for lambdas (inconsistent)
-          # Both are known false positives and do not affect coverage accuracy.
+          # GCC 13 + lcov 2.x compatibility:
+          # --ignore-errors mismatch,inconsistent: suppress "mismatched end line" and
+          #   "function not hit but line is" (lambda false positives). lcov 2.0 expands
+          #   comma-separated values to separate flags when calling geninfo internally.
+          # --rc check_data_consistency=0: lcov itself re-validates data after geninfo and
+          #   may throw the (inconsistent) "function not hit but line is" error even with
+          #   --ignore-errors in place. This rc flag disables that post-geninfo consistency
+          #   check entirely. The error message itself recommends this approach:
+          #   "see the 'check_data_consistency' section in man lcovrc(5)".
+          # All these are known false positives from GCC 13 lambda inlining and do not
+          # affect coverage accuracy.
           lcov --capture --directory "${BUILD_DIR}" --base-directory . \
                --gcov-tool gcov-13 \
                --ignore-errors mismatch,inconsistent \
+               --rc check_data_consistency=0 \
                --output-file coverage.info
           # --ignore-errors unused: lcov 2.x treats any --remove pattern that matches
           # no files as a fatal error (exit 25). At Phase 0 only smoke tests exist, so
