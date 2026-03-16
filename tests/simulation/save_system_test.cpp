@@ -22,6 +22,8 @@
 #include <string>
 #include <cstring>
 
+namespace {
+
 // ---------------------------------------------------------------------------
 // Minimal ICitySimulationSerializable — declares the two serialisation methods
 // that CitySimulation must implement by end of Phase 11.
@@ -293,6 +295,8 @@ private:
     int     m_saveCount{0};
     bool    m_suspended{false};
 };
+
+} // namespace
 
 // ===========================================================================
 // Test a: SaveSystem_RoundTrip_PreservesFullCityState
