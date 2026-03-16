@@ -214,12 +214,12 @@ jobs:
           echo "requires-opengl routing: $count test(s) discovered."
 
       # Step 12b: Verify unit test routing (non-zero discovery) — CI-7, Phase 4 deliverable.
-      # Uses -N dry-run + grep -c 'Test #' pattern (identical to integration/requires-opengl checks above).
+      # Uses -N dry-run + grep -E 'Test +#' (handles ctest alignment padding for test #1-9999).
       # --collect-labels does NOT exist in CTest — use -N (dry-run) instead.
       - name: Verify unit test routing (non-zero discovery)
         shell: bash
         run: |
-          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -c 'Test #' || true)
+          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -cE 'Test +#' || true)
           if [[ "$count" -eq 0 ]]; then
             echo "ERROR: No tests discovered under unit label. Check simulation_tests/terrain_tests/ui_tests/audio_tests CMake registration."
             exit 1
@@ -233,10 +233,12 @@ jobs:
       # Phase 10 adds adaptive_music_intensity_test.cpp to simulation_tests — if the
       # binary fails to start (e.g. missing symbol), ctest exits 0 with "No tests found".
       # Hard-failing here catches that silent failure before it reaches the coverage gate.
+      # Note: ctest pads test numbers with spaces ("Test    #1:" for #1-9, "Test #1000:"
+      # for #1000+); use grep -E 'Test +#' to match all formats.
       - name: Verify simulation_tests registration
         shell: bash
         run: |
-          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -c 'Test #' || true)
+          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -cE 'Test +#' || true)
           if [[ "$count" -eq 0 ]]; then
             echo "ERROR: No simulation_tests test cases discovered. Ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60) and that the binary links and starts correctly."
             exit 1
@@ -862,11 +864,11 @@ jobs:
           echo "requires-opengl routing: $count test(s) discovered."
 
       # Step 12b: Verify unit test routing (non-zero discovery) — CI-7, Phase 4 deliverable.
-      # Mirrors the identical step in build-linux. Uses -N dry-run + grep -c 'Test #'.
+      # Mirrors the identical step in build-linux. Uses -N dry-run + grep -E 'Test +#'.
       - name: Verify unit test routing (non-zero discovery)
         shell: bash
         run: |
-          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -c 'Test #' || true)
+          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -cE 'Test +#' || true)
           if [[ "$count" -eq 0 ]]; then
             echo "ERROR: No tests discovered under unit label. Check simulation_tests/terrain_tests/ui_tests/audio_tests CMake registration."
             exit 1
@@ -877,10 +879,11 @@ jobs:
       # Mirrors the identical step in build-linux.
       # Phase 6 is complete; hardened from WARNING-ONLY to hard-fail.
       # Phase 10 adds adaptive_music_intensity_test.cpp — silent 0-test ctest exit must be caught.
+      # Note: ctest pads test numbers with spaces; use grep -E 'Test +#' for all formats.
       - name: Verify simulation_tests registration
         shell: bash
         run: |
-          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -c 'Test #' || true)
+          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -cE 'Test +#' || true)
           if [[ "$count" -eq 0 ]]; then
             echo "ERROR: No simulation_tests test cases discovered. Ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60) and that the binary links and starts correctly."
             exit 1
