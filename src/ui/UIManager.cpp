@@ -39,7 +39,8 @@
 #include "src/interfaces/IRenderer.h"       // IRenderer — for setZoneOverlay, pickTerrainTile
 #include "src/interfaces/ITerrainQuery.h"   // ITerrainQuery — for earthworks cost computation
 #include "src/interfaces/simulation_types.h"  // ZoneType, DensityTier, ServiceBuildingType
-#include "src/simulation/SaveSystem.h"        // SaveSystem — Phase 11 manual save + quit-guard
+#include "src/interfaces/ISaveSystem.h"        // ISaveSystem — Phase 11c interface abstraction
+#include "src/simulation/SaveSystem.h"         // SaveResult/LoadResult types used in save wiring
 
 #include <algorithm>
 #include <string>
@@ -57,6 +58,7 @@ namespace {
     constexpr int kKeyR      = 82;   // Irrlicht KEY_KEY_R
     constexpr int kKeyT      = 84;   // Irrlicht KEY_KEY_T
     constexpr int kKeyU      = 85;   // Irrlicht KEY_KEY_U
+    constexpr int kKeyS      = 83;   // Irrlicht KEY_KEY_S
     constexpr int kKeyZ      = 90;   // Irrlicht KEY_KEY_Z
     constexpr int kKeyLCtrl  = 162;  // Irrlicht KEY_LCONTROL
     constexpr int kKeyRCtrl  = 163;  // Irrlicht KEY_RCONTROL
@@ -111,6 +113,10 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
 
     // Wire pause menu into settings panel for back-navigation (Settings > back to Pause).
     m_settings->setPauseMenu(m_pauseMenu);
+
+    // Wire modal dialog into settings panel (for WASD preset + Restore Defaults modals).
+    // m_modal is constructed immediately before this call (see line above).
+    m_settings->setModal(m_modal);
 
     // Create the background scrim element (50% opacity, hidden initially).
     // The scrim sits at Z-slot 9 between the settings panel (slot 8) and
@@ -481,6 +487,24 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_sim->undoLastAction();
                 return true;
             }
+        }
+
+        // --- Ctrl+S: Manual save (Gameplay only) ---
+        if (event.keyCode == kKeyS && m_ctrlDown && m_state == GameState::Gameplay) {
+            if (m_saveSystem) {
+                // Post-V1: slot picker dialog
+                SaveResult result = m_saveSystem->saveToSlot(1);
+                if (result.ok) {
+                    setUnsavedChanges(false);
+                } else {
+                    // Manual save failure — show blocking Retry/Cancel modal.
+                    if (m_modal) {
+                        m_pendingSaveFailure = true;
+                        m_modal->showSaveFailure(result.error);
+                    }
+                }
+            }
+            return true;
         }
 
         // --- Hotkeys (only during Gameplay) ---
@@ -1194,10 +1218,19 @@ void UIManager::update(float realDeltaSeconds) {
     // 1c. Poll PauseMenuPanel for save/quit requests.
     if (m_pauseMenu) {
         // Manual save: call saveToSlot(1) if SaveSystem is available.
+        // Post-V1: slot picker dialog
         if (m_pauseMenu->consumeSaveRequest()) {
             if (m_saveSystem) {
-                m_saveSystem->saveToSlot(1);
-                setUnsavedChanges(false);
+                SaveResult result = m_saveSystem->saveToSlot(1);
+                if (result.ok) {
+                    setUnsavedChanges(false);
+                } else {
+                    // Manual save failure: show blocking Retry/Cancel modal.
+                    if (m_modal) {
+                        m_pendingSaveFailure = true;
+                        m_modal->showSaveFailure(result.error);
+                    }
+                }
             }
         }
 
@@ -1253,6 +1286,24 @@ void UIManager::update(float realDeltaSeconds) {
             return;
         }
         // DialogResult::Cancel — do nothing, user stays in the game.
+    }
+
+    // 1d2. Handle save-failure modal result (Retry / Cancel).
+    if (m_pendingSaveFailure && m_modal && !m_modal->isActive()) {
+        m_pendingSaveFailure = false;
+        auto result = m_modal->getLastResult();
+        if (result == ModalDialog::DialogResult::Accept && m_saveSystem) {
+            // Retry: call saveToSlot(1) again.
+            SaveResult retryResult = m_saveSystem->saveToSlot(1);
+            if (retryResult.ok) {
+                setUnsavedChanges(false);
+            } else {
+                // Second failure: show modal again.
+                m_pendingSaveFailure = true;
+                m_modal->showSaveFailure(retryResult.error);
+            }
+        }
+        // Cancel: modal dismissed; unsaved-changes dot remains visible.
     }
 
     // 1e. Forward budget ticks from CitySimulation to SaveSystem (5-tick auto-save gate).
@@ -1699,7 +1750,7 @@ void UIManager::loadKeybindings() {
 // ----------------------------------------------------------------
 // Phase 11: setSaveSystem — bind the SaveSystem for manual save and quit-guard.
 // ----------------------------------------------------------------
-void UIManager::setSaveSystem(SaveSystem* saveSystem) {
+void UIManager::setSaveSystem(ISaveSystem* saveSystem) {
     m_saveSystem = saveSystem;
 }
 

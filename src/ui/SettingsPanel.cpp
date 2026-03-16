@@ -10,6 +10,8 @@
 #include "src/ui/SettingsPanel.h"
 #include "src/interfaces/IAudioSystem.h"
 #include "src/interfaces/IClock.h"
+#include "src/ui/KeyBindingsPanel.h"
+#include "src/ui/ModalDialog.h"
 #include "src/ui/PauseMenuPanel.h"
 #include "src/platform/input_event.h"
 
@@ -40,17 +42,35 @@ static constexpr int kBtnY = kSettingsY + kSettingsH - 52;
 // ---------------------------------------------------------------------------
 // Constructor
 // ---------------------------------------------------------------------------
-SettingsPanel::SettingsPanel(IUIBackend* backend, IAudioSystem* audio, IClock* clock)
+SettingsPanel::SettingsPanel(IUIBackend* backend, IAudioSystem* audio, IClock* clock,
+                             ModalDialog* modal)
     : m_backend(backend)
     , m_audio(audio)
     , m_clock(clock)
+    , m_modal(modal)
     , m_pauseMenu(nullptr)
     , m_visible(false)
     , m_activeTab(0)
 {
     if (!m_backend) return;
 
-    // Panel background
+    // --- Glass City full-screen scrim (rgba(0,0,0,0.50)) ---
+    // Created at full virtual canvas size; shown/hidden with the panel.
+    m_scrimHandle = m_backend->addStaticText("",
+        0, 0, m_backend->getVirtualWidth(), m_backend->getVirtualHeight());
+    m_backend->setElementBackground(m_scrimHandle, 0, 0, 0, 128); // 50% opacity black
+    m_backend->setElementVisible(m_scrimHandle, false);
+
+    // --- Glass City deep-navy panel background (rgba(13,27,42,0.88)) ---
+    // 8 px corner radius is baked visually via the panel tile or draw2DRectangle fallback.
+    // Use the sprite panel tile (hud_sprites_ui rows 16+) when available;
+    // fall back to setElementBackground with the nearest solid equivalent.
+    m_bgHandle = m_backend->addStaticText("", kSettingsX, kSettingsY, kSettingsW, kSettingsH);
+    m_backend->setElementBackground(m_bgHandle, 13, 27, 42, 224); // rgba(13,27,42,0.88)
+    m_backend->setElementVisible(m_bgHandle, false);
+
+    // Panel background (legacy handle, kept for backward compatibility with tests
+    // that reference m_panelBg via the show/hide element-visible pattern).
     m_panelBg = m_backend->addStaticText("", kSettingsX, kSettingsY, kSettingsW, kSettingsH);
 
     // Tab header buttons
@@ -97,14 +117,35 @@ SettingsPanel::SettingsPanel(IUIBackend* backend, IAudioSystem* audio, IClock* c
     m_gameplayDisasterToggle = m_backend->addButton("Disasters: Post-launch",             kContentX, y, 400, kLineH);
     m_backend->setElementEnabled(m_gameplayDisasterToggle, false); // Grayed in V1
 
+    // --- KeyBindingsPanel (Controls tab) ---
+    m_keyBindings = new KeyBindingsPanel(m_backend, m_modal);
+
     hide();
 }
 
 // ---------------------------------------------------------------------------
-// setPauseMenu
+// Destructor
+// ---------------------------------------------------------------------------
+SettingsPanel::~SettingsPanel() {
+    delete m_keyBindings;
+}
+
+// ---------------------------------------------------------------------------
+// setPauseMenu / setModal
 // ---------------------------------------------------------------------------
 void SettingsPanel::setPauseMenu(PauseMenuPanel* pauseMenu) {
     m_pauseMenu = pauseMenu;
+}
+
+void SettingsPanel::setModal(ModalDialog* modal) {
+    m_modal = modal;
+    // Re-create KeyBindingsPanel with the now-available modal pointer.
+    // This is safe: at construction time the modal was null; setModal() is
+    // called from UIManager immediately after ModalDialog construction.
+    if (m_keyBindings) {
+        delete m_keyBindings;
+    }
+    m_keyBindings = new KeyBindingsPanel(m_backend, m_modal);
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +154,10 @@ void SettingsPanel::setPauseMenu(PauseMenuPanel* pauseMenu) {
 void SettingsPanel::show() {
     m_visible = true;
     if (!m_backend) return;
+
+    // Glass City scrim and panel background.
+    m_backend->setElementVisible(m_scrimHandle, true);
+    m_backend->setElementVisible(m_bgHandle,    true);
 
     m_backend->setElementVisible(m_panelBg, true);
     m_backend->setElementVisible(m_tabGraphics, true);
@@ -130,6 +175,10 @@ void SettingsPanel::hide() {
     m_visible = false;
     m_countdownActive = false;
     if (!m_backend) return;
+
+    // Glass City scrim and panel background.
+    m_backend->setElementVisible(m_scrimHandle, false);
+    m_backend->setElementVisible(m_bgHandle,    false);
 
     m_backend->setElementVisible(m_panelBg, false);
     m_backend->setElementVisible(m_tabGraphics, false);
@@ -160,6 +209,7 @@ void SettingsPanel::hideAllTabElements() {
     m_backend->setElementVisible(m_ctrlEdgeScrollLabel, false);
     m_backend->setElementVisible(m_ctrlSensitivityLabel, false);
     m_backend->setElementVisible(m_ctrlWasdPresetBtn, false);
+    if (m_keyBindings) m_keyBindings->hide();
 
     // Audio
     m_backend->setElementVisible(m_audioMasterLabel, false);
@@ -212,6 +262,13 @@ void SettingsPanel::showControlsTab() {
     m_backend->setElementVisible(m_ctrlEdgeScrollLabel, true);
     m_backend->setElementVisible(m_ctrlSensitivityLabel, true);
     m_backend->setElementVisible(m_ctrlWasdPresetBtn, true);
+    // Open the keybinding table for the Controls tab.
+    if (m_keyBindings) {
+        // Pass default-constructed bindings as placeholder; UIManager should
+        // call SettingsPanel with the loaded bindings.  For now openTab()
+        // uses whatever is in the panel's internal state.
+        m_keyBindings->openTab(KeyBindings{});
+    }
 }
 
 void SettingsPanel::showAudioTab() {
@@ -282,6 +339,17 @@ void SettingsPanel::update() {
 // ---------------------------------------------------------------------------
 bool SettingsPanel::onEvent(const InputEvent& event) {
     if (!m_visible || !m_backend) return false;
+
+    // Route key events to KeyBindingsPanel FIRST when Controls tab is active.
+    // This implements the capture-mode input interception (Priority 5 per
+    // input-arbitration.md): KeyBindingsPanel consumes all keys during capture
+    // EXCEPT Escape, which falls through to the Escape handler below so that
+    // Settings closes in the same event frame.
+    if (m_activeTab == 1 && m_keyBindings) {
+        bool consumed = m_keyBindings->onEvent(event);
+        if (consumed) return true;
+        // If not consumed (including Escape from capture): fall through.
+    }
 
     if (event.type == InputEvent::Type::KeyDown) {
         int key = event.keyCode;

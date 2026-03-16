@@ -34,6 +34,11 @@ public:
     // Accept = Save and Quit, Decline = Quit Without Saving, Cancel = stay in game.
     void showUnsavedQuit(bool quitToDesktop);
 
+    // Phase 11c: manual save failure modal ("Save Failed" + reason, Retry / Cancel).
+    // Accept = Retry, Cancel = dismiss without retry.
+    // Escape activates Cancel.
+    void showSaveFailure(const std::string& reason);
+
     // Result accessors for UIManager to check after dialog closes
     enum class DialogResult { None, Accept, Decline, Cancel };
     DialogResult getLastResult() const { return m_lastResult; }
@@ -54,7 +59,8 @@ private:
         DemolishConfirm,
         WASDPreset,
         GameOver,
-        UnsavedQuit
+        UnsavedQuit,
+        SaveFailure
     };
     DialogType m_dialogType{DialogType::None};
 
@@ -79,6 +85,9 @@ private:
     int64_t m_gameOverDebt{0};
     int     m_gameOverMonths{0};
 
+    // Stored reason for save-failure modal
+    std::string m_saveFailureReason;
+
     // Focus tracking for keyboard navigation
     int m_focusedButton{0};  // 0-based index into active buttons
 
@@ -98,6 +107,7 @@ private:
     void layoutWASDPreset();
     void layoutGameOver(int64_t debt, int months);
     void layoutUnsavedQuit(bool quitToDesktop);
+    void layoutSaveFailure(const std::string& reason);
     void hideAllDialogElements();
     void setDialogRect(int w, int h);
 };

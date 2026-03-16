@@ -31,6 +31,17 @@ PauseMenuPanel::PauseMenuPanel(IUIBackend* backend)
 {
     if (!m_backend) return;
 
+    // --- Glass City full-screen scrim (rgba(0,0,0,0.50)) ---
+    m_scrimHandle = m_backend->addStaticText("",
+        0, 0, 1920, 1080);
+    m_backend->setElementBackground(m_scrimHandle, 0, 0, 0, 128); // 50% opacity black
+    m_backend->setElementVisible(m_scrimHandle, false);
+
+    // --- Glass City deep-navy panel background (rgba(13,27,42,0.88)) ---
+    m_bgHandle = m_backend->addStaticText("", kPanelX, kPanelY, kPanelW, kPanelH);
+    m_backend->setElementBackground(m_bgHandle, 13, 27, 42, 224); // rgba(13,27,42,0.88)
+    m_backend->setElementVisible(m_bgHandle, false);
+
     m_panelBg    = m_backend->addStaticText("", kPanelX, kPanelY, kPanelW, kPanelH);
     m_titleLabel = m_backend->addStaticText("Paused", kPanelX + 20, kPanelY + 8, kPanelW - 40, 36);
 
@@ -86,6 +97,8 @@ void PauseMenuPanel::show() {
     m_focusedButton = 0; // Default focus on Resume
     if (!m_backend) return;
 
+    m_backend->setElementVisible(m_scrimHandle,   true);
+    m_backend->setElementVisible(m_bgHandle,      true);
     m_backend->setElementVisible(m_panelBg,       true);
     m_backend->setElementVisible(m_titleLabel,    true);
     m_backend->setElementVisible(m_btnResume,     true);
@@ -99,6 +112,8 @@ void PauseMenuPanel::hide() {
     m_visible = false;
     if (!m_backend) return;
 
+    m_backend->setElementVisible(m_scrimHandle,   false);
+    m_backend->setElementVisible(m_bgHandle,      false);
     m_backend->setElementVisible(m_panelBg,       false);
     m_backend->setElementVisible(m_titleLabel,    false);
     m_backend->setElementVisible(m_btnResume,     false);

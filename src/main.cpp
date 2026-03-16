@@ -209,21 +209,26 @@ int main() {
     SaveSystem saveSystem(&wallClock);
     saveSystem.setSimulation(&citySimulation);
 
-    // Update Main Menu "Load Game" button state (3 states per main-menu-new-game-flow.md):
-    //   enabled         — at least one valid save exists
-    //   grayed+corrupt  — saves exist but are unreadable (schema mismatch, malformed JSON)
-    //   grayed+no-saves — no save files present (first run)
+    // Update Main Menu "Load Game" button state using ISaveSystem::getSaveFileState().
+    // Three states per architecture/ui-ux/main-menu-new-game-flow.md:
+    //   Valid      — button enabled; click → loading screen
+    //   AllCorrupt — button grayed; tooltip shows save directory path for recovery
+    //   NoSaves    — button grayed; tooltip "No saves found"
     {
-        const bool hasData   = saveSystem.hasSaveData();
-        const bool corrupted = hasData && saveSystem.isSaveCorrupted();
-        uiManager.setSaveAvailable(hasData && !corrupted);
-        if (corrupted) {
-            uiManager.setSaveStatusText(
-                "Save data corrupted — check " + saveSystem.getSaveDirectoryPath());
-        } else if (!hasData) {
-            uiManager.setSaveStatusText("No saves found.");
-        } else {
-            uiManager.setSaveStatusText("");  // hide label when saves are available
+        SaveFileState saveState = saveSystem.getSaveFileState();
+        uiManager.setSaveAvailable(saveState == SaveFileState::Valid);
+        switch (saveState) {
+            case SaveFileState::NoSaves:
+                uiManager.setSaveStatusText("No saves found.");
+                break;
+            case SaveFileState::AllCorrupt:
+                uiManager.setSaveStatusText(
+                    "Save data is corrupted — cannot load. Check "
+                    + saveSystem.getSaveDirectoryPath() + " for recovery.");
+                break;
+            case SaveFileState::Valid:
+                uiManager.setSaveStatusText("");  // hide label when saves are available
+                break;
         }
     }
     uiManager.setSaveSystem(&saveSystem);

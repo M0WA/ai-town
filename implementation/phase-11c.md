@@ -16,7 +16,7 @@ UI was never wired; (3) the save-slot picker and Load Game dialogs are incomplet
 
 #### 1. Settings Dialog — Glass City Background
 
-- [ ] **`SettingsPanel` background**: Apply the Glass City deep-navy panel style to
+- [x] **`SettingsPanel` background**: Apply the Glass City deep-navy panel style to
   `SettingsPanel`:
   - Background fill: `rgba(13, 27, 42, 0.88)` deep navy; **8 px corner radius** on all
     four edges (the panel is a floating centred overlay — never flush with the screen edge)
@@ -29,7 +29,7 @@ UI was never wired; (3) the save-slot picker and Load Game dialogs are incomplet
   - Full-screen scrim: solid `rgba(0, 0, 0, 0.50)` drawn beneath the panel (same scrim
     rule as modal dialogs — see `architecture/ui-ux/modal-dialog-system.md`)
 
-- [ ] **`PauseMenuPanel` background**: Same Glass City treatment as `SettingsPanel`
+- [x] **`PauseMenuPanel` background**: Same Glass City treatment as `SettingsPanel`
   (the two panels share identical panel style per `architecture/ui-ux/settings-pause-menu.md`):
   - Background: `rgba(13, 27, 42, 0.88)`, 8 px corner radius, floating centred
   - Scrim: `rgba(0, 0, 0, 0.50)` full-screen layer beneath the panel
@@ -54,7 +54,7 @@ UI was never wired; (3) the save-slot picker and Load Game dialogs are incomplet
 - [ ] **Apply / Cancel / Restore Defaults buttons** on all tabs: Glass City button tile
   (inactive default style; hover and focus states per tab-strip rules above)
 
-- [ ] **`SettingsPanelBackgroundTest`** (label `unit`, CMake target `ui_tests`): uses
+- [x] **`SettingsPanelBackgroundTest`** (label `unit`, CMake target `ui_tests`): uses
   `NiceMock<MockUIBackend>` to verify that `SettingsPanel::show()` calls
   `setElementVisible(scrimHandle, true)` and `setElementImage(bgHandle, kPanelTileId)` at
   the expected handles. Scrim handle and background handle are stored as `UIElementHandle`
@@ -69,7 +69,7 @@ UI was never wired; (3) the save-slot picker and Load Game dialogs are incomplet
 The Controls tab in `SettingsPanel` currently has placeholder stubs. This deliverable
 wires the full rebinding table specified in `architecture/ui-ux/hotkey-scheme.md`.
 
-- [ ] **`KeyBindingsPanel`** — new class `src/ui/KeyBindingsPanel.h` /
+- [x] **`KeyBindingsPanel`** — new class `src/ui/KeyBindingsPanel.h` /
   `src/ui/KeyBindingsPanel.cpp` owned by `SettingsPanel`:
   - Renders the rebinding table within the Controls tab content area
   - Owns the capture-mode state machine (Idle → Capturing → ConflictPending → Idle)
@@ -146,7 +146,7 @@ wires the full rebinding table specified in `architecture/ui-ux/hotkey-scheme.md
   Yes / Cancel." confirmation; on Yes, resets the in-memory `KeyBindings` struct to
   defaults and refreshes all chip labels (does NOT write to disk until Apply)
 
-- [ ] **`KeyBindingsPanelTest`** (label `unit`, CMake target `ui_tests`):
+- [x] **`KeyBindingsPanelTest`** (label `unit`, CMake target `ui_tests`):
   - `KeyBindingsPanel_CaptureMode_TogglesOnClick`: clicking a bindable chip enters Capture
     state; clicking again (second key chip while first is active) cancels first capture and
     begins new one
@@ -166,7 +166,7 @@ wires the full rebinding table specified in `architecture/ui-ux/hotkey-scheme.md
     the UI backend generates many incidental calls. `KeyBindings` is injected as a value
     type (copied on tab open, written on Apply).
 
-- [ ] **CMakeLists.txt registration** — extend `ui_tests` target via `target_sources()`
+- [x] **CMakeLists.txt registration** — extend `ui_tests` target via `target_sources()`
   following the Phase 4+ extension policy (do NOT call `add_executable` or
   `aitown_add_tests` again — duplicate target error):
 
@@ -194,7 +194,7 @@ Phase 11 delivered `SaveSystem` as a concrete class without a pure-virtual inter
 generate via GMock — following the testability architecture pattern for all injectable
 components (see `architecture/testing/testability-architecture.md`).
 
-- [ ] **`src/interfaces/ISaveSystem.h`** — new pure-virtual interface:
+- [x] **`src/interfaces/ISaveSystem.h`** — new pure-virtual interface:
   - Methods mirroring the `SaveSystem` public API used by `UIManager`:
     `virtual SaveResult saveToSlot(int slot) = 0;`
     `virtual SaveResult autoSave() = 0;`
@@ -208,17 +208,17 @@ components (see `architecture/testing/testability-architecture.md`).
     `isSaveCorrupted()` logic into a single three-state result for the Load Game button;
     it does not exist on the current concrete `SaveSystem` and must be added
 
-- [ ] **`SaveSystem` updated** to `class SaveSystem : public ISaveSystem` — all existing
+- [x] **`SaveSystem` updated** to `class SaveSystem : public ISaveSystem` — all existing
   public methods declared `override`; `getSaveFileState()` added as a new method
   (implementation: returns `NoSaves` when `!hasSaveData()`, `AllCorrupt` when
   `isSaveCorrupted()`, otherwise `Valid`); no other behaviour changes
 
-- [ ] **`MockSaveSystem`** in `tests/ui/MockSaveSystem.h` — **header-only** (no `.cpp` file),
+- [x] **`MockSaveSystem`** in `tests/ui/MockSaveSystem.h` — **header-only** (no `.cpp` file),
   following the `MockUIBackend` pattern used throughout the test suite; standard
   `NiceMock`/`StrictMock`-compatible GMock stub for all `ISaveSystem` methods; used by
   `UIManagerUnsavedQuitTest`, `UIManagerSaveFailureTest`, and `MainMenuSaveStateTest`
 
-- [ ] **`UIManager` constructor** updated to accept `ISaveSystem*` instead of `SaveSystem*`
+- [x] **`UIManager` constructor** updated to accept `ISaveSystem*` instead of `SaveSystem*`
   (if `UIManager` currently holds a concrete pointer); production `main.cpp` passes the real
   `SaveSystem` instance; all existing `UIManager` tests pass `MockSaveSystem` or `nullptr`
 
@@ -240,7 +240,7 @@ components (see `architecture/testing/testability-architecture.md`).
     every state transition (action placed → dot shown; manual/auto-save → dot cleared;
     failed auto-save → dot remains shown)
 
-- [ ] **`UIManagerUnsavedQuitTest`** (label `unit`, CMake target `ui_tests`):
+- [x] **`UIManagerUnsavedQuitTest`** (label `unit`, CMake target `ui_tests`):
   - `UIManager_QuitToDesktop_WithUnsavedChanges_ShowsModal`
   - `UIManager_QuitToDesktop_NoUnsavedChanges_ExitsImmediately`
   - `UIManager_QuitToMenu_WithUnsavedChanges_ShowsModal`
@@ -252,7 +252,7 @@ components (see `architecture/testing/testability-architecture.md`).
 
 ##### 3b. Manual Save Failure Modal
 
-- [ ] **`ModalDialog::showSaveFailure()`** — blocking error modal for manual save
+- [x] **`ModalDialog::showSaveFailure()`** — blocking error modal for manual save
   failures (Ctrl+S path): title "Save Failed", body "[reason]", buttons **Retry** /
   **Cancel** (per `architecture/ui-ux/settings-pause-menu.md` §Auto-save)
   - Dismissible via Escape (activates Cancel)
@@ -264,14 +264,14 @@ components (see `architecture/testing/testability-architecture.md`).
     Press Ctrl+S to save manually." (2 s display, non-dismissible until expiry per
     `NotificationManager::postCritical()`) — this path does NOT use the blocking modal
 
-- [ ] **`UIManagerSaveFailureTest`** (label `unit`, CMake target `ui_tests`):
+- [x] **`UIManagerSaveFailureTest`** (label `unit`, CMake target `ui_tests`):
   - `UIManager_ManualSave_Failure_ShowsBlockingModal`
   - `UIManager_ManualSave_RetrySuccess_ClearsUnsavedDot`
   - `UIManager_AutoSave_Failure_PostsCriticalToast_NotModal`
 
 ##### 3c. Load Game Dialogs — Main Menu State
 
-- [ ] **Main Menu "Load Game" button state** correctly reflects save file state at
+- [x] **Main Menu "Load Game" button state** correctly reflects save file state at
   startup and after save/load operations (three states per
   `architecture/ui-ux/main-menu-new-game-flow.md`):
   - **No saves**: grayed, tooltip "No saves found"
@@ -280,7 +280,7 @@ components (see `architecture/testing/testability-architecture.md`).
   - **At least one valid save**: enabled; on click → loading screen → terrain rebuild →
     gameplay; loading controller calls `UIManager::onGameLoaded()` after deserialisation
 
-- [ ] **`MainMenuSaveStateTest`** (label `unit`, CMake target `ui_tests`):
+- [x] **`MainMenuSaveStateTest`** (label `unit`, CMake target `ui_tests`):
   - `MainMenuPanel_NoSaves_LoadButtonGrayed`
   - `MainMenuPanel_CorruptSaves_LoadButtonGrayed_TooltipShowsPath`
   - `MainMenuPanel_ValidSave_LoadButtonEnabled`

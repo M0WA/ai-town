@@ -266,6 +266,11 @@ target_sources(aitown_ui PRIVATE
     src/ui/MainMenuPanel.cpp
 )
 
+# Phase 11c: KeyBindingsPanel (Controls tab keybinding table + capture-mode state machine).
+target_sources(aitown_ui PRIVATE
+    src/ui/KeyBindingsPanel.cpp
+)
+
 # ----------------------------------------------------------------------------
 # aitown_terrain — Terrain chunk and system (Phase 5: promoted from INTERFACE to STATIC)
 # Phase 3: was an INTERFACE library (headers only).
@@ -713,6 +718,22 @@ target_sources(ui_tests PRIVATE
 # PendingQuitAction::Desktop/ToMenu dispatch), setSaveSystem/setSaveAvailable/setSaveStatusText.
 target_sources(ui_tests PRIVATE
     tests/ui/ui_manager_quit_coverage_test.cpp
+)
+
+# Phase 11c: Settings, Controls & Save/Load Dialog Polish.
+# Do NOT call add_executable(ui_tests ...) or aitown_add_tests(ui_tests ...) again —
+# that would produce a duplicate target error (Phase 4+ extension policy).
+#
+# NOTE: key_bindings_panel_test.cpp depends on src/ui/KeyBindingsPanel.h (delivered
+# by graphics-dev-irrlicht in Phase 11c).  The remaining four test files depend on
+# src/interfaces/ISaveSystem.h (already present) and UIManager::setSaveSystem(ISaveSystem*)
+# (already wired).
+target_sources(ui_tests PRIVATE
+    tests/ui/settings_panel_background_test.cpp
+    tests/ui/key_bindings_panel_test.cpp
+    tests/ui/ui_manager_unsaved_quit_test.cpp
+    tests/ui/ui_manager_save_failure_test.cpp
+    tests/ui/main_menu_save_state_test.cpp
 )
 
 # ----------------------------------------------------------------------------

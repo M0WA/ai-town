@@ -4,6 +4,8 @@
 // Forward declarations
 class IAudioSystem;
 class IClock;
+class KeyBindingsPanel;
+class ModalDialog;
 class PauseMenuPanel;
 struct InputEvent;
 
@@ -13,7 +15,9 @@ struct InputEvent;
 // Audio tab wires sliders to IAudioSystem::setMasterVolume/setMusicVolume/setSFXVolume.
 class SettingsPanel {
 public:
-    SettingsPanel(IUIBackend* backend, IAudioSystem* audio, IClock* clock);
+    SettingsPanel(IUIBackend* backend, IAudioSystem* audio, IClock* clock,
+                  ModalDialog* modal = nullptr);
+    ~SettingsPanel();
 
     void show();
     void hide();
@@ -22,14 +26,26 @@ public:
     bool onEvent(const InputEvent& event);
 
     void setPauseMenu(PauseMenuPanel* pauseMenu);
+    // Late-bind the ModalDialog pointer (called from UIManager after modal construction).
+    void setModal(ModalDialog* modal);
     bool isVisible() const { return m_visible; }
 
 private:
-    IUIBackend*     m_backend{nullptr};
-    IAudioSystem*   m_audio{nullptr};
-    IClock*         m_clock{nullptr};
-    PauseMenuPanel* m_pauseMenu{nullptr};
-    bool            m_visible{false};
+    IUIBackend*       m_backend{nullptr};
+    IAudioSystem*     m_audio{nullptr};
+    IClock*           m_clock{nullptr};
+    ModalDialog*      m_modal{nullptr};
+    PauseMenuPanel*   m_pauseMenu{nullptr};
+    bool              m_visible{false};
+
+    // Glass City background elements (created once, repositioned on show())
+    // scrimHandle: full-screen 50% opacity overlay beneath the panel.
+    // bgHandle:    deep-navy panel background (rgba(13,27,42,0.88)).
+    UIElementHandle m_scrimHandle{kInvalidUIElement};
+    UIElementHandle m_bgHandle{kInvalidUIElement};
+
+    // KeyBindingsPanel — owns the Controls tab keybinding table.
+    KeyBindingsPanel* m_keyBindings{nullptr};
 
     // Active tab index (0=Graphics, 1=Controls, 2=Audio, 3=Gameplay)
     int m_activeTab{0};

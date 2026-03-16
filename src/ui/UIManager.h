@@ -16,7 +16,7 @@ class IAudioSystem;
 class ICitySimulation;
 class IRenderer;
 class ITerrainQuery;
-class SaveSystem;
+class ISaveSystem;
 
 // INCLUDE PROHIBITION: Do NOT replace this forward declaration with
 // #include "src/platform/input_event.h". The platform header must not
@@ -184,8 +184,9 @@ public:
     void loadKeybindings();
 
     // Phase 11: Wire the SaveSystem to UIManager for manual save and quit-guard.
+    // Accepts ISaveSystem* so tests can pass MockSaveSystem without a real SaveSystem.
     // Called from main.cpp after SaveSystem is constructed.
-    void setSaveSystem(SaveSystem* saveSystem);
+    void setSaveSystem(ISaveSystem* saveSystem);
 
     // Phase 11: Update Load Game button enabled state in MainMenuPanel.
     // When available=false (default): button grayed, tooltip "No saves found."
@@ -320,8 +321,8 @@ private:
     // While true, update() returns immediately (terrain generation in progress).
     bool m_loadingTerrain{false};
 
-    // --- Phase 11: SaveSystem pointer (optional — null until setSaveSystem() is called) ---
-    SaveSystem* m_saveSystem{nullptr};
+    // --- Phase 11: ISaveSystem pointer (optional — null until setSaveSystem() is called) ---
+    ISaveSystem* m_saveSystem{nullptr};
 
     // --- Phase 11: key bindings loaded from keybindings.json at startup ---
     // Defaults are set by KeyBindings member initialisers; overridden by load().
@@ -332,6 +333,11 @@ private:
     // Cleared after the blocking modal resolves.
     enum class PendingQuitAction { None, Desktop, ToMenu };
     PendingQuitAction m_pendingQuit{PendingQuitAction::None};
+
+    // --- Phase 11c: pending save-failure retry ---
+    // True when a manual save failure modal (SaveFailure type) is open.
+    // update() polls the modal result and re-calls saveToSlot(1) on Retry.
+    bool m_pendingSaveFailure{false};
 
     // --- Phase 8: application quit flag ---
     // Set when MainMenu Quit or PauseMenu Quit to Desktop is consumed.
