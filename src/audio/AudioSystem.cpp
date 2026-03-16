@@ -31,7 +31,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include <cstdlib>   // setenv
+#include <cstdlib>   // getenv, setenv (setenv is POSIX/Linux only — used inside #ifndef _WIN32)
 
 // ---------------------------------------------------------------------------
 // Compile-time check that the local EFX function-pointer typedefs match <efx.h>.
@@ -308,7 +308,9 @@ AudioSystem::AudioSystem(IClock* clock, IAlcFunctions* alcFunctions)
     // ALSOFT_CONF at it BEFORE the first alcOpenDevice call (OpenAL Soft
     // reads the config on that call).
     // Only do this if ALSOFT_CONF is not already set by the user/environment.
+    // Both issues (rtkit, PipeWire) are Linux-only; the block is excluded on Windows.
     // -----------------------------------------------------------------------
+#ifndef _WIN32
     if (!getenv("ALSOFT_CONF")) {
         const char* tmpConf = "/tmp/aitown_alsoft.conf";
         FILE* cf = fopen(tmpConf, "w");
@@ -340,6 +342,7 @@ AudioSystem::AudioSystem(IClock* clock, IAlcFunctions* alcFunctions)
                     "device=pulse, period_size=4096, periods=8 (~744ms buffer)");
         }
     }
+#endif // !_WIN32
 
     m_device = alcOpenDevice(nullptr);
     if (!m_device) {
