@@ -17,9 +17,10 @@ service coverage radius overlays on the minimap and in the world.
 
 This commit must land BEFORE any test files for Deliverables 3d or 4c are written.
 
-- [ ] Define in `src/interfaces/IRenderer.h`: `using AgentHandle = uint32_t;` and the six new
+- [ ] Define in `src/interfaces/IRenderer.h`: `using AgentHandle = uint32_t;` and the seven new
   method signatures: `spawnVehicleAgent`, `moveVehicleAgent`, `despawnVehicleAgent`,
-  `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`.
+  `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`,
+  `getListenerPosition`.
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`,
   `architecture/game-design/traffic-system.md`, `architecture/game-design/service-coverage.md`)
 
@@ -38,6 +39,12 @@ This commit must land BEFORE any test files for Deliverables 3d or 4c are writte
   methods (`getAgentPositions`, `getIntersectionSignalStates`, `getRoadSegmentSpeeds`,
   `getServiceCoverage`). This is a prerequisite for all test authoring in Deliverables 3d
   and 4c.
+  (ref: `architecture/testing/testability-architecture.md`)
+
+- [ ] Extend `MockRenderer` with `MOCK_METHOD` stubs for all six new `IRenderer` methods:
+  `spawnVehicleAgent`, `moveVehicleAgent`, `despawnVehicleAgent`,
+  `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`.
+  This is a prerequisite for all test authoring in Deliverables 3d and 4c.
   (ref: `architecture/testing/testability-architecture.md`)
 
 ---
@@ -80,8 +87,8 @@ city feel lived-in at close and mid range.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
 - [ ] **Service building LOD0 geometry** — re-export all four service building models
-  (`fire_station_lod0.b3d`, `police_station_lod0.b3d`, `power_plant_lod0.b3d`,
-  `water_tower_lod0.b3d`) targeting **3,000–5,000 tris** (treated as Large buildings per
+  (`svc_fire_station_lod0.b3d`, `svc_police_station_lod0.b3d`, `svc_power_plant_lod0.b3d`,
+  `svc_water_tower_lod0.b3d`) targeting **3,000–5,000 tris** (treated as Large buildings per
   spec category). Added detail must include: antenna masts, intake/exhaust geometry on the
   power plant, hose reels and garage bay insets on the fire station, and service entrance
   steps. UV channel 0 must remain mapped to the `service_buildings` atlas cell (row 3, col 2
@@ -95,12 +102,10 @@ city feel lived-in at close and mid range.
   altered. Only mesh detail within each LOD level changes in this phase.
   (ref: `architecture/asset-standards/3d-model-standards.md` §LOD Distance Thresholds)
 
-- [ ] **`validate_assets.py` regression-clean**: after re-export, confirm all models pass the
-  `validate_assets.py` suite (established in Phase 5 and extended through Phase 9).
-  The `validate-assets` CI job must remain green. Checks #25–27 added for vehicle atlas
-  format and mip-level validation (`vehicles_diffuse_atlas_d.dds`, `vehicles_sprite_atlas_d.dds`,
-  `vehicles_normal_atlas_n.dds`). The cicd-dev-github engineer adds these checks as part of
-  Deliverable 2b verification.
+- [ ] **`validate_assets.py` regression-clean**: after re-export, confirm all reworked
+  building models pass the existing `validate_assets.py` 24-check suite (established in
+  Phase 5 and extended through Phase 9) with zero errors. The `validate-assets` CI job
+  must remain green.
   (ref: `architecture/ci-cd/github-actions-workflow.md`)
 
 - [ ] **`graphics-artist-3d-model` sign-off gate** (blocking): before committing any reworked
@@ -122,16 +127,17 @@ city feel lived-in at close and mid range.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
 - [ ] **Bus and truck LOD0 geometry** — re-export bus (`bus_standard`) and truck
-  (`truck_cargo`) models targeting their respective upper binding limits (bus ≤3,000 tris,
+  (`truck_cargo`) models targeting their respective upper binding limits (bus ≤2,500 tris,
   truck ≤2,500 tris — per the Vehicle Polygon Budget per-class table in
   `architecture/asset-standards/3d-model-standards.md`). Added detail proportional to each
   vehicle type's silhouette complexity.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
-- [ ] **Vehicle LOD1 geometry** — re-export all vehicle LOD1 meshes targeting
-  **400–500 tris** for car/bus/truck (spec: 200–500 tris indicative range per
-  `architecture/asset-standards/3d-model-standards.md`). LOD1 retains the body silhouette;
-  wheels are simplified to flat discs.
+- [ ] **Vehicle LOD1 geometry** — re-export all vehicle LOD1 meshes at their per-class
+  binding limits: car ≤300 tris, bus ≤450 tris, truck ≤450 tris (per the Vehicle Polygon
+  Budget per-class table in `architecture/asset-standards/3d-model-standards.md`; the
+  general Vehicles row indicative range of 200–500 tris is superseded by these binding
+  limits). LOD1 retains the body silhouette; wheels are simplified to flat discs.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
 ---
@@ -212,6 +218,16 @@ placeholder paint-over content with hand-authored or baked detail.
   `tools/export_textures.py`.
   (ref: `architecture/asset-standards/2d-texture-standards.md`)
 
+- [ ] **`validate_assets.py` checks #25–27 — vehicle atlas DDS verification**: as part of
+  completing this deliverable, the `cicd-dev-github` engineer adds three new checks to
+  `validate_assets.py` for vehicle atlas DDS format and mip-level validation:
+  check #25 (`vehicles_diffuse_atlas_d.dds` — BC1_UNORM_SRGB, 4-mip, 2048×2048),
+  check #26 (`vehicles_sprite_atlas_d.dds` — BC3_UNORM linear, 1-mip, 256×256),
+  check #27 (`vehicles_normal_atlas_n.dds` — BC3_UNORM linear (DXT5nm), 4-mip, 2048×2048).
+  All three checks must pass before Deliverable 2b is considered complete.
+  (ref: `architecture/ci-cd/github-actions-workflow.md`,
+  `architecture/asset-standards/2d-texture-standards.md`)
+
 ##### 2c. Billboard Atlas Rework
 
 - [ ] **Billboard atlases** (`res_low_01_billboard.dds`, `com_low_01_billboard.dds`, etc. —
@@ -237,8 +253,9 @@ along road paths, and intersection signal state shown at road nodes.
   — new method on `IRenderer` interface (`src/interfaces/IRenderer.h`). Spawns a vehicle
   `SceneNode` (using `IrrlichtRenderer::placeVehicle` vehicle-pool pattern from Phase 9)
   at `startPos` and registers the `AgentHandle` in `SceneEntityManager`. Zone type determines
-  which vehicle atlas cell is sampled (Residential → car/bicycle; Commercial → van; Industrial
-  → truck). Returns a handle the caller uses for subsequent `moveVehicleAgent` /
+  which vehicle atlas cell is sampled (Residential → car (sedan/hatchback/SUV);
+  Commercial → bus_standard; Industrial → truck_cargo). Returns a handle the caller uses for
+  subsequent `moveVehicleAgent` /
   `despawnVehicleAgent` calls. `AgentHandle` is defined as `using AgentHandle = uint32_t;` in
   `src/interfaces/IRenderer.h` — it is a stable identifier for the agent's lifetime and is
   assigned by the traffic simulation. agentId (from traffic simulation) is mapped 1:1 to
@@ -265,10 +282,10 @@ along road paths, and intersection signal state shown at road nodes.
   pointers.
   (ref: `architecture/game-design/traffic-system.md`)
 
-- [ ] **`IRenderer::getListenerPosition()` → `irr::core::vector3df`** — new method on
-  `IRenderer` interface (`src/interfaces/IRenderer.h`); returns the current camera/listener
-  world-space position. Used by the traffic agent cull logic below to compute agent-to-camera
-  distance.
+- [ ] **`IRenderer::getListenerPosition()` → `irr::core::vector3df`** — method defined in
+  Deliverable 0 interface seam (`src/interfaces/IRenderer.h`); returns the current
+  camera/listener world-space position. Used by the traffic agent cull logic below to compute
+  agent-to-camera distance.
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
 
 - [ ] **Distance cull for agent spawning** — only agents within **150 m** of the camera
@@ -424,8 +441,9 @@ is selected, and a coverage overlay layer on the minimap.
   4,000–5,000 tris; Small: 1,200–1,500 tris; Service: 3,000–5,000 tris)
 - All reworked vehicle LOD0 meshes confirmed at or below their per-class binding limits from
   `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget
-- `validate_assets.py` 24-check suite passes with zero errors on all reworked `.b3d` and
-  `.dds` files; `validate-assets` CI job remains green
+- `validate_assets.py` 27-check suite passes with zero errors on all reworked `.b3d` and
+  `.dds` files (checks #25–27 added by Deliverable 2b for vehicle atlas DDS format
+  verification); `validate-assets` CI job remains green
 - `buildings_atlas_d.dds` DX10 header confirmed BC1_UNORM_SRGB (DXGI_FORMAT = 72); all four
   mip levels present; no UV bleed across atlas cell borders
 - `vehicles_diffuse_atlas_d.dds` passes DX10 header validation: BC1_UNORM_SRGB
@@ -459,7 +477,7 @@ is selected, and a coverage overlay layer on the minimap.
 | `graphics-dev-irrlicht` | Implement `IRenderer` methods for vehicle agent spawn/move/despawn, intersection signal state, service coverage overlays; add minimap traffic and service coverage overlay modes; add `ICitySimulation` query methods (`getAgentPositions`, `getIntersectionSignalStates`, `getRoadSegmentSpeeds`, `getServiceCoverage`); per-frame agent sync loop in `main.cpp` |
 | `gamedesign-lookandfeel` | Confirm coverage radius colours, minimap tint palette, and signal visual behaviour match simulation intent; verify no V1 scope creep in visual wiring |
 | `gamedesign-ux` | Verify Inspector panel coverage-overlay UX (show on open, hide on close); confirm minimap overlay toggle interaction matches `architecture/ui-ux/minimap.md` |
-| `test-dev-cpp` | Author all four new unit tests; extend `simulation_tests` and `MockRenderer` with new method stubs for `spawnVehicleAgent`, `moveVehicleAgent`, `despawnVehicleAgent`, `setIntersectionSignalState` |
+| `test-dev-cpp` | Deliverable 0 (Day-One Commit): extend `MockRenderer` with `MOCK_METHOD` stubs for all six new `IRenderer` methods (`spawnVehicleAgent`, `moveVehicleAgent`, `despawnVehicleAgent`, `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`) before any test files for Deliverables 3d or 4c are written; author all four new unit tests; extend `simulation_tests` CMake target |
 | `cicd-dev-github` | Verify `validate-assets` CI job remains green after DDS rework; confirm `all-checks-pass` gate green |
 
 ### Dependencies

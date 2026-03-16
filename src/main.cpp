@@ -33,11 +33,21 @@
 
 #include <irrlicht.h>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <cmath>
 #include <thread>
 #include <chrono>
 
-int main() {
+int main(int argc, char** argv) {
+    // --frames N : auto-exit after N frames (used for profiling / benchmarking)
+    int maxFrames = 0;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
+            maxFrames = std::atoi(argv[i + 1]);
+            ++i;
+        }
+    }
     // -------------------------------------------------------------------------
     // Phase 1: Create the Irrlicht device via RenderSystem (RAII owner).
     // -------------------------------------------------------------------------
@@ -296,12 +306,28 @@ int main() {
     // =========================================================================
     // 8-STEP FRAME LOOP
     // =========================================================================
+    int frameCount = 0;
     while (device->run()) {
+        if (maxFrames > 0 && frameCount >= maxFrames) {
+            device->closeDevice();
+            break;
+        }
+        ++frameCount;
+
         // Compute real delta — computed ONCE per frame, BEFORE step 2.
         // MUST use steady_clock (raw wall time) — NEVER pre-multiply by speed.
         const double currentTime  = wallClock.nowSeconds();
         const float  realDeltaSeconds = static_cast<float>(currentTime - prevTime);
         prevTime = currentTime;
+
+        // Per-step timing accumulators (microseconds) — active only when --frames is set.
+        using hrc = std::chrono::high_resolution_clock;
+        static double tSim=0, tCam=0, tTerrain=0, tUI=0, tAudio=0, tRender=0, tTotal=0;
+        auto T = [&]() -> double {
+            return std::chrono::duration<double,std::micro>(
+                hrc::now().time_since_epoch()).count();
+        };
+        double t0 = T();
 
         // Step 1: Poll events — handled by EventReceiver::OnEvent() via device->run().
         // No explicit poll call needed — device->run() drives EventReceiver.
@@ -319,7 +345,9 @@ int main() {
         // (kDefaultSimSpeed) — see architecture/game-design/simulation-time.md.
         // FRAME-LOOP POSITION CONSTRAINT: This tick call MUST remain at step 2 in the
         // 8-step sequence (before camera, UI, audio, and rendering steps).
+        double t1 = T();
         citySimulation.tick(realDeltaSeconds);
+        tSim += T() - t1;
 
         // Step 3: CameraController::update(dt).
         // OAL-2 ordering rule: CameraController::update() MUST execute BEFORE

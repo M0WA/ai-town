@@ -686,7 +686,7 @@ public:
 // MockRenderer — GMock implementation of IRenderer (17 methods as of Phase 10).
 // Method count: 5 base (beginFrame/endFrame/drawScene/loadTexture/setCamera) +
 //   1 (rebuildTerrainChunk) + 4 Phase 9b (pickTerrainTile/setTileHoverHighlight/setZoneOverlay/
-//   getTileScreenBounds) + 1 Phase 10 audio (getListenerPosition) +
+//   getTileScreenBounds) + 1 Phase 11d method (getListenerPosition) +
 //   6 Phase 10 rendering (placeBuildingMesh/removeBuildingMesh/placeRoadMesh/removeRoadMesh/
 //   placeServiceBuildingMesh/removeServiceBuildingMesh) = 17 total.
 // Source location: tests/simulation/MockRenderer.h
@@ -732,7 +732,7 @@ public:
 // getTileScreenBounds) ARE called from UIManager::onEvent() during tests. Each test
 // must declare EXPECT_CALL for each of these that the production code exercises.
 //
-// The Phase 10 method getListenerPosition() IS called from CitySimulation::tick() during
+// The Phase 11d method getListenerPosition() IS called from CitySimulation::tick() during
 // the sfx_intersection_tick 80 m pre-cull. Simulation tests that exercise tick() with
 // traffic signals must either set ON_CALL for getListenerPosition() or use NiceMock.
 
