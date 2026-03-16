@@ -196,10 +196,58 @@ public:
     // architecture/game-design/economy-model.md §Music Intensity Tiers.
     // MockAudioSystem: add MOCK_METHOD(void, setMusicIntensity, (MusicIntensity), (override));
     virtual void setMusicIntensity(MusicIntensity intensity) = 0;
+
+    // --- Phase 11d Vehicle Engine Pair API ---
+    // Acquire an idle+move source pair from the vehicle engine pool for a vehicle agent
+    // of the given zone type.  The pair is drawn from the 24-slot Traffic/Vehicle SFX
+    // budget (sources[0..50], NORMAL priority).  At most kMaxVehiclePairs (= 12) pairs
+    // may be active simultaneously.
+    //
+    // Returns: {idleIdx, moveIdx} — indices into the internal AL source pool to be used
+    //   for sfx_vehicle_engine_idle (idle source) and sfx_vehicle_engine_move (move source).
+    //   Returns {-1, -1} if the pool is exhausted (all 12 pairs in use) and no eviction
+    //   candidate with lower priority/greater distance exists.
+    //
+    // Callers MUST check the return value before using either index:
+    //   auto [idle, move] = m_audio->acquireVehicleEnginePair(zone);
+    //   if (idle == -1) { /* pool full — vehicle drives silently */ return; }
+    //
+    // Paired acquisition is atomic: either both sources are acquired or neither is
+    // (partial acquisition is prohibited — see source-pool.md §Paired acquisition).
+    //
+    // ZoneType determines base pitch multiplier applied to both idle and move sources:
+    //   ZoneType::Residential → 1.0  (car engine)
+    //   ZoneType::Commercial  → 0.85 (bus engine)
+    //   ZoneType::Industrial  → 0.85 (truck engine)
+    // This mapping is implemented in V1 and is not reserved for future use.
+    //
+    // See architecture/audio-architecture/source-pool.md §Vehicle Engine Source Constraints
+    // and §Vehicle Engine Source Pairing — Internal Tracking for the full pool contract.
+    //
+    // MockAudioSystem: add
+    //   MOCK_METHOD((std::pair<int,int>), acquireVehicleEnginePair, (ZoneType), (override));
+    virtual std::pair<int,int> acquireVehicleEnginePair(ZoneType zone) = 0;
+
+    // Return the idle+move source pair to the vehicle engine pool.
+    // idleIdx and moveIdx must be the values originally returned by acquireVehicleEnginePair().
+    // Both sources are stopped (alSourceStop) and their occlusion state is reset before
+    // the pool slots are marked free.
+    //
+    // Releasing only one source of a pair is prohibited.  The LOD-cull path must always
+    // call releaseVehicleEnginePair(idleIdx, moveIdx) — never release individual sources
+    // via any other pool release path.
+    //
+    // Passing {-1, -1} (a failed acquisition result) is a no-op and is safe to call.
+    //
+    // See architecture/audio-architecture/source-pool.md §releaseVehicleEnginePair.
+    //
+    // MockAudioSystem: add
+    //   MOCK_METHOD(void, releaseVehicleEnginePair, (int, int), (override));
+    virtual void releaseVehicleEnginePair(int idleIdx, int moveIdx) = 0;
 };
 ```
 
-`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all fifteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
+`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all seventeen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
 
 ---
 

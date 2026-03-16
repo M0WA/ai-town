@@ -2,7 +2,7 @@
 
 - **Model**: Lightweight agent-based simulation with A* / Dijkstra pathfinding on the road graph
 - **Road capacity**: Each road segment has a capacity (vehicles per unit length) and speed function: `speed = max(max_speed × min_speed_fraction, max_speed × (1 − occupancy / capacity))` where `min_speed_fraction = 0.05` (5% of max speed hard floor). This prevents agents from stopping permanently on fully-saturated segments. **Minimum road capacity**: every road segment has a capacity of at least **1 vehicle** to prevent division by zero in the speed formula. A newly placed road with zero agents has `occupancy = 0`, giving `speed = max_speed`. **Agent timeout**: agents that have not reached their destination within **120 simulation seconds** (120 real seconds at 1× speed) are despawned; their trip is logged as unserved and counted as an **extreme-travel-time trip** in the rolling demand average (equivalent to the maximum travel time for demand calculation purposes). **Timeout trips must NOT be classified as null-path trips** — a null-path trip means A* found no valid path at all; a timed-out trip had a valid path but was unable to complete it due to congestion. Conflating the two masks congestion problems behind null-path demand defaults (0.5 neutral), preventing the player from diagnosing gridlock. This prevents permanent gridlock from accumulating stuck agents.
-- **Intersections**: Traffic signal cycles with configurable green/red durations
+- **Intersections**: Traffic signal cycles with configurable green/red durations (see §Intersections below)
 - **Road parameters**: Default road max_speed = 50 km/h (in simulation units, 1 unit = 1 m/s, so max_speed = 13.9 units/s). Road segment capacity = 8 vehicles per tile of road length. A 4-tile road block has capacity 32. These values are calibrated so that at 10,000 agents spread across a 1024×1024 map with standard grid road spacing, congestion emerges as a meaningful late-game challenge, not an early-game constant state.
 - **Zone-to-road adjacency ("serves" definition)**: A zone tile is served by a road segment if any **edge-adjacent tile** (4-directional cardinal neighbors only — north, south, east, west; diagonal neighbors do not count) contains a road segment. If no edge-adjacent tile of a zone tile contains a road, that zone tile has no valid path and falls into the null-path behavior defined below. This definition is used both for traffic demand coupling and for congestion tax-yield penalties.
 - **Congestion threshold**: Graduated penalty applied to all zones served by a congested road segment:
@@ -15,6 +15,30 @@
 - **Null-path behavior**: When A\* finds no valid path for a zone tile (empty road graph or disconnected tile), that tick contributes `null_path_demand_default = 0.5f` as its individual `traffic_demand_factor` value in the rolling average calculation. The fallback of 0.5 when all ticks in the window are null-path is a mathematical consequence of averaging N values each equal to 0.5 — it is NOT a separate post-average override applied after computing the rolling average. Null-path ticks are included in the rolling average computation, not excluded with a fallback applied afterward. For example: a rolling window with 3 valid-path ticks and 2 null-path ticks has average = (sum of 3 valid `traffic_demand_factor` values + 2 × 0.5) / 5. If all ticks in the rolling window for that zone type have no valid path (5 ticks for Residential and Commercial; 3 ticks for Industrial — matching each zone type's rolling average window size), `demand_factor` is 0.5 (neutral) rather than 0.0, giving the player time to build road connections before demand collapses. This prevents the city from deadlocking with zero demand on a blank map. **Partial window averaging (early ticks)**: During the first few budget ticks before the rolling window has filled (i.e., `totalTicks < window_size`), divide the sum by `min(totalTicks, window_size)` — not by the constant `window_size` — to avoid diluting valid samples with zero-initialized slots. For example: at tick 2 with a 5-tick window, divide by 2, not 5. Initializing the window slots to `null_path_demand_default = 0.5f` and always dividing by the constant window size would over-weight the null-path default in early ticks and under-state demand for cities that build roads immediately. The oscillation sign-off tables in the zoning-system.md (e.g., "T+1=3 | [1.0, 1.0, 0.5, 0.5] (4 samples) | 3.0/4 = 0.750") already reflect partial-window averaging — the denominator equals the number of samples recorded so far, not the window capacity.
 - **Bootstrap oscillation invariant (testable constraint)**: During the first `demand_bootstrapping_ticks` budget ticks (ticks 0–5), demand values must not oscillate. Specifically, for any two consecutive ticks, `|demand_factor[tick+1] − demand_factor[tick]| < 1.0` for all zone types. A jump of 1.0 (the full [0.0, 1.0] range) indicates a sign-flip error in the bootstrap subsidy calculation. On a blank map at any simulation speed (including `SpeedMultiplier::x3`), `getTrafficDemandFactor()` and `getDemandPressurePct()` must remain bounded in [0.0, 1.0] with no tick-to-tick delta exceeding 1.0. Verified by `DemandBootstrap_AtX3Speed_NoBoundaryViolationAndNoOscillation` in `tests/simulation/zoning_test.cpp`.
 - **Demand pressure readouts** (C/I feedback): When Commercial or Industrial demand prerequisites are unmet, the unmet demand must be surfaced to the player. The `QueryResult` struct exposes a `demand_pressure_pct` field per tile = `(1.0f − effective_demand_factor) × 100`, where `effective_demand_factor` is the post-combination demand in [0.0, 1.0]. **Inverse semantics**: 0 means fully satisfied demand (high traffic flow, maximum demand); 100 means zero effective demand (demand collapsed). **CRITICAL — Do NOT confuse with `ICitySimulation::getDemandPressurePct(ZoneType)`**, which returns the city-wide EFFECTIVE demand in [0.0, 1.0] (1.0 = maximum demand) — the opposite direction. `QueryResult::demandPressurePct` = `(1.0f − tileEffectiveDemandFactor) × 100.0f`; it is NOT `getDemandPressurePct(zone) × 100`. See `simulation_types.h QueryResult::demandPressurePct` for the canonical definition and cross-reference. This is shown in the Inspector panel for zone tiles and as a compact HUD indicator bar per zone type (R/C/I). Without this readout, an economy flatline cannot be distinguished from a design error by the player.
+
+## Intersections
+
+Each road intersection is tracked by tile coordinate (`tileX`, `tileZ`). The simulation emits
+`IntersectionSignalState` structs (see `simulation_types.h`) on each signal phase transition.
+
+**Visual representation** (owned by `IrrlichtRenderer`):
+
+- A billboard quad (2D signal indicator) is placed as a child scene node of the road mesh node
+  at the intersection tile.
+- Material: `EMT_TRANSPARENT_ADD_COLOR`; emissive colour is set per phase:
+  - `SignalPhase::Green` → RGB (0, 220, 0) — bright green
+  - `SignalPhase::Red`   → RGB (220, 0, 0)   — bright red
+- Y-offset: +0.15 m above road surface to layer above terrain without Z-fighting.
+- Polygon offset: `PolygonOffsetFactor = -1, PolygonOffsetDirection = EPO_FRONT` to prevent
+  depth-buffer Z-fighting against the road quad at the same elevation.
+- Scene node lifetime: nodes are created by `IrrlichtRenderer::setIntersectionSignalState()`
+  on first call for a tile and reused on subsequent calls; nodes are destroyed when the road
+  tile is removed.
+- Node registry: intersection billboard nodes are stored in `m_intersectionNodes`
+  (`std::unordered_map<TileKey, ISceneNode*>`), owned by `IrrlichtRenderer`, following the
+  same ownership pattern as `m_agentNodes` (see Phase 11d scene-graph-ownership spec).
+
+See also: `implementation/phase-11d.md` Deliverable 3b.
 
 ## Phase 10 Audio Callbacks for Traffic Events
 

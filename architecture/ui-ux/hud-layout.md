@@ -228,12 +228,27 @@ define named constants in `src/ui/ui_constants.h`.**
 | Utilities | `0x80FF8000` | Semi-transparent orange (alpha=128) | `kHoverArgbUtilities` |
 | Demolish | `0x80FF0000` | Semi-transparent red (alpha=128) | `kHoverArgbDemolish` |
 | Query | `0x80FFFFFF` | Semi-transparent white (alpha=128) | `kHoverArgbQuery` |
+| Blocked tile (any placement tool) | `0xBBFF2222` | Semi-opaque red (alpha=187, ≈73%) — shown when the hovered tile cannot receive the current placement (occupied by existing zone or road) | `kHoverArgbBlocked` |
 
 Alpha value `0x80` = 128 = 50% opacity. This provides enough transparency to see terrain
 geometry beneath the highlight, while remaining clearly visible against both light and
 dark terrain surfaces. The highlight quad is rendered via
 `IVideoDriver::drawMeshBuffer()` using `EMT_TRANSPARENT_ALPHA_CHANNEL` material type,
 placed at terrain height +0.05 world units above the terrain surface (Z-fighting prevention).
+
+**`kHoverArgbBlocked` alpha rationale**: `0xBB` = 187 ≈ 73% opacity — intentionally more
+opaque than the standard `0x80` (50%) hover alpha used for the per-tool colours above.
+The higher opacity makes the blocking intent visually distinct: the player immediately reads
+the tile as "unavailable" rather than as a normal hover. The pure-red hue (`0xFF2222`)
+reinforces the "cannot place here" meaning.
+
+**`kHoverArgbBlocked` vs. Demolish tool red**: `kHoverArgbDemolish` uses `0x80FF0000`
+(fully-saturated red, 50% alpha). `kHoverArgbBlocked` uses `0xBBFF2222` (slightly
+desaturated warm red, 73% alpha). These two are visually distinct: the Demolish hover
+signals "will destroy this tile", whereas the blocked hover signals "cannot place here —
+tile is already occupied". The alpha difference (73% vs. 50%) is the primary differentiator
+because the colours are close in hue; implementors must not reduce `kHoverArgbBlocked`'s
+alpha to `0x80` as that would make the two states indistinguishable.
 
 **Clear sentinel**: pass `tileX = -1`, `tileZ = -1`, `argb = 0` to
 `IRenderer::setTileHoverHighlight()` to remove the highlight entirely (no active tool or

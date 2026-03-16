@@ -194,11 +194,13 @@ std::array<VehiclePairSlot, 12> m_vehiclePairs{};  // up to 12 active vehicles (
 4. Assign the newly-freed pair slot to the incoming vehicle. Return the pair index.
 5. **Partial acquisition is prohibited**: if either source index within the pair cannot be acquired after eviction (implementation error), the entire acquisition fails — call `onSourceRecycled` on any partially-acquired source, mark it free, and return `(-1, -1)`.
 
-**`releaseVehicleEnginePair(int pairIdx)`**:
+**`releaseVehicleEnginePair(int idleIdx, int moveIdx)`**:
 
-1. Look up `m_vehiclePairs[pairIdx]`.
-2. Call `onSourceRecycled(idleSourceIdx)` and `onSourceRecycled(moveSourceIdx)`.
+- **Invalid-index guard**: if `idleIdx == -1 || moveIdx == -1`, return immediately (no-op). Callers that store the result of a failed `acquireVehicleEnginePair()` call receive `{-1, -1}` and must call `releaseVehicleEnginePair(-1, -1)` without ill effect; the guard prevents double-free or out-of-bounds access.
+
+1. Locate the pair slot: scan `m_vehiclePairs` for the entry where `idleSourceIdx == idleIdx && moveSourceIdx == moveIdx`. If no matching slot is found (implementation error or already released), log a warning and return.
+2. Call `onSourceRecycled(idleIdx)` and `onSourceRecycled(moveIdx)`.
 3. Return both source indices to the free pool.
-4. Reset `m_vehiclePairs[pairIdx]` to `{-1, -1, 0.f, 0}`.
+4. Reset the matched `VehiclePairSlot` to `{-1, -1, 0.f, 0}`.
 
-Releasing only one source of a pair (e.g., on LOD cull) is prohibited. The cull path must call `releaseVehicleEnginePair(pairIdx)` — never free individual sources from a pair via `acquireSFXSource`/release paths.
+Releasing only one source of a pair (e.g., on LOD cull) is prohibited. The cull path must call `releaseVehicleEnginePair(idleIdx, moveIdx)` — never free individual sources from a pair via `acquireSFXSource`/release paths.

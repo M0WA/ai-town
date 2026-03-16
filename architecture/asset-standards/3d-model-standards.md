@@ -16,6 +16,7 @@
 | Terrain chunk (64×64 m) | 32×32 quad grid | 16×16 quad grid | 8×8 quad grid |
 | Road tile (10×10 m) | ≤48 tris (flat quad + kerb geometry) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
 | Infrastructure props (lamp posts, signs) | ≤300 tris | ≤75 tris | Billboard (same system as small buildings) |
+| Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | 2,000–5,000 tris | 100–300 tris | Billboard (no geometry shell required — `height_floors = 2` for all V1 service buildings; `_lod2.b3d` is not authored) |
 
 **Road tile LOD thresholds**: Road tiles use the same LOD distance thresholds as small buildings/props (LOD0→LOD1 at 30 m / 25 m; LOD1→LOD2 at 100 m / 90 m). At LOD2 (>100 m), road tiles are rendered as flat coloured quads with no kerb or road marking geometry — road marking decals from the road atlas are disabled at LOD2. **Road LOD2 color source**: The LOD2 road quad color is sampled from the road tileable texture's average color, computed at asset pipeline generation time and stored as a named constant `RenderConstants::road_lod2_color` (type `irr::video::SColor`) in `src/rendering/render_constants.h`. This value must be a perceptual match of the center region of `road_asphalt_tileable.dds` when viewed in linear space (approximately a mid-dark gray, e.g. SColor(255, 60, 60, 60) for standard asphalt). Do NOT hardcode a magic color literal inline in rendering code — always use `RenderConstants::road_lod2_color` so that the color is updated in one place when the road texture changes. The LOD2 road quad does NOT bind a texture — it is drawn as a flat-shaded quad using the material's vertex color channel, set to `road_lod2_color` at entity construction time.
 
@@ -31,10 +32,13 @@
 |---|---|---|---|---|
 | Large buildings | > 50 m | < 45 m | > 200 m | < 185 m |
 | Small buildings / props | > 30 m | < 25 m | > 100 m | < 90 m |
+| Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | > 30 m | < 25 m | > 100 m | < 90 m |
 | Vehicles | > 40 m | < 35 m | > 100 m | < 90 m |
 | Terrain chunk | > 100 m | < 92 m | > 300 m | < 285 m |
 | Road tile | > 30 m | < 25 m | > 100 m | < 90 m |
 | Infrastructure props | > 30 m | < 25 m | > 100 m | < 90 m |
+
+**Service buildings thresholds**: Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) are treated as a subtype of small buildings (`height_floors <= 3`) and use identical LOD distance thresholds. All four V1 service building types have `height_floors = 2`.
 
 **Road tile and Infrastructure props thresholds**: Road tiles and infrastructure props (lamp posts, signs) use the same thresholds as Small buildings/props (5 m close hysteresis, 10 m far hysteresis). Road tile LOD2 is a flat colored quad — not a billboard imposter — consistent with the road-tile LOD2 specification in the LOD Requirements table above.
 

@@ -114,13 +114,18 @@ struct ServiceCoverage {
 };
 
 // ServiceBuildingType — the four placeable service infrastructure buildings.
-// Used by ICitySimulation::placeServiceBuilding().
-// All four types are mandatory in V1; see architecture/game-design/service-coverage.md.
+// Used by ICitySimulation::placeServiceBuilding() and QueryResult::serviceType.
+// None is the sentinel value for non-service-building tiles (used in QueryResult).
+// IMPORTANT: None is placed last to preserve the existing ordinals of the four
+// placeable types (PowerPlant=0..PoliceStation=3); UIManager casts an int index
+// 0-3 directly to ServiceBuildingType — inserting None before them would break that mapping.
+// All four non-None types are mandatory in V1; see architecture/game-design/service-coverage.md.
 enum class ServiceBuildingType {
     PowerPlant,
     WaterTower,
     FireStation,
-    PoliceStation
+    PoliceStation,
+    None
 };
 
 // QueryResult — per-tile data returned by ICitySimulation::queryTile().
@@ -142,5 +147,6 @@ struct QueryResult {
                                       // multiplied by 100. Formula: queryResult.demandPressurePct =
                                       // (1.0f - tileEffectiveDemandFactor) * 100.0f — NOT getDemandPressurePct() * 100.
                                       // NOT the same as getDemandPressurePct(ZoneType) which returns city-wide aggregate.
-    ServiceCoverage coverage;        // per-service; -1.0f = N/A
+    ServiceCoverage     coverage;                              // per-service; -1.0f = N/A
+    ServiceBuildingType serviceType{ServiceBuildingType::None}; // ServiceBuildingType::None for non-service tiles
 };

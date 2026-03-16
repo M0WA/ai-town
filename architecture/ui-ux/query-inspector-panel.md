@@ -73,6 +73,7 @@ non-overlapping) to keep existing placement assertions valid.
   ```text
   if result.isZoned  → show zone/density/population/coverage data
   else if result.isRoad → show "Road" label; traffic data fields populated in future phase
+  else if result.serviceType != ServiceBuildingType::None → show service building panel
   else               → show "Unzoned"
   ```
 
@@ -80,6 +81,24 @@ non-overlapping) to keep existing placement assertions valid.
   `queryTile()` returns early after setting `isRoad = true` — no zone/population data is filled for
   road tiles. This is the V1 implementation; full road traffic fields (occupancy, speed, capacity,
   congestion) are deferred until the traffic system simulation phase.
+
+- **Service building tile detection via `QueryResult::serviceType`**: `ICitySimulation::queryTile()`
+  sets `QueryResult::serviceType` to the appropriate `ServiceBuildingType` enumerator when the tile
+  contains a service building (`PowerPlant`, `WaterTower`, `FireStation`, or `PoliceStation`).
+  Service building tiles have `isZoned = false` and `isRoad = false`, so without the explicit
+  `serviceType` check they would fall through to the "Unzoned" branch. When
+  `serviceType != ServiceBuildingType::None`, the Inspector displays the service building panel
+  showing: coverage radius, current upkeep, and service level %. The `serviceType` field is
+  declared in `src/interfaces/simulation_types.h` as
+  `ServiceBuildingType serviceType{ServiceBuildingType::None}` (after the `coverage` field).
+  `queryTile()` fills `serviceType` and leaves `isZoned = false`, `isRoad = false` for service
+  building tiles. A companion field `bool degraded{false}` is declared in
+  `src/interfaces/simulation_types.h` immediately after `serviceType`; it is populated by
+  `queryTile()` when `serviceType != ServiceBuildingType::None` and set to `true` when the
+  service building is in degraded state. When displaying the service coverage overlay,
+  `UIManager` reads `QueryResult::degraded` and passes it to
+  `IRenderer::showServiceCoverageOverlay(tileX, tileZ, serviceType, degraded)` so the renderer
+  can tint the overlay to indicate degraded service.
 
 - **Mutual exclusion with Tax Rate Panel**: QueryPanel and Tax Rate Panel must NOT be simultaneously open. Opening the QueryPanel closes the Tax Rate Panel if it is open. See `input-arbitration.md` Priority 3 for the authoritative mutual exclusion rule.
 - Panel populated by a `QueryResult` data struct passed from the simulation layer to `UIManager`

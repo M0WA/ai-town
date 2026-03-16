@@ -681,14 +681,68 @@ public:
     // Asset path: assets/3d/buildings/svc_<type>_lod0.b3d per 3d-model-standards.md naming convention.
     virtual void          placeServiceBuildingMesh(int tileX, int tileZ, ServiceBuildingType type) = 0;
     virtual void          removeServiceBuildingMesh(int tileX, int tileZ) = 0;
+
+    // Phase 10 — Vehicle rendering API (pre-agent, manually-placed vehicles).
+    virtual void          placeVehicle(uint32_t vehicleId, const std::string& assetName,
+                                       float worldX, float worldY, float worldZ, float yawDegrees) = 0;
+    virtual void          moveVehicle(uint32_t vehicleId,
+                                      float worldX, float worldY, float worldZ, float yawDegrees) = 0;
+    virtual void          removeVehicle(uint32_t vehicleId) = 0;
+
+    // Phase 10 — Multi-tile placement preview.
+    // Phase 11d extends to two-list signature: freeTiles (green) + blockedTiles (red).
+    // blockedTiles defaults to {} at call sites but MockRenderer requires the full signature.
+    virtual void          setTilePlacementPreview(const std::vector<std::pair<int,int>>& freeTiles,
+                                                   uint32_t freeArgb,
+                                                   const std::vector<std::pair<int,int>>& blockedTiles) = 0;
+
+    // Phase 11d — Traffic agent rendering API.
+    // AgentHandle is defined as using AgentHandle = uint32_t in IRenderer.h.
+    // These coexist with Phase 10 placeVehicle/moveVehicle/removeVehicle; both sets must be present.
+    using AgentHandle = uint32_t;
+    virtual AgentHandle   spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone) = 0;
+    virtual void          moveVehicleAgent(AgentHandle handle, int tileX, int tileZ, float headingDeg) = 0;
+    virtual void          despawnVehicleAgent(AgentHandle handle) = 0;
+
+    // Phase 11d — Traffic signal visual state.
+    // SignalPhase is defined in simulation_types.h: enum class SignalPhase { Green, Red };
+    virtual void          setIntersectionSignalState(int tileX, int tileZ, SignalPhase phase) = 0;
+
+    // Phase 11d — Service coverage radius overlay.
+    // showServiceCoverageOverlay: renders wireframe circle (or BFS tile highlight for PowerPlant)
+    //   at the building's coverage radius. degraded=true halves the radius.
+    // hideServiceCoverageOverlay: removes the overlay. Called on Inspector close.
+    virtual void          showServiceCoverageOverlay(int tileX, int tileZ,
+                                                      ServiceBuildingType type, bool degraded) = 0;
+    virtual void          hideServiceCoverageOverlay() = 0;
 };
 
-// MockRenderer — GMock implementation of IRenderer (17 methods as of Phase 10).
+// MockRenderer — GMock implementation of IRenderer (27 methods as of Phase 11d).
 // Method count: 5 base (beginFrame/endFrame/drawScene/loadTexture/setCamera) +
 //   1 (rebuildTerrainChunk) + 4 Phase 9b (pickTerrainTile/setTileHoverHighlight/setZoneOverlay/
-//   getTileScreenBounds) + 1 Phase 11d method (getListenerPosition) +
+//   getTileScreenBounds) + 1 Phase 10 (getListenerPosition) +
 //   6 Phase 10 rendering (placeBuildingMesh/removeBuildingMesh/placeRoadMesh/removeRoadMesh/
-//   placeServiceBuildingMesh/removeServiceBuildingMesh) = 17 total.
+//   placeServiceBuildingMesh/removeServiceBuildingMesh) +
+//   3 Phase 10 vehicle (placeVehicle/moveVehicle/removeVehicle) +
+//   1 Phase 10 preview (setTilePlacementPreview — Phase 11d extended to two-list signature) +
+//   6 Phase 11d (spawnVehicleAgent/moveVehicleAgent/despawnVehicleAgent/
+//   setIntersectionSignalState/showServiceCoverageOverlay/hideServiceCoverageOverlay) = 27 total.
+// Note: getListenerPosition was added in Phase 10 context (already counted above) —
+//   Phase 11d Deliverable 0 originally listed it as one of 7; it was pre-landed in Phase 10.
+//
+// Phase 11d additions (6 new MOCK_METHOD stubs — must be present in MockRenderer after
+// Deliverable 0 Day-One Commit; prerequisite for Deliverables 3d and 4c test authoring):
+//   spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone) → AgentHandle
+//   moveVehicleAgent(AgentHandle handle, int tileX, int tileZ, float headingDeg) → void
+//   despawnVehicleAgent(AgentHandle handle) → void
+//   setIntersectionSignalState(int tileX, int tileZ, SignalPhase phase) → void
+//   showServiceCoverageOverlay(int tileX, int tileZ, ServiceBuildingType type, bool degraded) → void
+//   hideServiceCoverageOverlay() → void
+// Note: spawnVehicleAgent/moveVehicleAgent/despawnVehicleAgent coexist with Phase 10's
+//   placeVehicle/moveVehicle/removeVehicle — both sets of methods must be present.
+// Note: setTilePlacementPreview extended from (tiles, argb) to (freeTiles, freeArgb, blockedTiles)
+//   in Phase 11d Deliverable 5d. blockedTiles defaults to {} at call sites but MockMethod
+//   requires the full three-parameter signature.
 // Source location: tests/simulation/MockRenderer.h
 // Shared across simulation_tests, ui_tests (via tests/simulation/ include path).
 //
@@ -705,6 +759,13 @@ public:
 //   removeRoadMesh            — no default action
 //   placeServiceBuildingMesh  — no default action
 //   removeServiceBuildingMesh — no default action
+//   spawnVehicleAgent         — returns AgentHandle{0} by default; override per-test via ON_CALL
+//   moveVehicleAgent          — no default action (void return)
+//   despawnVehicleAgent       — no default action (void return)
+//   setIntersectionSignalState — no default action (void return)
+//   showServiceCoverageOverlay — no default action (void return)
+//   hideServiceCoverageOverlay — no default action (void return)
+//   setTilePlacementPreview   — no default action (void return; three-parameter form since Phase 11d)
 //
 // IMPORTANT — CitySimulationUnitTest uses StrictMock<MockRenderer>. After Phase 10 wiring,
 // any test that exercises placeZone(), placeRoad(), placeServiceBuilding(), demolishTile(),
@@ -736,7 +797,7 @@ public:
 // the sfx_intersection_tick 80 m pre-cull. Simulation tests that exercise tick() with
 // traffic signals must either set ON_CALL for getListenerPosition() or use NiceMock.
 
-// Canonical IAudioSystem — 15 methods (Phase 10 added setMusicIntensity). Authoritative definition in audio-architecture/audio-system.md.
+// Canonical IAudioSystem — 17 methods (Phase 10 added setMusicIntensity; Phase 11d added acquireVehicleEnginePair, releaseVehicleEnginePair). Authoritative definition in audio-architecture/audio-system.md.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType, SimSpeed,
 // SoundPriority, TimeOfDay, vec3, CameraState). Never expose ALuint, ALfloat, or AL_* constants through this interface.
 // Forward declarations (defined in game-domain headers, not OpenAL headers):
@@ -813,7 +874,7 @@ public:
     virtual void setMusicIntensity(MusicIntensity intensity) = 0;
 };
 
-// MockAudioSystem — GMock implementation of IAudioSystem's 15 methods.
+// MockAudioSystem — GMock implementation of IAudioSystem's 17 methods.
 // Source location: tests/simulation/MockAudioSystem.h
 // Shared across simulation_tests, ui_tests, audio_tests CMake targets (header-only).
 class MockAudioSystem : public IAudioSystem {
@@ -833,6 +894,8 @@ public:
     MOCK_METHOD(void,        setMusicVolume,        (float gain),                                (override));
     MOCK_METHOD(void,        setSFXVolume,          (float gain),                                (override));
     MOCK_METHOD(void,        setMusicIntensity,     (MusicIntensity intensity),                   (override));
+    MOCK_METHOD((std::pair<int,int>), acquireVehicleEnginePair, (ZoneType zone),                 (override));
+    MOCK_METHOD(void,        releaseVehicleEnginePair, (int idleIdx, int moveIdx),               (override));
 };
 ```
 
@@ -1758,7 +1821,7 @@ creates a duplicate target. Add `target_sources` only.
 
 **Design rationale**: Uses a test-local `CitySimulationRenderStub` (a minimal dispatch-protocol model)
 and `ISimRenderer` (a test-local standalone interface using `TileCoord`-based API). Does NOT use the
-full `CitySimulation` class or `IRenderer`/`MockRenderer` — `IRenderer` has 16+ pure virtuals; extending
+full `CitySimulation` class or `IRenderer`/`MockRenderer` — `IRenderer` has 28 pure virtuals as of Phase 11d; extending
 it in a test would require all of them mocked. The stub faithfully models the render-dispatch contract
 (same `placeBuildingMesh`, `placeRoadMesh`, `removeBuildingMesh`, `removeRoadMesh`, `placeServiceBuildingMesh`
 call sequence) without incurring the `ManualRNG`, `ManualClock`, treasury, and audio side-effect

@@ -528,3 +528,36 @@ contains `/3d/vehicles/` it selects the vehicles atlas. Both loaders share the s
 call. It returns `false` (and logs a warning) when `m_smgr` or `m_driver` is null
 (headless / unit-test context). `placeVehicle()` returns early without crashing when
 `ensureVehicleLoader()` returns `false`.
+
+---
+
+## Agent Vehicle Node Registry (Phase 11d)
+
+`IrrlichtRenderer` maintains a second vehicle registry for traffic-simulation agents:
+
+```cpp
+std::unordered_map<AgentHandle, ISceneNode*> m_agentNodes;
+```
+
+**Ownership**: `IrrlichtRenderer` owns all nodes in `m_agentNodes`. Nodes are created by
+`spawnVehicleAgent()`, updated by `moveVehicleAgent()`, and destroyed by `despawnVehicleAgent()`.
+`main.cpp` calls these methods but does NOT hold a reference to `m_agentNodes`.
+
+**Coexistence with Phase 10 `m_vehicleNodes`**: The two registries are completely independent.
+`m_vehicleNodes` holds manually placed vehicles (via `placeVehicle`/`moveVehicle`/`removeVehicle`);
+`m_agentNodes` holds simulation-driven traffic agents. A tile may have at most one agent node but
+any number of manually placed vehicle nodes.
+
+**Lifecycle rules**:
+
+1. `spawnVehicleAgent(AgentHandle, tileX, tileZ, zone)` → creates `IAnimatedMeshSceneNode*`,
+   loads LOD0 mesh for `zone`, inserts into `m_agentNodes[handle]`.
+2. `moveVehicleAgent(handle, tileX, tileZ, headingDeg)` → looks up node, updates position and
+   Y-rotation; does nothing if handle is absent (agent was culled).
+3. `despawnVehicleAgent(handle)` → calls `node->remove()`, erases from `m_agentNodes`.
+
+**Cull policy**: agents beyond 150 m from the camera are not spawned (simulation skips calling
+`spawnVehicleAgent` for them); agents that move beyond 150 m trigger `despawnVehicleAgent`.
+
+**SMesh / drop() rules**: agent nodes use `IAnimatedMesh` loaded via `ISceneManager::getMesh()` —
+the scene manager owns the mesh; `IrrlichtRenderer` must NOT call `->drop()` on it.

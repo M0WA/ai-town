@@ -17,20 +17,38 @@ service coverage radius overlays on the minimap and in the world.
 
 This commit must land BEFORE any test files for Deliverables 3d or 4c are written.
 
-- [ ] Define in `src/interfaces/IRenderer.h`: `using AgentHandle = uint32_t;` and the seven new
+- [ ] Define in `src/interfaces/IRenderer.h`: `using AgentHandle = uint32_t;` and the six new
   method signatures: `spawnVehicleAgent`, `moveVehicleAgent`, `despawnVehicleAgent`,
-  `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`,
-  `getListenerPosition`.
+  `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`.
+  (Note: `getListenerPosition` was added in Phase 10; verify it is already present in
+  `IRenderer.h` — do not re-add.)
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`,
   `architecture/game-design/traffic-system.md`, `architecture/game-design/service-coverage.md`)
 
-- [ ] Define in `src/interfaces/simulation_types.h`: `enum class SignalPhase { Green, Red };`,
+- [ ] Define in `src/interfaces/simulation_types.h` all 6 new types required for Phase 11d query
+  methods: `using AgentHandle = uint32_t;` (type alias), `enum class SignalPhase { Green, Red };`,
   `struct AgentState { uint32_t agentId; int tileX; int tileZ; float headingDeg; ZoneType zone; };`,
   `struct IntersectionSignalState { int tileX; int tileZ; SignalPhase phase; };`,
   `struct RoadSegmentSpeed { int tileX; int tileZ; float speedFraction; };`,
   `struct ServiceCoverageTile { int tileX; int tileZ; ServiceBuildingType coveredBy; bool degraded; };`.
+  All six must be present in the Day-One Commit.
   (ref: `architecture/game-design/traffic-system.md`,
   `architecture/game-design/service-coverage.md`)
+
+- [ ] Extend `IAudioSystem` in `src/interfaces/IAudioSystem.h` with two new pure-virtual methods
+  required by Deliverable 3a's vehicle engine audio pair wiring:
+  `virtual std::pair<int,int> acquireVehicleEnginePair(ZoneType zone) = 0;`
+  (returns `{-1,-1}` if the vehicle pair pool is exhausted — callers MUST check before use;
+  indices are opaque SFX pool source indices, not `ALuint` — `IAudioSystem` must not expose
+  OpenAL types per `architecture/audio-architecture/audio-system.md`) and
+  `virtual void releaseVehicleEnginePair(int idleIdx, int moveIdx) = 0;`.
+  Update `MockAudioSystem` with `MOCK_METHOD` declarations for both new methods.
+  Also update the method-count comment in `tests/simulation/MockAudioSystem.h` from 15 to 17 to match the updated `audio-system.md` spec.
+  Also update the method-count comment in `src/interfaces/IAudioSystem.h` from 15 to 17 to keep interface and mock documentation in sync.
+  This must land in the Day-One Commit so that Deliverable 3a test authoring can begin.
+  (ref: `architecture/audio-architecture/audio-system.md`,
+  `architecture/audio-architecture/source-pool.md`,
+  `architecture/testing/testability-architecture.md`)
 
 - [ ] Extend `ICitySimulation` with four new pure-virtual query methods: `getAgentPositions`,
   `getIntersectionSignalStates`, `getRoadSegmentSpeeds`, `getServiceCoverage`.
@@ -43,11 +61,19 @@ This commit must land BEFORE any test files for Deliverables 3d or 4c are writte
   and 4c.
   (ref: `architecture/testing/testability-architecture.md`)
 
-- [ ] Extend `MockRenderer` with `MOCK_METHOD` stubs for all seven new `IRenderer` methods:
+- [ ] Extend `MockRenderer` with `MOCK_METHOD` stubs for all six new `IRenderer` methods:
   `spawnVehicleAgent`, `moveVehicleAgent`, `despawnVehicleAgent`,
-  `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`,
-  `getListenerPosition`.
+  `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`.
   This is a prerequisite for all test authoring in Deliverables 3d and 4c.
+  Note: `spawnVehicleAgent`, `moveVehicleAgent`, and `despawnVehicleAgent` are NEW additive
+  `IRenderer` methods; they coexist with Phase 10's `placeVehicle` / `moveVehicle` /
+  `removeVehicle` and do NOT replace them. Both sets of methods must be present in
+  `MockRenderer` after the Day-One Commit.
+  (ref: `architecture/testing/testability-architecture.md`)
+
+- [ ] Update `MockRenderer` with the new two-list `setTilePlacementPreview` signature
+  (`freeTiles`, `freeArgb`, `blockedTiles = {}`) — this must land in the Day-One Commit so
+  that Deliverable 5e test files compile from the start.
   (ref: `architecture/testing/testability-architecture.md`)
 
 ---
@@ -91,13 +117,23 @@ city feel lived-in at close and mid range.
 
 - [ ] **Service building LOD0 geometry** — re-export all four service building models
   (`svc_fire_station_lod0.b3d`, `svc_police_station_lod0.b3d`, `svc_power_plant_lod0.b3d`,
-  `svc_water_tower_lod0.b3d`) targeting **3,000–5,000 tris** (treated as Large buildings per
-  spec category). Added detail must include: antenna masts, intake/exhaust geometry on the
+  `svc_water_tower_lod0.b3d`) targeting **2,000–5,000 tris**
+  (intentional per spec — small-building LOD thresholds apply; see architecture/asset-standards/3d-model-standards.md)
+  (treated as small buildings per spec — service buildings use small-building LOD distance thresholds: LOD0→LOD1 at >30 m/<25 m, LOD1→LOD2 at >100 m/<90 m).
+  Added detail must include: antenna masts, intake/exhaust geometry on the
   power plant, hose reels and garage bay insets on the fire station, and service entrance
   steps. UV channel 0 must remain mapped to the `service_buildings` atlas cell (row 3, col 2
   of the 2048×2048 building atlas) per `architecture/asset-standards/building-atlas-layout.md`.
   (ref: `architecture/asset-standards/3d-model-standards.md`,
   `architecture/asset-standards/building-atlas-layout.md`)
+
+- [ ] **Service building LOD1 geometry** — re-export all four service building LOD1 meshes
+  (`svc_fire_station_lod1.b3d`, `svc_police_station_lod1.b3d`, `svc_power_plant_lod1.b3d`,
+  `svc_water_tower_lod1.b3d`) targeting **100–300 tris** (intentional per spec — small-building
+  LOD1 thresholds apply; see architecture/asset-standards/3d-model-standards.md). LOD1 must
+  retain the primary building silhouette; architectural details may be removed or baked to
+  texture.
+  (ref: `architecture/asset-standards/3d-model-standards.md` §LOD Requirements)
 
 - [ ] **LOD distance thresholds unchanged**: LOD swap distances (Large buildings: LOD0→LOD1
   at >50 m / <45 m; LOD1→LOD2 at >200 m / <185 m; Small: >30 m / <25 m; >100 m / <90 m)
@@ -107,7 +143,7 @@ city feel lived-in at close and mid range.
 
 - [ ] **`validate_assets.py` regression-clean**: after re-export, confirm all reworked
   building models pass the existing `validate_assets.py` 24-check suite (established in
-  Phase 5 and extended through Phase 9) with zero errors. The `validate-assets` CI job
+  Phase 5 and extended through Phase 10b) with zero errors. The `validate-assets` CI job
   must remain green.
   (ref: `architecture/ci-cd/github-actions-workflow.md`)
 
@@ -153,7 +189,7 @@ placeholder paint-over content with hand-authored or baked detail.
 
 ##### 2a. Building Facade Atlas Rework
 
-- [ ] **`buildings_atlas_d.png` (source PNG, 2048×2048)** — re-author all 14 assigned atlas
+- [ ] **`buildings_atlas_d.png` (source PNG, 2048×2048)** — re-author all 15 assigned atlas
   cells (per `architecture/asset-standards/building-atlas-layout.md` Cell Assignment Table)
   to production quality within the 496×496 px per-cell usable area (8 px border on each edge
   per spec). Required detail per cell type:
@@ -209,7 +245,7 @@ placeholder paint-over content with hand-authored or baked detail.
   `architecture/asset-standards/building-atlas-layout.md` §Vehicle Atlas)
 
 - [ ] **Sprite atlas** — `vehicles_sprite_atlas_d.png` (256×256 source) →
-  `vehicles_sprite_atlas_d.dds` (DXT5, linear, 1-mip): author roof colour-swatch palette for
+  `vehicles_sprite_atlas_d.dds` (DXT5, linear, 1 mip level (DDS dwMipMapCount=1, GL_TEXTURE_MAX_LEVEL=0, base level only)): author roof colour-swatch palette for
   LOD2 impostors per vehicle type. Exported via `tools/export_textures.py`.
   (ref: `architecture/asset-standards/3d-model-standards.md` §Billboard Imposter Bake,
   `architecture/asset-standards/2d-texture-standards.md`)
@@ -225,7 +261,7 @@ placeholder paint-over content with hand-authored or baked detail.
   completing this deliverable, the `cicd-dev-github` engineer adds three new checks to
   `validate_assets.py` for vehicle atlas DDS format and mip-level validation:
   check #25 (`vehicles_diffuse_atlas_d.dds` — BC1_UNORM_SRGB, 4-mip, 2048×2048),
-  check #26 (`vehicles_sprite_atlas_d.dds` — BC3_UNORM linear, 1-mip, 256×256),
+  check #26 (`vehicles_sprite_atlas_d.dds` — BC3_UNORM linear, 1 mip level (DDS dwMipMapCount=1, GL_TEXTURE_MAX_LEVEL=0), 256×256),
   check #27 (`vehicles_normal_atlas_n.dds` — BC3_UNORM linear (DXT5nm), 4-mip, 2048×2048).
   All three checks must pass before Deliverable 2b is considered complete.
   (ref: `architecture/ci-cd/github-actions-workflow.md`,
@@ -252,30 +288,34 @@ along road paths, and intersection signal state shown at road nodes.
 
 ##### 3a. Vehicle Agent Rendering
 
-- [ ] **`IRenderer::spawnVehicleAgent(agentId, ZoneType, vec3 startPos)` → `AgentHandle`**
+- [ ] **`IRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone)` → `AgentHandle`**
   — new method on `IRenderer` interface (`src/interfaces/IRenderer.h`). Spawns a vehicle
-  `SceneNode` (using `IrrlichtRenderer::placeVehicle` vehicle-pool pattern from Phase 9)
-  at `startPos` and registers the `AgentHandle` in `SceneEntityManager`. Zone type determines
-  which vehicle atlas cell is sampled (Residential → car (sedan/hatchback/SUV);
-  Commercial → bus_standard; Industrial → truck_cargo). Returns a handle the caller uses for
-  subsequent `moveVehicleAgent` /
-  `despawnVehicleAgent` calls. `AgentHandle` is defined as `using AgentHandle = uint32_t;` in
-  `src/interfaces/IRenderer.h` — it is a stable identifier for the agent's lifetime and is
-  assigned by the traffic simulation. agentId (from traffic simulation) is mapped 1:1 to
-  `AgentHandle`; the renderer maintains a parallel `m_agentNodes` registry alongside the
-  existing `m_vehicleNodes` — agent methods coexist with Phase 10 vehicle methods without
-  replacing them.
+  agent node as a direct `IAnimatedMeshSceneNode*` (not a `LODNode*` wrapper) at the
+  world-space position derived from tile coordinates `(tileX, tileZ)` and stores it in
+  `m_agentNodes` keyed by `AgentHandle`. (SceneEntityManager is NOT
+  involved — agent nodes are stored in `m_agentNodes` and managed entirely by
+  `IrrlichtRenderer`.) Zone type determines which vehicle atlas cell is sampled
+  (Residential → car (sedan/hatchback/SUV); Commercial → bus_standard;
+  Industrial → truck_cargo). Returns a handle the caller uses for subsequent
+  `moveVehicleAgent` / `despawnVehicleAgent` calls. `AgentHandle` is defined as
+  `using AgentHandle = uint32_t;` in `src/interfaces/IRenderer.h` — it is a stable
+  identifier for the agent's lifetime and is assigned by the traffic simulation. agentId
+  (from traffic simulation) is mapped 1:1 to `AgentHandle`; the renderer maintains a
+  parallel `m_agentNodes` registry alongside the existing `m_vehicleNodes` — agent methods
+  coexist with Phase 10 vehicle methods without replacing them. The `m_agentNodes`
+  handle→node registry is owned by `IrrlichtRenderer`; `main.cpp` calls the three agent
+  methods but does not hold the map.
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`,
   `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget)
 
-- [ ] **`IRenderer::moveVehicleAgent(AgentHandle, vec3 pos, float headingDeg)`** — updates
-  the agent's scene node position and Y-axis rotation each frame. Called from `main.cpp`
+- [ ] **`IRenderer::moveVehicleAgent(AgentHandle handle, int tileX, int tileZ, float headingDeg)`** — updates
+  the agent's scene node to the world-space position derived from tile coordinates
+  `(tileX, tileZ)` and sets Y-axis rotation each frame. Called from `main.cpp`
   per-frame render loop after `CitySimulation::getAgentPositions()` is polled. No physics;
   direct node position set (`setPosition` + `setRotation`).
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
 
-- [ ] **`IRenderer::despawnVehicleAgent(AgentHandle)`** — removes the vehicle scene node via
-  `SceneEntityManager::destroy()`, following the destroy-nulls-before-remove contract.
+- [ ] **`IRenderer::despawnVehicleAgent(AgentHandle)`** — look up the node pointer in `m_agentNodes[handle]` first, then apply the standard eviction sequence: iterate all material slots to clear texture pointers → `driver->setMaterial(SMaterial{})` → `node->remove()`, then erase the handle from `m_agentNodes`. Per `architecture/graphics-architecture/scene-graph-ownership.md`, agent nodes use `IAnimatedMesh` loaded via the scene manager — do NOT call `->drop()` on the mesh (scene manager retains ownership). `IrrlichtRenderer` owns agent nodes directly; `SceneEntityManager` is not involved.
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
 
 - [ ] **`ICitySimulation::getAgentPositions()` query** — new method on `ICitySimulation`
@@ -285,20 +325,30 @@ along road paths, and intersection signal state shown at road nodes.
   pointers.
   (ref: `architecture/game-design/traffic-system.md`)
 
-- [ ] **`IRenderer::getListenerPosition()` → `irr::core::vector3df`** — method defined in
-  Deliverable 0 interface seam (`src/interfaces/IRenderer.h`); returns the current
-  camera/listener world-space position. Used by the traffic agent cull logic below to compute
-  agent-to-camera distance.
+- [ ] **`IRenderer::getListenerPosition()` → `irr::core::vector3df`** — method already added
+  in Phase 10 (`src/interfaces/IRenderer.h`); returns the current camera/listener world-space
+  position. Used by the traffic agent cull logic below to compute agent-to-camera distance.
+  Verify it is present before use — do not re-add it in this phase.
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
 
-- [ ] **Distance cull for agent spawning** — only agents within **150 m** of the camera
-  listener position (per `IRenderer::getListenerPosition()` defined in this phase) are
+- [ ] **Distance cull for agent spawning** — only agents within **150 m** (agents also undergo LOD swap at spec distances per architecture/asset-standards/3d-model-standards.md — >100 m / <90 m for LOD1→LOD2; the 150 m value is the cull/despawn boundary, not a LOD override) of the camera
+  listener position (per `IRenderer::getListenerPosition()` defined in Phase 10) are
   spawned as scene nodes. Agents outside cull range are tracked in simulation but have no
   scene node. On spawn, `spawnVehicleAgent` is called; on despawn (timeout or exit cull
   range), `despawnVehicleAgent` is called. This matches the vehicle-engine-audio 150 m cull
-  established in Phase 10.
+  established in Phase 10. Before implementing, confirm this value matches the vehicle-audio
+  cull distance in `architecture/audio-architecture/dynamic-soundscape.md`; if values differ,
+  use the audio spec value as binding authority.
   (ref: `architecture/game-design/traffic-system.md`,
   `architecture/audio-architecture/dynamic-soundscape.md`)
+
+- [ ] **Vehicle engine audio pair wiring** — in the per-frame agent sync loop in `main.cpp`,
+  after each `spawnVehicleAgent` call, call `IAudioSystem::acquireVehicleEnginePair(ZoneType)`
+  and store the returned pair indices in a parallel map keyed by `AgentHandle`; before each
+  `despawnVehicleAgent` call, call `IAudioSystem::releaseVehicleEnginePair(idleIdx, moveIdx)`
+  using the stored indices. Verify that each frame, AudioSystem updates pitch and gain for active vehicle engine pairs based on `getAgentPositions()` data: base pitch is determined by agent zone type (Residential → 1.0 car, Commercial → 0.85 bus, Industrial → 0.85 truck) and modulated by speed fraction (0.75–1.35 range per `architecture/audio-architecture/dynamic-soundscape.md §Vehicle Engine Audio`); gain is set from the vehicle distance and AL_INVERSE_DISTANCE_CLAMPED rolloff.
+  (ref: `architecture/audio-architecture/dynamic-soundscape.md`,
+  `architecture/audio-architecture/source-pool.md`)
 
 - [ ] **Per-frame agent sync loop in `main.cpp`**: after `CitySimulation::tick()` and before
   `IRenderer::drawScene()`, call `CitySimulation::getAgentPositions()` and reconcile the
@@ -332,9 +382,9 @@ along road paths, and intersection signal state shown at road nodes.
   road segments are tinted on the 200×200 px minimap by congestion level using the following
   thresholds (thresholds per `architecture/game-design/traffic-system.md` congestion penalty
   table):
-  - Green: speed ≥ 40% of max (free-flow; at or above the mild-penalty threshold)
-  - Orange: speed 21–39% of max (moderate congestion; within the 31–40% and 21–30% simulation penalty bands)
-  - Red: speed ≤ 20% of max (severe congestion; within the ≤20% simulation penalty band)
+  - Green: speed > 40% of max (free-flow; strictly above the mild-penalty threshold)
+  - Orange: speed 31–39% of max (moderate congestion; within the 31–40% simulation penalty band)
+  - Red: speed ≤ 30% of max (heavy congestion; at or below the 31–40% penalty threshold lower bound)
   The congestion colour is fetched from `ICitySimulation::getRoadSegmentSpeeds()` (new query,
   see below) and applied as a coloured overlay pixel on the minimap texture.
   (ref: `architecture/game-design/traffic-system.md` §Congestion threshold,
@@ -364,6 +414,18 @@ along road paths, and intersection signal state shown at road nodes.
 - [ ] **CMakeLists extension** — add test source via `target_sources(simulation_tests PRIVATE
   tests/simulation/agent_render_sync_test.cpp)` following the Phase 4+ extension policy (do
   NOT call `add_executable` again — duplicate target error).
+
+##### 3e. Intersection Tick SFX
+
+- [ ] **`sfx_intersection_tick` audio trigger in `CitySimulation::tick()`** — for each active
+  traffic signal, on each phase transition (green→red or red→green), call
+  `m_audio->playPositionalSound(SFX_INTERSECTION_TICK, pos, SoundPriority::LOW, 1.0f)` gated
+  by an 80 m distance cull from `m_renderer->getListenerPosition()`. This wires the
+  intersection signal SFX specified in `architecture/game-design/traffic-system.md` and
+  `architecture/audio-architecture/dynamic-soundscape.md`. The `getListenerPosition()` method
+  was defined in Phase 10 and is already present in `IRenderer.h`.
+  (ref: `architecture/game-design/traffic-system.md` §Intersections,
+  `architecture/audio-architecture/v1-audio-asset-manifest.md`)
 
 ---
 
@@ -398,13 +460,15 @@ is selected, and a coverage overlay layer on the minimap.
 
 - [ ] **Power plant BFS tile highlight** — for `ServiceBuildingType::PowerPlant`, instead of
   a circle overlay, `showServiceCoverageOverlay` highlights all BFS-reachable tiles in a
-  distinct "coverage" colour (cyan `#00C9C8`). Implementation MUST use a multi-tile mesh
+  distinct "coverage" colour (yellow `#F1C40F`). Implementation MUST use a multi-tile mesh
   approach (following the placement-preview pattern from Phase 10:
   `architecture/graphics-architecture/scene-graph-ownership.md` §Placement Preview), NOT
   `setTileHoverHighlight()` (which is a single pre-allocated 4-vertex quad — calling it per
   tile overwrites and shows only the last tile). Allocate a dynamic `SMesh*` with one quad
   per covered tile, rebuild on `showServiceCoverageOverlay` call, and release on
-  `hideServiceCoverageOverlay`.
+  `hideServiceCoverageOverlay`. The dynamic `SMesh*` is owned by `IrrlichtRenderer` (not
+  `SceneEntityManager`); it is allocated in `showServiceCoverageOverlay` and released via
+  `->drop()` in `hideServiceCoverageOverlay`, following the `m_previewMesh` lifetime pattern.
   (ref: `architecture/game-design/service-coverage.md` §Power plant coverage model,
   `architecture/graphics-architecture/scene-graph-ownership.md` §Placement Preview)
 
@@ -433,16 +497,17 @@ is selected, and a coverage overlay layer on the minimap.
 ##### 4c. Service Coverage Tests
 
 - [ ] **`ServiceCoverageOverlay_QueryServiceTile_ShowsOverlay`** (label `unit`,
-  CMake target `simulation_tests`): using `MockRenderer`, verify that querying a service
-  building tile calls `showServiceCoverageOverlay` with correct type and degradation state.
+  CMake target `ui_tests`): using `MockCitySimulation` and `MockRenderer`, verify that
+  querying a service building tile calls `showServiceCoverageOverlay` with correct type and
+  degradation state.
   (ref: `architecture/testing/testability-architecture.md`)
 
 - [ ] **`ServiceCoverageOverlay_InspectorClose_HidesOverlay`** (label `unit`,
-  CMake target `simulation_tests`): verify that closing the Inspector panel calls
-  `hideServiceCoverageOverlay`.
+  CMake target `ui_tests`): using `MockCitySimulation` and `MockRenderer`, verify that
+  closing the Inspector panel calls `hideServiceCoverageOverlay`.
 
-- [ ] **CMakeLists extension** — add via `target_sources(simulation_tests PRIVATE
-  tests/simulation/service_coverage_overlay_test.cpp)`.
+- [ ] **CMakeLists extension** — add via `target_sources(ui_tests PRIVATE
+  tests/ui/service_coverage_overlay_test.cpp)`.
 
 ---
 
@@ -500,6 +565,11 @@ re-zoning or re-roading a tile.
   place. Remove it to eliminate dead code.
   (ref: `src/simulation/CitySimulation.cpp`)
 
+> **Note — `placeServiceBuilding` is intentionally exempt**: service buildings are
+> infrastructure and may be placed on any buildable tile regardless of zoning or road status,
+> per `architecture/game-design/service-coverage.md`. No placement conflict guard is added to
+> `placeServiceBuilding`.
+
 ##### 5c. Placement Conflict Tests
 
 - [ ] **`PlaceZone_OnRoadTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
@@ -555,6 +625,8 @@ initiate a placement click on an occupied tile.
   red ARGB rather than `freeArgb`). Update `IRenderer.h`, `IrrlichtRenderer.h/cpp`, and
   `MockRenderer` (`MOCK_METHOD` signature) to match the new signature. All existing
   call sites that pass only `freeTiles` remain valid (default `blockedTiles = {}`).
+  Before committing the signature change, run `grep -r 'setTilePlacementPreview'` to confirm
+  all existing call sites use only two arguments; none should pass a third argument.
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md` §Placement Preview,
   `architecture/testing/testability-architecture.md`)
 
@@ -639,7 +711,11 @@ initiate a placement click on an occupied tile.
 ### Exit Criteria
 
 - All reworked building LOD0 meshes confirmed within the upper polygon ranges (Large:
-  4,000–5,000 tris; Small: 1,200–1,500 tris; Service: 3,000–5,000 tris)
+  4,000–5,000 tris; Small: 1,200–1,500 tris; Service: 2,000–5,000 tris)
+- Service building LOD1: 100–300 tris.
+- Large building LOD1: 800–1,000 tris.
+- Small building LOD1: 250–300 tris.
+- Vehicle LOD1 (by class): car ≤300 tris, bus ≤450 tris, truck ≤450 tris.
 - All reworked vehicle LOD0 meshes confirmed at or below their per-class binding limits from
   `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget
 - `validate_assets.py` 27-check suite passes with zero errors on all reworked `.b3d` and
@@ -650,7 +726,7 @@ initiate a placement click on an occupied tile.
 - `vehicles_diffuse_atlas_d.dds` passes DX10 header validation: BC1_UNORM_SRGB
   (DXGI_FORMAT = 72), 4-mip chain, 2048×2048.
 - `vehicles_sprite_atlas_d.dds` passes DX10 header validation: BC3_UNORM (DXT5 linear),
-  1-mip, 256×256.
+  1 mip level (DDS dwMipMapCount=1, GL_TEXTURE_MAX_LEVEL=0), 256×256.
 - `vehicles_normal_atlas_n.dds` passes DX10 header validation: BC3_UNORM (DXT5nm linear),
   4-mip chain, 2048×2048.
 - Vehicle agents visibly move along roads in gameplay; despawn correctly on timeout (120
@@ -663,12 +739,17 @@ initiate a placement click on an occupied tile.
 - Power plant BFS tile highlights correctly reflect BFS coverage depth (including brownout
   depth reduction at budget deficit)
 - Minimap service coverage overlay correctly shows per-type coloured tiles
-- All new unit tests pass (`AgentRenderSync_SpawnDespawn_MatchesSimulationOutput`,
+- All new unit tests pass: `AgentRenderSync_SpawnDespawn_MatchesSimulationOutput`,
   `AgentRenderSync_CullDistance_AgentsBeyond150m_NotSpawned`,
   `ServiceCoverageOverlay_QueryServiceTile_ShowsOverlay`,
   `ServiceCoverageOverlay_InspectorClose_HidesOverlay`,
-  `PlaceZone_OnRoadTile_IsNoOp`, `PlaceZone_OnZonedTile_IsNoOp`,
-  `PlaceRoad_OnZonedTile_IsNoOp`, `PlaceRoad_OnRoadTile_IsNoOp`)
+  `PlaceZone_OnRoadTile_IsNoOp`,
+  `PlaceZone_OnZonedTile_IsNoOp`,
+  `PlaceRoad_OnZonedTile_IsNoOp`,
+  `PlaceRoad_OnRoadTile_IsNoOp`,
+  `PlacementPreview_ZoneTool_OccupiedTile_ShowsRedHighlight`,
+  `PlacementPreview_ZoneDrag_PartiallyOccupied_BlockedTilesRed`,
+  `PlacementCommit_ZoneTool_OccupiedTileSkipped`
 - `placeZone` and `placeRoad` are confirmed no-ops when the target tile is occupied:
   no cost deducted, no undo entry recorded, no renderer call issued
 - Single-tile hover shows red (`kHoverArgbBlocked`) when Zone or Road tool is active and
@@ -677,12 +758,6 @@ initiate a placement click on an occupied tile.
   blocked tiles in red simultaneously via the extended `setTilePlacementPreview` two-list API
 - Zone and Road commit loops on LMB release skip all occupied tiles (no `doTerrainPlacement`
   call, no cost, no undo entry)
-- All new unit tests pass (sim-level: `PlaceZone_OnRoadTile_IsNoOp`,
-  `PlaceZone_OnZonedTile_IsNoOp`, `PlaceRoad_OnZonedTile_IsNoOp`,
-  `PlaceRoad_OnRoadTile_IsNoOp`; UI-level:
-  `PlacementPreview_ZoneTool_OccupiedTile_ShowsRedHighlight`,
-  `PlacementPreview_ZoneDrag_PartiallyOccupied_BlockedTilesRed`,
-  `PlacementCommit_ZoneTool_OccupiedTileSkipped`)
 - `all-checks-pass` gate green
 
 ### Team
@@ -690,12 +765,12 @@ initiate a placement click on an occupied tile.
 | Role | Responsibility |
 |---|---|
 | `graphics-artist-3d-model` | Rework all building and vehicle LOD0/LOD1 `.b3d` meshes to upper polygon-budget detail; re-bake all billboard atlases at −45° pitch; sign off per deliverable 1a/1b sign-off gate |
-| `graphics-artist-2d-texture` | Rework `buildings_atlas_d.png` all 14 assigned cells to production detail; author all three vehicle atlases (`vehicles_diffuse_atlas_d.dds` DXT1 sRGB 4-mip, `vehicles_sprite_atlas_d.dds` DXT5 linear 1-mip, `vehicles_normal_atlas_n.dds` DXT5nm linear 4-mip); rework billboard atlases; re-export all DDS files via `tools/export_textures.py`; sign off per deliverable 2a sign-off gate |
+| `graphics-artist-2d-texture` | Rework `buildings_atlas_d.png` all 15 assigned cells to production detail; author all three vehicle atlases (`vehicles_diffuse_atlas_d.dds` DXT1 sRGB 4-mip, `vehicles_sprite_atlas_d.dds` DXT5 linear 1 mip level (DDS dwMipMapCount=1, GL_TEXTURE_MAX_LEVEL=0, base level only), `vehicles_normal_atlas_n.dds` DXT5nm linear 4-mip); rework billboard atlases; re-export all DDS files via `tools/export_textures.py`; sign off per deliverable 2a sign-off gate adapted for each vehicle atlas format (DXGI_FORMAT per checks #25–27: BC1_UNORM_SRGB=72 for diffuse, BC3_UNORM=71 for sprite and normal atlases) |
 | `graphics-dev-irrlicht` | Implement `IRenderer` methods for vehicle agent spawn/move/despawn, intersection signal state, service coverage overlays; add minimap traffic and service coverage overlay modes; add `ICitySimulation` query methods (`getAgentPositions`, `getIntersectionSignalStates`, `getRoadSegmentSpeeds`, `getServiceCoverage`); per-frame agent sync loop in `main.cpp`; add placement conflict guards in `placeZone` and `placeRoad` (Deliverable 5a/5b); extend `IRenderer::setTilePlacementPreview` to accept `blockedTiles` second list (Deliverable 5d) |
 | `gamedesign-lookandfeel` | Confirm coverage radius colours, minimap tint palette, and signal visual behaviour match simulation intent; verify no V1 scope creep in visual wiring |
 | `gamedesign-ux` | Verify Inspector panel coverage-overlay UX (show on open, hide on close); confirm minimap overlay toggle interaction matches `architecture/ui-ux/minimap.md`; sign off on red preview feedback colour and blocked-tile drag-preview split (Deliverable 5d) |
-| `test-dev-cpp` | Deliverable 0 (Day-One Commit): extend `MockRenderer` with updated `MOCK_METHOD` for `setTilePlacementPreview` (new two-list signature) and stubs for all seven new `IRenderer` methods before any test files for Deliverables 3d, 4c, 5c, or 5e are written; author all eleven new unit tests (four traffic/coverage tests + four sim-level placement conflict tests + three UI-level placement feedback tests); extend `simulation_tests` and `ui_tests` CMake targets |
-| `cicd-dev-github` | Verify `validate-assets` CI job remains green after DDS rework; confirm `all-checks-pass` gate green |
+| `test-dev-cpp` | Deliverable 0 (Day-One Commit): extend `MockRenderer` with updated `MOCK_METHOD` for `setTilePlacementPreview` (new two-list signature) and stubs for all six new `IRenderer` methods before any test files for Deliverables 3d, 4c, 5c, or 5e are written; author all eleven new unit tests (four traffic/coverage tests + four sim-level placement conflict tests + three UI-level placement feedback tests); extend `simulation_tests` and `ui_tests` CMake targets |
+| `cicd-dev-github` | add checks #25–27 to `validate_assets.py` for vehicle atlas DDS format validation (Deliverable 2b); add 'Verify check_25 present', 'Verify check_26 present', 'Verify check_27 present' guard steps to the `validate-assets` job in `.github/workflows/ci.yml`, following the established pattern for checks #21–24 (guard steps are added to the `validate-assets` job only — NOT to the `build-linux` preflight; checks #25–27 run exclusively in the dedicated `validate-assets` job); Verify `validate-assets` CI job remains green after DDS rework; confirm `all-checks-pass` gate green |
 
 ### Dependencies
 

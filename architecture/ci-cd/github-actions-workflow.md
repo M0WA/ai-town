@@ -696,6 +696,7 @@ markdown-lint:
   - Phase 9: Check #15 full implementation (replacing the Phase 5 `.meta` stub) and Check #20 (road LOD2 color validation) are added to the script; again no change to the job definition or wiring.
   - Phase 10: Checks #21–#23 (zone loop silence-floor, non-stinger WAV SFX format, HUD sprites dimensions) are added to the script; no change to the job definition or `all-checks-pass` wiring.
   - Phase 10b: Check #24 (cloud texture format gate — `clouds.png` 1024×1024 RGBA) is added to the script; no change to the job definition or `all-checks-pass` wiring.
+  - Phase 11d: Checks #25–27 (vehicle atlas DDS format validation — `vehicles_diffuse_atlas_d.dds` BC1_UNORM_SRGB 4-mip, `vehicles_sprite_atlas_d.dds` BC3_UNORM linear 1-mip, `vehicles_normal_atlas_n.dds` BC3_UNORM linear 4-mip) are added to the script; guard steps `Verify check_25 present`, `Verify check_26 present`, `Verify check_27 present` are added to the `validate-assets` job following the Phase 10b pattern; no change to `all-checks-pass` wiring.
 
 ### PHASE 0 FORM (validate-assets not yet introduced)
 
