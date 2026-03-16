@@ -563,6 +563,13 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/city_simulation_coverage_test.cpp
 )
 
+# Additional coverage gap tests: smoothstep, travelTimeDemand, time-of-day transitions,
+# bond issuance, JSON escape sequences, density-unlock lambda cases, SaveSystem error paths.
+target_sources(simulation_tests PRIVATE
+    tests/simulation/city_simulation_extra_coverage_test.cpp
+    tests/simulation/save_system_coverage_test.cpp
+)
+
 # Phase 10: AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier().
 # MUST be on simulation_tests ONLY — never on the main aitown binary target.
 target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
@@ -734,6 +741,14 @@ target_sources(ui_tests PRIVATE
     tests/ui/ui_manager_unsaved_quit_test.cpp
     tests/ui/ui_manager_save_failure_test.cpp
     tests/ui/main_menu_save_state_test.cpp
+)
+
+# Extra coverage gap tests: ModalDialog showRestoreDefaultsConfirm, SettingsPanel
+# WASD preset + restore-defaults polling, MainMenuPanel loading-screen paths,
+# KeyBindingsPanel draw/resetToDefaults/arrow-key capture, UIManager keybindings
+# persistence and save-failure retry, budget-tick forwarding.
+target_sources(ui_tests PRIVATE
+    tests/ui/ui_coverage_extra_test.cpp
 )
 
 # ----------------------------------------------------------------------------
