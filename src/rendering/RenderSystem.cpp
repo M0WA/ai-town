@@ -28,6 +28,9 @@ RenderSystem::RenderSystem() {
 
     m_device = createDeviceEx(params);
 
+    if (m_device)
+        m_device->getLogger()->setLogLevel(irr::ELL_ERROR);
+
     if (!m_device) {
         // EDT_OPENGL unavailable — log and abort
         fprintf(stderr, "[RenderSystem] FATAL: Failed to create Irrlicht device with EDT_OPENGL.\n");
