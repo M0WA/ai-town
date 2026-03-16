@@ -279,11 +279,13 @@ Examples:
 - `svc_power_plant_lod1.b3d`
 - `svc_water_tower_col.obj`
 
-**LOD strategy**: Service buildings use the **small building / props** LOD category
-(height_floors = 2 for all V1 service buildings — all are single or double-storey
-structures). This means:
+**LOD strategy**: Service buildings use the **small building / props** LOD distance
+thresholds (height_floors = 2 for all V1 service buildings — all are single or
+double-storey structures). LOD0 polygon budgets are raised in Phase 11d to support
+recognisable per-type architectural detail (antenna masts, equipment geometry, garage
+bay insets). This means:
 
-- LOD0: 500–1500 tris (full detail)
+- LOD0: 2,000–5,000 tris (full detail — Phase 11d raised budget)
 - LOD1: 100–300 tris (reduced)
 - LOD2: `_billboard.dds` (1024×128 DXT5 sRGB, 8-direction bake at 45° below horizontal).
   No `_lod2.b3d` geometry shell — `height_floors = 2 <= 3` boundary applies.

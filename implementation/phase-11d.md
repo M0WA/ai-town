@@ -25,8 +25,10 @@ This commit must land BEFORE any test files for Deliverables 3d or 4c are writte
   `architecture/game-design/traffic-system.md`, `architecture/game-design/service-coverage.md`)
 
 - [ ] Define in `src/interfaces/simulation_types.h`: `enum class SignalPhase { Green, Red };`,
-  `struct AgentState { ... };`, `struct IntersectionSignalState { ... };`,
-  `struct RoadSegmentSpeed { ... };`, `struct ServiceCoverageTile { ... };`.
+  `struct AgentState { uint32_t agentId; int tileX; int tileZ; float headingDeg; ZoneType zone; };`,
+  `struct IntersectionSignalState { int tileX; int tileZ; SignalPhase phase; };`,
+  `struct RoadSegmentSpeed { int tileX; int tileZ; float speedFraction; };`,
+  `struct ServiceCoverageTile { int tileX; int tileZ; ServiceBuildingType coveredBy; bool degraded; };`.
   (ref: `architecture/game-design/traffic-system.md`,
   `architecture/game-design/service-coverage.md`)
 
@@ -41,9 +43,10 @@ This commit must land BEFORE any test files for Deliverables 3d or 4c are writte
   and 4c.
   (ref: `architecture/testing/testability-architecture.md`)
 
-- [ ] Extend `MockRenderer` with `MOCK_METHOD` stubs for all six new `IRenderer` methods:
+- [ ] Extend `MockRenderer` with `MOCK_METHOD` stubs for all seven new `IRenderer` methods:
   `spawnVehicleAgent`, `moveVehicleAgent`, `despawnVehicleAgent`,
-  `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`.
+  `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`,
+  `getListenerPosition`.
   This is a prerequisite for all test authoring in Deliverables 3d and 4c.
   (ref: `architecture/testing/testability-architecture.md`)
 
@@ -329,9 +332,9 @@ along road paths, and intersection signal state shown at road nodes.
   road segments are tinted on the 200×200 px minimap by congestion level using the following
   thresholds (thresholds per `architecture/game-design/traffic-system.md` congestion penalty
   table):
-  - Green: speed ≥ 40% of max (no penalty band)
-  - Orange: speed 21–39% of max (covers the 31–40% and 21–30% penalty bands)
-  - Red: speed ≤ 20% of max (≤20% penalty band)
+  - Green: speed ≥ 40% of max (free-flow; at or above the mild-penalty threshold)
+  - Orange: speed 21–39% of max (moderate congestion; within the 31–40% and 21–30% simulation penalty bands)
+  - Red: speed ≤ 20% of max (severe congestion; within the ≤20% simulation penalty band)
   The congestion colour is fetched from `ICitySimulation::getRoadSegmentSpeeds()` (new query,
   see below) and applied as a coloured overlay pixel on the minimap texture.
   (ref: `architecture/game-design/traffic-system.md` §Congestion threshold,
@@ -339,8 +342,11 @@ along road paths, and intersection signal state shown at road nodes.
 
 - [ ] **`ICitySimulation::getRoadSegmentSpeeds()` query** — returns
   `std::vector<RoadSegmentSpeed>` (new struct: `{ tileX, tileZ, float speedFraction }`)
-  where `speedFraction` is `currentSpeed / maxSpeed` in [0.0, 1.0]. Used exclusively by
-  the minimap traffic overlay.
+  where `speedFraction` is `currentSpeed / maxSpeed` in [0.0, 1.0]. **All road tiles are
+  returned** (not just occupied ones); unoccupied road tiles report `speedFraction = 1.0`
+  (free-flow, green). This ensures the minimap shows a complete road network baseline and
+  does not misrepresent empty roads as missing data. Used exclusively by the minimap traffic
+  overlay.
   (ref: `architecture/game-design/traffic-system.md`)
 
 ##### 3d. Traffic Tests
@@ -391,11 +397,16 @@ is selected, and a coverage overlay layer on the minimap.
   `architecture/game-design/service-coverage.md`)
 
 - [ ] **Power plant BFS tile highlight** — for `ServiceBuildingType::PowerPlant`, instead of
-  a circle overlay, `showServiceCoverageOverlay` highlights all BFS-reachable tiles by
-  calling `IRenderer::setTileHoverHighlight` (Phase 9b deliverable) in a distinct "coverage"
-  colour (cyan `#00C9C8`) on all tiles within the plant's BFS coverage depth.
-  `hideServiceCoverageOverlay` clears these highlights.
-  (ref: `architecture/game-design/service-coverage.md` §Power plant coverage model)
+  a circle overlay, `showServiceCoverageOverlay` highlights all BFS-reachable tiles in a
+  distinct "coverage" colour (cyan `#00C9C8`). Implementation MUST use a multi-tile mesh
+  approach (following the placement-preview pattern from Phase 10:
+  `architecture/graphics-architecture/scene-graph-ownership.md` §Placement Preview), NOT
+  `setTileHoverHighlight()` (which is a single pre-allocated 4-vertex quad — calling it per
+  tile overwrites and shows only the last tile). Allocate a dynamic `SMesh*` with one quad
+  per covered tile, rebuild on `showServiceCoverageOverlay` call, and release on
+  `hideServiceCoverageOverlay`.
+  (ref: `architecture/game-design/service-coverage.md` §Power plant coverage model,
+  `architecture/graphics-architecture/scene-graph-ownership.md` §Placement Preview)
 
 ##### 4b. Service Coverage Minimap Overlay
 
@@ -477,7 +488,7 @@ is selected, and a coverage overlay layer on the minimap.
 | `graphics-dev-irrlicht` | Implement `IRenderer` methods for vehicle agent spawn/move/despawn, intersection signal state, service coverage overlays; add minimap traffic and service coverage overlay modes; add `ICitySimulation` query methods (`getAgentPositions`, `getIntersectionSignalStates`, `getRoadSegmentSpeeds`, `getServiceCoverage`); per-frame agent sync loop in `main.cpp` |
 | `gamedesign-lookandfeel` | Confirm coverage radius colours, minimap tint palette, and signal visual behaviour match simulation intent; verify no V1 scope creep in visual wiring |
 | `gamedesign-ux` | Verify Inspector panel coverage-overlay UX (show on open, hide on close); confirm minimap overlay toggle interaction matches `architecture/ui-ux/minimap.md` |
-| `test-dev-cpp` | Deliverable 0 (Day-One Commit): extend `MockRenderer` with `MOCK_METHOD` stubs for all six new `IRenderer` methods (`spawnVehicleAgent`, `moveVehicleAgent`, `despawnVehicleAgent`, `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`) before any test files for Deliverables 3d or 4c are written; author all four new unit tests; extend `simulation_tests` CMake target |
+| `test-dev-cpp` | Deliverable 0 (Day-One Commit): extend `MockRenderer` with `MOCK_METHOD` stubs for all seven new `IRenderer` methods (`spawnVehicleAgent`, `moveVehicleAgent`, `despawnVehicleAgent`, `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`, `getListenerPosition`) before any test files for Deliverables 3d or 4c are written; author all four new unit tests; extend `simulation_tests` CMake target |
 | `cicd-dev-github` | Verify `validate-assets` CI job remains green after DDS rework; confirm `all-checks-pass` gate green |
 
 ### Dependencies
