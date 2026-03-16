@@ -34,6 +34,8 @@
 #include <irrlicht.h>
 #include <cstdio>
 #include <cmath>
+#include <thread>
+#include <chrono>
 
 int main() {
     // -------------------------------------------------------------------------
@@ -398,6 +400,20 @@ int main() {
 
         // Step 7: endFrame (driver->endScene).
         renderer.endFrame();
+
+        // Step 8: Frame rate cap — sleep to target 60 FPS (≈16.67 ms/frame).
+        // Prevents CPU spin at 100% on software renderers (llvmpipe) and avoids
+        // thermal throttling that causes frame-time spikes ("choppiness").
+        {
+            static constexpr double kTargetFrameSeconds = 1.0 / 60.0;
+            double frameEnd = wallClock.nowSeconds();
+            double elapsed  = frameEnd - currentTime;
+            double remaining = kTargetFrameSeconds - elapsed;
+            if (remaining > 0.001) {
+                std::this_thread::sleep_for(
+                    std::chrono::duration<double>(remaining));
+            }
+        }
     }
 
     return 0;
