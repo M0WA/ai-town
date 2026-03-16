@@ -77,6 +77,22 @@ KeyBindingsPanel::BindingField KeyBindingsPanel::kBindingField[KeyBindingsPanel:
 };
 
 // ---------------------------------------------------------------------------
+// Destructor
+// ---------------------------------------------------------------------------
+KeyBindingsPanel::~KeyBindingsPanel() {
+    if (!m_backend) return;
+    for (int i = 0; i < kTotalRows; ++i) {
+        if (m_rowLabel[i] != kInvalidUIElement) m_backend->removeElement(m_rowLabel[i]);
+        if (m_rowChip[i]  != kInvalidUIElement) m_backend->removeElement(m_rowChip[i]);
+    }
+    for (int i = 0; i < kNumCapturable; ++i) {
+        if (m_rowMsg[i] != kInvalidUIElement) m_backend->removeElement(m_rowMsg[i]);
+    }
+    if (m_btnSwap           != kInvalidUIElement) m_backend->removeElement(m_btnSwap);
+    if (m_btnConflictCancel != kInvalidUIElement) m_backend->removeElement(m_btnConflictCancel);
+}
+
+// ---------------------------------------------------------------------------
 // Constructor
 // ---------------------------------------------------------------------------
 KeyBindingsPanel::KeyBindingsPanel(IUIBackend* backend, ModalDialog* modal)

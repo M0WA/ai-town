@@ -163,13 +163,12 @@ void SettingsPanel::setPauseMenu(PauseMenuPanel* pauseMenu) {
 
 void SettingsPanel::setModal(ModalDialog* modal) {
     m_modal = modal;
-    // Re-create KeyBindingsPanel with the now-available modal pointer.
-    // This is safe: at construction time the modal was null; setModal() is
-    // called from UIManager immediately after ModalDialog construction.
+    // Just update the modal pointer on the existing KeyBindingsPanel.
+    // Do NOT delete/recreate — that would leave orphaned Irrlicht GUI elements
+    // in guiEnvironment, doubling element count and slowing drawAll() every frame.
     if (m_keyBindings) {
-        delete m_keyBindings;
+        m_keyBindings->setModal(modal);
     }
-    m_keyBindings = new KeyBindingsPanel(m_backend, m_modal);
 }
 
 // ---------------------------------------------------------------------------

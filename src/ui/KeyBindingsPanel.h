@@ -27,6 +27,10 @@ class ModalDialog;
 class KeyBindingsPanel {
 public:
     KeyBindingsPanel(IUIBackend* backend, ModalDialog* modal);
+    ~KeyBindingsPanel();
+
+    // Update the modal pointer without recreating elements.
+    void setModal(ModalDialog* modal) { m_modal = modal; }
 
     // Refresh the panel for the Controls tab.
     // Called by SettingsPanel::showControlsTab().
