@@ -303,7 +303,7 @@ cmake --build build
 ctest --test-dir build -LE "integration|requires-opengl" --output-on-failure
 ctest --test-dir build -L "^integration$" --output-on-failure
 xvfb-run --auto-servernum ctest --test-dir build -L "^requires-opengl$" --output-on-failure
-lcov --capture --directory build --base-directory . --ignore-errors mismatch --output-file coverage.info
+lcov --capture --directory build --base-directory . --ignore-errors mismatch,inconsistent --output-file coverage.info
 BUILD_DIR=build
 lcov --remove coverage.info \
   --ignore-errors unused \
@@ -382,7 +382,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 - Tests use Google Test + GMock + RapidCheck (all vcpkg-managed); simulation injected via `IRenderer`/`IAudioSystem`; `UIManager` via `IUIBackend` (opaque `UIElementHandle` — no raw Irrlicht pointers in interface)
 - Mock policy: `StrictMock` for unit tests, `NiceMock` for property/integration tests; add `TearDown()` to explicitly reset `sim_` and document destructor-path contract
-- Coverage gate (lcov ≥95%) Linux only; do NOT include `${BUILD_DIR}/_deps/*` in lcov exclude patterns (path never exists); pass `--ignore-errors mismatch` to `lcov --capture` for GCC 13 compatibility
+- Coverage gate (lcov ≥95%) Linux only; do NOT include `${BUILD_DIR}/_deps/*` in lcov exclude patterns (path never exists); pass `--ignore-errors mismatch,inconsistent` (comma-separated single flag) to `lcov --capture` for GCC 13 + lcov 2.x compatibility — lcov 2.0 only forwards the first `--ignore-errors` flag to geninfo, so both categories must be combined in one flag
 - CI: permissions block needed (`checks: write`); `coverage-linux` is self-contained job (builds+tests+lcov with `ENABLE_COVERAGE=ON`); use `GTEST_OUTPUT=xml:test_results/` (directory form); `all-checks-pass` gate MUST have `if: always()` + strict branch protection; vcpkg baseline enforcement step required; `actions/upload-artifact` steps must be explicit
 - Linux CI: run unit tests with `ctest -LE "integration|requires-opengl"`; integration tests (no display) with `ctest -L "^integration$"`; OpenGL tests under `xvfb-run` with `ctest -L "^requires-opengl$"`
 - Windows CI: use `vswhere.exe` for MSVC version in cache key; include `AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` in test step `env:`

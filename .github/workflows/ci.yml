@@ -1001,16 +1001,16 @@ jobs:
           # set up a gcov alternative, so the default gcov resolves to gcov-14 on
           # Debian trixie. gcov-14 cannot read .gcda files produced by GCC 13 (version
           # mismatch). Explicitly passing gcov-13 matches the compiler used for the build.
-          # --ignore-errors mismatch / --ignore-errors inconsistent: GCC 13 + lcov 2.x
-          # compatibility. lcov 2.0 only forwards the first flag's value to the geninfo
-          # subprocess; using two separate flags ensures both are forwarded. GCC 13 geninfo
-          # produces "mismatched end line" and "inconsistent" errors for inline functions,
-          # lambdas, and unexecuted blocks in headers (e.g. GTest macros, STL headers).
-          # These are known false positives and do not affect coverage accuracy.
+          # --ignore-errors mismatch,inconsistent: GCC 13 + lcov 2.x compatibility.
+          # lcov 2.0 only forwards the FIRST --ignore-errors value to the geninfo subprocess,
+          # so both categories MUST be in a single comma-separated flag. Two separate flags
+          # would only forward "mismatch" and silently drop "inconsistent". GCC 13 produces:
+          #   - "mismatched end line" warnings (mismatch)
+          #   - "function not hit but line is" for lambdas (inconsistent)
+          # Both are known false positives and do not affect coverage accuracy.
           lcov --capture --directory "${BUILD_DIR}" --base-directory . \
                --gcov-tool gcov-13 \
-               --ignore-errors mismatch \
-               --ignore-errors inconsistent \
+               --ignore-errors mismatch,inconsistent \
                --output-file coverage.info
           # --ignore-errors unused: lcov 2.x treats any --remove pattern that matches
           # no files as a fatal error (exit 25). At Phase 0 only smoke tests exist, so
