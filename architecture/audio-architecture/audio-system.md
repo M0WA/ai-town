@@ -617,6 +617,45 @@ device = pulse
 against any remaining frame spikes. `ALSOFT_CONF` is set with `overwrite=0` so a user
 can override with their own config.
 
+### 3. Batch Placement Sound Flooding (contributing factor)
+
+Zone and road drag operations release all queued tiles at once on LMB-up.
+`UIManager` loops `doTerrainPlacement(tx, tz)` for every tile in the rectangle/line;
+each call reaches `CitySimulation::placeZone()` / `placeRoad()`, which previously fired
+`SFX_EARTHWORKS + SFX_BUILD_PLACE` (or `SFX_ROAD_BUILD`) unconditionally — 2 × N
+`playPositionalSound` calls in a single frame (e.g. 200 calls for a 10×10 zone).
+
+This floods the SFX source pool with identical concurrent positional sources and
+dramatically increases the HRTF mixing load per period, making the ALSA catch-up loop
+more likely to hit the 200 ms RLIMIT\_RTTIME limit described above.
+
+**Fix**: `CitySimulation` gates both `placeZone()` and `placeRoad()` behind a shared
+100 ms cooldown stored in `m_lastPlacementSoundTime` (a `double` member initialised to
+`-1.0`). The cooldown uses the injected `IClock*` (`m_clock->nowSeconds()`) for
+determinism in tests.
+
+```cpp
+// In placeZone() and placeRoad():
+if (m_audio && m_clock) {
+    const double now = m_clock->nowSeconds();
+    if (now - m_lastPlacementSoundTime >= 0.1) {
+        m_lastPlacementSoundTime = now;
+        const vec3 pos{static_cast<float>(tileX), 0.0f,
+                       static_cast<float>(tileZ)};
+        if (earthworksCostOverride > 0)
+            m_audio->playPositionalSound(SFX_EARTHWORKS, pos,
+                                         SoundPriority::NORMAL, 1.0f);
+        m_audio->playPositionalSound(SFX_BUILD_PLACE /*or SFX_ROAD_BUILD*/, pos,
+                                     SoundPriority::NORMAL, 1.0f);
+    }
+}
+```
+
+The result: any batch operation that completes within 100 ms plays exactly **one**
+earthworks cue and one placement cue, regardless of how many tiles were modified.
+The cooldown is shared between zone and road placement so interleaved calls are also
+gated correctly.
+
 ---
 
 ## Phase 1 sound-dev-opensoftal Sign-Off
