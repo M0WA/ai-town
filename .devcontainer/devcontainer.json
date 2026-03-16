@@ -32,7 +32,7 @@
         "editor.codeActionsOnSave": {
           "source.fixAll.eslint": "explicit"
         },
-        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.defaultProfile.linux": "bash",
         "dev.containers.forwardWaylandSocket": false,
         "terminal.integrated.profiles.linux": {
           "bash": {
