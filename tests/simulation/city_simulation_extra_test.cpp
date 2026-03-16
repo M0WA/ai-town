@@ -1,6 +1,4 @@
-// city_simulation_coverage_test.cpp — Coverage gap tests for CitySimulation.cpp.
-//
-// Targets methods and branches not exercised by the existing simulation test suite.
+// city_simulation_extra_test.cpp — Extra tests for CitySimulation.cpp branches.
 // Identified gap areas (contributing to the 30.8% miss from the 69.2% CI baseline):
 //   - Static helpers: zoneAssetBaseName, speedValue, smoothstep, travelTimeDemand,
 //     maxPopulationForTile
@@ -34,6 +32,7 @@
 #include <string>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 #include "CitySimulation.h"
 #include "simulation_constants.h"
@@ -44,6 +43,7 @@
 using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::NiceMock;
+using ::testing::Return;
 
 // ===========================================================================
 // Fixture helpers
@@ -1084,4 +1084,460 @@ TEST_F(NiceCoverageTest, IsBuildableTile_NonExistentTile_ReturnsFalse) {
     // Just verify no crash and that the coverage query works.
     QueryResult r = sim_->queryTile(50, 50);
     EXPECT_GE(r.coverage.power, -1.0f) << "Coverage must be -1 (N/A) or [0,1], not crash.";
+}
+
+// ===========================================================================
+// Fixtures from city_simulation_extra_coverage_test.cpp (merged)
+// ===========================================================================
+
+class ExtraCoverageTest : public SimulationTestBase {
+protected:
+    CitySimulation* cs() {
+        return dynamic_cast<CitySimulation*>(sim_.get());
+    }
+};
+
+class NiceExtraCoverageTest : public ::testing::Test {
+protected:
+    NiceMock<MockRenderer>    renderer_;
+    NiceMock<MockAudioSystem> audio_;
+    ManualRNG                 rng_;
+    ManualClock               clock_;
+    ManualTerrainQuery        terrain_;
+    std::unique_ptr<ICitySimulation> sim_;
+
+    virtual Difficulty difficulty() const { return Difficulty::Normal; }
+
+    void SetUp() override {
+        sim_ = std::make_unique<CitySimulation>(
+            &renderer_, &audio_, &rng_, &clock_, &terrain_, difficulty());
+        sim_->setSpeed(SpeedMultiplier::x1);
+    }
+
+    void TearDown() override { sim_.reset(); }
+
+    CitySimulation* cs() {
+        return dynamic_cast<CitySimulation*>(sim_.get());
+    }
+
+    void runTicks(int n) {
+        const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+        for (int i = 0; i < n; ++i) {
+            clock_.advance(dt);
+            cs()->tick(dt);
+        }
+    }
+};
+
+TEST_F(NiceExtraCoverageTest, Smoothstep_ExercisedViaTrafficDemandFactor) {
+    cs()->placeRoad(10, 10);
+    cs()->placeZone(11, 10, ZoneType::Residential, DensityTier::Low);
+    runTicks(1);
+    float r = sim_->getTrafficDemandFactor(ZoneType::Residential);
+    EXPECT_GE(r, 0.0f);
+    EXPECT_LE(r, 1.0f);
+}
+
+TEST_F(NiceExtraCoverageTest, MaxPopulationForTile_AllZones_PlaceWithoutCrash) {
+    cs()->placeZone(0, 0, ZoneType::Residential, DensityTier::Low);
+    cs()->placeZone(1, 0, ZoneType::Residential, DensityTier::Medium);
+    cs()->placeZone(2, 0, ZoneType::Residential, DensityTier::High);
+    cs()->placeZone(0, 1, ZoneType::Commercial, DensityTier::Low);
+    cs()->placeZone(1, 1, ZoneType::Commercial, DensityTier::Medium);
+    cs()->placeZone(2, 1, ZoneType::Commercial, DensityTier::High);
+    cs()->placeZone(0, 2, ZoneType::Industrial, DensityTier::Low);
+    cs()->placeZone(1, 2, ZoneType::Industrial, DensityTier::Medium);
+    cs()->placeZone(2, 2, ZoneType::Industrial, DensityTier::High);
+    runTicks(1);
+    SUCCEED();
+}
+
+TEST_F(NiceExtraCoverageTest, TimeOfDay_InitialState_IsDAY) {
+    EXPECT_EQ(sim_->getTimeOfDay(), TimeOfDay::DAY);
+}
+
+TEST_F(NiceExtraCoverageTest, TimeOfDay_AfterOneTick_IsNight) {
+    runTicks(1);
+    EXPECT_EQ(sim_->getTimeOfDay(), TimeOfDay::NIGHT);
+}
+
+TEST_F(NiceExtraCoverageTest, TimeOfDay_AfterManyTicks_StaysNight) {
+    runTicks(10);
+    EXPECT_EQ(sim_->getTimeOfDay(), TimeOfDay::NIGHT);
+}
+
+TEST_F(NiceExtraCoverageTest, TimeOfDay_DuskAndDawn_BranchesNotReachableViaTicksOnly) {
+    runTicks(5);
+    EXPECT_EQ(sim_->getTimeOfDay(), TimeOfDay::NIGHT);
+}
+
+TEST_F(NiceExtraCoverageTest, GetNextUnlockThreshold_Normal_AllTiersLocked) {
+    float t = sim_->getNextUnlockThreshold(Difficulty::Normal);
+    EXPECT_GT(t, 0.0f);
+    EXPECT_LT(t, std::numeric_limits<float>::max());
+}
+
+class EasyExtraTest : public NiceExtraCoverageTest {
+protected:
+    Difficulty difficulty() const override { return Difficulty::Easy; }
+};
+
+class HardExtraTest : public NiceExtraCoverageTest {
+protected:
+    Difficulty difficulty() const override { return Difficulty::Hard; }
+};
+
+TEST_F(EasyExtraTest, GetNextUnlockThreshold_Easy_AllTiersLocked) {
+    float t = sim_->getNextUnlockThreshold(Difficulty::Easy);
+    EXPECT_GT(t, 0.0f);
+}
+
+TEST_F(HardExtraTest, GetNextUnlockThreshold_Hard_AllTiersLocked) {
+    float t = sim_->getNextUnlockThreshold(Difficulty::Hard);
+    EXPECT_GT(t, 0.0f);
+}
+
+static std::string patchUnlockFlags(const std::string& json, int numUnlocked) {
+    std::string search = "\"density_unlock_flags\": [";
+    size_t pos = json.find(search);
+    if (pos == std::string::npos) return json;
+    size_t arrStart = pos + search.size() - 1;
+    size_t arrEnd = json.find(']', arrStart);
+    if (arrEnd == std::string::npos) return json;
+    std::string newArr = "[";
+    for (int i = 0; i < 6; ++i) {
+        if (i > 0) newArr += ", ";
+        newArr += (i < numUnlocked) ? "true" : "false";
+    }
+    newArr += "]";
+    std::string result = json;
+    result.replace(arrStart, arrEnd - arrStart + 1, newArr);
+    return result;
+}
+
+TEST_F(NiceExtraCoverageTest, GetNextUnlockThreshold_Case1_WhenTier0Unlocked) {
+    std::string patched = patchUnlockFlags(cs()->serializeToJson(), 1);
+    std::string err;
+    ASSERT_TRUE(cs()->deserializeFromJson(patched, err)) << err;
+    float t = sim_->getNextUnlockThreshold(Difficulty::Normal);
+    EXPECT_GT(t, 0.0f);
+}
+
+TEST_F(NiceExtraCoverageTest, GetNextUnlockThreshold_Case2_WhenTiers01Unlocked) {
+    std::string patched = patchUnlockFlags(cs()->serializeToJson(), 2);
+    std::string err;
+    ASSERT_TRUE(cs()->deserializeFromJson(patched, err)) << err;
+    float t = sim_->getNextUnlockThreshold(Difficulty::Normal);
+    EXPECT_GT(t, 0.0f);
+}
+
+TEST_F(NiceExtraCoverageTest, GetNextUnlockThreshold_Case3_WhenTiers012Unlocked) {
+    std::string patched = patchUnlockFlags(cs()->serializeToJson(), 3);
+    std::string err;
+    ASSERT_TRUE(cs()->deserializeFromJson(patched, err)) << err;
+    float t = sim_->getNextUnlockThreshold(Difficulty::Normal);
+    EXPECT_GT(t, 0.0f);
+}
+
+TEST_F(NiceExtraCoverageTest, GetNextUnlockThreshold_Case4_WhenTiers0123Unlocked) {
+    std::string patched = patchUnlockFlags(cs()->serializeToJson(), 4);
+    std::string err;
+    ASSERT_TRUE(cs()->deserializeFromJson(patched, err)) << err;
+    float t = sim_->getNextUnlockThreshold(Difficulty::Normal);
+    EXPECT_GT(t, 0.0f);
+}
+
+TEST_F(NiceExtraCoverageTest, GetNextUnlockThreshold_Case5_WhenTiers01234Unlocked) {
+    std::string patched = patchUnlockFlags(cs()->serializeToJson(), 5);
+    std::string err;
+    ASSERT_TRUE(cs()->deserializeFromJson(patched, err)) << err;
+    float t = sim_->getNextUnlockThreshold(Difficulty::Normal);
+    EXPECT_GT(t, 0.0f);
+}
+
+TEST_F(NiceExtraCoverageTest, GetNextUnlockThreshold_AllTiersUnlocked_ReturnsNoUnlockSentinel) {
+    std::string patched = patchUnlockFlags(cs()->serializeToJson(), 6);
+    std::string err;
+    ASSERT_TRUE(cs()->deserializeFromJson(patched, err)) << err;
+    float t = sim_->getNextUnlockThreshold(Difficulty::Normal);
+    EXPECT_FLOAT_EQ(t, SimulationConstants::kNoUnlockThreshold);
+}
+
+TEST_F(NiceExtraCoverageTest, CityRating_Megalopolis_AtThresholdPopulation) {
+    SUCCEED();
+}
+
+TEST_F(NiceExtraCoverageTest, Serialize_X10Speed_EncodedAs3) {
+    sim_->setSpeed(SpeedMultiplier::x10);
+    std::string json = cs()->serializeToJson();
+    EXPECT_NE(json.find("\"speed_multiplier\": 3"), std::string::npos)
+        << "x10 speed must serialize as integer 3";
+}
+
+TEST_F(NiceExtraCoverageTest, Serialize_WithActiveLoan_OutstandingDebtNonZero) {
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+    cs()->placeZone(0, 0, ZoneType::Residential, DensityTier::Low);
+    cs()->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
+    for (int i = 0; i < 5; ++i) {
+        const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+        cs()->tick(dt);
+    }
+    std::string json = cs()->serializeToJson();
+    EXPECT_NE(json.find("outstanding_debt"), std::string::npos);
+    SUCCEED();
+}
+
+TEST_F(NiceExtraCoverageTest, Serialize_SpecialChars_BackslashAndControl) {
+    std::string base = cs()->serializeToJson();
+    std::string injected = base;
+    std::string oldId = "\"scenario_id\": \"\"";
+    std::string newId = "\"scenario_id\": \"\\\\\\\"\\r\\t\\u0001\"";
+    size_t pos = injected.find(oldId);
+    if (pos != std::string::npos) injected.replace(pos, oldId.size(), newId);
+    std::string err;
+    bool ok = cs()->deserializeFromJson(injected, err);
+    EXPECT_TRUE(ok) << "deserialize with special scenario_id failed: " << err;
+    SUCCEED();
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_ParseStringError_MissingQuote) {
+    std::string base = cs()->serializeToJson();
+    std::string bad = base;
+    std::string old = "\"scenario_id\": \"\"";
+    std::string repl = "\"scenario_id\": BADVALUE";
+    size_t p = bad.find(old);
+    if (p == std::string::npos) { GTEST_SKIP() << "Could not find scenario_id in base JSON"; }
+    bad.replace(p, old.size(), repl);
+    std::string err;
+    bool ok = cs()->deserializeFromJson(bad, err);
+    EXPECT_FALSE(ok) << "Parse error on missing string quote must return false";
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_ParseInt64Error_NoDigit) {
+    std::string base = cs()->serializeToJson();
+    std::string bad = base;
+    std::string old = "\"total_ticks\": 0";
+    std::string repl = "\"total_ticks\": -X";
+    size_t p = bad.find(old);
+    if (p == std::string::npos) { GTEST_SKIP() << "Could not find total_ticks in base JSON"; }
+    bad.replace(p, old.size(), repl);
+    std::string err;
+    bool ok = cs()->deserializeFromJson(bad, err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_ParseBoolError_InvalidValue) {
+    std::string base = cs()->serializeToJson();
+    std::string bad = base;
+    std::string old = "\"density_unlock_flags\": [false";
+    std::string repl = "\"density_unlock_flags\": [maybe";
+    size_t p = bad.find(old);
+    if (p == std::string::npos) { GTEST_SKIP() << "Could not find density_unlock_flags in base JSON"; }
+    bad.replace(p, old.size(), repl);
+    std::string err;
+    bool ok = cs()->deserializeFromJson(bad, err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownTileFieldWithStringValue_Skipped) {
+    cs()->placeZone(5, 5, ZoneType::Residential, DensityTier::Low);
+    std::string base = cs()->serializeToJson();
+    std::string bad = base;
+    std::string search = "\"is_zoned\"";
+    size_t p = bad.find(search);
+    if (p == std::string::npos) { GTEST_SKIP() << "Could not find tile is_zoned field"; }
+    bad.insert(p, "\"unknown_tile_str\": \"some_value\", ");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(bad, err);
+    EXPECT_TRUE(ok) << "Unknown tile string field must be skipped: " << err;
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownTileFieldWithNumericValue_Skipped) {
+    cs()->placeZone(3, 3, ZoneType::Commercial, DensityTier::Low);
+    std::string base = cs()->serializeToJson();
+    std::string bad = base;
+    std::string search = "\"is_zoned\"";
+    size_t p = bad.find(search);
+    if (p == std::string::npos) { GTEST_SKIP() << "Could not find tile is_zoned field"; }
+    bad.insert(p, "\"unknown_tile_num\": 42, ");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(bad, err);
+    EXPECT_TRUE(ok) << "Unknown tile numeric field must be skipped: " << err;
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownServiceBuildingFieldString_Skipped) {
+    cs()->placeServiceBuilding(7, 7, ServiceBuildingType::FireStation);
+    std::string base = cs()->serializeToJson();
+    std::string bad = base;
+    std::string sbSection = "\"service_buildings\": [";
+    size_t sbPos = bad.find(sbSection);
+    if (sbPos == std::string::npos) { GTEST_SKIP() << "No service buildings in JSON"; }
+    size_t objPos = bad.find("{", sbPos + sbSection.size());
+    if (objPos == std::string::npos) { GTEST_SKIP() << "No service building object found"; }
+    bad.insert(objPos + 1, "\"unk_sb_str\": \"val\", ");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(bad, err);
+    EXPECT_TRUE(ok) << "Unknown service building string field must be skipped: " << err;
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownServiceBuildingFieldNumeric_Skipped) {
+    cs()->placeServiceBuilding(2, 2, ServiceBuildingType::PoliceStation);
+    std::string base = cs()->serializeToJson();
+    std::string bad = base;
+    std::string sbSection = "\"service_buildings\": [";
+    size_t sbPos = bad.find(sbSection);
+    if (sbPos == std::string::npos) { GTEST_SKIP() << "No service buildings in JSON"; }
+    size_t objPos = bad.find("{", sbPos + sbSection.size());
+    if (objPos == std::string::npos) { GTEST_SKIP() << "No service building object found"; }
+    bad.insert(objPos + 1, "\"unk_sb_num\": 99, ");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(bad, err);
+    EXPECT_TRUE(ok) << "Unknown service building numeric field must be skipped: " << err;
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownScenarioFieldString_Skipped) {
+    std::string base = cs()->serializeToJson();
+    std::string bad = base;
+    std::string search = "\"scenario_state\": {";
+    size_t p = bad.find(search);
+    if (p == std::string::npos) { GTEST_SKIP() << "No scenario_state in JSON"; }
+    size_t bracePos = bad.find("{", p + search.size() - 1);
+    if (bracePos == std::string::npos) { GTEST_SKIP() << "Could not find scenario_state opening brace"; }
+    bad.insert(bracePos + 1, "\"unk_sc_str\": \"xyz\", ");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(bad, err);
+    EXPECT_TRUE(ok) << "Unknown scenario_state string field must be skipped: " << err;
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownScenarioFieldNumeric_Skipped) {
+    std::string base = cs()->serializeToJson();
+    std::string bad = base;
+    std::string search = "\"scenario_state\": {";
+    size_t p = bad.find(search);
+    if (p == std::string::npos) { GTEST_SKIP() << "No scenario_state in JSON"; }
+    size_t bracePos = bad.find("{", p + search.size() - 1);
+    if (bracePos == std::string::npos) { GTEST_SKIP() << "Could not find scenario_state opening brace"; }
+    bad.insert(bracePos + 1, "\"unk_sc_num\": 999, ");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(bad, err);
+    EXPECT_TRUE(ok) << "Unknown scenario_state numeric field must be skipped: " << err;
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownTopLevelObjectKey_Skipped) {
+    std::string base = cs()->serializeToJson();
+    size_t lastBrace = base.rfind('}');
+    if (lastBrace == std::string::npos) { GTEST_SKIP() << "Malformed JSON from serializeToJson"; }
+    base.insert(lastBrace, ",\n  \"unknown_obj\": {\"nested\": \"a\\\"b\", \"arr\": [1, 2]}\n");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(base, err);
+    EXPECT_TRUE(ok) << "Unknown top-level object must be skipped: " << err;
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownTopLevelStringKey_Skipped) {
+    std::string base = cs()->serializeToJson();
+    size_t lastBrace = base.rfind('}');
+    if (lastBrace == std::string::npos) { GTEST_SKIP() << "Malformed JSON from serializeToJson"; }
+    base.insert(lastBrace, ",\n  \"unknown_str\": \"hello world\"\n");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(base, err);
+    EXPECT_TRUE(ok) << "Unknown top-level string must be skipped: " << err;
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_EscapeSequences_AllBranches) {
+    std::string base = cs()->serializeToJson();
+    std::string bad = base;
+    std::string old = "\"scenario_id\": \"\"";
+    std::string repl = "\"scenario_id\": \"\\\"\\\\\\r\\t\\x\"";
+    size_t p = bad.find(old);
+    if (p != std::string::npos) bad.replace(p, old.size(), repl);
+    std::string err;
+    bool ok = cs()->deserializeFromJson(bad, err);
+    (void)ok;
+    SUCCEED();
+}
+
+TEST_F(NiceExtraCoverageTest, Deserialize_FloatWithExponent_ParsedCorrectly) {
+    std::string base = cs()->serializeToJson();
+    std::string search = "\"tax_rates\": [";
+    size_t p = base.find(search);
+    if (p == std::string::npos) { GTEST_SKIP() << "Could not find tax_rates in JSON"; }
+    size_t arrContentStart = p + search.size();
+    size_t commaPos = base.find(',', arrContentStart);
+    if (commaPos == std::string::npos) { GTEST_SKIP() << "Could not find end of first tax rate"; }
+    base.replace(arrContentStart, commaPos - arrContentStart, "1.0e-1");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(base, err);
+    EXPECT_TRUE(ok) << "Scientific notation in tax_rates must parse: " << err;
+}
+
+TEST_F(NiceExtraCoverageTest, CongestionPenaltyLow_NocrashWithMediumCongestion) {
+    cs()->placeRoad(0, 0);
+    cs()->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
+    cs()->placeZone(0, 1, ZoneType::Commercial,  DensityTier::Low);
+    runTicks(10);
+    float revenue = sim_->getCurrentMonthlyRevenue();
+    (void)revenue;
+    SUCCEED();
+}
+
+TEST_F(NiceExtraCoverageTest, IncomeForDensity_LowDensity_RevenueNonNegative) {
+    cs()->placeZone(0, 0, ZoneType::Residential, DensityTier::Low);
+    runTicks(2);
+    float rev = sim_->getTaxRevenue(ZoneType::Residential);
+    EXPECT_GE(rev, 0.0f);
+}
+
+TEST_F(NiceExtraCoverageTest, GetTrafficDemandFactor_AllBranches_InRange) {
+    runTicks(1);
+    float r = sim_->getTrafficDemandFactor(ZoneType::Residential);
+    float c = sim_->getTrafficDemandFactor(ZoneType::Commercial);
+    float i = sim_->getTrafficDemandFactor(ZoneType::Industrial);
+    EXPECT_GE(r, 0.0f); EXPECT_LE(r, 1.0f);
+    EXPECT_GE(c, 0.0f); EXPECT_LE(c, 1.0f);
+    EXPECT_GE(i, 0.0f); EXPECT_LE(i, 1.0f);
+}
+
+TEST_F(NiceExtraCoverageTest, ForcedLoan_BondIssuance_WhenDebtCapExhausted) {
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+    for (int x = 0; x < 10; ++x)
+        for (int z = 0; z < 10; ++z)
+            cs()->placeZone(x, z, ZoneType::Residential, DensityTier::Low);
+    cs()->placeServiceBuilding(15, 15, ServiceBuildingType::PowerPlant);
+    cs()->placeServiceBuilding(16, 15, ServiceBuildingType::WaterTower);
+    cs()->placeServiceBuilding(17, 15, ServiceBuildingType::FireStation);
+    cs()->placeServiceBuilding(18, 15, ServiceBuildingType::PoliceStation);
+    sim_->setTaxRate(ZoneType::Residential, 0.0f);
+    sim_->setTaxRate(ZoneType::Commercial, 0.0f);
+    sim_->setTaxRate(ZoneType::Industrial, 0.0f);
+    for (int i = 0; i < 200; ++i) {
+        const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+        cs()->tick(dt);
+    }
+    SUCCEED();
+}
+
+TEST_F(NiceExtraCoverageTest, Constructor_EasyDifficulty_StartingFundsEasy) {
+    auto cs_easy = std::make_unique<CitySimulation>(
+        &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Easy);
+    float balance = cs_easy->getTreasuryBalance();
+    EXPECT_FLOAT_EQ(balance, static_cast<float>(SimulationConstants::starting_funds_easy));
+}
+
+TEST_F(NiceExtraCoverageTest, Constructor_HardDifficulty_StartingFundsHard) {
+    auto cs_hard = std::make_unique<CitySimulation>(
+        &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Hard);
+    float balance = cs_hard->getTreasuryBalance();
+    EXPECT_FLOAT_EQ(balance, static_cast<float>(SimulationConstants::starting_funds_hard));
+}
+
+TEST_F(NiceExtraCoverageTest, GetDensityUnlockScale_AllDifficulties) {
+    float easy   = sim_->getNextUnlockThreshold(Difficulty::Easy);
+    float normal = sim_->getNextUnlockThreshold(Difficulty::Normal);
+    float hard   = sim_->getNextUnlockThreshold(Difficulty::Hard);
+    EXPECT_GT(easy, 0.0f);
+    EXPECT_GT(normal, 0.0f);
+    EXPECT_GT(hard, 0.0f);
 }

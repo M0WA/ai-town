@@ -557,17 +557,10 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/save_system_real_test.cpp
 )
 
-# Coverage gap tests: target the ~30.8% miss identified in CI (static helpers,
-# speed/pause control, accessors, JSON round-trip, signal logic, demolish branches).
+# Extra simulation tests: static helpers, speed/pause control, accessors, JSON round-trip,
+# signal logic, demolish branches, smoothstep, time-of-day, bond issuance, escape sequences.
 target_sources(simulation_tests PRIVATE
-    tests/simulation/city_simulation_coverage_test.cpp
-)
-
-# Additional coverage gap tests: smoothstep, travelTimeDemand, time-of-day transitions,
-# bond issuance, JSON escape sequences, density-unlock lambda cases, SaveSystem error paths.
-target_sources(simulation_tests PRIVATE
-    tests/simulation/city_simulation_extra_coverage_test.cpp
-    tests/simulation/save_system_coverage_test.cpp
+    tests/simulation/city_simulation_extra_test.cpp
 )
 
 # Phase 10: AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier().
@@ -699,9 +692,9 @@ target_sources(ui_tests PRIVATE
 
 # (coverage_gap_test.cpp and query_panel_coverage_test.cpp dissolved —
 #  tests distributed to semantically correct files)
-# main_menu_coverage_test.cpp: MainMenuPanel keyboard navigation and lifecycle tests.
+# main_menu_flow_test.cpp: MainMenuPanel keyboard navigation and lifecycle tests.
 target_sources(ui_tests PRIVATE
-    tests/ui/main_menu_coverage_test.cpp
+    tests/ui/main_menu_flow_test.cpp
 )
 
 # Phase 11: stinger_milestone per-frame polling tests.
@@ -715,16 +708,16 @@ target_sources(ui_tests PRIVATE
     tests/ui/keybindings_load_test.cpp
 )
 
-# Coverage gap: HUD ratingName() variants, formatDollar() negative branch,
+# HUD display tests: ratingName() variants, formatDollar() negative branch,
 # grace-period fade/expire, budget-flash setElementAlpha.
 target_sources(ui_tests PRIVATE
-    tests/ui/hud_coverage_test.cpp
+    tests/ui/hud_display_test.cpp
 )
 
-# Coverage gap: UIManager pending-quit state machine (unsaved-changes modal,
+# UIManager quit tests: pending-quit state machine (unsaved-changes modal,
 # PendingQuitAction::Desktop/ToMenu dispatch), setSaveSystem/setSaveAvailable/setSaveStatusText.
 target_sources(ui_tests PRIVATE
-    tests/ui/ui_manager_quit_coverage_test.cpp
+    tests/ui/ui_manager_quit_test.cpp
 )
 
 # Phase 11c: Settings, Controls & Save/Load Dialog Polish.
@@ -743,12 +736,12 @@ target_sources(ui_tests PRIVATE
     tests/ui/main_menu_save_state_test.cpp
 )
 
-# Extra coverage gap tests: ModalDialog showRestoreDefaultsConfirm, SettingsPanel
+# UI panel tests: ModalDialog showRestoreDefaultsConfirm, SettingsPanel
 # WASD preset + restore-defaults polling, MainMenuPanel loading-screen paths,
 # KeyBindingsPanel draw/resetToDefaults/arrow-key capture, UIManager keybindings
 # persistence and save-failure retry, budget-tick forwarding.
 target_sources(ui_tests PRIVATE
-    tests/ui/ui_coverage_extra_test.cpp
+    tests/ui/ui_panel_test.cpp
 )
 
 # ----------------------------------------------------------------------------
