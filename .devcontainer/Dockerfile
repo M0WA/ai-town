@@ -49,6 +49,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   automake \
   libtool \
   openssh-client \
+  valgrind \
+  binutils \
   xauth \
   libnvtt-bin \
   mediainfo \
