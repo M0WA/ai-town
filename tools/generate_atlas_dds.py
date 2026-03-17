@@ -1370,6 +1370,91 @@ def draw_roof_cell(buf, W, H):
     _add_noise(buf, W, H, intensity=6, density=0.6, seed=5001)
 
 
+def draw_ground_garden(buf, W, H):
+    """Ground feature cell (5,1): mid-green grass/garden patch."""
+    base = (80, 130, 60)
+    _fill_rect(buf, W, 0, 0, W, H, *base)
+    # Subtle grass-blade noise (vertical streaks)
+    _add_noise(buf, W, H, intensity=12, density=0.4, seed=5101)
+    # Darker horizontal grass-blade lines for texture
+    rng = random.Random(5102)
+    for _ in range(W * H // 20):
+        bx = rng.randint(0, W - 1)
+        by = rng.randint(0, H - 1)
+        blade_h = rng.randint(2, 6)
+        dark = rng.randint(40, 70)
+        for dy in range(blade_h):
+            if by + dy < H:
+                r, g, b = buf[(by + dy) * W + bx]
+                buf[(by + dy) * W + bx] = (_clamp(r - dark // 3), _clamp(g - dark // 4), _clamp(b - dark // 2))
+
+
+def draw_ground_pool(buf, W, H):
+    """Ground feature cell (5,2): pool-blue water."""
+    base = (70, 160, 200)
+    _fill_rect(buf, W, 0, 0, W, H, *base)
+    # Faint tile-grid lines (lighter lines every ~32 px)
+    grid_spacing = max(16, W // 16)
+    line_rgb = (90, 180, 220)
+    for x in range(0, W, grid_spacing):
+        _vline(buf, W, H, x, 0, H, *line_rgb)
+    for y in range(0, H, grid_spacing):
+        _hline(buf, W, H, y, 0, W, *line_rgb)
+    # Subtle ripple noise
+    _add_noise(buf, W, H, intensity=8, density=0.2, seed=5201)
+
+
+def draw_ground_paving(buf, W, H):
+    """Ground feature cell (5,3): light-grey concrete forecourt."""
+    base = (190, 185, 178)
+    _fill_rect(buf, W, 0, 0, W, H, *base)
+    # Faint paving joint lines (darker lines every ~64 px)
+    joint_spacing = max(32, W // 8)
+    joint_rgb = (155, 150, 144)
+    for x in range(0, W, joint_spacing):
+        _vline(buf, W, H, x, 0, H, *joint_rgb)
+    for y in range(0, H, joint_spacing):
+        _hline(buf, W, H, y, 0, W, *joint_rgb)
+    _add_noise(buf, W, H, intensity=6, density=0.25, seed=5301)
+
+
+def draw_ground_tarmac(buf, W, H):
+    """Ground feature cell (5,4): dark asphalt tarmac."""
+    base = (55, 55, 58)
+    _fill_rect(buf, W, 0, 0, W, H, *base)
+    # Subtle aggregate texture (random lighter/darker specks)
+    _add_noise(buf, W, H, intensity=10, density=0.5, seed=5401)
+    # Occasional coarse aggregate specks
+    rng = random.Random(5402)
+    for _ in range(W * H // 80):
+        bx = rng.randint(0, W - 1)
+        by = rng.randint(0, H - 1)
+        speck = rng.randint(15, 30)
+        r, g, b = buf[by * W + bx]
+        buf[by * W + bx] = (_clamp(r + speck), _clamp(g + speck), _clamp(b + speck))
+
+
+def draw_ground_gravel(buf, W, H):
+    """Ground feature cell (5,5): beige/tan gravel."""
+    base = (180, 165, 130)
+    _fill_rect(buf, W, 0, 0, W, H, *base)
+    # Irregular gravel speckle noise
+    _add_noise(buf, W, H, intensity=20, density=0.6, seed=5501)
+    # Coarse gravel chunks (small rectangles)
+    rng = random.Random(5502)
+    for _ in range(W * H // 50):
+        bx = rng.randint(0, W - 3)
+        by = rng.randint(0, H - 3)
+        cw = rng.randint(2, 5)
+        ch = rng.randint(2, 4)
+        dr = rng.randint(-25, 25)
+        for dy in range(ch):
+            for dx in range(cw):
+                if by + dy < H and bx + dx < W:
+                    r, g, b = buf[(by + dy) * W + (bx + dx)]
+                    buf[(by + dy) * W + (bx + dx)] = (_clamp(r + dr), _clamp(g + dr * 9 // 10), _clamp(b + dr * 7 // 10))
+
+
 # ---------------------------------------------------------------------------
 # Cell draw dispatch table
 # ---------------------------------------------------------------------------
@@ -1416,6 +1501,11 @@ CELL_DRAW_FNS = {
     (4, 6): draw_svc_power_plant,
     (4, 7): draw_svc_water_tower,
     (5, 0): draw_roof_cell,
+    (5, 1): draw_ground_garden,
+    (5, 2): draw_ground_pool,
+    (5, 3): draw_ground_paving,
+    (5, 4): draw_ground_tarmac,
+    (5, 5): draw_ground_gravel,
 }
 
 RESERVED_COLOR = (72, 72, 72)

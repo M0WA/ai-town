@@ -422,6 +422,47 @@ def _parse_b3d_uv_channel0(filepath):
     return uvs
 
 
+def _parse_b3d_positions(filepath):
+    """Parse all vertex (x, y, z) positions from a B3D file's VRTS chunk.
+
+    Returns list of (x, y, z) float tuples.
+    Raises AssertionError on format errors.
+    """
+    with open(filepath, "rb") as f:
+        data = f.read()
+
+    # Locate VRTS chunk using same approach as _parse_b3d_uv_channel0
+    # Search for "VRTS" tag
+    vrts_pos = data.find(b"VRTS")
+    assert vrts_pos >= 0, "VRTS chunk not found"
+    payload_len = struct.unpack_from("<i", data, vrts_pos + 4)[0]
+    p = vrts_pos + 8  # start of VRTS payload
+
+    flags = struct.unpack_from("<i", data, p)[0]; p += 4
+    tc_sets = struct.unpack_from("<i", data, p)[0]; p += 4
+    has_normals = bool(flags & 1)
+    # Read tc_flags (one int per tc_set)
+    for _ in range(tc_sets):
+        p += 4
+
+    # Vertex stride: 3 floats pos + (3 floats normals if has_normals) + (2 floats * tc_sets)
+    stride = 3 * 4
+    if has_normals:
+        stride += 3 * 4
+    stride += tc_sets * 2 * 4
+
+    vrts_end = vrts_pos + 8 + payload_len
+    positions = []
+    while p + stride <= vrts_end:
+        x = struct.unpack_from("<f", data, p)[0]
+        y = struct.unpack_from("<f", data, p + 4)[0]
+        z = struct.unpack_from("<f", data, p + 8)[0]
+        positions.append((x, y, z))
+        p += stride
+
+    return positions
+
+
 # ---------------------------------------------------------------------------
 # Check #4: UV channel 0 within assigned 8×8 atlas cell for all building LOD0
 # models. Also validates .meta atlas_cell matches Phase 11e Cell Assignment Table.
@@ -486,11 +527,17 @@ def check_4_building_uv_atlas_cell(assets_dir):
         # ROOF_CELL = (5, 0): shared roof cell used by all buildings for roof faces
         roof_u_min, roof_u_max = 0.0, 0.125   # col 0 → U=[0.0, 0.125]
         roof_v_min, roof_v_max = 0.625, 0.75  # row 5 → V=[0.625, 0.75]
+        # Phase 11f ground-feature cells: row 5, cols 1-5 — UV V=[0.625, 0.75]
+        GROUND_V_MIN = 5 / 8.0 - TOL   # = 0.625 - TOL
+        GROUND_V_MAX = 6 / 8.0 + TOL   # = 0.75 + TOL
+        GROUND_U_RANGES = [(col / 8.0 - TOL, (col + 1) / 8.0 + TOL) for col in range(1, 6)]
         violation = None
         for u, v in uvs:
             in_wall = u_min - TOL <= u <= u_max + TOL and v_min - TOL <= v <= v_max + TOL
             in_roof = roof_u_min - TOL <= u <= roof_u_max + TOL and roof_v_min - TOL <= v <= roof_v_max + TOL
-            if not (in_wall or in_roof):
+            in_ground = (GROUND_V_MIN <= v <= GROUND_V_MAX and
+                         any(u_lo <= u <= u_hi for u_lo, u_hi in GROUND_U_RANGES))
+            if not (in_wall or in_roof or in_ground):
                 violation = (u, v)
                 break
         if violation is not None:
@@ -505,6 +552,60 @@ def check_4_building_uv_atlas_cell(assets_dir):
 
     if not errors:
         print(f"  check_4: {checked} building LOD0 models verified UV within assigned 8x8 atlas cell")
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #4b: Bounding box of all building LOD0 models must include ground
+# quad vertices: min.Y <= 0 and max.Y >= 0.01 (Phase 11f requirement).
+# ---------------------------------------------------------------------------
+def check_4b_building_bbox(assets_dir):
+    """Check #4b: verify bounding box of each building LOD0 includes ground quad at y=0.01.
+
+    Reads all vertex positions from each _lod0.b3d file and checks:
+      - min.Y <= 0   (building base at ground level)
+      - max.Y >= 0.01  (ground quad vertex present at y=0.01)
+
+    Returns a list of error strings. Empty list means the check passed.
+    """
+    buildings_dir = os.path.join(assets_dir, "3d", "buildings")
+    if not os.path.isdir(buildings_dir):
+        return [f"Check #4b: buildings directory not found: {buildings_dir}"]
+
+    errors = []
+    checked = 0
+
+    for asset_name in _PHASE_11E_CELL_ASSIGNMENT:
+        lod0_path = os.path.join(buildings_dir, f"{asset_name}_lod0.b3d")
+        if not os.path.exists(lod0_path):
+            errors.append(f"Check #4b {asset_name}: missing {lod0_path}")
+            continue
+        try:
+            positions = _parse_b3d_positions(lod0_path)
+        except Exception as exc:
+            errors.append(f"Check #4b {asset_name}: cannot parse {lod0_path}: {exc}")
+            continue
+        if not positions:
+            errors.append(f"Check #4b {asset_name}: no vertices found in {lod0_path}")
+            continue
+
+        ys = [p[1] for p in positions]
+        min_y = min(ys)
+        max_y = max(ys)
+        TOL = 1e-4
+        if min_y > TOL:
+            errors.append(
+                f"Check #4b {asset_name}: min.Y={min_y:.6f} > 0 "
+                f"(building should start at y=0)")
+        if max_y < 0.01 - TOL:
+            errors.append(
+                f"Check #4b {asset_name}: max.Y={max_y:.6f} < 0.01 "
+                f"(ground quad at y=0.01 appears missing)")
+        else:
+            checked += 1
+
+    if not errors:
+        print(f"  check_4b: {checked} building LOD0 bounding boxes verified (min.Y<=0, max.Y>=0.01)")
     return errors
 
 
@@ -2756,6 +2857,7 @@ def run_all_checks():
     # Run each check and collect errors.
     checks = [
         ("Check #4 (building LOD0 UV atlas cell)", check_4_building_uv_atlas_cell),
+        ("Check #4b (building LOD0 bounding box ground quad)", check_4b_building_bbox),
         ("Check #21 (zone loop silence-floor)", check_21_zone_loop_silence_floor),
         ("Check #22 (WAV SFX format)", check_22_wav_sfx_format),
         ("Check #23 (sprite sheet PNG)", check_23_sprite_sheet_png),

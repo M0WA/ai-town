@@ -369,6 +369,15 @@ WALL_CELLS = {
 }
 ROOF_CELL = (5, 0)  # shared roof cell — row 5 (reserved range) per building-atlas-layout.md
 
+# Phase 11f ground-feature atlas cells — row 5, cols 1-5
+GROUND_CELLS = {
+    "garden":  (5, 1),
+    "pool":    (5, 2),
+    "paving":  (5, 3),
+    "tarmac":  (5, 4),
+    "gravel":  (5, 5),
+}
+
 # Building heights per tier (in Irrlicht unit space, before setScale)
 # low=2 floors → 0.6 units, med=4 floors → 1.2 units, high=8 floors → 2.4 units
 TIER_HEIGHT = {
@@ -442,6 +451,27 @@ class MeshAccum:
 
     def to_b3d(self, tex="buildings_atlas_d.dds"):
         return build_b3d(self.verts, self.tris, texture_name=tex)
+
+
+def _add_ground_quad(m, gtype, xmin, xmax, zmin, zmax):
+    """
+    Add a flat upward-facing quad at y = 0.01 (1 cm above terrain) for ground
+    feature type gtype. Prevents depth-buffer conflict with terrain mesh at y = 0.
+    UV-mapped to GROUND_CELLS[gtype].
+
+    Args:
+        m: MeshAccum to add geometry to
+        gtype: ground feature type string (key of GROUND_CELLS)
+        xmin, xmax, zmin, zmax: XZ extents of the ground patch
+    """
+    row, col = GROUND_CELLS[gtype]
+    # CCW from above (+Y): BL->BR->TR->TL
+    v, t = make_quad(
+        (xmin, 0.01, zmin), (xmax, 0.01, zmin),
+        (xmax, 0.01, zmax), (xmin, 0.01, zmax),
+        (0.0, 1.0, 0.0), row, col
+    )
+    m.add(v, t)
 
 
 # ---------------------------------------------------------------------------
@@ -989,6 +1019,7 @@ def _build_res_low(zone, tier, variant, lod):
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
+            _add_ground_quad(m, "garden", -5*S, 5*S, -6*S, 6*S)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1001,6 +1032,7 @@ def _build_res_low(zone, tier, variant, lod):
         porch_w = 2.0*S
         porch_y = 3.0*S
         m.add_box(-porch_w/2, porch_w/2, porch_y, porch_y+0.2*S, -hz-porch_d, -hz, wr, wc)
+        _add_ground_quad(m, "garden", -5*S, 5*S, -6*S, 6*S)
         return m.to_b3d()
 
     elif variant == "02":
@@ -1013,12 +1045,14 @@ def _build_res_low(zone, tier, variant, lod):
             m.add_box(-hx, hx, 0, unit_h, -hz, hz, wr, wc, rr, rc)
             _add_hipped_roof(m, wr, wc, rr, rc, -hx, 0, unit_h, ridge_h_val, -hz, hz)
             _add_hipped_roof(m, wr, wc, rr, rc, 0, hx, unit_h, ridge_h_val, -hz, hz)
+            _add_ground_quad(m, "garden", -7*S, 7*S, -5*S, 5*S)
             return m.to_b3d()
         # LOD0: two unit boxes
         m.add_box(-hx, 0, 0, unit_h, -hz, hz, wr, wc, rr, rc)
         m.add_box(0, hx, 0, unit_h, -hz, hz, wr, wc, rr, rc)
         _add_hipped_roof(m, wr, wc, rr, rc, -hx, 0, unit_h, ridge_h_val, -hz, hz)
         _add_hipped_roof(m, wr, wc, rr, rc, 0, hx, unit_h, ridge_h_val, -hz, hz)
+        _add_ground_quad(m, "garden", -7*S, 7*S, -5*S, 5*S)
         return m.to_b3d()
 
     elif variant == "03":
@@ -1032,6 +1066,7 @@ def _build_res_low(zone, tier, variant, lod):
             m.add_quad((-hx, front_h, -hz), (hx, front_h, -hz),
                        (hx, rear_h, hz), (-hx, rear_h, hz),
                        (0, 1, 0.3), rr, rc)
+            _add_ground_quad(m, "garden", -7*S, 7*S, -5*S, 5*S)
             return m.to_b3d()
         # LOD0: three unit boxes
         for i in range(3):
@@ -1042,6 +1077,7 @@ def _build_res_low(zone, tier, variant, lod):
         # Bay window box projection on centre unit
         bay_w, bay_h = 0.8*S, 2.5*S
         m.add_box(-bay_w/2, bay_w/2, 0.3*S, 0.3*S+bay_h, -hz-bay_w, -hz, wr, wc, rr, rc)
+        _add_ground_quad(m, "garden", -7*S, 7*S, -5*S, 5*S)
         return m.to_b3d()
 
     elif variant == "04":
@@ -1052,6 +1088,7 @@ def _build_res_low(zone, tier, variant, lod):
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             _add_hipped_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
+            _add_ground_quad(m, "garden", -6*S, 6*S, -7*S, 7*S)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1060,6 +1097,7 @@ def _build_res_low(zone, tier, variant, lod):
         ver_d = 1.2*S
         ver_h = 2.4*S
         m.add_box(-hx-0.05*S, hx+0.05*S, ver_h, ver_h+0.1*S, -hz-ver_d, -hz, wr, wc)
+        _add_ground_quad(m, "garden", -6*S, 6*S, -7*S, 7*S)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1083,9 +1121,11 @@ def _build_res_med(zone, tier, variant, lod):
         par_h = 0.5*S
         if lod == 1:
             m.add_box(-hx, hx, 0, bh+par_h, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "garden", -9*S, 9*S, -7*S, 7*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         _add_parapet(m, wr, wc, -hx, hx, bh, -hz, hz, pw=0.03, ph=par_h*0.1)
+        _add_ground_quad(m, "garden", -9*S, 9*S, -7*S, 7*S)
         return m.to_b3d()
 
     elif variant == "02":
@@ -1100,6 +1140,7 @@ def _build_res_med(zone, tier, variant, lod):
                 x1 = x0 + unit_w
                 rh = 1.0*S if (i%2==0) else 0.8*S
                 _add_gabled_roof(m, wr, wc, rr, rc, x0, x1, unit_h, rh, -hz, hz)
+            _add_ground_quad(m, "garden", -9*S, 9*S, -6*S, 6*S)
             return m.to_b3d()
         # LOD0: four units with staggered setbacks
         for i in range(4):
@@ -1109,6 +1150,7 @@ def _build_res_med(zone, tier, variant, lod):
             m.add_box(x0, x1, 0, unit_h, -hz-setback, hz, wr, wc, rr, rc)
             rh = 1.0*S if (i%2==0) else 0.8*S
             _add_gabled_roof(m, wr, wc, rr, rc, x0, x1, unit_h, rh, -hz-setback, hz)
+        _add_ground_quad(m, "garden", -9*S, 9*S, -6*S, 6*S)
         return m.to_b3d()
 
     elif variant == "03":
@@ -1116,10 +1158,12 @@ def _build_res_med(zone, tier, variant, lod):
         h = 9*S
         if lod == 1:
             m.add_box(-7*S, 7*S, 0, h, -6*S, 6*S, wr, wc, rr, rc)
+            _add_ground_quad(m, "garden", -8*S, 8*S, -7*S, 7*S)
             return m.to_b3d()
         # L-shape: main block + leg
         m.add_box(-7*S, 7*S, 0, h, -6*S, 0, wr, wc, rr, rc)
         m.add_box(-7*S, -1*S, 0, h, 0, 6*S, wr, wc, rr, rc)
+        _add_ground_quad(m, "garden", -8*S, 8*S, -7*S, 7*S)
         return m.to_b3d()
 
     elif variant == "04":
@@ -1130,6 +1174,7 @@ def _build_res_med(zone, tier, variant, lod):
         total_h = bh + mansard_h
         if lod == 1:
             m.add_box(-hx, hx, 0, total_h, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "garden", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         # LOD0: main body
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1151,6 +1196,7 @@ def _build_res_med(zone, tier, variant, lod):
         m.add_quad((-hx+inset, total_h, -hz+inset), (hx-inset, total_h, -hz+inset),
                    (hx-inset, total_h, hz-inset), (-hx+inset, total_h, hz-inset),
                    (0, 1, 0), rr, rc)
+        _add_ground_quad(m, "garden", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1175,10 +1221,12 @@ def _build_res_high(zone, tier, variant, lod):
         floors = 13
         if lod == 2:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "garden", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             m.add_box(-2*S, 2*S, bh, bh+3*S, -2*S, 2*S, wr, wc, rr, rc)
+            _add_ground_quad(m, "garden", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1188,6 +1236,9 @@ def _build_res_high(zone, tier, variant, lod):
         for fl in range(3, floors, 3):
             fy = fl * floor_h
             _add_balcony_slab(m, wr, wc, -4*S, 4*S, fy, -hz, 1.2*S)
+        _add_ground_quad(m, "garden", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
+        # 4S x 4S pool in front of garden (LOD0 only)
+        _add_ground_quad(m, "pool", -2*S, 2*S, -hz-1*S-4*S, -hz-1*S)
         return m.to_b3d()
 
     elif variant == "02":
@@ -1196,17 +1247,20 @@ def _build_res_high(zone, tier, variant, lod):
         hx, hz = bw/2, bd/2
         if lod == 2:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             m.add_box(-hx-1*S, -hx, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
             m.add_box(hx, hx+1*S, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         # End staircase boxes
         m.add_box(-hx-1*S, -hx, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
         m.add_box(hx, hx+1*S, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
+        _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     elif variant == "03":
@@ -1217,11 +1271,13 @@ def _build_res_high(zone, tier, variant, lod):
         sb = 2*S
         if lod == 2:
             m.add_box(-base_hw, base_hw, 0, bh, -base_hw, base_hw, wr, wc, rr, rc)
+            _add_ground_quad(m, "garden", -base_hw-1*S, base_hw+1*S, -base_hw-1*S, base_hw+1*S)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-base_hw, base_hw, 0, sb1_y, -base_hw, base_hw, wr, wc, rr, rc)
             m.add_box(-base_hw+sb, base_hw-sb, sb1_y, sb2_y, -base_hw+sb, base_hw-sb, wr, wc, rr, rc)
             m.add_box(-base_hw+2*sb, base_hw-2*sb, sb2_y, bh, -base_hw+2*sb, base_hw-2*sb, wr, wc, rr, rc)
+            _add_ground_quad(m, "garden", -base_hw-1*S, base_hw+1*S, -base_hw-1*S, base_hw+1*S)
             return m.to_b3d()
         # LOD0: three stacked boxes
         m.add_box(-base_hw, base_hw, 0, sb1_y, -base_hw, base_hw, wr, wc, rr, rc)
@@ -1231,6 +1287,7 @@ def _build_res_high(zone, tier, variant, lod):
         m.add_box(-hw2, hw2, sb2_y, bh, -hw2, hw2, wr, wc, rr, rc)
         # Antenna box
         m.add_box(-0.5*S, 0.5*S, bh, bh+4*S, -0.5*S, 0.5*S, wr, wc)
+        _add_ground_quad(m, "garden", -base_hw-1*S, base_hw+1*S, -base_hw-1*S, base_hw+1*S)
         return m.to_b3d()
 
     elif variant == "04":
@@ -1241,9 +1298,11 @@ def _build_res_high(zone, tier, variant, lod):
         n_seg = 8
         if lod == 2:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         # LOD0: main box + curved front face segments
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1257,6 +1316,7 @@ def _build_res_high(zone, tier, variant, lod):
             z1 = -hz - bow * math.sin(frac1 * math.pi)
             m.add_quad((x0, 0, z0), (x1, 0, z1), (x1, bh, z1), (x0, bh, z0),
                        (0, 0, -1.0), wr, wc)
+        _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1279,11 +1339,13 @@ def _build_com_low(zone, tier, variant, lod):
         hx, hz = bw/2, bd/2
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         # Canopy slab
         can_w, can_d = 4*S, 2*S
         m.add_box(-can_w/2, can_w/2, 3*S, 3*S+0.2*S, -hz-can_d, -hz, wr, wc)
+        _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     elif variant == "02":
@@ -1292,8 +1354,10 @@ def _build_com_low(zone, tier, variant, lod):
         hx, hz = bw/2, bd/2
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     elif variant == "03":
@@ -1302,12 +1366,14 @@ def _build_com_low(zone, tier, variant, lod):
         hx, hz = bw/2, bd/2
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         # 4 simple thin pilaster boxes on front only
         for i in range(4):
             px = -hx + bw * (i + 0.5) / 4
             m.add_box(px-0.1*S, px+0.1*S, 0, bh, -hz-0.2*S, -hz, wr, wc, walls_only=True)
+        _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     elif variant == "04":
@@ -1317,9 +1383,11 @@ def _build_com_low(zone, tier, variant, lod):
         tooth_h = 2.5*S
         if lod == 1:
             m.add_box(-hx, hx, 0, bh+tooth_h*0.5, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         _add_sawtooth_roof(m, wr, wc, rr, rc, -hx, hx, bh, bh+tooth_h, -hz, hz, 4)
+        _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1345,9 +1413,11 @@ def _build_com_med(zone, tier, variant, lod):
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             m.add_box(-hx+sb, hx-sb, bh, top_h, -hz+sb, hz-sb, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         m.add_box(-hx+sb, hx-sb, bh, top_h, -hz+sb, hz-sb, wr, wc, rr, rc)
+        _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     elif variant == "02":
@@ -1358,9 +1428,11 @@ def _build_com_med(zone, tier, variant, lod):
         if lod == 1:
             m.add_box(-hx, hx, 0, pod_h, -hz, hz, wr, wc, rr, rc)
             m.add_box(-tow_w/2, tow_w/2, pod_h, pod_h+tow_h, -tow_d/2, tow_d/2, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, pod_h, -hz, hz, wr, wc, rr, rc)
         m.add_box(-tow_w/2, tow_w/2, pod_h, pod_h+tow_h, -tow_d/2, tow_d/2, wr, wc, rr, rc)
+        _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     elif variant == "03":
@@ -1370,10 +1442,12 @@ def _build_com_med(zone, tier, variant, lod):
         atrium_w, atrium_d = 8*S, 4*S
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         # Atrium slot recess box
         m.add_box(-atrium_w/2, atrium_w/2, 0, bh, -hz, -hz+atrium_d, wr, wc, rr, rc)
+        _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     elif variant == "04":
@@ -1384,6 +1458,7 @@ def _build_com_med(zone, tier, variant, lod):
         n_arches = 6
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         # Upper floors solid
         m.add_box(-hx, hx, arcade_h, bh, -hz, hz, wr, wc, rr, rc)
@@ -1393,6 +1468,7 @@ def _build_com_med(zone, tier, variant, lod):
             m.add_box(cx-0.15*S, cx+0.15*S, 0, arcade_h, -hz-0.3*S, -hz, wr, wc)
         # Ground floor back wall
         m.add_box(-hx, hx, 0, arcade_h, hz-0.1*S, hz, wr, wc, rr, rc)
+        _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1416,9 +1492,11 @@ def _build_com_high(zone, tier, variant, lod):
         taper1_y, taper2_y = 48*S, 55*S
         if lod == 2:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         # LOD0: main shaft + two taper steps
         m.add_box(-hx, hx, 0, taper1_y, -hz, hz, wr, wc, rr, rc)
@@ -1426,6 +1504,7 @@ def _build_com_high(zone, tier, variant, lod):
         m.add_box(-hx+sb1, hx-sb1, taper1_y, taper2_y, -hz+sb1, hz-sb1, wr, wc, rr, rc)
         sb2 = 2*S
         m.add_box(-hx+sb2, hx-sb2, taper2_y, bh, -hz+sb2, hz-sb2, wr, wc, rr, rc)
+        _add_ground_quad(m, "paving", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
         return m.to_b3d()
 
     elif variant == "02":
@@ -1436,9 +1515,11 @@ def _build_com_high(zone, tier, variant, lod):
         pod_h = 8*S
         if lod == 2:
             m.add_box(-hx, hx, 0, bh+crown_h, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, pod_h, -hz, hz, wr, wc, rr, rc)
@@ -1451,6 +1532,7 @@ def _build_com_high(zone, tier, variant, lod):
                   (0, 0, 1), wr, wc)
         # Entry canopy slab
         m.add_box(-3*S, 3*S, 4*S, 4*S+0.15*S, -hz-2*S, -hz, wr, wc)
+        _add_ground_quad(m, "paving", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
         return m.to_b3d()
 
     elif variant == "03":
@@ -1461,10 +1543,12 @@ def _build_com_high(zone, tier, variant, lod):
         n_sides = 8
         if lod == 2:
             m.add_box(-base_hw, base_hw, 0, bh, -base_hw, base_hw, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -base_hw-2*S, base_hw+2*S, -base_hw-2*S, base_hw+2*S)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-base_hw, base_hw, 0, bh, -base_hw, base_hw, wr, wc, rr, rc)
             m.add_box(-1.5*S, 1.5*S, bh, bh+8*S, -1.5*S, 1.5*S, wr, wc)
+            _add_ground_quad(m, "paving", -base_hw-2*S, base_hw+2*S, -base_hw-2*S, base_hw+2*S)
             return m.to_b3d()
         # LOD0: square shaft to chamfer_y
         m.add_box(-base_hw, base_hw, 0, chamfer_y, -base_hw, base_hw, wr, wc, rr, rc)
@@ -1482,6 +1566,7 @@ def _build_com_high(zone, tier, variant, lod):
         _add_cylinder_cap(m, rr, rc, 0, 0, bh, oct_r, n_sides=n_sides, face_up=True)
         # Spire box
         _add_spire(m, wr, wc, 0, 0, bh, bh+8*S, 1.5*S, n_sides=4)
+        _add_ground_quad(m, "paving", -base_hw-2*S, base_hw+2*S, -base_hw-2*S, base_hw+2*S)
         return m.to_b3d()
 
     elif variant == "04":
@@ -1490,11 +1575,13 @@ def _build_com_high(zone, tier, variant, lod):
         hx, hz = bw/2, bd/2
         if lod == 2:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "paving", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             for cx, cz in [(-hx,-hz),(-hx,hz),(hx,-hz),(hx,hz)]:
                 m.add_box(cx-0.5*S, cx+0.5*S, 0, bh, cz-0.5*S, cz+0.5*S, wr, wc, walls_only=True)
+            _add_ground_quad(m, "paving", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1508,6 +1595,9 @@ def _build_com_high(zone, tier, variant, lod):
             m.add_box(-hx, hx, band_y, band_y+beam_h, hz, hz+0.2*S, wr, wc, walls_only=True)
             m.add_box(-hx-0.2*S, -hx, band_y, band_y+beam_h, -hz, hz, wr, wc, walls_only=True)
             m.add_box(hx, hx+0.2*S, band_y, band_y+beam_h, -hz, hz, wr, wc, walls_only=True)
+        _add_ground_quad(m, "paving", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
+        # 5S x 5S pool in front of paving (LOD0 only)
+        _add_ground_quad(m, "pool", -2.5*S, 2.5*S, -hz-2*S-5*S, -hz-2*S)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1532,9 +1622,11 @@ def _build_ind_low(zone, tier, variant, lod):
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
+            _add_ground_quad(m, "tarmac", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
+        _add_ground_quad(m, "tarmac", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     elif variant == "02":
@@ -1546,10 +1638,12 @@ def _build_ind_low(zone, tier, variant, lod):
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             _add_gabled_roof(m, wr, wc, rr, rc, -hx, 0, bh, ridge_h, -hz, hz)
             _add_gabled_roof(m, wr, wc, rr, rc, 0, hx, bh, ridge_h, -hz, hz)
+            _add_ground_quad(m, "tarmac", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         _add_gabled_roof(m, wr, wc, rr, rc, -hx, 0, bh, ridge_h, -hz, hz)
         _add_gabled_roof(m, wr, wc, rr, rc, 0, hx, bh, ridge_h, -hz, hz)
+        _add_ground_quad(m, "tarmac", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     elif variant == "03":
@@ -1563,6 +1657,7 @@ def _build_ind_low(zone, tier, variant, lod):
             m.add_box(-hx_main, hx_main, 0, mh, -hz, hz, wr, wc, rr, rc)
             _add_gabled_roof(m, wr, wc, rr, rc, -hx_main, hx_main, mh, ridge_h, -hz, hz)
             m.add_box(hx_main, hx_main+lw, 0, lh_top, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -hx_main-1*S, hx_main+lw+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         # Main shed
         m.add_box(-hx_main, hx_main, 0, mh, -hz, hz, wr, wc, rr, rc)
@@ -1570,6 +1665,7 @@ def _build_ind_low(zone, tier, variant, lod):
         # Lean-to box
         m.add_box(hx_main, hx_main+lw, 0, lh_bot, -hz, hz, wr, wc, rr, rc)
         _add_mono_pitch_roof(m, wr, wc, rr, rc, hx_main, hx_main+lw, lh_bot, lh_top, -hz, hz)
+        _add_ground_quad(m, "tarmac", -hx_main-1*S, hx_main+lw+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     elif variant == "04":
@@ -1579,9 +1675,11 @@ def _build_ind_low(zone, tier, variant, lod):
         front_h, rear_h = 6*S, 4*S
         if lod == 1:
             m.add_box(-hx, hx, 0, front_h, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, rear_h, -hz, hz, wr, wc, rr, rc)
         _add_mono_pitch_roof(m, wr, wc, rr, rc, -hx, hx, rear_h, front_h, -hz, hz)
+        _add_ground_quad(m, "tarmac", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1604,12 +1702,14 @@ def _build_ind_med(zone, tier, variant, lod):
         hx, hz = bw/2, bd/2
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         # 3 dock leveller recesses (simple box recesses)
         for i in range(3):
             dcx = -hx + bw*(i+0.5)/3
             _add_loading_dock(m, wr, wc, dcx, 0, -hz, 3*S, 1.2*S, 0.5*S, normal_sign_z=-1)
+        _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
         return m.to_b3d()
 
     elif variant == "02":
@@ -1619,9 +1719,11 @@ def _build_ind_med(zone, tier, variant, lod):
         saw_h = 2.5*S
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         _add_sawtooth_roof(m, wr, wc, rr, rc, -hx, hx, bh, bh+saw_h, -hz, hz, 4)
+        _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
         return m.to_b3d()
 
     elif variant == "03":
@@ -1630,12 +1732,14 @@ def _build_ind_med(zone, tier, variant, lod):
         hx, hz = bw/2, bd/2
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         # 6 simple thin pilaster boxes on front face only
         for i in range(6):
             px = -hx + bw * (i + 0.5) / 6
             m.add_box(px-0.1*S, px+0.1*S, 0, bh, -hz-0.15*S, -hz, wr, wc, walls_only=True)
+        _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
         return m.to_b3d()
 
     elif variant == "04":
@@ -1644,8 +1748,10 @@ def _build_ind_med(zone, tier, variant, lod):
         hx, hz = bw/2, bd/2
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1672,11 +1778,13 @@ def _build_ind_high(zone, tier, variant, lod):
         if lod == 2:
             for cx, cz in cx_list:
                 _add_cylinder(m, wr, wc, cx, cz, 0, silo_h, silo_r, n_sides=8)
+            _add_ground_quad(m, "tarmac", -6*S-2*S, 6*S+2*S, -5*S-2*S, 2.5*S+silo_r+2*S)
             return m.to_b3d()
         if lod == 1:
             for cx, cz in cx_list:
                 _add_cylinder(m, wr, wc, cx, cz, 0, silo_h, silo_r, n_sides=n_seg)
                 _add_cylinder_cap(m, wr, wc, cx, cz, silo_h, silo_r, n_sides=n_seg, face_up=True)
+            _add_ground_quad(m, "tarmac", -6*S-2*S, 6*S+2*S, -5*S-2*S, 2.5*S+silo_r+2*S)
             return m.to_b3d()
         # LOD0
         for cx, cz in cx_list:
@@ -1686,6 +1794,7 @@ def _build_ind_high(zone, tier, variant, lod):
             _add_spire(m, rr, rc, cx, cz, silo_h, silo_h+cone_h, silo_r, n_sides=n_seg)
         # Loading shed box
         m.add_box(-6*S, 6*S, 0, 4*S, -5*S, -2*S, wr, wc, rr, rc)
+        _add_ground_quad(m, "tarmac", -6*S-2*S, 6*S+2*S, -5*S-2*S, 2.5*S+silo_r+2*S)
         return m.to_b3d()
 
     elif variant == "02":
@@ -1699,11 +1808,13 @@ def _build_ind_high(zone, tier, variant, lod):
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             _add_cylinder(m, wr, wc, -hx+1*S, hz-1*S, 0, stack_h, stack_r, n_sides=8)
             _add_cylinder(m, wr, wc, hx-1*S, hz-1*S, 0, stack_h, stack_r, n_sides=8)
+            _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             _add_cylinder(m, wr, wc, -hx+1*S, hz-1*S, 0, stack_h, stack_r, n_sides=n_seg)
             _add_cylinder(m, wr, wc, hx-1*S, hz-1*S, 0, stack_h, stack_r, n_sides=n_seg)
+            _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1712,6 +1823,7 @@ def _build_ind_high(zone, tier, variant, lod):
             _add_cylinder_cap(m, wr, wc, sx, hz-1*S, stack_h, stack_r, n_sides=n_seg, face_up=True)
         # Pipe run box
         m.add_box(-hx+1*S, hx-1*S, 8*S-0.3*S, 8*S+0.3*S, hz-1*S-0.2*S, hz-1*S+0.2*S, wr, wc)
+        _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
         return m.to_b3d()
 
     elif variant == "03":
@@ -1719,14 +1831,17 @@ def _build_ind_high(zone, tier, variant, lod):
         h = 10*S
         if lod == 2:
             m.add_box(-10*S, 10*S, 0, h, -8*S, 8*S, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -12*S, 12*S, -10*S, 10*S)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-10*S, 10*S, 0, h, -4*S, 4*S, wr, wc, rr, rc)
             m.add_box(-10*S, -2*S, 0, h, 4*S, 12*S, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -12*S, 12*S, -6*S, 14*S)
             return m.to_b3d()
         # LOD0: L-shape
         m.add_box(-10*S, 10*S, 0, h, -4*S, 4*S, wr, wc, rr, rc)
         m.add_box(-10*S, -2*S, 0, h, 4*S, 12*S, wr, wc, rr, rc)
+        _add_ground_quad(m, "tarmac", -12*S, 12*S, -6*S, 14*S)
         return m.to_b3d()
 
     elif variant == "04":
@@ -1735,11 +1850,13 @@ def _build_ind_high(zone, tier, variant, lod):
         hx, hz = bw/2, bd/2
         if lod == 2:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             m.add_box(-hx+1*S, -hx+7*S, 0, 3*S, -hz-1*S, -hz, wr, wc, rr, rc)
             m.add_box(hx-7*S, hx-1*S, 0, 3*S, -hz-1*S, -hz, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-4*S-1*S, hz+2*S)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1748,6 +1865,7 @@ def _build_ind_high(zone, tier, variant, lod):
             m.add_box(tx-3*S, tx+3*S, 0, 3*S, -hz-4*S, -hz, wr, wc, rr, rc)
         # Lightning rod box
         m.add_box(-1*S, 1*S, bh, bh+8*S, -1*S, 1*S, wr, wc, walls_only=True)
+        _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-4*S-2*S, hz+2*S)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1771,6 +1889,7 @@ def build_svc_fire_station(lod):
     if lod == 1:
         m.add_box(-hx, hx, 0, hall_h, -hz, hz, wr, wc, rr, rc)
         m.add_box(hx, hx+tow_w, 0, tow_h, -tow_w/2, tow_w/2, wr, wc, rr, rc)
+        _add_ground_quad(m, "paving", -hx-1*S, hx+tow_w+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     # LOD0: main hall box
@@ -1779,6 +1898,7 @@ def build_svc_fire_station(lod):
     m.add_box(hx, hx+tow_w, 0, tow_h, -tow_w/2, tow_w/2, wr, wc, rr, rc)
     # Simple canopy slab over bay doors
     m.add_box(-hx, 0, hall_h*0.75, hall_h*0.75+0.15*S, -hz-1.5*S, -hz, wr, wc)
+    _add_ground_quad(m, "paving", -hx-1*S, hx+tow_w+1*S, -hz-1*S, hz+1*S)
     return m.to_b3d()
 
 
@@ -1796,6 +1916,7 @@ def build_svc_police_station(lod):
     if lod == 1:
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         m.add_box(-ent_w/2, ent_w/2, 0, bh, -hz-ent_d, -hz, wr, wc, rr, rc)
+        _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-ent_d-1*S, hz+1*S)
         return m.to_b3d()
 
     # LOD0: main box
@@ -1808,6 +1929,7 @@ def build_svc_police_station(lod):
               (0, bh+2*S, -hz-ent_d-ped_proj), (0, 0, -1), wr, wc)
     m.add_tri((ent_w/2, bh, -hz-ent_d), (-ent_w/2, bh, -hz-ent_d),
               (0, bh+2*S, -hz-ent_d), (0, 0, 1), wr, wc)
+    _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-ent_d-1*S, hz+1*S)
     return m.to_b3d()
 
 
@@ -1826,11 +1948,16 @@ def build_svc_power_plant(lod):
     ct_h = 12*S
     n_seg = 12
 
+    # tcz for cooling towers: hz + ct_base_r + 1*S
+    # cooling tower far edge: tcz + ct_base_r = hz + 2*ct_base_r + 1*S
+    _ct_far_z = hz + 2*ct_base_r + 1*S
+
     if lod == 1:
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
         for tcx in [-hx*0.4, hx*0.4]:
             _add_cylinder(m, wr, wc, tcx, hz+ct_base_r+1*S, 0, ct_h, ct_base_r*0.8, n_sides=8)
+        _add_ground_quad(m, "gravel", -hx-2*S, hx+2*S, -hz-2*S, _ct_far_z+2*S)
         return m.to_b3d()
 
     # LOD0: main box + pitched roof
@@ -1852,6 +1979,7 @@ def build_svc_power_plant(lod):
                        (nx, 0.2, nz), wr, wc)
         _add_cylinder_cap(m, rr, rc, tcx, tcz, ct_h, ct_top_r, n_sides=n_seg, face_up=True)
 
+    _add_ground_quad(m, "gravel", -hx-2*S, hx+2*S, -hz-2*S, _ct_far_z+2*S)
     return m.to_b3d()
 
 
@@ -1881,6 +2009,7 @@ def build_svc_water_tower(lod):
             lx, lz = sx * leg_spread, sz * leg_spread
             m.add_box(lx - leg_hw, lx + leg_hw, 0, tank_bot,
                       lz - leg_hw, lz + leg_hw, wr, wc, walls_only=True)
+        _add_ground_quad(m, "gravel", -4*S, 4*S, -4*S, 4*S)
         return m.to_b3d()
 
     # LOD0: cylindrical tank with top + bottom caps
@@ -1897,6 +2026,7 @@ def build_svc_water_tower(lod):
         m.add_box(lx - leg_hw, lx + leg_hw, 0, leg_h,
                   lz - leg_hw, lz + leg_hw, wr, wc, walls_only=True)
 
+    _add_ground_quad(m, "gravel", -4*S, 4*S, -4*S, 4*S)
     return m.to_b3d()
 
 

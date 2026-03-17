@@ -29,7 +29,7 @@ building texture content 2026-03-04), `graphics-dev-irrlicht` (2026-02-26), and
 > `ddsBuffer` struct alignment issue.
 
 - Resolution: 4096×4096 pixels
-- Cell grid: 8×8 cells at 512×512 px each (64 cells total; rows 0–4 assigned; row 5 col 0 assigned (`ROOF_CELL`); row 5 cols 1–7 and rows 6–7 RESERVED)
+- Cell grid: 8×8 cells at 512×512 px each (64 cells total; rows 0–4 assigned; row 5 cols 0–5 assigned (`ROOF_CELL` + 5 ground-feature cells); row 5 cols 6–7 and rows 6–7 RESERVED)
 - Mip chain: 5-level mandatory (`GL_TEXTURE_MAX_LEVEL = 4`; 4096→2048→1024→512→256). All five mip
   levels MUST be present as data in the DDS file — a file whose `dwMipMapCount` field declares
   5 mips but contains only mip 0 data is truncated and causes `TextureCache::loadSRGB()` to
@@ -43,8 +43,9 @@ building texture content 2026-03-04), `graphics-dev-irrlicht` (2026-02-26), and
 
 Phase-11e expansion: the 8×8 grid provides one unique 512×512 cell per variant. Each of the 40
 assigned cells (rows 0–4, cols 0–7) is exclusive to a single building variant or service building
-type. Row 5 col 0 is also assigned as `ROOF_CELL` (used by `generate_b3d_models.py` for building
-roof surfaces). Row 5 cols 1–7 and rows 6–7 (23 cells) are RESERVED for future expansion.
+type. Row 5 cols 0–5 are also assigned: col 0 is `ROOF_CELL` (used by `generate_b3d_models.py`
+for building roof surfaces); cols 1–5 are ground-feature cells added in Phase 11f. Row 5 cols
+6–7 and rows 6–7 (18 cells) are RESERVED for future expansion.
 
 | Cell Row | Cell Col | Variant / Asset | Notes |
 |---|---|---|---|
@@ -89,7 +90,13 @@ roof surfaces). Row 5 cols 1–7 and rows 6–7 (23 cells) are RESERVED for futu
 | 4 | 6 | `svc_power_plant` | Service: power plant. UV authoring complete; concrete/glass/utility palette confirmed 2026-03-04. |
 | 4 | 7 | `svc_water_tower` | Service: water tower. UV authoring complete; concrete/glass/utility palette confirmed 2026-03-04. |
 | 5 | 0 | `ROOF_CELL` | Roof surface texture used by all building variants in `generate_b3d_models.py`. Assigned pre-Phase 11f. |
-| 5–7 | 1–7 (row 5); 0–7 (rows 6–7) | RESERVED | 23 cells reserved for future expansion (Phase 12+). Do not assign in V1 without a spec update. |
+| 5 | 1 | `ground_garden` | Phase 11f: mid-green grass/garden patch. Used by residential building ground quads. |
+| 5 | 2 | `ground_pool` | Phase 11f: pool-blue water. Used by res_high_01 and com_high_04 optional pool quads. |
+| 5 | 3 | `ground_paving` | Phase 11f: light-grey concrete forecourt. Used by commercial and service building ground quads. |
+| 5 | 4 | `ground_tarmac` | Phase 11f: dark-grey asphalt. Used by industrial building ground quads. |
+| 5 | 5 | `ground_gravel` | Phase 11f: beige/tan gravel. Used by svc_power_plant and svc_water_tower ground quads. |
+| 5 | 6–7 | RESERVED | Reserved for Phase 12+ expansion. |
+| 6–7 | 0–7 | RESERVED | 16 cells reserved for Phase 12+ expansion. |
 
 **Phase-11e per-variant unique cell assignment**: The 8×8 atlas expansion (phase-11e) allows and
 implements a unique 512×512 cell per variant. Each of the 36 zone-building variants
@@ -97,6 +104,21 @@ implements a unique 512×512 cell per variant. Each of the 36 zone-building vari
 dedicated atlas cell. The previous shared-cell approach (multiple variants mapped to one
 module-type cell) is superseded; per-variant UV islands now occupy the full 496×496 px usable
 area of their own cell without sub-region partitioning constraints.
+
+### Ground Feature Cells (Phase 11f)
+
+Five cells in row 5 (cols 1–5) are allocated as ground-feature textures:
+
+| Cell | Name | Base colour | Notes |
+|---|---|---|---|
+| (5,1) | `ground_garden` | mid-green (≈ RGB 80,130,60) | Grass/garden patch for residential lots |
+| (5,2) | `ground_pool` | pool-blue (≈ RGB 70,160,200) | Pool water for res_high_01 and com_high_04 |
+| (5,3) | `ground_paving` | light grey (≈ RGB 190,185,178) | Concrete forecourt for commercial/service |
+| (5,4) | `ground_tarmac` | dark asphalt (≈ RGB 55,55,58) | Industrial tarmac lot |
+| (5,5) | `ground_gravel` | beige/tan (≈ RGB 180,165,130) | Gravel/service yard for power plant and water tower |
+
+All ground-feature quads sit at `y = 0.01` (1 cm above terrain) to prevent depth-buffer conflict
+with the terrain mesh at `y = 0`.
 
 ## Road Marking Atlas (1024×1024)
 
@@ -254,6 +276,10 @@ Before Phase 9 UV authoring begins, all three reviewers must confirm:
   `buildings_atlas_d_2k.dds` with `GL_TEXTURE_MAX_LEVEL=3` covers GPUs below 4096 px max texture
   size, as implemented in `TextureCache.cpp:157`. Budget and mip-dispatch logic approved.
 - [x] Document reviewed and approved by `graphics-artist-3d-model`: (a) the phase-11e 8×8 per-variant unique cell assignment is compatible with modular kit UV authoring workflows — each variant has its own 512×512 cell and may use the full 496×496 px usable area without sub-region partitioning; (b) per-variant UV islands can be fully authored within the 496×496 px usable area per 512×512 cell without requiring bleed into the 8 px border; (c) the 8×8 cell grid and 64-cell capacity correctly covers all 36 V1 zone-building variants and all 4 service building types across Residential, Commercial, and Industrial zones, with 24 cells reserved for future expansion; (d) service building UV islands for all four V1 service building types each occupy a dedicated cell (row 4, cols 4–7) with the full 496×496 px usable area available. Confirmed by multiple sign-offs (2026-02-21, 2026-02-25, 2026-02-28, 2026-03-01, 2026-03-04).
+- [x] Ground Feature Cells `(5,1)`–`(5,5)` authored and atlas rebuilt.
+  Signed off by `graphics-artist-2d-texture` 2026-03-17: five ground-feature cells
+  painted in `generate_atlas_dds.py` with correct colours and noise/detail patterns;
+  `CELL_DRAW_FNS` updated; DDS atlas regenerated successfully.
 
 **Service building atlas cell gate** (`graphics-artist-3d-model` decision, 2026-03-04; `graphics-artist-2d-texture` texture content confirmation, 2026-03-04; updated phase-11e): Each service building type has its own dedicated cell: `svc_fire_station` (4,4), `svc_police_station` (4,5), `svc_power_plant` (4,6), `svc_water_tower` (4,7). The previous single-cell shared-palette approach (all four service types in one cell) is superseded by the phase-11e per-variant expansion. Each service type now has the full 496×496 px usable area of its dedicated cell. The material palette (concrete, glass, utility panels) and UV feasibility confirmation from 2026-03-04 remain valid. Both packing feasibility (by `graphics-artist-3d-model`) and texture content quality (by `graphics-artist-2d-texture`) are confirmed. This gate is CLOSED.
 
