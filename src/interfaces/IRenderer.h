@@ -174,6 +174,52 @@ public:
     virtual vec3 getListenerPosition() const = 0;
 
     // -----------------------------------------------------------------------
+    // Phase 11d — Traffic agent rendering API
+    //
+    // Agents are distinct from Phase 10 placeVehicle/moveVehicle/removeVehicle.
+    // Both sets of methods coexist. Vehicles are identified by AgentHandle (uint32_t
+    // alias defined in simulation_types.h — do NOT redefine here to avoid ODR).
+    // main-thread-only.
+    // (ref: architecture/graphics-architecture/scene-graph-ownership.md §Agent Registry)
+    // -----------------------------------------------------------------------
+
+    // spawnVehicleAgent — create a traffic agent scene node at tile (tileX, tileZ).
+    // zone determines the vehicle mesh asset (Residential→car, Commercial→van,
+    // Industrial→truck).
+    virtual void spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ,
+                                   ZoneType zone) = 0;
+
+    // moveVehicleAgent — update the agent's tile position and heading.
+    virtual void moveVehicleAgent(AgentHandle handle, int tileX, int tileZ,
+                                  float headingDeg) = 0;
+
+    // despawnVehicleAgent — remove and destroy the agent scene node.
+    // No-op if handle is not registered.
+    virtual void despawnVehicleAgent(AgentHandle handle) = 0;
+
+    // setIntersectionSignalState — update the signal billboard colour at tile.
+    // Green → RGB(0,220,0); Red → RGB(220,0,0).
+    // (ref: architecture/graphics-architecture/scene-graph-ownership.md §Intersection Signal Billboard Registry)
+    virtual void setIntersectionSignalState(int tileX, int tileZ,
+                                            SignalPhase phase) = 0;
+
+    // -----------------------------------------------------------------------
+    // Phase 11d — Service coverage overlay API
+    // main-thread-only.
+    // (ref: architecture/game-design/service-coverage.md)
+    // -----------------------------------------------------------------------
+
+    // showServiceCoverageOverlay — render service radius overlay for the building
+    // at tile (tileX, tileZ). degraded=true renders in the degraded-service colour.
+    virtual void showServiceCoverageOverlay(int tileX, int tileZ,
+                                            ServiceBuildingType type,
+                                            bool degraded) = 0;
+
+    // hideServiceCoverageOverlay — remove the currently shown service overlay.
+    // No-op if no overlay is visible.
+    virtual void hideServiceCoverageOverlay() = 0;
+
+    // -----------------------------------------------------------------------
     // Phase 10 — Building mesh spawning and road mesh rendering API
     //
     // These six methods wire CitySimulation placement/removal callbacks to
@@ -276,18 +322,15 @@ public:
 
     // setTilePlacementPreview — render a multi-tile placement preview highlight.
     //
-    // Each entry in tiles is a (tileX, tileZ) pair.  All tiles are rendered with
-    // the same ARGB colour using the same Y-offset (+0.05f) and
-    // EMT_TRANSPARENT_ALPHA_CHANNEL material as setTileHoverHighlight().
+    // freeTiles / freeArgb: tiles the player can freely place on (shown in tool colour).
+    // blockedTiles:         tiles that are already occupied (shown in kHoverArgbBlocked red).
+    //                       Defaults to {} for all callers that have not yet been updated
+    //                       to the two-list API (Deliverable 5d completes those call sites).
     //
-    // Passing an empty vector clears the preview (sets m_previewVisible = false).
-    // The preview is drawn via raw drawMeshBuffer() calls in drawScene(), after
-    // sceneManager->drawAll() and after the single-tile hover highlight, so it
-    // always renders on top of the zone colour overlay.
-    //
-    // Called from UIManager MouseMove while LMB is held for Zone (rect) and Road
-    // (straight-line) tools.  Cleared on MouseButtonUp after placement.
+    // Each entry in freeTiles and blockedTiles is a (tileX, tileZ) pair.
+    // Passing empty freeTiles AND empty blockedTiles clears the preview.
     // main-thread-only.
-    virtual void setTilePlacementPreview(const std::vector<std::pair<int,int>>& tiles,
-                                         uint32_t argb) = 0;
+    virtual void setTilePlacementPreview(const std::vector<std::pair<int,int>>& freeTiles,
+                                         uint32_t freeArgb,
+                                         const std::vector<std::pair<int,int>>& blockedTiles = {}) = 0;
 };

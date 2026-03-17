@@ -2234,6 +2234,27 @@ TimeOfDay CitySimulation::getTimeOfDay() const {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 11d — Per-frame simulation state query stubs.
+// Full implementations land in Phase 11d Deliverable 3a/3b/4b.
+// ---------------------------------------------------------------------------
+
+std::vector<AgentState> CitySimulation::getAgentPositions() const {
+    return {};  // Phase 11d Deliverable 3a: return active traffic agent snapshots.
+}
+
+std::vector<IntersectionSignalState> CitySimulation::getIntersectionSignalStates() const {
+    return {};  // Phase 11d Deliverable 3b: return active intersection signal states.
+}
+
+std::vector<RoadSegmentSpeed> CitySimulation::getRoadSegmentSpeeds() const {
+    return {};  // Phase 11d Deliverable 3a: return per-road-tile speed fractions.
+}
+
+std::vector<ServiceCoverageTile> CitySimulation::getServiceCoverage() const {
+    return {};  // Phase 11d Deliverable 4b: return service coverage snapshot.
+}
+
+// ---------------------------------------------------------------------------
 // Test-only API: inject a service building directly (not via ICitySimulation).
 // serviceTypeInt: 0=FireStation, 1=PoliceStation, 2=WaterTower, 3=PowerPlant.
 // ---------------------------------------------------------------------------

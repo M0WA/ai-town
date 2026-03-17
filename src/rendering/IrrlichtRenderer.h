@@ -128,8 +128,9 @@ public:
                              const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) override;
     ScreenRect getTileScreenBounds(int tileX, int tileZ) const override;
     vec3       getListenerPosition() const override;
-    void       setTilePlacementPreview(const std::vector<std::pair<int,int>>& tiles,
-                                       uint32_t argb) override;
+    void       setTilePlacementPreview(const std::vector<std::pair<int,int>>& freeTiles,
+                                       uint32_t freeArgb,
+                                       const std::vector<std::pair<int,int>>& blockedTiles = {}) override;
 
     // Phase 10 — building mesh spawning and road mesh rendering API.
     // Six overrides corresponding to the pure-virtual methods added to IRenderer
@@ -162,6 +163,16 @@ public:
                      float worldX, float worldY, float worldZ,
                      float yawDegrees) override;
     void removeVehicle(uint32_t vehicleId) override;
+
+    // Phase 11d — traffic agent rendering stubs (full impl in Deliverable 3a)
+    void spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone) override;
+    void moveVehicleAgent(AgentHandle handle, int tileX, int tileZ, float headingDeg) override;
+    void despawnVehicleAgent(AgentHandle handle) override;
+    void setIntersectionSignalState(int tileX, int tileZ, SignalPhase phase) override;
+    // Phase 11d — service coverage overlay stubs (full impl in Deliverable 4b)
+    void showServiceCoverageOverlay(int tileX, int tileZ,
+                                    ServiceBuildingType type, bool degraded) override;
+    void hideServiceCoverageOverlay() override;
 
     // initCloudPlane() — build the scrolling cloud plane mesh and scene node.
     // Called once from the constructor after other initialization.

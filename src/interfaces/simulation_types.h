@@ -149,4 +149,53 @@ struct QueryResult {
                                       // NOT the same as getDemandPressurePct(ZoneType) which returns city-wide aggregate.
     ServiceCoverage     coverage;                              // per-service; -1.0f = N/A
     ServiceBuildingType serviceType{ServiceBuildingType::None}; // ServiceBuildingType::None for non-service tiles
+    bool                degraded{false};         // true if covering service building is in degraded state
+};
+
+// -----------------------------------------------------------------------
+// Phase 11d — Types for traffic-agent and service-coverage query methods
+// added to ICitySimulation (getAgentPositions, getIntersectionSignalStates,
+// getRoadSegmentSpeeds, getServiceCoverage).
+// -----------------------------------------------------------------------
+
+// AgentHandle — opaque stable ID for a traffic agent, valid for the agent's
+// lifetime. Defined once here to avoid ODR violations when both simulation_types.h
+// and IRenderer.h appear in the same translation unit.
+using AgentHandle = uint32_t;
+
+// SignalPhase — current traffic-signal colour at an intersection tile.
+enum class SignalPhase {
+    Green,
+    Red
+};
+
+// AgentState — per-agent snapshot returned by ICitySimulation::getAgentPositions().
+struct AgentState {
+    uint32_t agentId{0};
+    int      tileX{0};
+    int      tileZ{0};
+    float    headingDeg{0.0f};
+    ZoneType zone{ZoneType::Residential};
+};
+
+// IntersectionSignalState — signal-phase snapshot for one intersection tile.
+struct IntersectionSignalState {
+    int         tileX{0};
+    int         tileZ{0};
+    SignalPhase phase{SignalPhase::Green};
+};
+
+// RoadSegmentSpeed — fractional speed on one road tile (0.0 = stopped, 1.0 = free-flow).
+struct RoadSegmentSpeed {
+    int   tileX{0};
+    int   tileZ{0};
+    float speedFraction{1.0f};
+};
+
+// ServiceCoverageTile — coverage state for one tile.
+struct ServiceCoverageTile {
+    int                 tileX{0};
+    int                 tileZ{0};
+    ServiceBuildingType coveredBy{ServiceBuildingType::None};
+    bool                degraded{false};
 };

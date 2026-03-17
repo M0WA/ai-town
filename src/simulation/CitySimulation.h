@@ -118,6 +118,12 @@ public:
     // ---- Time of day ----
     TimeOfDay getTimeOfDay() const override;
 
+    // ---- Phase 11d — Per-frame simulation state queries (stubs; full impl in Phase 11d) ----
+    std::vector<AgentState>              getAgentPositions()          const override;
+    std::vector<IntersectionSignalState> getIntersectionSignalStates() const override;
+    std::vector<RoadSegmentSpeed>        getRoadSegmentSpeeds()        const override;
+    std::vector<ServiceCoverageTile>     getServiceCoverage()          const override;
+
     // ---- Serialization (Phase 11) ----
     // serializeToJson() — produce a full city-state JSON string (schema_version: 1).
     // consumeBudgetTicks — returns and clears the count of budget ticks fired since last call.

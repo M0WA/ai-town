@@ -2105,3 +2105,23 @@ void AudioSystem::setSFXVolume(float gain) {
 void AudioSystem::setMusicIntensity(MusicIntensity intensity) {
     m_currentMusicIntensity.store(static_cast<int>(intensity), std::memory_order_relaxed);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 11d — Vehicle engine audio pair stubs.
+// Full implementations land in Deliverable 3a (acquireVehicleEnginePair,
+// releaseVehicleEnginePair, updateVehicleAudio).
+// ---------------------------------------------------------------------------
+
+std::pair<int,int> AudioSystem::acquireVehicleEnginePair(ZoneType /*zone*/) {
+    return {-1, -1};  // Phase 11d Deliverable 3a: acquire idle+move source pair from pool.
+}
+
+void AudioSystem::releaseVehicleEnginePair(int /*idleIdx*/, int /*moveIdx*/) {
+    // Phase 11d Deliverable 3a: stop sources and return them to the vehicle pair pool.
+}
+
+void AudioSystem::updateVehicleAudio(int /*idleIdx*/, int /*moveIdx*/,
+                                     float /*speedFraction*/,
+                                     float /*worldX*/, float /*worldZ*/) {
+    // Phase 11d Deliverable 3a: dispatch AL_PITCH/AL_GAIN crossblend and AL_POSITION to audio thread.
+}

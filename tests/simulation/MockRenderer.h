@@ -4,9 +4,9 @@
 #include <unordered_map>
 #include <cstdint>
 
-// MockRenderer — GMock implementation of IRenderer (21 active methods pre-Phase-11d;
-// 27 after Phase 11d Deliverable 0 Day-One Commit adds 6 new stubs and setTilePlacementPreview
-// gains a third parameter — see the commented-out stub block below removeVehicle).
+// MockRenderer — GMock implementation of IRenderer (28 active methods after Phase 11d
+// Day-One Commit: original 21 pre-Phase-11d methods + setTilePlacementPreview promoted to
+// three-parameter form + 6 new Phase 11d stubs added below removeVehicle).
 // Source location: tests/simulation/ (shared across simulation_tests, ui_tests, audio_tests).
 // Header-only — no .cpp file. Uses MOCK_METHOD macros only, no definitions.
 //
@@ -52,6 +52,8 @@ public:
             .WillByDefault(::testing::Return(ScreenRect{}));
         ON_CALL(*this, getListenerPosition())
             .WillByDefault(::testing::Return(vec3{}));
+        ON_CALL(*this, spawnVehicleAgent(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+            .WillByDefault(::testing::ReturnArg<0>());  // echo handle back
     }
 
     MOCK_METHOD(void,          beginFrame,          (),                                        (override));
@@ -79,15 +81,14 @@ public:
     // Phase 10: listener position for sfx_intersection_tick distance cull.
     MOCK_METHOD(vec3, getListenerPosition, (), (const, override));
 
-    // Phase 10: multi-tile placement preview (Zone rect / Road line).
-    // Phase 11d Deliverable 5d will extend this to a three-parameter form:
-    //   (freeTiles, freeArgb, blockedTiles) — that change must land atomically with
-    //   the IRenderer.h signature update, IrrlichtRenderer impl update, and UIManager
-    //   call-site updates in the Phase 11d Day-One Commit.
+    // Phase 10 / Phase 11d: multi-tile placement preview (Zone rect / Road line).
+    // Phase 11d Day-One Commit promotes this to three-parameter form:
+    //   (freeTiles, freeArgb, blockedTiles) — landed atomically with IRenderer.h
+    //   signature update, IrrlichtRenderer impl update, and UIManager call-site updates.
     // TileList alias avoids comma-in-template-arg issue with MOCK_METHOD macro.
     using TileList = std::vector<std::pair<int,int>>;
     MOCK_METHOD(void, setTilePlacementPreview,
-                (const TileList& tiles, uint32_t argb),
+                (const TileList& freeTiles, uint32_t freeArgb, const TileList& blockedTiles),
                 (override));
 
     // Phase 10: building mesh spawning and road mesh rendering API.
@@ -137,44 +138,28 @@ public:
                 (uint32_t vehicleId),
                 (override));
 
-    // Phase 11d Deliverable 0 (Day-One Commit) — add the following seven MOCK_METHOD
-    // stubs here ATOMICALLY with: (a) adding the pure-virtual declarations to IRenderer.h,
-    // (b) defining AgentHandle and SignalPhase in IRenderer.h / simulation_types.h, and
-    // (c) adding the IrrlichtRenderer stub implementations. Do NOT add them before the
-    // interface is updated — MockRenderer must compile cleanly against the current IRenderer.h.
-    //
-    // Stubs to add (signatures authoritative per scene-graph-ownership.md §Agent Registry):
-    //
-    //   MOCK_METHOD(AgentHandle, spawnVehicleAgent,
-    //               (AgentHandle handle, int tileX, int tileZ, ZoneType zone),
-    //               (override));
-    //   MOCK_METHOD(void, moveVehicleAgent,
-    //               (AgentHandle handle, int tileX, int tileZ, float headingDeg),
-    //               (override));
-    //   MOCK_METHOD(void, despawnVehicleAgent,
-    //               (AgentHandle handle),
-    //               (override));
-    //   MOCK_METHOD(void, setIntersectionSignalState,
-    //               (int tileX, int tileZ, SignalPhase phase),
-    //               (override));
-    //   MOCK_METHOD(void, showServiceCoverageOverlay,
-    //               (int tileX, int tileZ, ServiceBuildingType type, bool degraded),
-    //               (override));
-    //   MOCK_METHOD(void, hideServiceCoverageOverlay,
-    //               (),
-    //               (override));
-    //
-    // Also update setTilePlacementPreview at that point to the three-parameter form:
-    //   MOCK_METHOD(void, setTilePlacementPreview,
-    //               (const TileList& freeTiles, uint32_t freeArgb, const TileList& blockedTiles),
-    //               (override));
-    // and update all UIManager.cpp call sites from ({}, 0u) to ({}, 0u, {}).
-    //
-    // Default ON_CALL actions to add in the MockRenderer() constructor:
-    //   ON_CALL(*this, spawnVehicleAgent(_, _, _, _))
-    //       .WillByDefault(::testing::ReturnArg<0>());  // echo handle back
-    // All other new methods are void — no default action needed (NiceMock ignores;
-    // StrictMock requires explicit EXPECT_CALL).
+    // Phase 11d: traffic agent rendering API.
+    // spawnVehicleAgent, moveVehicleAgent, despawnVehicleAgent coexist with Phase 10
+    // placeVehicle/moveVehicle/removeVehicle — both sets are present simultaneously.
+    MOCK_METHOD(void, spawnVehicleAgent,
+                (AgentHandle handle, int tileX, int tileZ, ZoneType zone),
+                (override));
+    MOCK_METHOD(void, moveVehicleAgent,
+                (AgentHandle handle, int tileX, int tileZ, float headingDeg),
+                (override));
+    MOCK_METHOD(void, despawnVehicleAgent,
+                (AgentHandle handle),
+                (override));
+    MOCK_METHOD(void, setIntersectionSignalState,
+                (int tileX, int tileZ, SignalPhase phase),
+                (override));
+    // Phase 11d: service coverage overlay API.
+    MOCK_METHOD(void, showServiceCoverageOverlay,
+                (int tileX, int tileZ, ServiceBuildingType type, bool degraded),
+                (override));
+    MOCK_METHOD(void, hideServiceCoverageOverlay,
+                (),
+                (override));
 
 private:
     TextureHandle m_nextHandle{1};

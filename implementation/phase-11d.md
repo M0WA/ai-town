@@ -17,7 +17,7 @@ service coverage radius overlays on the minimap and in the world.
 
 This commit must land BEFORE any test files for Deliverables 3a, 3d, 4c, 5c, or 5e are written.
 
-- [ ] Define in `src/interfaces/IRenderer.h`: the six new pure-virtual method signatures
+- [x] Define in `src/interfaces/IRenderer.h`: the six new pure-virtual method signatures
   (exact signatures binding for Day-One Commit). `IRenderer.h` must `#include "simulation_types.h"`
   to access `AgentHandle`, `SignalPhase`, and `ServiceBuildingType` — do NOT re-define
   `AgentHandle` in `IRenderer.h`; it is defined exactly once in `simulation_types.h` (see next
@@ -33,7 +33,7 @@ This commit must land BEFORE any test files for Deliverables 3a, 3d, 4c, 5c, or 
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`,
   `architecture/game-design/traffic-system.md`, `architecture/game-design/service-coverage.md`)
 
-- [ ] Define in `src/interfaces/simulation_types.h` all 6 new types required for Phase 11d query
+- [x] Define in `src/interfaces/simulation_types.h` all 6 new types required for Phase 11d query
   methods: `using AgentHandle = uint32_t;` (type alias), `enum class SignalPhase { Green, Red };`,
   `struct AgentState { uint32_t agentId; int tileX; int tileZ; float headingDeg; ZoneType zone; };`,
   `struct IntersectionSignalState { int tileX; int tileZ; SignalPhase phase; };`,
@@ -43,7 +43,7 @@ This commit must land BEFORE any test files for Deliverables 3a, 3d, 4c, 5c, or 
   (ref: `architecture/game-design/traffic-system.md`,
   `architecture/game-design/service-coverage.md`)
 
-- [ ] **Extend `QueryResult` struct** — add `bool degraded{false};` to `src/interfaces/simulation_types.h`
+- [x] **Extend `QueryResult` struct** — add `bool degraded{false};` to `src/interfaces/simulation_types.h`
   immediately after `ServiceBuildingType serviceType{ServiceBuildingType::None};`, as required by
   `architecture/ui-ux/query-inspector-panel.md` §Service building tile detection and by
   Deliverable 4a (which passes `QueryResult::degraded` to
@@ -52,7 +52,7 @@ This commit must land BEFORE any test files for Deliverables 3a, 3d, 4c, 5c, or 
   (ref: `architecture/ui-ux/query-inspector-panel.md`,
   `architecture/game-design/service-coverage.md`)
 
-- [ ] Extend `IAudioSystem` in `src/interfaces/IAudioSystem.h` with three new pure-virtual methods
+- [x] Extend `IAudioSystem` in `src/interfaces/IAudioSystem.h` with three new pure-virtual methods
   required by Deliverable 3a's vehicle engine audio pair wiring:
   `virtual std::pair<int,int> acquireVehicleEnginePair(ZoneType zone) = 0;`
   (returns `{-1,-1}` if the vehicle pair pool is exhausted — callers MUST check before use;
@@ -72,18 +72,18 @@ This commit must land BEFORE any test files for Deliverables 3a, 3d, 4c, 5c, or 
   `architecture/audio-architecture/source-pool.md`,
   `architecture/testing/testability-architecture.md`)
 
-- [ ] Extend `ICitySimulation` with four new pure-virtual query methods: `getAgentPositions`,
+- [x] Extend `ICitySimulation` with four new pure-virtual query methods: `getAgentPositions`,
   `getIntersectionSignalStates`, `getRoadSegmentSpeeds`, `getServiceCoverage`.
   (ref: `architecture/game-design/traffic-system.md`,
   `architecture/game-design/service-coverage.md`)
 
-- [ ] Update `MockCitySimulation` with `MOCK_METHOD` declarations for all four new query
+- [x] Update `MockCitySimulation` with `MOCK_METHOD` declarations for all four new query
   methods (`getAgentPositions`, `getIntersectionSignalStates`, `getRoadSegmentSpeeds`,
   `getServiceCoverage`). This is a prerequisite for all test authoring in Deliverables 3d
   and 4c.
   (ref: `architecture/testing/testability-architecture.md`)
 
-- [ ] Extend `MockRenderer` with `MOCK_METHOD` stubs for all six new `IRenderer` methods:
+- [x] Extend `MockRenderer` with `MOCK_METHOD` stubs for all six new `IRenderer` methods:
   `spawnVehicleAgent`, `moveVehicleAgent`, `despawnVehicleAgent`,
   `setIntersectionSignalState`, `showServiceCoverageOverlay`, `hideServiceCoverageOverlay`.
   This is a prerequisite for all test authoring in Deliverables 3d and 4c.
@@ -93,7 +93,7 @@ This commit must land BEFORE any test files for Deliverables 3a, 3d, 4c, 5c, or 
   `MockRenderer` after the Day-One Commit.
   (ref: `architecture/testing/testability-architecture.md`)
 
-- [ ] Extend the **existing** `IRenderer::setTilePlacementPreview` signature in
+- [x] Extend the **existing** `IRenderer::setTilePlacementPreview` signature in
   `src/interfaces/IRenderer.h` from `(tiles, argb)` to
   `(freeTiles, freeArgb, blockedTiles = {})` — this change MUST land in the Day-One Commit
   atomically with the MockRenderer update below, because `MockRenderer` inherits from
@@ -102,7 +102,7 @@ This commit must land BEFORE any test files for Deliverables 3a, 3d, 4c, 5c, or 
   signature change lands here; the implementation body may simply ignore `blockedTiles` until
   Deliverable 5d.)
 
-- [ ] Update `MockRenderer` with the new two-list `setTilePlacementPreview` signature
+- [x] Update `MockRenderer` with the new two-list `setTilePlacementPreview` signature
   (`freeTiles`, `freeArgb`, `blockedTiles = {}`) — this must land in the Day-One Commit so
   that Deliverable 5e test files compile from the start.
   (ref: `architecture/testing/testability-architecture.md`)

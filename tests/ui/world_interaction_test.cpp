@@ -231,7 +231,7 @@ protected:
         // setTilePlacementPreview fires on Zone/Road LMB-down (anchor set, clear preview)
         // and on LMB-up (clear after commit).  Tests exercising the preview contents add
         // their own EXPECT_CALL; all others suppress via this catch-all.
-        EXPECT_CALL(renderer_, setTilePlacementPreview(_, _)).Times(::testing::AnyNumber());
+        EXPECT_CALL(renderer_, setTilePlacementPreview(_, _, _)).Times(::testing::AnyNumber());
 
         uiManager_->setMapDimensions(10, 10);
 
@@ -1560,7 +1560,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_MovesToNewTile_PlacesOnMo
     // those tiles; setTileHoverHighlight(-1,-1,_) is called to clear the single-tile hover.
     EXPECT_CALL(renderer_, pickTerrainTile(600, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _, _))
         .Times(1);
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
@@ -1569,7 +1569,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_MovesToNewTile_PlacesOnMo
     // Step 3: MouseMove to tile (7,7) — line preview covers (5,7)–(7,7); still no placement.
     EXPECT_CALL(renderer_, pickTerrainTile(700, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(7), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _, _))
         .Times(1);
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
@@ -1621,7 +1621,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_HoverUpdateOnClick_NoDoub
     // called to clear the single-tile hover.  No placement.
     EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _, _))
         .Times(1);
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
@@ -1715,7 +1715,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_MultiTileRect_Fills
     // Step 2: MouseMove to (4,5) while LMB held — rect preview; no placement.
     EXPECT_CALL(renderer_, pickTerrainTile(400, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(4), SetArgReferee<3>(5), Return(true)));
-    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _, _))
         .Times(1);
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
@@ -1757,7 +1757,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_RoadDragUnchanged_P
     // setTilePlacementPreview called; setTileHoverHighlight(-1,-1,_) clears single-tile hover.
     EXPECT_CALL(renderer_, pickTerrainTile(600, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _, _))
         .Times(1);
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
@@ -1792,7 +1792,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_DragNoDragPlacement
     // Step 2: MouseMove to (4,5) — rect preview shown; no placement during drag.
     EXPECT_CALL(renderer_, pickTerrainTile(400, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(4), SetArgReferee<3>(5), Return(true)));
-    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _, _))
         .Times(1);
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
@@ -2181,7 +2181,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
 
         EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AnyNumber());
-        EXPECT_CALL(renderer_, setTilePlacementPreview(_, _)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, setTilePlacementPreview(_, _, _)).Times(AnyNumber());
 
         uiManager_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
         uiManager_->setRenderer(&renderer_);

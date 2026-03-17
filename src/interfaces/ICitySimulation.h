@@ -184,4 +184,29 @@ public:
     // IAudioSystem::setTimeOfDay() is NOT called in Phase 6 — only the accessor is delivered here.
     // TimeOfDay is defined in audio_types.h; forwarded via simulation_types.h.
     virtual TimeOfDay getTimeOfDay() const = 0;
+
+    // -----------------------------------------------------------------------
+    // Phase 11d — Per-frame simulation state query methods
+    //
+    // These four methods return snapshots of per-frame simulation state for
+    // rendering and audio wiring. They are called once per render frame from
+    // main.cpp inside the per-frame agent sync loop.
+    // All types are defined in simulation_types.h.
+    // -----------------------------------------------------------------------
+
+    // getAgentPositions — return the current position/heading/zone of all active
+    // traffic agents. Returns an empty vector when no agents are active.
+    virtual std::vector<AgentState> getAgentPositions() const = 0;
+
+    // getIntersectionSignalStates — return the current signal phase for all
+    // active intersection tiles.
+    virtual std::vector<IntersectionSignalState> getIntersectionSignalStates() const = 0;
+
+    // getRoadSegmentSpeeds — return the fractional speed for all road tiles
+    // with active traffic (0.0 = stopped, 1.0 = free-flow).
+    virtual std::vector<RoadSegmentSpeed> getRoadSegmentSpeeds() const = 0;
+
+    // getServiceCoverage — return coverage state for all tiles currently covered
+    // by a service building.
+    virtual std::vector<ServiceCoverageTile> getServiceCoverage() const = 0;
 };

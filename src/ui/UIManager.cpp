@@ -771,7 +771,7 @@ bool UIManager::onEvent(const InputEvent& event) {
         m_zoneAnchorX = -1;
         m_zoneAnchorZ = -1;
         m_lmbHeld = false;
-        if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u);
+        if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u, {});
         // Clear the hover highlight so the last-hovered tile quad is not frozen
         // on screen after the tool is deselected.  The MouseMove handler at Priority 7
         // is gated on m_activeTool != None, so without this call m_hoverVisible
@@ -828,7 +828,7 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_zoneAnchorX = -1;
                 m_zoneAnchorZ = -1;
                 // Clear placement preview.
-                m_renderer->setTilePlacementPreview({}, 0u);
+                m_renderer->setTilePlacementPreview({}, 0u, {});
             }
 
             // Road tool: commit straight-line placement on mouse-up.
@@ -857,7 +857,7 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_zoneAnchorX = -1;
                 m_zoneAnchorZ = -1;
                 // Clear placement preview.
-                m_renderer->setTilePlacementPreview({}, 0u);
+                m_renderer->setTilePlacementPreview({}, 0u, {});
             }
 
             m_lmbHeld = false;
@@ -892,7 +892,7 @@ bool UIManager::onEvent(const InputEvent& event) {
                         }
                     }
                     m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
-                    m_renderer->setTilePlacementPreview(previewTiles, colour);
+                    m_renderer->setTilePlacementPreview(previewTiles, colour, {});
                 }
                 // Road tool with anchor active: show axis-snapped line preview.
                 else if (m_lmbHeld && m_activeTool == ActiveTool::Road && m_zoneAnchorX != -1) {
@@ -915,11 +915,11 @@ bool UIManager::onEvent(const InputEvent& event) {
                         }
                     }
                     m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
-                    m_renderer->setTilePlacementPreview(previewTiles, colour);
+                    m_renderer->setTilePlacementPreview(previewTiles, colour, {});
                 }
                 // All other cases: single-tile hover highlight (no drag preview).
                 else {
-                    m_renderer->setTilePlacementPreview({}, 0u);
+                    m_renderer->setTilePlacementPreview({}, 0u, {});
                     m_renderer->setTileHoverHighlight(hitX, hitZ, colour);
                 }
 
@@ -938,7 +938,7 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_hoveredTileZ = hitZ;
             } else {
                 m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
-                m_renderer->setTilePlacementPreview({}, 0u);
+                m_renderer->setTilePlacementPreview({}, 0u, {});
                 m_hoveredTileX = -1;
                 m_hoveredTileZ = -1;
             }
@@ -974,7 +974,7 @@ bool UIManager::onEvent(const InputEvent& event) {
             if (m_activeTool == ActiveTool::Zone) {
                 m_zoneAnchorX = hitX;
                 m_zoneAnchorZ = hitZ;
-                m_renderer->setTilePlacementPreview({}, 0u);
+                m_renderer->setTilePlacementPreview({}, 0u, {});
                 return true;  // Consumed: anchor recorded; no placement yet.
             }
 
@@ -984,7 +984,7 @@ bool UIManager::onEvent(const InputEvent& event) {
             if (m_activeTool == ActiveTool::Road) {
                 m_zoneAnchorX = hitX;
                 m_zoneAnchorZ = hitZ;
-                m_renderer->setTilePlacementPreview({}, 0u);
+                m_renderer->setTilePlacementPreview({}, 0u, {});
                 return true;  // Consumed: anchor recorded; no placement yet.
             }
 
@@ -1703,7 +1703,7 @@ void UIManager::onNewGame() {
     m_zoneAnchorX  = -1;
     m_zoneAnchorZ  = -1;
     m_lmbHeld      = false;
-    if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u);
+    if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u, {});
     if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
     updateSubPanelVisibility();
 }

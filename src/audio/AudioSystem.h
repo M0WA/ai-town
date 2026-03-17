@@ -168,6 +168,12 @@ public:
     // Thread-safety: call from the main thread only.
     void setMusicIntensity(MusicIntensity intensity) override;
 
+    // Phase 11d — Vehicle engine audio pair API (stubs; full impl in Deliverable 3a).
+    std::pair<int,int> acquireVehicleEnginePair(ZoneType zone) override;
+    void releaseVehicleEnginePair(int idleIdx, int moveIdx) override;
+    void updateVehicleAudio(int idleIdx, int moveIdx, float speedFraction,
+                            float worldX, float worldZ) override;
+
     // Called from AudioSourcePool on slot recycle (and from vehicle pair release).
     // Resets occlusion gain to 1.0f immediately, applying the filter reset.
     // MUST NOT be called while m_occlusionMutex is held by the caller.

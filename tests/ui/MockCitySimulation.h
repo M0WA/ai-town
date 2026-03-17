@@ -85,4 +85,12 @@ public:
 
     // --- Time of day (Phase 6 delivery) ---
     MOCK_METHOD(TimeOfDay, getTimeOfDay, (), (const, override));
+
+    // -----------------------------------------------------------------------
+    // Phase 11d — Per-frame simulation state query methods
+    // -----------------------------------------------------------------------
+    MOCK_METHOD((std::vector<AgentState>),              getAgentPositions,           (), (const, override));
+    MOCK_METHOD((std::vector<IntersectionSignalState>), getIntersectionSignalStates,  (), (const, override));
+    MOCK_METHOD((std::vector<RoadSegmentSpeed>),        getRoadSegmentSpeeds,         (), (const, override));
+    MOCK_METHOD((std::vector<ServiceCoverageTile>),     getServiceCoverage,           (), (const, override));
 };

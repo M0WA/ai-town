@@ -668,11 +668,12 @@ void IrrlichtRenderer::setTileHoverHighlight(int tileX, int tileZ, uint32_t argb
 // reached, following the same pattern as setZoneOverlay.
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::setTilePlacementPreview(
-    const std::vector<std::pair<int,int>>& tiles,
-    uint32_t argb)
+    const std::vector<std::pair<int,int>>& freeTiles,
+    uint32_t freeArgb,
+    const std::vector<std::pair<int,int>>& /*blockedTiles*/)  // Deliverable 5d will render blocked tiles
 {
     // Clear request.
-    if (tiles.empty()) {
+    if (freeTiles.empty()) {
         m_previewVisible = false;
         return;
     }
@@ -688,10 +689,10 @@ void IrrlichtRenderer::setTilePlacementPreview(
     }
 
     // Decode ARGB (0xAARRGGBB) for Irrlicht SColor(A, R, G, B).
-    u8 a = static_cast<u8>((argb >> 24) & 0xFF);
-    u8 r = static_cast<u8>((argb >> 16) & 0xFF);
-    u8 g = static_cast<u8>((argb >>  8) & 0xFF);
-    u8 b = static_cast<u8>( argb        & 0xFF);
+    u8 a = static_cast<u8>((freeArgb >> 24) & 0xFF);
+    u8 r = static_cast<u8>((freeArgb >> 16) & 0xFF);
+    u8 g = static_cast<u8>((freeArgb >>  8) & 0xFF);
+    u8 b = static_cast<u8>( freeArgb        & 0xFF);
     SColor colour(a, r, g, b);
 
     const float yOffset = 0.05f;  // same as single-tile hover highlight
@@ -722,7 +723,7 @@ void IrrlichtRenderer::setTilePlacementPreview(
 
     openBuffer();
 
-    for (const auto& tile : tiles) {
+    for (const auto& tile : freeTiles) {
         int tx = tile.first;
         int tz = tile.second;
 
@@ -2432,4 +2433,48 @@ void IrrlichtRenderer::update(float dt)
                 ->setCameraY(camPos.Y);
         }
     }
+}
+
+// -------------------------------------------------------------------------
+// Phase 11d — Traffic agent rendering stubs.
+// Full implementations land in Deliverable 3a (agent spawn/move/despawn)
+// and Deliverable 3b (intersection signal state).
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::spawnVehicleAgent(AgentHandle /*handle*/, int /*tileX*/,
+                                          int /*tileZ*/, ZoneType /*zone*/)
+{
+    // Phase 11d Deliverable 3a: spawn agent scene node from zone-specific vehicle mesh.
+}
+
+void IrrlichtRenderer::moveVehicleAgent(AgentHandle /*handle*/, int /*tileX*/,
+                                         int /*tileZ*/, float /*headingDeg*/)
+{
+    // Phase 11d Deliverable 3a: update agent scene node position and Y-axis rotation.
+}
+
+void IrrlichtRenderer::despawnVehicleAgent(AgentHandle /*handle*/)
+{
+    // Phase 11d Deliverable 3a: remove agent scene node from scene graph.
+}
+
+void IrrlichtRenderer::setIntersectionSignalState(int /*tileX*/, int /*tileZ*/,
+                                                   SignalPhase /*phase*/)
+{
+    // Phase 11d Deliverable 3b: update intersection signal billboard colour.
+}
+
+// -------------------------------------------------------------------------
+// Phase 11d — Service coverage overlay stubs.
+// Full implementation lands in Deliverable 4b.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::showServiceCoverageOverlay(int /*tileX*/, int /*tileZ*/,
+                                                   ServiceBuildingType /*type*/,
+                                                   bool /*degraded*/)
+{
+    // Phase 11d Deliverable 4b: render coverage radius polygon with PolyOffset_Factor=-1.
+}
+
+void IrrlichtRenderer::hideServiceCoverageOverlay()
+{
+    // Phase 11d Deliverable 4b: remove coverage overlay from scene graph.
 }
