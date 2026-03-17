@@ -15,8 +15,190 @@ Expected sizes:
 """
 
 import struct
-import colorsys
 import os
+
+
+# ---------------------------------------------------------------------------
+# Per-variant architectural color table
+# ---------------------------------------------------------------------------
+# Each entry: (base_r, base_g, base_b, stripe1_r, stripe1_g, stripe1_b,
+#              stripe2_r, stripe2_g, stripe2_b)
+# stripe colors are applied as horizontal bands at V=0.30–0.38 and V=0.62–0.70
+# of the cell height, to suggest window bands / cladding breaks.
+# The base color fills the rest of the cell.
+#
+# Cell assignment: (row, col) → variant name
+#   Row 0: res_low_01..04, res_med_01..04
+#   Row 1: res_high_01..04, com_low_01..04
+#   Row 2: com_med_01..04, com_high_01..04
+#   Row 3: ind_low_01..04, ind_med_01..04
+#   Row 4: ind_high_01..04, svc_fire/police/power/water
+#   Row 5, col 0: ROOF_CELL
+
+# Stripe band V-fractions (start, end) for two stripe bands per cell
+_STRIPE1_V = (0.28, 0.36)
+_STRIPE2_V = (0.60, 0.68)
+
+# Table format: (row, col) -> (base_rgb, stripe1_rgb, stripe2_rgb)
+# Each RGB is a 3-tuple of ints 0-255.
+_CELL_COLORS = {
+    # ---- Row 0: Residential Low (cols 0-3) ----
+    # 01 red brick
+    (0, 0): ((178,  78,  56), (200, 160, 100), (155,  60,  42)),
+    # 02 cream render
+    (0, 1): ((220, 210, 185), (240, 230, 205), (195, 185, 158)),
+    # 03 tan sandstone
+    (0, 2): ((193, 168, 120), (210, 190, 145), (165, 140,  96)),
+    # 04 grey pebbledash
+    (0, 3): ((155, 152, 148), (175, 170, 165), (128, 125, 120)),
+
+    # ---- Row 0: Residential Medium (cols 4-7) ----
+    # 01 buff brick
+    (0, 4): ((200, 175, 120), (220, 200, 150), (175, 150,  95)),
+    # 02 white render + balcony stripe
+    (0, 5): ((235, 235, 230), (180, 195, 215), (215, 215, 210)),
+    # 03 terracotta tile panels
+    (0, 6): ((195, 105,  65), (215, 140, 100), (168,  82,  48)),
+    # 04 pale render + green spandrel stripe
+    (0, 7): ((210, 215, 200), ( 90, 140,  95), (192, 198, 182)),
+
+    # ---- Row 1: Residential High (cols 0-3) ----
+    # 01 blue-grey curtain wall
+    (1, 0): ((115, 140, 168), (145, 168, 195), ( 88, 112, 140)),
+    # 02 warm beige precast panels
+    (1, 1): ((205, 188, 158), (225, 210, 182), (178, 160, 130)),
+    # 03 white with horizontal bands
+    (1, 2): ((235, 235, 232), (160, 175, 190), (218, 218, 215)),
+    # 04 amber glass + concrete
+    (1, 3): ((195, 155,  75), (160, 148, 130), (215, 175,  90)),
+
+    # ---- Row 1: Commercial Low (cols 4-7) ----
+    # 01 red shopfront awning
+    (1, 4): ((188,  45,  38), (230, 215, 195), (162,  35,  28)),
+    # 02 blue-grey cladding
+    (1, 5): ((108, 128, 150), (145, 162, 180), ( 82, 100, 122)),
+    # 03 brick with signage band
+    (1, 6): ((165,  72,  50), (235, 228, 210), (145,  58,  38)),
+    # 04 white render + green fascia
+    (1, 7): ((232, 232, 228), ( 72, 142,  80), (215, 215, 210)),
+
+    # ---- Row 2: Commercial Medium (cols 0-3) ----
+    # 01 silver-grey aluminium cladding
+    (2, 0): ((188, 192, 195), (208, 212, 215), (162, 165, 168)),
+    # 02 dark blue reflective glass
+    (2, 1): (( 35,  60, 105), ( 55,  82, 135), ( 22,  42,  82)),
+    # 03 cream stone facade
+    (2, 2): ((218, 208, 182), (235, 228, 205), (195, 185, 158)),
+    # 04 bronze-tinted glass curtain wall
+    (2, 3): ((148, 108,  55), (175, 138,  82), (122,  85,  35)),
+
+    # ---- Row 2: Commercial High (cols 4-7) ----
+    # 01 deep blue mirror glass
+    (2, 4): (( 25,  48,  98), ( 45,  72, 128), ( 12,  30,  72)),
+    # 02 silver steel + clear glass
+    (2, 5): ((198, 205, 212), (155, 185, 210), (175, 182, 188)),
+    # 03 green-tinted glass
+    (2, 6): (( 55, 118,  85), ( 78, 148, 108), ( 35,  90,  62)),
+    # 04 gold reflective glass
+    (2, 7): ((195, 162,  48), (218, 188,  72), (168, 138,  25)),
+
+    # ---- Row 3: Industrial Low (cols 0-3) ----
+    # 01 corrugated steel grey
+    (3, 0): ((148, 152, 155), (168, 172, 175), (122, 125, 128)),
+    # 02 red/rust metal cladding
+    (3, 1): ((168,  68,  38), (192, 105,  72), (142,  48,  22)),
+    # 03 beige brick
+    (3, 2): ((195, 178, 138), (215, 198, 162), (168, 150, 112)),
+    # 04 dark olive corrugated
+    (3, 3): (( 95, 108,  72), (118, 132,  90), ( 72,  82,  52)),
+
+    # ---- Row 3: Industrial Medium (cols 4-7) ----
+    # 01 white corrugated steel
+    (3, 4): ((228, 230, 228), (200, 208, 215), (210, 212, 210)),
+    # 02 yellow/ochre brick
+    (3, 5): ((198, 168,  65), (218, 192,  95), (172, 142,  42)),
+    # 03 dark blue metal
+    (3, 6): (( 42,  62, 105), ( 62,  85, 132), ( 25,  42,  80)),
+    # 04 light grey precast
+    (3, 7): ((185, 188, 192), (205, 208, 212), (158, 162, 165)),
+
+    # ---- Row 4: Industrial High (cols 0-3) ----
+    # 01 bare concrete panels
+    (4, 0): ((158, 158, 152), (178, 178, 172), (132, 132, 125)),
+    # 02 dark steel + orange safety stripe
+    (4, 1): (( 62,  68,  75), (215, 118,  32), ( 42,  48,  55)),
+    # 03 grey/blue industrial
+    (4, 2): (( 88, 108, 128), (112, 132, 152), ( 65,  82, 102)),
+    # 04 weathered steel + rust patches
+    (4, 3): ((105,  85,  68), (148,  78,  38), ( 82,  65,  48)),
+
+    # ---- Row 4: Service buildings (cols 4-7) ----
+    # svc_fire_station: red brick + bay doors, off-white trim
+    (4, 4): ((178,  52,  38), (235, 228, 210), (155,  38,  25)),
+    # svc_police_station: dark blue/navy brick + white signage stripe
+    (4, 5): (( 28,  45,  88), (235, 235, 232), ( 18,  30,  68)),
+    # svc_power_plant: grey concrete + yellow hazard stripe
+    (4, 6): ((145, 148, 145), (218, 192,  35), (118, 120, 118)),
+    # svc_water_tower: weathered steel + rust, pale blue tank
+    (4, 7): ((118, 105,  88), (178, 212, 225), ( 95,  82,  65)),
+
+    # ---- Row 5, col 0: ROOF_CELL ----
+    # flat grey/beige roof material
+    (5, 0): ((168, 162, 148), (148, 142, 128), (182, 175, 160)),
+}
+
+# Reserved cells (rows 5-7 except the roof cell) use neutral dark grey.
+_RESERVED_COLOR = (72, 72, 72)
+
+
+# ---------------------------------------------------------------------------
+# Color lookup function — architectural per-cell scheme
+# ---------------------------------------------------------------------------
+
+def get_architectural_color(row: int, col: int, cell_w: int, cell_h: int,
+                             px_in_cell: int, py_in_cell: int):
+    """
+    Return (r, g, b) for a pixel at (px_in_cell, py_in_cell) within the cell.
+    Applies base color + two horizontal stripe bands to suggest window bands.
+    """
+    key = (row, col)
+    if key not in _CELL_COLORS:
+        return _RESERVED_COLOR
+
+    base_rgb, stripe1_rgb, stripe2_rgb = _CELL_COLORS[key]
+
+    # Compute V-fraction within the cell (0.0 = top, 1.0 = bottom)
+    v = py_in_cell / max(1, cell_h - 1)
+
+    if _STRIPE1_V[0] <= v < _STRIPE1_V[1]:
+        return stripe1_rgb
+    if _STRIPE2_V[0] <= v < _STRIPE2_V[1]:
+        return stripe2_rgb
+    return base_rgb
+
+
+# ---------------------------------------------------------------------------
+# Color lookup function for the atlas
+# ---------------------------------------------------------------------------
+
+def make_atlas_color_fn(atlas_width: int, atlas_height: int,
+                        grid_cols: int, grid_rows: int):
+    """
+    Return a get_color_fn(x, y) -> (r, g, b) that maps pixel coordinates to
+    per-cell architectural colors with stripe patterns.
+    """
+    cell_w = atlas_width  // grid_cols
+    cell_h = atlas_height // grid_rows
+
+    def get_color(x: int, y: int):
+        row = min(y // cell_h, grid_rows - 1)
+        col = min(x // cell_w, grid_cols - 1)
+        px_in_cell = x - col * cell_w
+        py_in_cell = y - row * cell_h
+        return get_architectural_color(row, col, cell_w, cell_h,
+                                       px_in_cell, py_in_cell)
+
+    return get_color
 
 
 # ---------------------------------------------------------------------------
@@ -58,54 +240,6 @@ def encode_dxt1_image(width: int, height: int, get_color_fn) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Cell color assignment (40 assigned cells, rows 0-4)
-# ---------------------------------------------------------------------------
-
-def cell_color(row: int, col: int):
-    """
-    Return a unique (r, g, b) uint8 color for atlas cell (row, col).
-    Uses a spread across the HSV color wheel so each of the 40 assigned
-    cells has a visually distinct color.
-    """
-    cell_idx = row * 8 + col
-    # Spread hues across the full spectrum using a prime step to avoid clustering.
-    hue = (cell_idx * 37) % 360 / 360.0
-    sat = 0.6 + (cell_idx % 4) * 0.1    # 0.60 – 0.90
-    val = 0.5 + (cell_idx % 3) * 0.15   # 0.50 – 0.80
-    r_f, g_f, b_f = colorsys.hsv_to_rgb(hue, sat, val)
-    return int(r_f * 255), int(g_f * 255), int(b_f * 255)
-
-
-# ---------------------------------------------------------------------------
-# Color lookup function for the primary 4096x4096 atlas (8x8 grid, 512px cells)
-# ---------------------------------------------------------------------------
-
-def make_atlas_color_fn(atlas_width: int, atlas_height: int,
-                        grid_cols: int, grid_rows: int):
-    """
-    Return a get_color_fn(x, y) -> (r, g, b) that maps pixel coordinates to
-    per-cell colors.  Cells beyond the assigned range (rows 5-7) use a neutral
-    dark grey to indicate RESERVED status.
-    """
-    cell_w = atlas_width // grid_cols   # 512 for 4096/8
-    cell_h = atlas_height // grid_rows  # 512 for 4096/8
-    assigned_rows = 5                   # rows 0-4
-
-    def get_color(x: int, y: int):
-        row = y // cell_h
-        col = x // cell_w
-        # Clamp to grid bounds (handles edge pixels at exact atlas boundary)
-        row = min(row, grid_rows - 1)
-        col = min(col, grid_cols - 1)
-        if row < assigned_rows:
-            return cell_color(row, col)
-        # Reserved rows: neutral mid-grey
-        return (80, 80, 80)
-
-    return get_color
-
-
-# ---------------------------------------------------------------------------
 # DDS header builder (standard 128-byte, no DX10 extension)
 # ---------------------------------------------------------------------------
 
@@ -129,7 +263,7 @@ def build_dds_header(width: int, height: int, mip_levels: int) -> bytes:
         88-91 : pfRGBBitCount = 0
         92-95 : pfRBitMask = 0
         96-99 : pfGBitMask = 0
-        100-103: pfBBitMask = 0
+        100-103: pfGBitMask = 0
         104-107: pfABitMask = 0
       108-123: DDSCAPS
         108-111: dwCaps  = DDSCAPS_COMPLEX | DDSCAPS_TEXTURE | DDSCAPS_MIPMAP
@@ -227,7 +361,7 @@ def generate_mip_data(base_width: int, base_height: int, mip_levels: int,
 
 def generate_dds(output_path: str, width: int, height: int, mip_levels: int,
                  grid_cols: int = 8, grid_rows: int = 8):
-    """Generate a DXT1 sRGB DDS file with per-cell unique colors."""
+    """Generate a DXT1 sRGB DDS file with per-cell architectural colors."""
     get_color = make_atlas_color_fn(width, height, grid_cols, grid_rows)
 
     print(f"  Generating mip data for {width}x{height}, {mip_levels} mip levels...")
@@ -245,6 +379,32 @@ def generate_dds(output_path: str, width: int, height: int, mip_levels: int,
         f.write(mip_data)
 
     return total
+
+
+def generate_source_png(output_path: str, width: int, height: int,
+                        grid_cols: int = 8, grid_rows: int = 8):
+    """
+    Generate the source PNG authoring file (buildings_atlas_d.png) at the
+    specified resolution with per-cell architectural colors and stripe patterns.
+    Requires Pillow.  Called from the main entry point after DDS generation.
+    """
+    try:
+        from PIL import Image  # noqa: PLC0415
+    except ImportError:
+        print("  Skipping PNG generation: Pillow not installed.")
+        return
+
+    img = Image.new("RGB", (width, height))
+    pixels = img.load()
+
+    get_color = make_atlas_color_fn(width, height, grid_cols, grid_rows)
+    for y in range(height):
+        for x in range(width):
+            pixels[x, y] = get_color(x, y)
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    img.save(output_path, "PNG")
+    print(f"  Saved source PNG: {output_path} ({os.path.getsize(output_path):,} bytes)")
 
 
 def verify_expected_sizes(primary_path: str, fallback_path: str):
@@ -275,12 +435,6 @@ def verify_headers(primary_path: str, fallback_path: str):
         (primary_path,  4096, 4096, 5),
         (fallback_path, 2048, 2048, 4),
     ]:
-        with open(path, 'rb') as f:
-            magic = f.read(4)
-            f.seek(8)   # skip dwSize
-            h, w = struct.unpack('<II', f.read(8))      # offsets 8,12 = height, width
-            # Actually: offset 4=dwSize, 8=dwFlags, 12=dwHeight, 16=dwWidth, 28=dwMipMapCount
-            # Re-read properly:
         with open(path, 'rb') as f:
             magic = f.read(4)           # offset 0
             _size  = struct.unpack('<I', f.read(4))[0]  # offset 4
@@ -318,6 +472,8 @@ if __name__ == '__main__':
                                  'buildings_atlas_d.dds')
     fallback_path = os.path.join(repo_root, 'assets', 'textures', 'buildings',
                                  'buildings_atlas_d_2k.dds')
+    png_path      = os.path.join(repo_root, 'assets', 'textures', 'buildings',
+                                 'buildings_atlas_d.png')
 
     # -----------------------------------------------------------------------
     # Expected byte sizes (from 2d-texture-standards.md §DDS Reference Byte-Size table)
@@ -360,6 +516,13 @@ if __name__ == '__main__':
     fallback_total = generate_dds(fallback_path, 2048, 2048, 4)
 
     # -----------------------------------------------------------------------
+    # Source PNG: 2048x2048, 8x8 grid at 256px per cell
+    # This is the authoring intermediate read by validate_assets.py Check #28.
+    # -----------------------------------------------------------------------
+    print(f"\nGenerating source PNG: {png_path}")
+    generate_source_png(png_path, 2048, 2048, 8, 8)
+
+    # -----------------------------------------------------------------------
     # Verify
     # -----------------------------------------------------------------------
     verify_expected_sizes(primary_path, fallback_path)
@@ -370,3 +533,5 @@ if __name__ == '__main__':
     print(f"    {os.path.getsize(primary_path):,} bytes")
     print(f"  {fallback_path}")
     print(f"    {os.path.getsize(fallback_path):,} bytes")
+    print(f"  {png_path}")
+    print(f"    {os.path.getsize(png_path):,} bytes")
