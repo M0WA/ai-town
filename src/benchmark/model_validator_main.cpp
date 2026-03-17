@@ -421,6 +421,7 @@ int main(int argc, char** argv)
         // --- Load all models for this category via BuildingAssetLoader ---
         std::vector<LODNode*> lodNodes;
         std::vector<std::string> loadedNames;
+        std::vector<float> loadedXPositions;
 
         const int N = static_cast<int>(cat.names.size());
         BuildingAssetLoader loader(smgr3, driver);
@@ -457,6 +458,9 @@ int main(int argc, char** argv)
 
             lodNodes.push_back(lodNode);
             loadedNames.push_back(name);
+            float xPos = (static_cast<float>(mi) - (static_cast<float>(N - 1) * 0.5f))
+                         * kShowcaseSpacing;
+            loadedXPositions.push_back(xPos);
         }
 
         // --- Orbiting camera ---
@@ -511,6 +515,40 @@ int main(int argc, char** argv)
 
             driver->beginScene(true, true, irr::video::SColor(255, 190, 215, 245));
             smgr3->drawAll();
+
+            // --- On-screen HUD ---
+            irr::gui::IGUIFont* font = device->getGUIEnvironment()->getBuiltInFont();
+
+            // 1. Category banner (top-left): "[N/11] Category Name"
+            std::string banner = "[" + std::to_string(ci + 1) + "/" +
+                                 std::to_string(kTotalCategories) +
+                                 "] " + cat.label;
+            font->draw(
+                irr::core::stringw(banner.c_str()),
+                irr::core::rect<irr::s32>(12, 12, 600, 36),
+                irr::video::SColor(255, 255, 255, 255)
+            );
+
+            // 2. Floor labels: one per successfully loaded model.
+            for (int li = 0; li < static_cast<int>(loadedNames.size()); ++li)
+            {
+                const std::string& modelName = loadedNames[static_cast<size_t>(li)];
+                float modelX = loadedXPositions[static_cast<size_t>(li)];
+                irr::core::vector3df anchor(modelX, 0.05f, 6.0f);
+                irr::core::position2d<irr::s32> sp =
+                    smgr3->getSceneCollisionManager()
+                        ->getScreenCoordinatesFrom3DPosition(anchor, smgr3->getActiveCamera());
+
+                if (sp.X < 0 || sp.X > opts.width || sp.Y < 0 || sp.Y > opts.height)
+                    continue;
+
+                font->draw(
+                    irr::core::stringw(modelName.c_str()),
+                    irr::core::rect<irr::s32>(sp.X - 60, sp.Y - 10, sp.X + 140, sp.Y + 14),
+                    irr::video::SColor(255, 255, 220, 60)
+                );
+            }
+
             driver->endScene();
             ++frameCount;
         }
