@@ -764,6 +764,13 @@ target_sources(ui_tests PRIVATE
     tests/ui/placement_conflict_ui_test.cpp
 )
 
+# Phase 11d — Minimap Traffic and ServiceCoverage overlay rendering tests.
+# Exercises Minimap::draw() branches for both overlay modes using NiceMock<MockCitySimulation>
+# to stub getRoadSegmentSpeeds() and getServiceCoverage() return values.
+target_sources(ui_tests PRIVATE
+    tests/ui/minimap_overlay_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # audio_tests — duck state machine, occlusion smoothing, crossfade, stinger milestone tests
 # Vorbis::vorbisfile must be listed EXPLICITLY — it CANNOT resolve through aitown_audio's
