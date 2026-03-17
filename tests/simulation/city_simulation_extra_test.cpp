@@ -759,6 +759,8 @@ TEST_F(NiceCoverageTest, PowerCoverage_DisconnectedTile_RadialFallback) {
 // ===========================================================================
 
 TEST_F(CoverageTest, PlaceZone_OverExistingRoad_DecrementsRoadCount) {
+    // Phase 11d Deliverable 5a: placeZone returns early when tile is already a road
+    // (occupancy guard).  Zone over road is now a no-op — road tile count is unchanged.
     EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
     EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
 
@@ -769,11 +771,13 @@ TEST_F(CoverageTest, PlaceZone_OverExistingRoad_DecrementsRoadCount) {
     EXPECT_FLOAT_EQ(sim_->getRoadMaintenanceCost(),
                     static_cast<float>(SimulationConstants::road_maintenance_cost_per_tile));
 
-    // Now overwrite the road with a zone. Road count must drop to 0.
+    // Attempt to overwrite the road with a zone — blocked by occupancy guard.
+    // Road count must remain at 1; maintenance cost is unchanged.
     sim_->placeZone(0, 0, ZoneType::Industrial, DensityTier::Low);
     runTicks(1);
-    EXPECT_FLOAT_EQ(sim_->getRoadMaintenanceCost(), 0.0f)
-        << "Road maintenance must be 0 after zone overwrites the road tile.";
+    EXPECT_FLOAT_EQ(sim_->getRoadMaintenanceCost(),
+                    static_cast<float>(SimulationConstants::road_maintenance_cost_per_tile))
+        << "Road maintenance must remain unchanged when placeZone is blocked by occupancy guard.";
 }
 
 // ===========================================================================

@@ -29,7 +29,7 @@
   glBindTexture(GL_TEXTURE_2D, texId);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 3); // clamp mip chain
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, N); // N per dispatch table below
   for (int mip = 0; mip < numMips; ++mip) {
       glCompressedTexImage2D(GL_TEXTURE_2D, mip,
           GL_COMPRESSED_SRGB_S3TC_DXT1_EXT, // or SRGB_ALPHA_S3TC_DXT5_EXT
@@ -79,7 +79,8 @@ the reference values in `architecture/asset-standards/2d-texture-standards.md`
 
 | Texture category | Filename suffix | TextureCache method | GL internal format | `GL_TEXTURE_MAX_LEVEL` | Rationale |
 |---|---|---|---|---|---|
-| Diffuse atlas (sRGB DXT1) | `_d` | `loadSRGB()` | `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` (from FourCC) | **3** | 4-level mip chain mandatory (CLAUDE.md); building atlas mip chain clamped at 4 levels. |
+| Diffuse atlas — primary `buildings_atlas_d.dds` (sRGB DXT1, 4096×4096) | `_d` | `loadSRGB()` | `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` (from FourCC) | **4** | Phase-11e primary atlas: 4096×4096 with 5 mip levels (levels 0–4). |
+| Diffuse atlas — fallback `buildings_atlas_d_2k.dds` (sRGB DXT1, 2048×2048) | `_d` | `loadSRGB()` | `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` (from FourCC) | **3** | Fallback atlas for GPU/driver caps below `GL_MAX_TEXTURE_SIZE` = 4096: 2048×2048 with 4 mip levels (levels 0–3). |
 | Billboard imposter atlas (sRGB DXT5) | `_billboard` | `loadSRGB()` | `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` (from FourCC) | **3** | 4-level mip chain mandatory (billboard imposter spec). |
 | Road tileable texture (sRGB DXT5) | `_tileable` | `loadSRGB()` | `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` (from FourCC) | **3** | Repeat wrap; road_asphalt_tileable.dds is 1024×1024 DXT5 sRGB with alpha. |
 | Lightmap (linear, baked) | `_lm` | `loadLinear()` (or dedicated `loadLightmap()` if added) | `GL_RGB` / `GL_RGBA` linear | _(driver default)_ | Single mip only; lightmaps are pre-filtered at bake time; hardware mip filtering would corrupt the baked radiance values. `GL_TEXTURE_MAX_LEVEL` cannot be set via `glTexParameteri` through the `IVideoDriver` path — see note below. |
@@ -94,7 +95,7 @@ the reference values in `architecture/asset-standards/2d-texture-standards.md`
 
 **Vehicle normal atlas mip levels**: The vehicle normal atlas (`vehicles_normal_atlas_n.dds`) requires exactly 4 authored mip levels pre-baked into the DDS file header to prevent driver-side mip generation beyond level 3. Because the atlas is uploaded via `IVideoDriver::getTexture()` (linear pool), `glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 3)` cannot be applied through the Irrlicht driver path. See `building-atlas-layout.md` for the V1 workaround.
 
-**Implementation rule**: `GL_TEXTURE_MAX_LEVEL` must be set via `glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, N)` immediately after `glGenTextures` / `glBindTexture`, before any `glCompressedTexImage2D` or `glTexImage2D` upload call. This applies only to textures uploaded through the raw-GL path (`loadSRGB()` and `loadSplatMap()`). The sRGB upload code block above already sets `GL_TEXTURE_MAX_LEVEL = 3` for diffuse and billboard atlases — this table is the authoritative cross-reference for all texture categories. If a new texture category is added, this table MUST be updated and the corresponding `TextureCache` load method MUST set the correct `GL_TEXTURE_MAX_LEVEL` where the raw-GL path is used.
+**Implementation rule**: `GL_TEXTURE_MAX_LEVEL` must be set via `glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, N)` immediately after `glGenTextures` / `glBindTexture`, before any `glCompressedTexImage2D` or `glTexImage2D` upload call. This applies only to textures uploaded through the raw-GL path (`loadSRGB()` and `loadSplatMap()`). The sRGB upload code block above sets `GL_TEXTURE_MAX_LEVEL = N` where `N` is determined per texture category — consult this table as the authoritative cross-reference (primary building atlas: `N = 4`; fallback building atlas and billboard atlas: `N = 3`). If a new texture category is added, this table MUST be updated and the corresponding `TextureCache` load method MUST set the correct `GL_TEXTURE_MAX_LEVEL` where the raw-GL path is used.
 
 - **Eviction policy**: When budget exceeded, evict the **LRU zero-reference** entry from either pool (linear: `IVideoDriver::removeTexture()`; sRGB: `glDeleteTextures()`); error-log and skip if no zero-reference entries available.
 - **Eviction safety**: Before any entity destruction, `SceneEntityManager::destroy()` must iterate over every material slot on the scene node and zero the texture layers explicitly (clearing the node's own material array), AND call `IVideoDriver::setMaterial(SMaterial{})` (to flush the driver's last-bound state). Both steps are required:

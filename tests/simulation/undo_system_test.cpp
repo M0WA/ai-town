@@ -448,23 +448,23 @@ TEST_F(UndoTest, RecordUndoAction_WhenPaused_SetsWallExpiry)
 // ============================================================================
 TEST_F(UndoTest, UndoZoneOverRoad_RestoresRoadAndIncrementsCount)
 {
-    // Place a road at (4,4).
+    // Phase 11d Deliverable 5a: placeZone returns early when tile is already a road
+    // (occupancy guard).  Zone over road is a no-op — tile remains a road.
+    // Place a road at (4,4) — this records one undo action.
     sim_->placeRoad(4, 4, 0);
+    ASSERT_TRUE(sim_->hasUndoPendingAction());
 
-    // Zone over it — replaces road with zone, records undo action.
+    // Attempt to zone over it — must be blocked by the occupancy guard.
     sim_->placeZone(4, 4, ZoneType::Residential, DensityTier::Low, 0);
 
-    // Verify zone placed.
-    QueryResult afterZone = sim_->queryTile(4, 4);
-    ASSERT_TRUE(afterZone.isZoned);
-    ASSERT_FALSE(afterZone.isRoad);
+    // Tile remains a road, not zoned.
+    QueryResult afterAttempt = sim_->queryTile(4, 4);
+    EXPECT_FALSE(afterAttempt.isZoned);
+    EXPECT_TRUE(afterAttempt.isRoad);
 
-    // Undo the zone placement — restores the road.
-    ASSERT_TRUE(sim_->hasUndoPendingAction());
+    // Undo the road placement — tile should revert to empty.
     sim_->undoLastAction();
-
-    // After undo, tile should be a road again.
     QueryResult afterUndo = sim_->queryTile(4, 4);
-    EXPECT_TRUE(afterUndo.isRoad);
+    EXPECT_FALSE(afterUndo.isRoad);
     EXPECT_FALSE(afterUndo.isZoned);
 }

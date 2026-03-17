@@ -311,6 +311,8 @@ bool UIManager::onEvent(const InputEvent& event) {
         if (event.type == InputEvent::Type::KeyDown && event.keyCode == kKeyEscape) {
             m_inspector->hide();
             m_inspectorOpen = false;
+            // Phase 11d Deliverable 4a: hide service coverage overlay on inspector close.
+            if (m_renderer) m_renderer->hideServiceCoverageOverlay();
             return true;
         }
 
@@ -338,6 +340,8 @@ bool UIManager::onEvent(const InputEvent& event) {
                     // Outside click — close inspector, consume event.
                     m_inspector->hide();
                     m_inspectorOpen = false;
+                    // Phase 11d Deliverable 4a: hide service coverage overlay on outside click.
+                    if (m_renderer) m_renderer->hideServiceCoverageOverlay();
                     return true;
                 }
             }
@@ -385,6 +389,13 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_inspector->populate(result, hitX, hitZ,
                                       event.x, event.y, tileBounds);
                 m_inspectorOpen = true;
+                // Phase 11d Deliverable 4a: show service coverage overlay when
+                // the queried tile holds a service building.
+                if (m_renderer &&
+                    result.serviceType != ServiceBuildingType::None) {
+                    m_renderer->showServiceCoverageOverlay(
+                        hitX, hitZ, result.serviceType, result.degraded);
+                }
             }
             return true;
         }
@@ -821,6 +832,14 @@ bool UIManager::onEvent(const InputEvent& event) {
                     int z1 = std::max(m_zoneAnchorZ, releaseZ);
                     for (int tz = z0; tz <= z1; ++tz) {
                         for (int tx = x0; tx <= x1; ++tx) {
+                            // Phase 11d Deliverable 5d: skip tiles already occupied
+                            // (isRoad || isZoned) — sim guard already rejects them, but
+                            // skipping here avoids triggering the placeZone early-return
+                            // for every blocked tile in the rect.
+                            if (m_sim) {
+                                QueryResult q = m_sim->queryTile(tx, tz);
+                                if (q.isRoad || q.isZoned) continue;
+                            }
                             doTerrainPlacement(tx, tz);
                         }
                     }
@@ -843,6 +862,11 @@ bool UIManager::onEvent(const InputEvent& event) {
                         int x0 = std::min(m_zoneAnchorX, releaseX);
                         int x1 = std::max(m_zoneAnchorX, releaseX);
                         for (int tx = x0; tx <= x1; ++tx) {
+                            // Phase 11d Deliverable 5d: skip occupied tiles.
+                            if (m_sim) {
+                                QueryResult q = m_sim->queryTile(tx, m_zoneAnchorZ);
+                                if (q.isRoad || q.isZoned) continue;
+                            }
                             doTerrainPlacement(tx, m_zoneAnchorZ);
                         }
                     } else {
@@ -850,6 +874,11 @@ bool UIManager::onEvent(const InputEvent& event) {
                         int z0 = std::min(m_zoneAnchorZ, releaseZ);
                         int z1 = std::max(m_zoneAnchorZ, releaseZ);
                         for (int tz = z0; tz <= z1; ++tz) {
+                            // Phase 11d Deliverable 5d: skip occupied tiles.
+                            if (m_sim) {
+                                QueryResult q = m_sim->queryTile(m_zoneAnchorX, tz);
+                                if (q.isRoad || q.isZoned) continue;
+                            }
                             doTerrainPlacement(m_zoneAnchorX, tz);
                         }
                     }
@@ -878,44 +907,93 @@ bool UIManager::onEvent(const InputEvent& event) {
                     default:                    colour = kHoverArgbClear;     break;
                 }
 
+                // Phase 11d Deliverable 5d: override hover colour to blocked red when
+                // the Zone or Road tool is hovering over an already-occupied tile
+                // (isRoad || isZoned).  Only applied to single-tile hover; drag rect
+                // preview partitioning handles the multi-tile case below.
+                if (m_sim &&
+                    (m_activeTool == ActiveTool::Zone || m_activeTool == ActiveTool::Road) &&
+                    !(m_lmbHeld && m_zoneAnchorX != -1)) {
+                    QueryResult hoverQ = m_sim->queryTile(hitX, hitZ);
+                    if (hoverQ.isRoad || hoverQ.isZoned) {
+                        colour = kHoverArgbBlocked;
+                    }
+                }
+
                 // Zone tool with anchor active: show rect preview instead of single-tile hover.
                 if (m_lmbHeld && m_activeTool == ActiveTool::Zone && m_zoneAnchorX != -1) {
                     int x0 = std::min(m_zoneAnchorX, hitX);
                     int x1 = std::max(m_zoneAnchorX, hitX);
                     int z0 = std::min(m_zoneAnchorZ, hitZ);
                     int z1 = std::max(m_zoneAnchorZ, hitZ);
-                    std::vector<std::pair<int,int>> previewTiles;
-                    previewTiles.reserve(static_cast<size_t>((x1 - x0 + 1) * (z1 - z0 + 1)));
+                    // Phase 11d Deliverable 5d: partition preview tiles into free vs blocked
+                    // so the renderer shows free tiles in zone colour and blocked tiles in red.
+                    std::vector<std::pair<int,int>> freeTiles;
+                    std::vector<std::pair<int,int>> blockedTiles;
+                    const size_t total = static_cast<size_t>((x1 - x0 + 1) * (z1 - z0 + 1));
+                    freeTiles.reserve(total);
+                    blockedTiles.reserve(total);
                     for (int tz = z0; tz <= z1; ++tz) {
                         for (int tx = x0; tx <= x1; ++tx) {
-                            previewTiles.push_back({tx, tz});
+                            if (m_sim) {
+                                QueryResult q = m_sim->queryTile(tx, tz);
+                                if (q.isRoad || q.isZoned) {
+                                    blockedTiles.push_back({tx, tz});
+                                } else {
+                                    freeTiles.push_back({tx, tz});
+                                }
+                            } else {
+                                freeTiles.push_back({tx, tz});
+                            }
                         }
                     }
                     m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
-                    m_renderer->setTilePlacementPreview(previewTiles, colour, {});
+                    m_renderer->setTilePlacementPreview(freeTiles, colour, blockedTiles);
                 }
                 // Road tool with anchor active: show axis-snapped line preview.
                 else if (m_lmbHeld && m_activeTool == ActiveTool::Road && m_zoneAnchorX != -1) {
                     int dX = std::abs(hitX - m_zoneAnchorX);
                     int dZ = std::abs(hitZ - m_zoneAnchorZ);
-                    std::vector<std::pair<int,int>> previewTiles;
+                    // Phase 11d Deliverable 5d: partition road preview into free vs blocked.
+                    std::vector<std::pair<int,int>> freeTiles;
+                    std::vector<std::pair<int,int>> blockedTiles;
                     if (dX >= dZ) {
                         int x0 = std::min(m_zoneAnchorX, hitX);
                         int x1 = std::max(m_zoneAnchorX, hitX);
-                        previewTiles.reserve(static_cast<size_t>(x1 - x0 + 1));
+                        freeTiles.reserve(static_cast<size_t>(x1 - x0 + 1));
+                        blockedTiles.reserve(static_cast<size_t>(x1 - x0 + 1));
                         for (int tx = x0; tx <= x1; ++tx) {
-                            previewTiles.push_back({tx, m_zoneAnchorZ});
+                            if (m_sim) {
+                                QueryResult q = m_sim->queryTile(tx, m_zoneAnchorZ);
+                                if (q.isRoad || q.isZoned) {
+                                    blockedTiles.push_back({tx, m_zoneAnchorZ});
+                                } else {
+                                    freeTiles.push_back({tx, m_zoneAnchorZ});
+                                }
+                            } else {
+                                freeTiles.push_back({tx, m_zoneAnchorZ});
+                            }
                         }
                     } else {
                         int z0 = std::min(m_zoneAnchorZ, hitZ);
                         int z1 = std::max(m_zoneAnchorZ, hitZ);
-                        previewTiles.reserve(static_cast<size_t>(z1 - z0 + 1));
+                        freeTiles.reserve(static_cast<size_t>(z1 - z0 + 1));
+                        blockedTiles.reserve(static_cast<size_t>(z1 - z0 + 1));
                         for (int tz = z0; tz <= z1; ++tz) {
-                            previewTiles.push_back({m_zoneAnchorX, tz});
+                            if (m_sim) {
+                                QueryResult q = m_sim->queryTile(m_zoneAnchorX, tz);
+                                if (q.isRoad || q.isZoned) {
+                                    blockedTiles.push_back({m_zoneAnchorX, tz});
+                                } else {
+                                    freeTiles.push_back({m_zoneAnchorX, tz});
+                                }
+                            } else {
+                                freeTiles.push_back({m_zoneAnchorX, tz});
+                            }
                         }
                     }
                     m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
-                    m_renderer->setTilePlacementPreview(previewTiles, colour, {});
+                    m_renderer->setTilePlacementPreview(freeTiles, colour, blockedTiles);
                 }
                 // All other cases: single-tile hover highlight (no drag preview).
                 else {

@@ -766,6 +766,38 @@ markdown-lint:
             echo "PASS: check_30 present"
     ```
 
+  - Phase 11e: Check #4 (UV within atlas cell) is **extended** — not a new check number — with
+    a B3D UV-coordinate reader that validates UV coordinates at runtime. The extension upgrades
+    the atlas grid from 4×4 (0.25 step) to 8×8 (0.125 step) and adds two new sub-validations:
+    - **UV boundary gate**: for each `.b3d` model, read every UV coordinate from the mesh and
+      verify it falls within the cell bounds defined by the model's `.meta` `atlas_cell`
+      assignment. For a cell at `(cell_col, cell_row)` on the 8×8 grid the permitted UV range
+      is `[cell_col/8, (cell_col+1)/8]` × `[cell_row/8, (cell_row+1)/8]`. Any UV coordinate
+      outside this rectangle is a CI failure.
+    - **Cell Assignment Table cross-check**: the `atlas_cell` row/col read from the `.meta`
+      file is verified against the canonical Cell Assignment Table in
+      `architecture/asset-standards/building-atlas-layout.md`. A mismatch between the `.meta`
+      value and the table entry for that variant is a CI failure.
+
+    No new check number is introduced; the guard step verifies the UV-reader logic is present
+    in `tools/validate_assets.py` by searching for the joint presence of `"check_4"` and
+    `"uv"` (case-insensitive). No change to the `validate-assets` job definition or
+    `all-checks-pass` wiring.
+
+    Example guard step for the Phase 11e Check #4 extension:
+
+    ```yaml
+        - name: Verify check_4 UV-coordinate reader present in validate_assets.py
+          # check_4 extension (Phase 11e): B3D UV-coordinate reader validates UV coords fall
+          # within [cell_col/8, (cell_col+1)/8] x [cell_row/8, (cell_row+1)/8] per atlas_cell.
+          # Grid upgraded from 4x4 (0.25 step) to 8x8 (0.125 step).
+          # A missing UV-reader allows out-of-bounds UVs to pass CI silently.
+          run: |
+            grep -q "check_4" tools/validate_assets.py && grep -qi "uv" tools/validate_assets.py || \
+              (echo "FAIL: check_4 UV-coordinate reader not found in validate_assets.py — Phase 11e UV boundary gate missing" && exit 1)
+            echo "PASS: check_4 UV-coordinate reader present"
+    ```
+
 ### PHASE 0 FORM (validate-assets not yet introduced)
 
 ```yaml

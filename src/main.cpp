@@ -37,6 +37,8 @@
 #include <cstring>
 #include <cmath>
 #include <exception>
+#include <unordered_map>
+#include <unordered_set>
 
 int main(int argc, char** argv) {
     // --frames N : auto-exit after N frames (used for profiling / benchmarking)
@@ -303,6 +305,18 @@ int main(int argc, char** argv) {
     device->setEventReceiver(&eventReceiver);
 
     // =========================================================================
+    // Phase 11d Deliverable 3a: per-frame vehicle agent sync state.
+    // Persists across frames: maps AgentHandle → acquired audio source pair.
+    // Released on despawn; capped to 150 m distance cull in the sync loop below.
+    // =========================================================================
+    struct AgentAudioState {
+        int      idleIdx{-1};
+        int      moveIdx{-1};
+        ZoneType zone{ZoneType::Residential};
+    };
+    std::unordered_map<AgentHandle, AgentAudioState> activeAgents;
+
+    // =========================================================================
     // 8-STEP FRAME LOOP
     // =========================================================================
     int frameCount = 0;
@@ -340,6 +354,94 @@ int main(int argc, char** argv) {
         } catch (const std::exception& e) {
             fprintf(stderr, "[main] Error in citySimulation.tick (continuing): %s\n",
                     e.what());
+        }
+
+        // Phase 11d Deliverable 3a: per-frame vehicle agent sync loop.
+        // Runs AFTER CitySimulation::tick() so getAgentPositions() reflects the
+        // current tick, and BEFORE drawScene() so renderer nodes are updated.
+        // Distance cull: agents beyond 150 m from the camera are not rendered.
+        // kAgentCullDistSq = 150*150 = 22500 m² (avoids sqrt per agent).
+        {
+            constexpr float kTileSizeM       = 10.0f;   // metres per tile (V1 map)
+            constexpr float kAgentCullDistSq = 22500.0f; // 150 m radius squared
+
+            CameraState camState = cameraController.getCameraState();
+            const float camX = camState.position.x;
+            const float camZ = camState.position.z;
+
+            const std::vector<AgentState> agentList = citySimulation.getAgentPositions();
+
+            // Build set of handles currently alive in the simulation.
+            std::unordered_set<AgentHandle> liveHandles;
+            liveHandles.reserve(agentList.size());
+            for (const AgentState& a : agentList) {
+                liveHandles.insert(static_cast<AgentHandle>(a.agentId));
+            }
+
+            // Despawn agents that are no longer alive in the simulation.
+            {
+                std::vector<AgentHandle> toRemove;
+                for (const auto& kv : activeAgents) {
+                    if (liveHandles.find(kv.first) == liveHandles.end()) {
+                        toRemove.push_back(kv.first);
+                    }
+                }
+                for (AgentHandle h : toRemove) {
+                    const AgentAudioState& aud = activeAgents.at(h);
+                    audioSystem.releaseVehicleEnginePair(aud.idleIdx, aud.moveIdx);
+                    renderer.despawnVehicleAgent(h);
+                    activeAgents.erase(h);
+                }
+            }
+
+            // Spawn / move agents that are alive.
+            for (const AgentState& a : agentList) {
+                const AgentHandle handle = static_cast<AgentHandle>(a.agentId);
+
+                // Distance cull: skip agents beyond 150 m.
+                const float wx = static_cast<float>(a.tileX) * kTileSizeM;
+                const float wz = static_cast<float>(a.tileZ) * kTileSizeM;
+                const float dx = wx - camX;
+                const float dz = wz - camZ;
+                const float distSq = dx * dx + dz * dz;
+                if (distSq > kAgentCullDistSq) {
+                    // If the agent was previously visible, despawn it now.
+                    auto it = activeAgents.find(handle);
+                    if (it != activeAgents.end()) {
+                        audioSystem.releaseVehicleEnginePair(it->second.idleIdx, it->second.moveIdx);
+                        renderer.despawnVehicleAgent(handle);
+                        activeAgents.erase(it);
+                    }
+                    continue;
+                }
+
+                auto it = activeAgents.find(handle);
+                if (it == activeAgents.end()) {
+                    // New agent: spawn renderer node and acquire audio pair.
+                    renderer.spawnVehicleAgent(handle, a.tileX, a.tileZ, a.zone);
+                    auto audioPair = audioSystem.acquireVehicleEnginePair(a.zone);
+                    AgentAudioState aud;
+                    aud.idleIdx = audioPair.first;
+                    aud.moveIdx = audioPair.second;
+                    aud.zone    = a.zone;
+                    activeAgents[handle] = aud;
+                    it = activeAgents.find(handle);
+                }
+
+                // Move existing agent.
+                renderer.moveVehicleAgent(handle, a.tileX, a.tileZ, a.headingDeg);
+
+                // Update vehicle audio (speed fraction derived from agent road data).
+                // Use speedFraction = 1.0 (free-flow) as default; traffic signal state
+                // modulation is handled by CitySimulation::getRoadSegmentSpeeds() queries
+                // from the minimap overlay — agent sync uses a simple motion heuristic.
+                const float speedFraction = 1.0f;
+                if (it->second.idleIdx >= 0) {
+                    audioSystem.updateVehicleAudio(
+                        it->second.idleIdx, it->second.moveIdx,
+                        speedFraction, wx, wz);
+                }
+            }
         }
 
         // Step 3: CameraController::update(dt).

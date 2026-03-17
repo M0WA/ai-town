@@ -16,7 +16,7 @@
 #include "src/interfaces/audio_types.h"
 #include "src/audio/audio_command_queue.h"
 #include "src/interfaces/IAlcFunctions.h"
-#include "src/audio/AudioSourcePool.h"   // for VehiclePairSlot
+#include "src/audio/AudioSourcePool.h"   // for AudioSourcePool (vehicle pair pool management)
 
 #include <atomic>
 #include <array>
@@ -388,9 +388,54 @@ private:
     std::atomic<int> m_currentMusicIntensity{static_cast<int>(MusicIntensity::CALM)};
 
     // -----------------------------------------------------------------------
-    // Vehicle pair tracking — kMaxVehiclePairs pairs.
+    // Vehicle audio slot — per-active-vehicle cross-thread state.
+    //
+    // Main thread writes idleSourceIdx/moveSourceIdx/basePitch/pendingInit
+    // at acquire time; writes speedFraction/worldX/worldZ per-frame via
+    // updateVehicleAudio(); writes pendingRelease at release time.
+    // Audio thread reads all fields each wake in updateVehicleEngines().
+    //
+    // All fields are std::atomic<> to satisfy the C++ data-race-free contract
+    // (main thread and audio thread access concurrently with no mutex).
+    // pendingInit / pendingRelease use relaxed loads/stores — the audio thread
+    // wake interval (~10 ms) provides sufficient ordering; no ABA risk because
+    // acquire and release are serialized by the single-threaded main loop.
     // -----------------------------------------------------------------------
-    std::array<VehiclePairSlot, kMaxVehiclePairs> m_vehiclePairs{};
+    struct VehicleAudioSlot {
+        // Indices used by both main thread (acquire/release) and audio thread.
+        // idleSourceIdx == -1 means the slot is free.
+        std::atomic<int>   idleSourceIdx{-1};
+        std::atomic<int>   moveSourceIdx{-1};
+
+        // Set at acquire time; read by audio thread for pitch computation.
+        std::atomic<float> basePitch{1.0f};    // 1.0 (car) or 0.85 (bus/truck)
+
+        // pendingInit: main thread sets true at acquire; audio thread clears after
+        // binding buffers, setting AL_VELOCITY=0, and calling alSourcePlay.
+        std::atomic<bool>  pendingInit{false};
+
+        // pendingRelease: main thread sets true at release (and stores the source
+        // indices into pendingReleaseIdle/Move before clearing idleSourceIdx).
+        // Audio thread calls alSourceStop on those indices, then clears this flag.
+        std::atomic<bool>  pendingRelease{false};
+
+        // Source indices preserved for pendingRelease processing.
+        // Written by main thread before setting pendingRelease=true;
+        // read by audio thread when pendingRelease=true.
+        std::atomic<int>   pendingReleaseIdle{-1};
+        std::atomic<int>   pendingReleaseMove{-1};
+
+        // Per-frame state written by main thread in updateVehicleAudio();
+        // read by audio thread each wake.
+        std::atomic<float> speedFraction{0.f};
+        std::atomic<float> worldX{0.f};
+        std::atomic<float> worldZ{0.f};
+    };
+    VehicleAudioSlot m_vehicleAudio[kMaxVehiclePairs];
+
+    // Called on audio thread each wake to process pending vehicle init/release
+    // commands and apply per-frame AL_PITCH / AL_GAIN / AL_POSITION updates.
+    void updateVehicleEngines();
 
     // SFX pool "in-use" tracking: source index -> SoundHandle.
     // SoundHandle 0 is invalid; generated handles are sequential > 0.

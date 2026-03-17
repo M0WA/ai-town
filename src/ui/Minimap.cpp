@@ -3,9 +3,13 @@
 // Minimap — 200x200 px at bottom-right (virtual x:1720-1920, y:880-1080).
 // Top-down zone color coding, road network, camera viewport rectangle.
 // Click-to-pan camera, service coverage overlay toggle.
+//
+// Phase 11d Deliverable 3c: Traffic overlay — road tile congestion colour-coding.
+// Phase 11d Deliverable 4b: ServiceCoverage overlay — per-service tile tinting.
 
 #include "src/ui/Minimap.h"
 #include "src/platform/input_event.h"
+#include "src/interfaces/simulation_types.h"  // RoadSegmentSpeed, ServiceCoverageTile, ServiceBuildingType
 
 // ---------------------------------------------------------------------------
 // Constructor
@@ -83,8 +87,92 @@ void Minimap::draw() {
     m_backend->setElementVisible(m_legendPanel, m_overlayActive);
     m_backend->setElementVisible(m_legendLabel, m_overlayActive);
 
-    // Update toggle button label to reflect state
-    m_backend->setElementText(m_toggleBtn, m_overlayActive ? "[Svc]" : "Svc");
+    // Update toggle button label to reflect current overlay mode.
+    if (!m_overlayActive) {
+        m_backend->setElementText(m_toggleBtn, "Svc");
+    } else if (m_overlayMode == MinimapOverlay::Traffic) {
+        m_backend->setElementText(m_toggleBtn, "[Tfc]");
+    } else {
+        m_backend->setElementText(m_toggleBtn, "[Svc]");
+    }
+
+    // Phase 11d Deliverable 3c: Traffic congestion overlay.
+    // When active and simulation is available, colour each road tile by speed fraction:
+    //   >= 0.4 → Green  #27AE60 (free-flow)
+    //   0.31-0.39 → Orange #E67E22 (mild congestion)
+    //   <= 0.30 → Red   #E74C3C (moderate-heavy congestion)
+    if (m_overlayActive && m_overlayMode == MinimapOverlay::Traffic && m_sim) {
+        const auto& speeds = m_sim->getRoadSegmentSpeeds();
+        // Minimap maps tiles linearly to the 200x200 pixel area.
+        // Without map dimension knowledge we render a proportional overlay using
+        // backend draw primitives. The minimap spans tiles [0, mapW)×[0, mapH) over
+        // the 200×200 px area. Since we don't have map dimensions here, we use a
+        // fixed 128-tile reference (the V1 default map size).
+        // Each tile maps to ~1.5 px (200/128); we render a 2×2 px dot per tile.
+        // This is a best-effort visual overlay; precise pixel mapping requires map
+        // dimensions injected via setSimulation or a separate setMapDimensions setter.
+        constexpr float kRefMapTiles = 128.0f;
+        constexpr float kMinimapPx = 200.0f;
+        const float scale = kMinimapPx / kRefMapTiles;
+
+        for (const auto& seg : speeds) {
+            int px = kMapX + static_cast<int>(seg.tileX * scale);
+            int py = kMapY + static_cast<int>(seg.tileZ * scale);
+            if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
+
+            // Select colour by speed fraction.
+            int r, g, b;
+            if (seg.speedFraction >= 0.4f) {
+                r = 0x27; g = 0xAE; b = 0x60;  // Green #27AE60
+            } else if (seg.speedFraction >= 0.31f) {
+                r = 0xE6; g = 0x7E; b = 0x22;  // Orange #E67E22
+            } else {
+                r = 0xE7; g = 0x4C; b = 0x3C;  // Red #E74C3C
+            }
+            // Draw a 2×2 pixel dot for each road tile.
+            UIElementHandle dot = m_backend->addStaticText("", px, py, 2, 2);
+            if (dot != kInvalidUIElement) {
+                m_backend->setElementBackground(dot, r, g, b, 200);
+            }
+        }
+    }
+
+    // Phase 11d Deliverable 4b: Service coverage overlay.
+    // When active and simulation is available, colour covered tiles by service type:
+    //   Fire Station:   red  #C0392B
+    //   Police Station: blue #2E4482
+    //   Power Plant:    yellow #F1C40F
+    //   Water Tower:    cyan #1ABC9C
+    if (m_overlayActive && m_overlayMode == MinimapOverlay::ServiceCoverage && m_sim) {
+        const auto& coverage = m_sim->getServiceCoverage();
+        constexpr float kRefMapTiles = 128.0f;
+        constexpr float kMinimapPx = 200.0f;
+        const float scale = kMinimapPx / kRefMapTiles;
+
+        for (const auto& sct : coverage) {
+            int px = kMapX + static_cast<int>(sct.tileX * scale);
+            int py = kMapY + static_cast<int>(sct.tileZ * scale);
+            if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
+
+            int r, g, b;
+            switch (sct.coveredBy) {
+                case ServiceBuildingType::FireStation:
+                    r = 0xC0; g = 0x39; b = 0x2B; break;  // #C0392B
+                case ServiceBuildingType::PoliceStation:
+                    r = 0x2E; g = 0x44; b = 0x82; break;  // #2E4482
+                case ServiceBuildingType::PowerPlant:
+                    r = 0xF1; g = 0xC4; b = 0x0F; break;  // #F1C40F
+                case ServiceBuildingType::WaterTower:
+                    r = 0x1A; g = 0xBC; b = 0x9C; break;  // #1ABC9C
+                default:
+                    continue;
+            }
+            UIElementHandle dot = m_backend->addStaticText("", px, py, 2, 2);
+            if (dot != kInvalidUIElement) {
+                m_backend->setElementBackground(dot, r, g, b, 180);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

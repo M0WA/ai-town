@@ -464,7 +464,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   altered. Only mesh detail within each LOD level changes in this phase.
   (ref: `architecture/asset-standards/3d-model-standards.md` §LOD Distance Thresholds)
 
-- [ ] **`aitown_model_validator` update** — expand `src/benchmark/model_validator_main.cpp`
+- [x] **`aitown_model_validator` update** — expand `src/benchmark/model_validator_main.cpp`
   category list from the Phase 9 six-model-per-zone layout to the Phase 11d eleven-category
   layout defined in `architecture/graphics-architecture/model-validator-tool.md`: each zone
   tier is its own category (4 variants each), giving categories 1–9 for zone buildings plus
@@ -1193,7 +1193,7 @@ along road paths, and intersection signal state shown at road nodes.
 
 ##### 3a. Vehicle Agent Rendering
 
-- [ ] **`IRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone)` → `void`**
+- [x] **`IRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone)` → `void`**
   — new method on `IRenderer` interface (`src/interfaces/IRenderer.h`). Spawns a vehicle
   agent node as an `IMeshSceneNode* (CMeshSceneNode)` (not a `LODNode*` wrapper) at the
   world-space position derived from tile coordinates `(tileX, tileZ)` and stores it in
@@ -1226,30 +1226,30 @@ along road paths, and intersection signal state shown at road nodes.
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`,
   `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget)
 
-- [ ] **`IRenderer::moveVehicleAgent(AgentHandle handle, int tileX, int tileZ, float headingDeg)`** — updates
+- [x] **`IRenderer::moveVehicleAgent(AgentHandle handle, int tileX, int tileZ, float headingDeg)`** — updates
   the agent's scene node to the world-space position derived from tile coordinates
   `(tileX, tileZ)` and sets Y-axis rotation each frame. Called from `main.cpp`
   per-frame render loop after `CitySimulation::getAgentPositions()` is polled. No physics;
   direct node position set (`setPosition` + `setRotation`).
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
 
-- [ ] **`IRenderer::despawnVehicleAgent(AgentHandle)`** — look up the node pointer in `m_agentNodes[handle]` first, then apply the eviction sequence: iterate all material slots to clear texture pointers → `driver->setMaterial(SMaterial{})` → `node->remove()`, then erase the handle from `m_agentNodes`. Per `architecture/graphics-architecture/scene-graph-ownership.md`, agent nodes use `IAnimatedMesh` loaded via the scene manager — do NOT call `->drop()` on the mesh (scene manager retains ownership). `IrrlichtRenderer` owns agent nodes directly; `SceneEntityManager` is not involved. **TextureCache note**: vehicle atlas textures are loaded ONCE at renderer init and shared across all agent nodes; `spawnVehicleAgent` does NOT call `TextureCache::loadSRGB`, so `despawnVehicleAgent` does NOT call `TextureCache::releaseSRGB` — clearing the material slots is sufficient.
+- [x] **`IRenderer::despawnVehicleAgent(AgentHandle)`** — look up the node pointer in `m_agentNodes[handle]` first, then apply the eviction sequence: iterate all material slots to clear texture pointers → `driver->setMaterial(SMaterial{})` → `node->remove()`, then erase the handle from `m_agentNodes`. Per `architecture/graphics-architecture/scene-graph-ownership.md`, agent nodes use `IAnimatedMesh` loaded via the scene manager — do NOT call `->drop()` on the mesh (scene manager retains ownership). `IrrlichtRenderer` owns agent nodes directly; `SceneEntityManager` is not involved. **TextureCache note**: vehicle atlas textures are loaded ONCE at renderer init and shared across all agent nodes; `spawnVehicleAgent` does NOT call `TextureCache::loadSRGB`, so `despawnVehicleAgent` does NOT call `TextureCache::releaseSRGB` — clearing the material slots is sufficient.
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
 
-- [ ] **`ICitySimulation::getAgentPositions()` query** — new method on `ICitySimulation`
+- [x] **`ICitySimulation::getAgentPositions()` query** — new method on `ICitySimulation`
   returning a `std::vector<AgentState>` (defined in `simulation_types.h`) where `AgentState`
   carries `{ agentId, tileX, tileZ, headingDeg, ZoneType }`. Used by the render loop to
   sync scene nodes to simulation state each frame. `AgentState` is a value type; no raw
   pointers.
   (ref: `architecture/game-design/traffic-system.md`)
 
-- [ ] **`IRenderer::getListenerPosition()` → `irr::core::vector3df`** — method already added
+- [x] **`IRenderer::getListenerPosition()` → `irr::core::vector3df`** — method already added
   in Phase 10 (`src/interfaces/IRenderer.h`); returns the current camera/listener world-space
   position. Used by the traffic agent cull logic below to compute agent-to-camera distance.
   Verify it is present before use — do not re-add it in this phase.
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
 
-- [ ] **Distance cull for agent spawning** — only agents within **150 m** (Phase 11d agents use LOD0 only — no LOD swap; `m_agentNodes` stores plain `IMeshSceneNode*`, not `LODNode*`; the 150 m value is the spawn/despawn cull boundary) of the camera
+- [x] **Distance cull for agent spawning** — only agents within **150 m** (Phase 11d agents use LOD0 only — no LOD swap; `m_agentNodes` stores plain `IMeshSceneNode*`, not `LODNode*`; the 150 m value is the spawn/despawn cull boundary) of the camera
   listener position (per `IRenderer::getListenerPosition()` defined in Phase 10) are
   spawned as scene nodes. Agents outside cull range are tracked in simulation but have no
   scene node. On spawn, `spawnVehicleAgent` is called; on despawn (timeout or exit cull
@@ -1259,7 +1259,7 @@ along road paths, and intersection signal state shown at road nodes.
   (ref: `architecture/game-design/traffic-system.md`,
   `architecture/audio-architecture/dynamic-soundscape.md`)
 
-- [ ] **Vehicle engine audio pair wiring** — in the per-frame agent sync loop in `main.cpp`,
+- [x] **Vehicle engine audio pair wiring** — in the per-frame agent sync loop in `main.cpp`,
   after each `spawnVehicleAgent` call, call `IAudioSystem::acquireVehicleEnginePair(ZoneType)`
   and store the returned pair indices in a `std::unordered_map<AgentHandle, std::pair<int,int>>`
   keyed by `AgentHandle`; before each `despawnVehicleAgent` call, call
@@ -1289,7 +1289,25 @@ along road paths, and intersection signal state shown at road nodes.
   (ref: `architecture/audio-architecture/dynamic-soundscape.md`,
   `architecture/audio-architecture/source-pool.md`)
 
-- [ ] **Per-frame agent sync loop in `main.cpp`**: after `CitySimulation::tick()` and before
+  **SIGN-OFF EVIDENCE** (sound-dev-opensoftal, 2026-03-17): All three methods implemented in
+  `/workspace/src/audio/AudioSystem.cpp` (Deliverable 3a): (a)
+  `acquireVehicleEnginePair(ZoneType)` — scans `m_vehicleAudio[0..kMaxVehiclePairs-1]` for a
+  free slot, acquires two SFX pool sources from NORMAL-priority range `[0..kTransientReserveStart-1]`,
+  stores basePitch (Residential=1.0, Commercial/Industrial=0.85), sets `pendingInit=true` so
+  the audio thread performs `AL_VELOCITY=0` + `alSourcePlay` on its next wake; returns
+  `{idleIdx,moveIdx}` or `{-1,-1}` if pool exhausted; (b) `releaseVehicleEnginePair(int,int)`
+  — `{-1,-1}` no-op guard present; stores release indices into `pendingReleaseIdle/Move`
+  atomics before clearing `idleSourceIdx`, sets `pendingRelease=true` so audio thread calls
+  `alSourceStop`; frees SFX pool slots immediately; (c) `updateVehicleAudio(int,int,float,float,float)`
+  — no-op if `idleIdx==-1`; stores `speedFraction/worldX/worldZ` atomically; audio thread
+  applies `AL_PITCH = basePitch × lerp(0.75,1.35,speed)`, `AL_GAIN` crossblend
+  (`idle=1-speed`, `move=speed`), and `AL_POSITION`; `updateVehicleEngines()` added to
+  audio-thread wake loop after `updateDuckState(dt)`; `VehicleAudioSlot` struct with all
+  required `std::atomic<>` fields added to `AudioSystem.h`. Build: 0 errors, 0 warnings.
+  Tests: `ctest -L unit` → 1063/1063 passed (all audio tests including
+  `DuckStateMachine_*`, `AudioThread_*`, `VolumeControl_*`).
+
+- [x] **Per-frame agent sync loop in `main.cpp`**: after `CitySimulation::tick()` and before
   `IRenderer::drawScene()`, call `CitySimulation::getAgentPositions()` and reconcile the
   returned list against the active `AgentHandle` map (spawn missing, despawn removed, move
   existing). This loop runs every render frame (not every simulation tick), giving agents
@@ -1298,7 +1316,7 @@ along road paths, and intersection signal state shown at road nodes.
 
 ##### 3b. Traffic Signal Visual State
 
-- [ ] **`IRenderer::setIntersectionSignalState(tileX, tileZ, SignalPhase phase)`** — sets
+- [x] **`IRenderer::setIntersectionSignalState(tileX, tileZ, SignalPhase phase)`** — sets
   the material emissive colour on the road intersection scene node at `(tileX, tileZ)` to
   green (`SignalPhase::Green`) or red (`SignalPhase::Red`), where `SignalPhase` is
   `enum class SignalPhase { Green, Red };` defined in `src/interfaces/simulation_types.h`
@@ -1308,7 +1326,7 @@ along road paths, and intersection signal state shown at road nodes.
   node changes colour; uses `EMT_TRANSPARENT_ADD_COLOR` material for emissive glow.
   (ref: `architecture/game-design/traffic-system.md` §Intersections)
 
-- [ ] **`ICitySimulation::getIntersectionSignalStates()` query** — returns
+- [x] **`ICitySimulation::getIntersectionSignalStates()` query** — returns
   `std::vector<IntersectionSignalState>` (new struct in `simulation_types.h`:
   `{ tileX, tileZ, SignalPhase phase }`). Polled once per simulation tick in the main loop
   and forwarded to `IRenderer::setIntersectionSignalState`.
@@ -1316,7 +1334,7 @@ along road paths, and intersection signal state shown at road nodes.
 
 ##### 3c. Traffic Overlay — Minimap
 
-- [ ] **Minimap traffic congestion overlay** — add a `MinimapOverlay::Traffic` rendering
+- [x] **Minimap traffic congestion overlay** — add a `MinimapOverlay::Traffic` rendering
   mode to the existing minimap (Phase 8 deliverable). When the player toggles the overlay,
   road segments are tinted on the 200×200 px minimap by congestion level using the following
   thresholds (thresholds per `architecture/game-design/traffic-system.md` congestion penalty
@@ -1330,7 +1348,7 @@ along road paths, and intersection signal state shown at road nodes.
   (ref: `architecture/game-design/traffic-system.md` §Congestion threshold,
   `architecture/ui-ux/minimap.md`)
 
-- [ ] **`ICitySimulation::getRoadSegmentSpeeds()` query** — returns
+- [x] **`ICitySimulation::getRoadSegmentSpeeds()` query** — returns
   `std::vector<RoadSegmentSpeed>` (new struct: `{ tileX, tileZ, float speedFraction }`)
   where `speedFraction` is `currentSpeed / maxSpeed` in [0.0, 1.0]. **All road tiles are
   returned** (not just occupied ones); unoccupied road tiles report `speedFraction = 1.0`
@@ -1339,7 +1357,7 @@ along road paths, and intersection signal state shown at road nodes.
   overlay.
   (ref: `architecture/game-design/traffic-system.md`)
 
-- [ ] **`kMinimapWidgetTop`, `kMinimapWidgetTopOverlayActive`, and `kMinimapWidgetLeft` constants** — add to
+- [x] **`kMinimapWidgetTop`, `kMinimapWidgetTopOverlayActive`, and `kMinimapWidgetLeft` constants** — add to
   `src/ui/ui_constants.h`:
 
   ```cpp
@@ -1364,17 +1382,17 @@ along road paths, and intersection signal state shown at road nodes.
 > `architecture/testing/testability-architecture.md` (StrictMock for unit tests). Use
 > `StrictMock<MockRenderer>` in all test fixtures below.
 
-- [ ] **`AgentRenderSync_SpawnDespawn_MatchesSimulationOutput`** (label `unit`,
+- [x] **`AgentRenderSync_SpawnDespawn_MatchesSimulationOutput`** (label `unit`,
   CMake target `simulation_tests`): using `StrictMock<MockRenderer>`, verify that the per-frame agent
   sync loop calls `spawnVehicleAgent` exactly once per new agent, `moveVehicleAgent` every
   frame for active agents, and `despawnVehicleAgent` exactly once when an agent is removed.
   (ref: `architecture/testing/testability-architecture.md`)
 
-- [ ] **`AgentRenderSync_CullDistance_AgentsBeyond150m_NotSpawned`** (label `unit`,
+- [x] **`AgentRenderSync_CullDistance_AgentsBeyond150m_NotSpawned`** (label `unit`,
   CMake target `simulation_tests`): using `StrictMock<MockRenderer>`, verify that agents with tile distance > 150 m from the
   camera do not trigger `spawnVehicleAgent`.
 
-- [ ] **`AgentEngineAudio_AcquireRelease_MatchesSpawnDespawn`** (label `unit`,
+- [x] **`AgentEngineAudio_AcquireRelease_MatchesSpawnDespawn`** (label `unit`,
   CMake target `simulation_tests`): using `StrictMock<MockAudioSystem>`, verify that the
   per-frame agent sync loop calls `acquireVehicleEnginePair` exactly once per spawned agent
   (on spawn) and `releaseVehicleEnginePair` exactly once per despawned agent (on despawn) with
@@ -1385,13 +1403,13 @@ along road paths, and intersection signal state shown at road nodes.
   (ref: `architecture/audio-architecture/source-pool.md`,
   `architecture/audio-architecture/audio-system.md` §acquireVehicleEnginePair)
 
-- [ ] **CMakeLists extension** — add test source via `target_sources(simulation_tests PRIVATE
+- [x] **CMakeLists extension** — add test source via `target_sources(simulation_tests PRIVATE
   tests/simulation/agent_render_sync_test.cpp)` following the Phase 4+ extension policy (do
   NOT call `add_executable` again — duplicate target error).
 
 ##### 3e. Intersection Tick SFX
 
-- [ ] **`sfx_intersection_tick` audio trigger in `CitySimulation::tick()`** — for each active
+- [x] **`sfx_intersection_tick` audio trigger in `CitySimulation::tick()`** — for each active
   traffic signal, on each phase transition (green→red or red→green), call
   `m_audio->playPositionalSound(SFX_INTERSECTION_TICK, pos, SoundPriority::LOW, 1.0f)` gated
   by an 80 m distance cull from `m_renderer->getListenerPosition()`. This wires the
@@ -1412,7 +1430,7 @@ is selected, and a coverage overlay layer on the minimap.
 
 ##### 4a. Service Coverage Radius Overlay
 
-- [ ] **`IRenderer::showServiceCoverageOverlay(tileX, tileZ, ServiceBuildingType,
+- [x] **`IRenderer::showServiceCoverageOverlay(tileX, tileZ, ServiceBuildingType,
   bool degraded)`** — renders a tile-step polygon on the terrain at the specified building's
   coverage radius. Radius values come directly from the spec: Fire Station 800 m, Police
   Station 600 m, Water Tower 700 m, Power Plant uses BFS footprint (not a circle — highlight
@@ -1426,11 +1444,11 @@ is selected, and a coverage overlay layer on the minimap.
   (ref: `architecture/game-design/service-coverage.md`,
   `architecture/graphics-architecture/scene-graph-ownership.md`)
 
-- [ ] **`IRenderer::hideServiceCoverageOverlay()`** — removes the coverage overlay. Called
+- [x] **`IRenderer::hideServiceCoverageOverlay()`** — removes the coverage overlay. Called
   when the Inspector panel is closed or a different tile is queried.
   (ref: `architecture/game-design/service-coverage.md`)
 
-- [ ] **Inspector panel integration** — when `queryTile` returns a service building tile,
+- [x] **Inspector panel integration** — when `queryTile` returns a service building tile,
   `UIManager` calls `showServiceCoverageOverlay` with the building's type and degradation
   state. `hideServiceCoverageOverlay` is called in three cases: (1) on Inspector close (player
   presses **I**, clicks elsewhere, or presses **Escape**), (2) when a different tile is
@@ -1444,7 +1462,7 @@ is selected, and a coverage overlay layer on the minimap.
   (ref: `architecture/ui-ux/query-inspector-panel.md`,
   `architecture/game-design/service-coverage.md`)
 
-- [ ] **Power plant BFS tile highlight** — for `ServiceBuildingType::PowerPlant`, instead of
+- [x] **Power plant BFS tile highlight** — for `ServiceBuildingType::PowerPlant`, instead of
   a circle overlay, `showServiceCoverageOverlay` highlights all BFS-reachable tiles in a
   distinct "coverage" colour (yellow `#F1C40F`). Implementation MUST use a multi-tile mesh
   approach (following the placement-preview pattern from Phase 10:
@@ -1460,7 +1478,7 @@ is selected, and a coverage overlay layer on the minimap.
 
 ##### 4b. Service Coverage Minimap Overlay
 
-- [ ] **Minimap service coverage overlay** — add a `MinimapOverlay::ServiceCoverage` mode
+- [x] **Minimap service coverage overlay** — add a `MinimapOverlay::ServiceCoverage` mode
   to the minimap. When active, each service building's covered tiles are tinted on the
   200×200 px minimap using distinct colours per service type (matching the service legend
   panel established in Phase 8):
@@ -1479,7 +1497,7 @@ is selected, and a coverage overlay layer on the minimap.
   `architecture/game-design/service-coverage.md`,
   `architecture/ui-ux/resolution-ui-scaling.md` §Colorblind Accessibility)
 
-- [ ] **`ICitySimulation::getServiceCoverage()` query** — returns
+- [x] **`ICitySimulation::getServiceCoverage()` query** — returns
   `std::vector<ServiceCoverageTile>` (new struct in `simulation_types.h`:
   `{ tileX, tileZ, ServiceBuildingType coveredBy, bool degraded }`) for all tiles currently
   covered by at least one service building. Used exclusively by the minimap service coverage
@@ -1492,17 +1510,17 @@ is selected, and a coverage overlay layer on the minimap.
 > `architecture/testing/testability-architecture.md` (StrictMock for unit tests). Use
 > `StrictMock<MockCitySimulation>` and `StrictMock<MockRenderer>` in all test fixtures below.
 
-- [ ] **`ServiceCoverageOverlay_QueryServiceTile_ShowsOverlay`** (label `unit`,
+- [x] **`ServiceCoverageOverlay_QueryServiceTile_ShowsOverlay`** (label `unit`,
   CMake target `ui_tests`): using `StrictMock<MockCitySimulation>` and `StrictMock<MockRenderer>`,
   verify that querying a service building tile calls `showServiceCoverageOverlay` with correct
   type and degradation state.
   (ref: `architecture/testing/testability-architecture.md`)
 
-- [ ] **`ServiceCoverageOverlay_InspectorClose_HidesOverlay`** (label `unit`,
+- [x] **`ServiceCoverageOverlay_InspectorClose_HidesOverlay`** (label `unit`,
   CMake target `ui_tests`): using `StrictMock<MockCitySimulation>` and `StrictMock<MockRenderer>`,
   verify that closing the Inspector panel calls `hideServiceCoverageOverlay`.
 
-- [ ] **CMakeLists extension** — add via `target_sources(ui_tests PRIVATE
+- [x] **CMakeLists extension** — add via `target_sources(ui_tests PRIVATE
   tests/ui/service_coverage_overlay_test.cpp)`.
 
 ---
@@ -1517,7 +1535,7 @@ re-zoning or re-roading a tile.
 
 ##### 5a. Simulation Guard — `placeZone`
 
-- [ ] **Guard in `CitySimulation::placeZone`**: at the top of the function, before any
+- [x] **Guard in `CitySimulation::placeZone`**: at the top of the function, before any
   cost deduction or undo-state capture, check whether the target tile is already occupied:
 
   ```cpp
@@ -1537,14 +1555,14 @@ re-zoning or re-roading a tile.
   (ref: `architecture/game-design/zoning-system.md`,
   `architecture/game-design/undo-system.md`)
 
-- [ ] **Remove the now-dead `isRoad` branch** inside `placeZone` that decremented
+- [x] **Remove the now-dead `isRoad` branch** inside `placeZone` that decremented
   `m_roadTileCount` when replacing a road tile — this code path can no longer be reached
   after the guard is in place. Remove it to eliminate dead code.
   (ref: `src/simulation/CitySimulation.cpp`)
 
 ##### 5b. Simulation Guard — `placeRoad`
 
-- [ ] **Guard in `CitySimulation::placeRoad`**: at the top of the function, before any
+- [x] **Guard in `CitySimulation::placeRoad`**: at the top of the function, before any
   cost deduction or undo-state capture, add:
 
   ```cpp
@@ -1563,7 +1581,7 @@ re-zoning or re-roading a tile.
   (ref: `architecture/game-design/zoning-system.md`,
   `architecture/game-design/undo-system.md`)
 
-- [ ] **Remove the now-dead `isZoned` branch** inside `placeRoad` that handled replacing a
+- [x] **Remove the now-dead `isZoned` branch** inside `placeRoad` that handled replacing a
   zone tile with a road — this code path can no longer be reached after the guard is in
   place. Remove it to eliminate dead code.
   (ref: `src/simulation/CitySimulation.cpp`)
@@ -1587,31 +1605,31 @@ re-zoning or re-roading a tile.
 > `Times(0)` negative assertions below (bare mocks silently swallow unexpected calls,
 > defeating the no-op checks).
 
-- [ ] **`PlaceZone_OnRoadTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
+- [x] **`PlaceZone_OnRoadTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
   place a road tile at `(3, 3)`, then call `placeZone` on the same tile. Assert: the tile
   remains `isRoad == true` and `isZoned == false`; `m_roadTileCount` is unchanged; treasury
   is unchanged; `StrictMock<MockRenderer>` receives no `placeBuildingMesh` call
   (`EXPECT_CALL(...).Times(0)`); undo stack depth is unchanged.
   (ref: `architecture/testing/testability-architecture.md`)
 
-- [ ] **`PlaceZone_OnZonedTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
+- [x] **`PlaceZone_OnZonedTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
   place a Residential zone at `(4, 4)`, then call `placeZone` with Commercial on the same
   tile. Assert: tile zone remains `Residential`; treasury unchanged after the second call;
   `StrictMock<MockRenderer>` receives no second `placeBuildingMesh` call; undo stack depth
   is unchanged after the second call.
 
-- [ ] **`PlaceRoad_OnZonedTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
+- [x] **`PlaceRoad_OnZonedTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
   place a Residential zone at `(5, 5)`, then call `placeRoad` on the same tile. Assert:
   tile remains `isZoned == true` and `isRoad == false`; `m_roadTileCount` is zero; treasury
   is unchanged after the `placeRoad` call; `StrictMock<MockRenderer>` receives no
   `placeRoadMesh` call; undo stack depth is unchanged after the `placeRoad` call.
 
-- [ ] **`PlaceRoad_OnRoadTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
+- [x] **`PlaceRoad_OnRoadTile_IsNoOp`** (label `unit`, CMake target `simulation_tests`):
   place a road at `(6, 6)`, then call `placeRoad` again on the same tile. Assert:
   `m_roadTileCount == 1` (not 2); treasury deduction happens only once; `StrictMock<MockRenderer>`
   receives exactly one `placeRoadMesh` call; undo stack depth is 1 after both calls.
 
-- [ ] **`CMakeLists extension`** — add via `target_sources(simulation_tests PRIVATE
+- [x] **`CMakeLists extension`** — add via `target_sources(simulation_tests PRIVATE
   tests/simulation/placement_conflict_test.cpp)`. Do NOT call `add_executable` again.
 
 ##### 5d. UI-Level Placement Guard with Red Preview Feedback
@@ -1620,7 +1638,7 @@ The simulation guards in 5a/5b are silent no-ops. This sub-deliverable adds visi
 so the player knows why a placement is being rejected, and makes it impossible to even
 initiate a placement click on an occupied tile.
 
-- [ ] **`kHoverArgbBlocked` constant** — add `constexpr uint32_t kHoverArgbBlocked =
+- [x] **`kHoverArgbBlocked` constant** — add `constexpr uint32_t kHoverArgbBlocked =
   0xBBFF2222u;` (semi-opaque red, alpha=0xBB≈73%) to `src/ui/ui_constants.h`, alongside
   `kHoverArgbZone`, `kHoverArgbRoad`, and the other hover ARGB constants. **Do NOT add it
   to `UIManager.cpp`** — `hud-layout.md` §Tile Hover Highlight — ARGB Colour Scheme mandates all hover
@@ -1628,7 +1646,7 @@ initiate a placement click on an occupied tile.
   reference `kHoverArgbBlocked` directly, requiring it to be accessible from test TUs).
   (ref: `architecture/ui-ux/hud-layout.md` §Tile Hover Highlight — ARGB Colour Scheme)
 
-- [ ] **`IRenderer::setTilePlacementPreview` signature extension** — change the existing
+- [x] **`IRenderer::setTilePlacementPreview` signature extension** — change the existing
   single-list overload to accept a second tile list for blocked tiles:
 
   ```cpp
@@ -1648,7 +1666,7 @@ initiate a placement click on an occupied tile.
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md` §Placement Preview,
   `architecture/testing/testability-architecture.md`)
 
-- [ ] **Single-tile hover color override** — in the `UIManager::onEvent` MouseMove handler,
+- [x] **Single-tile hover color override** — in the `UIManager::onEvent` MouseMove handler,
   after `colour` is determined from the active tool switch, add an occupancy override for
   Zone and Road tools:
 
@@ -1665,7 +1683,7 @@ initiate a placement click on an occupied tile.
   tile is occupied.
   (ref: `architecture/ui-ux/hud-layout.md`, `architecture/ui-ux/input-arbitration.md`)
 
-- [ ] **Drag preview partitioning — Zone rect** — in the MouseMove branch that builds the
+- [x] **Drag preview partitioning — Zone rect** — in the MouseMove branch that builds the
   Zone rect preview (`m_lmbHeld && m_activeTool == ActiveTool::Zone && m_zoneAnchorX != -1`),
   after assembling the full `previewTiles` vector, partition it into `freeTiles` and
   `blockedTiles` by calling `m_sim->queryTile(tx, tz)` on each tile and checking
@@ -1675,13 +1693,13 @@ initiate a placement click on an occupied tile.
   the zone colour).
   (ref: `architecture/ui-ux/input-arbitration.md` §Priority 7)
 
-- [ ] **Drag preview partitioning — Road line** — same partitioning as Zone rect, applied
+- [x] **Drag preview partitioning — Road line** — same partitioning as Zone rect, applied
   to the Road line preview branch (`m_lmbHeld && m_activeTool == ActiveTool::Road &&
   m_zoneAnchorX != -1`). Pass `freeTiles` and `blockedTiles` to the extended
   `setTilePlacementPreview` with `freeArgb = kHoverArgbRoad`.
   (ref: `architecture/ui-ux/input-arbitration.md` §Priority 7)
 
-- [ ] **Commit loop — skip occupied tiles (Zone)** — in the `MouseButtonUp` Zone commit
+- [x] **Commit loop — skip occupied tiles (Zone)** — in the `MouseButtonUp` Zone commit
   block that iterates `[x0..x1] × [z0..z1]` and calls `doTerrainPlacement(tx, tz)`, wrap
   each call in an occupancy guard:
 
@@ -1695,7 +1713,7 @@ initiate a placement click on an occupied tile.
 
   (ref: `architecture/ui-ux/input-arbitration.md` §Priority 7)
 
-- [ ] **Commit loop — skip occupied tiles (Road)** — same guard applied to the Road line
+- [x] **Commit loop — skip occupied tiles (Road)** — same guard applied to the Road line
   commit loop (both the X-axis and Z-axis segments).
   (ref: `architecture/ui-ux/input-arbitration.md` §Priority 7)
 
@@ -1705,7 +1723,7 @@ initiate a placement click on an occupied tile.
 > `architecture/testing/testability-architecture.md` (StrictMock for unit tests). Use
 > `StrictMock<MockCitySimulation>` and `StrictMock<MockRenderer>` in all test fixtures below.
 
-- [ ] **`PlacementPreview_ZoneTool_OccupiedTile_ShowsRedHighlight`** (label `unit`,
+- [x] **`PlacementPreview_ZoneTool_OccupiedTile_ShowsRedHighlight`** (label `unit`,
   CMake target `ui_tests`): set up `StrictMock<MockCitySimulation>::queryTile` to return
   `QueryResult{.isRoad = true}` for tile `(2, 2)`. Inject into a `UIManager` with
   `StrictMock<MockRenderer>`. Synthesise a `MouseMove` event that ray-casts to tile `(2, 2)`
@@ -1713,19 +1731,19 @@ initiate a placement click on an occupied tile.
   `argb == kHoverArgbBlocked`.
   (ref: `architecture/testing/testability-architecture.md`)
 
-- [ ] **`PlacementPreview_ZoneDrag_PartiallyOccupied_BlockedTilesRed`** (label `unit`,
+- [x] **`PlacementPreview_ZoneDrag_PartiallyOccupied_BlockedTilesRed`** (label `unit`,
   CMake target `ui_tests`): `StrictMock<MockCitySimulation>::queryTile` returns `isRoad=true`
   for tile `(1,1)` and unoccupied for `(2,1)`. Simulate LMB-held Zone drag from `(1,1)` to
   `(2,1)`. Assert `StrictMock<MockRenderer>::setTilePlacementPreview` received
   `blockedTiles == {(1,1)}` and `freeTiles == {(2,1)}`.
 
-- [ ] **`PlacementCommit_ZoneTool_OccupiedTileSkipped`** (label `unit`,
+- [x] **`PlacementCommit_ZoneTool_OccupiedTileSkipped`** (label `unit`,
   CMake target `ui_tests`): `StrictMock<MockCitySimulation>::queryTile` returns `isRoad=true`
   for `(3,3)` and unoccupied for `(4,3)`. Simulate LMB drag-release over both tiles with
   Zone tool. Assert `StrictMock<MockCitySimulation>::placeZone` was called exactly once — for
   `(4,3)` only, never for `(3,3)`.
 
-- [ ] **`CMakeLists extension`** — add via `target_sources(ui_tests PRIVATE
+- [x] **`CMakeLists extension`** — add via `target_sources(ui_tests PRIVATE
   tests/ui/placement_conflict_ui_test.cpp)`. Do NOT call `add_executable` again.
 
 ---

@@ -232,6 +232,11 @@ protected:
         // and on LMB-up (clear after commit).  Tests exercising the preview contents add
         // their own EXPECT_CALL; all others suppress via this catch-all.
         EXPECT_CALL(renderer_, setTilePlacementPreview(_, _, _)).Times(::testing::AnyNumber());
+        // Phase 11d Deliverable 5d: queryTile is now called in Zone/Road commit loops
+        // and drag preview partitioning to classify tiles as free vs blocked.
+        // Suppress via catch-all; tests that verify placement counts add their own
+        // EXPECT_CALL on placeZone/placeRoad (the call under test), not queryTile.
+        EXPECT_CALL(sim_, queryTile(_, _)).Times(::testing::AnyNumber()).WillRepeatedly(Return(QueryResult{}));
 
         uiManager_->setMapDimensions(10, 10);
 
@@ -2182,6 +2187,9 @@ protected:
 
         EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AnyNumber());
         EXPECT_CALL(renderer_, setTilePlacementPreview(_, _, _)).Times(AnyNumber());
+        // Phase 11d Deliverable 5d: queryTile called in Zone/Road preview partitioning
+        // and commit loop guards. Suppress via catch-all for this fixture.
+        EXPECT_CALL(sim_, queryTile(_, _)).Times(AnyNumber()).WillRepeatedly(Return(QueryResult{}));
 
         uiManager_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
         uiManager_->setRenderer(&renderer_);

@@ -371,6 +371,75 @@ nm build/libaitown_render.a | grep -i glew | sort | uniq -d
 
 If this command produces any output, duplicate GLEW symbols are present and the build is BLOCKED — the issue must be resolved before merging. The result of this check (clean or duplicate list) must be recorded in the Phase 2 Spike Results section below.
 
+## Building Atlas Resolution Fallback
+
+`RenderSystem` queries and stores `m_maxTextureSize` during GL capability
+initialization (see "GL Capability Query Initialization" above). `TextureCache`
+reads this value when loading the building diffuse atlas to decide whether the
+primary 4096×4096 atlas is safe to upload.
+
+### Detection
+
+`TextureCache::loadSRGB()` checks `m_maxTextureSize` before loading
+`buildings_atlas_d.dds`. If `m_maxTextureSize < 4096`, the fallback path is
+taken instead of the primary path.
+
+```cpp
+const std::string atlasPath =
+    (m_maxTextureSize >= 4096)
+        ? "assets/textures/buildings_atlas_d.dds"
+        : "assets/textures/buildings_atlas_d_2k.dds";
+```
+
+### Fallback Asset
+
+When `m_maxTextureSize < 4096`, load `buildings_atlas_d_2k.dds` — the
+2048×2048 DXT1 sRGB fallback atlas — in place of the primary
+`buildings_atlas_d.dds` atlas. Both files must be shipped with the game; the
+fallback is not generated at runtime.
+
+### Warning Log
+
+When the fallback path is taken, log a `WARNING` to stderr before the load:
+
+```cpp
+std::fprintf(stderr,
+    "WARNING: GL_MAX_TEXTURE_SIZE < 4096; "
+    "loading fallback atlas buildings_atlas_d_2k.dds\n");
+```
+
+### Naming Convention
+
+The fallback asset uses the suffix `_2k` inserted immediately before the file
+extension: `<basename>_2k.dds`. For the building diffuse atlas:
+
+| Role | Filename | Resolution |
+|---|---|---|
+| Primary atlas | `buildings_atlas_d.dds` | 4096×4096 DXT1 sRGB |
+| Fallback atlas | `buildings_atlas_d_2k.dds` | 2048×2048 DXT1 sRGB |
+
+Both files must be present in the shipping build. The `_2k` suffix pattern
+applies to any future atlas that follows the same dual-resolution scheme.
+
+### GL_TEXTURE_MAX_LEVEL
+
+The two atlas sizes use different mip chain depths. Set `GL_TEXTURE_MAX_LEVEL`
+immediately after uploading the compressed texture data:
+
+| Atlas | Resolution | Mip levels | `GL_TEXTURE_MAX_LEVEL` |
+|---|---|---|---|
+| Primary | 4096×4096 | 5 (4096 → 256) | `4` |
+| Fallback | 2048×2048 | 4 (2048 → 256) | `3` |
+
+The fallback 2048 atlas retains the same 4-level mip chain as the V1 atlas
+(as documented in `architecture/asset-standards/2d-texture-standards.md`).
+The primary 4096 atlas adds one additional mip level (level 0 at 4096×4096).
+
+```cpp
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL,
+    (m_maxTextureSize >= 4096) ? 4 : 3);
+```
+
 ## Phase 2 Spike Results
 
 **Q1 — Does vendored Irrlicht use GLEW internally?**

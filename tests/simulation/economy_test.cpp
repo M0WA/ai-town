@@ -1603,16 +1603,17 @@ TEST_F(EconomyTest, PlaceRoad_WithEarthworks_PlaysEarthworksSFX)
 // ============================================================================
 TEST_F(EconomyTest, PlaceZoneOverRoad_DecrementsRoadTileCount)
 {
-    // Place a road at (5,5).
+    // Phase 11d Deliverable 5a: placeZone now returns early when the tile is already
+    // a road (occupancy guard).  Zone over road is a no-op — the tile stays as road.
     sim_->placeRoad(5, 5, 0);
 
-    // Zone over the road — replaces road tile with zone, triggers road count decrement.
+    // Attempt to zone over the road — must be blocked by the occupancy guard.
     sim_->placeZone(5, 5, ZoneType::Residential, DensityTier::Low, 0);
 
-    // The road is gone — queryTile should report isRoad=false, isZoned=true.
+    // Tile remains a road, not zoned.
     QueryResult qr = sim_->queryTile(5, 5);
-    EXPECT_FALSE(qr.isRoad);
-    EXPECT_TRUE(qr.isZoned);
+    EXPECT_TRUE(qr.isRoad);
+    EXPECT_FALSE(qr.isZoned);
 }
 
 // ============================================================================

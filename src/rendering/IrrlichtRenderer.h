@@ -313,6 +313,33 @@ private:
     // node->remove()) before the LODNode wrapper is deleted.
     std::unordered_map<uint32_t, LODNode*> m_vehicleNodes;
 
+    // --- Phase 11d: traffic agent scene node registry (Deliverable 3a) ---
+    //
+    // Key: AgentHandle (uint32_t) — stable for agent lifetime.
+    // Value: non-owning IMeshSceneNode* (Irrlicht scene graph owns the node).
+    //
+    // Agent nodes are plain CMeshSceneNode (NOT LODNode wrappers) — agents use
+    // LOD0 only. The scene manager retains the B3D mesh; do NOT drop the mesh on
+    // despawn. On removal the eviction sequence clears textures then calls node->remove().
+    std::unordered_map<AgentHandle, irr::scene::IMeshSceneNode*> m_agentNodes;
+
+    // --- Phase 11d: intersection signal billboard registry (Deliverable 3b) ---
+    //
+    // Key: tileX*10000 + tileZ — compact int key for intersection tiles.
+    // Value: non-owning IMeshSceneNode* (Irrlicht scene graph owns the node).
+    //
+    // One small billboard quad per intersection; colour updated in-place by
+    // setIntersectionSignalState(). Nodes persist for the session and are never
+    // removed (intersection tiles are rarely demolished; V1 does not garbage-collect them).
+    std::unordered_map<int, irr::scene::IMeshSceneNode*> m_signalNodes;
+
+    // --- Phase 11d: service coverage overlay node (Deliverable 4a) ---
+    //
+    // Single dynamic SMesh* rendered as an IMeshSceneNode above the terrain.
+    // Built by showServiceCoverageOverlay(); removed by hideServiceCoverageOverlay().
+    // Null when no overlay is active.
+    irr::scene::ISceneNode* m_coverageOverlayNode{nullptr};
+
     // m_vehicleAssetLoader — separate BuildingAssetLoader instance for vehicle
     // assets (different atlas path: vehicles_diffuse_atlas_d.dds).
     // Created lazily on first placeVehicle() call.

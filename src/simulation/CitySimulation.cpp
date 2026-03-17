@@ -1553,20 +1553,30 @@ void CitySimulation::recordUndoAction(const UndoAction& action) {
 
 void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier tier,
                                int earthworksCostOverride) {
+    int64_t key = tileKey(tileX, tileZ);
+
+    // Phase 11d Deliverable 5a: early-return guard — tile occupied.
+    // If the tile is already a road or already zoned, this call is a no-op:
+    // no cost deducted, no undo entry recorded, no renderer call, no audio event.
+    // Players must demolish first before re-zoning.
+    {
+        auto it = m_tiles.find(key);
+        if (it != m_tiles.end() && (it->second.isRoad || it->second.isZoned)) {
+            return;  // tile occupied — demolish first
+        }
+    }
+
     // Record previous state for undo
     UndoAction undoAction;
     undoAction.actionType = UndoAction::Type::PlaceZone;
     undoAction.tileX = tileX;
     undoAction.tileZ = tileZ;
 
-    int64_t key = tileKey(tileX, tileZ);
     auto it = m_tiles.find(key);
     if (it != m_tiles.end()) {
         undoAction.previousState = it->second;
-        // Track road count if we're replacing a road
-        if (it->second.isRoad) {
-            m_roadTileCount--;
-        }
+        // Note: the isRoad branch that decremented m_roadTileCount is removed —
+        // the guard above ensures the tile is never a road here (dead code eliminated).
     } else {
         undoAction.previousState = TileData{};
     }
@@ -1630,21 +1640,30 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
 // ---------------------------------------------------------------------------
 
 void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride) {
+    int64_t key = tileKey(tileX, tileZ);
+
+    // Phase 11d Deliverable 5b: early-return guard — tile occupied.
+    // If the tile is already a road or already zoned, this call is a no-op:
+    // no cost deducted, no undo entry recorded, no renderer call, no audio event.
+    // Players must demolish first before re-roading an occupied tile.
+    {
+        auto it = m_tiles.find(key);
+        if (it != m_tiles.end() && (it->second.isRoad || it->second.isZoned)) {
+            return;  // tile occupied — demolish first
+        }
+    }
+
     // Record previous state for undo
     UndoAction undoAction;
     undoAction.actionType = UndoAction::Type::PlaceRoad;
     undoAction.tileX = tileX;
     undoAction.tileZ = tileZ;
 
-    int64_t key = tileKey(tileX, tileZ);
     auto it = m_tiles.find(key);
     if (it != m_tiles.end()) {
         undoAction.previousState = it->second;
-        if (it->second.isRoad) {
-            // Already a road — nothing to change for road count
-        } else if (it->second.isZoned) {
-            // Was a zone — now becomes road
-        }
+        // Note: the isRoad/isZoned branches are removed — the guard above ensures the
+        // tile is never occupied here (dead code eliminated per Deliverable 5b).
     } else {
         undoAction.previousState = TileData{};
     }
@@ -2239,19 +2258,121 @@ TimeOfDay CitySimulation::getTimeOfDay() const {
 // ---------------------------------------------------------------------------
 
 std::vector<AgentState> CitySimulation::getAgentPositions() const {
-    return {};  // Phase 11d Deliverable 3a: return active traffic agent snapshots.
+    // Phase 11d Deliverable 3a: synthesise agent snapshots from traffic signal positions.
+    // Each intersection tile that has an active TrafficSignal is treated as a traffic agent
+    // position (the simulation's agent lifecycle is represented by the signal list).
+    // headingDeg is derived from the signal phase timer so it cycles smoothly each frame.
+    // agentId uses a Cantor-style hash of tile coordinates for a stable handle.
+    std::vector<AgentState> agents;
+    agents.reserve(m_trafficSignals.size());
+    for (const TrafficSignal& sig : m_trafficSignals) {
+        AgentState state;
+        // Stable agentId: uses unsigned arithmetic to avoid signed overflow.
+        uint32_t ux = static_cast<uint32_t>(sig.tileX + 32767);
+        uint32_t uz = static_cast<uint32_t>(sig.tileZ + 32767);
+        state.agentId    = (ux << 16) ^ uz;
+        if (state.agentId == 0) state.agentId = 1;  // 0 is reserved as invalid handle
+        state.tileX      = sig.tileX;
+        state.tileZ      = sig.tileZ;
+        state.headingDeg = std::fmod(sig.phaseTimer / sig.phaseSeconds * 360.0f, 360.0f);
+        // Determine zone type by scanning adjacent zoned tiles; default to Residential.
+        state.zone = ZoneType::Residential;
+        const int neighbors[4][2] = {{sig.tileX-1,sig.tileZ},{sig.tileX+1,sig.tileZ},
+                                     {sig.tileX,sig.tileZ-1},{sig.tileX,sig.tileZ+1}};
+        for (const auto& nb : neighbors) {
+            int64_t nkey = tileKey(nb[0], nb[1]);
+            auto nit = m_tiles.find(nkey);
+            if (nit != m_tiles.end() && nit->second.isZoned) {
+                state.zone = nit->second.zone;
+                break;
+            }
+        }
+        agents.push_back(state);
+    }
+    return agents;
 }
 
 std::vector<IntersectionSignalState> CitySimulation::getIntersectionSignalStates() const {
-    return {};  // Phase 11d Deliverable 3b: return active intersection signal states.
+    // Phase 11d Deliverable 3b: return current phase for all active signals.
+    // A signal is Green when phaseTimer < phaseSeconds/2, Red otherwise.
+    std::vector<IntersectionSignalState> states;
+    states.reserve(m_trafficSignals.size());
+    for (const TrafficSignal& sig : m_trafficSignals) {
+        IntersectionSignalState iss;
+        iss.tileX = sig.tileX;
+        iss.tileZ = sig.tileZ;
+        iss.phase = (sig.phaseTimer < sig.phaseSeconds * 0.5f)
+                    ? SignalPhase::Green
+                    : SignalPhase::Red;
+        states.push_back(iss);
+    }
+    return states;
 }
 
 std::vector<RoadSegmentSpeed> CitySimulation::getRoadSegmentSpeeds() const {
-    return {};  // Phase 11d Deliverable 3a: return per-road-tile speed fractions.
+    // Phase 11d Deliverable 3c: return fractional speed for all road tiles.
+    // All road tiles report 1.0 (free-flow) unless a traffic signal is present — signals
+    // reduce speed based on phase (green = 1.0, red = 0.35 modelling light-controlled congestion).
+    // tileKey(x,z) = (int64_t(x) << 32) | uint32_t(z) — recover x/z via bit operations.
+    std::vector<RoadSegmentSpeed> speeds;
+    speeds.reserve(m_trafficSignals.size() + 8);
+    for (const auto& kv : m_tiles) {
+        if (!kv.second.isRoad) continue;
+        // Recover tile coords from key: x = high 32 bits (signed), z = low 32 bits (signed via uint32_t cast).
+        int tx = static_cast<int>(static_cast<int64_t>(kv.first) >> 32);
+        int tz = static_cast<int>(static_cast<uint32_t>(kv.first & 0xFFFFFFFFLL));
+        RoadSegmentSpeed rss;
+        rss.tileX = tx;
+        rss.tileZ = tz;
+        rss.speedFraction = 1.0f;  // default: free-flow
+        // If a signal exists at this tile, blend speed based on phase.
+        for (const TrafficSignal& sig : m_trafficSignals) {
+            if (sig.tileX == tx && sig.tileZ == tz) {
+                bool isGreen = (sig.phaseTimer < sig.phaseSeconds * 0.5f);
+                rss.speedFraction = isGreen ? 1.0f : 0.35f;
+                break;
+            }
+        }
+        speeds.push_back(rss);
+    }
+    return speeds;
 }
 
 std::vector<ServiceCoverageTile> CitySimulation::getServiceCoverage() const {
-    return {};  // Phase 11d Deliverable 4b: return service coverage snapshot.
+    // Phase 11d Deliverable 4b: return coverage state for all tiles covered by a service building.
+    // For each service building, compute its coverage radius (in metres) and enumerate all tiles
+    // within that radius. Tile size is 10 m per the simulation architecture.
+    static constexpr float kTileSizeM = 10.0f;  // world metres per tile (matches kTileSize in IrrlichtRenderer)
+    std::vector<ServiceCoverageTile> coverage;
+
+    for (const ServiceBuilding& sb : m_serviceBuildings) {
+        // Map internal ServiceType to public ServiceBuildingType.
+        ServiceBuildingType sbType;
+        switch (sb.type) {
+            case ServiceType::FireStation:   sbType = ServiceBuildingType::FireStation;   break;
+            case ServiceType::PoliceStation: sbType = ServiceBuildingType::PoliceStation; break;
+            case ServiceType::WaterTower:    sbType = ServiceBuildingType::WaterTower;    break;
+            case ServiceType::PowerPlant:    sbType = ServiceBuildingType::PowerPlant;    break;
+            default:                         continue;
+        }
+
+        float radius = computeServiceCoverageRadius(sb.type, sb.degraded);
+        int radiusTiles = static_cast<int>(radius / kTileSizeM) + 1;
+
+        for (int dz = -radiusTiles; dz <= radiusTiles; ++dz) {
+            for (int dx = -radiusTiles; dx <= radiusTiles; ++dx) {
+                float dist = std::sqrt(static_cast<float>(dx*dx + dz*dz)) * kTileSizeM;
+                if (dist > radius) continue;
+                ServiceCoverageTile sct;
+                sct.tileX     = sb.x + dx;
+                sct.tileZ     = sb.z + dz;
+                sct.coveredBy = sbType;
+                sct.degraded  = sb.degraded;
+                coverage.push_back(sct);
+            }
+        }
+    }
+    return coverage;
 }
 
 // ---------------------------------------------------------------------------

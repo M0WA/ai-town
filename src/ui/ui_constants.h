@@ -37,3 +37,10 @@ constexpr unsigned int kHoverArgbUtilities = 0x80FF8000u;  // semi-transparent o
 constexpr unsigned int kHoverArgbDemolish  = 0x80FF0000u;  // semi-transparent red
 constexpr unsigned int kHoverArgbQuery     = 0x80FFFFFFu;  // semi-transparent white
 constexpr unsigned int kHoverArgbClear     = 0x00000000u;  // clear / no highlight
+// Phase 11d Deliverable 5d: semi-opaque red highlight for tiles that are already occupied.
+// Used when Zone or Road tool is active and the hovered tile is a road or zone (blocked).
+constexpr unsigned int kHoverArgbBlocked   = 0xBBFF2222u;  // semi-opaque red, alpha=0xBB≈73%
+
+// Phase 11d Deliverable 3c: left edge of the full minimap widget footprint (virtual 1920x1080).
+// Extends from kMinimapWidgetLeft to x=1920. Used by UIManager::onEvent Inspector carve-out.
+constexpr int kMinimapWidgetLeft = 1576;
