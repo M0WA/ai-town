@@ -386,6 +386,20 @@ class MeshAccum:
         v, t = make_quad(v0, v1, v2, v3, normal, row, col)
         self.add(v, t)
 
+    def add_tri(self, v0pos, v1pos, v2pos, normal, row, col):
+        """Add a single triangle (for non-quad faces like roof slopes)."""
+        nx, ny, nz = normal
+        def uv(fu, fv):
+            return atlas_uv(row, col, fu, fv)
+        verts = [
+            Vertex(*v0pos, nx, ny, nz, *uv(0.0, 0.0)),
+            Vertex(*v1pos, nx, ny, nz, *uv(1.0, 0.0)),
+            Vertex(*v2pos, nx, ny, nz, *uv(0.5, 1.0)),
+        ]
+        base = len(self.verts)
+        self.verts.extend(verts)
+        self.tris.append((base, base+1, base+2))
+
     def tri_count(self):
         return len(self.tris)
 
@@ -465,6 +479,57 @@ def _add_dense_facade_detail(m, wall_row, wall_col,
                       wall_row, wall_col, walls_only=True)
 
 
+def _add_tiled_wall(m, xmin, xmax, y_bot, y_top, z, normal_sign_z,
+                    wall_row, wall_col, floor_h=0.30):
+    """
+    Add a wall face (parallel to XY plane at given Z) split into horizontal
+    strips of floor_h each so the texture tiles once per strip rather than
+    being stretched across the full wall height.
+    normal_sign_z: -1 for face pointing -Z, +1 for face pointing +Z.
+    """
+    y = y_bot
+    while y < y_top - 0.001:
+        y1 = min(y + floor_h, y_top)
+        if normal_sign_z < 0:
+            m.add_quad(
+                (xmin, y, z), (xmax, y, z),
+                (xmax, y1, z), (xmin, y1, z),
+                (0, 0, -1), wall_row, wall_col
+            )
+        else:
+            m.add_quad(
+                (xmax, y, z), (xmin, y, z),
+                (xmin, y1, z), (xmax, y1, z),
+                (0, 0, 1), wall_row, wall_col
+            )
+        y = y1
+
+
+def _add_tiled_wall_x(m, zmin, zmax, y_bot, y_top, x, normal_sign_x,
+                       wall_row, wall_col, floor_h=0.30):
+    """
+    Add a wall face (parallel to ZY plane at given X) split into horizontal
+    strips of floor_h each for proper UV tiling.
+    normal_sign_x: -1 for face pointing -X, +1 for face pointing +X.
+    """
+    y = y_bot
+    while y < y_top - 0.001:
+        y1 = min(y + floor_h, y_top)
+        if normal_sign_x < 0:
+            m.add_quad(
+                (x, y, zmax), (x, y, zmin),
+                (x, y1, zmin), (x, y1, zmax),
+                (-1, 0, 0), wall_row, wall_col
+            )
+        else:
+            m.add_quad(
+                (x, y, zmin), (x, y, zmax),
+                (x, y1, zmax), (x, y1, zmin),
+                (1, 0, 0), wall_row, wall_col
+            )
+        y = y1
+
+
 def _add_horizontal_band(m, wall_row, wall_col,
                          xmin, xmax, y, zmin, zmax, thickness, height):
     """Horizontal projecting cornice/ledge band (facing outward on Z min face)."""
@@ -481,35 +546,76 @@ def _add_horizontal_band(m, wall_row, wall_col,
 
 def _add_gabled_roof(m, wall_row, wall_col, roof_row, roof_col,
                      xmin, xmax, y_base, ridge_h, zmin, zmax):
-    """Gabled (two-slope) pitched roof."""
-    cx = (xmin + xmax) * 0.5
+    """
+    Gabled (two-slope) pitched roof.
+    Ridge runs along X axis from (xmin, ridge_y, cz) to (xmax, ridge_y, cz).
+    Front slope faces -Z; back slope faces +Z.
+    Gable ends (triangles) on X=xmin and X=xmax sides.
+    """
+    cz = (zmin + zmax) * 0.5
     ridge_y = y_base + ridge_h
-    # Front slope (Z = zmin face)
-    m.add_quad((xmin,y_base,zmin),(xmax,y_base,zmin),(cx,ridge_y,(zmin+zmax)*0.5),(cx,ridge_y,(zmin+zmax)*0.5),(0,0,-1),roof_row,roof_col)
-    # Back slope
-    m.add_quad((xmax,y_base,zmax),(xmin,y_base,zmax),(cx,ridge_y,(zmin+zmax)*0.5),(cx,ridge_y,(zmin+zmax)*0.5),(0,0,1),roof_row,roof_col)
-    # Left gable
-    m.add_quad((xmin,y_base,zmin),(xmin,y_base,zmax),(xmin,y_base,zmax),(cx,ridge_y,(zmin+zmax)*0.5),(-1,0,0),wall_row,wall_col)
-    m.add_quad((xmin,y_base,zmin),(cx,ridge_y,(zmin+zmax)*0.5),(xmin,y_base,zmin),(xmin,y_base,zmin),(-1,0,0),wall_row,wall_col)
-    # Right gable
-    m.add_quad((xmax,y_base,zmax),(xmax,y_base,zmin),(cx,ridge_y,(zmin+zmax)*0.5),(cx,ridge_y,(zmin+zmax)*0.5),(1,0,0),wall_row,wall_col)
-    # Left slope (X = xmin)
-    m.add_quad((xmin,y_base,zmin),(xmin,y_base,zmax),(cx,ridge_y,(zmin+zmax)*0.5),(cx,ridge_y,(zmin+zmax)*0.5),(-1,0.5,0),roof_row,roof_col)
-    # Right slope (X = xmax)
-    m.add_quad((xmax,y_base,zmax),(xmax,y_base,zmin),(cx,ridge_y,(zmin+zmax)*0.5),(cx,ridge_y,(zmin+zmax)*0.5),(1,0.5,0),roof_row,roof_col)
+    # Front slope quad: bottom edge at Z=zmin, ridge at centre Z
+    # CCW from outside (from -Z): BL, BR, TR, TL
+    m.add_quad(
+        (xmin, y_base, zmin), (xmax, y_base, zmin),
+        (xmax, ridge_y, cz), (xmin, ridge_y, cz),
+        (0, 0.5, -1), roof_row, roof_col
+    )
+    # Back slope quad: bottom edge at Z=zmax, ridge at centre Z
+    # CCW from outside (from +Z): BL(zmax side right→left), TR at ridge
+    m.add_quad(
+        (xmax, y_base, zmax), (xmin, y_base, zmax),
+        (xmin, ridge_y, cz), (xmax, ridge_y, cz),
+        (0, 0.5, 1), roof_row, roof_col
+    )
+    # Left gable triangle (X=xmin): CCW from outside (from -X)
+    # Viewed from -X: zmin→zmax is left→right, base→ridge is bottom→top
+    m.add_tri(
+        (xmin, y_base, zmin), (xmin, y_base, zmax), (xmin, ridge_y, cz),
+        (-1, 0, 0), wall_row, wall_col
+    )
+    # Right gable triangle (X=xmax): CCW from outside (from +X)
+    # Viewed from +X: zmax→zmin is left→right
+    m.add_tri(
+        (xmax, y_base, zmax), (xmax, y_base, zmin), (xmax, ridge_y, cz),
+        (1, 0, 0), wall_row, wall_col
+    )
 
 
 def _add_hipped_roof(m, wall_row, wall_col, roof_row, roof_col,
                      xmin, xmax, y_base, ridge_h, zmin, zmax):
-    """Hipped (four-slope) pitched roof with centred ridge point."""
-    cx = (xmin + xmax) * 0.5
+    """
+    Hipped (four-slope) pitched roof with a ridge LINE (not a single apex).
+    Ridge runs along X axis at Z centre, between 25% and 75% of the X span.
+    """
     cz = (zmin + zmax) * 0.5
     ridge_y = y_base + ridge_h
-    # Four triangular roof slopes to a single apex
-    m.add_quad((xmin,y_base,zmin),(xmax,y_base,zmin),(cx,ridge_y,cz),(cx,ridge_y,cz),(0,0.5,-1),roof_row,roof_col)
-    m.add_quad((xmax,y_base,zmax),(xmin,y_base,zmax),(cx,ridge_y,cz),(cx,ridge_y,cz),(0,0.5,1),roof_row,roof_col)
-    m.add_quad((xmin,y_base,zmax),(xmin,y_base,zmin),(cx,ridge_y,cz),(cx,ridge_y,cz),(-1,0.5,0),roof_row,roof_col)
-    m.add_quad((xmax,y_base,zmin),(xmax,y_base,zmax),(cx,ridge_y,cz),(cx,ridge_y,cz),(1,0.5,0),roof_row,roof_col)
+    ridge_x0 = xmin + (xmax - xmin) * 0.25
+    ridge_x1 = xmin + (xmax - xmin) * 0.75
+    # Front slope quad (base at Z=zmin, ridge between ridge_x0 and ridge_x1)
+    # CCW from outside (from -Z): BL, BR, TR, TL
+    m.add_quad(
+        (xmin, y_base, zmin), (xmax, y_base, zmin),
+        (ridge_x1, ridge_y, cz), (ridge_x0, ridge_y, cz),
+        (0, 0.5, -1), roof_row, roof_col
+    )
+    # Back slope quad (base at Z=zmax)
+    # CCW from outside (from +Z)
+    m.add_quad(
+        (xmax, y_base, zmax), (xmin, y_base, zmax),
+        (ridge_x0, ridge_y, cz), (ridge_x1, ridge_y, cz),
+        (0, 0.5, 1), roof_row, roof_col
+    )
+    # Left hip triangle (X=xmin end): CCW from outside (from -X)
+    m.add_tri(
+        (xmin, y_base, zmin), (xmin, y_base, zmax), (ridge_x0, ridge_y, cz),
+        (-1, 0.5, 0), roof_row, roof_col
+    )
+    # Right hip triangle (X=xmax end): CCW from outside (from +X)
+    m.add_tri(
+        (xmax, y_base, zmax), (xmax, y_base, zmin), (ridge_x1, ridge_y, cz),
+        (1, 0.5, 0), roof_row, roof_col
+    )
 
 
 def _add_chimney(m, wall_row, wall_col, roof_row, roof_col,
@@ -815,15 +921,15 @@ def _build_res_small(zone, tier, variant, lod):
             m.add_box(-hx, hx, 0, h + 0.06, -hz, hz, wr, wc, rr, rc)
             m.add_box(-hx - 0.07, -hx, h * 0.4, h + 0.08, -0.08, 0.08, wr, wc, rr, rc)
         elif variant == "02":
-            hx, hz = 0.50, 0.45; ridge_h = 0.13
+            hx, hz = 0.50, 0.45; ridge_h = 0.25
             m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
             _add_hipped_roof(m, wr, wc, rr, rc, -hx, hx, h, ridge_h, -hz, hz)
         elif variant == "03":
-            hx, hz = 0.38, 0.44; ridge_h = 0.14
+            hx, hz = 0.38, 0.44; ridge_h = 0.25
             m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
             _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, h, ridge_h, -hz, hz)
         else:  # 04
-            hx, hz = 0.42, 0.42; ridge_h = 0.18
+            hx, hz = 0.42, 0.42; ridge_h = 0.25
             m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
             _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, h, ridge_h, -hz, hz)
         return m.to_b3d()
@@ -868,20 +974,11 @@ def _build_res_small(zone, tier, variant, lod):
                 ax = -hx * 0.5 + hx * ac_i * 0.5
                 m.add_box(ax - 0.04, ax + 0.04, h + ph, h + ph + 0.06,
                           -hz + 0.08 + ac_i * 0.06, -hz + 0.12 + ac_i * 0.06, wr, wc, rr, rc)
-        # Dense detail
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, -hz,
-                                  n_horiz_strips=38, n_vert_strips=22, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, -hx,
-                                  n_horiz_strips=32, n_vert_strips=18, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, hx,
-                                  n_horiz_strips=32, n_vert_strips=18, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, hz,
-                                  n_horiz_strips=30, n_vert_strips=18, normal_sign_z=1)
         return m.to_b3d()
 
     # ---- variant 02: villa with hipped roof, carport, perimeter wall, gate ----
     if variant == "02":
-        hx, hz = 0.50, 0.45; ridge_h = 0.13
+        hx, hz = 0.50, 0.45; ridge_h = 0.25
         m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
         _add_hipped_roof(m, wr, wc, rr, rc, -hx, hx, h, ridge_h, -hz, hz)
         # Carport lean-to on right side
@@ -916,23 +1013,15 @@ def _build_res_small(zone, tier, variant, lod):
             _add_balcony_slab(m, wr, wc, -hx - 0.02, -hx + 0.02, floor_h, -hz, 0.06)
             # Kidney pool area (flat slab in garden)
             m.add_box(-hx + 0.05, hx - 0.05, 0.01, 0.025, -hz - 0.16, -hz - 0.06, wr, wc, rr, rc)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, -hz,
-                                  n_horiz_strips=38, n_vert_strips=22, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, -hx,
-                                  n_horiz_strips=32, n_vert_strips=18, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, hx,
-                                  n_horiz_strips=32, n_vert_strips=18, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, hz,
-                                  n_horiz_strips=30, n_vert_strips=18, normal_sign_z=1)
         return m.to_b3d()
 
     # ---- variant 03: cottage — gabled roof, chimney, covered porch, fence posts ----
     if variant == "03":
-        hx, hz = 0.38, 0.44; ridge_h = 0.16
+        hx, hz = 0.38, 0.44; ridge_h = 0.25
         m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
         _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, h, ridge_h, -hz, hz)
         # Brick chimney stub (taller than ridge)
-        _add_chimney(m, wr, wc, rr, rc, hx * 0.35, 0.0, h + ridge_h * 0.5, 0.22, hw=0.03)
+        _add_chimney(m, wr, wc, rr, rc, hx * 0.35, 0.0, h + ridge_h * 0.5, 0.22, hw=0.04)
         # Covered front porch canopy (projecting flat slab)
         pc_w = 0.22; pc_d = 0.12; pc_y = h * 0.40; pc_t = 0.02
         m.add_box(-pc_w / 2, pc_w / 2, pc_y, pc_y + pc_t, -hz - pc_d, -hz, wr, wc, rr, rc)
@@ -957,14 +1046,6 @@ def _build_res_small(zone, tier, variant, lod):
             _add_balcony_slab(m, wr, wc, -hx - 0.02, hx + 0.02, floor_h, -hz, 0.07)
             # Wrought-iron fence posts on balcony
             _add_fence_posts(m, wr, wc, -hx, hx, floor_h - 0.06, floor_h, -hz - 0.07, 8)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, -hz,
-                                  n_horiz_strips=38, n_vert_strips=22, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, -hx,
-                                  n_horiz_strips=32, n_vert_strips=18, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, hx,
-                                  n_horiz_strips=32, n_vert_strips=18, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, hz,
-                                  n_horiz_strips=30, n_vert_strips=18, normal_sign_z=1)
         return m.to_b3d()
 
     # ---- variant 04: red-brick — steeply-pitched roof, dormer, narrow chimney,
@@ -977,7 +1058,7 @@ def _build_res_small(zone, tier, variant, lod):
         _add_dormer(m, wr, wc, rr, rc, 0.0, -hz + (hz - (-hz)) * 0.4,
                     h + ridge_h * 0.25, dormer_w=0.14, dormer_h=0.12, dormer_d=0.09)
         # Narrow chimney
-        _add_chimney(m, wr, wc, rr, rc, -hx * 0.3, 0.0, h + ridge_h * 0.4, 0.24, hw=0.022)
+        _add_chimney(m, wr, wc, rr, rc, -hx * 0.3, 0.0, h + ridge_h * 0.4, 0.24, hw=0.04)
         # Low brick boundary wall at plot edge
         bw_h = 0.07; bw_t = 0.025
         for (bx0, bx1, bz0, bz1) in [
@@ -1004,14 +1085,6 @@ def _build_res_small(zone, tier, variant, lod):
             # Second dormer
             _add_dormer(m, wr, wc, rr, rc, -hx * 0.5, -hz + (hz - (-hz)) * 0.4,
                         h + ridge_h * 0.25, dormer_w=0.12, dormer_h=0.11, dormer_d=0.08)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, -hz,
-                                  n_horiz_strips=38, n_vert_strips=22, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, -hx,
-                                  n_horiz_strips=32, n_vert_strips=18, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, hx,
-                                  n_horiz_strips=32, n_vert_strips=18, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, hz,
-                                  n_horiz_strips=30, n_vert_strips=18, normal_sign_z=1)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1041,15 +1114,6 @@ def _build_com_small(zone, tier, variant, lod):
               "med": {"01":2,"02":3,"03":2,"04":3}}[tier][variant]
     floor_h = 0.30
     h = floors * floor_h
-
-    def _dense():
-        hx_ = {"01":0.45,"02":0.50,"03":0.44,"04":0.46,"":0.45}
-        hz_ = {"01":0.45,"02":0.42,"03":0.50,"04":0.45,"":0.45}
-        hx = hx_.get(variant, 0.45); hz = hz_.get(variant, 0.45)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, -hz, n_horiz_strips=38, n_vert_strips=22, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, -hx, n_horiz_strips=32, n_vert_strips=18, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, hx,  n_horiz_strips=32, n_vert_strips=18, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, hz,  n_horiz_strips=30, n_vert_strips=18, normal_sign_z=1)
 
     # ------------------------------------------------------------------ LOD1
     if lod == 1:
@@ -1088,7 +1152,6 @@ def _build_com_small(zone, tier, variant, lod):
             for sp_i in range(3):
                 spx = -hx * 0.7 + hx * 1.4 * sp_i / 2
                 m.add_box(spx - 0.08, spx + 0.08, h - 0.06, h, -hz - 0.012, -hz, wr, wc, walls_only=True)
-        _dense()
         return m.to_b3d()
 
     # ---- variant 02: café ----
@@ -1129,7 +1192,6 @@ def _build_com_small(zone, tier, variant, lod):
             # Ornamental bracket lintels above windows
             _add_windows(m, wr, wc, 3, 1, floor_h + 0.04, h - 0.05,
                          -hx + 0.06, hx - 0.06, -hz, -hz, -1, win_w_frac=0.22, win_h_frac=0.55)
-        _dense()
         return m.to_b3d()
 
     # ---- variant 03: auto garage ----
@@ -1153,7 +1215,6 @@ def _build_com_small(zone, tier, variant, lod):
         if tier == "med":
             # Wider footprint, add side loading bay
             _add_loading_dock(m, wr, wc, 0.0, 0.0, hz, 0.30, h * 0.65, 0.06, normal_sign_z=1)
-        _dense()
         return m.to_b3d()
 
     # ---- variant 04: supermarket ----
@@ -1180,7 +1241,6 @@ def _build_com_small(zone, tier, variant, lod):
             m.add_box(-hx * 0.5, hx * 0.5, h + ph, h + ph + 0.12, -hz * 0.5, hz * 0.5, wr, wc, rr, rc)
             # Projecting concrete entrance canopy
             m.add_box(-hx * 0.55, hx * 0.55, floor_h * 0.78, floor_h * 0.80, -hz - 0.14, -hz, wr, wc)
-        _dense()
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1263,10 +1323,6 @@ def _build_ind_low(zone, tier, variant, lod):
         _add_facade_ribs(m, wr, wc, -hz * 0.7 + 0.02, hz - 0.02, 0.04, h_wall - 0.04, -hx, 6)
         # Plinth
         m.add_box(-hx - annex_w - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, -hz, n_horiz_strips=40, n_vert_strips=25, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, -hx, n_horiz_strips=35, n_vert_strips=20, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, hx,  n_horiz_strips=35, n_vert_strips=20, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, hz,  n_horiz_strips=32, n_vert_strips=20, normal_sign_z=1)
         return m.to_b3d()
 
     # ---- variant 02: brick workshop ----
@@ -1291,10 +1347,6 @@ def _build_ind_low(zone, tier, variant, lod):
         for cx, cz in [(-hx, -hz), (-hx, hz), (hx, -hz), (hx, hz)]:
             m.add_box(cx - 0.02, cx + 0.02, 0, h_wall, cz - 0.02, cz + 0.02, wr, wc, walls_only=True)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, -hz, n_horiz_strips=40, n_vert_strips=25, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, -hx, n_horiz_strips=35, n_vert_strips=20, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, hx,  n_horiz_strips=35, n_vert_strips=20, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, hz,  n_horiz_strips=32, n_vert_strips=20, normal_sign_z=1)
         return m.to_b3d()
 
     # ---- variant 03: sawtooth factory — CRITICAL PRIMARY IDENTIFIER ----
@@ -1306,7 +1358,7 @@ def _build_ind_low(zone, tier, variant, lod):
         # SAWTOOTH ROOF: min 2 distinct asymmetric ridges visible from the side
         _add_sawtooth_roof(m, wr, wc, rr, rc, -hx, hx, h_wall, y_high, -hz, hz, n_ridges=3)
         # Chimney stack on gable end
-        _add_chimney(m, wr, wc, rr, rc, 0.0, hz - 0.06, y_high, 0.22, hw=0.04)
+        _add_chimney(m, wr, wc, rr, rc, 0.0, hz - 0.06, y_high, 0.22, hw=0.06)
         # Chain-link fence perimeter (thin box posts)
         _add_fence_posts(m, wr, wc, -hx - 0.06, hx + 0.06, 0, 0.14, -hz - 0.18, 8)
         _add_fence_posts(m, wr, wc, -hz - 0.06, hz + 0.06, 0, 0.14, -hx - 0.06, 8)
@@ -1317,10 +1369,6 @@ def _build_ind_low(zone, tier, variant, lod):
         _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, hx, 8)
         _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, -hx, 8)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, -hz, n_horiz_strips=40, n_vert_strips=25, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, -hx, n_horiz_strips=35, n_vert_strips=20, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, hx,  n_horiz_strips=35, n_vert_strips=20, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, hz,  n_horiz_strips=32, n_vert_strips=20, normal_sign_z=1)
         return m.to_b3d()
 
     # ---- variant 04: storage yard with gatehouse ----
@@ -1349,10 +1397,6 @@ def _build_ind_low(zone, tier, variant, lod):
         # Chain-link fence perimeter
         _add_fence_posts(m, wr, wc, -hx - 0.06, 0.85, 0, 0.14, -hz - 0.10, 10)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, -hz, n_horiz_strips=38, n_vert_strips=22, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, -hx, n_horiz_strips=32, n_vert_strips=18, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, hx,  n_horiz_strips=32, n_vert_strips=18, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, hz,  n_horiz_strips=30, n_vert_strips=18, normal_sign_z=1)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1400,8 +1444,8 @@ def _build_ind_med(zone, tier, variant, lod):
         m.add_box(-hx, hx, 0, h_wall, -hz, hz, wr, wc, rr, rc)
         _add_parapet(m, wr, wc, -hx, hx, h_wall, -hz, hz, pw=0.025, ph=ph)
         # Two concrete chimney stacks above parapet (min 2m above roof = 0.20 model units)
-        _add_chimney(m, wr, wc, rr, rc, -hx * 0.40, hz * 0.42, h_wall, 0.24, hw=0.04)
-        _add_chimney(m, wr, wc, rr, rc,  hx * 0.35, hz * 0.42, h_wall, 0.22, hw=0.038)
+        _add_chimney(m, wr, wc, rr, rc, -hx * 0.40, hz * 0.42, h_wall, 0.24, hw=0.06)
+        _add_chimney(m, wr, wc, rr, rc,  hx * 0.35, hz * 0.42, h_wall, 0.22, hw=0.06)
         # Ground-floor loading bays (2 inset rects)
         for bay_cx in [-hx * 0.45, hx * 0.25]:
             _add_loading_dock(m, wr, wc, bay_cx, 0.0, -hz, 0.24, h_wall * 0.60, 0.07, normal_sign_z=-1)
@@ -1421,10 +1465,6 @@ def _build_ind_med(zone, tier, variant, lod):
         _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, -hx, 8)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
         _add_ac_units(m, wr, wc, rr, rc, h_wall + ph, -hx * 0.6, hx * 0.6, -hz * 0.5, hz * 0.5, count=3)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, -hz, n_horiz_strips=40, n_vert_strips=25, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, -hx, n_horiz_strips=35, n_vert_strips=20, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, hx,  n_horiz_strips=35, n_vert_strips=20, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, hz,  n_horiz_strips=32, n_vert_strips=20, normal_sign_z=1)
         return m.to_b3d()
 
     # ---- variant 02: steel-frame warehouse ----
@@ -1455,10 +1495,6 @@ def _build_ind_med(zone, tier, variant, lod):
         _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, -hx - col_d, 8)
         _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, hx + col_d, 8)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, -hz, n_horiz_strips=40, n_vert_strips=25, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, -hx, n_horiz_strips=35, n_vert_strips=20, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, hx,  n_horiz_strips=35, n_vert_strips=20, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, hz,  n_horiz_strips=32, n_vert_strips=20, normal_sign_z=1)
         return m.to_b3d()
 
     # ---- variant 03: brick mill with rooftop cylindrical water tank ----
@@ -1484,10 +1520,6 @@ def _build_ind_med(zone, tier, variant, lod):
         # Cast-iron fire escapes on rear facade
         m.add_box(-hx * 0.8, -hx * 0.5, 0, h_wall + 0.06, hz, hz + 0.08, wr, wc, rr, rc)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, -hz, n_horiz_strips=40, n_vert_strips=25, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, -hx, n_horiz_strips=35, n_vert_strips=20, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, hx,  n_horiz_strips=35, n_vert_strips=20, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, hz,  n_horiz_strips=32, n_vert_strips=20, normal_sign_z=1)
         return m.to_b3d()
 
     # ---- variant 04: distribution centre — square, loading docks on 2 sides ----
@@ -1513,10 +1545,6 @@ def _build_ind_med(zone, tier, variant, lod):
                      -hx * 0.15, hx - 0.08, -hz, -hz, -1, win_w_frac=0.14, win_h_frac=0.50)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
         _add_ac_units(m, wr, wc, rr, rc, h_wall + ph, -hx * 0.6, hx * 0.6, -hz * 0.5, hz * 0.5, count=3)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, -hz, n_horiz_strips=40, n_vert_strips=25, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, -hx, n_horiz_strips=35, n_vert_strips=20, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h_wall, hx,  n_horiz_strips=35, n_vert_strips=20, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h_wall, hz,  n_horiz_strips=32, n_vert_strips=20, normal_sign_z=1)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1634,16 +1662,6 @@ def _build_res_high(zone, tier, variant, lod):
     for fl in range(0, floors, 2):
         fy = fl * floor_h + floor_h * 0.85
         m.add_box(-hx, hx, fy, fy+0.02, -hz-0.01, hz+0.01, wr, wc, walls_only=True)
-
-    # Dense surface detail to reach 6,000–8,000 tris
-    _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, -hz,
-                              n_horiz_strips=110, n_vert_strips=70, normal_sign_z=-1)
-    _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, hz,
-                              n_horiz_strips=110, n_vert_strips=70, normal_sign_z=1)
-    _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, -hx,
-                              n_horiz_strips=95, n_vert_strips=55, normal_sign_z=-1)
-    _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, hx,
-                              n_horiz_strips=95, n_vert_strips=55, normal_sign_z=1)
 
     return m.to_b3d()
 
@@ -1967,8 +1985,8 @@ def _build_ind_high(zone, tier, variant, lod):
         m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
         _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.025, ph=0.06)
         # Two tall chimney stacks well above roofline (min 3m = 0.30 model above parapet)
-        _add_chimney(m, wr, wc, rr, rc, -hx * 0.35, hz * 0.45, h, 0.36, hw=0.045)
-        _add_chimney(m, wr, wc, rr, rc,  hx * 0.30, hz * 0.45, h, 0.32, hw=0.040)
+        _add_chimney(m, wr, wc, rr, rc, -hx * 0.35, hz * 0.45, h, 0.36, hw=0.06)
+        _add_chimney(m, wr, wc, rr, rc,  hx * 0.30, hz * 0.45, h, 0.32, hw=0.06)
         # Rooftop service structure box
         m.add_box(-hx * 0.50, hx * 0.50, h + 0.06, h + 0.20, -hz * 0.40, hz * 0.40, wr, wc, rr, rc)
         # Punched small windows
@@ -1982,10 +2000,6 @@ def _build_ind_high(zone, tier, variant, lod):
         for fl in range(1, floors):
             fy = fl * floor_h
             m.add_box(-hx - 0.005, hx + 0.005, fy, fy + 0.012, -hz - 0.005, hz + 0.005, wr, wc, walls_only=True)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, -hz, n_horiz_strips=110, n_vert_strips=70, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, hz,  n_horiz_strips=110, n_vert_strips=70, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, -hx, n_horiz_strips=95, n_vert_strips=55, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, hx,  n_horiz_strips=95, n_vert_strips=55, normal_sign_z=1)
         return m.to_b3d()
 
     # ---- variant 02: exposed steel-frame, pipe runs, spherical pressure vessel, cooling tower ----
@@ -2020,10 +2034,6 @@ def _build_ind_high(zone, tier, variant, lod):
         for fl in range(1, floors):
             fy = fl * floor_h
             m.add_box(-hx - 0.005, hx + 0.005, fy, fy + 0.012, -hz - 0.005, hz + 0.005, wr, wc, walls_only=True)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, -hz, n_horiz_strips=110, n_vert_strips=70, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, hz,  n_horiz_strips=110, n_vert_strips=70, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, -hx, n_horiz_strips=95, n_vert_strips=55, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, hx,  n_horiz_strips=95, n_vert_strips=55, normal_sign_z=1)
         return m.to_b3d()
 
     # ---- variant 03: SILO CLUSTER — CRITICAL PRIMARY IDENTIFIER ----
@@ -2047,15 +2057,6 @@ def _build_ind_high(zone, tier, variant, lod):
         m.add_box(0.22, 0.34, silo_h, silo_h + 0.25, -0.10, 0.10, wr, wc, rr, rc)
         # Foundation base
         m.add_box(-0.32, 0.32, 0, 0.05, -0.22, 0.22, wr, wc, walls_only=True)
-        # LOD0 detail on silos
-        _add_dense_facade_detail(m, wr, wc, -0.28, 0.28, 0, silo_h, -0.22,
-                                  n_horiz_strips=80, n_vert_strips=50, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -0.28, 0.28, 0, silo_h, 0.22,
-                                  n_horiz_strips=80, n_vert_strips=50, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -0.22, 0.22, 0, silo_h, -0.28,
-                                  n_horiz_strips=70, n_vert_strips=45, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -0.22, 0.22, 0, silo_h, 0.28,
-                                  n_horiz_strips=70, n_vert_strips=45, normal_sign_z=1)
         return m.to_b3d()
 
     # ---- variant 04: refinery tower — grating platforms, pipe rack, flare stack ----
@@ -2094,10 +2095,6 @@ def _build_ind_high(zone, tier, variant, lod):
         # Hazard-stripe banding on structural posts at base
         for cx, cz in [(-hx, -hz), (hx, -hz), (-hx, hz), (hx, hz)]:
             m.add_box(cx - 0.025, cx + 0.025, 0, 0.20, cz - 0.025, cz + 0.025, wr, wc, walls_only=True)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, -hz, n_horiz_strips=110, n_vert_strips=70, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, hz,  n_horiz_strips=110, n_vert_strips=70, normal_sign_z=1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, -hx, n_horiz_strips=95, n_vert_strips=55, normal_sign_z=-1)
-        _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, hx,  n_horiz_strips=95, n_vert_strips=55, normal_sign_z=1)
         return m.to_b3d()
 
     return m.to_b3d()
