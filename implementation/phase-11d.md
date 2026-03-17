@@ -534,7 +534,7 @@ placeholder paint-over content with hand-authored or baked detail.
 
 ##### 2a. Building Facade Atlas Rework
 
-- [ ] **`buildings_atlas_d.png` (source PNG, 2048×2048)** — re-author all 15 assigned atlas
+- [x] **`buildings_atlas_d.png` (source PNG, 2048×2048)** — re-author all 15 assigned atlas
   cells (per `architecture/asset-standards/building-atlas-layout.md` Cell Assignment Table)
   to production quality within the 496×496 px per-cell usable area (8 px border on each edge
   per spec). **Each zone-type wall cell must have a materially distinct surface that a player
@@ -642,7 +642,7 @@ placeholder paint-over content with hand-authored or baked detail.
   (ref: `architecture/asset-standards/building-atlas-layout.md`,
   `architecture/asset-standards/2d-texture-standards.md`)
 
-- [ ] **`buildings_atlas_d.png` → DDS pipeline**: after re-authoring the source PNG, run
+- [x] **`buildings_atlas_d.png` → DDS pipeline**: after re-authoring the source PNG, run
   `tools/export_textures.py` (Phase 9 deliverable) to regenerate `buildings_atlas_d.dds`
   (DXT1 sRGB, 4-mip) and `buildings_atlas_d_n.dds` (DXT5nm normal map, 4-mip). Validate
   the DDS headers per `architecture/asset-standards/2d-texture-standards.md`
@@ -650,7 +650,7 @@ placeholder paint-over content with hand-authored or baked detail.
   `validate_assets.py` sRGB/mip-chain checks before commit.
   (ref: `architecture/asset-standards/2d-texture-standards.md` §DDS Authoring Pipeline)
 
-- [ ] **Normal map source re-author** — for each wall-cell type, produce a height-map
+- [x] **Normal map source re-author** — for each wall-cell type, produce a height-map
   source PNG in the DCC tool (Substance Painter bake, xNormal height-map bake, or
   Photoshop bump-to-normal conversion) and derive the normal-map PNG from it. **The
   height-map source PNG must be committed alongside the normal-map PNG** so it can be
@@ -694,7 +694,7 @@ placeholder paint-over content with hand-authored or baked detail.
   `architecture/asset-standards/2d-texture-standards.md` §DXT5nm packing.
   (ref: `architecture/asset-standards/2d-texture-standards.md`)
 
-- [ ] **Automated colour-variance quality gate** — add `validate_assets.py` check #28
+- [x] **Automated colour-variance quality gate** — add `validate_assets.py` check #28
   (building atlas diffuse minimum variance): for each of the 9 zone-type wall cells
   (rows 0–2, cols 0–2) within `buildings_atlas_d.png`, compute the standard deviation
   of pixel luminance within the 496×496 px usable area. A standard deviation below 8.0
@@ -707,7 +707,7 @@ placeholder paint-over content with hand-authored or baked detail.
   must pass before Deliverable 2a is considered complete.
   (ref: `architecture/ci-cd/github-actions-workflow.md`)
 
-- [ ] **`graphics-artist-2d-texture` sign-off gate** (blocking): before committing any
+- [x] **`graphics-artist-2d-texture` sign-off gate** (blocking): before committing any
   reworked atlas PNG or DDS, `graphics-artist-2d-texture` must verify: (a) sRGB ICC profile
   embedded in source PNG, (b) DX10 extended header present in DDS with correct DXGI_FORMAT
   (BC1_UNORM_SRGB = 72 for DXT1 atlas; BC3_UNORM_SRGB = 78 for DXT5 atlas), (c) 8 px
@@ -734,7 +734,7 @@ placeholder paint-over content with hand-authored or baked detail.
 
 ##### 2b. Vehicle Texture Rework
 
-- [ ] **Diffuse atlas** — `vehicles_diffuse_atlas_d.png` (2048×2048 source) →
+- [x] **Diffuse atlas** — `vehicles_diffuse_atlas_d.png` (2048×2048 source) →
   `vehicles_diffuse_atlas_d.dds` (DXT1 sRGB, 4-mip): rework vehicle liveries to production
   quality. Required per-vehicle surface detail: panel gaps and door seams (inset dark line
   ~1–2 px wide separating body panels); wheel disc markings (hub cap pattern or alloy spoke
@@ -757,7 +757,7 @@ placeholder paint-over content with hand-authored or baked detail.
   (ref: `architecture/asset-standards/2d-texture-standards.md` §DDS Authoring Pipeline,
   `architecture/asset-standards/building-atlas-layout.md` §Vehicle Atlas)
 
-- [ ] **Sprite atlas** — `vehicles_sprite_atlas_d.png` (256×256 source) →
+- [x] **Sprite atlas** — `vehicles_sprite_atlas_d.png` (256×256 source) →
   `vehicles_sprite_atlas_d.dds` (DXT5, linear, 1 mip level (DDS dwMipMapCount=1,
   GL_TEXTURE_MAX_LEVEL=0, base level only)): author roof colour-swatch palette for
   LOD2 impostors per vehicle type. Each 16×16 px sprite cell must be a solid fill of the
@@ -769,7 +769,7 @@ placeholder paint-over content with hand-authored or baked detail.
   `tools/export_textures.py`.
   (ref: `architecture/asset-standards/building-atlas-layout.md` §Vehicle Sprite Atlas)
 
-- [ ] **Normal atlas** — `vehicles_normal_atlas_n.png` (2048×2048 source) →
+- [x] **Normal atlas** — `vehicles_normal_atlas_n.png` (2048×2048 source) →
   `vehicles_normal_atlas_n.dds` (DXT5nm, linear, 4-mip): author vehicle surface normal maps
   with per-vehicle-type surface detail requirements:
   - **Car variants** (sedan, hatchback, SUV): bonnet crease — a single longitudinal
@@ -809,7 +809,7 @@ placeholder paint-over content with hand-authored or baked detail.
   job only (not `build-linux`).
   (ref: `architecture/ci-cd/github-actions-workflow.md`)
 
-- [ ] **`graphics-artist-2d-texture` sign-off gate — vehicles** (blocking): before
+- [x] **`graphics-artist-2d-texture` sign-off gate — vehicles** (blocking): before
   committing any reworked vehicle atlas PNG or DDS, `graphics-artist-2d-texture` must
   verify: (a) DX10 sRGB header present in `vehicles_diffuse_atlas_d.dds`
   (BC1_UNORM_SRGB, DXGI_FORMAT = 72), (b) at least four distinct car body colours present
@@ -829,7 +829,7 @@ placeholder paint-over content with hand-authored or baked detail.
 
 ##### 2c. Billboard Atlas Rework
 
-- [ ] **Billboard atlases** (`res_low_01_billboard.dds` through `res_low_04_billboard.dds`,
+- [x] **Billboard atlases** (`res_low_01_billboard.dds` through `res_low_04_billboard.dds`,
   `com_low_01_billboard.dds` through `com_low_04_billboard.dds`, etc. — one per Low/Med-density
   zone variant plus one per service building type; **28 files total**: 24 zone billboard files
   (Low and Med density across 3 zone types × 4 variants each) + 4 service billboard files.
