@@ -87,7 +87,7 @@ The fallback when `getGPUProgrammingServices()` returns null (e.g. software driv
 
 Fixed orbit: radius 65 m, height 15 m, centre (0, 5, 0), advancing 0.3°/frame.
 The 65 m radius keeps the maximum 5-model vehicle row (±24 m span) comfortably in view.
-Zone-tier categories have 4 models (±18 m span); service has 4 models.
+All other categories have 4 models (±18 m span at 12 m spacing).
 
 | Orbit parameter | Value |
 |---|---|

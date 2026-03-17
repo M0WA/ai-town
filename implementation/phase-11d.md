@@ -385,6 +385,14 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   altered. Only mesh detail within each LOD level changes in this phase.
   (ref: `architecture/asset-standards/3d-model-standards.md` §LOD Distance Thresholds)
 
+- [x] **`aitown_model_validator` update** — expand `src/benchmark/model_validator_main.cpp`
+  category list from the Phase 9 six-model-per-zone layout to the Phase 11d eleven-category
+  layout defined in `architecture/graphics-architecture/model-validator-tool.md`: each zone
+  tier is its own category (4 variants each), giving categories 1–9 for zone buildings plus
+  Service and Vehicles, 11 total. `kTotalCategories` is computed from the vector size and
+  updates automatically.
+  (ref: `architecture/graphics-architecture/model-validator-tool.md`)
+
 - [x] **`validate_assets.py` regression-clean**: after re-export, confirm all reworked
   building models pass the existing `validate_assets.py` 24-check suite (established in
   Phase 5 and extended through Phase 10b) with zero errors. The `validate-assets` CI job

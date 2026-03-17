@@ -187,24 +187,26 @@ int main(int argc, char** argv)
     };
 
     const std::vector<Category> categories = {
-        {
-            "Residential",
-            "3d/buildings",
-            {"res_low_01", "res_low_02", "res_med_01", "res_med_02", "res_high_01", "res_high_02"},
-            true, false
-        },
-        {
-            "Commercial",
-            "3d/buildings",
-            {"com_low_01", "com_low_02", "com_med_01", "com_med_02", "com_high_01", "com_high_02"},
-            true, false
-        },
-        {
-            "Industrial",
-            "3d/buildings",
-            {"ind_low_01", "ind_low_02", "ind_med_01", "ind_med_02", "ind_high_01", "ind_high_02"},
-            true, false
-        },
+        // Zone categories: each tier is its own category (4 variants each) so the
+        // orbiting camera keeps all models comfortably in view at 65 m radius.
+        { "Residential Low",              "3d/buildings",
+          {"res_low_01",  "res_low_02",  "res_low_03",  "res_low_04"},  true, false },
+        { "Residential Med",              "3d/buildings",
+          {"res_med_01",  "res_med_02",  "res_med_03",  "res_med_04"},  true, false },
+        { "Residential High",             "3d/buildings",
+          {"res_high_01", "res_high_02", "res_high_03", "res_high_04"}, true, false },
+        { "Commercial Low",               "3d/buildings",
+          {"com_low_01",  "com_low_02",  "com_low_03",  "com_low_04"},  true, false },
+        { "Commercial Med",               "3d/buildings",
+          {"com_med_01",  "com_med_02",  "com_med_03",  "com_med_04"},  true, false },
+        { "Commercial High (Skyscrapers)","3d/buildings",
+          {"com_high_01", "com_high_02", "com_high_03", "com_high_04"}, true, false },
+        { "Industrial Low",               "3d/buildings",
+          {"ind_low_01",  "ind_low_02",  "ind_low_03",  "ind_low_04"},  true, false },
+        { "Industrial Med",               "3d/buildings",
+          {"ind_med_01",  "ind_med_02",  "ind_med_03",  "ind_med_04"},  true, false },
+        { "Industrial High",              "3d/buildings",
+          {"ind_high_01", "ind_high_02", "ind_high_03", "ind_high_04"}, true, false },
         {
             "Service",
             "3d/buildings",
