@@ -605,3 +605,43 @@ any number of manually placed vehicle nodes.
 **SMesh / drop() rules**: agent nodes use `IAnimatedMesh*` loaded via `ISceneManager::getMesh()`
 and cast to `IMesh*` for `addMeshSceneNode` — the scene manager owns the mesh;
 `IrrlichtRenderer` must NOT call `->drop()` on it.
+
+---
+
+## Intersection Signal Billboard Registry (Phase 11d)
+
+`IrrlichtRenderer` maintains a registry of intersection signal billboard nodes:
+
+```cpp
+std::unordered_map<TileKey, ISceneNode*> m_intersectionNodes;
+```
+
+**Ownership**: `IrrlichtRenderer` owns all nodes in `m_intersectionNodes`. Nodes are created
+by `setIntersectionSignalState()` on the first call for a given tile and reused on all
+subsequent calls for that same tile. Nodes are destroyed when the associated road tile is
+removed (caller invokes `setIntersectionSignalState` with a sentinel or the road tile is
+demolished — implementers must call `hideServiceCoverageOverlay`-style cleanup when road
+tiles are removed).
+
+**Lifecycle rules**:
+
+1. `setIntersectionSignalState(tileX, tileZ, SignalPhase)` — if no node exists for `(tileX, tileZ)`,
+   create a `IBillboardSceneNode*` via `smgr->addBillboardSceneNode()`, insert into
+   `m_intersectionNodes[{tileX, tileZ}]`, and set initial material and colour.
+   On subsequent calls for the same tile, look up the existing node and update its material
+   colour only (no allocation). Position: world centre of the tile + Y-offset `+0.15 m` above
+   the road surface. Set `PolygonOffsetFactor = -1` and `PolygonOffsetDirection = EPO_FRONT`
+   on the node's material to prevent Z-fighting with the road quad.
+   Colour per `SignalPhase`: `SignalPhase::Green` → RGB `0x00FF00`; `SignalPhase::Red` → RGB
+   `0xFF0000`. Set via `node->setColor(SColor(255, r, g, b))`.
+   Material: `EMT_TRANSPARENT_ADD_COLOR` (no texture — solid colour billboard).
+
+2. **Eviction sequence** (road tile removed or renderer shutdown):
+   1. For `t` in `[0, MATERIAL_MAX_TEXTURES)`: `node->getMaterial(t).setTexture(0, nullptr)`.
+   2. `m_driver->setMaterial(SMaterial{})` — flush driver last-bound state.
+   3. `node->remove()` — release the scene node. Do NOT access the node pointer after this line.
+   4. Erase the entry from `m_intersectionNodes`.
+
+**TextureCache note**: intersection signal billboards use no textures (solid colour material);
+steps 1–2 of the eviction sequence are included for uniformity with the vehicle eviction
+pattern but have no effect in practice.

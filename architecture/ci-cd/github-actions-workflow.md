@@ -720,9 +720,30 @@ markdown-lint:
     step that exits 1 with a descriptive message if the named symbol is absent from
     `tools/validate_assets.py`); no change to `all-checks-pass` wiring.
 
-    Example guard steps for checks #28–30 (append after the check_27 guard step):
+    Example guard steps for checks #25–30:
 
     ```yaml
+        - name: Verify check_25 present in validate_assets.py
+          # check_25: vehicles_diffuse_atlas_d.dds — BC1_UNORM_SRGB (DXGI_FORMAT=72), 2048×2048, 4 mip levels.
+          # A missing check_25 allows a misformatted vehicle diffuse atlas DDS to pass CI silently.
+          run: |
+            grep -q "check_25" tools/validate_assets.py || (echo "FAIL: check_25 not found in validate_assets.py — Phase 11d vehicle diffuse atlas DDS format gate missing" && exit 1)
+            echo "PASS: check_25 present"
+
+        - name: Verify check_26 present in validate_assets.py
+          # check_26: vehicles_sprite_atlas_d.dds — BC3_UNORM linear (DXGI_FORMAT=77), 256×256, exactly 1 mip level.
+          # A missing check_26 allows a misformatted vehicle sprite atlas DDS to pass CI silently.
+          run: |
+            grep -q "check_26" tools/validate_assets.py || (echo "FAIL: check_26 not found in validate_assets.py — Phase 11d vehicle sprite atlas DDS format gate missing" && exit 1)
+            echo "PASS: check_26 present"
+
+        - name: Verify check_27 present in validate_assets.py
+          # check_27: vehicles_normal_atlas_n.dds — BC3_UNORM linear DXT5nm (DXGI_FORMAT=77), 2048×2048, 4 mip levels.
+          # A missing check_27 allows a misformatted vehicle normal atlas DDS to pass CI silently.
+          run: |
+            grep -q "check_27" tools/validate_assets.py || (echo "FAIL: check_27 not found in validate_assets.py — Phase 11d vehicle normal atlas DDS format gate missing" && exit 1)
+            echo "PASS: check_27 present"
+
         - name: Verify check_28 present in validate_assets.py
           # check_28: buildings_atlas_d.png wall-cell luminance stddev gate (< 8.0 = CI failure).
           # A missing check_28 allows a near-solid placeholder atlas to pass CI silently.

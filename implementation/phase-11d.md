@@ -43,6 +43,15 @@ This commit must land BEFORE any test files for Deliverables 3a, 3d, 4c, 5c, or 
   (ref: `architecture/game-design/traffic-system.md`,
   `architecture/game-design/service-coverage.md`)
 
+- [ ] **Extend `QueryResult` struct** — add `bool degraded{false};` to `src/interfaces/simulation_types.h`
+  immediately after `ServiceBuildingType serviceType{ServiceBuildingType::None};`, as required by
+  `architecture/ui-ux/query-inspector-panel.md` §Service building tile detection and by
+  Deliverable 4a (which passes `QueryResult::degraded` to
+  `IRenderer::showServiceCoverageOverlay(tileX, tileZ, serviceType, degraded)`). This must land
+  in the Day-One Commit — Deliverable 4a integration code cannot compile without this field.
+  (ref: `architecture/ui-ux/query-inspector-panel.md`,
+  `architecture/game-design/service-coverage.md`)
+
 - [ ] Extend `IAudioSystem` in `src/interfaces/IAudioSystem.h` with three new pure-virtual methods
   required by Deliverable 3a's vehicle engine audio pair wiring:
   `virtual std::pair<int,int> acquireVehicleEnginePair(ZoneType zone) = 0;`
@@ -1034,19 +1043,22 @@ along road paths, and intersection signal state shown at road nodes.
   overlay.
   (ref: `architecture/game-design/traffic-system.md`)
 
-- [ ] **`kMinimapWidgetTop` and `kMinimapWidgetTopOverlayActive` constants** — add to
+- [ ] **`kMinimapWidgetTop`, `kMinimapWidgetTopOverlayActive`, and `kMinimapWidgetLeft` constants** — add to
   `src/ui/ui_constants.h`:
 
   ```cpp
   constexpr int kMinimapWidgetTop = 848;               // top edge of minimap widget (no overlay)
   constexpr int kMinimapWidgetTopOverlayActive = 732;  // top edge when overlay chrome is visible
+  constexpr int kMinimapWidgetLeft = 1576;             // left edge of full minimap widget footprint
   ```
 
   These constants are required by the QueryPanel dismiss-click minimap carve-out in
   `UIManager::onEvent` (per `architecture/ui-ux/input-arbitration.md` Priority 3) to
   correctly exclude minimap-region clicks from closing the Inspector panel when a traffic or
   service-coverage overlay is active (overlay chrome extends the minimap widget upward from
-  848 px to 732 px). Responsibility: `graphics-dev-irrlicht`.
+  848 px to 732 px; `kMinimapWidgetLeft` anchors the left boundary for the x-coordinate
+  carve-out check). Responsibility: `gamedesign-ux` (these are UI-layer constants in
+  `src/ui/ui_constants.h` consumed by `UIManager::onEvent` — not graphics renderer code).
   (ref: `architecture/ui-ux/input-arbitration.md` Priority 3,
   `architecture/ui-ux/minimap.md`)
 
@@ -1065,6 +1077,17 @@ along road paths, and intersection signal state shown at road nodes.
 - [ ] **`AgentRenderSync_CullDistance_AgentsBeyond150m_NotSpawned`** (label `unit`,
   CMake target `simulation_tests`): using `StrictMock<MockRenderer>`, verify that agents with tile distance > 150 m from the
   camera do not trigger `spawnVehicleAgent`.
+
+- [ ] **`AgentEngineAudio_AcquireRelease_MatchesSpawnDespawn`** (label `unit`,
+  CMake target `simulation_tests`): using `StrictMock<MockAudioSystem>`, verify that the
+  per-frame agent sync loop calls `acquireVehicleEnginePair` exactly once per spawned agent
+  (on spawn) and `releaseVehicleEnginePair` exactly once per despawned agent (on despawn) with
+  the matching indices. Also verify that passing `{-1, -1}` (pool exhaustion) to
+  `releaseVehicleEnginePair` is a safe no-op (i.e., `releaseVehicleEnginePair(-1, -1)` is
+  called and does not crash or assert). This test guards against pool source handle leaks when
+  agents despawn.
+  (ref: `architecture/audio-architecture/source-pool.md`,
+  `architecture/audio-architecture/audio-system.md` §acquireVehicleEnginePair)
 
 - [ ] **CMakeLists extension** — add test source via `target_sources(simulation_tests PRIVATE
   tests/simulation/agent_render_sync_test.cpp)` following the Phase 4+ extension policy (do
@@ -1145,9 +1168,15 @@ is selected, and a coverage overlay layer on the minimap.
   - Power Plant coverage: yellow tint `#F1C40F`
   - Water Tower coverage: cyan tint `#1ABC9C`
   Only covered tiles are coloured; uncovered tiles receive no special highlight (per
-  `architecture/ui-ux/minimap.md` covered-tile encoding).
+  `architecture/ui-ux/minimap.md` §Service Coverage Overlay).
+  **Colorblind mode** (required per `architecture/ui-ux/resolution-ui-scaling.md`
+  §Colorblind Accessibility): when colorblind mode is active, each covered-tile colour
+  must also include a distinct geometric pattern overlay so the service type is
+  distinguishable by pattern alone — diagonal hatching for Fire Station, horizontal
+  lines for Police Station, dotted overlay for Power Plant, cross-hatch for Water Tower.
   (ref: `architecture/ui-ux/minimap.md`,
-  `architecture/game-design/service-coverage.md`)
+  `architecture/game-design/service-coverage.md`,
+  `architecture/ui-ux/resolution-ui-scaling.md` §Colorblind Accessibility)
 
 - [ ] **`ICitySimulation::getServiceCoverage()` query** — returns
   `std::vector<ServiceCoverageTile>` (new struct in `simulation_types.h`:
@@ -1465,7 +1494,7 @@ initiate a placement click on an occupied tile.
 | `graphics-dev-irrlicht` | Implement `IRenderer` methods for vehicle agent spawn/move/despawn, intersection signal state, service coverage overlays; add minimap traffic and service coverage overlay modes; add `ICitySimulation` query methods (`getAgentPositions`, `getIntersectionSignalStates`, `getRoadSegmentSpeeds`, `getServiceCoverage`); per-frame agent sync loop in `main.cpp`; add placement conflict guards in `placeZone` and `placeRoad` (Deliverable 5a/5b); extend `IRenderer::setTilePlacementPreview` to accept `blockedTiles` second list (Deliverable 5d) |
 | `sound-dev-opensoftal` | Implement the three new `IAudioSystem` concrete methods in `AudioSystem`: `acquireVehicleEnginePair` (callable from main thread — like all IAudioSystem methods; internally dispatches AL_VELOCITY zeroing to the audio thread per `AudioSystem`'s two-mutex design; returns opaque `{idleIdx, moveIdx}` or `{-1,-1}` if pool exhausted); `releaseVehicleEnginePair` (callable from main thread; internally stops and returns both sources to the pool on the audio thread); `updateVehicleAudio` (callable from main thread; internally executes AL_PITCH, AL_GAIN crossblend, and AL_POSITION updates on the audio thread). All AL calls within these implementations must execute on the audio thread — the methods themselves are main-thread entry points per the IAudioSystem contract. See `architecture/audio-architecture/audio-system.md` §Two-Mutex Design and `architecture/audio-architecture/dynamic-soundscape.md` §Vehicle Engine Audio. |
 | `gamedesign-lookandfeel` | Confirm coverage radius colours, minimap tint palette, and signal visual behaviour match simulation intent; verify no V1 scope creep in visual wiring |
-| `gamedesign-ux` | Verify Inspector panel coverage-overlay UX (show on open, hide on close); confirm minimap overlay toggle interaction matches `architecture/ui-ux/minimap.md`; sign off on red preview feedback colour and blocked-tile drag-preview split (Deliverable 5d) |
+| `gamedesign-ux` | Add `kMinimapWidgetTop = 848`, `kMinimapWidgetTopOverlayActive = 732`, and `kMinimapWidgetLeft = 1576` to `src/ui/ui_constants.h` (Deliverable 3c); verify Inspector panel coverage-overlay UX (show on open, hide on close); confirm minimap overlay toggle interaction matches `architecture/ui-ux/minimap.md`; sign off on red preview feedback colour and blocked-tile drag-preview split (Deliverable 5d) |
 | `test-dev-cpp` | Deliverable 0 (Day-One Commit): extend `MockRenderer` with updated `MOCK_METHOD` for `setTilePlacementPreview` (new two-list signature) and stubs for all six new `IRenderer` methods before any test files for Deliverables 3d, 4c, 5c, or 5e are written; author all eleven new unit tests (four traffic/coverage tests + four sim-level placement conflict tests + three UI-level placement feedback tests); extend `simulation_tests` and `ui_tests` CMake targets |
 | `cicd-dev-github` | add checks #25–27 to `validate_assets.py` for vehicle atlas DDS format validation (Deliverable 2b); add guard steps 'Verify check_25 present' through 'Verify check_30 present' to the `validate-assets` job in `.github/workflows/ci.yml` for all six new checks (#25–30), following the established pattern for checks #21–24 (guard steps are added to the `validate-assets` job only — NOT to the `build-linux` preflight; the cicd role's responsibility for checks #28–30 is the guard steps only — the checks themselves are implemented in `validate_assets.py` by `graphics-artist-2d-texture` per Deliverables 2a/2c); Verify `validate-assets` CI job remains green after DDS rework; confirm `all-checks-pass` gate green |
 
@@ -1506,7 +1535,7 @@ initiate a placement click on an occupied tile.
   signs off.
 - **RISK**: Adding four new `ICitySimulation` query methods (`getAgentPositions`,
   `getIntersectionSignalStates`, `getRoadSegmentSpeeds`, `getServiceCoverage`) requires
-  updating `MockCitySimulation` in `tests/simulation/MockCitySimulation.h`. Failure to
+  updating `MockCitySimulation` in `tests/ui/MockCitySimulation.h`. Failure to
   update the mock before writing tests causes link errors. **Spike**: add all four
   `MOCK_METHOD` declarations to `MockCitySimulation` as the very first commit of this phase,
   before any other deliverable.
