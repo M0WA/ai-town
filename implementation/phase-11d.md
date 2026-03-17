@@ -1521,21 +1521,41 @@ initiate a placement click on an occupied tile.
 ### Risks & Spikes
 
 - **RISK**: Per-frame `getAgentPositions()` copy of up to 10,000 `AgentState` structs may
-  cause frame-time spikes. **Spike**: profile the copy at 10,000 agents on a 1024×1024 map
-  before committing to the value-type vector approach; if copy cost exceeds 1 ms at 60 FPS,
-  investigate a double-buffer or dirty-flag strategy that only returns moved agents.
+  cause frame-time spikes. **Resolution**: `AgentState` is 20 bytes
+  (`uint32_t agentId` + `int tileX` + `int tileZ` + `float headingDeg` + `ZoneType zone`);
+  10,000 × 20 B × 60 fps ≈ 11.4 MB/s — well within DDR4 bandwidth (30–50 GB/s). Use simple
+  `std::vector<AgentState>` value-copy; no dirty-flag or double-buffer strategy needed. Add a
+  `DCHECK(copy_us < 500)` timing guard in DEBUG builds during Deliverable 3a integration to
+  confirm the copy remains under 0.5 ms at runtime.
 - **RISK**: Service coverage wireframe circle for a 800 m Fire Station radius will span many
-  terrain chunks at varying heights. **Spike**: prototype the circle overlay as a flat-terrain
-  screenspace outline first; if terrain height variation causes visible z-fighting, switch to
-  a world-space tile-step polygon offset with `PolyOffset_Factor=−1`.
-- **RISK**: Billboard re-bake at −45° pitch with reworked LOD0 meshes may introduce imposter
-  mismatch visible at the LOD1→LOD2 transition distance (100 m / 90 m). **Spike**: render a
-  comparison pair (reworked LOD1 vs. re-baked billboard) at the 90 m switch-in distance under
-  `xvfb-run` integration test; confirm no obvious silhouette discontinuity before artist
-  signs off.
+  terrain chunks at varying heights. **Resolution**: terrain heights range 0–26 m on a default
+  map, making screenspace projection unreliable across chunk boundaries. Go directly to the
+  world-space tile-step polygon approach with `PolygonOffsetFactor=−1` and `EPO_FRONT` (same
+  as intersection signal billboards — see
+  `architecture/graphics-architecture/scene-graph-ownership.md` §Intersection Signal Billboard
+  Registry). No flat-terrain screenspace prototype step is needed.
+- **RISK (RESOLVED)**: Billboard re-bake at −45° pitch with reworked LOD0 meshes may introduce
+  imposter mismatch visible at the LOD1→LOD2 transition distance (100 m / 90 m).
+  **Resolution**: bake validation is a mandatory step in the Deliverable 2c billboard atlas
+  sign-off gate. After re-baking all 28 billboard atlases from the reworked Phase 11d LOD0
+  meshes (Deliverable 1a), launch the model validator under a virtual display and step through
+  the LOD2 transition manually:
+  `xvfb-run --auto-servernum ./build/aitown_model_validator --width 1920 --height 1080`.
+  Position the camera at the 90 m switch-in distance (LOD1→LOD2 switch-in for small buildings
+  and service buildings per `architecture/asset-standards/3d-model-standards.md`
+  §LOD Distance Thresholds) and confirm that no billboard impostor shows a silhouette gap or
+  step discontinuity greater than 2 pixels at 1920×1080 compared to the LOD1 mesh at the
+  same distance. This check is a **blocker** for `graphics-artist-3d-model` sign-off on
+  Deliverable 2c: a failed check (visible gap > 2 px at 1080p) requires a re-bake with
+  adjusted camera pitch or field-of-view in the bake setup. The sign-off is recorded as a
+  commit-message annotation on the first reworked billboard atlas commit, stating that the
+  90 m transition was verified clean at 1920×1080 with no silhouette discontinuity > 2 px.
 - **RISK**: Adding four new `ICitySimulation` query methods (`getAgentPositions`,
   `getIntersectionSignalStates`, `getRoadSegmentSpeeds`, `getServiceCoverage`) requires
   updating `MockCitySimulation` in `tests/ui/MockCitySimulation.h`. Failure to
-  update the mock before writing tests causes link errors. **Spike**: add all four
-  `MOCK_METHOD` declarations to `MockCitySimulation` as the very first commit of this phase,
-  before any other deliverable.
+  update the mock before writing tests causes link errors.
+  **Resolution**: mitigated procedurally — Deliverable 0 (Day-One Commit) explicitly requires
+  adding all four `MOCK_METHOD` declarations (`getAgentPositions`,
+  `getIntersectionSignalStates`, `getRoadSegmentSpeeds`, `getServiceCoverage`) to
+  `tests/ui/MockCitySimulation.h` before any other deliverable. No separate spike needed;
+  the commit ordering enforces the constraint.
