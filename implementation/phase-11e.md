@@ -238,16 +238,22 @@ geometry and texture — no two variants within a zone-tier share a cell.
 
 ### Risks & Spikes
 
-- **RISK**: 4096×4096 DXT1 atlas requires ~8 MB more VRAM than the 2048×2048 predecessor,
-  pushing total scene VRAM consumption closer to the 170 MB Phase 12 budget ceiling.
-  **Spike**: `graphics-dev-irrlicht` to run a VRAM profiling pass on the Phase 11d build before
-  authoring begins, confirming headroom of at least 10 MB above the new atlas cost.
-- **RISK**: Some target GPUs may not support 4096-px textures (`GL_MAX_TEXTURE_SIZE < 4096`).
-  **Spike**: Check the `m_maxTextureSize` guard already established in Phase 1/2 (`GL_MAX_TEXTURE_SIZE`
-  query in `RenderSystem`); confirm the fallback path is documented in
-  `architecture/graphics-architecture/irrlicht-device-lifecycle.md` before the texture rebuild
-  begins.
-- **RISK**: Regenerating all 102 `.b3d` files in one pass may surface UV precision errors that
-  only become visible at the new 8×8 scale.
-  **Spike**: Run `validate_assets.py` with the updated Check #4 on a single representative model
-  (e.g., `res_low_01_lod0.b3d`) after the divisor change before doing the full regeneration batch.
+- **RISK (RESOLVED)**: 4096×4096 DXT1 atlas requires ~8 MB more VRAM than the 2048×2048
+  predecessor, pushing total scene VRAM consumption closer to the Phase 12 budget ceiling.
+  **Resolution**: Phase 12 ceiling raised to ≤180 MB (from 170 MB) in
+  `implementation/phase-12.md` and `architecture/asset-standards/2d-texture-standards.md`
+  §Scene VRAM Budget. Actual worst-case sum with primary 4096 atlas ≈166.5 MB, leaving
+  ~13.5 MB headroom — equivalent to the pre-11e margin. No VRAM profiling spike needed.
+- **RISK (RESOLVED)**: Some target GPUs may not support 4096-px textures
+  (`GL_MAX_TEXTURE_SIZE < 4096`).
+  **Resolution**: `architecture/graphics-architecture/irrlicht-device-lifecycle.md`
+  §Building Atlas Resolution Fallback fully documents the detection logic
+  (`m_maxTextureSize` queried in `RenderSystem`), fallback asset
+  (`buildings_atlas_d_2k.dds`), `GL_TEXTURE_MAX_LEVEL` dispatch (4 for primary, 3 for
+  fallback), and stderr warning. No further spec work required.
+- **RISK (RESOLVED)**: Regenerating all 102 `.b3d` files in one pass may surface UV
+  precision errors only visible at the new 8×8 scale.
+  **Resolution**: `validate_assets.py` Check #13 validates UV range compliance within
+  each 512×512 cell (8–504 px usable area); the single-model validation gate
+  (`res_low_01_lod0.b3d` with updated Check #4 boundary 0.125) is a mandatory step in
+  Deliverable 2 before the full batch regeneration. No spec gap remains.

@@ -717,7 +717,7 @@ Total texture VRAM for all simultaneously-resident assets must not exceed **1.0 
 | Vehicle sprite atlas (256×256 DXT5, no mip) | ≤1 MB (DXT5 required — see 3D Model Standards; alpha channel needed for non-rectangular vehicle roof silhouettes; actual size ≈ 64 KB) |
 | Billboard imposter atlases (≤50 unique small building/prop types × 1024×128 DXT5, 4-level mip) | ≤9 MB (≤170 KB per atlas × 50 types) |
 | Miscellaneous (normal maps, roughness, props, per-type vehicle textures) | ≤48 MB |
-| **Total** | **≤170 MB** (well within 1 GB ceiling) |
+| **Total** | **≤180 MB** (well within 1 GB ceiling; updated for Phase 11e 4096 atlas — primary path 166.5 MB actual vs 160.5 MB with 2048 fallback) |
 
 **Draw call ceiling**: ≤2,000 draw calls per frame (all LODs combined). Buildings sharing the same atlas texture and material can be batched or instanced into a single draw call. This drives the atlas-first design requirement.
 **Unique mesh variant cap**: ≤50 unique LOD0/LOD1/LOD2 building mesh variants simultaneously loaded. Building types exceeding 50 unique meshes must share atlas space and be explicitly approved.
