@@ -1234,7 +1234,8 @@ def _build_res_high(zone, tier, variant, lod):
     if variant == "01":
         # Tall shaft box + flat roof + balcony slabs every 3 floors
         # Phase-11d: flat-roof concrete, AC condensers on parapet, no pool
-        bw, bd, bh = 10*S, 10*S, 40*S
+        # Footprint clamped to ±4*S (0.4 units) to stay within BUILDING_HALF_XZ
+        bw, bd, bh = 8*S, 8*S, 40*S
         hx, hz = bw/2, bd/2
         floors = 13
         if lod == 2:
@@ -1250,17 +1251,18 @@ def _build_res_high(zone, tier, variant, lod):
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         # Plant room box
         m.add_box(-2*S, 2*S, bh, bh+3*S, -2*S, 2*S, wr, wc, rr, rc)
-        # Balcony slabs every 3 floors
+        # Balcony slabs every 3 floors — overhang clamped so tip stays within ±4*S
         for fl in range(3, floors, 3):
             fy = fl * floor_h
-            _add_balcony_slab(m, wr, wc, -4*S, 4*S, fy, -hz, 1.2*S)
+            _add_balcony_slab(m, wr, wc, -3*S, 3*S, fy, -hz, 0.8*S)
         _add_ground_quad(m, "paving", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     elif variant == "02":
         # Slab box + flat roof
         # Phase-11d: stepped-setback, pool basin geometry in walled courtyard
-        bw, bd, bh = 24*S, 12*S, 30*S
+        # Footprint clamped: main slab 8*S wide, staircases tucked to ±4*S total
+        bw, bd, bh = 8*S, 8*S, 30*S
         hx, hz = bw/2, bd/2
         if lod == 2:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1268,15 +1270,16 @@ def _build_res_high(zone, tier, variant, lod):
             return m.to_b3d()
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
-            m.add_box(-hx-1*S, -hx, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
-            m.add_box(hx, hx+1*S, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
+            # Staircase projections stay within ±4*S: offset kept within hx
+            m.add_box(-hx, -hx+1*S, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
+            m.add_box(hx-1*S, hx, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
             _add_ground_quad(m, "garden", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
-        # End staircase boxes
-        m.add_box(-hx-1*S, -hx, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
-        m.add_box(hx, hx+1*S, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
+        # End staircase boxes — inset so total stays within ±4*S
+        m.add_box(-hx, -hx+1*S, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
+        m.add_box(hx-1*S, hx, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
         _add_ground_quad(m, "garden", -hx-1*S, hx+1*S, -hz-1*S, hz+1*S)
         # Pool basin in walled courtyard (LOD0 only)
         _add_ground_quad(m, "pool", -2*S, 2*S, -hz-1*S-4*S, -hz-1*S)
@@ -1285,7 +1288,8 @@ def _build_res_high(zone, tier, variant, lod):
     elif variant == "03":
         # Stepped shaft (3 stacked boxes decreasing in plan) + antenna box
         # Phase-11d: full-height curtain-wall tower, cantilevered balconies
-        base_hw = 6*S
+        # Footprint clamped: base_hw reduced to 4*S to stay within BUILDING_HALF_XZ
+        base_hw = 4*S
         bh = 36*S
         sb1_y, sb2_y = 15*S, 25*S
         sb = 2*S
@@ -1312,9 +1316,10 @@ def _build_res_high(zone, tier, variant, lod):
 
     elif variant == "04":
         # Slab box + flat roof (curved front as approximation)
-        bw, bd, bh = 20*S, 10*S, 28*S
+        # Footprint clamped: bw reduced to 8*S, bow reduced to 0.4*S so tip = hz+bow ≤ 4*S
+        bw, bd, bh = 8*S, 7*S, 28*S
         hx, hz = bw/2, bd/2
-        bow = 1.5*S
+        bow = 0.4*S
         n_seg = 8
         if lod == 2:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1384,7 +1389,8 @@ def _build_com_low(zone, tier, variant, lod):
     elif variant == "03":
         # Box + flat roof + 4 simple pilaster boxes on front
         # Phase-11d: auto garage, open forecourt, no awning
-        bw, bd, bh = 16*S, 6*S, 5*S
+        # Footprint clamped: bw reduced to 8*S so hx = 4*S ≤ BUILDING_HALF_XZ
+        bw, bd, bh = 8*S, 6*S, 5*S
         hx, hz = bw/2, bd/2
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1401,7 +1407,8 @@ def _build_com_low(zone, tier, variant, lod):
     elif variant == "04":
         # Box + sawtooth roof
         # Phase-11d: supermarket, freestanding trolley-bay shelter in parking apron
-        bw, bd, bh = 12*S, 8*S, 4*S
+        # Footprint clamped: bw reduced to 8*S so hx = 4*S ≤ BUILDING_HALF_XZ
+        bw, bd, bh = 8*S, 8*S, 4*S
         hx, hz = bw/2, bd/2
         tooth_h = 2.5*S
         if lod == 1:
@@ -1511,7 +1518,8 @@ def _build_com_high(zone, tier, variant, lod):
 
     if variant == "01":
         # Tapered shaft (main box + two smaller setback boxes at top) -- NO mullion grid
-        bw, bd, bh = 18*S, 14*S, 60*S
+        # Footprint clamped: bw=8*S, bd=8*S so hx=hz=4*S ≤ BUILDING_HALF_XZ
+        bw, bd, bh = 8*S, 8*S, 60*S
         hx, hz = bw/2, bd/2
         taper1_y, taper2_y = 48*S, 55*S
         if lod == 2:
@@ -1533,7 +1541,8 @@ def _build_com_high(zone, tier, variant, lod):
 
     elif variant == "02":
         # Main box + pediment fins (two triangular prisms at top) + entry canopy slab
-        bw, bd, bh = 20*S, 16*S, 42*S
+        # Footprint clamped: bw=8*S, bd=8*S; canopy depth reduced to stay within ±4*S
+        bw, bd, bh = 8*S, 8*S, 42*S
         hx, hz = bw/2, bd/2
         crown_h = 6*S
         pod_h = 8*S
@@ -1554,14 +1563,15 @@ def _build_com_high(zone, tier, variant, lod):
                   (0, 0, -1), wr, wc)
         m.add_tri((ped_w/2, bh, hz), (-ped_w/2, bh, hz), (0, bh+crown_h, hz),
                   (0, 0, 1), wr, wc)
-        # Entry canopy slab
-        m.add_box(-3*S, 3*S, 4*S, 4*S+0.15*S, -hz-2*S, -hz, wr, wc)
+        # Entry canopy slab — tip recessed flush with front face, no outboard projection
+        m.add_box(-2*S, 2*S, 4*S, 4*S+0.15*S, -hz, -hz+1*S, wr, wc)
         _add_ground_quad(m, "paving", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
         return m.to_b3d()
 
     elif variant == "03":
         # Main shaft box + chamfered octagonal top section + spire box
-        base_hw = 6*S
+        # Footprint clamped: base_hw reduced to 4*S to stay within BUILDING_HALF_XZ
+        base_hw = 4*S
         bh = 55*S
         chamfer_y = 47*S
         n_sides = 8
@@ -1595,7 +1605,8 @@ def _build_com_high(zone, tier, variant, lod):
 
     elif variant == "04":
         # Main slab box + 4 corner mega-column boxes + 3 cross-brace slab boxes
-        bw, bd, bh = 14*S, 10*S, 50*S
+        # Footprint clamped: bw=7*S, bd=7*S; columns at hx±0.5*S stay within 4*S
+        bw, bd, bh = 7*S, 7*S, 50*S
         hx, hz = bw/2, bd/2
         if lod == 2:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1639,7 +1650,8 @@ def _build_ind_low(zone, tier, variant, lod):
 
     if variant == "01":
         # Box + pitched roof (portal frame gabled)
-        bw, bd, bh = 12*S, 16*S, 5*S
+        # Footprint clamped: bd reduced to 8*S so hz = 4*S ≤ BUILDING_HALF_XZ
+        bw, bd, bh = 8*S, 8*S, 5*S
         hx, hz = bw/2, bd/2
         ridge_h = (7-5)*S
         if lod == 1:
@@ -1654,7 +1666,8 @@ def _build_ind_low(zone, tier, variant, lod):
 
     elif variant == "02":
         # Box + twin parallel pitched roofs
-        bw, bd, bh = 20*S, 16*S, 5*S
+        # Footprint clamped: bw=8*S, bd=8*S so hx=hz=4*S ≤ BUILDING_HALF_XZ
+        bw, bd, bh = 8*S, 8*S, 5*S
         hx, hz = bw/2, bd/2
         ridge_h = (7-5)*S
         if lod == 1:
@@ -1671,30 +1684,34 @@ def _build_ind_low(zone, tier, variant, lod):
 
     elif variant == "03":
         # Main box + lean-to box + mono-pitch roofs on each
-        mw, md, mh = 12*S, 10*S, 6*S
+        # Footprint clamped: combined footprint centred within ±4*S.
+        # Main box 5*S wide, lean-to 3*S wide → total 8*S, centred: main [-4*S,+1*S], lean-to [+1*S,+4*S]
+        mw, md, mh = 5*S, 8*S, 6*S
         ridge_h = (8-6)*S
-        lw, lh_top, lh_bot = 6*S, 5*S, 4*S
-        hx_main = mw/2
+        lw, lh_top, lh_bot = 3*S, 5*S, 4*S
+        x_main_min = -4*S
+        hx_main = x_main_min + mw  # = -4*S + 5*S = +1*S (join line)
         hz = md/2
         if lod == 1:
-            m.add_box(-hx_main, hx_main, 0, mh, -hz, hz, wr, wc, rr, rc)
-            _add_gabled_roof(m, wr, wc, rr, rc, -hx_main, hx_main, mh, ridge_h, -hz, hz)
+            m.add_box(x_main_min, hx_main, 0, mh, -hz, hz, wr, wc, rr, rc)
+            _add_gabled_roof(m, wr, wc, rr, rc, x_main_min, hx_main, mh, ridge_h, -hz, hz)
             m.add_box(hx_main, hx_main+lw, 0, lh_top, -hz, hz, wr, wc, rr, rc)
-            _add_ground_quad(m, "tarmac", -hx_main-1*S, hx_main+lw+1*S, -hz-1*S, hz+1*S)
+            _add_ground_quad(m, "tarmac", x_main_min-1*S, hx_main+lw+1*S, -hz-1*S, hz+1*S)
             return m.to_b3d()
         # Main shed
-        m.add_box(-hx_main, hx_main, 0, mh, -hz, hz, wr, wc, rr, rc)
-        _add_gabled_roof(m, wr, wc, rr, rc, -hx_main, hx_main, mh, ridge_h, -hz, hz)
-        # Lean-to box
+        m.add_box(x_main_min, hx_main, 0, mh, -hz, hz, wr, wc, rr, rc)
+        _add_gabled_roof(m, wr, wc, rr, rc, x_main_min, hx_main, mh, ridge_h, -hz, hz)
+        # Lean-to box — extends to hx_main+lw = 4*S ≤ BUILDING_HALF_XZ
         m.add_box(hx_main, hx_main+lw, 0, lh_bot, -hz, hz, wr, wc, rr, rc)
         _add_mono_pitch_roof(m, wr, wc, rr, rc, hx_main, hx_main+lw, lh_bot, lh_top, -hz, hz)
-        _add_ground_quad(m, "tarmac", -hx_main-1*S, hx_main+lw+1*S, -hz-1*S, hz+1*S)
+        _add_ground_quad(m, "tarmac", x_main_min-1*S, hx_main+lw+1*S, -hz-1*S, hz+1*S)
         return m.to_b3d()
 
     elif variant == "04":
         # Full box geometry + mono-pitch roof
         # Phase-11d: storage yard, two-high shipping container stacks, chain-link fence, floodlight mast
-        bw, bd = 16*S, 12*S
+        # Footprint clamped: bw=8*S, bd=8*S so hx=hz=4*S ≤ BUILDING_HALF_XZ
+        bw, bd = 8*S, 8*S
         hx, hz = bw/2, bd/2
         front_h, rear_h = 6*S, 4*S
         if lod == 1:
@@ -1722,7 +1739,8 @@ def _build_ind_med(zone, tier, variant, lod):
 
     if variant == "01":
         # Box + flat roof (dock leveller recesses = 3 simple shallow box recesses on front)
-        bw, bd, bh = 24*S, 20*S, 8*S
+        # Footprint clamped: bw=8*S, bd=8*S so hx=hz=4*S ≤ BUILDING_HALF_XZ
+        bw, bd, bh = 8*S, 8*S, 8*S
         hx, hz = bw/2, bd/2
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1738,7 +1756,8 @@ def _build_ind_med(zone, tier, variant, lod):
 
     elif variant == "02":
         # Box + sawtooth north-light roof
-        bw, bd, bh = 22*S, 18*S, 10*S
+        # Footprint clamped: bw=8*S, bd=8*S so hx=hz=4*S ≤ BUILDING_HALF_XZ
+        bw, bd, bh = 8*S, 8*S, 10*S
         hx, hz = bw/2, bd/2
         saw_h = 2.5*S
         if lod == 1:
@@ -1752,7 +1771,8 @@ def _build_ind_med(zone, tier, variant, lod):
 
     elif variant == "03":
         # Box + flat roof + optional 6 simple thin pilaster boxes on front
-        bw, bd, bh = 18*S, 14*S, 14*S
+        # Footprint clamped: bw=8*S, bd=8*S so hx=hz=4*S ≤ BUILDING_HALF_XZ
+        bw, bd, bh = 8*S, 8*S, 14*S
         hx, hz = bw/2, bd/2
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1768,7 +1788,8 @@ def _build_ind_med(zone, tier, variant, lod):
 
     elif variant == "04":
         # Box + flat roof
-        bw, bd, bh = 16*S, 14*S, 9*S
+        # Footprint clamped: bw=8*S, bd=8*S so hx=hz=4*S ≤ BUILDING_HALF_XZ
+        bw, bd, bh = 8*S, 8*S, 9*S
         hx, hz = bw/2, bd/2
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1794,21 +1815,22 @@ def _build_ind_high(zone, tier, variant, lod):
 
     if variant == "01":
         # 3 cylinder approximations (12 segments) + conical tops + small base shed box
-        silo_r = 2.5*S
+        # Footprint clamped: silo_r=1.5*S, centres repositioned so all extents ≤ ±4*S
+        silo_r = 1.5*S
         silo_h = 20*S
         cone_h = 2*S
         n_seg = 12
-        cx_list = [(-3*S, -1.5*S), (3*S, -1.5*S), (0, 2.5*S)]
+        cx_list = [(-2*S, -1*S), (2*S, -1*S), (0, 2*S)]
         if lod == 2:
             for cx, cz in cx_list:
                 _add_cylinder(m, wr, wc, cx, cz, 0, silo_h, silo_r, n_sides=8)
-            _add_ground_quad(m, "tarmac", -6*S-2*S, 6*S+2*S, -5*S-2*S, 2.5*S+silo_r+2*S)
+            _add_ground_quad(m, "tarmac", -4*S-1*S, 4*S+1*S, -3*S-1*S, 2*S+silo_r+1*S)
             return m.to_b3d()
         if lod == 1:
             for cx, cz in cx_list:
                 _add_cylinder(m, wr, wc, cx, cz, 0, silo_h, silo_r, n_sides=n_seg)
                 _add_cylinder_cap(m, wr, wc, cx, cz, silo_h, silo_r, n_sides=n_seg, face_up=True)
-            _add_ground_quad(m, "tarmac", -6*S-2*S, 6*S+2*S, -5*S-2*S, 2.5*S+silo_r+2*S)
+            _add_ground_quad(m, "tarmac", -4*S-1*S, 4*S+1*S, -3*S-1*S, 2*S+silo_r+1*S)
             return m.to_b3d()
         # LOD0
         for cx, cz in cx_list:
@@ -1816,16 +1838,17 @@ def _build_ind_high(zone, tier, variant, lod):
             _add_cylinder_cap(m, wr, wc, cx, cz, silo_h, silo_r, n_sides=n_seg, face_up=True)
             # Conical roof
             _add_spire(m, rr, rc, cx, cz, silo_h, silo_h+cone_h, silo_r, n_sides=n_seg)
-        # Loading shed box
-        m.add_box(-6*S, 6*S, 0, 4*S, -5*S, -2*S, wr, wc, rr, rc)
-        _add_ground_quad(m, "tarmac", -6*S-2*S, 6*S+2*S, -5*S-2*S, 2.5*S+silo_r+2*S)
+        # Loading shed box — clamped to ±4*S in X
+        m.add_box(-4*S, 4*S, 0, 4*S, -3*S, -1*S, wr, wc, rr, rc)
+        _add_ground_quad(m, "tarmac", -4*S-1*S, 4*S+1*S, -3*S-1*S, 2*S+silo_r+1*S)
         return m.to_b3d()
 
     elif variant == "02":
         # Main box + 2 cylinder stack approximations (12 segs) + pipe run box
-        bw, bd, bh = 16*S, 12*S, 24*S
+        # Footprint clamped: bw=8*S, bd=8*S; stacks inset so extent ≤ ±4*S
+        bw, bd, bh = 8*S, 8*S, 24*S
         hx, hz = bw/2, bd/2
-        stack_r = 0.75*S
+        stack_r = 0.5*S
         stack_h = 30*S
         n_seg = 12
         if lod == 2:
@@ -1852,25 +1875,29 @@ def _build_ind_high(zone, tier, variant, lod):
 
     elif variant == "03":
         # L-shaped plan (two boxes forming L) + flat roof
+        # Footprint redesigned to fit within ±4*S × ±4*S bounding box
+        # Horizontal bar: X [-4*S, +4*S] × Z [-4*S, 0]
+        # Vertical stem:  X [-4*S,  0  ] × Z [  0, +4*S]
         h = 10*S
         if lod == 2:
-            m.add_box(-10*S, 10*S, 0, h, -8*S, 8*S, wr, wc, rr, rc)
-            _add_ground_quad(m, "tarmac", -12*S, 12*S, -10*S, 10*S)
+            m.add_box(-4*S, 4*S, 0, h, -4*S, 4*S, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -4*S-1*S, 4*S+1*S, -4*S-1*S, 4*S+1*S)
             return m.to_b3d()
         if lod == 1:
-            m.add_box(-10*S, 10*S, 0, h, -4*S, 4*S, wr, wc, rr, rc)
-            m.add_box(-10*S, -2*S, 0, h, 4*S, 12*S, wr, wc, rr, rc)
-            _add_ground_quad(m, "tarmac", -12*S, 12*S, -6*S, 14*S)
+            m.add_box(-4*S, 4*S, 0, h, -4*S, 0, wr, wc, rr, rc)
+            m.add_box(-4*S, 0, 0, h, 0, 4*S, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -4*S-1*S, 4*S+1*S, -4*S-1*S, 4*S+1*S)
             return m.to_b3d()
-        # LOD0: L-shape
-        m.add_box(-10*S, 10*S, 0, h, -4*S, 4*S, wr, wc, rr, rc)
-        m.add_box(-10*S, -2*S, 0, h, 4*S, 12*S, wr, wc, rr, rc)
-        _add_ground_quad(m, "tarmac", -12*S, 12*S, -6*S, 14*S)
+        # LOD0: L-shape within ±4*S bounding box
+        m.add_box(-4*S, 4*S, 0, h, -4*S, 0, wr, wc, rr, rc)
+        m.add_box(-4*S, 0, 0, h, 0, 4*S, wr, wc, rr, rc)
+        _add_ground_quad(m, "tarmac", -4*S-1*S, 4*S+1*S, -4*S-1*S, 4*S+1*S)
         return m.to_b3d()
 
     elif variant == "04":
         # Main box + 2 transformer pad boxes + lightning rod box
-        bw, bd, bh = 18*S, 14*S, 16*S
+        # Footprint clamped: bw=8*S, bd=8*S; transformer pads placed within main Z range
+        bw, bd, bh = 8*S, 8*S, 16*S
         hx, hz = bw/2, bd/2
         if lod == 2:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1878,18 +1905,19 @@ def _build_ind_high(zone, tier, variant, lod):
             return m.to_b3d()
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
-            m.add_box(-hx+1*S, -hx+7*S, 0, 3*S, -hz-1*S, -hz, wr, wc, rr, rc)
-            m.add_box(hx-7*S, hx-1*S, 0, 3*S, -hz-1*S, -hz, wr, wc, rr, rc)
-            _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-4*S-1*S, hz+2*S)
+            # Transformer pads inset on front face (do not extend beyond -hz)
+            m.add_box(-hx+0.5*S, -hx+2.5*S, 0, 3*S, -hz, -hz+1*S, wr, wc, rr, rc)
+            m.add_box(hx-2.5*S, hx-0.5*S, 0, 3*S, -hz, -hz+1*S, wr, wc, rr, rc)
+            _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
-        # Two transformer pad boxes (simple rectangles, NO radiator fin strips)
-        for tx in [-hx+4*S, hx-4*S]:
-            m.add_box(tx-3*S, tx+3*S, 0, 3*S, -hz-4*S, -hz, wr, wc, rr, rc)
+        # Two transformer pad boxes — placed against front wall, inside footprint
+        for tx in [-hx+1.5*S, hx-1.5*S]:
+            m.add_box(tx-1*S, tx+1*S, 0, 3*S, -hz, -hz+1.5*S, wr, wc, rr, rc)
         # Lightning rod box
         m.add_box(-1*S, 1*S, bh, bh+8*S, -1*S, 1*S, wr, wc, walls_only=True)
-        _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-4*S-2*S, hz+2*S)
+        _add_ground_quad(m, "tarmac", -hx-2*S, hx+2*S, -hz-2*S, hz+2*S)
         return m.to_b3d()
 
     return m.to_b3d()
