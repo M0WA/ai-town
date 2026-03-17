@@ -6,7 +6,8 @@ Add lot-level ground features to every building model so buildings sit on a
 recognisable footprint rather than bare terrain. Residential buildings gain garden
 patches and optional pools; commercial buildings gain paved forecourts; industrial
 buildings gain tarmac lots; service buildings gain contextual ground surfaces. Ground
-features are flat quads embedded in each B3D mesh at y = 0, UV-mapped to new
+features are flat quads embedded in each B3D mesh at y = 0.01 (1 cm above terrain,
+preventing depth-buffer conflict with the terrain mesh), UV-mapped to new
 ground-feature atlas cells allocated from the currently-reserved rows 5–7 of the
 8×8 building atlas.
 
@@ -17,7 +18,8 @@ ground-feature atlas cells allocated from the currently-reserved rows 5–7 of t
 #### 1. Spec Update — `architecture/asset-standards/building-atlas-layout.md`
 
 Allocate five ground-feature cells from row 5 (currently RESERVED). Row 5 col 0
-is already used by `ROOF_CELL`; cols 1–5 are assigned as follows.
+is already assigned as `ROOF_CELL` in `generate_b3d_models.py` and documented in
+`building-atlas-layout.md`; cols 1–5 are assigned as follows.
 
 - [ ] Add a **Ground Feature Cells** section to the Cell Assignment Table:
   - `(5, 1)` — `ground_garden`: mid-green grass / garden patch
@@ -69,8 +71,11 @@ is already used by `ROOF_CELL`; cols 1–5 are assigned as follows.
 
   (ref: `architecture/asset-standards/building-atlas-layout.md`)
 - [ ] Add a `_add_ground_quad(m, gtype, xmin, xmax, zmin, zmax)` helper that emits
-  a single upward-facing flat quad (normal `(0,1,0)`) at `y = 0` using
-  `GROUND_CELLS[gtype]`, covering the given XZ extents.
+  a single upward-facing flat quad (normal `(0,1,0)`) at `y = 0.01` (1 cm above
+  terrain, preventing depth-buffer conflict with the terrain mesh at y = 0) using
+  `GROUND_CELLS[gtype]`, covering the given XZ extents. After adding the quad,
+  recalculate the mesh bounding box (`m.recalculate_bounding_box()` or equivalent)
+  so the extended footprint is included in frustum culling.
 - [ ] Apply ground quads to every building variant using the rules below.
   All quads extend the building's footprint by `1*S` on each side (so the ground
   patch is slightly larger than the building base and is visible from any camera
@@ -80,7 +85,7 @@ is already used by `ROOF_CELL`; cols 1–5 are assigned as follows.
   **Residential med** — `ground_garden` patch at full footprint + 1 S margin.\
   **Residential high — variants 01, 03** — `ground_garden` rear courtyard
   (full footprint + 1 S margin); variant 01 also adds a `ground_pool` quad
-  (4 S × 4 S, centred, at y = 0 in front of the building).\
+  (4 S × 4 S, centred, at y = 0.01, in front of the building).\
   **Residential high — variants 02, 04** — `ground_paving` front forecourt
   (full footprint + 1 S margin).\
   **Commercial low** — `ground_paving` forecourt at full footprint + 1 S margin.\
@@ -98,11 +103,24 @@ is already used by `ROOF_CELL`; cols 1–5 are assigned as follows.
   LOD1 and LOD2 variants receive the same ground quad as LOD0 (same footprint,
   same ground type). LOD2 for high-density buildings (where LOD2 is a single
   box) still receives a ground quad.
+- [ ] Update `tools/validate_assets.py` to accept UV coordinates mapping to ground
+  feature cells `(5,1)`–`(5,5)` and `ROOF_CELL (5,0)` in addition to the 40
+  building variant cells in rows 0–4. Without this update the validator will
+  reject regenerated B3D files that contain ground quad UVs.
+  (`cicd-dev-github`)
+- [ ] Update `tools/validate_assets.py` to verify that each regenerated B3D
+  bounding box encompasses the ground quad vertices: bounding box XZ extent must
+  be at least as large as the expected footprint and margin for each building type
+  (derive expected extents from the footprint constants already defined in
+  `generate_b3d_models.py`); bounding box Y range must include `y = 0.01`
+  (i.e., `min.Y ≤ 0` and `max.Y ≥ 0.01`). This ensures silent frustum-culling
+  failures from missing bounding box recalculation are caught in CI.
+  (`cicd-dev-github`)
 - [ ] Regenerate all 102 `.b3d` files; verify all pass `python tools/validate_assets.py`.
   (`graphics-artist-3d-model`)
 - [ ] `graphics-artist-3d-model` sign-off: ground quads visible in
   `aitown_model_validator` screenshots for all 10 building categories; no
-  z-fighting between ground quad and terrain plane at y = 0.
+  z-fighting between ground quad (at y = 0.01) and terrain mesh.
 
 #### 4. Model Validator Visual Confirmation
 
@@ -121,8 +139,16 @@ is already used by `ROOF_CELL`; cols 1–5 are assigned as follows.
 - [ ] `buildings_atlas_d.png` rebuilt with all five new ground-feature cells painted;
   all previously-assigned cells (rows 0–4 + row 5 col 0) unchanged.
 - [ ] `generate_b3d_models.py` updated: `GROUND_CELLS` dict present; `_add_ground_quad()`
-  helper present; ground quads applied to all 15 building types (12 zone types +
+  helper present; all ground quads placed at `y = 0.01` (not `y = 0`) to prevent
+  depth-buffer conflict with terrain mesh; bounding box recalculated after each quad
+  addition; ground quads applied to all 15 building types (12 zone types +
   3 svc variants that share a type each); all 102 `.b3d` files regenerated.
+- [ ] `tools/validate_assets.py` updated: accepts UV cells `(5,0)`–`(5,5)` (ROOF_CELL
+  and five ground feature cells); rejects any other row-5–7 UV that is not yet assigned;
+  verifies each B3D bounding box XZ extent (derived from `generate_b3d_models.py`
+  footprint constants) is at least as large as the expected footprint and margin for
+  that building type; verifies bounding box Y range satisfies `min.Y ≤ 0`
+  and `max.Y ≥ 0.01`.
 - [ ] `python tools/validate_assets.py` exits zero after regeneration.
 - [ ] `aitown_model_validator` screenshot confirms ground features visible in all
   10 building categories; reference PNGs committed under
@@ -130,7 +156,9 @@ is already used by `ROOF_CELL`; cols 1–5 are assigned as follows.
 - [ ] `graphics-artist-2d-texture` sign-off: five ground-feature cells authored and
   atlas rebuilt.
 - [ ] `graphics-artist-3d-model` sign-off: ground quads applied, visible, no
-  z-fighting.
+  z-fighting (confirmed by placement at y = 0.01 above terrain mesh).
+- [ ] `graphics-dev-irrlicht` sign-off: no depth-buffer artifact between ground
+  quads (y = 0.01) and terrain mesh (y = 0) observed in `aitown_model_validator`.
 - [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
   exits zero.
 
@@ -143,7 +171,7 @@ is already used by `ROOF_CELL`; cols 1–5 are assigned as follows.
 | `graphics-artist-2d-texture` | Author five ground-feature cells in the atlas; sign off on cell content |
 | `graphics-artist-3d-model` | Add `GROUND_CELLS` dict + `_add_ground_quad()` helper + apply quads to all variants; regenerate 102 B3D files; sign off on visual result |
 | `graphics-dev-irrlicht` | Confirm no z-fighting at y = 0 between building ground quads and terrain mesh |
-| `cicd-dev-github` | Verify `validate-assets` CI job exits zero after atlas and B3D regeneration |
+| `cicd-dev-github` | Update `validate_assets.py` to accept ground feature cells (5,1)–(5,5) and ROOF_CELL (5,0); add bounding-box extent check; verify `validate-assets` CI job exits zero after atlas and B3D regeneration |
 
 ---
 

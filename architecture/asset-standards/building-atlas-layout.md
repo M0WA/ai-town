@@ -29,7 +29,7 @@ building texture content 2026-03-04), `graphics-dev-irrlicht` (2026-02-26), and
 > `ddsBuffer` struct alignment issue.
 
 - Resolution: 4096×4096 pixels
-- Cell grid: 8×8 cells at 512×512 px each (64 cells total; rows 0–4 assigned, rows 5–7 RESERVED)
+- Cell grid: 8×8 cells at 512×512 px each (64 cells total; rows 0–4 assigned; row 5 col 0 assigned (`ROOF_CELL`); row 5 cols 1–7 and rows 6–7 RESERVED)
 - Mip chain: 5-level mandatory (`GL_TEXTURE_MAX_LEVEL = 4`; 4096→2048→1024→512→256). All five mip
   levels MUST be present as data in the DDS file — a file whose `dwMipMapCount` field declares
   5 mips but contains only mip 0 data is truncated and causes `TextureCache::loadSRGB()` to
@@ -43,7 +43,8 @@ building texture content 2026-03-04), `graphics-dev-irrlicht` (2026-02-26), and
 
 Phase-11e expansion: the 8×8 grid provides one unique 512×512 cell per variant. Each of the 40
 assigned cells (rows 0–4, cols 0–7) is exclusive to a single building variant or service building
-type. Rows 5–7 (24 cells) are RESERVED for future expansion.
+type. Row 5 col 0 is also assigned as `ROOF_CELL` (used by `generate_b3d_models.py` for building
+roof surfaces). Row 5 cols 1–7 and rows 6–7 (23 cells) are RESERVED for future expansion.
 
 | Cell Row | Cell Col | Variant / Asset | Notes |
 |---|---|---|---|
@@ -87,7 +88,8 @@ type. Rows 5–7 (24 cells) are RESERVED for future expansion.
 | 4 | 5 | `svc_police_station` | Service: police station. UV authoring complete; concrete/glass/utility palette confirmed 2026-03-04. |
 | 4 | 6 | `svc_power_plant` | Service: power plant. UV authoring complete; concrete/glass/utility palette confirmed 2026-03-04. |
 | 4 | 7 | `svc_water_tower` | Service: water tower. UV authoring complete; concrete/glass/utility palette confirmed 2026-03-04. |
-| 5–7 | 0–7 | RESERVED | 24 cells reserved for future expansion. Do not assign in V1. |
+| 5 | 0 | `ROOF_CELL` | Roof surface texture used by all building variants in `generate_b3d_models.py`. Assigned pre-Phase 11f. |
+| 5–7 | 1–7 (row 5); 0–7 (rows 6–7) | RESERVED | 23 cells reserved for future expansion (Phase 12+). Do not assign in V1 without a spec update. |
 
 **Phase-11e per-variant unique cell assignment**: The 8×8 atlas expansion (phase-11e) allows and
 implements a unique 512×512 cell per variant. Each of the 36 zone-building variants
