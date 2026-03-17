@@ -1856,50 +1856,46 @@ def build_svc_power_plant(lod):
 
 
 def build_svc_water_tower(lod):
-    """Water tower: 4 tapered leg boxes + cylindrical tank (16 segs) + conical roof."""
+    """Water tower: 4 solid leg columns + cylindrical tank (16 segs) + conical roof."""
     wr, wc = WALL_CELLS[("svc", "water_tower")]
     rr, rc = ROOF_CELL
     m = MeshAccum()
     S = 0.1
 
-    tank_r = 4*S
-    tank_h = 6*S
-    leg_h = 8*S
+    tank_r  = 4*S
+    tank_h  = 7*S
+    leg_h   = 8*S
     tank_bot = leg_h
     tank_top = tank_bot + tank_h
-    cone_r = 4.5*S
-    cone_h = 1.5*S
-    n_seg = 16
-    foot_spread = 5*S
+    cone_r  = 4.5*S
+    cone_h  = 2*S
+    n_seg   = 16
+    # Legs positioned inside the tank radius so the tank overhangs them visibly.
+    leg_spread = 2.5*S   # distance from centre to leg centre
+    leg_hw     = 1.5*S   # half-width of each square leg column
 
     if lod == 1:
         _add_cylinder(m, wr, wc, 0, 0, tank_bot, tank_top, tank_r, n_sides=8)
         _add_cylinder_cap(m, wr, wc, 0, 0, tank_top, tank_r, n_sides=8, face_up=True)
-        for sx, sz in [(-1,-1),(1,-1),(-1,1),(1,1)]:
-            lx, lz = sx*foot_spread, sz*foot_spread
-            m.add_box(lx-0.5*S, lx+0.5*S, 0, tank_bot, lz-0.5*S, lz+0.5*S, wr, wc, walls_only=True)
+        for sx, sz in [(-1, -1), (1, -1), (-1, 1), (1, 1)]:
+            lx, lz = sx * leg_spread, sz * leg_spread
+            m.add_box(lx - leg_hw, lx + leg_hw, 0, tank_bot,
+                      lz - leg_hw, lz + leg_hw, wr, wc, walls_only=True)
         return m.to_b3d()
 
-    # LOD0: cylindrical tank
+    # LOD0: cylindrical tank with top + bottom caps
     _add_cylinder(m, wr, wc, 0, 0, tank_bot, tank_top, tank_r, n_sides=n_seg)
     _add_cylinder_cap(m, wr, wc, 0, 0, tank_bot, tank_r, n_sides=n_seg, face_up=False)
     _add_cylinder_cap(m, wr, wc, 0, 0, tank_top, tank_r, n_sides=n_seg, face_up=True)
 
     # Conical roof
-    _add_spire(m, rr, rc, 0, 0, tank_top, tank_top+cone_h, cone_r, n_sides=n_seg)
+    _add_spire(m, rr, rc, 0, 0, tank_top, tank_top + cone_h, cone_r, n_sides=n_seg)
 
-    # Four tapered leg boxes (splayed)
-    for sx, sz in [(-1,-1),(1,-1),(-1,1),(1,1)]:
-        bx, bz = sx*foot_spread, sz*foot_spread
-        tx, tz = sx*(tank_r*0.6), sz*(tank_r*0.6)
-        base_hw = 0.5*S
-        top_hw = 0.25*S
-        mid_y = leg_h * 0.5
-        mid_x = (bx + tx) * 0.5
-        mid_z = (bz + tz) * 0.5
-        mid_hw = (base_hw + top_hw) * 0.5
-        m.add_box(bx-base_hw, bx+base_hw, 0, mid_y, bz-base_hw, bz+base_hw, wr, wc, walls_only=True)
-        m.add_box(mid_x-mid_hw, mid_x+mid_hw, mid_y, leg_h, mid_z-mid_hw, mid_z+mid_hw, wr, wc, walls_only=True)
+    # Four solid square leg columns
+    for sx, sz in [(-1, -1), (1, -1), (-1, 1), (1, 1)]:
+        lx, lz = sx * leg_spread, sz * leg_spread
+        m.add_box(lx - leg_hw, lx + leg_hw, 0, leg_h,
+                  lz - leg_hw, lz + leg_hw, wr, wc, walls_only=True)
 
     return m.to_b3d()
 

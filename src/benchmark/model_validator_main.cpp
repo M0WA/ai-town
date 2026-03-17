@@ -110,7 +110,7 @@ static bool parseArgs(int argc, char** argv, ValidatorOptions& opts)
 // ---------------------------------------------------------------------------
 // Showcase constants
 // ---------------------------------------------------------------------------
-static constexpr float kShowcaseSpacing = 12.0f;  // metres between model centres
+static constexpr float kShowcaseSpacing = 22.0f;  // metres between model centres
 
 // ---------------------------------------------------------------------------
 // ShowcaseReceiver — minimal event receiver for keyboard input.
