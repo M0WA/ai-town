@@ -14,11 +14,12 @@ constexpr int kToolbarTop    = 64;   // virtual y-coordinate (1920x1080 space)
 constexpr int kToolbarBottom = 784;  // virtual y-coordinate (1920x1080 space)
 
 // Minimap widget top edge (virtual 1920x1080 space).
-// kMinimapWidgetTopOverlayActive: top edge when an overlay panel (e.g. QueryPanel)
-// is active above the minimap.
-// kMinimapWidgetTop: default top edge with no overlay active.
+// kMinimapWidgetTopOverlayActive: top edge when the legend panel is active above
+// the toggle row (legend at y:732–832, label strip y:832–848, toggle row y:848–880).
+// kMinimapWidgetTop: default top edge (toggle row at y:848–880, render area y:880–1080).
+// See architecture/ui-ux/minimap.md for the full widget footprint layout.
 constexpr int kMinimapWidgetTopOverlayActive = 732;
-constexpr int kMinimapWidgetTop = 880;
+constexpr int kMinimapWidgetTop = 848;
 
 // --- Phase 9b: Zone overlay and hover highlight ARGB colour constants ---
 // Format: 0xAARRGGBB  (Irrlicht SColor format, alpha 0x60 ≈ 38% for overlays)
