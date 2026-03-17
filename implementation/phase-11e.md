@@ -95,13 +95,18 @@ geometry and texture — no two variants within a zone-tier share a cell.
 - [ ] Update `WALL_CELLS`, `ROOF_CELL`, and `BASE_CELL` dictionaries to use the new per-variant
   cell assignments from the 8×8 grid Cell Assignment Table. `WALL_CELLS` must become a per-variant
   dict mapping each `(zone, tier, variant_number)` tuple to its own `(row, col)` cell — not a
-  shared cell per zone-tier.
+  shared cell per zone-tier. `variant_number` is the 1-based numeric suffix of the asset name
+  (e.g., `res_low_01` → `variant_number=1`, `res_low_04` → `variant_number=4`).
   (ref: `architecture/asset-standards/building-atlas-layout.md`)
 - [ ] Regenerate all 102 `.b3d` files after the changes; verify all regenerated files pass
   `validate_assets.py`.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 - [ ] `graphics-artist-3d-model` sign-off: per-variant UV assignments in the updated generator
-  verified correct; all models visually distinct across zone-tiers after regeneration.
+  verified correct; all models visually distinct across zone-tiers after regeneration. Acceptance
+  criteria: (1) each variant's LOD0 model passes `validate_assets.py` Check #4 (UV coordinates
+  within assigned cell boundaries); (2) renders correctly in `aitown_model_validator` (no missing
+  textures or black faces); (3) displays recognizable geometry differentiation from other variants
+  in the same zone-tier when viewed at 12 m showcase spacing.
 
 #### 5. Texture Rebuild — `assets/textures/buildings_atlas_d.dds`
 
@@ -135,6 +140,14 @@ geometry and texture — no two variants within a zone-tier share a cell.
   levels on a 4096-px atlas).
   (ref: `architecture/graphics-architecture/texture-cache.md`)
 - [ ] Update any hardcoded 2048-related atlas size references in `TextureCache.cpp`.
+  (ref: `architecture/graphics-architecture/texture-cache.md`)
+- [ ] Add C++ test coverage for the new `TextureCache` atlas-selection logic in
+  `tests/rendering/texture_cache_test.cpp` (authored and owned by `graphics-dev-irrlicht`):
+  Test case 1 — `loadSRGB()` selects `buildings_atlas_d_2k.dds` when `maxTextureSize < 4096`;
+  Test case 2 — `GL_TEXTURE_MAX_LEVEL` is set to 3 for the 2k fallback atlas and 4 for the
+  primary 4096 atlas; Test case 3 — Both atlases load without GL errors (integration test under
+  `xvfb-run`, labeled `requires-opengl`). These tests ensure the fallback path operates correctly
+  on GPUs without 4096-px texture support.
   (ref: `architecture/graphics-architecture/texture-cache.md`)
 
 #### 7. validate\_assets.py Update
@@ -185,6 +198,10 @@ geometry and texture — no two variants within a zone-tier share a cell.
   check is mandatory before Deliverable 5 is marked complete.
 - [ ] `TextureCache.cpp` updated: GL\_TEXTURE\_MAX\_LEVEL=4 for the buildings atlas, no remaining
   hardcoded 2048-px atlas size references.
+- [ ] `TextureCache` atlas-selection C++ tests pass in CI: three test cases verify fallback atlas
+  selection, GL\_TEXTURE\_MAX\_LEVEL dispatch (3 for 2k, 4 for 4k), and error-free loading of both
+  atlases under `xvfb-run` with label `requires-opengl`. Tests located in
+  `tests/rendering/texture_cache_test.cpp`.
 - [ ] `validate_assets.py` Check #4 extended with UV cell boundary validation (new B3D UV-coordinate
   reader; boundaries `[cell_col/8, (cell_col+1)/8] × [cell_row/8, (cell_row+1)/8]`) and per-variant
   `.meta` assignment verification.
