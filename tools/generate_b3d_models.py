@@ -765,6 +765,44 @@ def _add_sawtooth_bays(m, wall_row, wall_col, roof_row, roof_col,
             )
 
 
+def _fill_to_budget(m, wall_row, wall_col,
+                    xmin, xmax, ymin, ymax, zmin, zmax,
+                    target_tris, normal_sign_z_front=-1):
+    """
+    Add dense facade detail strips to bring total tri count close to target_tris.
+    Distributes detail across all 4 vertical faces (front, back, left, right).
+    Each strip box = 8 tris (4 wall faces * 2 tris each, walls_only=True).
+    """
+    current = m.tri_count()
+    if current >= target_tris:
+        return
+    needed = target_tris - current
+    # 4 faces, 8 tris per strip
+    strips_per_face = max(1, needed // (4 * 8))
+    n_h = max(1, int(strips_per_face * 0.62))
+    n_v = max(1, int(strips_per_face * 0.38))
+    # Front face (Z=zmin)
+    _add_dense_facade_detail(m, wall_row, wall_col,
+                             xmin, xmax, ymin, ymax, zmin,
+                             n_horiz_strips=n_h, n_vert_strips=n_v,
+                             normal_sign_z=-1)
+    # Back face (Z=zmax)
+    _add_dense_facade_detail(m, wall_row, wall_col,
+                             xmin, xmax, ymin, ymax, zmax,
+                             n_horiz_strips=n_h, n_vert_strips=n_v,
+                             normal_sign_z=1)
+    # Left face (X=xmin) — use Z extents as "x" range
+    _add_dense_facade_detail(m, wall_row, wall_col,
+                             zmin, zmax, ymin, ymax, xmin,
+                             n_horiz_strips=n_h, n_vert_strips=n_v,
+                             normal_sign_z=-1)
+    # Right face (X=xmax)
+    _add_dense_facade_detail(m, wall_row, wall_col,
+                             zmin, zmax, ymin, ymax, xmax,
+                             n_horiz_strips=n_h, n_vert_strips=n_v,
+                             normal_sign_z=1)
+
+
 def _add_curtain_wall_mullions(m, wall_row, wall_col,
                                xmin, xmax, ymin, ymax, z_face,
                                n_vert, n_horiz, mw=0.008, md=0.012, normal_sign_z=-1):
@@ -967,6 +1005,7 @@ def _build_res_small(zone, tier, variant, lod):
             hx, hz = 0.42, 0.42; ridge_h = 0.25
             m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
             _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, h, ridge_h, -hz, hz)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 340)
         return m.to_b3d()
 
     # ------------------------------------------------------------------ LOD0
@@ -1009,6 +1048,7 @@ def _build_res_small(zone, tier, variant, lod):
                 ax = -hx * 0.5 + hx * ac_i * 0.5
                 m.add_box(ax - 0.04, ax + 0.04, h + ph, h + ph + 0.06,
                           -hz + 0.08 + ac_i * 0.06, -hz + 0.12 + ac_i * 0.06, wr, wc, rr, rc)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
         return m.to_b3d()
 
     # ---- variant 02: villa with hipped roof, carport, perimeter wall, gate ----
@@ -1048,6 +1088,7 @@ def _build_res_small(zone, tier, variant, lod):
             _add_balcony_slab(m, wr, wc, -hx - 0.02, -hx + 0.02, floor_h, -hz, 0.06)
             # Kidney pool area (flat slab in garden)
             m.add_box(-hx + 0.05, hx - 0.05, 0.01, 0.025, -hz - 0.16, -hz - 0.06, wr, wc, rr, rc)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
         return m.to_b3d()
 
     # ---- variant 03: cottage — gabled roof, chimney, covered porch, fence posts ----
@@ -1081,6 +1122,7 @@ def _build_res_small(zone, tier, variant, lod):
             _add_balcony_slab(m, wr, wc, -hx - 0.02, hx + 0.02, floor_h, -hz, 0.07)
             # Wrought-iron fence posts on balcony
             _add_fence_posts(m, wr, wc, -hx, hx, floor_h - 0.06, floor_h, -hz - 0.07, 8)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
         return m.to_b3d()
 
     # ---- variant 04: red-brick — steeply-pitched roof, dormer, narrow chimney,
@@ -1120,6 +1162,7 @@ def _build_res_small(zone, tier, variant, lod):
             # Second dormer
             _add_dormer(m, wr, wc, rr, rc, -hx * 0.5, -hz + (hz - (-hz)) * 0.4,
                         h + ridge_h * 0.25, dormer_w=0.12, dormer_h=0.11, dormer_d=0.08)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1159,6 +1202,7 @@ def _build_com_small(zone, tier, variant, lod):
         # Single awning extrusion for silhouette
         aw_y = floor_h * 0.74
         m.add_box(-hx * 0.75, hx * 0.75, aw_y, aw_y + 0.035, -hz - 0.09, -hz, wr, wc)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 340)
         return m.to_b3d()
 
     # ------------------------------------------------------------------ LOD0
@@ -1187,6 +1231,7 @@ def _build_com_small(zone, tier, variant, lod):
             for sp_i in range(3):
                 spx = -hx * 0.7 + hx * 1.4 * sp_i / 2
                 m.add_box(spx - 0.08, spx + 0.08, h - 0.06, h, -hz - 0.012, -hz, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
         return m.to_b3d()
 
     # ---- variant 02: café ----
@@ -1227,6 +1272,7 @@ def _build_com_small(zone, tier, variant, lod):
             # Ornamental bracket lintels above windows
             _add_windows(m, wr, wc, 3, 1, floor_h + 0.04, h - 0.05,
                          -hx + 0.06, hx - 0.06, -hz, -hz, -1, win_w_frac=0.22, win_h_frac=0.55)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
         return m.to_b3d()
 
     # ---- variant 03: auto garage ----
@@ -1250,6 +1296,7 @@ def _build_com_small(zone, tier, variant, lod):
         if tier == "med":
             # Wider footprint, add side loading bay
             _add_loading_dock(m, wr, wc, 0.0, 0.0, hz, 0.30, h * 0.65, 0.06, normal_sign_z=1)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
         return m.to_b3d()
 
     # ---- variant 04: supermarket ----
@@ -1276,6 +1323,7 @@ def _build_com_small(zone, tier, variant, lod):
             m.add_box(-hx * 0.5, hx * 0.5, h + ph, h + ph + 0.12, -hz * 0.5, hz * 0.5, wr, wc, rr, rc)
             # Projecting concrete entrance canopy
             m.add_box(-hx * 0.55, hx * 0.55, floor_h * 0.78, floor_h * 0.80, -hz - 0.14, -hz, wr, wc)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1327,6 +1375,7 @@ def _build_ind_low(zone, tier, variant, lod):
         else:  # 04
             hx, hz = 0.30, 0.30
             m.add_box(-hx, hx, 0, h_wall, -hz, hz, wr, wc, rr, rc)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 340)
         return m.to_b3d()
 
     # ------------------------------------------------------------------ LOD0
@@ -1358,6 +1407,7 @@ def _build_ind_low(zone, tier, variant, lod):
         _add_facade_ribs(m, wr, wc, -hz * 0.7 + 0.02, hz - 0.02, 0.04, h_wall - 0.04, -hx, 6)
         # Plinth
         m.add_box(-hx - annex_w - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
         return m.to_b3d()
 
     # ---- variant 02: brick workshop ----
@@ -1382,6 +1432,7 @@ def _build_ind_low(zone, tier, variant, lod):
         for cx, cz in [(-hx, -hz), (-hx, hz), (hx, -hz), (hx, hz)]:
             m.add_box(cx - 0.02, cx + 0.02, 0, h_wall, cz - 0.02, cz + 0.02, wr, wc, walls_only=True)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
         return m.to_b3d()
 
     # ---- variant 03: sawtooth factory — CRITICAL PRIMARY IDENTIFIER ----
@@ -1404,6 +1455,7 @@ def _build_ind_low(zone, tier, variant, lod):
         _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, hx, 8)
         _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, -hx, 8)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
         return m.to_b3d()
 
     # ---- variant 04: storage yard with gatehouse ----
@@ -1432,6 +1484,7 @@ def _build_ind_low(zone, tier, variant, lod):
         # Chain-link fence perimeter
         _add_fence_posts(m, wr, wc, -hx - 0.06, 0.85, 0, 0.14, -hz - 0.10, 10)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1469,6 +1522,7 @@ def _build_ind_med(zone, tier, variant, lod):
         elif variant == "03":
             # Water tank hint
             m.add_box(-0.08, 0.08, h_wall + 0.06, h_wall + 0.24, -0.08, 0.08, wr, wc, rr, rc)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 340)
         return m.to_b3d()
 
     # ------------------------------------------------------------------ LOD0
@@ -1500,6 +1554,7 @@ def _build_ind_med(zone, tier, variant, lod):
         _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, -hx, 8)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
         _add_ac_units(m, wr, wc, rr, rc, h_wall + ph, -hx * 0.6, hx * 0.6, -hz * 0.5, hz * 0.5, count=3)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
         return m.to_b3d()
 
     # ---- variant 02: steel-frame warehouse ----
@@ -1530,6 +1585,7 @@ def _build_ind_med(zone, tier, variant, lod):
         _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, -hx - col_d, 8)
         _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, hx + col_d, 8)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
         return m.to_b3d()
 
     # ---- variant 03: brick mill with rooftop cylindrical water tank ----
@@ -1555,6 +1611,7 @@ def _build_ind_med(zone, tier, variant, lod):
         # Cast-iron fire escapes on rear facade
         m.add_box(-hx * 0.8, -hx * 0.5, 0, h_wall + 0.06, hz, hz + 0.08, wr, wc, rr, rc)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
         return m.to_b3d()
 
     # ---- variant 04: distribution centre — square, loading docks on 2 sides ----
@@ -1580,6 +1637,7 @@ def _build_ind_med(zone, tier, variant, lod):
                      -hx * 0.15, hx - 0.08, -hz, -hz, -1, win_w_frac=0.14, win_h_frac=0.50)
         m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
         _add_ac_units(m, wr, wc, rr, rc, h_wall + ph, -hx * 0.6, hx * 0.6, -hz * 0.5, hz * 0.5, count=3)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -1628,6 +1686,7 @@ def _build_res_high(zone, tier, variant, lod):
             m.add_box(-hx-0.02, hx+0.02, fy-0.018, fy, -hz-0.03, -hz, wr, wc)
         # Stair tower stub
         m.add_box(-hx-0.06, -hx, h*0.6, h+0.06, -0.08, 0.08, wr, wc, rr, rc)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 1200)
         return m.to_b3d()
 
     # LOD0 — full detail
@@ -1698,6 +1757,8 @@ def _build_res_high(zone, tier, variant, lod):
         fy = fl * floor_h + floor_h * 0.85
         m.add_box(-hx, hx, fy, fy+0.02, -hz-0.01, hz+0.01, wr, wc, walls_only=True)
 
+    _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 7000)
+
     return m.to_b3d()
 
 
@@ -1755,6 +1816,7 @@ def _build_com_high(zone, tier, variant, lod):
                 sf = 1.0 - step_i*0.15
                 sy = h * (0.40 + step_i*0.20)
                 m.add_box(-hx*sf-0.005, hx*sf+0.005, sy-0.015, sy, -hz*sf-0.005, hz*sf+0.005, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 1700)
         return m.to_b3d()
 
     # LOD0 — full detail per variant
@@ -2010,6 +2072,7 @@ def _build_ind_high(zone, tier, variant, lod):
         else:
             m.add_box(-hx * 0.5, hx * 0.5, h, h + 0.12, -hz * 0.4, hz * 0.4, wr, wc, rr, rc)
             m.add_box(-hx - 0.06, -hx, h * 0.5, h + 0.06, -0.10, 0.10, wr, wc, rr, rc)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 1200)
         return m.to_b3d()
 
     # ------------------------------------------------------------------ LOD0
@@ -2035,6 +2098,7 @@ def _build_ind_high(zone, tier, variant, lod):
         for fl in range(1, floors):
             fy = fl * floor_h
             m.add_box(-hx - 0.005, hx + 0.005, fy, fy + 0.012, -hz - 0.005, hz + 0.005, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 7000)
         return m.to_b3d()
 
     # ---- variant 02: exposed steel-frame, pipe runs, spherical pressure vessel, cooling tower ----
@@ -2069,6 +2133,7 @@ def _build_ind_high(zone, tier, variant, lod):
         for fl in range(1, floors):
             fy = fl * floor_h
             m.add_box(-hx - 0.005, hx + 0.005, fy, fy + 0.012, -hz - 0.005, hz + 0.005, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 7000)
         return m.to_b3d()
 
     # ---- variant 03: SILO CLUSTER — CRITICAL PRIMARY IDENTIFIER ----
@@ -2092,6 +2157,7 @@ def _build_ind_high(zone, tier, variant, lod):
         m.add_box(0.22, 0.34, silo_h, silo_h + 0.25, -0.10, 0.10, wr, wc, rr, rc)
         # Foundation base
         m.add_box(-0.32, 0.32, 0, 0.05, -0.22, 0.22, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -0.32, 0.32, 0, silo_h, -0.22, 0.22, 7000)
         return m.to_b3d()
 
     # ---- variant 04: refinery tower — grating platforms, pipe rack, flare stack ----
@@ -2130,6 +2196,7 @@ def _build_ind_high(zone, tier, variant, lod):
         # Hazard-stripe banding on structural posts at base
         for cx, cz in [(-hx, -hz), (hx, -hz), (-hx, hz), (hx, hz)]:
             m.add_box(cx - 0.025, cx + 0.025, 0, 0.20, cz - 0.025, cz + 0.025, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 7000)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -2194,6 +2261,7 @@ def build_svc_fire_station(lod: int) -> bytes:
             m.add_box(bx_c-0.12, bx_c+0.12, 0, h*0.72, -hz-0.04, -hz, wr, wc)
         # Antenna stub
         m.add_box(-0.01, 0.01, h, h+0.25, -hz*0.5-0.01, -hz*0.5+0.01, wr, wc)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 340)
         return m.to_b3d()
 
     # Main building
@@ -2294,6 +2362,7 @@ def build_svc_police_station(lod: int) -> bytes:
         # Two antenna stubs
         for ax in [-0.05, 0.05]:
             m.add_box(ax-0.008, ax+0.008, h, h+0.20, hz*0.5-0.008, hz*0.5+0.008, wr, wc)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 340)
         return m.to_b3d()
 
     # Main masonry volume
@@ -2389,6 +2458,7 @@ def build_svc_power_plant(lod: int) -> bytes:
         m.add_box(hx*0.5-0.04, hx*0.5+0.04, 0, h+0.55, hz*0.5-0.04, hz*0.5+0.04, wr, wc, walls_only=True)
         # Secondary box
         m.add_box(hx*0.3, hx+0.06, 0, h*0.45, -hz, -hz*0.3, wr, wc, rr, rc)
+        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 340)
         return m.to_b3d()
 
     # Main building
@@ -2494,6 +2564,7 @@ def build_svc_water_tower(lod: int) -> bytes:
         for sx, sz in [(-1,-1),(1,-1),(-1,1),(1,1)]:
             lx = sx*leg_off; lz = sz*leg_off
             m.add_box(lx-leg_hw*2, lx+leg_hw*2, 0, tank_bot, lz-leg_hw, lz+leg_hw, wr, wc, walls_only=True)
+        _fill_to_budget(m, wr, wc, -tank_r, tank_r, 0, tank_top, -tank_r, tank_r, 340)
         return m.to_b3d()
 
     # LOD0 — full detail
