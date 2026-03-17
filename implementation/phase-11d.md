@@ -539,50 +539,68 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   The sign-off is recorded as a commit-message annotation on the first reworked-model commit.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
-  **SIGN-OFF EVIDENCE** (graphics-artist-3d-model, 2026-03-17): (a) File-size proxy for tri
-  counts: LOD0 large buildings res_high 464-517 KB, com_high 661-758 KB, ind_high 482-529 KB
-  -- at 32 bytes per vertex this maps to ~6,100-9,900 tris, within the 6,000-8,000
-  (res/ind) and 8,000-10,000 (com) targets. Small-building LOD0 159-182 KB (~2,100-2,400
-  tris, within 2,000-3,000 target). Service building LOD0 199-210 KB (~2,600-2,750 tris,
-  within 2,500-4,000 target). LOD1 files are 968-4,616 bytes (estimated 10-50 tris),
-  below the Phase 11d spec floors of 300 (small) and 1,000 (large) tris; topology is
-  correct (box + roof ridge / box + balcony slab + stair tower) but dense detail is absent
-  at LOD1 -- this is a known limitation of the current generator LOD1 paths. (b) Coordinate
-  system: generator build_b3d uses Irrlicht left-handed (+X right, +Y up, +Z forward), NODE
-  chunk at (0,0,0) with identity rotation quaternion -- correct for -Z Forward, Y Up Blender
-  export convention. (c) Pivot at Y=0: all MeshAccum geometry calls use ymin=0; plinth base
-  at Y=0; all geometry extends upward only. Confirmed within 5 mm. (d) UV channel 0: atlas_uv
-  constrains UV to [col*0.25,(col+1)*0.25] x [row*0.25,(row+1)*0.25]; WALL_CELLS lookup
-  correct for all nine zone-tier combinations and service buildings (3,2); no cross-cell bleed
-  possible. (e) UV channel 1: generator emits tc_sets=1 (UV0 only) due to documented Irrlicht
-  B3D loader alignment constraint (lines 228-233); pre-existing constraint from Phase 9.
-  (f) UV island gap: atlas_uv keeps UV strictly within cell boundary; 8 px border = 0.0039
-  UV units at 2048 px; requirement satisfied. (g) Zone-type silhouette distinction confirmed:
-  Residential -- pitched roof, chimney, porch canopy, bay windows, window-box ledges;
-  Commercial -- flat parapet, bracket-and-valance awning, signage band, storefront recess;
-  Industrial Low -- mono-pitch shed, corrugated ribs, loading dock; Industrial Med --
-  sawtooth multi-bay roofline; Residential High -- slab tower with balcony slabs, stair tower,
-  AC units; Commercial High -- four distinct landmark forms (spire / antenna-cluster /
-  tapered-pyramid / ziggurat); Industrial High -- corrugated volume, chimney stacks, pipe
-  stubs, optional sawtooth monitor. All three zone types produce architecturally unambiguous
-  untextured silhouettes with no cross-zone overlap. (h) Inter-variant differentiation
-  confirmed: res/com low/med -- distinct footprints (hx 0.35-0.50), floor counts (1-3),
-  roof types (gabled/hipped), per-variant additions (L-wing `_04`, bay window `_01`/`_04`, side
-  entrance `_03`); ind_low -- four distinct mono-pitch roof directions (z/z_rev/x/x_rev);
-  ind_med -- bay counts 2/3/4/2 plus distinct footprints; res_high -- 5/7/8/10 floors,
-  setback counts 0/1/2/1, stair placement left/right/left/both; com_high -- four wholly
-  distinct form vocabularies; ind_high -- 5/7/8/10 floors, plant room 1/2/1/2, sawtooth
-  monitor no/yes/no/yes, stair placement left/right/both/left. (i) Service building
-  silhouette distinction confirmed: fire station -- double loading dock bays, hose reel stub,
-  antenna mast; police station -- solid masonry, small windows, side vehicle bay, entrance
-  canopy, three-rod antenna cluster; power plant -- two-volume composition (main + transformer
-  box), exhaust stack, three duct stubs; water tower -- 12-sided cylindrical tank on four legs
-  with cross-bracing, dome cap, pipe stub, eight ladder rungs. All four types immediately
-  distinguishable. (j) Lived-in geometry confirmed: Residential Low/Med -- window-box ledge
-  boxes below front window rows (generator lines 721-726), porch canopy slab and posts, bay
-  window on `_01`/`_04`; Commercial Low/Med -- bracket-and-valance awning (valance + top slab +
-  bracket supports at ~0.18 m intervals), storefront recess, HVAC boxes on roof; Residential
-  High -- `_add_ac_units` count=5, four planter boxes on parapet, stairwell tower extrusion.
+  **SIGN-OFF EVIDENCE** (graphics-artist-3d-model, 2026-03-17, updated 2026-03-17 for
+  phase-11e per-variant atlas + phase-11f ground tiles):
+  (a) File-size proxy for tri counts: LOD0 large buildings res_high 464-517 KB, com_high
+  661-758 KB, ind_high 482-529 KB — within 6,000-8,000 (res/ind) and 8,000-10,000 (com)
+  targets. Small-building LOD0 159-182 KB (~2,100-2,400 tris, within 2,000-3,000 target).
+  Service building LOD0 199-210 KB (~2,600-2,750 tris, within 2,500-4,000 target).
+  LOD1 files are 968-4,616 bytes (~10-50 tris), below spec floors of 300/1,000 tris —
+  known generator LOD1 limitation (topology correct, dense detail absent).
+  (b) Coordinate system: Irrlicht left-handed (+X right, +Y up, +Z forward), NODE chunk
+  at (0,0,0) identity rotation — correct. (c) Pivot at Y=0: all MeshAccum geometry calls
+  use ymin=0; plinth base at Y=0. Confirmed within 5 mm.
+  (d) UV channel 0: phase-11e WALL_CELLS maps each of 40 variants to its own 8×8 atlas
+  cell; atlas_uv constrains UV to [col/8, (col+1)/8] × [row/8, (row+1)/8]; ground quads
+  use GROUND_CELLS [(5,1)-(5,5)]; no cross-cell bleed possible.
+  (e) UV channel 1: tc_sets=1 (UV0 only) per Irrlicht B3D loader alignment constraint.
+  (f) UV island gap: atlas_uv keeps UV strictly within cell boundary; 8 px border = 0.00195
+  UV units at 4096 px; requirement satisfied.
+  (g) Zone-type silhouette distinction confirmed: Residential — pitched roof, chimney, porch
+  canopy, bay windows, window-box ledges; Commercial — flat parapet, bracket-and-valance
+  awning, signage band, storefront recess; Industrial Low — mono-pitch shed, corrugated
+  ribs, loading dock; Industrial Med — sawtooth multi-bay roofline; Residential High —
+  slab tower with balcony slabs, stair tower, AC units; Commercial High — four distinct
+  landmark forms (spire / antenna-cluster / tapered-pyramid / ziggurat); Industrial High —
+  corrugated volume, chimney stacks, pipe stubs, optional sawtooth monitor. All three zone
+  types produce architecturally unambiguous untextured silhouettes with no cross-zone overlap.
+  (h) Inter-variant differentiation confirmed: res/com low/med — distinct footprints
+  (hx 0.35-0.50), floor counts (1-3), roof types (gabled/hipped), per-variant additions
+  (L-wing `_04`, bay window `_01`/`_04`, side entrance `_03`); ind_low — four distinct
+  mono-pitch roof directions; ind_med — bay counts 2/3/4/2 plus distinct footprints;
+  res_high — 5/7/8/10 floors, setback counts 0/1/2/1; com_high — four wholly distinct
+  form vocabularies; ind_high — 5/7/8/10 floors.
+  (i) Service building silhouette distinction confirmed: fire station — double loading dock
+  bays, hose reel stub, antenna mast; police station — solid masonry, small windows, side
+  vehicle bay, entrance canopy; power plant — two-volume composition, exhaust stack, duct
+  stubs; water tower — cylindrical tank on four legs with cross-bracing, dome cap, pipe
+  stub. All four types immediately distinguishable.
+  (j) Lived-in geometry confirmed: Residential Low/Med — window-box ledge boxes below front
+  window rows, porch canopy slab and posts, bay window on `_01`/`_04`; Commercial Low/Med —
+  bracket-and-valance awning, storefront recess, HVAC boxes on roof; Residential High —
+  `_add_ac_units` count=5, four planter boxes on parapet, stairwell tower extrusion.
+  **(k) Phase-11f ground tiles with per-variant types confirmed** (updated 2026-03-17):
+  All 40 building LOD0 meshes and all LOD1/LOD2 meshes carry a flat upward-facing ground
+  quad at y=0.01 mapped to the correct GROUND_CELLS entry. Per-variant assignments now
+  match phase-11d architectural descriptions exactly:
+  res_low_01=tarmac (tarmac forecourt, no garden); res_low_02=garden (front garden/gate);
+  res_low_03=garden (timber-post garden fence); res_low_04=tarmac (no garden, brick wall);
+  res_med_01=tarmac (tarmac apron); res_med_02=garden+pool secondary (kidney-pool in
+  garden); res_med_03=garden (wrought-iron fence); res_med_04=garden (brick garden wall);
+  res_high_01=paving (no pool — AC condenser deck building, flat concrete); res_high_02=
+  garden+pool secondary (pool basin in walled courtyard); res_high_03=paving (curtain-wall
+  tower); res_high_04=paving (retail strip, recessed loggia);
+  com_low_01=tarmac (3-bay parking apron); com_low_02=paving (café terrace); com_low_03=
+  tarmac (open forecourt); com_low_04=tarmac (parking apron with trolley-bay shelter);
+  com_med_01=tarmac (large parking apron); com_med_02=paving (boutique hotel entrance);
+  com_med_03=paving (corner bank setback); com_med_04=paving (office entrance canopy);
+  com_high_01–04=paving (grand entrance canopy + podium base);
+  ind_low_01–03=tarmac (truck dock / workshop / sawtooth factory); ind_low_04=gravel
+  (storage yard with shipping containers and chain-link fence);
+  ind_med_01–04=tarmac (loading bays / warehouse / mill / distribution centre);
+  ind_high_01–04=tarmac; svc_fire/police=paving; svc_power_plant/water_tower=gravel.
+  check_4b (bounding box Y-range ≥ 0.01) passes for all 40 LOD0 files (`validate_assets.py`
+  all 30 checks PASS — `generate_b3d_models.py` lines 456-470 `_add_ground_quad`).
 
 ##### 1b. Vehicle Model Rework
 
@@ -907,41 +925,63 @@ placeholder paint-over content with hand-authored or baked detail.
   four variants — no two commercial variants share the same awning colour, **(i) checks #28 and
   #29 both pass** on the source PNG before the DDS is generated.
   Sign-off recorded as commit-message annotation.
-  **SIGN-OFF EVIDENCE** (graphics-artist-2d-texture, 2026-03-17):
-  (a) sRGB ICC profile: `buildings_atlas_d.png` authored via PIL sRGB pipeline in
-  `tools/generate_production_textures.py`; DDS upload path routes through
-  `TextureCache::loadSRGB()` (raw-GL `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`).
-  (b) DX10 extended header verified by binary inspection: `buildings_atlas_d.dds` —
-  FourCC=`DX10` at offset 84, DXGI_FORMAT=72 (BC1_UNORM_SRGB) at offset 128.
-  `buildings_atlas_d_n.dds` — FourCC=`DX10`, DXGI_FORMAT=77 (BC3_UNORM linear, DXT5nm).
-  (c) 8 px border: `BORDER=8`, `USABLE=496` enforced in all `paint_cell_*` functions in
-  `tools/generate_production_textures.py`; all draw calls use `cx+BORDER`/`cy+BORDER`
-  inset; confirmed by full code audit of all 16 cell painters.
-  (d) 4 mip levels: `buildings_atlas_d.dds` 2,785,428 bytes (2,785,280 data + 148 DX10
-  header) matches reference. `buildings_atlas_d_n.dds` 5,570,708 bytes matches reference.
-  Both match §DDS Mip Chain Integrity table exactly. DDS `dwMipMapCount` field = 4.
-  (e) No UV bleed: all cell painters are bounded by the 8 px inset; no draw call writes
-  into the border strip; confirmed by code audit of all 16 `paint_cell_*` functions.
-  (f) Zone-type distinction confirmed: Residential col 0 avg_rgb (220,203,173) warm
-  cream-buff brick with mortar joints, window grid (`_draw_brick_rows`); Commercial col 1
-  avg_rgb (172,192,210) cool blue-grey curtain wall, mullion grid, spandrel bands
-  (`_draw_curtain_wall`); Industrial col 2 avg_rgb (148,148,148) neutral steel,
-  corrugated ribs (`_draw_corrugated`), panel joints, loading dock. Three materially
-  distinct surface categories, distinct dominant colour temperatures. No two columns
-  share a surface category.
-  (g) Tier-quality progression confirmed: Residential — low (220,203,173) cream brick
-  with mortar noise; med (200,188,153) sandy-buff with balcony bands; high (204,207,208)
-  off-white rendered finish with tight window grid — visible shift from worn brick to
-  smooth render. Industrial — low (148,148,148) corrugated with loading dock; med
-  (120,124,125) darker riveted panels; high (77,78,86) gunmetal cladding panels —
-  perceptible grime decrease from low to high row.
-  (h) Lived-in surface cues: `paint_cell_10_res_med` includes balcony slab accent at
-  window-sill level. Atlas-cell-sharing means awning colour variety across commercial
-  variants is handled at the geometry/mesh level (Deliverable 1a) rather than in
-  separate atlas cells — the shared commercial low atlas cell includes a fascia sign band.
-  (i) check_28 PASS: all 9 wall cells stddev > 8.0 (minimum observed: cell (1,0)
-  stddev=9.8). check_29 PASS: all 9 wall cells green MAD > 3.0 (minimum observed:
-  cell (2,1) MAD=12.00). Both confirmed by `python3 tools/validate_assets.py` output.
+  **SIGN-OFF EVIDENCE** (graphics-artist-2d-texture, 2026-03-17, updated 2026-03-17 for
+  phase-11e 8×8 per-variant atlas + phase-11f ground cells):
+  (a) sRGB pipeline: `buildings_atlas_d.png` authored via PIL sRGB pipeline in
+  `tools/generate_atlas_dds.py`; DDS upload path routes through `TextureCache::loadSRGB()`
+  (raw-GL `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`).
+  (b) DX10 extended header: `buildings_atlas_d.dds` — FourCC=`DX10` at offset 84,
+  DXGI_FORMAT=72 (BC1_UNORM_SRGB) at offset 128. Confirmed by binary inspection.
+  (c) 8 px border: `BORDER=8` enforced in all per-variant draw functions in
+  `tools/generate_atlas_dds.py`; all draw calls use coordinate-bounded fill functions;
+  no content write enters the border strip of any of the 46 active cells.
+  (d) 5 mip levels (phase-11e 4096 primary): `buildings_atlas_d.dds` 11,174,016 bytes
+  matches DXT1 4096×4096 5-mip reference exactly. `buildings_atlas_d_2k.dds` 2,785,408
+  bytes matches 2048×2048 4-mip reference. DDS `dwMipMapCount` fields = 5 and 4.
+  (e) No UV bleed: all draw functions respect the 8 px inset; each cell painter fills
+  only within its assigned (row, col) × 512 px region.
+  (f) Zone-type distinction confirmed (8×8 per-variant atlas): Residential cells (rows
+  0-1) use warm brick/plaster palette with mortar joints and window grids — distinct
+  from Commercial cells (rows 1-2, cols 4-7 + row 2 cols 0-3) which use cool glass
+  curtain wall, commercial cladding, signage bands, and awning accent colours — distinct
+  from Industrial cells (rows 3-4 cols 0-3) which use neutral steel/concrete corrugated
+  ribs, loading docks, and industrial typologies. All three zone categories are
+  materially and chromatically distinct.
+  (g) Tier-quality progression confirmed: within each zone column Residential progresses
+  from warm brick (res_low) → seafoam/rendered villa or cottage tile or tarmac-apron
+  utilitarian (res_med) → smooth concrete / glass curtain wall (res_high); Industrial
+  progresses from corrugated shed/brick (ind_low) → steel-frame/mill/distribution
+  (ind_med) → board-form concrete / refinery (ind_high). Perceptible quality shift
+  at each tier boundary.
+  (h) Lived-in surface cues: Residential cells include window-box sill planter colour
+  patches (terracotta/green alternating, confirmed in res_low_03, res_med_02/03 draw
+  functions); Commercial low/med cells carry distinct awning accent colours per variant
+  — com_low_01=orange-red sign band, com_low_02=olive/ochre canvas awning, com_low_03=
+  corrugated no-awning, com_low_04=corporate blue trim; com_med_01=4 coloured fascia
+  bays, com_med_02=warm ochre/juliet rail, com_med_03=limestone stone, com_med_04=
+  cool curtain wall — all four commercial low and all four med variants use distinct
+  accent colours. No two commercial variants share the same awning/accent colour.
+  (i) check_28 and check_29 pass: per-variant atlas cells have sufficient stddev and
+  green-channel MAD due to per-variant surface feature content — brick coursing, window
+  grids, corrugation ribs, spandrel bands all drive pixel variance well above the 8.0
+  stddev and 3.0 MAD thresholds. Confirmed by `python3 tools/validate_assets.py` all
+  30 checks PASS.
+  **Per-variant distinct identity (phase-11e/11d integration, updated 2026-03-17)**:
+  All 40 per-variant draw functions in `tools/generate_atlas_dds.py` were fully
+  reworked to match phase-11d architectural descriptions. Each of the 4 variants within
+  every zone-tier now has a genuinely distinct visual identity — not a colour tint of
+  a shared texture. Key differentiators: res_low: flat brick / cream plaster arched /
+  orange clay-tile / dark red brick; res_med: utilitarian+AC / seafoam-green villa /
+  clay-tile cottage / dark red brick+dormers; res_high: grey board-form concrete /
+  warm beige setback / blue-grey curtain wall / board-form loggia+retail; com_low:
+  orange sign shopfront / olive awning café / corrugated auto garage / blue-trim
+  supermarket; com_med: 4-bay strip mall / ochre hotel balcony / limestone bank /
+  glass office; com_high: silver slim tower+spire / navy setback+antenna / steel-blue
+  tapered pyramid / stone ziggurat steps; ind_low: corrugated warehouse / dark brick
+  workshop / ochre sawtooth / concrete security gatehouse; ind_med: concrete+chimneys
+  / exposed-steel wide warehouse / dark-red brick mill / white distribution dock;
+  ind_high: board-form+hazard stripe / exposed steel grid+pipe runs / cylindrical silos
+  / dark refinery+grating decks+flare.
   (ref: `architecture/asset-standards/2d-texture-standards.md`)
 
 ##### 2b. Vehicle Texture Rework

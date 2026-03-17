@@ -150,667 +150,936 @@ GLASS_BLUE = (42, 55, 78)
 
 
 def draw_res_low_01(buf, W, H):
-    """Detached house, red brick."""
-    base = (165, 70, 48)
+    """Flat-roof residential block: plain warm brick, utility meter box on facade."""
+    base = (168, 100, 65)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    _brick_coursing(buf, W, H, 0, H, max(2, H // 64), (130, 52, 35), seed=101)
+    _brick_coursing(buf, W, H, 0, H, max(2, H * 12 // 512), (135, 78, 48), seed=101)
     _add_noise(buf, W, H, intensity=6, density=0.25, seed=1001)
-    # Windows: 3 cols x 2 rows
-    ww, wh = W * 60 // 512, H * 70 // 512
-    sp_x = W // 4
-    sp_y = H // 4
-    for r in range(2):
+    # Flat parapet cap at top 8%
+    cap_h = H * 8 // 100
+    _fill_rect(buf, W, 0, 0, W, cap_h, 148, 142, 130)
+    # Windows: 3 cols x 3 rows, small punched openings
+    ww, wh = W * 55 // 512, H * 62 // 512
+    sp_x = W * 140 // 512
+    sp_y = H * 125 // 512
+    for r in range(3):
         for c in range(3):
-            wx = W // 6 + c * sp_x
-            wy = H // 6 + r * sp_y
-            _draw_window(buf, W, H, wx, wy, ww, wh, (48, 50, 55),
-                         frame_rgb=(85, 80, 75), frame_w=max(1, W // 256))
-    # Door
-    dw, dh = W * 80 // 512, H * 90 // 512
+            wx = W // 8 + c * sp_x
+            wy = cap_h + H * 20 // 512 + r * sp_y
+            _draw_window(buf, W, H, wx, wy, ww, wh, (45, 48, 55),
+                         frame_rgb=(120, 92, 62), frame_w=max(1, W // 256))
+    # Door — plain painted metal
+    dw, dh = W * 72 // 512, H * 85 // 512
     dx = (W - dw) // 2
-    dy = H - dh - H // 10
-    _fill_rect(buf, W, dx, dy, dx + dw, dy + dh, 90, 55, 35)
-    _fill_rect(buf, W, dx + 2, dy + 2, dx + dw - 2, dy + dh - 2, 72, 42, 28)
+    dy = H - dh - H // 14
+    _fill_rect(buf, W, dx, dy, dx + dw, dy + dh, 55, 62, 75)
+    _fill_rect(buf, W, dx + 2, dy + 2, dx + dw - 2, dy + dh - 2, 42, 48, 60)
+    # Utility meter box: small grey panel to left of door
+    mb_x = dx - W * 50 // 512
+    mb_y = dy + dh // 3
+    mb_w = W * 30 // 512
+    mb_h = H * 35 // 512
+    _fill_rect(buf, W, mb_x, mb_y, mb_x + mb_w, mb_y + mb_h, 185, 182, 178)
+    _fill_rect(buf, W, mb_x + 2, mb_y + 2, mb_x + mb_w - 2, mb_y + mb_h - 2, 160, 158, 155)
 
 
 def draw_res_low_02(buf, W, H):
-    """Semi-detached, cream render."""
-    base = (218, 208, 182)
+    """Villa: rendered cream/white plaster, dark trim, arched windows."""
+    base = (238, 232, 215)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Render band joints every 32px scaled
-    sp = max(2, H * 32 // 512)
+    # Fine render texture lines
+    sp = max(2, H * 28 // 512)
     for y in range(0, H, sp):
-        _hline(buf, W, H, y, 0, W, 205, 195, 170)
-    # String course
-    sc_y = H * 170 // 512
-    for dy in range(max(1, H * 4 // 512)):
-        _hline(buf, W, H, sc_y + dy, 0, W, 180, 170, 148)
-    # Windows 4x3
-    ww, wh = W * 50 // 512, H * 65 // 512
-    _draw_window_grid(buf, W, H, 4, 3, ww, wh, GLASS_DARK,
-                      frame_rgb=(235, 230, 220), frame_w=max(1, W // 256))
-    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1002)
+        _hline(buf, W, H, y, 0, W, 228, 222, 205)
+    # Dark trim cornice bands at 25% and 75% height
+    for cy in [H * 25 // 100, H * 75 // 100]:
+        trim_h = max(2, H * 8 // 512)
+        _fill_rect(buf, W, 0, cy, W, cy + trim_h, 55, 48, 42)
+    # Dark trim base dado
+    dado_h = H * 10 // 100
+    _fill_rect(buf, W, 0, H - dado_h, W, H, 62, 55, 48)
+    # Arched windows: 2 cols x 3 rows
+    ww, wh = W * 62 // 512, H * 72 // 512
+    sp_x = W * 180 // 512
+    sp_y = H * 155 // 512
+    for r in range(3):
+        for c in range(2):
+            wx = W * 100 // 512 + c * sp_x
+            wy = H * 45 // 512 + r * sp_y
+            # Arch top approximation: narrow rectangle above main window
+            arch_h = max(2, wh // 5)
+            arch_w = ww * 7 // 10
+            arch_x = wx + (ww - arch_w) // 2
+            _fill_rect(buf, W, arch_x, wy - arch_h, arch_x + arch_w, wy, 38, 40, 48)
+            # Main window pane
+            _draw_window(buf, W, H, wx, wy, ww, wh, (42, 45, 55),
+                         frame_rgb=(55, 48, 42), frame_w=max(2, W * 4 // 512))
+            # Window sill planter patch (warm terracotta)
+            sill_h = max(2, H * 8 // 512)
+            _fill_rect(buf, W, wx, wy + wh + 2, wx + ww, wy + wh + 2 + sill_h, 185, 95, 60)
+    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1002)
 
 
 def draw_res_low_03(buf, W, H):
-    """Terraced, tan sandstone."""
-    base = (190, 165, 115)
+    """Cottage: warm orange-brown brick, clay-tile roof hint, chimney."""
+    base = (182, 115, 62)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Stone block coursing
-    ch = max(2, H * 24 // 512)
-    jw = max(2, W * 48 // 512)
-    joint_clr = (155, 132, 88)
-    for y in range(0, H, ch):
-        _hline(buf, W, H, y, 0, W, *joint_clr)
-        row_idx = y // ch
-        offset = (jw // 2) if (row_idx % 2 == 1) else 0
-        for x in range(offset, W, jw):
-            _vline(buf, W, H, x, y, min(y + ch, H), *joint_clr)
-    # Windows 2x3
-    ww, wh = W * 55 // 512, H * 75 // 512
-    _draw_window_grid(buf, W, H, 2, 3, ww, wh, GLASS_DARK,
-                      frame_rgb=(170, 148, 100), frame_w=max(1, W // 256))
-    # Bay window
-    bx = W * 120 // 512
-    by = H * 300 // 512
-    bw = W * 180 // 512
-    bh = H * 100 // 512
-    _fill_rect(buf, W, bx, by, bx + bw, by + bh, 175, 150, 105)
-    for i in range(3):
-        sx = bx + 10 + i * (bw // 3)
-        _draw_window(buf, W, H, sx, by + 8, bw // 4, bh - 16, GLASS_DARK)
-    # Stone sill bands
-    for r in range(3):
-        sy = H // 6 + r * (H // 4) + wh + 2
-        for dy in range(max(1, H * 3 // 512)):
-            _hline(buf, W, H, sy + dy, 0, W, 165, 140, 95)
-    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1003)
+    _brick_coursing(buf, W, H, 0, H, max(2, H * 14 // 512), (148, 88, 42), seed=1003)
+    # Clay-tile roof hint at top 22% — alternating warm orange-brown tile courses
+    tile_h = H * 22 // 100
+    tile_row_h = max(3, H * 18 // 512)
+    for y in range(0, tile_h, tile_row_h):
+        row_idx = y // tile_row_h
+        base_c = (195, 88, 42) if (row_idx % 2 == 0) else (172, 72, 32)
+        _fill_rect(buf, W, 0, y, W, y + tile_row_h, *base_c)
+        # Tile overlap lines
+        _hline(buf, W, H, y, 0, W, 138, 55, 25)
+        # Half-offset vertical joints
+        tile_w = max(4, W * 40 // 512)
+        offset = (tile_w // 2) if (row_idx % 2 == 1) else 0
+        for x in range(offset, W, tile_w):
+            _vline(buf, W, H, x, y, min(y + tile_row_h, H), 138, 55, 25)
+    # Chimney stack left of centre, runs through roof band
+    ch_x = W * 120 // 512
+    ch_w = max(3, W * 28 // 512)
+    _fill_rect(buf, W, ch_x, 0, ch_x + ch_w, H * 35 // 100, 142, 82, 52)
+    _brick_coursing(buf, W, H, 0, H * 35 // 100, max(2, H * 10 // 512), (115, 62, 35), seed=1003)
+    # Windows: 3 cols x 2 rows — warm frames
+    ww, wh = W * 60 // 512, H * 68 // 512
+    sp_x = W * 148 // 512
+    sp_y = H * 145 // 512
+    for r in range(2):
+        for c in range(3):
+            wx = W * 30 // 512 + c * sp_x
+            wy = tile_h + H * 18 // 512 + r * sp_y
+            _draw_window(buf, W, H, wx, wy, ww, wh, (42, 45, 52),
+                         frame_rgb=(105, 62, 32), frame_w=max(2, W * 3 // 512))
+            # Window sill planter (terracotta/green)
+            sill_h = max(2, H * 7 // 512)
+            sill_clr = (148, 165, 55) if (c % 2 == 0) else (165, 85, 48)
+            _fill_rect(buf, W, wx, wy + wh + 1, wx + ww, wy + wh + 1 + sill_h, *sill_clr)
+    _add_noise(buf, W, H, intensity=6, density=0.25, seed=1003)
 
 
 def draw_res_low_04(buf, W, H):
-    """Bungalow, grey pebbledash."""
-    base = (152, 150, 146)
+    """Red-brick terrace: dark red brick, mortar joints, small punched windows, metal-tile roof hint."""
+    base = (135, 42, 38)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    _add_noise(buf, W, H, intensity=8, density=0.45, seed=1004)
-    # Bargeboards (diagonal hatching at top)
-    bh = H * 80 // 512
-    for y in range(bh):
-        for x in range(W):
-            if (x + y) % (max(2, W // 32)) < max(1, W // 64):
-                idx = y * W + x
-                r, g, b = buf[idx]
-                buf[idx] = (_clamp(r - 20), _clamp(g - 20), _clamp(b - 20))
-    # Wide shallow windows: 3 horizontal strips
-    ww, wh = W * 90 // 512, H * 45 // 512
-    for i in range(3):
-        wx = W // 8 + i * (W // 3)
-        wy = H * 200 // 512
-        _draw_window(buf, W, H, wx, wy, ww, wh, GLASS_DARK,
-                     frame_rgb=(175, 172, 168), frame_w=max(1, W // 256))
-    # Ground floor dominates (single storey so door area)
-    dw = W * 70 // 512
-    dh = H * 100 // 512
+    _brick_coursing(buf, W, H, 0, H, max(2, H * 12 // 512), (105, 28, 25), seed=1004)
+    _add_noise(buf, W, H, intensity=7, density=0.3, seed=1004)
+    # Metal-tile roof hint at top 18% — dark grey with horizontal seam lines
+    roof_h = H * 18 // 100
+    _fill_rect(buf, W, 0, 0, W, roof_h, 68, 68, 72)
+    seam_sp = max(3, H * 22 // 512)
+    for y in range(0, roof_h, seam_sp):
+        _hline(buf, W, H, y, 0, W, 45, 45, 50)
+    # Mortar joint emphasis (lighter thin lines)
+    mj_sp = max(2, H * 12 // 512)
+    for y in range(roof_h, H, mj_sp):
+        _hline(buf, W, H, y, 0, W, 158, 138, 128)
+    # Small punched windows: 2 cols x 3 rows
+    ww, wh = W * 48 // 512, H * 55 // 512
+    sp_x = W * 160 // 512
+    sp_y = H * 130 // 512
+    for r in range(3):
+        for c in range(2):
+            wx = W * 80 // 512 + c * sp_x
+            wy = roof_h + H * 18 // 512 + r * sp_y
+            _draw_window(buf, W, H, wx, wy, ww, wh, (38, 40, 50),
+                         frame_rgb=(88, 25, 22), frame_w=max(2, W * 4 // 512))
+    # Recessed entrance with plain surround
+    dw = W * 85 // 512
+    dh = H * 88 // 512
     dx = (W - dw) // 2
-    dy = H - dh - H // 12
-    _fill_rect(buf, W, dx, dy, dx + dw, dy + dh, 120, 82, 55)
+    dy = H - dh - H // 15
+    _fill_rect(buf, W, dx - 4, dy - 4, dx + dw + 4, dy + dh + 4, 95, 28, 25)
+    _fill_rect(buf, W, dx, dy, dx + dw, dy + dh, 45, 32, 28)
 
 
 def draw_res_med_01(buf, W, H):
-    """Walk-up apartments, buff brick."""
-    base = (198, 174, 118)
+    """2-storey block: flat parapet, external staircase hint, AC condensers, utilitarian."""
+    base = (195, 172, 118)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    _brick_coursing(buf, W, H, 0, H, max(2, H * 10 // 512), (172, 148, 92), seed=201)
-    # Concrete floor bands
-    fb_h = max(1, H * 10 // 512)
-    sp = max(2, H * 96 // 512)
-    for y in range(sp, H, sp):
-        _fill_rect(buf, W, 0, y, W, y + fb_h, 175, 175, 170)
-    # Windows 4x5
-    ww, wh = W * 45 // 512, H * 60 // 512
-    _draw_window_grid(buf, W, H, 4, 5, ww, wh, GLASS_DARK,
-                      frame_rgb=(230, 225, 218), frame_w=max(1, W // 256))
-    # Entrance band
-    ew = W // 5
-    _fill_rect(buf, W, (W - ew) // 2, H * 400 // 512, (W + ew) // 2, H, 165, 155, 130)
+    _brick_coursing(buf, W, H, 0, H, max(2, H * 10 // 512), (165, 142, 90), seed=201)
+    # Flat parapet cap
+    cap_h = H * 6 // 100
+    _fill_rect(buf, W, 0, 0, W, cap_h, 155, 152, 145)
+    # Concrete floor band at midpoint
+    fb_h = max(2, H * 10 // 512)
+    mid_y = H * 50 // 100
+    _fill_rect(buf, W, 0, mid_y, W, mid_y + fb_h, 172, 172, 168)
+    # Windows 4x4
+    ww, wh = W * 48 // 512, H * 60 // 512
+    sp_x = W * 112 // 512
+    sp_y = H * 110 // 512
+    for r in range(4):
+        for c in range(4):
+            wx = W * 30 // 512 + c * sp_x
+            wy = cap_h + H * 15 // 512 + r * sp_y
+            _draw_window(buf, W, H, wx, wy, ww, wh, GLASS_DARK,
+                         frame_rgb=(215, 208, 195), frame_w=max(1, W // 256))
+    # External staircase hint: diagonal zigzag on right 15%
+    st_x = W * 85 // 100
+    st_w = W * 12 // 100
+    _fill_rect(buf, W, st_x, cap_h, W, H, 178, 155, 105)
+    step_h = max(4, H * 30 // 512)
+    for y in range(cap_h, H, step_h * 2):
+        for dy in range(step_h):
+            sx = st_x + int(st_w * dy / max(1, step_h))
+            if y + dy < H and sx < W:
+                _hline(buf, W, H, y + dy, sx, min(sx + st_w - int(st_w * dy / max(1, step_h)), W), 148, 128, 85)
+    # AC condenser boxes on parapet
+    for i in range(3):
+        ac_x = W * 30 // 512 + i * (W * 155 // 512)
+        ac_w = W * 42 // 512
+        ac_h = cap_h * 60 // 100
+        _fill_rect(buf, W, ac_x, cap_h // 5, ac_x + ac_w, cap_h // 5 + ac_h, 162, 162, 158)
+        # Louvre lines
+        for ly in range(cap_h // 5, cap_h // 5 + ac_h, max(2, ac_h // 4)):
+            _hline(buf, W, H, ly, ac_x + 1, ac_x + ac_w - 1, 135, 135, 132)
     _add_noise(buf, W, H, intensity=5, density=0.2, seed=1201)
 
 
 def draw_res_med_02(buf, W, H):
-    """Walk-up apartments, white render + balcony stripe."""
-    base = (235, 235, 230)
+    """2-storey villa: seafoam-green rendered render, wrap-around balcony stripe, wrought-iron accents."""
+    base = (145, 185, 165)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    sp = max(2, H * 20 // 512)
+    # Fine render texture
+    sp = max(2, H * 22 // 512)
     for y in range(0, H, sp):
-        _hline(buf, W, H, y, 0, W, 222, 222, 218)
-    # Windows 4x5
-    ww, wh = W * 45 // 512, H * 55 // 512
-    sp_y = H * 96 // 512
-    for r in range(5):
-        wy = H // 10 + r * sp_y
-        # Balcony recess on even floors
-        if r % 2 == 0:
-            bal_y = wy + wh + 2
-            bal_h = max(1, H * 30 // 512)
-            _fill_rect(buf, W, 0, bal_y, W, bal_y + bal_h, 180, 180, 178)
-            # Guard rail line
-            _hline(buf, W, H, bal_y + bal_h - 1, 0, W, 100, 100, 98)
-        for c in range(4):
-            wx = W // 8 + c * (W * 100 // 512)
-            _draw_window(buf, W, H, wx, wy, ww, wh, GLASS_DARK,
-                         frame_rgb=(210, 210, 208), frame_w=max(1, W // 256))
+        _hline(buf, W, H, y, 0, W, 132, 172, 152)
+    # White cornice at top 8%
+    cor_h = H * 8 // 100
+    _fill_rect(buf, W, 0, 0, W, cor_h, 235, 232, 228)
+    # Wrap-around balcony stripe: full-width band at 50% height
+    bal_y = H * 50 // 100
+    bal_h = max(3, H * 28 // 512)
+    _fill_rect(buf, W, 0, bal_y, W, bal_y + bal_h, 225, 222, 218)
+    # Wrought-iron rail: dark line with small repeat bracket marks
+    rail_y = bal_y + bal_h
+    _hline(buf, W, H, rail_y, 0, W, 35, 32, 28)
+    _hline(buf, W, H, rail_y + 1, 0, W, 35, 32, 28)
+    bracket_sp = max(4, W * 32 // 512)
+    for bx in range(0, W, bracket_sp):
+        for dy in range(max(2, H * 12 // 512)):
+            if rail_y + 2 + dy < H:
+                buf[(rail_y + 2 + dy) * W + min(bx, W - 1)] = (35, 32, 28)
+    # Windows 3x4, seafoam tinted frames
+    ww, wh = W * 52 // 512, H * 58 // 512
+    sp_x = W * 148 // 512
+    sp_y_step = H * 118 // 512
+    for r in range(4):
+        for c in range(3):
+            wx = W * 50 // 512 + c * sp_x
+            wy = cor_h + H * 15 // 512 + r * sp_y_step
+            _draw_window(buf, W, H, wx, wy, ww, wh, (38, 42, 48),
+                         frame_rgb=(112, 148, 128), frame_w=max(2, W * 3 // 512))
+            # Sill planter
+            sill_h = max(2, H * 7 // 512)
+            _fill_rect(buf, W, wx, wy + wh + 1, wx + ww, wy + wh + 1 + sill_h, 75, 145, 90)
     _add_noise(buf, W, H, intensity=4, density=0.15, seed=1202)
 
 
 def draw_res_med_03(buf, W, H):
-    """Walk-up, terracotta tile panels."""
-    base = (188, 98, 60)
+    """2-storey cottage: warm brick, clay-tile hipped roof hint, chimney."""
+    base = (178, 108, 62)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Tile grid
-    th = max(2, H * 40 // 512)
-    tv = max(2, W * 20 // 512)
-    for y in range(0, H, th):
-        _hline(buf, W, H, y, 0, W, 155, 75, 42)
-    for x in range(0, W, tv):
-        _vline(buf, W, H, x, 0, H, 155, 75, 42)
-    # Spandrel bands between floors
-    sp_h = max(1, H * 18 // 512)
-    sp_sp = max(2, H * 100 // 512)
-    for y in range(sp_sp, H, sp_sp):
-        _fill_rect(buf, W, 0, y, W, y + sp_h, 80, 80, 78)
-    # Windows 3x5
-    ww, wh = W * 50 // 512, H * 60 // 512
-    _draw_window_grid(buf, W, H, 3, 5, ww, wh, GLASS_DARK,
-                      frame_rgb=(150, 85, 50), frame_w=max(1, W // 256))
-    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1203)
+    _brick_coursing(buf, W, H, 0, H, max(2, H * 11 // 512), (145, 82, 42), seed=1203)
+    # Clay-tile hipped roof hint at top 28%
+    roof_h = H * 28 // 100
+    tile_row = max(3, H * 16 // 512)
+    for y in range(0, roof_h, tile_row):
+        row_idx = y // tile_row
+        col = (188, 82, 38) if (row_idx % 2 == 0) else (165, 65, 28)
+        _fill_rect(buf, W, 0, y, W, y + tile_row, *col)
+        _hline(buf, W, H, y, 0, W, 128, 48, 18)
+        tw = max(4, W * 42 // 512)
+        off = (tw // 2) if (row_idx % 2 == 1) else 0
+        for x in range(off, W, tw):
+            _vline(buf, W, H, x, y, min(y + tile_row, H), 128, 48, 18)
+    # Chimney stack — centred, runs through roof
+    ch_x = W * 220 // 512
+    ch_w = max(3, W * 30 // 512)
+    _fill_rect(buf, W, ch_x, 0, ch_x + ch_w, H * 40 // 100, 145, 72, 42)
+    _brick_coursing(buf, W, H, 0, H * 40 // 100, max(2, H * 9 // 512), (115, 52, 28), seed=2203)
+    # Chimney pot hint at very top
+    _fill_rect(buf, W, ch_x + ch_w // 4, 0, ch_x + ch_w * 3 // 4, max(2, H * 12 // 512), 95, 55, 35)
+    # Windows 3x2, warm brick frames
+    ww, wh = W * 58 // 512, H * 65 // 512
+    sp_x = W * 155 // 512
+    sp_y = H * 140 // 512
+    for r in range(2):
+        for c in range(3):
+            wx = W * 28 // 512 + c * sp_x
+            wy = roof_h + H * 20 // 512 + r * sp_y
+            _draw_window(buf, W, H, wx, wy, ww, wh, (42, 45, 52),
+                         frame_rgb=(108, 68, 38), frame_w=max(2, W * 3 // 512))
+            # Window box sill planter
+            sill_h = max(2, H * 8 // 512)
+            pl_clr = (165, 92, 55) if (r == 0) else (85, 148, 55)
+            _fill_rect(buf, W, wx, wy + wh + 1, wx + ww, wy + wh + 1 + sill_h, *pl_clr)
+    _add_noise(buf, W, H, intensity=6, density=0.25, seed=1203)
 
 
 def draw_res_med_04(buf, W, H):
-    """Walk-up, pale render + green spandrel."""
-    base = (208, 212, 198)
+    """3-storey red-brick: dark red brick, pitched black metal roof hint, dormers implied."""
+    base = (138, 42, 38)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Floor lines
-    sp = max(2, H * 100 // 512)
-    for y in range(sp, H, sp):
-        _hline(buf, W, H, y, 0, W, 165, 168, 155)
-    # Windows 4x5 with green spandrel below each
-    ww, wh = W * 45 // 512, H * 55 // 512
-    green_h = max(1, H * 35 // 512)
-    sp_y = max(2, H * 95 // 512)
-    for r in range(5):
-        for c in range(4):
-            wx = W // 8 + c * (W * 110 // 512)
-            wy = H // 12 + r * sp_y
-            _draw_window(buf, W, H, wx, wy, ww, wh, GLASS_DARK)
-            # Green spandrel below
-            _fill_rect(buf, W, wx, wy + wh, wx + ww, wy + wh + green_h, 95, 140, 95)
-    # Ground floor taller openings
-    gh = H * 80 // 512
-    for c in range(4):
-        wx = W // 8 + c * (W * 110 // 512)
-        wy = H - gh - H // 20
-        _draw_window(buf, W, H, wx, wy, ww, gh, GLASS_DARK)
-    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1204)
+    _brick_coursing(buf, W, H, 0, H, max(2, H * 11 // 512), (108, 28, 25), seed=1204)
+    _add_noise(buf, W, H, intensity=7, density=0.28, seed=1204)
+    # Pitched black metal roof at top 20%
+    roof_h = H * 20 // 100
+    _fill_rect(buf, W, 0, 0, W, roof_h, 38, 38, 42)
+    # Roof seam lines
+    seam_sp = max(3, H * 20 // 512)
+    for y in range(0, roof_h, seam_sp):
+        _hline(buf, W, H, y, 0, W, 25, 25, 30)
+    # Dormer window hints: 2 small bright rectangles in roof band
+    dor_w = W * 58 // 512
+    dor_h = max(3, roof_h * 55 // 100)
+    for di in range(2):
+        dox = W * 90 // 512 + di * (W * 230 // 512)
+        _fill_rect(buf, W, dox, roof_h // 4, dox + dor_w, roof_h // 4 + dor_h, 52, 52, 58)
+        _fill_rect(buf, W, dox + 3, roof_h // 4 + 3, dox + dor_w - 3, roof_h // 4 + dor_h - 3, 38, 42, 52)
+    # Windows 3x3 on main facade — small punched, light stone frames
+    ww, wh = W * 55 // 512, H * 62 // 512
+    sp_x = W * 148 // 512
+    sp_y = H * 115 // 512
+    for r in range(3):
+        for c in range(3):
+            wx = W * 45 // 512 + c * sp_x
+            wy = roof_h + H * 15 // 512 + r * sp_y
+            _draw_window(buf, W, H, wx, wy, ww, wh, (38, 42, 52),
+                         frame_rgb=(185, 168, 148), frame_w=max(2, W * 4 // 512))
+    # Stone string course at 2/3 height
+    sc_y = roof_h + H * 65 // 100 * 2 // 3
+    sc_h = max(2, H * 8 // 512)
+    _fill_rect(buf, W, 0, sc_y, W, sc_y + sc_h, 192, 172, 148)
+    _add_noise(buf, W, H, intensity=6, density=0.2, seed=2204)
 
 
 def draw_res_high_01(buf, W, H):
-    """Tower block, blue-grey curtain wall."""
-    base = (110, 138, 165)
+    """Flat-roof concrete tower: grey smooth-rendered concrete, punched window grid, AC condensers."""
+    base = (155, 155, 150)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    grid_clr = (55, 70, 85)
-    fh = max(2, H * 48 // 512)
-    cv = max(2, W * 64 // 512)
-    lw = max(1, W * 2 // 512)
-    # Horizontal floor lines
-    for y in range(0, H, fh):
-        for dy in range(lw):
-            _hline(buf, W, H, y + dy, 0, W, *grid_clr)
-    # Vertical column lines
-    for x in range(0, W, cv):
-        for dx in range(lw):
-            _vline(buf, W, H, x + dx, 0, H, *grid_clr)
-    # Window fills slightly lighter
-    for y in range(0, H, fh):
-        for x in range(0, W, cv):
-            wy0 = y + lw
-            wy1 = min(y + fh - lw, H)
-            wx0 = x + lw
-            wx1 = min(x + cv - lw, W)
-            _fill_rect(buf, W, wx0, wy0, wx1, wy1, 125, 155, 185)
-    # Spandrel bands
-    sp_h = max(1, H * 18 // 512)
-    for y in range(fh - sp_h, H, fh):
-        _fill_rect(buf, W, 0, y, W, y + sp_h, 72, 95, 118)
-    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1301)
+    # Smooth render: subtle horizontal form-work lines
+    sp = max(2, H * 18 // 512)
+    for y in range(0, H, sp):
+        _hline(buf, W, H, y, 0, W, 142, 142, 138)
+    _add_noise(buf, W, H, intensity=5, density=0.18, seed=1301)
+    # Flat parapet cap
+    cap_h = H * 5 // 100
+    _fill_rect(buf, W, 0, 0, W, cap_h, 135, 132, 128)
+    # AC condenser row on parapet
+    ac_w = W * 38 // 512
+    ac_h = cap_h * 70 // 100
+    for i in range(4):
+        acx = W * 20 // 512 + i * (W * 118 // 512)
+        _fill_rect(buf, W, acx, cap_h // 6, acx + ac_w, cap_h // 6 + ac_h, 172, 170, 165)
+        for ly in range(cap_h // 6, cap_h // 6 + ac_h, max(2, ac_h // 4)):
+            _hline(buf, W, H, ly, acx + 1, acx + ac_w - 1, 148, 145, 140)
+    # Punched window grid: 5 cols x 8 rows — small square windows deep-set
+    ww, wh = W * 52 // 512, H * 52 // 512
+    sp_x = W * 92 // 512
+    sp_y = H * 84 // 512
+    for r in range(8):
+        for c in range(5):
+            wx = W * 22 // 512 + c * sp_x
+            wy = cap_h + H * 12 // 512 + r * sp_y
+            # Deep reveal (concrete surround 4px darker)
+            _fill_rect(buf, W, wx - 4, wy - 4, wx + ww + 4, wy + wh + 4, 132, 130, 125)
+            _draw_window(buf, W, H, wx, wy, ww, wh, (42, 46, 55))
 
 
 def draw_res_high_02(buf, W, H):
-    """Tower block, warm beige precast panels."""
-    base = (200, 185, 155)
+    """Stepped-setback tower: warm beige precast, setback ledges, colonnade hint at base."""
+    base = (205, 188, 158)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Panel joints
+    # Precast panel texture: vertical joints at 80px, horizontal at 96px
     pv = max(2, W * 80 // 512)
     ph = max(2, H * 96 // 512)
     jw = max(1, W * 3 // 512)
     for x in range(0, W, pv):
         for dx in range(jw):
-            _vline(buf, W, H, x + dx, 0, H, 110, 95, 68)
+            _vline(buf, W, H, x + dx, 0, H, 115, 98, 72)
     for y in range(0, H, ph):
         for dy in range(jw):
-            _hline(buf, W, H, y + dy, 0, W, 110, 95, 68)
-    # Windows 3x8
-    ww, wh = W * 65 // 512, H * 55 // 512
+            _hline(buf, W, H, y + dy, 0, W, 115, 98, 72)
+    # Setback ledges at 33% and 66% height — wider section below each ledge
+    for ledge_y in [H * 33 // 100, H * 66 // 100]:
+        ledge_h = max(3, H * 14 // 512)
+        _fill_rect(buf, W, 0, ledge_y, W, ledge_y + ledge_h, 188, 172, 142)
+        # Shadow line above ledge
+        _hline(buf, W, H, ledge_y - 1, 0, W, 145, 128, 100)
+        _hline(buf, W, H, ledge_y + ledge_h, 0, W, 225, 210, 182)
+    # Colonnade hint at base: repeated vertical column marks
+    col_h = H * 15 // 100
+    col_w = max(2, W * 12 // 512)
+    col_sp = max(4, W * 68 // 512)
+    for cx in range(0, W, col_sp):
+        _fill_rect(buf, W, cx, H - col_h, cx + col_w, H, 178, 162, 132)
+    # Windows 3x8 — set in precast
+    ww, wh = W * 60 // 512, H * 52 // 512
     _draw_window_grid(buf, W, H, 3, 8, ww, wh, GLASS_DARK,
-                      frame_rgb=(160, 145, 118), frame_w=max(1, W * 4 // 512))
-    _add_noise(buf, W, H, intensity=4, density=0.2, seed=1302)
+                      frame_rgb=(162, 148, 120), frame_w=max(1, W * 4 // 512))
+    _add_noise(buf, W, H, intensity=4, density=0.18, seed=1302)
 
 
 def draw_res_high_03(buf, W, H):
-    """Tower block, white + horizontal bands."""
-    base = (238, 238, 235)
+    """Curtain-wall residential tower: modern glass curtain wall, balcony slab bands."""
+    base = (125, 148, 172)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Bold horizontal bands every 96px
-    bh = max(2, H * 20 // 512)
-    sp = max(2, H * 96 // 512)
-    for y in range(sp, H, sp):
-        _fill_rect(buf, W, 0, y, W, y + bh, 170, 170, 168)
-        # Thin dark line above and below
-        _hline(buf, W, H, y - 1, 0, W, 130, 130, 128)
-        _hline(buf, W, H, y + bh, 0, W, 130, 130, 128)
-    # Windows 5x8
-    ww, wh = W * 48 // 512, H * 52 // 512
-    _draw_window_grid(buf, W, H, 5, 8, ww, wh, (150, 165, 185),
-                      frame_rgb=(200, 200, 198), frame_w=max(1, W // 256))
-    _add_noise(buf, W, H, intensity=3, density=0.12, seed=1303)
+    # Curtain-wall grid — floor height 56px, bay width 72px
+    fh = max(2, H * 56 // 512)
+    cv = max(2, W * 72 // 512)
+    lw = max(1, W * 2 // 512)
+    for y in range(0, H, fh):
+        for dy in range(lw):
+            _hline(buf, W, H, y + dy, 0, W, 55, 72, 92)
+    for x in range(0, W, cv):
+        for dx in range(lw):
+            _vline(buf, W, H, x + dx, 0, H, 55, 72, 92)
+    # Glass fill — slightly varying blue-grey tones per bay
+    for y in range(0, H, fh):
+        for x in range(0, W, cv):
+            # Alternate warmer/cooler glass tones
+            tone = 8 if ((y // fh + x // cv) % 2 == 0) else -5
+            _fill_rect(buf, W, x + lw + 1, y + lw + 1,
+                       min(x + cv - lw - 1, W), min(y + fh - lw - 1, H),
+                       _clamp(138 + tone), _clamp(162 + tone), _clamp(188 + tone))
+    # Balcony slab bands at every 3rd floor — full-width concrete strip
+    slab_h = max(3, H * 12 // 512)
+    for y in range(fh * 3, H, fh * 3):
+        _fill_rect(buf, W, 0, y - slab_h, W, y, 188, 185, 180)
+        _hline(buf, W, H, y - slab_h, 0, W, 145, 142, 138)
+        _hline(buf, W, H, y, 0, W, 222, 218, 215)
+    # Mechanical top 6%
+    mh = H * 6 // 100
+    _fill_rect(buf, W, 0, 0, W, mh, 105, 118, 135)
+    _add_noise(buf, W, H, intensity=3, density=0.1, seed=1303)
 
 
 def draw_res_high_04(buf, W, H):
-    """Tower block, amber glass + concrete."""
-    base = (190, 150, 72)
+    """Flat-fronted concrete tower: board-form concrete, horizontal spandrel bands, retail ground floor."""
+    base = (148, 142, 135)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Concrete column strips
-    cw = max(2, W * 20 // 512)
-    cv = max(2, W * 128 // 512)
-    for x in range(0, W, cv):
-        _fill_rect(buf, W, x, 0, x + cw, H, 120, 115, 108)
-    # Floor bands
-    fb_h = max(1, H * 12 // 512)
-    sp = max(2, H * 96 // 512)
-    for y in range(sp, H, sp):
-        _fill_rect(buf, W, 0, y, W, y + fb_h, 120, 115, 108)
-    # Glass fill between columns
-    for y in range(0, H, sp):
-        for x in range(cw, W, cv):
-            gx0 = x
-            gx1 = min(x + cv - cw, W)
-            gy0 = y + fb_h
-            gy1 = min(y + sp, H)
-            _fill_rect(buf, W, gx0, gy0, gx1, gy1, 195, 158, 82)
+    # Board-form concrete: closely spaced horizontal plank lines
+    plank_h = max(2, H * 8 // 512)
+    for y in range(0, H, plank_h):
+        offset = 3 if ((y // plank_h) % 3 == 0) else 0
+        _hline(buf, W, H, y, offset, W, 128, 122, 115)
     _add_noise(buf, W, H, intensity=5, density=0.2, seed=1304)
+    # Horizontal spandrel bands at each floor level (every 64px)
+    sp_floor = max(2, H * 64 // 512)
+    sp_band = max(2, H * 12 // 512)
+    for y in range(sp_floor, H * 80 // 100, sp_floor):
+        _fill_rect(buf, W, 0, y, W, y + sp_band, 168, 162, 155)
+        _hline(buf, W, H, y, 0, W, 105, 100, 95)
+        _hline(buf, W, H, y + sp_band, 0, W, 185, 178, 170)
+    # Recessed loggia pockets: 3x2 deep recesses
+    log_w = W * 70 // 512
+    log_h = H * 48 // 512
+    log_sp_x = W * 158 // 512
+    log_sp_y = H * 130 // 512
+    for r in range(2):
+        for c in range(3):
+            lx = W * 28 // 512 + c * log_sp_x
+            ly = H * 5 // 100 + r * log_sp_y
+            _fill_rect(buf, W, lx, ly, lx + log_w, ly + log_h, 105, 100, 95)
+            # Window inside loggia
+            _draw_window(buf, W, H, lx + 4, ly + 4, log_w - 8, log_h - 8,
+                         (38, 42, 50))
+    # Retail strip ground floor bottom 15% — glazed band
+    ret_h = H * 15 // 100
+    _fill_rect(buf, W, 0, H - ret_h, W, H, 115, 112, 108)
+    # Glazed bays
+    bay_w = W * 85 // 512
+    for i in range(4):
+        bx = W * 15 // 512 + i * (W * 120 // 512)
+        _fill_rect(buf, W, bx, H - ret_h + 4, bx + bay_w, H - 4, 38, 42, 52)
+        _fill_rect(buf, W, bx, H - ret_h, bx + bay_w, H - ret_h + 4, 88, 85, 80)
 
 
 def draw_com_low_01(buf, W, H):
-    """Retail unit, red shopfront."""
-    # Upper: brick
-    base = (180, 80, 55)
+    """Convenience store: bright signage band at top, glazed shopfront, clean commercial finish."""
+    base = (228, 228, 222)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    _brick_coursing(buf, W, H, 0, H * 65 // 100, max(2, H * 10 // 512), (148, 62, 40), seed=401)
-    # Ground floor shopfront (bottom 30%)
-    sf_y = H * 70 // 100
-    _fill_rect(buf, W, 0, sf_y, W, H, 200, 35, 35)
-    # Fascia band
-    fas_h = max(2, H * 40 // 512)
-    _fill_rect(buf, W, 0, sf_y, W, sf_y + fas_h, 245, 245, 245)
+    _add_noise(buf, W, H, intensity=3, density=0.1, seed=1401)
+    # Bright signage band — top 22%, vivid orange-red
+    sign_h = H * 22 // 100
+    _fill_rect(buf, W, 0, 0, W, sign_h, 210, 62, 28)
+    # White sign panel inset
+    sp_w = W * 75 // 100
+    sp_h = sign_h * 55 // 100
+    _fill_rect(buf, W, (W - sp_w) // 2, sign_h * 20 // 100,
+               (W + sp_w) // 2, sign_h * 20 // 100 + sp_h, 252, 248, 240)
+    # Mid section: smooth white/cream render
+    # Upper windows: 4 small punch-out windows
+    ww, wh = W * 52 // 512, H * 48 // 512
+    wy_upper = sign_h + H * 18 // 512
+    for c in range(4):
+        wx = W * 18 // 512 + c * (W * 118 // 512)
+        _draw_window(buf, W, H, wx, wy_upper, ww, wh, GLASS_DARK,
+                     frame_rgb=(195, 192, 185), frame_w=max(1, W // 256))
+    # Glazed shopfront bottom 35%
+    sf_y = H * 65 // 100
+    _fill_rect(buf, W, 0, sf_y, W, H, 205, 202, 198)
+    # Fascia band below sign
+    fas_h = max(2, H * 10 // 512)
+    _fill_rect(buf, W, 0, sf_y, W, sf_y + fas_h, 178, 175, 170)
     # Large glazed panel
-    gw = W * 70 // 100
-    gh = (H - sf_y - fas_h) * 55 // 100
+    gw = W * 78 // 100
+    gh = H - sf_y - fas_h - H * 5 // 100
     gx = (W - gw) // 2
-    gy = sf_y + fas_h + 4
-    _fill_rect(buf, W, gx, gy, gx + gw, gy + gh, 38, 38, 42)
-    # Upper windows 3x2
-    ww, wh = W * 55 // 512, H * 50 // 512
-    _draw_window_grid(buf, W, H, 3, 2, ww, wh, GLASS_DARK,
-                      start_y=H * 60 // 512,
-                      spacing_y=H * 120 // 512,
-                      frame_rgb=(160, 65, 42), frame_w=max(1, W // 256))
-    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1401)
+    gy = sf_y + fas_h + 2
+    _fill_rect(buf, W, gx, gy, gx + gw, gy + gh, 38, 42, 50)
+    # Door opening
+    dw = W * 55 // 512
+    _fill_rect(buf, W, (W - dw) // 2, gy, (W + dw) // 2, H - 2, 28, 32, 40)
 
 
 def draw_com_low_02(buf, W, H):
-    """Commercial, blue-grey cladding."""
-    base = (105, 125, 148)
+    """Café: warm brick/render, canvas awning colour band, wide window."""
+    base = (188, 155, 105)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Cladding panel joints
-    ph = max(2, H * 80 // 512)
-    pv = max(2, W * 64 // 512)
-    for y in range(0, H, ph):
-        _hline(buf, W, H, y, 0, W, 60, 75, 95)
-        _hline(buf, W, H, y + 1, 0, W, 60, 75, 95)
-    for x in range(0, W, pv):
-        _vline(buf, W, H, x, 0, H, 60, 75, 95)
-        _vline(buf, W, H, x + 1, 0, H, 60, 75, 95)
-    # Windows 4x4
-    ww, wh = W * 50 // 512, H * 55 // 512
-    _draw_window_grid(buf, W, H, 4, 4, ww, wh, GLASS_DARK)
-    # Ground floor: large frameless glazing
-    gw = W * 80 // 100
-    gh = H * 25 // 100
-    gx = (W - gw) // 2
-    gy = H - gh - H // 20
-    _fill_rect(buf, W, gx, gy, gx + gw, gy + gh, 35, 38, 45)
-    _fill_rect(buf, W, gx - 3, gy - 3, gx + gw + 3, gy, 58, 62, 72)
-    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1402)
+    _brick_coursing(buf, W, H, 0, H * 70 // 100, max(2, H * 11 // 512), (155, 122, 75), seed=1402)
+    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1402)
+    # Canvas awning band — warm olive/ochre (distinct from com_low_01 orange-red)
+    awn_y = H * 62 // 100
+    awn_h = max(4, H * 32 // 512)
+    _fill_rect(buf, W, 0, awn_y, W, awn_y + awn_h, 148, 128, 48)
+    # Awning stripe pattern (diagonal lines)
+    stripe_w = max(3, W * 20 // 512)
+    for y in range(awn_y, awn_y + awn_h):
+        for x in range(W):
+            if ((x + (y - awn_y) * 2) // stripe_w) % 2 == 1:
+                buf[y * W + x] = (168, 148, 65)
+    # Wide café window (ground floor) — two large panes
+    gf_y = awn_y + awn_h
+    gf_h = H - gf_y - H * 4 // 100
+    _fill_rect(buf, W, 0, gf_y, W, H, 172, 142, 92)
+    pane_w = W * 42 // 100
+    for i in range(2):
+        px = W * 5 // 100 + i * (W * 50 // 100)
+        _fill_rect(buf, W, px, gf_y + 4, px + pane_w, gf_y + gf_h, 35, 40, 52)
+        # Window divider bar
+        bar_x = px + pane_w // 2
+        _vline(buf, W, H, bar_x, gf_y + 4, gf_y + gf_h, 135, 110, 75)
+    # Upper windows: 2x2 with warm brick frames
+    ww, wh = W * 62 // 512, H * 68 // 512
+    for r in range(2):
+        for c in range(2):
+            wx = W * 60 // 512 + c * (W * 230 // 512)
+            wy = H * 35 // 512 + r * (H * 130 // 512)
+            _draw_window(buf, W, H, wx, wy, ww, wh, GLASS_DARK,
+                         frame_rgb=(148, 115, 72), frame_w=max(2, W * 3 // 512))
 
 
 def draw_com_low_03(buf, W, H):
-    """Corner commercial, brick + signage band."""
-    # Lower: dark red-brown brick
-    base = (158, 65, 48)
+    """Auto garage: corrugated metal walls, roll-up shutter doors, industrial character."""
+    base = (132, 128, 122)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    _brick_coursing(buf, W, H, 0, H * 60 // 100, max(2, H * 12 // 512), (128, 48, 32), seed=403)
-    # Upper 40%: buff brick
-    uy = H * 60 // 100
-    _fill_rect(buf, W, 0, 0, W, uy - H * 40 // 100, 185, 160, 112)
-    _brick_coursing(buf, W, H, 0, uy - H * 40 // 100, max(2, H * 12 // 512), (158, 135, 88), seed=404)
-    # String course at 60% height
-    sc_y = H * 60 // 100
-    sc_h = max(2, H * 25 // 512)
-    _fill_rect(buf, W, 0, sc_y, W, sc_y + sc_h, 218, 198, 155)
-    # Windows 3x3
-    ww, wh = W * 55 // 512, H * 65 // 512
-    _draw_window_grid(buf, W, H, 3, 3, ww, wh, GLASS_DARK,
-                      frame_rgb=(138, 55, 38), frame_w=max(1, W // 256))
-    # Ground floor: large shop glazing (3 bays)
-    bay_w = W * 28 // 100
-    bay_h = H * 25 // 100
-    bay_y = H - bay_h - H // 20
-    for i in range(3):
-        bx = W // 10 + i * (W * 30 // 100)
-        _fill_rect(buf, W, bx, bay_y, bx + bay_w, bay_y + bay_h, 32, 32, 38)
-    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1403)
+    _corrugation_lines(buf, W, H, 0, H, max(2, H * 10 // 512), base, amplitude=18)
+    _add_noise(buf, W, H, intensity=6, density=0.25, seed=1403)
+    # Gable shadow at top 15%
+    gable_h = H * 15 // 100
+    for y in range(gable_h):
+        frac = y / max(1, gable_h)
+        dark = int(28 * (1.0 - frac))
+        for x in range(W):
+            idx = y * W + x
+            r, g, b = buf[idx]
+            buf[idx] = (_clamp(r - dark), _clamp(g - dark), _clamp(b - dark))
+    # Company name fascia band below gable — mid-grey
+    fas_y = gable_h
+    fas_h = max(3, H * 28 // 512)
+    _fill_rect(buf, W, 0, fas_y, W, fas_y + fas_h, 88, 85, 80)
+    # Roll-up shutter doors: 2 wide dark openings with horizontal ribs
+    door_w = W * 38 // 100
+    door_h = H * 52 // 100
+    door_y = H - door_h - H * 3 // 100
+    for di in range(2):
+        dx = W * 4 // 100 + di * (W * 52 // 100)
+        _fill_rect(buf, W, dx, door_y, dx + door_w, door_y + door_h, 45, 45, 48)
+        # Shutter horizontal rib lines
+        rib_sp = max(3, H * 18 // 512)
+        for ry in range(door_y, door_y + door_h, rib_sp):
+            _hline(buf, W, H, ry, dx + 2, dx + door_w - 2, 62, 62, 65)
+        # Guide channel marks on sides
+        _vline(buf, W, H, dx, door_y, door_y + door_h, 72, 70, 68)
+        _vline(buf, W, H, dx + door_w - 1, door_y, door_y + door_h, 72, 70, 68)
+    # Small office window above right shutter
+    _draw_window(buf, W, H, W * 62 // 100, fas_y + fas_h + H * 10 // 512,
+                 W * 60 // 512, H * 48 // 512, GLASS_DARK,
+                 frame_rgb=(105, 102, 98), frame_w=max(1, W // 256))
 
 
 def draw_com_low_04(buf, W, H):
-    """Small market hall, white render + green fascia."""
-    base = (232, 232, 228)
+    """Supermarket: large glazed shopfront, wide covered walkway canopy, white/light grey cladding."""
+    base = (235, 235, 230)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Plaster lines
-    sp = max(2, H * 32 // 512)
-    for y in range(0, H, sp):
-        _hline(buf, W, H, y, 0, W, 218, 218, 215)
-    # Green fascia top 20%
-    fh = H * 20 // 100
-    _fill_rect(buf, W, 0, 0, W, fh, 45, 105, 58)
-    # 4 arched windows
-    aw = W * 60 // 512
-    ah = H * 100 // 512
-    for i in range(4):
-        ax = W // 10 + i * (W * 22 // 100)
-        ay = fh + H * 40 // 512
-        _fill_rect(buf, W, ax, ay, ax + aw, ay + ah, 42, 45, 52)
-        # Arch top (semicircle approximation with rect + trapezoid)
-        arc_h = max(2, ah // 4)
-        _fill_rect(buf, W, ax + aw // 6, ay - arc_h, ax + aw - aw // 6, ay, 42, 45, 52)
-        # Keystone
-        _fill_rect(buf, W, ax + aw // 2 - 2, ay - arc_h - 3, ax + aw // 2 + 2, ay - arc_h, 200, 195, 185)
-    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1404)
+    _add_noise(buf, W, H, intensity=3, density=0.1, seed=1404)
+    # Light grey cladding panel joints
+    ph = max(2, H * 96 // 512)
+    pv = max(2, W * 128 // 512)
+    for y in range(0, H, ph):
+        _hline(buf, W, H, y, 0, W, 212, 210, 206)
+    for x in range(0, W, pv):
+        _vline(buf, W, H, x, 0, H, 212, 210, 206)
+    # Blue corporate trim band at very top 8%
+    trim_h = H * 8 // 100
+    _fill_rect(buf, W, 0, 0, W, trim_h, 42, 82, 152)
+    # Upper section small transom windows: 5 x 1
+    ww, wh = W * 72 // 512, H * 42 // 512
+    wy_u = trim_h + H * 12 // 512
+    for c in range(5):
+        wx = W * 12 // 512 + c * (W * 96 // 512)
+        _draw_window(buf, W, H, wx, wy_u, ww, wh, GLASS_DARK,
+                     frame_rgb=(200, 198, 195), frame_w=max(1, W // 256))
+    # Wide covered walkway canopy at 60% height — full width overhang
+    can_y = H * 58 // 100
+    can_h = max(4, H * 22 // 512)
+    _fill_rect(buf, W, 0, can_y, W, can_y + can_h, 188, 185, 180)
+    # Canopy soffit shadow
+    _hline(buf, W, H, can_y + can_h, 0, W, 155, 152, 148)
+    _hline(buf, W, H, can_y + can_h + 1, 0, W, 168, 165, 160)
+    # Support posts
+    post_sp = max(4, W * 96 // 512)
+    post_w = max(2, W * 8 // 512)
+    for px in range(post_sp // 2, W, post_sp):
+        _fill_rect(buf, W, px - post_w // 2, can_y + can_h, px + post_w // 2, H, 172, 168, 165)
+    # Large glazed shopfront below canopy
+    sf_y = can_y + can_h + 2
+    gw = W - 2
+    gh = H - sf_y - 2
+    _fill_rect(buf, W, 1, sf_y, gw, sf_y + gh, 38, 42, 52)
+    # Mullion dividers in shopfront
+    mull_sp = max(4, W * 80 // 512)
+    for mx in range(mull_sp, W, mull_sp):
+        _vline(buf, W, H, mx, sf_y, sf_y + gh, 185, 182, 178)
 
 
 def draw_com_med_01(buf, W, H):
-    """Office block, silver aluminium cladding."""
-    base = (185, 190, 195)
+    """Strip mall: plain commercial cladding, multiple fascia sign panels, large glazed shopfronts."""
+    base = (210, 208, 202)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    fh = max(2, H * 64 // 512)
-    cv = max(2, W * 96 // 512)
-    lw = max(1, W * 2 // 512)
-    # Grid
-    for y in range(0, H, fh):
-        for dy in range(lw):
-            _hline(buf, W, H, y + dy, 0, W, 90, 95, 100)
-    for x in range(0, W, cv):
-        for dx in range(lw):
-            _vline(buf, W, H, x + dx, 0, H, 90, 95, 100)
-    # Window infill
-    for y in range(0, H, fh):
-        for x in range(0, W, cv):
-            _fill_rect(buf, W, x + lw + 2, y + lw + 2,
-                       min(x + cv - lw - 2, W), min(y + fh - lw - 2, H),
-                       145, 155, 165)
-    # Spandrel panels
-    sp_h = max(1, H * 22 // 512)
-    for y in range(fh - sp_h, H, fh):
-        _fill_rect(buf, W, 0, y, W, y + sp_h, 200, 205, 210)
-    # Column reveals
-    rl = max(1, W * 4 // 512)
-    for x in range(0, W, cv):
-        _fill_rect(buf, W, x + lw, 0, x + lw + rl, H, 120, 125, 130)
-    _add_noise(buf, W, H, intensity=3, density=0.1, seed=1501)
+    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1501)
+    # Render horizontal bond lines
+    sp = max(2, H * 38 // 512)
+    for y in range(0, H, sp):
+        _hline(buf, W, H, y, 0, W, 195, 192, 188)
+    # Fascia sign panel band — top 28%, 4 distinct coloured sign bays
+    fas_h = H * 28 // 100
+    sign_colors = [(188, 32, 28), (28, 82, 168), (28, 128, 62), (188, 135, 22)]
+    bay_w = W // 4
+    for i, sc in enumerate(sign_colors):
+        bx = i * bay_w
+        _fill_rect(buf, W, bx, 0, bx + bay_w, fas_h, *sc)
+        # White sign lettering band inset
+        sb_h = max(2, fas_h * 35 // 100)
+        _fill_rect(buf, W, bx + 4, fas_h * 30 // 100, bx + bay_w - 4,
+                   fas_h * 30 // 100 + sb_h, 248, 245, 240)
+        # Bay divider
+        _vline(buf, W, H, bx, 0, fas_h, 165, 162, 158)
+    # Separation band between fascia and shopfront
+    sep_h = max(2, H * 12 // 512)
+    _fill_rect(buf, W, 0, fas_h, W, fas_h + sep_h, 188, 185, 180)
+    # Glazed shopfronts in 4 bays
+    sf_y = fas_h + sep_h
+    sf_h = H - sf_y - H * 5 // 100
+    for i in range(4):
+        bx = i * bay_w + 2
+        _fill_rect(buf, W, bx, sf_y + 2, bx + bay_w - 4, sf_y + sf_h, 38, 42, 52)
+        # Door in centre of each bay
+        dw = bay_w * 22 // 100
+        dh = sf_h * 70 // 100
+        _fill_rect(buf, W, bx + (bay_w - dw) // 2, sf_y + sf_h - dh,
+                   bx + (bay_w + dw) // 2, sf_y + sf_h, 28, 32, 42)
 
 
 def draw_com_med_02(buf, W, H):
-    """Office block, dark blue reflective glass."""
-    base = (28, 52, 100)
+    """Boutique hotel: warm ochre render, juliet balcony railing bands, ornamental brackets."""
+    base = (205, 165, 75)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Subtle vertical gradient
-    for y in range(H):
-        frac = y / max(1, H - 1)
-        lighten = int(12 * (1.0 - frac))
-        for x in range(W):
-            r, g, b = buf[y * W + x]
-            buf[y * W + x] = (_clamp(r + lighten), _clamp(g + lighten), _clamp(b + lighten))
-    # Grid
-    fh = max(2, H * 64 // 512)
-    cv = max(2, W * 96 // 512)
-    for y in range(0, H, fh):
-        _hline(buf, W, H, y, 0, W, 18, 32, 65)
-        _hline(buf, W, H, y + 1, 0, W, 18, 32, 65)
-    for x in range(0, W, cv):
-        _vline(buf, W, H, x, 0, H, 18, 32, 65)
-        _vline(buf, W, H, x + 1, 0, H, 18, 32, 65)
-    # Window fills slightly lighter
-    for y in range(0, H, fh):
-        for x in range(0, W, cv):
-            _fill_rect(buf, W, x + 3, y + 3,
-                       min(x + cv - 3, W), min(y + fh - 3, H),
-                       40, 72, 135)
-    # Column bands
-    cb_w = max(1, W * 20 // 512)
-    for x in range(0, W, cv):
-        _fill_rect(buf, W, x, 0, x + cb_w, H, 18, 32, 65)
-    _add_noise(buf, W, H, intensity=3, density=0.1, seed=1502)
+    # Fine render texture
+    sp = max(2, H * 25 // 512)
+    for y in range(0, H, sp):
+        _hline(buf, W, H, y, 0, W, 192, 152, 65)
+    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1502)
+    # White/cream cornice top 10%
+    cor_h = H * 10 // 100
+    _fill_rect(buf, W, 0, 0, W, cor_h, 238, 232, 218)
+    # Juliet balcony railing bands — full-width dark forged-iron stripe at each floor
+    floor_h = H * 96 // 512
+    rail_h = max(2, H * 10 // 512)
+    for fy in range(cor_h + floor_h, H * 85 // 100, floor_h):
+        # Railing band — dark wrought iron
+        _fill_rect(buf, W, 0, fy, W, fy + rail_h, 35, 30, 25)
+        # Rail posts (repeating narrow vertical marks)
+        post_sp = max(3, W * 28 // 512)
+        for px in range(0, W, post_sp):
+            _vline(buf, W, H, px, fy - max(2, H * 15 // 512), fy, 35, 30, 25)
+    # Ornamental bracket marks at corners of each floor (small L-shapes)
+    brk_h = max(3, H * 14 // 512)
+    brk_w = max(3, W * 12 // 512)
+    for fy in range(cor_h + floor_h, H * 85 // 100, floor_h):
+        for bx in [W * 8 // 512, W - W * 20 // 512]:
+            _fill_rect(buf, W, bx, fy - brk_h, bx + brk_w, fy, 88, 72, 38)
+            _fill_rect(buf, W, bx, fy - brk_h, bx + brk_w, fy - brk_h + 2, 108, 88, 48)
+    # Windows 3x5, warm frames
+    ww, wh = W * 58 // 512, H * 65 // 512
+    _draw_window_grid(buf, W, H, 3, 5, ww, wh, GLASS_DARK,
+                      start_y=cor_h + H * 12 // 512,
+                      spacing_y=floor_h,
+                      frame_rgb=(158, 122, 48), frame_w=max(2, W * 3 // 512))
+    # Rusticated base: lower 12% slightly darker
+    _fill_rect_blend(buf, W, H, 0, H * 88 // 100, W, H, 155, 118, 45, 0.3)
 
 
 def draw_com_med_03(buf, W, H):
-    """Office block, cream stone facade."""
-    base = (215, 205, 180)
+    """Corner bank: stone/limestone facade, pilaster rhythm, arched windows, cornice band."""
+    base = (212, 202, 175)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Rusticated base (lower 25%)
-    rb = H * 25 // 100
-    _fill_rect(buf, W, 0, H - rb, W, H, 200, 190, 165)
-    rsp = max(2, H * 32 // 512)
-    for y in range(H - rb, H, rsp):
-        _hline(buf, W, H, y, 0, W, 165, 155, 130)
-        _hline(buf, W, H, y + 1, 0, W, 165, 155, 130)
-    # Pilaster rhythm
-    pv = max(2, W * 96 // 512)
-    pw = max(1, W * 8 // 512)
-    for x in range(0, W, pv):
-        _fill_rect(buf, W, x, 0, x + pw, H, 225, 215, 190)
-    # Windows 3x6
-    ww, wh = W * 55 // 512, H * 70 // 512
-    _draw_window_grid(buf, W, H, 3, 6, ww, wh, GLASS_DARK,
-                      frame_rgb=(225, 218, 195), frame_w=max(1, W * 3 // 512))
-    # Cornice line at 85%
-    cy = H * 85 // 100
-    ch = max(2, H * 20 // 512)
-    _fill_rect(buf, W, 0, cy, W, cy + ch, 228, 218, 195)
-    _hline(buf, W, H, cy, 0, W, 185, 175, 150)
-    _hline(buf, W, H, cy + ch, 0, W, 185, 175, 150)
     _add_noise(buf, W, H, intensity=4, density=0.15, seed=1503)
+    # Limestone block coursing — horizontal joint lines
+    course_h = max(2, H * 28 // 512)
+    for y in range(0, H, course_h):
+        _hline(buf, W, H, y, 0, W, 185, 175, 148)
+    # Pilaster rhythm — 4 raised vertical strips
+    pv = max(2, W * 110 // 512)
+    pw = max(3, W * 14 // 512)
+    for px in range(0, W, pv):
+        _fill_rect(buf, W, px, 0, px + pw, H, 228, 218, 192)
+        # Capital detail at top
+        cap_h = max(2, H * 20 // 512)
+        _fill_rect(buf, W, px - 2, 0, px + pw + 2, cap_h, 235, 225, 200)
+    # Cornice band at 85%
+    cy = H * 85 // 100
+    ch = max(3, H * 22 // 512)
+    _fill_rect(buf, W, 0, cy, W, cy + ch, 230, 220, 195)
+    _hline(buf, W, H, cy, 0, W, 182, 172, 145)
+    _hline(buf, W, H, cy + ch, 0, W, 182, 172, 145)
+    # Arched windows: 3 cols x 4 rows — arch top above each window
+    ww, wh = W * 62 // 512, H * 68 // 512
+    sp_x = W * 158 // 512
+    sp_y = H * 118 // 512
+    for r in range(4):
+        for c in range(3):
+            wx = W * 42 // 512 + c * sp_x
+            wy = H * 18 // 512 + r * sp_y
+            arch_h = max(2, ww // 4)
+            arch_w = ww * 7 // 10
+            ax = wx + (ww - arch_w) // 2
+            _fill_rect(buf, W, ax, wy - arch_h, ax + arch_w, wy, 38, 40, 52)
+            _draw_window(buf, W, H, wx, wy, ww, wh, GLASS_DARK,
+                         frame_rgb=(198, 188, 162), frame_w=max(2, W * 4 // 512))
+    # Rusticated base lower 20%
+    rb_h = H * 20 // 100
+    _fill_rect(buf, W, 0, H - rb_h, W, H, 195, 185, 158)
+    rsp = max(2, H * 28 // 512)
+    for y in range(H - rb_h, H, rsp):
+        _hline(buf, W, H, y, 0, W, 162, 152, 125)
+        for vx in range(0, W, max(2, W * 80 // 512)):
+            _vline(buf, W, H, vx, y, min(y + rsp, H), 162, 152, 125)
 
 
 def draw_com_med_04(buf, W, H):
-    """Office block, bronze-tinted curtain wall."""
-    base = (145, 105, 52)
+    """Office block: glass curtain-wall facade, flat roof with louvred parapet."""
+    base = (105, 128, 155)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Mullion grid
+    # Curtain-wall grid — floor 64px, bay 80px
     fh = max(2, H * 64 // 512)
-    cv = max(2, W * 96 // 512)
-    lw = max(1, W * 3 // 512)
+    cv = max(2, W * 80 // 512)
+    lw = max(1, W * 2 // 512)
     for y in range(0, H, fh):
         for dy in range(lw):
-            _hline(buf, W, H, y + dy, 0, W, 80, 55, 22)
+            _hline(buf, W, H, y + dy, 0, W, 55, 72, 92)
     for x in range(0, W, cv):
         for dx in range(lw):
-            _vline(buf, W, H, x + dx, 0, H, 80, 55, 22)
-    # Spandrel
-    sp_h = max(1, H * 20 // 512)
-    for y in range(fh - sp_h, H, fh):
-        _fill_rect(buf, W, 0, y, W, y + sp_h, 165, 120, 60)
-    # Window fills
+            _vline(buf, W, H, x + dx, 0, H, 55, 72, 92)
+    # Glass fill — cool blue-grey
     for y in range(0, H, fh):
         for x in range(0, W, cv):
             _fill_rect(buf, W, x + lw + 1, y + lw + 1,
-                       min(x + cv - lw - 1, W), min(y + fh - sp_h - 1, H),
-                       160, 120, 65)
-    # Corner fins
-    fw = max(1, W * 8 // 512)
-    _fill_rect(buf, W, 0, 0, fw, H, 100, 72, 30)
-    _fill_rect(buf, W, W - fw, 0, W, H, 100, 72, 30)
-    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1504)
+                       min(x + cv - lw - 1, W), min(y + fh - lw - 1, H),
+                       120, 148, 178)
+    # Spandrel band per floor — slightly opaque grey
+    sp_h = max(1, H * 14 // 512)
+    for y in range(fh - sp_h, H, fh):
+        _fill_rect(buf, W, 0, y, W, y + sp_h, 82, 98, 118)
+    # Louvred parapet at top 8% — alternating grey/light louvre slats
+    par_h = H * 8 // 100
+    _fill_rect(buf, W, 0, 0, W, par_h, 92, 105, 120)
+    louv_sp = max(3, H * 8 // 512)
+    for y in range(0, par_h, louv_sp):
+        _hline(buf, W, H, y, 0, W, 135, 148, 165)
+        _hline(buf, W, H, y + 1, 0, W, 68, 82, 100)
+    _add_noise(buf, W, H, intensity=3, density=0.1, seed=1504)
 
 
 def draw_com_high_01(buf, W, H):
-    """Skyscraper, deep blue mirror glass."""
-    base = (22, 42, 92)
+    """Narrow glass tower with spire: silver steel + clear glass, slim vertical proportions."""
+    base = (192, 198, 208)
     _fill_rect(buf, W, 0, 0, W, H, *base)
+    # Steel structure: vertical columns every 64px, floor bands every 48px
     fh = max(2, H * 48 // 512)
-    cv = max(2, W * 72 // 512)
-    # Grid
-    for y in range(0, H, fh):
-        _hline(buf, W, H, y, 0, W, 12, 22, 55)
-        _hline(buf, W, H, y + 1, 0, W, 12, 22, 55)
-    for x in range(0, W, cv):
-        _vline(buf, W, H, x, 0, H, 12, 22, 55)
-        _vline(buf, W, H, x + 1, 0, H, 12, 22, 55)
-    # 3-tone window fills
-    colors = [(28, 50, 110), (40, 70, 148), (35, 58, 125)]
-    ci = 0
-    for y in range(0, H, fh):
-        for x in range(0, W, cv):
-            c = colors[ci % 3]
-            _fill_rect(buf, W, x + 2, y + 2, min(x + cv - 2, W), min(y + fh - 2, H), *c)
-            ci += 1
-    # Reflection streak (faint diagonal lighter band)
-    streak_w = W * 60 // 512
-    for y in range(H):
-        sx = (y * 2 // 3) % W
-        for dx in range(streak_w):
-            px = sx + dx
-            if 0 <= px < W:
-                idx = y * W + px
-                r, g, b = buf[idx]
-                buf[idx] = (_clamp(r + 8), _clamp(g + 12), _clamp(b + 18))
-    # Mechanical penthouse top 10%
-    mh = H * 10 // 100
-    _fill_rect(buf, W, 0, 0, W, mh, 80, 85, 95)
+    cv = max(2, W * 64 // 512)
+    col_w = max(2, W * 6 // 512)
+    fb_h = max(1, H * 8 // 512)
+    # Column strips — silver-grey
+    for cx in range(0, W, cv):
+        _fill_rect(buf, W, cx, 0, cx + col_w, H, 145, 150, 158)
+    # Floor bands
+    for fy in range(0, H, fh):
+        _fill_rect(buf, W, 0, fy, W, fy + fb_h, 162, 168, 178)
+    # Clear glass fill between columns
+    for fy in range(0, H, fh):
+        for cx in range(col_w, W, cv):
+            _fill_rect(buf, W, cx, fy + fb_h,
+                       min(cx + cv - col_w, W), min(fy + fh, H),
+                       175, 192, 218)
+    # Slim tower: narrow the facade at 75% height (setback implied — lighter zone)
+    _fill_rect_blend(buf, W, H, 0, 0, W * 12 // 100, H * 75 // 100, 155, 162, 175, 0.5)
+    _fill_rect_blend(buf, W, H, W * 88 // 100, 0, W, H * 75 // 100, 155, 162, 175, 0.5)
+    # Spire feature at top 12% — narrow silver shaft
+    sp_h = H * 12 // 100
+    sp_w = max(3, W * 12 // 512)
+    sp_x = (W - sp_w) // 2
+    _fill_rect(buf, W, sp_x, 0, sp_x + sp_w, sp_h, 175, 180, 190)
+    # Antenna tip
+    tip_w = max(1, sp_w // 3)
+    _fill_rect(buf, W, (W - tip_w) // 2, 0, (W + tip_w) // 2, sp_h // 3, 135, 140, 150)
+    # Mechanical floor at sp_h
+    _fill_rect(buf, W, 0, sp_h, W, sp_h + max(2, H * 16 // 512), 138, 142, 152)
     _add_noise(buf, W, H, intensity=3, density=0.1, seed=1601)
 
 
 def draw_com_high_02(buf, W, H):
-    """Skyscraper, silver steel + clear glass."""
-    base = (195, 202, 210)
+    """Wide slab tower: broader base steps back, antenna cluster at crown."""
+    base = (165, 172, 185)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Steel column lines
-    cv = max(2, W * 96 // 512)
-    cw = max(1, W * 4 // 512)
+    # Deep blue glass curtain wall grid
+    fh = max(2, H * 52 // 512)
+    cv = max(2, W * 82 // 512)
+    lw = max(1, W * 3 // 512)
+    for y in range(0, H, fh):
+        for dy in range(lw):
+            _hline(buf, W, H, y + dy, 0, W, 72, 85, 108)
     for x in range(0, W, cv):
-        for dx in range(cw):
-            _vline(buf, W, H, x + dx, 0, H, 100, 105, 112)
-    # Floor bands
-    fh = max(2, H * 48 // 512)
-    fb_h = max(1, H * 16 // 512)
+        for dx in range(lw):
+            _vline(buf, W, H, x + dx, 0, H, 72, 85, 108)
+    # Glass fill — dark navy-blue glass
     for y in range(0, H, fh):
-        _fill_rect(buf, W, 0, y, W, y + fb_h, 160, 165, 170)
-    # Clear glass between columns
-    for y in range(0, H, fh):
-        for x in range(cw, W, cv):
-            _fill_rect(buf, W, x, y + fb_h, min(x + cv - cw, W), min(y + fh, H),
-                       165, 185, 215)
-    # Mechanical top 8%
+        for x in range(0, W, cv):
+            _fill_rect(buf, W, x + lw + 1, y + lw + 1,
+                       min(x + cv - lw - 1, W), min(y + fh - lw - 1, H),
+                       38, 62, 105)
+    # Setback at 65% height — full-width ledge, narrower tower above
+    setback_y = H * 65 // 100
+    ledge_h = max(4, H * 18 // 512)
+    _fill_rect(buf, W, 0, setback_y, W, setback_y + ledge_h, 148, 155, 168)
+    _hline(buf, W, H, setback_y, 0, W, 105, 112, 128)
+    _hline(buf, W, H, setback_y + ledge_h, 0, W, 195, 200, 215)
+    # Upper section slightly inset (lighter sides)
+    inset_w = W * 10 // 100
+    _fill_rect_blend(buf, W, H, 0, 0, inset_w, setback_y, 125, 132, 148, 0.6)
+    _fill_rect_blend(buf, W, H, W - inset_w, 0, W, setback_y, 125, 132, 148, 0.6)
+    # Antenna cluster at crown — 3 thin vertical rods
     mh = H * 8 // 100
-    _fill_rect(buf, W, 0, 0, W, mh, 130, 135, 140)
+    _fill_rect(buf, W, 0, 0, W, mh, 115, 120, 132)
+    ant_positions = [W * 30 // 100, W * 50 // 100, W * 68 // 100]
+    ant_heights = [mh, mh * 70 // 100, mh * 50 // 100]
+    for ax, ah in zip(ant_positions, ant_heights):
+        ant_w = max(1, W * 3 // 512)
+        _fill_rect(buf, W, ax - ant_w // 2, 0, ax + ant_w // 2, ah, 88, 92, 102)
     _add_noise(buf, W, H, intensity=3, density=0.1, seed=1602)
 
 
 def draw_com_high_03(buf, W, H):
-    """Skyscraper, green-tinted glass."""
-    base = (45, 115, 80)
+    """Tapered pyramid tower: floor plate reduces base to crown, chamfered corners."""
+    base = (128, 155, 175)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    fh = max(2, H * 48 // 512)
+    # Light steel-blue glass curtain wall grid
+    fh = max(2, H * 52 // 512)
     cv = max(2, W * 72 // 512)
-    # Grid
+    lw = max(1, W * 2 // 512)
     for y in range(0, H, fh):
-        _hline(buf, W, H, y, 0, W, 22, 65, 42)
-        _hline(buf, W, H, y + 1, 0, W, 22, 65, 42)
+        for dy in range(lw):
+            _hline(buf, W, H, y + dy, 0, W, 72, 92, 112)
     for x in range(0, W, cv):
-        _vline(buf, W, H, x, 0, H, 22, 65, 42)
-        _vline(buf, W, H, x + 1, 0, H, 22, 65, 42)
-    # Spandrel
-    sp_h = max(1, H * 16 // 512)
-    for y in range(fh - sp_h, H, fh):
-        _fill_rect(buf, W, 0, y, W, y + sp_h, 55, 130, 90)
-    # Window fills
+        for dx in range(lw):
+            _vline(buf, W, H, x + dx, 0, H, 72, 92, 112)
+    # Glass fill
     for y in range(0, H, fh):
         for x in range(0, W, cv):
-            _fill_rect(buf, W, x + 2, y + 2,
-                       min(x + cv - 2, W), min(y + fh - sp_h - 1, H),
-                       65, 145, 105)
-    # Shimmer band
-    shimmer_period = max(2, H * 200 // 512)
-    for y in range(0, H, shimmer_period):
-        for dy in range(max(1, H * 8 // 512)):
-            if y + dy < H:
-                for x in range(W):
-                    idx = (y + dy) * W + x
-                    r, g, b = buf[idx]
-                    buf[idx] = (_clamp(r + 6), _clamp(g + 8), _clamp(b + 5))
-    # Crown
-    mh = H * 12 // 100
-    _fill_rect(buf, W, W // 10, 0, W - W // 10, mh, 38, 95, 65)
+            _fill_rect(buf, W, x + lw + 1, y + lw + 1,
+                       min(x + cv - lw - 1, W), min(y + fh - lw - 1, H),
+                       148, 178, 205)
+    # Pyramid taper: mask corners with progressively larger triangular darker zones
+    # At each floor row from top, chamfer corners by 1 unit per floor
+    taper_rate = max(1, W // (2 * max(1, H // fh)))
+    for row in range(H // fh):
+        y0 = row * fh
+        y1 = min(y0 + fh, H)
+        margin = row * taper_rate
+        # Left and right chamfer darkening
+        if margin > 0:
+            _fill_rect_blend(buf, W, H, 0, y0, min(margin, W), y1, 88, 108, 128, 0.6)
+            _fill_rect_blend(buf, W, H, max(0, W - margin), y0, W, y1, 88, 108, 128, 0.6)
+    # Chamfered corner diagonal edge marks
+    for y in range(H):
+        margin = (y // max(1, fh)) * taper_rate
+        if margin > 0 and margin < W // 2:
+            if 0 <= margin < W:
+                buf[y * W + margin] = (62, 80, 98)
+            if W - margin - 1 >= 0:
+                buf[y * W + W - margin - 1] = (62, 80, 98)
+    # Crown point top 5%
+    crown_h = H * 5 // 100
+    crown_w = max(4, W * 15 // 100)
+    _fill_rect(buf, W, (W - crown_w) // 2, 0, (W + crown_w) // 2, crown_h, 108, 128, 148)
     _add_noise(buf, W, H, intensity=3, density=0.1, seed=1603)
 
 
 def draw_com_high_04(buf, W, H):
-    """Skyscraper, gold reflective glass."""
-    base = (188, 155, 42)
+    """Stepped ziggurat tower: horizontal ledges at every setback step, 4+ step levels."""
+    base = (155, 148, 138)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    fh = max(2, H * 48 // 512)
-    cv = max(2, W * 80 // 512)
-    # Grid
-    for y in range(0, H, fh):
-        _hline(buf, W, H, y, 0, W, 108, 82, 18)
-        _hline(buf, W, H, y + 1, 0, W, 108, 82, 18)
-    for x in range(0, W, cv):
-        _vline(buf, W, H, x, 0, H, 108, 82, 18)
-        _vline(buf, W, H, x + 1, 0, H, 108, 82, 18)
-    # Spandrel
-    sp_h = max(1, H * 18 // 512)
-    for y in range(fh - sp_h, H, fh):
-        _fill_rect(buf, W, 0, y, W, y + sp_h, 205, 170, 52)
-    # Window fills
-    for y in range(0, H, fh):
-        for x in range(0, W, cv):
-            _fill_rect(buf, W, x + 2, y + 2,
-                       min(x + cv - 2, W), min(y + fh - sp_h - 1, H),
-                       175, 142, 38)
-    # Corner bands
-    cbw = max(1, W * 20 // 512)
-    _fill_rect(buf, W, 0, 0, cbw, H, 138, 108, 28)
-    _fill_rect(buf, W, W - cbw, 0, W, H, 138, 108, 28)
-    # Crown feature top 15%
-    mh = H * 15 // 100
-    _fill_rect(buf, W, W // 8, 0, W - W // 8, mh, 158, 128, 35)
-    _add_noise(buf, W, H, intensity=3, density=0.1, seed=1604)
+    # Concrete/stone cladding texture
+    sp = max(2, H * 20 // 512)
+    for y in range(0, H, sp):
+        _hline(buf, W, H, y, 0, W, 138, 132, 122)
+    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1604)
+    # 5 setback steps from base to crown
+    n_steps = 5
+    step_h = H // n_steps
+    step_inset = W // (n_steps * 2)  # horizontal inset per step
+    for step in range(n_steps):
+        y0 = step * step_h
+        y1 = min(y0 + step_h, H)
+        inset = step * step_inset
+        # Full ledge at the top of each step section
+        ledge_h = max(4, H * 16 // 512)
+        ledge_y = y1 - ledge_h
+        if ledge_y >= 0 and ledge_y < H:
+            _fill_rect(buf, W, inset, ledge_y, W - inset, ledge_y + ledge_h, 175, 168, 158)
+            _hline(buf, W, H, ledge_y, inset, W - inset, 118, 112, 102)
+            _hline(buf, W, H, ledge_y + ledge_h - 1, inset, W - inset, 205, 198, 188)
+        # Window grid in this step band
+        step_win_h = H * 45 // 512
+        step_win_w = W * 48 // 512
+        band_inner = y0 + H * 10 // 512
+        band_outer = ledge_y - H * 8 // 512 if ledge_y > 0 else y1
+        if band_outer > band_inner and (W - 2 * inset) > step_win_w:
+            usable_w = W - 2 * inset
+            n_wins = max(1, usable_w // (step_win_w + W * 12 // 512))
+            win_sp = usable_w // n_wins
+            for c in range(n_wins):
+                wx = inset + c * win_sp + (win_sp - step_win_w) // 2
+                wy = band_inner
+                _draw_window(buf, W, H, wx, wy, step_win_w, step_win_h,
+                             GLASS_DARK, frame_rgb=(125, 118, 108),
+                             frame_w=max(1, W // 256))
 
 
 def draw_ind_low_01(buf, W, H):
@@ -840,376 +1109,485 @@ def draw_ind_low_01(buf, W, H):
 
 
 def draw_ind_low_02(buf, W, H):
-    """Industrial shed, red/rust metal cladding."""
-    base = (162, 62, 35)
+    """Brick workshop: plain dark brick, flat parapet, roller-shutter entrance."""
+    base = (88, 68, 58)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    _corrugation_lines(buf, W, H, 0, H, max(2, H * 10 // 512), base, amplitude=12)
-    # Rust patches
-    rng = random.Random(1702)
-    for _ in range(8):
-        px = rng.randint(0, W - W * 40 // 512)
-        py = rng.randint(0, H - H * 40 // 512)
-        pw = W * 40 // 512
-        ph = H * 40 // 512
-        _fill_rect_blend(buf, W, H, px, py, px + pw, py + ph, 120, 42, 20, 0.6)
-    # Loading bay
-    lw = W * 40 // 100
-    lh = H * 50 // 100
-    _fill_rect(buf, W, 0, H - lh, lw, H, 32, 28, 25)
-    # Bolted joint line at 55%
-    jy = H * 55 // 100
-    _hline(buf, W, H, jy, 0, W, 115, 42, 22)
-    _hline(buf, W, H, jy + 1, 0, W, 115, 42, 22)
-    _hline(buf, W, H, jy + 2, 0, W, 115, 42, 22)
-    _hline(buf, W, H, jy - 1, 0, W, 182, 78, 52)
-    _add_noise(buf, W, H, intensity=6, density=0.25, seed=1702)
+    _brick_coursing(buf, W, H, 0, H, max(2, H * 12 // 512), (68, 50, 42), seed=1702)
+    _add_noise(buf, W, H, intensity=7, density=0.3, seed=1702)
+    # Flat concrete parapet cap
+    cap_h = H * 7 // 100
+    _fill_rect(buf, W, 0, 0, W, cap_h, 118, 115, 110)
+    # Roller-shutter entrance — centred, bottom 55%
+    rs_w = W * 62 // 100
+    rs_h = H * 55 // 100
+    rs_x = (W - rs_w) // 2
+    rs_y = H - rs_h
+    _fill_rect(buf, W, rs_x, rs_y, rs_x + rs_w, H, 42, 40, 38)
+    # Shutter horizontal rib lines
+    rib_sp = max(3, H * 16 // 512)
+    for ry in range(rs_y, H, rib_sp):
+        _hline(buf, W, H, ry, rs_x + 2, rs_x + rs_w - 2, 58, 56, 54)
+    # Guide channel on sides
+    gc_w = max(2, W * 8 // 512)
+    _fill_rect(buf, W, rs_x - gc_w, rs_y, rs_x, H, 72, 68, 65)
+    _fill_rect(buf, W, rs_x + rs_w, rs_y, rs_x + rs_w + gc_w, H, 72, 68, 65)
+    # Small windows either side of shutter
+    ww, wh = W * 52 // 512, H * 45 // 512
+    win_y = cap_h + H * 15 // 512
+    for wx in [W * 15 // 512, W - W * 67 // 512]:
+        _draw_window(buf, W, H, wx, win_y, ww, wh, (38, 40, 48),
+                     frame_rgb=(62, 48, 40), frame_w=max(1, W // 256))
 
 
 def draw_ind_low_03(buf, W, H):
-    """Saw-tooth industrial, beige brick."""
-    base = (192, 176, 135)
+    """Sawtooth factory: ochre/yellow brick, sawtooth roof shadow bands, chimney stack."""
+    base = (195, 172, 92)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    _brick_coursing(buf, W, H, 0, H, max(2, H * 14 // 512), (162, 146, 105), seed=703)
-    # Saw-tooth clerestory at top 25%
-    st_h = H * 25 // 100
-    sw = W * 128 // 512
-    for i in range(3):
-        sx = W // 8 + i * (W * 140 // 512)
-        # Triangle lighter area
+    _brick_coursing(buf, W, H, 0, H, max(2, H * 13 // 512), (165, 142, 68), seed=1703)
+    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1703)
+    # Sawtooth roof shadow bands at top 28% — alternating bright/shadow triangles
+    st_h = H * 28 // 100
+    n_teeth = 3
+    tooth_w = W // n_teeth
+    for i in range(n_teeth):
+        tx = i * tooth_w
+        # Shadow slope on right side of each tooth
         for y in range(st_h):
             frac = y / max(1, st_h)
-            lw2 = int(sw * frac)
-            x0 = sx + (sw - lw2) // 2
-            x1 = x0 + lw2
-            for x in range(max(0, x0), min(x1, W)):
+            shadow_start = tx + int(tooth_w * frac)
+            shadow_end = tx + tooth_w
+            for x in range(max(tx, shadow_start), min(shadow_end, W)):
                 idx = y * W + x
                 r, g, b = buf[idx]
-                buf[idx] = (_clamp(r + 18), _clamp(g + 19), _clamp(b + 15))
-    # Pilasters
+                buf[idx] = (_clamp(r - 28), _clamp(g - 25), _clamp(b - 18))
+        # Sawtooth ridge line
+        for y in range(st_h):
+            frac = y / max(1, st_h)
+            ridge_x = tx + int(tooth_w * frac)
+            if 0 <= ridge_x < W:
+                buf[y * W + ridge_x] = (155, 130, 55)
+    # Chimney stack — right side, runs from top
+    ch_x = W * 72 // 100
+    ch_w = max(3, W * 26 // 512)
+    _fill_rect(buf, W, ch_x, 0, ch_x + ch_w, H * 45 // 100, 152, 132, 68)
+    _brick_coursing(buf, W, H, 0, H * 45 // 100, max(2, H * 10 // 512), (122, 102, 48), seed=2703)
+    # Chimney top cap
+    cap_h = max(2, H * 12 // 512)
+    _fill_rect(buf, W, ch_x - 2, 0, ch_x + ch_w + 2, cap_h, 105, 98, 55)
+    # Pilasters on facade
     pv = max(2, W * 128 // 512)
     pw = max(1, W * 8 // 512)
     for x in range(0, W, pv):
-        _fill_rect(buf, W, x, 0, x + pw, H, 165, 148, 108)
-    # Concrete dado lower 15%
-    dh = H * 15 // 100
-    _fill_rect(buf, W, 0, H - dh, W, H, 165, 162, 158)
-    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1703)
+        _fill_rect(buf, W, x, st_h, x + pw, H, 172, 148, 78)
+    # Concrete dado lower 12%
+    dh = H * 12 // 100
+    _fill_rect(buf, W, 0, H - dh, W, H, 165, 162, 155)
 
 
 def draw_ind_low_04(buf, W, H):
-    """Barrel vault shed, dark olive."""
-    base = (92, 105, 70)
+    """Storage yard gatehouse: plain concrete block finish, security fence hint."""
+    base = (162, 158, 148)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    _corrugation_lines(buf, W, H, 0, H, max(2, H * 10 // 512), base, amplitude=10)
-    # Barrel vault upper 30%
-    vt = H * 30 // 100
-    for y in range(vt):
-        frac = y / max(1, vt)
-        dark = int(20 * (1.0 - frac))
-        for x in range(W):
-            idx = y * W + x
-            r, g, b = buf[idx]
-            buf[idx] = (_clamp(r - dark), _clamp(g - dark), _clamp(b - dark))
-    # Curved shadow lines
-    for y in range(0, vt, max(2, H * 20 // 512)):
-        _hline(buf, W, H, y, 0, W, 72, 82, 52)
-    # Office block right 35%
-    ow = W * 35 // 100
-    ox = W - ow
-    _fill_rect(buf, W, ox, 0, W, H, 105, 118, 82)
-    # Office windows 2x3
-    ww, wh = W * 35 // 512, H * 40 // 512
-    for r in range(3):
-        for c in range(2):
-            wx = ox + W // 20 + c * (ow // 3)
-            wy = H // 5 + r * (H // 4)
-            _draw_window(buf, W, H, wx, wy, ww, wh, GLASS_DARK)
+    # Concrete block coursing: horizontal joints every 32px, vertical at 48px
+    bh = max(2, H * 32 // 512)
+    bv = max(2, W * 48 // 512)
+    joint_clr = (138, 134, 124)
+    for y in range(0, H, bh):
+        _hline(buf, W, H, y, 0, W, *joint_clr)
+        row_idx = y // bh
+        offset = (bv // 2) if (row_idx % 2 == 1) else 0
+        for x in range(offset, W, bv):
+            _vline(buf, W, H, x, y, min(y + bh, H), *joint_clr)
     _add_noise(buf, W, H, intensity=5, density=0.2, seed=1704)
+    # Flat parapet cap
+    cap_h = H * 8 // 100
+    _fill_rect(buf, W, 0, 0, W, cap_h, 145, 140, 132)
+    # Security fence hint: chain-link pattern strip at top 15% (above cap)
+    # Represented as regular diagonal cross-hatch
+    fence_h = H * 15 // 100
+    _fill_rect(buf, W, 0, 0, W, fence_h, 118, 115, 108)
+    diag_sp = max(3, W * 18 // 512)
+    for y in range(0, fence_h):
+        for x in range(W):
+            if (x + y) % diag_sp == 0 or (x - y) % diag_sp == 0:
+                buf[y * W + x] = (88, 85, 80)
+    # Small windows: 2x2 punched openings
+    ww, wh = W * 55 // 512, H * 50 // 512
+    sp_x = W * 180 // 512
+    for r in range(2):
+        for c in range(2):
+            wx = W * 55 // 512 + c * sp_x
+            wy = fence_h + H * 18 // 512 + r * (H * 130 // 512)
+            _draw_window(buf, W, H, wx, wy, ww, wh, (38, 40, 48),
+                         frame_rgb=(128, 124, 115), frame_w=max(1, W // 256))
+    # Plain entrance door
+    dw, dh = W * 75 // 512, H * 90 // 512
+    dx = (W - dw) // 2
+    dy = H - dh - H * 4 // 100
+    _fill_rect(buf, W, dx, dy, dx + dw, dy + dh, 88, 85, 80)
+    _fill_rect(buf, W, dx + 2, dy + 2, dx + dw - 2, dy + dh - 2, 68, 65, 62)
 
 
 def draw_ind_med_01(buf, W, H):
-    """Large distribution unit, white steel."""
-    base = (225, 228, 225)
+    """Flat-roof factory: concrete with horizontal loading bay openings, two chimney stacks."""
+    base = (158, 155, 148)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    _corrugation_lines(buf, W, H, 0, H, max(2, H * 12 // 512), base, amplitude=8)
-    # Loading docks: 3 large dark rectangles
-    dw = W * 80 // 512
-    dh = H * 100 // 512
-    dy = H - dh - H * 5 // 100
+    # Smooth concrete form-work lines
+    sp = max(2, H * 16 // 512)
+    for y in range(0, H, sp):
+        _hline(buf, W, H, y, 0, W, 142, 138, 132)
+    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1801)
+    # Flat parapet cap
+    cap_h = H * 6 // 100
+    _fill_rect(buf, W, 0, 0, W, cap_h, 138, 135, 128)
+    # Two chimney stacks rising above cap
+    for ch_cx in [W * 25 // 100, W * 72 // 100]:
+        ch_w = max(4, W * 28 // 512)
+        _fill_rect(buf, W, ch_cx - ch_w // 2, 0, ch_cx + ch_w // 2, H * 35 // 100, 118, 115, 108)
+        # Stack flue cap
+        _fill_rect(buf, W, ch_cx - ch_w // 2 - 2, H * 3 // 100,
+                   ch_cx + ch_w // 2 + 2, H * 3 // 100 + max(2, H * 8 // 512), 95, 92, 88)
+    # Horizontal loading bay strip — bottom 35%, 3 openings
+    bay_y = H * 65 // 100
+    bay_h = H * 30 // 100
+    _fill_rect(buf, W, 0, bay_y, W, H, 140, 138, 132)
+    bay_w = W * 26 // 100
     for i in range(3):
-        dx = W // 8 + i * (W * 30 // 100)
-        _fill_rect(buf, W, dx, dy, dx + dw, dy + dh, 42, 42, 45)
-        # Dock canopy
-        _fill_rect(buf, W, dx - 4, dy - max(1, H * 15 // 512), dx + dw + 4, dy, 195, 198, 195)
-    # Rooftop plant zone top 15%
-    ph = H * 15 // 100
-    _fill_rect(buf, W, 0, 0, W, ph, 190, 190, 188)
-    # Equipment silhouette
-    for i in range(4):
-        ex = W // 6 + i * (W // 5)
-        ew = W * 30 // 512
-        eh = max(2, ph * 60 // 100)
-        _fill_rect(buf, W, ex, ph - eh, ex + ew, ph, 165, 168, 165)
-    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1801)
+        bx = W * 5 // 100 + i * (W * 32 // 100)
+        _fill_rect(buf, W, bx, bay_y + H * 8 // 512, bx + bay_w, H - H * 4 // 100, 42, 40, 38)
+        # Canopy above each opening
+        _fill_rect(buf, W, bx - 2, bay_y, bx + bay_w + 2, bay_y + H * 8 // 512, 120, 118, 112)
+    # Windows row above bays: 5 small punched
+    ww, wh = W * 45 // 512, H * 42 // 512
+    wy = cap_h + H * 18 // 512
+    for c in range(5):
+        wx = W * 15 // 512 + c * (W * 95 // 512)
+        _draw_window(buf, W, H, wx, wy, ww, wh, GLASS_DARK,
+                     frame_rgb=(125, 122, 115), frame_w=max(1, W // 256))
 
 
 def draw_ind_med_02(buf, W, H):
-    """Gabled factory, yellow/ochre brick."""
-    base = (195, 165, 62)
+    """Steel-frame warehouse: exposed structural steel corner columns, wide corrugated cladding."""
+    base = (178, 175, 168)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    _brick_coursing(buf, W, H, 0, H, max(2, H * 12 // 512), (168, 138, 42), seed=802)
-    # Central gable shadow at top 25%
-    gt = H * 25 // 100
-    for y in range(gt):
-        frac = y / max(1, gt)
-        dark = int(18 * (1.0 - frac))
-        cx = W // 2
-        spread = int(W // 2 * frac)
-        for x in range(max(0, cx - spread), min(cx + spread, W)):
-            idx = y * W + x
-            r, g, b = buf[idx]
-            buf[idx] = (_clamp(r - dark), _clamp(g - dark), _clamp(b - dark))
-    # Wing sections slightly lighter
-    _fill_rect_blend(buf, W, H, 0, 0, W // 4, gt, 208, 178, 75, 0.4)
-    _fill_rect_blend(buf, W, H, W * 3 // 4, 0, W, gt, 208, 178, 75, 0.4)
-    # Clerestory band at 70%
-    cy = H * 70 // 100
-    ch = max(2, H * 40 // 512)
-    _fill_rect(buf, W, 0, cy, W, cy + ch, 228, 210, 108)
-    # Ground floor loading bays
-    lb_h = H * 30 // 100
-    lb_sp = max(2, W * 80 // 512)
-    for x in range(0, W, lb_sp):
-        _fill_rect(buf, W, x + 4, H - lb_h, x + lb_sp - 4, H, 52, 42, 18)
-    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1802)
+    _corrugation_lines(buf, W, H, 0, H, max(2, H * 14 // 512), base, amplitude=12)
+    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1802)
+    # Exposed structural steel columns — 4 vertical strips
+    col_w = max(4, W * 18 // 512)
+    col_positions = [0, W * 32 // 100 - col_w // 2, W * 66 // 100 - col_w // 2, W - col_w]
+    for cx in col_positions:
+        _fill_rect(buf, W, cx, 0, cx + col_w, H, 125, 122, 118)
+        # Column bolt detail lines every floor
+        fb_sp = max(3, H * 64 // 512)
+        bolt_h = max(2, H * 8 // 512)
+        for fy in range(0, H, fb_sp):
+            _fill_rect(buf, W, cx - 2, fy, cx + col_w + 2, fy + bolt_h, 108, 105, 100)
+    # Steel floor tie beams: horizontal flat bands at each floor
+    beam_h = max(2, H * 10 // 512)
+    fb_sp = max(2, H * 96 // 512)
+    for fy in range(fb_sp, H, fb_sp):
+        _fill_rect(buf, W, 0, fy, W, fy + beam_h, 138, 135, 128)
+    # Wide loading door — two bays, bottom 45%
+    door_h = H * 45 // 100
+    for i in range(2):
+        dx = col_positions[i + 1] + col_w
+        dw = col_positions[i + 2] - dx
+        _fill_rect(buf, W, dx, H - door_h, dx + dw, H, 42, 40, 38)
+        rib_sp = max(3, H * 14 // 512)
+        for ry in range(H - door_h, H, rib_sp):
+            _hline(buf, W, H, ry, dx + 2, dx + dw - 2, 58, 56, 54)
+    # Eave gutter line
+    gut_y = H * 8 // 100
+    _fill_rect(buf, W, 0, gut_y, W, gut_y + max(2, H * 10 // 512), 145, 142, 135)
 
 
 def draw_ind_med_03(buf, W, H):
-    """Grid-frame structure, dark blue metal."""
-    base = (38, 58, 105)
+    """Brick mill: dark red brick, multi-pane industrial windows, arched lintels."""
+    base = (105, 45, 38)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Steel frame grid
-    fh = max(2, H * 128 // 512)
+    _brick_coursing(buf, W, H, 0, H, max(2, H * 11 // 512), (82, 32, 28), seed=1803)
+    _add_noise(buf, W, H, intensity=7, density=0.28, seed=1803)
+    # Stone quoin corners: lighter columns at left and right edges
+    qw = max(3, W * 20 // 512)
+    _fill_rect(buf, W, 0, 0, qw, H, 148, 128, 108)
+    _fill_rect(buf, W, W - qw, 0, W, H, 148, 128, 108)
+    # Stone string course at 35% and 70% height
+    for sc_y in [H * 35 // 100, H * 70 // 100]:
+        sc_h = max(2, H * 12 // 512)
+        _fill_rect(buf, W, 0, sc_y, W, sc_y + sc_h, 165, 145, 118)
+        _hline(buf, W, H, sc_y, 0, W, 128, 108, 88)
+        _hline(buf, W, H, sc_y + sc_h, 0, W, 188, 168, 142)
+    # Multi-pane industrial windows: 3 cols x 3 rows, arched lintel above each
+    ww, wh = W * 68 // 512, H * 72 // 512
+    sp_x = W * 158 // 512
+    sp_y = H * 120 // 512
+    for r in range(3):
+        for c in range(3):
+            wx = qw + W * 18 // 512 + c * sp_x
+            wy = H * 18 // 512 + r * sp_y
+            # Arched lintel (stone arch above)
+            arch_h = max(2, ww // 4)
+            arch_w = ww
+            _fill_rect(buf, W, wx, wy - arch_h, wx + arch_w, wy, 148, 128, 105)
+            # Inner arch cutout
+            inner_arch_w = arch_w * 7 // 10
+            _fill_rect(buf, W, wx + (arch_w - inner_arch_w) // 2, wy - arch_h + 2,
+                       wx + (arch_w + inner_arch_w) // 2, wy, 78, 35, 28)
+            # Multi-pane window: 3 panes across, 2 rows
+            pane_w = (ww - 4) // 3
+            pane_h = (wh - 2) // 2
+            _fill_rect(buf, W, wx, wy, wx + ww, wy + wh, 62, 28, 22)
+            for pr in range(2):
+                for pc in range(3):
+                    px = wx + 1 + pc * (pane_w + 1)
+                    py = wy + 1 + pr * (pane_h + 1)
+                    _fill_rect(buf, W, px, py, px + pane_w, py + pane_h, 38, 42, 52)
+    # Parapet cap
+    cap_h = H * 6 // 100
+    _fill_rect(buf, W, 0, 0, W, cap_h, 128, 108, 88)
+
+
+def draw_ind_med_04(buf, W, H):
+    """Distribution centre: white steel cladding, loading dock canopy bands, dock openings."""
+    base = (225, 225, 220)
+    _fill_rect(buf, W, 0, 0, W, H, *base)
+    _corrugation_lines(buf, W, H, 0, H, max(2, H * 10 // 512), base, amplitude=6)
+    _add_noise(buf, W, H, intensity=3, density=0.1, seed=1804)
+    # Horizontal steel cladding rail lines (wide rivet-band style)
+    band_sp = max(3, H * 56 // 512)
+    band_h = max(2, H * 8 // 512)
+    for fy in range(band_sp, H, band_sp):
+        _fill_rect(buf, W, 0, fy, W, fy + band_h, 195, 192, 188)
+        _hline(buf, W, H, fy, 0, W, 175, 172, 168)
+        _hline(buf, W, H, fy + band_h, 0, W, 235, 232, 228)
+    # Loading dock section: bottom 40% — yellow dock-canopy band + dock openings
+    dock_y = H * 60 // 100
+    can_h = max(3, H * 18 // 512)
+    # Dock canopy stripe: safety yellow-green
+    _fill_rect(buf, W, 0, dock_y, W, dock_y + can_h, 188, 185, 52)
+    _hline(buf, W, H, dock_y, 0, W, 155, 152, 35)
+    _hline(buf, W, H, dock_y + can_h, 0, W, 215, 210, 80)
+    # 3 dock opening bays
+    dock_bay_w = W * 27 // 100
+    dock_bay_h = H - dock_y - can_h - H * 3 // 100
+    for i in range(3):
+        dbx = W * 3 // 100 + i * (W * 32 // 100)
+        dby = dock_y + can_h
+        _fill_rect(buf, W, dbx, dby, dbx + dock_bay_w, dby + dock_bay_h, 42, 40, 38)
+        # Dock leveler plate at base
+        lev_h = max(2, H * 12 // 512)
+        _fill_rect(buf, W, dbx, dby + dock_bay_h - lev_h,
+                   dbx + dock_bay_w, dby + dock_bay_h, 88, 85, 80)
+    # Upper windows: 5 small punch-outs
+    ww, wh = W * 52 // 512, H * 42 // 512
+    wy = H * 8 // 100
+    for c in range(5):
+        wx = W * 15 // 512 + c * (W * 96 // 512)
+        _draw_window(buf, W, H, wx, wy, ww, wh, GLASS_DARK,
+                     frame_rgb=(195, 192, 185), frame_w=max(1, W // 256))
+
+
+def draw_ind_high_01(buf, W, H):
+    """Concrete tower: board-form concrete, small punched windows, safety stripes at base."""
+    base = (145, 142, 135)
+    _fill_rect(buf, W, 0, 0, W, H, *base)
+    # Board-form concrete: dense horizontal plank lines
+    plank_h = max(2, H * 10 // 512)
+    for y in range(0, H, plank_h):
+        _hline(buf, W, H, y, 0, W, 125, 122, 115)
+    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1901)
+    # Tie-hole pattern: regular grid of small dark spots
+    tie_sp_x = max(4, W * 48 // 512)
+    tie_sp_y = max(4, H * 32 // 512)
+    tie_r = max(1, W * 3 // 512)
+    for ty in range(tie_sp_y // 2, H * 85 // 100, tie_sp_y):
+        for tx in range(tie_sp_x // 2, W, tie_sp_x):
+            for dy in range(-tie_r, tie_r + 1):
+                for dx in range(-tie_r, tie_r + 1):
+                    if dx * dx + dy * dy <= tie_r * tie_r:
+                        py2 = ty + dy
+                        px2 = tx + dx
+                        if 0 <= py2 < H and 0 <= px2 < W:
+                            buf[py2 * W + px2] = (105, 102, 95)
+    # Small punched windows: 3 cols x 5 rows, very deep reveals
+    ww, wh = W * 45 // 512, H * 45 // 512
+    sp_x = W * 148 // 512
+    sp_y = H * 108 // 512
+    for r in range(5):
+        for c in range(3):
+            wx = W * 38 // 512 + c * sp_x
+            wy = H * 5 // 100 + r * sp_y
+            _fill_rect(buf, W, wx - 5, wy - 5, wx + ww + 5, wy + wh + 5, 112, 108, 102)
+            _draw_window(buf, W, H, wx, wy, ww, wh, (38, 40, 48))
+    # Safety stripes at base (bottom 12%): diagonal hazard band
+    base_y = H * 88 // 100
+    stripe_w = max(3, W * 22 // 512)
+    for y in range(base_y, H):
+        for x in range(W):
+            si = ((x + (y - base_y) * 2) // stripe_w) % 2
+            buf[y * W + x] = (210, 188, 25) if si == 0 else (35, 35, 35)
+    # Chimney stacks: 2 narrow stacks rising from top
+    for ch_cx in [W * 20 // 100, W * 78 // 100]:
+        ch_w = max(3, W * 18 // 512)
+        _fill_rect(buf, W, ch_cx - ch_w // 2, 0, ch_cx + ch_w // 2, H * 20 // 100, 112, 108, 102)
+
+
+def draw_ind_high_02(buf, W, H):
+    """Exposed steel-frame refinery: structural steel grid, pipe run accents, spherical vessel hint."""
+    base = (62, 68, 78)
+    _fill_rect(buf, W, 0, 0, W, H, *base)
+    # Exposed steel structural grid — bold silver-grey frame
+    fh = max(2, H * 80 // 512)
     fv = max(2, W * 96 // 512)
-    fw = max(1, W * 6 // 512)
-    frame_clr = (155, 160, 168)
+    fw = max(3, W * 8 // 512)
+    frame_clr = (148, 152, 158)
     for y in range(0, H, fh):
         for dy in range(fw):
             _hline(buf, W, H, y + dy, 0, W, *frame_clr)
     for x in range(0, W, fv):
         for dx in range(fw):
             _vline(buf, W, H, x + dx, 0, H, *frame_clr)
-    # Panel variation
-    rng = random.Random(1803)
+    # Panel fill between frame — varied dark metal tones
+    rng = random.Random(1902)
     for y in range(0, H, fh):
         for x in range(0, W, fv):
-            d = rng.randint(-8, 8)
+            d = rng.randint(-10, 10)
             _fill_rect(buf, W, x + fw, y + fw,
                        min(x + fv - fw, W), min(y + fh - fw, H),
-                       _clamp(38 + d), _clamp(58 + d), _clamp(105 + d))
-    # Clerestory top
-    ct = max(2, H * 60 // 512)
-    _fill_rect(buf, W, 0, 0, W, ct, 62, 78, 125)
-    # Small square windows in clerestory
-    sw = max(2, W * 20 // 512)
-    for i in range(6):
-        sx = W // 10 + i * (W // 7)
-        _fill_rect(buf, W, sx, ct // 4, sx + sw, ct * 3 // 4, 120, 135, 165)
-    # Anchor plates at frame intersections
-    ap = max(1, W * 8 // 512)
-    for y in range(0, H, fh):
-        for x in range(0, W, fv):
-            _fill_rect(buf, W, x - ap // 2, y - ap // 2, x + ap // 2, y + ap // 2, 105, 108, 115)
-    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1803)
-
-
-def draw_ind_med_04(buf, W, H):
-    """L-plan unit, light grey precast."""
-    base = (182, 185, 190)
-    _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Precast panel joints
-    pv = max(2, W * 128 // 512)
-    ph = max(2, H * 96 // 512)
-    lw = max(1, W * 2 // 512)
-    for y in range(0, H, ph):
-        for dy in range(lw):
-            _hline(buf, W, H, y + dy, 0, W, 120, 122, 125)
-    for x in range(0, W, pv):
-        for dx in range(lw):
-            _vline(buf, W, H, x + dx, 0, H, 120, 122, 125)
-    # Corner entrance bay
-    ew = W * 25 // 100
-    ex = (W - ew) // 2
-    _fill_rect(buf, W, ex, 0, ex + ew, H, 195, 198, 202)
-    # Windows 4x4 upper 70%
-    ww, wh = W * 45 // 512, H * 50 // 512
-    _draw_window_grid(buf, W, H, 4, 4, ww, wh, GLASS_DARK,
-                      start_y=H * 5 // 100,
-                      spacing_y=H * 70 // (4 * 100))
-    # Ground floor glazing strip
-    gh = H * 20 // 100
-    _fill_rect(buf, W, 0, H - gh, W, H, 55, 58, 65)
-    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1804)
-
-
-def draw_ind_high_01(buf, W, H):
-    """Process plant, bare concrete + pipe."""
-    base = (155, 155, 150)
-    _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Form-work lines
-    sp = max(2, H * 24 // 512)
-    for y in range(0, H, sp):
-        _hline(buf, W, H, y, 0, W, 138, 138, 132)
-    # Pipe run on right 15%
-    pw = W * 15 // 100
-    px = W - pw
-    _fill_rect(buf, W, px, 0, W, H, 200, 100, 35)
-    # Flange marks
-    fl_sp = max(2, H * 64 // 512)
-    fl_r = max(2, pw // 4)
-    for y in range(fl_sp // 2, H, fl_sp):
-        cx = px + pw // 2
-        for dy in range(-fl_r, fl_r):
-            for dx in range(-fl_r, fl_r):
-                if dx * dx + dy * dy <= fl_r * fl_r:
-                    py2 = y + dy
-                    px2 = cx + dx
-                    if 0 <= py2 < H and 0 <= px2 < W:
-                        buf[py2 * W + px2] = (175, 82, 25)
-    # Chimney stack on left edge
-    cw = max(2, W * 20 // 512)
-    _fill_rect(buf, W, 0, 0, cw, H, 88, 85, 82)
-    # Windows sparse 3x4
-    ww, wh = W * 40 // 512, H * 45 // 512
-    _draw_window_grid(buf, W, H, 3, 4, ww, wh, GLASS_DARK,
-                      start_x=cw + W // 10)
-    _add_noise(buf, W, H, intensity=5, density=0.2, seed=1901)
-
-
-def draw_ind_high_02(buf, W, H):
-    """Large span, dark steel + orange safety stripe."""
-    base = (58, 62, 70)
-    _fill_rect(buf, W, 0, 0, W, H, *base)
-    # 3 arched openings in lower 70%
-    ah = H * 70 // 100
-    aw = W * 28 // 100
-    ay = H - ah
-    for i in range(3):
-        ax = W // 12 + i * (W * 32 // 100)
-        _fill_rect(buf, W, ax, ay, ax + aw, H, 25, 25, 28)
-        # Arch top
-        arc = max(2, aw // 3)
-        _fill_rect(buf, W, ax + aw // 6, ay - arc, ax + aw - aw // 6, ay, 25, 25, 28)
-    # Safety stripe band at 75%
-    sy = H * 25 // 100 - H * 60 // 512
-    sh = max(2, H * 60 // 512)
-    stripe_w = max(2, W * 20 // 512)
-    for y in range(sy, sy + sh):
-        for x in range(W):
-            stripe_idx = ((x + (y - sy)) // stripe_w) % 2
-            if stripe_idx == 0:
-                buf[y * W + x] = (210, 105, 25)
-            else:
-                buf[y * W + x] = (28, 28, 28)
-    # Cooling tower silhouette right side
-    ct_x = W * 75 // 100
-    ct_w = W * 20 // 100
-    ct_h = H * 40 // 100
-    for y in range(ct_h):
-        frac = y / max(1, ct_h)
-        r_frac = 0.6 + 0.4 * math.sin(frac * math.pi)
-        rw = int(ct_w * r_frac) // 2
-        cx = ct_x + ct_w // 2
-        for x in range(cx - rw, cx + rw):
-            if 0 <= x < W and 0 <= y < H:
-                buf[y * W + x] = (82, 85, 92)
+                       _clamp(62 + d), _clamp(68 + d), _clamp(78 + d))
+    # Pipe run accents: 2 horizontal pipe runs crossing mid-facade
+    pipe_positions = [H * 33 // 100, H * 66 // 100]
+    pipe_h = max(4, H * 18 // 512)
+    for pipe_y in pipe_positions:
+        _fill_rect(buf, W, 0, pipe_y, W, pipe_y + pipe_h, 165, 115, 62)
+        # Pipe flange marks
+        fl_sp = max(4, W * 62 // 512)
+        fl_h = max(3, pipe_h + 4)
+        for fx in range(fl_sp // 2, W, fl_sp):
+            _fill_rect(buf, W, fx - 2, pipe_y - 2, fx + 3, pipe_y + pipe_h + 2, 142, 98, 48)
+    # Spherical pressure vessel hint: right-centre zone
+    v_cx = W * 72 // 100
+    v_cy = H * 50 // 100
+    v_r = max(8, W * 28 // 512)
+    for dy in range(-v_r, v_r + 1):
+        for dx in range(-v_r, v_r + 1):
+            if dx * dx + dy * dy <= v_r * v_r:
+                px2 = v_cx + dx
+                py2 = v_cy + dy
+                if 0 <= px2 < W and 0 <= py2 < H:
+                    # Lighting: lighter on upper-left
+                    light = int(25 * (1.0 - (dx + dy) / (2 * v_r)))
+                    buf[py2 * W + px2] = (_clamp(118 + light), _clamp(122 + light), _clamp(128 + light))
     _add_noise(buf, W, H, intensity=4, density=0.15, seed=1902)
 
 
 def draw_ind_high_03(buf, W, H):
-    """Multi-storey process plant, grey/blue."""
-    base = (85, 105, 125)
+    """Cylindrical silo cluster: 3 round corrugated silos with curved shading and access ladder."""
+    base = (108, 95, 80)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Floor bands
-    fh = max(2, H * 80 // 512)
-    for y in range(0, H, fh):
-        _fill_rect(buf, W, 0, y, W, y + max(1, H * 3 // 512), 55, 70, 88)
-    # External staircase zigzag on left 20%
-    sw = W * 20 // 100
-    stair_clr = (155, 170, 185)
-    step = max(2, H * 40 // 512)
-    for y in range(0, H, step * 2):
-        # Going right
-        for dy in range(step):
-            sx = int(sw * dy / step)
-            if y + dy < H:
-                buf[(y + dy) * W + min(sx, W - 1)] = stair_clr
-                if sx + 1 < W:
-                    buf[(y + dy) * W + sx + 1] = stair_clr
-        # Going left
-        for dy in range(step):
-            sx = int(sw * (1.0 - dy / step))
-            if y + step + dy < H:
-                buf[(y + step + dy) * W + min(sx, W - 1)] = stair_clr
-                if sx + 1 < W:
-                    buf[(y + step + dy) * W + sx + 1] = stair_clr
-    # External ductwork on right
-    dw = max(2, W * 30 // 512)
-    dx = W - dw - W // 20
-    _fill_rect(buf, W, dx, 0, dx + dw, H, 110, 108, 105)
-    # Instrument panels on each floor
-    for y in range(fh // 2, H, fh):
-        for i in range(3):
-            px = W // 4 + i * (W // 5)
-            pw = max(2, W * 15 // 512)
-            ph2 = max(2, H * 12 // 512)
-            _fill_rect(buf, W, px, y, px + pw, y + ph2, 140, 155, 172)
     _add_noise(buf, W, H, intensity=4, density=0.15, seed=1903)
+    # 3 cylindrical silo forms side by side
+    n_silos = 3
+    silo_w = W * 28 // 100
+    silo_gap = (W - n_silos * silo_w) // (n_silos + 1)
+    for i in range(n_silos):
+        sx = silo_gap + i * (silo_w + silo_gap)
+        # Base colour varies slightly between silos
+        silo_base = [
+            (112, 98, 82),
+            (102, 90, 75),
+            (118, 102, 85),
+        ][i]
+        _fill_rect(buf, W, sx, H * 15 // 100, sx + silo_w, H, *silo_base)
+        # Horizontal corrugation rings
+        ring_sp = max(3, H * 20 // 512)
+        for ry in range(H * 15 // 100, H, ring_sp):
+            _hline(buf, W, H, ry, sx, sx + silo_w, _clamp(silo_base[0] - 18),
+                   _clamp(silo_base[1] - 18), _clamp(silo_base[2] - 18))
+        # Cylindrical shading: darker on right half
+        for y in range(H * 15 // 100, H):
+            for x in range(sx, min(sx + silo_w, W)):
+                frac = (x - sx) / max(1, silo_w)
+                dark = int(32 * frac)
+                idx = y * W + x
+                r2, g2, b2 = buf[idx]
+                buf[idx] = (_clamp(r2 - dark), _clamp(g2 - dark), _clamp(b2 - dark))
+        # Dome top
+        dome_h = H * 12 // 100
+        dome_y = H * 15 // 100 - dome_h
+        if dome_y >= 0:
+            _fill_rect(buf, W, sx, dome_y, sx + silo_w, H * 15 // 100, _clamp(silo_base[0] + 12),
+                       _clamp(silo_base[1] + 10), _clamp(silo_base[2] + 8))
+            # Dome arc silhouette
+            for dx2 in range(silo_w):
+                x = sx + dx2
+                frac = (dx2 - silo_w // 2) / max(1, silo_w // 2)
+                arc_y = H * 15 // 100 - dome_h + int(dome_h * frac * frac)
+                if 0 <= x < W and 0 <= arc_y < H:
+                    buf[arc_y * W + x] = (_clamp(silo_base[0] - 22), _clamp(silo_base[1] - 22),
+                                          _clamp(silo_base[2] - 22))
+        # Access ladder on first silo
+        if i == 0:
+            lx = sx + silo_w // 3
+            for y in range(H * 12 // 100, H):
+                if 0 <= lx < W:
+                    buf[y * W + lx] = (55, 48, 38)
+                rung_sp = max(2, H * 18 // 512)
+                if y % rung_sp < 2:
+                    for ddx in range(-3, 4):
+                        if 0 <= lx + ddx < W:
+                            buf[y * W + lx + ddx] = (55, 48, 38)
 
 
 def draw_ind_high_04(buf, W, H):
-    """Silo cluster, weathered steel + rust."""
-    base = (100, 82, 65)
+    """Refinery tower: grating/deck bands, hazard stripe posts, louvre panels, flare stack hint."""
+    base = (72, 70, 65)
     _fill_rect(buf, W, 0, 0, W, H, *base)
-    # Rust patches
-    rng = random.Random(1904)
-    for _ in range(12):
-        px = rng.randint(0, W - 1)
-        py = rng.randint(0, H - 1)
-        pw = rng.randint(W * 30 // 512, W * 60 // 512)
-        ph = rng.randint(H * 30 // 512, H * 60 // 512)
-        _fill_rect_blend(buf, W, H, px, py, px + pw, py + ph, 145, 68, 28, 0.55)
-    # 3 cylindrical silo forms
-    silo_w = W * 28 // 100
-    for i in range(3):
-        sx = W * 5 // 100 + i * (W * 32 // 100)
-        # Shading darker on right side
-        for y in range(H // 4, H):
-            for x in range(sx, min(sx + silo_w, W)):
-                frac = (x - sx) / max(1, silo_w)
-                dark = int(25 * frac)
-                idx = y * W + x
-                r, g, b = buf[idx]
-                buf[idx] = (_clamp(r - dark), _clamp(g - dark), _clamp(b - dark))
-        # Oval arc at top
-        cy = H // 4
-        for dx in range(silo_w):
-            x = sx + dx
-            frac = (dx - silo_w // 2) / max(1, silo_w // 2)
-            arc_y = cy - int((1.0 - frac * frac) * H * 15 // 512)
-            if 0 <= x < W and 0 <= arc_y < H:
-                buf[arc_y * W + x] = (72, 55, 40)
-    # Ladder on left silo
-    lx = W * 5 // 100 + silo_w // 2
-    for y in range(H // 4, H):
-        if 0 <= lx < W:
-            buf[y * W + lx] = (55, 42, 30)
-        if y % max(2, H * 20 // 512) < 2:
-            for dx in range(-3, 4):
-                px2 = lx + dx
-                if 0 <= px2 < W:
-                    buf[y * W + px2] = (55, 42, 30)
-    _add_noise(buf, W, H, intensity=6, density=0.25, seed=1904)
+    _add_noise(buf, W, H, intensity=4, density=0.15, seed=1904)
+    # Grating/deck platform bands — every ~80px, full width
+    deck_sp = max(3, H * 80 // 512)
+    deck_h = max(4, H * 16 // 512)
+    for dy in range(deck_h, H, deck_sp):
+        _fill_rect(buf, W, 0, dy, W, dy + deck_h, 92, 88, 82)
+        # Grating texture: diagonal hatch lines
+        grate_sp = max(2, W * 12 // 512)
+        for y in range(dy, dy + deck_h):
+            for x in range(W):
+                if (x + (y - dy) * 2) % grate_sp == 0:
+                    buf[y * W + x] = (62, 60, 56)
+        # Deck edge handrail top line
+        _hline(buf, W, H, dy, 0, W, 115, 110, 105)
+        _hline(buf, W, H, dy + deck_h - 1, 0, W, 62, 60, 56)
+    # Louvre panel sections: left 30% — vertical dark slat bands
+    louv_w = W * 30 // 100
+    louv_slat = max(3, W * 10 // 512)
+    for x in range(0, louv_w, louv_slat * 2):
+        _fill_rect(buf, W, x, 0, x + louv_slat, H, 48, 46, 42)
+    # Hazard stripe posts: 3 vertical striped pillars
+    post_positions = [W * 38 // 100, W * 58 // 100, W * 78 // 100]
+    post_w = max(4, W * 14 // 512)
+    for px2 in post_positions:
+        for y in range(H):
+            stripe = (y // max(3, H * 20 // 512)) % 2
+            clr = (210, 188, 28) if stripe == 0 else (35, 35, 35)
+            for dx2 in range(post_w):
+                if 0 <= px2 + dx2 < W:
+                    buf[y * W + px2 + dx2] = clr
+    # Flare stack hint: narrow right-edge column with glow at top
+    flare_x = W - max(4, W * 12 // 512) - W * 4 // 100
+    flare_w = max(4, W * 12 // 512)
+    _fill_rect(buf, W, flare_x, 0, flare_x + flare_w, H, 88, 85, 80)
+    # Glow zone at flare tip
+    glow_h = max(4, H * 25 // 512)
+    _fill_rect(buf, W, flare_x - 4, 0, flare_x + flare_w + 4, glow_h, 210, 138, 38)
+    _fill_rect(buf, W, flare_x - 2, 0, flare_x + flare_w + 2, glow_h // 2, 235, 172, 65)
+    # Pipe runs: 2 horizontal orange pipes
+    for pipe_y in [H * 30 // 100, H * 62 // 100]:
+        ph2 = max(3, H * 12 // 512)
+        _fill_rect(buf, W, louv_w, pipe_y, flare_x, pipe_y + ph2, 175, 108, 45)
+        fl_sp = max(4, W * 55 // 512)
+        for fx in range(louv_w + fl_sp // 2, flare_x, fl_sp):
+            _fill_rect(buf, W, fx - 2, pipe_y - 2, fx + 3, pipe_y + ph2 + 2, 145, 85, 32)
 
 
 def draw_svc_fire_station(buf, W, H):
