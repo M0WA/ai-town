@@ -23,7 +23,7 @@ This commit must land BEFORE any test files for Deliverables 3a, 3d, 4c, 5c, or 
   `AgentHandle` in `IRenderer.h`; it is defined exactly once in `simulation_types.h` (see next
   item) to avoid ODR violations when both headers appear in the same translation unit.
   `virtual void spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone) = 0;`,
-  `virtual void moveVehicleAgent(AgentHandle handle, int tileX, int tileZ, float headingDeg) = 0;`,
+  `virtual void moveVehicleAgent(AgentHandle handle, float worldX, float worldZ, float headingDeg) = 0;`,
   `virtual void despawnVehicleAgent(AgentHandle handle) = 0;`,
   `virtual void setIntersectionSignalState(int tileX, int tileZ, SignalPhase phase) = 0;`,
   `virtual void showServiceCoverageOverlay(int tileX, int tileZ, ServiceBuildingType type, bool degraded) = 0;`,
@@ -35,7 +35,7 @@ This commit must land BEFORE any test files for Deliverables 3a, 3d, 4c, 5c, or 
 
 - [x] Define in `src/interfaces/simulation_types.h` all 6 new types required for Phase 11d query
   methods: `using AgentHandle = uint32_t;` (type alias), `enum class SignalPhase { Green, Red };`,
-  `struct AgentState { uint32_t agentId; int tileX; int tileZ; float headingDeg; ZoneType zone; };`,
+  `struct AgentState { uint32_t agentId; int tileX; int tileZ; float headingDeg; ZoneType zone; float worldX; float worldZ; };`,
   `struct IntersectionSignalState { int tileX; int tileZ; SignalPhase phase; };`,
   `struct RoadSegmentSpeed { int tileX; int tileZ; float speedFraction; };`,
   `struct ServiceCoverageTile { int tileX; int tileZ; ServiceBuildingType coveredBy; bool degraded; };`.
@@ -1266,11 +1266,13 @@ along road paths, and intersection signal state shown at road nodes.
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`,
   `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget)
 
-- [x] **`IRenderer::moveVehicleAgent(AgentHandle handle, int tileX, int tileZ, float headingDeg)`** — updates
-  the agent's scene node to the world-space position derived from tile coordinates
-  `(tileX, tileZ)` and sets Y-axis rotation each frame. Called from `main.cpp`
-  per-frame render loop after `CitySimulation::getAgentPositions()` is polled. No physics;
-  direct node position set (`setPosition` + `setRotation`).
+- [x] **`IRenderer::moveVehicleAgent(AgentHandle handle, float worldX, float worldZ, float headingDeg)`** — updates
+  the agent's scene node to the world-space position `(worldX, worldZ)` (metres, sub-tile
+  interpolated from `TrafficVehicle` path-following) and sets Y-axis rotation each frame.
+  Called from `main.cpp` per-frame render loop after `CitySimulation::getAgentPositions()`
+  is polled. No physics; direct node position set (`setPosition` + `setRotation`).
+  `main.cpp` uses `AgentState::worldX/worldZ` when non-zero; falls back to tile-centre
+  `(tileX + 0.5) * kTileSize` when both are zero.
   (ref: `architecture/graphics-architecture/scene-graph-ownership.md`)
 
 - [x] **`IRenderer::despawnVehicleAgent(AgentHandle)`** — look up the node pointer in `m_agentNodes[handle]` first, then apply the eviction sequence: iterate all material slots to clear texture pointers → `driver->setMaterial(SMaterial{})` → `node->remove()`, then erase the handle from `m_agentNodes`. Per `architecture/graphics-architecture/scene-graph-ownership.md`, agent nodes use `IAnimatedMesh` loaded via the scene manager — do NOT call `->drop()` on the mesh (scene manager retains ownership). `IrrlichtRenderer` owns agent nodes directly; `SceneEntityManager` is not involved. **TextureCache note**: vehicle atlas textures are loaded ONCE at renderer init and shared across all agent nodes; `spawnVehicleAgent` does NOT call `TextureCache::loadSRGB`, so `despawnVehicleAgent` does NOT call `TextureCache::releaseSRGB` — clearing the material slots is sufficient.
@@ -1278,8 +1280,11 @@ along road paths, and intersection signal state shown at road nodes.
 
 - [x] **`ICitySimulation::getAgentPositions()` query** — new method on `ICitySimulation`
   returning a `std::vector<AgentState>` (defined in `simulation_types.h`) where `AgentState`
-  carries `{ agentId, tileX, tileZ, headingDeg, ZoneType }`. Used by the render loop to
-  sync scene nodes to simulation state each frame. `AgentState` is a value type; no raw
+  carries `{ agentId, tileX, tileZ, headingDeg, ZoneType, worldX, worldZ }`. `worldX`
+  and `worldZ` are sub-tile interpolated world-space positions (metres) derived from
+  `TrafficVehicle` path-following (`srcX/srcZ` → `dstX/dstZ` at `kVehicleTilePerSecond`
+  tiles/s). `tileX/tileZ` are retained for audio distance culling. Used by the render loop
+  to sync scene nodes to simulation state each frame. `AgentState` is a value type; no raw
   pointers.
   (ref: `architecture/game-design/traffic-system.md`)
 
