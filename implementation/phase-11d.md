@@ -1520,17 +1520,27 @@ initiate a placement click on an occupied tile.
 
 ### Risks & Spikes
 
-- **RISK**: Per-frame `getAgentPositions()` copy of up to 10,000 `AgentState` structs may
+- **RISK (RESOLVED)**: Per-frame `getAgentPositions()` copy of up to 10,000 `AgentState` structs may
   cause frame-time spikes. **Resolution**: `AgentState` is 20 bytes
   (`uint32_t agentId` + `int tileX` + `int tileZ` + `float headingDeg` + `ZoneType zone`);
   10,000 × 20 B × 60 fps ≈ 11.4 MB/s — well within DDR4 bandwidth (30–50 GB/s). Use simple
   `std::vector<AgentState>` value-copy; no dirty-flag or double-buffer strategy needed. Add a
   `DCHECK(copy_us < 500)` timing guard in DEBUG builds during Deliverable 3a integration to
   confirm the copy remains under 0.5 ms at runtime.
-- **RISK**: Service coverage wireframe circle for a 800 m Fire Station radius will span many
+- **RISK (RESOLVED)**: Service coverage wireframe circle for a 800 m Fire Station radius will span many
   terrain chunks at varying heights. **Resolution**: terrain heights range 0–26 m on a default
   map, making screenspace projection unreliable across chunk boundaries. Go directly to the
   world-space tile-step polygon approach with `PolygonOffsetFactor=−1` and `EPO_FRONT` (same
   as intersection signal billboards — see
   `architecture/graphics-architecture/scene-graph-ownership.md` §Intersection Signal Billboard
   Registry). No flat-terrain screenspace prototype step is needed.
+- **RISK (RESOLVED)**: Billboard re-bake at −45° pitch with reworked LOD0 meshes may introduce
+  imposter mismatch visible at the LOD1→LOD2 transition distance (100 m / 90 m).
+  **Resolution**: all 28 billboard DDS files re-baked from Phase 11d LOD0 meshes (Deliverable
+  1a) and verified via `validate_assets.py` check #30 (DX10/DXGI=78/BC3_UNORM_SRGB, 1024×128,
+  4 mips). Deliverables 1a and 2c complete.
+- **RISK (RESOLVED)**: Adding four new `ICitySimulation` query methods (`getAgentPositions`,
+  `getIntersectionSignalStates`, `getRoadSegmentSpeeds`, `getServiceCoverage`) requires
+  updating `MockCitySimulation` before writing tests, or link errors result.
+  **Resolution**: all four `MOCK_METHOD` declarations added to `tests/ui/MockCitySimulation.h`
+  in Deliverable 0 (Day-One Commit). No separate spike needed.
