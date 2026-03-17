@@ -170,12 +170,17 @@ enum class SignalPhase {
 };
 
 // AgentState — per-agent snapshot returned by ICitySimulation::getAgentPositions().
+// worldX/worldZ hold the sub-tile-interpolated world-space position (metres).
+// When non-zero they are used directly by the renderer for smooth movement;
+// tileX/tileZ retain the integer tile for audio distance culling.
 struct AgentState {
     uint32_t agentId{0};
     int      tileX{0};
     int      tileZ{0};
     float    headingDeg{0.0f};
     ZoneType zone{ZoneType::Residential};
+    float    worldX{0.0f};   // sub-tile interpolated world X (m); 0 = use tile centre
+    float    worldZ{0.0f};   // sub-tile interpolated world Z (m); 0 = use tile centre
 };
 
 // IntersectionSignalState — signal-phase snapshot for one intersection tile.

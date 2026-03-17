@@ -189,8 +189,9 @@ public:
     virtual void spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ,
                                    ZoneType zone) = 0;
 
-    // moveVehicleAgent — update the agent's tile position and heading.
-    virtual void moveVehicleAgent(AgentHandle handle, int tileX, int tileZ,
+    // moveVehicleAgent — update the agent's world-space position and heading.
+    // worldX/worldZ are metres in world space (same coordinate system as terrain).
+    virtual void moveVehicleAgent(AgentHandle handle, float worldX, float worldZ,
                                   float headingDeg) = 0;
 
     // despawnVehicleAgent — remove and destroy the agent scene node.

@@ -428,8 +428,14 @@ int main(int argc, char** argv) {
                     it = activeAgents.find(handle);
                 }
 
-                // Move existing agent.
-                renderer.moveVehicleAgent(handle, a.tileX, a.tileZ, a.headingDeg);
+                // Move existing agent — use sub-tile-interpolated world position when available.
+                const float agentWx = (a.worldX != 0.0f || a.worldZ != 0.0f)
+                    ? a.worldX
+                    : (static_cast<float>(a.tileX) + 0.5f) * kTileSizeM;
+                const float agentWz = (a.worldX != 0.0f || a.worldZ != 0.0f)
+                    ? a.worldZ
+                    : (static_cast<float>(a.tileZ) + 0.5f) * kTileSizeM;
+                renderer.moveVehicleAgent(handle, agentWx, agentWz, a.headingDeg);
 
                 // Update vehicle audio (speed fraction derived from agent road data).
                 // Use speedFraction = 1.0 (free-flow) as default; traffic signal state

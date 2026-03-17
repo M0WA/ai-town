@@ -2571,16 +2571,14 @@ void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tile
     m_agentNodes[handle] = node;
 }
 
-void IrrlichtRenderer::moveVehicleAgent(AgentHandle handle, int tileX, int tileZ,
+void IrrlichtRenderer::moveVehicleAgent(AgentHandle handle, float worldX, float worldZ,
                                          float headingDeg)
 {
     auto it = m_agentNodes.find(handle);
     if (it == m_agentNodes.end()) return;  // no-op if handle not found
 
     IMeshSceneNode* node = it->second;
-    float wx = static_cast<float>(tileX) * kTileSize + kTileSize * 0.5f;
-    float wz = static_cast<float>(tileZ) * kTileSize + kTileSize * 0.5f;
-    node->setPosition(core::vector3df(wx, 0.0f, wz));
+    node->setPosition(core::vector3df(worldX, 0.0f, worldZ));
     node->setRotation(core::vector3df(0.0f, headingDeg, 0.0f));
 }
 

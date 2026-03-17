@@ -117,7 +117,12 @@ static void runAgentSyncOnce(
             it = activeAgents.find(handle);
         }
 
-        renderer->moveVehicleAgent(handle, a.tileX, a.tileZ, a.headingDeg);
+        // Use sub-tile world position if provided; otherwise fall back to tile centre.
+        const float agentWx = (a.worldX != 0.0f || a.worldZ != 0.0f)
+            ? a.worldX : (static_cast<float>(a.tileX) + 0.5f) * kTileSize;
+        const float agentWz = (a.worldX != 0.0f || a.worldZ != 0.0f)
+            ? a.worldZ : (static_cast<float>(a.tileZ) + 0.5f) * kTileSize;
+        renderer->moveVehicleAgent(handle, agentWx, agentWz, a.headingDeg);
 
         if (it->second.idleIdx >= 0) {
             audio->updateVehicleAudio(it->second.idleIdx, it->second.moveIdx, 1.0f, wx, wz);
@@ -185,8 +190,9 @@ TEST_F(AgentRenderSyncTest, AgentRenderSync_SpawnDespawn_MatchesSimulationOutput
     const std::vector<AgentState> oneAgent = {agent};
 
     // Frame 1: agent is new — expect spawn + move + audio acquire + updateVehicleAudio.
+    // worldX/worldZ are 0.0f so fallback tile-centre is used: (2+0.5)*10 = 25.0f.
     EXPECT_CALL(renderer_, spawnVehicleAgent(42u, 2, 2, ZoneType::Residential)).Times(1);
-    EXPECT_CALL(renderer_, moveVehicleAgent(42u, 2, 2, 0.0f)).Times(1);
+    EXPECT_CALL(renderer_, moveVehicleAgent(42u, 25.0f, 25.0f, 0.0f)).Times(1);
     EXPECT_CALL(audio_, acquireVehicleEnginePair(ZoneType::Residential))
         .WillOnce(Return(std::make_pair(0, 1)));
     EXPECT_CALL(audio_, updateVehicleAudio(0, 1, 1.0f, 20.0f, 20.0f)).Times(1);
@@ -194,7 +200,7 @@ TEST_F(AgentRenderSyncTest, AgentRenderSync_SpawnDespawn_MatchesSimulationOutput
     runAgentSyncOnce(oneAgent, activeAgents_, &renderer_, &audio_, camX, camZ);
 
     // Frame 2: agent still alive — expect move only (no spawn), audio update.
-    EXPECT_CALL(renderer_, moveVehicleAgent(42u, 2, 2, 0.0f)).Times(1);
+    EXPECT_CALL(renderer_, moveVehicleAgent(42u, 25.0f, 25.0f, 0.0f)).Times(1);
     EXPECT_CALL(audio_, updateVehicleAudio(0, 1, 1.0f, 20.0f, 20.0f)).Times(1);
 
     runAgentSyncOnce(oneAgent, activeAgents_, &renderer_, &audio_, camX, camZ);
@@ -259,8 +265,9 @@ TEST_F(AgentRenderSyncTest, AgentEngineAudio_AcquireRelease_MatchesSpawnDespawn)
     const std::vector<AgentState> emptyList;
 
     // Simulate pool exhaustion: acquireVehicleEnginePair returns {-1,-1}.
+    // worldX/worldZ are 0.0f so fallback tile-centre is used: (3+0.5)*10 = 35.0f.
     EXPECT_CALL(renderer_, spawnVehicleAgent(7u, 3, 3, ZoneType::Commercial)).Times(1);
-    EXPECT_CALL(renderer_, moveVehicleAgent(7u, 3, 3, 45.0f)).Times(1);
+    EXPECT_CALL(renderer_, moveVehicleAgent(7u, 35.0f, 35.0f, 45.0f)).Times(1);
     EXPECT_CALL(audio_, acquireVehicleEnginePair(ZoneType::Commercial))
         .WillOnce(Return(std::make_pair(-1, -1)));
     // updateVehicleAudio must NOT be called when idleIdx < 0.

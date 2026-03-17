@@ -145,7 +145,7 @@ public:
                 (AgentHandle handle, int tileX, int tileZ, ZoneType zone),
                 (override));
     MOCK_METHOD(void, moveVehicleAgent,
-                (AgentHandle handle, int tileX, int tileZ, float headingDeg),
+                (AgentHandle handle, float worldX, float worldZ, float headingDeg),
                 (override));
     MOCK_METHOD(void, despawnVehicleAgent,
                 (AgentHandle handle),

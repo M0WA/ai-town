@@ -1584,27 +1584,35 @@ TEST_F(NiceExtraCoverageTest, GetAgentPositions_AfterJunction_ReturnsNonEmpty) {
 }
 
 TEST_F(NiceExtraCoverageTest, GetAgentPositions_ZonedNeighbor_PropagatesZone) {
-    // Place a junction and a zoned tile adjacent to the signal tile.
-    // getAgentPositions() scans neighbors for zone type — the neighbor's zone must
-    // be reflected in the agent's zone field.
-    cs()->placeRoad(5, 5);
-    cs()->placeRoad(6, 5);
-    cs()->placeRoad(5, 6);
-    // Place a Commercial zone adjacent to the signal at (5,5).
-    cs()->placeZone(4, 5, ZoneType::Commercial, DensityTier::Low);
+    // Phase 11d: vehicles spawn every kVehicleSpawnInterval (3) road tiles placed.
+    // The vehicle spawns at the 3rd road tile and scans its neighbours at spawn time
+    // to determine zone type. Ensure a Commercial zone adjacent to the spawn tile is
+    // reflected in the vehicle's zone field.
+    //
+    // Layout: roads at (0,0) → (1,0) → (0,1) [spawn tile], Commercial zone at (1,1).
+    // (1,1) is an immediate neighbour of the spawn tile (0,1) → zone = Commercial.
+    cs()->placeRoad(0, 0);
+    cs()->placeRoad(1, 0);
+    // Place Commercial zone adjacent to the future spawn tile (0,1) before the spawn.
+    cs()->placeZone(1, 1, ZoneType::Commercial, DensityTier::Low);
+    // Third road triggers vehicle spawn at (0,1) with neighbour (1,1) = Commercial.
+    cs()->placeRoad(0, 1);
 
     auto agents = cs()->getAgentPositions();
-    // At least one agent should exist for the junction at (5,5).
-    bool found55 = false;
+    // A vehicle must have been spawned (kVehicleSpawnInterval=3, 3 roads placed).
+    ASSERT_FALSE(agents.empty()) << "Expected a vehicle agent after 3 roads placed.";
+
+    // Find the vehicle spawned at (0,1).
+    bool foundSpawnTile = false;
     for (const AgentState& a : agents) {
-        if (a.tileX == 5 && a.tileZ == 5) {
-            found55 = true;
-            // The neighbor at (4,5) is Commercial → zone must be Commercial.
+        if (a.tileX == 0 && a.tileZ == 1) {
+            foundSpawnTile = true;
+            // The neighbor (1,1) is Commercial → zone must be Commercial.
             EXPECT_EQ(a.zone, ZoneType::Commercial)
                 << "AgentState.zone must reflect adjacent Commercial zoned tile.";
         }
     }
-    EXPECT_TRUE(found55) << "Expected a signal/agent at the T-junction tile (5,5).";
+    EXPECT_TRUE(foundSpawnTile) << "Expected a vehicle agent spawned at tile (0,1).";
 }
 
 // ---------------------------------------------------------------------------

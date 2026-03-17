@@ -305,6 +305,7 @@ void CitySimulation::tick(float realDeltaSeconds) {
     // Called outside the budget-tick while-loop so signals fire at real-time frequency
     // regardless of simulation speed.
     doTrafficSignalTick(realDeltaSeconds);
+    doTrafficVehicleTick(realDeltaSeconds);
 }
 
 // ---------------------------------------------------------------------------
@@ -1389,6 +1390,92 @@ void CitySimulation::doTrafficSignalTick(float realDeltaSeconds) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 11d — Traffic vehicle path-following
+// ---------------------------------------------------------------------------
+//
+// Each vehicle moves at kVehicleTilePerSecond tiles per second (real-time).
+// When progress reaches 1.0 the vehicle picks the next road tile (preferring to
+// continue straight or turn; reversing only if no other adjacent road exists).
+//
+// Vehicles are spawned by placeRoad() (one vehicle per kVehicleSpawnInterval roads
+// placed) and despawned lazily when their current or destination tile is no longer
+// a road tile (detected at tile-arrival time).
+
+static constexpr float kVehicleTilePerSecond   = 4.0f;  // one 10-m tile per 0.25 s
+static constexpr int   kVehicleSpawnInterval   = 3;     // spawn 1 vehicle every N roads placed
+static constexpr float kTileSizeM              = 10.0f; // metres per tile (matches IrrlichtRenderer)
+
+bool CitySimulation::pickNextRoadTile(int curX, int curZ, int prevX, int prevZ,
+                                       int& outX, int& outZ) {
+    // Cardinal neighbours
+    const int dirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+    // Collect road-tile neighbours that are not the previous tile (avoid immediate U-turn).
+    std::vector<std::pair<int,int>> candidates;
+    for (const auto& d : dirs) {
+        int nx = curX + d[0];
+        int nz = curZ + d[1];
+        if (nx == prevX && nz == prevZ) continue;  // skip previous tile (no U-turn)
+        const TileData* td = findTile(nx, nz);
+        if (td && td->isRoad) candidates.push_back({nx, nz});
+    }
+    if (candidates.empty()) {
+        // No forward option — allow U-turn back to previous tile.
+        const TileData* td = findTile(prevX, prevZ);
+        if (td && td->isRoad) { outX = prevX; outZ = prevZ; return true; }
+        return false;
+    }
+    // Pick deterministically using a simple hash so vehicles cycle routes predictably.
+    size_t idx = static_cast<size_t>(curX * 7 + curZ * 13) % candidates.size();
+    outX = candidates[idx].first;
+    outZ = candidates[idx].second;
+    return true;
+}
+
+void CitySimulation::doTrafficVehicleTick(float realDeltaSeconds) {
+    if (m_trafficVehicles.empty()) return;
+
+    const float step = kVehicleTilePerSecond * realDeltaSeconds;
+
+    for (TrafficVehicle& v : m_trafficVehicles) {
+        v.progress += step;
+        if (v.progress >= 1.0f) {
+            // Arrived at destination tile — check it still exists as road.
+            const TileData* dst = findTile(v.dstX, v.dstZ);
+            if (!dst || !dst->isRoad) {
+                // Destination demolished — despawn by marking src invalid (handled below).
+                v.srcX = v.dstX = -9999;
+                continue;
+            }
+            // Pick next tile.
+            int nextX, nextZ;
+            if (!pickNextRoadTile(v.dstX, v.dstZ, v.srcX, v.srcZ, nextX, nextZ)) {
+                v.srcX = v.dstX = -9999; // no road to follow — despawn
+                continue;
+            }
+            v.srcX = v.dstX;
+            v.srcZ = v.dstZ;
+            v.dstX = nextX;
+            v.dstZ = nextZ;
+            v.progress -= 1.0f;
+            // Update heading.
+            float dx = static_cast<float>(v.dstX - v.srcX);
+            float dz = static_cast<float>(v.dstZ - v.srcZ);
+            v.headingDeg = std::atan2(dx, dz) * (180.0f / 3.14159265f);
+        }
+        // Interpolate world position.
+        float t = std::max(0.0f, std::min(1.0f, v.progress));
+        v.worldX = (static_cast<float>(v.srcX) + (v.dstX - v.srcX) * t + 0.5f) * kTileSizeM;
+        v.worldZ = (static_cast<float>(v.srcZ) + (v.dstZ - v.srcZ) * t + 0.5f) * kTileSizeM;
+    }
+
+    // Prune despawned vehicles.
+    m_trafficVehicles.erase(
+        std::remove_if(m_trafficVehicles.begin(), m_trafficVehicles.end(),
+            [](const TrafficVehicle& v){ return v.srcX == -9999; }),
+        m_trafficVehicles.end());
+}
+
+// ---------------------------------------------------------------------------
 // Density unlock scale
 // ---------------------------------------------------------------------------
 
@@ -1610,17 +1697,17 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
         }
     }
 
-    // Phase 11: round-robin variant cycling (_01/_02/_03).
-    // Increment counter for this (zone, tier) pair, then pick variant = counter % 3 + 1.
+    // Phase 11: round-robin variant cycling (_01/_02/_03/_04).
+    // Increment counter for this (zone, tier) pair, then pick variant = counter % 4 + 1.
     {
         int zoneIdx = static_cast<int>(type);
         int tierIdx = static_cast<int>(tier);
         int idx     = zoneIdx * 3 + tierIdx;
         m_buildingVariantCounters[idx]++;
-        int variantNum = ((m_buildingVariantCounters[idx] - 1) % 2) + 1;  // 1 or 2
+        int variantNum = ((m_buildingVariantCounters[idx] - 1) % 4) + 1;  // 1..4
 
         if (m_renderer) {
-            // Build name like "res_low_01", "res_low_02", "res_low_03"
+            // Build name like "res_low_01", "res_low_02", "res_low_03", "res_low_04"
             std::string baseName = zoneAssetBaseName(type, tier);
             // zoneAssetBaseName returns "zone_dens_01"; replace "01" suffix with variantNum
             if (baseName.size() >= 2) {
@@ -1772,6 +1859,39 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
     // Phase 10: spawn road tile mesh.
     if (m_renderer) {
         m_renderer->placeRoadMesh(tileX, tileZ);
+    }
+
+    // Phase 11d: spawn a traffic vehicle every kVehicleSpawnInterval road tiles placed.
+    // The new tile becomes the vehicle's starting position; pick an adjacent road tile
+    // as the initial destination. Vehicles only spawn when at least one road neighbour
+    // exists so they have somewhere to go.
+    if (!wasRoad && (m_roadTileCount % kVehicleSpawnInterval == 0)) {
+        const int dirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+        int dstX = tileX, dstZ = tileZ;  // fallback: stay on new tile (will despawn instantly)
+        for (auto& d : dirs) {
+            int nx = tileX + d[0];
+            int nz = tileZ + d[1];
+            const TileData* nd = findTile(nx, nz);
+            if (nd && nd->isRoad) { dstX = nx; dstZ = nz; break; }
+        }
+        if (dstX != tileX || dstZ != tileZ) {
+            TrafficVehicle v;
+            v.id = m_nextVehicleId++;
+            v.srcX = tileX; v.srcZ = tileZ;
+            v.dstX = dstX;  v.dstZ = dstZ;
+            v.progress = 0.0f;
+            float dx = static_cast<float>(dstX - tileX);
+            float dz = static_cast<float>(dstZ - tileZ);
+            v.headingDeg = std::atan2(dx, dz) * (180.0f / 3.14159265f);
+            v.worldX = (static_cast<float>(tileX) + 0.5f) * kTileSizeM;
+            v.worldZ = (static_cast<float>(tileZ) + 0.5f) * kTileSizeM;
+            // Zone nearest zoned tile for vehicle type selection
+            for (auto& d2 : dirs) {
+                const TileData* nd2 = findTile(tileX + d2[0], tileZ + d2[1]);
+                if (nd2 && nd2->isZoned) { v.zone = nd2->zone; break; }
+            }
+            m_trafficVehicles.push_back(v);
+        }
     }
 
     // Record undo
@@ -2258,35 +2378,21 @@ TimeOfDay CitySimulation::getTimeOfDay() const {
 // ---------------------------------------------------------------------------
 
 std::vector<AgentState> CitySimulation::getAgentPositions() const {
-    // Phase 11d Deliverable 3a: synthesise agent snapshots from traffic signal positions.
-    // Each intersection tile that has an active TrafficSignal is treated as a traffic agent
-    // position (the simulation's agent lifecycle is represented by the signal list).
-    // headingDeg is derived from the signal phase timer so it cycles smoothly each frame.
-    // agentId uses a Cantor-style hash of tile coordinates for a stable handle.
+    // Phase 11d Deliverable 3a: return path-following traffic vehicle positions.
+    // Each TrafficVehicle has a sub-tile-interpolated worldX/worldZ that is updated
+    // each frame by doTrafficVehicleTick(). The agentId is stable for the vehicle's
+    // lifetime. tileX/tileZ are the source tile (integer, for audio culling).
     std::vector<AgentState> agents;
-    agents.reserve(m_trafficSignals.size());
-    for (const TrafficSignal& sig : m_trafficSignals) {
+    agents.reserve(m_trafficVehicles.size());
+    for (const TrafficVehicle& v : m_trafficVehicles) {
         AgentState state;
-        // Stable agentId: uses unsigned arithmetic to avoid signed overflow.
-        uint32_t ux = static_cast<uint32_t>(sig.tileX + 32767);
-        uint32_t uz = static_cast<uint32_t>(sig.tileZ + 32767);
-        state.agentId    = (ux << 16) ^ uz;
-        if (state.agentId == 0) state.agentId = 1;  // 0 is reserved as invalid handle
-        state.tileX      = sig.tileX;
-        state.tileZ      = sig.tileZ;
-        state.headingDeg = std::fmod(sig.phaseTimer / sig.phaseSeconds * 360.0f, 360.0f);
-        // Determine zone type by scanning adjacent zoned tiles; default to Residential.
-        state.zone = ZoneType::Residential;
-        const int neighbors[4][2] = {{sig.tileX-1,sig.tileZ},{sig.tileX+1,sig.tileZ},
-                                     {sig.tileX,sig.tileZ-1},{sig.tileX,sig.tileZ+1}};
-        for (const auto& nb : neighbors) {
-            int64_t nkey = tileKey(nb[0], nb[1]);
-            auto nit = m_tiles.find(nkey);
-            if (nit != m_tiles.end() && nit->second.isZoned) {
-                state.zone = nit->second.zone;
-                break;
-            }
-        }
+        state.agentId    = v.id;
+        state.tileX      = v.srcX;
+        state.tileZ      = v.srcZ;
+        state.headingDeg = v.headingDeg;
+        state.zone       = v.zone;
+        state.worldX     = v.worldX;
+        state.worldZ     = v.worldZ;
         agents.push_back(state);
     }
     return agents;

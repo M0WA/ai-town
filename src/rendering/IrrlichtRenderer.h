@@ -166,7 +166,7 @@ public:
 
     // Phase 11d — traffic agent rendering stubs (full impl in Deliverable 3a)
     void spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone) override;
-    void moveVehicleAgent(AgentHandle handle, int tileX, int tileZ, float headingDeg) override;
+    void moveVehicleAgent(AgentHandle handle, float worldX, float worldZ, float headingDeg) override;
     void despawnVehicleAgent(AgentHandle handle) override;
     void setIntersectionSignalState(int tileX, int tileZ, SignalPhase phase) override;
     // Phase 11d — service coverage overlay stubs (full impl in Deliverable 4b)

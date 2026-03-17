@@ -330,7 +330,31 @@ private:
     // Populated by placeRoad() (when the new road tile is adjacent to 2+ existing roads)
     // and pruned by demolishTile() (remove entry when a road tile is demolished).
     // Each signal's phaseTimer is advanced by doTrafficSignalTick(realDeltaSeconds).
-    std::vector<TrafficSignal> m_trafficSignals;
+    std::vector<TrafficSignal>  m_trafficSignals;
+
+    // TrafficVehicle — Phase 11d Deliverable 3a path-following vehicle agent.
+    // Each vehicle traverses a sequence of road tiles. srcX/srcZ is the tile it
+    // departed from; dstX/dstZ is the tile it is heading towards. progress is
+    // 0..1 (0 = at src centre, 1 = at dst centre). When progress reaches 1 the
+    // vehicle picks the next road tile and resets progress. headingDeg is
+    // recomputed at each tile transition.
+    struct TrafficVehicle {
+        uint32_t  id{0};            // stable per-vehicle ID (never reused)
+        int       srcX{0}, srcZ{0}; // current source tile
+        int       dstX{0}, dstZ{0}; // current destination tile
+        float     progress{0.0f};   // 0..1 from src to dst
+        float     headingDeg{0.0f};
+        ZoneType  zone{ZoneType::Residential};
+        // World-space current position (interpolated each tick)
+        float     worldX{0.0f};
+        float     worldZ{0.0f};
+    };
+
+    // Phase 11d: path-following traffic vehicles.
+    // Spawned / despawned by placeRoad() / demolishTile().
+    // Positions advanced each tick by doTrafficVehicleTick().
+    std::vector<TrafficVehicle> m_trafficVehicles;
+    uint32_t                    m_nextVehicleId{1}; // monotonic; never reused
 
     // ------------------------------------------------------------------
     // Traffic — rolling windows (circular buffers, initialized to null_path default)
@@ -435,10 +459,17 @@ private:
 
     // Phase 10: advance traffic signal timers and fire sfx_intersection_tick.
     // Called once per tick() with real delta seconds (NOT sim-speed-scaled).
-    // Signals are independent of budget ticks — they toggle every
-    // SimulationConstants::traffic_signal_phase_seconds real-time seconds.
-    // Pre-cull: skips playPositionalSound if listener distance > 80 m.
     void doTrafficSignalTick(float realDeltaSeconds);
+
+    // Phase 11d: advance vehicle positions along road tiles.
+    // Speed: kVehicleTilePerSecond tiles per second (real-time, not sim-scaled).
+    void doTrafficVehicleTick(float realDeltaSeconds);
+
+    // Pick a random adjacent road tile for a vehicle to move to next.
+    // Returns true and sets outX/outZ if a valid neighbour exists (excluding the
+    // tile the vehicle just came from, unless it is the only option).
+    bool pickNextRoadTile(int curX, int curZ, int prevX, int prevZ,
+                          int& outX, int& outZ);
 
     // Economy helpers
     int64_t computeTaxRevenue(ZoneType zone) const;

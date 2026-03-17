@@ -459,11 +459,22 @@ def _add_ground_quad(m, gtype, xmin, xmax, zmin, zmax):
     feature type gtype. Prevents depth-buffer conflict with terrain mesh at y = 0.
     UV-mapped to GROUND_CELLS[gtype].
 
+    All extents are clamped to the tile half-extent (5*S = 0.5 units) so ground
+    patches never overflow into neighbouring road or terrain tiles after the
+    kTileSize=10 world-space scale is applied in IrrlichtRenderer.
+
     Args:
         m: MeshAccum to add geometry to
         gtype: ground feature type string (key of GROUND_CELLS)
-        xmin, xmax, zmin, zmax: XZ extents of the ground patch
+        xmin, xmax, zmin, zmax: XZ extents of the ground patch (before clamping)
     """
+    HALF = 5 * 0.1  # 5*S — tile half-extent
+    xmin = max(xmin, -HALF)
+    xmax = min(xmax,  HALF)
+    zmin = max(zmin, -HALF)
+    zmax = min(zmax,  HALF)
+    if xmin >= xmax or zmin >= zmax:
+        return  # degenerate quad after clamping — skip silently
     row, col = GROUND_CELLS[gtype]
     # CCW from above (+Y): BL->BR->TR->TL
     v, t = make_quad(
