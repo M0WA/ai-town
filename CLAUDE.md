@@ -278,7 +278,7 @@ labels change.**
 | `make config` | Generate the CMake build configuration (`ci-linux` preset by default) |
 | `make build` | Build all binaries (runs `config` automatically if `build/` is missing) |
 | `make clean` | Remove all build artifacts (`build/` directory) |
-| `make test` | Build with coverage, run unit + integration tests, generate lcov report in `coverage_html/` |
+| `make test` | Build with coverage, run unit + integration tests, generate lcov report, enforce ≥95% gate |
 
 Override the preset with `make config PRESET=ci-linux-coverage` for a coverage build.
 
@@ -350,7 +350,8 @@ ctest --test-dir build -C Release --output-on-failure
 
 ### Build & Toolchain
 
-- **Makefile**: `make config / build / clean / test` are thin wrappers around cmake/ctest. Update `Makefile` targets whenever build commands, CMake presets, or ctest labels change — the Makefile is the canonical quick-start interface.
+- **Makefile**: `make config / build / clean / test` are thin wrappers around cmake/ctest. Update `Makefile` targets whenever build commands, CMake presets, or ctest labels change — the Makefile is the canonical quick-start interface. `make test` enforces a **≥95% total line coverage gate** (target range 95–98%); override with `make test COVERAGE_MIN=90.0` if needed during active development.
+- **lcov `--ignore-errors`**: pass `mismatch,inconsistent,version` (comma-separated, single flag) to `lcov --capture` — `mismatch`/`inconsistent` suppress GCC 13 inline-function noise; `version` suppresses the GCC/gcov version-string mismatch emitted when the build and capture gcov versions differ slightly.
 - **Local build with gcc-12 fallback**: if the devcontainer image has not been rebuilt after the gcc-13 Dockerfile fix, `/usr/bin/c++` resolves to gcc-12 which lacks `<format>` (required by openal-soft ≥ 1.24.0). Workaround: pass `-DVCPKG_OVERLAY_PORTS=vcpkg-overlays` to cmake — the overlay pins openal-soft to 1.23.1. Once the devcontainer is rebuilt (which now sets the `c++` alternative to gcc-13), the overlay is not needed.
 - **CMakePresets**: Three CI presets defined in `CMakePresets.json`: `ci-linux` (Ninja, no coverage), `ci-linux-coverage` (Ninja, coverage), `ci-windows` (Ninja + MSVC). CI jobs call `cmake --preset <name>`. Local dev: set `VCPKG_ROOT` then `cmake --preset ci-linux` (add `-DVCPKG_OVERLAY_PORTS=vcpkg-overlays` if using gcc-12 fallback).
 - **Test deps via vcpkg**: `gtest` and `rapidcheck` are vcpkg-managed (not FetchContent). Targets: `GTest::gtest_main`, `GTest::gmock` (namespaced); `rapidcheck`, `rapidcheck_gtest` (bare, no namespace).

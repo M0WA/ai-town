@@ -1,38 +1,44 @@
 # AI Town - Convenience Makefile wrapping CMake/ctest
 # Requires: VCPKG_ROOT env var set, cmake, ninja, ctest, lcov
 
-BUILD_DIR        := build
-PRESET           := ci-linux
-COVERAGE_PRESET  := ci-linux-coverage
-COVERAGE_INFO    := coverage.info
+BUILD_DIR         := build
+PRESET            := ci-linux
+COVERAGE_PRESET   := ci-linux-coverage
+COVERAGE_INFO     := coverage.info
 COVERAGE_FILTERED := coverage_filtered.info
-COVERAGE_HTML    := coverage_html
+COVERAGE_HTML     := coverage_html
+# Minimum total line coverage % enforced by `make test`.
+# Target range: 95–98%. Tests must stay above 95; aim for 98.
+COVERAGE_MIN      := 95.0
 
 .PHONY: config build clean test
 
-## Generate the CMake build configuration (uses the ci-linux preset)
+## Generate the CMake build configuration (uses the ci-linux preset by default).
+## Override with: make config PRESET=ci-linux-coverage
 config:
 	cmake --preset $(PRESET)
 
-## Build all binaries (runs config first if build dir is missing)
+## Build all binaries (runs config first if build/ is missing).
 build: $(BUILD_DIR)/build.ninja
 	cmake --build $(BUILD_DIR)
 
 $(BUILD_DIR)/build.ninja:
 	$(MAKE) config
 
-## Remove all build artifacts
+## Remove all build artifacts and coverage files.
 clean:
 	rm -rf $(BUILD_DIR) $(COVERAGE_INFO) $(COVERAGE_FILTERED) $(COVERAGE_HTML)
 
-## Run unit + integration tests and generate an lcov coverage report
+## Build with coverage, run unit + integration tests, generate lcov report,
+## and enforce the $(COVERAGE_MIN)% total line coverage gate.
+## Coverage report is written to $(COVERAGE_HTML)/index.html.
 test:
 	cmake --preset $(COVERAGE_PRESET)
 	cmake --build $(BUILD_DIR)
 	ctest --test-dir $(BUILD_DIR) -LE "integration|requires-opengl" --output-on-failure
 	ctest --test-dir $(BUILD_DIR) -L "^integration$$" --output-on-failure
 	lcov --capture --directory $(BUILD_DIR) --base-directory . \
-	     --ignore-errors mismatch,inconsistent \
+	     --ignore-errors mismatch,inconsistent,version \
 	     --output-file $(COVERAGE_INFO)
 	lcov --remove $(COVERAGE_INFO) \
 	     --ignore-errors unused \
@@ -47,3 +53,12 @@ test:
 	     --output-file $(COVERAGE_FILTERED)
 	genhtml $(COVERAGE_FILTERED) --output-directory $(COVERAGE_HTML)
 	lcov --summary $(COVERAGE_FILTERED)
+	@total=$$(awk '/^LH:/{lh+=substr($$0,4)+0} /^LF:/{lf+=substr($$0,4)+0} \
+	  END{if(lf>0) printf "%.2f",lh/lf*100; else print 0}' $(COVERAGE_FILTERED)); \
+	awk -v pct="$$total" -v min="$(COVERAGE_MIN)" 'BEGIN { \
+	  if (pct+0 < min+0) { \
+	    print "FAIL: total line coverage " pct "% < " min "% gate"; exit 1 \
+	  } else { \
+	    print "PASS: total line coverage " pct "% >= " min "%" \
+	  } \
+	}'
