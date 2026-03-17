@@ -278,7 +278,7 @@ labels change.**
 | `make config` | Generate the CMake build configuration (`ci-linux` preset by default) |
 | `make build` | Build all binaries (runs `config` automatically if `build/` is missing) |
 | `make clean` | Remove all build artifacts (`build/` directory) |
-| `make test` | Run unit tests and integration tests via ctest |
+| `make test` | Build with coverage, run unit + integration tests, generate lcov report in `coverage_html/` |
 
 Override the preset with `make config PRESET=ci-linux-coverage` for a coverage build.
 
