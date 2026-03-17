@@ -412,10 +412,12 @@ class MeshAccum:
             ]:
                 self.add(v, t)
         else:
+            base = len(self.verts)
             v, t = box_faces(xmin, xmax, ymin, ymax, zmin, zmax,
                              wall_row, wall_col, roof_row, roof_col)
             self.verts.extend(v)
-            self.tris.extend(t)
+            for tri in t:
+                self.tris.append((base + tri[0], base + tri[1], base + tri[2]))
 
     def add_quad(self, v0, v1, v2, v3, normal, row, col):
         v, t = make_quad(v0, v1, v2, v3, normal, row, col)
@@ -838,15 +840,15 @@ def _add_sawtooth_roof(m, wall_row, wall_col, roof_row, roof_col,
     for i in range(n_ridges):
         bz0 = zmin + i * bay_w
         bz1 = bz0 + bay_w
-        bz_mid = bz0 + bay_w * 0.3  # ridge peak close to front of bay
-        # Shallow slope quad (wide, low angle) from bz0→bz_mid
+        bz_mid = bz0 + bay_w * 0.85  # ridge peak near back of bay
+        # Sloped south-pitch face (wide, ~30 deg) from bz0→bz_mid
         m.add_quad((xmin, y_base, bz0), (xmax, y_base, bz0),
                    (xmax, y_high, bz_mid), (xmin, y_high, bz_mid),
-                   (0, 0.8, -0.6), roof_row, roof_col)
-        # Steep north-light face (nearly vertical) from bz_mid→bz1
+                   (0, 0.87, -0.5), roof_row, roof_col)
+        # Steep north-light face (nearly vertical, ~80 deg) from bz_mid→bz1
         m.add_quad((xmin, y_high, bz_mid), (xmax, y_high, bz_mid),
                    (xmax, y_base, bz1), (xmin, y_base, bz1),
-                   (0, 0.2, 0.98), wall_row, wall_col)
+                   (0, 0.17, 0.98), wall_row, wall_col)
         # Left gable triangle
         m.add_quad((xmin, y_base, bz0), (xmin, y_high, bz_mid),
                    (xmin, y_high, bz_mid), (xmin, y_base, bz1),
@@ -1212,7 +1214,7 @@ def _build_res_high(zone, tier, variant, lod):
         base_hw = 6*S
         bh = 36*S
         sb1_y, sb2_y = 15*S, 25*S
-        sb = 1.5*S
+        sb = 2*S
         if lod == 2:
             m.add_box(-base_hw, base_hw, 0, bh, -base_hw, base_hw, wr, wc, rr, rc)
             return m.to_b3d()
@@ -1312,7 +1314,7 @@ def _build_com_low(zone, tier, variant, lod):
         # Box + sawtooth roof
         bw, bd, bh = 12*S, 8*S, 4*S
         hx, hz = bw/2, bd/2
-        tooth_h = 1.5*S
+        tooth_h = 2.5*S
         if lod == 1:
             m.add_box(-hx, hx, 0, bh+tooth_h*0.5, -hz, hz, wr, wc, rr, rc)
             return m.to_b3d()
@@ -1462,7 +1464,7 @@ def _build_com_high(zone, tier, variant, lod):
             return m.to_b3d()
         if lod == 1:
             m.add_box(-base_hw, base_hw, 0, bh, -base_hw, base_hw, wr, wc, rr, rc)
-            m.add_box(-0.05*S, 0.05*S, bh, bh+8*S, -0.05*S, 0.05*S, wr, wc)
+            m.add_box(-1.5*S, 1.5*S, bh, bh+8*S, -1.5*S, 1.5*S, wr, wc)
             return m.to_b3d()
         # LOD0: square shaft to chamfer_y
         m.add_box(-base_hw, base_hw, 0, chamfer_y, -base_hw, base_hw, wr, wc, rr, rc)
@@ -1479,7 +1481,7 @@ def _build_com_high(zone, tier, variant, lod):
                        (nx, 0, nz), wr, wc)
         _add_cylinder_cap(m, rr, rc, 0, 0, bh, oct_r, n_sides=n_sides, face_up=True)
         # Spire box
-        _add_spire(m, wr, wc, 0, 0, bh, bh+8*S, 0.5*S, n_sides=4)
+        _add_spire(m, wr, wc, 0, 0, bh, bh+8*S, 1.5*S, n_sides=4)
         return m.to_b3d()
 
     elif variant == "04":
@@ -1614,7 +1616,7 @@ def _build_ind_med(zone, tier, variant, lod):
         # Box + sawtooth north-light roof
         bw, bd, bh = 22*S, 18*S, 10*S
         hx, hz = bw/2, bd/2
-        saw_h = 2*S
+        saw_h = 2.5*S
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             return m.to_b3d()

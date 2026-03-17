@@ -268,17 +268,50 @@ Failed loads appear on stderr:
 
 ## CLI Reference
 
+### Usage
+
 ```text
 Usage: aitown_model_validator [options]
-  --width W    window width (default: 1280)
-  --height H   window height (default: 720)
-  --help       print this usage message
+  --width W              window width (default: 1280)
+  --height H             window height (default: 720)
+  --model <n1> [n2...]   show only the named model(s) in a single "Custom Selection"
+                         category, then exit. Auto-detects vehicles vs buildings
+                         from the model name prefix (car_, bus_, truck_ = vehicles;
+                         everything else = buildings at 10× scale)
+  --screenshot <file>    after rendering --screenshot-frame frames, save a PNG
+                         screenshot to the given path and advance to the next
+                         category. Multiple categories produce numbered files
+                         (e.g. shot_1.png, shot_2.png). In screenshot mode the
+                         orbit starts at 35° so both the front face and one side
+                         are visible immediately
+  --screenshot-frame N   frame number at which to capture the screenshot
+                         (default: 3)
+  --help                 print this usage message
 ```
 
-Exit codes:
+### Exit Codes
 
 - `0` — success (all categories displayed or operator exited early)
 - `1` — device creation failure (no OpenGL context available)
+
+### Examples
+
+```bash
+# Display only a single building and exit
+./build/aitown_model_validator --model res_low_01
+
+# Display multiple models in a custom selection
+./build/aitown_model_validator --model res_low_01 res_med_02 com_high_03
+
+# Display vehicles with road shader
+./build/aitown_model_validator --model car_sedan car_hatchback bus_standard
+
+# Capture screenshots of all categories, 1920×1080 resolution
+./build/aitown_model_validator --width 1920 --height 1080 --screenshot screenshots/shot.png
+
+# Capture a screenshot at frame 60 (stable pose after longer orbit)
+./build/aitown_model_validator --model res_med_01 --screenshot out.png --screenshot-frame 60
+```
 
 ---
 

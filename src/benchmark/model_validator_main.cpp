@@ -30,15 +30,23 @@
 struct ValidatorOptions {
     int width  = 1280;
     int height = 720;
+    std::vector<std::string> filterModels;  // --model <n1> [n2 ...]: show only these
+    std::string screenshotPath;             // --screenshot <file>: save PNG and exit
+    int screenshotFrame = 3;                // --screenshot-frame N: frame to capture (3 = stable first pose)
+    bool softwareDriver = false;            // --driver burnings: software renderer (headless-safe)
 };
 
 static void printUsage(const char* prog)
 {
     std::printf(
         "Usage: %s [options]\n"
-        "  --width W    window width (default: 1280)\n"
-        "  --height H   window height (default: 720)\n"
-        "  --help       print this usage message\n",
+        "  --width W              window width (default: 1280)\n"
+        "  --height H             window height (default: 720)\n"
+        "  --model <n1> [n2...]   show only the named model(s) then exit\n"
+        "  --screenshot <file>    render --screenshot-frame frames, save PNG, exit\n"
+        "  --screenshot-frame N   frame number to capture (default: 3)\n"
+        "  --driver burnings      use software renderer (headless/xvfb safe)\n"
+        "  --help                 print this usage message\n",
         prog
     );
 }
@@ -58,6 +66,37 @@ static bool parseArgs(int argc, char** argv, ValidatorOptions& opts)
         else if (std::strcmp(argv[i], "--height") == 0 && i + 1 < argc)
         {
             opts.height = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "--model") == 0)
+        {
+            // Consume all following non-flag args as model names
+            while (i + 1 < argc && argv[i + 1][0] != '-')
+                opts.filterModels.push_back(argv[++i]);
+            if (opts.filterModels.empty())
+            {
+                std::printf("--model requires at least one model name\n");
+                return false;
+            }
+        }
+        else if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc)
+        {
+            opts.screenshotPath = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "--screenshot-frame") == 0 && i + 1 < argc)
+        {
+            opts.screenshotFrame = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "--driver") == 0 && i + 1 < argc)
+        {
+            ++i;
+            if (std::strcmp(argv[i], "burnings") == 0 ||
+                std::strcmp(argv[i], "software") == 0)
+                opts.softwareDriver = true;
+            else
+            {
+                std::printf("Unknown driver: %s (supported: burnings, software)\n", argv[i]);
+                return false;
+            }
         }
         else
         {
@@ -113,7 +152,9 @@ int main(int argc, char** argv)
     // 1. Create Irrlicht device (EDT_OPENGL)
     // -----------------------------------------------------------------------
     irr::SIrrlichtCreationParameters params;
-    params.DriverType    = irr::video::EDT_OPENGL;
+    params.DriverType    = opts.softwareDriver
+                           ? irr::video::EDT_BURNINGSVIDEO
+                           : irr::video::EDT_OPENGL;
     params.WindowSize    = irr::core::dimension2d<irr::u32>(
                                static_cast<irr::u32>(opts.width),
                                static_cast<irr::u32>(opts.height));
@@ -138,15 +179,16 @@ int main(int argc, char** argv)
     irr::scene::ISceneManager* smgr   = device->getSceneManager();
 
     // -----------------------------------------------------------------------
-    // 2. Init GLEW (required before raw GL/GLEW calls; aitown_render internals
-    //    may depend on GLEW-resolved function pointers via BuildingAssetLoader).
+    // 2. Init GLEW (OpenGL mode only; skip for software renderer).
     // -----------------------------------------------------------------------
-    GLenum glewErr = glewInit();
-    if (glewErr != GLEW_OK)
+    if (!opts.softwareDriver)
     {
-        std::fprintf(stderr, "WARNING: glewInit() failed: %s\n",
-                     reinterpret_cast<const char*>(glewGetErrorString(glewErr)));
-        // Non-fatal: model loading does not require GLEW extensions directly.
+        GLenum glewErr = glewInit();
+        if (glewErr != GLEW_OK)
+        {
+            std::fprintf(stderr, "WARNING: glewInit() failed: %s\n",
+                         reinterpret_cast<const char*>(glewGetErrorString(glewErr)));
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -221,7 +263,34 @@ int main(int argc, char** argv)
         }
     };
 
-    const int kTotalCategories = static_cast<int>(categories.size());
+    // --model filter: build a synthetic single category from the requested names.
+    // Auto-detect path prefix: names starting with "car_", "bus_", or "truck_"
+    // are vehicles; everything else is buildings.
+    std::vector<Category> filteredCategories;
+    if (!opts.filterModels.empty())
+    {
+        bool isVehicle = false;
+        for (const std::string& mn : opts.filterModels)
+        {
+            if (mn.rfind("car_", 0) == 0 || mn.rfind("bus_", 0) == 0 ||
+                mn.rfind("truck_", 0) == 0)
+            {
+                isVehicle = true;
+                break;
+            }
+        }
+        Category custom;
+        custom.label         = "Custom Selection";
+        custom.pathPrefix    = isVehicle ? "3d/vehicles" : "3d/buildings";
+        custom.scaleBuilding = !isVehicle;
+        custom.hasStreet     = isVehicle;
+        custom.names         = opts.filterModels;
+        filteredCategories.push_back(custom);
+    }
+
+    const std::vector<Category>& activeCategories =
+        opts.filterModels.empty() ? categories : filteredCategories;
+    const int kTotalCategories = static_cast<int>(activeCategories.size());
 
     // -----------------------------------------------------------------------
     // 5. Attach keyboard event receiver
@@ -244,7 +313,7 @@ int main(int argc, char** argv)
     // -----------------------------------------------------------------------
     for (int ci = 0; ci < kTotalCategories && !exitEarly; ++ci)
     {
-        const Category& cat = categories[static_cast<size_t>(ci)];
+        const Category& cat = activeCategories[static_cast<size_t>(ci)];
 
         // Fresh scene manager for each category so assets are cleanly unloaded
         // between categories.
@@ -485,7 +554,9 @@ int main(int argc, char** argv)
         receiver.spacePressed = false;
 
         // --- Render loop for this category ---
-        float orbitAngle = 0.0f;
+        // In screenshot mode, start at a 35° orbit angle so the front face AND
+        // one side are visible without relying on the animation to reach a good pose.
+        float orbitAngle = opts.screenshotPath.empty() ? 0.0f : 35.0f;
         int   frameCount = 0;
         auto  t0         = std::chrono::steady_clock::now();
 
@@ -553,6 +624,32 @@ int main(int argc, char** argv)
 
             driver->endScene();
             ++frameCount;
+
+            // Auto-screenshot: capture frame N then advance to next category.
+            if (!opts.screenshotPath.empty() && frameCount == opts.screenshotFrame)
+            {
+                // Build per-category filename: insert category index before extension.
+                std::string shotPath = opts.screenshotPath;
+                if (kTotalCategories > 1)
+                {
+                    // Insert "_N" before last '.' (or append if no extension).
+                    size_t dot = shotPath.rfind('.');
+                    std::string idx = "_" + std::to_string(ci + 1);
+                    if (dot == std::string::npos)
+                        shotPath += idx;
+                    else
+                        shotPath = shotPath.substr(0, dot) + idx + shotPath.substr(dot);
+                }
+                irr::video::IImage* shot = driver->createScreenShot();
+                if (shot)
+                {
+                    driver->writeImageToFile(shot, shotPath.c_str());
+                    shot->drop();
+                    std::printf("  Screenshot saved: %s\n", shotPath.c_str());
+                    std::fflush(stdout);
+                }
+                break;  // advance to next category
+            }
         }
 
         // If device->run() returned false the window was closed.
