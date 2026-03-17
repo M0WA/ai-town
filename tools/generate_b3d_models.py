@@ -958,1246 +958,946 @@ def _add_dormer(m, wall_row, wall_col, roof_row, roof_col,
                      z_face - dormer_d, z_face)
 
 
+#!/usr/bin/env python3
+"""
+New geometry builder functions for generate_b3d_models.py.
+This file is a staging area -- its content replaces lines 961..2697 in the main script.
+
+Scale: 0.1 model units = 1 meter.
+Coordinate system: +X right, +Y up, +Z forward. Pivot at base centre (Y=0).
+"""
+
 # ---------------------------------------------------------------------------
-# RESIDENTIAL LOW / MED  (small buildings, 2,000–3,000 tris)
+# RESIDENTIAL LOW  (small residential, 2-3 story, 2000-3000 tris LOD0)
 # ---------------------------------------------------------------------------
 
-def _build_res_small(zone, tier, variant, lod):
-    """
-    Residential low/med — four DISTINCT building types per the spec:
-      low/01  flat-roof block: parapet, AC unit, utility meter, window recesses, tarmac
-      low/02  villa: hipped/gabled roof, carport lean-to, perimeter wall, gate
-      low/03  cottage: gabled clay-tile roof, chimney, covered porch, fence posts
-      low/04  red-brick: steeply-pitched roof, dormer, narrow chimney, boundary wall
-      med/01  2-storey block: flat parapet, external staircase, clustered AC units
-      med/02  2-storey villa: hipped roof, wrap-around balcony slab, kidney pool
-      med/03  2-storey cottage: hipped roof+dormer, chimney, full-width balcony
-      med/04  3-storey red-brick: pitched roof+2 dormers, projecting bay window
-    """
+def _build_res_low(zone, tier, variant, lod):
+    """Residential low tier -- 4 distinct house forms."""
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
-    floor_h = 0.30
-    floors = {"low": {"01":1,"02":2,"03":1,"04":2},
-              "med": {"01":2,"02":3,"03":2,"04":3}}[tier][variant]
-    h = floors * floor_h
+    S = 0.1
 
-    # ------------------------------------------------------------------ LOD1
-    if lod == 1:
-        if variant in ("01",) and tier == "low":
-            # flat parapet roof
-            hx, hz = 0.45, 0.45
-            m.add_box(-hx, hx, 0, h + 0.06, -hz, hz, wr, wc, rr, rc)
-        elif variant in ("01",) and tier == "med":
-            hx, hz = 0.45, 0.45
-            m.add_box(-hx, hx, 0, h + 0.06, -hz, hz, wr, wc, rr, rc)
-            m.add_box(-hx - 0.07, -hx, h * 0.4, h + 0.08, -0.08, 0.08, wr, wc, rr, rc)
-        elif variant == "02":
-            hx, hz = 0.50, 0.45; ridge_h = 0.25
-            m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-            _add_hipped_roof(m, wr, wc, rr, rc, -hx, hx, h, ridge_h, -hz, hz)
-        elif variant == "03":
-            hx, hz = 0.38, 0.44; ridge_h = 0.25
-            m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-            _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, h, ridge_h, -hz, hz)
-        else:  # 04
-            hx, hz = 0.42, 0.42; ridge_h = 0.25
-            m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-            _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, h, ridge_h, -hz, hz)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 340)
-        return m.to_b3d()
-
-    # ------------------------------------------------------------------ LOD0
-
-    # ---- variant 01: flat-roof block (low) / 2-storey block with staircase (med) ----
     if variant == "01":
-        hx, hz = 0.45, 0.45
-        ph = 0.06  # parapet height
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.03, ph=ph)
-        # AC condenser on parapet
-        m.add_box(-0.07, 0.07, h + ph, h + ph + 0.06, -hz + 0.10, -hz + 0.14, wr, wc, rr, rc)
-        # Utility meter box on facade
-        m.add_box(hx * 0.55 - 0.03, hx * 0.55 + 0.03, h * 0.3, h * 0.5, -hz - 0.02, -hz, wr, wc)
-        # Window recesses (front)
-        _add_windows(m, wr, wc, 3, floors, 0.06, h - 0.06,
-                     -hx + 0.08, hx - 0.08, -hz, -hz, -1, win_w_frac=0.20, win_h_frac=0.55)
-        # Window-box ledges
-        step_w = (2 * hx - 0.16) / 3
-        for ci in range(3):
-            lcx = -hx + 0.08 + step_w * (ci + 0.5)
-            for ri in range(floors):
-                ly = 0.06 + (h - 0.12) / floors * (ri + 0.3)
-                m.add_box(lcx - step_w * 0.3, lcx + step_w * 0.3, ly - 0.015, ly,
-                          -hz - 0.022, -hz, wr, wc, walls_only=True)
-        # Tarmac forecourt (flat quad in front)
-        m.add_box(-hx, hx, 0, 0.02, -hz - 0.18, -hz, wr, wc, rr, rc)
-        # Side windows
-        _add_windows(m, wr, wc, 2, floors, 0.06, h - 0.06,
-                     -hz + 0.06, hz - 0.06, hx, hx, 1, win_w_frac=0.22, win_h_frac=0.50)
-        _add_windows(m, wr, wc, 2, floors, 0.06, h - 0.06,
-                     -hz + 0.06, hz - 0.06, -hx, -hx, -1, win_w_frac=0.22, win_h_frac=0.50)
-        # Plinth
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        if tier == "med":
-            # External staircase box on left side
-            m.add_box(-hx - 0.08, -hx, h * 0.0, h + 0.06, -0.10, 0.10, wr, wc, rr, rc)
-            # Clustered AC condensers (3 units)
-            for ac_i in range(3):
-                ax = -hx * 0.5 + hx * ac_i * 0.5
-                m.add_box(ax - 0.04, ax + 0.04, h + ph, h + ph + 0.06,
-                          -hz + 0.08 + ac_i * 0.06, -hz + 0.12 + ac_i * 0.06, wr, wc, rr, rc)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
+        # Detached house: box + gabled roof + chimney box + porch slab
+        bw, bd, bh = 8*S, 10*S, 6*S
+        hx, hz = bw/2, bd/2
+        ridge_h = (10 - 6) * S
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
+            return m.to_b3d()
+        # LOD0
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
+        # Chimney box
+        chw = 0.8*S/2
+        _add_chimney(m, wr, wc, rr, rc, 0.0, 0.0, bh + ridge_h*0.5, 2*S, hw=chw)
+        # Porch slab
+        porch_d = 1.5*S
+        porch_w = 2.0*S
+        porch_y = 3.0*S
+        m.add_box(-porch_w/2, porch_w/2, porch_y, porch_y+0.2*S, -hz-porch_d, -hz, wr, wc)
         return m.to_b3d()
 
-    # ---- variant 02: villa with hipped roof, carport, perimeter wall, gate ----
-    if variant == "02":
-        hx, hz = 0.50, 0.45; ridge_h = 0.25
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        _add_hipped_roof(m, wr, wc, rr, rc, -hx, hx, h, ridge_h, -hz, hz)
-        # Carport lean-to on right side
-        cx0 = hx; cx1 = hx + 0.22; cz0 = -hz * 0.6; cz1 = hz; carport_h = h * 0.55
-        m.add_box(cx0, cx1, 0, carport_h, cz0, cz1, wr, wc, rr, rc)
-        # Flat carport roof slab
-        m.add_box(cx0 - 0.01, cx1 + 0.01, carport_h, carport_h + 0.02, cz0 - 0.01, cz1 + 0.01,
-                  wr, wc, rr, rc)
-        # Perimeter wall at plot edge (front face, low wall)
-        wall_h = 0.08; wall_t = 0.02
-        m.add_box(-hx - 0.05, hx + 0.22 + 0.05, 0, wall_h, -hz - 0.22, -hz - 0.22 + wall_t,
-                  wr, wc, rr, rc)
-        # Left perimeter wall
-        m.add_box(-hx - 0.05, -hx - 0.05 + wall_t, 0, wall_h, -hz - 0.22, hz + 0.05, wr, wc, rr, rc)
-        # Gate gap: right perimeter wall (two sections)
-        m.add_box(hx + 0.22 + 0.05 - wall_t, hx + 0.22 + 0.05, 0, wall_h,
-                  -hz - 0.22, hz + 0.05, wr, wc, rr, rc)
-        # Windows front
-        _add_windows(m, wr, wc, 3, floors, 0.06, h - 0.06,
-                     -hx + 0.10, hx * 0.7, -hz, -hz, -1, win_w_frac=0.20, win_h_frac=0.55)
-        # Window-box ledges
-        step_w2 = (hx * 0.7 - (-hx + 0.10)) / 3
-        for ci in range(3):
-            lcx = -hx + 0.10 + step_w2 * (ci + 0.5)
-            for ri in range(floors):
-                ly = 0.06 + (h - 0.12) / floors * (ri + 0.3)
-                m.add_box(lcx - step_w2 * 0.28, lcx + step_w2 * 0.28, ly - 0.015, ly,
-                          -hz - 0.022, -hz, wr, wc, walls_only=True)
-        if tier == "med":
-            # Wrap-around first-floor balcony slab
-            _add_balcony_slab(m, wr, wc, -hx - 0.02, hx + 0.02, floor_h, -hz, 0.06)
-            _add_balcony_slab(m, wr, wc, -hx - 0.02, -hx + 0.02, floor_h, -hz, 0.06)
-            # Kidney pool area (flat slab in garden)
-            m.add_box(-hx + 0.05, hx - 0.05, 0.01, 0.025, -hz - 0.16, -hz - 0.06, wr, wc, rr, rc)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
+    elif variant == "02":
+        # Semi-detached pair: two unit boxes + two hipped roofs
+        unit_w, unit_d, unit_h = 6*S, 8*S, 5*S
+        total_w = 12*S
+        hx, hz = total_w/2, unit_d/2
+        ridge_h_val = 3*S
+        if lod == 1:
+            m.add_box(-hx, hx, 0, unit_h, -hz, hz, wr, wc, rr, rc)
+            _add_hipped_roof(m, wr, wc, rr, rc, -hx, 0, unit_h, ridge_h_val, -hz, hz)
+            _add_hipped_roof(m, wr, wc, rr, rc, 0, hx, unit_h, ridge_h_val, -hz, hz)
+            return m.to_b3d()
+        # LOD0: two unit boxes
+        m.add_box(-hx, 0, 0, unit_h, -hz, hz, wr, wc, rr, rc)
+        m.add_box(0, hx, 0, unit_h, -hz, hz, wr, wc, rr, rc)
+        _add_hipped_roof(m, wr, wc, rr, rc, -hx, 0, unit_h, ridge_h_val, -hz, hz)
+        _add_hipped_roof(m, wr, wc, rr, rc, 0, hx, unit_h, ridge_h_val, -hz, hz)
         return m.to_b3d()
 
-    # ---- variant 03: cottage — gabled roof, chimney, covered porch, fence posts ----
-    if variant == "03":
-        hx, hz = 0.38, 0.44; ridge_h = 0.25
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, h, ridge_h, -hz, hz)
-        # Brick chimney stub (taller than ridge)
-        _add_chimney(m, wr, wc, rr, rc, hx * 0.35, 0.0, h + ridge_h * 0.5, 0.22, hw=0.04)
-        # Covered front porch canopy (projecting flat slab)
-        pc_w = 0.22; pc_d = 0.12; pc_y = h * 0.40; pc_t = 0.02
-        m.add_box(-pc_w / 2, pc_w / 2, pc_y, pc_y + pc_t, -hz - pc_d, -hz, wr, wc, rr, rc)
-        # Porch posts
-        for px in [-pc_w / 2 + 0.02, pc_w / 2 - 0.02]:
-            m.add_box(px - 0.015, px + 0.015, 0, pc_y, -hz - pc_d + 0.01, -hz - pc_d + 0.03, wr, wc)
-        # Timber-post garden fence
-        _add_fence_posts(m, wr, wc, -hx - 0.02, hx + 0.02, 0, 0.10, -hz - 0.18, 10)
-        # Windows front
-        _add_windows(m, wr, wc, 2, floors, 0.06, h - 0.06,
-                     -hx + 0.08, hx - 0.08, -hz, -hz, -1, win_w_frac=0.25, win_h_frac=0.55)
-        # Window-box ledges
-        step_w3 = (2 * hx - 0.16) / 2
-        for ci in range(2):
-            lcx = -hx + 0.08 + step_w3 * (ci + 0.5)
-            for ri in range(floors):
-                ly = 0.06 + (h - 0.12) / floors * (ri + 0.3)
-                m.add_box(lcx - step_w3 * 0.35, lcx + step_w3 * 0.35, ly - 0.015, ly,
-                          -hz - 0.022, -hz, wr, wc, walls_only=True)
-        if tier == "med":
-            # Full-width covered balcony on first floor
-            _add_balcony_slab(m, wr, wc, -hx - 0.02, hx + 0.02, floor_h, -hz, 0.07)
-            # Wrought-iron fence posts on balcony
-            _add_fence_posts(m, wr, wc, -hx, hx, floor_h - 0.06, floor_h, -hz - 0.07, 8)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
+    elif variant == "03":
+        # Three unit boxes + mono-pitch roof + bay window box projection
+        unit_w, unit_d = 4*S, 8*S
+        total_w = 12*S
+        front_h, rear_h = 5*S, 4*S
+        hx, hz = total_w/2, unit_d/2
+        if lod == 1:
+            m.add_box(-hx, hx, 0, front_h, -hz, hz, wr, wc, rr, rc)
+            m.add_quad((-hx, front_h, -hz), (hx, front_h, -hz),
+                       (hx, rear_h, hz), (-hx, rear_h, hz),
+                       (0, 1, 0.3), rr, rc)
+            return m.to_b3d()
+        # LOD0: three unit boxes
+        for i in range(3):
+            x0 = -hx + i * unit_w
+            x1 = x0 + unit_w
+            m.add_box(x0, x1, 0, front_h, -hz, hz, wr, wc, rr, rc)
+        _add_mono_pitch_roof(m, wr, wc, rr, rc, -hx, hx, rear_h, front_h, -hz, hz)
+        # Bay window box projection on centre unit
+        bay_w, bay_h = 0.8*S, 2.5*S
+        m.add_box(-bay_w/2, bay_w/2, 0.3*S, 0.3*S+bay_h, -hz-bay_w, -hz, wr, wc, rr, rc)
         return m.to_b3d()
 
-    # ---- variant 04: red-brick — steeply-pitched roof, dormer, narrow chimney,
-    #                              boundary wall at plot edge ----
-    if variant == "04":
-        hx, hz = 0.42, 0.42; ridge_h = 0.20  # steeper pitch
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, h, ridge_h, -hz, hz)
-        # Single dormer on front slope
-        _add_dormer(m, wr, wc, rr, rc, 0.0, -hz + (hz - (-hz)) * 0.4,
-                    h + ridge_h * 0.25, dormer_w=0.14, dormer_h=0.12, dormer_d=0.09)
-        # Narrow chimney
-        _add_chimney(m, wr, wc, rr, rc, -hx * 0.3, 0.0, h + ridge_h * 0.4, 0.24, hw=0.04)
-        # Low brick boundary wall at plot edge
-        bw_h = 0.07; bw_t = 0.025
-        for (bx0, bx1, bz0, bz1) in [
-            (-hx - 0.05, hx + 0.05, -hz - 0.16, -hz - 0.16 + bw_t),  # front
-            (-hx - 0.05, -hx - 0.05 + bw_t, -hz - 0.16, hz + 0.05),  # left
-            (hx + 0.05 - bw_t, hx + 0.05, -hz - 0.16, hz + 0.05),    # right
-        ]:
-            m.add_box(bx0, bx1, 0, bw_h, bz0, bz1, wr, wc, rr, rc)
-        # Windows front
-        _add_windows(m, wr, wc, 3, floors, 0.06, h - 0.06,
-                     -hx + 0.08, hx - 0.08, -hz, -hz, -1, win_w_frac=0.18, win_h_frac=0.52)
-        # Window-box ledges
-        step_w4 = (2 * hx - 0.16) / 3
-        for ci in range(3):
-            lcx = -hx + 0.08 + step_w4 * (ci + 0.5)
-            for ri in range(floors):
-                ly = 0.06 + (h - 0.12) / floors * (ri + 0.3)
-                m.add_box(lcx - step_w4 * 0.28, lcx + step_w4 * 0.28, ly - 0.015, ly,
-                          -hz - 0.022, -hz, wr, wc, walls_only=True)
-        if tier == "med":
-            # Projecting bay window on first floor
-            bw = 0.14; bd = 0.06
-            m.add_box(-bw / 2, bw / 2, floor_h * 0.1, floor_h * 0.85, -hz - bd, -hz, wr, wc)
-            # Second dormer
-            _add_dormer(m, wr, wc, rr, rc, -hx * 0.5, -hz + (hz - (-hz)) * 0.4,
-                        h + ridge_h * 0.25, dormer_w=0.12, dormer_h=0.11, dormer_d=0.08)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
+    elif variant == "04":
+        # Bungalow: box + low hipped roof + veranda slab
+        bw, bd, bh = 10*S, 12*S, 3*S
+        hx, hz = bw/2, bd/2
+        ridge_h = (5-3)*S
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_hipped_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
+            return m.to_b3d()
+        # LOD0
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        _add_hipped_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
+        # Veranda slab (single roof slab, no posts)
+        ver_d = 1.2*S
+        ver_h = 2.4*S
+        m.add_box(-hx-0.05*S, hx+0.05*S, ver_h, ver_h+0.1*S, -hz-ver_d, -hz, wr, wc)
         return m.to_b3d()
 
     return m.to_b3d()
 
 
 # ---------------------------------------------------------------------------
-# COMMERCIAL LOW / MED  (small buildings, 2,000–3,000 tris)
+# RESIDENTIAL MED  (medium residential, 3-5 story, 3000-5000 tris LOD0)
 # ---------------------------------------------------------------------------
 
-def _build_com_small(zone, tier, variant, lod):
-    """
-    Commercial low/med — four DISTINCT building types per the spec:
-      low/01  convenience store: flat parapet, full-width glazed shopfront, sign board, parking apron
-      low/02  café: flat roof, canvas awning frame with brackets, side terrace
-      low/03  auto garage: corrugated facade, two roll-up shutter doors, open forecourt
-      low/04  supermarket: flat parapet, full-width shopfront, covered walkway canopy, trolley bay
-      med/01  strip mall: flat roof+HVAC, continuous shopfronts, ribbon windows, parking apron
-      med/02  boutique hotel: flat roof, juliet balcony railings, fabric canopy, bracket lintels
-      med/03  corner bank: flat roof+cornice, paired pilasters, arched window heads, revolving door recess
-      med/04  office block: curtain-wall facade, flat roof+plant room, recessed entrance+canopy
-    """
+def _build_res_med(zone, tier, variant, lod):
+    """Residential med tier -- 4 distinct mid-rise forms."""
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
+    S = 0.1
 
-    floors = {"low": {"01":1,"02":2,"03":1,"04":2},
-              "med": {"01":2,"02":3,"03":2,"04":3}}[tier][variant]
-    floor_h = 0.30
-    h = floors * floor_h
-
-    # ------------------------------------------------------------------ LOD1
-    if lod == 1:
-        hx = {"01":0.45,"02":0.50,"03":0.44,"04":0.46}.get(variant, 0.45)
-        hz = {"01":0.45,"02":0.42,"03":0.50,"04":0.45}.get(variant, 0.45)
-        ph = 0.07
-        m.add_box(-hx, hx, 0, h + ph, -hz, hz, wr, wc, rr, rc)
-        # Single awning extrusion for silhouette
-        aw_y = floor_h * 0.74
-        m.add_box(-hx * 0.75, hx * 0.75, aw_y, aw_y + 0.035, -hz - 0.09, -hz, wr, wc)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 340)
-        return m.to_b3d()
-
-    # ------------------------------------------------------------------ LOD0
-
-    # ---- variant 01: convenience store ----
     if variant == "01":
-        hx, hz, ph = 0.45, 0.45, 0.065
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.03, ph=ph)
-        # Full-width glazed shopfront recess
-        _add_loading_dock(m, wr, wc, 0.0, 0.0, -hz, hx * 1.6, floor_h * 0.80, 0.07, normal_sign_z=-1)
-        # Projecting sign board above entrance
-        m.add_box(-hx * 0.90, hx * 0.90, floor_h * 0.82, floor_h * 0.97, -hz - 0.045, -hz, wr, wc)
-        # Parking apron
-        m.add_box(-hx, hx, 0, 0.02, -hz - 0.25, -hz, wr, wc, rr, rc)
-        # Upper windows (if 2 floors)
-        if floors > 1:
-            _add_windows(m, wr, wc, 4, floors - 1, floor_h + 0.04, h - 0.05,
-                         -hx + 0.06, hx - 0.06, -hz, -hz, -1, win_w_frac=0.18, win_h_frac=0.60)
-        _add_ac_units(m, wr, wc, rr, rc, h + ph, -hx * 0.6, hx * 0.6, -hz * 0.5, hz * 0.5, count=2)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        if tier == "med":
-            # Strip mall: HVAC units, ribbon windows on upper floor, parking apron
-            _add_ac_units(m, wr, wc, rr, rc, h + ph, -hx * 0.7, hx * 0.7, -hz * 0.6, hz * 0.6, count=3)
-            # Fascia sign panels
-            for sp_i in range(3):
-                spx = -hx * 0.7 + hx * 1.4 * sp_i / 2
-                m.add_box(spx - 0.08, spx + 0.08, h - 0.06, h, -hz - 0.012, -hz, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
+        # Box + flat roof (add_box to parapet height)
+        bw, bd, bh = 16*S, 12*S, 12*S
+        hx, hz = bw/2, bd/2
+        par_h = 0.5*S
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh+par_h, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        _add_parapet(m, wr, wc, -hx, hx, bh, -hz, hz, pw=0.03, ph=par_h*0.1)
         return m.to_b3d()
 
-    # ---- variant 02: café ----
-    if variant == "02":
-        hx, hz, ph = 0.50, 0.42, 0.08
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.03, ph=ph)
-        # Canvas awning frame (bracket-and-valance)
-        aw_y = floor_h * 0.68; aw_h = 0.045; aw_d = 0.12
-        aw_x0 = -hx * 0.70; aw_x1 = hx * 0.70
-        # Valance front face
-        m.add_box(aw_x0, aw_x1, aw_y, aw_y + aw_h, -hz - aw_d, -hz - aw_d + 0.015, wr, wc)
-        # Awning top slab
-        m.add_box(aw_x0 - 0.01, aw_x1 + 0.01, aw_y + aw_h - 0.018, aw_y + aw_h,
-                  -hz - aw_d, -hz, wr, wc, walls_only=False)
-        # Bracket supports
-        n_brk = max(3, int((aw_x1 - aw_x0) / 0.16))
-        brk_step = (aw_x1 - aw_x0) / n_brk
-        for bi in range(n_brk + 1):
-            bx = aw_x0 + bi * brk_step
-            m.add_box(bx - 0.009, bx + 0.009, aw_y, aw_y + aw_h, -hz - aw_d, -hz, wr, wc, walls_only=True)
-        # Signage band
-        m.add_box(-hx * 0.85, hx * 0.85, floor_h * 0.82, floor_h * 0.98, -hz - 0.012, -hz, wr, wc, walls_only=True)
-        # Side terrace (flat slab area)
-        m.add_box(hx, hx + 0.18, 0, 0.02, -hz, hz * 0.6, wr, wc, rr, rc)
-        # Entrance window recess
-        _add_loading_dock(m, wr, wc, 0.0, 0.0, -hz, hx * 0.8, floor_h * 0.72, 0.05, normal_sign_z=-1)
-        # Upper windows
-        if floors > 1:
-            _add_windows(m, wr, wc, 3, floors - 1, floor_h + 0.04, h - 0.05,
-                         -hx + 0.06, hx - 0.06, -hz, -hz, -1, win_w_frac=0.20, win_h_frac=0.60)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        if tier == "med":
-            # Boutique hotel: juliet balcony railings on upper floor windows, fabric canopy
-            for fl in range(1, floors):
-                fy = fl * floor_h
-                m.add_box(-hx * 0.70, hx * 0.70, fy, fy + 0.015, -hz - 0.025, -hz, wr, wc, walls_only=True)
-            # Ornamental bracket lintels above windows
-            _add_windows(m, wr, wc, 3, 1, floor_h + 0.04, h - 0.05,
-                         -hx + 0.06, hx - 0.06, -hz, -hz, -1, win_w_frac=0.22, win_h_frac=0.55)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
+    elif variant == "02":
+        # Four unit boxes + alternating gabled roofs
+        unit_w, unit_d, unit_h = 4*S, 10*S, 10*S
+        total_w = 16*S
+        hx, hz = total_w/2, unit_d/2
+        if lod == 1:
+            m.add_box(-hx, hx, 0, unit_h, -hz, hz, wr, wc, rr, rc)
+            for i in range(4):
+                x0 = -hx + i*unit_w
+                x1 = x0 + unit_w
+                rh = 1.0*S if (i%2==0) else 0.8*S
+                _add_gabled_roof(m, wr, wc, rr, rc, x0, x1, unit_h, rh, -hz, hz)
+            return m.to_b3d()
+        # LOD0: four units with staggered setbacks
+        for i in range(4):
+            x0 = -hx + i*unit_w
+            x1 = x0 + unit_w
+            setback = 0.5*S if (i%2==0) else 0.0
+            m.add_box(x0, x1, 0, unit_h, -hz-setback, hz, wr, wc, rr, rc)
+            rh = 1.0*S if (i%2==0) else 0.8*S
+            _add_gabled_roof(m, wr, wc, rr, rc, x0, x1, unit_h, rh, -hz-setback, hz)
         return m.to_b3d()
 
-    # ---- variant 03: auto garage ----
-    if variant == "03":
-        hx, hz, ph = 0.44, 0.50, 0.06
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.025, ph=ph)
-        # Corrugated-look facade ribs on front
-        _add_facade_ribs(m, wr, wc, -hx + 0.02, hx - 0.02, 0.04, h - 0.04, -hz, 14)
-        # Two wide roll-up shutter door openings
-        for door_cx in [-hx * 0.45, hx * 0.28]:
-            _add_loading_dock(m, wr, wc, door_cx, 0.0, -hz, 0.28, h * 0.68, 0.06, normal_sign_z=-1)
-        # Open forecourt
-        m.add_box(-hx, hx, 0, 0.02, -hz - 0.25, -hz, wr, wc, rr, rc)
-        # Corrugated ribs on sides
-        _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h - 0.04, hx, 10)
-        _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h - 0.04, -hx, 10)
-        # Small windows above shutter doors
-        for door_cx in [-hx * 0.45, hx * 0.28]:
-            m.add_box(door_cx - 0.06, door_cx + 0.06, h * 0.72, h - 0.05, -hz - 0.02, -hz, wr, wc)
-        if tier == "med":
-            # Wider footprint, add side loading bay
-            _add_loading_dock(m, wr, wc, 0.0, 0.0, hz, 0.30, h * 0.65, 0.06, normal_sign_z=1)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
+    elif variant == "03":
+        # L-shaped plan (two boxes forming L) + flat roofs
+        h = 9*S
+        if lod == 1:
+            m.add_box(-7*S, 7*S, 0, h, -6*S, 6*S, wr, wc, rr, rc)
+            return m.to_b3d()
+        # L-shape: main block + leg
+        m.add_box(-7*S, 7*S, 0, h, -6*S, 0, wr, wc, rr, rc)
+        m.add_box(-7*S, -1*S, 0, h, 0, 6*S, wr, wc, rr, rc)
         return m.to_b3d()
 
-    # ---- variant 04: supermarket ----
-    if variant == "04":
-        hx, hz, ph = 0.46, 0.45, 0.07
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.03, ph=ph)
-        # Full-width glazed shopfront
-        _add_loading_dock(m, wr, wc, 0.0, 0.0, -hz, hx * 1.70, floor_h * 0.82, 0.06, normal_sign_z=-1)
-        # Recessed covered walkway canopy (set back creating covered zone)
-        m.add_box(-hx * 0.95, hx * 0.95, floor_h * 0.84, floor_h * 0.88, -hz - 0.08, -hz, wr, wc)
-        # Freestanding trolley-bay shelter in forecourt
-        m.add_box(hx * 0.30, hx * 0.65, 0, floor_h * 0.55, -hz - 0.22, -hz - 0.06, wr, wc, rr, rc)
-        # Trolley bay shelter roof
-        m.add_box(hx * 0.28, hx * 0.67, floor_h * 0.53, floor_h * 0.55, -hz - 0.24, -hz - 0.04, wr, wc)
-        # Parking apron
-        m.add_box(-hx, hx, 0, 0.02, -hz - 0.30, -hz, wr, wc, rr, rc)
-        _add_ac_units(m, wr, wc, rr, rc, h + ph, -hx * 0.6, hx * 0.6, -hz * 0.5, hz * 0.5, count=3)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        if tier == "med":
-            # Office block: curtain-wall, plant room behind parapet, recessed entrance canopy
-            _add_curtain_wall_mullions(m, wr, wc, -hx, hx, 0, h, -hz, 5, floors, normal_sign_z=-1)
-            # Plant room box behind parapet
-            m.add_box(-hx * 0.5, hx * 0.5, h + ph, h + ph + 0.12, -hz * 0.5, hz * 0.5, wr, wc, rr, rc)
-            # Projecting concrete entrance canopy
-            m.add_box(-hx * 0.55, hx * 0.55, floor_h * 0.78, floor_h * 0.80, -hz - 0.14, -hz, wr, wc)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 2200)
+    elif variant == "04":
+        # Box + mansard roof sides
+        bw, bd, bh = 18*S, 14*S, 10*S
+        hx, hz = bw/2, bd/2
+        mansard_h = 3*S
+        total_h = bh + mansard_h
+        if lod == 1:
+            m.add_box(-hx, hx, 0, total_h, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        # LOD0: main body
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        # Mansard roof: steep sides + flat top
+        inset = 1.0*S
+        m.add_quad((-hx, bh, -hz), (hx, bh, -hz),
+                   (hx-inset, total_h, -hz+inset), (-hx+inset, total_h, -hz+inset),
+                   (0, 0.3, -0.95), wr, wc)
+        m.add_quad((hx, bh, hz), (-hx, bh, hz),
+                   (-hx+inset, total_h, hz-inset), (hx-inset, total_h, hz-inset),
+                   (0, 0.3, 0.95), wr, wc)
+        m.add_quad((-hx, bh, hz), (-hx, bh, -hz),
+                   (-hx+inset, total_h, -hz+inset), (-hx+inset, total_h, hz-inset),
+                   (-0.95, 0.3, 0), wr, wc)
+        m.add_quad((hx, bh, -hz), (hx, bh, hz),
+                   (hx-inset, total_h, hz-inset), (hx-inset, total_h, -hz+inset),
+                   (0.95, 0.3, 0), wr, wc)
+        # Flat top
+        m.add_quad((-hx+inset, total_h, -hz+inset), (hx-inset, total_h, -hz+inset),
+                   (hx-inset, total_h, hz-inset), (-hx+inset, total_h, hz-inset),
+                   (0, 1, 0), rr, rc)
         return m.to_b3d()
 
     return m.to_b3d()
 
 
 # ---------------------------------------------------------------------------
-# INDUSTRIAL LOW  (small buildings, 2,000–3,000 tris)
-# ---------------------------------------------------------------------------
-
-def _build_ind_low(zone, tier, variant, lod):
-    """
-    Industrial low — four DISTINCT building types per the spec:
-      01  corrugated metal warehouse: mono-pitch shed, corrugated ribs, shutter door, lean-to annex, truck dock
-      02  brick workshop: flat felted roof+parapet, roller-shutter entrance, sign board above entrance
-      03  sawtooth factory: CRITICAL sawtooth roofline (min 2 ridges), chimney stack, chain-link fence
-      04  storage yard: small flat-roof gatehouse, container stacks, floodlight mast
-    """
-    wr, wc = WALL_CELLS[(zone, tier, variant)]
-    rr, rc = ROOF_CELL
-    m = MeshAccum()
-
-    floor_h = 0.30
-    floors = {"01":1,"02":2,"03":1,"04":2}[variant]
-    h_wall = floors * floor_h
-
-    # ------------------------------------------------------------------ LOD1
-    if lod == 1:
-        if variant == "01":
-            hx, hz = 0.45, 0.45
-            roof_rise = h_wall * 0.28
-            h_avg = h_wall + roof_rise * 0.5
-            m.add_box(-hx, hx, 0, h_avg, -hz, hz, wr, wc, rr, rc)
-            m.add_quad((-hx, h_wall + roof_rise, hz), (hx, h_wall + roof_rise, hz),
-                       (hx, h_wall, -hz), (-hx, h_wall, -hz), (0, 1, 0), rr, rc)
-        elif variant == "02":
-            hx, hz = 0.50, 0.42
-            m.add_box(-hx, hx, 0, h_wall + 0.07, -hz, hz, wr, wc, rr, rc)
-        elif variant == "03":
-            hx, hz = 0.48, 0.50
-            y_high = h_wall + h_wall * 0.30
-            # Two visible sawtooth ridges at LOD1
-            m.add_box(-hx, hx, 0, h_wall, -hz, hz, wr, wc, rr, rc)
-            bay_w = (hz * 2) / 2
-            for i in range(2):
-                bz_mid = -hz + i * bay_w + bay_w * 0.3
-                m.add_quad((-hx, y_high, bz_mid), (hx, y_high, bz_mid),
-                           (hx, h_wall, -hz + i * bay_w), (-hx, h_wall, -hz + i * bay_w),
-                           (0, 1, 0), rr, rc)
-        else:  # 04
-            hx, hz = 0.30, 0.30
-            m.add_box(-hx, hx, 0, h_wall, -hz, hz, wr, wc, rr, rc)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 340)
-        return m.to_b3d()
-
-    # ------------------------------------------------------------------ LOD0
-
-    # ---- variant 01: corrugated metal warehouse ----
-    if variant == "01":
-        hx, hz = 0.45, 0.45
-        roof_rise = h_wall * 0.28
-        # Main shed box
-        m.add_box(-hx, hx, 0, h_wall, -hz, hz, wr, wc, rr, rc)
-        # Mono-pitch roof (high at back)
-        _add_mono_pitch_roof(m, wr, wc, rr, rc, -hx, hx, h_wall, h_wall + roof_rise, -hz, hz)
-        # Corrugated ribs on principal (front) facade — min 8 per spec
-        _add_facade_ribs(m, wr, wc, -hx + 0.02, hx - 0.02, 0.04, h_wall - 0.04, -hz, 10)
-        # Wide roll-up shutter loading door
-        _add_loading_dock(m, wr, wc, 0.0, 0.0, -hz, 0.36, h_wall * 0.70, 0.07, normal_sign_z=-1)
-        # Lean-to office annexe on left end
-        annex_w = 0.22; annex_h = h_wall * 0.55
-        m.add_box(-hx - annex_w, -hx, 0, annex_h, -hz * 0.7, hz, wr, wc, rr, rc)
-        # Annex flat roof
-        m.add_box(-hx - annex_w - 0.01, -hx + 0.01, annex_h, annex_h + 0.02,
-                  -hz * 0.7 - 0.01, hz + 0.01, wr, wc, rr, rc)
-        # Truck dock (recessed bay at floor level, back face)
-        _add_loading_dock(m, wr, wc, 0.0, 0.0, hz, 0.32, h_wall * 0.55, 0.08, normal_sign_z=1)
-        # Yellow kerb marker (thin flat slab in front of dock)
-        m.add_box(-0.18, 0.18, 0, 0.02, hz, hz + 0.06, wr, wc, rr, rc)
-        # Side ribs
-        _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, hx, 8)
-        _add_facade_ribs(m, wr, wc, -hz * 0.7 + 0.02, hz - 0.02, 0.04, h_wall - 0.04, -hx, 6)
-        # Plinth
-        m.add_box(-hx - annex_w - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
-        return m.to_b3d()
-
-    # ---- variant 02: brick workshop ----
-    if variant == "02":
-        hx, hz = 0.50, 0.42; ph = 0.07
-        m.add_box(-hx, hx, 0, h_wall, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h_wall, -hz, hz, pw=0.025, ph=ph)
-        # Roller-shutter entrance recess
-        _add_loading_dock(m, wr, wc, 0.0, 0.0, -hz, 0.28, h_wall * 0.72, 0.06, normal_sign_z=-1)
-        # Hand-painted sign board above entrance
-        m.add_box(-hx * 0.70, hx * 0.70, h_wall * 0.74, h_wall * 0.96, -hz - 0.014, -hz, wr, wc, walls_only=True)
-        # Small windows on upper part
-        _add_windows(m, wr, wc, 2, 1, h_wall * 0.55, h_wall - 0.05,
-                     -hx * 0.65, -hx * 0.05, -hz, -hz, -1, win_w_frac=0.25, win_h_frac=0.55)
-        _add_windows(m, wr, wc, 2, 1, h_wall * 0.55, h_wall - 0.05,
-                     hx * 0.05, hx * 0.65, -hz, -hz, -1, win_w_frac=0.25, win_h_frac=0.55)
-        # Tyre prop stacks (small box stacks against side wall)
-        for ti in range(3):
-            m.add_box(hx, hx + 0.06, 0, 0.08 + ti * 0.07,
-                      -hz + 0.05 + ti * 0.12, -hz + 0.05 + ti * 0.12 + 0.07, wr, wc, rr, rc)
-        # Corner columns
-        for cx, cz in [(-hx, -hz), (-hx, hz), (hx, -hz), (hx, hz)]:
-            m.add_box(cx - 0.02, cx + 0.02, 0, h_wall, cz - 0.02, cz + 0.02, wr, wc, walls_only=True)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
-        return m.to_b3d()
-
-    # ---- variant 03: sawtooth factory — CRITICAL PRIMARY IDENTIFIER ----
-    if variant == "03":
-        hx, hz = 0.48, 0.50
-        y_high = h_wall + h_wall * 0.32
-        # Main shed walls
-        m.add_box(-hx, hx, 0, h_wall, -hz, hz, wr, wc, rr, rc)
-        # SAWTOOTH ROOF: min 2 distinct asymmetric ridges visible from the side
-        _add_sawtooth_roof(m, wr, wc, rr, rc, -hx, hx, h_wall, y_high, -hz, hz, n_ridges=3)
-        # Chimney stack on gable end
-        _add_chimney(m, wr, wc, rr, rc, 0.0, hz - 0.06, y_high, 0.22, hw=0.06)
-        # Chain-link fence perimeter (thin box posts)
-        _add_fence_posts(m, wr, wc, -hx - 0.06, hx + 0.06, 0, 0.14, -hz - 0.18, 8)
-        _add_fence_posts(m, wr, wc, -hz - 0.06, hz + 0.06, 0, 0.14, -hx - 0.06, 8)
-        # Front windows
-        _add_windows(m, wr, wc, 3, 1, h_wall * 0.15, h_wall * 0.72,
-                     -hx + 0.10, hx - 0.10, -hz, -hz, -1, win_w_frac=0.16, win_h_frac=0.55)
-        # Side ribs
-        _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, hx, 8)
-        _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, -hx, 8)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
-        return m.to_b3d()
-
-    # ---- variant 04: storage yard with gatehouse ----
-    if variant == "04":
-        # Small flat-roof gatehouse (min 3×3 m footprint)
-        hx, hz = 0.30, 0.30; ph = 0.055
-        m.add_box(-hx, hx, 0, h_wall, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h_wall, -hz, hz, pw=0.025, ph=ph)
-        # Gate window on front
-        _add_windows(m, wr, wc, 2, 1, h_wall * 0.15, h_wall * 0.75,
-                     -hx + 0.06, hx - 0.06, -hz, -hz, -1, win_w_frac=0.30, win_h_frac=0.60)
-        # Container stacks — 3 box props of varying sizes
-        containers = [
-            ( 0.35,  0.75, 0, 0.16, -hz + 0.05, hz + 0.40),
-            ( 0.35,  0.75, 0.16, 0.30, -hz + 0.05, hz + 0.40),
-            (-0.80, -0.40, 0, 0.18, -hz + 0.05, hz + 0.32),
-        ]
-        for cx0, cx1, cy0, cy1, cz0, cz1 in containers:
-            m.add_box(cx0, cx1, cy0, cy1, cz0, cz1, wr, wc, rr, rc)
-        # Floodlight mast (thin vertical stick + flat top box)
-        mast_x = hx + 0.06; mast_z = -hz + 0.05
-        m.add_box(mast_x - 0.012, mast_x + 0.012, 0, h_wall + 0.35,
-                  mast_z - 0.012, mast_z + 0.012, wr, wc, walls_only=True)
-        m.add_box(mast_x - 0.04, mast_x + 0.04, h_wall + 0.32, h_wall + 0.36,
-                  mast_z - 0.035, mast_z + 0.025, wr, wc, rr, rc)
-        # Chain-link fence perimeter
-        _add_fence_posts(m, wr, wc, -hx - 0.06, 0.85, 0, 0.14, -hz - 0.10, 10)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
-        return m.to_b3d()
-
-    return m.to_b3d()
-
-
-# ---------------------------------------------------------------------------
-# INDUSTRIAL MED  (small buildings, 2,000–3,000 tris)
-# ---------------------------------------------------------------------------
-
-def _build_ind_med(zone, tier, variant, lod):
-    """
-    Industrial med — four DISTINCT building types per the spec:
-      01  flat-roof factory: flat roof+2 chimney stacks, 2 loading bays, metal-railed walkway
-      02  steel-frame warehouse: corner columns proud of cladding, fire escape, elevated covered walkway
-      03  brick mill: flat roof+rooftop cylindrical water tank on support frame, large industrial windows
-      04  distribution centre: square footprint, loading docks on 2 sides, dock shelter hoods, gatehouse booth
-    """
-    wr, wc = WALL_CELLS[(zone, tier, variant)]
-    rr, rc = ROOF_CELL
-    m = MeshAccum()
-
-    floor_h = 0.30
-    floors = {"01":2,"02":3,"03":2,"04":3}[variant]
-    h_wall = floors * floor_h
-
-    # ------------------------------------------------------------------ LOD1
-    if lod == 1:
-        hx = {"01":0.46,"02":0.52,"03":0.44,"04":0.48}.get(variant, 0.46)
-        hz = {"01":0.46,"02":0.48,"03":0.50,"04":0.48}.get(variant, 0.46)
-        m.add_box(-hx, hx, 0, h_wall + 0.06, -hz, hz, wr, wc, rr, rc)
-        if variant == "01":
-            # Two chimney stubs visible
-            for ch_x in [-hx * 0.4, hx * 0.35]:
-                m.add_box(ch_x - 0.03, ch_x + 0.03, h_wall, h_wall + 0.22, hz * 0.5 - 0.03, hz * 0.5 + 0.03, wr, wc, walls_only=True)
-        elif variant == "03":
-            # Water tank hint
-            m.add_box(-0.08, 0.08, h_wall + 0.06, h_wall + 0.24, -0.08, 0.08, wr, wc, rr, rc)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 340)
-        return m.to_b3d()
-
-    # ------------------------------------------------------------------ LOD0
-
-    # ---- variant 01: flat-roof factory with chimney stacks and loading bays ----
-    if variant == "01":
-        hx, hz = 0.46, 0.46; ph = 0.06
-        m.add_box(-hx, hx, 0, h_wall, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h_wall, -hz, hz, pw=0.025, ph=ph)
-        # Two concrete chimney stacks above parapet (min 2m above roof = 0.20 model units)
-        _add_chimney(m, wr, wc, rr, rc, -hx * 0.40, hz * 0.42, h_wall, 0.24, hw=0.06)
-        _add_chimney(m, wr, wc, rr, rc,  hx * 0.35, hz * 0.42, h_wall, 0.22, hw=0.06)
-        # Ground-floor loading bays (2 inset rects)
-        for bay_cx in [-hx * 0.45, hx * 0.25]:
-            _add_loading_dock(m, wr, wc, bay_cx, 0.0, -hz, 0.24, h_wall * 0.60, 0.07, normal_sign_z=-1)
-        # Metal-railed access walkway at second floor along facade
-        walkway_y = floor_h
-        m.add_box(-hx - 0.01, hx + 0.01, walkway_y, walkway_y + 0.02, -hz - 0.06, -hz, wr, wc, walls_only=False)
-        # Walkway railing posts
-        n_posts = 8
-        for pi in range(n_posts + 1):
-            px = -hx + 2 * hx * pi / n_posts
-            m.add_box(px - 0.008, px + 0.008, walkway_y, walkway_y + 0.06, -hz - 0.055, -hz - 0.04, wr, wc)
-        # Windows
-        _add_windows(m, wr, wc, 4, floors, 0.06, h_wall - 0.06,
-                     -hx + 0.08, hx - 0.08, -hz, -hz, -1, win_w_frac=0.14, win_h_frac=0.50)
-        # Side ribs
-        _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, hx, 8)
-        _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, -hx, 8)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _add_ac_units(m, wr, wc, rr, rc, h_wall + ph, -hx * 0.6, hx * 0.6, -hz * 0.5, hz * 0.5, count=3)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
-        return m.to_b3d()
-
-    # ---- variant 02: steel-frame warehouse ----
-    if variant == "02":
-        hx, hz = 0.52, 0.48; ph = 0.06
-        m.add_box(-hx, hx, 0, h_wall, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h_wall, -hz, hz, pw=0.025, ph=ph)
-        # Exposed corner columns proud of cladding (vertical slab strips)
-        col_d = 0.05
-        for cx, cz, nx in [(-hx, -hz, -1), (hx, -hz, 1), (-hx, hz, -1), (hx, hz, 1)]:
-            if nx < 0:
-                m.add_box(cx - col_d, cx, 0, h_wall, cz - 0.03, cz + 0.03, wr, wc, walls_only=True)
-            else:
-                m.add_box(cx, cx + col_d, 0, h_wall, cz - 0.03, cz + 0.03, wr, wc, walls_only=True)
-        # Fire-escape staircase on gable end (zigzag box)
-        m.add_box(hx, hx + 0.09, 0, h_wall + 0.06, -0.12, 0.12, wr, wc, rr, rc)
-        # Stair landing hints
-        for fl in range(floors + 1):
-            fy = fl * floor_h
-            m.add_box(hx + 0.01, hx + 0.085, fy, fy + 0.02, -0.10, 0.10, wr, wc, walls_only=False)
-        # Elevated covered walkway (connecting two building wings — bridge slab)
-        m.add_box(-hx - 0.01, hx + 0.01, h_wall * 0.55, h_wall * 0.57, -0.10, 0.10, wr, wc, walls_only=False)
-        # Wide windows
-        _add_windows(m, wr, wc, 4, floors, 0.06, h_wall - 0.06,
-                     -hx + 0.08, hx - 0.08, -hz, -hz, -1, win_w_frac=0.18, win_h_frac=0.55)
-        # Corrugated ribs on walls
-        _add_facade_ribs(m, wr, wc, -hx + 0.05, hx - 0.05, 0.04, h_wall - 0.04, -hz, 10)
-        _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, -hx - col_d, 8)
-        _add_facade_ribs(m, wr, wc, -hz + 0.02, hz - 0.02, 0.04, h_wall - 0.04, hx + col_d, 8)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
-        return m.to_b3d()
-
-    # ---- variant 03: brick mill with rooftop cylindrical water tank ----
-    if variant == "03":
-        hx, hz = 0.44, 0.50; ph = 0.06
-        m.add_box(-hx, hx, 0, h_wall, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h_wall, -hz, hz, pw=0.025, ph=ph)
-        # Rooftop water tank on steel support frame
-        tank_r = 0.12; tank_cy = h_wall + ph + 0.12; tank_top = tank_cy + 0.18
-        _add_cylinder(m, wr, wc, 0.0, 0.0, tank_cy, tank_top, tank_r, n_sides=8)
-        _add_cylinder_cap(m, wr, wc, 0.0, 0.0, tank_top + 0.03, tank_r * 1.1, n_sides=8, face_up=True)
-        # Support frame legs (4 thin boxes)
-        for sx, sz in [(-1, -1), (1, -1), (-1, 1), (1, 1)]:
-            lx = sx * tank_r * 0.7; lz = sz * tank_r * 0.7
-            m.add_box(lx - 0.015, lx + 0.015, h_wall + ph, tank_cy, lz - 0.015, lz + 0.015, wr, wc, walls_only=True)
-        # Large multi-pane industrial windows (wider than tall)
-        _add_windows(m, wr, wc, 3, floors, 0.06, h_wall - 0.06,
-                     -hx + 0.08, hx - 0.08, -hz, -hz, -1, win_w_frac=0.24, win_h_frac=0.40)
-        # Arched window head lintels (thin slab above each window row)
-        for wi in range(3):
-            wx = -hx + 0.08 + (2 * hx - 0.16) / 3 * (wi + 0.5)
-            m.add_box(wx - 0.07, wx + 0.07, h_wall * 0.72, h_wall * 0.76, -hz - 0.02, -hz, wr, wc, walls_only=True)
-        # Cast-iron fire escapes on rear facade
-        m.add_box(-hx * 0.8, -hx * 0.5, 0, h_wall + 0.06, hz, hz + 0.08, wr, wc, rr, rc)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
-        return m.to_b3d()
-
-    # ---- variant 04: distribution centre — square, loading docks on 2 sides ----
-    if variant == "04":
-        hx, hz = 0.48, 0.48; ph = 0.06
-        m.add_box(-hx, hx, 0, h_wall, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h_wall, -hz, hz, pw=0.025, ph=ph)
-        # Loading docks on two perpendicular sides with dock shelter hoods
-        for dock_cx in [-hx * 0.40, hx * 0.25]:
-            _add_loading_dock(m, wr, wc, dock_cx, 0.0, -hz, 0.25, h_wall * 0.62, 0.07, normal_sign_z=-1)
-            # Dock shelter hood (sloped slab overhang)
-            m.add_box(dock_cx - 0.14, dock_cx + 0.14, h_wall * 0.64, h_wall * 0.67, -hz - 0.10, -hz, wr, wc, walls_only=False)
-        # Loading docks on side face
-        _add_loading_dock(m, wr, wc, 0.0, 0.0, hx, 0.28, h_wall * 0.62, 0.07, normal_sign_z=1)
-        m.add_box(-0.16, 0.16, h_wall * 0.64, h_wall * 0.67, hx, hx + 0.10, wr, wc, walls_only=False)
-        # Elevated gatehouse booth (raised box above main entrance)
-        m.add_box(-hx * 0.20, hx * 0.20, h_wall * 0.70, h_wall + 0.08, -hz - 0.06, -hz, wr, wc, rr, rc)
-        # Concrete truck apron
-        m.add_box(-hx, hx, 0, 0.02, -hz - 0.30, -hz, wr, wc, rr, rc)
-        m.add_box(-hx - 0.30, -hx, 0, 0.02, -hz, hz, wr, wc, rr, rc)
-        # Windows
-        _add_windows(m, wr, wc, 4, floors, 0.06, h_wall - 0.06,
-                     -hx * 0.15, hx - 0.08, -hz, -hz, -1, win_w_frac=0.14, win_h_frac=0.50)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.04, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        _add_ac_units(m, wr, wc, rr, rc, h_wall + ph, -hx * 0.6, hx * 0.6, -hz * 0.5, hz * 0.5, count=3)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h_wall, -hz, hz, 2200)
-        return m.to_b3d()
-
-    return m.to_b3d()
-
-
-# ---------------------------------------------------------------------------
-# RESIDENTIAL HIGH  (large buildings, 6,000–8,000 tris)
+# RESIDENTIAL HIGH  (tall residential, 8-15 story, 6000-10000 tris LOD0)
 # ---------------------------------------------------------------------------
 
 def _build_res_high(zone, tier, variant, lod):
-    """
-    Residential high-rise: balcony slabs, recessed window bays, planted parapet,
-    stairwell tower, AC units.
-    height_floors: 01=5, 02=7, 03=8, 04=10
-    """
+    """Residential high -- 4 distinct tower forms."""
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
+    S = 0.1
+    floor_h = 3*S
 
-    floor_h = 0.30
-    floors = {"01":5,"02":7,"03":8,"04":10}[variant]
-    h = floors * floor_h
-
-    params = {
-        "01": {"hx":0.40,"hz":0.35,"setbacks":0,"stair_side":"left"},
-        "02": {"hx":0.45,"hz":0.40,"setbacks":1,"stair_side":"right"},
-        "03": {"hx":0.38,"hz":0.45,"setbacks":2,"stair_side":"left"},
-        "04": {"hx":0.42,"hz":0.38,"setbacks":1,"stair_side":"both"},
-    }[variant]
-    hx = params["hx"]; hz = params["hz"]
-    setbacks = params["setbacks"]
-
-    if lod == 2:
-        # LOD2 geometry shell: simplified box + balcony extrusions hint
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        for fl in range(2, floors, 3):
+    if variant == "01":
+        # Tall shaft box + flat roof + balcony slabs every 3 floors
+        bw, bd, bh = 10*S, 10*S, 40*S
+        hx, hz = bw/2, bd/2
+        floors = 13
+        if lod == 2:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            m.add_box(-2*S, 2*S, bh, bh+3*S, -2*S, 2*S, wr, wc, rr, rc)
+            return m.to_b3d()
+        # LOD0
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        # Plant room box
+        m.add_box(-2*S, 2*S, bh, bh+3*S, -2*S, 2*S, wr, wc, rr, rc)
+        # Balcony slabs every 3 floors
+        for fl in range(3, floors, 3):
             fy = fl * floor_h
-            m.add_box(-hx-0.025, hx+0.025, fy-0.02, fy, -hz-0.025, -hz, wr, wc)
+            _add_balcony_slab(m, wr, wc, -4*S, 4*S, fy, -hz, 1.2*S)
         return m.to_b3d()
 
-    if lod == 1:
-        # LOD1: box with balcony slab profile and stair tower hint
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        for fl in range(2, floors, 3):
-            fy = fl * floor_h
-            m.add_box(-hx-0.02, hx+0.02, fy-0.018, fy, -hz-0.03, -hz, wr, wc)
-        # Stair tower stub
-        m.add_box(-hx-0.06, -hx, h*0.6, h+0.06, -0.08, 0.08, wr, wc, rr, rc)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 1200)
+    elif variant == "02":
+        # Slab box + flat roof
+        bw, bd, bh = 24*S, 12*S, 30*S
+        hx, hz = bw/2, bd/2
+        if lod == 2:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            m.add_box(-hx-1*S, -hx, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
+            m.add_box(hx, hx+1*S, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
+            return m.to_b3d()
+        # LOD0
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        # End staircase boxes
+        m.add_box(-hx-1*S, -hx, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
+        m.add_box(hx, hx+1*S, 0, bh, -1*S, 1*S, wr, wc, rr, rc)
         return m.to_b3d()
 
-    # LOD0 — full detail
-    # Main tower volume (may have setback at upper floors)
-    setback_floor = int(floors * 0.65)
-    if setbacks >= 1:
-        # Lower portion
-        m.add_box(-hx, hx, 0, setback_floor*floor_h, -hz, hz, wr, wc, rr, rc)
-        # Upper portion (stepped in)
-        sx = 0.04; sz = 0.04
-        m.add_box(-hx+sx, hx-sx, setback_floor*floor_h, h, -hz+sz, hz-sz, wr, wc, rr, rc)
-        # Setback ledge
-        m.add_box(-hx, hx, setback_floor*floor_h-0.02, setback_floor*floor_h, -hz, hz, wr, wc, walls_only=True)
-    else:
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
+    elif variant == "03":
+        # Stepped shaft (3 stacked boxes decreasing in plan) + antenna box
+        base_hw = 6*S
+        bh = 36*S
+        sb1_y, sb2_y = 15*S, 25*S
+        sb = 1.5*S
+        if lod == 2:
+            m.add_box(-base_hw, base_hw, 0, bh, -base_hw, base_hw, wr, wc, rr, rc)
+            return m.to_b3d()
+        if lod == 1:
+            m.add_box(-base_hw, base_hw, 0, sb1_y, -base_hw, base_hw, wr, wc, rr, rc)
+            m.add_box(-base_hw+sb, base_hw-sb, sb1_y, sb2_y, -base_hw+sb, base_hw-sb, wr, wc, rr, rc)
+            m.add_box(-base_hw+2*sb, base_hw-2*sb, sb2_y, bh, -base_hw+2*sb, base_hw-2*sb, wr, wc, rr, rc)
+            return m.to_b3d()
+        # LOD0: three stacked boxes
+        m.add_box(-base_hw, base_hw, 0, sb1_y, -base_hw, base_hw, wr, wc, rr, rc)
+        hw1 = base_hw - sb
+        m.add_box(-hw1, hw1, sb1_y, sb2_y, -hw1, hw1, wr, wc, rr, rc)
+        hw2 = base_hw - 2*sb
+        m.add_box(-hw2, hw2, sb2_y, bh, -hw2, hw2, wr, wc, rr, rc)
+        # Antenna box
+        m.add_box(-0.5*S, 0.5*S, bh, bh+4*S, -0.5*S, 0.5*S, wr, wc)
+        return m.to_b3d()
 
-    # Per-floor window recesses on all four faces
-    # Front / Back face
-    for face_z, nz in [(-hz,-1),(hz,1)]:
-        _add_windows(m, wr, wc, 4, floors, 0.05, h-0.06,
-                     -hx+0.05, hx-0.05, face_z, face_z, nz,
-                     win_w_frac=0.16, win_h_frac=0.60)
-    # Side faces
-    for face_x, nx in [(-hx,-1),(hx,1)]:
-        _add_windows(m, wr, wc, 3, floors, 0.05, h-0.06,
-                     -hz+0.05, hz-0.05, face_x, face_x, nx,
-                     win_w_frac=0.18, win_h_frac=0.58)
-
-    # Balcony slabs every 2-3 floors on front face
-    overhang = 0.03 + 0.01 * (int(variant)-1)
-    for fl in range(2, floors, 3):
-        fy = fl * floor_h
-        _add_balcony_slab(m, wr, wc, -hx+0.04, hx-0.04, fy, -hz, overhang)
-        # Balcony side panels
-        for bx in [-hx+0.04, hx-0.04]:
-            m.add_box(bx-0.015, bx+0.015, fy-0.06, fy, -hz-overhang, -hz, wr, wc, walls_only=True)
-
-    # Floor banding strips
-    for fl in range(1, floors):
-        fy = fl * floor_h
-        m.add_box(-hx-0.005, hx+0.005, fy-0.01, fy+0.005, -hz-0.005, hz+0.005, wr, wc, walls_only=True)
-
-    # Planted parapet
-    _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.025, ph=0.05)
-    # Planter boxes on parapet
-    for px in [-hx*0.6, -hx*0.2, hx*0.2, hx*0.6]:
-        m.add_box(px-0.04, px+0.04, h+0.05, h+0.09, -hz-0.025, -hz+0.025, wr, wc)
-
-    # Stairwell tower
-    st_side = params["stair_side"]
-    if st_side in ("left","both"):
-        m.add_box(-hx-0.08, -hx, h*0.5, h+0.10, -0.10, 0.10, wr, wc, rr, rc)
-    if st_side in ("right","both"):
-        m.add_box(hx, hx+0.08, h*0.5, h+0.10, -0.10, 0.10, wr, wc, rr, rc)
-
-    # AC condenser units on roof
-    _add_ac_units(m, wr, wc, rr, rc, h+0.05, -hx*0.7, hx*0.7, -hz*0.6, hz*0.6, count=5)
-
-    # Plinth
-    m.add_box(-hx-0.015, hx+0.015, 0, 0.05, -hz-0.015, hz+0.015, wr, wc, walls_only=True)
-
-    # Corner columns
-    for cx, cz in [(-hx,-hz),(-hx,hz),(hx,-hz),(hx,hz)]:
-        m.add_box(cx-0.025, cx+0.025, 0, h, cz-0.025, cz+0.025, wr, wc, walls_only=True)
-
-    # Horizontal spandrel bands
-    for fl in range(0, floors, 2):
-        fy = fl * floor_h + floor_h * 0.85
-        m.add_box(-hx, hx, fy, fy+0.02, -hz-0.01, hz+0.01, wr, wc, walls_only=True)
-
-    _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 7000)
+    elif variant == "04":
+        # Slab box + flat roof (curved front as approximation)
+        bw, bd, bh = 20*S, 10*S, 28*S
+        hx, hz = bw/2, bd/2
+        bow = 1.5*S
+        n_seg = 8
+        if lod == 2:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        # LOD0: main box + curved front face segments
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        # Curved front face: 8-segment barrel
+        for i in range(n_seg):
+            frac0 = i / n_seg
+            frac1 = (i+1) / n_seg
+            x0 = -hx + bw * frac0
+            x1 = -hx + bw * frac1
+            z0 = -hz - bow * math.sin(frac0 * math.pi)
+            z1 = -hz - bow * math.sin(frac1 * math.pi)
+            m.add_quad((x0, 0, z0), (x1, 0, z1), (x1, bh, z1), (x0, bh, z0),
+                       (0, 0, -1.0), wr, wc)
+        return m.to_b3d()
 
     return m.to_b3d()
 
 
 # ---------------------------------------------------------------------------
-# COMMERCIAL HIGH  (skyscrapers, 8,000–10,000 tris)
+# COMMERCIAL LOW  (small commercial, 1-2 story, 2000-3000 tris LOD0)
+# ---------------------------------------------------------------------------
+
+def _build_com_low(zone, tier, variant, lod):
+    """Commercial low -- 4 distinct shop forms."""
+    wr, wc = WALL_CELLS[(zone, tier, variant)]
+    rr, rc = ROOF_CELL
+    m = MeshAccum()
+    S = 0.1
+
+    if variant == "01":
+        # Box + flat roof + canopy slab over entrance
+        bw, bd, bh = 8*S, 6*S, 4*S
+        hx, hz = bw/2, bd/2
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        # Canopy slab
+        can_w, can_d = 4*S, 2*S
+        m.add_box(-can_w/2, can_w/2, 3*S, 3*S+0.2*S, -hz-can_d, -hz, wr, wc)
+        return m.to_b3d()
+
+    elif variant == "02":
+        # Box + flat roof (plain box)
+        bw, bd, bh = 8*S, 8*S, 4*S
+        hx, hz = bw/2, bd/2
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        return m.to_b3d()
+
+    elif variant == "03":
+        # Box + flat roof + 4 simple pilaster boxes on front
+        bw, bd, bh = 16*S, 6*S, 5*S
+        hx, hz = bw/2, bd/2
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        # 4 simple thin pilaster boxes on front only
+        for i in range(4):
+            px = -hx + bw * (i + 0.5) / 4
+            m.add_box(px-0.1*S, px+0.1*S, 0, bh, -hz-0.2*S, -hz, wr, wc, walls_only=True)
+        return m.to_b3d()
+
+    elif variant == "04":
+        # Box + sawtooth roof
+        bw, bd, bh = 12*S, 8*S, 4*S
+        hx, hz = bw/2, bd/2
+        tooth_h = 1.5*S
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh+tooth_h*0.5, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        _add_sawtooth_roof(m, wr, wc, rr, rc, -hx, hx, bh, bh+tooth_h, -hz, hz, 4)
+        return m.to_b3d()
+
+    return m.to_b3d()
+
+
+# ---------------------------------------------------------------------------
+# COMMERCIAL MED  (medium commercial, 3-6 story, 3000-5000 tris LOD0)
+# ---------------------------------------------------------------------------
+
+def _build_com_med(zone, tier, variant, lod):
+    """Commercial med -- 4 distinct mid-rise office forms."""
+    wr, wc = WALL_CELLS[(zone, tier, variant)]
+    rr, rc = ROOF_CELL
+    m = MeshAccum()
+    S = 0.1
+
+    if variant == "01":
+        # Box + smaller set-back top box
+        bw, bd, bh = 20*S, 16*S, 15*S
+        hx, hz = bw/2, bd/2
+        top_h = 18*S
+        sb = 1*S
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            m.add_box(-hx+sb, hx-sb, bh, top_h, -hz+sb, hz-sb, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        m.add_box(-hx+sb, hx-sb, bh, top_h, -hz+sb, hz-sb, wr, wc, rr, rc)
+        return m.to_b3d()
+
+    elif variant == "02":
+        # Wide podium box + narrower tower box on top
+        pod_w, pod_d, pod_h = 20*S, 16*S, 6*S
+        tow_w, tow_d, tow_h = 10*S, 10*S, 24*S
+        hx, hz = pod_w/2, pod_d/2
+        if lod == 1:
+            m.add_box(-hx, hx, 0, pod_h, -hz, hz, wr, wc, rr, rc)
+            m.add_box(-tow_w/2, tow_w/2, pod_h, pod_h+tow_h, -tow_d/2, tow_d/2, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, pod_h, -hz, hz, wr, wc, rr, rc)
+        m.add_box(-tow_w/2, tow_w/2, pod_h, pod_h+tow_h, -tow_d/2, tow_d/2, wr, wc, rr, rc)
+        return m.to_b3d()
+
+    elif variant == "03":
+        # Box + flat roof (atrium as shallow box recess in front face)
+        bw, bd, bh = 18*S, 16*S, 15*S
+        hx, hz = bw/2, bd/2
+        atrium_w, atrium_d = 8*S, 4*S
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        # Atrium slot recess box
+        m.add_box(-atrium_w/2, atrium_w/2, 0, bh, -hz, -hz+atrium_d, wr, wc, rr, rc)
+        return m.to_b3d()
+
+    elif variant == "04":
+        # Box + flat roof (arcade = 6 simple arch boxes on ground floor)
+        bw, bd, bh = 20*S, 12*S, 12*S
+        hx, hz = bw/2, bd/2
+        arcade_h = 3*S
+        n_arches = 6
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        # Upper floors solid
+        m.add_box(-hx, hx, arcade_h, bh, -hz, hz, wr, wc, rr, rc)
+        # Ground floor: 6 simple arch column boxes
+        for i in range(n_arches):
+            cx = -hx + bw * (i + 0.5) / n_arches
+            m.add_box(cx-0.15*S, cx+0.15*S, 0, arcade_h, -hz-0.3*S, -hz, wr, wc)
+        # Ground floor back wall
+        m.add_box(-hx, hx, 0, arcade_h, hz-0.1*S, hz, wr, wc, rr, rc)
+        return m.to_b3d()
+
+    return m.to_b3d()
+
+
+# ---------------------------------------------------------------------------
+# COMMERCIAL HIGH  (tall commercial, 10-20 story, 6000-10000 tris LOD0)
 # ---------------------------------------------------------------------------
 
 def _build_com_high(zone, tier, variant, lod):
-    """
-    Commercial high skyscrapers — four distinct form vocabularies:
-    01 = narrow glass tower + spire crown
-    02 = wide slab + setback upper + antenna cluster
-    03 = tapered pyramid + chamfered corners
-    04 = stepped ziggurat
-    """
+    """Commercial high -- 4 distinct skyscraper forms."""
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
+    S = 0.1
 
-    floor_h = 0.30
-    floors = {"01":15,"02":20,"03":25,"04":30}[variant]
-    h = floors * floor_h
-
-    if lod == 2:
-        # Geometry shell: simplified tower + variant crown hint
-        hx = hz = 0.35
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        if variant == "01":
-            # Spire
-            m.add_box(-0.02, 0.02, h, h+0.60, -0.02, 0.02, wr, wc, walls_only=True)
-        elif variant == "04":
-            # Two step hints
-            for step_i in range(2):
-                sy = h * (0.5 + step_i*0.25)
-                m.add_box(-hx*(0.9-step_i*0.1), hx*(0.9-step_i*0.1), sy-0.015, sy, -hz*(0.9-step_i*0.1), hz*(0.9-step_i*0.1), wr, wc, walls_only=True)
-        return m.to_b3d()
-
-    if lod == 1:
-        hx = hz = 0.35
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        if variant == "01":
-            m.add_box(-0.025, 0.025, h, h+0.40, -0.025, 0.025, wr, wc)
-        elif variant == "02":
-            m.add_box(-hx*0.7, hx*0.7, h*0.60, h, -hz*0.7, hz*0.7, wr, wc, rr, rc)
-            for i in range(3):
-                m.add_box(-0.02, 0.02, h + i*0.06, h + i*0.06+0.18, -0.02, 0.02, wr, wc)
-        elif variant == "03":
-            for step_i in range(3):
-                sf = 1.0 - step_i*0.12
-                sy0 = h * (0.60 + step_i*0.13)
-                sy1 = h * (0.60 + (step_i+1)*0.13)
-                m.add_box(-hx*sf, hx*sf, sy0, sy1, -hz*sf, hz*sf, wr, wc)
-        elif variant == "04":
-            for step_i in range(3):
-                sf = 1.0 - step_i*0.15
-                sy = h * (0.40 + step_i*0.20)
-                m.add_box(-hx*sf-0.005, hx*sf+0.005, sy-0.015, sy, -hz*sf-0.005, hz*sf+0.005, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 1700)
-        return m.to_b3d()
-
-    # LOD0 — full detail per variant
     if variant == "01":
-        # Narrow glass tower
-        hx = hz = 0.28
-        # Podium base
-        m.add_box(-hx-0.06, hx+0.06, 0, floor_h*1.5, -hz-0.06, hz+0.06, wr, wc, rr, rc)
-        # Tower shaft
-        m.add_box(-hx, hx, floor_h*1.5, h, -hz, hz, wr, wc, rr, rc)
-        # Curtain wall mullions all four faces
-        for face_z, nz in [(-hz,-1),(hz,1)]:
-            _add_curtain_wall_mullions(m, wr, wc, -hx, hx, floor_h*1.5, h, face_z, 5, floors//2, normal_sign_z=nz)
-        for face_x, nx in [(-hx,-1),(hx,1)]:
-            _add_curtain_wall_mullions(m, wr, wc, -hz, hz, floor_h*1.5, h, face_x, 3, floors//2, normal_sign_z=nx)
-        # Structural core columns on corners
-        for cx, cz in [(-hx,-hz),(-hx,hz),(hx,-hz),(hx,hz)]:
-            m.add_box(cx-0.015, cx+0.015, 0, h, cz-0.015, cz+0.015, wr, wc, walls_only=True)
-        # Spire
-        sp_h = 0.55
-        m.add_box(-0.015, 0.015, h, h+sp_h, -0.015, 0.015, wr, wc, walls_only=True)
-        m.add_box(-0.025, 0.025, h-0.02, h+0.04, -0.025, 0.025, wr, wc, rr, rc)
-        # Lobby canopy
-        m.add_box(-hx-0.06-0.10, hx+0.06+0.10, floor_h*0.8, floor_h*0.8+0.015, -hz-0.06-0.12, -hz-0.06, wr, wc)
-        # Revolving door recesses (3 bays)
-        for bay_i in range(3):
-            bx = -hx + (hx*2)*(bay_i+0.5)/3
-            m.add_box(bx-0.05, bx+0.05, 0, floor_h*0.75, -hz-0.06-0.04, -hz-0.06, wr, wc)
-        # Window recesses
-        for face_z, nz in [(-hz,-1),(hz,1)]:
-            _add_windows(m, wr, wc, 3, floors-2, floor_h*1.5+0.04, h-0.06,
-                         -hx+0.04, hx-0.04, face_z, face_z, nz,
-                         win_w_frac=0.22, win_h_frac=0.70)
-        for face_x, nx in [(-hx,-1),(hx,1)]:
-            _add_windows(m, wr, wc, 2, floors-2, floor_h*1.5+0.04, h-0.06,
-                         -hz+0.04, hz-0.04, face_x, face_x, nx,
-                         win_w_frac=0.28, win_h_frac=0.70)
-        # Floor bands
-        for fl in range(1, floors-1):
-            fy = floor_h*1.5 + fl*floor_h
-            m.add_box(-hx-0.004, hx+0.004, fy, fy+0.008, -hz-0.004, hz+0.004, wr, wc, walls_only=True)
-        _add_ac_units(m, wr, wc, rr, rc, h+0.04, -hx*0.5, hx*0.5, -hz*0.5, hz*0.5, count=3)
+        # Tapered shaft (main box + two smaller setback boxes at top) -- NO mullion grid
+        bw, bd, bh = 18*S, 14*S, 60*S
+        hx, hz = bw/2, bd/2
+        taper1_y, taper2_y = 48*S, 55*S
+        if lod == 2:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        # LOD0: main shaft + two taper steps
+        m.add_box(-hx, hx, 0, taper1_y, -hz, hz, wr, wc, rr, rc)
+        sb1 = 1*S
+        m.add_box(-hx+sb1, hx-sb1, taper1_y, taper2_y, -hz+sb1, hz-sb1, wr, wc, rr, rc)
+        sb2 = 2*S
+        m.add_box(-hx+sb2, hx-sb2, taper2_y, bh, -hz+sb2, hz-sb2, wr, wc, rr, rc)
+        return m.to_b3d()
 
     elif variant == "02":
-        # Wide slab + setback
-        hx = 0.44; hz = 0.35
-        sb_floor = int(floors * 0.62)
-        sb_h = sb_floor * floor_h
-        # Lower slab
-        m.add_box(-hx, hx, 0, sb_h, -hz, hz, wr, wc, rr, rc)
-        # Upper setback
-        m.add_box(-hx*0.70, hx*0.70, sb_h, h, -hz*0.75, hz*0.75, wr, wc, rr, rc)
-        # Setback ledge
-        m.add_box(-hx-0.01, hx+0.01, sb_h-0.02, sb_h, -hz-0.01, hz+0.01, wr, wc, walls_only=True)
-        # Curtain wall
-        for face_z, nz in [(-hz,-1),(hz,1)]:
-            _add_curtain_wall_mullions(m, wr, wc, -hx, hx, 0, sb_h, face_z, 6, sb_floor//2, normal_sign_z=nz)
-        for face_z, nz in [(-hz*0.75,-1),(hz*0.75,1)]:
-            _add_curtain_wall_mullions(m, wr, wc, -hx*0.70, hx*0.70, sb_h, h, face_z, 5, (floors-sb_floor)//2, normal_sign_z=nz)
-        # Corner core columns
-        for cx, cz in [(-hx,-hz),(-hx,hz),(hx,-hz),(hx,hz)]:
-            m.add_box(cx-0.02, cx+0.02, 0, sb_h, cz-0.02, cz+0.02, wr, wc, walls_only=True)
-        # Antenna cluster (3-5 rods)
-        for ai, (ax, aoff) in enumerate([(-0.04,0),(0.04,0),(-0.02,0.02),(0.02,0.02),(0,0.04)]):
-            rod_h = 0.18 + ai*0.04
-            m.add_box(ax-0.008, ax+0.008, h, h+rod_h, aoff-0.008, aoff+0.008, wr, wc)
-        # Lobby canopy
-        m.add_box(-hx-0.08, hx+0.08, floor_h*0.8, floor_h*0.8+0.02, -hz-0.15, -hz, wr, wc)
-        # Revolving door recesses
-        for bay_i in range(3):
-            bx = -hx*0.5 + hx*(bay_i+0.5)/1.5
-            m.add_box(bx-0.06, bx+0.06, 0, floor_h*0.75, -hz-0.04, -hz, wr, wc)
-        # Windows lower
-        for face_z, nz in [(-hz,-1),(hz,1)]:
-            _add_windows(m, wr, wc, 5, sb_floor-1, 0.05, sb_h-0.05,
-                         -hx+0.05, hx-0.05, face_z, face_z, nz,
-                         win_w_frac=0.14, win_h_frac=0.68)
-        for face_x, nx in [(-hx,-1),(hx,1)]:
-            _add_windows(m, wr, wc, 3, sb_floor-1, 0.05, sb_h-0.05,
-                         -hz+0.05, hz-0.05, face_x, face_x, nx,
-                         win_w_frac=0.20, win_h_frac=0.68)
-        # Windows upper
-        for face_z, nz in [(-hz*0.75,-1),(hz*0.75,1)]:
-            _add_windows(m, wr, wc, 4, floors-sb_floor-1, sb_h+0.05, h-0.05,
-                         -hx*0.70+0.04, hx*0.70-0.04, face_z, face_z, nz,
-                         win_w_frac=0.16, win_h_frac=0.68)
-        for fl in range(1, floors):
-            fy = fl * floor_h
-            m.add_box(-hx-0.005, hx+0.005, fy, fy+0.01, -hz-0.005, hz+0.005, wr, wc, walls_only=True)
-        _add_ac_units(m, wr, wc, rr, rc, h+0.02, -hx*0.60, hx*0.60, -hz*0.65, hz*0.65, count=5)
-        # Podium geometry
-        m.add_box(-hx-0.06, hx+0.06, 0, floor_h*1.5, -hz-0.06, hz+0.06, wr, wc, rr, rc)
+        # Main box + pediment fins (two triangular prisms at top) + entry canopy slab
+        bw, bd, bh = 20*S, 16*S, 42*S
+        hx, hz = bw/2, bd/2
+        crown_h = 6*S
+        pod_h = 8*S
+        if lod == 2:
+            m.add_box(-hx, hx, 0, bh+crown_h, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        # LOD0
+        m.add_box(-hx, hx, 0, pod_h, -hz, hz, wr, wc, rr, rc)
+        m.add_box(-hx, hx, pod_h, bh, -hz, hz, wr, wc, rr, rc)
+        # Two triangular pediment fins
+        ped_w = 2*S
+        m.add_tri((-ped_w/2, bh, -hz), (ped_w/2, bh, -hz), (0, bh+crown_h, -hz),
+                  (0, 0, -1), wr, wc)
+        m.add_tri((ped_w/2, bh, hz), (-ped_w/2, bh, hz), (0, bh+crown_h, hz),
+                  (0, 0, 1), wr, wc)
+        # Entry canopy slab
+        m.add_box(-3*S, 3*S, 4*S, 4*S+0.15*S, -hz-2*S, -hz, wr, wc)
+        return m.to_b3d()
 
     elif variant == "03":
-        # Tapered pyramid + chamfered corners
-        hx0 = 0.42; hz0 = 0.42
-        # Build stepped tapers (10 steps)
-        n_steps = 10
-        for si in range(n_steps):
-            sf = 1.0 - si * (0.7/n_steps)
-            y0 = si * (h/n_steps)
-            y1 = (si+1) * (h/n_steps)
-            hxi = hx0 * sf; hzi = hz0 * sf
-            m.add_box(-hxi, hxi, y0, y1, -hzi, hzi, wr, wc, rr, rc)
-        # Chamfered corner columns (diagonal fins) all floors
-        for cx, cz, nrm in [(-hx0,-hz0,(-0.707,0,-0.707)),(hx0,-hz0,(0.707,0,-0.707)),
-                             (-hx0,hz0,(-0.707,0,0.707)),(hx0,hz0,(0.707,0,0.707))]:
-            for si in range(n_steps):
-                sf = 1.0 - si*(0.7/n_steps)
-                y0 = si*(h/n_steps); y1=(si+1)*(h/n_steps)
-                bx = cx*sf; bz = cz*sf
-                m.add_box(bx-0.02, bx+0.02, y0, y1, bz-0.02, bz+0.02, wr, wc, walls_only=True)
-        # Curtain wall on main faces (lower portion)
-        for face_z, nz in [(-hz0,-1),(hz0,1)]:
-            _add_curtain_wall_mullions(m, wr, wc, -hx0*0.5, hx0*0.5, 0, h*0.6, face_z, 4, floors//3, normal_sign_z=nz)
-        # Lobby canopy
-        m.add_box(-hx0*0.6, hx0*0.6, floor_h*0.8, floor_h*0.8+0.018, -hz0-0.12, -hz0, wr, wc)
-        # Revolving door recesses
-        for bay_i in range(3):
-            bx = -hx0*0.4 + hx0*0.4*(bay_i)
-            m.add_box(bx-0.05, bx+0.05, 0, floor_h*0.72, -hz0-0.04, -hz0, wr, wc)
-        # Windows on tapered faces
-        for si in range(n_steps):
-            sf = 1.0 - si*(0.7/n_steps)
-            y0 = si*(h/n_steps); y1=(si+1)*(h/n_steps)
-            hxi = hx0*sf*0.9; hzi = hz0*sf*0.9
-            n_w = max(1, int(hxi*2/0.08))
-            for face_z, nz in [(-hzi,-1),(hzi,1)]:
-                _add_windows(m, wr, wc, min(n_w,4), 1, y0+0.01, y1-0.01,
-                             -hxi+0.03, hxi-0.03, face_z, face_z, nz,
-                             win_w_frac=0.30, win_h_frac=0.72)
-        # Crown
-        m.add_box(-0.04, 0.04, h, h+0.04, -0.04, 0.04, rr, rc, rr, rc)
-        _add_ac_units(m, wr, wc, rr, rc, h*(1.0-0.7/n_steps)*0.98, -0.06, 0.06, -0.06, 0.06, count=2)
+        # Main shaft box + chamfered octagonal top section + spire box
+        base_hw = 6*S
+        bh = 55*S
+        chamfer_y = 47*S
+        n_sides = 8
+        if lod == 2:
+            m.add_box(-base_hw, base_hw, 0, bh, -base_hw, base_hw, wr, wc, rr, rc)
+            return m.to_b3d()
+        if lod == 1:
+            m.add_box(-base_hw, base_hw, 0, bh, -base_hw, base_hw, wr, wc, rr, rc)
+            m.add_box(-0.05*S, 0.05*S, bh, bh+8*S, -0.05*S, 0.05*S, wr, wc)
+            return m.to_b3d()
+        # LOD0: square shaft to chamfer_y
+        m.add_box(-base_hw, base_hw, 0, chamfer_y, -base_hw, base_hw, wr, wc, rr, rc)
+        # Octagonal top (~8 faces)
+        oct_r = base_hw
+        for i in range(n_sides):
+            a0 = 2*math.pi*i/n_sides + math.pi/n_sides
+            a1 = 2*math.pi*(i+1)/n_sides + math.pi/n_sides
+            x0 = oct_r * math.sin(a0); z0 = oct_r * math.cos(a0)
+            x1 = oct_r * math.sin(a1); z1 = oct_r * math.cos(a1)
+            nx = math.sin((a0+a1)*0.5); nz = math.cos((a0+a1)*0.5)
+            m.add_quad((x0, chamfer_y, z0), (x1, chamfer_y, z1),
+                       (x1, bh, z1), (x0, bh, z0),
+                       (nx, 0, nz), wr, wc)
+        _add_cylinder_cap(m, rr, rc, 0, 0, bh, oct_r, n_sides=n_sides, face_up=True)
+        # Spire box
+        _add_spire(m, wr, wc, 0, 0, bh, bh+8*S, 0.5*S, n_sides=4)
+        return m.to_b3d()
 
     elif variant == "04":
-        # Stepped ziggurat
-        hx0 = 0.44; hz0 = 0.44
-        n_steps = 5
-        step_h = h / n_steps
-        for si in range(n_steps):
-            sf = 1.0 - si * (0.60 / n_steps)
-            y0 = si * step_h
-            y1 = y0 + step_h
-            hxi = hx0 * sf; hzi = hz0 * sf
-            m.add_box(-hxi, hxi, y0, y1, -hzi, hzi, wr, wc, rr, rc)
-            if si > 0:
-                # Step ledge
-                m.add_box(-hxi-0.005, hxi+0.005, y0-0.02, y0, -hzi-0.005, hzi+0.005, wr, wc, walls_only=True)
-        # Curtain wall on each step face
-        for si in range(n_steps):
-            sf = 1.0 - si*(0.60/n_steps)
-            y0 = si*step_h; y1=y0+step_h
-            hxi = hx0*sf; hzi = hz0*sf
-            for face_z, nz in [(-hzi,-1),(hzi,1)]:
-                _add_curtain_wall_mullions(m, wr, wc, -hxi, hxi, y0, y1, face_z, 4, 2, normal_sign_z=nz)
-            for face_x, nx in [(-hxi,-1),(hxi,1)]:
-                _add_curtain_wall_mullions(m, wr, wc, -hzi, hzi, y0, y1, face_x, 3, 2, normal_sign_z=nx)
-            # Windows on each step
-            for face_z, nz in [(-hzi,-1),(hzi,1)]:
-                _add_windows(m, wr, wc, 4, 2, y0+0.04, y1-0.04,
-                             -hxi+0.04, hxi-0.04, face_z, face_z, nz,
-                             win_w_frac=0.16, win_h_frac=0.60)
-        # Corner columns on base
-        for cx, cz in [(-hx0,-hz0),(-hx0,hz0),(hx0,-hz0),(hx0,hz0)]:
-            m.add_box(cx-0.018, cx+0.018, 0, step_h, cz-0.018, cz+0.018, wr, wc, walls_only=True)
-        # Lobby canopy
-        m.add_box(-hx0-0.08, hx0+0.08, floor_h*0.8, floor_h*0.8+0.018, -hz0-0.14, -hz0, wr, wc)
-        # Revolving door recesses
-        for bay_i in range(3):
-            bx = -hx0*0.4 + hx0*0.4*bay_i
-            m.add_box(bx-0.06, bx+0.06, 0, floor_h*0.72, -hz0-0.04, -hz0, wr, wc)
-        # Podium
-        m.add_box(-hx0-0.08, hx0+0.08, 0, floor_h*1.5, -hz0-0.08, hz0+0.08, wr, wc, rr, rc)
-        _add_ac_units(m, wr, wc, rr, rc, (n_steps-1)*step_h+step_h*0.8,
-                      -hx0*(1-(n_steps-1)*0.60/n_steps)*0.8,
-                       hx0*(1-(n_steps-1)*0.60/n_steps)*0.8,
-                      -hz0*(1-(n_steps-1)*0.60/n_steps)*0.8,
-                       hz0*(1-(n_steps-1)*0.60/n_steps)*0.8, count=3)
-
-    # Dense surface detail to reach 8,000–10,000 tris
-    # Use hx/hz from the outermost definition for each variant
-    if variant == "01":
-        _hx, _hz = 0.28, 0.28
-    elif variant == "02":
-        _hx, _hz = 0.44, 0.35
-    elif variant == "03":
-        _hx, _hz = 0.42, 0.42
-    else:
-        _hx, _hz = 0.44, 0.44
-    _add_dense_facade_detail(m, wr, wc, -_hx, _hx, 0, h, -_hz,
-                              n_horiz_strips=145, n_vert_strips=95, normal_sign_z=-1)
-    _add_dense_facade_detail(m, wr, wc, -_hx, _hx, 0, h, _hz,
-                              n_horiz_strips=145, n_vert_strips=95, normal_sign_z=1)
-    _add_dense_facade_detail(m, wr, wc, -_hz, _hz, 0, h, -_hx,
-                              n_horiz_strips=135, n_vert_strips=85, normal_sign_z=-1)
-    _add_dense_facade_detail(m, wr, wc, -_hz, _hz, 0, h, _hx,
-                              n_horiz_strips=135, n_vert_strips=85, normal_sign_z=1)
+        # Main slab box + 4 corner mega-column boxes + 3 cross-brace slab boxes
+        bw, bd, bh = 14*S, 10*S, 50*S
+        hx, hz = bw/2, bd/2
+        if lod == 2:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            for cx, cz in [(-hx,-hz),(-hx,hz),(hx,-hz),(hx,hz)]:
+                m.add_box(cx-0.5*S, cx+0.5*S, 0, bh, cz-0.5*S, cz+0.5*S, wr, wc, walls_only=True)
+            return m.to_b3d()
+        # LOD0
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        # 4 corner mega-column boxes
+        for cx, cz in [(-hx,-hz),(-hx,hz),(hx,-hz),(hx,hz)]:
+            m.add_box(cx-0.5*S, cx+0.5*S, 0, bh, cz-0.5*S, cz+0.5*S, wr, wc, walls_only=True)
+        # 3 cross-brace slab boxes
+        beam_h = 0.5*S
+        for band_y in [15*S, 30*S, 45*S]:
+            m.add_box(-hx, hx, band_y, band_y+beam_h, -hz-0.2*S, -hz, wr, wc, walls_only=True)
+            m.add_box(-hx, hx, band_y, band_y+beam_h, hz, hz+0.2*S, wr, wc, walls_only=True)
+            m.add_box(-hx-0.2*S, -hx, band_y, band_y+beam_h, -hz, hz, wr, wc, walls_only=True)
+            m.add_box(hx, hx+0.2*S, band_y, band_y+beam_h, -hz, hz, wr, wc, walls_only=True)
+        return m.to_b3d()
 
     return m.to_b3d()
 
 
 # ---------------------------------------------------------------------------
-# INDUSTRIAL HIGH  (large buildings, 6,000–8,000 tris)
+# INDUSTRIAL LOW  (small industrial, 1 story, 2000-3000 tris LOD0)
 # ---------------------------------------------------------------------------
 
-def _build_ind_high(zone, tier, variant, lod):
-    """
-    Industrial high-rise — four DISTINCT building types per the spec:
-      01  plain concrete tower: 2 tall chimney stacks well above roofline, punched windows, rooftop service structure
-      02  exposed steel-frame: external pipe runs along full height, spherical pressure vessel at mid-height, cooling tower
-      03  silo cluster: CRITICAL — min 3 cylindrical silos (8-sided prism), corrugated conveyor bridge, elevator head house
-      04  refinery tower: grating-platform bands at every floor, dense roof pipe rack, flare stack from corner
-    height_floors: 01=5, 02=7, 03=8, 04=10
-    """
+def _build_ind_low(zone, tier, variant, lod):
+    """Industrial low -- 4 distinct shed forms."""
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
+    S = 0.1
 
-    floor_h = 0.30
-    floors = {"01":5,"02":7,"03":8,"04":10}[variant]
-    h = floors * floor_h
-
-    # ------------------------------------------------------------------ LOD2
-    if lod == 2:
-        hx = {"01":0.44,"02":0.42,"03":0.45,"04":0.40}.get(variant, 0.44)
-        hz = {"01":0.40,"02":0.45,"03":0.45,"04":0.44}.get(variant, 0.40)
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        if variant == "03":
-            # Silo cluster hint: 3 cylinders at LOD2
-            for si, (scx, scz) in enumerate([(-0.15, 0.0), (0.0, 0.0), (0.15, 0.0)]):
-                _add_cylinder(m, wr, wc, scx, scz, 0, h, 0.10, n_sides=6)
-        else:
-            m.add_box(-hx * 0.5, hx * 0.5, h, h + 0.15, -hz * 0.4, hz * 0.4, wr, wc, rr, rc)
-        return m.to_b3d()
-
-    # ------------------------------------------------------------------ LOD1
-    if lod == 1:
-        hx = {"01":0.44,"02":0.42,"03":0.45,"04":0.40}.get(variant, 0.44)
-        hz = {"01":0.40,"02":0.45,"03":0.45,"04":0.44}.get(variant, 0.40)
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        if variant == "01":
-            # Two chimney stacks at LOD1
-            for ch_x in [-hx * 0.35, hx * 0.30]:
-                m.add_box(ch_x - 0.03, ch_x + 0.03, h, h + 0.18, hz * 0.5 - 0.03, hz * 0.5 + 0.03, wr, wc, walls_only=True)
-        elif variant == "02":
-            m.add_box(-hx * 0.5, hx * 0.5, h, h + 0.12, -hz * 0.4, hz * 0.4, wr, wc, rr, rc)
-            m.add_box(-hx - 0.06, -hx, h * 0.5, h + 0.06, -0.10, 0.10, wr, wc, rr, rc)
-        elif variant == "03":
-            # Silo cluster — three cylinders LOD1
-            for si, (scx, scz) in enumerate([(-0.18, 0.0), (0.0, 0.0), (0.18, 0.0)]):
-                _add_cylinder(m, wr, wc, scx, scz, 0, h, 0.11, n_sides=8)
-        else:
-            m.add_box(-hx * 0.5, hx * 0.5, h, h + 0.12, -hz * 0.4, hz * 0.4, wr, wc, rr, rc)
-            m.add_box(-hx - 0.06, -hx, h * 0.5, h + 0.06, -0.10, 0.10, wr, wc, rr, rc)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 1200)
-        return m.to_b3d()
-
-    # ------------------------------------------------------------------ LOD0
-
-    # ---- variant 01: plain concrete tower, 2 tall chimney stacks ----
     if variant == "01":
-        hx, hz = 0.44, 0.40
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.025, ph=0.06)
-        # Two tall chimney stacks well above roofline (min 3m = 0.30 model above parapet)
-        _add_chimney(m, wr, wc, rr, rc, -hx * 0.35, hz * 0.45, h, 0.36, hw=0.06)
-        _add_chimney(m, wr, wc, rr, rc,  hx * 0.30, hz * 0.45, h, 0.32, hw=0.06)
-        # Rooftop service structure box
-        m.add_box(-hx * 0.50, hx * 0.50, h + 0.06, h + 0.20, -hz * 0.40, hz * 0.40, wr, wc, rr, rc)
-        # Punched small windows
-        for face_z, nz in [(-hz, -1), (hz, 1)]:
-            _add_windows(m, wr, wc, 4, floors, 0.05, h - 0.10,
-                         -hx + 0.06, hx - 0.06, face_z, face_z, nz, win_w_frac=0.12, win_h_frac=0.45)
-        for face_x, nx in [(-hx, -1), (hx, 1)]:
-            _add_windows(m, wr, wc, 3, floors, 0.05, h - 0.10,
-                         -hz + 0.06, hz - 0.06, face_x, face_x, nx, win_w_frac=0.14, win_h_frac=0.45)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.05, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        for fl in range(1, floors):
-            fy = fl * floor_h
-            m.add_box(-hx - 0.005, hx + 0.005, fy, fy + 0.012, -hz - 0.005, hz + 0.005, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 7000)
+        # Box + pitched roof (portal frame gabled)
+        bw, bd, bh = 12*S, 16*S, 5*S
+        hx, hz = bw/2, bd/2
+        ridge_h = (7-5)*S
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
         return m.to_b3d()
 
-    # ---- variant 02: exposed steel-frame, pipe runs, spherical pressure vessel, cooling tower ----
-    if variant == "02":
-        hx, hz = 0.42, 0.45
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.025, ph=0.06)
-        # Exposed corner column strips proud of facade
-        for cx, cz in [(-hx, -hz), (hx, -hz), (-hx, hz), (hx, hz)]:
-            m.add_box(cx - 0.04, cx + 0.04, 0, h + 0.06, cz - 0.04, cz + 0.04, wr, wc, walls_only=True)
-        # External pipe runs along full height: large-bore (~0.3m dia) and small-bore (~0.1m dia)
-        pipe_large_r = 0.03; pipe_small_r = 0.012
-        for (pz, r) in [(-hz - pipe_large_r - 0.01, pipe_large_r),
-                         (-hz - pipe_small_r - 0.06, pipe_small_r)]:
-            _add_cylinder(m, wr, wc, -hx * 0.5, pz, 0, h, r, n_sides=6)
-            _add_cylinder(m, wr, wc,  hx * 0.5, pz, 0, h, r, n_sides=6)
-        # Spherical pressure vessel at mid-height (approximated as 8-sided box + cylinder)
-        sphere_y = h * 0.50; sphere_r = 0.10
-        _add_cylinder(m, wr, wc, 0.0, -hz - sphere_r - 0.02,
-                      sphere_y - sphere_r, sphere_y + sphere_r, sphere_r, n_sides=8)
-        _add_cylinder_cap(m, wr, wc, 0.0, -hz - sphere_r - 0.02,
-                          sphere_y + sphere_r, sphere_r * 0.8, n_sides=8, face_up=True)
-        _add_cylinder_cap(m, wr, wc, 0.0, -hz - sphere_r - 0.02,
-                          sphere_y - sphere_r, sphere_r * 0.8, n_sides=8, face_up=False)
-        # Wide cooling tower on one side (separate box volume)
-        m.add_box(hx, hx + 0.18, 0, h * 0.70, -hz * 0.6, hz * 0.6, wr, wc, rr, rc)
-        # Windows
-        for face_z, nz in [(-hz, -1), (hz, 1)]:
-            _add_windows(m, wr, wc, 4, floors, 0.05, h - 0.10,
-                         -hx + 0.06, hx - 0.06, face_z, face_z, nz, win_w_frac=0.14, win_h_frac=0.50)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.05, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        for fl in range(1, floors):
-            fy = fl * floor_h
-            m.add_box(-hx - 0.005, hx + 0.005, fy, fy + 0.012, -hz - 0.005, hz + 0.005, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 7000)
+    elif variant == "02":
+        # Box + twin parallel pitched roofs
+        bw, bd, bh = 20*S, 16*S, 5*S
+        hx, hz = bw/2, bd/2
+        ridge_h = (7-5)*S
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_gabled_roof(m, wr, wc, rr, rc, -hx, 0, bh, ridge_h, -hz, hz)
+            _add_gabled_roof(m, wr, wc, rr, rc, 0, hx, bh, ridge_h, -hz, hz)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        _add_gabled_roof(m, wr, wc, rr, rc, -hx, 0, bh, ridge_h, -hz, hz)
+        _add_gabled_roof(m, wr, wc, rr, rc, 0, hx, bh, ridge_h, -hz, hz)
         return m.to_b3d()
 
-    # ---- variant 03: SILO CLUSTER — CRITICAL PRIMARY IDENTIFIER ----
-    if variant == "03":
-        # Min 3 cylinders, each 8–12 sides, height = 7 floors = 2.1 model units
-        # The circular silhouette is the primary identifier
-        silo_h = 7 * floor_h   # 2.1 units
-        silo_r = 0.18           # radius ~0.3m model (3m world)
-        n_sides = 10
-        silo_positions = [(-0.22, 0.0), (0.0, 0.12), (0.22, 0.0), (0.0, -0.15)]
-        for (scx, scz) in silo_positions:
-            _add_cylinder(m, wr, wc, scx, scz, 0, silo_h, silo_r, n_sides=n_sides)
-            _add_cylinder_cap(m, wr, wc, scx, scz, silo_h, silo_r, n_sides=n_sides, face_up=True)
-            # Corrugated horizontal rings on each silo
-            for ring_i in range(6):
-                ry = silo_h * (ring_i + 0.5) / 6
-                _add_cylinder(m, wr, wc, scx, scz, ry, ry + 0.015, silo_r + 0.012, n_sides=n_sides)
-        # Corrugated metal conveyor bridge connecting silo tops (flat slab)
-        m.add_box(-0.28, 0.28, silo_h - 0.02, silo_h + 0.04, -0.06, 0.06, wr, wc, rr, rc)
-        # Elevator head house at one end of bridge
-        m.add_box(0.22, 0.34, silo_h, silo_h + 0.25, -0.10, 0.10, wr, wc, rr, rc)
-        # Foundation base
-        m.add_box(-0.32, 0.32, 0, 0.05, -0.22, 0.22, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -0.32, 0.32, 0, silo_h, -0.22, 0.22, 7000)
+    elif variant == "03":
+        # Main box + lean-to box + mono-pitch roofs on each
+        mw, md, mh = 12*S, 10*S, 6*S
+        ridge_h = (8-6)*S
+        lw, lh_top, lh_bot = 6*S, 5*S, 4*S
+        hx_main = mw/2
+        hz = md/2
+        if lod == 1:
+            m.add_box(-hx_main, hx_main, 0, mh, -hz, hz, wr, wc, rr, rc)
+            _add_gabled_roof(m, wr, wc, rr, rc, -hx_main, hx_main, mh, ridge_h, -hz, hz)
+            m.add_box(hx_main, hx_main+lw, 0, lh_top, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        # Main shed
+        m.add_box(-hx_main, hx_main, 0, mh, -hz, hz, wr, wc, rr, rc)
+        _add_gabled_roof(m, wr, wc, rr, rc, -hx_main, hx_main, mh, ridge_h, -hz, hz)
+        # Lean-to box
+        m.add_box(hx_main, hx_main+lw, 0, lh_bot, -hz, hz, wr, wc, rr, rc)
+        _add_mono_pitch_roof(m, wr, wc, rr, rc, hx_main, hx_main+lw, lh_bot, lh_top, -hz, hz)
         return m.to_b3d()
 
-    # ---- variant 04: refinery tower — grating platforms, pipe rack, flare stack ----
-    if variant == "04":
-        hx, hz = 0.40, 0.44
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.025, ph=0.06)
-        # Grating-platform bands at every floor (thin horizontal slab per floor)
-        for fl in range(1, floors):
-            fy = fl * floor_h
-            m.add_box(-hx - 0.04, hx + 0.04, fy, fy + 0.018, -hz - 0.04, hz + 0.04, wr, wc, walls_only=False)
-        # Dense roof-level pipe rack (min 5 horizontal pipe members)
-        for pi in range(6):
-            pz = -hz + (2 * hz) * pi / 5
-            m.add_box(-hx - 0.02, hx + 0.02, h + 0.06, h + 0.08, pz - 0.008, pz + 0.008, wr, wc, walls_only=True)
-        # Flare stack from corner (thin vertical stick with flame-cap)
-        flare_x = hx + 0.015; flare_z = -hz + 0.015
-        m.add_box(flare_x - 0.015, flare_x + 0.015, 0, h + 0.42,
-                  flare_z - 0.015, flare_z + 0.015, wr, wc, walls_only=True)
-        # Flame cap at top of flare
-        m.add_box(flare_x - 0.04, flare_x + 0.04, h + 0.40, h + 0.48,
-                  flare_z - 0.04, flare_z + 0.04, wr, wc, rr, rc)
-        # Large louvred panels (inset panels with horizontal bar subdivisions)
-        for face_z, nz in [(-hz, -1), (hz, 1)]:
-            for lp_i in range(2):
-                lp_cx = -hx * 0.5 + hx * lp_i
-                for bar_i in range(4):
-                    bar_y = h * 0.20 + h * 0.50 * bar_i / 3
-                    m.add_box(lp_cx - 0.08, lp_cx + 0.08, bar_y, bar_y + 0.015,
-                              face_z + nz * (-0.015), face_z, wr, wc, walls_only=True)
-        # Windows (small)
-        for face_z, nz in [(-hz, -1), (hz, 1)]:
-            _add_windows(m, wr, wc, 3, floors, 0.05, h - 0.10,
-                         -hx + 0.06, hx - 0.06, face_z, face_z, nz, win_w_frac=0.10, win_h_frac=0.40)
-        m.add_box(-hx - 0.01, hx + 0.01, 0, 0.05, -hz - 0.01, hz + 0.01, wr, wc, walls_only=True)
-        # Hazard-stripe banding on structural posts at base
-        for cx, cz in [(-hx, -hz), (hx, -hz), (-hx, hz), (hx, hz)]:
-            m.add_box(cx - 0.025, cx + 0.025, 0, 0.20, cz - 0.025, cz + 0.025, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 7000)
+    elif variant == "04":
+        # Full box geometry + mono-pitch roof
+        bw, bd = 16*S, 12*S
+        hx, hz = bw/2, bd/2
+        front_h, rear_h = 6*S, 4*S
+        if lod == 1:
+            m.add_box(-hx, hx, 0, front_h, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, rear_h, -hz, hz, wr, wc, rr, rc)
+        _add_mono_pitch_roof(m, wr, wc, rr, rc, -hx, hx, rear_h, front_h, -hz, hz)
         return m.to_b3d()
+
+    return m.to_b3d()
+
+
+# ---------------------------------------------------------------------------
+# INDUSTRIAL MED  (medium industrial, 1-3 story, 3000-5000 tris LOD0)
+# ---------------------------------------------------------------------------
+
+def _build_ind_med(zone, tier, variant, lod):
+    """Industrial med -- 4 distinct warehouse/factory forms."""
+    wr, wc = WALL_CELLS[(zone, tier, variant)]
+    rr, rc = ROOF_CELL
+    m = MeshAccum()
+    S = 0.1
+
+    if variant == "01":
+        # Box + flat roof (dock leveller recesses = 3 simple shallow box recesses on front)
+        bw, bd, bh = 24*S, 20*S, 8*S
+        hx, hz = bw/2, bd/2
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        # 3 dock leveller recesses (simple box recesses)
+        for i in range(3):
+            dcx = -hx + bw*(i+0.5)/3
+            _add_loading_dock(m, wr, wc, dcx, 0, -hz, 3*S, 1.2*S, 0.5*S, normal_sign_z=-1)
+        return m.to_b3d()
+
+    elif variant == "02":
+        # Box + sawtooth north-light roof
+        bw, bd, bh = 22*S, 18*S, 10*S
+        hx, hz = bw/2, bd/2
+        saw_h = 2*S
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        _add_sawtooth_roof(m, wr, wc, rr, rc, -hx, hx, bh, bh+saw_h, -hz, hz, 4)
+        return m.to_b3d()
+
+    elif variant == "03":
+        # Box + flat roof + optional 6 simple thin pilaster boxes on front
+        bw, bd, bh = 18*S, 14*S, 14*S
+        hx, hz = bw/2, bd/2
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        # 6 simple thin pilaster boxes on front face only
+        for i in range(6):
+            px = -hx + bw * (i + 0.5) / 6
+            m.add_box(px-0.1*S, px+0.1*S, 0, bh, -hz-0.15*S, -hz, wr, wc, walls_only=True)
+        return m.to_b3d()
+
+    elif variant == "04":
+        # Box + flat roof
+        bw, bd, bh = 16*S, 14*S, 9*S
+        hx, hz = bw/2, bd/2
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        return m.to_b3d()
+
+    return m.to_b3d()
+
+
+# ---------------------------------------------------------------------------
+# INDUSTRIAL HIGH  (large industrial, 3-6 story, 6000-10000 tris LOD0)
+# ---------------------------------------------------------------------------
+
+def _build_ind_high(zone, tier, variant, lod):
+    """Industrial high -- 4 distinct large industrial forms."""
+    wr, wc = WALL_CELLS[(zone, tier, variant)]
+    rr, rc = ROOF_CELL
+    m = MeshAccum()
+    S = 0.1
+
+    if variant == "01":
+        # 3 cylinder approximations (12 segments) + conical tops + small base shed box
+        silo_r = 2.5*S
+        silo_h = 20*S
+        cone_h = 2*S
+        n_seg = 12
+        cx_list = [(-3*S, -1.5*S), (3*S, -1.5*S), (0, 2.5*S)]
+        if lod == 2:
+            for cx, cz in cx_list:
+                _add_cylinder(m, wr, wc, cx, cz, 0, silo_h, silo_r, n_sides=8)
+            return m.to_b3d()
+        if lod == 1:
+            for cx, cz in cx_list:
+                _add_cylinder(m, wr, wc, cx, cz, 0, silo_h, silo_r, n_sides=n_seg)
+                _add_cylinder_cap(m, wr, wc, cx, cz, silo_h, silo_r, n_sides=n_seg, face_up=True)
+            return m.to_b3d()
+        # LOD0
+        for cx, cz in cx_list:
+            _add_cylinder(m, wr, wc, cx, cz, 0, silo_h, silo_r, n_sides=n_seg)
+            _add_cylinder_cap(m, wr, wc, cx, cz, silo_h, silo_r, n_sides=n_seg, face_up=True)
+            # Conical roof
+            _add_spire(m, rr, rc, cx, cz, silo_h, silo_h+cone_h, silo_r, n_sides=n_seg)
+        # Loading shed box
+        m.add_box(-6*S, 6*S, 0, 4*S, -5*S, -2*S, wr, wc, rr, rc)
+        return m.to_b3d()
+
+    elif variant == "02":
+        # Main box + 2 cylinder stack approximations (12 segs) + pipe run box
+        bw, bd, bh = 16*S, 12*S, 24*S
+        hx, hz = bw/2, bd/2
+        stack_r = 0.75*S
+        stack_h = 30*S
+        n_seg = 12
+        if lod == 2:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_cylinder(m, wr, wc, -hx+1*S, hz-1*S, 0, stack_h, stack_r, n_sides=8)
+            _add_cylinder(m, wr, wc, hx-1*S, hz-1*S, 0, stack_h, stack_r, n_sides=8)
+            return m.to_b3d()
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            _add_cylinder(m, wr, wc, -hx+1*S, hz-1*S, 0, stack_h, stack_r, n_sides=n_seg)
+            _add_cylinder(m, wr, wc, hx-1*S, hz-1*S, 0, stack_h, stack_r, n_sides=n_seg)
+            return m.to_b3d()
+        # LOD0
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        for sx in [-hx+1*S, hx-1*S]:
+            _add_cylinder(m, wr, wc, sx, hz-1*S, 0, stack_h, stack_r, n_sides=n_seg)
+            _add_cylinder_cap(m, wr, wc, sx, hz-1*S, stack_h, stack_r, n_sides=n_seg, face_up=True)
+        # Pipe run box
+        m.add_box(-hx+1*S, hx-1*S, 8*S-0.3*S, 8*S+0.3*S, hz-1*S-0.2*S, hz-1*S+0.2*S, wr, wc)
+        return m.to_b3d()
+
+    elif variant == "03":
+        # L-shaped plan (two boxes forming L) + flat roof
+        h = 10*S
+        if lod == 2:
+            m.add_box(-10*S, 10*S, 0, h, -8*S, 8*S, wr, wc, rr, rc)
+            return m.to_b3d()
+        if lod == 1:
+            m.add_box(-10*S, 10*S, 0, h, -4*S, 4*S, wr, wc, rr, rc)
+            m.add_box(-10*S, -2*S, 0, h, 4*S, 12*S, wr, wc, rr, rc)
+            return m.to_b3d()
+        # LOD0: L-shape
+        m.add_box(-10*S, 10*S, 0, h, -4*S, 4*S, wr, wc, rr, rc)
+        m.add_box(-10*S, -2*S, 0, h, 4*S, 12*S, wr, wc, rr, rc)
+        return m.to_b3d()
+
+    elif variant == "04":
+        # Main box + 2 transformer pad boxes + lightning rod box
+        bw, bd, bh = 18*S, 14*S, 16*S
+        hx, hz = bw/2, bd/2
+        if lod == 2:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        if lod == 1:
+            m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+            m.add_box(-hx+1*S, -hx+7*S, 0, 3*S, -hz-1*S, -hz, wr, wc, rr, rc)
+            m.add_box(hx-7*S, hx-1*S, 0, 3*S, -hz-1*S, -hz, wr, wc, rr, rc)
+            return m.to_b3d()
+        # LOD0
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        # Two transformer pad boxes (simple rectangles, NO radiator fin strips)
+        for tx in [-hx+4*S, hx-4*S]:
+            m.add_box(tx-3*S, tx+3*S, 0, 3*S, -hz-4*S, -hz, wr, wc, rr, rc)
+        # Lightning rod box
+        m.add_box(-1*S, 1*S, bh, bh+8*S, -1*S, 1*S, wr, wc, walls_only=True)
+        return m.to_b3d()
+
+    return m.to_b3d()
+
+
+# ---------------------------------------------------------------------------
+# SERVICE BUILDINGS  (2500-4000 tris LOD0)
+# ---------------------------------------------------------------------------
+
+def build_svc_fire_station(lod):
+    """Fire station: main hall box + watch tower box + canopy slab over bay doors."""
+    wr, wc = WALL_CELLS[("svc", "fire_station")]
+    rr, rc = ROOF_CELL
+    m = MeshAccum()
+    S = 0.1
+
+    hall_w, hall_d, hall_h = 14*S, 12*S, 6*S
+    hx, hz = hall_w/2, hall_d/2
+    tow_w, tow_h = 4*S, 10*S
+
+    if lod == 1:
+        m.add_box(-hx, hx, 0, hall_h, -hz, hz, wr, wc, rr, rc)
+        m.add_box(hx, hx+tow_w, 0, tow_h, -tow_w/2, tow_w/2, wr, wc, rr, rc)
+        return m.to_b3d()
+
+    # LOD0: main hall box
+    m.add_box(-hx, hx, 0, hall_h, -hz, hz, wr, wc, rr, rc)
+    # Watch tower box
+    m.add_box(hx, hx+tow_w, 0, tow_h, -tow_w/2, tow_w/2, wr, wc, rr, rc)
+    # Simple canopy slab over bay doors
+    m.add_box(-hx, 0, hall_h*0.75, hall_h*0.75+0.15*S, -hz-1.5*S, -hz, wr, wc)
+    return m.to_b3d()
+
+
+def build_svc_police_station(lod):
+    """Police station: main box + projecting entrance box + triangular pediment."""
+    wr, wc = WALL_CELLS[("svc", "police_station")]
+    rr, rc = ROOF_CELL
+    m = MeshAccum()
+    S = 0.1
+
+    bw, bd, bh = 12*S, 10*S, 9*S
+    hx, hz = bw/2, bd/2
+    ent_w, ent_d = 4*S, 2*S
+
+    if lod == 1:
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        m.add_box(-ent_w/2, ent_w/2, 0, bh, -hz-ent_d, -hz, wr, wc, rr, rc)
+        return m.to_b3d()
+
+    # LOD0: main box
+    m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+    # Projecting entrance box
+    m.add_box(-ent_w/2, ent_w/2, 0, bh, -hz-ent_d, -hz, wr, wc, rr, rc)
+    # Triangular pediment (2 triangles)
+    ped_proj = 0.3*S
+    m.add_tri((-ent_w/2, bh, -hz-ent_d-ped_proj), (ent_w/2, bh, -hz-ent_d-ped_proj),
+              (0, bh+2*S, -hz-ent_d-ped_proj), (0, 0, -1), wr, wc)
+    m.add_tri((ent_w/2, bh, -hz-ent_d), (-ent_w/2, bh, -hz-ent_d),
+              (0, bh+2*S, -hz-ent_d), (0, 0, 1), wr, wc)
+    return m.to_b3d()
+
+
+def build_svc_power_plant(lod):
+    """Power plant: main box + pitched roof + 2 cooling tower frustums."""
+    wr, wc = WALL_CELLS[("svc", "power_plant")]
+    rr, rc = ROOF_CELL
+    m = MeshAccum()
+    S = 0.1
+
+    bw, bd, bh = 20*S, 16*S, 14*S
+    hx, hz = bw/2, bd/2
+    ridge_h = (16-14)*S
+    ct_base_r = 4*S
+    ct_top_r = 3*S
+    ct_h = 12*S
+    n_seg = 12
+
+    if lod == 1:
+        m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+        _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
+        for tcx in [-hx*0.4, hx*0.4]:
+            _add_cylinder(m, wr, wc, tcx, hz+ct_base_r+1*S, 0, ct_h, ct_base_r*0.8, n_sides=8)
+        return m.to_b3d()
+
+    # LOD0: main box + pitched roof
+    m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
+    _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
+
+    # Two cooling tower frustums (cylinder_approx with 12 segs)
+    for tcx in [-hx*0.4, hx*0.4]:
+        tcz = hz + ct_base_r + 1*S
+        for i in range(n_seg):
+            a0 = 2*math.pi*i/n_seg
+            a1 = 2*math.pi*(i+1)/n_seg
+            bx0 = tcx + ct_base_r*math.sin(a0); bz0 = tcz + ct_base_r*math.cos(a0)
+            bx1 = tcx + ct_base_r*math.sin(a1); bz1 = tcz + ct_base_r*math.cos(a1)
+            tx0 = tcx + ct_top_r*math.sin(a0); tz0 = tcz + ct_top_r*math.cos(a0)
+            tx1 = tcx + ct_top_r*math.sin(a1); tz1 = tcz + ct_top_r*math.cos(a1)
+            nx = math.sin((a0+a1)*0.5); nz = math.cos((a0+a1)*0.5)
+            m.add_quad((bx0, 0, bz0), (bx1, 0, bz1), (tx1, ct_h, tz1), (tx0, ct_h, tz0),
+                       (nx, 0.2, nz), wr, wc)
+        _add_cylinder_cap(m, rr, rc, tcx, tcz, ct_h, ct_top_r, n_sides=n_seg, face_up=True)
+
+    return m.to_b3d()
+
+
+def build_svc_water_tower(lod):
+    """Water tower: 4 tapered leg boxes + cylindrical tank (16 segs) + conical roof."""
+    wr, wc = WALL_CELLS[("svc", "water_tower")]
+    rr, rc = ROOF_CELL
+    m = MeshAccum()
+    S = 0.1
+
+    tank_r = 4*S
+    tank_h = 6*S
+    leg_h = 8*S
+    tank_bot = leg_h
+    tank_top = tank_bot + tank_h
+    cone_r = 4.5*S
+    cone_h = 1.5*S
+    n_seg = 16
+    foot_spread = 5*S
+
+    if lod == 1:
+        _add_cylinder(m, wr, wc, 0, 0, tank_bot, tank_top, tank_r, n_sides=8)
+        _add_cylinder_cap(m, wr, wc, 0, 0, tank_top, tank_r, n_sides=8, face_up=True)
+        for sx, sz in [(-1,-1),(1,-1),(-1,1),(1,1)]:
+            lx, lz = sx*foot_spread, sz*foot_spread
+            m.add_box(lx-0.5*S, lx+0.5*S, 0, tank_bot, lz-0.5*S, lz+0.5*S, wr, wc, walls_only=True)
+        return m.to_b3d()
+
+    # LOD0: cylindrical tank
+    _add_cylinder(m, wr, wc, 0, 0, tank_bot, tank_top, tank_r, n_sides=n_seg)
+    _add_cylinder_cap(m, wr, wc, 0, 0, tank_bot, tank_r, n_sides=n_seg, face_up=False)
+    _add_cylinder_cap(m, wr, wc, 0, 0, tank_top, tank_r, n_sides=n_seg, face_up=True)
+
+    # Conical roof
+    _add_spire(m, rr, rc, 0, 0, tank_top, tank_top+cone_h, cone_r, n_sides=n_seg)
+
+    # Four tapered leg boxes (splayed)
+    for sx, sz in [(-1,-1),(1,-1),(-1,1),(1,1)]:
+        bx, bz = sx*foot_spread, sz*foot_spread
+        tx, tz = sx*(tank_r*0.6), sz*(tank_r*0.6)
+        base_hw = 0.5*S
+        top_hw = 0.25*S
+        mid_y = leg_h * 0.5
+        mid_x = (bx + tx) * 0.5
+        mid_z = (bz + tz) * 0.5
+        mid_hw = (base_hw + top_hw) * 0.5
+        m.add_box(bx-base_hw, bx+base_hw, 0, mid_y, bz-base_hw, bz+base_hw, wr, wc, walls_only=True)
+        m.add_box(mid_x-mid_hw, mid_x+mid_hw, mid_y, leg_h, mid_z-mid_hw, mid_z+mid_hw, wr, wc, walls_only=True)
 
     return m.to_b3d()
 
@@ -2208,23 +1908,23 @@ def _build_ind_high(zone, tier, variant, lod):
 
 def build_box_building(zone: str, tier: str, variant: str, lod: int) -> bytes:
     """Route to zone/tier-specific detailed geometry builder."""
-    if tier == "low" and zone == "res":
-        return _build_res_small(zone, tier, variant, lod)
-    elif tier == "med" and zone == "res":
-        return _build_res_small(zone, tier, variant, lod)
-    elif tier == "low" and zone == "com":
-        return _build_com_small(zone, tier, variant, lod)
-    elif tier == "med" and zone == "com":
-        return _build_com_small(zone, tier, variant, lod)
-    elif tier == "low" and zone == "ind":
-        return _build_ind_low(zone, tier, variant, lod)
-    elif tier == "med" and zone == "ind":
-        return _build_ind_med(zone, tier, variant, lod)
-    elif tier == "high" and zone == "res":
+    if zone == "res" and tier == "low":
+        return _build_res_low(zone, tier, variant, lod)
+    elif zone == "res" and tier == "med":
+        return _build_res_med(zone, tier, variant, lod)
+    elif zone == "res" and tier == "high":
         return _build_res_high(zone, tier, variant, lod)
-    elif tier == "high" and zone == "com":
+    elif zone == "com" and tier == "low":
+        return _build_com_low(zone, tier, variant, lod)
+    elif zone == "com" and tier == "med":
+        return _build_com_med(zone, tier, variant, lod)
+    elif zone == "com" and tier == "high":
         return _build_com_high(zone, tier, variant, lod)
-    elif tier == "high" and zone == "ind":
+    elif zone == "ind" and tier == "low":
+        return _build_ind_low(zone, tier, variant, lod)
+    elif zone == "ind" and tier == "med":
+        return _build_ind_med(zone, tier, variant, lod)
+    elif zone == "ind" and tier == "high":
         return _build_ind_high(zone, tier, variant, lod)
     else:
         # Fallback: simple box
@@ -2236,464 +1936,6 @@ def build_box_building(zone: str, tier: str, variant: str, lod: int) -> bytes:
         v, t = box_faces(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
         all_verts.extend(v); all_tris.extend(t)
         return build_b3d(all_verts, all_tris)
-
-
-# ---------------------------------------------------------------------------
-# Service building geometry
-# ---------------------------------------------------------------------------
-
-def build_svc_fire_station(lod: int) -> bytes:
-    """
-    Fire station: 2,500–4,000 tris LOD0.
-    Two vehicle bay door openings, apron, hose reel housing, personnel entrance,
-    antenna/radio mast.
-    """
-    wr, wc = WALL_CELLS[("svc", "fire_station")]
-    rr, rc = ROOF_CELL
-    m = MeshAccum()
-
-    hx = 0.44; hz = 0.38; h = 0.60
-
-    if lod == 1:
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        # Two simplified bay insets
-        for bx_c in [-hx*0.45, hx*0.10]:
-            m.add_box(bx_c-0.12, bx_c+0.12, 0, h*0.72, -hz-0.04, -hz, wr, wc)
-        # Antenna stub
-        m.add_box(-0.01, 0.01, h, h+0.25, -hz*0.5-0.01, -hz*0.5+0.01, wr, wc)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 340)
-        return m.to_b3d()
-
-    # Main building
-    m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-
-    # Flat parapet
-    _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.025, ph=0.05)
-
-    # Two vehicle bay door openings (front face Z=-hz, normal -Z)
-    bay_w = 0.24; bay_h = h * 0.72; bay_d = 0.07
-    for bx_c in [-hx*0.46, hx*0.12]:
-        _add_loading_dock(m, wr, wc, bx_c, 0.0, -hz, bay_w, bay_h, bay_d, normal_sign_z=-1)
-
-    # Apron (flat projecting slab in front of bays)
-    m.add_box(-hx*0.7, hx*0.6, 0, 0.025, -hz-0.12, -hz, wr, wc, walls_only=False)
-
-    # Personnel entrance door recess (right side of front face)
-    m.add_box(hx*0.55-0.06, hx*0.55+0.06, 0, h*0.52, -hz-0.04, -hz, wr, wc)
-
-    # Entrance canopy
-    m.add_box(hx*0.55-0.10, hx*0.55+0.10, h*0.50, h*0.50+0.015, -hz-0.10, -hz, wr, wc)
-
-    # Hose reel housing on left side wall
-    m.add_box(-hx-0.06, -hx, h*0.15, h*0.52, -hz*0.3-0.04, -hz*0.3+0.04, wr, wc, rr, rc)
-
-    # Antenna/radio mast on roof
-    m.add_box(-0.012, 0.012, h+0.05, h+0.32, hz*0.6-0.012, hz*0.6+0.012, wr, wc)
-    # Cross piece on mast
-    m.add_box(-0.06, 0.06, h+0.24, h+0.26, hz*0.6-0.006, hz*0.6+0.006, wr, wc)
-
-    # Windows on upper facade (above bays)
-    for bx_c in [-hx*0.46, hx*0.12]:
-        m.add_box(bx_c-0.06, bx_c+0.06, bay_h+0.04, h-0.04, -hz-0.025, -hz, wr, wc)
-
-    # Side wall windows
-    _add_windows(m, wr, wc, 3, 1, h*0.15, h*0.65,
-                 -hz+0.05, hz-0.05, hx, hx, 1, win_w_frac=0.18, win_h_frac=0.55)
-    _add_windows(m, wr, wc, 2, 1, h*0.15, h*0.65,
-                 -hz+0.05, hz-0.05, -hx, -hx, -1, win_w_frac=0.18, win_h_frac=0.55)
-
-    # Facade ribs on side walls
-    _add_facade_ribs(m, wr, wc, -hz+0.02, hz-0.02, 0.05, h-0.05, hx, 6)
-    _add_facade_ribs(m, wr, wc, -hz+0.02, hz-0.02, 0.05, h-0.05, -hx, 6)
-
-    # Horizontal banding
-    for frac in [0.35, 0.72]:
-        yb = frac * h
-        m.add_box(-hx-0.008, hx+0.008, yb, yb+0.014, -hz-0.008, hz+0.008, wr, wc, walls_only=True)
-
-    # Plinth
-    m.add_box(-hx-0.01, hx+0.01, 0, 0.04, -hz-0.01, hz+0.01, wr, wc, walls_only=True)
-
-    # Corner columns
-    for cx, cz in [(-hx,-hz),(-hx,hz),(hx,-hz),(hx,hz)]:
-        m.add_box(cx-0.02, cx+0.02, 0, h, cz-0.02, cz+0.02, wr, wc, walls_only=True)
-
-    # Number plate / signage band across facade
-    m.add_box(-hx*0.85, hx*0.85, bay_h, bay_h+0.06, -hz-0.012, -hz, wr, wc, walls_only=True)
-
-    # Back face detail
-    _add_windows(m, wr, wc, 3, 1, h*0.1, h*0.65,
-                 -hx*0.6, hx*0.6, hz, hz, 1, win_w_frac=0.15, win_h_frac=0.50)
-
-    # Roof equipment
-    _add_ac_units(m, wr, wc, rr, rc, h+0.05, -hx*0.5, hx*0.5, -hz*0.5, hz*0.5, count=3)
-
-    # Dense surface detail to reach 2,500–4,000 tris
-    _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, -hz,
-                              n_horiz_strips=50, n_vert_strips=30, normal_sign_z=-1)
-    _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, -hx,
-                              n_horiz_strips=44, n_vert_strips=26, normal_sign_z=-1)
-    _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, hx,
-                              n_horiz_strips=44, n_vert_strips=26, normal_sign_z=1)
-    _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, hz,
-                              n_horiz_strips=40, n_vert_strips=26, normal_sign_z=1)
-
-    return m.to_b3d()
-
-
-def build_svc_police_station(lod: int) -> bytes:
-    """
-    Police station: 2,500–4,000 tris LOD0.
-    Solid masonry, recessed windows, vehicle bay recess, entrance canopy,
-    antenna cluster.
-    """
-    wr, wc = WALL_CELLS[("svc", "police_station")]
-    rr, rc = ROOF_CELL
-    m = MeshAccum()
-
-    hx = 0.38; hz = 0.36; h = 0.66
-
-    if lod == 1:
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        # Vehicle bay hint
-        m.add_box(hx*0.4-0.10, hx*0.4+0.10, 0, h*0.55, -hz-0.04, -hz, wr, wc)
-        # Entrance canopy
-        m.add_box(-0.12, 0.12, h*0.55, h*0.55+0.015, -hz-0.10, -hz, wr, wc)
-        # Two antenna stubs
-        for ax in [-0.05, 0.05]:
-            m.add_box(ax-0.008, ax+0.008, h, h+0.20, hz*0.5-0.008, hz*0.5+0.008, wr, wc)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 340)
-        return m.to_b3d()
-
-    # Main masonry volume
-    m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-
-    # Parapet
-    _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.025, ph=0.05)
-
-    # Recessed windows (small, masonry-style) on all faces
-    # Front
-    _add_windows(m, wr, wc, 4, 2, 0.12, h-0.06,
-                 -hx+0.06, hx*0.3, -hz, -hz, -1,
-                 win_w_frac=0.16, win_h_frac=0.55)
-    # Side
-    _add_windows(m, wr, wc, 3, 2, 0.12, h-0.06,
-                 -hz+0.06, hz-0.06, -hx, -hx, -1, win_w_frac=0.18, win_h_frac=0.50)
-    _add_windows(m, wr, wc, 3, 2, 0.12, h-0.06,
-                 -hz+0.06, hz-0.06, hx, hx, 1, win_w_frac=0.18, win_h_frac=0.50)
-    # Back
-    _add_windows(m, wr, wc, 3, 2, 0.12, h-0.06,
-                 -hx*0.7, hx*0.7, hz, hz, 1, win_w_frac=0.15, win_h_frac=0.48)
-
-    # Vehicle bay recess on right side elevation (X = hx)
-    _add_loading_dock(m, wr, wc, -hz*0.1, 0.0, hx, 0.28, h*0.50, 0.06, normal_sign_z=1)
-
-    # Entrance canopy (main door front)
-    m.add_box(-0.14, 0.14, h*0.55, h*0.55+0.016, -hz-0.12, -hz, wr, wc)
-    # Canopy support columns
-    for px in [-0.12, 0.12]:
-        m.add_box(px-0.012, px+0.012, 0, h*0.55, -hz-0.115, -hz-0.100, wr, wc)
-
-    # Main entrance door recess
-    m.add_box(-0.08, 0.08, 0, h*0.53, -hz-0.04, -hz, wr, wc)
-
-    # Steps in front of entrance
-    for s_i in range(3):
-        sy = s_i * 0.022
-        sd = s_i * 0.035
-        m.add_box(-0.10, 0.10, sy, sy+0.022, -hz-0.12+sd, -hz-0.12+sd+0.035, wr, wc, walls_only=False)
-
-    # Communications antenna cluster on roof
-    for ai, (ax, rod_h) in enumerate([(-0.06, 0.20),(0.06, 0.26),(0.0, 0.16)]):
-        m.add_box(ax-0.009, ax+0.009, h+0.05, h+0.05+rod_h, hz*0.55-0.009, hz*0.55+0.009, wr, wc)
-    # Cross-arm on tallest antenna
-    m.add_box(-0.05, 0.05, h+0.05+0.20, h+0.05+0.22, hz*0.55-0.005, hz*0.55+0.005, wr, wc)
-
-    # Facade pilasters (vertical engaged piers)
-    for px in [-hx*0.65, -hx*0.25, hx*0.25]:
-        m.add_box(px-0.02, px+0.02, 0, h, -hz-0.022, -hz, wr, wc, walls_only=True)
-
-    # Horizontal banding (string courses)
-    for frac in [0.35, 0.72]:
-        yb = frac * h
-        m.add_box(-hx-0.01, hx+0.01, yb, yb+0.016, -hz-0.01, hz+0.01, wr, wc, walls_only=True)
-
-    # Plinth
-    m.add_box(-hx-0.01, hx+0.01, 0, 0.04, -hz-0.01, hz+0.01, wr, wc, walls_only=True)
-
-    # Corner quoins
-    for cx, cz in [(-hx,-hz),(-hx,hz),(hx,-hz),(hx,hz)]:
-        m.add_box(cx-0.025, cx+0.025, 0, h, cz-0.025, cz+0.025, wr, wc, walls_only=True)
-
-    # Roof equipment
-    _add_ac_units(m, wr, wc, rr, rc, h+0.05, -hx*0.6, hx*0.6, -hz*0.5, hz*0.5, count=2)
-
-    # Dense surface detail to reach 2,500–4,000 tris
-    _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, -hz,
-                              n_horiz_strips=50, n_vert_strips=30, normal_sign_z=-1)
-    _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, -hx,
-                              n_horiz_strips=44, n_vert_strips=26, normal_sign_z=-1)
-    _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, hx,
-                              n_horiz_strips=44, n_vert_strips=26, normal_sign_z=1)
-    _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, hz,
-                              n_horiz_strips=40, n_vert_strips=26, normal_sign_z=1)
-
-    return m.to_b3d()
-
-
-def build_svc_power_plant(lod: int) -> bytes:
-    """
-    Power plant: 2,500–4,000 tris LOD0.
-    Transformer/switchgear secondary box, exhaust stack, duct stubs, loading door.
-    """
-    wr, wc = WALL_CELLS[("svc", "power_plant")]
-    rr, rc = ROOF_CELL
-    m = MeshAccum()
-
-    hx = 0.42; hz = 0.40; h = 0.56
-
-    if lod == 1:
-        m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-        # Chimney/stack
-        m.add_box(hx*0.5-0.04, hx*0.5+0.04, 0, h+0.55, hz*0.5-0.04, hz*0.5+0.04, wr, wc, walls_only=True)
-        # Secondary box
-        m.add_box(hx*0.3, hx+0.06, 0, h*0.45, -hz, -hz*0.3, wr, wc, rr, rc)
-        _fill_to_budget(m, wr, wc, -hx, hx, 0, h, -hz, hz, 340)
-        return m.to_b3d()
-
-    # Main building
-    m.add_box(-hx, hx, 0, h, -hz, hz, wr, wc, rr, rc)
-
-    # Flat parapet
-    _add_parapet(m, wr, wc, -hx, hx, h, -hz, hz, pw=0.025, ph=0.05)
-
-    # Transformer/switchgear secondary box (adjacent, distinct footprint)
-    m.add_box(hx*0.25, hx+0.07, 0, h*0.48, -hz, -hz*0.25, wr, wc, rr, rc)
-    # Connection bridge between main and secondary
-    m.add_box(hx*0.25, hx+0.07, h*0.30, h*0.38, -hz*0.25-0.03, -hz*0.25+0.03, wr, wc)
-
-    # Exhaust stack (tall, rectangular)
-    stack_x = hx*0.55; stack_z = hz*0.55
-    stack_hw = 0.045
-    m.add_box(stack_x-stack_hw, stack_x+stack_hw, 0, h+0.52, stack_z-stack_hw, stack_z+stack_hw, wr, wc, walls_only=True)
-    # Stack cap
-    m.add_box(stack_x-stack_hw-0.01, stack_x+stack_hw+0.01, h+0.50, h+0.52, stack_z-stack_hw-0.01, stack_z+stack_hw+0.01, wr, wc, rr, rc)
-
-    # Three intake/exhaust duct stubs on principal (front) facade
-    for duct_i in range(3):
-        dx = -hx*0.5 + hx*(duct_i+0.5)/1.5
-        m.add_box(dx-0.022, dx+0.022, h*0.35, h*0.55, -hz-0.055, -hz, wr, wc)
-
-    # Recessed loading door on right elevation
-    _add_loading_dock(m, wr, wc, 0.0, 0.0, hx, 0.32, h*0.58, 0.06, normal_sign_z=1)
-
-    # Corrugated ribs
-    _add_facade_ribs(m, wr, wc, -hx+0.02, hx-0.02, 0, h-0.02, -hz, 10)
-    _add_facade_ribs(m, wr, wc, -hx+0.02, hx-0.02, 0, h-0.02, hz, 8)
-    _add_facade_ribs(m, wr, wc, -hz+0.02, hz*0.25-0.02, 0, h-0.02, -hx, 6)
-
-    # Windows
-    _add_windows(m, wr, wc, 3, 1, h*0.15, h*0.60,
-                 -hx*0.7, -hx*0.2, -hz, -hz, -1, win_w_frac=0.20, win_h_frac=0.50)
-    _add_windows(m, wr, wc, 2, 1, h*0.15, h*0.60,
-                 -hz+0.04, hz-0.04, -hx, -hx, -1, win_w_frac=0.22, win_h_frac=0.50)
-
-    # Floor bands
-    for frac in [0.30, 0.65]:
-        yb = frac * h
-        m.add_box(-hx-0.008, hx+0.008, yb, yb+0.014, -hz-0.008, hz+0.008, wr, wc, walls_only=True)
-
-    # Plinth
-    m.add_box(-hx-0.01, hx+0.01, 0, 0.04, -hz-0.01, hz+0.01, wr, wc, walls_only=True)
-
-    # Corner columns
-    for cx, cz in [(-hx,-hz),(-hx,hz),(hx,-hz),(hx,hz)]:
-        m.add_box(cx-0.02, cx+0.02, 0, h, cz-0.02, cz+0.02, wr, wc, walls_only=True)
-
-    # Roof AC / cooling units
-    _add_ac_units(m, wr, wc, rr, rc, h+0.05, -hx*0.5, hx*0.3, -hz*0.55, hz*0.55, count=4)
-
-    # Back face detail
-    _add_windows(m, wr, wc, 3, 1, h*0.10, h*0.58,
-                 -hx*0.6, hx*0.6, hz, hz, 1, win_w_frac=0.16, win_h_frac=0.48)
-
-    # Dense surface detail to reach 2,500–4,000 tris
-    _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, -hz,
-                              n_horiz_strips=50, n_vert_strips=30, normal_sign_z=-1)
-    _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, -hx,
-                              n_horiz_strips=44, n_vert_strips=26, normal_sign_z=-1)
-    _add_dense_facade_detail(m, wr, wc, -hz, hz, 0, h, hx,
-                              n_horiz_strips=44, n_vert_strips=26, normal_sign_z=1)
-    _add_dense_facade_detail(m, wr, wc, -hx, hx, 0, h, hz,
-                              n_horiz_strips=40, n_vert_strips=26, normal_sign_z=1)
-
-    return m.to_b3d()
-
-
-def build_svc_water_tower(lod: int) -> bytes:
-    """
-    Water tower: 2,500–4,000 tris LOD0.
-    Elevated cylindrical tank (approximated as 12-sided polygon), four support
-    legs with cross-bracing, pipe stub, access ladder, dome cap.
-    """
-    wr, wc = WALL_CELLS[("svc", "water_tower")]
-    rr, rc = ROOF_CELL
-    m = MeshAccum()
-
-    tank_r = 0.22        # tank radius (3m world → 0.30 model, but keep within tile)
-    tank_bot = 0.42      # tank bottom Y (4m world)
-    tank_top = tank_bot + 0.25  # tank height 2.5m world
-    leg_hw = 0.022       # leg half-width
-    leg_off = 0.18       # leg centre offset from tower axis
-    n_seg = 12           # polygon segments for tank approximation
-
-    if lod == 1:
-        # Simplified: octagonal tank + 4 flat fin legs
-        seg4 = 8
-        tank_cx, tank_cz = 0.0, 0.0
-        for i in range(seg4):
-            a0 = 2*math.pi*i/seg4
-            a1 = 2*math.pi*(i+1)/seg4
-            x0 = tank_cx + tank_r*math.sin(a0); z0 = tank_cz + tank_r*math.cos(a0)
-            x1 = tank_cx + tank_r*math.sin(a1); z1 = tank_cz + tank_r*math.cos(a1)
-            nx = math.sin((a0+a1)*0.5); nz = math.cos((a0+a1)*0.5)
-            m.add_quad((x0,tank_bot,z0),(x1,tank_bot,z1),(x1,tank_top,z1),(x0,tank_top,z0),(nx,0,nz),wr,wc)
-        # Tank top (cap)
-        m.add_box(-tank_r, tank_r, tank_top, tank_top+0.04, -tank_r, tank_r, wr, wc, rr, rc)
-        # 4 flat leg fins
-        for sx, sz in [(-1,-1),(1,-1),(-1,1),(1,1)]:
-            lx = sx*leg_off; lz = sz*leg_off
-            m.add_box(lx-leg_hw*2, lx+leg_hw*2, 0, tank_bot, lz-leg_hw, lz+leg_hw, wr, wc, walls_only=True)
-        _fill_to_budget(m, wr, wc, -tank_r, tank_r, 0, tank_top, -tank_r, tank_r, 340)
-        return m.to_b3d()
-
-    # LOD0 — full detail
-    # Cylindrical tank body (n_seg-sided prism)
-    for i in range(n_seg):
-        a0 = 2*math.pi*i/n_seg
-        a1 = 2*math.pi*(i+1)/n_seg
-        x0 = tank_r*math.sin(a0); z0 = tank_r*math.cos(a0)
-        x1 = tank_r*math.sin(a1); z1 = tank_r*math.cos(a1)
-        nx = math.sin((a0+a1)*0.5); nz = math.cos((a0+a1)*0.5)
-        m.add_quad((x0,tank_bot,z0),(x1,tank_bot,z1),(x1,tank_top,z1),(x0,tank_top,z0),(nx,0,nz),wr,wc)
-
-    # Tank bottom plate (flat disk — n_seg tris)
-    cx_v = Vertex(0.0, tank_bot, 0.0, 0,-1,0, *atlas_uv(wr,wc,0.5,0.5))
-    base_b = len(m.verts); m.verts.append(cx_v)
-    for i in range(n_seg):
-        a0 = 2*math.pi*i/n_seg; a1 = 2*math.pi*(i+1)/n_seg
-        x0 = tank_r*math.sin(a0); z0 = tank_r*math.cos(a0)
-        x1 = tank_r*math.sin(a1); z1 = tank_r*math.cos(a1)
-        vi = Vertex(x0,tank_bot,z0, 0,-1,0, *atlas_uv(wr,wc,0.5+0.5*math.sin(a0),0.5+0.5*math.cos(a0)))
-        vj = Vertex(x1,tank_bot,z1, 0,-1,0, *atlas_uv(wr,wc,0.5+0.5*math.sin(a1),0.5+0.5*math.cos(a1)))
-        bi = len(m.verts); m.verts.append(vi); m.verts.append(vj)
-        m.tris.append((base_b, bi+1, bi))
-
-    # Dome cap (cone approximation — n_seg tris)
-    dome_apex_y = tank_top + tank_r * 0.4
-    apex_v = Vertex(0.0, dome_apex_y, 0.0, 0,1,0, *atlas_uv(rr,rc,0.5,0.5))
-    base_a = len(m.verts); m.verts.append(apex_v)
-    for i in range(n_seg):
-        a0 = 2*math.pi*i/n_seg; a1 = 2*math.pi*(i+1)/n_seg
-        x0 = tank_r*math.sin(a0); z0 = tank_r*math.cos(a0)
-        x1 = tank_r*math.sin(a1); z1 = tank_r*math.cos(a1)
-        vi = Vertex(x0,tank_top,z0, 0,0.5,0, *atlas_uv(rr,rc,0.5+0.5*math.sin(a0),0.5+0.5*math.cos(a0)))
-        vj = Vertex(x1,tank_top,z1, 0,0.5,0, *atlas_uv(rr,rc,0.5+0.5*math.sin(a1),0.5+0.5*math.cos(a1)))
-        bi = len(m.verts); m.verts.append(vi); m.verts.append(vj)
-        m.tris.append((base_a, bi, bi+1))
-
-    # Four support legs with cross-bracing
-    for sx, sz in [(-1,-1),(1,-1),(-1,1),(1,1)]:
-        lx = sx*leg_off; lz = sz*leg_off
-        # Vertical leg box
-        m.add_box(lx-leg_hw, lx+leg_hw, 0, tank_bot+0.02, lz-leg_hw, lz+leg_hw, wr, wc, walls_only=True)
-
-    # Cross-bracing (diagonal members between legs)
-    brace_y0 = 0.06; brace_y1 = tank_bot - 0.06; brace_t = 0.012
-    # Four pairs of adjacent legs
-    leg_pairs = [
-        ((-1,-1),(1,-1)),   # front pair
-        ((-1,1),(1,1)),     # back pair
-        ((-1,-1),(-1,1)),   # left pair
-        ((1,-1),(1,1)),     # right pair
-    ]
-    for (sx0,sz0),(sx1,sz1) in leg_pairs:
-        ax0 = sx0*leg_off; az0 = sz0*leg_off
-        ax1 = sx1*leg_off; az1 = sz1*leg_off
-        # Diagonal brace low-to-high
-        m.add_quad(
-            (ax0-brace_t, brace_y0, az0-brace_t),
-            (ax1-brace_t, brace_y1, az1-brace_t),
-            (ax1+brace_t, brace_y1, az1+brace_t),
-            (ax0+brace_t, brace_y0, az0+brace_t),
-            (0,1,0), wr, wc
-        )
-        # Diagonal brace high-to-low
-        m.add_quad(
-            (ax0-brace_t, brace_y1, az0-brace_t),
-            (ax1-brace_t, brace_y0, az1-brace_t),
-            (ax1+brace_t, brace_y0, az1+brace_t),
-            (ax0+brace_t, brace_y1, az0+brace_t),
-            (0,1,0), wr, wc
-        )
-
-    # Inlet/outlet pipe stub descending from tank base
-    m.add_box(-0.015, 0.015, 0.06, tank_bot, tank_r*0.5-0.015, tank_r*0.5+0.015, wr, wc, walls_only=True)
-
-    # Access ladder on one support leg (rungs)
-    lad_lx = -leg_off + leg_hw + 0.012; lad_lz = -leg_off
-    for rung_i in range(8):
-        ry = 0.06 + rung_i * (tank_bot - 0.06) / 8
-        m.add_box(lad_lx, lad_lx + 0.04, ry, ry+0.012, lad_lz-0.012, lad_lz+0.012, wr, wc)
-
-    # Foundation base slab
-    m.add_box(-leg_off-0.06, leg_off+0.06, 0, 0.04, -leg_off-0.06, leg_off+0.06, wr, wc, walls_only=False)
-
-    # Dense detail on tank body (adds detail strips around the circumference at varying heights)
-    # Additional horizontal ring bands on tank
-    for ring_i in range(12):
-        ry = tank_bot + (tank_top-tank_bot) * (ring_i+0.5)/12
-        band_t = 0.012
-        for i in range(n_seg):
-            a0 = 2*math.pi*i/n_seg; a1 = 2*math.pi*(i+1)/n_seg
-            x0 = (tank_r+band_t)*math.sin(a0); z0 = (tank_r+band_t)*math.cos(a0)
-            x1 = (tank_r+band_t)*math.sin(a1); z1 = (tank_r+band_t)*math.cos(a1)
-            nx = math.sin((a0+a1)*0.5); nz_v = math.cos((a0+a1)*0.5)
-            m.add_quad((x0,ry,z0),(x1,ry,z1),(x1,ry+0.012,z1),(x0,ry+0.012,z0),(nx,0,nz_v),wr,wc)
-
-    # Additional vertical stiffener ribs on tank
-    for i in range(n_seg):
-        a = 2*math.pi*i/n_seg
-        rx0 = tank_r*math.sin(a); rz0 = tank_r*math.cos(a)
-        rx1 = (tank_r+0.015)*math.sin(a); rz1 = (tank_r+0.015)*math.cos(a)
-        # Thin quad from tank_bot to tank_top
-        nx = math.sin(a); nz_v = math.cos(a)
-        m.add_quad((rx0,tank_bot,rz0),(rx1,tank_bot,rz1),(rx1,tank_top,rz1),(rx0,tank_top,rz0),(nx,0,nz_v),wr,wc)
-
-    # Foundation slab detail
-    _add_dense_facade_detail(m, wr, wc, -leg_off-0.06, leg_off+0.06, 0, tank_bot*0.4, -(leg_off+0.06),
-                              n_horiz_strips=22, n_vert_strips=14, normal_sign_z=-1)
-    _add_dense_facade_detail(m, wr, wc, -leg_off-0.06, leg_off+0.06, 0, tank_bot*0.4, leg_off+0.06,
-                              n_horiz_strips=22, n_vert_strips=14, normal_sign_z=1)
-    _add_dense_facade_detail(m, wr, wc, -(leg_off+0.06), leg_off+0.06, 0, tank_bot*0.8, -(leg_off+0.06),
-                              n_horiz_strips=18, n_vert_strips=12, normal_sign_z=-1)
-    _add_dense_facade_detail(m, wr, wc, -(leg_off+0.06), leg_off+0.06, 0, tank_bot*0.8, leg_off+0.06,
-                              n_horiz_strips=18, n_vert_strips=12, normal_sign_z=1)
-
-    # Extra detail bands at multiple heights on the cylindrical tank (24-sided panels)
-    n_detail = 24
-    for ring_level in range(22):
-        rly = tank_bot + (tank_top - tank_bot) * ring_level / 22
-        rly2 = rly + (tank_top - tank_bot) / 22
-        band_t2 = 0.018
-        for i in range(n_detail):
-            a0 = 2*math.pi*i/n_detail; a1 = 2*math.pi*(i+1)/n_detail
-            x0 = (tank_r+band_t2)*math.sin(a0); z0 = (tank_r+band_t2)*math.cos(a0)
-            x1 = (tank_r+band_t2)*math.sin(a1); z1 = (tank_r+band_t2)*math.cos(a1)
-            nx = math.sin((a0+a1)*0.5); nz_v2 = math.cos((a0+a1)*0.5)
-            m.add_quad((x0,rly,z0),(x1,rly,z1),(x1,rly2,z1),(x0,rly2,z0),(nx,0,nz_v2),wr,wc)
-
-    return m.to_b3d()
 
 
 # ---------------------------------------------------------------------------

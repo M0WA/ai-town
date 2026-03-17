@@ -539,7 +539,9 @@ int main(int argc, char** argv)
                     smgr3->getSceneCollisionManager()
                         ->getScreenCoordinatesFrom3DPosition(anchor, smgr3->getActiveCamera());
 
-                if (sp.X < 0 || sp.X > opts.width || sp.Y < 0 || sp.Y > opts.height)
+                const irr::core::dimension2du screenSz = driver->getScreenSize();
+                if (sp.X < 0 || sp.X > static_cast<irr::s32>(screenSz.Width) ||
+                    sp.Y < 0 || sp.Y > static_cast<irr::s32>(screenSz.Height))
                     continue;
 
                 font->draw(
