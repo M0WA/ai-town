@@ -953,6 +953,7 @@ add_executable(opengl_tests
     tests/rendering/building_lod_swap_test.cpp        # Phase 9: LOD swap bounding box integration test
     tests/rendering/building_srgb_fallback_test.cpp   # Phase 9: building facade sRGB fallback test
     tests/rendering/cloud_plane_test.cpp       # Phase 10b: cloud plane init test (EDT_OPENGL + EDT_NULL)
+    tests/rendering/texture_cache_atlas_test.cpp      # Phase 11e: buildings atlas GL_TEXTURE_MAX_LEVEL check
 )
 # Irrlicht and GLEW::GLEW MUST be linked directly: shader_stub_compile_test.cpp includes
 # <irrlicht.h> and <GL/glew.h>; aitown_render links both PRIVATE so their include paths

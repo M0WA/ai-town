@@ -73,11 +73,11 @@ class Vertex:
 
 def atlas_uv(row: int, col: int, face_u: float, face_v: float) -> tuple:
     """
-    Map a face-local UV (0..1) to the 4×4 atlas cell at (row, col).
-    Each cell occupies 0.25 of the 0..1 UV range.
+    Map a face-local UV (0..1) to the 8×8 atlas cell at (row, col).
+    Each cell occupies 0.125 of the 0..1 UV range.
     """
-    u = col * 0.25 + face_u * 0.25
-    v = row * 0.25 + face_v * 0.25
+    u = col * 0.125 + face_u * 0.125
+    v = row * 0.125 + face_v * 0.125
     return (u, v)
 
 # ---------------------------------------------------------------------------
@@ -316,23 +316,58 @@ def build_b3d(verts: list, tris: list, texture_name: str = "buildings_atlas_d.dd
 # Building geometry definitions
 # ---------------------------------------------------------------------------
 
-# Atlas cell assignments from building-atlas-layout.md
-# Walls: (row, col) per zone_tier
-# Roof: cell (2, 3) shared for all
+# Atlas cell assignments from building-atlas-layout.md (8×8 grid, Phase 11e)
+# Walls: (row, col) per (zone, tier, variant) — unique cell per variant
+# Roof: cell shared for all (outside the 5-row used range)
 WALL_CELLS = {
-    ("res", "low"):  (0, 0),
-    ("com", "low"):  (0, 1),
-    ("ind", "low"):  (0, 2),
-    ("res", "med"):  (1, 0),
-    ("com", "med"):  (1, 1),
-    ("ind", "med"):  (1, 2),
-    ("res", "high"): (2, 0),
-    ("com", "high"): (2, 1),
-    ("ind", "high"): (2, 2),
-    # service buildings → cell (3, 2)
-    ("svc", "svc"):  (3, 2),
+    # Row 0: res_low and res_med
+    ("res", "low",  "01"): (0, 0),
+    ("res", "low",  "02"): (0, 1),
+    ("res", "low",  "03"): (0, 2),
+    ("res", "low",  "04"): (0, 3),
+    ("res", "med",  "01"): (0, 4),
+    ("res", "med",  "02"): (0, 5),
+    ("res", "med",  "03"): (0, 6),
+    ("res", "med",  "04"): (0, 7),
+    # Row 1: res_high and com_low
+    ("res", "high", "01"): (1, 0),
+    ("res", "high", "02"): (1, 1),
+    ("res", "high", "03"): (1, 2),
+    ("res", "high", "04"): (1, 3),
+    ("com", "low",  "01"): (1, 4),
+    ("com", "low",  "02"): (1, 5),
+    ("com", "low",  "03"): (1, 6),
+    ("com", "low",  "04"): (1, 7),
+    # Row 2: com_med and com_high
+    ("com", "med",  "01"): (2, 0),
+    ("com", "med",  "02"): (2, 1),
+    ("com", "med",  "03"): (2, 2),
+    ("com", "med",  "04"): (2, 3),
+    ("com", "high", "01"): (2, 4),
+    ("com", "high", "02"): (2, 5),
+    ("com", "high", "03"): (2, 6),
+    ("com", "high", "04"): (2, 7),
+    # Row 3: ind_low and ind_med
+    ("ind", "low",  "01"): (3, 0),
+    ("ind", "low",  "02"): (3, 1),
+    ("ind", "low",  "03"): (3, 2),
+    ("ind", "low",  "04"): (3, 3),
+    ("ind", "med",  "01"): (3, 4),
+    ("ind", "med",  "02"): (3, 5),
+    ("ind", "med",  "03"): (3, 6),
+    ("ind", "med",  "04"): (3, 7),
+    # Row 4: ind_high and service buildings
+    ("ind", "high", "01"): (4, 0),
+    ("ind", "high", "02"): (4, 1),
+    ("ind", "high", "03"): (4, 2),
+    ("ind", "high", "04"): (4, 3),
+    # Service buildings (each has its own key)
+    ("svc", "fire_station"):   (4, 4),
+    ("svc", "police_station"): (4, 5),
+    ("svc", "power_plant"):    (4, 6),
+    ("svc", "water_tower"):    (4, 7),
 }
-ROOF_CELL = (2, 3)  # shared roof cell per building-atlas-layout.md
+ROOF_CELL = (5, 0)  # shared roof cell — row 5 (reserved range) per building-atlas-layout.md
 
 # Building heights per tier (in Irrlicht unit space, before setScale)
 # low=2 floors → 0.6 units, med=4 floors → 1.2 units, high=8 floors → 2.4 units
@@ -901,7 +936,7 @@ def _build_res_small(zone, tier, variant, lod):
       med/03  2-storey cottage: hipped roof+dormer, chimney, full-width balcony
       med/04  3-storey red-brick: pitched roof+2 dormers, projecting bay window
     """
-    wr, wc = WALL_CELLS[(zone, tier)]
+    wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
@@ -1106,7 +1141,7 @@ def _build_com_small(zone, tier, variant, lod):
       med/03  corner bank: flat roof+cornice, paired pilasters, arched window heads, revolving door recess
       med/04  office block: curtain-wall facade, flat roof+plant room, recessed entrance+canopy
     """
-    wr, wc = WALL_CELLS[(zone, tier)]
+    wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
@@ -1258,7 +1293,7 @@ def _build_ind_low(zone, tier, variant, lod):
       03  sawtooth factory: CRITICAL sawtooth roofline (min 2 ridges), chimney stack, chain-link fence
       04  storage yard: small flat-roof gatehouse, container stacks, floodlight mast
     """
-    wr, wc = WALL_CELLS[(zone, tier)]
+    wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
@@ -1414,7 +1449,7 @@ def _build_ind_med(zone, tier, variant, lod):
       03  brick mill: flat roof+rooftop cylindrical water tank on support frame, large industrial windows
       04  distribution centre: square footprint, loading docks on 2 sides, dock shelter hoods, gatehouse booth
     """
-    wr, wc = WALL_CELLS[(zone, tier)]
+    wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
@@ -1560,7 +1595,7 @@ def _build_res_high(zone, tier, variant, lod):
     stairwell tower, AC units.
     height_floors: 01=5, 02=7, 03=8, 04=10
     """
-    wr, wc = WALL_CELLS[(zone, tier)]
+    wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
@@ -1678,7 +1713,7 @@ def _build_com_high(zone, tier, variant, lod):
     03 = tapered pyramid + chamfered corners
     04 = stepped ziggurat
     """
-    wr, wc = WALL_CELLS[(zone, tier)]
+    wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
@@ -1935,7 +1970,7 @@ def _build_ind_high(zone, tier, variant, lod):
       04  refinery tower: grating-platform bands at every floor, dense roof pipe rack, flare stack from corner
     height_floors: 01=5, 02=7, 03=8, 04=10
     """
-    wr, wc = WALL_CELLS[(zone, tier)]
+    wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
@@ -2126,7 +2161,7 @@ def build_box_building(zone: str, tier: str, variant: str, lod: int) -> bytes:
         return _build_ind_high(zone, tier, variant, lod)
     else:
         # Fallback: simple box
-        wr, wc = WALL_CELLS[(zone, tier)]
+        wr, wc = WALL_CELLS[(zone, tier, variant)]
         rr, rc = ROOF_CELL
         h = TIER_HEIGHT[tier]
         hx = hz = BUILDING_HALF_XZ
@@ -2146,7 +2181,7 @@ def build_svc_fire_station(lod: int) -> bytes:
     Two vehicle bay door openings, apron, hose reel housing, personnel entrance,
     antenna/radio mast.
     """
-    wr, wc = WALL_CELLS[("svc", "svc")]
+    wr, wc = WALL_CELLS[("svc", "fire_station")]
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
@@ -2244,7 +2279,7 @@ def build_svc_police_station(lod: int) -> bytes:
     Solid masonry, recessed windows, vehicle bay recess, entrance canopy,
     antenna cluster.
     """
-    wr, wc = WALL_CELLS[("svc", "svc")]
+    wr, wc = WALL_CELLS[("svc", "police_station")]
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
@@ -2342,7 +2377,7 @@ def build_svc_power_plant(lod: int) -> bytes:
     Power plant: 2,500–4,000 tris LOD0.
     Transformer/switchgear secondary box, exhaust stack, duct stubs, loading door.
     """
-    wr, wc = WALL_CELLS[("svc", "svc")]
+    wr, wc = WALL_CELLS[("svc", "power_plant")]
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
@@ -2431,7 +2466,7 @@ def build_svc_water_tower(lod: int) -> bytes:
     Elevated cylindrical tank (approximated as 12-sided polygon), four support
     legs with cross-bracing, pipe stub, access ladder, dome cap.
     """
-    wr, wc = WALL_CELLS[("svc", "svc")]
+    wr, wc = WALL_CELLS[("svc", "water_tower")]
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
@@ -3026,10 +3061,10 @@ def generate_zone_buildings() -> list:
 
     for zone in zones:
         for tier in tiers:
-            wall_row, wall_col = WALL_CELLS[(zone, tier)]
             lod_dist = tier_lod_dist[tier]
 
             for variant in variants:
+                wall_row, wall_col = WALL_CELLS[(zone, tier, variant)]
                 height_floors = variant_floors[(zone, tier)][variant]
                 category = _category(zone, tier, variant)
                 # small_building (floors<=3): lod0, lod1 only (billboard at LOD2, no _lod2.b3d)
@@ -3158,12 +3193,12 @@ def make_minimal_dds_billboard() -> bytes:
 def generate_service_buildings() -> list:
     """Generate service building B3D files, billboard DDS stubs, and update meta files."""
     svc_builders = {
-        "svc_fire_station":   build_svc_fire_station,
-        "svc_police_station": build_svc_police_station,
-        "svc_power_plant":    build_svc_power_plant,
-        "svc_water_tower":    build_svc_water_tower,
+        "svc_fire_station":   (build_svc_fire_station,   WALL_CELLS[("svc", "fire_station")]),
+        "svc_police_station": (build_svc_police_station, WALL_CELLS[("svc", "police_station")]),
+        "svc_power_plant":    (build_svc_power_plant,    WALL_CELLS[("svc", "power_plant")]),
+        "svc_water_tower":    (build_svc_water_tower,    WALL_CELLS[("svc", "water_tower")]),
     }
-    # Service buildings: height_floors=2, small_building, atlas cell (3,2)
+    # Service buildings: height_floors=2, small_building, per-variant atlas cells (8×8 grid, Phase 11e)
     # No LOD2 .b3d (height_floors=2 <= 3 → billboard only per 3d-model-standards.md)
     # _billboard.dds required by check_2 for all small_building assets with height_floors <= 3
     # lod_distances must satisfy: d1-d0 >= 5 and d2 > d1
@@ -3172,12 +3207,12 @@ def generate_service_buildings() -> list:
     generated = []
     billboard_dds = make_minimal_dds_billboard()
 
-    for svc_name, builder_fn in svc_builders.items():
+    for svc_name, (builder_fn, (svc_row, svc_col)) in svc_builders.items():
         base_path = os.path.join(BUILDINGS_DIR, svc_name)
 
-        # Update meta: correct atlas cell to (3,2) per building-atlas-layout.md
+        # Update meta: per-variant atlas cell per building-atlas-layout.md (Phase 11e 8×8 grid)
         meta_path = base_path + ".meta"
-        write_meta_building(meta_path, 2, "small_building", 3, 2, svc_lod_dist)
+        write_meta_building(meta_path, 2, "small_building", svc_row, svc_col, svc_lod_dist)
 
         # Billboard DDS stub (required by check_2 for small_building height_floors <= 3)
         # Only write if not already present as a proper authored DDS

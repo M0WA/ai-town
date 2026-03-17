@@ -187,33 +187,326 @@ def check_3():
 
 
 # ---------------------------------------------------------------------------
-# Check #4: UV channel 0 within [0, 1] on all LOD levels.
-# NOTE: B3D UV channel extraction requires a B3D parser. Since no Python
-# B3D parser library is available, this check validates file existence and
-# meta consistency; full UV range validation requires a B3D-aware tool.
+# Phase 11e cell assignment table (canonical 8×8 atlas grid).
+# Key: asset base name (e.g. "res_low_01").  Value: (row, col).
 # ---------------------------------------------------------------------------
-def check_4():
-    """check_4: UV channel 0 coordinates on all LOD levels must be in [0, 1]."""
-    asset_dir = "assets/3d"
-    lod_files = (
-        glob.glob(os.path.join(asset_dir, "**", "*_lod0.b3d"), recursive=True) +
-        glob.glob(os.path.join(asset_dir, "**", "*_lod1.b3d"), recursive=True) +
-        glob.glob(os.path.join(asset_dir, "**", "*_lod2.b3d"), recursive=True) +
-        glob.glob(os.path.join(asset_dir, "*_lod0.b3d")) +
-        glob.glob(os.path.join(asset_dir, "*_lod1.b3d")) +
-        glob.glob(os.path.join(asset_dir, "*_lod2.b3d"))
-    )
-    if not lod_files:
-        print("INFO check_4: no _lod*.b3d files found — no-op")
-        return
-    # B3D binary parsing for UV channel 0 requires a full B3D parser.
-    # The check logic is present; UV validation deferred pending parser availability.
-    # Any B3D file that can be opened as a binary file and is non-empty is accepted here.
-    for path in lod_files:
-        if os.path.getsize(path) == 0:
-            raise AssertionError(f"check_4 FAIL: {path} is empty — not a valid B3D file")
-    print(f"check_4 PASS: {len(lod_files)} LOD .b3d file(s) verified non-empty "
-          f"(full UV[0,1] validation requires B3D parser — no .b3d assets present in Phase 5)")
+_PHASE_11E_CELL_ASSIGNMENT = {
+    # Row 0: res_low and res_med
+    "res_low_01": (0, 0),
+    "res_low_02": (0, 1),
+    "res_low_03": (0, 2),
+    "res_low_04": (0, 3),
+    "res_med_01": (0, 4),
+    "res_med_02": (0, 5),
+    "res_med_03": (0, 6),
+    "res_med_04": (0, 7),
+    # Row 1: res_high and com_low
+    "res_high_01": (1, 0),
+    "res_high_02": (1, 1),
+    "res_high_03": (1, 2),
+    "res_high_04": (1, 3),
+    "com_low_01": (1, 4),
+    "com_low_02": (1, 5),
+    "com_low_03": (1, 6),
+    "com_low_04": (1, 7),
+    # Row 2: com_med and com_high
+    "com_med_01": (2, 0),
+    "com_med_02": (2, 1),
+    "com_med_03": (2, 2),
+    "com_med_04": (2, 3),
+    "com_high_01": (2, 4),
+    "com_high_02": (2, 5),
+    "com_high_03": (2, 6),
+    "com_high_04": (2, 7),
+    # Row 3: ind_low and ind_med
+    "ind_low_01": (3, 0),
+    "ind_low_02": (3, 1),
+    "ind_low_03": (3, 2),
+    "ind_low_04": (3, 3),
+    "ind_med_01": (3, 4),
+    "ind_med_02": (3, 5),
+    "ind_med_03": (3, 6),
+    "ind_med_04": (3, 7),
+    # Row 4: ind_high and service buildings
+    "ind_high_01": (4, 0),
+    "ind_high_02": (4, 1),
+    "ind_high_03": (4, 2),
+    "ind_high_04": (4, 3),
+    "svc_fire_station":   (4, 4),
+    "svc_police_station": (4, 5),
+    "svc_power_plant":    (4, 6),
+    "svc_water_tower":    (4, 7),
+}
+
+
+def _parse_b3d_uv_channel0(filepath):
+    """
+    Parse a B3D binary file and return all UV channel 0 (u, v) pairs as a list
+    of float tuples.
+
+    B3D chunk format written by generate_b3d_models.py:
+      BB3D → version(i32) + TEXS + BRUS + NODE
+      NODE → name(str) + pos(3×f32) + scale(3×f32) + rot(4×f32) + MESH
+      MESH → brush_id(i32) + VRTS + TRIS
+      VRTS → flags(i32) + tc_sets(i32) + tc_flags[0..tc_sets-1](i32 each)
+             + per-vertex data
+
+    Per-vertex layout (flags=1 → normals present, tc_sets=1, tc_flags[0]=2):
+      x, y, z       (3 × float32)
+      nx, ny, nz    (3 × float32)   [present when flags & 1]
+      u0, v0        (2 × float32)   [first UV channel]
+
+    B3D sub-chunks (NODE, MESH) have non-chunk preamble bytes before their
+    child chunks, so they cannot be recursively scanned as a flat chunk list.
+    This function parses the known structure explicitly:
+      BB3D payload → skip version(i32) → scan TEXS/BRUS/NODE at top level
+      NODE payload → skip preamble (name str + 3+3+4 floats) → scan MESH
+      MESH payload → skip brush_id(i32) → scan VRTS/TRIS
+
+    Raises AssertionError if the file cannot be parsed or contains no VRTS chunk.
+    """
+    with open(filepath, "rb") as f:
+        data = f.read()
+
+    if len(data) < 12:
+        raise AssertionError(
+            f"_parse_b3d_uv_channel0: {filepath}: file too small ({len(data)} bytes)"
+        )
+
+    root_tag = data[0:4]
+    if root_tag != b"BB3D":
+        raise AssertionError(
+            f"_parse_b3d_uv_channel0: {filepath}: not a B3D file (magic {root_tag!r})"
+        )
+
+    def read_i32(pos):
+        return struct.unpack_from("<i", data, pos)[0], pos + 4
+
+    def read_f32(pos):
+        return struct.unpack_from("<f", data, pos)[0], pos + 4
+
+    def read_str(pos):
+        """Read null-terminated string; return (s, new_pos)."""
+        end = data.index(b"\x00", pos)
+        return data[pos:end].decode("ascii", errors="replace"), end + 1
+
+    def read_chunk_header(pos):
+        """Return (tag_bytes, payload_start, payload_end, next_chunk_pos)."""
+        if pos + 8 > len(data):
+            return None
+        tag = data[pos:pos + 4]
+        length, payload_start = read_i32(pos + 4)
+        if length < 0:
+            return None
+        payload_end = payload_start + length
+        if payload_end > len(data):
+            return None
+        return tag, payload_start, payload_end, payload_end
+
+    # ---- Locate NODE in the top-level BB3D payload ----
+    # BB3D payload: version(i32) then top-level chunks (TEXS, BRUS, NODE, ...)
+    root_length = struct.unpack_from("<i", data, 4)[0]
+    root_payload_end = 8 + root_length
+    pos = 12  # skip BB3D tag(4) + length(4) + version(4)
+
+    node_payload_start = None
+    node_payload_end = None
+    while pos + 8 <= root_payload_end:
+        hdr = read_chunk_header(pos)
+        if hdr is None:
+            break
+        tag, payload_start, payload_end, next_pos = hdr
+        if tag == b"NODE":
+            node_payload_start = payload_start
+            node_payload_end = payload_end
+            break
+        pos = next_pos
+
+    if node_payload_start is None:
+        raise AssertionError(
+            f"_parse_b3d_uv_channel0: {filepath}: no NODE chunk found"
+        )
+
+    # ---- Parse NODE preamble to reach MESH ----
+    # NODE payload: name(str) + pos(3×f32) + scale(3×f32) + rot(4×f32) + sub-chunks
+    pos = node_payload_start
+    _name, pos = read_str(pos)           # node name (null-terminated)
+    for _ in range(3):                   # position x, y, z
+        _, pos = read_f32(pos)
+    for _ in range(3):                   # scale x, y, z
+        _, pos = read_f32(pos)
+    for _ in range(4):                   # rotation w, x, y, z (quaternion)
+        _, pos = read_f32(pos)
+
+    mesh_payload_start = None
+    mesh_payload_end = None
+    while pos + 8 <= node_payload_end:
+        hdr = read_chunk_header(pos)
+        if hdr is None:
+            break
+        tag, payload_start, payload_end, next_pos = hdr
+        if tag == b"MESH":
+            mesh_payload_start = payload_start
+            mesh_payload_end = payload_end
+            break
+        pos = next_pos
+
+    if mesh_payload_start is None:
+        raise AssertionError(
+            f"_parse_b3d_uv_channel0: {filepath}: no MESH chunk found inside NODE"
+        )
+
+    # ---- Parse MESH preamble to reach VRTS ----
+    # MESH payload: brush_id(i32) + sub-chunks (VRTS, TRIS, ...)
+    pos = mesh_payload_start
+    _brush_id, pos = read_i32(pos)      # MESH brush_id
+
+    vrts_payload_start = None
+    vrts_payload_end = None
+    while pos + 8 <= mesh_payload_end:
+        hdr = read_chunk_header(pos)
+        if hdr is None:
+            break
+        tag, payload_start, payload_end, next_pos = hdr
+        if tag == b"VRTS":
+            vrts_payload_start = payload_start
+            vrts_payload_end = payload_end
+            break
+        pos = next_pos
+
+    if vrts_payload_start is None:
+        raise AssertionError(
+            f"_parse_b3d_uv_channel0: {filepath}: no VRTS chunk found inside MESH"
+        )
+
+    # ---- Parse VRTS payload ----
+    # VRTS: flags(i32) + tc_sets(i32) + tc_flags[0..tc_sets-1](i32 each) + vertices
+    p = vrts_payload_start
+    flags, p = read_i32(p)
+    tc_sets, p = read_i32(p)
+    tc_flags = []
+    for _ in range(tc_sets):
+        tf, p = read_i32(p)
+        tc_flags.append(tf)
+
+    has_normals = bool(flags & 1)
+    tc_size_0 = tc_flags[0] if tc_sets >= 1 else 0  # 2 for 2D UV
+
+    floats_per_vertex = 3                          # x, y, z
+    if has_normals:
+        floats_per_vertex += 3                     # nx, ny, nz
+    floats_per_vertex += tc_size_0                 # UV channel 0
+    for i in range(1, tc_sets):
+        floats_per_vertex += tc_flags[i]           # additional UV channels
+
+    bytes_per_vertex = floats_per_vertex * 4
+    if bytes_per_vertex == 0:
+        return []
+
+    n_verts = (vrts_payload_end - p) // bytes_per_vertex
+    if n_verts <= 0:
+        return []
+
+    # Byte offset to UV channel 0 within each vertex
+    uv0_byte_offset = (3 + (3 if has_normals else 0)) * 4
+
+    uvs = []
+    for vi in range(n_verts):
+        base = p + vi * bytes_per_vertex
+        u_pos = base + uv0_byte_offset
+        v_pos = u_pos + 4
+        if v_pos + 4 <= vrts_payload_end:
+            u = struct.unpack_from("<f", data, u_pos)[0]
+            v = struct.unpack_from("<f", data, v_pos)[0]
+            uvs.append((u, v))
+    return uvs
+
+
+# ---------------------------------------------------------------------------
+# Check #4: UV channel 0 within assigned 8×8 atlas cell for all building LOD0
+# models. Also validates .meta atlas_cell matches Phase 11e Cell Assignment Table.
+# ---------------------------------------------------------------------------
+def check_4_building_uv_atlas_cell(assets_dir):
+    """Check #4: UV channel 0 within assigned 8x8 atlas cell for all building LOD0 models.
+
+    For each entry in _PHASE_11E_CELL_ASSIGNMENT:
+      1. Verifies the .meta atlas_cell row/col matches the Phase 11e Cell Assignment Table.
+      2. Parses UV channel 0 from the _lod0.b3d file and verifies all UVs fall within
+         [col/8, (col+1)/8] × [row/8, (row+1)/8].
+
+    Returns a list of error strings. Empty list means the check passed.
+    """
+    buildings_dir = os.path.join(assets_dir, "3d", "buildings")
+    if not os.path.isdir(buildings_dir):
+        # Assets not yet delivered — skip silently.
+        return []
+
+    errors = []
+    checked = 0
+    TOL = 1e-4  # floating-point tolerance for boundary comparisons
+
+    for asset_name, (exp_row, exp_col) in _PHASE_11E_CELL_ASSIGNMENT.items():
+        lod0_path = os.path.join(buildings_dir, f"{asset_name}_lod0.b3d")
+        meta_path = os.path.join(buildings_dir, f"{asset_name}.meta")
+
+        # 1. Verify .meta atlas_cell matches Phase 11e Cell Assignment Table
+        if not os.path.exists(meta_path):
+            errors.append(
+                f"{asset_name}: missing {meta_path}"
+            )
+            continue
+        try:
+            with open(meta_path, "r") as mf:
+                meta = json.load(mf)
+        except Exception as exc:
+            errors.append(f"{asset_name}: cannot parse {meta_path}: {exc}")
+            continue
+        ac = meta.get("atlas_cell", {})
+        meta_row = ac.get("row")
+        meta_col = ac.get("col")
+        if meta_row != exp_row or meta_col != exp_col:
+            errors.append(
+                f"{asset_name}: {meta_path} atlas_cell={{row:{meta_row},col:{meta_col}}} "
+                f"expected row={exp_row} col={exp_col} per Phase 11e Cell Assignment Table"
+            )
+
+        # 2. Verify UV coordinates in LOD0 model fall within the assigned cell
+        if not os.path.exists(lod0_path):
+            errors.append(f"{asset_name}: missing {lod0_path}")
+            continue
+        try:
+            uvs = _parse_b3d_uv_channel0(lod0_path)
+        except AssertionError as exc:
+            errors.append(f"{asset_name}: {lod0_path}: {exc}")
+            continue
+
+        u_min = exp_col / 8.0
+        u_max = (exp_col + 1) / 8.0
+        v_min = exp_row / 8.0
+        v_max = (exp_row + 1) / 8.0
+        # ROOF_CELL = (5, 0): shared roof cell used by all buildings for roof faces
+        roof_u_min, roof_u_max = 0.0, 0.125   # col 0 → U=[0.0, 0.125]
+        roof_v_min, roof_v_max = 0.625, 0.75  # row 5 → V=[0.625, 0.75]
+        violation = None
+        for u, v in uvs:
+            in_wall = u_min - TOL <= u <= u_max + TOL and v_min - TOL <= v <= v_max + TOL
+            in_roof = roof_u_min - TOL <= u <= roof_u_max + TOL and roof_v_min - TOL <= v <= roof_v_max + TOL
+            if not (in_wall or in_roof):
+                violation = (u, v)
+                break
+        if violation is not None:
+            u, v = violation
+            errors.append(
+                f"{asset_name}: {lod0_path} UV ({u:.6f},{v:.6f}) "
+                f"outside cell ({exp_row},{exp_col}) bounds "
+                f"U=[{u_min:.4f},{u_max:.4f}] V=[{v_min:.4f},{v_max:.4f}]"
+            )
+        else:
+            checked += 1
+
+    if not errors:
+        print(f"  check_4: {checked} building LOD0 models verified UV within assigned 8x8 atlas cell")
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -2463,6 +2756,7 @@ def run_all_checks():
 
     # Run each check and collect errors.
     checks = [
+        ("Check #4 (building LOD0 UV atlas cell)", check_4_building_uv_atlas_cell),
         ("Check #21 (zone loop silence-floor)", check_21_zone_loop_silence_floor),
         ("Check #22 (WAV SFX format)", check_22_wav_sfx_format),
         ("Check #23 (sprite sheet PNG)", check_23_sprite_sheet_png),

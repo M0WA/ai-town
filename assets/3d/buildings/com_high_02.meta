@@ -3,7 +3,7 @@
   "category": "large_building",
   "atlas_cell": {
     "row": 2,
-    "col": 1
+    "col": 5
   },
   "lod_distances": [
     50,
