@@ -2122,7 +2122,8 @@ def build_vehicle(vtype: str, lod: int) -> bytes:
       car_suv      : body + raised ride-height + flat full-length roof + roof rack rails + wheel arches + mirrors
       bus_standard : body + destination blind recess + folding-door frame + wheel arch skirts + roof AC box + rear vent louvres
       truck_cargo  : cab box + cargo box + cab/cargo gap + grille + exhaust stack + rear door inset + side step
-    LOD1 = body outline only (all types).
+    LOD0 = full detail (1,800-2,000 tris cars; 2,500-3,000 tris bus/truck).
+    LOD1 = simplified silhouette (cars >=300 tris; bus/truck >=400 tris).
     """
     row, col = VEHICLE_CELLS[vtype]
 
@@ -2141,21 +2142,25 @@ def build_vehicle(vtype: str, lod: int) -> bytes:
         v, t = box_faces(x0, x1, y0, y1, z0, z1, nr2, nc2, nr2, nc2)
         _add(v, t)
 
-    def _wheel_disks(wx, wy, wz_centre, wheel_r, wheel_w):
-        """Two flat 8-sided disks (inner + outer face) approximating a wheel."""
-        n_seg = 8
+    def _disk_n(wx, wy, wz_centre, wheel_r, wheel_w, n_seg):
+        """Two flat n-sided disks (inner + outer face) approximating a wheel."""
         wz_in  = wz_centre - wheel_w * 0.5
         wz_out = wz_centre + wheel_w * 0.5
-        for z_val, normal, reverse in [(wz_out, (0,0,1) if wz_out > 0 else (0,0,-1), False),
-                                        (wz_in,  (0,0,-1) if wz_out > 0 else (0,0,1),  True)]:
+        for z_val, normal, reverse in [
+            (wz_out, (0, 0, 1) if wz_out > 0 else (0, 0, -1), False),
+            (wz_in,  (0, 0, -1) if wz_out > 0 else (0, 0, 1),  True),
+        ]:
             verts_disk = []
             for i in range(n_seg):
                 angle = 2 * math.pi * i / n_seg
                 px = wx + wheel_r * math.sin(angle)
                 py = wy + wheel_r * math.cos(angle)
-                u2, v2 = atlas_uv(row, col, 0.5 + 0.5*math.sin(angle), 0.5 + 0.5*math.cos(angle))
+                u2, v2 = atlas_uv(row, col,
+                                  0.5 + 0.5 * math.sin(angle),
+                                  0.5 + 0.5 * math.cos(angle))
                 verts_disk.append(Vertex(px, py, z_val, *normal, u2, v2))
-            center_v = Vertex(wx, wy, z_val, *normal, *atlas_uv(row, col, 0.5, 0.5))
+            center_v = Vertex(wx, wy, z_val, *normal,
+                              *atlas_uv(row, col, 0.5, 0.5))
             base = len(all_verts)
             all_verts.extend(verts_disk)
             all_verts.append(center_v)
@@ -2167,6 +2172,57 @@ def build_vehicle(vtype: str, lod: int) -> bytes:
                 else:
                     all_tris.append((c_idx, base + i, base + ni))
 
+    def _sidewall_ring(wx, wy, wz_centre, wheel_r, wheel_w, n_seg):
+        """Quad strip around the tire circumference (sidewall)."""
+        wz_in  = wz_centre - wheel_w * 0.5
+        wz_out = wz_centre + wheel_w * 0.5
+        for i in range(n_seg):
+            a0 = 2 * math.pi * i / n_seg
+            a1 = 2 * math.pi * (i + 1) / n_seg
+            p0x = wx + wheel_r * math.sin(a0); p0y = wy + wheel_r * math.cos(a0)
+            p1x = wx + wheel_r * math.sin(a1); p1y = wy + wheel_r * math.cos(a1)
+            nx0 = math.sin(a0); ny0 = math.cos(a0)
+            u0, vv0 = atlas_uv(row, col, i / n_seg, 0.2)
+            u1, vv1 = atlas_uv(row, col, (i + 1) / n_seg, 0.2)
+            u0b, vv0b = atlas_uv(row, col, i / n_seg, 0.8)
+            u1b, vv1b = atlas_uv(row, col, (i + 1) / n_seg, 0.8)
+            base = len(all_verts)
+            all_verts.append(Vertex(p0x, p0y, wz_in,  nx0, ny0, 0, u0,  vv0))
+            all_verts.append(Vertex(p1x, p1y, wz_in,  nx0, ny0, 0, u1,  vv1))
+            all_verts.append(Vertex(p1x, p1y, wz_out, nx0, ny0, 0, u1b, vv1b))
+            all_verts.append(Vertex(p0x, p0y, wz_out, nx0, ny0, 0, u0b, vv0b))
+            all_tris.append((base, base + 1, base + 2))
+            all_tris.append((base, base + 2, base + 3))
+
+    def _spoke_ring(wx, wy, wz_centre, wheel_r, wheel_w, n_spokes):
+        """Flat spoke bars radiating from hub centre on outer disk face."""
+        z_val  = wz_centre + wheel_w * 0.5 + 0.005
+        nz     = 1.0 if z_val > 0 else -1.0
+        spoke_w = 0.03
+        inner_r = wheel_r * 0.18
+        for i in range(n_spokes):
+            angle = 2 * math.pi * i / n_spokes
+            sa = math.sin(angle); ca = math.cos(angle)
+            pa = math.sin(angle + 0.5); pb = math.cos(angle + 0.5)
+            ix = wx + inner_r * sa; iy = wy + inner_r * ca
+            ox = wx + wheel_r * 0.85 * sa; oy = wy + wheel_r * 0.85 * ca
+            perp_x = -ca * spoke_w * 0.5; perp_y = sa * spoke_w * 0.5
+            base = len(all_verts)
+            uci, vci = atlas_uv(row, col, 0.5 + 0.5 * sa * 0.2, 0.5 + 0.5 * ca * 0.2)
+            uoi, voi = atlas_uv(row, col, 0.5 + 0.5 * sa * 0.85, 0.5 + 0.5 * ca * 0.85)
+            all_verts.append(Vertex(ix + perp_x, iy + perp_y, z_val, 0, 0, nz, uci, vci))
+            all_verts.append(Vertex(ix - perp_x, iy - perp_y, z_val, 0, 0, nz, uci, vci))
+            all_verts.append(Vertex(ox + perp_x, oy + perp_y, z_val, 0, 0, nz, uoi, voi))
+            all_verts.append(Vertex(ox - perp_x, oy - perp_y, z_val, 0, 0, nz, uoi, voi))
+            all_tris.append((base, base + 1, base + 3))
+            all_tris.append((base, base + 3, base + 2))
+
+    def _full_wheel(wx, wy, wz_c, wheel_r, wheel_w, n_seg, n_spokes):
+        """Disk + sidewall ring + spokes."""
+        _disk_n(wx, wy, wz_c, wheel_r, wheel_w, n_seg)
+        _sidewall_ring(wx, wy, wz_c, wheel_r, wheel_w, n_seg)
+        _spoke_ring(wx, wy, wz_c, wheel_r, wheel_w, n_spokes)
+
     def _wheel_arch(wx, wy, wz_centre, wheel_r, wheel_w):
         """Thin rectangular arch skirt sitting above wheel position."""
         arch_h  = wheel_r * 1.2
@@ -2174,253 +2230,1334 @@ def build_vehicle(vtype: str, lod: int) -> bytes:
         arch_t  = 0.02
         wz0 = wz_centre - wheel_w * 0.5 - arch_t
         wz1 = wz_centre + wheel_w * 0.5 + arch_t
-        # outer face of arch skirt
         _box(wx - arch_hw, wx + arch_hw, wy, wy + arch_h, wz0 - arch_t, wz0)
         _box(wx - arch_hw, wx + arch_hw, wy, wy + arch_h, wz1, wz1 + arch_t)
 
     def _side_mirror(wx, wy, wz, facing_z):
-        """Small projecting stub for side mirror (flat box)."""
-        mw = 0.06; mh = 0.04; md = 0.08
-        z0 = wz if facing_z > 0 else wz - md
-        z1 = wz + md if facing_z > 0 else wz
-        _box(wx - mw*0.5, wx + mw*0.5, wy, wy + mh, z0, z1)
+        """L-shaped mirror housing: arm box + head box."""
+        arm_w = 0.04; arm_h = 0.03; arm_d = 0.09
+        head_w = 0.10; head_h = 0.07; head_d = 0.03
+        if facing_z > 0:
+            arm_z0 = wz; arm_z1 = wz + arm_d
+            head_z0 = arm_z1; head_z1 = arm_z1 + head_d
+        else:
+            arm_z1 = wz; arm_z0 = wz - arm_d
+            head_z1 = arm_z0; head_z0 = arm_z0 - head_d
+        _box(wx - arm_w * 0.5, wx + arm_w * 0.5, wy, wy + arm_h, arm_z0, arm_z1)
+        _box(wx - head_w * 0.5, wx + head_w * 0.5, wy, wy + head_h, head_z0, head_z1)
+
+    # ==========================================================================
+    #  LOD0 shared car helper — call after body/roof/boot geometry is added
+    # ==========================================================================
+    def _car_lod0_common(body_x0, body_x1, body_y0, body_y1, body_z0, body_z1,
+                         roof_x0, roof_x1, roof_y0, roof_y1,
+                         wheel_r, wheel_w, wheel_y,
+                         front_axle_x, rear_axle_x,
+                         mirror_x):
+        # ---- Wheels (16-seg disks + sidewalls + 8 spokes) ----
+        for wx in [front_axle_x, rear_axle_x]:
+            for wz_c in [body_z0 - wheel_w * 0.35, body_z1 + wheel_w * 0.35]:
+                _full_wheel(wx, wheel_y, wz_c, wheel_r, wheel_w, 16, 8)
+                _wheel_arch(wx, wheel_y - wheel_r * 0.12, wz_c, wheel_r, wheel_w)
+
+        # ---- Headlights (2 boxes proud of front face) ----
+        hl_w = 0.28; hl_h = 0.12; hl_d = 0.04
+        hl_y  = body_y0 + (body_y1 - body_y0) * 0.55
+        for hz in [body_z0 + 0.18, body_z1 - 0.18 - hl_w]:
+            _box(body_x1 - hl_d, body_x1 + hl_d, hl_y, hl_y + hl_h, hz, hz + hl_w)
+
+        # ---- Taillights (2 boxes proud of rear face) ----
+        tl_w = 0.24; tl_h = 0.10; tl_d = 0.04
+        tl_y = body_y0 + (body_y1 - body_y0) * 0.50
+        for tz in [body_z0 + 0.15, body_z1 - 0.15 - tl_w]:
+            _box(body_x0 - tl_d, body_x0 + tl_d, tl_y, tl_y + tl_h, tz, tz + tl_w)
+
+        # ---- Front bumper bar ----
+        _box(body_x1 - 0.04, body_x1 + 0.06,
+             body_y0, body_y0 + 0.16,
+             body_z0 + 0.05, body_z1 - 0.05)
+
+        # ---- Rear bumper bar ----
+        _box(body_x0 - 0.06, body_x0 + 0.04,
+             body_y0, body_y0 + 0.14,
+             body_z0 + 0.05, body_z1 - 0.05)
+
+        # ---- Rocker panels / side skirts (lower body sides) ----
+        sk_h = 0.08; sk_d = 0.025
+        sk_y0 = body_y0; sk_y1 = body_y0 + sk_h
+        _box(body_x0 + 0.30, body_x1 - 0.30, sk_y0, sk_y1,
+             body_z0 - sk_d, body_z0)
+        _box(body_x0 + 0.30, body_x1 - 0.30, sk_y0, sk_y1,
+             body_z1, body_z1 + sk_d)
+
+        # ---- Wheel well lips (inner arch sill strip) ----
+        lip_h = 0.06; lip_t = 0.018
+        for wx in [front_axle_x, rear_axle_x]:
+            arch_hw = wheel_r * 1.1
+            for wz_c in [body_z0 - wheel_w * 0.35, body_z1 + wheel_w * 0.35]:
+                wz0 = wz_c - wheel_w * 0.5 - 0.02
+                wz1 = wz_c + wheel_w * 0.5 + 0.02
+                _box(wx - arch_hw, wx + arch_hw,
+                     wheel_y - wheel_r * 0.12,
+                     wheel_y - wheel_r * 0.12 + lip_h,
+                     wz0 - lip_t, wz0)
+                _box(wx - arch_hw, wx + arch_hw,
+                     wheel_y - wheel_r * 0.12,
+                     wheel_y - wheel_r * 0.12 + lip_h,
+                     wz1, wz1 + lip_t)
+
+        # ---- Window frame boxes (4 side windows) ----
+        win_y0 = body_y1 * 0.72
+        win_h  = (roof_y0 - win_y0) * 0.85
+        win_t  = 0.018
+        # front side windows
+        fw_x0 = body_x1 - 0.85; fw_x1 = body_x1 - 0.05
+        for wz_face, wz_in in [(body_z0, body_z0 - win_t),
+                                (body_z1, body_z1 + win_t)]:
+            _box(fw_x0, fw_x1, win_y0, win_y0 + win_h, wz_in, wz_face)
+        # rear side windows
+        rw_x0 = body_x0 + 0.15; rw_x1 = body_x0 + 0.95
+        for wz_face, wz_in in [(body_z0, body_z0 - win_t),
+                                (body_z1, body_z1 + win_t)]:
+            _box(rw_x0, rw_x1, win_y0, win_y0 + win_h, wz_in, wz_face)
+
+        # ---- Windshield A-pillar strips ----
+        ap_w = 0.06; ap_h = roof_y0 - body_y1 + 0.05
+        for wz_ap in [body_z0 + 0.04, body_z1 - 0.04 - ap_w]:
+            _box(body_x1 - 0.65, body_x1 - 0.50,
+                 body_y1, body_y1 + ap_h,
+                 wz_ap, wz_ap + ap_w)
+
+        # ---- B-pillars (vertical strips mid-body each side) ----
+        bp_x_c = (body_x0 + body_x1) * 0.5 - 0.10
+        bp_w_x = 0.07; bp_d = 0.022
+        for wz_bp_out, wz_bp_in in [(body_z0 - bp_d, body_z0),
+                                     (body_z1, body_z1 + bp_d)]:
+            _box(bp_x_c - bp_w_x, bp_x_c + bp_w_x,
+                 body_y1 * 0.55, roof_y0,
+                 wz_bp_out, wz_bp_in)
+
+        # ---- Door handles (4 handles: front-left, front-right, rear-left, rear-right) ----
+        dh_w = 0.14; dh_h = 0.04; dh_d = 0.025
+        dh_y = body_y0 + (body_y1 - body_y0) * 0.68
+        for dh_x in [body_x1 - 0.55, body_x0 + 0.55]:
+            for dh_z_out, dh_z_in in [(body_z0 - dh_d, body_z0),
+                                       (body_z1, body_z1 + dh_d)]:
+                _box(dh_x - dh_w * 0.5, dh_x + dh_w * 0.5,
+                     dh_y, dh_y + dh_h,
+                     dh_z_out, dh_z_in)
+
+        # ---- Hood/bonnet panel (slightly raised box on top-front) ----
+        _box(body_x1 - 0.85, body_x1 - 0.02,
+             body_y1, body_y1 + 0.022,
+             body_z0 + 0.06, body_z1 - 0.06)
+
+        # ---- Undercarriage frame ----
+        _box(body_x0 + 0.35, body_x1 - 0.35,
+             0.02, 0.08,
+             body_z0 + 0.08, body_z1 - 0.08)
+
+        # ---- Front face vertical bands (grille area) ----
+        band_h = body_y0 + (body_y1 - body_y0) * 0.50
+        bz_span = (body_z1 - body_z0)
+        for bz_off in [body_z0 + 0.05,
+                       body_z0 + bz_span * 0.35,
+                       body_z0 + bz_span * 0.68]:
+            bz_w = bz_span * 0.25
+            _box(body_x1 - 0.03, body_x1 + 0.03,
+                 body_y0, band_h,
+                 bz_off, bz_off + bz_w)
+
+        # ---- Rear face vertical bands ----
+        for bz_off in [body_z0 + 0.05,
+                       body_z0 + bz_span * 0.35,
+                       body_z0 + bz_span * 0.68]:
+            bz_w = bz_span * 0.25
+            _box(body_x0 - 0.03, body_x0 + 0.03,
+                 body_y0, band_h,
+                 bz_off, bz_off + bz_w)
+
+        # ---- Top surface bands (hood + roof as separate surfaces) ----
+        _box(body_x1 - 0.85, body_x1 - 0.02,
+             body_y1 - 0.01, body_y1 + 0.01,
+             body_z0 + 0.04, body_z1 - 0.04)
+
+        # ---- Belt-line chrome strip (thin flat strip on body sides) ----
+        belt_y = body_y0 + (body_y1 - body_y0) * 0.78
+        belt_h = 0.025; belt_d = 0.008
+        _box(body_x0 + 0.20, body_x1 - 0.20,
+             belt_y, belt_y + belt_h,
+             body_z0 - belt_d, body_z0)
+        _box(body_x0 + 0.20, body_x1 - 0.20,
+             belt_y, belt_y + belt_h,
+             body_z1, body_z1 + belt_d)
+
+        # ---- Roof panel detail strip (sunroof recess approximation) ----
+        _box(roof_x0 + 0.15, roof_x1 - 0.15,
+             roof_y1 - 0.02, roof_y1 + 0.008,
+             body_z0 + 0.22, body_z1 - 0.22)
+
+        # ---- Side mirrors ----
+        mirror_y = body_y0 + (body_y1 - body_y0) * 0.75
+        _side_mirror(mirror_x, mirror_y, body_z0, -1)
+        _side_mirror(mirror_x, mirror_y, body_z1,  1)
+
+        # ---- Hood lip (front edge lip) ----
+        _box(body_x1 - 0.06, body_x1 + 0.02,
+             body_y1 - 0.02, body_y1 + 0.04,
+             body_z0 + 0.04, body_z1 - 0.04)
+
+        # ---- Additional body-curve patches (trunk lip, roof-to-rear transition) ----
+        for patch_x0, patch_x1 in [(body_x0 - 0.02, body_x0 + 0.04),   # rear lip
+                                     (body_x0 + 0.30, body_x0 + 0.36)]:  # rear quarter
+            _box(patch_x0, patch_x1,
+                 body_y1 - 0.03, body_y1 + 0.03,
+                 body_z0 + 0.05, body_z1 - 0.05)
+
+        # ---- Additional A-pillar geometry (both sides, 2 strips each) ----
+        for ap_x0, ap_x1 in [(body_x1 - 0.62, body_x1 - 0.52),
+                               (body_x1 - 0.52, body_x1 - 0.42)]:
+            ap_d = 0.016
+            _box(ap_x0, ap_x1, body_y1, body_y1 + 0.28,
+                 body_z0 - ap_d, body_z0)
+            _box(ap_x0, ap_x1, body_y1, body_y1 + 0.28,
+                 body_z1, body_z1 + ap_d)
+
+        # ---- C-pillar strips (rear greenhouse-to-bootlid) ----
+        cp_d = 0.016
+        cp_x0 = body_x0 + 0.15; cp_x1 = body_x0 + 0.38
+        _box(cp_x0, cp_x1, body_y1 - 0.05, roof_y0 + 0.08,
+             body_z0 - cp_d, body_z0)
+        _box(cp_x0, cp_x1, body_y1 - 0.05, roof_y0 + 0.08,
+             body_z1, body_z1 + cp_d)
+
+        # ---- Fender flares (front + rear, each side) ----
+        ff_h = 0.06; ff_d = 0.025
+        for ff_x0, ff_x1 in [(front_axle_x - 0.38, front_axle_x + 0.38),
+                               (rear_axle_x  - 0.38, rear_axle_x  + 0.38)]:
+            _box(ff_x0, ff_x1, body_y0, body_y0 + ff_h,
+                 body_z0 - ff_d, body_z0 - 0.002)
+            _box(ff_x0, ff_x1, body_y0, body_y0 + ff_h,
+                 body_z1 + 0.002, body_z1 + ff_d)
+
+        # ---- Windscreen wiper park strip (thin box across bonnet base) ----
+        _box(body_x1 - 0.90, body_x1 - 0.12,
+             body_y1 + 0.01, body_y1 + 0.05,
+             body_z0 + 0.10, body_z1 - 0.10)
+
+        # ---- Rear diffuser strip ----
+        _box(body_x0 - 0.04, body_x0 + 0.02,
+             body_y0 + 0.03, body_y0 + 0.14,
+             body_z0 + 0.10, body_z1 - 0.10)
+
+        # ---- Front lip spoiler ----
+        _box(body_x1 - 0.03, body_x1 + 0.05,
+             body_y0, body_y0 + 0.06,
+             body_z0 + 0.04, body_z1 - 0.04)
+
+        # ---- Tow hitch recess (rear underside) ----
+        _box(body_x0 - 0.02, body_x0 + 0.03,
+             body_y0 + 0.04, body_y0 + 0.12,
+             -0.10, 0.10)
+
+        # ---- Side panel additional horizontal ribs (2 per side) ----
+        for rib_y_frac in [0.25, 0.48, 0.70]:
+            rib_y = body_y0 + (body_y1 - body_y0) * rib_y_frac
+            rib_d2 = 0.010; rib_h2 = 0.018
+            _box(body_x0 + 0.18, body_x1 - 0.18,
+                 rib_y, rib_y + rib_h2,
+                 body_z0 - rib_d2, body_z0)
+            _box(body_x0 + 0.18, body_x1 - 0.18,
+                 rib_y, rib_y + rib_h2,
+                 body_z1, body_z1 + rib_d2)
+
+        # ---- Fog light pods (lower front corners) ----
+        fl_w = 0.14; fl_h = 0.08; fl_d = 0.035
+        fl_y = body_y0 + 0.04
+        for fz in [body_z0 + 0.06, body_z1 - 0.06 - fl_w]:
+            _box(body_x1 - fl_d, body_x1 + fl_d, fl_y, fl_y + fl_h, fz, fz + fl_w)
+
+        # ---- Rear fog light (single, left side) ----
+        _box(body_x0 - 0.03, body_x0 + 0.02,
+             body_y0 + 0.10, body_y0 + 0.18,
+             body_z0 + 0.06, body_z0 + 0.18)
+
+        # ---- Grille mesh horizontal bars (4 bars in front face lower area) ----
+        for gi in range(4):
+            gy = body_y0 + 0.04 + gi * 0.10
+            _box(body_x1 - 0.02, body_x1 + 0.02,
+                 gy, gy + 0.05,
+                 body_z0 + 0.10, body_z1 - 0.10)
+
+        # ---- Roof-gutter drip rail (each side) ----
+        gr_d = 0.014; gr_h = 0.025
+        _box(roof_x0 + 0.05, roof_x1 - 0.05,
+             roof_y1 - gr_h, roof_y1,
+             body_z0 + 0.06, body_z0 + 0.06 + gr_d)
+        _box(roof_x0 + 0.05, roof_x1 - 0.05,
+             roof_y1 - gr_h, roof_y1,
+             body_z1 - 0.06 - gr_d, body_z1 - 0.06)
+
+        # ---- Headlight surround bezels ----
+        hl_bz_w = 0.32; hl_bz_h = 0.16; hl_bz_d = 0.018
+        hl_y = body_y0 + (body_y1 - body_y0) * 0.55 - 0.02
+        for hz in [body_z0 + 0.14, body_z1 - 0.14 - hl_bz_w]:
+            _box(body_x1 - hl_bz_d, body_x1 + hl_bz_d,
+                 hl_y, hl_y + hl_bz_h,
+                 hz, hz + hl_bz_w)
+
+        # ---- Taillight surround bezels ----
+        tl_bz_w = 0.28; tl_bz_h = 0.14; tl_bz_d = 0.018
+        tl_y = body_y0 + (body_y1 - body_y0) * 0.50 - 0.02
+        for tz in [body_z0 + 0.12, body_z1 - 0.12 - tl_bz_w]:
+            _box(body_x0 - tl_bz_d, body_x0 + tl_bz_d,
+                 tl_y, tl_y + tl_bz_h,
+                 tz, tz + tl_bz_w)
+
+        # ---- Sill step plates (under each door) ----
+        sill_h = 0.04; sill_d = 0.030
+        sill_y = body_y0 + 0.02
+        for sill_x0, sill_x1 in [(body_x1 - 0.80, body_x1 - 0.10),
+                                   (body_x0 + 0.10, body_x0 + 0.80)]:
+            _box(sill_x0, sill_x1, sill_y, sill_y + sill_h,
+                 body_z0 - sill_d, body_z0)
+            _box(sill_x0, sill_x1, sill_y, sill_y + sill_h,
+                 body_z1, body_z1 + sill_d)
+
+        # ---- Lower front air dam slots (2 rectangular cutouts as inset boxes) ----
+        for ad_z in [body_z0 + 0.22, body_z0 + 0.52]:
+            _box(body_x1 - 0.02, body_x1 + 0.03,
+                 body_y0 + 0.02, body_y0 + 0.12,
+                 ad_z, ad_z + 0.22)
+
+        # ---- Cabin cross-brace visible at base of windscreen ----
+        _box(body_x1 - 0.64, body_x1 - 0.52,
+             body_y1, body_y1 + 0.06,
+             body_z0 + 0.08, body_z1 - 0.08)
+
+        # ---- Number plate recess (front + rear) ----
+        _box(body_x1 - 0.02, body_x1 + 0.03,
+             body_y0 + 0.16, body_y0 + 0.32,
+             -0.22, 0.22)
+        _box(body_x0 - 0.03, body_x0 + 0.02,
+             body_y0 + 0.14, body_y0 + 0.30,
+             -0.20, 0.20)
+
+        # ---- Inner door panel detail (4 door panels, each with upper+lower subdivision) ----
+        dp_d = 0.015
+        for dp_x0, dp_x1 in [(body_x1 - 0.88, body_x1 - 0.08),
+                               (body_x0 + 0.08, body_x0 + 0.88)]:
+            mid_y = body_y0 + (body_y1 - body_y0) * 0.45
+            for cz_pair in [(body_z0 - dp_d, body_z0), (body_z1, body_z1 + dp_d)]:
+                _box(dp_x0, dp_x1, body_y0 + 0.05, mid_y, *cz_pair)
+                _box(dp_x0, dp_x1, mid_y, body_y1 - 0.05, *cz_pair)
+
+        # ---- Quarter panel detail strips (front/rear fender transitions) ----
+        qp_d = 0.015; qp_h = 0.12
+        for qz_pair in [(body_z0 - qp_d, body_z0), (body_z1, body_z1 + qp_d)]:
+            _box(body_x1 - 0.12, body_x1 - 0.04,
+                 body_y0 + 0.20, body_y0 + 0.20 + qp_h, *qz_pair)
+            _box(body_x0 + 0.04, body_x0 + 0.12,
+                 body_y0 + 0.20, body_y0 + 0.20 + qp_h, *qz_pair)
+
+        # ---- Rear screen wiper park strip ----
+        _box(body_x0 - 0.03, body_x0 + 0.03,
+             body_y1 + 0.01, body_y1 + 0.05,
+             body_z0 + 0.12, body_z1 - 0.12)
+
+        # ---- Headlight DRL strip (thin strip just below main headlight) ----
+        drl_h = 0.04; drl_d = 0.015
+        drl_y = body_y0 + (body_y1 - body_y0) * 0.52
+        for dz in [body_z0 + 0.12, body_z1 - 0.12 - 0.42]:
+            _box(body_x1 - drl_d, body_x1 + drl_d, drl_y, drl_y + drl_h, dz, dz + 0.42)
+
+        # ---- Rear LED tail strip (full-width thin strip) ----
+        _box(body_x0 - 0.015, body_x0 + 0.015,
+             body_y0 + (body_y1 - body_y0) * 0.48,
+             body_y0 + (body_y1 - body_y0) * 0.56,
+             body_z0 + 0.08, body_z1 - 0.08)
+
+        # ---- Windscreen seal strip (rubber around windscreen perimeter) ----
+        ws_d = 0.014
+        _box(body_x1 - 0.68, body_x1 - 0.04,
+             body_y1 - ws_d, body_y1 + ws_d,
+             body_z0 + 0.06, body_z1 - 0.06)
+        _box(body_x1 - ws_d, body_x1 + ws_d,
+             body_y1 - 0.02, body_y1 + 0.32,
+             body_z0 + 0.06, body_z1 - 0.06)
+
+        # ---- Rear screen seal strip ----
+        _box(body_x0 - ws_d, body_x0 + ws_d,
+             body_y1 - 0.02, body_y1 + 0.28,
+             body_z0 + 0.10, body_z1 - 0.10)
+
+        # ---- Stepped underfloor tray ----
+        _box(body_x0 + 0.40, body_x1 - 0.40,
+             0.01, 0.05,
+             body_z0 + 0.10, body_z1 - 0.10)
+
+        # ---- Rear over-rider strips (2 rubber bumper pads) ----
+        for rz in [body_z0 + 0.14, body_z1 - 0.34]:
+            _box(body_x0 - 0.04, body_x0 + 0.02,
+                 body_y0 + 0.02, body_y0 + 0.12,
+                 rz, rz + 0.18)
+
+        # ---- Bonnet shut lines (2 thin strips along bonnet sides) ----
+        bon_d = 0.012
+        for bz_pair in [(body_z0 + 0.06, body_z0 + 0.06 + bon_d),
+                         (body_z1 - 0.06 - bon_d, body_z1 - 0.06)]:
+            _box(body_x1 - 0.88, body_x1 - 0.03,
+                 body_y1, body_y1 + 0.022,
+                 *bz_pair)
+
+        # ---- Boot shut lines (2 thin strips along boot sides) ----
+        for bz_pair in [(body_z0 + 0.08, body_z0 + 0.08 + bon_d),
+                         (body_z1 - 0.08 - bon_d, body_z1 - 0.08)]:
+            _box(body_x0 + 0.02, body_x0 + 0.95,
+                 body_y1, body_y1 + 0.018,
+                 *bz_pair)
+
+        # ---- Rear lower apron (below bumper) ----
+        _box(body_x0 - 0.03, body_x0 + 0.03,
+             body_y0, body_y0 + 0.08,
+             body_z0 + 0.08, body_z1 - 0.08)
+
+        # ---- Side repeater indicator strips (each side, front quarter) ----
+        rp_d = 0.012; rp_h = 0.06; rp_w = 0.14
+        for rz in [body_z0 - rp_d, body_z1]:
+            _box(body_x1 - 0.75, body_x1 - 0.75 + rp_w,
+                 body_y0 + (body_y1 - body_y0) * 0.55,
+                 body_y0 + (body_y1 - body_y0) * 0.55 + rp_h,
+                 rz, rz + rp_d * 2)
+
+        # ---- Additional front-face inner panel detail ----
+        for fp_z0, fp_z1 in [(body_z0 + 0.10, body_z0 + 0.38),
+                               (body_z0 + 0.40, body_z0 + 0.68),
+                               (body_z0 + 0.70, body_z1 - 0.10)]:
+            _box(body_x1 - 0.02, body_x1 + 0.02,
+                 body_y0 + 0.12, body_y0 + 0.40,
+                 fp_z0, fp_z1)
+
+        # ---- Fender vent strips (decorative slots on front quarter, each side) ----
+        fv_d = 0.015; fv_h = 0.06; fv_w = 0.10
+        fv_y = body_y0 + (body_y1 - body_y0) * 0.58
+        fv_x0 = body_x1 - 0.42; fv_x1 = body_x1 - 0.34
+        for fz in [body_z0 - fv_d, body_z1]:
+            for fi in range(3):
+                fvy = fv_y + fi * 0.08
+                _box(fv_x0, fv_x1, fvy, fvy + fv_h * 0.6, fz, fz + fv_d * 2)
+
+        # ---- Rear quarter panel crease (extra detail line) ----
+        rc_d = 0.012
+        for rz_pair in [(body_z0 - rc_d, body_z0), (body_z1, body_z1 + rc_d)]:
+            _box(body_x0 + 0.15, body_x0 + 0.60,
+                 body_y0 + (body_y1 - body_y0) * 0.42,
+                 body_y0 + (body_y1 - body_y0) * 0.46,
+                 *rz_pair)
+
+    # ==========================================================================
+    #  LOD1 shared car helper
+    # ==========================================================================
+    def _car_lod1_common(body_x0, body_x1, body_y0, body_y1, body_z0, body_z1,
+                          wheel_r, wheel_w, wheel_y, front_axle_x, rear_axle_x):
+        # 8-seg wheels (disk only, no sidewall/spoke)
+        for wx in [front_axle_x, rear_axle_x]:
+            for wz_c in [body_z0 - wheel_w * 0.35, body_z1 + wheel_w * 0.35]:
+                _disk_n(wx, wheel_y, wz_c, wheel_r, wheel_w, 8)
+                _wheel_arch(wx, wheel_y - wheel_r * 0.12, wz_c, wheel_r, wheel_w)
+
+        # Window strip bands (2 per side)
+        win_y0 = body_y1 * 0.72; win_h = (body_y1 - body_y0) * 0.22
+        win_t = 0.018
+        for wz_face, wz_in in [(body_z0, body_z0 - win_t),
+                                (body_z1, body_z1 + win_t)]:
+            _box(body_x0 + 0.15, body_x1 - 0.15, win_y0, win_y0 + win_h,
+                 wz_in, wz_face)
+
+        # Door line strips
+        crease_h = 0.03; crease_d = 0.012
+        crease_y = body_y0 + (body_y1 - body_y0) * 0.55
+        _box(body_x0 + 0.25, body_x1 - 0.25,
+             crease_y, crease_y + crease_h,
+             body_z0 - crease_d, body_z0)
+        _box(body_x0 + 0.25, body_x1 - 0.25,
+             crease_y, crease_y + crease_h,
+             body_z1, body_z1 + crease_d)
+
+        # Simplified bumpers
+        _box(body_x1 - 0.02, body_x1 + 0.04,
+             body_y0, body_y0 + 0.14,
+             body_z0 + 0.08, body_z1 - 0.08)
+        _box(body_x0 - 0.04, body_x0 + 0.02,
+             body_y0, body_y0 + 0.12,
+             body_z0 + 0.08, body_z1 - 0.08)
+
+        # Simplified headlights
+        hl_y = body_y0 + (body_y1 - body_y0) * 0.55
+        for hz in [body_z0 + 0.18, body_z1 - 0.46]:
+            _box(body_x1 - 0.03, body_x1 + 0.03, hl_y, hl_y + 0.10, hz, hz + 0.25)
+
+        # Simplified taillights
+        tl_y = body_y0 + (body_y1 - body_y0) * 0.50
+        for tz in [body_z0 + 0.15, body_z1 - 0.38]:
+            _box(body_x0 - 0.03, body_x0 + 0.03, tl_y, tl_y + 0.08, tz, tz + 0.20)
+
+        # Rocker strips
+        sk_h = 0.07; sk_d = 0.020
+        _box(body_x0 + 0.30, body_x1 - 0.30, body_y0, body_y0 + sk_h,
+             body_z0 - sk_d, body_z0)
+        _box(body_x0 + 0.30, body_x1 - 0.30, body_y0, body_y0 + sk_h,
+             body_z1, body_z1 + sk_d)
+
+        # Belt strip
+        belt_y = body_y0 + (body_y1 - body_y0) * 0.78
+        belt_h = 0.022; belt_d = 0.007
+        _box(body_x0 + 0.20, body_x1 - 0.20, belt_y, belt_y + belt_h,
+             body_z0 - belt_d, body_z0)
+        _box(body_x0 + 0.20, body_x1 - 0.20, belt_y, belt_y + belt_h,
+             body_z1, body_z1 + belt_d)
 
     # ------------------------------------------------------------------
     if vtype == "car_sedan":
-        # Dimensions
         body_x0, body_x1 = -2.0, 2.0
         body_y0, body_y1 = 0.0,  0.72
         body_z0, body_z1 = -0.85, 0.85
-        # Main body
-        _box(body_x0, body_x1, body_y0, body_y1, body_z0, body_z1)
+
+        # Lower body zone
+        _box(body_x0, body_x1, body_y0, body_y0 + 0.24, body_z0, body_z1)
+        # Door zone
+        _box(body_x0, body_x1, body_y0 + 0.24, body_y1 - 0.14, body_z0, body_z1)
+        # Upper greenhouse zone
+        _box(body_x0, body_x1, body_y1 - 0.14, body_y1, body_z0, body_z1)
 
         if lod == 0:
-            # Boot/trunk step — raised block at rear quarter only (rear = -x side)
-            # The body rear extends from body_x0 to body_x0+1.1
-            boot_x0 = body_x0
-            boot_x1 = body_x0 + 1.1   # boot occupies rear ~55% of body length
-            boot_y0 = body_y1
-            boot_y1 = body_y1 + 0.22  # boot top sits ~22% of body height above body
+            # Boot/trunk step
+            boot_x0 = body_x0; boot_x1 = body_x0 + 1.1
+            boot_y0 = body_y1;  boot_y1 = body_y1 + 0.22
             _box(boot_x0, boot_x1, boot_y0, boot_y1, body_z0 + 0.05, body_z1 - 0.05)
 
-            # Roof box — above body, setback from boot and bonnet ends
-            roof_x0 = body_x0 + 1.25   # set back from boot step
-            roof_x1 = body_x1 - 0.55   # set back from bonnet front
-            roof_y0 = body_y1
-            roof_y1 = body_y1 + 0.44
+            # Boot lid panel (raised slightly)
+            _box(boot_x0 + 0.05, boot_x1 - 0.05,
+                 boot_y1, boot_y1 + 0.018,
+                 body_z0 + 0.08, body_z1 - 0.08)
+
+            # Roof box
+            roof_x0 = body_x0 + 1.25; roof_x1 = body_x1 - 0.55
+            roof_y0 = body_y1;         roof_y1 = body_y1 + 0.44
             _box(roof_x0, roof_x1, roof_y0, roof_y1, body_z0 + 0.08, body_z1 - 0.08)
 
-            # Door crease lines — thin horizontal ledge strips on each side
-            crease_h = 0.03; crease_d = 0.012
-            crease_y = body_y0 + (body_y1 - body_y0) * 0.55
-            # left side
-            _box(body_x0 + 0.25, body_x1 - 0.25,
-                 crease_y, crease_y + crease_h,
-                 body_z0 - crease_d, body_z0)
-            # right side
-            _box(body_x0 + 0.25, body_x1 - 0.25,
-                 crease_y, crease_y + crease_h,
-                 body_z1, body_z1 + crease_d)
+            # Rear windscreen slope (two angled approximation boxes)
+            rw_h = boot_y1 - roof_y0
+            _box(boot_x1 - 0.08, roof_x0 + 0.08,
+                 roof_y0, roof_y0 + rw_h * 0.55,
+                 body_z0 + 0.10, body_z1 - 0.10)
+            _box(boot_x1 - 0.04, roof_x0 + 0.04,
+                 roof_y0 + rw_h * 0.45, roof_y1,
+                 body_z0 + 0.10, body_z1 - 0.10)
 
-            # Wheel arches + disks — four corners
-            wheel_r = 0.28; wheel_w = 0.18
-            wheel_y = wheel_r
-            for wx in [body_x1 - 0.55, body_x0 + 0.55]:  # front, rear axle
-                for wz_c, fz in [(body_z0 - wheel_w*0.35, -1), (body_z1 + wheel_w*0.35, 1)]:
-                    _wheel_disks(wx, wheel_y, wz_c, wheel_r, wheel_w)
-                    _wheel_arch(wx, wheel_y - wheel_r * 0.1, wz_c, wheel_r, wheel_w)
+            # Tailgate glass panel
+            _box(boot_x0 - 0.02, boot_x1 + 0.02,
+                 boot_y0 + 0.05, boot_y1 - 0.04,
+                 body_z0 + 0.12, body_z1 - 0.12)
 
-            # Side mirrors — near front, just above door crease
-            mirror_y = body_y0 + (body_y1 - body_y0) * 0.75
-            mirror_x = body_x1 - 0.65
-            _side_mirror(mirror_x, mirror_y, body_z0, -1)
-            _side_mirror(mirror_x, mirror_y, body_z1,  1)
+            # Vertical door division lines (front/rear door boundary)
+            door_div_x = (body_x0 + body_x1) * 0.5 - 0.08
+            div_d = 0.020
+            _box(door_div_x - 0.03, door_div_x + 0.03,
+                 body_y0 + 0.10, body_y1,
+                 body_z0 - div_d, body_z0)
+            _box(door_div_x - 0.03, door_div_x + 0.03,
+                 body_y0 + 0.10, body_y1,
+                 body_z1, body_z1 + div_d)
 
-            # Exhaust pipe stub — rear underside, left of centre
+            # Exhaust stub
             _box(-2.05, -1.92, 0.06, 0.12, -0.15, 0.15)
+
+            # Antenna stub
+            _box(roof_x0 + 0.20, roof_x0 + 0.24,
+                 roof_y1, roof_y1 + 0.18,
+                 -0.02, 0.02)
+
+            wheel_r = 0.28; wheel_w = 0.18; wheel_y = wheel_r
+            _car_lod0_common(
+                body_x0, body_x1, body_y0, body_y1, body_z0, body_z1,
+                roof_x0, roof_x1, roof_y0, roof_y1,
+                wheel_r, wheel_w, wheel_y,
+                front_axle_x=body_x1 - 0.55,
+                rear_axle_x=body_x0 + 0.55,
+                mirror_x=body_x1 - 0.65,
+            )
+
+        else:  # lod == 1
+            roof_x0 = body_x0 + 1.25; roof_x1 = body_x1 - 0.55
+            roof_y0 = body_y1;         roof_y1 = body_y1 + 0.44
+            _box(roof_x0, roof_x1, roof_y0, roof_y1, body_z0 + 0.08, body_z1 - 0.08)
+            _box(body_x0, body_x0 + 1.1, body_y1, body_y1 + 0.22, body_z0 + 0.05, body_z1 - 0.05)
+            wheel_r = 0.28; wheel_w = 0.18; wheel_y = wheel_r
+            _car_lod1_common(
+                body_x0, body_x1, body_y0, body_y1, body_z0, body_z1,
+                wheel_r, wheel_w, wheel_y,
+                front_axle_x=body_x1 - 0.55,
+                rear_axle_x=body_x0 + 0.55,
+            )
 
     # ------------------------------------------------------------------
     elif vtype == "car_hatchback":
         body_x0, body_x1 = -1.9, 1.9
         body_y0, body_y1 = 0.0,  0.74
         body_z0, body_z1 = -0.85, 0.85
-        _box(body_x0, body_x1, body_y0, body_y1, body_z0, body_z1)
+
+        _box(body_x0, body_x1, body_y0, body_y0 + 0.25, body_z0, body_z1)
+        _box(body_x0, body_x1, body_y0 + 0.25, body_y1 - 0.15, body_z0, body_z1)
+        _box(body_x0, body_x1, body_y1 - 0.15, body_y1, body_z0, body_z1)
 
         if lod == 0:
-            # No boot step — rear end is near-vertical, body ends at rear windscreen line.
-            # Roof is squarer and extends close to the rear.
-            roof_x0 = body_x0 + 0.45   # only short setback at hatch rear
-            roof_x1 = body_x1 - 0.55   # bonnet setback similar to sedan
-            roof_y0 = body_y1
-            roof_y1 = body_y1 + 0.50   # slightly taller than sedan roof
+            roof_x0 = body_x0 + 0.45; roof_x1 = body_x1 - 0.55
+            roof_y0 = body_y1;         roof_y1 = body_y1 + 0.50
             _box(roof_x0, roof_x1, roof_y0, roof_y1, body_z0 + 0.08, body_z1 - 0.08)
 
-            # Rear near-vertical hatch face extension — thin slab flush with body rear
+            # Rear near-vertical hatch face extension
             hatch_t = 0.05
             _box(body_x0, body_x0 + hatch_t,
                  body_y1, roof_y1,
                  body_z0 + 0.06, body_z1 - 0.06)
 
-            # Door crease lines
-            crease_h = 0.03; crease_d = 0.012
-            crease_y = body_y0 + (body_y1 - body_y0) * 0.55
-            _box(body_x0 + 0.20, body_x1 - 0.20,
-                 crease_y, crease_y + crease_h,
-                 body_z0 - crease_d, body_z0)
-            _box(body_x0 + 0.20, body_x1 - 0.20,
-                 crease_y, crease_y + crease_h,
-                 body_z1, body_z1 + crease_d)
+            # D-pillar geometry (hatchback distinguishing feature)
+            _box(body_x0, body_x0 + 0.12,
+                 roof_y0 - 0.05, roof_y1,
+                 body_z0 + 0.08, body_z1 - 0.08)
 
-            # Wheel arches + disks
-            wheel_r = 0.28; wheel_w = 0.18
-            wheel_y = wheel_r
-            for wx in [body_x1 - 0.50, body_x0 + 0.50]:
-                for wz_c, fz in [(body_z0 - wheel_w*0.35, -1), (body_z1 + wheel_w*0.35, 1)]:
-                    _wheel_disks(wx, wheel_y, wz_c, wheel_r, wheel_w)
-                    _wheel_arch(wx, wheel_y - wheel_r * 0.1, wz_c, wheel_r, wheel_w)
+            # Rear near-vertical glass panel
+            _box(body_x0 - 0.02, body_x0 + hatch_t + 0.02,
+                 body_y1 + 0.05, roof_y1 - 0.04,
+                 body_z0 + 0.12, body_z1 - 0.12)
 
-            # Side mirrors
-            mirror_y = body_y0 + (body_y1 - body_y0) * 0.75
-            mirror_x = body_x1 - 0.60
-            _side_mirror(mirror_x, mirror_y, body_z0, -1)
-            _side_mirror(mirror_x, mirror_y, body_z1,  1)
+            # Vertical door division
+            door_div_x = (body_x0 + body_x1) * 0.5 - 0.05
+            div_d = 0.020
+            _box(door_div_x - 0.03, door_div_x + 0.03,
+                 body_y0 + 0.10, body_y1,
+                 body_z0 - div_d, body_z0)
+            _box(door_div_x - 0.03, door_div_x + 0.03,
+                 body_y0 + 0.10, body_y1,
+                 body_z1, body_z1 + div_d)
 
             # Exhaust
             _box(-1.95, -1.82, 0.06, 0.12, -0.18, 0.12)
 
+            # Hatch-specific rear spoiler lip
+            _box(body_x0 - 0.02, body_x0 + 0.04,
+                 roof_y1 - 0.04, roof_y1 + 0.06,
+                 body_z0 + 0.10, body_z1 - 0.10)
+
+            wheel_r = 0.28; wheel_w = 0.18; wheel_y = wheel_r
+            _car_lod0_common(
+                body_x0, body_x1, body_y0, body_y1, body_z0, body_z1,
+                roof_x0, roof_x1, roof_y0, roof_y1,
+                wheel_r, wheel_w, wheel_y,
+                front_axle_x=body_x1 - 0.50,
+                rear_axle_x=body_x0 + 0.50,
+                mirror_x=body_x1 - 0.60,
+            )
+
+        else:  # lod == 1
+            roof_x0 = body_x0 + 0.45; roof_x1 = body_x1 - 0.55
+            roof_y0 = body_y1;         roof_y1 = body_y1 + 0.50
+            _box(roof_x0, roof_x1, roof_y0, roof_y1, body_z0 + 0.08, body_z1 - 0.08)
+            _box(body_x0, body_x0 + 0.05, body_y1, roof_y1, body_z0 + 0.06, body_z1 - 0.06)
+            wheel_r = 0.28; wheel_w = 0.18; wheel_y = wheel_r
+            _car_lod1_common(
+                body_x0, body_x1, body_y0, body_y1, body_z0, body_z1,
+                wheel_r, wheel_w, wheel_y,
+                front_axle_x=body_x1 - 0.50,
+                rear_axle_x=body_x0 + 0.50,
+            )
+
     # ------------------------------------------------------------------
     elif vtype == "car_suv":
         body_x0, body_x1 = -2.2, 2.2
-        body_y0, body_y1 = 0.0,  0.90   # higher ground clearance → taller body
+        body_y0, body_y1 = 0.0,  0.90
         body_z0, body_z1 = -0.95, 0.95
-        _box(body_x0, body_x1, body_y0, body_y1, body_z0, body_z1)
+
+        _box(body_x0, body_x1, body_y0, body_y0 + 0.30, body_z0, body_z1)
+        _box(body_x0, body_x1, body_y0 + 0.30, body_y1 - 0.18, body_z0, body_z1)
+        _box(body_x0, body_x1, body_y1 - 0.18, body_y1, body_z0, body_z1)
 
         if lod == 0:
-            # Flat roof extends full body length (no boot step, no strong taper)
-            roof_x0 = body_x0 + 0.50
-            roof_x1 = body_x1 - 0.55
-            roof_y0 = body_y1
-            roof_y1 = body_y1 + 0.42   # flat roofline
+            roof_x0 = body_x0 + 0.50; roof_x1 = body_x1 - 0.55
+            roof_y0 = body_y1;         roof_y1 = body_y1 + 0.42
             _box(roof_x0, roof_x1, roof_y0, roof_y1, body_z0 + 0.10, body_z1 - 0.10)
 
-            # Roof rack rails — 2 longitudinal bars on top of roof
-            rail_y0 = roof_y1
-            rail_y1 = roof_y1 + 0.04
+            # Roof rack rails
+            rail_y0 = roof_y1; rail_y1 = roof_y1 + 0.04
             rail_z_off = (body_z1 - body_z0) * 0.10
-            # left rail
-            _box(roof_x0 + 0.10, roof_x1 - 0.10,
-                 rail_y0, rail_y1,
+            _box(roof_x0 + 0.10, roof_x1 - 0.10, rail_y0, rail_y1,
                  body_z0 + rail_z_off, body_z0 + rail_z_off + 0.06)
-            # right rail
-            _box(roof_x0 + 0.10, roof_x1 - 0.10,
-                 rail_y0, rail_y1,
+            _box(roof_x0 + 0.10, roof_x1 - 0.10, rail_y0, rail_y1,
                  body_z1 - rail_z_off - 0.06, body_z1 - rail_z_off)
 
-            # Door crease lines
-            crease_h = 0.035; crease_d = 0.015
-            crease_y = body_y0 + (body_y1 - body_y0) * 0.50
+            # Side cladding panel (thick plastic trim below door line)
+            clad_y1 = body_y0 + body_y1 * 0.38; clad_d = 0.035
             _box(body_x0 + 0.30, body_x1 - 0.30,
-                 crease_y, crease_y + crease_h,
-                 body_z0 - crease_d, body_z0)
+                 body_y0, clad_y1,
+                 body_z0 - clad_d, body_z0 - 0.002)
             _box(body_x0 + 0.30, body_x1 - 0.30,
-                 crease_y, crease_y + crease_h,
-                 body_z1, body_z1 + crease_d)
+                 body_y0, clad_y1,
+                 body_z1 + 0.002, body_z1 + clad_d)
 
-            # Raised ground clearance visible as step between body bottom and wheel
-            # Wheel arches + disks (larger wheels, higher centre)
-            wheel_r = 0.34; wheel_w = 0.22
-            wheel_y = wheel_r + 0.06   # extra clearance for SUV
-            for wx in [body_x1 - 0.58, body_x0 + 0.58]:
-                for wz_c, fz in [(body_z0 - wheel_w*0.35, -1), (body_z1 + wheel_w*0.35, 1)]:
-                    _wheel_disks(wx, wheel_y, wz_c, wheel_r, wheel_w)
-                    _wheel_arch(wx, wheel_y - wheel_r * 0.15, wz_c, wheel_r, wheel_w)
+            # Front skid plate
+            _box(body_x1 - 0.05, body_x1 + 0.08,
+                 body_y0, body_y0 + 0.22,
+                 body_z0 + 0.08, body_z1 - 0.08)
 
-            # Side mirrors — larger, mounted higher
-            mirror_y = body_y0 + (body_y1 - body_y0) * 0.72
-            mirror_x = body_x1 - 0.65
-            _side_mirror(mirror_x, mirror_y, body_z0, -1)
-            _side_mirror(mirror_x, mirror_y, body_z1,  1)
+            # Antenna stub on roof
+            _box(roof_x0 + 0.20, roof_x0 + 0.24,
+                 roof_y1, roof_y1 + 0.15,
+                 -0.02, 0.02)
 
-            # Exhaust (twin)
+            # Vertical door division
+            door_div_x = (body_x0 + body_x1) * 0.5
+            div_d = 0.022
+            _box(door_div_x - 0.04, door_div_x + 0.04,
+                 body_y0 + 0.15, body_y1,
+                 body_z0 - div_d, body_z0)
+            _box(door_div_x - 0.04, door_div_x + 0.04,
+                 body_y0 + 0.15, body_y1,
+                 body_z1, body_z1 + div_d)
+
+            # Twin exhausts
             _box(-2.25, -2.10, 0.10, 0.18, -0.25, -0.05)
             _box(-2.25, -2.10, 0.10, 0.18,  0.05,  0.25)
+
+            wheel_r = 0.34; wheel_w = 0.22; wheel_y = wheel_r + 0.06
+            _car_lod0_common(
+                body_x0, body_x1, body_y0, body_y1, body_z0, body_z1,
+                roof_x0, roof_x1, roof_y0, roof_y1,
+                wheel_r, wheel_w, wheel_y,
+                front_axle_x=body_x1 - 0.58,
+                rear_axle_x=body_x0 + 0.58,
+                mirror_x=body_x1 - 0.65,
+            )
+
+        else:  # lod == 1
+            roof_x0 = body_x0 + 0.50; roof_x1 = body_x1 - 0.55
+            roof_y0 = body_y1;         roof_y1 = body_y1 + 0.42
+            _box(roof_x0, roof_x1, roof_y0, roof_y1, body_z0 + 0.10, body_z1 - 0.10)
+            _box(roof_x0 + 0.10, roof_x1 - 0.10, roof_y1, roof_y1 + 0.04,
+                 body_z0 + 0.16, body_z1 - 0.16)
+            wheel_r = 0.34; wheel_w = 0.22; wheel_y = wheel_r + 0.06
+            _car_lod1_common(
+                body_x0, body_x1, body_y0, body_y1, body_z0, body_z1,
+                wheel_r, wheel_w, wheel_y,
+                front_axle_x=body_x1 - 0.58,
+                rear_axle_x=body_x0 + 0.58,
+            )
 
     # ------------------------------------------------------------------
     elif vtype == "bus_standard":
         body_x0, body_x1 = -5.5, 5.5
-        body_y0, body_y1 = 0.30, 2.80   # body sits ~30cm above ground (wheels underneath)
+        body_y0, body_y1 = 0.30, 2.80
         body_z0, body_z1 = -1.10, 1.10
-        _box(body_x0, body_x1, body_y0, body_y1, body_z0, body_z1)
+
+        # Body in 3 horizontal zones
+        _box(body_x0, body_x1, body_y0, body_y0 + 0.55, body_z0, body_z1)
+        _box(body_x0, body_x1, body_y0 + 0.55, body_y1 - 0.52, body_z0, body_z1)
+        _box(body_x0, body_x1, body_y1 - 0.52, body_y1, body_z0, body_z1)
 
         if lod == 0:
-            # Destination blind recess — narrow strip at top-front of bus face
-            blind_t = 0.06
-            _box(body_x1 - blind_t, body_x1,
-                 body_y1 - 0.38, body_y1,
-                 body_z0 + 0.10, body_z1 - 0.10)
-
-            # Folding door frame — recess on right side (front door)
-            door_x0 = body_x1 - 1.40
-            door_x1 = body_x1 - 0.20
-            door_t  = 0.04
-            _box(door_x0, door_x1,
-                 body_y0, body_y0 + 1.90,
-                 body_z1, body_z1 + door_t)
-
-            # Wheel arch skirts — 4 corners, large
             wheel_r = 0.50; wheel_w = 0.28
-            wheel_y = body_y0 - wheel_r * 0.05  # wheel centres below body floor
-            for wx in [body_x1 - 0.90, body_x0 + 0.90]:
-                for wz_c, fz in [(body_z0 - wheel_w*0.3, -1), (body_z1 + wheel_w*0.3, 1)]:
-                    _wheel_disks(wx, wheel_y, wz_c, wheel_r, wheel_w)
+            wheel_y = body_y0 - wheel_r * 0.05
+
+            # ---- 3 axles (front + 2 rear) × 2 sides = 6 wheel positions ----
+            for wx in [body_x1 - 0.90, body_x0 + 1.60, body_x0 + 0.90]:
+                for wz_c in [body_z0 - wheel_w * 0.3, body_z1 + wheel_w * 0.3]:
+                    _full_wheel(wx, wheel_y, wz_c, wheel_r, wheel_w, 16, 6)
                     _wheel_arch(wx, wheel_y - wheel_r * 0.05, wz_c, wheel_r, wheel_w)
 
-            # Roof AC box — centred on roof, front half
-            ac_x0 = 0.0; ac_x1 = body_x1 - 0.60
-            _box(ac_x0, ac_x1,
-                 body_y1, body_y1 + 0.28,
-                 body_z0 + 0.25, body_z1 - 0.25)
+            # ---- Passenger windows: 8 per side (window pane + frame) ----
+            win_y0 = body_y0 + 0.90; win_h = 0.72; win_t = 0.020
+            win_x_step = (body_x1 - body_x0 - 1.10) / 8.0
+            for wi in range(8):
+                wx0 = body_x0 + 0.55 + wi * win_x_step + 0.04
+                wx1 = wx0 + win_x_step - 0.08
+                # pane
+                for wz_face, wz_in in [(body_z0, body_z0 - win_t),
+                                        (body_z1, body_z1 + win_t)]:
+                    _box(wx0, wx1, win_y0, win_y0 + win_h, wz_in, wz_face)
+                # frame strip above
+                _box(wx0 - 0.02, wx1 + 0.02,
+                     win_y0 + win_h, win_y0 + win_h + 0.06,
+                     body_z0 - 0.008, body_z1 + 0.008)
 
-            # Rear engine vent louvres — 4 horizontal bar strips on rear face
+            # ---- Floor-level skirt panels ----
+            _box(body_x0 + 0.20, body_x1 - 0.20,
+                 body_y0 - 0.10, body_y0 + 0.06,
+                 body_z0 - 0.03, body_z0)
+            _box(body_x0 + 0.20, body_x1 - 0.20,
+                 body_y0 - 0.10, body_y0 + 0.06,
+                 body_z1, body_z1 + 0.03)
+
+            # ---- Front face detail ----
+            # Windscreen panel (inset)
+            _box(body_x1 - 0.05, body_x1 + 0.02,
+                 body_y0 + 0.55, body_y1 - 0.52,
+                 body_z0 + 0.12, body_z1 - 0.12)
+            # Headlight units (2)
+            for hz in [body_z0 + 0.12, body_z1 - 0.42]:
+                _box(body_x1 - 0.04, body_x1 + 0.04,
+                     body_y0 + 0.30, body_y0 + 0.55,
+                     hz, hz + 0.28)
+            # Destination blind frame
+            blind_t = 0.06
+            _box(body_x1 - blind_t, body_x1 + 0.02,
+                 body_y1 - 0.38, body_y1,
+                 body_z0 + 0.10, body_z1 - 0.10)
+            # Front bumper
+            _box(body_x1 - 0.04, body_x1 + 0.07,
+                 body_y0 - 0.05, body_y0 + 0.22,
+                 body_z0 + 0.05, body_z1 - 0.05)
+
+            # ---- Rear face detail ----
+            # Rear window
+            _box(body_x0 - 0.03, body_x0 + 0.02,
+                 body_y0 + 0.80, body_y1 - 0.45,
+                 body_z0 + 0.20, body_z1 - 0.20)
+            # Taillights (2)
+            for tz in [body_z0 + 0.10, body_z1 - 0.34]:
+                _box(body_x0 - 0.04, body_x0 + 0.02,
+                     body_y0 + 0.30, body_y0 + 0.65,
+                     tz, tz + 0.22)
+            # Engine vent louvres (4 bars)
             for i in range(4):
                 vy = body_y0 + 0.35 + i * 0.28
                 _box(body_x0 - 0.04, body_x0,
                      vy, vy + 0.08,
                      body_z0 + 0.18, body_z1 - 0.18)
+            # Emergency door panel
+            _box(body_x0 - 0.05, body_x0 + 0.02,
+                 body_y0 + 0.10, body_y0 + 1.90,
+                 body_z0 + 0.38, body_z1 - 0.38)
+            # Rear bumper
+            _box(body_x0 - 0.06, body_x0 + 0.02,
+                 body_y0 - 0.05, body_y0 + 0.22,
+                 body_z0 + 0.08, body_z1 - 0.08)
+
+            # ---- Folding door frame (right side front) ----
+            door_x0 = body_x1 - 1.40; door_x1 = body_x1 - 0.20; door_t = 0.04
+            _box(door_x0, door_x1, body_y0, body_y0 + 1.90, body_z1, body_z1 + door_t)
+
+            # ---- Step area (3 steps into front door) ----
+            for si in range(3):
+                sy = body_y0 - 0.12 - si * 0.12
+                _box(body_x1 - 1.30, body_x1 - 0.30,
+                     sy, sy + 0.10,
+                     body_z1, body_z1 + 0.06 + si * 0.04)
+
+            # ---- Roof detail ----
+            # AC box
+            ac_x0 = 0.0; ac_x1 = body_x1 - 0.60
+            _box(ac_x0, ac_x1, body_y1, body_y1 + 0.28, body_z0 + 0.25, body_z1 - 0.25)
+            # AC fins (8 strips)
+            for fi in range(8):
+                fx = ac_x0 + 0.15 + fi * (ac_x1 - ac_x0 - 0.30) / 7.0
+                _box(fx - 0.03, fx + 0.03,
+                     body_y1 + 0.28, body_y1 + 0.44,
+                     body_z0 + 0.28, body_z1 - 0.28)
+            # Skylight hatch
+            _box(body_x0 + 1.20, body_x0 + 1.80,
+                 body_y1, body_y1 + 0.04,
+                 body_z0 + 0.30, body_z1 - 0.30)
+            # Roof rail strips (2 longitudinal)
+            _box(body_x0 + 0.10, body_x1 - 0.10,
+                 body_y1, body_y1 + 0.06,
+                 body_z0 + 0.04, body_z0 + 0.10)
+            _box(body_x0 + 0.10, body_x1 - 0.10,
+                 body_y1, body_y1 + 0.06,
+                 body_z1 - 0.10, body_z1 - 0.04)
+
+            # ---- Waistband strip (body belt-line) ----
+            wb_y = body_y0 + 0.62; wb_h = 0.04; wb_d = 0.015
+            _box(body_x0 + 0.10, body_x1 - 0.10, wb_y, wb_y + wb_h,
+                 body_z0 - wb_d, body_z0)
+            _box(body_x0 + 0.10, body_x1 - 0.10, wb_y, wb_y + wb_h,
+                 body_z1, body_z1 + wb_d)
+
+            # ---- Body panel joint lines (5 joints × 2 sides) ----
+            for jx in [body_x0 + 1.8, body_x0 + 3.6, 0.0, body_x1 - 3.6, body_x1 - 1.8]:
+                jd = 0.012
+                _box(jx - 0.02, jx + 0.02, body_y0 + 0.10, body_y1 - 0.10,
+                     body_z0 - jd, body_z0)
+                _box(jx - 0.02, jx + 0.02, body_y0 + 0.10, body_y1 - 0.10,
+                     body_z1, body_z1 + jd)
+
+            # ---- Window sill ledges (below each passenger window, both sides) ----
+            win_x_step = (body_x1 - body_x0 - 1.10) / 8.0
+            sill_h = 0.06; sill_d = 0.018
+            sill_y_top = body_y0 + 0.90
+            for wi in range(8):
+                wx0 = body_x0 + 0.55 + wi * win_x_step + 0.04
+                wx1 = wx0 + win_x_step - 0.08
+                _box(wx0, wx1, sill_y_top - sill_h, sill_y_top,
+                     body_z0 - sill_d, body_z0)
+                _box(wx0, wx1, sill_y_top - sill_h, sill_y_top,
+                     body_z1, body_z1 + sill_d)
+
+            # ---- Rear upper window ----
+            _box(body_x0 - 0.03, body_x0 + 0.02,
+                 body_y1 - 0.48, body_y1 - 0.04,
+                 body_z0 + 0.25, body_z1 - 0.25)
+
+            # ---- Underside skirting detail (side skirt lower rim) ----
+            for xi in range(6):
+                sx = body_x0 + 0.60 + xi * (body_x1 - body_x0 - 1.20) / 5.0
+                _box(sx - 0.25, sx + 0.25,
+                     body_y0 - 0.08, body_y0 + 0.05,
+                     body_z0 - 0.04, body_z0)
+                _box(sx - 0.25, sx + 0.25,
+                     body_y0 - 0.08, body_y0 + 0.05,
+                     body_z1, body_z1 + 0.04)
+
+            # ---- Indicator/signal light strips (front + rear each side) ----
+            ind_w = 0.18; ind_h = 0.10; ind_d = 0.025
+            for iz in [body_z0 + 0.04, body_z1 - 0.04 - ind_w]:
+                # front
+                _box(body_x1 - ind_d, body_x1 + ind_d,
+                     body_y0 + 0.30, body_y0 + 0.30 + ind_h,
+                     iz, iz + ind_w)
+                # rear
+                _box(body_x0 - ind_d, body_x0 + ind_d,
+                     body_y0 + 0.30, body_y0 + 0.30 + ind_h,
+                     iz, iz + ind_w)
+
+            # ---- Driver's cab subdivision panels (front upper face) ----
+            for di in range(3):
+                dx = body_x1 - 0.55 + di * 0.16
+                _box(dx, dx + 0.14,
+                     body_y1 - 0.52, body_y1,
+                     body_z0 + 0.05, body_z1 - 0.05)
+
+            # ---- Roof edge gutters (front + rear overhangs) ----
+            _box(body_x1 - 0.06, body_x1 + 0.04,
+                 body_y1 - 0.04, body_y1 + 0.04,
+                 body_z0 + 0.04, body_z1 - 0.04)
+            _box(body_x0 - 0.04, body_x0 + 0.06,
+                 body_y1 - 0.04, body_y1 + 0.04,
+                 body_z0 + 0.04, body_z1 - 0.04)
+
+            # ---- AC duct connector strips (3 ducts from AC unit) ----
+            ac_x0 = 0.0; ac_x1 = body_x1 - 0.60
+            for di in range(3):
+                dz = body_z0 + 0.30 + di * ((body_z1 - body_z0 - 0.60) / 2.0)
+                _box(ac_x0 + 0.20, ac_x0 + 0.50,
+                     body_y1 + 0.28, body_y1 + 0.42,
+                     dz, dz + 0.14)
+
+            # ---- Axle housing boxes (visible underbelly at each axle) ----
+            for ax_wx in [body_x1 - 0.90, body_x0 + 1.60, body_x0 + 0.90]:
+                _box(ax_wx - 0.35, ax_wx + 0.35,
+                     0.04, 0.18,
+                     body_z0 + 0.12, body_z1 - 0.12)
+
+            # ---- Side mirror assemblies (large bus mirrors) ----
+            mx = body_x1 - 0.30; my = body_y1 - 0.52
+            # left
+            _box(mx - 0.06, mx + 0.06, my, my + 0.08, body_z0 - 0.22, body_z0 - 0.06)
+            _box(mx - 0.20, mx + 0.20, my - 0.04, my + 0.22, body_z0 - 0.28, body_z0 - 0.18)
+            # right
+            _box(mx - 0.06, mx + 0.06, my, my + 0.08, body_z1 + 0.06, body_z1 + 0.22)
+            _box(mx - 0.20, mx + 0.20, my - 0.04, my + 0.22, body_z1 + 0.18, body_z1 + 0.28)
+
+            # ---- Fuel filler hatch (right side rear quarter) ----
+            _box(body_x0 + 1.10, body_x0 + 1.50,
+                 body_y0 + 0.55, body_y0 + 0.88,
+                 body_z1 - 0.012, body_z1 + 0.012)
+
+            # ---- Service hatch panels (2 per side, lower body) ----
+            for hx0, hx1 in [(body_x0 + 1.60, body_x0 + 2.40),
+                               (body_x0 + 2.50, body_x0 + 3.30)]:
+                _box(hx0, hx1, body_y0, body_y0 + 0.52,
+                     body_z0 - 0.012, body_z0)
+                _box(hx0, hx1, body_y0, body_y0 + 0.52,
+                     body_z1, body_z1 + 0.012)
+
+            # ---- Roof ventilation hatches (4 additional along roof) ----
+            for vi in range(4):
+                vx = body_x0 + 1.20 + vi * 2.10
+                _box(vx, vx + 0.55,
+                     body_y1, body_y1 + 0.05,
+                     body_z0 + 0.38, body_z1 - 0.38)
+
+            # ---- Number plate panels ----
+            _box(body_x1 - 0.02, body_x1 + 0.03,
+                 body_y0 + 0.35, body_y0 + 0.62,
+                 -0.28, 0.28)
+            _box(body_x0 - 0.03, body_x0 + 0.02,
+                 body_y0 + 0.32, body_y0 + 0.58,
+                 -0.26, 0.26)
+
+            # ---- Lower front face horizontal bands (3 bands) ----
+            for bi in range(3):
+                by = body_y0 + bi * 0.18
+                _box(body_x1 - 0.03, body_x1 + 0.03,
+                     by, by + 0.10,
+                     body_z0 + 0.08, body_z1 - 0.08)
+
+            # ---- Rear face additional detail bands ----
+            for bi in range(3):
+                by = body_y0 + bi * 0.18
+                _box(body_x0 - 0.03, body_x0 + 0.03,
+                     by, by + 0.10,
+                     body_z0 + 0.08, body_z1 - 0.08)
+
+            # ---- Interior ceiling strip lights (visible through windows as thin strips) ----
+            for li in range(6):
+                lx = body_x0 + 0.80 + li * (body_x1 - body_x0 - 1.60) / 5.0
+                _box(lx - 0.15, lx + 0.15,
+                     body_y1 - 0.06, body_y1 - 0.01,
+                     body_z0 + 0.15, body_z1 - 0.15)
+
+            # ---- Upper side-panel detail strips (between windows and roof) ----
+            up_d = 0.012; up_h = 0.10
+            up_y0 = body_y0 + 0.90 + 0.72 + 0.06
+            _box(body_x0 + 0.40, body_x1 - 0.40,
+                 up_y0, up_y0 + up_h,
+                 body_z0 - up_d, body_z0)
+            _box(body_x0 + 0.40, body_x1 - 0.40,
+                 up_y0, up_y0 + up_h,
+                 body_z1, body_z1 + up_d)
+
+            # ---- Lower-body reinforcement ribs (6 ribs each side) ----
+            for ri in range(6):
+                rx = body_x0 + 0.70 + ri * (body_x1 - body_x0 - 1.40) / 5.0
+                rib_d = 0.020
+                _box(rx - 0.06, rx + 0.06,
+                     body_y0, body_y0 + 0.55,
+                     body_z0 - rib_d, body_z0)
+                _box(rx - 0.06, rx + 0.06,
+                     body_y0, body_y0 + 0.55,
+                     body_z1, body_z1 + rib_d)
+
+            # ---- Rear emergency exit handle strips ----
+            _box(body_x0 - 0.03, body_x0 + 0.02,
+                 body_y0 + 1.50, body_y0 + 1.55,
+                 body_z0 + 0.40, body_z1 - 0.40)
+
+            # ---- Undercarriage transmission/driveshaft cover ----
+            _box(body_x0 + 0.80, body_x1 - 0.80,
+                 0.02, 0.14,
+                 body_z0 + 0.18, body_z1 - 0.18)
+
+            # ---- Roof antenna mast ----
+            _box(body_x1 - 1.20, body_x1 - 1.16,
+                 body_y1 + 0.04, body_y1 + 0.50,
+                 -0.02, 0.02)
+
+            # ---- Front corner radius pillars ----
+            for fz in [body_z0 + 0.06, body_z1 - 0.14]:
+                _box(body_x1 - 0.12, body_x1 + 0.03,
+                     body_y0 + 0.15, body_y1 - 0.15,
+                     fz, fz + 0.08)
+
+            # ---- Wheel arch inner liner strips ----
+            for ax_wx in [body_x1 - 0.90, body_x0 + 1.60, body_x0 + 0.90]:
+                for wz_c in [body_z0 - wheel_w * 0.3, body_z1 + wheel_w * 0.3]:
+                    arch_hw = wheel_r * 1.1
+                    wz_in0 = wz_c - wheel_w * 0.5 - 0.02
+                    wz_in1 = wz_c + wheel_w * 0.5 + 0.02
+                    _box(ax_wx - arch_hw, ax_wx + arch_hw,
+                         wheel_y - wheel_r * 0.05,
+                         wheel_y - wheel_r * 0.05 + 0.08,
+                         wz_in0 - 0.018, wz_in0)
+                    _box(ax_wx - arch_hw, ax_wx + arch_hw,
+                         wheel_y - wheel_r * 0.05,
+                         wheel_y - wheel_r * 0.05 + 0.08,
+                         wz_in1, wz_in1 + 0.018)
+
+            # ---- Additional passenger window subdivisions (vertical divider per window) ----
+            win_x_step2 = (body_x1 - body_x0 - 1.10) / 8.0
+            win_y0b = body_y0 + 0.90; win_hb = 0.72; wt2 = 0.016
+            for wi in range(8):
+                wx0 = body_x0 + 0.55 + wi * win_x_step2 + 0.04
+                wx_c = wx0 + (win_x_step2 - 0.08) * 0.5
+                _box(wx_c - 0.02, wx_c + 0.02,
+                     win_y0b, win_y0b + win_hb,
+                     body_z0 - wt2, body_z0)
+                _box(wx_c - 0.02, wx_c + 0.02,
+                     win_y0b, win_y0b + win_hb,
+                     body_z1, body_z1 + wt2)
+
+            # ---- Front face lower grille bars (5 horizontal bars) ----
+            for gi in range(5):
+                gy = body_y0 + 0.05 + gi * 0.10
+                _box(body_x1 - 0.03, body_x1 + 0.03,
+                     gy, gy + 0.06,
+                     body_z0 + 0.12, body_z1 - 0.12)
+
+            # ---- Side mirror lower brace ----
+            mx = body_x1 - 0.30; my = body_y1 - 0.52
+            _box(mx - 0.04, mx + 0.04,
+                 my - 0.16, my,
+                 body_z0 - 0.22, body_z0 - 0.08)
+            _box(mx - 0.04, mx + 0.04,
+                 my - 0.16, my,
+                 body_z1 + 0.08, body_z1 + 0.22)
+
+            # ---- Route indicator board (side, front quarter) ----
+            _box(body_x1 - 0.50, body_x1 - 0.08,
+                 body_y1 - 0.38, body_y1 - 0.04,
+                 body_z1 + 0.002, body_z1 + 0.016)
+
+            # ---- Rear passenger window subdivisions ----
+            for ri in range(2):
+                rx = body_x0 + 1.80 + ri * 1.20
+                _box(rx, rx + 0.80,
+                     body_y0 + 0.90, body_y0 + 0.90 + 0.72,
+                     body_z0 - 0.018, body_z0)
+                _box(rx, rx + 0.80,
+                     body_y0 + 0.90, body_y0 + 0.90 + 0.72,
+                     body_z1, body_z1 + 0.018)
+
+        else:  # lod == 1
+            # Simplified wheels (8-seg)
+            wheel_r = 0.50; wheel_w = 0.28
+            wheel_y = body_y0 - wheel_r * 0.05
+            for wx in [body_x1 - 0.90, body_x0 + 0.90]:
+                for wz_c in [body_z0 - wheel_w * 0.3, body_z1 + wheel_w * 0.3]:
+                    _disk_n(wx, wheel_y, wz_c, wheel_r, wheel_w, 8)
+                    _wheel_arch(wx, wheel_y - wheel_r * 0.05, wz_c, wheel_r, wheel_w)
+            # Window strip bands per side
+            win_y0 = body_y0 + 0.90; win_h = 0.72; win_t = 0.018
+            for wz_face, wz_in in [(body_z0, body_z0 - win_t),
+                                    (body_z1, body_z1 + win_t)]:
+                _box(body_x0 + 0.40, body_x1 - 0.40, win_y0, win_y0 + win_h,
+                     wz_in, wz_face)
+            # Destination blind
+            _box(body_x1 - 0.06, body_x1 + 0.02, body_y1 - 0.38, body_y1,
+                 body_z0 + 0.10, body_z1 - 0.10)
+            # Door frame
+            _box(body_x1 - 1.40, body_x1 - 0.20, body_y0, body_y0 + 1.90,
+                 body_z1, body_z1 + 0.04)
+            # AC box
+            _box(0.0, body_x1 - 0.60, body_y1, body_y1 + 0.28,
+                 body_z0 + 0.25, body_z1 - 0.25)
+            # Bumpers
+            _box(body_x1 - 0.04, body_x1 + 0.06, body_y0 - 0.05, body_y0 + 0.20,
+                 body_z0 + 0.08, body_z1 - 0.08)
+            _box(body_x0 - 0.06, body_x0 + 0.04, body_y0 - 0.05, body_y0 + 0.20,
+                 body_z0 + 0.08, body_z1 - 0.08)
+            # Vent louvres
+            for i in range(4):
+                vy = body_y0 + 0.35 + i * 0.28
+                _box(body_x0 - 0.04, body_x0, vy, vy + 0.08,
+                     body_z0 + 0.18, body_z1 - 0.18)
+            # Belt strip
+            wb_y = body_y0 + 0.62; wb_h = 0.04; wb_d = 0.012
+            _box(body_x0 + 0.10, body_x1 - 0.10, wb_y, wb_y + wb_h,
+                 body_z0 - wb_d, body_z0)
+            _box(body_x0 + 0.10, body_x1 - 0.10, wb_y, wb_y + wb_h,
+                 body_z1, body_z1 + wb_d)
+            # Headlights
+            for hz in [body_z0 + 0.12, body_z1 - 0.42]:
+                _box(body_x1 - 0.04, body_x1 + 0.04, body_y0 + 0.30, body_y0 + 0.55,
+                     hz, hz + 0.28)
+            # Taillights
+            for tz in [body_z0 + 0.10, body_z1 - 0.34]:
+                _box(body_x0 - 0.04, body_x0 + 0.02, body_y0 + 0.30, body_y0 + 0.65,
+                     tz, tz + 0.22)
+            # Additional wheel detail (2 extra axle arches for LOD1)
+            for wx in [body_x0 + 1.60]:
+                for wz_c in [body_z0 - wheel_w * 0.3, body_z1 + wheel_w * 0.3]:
+                    _disk_n(wx, wheel_y, wz_c, wheel_r, wheel_w, 8)
+                    _wheel_arch(wx, wheel_y - wheel_r * 0.05, wz_c, wheel_r, wheel_w)
+            # Roof silhouette strip
+            _box(body_x0 + 0.10, body_x1 - 0.10,
+                 body_y1, body_y1 + 0.06,
+                 body_z0 + 0.10, body_z1 - 0.10)
+            # Skirt lower strip
+            _box(body_x0 + 0.20, body_x1 - 0.20,
+                 body_y0 - 0.08, body_y0 + 0.04,
+                 body_z0 - 0.025, body_z0)
+            _box(body_x0 + 0.20, body_x1 - 0.20,
+                 body_y0 - 0.08, body_y0 + 0.04,
+                 body_z1, body_z1 + 0.025)
 
     # ------------------------------------------------------------------
     elif vtype == "truck_cargo":
-        # Cab occupies front portion, cargo box the rear
         cab_x0 = 0.60; cab_x1 = 4.0
         cab_y0 = 0.32; cab_y1 = 2.50
         cab_z0 = -1.00; cab_z1 = 1.00
 
-        cargo_x0 = -4.0; cargo_x1 = 0.40   # 20cm gap between cab and cargo
+        cargo_x0 = -4.0; cargo_x1 = 0.40
         cargo_y0 = 0.32; cargo_y1 = 2.50
         cargo_z0 = -0.98; cargo_z1 = 0.98
 
-        _box(cab_x0, cab_x1, cab_y0, cab_y1, cab_z0, cab_z1)
+        # Cab in 2 vertical zones; cargo body
+        _box(cab_x0, cab_x1, cab_y0, cab_y0 + 0.80, cab_z0, cab_z1)
+        _box(cab_x0, cab_x1, cab_y0 + 0.80, cab_y1, cab_z0, cab_z1)
         _box(cargo_x0, cargo_x1, cargo_y0, cargo_y1, cargo_z0, cargo_z1)
 
         if lod == 0:
-            # Cab front grille — thin slab on cab face
-            _box(cab_x1, cab_x1 + 0.06,
-                 cab_y0, cab_y0 + 0.65,
-                 cab_z0 + 0.20, cab_z1 - 0.20)
+            wheel_r = 0.42; wheel_w = 0.24; wheel_y = wheel_r
 
-            # Exhaust stack stub — top of cab, right side, forward half
-            stack_x = cab_x1 - 0.45
-            _box(stack_x - 0.08, stack_x + 0.08,
-                 cab_y1, cab_y1 + 0.65,
-                 cab_z1 - 0.22, cab_z1 - 0.06)
+            # ---- 10 wheels: 1 front axle (2 wheels) + 2 rear axles (4 wheels each side) ----
+            # front axle
+            for wz_c in [cab_z0 - wheel_w * 0.3, cab_z1 + wheel_w * 0.3]:
+                _full_wheel(cab_x1 - 0.60, wheel_y, wz_c, wheel_r, wheel_w, 16, 8)
+                _wheel_arch(cab_x1 - 0.60, wheel_y - wheel_r * 0.10, wz_c, wheel_r, wheel_w)
+            # rear axle 1 — outer + inner dual wheels each side
+            outer_sep = wheel_w * 0.30; inner_sep = wheel_w * 1.10
+            for ra_wx in [cargo_x0 + 0.80, cargo_x0 + 1.60]:
+                for side_mult, side_z_base in [(-1, cab_z0), (1, cab_z1)]:
+                    wz_outer = side_z_base + side_mult * outer_sep
+                    wz_inner = side_z_base + side_mult * inner_sep
+                    _full_wheel(ra_wx, wheel_y, wz_outer, wheel_r, wheel_w, 16, 8)
+                    _full_wheel(ra_wx, wheel_y, wz_inner, wheel_r, wheel_w, 16, 8)
+                    _wheel_arch(ra_wx, wheel_y - wheel_r * 0.10, wz_outer, wheel_r, wheel_w)
 
-            # Cargo box rear door inset — recessed panel on rear face
-            door_inset = 0.05
-            _box(cargo_x0 - door_inset, cargo_x0,
+            # ---- Cab front detail ----
+            # Windscreen (inset panel)
+            _box(cab_x1 - 0.04, cab_x1 + 0.02,
+                 cab_y0 + 0.80, cab_y1 - 0.30,
+                 cab_z0 + 0.12, cab_z1 - 0.12)
+            # Headlight units (2 large)
+            for hz in [cab_z0 + 0.10, cab_z1 - 0.38]:
+                _box(cab_x1 - 0.04, cab_x1 + 0.06,
+                     cab_y0 + 0.32, cab_y0 + 0.72,
+                     hz, hz + 0.26)
+            # Grille horizontal bars (6)
+            for gi in range(6):
+                gy = cab_y0 + 0.05 + gi * 0.12
+                _box(cab_x1, cab_x1 + 0.06,
+                     gy, gy + 0.06,
+                     cab_z0 + 0.15, cab_z1 - 0.15)
+            # Front bumper (3 sections)
+            bmp_y0 = cab_y0 - 0.06; bmp_y1 = cab_y0 + 0.28
+            for bz0, bz1 in [(cab_z0 - 0.04, cab_z0 + 0.36),
+                              (cab_z0 + 0.36, cab_z1 - 0.36),
+                              (cab_z1 - 0.36, cab_z1 + 0.04)]:
+                _box(cab_x1 - 0.04, cab_x1 + 0.10, bmp_y0, bmp_y1, bz0, bz1)
+            # Cab sun visor (strip above windscreen)
+            _box(cab_x1 - 0.02, cab_x1 + 0.04,
+                 cab_y1 - 0.35, cab_y1 - 0.28,
+                 cab_z0 + 0.08, cab_z1 - 0.08)
+            # Roof air deflector / spoiler
+            _box(cab_x1 - 0.45, cab_x1 - 0.05,
+                 cab_y1, cab_y1 + 0.28,
+                 cab_z0 + 0.08, cab_z1 - 0.08)
+
+            # ---- Cab door windows (2 per side) ----
+            win_t = 0.020
+            dw_y0 = cab_y0 + 0.90; dw_h = 0.70
+            # front door window
+            fdw_x0 = cab_x1 - 0.85; fdw_x1 = cab_x1 - 0.05
+            for wz_face, wz_in in [(cab_z0, cab_z0 - win_t),
+                                    (cab_z1, cab_z1 + win_t)]:
+                _box(fdw_x0, fdw_x1, dw_y0, dw_y0 + dw_h, wz_in, wz_face)
+            # rear cab window
+            rcw_x0 = cab_x0 + 0.05; rcw_x1 = cab_x0 + 0.45
+            for wz_face, wz_in in [(cab_z0, cab_z0 - win_t),
+                                    (cab_z1, cab_z1 + win_t)]:
+                _box(rcw_x0, rcw_x1, dw_y0, dw_y0 + dw_h * 0.6, wz_in, wz_face)
+
+            # ---- Cab door panels (upper/lower division) ----
+            dp_d = 0.018
+            for dz_out, dz_in in [(cab_z0 - dp_d, cab_z0),
+                                   (cab_z1, cab_z1 + dp_d)]:
+                _box(cab_x0 + 0.05, cab_x1 - 0.05, cab_y0 + 0.32, dw_y0, dz_out, dz_in)
+            # Door handles
+            dh_d = 0.025; dh_w = 0.16; dh_h = 0.04; dh_y = cab_y0 + 0.72
+            dh_x_c = (cab_x0 + cab_x1) * 0.5
+            for dz_out, dz_in in [(cab_z0 - dh_d, cab_z0),
+                                   (cab_z1, cab_z1 + dh_d)]:
+                _box(dh_x_c - dh_w * 0.5, dh_x_c + dh_w * 0.5,
+                     dh_y, dh_y + dh_h, dz_out, dz_in)
+
+            # ---- Exhaust stack (8-sided tube approximation) ----
+            stack_x = cab_x1 - 0.45; stack_r = 0.06; stack_segs = 8
+            stack_z_c = cab_z1 - 0.14
+            for si in range(stack_segs):
+                a0 = 2 * math.pi * si / stack_segs
+                a1 = 2 * math.pi * (si + 1) / stack_segs
+                p0z = stack_z_c + stack_r * math.sin(a0)
+                p0x_off = stack_r * math.cos(a0)
+                p1z = stack_z_c + stack_r * math.sin(a1)
+                p1x_off = stack_r * math.cos(a1)
+                sy_bot = cab_y1; sy_top = cab_y1 + 0.65
+                u0, vv0 = atlas_uv(row, col, si / stack_segs, 0.0)
+                u1, vv1 = atlas_uv(row, col, (si + 1) / stack_segs, 0.0)
+                u0t, vv0t = atlas_uv(row, col, si / stack_segs, 1.0)
+                u1t, vv1t = atlas_uv(row, col, (si + 1) / stack_segs, 1.0)
+                nx0 = math.sin(a0); nz0 = math.cos(a0)
+                base = len(all_verts)
+                all_verts.append(Vertex(stack_x + p0x_off, sy_bot, p0z, nx0, 0, nz0, u0,  vv0))
+                all_verts.append(Vertex(stack_x + p1x_off, sy_bot, p1z, nx0, 0, nz0, u1,  vv1))
+                all_verts.append(Vertex(stack_x + p1x_off, sy_top, p1z, nx0, 0, nz0, u1t, vv1t))
+                all_verts.append(Vertex(stack_x + p0x_off, sy_top, p0z, nx0, 0, nz0, u0t, vv0t))
+                all_tris.append((base, base + 1, base + 2))
+                all_tris.append((base, base + 2, base + 3))
+
+            # ---- Cargo box side panel ribs (5 vertical ribs each side) ----
+            rib_d = 0.022; rib_w = 0.06
+            for ri in range(5):
+                rx = cargo_x0 + 0.80 + ri * (cargo_x1 - cargo_x0 - 1.0) / 4.0
+                _box(rx - rib_w * 0.5, rx + rib_w * 0.5,
+                     cargo_y0 + 0.05, cargo_y1 - 0.05,
+                     cargo_z0 - rib_d, cargo_z0)
+                _box(rx - rib_w * 0.5, rx + rib_w * 0.5,
+                     cargo_y0 + 0.05, cargo_y1 - 0.05,
+                     cargo_z1, cargo_z1 + rib_d)
+
+            # ---- Cargo rear door (2 door halves + hinges) ----
+            rd_t = 0.05
+            _box(cargo_x0 - rd_t, cargo_x0,
                  cargo_y0 + 0.10, cargo_y1 - 0.10,
-                 cargo_z0 + 0.15, cargo_z1 - 0.15)
+                 cargo_z0 + 0.15, cargo_z0 + (cargo_z1 - cargo_z0) * 0.5)
+            _box(cargo_x0 - rd_t, cargo_x0,
+                 cargo_y0 + 0.10, cargo_y1 - 0.10,
+                 cargo_z0 + (cargo_z1 - cargo_z0) * 0.5, cargo_z1 - 0.15)
+            # Hinge strips
+            for hi in range(3):
+                hy = cargo_y0 + 0.25 + hi * (cargo_y1 - cargo_y0 - 0.35) * 0.5
+                _box(cargo_x0 - rd_t - 0.04, cargo_x0 + 0.01,
+                     hy, hy + 0.08,
+                     cargo_z0 + (cargo_z1 - cargo_z0) * 0.5 - 0.025,
+                     cargo_z0 + (cargo_z1 - cargo_z0) * 0.5 + 0.025)
+            # Dock bumpers (3 rubber stops)
+            for di in range(3):
+                dz = cargo_z0 + 0.25 + di * (cargo_z1 - cargo_z0 - 0.50) * 0.5
+                _box(cargo_x0 - 0.08, cargo_x0 - 0.01,
+                     cargo_y0 + 0.05, cargo_y0 + 0.22,
+                     dz, dz + 0.10)
 
-            # Side step under cab — running board
+            # ---- Cab back wall (visible in gap) ----
+            _box(cab_x0 - 0.04, cab_x0 + 0.02,
+                 cab_y0, cab_y1,
+                 cab_z0 + 0.05, cab_z1 - 0.05)
+
+            # ---- Chassis frame rails + cross-members ----
+            rail_y0 = 0.05; rail_y1 = 0.22; rail_d = 0.12
+            _box(cargo_x0, cab_x1,
+                 rail_y0, rail_y1,
+                 cab_z0 + 0.15, cab_z0 + 0.15 + rail_d)
+            _box(cargo_x0, cab_x1,
+                 rail_y0, rail_y1,
+                 cab_z1 - 0.15 - rail_d, cab_z1 - 0.15)
+            # Cross-members
+            for cmi in range(4):
+                cmx = cargo_x0 + 0.60 + cmi * (cab_x1 - cargo_x0 - 0.80) / 3.0
+                _box(cmx - 0.06, cmx + 0.06,
+                     rail_y0, rail_y1,
+                     cab_z0 + 0.15, cab_z1 - 0.15)
+            # Fuel tank box
+            _box(cargo_x0 + 0.20, cargo_x0 + 0.90,
+                 0.10, 0.48,
+                 cab_z0 - 0.04, cab_z0 + 0.14)
+            # Battery box
+            _box(cargo_x0 + 1.00, cargo_x0 + 1.50,
+                 0.10, 0.35,
+                 cab_z0 - 0.03, cab_z0 + 0.12)
+
+            # ---- Side running boards (both sides) ----
             step_y = cab_y0 - 0.20
             _box(cab_x0 + 0.40, cab_x1 - 0.20,
                  step_y, step_y + 0.12,
@@ -2429,13 +3566,380 @@ def build_vehicle(vtype: str, lod: int) -> bytes:
                  step_y, step_y + 0.12,
                  cab_z1, cab_z1 + 0.12)
 
-            # Wheels — large truck wheels (3 axles: front, rear-forward, rear-back)
-            wheel_r = 0.42; wheel_w = 0.24
-            wheel_y = wheel_r
+            # ---- Cab corner radius approximation strips ----
+            cr_d = 0.025; cr_h_bot = cab_y0 + 0.18; cr_h_top = cab_y1 - 0.20
+            for cz_pair in [(cab_z0 - cr_d, cab_z0), (cab_z1, cab_z1 + cr_d)]:
+                _box(cab_x1 - 0.18, cab_x1 + 0.02, cr_h_bot, cr_h_top, *cz_pair)
+                _box(cab_x0 - 0.02, cab_x0 + 0.18, cr_h_bot, cr_h_top, *cz_pair)
+
+            # ---- Cab A-pillar strips ----
+            ap_d = 0.018
+            for cz_pair in [(cab_z0 - ap_d, cab_z0), (cab_z1, cab_z1 + ap_d)]:
+                _box(cab_x1 - 0.55, cab_x1 - 0.40, cab_y0 + 0.80, cab_y1 - 0.10,
+                     *cz_pair)
+
+            # ---- Cab roof corner braces ----
+            _box(cab_x1 - 0.52, cab_x1 - 0.05,
+                 cab_y1 - 0.10, cab_y1 + 0.02,
+                 cab_z0 + 0.06, cab_z0 + 0.16)
+            _box(cab_x1 - 0.52, cab_x1 - 0.05,
+                 cab_y1 - 0.10, cab_y1 + 0.02,
+                 cab_z1 - 0.16, cab_z1 - 0.06)
+
+            # ---- Taillights (2 each side of cargo rear) ----
+            tl_w = 0.20; tl_h = 0.28; tl_d = 0.025
+            tl_y = cargo_y0 + 0.16
+            for tz in [cargo_z0 - tl_d, cargo_z1 - 0.02]:
+                _box(cargo_x0 - tl_d, cargo_x0 + 0.02,
+                     tl_y, tl_y + tl_h,
+                     tz, tz + tl_w)
+
+            # ---- Cargo roof rain gutter strips ----
+            _box(cargo_x0, cargo_x1,
+                 cargo_y1 - 0.04, cargo_y1 + 0.02,
+                 cargo_z0 - 0.02, cargo_z0 + 0.04)
+            _box(cargo_x0, cargo_x1,
+                 cargo_y1 - 0.04, cargo_y1 + 0.02,
+                 cargo_z1 - 0.04, cargo_z1 + 0.02)
+
+            # ---- Cargo lower trim strip (skirt) ----
+            _box(cargo_x0 + 0.10, cargo_x1 - 0.10,
+                 cargo_y0 - 0.04, cargo_y0 + 0.08,
+                 cargo_z0 - 0.025, cargo_z0)
+            _box(cargo_x0 + 0.10, cargo_x1 - 0.10,
+                 cargo_y0 - 0.04, cargo_y0 + 0.08,
+                 cargo_z1, cargo_z1 + 0.025)
+
+            # ---- Cab headlight surrounds (bezels) ----
+            for hz in [cab_z0 + 0.08, cab_z1 - 0.40]:
+                _box(cab_x1 - 0.025, cab_x1 + 0.06,
+                     cab_y0 + 0.28, cab_y0 + 0.76,
+                     hz - 0.02, hz + 0.30)
+
+            # ---- Cab grille surround frame ----
+            _box(cab_x1 - 0.02, cab_x1 + 0.08,
+                 cab_y0 + 0.02, cab_y0 + 0.80,
+                 cab_z0 + 0.12, cab_z0 + 0.16)
+            _box(cab_x1 - 0.02, cab_x1 + 0.08,
+                 cab_y0 + 0.02, cab_y0 + 0.80,
+                 cab_z1 - 0.16, cab_z1 - 0.12)
+
+            # ---- Cab fog lights ----
+            for fz in [cab_z0 + 0.06, cab_z1 - 0.22]:
+                _box(cab_x1 - 0.03, cab_x1 + 0.05,
+                     cab_y0 + 0.05, cab_y0 + 0.22,
+                     fz, fz + 0.14)
+
+            # ---- Undercarriage additional geometry ----
+            # Transmission hump
+            _box(cab_x0 + 0.20, cab_x1 - 0.30,
+                 0.22, 0.42,
+                 -0.18, 0.18)
+            # Spare wheel carrier (under cargo rear)
+            _box(cargo_x0 + 0.10, cargo_x0 + 0.65,
+                 0.06, 0.48,
+                 -0.30, 0.30)
+
+            # ---- Cargo box corner angle-irons (4 vertical corners) ----
+            ai_d = 0.05
+            for cz_pair in [(cargo_z0 - ai_d, cargo_z0 + ai_d),
+                             (cargo_z1 - ai_d, cargo_z1 + ai_d)]:
+                _box(cargo_x0 - ai_d, cargo_x0 + ai_d,
+                     cargo_y0, cargo_y1,
+                     *cz_pair)
+                _box(cargo_x1 - ai_d, cargo_x1 + ai_d,
+                     cargo_y0, cargo_y1,
+                     *cz_pair)
+
+            # ---- Cargo top horizontal reinforcement bars (3 bars) ----
+            for bi in range(3):
+                bx = cargo_x0 + 0.80 + bi * (cargo_x1 - cargo_x0 - 1.0) / 2.0
+                _box(bx - 0.06, bx + 0.06,
+                     cargo_y1 - 0.08, cargo_y1 + 0.02,
+                     cargo_z0, cargo_z1)
+
+            # ---- Air intake scoop on cab roof ----
+            _box(cab_x0 + 0.20, cab_x0 + 0.55,
+                 cab_y1 - 0.05, cab_y1 + 0.14,
+                 cab_z0 + 0.20, cab_z1 - 0.20)
+
+            # ---- Rear view mirrors (cab, left + right) ----
+            # Arm
+            _box(cab_x1 - 0.20, cab_x1 + 0.04,
+                 cab_y1 - 0.50, cab_y1 - 0.44,
+                 cab_z0 - 0.18, cab_z0 - 0.06)
+            _box(cab_x1 - 0.20, cab_x1 + 0.04,
+                 cab_y1 - 0.50, cab_y1 - 0.44,
+                 cab_z1 + 0.06, cab_z1 + 0.18)
+            # Head
+            _box(cab_x1 - 0.05, cab_x1 + 0.04,
+                 cab_y1 - 0.65, cab_y1 - 0.35,
+                 cab_z0 - 0.32, cab_z0 - 0.14)
+            _box(cab_x1 - 0.05, cab_x1 + 0.04,
+                 cab_y1 - 0.65, cab_y1 - 0.35,
+                 cab_z1 + 0.14, cab_z1 + 0.32)
+
+            # ---- Number plate panels ----
+            _box(cab_x1 - 0.02, cab_x1 + 0.04,
+                 cab_y0 + 0.30, cab_y0 + 0.56,
+                 -0.22, 0.22)
+            _box(cargo_x0 - 0.03, cargo_x0 + 0.02,
+                 cargo_y0 + 0.12, cargo_y0 + 0.36,
+                 -0.20, 0.20)
+
+            # ---- Additional cargo side panel detail ----
+            # Horizontal reinforcement rails (2 per side at mid and low)
+            for ry_frac in [0.35, 0.65]:
+                ry = cargo_y0 + (cargo_y1 - cargo_y0) * ry_frac
+                rr_d = 0.022; rr_h = 0.06
+                _box(cargo_x0 + 0.10, cargo_x1 - 0.10,
+                     ry, ry + rr_h,
+                     cargo_z0 - rr_d, cargo_z0)
+                _box(cargo_x0 + 0.10, cargo_x1 - 0.10,
+                     ry, ry + rr_h,
+                     cargo_z1, cargo_z1 + rr_d)
+
+            # ---- Cab interior visible geometry (dash/steering area) ----
+            _box(cab_x1 - 0.40, cab_x1 - 0.10,
+                 cab_y0 + 0.82, cab_y0 + 1.00,
+                 cab_z0 + 0.18, cab_z1 - 0.18)
+
+            # ---- Cab lower sill panels ----
+            sl_d = 0.025; sl_h = 0.14
+            for cz_pair in [(cab_z0 - sl_d, cab_z0), (cab_z1, cab_z1 + sl_d)]:
+                _box(cab_x0 + 0.10, cab_x1 - 0.10, cab_y0, cab_y0 + sl_h, *cz_pair)
+
+            # ---- Cab windscreen lower sill strip ----
+            _box(cab_x1 - 0.55, cab_x1 - 0.04,
+                 cab_y0 + 0.78, cab_y0 + 0.86,
+                 cab_z0 + 0.10, cab_z1 - 0.10)
+
+            # ---- Cargo floor underside panels (2 strips) ----
+            _box(cargo_x0 + 0.20, cargo_x1 - 0.20,
+                 cargo_y0 - 0.02, cargo_y0 + 0.06,
+                 cargo_z0 + 0.18, cargo_z0 + 0.40)
+            _box(cargo_x0 + 0.20, cargo_x1 - 0.20,
+                 cargo_y0 - 0.02, cargo_y0 + 0.06,
+                 cargo_z1 - 0.40, cargo_z1 - 0.18)
+
+            # ---- Rear dock leveller recess ----
+            _box(cargo_x0 - 0.04, cargo_x0 + 0.02,
+                 cargo_y0 - 0.04, cargo_y0 + 0.18,
+                 -0.40, 0.40)
+
+            # ---- Cab B-pillar strips ----
+            bp_d = 0.018
+            bp_x = (cab_x0 + cab_x1) * 0.5 + 0.10
+            for cz_pair in [(cab_z0 - bp_d, cab_z0), (cab_z1, cab_z1 + bp_d)]:
+                _box(bp_x - 0.05, bp_x + 0.05,
+                     cab_y0 + 0.80, cab_y1,
+                     *cz_pair)
+
+            # ---- Cab back wall window (rear cab glazing) ----
+            bw_t = 0.018
+            _box(cab_x0 - bw_t, cab_x0 + bw_t,
+                 cab_y0 + 0.85, cab_y1 - 0.20,
+                 cab_z0 + 0.24, cab_z1 - 0.24)
+
+            # ---- Cargo top corner angle-irons ----
+            ai2_d = 0.045
+            for cz_pair in [(cargo_z0, cargo_z0 + ai2_d),
+                             (cargo_z1 - ai2_d, cargo_z1)]:
+                _box(cargo_x0, cargo_x0 + ai2_d, cargo_y1 - ai2_d, cargo_y1, *cz_pair)
+                _box(cargo_x1 - ai2_d, cargo_x1, cargo_y1 - ai2_d, cargo_y1, *cz_pair)
+
+            # ---- Exhaust pipe heat shield ----
+            stack_x = cab_x1 - 0.45
+            _box(stack_x - 0.14, stack_x + 0.14,
+                 cab_y1 + 0.06, cab_y1 + 0.58,
+                 cab_z1 - 0.26, cab_z1 - 0.04)
+
+            # ---- Air filter housing (right side of engine bay) ----
+            _box(cab_x1 - 0.35, cab_x1 - 0.10,
+                 cab_y0 + 0.20, cab_y0 + 0.60,
+                 cab_z0 - 0.04, cab_z0 + 0.14)
+
+            # ---- Door belt-line chrome strip (each cab door side) ----
+            bc_h = 0.025; bc_d = 0.010
+            bc_y = cab_y0 + 1.10
+            for cz_pair in [(cab_z0 - bc_d, cab_z0), (cab_z1, cab_z1 + bc_d)]:
+                _box(cab_x0 + 0.10, cab_x1 - 0.10, bc_y, bc_y + bc_h, *cz_pair)
+
+            # ---- Cab windscreen seal strips ----
+            ws_d = 0.014
+            _box(cab_x1 - ws_d, cab_x1 + ws_d,
+                 cab_y0 + 0.78, cab_y1 - 0.30,
+                 cab_z0 + 0.08, cab_z1 - 0.08)
+
+            # ---- Cab interior rear wall visible panel ----
+            _box(cab_x0 + 0.02, cab_x0 + 0.08,
+                 cab_y0 + 0.32, cab_y1 - 0.10,
+                 cab_z0 + 0.08, cab_z1 - 0.08)
+
+            # ---- Cargo side reinforcement ribs additional set (5 more each side) ----
+            for ri in range(5):
+                rx2 = cargo_x0 + 0.45 + ri * (cargo_x1 - cargo_x0 - 0.60) / 4.0
+                rib_d2 = 0.022; rib_w2 = 0.05
+                _box(rx2 - rib_w2, rx2 + rib_w2,
+                     cargo_y0 + 0.05, cargo_y1 - 0.05,
+                     cargo_z0 - rib_d2, cargo_z0)
+                _box(rx2 - rib_w2, rx2 + rib_w2,
+                     cargo_y0 + 0.05, cargo_y1 - 0.05,
+                     cargo_z1, cargo_z1 + rib_d2)
+
+            # ---- Cab roof deflector fins (3 vertical fins) ----
+            fin_x0 = cab_x1 - 0.45; fin_x1 = cab_x1 - 0.05
+            for fi in range(3):
+                fz = cab_z0 + 0.16 + fi * (cab_z1 - cab_z0 - 0.32) * 0.5
+                _box(fin_x0, fin_x1, cab_y1 + 0.04, cab_y1 + 0.28, fz, fz + 0.05)
+
+            # ---- Cab undercarriage protection plate ----
+            _box(cab_x0 + 0.10, cab_x1 - 0.10,
+                 cab_y0 - 0.04, cab_y0 + 0.08,
+                 cab_z0 + 0.10, cab_z1 - 0.10)
+
+            # ---- Cargo box top ventilation slits (4 vent strips) ----
+            for vi in range(4):
+                vx = cargo_x0 + 0.50 + vi * (cargo_x1 - cargo_x0 - 0.60) / 3.0
+                _box(vx, vx + 0.30,
+                     cargo_y1 - 0.022, cargo_y1 + 0.008,
+                     cargo_z0 + 0.18, cargo_z1 - 0.18)
+
+            # ---- Rear cargo lighting bar ----
+            _box(cargo_x0 - 0.03, cargo_x0 + 0.02,
+                 cargo_y1 - 0.14, cargo_y1 - 0.06,
+                 cargo_z0 + 0.12, cargo_z1 - 0.12)
+
+            # ---- Front tow hook assembly ----
+            _box(cab_x1 - 0.04, cab_x1 + 0.06,
+                 cab_y0 + 0.06, cab_y0 + 0.22,
+                 -0.18, 0.18)
+
+            # ---- Fifth wheel kingpin plate ----
+            _box(cab_x0 - 0.10, cab_x0 + 0.10,
+                 cab_y0 + 0.02, cab_y0 + 0.12,
+                 -0.35, 0.35)
+
+            # ---- Suspension linkage boxes (per rear axle) ----
+            for ax_wx in [cargo_x0 + 0.80, cargo_x0 + 1.60]:
+                _box(ax_wx - 0.20, ax_wx + 0.20,
+                     wheel_r * 0.85, wheel_r * 1.10,
+                     cab_z0 + 0.14, cab_z1 - 0.14)
+
+            # ---- Exhaust aftertreatment box (DPF canister on frame) ----
+            _box(cargo_x0 + 0.95, cargo_x0 + 1.60,
+                 0.18, 0.40,
+                 cab_z0 - 0.04, cab_z0 + 0.16)
+
+            # ---- Cab roof inner headliner strip ----
+            _box(cab_x1 - 0.50, cab_x0 + 0.10,
+                 cab_y1 - 0.10, cab_y1 - 0.02,
+                 cab_z0 + 0.10, cab_z1 - 0.10)
+
+            # ---- Additional cargo corner angle bars (bottom) ----
+            ai3_d = 0.04
+            for cz_pair in [(cargo_z0, cargo_z0 + ai3_d),
+                             (cargo_z1 - ai3_d, cargo_z1)]:
+                _box(cargo_x0 - ai3_d, cargo_x0 + ai3_d, cargo_y0, cargo_y0 + ai3_d, *cz_pair)
+                _box(cargo_x1 - ai3_d, cargo_x1 + ai3_d, cargo_y0, cargo_y0 + ai3_d, *cz_pair)
+
+            # ---- Rear under-run protection bar ----
+            _box(cargo_x0 - 0.06, cargo_x0 + 0.02,
+                 cargo_y0 - 0.08, cargo_y0 + 0.04,
+                 cargo_z0 + 0.06, cargo_z1 - 0.06)
+
+            # ---- Cargo door lock mechanism strip ----
+            _box(cargo_x0 - 0.04, cargo_x0 + 0.02,
+                 cargo_y0 + 0.82, cargo_y0 + 0.96,
+                 -0.04, 0.04)
+
+            # ---- Cab front lower air dam ----
+            for adz0, adz1 in [(cab_z0 + 0.16, cab_z0 + 0.40),
+                                (cab_z0 + 0.44, cab_z0 + 0.68),
+                                (cab_z0 + 0.72, cab_z1 - 0.16)]:
+                _box(cab_x1 - 0.02, cab_x1 + 0.06,
+                     cab_y0, cab_y0 + 0.12,
+                     adz0, adz1)
+
+            # ---- Cargo body additional top rail ----
+            _box(cargo_x0 + 0.10, cargo_x1 - 0.10,
+                 cargo_y1 - 0.06, cargo_y1 + 0.04,
+                 cargo_z0 + 0.06, cargo_z0 + 0.14)
+            _box(cargo_x0 + 0.10, cargo_x1 - 0.10,
+                 cargo_y1 - 0.06, cargo_y1 + 0.04,
+                 cargo_z1 - 0.14, cargo_z1 - 0.06)
+
+            # ---- Wheel mud flaps (one per rear axle pair, each side) ----
+            mf_t = 0.012; mf_h = 0.35; mf_w = 0.40
+            for mf_wx in [cargo_x0 + 0.50, cargo_x0 + 1.35]:
+                for cz_pair in [(cab_z0 - mf_t * 2, cab_z0 - mf_t),
+                                 (cab_z1 + mf_t, cab_z1 + mf_t * 2)]:
+                    _box(mf_wx - mf_w * 0.5, mf_wx + mf_w * 0.5,
+                         cab_y0 - mf_h, cab_y0,
+                         *cz_pair)
+
+            # ---- Additional cross-members (4 more) ----
+            for cmi2 in range(4):
+                cmx2 = cargo_x0 + 0.20 + cmi2 * (cab_x1 - cargo_x0 - 0.30) / 3.0
+                _box(cmx2 - 0.04, cmx2 + 0.04,
+                     0.04, 0.18,
+                     cab_z0 + 0.16, cab_z1 - 0.16)
+
+        else:  # lod == 1
+            wheel_r = 0.42; wheel_w = 0.24; wheel_y = wheel_r
             for wx in [cab_x1 - 0.60, cargo_x0 + 0.80, cargo_x0 + 1.60]:
-                for wz_c in [cab_z0 - wheel_w*0.3, cab_z1 + wheel_w*0.3]:
-                    _wheel_disks(wx, wheel_y, wz_c, wheel_r, wheel_w)
-                    _wheel_arch(wx, wheel_y - wheel_r * 0.1, wz_c, wheel_r, wheel_w)
+                for wz_c in [cab_z0 - wheel_w * 0.3, cab_z1 + wheel_w * 0.3]:
+                    _disk_n(wx, wheel_y, wz_c, wheel_r, wheel_w, 8)
+                    _wheel_arch(wx, wheel_y - wheel_r * 0.10, wz_c, wheel_r, wheel_w)
+            # Cab detail
+            _box(cab_x1, cab_x1 + 0.06, cab_y0, cab_y0 + 0.65,
+                 cab_z0 + 0.20, cab_z1 - 0.20)
+            _box(cab_x1 - 0.08, cab_x1 + 0.08, cab_y1, cab_y1 + 0.65,
+                 cab_z1 - 0.22, cab_z1 - 0.06)
+            # Cargo rear door
+            _box(cargo_x0 - 0.05, cargo_x0,
+                 cargo_y0 + 0.10, cargo_y1 - 0.10,
+                 cargo_z0 + 0.15, cargo_z1 - 0.15)
+            # Running boards
+            step_y = cab_y0 - 0.20
+            _box(cab_x0 + 0.40, cab_x1 - 0.20, step_y, step_y + 0.12,
+                 cab_z0 - 0.12, cab_z0)
+            _box(cab_x0 + 0.40, cab_x1 - 0.20, step_y, step_y + 0.12,
+                 cab_z1, cab_z1 + 0.12)
+            # Windscreen panel
+            _box(cab_x1 - 0.04, cab_x1 + 0.02,
+                 cab_y0 + 0.80, cab_y1 - 0.30,
+                 cab_z0 + 0.12, cab_z1 - 0.12)
+            # Headlights
+            for hz in [cab_z0 + 0.10, cab_z1 - 0.38]:
+                _box(cab_x1 - 0.04, cab_x1 + 0.06,
+                     cab_y0 + 0.32, cab_y0 + 0.72,
+                     hz, hz + 0.26)
+            # Door window bands
+            win_t = 0.018
+            dw_y0 = cab_y0 + 0.90; dw_h = 0.70
+            for wz_face, wz_in in [(cab_z0, cab_z0 - win_t),
+                                    (cab_z1, cab_z1 + win_t)]:
+                _box(cab_x0 + 0.10, cab_x1 - 0.10, dw_y0, dw_y0 + dw_h,
+                     wz_in, wz_face)
+            # Cargo ribs (simplified — 3 ribs)
+            rib_d = 0.020
+            for ri in range(3):
+                rx = cargo_x0 + 1.0 + ri * (cargo_x1 - cargo_x0 - 1.5) / 2.0
+                _box(rx - 0.04, rx + 0.04,
+                     cargo_y0 + 0.05, cargo_y1 - 0.05,
+                     cargo_z0 - rib_d, cargo_z0)
+                _box(rx - 0.04, rx + 0.04,
+                     cargo_y0 + 0.05, cargo_y1 - 0.05,
+                     cargo_z1, cargo_z1 + rib_d)
+            # Chassis rails
+            _box(cargo_x0, cab_x1, 0.05, 0.18, cab_z0 + 0.18, cab_z0 + 0.30)
+            _box(cargo_x0, cab_x1, 0.05, 0.18, cab_z1 - 0.30, cab_z1 - 0.18)
+            # Bumpers
+            _box(cab_x1 - 0.04, cab_x1 + 0.08, cab_y0 - 0.06, cab_y0 + 0.24,
+                 cab_z0 + 0.05, cab_z1 - 0.05)
+            _box(cargo_x0 - 0.06, cargo_x0 + 0.02, cargo_y0 - 0.05, cargo_y0 + 0.22,
+                 cargo_z0 + 0.08, cargo_z1 - 0.08)
 
     tex_name = "vehicles_diffuse_atlas_d.dds"
     return build_b3d(all_verts, all_tris, texture_name=tex_name)
