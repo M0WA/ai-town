@@ -1259,6 +1259,24 @@ jobs:
           grep -q "check_24_clouds_png" tools/validate_assets.py || (echo "FAIL: check_24_clouds_png not found in validate_assets.py — Phase 10b cloud texture format gate missing" && exit 1)
           echo "PASS: check_24 present"
 
+      - name: Verify check_25 present
+        run: grep -q "check_25" tools/validate_assets.py || exit 1
+
+      - name: Verify check_26 present
+        run: grep -q "check_26" tools/validate_assets.py || exit 1
+
+      - name: Verify check_27 present
+        run: grep -q "check_27" tools/validate_assets.py || exit 1
+
+      - name: Verify check_28 present
+        run: grep -q "check_28" tools/validate_assets.py || exit 1
+
+      - name: Verify check_29 present
+        run: grep -q "check_29" tools/validate_assets.py || exit 1
+
+      - name: Verify check_30 present
+        run: grep -q "check_30" tools/validate_assets.py || exit 1
+
       - name: Verify hud_sprites_ui.dds not git-tracked
         # The DDS intermediate is an authoring artifact and must never be committed.
         # .gitignore has the entry; git rm --cached was run in Phase 10.

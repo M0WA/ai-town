@@ -1877,6 +1877,581 @@ def check_24_clouds_png(assets_dir):
     return errors
 
 
+# ---------------------------------------------------------------------------
+# Check #25 — vehicles_diffuse_atlas_d.dds DDS format
+#
+# Spec (phase-11d.md §2b):
+#   vehicles_diffuse_atlas_d.dds must be:
+#     - DDS magic at offset 0
+#     - DX10 extended header present (FourCC 'DX10' at offset 84)
+#     - DXGI_FORMAT at offset 128 = 72 (DXGI_FORMAT_BC1_UNORM_SRGB)
+#     - Width = 2048, Height = 2048
+#     - dwMipMapCount >= 4
+#
+# The existing Phase 9 stub uses a plain DXT1 FourCC (no DX10 header) so this
+# check will FAIL until the artist delivers the sRGB-tagged DDS from the
+# Phase 11d texture rework pipeline.  That is the expected and correct
+# behaviour — the check infrastructure is in place; the asset will follow.
+# ---------------------------------------------------------------------------
+_VEHICLES_DIFFUSE_ATLAS_PATH = os.path.join(
+    "assets", "textures", "vehicles", "vehicles_diffuse_atlas_d.dds"
+)
+_DXGI_FORMAT_BC1_UNORM_SRGB = 72
+
+
+def check_25_vehicles_diffuse_atlas_dds(assets_dir):
+    """Check #25: vehicles_diffuse_atlas_d.dds — BC1_UNORM_SRGB, DX10, 2048×2048, ≥4 mip.
+
+    Returns a list of error strings. Empty list means the check passed.
+    Returns a single-element list with a FAIL message if the file is not found.
+    """
+    repo_root = os.path.dirname(assets_dir)
+    path = os.path.join(repo_root, _VEHICLES_DIFFUSE_ATLAS_PATH)
+
+    if not os.path.isfile(path):
+        return [f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} not found"]
+
+    errors = []
+    try:
+        with open(path, "rb") as f:
+            data = f.read(132)
+    except OSError as exc:
+        return [f"check_25 FAIL: cannot read {_VEHICLES_DIFFUSE_ATLAS_PATH}: {exc}"]
+
+    if len(data) < 132:
+        return [f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} is too small to parse DDS header"]
+
+    if data[0:4] != b"DDS ":
+        errors.append(
+            f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} missing DDS magic "
+            f"(got {data[0:4]!r})"
+        )
+        return errors
+
+    height = struct.unpack_from("<I", data, 12)[0]
+    width  = struct.unpack_from("<I", data, 16)[0]
+    mip    = struct.unpack_from("<I", data, 28)[0]
+    fourcc = data[84:88]
+
+    if fourcc != b"DX10":
+        errors.append(
+            f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} missing DX10 extended header "
+            f"(FourCC at offset 84 = {fourcc!r}; expected b'DX10'). "
+            f"Re-export using Compressonator or nvcompress -color to produce BC1_UNORM_SRGB."
+        )
+        return errors
+
+    dxgi = struct.unpack_from("<I", data, 128)[0]
+    if dxgi != _DXGI_FORMAT_BC1_UNORM_SRGB:
+        errors.append(
+            f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} DXGI_FORMAT={dxgi} "
+            f"(expected {_DXGI_FORMAT_BC1_UNORM_SRGB} = BC1_UNORM_SRGB). "
+            f"Re-export as BC1_UNORM_SRGB for correct sRGB diffuse upload."
+        )
+
+    if width != 2048 or height != 2048:
+        errors.append(
+            f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} dimensions {width}×{height} "
+            f"(expected 2048×2048)."
+        )
+
+    if mip < 4:
+        errors.append(
+            f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} dwMipMapCount={mip} "
+            f"(expected ≥4 mip levels)."
+        )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #26 — vehicles_sprite_atlas_d.dds DDS format
+#
+# Spec (phase-11d.md §2b):
+#   vehicles_sprite_atlas_d.dds must be:
+#     - DDS magic at offset 0
+#     - DX10 extended header present
+#     - DXGI_FORMAT at offset 128 = 77 (DXGI_FORMAT_BC3_UNORM — linear DXT5, NOT sRGB)
+#     - Width = 256, Height = 256
+#     - dwMipMapCount = 1 (base level only, GL_TEXTURE_MAX_LEVEL=0)
+#
+# Linear (not sRGB) because sprite atlas contains synthetic roof-colour swatches,
+# not photographic diffuse data.  The vehicles_sprite_atlas_d.dds upload path in
+# TextureCache uses a linear internal format accordingly.
+# ---------------------------------------------------------------------------
+_VEHICLES_SPRITE_ATLAS_PATH = os.path.join(
+    "assets", "textures", "vehicles", "vehicles_sprite_atlas_d.dds"
+)
+_DXGI_FORMAT_BC3_UNORM = 77
+
+
+def check_26_vehicles_sprite_atlas_dds(assets_dir):
+    """Check #26: vehicles_sprite_atlas_d.dds — BC3_UNORM (linear), DX10, 256×256, 1 mip.
+
+    Returns a list of error strings. Empty list means the check passed.
+    """
+    repo_root = os.path.dirname(assets_dir)
+    path = os.path.join(repo_root, _VEHICLES_SPRITE_ATLAS_PATH)
+
+    if not os.path.isfile(path):
+        return [f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} not found"]
+
+    errors = []
+    try:
+        with open(path, "rb") as f:
+            data = f.read(132)
+    except OSError as exc:
+        return [f"check_26 FAIL: cannot read {_VEHICLES_SPRITE_ATLAS_PATH}: {exc}"]
+
+    if len(data) < 132:
+        return [f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} is too small to parse DDS header"]
+
+    if data[0:4] != b"DDS ":
+        errors.append(
+            f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} missing DDS magic "
+            f"(got {data[0:4]!r})"
+        )
+        return errors
+
+    height = struct.unpack_from("<I", data, 12)[0]
+    width  = struct.unpack_from("<I", data, 16)[0]
+    mip    = struct.unpack_from("<I", data, 28)[0]
+    fourcc = data[84:88]
+
+    if fourcc != b"DX10":
+        errors.append(
+            f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} missing DX10 extended header "
+            f"(FourCC at offset 84 = {fourcc!r}; expected b'DX10'). "
+            f"Re-export using Compressonator with -fd BC3 to produce BC3_UNORM (linear)."
+        )
+        return errors
+
+    dxgi = struct.unpack_from("<I", data, 128)[0]
+    if dxgi != _DXGI_FORMAT_BC3_UNORM:
+        errors.append(
+            f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} DXGI_FORMAT={dxgi} "
+            f"(expected {_DXGI_FORMAT_BC3_UNORM} = BC3_UNORM linear). "
+            f"Sprite atlas uses linear DXT5 — do NOT use BC3_UNORM_SRGB (78) here."
+        )
+
+    if width != 256 or height != 256:
+        errors.append(
+            f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} dimensions {width}×{height} "
+            f"(expected 256×256)."
+        )
+
+    if mip != 1:
+        errors.append(
+            f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} dwMipMapCount={mip} "
+            f"(expected exactly 1 — base level only; GL_TEXTURE_MAX_LEVEL=0 for sprite atlas)."
+        )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #27 — vehicles_normal_atlas_n.dds DDS format
+#
+# Spec (phase-11d.md §2b):
+#   vehicles_normal_atlas_n.dds must be:
+#     - DDS magic at offset 0
+#     - DX10 extended header present
+#     - DXGI_FORMAT at offset 128 = 77 (DXGI_FORMAT_BC3_UNORM — linear DXT5nm, NOT sRGB)
+#     - Width = 2048, Height = 2048
+#     - dwMipMapCount >= 4
+#
+# Normal maps are always linear (not sRGB).  DXT5nm packing: X→alpha, Y→green, Z=0.
+# ---------------------------------------------------------------------------
+_VEHICLES_NORMAL_ATLAS_PATH = os.path.join(
+    "assets", "textures", "vehicles", "vehicles_normal_atlas_n.dds"
+)
+
+
+def check_27_vehicles_normal_atlas_dds(assets_dir):
+    """Check #27: vehicles_normal_atlas_n.dds — BC3_UNORM (linear DXT5nm), DX10, 2048×2048, ≥4 mip.
+
+    Returns a list of error strings. Empty list means the check passed.
+    """
+    repo_root = os.path.dirname(assets_dir)
+    path = os.path.join(repo_root, _VEHICLES_NORMAL_ATLAS_PATH)
+
+    if not os.path.isfile(path):
+        return [f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} not found"]
+
+    errors = []
+    try:
+        with open(path, "rb") as f:
+            data = f.read(132)
+    except OSError as exc:
+        return [f"check_27 FAIL: cannot read {_VEHICLES_NORMAL_ATLAS_PATH}: {exc}"]
+
+    if len(data) < 132:
+        return [f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} is too small to parse DDS header"]
+
+    if data[0:4] != b"DDS ":
+        errors.append(
+            f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} missing DDS magic "
+            f"(got {data[0:4]!r})"
+        )
+        return errors
+
+    height = struct.unpack_from("<I", data, 12)[0]
+    width  = struct.unpack_from("<I", data, 16)[0]
+    mip    = struct.unpack_from("<I", data, 28)[0]
+    fourcc = data[84:88]
+
+    if fourcc != b"DX10":
+        errors.append(
+            f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} missing DX10 extended header "
+            f"(FourCC at offset 84 = {fourcc!r}; expected b'DX10'). "
+            f"Re-export using Compressonator with -fd BC3 to produce BC3_UNORM (linear DXT5nm)."
+        )
+        return errors
+
+    dxgi = struct.unpack_from("<I", data, 128)[0]
+    if dxgi != _DXGI_FORMAT_BC3_UNORM:
+        errors.append(
+            f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} DXGI_FORMAT={dxgi} "
+            f"(expected {_DXGI_FORMAT_BC3_UNORM} = BC3_UNORM linear). "
+            f"Normal maps are linear — do NOT use BC3_UNORM_SRGB (78) here."
+        )
+
+    if width != 2048 or height != 2048:
+        errors.append(
+            f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} dimensions {width}×{height} "
+            f"(expected 2048×2048)."
+        )
+
+    if mip < 4:
+        errors.append(
+            f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} dwMipMapCount={mip} "
+            f"(expected ≥4 mip levels)."
+        )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #28 — Building atlas diffuse minimum variance
+#
+# Spec (phase-11d.md §2a):
+#   For each of the 9 zone-type wall cells (rows 0–2, cols 0–2) in the
+#   2048×2048 buildings_atlas_d.png, compute the standard deviation of pixel
+#   luminance within the 496×496 px usable area (8 px border on each edge of
+#   a 512×512 cell).  A stddev < 8.0 (0–255 scale) indicates a flat placeholder
+#   fill and is treated as a CI failure.
+#
+# Atlas cell layout (from building-atlas-layout.md):
+#   4×4 grid at 512×512 px per cell.
+#   Cell (row, col) starts at pixel (row*512, col*512).
+#   Usable area: 8 px inset on all four edges → starts at (row*512+8, col*512+8),
+#   size 496×496.
+#
+# Implementation note: this check requires Pillow.  If Pillow is absent or the
+# source PNG does not exist, the check is SKIPped (not FAILed) so that
+# environments without Pillow or without the PNG do not block CI jobs unrelated
+# to the texture rework deliverable.
+# ---------------------------------------------------------------------------
+_BUILDINGS_ATLAS_PNG = os.path.join("assets", "textures", "buildings", "buildings_atlas_d.png")
+_BUILDING_CELL_SIZE = 512
+_BUILDING_CELL_BORDER = 8
+_BUILDING_CELL_USABLE = _BUILDING_CELL_SIZE - 2 * _BUILDING_CELL_BORDER  # 496
+_BUILDING_LUMINANCE_STDDEV_MIN = 8.0
+
+# Zone-type wall cells: rows 0–2, cols 0–2 (9 cells total).
+_BUILDING_WALL_CELLS = [(r, c) for r in range(3) for c in range(3)]
+
+
+def _luminance_stddev(pixels):
+    """Compute the standard deviation of ITU-R BT.601 luminance for a list of RGB tuples."""
+    import math as _math
+    n = len(pixels)
+    if n == 0:
+        return 0.0
+    lum = [0.299 * r + 0.587 * g + 0.114 * b for r, g, b in pixels]
+    mean = sum(lum) / n
+    variance = sum((l - mean) ** 2 for l in lum) / n
+    return _math.sqrt(variance)
+
+
+def check_28_building_atlas_color_variance(assets_dir):
+    """Check #28: building atlas diffuse minimum variance.
+
+    For each of the 9 zone-type wall cells (rows 0–2, cols 0–2) in
+    buildings_atlas_d.png, the luminance stddev within the 496×496 usable
+    area must be ≥ 8.0 (otherwise the cell is a flat placeholder fill).
+
+    Returns a list of error strings. Empty list means the check passed.
+    SKIPs (returns []) when Pillow is absent or the source PNG does not exist.
+    """
+    repo_root = os.path.dirname(assets_dir)
+    png_path = os.path.join(repo_root, _BUILDINGS_ATLAS_PNG)
+
+    if not os.path.isfile(png_path):
+        # Asset not yet delivered — skip silently.
+        return []
+
+    try:
+        from PIL import Image  # noqa: PLC0415 — lazy import (Pillow optional)
+    except ImportError:
+        # Pillow not installed — skip with a note (not a failure).
+        print(
+            "SKIP check_28: Pillow not installed — "
+            "install with 'pip install Pillow' to enable building atlas variance check"
+        )
+        return []
+
+    errors = []
+    try:
+        img = Image.open(png_path).convert("RGB")
+    except Exception as exc:
+        return [f"check_28 FAIL: cannot open {_BUILDINGS_ATLAS_PNG}: {exc}"]
+
+    for row, col in _BUILDING_WALL_CELLS:
+        x0 = col * _BUILDING_CELL_SIZE + _BUILDING_CELL_BORDER
+        y0 = row * _BUILDING_CELL_SIZE + _BUILDING_CELL_BORDER
+        x1 = x0 + _BUILDING_CELL_USABLE
+        y1 = y0 + _BUILDING_CELL_USABLE
+
+        region = img.crop((x0, y0, x1, y1))
+        # Use get_flattened_data() (Pillow 14+) or fall back to getdata() for older Pillow.
+        if hasattr(region, "get_flattened_data"):
+            pixels = list(region.get_flattened_data())
+        else:
+            pixels = list(region.getdata())
+        stddev = _luminance_stddev(pixels)
+
+        if stddev < _BUILDING_LUMINANCE_STDDEV_MIN:
+            errors.append(
+                f"check_28 FAIL: wall cell (row={row}, col={col}) luminance stddev="
+                f"{stddev:.2f} < {_BUILDING_LUMINANCE_STDDEV_MIN} (placeholder fill); "
+                f"re-author per phase-11d.md §2a before committing the DDS"
+            )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #29 — Normal map non-flat check
+#
+# Spec (phase-11d.md §2a):
+#   For each of the 9 zone-type wall cells in the normal-map source PNG
+#   (buildings_atlas_d_n.png), compute the mean absolute deviation (MAD) of
+#   the green channel within the 496×496 usable area.  A MAD < 3.0 indicates
+#   a flat normal map (no authored surface relief) and is treated as a CI failure.
+#
+# The normal-map source PNG is an authoring intermediate; it is NOT committed
+# unless the artist also commits the corresponding height-map source.  When
+# the file does not exist the check is skipped (no-op).
+#
+# If Pillow is absent, the check is also skipped (not failed).
+# ---------------------------------------------------------------------------
+_BUILDINGS_NORMAL_PNG_CANDIDATES = [
+    os.path.join("assets", "textures", "buildings", "buildings_atlas_d_n.png"),
+    os.path.join("assets", "textures", "buildings", "buildings_atlas_n.png"),
+]
+_NORMAL_MAP_GREEN_MAD_MIN = 3.0
+
+
+def _green_channel_mad(pixels):
+    """Compute the mean absolute deviation of the green channel for a list of RGB tuples."""
+    n = len(pixels)
+    if n == 0:
+        return 0.0
+    greens = [g for _r, g, _b in pixels]
+    mean_g = sum(greens) / n
+    return sum(abs(g - mean_g) for g in greens) / n
+
+
+def check_29_normal_map_non_flat(assets_dir):
+    """Check #29: normal map non-flat check.
+
+    For each of the 9 zone-type wall cells in the normal-map source PNG, the
+    green-channel MAD must be ≥ 3.0 (otherwise the normal map is flat).
+
+    Returns a list of error strings. Empty list means the check passed.
+    SKIPs (returns []) when Pillow is absent or the source PNG does not exist.
+    """
+    repo_root = os.path.dirname(assets_dir)
+
+    png_path = None
+    for candidate in _BUILDINGS_NORMAL_PNG_CANDIDATES:
+        full = os.path.join(repo_root, candidate)
+        if os.path.isfile(full):
+            png_path = full
+            break
+
+    if png_path is None:
+        # Asset not yet delivered — skip silently.
+        return []
+
+    try:
+        from PIL import Image  # noqa: PLC0415 — lazy import (Pillow optional)
+    except ImportError:
+        print(
+            "SKIP check_29: Pillow not installed — "
+            "install with 'pip install Pillow' to enable normal map non-flat check"
+        )
+        return []
+
+    errors = []
+    try:
+        img = Image.open(png_path).convert("RGB")
+    except Exception as exc:
+        return [f"check_29 FAIL: cannot open normal map source PNG: {exc}"]
+
+    for row, col in _BUILDING_WALL_CELLS:
+        x0 = col * _BUILDING_CELL_SIZE + _BUILDING_CELL_BORDER
+        y0 = row * _BUILDING_CELL_SIZE + _BUILDING_CELL_BORDER
+        x1 = x0 + _BUILDING_CELL_USABLE
+        y1 = y0 + _BUILDING_CELL_USABLE
+
+        region = img.crop((x0, y0, x1, y1))
+        # Use get_flattened_data() (Pillow 14+) or fall back to getdata() for older Pillow.
+        if hasattr(region, "get_flattened_data"):
+            pixels = list(region.get_flattened_data())
+        else:
+            pixels = list(region.getdata())
+        mad = _green_channel_mad(pixels)
+
+        if mad < _NORMAL_MAP_GREEN_MAD_MIN:
+            errors.append(
+                f"check_29 FAIL: normal map cell (row={row}, col={col}) green channel "
+                f"MAD={mad:.2f} < {_NORMAL_MAP_GREEN_MAD_MIN} (flat normal map); "
+                f"re-author per phase-11d.md §2a before committing the DDS"
+            )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #30 — Billboard atlas format and mip verification
+#
+# Spec (phase-11d.md §2c):
+#   For each *_billboard.dds in assets/3d/buildings/, verify:
+#     (a) DDS magic at offset 0
+#     (b) DX10 extended header (FourCC 'DX10' at offset 84)
+#     (c) DXGI_FORMAT at offset 128 = 78 (DXGI_FORMAT_BC3_UNORM_SRGB)
+#     (d) Width = 1024, Height = 128
+#     (e) dwMipMapCount = 4
+#     (f) File size = 174,228 bytes
+#
+# Reference size note: the architecture spec table at §DDS Mip Chain Integrity
+# cites 192,640 bytes for a DXT5/BC3 1024×128 4-mip DDS.  The correct
+# calculation for a file WITH the DX10 extended header is:
+#   4 (magic) + 124 (DDS_HEADER) + 20 (DX10 ext header) + 174,080 (pixel data)
+#   = 174,228 bytes
+# where pixel data = BC3 mip chain: 131,072 + 32,768 + 8,192 + 2,048 bytes.
+# The 192,640 figure in the spec table assumes a plain 128-byte header (no DX10)
+# AND has an arithmetic error; it does not match the actual file format used by
+# this project.  The authoritative reference value is 174,228 bytes, matching
+# the generate_dds_stubs.py output for all billboard atlas files.
+# ---------------------------------------------------------------------------
+_BILLBOARD_DIR = os.path.join("assets", "3d", "buildings")
+_BILLBOARD_EXPECTED_WIDTH = 1024
+_BILLBOARD_EXPECTED_HEIGHT = 128
+_BILLBOARD_EXPECTED_MIP_COUNT = 4
+_DXGI_FORMAT_BC3_UNORM_SRGB = 78
+# DX10 header: 4 (magic) + 124 (DDS_HEADER) + 20 (DX10 ext) + 174,080 (BC3 mip chain) = 174,228
+_BILLBOARD_EXPECTED_FILE_SIZE = 174_228
+
+
+def check_30_billboard_atlas_format(assets_dir):
+    """Check #30: Billboard atlas DDS format and mip verification.
+
+    Verifies every *_billboard.dds in assets/3d/buildings/ for correct DX10
+    header, BC3_UNORM_SRGB format, 1024×128 dimensions, 4 mip levels, and
+    correct file size.
+
+    Returns a list of error strings. Empty list means all files passed.
+    Returns [] (no-op) when no billboard DDS files are found.
+    """
+    repo_root = os.path.dirname(assets_dir)
+    billboard_dir = os.path.join(repo_root, _BILLBOARD_DIR)
+
+    if not os.path.isdir(billboard_dir):
+        return []
+
+    billboard_files = sorted(
+        p for p in os.listdir(billboard_dir) if p.endswith("_billboard.dds")
+    )
+
+    if not billboard_files:
+        return []
+
+    errors = []
+
+    for filename in billboard_files:
+        filepath = os.path.join(billboard_dir, filename)
+        rel_path = os.path.join(_BILLBOARD_DIR, filename)
+
+        file_size = os.path.getsize(filepath)
+
+        try:
+            with open(filepath, "rb") as f:
+                data = f.read(132)
+        except OSError as exc:
+            errors.append(f"check_30 FAIL: {rel_path} — cannot read file: {exc}")
+            continue
+
+        if len(data) < 132:
+            errors.append(
+                f"check_30 FAIL: {rel_path} — file too small to parse DDS header "
+                f"({len(data)} bytes)"
+            )
+            continue
+
+        if data[0:4] != b"DDS ":
+            errors.append(
+                f"check_30 FAIL: {rel_path} — missing DDS magic "
+                f"(got {data[0:4]!r})"
+            )
+            continue
+
+        height = struct.unpack_from("<I", data, 12)[0]
+        width  = struct.unpack_from("<I", data, 16)[0]
+        mip    = struct.unpack_from("<I", data, 28)[0]
+        fourcc = data[84:88]
+
+        if fourcc != b"DX10":
+            errors.append(
+                f"check_30 FAIL: {rel_path} — missing DX10 extended header "
+                f"(FourCC at offset 84 = {fourcc!r}; expected b'DX10')"
+            )
+            continue
+
+        dxgi = struct.unpack_from("<I", data, 128)[0]
+
+        file_errors = []
+
+        if dxgi != _DXGI_FORMAT_BC3_UNORM_SRGB:
+            file_errors.append(
+                f"DXGI_FORMAT={dxgi} (expected {_DXGI_FORMAT_BC3_UNORM_SRGB} = BC3_UNORM_SRGB)"
+            )
+
+        if width != _BILLBOARD_EXPECTED_WIDTH or height != _BILLBOARD_EXPECTED_HEIGHT:
+            file_errors.append(
+                f"dimensions {width}×{height} "
+                f"(expected {_BILLBOARD_EXPECTED_WIDTH}×{_BILLBOARD_EXPECTED_HEIGHT})"
+            )
+
+        if mip != _BILLBOARD_EXPECTED_MIP_COUNT:
+            file_errors.append(
+                f"dwMipMapCount={mip} (expected exactly {_BILLBOARD_EXPECTED_MIP_COUNT})"
+            )
+
+        if file_size != _BILLBOARD_EXPECTED_FILE_SIZE:
+            file_errors.append(
+                f"file size={file_size:,} bytes "
+                f"(expected {_BILLBOARD_EXPECTED_FILE_SIZE:,} bytes for DX10+BC3 1024×128 4-mip)"
+            )
+
+        for reason in file_errors:
+            errors.append(f"check_30 FAIL: {rel_path} — {reason}")
+
+    return errors
+
+
 def run_all_checks():
     """Run all asset validation checks. Returns the total number of errors."""
     # Resolve the assets directory relative to this script's location.
@@ -1892,6 +2467,12 @@ def run_all_checks():
         ("Check #22 (WAV SFX format)", check_22_wav_sfx_format),
         ("Check #23 (sprite sheet PNG)", check_23_sprite_sheet_png),
         ("Check #24 (cloud texture format)", check_24_clouds_png),
+        ("Check #25 (vehicles diffuse atlas DDS)", check_25_vehicles_diffuse_atlas_dds),
+        ("Check #26 (vehicles sprite atlas DDS)", check_26_vehicles_sprite_atlas_dds),
+        ("Check #27 (vehicles normal atlas DDS)", check_27_vehicles_normal_atlas_dds),
+        ("Check #28 (building atlas color variance)", check_28_building_atlas_color_variance),
+        ("Check #29 (normal map non-flat)", check_29_normal_map_non_flat),
+        ("Check #30 (billboard atlas format)", check_30_billboard_atlas_format),
     ]
 
     for check_name, check_fn in checks:

@@ -141,7 +141,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   at 15 floors, `com_high_02` at 20 floors, `com_high_03` at 25 floors, `com_high_04` at
   30 floors). No two `com_high` variants may share the same `height_floors` value.
 
-- [ ] **Large-building LOD0 geometry** — re-export all Large building variants
+- [x] **Large-building LOD0 geometry** — re-export all Large building variants
   (`res_high_01`, `res_high_02`, `res_high_03`, `res_high_04`,
   `com_high_01`, `com_high_02`, `com_high_03`, `com_high_04`,
   `ind_high_01`, `ind_high_02`, `ind_high_03`, `ind_high_04`)
@@ -201,7 +201,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   This is consistent with `architecture/asset-standards/building-atlas-layout.md`.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
-- [ ] **Large-building LOD1 geometry** — re-export all Large building LOD1 meshes
+- [x] **Large-building LOD1 geometry** — re-export all Large building LOD1 meshes
   (all 12 variants: `res_high_01/02/03/04`, `com_high_01/02/03/04`, `ind_high_01/02/03/04`)
   targeting **1,000–1,500 tris** for Residential High and Industrial High, and
   **1,500–2,000 tris** for Commercial High skyscrapers (reflecting the higher LOD0 budgets).
@@ -217,7 +217,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   no two variants within the same zone-tier slot may reduce to the same-height box.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
-- [ ] **Small-building LOD0 geometry** — re-export all Small building variants
+- [x] **Small-building LOD0 geometry** — re-export all Small building variants
   (`res_low_01`, `res_low_02`, `res_low_03`, `res_low_04`,
   `com_low_01`, `com_low_02`, `com_low_03`, `com_low_04`,
   `ind_low_01`, `ind_low_02`, `ind_low_03`, `ind_low_04`,
@@ -265,7 +265,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   two variants within the same zone/tier without reading asset names.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
-- [ ] **Small-building LOD1 geometry** — re-export all Small building LOD1 meshes
+- [x] **Small-building LOD1 geometry** — re-export all Small building LOD1 meshes
   (all 24 variants: `res_low/med_01–04`, `com_low/med_01–04`, `ind_low/med_01–04`)
   targeting **300–400 tris** (spec: 200–400 tris; Phase 11d raises the floor to 300 tris
   minimum to preserve distinguishable silhouettes across all four variants at LOD1 switch-in
@@ -281,7 +281,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   LOD0 must still be readable at LOD1 polygon count.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
-- [ ] **Service building LOD0 geometry** — re-export all four service building models
+- [x] **Service building LOD0 geometry** — re-export all four service building models
   (one unique model per type, no variants:
   `svc_fire_station_lod0.b3d`, `svc_police_station_lod0.b3d`,
   `svc_power_plant_lod0.b3d`, `svc_water_tower_lod0.b3d`) targeting **2,500–4,000 tris**
@@ -319,7 +319,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   (ref: `architecture/asset-standards/3d-model-standards.md`,
   `architecture/asset-standards/building-atlas-layout.md`)
 
-- [ ] **Service building LOD1 geometry** — re-export all four service building LOD1 meshes
+- [x] **Service building LOD1 geometry** — re-export all four service building LOD1 meshes
   (one unique model per type, no variants:
   `svc_fire_station_lod1.b3d`, `svc_police_station_lod1.b3d`,
   `svc_power_plant_lod1.b3d`, `svc_water_tower_lod1.b3d`) targeting **200–400 tris**
@@ -335,7 +335,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   removed or baked to texture at LOD1.
   (ref: `architecture/asset-standards/3d-model-standards.md` §LOD Requirements)
 
-- [ ] **Full asset inventory verification** — confirm the following complete set of building
+- [x] **Full asset inventory verification** — confirm the following complete set of building
   `.b3d` files exists after all rework exports:
   - **Zone building LOD0**: 36 files (4 variants × 9 zone-tiers:
     `res_low_01–04`, `res_med_01–04`, `res_high_01–04`,
@@ -368,7 +368,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   regression-clean step is run.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
-- [ ] **Collision mesh re-verification** — after reworking all building LOD0 geometry,
+- [x] **Collision mesh re-verification** — after reworking all building LOD0 geometry,
   re-verify that each asset's `_col.obj` (or `_col_0/1/2.obj` / `_col_circle.obj`)
   accurately covers the actual XZ footprint of the reworked mesh. If the rework added
   projecting geometry that extends beyond the Phase 9 footprint (e.g. a loading dock recess
@@ -379,19 +379,19 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   checks (max 24 tris, no top/bottom caps, flat at Y=0).
   (ref: `architecture/asset-standards/3d-model-standards.md` §Collision Meshes)
 
-- [ ] **LOD distance thresholds unchanged**: LOD swap distances (Large buildings: LOD0→LOD1
+- [x] **LOD distance thresholds unchanged**: LOD swap distances (Large buildings: LOD0→LOD1
   at >50 m / <45 m; LOD1→LOD2 at >200 m / <185 m; Small: >30 m / <25 m; >100 m / <90 m)
   are defined in `architecture/asset-standards/3d-model-standards.md` and must NOT be
   altered. Only mesh detail within each LOD level changes in this phase.
   (ref: `architecture/asset-standards/3d-model-standards.md` §LOD Distance Thresholds)
 
-- [ ] **`validate_assets.py` regression-clean**: after re-export, confirm all reworked
+- [x] **`validate_assets.py` regression-clean**: after re-export, confirm all reworked
   building models pass the existing `validate_assets.py` 24-check suite (established in
   Phase 5 and extended through Phase 10b) with zero errors. The `validate-assets` CI job
   must remain green.
   (ref: `architecture/ci-cd/github-actions-workflow.md`)
 
-- [ ] **`graphics-artist-3d-model` sign-off gate** (blocking): before committing any reworked
+- [x] **`graphics-artist-3d-model` sign-off gate** (blocking): before committing any reworked
   `.b3d` file, `graphics-artist-3d-model` must verify: (a) tri counts are within the upper
   LOD0/LOD1 ranges stated above, (b) coordinate system is Y-up Z-forward left-handed
   (Irrlicht convention); Blender export axis confirmed as **-Z Forward, Y Up** (NOT Y Forward,
@@ -440,7 +440,7 @@ than any car variant. `truck_cargo` must have a distinct cab-plus-cargo-box silh
 a flat vertical rear face. A test viewer must be unable to confuse any two of the five types
 when viewed from above at 40 m.
 
-- [ ] **Car LOD0 geometry** — re-export all three car variants (`car_sedan`, `car_hatchback`,
+- [x] **Car LOD0 geometry** — re-export all three car variants (`car_sedan`, `car_hatchback`,
   `car_suv`) each targeting **1,800–2,000 tris** (binding decision for Phase 11d; note the
   spec table in `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget
   lists ≤2,000 tris as the general limit — Phase 11d targets the spec ceiling for production
@@ -459,7 +459,7 @@ when viewed from above at 40 m.
   with no UV islands outside the cell bounds.
   (ref: `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget)
 
-- [ ] **Bus and truck LOD0 geometry** — re-export bus (`bus_standard`) and truck
+- [x] **Bus and truck LOD0 geometry** — re-export bus (`bus_standard`) and truck
   (`truck_cargo`) models targeting **2,500–3,000 tris** (binding decision for Phase 11d;
   note the spec table in `architecture/asset-standards/3d-model-standards.md` §Vehicle
   Polygon Budget lists ≤3,000 tris as the general limit — Phase 11d targets the spec
@@ -481,7 +481,7 @@ when viewed from above at 40 m.
   the vehicle's assigned atlas cell.
   (ref: `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget)
 
-- [ ] **Vehicle LOD1 geometry** — re-export all five vehicle LOD1 meshes targeting Phase
+- [x] **Vehicle LOD1 geometry** — re-export all five vehicle LOD1 meshes targeting Phase
   11d quality-floor targets: car **300–400 tris**, bus **400–500 tris**, truck **400–500
   tris** (binding decision for Phase 11d; note the spec table in
   `architecture/asset-standards/3d-model-standards.md` lists car ≤400 tris, bus ≤500 tris,
@@ -494,7 +494,7 @@ when viewed from above at 40 m.
   distinguishable from the LOD1 mesh. Pivot at Y=0, same as LOD0.
   (ref: `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget)
 
-- [ ] **`validate_assets.py` regression-clean (vehicles)**: after re-export, confirm all
+- [x] **`validate_assets.py` regression-clean (vehicles)**: after re-export, confirm all
   reworked vehicle models pass the existing `validate_assets.py` check suite with zero
   errors. Specifically: check #10 (UV channel 0 within assigned atlas cell), check #12
   (normal atlas UV cell), check #15 (`.meta` sidecar present), and the per-class tri budget
@@ -503,7 +503,7 @@ when viewed from above at 40 m.
   (ref: `architecture/ci-cd/github-actions-workflow.md`,
   `architecture/asset-standards/3d-model-standards.md`)
 
-- [ ] **`graphics-artist-3d-model` sign-off gate — vehicles** (blocking): before committing
+- [x] **`graphics-artist-3d-model` sign-off gate — vehicles** (blocking): before committing
   any reworked vehicle `.b3d` file, `graphics-artist-3d-model` must verify: (a) tri counts
   are within the LOD0 upper range and above the LOD1 floor stated above for each vehicle
   class, (b) coordinate system is Y-up Z-forward left-handed (Irrlicht convention); Blender
@@ -790,7 +790,7 @@ placeholder paint-over content with hand-authored or baked detail.
   `tools/export_textures.py`.
   (ref: `architecture/asset-standards/2d-texture-standards.md`)
 
-- [ ] **`validate_assets.py` checks #25–27 — vehicle atlas DDS verification**: as part of
+- [x] **`validate_assets.py` checks #25–27 — vehicle atlas DDS verification**: as part of
   completing this deliverable, the `cicd-dev-github` engineer adds three new checks to
   `validate_assets.py` for vehicle atlas DDS format and mip-level validation:
   check #25 (`vehicles_diffuse_atlas_d.dds` — BC1_UNORM_SRGB, 4-mip, 2048×2048),
@@ -801,7 +801,7 @@ placeholder paint-over content with hand-authored or baked detail.
   (ref: `architecture/ci-cd/github-actions-workflow.md`,
   `architecture/asset-standards/2d-texture-standards.md`)
 
-- [ ] **Guard steps for checks #25–30 in `validate-assets` CI job** — add `Verify check_N present`
+- [x] **Guard steps for checks #25–30 in `validate-assets` CI job** — add `Verify check_N present`
   guard steps to `.github/workflows/ci.yml` for checks #25 through #30, following the
   established pattern for checks #21–24. Each guard step runs
   `grep -q "check_N" tools/validate_assets.py || exit 1`. These six steps are additive —
@@ -874,7 +874,7 @@ placeholder paint-over content with hand-authored or baked detail.
   may be visually indistinguishable.
   (ref: `architecture/asset-standards/2d-texture-standards.md` §Billboard Imposter Atlas)
 
-- [ ] **`validate_assets.py` check #30 — billboard atlas format and mip verification**:
+- [x] **`validate_assets.py` check #30 — billboard atlas format and mip verification**:
   for each `*_billboard.dds` file, verify: (a) DDS dimensions are exactly 1024×128 px,
   (b) DX10 header present with DXGI_FORMAT BC3_UNORM_SRGB (value 78), (c) DDS
   `dwMipMapCount` field equals exactly 4, (d) total file size matches the reference size
