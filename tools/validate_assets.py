@@ -438,8 +438,7 @@ def check_4_building_uv_atlas_cell(assets_dir):
     """
     buildings_dir = os.path.join(assets_dir, "3d", "buildings")
     if not os.path.isdir(buildings_dir):
-        # Assets not yet delivered — skip silently.
-        return []
+        return [f"Check #4: buildings directory not found: {buildings_dir}"]
 
     errors = []
     checked = 0

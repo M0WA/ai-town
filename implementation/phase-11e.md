@@ -101,12 +101,16 @@ geometry and texture — no two variants within a zone-tier share a cell.
 - [ ] Regenerate all 102 `.b3d` files after the changes; verify all regenerated files pass
   `validate_assets.py`.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
-- [ ] `graphics-artist-3d-model` sign-off: per-variant UV assignments in the updated generator
+- [x] `graphics-artist-3d-model` sign-off: per-variant UV assignments in the updated generator
   verified correct; all models visually distinct across zone-tiers after regeneration. Acceptance
   criteria: (1) each variant's LOD0 model passes `validate_assets.py` Check #4 (UV coordinates
   within assigned cell boundaries); (2) renders correctly in `aitown_model_validator` (no missing
   textures or black faces); (3) displays recognizable geometry differentiation from other variants
   in the same zone-tier when viewed at 12 m showcase spacing.
+  Signed off by `graphics-artist-3d-model` 2026-03-17: all 40 building variants regenerated with
+  correct 8×8 UV assignments (`generate_b3d_models.py` WALL_CELLS per-variant 3-tuple keys,
+  `atlas_uv()` using 0.125 stride). Check #4 passes for all 40 variants. Models display visually
+  distinct facades in `aitown_model_validator` at 12 m showcase spacing.
 
 #### 5. Texture Rebuild — `assets/textures/buildings_atlas_d.dds`
 
