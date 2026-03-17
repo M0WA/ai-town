@@ -122,7 +122,7 @@ geometry and texture — no two variants within a zone-tier share a cell.
   service building cells.
   (ref: `architecture/asset-standards/building-atlas-layout.md`)
 - [ ] Validate both DDS files against reference byte sizes (11,174,016 bytes for
-  `buildings_atlas_d.dds`; 1,398,272 bytes for `buildings_atlas_d_2k.dds`) per
+  `buildings_atlas_d.dds`; 2,785,408 bytes for `buildings_atlas_d_2k.dds`) per
   `architecture/asset-standards/2d-texture-standards.md` — truncated files render silently black
   with no GL error; confirm file size before committing.
   (`graphics-artist-2d-texture`)
@@ -179,7 +179,7 @@ geometry and texture — no two variants within a zone-tier share a cell.
   texture cells; `buildings_atlas_d_2k.dds` authored at 2048×2048 DXT1 sRGB as the
   GL\_MAX\_TEXTURE\_SIZE fallback atlas.
 - [ ] `buildings_atlas_d.dds` confirmed as 11,174,016 bytes (header + 5-level mip data) and
-  `buildings_atlas_d_2k.dds` confirmed as 1,398,272 bytes (header + 4-level mip data) before
+  `buildings_atlas_d_2k.dds` confirmed as 2,785,408 bytes (header + 4-level mip data) before
   committing; reference values from `architecture/asset-standards/2d-texture-standards.md` DDS
   Reference Byte-Size table. A truncated DDS with wrong byte count renders silently black — this
   check is mandatory before Deliverable 5 is marked complete.
