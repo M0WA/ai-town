@@ -771,6 +771,18 @@ target_sources(ui_tests PRIVATE
     tests/ui/minimap_overlay_test.cpp
 )
 
+# Coverage boost — targets specific uncovered lines identified by lcov analysis:
+#   SettingsPanel.cpp: WASD/RestoreDefaults modal poll Accept/Cancel (lines 379-409),
+#     Controls Apply no-conflict callback (504-508), RestoreDefaults button (517-521),
+#     WASD preset button (525-528), getInteractiveElementCount Controls/Audio (557, 594),
+#     countdown-active branch in showGraphicsTab (300), destructor (148).
+#   UIManager.cpp: PauseMenu save success (1313), transitionToMainMenu in quit-flow
+#     Accept/Decline branches (1362, 1371), speed-selector handle polling (1491-1499),
+#     showForcedLoanDialog with saveSystem (1606), loadKeybindings file-exists path (1834).
+target_sources(ui_tests PRIVATE
+    tests/ui/coverage_boost_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # audio_tests — duck state machine, occlusion smoothing, crossfade, stinger milestone tests
 # Vorbis::vorbisfile must be listed EXPLICITLY — it CANNOT resolve through aitown_audio's
