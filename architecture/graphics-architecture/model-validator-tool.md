@@ -146,16 +146,16 @@ The validator tool exercises the 45 LOD0 `.b3d` files across categories 1–11. 
 assets are validated by `validate_assets.py` (CI) and manual game playback at appropriate distances.
 
 **Phase 11d polygon budget reference** (see `architecture/asset-standards/3d-model-standards.md`
-§Vehicle Polygon Budget and §Building Polygon Budget for full specs):
+§Vehicle Polygon Budget and §LOD Requirements table for full specs):
 
 | Asset | LOD0 target | LOD1 target |
 |---|---|---|
-| Small buildings (Low/Med all zones) | ≤ spec ceiling (800–900 tris) | 300–400 tris |
-| Large buildings (High all zones) | ≤ spec ceiling (1,200–2,000 tris) | 300–400 tris |
-| Commercial High (skyscrapers) | ≤ 2,000 tris | 300–400 tris |
-| Cars (`car_sedan`, `car_hatchback`, `car_suv`) | 1,800–2,000 tris | ≥ 300 tris |
-| Bus (`bus_standard`) | ≤ 2,000 tris | ≥ 400 tris |
-| Truck (`truck_cargo`) | ≤ 2,000 tris | ≥ 400 tris |
+| Small buildings (Low/Med all zones) | 1,500–3,000 tris | 200–400 tris |
+| Large buildings (High all zones) | 4,000–8,000 tris | 1,000–1,500 tris |
+| Commercial High (skyscrapers) | 7,000–10,000 tris | 1,200–2,000 tris |
+| Cars (`car_sedan`, `car_hatchback`, `car_suv`) | 1,800–2,000 tris | ≤ 400 tris |
+| Bus (`bus_standard`) | 2,500–3,000 tris | ≤ 500 tris |
+| Truck (`truck_cargo`) | 2,500–3,000 tris | ≤ 500 tris |
 
 ---
 
@@ -173,6 +173,45 @@ assets are validated by `validate_assets.py` (CI) and manual game playback at ap
 manager. After `drop()`, the raw `LODNode*` wrappers (plain heap objects, not Irrlicht
 ref-counted) must be `delete`d explicitly. Store them in a `std::vector<LODNode*>` per
 category.
+
+---
+
+## On-Screen HUD
+
+Two overlaid 2D text elements are rendered on top of the 3D scene each frame:
+
+### Category Banner
+
+A single line of white text rendered in the top-left corner using the Irrlicht GUI font
+(`IGUIFont* font = device->getGUIEnvironment()->getBuiltInFont()`):
+
+```text
+[N/11] Category Name
+```
+
+Example: `[3/11] Residential High`
+
+Rendered at screen position `(12, 12)` with colour `SColor(255, 255, 255, 255)` (opaque white).
+
+### Floor Labels (per model)
+
+For each loaded model at screen-space projected position of a point on the ground in front
+of it, a short name label is drawn. The label text is the asset name (e.g. `res_low_01`,
+`car_sedan`).
+
+**World position of the label anchor**: `(modelWorldX, 0.05f, modelWorldZ + 6.0f)` — 6 m
+in front of the model centre (in the +Z direction), 5 cm above the ground plane so it is
+not z-fighting with the ground.
+
+**Projection**: use `smgr->getSceneCollisionManager()->getScreenCoordinatesFrom3DPosition()`
+to convert the world anchor to 2D screen coordinates. If the projected point is off-screen
+(x or y outside `[0, width]` / `[0, height]`), skip drawing that label.
+
+**Rendering**: `font->draw(irr::core::stringw(name.c_str()), irr::core::rect<irr::s32>(sx, sy, sx+200, sy+20), irr::video::SColor(255, 255, 220, 60))` — amber/yellow text
+(`RGB 255, 220, 60`), width budget 200 px.
+
+**Draw order**: HUD elements are drawn after `smgr->drawAll()` and before
+`driver->endScene()`, inside the `driver->beginScene()`/`endScene()` block.
 
 ---
 

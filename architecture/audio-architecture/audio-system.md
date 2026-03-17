@@ -267,6 +267,15 @@ public:
     //
     // MockAudioSystem: add
     //   MOCK_METHOD(void, updateVehicleAudio, (int, int, float, float, float), (override));
+    //
+    // Threading model: updateVehicleAudio() is called on the MAIN THREAD every frame.
+    // The implementation stores speedFraction, worldX, and worldZ into the per-slot
+    // std::atomic<float> fields of VehiclePairSlot (source-pool.md §Vehicle Engine Source
+    // Pairing — Internal Tracking).  The audio thread reads these atomics on each wake
+    // (same pattern as m_occlusionGainTarget) and applies the AL_PITCH, AL_GAIN, and
+    // AL_POSITION calls.  No mutex is required for the main-thread write; std::atomic
+    // provides the necessary memory ordering.  AL calls are NEVER made on the main thread
+    // from this method.
     virtual void updateVehicleAudio(int idleIdx, int moveIdx,
                                     float speedFraction,
                                     float worldX, float worldZ) = 0;
@@ -274,6 +283,8 @@ public:
 ```
 
 `MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all eighteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
+
+**MockAudioSystem atomicity rule**: `MockAudioSystem` must declare all 18 `MOCK_METHOD` entries in exact sync with the `IAudioSystem` interface. Any commit that adds or removes a method on `IAudioSystem` must update `MockAudioSystem` in the same commit. Failure to do so causes `simulation_tests` and `ui_tests` targets to fail to compile (pure-virtual override missing). This constraint is especially critical before Phase 11d test authoring begins, when all three vehicle-audio methods (`acquireVehicleEnginePair`, `releaseVehicleEnginePair`, `updateVehicleAudio`) must already be present in `MockAudioSystem`.
 
 ---
 

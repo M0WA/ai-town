@@ -20,6 +20,22 @@
 
     Overlay data is rendered into the minimap texture at budget-tick cadence (not per-frame).
 
+    **Colorblind mode** (required per `architecture/ui-ux/resolution-ui-scaling.md`
+    §Colorblind Accessibility): when colorblind mode is active, each covered-tile colour
+    must also include a distinct geometric pattern overlay so the service type is
+    distinguishable by pattern alone, independent of colour:
+
+    | Service | Pattern |
+    |---|---|
+    | Fire Station | Diagonal hatching at 45° |
+    | Police Station | Horizontal lines |
+    | Power Plant | Dotted overlay |
+    | Water Tower | Cross-hatch |
+
+    Patterns are rendered at 50% opacity on top of the tint colour. Pattern pixel pitch:
+    4 px between lines/dots at the minimap tile resolution. Both tint colour and pattern
+    are applied simultaneously in colorblind mode — the tint is not suppressed.
+
   - **Traffic Congestion overlay**: Road segments are coloured by speed band relative to the
     free-flow speed of that segment. Authoritative hex values (used for both the minimap road
     colouring and the legend swatches):

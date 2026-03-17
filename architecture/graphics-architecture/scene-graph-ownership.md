@@ -612,15 +612,27 @@ and cast to `IMesh*` for `addMeshSceneNode` — the scene manager owns the mesh;
 
 `IrrlichtRenderer` maintains a registry of intersection signal billboard nodes:
 
+**`TileKey` type**: `TileKey` is defined in `src/simulation/simulation_types.h` as a plain
+struct with a custom hash, following the same pattern used by `m_agentNodes`:
+
 ```cpp
-std::unordered_map<TileKey, ISceneNode*> m_intersectionNodes;
+struct TileKey { int x{0}; int z{0}; };
+struct TileKeyHash {
+    std::size_t operator()(TileKey k) const noexcept {
+        return std::hash<int>()(k.x) ^ (std::hash<int>()(k.z) << 16);
+    }
+};
+```
+
+```cpp
+std::unordered_map<TileKey, ISceneNode*, TileKeyHash> m_intersectionNodes;
 ```
 
 **Ownership**: `IrrlichtRenderer` owns all nodes in `m_intersectionNodes`. Nodes are created
 by `setIntersectionSignalState()` on the first call for a given tile and reused on all
 subsequent calls for that same tile. Nodes are destroyed when the associated road tile is
 removed (caller invokes `setIntersectionSignalState` with a sentinel or the road tile is
-demolished — implementers must call `hideServiceCoverageOverlay`-style cleanup when road
+demolished — implementers must run the **Eviction sequence** (steps 1–4 below) when road
 tiles are removed).
 
 **Lifecycle rules**:

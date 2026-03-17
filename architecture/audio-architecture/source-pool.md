@@ -178,6 +178,13 @@ struct VehiclePairSlot {
     int  moveSourceIdx{-1};   // index into sources[] for the move source (-1 = unused)
     float listenerDistanceSq{0.f}; // cached squared distance at last update (for eviction selection)
     int   priority{0};        // copied from the vehicle entity priority at acquire time
+    // Per-frame state written by the main thread in updateVehicleAudio(); read by the audio
+    // thread on each wake to apply AL_PITCH, AL_GAIN crossblend, and AL_POSITION.
+    // Must be std::atomic<float>: updateVehicleAudio() is called on the main thread while
+    // the audio thread concurrently reads these values (same pattern as m_occlusionGainTarget).
+    std::atomic<float> speedFraction{0.f};  // normalised 0.0 (stopped) → 1.0 (max speed)
+    std::atomic<float> worldX{0.f};         // world-space X for AL_POSITION
+    std::atomic<float> worldZ{0.f};         // world-space Z for AL_POSITION
 };
 std::array<VehiclePairSlot, 12> m_vehiclePairs{};  // up to 12 active vehicles (kMaxVehiclePairs = 12)
 ```
@@ -201,6 +208,6 @@ std::array<VehiclePairSlot, 12> m_vehiclePairs{};  // up to 12 active vehicles (
 1. Locate the pair slot: scan `m_vehiclePairs` for the entry where `idleSourceIdx == idleIdx && moveSourceIdx == moveIdx`. If no matching slot is found (implementation error or already released), log a warning and return.
 2. Call `onSourceRecycled(idleIdx)` and `onSourceRecycled(moveIdx)`.
 3. Return both source indices to the free pool.
-4. Reset the matched `VehiclePairSlot` to `{-1, -1, 0.f, 0}`.
+4. Reset the matched `VehiclePairSlot`: set `idleSourceIdx` and `moveSourceIdx` to -1, `listenerDistanceSq` to 0.f, `priority` to 0; store 0.f to `speedFraction`, `worldX`, and `worldZ` atomics.
 
 Releasing only one source of a pair (e.g., on LOD cull) is prohibited. The cull path must call `releaseVehicleEnginePair(idleIdx, moveIdx)` — never free individual sources from a pair via `acquireSFXSource`/release paths.

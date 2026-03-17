@@ -141,7 +141,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   at 15 floors, `com_high_02` at 20 floors, `com_high_03` at 25 floors, `com_high_04` at
   30 floors). No two `com_high` variants may share the same `height_floors` value.
 
-- [x] **Large-building LOD0 geometry** — re-export all Large building variants
+- [ ] **Large-building LOD0 geometry** — re-export all Large building variants
   (`res_high_01`, `res_high_02`, `res_high_03`, `res_high_04`,
   `com_high_01`, `com_high_02`, `com_high_03`, `com_high_04`,
   `ind_high_01`, `ind_high_02`, `ind_high_03`, `ind_high_04`)
@@ -150,12 +150,21 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   §LOD Requirements; Phase 11d targets the upper 75% of the spec range).
   Zone-type geometry requirements are **mandatory** — each zone must have a distinct
   architectural vocabulary:
-  - **Residential High** (`res_high_01/02/03/04`): projecting balcony slabs on every
-    2–3 floors (20–40 cm slab overhang as inset geometry, not painted), recessed window
-    bays with frame reveals, planted parapet geometry at rooftop, stairwell tower stub at
-    rear elevation. Rooftop equipment silhouettes must include discrete AC condenser box
-    geometry (boxy units, ~0.6 m tall, staggered placement) so the roofline reads as
-    inhabited — not a bare slab.
+  - **Residential High** (`res_high_01/02/03/04`): four specific variants required:
+    - `res_high_01`: flat-roof concrete slab, smooth render exterior, row of AC condenser
+      units on parapet (min 6 units, boxy geometry), punched window grid, ground-floor
+      entry canopy slab projecting from recessed lobby
+    - `res_high_02`: stepped-setback form — upper 2 floors set back on min 2 sides
+      (visible ledge profile at each step), corner tower element rising one floor above
+      main roof, ground-floor colonnade (min 4 columns with visible spacing), pool basin
+      geometry in walled courtyard
+    - `res_high_03`: full-height curtain-wall tower, cantilevered balcony slabs at each
+      floor (20–35 cm overhang), alternating vertical sunshield fin geometry (one fin per
+      1.5–2 m of facade width), small rooftop plant room
+    - `res_high_04`: flat-fronted concrete slab (board-form texture drives this variant;
+      geometry is the plainest of the four), recessed loggia balcony per floor (fully
+      recessed behind the facade plane, min 0.8 m depth), horizontal spandrel band
+      geometry between floors, ground-floor retail strip with wider openings
   - **Commercial High** (`com_high_01/02/03/04`) — tall glass skyscrapers
     (`height_floors` 15–30), targeting **8,000–10,000 tris**: these are landmark
     buildings; budget and detail must reflect that. Four distinct form vocabularies are
@@ -181,27 +190,39 @@ be able to identify the zone type from mesh shape alone, without colour or textu
       extrusions, not painted lines), expressed structural core visible on the exterior
       (a thickened central or corner volume carrying vertical columns proud of the
       curtain wall face by min 5 cm)
-  - **Industrial High** (`ind_high_01/02/03/04`): flat-top roofline with rooftop
-    plant-room volume (a distinct secondary box set back from the parapet), pipe/duct
-    stub geometry on the upper facade, clerestory-band recess geometry near the roofline,
-    stair-tower extrusion on at least one elevation.
+  - **Industrial High** (`ind_high_01/02/03/04`): four specific variants required:
+    - `ind_high_01`: plain concrete tower with board-form banding, two tall chimney stacks
+      rising well above roofline (each min 3 m above parapet), small punched windows with
+      expressed lintels, rooftop service structure
+    - `ind_high_02`: exposed steel-frame structure, external pipe runs of two distinct
+      diameters along full facade height (large-bore: ~0.3 m diameter; small-bore: ~0.1 m
+      diameter), spherical pressure vessel at mid-height (min 2 m diameter), wide-base
+      cooling tower volume on one side
+    - `ind_high_03`: cluster of cylindrical silos (min 3 cylinders, each 3–5 m diameter),
+      silo cluster height equivalent to 7 floors; corrugated metal conveyor bridge
+      connecting silo tops; elevator head house at one end of bridge — the circular
+      silhouette is the primary identifier
+    - `ind_high_04`: grating-platform horizontal bands at every floor, dense roof-level
+      pipe rack (min 5 horizontal pipe members visible in elevation), flare stack rising
+      from one corner (min 4 m above roof), large industrial louvred panels in place of
+      windows, hazard-stripe banding on structural posts at base
   All three zones must also include: setback modelling at each floor band and rooftop
   equipment silhouettes (AC units, antennae stubs).
   **Inter-variant differentiation is mandatory for Large buildings**: the four variants
   within each zone type must each differ from every other variant in at least one of:
   footprint aspect ratio (narrow-tower vs. wider-slab massing), floor-band setback count,
-  rooftop silhouette (e.g. for Residential: single stair-tower vs. dual stair-tower vs.
-  planted parapet vs. recessed equipment deck; for Industrial: single plant-room box vs.
-  two offset boxes vs. sawtooth monitor roof vs. perimeter parapet with duct cluster). A
-  city block containing all four variants must not contain any two buildings that look alike
-  when viewed from 60 m.
+  rooftop silhouette (e.g. for Residential: AC condenser deck vs. stepped setback vs.
+  curtain-wall balcony tower vs. loggia slab; for Industrial: chimney stacks vs. pipe runs
+  vs. silo cluster vs. grating-platform refinery). A city block containing all four
+  variants must not contain any two buildings that look alike when viewed from 60 m.
   **Building atlas note**: the atlas layout is UNCHANGED — all four variants of the same
   zone-tier share the same wall-module atlas cell (the binding decision from Phase 1).
   Only mesh geometry and UV placement within the shared cell differ between variants.
   This is consistent with `architecture/asset-standards/building-atlas-layout.md`.
-  (ref: `architecture/asset-standards/3d-model-standards.md`)
+  (ref: `architecture/asset-standards/3d-model-standards.md`
+  §Building Variant Geometry Standards)
 
-- [x] **Large-building LOD1 geometry** — re-export all Large building LOD1 meshes
+- [ ] **Large-building LOD1 geometry** — re-export all Large building LOD1 meshes
   (all 12 variants: `res_high_01/02/03/04`, `com_high_01/02/03/04`, `ind_high_01/02/03/04`)
   targeting **1,000–1,500 tris** for Residential High and Industrial High, and
   **1,500–2,000 tris** for Commercial High skyscrapers (reflecting the higher LOD0 budgets).
@@ -217,7 +238,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   no two variants within the same zone-tier slot may reduce to the same-height box.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
-- [x] **Small-building LOD0 geometry** — re-export all Small building variants
+- [ ] **Small-building LOD0 geometry** — re-export all Small building variants
   (`res_low_01`, `res_low_02`, `res_low_03`, `res_low_04`,
   `com_low_01`, `com_low_02`, `com_low_03`, `com_low_04`,
   `ind_low_01`, `ind_low_02`, `ind_low_03`, `ind_low_04`,
@@ -228,44 +249,102 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   `architecture/asset-standards/3d-model-standards.md` §LOD Requirements; Phase 11d targets
   the upper portion of the budget to reach production detail for small buildings).
   Zone-type geometry requirements are **mandatory**:
-  - **Residential Low/Med** (`res_low_*`, `res_med_*`): pitched roof geometry (gabled or
-    hipped ridge line — not a flat slab), chimney stub, bay window outcrop on the principal
-    elevation, front door step and small porch canopy geometry. At least one window opening
-    per principal elevation must include a narrow window-box ledge geometry (a 5–8 cm
-    horizontal shelf proud of the wall face) to read as a flower-box or sill planter when
-    the texture is applied — this is the primary "lived-in" cue at close range.
-  - **Commercial Low/Med** (`com_low_*`, `com_med_*`): flat roof with parapet, wide
-    display-window recess on the ground floor (storefront inset geometry, not painted),
-    overhead awning frame geometry above the storefront, signage band fascia geometry
-    between the awning and the first floor. The awning frame must be modelled as a
-    projecting bracket-and-valance profile (not a flush plane) so that awning colour
-    painted in the atlas reads as a distinct canopy element at street level.
-  - **Industrial Low** (`ind_low_*`): mono-pitch single-span shed roof (one ridge running
-    the length of the building — the lower end faces the street), loading dock recess on at
-    least one elevation (recessed bay, min 0.5 m depth), corrugated wall panel rib geometry
-    (min 8 parallel extrusions across the principal facade plane), clerestory-strip window
-    geometry near the roofline (a continuous horizontal slot, not individual windows).
-  - **Industrial Med** (`ind_med_*`): multi-bay shed with sawtooth profile (minimum two
-    parallel ridges visible in silhouette — the stepped roofline is the primary identifier
-    that distinguishes Med from Low), loading dock on at least one elevation, corrugated
-    panel ribs, and a taller clerestory band between sawtooth bays. At least one elevation
-    must also carry an external stair or access-ladder stub and ventilation cowl geometry on
-    a roof ridge (min 2 cowl stubs).
+  - **Residential Low** (`res_low_01–04`): four specific variants required:
+    - `res_low_01` (flat-roof block): flat parapet roof, single AC condenser on parapet,
+      no garden (tarmac forecourt), utility meter box geometry on facade
+    - `res_low_02` (villa): metallic standing-seam pitched roof (gabled or hipped),
+      carport lean-to on side, front garden with rendered perimeter wall and iron gate
+    - `res_low_03` (cottage): clay-tile pitched roof, brick chimney stub, covered front
+      porch canopy, timber-post garden fence
+    - `res_low_04` (red-brick): steeply-pitched metal-tile roof with single dormer window,
+      narrow chimney, low brick boundary wall at plot edge (no garden)
+  - **Residential Med** (`res_med_01–04`): four specific variants required:
+    - `res_med_01` (2-storey block): flat parapet roof, external staircase on side facade
+      to rooftop terrace, clustered AC condensers on parapet, tarmac apron
+    - `res_med_02` (2-storey villa): hipped metal roof in seafoam-green, full wrap-around
+      first-floor balcony with rendered balustrade, rendered perimeter wall with iron gate,
+      kidney-pool geometry in garden
+    - `res_med_03` (2-storey cottage): clay-tile hipped roof with dormer windows, brick
+      chimney, full-width covered balcony on first floor, wrought-iron fence with brick piers
+    - `res_med_04` (3-storey red-brick): pitched black metal roof with pair of dormers,
+      projecting bay window on first floor, low brick garden wall at plot edge
+  - **Commercial Low** (`com_low_01–04`): four specific variants required:
+    - `com_low_01` (convenience store): flat parapet roof, full-width glazed shopfront,
+      projecting sign board above entrance (flat slab geometry, min 0.4 m depth), 3-bay
+      parking apron
+    - `com_low_02` (café): flat roof, canvas awning frame over entrance and side terrace
+      (bracket-and-valance profile), café table and chair props, flower-pot props
+      flanking door
+    - `com_low_03` (auto garage): corrugated metal facade, two wide roll-up shutter doors,
+      open forecourt (no awning), tyre prop stacks against side wall
+    - `com_low_04` (supermarket): flat parapet roof, full-width glazed shopfront with
+      recessed covered walkway canopy, freestanding trolley-bay shelter geometry in
+      parking apron
+  - **Commercial Med** (`com_med_01–04`): four specific variants required:
+    - `com_med_01` (strip mall): flat roof with HVAC unit props, continuous glazed
+      shopfronts on ground floor, upper floor with ribbon windows, large parking apron
+      with bay markings, multiple fascia sign panels
+    - `com_med_02` (boutique hotel): flat or low-pitched roof, juliet balcony railings on
+      every upper floor window, fabric canopy frame over main entrance, ornamental bracket
+      geometry above ground-floor window lintels
+    - `com_med_03` (corner bank): flat roof with projecting cornice band, paired pilaster
+      strips at facade corners, arched window openings flanking entrance, revolving door
+      recess (min 3 bays), shallow front setback
+    - `com_med_04` (office block): glass curtain-wall facade (3 floors), flat roof with
+      plant room behind louvred parapet screen, recessed ground-floor entrance under
+      projecting concrete canopy slab
+  - **Industrial Low** (`ind_low_01–04`): four specific variants required:
+    - `ind_low_01` (corrugated metal warehouse): mono-pitch or flat shed roof, corrugated
+      metal wall panel ribs (min 8 parallel extrusions on principal facade), wide roll-up
+      shutter loading doors, lean-to office annexe on one end, truck dock geometry with
+      yellow kerb marker
+    - `ind_low_02` (brick workshop): flat felted roof with parapet, brick wall (no
+      corrugated ribs), roller-shutter entrance, tyre prop stacks, hand-painted sign board
+      above entrance
+    - `ind_low_03` (sawtooth factory): sawtooth roofline with min 2 asymmetric north-light
+      ridges (highly distinctive stepped profile — this is the primary zone identifier for
+      this variant), chimney stack on gable end, chain-link fence perimeter
+    - `ind_low_04` (storage yard): small flat-roof gatehouse as primary mesh anchor (min
+      3 m × 3 m footprint), two-high shipping container stacks (rectangular box props in
+      3 distinct tints), chain-link fence perimeter, floodlight mast
+  - **Industrial Med** (`ind_med_01–04`): four specific variants required:
+    - `ind_med_01` (flat-roof factory): flat roof with two concrete chimney stacks above
+      parapet (round or rectangular section, min 2 m above roof), ground-floor loading
+      bays (min 2 bays), metal-railed access walkway along second-floor facade
+    - `ind_med_02` (steel-frame warehouse): exposed structural steel frame visible on the
+      exterior (at least corner columns proud of the cladding), notably wider footprint
+      than `ind_med_01`, fire-escape staircase on gable end, elevated covered walkway
+      connecting two building wings
+    - `ind_med_03` (brick mill): flat roof with rooftop cylindrical water tank on a steel
+      support frame, large multi-pane industrial windows (wider proportions than
+      `ind_low_02`), arched window head lintels, cast-iron fire escapes on rear facade
+    - `ind_med_04` (distribution centre): compact square footprint (notably wider than it
+      is tall), loading docks on two perpendicular sides with dock shelter hoods, elevated
+      gatehouse booth at site entrance, extensive concrete truck apron
   **Building atlas note**: the atlas layout is UNCHANGED — all four variants of the same
   zone-tier share the same wall-module atlas cell (the binding decision from Phase 1).
   Only mesh geometry and UV placement within the shared cell differ between variants.
   This is consistent with `architecture/asset-standards/building-atlas-layout.md`.
   **Inter-variant differentiation is mandatory for Small buildings**: the four variants
-  within each zone/tier must each differ from every other variant in at least one of:
-  footprint aspect ratio, roof form (gabled vs. hipped for Residential Low/Med;
-  flat-parapet height vs. mansard step for Commercial Low/Med; mono-pitch roof direction
-  for Industrial Low; 2-bay vs. 3-bay vs. 4-bay sawtooth for Industrial Med), principal-
-  facade window count or arrangement, or secondary-elevation treatment (blank wall vs. side
-  entrance detail). A player zoomed to street-level view must be able to distinguish any
-  two variants within the same zone/tier without reading asset names.
-  (ref: `architecture/asset-standards/3d-model-standards.md`)
+  within each zone/tier must each differ from every other variant in at least one structural
+  dimension. Primary differentiators per zone type:
+  - Residential Low/Med: roof form (flat vs. pitched; gabled vs. hipped; dormer count),
+    external additions (carport, AC condenser, staircase, balcony, pool), and boundary
+    treatment (fence vs. wall vs. no enclosure)
+  - Commercial Low/Med: building programme (convenience store vs. café vs. garage vs.
+    supermarket; strip mall vs. hotel vs. bank vs. office block) produces inherently
+    different shopfront and roof configurations
+  - Industrial Low: shed type (corrugated metal warehouse vs. brick workshop vs. sawtooth
+    factory vs. storage yard) — roof profile is the primary identifier (mono-pitch shed,
+    flat parapet, sawtooth ridgeline, or gatehouse anchor)
+  - Industrial Med: structural type (flat-roof factory vs. steel-frame warehouse vs. brick
+    mill vs. distribution centre) — roof form and structural expression drive differentiation
+  A player zoomed to street-level view must be able to distinguish any two variants within
+  the same zone/tier without reading asset names.
+  (ref: `architecture/asset-standards/3d-model-standards.md`
+  §Building Variant Geometry Standards)
 
-- [x] **Small-building LOD1 geometry** — re-export all Small building LOD1 meshes
+- [ ] **Small-building LOD1 geometry** — re-export all Small building LOD1 meshes
   (all 24 variants: `res_low/med_01–04`, `com_low/med_01–04`, `ind_low/med_01–04`)
   targeting **300–400 tris** (spec: 200–400 tris; Phase 11d raises the floor to 300 tris
   minimum to preserve distinguishable silhouettes across all four variants at LOD1 switch-in
@@ -281,7 +360,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   LOD0 must still be readable at LOD1 polygon count.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
-- [x] **Service building LOD0 geometry** — re-export all four service building models
+- [ ] **Service building LOD0 geometry** — re-export all four service building models
   (one unique model per type, no variants:
   `svc_fire_station_lod0.b3d`, `svc_police_station_lod0.b3d`,
   `svc_power_plant_lod0.b3d`, `svc_water_tower_lod0.b3d`) targeting **2,500–4,000 tris**
@@ -319,7 +398,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   (ref: `architecture/asset-standards/3d-model-standards.md`,
   `architecture/asset-standards/building-atlas-layout.md`)
 
-- [x] **Service building LOD1 geometry** — re-export all four service building LOD1 meshes
+- [ ] **Service building LOD1 geometry** — re-export all four service building LOD1 meshes
   (one unique model per type, no variants:
   `svc_fire_station_lod1.b3d`, `svc_police_station_lod1.b3d`,
   `svc_power_plant_lod1.b3d`, `svc_water_tower_lod1.b3d`) targeting **200–400 tris**
@@ -335,7 +414,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   removed or baked to texture at LOD1.
   (ref: `architecture/asset-standards/3d-model-standards.md` §LOD Requirements)
 
-- [x] **Full asset inventory verification** — confirm the following complete set of building
+- [ ] **Full asset inventory verification** — confirm the following complete set of building
   `.b3d` files exists after all rework exports:
   - **Zone building LOD0**: 36 files (4 variants × 9 zone-tiers:
     `res_low_01–04`, `res_med_01–04`, `res_high_01–04`,
@@ -368,7 +447,7 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   regression-clean step is run.
   (ref: `architecture/asset-standards/3d-model-standards.md`)
 
-- [x] **Collision mesh re-verification** — after reworking all building LOD0 geometry,
+- [ ] **Collision mesh re-verification** — after reworking all building LOD0 geometry,
   re-verify that each asset's `_col.obj` (or `_col_0/1/2.obj` / `_col_circle.obj`)
   accurately covers the actual XZ footprint of the reworked mesh. If the rework added
   projecting geometry that extends beyond the Phase 9 footprint (e.g. a loading dock recess
@@ -379,13 +458,13 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   checks (max 24 tris, no top/bottom caps, flat at Y=0).
   (ref: `architecture/asset-standards/3d-model-standards.md` §Collision Meshes)
 
-- [x] **LOD distance thresholds unchanged**: LOD swap distances (Large buildings: LOD0→LOD1
+- [ ] **LOD distance thresholds unchanged**: LOD swap distances (Large buildings: LOD0→LOD1
   at >50 m / <45 m; LOD1→LOD2 at >200 m / <185 m; Small: >30 m / <25 m; >100 m / <90 m)
   are defined in `architecture/asset-standards/3d-model-standards.md` and must NOT be
   altered. Only mesh detail within each LOD level changes in this phase.
   (ref: `architecture/asset-standards/3d-model-standards.md` §LOD Distance Thresholds)
 
-- [x] **`aitown_model_validator` update** — expand `src/benchmark/model_validator_main.cpp`
+- [ ] **`aitown_model_validator` update** — expand `src/benchmark/model_validator_main.cpp`
   category list from the Phase 9 six-model-per-zone layout to the Phase 11d eleven-category
   layout defined in `architecture/graphics-architecture/model-validator-tool.md`: each zone
   tier is its own category (4 variants each), giving categories 1–9 for zone buildings plus
@@ -393,13 +472,13 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   updates automatically.
   (ref: `architecture/graphics-architecture/model-validator-tool.md`)
 
-- [x] **`validate_assets.py` regression-clean**: after re-export, confirm all reworked
+- [ ] **`validate_assets.py` regression-clean**: after re-export, confirm all reworked
   building models pass the existing `validate_assets.py` 24-check suite (established in
   Phase 5 and extended through Phase 10b) with zero errors. The `validate-assets` CI job
   must remain green.
   (ref: `architecture/ci-cd/github-actions-workflow.md`)
 
-- [x] **`graphics-artist-3d-model` sign-off gate** (blocking): before committing any reworked
+- [ ] **`graphics-artist-3d-model` sign-off gate** (blocking): before committing any reworked
   `.b3d` file, `graphics-artist-3d-model` must verify: (a) tri counts are within the upper
   LOD0/LOD1 ranges stated above, (b) coordinate system is Y-up Z-forward left-handed
   (Irrlicht convention); Blender export axis confirmed as **-Z Forward, Y Up** (NOT Y Forward,
@@ -412,11 +491,12 @@ be able to identify the zone type from mesh shape alone, without colour or textu
   islands on UV channel 0 AND UV channel 1 (both channels must satisfy the gap requirement —
   per `architecture/asset-standards/3d-model-standards.md` §UV Authoring),
   **(g) zone-type silhouette distinction confirmed**: the three zone-type geometry vocabularies
-  (pitched roof + porch for Residential small; storefront recess + awning for Commercial small;
-  loading dock + corrugated ribs for Industrial small; balcony slabs for Residential high;
-  curtain-wall mullions for Commercial high; rooftop plant box + duct stubs for Industrial high)
-  are visually distinct in the exported mesh with no zone-type overlap — a viewer looking at
-  the untextured grey mesh can unambiguously identify the zone type,
+  (varied roof forms + residential additions for Residential small; storefront recess + awning
+  for Commercial small; distinct industrial typologies for Industrial small; balcony/loggia
+  configurations for Residential high; curtain-wall mullions + crown silhouettes for
+  Commercial high; chimney stacks / pipe runs / silo cluster / grating-platform for
+  Industrial high) are visually distinct in the exported mesh with no zone-type overlap —
+  a viewer looking at the untextured grey mesh can unambiguously identify the zone type,
   **(h) inter-variant differentiation confirmed**: for every zone-type/tier pair, the four
   variants (`_01`, `_02`, `_03`, `_04`) each differ from every other variant in at least one
   of the structural dimensions listed in the Large-building and Small-building inter-variant
@@ -448,7 +528,7 @@ than any car variant. `truck_cargo` must have a distinct cab-plus-cargo-box silh
 a flat vertical rear face. A test viewer must be unable to confuse any two of the five types
 when viewed from above at 40 m.
 
-- [x] **Car LOD0 geometry** — re-export all three car variants (`car_sedan`, `car_hatchback`,
+- [ ] **Car LOD0 geometry** — re-export all three car variants (`car_sedan`, `car_hatchback`,
   `car_suv`) each targeting **1,800–2,000 tris** (binding decision for Phase 11d; note the
   spec table in `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget
   lists ≤2,000 tris as the general limit — Phase 11d targets the spec ceiling for production
@@ -467,7 +547,7 @@ when viewed from above at 40 m.
   with no UV islands outside the cell bounds.
   (ref: `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget)
 
-- [x] **Bus and truck LOD0 geometry** — re-export bus (`bus_standard`) and truck
+- [ ] **Bus and truck LOD0 geometry** — re-export bus (`bus_standard`) and truck
   (`truck_cargo`) models targeting **2,500–3,000 tris** (binding decision for Phase 11d;
   note the spec table in `architecture/asset-standards/3d-model-standards.md` §Vehicle
   Polygon Budget lists ≤3,000 tris as the general limit — Phase 11d targets the spec
@@ -489,7 +569,7 @@ when viewed from above at 40 m.
   the vehicle's assigned atlas cell.
   (ref: `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget)
 
-- [x] **Vehicle LOD1 geometry** — re-export all five vehicle LOD1 meshes targeting Phase
+- [ ] **Vehicle LOD1 geometry** — re-export all five vehicle LOD1 meshes targeting Phase
   11d quality-floor targets: car **300–400 tris**, bus **400–500 tris**, truck **400–500
   tris** (binding decision for Phase 11d; note the spec table in
   `architecture/asset-standards/3d-model-standards.md` lists car ≤400 tris, bus ≤500 tris,
@@ -502,7 +582,7 @@ when viewed from above at 40 m.
   distinguishable from the LOD1 mesh. Pivot at Y=0, same as LOD0.
   (ref: `architecture/asset-standards/3d-model-standards.md` §Vehicle Polygon Budget)
 
-- [x] **`validate_assets.py` regression-clean (vehicles)**: after re-export, confirm all
+- [ ] **`validate_assets.py` regression-clean (vehicles)**: after re-export, confirm all
   reworked vehicle models pass the existing `validate_assets.py` check suite with zero
   errors. Specifically: check #10 (UV channel 0 within assigned atlas cell), check #12
   (normal atlas UV cell), check #15 (`.meta` sidecar present), and the per-class tri budget
@@ -511,7 +591,7 @@ when viewed from above at 40 m.
   (ref: `architecture/ci-cd/github-actions-workflow.md`,
   `architecture/asset-standards/3d-model-standards.md`)
 
-- [x] **`graphics-artist-3d-model` sign-off gate — vehicles** (blocking): before committing
+- [ ] **`graphics-artist-3d-model` sign-off gate — vehicles** (blocking): before committing
   any reworked vehicle `.b3d` file, `graphics-artist-3d-model` must verify: (a) tri counts
   are within the LOD0 upper range and above the LOD1 floor stated above for each vehicle
   class, (b) coordinate system is Y-up Z-forward left-handed (Irrlicht convention); Blender
@@ -542,7 +622,7 @@ placeholder paint-over content with hand-authored or baked detail.
 
 ##### 2a. Building Facade Atlas Rework
 
-- [x] **`buildings_atlas_d.png` (source PNG, 2048×2048)** — re-author all 15 assigned atlas
+- [ ] **`buildings_atlas_d.png` (source PNG, 2048×2048)** — re-author all 15 assigned atlas
   cells (per `architecture/asset-standards/building-atlas-layout.md` Cell Assignment Table)
   to production quality within the 496×496 px per-cell usable area (8 px border on each edge
   per spec). **Each zone-type wall cell must have a materially distinct surface that a player
@@ -650,7 +730,7 @@ placeholder paint-over content with hand-authored or baked detail.
   (ref: `architecture/asset-standards/building-atlas-layout.md`,
   `architecture/asset-standards/2d-texture-standards.md`)
 
-- [x] **`buildings_atlas_d.png` → DDS pipeline**: after re-authoring the source PNG, run
+- [ ] **`buildings_atlas_d.png` → DDS pipeline**: after re-authoring the source PNG, run
   `tools/export_textures.py` (Phase 9 deliverable) to regenerate `buildings_atlas_d.dds`
   (DXT1 sRGB, 4-mip) and `buildings_atlas_d_n.dds` (DXT5nm normal map, 4-mip). Validate
   the DDS headers per `architecture/asset-standards/2d-texture-standards.md`
@@ -658,7 +738,7 @@ placeholder paint-over content with hand-authored or baked detail.
   `validate_assets.py` sRGB/mip-chain checks before commit.
   (ref: `architecture/asset-standards/2d-texture-standards.md` §DDS Authoring Pipeline)
 
-- [x] **Normal map source re-author** — for each wall-cell type, produce a height-map
+- [ ] **Normal map source re-author** — for each wall-cell type, produce a height-map
   source PNG in the DCC tool (Substance Painter bake, xNormal height-map bake, or
   Photoshop bump-to-normal conversion) and derive the normal-map PNG from it. **The
   height-map source PNG must be committed alongside the normal-map PNG** so it can be
@@ -702,7 +782,7 @@ placeholder paint-over content with hand-authored or baked detail.
   `architecture/asset-standards/2d-texture-standards.md` §DXT5nm packing.
   (ref: `architecture/asset-standards/2d-texture-standards.md`)
 
-- [x] **Automated colour-variance quality gate** — add `validate_assets.py` check #28
+- [ ] **Automated colour-variance quality gate** — add `validate_assets.py` check #28
   (building atlas diffuse minimum variance): for each of the 9 zone-type wall cells
   (rows 0–2, cols 0–2) within `buildings_atlas_d.png`, compute the standard deviation
   of pixel luminance within the 496×496 px usable area. A standard deviation below 8.0
@@ -715,7 +795,7 @@ placeholder paint-over content with hand-authored or baked detail.
   must pass before Deliverable 2a is considered complete.
   (ref: `architecture/ci-cd/github-actions-workflow.md`)
 
-- [x] **`graphics-artist-2d-texture` sign-off gate** (blocking): before committing any
+- [ ] **`graphics-artist-2d-texture` sign-off gate** (blocking): before committing any
   reworked atlas PNG or DDS, `graphics-artist-2d-texture` must verify: (a) sRGB ICC profile
   embedded in source PNG, (b) DX10 extended header present in DDS with correct DXGI_FORMAT
   (BC1_UNORM_SRGB = 72 for DXT1 atlas; BC3_UNORM_SRGB = 78 for DXT5 atlas), (c) 8 px
@@ -742,7 +822,7 @@ placeholder paint-over content with hand-authored or baked detail.
 
 ##### 2b. Vehicle Texture Rework
 
-- [x] **Diffuse atlas** — `vehicles_diffuse_atlas_d.png` (2048×2048 source) →
+- [ ] **Diffuse atlas** — `vehicles_diffuse_atlas_d.png` (2048×2048 source) →
   `vehicles_diffuse_atlas_d.dds` (DXT1 sRGB, 4-mip): rework vehicle liveries to production
   quality. Required per-vehicle surface detail: panel gaps and door seams (inset dark line
   ~1–2 px wide separating body panels); wheel disc markings (hub cap pattern or alloy spoke
@@ -765,7 +845,7 @@ placeholder paint-over content with hand-authored or baked detail.
   (ref: `architecture/asset-standards/2d-texture-standards.md` §DDS Authoring Pipeline,
   `architecture/asset-standards/building-atlas-layout.md` §Vehicle Atlas)
 
-- [x] **Sprite atlas** — `vehicles_sprite_atlas_d.png` (256×256 source) →
+- [ ] **Sprite atlas** — `vehicles_sprite_atlas_d.png` (256×256 source) →
   `vehicles_sprite_atlas_d.dds` (DXT5, linear, 1 mip level (DDS dwMipMapCount=1,
   GL_TEXTURE_MAX_LEVEL=0, base level only)): author roof colour-swatch palette for
   LOD2 impostors per vehicle type. Each 16×16 px sprite cell must be a solid fill of the
@@ -777,7 +857,7 @@ placeholder paint-over content with hand-authored or baked detail.
   `tools/export_textures.py`.
   (ref: `architecture/asset-standards/building-atlas-layout.md` §Vehicle Sprite Atlas)
 
-- [x] **Normal atlas** — `vehicles_normal_atlas_n.png` (2048×2048 source) →
+- [ ] **Normal atlas** — `vehicles_normal_atlas_n.png` (2048×2048 source) →
   `vehicles_normal_atlas_n.dds` (DXT5nm, linear, 4-mip): author vehicle surface normal maps
   with per-vehicle-type surface detail requirements:
   - **Car variants** (sedan, hatchback, SUV): bonnet crease — a single longitudinal
@@ -798,7 +878,7 @@ placeholder paint-over content with hand-authored or baked detail.
   `tools/export_textures.py`.
   (ref: `architecture/asset-standards/2d-texture-standards.md`)
 
-- [x] **`validate_assets.py` checks #25–27 — vehicle atlas DDS verification**: as part of
+- [ ] **`validate_assets.py` checks #25–27 — vehicle atlas DDS verification**: as part of
   completing this deliverable, the `cicd-dev-github` engineer adds three new checks to
   `validate_assets.py` for vehicle atlas DDS format and mip-level validation:
   check #25 (`vehicles_diffuse_atlas_d.dds` — BC1_UNORM_SRGB, 4-mip, 2048×2048),
@@ -809,15 +889,21 @@ placeholder paint-over content with hand-authored or baked detail.
   (ref: `architecture/ci-cd/github-actions-workflow.md`,
   `architecture/asset-standards/2d-texture-standards.md`)
 
-- [x] **Guard steps for checks #25–30 in `validate-assets` CI job** — add `Verify check_N present`
-  guard steps to `.github/workflows/ci.yml` for checks #25 through #30, following the
-  established pattern for checks #21–24. Each guard step runs
-  `grep -q "check_N" tools/validate_assets.py || exit 1`. These six steps are additive —
-  they do NOT replace or modify any existing guard steps. Placed in the `validate-assets`
-  job only (not `build-linux`).
+- [ ] **Guard steps for checks #25–30 in `validate-assets` CI job** — add `Verify check_N present`
+  guard steps to `.github/workflows/ci.yml` for checks #25 through #30. Each guard step
+  must use the **verbose form** documented in
+  `architecture/ci-cd/github-actions-workflow.md` lines 726–766: an inline YAML comment
+  describing what the check validates, a `run:` block that calls
+  `grep -q "check_N" tools/validate_assets.py || (echo "FAIL: check_N not found in validate_assets.py — Phase 11d [description]" && exit 1)`,
+  and a trailing `echo "PASS: check_N present"` line. The simplified
+  `grep -q "check_N" tools/validate_assets.py || exit 1` form (used by earlier phases)
+  must NOT be used for checks #25–30 — it omits the failure description and pass
+  confirmation required by the canonical spec. These six steps are additive — they do
+  NOT replace or modify any existing guard steps. Placed in the `validate-assets` job
+  only (not `build-linux`).
   (ref: `architecture/ci-cd/github-actions-workflow.md`)
 
-- [x] **`graphics-artist-2d-texture` sign-off gate — vehicles** (blocking): before
+- [ ] **`graphics-artist-2d-texture` sign-off gate — vehicles** (blocking): before
   committing any reworked vehicle atlas PNG or DDS, `graphics-artist-2d-texture` must
   verify: (a) DX10 sRGB header present in `vehicles_diffuse_atlas_d.dds`
   (BC1_UNORM_SRGB, DXGI_FORMAT = 72), (b) at least four distinct car body colours present
@@ -837,7 +923,7 @@ placeholder paint-over content with hand-authored or baked detail.
 
 ##### 2c. Billboard Atlas Rework
 
-- [x] **Billboard atlases** (`res_low_01_billboard.dds` through `res_low_04_billboard.dds`,
+- [ ] **Billboard atlases** (`res_low_01_billboard.dds` through `res_low_04_billboard.dds`,
   `com_low_01_billboard.dds` through `com_low_04_billboard.dds`, etc. — one per Low/Med-density
   zone variant plus one per service building type; **28 files total**: 24 zone billboard files
   (Low and Med density across 3 zone types × 4 variants each) + 4 service billboard files.
@@ -882,16 +968,41 @@ placeholder paint-over content with hand-authored or baked detail.
   may be visually indistinguishable.
   (ref: `architecture/asset-standards/2d-texture-standards.md` §Billboard Imposter Atlas)
 
-- [x] **`validate_assets.py` check #30 — billboard atlas format and mip verification**:
+- [ ] **`validate_assets.py` check #30 — billboard atlas format and mip verification**:
   for each `*_billboard.dds` file, verify: (a) DDS dimensions are exactly 1024×128 px,
   (b) DX10 header present with DXGI_FORMAT BC3_UNORM_SRGB (value 78), (c) DDS
-  `dwMipMapCount` field equals exactly 4, (d) total file size matches the reference size
-  for DXT5/BC3 1024×128 at 4 mip levels (192,640 bytes per
+  `dwMipMapCount` field is >= 4 (nvcompress generates a full mip chain beyond 4 levels
+  which is valid when clamped at GL_TEXTURE_MAX_LEVEL=3; a strict == 4 check would
+  incorrectly reject valid nvcompress-authored atlases — see
+  `architecture/asset-standards/2d-texture-standards.md` §Billboard Imposter Atlas),
+  (d) total file size matches the reference size for DXT5/BC3 1024×128 at 4 mip levels
+  (192,640 bytes per
   `architecture/asset-standards/2d-texture-standards.md` §DDS Mip Chain Integrity).
   Check #30 must pass for all billboard atlases before Deliverable 2c is considered
   complete.
   (ref: `architecture/ci-cd/github-actions-workflow.md`,
   `architecture/asset-standards/2d-texture-standards.md`)
+
+- [ ] **`graphics-artist-2d-texture` sign-off gate — billboards** (blocking): before
+  committing any reworked billboard atlas PNG or DDS, `graphics-artist-2d-texture` must
+  verify: (a) DDS format is DXT5 sRGB (BC3_UNORM_SRGB, DXGI_FORMAT = 78 with DX10
+  extended header), (b) atlas dimensions are exactly 1024×128 px, (c) `dwMipMapCount`
+  field is >= 4, (d) 8 px border respected on all per-frame cell edges — no content
+  bleeds into the border strip of any of the 8 frames in the atlas, (e) each billboard
+  frame achieves >= 60% silhouette fill within its 128×128 px cell (building mass is
+  clearly identifiable at LOD2 viewing distance — frames where the building occupies
+  less than 60% of frame height indicate an incorrect camera distance or elevation
+  during bake), (f) the four variants per zone-tier are visually distinct from each
+  other in the billboard frames — no two variants within the same zone-tier may reduce
+  to the same silhouette (verify by side-by-side comparison of all four atlases for
+  each zone/tier, e.g. `res_low_01_billboard.dds` through `res_low_04_billboard.dds`),
+  (g) bake angle matches the spec: 8 azimuths at 45° increments, camera pitch = −45°
+  (45° below horizontal) per `architecture/asset-standards/2d-texture-standards.md`
+  §Billboard Imposter Atlas — verify by inspecting the rendered shadow direction and
+  apparent foreshortening in the baked frames against the reference renders at each
+  azimuth.
+  Sign-off recorded as commit-message annotation on the first reworked billboard commit.
+  (ref: `architecture/asset-standards/2d-texture-standards.md`)
 
 ---
 
@@ -964,10 +1075,9 @@ along road paths, and intersection signal state shown at road nodes.
   listener position (per `IRenderer::getListenerPosition()` defined in Phase 10) are
   spawned as scene nodes. Agents outside cull range are tracked in simulation but have no
   scene node. On spawn, `spawnVehicleAgent` is called; on despawn (timeout or exit cull
-  range), `despawnVehicleAgent` is called. This matches the vehicle-engine-audio 150 m cull
-  established in Phase 10. Before implementing, confirm this value matches the vehicle-audio
-  cull distance in `architecture/audio-architecture/dynamic-soundscape.md`; if values differ,
-  use the audio spec value as binding authority.
+  range), `despawnVehicleAgent` is called. Vehicle engine SFX are culled at 150 m per
+  `architecture/audio-architecture/dynamic-soundscape.md` §Vehicle Engine Audio. This value
+  is binding and must not be changed without an audio spec amendment.
   (ref: `architecture/game-design/traffic-system.md`,
   `architecture/audio-architecture/dynamic-soundscape.md`)
 
@@ -1125,13 +1235,18 @@ is selected, and a coverage overlay layer on the minimap.
 ##### 4a. Service Coverage Radius Overlay
 
 - [ ] **`IRenderer::showServiceCoverageOverlay(tileX, tileZ, ServiceBuildingType,
-  bool degraded)`** — renders a wireframe circle (or tile-step polygon) on the terrain at the
-  specified building's coverage radius. Radius values come directly from the spec:
-  Fire Station 800 m, Police Station 600 m, Water Tower 700 m, Power Plant uses BFS footprint
-  (not a circle — highlight covered tiles individually). When `degraded == true`, the overlay
-  radius is halved for radius-based buildings (per
-  `architecture/game-design/service-coverage.md` §Budget deficit degradation).
-  (ref: `architecture/game-design/service-coverage.md`)
+  bool degraded)`** — renders a tile-step polygon on the terrain at the specified building's
+  coverage radius. Radius values come directly from the spec: Fire Station 800 m, Police
+  Station 600 m, Water Tower 700 m, Power Plant uses BFS footprint (not a circle — highlight
+  covered tiles individually). When `degraded == true`, the overlay radius is halved for
+  radius-based buildings (per `architecture/game-design/service-coverage.md` §Budget deficit
+  degradation). **Material requirement**: the overlay mesh MUST use
+  `PolygonOffsetFactor = −1` and `PolygonOffsetMode = EPO_FRONT` (same as intersection
+  signal billboards — `architecture/graphics-architecture/scene-graph-ownership.md`
+  §Intersection Signal Billboard Registry) to prevent z-fighting against terrain across
+  chunk boundaries. Do NOT use the screenspace projection approach.
+  (ref: `architecture/game-design/service-coverage.md`,
+  `architecture/graphics-architecture/scene-graph-ownership.md`)
 
 - [ ] **`IRenderer::hideServiceCoverageOverlay()`** — removes the coverage overlay. Called
   when the Inspector panel is closed or a different tile is queried.
@@ -1512,6 +1627,9 @@ initiate a placement click on an occupied tile.
   the baseline being reworked; `placeVehicle` scene-node infrastructure is in place)
 - Requires Phase 9b complete (`IRenderer::setTileHoverHighlight`, `InspectorPanel::populate`,
   `ActiveTool` dispatch — used by service coverage overlay wiring)
+- Requires Phase 8 complete (colorblind mode toggle and pattern overlay infrastructure
+  present in the Settings panel — needed for Deliverable 4b colorblind pattern rendering
+  on the service coverage minimap overlay)
 - Requires Phase 6 complete (`CitySimulation` traffic simulation and service coverage
   simulation fully implemented; `ICitySimulation` interface with `placeServiceBuilding` and
   all placement APIs present)

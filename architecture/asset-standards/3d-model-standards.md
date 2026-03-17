@@ -9,7 +9,7 @@
 
 | Asset category | LOD0 (near) | LOD1 (mid) | LOD2 (far) |
 |---|---|---|---|
-| Large buildings (general) | 4,000–8,000 tris | 800–1,500 tris | 400–600 tris |
+| Large buildings (general) | 4,000–8,000 tris | 1,000–1,500 tris | 400–600 tris |
 | Large buildings — Commercial High only (skyscrapers) | 7,000–10,000 tris | 1,200–2,000 tris | 500–700 tris |
 | Small buildings / props (height\_floors <= 3) | 1,500–3,000 tris | 200–400 tris | Billboard (point-sprite only) |
 | Small buildings / props (height\_floors >= 4) | 1,500–3,000 tris | 200–400 tris | 400–600 tris (`_lod2.b3d` geometry shell) |
@@ -516,6 +516,224 @@ delivery. No 3D model asset is on the Phase 10 critical path.
   ```
 
   The export validation script reads this registry when checking vehicle UV channel 0 coordinates (check #10). A vehicle with no registry entry fails validation. A vehicle with UV coordinates outside its assigned cell fails validation. **Atlas UV calculation**: For a cell at (row R, col C) on a 4×4 grid, the atlas UV range is `U ∈ [C/4, (C+1)/4]`, `V ∈ [R/4, (R+1)/4]`. **V-axis origin convention (OpenGL)**: This formula uses **OpenGL UV convention** — V origin is at the bottom-left of the atlas; V increases upward; row 0 (R=0) is the BOTTOM row. DDS files store texels top-row-first, and Blender's UV editor shows V=0 at the top. Artists authoring vehicle UV islands in Blender must apply V-flip (`V_opengl = 1 − V_blender`) before mapping to atlas cells. The export validation script must use the OpenGL convention when checking UV coordinates against assigned cells.
+
+## Building Variant Geometry Standards
+
+This section is the canonical reference for per-variant geometry requirements for all V1 zone
+building sets. Each zone-tier combination requires exactly four geometry variants with distinct
+architectural vocabularies. A player must be able to identify the zone type and distinguish
+individual variants from mesh shape alone, without colour or texture cues.
+
+**Inter-variant differentiation is mandatory**: the four variants within each zone-tier must each
+differ from every other variant in at least one structural dimension (roof form, massing, external
+additions, or boundary treatment). A city block containing all four variants must not contain any
+two buildings that look alike when viewed from 60 m (large buildings) or from street-level view
+(small buildings).
+
+**Building atlas**: all four variants of the same zone-tier share the same wall-module atlas cell.
+Only mesh geometry and UV placement within the shared cell differ between variants (consistent with
+`architecture/asset-standards/building-atlas-layout.md`).
+
+### Residential Low
+
+Floor count: `height_floors` 1 or 2 (`height_floors <= 3` small building tier). Variants within
+this tier may use different values within the range; height difference is the primary
+silhouette-variation tool.
+
+- **`res_low_01`** (flat-roof block): flat parapet roof, single AC condenser on parapet, no garden
+  (tarmac forecourt), utility meter box geometry on facade.
+- **`res_low_02`** (villa): metallic standing-seam pitched roof (gabled or hipped), carport lean-to
+  on side, front garden with rendered perimeter wall and iron gate.
+- **`res_low_03`** (cottage): clay-tile pitched roof, brick chimney stub, covered front porch
+  canopy, timber-post garden fence.
+- **`res_low_04`** (red-brick): steeply-pitched metal-tile roof with single dormer window, narrow
+  chimney, low brick boundary wall at plot edge (no garden).
+
+Primary differentiators: roof form (flat vs. pitched; gabled vs. hipped; dormer count), external
+additions (carport, AC condenser), and boundary treatment (fence vs. wall vs. no enclosure).
+
+### Residential Medium
+
+Floor count: `height_floors` 2 or 3 (`height_floors <= 3` small building tier).
+
+- **`res_med_01`** (2-storey block): flat parapet roof, external staircase on side facade to
+  rooftop terrace, clustered AC condensers on parapet, tarmac apron.
+- **`res_med_02`** (2-storey villa): hipped metal roof in seafoam-green, full wrap-around
+  first-floor balcony with rendered balustrade, rendered perimeter wall with iron gate,
+  kidney-pool geometry in garden.
+- **`res_med_03`** (2-storey cottage): clay-tile hipped roof with dormer windows, brick chimney,
+  full-width covered balcony on first floor, wrought-iron fence with brick piers.
+- **`res_med_04`** (3-storey red-brick): pitched black metal roof with pair of dormers, projecting
+  bay window on first floor, low brick garden wall at plot edge.
+
+Primary differentiators: roof form (flat vs. hipped; dormer count), external additions (staircase,
+balcony, pool), and boundary treatment (fence vs. wall vs. no enclosure).
+
+### Residential High
+
+Floor count: `height_floors` 5–10 (`height_floors >= 4` large building tier). The four variants
+must span at least a 3-floor range (e.g. 5, 7, 8, 10 floors) to produce readable skyline height
+variation. No two variants may share the same `height_floors` value.
+
+LOD0 target: 6,000–8,000 tris. LOD1 must retain balcony slab extrusion profile (single flat slab
+per floor band, no railing geometry) and preserve height variation across all four variants.
+
+- **`res_high_01`** (flat-roof concrete slab): flat parapet roof, smooth render exterior, row of AC
+  condenser units on parapet (min 6 units, boxy geometry), punched window grid, ground-floor entry
+  canopy slab projecting from recessed lobby.
+- **`res_high_02`** (stepped-setback form): upper 2 floors set back on min 2 sides (visible ledge
+  profile at each step), corner tower element rising one floor above main roof, ground-floor
+  colonnade (min 4 columns with visible spacing), pool basin geometry in walled courtyard.
+- **`res_high_03`** (full-height curtain-wall tower): cantilevered balcony slabs at each floor
+  (20–35 cm overhang), alternating vertical sunshield fin geometry (one fin per 1.5–2 m of facade
+  width), small rooftop plant room.
+- **`res_high_04`** (flat-fronted concrete slab): plainest massing of the four (board-form texture
+  drives variant identity); recessed loggia balcony per floor (fully recessed behind facade plane,
+  min 0.8 m depth), horizontal spandrel band geometry between floors, ground-floor retail strip
+  with wider openings.
+
+Primary differentiators: rooftop silhouette (AC condenser deck vs. stepped setback vs. curtain-wall
+balcony tower vs. loggia slab) and footprint aspect ratio (narrow-tower vs. wider-slab massing).
+
+### Commercial Low
+
+Floor count: `height_floors` 1 or 2 (`height_floors <= 3` small building tier).
+
+- **`com_low_01`** (convenience store): flat parapet roof, full-width glazed shopfront, projecting
+  sign board above entrance (flat slab geometry, min 0.4 m depth), 3-bay parking apron.
+- **`com_low_02`** (café): flat roof, canvas awning frame over entrance and side terrace
+  (bracket-and-valance profile), café table and chair props, flower-pot props flanking door.
+- **`com_low_03`** (auto garage): corrugated metal facade, two wide roll-up shutter doors, open
+  forecourt (no awning), tyre prop stacks against side wall.
+- **`com_low_04`** (supermarket): flat parapet roof, full-width glazed shopfront with recessed
+  covered walkway canopy, freestanding trolley-bay shelter geometry in parking apron.
+
+Primary differentiator: building programme (convenience store vs. café vs. garage vs. supermarket)
+produces inherently different shopfront and roof configurations.
+
+### Commercial Medium
+
+Floor count: `height_floors` 2 or 3 (`height_floors <= 3` small building tier).
+
+- **`com_med_01`** (strip mall): flat roof with HVAC unit props, continuous glazed shopfronts on
+  ground floor, upper floor with ribbon windows, large parking apron with bay markings, multiple
+  fascia sign panels.
+- **`com_med_02`** (boutique hotel): flat or low-pitched roof, juliet balcony railings on every
+  upper floor window, fabric canopy frame over main entrance, ornamental bracket geometry above
+  ground-floor window lintels.
+- **`com_med_03`** (corner bank): flat roof with projecting cornice band, paired pilaster strips at
+  facade corners, arched window openings flanking entrance, revolving door recess (min 3 bays),
+  shallow front setback.
+- **`com_med_04`** (office block): glass curtain-wall facade (3 floors), flat roof with plant room
+  behind louvred parapet screen, recessed ground-floor entrance under projecting concrete canopy
+  slab.
+
+Primary differentiator: building programme (strip mall vs. hotel vs. bank vs. office block)
+produces inherently different shopfront and roof configurations.
+
+### Commercial High
+
+Floor count: `height_floors` 15–30 (skyscraper exception — these are tall glass landmark
+buildings, NOT subject to the standard 5–10 floor range for High-tier buildings). The four variants
+must span at least a 10-floor range (e.g. 15, 20, 25, 30 floors). No two variants may share the
+same `height_floors` value.
+
+LOD0 target: 8,000–10,000 tris (elevated budget reflecting landmark status). LOD1 must retain the
+variant-specific crown silhouette (spire, antenna cluster, tapered top, or ziggurat steps must
+still be readable at LOD1 polygon count).
+
+All four `com_high` variants must have: a unique crown treatment distinguishable by silhouette from
+skyline distance; ground floor grand entrance lobby canopy geometry (projecting flat canopy slab,
+min 4 m wide × 1.5 m deep); multi-bay revolving door recess (min 3 door bays, each min 1.2 m wide
+× 2.2 m tall, recessed min 0.4 m); podium base geometry (a wider base volume, min 1.5 m taller
+than street level, set back from the tower shaft above); facade floor-to-ceiling curtain-wall
+mullion grid throughout the full height (thin vertical and horizontal extrusions, not painted
+lines); expressed structural core visible on the exterior (a thickened central or corner volume
+carrying vertical columns proud of the curtain wall face by min 5 cm).
+
+Four distinct form vocabularies — one per variant:
+
+- **`com_high_01`** (spire tower): narrow glass tower with a spire crown — slender rectangular
+  shaft tapering to a spire pinnacle at rooftop; floor plate consistent throughout height.
+- **`com_high_02`** (slab with antenna cluster): wide slab with setback upper floors and an antenna
+  cluster crown — lower 60% is a broad rectangular slab; upper 40% steps back on at least two
+  sides; antenna cluster of 3–5 vertical rods of varying heights at the roof centre.
+- **`com_high_03`** (tapered pyramid): tapered pyramid form with chamfered corners — floor plate
+  reduces uniformly from base to crown, each floor stepping inward ~0.3–0.5 m; all four vertical
+  corners are chamfered throughout the full height.
+- **`com_high_04`** (stepped ziggurat): stepped ziggurat with floor-plate reductions every 3–4
+  floors — distinct horizontal ledge at every setback step, min 4 step levels visible from ground
+  to crown.
+
+### Industrial Low
+
+Floor count: `height_floors` 1 or 2 (`height_floors <= 3` small building tier).
+
+- **`ind_low_01`** (corrugated metal warehouse): mono-pitch or flat shed roof, corrugated metal
+  wall panel ribs (min 8 parallel extrusions on principal facade), wide roll-up shutter loading
+  doors, lean-to office annexe on one end, truck dock geometry with yellow kerb marker.
+- **`ind_low_02`** (brick workshop): flat felted roof with parapet, brick wall (no corrugated
+  ribs), roller-shutter entrance, tyre prop stacks, hand-painted sign board above entrance.
+- **`ind_low_03`** (sawtooth factory): sawtooth roofline with min 2 asymmetric north-light ridges
+  (highly distinctive stepped profile — primary zone identifier for this variant), chimney stack on
+  gable end, chain-link fence perimeter.
+- **`ind_low_04`** (storage yard): small flat-roof gatehouse as primary mesh anchor (min 3 m × 3 m
+  footprint), two-high shipping container stacks (rectangular box props in 3 distinct tints),
+  chain-link fence perimeter, floodlight mast.
+
+Primary differentiators: shed type (corrugated metal warehouse vs. brick workshop vs. sawtooth
+factory vs. storage yard) — roof profile is the primary identifier (mono-pitch shed, flat parapet,
+sawtooth ridgeline, or gatehouse anchor).
+
+### Industrial Medium
+
+Floor count: `height_floors` 2 or 3 (`height_floors <= 3` small building tier).
+
+- **`ind_med_01`** (flat-roof factory): flat roof with two concrete chimney stacks above parapet
+  (round or rectangular section, min 2 m above roof), ground-floor loading bays (min 2 bays),
+  metal-railed access walkway along second-floor facade.
+- **`ind_med_02`** (steel-frame warehouse): exposed structural steel frame visible on the exterior
+  (at least corner columns proud of the cladding), notably wider footprint than `ind_med_01`,
+  fire-escape staircase on gable end, elevated covered walkway connecting two building wings.
+- **`ind_med_03`** (brick mill): flat roof with rooftop cylindrical water tank on a steel support
+  frame, large multi-pane industrial windows (wider proportions than `ind_low_02`), arched window
+  head lintels, cast-iron fire escapes on rear facade.
+- **`ind_med_04`** (distribution centre): compact square footprint (notably wider than it is tall),
+  loading docks on two perpendicular sides with dock shelter hoods, elevated gatehouse booth at
+  site entrance, extensive concrete truck apron.
+
+Primary differentiators: structural type (flat-roof factory vs. steel-frame warehouse vs. brick
+mill vs. distribution centre) — roof form and structural expression drive differentiation.
+
+### Industrial High
+
+Floor count: `height_floors` 5–10 (`height_floors >= 4` large building tier). The four variants
+must span at least a 3-floor range. No two variants may share the same `height_floors` value.
+
+LOD0 target: 6,000–8,000 tris. LOD1 must retain rooftop plant-room box and zone-defining silhouette
+features at simplified fidelity.
+
+All Industrial High variants must also include: setback modelling at each floor band and rooftop
+equipment silhouettes (AC units, antennae stubs).
+
+- **`ind_high_01`** (concrete tower with chimney stacks): plain concrete tower with board-form
+  banding, two tall chimney stacks rising well above roofline (each min 3 m above parapet), small
+  punched windows with expressed lintels, rooftop service structure.
+- **`ind_high_02`** (exposed steel frame with pipe runs): exposed steel-frame structure, external
+  pipe runs of two distinct diameters along full facade height (large-bore: ~0.3 m diameter;
+  small-bore: ~0.1 m diameter), spherical pressure vessel at mid-height (min 2 m diameter),
+  wide-base cooling tower volume on one side.
+- **`ind_high_03`** (silo cluster): cluster of cylindrical silos (min 3 cylinders, each 3–5 m
+  diameter), silo cluster height equivalent to 7 floors; corrugated metal conveyor bridge
+  connecting silo tops; elevator head house at one end of bridge — the circular silhouette is the
+  primary identifier.
+- **`ind_high_04`** (grating-platform refinery): grating-platform horizontal bands at every floor,
+  dense roof-level pipe rack (min 5 horizontal pipe members visible in elevation), flare stack
+  rising from one corner (min 4 m above roof), large industrial louvred panels in place of
+  windows, hazard-stripe banding on structural posts at base.
+
+Primary differentiators: rooftop silhouette (chimney stacks vs. pipe runs vs. silo cluster vs.
+grating-platform refinery) and floor-band setback count.
 
 <!-- SIGN-OFF: graphics-artist-3d-model 2026-02-27 — confirmed: all 20 export validation checks present and correct; naming convention <zone>_<tier>_<variant>_lod<N>.<ext>; pivot at base center Y=0; 5 mm Y-axis vertical extent tolerance (max vertex deviation from Y=0 bottom or Y=3.0 top per floor module); 10-floor hard cap; collision mesh dispatch order confirmed — (1) _col_0.obj: multi-convex set, (2) _col_circle.obj: N-sided circular prism, (3) _col.obj: single convex hull, (4) none: log error; dispatch prevents _col_0 shadowing _col on dual-suffixed assets; billboard floor count limit (height_floors <= 3 uses billboard imposter, >= 4 uses _lod2.b3d); LOD2 pivot conformance (base-center identical to LOD0/LOD1); Blender export axis (-Z Forward, Y Up); asset formats .b3d (animated/rigged), .obj (collision/static). Atlas mip chain clamping (4 levels) is documented in building-atlas-layout.md and 2d-texture-standards.md — outside the scope of this document but verified as present. Phase 9 may proceed. -->
 
