@@ -368,6 +368,7 @@ WALL_CELLS = {
     ("svc", "water_tower"):    (4, 7),
 }
 ROOF_CELL = (5, 0)  # shared roof cell — row 5 (reserved range) per building-atlas-layout.md
+SOLID_WALL_CELL = (5, 6)  # plain brick, no windows — used for gable ends
 
 # Phase 11f ground-feature atlas cells — row 5, cols 1-5
 GROUND_CELLS = {
@@ -623,13 +624,20 @@ def _add_horizontal_band(m, wall_row, wall_col,
 
 
 def _add_gabled_roof(m, wall_row, wall_col, roof_row, roof_col,
-                     xmin, xmax, y_base, ridge_h, zmin, zmax):
+                     xmin, xmax, y_base, ridge_h, zmin, zmax,
+                     gable_row=None, gable_col=None):
     """
     Gabled (two-slope) pitched roof.
     Ridge runs along X axis from (xmin, ridge_y, cz) to (xmax, ridge_y, cz).
     Front slope faces -Z; back slope faces +Z.
     Gable ends (triangles) on X=xmin and X=xmax sides.
+
+    gable_row/gable_col: atlas cell for the two end triangles. Defaults to
+    SOLID_WALL_CELL (plain brick, no windows) so triangular gable faces do not
+    show clipped window geometry from the wall texture.
     """
+    if gable_row is None:
+        gable_row, gable_col = SOLID_WALL_CELL
     cz = (zmin + zmax) * 0.5
     ridge_y = y_base + ridge_h
     # Front slope quad: bottom edge at Z=zmin, ridge at centre Z
@@ -648,15 +656,17 @@ def _add_gabled_roof(m, wall_row, wall_col, roof_row, roof_col,
     )
     # Left gable triangle (X=xmin): CCW from outside (from -X)
     # Viewed from -X: zmin→zmax is left→right, base→ridge is bottom→top
+    # Use gable_row/col (solid brick, no windows) so the triangular end face
+    # does not show clipped window geometry from the wall texture.
     m.add_tri(
         (xmin, y_base, zmin), (xmin, y_base, zmax), (xmin, ridge_y, cz),
-        (-1, 0, 0), wall_row, wall_col
+        (-1, 0, 0), gable_row, gable_col
     )
     # Right gable triangle (X=xmax): CCW from outside (from +X)
     # Viewed from +X: zmax→zmin is left→right
     m.add_tri(
         (xmax, y_base, zmax), (xmax, y_base, zmin), (xmax, ridge_y, cz),
-        (1, 0, 0), wall_row, wall_col
+        (1, 0, 0), gable_row, gable_col
     )
 
 
@@ -1039,11 +1049,22 @@ def _build_res_low(zone, tier, variant, lod):
         # Chimney box
         chw = 0.8*S/2
         _add_chimney(m, wr, wc, rr, rc, 0.0, 0.0, bh + ridge_h*0.5, 2*S, hw=chw)
-        # Porch slab
-        porch_d = 1.5*S
-        porch_w = 2.0*S
-        porch_y = 3.0*S
-        m.add_box(-porch_w/2, porch_w/2, porch_y, porch_y+0.2*S, -hz-porch_d, -hz, wr, wc)
+        # Entrance canopy — visible from ~65 m camera distance.
+        # Slab at door-head height; depth clamped within tile footprint.
+        canopy_y0 = bh * 0.55
+        canopy_y1 = canopy_y0 + 0.5*S   # 5 cm thick — readable from above angle
+        canopy_w = 3*S                   # slightly wider than door
+        canopy_z_inner = -hz             # flush with front wall face
+        canopy_z_outer = -hz - 1.0*S    # 1 step outside front wall, within tile
+        m.add_box(-canopy_w/2, canopy_w/2, canopy_y0, canopy_y1,
+                  canopy_z_outer, canopy_z_inner, wr, wc)
+        # Door step — ground-level flat step for visual entrance marker
+        step_y1 = 0.3*S
+        step_w = 3*S
+        step_z_inner = -hz
+        step_z_outer = -hz - 0.5*S
+        m.add_box(-step_w/2, step_w/2, 0, step_y1,
+                  step_z_outer, step_z_inner, wr, wc)
         _add_ground_quad(m, "tarmac", -5*S, 5*S, -6*S, 6*S)
         return m.to_b3d()
 

@@ -103,7 +103,10 @@ private:
     // Content area origin passed from SettingsPanel layout constants.
     // Matches kContentX / kContentY / kContentW / kLineH from SettingsPanel.cpp.
     static constexpr int kContentX = 360 + 16;  // kSettingsX + 16
-    static constexpr int kContentY = 140 + 50;  // kSettingsY + 50
+    // kContentY must sit below the controls-tab widgets in SettingsPanel:
+    //   Edge Scroll label  y=190..222, Sensitivity label y=226..258, WASD button y=262..294.
+    //   8 px gap → keybindings table starts at 302.
+    static constexpr int kContentY = 302;
     static constexpr int kContentW = 1200 - 32; // kSettingsW - 32
     static constexpr int kLineH    = 32;
     static constexpr int kChipW    = 180;

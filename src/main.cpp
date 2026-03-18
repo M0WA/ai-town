@@ -419,7 +419,12 @@ int main(int argc, char** argv) {
                 if (it == activeAgents.end()) {
                     // New agent: spawn renderer node and acquire audio pair.
                     renderer.spawnVehicleAgent(handle, a.tileX, a.tileZ, a.zone);
-                    auto audioPair = audioSystem.acquireVehicleEnginePair(a.zone);
+                    std::pair<int,int> audioPair{-1, -1};
+                    try {
+                        audioPair = audioSystem.acquireVehicleEnginePair(a.zone);
+                    } catch (const std::exception& e) {
+                        fprintf(stderr, "[main] Audio error (audio disabled): %s\n", e.what());
+                    }
                     AgentAudioState aud;
                     aud.idleIdx = audioPair.first;
                     aud.moveIdx = audioPair.second;

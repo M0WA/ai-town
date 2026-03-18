@@ -150,37 +150,53 @@ GLASS_BLUE = (42, 55, 78)
 
 
 def draw_res_low_01(buf, W, H):
-    """Flat-roof residential block: plain warm brick, utility meter box on facade."""
+    """Detached house: warm brick walls, door + 2 windows, utility meter box.
+
+    UV orientation: face_v=0 → top of PNG → FLOOR level of wall.
+                    face_v=1 → bottom of PNG → CEILING/ROOFLINE level.
+    Layout (top→bottom in PNG = floor→ceiling on wall):
+      [door + meter box]   ← floor level
+      [2 centred windows]  ← mid-wall
+      [parapet cap band]   ← roofline
+    """
     base = (168, 100, 65)
     _fill_rect(buf, W, 0, 0, W, H, *base)
     _brick_coursing(buf, W, H, 0, H, max(2, H * 12 // 512), (135, 78, 48), seed=101)
     _add_noise(buf, W, H, intensity=6, density=0.25, seed=1001)
-    # Flat parapet cap at top 8%
-    cap_h = H * 8 // 100
-    _fill_rect(buf, W, 0, 0, W, cap_h, 148, 142, 130)
-    # Windows: 3 cols x 3 rows, small punched openings
-    ww, wh = W * 55 // 512, H * 62 // 512
-    sp_x = W * 140 // 512
-    sp_y = H * 125 // 512
-    for r in range(3):
-        for c in range(3):
-            wx = W // 8 + c * sp_x
-            wy = cap_h + H * 20 // 512 + r * sp_y
-            _draw_window(buf, W, H, wx, wy, ww, wh, (45, 48, 55),
-                         frame_rgb=(120, 92, 62), frame_w=max(1, W // 256))
-    # Door — plain painted metal
-    dw, dh = W * 72 // 512, H * 85 // 512
-    dx = (W - dw) // 2
-    dy = H - dh - H // 14
-    _fill_rect(buf, W, dx, dy, dx + dw, dy + dh, 55, 62, 75)
-    _fill_rect(buf, W, dx + 2, dy + 2, dx + dw - 2, dy + dh - 2, 42, 48, 60)
-    # Utility meter box: small grey panel to left of door
-    mb_x = dx - W * 50 // 512
-    mb_y = dy + dh // 3
-    mb_w = W * 30 // 512
-    mb_h = H * 35 // 512
+
+    # --- Door: wide, centred, at TOP of PNG → renders at floor level ---
+    # Door is 80px wide (31% of cell = ~1.25 m in a 4 m wall), 155px tall (60%)
+    dw = W * 130 // 512   # 65 px — narrower door
+    dh = H * 310 // 512   # 155 px
+    dx = (W - dw) // 2    # centred: (256-80)//2 = 88
+    dy = H * 8 // 512     # small top margin (~4 px)
+    _fill_rect(buf, W, dx, dy, dx + dw, dy + dh, 100, 65, 25)
+    _fill_rect(buf, W, dx + 2, dy + 2, dx + dw - 2, dy + dh - 2, 75, 45, 15)
+
+    # Utility meter box: small grey panel to the right of door
+    mb_x = dx + dw + W * 15 // 512
+    mb_y = dy + dh // 4
+    mb_w = W * 28 // 512
+    mb_h = H * 40 // 512
     _fill_rect(buf, W, mb_x, mb_y, mb_x + mb_w, mb_y + mb_h, 185, 182, 178)
     _fill_rect(buf, W, mb_x + 2, mb_y + 2, mb_x + mb_w - 2, mb_y + mb_h - 2, 160, 158, 155)
+
+    # --- Two windows flanking the door, same floor level, shorter than door ---
+    # Each window 40px wide, 100px tall; 10px gap from door edge
+    ww = W * 80 // 512           # 40 px wide
+    wh = ww * 8 // 6             # compensate for wall 8S wide × 6S tall → square in world space
+    gap = W * 35 // 512   # slightly wider gap from door
+    wx_left  = dx - gap - ww   # left of door
+    wx_right = dx + dw + gap   # right of door
+    wy = H * 180 // 512        # ~35% up from floor (PNG y=90 → 35% of 256)
+    for wx in (wx_left, wx_right):
+        _draw_window(buf, W, H, wx, wy, ww, wh,
+                     (45, 48, 55), frame_rgb=(120, 92, 62),
+                     frame_w=max(1, W // 256))
+
+    # --- Parapet cap at BOTTOM of PNG → renders at roofline of wall ---
+    cap_h = H * 8 // 100
+    _fill_rect(buf, W, 0, H - cap_h, W, H, 148, 142, 130)
 
 
 def draw_res_low_02(buf, W, H):
@@ -199,7 +215,8 @@ def draw_res_low_02(buf, W, H):
     dado_h = H * 10 // 100
     _fill_rect(buf, W, 0, H - dado_h, W, H, 62, 55, 48)
     # Arched windows: 2 cols x 3 rows
-    ww, wh = W * 62 // 512, H * 72 // 512
+    ww = W * 62 // 512
+    wh = ww
     sp_x = W * 180 // 512
     sp_y = H * 155 // 512
     for r in range(3):
@@ -245,7 +262,8 @@ def draw_res_low_03(buf, W, H):
     _fill_rect(buf, W, ch_x, 0, ch_x + ch_w, H * 35 // 100, 142, 82, 52)
     _brick_coursing(buf, W, H, 0, H * 35 // 100, max(2, H * 10 // 512), (115, 62, 35), seed=1003)
     # Windows: 3 cols x 2 rows — warm frames
-    ww, wh = W * 60 // 512, H * 68 // 512
+    ww = W * 60 // 512
+    wh = ww
     sp_x = W * 148 // 512
     sp_y = H * 145 // 512
     for r in range(2):
@@ -278,7 +296,8 @@ def draw_res_low_04(buf, W, H):
     for y in range(roof_h, H, mj_sp):
         _hline(buf, W, H, y, 0, W, 158, 138, 128)
     # Small punched windows: 2 cols x 3 rows
-    ww, wh = W * 48 // 512, H * 55 // 512
+    ww = W * 48 // 512
+    wh = ww
     sp_x = W * 160 // 512
     sp_y = H * 130 // 512
     for r in range(3):
@@ -309,7 +328,8 @@ def draw_res_med_01(buf, W, H):
     mid_y = H * 50 // 100
     _fill_rect(buf, W, 0, mid_y, W, mid_y + fb_h, 172, 172, 168)
     # Windows 4x4
-    ww, wh = W * 48 // 512, H * 60 // 512
+    ww = W * 48 // 512
+    wh = ww
     sp_x = W * 112 // 512
     sp_y = H * 110 // 512
     for r in range(4):
@@ -365,7 +385,8 @@ def draw_res_med_02(buf, W, H):
             if rail_y + 2 + dy < H:
                 buf[(rail_y + 2 + dy) * W + min(bx, W - 1)] = (35, 32, 28)
     # Windows 3x4, seafoam tinted frames
-    ww, wh = W * 52 // 512, H * 58 // 512
+    ww = W * 52 // 512
+    wh = ww
     sp_x = W * 148 // 512
     sp_y_step = H * 118 // 512
     for r in range(4):
@@ -1833,6 +1854,17 @@ def draw_ground_gravel(buf, W, H):
                     buf[(by + dy) * W + (bx + dx)] = (_clamp(r + dr), _clamp(g + dr * 9 // 10), _clamp(b + dr * 7 // 10))
 
 
+def draw_solid_wall_brick(buf, W, H):
+    """Solid wall brick cell (5,6): plain warm terracotta brick with NO windows or door.
+    Used for gable-end triangles on gabled buildings so the triangular face shows
+    plain brick coursing rather than clipped window geometry from a wall cell.
+    Base colour matches draw_res_low_01 (RGB 168, 100, 65)."""
+    base = (168, 100, 65)
+    _fill_rect(buf, W, 0, 0, W, H, *base)
+    _brick_coursing(buf, W, H, 0, H, max(2, H * 12 // 512), (135, 78, 48), seed=5601)
+    _add_noise(buf, W, H, intensity=6, density=0.25, seed=5602)
+
+
 # ---------------------------------------------------------------------------
 # Cell draw dispatch table
 # ---------------------------------------------------------------------------
@@ -1884,6 +1916,7 @@ CELL_DRAW_FNS = {
     (5, 3): draw_ground_paving,
     (5, 4): draw_ground_tarmac,
     (5, 5): draw_ground_gravel,
+    (5, 6): draw_solid_wall_brick,
 }
 
 RESERVED_COLOR = (72, 72, 72)

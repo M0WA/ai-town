@@ -196,7 +196,7 @@ Z = tileZ * kTileSize
 
 **Service building tile footprint**: Service buildings occupy a single 10×10 m tile in V1. The placed scene node's world X/Z origin is identical to the formula above. The service building mesh extends beyond the 10×10 m tile boundary at LOD0 (up to 30×30 m for a power plant), but the placement origin and collision registration tile are the single 10×10 m origin tile.
 
-**Zone building footprint constraint**: Zone building (res/com/ind) geometry MUST fit within `±BUILDING_HALF_XZ = ±0.45` model units in X and Z (= ±4.5 m world space after `kTileSize` scaling). Any geometry exceeding this boundary will visually intersect adjacent tile buildings. Service buildings are explicitly exempt from this constraint (see service building note above). Authoring rule: use at most `4*S` (0.4 units) as a safe footprint half-extent for zone buildings; the remaining 0.5*S gap provides a visual margin between adjacent buildings.
+**Zone building footprint constraint**: Zone building (res/com/ind) geometry is authored with `±2 m` half-extent in X and Z local space (4 m × 4 m footprint, matching the modular grid unit). `placeBuildingMesh()` and `placeServiceBuildingMesh()` apply `setScale(kTileSize / 4.0f)` = `setScale(2.5f)`, which maps the ±2 m model-space footprint to ±5 m world space — exactly one 10 m tile. Do NOT scale by the bare `kTileSize` (10.0f); that would produce a 40 m × 40 m footprint spanning four tiles. Service buildings share the same ±2 m / 2.5f convention. Any geometry exceeding ±2 m in X/Z will visually intersect adjacent tiles at runtime.
 
 #### `.meta` Sidecar File Format
 

@@ -1298,7 +1298,9 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
             postY + 0.10f,   // 10 cm above terrain — covers tile-edge bleed-back after
                              // neighbour blending; polygon offset is the primary Z-fight defence.
             static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
-        node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
+        // Building assets are authored with half-extent ≤ 4*S = 0.4 model units.
+        // Scale by kTileSize/2 = 5.0f → world half-extent ≤ 2.0 m (4 m footprint per tile).
+        node->setScale(core::vector3df(kTileSize / 2.0f, kTileSize / 2.0f, kTileSize / 2.0f));
 
         // Zone-colour fallback: only applied per-slot when atlas was NOT bound.
         const std::string prefix = (assetBaseName.size() >= 4)
@@ -1982,7 +1984,9 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
             postY + 0.10f,   // 10 cm above terrain — covers tile-edge bleed-back after
                              // neighbour blending; polygon offset is the primary Z-fight defence.
             static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
-        node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
+        // Service building assets share the same authoring convention as zone buildings.
+        // Scale by kTileSize/2 = 5.0f to match the doubled zone-building scale.
+        node->setScale(core::vector3df(kTileSize / 2.0f, kTileSize / 2.0f, kTileSize / 2.0f));
 
         // Zone-colour fallback (amber) for service buildings — only used when
         // the atlas was not successfully bound by BuildingAssetLoader::load().
@@ -2511,30 +2515,20 @@ static std::string vehicleMeshPath(ZoneType zone, AgentHandle handle)
     switch (zone) {
         case ZoneType::Residential: {
             const char* variants[3] = {"car_sedan", "car_hatchback", "car_suv"};
-            return std::string("assets/3d/vehicles/")
+            return std::string(AITOWN_ASSETS_DIR) + "/3d/vehicles/"
                    + variants[handle % 3] + "_lod0.b3d";
         }
         case ZoneType::Commercial:
-            return "assets/3d/vehicles/bus_standard_lod0.b3d";
+            return std::string(AITOWN_ASSETS_DIR) + "/3d/vehicles/bus_standard_lod0.b3d";
         case ZoneType::Industrial:
-            return "assets/3d/vehicles/truck_cargo_lod0.b3d";
+            return std::string(AITOWN_ASSETS_DIR) + "/3d/vehicles/truck_cargo_lod0.b3d";
     }
-    return "assets/3d/vehicles/car_sedan_lod0.b3d";
+    return std::string(AITOWN_ASSETS_DIR) + "/3d/vehicles/car_sedan_lod0.b3d";
 }
 
 void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone)
 {
     if (!m_smgr || !m_driver) return;
-
-    // Distance cull: skip agents > 150 m from listener.
-    {
-        vec3 lpos = getListenerPosition();
-        float wx = static_cast<float>(tileX) * kTileSize + kTileSize * 0.5f;
-        float wz = static_cast<float>(tileZ) * kTileSize + kTileSize * 0.5f;
-        float dx = wx - lpos.x;
-        float dz = wz - lpos.z;
-        if (dx*dx + dz*dz > 150.0f * 150.0f) return;
-    }
 
     // If a node already exists for this handle, despawn first (replace guard).
     if (m_agentNodes.count(handle)) {
@@ -2560,9 +2554,10 @@ void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tile
     node->setPosition(core::vector3df(wx, 0.0f, wz));
     node->setRotation(core::vector3df(0.0f, 0.0f, 0.0f));
 
-    // Apply vehicle atlas texture from the zone-appropriate atlas.
-    // The vehicle atlas is loaded ONCE at renderer init (shared via IVideoDriver texture cache).
-    ITexture* vehicleTex = m_driver->getTexture("assets/textures/vehicles/vehicles_diffuse_atlas_d.dds");
+    // Apply vehicle atlas texture. Use PNG — the DDS atlas uses BC1_UNORM_SRGB
+    // (DXGI format 72) which Irrlicht's DDS loader does not recognise.
+    ITexture* vehicleTex = m_driver->getTexture(
+        (std::string(AITOWN_ASSETS_DIR) + "/textures/vehicles/vehicles_diffuse_atlas_d.png").c_str());
     if (vehicleTex) {
         node->getMaterial(0).setTexture(0, vehicleTex);
     }
@@ -2577,8 +2572,16 @@ void IrrlichtRenderer::moveVehicleAgent(AgentHandle handle, float worldX, float 
     auto it = m_agentNodes.find(handle);
     if (it == m_agentNodes.end()) return;  // no-op if handle not found
 
+    // Sample terrain height at this world position so vehicles sit on the ground.
+    float y = 0.0f;
+    if (m_terrain) {
+        int tileX = static_cast<int>(worldX / kTileSize);
+        int tileZ = static_cast<int>(worldZ / kTileSize);
+        y = m_terrain->getHeightAt(tileX, tileZ);
+    }
+
     IMeshSceneNode* node = it->second;
-    node->setPosition(core::vector3df(worldX, 0.0f, worldZ));
+    node->setPosition(core::vector3df(worldX, y, worldZ));
     node->setRotation(core::vector3df(0.0f, headingDeg, 0.0f));
 }
 
@@ -2611,7 +2614,7 @@ void IrrlichtRenderer::despawnVehicleAgent(AgentHandle handle)
 // Green phase → emissive green SColor(255, 0, 200, 0).
 // Red phase   → emissive red   SColor(255, 200, 0, 0).
 // Material: EMT_TRANSPARENT_ADD_COLOR for emissive glow.
-// PolygonOffsetFactor = -1, PolygonOffsetMode = EPO_FRONT to prevent z-fighting.
+// PolygonOffsetFactor = 1, PolygonOffsetMode = EPO_FRONT to prevent z-fighting.
 // Stored in m_signalNodes keyed by tileX*10000 + tileZ.
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::setIntersectionSignalState(int tileX, int tileZ, SignalPhase phase)
@@ -2644,7 +2647,7 @@ void IrrlichtRenderer::setIntersectionSignalState(int tileX, int tileZ, SignalPh
     buf->Material.Lighting        = false;
     buf->Material.ZWriteEnable    = false;
     buf->Material.EmissiveColor   = signalColour;
-    buf->Material.PolygonOffsetFactor = -1;
+    buf->Material.PolygonOffsetFactor = 1;
     buf->Material.PolygonOffsetDirection = EPO_FRONT;
 
     // Small quad: 0.5 m × 0.5 m centred at (0, 2.5, 0) above the tile.
@@ -2678,7 +2681,7 @@ void IrrlichtRenderer::setIntersectionSignalState(int tileX, int tileZ, SignalPh
         node->getMaterial(0).MaterialType             = EMT_TRANSPARENT_ADD_COLOR;
         node->getMaterial(0).Lighting                 = false;
         node->getMaterial(0).ZWriteEnable             = false;
-        node->getMaterial(0).PolygonOffsetFactor      = -1;
+        node->getMaterial(0).PolygonOffsetFactor      = 1;
         node->getMaterial(0).PolygonOffsetDirection   = EPO_FRONT;
         m_signalNodes[key] = node;
     }
@@ -2689,7 +2692,7 @@ void IrrlichtRenderer::setIntersectionSignalState(int tileX, int tileZ, SignalPh
 //
 // Builds a dynamic SMesh* with tile quads covering the service building's
 // radius. The mesh is owned by a scene node stored in m_coverageOverlayNode.
-// Uses PolygonOffsetFactor = -1, EPO_FRONT for z-fighting prevention.
+// Uses PolygonOffsetFactor = 1, EPO_FRONT for z-fighting prevention.
 //
 // Radius per type (per architecture/game-design/service-coverage.md):
 //   Fire Station:   800 m (400 m when degraded)
@@ -2748,7 +2751,7 @@ void IrrlichtRenderer::showServiceCoverageOverlay(int tileX, int tileZ,
     cur->Material.MaterialType         = EMT_TRANSPARENT_ALPHA_CHANNEL;
     cur->Material.Lighting             = false;
     cur->Material.ZWriteEnable         = false;
-    cur->Material.PolygonOffsetFactor  = -1;
+    cur->Material.PolygonOffsetFactor  = 1;
     cur->Material.PolygonOffsetDirection = EPO_FRONT;
 
     static constexpr u32 kMaxQuadsPerBuffer = 10922u;
@@ -2762,7 +2765,7 @@ void IrrlichtRenderer::showServiceCoverageOverlay(int tileX, int tileZ,
         cur->Material.MaterialType         = EMT_TRANSPARENT_ALPHA_CHANNEL;
         cur->Material.Lighting             = false;
         cur->Material.ZWriteEnable         = false;
-        cur->Material.PolygonOffsetFactor  = -1;
+        cur->Material.PolygonOffsetFactor  = 1;
         cur->Material.PolygonOffsetDirection = EPO_FRONT;
         quadsInCur = 0;
     };
@@ -2893,7 +2896,7 @@ void IrrlichtRenderer::showServiceCoverageOverlay(int tileX, int tileZ,
     if (m_coverageOverlayNode) {
         // Set polygon offset on the scene node's materials.
         for (u32 i = 0; i < m_coverageOverlayNode->getMaterialCount(); ++i) {
-            m_coverageOverlayNode->getMaterial(i).PolygonOffsetFactor    = -1;
+            m_coverageOverlayNode->getMaterial(i).PolygonOffsetFactor    = 1;
             m_coverageOverlayNode->getMaterial(i).PolygonOffsetDirection = EPO_FRONT;
         }
         m_coverageOverlayNode->setPosition(core::vector3df(0.0f, 0.0f, 0.0f));

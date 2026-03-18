@@ -71,7 +71,9 @@ HUD::HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock*
     m_populationLabel = m_backend->addStaticText("Pop: 0", 592, 8, 160, 48);
     m_backend->setElementMonoFont(m_populationLabel);            // numeric: monospace required (phase-10)
     m_backend->setElementTextColor(m_populationLabel, 240, 180, 41); // amber #F0B429 (phase-10c)
-    m_dateLabel       = m_backend->addStaticText("Year 1, Month 1", 760, 8, 200, 48);
+    // w=360: "Year 10, Month 12" (18 chars × ~11px mono) needs ~198px physical;
+    // at 1280×720 physical w = (360×1280)/1920 = 240px → fits comfortably.
+    m_dateLabel       = m_backend->addStaticText("Year 1, Month 1", 760, 8, 360, 48);
     m_backend->setElementMonoFont(m_dateLabel);                  // numeric: monospace required (phase-10)
     m_backend->setElementTextColor(m_dateLabel, 240, 180, 41);      // amber #F0B429 (phase-10c)
 
@@ -99,17 +101,21 @@ HUD::HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock*
     // --- Undo button (x:8-72, y:608-656) ---
     m_btnUndo = m_backend->addButton("Undo", 8, 608, 64, 48);
 
-    // --- Grace period indicator (x:8-1912, y:60-92) ---
-    m_gracePeriodLabel = m_backend->addStaticText("Cost waiver: 120s remaining", 8, 60, 1904, 32);
+    // --- Grace period indicator (x:80-1912, y:60-92) ---
+    // Starts at x=80 (after the 64px-wide toolbar column) so it does not
+    // visually overlap the tool buttons on the left side of the screen.
+    m_gracePeriodLabel = m_backend->addStaticText("Cost waiver: 120s remaining", 80, 60, 1832, 32);
 
-    // --- Demand pressure bars (x:8-72, y:664-744) ---
-    // 3 bars each ~20px wide in the 64px toolbar width
-    m_demandLabelR = m_backend->addStaticText("R",  8,  664, 20, 16);
-    m_demandLabelC = m_backend->addStaticText("C",  30, 664, 20, 16);
-    m_demandLabelI = m_backend->addStaticText("I",  52, 664, 20, 16);
-    m_demandBarR   = m_backend->addStaticText("",   8,  682, 20, 62);
-    m_demandBarC   = m_backend->addStaticText("",   30, 682, 20, 62);
-    m_demandBarI   = m_backend->addStaticText("",   52, 682, 20, 62);
+    // --- Demand pressure bars (x:8-72, y:664-748) ---
+    // 3 bars each ~20px wide in the 64px toolbar width.
+    // Label h=28: at 720p → 18.7px physical (vs 22px font) — less clipped than h=16.
+    // Bars start at y=664+28=692, h=56, end at y=748; active tool below at y=752.
+    m_demandLabelR = m_backend->addStaticText("R",  8,  664, 20, 28);
+    m_demandLabelC = m_backend->addStaticText("C",  30, 664, 20, 28);
+    m_demandLabelI = m_backend->addStaticText("I",  52, 664, 20, 28);
+    m_demandBarR   = m_backend->addStaticText("",   8,  692, 20, 56);
+    m_demandBarC   = m_backend->addStaticText("",   30, 692, 20, 56);
+    m_demandBarI   = m_backend->addStaticText("",   52, 692, 20, 56);
 
     // --- Active tool indicator (x:8-72, y:752-784) ---
     m_activeToolLabel = m_backend->addStaticText("No tool", 8, 752, 64, 32);

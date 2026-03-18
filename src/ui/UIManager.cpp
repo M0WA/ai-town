@@ -1113,21 +1113,11 @@ bool UIManager::doTerrainPlacement(int hitX, int hitZ) {
                              static_cast<DensityTier>(m_selectedDensityTier),
                              earthworksCost);
             if (m_mapTilesX > 0 && m_mapTilesZ > 0) {
-                // Determine overlay colour from zone type.
-                uint32_t overlayColour = 0u;
-                switch (static_cast<ZoneType>(m_selectedZoneType)) {
-                    case ZoneType::Residential: overlayColour = kOverlayArgbResidential; break;
-                    case ZoneType::Commercial:  overlayColour = kOverlayArgbCommercial;  break;
-                    case ZoneType::Industrial:  overlayColour = kOverlayArgbIndustrial;  break;
-                }
-                // Cap overlay map at 100K entries.
-                static constexpr size_t kOverlayCap = 100000u;
+                // placeZone() always places a building immediately — remove the tile from
+                // the overlay so the zone colour doesn't show through/under the building.
                 uint64_t key = static_cast<uint64_t>(hitZ) * static_cast<uint64_t>(m_mapTilesX)
                                + static_cast<uint64_t>(hitX);
-                if (m_overlayMap.size() < kOverlayCap || m_overlayMap.count(key)) {
-                    m_overlayMap[key] = overlayColour;
-                }
-                if (m_renderer) {
+                if (m_overlayMap.erase(key) && m_renderer) {
                     m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
                 }
             }

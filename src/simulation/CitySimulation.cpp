@@ -947,7 +947,19 @@ void CitySimulation::doDensityUnlockTick() {
                 int tx = static_cast<int>(key >> 32);
                 int tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
                 m_renderer->removeBuildingMesh(tx, tz);
-                m_renderer->placeBuildingMesh(tx, tz, zoneAssetBaseName(targetZone, targetDensity));
+
+                // Round-robin variant cycling — same logic as placeZone().
+                int zoneIdx = static_cast<int>(targetZone);
+                int tierIdx = static_cast<int>(targetDensity);
+                int idx     = zoneIdx * 3 + tierIdx;
+                m_buildingVariantCounters[idx]++;
+                int variantNum = ((m_buildingVariantCounters[idx] - 1) % 4) + 1;
+                std::string baseName = zoneAssetBaseName(targetZone, targetDensity);
+                if (baseName.size() >= 2) {
+                    baseName[baseName.size() - 2] = '0';
+                    baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
+                }
+                m_renderer->placeBuildingMesh(tx, tz, baseName);
             }
 
             // Phase 10: sfx_zone_upgrade is non-positional (AL_SOURCE_RELATIVE = AL_TRUE).
@@ -2128,6 +2140,19 @@ QueryResult CitySimulation::queryTile(int tileX, int tileZ) const {
 
     const TileData* tile = findTile(tileX, tileZ);
     if (!tile) {
+        // Check if a service building occupies this tile.
+        for (const ServiceBuilding& sb : m_serviceBuildings) {
+            if (sb.x == tileX && sb.z == tileZ) {
+                switch (sb.type) {
+                    case ServiceType::PowerPlant:    result.serviceType = ServiceBuildingType::PowerPlant;    break;
+                    case ServiceType::WaterTower:    result.serviceType = ServiceBuildingType::WaterTower;    break;
+                    case ServiceType::FireStation:   result.serviceType = ServiceBuildingType::FireStation;   break;
+                    case ServiceType::PoliceStation: result.serviceType = ServiceBuildingType::PoliceStation; break;
+                }
+                result.degraded = sb.degraded;
+                return result;
+            }
+        }
         return result;
     }
 

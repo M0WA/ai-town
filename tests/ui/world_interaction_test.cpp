@@ -576,12 +576,13 @@ TEST_F(WorldInteractionTest, WorldInteraction_HoverHighlight_ClearedOnMiss)
 }
 
 // ---------------------------------------------------------------------------
-// Test 10: ZonePlacement_SparseOverlay_InsertsEntry
+// Test 10: ZonePlacement_NoOverlayInserted
 //
 // Zone tool; pickTerrainTile at (3,4); left-click.
-// m_mapTilesX=10 (set in SetUp), so key = 4*10+3 = 43.
-// After dispatch, captured sparseOverlay must contain {43 -> kOverlayArgbResidential}.
-// (ref: implementation/phase-9b.md Deliverable G)
+// placeZone() immediately places a building, so the zone overlay must NOT be
+// added — overlay is erased (or left empty) on placement, not inserted.
+// setZoneOverlay must NOT be called during zone placement.
+// (ref: implementation/phase-9b.md Deliverable G — overlay erased on placement)
 // ---------------------------------------------------------------------------
 TEST_F(WorldInteractionTest, WorldInteraction_ZonePlacement_SparseOverlay_InsertsEntry)
 {
@@ -594,22 +595,14 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZonePlacement_SparseOverlay_Insert
 
     EXPECT_CALL(sim_, placeZone(3, 4, _, _, 0)).Times(1);
 
-    // Capture the sparseOverlay argument passed to setZoneOverlay.
-    ZoneOverlayMap capturedMap;
-    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
-        .WillOnce(SaveArg<2>(&capturedMap));
+    // setZoneOverlay must NOT be called: placeZone() places a building immediately,
+    // so the overlay entry is erased (not inserted) and the overlay stays empty.
+    // StrictMock will fail if setZoneOverlay is unexpectedly called.
 
     // Zone rect-select: press sets anchor at (3,4); release fills the 1x1 rect.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
-
-    // Assert: exactly one entry; key=43; value=kOverlayArgbResidential (green, 0x6000FF00).
-    ASSERT_EQ(capturedMap.size(), 1u)
-        << "Overlay map must contain exactly one entry after first zone placement";
-    ASSERT_TRUE(capturedMap.count(43u) > 0)
-        << "Key must be tileZ*mapTilesX+tileX = 4*10+3 = 43";
-    EXPECT_EQ(capturedMap.at(43u), static_cast<uint32_t>(kOverlayArgbResidential))
-        << "Value must be kOverlayArgbResidential (0x6000FF00) for Residential zone";
+    // If we reach here without a StrictMock violation, the overlay was not set.
 }
 
 // ---------------------------------------------------------------------------
@@ -632,17 +625,14 @@ TEST_F(WorldInteractionTest, WorldInteraction_Demolish_SparseOverlay_ErasesEntry
 
     EXPECT_CALL(sim_, placeZone(3, 4, _, _, 0)).Times(1);
 
-    // First setZoneOverlay call — after placement (key 43 inserted).
-    ZoneOverlayMap capturedAfterPlace;
-    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
-        .WillOnce(SaveArg<2>(&capturedAfterPlace));
+    // setZoneOverlay must NOT be called on zone placement: building placed immediately,
+    // overlay stays empty (erase on empty map returns 0, condition is false).
 
     // Zone rect-select: press sets anchor at (3,4); release fills the 1x1 rect.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 
-    // Verify placement produced a non-empty map.
-    EXPECT_EQ(capturedAfterPlace.size(), 1u);
+    // After placement the overlay map is still empty (no insertion happened).
 
     // -- Step 2: switch to Demolish tool and demolish (3,4) --
     // (The confirm-before-demolish modal is OFF by design in this test to directly
@@ -683,7 +673,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_NewGameLoad_ClearsOverlay)
         EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
             .WillOnce(DoAll(SetArgReferee<2>(t[0]), SetArgReferee<3>(t[1]), Return(true)));
         EXPECT_CALL(sim_, placeZone(t[0], t[1], _, _, 0)).Times(1);
-        EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(1);
+        // setZoneOverlay NOT called on zone placement (building placed immediately).
         // Zone rect-select: press sets anchor; release fills the 1x1 rect.
         uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
         uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
@@ -790,7 +780,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_SetMapDimensions_Recall_ClearsOver
         EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
             .WillOnce(DoAll(SetArgReferee<2>(i), SetArgReferee<3>(0), Return(true)));
         EXPECT_CALL(sim_, placeZone(i, 0, _, _, 0)).Times(1);
-        EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(1);
+        // setZoneOverlay NOT called on zone placement (building placed immediately).
         // Zone rect-select: press sets anchor; release fills the 1x1 rect.
         uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
         uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
@@ -2094,7 +2084,8 @@ TEST_F(WorldInteractionTest, Coverage_WorldClick_NoTerrainHit_ReturnsFalse)
 }
 
 // ============================================================================
-// Test: Commercial zone placement produces kOverlayArgbCommercial
+// Test: Commercial zone placement does NOT insert into overlay
+// (setZoneOverlay must NOT be called — building appears immediately)
 // ============================================================================
 TEST_F(WorldInteractionTest, Coverage_CommercialZone_OverlayColor)
 {
@@ -2109,21 +2100,15 @@ TEST_F(WorldInteractionTest, Coverage_CommercialZone_OverlayColor)
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(2), SetArgReferee<3>(3), Return(true)));
     EXPECT_CALL(sim_, placeZone(2, 3, ZoneType::Commercial, _, _)).Times(1);
-
-    ZoneOverlayMap captured;
-    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
-        .WillOnce(SaveArg<2>(&captured));
+    // setZoneOverlay must NOT be called: building placed immediately, overlay stays empty.
 
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
-
-    uint64_t key = static_cast<uint64_t>(3) * 10u + static_cast<uint64_t>(2);
-    ASSERT_TRUE(captured.count(key) > 0);
-    EXPECT_EQ(captured.at(key), static_cast<uint32_t>(kOverlayArgbCommercial));
 }
 
 // ============================================================================
-// Test: Industrial zone placement produces kOverlayArgbIndustrial
+// Test: Industrial zone placement does NOT insert into overlay
+// (setZoneOverlay must NOT be called — building appears immediately)
 // ============================================================================
 TEST_F(WorldInteractionTest, Coverage_IndustrialZone_OverlayColor)
 {
@@ -2138,17 +2123,10 @@ TEST_F(WorldInteractionTest, Coverage_IndustrialZone_OverlayColor)
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(1), SetArgReferee<3>(2), Return(true)));
     EXPECT_CALL(sim_, placeZone(1, 2, ZoneType::Industrial, _, _)).Times(1);
-
-    ZoneOverlayMap captured;
-    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
-        .WillOnce(SaveArg<2>(&captured));
+    // setZoneOverlay must NOT be called: building placed immediately, overlay stays empty.
 
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
-
-    uint64_t key = static_cast<uint64_t>(2) * 10u + static_cast<uint64_t>(1);
-    ASSERT_TRUE(captured.count(key) > 0);
-    EXPECT_EQ(captured.at(key), static_cast<uint32_t>(kOverlayArgbIndustrial));
 }
 
 // ============================================================================

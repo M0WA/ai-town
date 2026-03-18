@@ -62,8 +62,8 @@ static bool rectsOverlap(int ax, int ay, int aw, int ah,
 // ---------------------------------------------------------------------------
 ScreenRect InspectorPanel::computePanelPosition(int cursorX, int cursorY,
                                                 const ScreenRect& tileBounds) {
-    constexpr int pw     = 240;
-    constexpr int ph     = 160;
+    constexpr int pw     = kPanelW;  // 340 — matches InspectorPanel::kPanelW
+    constexpr int ph     = kPanelH;  // 280 — matches InspectorPanel::kPanelH
     constexpr int offset = 40;
 
     // Step 1: Primary — right-below cursor
@@ -114,17 +114,23 @@ InspectorPanel::InspectorPanel(IUIBackend* backend, ICitySimulation* sim)
 {
     if (!m_backend) return;
 
-    constexpr int lineH = 20;
+    // Layout constants — sized for legibility at 720p (22px physical font, kLineH virtual).
+    // Row Y positions are relative to panel origin (0, 0) at construction time;
+    // populate() destroys and recreates elements at the actual panel position.
+    constexpr int pad  = 4;   // top/left padding
+    constexpr int lw   = kPanelW - 8;  // label width (4px margin each side)
     // Create elements at origin — we reposition them in show()
-    m_panelBg          = m_backend->addStaticText("",     0, 0,   kPanelW, kPanelH);
-    m_coordsLabel      = m_backend->addStaticText("Tile", 4, 4,   kPanelW - 8, lineH);
-    m_zoneLabel        = m_backend->addStaticText("Zone", 4, 24,  kPanelW - 8, lineH);
-    m_popLabel         = m_backend->addStaticText("Pop",  4, 44,  kPanelW - 8, lineH);
-    m_coverageLabel    = m_backend->addStaticText("Svc",  4, 64,  kPanelW - 8, lineH);
-    m_desirabilityLabel= m_backend->addStaticText("Des",  4, 84,  kPanelW - 8, lineH);
-    m_demandLabel      = m_backend->addStaticText("Dem",  4, 104, kPanelW - 8, lineH);
+    m_panelBg          = m_backend->addStaticText("", 0, 0, kPanelW, kPanelH);
+    m_backend->setElementBackground(m_panelBg, 18, 18, 36, 210); // dark-navy semi-transparent
+    m_coordsLabel      = m_backend->addStaticText("Tile", pad, pad,                  lw, kLineH);
+    m_zoneLabel        = m_backend->addStaticText("Zone", pad, pad +   kLineH,        lw, kLineH);
+    m_popLabel         = m_backend->addStaticText("Pop",  pad, pad + 2*kLineH,        lw, kLineH);
+    // Coverage spans two rows (two lines via '\n'); height = 2×kLineH.
+    m_coverageLabel    = m_backend->addStaticText("Svc",  pad, pad + 3*kLineH,        lw, 2*kLineH);
+    m_desirabilityLabel= m_backend->addStaticText("Des",  pad, pad + 5*kLineH,        lw, kLineH);
+    m_demandLabel      = m_backend->addStaticText("Dem",  pad, pad + 6*kLineH,        lw, kLineH);
     // Staleness line — shown at bottom of panel only when data is > ~1 s old.
-    m_updatedLabel     = m_backend->addStaticText("",     4, 130, kPanelW - 8, lineH);
+    m_updatedLabel     = m_backend->addStaticText("",     pad, pad + 7*kLineH,        lw, kLineH);
 
     hide();
 }
@@ -200,19 +206,22 @@ void InspectorPanel::populate(const QueryResult& result, int tileX, int tileZ,
         if (m_demandLabel != kInvalidUIElement)       { m_backend->removeElement(m_demandLabel);       m_demandLabel = kInvalidUIElement; }
         if (m_updatedLabel != kInvalidUIElement)      { m_backend->removeElement(m_updatedLabel);      m_updatedLabel = kInvalidUIElement; }
 
-        constexpr int lineH = 20;
+        constexpr int pad = 4;
+        constexpr int lw  = kPanelW - 8;
         int bx = pos.x;
         int by = pos.y;
 
-        m_panelBg          = m_backend->addStaticText("",     bx,        by,         kPanelW, kPanelH);
-        m_coordsLabel      = m_backend->addStaticText("Tile", bx + 4,    by + 4,     kPanelW - 8, lineH);
-        m_zoneLabel        = m_backend->addStaticText("Zone", bx + 4,    by + 24,    kPanelW - 8, lineH);
-        m_popLabel         = m_backend->addStaticText("Pop",  bx + 4,    by + 44,    kPanelW - 8, lineH);
-        m_coverageLabel    = m_backend->addStaticText("Svc",  bx + 4,    by + 64,    kPanelW - 8, lineH);
-        m_desirabilityLabel= m_backend->addStaticText("Des",  bx + 4,    by + 84,    kPanelW - 8, lineH);
-        m_demandLabel      = m_backend->addStaticText("Dem",  bx + 4,    by + 104,   kPanelW - 8, lineH);
+        m_panelBg          = m_backend->addStaticText("", bx, by, kPanelW, kPanelH);
+        m_backend->setElementBackground(m_panelBg, 18, 18, 36, 210); // dark-navy semi-transparent
+        m_coordsLabel      = m_backend->addStaticText("Tile", bx+pad, by+pad,               lw, kLineH);
+        m_zoneLabel        = m_backend->addStaticText("Zone", bx+pad, by+pad +   kLineH,    lw, kLineH);
+        m_popLabel         = m_backend->addStaticText("Pop",  bx+pad, by+pad + 2*kLineH,    lw, kLineH);
+        // Coverage spans two rows; height = 2×kLineH for two lines via '\n'.
+        m_coverageLabel    = m_backend->addStaticText("Svc",  bx+pad, by+pad + 3*kLineH,    lw, 2*kLineH);
+        m_desirabilityLabel= m_backend->addStaticText("Des",  bx+pad, by+pad + 5*kLineH,    lw, kLineH);
+        m_demandLabel      = m_backend->addStaticText("Dem",  bx+pad, by+pad + 6*kLineH,    lw, kLineH);
         // Staleness label — hidden until economy data is > ~1 s old.
-        m_updatedLabel     = m_backend->addStaticText("",     bx + 4,    by + 130,   kPanelW - 8, lineH);
+        m_updatedLabel     = m_backend->addStaticText("",     bx+pad, by+pad + 7*kLineH,    lw, kLineH);
         m_backend->setElementVisible(m_updatedLabel, false);
     }
 
@@ -239,7 +248,9 @@ void InspectorPanel::populate(const QueryResult& result, int tileX, int tileZ,
         m_backend->setElementText(m_popLabel, "Pop: " + std::to_string(result.population));
 
         char covBuf[128];
-        std::snprintf(covBuf, sizeof(covBuf), "Fire:%.0f%% Pol:%.0f%% Pwr:%.0f%% Wtr:%.0f%%",
+        // Two-line format via '\n': each line fits within the panel width at 720p.
+        std::snprintf(covBuf, sizeof(covBuf),
+                      "Fire:%.0f%% Pol:%.0f%%\nPwr:%.0f%% Wtr:%.0f%%",
                       result.coverage.fire   >= 0.0f ? result.coverage.fire   : 0.0f,
                       result.coverage.police >= 0.0f ? result.coverage.police : 0.0f,
                       result.coverage.power  >= 0.0f ? result.coverage.power  : 0.0f,
@@ -324,8 +335,9 @@ void InspectorPanel::draw() {
             m_backend->setElementText(m_popLabel, "Pop: " + std::to_string(qr.population));
 
             char covBuf[128];
+            // Two-line format via '\n': each line fits within the panel width at 720p.
             std::snprintf(covBuf, sizeof(covBuf),
-                          "Fire:%.0f%% Pol:%.0f%% Pwr:%.0f%% Wtr:%.0f%%",
+                          "Fire:%.0f%% Pol:%.0f%%\nPwr:%.0f%% Wtr:%.0f%%",
                           qr.coverage.fire   >= 0.0f ? qr.coverage.fire   : 0.0f,
                           qr.coverage.police >= 0.0f ? qr.coverage.police : 0.0f,
                           qr.coverage.power  >= 0.0f ? qr.coverage.power  : 0.0f,

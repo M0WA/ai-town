@@ -750,6 +750,11 @@ void AudioSystem::audioThreadFunc() {
             break;
         }
     }
+
+    // Clear the thread-local OpenAL context before the thread exits.
+    // Omitting this causes OpenAL Soft to log:
+    //   "[ALSOFT] (EE) Context current for thread being destroyed!"
+    m_fnSetThreadCtx(nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -1494,10 +1499,17 @@ void AudioSystem::updateStreams(float dt) {
     // ------------------------------------------------------------------
     // Apply final gain to all open streams (music duck multiplicative).
     // ------------------------------------------------------------------
+    // Clear any stale AL error left by refillStream / closeStream above.
+    // closeStream calls alSourceStop / alSourceUnqueueBuffers without error
+    // checks; a failure there leaves AL_INVALID_OPERATION in the error state
+    // which would otherwise be falsely attributed to alSourcef(AL_GAIN) below.
+    alGetError();
+
     float duckGain = m_musicDuckGain.load(std::memory_order_relaxed);
     float musicVol = m_musicVolume.load(std::memory_order_relaxed);
     for (int i = 0; i < kStreamSourceCount; ++i) {
         if (!m_streams[i].isOpen) continue;
+        if (m_streams[i].sourceHandle == 0) continue;
 
         float gain = m_streams[i].crossfadeGain;
         if (i < 2) {
@@ -1610,6 +1622,9 @@ void AudioSystem::onSourceRecycled(int i) {
     m_occlusionGainTarget[i].store(1.0f, std::memory_order_relaxed);
 
     if (m_efxAvailable) {
+        // Clear any stale AL error from caller (e.g. alSourcei(AL_BUFFER,0) on a
+        // playing source in update()) so it is not misattributed to alFilterf below.
+        alGetError();
         m_fnFilterf(m_occlusionFilter[i], AL_LOWPASS_GAIN,   1.0f);
         alCheckError_real("alFilterf(AL_LOWPASS_GAIN) in onSourceRecycled");
         m_fnFilterf(m_occlusionFilter[i], AL_LOWPASS_GAINHF, 1.0f);
@@ -2172,6 +2187,9 @@ std::pair<int,int> AudioSystem::acquireVehicleEnginePair(ZoneType zone) {
         // playSound().  Stop sources and free pool slots before re-assigning.
         int evictIdle = m_vehicleAudio[evictSlot].idleSourceIdx.load(std::memory_order_relaxed);
         int evictMove = m_vehicleAudio[evictSlot].moveSourceIdx.load(std::memory_order_relaxed);
+        // Drain any stale AL error before the evict calls so a prior operation's
+        // error is not misattributed to alSourceStop/alSourcei here.
+        alGetError();
         if (evictIdle >= 0) {
             alSourceStop(static_cast<ALuint>(m_sources[evictIdle]));
             alCheckError_real("acquireVehicleEnginePair:evict:alSourceStop(idle)");
@@ -2384,6 +2402,11 @@ void AudioSystem::updateVehicleEngines() {
         if (m_vehicleAudio[i].pendingInit.load(std::memory_order_relaxed) && buffersReady) {
             ALuint bufIdle = static_cast<ALuint>(it_idle->second);
             ALuint bufMove = static_cast<ALuint>(it_move->second);
+
+            // Stop sources before binding buffers — AL_BUFFER on a PLAYING source
+            // triggers AL_INVALID_OPERATION (reused SFX sources may still be playing).
+            alSourceStop(idleSrc);
+            alSourceStop(moveSrc);
 
             // Idle source: positional, looping, start at idle gain (speed=0).
             alSourcei (idleSrc, AL_SOURCE_RELATIVE, AL_FALSE);

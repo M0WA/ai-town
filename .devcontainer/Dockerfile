@@ -100,6 +100,12 @@ RUN ARCH=$(dpkg --print-architecture) && \
 
 # CMake is pre-installed in the CI base image at /opt/cmake/bin — PATH already set.
 
+# Transfer ownership of vcpkg directories to the non-root user so that
+# cmake --preset ci-linux can take vcpkg's write lock during configure.
+# Both /opt/vcpkg (the toolchain) and /opt/vcpkg_installed (pre-built packages)
+# are baked into the CI base image as root-owned; the node user needs write access.
+RUN chown -R node:node /opt/vcpkg /opt/vcpkg_installed
+
 # Set up non-root user
 USER node
 

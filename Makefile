@@ -1,9 +1,31 @@
 # AI Town - Convenience Makefile wrapping CMake/ctest
-# Requires: VCPKG_ROOT env var set, cmake, ninja, ctest, lcov
+# Requires: VCPKG_ROOT env var set, cmake, ctest, lcov
+# Inside devcontainer (ninja + ccache available): uses ci-linux / ci-linux-coverage presets.
+# Outside devcontainer: auto-selects local / local-coverage presets (no ninja/ccache needed).
 
-BUILD_DIR         := build
-PRESET            := ci-linux
-COVERAGE_PRESET   := ci-linux-coverage
+BUILD_DIR  := build
+VCPKG_ROOT ?= /opt/vcpkg
+export VCPKG_ROOT
+
+# Auto-select preset based on available tools (override with PRESET=... on the command line).
+# Uses ci-linux (Ninja + ccache) when both are present; falls back to local otherwise.
+ifndef PRESET
+  _HAVE_NINJA  := $(shell which ninja  2>/dev/null)
+  _HAVE_CCACHE := $(shell which ccache 2>/dev/null)
+  ifneq ($(and $(_HAVE_NINJA),$(_HAVE_CCACHE)),)
+    PRESET := ci-linux
+  else
+    PRESET := local
+  endif
+endif
+
+ifndef COVERAGE_PRESET
+  ifeq ($(PRESET),ci-linux)
+    COVERAGE_PRESET := ci-linux-coverage
+  else
+    COVERAGE_PRESET := local-coverage
+  endif
+endif
 COVERAGE_INFO     := coverage.info
 COVERAGE_FILTERED := coverage_filtered.info
 COVERAGE_HTML     := coverage_html
@@ -13,16 +35,17 @@ COVERAGE_MIN      := 95.0
 
 .PHONY: config build clean test
 
-## Generate the CMake build configuration (uses the ci-linux preset by default).
+## Generate the CMake build configuration.
+## Auto-selects ci-linux (Ninja+ccache) or local preset based on available tools.
 ## Override with: make config PRESET=ci-linux-coverage
 config:
 	cmake --preset $(PRESET)
 
 ## Build all binaries (runs config first if build/ is missing).
-build: $(BUILD_DIR)/build.ninja
+build: $(BUILD_DIR)/CMakeCache.txt
 	cmake --build $(BUILD_DIR)
 
-$(BUILD_DIR)/build.ninja:
+$(BUILD_DIR)/CMakeCache.txt:
 	$(MAKE) config
 
 ## Remove all build artifacts and coverage files.
