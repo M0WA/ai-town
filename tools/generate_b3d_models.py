@@ -369,6 +369,8 @@ WALL_CELLS = {
 }
 ROOF_CELL = (5, 0)  # shared roof cell — row 5 (reserved range) per building-atlas-layout.md
 SOLID_WALL_CELL = (5, 6)  # plain brick, no windows — used for gable ends
+RES_LOW_02_DOOR_CELL = (6, 0)  # cream wall + door — used only for left unit front face of res_low_02
+RES_LOW_03_DOOR_CELL = (6, 1)  # brick wall + door — used only for front face of res_low_03
 
 # Phase 11f ground-feature atlas cells — row 5, cols 1-5
 GROUND_CELLS = {
@@ -1070,47 +1072,88 @@ def _build_res_low(zone, tier, variant, lod):
 
     elif variant == "02":
         # Semi-detached pair: two unit boxes + two hipped roofs
-        unit_w, unit_d, unit_h = 6*S, 8*S, 5*S
-        total_w = 12*S
+        # Matches res_low_01 footprint: total_w=8S, depth=10S, height=6S
+        unit_w, unit_d, unit_h = 4*S, 10*S, 6*S
+        total_w = 8*S
         hx, hz = total_w/2, unit_d/2
         ridge_h_val = 3*S
+        dr, dc = RES_LOW_02_DOOR_CELL  # door cell for left unit front face only
+
+        def _add_left_unit(mesh):
+            """Left unit: door on front face, plain wall (wr,wc) on all other faces."""
+            xn, xp = -hx, 0.0
+            yn, yp = 0.0, unit_h
+            zn, zp = -hz, hz
+            # Front face (normal -Z): door cell
+            v, t = make_quad((xn,yn,zn),(xp,yn,zn),(xp,yp,zn),(xn,yp,zn),(0,0,-1),dr,dc)
+            mesh.add(v, t)
+            # Back face (normal +Z)
+            v, t = make_quad((xp,yn,zp),(xn,yn,zp),(xn,yp,zp),(xp,yp,zp),(0,0,1),wr,wc)
+            mesh.add(v, t)
+            # Left face (normal -X)
+            v, t = make_quad((xn,yn,zp),(xn,yn,zn),(xn,yp,zn),(xn,yp,zp),(-1,0,0),wr,wc)
+            mesh.add(v, t)
+            # Right face / party wall (normal +X)
+            v, t = make_quad((xp,yn,zn),(xp,yn,zp),(xp,yp,zp),(xp,yp,zn),(1,0,0),wr,wc)
+            mesh.add(v, t)
+            # Top face (roof)
+            v, t = make_quad((xn,yp,zn),(xp,yp,zn),(xp,yp,zp),(xn,yp,zp),(0,1,0),rr,rc)
+            mesh.add(v, t)
+
         if lod == 1:
-            m.add_box(-hx, hx, 0, unit_h, -hz, hz, wr, wc, rr, rc)
+            _add_left_unit(m)
+            m.add_box(0, hx, 0, unit_h, -hz, hz, wr, wc, rr, rc)
             _add_hipped_roof(m, wr, wc, rr, rc, -hx, 0, unit_h, ridge_h_val, -hz, hz)
             _add_hipped_roof(m, wr, wc, rr, rc, 0, hx, unit_h, ridge_h_val, -hz, hz)
-            _add_ground_quad(m, "garden", -7*S, 7*S, -5*S, 5*S)
+            _add_ground_quad(m, "garden", -5*S, 5*S, -5*S, 5*S)
             return m.to_b3d()
-        # LOD0: two unit boxes
-        m.add_box(-hx, 0, 0, unit_h, -hz, hz, wr, wc, rr, rc)
+        # LOD0
+        _add_left_unit(m)
         m.add_box(0, hx, 0, unit_h, -hz, hz, wr, wc, rr, rc)
         _add_hipped_roof(m, wr, wc, rr, rc, -hx, 0, unit_h, ridge_h_val, -hz, hz)
         _add_hipped_roof(m, wr, wc, rr, rc, 0, hx, unit_h, ridge_h_val, -hz, hz)
-        _add_ground_quad(m, "garden", -7*S, 7*S, -5*S, 5*S)
+        _add_ground_quad(m, "garden", -5*S, 5*S, -5*S, 5*S)
         return m.to_b3d()
 
     elif variant == "03":
-        # Three unit boxes + mono-pitch roof + bay window box projection
-        unit_w, unit_d = 4*S, 8*S
-        total_w = 12*S
-        front_h, rear_h = 5*S, 4*S
-        hx, hz = total_w/2, unit_d/2
+        # Cottage: single box + mono-pitch roof + chimney + door on front face only
+        # Matches res_low_01/02 footprint: 8S wide, 10S deep, 6S tall
+        bw, bd, bh = 8*S, 10*S, 6*S
+        hx, hz = bw/2, bd/2
+        dr, dc = RES_LOW_03_DOOR_CELL
+
+        def _add_cottage_box(mesh):
+            """Box with door cell on front face, plain wall on other faces."""
+            xn, xp = -hx, hx
+            yn, yp = 0.0, bh
+            zn, zp = -hz, hz
+            # Front face: door cell
+            v, t = make_quad((xn,yn,zn),(xp,yn,zn),(xp,yp,zn),(xn,yp,zn),(0,0,-1),dr,dc)
+            mesh.add(v, t)
+            # Back face
+            v, t = make_quad((xp,yn,zp),(xn,yn,zp),(xn,yp,zp),(xp,yp,zp),(0,0,1),wr,wc)
+            mesh.add(v, t)
+            # Left face
+            v, t = make_quad((xn,yn,zp),(xn,yn,zn),(xn,yp,zn),(xn,yp,zp),(-1,0,0),wr,wc)
+            mesh.add(v, t)
+            # Right face
+            v, t = make_quad((xp,yn,zn),(xp,yn,zp),(xp,yp,zp),(xp,yp,zn),(1,0,0),wr,wc)
+            mesh.add(v, t)
+            # Top face
+            v, t = make_quad((xn,yp,zn),(xp,yp,zn),(xp,yp,zp),(xn,yp,zp),(0,1,0),rr,rc)
+            mesh.add(v, t)
+
         if lod == 1:
-            m.add_box(-hx, hx, 0, front_h, -hz, hz, wr, wc, rr, rc)
-            m.add_quad((-hx, front_h, -hz), (hx, front_h, -hz),
-                       (hx, rear_h, hz), (-hx, rear_h, hz),
-                       (0, 1, 0.3), rr, rc)
-            _add_ground_quad(m, "garden", -7*S, 7*S, -5*S, 5*S)
+            _add_cottage_box(m)
+            _add_mono_pitch_roof(m, wr, wc, rr, rc, -hx, hx, bh, bh+2*S, -hz, hz)
+            _add_ground_quad(m, "garden", -5*S, 5*S, -5*S, 5*S)
             return m.to_b3d()
-        # LOD0: three unit boxes
-        for i in range(3):
-            x0 = -hx + i * unit_w
-            x1 = x0 + unit_w
-            m.add_box(x0, x1, 0, front_h, -hz, hz, wr, wc, rr, rc)
-        _add_mono_pitch_roof(m, wr, wc, rr, rc, -hx, hx, rear_h, front_h, -hz, hz)
-        # Bay window box projection on centre unit
-        bay_w, bay_h = 0.8*S, 2.5*S
-        m.add_box(-bay_w/2, bay_w/2, 0.3*S, 0.3*S+bay_h, -hz-bay_w, -hz, wr, wc, rr, rc)
-        _add_ground_quad(m, "garden", -7*S, 7*S, -5*S, 5*S)
+        # LOD0
+        _add_cottage_box(m)
+        _add_mono_pitch_roof(m, wr, wc, rr, rc, -hx, hx, bh, bh+2*S, -hz, hz)
+        chw = 0.8*S/2
+        _add_chimney(m, wr, wc, rr, rc, -2*S, 0.0, bh + 0.5*S, 2*S, hw=chw)
+        _add_ground_quad(m, "garden", -5*S, 5*S, -5*S, 5*S)
         return m.to_b3d()
 
     elif variant == "04":

@@ -200,83 +200,119 @@ def draw_res_low_01(buf, W, H):
 
 
 def draw_res_low_02(buf, W, H):
-    """Villa: rendered cream/white plaster, dark trim, arched windows."""
+    """Semi-detached villa: cream/white plaster, dark trim, arched windows (no door).
+
+    UV orientation: face_v=0 → top of PNG → FLOOR level of wall.
+                    face_v=1 → bottom of PNG → CEILING/ROOFLINE level.
+    Wall geometry: 4S wide × 5S tall (each unit of the semi-detached pair).
+    No door in texture: both units share this cell so a centred door would
+    appear twice. Entrance is implied at ground level between the two units.
+    Single floor only — matches res_low_01 storey count.
+    Layout (top→bottom in PNG = floor→ceiling on wall):
+      [2 arched windows, single floor, centred vertically]
+      [dark trim dado]                ← roofline
+    """
     base = (238, 232, 215)
     _fill_rect(buf, W, 0, 0, W, H, *base)
     # Fine render texture lines
     sp = max(2, H * 28 // 512)
     for y in range(0, H, sp):
         _hline(buf, W, H, y, 0, W, 228, 222, 205)
-    # Dark trim cornice bands at 25% and 75% height
-    for cy in [H * 25 // 100, H * 75 // 100]:
-        trim_h = max(2, H * 8 // 512)
-        _fill_rect(buf, W, 0, cy, W, cy + trim_h, 55, 48, 42)
-    # Dark trim base dado
+
+    # --- Two arched windows, synced with res_low_01 (same ww, aspect for 4S×6S wall) ---
+    ww = W * 80 // 512            # same texture-space size as res_low_01
+    wh = ww * 2 // 3             # square in world space: ww*(4S/6S)
+    sp_x = W * 200 // 512
+    wx0  = (W - sp_x) // 2
+    wy   = H * 180 // 512        # same mid-wall position as res_low_01
+
+    for wx in (wx0, wx0 + sp_x):
+        arch_h = max(2, wh // 5)
+        arch_w = ww * 7 // 10
+        arch_x = wx + (ww - arch_w) // 2
+        _fill_rect(buf, W, arch_x, wy - arch_h, arch_x + arch_w, wy, 38, 40, 48)
+        _draw_window(buf, W, H, wx, wy, ww, wh, (42, 45, 55),
+                     frame_rgb=(55, 48, 42), frame_w=max(2, W * 4 // 512))
+        sill_h = max(2, H * 8 // 512)
+        _fill_rect(buf, W, wx, wy + wh + 2, wx + ww, wy + wh + 2 + sill_h, 185, 95, 60)
+
+    # Dark trim base dado at BOTTOM of PNG → roofline
     dado_h = H * 10 // 100
     _fill_rect(buf, W, 0, H - dado_h, W, H, 62, 55, 48)
-    # Arched windows: 2 cols x 3 rows
-    ww = W * 62 // 512
-    wh = ww
-    sp_x = W * 180 // 512
-    sp_y = H * 155 // 512
-    for r in range(3):
-        for c in range(2):
-            wx = W * 100 // 512 + c * sp_x
-            wy = H * 45 // 512 + r * sp_y
-            # Arch top approximation: narrow rectangle above main window
-            arch_h = max(2, wh // 5)
-            arch_w = ww * 7 // 10
-            arch_x = wx + (ww - arch_w) // 2
-            _fill_rect(buf, W, arch_x, wy - arch_h, arch_x + arch_w, wy, 38, 40, 48)
-            # Main window pane
-            _draw_window(buf, W, H, wx, wy, ww, wh, (42, 45, 55),
-                         frame_rgb=(55, 48, 42), frame_w=max(2, W * 4 // 512))
-            # Window sill planter patch (warm terracotta)
-            sill_h = max(2, H * 8 // 512)
-            _fill_rect(buf, W, wx, wy + wh + 2, wx + ww, wy + wh + 2 + sill_h, 185, 95, 60)
     _add_noise(buf, W, H, intensity=4, density=0.15, seed=1002)
 
 
 def draw_res_low_03(buf, W, H):
-    """Cottage: warm orange-brown brick, clay-tile roof hint, chimney."""
+    """Cottage: warm orange-brown brick, clay-tile roof hint, 2 windows (no door).
+    Wall geometry matches res_low_03: 8S wide × 6S tall.
+    Used on back/side faces; front face uses draw_res_low_03_door."""
     base = (182, 115, 62)
     _fill_rect(buf, W, 0, 0, W, H, *base)
     _brick_coursing(buf, W, H, 0, H, max(2, H * 14 // 512), (148, 88, 42), seed=1003)
-    # Clay-tile roof hint at top 22% — alternating warm orange-brown tile courses
+    # Clay-tile roof hint at top 22%
     tile_h = H * 22 // 100
     tile_row_h = max(3, H * 18 // 512)
     for y in range(0, tile_h, tile_row_h):
         row_idx = y // tile_row_h
         base_c = (195, 88, 42) if (row_idx % 2 == 0) else (172, 72, 32)
         _fill_rect(buf, W, 0, y, W, y + tile_row_h, *base_c)
-        # Tile overlap lines
         _hline(buf, W, H, y, 0, W, 138, 55, 25)
-        # Half-offset vertical joints
         tile_w = max(4, W * 40 // 512)
         offset = (tile_w // 2) if (row_idx % 2 == 1) else 0
         for x in range(offset, W, tile_w):
             _vline(buf, W, H, x, y, min(y + tile_row_h, H), 138, 55, 25)
-    # Chimney stack left of centre, runs through roof band
-    ch_x = W * 120 // 512
-    ch_w = max(3, W * 28 // 512)
-    _fill_rect(buf, W, ch_x, 0, ch_x + ch_w, H * 35 // 100, 142, 82, 52)
-    _brick_coursing(buf, W, H, 0, H * 35 // 100, max(2, H * 10 // 512), (115, 62, 35), seed=1003)
-    # Windows: 3 cols x 2 rows — warm frames
-    ww = W * 60 // 512
-    wh = ww
-    sp_x = W * 148 // 512
-    sp_y = H * 145 // 512
-    for r in range(2):
-        for c in range(3):
-            wx = W * 30 // 512 + c * sp_x
-            wy = tile_h + H * 18 // 512 + r * sp_y
-            _draw_window(buf, W, H, wx, wy, ww, wh, (42, 45, 52),
-                         frame_rgb=(105, 62, 32), frame_w=max(2, W * 3 // 512))
-            # Window sill planter (terracotta/green)
-            sill_h = max(2, H * 7 // 512)
-            sill_clr = (148, 165, 55) if (c % 2 == 0) else (165, 85, 48)
-            _fill_rect(buf, W, wx, wy + wh + 1, wx + ww, wy + wh + 1 + sill_h, *sill_clr)
+    # 2 windows — square in world space for 8S wide × 6S tall wall
+    ww = W * 80 // 512
+    wh = ww * 8 // 6
+    sp_x = W * 200 // 512
+    wx0 = (W - sp_x) // 2
+    wy = H * 180 // 512
+    for wx in (wx0, wx0 + sp_x):
+        _draw_window(buf, W, H, wx, wy, ww, wh, (42, 45, 52),
+                     frame_rgb=(105, 62, 32), frame_w=max(2, W * 3 // 512))
+        sill_h = max(2, H * 8 // 512)
+        _fill_rect(buf, W, wx, wy + wh + 2, wx + ww, wy + wh + 2 + sill_h, 148, 165, 55)
     _add_noise(buf, W, H, intensity=6, density=0.25, seed=1003)
+
+
+def draw_res_low_03_door(buf, W, H):
+    """Res_low_03 front-door face (6,1): brick wall + centred door + 2 flanking windows.
+    Used only on the front face of res_low_03. Wall: 8S wide × 6S tall."""
+    base = (182, 115, 62)
+    _fill_rect(buf, W, 0, 0, W, H, *base)
+    _brick_coursing(buf, W, H, 0, H, max(2, H * 14 // 512), (148, 88, 42), seed=1003)
+    # Clay-tile roof hint at top 22%
+    tile_h = H * 22 // 100
+    tile_row_h = max(3, H * 18 // 512)
+    for y in range(0, tile_h, tile_row_h):
+        row_idx = y // tile_row_h
+        base_c = (195, 88, 42) if (row_idx % 2 == 0) else (172, 72, 32)
+        _fill_rect(buf, W, 0, y, W, y + tile_row_h, *base_c)
+        _hline(buf, W, H, y, 0, W, 138, 55, 25)
+        tile_w = max(4, W * 40 // 512)
+        offset = (tile_w // 2) if (row_idx % 2 == 1) else 0
+        for x in range(offset, W, tile_w):
+            _vline(buf, W, H, x, y, min(y + tile_row_h, H), 138, 55, 25)
+    # Door centred at floor level
+    dw = W * 100 // 512
+    dh = H * 270 // 512
+    dx = (W - dw) // 2
+    dy = H * 8 // 512
+    _fill_rect(buf, W, dx, dy, dx + dw, dy + dh, 80, 48, 20)
+    _fill_rect(buf, W, dx + 2, dy + 2, dx + dw - 2, dy + dh - 2, 58, 32, 10)
+    # 2 windows flanking door — square in world space for 8S wide × 6S tall wall
+    ww = W * 80 // 512
+    wh = ww * 8 // 6
+    gap = W * 35 // 512
+    wx_left = dx - gap - ww
+    wx_right = dx + dw + gap
+    wy = H * 180 // 512
+    for wx in (wx_left, wx_right):
+        _draw_window(buf, W, H, wx, wy, ww, wh, (42, 45, 52),
+                     frame_rgb=(105, 62, 32), frame_w=max(2, W * 3 // 512))
+        sill_h = max(2, H * 8 // 512)
+        _fill_rect(buf, W, wx, wy + wh + 2, wx + ww, wy + wh + 2 + sill_h, 148, 165, 55)
+    _add_noise(buf, W, H, intensity=6, density=0.25, seed=6003)
 
 
 def draw_res_low_04(buf, W, H):
@@ -1865,6 +1901,47 @@ def draw_solid_wall_brick(buf, W, H):
     _add_noise(buf, W, H, intensity=6, density=0.25, seed=5602)
 
 
+def draw_res_low_02_door(buf, W, H):
+    """Res_low_02 front-door face (6,0): cream wall + centred door + 2 flanking arched windows.
+    Used only for the FRONT face of the left unit of the semi-detached pair so the door
+    appears on exactly one wall. All other faces use draw_res_low_02 (no door).
+    Wall geometry matches res_low_02: 4S wide × 5S tall."""
+    base = (238, 232, 215)
+    _fill_rect(buf, W, 0, 0, W, H, *base)
+    sp = max(2, H * 28 // 512)
+    for y in range(0, H, sp):
+        _hline(buf, W, H, y, 0, W, 228, 222, 205)
+
+    # Door centred at floor level (top of PNG)
+    dw = W * 100 // 512
+    dh = H * 270 // 512
+    dx = (W - dw) // 2
+    dy = H * 8 // 512
+    _fill_rect(buf, W, dx, dy, dx + dw, dy + dh, 100, 65, 25)
+    _fill_rect(buf, W, dx + 2, dy + 2, dx + dw - 2, dy + dh - 2, 75, 45, 15)
+
+    # 2 arched windows flanking door, synced with res_low_01 (4S×6S wall)
+    ww = W * 80 // 512
+    wh = ww * 2 // 3
+    gap = W * 28 // 512
+    wx_left  = dx - gap - ww
+    wx_right = dx + dw + gap
+    wy = H * 180 // 512   # mid-wall, matching plain cell
+    for wx in (wx_left, wx_right):
+        arch_h = max(2, wh // 5)
+        arch_w = ww * 7 // 10
+        arch_x = wx + (ww - arch_w) // 2
+        _fill_rect(buf, W, arch_x, wy - arch_h, arch_x + arch_w, wy, 38, 40, 48)
+        _draw_window(buf, W, H, wx, wy, ww, wh, (42, 45, 55),
+                     frame_rgb=(55, 48, 42), frame_w=max(2, W * 4 // 512))
+        sill_h = max(2, H * 8 // 512)
+        _fill_rect(buf, W, wx, wy + wh + 2, wx + ww, wy + wh + 2 + sill_h, 185, 95, 60)
+
+    dado_h = H * 10 // 100
+    _fill_rect(buf, W, 0, H - dado_h, W, H, 62, 55, 48)
+    _add_noise(buf, W, H, intensity=4, density=0.15, seed=6001)
+
+
 # ---------------------------------------------------------------------------
 # Cell draw dispatch table
 # ---------------------------------------------------------------------------
@@ -1917,6 +1994,8 @@ CELL_DRAW_FNS = {
     (5, 4): draw_ground_tarmac,
     (5, 5): draw_ground_gravel,
     (5, 6): draw_solid_wall_brick,
+    (6, 0): draw_res_low_02_door,
+    (6, 1): draw_res_low_03_door,
 }
 
 RESERVED_COLOR = (72, 72, 72)

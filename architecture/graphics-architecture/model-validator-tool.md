@@ -59,6 +59,36 @@ X = (i − (N−1) / 2.0) × 12
 Y=0, Z=0. Building nodes are scaled 10×10×10 m (same as `IrrlichtRenderer`). Vehicle nodes
 are not scaled (authored at world scale).
 
+### Tile Boundary Overlay (Building Categories Only)
+
+For every building category (`scaleBuilding = true`), a **red 10×10 m square outline** is
+rendered on the ground centred on **each loaded model slot**. This means:
+
+- **Single-model mode** (`--model`): one square per LOD slot displayed (e.g. two squares for
+  LOD0 and LOD1 of a low/med building, one per model position).
+- **Category mode**: one square per model in the category row.
+
+The squares mark the exact in-game tile footprint so the operator can confirm that no geometry
+overflows the tile boundary.
+
+| Parameter | Value |
+|---|---|
+| Shape | 4 `draw2DLine` segments forming a closed square (2D screen-space projected) |
+| Colour | `SColor(255, 220, 30, 30)` (bright red) |
+| Size | 10 m × 10 m (`kHalf = 5.0f`) |
+| Y offset | 0.05 m above ground (`kY = 0.05f`) to avoid z-fighting |
+| Centre | Each model's world X position, Z = 0 |
+| Projection | `ISceneCollisionManager::getScreenCoordinatesFrom3DPosition()` |
+
+The four 3D corners are projected to screen space with `getScreenCoordinatesFrom3DPosition()`
+then connected with `driver->draw2DLine()`. This approach works with all renderers (including
+Burnings software driver where `draw3DLine` can be unreliable).
+
+The overlay is drawn after `smgr->drawAll()` and before the HUD text, inside the
+`beginScene`/`endScene` block.
+
+---
+
 ### Road Tiles (Vehicles Category Only)
 
 The Vehicles category places 7 real game road tiles along the X axis beneath all vehicle
@@ -85,14 +115,22 @@ The fallback when `getGPUProgrammingServices()` returns null (e.g. software driv
 
 ### Camera
 
-Fixed orbit: radius 65 m, height 15 m, centre (0, 5, 0), advancing 0.3°/frame.
+Orbiting camera: default radius 65 m, height 15 m, centre (0, 5, 0), advancing 0.3°/frame.
 The 65 m radius keeps the maximum 5-model vehicle row (±24 m span) comfortably in view.
 All other categories have 4 models (±18 m span at 12 m spacing).
+
+Mouse wheel zooms the camera in/out by adjusting the orbit radius (scroll up = zoom in,
+scroll down = zoom out). Range: 5 m (minimum) to 200 m (maximum). Step: 3 m per scroll notch.
+The zoom level persists for the duration of the category; it resets to 65 m when advancing
+to the next category (new orbit state is initialised per category).
 
 | Orbit parameter | Value |
 |---|---|
 | Centre | `(0, 5, 0)` |
-| Radius | 65 m |
+| Default radius | 65 m |
+| Minimum radius | 5 m |
+| Maximum radius | 200 m |
+| Zoom step | 3 m per scroll notch |
 | Height above centre | 15 m |
 | Speed | 0.3°/frame |
 
@@ -213,6 +251,80 @@ to convert the world anchor to 2D screen coordinates. If the projected point is 
 **Draw order**: HUD elements are drawn after `smgr->drawAll()` and before
 `driver->endScene()`, inside the `driver->beginScene()`/`endScene()` block.
 
+### Annotation Tool Bar
+
+A single line of text at the bottom of the screen (drawn in the current mark colour)
+shows the active tool state and available hotkeys:
+
+```text
+Draw: 1=Red 2=Green 3=Blue 4=Yellow 5=Magenta  C=shape[DOT]  LClick=place  Z=undo  X=clear  S=screenshot
+```
+
+---
+
+## Annotation Drawing Mode
+
+The validator includes a 2D overlay annotation system for visual review.
+The operator clicks to place marks; screenshots of annotated views are saved for analysis.
+
+### Controls
+
+| Input | Action |
+|---|---|
+| **Left hold/drag** | Freehand draw annotation marks |
+| **Right drag** | Orbit camera (all modes) |
+| **Mouse wheel** | Zoom in/out (adjusts orbit radius, 3 m per notch, range 5–200 m) |
+| **C** | Cycle annotation colour (Red → Green → Blue → Yellow → Cyan → Magenta → White → Black) |
+| **V** | Cycle mark shape: `DOT` → `CIRCLE` → `CROSS` → `DOT` |
+| **S** | Save an annotated screenshot (one file per press, counter resumes across sessions) |
+| **Z** | Undo last stroke |
+| **X** | Clear all marks for the current category |
+
+Marks are cleared automatically when advancing to the next category (Spacebar).
+
+**Click vs drag detection**: a left-button release is treated as a click (mark placed) only if
+the mouse moved ≤ 4 px from the press position. Larger movement is treated as a camera drag.
+
+### Colour Palette
+
+Right-click cycles through 8 visually distinct colours:
+
+| # | Name | RGB |
+|---|---|---|
+| 0 | Red | `(220, 30, 30)` |
+| 1 | Green | `(30, 180, 30)` |
+| 2 | Blue | `(30, 100, 220)` |
+| 3 | Yellow | `(220, 200, 0)` |
+| 4 | Cyan | `(0, 200, 220)` |
+| 5 | Magenta | `(220, 0, 220)` |
+| 6 | White | `(255, 255, 255)` |
+| 7 | Black | `(20, 20, 20)` |
+
+### Mark Shapes
+
+| Shape | Rendering | Reference name |
+|---|---|---|
+| `DOT` | Filled 10×10 px square centred on click | "red dot", "green dot" |
+| `CIRCLE` | 24-segment outline circle, radius 18 px | "blue circle", "yellow circle" |
+| `CROSS` | Two diagonal lines, ±12 px arms | "magenta cross", "red cross" |
+
+### Mouse Cursor
+
+A small crosshair (±6 px) is rendered at the current mouse position in the active
+colour so the operator can see exactly where a click will land.
+
+### Screenshot Output
+
+`S` saves `annotation_N.png` (N increments globally across the session) in the current
+working directory and prints the path to stdout:
+
+```text
+  Annotation screenshot saved: annotation_1.png
+```
+
+The operator can then ask Claude Code to read the screenshot path and analyse the
+annotated marks.
+
 ---
 
 ## Interaction
@@ -275,9 +387,13 @@ Usage: aitown_model_validator [options]
   --width W              window width (default: 1280)
   --height H             window height (default: 720)
   --model <n1> [n2...]   show only the named model(s) in a single "Custom Selection"
-                         category, then exit. Auto-detects vehicles vs buildings
-                         from the model name prefix (car_, bus_, truck_ = vehicles;
-                         everything else = buildings at 10× scale)
+                         category. Auto-detects vehicles vs buildings from the model
+                         name prefix (car_, bus_, truck_ = vehicles; everything else
+                         = buildings at 10× scale). All available LODs (LOD0, LOD1,
+                         LOD2) are displayed simultaneously side by side, labelled
+                         "[LOD0]", "[LOD1]", "[LOD2]" — no distance-based switching.
+                         Camera does NOT auto-rotate; right-drag to orbit manually.
+                         One 10×10 m tile square is drawn around each LOD slot.
   --screenshot <file>    after rendering --screenshot-frame frames, save a PNG
                          screenshot to the given path and advance to the next
                          category. Multiple categories produce numbered files

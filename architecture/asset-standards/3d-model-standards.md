@@ -550,10 +550,13 @@ silhouette-variation tool.
 
 - **`res_low_01`** (flat-roof block): flat parapet roof, single AC condenser on parapet, no garden
   (tarmac forecourt), utility meter box geometry on facade.
-- **`res_low_02`** (villa): metallic standing-seam pitched roof (gabled or hipped), carport lean-to
-  on side, front garden with rendered perimeter wall and iron gate.
-- **`res_low_03`** (cottage): clay-tile pitched roof, brick chimney stub, covered front porch
-  canopy, timber-post garden fence.
+- **`res_low_02`** (semi-detached pair): two single-storey units side by side under a common
+  gabled pitched roof; door centred on the front face of the left unit only (atlas cell (6,0));
+  plain cream rendered walls on all other faces; windows match `res_low_01` size and height
+  (same `ww`/`wh`/`wy` atlas proportions). Total footprint 8 S × 10 S, fits within one tile.
+- **`res_low_03`** (cottage): single-storey box with mono-pitch roof (low front, high rear),
+  brick chimney geometry stub, door on front face only (atlas cell (6,1)); brick+clay-tile
+  texture. Footprint 8 S × 10 S, height 6 S — matches `res_low_01`/`res_low_02`.
 - **`res_low_04`** (red-brick): steeply-pitched metal-tile roof with single dormer window, narrow
   chimney, low brick boundary wall at plot edge (no garden).
 
