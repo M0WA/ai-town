@@ -2165,11 +2165,12 @@ std::pair<int,int> AudioSystem::acquireVehicleEnginePair(ZoneType zone) {
         }
     }
 
+    // evictSlot >= 0 when eviction was needed; used in Step 3 to preserve pendingRelease.
+    int evictSlot = -1;
     if (slotIdx < 0) {
         // All 12 slots occupied — attempt to evict the lowest-priority /
         // greatest-distance pair.  Vehicle pairs all have NORMAL priority,
         // so distance alone determines the eviction candidate.
-        int   evictSlot = -1;
         float evictDist = -1.f;
         for (int i = 0; i < kMaxVehiclePairs; ++i) {
             int   idleIdx = m_vehicleAudio[i].idleSourceIdx.load(std::memory_order_relaxed);
@@ -2183,34 +2184,27 @@ std::pair<int,int> AudioSystem::acquireVehicleEnginePair(ZoneType zone) {
         }
         if (evictSlot < 0) return {-1, -1};
 
-        // Evict inline on main thread — consistent with the eviction pattern in
-        // playSound().  Stop sources and free pool slots before re-assigning.
+        // Queue the evicted sources for AL stop/detach on the audio thread via
+        // pendingRelease.  Do NOT make AL calls on the main thread: both threads
+        // share the same OpenAL context error state, so a main-thread AL error
+        // (e.g. alSourceStop on a source the audio thread is concurrently using)
+        // bleeds into the audio thread's alCheckError_real and triggers a
+        // spurious AL_INVALID_OPERATION that disables audio.
         int evictIdle = m_vehicleAudio[evictSlot].idleSourceIdx.load(std::memory_order_relaxed);
         int evictMove = m_vehicleAudio[evictSlot].moveSourceIdx.load(std::memory_order_relaxed);
-        // Drain any stale AL error before the evict calls so a prior operation's
-        // error is not misattributed to alSourceStop/alSourcei here.
-        alGetError();
         if (evictIdle >= 0) {
-            alSourceStop(static_cast<ALuint>(m_sources[evictIdle]));
-            alCheckError_real("acquireVehicleEnginePair:evict:alSourceStop(idle)");
-            alSourcei(static_cast<ALuint>(m_sources[evictIdle]), AL_BUFFER, 0);
-            alCheckError_real("acquireVehicleEnginePair:evict:alSourcei(idle,AL_BUFFER,0)");
-            onSourceRecycled(evictIdle);
             m_sfxSlots[evictIdle] = SFXSlot{};
+            m_occlusionGainTarget[evictIdle].store(1.0f, std::memory_order_relaxed);
         }
         if (evictMove >= 0) {
-            alSourceStop(static_cast<ALuint>(m_sources[evictMove]));
-            alCheckError_real("acquireVehicleEnginePair:evict:alSourceStop(move)");
-            alSourcei(static_cast<ALuint>(m_sources[evictMove]), AL_BUFFER, 0);
-            alCheckError_real("acquireVehicleEnginePair:evict:alSourcei(move,AL_BUFFER,0)");
-            onSourceRecycled(evictMove);
             m_sfxSlots[evictMove] = SFXSlot{};
+            m_occlusionGainTarget[evictMove].store(1.0f, std::memory_order_relaxed);
         }
-        // Clear all slot state — reset atomics to defaults.
+        // Signal audio thread to stop and detach the evicted sources.
+        m_vehicleAudio[evictSlot].pendingReleaseIdle.store(evictIdle, std::memory_order_relaxed);
+        m_vehicleAudio[evictSlot].pendingReleaseMove.store(evictMove, std::memory_order_relaxed);
+        m_vehicleAudio[evictSlot].pendingRelease.store(true, std::memory_order_relaxed);
         m_vehicleAudio[evictSlot].pendingInit.store(false, std::memory_order_relaxed);
-        m_vehicleAudio[evictSlot].pendingRelease.store(false, std::memory_order_relaxed);
-        m_vehicleAudio[evictSlot].pendingReleaseIdle.store(-1, std::memory_order_relaxed);
-        m_vehicleAudio[evictSlot].pendingReleaseMove.store(-1, std::memory_order_relaxed);
         m_vehicleAudio[evictSlot].speedFraction.store(0.f, std::memory_order_relaxed);
         m_vehicleAudio[evictSlot].worldX.store(0.f, std::memory_order_relaxed);
         m_vehicleAudio[evictSlot].worldZ.store(0.f, std::memory_order_relaxed);
@@ -2253,7 +2247,10 @@ std::pair<int,int> AudioSystem::acquireVehicleEnginePair(ZoneType zone) {
     m_vehicleAudio[slotIdx].worldX.store(0.f, std::memory_order_relaxed);
     m_vehicleAudio[slotIdx].worldZ.store(0.f, std::memory_order_relaxed);
     m_vehicleAudio[slotIdx].basePitch.store(basePitch, std::memory_order_relaxed);
-    m_vehicleAudio[slotIdx].pendingRelease.store(false, std::memory_order_relaxed);
+    // Do not clear pendingRelease when eviction already queued a stop for the audio thread.
+    if (evictSlot < 0) {
+        m_vehicleAudio[slotIdx].pendingRelease.store(false, std::memory_order_relaxed);
+    }
     m_vehicleAudio[slotIdx].moveSourceIdx.store(moveIdx, std::memory_order_relaxed);
     m_vehicleAudio[slotIdx].idleSourceIdx.store(idleIdx, std::memory_order_relaxed);  // last: marks slot live
     m_vehicleAudio[slotIdx].pendingInit.store(true, std::memory_order_relaxed);
@@ -2307,7 +2304,7 @@ void AudioSystem::releaseVehicleEnginePair(int idleIdx, int moveIdx) {
         }
     }
     // No matching slot found — warn and return (implementation error or already released).
-    logWarning("releaseVehicleEnginePair: no matching slot for idleIdx=" +
+    logInfo("releaseVehicleEnginePair: no matching slot for idleIdx=" +
                std::to_string(idleIdx) + " moveIdx=" + std::to_string(moveIdx));
 }
 
