@@ -60,6 +60,10 @@ Three independent but thematically related gameplay/visual improvements:
   Artists export each tier as a separate model at the correct size. The existing ±2 m
   authoring convention is retired. (`graphics-artist-3d-model`)
 
+  > **Note**: This change requires all Phase 9 building assets (`res_low_*`, `res_med_*`,
+  > `res_high_*`, `com_low_*`, etc.) to be re-exported from Blender at native world size.
+  > Add this as a prerequisite in the Dependencies section.
+
 - [ ] Clarify that **collision registration** and **simulation ownership** use the full tile
   footprint (2×2 or 3×3): all tiles in the footprint are marked as occupied and cannot
   receive an overlapping placement. The **origin tile** is the bottom-left corner
@@ -145,6 +149,8 @@ Three independent but thematically related gameplay/visual improvements:
 #### 2. Spec Updates — Budget Screen Income/Expense Breakdown
 
 ##### 2a. `architecture/ui-ux/hud-layout.md` — Budget Detail Panel
+
+*(Spec already updated during planning — these deliverables confirm the spec is correct and track the C++ implementation work.)*
 
 - [ ] Redesign the **Fields displayed** list in the Budget Detail Panel section. Replace the
   flat 8-item list with a three-section layout:
@@ -338,19 +344,14 @@ Three independent but thematically related gameplay/visual improvements:
 
 ##### 4b. `IrrlichtRenderer` — Per-Tier Scaling
 
-- [ ] `IrrlichtRenderer::placeBuildingMesh(assetBaseName, tileX, tileZ, DensityTier)`: place
-  the node at scale 1.0 (no `setScale()` call — models are natively sized per §1a). The
-  world origin is still derived from the density tier using the footprint-center formula.
-  The `assetBaseName` naming convention is unchanged (`res_low_01`, etc.).
-  (`graphics-dev-irrlicht`)
+- [ ] `IrrlichtRenderer::placeBuildingMesh(assetBaseName, tileX, tileZ)`: parse `DensityTier`
+  from the first segment of `assetBaseName` (e.g., `"res_low_01"` → `LOW`), then compute
+  world origin and confirm scale 1.0 per native-size convention. No IRenderer interface
+  change needed; `MockRenderer` unchanged. (`graphics-dev-irrlicht`)
 
 - [ ] `IrrlichtRenderer::placeServiceBuildingMesh(type, tileX, tileZ)`: place at scale 1.0
   (model is natively sized at ±10 m = 20 m × 20 m) and center the node over the 2×2 block.
   (`graphics-dev-irrlicht`)
-
-- [ ] Update `IRenderer::placeBuildingMesh()` signature in `src/interfaces/IRenderer.h` to
-  accept `DensityTier` as the third parameter (after `tileZ`). Update `MockRenderer` and all
-  call sites in `CitySimulation` and tests. (`graphics-dev-irrlicht`, `test-dev-cpp`)
 
 - [ ] **Multi-tile hover highlight interface**: Update `IRenderer::setTileHoverHighlight()` in
   `src/interfaces/IRenderer.h` to accept a `footprintSize` parameter (default value `1` for
@@ -359,6 +360,13 @@ Three independent but thematically related gameplay/visual improvements:
   ```cpp
   virtual void setTileHoverHighlight(int tileX, int tileZ, int footprintSize = 1) = 0;
   ```
+
+  The `uint32_t argb` parameter from the old signature is removed. Highlight colour is
+  hardcoded per tool mode in `IrrlichtRenderer`: Zone-tool hover uses a semi-transparent
+  green (`0x6600FF00`); Demolish-tool pending hover uses a semi-transparent red
+  (`0x66FF0000`). No colour is passed at the call site — the renderer determines colour
+  from the current tool state or a new `ToolMode` parameter (implementer's choice). Update
+  `MockRenderer` to match.
 
   The implementation in `IrrlichtRenderer` draws an N×N highlight quad (where N =
   `footprintSize`) centered on the footprint, covering all tiles from `(tileX, tileZ)` to
@@ -423,6 +431,13 @@ Three independent but thematically related gameplay/visual improvements:
   §Lane Assignment ("agents snap to the tile center X/Z at intersection tiles (no lane
   offset) and resume lane offset on the exit segment"). (`graphics-dev-irrlicht`)
 
+  **Audio positioning**: vehicle engine audio sources (`updateVehicleAudio(worldX, worldZ)`)
+  must receive the same world coordinates as the rendered position — including the applied
+  lane offset on straight segments. At intersection tiles (lane offset = 0, agent snapped to
+  tile center), pass tile-center worldX/worldZ. This keeps audio spatially synchronised with
+  the visual position. Cross-reference: `architecture/audio-architecture/dynamic-soundscape.md`
+  §Vehicle Engine Audio. (`sound-dev-opensoftal`)
+
 #### 5. Unit Tests
 
 ##### 5a. Multi-Tile Footprint Tests — `tests/simulation/footprint_test.cpp`
@@ -476,7 +491,7 @@ Three independent but thematically related gameplay/visual improvements:
 
   (`test-dev-cpp`)
 
-- [ ] Add `road_lane_test.cpp` to the `terrain_tests` (or `rendering_tests`) CMake target.
+- [ ] Add `road_lane_test.cpp` to the `terrain_tests` CMake target.
   (`test-dev-cpp`)
 
 ##### 5c. Budget Panel Tests — `tests/ui/budget_breakdown_test.cpp`
@@ -532,8 +547,9 @@ Three independent but thematically related gameplay/visual improvements:
   `kLaneCenterOffset` reference and intersection snap rule.
 - [ ] `architecture/asset-standards/3d-model-standards.md` road tile lane-layout and
   center-line strip documented with named constants.
-- [ ] `IRenderer::placeBuildingMesh()` accepts `DensityTier`; places at scale 1.0 (no
-  `setScale()`); `MockRenderer` updated; all call sites compile cleanly.
+- [ ] `IrrlichtRenderer::placeBuildingMesh()` parses `DensityTier` from `assetBaseName`
+  prefix; places at scale 1.0 (no `setScale()`); `IRenderer` interface unchanged;
+  `MockRenderer` unchanged; all call sites compile cleanly.
 - [ ] `CitySimulation::placeServiceBuilding()` enforces direct street adjacency (distance = 1).
 - [ ] `CitySimulation::placeZone()` enforces zone street-proximity check (nearest road ≤ 3 tiles).
 - [ ] `CitySimulation::doProximityTick()` marks buildings abandoned when road moves > 3 tiles
@@ -569,7 +585,7 @@ Three independent but thematically related gameplay/visual improvements:
 | `gamedesign-lookandfeel` | Author multi-tile placement rules in zoning-system.md; service building street-adjacency rule; zone 3-tile proximity rule and abandonment/recovery spec; road adjacency rule; density-upgrade deferral design; lane assignment and kLaneCenterOffset spec in traffic-system.md; budget section mapping note in economy-model.md |
 | `gamedesign-ux` | Redesign Budget Detail Panel layout in hud-layout.md (Income/Expenses/Total sections, 320×260 px, subtotals, colors, tourism placeholder); hover highlight footprint rule in zoning-system.md; demolition tool input flow in input-arbitration.md (mouse-up confirmation, tool-mode gating) |
 | `graphics-artist-3d-model` | Author multi-tile footprint and native-size authoring convention (no setScale) in 3d-model-standards.md; road carriageway width, center-line strip geometry, and updated ≤50 tri budget in 3d-model-standards.md |
-| `graphics-dev-irrlicht` | Implement `placeBuildingMesh()`/`placeServiceBuildingMesh()` at scale 1.0 (native-size models, no setScale); update `IRenderer` signature and `MockRenderer`; add `footprintSize` parameter to `setTileHoverHighlight()`; implement carriageway width + center-line strip in `placeRoadMesh()`; declare constants in `render_constants.h`; implement lane offset with intersection snap in vehicle agent rendering; update `placeZone()`/`demolishTile()`/`doDensityUnlockTick()` footprint logic; implement `placeServiceBuilding()` street-adjacency check; implement `placeZone()` 3-tile proximity check; implement `doProximityTick()` abandonment/recovery; update `setTileHeight()` calls to cover full footprint; fix demolition input (mouse-up trigger, tool-mode guard, Yes→demolishTile() wiring, `clearDemolishHighlight()`) |
+| `graphics-dev-irrlicht` | Implement `placeBuildingMesh()` (DensityTier parsed from assetBaseName prefix, scale 1.0, no IRenderer interface change, MockRenderer unchanged) and `placeServiceBuildingMesh()` at scale 1.0; add `footprintSize` parameter to `setTileHoverHighlight()` and update MockRenderer for that interface change; implement carriageway width + center-line strip in `placeRoadMesh()`; declare constants in `render_constants.h`; implement lane offset with intersection snap in vehicle agent rendering; update `placeZone()`/`demolishTile()`/`doDensityUnlockTick()` footprint logic; implement `placeServiceBuilding()` street-adjacency check; implement `placeZone()` 3-tile proximity check; implement `doProximityTick()` abandonment/recovery; update `setTileHeight()` calls to cover full footprint; fix demolition input (mouse-up trigger, tool-mode guard, Yes→demolishTile() wiring, `clearDemolishHighlight()`) |
 | `test-dev-cpp` | Author footprint, road lane, and budget breakdown test files; wire all into CMake targets |
 
 ---
@@ -579,6 +595,8 @@ Three independent but thematically related gameplay/visual improvements:
 - Requires Phase 11d complete: multi-tile vehicle agent rendering (lane offset) depends on the
   Phase 11d vehicle spawn/move/despawn infrastructure.
 - Requires Phase 10b complete: terrain flattening for multi-tile footprints.
+- Requires Phase 9 building assets to be re-exported at native world size (1 Blender unit = 1 m)
+  per the §1a authoring convention. No `setScale()` is applied at runtime.
 - No dependency on Phase 11f, 11g, or 12 — can run in parallel with those phases.
 - Post-V1 extension: angled / diagonal road tiles with lane curvature are deferred to a
   post-V1 traffic pass.
