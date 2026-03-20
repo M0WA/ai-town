@@ -386,6 +386,14 @@ Three independent but thematically related gameplay/visual improvements:
   overlay covers the full footprint of the tier selected in the Zone sub-panel").
   (`graphics-dev-irrlicht`)
 
+- [ ] **Active-tool synchronisation**: Declare `virtual void setActiveTool(ToolMode mode) = 0;`
+  in `src/interfaces/IRenderer.h`. `ToolMode` is the existing enum (or equivalent) tracking
+  the active placement tool (Zone, Road, Utilities, Demolish, Query, None). UIManager calls
+  `m_renderer->setActiveTool(m_activeTool)` in its toolbar-button click handler whenever
+  `m_activeTool` changes. `IrrlichtRenderer` stores the value in its own `m_activeTool` member
+  and uses it inside `setTileHoverHighlight()` to select the highlight colour. Update
+  `MockRenderer` to add a matching override.  (`graphics-dev-irrlicht`, `test-dev-cpp`)
+
 ##### 4c. Road Mesh — Carriageway Width & Center-Line Strip
 
 - [ ] In `IrrlichtRenderer::placeRoadMesh()`, update the asphalt quad half-width from 5.0 m to

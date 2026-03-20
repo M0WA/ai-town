@@ -179,9 +179,9 @@ When a building upgrades to a higher density tier, its footprint expands (e.g., 
 
 3. **Defer if blocked**: If any remaining tile in the expanded footprint is occupied by a **road**, a **different zone type**, a **service building**, or is **out-of-bounds**, do **NOT** demolish same-type neighbours preemptively. Instead, **defer** the entire upgrade. Increment `upgradeRetryCount` for this tile and return without upgrading.
 
-4. **Cancel after 12 retries**: If `upgradeRetryCount` reaches 12 for a single tile, cancel the pending upgrade and emit a CRITICAL-priority toast: "Upgrade blocked — clear surrounding tiles". Reset `upgradeRetryCount` to 0 whenever a tile successfully upgrades or is manually demolished.
+4. **Cancel after 12 retries**: If `upgradeRetryCount` reaches 12 for a single tile, cancel the pending upgrade and emit a CRITICAL-priority toast: "Upgrade blocked — clear surrounding tiles". Upon cancellation, reset `upgradeRetryCount` to 0 AND set a per-tile boolean flag `upgradeBlocked = true`. While `upgradeBlocked` is `true`, the tile is excluded from upgrade resolution entirely — step 3's defer logic is skipped and no further CRITICAL toasts are emitted for this tile. The `upgradeBlocked` flag is cleared (and the tile becomes eligible for upgrade resolution again) when the player manually demolishes any tile that was previously blocking the upgrade — i.e., when a tile in the previously expanded footprint that was a road, a different zone type, a service building, or an out-of-bounds boundary is removed and the expanded footprint no longer contains any blocking tiles. Reset `upgradeRetryCount` to 0 and clear `upgradeBlocked` whenever a tile successfully upgrades, is manually demolished, OR whenever the blocking condition that caused a prior cancellation is resolved (e.g., a blocking neighbour tile is demolished and the footprint is now fully clear).
 
-The `upgradeRetryCount` is tracked per tile in a `std::unordered_map<TileKey, int>` on `CitySimulation`.
+The `upgradeRetryCount` is tracked per tile in a `std::unordered_map<TileKey, int>` on `CitySimulation`. The `upgradeBlocked` flag is tracked per tile in a `std::unordered_map<TileKey, bool>` on `CitySimulation`.
 
 ### Service Building Street Adjacency
 
