@@ -483,18 +483,35 @@ BudgetDetailPanel is owned and drawn by HUD (not UIManager). UIManager does not 
 A floating detail panel that appears when the player hovers over or clicks the treasury balance display in the resource/budget bar.
 
 - **Trigger**: hover or click on the treasury balance field in the resource bar
-- **Dimensions**: approximately 320×200 px (virtual/scaled)
-- **Anchor**: below the resource bar, left-aligned to the left edge of the resource bar
+- **Dimensions**: 320×260 px (virtual/scaled — 60 px taller than the original 320×200 px to accommodate section headers and 1 px separator rules)
+- **Anchor**: below the resource bar, left-aligned to the left edge of the resource bar. The panel extends downward from its top-left anchor; the +60 px increase in height adds space below the previous bottom edge.
 - **Z-order**: above all HUD elements; below the modal scrim (when a blocking modal is active, the budget detail panel is covered by the scrim)
-- **Fields displayed** (named line items):
+- **Layout — three sections** separated by 1 px horizontal rules. Section headers are bold label rows using the HUD font. Subtotals are shown inline on the section header row:
+
+  **Income** [$X,XXX/month] ← bold header row with subtotal
+
   - Tax revenue — Residential
   - Tax revenue — Commercial
   - Tax revenue — Industrial
-  - Wages (city employee salaries)
-  - Road maintenance
-  - Service upkeep (fire, police, utilities)
   - Utility fees
-  - Net monthly balance
+  - Tourism income: $0 (post-V1) ← grayed-out placeholder; last item in Income section; rendered via `setElementEnabled(handle, false)` (visible but non-interactive and dimmed)
+
+  *(1 px separator rule)*
+
+  **Expenses** [$X,XXX/month] ← bold header row with subtotal
+
+  - Road maintenance
+  - Service upkeep (fire/police/utilities)
+  - Wages
+
+  *(1 px separator rule)*
+
+  **Total**
+
+  - Net monthly balance = Income total − Expenses total
+  - Displayed as "+$X,XXX" (green `SColor(255, 80, 200, 80)`) for surplus or "−$X,XXX" (red `SColor(255, 220, 80, 80)`) for deficit
+  - These colors are consistent with the existing deficit-pulsing color palette in the resource bar
+
 - **Data refresh**: updates once per budget tick (not real-time between ticks)
 - **Cross-reference**: see [Economy Model](../game-design/economy-model.md) for authoritative field definitions and calculation formulas
 
@@ -504,7 +521,7 @@ A supplemental line displayed within the budget detail panel (or as an additiona
 
 - **Trigger**: appears when the current monthly revenue is within 10% of any locked density tier threshold (evaluated at the difficulty-adjusted threshold value). Not shown when all density tiers are already unlocked.
 - **Display format**: "After Unlock: ~+$X/month expenses" where X is the estimated monthly upkeep increase resulting from the next density tier unlock
-- **Placement**: shown as a supplemental line at the bottom of the budget detail panel, or as an additional line in the resource bar tooltip if the budget detail panel is not open
+- **Placement**: shown as a supplemental line at the bottom of the budget detail panel — below the Total section and its 1 px separator rule (i.e. after all three sections of the 3-section layout), or as an additional line in the resource bar tooltip if the budget detail panel is not open
 - **Update cadence**: updates once per budget tick (same as the rest of the budget detail panel)
 - **Sentinel handling — all tiers unlocked**: The HUD calls `ICitySimulation::getNextUnlockThreshold(difficulty)` each budget tick to determine whether a threshold exists. When the return value equals `SimulationConstants::kNoUnlockThreshold` (`-1.0f`), the HUD MUST:
   1. Hide the density unlock progress indicator in the resource bar via `IUIBackend::setElementVisible(handle, false)` — the element is hidden (not merely disabled) because there is no actionable information to display.

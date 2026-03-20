@@ -41,18 +41,19 @@ Three independent but thematically related gameplay/visual improvements:
 
   (`graphics-artist-3d-model`)
 
-- [ ] Document that **model-space authoring convention** remains ±2 m half-extent for all
-  assets — the per-tier scale applied by `placeBuildingMesh()` changes:
+- [ ] Document the **native-size authoring convention**: models are authored at real-world scale
+  (1 Blender unit = 1 m). Each density tier has its own correctly-sized model; no runtime
+  `setScale()` is applied — `placeBuildingMesh()` places nodes at scale 1.0:
 
-  | Density tier | `setScale()` argument | Resulting world footprint |
+  | Density tier | Local-space half-extent | World footprint |
   |---|---|---|
-  | `low` | `kTileSize / 4.0f` = 2.5f | ±5 m = 10 m × 10 m |
-  | `med` | `kTileSize * 2 / 4.0f` = 5.0f | ±10 m = 20 m × 20 m |
-  | `high` | `kTileSize * 3 / 4.0f` = 7.5f | ±15 m = 30 m × 30 m |
-  | Service (2×2) | `kTileSize * 2 / 4.0f` = 5.0f | ±10 m = 20 m × 20 m |
+  | `low` (res/com/ind) | ±5 m | 10 m × 10 m |
+  | `med` (res/com/ind) | ±10 m | 20 m × 20 m |
+  | `high` (res/com/ind) | ±15 m | 30 m × 30 m |
+  | Service (2×2) | ±10 m | 20 m × 20 m |
 
-  Artists continue to author all building meshes in ±2 m local space. No re-export is required
-  — only the C++ scale factor changes per density tier. (`graphics-artist-3d-model`)
+  Artists export each tier as a separate model at the correct size. The existing ±2 m
+  authoring convention is retired. (`graphics-artist-3d-model`)
 
 - [ ] Clarify that **collision registration** and **simulation ownership** use the full tile
   footprint (2×2 or 3×3): all tiles in the footprint are marked as occupied and cannot
@@ -79,6 +80,8 @@ Three independent but thematically related gameplay/visual improvements:
     building, not out-of-bounds). If any tile is occupied or out-of-bounds, placement is
     rejected and the player is shown a toast: "Not enough space for [tier] zone".
   - On demolish: all tiles in the footprint are freed simultaneously.
+  - Terrain flattening: during placement, `setTileHeight()` must be called for **all tiles in
+    the N×N footprint** (not only the origin tile) — see §4a for the C++ implementation detail.
   - **Density upgrade (Low→Med or Med→High)**: the upgraded building's footprint expands
     into tiles that were previously empty or occupied by neighbouring low-tier buildings of
     the **same zone type**. The upgrade resolution order is:
@@ -98,19 +101,41 @@ Three independent but thematically related gameplay/visual improvements:
        clear, all N×N tiles are marked occupied by the upgraded building.
   (`gamedesign-lookandfeel`)
 
+- [ ] Add a **Service Building Street Adjacency** rule: a service building may only be placed
+  if at least one of the tiles in its 2×2 footprint is directly edge-adjacent (4-directional
+  cardinal, distance = 1) to a road tile. If no adjacent road exists, placement is rejected
+  and the player is shown a toast: "Service building must be next to a road". Service
+  buildings are never subject to the 3-tile proximity rule below — they use the stricter
+  direct-adjacency requirement. (`gamedesign-lookandfeel`)
+
+- [ ] Add a **Zone Street Proximity** rule: a zone tile (any density, any type) requires a
+  road tile within **3 tiles** (Manhattan distance from any tile in the footprint to the
+  nearest road tile, measured as straight-line grid steps, not path cost). The rule has two
+  enforcement modes:
+  - **New placement**: if no road tile is within 3 tiles of the entire N×N footprint,
+    placement is rejected and the player is shown a toast: "Must be within 3 tiles of a road".
+  - **Abandonment** (existing building): on each simulation tick, if the nearest road tile
+    to a building's footprint exceeds 3 tiles (e.g. the road was demolished), the building
+    becomes **abandoned** — population is removed, tax revenue drops to $0, and a
+    NORMAL-priority toast is shown: "Building abandoned — too far from road". An abandoned
+    building can recover automatically if a road is built within 3 tiles before the next
+    abandonment tick; otherwise it remains abandoned until demolished or road is restored.
+  (`gamedesign-lookandfeel`)
+
 - [ ] Document the **hover highlight** rule: when the player hovers over a zone tile with the
   Zone tool active, the highlight overlay covers the full footprint of the tier selected in
   the Zone sub-panel (1×1, 2×2, or 3×3), not just the hovered tile. (`gamedesign-ux`)
 
 ##### 1c. `architecture/graphics-architecture/scene-graph-ownership.md`
 
-- [ ] Update `placeBuildingMesh()` contract: add a `DensityTier` parameter (or derive tier from
-  `assetBaseName` prefix) so the scene-graph layer can compute the correct `setScale()`
-  factor. Document the per-tier scale table. (`graphics-dev-irrlicht`)
+- [ ] Update `placeBuildingMesh()` contract: add a `DensityTier` parameter (or derive tier
+  from `assetBaseName` prefix) so the scene-graph layer can compute the correct world origin.
+  Document that no `setScale()` is applied — models are natively sized. Document the
+  per-tier local half-extent table from §1a. (`graphics-dev-irrlicht`)
 
-- [ ] Update `placeServiceBuildingMesh()` contract: service buildings now use the 2×2
-  footprint with `setScale(5.0f)`. The world origin is the center of the 2×2 footprint
-  (see origin formula above). (`graphics-dev-irrlicht`)
+- [ ] Update `placeServiceBuildingMesh()` contract: service buildings use the 2×2 footprint
+  at scale 1.0 (model is natively sized at ±10 m). The world origin is the center of the 2×2
+  footprint (see origin formula above). (`graphics-dev-irrlicht`)
 
 #### 2. Spec Updates — Budget Screen Income/Expense Breakdown
 
@@ -149,14 +174,27 @@ Three independent but thematically related gameplay/visual improvements:
   `(255, 220, 80, 80)` for deficit, consistent with the existing deficit-pulsing color
   palette. (`gamedesign-ux`)
 
-- [ ] Tourism income line: rendered as a grayed-out row "Tourism income: $0 (post-V1)" to
-  occupy the reserved slot without being interactive. (`gamedesign-ux`)
+- [ ] Tourism income line: the last line item within the Income section (after Utility fees),
+  rendered as a grayed-out non-interactive row labelled "Tourism income: $0 (post-V1)" to
+  reserve space for a post-V1 feature. (`gamedesign-ux`)
 
 ##### 2b. `architecture/game-design/economy-model.md`
 
 - [ ] Add a **Budget Screen Section Mapping** note that cross-references the canonical income
   and expense categories defined in this spec to their Budget Detail Panel display sections.
-  This prevents future additions from being placed in the wrong column. (`gamedesign-lookandfeel`)
+  This prevents future additions from being placed in the wrong column. The note MUST also
+  explicitly document the V1 treatment of Tourism income:
+
+  - **Tourism income is scoped as post-V1** (consistent with the existing "Tourism income:
+    Post-V1 scope" line in the Revenue sources bullet of this spec). In the Budget Detail
+    Panel Income section it renders as a grayed-out, non-interactive placeholder row labelled
+    "Tourism income: $0 (post-V1)". A developer reading the economy spec must be able to
+    understand from this note why Tourism appears in the panel at all (it reserves display
+    space for the future feature) without hunting for the answer in the UI spec.
+  - The cross-reference should point to `architecture/ui-ux/hud-layout.md` §Budget Detail
+    Panel, Tourism income line item, for the authoritative rendering rule.
+
+  (`gamedesign-lookandfeel`)
 
 #### 3. Spec Updates — Road Lane Geometry & Center-Line Strip
 
@@ -244,21 +282,66 @@ Three independent but thematically related gameplay/visual improvements:
   reset to 0 whenever a tile successfully upgrades or is manually demolished.
   (`gamedesign-lookandfeel`, `graphics-dev-irrlicht`)
 
+- [ ] `CitySimulation::placeServiceBuilding(int tileX, int tileZ, ServiceType)`: before
+  placing, verify that at least one tile in the 2×2 footprint is directly adjacent (cardinal,
+  distance = 1) to a road tile. If not, emit `SimEvent::PLACEMENT_BLOCKED` with toast
+  "Service building must be next to a road" and return without placing. (`graphics-dev-irrlicht`)
+
+- [ ] `CitySimulation::placeZone()`: extend the pre-placement check to also verify that
+  the Manhattan distance from the nearest road tile to any tile in the N×N footprint is ≤ 3.
+  If the nearest road is > 3 tiles away, emit `SimEvent::PLACEMENT_BLOCKED` with toast
+  "Must be within 3 tiles of a road". This check runs after the footprint-collision check.
+  Helper: `static int nearestRoadDistance(int tileX, int tileZ, int footprintN)` —
+  returns the minimum Manhattan distance from any footprint tile to any road tile, or
+  `INT_MAX` if no road exists in range. (`graphics-dev-irrlicht`)
+
+- [ ] `CitySimulation::doProximityTick()`: new per-tick method that iterates all placed
+  zone buildings (not service buildings) and for each checks `nearestRoadDistance() <= 3`.
+  - If distance > 3 and building is **not** already abandoned: mark as abandoned, zero out
+    population and tax contribution for this building, emit NORMAL toast "Building abandoned
+    — too far from road".
+  - If distance ≤ 3 and building **is** abandoned: recover automatically (restore
+    population/tax), emit NORMAL toast "Building recovered — road reconnected".
+  The abandoned flag is stored per-building in the footprint registry.
+  `doProximityTick()` is called once per simulation tick, after `doDensityUnlockTick()`.
+  (`gamedesign-lookandfeel`, `graphics-dev-irrlicht`)
+
 - [ ] `ITerrainQuery::setTileHeight()` (from Phase 10b) must be called for **all tiles in the
   footprint** during terrain flattening, not only the origin tile. (`graphics-dev-irrlicht`)
 
 ##### 4b. `IrrlichtRenderer` — Per-Tier Scaling
 
-- [ ] `IrrlichtRenderer::placeBuildingMesh(assetBaseName, tileX, tileZ, DensityTier)`: derive
-  `setScale()` and world origin from the density tier per the table in §1a. The
-  `assetBaseName` naming convention is unchanged (`res_low_01`, etc.). (`graphics-dev-irrlicht`)
+- [ ] `IrrlichtRenderer::placeBuildingMesh(assetBaseName, tileX, tileZ, DensityTier)`: place
+  the node at scale 1.0 (no `setScale()` call — models are natively sized per §1a). The
+  world origin is still derived from the density tier using the footprint-center formula.
+  The `assetBaseName` naming convention is unchanged (`res_low_01`, etc.).
+  (`graphics-dev-irrlicht`)
 
-- [ ] `IrrlichtRenderer::placeServiceBuildingMesh(type, tileX, tileZ)`: apply `setScale(5.0f)`
-  (2×2 footprint) and center the node over the 2×2 block. (`graphics-dev-irrlicht`)
+- [ ] `IrrlichtRenderer::placeServiceBuildingMesh(type, tileX, tileZ)`: place at scale 1.0
+  (model is natively sized at ±10 m = 20 m × 20 m) and center the node over the 2×2 block.
+  (`graphics-dev-irrlicht`)
 
 - [ ] Update `IRenderer::placeBuildingMesh()` signature in `src/interfaces/IRenderer.h` to
   accept `DensityTier` as the third parameter (after `tileZ`). Update `MockRenderer` and all
   call sites in `CitySimulation` and tests. (`graphics-dev-irrlicht`, `test-dev-cpp`)
+
+- [ ] **Multi-tile hover highlight interface**: Update `IRenderer::setTileHoverHighlight()` in
+  `src/interfaces/IRenderer.h` to accept a `footprintSize` parameter (default value `1` for
+  backward compatibility with all existing 1×1 call sites):
+
+  ```cpp
+  virtual void setTileHoverHighlight(int tileX, int tileZ, int footprintSize = 1) = 0;
+  ```
+
+  The implementation in `IrrlichtRenderer` draws an N×N highlight quad (where N =
+  `footprintSize`) centered on the footprint, covering all tiles from `(tileX, tileZ)` to
+  `(tileX + footprintSize − 1, tileZ + footprintSize − 1)`. UIManager calls this single
+  overload with the tier-appropriate footprint size (1, 2, or 3) when the player hovers with
+  the Zone tool active. Update `MockRenderer` to add the new parameter with the same default.
+  Update all call sites to compile cleanly — existing call sites with two arguments are
+  unaffected by the default. Cross-reference: §1b hover highlight rule ("the highlight
+  overlay covers the full footprint of the tier selected in the Zone sub-panel").
+  (`graphics-dev-irrlicht`)
 
 ##### 4c. Road Mesh — Carriageway Width & Center-Line Strip
 
@@ -279,7 +362,15 @@ Three independent but thematically related gameplay/visual improvements:
 - [ ] In `IrrlichtRenderer` vehicle agent position update (Phase 11d vehicle rendering),
   apply the `kLaneCenterOffset` world-space offset perpendicular to the agent's direction of
   travel. Northbound (+Z) agents shift +X by `kLaneCenterOffset`; southbound shift −X.
-  East (+X) agents shift +Z; west shift −Z. (`graphics-dev-irrlicht`)
+  East (+X) agents shift +Z; west shift −Z.
+
+  **Intersection tile snap rule**: Lane offset is applied only on straight road segments.
+  At intersection tiles — defined as tiles with 3 or more road neighbours, or tiles recorded
+  in the intersection registry — agents snap to the tile center X/Z (lane offset = 0) and do
+  NOT apply `kLaneCenterOffset`. The lane offset resumes on the exit segment once the agent
+  leaves the intersection tile. Cross-reference: `architecture/game-design/traffic-system.md`
+  §Lane Assignment ("agents snap to the tile center X/Z at intersection tiles (no lane
+  offset) and resume lane offset on the exit segment"). (`graphics-dev-irrlicht`)
 
 #### 5. Unit Tests
 
@@ -302,6 +393,19 @@ Three independent but thematically related gameplay/visual improvements:
 - [ ] `FootprintTest_UpgradeToMed_BlockedByDifferentZone_DoesNotDemolishNeighbour`: expanded
   footprint overlaps a `com_low` tile — upgrade is deferred, `com_low` tile untouched.
 - [ ] `FootprintTest_UpgradeRetryCancel_After12Ticks_EmitsCriticalToast`
+- [ ] `FootprintTest_ServiceBuilding_PlacementBlocked_NoAdjacentRoad`: service building
+  placement fails when no road tile is cardinal-adjacent to any tile in its 2×2 footprint.
+- [ ] `FootprintTest_ServiceBuilding_PlacementSucceeds_OneAdjacentRoad`: placement succeeds
+  when exactly one tile in the 2×2 footprint has a cardinal-adjacent road.
+- [ ] `FootprintTest_ZonePlacement_Blocked_RoadTooFar`: `placeZone()` rejects placement when
+  nearest road tile is > 3 tiles from the footprint; emits PLACEMENT_BLOCKED toast.
+- [ ] `FootprintTest_ZonePlacement_Succeeds_RoadWithin3Tiles`: `placeZone()` succeeds when
+  nearest road tile is exactly 3 tiles away.
+- [ ] `FootprintTest_ZoneAbandonment_WhenRoadDemolished`: after placing a zone within 3 tiles
+  of a road, demolishing that road causes `doProximityTick()` to mark the building abandoned
+  and zero out its population contribution.
+- [ ] `FootprintTest_ZoneRecovery_WhenRoadRestored`: an abandoned building recovers
+  automatically on the next `doProximityTick()` after a road is placed within 3 tiles.
 
   All tests use `ManualRNG` and `ManualClock`. (`test-dev-cpp`)
 
@@ -315,6 +419,9 @@ Three independent but thematically related gameplay/visual improvements:
   `kLaneCenterOffset` for a +Z-direction agent.
 - [ ] `RoadLane_SouthboundAgent_NegativeXOffset`: confirms agent world-X = tile center X −
   `kLaneCenterOffset` for a −Z-direction agent.
+- [ ] `RoadLane_IntersectionTile_AgentSnapsToTileCenter`: confirms that an agent traversing
+  an intersection tile (3+ road neighbours) has lane offset = 0 (world X/Z equals tile
+  center X/Z), and that the lane offset resumes to `±kLaneCenterOffset` on the exit segment.
 
   (`test-dev-cpp`)
 
@@ -337,31 +444,44 @@ Three independent but thematically related gameplay/visual improvements:
 ### Exit Criteria
 
 - [ ] `architecture/asset-standards/3d-model-standards.md` documents the multi-tile footprint
-  table, per-tier `setScale()` values, multi-tile world-origin formula, and road carriageway /
-  center-line strip geometry (including updated ≤50 tri LOD0 budget).
+  table, native-size authoring convention (no `setScale()`; per-tier local half-extent table),
+  multi-tile world-origin formula, and road carriageway / center-line strip geometry
+  (including updated ≤50 tri LOD0 budget).
 - [ ] `architecture/game-design/zoning-system.md` documents multi-tile placement rules,
-  demolish behavior, density-upgrade deferral, and hover highlight footprint.
+  demolish behavior, density-upgrade deferral, hover highlight footprint, service building
+  street-adjacency rule, and zone 3-tile street-proximity rule with abandonment/recovery.
 - [ ] `architecture/graphics-architecture/scene-graph-ownership.md` documents
   `placeBuildingMesh()` and `placeServiceBuildingMesh()` updated contracts with per-tier scale.
 - [ ] `architecture/ui-ux/hud-layout.md` Budget Detail Panel redesigned into Income /
   Expenses / Total sections, panel height updated to 320×260 px, subtotals and sign colors
   documented.
-- [ ] `architecture/game-design/economy-model.md` Budget Screen Section Mapping note present.
+- [ ] `architecture/game-design/economy-model.md` Budget Screen Section Mapping note present,
+  including explicit documentation that Tourism income is post-V1 and renders as a grayed-out
+  placeholder in the Budget Detail Panel Income section, with cross-reference to
+  `architecture/ui-ux/hud-layout.md`.
 - [ ] `architecture/game-design/traffic-system.md` Lane Assignment subsection present with
   `kLaneCenterOffset` reference and intersection snap rule.
 - [ ] `architecture/asset-standards/3d-model-standards.md` road tile lane-layout and
   center-line strip documented with named constants.
-- [ ] `IRenderer::placeBuildingMesh()` accepts `DensityTier`; `MockRenderer` updated; all call
-  sites compile cleanly.
+- [ ] `IRenderer::placeBuildingMesh()` accepts `DensityTier`; places at scale 1.0 (no
+  `setScale()`); `MockRenderer` updated; all call sites compile cleanly.
+- [ ] `CitySimulation::placeServiceBuilding()` enforces direct street adjacency (distance = 1).
+- [ ] `CitySimulation::placeZone()` enforces zone street-proximity check (nearest road ≤ 3 tiles).
+- [ ] `CitySimulation::doProximityTick()` marks buildings abandoned when road moves > 3 tiles
+  away; recovers them automatically when road returns within 3 tiles.
 - [ ] `CitySimulation::placeZone()` enforces multi-tile footprint collision check.
 - [ ] `CitySimulation::demolishTile()` frees all footprint tiles.
 - [ ] `CitySimulation::doDensityUnlockTick()` auto-demolishes same-zone lower-density
   neighbours in the expanded footprint; defers (not demolishes) on road/different-zone/OOB
   conflicts; cancels after 12 retries with CRITICAL toast.
 - [ ] `placeRoadMesh()` renders 7.5 m carriageway with white center-line strip at LOD0.
-- [ ] Vehicle agent positions offset by `kLaneCenterOffset` perpendicular to travel direction.
+- [ ] Vehicle agent positions offset by `kLaneCenterOffset` perpendicular to travel direction;
+  lane offset suppressed (snapped to tile center X/Z) at intersection tiles.
+- [ ] `IRenderer::setTileHoverHighlight(tileX, tileZ, footprintSize = 1)` declared in
+  `src/interfaces/IRenderer.h`; `MockRenderer` updated; all existing call sites compile
+  cleanly with two-argument form; UIManager passes tier footprint size for Zone tool hover.
 - [ ] `kLaneCenterOffset` and `kCarriagewayHalfWidth` declared in `render_constants.h`.
-- [ ] All 13 footprint tests, 4 road lane tests, and 4 budget breakdown tests pass.
+- [ ] All 20 footprint tests, 5 road lane tests, and 4 budget breakdown tests pass.
 - [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` exits
   zero.
 
@@ -371,10 +491,10 @@ Three independent but thematically related gameplay/visual improvements:
 
 | Role | Responsibility |
 |---|---|
-| `gamedesign-lookandfeel` | Author multi-tile placement rules in zoning-system.md; road adjacency rule; density-upgrade deferral design; lane assignment and kLaneCenterOffset spec in traffic-system.md; budget section mapping note in economy-model.md |
+| `gamedesign-lookandfeel` | Author multi-tile placement rules in zoning-system.md; service building street-adjacency rule; zone 3-tile proximity rule and abandonment/recovery spec; road adjacency rule; density-upgrade deferral design; lane assignment and kLaneCenterOffset spec in traffic-system.md; budget section mapping note in economy-model.md |
 | `gamedesign-ux` | Redesign Budget Detail Panel layout in hud-layout.md (Income/Expenses/Total sections, 320×260 px, subtotals, colors, tourism placeholder); hover highlight footprint rule in zoning-system.md |
-| `graphics-artist-3d-model` | Author multi-tile footprint and scale table in 3d-model-standards.md; road carriageway width, center-line strip geometry, and updated ≤50 tri budget in 3d-model-standards.md |
-| `graphics-dev-irrlicht` | Implement per-tier scale in `placeBuildingMesh()`/`placeServiceBuildingMesh()`; update `IRenderer` signature and `MockRenderer`; implement carriageway width + center-line strip in `placeRoadMesh()`; declare constants in `render_constants.h`; implement lane offset in vehicle agent rendering; update `placeZone()`/`demolishTile()`/`doDensityUnlockTick()` footprint logic; update `setTileHeight()` calls to cover full footprint |
+| `graphics-artist-3d-model` | Author multi-tile footprint and native-size authoring convention (no setScale) in 3d-model-standards.md; road carriageway width, center-line strip geometry, and updated ≤50 tri budget in 3d-model-standards.md |
+| `graphics-dev-irrlicht` | Implement `placeBuildingMesh()`/`placeServiceBuildingMesh()` at scale 1.0 (native-size models, no setScale); update `IRenderer` signature and `MockRenderer`; add `footprintSize` parameter to `setTileHoverHighlight()`; implement carriageway width + center-line strip in `placeRoadMesh()`; declare constants in `render_constants.h`; implement lane offset with intersection snap in vehicle agent rendering; update `placeZone()`/`demolishTile()`/`doDensityUnlockTick()` footprint logic; implement `placeServiceBuilding()` street-adjacency check; implement `placeZone()` 3-tile proximity check; implement `doProximityTick()` abandonment/recovery; update `setTileHeight()` calls to cover full footprint |
 | `test-dev-cpp` | Author footprint, road lane, and budget breakdown test files; wire all into CMake targets |
 
 ---

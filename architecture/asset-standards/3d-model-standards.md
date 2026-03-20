@@ -18,7 +18,7 @@
 | Vehicles (bus, truck) | ≤3,000 tris | ≤500 tris | Point/sprite |
 | Vehicles (general indicative range) | 1,000–3,000 tris (indicative range — see per-class table in § Vehicle Polygon Budget for binding limits) | 200–500 tris (indicative range — see per-class table for binding limits) | Point/sprite |
 | Terrain chunk (64×64 m) | 32×32 quad grid | 16×16 quad grid | 8×8 quad grid |
-| Road tile (10×10 m) | ≤48 tris (flat quad + kerb geometry) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
+| Road tile (10×10 m) | ≤50 tris (flat quad + kerb geometry + center-line strip; Phase-11h adds a 2-tri center-line quad bringing the total from the prior ≤48 to ≤50) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
 | Infrastructure props (lamp posts, signs) | ≤300 tris | ≤75 tris | Billboard (same system as small buildings) |
 
 **Commercial High skyscraper sub-row**: The `com_high_*` row (7,000–10,000 tris LOD0) applies
