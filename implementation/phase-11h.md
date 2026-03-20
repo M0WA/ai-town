@@ -137,10 +137,10 @@ Three independent but thematically related gameplay/visual improvements:
 
 ##### 1c. `architecture/graphics-architecture/scene-graph-ownership.md`
 
-- [ ] Update `placeBuildingMesh()` contract: add a `DensityTier` parameter (or derive tier
-  from `assetBaseName` prefix) so the scene-graph layer can compute the correct world origin.
-  Document that no `setScale()` is applied — models are natively sized. Document the
-  per-tier local half-extent table from §1a. (`graphics-dev-irrlicht`)
+- [ ] Update `placeBuildingMesh()` contract: derive `DensityTier` from the `assetBaseName`
+  prefix so the scene-graph layer can compute the correct world origin. Document that no
+  `setScale()` is applied — models are natively sized. Document the per-tier local
+  half-extent table from §1a. (`graphics-dev-irrlicht`)
 
 - [ ] Update `placeServiceBuildingMesh()` contract: service buildings use the 2×2 footprint
   at scale 1.0 (model is natively sized at ±10 m). The world origin is the center of the 2×2
@@ -340,14 +340,20 @@ Three independent but thematically related gameplay/visual improvements:
   (`gamedesign-lookandfeel`, `graphics-dev-irrlicht`)
 
 - [ ] `ITerrainQuery::setTileHeight()` (from Phase 10b) must be called for **all tiles in the
-  footprint** during terrain flattening, not only the origin tile. (`graphics-dev-irrlicht`)
+  footprint** during terrain flattening, not only the origin tile. Iterate the full N×N grid:
+  for a 1×1 footprint — 1 call; for a 2×2 footprint — 4 calls at `(tileX+dx, tileZ+dz)` for
+  dx,dz ∈ {0,1}; for a 3×3 footprint — 9 calls at `(tileX+dx, tileZ+dz)` for
+  dx,dz ∈ {0,1,2}. All tiles are set to the same height (the height of the origin tile
+  sampled from the current heightmap **before** any `setTileHeight()` modifications occur)
+  to ensure a flat, level building footprint. (`graphics-dev-irrlicht`)
 
 ##### 4b. `IrrlichtRenderer` — Per-Tier Scaling
 
 - [ ] `IrrlichtRenderer::placeBuildingMesh(assetBaseName, tileX, tileZ)`: parse `DensityTier`
-  from the first segment of `assetBaseName` (e.g., `"res_low_01"` → `LOW`), then compute
-  world origin and confirm scale 1.0 per native-size convention. No IRenderer interface
-  change needed; `MockRenderer` unchanged. (`graphics-dev-irrlicht`)
+  from the second `_`-delimited segment of `assetBaseName` (e.g., `"res_low_01"` splits to
+  ["res", "low", "01"] → tier = `low` → `DensityTier::LOW`), then compute world origin and
+  confirm scale 1.0 per native-size convention. No IRenderer interface change needed;
+  `MockRenderer` unchanged. (`graphics-dev-irrlicht`)
 
 - [ ] `IrrlichtRenderer::placeServiceBuildingMesh(type, tileX, tileZ)`: place at scale 1.0
   (model is natively sized at ±10 m = 20 m × 20 m) and center the node over the 2×2 block.
@@ -365,8 +371,10 @@ Three independent but thematically related gameplay/visual improvements:
   hardcoded per tool mode in `IrrlichtRenderer`: Zone-tool hover uses a semi-transparent
   green (`0x6600FF00`); Demolish-tool pending hover uses a semi-transparent red
   (`0x66FF0000`). No colour is passed at the call site — the renderer determines colour
-  from the current tool state or a new `ToolMode` parameter (implementer's choice). Update
-  `MockRenderer` to match.
+  by reading an internal `m_activeTool` (or equivalent tool-mode state member) — the
+  named colour constants (`kHoverArgbZone`, `kHoverArgbDemolish`, etc.) are defined in
+  `src/ui/ui_constants.h` and used only inside `IrrlichtRenderer`. Cross-reference:
+  `architecture/ui-ux/hud-layout.md` §Tile Hover Highlight. Update `MockRenderer` to match.
 
   The implementation in `IrrlichtRenderer` draws an N×N highlight quad (where N =
   `footprintSize`) centered on the footprint, covering all tiles from `(tileX, tileZ)` to
@@ -431,12 +439,15 @@ Three independent but thematically related gameplay/visual improvements:
   §Lane Assignment ("agents snap to the tile center X/Z at intersection tiles (no lane
   offset) and resume lane offset on the exit segment"). (`graphics-dev-irrlicht`)
 
-  **Audio positioning**: vehicle engine audio sources (`updateVehicleAudio(worldX, worldZ)`)
+  **Audio positioning**: vehicle engine audio sources (`updateVehicleAudio(idleIdx, moveIdx, speedFraction, worldX, worldZ)`)
   must receive the same world coordinates as the rendered position — including the applied
   lane offset on straight segments. At intersection tiles (lane offset = 0, agent snapped to
   tile center), pass tile-center worldX/worldZ. This keeps audio spatially synchronised with
   the visual position. Cross-reference: `architecture/audio-architecture/dynamic-soundscape.md`
-  §Vehicle Engine Audio. (`sound-dev-opensoftal`)
+  §Vehicle Engine Audio. The vehicle position (including lane offset) is computed once per
+  frame in the vehicle update pass; the resulting `(worldX, worldZ)` is passed to both the
+  renderer and `updateVehicleAudio()` — no separate recomputation occurs in the audio path.
+  (`sound-dev-opensoftal`)
 
 #### 5. Unit Tests
 
@@ -477,7 +488,7 @@ Three independent but thematically related gameplay/visual improvements:
 
 - [ ] Add `footprint_test.cpp` to the `simulation_tests` CMake target. (`test-dev-cpp`)
 
-##### 5b. Road Lane Tests — `tests/rendering/road_lane_test.cpp`
+##### 5b. Road Lane Tests — `tests/terrain/road_lane_test.cpp`
 
 - [ ] `RoadLane_CarriagewayHalfWidth_Is3_75m`: verifies `kCarriagewayHalfWidth == 3.75f`.
 - [ ] `RoadLane_LaneCenterOffset_Is1_875m`: verifies `kLaneCenterOffset == 1.875f`.
@@ -522,6 +533,25 @@ Three independent but thematically related gameplay/visual improvements:
   Use `MockCitySimulation` and `MockRenderer`. (`test-dev-cpp`)
 
 - [ ] Add `demolition_input_test.cpp` to `ui_tests` CMake target. (`test-dev-cpp`)
+
+##### 5e. Vehicle Audio Positioning Tests — `tests/audio/vehicle_audio_positioning_test.cpp`
+
+- [ ] `VehicleAudio_StraightSegment_AudioReceivesLaneOffsetCoords`: verifies that when a
+  vehicle agent travels a straight road segment in the northbound (+Z) direction, the worldX
+  coordinate passed to `updateVehicleAudio(idleIdx, moveIdx, speedFraction, worldX, worldZ)`
+  equals tile center X + `kLaneCenterOffset`. Cross-reference: §4e audio positioning
+  requirement and `architecture/audio-architecture/dynamic-soundscape.md` §Vehicle Engine
+  Audio. (`test-dev-cpp`)
+
+- [ ] `VehicleAudio_IntersectionTile_AudioReceivesTileCenterCoords`: verifies that when a
+  vehicle agent traverses an intersection tile (3+ road neighbours), the worldX/worldZ passed
+  to `updateVehicleAudio()` equals the tile center (no lane offset). This confirms that audio
+  remains spatially synchronized with the visual position when the agent snaps to the
+  intersection tile center per §4e lane offset suppression rule. (`test-dev-cpp`)
+
+  Use `MockAudioSystem` and `MockRenderer`. (`test-dev-cpp`)
+
+- [ ] Add `vehicle_audio_positioning_test.cpp` to `audio_tests` CMake target. (`test-dev-cpp`)
 
 ---
 
@@ -571,8 +601,12 @@ Three independent but thematically related gameplay/visual improvements:
 - [ ] Demolition confirmation modal fires on mouse-up (not mouse-down); Zone tool LMB-down
   is fully isolated from demolition code path.
 - [ ] Confirmation **Yes** calls `demolishTile()` and removes tile from world end-to-end.
-- [ ] All 20 footprint tests, 5 road lane tests, 4 budget breakdown tests, and 5 demolition
-  input tests pass.
+- [ ] Vehicle audio positioning tests pass: `VehicleAudio_StraightSegment_AudioReceivesLaneOffsetCoords`
+  and `VehicleAudio_IntersectionTile_AudioReceivesTileCenterCoords` confirm that audio
+  coordinates match visual position with lane offset on straight segments and tile-center
+  snap at intersections.
+- [ ] All 18 footprint tests, 5 road lane tests, 4 budget breakdown tests, 5 demolition
+  input tests, and 2 vehicle audio positioning tests pass.
 - [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` exits
   zero.
 

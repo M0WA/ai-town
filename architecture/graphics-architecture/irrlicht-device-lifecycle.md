@@ -37,16 +37,23 @@ driver->endScene();
    - `bool m_hoverVisible{false}` — set to `true` when a valid tile is hovered; set to
      `false` on a clear request (`tileX == -1`).
 
-   `setTileHoverHighlight(tileX, tileZ, colour)` behaves as follows:
+   `setTileHoverHighlight(tileX, tileZ, footprintSize = 1)` behaves as follows:
 
    - **Clear request (`tileX == -1`)**: sets `m_hoverVisible = false`. Does NOT touch
      `m_hoveredTileMesh` — the pointer remains valid and the buffer is retained for reuse.
-   - **Normal call (valid tile)**: updates vertex positions and colours in the existing buffer,
+   - **Normal call (valid tile)**: updates vertex positions in the existing buffer (colour is
+     hardcoded in `IrrlichtRenderer`), sets the highlighted footprint to
+     `footprintSize × footprintSize` tiles starting at `(tileX, tileZ)`,
      calls `recalculateBoundingBox()` on the buffer, then sets `m_hoverVisible = true`.
 
    `m_hoveredTileMesh` is dropped **only** in the `IrrlichtRenderer` destructor via `->drop()`.
    Setting the pointer to `nullptr` on clear is a bug — it loses the only reference to the
    allocated buffer, causing a memory leak.
+
+   **Phase 11h signature change**: the `uint32_t argb` parameter was removed in Phase 11h;
+   hover highlight colours are now hardcoded in `IrrlichtRenderer`. The third parameter
+   `footprintSize` (default = 1) controls the N×N footprint size. The clear sentinel is now
+   `setTileHoverHighlight(-1, -1)` (two arguments).
 
 3. `uiManager->draw()` — calls each panel's `draw()` method in explicit Z-order (slots 1–10 per `ui-manager.md`). Each panel's `draw()` updates element state (visibility, text, alpha) but does NOT render pixels.
 4. `guiEnvironment->drawAll()` — renders all visible `IGUIElement` nodes. Because step 3 has already set the correct visibility on every element (non-active panels hide theirs), only the intended elements are painted.

@@ -663,7 +663,7 @@ public:
     // Phase 9b additions — world interaction:
     virtual bool          pickTerrainTile(int screenX, int screenY,
                                           int& tileX, int& tileZ) const = 0;
-    virtual void          setTileHoverHighlight(int tileX, int tileZ, uint32_t argb) = 0;
+    virtual void          setTileHoverHighlight(int tileX, int tileZ, int footprintSize = 1) = 0;
     virtual void          setZoneOverlay(int mapTilesX, int mapTilesZ,
                                          const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) = 0;
     virtual ScreenRect    getTileScreenBounds(int tileX, int tileZ) const = 0;

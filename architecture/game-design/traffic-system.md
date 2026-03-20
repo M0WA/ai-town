@@ -16,6 +16,27 @@
 - **Bootstrap oscillation invariant (testable constraint)**: During the first `demand_bootstrapping_ticks` budget ticks (ticks 0–5), demand values must not oscillate. Specifically, for any two consecutive ticks, `|demand_factor[tick+1] − demand_factor[tick]| < 1.0` for all zone types. A jump of 1.0 (the full [0.0, 1.0] range) indicates a sign-flip error in the bootstrap subsidy calculation. On a blank map at any simulation speed (including `SpeedMultiplier::x3`), `getTrafficDemandFactor()` and `getDemandPressurePct()` must remain bounded in [0.0, 1.0] with no tick-to-tick delta exceeding 1.0. Verified by `DemandBootstrap_AtX3Speed_NoBoundaryViolationAndNoOscillation` in `tests/simulation/zoning_test.cpp`.
 - **Demand pressure readouts** (C/I feedback): When Commercial or Industrial demand prerequisites are unmet, the unmet demand must be surfaced to the player. The `QueryResult` struct exposes a `demand_pressure_pct` field per tile = `(1.0f − effective_demand_factor) × 100`, where `effective_demand_factor` is the post-combination demand in [0.0, 1.0]. **Inverse semantics**: 0 means fully satisfied demand (high traffic flow, maximum demand); 100 means zero effective demand (demand collapsed). **CRITICAL — Do NOT confuse with `ICitySimulation::getDemandPressurePct(ZoneType)`**, which returns the city-wide EFFECTIVE demand in [0.0, 1.0] (1.0 = maximum demand) — the opposite direction. `QueryResult::demandPressurePct` = `(1.0f − tileEffectiveDemandFactor) × 100.0f`; it is NOT `getDemandPressurePct(zone) × 100`. See `simulation_types.h QueryResult::demandPressurePct` for the canonical definition and cross-reference. This is shown in the Inspector panel for zone tiles and as a compact HUD indicator bar per zone type (R/C/I). Without this readout, an economy flatline cannot be distinguished from a design error by the player.
 
+## Lane Assignment
+
+Each road edge in the traffic graph is **directional**. Each physical road tile hosts **two directed edges** — one per lane direction — allowing vehicles to travel in both directions on the same road.
+
+### Lane Offset and World Positioning
+
+Vehicle agents are rendered at a **lane center offset** perpendicular to their direction of travel. This visual offset indicates which lane they are occupying:
+
+- **Northbound (+Z) agent**: rendered at world X offset `+kLaneCenterOffset` from the tile center.
+- **Southbound (−Z) agent**: rendered at world X offset `−kLaneCenterOffset` from the tile center.
+- **Eastbound (+X) agent**: rendered at world Z offset `+kLaneCenterOffset` from the tile center.
+- **Westbound (−X) agent**: rendered at world Z offset `−kLaneCenterOffset` from the tile center.
+
+The `kLaneCenterOffset` constant is **1.875 metres** and must be defined in `src/rendering/render_constants.h` alongside other rendering constants (e.g., `road_lod2_color`). **Do NOT hardcode the literal `1.875f` at call sites** — always reference the named constant. The declaration is: `static constexpr float kLaneCenterOffset = 1.875f;` in `src/rendering/render_constants.h`.
+
+### Intersection Tile Snap Rule
+
+Lane offset is **applied only on straight road segments**. At intersection tiles — defined as tiles with 3 or more road neighbours, or tiles recorded in the intersection signal registry — agents **snap to the tile center X/Z** (lane offset = 0). Lane offset resumes on the **exit segment** once the agent leaves the intersection tile.
+
+This snap rule prevents agents from appearing offset when navigating tight intersections, and ensures smooth visual turns through the intersection space.
+
 ## Intersections
 
 Each road intersection is tracked by tile coordinate (`tileX`, `tileZ`). The simulation emits

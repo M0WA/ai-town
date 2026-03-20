@@ -403,7 +403,7 @@ buffers — no separate buffer allocation per colour group is required.
 
 **When the single-tile hover is suppressed**: while a Zone or Road drag is active
 (`m_lmbHeld && m_zoneAnchorX != -1`) and the preview is shown, `UIManager` calls
-`setTileHoverHighlight(-1, -1, kHoverArgbClear)` to hide the single-tile cursor and
+`setTileHoverHighlight(-1, -1)` to hide the single-tile cursor and
 `setTilePlacementPreview(freeTiles, kHoverArgb, blockedTiles)` to show the multi-tile
 preview. When LMB is released or the tool is deselected,
 `setTilePlacementPreview({}, 0)` clears the preview and the normal single-tile hover
@@ -483,6 +483,90 @@ placement time therefore survives LOD transitions without re-binding.
 
 ---
 
+## Building Mesh Placement Contracts (Phase 11)
+
+### `placeBuildingMesh()` Contract
+
+`placeBuildingMesh(tileX, tileZ, assetBaseName)` places a zone building (residential, commercial, or industrial) at a given origin tile, with footprint and world origin determined by the building's `DensityTier`.
+
+**Footprint collision responsibility**: `placeBuildingMesh()` assumes the footprint is already validated as clear before being called. Footprint occupancy checking is the exclusive responsibility of `CitySimulation::placeZone()` — the renderer's sole responsibility is computing the world origin and placing the scene node. No occupancy validation logic belongs in the rendering layer. Cross-reference: `architecture/game-design/zoning-system.md` § Multi-Tile Footprint Placement Rules.
+
+**DensityTier derivation from assetBaseName**:
+The `DensityTier` is derived from the second delimiter-separated segment of `assetBaseName`. For example:
+
+- `"res_low_01"` → split by `_` → `["res", "low", "01"]` → tier segment = `"low"` → `DensityTier::LOW`
+- `"com_med_03"` → split by `_` → `["com", "med", "03"]` → tier segment = `"med"` → `DensityTier::MED`
+- `"ind_high_02"` → split by `_` → `["ind", "high", "02"]` → tier segment = `"high"` → `DensityTier::HIGH`
+
+No new parameter is added to the signature; tier extraction is performed internally by the method.
+
+**Native-size convention**:
+No `setScale()` is applied to the placed node. Building models are authored at real-world scale (1 Blender unit = 1 m) and placed at scale 1.0. This departs from the V1 baseline, which used `setScale(kTileSize / 4.0f) = setScale(2.5f)` on ±2 m models; Phase 9+ assets are authored natively sized.
+
+**Per-tier local half-extent and footprint**:
+Each density tier has a defined local-space half-extent (±X, ±Y, ±Z from model origin) and corresponding world footprint size:
+
+| Density tier | Local half-extent | World footprint |
+|---|---|---|
+| `LOW` | ±5 m | 10 m × 10 m |
+| `MED` | ±10 m | 20 m × 20 m |
+| `HIGH` | ±15 m | 30 m × 30 m |
+
+These values are binding and derived from `architecture/asset-standards/3d-model-standards.md` § Multi-Tile Footprint.
+
+**World origin formula for multi-tile footprints**:
+The origin tile is the bottom-left corner `(tileX, tileZ)`. All tiles in the footprint are marked occupied in the simulation layer. The placed scene node's world origin is positioned at the **center** of the full footprint:
+
+```text
+footprintW = 1 (LOW), 2 (MED), 3 (HIGH)
+footprintH = 1 (LOW), 2 (MED), 3 (HIGH)
+
+worldX = (tileX + (footprintW - 1) * 0.5f) * kTileSize
+worldZ = (tileZ + (footprintH - 1) * 0.5f) * kTileSize
+```
+
+For a LOW-tier (1×1) building at `(tileX, tileZ)`:
+
+```text
+worldX = (tileX + 0 * 0.5f) * kTileSize = tileX * kTileSize
+worldZ = (tileZ + 0 * 0.5f) * kTileSize = tileZ * kTileSize
+```
+
+(Unchanged from V1 baseline.)
+
+For a MED-tier (2×2) building at `(tileX, tileZ)`:
+
+```text
+worldX = (tileX + 0.5f) * kTileSize
+worldZ = (tileZ + 0.5f) * kTileSize
+```
+
+For a HIGH-tier (3×3) building at `(tileX, tileZ)`:
+
+```text
+worldX = (tileX + 1.0f) * kTileSize
+worldZ = (tileZ + 1.0f) * kTileSize
+```
+
+### `placeServiceBuildingMesh()` Contract
+
+`placeServiceBuildingMesh(tileX, tileZ, assetBaseName)` places a service building (power plant, water tower, etc.) at the given origin tile.
+
+**Footprint and native-size convention**:
+Service buildings occupy a **2×2 tile footprint** (20 m × 20 m world extent) at scale 1.0 (natively sized, no runtime `setScale()` applied). Service building models are authored at real-world scale (1 Blender unit = 1 m) with a local-space half-extent of **±10 m** (matching the MED-tier zone building convention).
+
+**World origin formula**:
+The origin tile is `(tileX, tileZ)`. The scene node's world origin is positioned at the **center** of the 2×2 footprint, using the same formula as MED-tier zone buildings:
+
+```text
+worldX = (tileX + 0.5f) * kTileSize
+worldZ = (tileZ + 0.5f) * kTileSize
+```
+
+All four tiles of the 2×2 footprint `[(tileX, tileZ), (tileX+1, tileZ), (tileX, tileZ+1), (tileX+1, tileZ+1)]` are marked occupied in the simulation layer. At least one road tile must be edge-adjacent (4-directional cardinal, distance = 1) to any tile in the footprint for the building to be placeable.
+
+---
+
 ## Vehicle Node Registry (Phase 10)
 
 ### Registry structure
@@ -533,8 +617,11 @@ Vehicle material slots are configured in `placeVehicle()` immediately after
 
 ### Vehicles are NOT tile-scaled
 
-Building nodes are scaled by `kTileSize` to fill the 10 × 10 m tile footprint.
-Vehicle nodes are **NOT** scaled — vehicles are authored at world scale (real metres).
+Building nodes are placed at scale 1.0 (natively sized — 1 Blender unit = 1 m, exported at
+real-world dimensions) — see `placeBuildingMesh()` Contract section above for the world
+origin formula that centres buildings on multi-tile footprints. `setScale()` is **never**
+called on building nodes.
+Vehicle nodes are likewise **NOT** scaled — vehicles are authored at world scale (real metres).
 `placeVehicle()` calls only `setPosition` and `setRotation`; it never calls
 `setScale`.
 

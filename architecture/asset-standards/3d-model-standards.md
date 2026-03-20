@@ -30,7 +30,26 @@ Standards** section below for full design requirements.
 
 **Road tile LOD thresholds**: Road tiles use the same LOD distance thresholds as small buildings/props (LOD0→LOD1 at 30 m / 25 m; LOD1→LOD2 at 100 m / 90 m). At LOD2 (>100 m), road tiles are rendered as flat coloured quads with no kerb or road marking geometry — road marking decals from the road atlas are disabled at LOD2. **Road LOD2 color source**: The LOD2 road quad color is sampled from the road tileable texture's average color, computed at asset pipeline generation time and stored as a named constant `RenderConstants::road_lod2_color` (type `irr::video::SColor`) in `src/rendering/render_constants.h`. This value must be a perceptual match of the center region of `road_asphalt_tileable.dds` when viewed in linear space (approximately a mid-dark gray, e.g. SColor(255, 60, 60, 60) for standard asphalt). Do NOT hardcode a magic color literal inline in rendering code — always use `RenderConstants::road_lod2_color` so that the color is updated in one place when the road texture changes. The LOD2 road quad does NOT bind a texture — it is drawn as a flat-shaded quad using the material's vertex color channel, set to `road_lod2_color` at entity construction time.
 
-**Road tile mesh authoring source (binding decision, `graphics-artist-3d-model`, 2026-03-04)**: Road tile LOD0 and LOD1 geometry is **procedurally generated in C++ at runtime via `SMesh`/`IMeshBuffer`** — no `.b3d` file is authored on disk for road tiles. `IrrlichtRenderer::placeRoadMesh()` constructs the LOD0 quad+kerb mesh (≤48 tris) and LOD1 flat quad mesh (≤16 tris) directly in code using hardcoded vertex data for a 4×4 m tile footprint. The LOD2 flat colored quad is also constructed in code (≤8 tris, `road_lod2_color` vertex color, no texture). Rationale: (a) road tiles do not participate in the lightmap baking pipeline and therefore do not require UV channel 1 or the `.b3d` format; (b) the road custom shader binds `road_asphalt_tileable.dds` via the raw GL path, which is incompatible with a standard `IMeshSceneNode` loaded from a `.b3d` file via the Irrlicht mesh loader; (c) no road tile `.b3d` filename appears in any phase deliverable — road geometry is implicitly a code deliverable of `graphics-dev-irrlicht`, not an artist asset. **Artist action: none**. No road tile `.b3d`, `.obj`, or `.meta` file is required from the 3D model artist pipeline. The `validate_assets.py` script must NOT look for road tile `.b3d` files — they do not exist. Road tile UV-channel 0 tiling is specified in the road shader (UV tiles 2× per 4×4 m road quad — both U and V scale by 2.0 in the vertex shader), not authored per-asset. The road kerb geometry vertices are authored inline in `IrrlichtRenderer` as a unit of 4 bevelled edge strips (each strip = 6 tris, 4 strips = 24 tris) plus a central flat quad (2 tris), totaling 26 tris for LOD0 — well within the ≤48 tri budget. LOD1 is a single flat quad (2 tris) with no kerb, within the ≤16 tri budget.
+**Road tile mesh authoring source (binding decision, `graphics-artist-3d-model`, 2026-03-04)**: Road tile LOD0 and LOD1 geometry is **procedurally generated in C++ at runtime via `SMesh`/`IMeshBuffer`** — no `.b3d` file is authored on disk for road tiles. `IrrlichtRenderer::placeRoadMesh()` constructs the LOD0 quad+kerb mesh (≤50 tris) and LOD1 flat quad mesh (≤16 tris) directly in code using hardcoded vertex data for a 10 m × 10 m tile. The LOD2 flat colored quad is also constructed in code (≤8 tris, `road_lod2_color` vertex color, no texture). Rationale: (a) road tiles do not participate in the lightmap baking pipeline and therefore do not require UV channel 1 or the `.b3d` format; (b) the road custom shader binds `road_asphalt_tileable.dds` via the raw GL path, which is incompatible with a standard `IMeshSceneNode` loaded from a `.b3d` file via the Irrlicht mesh loader; (c) no road tile `.b3d` filename appears in any phase deliverable — road geometry is implicitly a code deliverable of `graphics-dev-irrlicht`, not an artist asset. **Artist action: none**. No road tile `.b3d`, `.obj`, or `.meta` file is required from the 3D model artist pipeline. The `validate_assets.py` script must NOT look for road tile `.b3d` files — they do not exist. Road tile UV-channel 0 tiling is specified in the road shader (UV tiles 2× per 10 m road quad — both U and V scale by 2.0 in the vertex shader), not authored per-asset.
+
+**Carriageway width**: The asphalt surface covers **7.5 m** of the 10 m tile width (¾ of the tile). The remaining 1.25 m on each side is rendered as a kerb/verge strip using bevelled edge strips. The carriageway is centered within the tile.
+
+**Center-line strip**: A 0.3 m wide white painted strip runs along the Z-axis center of the carriageway (at local X = 0), implementing a two-way road divider. The strip is part of the LOD0 road mesh (≤2 additional tris, bringing the total to ≤50), implemented as a thin raised quad (+0.005 m above the asphalt surface to avoid Z-fighting) with white vertex color (`SColor(255, 255, 255, 255)`) and `EMT_SOLID` material (no texture binding required — vertex color suffices). The strip does NOT appear at LOD1 or LOD2.
+
+**Lane layout** (two-way, keep-right):
+
+- **Left lane** (local X = −1.875 m center, 3.6 m wide): vehicle agents traveling in the **−Z direction** (southbound).
+- **Right lane** (local X = +1.875 m center, 3.6 m wide): vehicle agents traveling in the **+Z direction** (northbound).
+- Intersecting tiles rotate these conventions 90° about Y so the same lane rules hold in all cardinal directions.
+
+Named constants (declared in `src/rendering/render_constants.h`):
+
+```cpp
+static constexpr float kLaneCenterOffset = 1.875f;   // metres from road center
+static constexpr float kCarriagewayHalfWidth = 3.75f; // half of 7.5 m carriageway
+```
+
+The road kerb geometry vertices are authored inline in `IrrlichtRenderer` as a unit of 4 bevelled edge strips (each strip = 6 tris, 4 strips = 24 tris) plus a central flat quad (2 tris), totaling 26 tris for LOD0, plus the center-line strip (2 tris) = 28 tris — well within the ≤50 tri budget (Phase 11h raised from ≤48 to accommodate the 2-tri center-line quad). LOD1 is a single flat quad (2 tris) with no kerb or center-line, within the ≤16 tri budget.
 
 **Note on large building LOD2 budget**: 400–600 tris is required to represent building silhouettes (setbacks, rooftop details, entry bays) at the 185–200 m switch-in distance where tall buildings still occupy 50–80 vertical pixels. A 100–200 tri cap produces a featureless slab that is visually jarring against LOD1 counterparts.
 
@@ -197,6 +216,37 @@ Z = tileZ * kTileSize
 **Service building tile footprint**: Service buildings occupy a single 10×10 m tile in V1. The placed scene node's world X/Z origin is identical to the formula above. The service building mesh extends beyond the 10×10 m tile boundary at LOD0 (up to 30×30 m for a power plant), but the placement origin and collision registration tile are the single 10×10 m origin tile.
 
 **Zone building footprint constraint**: Zone building (res/com/ind) geometry is authored with `±2 m` half-extent in X and Z local space (4 m × 4 m footprint, matching the modular grid unit). `placeBuildingMesh()` and `placeServiceBuildingMesh()` apply `setScale(kTileSize / 4.0f)` = `setScale(2.5f)`, which maps the ±2 m model-space footprint to ±5 m world space — exactly one 10 m tile. Do NOT scale by the bare `kTileSize` (10.0f); that would produce a 40 m × 40 m footprint spanning four tiles. Service buildings share the same ±2 m / 2.5f convention. Any geometry exceeding ±2 m in X/Z will visually intersect adjacent tiles at runtime.
+
+#### Multi-Tile Footprint
+
+**Tile footprint by density tier** (binding):
+
+| Density tier | Tile footprint | World footprint |
+|---|---|---|
+| `low` (res/com/ind) | 1×1 tiles | 10 m × 10 m |
+| `med` (res/com/ind) | 2×2 tiles | 20 m × 20 m |
+| `high` (res/com/ind) | 3×3 tiles | 30 m × 30 m |
+| Service buildings | 2×2 tiles | 20 m × 20 m |
+
+**Native-size authoring convention**: Zone buildings and service buildings are authored at real-world scale (1 Blender unit = 1 m). Each density tier has its own correctly-sized model. **No runtime `setScale()` is applied** — `placeBuildingMesh()` and `placeServiceBuildingMesh()` place nodes at scale 1.0. The old ±2 m authoring convention is **retired**; Phase 9 assets must be re-exported at native world size.
+
+| Density tier | Local-space half-extent | World footprint |
+|---|---|---|
+| `low` (res/com/ind) | ±5 m | 10 m × 10 m |
+| `med` (res/com/ind) | ±10 m | 20 m × 20 m |
+| `high` (res/com/ind) | ±15 m | 30 m × 30 m |
+| Service (2×2) | ±10 m | 20 m × 20 m |
+
+**Collision registration and simulation ownership**: All tiles in the footprint are marked occupied. The **origin tile** is the bottom-left corner (`tileX, tileZ`). The placed scene node's world origin is the **center of the full footprint**:
+
+```text
+worldX = (tileX + (footprintW - 1) * 0.5f) * kTileSize
+worldZ = (tileZ + (footprintH - 1) * 0.5f) * kTileSize
+```
+
+For a 1×1 building, `worldX = tileX * kTileSize` and `worldZ = tileZ * kTileSize` (unchanged from V1 baseline).
+
+**Road adjacency for multi-tile buildings**: At least one road tile must be edge-adjacent (4-directional cardinal, distance = 1) to **any tile in the footprint** — not only the origin tile.
 
 #### `.meta` Sidecar File Format
 

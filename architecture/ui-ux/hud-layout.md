@@ -217,9 +217,12 @@ The tile hover highlight is a semi-transparent wireframe quad rendered over the 
 terrain tile. ARGB values are encoded as `0xAARRGGBB` (Irrlicht `SColor` format;
 AA=alpha, RR=red, GG=green, BB=blue).
 
-**These values are authoritative and must be used by `UIManager::onEvent()` MouseMove
-handler when calling `IRenderer::setTileHoverHighlight()`. Do not use inline literals —
-define named constants in `src/ui/ui_constants.h`.**
+Highlight colours are hardcoded in `IrrlichtRenderer` based on the active tool mode.
+`UIManager` does not pass colour values at the call site — the renderer determines colour
+internally. The named constants below serve as the authoritative reference for what
+colours the renderer uses for each tool; implementors must match these values inside
+`IrrlichtRenderer`. Do not use inline literals — define named constants in
+`src/ui/ui_constants.h` for use as implementation references.
 
 | Active tool | ARGB value | Colour description | Named constant |
 |---|---|---|---|
@@ -250,10 +253,24 @@ tile is already occupied". The alpha difference (73% vs. 50%) is the primary dif
 because the colours are close in hue; implementors must not reduce `kHoverArgbBlocked`'s
 alpha to `0x80` as that would make the two states indistinguishable.
 
-**Clear sentinel**: pass `tileX = -1`, `tileZ = -1`, `argb = 0` to
+**Clear sentinel**: pass `tileX = -1`, `tileZ = -1` to
 `IRenderer::setTileHoverHighlight()` to remove the highlight entirely (no active tool or
-ray-cast miss). The value `kHoverArgbClear = 0x00000000u` is the canonical constant for
-this case.
+ray-cast miss). The `argb` parameter is not used in the new interface and must not be
+passed. The sentinel value is `setTileHoverHighlight(-1, -1)` (no colour argument).
+The legacy constant `kHoverArgbClear = 0x00000000u` is retained as a reference only.
+
+**Interface change (Phase 11h)**: The `uint32_t argb` parameter has been removed from
+`IRenderer::setTileHoverHighlight()`. The new signature is:
+
+```cpp
+virtual void setTileHoverHighlight(int tileX, int tileZ, int footprintSize = 1) = 0;
+```
+
+UIManager passes only `(tileX, tileZ, footprintSize)`. The renderer determines the
+highlight colour internally from the active tool mode — specifically by reading
+`m_activeTool` (or equivalent tool-mode state member) inside `IrrlichtRenderer`. The named
+constants (`kHoverArgbZone`, `kHoverArgbDemolish`, `kHoverArgbBlocked`, etc.) are used as
+implementation references inside `IrrlichtRenderer` and must not appear in UIManager code.
 
 ## Zone Colour Overlay — ARGB Colour Scheme
 
@@ -484,7 +501,7 @@ A floating detail panel that appears when the player hovers over or clicks the t
 
 - **Trigger**: hover or click on the treasury balance field in the resource bar
 - **Dimensions**: 320×260 px (virtual/scaled — 60 px taller than the original 320×200 px to accommodate section headers and 1 px separator rules)
-- **Anchor**: below the resource bar, left-aligned to the left edge of the resource bar. The panel extends downward from its top-left anchor; the +60 px increase in height adds space below the previous bottom edge.
+- **Anchor**: below the resource bar, left-aligned to the left edge of the resource bar — top-left corner at virtual (8 px, 57 px), immediately below the resource bar bottom edge (resource bar ends at approximately y = 56 px virtual). The panel extends downward from its top-left anchor; the +60 px increase in height adds space below the previous bottom edge.
 - **Z-order**: above all HUD elements; below the modal scrim (when a blocking modal is active, the budget detail panel is covered by the scrim)
 - **Layout — three sections** separated by 1 px horizontal rules. Section headers are bold label rows using the HUD font. Subtotals are shown inline on the section header row:
 

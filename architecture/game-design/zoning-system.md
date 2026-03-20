@@ -146,6 +146,73 @@
 - **Terrain interaction**: See [Terrain Interaction](terrain-interaction.md) for the authoritative slope threshold (> 15.0°, exact), earthworks cost formula, and map playability guarantee.
 - **Player action**: Player designates zones; engine auto-populates buildings based on demand and desirability scores
 
+## Multi-Tile Footprint Placement Rules
+
+Multi-tile footprints allow zone buildings and service buildings to occupy multiple tiles based on density tier. This section specifies placement collision checks, demolition behavior, terrain flattening, density upgrade resolution, street adjacency rules, and hover highlight behavior.
+
+### Placement Collision Check
+
+Before placing a zone tile at `(tileX, tileZ)` with an N×N footprint (where N = 1, 2, or 3 depending on density tier), the simulation must verify that **all tiles in the footprint** are empty. A tile is considered occupied if it contains a road, another building, or is out-of-bounds. If any tile in the footprint fails this check, placement is **rejected** and the player sees a toast: "Not enough space for [tier] zone".
+
+The footprint dimensions are:
+
+- **Low density**: 1×1 tile
+- **Medium density**: 2×2 tiles
+- **High density**: 3×3 tiles
+- **Service buildings**: 2×2 tiles
+
+### Demolish Behavior
+
+On demolition, **all tiles in the footprint are freed simultaneously**. If the player targets any tile within a multi-tile footprint (not just the origin tile), the simulation looks up the origin tile and demolishes the entire footprint as a single atomic operation.
+
+### Terrain Flattening
+
+During zone placement, `setTileHeight()` must be called for **all tiles in the N×N footprint**, not only the origin tile. This ensures the entire building footprint sits on flat, level ground.
+
+### Density Upgrade Resolution (Low→Med or Med→High)
+
+When a building upgrades to a higher density tier, its footprint expands (e.g., from 1×1 to 2×2, or 2×2 to 3×3). Upgrade resolution follows a strict four-step order:
+
+1. **Compute expanded footprint**: Calculate the new N×N footprint centered on the upgrading building's origin tile.
+
+2. **Demolish same-zone-type, lower-density neighbours**: For each tile in the expanded footprint that is currently occupied by a **same-zone-type, lower-density building** (e.g., a `res_low_*` building when the tile is upgrading to `res_med`), automatically demolish that neighbour **without cost** (no treasury refund, no undo window). Post a NORMAL-priority toast: "Neighbouring [zone] building cleared for upgrade".
+
+3. **Defer if blocked**: If any remaining tile in the expanded footprint is occupied by a **road**, a **different zone type**, a **service building**, or is **out-of-bounds**, do **NOT** demolish same-type neighbours preemptively. Instead, **defer** the entire upgrade. Increment `upgradeRetryCount` for this tile and return without upgrading.
+
+4. **Cancel after 12 retries**: If `upgradeRetryCount` reaches 12 for a single tile, cancel the pending upgrade and emit a CRITICAL-priority toast: "Upgrade blocked — clear surrounding tiles". Reset `upgradeRetryCount` to 0 whenever a tile successfully upgrades or is manually demolished.
+
+The `upgradeRetryCount` is tracked per tile in a `std::unordered_map<TileKey, int>` on `CitySimulation`.
+
+### Service Building Street Adjacency
+
+Service buildings (fire, police, water/power/trash plants) may only be placed if **at least one tile in their 2×2 footprint is directly edge-adjacent (4-directional cardinal, distance = 1) to a road tile**. This rule is stricter than the zone proximity rule below and applies only to service buildings.
+
+If no cardinal-adjacent road exists, placement is **rejected** and the player sees a toast: "Service building must be next to a road".
+
+### Zone Street Proximity
+
+A zone tile (any type, any density) requires a road tile within **3 tiles** (Manhattan distance, measured as straight-line grid steps, not path cost). **Service buildings are not subject to the 3-tile zone proximity rule**; they have a stricter direct street-adjacency requirement defined in §Service Building Street Adjacency above. The rule has two enforcement modes:
+
+#### New Placement
+
+At placement time, if no road tile is within 3 tiles Manhattan distance of **any tile in the footprint**, the placement is **rejected** and the player sees a toast: "Must be within 3 tiles of a road".
+
+The Manhattan distance is computed as the minimum distance from any tile in the N×N footprint to the nearest road tile: `min_distance = argmin over all footprint tiles T of (Manhattan distance from T to nearest road tile)`. If `min_distance > 3`, rejection.
+
+#### Abandonment and Recovery
+
+On each simulation tick, `doProximityTick()` iterates all placed zone buildings (not service buildings) and checks whether the nearest road tile remains within 3 tiles.
+
+- **Abandonment**: If the nearest road tile is **> 3 tiles away** and the building is **not already abandoned**, mark it as abandoned. Zero out its population contribution and tax revenue for this tick. Post a NORMAL-priority toast: "Building abandoned — too far from road".
+
+- **Recovery**: If the nearest road tile is **≤ 3 tiles away** and the building **is currently abandoned**, recover it automatically (restore population and tax contribution). Post a NORMAL-priority toast: "Building recovered — road reconnected".
+
+An abandoned building remains abandoned until either (a) a road is restored within 3 tiles (automatic recovery), or (b) the player demolishes it manually.
+
+### Hover Highlight Rule
+
+When the player hovers over the terrain with the Zone tool active, the tile hover highlight covers the **full footprint of the selected tier** (1×1, 2×2, or 3×3), not just the single hovered tile. The highlight is a semi-transparent overlay covering all tiles from `(tileX, tileZ)` to `(tileX + footprintSize − 1, tileZ + footprintSize − 1)`, where `footprintSize` is determined by the density tier selected in the Zone sub-panel.
+
 ## Phase 10 Audio Callbacks for Zone Events
 
 The following calls are made from `CitySimulation` on zone placement, demolition, and density
