@@ -1340,7 +1340,7 @@ jobs:
         # because the Python ffmpeg bindings are wrappers around the ffmpeg binary anyway.
         run: |
           pip install mutagen Pillow
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo apt-get install -y --no-install-recommends --fix-missing ffmpeg
 
       - name: Run asset validation
         run: python tools/validate_assets.py

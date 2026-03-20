@@ -527,6 +527,15 @@ def check_4_building_uv_atlas_cell(assets_dir):
         # ROOF_CELL = (5, 0): shared roof cell used by all buildings for roof faces
         roof_u_min, roof_u_max = 0.0, 0.125   # col 0 → U=[0.0, 0.125]
         roof_v_min, roof_v_max = 0.625, 0.75  # row 5 → V=[0.625, 0.75]
+        # SOLID_WALL_CELL = (5, 6): plain brick — used for gable ends on all buildings
+        solid_u_min, solid_u_max = 0.75, 0.875  # col 6 → U=[0.75, 0.875]
+        solid_v_min, solid_v_max = 0.625, 0.75  # row 5 → V=[0.625, 0.75]
+        # Door cells: res_low_02 uses (6,0), res_low_03 uses (6,1)
+        door_cells = []
+        if asset_name == "res_low_02":
+            door_cells.append((0.0, 0.125, 0.75, 0.875))    # DOOR_CELL (6,0)
+        elif asset_name == "res_low_03":
+            door_cells.append((0.125, 0.25, 0.75, 0.875))   # DOOR_CELL (6,1)
         # Phase 11f ground-feature cells: row 5, cols 1-5 — UV V=[0.625, 0.75]
         GROUND_V_MIN = 5 / 8.0 - TOL   # = 0.625 - TOL
         GROUND_V_MAX = 6 / 8.0 + TOL   # = 0.75 + TOL
@@ -535,9 +544,12 @@ def check_4_building_uv_atlas_cell(assets_dir):
         for u, v in uvs:
             in_wall = u_min - TOL <= u <= u_max + TOL and v_min - TOL <= v <= v_max + TOL
             in_roof = roof_u_min - TOL <= u <= roof_u_max + TOL and roof_v_min - TOL <= v <= roof_v_max + TOL
+            in_solid = solid_u_min - TOL <= u <= solid_u_max + TOL and solid_v_min - TOL <= v <= solid_v_max + TOL
+            in_door = any(du0 - TOL <= u <= du1 + TOL and dv0 - TOL <= v <= dv1 + TOL
+                          for du0, du1, dv0, dv1 in door_cells)
             in_ground = (GROUND_V_MIN <= v <= GROUND_V_MAX and
                          any(u_lo <= u <= u_hi for u_lo, u_hi in GROUND_U_RANGES))
-            if not (in_wall or in_roof or in_ground):
+            if not (in_wall or in_roof or in_solid or in_door or in_ground):
                 violation = (u, v)
                 break
         if violation is not None:
