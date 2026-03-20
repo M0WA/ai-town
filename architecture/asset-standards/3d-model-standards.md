@@ -558,7 +558,8 @@ silhouette-variation tool.
   brick chimney geometry stub, door on front face only (atlas cell (6,1)); brick+clay-tile
   texture. Footprint 8 S × 10 S, height 6 S — matches `res_low_01`/`res_low_02`.
 - **`res_low_04`** (red-brick): steeply-pitched metal-tile roof with single dormer window, narrow
-  chimney, low brick boundary wall at plot edge (no garden).
+  chimney, low brick boundary wall at plot edge (no garden). Total footprint 10 S × 10 S,
+  height 3 S — fits within one tile.
 
 Primary differentiators: roof form (flat vs. pitched; gabled vs. hipped; dormer count), external
 additions (carport, AC condenser), and boundary treatment (fence vs. wall vs. no enclosure).

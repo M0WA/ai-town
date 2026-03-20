@@ -437,6 +437,13 @@ private:
     // commands and apply per-frame AL_PITCH / AL_GAIN / AL_POSITION updates.
     void updateVehicleEngines();
 
+    // Reclaim finished (non-looping) SFX sources — called once per audio thread wake.
+    // Must run on the audio thread so AL state queries and buffer detaches do not
+    // race with audio-thread AL calls and bleed spurious errors into alCheckError_real.
+    // Vehicle engine sources (SFX_VEHICLE_ENGINE_IDLE/MOVE) are skipped; they are
+    // managed exclusively by updateVehicleEngines().
+    void cleanupFinishedSFX();
+
     // SFX pool "in-use" tracking: source index -> SoundHandle.
     // SoundHandle 0 is invalid; generated handles are sequential > 0.
     struct SFXSlot {
@@ -449,6 +456,14 @@ private:
     };
     SFXSlot m_sfxSlots[kEvictableSFXCount];
     std::atomic<SoundHandle> m_nextHandle{1};  // monotonic handle counter
+
+    // Per-slot atomic flag: true while the slot is reserved for a vehicle engine pair.
+    // Set to true (with memory_order_release) BEFORE m_sfxSlots[i] is populated in
+    // acquireVehicleEnginePair, and cleared to false BEFORE the slot is released in
+    // releaseVehicleEnginePair / eviction path.
+    // Used by cleanupFinishedSFX (audio thread) to skip vehicle engine sources without
+    // reading the non-atomic m_sfxSlots[i].soundId field (which would be a data race).
+    std::atomic<bool> m_sfxVehicleReserved[kEvictableSFXCount]{};
 
     // -----------------------------------------------------------------------
     // Internal helpers.

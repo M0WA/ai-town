@@ -1043,7 +1043,8 @@ def _build_res_low(zone, tier, variant, lod):
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
-            _add_ground_quad(m, "tarmac", -5*S, 5*S, -6*S, 6*S)
+            # Ground quad clamped to ±5S so it stays within the 10×10 tile at scale=10.
+            _add_ground_quad(m, "tarmac", -5*S, 5*S, -5*S, 5*S)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1051,23 +1052,10 @@ def _build_res_low(zone, tier, variant, lod):
         # Chimney box
         chw = 0.8*S/2
         _add_chimney(m, wr, wc, rr, rc, 0.0, 0.0, bh + ridge_h*0.5, 2*S, hw=chw)
-        # Entrance canopy — visible from ~65 m camera distance.
-        # Slab at door-head height; depth clamped within tile footprint.
-        canopy_y0 = bh * 0.55
-        canopy_y1 = canopy_y0 + 0.5*S   # 5 cm thick — readable from above angle
-        canopy_w = 3*S                   # slightly wider than door
-        canopy_z_inner = -hz             # flush with front wall face
-        canopy_z_outer = -hz - 1.0*S    # 1 step outside front wall, within tile
-        m.add_box(-canopy_w/2, canopy_w/2, canopy_y0, canopy_y1,
-                  canopy_z_outer, canopy_z_inner, wr, wc)
-        # Door step — ground-level flat step for visual entrance marker
-        step_y1 = 0.3*S
-        step_w = 3*S
-        step_z_inner = -hz
-        step_z_outer = -hz - 0.5*S
-        m.add_box(-step_w/2, step_w/2, 0, step_y1,
-                  step_z_outer, step_z_inner, wr, wc)
-        _add_ground_quad(m, "tarmac", -5*S, 5*S, -6*S, 6*S)
+        # Entrance canopy/step removed: building front (hz=5S) is at the tile edge
+        # (tile half-extent = 5S at scale=10), leaving no space to extend outward.
+        # Ground quad clamped to ±5S so it stays within the 10×10 tile at scale=10.
+        _add_ground_quad(m, "tarmac", -5*S, 5*S, -5*S, 5*S)
         return m.to_b3d()
 
     elif variant == "02":
@@ -1157,24 +1145,23 @@ def _build_res_low(zone, tier, variant, lod):
         return m.to_b3d()
 
     elif variant == "04":
-        # Bungalow: box + low hipped roof + veranda slab
+        # Bungalow: box + low hipped roof
         # Phase-11d: red-brick, low brick boundary wall at plot edge, no garden
-        bw, bd, bh = 10*S, 12*S, 3*S
+        # Depth reduced to 10S (was 12S) so the building fills but does not exceed
+        # the 10×10 tile at scale=10 (tile half-extent = 5S).
+        # Veranda removed: building already fills the full tile depth.
+        bw, bd, bh = 10*S, 10*S, 3*S
         hx, hz = bw/2, bd/2
         ridge_h = (5-3)*S
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             _add_hipped_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
-            _add_ground_quad(m, "tarmac", -6*S, 6*S, -7*S, 7*S)
+            _add_ground_quad(m, "tarmac", -5*S, 5*S, -5*S, 5*S)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
         _add_hipped_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
-        # Veranda slab (single roof slab, no posts)
-        ver_d = 1.2*S
-        ver_h = 2.4*S
-        m.add_box(-hx-0.05*S, hx+0.05*S, ver_h, ver_h+0.1*S, -hz-ver_d, -hz, wr, wc)
-        _add_ground_quad(m, "tarmac", -6*S, 6*S, -7*S, 7*S)
+        _add_ground_quad(m, "tarmac", -5*S, 5*S, -5*S, 5*S)
         return m.to_b3d()
 
     return m.to_b3d()
@@ -2195,7 +2182,10 @@ VEHICLE_CELLS = {
     "truck_cargo":  (1, 1),
 }
 
-# Vehicle body dimensions (world-space units, before any engine scaling)
+# Vehicle body dimensions in BUILD-space (before the Z-forward reorientation).
+# In build-space: X is the front-to-back axis (+X = front), Z is side-to-side.
+# A post-build rotation in build_vehicle() converts these to Irrlicht's
+# +Z-forward convention: (x,z) → (-z,x).
 # (xmin, xmax, ymin, ymax, zmin, zmax)
 VEHICLE_BODY = {
     "car_sedan":     (-2.0,  2.0, 0.0,  1.40, -0.85, 0.85),
@@ -4043,6 +4033,17 @@ def build_vehicle(vtype: str, lod: int) -> bytes:
                  cab_z0 + 0.05, cab_z1 - 0.05)
             _box(cargo_x0 - 0.06, cargo_x0 + 0.02, cargo_y0 - 0.05, cargo_y0 + 0.22,
                  cargo_z0 + 0.08, cargo_z1 - 0.08)
+
+    # ---------------------------------------------------------------------------
+    # Reorient: vehicle body is built with X as the front-to-back axis (+X = front)
+    # but the spec requires the front face to point toward +Z in Irrlicht's scene.
+    # Apply a 90° CCW rotation around Y: (x, z) → (-z, x); same for normals.
+    # This is a proper rotation (det = 1) so triangle winding order is preserved.
+    # ---------------------------------------------------------------------------
+    all_verts = [
+        Vertex(-v.z, v.y, v.x, -v.nz, v.ny, v.nx, v.u0, v.v0, v.u1, v.v1)
+        for v in all_verts
+    ]
 
     tex_name = "vehicles_diffuse_atlas_d.dds"
     return build_b3d(all_verts, all_tris, texture_name=tex_name)

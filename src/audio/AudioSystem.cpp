@@ -743,6 +743,7 @@ void AudioSystem::audioThreadFunc() {
             updateOcclusion();
             updateDuckState(dt);
             updateVehicleEngines();
+            cleanupFinishedSFX();
         } catch (const std::exception& e) {
             logError(std::string("AudioSystem: audio thread error, disabling audio: ") + e.what());
             m_deviceLost.store(true);
@@ -1612,7 +1613,8 @@ void AudioSystem::updateDuckState(float dt) {
 
 // ---------------------------------------------------------------------------
 // onSourceRecycled — reset occlusion gain for a recycled SFX slot.
-// Called from main thread (pool eviction / release); must hold m_occlusionMutex.
+// Called from main thread (pool eviction / release via playSFX/stopSFX) OR from
+// the audio thread (cleanupFinishedSFX). Acquires m_occlusionMutex internally.
 // ---------------------------------------------------------------------------
 void AudioSystem::onSourceRecycled(int i) {
     if (i < 0 || i >= kEvictableSFXCount) return;
@@ -1622,8 +1624,9 @@ void AudioSystem::onSourceRecycled(int i) {
     m_occlusionGainTarget[i].store(1.0f, std::memory_order_relaxed);
 
     if (m_efxAvailable) {
-        // Clear any stale AL error from caller (e.g. alSourcei(AL_BUFFER,0) on a
-        // playing source in update()) so it is not misattributed to alFilterf below.
+        // Clear any stale AL error from main-thread callers (playSFX/stopSFX
+        // eviction may call alSourceStop on a playing source, setting an error
+        // that would otherwise be misattributed to alFilterf below).
         alGetError();
         m_fnFilterf(m_occlusionFilter[i], AL_LOWPASS_GAIN,   1.0f);
         alCheckError_real("alFilterf(AL_LOWPASS_GAIN) in onSourceRecycled");
@@ -2051,18 +2054,9 @@ void AudioSystem::update(float /*realDeltaSeconds*/) {
     //     by the audio thread in updateStreams(). Crossfade requests are queued
     //     via m_streamMutex and processed by the audio thread.)
 
-    // Clean up finished (non-looping) SFX sources to keep the pool available.
-    for (int i = 0; i < kEvictableSFXCount; ++i) {
-        if (!m_sfxSlots[i].occupied) continue;
-        ALint state = AL_STOPPED;
-        alGetSourcei(static_cast<ALuint>(m_sources[i]),
-                     AL_SOURCE_STATE, &state);
-        if (state == AL_STOPPED) {
-            alSourcei(static_cast<ALuint>(m_sources[i]), AL_BUFFER, 0);
-            onSourceRecycled(i);
-            m_sfxSlots[i] = SFXSlot{};
-        }
-    }
+    // SFX cleanup is performed on the audio thread (cleanupFinishedSFX) to avoid
+    // making AL calls here that could set AL_INVALID_OPERATION in the shared context
+    // error state and bleed into the audio thread's alCheckError_real.
 }
 
 // ---------------------------------------------------------------------------
@@ -2193,10 +2187,15 @@ std::pair<int,int> AudioSystem::acquireVehicleEnginePair(ZoneType zone) {
         int evictIdle = m_vehicleAudio[evictSlot].idleSourceIdx.load(std::memory_order_relaxed);
         int evictMove = m_vehicleAudio[evictSlot].moveSourceIdx.load(std::memory_order_relaxed);
         if (evictIdle >= 0) {
+            // Clear vehicle-reserved flag before clearing the slot — cleanupFinishedSFX
+            // uses this atomic to skip vehicle sources; clearing it before the slot
+            // prevents cleanupFinishedSFX from racing on m_sfxSlots[evictIdle].soundId.
+            m_sfxVehicleReserved[evictIdle].store(false, std::memory_order_release);
             m_sfxSlots[evictIdle] = SFXSlot{};
             m_occlusionGainTarget[evictIdle].store(1.0f, std::memory_order_relaxed);
         }
         if (evictMove >= 0) {
+            m_sfxVehicleReserved[evictMove].store(false, std::memory_order_release);
             m_sfxSlots[evictMove] = SFXSlot{};
             m_occlusionGainTarget[evictMove].store(1.0f, std::memory_order_relaxed);
         }
@@ -2231,6 +2230,13 @@ std::pair<int,int> AudioSystem::acquireVehicleEnginePair(ZoneType zone) {
         // (No partial marks needed since we did not set occupied yet.)
         return {-1, -1};
     }
+
+    // Reserve slots as vehicle engine sources BEFORE populating m_sfxSlots.
+    // cleanupFinishedSFX (audio thread) loads this atomic flag with memory_order_acquire
+    // to skip vehicle sources; the release store here ensures the flag is visible before
+    // the non-atomic m_sfxSlots write, eliminating the data race on soundId.
+    m_sfxVehicleReserved[idleIdx].store(true, std::memory_order_release);
+    m_sfxVehicleReserved[moveIdx].store(true, std::memory_order_release);
 
     // Mark both pool slots as occupied (NORMAL priority, zero initial distance).
     m_sfxSlots[idleIdx] = SFXSlot{SFX_VEHICLE_ENGINE_IDLE, 0, 0,
@@ -2287,10 +2293,15 @@ void AudioSystem::releaseVehicleEnginePair(int idleIdx, int moveIdx) {
             m_vehicleAudio[i].pendingRelease.store(true, std::memory_order_relaxed);
             // Free SFX pool slots immediately so they can be reacquired.
             // alSourceStop happens on the audio thread via pendingRelease.
+            // Clear m_sfxVehicleReserved BEFORE clearing m_sfxSlots so that
+            // cleanupFinishedSFX, which checks the atomic flag, won't see a
+            // stale reserved=true after the slot has been logically freed.
             if (idleIdx >= 0 && idleIdx < kEvictableSFXCount) {
+                m_sfxVehicleReserved[idleIdx].store(false, std::memory_order_release);
                 m_sfxSlots[idleIdx] = SFXSlot{};
             }
             if (moveIdx >= 0 && moveIdx < kEvictableSFXCount) {
+                m_sfxVehicleReserved[moveIdx].store(false, std::memory_order_release);
                 m_sfxSlots[moveIdx] = SFXSlot{};
             }
             // Mark slot as free so acquireVehicleEnginePair won't scan it as live.
@@ -2495,5 +2506,39 @@ void AudioSystem::updateVehicleEngines() {
         alCheckError_real("updateVehicleEngines:AL_POSITION(idle)");
         alSource3f(moveSrc, AL_POSITION, wx, 0.f, wz);
         alCheckError_real("updateVehicleEngines:AL_POSITION(move)");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// cleanupFinishedSFX — audio thread, called each wake after updateVehicleEngines.
+//
+// Reclaims SFX pool sources whose non-looping one-shot playback has ended.
+// Runs exclusively on the audio thread so that:
+//   - alGetSourcei(AL_SOURCE_STATE) and alSourcei(AL_BUFFER, 0) are never
+//     called from the main thread concurrently with audio-thread AL calls.
+//   - Errors from these calls cannot bleed into alCheckError_real and
+//     falsely disable audio (the bug fixed by this refactor).
+//
+// Vehicle engine sources (SFX_VEHICLE_ENGINE_IDLE/MOVE) are skipped; they are
+// looping and managed exclusively by updateVehicleEngines().
+// ---------------------------------------------------------------------------
+void AudioSystem::cleanupFinishedSFX() {
+    for (int i = 0; i < kEvictableSFXCount; ++i) {
+        if (!m_sfxSlots[i].occupied) continue;
+        // Vehicle engine sources loop forever and are managed by updateVehicleEngines.
+        // Use the atomic m_sfxVehicleReserved flag — reading the non-atomic
+        // m_sfxSlots[i].soundId while the main thread writes it is a data race.
+        // The acquire load pairs with the release store in acquireVehicleEnginePair.
+        if (m_sfxVehicleReserved[i].load(std::memory_order_acquire)) continue;
+
+        ALint state = AL_STOPPED;
+        alGetSourcei(static_cast<ALuint>(m_sources[i]), AL_SOURCE_STATE, &state);
+        alCheckError_real("cleanupFinishedSFX:alGetSourcei");
+        if (state == AL_STOPPED) {
+            alSourcei(static_cast<ALuint>(m_sources[i]), AL_BUFFER, 0);
+            alCheckError_real("cleanupFinishedSFX:alSourcei(AL_BUFFER,0)");
+            onSourceRecycled(i);
+            m_sfxSlots[i] = SFXSlot{};
+        }
     }
 }

@@ -1298,9 +1298,9 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
             postY + 0.10f,   // 10 cm above terrain — covers tile-edge bleed-back after
                              // neighbour blending; polygon offset is the primary Z-fight defence.
             static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
-        // Building assets are authored with half-extent ≤ 4*S = 0.4 model units.
-        // Scale by kTileSize/2 = 5.0f → world half-extent ≤ 2.0 m (4 m footprint per tile).
-        node->setScale(core::vector3df(kTileSize / 2.0f, kTileSize / 2.0f, kTileSize / 2.0f));
+        // Building assets are authored with half-extent = 5*S = 0.5 model units.
+        // Scale by kTileSize = 10.0f → world half-extent = 5 m (10 m footprint fills tile).
+        node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
 
         // Zone-colour fallback: only applied per-slot when atlas was NOT bound.
         const std::string prefix = (assetBaseName.size() >= 4)
@@ -1985,8 +1985,8 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
                              // neighbour blending; polygon offset is the primary Z-fight defence.
             static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
         // Service building assets share the same authoring convention as zone buildings.
-        // Scale by kTileSize/2 = 5.0f to match the doubled zone-building scale.
-        node->setScale(core::vector3df(kTileSize / 2.0f, kTileSize / 2.0f, kTileSize / 2.0f));
+        // Scale by kTileSize = 10.0f → world half-extent = 5 m (10 m footprint fills tile).
+        node->setScale(core::vector3df(kTileSize, kTileSize, kTileSize));
 
         // Zone-colour fallback (amber) for service buildings — only used when
         // the atlas was not successfully bound by BuildingAssetLoader::load().
@@ -2138,7 +2138,10 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
         // Vehicles are authored at world scale — do NOT apply tile-based setScale.
 
         // Apply material settings.
-        // BackfaceCulling=true: vehicles have correct winding (authored by artist).
+        // BackfaceCulling=false: procedural B3D assets may have inverted or
+        // mixed winding after the axis-reorientation pass; disabling culling
+        // guarantees all faces are visible from any camera angle, matching
+        // the approach used for building assets.
         // Lighting=false: no light nodes in scene yet (Phase 6+).
         // Atlas fallback: if BuildingAssetLoader did not bind the atlas (file missing),
         // bind vehicles_diffuse_atlas_d.dds directly as a safety fallback.
@@ -2148,7 +2151,7 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
         for (u32 m = 0; m < node->getMaterialCount(); ++m) {
             SMaterial& mat = node->getMaterial(m);
             mat.Lighting        = false;
-            mat.BackfaceCulling = true;
+            mat.BackfaceCulling = false;
             // Bind vehicle atlas as fallback only when slot 0 is still unbound.
             if (!mat.getTexture(0) && m_driver) {
                 ITexture* atlas = m_driver->getTexture(atlasPath.c_str());
@@ -2558,10 +2561,22 @@ void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tile
     // (DXGI format 72) which Irrlicht's DDS loader does not recognise.
     ITexture* vehicleTex = m_driver->getTexture(
         (std::string(AITOWN_ASSETS_DIR) + "/textures/vehicles/vehicles_diffuse_atlas_d.png").c_str());
+
+    for (u32 m = 0; m < node->getMaterialCount(); ++m) {
+        SMaterial& mat = node->getMaterial(m);
+        mat.Lighting = false;
+        // BackfaceCulling=false: procedural B3D assets may have inverted or
+        // mixed winding after the axis-reorientation pass; disabling culling
+        // ensures the vehicle is visible from all camera angles.
+        mat.BackfaceCulling = false;
+        if (vehicleTex && !mat.getTexture(0)) {
+            mat.setTexture(0, vehicleTex);
+        }
+    }
+    // Ensure slot 0 always gets the atlas even if it already had a texture bound.
     if (vehicleTex) {
         node->getMaterial(0).setTexture(0, vehicleTex);
     }
-    node->getMaterial(0).Lighting = false;
 
     m_agentNodes[handle] = node;
 }
