@@ -21,6 +21,11 @@ Three independent but thematically related gameplay/visual improvements:
    dividing the carriageway into two lanes. Vehicle agents drive on the left lane going in one
    direction and the right lane going the other direction (two-way traffic, keep-right convention).
 
+4. **Demolition fix** — demolition is currently non-functional and the left-mouse-down event
+   fires the yes/no/cancel confirmation dialog immediately, which blocks zoning. The fix moves
+   the confirmation to mouse-release, gates it behind the active tool, and wires
+   `demolishTile()` correctly end-to-end.
+
 ---
 
 ### Deliverables
@@ -232,6 +237,28 @@ Three independent but thematically related gameplay/visual improvements:
   to LOD0, bringing the new LOD0 budget to ≤50 tris (raise the cap from ≤48 to ≤50 to
   accommodate the strip). (`graphics-artist-3d-model`)
 
+#### 3c. `architecture/ui-ux/input-arbitration.md` — Demolition Tool Input Fix
+
+- [ ] Add a **Demolition Tool** subsection documenting the corrected input flow:
+  - The demolish tool is activated via the Demolish button in the toolbar (or hotkey `X`).
+    While demolish is **not** the active tool, left-mouse events must **never** trigger
+    demolition logic.
+  - **Mouse-down** (LMB press) while Demolish is active: highlights the hovered tile as a
+    demolition target (visual feedback only — no dialog shown yet).
+  - **Mouse-up** (LMB release) on the same tile that was highlighted on mouse-down: opens
+    the confirmation modal "Demolish [tile type]? [Yes] [No]". If the cursor has moved to a
+    different tile between down and up, cancel the highlight and do nothing.
+  - **Yes**: call `ICitySimulation::demolishTile(tileX, tileZ)` and dismiss the modal.
+  - **No** / modal dismissed (Esc): cancel the demolition, clear the highlight, remain in
+    Demolish tool mode.
+  - The Zone tool's LMB-down must not enter the demolition code path under any
+    circumstances. Input arbitration: tool-mode is checked before any tile-interaction
+    handler fires. (`gamedesign-ux`)
+
+- [ ] Update the **Input Arbitration** section to document that the Demolish tool takes
+  exclusive input ownership only while active; switching to the Zone or Road tool
+  immediately clears any pending demolition highlight. (`gamedesign-ux`)
+
 ##### 3b. `architecture/game-design/traffic-system.md`
 
 - [ ] Add a **Lane Assignment** subsection documenting the two-way lane convention:
@@ -357,7 +384,31 @@ Three independent but thematically related gameplay/visual improvements:
 - [ ] Declare `kLaneCenterOffset` and `kCarriagewayHalfWidth` as `static constexpr float`
   in `src/rendering/render_constants.h`. (`graphics-dev-irrlicht`)
 
-##### 4d. Vehicle Agent Rendering — Lane Offset
+##### 4d. UIManager — Demolition Tool Input Fix
+
+- [ ] In `UIManager` (or the tool-dispatch layer), move the demolition confirmation trigger
+  from `onMouseButtonDown()` to `onMouseButtonUp()`. The down event sets a
+  `m_demolishPendingTile` member; the up event checks that the tile under the cursor matches
+  `m_demolishPendingTile` before opening the modal. If they differ, clear
+  `m_demolishPendingTile` and do nothing. (`graphics-dev-irrlicht`)
+
+- [ ] Guard all demolition input handling behind an `activeTool == ToolMode::DEMOLISH` check.
+  The Zone tool's `onMouseButtonDown()` must assert / short-circuit before reaching any
+  demolition code path. (`graphics-dev-irrlicht`)
+
+- [ ] Wire the confirmation modal **Yes** branch to call
+  `m_simulation->demolishTile(tileX, tileZ)`. Verify the call reaches
+  `CitySimulation::demolishTile()` and that the tile is actually removed from the world (mesh
+  removed via `IRenderer::removeBuildingMesh()`, footprint registry cleared, population
+  updated). This is the "currently not functional" wiring fix. (`graphics-dev-irrlicht`)
+
+- [ ] On confirmation modal **No** / Esc: call `m_renderer->clearDemolishHighlight()` and
+  reset `m_demolishPendingTile`. Do not call `demolishTile()`. (`graphics-dev-irrlicht`)
+
+- [ ] Add `clearDemolishHighlight()` to `IRenderer` / `IrrlichtRenderer` if not already
+  present. Update `MockRenderer`. (`graphics-dev-irrlicht`, `test-dev-cpp`)
+
+##### 4e. Vehicle Agent Rendering — Lane Offset
 
 - [ ] In `IrrlichtRenderer` vehicle agent position update (Phase 11d vehicle rendering),
   apply the `kLaneCenterOffset` world-space offset perpendicular to the agent's direction of
@@ -439,6 +490,24 @@ Three independent but thematically related gameplay/visual improvements:
 
 - [ ] Add `budget_breakdown_test.cpp` to `ui_tests` CMake target. (`test-dev-cpp`)
 
+##### 5d. Demolition Input Tests — `tests/ui/demolition_input_test.cpp`
+
+- [ ] `DemolitionInput_MouseUp_SameTile_ConfirmModalOpened`: mouse-down then mouse-up on
+  same tile while Demolish tool active → confirmation modal opens; `demolishTile()` NOT
+  yet called.
+- [ ] `DemolitionInput_MouseUp_DifferentTile_NoModal`: mouse-down on tile A, mouse-up on
+  tile B → no modal opened, no demolition triggered.
+- [ ] `DemolitionInput_ConfirmYes_CallsDemolishTile`: after modal opens, confirming Yes →
+  `demolishTile()` called with correct (tileX, tileZ); tile removed from renderer.
+- [ ] `DemolitionInput_ConfirmNo_NoDemolition`: confirming No → `demolishTile()` NOT called;
+  highlight cleared.
+- [ ] `DemolitionInput_ZoneTool_MouseDown_DoesNotTriggerDemolish`: while Zone tool is active,
+  LMB down on any tile must not set `m_demolishPendingTile` or open a confirmation modal.
+
+  Use `MockCitySimulation` and `MockRenderer`. (`test-dev-cpp`)
+
+- [ ] Add `demolition_input_test.cpp` to `ui_tests` CMake target. (`test-dev-cpp`)
+
 ---
 
 ### Exit Criteria
@@ -481,7 +550,13 @@ Three independent but thematically related gameplay/visual improvements:
   `src/interfaces/IRenderer.h`; `MockRenderer` updated; all existing call sites compile
   cleanly with two-argument form; UIManager passes tier footprint size for Zone tool hover.
 - [ ] `kLaneCenterOffset` and `kCarriagewayHalfWidth` declared in `render_constants.h`.
-- [ ] All 20 footprint tests, 5 road lane tests, and 4 budget breakdown tests pass.
+- [ ] `architecture/ui-ux/input-arbitration.md` documents demolition tool input flow
+  (mouse-down highlights, mouse-up triggers modal) and tool-mode gating.
+- [ ] Demolition confirmation modal fires on mouse-up (not mouse-down); Zone tool LMB-down
+  is fully isolated from demolition code path.
+- [ ] Confirmation **Yes** calls `demolishTile()` and removes tile from world end-to-end.
+- [ ] All 20 footprint tests, 5 road lane tests, 4 budget breakdown tests, and 5 demolition
+  input tests pass.
 - [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` exits
   zero.
 
@@ -492,9 +567,9 @@ Three independent but thematically related gameplay/visual improvements:
 | Role | Responsibility |
 |---|---|
 | `gamedesign-lookandfeel` | Author multi-tile placement rules in zoning-system.md; service building street-adjacency rule; zone 3-tile proximity rule and abandonment/recovery spec; road adjacency rule; density-upgrade deferral design; lane assignment and kLaneCenterOffset spec in traffic-system.md; budget section mapping note in economy-model.md |
-| `gamedesign-ux` | Redesign Budget Detail Panel layout in hud-layout.md (Income/Expenses/Total sections, 320×260 px, subtotals, colors, tourism placeholder); hover highlight footprint rule in zoning-system.md |
+| `gamedesign-ux` | Redesign Budget Detail Panel layout in hud-layout.md (Income/Expenses/Total sections, 320×260 px, subtotals, colors, tourism placeholder); hover highlight footprint rule in zoning-system.md; demolition tool input flow in input-arbitration.md (mouse-up confirmation, tool-mode gating) |
 | `graphics-artist-3d-model` | Author multi-tile footprint and native-size authoring convention (no setScale) in 3d-model-standards.md; road carriageway width, center-line strip geometry, and updated ≤50 tri budget in 3d-model-standards.md |
-| `graphics-dev-irrlicht` | Implement `placeBuildingMesh()`/`placeServiceBuildingMesh()` at scale 1.0 (native-size models, no setScale); update `IRenderer` signature and `MockRenderer`; add `footprintSize` parameter to `setTileHoverHighlight()`; implement carriageway width + center-line strip in `placeRoadMesh()`; declare constants in `render_constants.h`; implement lane offset with intersection snap in vehicle agent rendering; update `placeZone()`/`demolishTile()`/`doDensityUnlockTick()` footprint logic; implement `placeServiceBuilding()` street-adjacency check; implement `placeZone()` 3-tile proximity check; implement `doProximityTick()` abandonment/recovery; update `setTileHeight()` calls to cover full footprint |
+| `graphics-dev-irrlicht` | Implement `placeBuildingMesh()`/`placeServiceBuildingMesh()` at scale 1.0 (native-size models, no setScale); update `IRenderer` signature and `MockRenderer`; add `footprintSize` parameter to `setTileHoverHighlight()`; implement carriageway width + center-line strip in `placeRoadMesh()`; declare constants in `render_constants.h`; implement lane offset with intersection snap in vehicle agent rendering; update `placeZone()`/`demolishTile()`/`doDensityUnlockTick()` footprint logic; implement `placeServiceBuilding()` street-adjacency check; implement `placeZone()` 3-tile proximity check; implement `doProximityTick()` abandonment/recovery; update `setTileHeight()` calls to cover full footprint; fix demolition input (mouse-up trigger, tool-mode guard, Yes→demolishTile() wiring, `clearDemolishHighlight()`) |
 | `test-dev-cpp` | Author footprint, road lane, and budget breakdown test files; wire all into CMake targets |
 
 ---
