@@ -29,7 +29,7 @@ building texture content 2026-03-04), `graphics-dev-irrlicht` (2026-02-26), and
 > `ddsBuffer` struct alignment issue.
 
 - Resolution: 4096×4096 pixels
-- Cell grid: 8×8 cells at 512×512 px each (64 cells total; rows 0–4 assigned; row 5 cols 0–5 assigned (`ROOF_CELL` + 5 ground-feature cells); row 6 cols 0–1 assigned (`res_low_02_door`, `res_low_03_door`); row 5 cols 6–7, row 6 cols 2–7, and row 7 RESERVED)
+- Cell grid: 8×8 cells at 512×512 px each (64 cells total; rows 0–4 assigned; row 5 cols 0–6 assigned (`ROOF_CELL` + 5 ground-feature cells + `SOLID_WALL_CELL`); row 6 cols 0–1 assigned (`res_low_02_door`, `res_low_03_door`); row 5 col 7, row 6 cols 2–7, and row 7 RESERVED)
 - Mip chain: 5-level mandatory (`GL_TEXTURE_MAX_LEVEL = 4`; 4096→2048→1024→512→256). All five mip
   levels MUST be present as data in the DDS file — a file whose `dwMipMapCount` field declares
   5 mips but contains only mip 0 data is truncated and causes `TextureCache::loadSRGB()` to
@@ -43,9 +43,10 @@ building texture content 2026-03-04), `graphics-dev-irrlicht` (2026-02-26), and
 
 Phase-11e expansion: the 8×8 grid provides one unique 512×512 cell per variant. Each of the 40
 assigned cells (rows 0–4, cols 0–7) is exclusive to a single building variant or service building
-type. Row 5 cols 0–5 are also assigned: col 0 is `ROOF_CELL` (used by `generate_b3d_models.py`
-for building roof surfaces); cols 1–5 are ground-feature cells added in Phase 11f. Row 5 cols
-6–7 and rows 6–7 (18 cells) are RESERVED for future expansion.
+type. Row 5 cols 0–6 are also assigned: col 0 is `ROOF_CELL` (used by `generate_b3d_models.py`
+for building roof surfaces); cols 1–5 are ground-feature cells added in Phase 11f; col 6 is
+`SOLID_WALL_CELL` (plain brick/solid wall, used by `generate_b3d_models.py` for all building
+gable-end faces). Row 5 col 7 and rows 6–7 cols 2–7 (16 cells) are RESERVED for future expansion.
 
 | Cell Row | Cell Col | Variant / Asset | Notes |
 |---|---|---|---|
@@ -95,7 +96,8 @@ for building roof surfaces); cols 1–5 are ground-feature cells added in Phase 
 | 5 | 3 | `ground_paving` | Phase 11f: light-grey concrete forecourt. Used by commercial and service building ground quads. |
 | 5 | 4 | `ground_tarmac` | Phase 11f: dark-grey asphalt. Used by industrial building ground quads. |
 | 5 | 5 | `ground_gravel` | Phase 11f: beige/tan gravel. Used by svc_power_plant and svc_water_tower ground quads. |
-| 5 | 6–7 | RESERVED | Reserved for Phase 12+ expansion. |
+| 5 | 6 | `SOLID_WALL_CELL` | Plain brick/solid wall — no windows. Used by `generate_b3d_models.py` for all building gable-end faces. |
+| 5 | 7 | RESERVED | Reserved for Phase 12+ expansion. |
 | 6 | 0 | `res_low_02_door` | Auxiliary door-face texture for `res_low_02`. Cream rendered wall with centred door and two flanking arched windows. Used only on the front face of the left unit of the semi-detached pair. |
 | 6 | 1 | `res_low_03_door` | Auxiliary door-face texture for `res_low_03`. Brick wall with centred door and two flanking windows. Used only on the front face of the cottage. |
 | 6 | 2–7 | RESERVED | 6 cells reserved for Phase 12+ expansion. |
