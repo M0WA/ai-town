@@ -1,6 +1,6 @@
 ## Phase 11i: CI Packaging — Windows Installer, Debian/Ubuntu Packages & Asset Validation Consolidation
 
-**Status: Planned**
+**Status: Done**
 
 ### Goal
 
@@ -87,7 +87,7 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
 ##### 1b. `package-windows` Job
 
-- [ ] Add a **`package-windows` job** section documenting the following. Insert this section in `architecture/ci-cd/github-actions-workflow.md` immediately after the `all-checks-pass` job documentation section and before any trailing phasing-summary or appendix content.
+- [x] Add a **`package-windows` job** section documenting the following. Insert this section in `architecture/ci-cd/github-actions-workflow.md` immediately after the `all-checks-pass` job documentation section and before any trailing phasing-summary or appendix content.
 
   - **Trigger condition**: runs only on push to `main` or `develop`
     (`if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')`).
@@ -196,7 +196,7 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
 ##### 1c. `package-linux-deb` Job
 
-- [ ] Add a **`package-linux-deb` job** section documenting the following. Insert this section in `architecture/ci-cd/github-actions-workflow.md` immediately after the `all-checks-pass` job documentation section and before any trailing phasing-summary or appendix content.
+- [x] Add a **`package-linux-deb` job** section documenting the following. Insert this section in `architecture/ci-cd/github-actions-workflow.md` immediately after the `all-checks-pass` job documentation section and before any trailing phasing-summary or appendix content.
 
   - **Trigger condition**: runs only on push to `main` or `develop`
     (`if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')`).
@@ -371,7 +371,7 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
 ##### 2a. Remove Shader Verification from OS-Specific Jobs
 
-- [ ] If a temporary "music stem sidecar enforcement" step (or similar source-tree file
+- [x] If a temporary "music stem sidecar enforcement" step (or similar source-tree file
   check) exists in `build-linux` or `coverage-linux`, handle it as follows:
   - If Check #14 (music stem JSON sidecar validation) is already implemented in
     `tools/validate_assets.py`, the temporary step is redundant — simply remove it
@@ -383,7 +383,7 @@ Three CI/CD improvements delivered as a single cohesive phase:
     in `build-linux`/`coverage-linux`.
   (`cicd-dev-github`)
 
-- [ ] Remove the "Verify shader assets" step from `build-linux`:
+- [x] Remove the "Verify shader assets" step from `build-linux`:
 
   ```yaml
   # DELETE this block from build-linux:
@@ -396,10 +396,10 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
   (`cicd-dev-github`)
 
-- [ ] Remove the "Verify shader assets" step from `coverage-linux` (same step, same
+- [x] Remove the "Verify shader assets" step from `coverage-linux` (same step, same
   deletion). (`cicd-dev-github`)
 
-- [ ] Add the "Verify shader assets" step to the `validate-assets` job, placed after the
+- [x] Add the "Verify shader assets" step to the `validate-assets` job, placed after the
   "Install Python dependencies" step and before the "Run asset validation" step:
 
   ```yaml
@@ -414,28 +414,28 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
 ##### 2b. Add `package-windows` Job
 
-- [ ] Add the `package-windows` job to `.github/workflows/ci.yml` per the spec in §1b.
+- [x] Add the `package-windows` job to `.github/workflows/ci.yml` per the spec in §1b.
   All action `uses:` lines must use the full 40-character commit SHA (no tag references
   or short SHAs — the supply-chain lint step in `build-linux` enforces this). The NSIS
   installer step must run inside the `build/` directory (`working-directory: build`).
   (`cicd-dev-github`)
 
-- [ ] The `package-windows` job must be listed in the `on:` trigger section under
+- [x] The `package-windows` job must be listed in the `on:` trigger section under
   `push.branches: [main, develop]` only. Do not add it to the pull_request trigger.
   (`cicd-dev-github`)
 
-- [ ] Add `CPACK_PACKAGE_*` and `CPACK_NSIS_*` variables to `CMakeLists.txt` per §1b.
+- [x] Add `CPACK_PACKAGE_*` and `CPACK_NSIS_*` variables to `CMakeLists.txt` per §1b.
   All runtime DLLs produced by the vcpkg `x64-windows` triplet must be installed via
   `install(FILES ...)` or `install(DIRECTORY ...)` so CPack includes them in the
   installer. (`cicd-dev-github`)
 
-- [ ] Add the `POST_BUILD copy_if_different` rule to `CMakeLists.txt` to copy
+- [x] Add the `POST_BUILD copy_if_different` rule to `CMakeLists.txt` to copy
   `default.mhr` from the vcpkg OpenAL Soft share directory to the binary output
   directory after every build (per the requirement documented in §1b). Without this
   rule, `${CMAKE_BINARY_DIR}/default.mhr` will not exist and the CPack `install(FILES ...)`
   rule for HRTF data will fail silently. (`cicd-dev-github`)
 
-- [ ] Verify that `AITOWN_ASSETS_DIR` (the compile-time asset path constant in `CMakeLists.txt`)
+- [x] Verify that `AITOWN_ASSETS_DIR` (the compile-time asset path constant in `CMakeLists.txt`)
   is set correctly for installed builds, not just development builds. If it is currently
   hardcoded to `${CMAKE_SOURCE_DIR}/assets` (an absolute source-tree path), update it
   to use the correct installation prefix for packaged builds:
@@ -467,38 +467,38 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
 ##### 2c. Add `package-linux-deb` Job
 
-- [ ] Add the `package-linux-deb` job (with matrix) to `.github/workflows/ci.yml` per
+- [x] Add the `package-linux-deb` job (with matrix) to `.github/workflows/ci.yml` per
   the spec in §1c. The `container:` field must reference `${{ matrix.container }}` so
   each matrix leg runs inside its distro container. (`cicd-dev-github`)
 
-- [ ] The `package-linux-deb` job must be listed in the `on:` trigger section under
+- [x] The `package-linux-deb` job must be listed in the `on:` trigger section under
   `push.branches: [main, develop]` only. (`cicd-dev-github`)
 
-- [ ] Add `CPACK_DEBIAN_*` and the install destination rules to `CMakeLists.txt` per
+- [x] Add `CPACK_DEBIAN_*` and the install destination rules to `CMakeLists.txt` per
   §1c. The `CPACK_DEBIAN_FILE_NAME: DEB-DEFAULT` setting requires `dpkg-architecture`
   to be available at CPack time — this is satisfied by the `dpkg-dev` apt package
   installed in the container step. (`cicd-dev-github`)
 
-- [ ] Verify `AITOWN_ASSETS_DIR` is correct for installed Linux builds (see §2b for the
+- [x] Verify `AITOWN_ASSETS_DIR` is correct for installed Linux builds (see §2b for the
   full requirement — the same fix applies to the Linux package). (`cicd-dev-github`,
   `graphics-dev-irrlicht`)
 
-- [ ] Verify the same `POST_BUILD copy_if_different` rule for `default.mhr` (see §2b)
+- [x] Verify the same `POST_BUILD copy_if_different` rule for `default.mhr` (see §2b)
   also runs on Linux builds — the same CMakeLists.txt rule applies to all platforms.
   (`cicd-dev-github`)
 
 #### 3. Verification Steps
 
-- [ ] After the `validate-assets` job change: verify that `build-linux` and
+- [x] After the `validate-assets` job change: verify that `build-linux` and
   `coverage-linux` CI runs no longer contain a "Verify shader assets" step, and that the
   `validate-assets` job run log shows the step passing. (`cicd-dev-github`)
 
-- [ ] After the `package-windows` job addition: trigger a push to `develop` and confirm
+- [x] After the `package-windows` job addition: trigger a push to `develop` and confirm
   the `package-windows` job runs, produces a `.exe` artifact, and uploads it
   successfully. Confirm the artifact installs and launches `aitown.exe` on a Windows
   machine. (`cicd-dev-github`)
 
-- [ ] After the `package-linux-deb` job addition: trigger a push to `develop` and
+- [x] After the `package-linux-deb` job addition: trigger a push to `develop` and
   confirm all four matrix legs complete, producing `.deb` artifacts for each distro.
   Confirm `dpkg -i aitown-*.deb` succeeds on a matching distro. (`cicd-dev-github`)
 
@@ -506,30 +506,30 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
 ### Exit Criteria
 
-- [ ] `architecture/ci-cd/github-actions-workflow.md` documents the shader-asset
+- [x] `architecture/ci-cd/github-actions-workflow.md` documents the shader-asset
   verification step as a `validate-assets` deliverable (not `build-linux`/
   `coverage-linux`); the general rule that source-tree file checks belong in
   `validate-assets` is stated.
-- [ ] `architecture/ci-cd/github-actions-workflow.md` documents the `package-windows`
+- [x] `architecture/ci-cd/github-actions-workflow.md` documents the `package-windows`
   job (NSIS, CPack, SHA-pinned actions, trigger condition, `needs: [build-windows]`,
   artifact upload, CMakeLists.txt NSIS variables).
-- [ ] `architecture/ci-cd/github-actions-workflow.md` documents the `package-linux-deb`
+- [x] `architecture/ci-cd/github-actions-workflow.md` documents the `package-linux-deb`
   job (matrix over 4 distros, container builds, system packages vs vcpkg split,
   CPack DEB, artifact upload, non-gating status).
-- [ ] `.github/workflows/ci.yml`: "Verify shader assets" step absent from `build-linux`
+- [x] `.github/workflows/ci.yml`: "Verify shader assets" step absent from `build-linux`
   and `coverage-linux`; present in `validate-assets`.
-- [ ] `.github/workflows/ci.yml`: `package-windows` job present; triggers on push to
+- [x] `.github/workflows/ci.yml`: `package-windows` job present; triggers on push to
   `main`/`develop` only; produces `aitown-installer-windows-<sha>.exe` artifact with
   30-day retention; does NOT appear in `all-checks-pass` `needs:`.
-- [ ] `.github/workflows/ci.yml`: `package-linux-deb` job present with 4-entry matrix
+- [x] `.github/workflows/ci.yml`: `package-linux-deb` job present with 4-entry matrix
   (debian-bookworm, debian-trixie, ubuntu-jammy, ubuntu-noble); triggers on push to
   `main`/`develop` only; produces `aitown-deb-<distro>-<sha>.deb` artifacts with
   30-day retention; does NOT appear in `all-checks-pass` `needs:`.
-- [ ] `CMakeLists.txt`: `CPACK_NSIS_*` variables for Windows installer defined;
+- [x] `CMakeLists.txt`: `CPACK_NSIS_*` variables for Windows installer defined;
   `CPACK_DEBIAN_*` variables for Debian/Ubuntu packages defined; runtime DLL install
   rules for Windows present; `install(TARGETS aitown RUNTIME DESTINATION games)` present
   for Linux.
-- [ ] All previously passing CI jobs (`build-linux`, `build-windows`, `coverage-linux`,
+- [x] All previously passing CI jobs (`build-linux`, `build-windows`, `coverage-linux`,
   `validate-assets`, `markdown-lint`) continue to pass after the changes. Specifically
   for `coverage-linux`: all three test routing checks (unit, integration, requires-opengl)
   execute and produce non-zero discovery, all test steps complete with exit code 0, lcov
@@ -537,7 +537,7 @@ Three CI/CD improvements delivered as a single cohesive phase:
   files are written to `test_results/`. The new `package-windows` and `package-linux-deb`
   jobs run independently and are NOT included in this continuity requirement — they do not
   run tests and do not gate `all-checks-pass`.
-- [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
+- [x] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
   exits zero.
 
 ---
