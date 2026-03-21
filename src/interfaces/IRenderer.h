@@ -149,6 +149,14 @@ public:
     // main-thread-only.
     virtual void setActiveTool(ToolMode mode) = 0;
 
+    // setZoneHoverColour — set the ARGB colour used for zone-tool hover highlights.
+    // Called by UIManager whenever the selected zone type changes or the Zone tool is activated.
+    // Allows the hover preview to reflect the current zone type (green=Residential,
+    // blue=Commercial, yellow=Industrial).  Default no-op for implementations that
+    // do not support per-zone hover colours.
+    // main-thread-only.
+    virtual void setZoneHoverColour(unsigned int argb) {}
+
     // clearDemolishHighlight — clear any pending demolition highlight.
     // Called by UIManager when the demolition confirmation modal is cancelled or dismissed.
     // Equivalent to setTileHoverHighlight(-1, -1) but semantically explicit.

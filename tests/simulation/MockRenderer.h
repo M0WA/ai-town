@@ -71,6 +71,7 @@ public:
                 (int tileX, int tileZ, int footprintSize),
                 (override));
     MOCK_METHOD(void, setActiveTool, (ToolMode mode), (override));
+    MOCK_METHOD(void, setZoneHoverColour, (unsigned int argb), (override));
     MOCK_METHOD(void, clearDemolishHighlight, (), (override));
     // setZoneOverlay: ZoneOverlayMap alias avoids comma-in-macro.
     MOCK_METHOD(void, setZoneOverlay,

@@ -125,6 +125,7 @@ public:
                                int& tileX, int& tileZ) const override;
     void      setTileHoverHighlight(int tileX, int tileZ, int footprintSize = 1) override;
     void      setActiveTool(ToolMode mode) override;
+    void      setZoneHoverColour(unsigned int argb) override;
     void      clearDemolishHighlight() override;
     void      setZoneOverlay(int mapTilesX, int mapTilesZ,
                              const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) override;
@@ -220,7 +221,8 @@ private:
     vec3 m_lastCameraPosition{};
 
     // Phase 11h: current active tool — used by setTileHoverHighlight() to select color.
-    ToolMode m_activeTool{ToolMode::None};
+    ToolMode     m_activeTool{ToolMode::None};
+    unsigned int m_zoneHoverArgb{0x8000FF00u};  // zone hover colour (default: Residential green)
 
     // Texture handle map: TextureHandle → ITexture*
     TextureHandle                                      m_nextHandle{1};

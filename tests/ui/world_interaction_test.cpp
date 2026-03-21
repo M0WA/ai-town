@@ -239,6 +239,8 @@ protected:
         EXPECT_CALL(renderer_, setActiveTool(_)).Times(::testing::AnyNumber());
         EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(::testing::AnyNumber());
         EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(::testing::AnyNumber());
+        // setZoneHoverColour fires whenever the Zone tool hover color changes (per zone type).
+        EXPECT_CALL(renderer_, setZoneHoverColour(_)).Times(::testing::AnyNumber());
         // Phase 11d Deliverable 5d: queryTile is now called in Zone/Road commit loops
         // and drag preview partitioning to classify tiles as free vs blocked.
         // Suppress via catch-all; tests that verify placement counts add their own
@@ -1841,13 +1843,14 @@ TEST_F(WorldInteractionTest, WorldInteraction_HoverHighlight_ClearedOnRmbToolClo
     EXPECT_CALL(renderer_, setTileHoverHighlight(3, 4, _)).Times(1);
     uiManager_->onEvent(makeMouseMove(500, 500));
 
-    // Step 2: RMB press — tool deselected; hover must be cleared.
-    // The primary assertion: setTileHoverHighlight(-1, -1, ...) called exactly once
-    // by the RMB handler (footprintSize arg may vary).
+    // Step 2: RMB up (short click, no movement) — tool deselected; hover must be cleared.
+    // Tool cancel fires on RMB up (not down) per input-arbitration Priority 6b:
+    // RMB down always starts camera drag; cancel only on RMB click (no movement).
+    // The primary assertion: setTileHoverHighlight(-1, -1, ...) called exactly once.
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
-    uiManager_->onEvent(makeMouseButtonDown(1, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(1, 500, 500));
 
-    // Postcondition: active tool must be None after RMB.
+    // Postcondition: active tool must be None after RMB click.
     EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::None);
 }
 
@@ -2175,6 +2178,7 @@ protected:
         EXPECT_CALL(renderer_, setTilePlacementPreview(_, _, _)).Times(AnyNumber());
         EXPECT_CALL(renderer_, setActiveTool(_)).Times(AnyNumber());
         EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(AnyNumber());
+        EXPECT_CALL(renderer_, setZoneHoverColour(_)).Times(AnyNumber());
         // Phase 11d Deliverable 5d: queryTile called in Zone/Road preview partitioning
         // and commit loop guards. Suppress via catch-all for this fixture.
         EXPECT_CALL(sim_, queryTile(_, _)).Times(AnyNumber()).WillRepeatedly(Return(QueryResult{}));

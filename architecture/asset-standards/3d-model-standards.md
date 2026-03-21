@@ -264,12 +264,12 @@ Examples: LOW (N=1) → `(tileX + 0.5f) * 10` (tile centre); MED (N=2) → `(til
 
 **Zone-based ground plate defaults**: When no variant-specific override is defined, the ground quad material defaults by zone:
 
-- **Residential** → garden (grass green)
+- **Residential** (Low, Med, High) → garden (grass green)
 - **Commercial** → paving (gray concrete)
 - **Industrial** → paving (gray concrete)
 - **Service** → paving for civic/emergency buildings (fire station, police station); gravel for utility buildings (power plant, water tower)
 
-These are "if not specified" defaults. Specific variants may use a different ground type for artistic reasons — for example, a residential variant with an urban tarmac forecourt is permitted.
+These are "if not specified" defaults. Specific variants may use a different ground type for artistic reasons — for example, a residential variant with an urban tarmac forecourt is permitted. The pool ground type is always a variant override, never a zone default.
 
 **LOW-tier bungalow exception**: Variant 04 (`res_low_04`) is a bungalow whose box was `10×10 m` (matching the tile exactly). It has been reduced to `8×8 m` so the 1 m tarmac border around the building remains visible — consistent with all other LOW-tier variants (`8 m` wide).
 

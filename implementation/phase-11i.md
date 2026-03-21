@@ -28,6 +28,18 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
 ### Deliverables
 
+> **Implementation note**: Deliverable **§1a** (shader verification consolidation spec
+> updates — removing the "Verify shader assets" step from `build-linux`/`coverage-linux`
+> documentation and adding it to the `validate-assets` job section, plus the general
+> source-tree-check rule and ordering rationale) has been **pre-applied** to
+> `architecture/ci-cd/github-actions-workflow.md` as part of a fix-implementation review.
+> Verify that section is correct before starting §2.
+>
+> Deliverables **§1b** (`package-windows` job spec) and **§1c** (`package-linux-deb` job
+> spec) are **pending** — add those sections to the spec as part of implementing this
+> phase. Deliverables **§2** (CI YAML changes) and **§3** (verification) are also
+> **pending**.
+
 #### 1. Spec Updates — `architecture/ci-cd/github-actions-workflow.md`
 
 ##### 1a. Asset Validation Consolidation
@@ -58,7 +70,7 @@ Three CI/CD improvements delivered as a single cohesive phase:
   (`cicd-dev-github`)
 
 - [ ] Update the `build-linux` job documentation: remove the "Verify shader assets" step
-  from the mandatory step sequence. Update the ordered step list in the spec to reflect
+  from the mandatory step sequence. Update the step documentation in the spec to reflect
   that this step no longer appears in `build-linux`. Document the rationale: source-tree
   checks belong in `validate-assets`; `build-linux` only validates build artifacts and
   test execution. (`cicd-dev-github`)
@@ -75,7 +87,7 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
 ##### 1b. `package-windows` Job
 
-- [ ] Add a **`package-windows` job** section documenting the following:
+- [ ] Add a **`package-windows` job** section documenting the following. Insert this section in `architecture/ci-cd/github-actions-workflow.md` immediately after the `all-checks-pass` job documentation section and before any trailing phasing-summary or appendix content.
 
   - **Trigger condition**: runs only on push to `main` or `develop`
     (`if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')`).
@@ -89,7 +101,12 @@ Three CI/CD improvements delivered as a single cohesive phase:
   - **Permissions**: `contents: read`.
 
   - **Dependencies**: `needs: [build-windows]` — packaging runs only after the Windows
-    build job passes, ensuring the binary is known-good before packaging.
+    build job passes. This is a **quality gate only** (not artifact sharing): the
+    packaging job rebuilds from source rather than downloading `build-windows` artifacts.
+    The rationale: `build-windows` verifies that the code compiles and all tests pass;
+    `package-windows` then produces a clean, definitive release build. If `build-windows`
+    fails, packaging is skipped entirely. The packaged binary is built with the same
+    `ci-windows` preset, so the build is reproducible.
 
   - **Step sequence**:
     1. Checkout (`actions/checkout` SHA-pinned)
@@ -138,6 +155,24 @@ Three CI/CD improvements delivered as a single cohesive phase:
     - All vcpkg runtime DLLs must be installed alongside `aitown.exe` via
       `install(FILES ...)` in `CMakeLists.txt` — the installer must be self-contained
       (no separate vcpkg installation required on the end user's machine).
+    - `default.mhr` (HRTF data file required for 3D spatial audio):
+      `install(FILES ${CMAKE_BINARY_DIR}/default.mhr DESTINATION .)` — this file is
+      copied to `${CMAKE_BINARY_DIR}` by a CMake `POST_BUILD copy_if_different` rule
+      sourcing from the vcpkg OpenAL Soft share directory
+      (`${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr`).
+      This POST_BUILD rule must exist in `CMakeLists.txt`; CPack runs after the build
+      completes, so the file will be present when CPack executes. Without it the HRTF
+      initialization step fails silently at runtime.
+    - `soft_oal.dll` (OpenAL Soft renamed as `soft_oal.dll` per Windows naming
+      convention): `install(FILES ${CMAKE_BINARY_DIR}/soft_oal.dll DESTINATION .)` —
+      must be explicitly listed; it is NOT automatically included by the generic DLL
+      glob and its absence causes `alGetError`/`alcOpenDevice` to fail on the end
+      user's machine.
+    - Data files (assets/): `install(DIRECTORY assets/ DESTINATION .)` so the assets
+      directory lands alongside `aitown.exe` in the installer root. This is the Windows
+      equivalent of the Linux `install(DIRECTORY assets/ DESTINATION share/aitown/assets)`
+      rule and is required so that DDS textures, audio assets, and shader files are
+      included in the `.exe` installer.
     - The `CPACK_GENERATOR` default is NOT set in `CMakeLists.txt`; the generator is
       always specified explicitly on the `cpack` command line (`-G NSIS`, `-G DEB`).
 
@@ -145,7 +180,7 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
 ##### 1c. `package-linux-deb` Job
 
-- [ ] Add a **`package-linux-deb` job** section documenting the following:
+- [ ] Add a **`package-linux-deb` job** section documenting the following. Insert this section in `architecture/ci-cd/github-actions-workflow.md` immediately after the `all-checks-pass` job documentation section and before any trailing phasing-summary or appendix content.
 
   - **Trigger condition**: runs only on push to `main` or `develop`
     (`if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')`).
@@ -212,14 +247,15 @@ Three CI/CD improvements delivered as a single cohesive phase:
        - name: Set up vcpkg
          run: |
            git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg
+           git -C /opt/vcpkg checkout ${VCPKG_COMMIT_ID}
            /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
            echo "VCPKG_ROOT=/opt/vcpkg" >> $GITHUB_ENV
        ```
 
        **Pinning**: The vcpkg clone must use the same `VCPKG_COMMIT_ID` as the main
-       `build-linux` job — set `git -C /opt/vcpkg checkout ${VCPKG_COMMIT_ID}` after
-       the clone, where `VCPKG_COMMIT_ID` is provided as a workflow-level env var (same
-       value as in `build-linux`). Using a different vcpkg baseline in the packaging
+       `build-linux` job. `VCPKG_COMMIT_ID` is provided as a workflow-level env var (same
+       value as in `build-linux`). The `git checkout` command above pins the clone to that
+       exact commit before bootstrapping. Using a different vcpkg baseline in the packaging
        job would risk baseline atomicity violations (see `architecture/ci-cd/
        dependency-management.md`).
 
@@ -241,10 +277,16 @@ Three CI/CD improvements delivered as a single cohesive phase:
              -G Ninja \
              -DCMAKE_BUILD_TYPE=Release \
              -DENABLE_COVERAGE=OFF \
+             -DENABLE_TESTING=OFF \
              -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
              -DVCPKG_MANIFEST_FEATURES="" \
              -DVCPKG_INSTALLED_DIR=$VCPKG_ROOT/installed
        ```
+
+       Testing is disabled because the packaging job builds with system packages and only
+       Irrlicht from vcpkg — gtest and rapidcheck are not available. The packaging job
+       produces only the `aitown` binary and installer; test execution is handled by
+       `build-linux` and `coverage-linux`.
 
     6. CMake build: `cmake --build build --parallel`
 
@@ -283,6 +325,7 @@ Three CI/CD improvements delivered as a single cohesive phase:
     - Install destination: `install(TARGETS aitown RUNTIME DESTINATION games)` so the
       binary lands at `/usr/games/aitown` (standard Debian policy location for games).
     - Data files (assets/): `install(DIRECTORY assets/ DESTINATION share/aitown/assets)`.
+    - `default.mhr` (HRTF data file): `install(FILES ${CMAKE_BINARY_DIR}/default.mhr DESTINATION share/openal/hrtf)` — installs to `/usr/share/openal/hrtf/default.mhr`, which is one of OpenAL Soft's standard HRTF search paths (along with `~/.local/share/openal/hrtf/` for per-user overrides). Installing to `share/aitown/` would be incorrect — OpenAL Soft does NOT search that path. The same POST_BUILD `copy_if_different` rule that populates `${CMAKE_BINARY_DIR}/default.mhr` on Windows also runs on Linux builds, so the file is present before CPack executes.
     - The `CPACK_GENERATOR` default is NOT set; always specify `-G DEB` on the command
       line.
 
@@ -297,6 +340,18 @@ Three CI/CD improvements delivered as a single cohesive phase:
 #### 2. CI Implementation — `.github/workflows/ci.yml`
 
 ##### 2a. Remove Shader Verification from OS-Specific Jobs
+
+- [ ] If a temporary "music stem sidecar enforcement" step (or similar source-tree file
+  check) exists in `build-linux` or `coverage-linux`, handle it as follows:
+  - If Check #14 (music stem JSON sidecar validation) is already implemented in
+    `tools/validate_assets.py`, the temporary step is redundant — simply remove it
+    from `build-linux`/`coverage-linux` without adding it to `validate-assets`
+    (the validation is already covered by the `Run asset validation` step).
+  - If Check #14 is NOT yet implemented in `tools/validate_assets.py`, move the
+    temporary step to `validate-assets` (after "Install Python dependencies", before
+    "Run asset validation") per the general consolidation rule. Do NOT leave the step
+    in `build-linux`/`coverage-linux`.
+  (`cicd-dev-github`)
 
 - [ ] Remove the "Verify shader assets" step from `build-linux`:
 
@@ -344,6 +399,22 @@ Three CI/CD improvements delivered as a single cohesive phase:
   `install(FILES ...)` or `install(DIRECTORY ...)` so CPack includes them in the
   installer. (`cicd-dev-github`)
 
+- [ ] Verify that `AITOWN_ASSETS_DIR` (the compile-time asset path constant in `CMakeLists.txt`)
+  is set correctly for installed builds, not just development builds. If it is currently
+  hardcoded to `${CMAKE_SOURCE_DIR}/assets` (an absolute source-tree path), update it
+  to use the correct installation prefix for packaged builds:
+  - On Windows (NSIS installer): assets land alongside `aitown.exe` (DESTINATION `.`),
+    so the binary can locate them via a relative path from the executable directory
+    (e.g., `./assets`). Use a generator expression or install-time configuration to
+    set `AITOWN_ASSETS_DIR` to `"."` or derive it relative to the executable at runtime.
+  - On Linux (DEB package): assets land at `/usr/share/aitown/assets`, so
+    `AITOWN_ASSETS_DIR` must be set to `/usr/share/aitown/assets` for installed builds.
+  The recommended approach is a CMake configure-time `install(CODE ...)` block or a
+  `GNUInstallDirs`-based `AITOWN_ASSETS_DIR_INSTALL` that overrides the dev-time value
+  when building for packaging. Without this fix, packaged applications will fail to load
+  any asset (textures, shaders, audio) because the source tree path does not exist on
+  the end user's machine. (`cicd-dev-github`, `graphics-dev-irrlicht`)
+
 ##### 2c. Add `package-linux-deb` Job
 
 - [ ] Add the `package-linux-deb` job (with matrix) to `.github/workflows/ci.yml` per
@@ -357,6 +428,10 @@ Three CI/CD improvements delivered as a single cohesive phase:
   §1c. The `CPACK_DEBIAN_FILE_NAME: DEB-DEFAULT` setting requires `dpkg-architecture`
   to be available at CPack time — this is satisfied by the `dpkg-dev` apt package
   installed in the container step. (`cicd-dev-github`)
+
+- [ ] Verify `AITOWN_ASSETS_DIR` is correct for installed Linux builds (see §2b for the
+  full requirement — the same fix applies to the Linux package). (`cicd-dev-github`,
+  `graphics-dev-irrlicht`)
 
 #### 3. Verification Steps
 
@@ -401,7 +476,13 @@ Three CI/CD improvements delivered as a single cohesive phase:
   rules for Windows present; `install(TARGETS aitown RUNTIME DESTINATION games)` present
   for Linux.
 - [ ] All previously passing CI jobs (`build-linux`, `build-windows`, `coverage-linux`,
-  `validate-assets`, `markdown-lint`) continue to pass after the changes.
+  `validate-assets`, `markdown-lint`) continue to pass after the changes. Specifically
+  for `coverage-linux`: all three test routing checks (unit, integration, requires-opengl)
+  execute and produce non-zero discovery, all test steps complete with exit code 0, lcov
+  coverage gate enforcement runs and produces expected PASS/FAIL output, and test XML
+  files are written to `test_results/`. The new `package-windows` and `package-linux-deb`
+  jobs run independently and are NOT included in this continuity requirement — they do not
+  run tests and do not gate `all-checks-pass`.
 - [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
   exits zero.
 

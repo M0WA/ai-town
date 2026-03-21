@@ -288,22 +288,27 @@ TEST_F(PopulationTest, CityRating_100KPopulation_NoRatingTransition_NoStingerFla
     local_sim->setTaxRate(ZoneType::Industrial,  0.05f);
 
     // Place enough zones to reach 100K:
-    //   200 High-R tiles (capacity 1000 each = 200K total).
-    //   At 10% growth cap = 100/tile/tick; 200 tiles = 20000/tick.
+    //   200 High-R zones (capacity 1000 each = 200K total).
+    //   At 10% growth cap = 100/zone/tick; 200 zones = 20000/tick.
     //   100K reached in ~5 ticks.
-    //   Note: High density requires unlock (threshold_3 = $100K × 0.70 Easy scale = $70K).
-    //   Easy starting funds = $1M > $70K → density unlock happens quickly.
+    //   High density (N=3): zones spaced 3 apart; roads at z=3 (dist 1 from footprint tile z=2).
+    //   placeZone does NOT check density unlock — placement is always allowed.
     // Phase 11h: placeZone requires a road within 3 Manhattan tiles.
-    for (int x = 0; x <= 198; x += 3) { local_sim->placeRoad(x, 1, 0); }
-    for (int x = 0; x <= 48; x += 3) { local_sim->placeRoad(x, 4, 0); }
-    for (int x = 0; x <= 48; x += 3) { local_sim->placeRoad(x, 9, 0); }
-    for (int x = 0; x < 200; ++x) {
-        local_sim->placeZone(x, 0, ZoneType::Residential, DensityTier::Low);
+    // 200 High-R zones at x=0,3,...,597 (3×3 footprint at z=0..2), roads at z=3.
+    for (int x = 0; x <= 597; x += 3) { local_sim->placeRoad(x, 3, 0); }
+    for (int x = 0; x <= 597; x += 3) {
+        local_sim->placeZone(x, 0, ZoneType::Residential, DensityTier::High);
     }
-    // Balance demand with Commercial and Industrial.
-    for (int x = 0; x < 50; ++x) {
-        local_sim->placeZone(x, 5, ZoneType::Commercial,  DensityTier::Low);
-        local_sim->placeZone(x, 10, ZoneType::Industrial, DensityTier::Low);
+    // Balance demand with Commercial and Industrial (High density).
+    // 50 High-C zones at x=0,3,...,147 (3×3 footprint at z=4..6), roads at z=7.
+    for (int x = 0; x <= 147; x += 3) { local_sim->placeRoad(x, 7, 0); }
+    for (int x = 0; x <= 147; x += 3) {
+        local_sim->placeZone(x, 4, ZoneType::Commercial,  DensityTier::High);
+    }
+    // 50 High-I zones at x=0,3,...,147 (3×3 footprint at z=8..10), roads at z=11.
+    for (int x = 0; x <= 147; x += 3) { local_sim->placeRoad(x, 11, 0); }
+    for (int x = 0; x <= 147; x += 3) {
+        local_sim->placeZone(x, 8, ZoneType::Industrial,  DensityTier::High);
     }
 
     const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
@@ -333,9 +338,9 @@ TEST_F(PopulationTest, CityRating_100KPopulation_NoRatingTransition_NoStingerFla
     EXPECT_CALL(strict_audio, triggerStinger(_)).Times(0);
 
     // Drive population from ~60K to 100K+.
-    // With 200 Low-R tiles and balanced demand:
-    //   each tile capacity = 100; 10% cap = 10/tick; 200 × 10 = 2000/tick
-    //   100K / 2000 = 50 ticks needed. Run 30 more to be safe.
+    // With 200 High-R zones and balanced demand:
+    //   each zone capacity = 1000; 10% cap = 100/tick; 200 × 100 = 20000/tick.
+    //   100K reached in ~5 ticks. Run 30 more to be safe.
     for (int i = 0; i < 30; ++i) {
         local_clock.advance(dt);
         cs2->tick(dt);

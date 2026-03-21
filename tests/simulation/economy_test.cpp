@@ -1550,11 +1550,12 @@ TEST_F(EconomyTest, ForcedLoan_WithUtilityRevenue_ExercisesEconomyPath)
     EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
 
     // Phase 11h: placeServiceBuilding requires adjacent road; placeZone requires road within 3.
-    // Road at (2,0): adjacent to footprint tile (1,0) of WaterTower; dist 1 from zone at (1,0).
+    // Road at (2,0): adjacent to footprint tile (1,0) of WaterTower; dist 1 from zone at (3,0).
+    // Zone at (3,0) is outside the WaterTower 2×2 footprint (covers (0,0)-(1,1)).
     sim_->placeRoad(2, 0, 0);
     // Place WaterTower + residential zone so utility fee sets m_firstRevenueTicked.
     sim_->placeServiceBuilding(0, 0, ServiceBuildingType::WaterTower, 0);
-    sim_->placeZone(1, 0, ZoneType::Residential, DensityTier::Low, 0);
+    sim_->placeZone(3, 0, ZoneType::Residential, DensityTier::Low, 0);
 
     // Advance past grace period.
     clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);

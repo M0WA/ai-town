@@ -1297,12 +1297,12 @@ def _build_res_high(zone, tier, variant, lod):
         floors = 13
         if lod == 2:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
-            _add_ground_quad(m, "paving", -fh, fh, -fh, fh)
+            _add_ground_quad(m, "garden", -fh, fh, -fh, fh)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             m.add_box(-2*S, 2*S, bh, bh+3*S, -2*S, 2*S, wr, wc, rr, rc)
-            _add_ground_quad(m, "paving", -fh, fh, -fh, fh)
+            _add_ground_quad(m, "garden", -fh, fh, -fh, fh)
             return m.to_b3d()
         # LOD0
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1312,7 +1312,7 @@ def _build_res_high(zone, tier, variant, lod):
         for fl in range(3, floors, 3):
             fy = fl * floor_h
             _add_balcony_slab(m, wr, wc, -3*S, 3*S, fy, -hz, 0.8*S)
-        _add_ground_quad(m, "paving", -fh, fh, -fh, fh)
+        _add_ground_quad(m, "garden", -fh, fh, -fh, fh)
         return m.to_b3d()
 
     elif variant == "02":
@@ -1352,13 +1352,13 @@ def _build_res_high(zone, tier, variant, lod):
         sb = 2*S
         if lod == 2:
             m.add_box(-base_hw, base_hw, 0, bh, -base_hw, base_hw, wr, wc, rr, rc)
-            _add_ground_quad(m, "paving", -fh, fh, -fh, fh)
+            _add_ground_quad(m, "garden", -fh, fh, -fh, fh)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-base_hw, base_hw, 0, sb1_y, -base_hw, base_hw, wr, wc, rr, rc)
             m.add_box(-base_hw+sb, base_hw-sb, sb1_y, sb2_y, -base_hw+sb, base_hw-sb, wr, wc, rr, rc)
             m.add_box(-base_hw+2*sb, base_hw-2*sb, sb2_y, bh, -base_hw+2*sb, base_hw-2*sb, wr, wc, rr, rc)
-            _add_ground_quad(m, "paving", -fh, fh, -fh, fh)
+            _add_ground_quad(m, "garden", -fh, fh, -fh, fh)
             return m.to_b3d()
         # LOD0: three stacked boxes
         m.add_box(-base_hw, base_hw, 0, sb1_y, -base_hw, base_hw, wr, wc, rr, rc)
@@ -1368,7 +1368,7 @@ def _build_res_high(zone, tier, variant, lod):
         m.add_box(-hw2, hw2, sb2_y, bh, -hw2, hw2, wr, wc, rr, rc)
         # Antenna box
         m.add_box(-0.5*S, 0.5*S, bh, bh+4*S, -0.5*S, 0.5*S, wr, wc)
-        _add_ground_quad(m, "paving", -fh, fh, -fh, fh)
+        _add_ground_quad(m, "garden", -fh, fh, -fh, fh)
         return m.to_b3d()
 
     elif variant == "04":
@@ -1380,11 +1380,11 @@ def _build_res_high(zone, tier, variant, lod):
         n_seg = 8
         if lod == 2:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
-            _add_ground_quad(m, "paving", -fh, fh, -fh, fh)
+            _add_ground_quad(m, "garden", -fh, fh, -fh, fh)
             return m.to_b3d()
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
-            _add_ground_quad(m, "paving", -fh, fh, -fh, fh)
+            _add_ground_quad(m, "garden", -fh, fh, -fh, fh)
             return m.to_b3d()
         # LOD0: main box + curved front face segments
         m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
@@ -1398,7 +1398,7 @@ def _build_res_high(zone, tier, variant, lod):
             z1 = -hz - bow * math.sin(frac1 * math.pi)
             m.add_quad((x0, 0, z0), (x1, 0, z1), (x1, bh, z1), (x0, bh, z0),
                        (0, 0, -1.0), wr, wc)
-        _add_ground_quad(m, "paving", -fh, fh, -fh, fh)
+        _add_ground_quad(m, "garden", -fh, fh, -fh, fh)
         return m.to_b3d()
 
     return m.to_b3d()

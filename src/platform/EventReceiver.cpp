@@ -113,16 +113,11 @@ bool EventReceiver::OnEvent(const irr::SEvent& event) {
         case irr::EMIE_RMOUSE_PRESSED_DOWN:
             ev.type   = InputEvent::Type::MouseButtonDown;
             ev.button = 1;  // RMB
-            // RMB atomicity: UIManager first; if NOT consumed, set m_rmbDragActive AND
-            // forward to CameraController IN THE SAME BRANCH (atomicity requirement).
-            // Splitting into separate conditions is a bug (CameraController never starts drag).
-            if (m_uiManager && m_uiManager->onEvent(ev)) {
-                // Scrim consumed RMB — do NOT start RMB drag.
-                // NOTE: UIManager returning true here is CORRECT (scrim at Priority 1).
-                return true;
-            }
-            // UIManager did not consume — start RMB drag and forward to CameraController.
+            // Always start camera drag immediately — tool cancel is deferred to RMB up
+            // (only when no movement occurred, i.e. a short click, not a drag).
+            // UIManager is NOT called on RMB down; it sees RMB up only for click-cancel.
             m_rmbDragActive = true;
+            m_rmbMoved = false;
             if (m_camera) m_camera->OnInputEvent(ev);
             return false;
 
@@ -144,9 +139,20 @@ bool EventReceiver::OnEvent(const irr::SEvent& event) {
             ev.type   = InputEvent::Type::MouseButtonUp;
             ev.button = 1;
             m_rmbDragActive = false;
-            if (m_uiManager && m_uiManager->onEvent(ev)) return true;
-            if (m_camera) m_camera->OnInputEvent(ev);
-            return false;
+            {
+                // Only notify UIManager on RMB click (no movement during press).
+                // If m_rmbMoved is true the user was dragging the camera — do not cancel tool.
+                bool consumed = false;
+                if (!m_rmbMoved && m_uiManager) {
+                    consumed = m_uiManager->onEvent(ev);
+                }
+                // Always forward to CameraController — it MUST receive RMB up to clear
+                // its own m_rmbDragActive. Without this, a short RMB click (UIManager
+                // consumes the up event) leaves CameraController in drag state and
+                // subsequent mouse moves rotate the camera with no button held.
+                if (m_camera) m_camera->OnInputEvent(ev);
+                return consumed;
+            }
 
         case irr::EMIE_MMOUSE_LEFT_UP:
             ev.type   = InputEvent::Type::MouseButtonUp;
@@ -160,6 +166,7 @@ bool EventReceiver::OnEvent(const irr::SEvent& event) {
             ev.type = InputEvent::Type::MouseMove;
             // Camera pass-through during MMB or RMB drag (Priority 1 — bypasses UIManager).
             if (m_mmbDragActive || m_rmbDragActive) {
+                if (m_rmbDragActive) m_rmbMoved = true;
                 if (m_camera) m_camera->OnInputEvent(ev);
                 return false;
             }

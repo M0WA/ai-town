@@ -115,7 +115,7 @@ Five cells in row 5 (cols 1–5) are allocated as ground-feature textures:
 
 | Cell | Name | Base colour | Zone default | Notes |
 |---|---|---|---|---|
-| (5,1) | `ground_garden` | mid-green (≈ RGB 80,130,60) | Residential | Default ground plate for all residential zones |
+| (5,1) | `ground_garden` | mid-green (≈ RGB 80,130,60) | Residential | Default ground plate for all residential zones (Low, Med, High) |
 | (5,2) | `ground_pool` | pool-blue (≈ RGB 70,160,200) | — (variant override) | Pool water for res_high_01 and com_high_04 only; not a zone-wide default |
 | (5,3) | `ground_paving` | light grey (≈ RGB 190,185,178) | Commercial, Industrial | Default ground plate for commercial and industrial zones (gray concrete forecourt) |
 | (5,4) | `ground_tarmac` | dark asphalt (≈ RGB 55,55,58) | — (variant override) | Artistic tarmac choice for specific variants only (e.g., urban residential forecourts, auto garage forecourts); no longer the industrial zone default |

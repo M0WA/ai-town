@@ -171,23 +171,26 @@ TEST_F(ServiceTest, ServiceCoverage_NewlyPlacedTile_NoPenaltyOnFirstTick) {
 // Spec: Power plant provides BFS-radius coverage. A residential tile within
 //       BFS reach of a power plant must show coverage.power > 0.0f (covered).
 //
-// Setup: add power plant at (0,0); place residential at (1,0); verify coverage > 0.
+// Setup: add power plant at (0,0) (2×2 footprint covers (0,0)-(1,1));
+//        place residential at (2,0) (BFS depth 1 from footprint tile (1,0));
+//        verify coverage > 0.
 // ---------------------------------------------------------------------------
 TEST_F(ServiceTest, PowerCoverage_ConnectedTiles_AreCovered) {
     // serviceTypeInt 3 = PowerPlant (matches CitySimulation::ServiceType enum order)
     cs()->addServiceBuilding(0, 0, 3);
 
     // Phase 11h: placeZone requires a road within 3 tiles.
-    sim_->placeRoad(2, 0, 0);
-    // Place residential adjacent to the power plant.
-    sim_->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
+    // Road at (3,0): within dist 1 of zone at (2,0). Zone at (2,0) is outside the
+    // 2×2 footprint (covers (0,0)-(1,1)) and adjacent to footprint tile (1,0) at BFS depth 1.
+    sim_->placeRoad(3, 0, 0);
+    sim_->placeZone(2, 0, ZoneType::Residential, DensityTier::Low);
 
     // Run one tick so coverage is evaluated.
     runTicks(1);
 
-    QueryResult r = sim_->queryTile(1, 0);
+    QueryResult r = sim_->queryTile(2, 0);
     EXPECT_GT(r.coverage.power, 0.0f)
-        << "Residential tile adjacent to power plant must have power coverage > 0.0f";
+        << "Residential tile adjacent to power plant footprint must have power coverage > 0.0f";
 }
 
 // ---------------------------------------------------------------------------
@@ -227,19 +230,20 @@ TEST_F(ServiceTest, PowerCoverage_ZeroTilesInRange_ReturnsNASentinel) {
 // floor(1 * 0.70) = 0 => that node falls in the outer 30% and loses coverage.
 // ---------------------------------------------------------------------------
 TEST_F(ServiceTest, PowerCoverage_DeficitDegradation_ReducesBFSRadius) {
-    // Power plant at origin; residential 1 tile away (BFS depth = 1).
+    // Power plant at origin; 2×2 footprint covers (0,0)-(1,1).
+    // Residential at (2,0): adjacent to footprint tile (1,0) at BFS depth 1.
+    // maxDepth = 1; brownout cutoff = floor(1 × 0.70) = 0 → depth-1 tile loses coverage. ✓
     cs()->addServiceBuilding(0, 0, 3);  // PowerPlant
-    // Phase 11h: road at (3,0) satisfies placeZone proximity (dist 2 from (1,0)).
-    // Placed at (3,0) not (2,0) so BFS from power plant stays at maxDepth=1:
-    // (0,0)→(1,0)[zone,depth1]; (2,0) is empty so BFS can't reach (3,0)[road].
-    // Brownout cutoff = floor(1 × 0.70) = 0 → tile at depth 1 loses coverage. ✓
-    sim_->placeRoad(3, 0, 0);
-    sim_->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
+    // Road at (2,3): satisfies placeZone proximity (Manhattan dist 3 from footprint tile (2,2)).
+    // Placed at (2,3) so BFS stays at maxDepth=1: footprint(1,0)→zone(2,0)[depth1];
+    // (3,0),(2,1) are empty so BFS can't extend further; road at (2,3) is unreachable via BFS.
+    sim_->placeRoad(2, 3, 0);
+    sim_->placeZone(2, 0, ZoneType::Residential, DensityTier::Low);
 
     // Run initial tick to establish baseline coverage.
     runTicks(1);
 
-    QueryResult baseline = sim_->queryTile(1, 0);
+    QueryResult baseline = sim_->queryTile(2, 0);
     ASSERT_GT(baseline.coverage.power, 0.0f)
         << "Pre-condition: tile should be powered before deficit";
 
@@ -254,7 +258,7 @@ TEST_F(ServiceTest, PowerCoverage_DeficitDegradation_ReducesBFSRadius) {
     // brownout is deterministic (not RNG-based for PowerPlant — it uses BFS depth reduction).
     runTicks(3);
 
-    QueryResult degraded = sim_->queryTile(1, 0);
+    QueryResult degraded = sim_->queryTile(2, 0);
     // After brownout at BFS depth 1 with floor(1*0.70) = 0 reachable depth,
     // the node at depth 1 is uncovered. Coverage should be 0 (not covered).
     EXPECT_EQ(degraded.coverage.power, 0.0f)
@@ -892,16 +896,18 @@ TEST_F(ServiceTest, ServiceAlert_PoliceAlert_FiredWhenNoFireStation)
 TEST_F(ServiceTest, QueryTile_WithWaterTower_ReturnsCoverageData)
 {
     // Phase 11h: placeServiceBuilding (2×2 footprint at (0,0)) needs adjacent road.
-    // Road at (2,0) is adjacent to footprint tile (1,0) and within dist 1 of zone (1,0).
+    // Road at (2,0) is adjacent to footprint tile (1,0).
+    // Zone at (3,0) is outside the 2×2 footprint (covers (0,0)-(1,1)); road at (2,0)
+    // satisfies the road-within-3 proximity check (dist 1 from zone at (3,0)).
     sim_->placeRoad(2, 0, 0);
     // Place a WaterTower.
     sim_->placeServiceBuilding(0, 0, ServiceBuildingType::WaterTower, 0);
 
-    // Place a Residential zone near the tower.
-    sim_->placeZone(1, 0, ZoneType::Residential, DensityTier::Low, 0);
+    // Place a Residential zone outside the service building footprint.
+    sim_->placeZone(3, 0, ZoneType::Residential, DensityTier::Low, 0);
 
     // queryTile should show coverage data (water coverage != -1.0f).
-    QueryResult qr = cs()->queryTile(1, 0);
+    QueryResult qr = cs()->queryTile(3, 0);
     EXPECT_TRUE(qr.isZoned);
     // Water coverage should be >= 0 (WaterTower is close enough).
     EXPECT_GE(qr.coverage.water, 0.0f);

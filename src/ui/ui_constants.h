@@ -32,7 +32,10 @@ constexpr unsigned int kOverlayArgbIndustrial  = 0x60FFFF00u;  // yellow
 
 // Hover highlight ARGB colours per active tool (alpha 0x80 ≈ 50%).
 // Used by UIManager::onEvent() MouseMove handler.
-constexpr unsigned int kHoverArgbZone      = 0x80FF00FFu;  // semi-transparent magenta
+// Zone tool: per-zone-type colours matching the zone overlay hues (same hue, higher alpha).
+constexpr unsigned int kHoverArgbZoneRes   = 0x8000FF00u;  // green  — Residential
+constexpr unsigned int kHoverArgbZoneCom   = 0x800000FFu;  // blue   — Commercial
+constexpr unsigned int kHoverArgbZoneInd   = 0x80FFFF00u;  // yellow — Industrial
 constexpr unsigned int kHoverArgbRoad      = 0x8000FFFFu;  // semi-transparent cyan
 constexpr unsigned int kHoverArgbUtilities = 0x80FF8000u;  // semi-transparent orange
 constexpr unsigned int kHoverArgbDemolish  = 0x80FF0000u;  // semi-transparent red

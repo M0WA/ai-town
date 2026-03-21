@@ -111,18 +111,6 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
   All three routing checks (`unit`, `integration`, `requires-opengl`) must be placed **after the CMake build step and before any ctest execution step** so that a label misconfiguration fails the job before any false-passing `ctest -L` invocation can run. Neither step requires a display or audio device — they only invoke `ctest -N` (list mode, no test execution).
 
-  **Shader asset verification (mandatory post-build step, Phase 8)**: After the CMake build step and after the label-routing verification steps, add a step that confirms both `IrrlichtUIBackend` raw-GL draw path shader files are present in the source tree before tests run. These files (`assets/shaders/ui_quad.vert` and `assets/shaders/ui_quad.frag`) are Phase 8 deliverables — their absence means the UIBackend shader path is incomplete and tests will fail with cryptic file-not-found errors rather than a clear CI message. This step must fail with an explicit error message rather than allowing the test steps to produce misleading failures:
-
-  ```yaml
-  - name: Verify shader assets
-    shell: bash
-    run: |
-      test -f assets/shaders/ui_quad.vert || { echo "Missing ui_quad.vert"; exit 1; }
-      test -f assets/shaders/ui_quad.frag || { echo "Missing ui_quad.frag"; exit 1; }
-  ```
-
-  This step is placed after all three label-routing verification steps and before the first `ctest` execution step. It requires no display, audio device, or build artifacts beyond the source tree — it checks the checked-out file tree directly.
-
   ```yaml
   - name: Run unit tests (no display)
     run: |
@@ -331,19 +319,18 @@ This step runs as the **first named step** in the `build-linux` job — before v
   8. **Verify unit test routing (non-zero discovery)** — after build, before any ctest
   9. **Verify integration test routing (non-zero discovery)** — after build, before any ctest
   10. **Verify requires-opengl test routing (non-zero discovery)** — after build, before any ctest
-  11. **Verify shader assets** — confirm `assets/shaders/ui_quad.vert` and `assets/shaders/ui_quad.frag` exist (Phase 8 deliverables; `IrrlichtUIBackend` raw-GL draw path requires both files at test time)
-  12. Run unit tests ctest step
-  13. Run integration tests ctest step
-  14. Run OpenGL tests ctest step (xvfb)
-  15. Verify test XML output exists
-  16. Publish test results (dorny/test-reporter)
-  17. Capture and gate lcov coverage
-  17a. Check src/ui/ zero-hit files (zero-hit coverage completeness checkpoint) — this step MUST use `if: always()` in the CI YAML so the zero-hit check runs unconditionally even when step 17 (lcov gate) exits non-zero; without `if: always()`, GitHub Actions skips step 17a after a lcov gate failure, silently bypassing dead-code detection
-  17b. **Phase 6 deliverable** — `src/simulation/` SF preflight: verifies that `coverage_filtered.info` contains at least one `SF:` entry for `src/simulation/`. Placement: inside step 17 (the lcov capture-and-gate `run:` block), immediately before the 95% total gate awk step. See `architecture/testing/coverage.md` § Phase 6 for the exact bash snippet.
-  17c. **Phase 11 deliverable** — `src/simulation/` per-file 85% floor gate: awk step that fails the build if any single `src/simulation/` file is below 85% line coverage. Placement: inside step 17 (the lcov capture-and-gate `run:` block), immediately after the `src/simulation/` SF preflight (step 17b) and before the 95% total gate. See `architecture/testing/coverage.md` § Phase 11 for the exact awk code.
-  18. Upload coverage artifact
+  11. Run unit tests ctest step
+  12. Run integration tests ctest step
+  13. Run OpenGL tests ctest step (xvfb)
+  14. Verify test XML output exists
+  15. Publish test results (dorny/test-reporter)
+  16. Capture and gate lcov coverage
+  16a. Check src/ui/ zero-hit files (zero-hit coverage completeness checkpoint) — this step MUST use `if: always()` in the CI YAML so the zero-hit check runs unconditionally even when step 16 (lcov gate) exits non-zero; without `if: always()`, GitHub Actions skips step 16a after a lcov gate failure, silently bypassing dead-code detection
+  16b. **Phase 6 deliverable** — `src/simulation/` SF preflight: verifies that `coverage_filtered.info` contains at least one `SF:` entry for `src/simulation/`. Placement: inside step 16 (the lcov capture-and-gate `run:` block), immediately before the 95% total gate awk step. See `architecture/testing/coverage.md` § Phase 6 for the exact bash snippet.
+  16c. **Phase 11 deliverable** — `src/simulation/` per-file 85% floor gate: awk step that fails the build if any single `src/simulation/` file is below 85% line coverage. Placement: inside step 16 (the lcov capture-and-gate `run:` block), immediately after the `src/simulation/` SF preflight (step 16b) and before the 95% total gate. See `architecture/testing/coverage.md` § Phase 11 for the exact awk code.
+  17. Upload coverage artifact
 
-  Steps 8, 9, and 10 (the three label-routing verification steps) and step 11 (shader asset verification) are placed **after CMake build step (7) and before the first ctest execution step (12)**. A label misconfiguration that produces zero-test discovery in `build-linux` will equally affect `coverage-linux`; without these checks, a zero-discovery run silently under-reports coverage and exits 0.
+  Steps 8, 9, and 10 (the three label-routing verification steps) are placed **after CMake build step (7) and before the first ctest execution step (11)**. A label misconfiguration that produces zero-test discovery in `build-linux` will equally affect `coverage-linux`; without these checks, a zero-discovery run silently under-reports coverage and exits 0.
 
   **coverage-linux: label-routing verification YAML**
 
@@ -388,16 +375,6 @@ This step runs as the **first named step** in the `build-linux` job — before v
   **Phase assignment (requires-opengl label routing)**: The `requires-opengl` label routing non-zero discovery verification step MAY be added in Phase 1, once `opengl_tests` is linked against `aitown_render`. The `stub_succeed.cpp` test registered in Phase 0 under `opengl_tests` satisfies the non-zero discovery requirement. This step is a Phase 1 deliverable and must not be deferred to Phase 3.
 
   All three routing checks (`unit`, `integration`, `requires-opengl`) must be placed **after the CMake build step and before the first ctest execution step** so that a label misconfiguration fails the job before any false-passing `ctest -L` invocation can run. Neither step requires a display or audio device — they only invoke `ctest -N` (list mode, no test execution).
-
-  **Phase assignment (shader asset verification)**: The shader asset verification step is a **Phase 8 deliverable** for both `build-linux` and `coverage-linux`. It MUST be placed after the three label-routing verification steps and before the first ctest execution step. The step verifies that `assets/shaders/ui_quad.vert` and `assets/shaders/ui_quad.frag` are present in the checked-out source tree — these files are required by the `IrrlichtUIBackend` raw-GL draw path and must exist before any test that exercises UIBackend rendering is run. The YAML is identical between the two jobs and is reproduced below:
-
-  ```yaml
-  - name: Verify shader assets
-    shell: bash
-    run: |
-      test -f assets/shaders/ui_quad.vert || { echo "Missing ui_quad.vert"; exit 1; }
-      test -f assets/shaders/ui_quad.frag || { echo "Missing ui_quad.frag"; exit 1; }
-  ```
 
     ```yaml
     - name: Run unit tests (no display)
@@ -551,7 +528,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
     **Placement constraint**: This step MUST run after the `src/simulation/` SF preflight (step 17b, Phase 6 deliverable) and before the 95% total gate awk step. The SF preflight guarantees that `src/simulation/` SF entries are present in `coverage_filtered.info` before the per-file awk runs; without it, an absent `src/simulation/` block would cause the per-file check to exit with a misleading preflight error rather than a coverage failure. Do NOT add this block before Phase 11 — the per-file floor was deferred from Phase 6 and is only enforced once Phase 11 simulation coverage is complete.
 
-  - **`coverage-linux` test reporting steps (required)**: After all three ctest steps and **before the lcov capture step**, `coverage-linux` must include the XML verification and `dorny/test-reporter` steps. Placing these **before lcov** is intentional: if a test fails and ctest exits non-zero, the XML files may still be present; reporting them before the lcov step ensures test annotations reach the PR even when lcov subsequently fails or is skipped. Without these steps, test failures in the coverage build produce no PR annotations, silently hiding coverage-run failures from reviewers. **Step order in `coverage-linux`**: (1) unit tests ctest, (2) integration tests ctest, (3) OpenGL tests ctest under xvfb, (4) Verify test XML, (5) Publish test results via `dorny/test-reporter`, (6) lcov capture + filter + gate, (6a) check src/ui/ zero-hit files (`if: always()` — Phase 8 deliverable, see step 17a YAML above), (7) Upload coverage artifact. Note: the "Verify shader assets" step (step 11 in the full ordered list above) runs before any of these ctest steps. The `coverage-linux` YAML must include (after all ctest steps, before lcov):
+  - **`coverage-linux` test reporting steps (required)**: After all three ctest steps and **before the lcov capture step**, `coverage-linux` must include the XML verification and `dorny/test-reporter` steps. Placing these **before lcov** is intentional: if a test fails and ctest exits non-zero, the XML files may still be present; reporting them before the lcov step ensures test annotations reach the PR even when lcov subsequently fails or is skipped. Without these steps, test failures in the coverage build produce no PR annotations, silently hiding coverage-run failures from reviewers. **Step order in `coverage-linux`**: (1) unit tests ctest, (2) integration tests ctest, (3) OpenGL tests ctest under xvfb, (4) Verify test XML, (5) Publish test results via `dorny/test-reporter`, (6) lcov capture + filter + gate, (6a) check src/ui/ zero-hit files (`if: always()` — Phase 8 deliverable, see step 17a YAML above), (7) Upload coverage artifact. The `coverage-linux` YAML must include (after all ctest steps, before lcov):
 
     ```yaml
     - name: Verify test XML output exists
@@ -676,6 +653,18 @@ markdown-lint:
   specific version — use `pip install mutagen` without version pinning to always use the
   latest compatible release.
 
+  **Phase 11i deliverable — Shader asset verification** (source-tree check consolidated here from `build-linux`/`coverage-linux`; added to this job as part of Phase 11i implementation, not before): After the Python dependencies step and before `Run asset validation`, add a step that confirms both `IrrlichtUIBackend` raw-GL draw path shader files are present in the source tree. This is a pure source-tree file check — it requires no build artifacts, no C++ toolchain, and no OS-specific environment. **General rule: any CI step that checks source-tree file existence, file format, or file content and requires no compiled binary must be placed in `validate-assets`, not in `build-linux`, `build-windows`, or `coverage-linux`.** This rule prevents future duplication.
+
+  **Ordering rationale**: `validate-assets` runs in parallel with `build-linux` and `coverage-linux` — it does NOT gate those jobs individually. This is intentional: shader files are source-tree files checked out by every CI job. If `assets/shaders/ui_quad.vert` or `assets/shaders/ui_quad.frag` are missing from the repository, build and test jobs will also fail with their own diagnostic messages. The `validate-assets` shader check provides a clear, dedicated diagnostic and gates the overall PR through `all-checks-pass`. Build/test jobs do not need to depend on `validate-assets` for correctness.
+
+  ```yaml
+      - name: Verify shader assets
+        shell: bash
+        run: |
+          test -f assets/shaders/ui_quad.vert || { echo "Missing ui_quad.vert"; exit 1; }
+          test -f assets/shaders/ui_quad.frag || { echo "Missing ui_quad.frag"; exit 1; }
+  ```
+
   Continuing the job definition:
 
   ```yaml
@@ -696,6 +685,7 @@ markdown-lint:
   - Phase 9: Check #15 full implementation (replacing the Phase 5 `.meta` stub) and Check #20 (road LOD2 color validation) are added to the script; again no change to the job definition or wiring.
   - Phase 10: Checks #21–#23 (zone loop silence-floor, non-stinger WAV SFX format, HUD sprites dimensions) are added to the script; no change to the job definition or `all-checks-pass` wiring.
   - Phase 10b: Check #24 (cloud texture format gate — `clouds.png` 1024×1024 RGBA) is added to the script; no change to the job definition or `all-checks-pass` wiring.
+  - Phase 11i: The "Verify shader assets" step is moved from `build-linux`/`coverage-linux` into this job (after `Install Python dependencies`, before `Run asset validation`). No change to the `all-checks-pass` wiring or the validate_assets.py script.
   - Phase 11d: Checks #25–30 are added to the script in two groups:
     - Checks #25–27 (vehicle atlas DDS format validation — `vehicles_diffuse_atlas_d.dds`
       2048×2048 BC1_UNORM_SRGB 4-mip, `vehicles_sprite_atlas_d.dds` 256×256 BC3_UNORM
