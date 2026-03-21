@@ -438,8 +438,11 @@ private:
     // all Y displacement is baked directly into the vertex positions.
     // The caller is responsible for calling drop() after addMeshSceneNode().
     // Returns nullptr if m_driver is null (headless context).
+    // isEW=true: carriageway and center-line oriented along X (East/West).
+    // isEW=false (default): oriented along Z (North/South).
     irr::scene::SMesh* buildTileRoadMesh(float h00, float h10,
-                                          float h01, float h11) const;
+                                          float h01, float h11,
+                                          bool isEW = false) const;
 
     // placeRoadMesh (internal extended) — core implementation called by both the
     // public IRenderer override and recursive neighbor rebuild calls.

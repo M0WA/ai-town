@@ -1647,7 +1647,7 @@ void IrrlichtRenderer::ensureRoadMeshes()
 // Kerb geometry follows the same corner heights so kerbs hug the terrain edge.
 // -------------------------------------------------------------------------
 irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
-    float h00, float h10, float h01, float h11) const
+    float h00, float h10, float h01, float h11, bool isEW) const
 {
     if (!m_driver) return nullptr;
 
@@ -1698,92 +1698,157 @@ irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
         b->Indices.push_back(base + 0); b->Indices.push_back(base + 3); b->Indices.push_back(base + 2);
     };
 
-    // --- Buffer 0: Asphalt carriageway (±kCarriagewayHalfWidth, full Z) ---
-    // Bilinear interpolation: at x=±kCarriagewayHalfWidth, Y is interpolated
-    // proportionally between the tile corners.
-    // For simplicity use the same corner heights as the full tile — the carriageway
-    // is the central portion; the Y difference across 1.25 m is negligible.
-    {
-        SMeshBuffer* buf = makeRoadBuf();
-        const SColor white(255, 255, 255, 255);
-        const float cH = kCarriagewayHalfWidth;
-        // Carriageway UV: proportional to tile width  (cH/H of the full [0..1] range)
-        const float uLeft  = 0.5f - cH / H * 0.5f;
-        const float uRight = 0.5f + cH / H * 0.5f;
-        addV(buf, -cH, y00, -H,  uLeft,  0.f, white);  // v0 back-left
-        addV(buf,  cH, y10, -H,  uRight, 0.f, white);  // v1 back-right
-        addV(buf,  cH, y11,  H,  uRight, 1.f, white);  // v2 front-right
-        addV(buf, -cH, y01,  H,  uLeft,  1.f, white);  // v3 front-left
-        addQuadIdx(buf, 0);
-        buf->recalculateBoundingBox();
-        {
-            core::aabbox3df box = buf->getBoundingBox();
-            const float yMid = (box.MaxEdge.Y + box.MinEdge.Y) * 0.5f;
-            if (box.MaxEdge.Y - box.MinEdge.Y < 0.5f) {
-                box.MinEdge.Y = yMid - 0.25f;
-                box.MaxEdge.Y = yMid + 0.25f;
-                buf->setBoundingBox(box);
-            }
+    // Road geometry is orientation-dependent:
+    //   isEW=false (N/S): carriageway spans X=±cH, full Z=±H; center-line at X=0 along Z.
+    //   isEW=true  (E/W): carriageway spans Z=±cH, full X=±H; center-line at Z=0 along X.
+    // In both cases h00/h10/h01/h11 are the four tile-corner heights (SW/SE/NW/NE).
+    // For the E/W inner-edge vertices (at Z=±cH instead of ±H) we use the nearest
+    // outer-corner heights — the error over 1.25 m is ≤0.06 m at the 5% max grade.
+
+    const float cH = kCarriagewayHalfWidth;
+
+    // Helper: expand bounding box Y if nearly flat (EAC_BOX false-rejects near-horizontal tiles).
+    auto expandBBY = [](SMeshBuffer* b) {
+        b->recalculateBoundingBox();
+        core::aabbox3df box = b->getBoundingBox();
+        const float yMid = (box.MaxEdge.Y + box.MinEdge.Y) * 0.5f;
+        if (box.MaxEdge.Y - box.MinEdge.Y < 0.5f) {
+            box.MinEdge.Y = yMid - 0.25f;
+            box.MaxEdge.Y = yMid + 0.25f;
+            b->setBoundingBox(box);
         }
-        mesh->addMeshBuffer(buf);
-        buf->drop();
-    }
+    };
 
-    // --- Buffer 1: Left kerb strip (X: -H to -kCarriagewayHalfWidth) ---
-    {
-        SMeshBuffer* buf = makeRoadBuf();
-        const SColor kerbGray(255, 100, 100, 100);
-        const float cH = kCarriagewayHalfWidth;
-        addV(buf, -H,  y00, -H,  0.f, 0.f, kerbGray);
-        addV(buf, -cH, y10, -H,  1.f, 0.f, kerbGray);
-        addV(buf, -cH, y11,  H,  1.f, 1.f, kerbGray);
-        addV(buf, -H,  y01,  H,  0.f, 1.f, kerbGray);
-        addQuadIdx(buf, 0);
-        buf->recalculateBoundingBox();
-        mesh->addMeshBuffer(buf);
-        buf->drop();
-    }
+    if (!isEW) {
+        // --- N/S orientation: carriageway along Z, kerbs on X sides, center-line at X=0 ---
 
-    // --- Buffer 2: Right kerb strip (X: +kCarriagewayHalfWidth to +H) ---
-    {
-        SMeshBuffer* buf = makeRoadBuf();
-        const SColor kerbGray(255, 100, 100, 100);
-        const float cH = kCarriagewayHalfWidth;
-        addV(buf,  cH, y10, -H,  0.f, 0.f, kerbGray);
-        addV(buf,  H,  y00, -H,  1.f, 0.f, kerbGray);
-        addV(buf,  H,  y01,  H,  1.f, 1.f, kerbGray);
-        addV(buf,  cH, y11,  H,  0.f, 1.f, kerbGray);
-        addQuadIdx(buf, 0);
-        buf->recalculateBoundingBox();
-        mesh->addMeshBuffer(buf);
-        buf->drop();
-    }
+        // Buffer 0: Asphalt carriageway (X=±cH, full Z=±H)
+        {
+            SMeshBuffer* buf = makeRoadBuf();
+            const SColor white(255, 255, 255, 255);
+            const float uLeft  = 0.5f - cH / H * 0.5f;
+            const float uRight = 0.5f + cH / H * 0.5f;
+            addV(buf, -cH, y00, -H,  uLeft,  0.f, white);
+            addV(buf,  cH, y10, -H,  uRight, 0.f, white);
+            addV(buf,  cH, y11,  H,  uRight, 1.f, white);
+            addV(buf, -cH, y01,  H,  uLeft,  1.f, white);
+            addQuadIdx(buf, 0);
+            expandBBY(buf);
+            mesh->addMeshBuffer(buf);
+            buf->drop();
+        }
+        // Buffer 1: Left kerb (X: -H to -cH)
+        {
+            SMeshBuffer* buf = makeRoadBuf();
+            const SColor kerbGray(255, 100, 100, 100);
+            addV(buf, -H,  y00, -H,  0.f, 0.f, kerbGray);
+            addV(buf, -cH, y10, -H,  1.f, 0.f, kerbGray);
+            addV(buf, -cH, y11,  H,  1.f, 1.f, kerbGray);
+            addV(buf, -H,  y01,  H,  0.f, 1.f, kerbGray);
+            addQuadIdx(buf, 0);
+            buf->recalculateBoundingBox();
+            mesh->addMeshBuffer(buf);
+            buf->drop();
+        }
+        // Buffer 2: Right kerb (X: +cH to +H)
+        {
+            SMeshBuffer* buf = makeRoadBuf();
+            const SColor kerbGray(255, 100, 100, 100);
+            addV(buf,  cH, y10, -H,  0.f, 0.f, kerbGray);
+            addV(buf,  H,  y00, -H,  1.f, 0.f, kerbGray);
+            addV(buf,  H,  y01,  H,  1.f, 1.f, kerbGray);
+            addV(buf,  cH, y11,  H,  0.f, 1.f, kerbGray);
+            addQuadIdx(buf, 0);
+            buf->recalculateBoundingBox();
+            mesh->addMeshBuffer(buf);
+            buf->drop();
+        }
+        // Buffer 3: Center-line strip (X=0, along Z, 0.3 m wide)
+        {
+            SMeshBuffer* buf = new SMeshBuffer();
+            buf->Material.MaterialType           = EMT_SOLID;
+            buf->Material.Lighting               = false;
+            buf->Material.BackfaceCulling        = false;
+            buf->Material.PolygonOffsetDirection = irr::video::EPO_FRONT;
+            buf->Material.PolygonOffsetFactor    = 5;
+            const SColor lineWhite(255, 255, 255, 255);
+            const float lHW = 0.15f;
+            addV(buf, -lHW, y00 + 0.005f, -H,  0.f, 0.f, lineWhite);
+            addV(buf,  lHW, y10 + 0.005f, -H,  1.f, 0.f, lineWhite);
+            addV(buf,  lHW, y11 + 0.005f,  H,  1.f, 1.f, lineWhite);
+            addV(buf, -lHW, y01 + 0.005f,  H,  0.f, 1.f, lineWhite);
+            addQuadIdx(buf, 0);
+            buf->recalculateBoundingBox();
+            mesh->addMeshBuffer(buf);
+            buf->drop();
+        }
+    } else {
+        // --- E/W orientation: carriageway along X, kerbs on Z sides, center-line at Z=0 ---
 
-    // --- Buffer 3: Center-line strip (LOD0 only) ---
-    // 0.3 m wide, full 10 m long, Y = B + 0.005 m above asphalt surface.
-    // White vertex color, EMT_SOLID material.
-    {
-        SMeshBuffer* buf = new SMeshBuffer();
-        buf->Material.MaterialType           = EMT_SOLID;
-        buf->Material.Lighting               = false;
-        buf->Material.BackfaceCulling        = false;
-        buf->Material.PolygonOffsetDirection = irr::video::EPO_FRONT;
-        buf->Material.PolygonOffsetFactor    = 5;  // slightly above asphalt buffer
-
-        const SColor lineWhite(255, 255, 255, 255);
-        const float lineHalfW = 0.15f;  // half of 0.3 m
-        const float lineY00   = y00 + 0.005f;
-        const float lineY10   = y10 + 0.005f;
-        const float lineY01   = y01 + 0.005f;
-        const float lineY11   = y11 + 0.005f;
-        addV(buf, -lineHalfW, lineY00, -H,  0.f, 0.f, lineWhite);
-        addV(buf,  lineHalfW, lineY10, -H,  1.f, 0.f, lineWhite);
-        addV(buf,  lineHalfW, lineY11,  H,  1.f, 1.f, lineWhite);
-        addV(buf, -lineHalfW, lineY01,  H,  0.f, 1.f, lineWhite);
-        addQuadIdx(buf, 0);
-        buf->recalculateBoundingBox();
-        mesh->addMeshBuffer(buf);
-        buf->drop();
+        // Buffer 0: Asphalt carriageway (full X=±H, Z=±cH)
+        // Heights: y00/y10 approximate the south inner edge (Z=-cH), y01/y11 the north (Z=+cH).
+        {
+            SMeshBuffer* buf = makeRoadBuf();
+            const SColor white(255, 255, 255, 255);
+            const float uLeft  = 0.5f - cH / H * 0.5f;
+            const float uRight = 0.5f + cH / H * 0.5f;
+            addV(buf, -H,  y00, -cH,  0.f,    uLeft,  white);  // west, south inner
+            addV(buf,  H,  y10, -cH,  1.f,    uLeft,  white);  // east, south inner
+            addV(buf,  H,  y11,  cH,  1.f,    uRight, white);  // east, north inner
+            addV(buf, -H,  y01,  cH,  0.f,    uRight, white);  // west, north inner
+            addQuadIdx(buf, 0);
+            expandBBY(buf);
+            mesh->addMeshBuffer(buf);
+            buf->drop();
+        }
+        // Buffer 1: South kerb (Z: -H to -cH)
+        {
+            SMeshBuffer* buf = makeRoadBuf();
+            const SColor kerbGray(255, 100, 100, 100);
+            addV(buf, -H,  y00, -H,   0.f, 0.f, kerbGray);  // west, outer
+            addV(buf,  H,  y10, -H,   1.f, 0.f, kerbGray);  // east, outer
+            addV(buf,  H,  y10, -cH,  1.f, 1.f, kerbGray);  // east, inner
+            addV(buf, -H,  y00, -cH,  0.f, 1.f, kerbGray);  // west, inner
+            addQuadIdx(buf, 0);
+            buf->recalculateBoundingBox();
+            mesh->addMeshBuffer(buf);
+            buf->drop();
+        }
+        // Buffer 2: North kerb (Z: +cH to +H)
+        {
+            SMeshBuffer* buf = makeRoadBuf();
+            const SColor kerbGray(255, 100, 100, 100);
+            addV(buf, -H,  y01,  cH,  0.f, 0.f, kerbGray);  // west, inner
+            addV(buf,  H,  y11,  cH,  1.f, 0.f, kerbGray);  // east, inner
+            addV(buf,  H,  y11,  H,   1.f, 1.f, kerbGray);  // east, outer
+            addV(buf, -H,  y01,  H,   0.f, 1.f, kerbGray);  // west, outer
+            addQuadIdx(buf, 0);
+            buf->recalculateBoundingBox();
+            mesh->addMeshBuffer(buf);
+            buf->drop();
+        }
+        // Buffer 3: Center-line strip (Z=0, along X, 0.3 m wide)
+        // Heights at Z=0 interpolated from west/east corner pairs.
+        {
+            SMeshBuffer* buf = new SMeshBuffer();
+            buf->Material.MaterialType           = EMT_SOLID;
+            buf->Material.Lighting               = false;
+            buf->Material.BackfaceCulling        = false;
+            buf->Material.PolygonOffsetDirection = irr::video::EPO_FRONT;
+            buf->Material.PolygonOffsetFactor    = 5;
+            const SColor lineWhite(255, 255, 255, 255);
+            const float lHW = 0.15f;
+            const float yCL_W = (y00 + y01) * 0.5f + 0.005f;  // west edge at Z=0
+            const float yCL_E = (y10 + y11) * 0.5f + 0.005f;  // east edge at Z=0
+            addV(buf, -H, yCL_W, -lHW,  0.f, 0.f, lineWhite);  // west, south
+            addV(buf,  H, yCL_E, -lHW,  1.f, 0.f, lineWhite);  // east, south
+            addV(buf,  H, yCL_E,  lHW,  1.f, 1.f, lineWhite);  // east, north
+            addV(buf, -H, yCL_W,  lHW,  0.f, 1.f, lineWhite);  // west, north
+            addQuadIdx(buf, 0);
+            buf->recalculateBoundingBox();
+            mesh->addMeshBuffer(buf);
+            buf->drop();
+        }
     }
 
     mesh->recalculateBoundingBox();
@@ -1915,8 +1980,16 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
     float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
     float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
 
+    // Detect E/W orientation: tile has at least one E/W neighbour but no N/S neighbours.
+    // Intersections and T-junctions (both N/S and E/W neighbours present) use N/S geometry.
+    const bool hasNS_dir = m_roadNodes.count(tileKey(tileX, tileZ - 1)) > 0
+                        || m_roadNodes.count(tileKey(tileX, tileZ + 1)) > 0;
+    const bool hasEW_dir = m_roadNodes.count(tileKey(tileX + 1, tileZ)) > 0
+                        || m_roadNodes.count(tileKey(tileX - 1, tileZ)) > 0;
+    const bool isEW = hasEW_dir && !hasNS_dir;
+
     // --- Build per-tile LOD0 terrain-conforming mesh ---
-    SMesh* tileMesh = buildTileRoadMesh(h00, h10, h01, h11);
+    SMesh* tileMesh = buildTileRoadMesh(h00, h10, h01, h11, isEW);
     if (!tileMesh) {
         fprintf(stderr,
             "[IrrlichtRenderer] WARNING: placeRoadMesh(%d,%d): buildTileRoadMesh"
@@ -1942,21 +2015,6 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
         0.0f,
         static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
     node->setScale(core::vector3df(1.0f, 1.0f, 1.0f));
-
-    // Phase 11h: E/W road orientation — rotate 90° Y so the center-line strip aligns
-    // with the road direction.  buildTileRoadMesh() always builds the center-line strip
-    // running along the Z-axis (local space).  For tiles that connect East/West only
-    // (no N/S neighbours already in m_roadNodes), rotate the node 90° around Y so the
-    // strip runs along X instead.  T-junctions and cross-intersections are left at 0°.
-    {
-        const bool hasNS = m_roadNodes.count(tileKey(tileX, tileZ - 1)) > 0
-                        || m_roadNodes.count(tileKey(tileX, tileZ + 1)) > 0;
-        const bool hasEW = m_roadNodes.count(tileKey(tileX + 1, tileZ)) > 0
-                        || m_roadNodes.count(tileKey(tileX - 1, tileZ)) > 0;
-        if (hasEW && !hasNS) {
-            node->setRotation(core::vector3df(0.f, 90.f, 0.f));
-        }
-    }
 
     // Disable Irrlicht's automatic box frustum culling for road tiles.
     // Road tile meshes are nearly flat so their AABB has little vertical headroom.

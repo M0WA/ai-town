@@ -382,16 +382,16 @@ GROUND_CELLS = {
 }
 
 # Building heights per tier (in Irrlicht unit space, before setScale)
-# low=2 floors → 0.6 units, med=4 floors → 1.2 units, high=8 floors → 2.4 units
+# low=2 floors → 6 m, med=4 floors → 12 m, high=8 floors → 24 m (native-scale, setScale=1)
 TIER_HEIGHT = {
-    "low":  0.6,
-    "med":  1.2,
-    "high": 2.4,
-    "svc":  0.6,   # service buildings are 2-floor equivalent
+    "low":  6.0,
+    "med":  12.0,
+    "high": 24.0,
+    "svc":  6.0,   # service buildings are 2-floor equivalent
 }
 
-# Half-extent on X and Z (leaves slight gap between tiles)
-BUILDING_HALF_XZ = 0.45
+# Half-extent on X and Z in metres (leaves slight gap between tiles, native-scale)
+BUILDING_HALF_XZ = 4.5
 
 
 # ---------------------------------------------------------------------------
@@ -1032,7 +1032,7 @@ def _build_res_low(zone, tier, variant, lod):
     rr, rc = ROOF_CELL
     m = MeshAccum()
 
-    S = 0.1
+    S = 1.0
 
     if variant == "01":
         # Detached house: box + gabled roof + chimney box + porch slab
@@ -1176,7 +1176,7 @@ def _build_res_med(zone, tier, variant, lod):
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
-    S = 0.1
+    S = 1.0
 
     if variant == "01":
         # Box + flat roof (add_box to parapet height)
@@ -1279,7 +1279,7 @@ def _build_res_high(zone, tier, variant, lod):
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
-    S = 0.1
+    S = 1.0
     floor_h = 3*S
 
     if variant == "01":
@@ -1407,7 +1407,7 @@ def _build_com_low(zone, tier, variant, lod):
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
-    S = 0.1
+    S = 1.0
 
     if variant == "01":
         # Box + flat roof + canopy slab over entrance
@@ -1483,7 +1483,7 @@ def _build_com_med(zone, tier, variant, lod):
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
-    S = 0.1
+    S = 1.0
 
     if variant == "01":
         # Box + smaller set-back top box
@@ -1565,7 +1565,7 @@ def _build_com_high(zone, tier, variant, lod):
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
-    S = 0.1
+    S = 1.0
 
     if variant == "01":
         # Tapered shaft (main box + two smaller setback boxes at top) -- NO mullion grid
@@ -1697,7 +1697,7 @@ def _build_ind_low(zone, tier, variant, lod):
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
-    S = 0.1
+    S = 1.0
 
     if variant == "01":
         # Box + pitched roof (portal frame gabled)
@@ -1786,7 +1786,7 @@ def _build_ind_med(zone, tier, variant, lod):
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
-    S = 0.1
+    S = 1.0
 
     if variant == "01":
         # Box + flat roof (dock leveller recesses = 3 simple shallow box recesses on front)
@@ -1862,7 +1862,7 @@ def _build_ind_high(zone, tier, variant, lod):
     wr, wc = WALL_CELLS[(zone, tier, variant)]
     rr, rc = ROOF_CELL
     m = MeshAccum()
-    S = 0.1
+    S = 1.0
 
     if variant == "01":
         # 3 cylinder approximations (12 segments) + conical tops + small base shed box
@@ -1983,7 +1983,7 @@ def build_svc_fire_station(lod):
     wr, wc = WALL_CELLS[("svc", "fire_station")]
     rr, rc = ROOF_CELL
     m = MeshAccum()
-    S = 0.1
+    S = 1.0
 
     hall_w, hall_d, hall_h = 14*S, 12*S, 6*S
     hx, hz = hall_w/2, hall_d/2
@@ -2010,7 +2010,7 @@ def build_svc_police_station(lod):
     wr, wc = WALL_CELLS[("svc", "police_station")]
     rr, rc = ROOF_CELL
     m = MeshAccum()
-    S = 0.1
+    S = 1.0
 
     bw, bd, bh = 12*S, 10*S, 9*S
     hx, hz = bw/2, bd/2
@@ -2041,7 +2041,7 @@ def build_svc_power_plant(lod):
     wr, wc = WALL_CELLS[("svc", "power_plant")]
     rr, rc = ROOF_CELL
     m = MeshAccum()
-    S = 0.1
+    S = 1.0
 
     bw, bd, bh = 20*S, 16*S, 14*S
     hx, hz = bw/2, bd/2
@@ -2091,7 +2091,7 @@ def build_svc_water_tower(lod):
     wr, wc = WALL_CELLS[("svc", "water_tower")]
     rr, rc = ROOF_CELL
     m = MeshAccum()
-    S = 0.1
+    S = 1.0
 
     tank_r  = 4*S
     tank_h  = 7*S
