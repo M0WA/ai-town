@@ -276,18 +276,6 @@ jobs:
           fi
           echo "default.mhr present at build/default.mhr."
 
-      # Step 13b: Verify UI shader assets (Phase 8 deliverable).
-      # Confirms assets/shaders/ui_quad.vert and ui_quad.frag are present in the
-      # checked-out source tree before tests run. These files are required by the
-      # IrrlichtUIBackend raw-GL draw path — their absence causes cryptic
-      # file-not-found errors rather than a clear CI message.
-      - name: Verify UI shader assets
-        shell: bash
-        run: |
-          test -f assets/shaders/ui_quad.vert || { echo "ERROR: assets/shaders/ui_quad.vert not found"; exit 1; }
-          test -f assets/shaders/ui_quad.frag || { echo "ERROR: assets/shaders/ui_quad.frag not found"; exit 1; }
-          echo "UI shader assets verified."
-
       - name: Verify terrain assets present
         run: |
           test -f assets/textures/terrain/terrain_grass_d.dds    || { echo "ERROR: terrain_grass_d.dds missing"; exit 1; }
@@ -901,17 +889,6 @@ jobs:
           test -f assets/fonts/hud_mono_font.xml || { echo "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing"; exit 1; }
           echo "Phase 10 font assets verified: hud_font.xml and hud_mono_font.xml present."
 
-      # Step 12d: Verify UI shader assets (Phase 8 deliverable).
-      # Identical to the build-linux shader check — confirms assets/shaders/ui_quad.vert
-      # and ui_quad.frag are present before tests run. Required by the IrrlichtUIBackend
-      # raw-GL draw path.
-      - name: Verify UI shader assets
-        shell: bash
-        run: |
-          test -f assets/shaders/ui_quad.vert || { echo "ERROR: assets/shaders/ui_quad.vert not found"; exit 1; }
-          test -f assets/shaders/ui_quad.frag || { echo "ERROR: assets/shaders/ui_quad.frag not found"; exit 1; }
-          echo "UI shader assets verified."
-
       - name: Verify terrain assets present
         run: |
           test -f assets/textures/terrain/terrain_grass_d.dds    || { echo "ERROR: terrain_grass_d.dds missing"; exit 1; }
@@ -1343,6 +1320,16 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends ffmpeg
 
+      - name: Verify shader assets
+        # Source-tree check — no build artifacts required.
+        # Moved from build-linux/coverage-linux per Phase 11i consolidation rule:
+        # any step checking source-tree file existence belongs in validate-assets.
+        shell: bash
+        run: |
+          test -f assets/shaders/ui_quad.vert || { echo "ERROR: assets/shaders/ui_quad.vert not found"; exit 1; }
+          test -f assets/shaders/ui_quad.frag || { echo "ERROR: assets/shaders/ui_quad.frag not found"; exit 1; }
+          echo "Shader assets verified."
+
       - name: Run asset validation
         run: python tools/validate_assets.py
 
@@ -1412,3 +1399,134 @@ jobs:
             exit 1
           fi
           echo "All required jobs succeeded."
+
+  # ============================================================================
+  # package-windows — NSIS installer via CPack.
+  # Runs only on push to main/develop (not PRs). Not in all-checks-pass gate.
+  # Rebuilds from source after build-windows passes (quality gate only).
+  # ============================================================================
+  package-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    needs: [build-windows]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+
+      - uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c
+
+      - uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+
+      - name: CMake configure
+        shell: pwsh
+        run: cmake --preset ci-windows -DAITOWN_ASSETS_DIR=assets -DBUILD_TESTING=OFF
+
+      - name: CMake build
+        shell: pwsh
+        run: cmake --build build --parallel
+
+      - name: Append vcpkg DLL directory to PATH
+        shell: pwsh
+        run: |
+          $vcpkgBin = "build\vcpkg_installed\x64-windows\bin"
+          echo "$vcpkgBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Create Windows installer
+        shell: pwsh
+        working-directory: build
+        run: cpack -G NSIS -C Release
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: aitown-installer-windows-${{ github.sha }}
+          path: build/aitown-*.exe
+          retention-days: 30
+
+  # ============================================================================
+  # package-linux-deb — Debian/Ubuntu .deb packages via CPack.
+  # Matrix over 4 distros. Runs only on push to main/develop (not PRs).
+  # Not in all-checks-pass gate. fail-fast: false so one leg failure doesn't
+  # cancel the other three.
+  # ============================================================================
+  package-linux-deb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian-bookworm
+            container: debian:bookworm
+            codename: bookworm
+          - distro: debian-trixie
+            container: debian:trixie
+            codename: trixie
+          - distro: ubuntu-jammy
+            container: ubuntu:22.04
+            codename: jammy
+          - distro: ubuntu-noble
+            container: ubuntu:24.04
+            codename: noble
+    container: ${{ matrix.container }}
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update -y
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git curl zip unzip tar pkg-config \
+            libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libopenal-dev libvorbis-dev \
+            python3 \
+            dpkg-dev fakeroot
+
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Set up vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg
+          git -C /opt/vcpkg checkout ${{ env.VCPKG_COMMIT_ID }}
+          /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          echo "VCPKG_ROOT=/opt/vcpkg" >> $GITHUB_ENV
+
+      - name: Install vcpkg packages
+        run: |
+          $VCPKG_ROOT/vcpkg install irrlicht --triplet x64-linux
+
+      - name: CMake configure
+        run: |
+          cmake -B build -S . \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_COVERAGE=OFF \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DAITOWN_ASSETS_DIR=/usr/share/aitown/assets \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            -DVCPKG_MANIFEST_FEATURES="" \
+            -DVCPKG_INSTALLED_DIR=$VCPKG_ROOT/installed
+
+      - name: CMake build
+        run: cmake --build build --parallel
+
+      - name: Create Debian package
+        working-directory: build
+        run: cpack -G DEB
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: aitown-deb-${{ matrix.distro }}-${{ github.sha }}
+          path: build/aitown-*.deb
+          retention-days: 30

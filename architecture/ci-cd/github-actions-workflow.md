@@ -870,3 +870,98 @@ all-checks-pass:
         fi
         echo "All required jobs succeeded."
 ```
+
+## `package-windows` Job
+
+Produces an NSIS-based `.exe` installer via CPack. Runs only on push to `main` or `develop`
+(`if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')`).
+Does NOT run on pull requests. Does NOT block `all-checks-pass`.
+
+- **Runner**: `windows-latest`
+- **Timeout**: `timeout-minutes: 60`
+- **Permissions**: `contents: read`
+- **Dependencies**: `needs: [build-windows]` — quality gate only; packaging rebuilds from source.
+
+### Step sequence
+
+1. Checkout (`actions/checkout` SHA-pinned)
+2. Install NSIS via Chocolatey (`choco install nsis --no-progress -y`)
+3. `ilammy/msvc-dev-cmd` (SHA-pinned) — vcvarsall for CMake configure
+4. `lukka/run-vcpkg` (SHA-pinned) — restore vcpkg packages
+5. CMake configure with `-DAITOWN_ASSETS_DIR=assets -DBUILD_TESTING=OFF`
+6. CMake build: `cmake --build build --parallel`
+7. Append `build\vcpkg_installed\x64-windows\bin` to `$env:GITHUB_PATH`
+8. CPack — `cpack -G NSIS -C Release` (run inside `build/`)
+9. Upload installer artifact (`name: aitown-installer-windows-<sha>`, `retention-days: 30`)
+
+### CPack NSIS requirements in `CMakeLists.txt`
+
+- `CPACK_PACKAGE_NAME`: `"AI Town"`
+- `CPACK_PACKAGE_VENDOR`: project maintainer name
+- `CPACK_PACKAGE_VERSION`: `${PROJECT_VERSION}`
+- `CPACK_NSIS_DISPLAY_NAME`: `"AI Town"`
+- `CPACK_NSIS_INSTALL_ROOT`: `"$PROGRAMFILES64"`
+- `CPACK_NSIS_CREATE_ICONS_EXTRA`: Start Menu and Desktop shortcuts to `aitown.exe`
+- `CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL`: `ON`
+- `install(TARGETS aitown RUNTIME DESTINATION .)` — binary to installer root
+- `install(DIRECTORY assets DESTINATION .)` — **no trailing slash**: installs `assets/` as a
+  subdirectory alongside `aitown.exe`
+- `install(FILES ${CMAKE_BINARY_DIR}/soft_oal.dll DESTINATION .)` — OpenAL Soft runtime
+- `install(FILES ${CMAKE_BINARY_DIR}/default.mhr DESTINATION .)` — HRTF data file
+- vcpkg DLLs: `install(DIRECTORY ${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/ DESTINATION . FILES_MATCHING PATTERN "*.dll")`
+- `CPACK_GENERATOR` is NOT set in `CMakeLists.txt`; always specify `-G NSIS` on the command line
+- `AITOWN_ASSETS_DIR` must be a `CACHE STRING` so `-DAITOWN_ASSETS_DIR=assets` overrides the default
+
+## `package-linux-deb` Job
+
+Produces `.deb` packages for four Debian/Ubuntu distros via CPack. Runs only on push to `main`
+or `develop`. Does NOT run on pull requests. Does NOT block `all-checks-pass`.
+
+### Matrix
+
+| `matrix.distro` | `matrix.container` | `matrix.codename` |
+|---|---|---|
+| `debian-bookworm` | `debian:bookworm` | `bookworm` |
+| `debian-trixie` | `debian:trixie` | `trixie` |
+| `ubuntu-jammy` | `ubuntu:22.04` | `jammy` |
+| `ubuntu-noble` | `ubuntu:24.04` | `noble` |
+
+`fail-fast: false` — one distro failure must not cancel the other three.
+
+- **Container**: `container: ${{ matrix.container }}`
+- **Runner**: `ubuntu-latest` (host; container provides the distro environment)
+- **Timeout**: `timeout-minutes: 60`
+- **Permissions**: `contents: read`
+- **Dependencies**: none (`needs:` omitted)
+
+### Step sequence
+
+1. Install system build dependencies (apt-get: build-essential, cmake, ninja-build, git,
+   curl, zip, unzip, tar, pkg-config, libgl1-mesa-dev, libx11-dev, libxrandr-dev,
+   libxinerama-dev, libopenal-dev, libvorbis-dev, python3, dpkg-dev, fakeroot)
+2. Checkout (`actions/checkout` SHA-pinned)
+3. Install vcpkg (clone + `git checkout $VCPKG_COMMIT_ID` + bootstrap)
+4. Install vcpkg packages: `$VCPKG_ROOT/vcpkg install irrlicht --triplet x64-linux`
+5. CMake configure with `-DBUILD_TESTING=OFF -DCMAKE_INSTALL_PREFIX=/usr -DAITOWN_ASSETS_DIR=/usr/share/aitown/assets`
+6. CMake build: `cmake --build build --parallel`
+7. CPack DEB: `cpack -G DEB` (run inside `build/`)
+8. Upload `.deb` artifact (`name: aitown-deb-<distro>-<sha>`, `retention-days: 30`)
+
+### CPack DEB requirements in `CMakeLists.txt`
+
+- `CPACK_DEBIAN_PACKAGE_MAINTAINER`: maintainer name and email
+- `CPACK_DEBIAN_PACKAGE_SECTION`: `games`
+- `CPACK_DEBIAN_PACKAGE_PRIORITY`: `optional`
+- `CPACK_DEBIAN_PACKAGE_DEPENDS`: `"libopenal1, libvorbis0a, libgl1, libx11-6, libxrandr2, libxinerama1"`
+- `CPACK_DEBIAN_PACKAGE_SHLIBDEPS`: `ON`
+- `CPACK_DEBIAN_FILE_NAME`: `DEB-DEFAULT`
+- `CPACK_PACKAGING_INSTALL_PREFIX`: `/usr`
+- `install(TARGETS aitown RUNTIME DESTINATION games)` — binary to `/usr/games/aitown`
+- `install(DIRECTORY assets/ DESTINATION share/aitown/assets)` — **trailing slash**: copies contents
+- `install(FILES ${CMAKE_BINARY_DIR}/default.mhr DESTINATION share/openal/hrtf)`
+- `CPACK_GENERATOR` is NOT set; always specify `-G DEB` on the command line
+
+### Gate status
+
+`package-windows` and `package-linux-deb` are NOT in `all-checks-pass` `needs:`. Packaging
+failures must not block PR merges — investigate before cutting a release.

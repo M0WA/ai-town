@@ -89,6 +89,14 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # ============================================================================
+# AITOWN_ASSETS_DIR — compile-time asset path constant.
+# Default: absolute source-tree path (correct for dev builds).
+# Override at configure time for packaging: -DAITOWN_ASSETS_DIR=assets (Windows NSIS)
+# or -DAITOWN_ASSETS_DIR=/usr/share/aitown/assets (Linux DEB).
+# ============================================================================
+set(AITOWN_ASSETS_DIR "${CMAKE_SOURCE_DIR}/assets" CACHE STRING "Runtime assets directory path")
+
+# ============================================================================
 # TESTING DEPENDENCIES — GTest and RapidCheck (via vcpkg)
 # googletest: vcpkg port "gtest" — CMake targets: GTest::gtest, GTest::gtest_main,
 #             GTest::gmock, GTest::gmock_main (namespaced, same as FetchContent).
@@ -96,15 +104,19 @@ endif()
 #             (bare names — upstream installs(EXPORT ...) has no NAMESPACE argument).
 #             rapidcheck_gtest is an INTERFACE library (headers only); no GTest dep.
 # ============================================================================
+if(BUILD_TESTING)
 find_package(GTest CONFIG REQUIRED)
 find_package(rapidcheck CONFIG REQUIRED)
+endif()
 
 # ============================================================================
 # TESTING INFRASTRUCTURE
 # ============================================================================
+if(BUILD_TESTING)
 enable_testing()
 include(GoogleTest)
 include(cmake/AitownTestHelpers.cmake)
+endif()
 
 # ============================================================================
 # LIBRARY STUBS
@@ -143,11 +155,10 @@ target_include_directories(aitown_render
     INTERFACE src/interfaces/      # propagates to consumers (test targets, etc.)
     INTERFACE src/rendering/       # IrrlichtUIBackend.h and IrrlichtRenderer.h for consumers
 )
-# AITOWN_ASSETS_DIR — absolute path expanded at configure time.
-# Correct for both Linux and Windows. Using CMAKE_CURRENT_SOURCE_DIR is incorrect
-# if the target is configured from a subdirectory.
+# AITOWN_ASSETS_DIR — set via CACHE STRING at configure time (see top of file).
+# Default is the source-tree path for dev builds; packaging jobs override via -D.
 target_compile_definitions(aitown_render PRIVATE
-    AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+    AITOWN_ASSETS_DIR="${AITOWN_ASSETS_DIR}"
 )
 # GLEW::GLEW BEFORE Irrlicht — mandatory link order (GLEW symbol duplication mitigation-2).
 # PRIVATE scope: Irrlicht and GLEW headers must NOT propagate to test targets.
@@ -191,7 +202,7 @@ target_include_directories(aitown_audio
     INTERFACE src/audio/           # AudioSystem.h visible to consumers (e.g. main.cpp)
 )
 target_compile_definitions(aitown_audio PRIVATE
-    AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+    AITOWN_ASSETS_DIR="${AITOWN_ASSETS_DIR}"
 )
 # PRIVATE scope: OpenAL, Vorbis, and fmt headers must NOT propagate to test targets.
 # Omitting any of these causes a cmake --build build link failure on Linux and Windows.
@@ -408,7 +419,7 @@ add_executable(aitown_benchmark
 target_link_libraries(aitown_benchmark PRIVATE aitown_render GLEW::GLEW Irrlicht)
 target_include_directories(aitown_benchmark PRIVATE src/ ${CMAKE_SOURCE_DIR})
 target_compile_definitions(aitown_benchmark PRIVATE
-    AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+    AITOWN_ASSETS_DIR="${AITOWN_ASSETS_DIR}"
 )
 # Irrlicht transitive deps (Linux only) — see find_package block above for rationale.
 if(UNIX AND NOT APPLE)
@@ -451,7 +462,7 @@ add_executable(aitown_model_validator
 target_link_libraries(aitown_model_validator PRIVATE aitown_render GLEW::GLEW Irrlicht)
 target_include_directories(aitown_model_validator PRIVATE src/ ${CMAKE_SOURCE_DIR})
 target_compile_definitions(aitown_model_validator PRIVATE
-    AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+    AITOWN_ASSETS_DIR="${AITOWN_ASSETS_DIR}"
 )
 # Irrlicht transitive deps (Linux only) — same rationale as aitown_benchmark.
 if(UNIX AND NOT APPLE)
@@ -480,6 +491,8 @@ if(WIN32)
         COMMENT "Copying GLEW32.dll to aitown_model_validator output"
     )
 endif()
+
+if(BUILD_TESTING)
 
 # ============================================================================
 # TEST TARGETS
@@ -1019,3 +1032,72 @@ target_include_directories(opengl_tests PRIVATE
     ${CMAKE_SOURCE_DIR}
 )
 aitown_add_tests(opengl_tests LABEL "requires-opengl")
+
+endif() # BUILD_TESTING
+
+# ============================================================================
+# INSTALL RULES
+# Windows (NSIS): binary + DLLs + assets/ + default.mhr alongside aitown.exe.
+# Linux (DEB): binary to /usr/games; assets to /usr/share/aitown/assets;
+#              default.mhr to /usr/share/openal/hrtf.
+# ============================================================================
+if(WIN32)
+    install(TARGETS aitown RUNTIME DESTINATION .)
+    # Assets directory — no trailing slash: installs assets/ as a subdirectory alongside exe.
+    install(DIRECTORY assets DESTINATION .)
+    # OpenAL Soft runtime (renamed to soft_oal.dll per Windows naming convention).
+    install(FILES "${CMAKE_BINARY_DIR}/soft_oal.dll" DESTINATION .)
+    # HRTF data file (required for 3D spatial audio; sourced by POST_BUILD copy rule).
+    install(FILES "${CMAKE_BINARY_DIR}/default.mhr" DESTINATION .)
+    # vcpkg runtime DLLs alongside the binary.
+    install(DIRECTORY "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/"
+        DESTINATION .
+        FILES_MATCHING PATTERN "*.dll"
+    )
+else()
+    install(TARGETS aitown RUNTIME DESTINATION games)
+    # Assets directory — trailing slash: copies contents into share/aitown/assets/.
+    install(DIRECTORY assets/ DESTINATION share/aitown/assets)
+    # HRTF data file to OpenAL Soft standard search path.
+    install(FILES "${CMAKE_BINARY_DIR}/default.mhr" DESTINATION share/openal/hrtf)
+endif()
+
+# ============================================================================
+# CPACK — Windows NSIS installer and Linux DEB packages.
+# Generator is NOT set here; always specify -G NSIS or -G DEB on the cpack command line.
+# ============================================================================
+set(CPACK_PACKAGE_NAME "AI Town")
+set(CPACK_PACKAGE_VENDOR "AI Town Contributors")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AI Town — 3D city simulator")
+set(CPACK_PACKAGE_DESCRIPTION
+"AI Town is a Sim City-style 3D city simulator built with C++, Irrlicht, and OpenAL Soft.
+ Design and manage a growing city: zone land, build roads, manage services,
+ and keep your citizens happy.")
+
+# NSIS (Windows installer) settings
+set(CPACK_NSIS_DISPLAY_NAME "AI Town")
+set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")
+set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+set(CPACK_NSIS_CREATE_ICONS_EXTRA
+    "CreateShortcut '$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\AI Town.lnk' '$INSTDIR\\\\aitown.exe'
+     CreateShortcut '$DESKTOP\\\\AI Town.lnk' '$INSTDIR\\\\aitown.exe'")
+set(CPACK_NSIS_DELETE_ICONS_EXTRA
+    "Delete '$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\AI Town.lnk'
+     Delete '$DESKTOP\\\\AI Town.lnk'")
+
+# DEB (Debian/Ubuntu package) settings
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "AI Town Contributors <aitown@example.com>")
+set(CPACK_DEBIAN_PACKAGE_SECTION "games")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libopenal1, libvorbis0a, libgl1, libx11-6, libxrandr2, libxinerama1")
+set(CPACK_DEBIAN_PACKAGE_DESCRIPTION
+"AI Town — 3D city simulator
+ AI Town is a Sim City-style 3D city simulator built with C++, Irrlicht, and OpenAL Soft.
+ Design and manage a growing city: zone land, build roads, manage services,
+ and keep your citizens happy.")
+set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+
+include(CPack)
