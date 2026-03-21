@@ -227,7 +227,7 @@ Z = tileZ * kTileSize
 
 **Declaration**: `kTileSize` is declared as `static constexpr float kTileSize = 10.0f;` directly on `IrrlichtRenderer` in `src/rendering/IrrlichtRenderer.h`. It is used by `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and `placeServiceBuildingMesh()`. Do NOT hardcode the literal `10.0f` at call sites — always use `kTileSize` so that if the tile size changes (e.g., for a future map scale change), all placement calls update in one place.
 
-**Service building tile footprint**: Service buildings occupy a **2×2 tile (20 m × 20 m) footprint** in V1. The origin tile is the bottom-left corner (`tileX, tileZ`); the placed scene node's world X/Z origin is the centre of the 2×2 footprint: `worldX = (tileX + 0.5f) * kTileSize`, `worldZ = (tileZ + 0.5f) * kTileSize`. The mesh is authored at ±10 m half-extent (native world scale, no runtime `setScale()`); it must not visually exceed the 20 m × 20 m footprint at LOD0. All four tiles in the footprint are marked occupied; road adjacency requires at least one road tile edge-adjacent to any footprint tile.
+**Service building tile footprint**: Service buildings occupy a **2×2 tile (20 m × 20 m) footprint** in V1. The origin tile is the bottom-left corner (`tileX, tileZ`); the placed scene node's world X/Z origin is the centre of the 2×2 footprint: `worldX = (tileX + 1.0f) * kTileSize`, `worldZ = (tileZ + 1.0f) * kTileSize` (i.e. `N=2 → N*0.5=1.0`). The mesh is authored at ±10 m half-extent (native world scale, no runtime `setScale()`); it must not visually exceed the 20 m × 20 m footprint at LOD0. All four tiles in the footprint are marked occupied; road adjacency requires at least one road tile edge-adjacent to any footprint tile.
 
 **Zone building footprint constraint**: Zone building (res/com/ind) geometry is authored at **native world scale** — 1 Blender unit = 1 m, no runtime `setScale()`. The local-space half-extent in X and Z is tier-dependent: `low` = ±5 m (10 m × 10 m footprint, 1×1 tile), `med` = ±10 m (20 m × 20 m, 2×2 tiles), `high` = ±15 m (30 m × 30 m, 3×3 tiles). Service buildings are authored at ±10 m half-extent (20 m × 20 m, 2×2 tiles). See the **Native-size authoring convention** table in the Multi-Tile Footprint section below for the authoritative half-extent values. The old ±2 m / `setScale(2.5f)` convention is **retired as of Phase 9** — do NOT author assets at ±2 m. Any geometry exceeding the tier's native half-extent in X/Z will visually intersect adjacent tiles at runtime.
 
@@ -254,11 +254,15 @@ Z = tileZ * kTileSize
 **Collision registration and simulation ownership**: All tiles in the footprint are marked occupied. The **origin tile** is the bottom-left corner (`tileX, tileZ`). The placed scene node's world origin is the **center of the full footprint**:
 
 ```text
-worldX = (tileX + (footprintW - 1) * 0.5f) * kTileSize
-worldZ = (tileZ + (footprintH - 1) * 0.5f) * kTileSize
+worldX = (tileX + N * 0.5f) * kTileSize   where N = footprint tile count per side
+worldZ = (tileZ + N * 0.5f) * kTileSize
 ```
 
-For a 1×1 building, `worldX = tileX * kTileSize` and `worldZ = tileZ * kTileSize` (unchanged from V1 baseline).
+Examples: LOW (N=1) → `(tileX + 0.5f) * 10` (tile centre); MED (N=2) → `(tileX + 1.0f) * 10`; HIGH (N=3) → `(tileX + 1.5f) * 10`.
+
+**Ground quad coverage rule**: Every building B3D must include a ground quad (tarmac, garden, paving, or gravel) that covers the **full N×N tile footprint** — `(-N*5, N*5, -N*5, N*5)` in local space. This prevents bare terrain showing through around the building. In `generate_b3d_models.py` this is enforced via `FOOTPRINT_HALF[tier]`: LOW=5 m, MED=10 m, HIGH=15 m, SVC=10 m. Building structure geometry (walls, roofs) must not exceed the footprint half-extent in X/Z.
+
+**LOW-tier bungalow exception**: Variant 04 (`res_low_04`) is a bungalow whose box was `10×10 m` (matching the tile exactly). It has been reduced to `8×8 m` so the 1 m tarmac border around the building remains visible — consistent with all other LOW-tier variants (`8 m` wide).
 
 **Road adjacency for multi-tile buildings**: At least one road tile must be edge-adjacent (4-directional cardinal, distance = 1) to **any tile in the footprint** — not only the origin tile.
 
