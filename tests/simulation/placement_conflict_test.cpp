@@ -106,6 +106,8 @@ TEST_F(PlacementConflictTest, PlaceZone_OnRoadTile_IsNoOp)
 // ============================================================================
 TEST_F(PlacementConflictTest, PlaceZone_OnZonedTile_IsNoOp)
 {
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(5, 4, 0);
     // Place Residential zone at (4,4).
     sim_->placeZone(4, 4, ZoneType::Residential, DensityTier::Low, 0);
     const float fundsAfterFirst = getTreasury();
@@ -128,6 +130,8 @@ TEST_F(PlacementConflictTest, PlaceZone_OnZonedTile_IsNoOp)
 // ============================================================================
 TEST_F(PlacementConflictTest, PlaceRoad_OnZonedTile_IsNoOp)
 {
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(6, 5, 0);
     // Place Residential zone at (5,5).
     sim_->placeZone(5, 5, ZoneType::Residential, DensityTier::Low, 0);
     const float fundsAfterZone = getTreasury();

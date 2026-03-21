@@ -109,6 +109,18 @@ protected:
         sim_->setTaxRate(ZoneType::Commercial,   0.05f);
         sim_->setTaxRate(ZoneType::Industrial,   0.05f);
 
+        // Phase 11h: placeZone requires a road within 3 Manhattan tiles.
+        // Roads at z=1 every 3 tiles cover zones at z=0 (x=0..19).
+        for (int x = 0; x <= 18; x += 3) {
+            sim_->placeRoad(x, 1, 0);
+        }
+        // Roads at z=4 cover zones at z=5 (x=0..4).
+        sim_->placeRoad(0, 4, 0);
+        sim_->placeRoad(3, 4, 0);
+        // Roads at z=9 cover zones at z=10 (x=0..4).
+        sim_->placeRoad(0, 9, 0);
+        sim_->placeRoad(3, 9, 0);
+
         // Place 15 High-density Residential zones (capacity 1000 each = 15000 total).
         // At 10% growth cap: 1000 * 0.10 = 100 pop/tile/tick;
         // 15 tiles * 100 = 1500 pop/tick; crosses 1000 in 1 tick.
@@ -281,6 +293,10 @@ TEST_F(PopulationTest, CityRating_100KPopulation_NoRatingTransition_NoStingerFla
     //   100K reached in ~5 ticks.
     //   Note: High density requires unlock (threshold_3 = $100K × 0.70 Easy scale = $70K).
     //   Easy starting funds = $1M > $70K → density unlock happens quickly.
+    // Phase 11h: placeZone requires a road within 3 Manhattan tiles.
+    for (int x = 0; x <= 198; x += 3) { local_sim->placeRoad(x, 1, 0); }
+    for (int x = 0; x <= 48; x += 3) { local_sim->placeRoad(x, 4, 0); }
+    for (int x = 0; x <= 48; x += 3) { local_sim->placeRoad(x, 9, 0); }
     for (int x = 0; x < 200; ++x) {
         local_sim->placeZone(x, 0, ZoneType::Residential, DensityTier::Low);
     }
@@ -471,6 +487,10 @@ TEST_F(PopulationTest, CityRating_VillageToTown_Transition_FiresStingerNotificat
     local_sim->setTaxRate(ZoneType::Industrial,  0.05f);
 
     // Place residential zones sufficient to cross 1000 population.
+    // Phase 11h: placeZone requires a road within 3 Manhattan tiles.
+    for (int x = 0; x <= 18; x += 3) { local_sim->placeRoad(x, 1, 0); }
+    local_sim->placeRoad(0, 4, 0); local_sim->placeRoad(3, 4, 0);
+    local_sim->placeRoad(0, 9, 0); local_sim->placeRoad(3, 9, 0);
     for (int x = 0; x < 20; ++x) {
         local_sim->placeZone(x, 0, ZoneType::Residential, DensityTier::Low);
     }

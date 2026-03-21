@@ -138,6 +138,8 @@ protected:
 //        at base 50 → run 2nd tick → desirability decreases by 5.
 // ---------------------------------------------------------------------------
 TEST_F(ServiceTest, ServiceCoverage_NewlyPlacedTile_NoPenaltyOnFirstTick) {
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(11, 10, 0);
     // Place a residential zone at (10, 10) — no service buildings anywhere.
     sim_->placeZone(10, 10, ZoneType::Residential, DensityTier::Low);
 
@@ -175,6 +177,8 @@ TEST_F(ServiceTest, PowerCoverage_ConnectedTiles_AreCovered) {
     // serviceTypeInt 3 = PowerPlant (matches CitySimulation::ServiceType enum order)
     cs()->addServiceBuilding(0, 0, 3);
 
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(2, 0, 0);
     // Place residential adjacent to the power plant.
     sim_->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
 
@@ -225,6 +229,11 @@ TEST_F(ServiceTest, PowerCoverage_ZeroTilesInRange_ReturnsNASentinel) {
 TEST_F(ServiceTest, PowerCoverage_DeficitDegradation_ReducesBFSRadius) {
     // Power plant at origin; residential 1 tile away (BFS depth = 1).
     cs()->addServiceBuilding(0, 0, 3);  // PowerPlant
+    // Phase 11h: road at (3,0) satisfies placeZone proximity (dist 2 from (1,0)).
+    // Placed at (3,0) not (2,0) so BFS from power plant stays at maxDepth=1:
+    // (0,0)→(1,0)[zone,depth1]; (2,0) is empty so BFS can't reach (3,0)[road].
+    // Brownout cutoff = floor(1 × 0.70) = 0 → tile at depth 1 loses coverage. ✓
+    sim_->placeRoad(3, 0, 0);
     sim_->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
 
     // Run initial tick to establish baseline coverage.
@@ -265,6 +274,8 @@ TEST_F(ServiceTest, PowerCoverage_MultipleBuildings_NoStacking) {
     cs()->addServiceBuilding(0, 0, 3);   // PowerPlant 1
     cs()->addServiceBuilding(10, 0, 3);  // PowerPlant 2
 
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(6, 0, 0);
     sim_->placeZone(5, 0, ZoneType::Residential, DensityTier::Low);
 
     runTicks(1);
@@ -299,6 +310,8 @@ TEST_F(ServiceTest, PowerCoverage_MultipleBuildings_NoStacking) {
 TEST_F(ServiceTest, ServiceCoverage_DeficitRecovery_RestoresFullRadius) {
     // Fire station at (0,0); residential tile at (5,0) within fire radius (80 tiles).
     cs()->addServiceBuilding(0, 0, 0);  // FireStation (serviceTypeInt=0)
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(6, 0, 0);
     sim_->placeZone(5, 0, ZoneType::Residential, DensityTier::Low);
 
     // Baseline: tile is covered.
@@ -331,6 +344,8 @@ TEST_F(ServiceTest, ServiceCoverage_DeficitRecovery_RestoresFullRadius) {
     ASSERT_NE(cs2, nullptr);
 
     cs2->addServiceBuilding(0, 0, 0);  // FireStation
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    controlled_sim->placeRoad(6, 0, 0);
     controlled_sim->placeZone(5, 0, ZoneType::Residential, DensityTier::Low);
 
     const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
@@ -363,6 +378,10 @@ TEST_F(ServiceTest, ServiceCoverage_DeficitRecovery_RestoresFullRadius) {
     // Run a recovery tick: set high tax rate so revenue exceeds upkeep (restores surplus > -10%).
     controlled_sim->setTaxRate(ZoneType::Residential, 0.25f);
     // Place many R tiles to generate revenue that exceeds fire station upkeep (500/tick).
+    // Phase 11h: place roads at z=1 every 3 tiles to satisfy road proximity for zones at z=0.
+    for (int rx = 20; rx <= 38; rx += 3) {
+        controlled_sim->placeRoad(rx, 1, 0);
+    }
     for (int x = 0; x < 20; ++x) {
         controlled_sim->placeZone(x + 20, 0, ZoneType::Residential, DensityTier::Low);
     }
@@ -614,6 +633,8 @@ TEST_F(ServiceTest, ServiceCoverage_Fire_Degrades_Independently_AtDeficit) {
     ASSERT_NE(cs2, nullptr);
 
     cs2->addServiceBuilding(0, 0, 0);  // FireStation only
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    fire_sim->placeRoad(6, 0, 0);
     fire_sim->placeZone(5, 0, ZoneType::Residential, DensityTier::Low);
 
     const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
@@ -675,6 +696,8 @@ TEST_F(ServiceTest, ServiceCoverage_Police_Degrades_Independently_AtDeficit) {
     ASSERT_NE(cs2, nullptr);
 
     cs2->addServiceBuilding(0, 0, 1);  // PoliceStation only (serviceTypeInt=1)
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    police_sim->placeRoad(6, 0, 0);
     police_sim->placeZone(5, 0, ZoneType::Residential, DensityTier::Low);
 
     const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
@@ -717,6 +740,8 @@ TEST_F(ServiceTest, ServiceCoverage_Police_Degrades_Independently_AtDeficit) {
 // ============================================================================
 TEST_F(ServiceTest, PlaceServiceBuilding_WaterTower_ReducesTreasury)
 {
+    // Phase 11h: placeServiceBuilding requires adjacent road to 2×2 footprint at (5,5).
+    sim_->placeRoad(4, 5, 0);
     float before = sim_->getTreasuryBalance();
     sim_->placeServiceBuilding(5, 5, ServiceBuildingType::WaterTower, 0);
     float after = sim_->getTreasuryBalance();
@@ -732,6 +757,8 @@ TEST_F(ServiceTest, PlaceServiceBuilding_WaterTower_ReducesTreasury)
 // ============================================================================
 TEST_F(ServiceTest, PlaceServiceBuilding_FireStation_ReducesTreasury)
 {
+    // Phase 11h: placeServiceBuilding requires adjacent road to 2×2 footprint at (3,3).
+    sim_->placeRoad(2, 3, 0);
     float before = sim_->getTreasuryBalance();
     sim_->placeServiceBuilding(3, 3, ServiceBuildingType::FireStation, 0);
     float after = sim_->getTreasuryBalance();
@@ -746,6 +773,8 @@ TEST_F(ServiceTest, PlaceServiceBuilding_FireStation_ReducesTreasury)
 // ============================================================================
 TEST_F(ServiceTest, PlaceServiceBuilding_PoliceStation_ReducesTreasury)
 {
+    // Phase 11h: placeServiceBuilding requires adjacent road to 2×2 footprint at (2,2).
+    sim_->placeRoad(1, 2, 0);
     float before = sim_->getTreasuryBalance();
     sim_->placeServiceBuilding(2, 2, ServiceBuildingType::PoliceStation, 0);
     float after = sim_->getTreasuryBalance();
@@ -862,6 +891,9 @@ TEST_F(ServiceTest, ServiceAlert_PoliceAlert_FiredWhenNoFireStation)
 // ============================================================================
 TEST_F(ServiceTest, QueryTile_WithWaterTower_ReturnsCoverageData)
 {
+    // Phase 11h: placeServiceBuilding (2×2 footprint at (0,0)) needs adjacent road.
+    // Road at (2,0) is adjacent to footprint tile (1,0) and within dist 1 of zone (1,0).
+    sim_->placeRoad(2, 0, 0);
     // Place a WaterTower.
     sim_->placeServiceBuilding(0, 0, ServiceBuildingType::WaterTower, 0);
 

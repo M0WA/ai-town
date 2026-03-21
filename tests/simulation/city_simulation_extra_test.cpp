@@ -261,6 +261,8 @@ TEST_F(CoverageTest, GetBuildingVariantCounter_ZeroBeforePlacement) {
 
 TEST_F(CoverageTest, GetBuildingVariantCounter_IncrementsAfterPlacement) {
     EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+    // Phase 11h: placeZone requires a road within 3 tiles. Road at (0,1) covers both zones.
+    sim_->placeRoad(0, 1, 0);
     sim_->placeZone(0, 0, ZoneType::Residential, DensityTier::Low);
     // zone=0 (Residential), tier=0 (Low) → index 0*3+0 = 0
     EXPECT_EQ(cs()->getBuildingVariantCounter(0, 0), 1);
@@ -279,10 +281,15 @@ TEST_F(CoverageTest, GetBuildingVariantCounter_OutOfRange_ReturnsZero) {
 TEST_F(CoverageTest, GetBuildingVariantCounter_AllZonesTiers) {
     EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
     // Commercial/Medium → zone=1, tier=1 → index 4
+    // Phase 11h: Medium=2×2 footprint at (2,0)–(3,1). Road at (1,0) is adjacent.
+    sim_->placeRoad(1, 0, 0);
     sim_->placeZone(2, 0, ZoneType::Commercial,  DensityTier::Medium);
     EXPECT_EQ(cs()->getBuildingVariantCounter(1, 1), 1);
     // Industrial/High → zone=2, tier=2 → index 8
-    sim_->placeZone(3, 0, ZoneType::Industrial,  DensityTier::High);
+    // Phase 11h: High=3×3 footprint. Move to (5,0) to avoid overlap with Medium at (2,0)–(3,1).
+    // Road at (4,0) is adjacent to (5,0).
+    sim_->placeRoad(4, 0, 0);
+    sim_->placeZone(5, 0, ZoneType::Industrial,  DensityTier::High);
     EXPECT_EQ(cs()->getBuildingVariantCounter(2, 2), 1);
 }
 
@@ -349,6 +356,8 @@ TEST_F(CoverageTest, EstimateMonthlyUpkeep_AfterGracePeriod_ReflectsServiceAndRo
 TEST_F(NiceCoverageTest, BudgetSurplusPct_ZeroRevenue_WithExpenses_ReturnsNegativeOne) {
     // Place a service building (creates upkeep) but no zones (no revenue).
     // After grace period expires, computeBudgetSurplusPct(0, expenses>0) must return -1.0f.
+    // Phase 11h: placeServiceBuilding requires adjacent road to 2×2 footprint at (0,0).
+    cs()->placeRoad(2, 0, 0);
     cs()->placeServiceBuilding(0, 0, ServiceBuildingType::FireStation);
     clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
     runTicks(1);
@@ -373,6 +382,8 @@ TEST_F(NiceCoverageTest, BudgetSurplusPct_ZeroRevenue_ZeroExpenses_NoDeficit) {
 TEST_F(NiceCoverageTest, GameOverTick_Month1AutoSlowed_DoesNotReSlowIfAlreadyX1) {
     // Prime the scenario: city is in a -50%+ deficit outside grace period.
     // A FireStation creates upkeep but no revenue (no zones).
+    // Phase 11h: placeServiceBuilding requires adjacent road to 2×2 footprint at (0,0).
+    cs()->placeRoad(2, 0, 0);
     cs()->placeServiceBuilding(0, 0, ServiceBuildingType::FireStation);
     clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
     sim_->setSpeed(SpeedMultiplier::x1);
@@ -392,7 +403,11 @@ TEST_F(NiceCoverageTest, GameOverTick_Month1AutoSlowed_DoesNotReSlowIfAlreadyX1)
 // (removing upkeep) and verify the counter resets to 0.
 TEST_F(NiceCoverageTest, GameOverTick_Sub50PctDeficit_ResetsStreakCounter) {
     // Phase 1: build up a deficit streak.
-    cs()->placeServiceBuilding(3, 3, ServiceBuildingType::FireStation);
+    // Use addServiceBuilding backdoor (bypasses road proximity) to avoid placing a
+    // road that would leave road_maintenance_cost (10/tick) after demolition.
+    // If a road were present, budget after demolition = -10/tick (road maintenance)
+    // → surplus_pct ≤ -50% → counter increments instead of resetting to 0.
+    cs()->addServiceBuilding(3, 3, 0);  // 0 = FireStation
     clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
     runTicks(2);
     EXPECT_GE(sim_->getConsecutiveDeficitMonths(), 1)
@@ -401,7 +416,7 @@ TEST_F(NiceCoverageTest, GameOverTick_Sub50PctDeficit_ResetsStreakCounter) {
     // Phase 2: remove the expense source so budget becomes neutral (surplus = 0 > -50%).
     sim_->demolishTile(3, 3);
 
-    // One more tick: no service upkeep, no road maintenance, no revenue → surplus = 0 > -50%.
+    // One more tick: no service upkeep, no road, no revenue → surplus = 0 > -50%.
     runTicks(1);
 
     // The doGameOverTick else-branch (surplus > -0.50f) resets the counter.
@@ -543,6 +558,8 @@ TEST_F(CoverageTest, PlaceRoad_AlreadyRoad_NoDoubleSignal) {
 
 TEST_F(CoverageTest, DemolishTile_ServiceBuilding_RemovesServiceBuildingMesh) {
     EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+    // Phase 11h: placeServiceBuilding requires adjacent road to 2×2 footprint at (3,3).
+    sim_->placeRoad(2, 3, 0);
     sim_->placeServiceBuilding(3, 3, ServiceBuildingType::WaterTower);
 
     // demolishTile on a service-building-only tile must call removeServiceBuildingMesh.
@@ -554,6 +571,8 @@ TEST_F(CoverageTest, DemolishTile_ServiceBuilding_RemovesServiceBuildingMesh) {
 
 TEST_F(CoverageTest, DemolishTile_ZonedTile_RemovesBuildingMesh) {
     EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(5, 4, 0);
     sim_->placeZone(4, 4, ZoneType::Residential, DensityTier::Low);
 
     EXPECT_CALL(renderer_, removeBuildingMesh(4, 4)).Times(1);
@@ -611,6 +630,10 @@ TEST_F(CoverageTest, DemolishTile_RoadWithSignal_SignalRemoved) {
 TEST_F(CoverageTest, PlaceServiceBuilding_WithEarthworksCost_FiresEarthworksSFX) {
     const int earthworksCost = 500;
 
+    // Phase 11h: placeServiceBuilding requires adjacent road to 2×2 footprint at (2,2).
+    EXPECT_CALL(audio_, playPositionalSound(SFX_ROAD_BUILD, _, _, _)).Times(AnyNumber());
+    sim_->placeRoad(1, 2, 0);
+
     // Both SFX_EARTHWORKS and SFX_BUILD_PLACE must fire (in any order).
     EXPECT_CALL(audio_, playPositionalSound(SFX_EARTHWORKS, _, _, _)).Times(1);
     EXPECT_CALL(audio_, playPositionalSound(SFX_BUILD_PLACE, _, _, _)).Times(1);
@@ -619,6 +642,10 @@ TEST_F(CoverageTest, PlaceServiceBuilding_WithEarthworksCost_FiresEarthworksSFX)
 }
 
 TEST_F(CoverageTest, PlaceServiceBuilding_ZeroEarthworks_OnlyBuildPlaceSFX) {
+    // Phase 11h: placeServiceBuilding requires adjacent road to 2×2 footprint at (7,7).
+    EXPECT_CALL(audio_, playPositionalSound(SFX_ROAD_BUILD, _, _, _)).Times(1);
+    sim_->placeRoad(6, 7, 0);
+
     // earthworksCostOverride == 0 → only SFX_BUILD_PLACE, no SFX_EARTHWORKS.
     EXPECT_CALL(audio_, playPositionalSound(SFX_EARTHWORKS, _, _, _)).Times(0);
     EXPECT_CALL(audio_, playPositionalSound(SFX_BUILD_PLACE, _, _, _)).Times(1);
@@ -647,6 +674,8 @@ TEST_F(CoverageTest, QueryTile_RoadTile_IsRoadTrue) {
 
 TEST_F(CoverageTest, QueryTile_ZonedTile_AllFieldsPopulated) {
     EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+    // Phase 11h: placeZone requires a road within 3 tiles. Medium=2×2 footprint at (4,4)–(5,5).
+    sim_->placeRoad(3, 4, 0);
     sim_->placeZone(4, 4, ZoneType::Commercial, DensityTier::Medium);
     QueryResult r = sim_->queryTile(4, 4);
     EXPECT_TRUE(r.isZoned);
@@ -707,6 +736,8 @@ TEST_F(DegradationCoverageTest, RadialCoverage_DegradedBuilding_HalvedRadius) {
     // Normal: 500 m <= 800 m → covered.
     // Degraded: 500 m <= 400 m (halved) → NOT covered.
     cs()->addServiceBuilding(0, 0, 0);  // 0 = FireStation
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(51, 0, 0);
     cs()->placeZone(50, 0, ZoneType::Residential, DensityTier::Low);
 
     // Confirm within normal radius before any degradation.
@@ -744,6 +775,8 @@ TEST_F(NiceCoverageTest, PowerCoverage_DisconnectedTile_RadialFallback) {
     // tiles in between. BFS cannot reach (5,0) via placed tiles.
     // The fallback radial path must cover (5,0) if it is within coverage radius.
     cs()->addServiceBuilding(0, 0, 3);  // 3 = PowerPlant
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    cs()->placeRoad(6, 0, 0);
     cs()->placeZone(5, 0, ZoneType::Residential, DensityTier::Low);
 
     // Tile (5,0) is 5 tiles from plant at (0,0). Fire station radius = 800 m, tile = 10 m each.
@@ -785,6 +818,8 @@ TEST_F(CoverageTest, PlaceZone_OverExistingRoad_DecrementsRoadCount) {
 // ===========================================================================
 
 TEST_F(NiceCoverageTest, BudgetLineItems_ServiceUpkeepAfterGracePeriod) {
+    // Phase 11h: placeServiceBuilding requires adjacent road to 2×2 footprint at (0,0).
+    cs()->placeRoad(2, 0, 0);
     cs()->placeServiceBuilding(0, 0, ServiceBuildingType::FireStation);
     clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
     runTicks(1);

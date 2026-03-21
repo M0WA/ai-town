@@ -966,6 +966,8 @@ TEST_F(EconomyTest, UndoSystem_ExpiryTime_ZeroAtStart) {
 TEST_F(EconomyTest, UndoSystem_PlaceZone_PendingActionSet) {
     // placeZone() triggers SFX_BUILD_PLACE — permit any audio calls.
     EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(1, 0, 0);
     sim_->placeZone(0, 0, ZoneType::Commercial, DensityTier::Low);
     EXPECT_TRUE(sim_->hasUndoPendingAction());
 }
@@ -975,6 +977,8 @@ TEST_F(EconomyTest, UndoSystem_PlaceZone_PendingActionSet) {
 TEST_F(EconomyTest, UndoSystem_AfterUndo_TileReverts) {
     // placeZone() triggers SFX_BUILD_PLACE — permit any audio calls.
     EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(4, 3, 0);
     sim_->placeZone(3, 3, ZoneType::Residential, DensityTier::Low);
     EXPECT_TRUE(sim_->queryTile(3, 3).isZoned);
 
@@ -1067,6 +1071,8 @@ TEST_F(EconomyTest, QueryTile_UnzonedTile_IsZonedFalse) {
 TEST_F(EconomyTest, QueryTile_PlacedZone_IsZonedTrue) {
     // placeZone() triggers SFX_BUILD_PLACE audio callback — permit it.
     EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(11, 10, 0);
     sim_->placeZone(10, 10, ZoneType::Residential, DensityTier::Low);
     QueryResult r = sim_->queryTile(10, 10);
     EXPECT_TRUE(r.isZoned);
@@ -1543,6 +1549,9 @@ TEST_F(EconomyTest, ForcedLoan_WithUtilityRevenue_ExercisesEconomyPath)
     // StrictMock requires explicit allowance for any playSound calls during tick().
     EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
 
+    // Phase 11h: placeServiceBuilding requires adjacent road; placeZone requires road within 3.
+    // Road at (2,0): adjacent to footprint tile (1,0) of WaterTower; dist 1 from zone at (1,0).
+    sim_->placeRoad(2, 0, 0);
     // Place WaterTower + residential zone so utility fee sets m_firstRevenueTicked.
     sim_->placeServiceBuilding(0, 0, ServiceBuildingType::WaterTower, 0);
     sim_->placeZone(1, 0, ZoneType::Residential, DensityTier::Low, 0);
@@ -1581,6 +1590,8 @@ TEST_F(EconomyTest, PlaceServiceBuilding_WithEarthworks_PlaysEarthworksSFX)
     EXPECT_CALL(audio_, playPositionalSound(SFX_BUILD_PLACE, _, _, _)).Times(AnyNumber());
     EXPECT_CALL(audio_, playPositionalSound(SFX_EARTHWORKS, _, _, _)).Times(AtLeast(1));
 
+    // Phase 11h: placeServiceBuilding requires adjacent road to 2×2 footprint at (6,6).
+    sim_->placeRoad(5, 6, 0);
     sim_->placeServiceBuilding(6, 6, ServiceBuildingType::FireStation, 500);
 }
 
@@ -1628,6 +1639,10 @@ TEST_F(EconomyTest, PlaceZone_WithEarthworksCost_PlaysEarthworksSFX)
     // Specific expectation registered LAST → checked first by GMock (LIFO).
     EXPECT_CALL(audio_, playPositionalSound(SFX_EARTHWORKS, _, _, _)).Times(AtLeast(1));
 
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(4, 3, 0);
+    // Advance clock past 100ms SFX cooldown so placeZone can fire SFX_EARTHWORKS.
+    clock_.advance(0.2);
     // earthworksCostOverride=500 → fires the earthworks SFX path.
     sim_->placeZone(3, 3, ZoneType::Commercial, DensityTier::Low, 500);
 }
