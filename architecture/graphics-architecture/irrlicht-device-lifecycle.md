@@ -475,9 +475,9 @@ VERIFIED by binary analysis of `CMeshSceneNode.cpp.o` extracted from `libIrrlich
 Caller MUST call `->drop()` on `newLODMesh` after `setMesh()`. See `scene-graph-ownership.md`.
 Phase 5 TerrainChunk work is UNBLOCKED.
 
-## Test Guard — `shader_stub_compile_test` Skip vs. Fail
+## Test Guard — `shader_loading_test` Skip vs. Fail
 
-The `GTEST_SKIP()` guard in `shader_stub_compile_test` must only activate when
+The `GTEST_SKIP()` guard in `shader_loading_test` must only activate when
 `createDevice()` returns null AND the `DISPLAY` environment variable is unset.
 Under `xvfb-run` (where `DISPLAY` is set), a null return from
 `createDevice(EDT_OPENGL)` is a test FAILURE (`FAIL()`), not a skip — it

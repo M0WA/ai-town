@@ -61,11 +61,13 @@ test:
 	ctest --test-dir $(BUILD_DIR) -LE "integration|requires-opengl" --output-on-failure
 	ctest --test-dir $(BUILD_DIR) -L "^integration$$" --output-on-failure
 	lcov --capture --directory $(BUILD_DIR) --base-directory . \
-	     --ignore-errors mismatch,inconsistent,version \
+	     --gcov-tool gcov-13 \
+	     --ignore-errors mismatch,inconsistent,version,empty,empty \
 	     --output-file $(COVERAGE_INFO)
 	lcov --remove $(COVERAGE_INFO) \
-	     --ignore-errors unused \
+	     --ignore-errors unused,inconsistent \
 	     '/usr/*' \
+	     "*/build/vcpkg_installed/*" \
 	     "*/.fetchcontent_cache/*" \
 	     '*/tests/*' \
 	     '*/mock_*.h' '*/mock_*.cpp' \

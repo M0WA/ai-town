@@ -170,16 +170,9 @@ DXT1 block size: 8 bytes per 4×4 pixel block. DXT5 block size: 16 bytes per 4×
 Mip N dimensions: `max(1, floor(W / 2^N)) × max(1, floor(H / 2^N))`, rounded up to the
 nearest 4-pixel block boundary.
 
-**Regenerating all DDS stubs** — after any change to `tools/generate_dds_stubs.py` (or if
-stubs are suspected truncated), regenerate all assets from the repository root:
-
-```bash
-python3 tools/generate_dds_stubs.py
-```
-
-This command overwrites every stub DDS file tracked by the script. Commit the regenerated files
-to ensure CI and other contributors receive complete mip chains. **Do not manually edit DDS
-binary files** — always regenerate via the script.
+**DDS asset integrity** — if a DDS file is suspected truncated or corrupted, verify its file
+size against the reference values in the table above and regenerate via the production export
+pipeline (`tools/export_textures.py`). **Do not manually edit DDS binary files.**
 
 **Splat map (RGBA8 UNORM — NOT DDS)**:
 Author as a plain RGBA PNG with R channel filled to 255, G/B/A channels filled to 0 (initial state: 100% grass). Splat maps are uploaded at runtime via `glTexImage2D` with `GL_RGBA8` internal format — they are never compressed to DDS. Do NOT run `export_textures.py` or `nvcompress` on splat map source files. The `TextureCache` splat map pool (third pool, distinct from the linear and sRGB pools) loads these RGBA PNGs directly. The `--validate-only` flag in `export_textures.py` does not apply to splat maps.

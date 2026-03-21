@@ -70,10 +70,8 @@ uploads a **black surface** for each missing level. Symptoms:
   common symptom when only the base level was written by a buggy generator.
 
 There is no GL error, assertion, or log message for this failure. It must be caught at
-asset-authoring time. After any change to `tools/generate_dds_stubs.py`, regenerate all stubs
-from the repository root (`python3 tools/generate_dds_stubs.py`) and verify file sizes match
-the reference values in `architecture/asset-standards/2d-texture-standards.md`
-§DDS Mip Chain Integrity.
+asset-authoring time. Verify that file sizes match the reference values in
+`architecture/asset-standards/2d-texture-standards.md` §DDS Mip Chain Integrity.
 
 **Internal format derived from DDS FourCC — NOT from path suffix**: `loadSRGB()` derives the sRGB GL internal format from the actual FourCC read from the DDS file header, not from the path suffix. This avoids mismatches when the filename doesn't end in `_d` or `_billboard` (e.g., `road_asphalt_tileable.dds` which is DXT5 but not a billboard). Path suffix is used ONLY for wrap mode (`_billboard` → `GL_CLAMP_TO_EDGE`, others → `GL_REPEAT`). Format mapping: `DXT1 (0x31545844)` → `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`; `DXT5 (0x35545844)` → `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`. Passing the wrong internal format to `glCompressedTexImage2D` (e.g., DXT1 format with DXT5 data) produces silent GL errors and garbled texture output.
 

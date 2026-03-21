@@ -589,7 +589,6 @@ target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
 # ----------------------------------------------------------------------------
 add_executable(terrain_tests
     tests/terrain/terrain_smoke_test.cpp
-    tests/terrain/terrain_stub.cpp        # Phase 3: compile-only stub for all terrain headers
     tests/terrain/terrain_chunk_test.cpp  # Phase 5: TerrainChunk vertex count + bounding box tests
     tests/terrain/terrain_system_test.cpp # Phase 5: TerrainSystem rebuild deque + hysteresis tests
     tests/terrain/texture_cache_test.cpp  # Phase 5: TextureCache unit tests (EDT_NULL guard + ref counts)
@@ -621,7 +620,7 @@ if(UNIX AND NOT APPLE)
     endif()
 endif()
 # tests/simulation/ — ManualClock (manual_clock.h) and MockRenderer (mock_renderer.h)
-# tests/terrain/   — MockTerrainRNG (mock_terrain_rng.h) and terrain_stub.cpp includes
+# tests/terrain/   — MockTerrainRNG (mock_terrain_rng.h)
 # src/terrain/     — ITerrainRNG.h (included by mock_terrain_rng.h)
 # src/rendering/   — TextureCache.h (referenced by texture_cache_test.cpp)
 # src/interfaces/  — IClock.h, IRenderer.h (propagated via aitown_terrain PUBLIC but
@@ -975,20 +974,16 @@ target_sources(integration_tests PRIVATE
 # ----------------------------------------------------------------------------
 # opengl_tests — sRGB upload, setMesh grab/drop smoke test, shader compilation
 # Must run under xvfb-run on Linux.
-# Phase 0: ONLY stub_succeed.cpp in source list.
-# Phase 2 atomicity commit adds: lod_swap_smoke_test.cpp (GTEST_SKIP body), ShaderLoadingTest body,
-# 6 GLSL stubs, and getGPUProgrammingServices() null check — all four items in one commit.
 # ----------------------------------------------------------------------------
 add_executable(opengl_tests
-    tests/rendering/stub_succeed.cpp           # Phase 0 stub — remove when real tests cover target
-    tests/rendering/shader_stub_compile_test.cpp  # Phase 1+2: shader stub compile check
-    tests/rendering/lod_swap_smoke_test.cpp    # Phase 2: LOD swap grab/drop contract smoke test
+    tests/rendering/shader_loading_test.cpp           # shader compilation smoke test
+    tests/rendering/lod_swap_smoke_test.cpp           # Phase 2: LOD swap grab/drop contract smoke test
     tests/rendering/building_lod_swap_test.cpp        # Phase 9: LOD swap bounding box integration test
     tests/rendering/building_srgb_fallback_test.cpp   # Phase 9: building facade sRGB fallback test
-    tests/rendering/cloud_plane_test.cpp       # Phase 10b: cloud plane init test (EDT_OPENGL + EDT_NULL)
+    tests/rendering/cloud_plane_test.cpp              # Phase 10b: cloud plane init test (EDT_OPENGL + EDT_NULL)
     tests/rendering/texture_cache_atlas_test.cpp      # Phase 11e: buildings atlas GL_TEXTURE_MAX_LEVEL check
 )
-# Irrlicht and GLEW::GLEW MUST be linked directly: shader_stub_compile_test.cpp includes
+# Irrlicht and GLEW::GLEW MUST be linked directly: shader_loading_test.cpp includes
 # <irrlicht.h> and <GL/glew.h>; aitown_render links both PRIVATE so their include paths
 # do NOT propagate to consumers (same rationale as integration_tests linking Irrlicht directly).
 target_link_libraries(opengl_tests PRIVATE

@@ -33,9 +33,8 @@ building texture content 2026-03-04), `graphics-dev-irrlicht` (2026-02-26), and
 - Mip chain: 5-level mandatory (`GL_TEXTURE_MAX_LEVEL = 4`; 4096→2048→1024→512→256). All five mip
   levels MUST be present as data in the DDS file — a file whose `dwMipMapCount` field declares
   5 mips but contains only mip 0 data is truncated and causes `TextureCache::loadSRGB()` to
-  render a black atlas. Regenerate stubs with `python3 tools/generate_dds_stubs.py` from the
-  repo root. See `architecture/asset-standards/2d-texture-standards.md` §DDS Mip Chain
-  Integrity for reference byte sizes and the truncation failure mode.
+  render a black atlas. See `architecture/asset-standards/2d-texture-standards.md` §DDS Mip Chain
+  Integrity for reference byte sizes, the truncation failure mode, and how to verify assets.
 - Per-cell usable area: 496×496 px (8 px border on each edge, per 2d-texture-standards.md)
 - All building LOD0/LOD1 UV channel 0 maps into this atlas
 
@@ -114,13 +113,13 @@ area of their own cell without sub-region partitioning constraints.
 
 Five cells in row 5 (cols 1–5) are allocated as ground-feature textures:
 
-| Cell | Name | Base colour | Notes |
-|---|---|---|---|
-| (5,1) | `ground_garden` | mid-green (≈ RGB 80,130,60) | Grass/garden patch for residential lots |
-| (5,2) | `ground_pool` | pool-blue (≈ RGB 70,160,200) | Pool water for res_high_01 and com_high_04 |
-| (5,3) | `ground_paving` | light grey (≈ RGB 190,185,178) | Concrete forecourt for commercial/service |
-| (5,4) | `ground_tarmac` | dark asphalt (≈ RGB 55,55,58) | Industrial tarmac lot |
-| (5,5) | `ground_gravel` | beige/tan (≈ RGB 180,165,130) | Gravel/service yard for power plant and water tower |
+| Cell | Name | Base colour | Zone default | Notes |
+|---|---|---|---|---|
+| (5,1) | `ground_garden` | mid-green (≈ RGB 80,130,60) | Residential | Default ground plate for all residential zones |
+| (5,2) | `ground_pool` | pool-blue (≈ RGB 70,160,200) | — (variant override) | Pool water for res_high_01 and com_high_04 only; not a zone-wide default |
+| (5,3) | `ground_paving` | light grey (≈ RGB 190,185,178) | Commercial, Industrial | Default ground plate for commercial and industrial zones (gray concrete forecourt) |
+| (5,4) | `ground_tarmac` | dark asphalt (≈ RGB 55,55,58) | — (variant override) | Artistic tarmac choice for specific variants only (e.g., urban residential forecourts, auto garage forecourts); no longer the industrial zone default |
+| (5,5) | `ground_gravel` | beige/tan (≈ RGB 180,165,130) | — (service only) | Gravel/service yard for service buildings only (power plant, water tower) |
 
 All ground-feature quads sit at `y = 0.01` (1 cm above terrain) to prevent depth-buffer conflict
 with the terrain mesh at `y = 0`.

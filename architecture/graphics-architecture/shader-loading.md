@@ -176,28 +176,20 @@ if (!gpu) {
 
   Additionally, use the GLSL compatibility built-ins `gl_Vertex`, `gl_Normal`, and `gl_MultiTexCoord0` directly instead of user-defined `in` variables — this avoids attribute-location ambiguity when the GLSL linker assigns user-defined `in` variable locations in implementation-defined order (Irrlicht's `COpenGLSLMaterialRenderer` does not call `glBindAttribLocation`, so named `in` variables may not land at the compatibility alias locations 0/2/8).
 
-## Phase 2 GLSL Stub Files — Co-Landing Requirement
+## GLSL Shader Files
 
-The Phase 2 GLSL stub files MUST be co-landed in the same commit as `shader_stub_compile_test.cpp` that asserts they can be found and compiled. This is a hard requirement, not a convention.
+The following GLSL shader files must always be present in the repository:
 
-**Rationale**: `shader_stub_compile_test.cpp` calls `addHighLevelShaderMaterialFromFiles()` with paths to the Phase 2 lighting shader stubs. If those files are absent on disk, Irrlicht returns immediately with a `−1` material type and the test fails with a file-not-found error. Committing the test without the GLSL files causes an immediate CI failure on every subsequent push until the files are added — this is a broken-tree state and must not enter the branch.
+- `assets/shaders/lighting.vert` — passthrough vertex shader (`#version 130`)
+- `assets/shaders/lighting.frag` — constant color fragment shader (`#version 130`)
+- `assets/shaders/terrain.vert` — passthrough vertex shader (`#version 130`)
+- `assets/shaders/terrain.frag` — constant color fragment shader (`#version 130`)
+- `assets/shaders/billboard.vert` — passthrough vertex shader (`#version 130`)
+- `assets/shaders/billboard.frag` — constant color fragment shader (`#version 130`)
 
-**Exit criterion**: A green `shader_stub_compile_test` in CI is ONLY valid evidence that both the shader files AND the shader loading code are present and functional. A green result obtained by stubbing the test to skip when the files are absent is NOT a valid exit criterion — the skip must never be triggered in CI (see the `GTEST_SKIP()` guard rules in `irrlicht-device-lifecycle.md`).
-
-**Co-landing checklist (single commit must include all of the following):**
-
-- `assets/shaders/lighting.vert` — Phase 2 stub (minimal valid GLSL with `#version 130`, passthrough vertex shader)
-- `assets/shaders/lighting.frag` — Phase 2 stub (minimal valid GLSL with `#version 130`, constant color output)
-- `assets/shaders/terrain.vert` — Phase 2 stub (minimal valid GLSL with `#version 130`, passthrough vertex shader)
-- `assets/shaders/terrain.frag` — Phase 2 stub (minimal valid GLSL with `#version 130`, constant color output)
-- `assets/shaders/billboard.vert` — Phase 2 stub (minimal valid GLSL with `#version 130`, passthrough vertex shader)
-- `assets/shaders/billboard.frag` — Phase 2 stub (minimal valid GLSL with `#version 130`, constant color output)
-- `tests/rendering/shader_stub_compile_test.cpp` — exercises the lighting shaders (NOTE: not shader_loading_test.cpp)
-- `src/rendering/shader_loader.cpp` (or the relevant loading code) — the implementation being tested
-
-**Note**: `shader_stub_compile_test.cpp` exercises the `lighting` shaders; all six GLSL files must be present so Phase 3 can build against them.
-
-If any of these artifacts is missing from the commit, the commit is incomplete and must not be merged.
+The test `ShaderLoadingTest::LightingShaderCompilesWithoutError` in `tests/rendering/shader_loading_test.cpp`
+calls `addHighLevelShaderMaterialFromFiles()` with paths to the lighting shaders and asserts
+`matType != -1`. If any shader file is absent, Irrlicht returns `−1` immediately and the test fails.
 
 ## Phase 8 GLSL Co-Landing Requirement
 

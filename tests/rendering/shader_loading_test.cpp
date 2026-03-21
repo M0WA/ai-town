@@ -1,14 +1,7 @@
-// shader_stub_compile_test.cpp — Phase 1 + Phase 2 shader compile tests for opengl_tests target.
+// shader_loading_test.cpp — OpenGL shader loading tests.
 //
-// Phase 1: ShaderStubCompileTest::Placeholder — trivial SUCCEED() to confirm CI routing.
-// Phase 2: ShaderLoadingTest::LightingShaderCompilesWithoutError — loads lighting.vert/frag
-//          via addHighLevelShaderMaterialFromFiles() and asserts matType != -1.
-//
-// Co-landing requirement (architecture/graphics-architecture/shader-loading.md):
-//   This file MUST be committed in the same commit as all 6 GLSL stub files:
-//   assets/shaders/lighting.vert, lighting.frag, terrain.vert, terrain.frag,
-//   billboard.vert, billboard.frag. Committing this test without the GLSL stubs
-//   causes an immediate CI failure (Irrlicht returns -1 for missing files).
+// ShaderLoadingTest::LightingShaderCompilesWithoutError — loads lighting.vert/frag
+// via addHighLevelShaderMaterialFromFiles() and asserts matType != -1.
 //
 // Shader paths are relative to CMAKE_SOURCE_DIR (project root) — the WORKING_DIRECTORY
 // set in aitown_add_tests() via gtest_discover_tests(WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}").
@@ -22,18 +15,6 @@
 
 using namespace irr;
 using namespace irr::video;
-
-// ============================================================================
-// Phase 1 stub — preserved from Phase 1 (do not remove)
-// ============================================================================
-
-TEST(ShaderStubCompileTest, Placeholder) {
-    SUCCEED();
-}
-
-// ============================================================================
-// Phase 2: LightingShaderCompilesWithoutError
-// ============================================================================
 
 // Minimal no-op shader callback — required by addHighLevelShaderMaterialFromFiles().
 // Irrlicht calls grab() on this callback internally; we call drop() after the call
@@ -57,7 +38,7 @@ TEST(ShaderLoadingTest, LightingShaderCompilesWithoutError) {
 
     IrrlichtDevice* device = createDeviceEx(params);
 
-    // Two-condition null-device guard (per phase-2.md and irrlicht-device-lifecycle.md):
+    // Two-condition null-device guard (per irrlicht-device-lifecycle.md):
     //   - No display AND null device → SKIP (local dev without X server, acceptable).
     //   - DISPLAY set AND null device → FAIL (Mesa/OpenGL misconfigured in CI).
     if (!device) {

@@ -262,6 +262,15 @@ Examples: LOW (N=1) → `(tileX + 0.5f) * 10` (tile centre); MED (N=2) → `(til
 
 **Ground quad coverage rule**: Every building B3D must include a ground quad (tarmac, garden, paving, or gravel) that covers the **full N×N tile footprint** — `(-N*5, N*5, -N*5, N*5)` in local space. This prevents bare terrain showing through around the building. In `generate_b3d_models.py` this is enforced via `FOOTPRINT_HALF[tier]`: LOW=5 m, MED=10 m, HIGH=15 m, SVC=10 m. Building structure geometry (walls, roofs) must not exceed the footprint half-extent in X/Z.
 
+**Zone-based ground plate defaults**: When no variant-specific override is defined, the ground quad material defaults by zone:
+
+- **Residential** → garden (grass green)
+- **Commercial** → paving (gray concrete)
+- **Industrial** → paving (gray concrete)
+- **Service** → paving for civic/emergency buildings (fire station, police station); gravel for utility buildings (power plant, water tower)
+
+These are "if not specified" defaults. Specific variants may use a different ground type for artistic reasons — for example, a residential variant with an urban tarmac forecourt is permitted.
+
 **LOW-tier bungalow exception**: Variant 04 (`res_low_04`) is a bungalow whose box was `10×10 m` (matching the tile exactly). It has been reduced to `8×8 m` so the 1 m tarmac border around the building remains visible — consistent with all other LOW-tier variants (`8 m` wide).
 
 **Road adjacency for multi-tile buildings**: At least one road tile must be edge-adjacent (4-directional cardinal, distance = 1) to **any tile in the footprint** — not only the origin tile.
