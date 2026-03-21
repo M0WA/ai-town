@@ -59,6 +59,8 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
 - **`build-linux` job** (`ubuntu-latest`): install xvfb + Mesa + libgl1-mesa-dev + vcpkg; CMake configure with **`-DENABLE_COVERAGE=OFF`** (coverage instrumentation disabled — this is the fast binary-verification build, not the coverage build); build; then, before running tests, verify that label routing is non-zero; then run tests in three explicitly named steps.
 
+  **Note**: Do NOT add a "Verify shader assets" step to this job. Shader file existence checks are source-tree checks that belong in `validate-assets` (see Phase 11i phasing note below). This keeps build jobs focused on compilation and test execution.
+
   **Integration test routing verification (mandatory post-build step)**: After the build step and before any test execution step, add a CI step that queries the number of tests discovered under the `integration` label. If zero tests are discovered, the step exits non-zero and the job fails immediately. This prevents the false-green scenario where `gtest_discover_tests()` with a misconfigured `LABEL` silently produces zero tests and `ctest -L '^integration$'` exits 0 — a zero-test discovery does NOT constitute a passing verification:
 
   ```yaml
@@ -305,6 +307,9 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
 - **Artifact retention**: test XML retained 14 days (all three jobs: `build-linux`, `coverage-linux`, `build-windows`); coverage HTML report retained 14 days (same as test XML — both are diagnostic artifacts consumed during the CI review window); release binaries (Windows, on push to `main` only) retained 30 days. Every `upload-artifact` step MUST carry an explicit `retention-days:` value — never rely on the GitHub Actions default (90 days) or assume another job's step definition applies.
 - **`coverage-linux` is a separate, self-contained job** — it performs its own configure+build+test+lcov sequence with `-DENABLE_COVERAGE=ON`. It does NOT depend on artifacts from `build-linux` (which would require large artifact transfers). This means `coverage-linux` re-runs the full build, but with coverage instrumentation enabled; `build-linux` can run a faster non-coverage build for binary verification. Both jobs run in parallel. The `all-checks-pass` gate references both. **Naming note**: the job can be renamed `build-test-coverage-linux` for clarity, as long as the name matches in the `needs:` list.
+
+  **Note**: Do NOT add a "Verify shader assets" step to this job. Shader file existence checks are source-tree checks that belong in `validate-assets` (see Phase 11i phasing note below). This keeps build jobs focused on compilation and test execution.
+
   - **`coverage-linux` must include three explicit, separately named YAML steps for ctest** (unit tests, integration tests without display, and OpenGL tests under xvfb) **before the lcov capture step**. A single combined `ctest` step cannot use both `-LE` and `-L` flags simultaneously; three named steps make coverage tracing explicit. The three ctest steps in `coverage-linux` must mirror the three ctest steps in `build-linux` exactly (same label filters `-LE "integration|requires-opengl"`, `-L "^integration$"`, `-L "^requires-opengl$"`) to ensure coverage data is collected for all test categories.
 
   **Label-routing verification in `coverage-linux` (mandatory)**: The `coverage-linux` job MUST include the same three label-routing non-zero discovery verification steps that `build-linux` includes — one for the `unit` label, one for the `integration` label, and one for the `requires-opengl` label. The exact step order within `coverage-linux` is:

@@ -44,7 +44,7 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
 ##### 1a. Asset Validation Consolidation
 
-- [ ] Add a **Shader Asset Verification** subsection to the `validate-assets` job
+- [x] Add a **Shader Asset Verification** subsection to the `validate-assets` job
   documentation. The "Verify shader assets" step (checking that
   `assets/shaders/ui_quad.vert` and `assets/shaders/ui_quad.frag` exist) is a pure
   source-tree file check — it requires no build artifacts, no C++ toolchain, and no
@@ -69,17 +69,17 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
   (`cicd-dev-github`)
 
-- [ ] Update the `build-linux` job documentation: remove the "Verify shader assets" step
+- [x] Update the `build-linux` job documentation: remove the "Verify shader assets" step
   from the mandatory step sequence. Update the step documentation in the spec to reflect
   that this step no longer appears in `build-linux`. Document the rationale: source-tree
   checks belong in `validate-assets`; `build-linux` only validates build artifacts and
   test execution. (`cicd-dev-github`)
 
-- [ ] Update the `coverage-linux` job documentation: remove the "Verify shader assets"
+- [x] Update the `coverage-linux` job documentation: remove the "Verify shader assets"
   step from its mandatory step sequence (step 11 in the current ordered list). Renumber
   subsequent steps accordingly. (`cicd-dev-github`)
 
-- [ ] Add a general rule to the `validate-assets` job documentation:
+- [x] Add a general rule to the `validate-assets` job documentation:
   **Any CI step that checks source-tree file existence, file format, or file content and
   requires no compiled binary must be placed in `validate-assets`, not in
   `build-linux`, `build-windows`, or `coverage-linux`.** This rule prevents future
@@ -120,7 +120,16 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
     3. `ilammy/msvc-dev-cmd` (SHA-pinned) — required for the CMake configure step
     4. `lukka/run-vcpkg` (SHA-pinned) — restore vcpkg packages
-    5. CMake configure: `cmake --preset ci-windows`
+    5. CMake configure:
+
+       ```yaml
+       - name: CMake configure
+         shell: pwsh
+         run: cmake --preset ci-windows -DAITOWN_ASSETS_DIR=assets
+       ```
+
+       The `-DAITOWN_ASSETS_DIR=assets` flag sets the compile-time asset path to a relative
+       path (`assets/`), resolved from the process working directory at runtime.
     6. CMake build: `cmake --build build --parallel`
     7. Append vcpkg DLL directory to `$env:GITHUB_PATH` (same step as `build-windows`)
     8. CPack — generate NSIS installer:
@@ -136,7 +145,7 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
        ```yaml
        - name: Upload Windows installer
-         uses: actions/upload-artifact@<SHA>  # v4.6.0
+         uses: actions/upload-artifact@<SHA-PLACEHOLDER>  # v4.6.0 — resolve SHA via: gh release view v4.6.0 --repo actions/upload-artifact; NEVER copy from this document
          with:
            name: aitown-installer-windows-${{ github.sha }}
            path: build/aitown-*.exe
@@ -162,17 +171,24 @@ Three CI/CD improvements delivered as a single cohesive phase:
       (`${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr`).
       This POST_BUILD rule must exist in `CMakeLists.txt`; CPack runs after the build
       completes, so the file will be present when CPack executes. Without it the HRTF
-      initialization step fails silently at runtime.
+      initialization step fails silently at runtime. **Windows HRTF search path**: On
+      Windows, OpenAL Soft searches the application executable directory (alongside
+      `aitown.exe` and `soft_oal.dll`) for `default.mhr`, so `DESTINATION .` is the
+      correct install destination — no additional path configuration is required.
     - `soft_oal.dll` (OpenAL Soft renamed as `soft_oal.dll` per Windows naming
       convention): `install(FILES ${CMAKE_BINARY_DIR}/soft_oal.dll DESTINATION .)` —
       must be explicitly listed; it is NOT automatically included by the generic DLL
       glob and its absence causes `alGetError`/`alcOpenDevice` to fail on the end
       user's machine.
-    - Data files (assets/): `install(DIRECTORY assets/ DESTINATION .)` so the assets
-      directory lands alongside `aitown.exe` in the installer root. This is the Windows
-      equivalent of the Linux `install(DIRECTORY assets/ DESTINATION share/aitown/assets)`
-      rule and is required so that DDS textures, audio assets, and shader files are
-      included in the `.exe` installer.
+    - Data files (assets/): `install(DIRECTORY assets DESTINATION .)` so the `assets/`
+      directory lands as a subdirectory alongside `aitown.exe` in the installer root
+      (e.g., `<install dir>/assets/shaders/...`). The trailing slash MUST be omitted:
+      with a trailing slash, CMake would install the *contents* of `assets/` directly
+      to the root, breaking the `assets/` subdirectory that `AITOWN_ASSETS_DIR=assets`
+      expects. This is the Windows equivalent of the Linux
+      `install(DIRECTORY assets/ DESTINATION share/aitown/assets)` rule and is required
+      so that DDS textures, audio assets, and shader files are included in the `.exe`
+      installer.
     - The `CPACK_GENERATOR` default is NOT set in `CMakeLists.txt`; the generator is
       always specified explicitly on the `cpack` command line (`-G NSIS`, `-G DEB`).
 
@@ -277,15 +293,21 @@ Three CI/CD improvements delivered as a single cohesive phase:
              -G Ninja \
              -DCMAKE_BUILD_TYPE=Release \
              -DENABLE_COVERAGE=OFF \
-             -DENABLE_TESTING=OFF \
+             -DBUILD_TESTING=OFF \
+             -DCMAKE_INSTALL_PREFIX=/usr \
+             -DAITOWN_ASSETS_DIR=/usr/share/aitown/assets \
              -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
              -DVCPKG_MANIFEST_FEATURES="" \
              -DVCPKG_INSTALLED_DIR=$VCPKG_ROOT/installed
        ```
 
-       Testing is disabled because the packaging job builds with system packages and only
-       Irrlicht from vcpkg — gtest and rapidcheck are not available. The packaging job
-       produces only the `aitown` binary and installer; test execution is handled by
+       Testing is disabled via the standard CMake `BUILD_TESTING` option (set to `OFF`
+       here) so that `find_package(GTest)` and `find_package(rapidcheck)` are not
+       required. `CMakeLists.txt` must guard all test target declarations with
+       `if(BUILD_TESTING)` (or the equivalent CMake `include(CTest)`/`enable_testing()`
+       mechanism) for this flag to take effect — without the guard, the `find_package`
+       calls will still execute and fail if the packages are not installed. The packaging
+       job produces only the `aitown` binary and installer; test execution is handled by
        `build-linux` and `coverage-linux`.
 
     6. CMake build: `cmake --build build --parallel`
@@ -302,7 +324,7 @@ Three CI/CD improvements delivered as a single cohesive phase:
 
        ```yaml
        - name: Upload Debian package
-         uses: actions/upload-artifact@<SHA>  # v4.6.0
+         uses: actions/upload-artifact@<SHA-PLACEHOLDER>  # v4.6.0 — resolve SHA via: gh release view v4.6.0 --repo actions/upload-artifact; NEVER copy from this document
          with:
            name: aitown-deb-${{ matrix.distro }}-${{ github.sha }}
            path: build/aitown-*.deb
@@ -326,6 +348,14 @@ Three CI/CD improvements delivered as a single cohesive phase:
       binary lands at `/usr/games/aitown` (standard Debian policy location for games).
     - Data files (assets/): `install(DIRECTORY assets/ DESTINATION share/aitown/assets)`.
     - `default.mhr` (HRTF data file): `install(FILES ${CMAKE_BINARY_DIR}/default.mhr DESTINATION share/openal/hrtf)` — installs to `/usr/share/openal/hrtf/default.mhr`, which is one of OpenAL Soft's standard HRTF search paths (along with `~/.local/share/openal/hrtf/` for per-user overrides). Installing to `share/aitown/` would be incorrect — OpenAL Soft does NOT search that path. The same POST_BUILD `copy_if_different` rule that populates `${CMAKE_BINARY_DIR}/default.mhr` on Windows also runs on Linux builds, so the file is present before CPack executes.
+    - `CPACK_PACKAGING_INSTALL_PREFIX`: `/usr` — sets the installation prefix for the
+      Debian package. This must match `CMAKE_INSTALL_PREFIX=/usr` set at configure
+      time. Without it, CPack uses the default prefix (`/usr/local`), causing the
+      binary to land at `/usr/local/games/aitown`, assets at
+      `/usr/local/share/aitown/assets`, and the HRTF file at
+      `/usr/local/share/openal/hrtf/default.mhr` — all differing from the
+      `/usr`-based paths documented above. Add this to `CMakeLists.txt` as
+      `set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")`.
     - The `CPACK_GENERATOR` default is NOT set; always specify `-G DEB` on the command
       line.
 
@@ -399,6 +429,12 @@ Three CI/CD improvements delivered as a single cohesive phase:
   `install(FILES ...)` or `install(DIRECTORY ...)` so CPack includes them in the
   installer. (`cicd-dev-github`)
 
+- [ ] Add the `POST_BUILD copy_if_different` rule to `CMakeLists.txt` to copy
+  `default.mhr` from the vcpkg OpenAL Soft share directory to the binary output
+  directory after every build (per the requirement documented in §1b). Without this
+  rule, `${CMAKE_BINARY_DIR}/default.mhr` will not exist and the CPack `install(FILES ...)`
+  rule for HRTF data will fail silently. (`cicd-dev-github`)
+
 - [ ] Verify that `AITOWN_ASSETS_DIR` (the compile-time asset path constant in `CMakeLists.txt`)
   is set correctly for installed builds, not just development builds. If it is currently
   hardcoded to `${CMAKE_SOURCE_DIR}/assets` (an absolute source-tree path), update it
@@ -409,9 +445,23 @@ Three CI/CD improvements delivered as a single cohesive phase:
     set `AITOWN_ASSETS_DIR` to `"."` or derive it relative to the executable at runtime.
   - On Linux (DEB package): assets land at `/usr/share/aitown/assets`, so
     `AITOWN_ASSETS_DIR` must be set to `/usr/share/aitown/assets` for installed builds.
-  The recommended approach is a CMake configure-time `install(CODE ...)` block or a
-  `GNUInstallDirs`-based `AITOWN_ASSETS_DIR_INSTALL` that overrides the dev-time value
-  when building for packaging. Without this fix, packaged applications will fail to load
+  The correct approach is to pass `-DAITOWN_ASSETS_DIR=<path>` as an explicit CMake
+  `-D` flag at configure time in the packaging job: for the Windows NSIS job, pass
+  `-DAITOWN_ASSETS_DIR=assets` (relative path, resolved at runtime relative to the
+  executable directory); for the Linux DEB job, pass
+  `-DAITOWN_ASSETS_DIR=/usr/share/aitown/assets` (the FHS-compliant absolute install
+  path). For this `-D` flag to work, `CMakeLists.txt` must declare `AITOWN_ASSETS_DIR`
+  as a CMake `CACHE STRING` variable:
+  `set(AITOWN_ASSETS_DIR "${CMAKE_SOURCE_DIR}/assets" CACHE STRING "Runtime assets directory path")`.
+  If the variable is currently hardcoded inside
+  `target_compile_definitions(... PRIVATE AITOWN_ASSETS_DIR=...)`, the `-D` flag on the
+  command line will have no effect and the packaged binary will use the source-tree path.
+  The Windows relative path `assets` is resolved from the process working directory at
+  runtime; NSIS shortcuts default to the installation directory as the working directory,
+  so this works correctly for installed builds launched via the Start Menu shortcut.
+  Because `AITOWN_ASSETS_DIR` is a compile-time `#define` baked into the binary,
+  it cannot be changed at install time — it must be set correctly at CMake configure time
+  in each packaging job. Without this fix, packaged applications will fail to load
   any asset (textures, shaders, audio) because the source tree path does not exist on
   the end user's machine. (`cicd-dev-github`, `graphics-dev-irrlicht`)
 
@@ -432,6 +482,10 @@ Three CI/CD improvements delivered as a single cohesive phase:
 - [ ] Verify `AITOWN_ASSETS_DIR` is correct for installed Linux builds (see §2b for the
   full requirement — the same fix applies to the Linux package). (`cicd-dev-github`,
   `graphics-dev-irrlicht`)
+
+- [ ] Verify the same `POST_BUILD copy_if_different` rule for `default.mhr` (see §2b)
+  also runs on Linux builds — the same CMakeLists.txt rule applies to all platforms.
+  (`cicd-dev-github`)
 
 #### 3. Verification Steps
 

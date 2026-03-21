@@ -49,8 +49,25 @@ must NOT be used as the copy source; use the explicit vcpkg path instead:
 ```cmake
 add_custom_command(TARGET aitown POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin/OpenAL32.dll"
+        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/OpenAL32.dll"
         "$<TARGET_FILE_DIR:aitown>/soft_oal.dll"
     COMMENT "Copying OpenAL32.dll (OpenAL Soft runtime) to aitown output as soft_oal.dll"
 )
 ```
+
+**HRTF data file POST_BUILD copy rule**: The `default.mhr` HRTF data file must also be copied
+alongside the binary at build time so it is available at runtime before any installer packaging.
+This POST_BUILD rule reads from the vcpkg installed share directory and places `default.mhr`
+directly in the binary output directory:
+
+```cmake
+add_custom_command(TARGET aitown POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
+        "$<TARGET_FILE_DIR:aitown>/default.mhr"
+    COMMENT "Copying default.mhr (OpenAL Soft HRTF data) to aitown output directory"
+)
+```
+
+Both this rule and the `soft_oal.dll` rule above belong in `CMakeLists.txt` together as a pair of
+POST_BUILD commands on the `aitown` target.
