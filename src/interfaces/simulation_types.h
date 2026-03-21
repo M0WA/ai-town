@@ -89,9 +89,11 @@ enum class NotificationType {
     ServiceDegraded,     // service building entered reduced-coverage state; amount unused
     BudgetDeficitWarn,   // city crossed the -25% deficit threshold; amount unused
     PopulationMilestone, // population crossed a milestone (1K/10K/50K/100K/500K); milestoneValue = pop count
-    CityRatingTransition // city rating tier changed; milestoneValue = new CityRatingTier as int
-                         //   (Village=0, Town=1, City=2, Metropolis=3, Megalopolis=4)
-                         //   fires stinger_milestone at tier transitions ONLY; NOT at 100K raw population
+    CityRatingTransition, // city rating tier changed; milestoneValue = new CityRatingTier as int
+                          //   (Village=0, Town=1, City=2, Metropolis=3, Megalopolis=4)
+                          //   fires stinger_milestone at tier transitions ONLY; NOT at 100K raw population
+    NeighbourCleared,    // same-zone lower-density neighbour auto-demolished during density upgrade
+    UpgradeBlocked       // density upgrade cancelled after 12 deferred retries (CRITICAL toast)
 };
 
 // SimulationNotification — one queued event from CitySimulation for UIManager to process.

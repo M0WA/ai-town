@@ -1943,6 +1943,21 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
         static_cast<f32>(tileZ) * kTileSize + kTileSize * 0.5f));
     node->setScale(core::vector3df(1.0f, 1.0f, 1.0f));
 
+    // Phase 11h: E/W road orientation — rotate 90° Y so the center-line strip aligns
+    // with the road direction.  buildTileRoadMesh() always builds the center-line strip
+    // running along the Z-axis (local space).  For tiles that connect East/West only
+    // (no N/S neighbours already in m_roadNodes), rotate the node 90° around Y so the
+    // strip runs along X instead.  T-junctions and cross-intersections are left at 0°.
+    {
+        const bool hasNS = m_roadNodes.count(tileKey(tileX, tileZ - 1)) > 0
+                        || m_roadNodes.count(tileKey(tileX, tileZ + 1)) > 0;
+        const bool hasEW = m_roadNodes.count(tileKey(tileX + 1, tileZ)) > 0
+                        || m_roadNodes.count(tileKey(tileX - 1, tileZ)) > 0;
+        if (hasEW && !hasNS) {
+            node->setRotation(core::vector3df(0.f, 90.f, 0.f));
+        }
+    }
+
     // Disable Irrlicht's automatic box frustum culling for road tiles.
     // Road tile meshes are nearly flat so their AABB has little vertical headroom.
     // At oblique camera angles tiles near the frustum boundary can be false-rejected

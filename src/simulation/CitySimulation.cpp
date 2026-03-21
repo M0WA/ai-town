@@ -931,31 +931,144 @@ void CitySimulation::doDensityUnlockTick() {
         float demandForZone = m_demandPressurePct[static_cast<int>(targetZone)];
         if (demandForZone < SimulationConstants::density_upgrade_wave_demand_threshold) continue;
 
+        // Phase 11h: collect origin-tile upgrade candidates first to avoid
+        // iterator invalidation when we demolish neighbours inside the loop.
+        struct UpgradeCandidate { int64_t key; int tx; int tz; };
+        std::vector<UpgradeCandidate> candidates;
         for (auto& [key, tile] : m_tiles) {
-            if (upgradeCount >= maxUpgrades) break;
             if (!tile.isZoned) continue;
             if (tile.zone != targetZone) continue;
             if (tile.density != currentRequired) continue;
+            if (tile.footprintOriginX != -1) continue;  // skip non-origin tiles
+            int tx = static_cast<int>(key >> 32);
+            int tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
+            candidates.push_back({key, tx, tz});
+        }
 
-            // Upgrade this tile
-            tile.density = targetDensity;
-            tile.population = 0.0f;  // population grows fresh
+        for (auto& cand : candidates) {
+            if (upgradeCount >= maxUpgrades) break;
 
-            // Phase 10: swap the building mesh to match the new density tier.
-            // Decode tile coordinates from the map key (key = (x << 32) | (uint32_t)z).
-            // Remove the old mesh first, then place the new one so the renderer
-            // never has two overlapping meshes at the same tile.
+            // Re-validate: tile may have been modified during this loop iteration.
+            auto it = m_tiles.find(cand.key);
+            if (it == m_tiles.end()) continue;
+            if (!it->second.isZoned || it->second.zone != targetZone ||
+                it->second.density != currentRequired) continue;
+
+            const int tx = cand.tx, tz = cand.tz;
+            const int newN = footprintSize(targetDensity);
+
+            // --- Check / enforce retry limit ---
+            int& retryCount = m_upgradeRetryCount[cand.key];
+            if (retryCount >= 12) {
+                // 12 deferred retries exhausted: cancel upgrade for this tile.
+                m_upgradeRetryCount.erase(cand.key);
+                m_notifications.push({NotificationType::UpgradeBlocked, tx, tz, 0});
+                continue;
+            }
+
+            // --- Scan expanded N×N footprint for blockers vs same-zone neighbours ---
+            bool hasBlocker = false;
+            struct DemoEntry { int x; int z; int64_t originKey; };
+            std::vector<DemoEntry> toDemo;
+
+            for (int dx = 0; dx < newN && !hasBlocker; ++dx) {
+                for (int dz = 0; dz < newN && !hasBlocker; ++dz) {
+                    int fx = tx + dx, fz = tz + dz;
+                    if (fx < 0 || fz < 0) { hasBlocker = true; break; }
+                    int64_t fkey = tileKey(fx, fz);
+                    if (fkey == cand.key) continue;  // origin tile itself
+
+                    auto fit = m_tiles.find(fkey);
+                    if (fit == m_tiles.end()) continue;  // empty tile: OK
+
+                    const TileData& ft = fit->second;
+                    if (ft.isRoad) { hasBlocker = true; break; }
+                    if (ft.isZoned) {
+                        // Resolve to this zone's origin tile.
+                        int originX = (ft.footprintOriginX == -1) ? fx : ft.footprintOriginX;
+                        int originZ = (ft.footprintOriginZ == -1) ? fz : ft.footprintOriginZ;
+                        int64_t ftOriginKey = tileKey(originX, originZ);
+
+                        auto ftOIt = m_tiles.find(ftOriginKey);
+                        if (ftOIt == m_tiles.end()) { hasBlocker = true; break; }
+                        const TileData& ftO = ftOIt->second;
+
+                        if (ftO.zone == targetZone && ftO.density < targetDensity) {
+                            // Same zone type, lower density: candidate for silent demolish.
+                            bool alreadyAdded = false;
+                            for (auto& de : toDemo) {
+                                if (de.originKey == ftOriginKey) { alreadyAdded = true; break; }
+                            }
+                            if (!alreadyAdded)
+                                toDemo.push_back({originX, originZ, ftOriginKey});
+                        } else {
+                            // Different zone, same/higher density, or service building: blocker.
+                            hasBlocker = true;
+                        }
+                    }
+                }
+            }
+
+            if (hasBlocker) {
+                retryCount++;
+                continue;
+            }
+
+            // --- No blockers: silently demolish same-zone lower-density neighbours ---
+            for (auto& de : toDemo) {
+                auto dIt = m_tiles.find(de.originKey);
+                if (dIt == m_tiles.end()) continue;
+                const int oldN = footprintSize(dIt->second.density);
+
+                // Remove renderer mesh (no treasury refund, no undo).
+                if (m_renderer) m_renderer->removeBuildingMesh(de.x, de.z);
+
+                // Clear all footprint tiles.
+                for (int ddx = 0; ddx < oldN; ++ddx)
+                    for (int ddz = 0; ddz < oldN; ++ddz)
+                        m_tiles.erase(tileKey(de.x + ddx, de.z + ddz));
+
+                m_notifications.push({NotificationType::NeighbourCleared, de.x, de.z, 0});
+            }
+
+            // --- Reset retry counter ---
+            m_upgradeRetryCount.erase(cand.key);
+
+            // --- Upgrade origin tile ---
+            TileData& originTile = m_tiles[cand.key];
+            originTile.density    = targetDensity;
+            originTile.population = 0.0f;
+            originTile.footprintOriginX = -1;
+            originTile.footprintOriginZ = -1;
+
+            // --- Mark new N×N footprint tiles ---
+            for (int dx = 0; dx < newN; ++dx) {
+                for (int dz = 0; dz < newN; ++dz) {
+                    if (dx == 0 && dz == 0) continue;  // origin already updated above
+                    int64_t fkey = tileKey(tx + dx, tz + dz);
+                    TileData& ftile = m_tiles[fkey];
+                    ftile.isZoned    = true;
+                    ftile.isRoad     = false;
+                    ftile.zone       = targetZone;
+                    ftile.density    = targetDensity;
+                    ftile.population = 0.0f;
+                    ftile.desirability = static_cast<float>(SimulationConstants::desirability_base_value);
+                    ftile.isAbandoned  = false;
+                    ftile.footprintOriginX = tx;
+                    ftile.footprintOriginZ = tz;
+                }
+            }
+
+            // --- Swap building mesh ---
             if (m_renderer) {
-                int tx = static_cast<int>(key >> 32);
-                int tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
                 m_renderer->removeBuildingMesh(tx, tz);
 
                 // Round-robin variant cycling — same logic as placeZone().
-                int zoneIdx = static_cast<int>(targetZone);
-                int tierIdx = static_cast<int>(targetDensity);
-                int idx     = zoneIdx * 3 + tierIdx;
-                m_buildingVariantCounters[idx]++;
-                int variantNum = ((m_buildingVariantCounters[idx] - 1) % 4) + 1;
+                int zoneIdx2 = static_cast<int>(targetZone);
+                int tierIdx2 = static_cast<int>(targetDensity);
+                int idx2     = zoneIdx2 * 3 + tierIdx2;
+                m_buildingVariantCounters[idx2]++;
+                int variantNum = ((m_buildingVariantCounters[idx2] - 1) % 4) + 1;
                 std::string baseName = zoneAssetBaseName(targetZone, targetDensity);
                 if (baseName.size() >= 2) {
                     baseName[baseName.size() - 2] = '0';
@@ -964,8 +1077,7 @@ void CitySimulation::doDensityUnlockTick() {
                 m_renderer->placeBuildingMesh(tx, tz, baseName);
             }
 
-            // Phase 10: sfx_zone_upgrade is non-positional (AL_SOURCE_RELATIVE = AL_TRUE).
-            // Cap at sfx_zone_upgrade_per_tick_cap calls total across all tiers this tick.
+            // --- SFX (capped per tick) ---
             if (m_audio && sfxCallsThisTick < SimulationConstants::sfx_zone_upgrade_per_tick_cap) {
                 m_audio->playSound(SFX_ZONE_UPGRADE, SoundPriority::NORMAL, 1.0f);
                 ++sfxCallsThisTick;
@@ -1763,6 +1875,11 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
     // Deduct earthworks cost
     m_treasury -= static_cast<int64_t>(earthworksCostOverride);
 
+    // Phase 11h: sample origin tile height BEFORE any setTileHeight calls so all
+    // footprint tiles are flattened to the same level (spec: "the height of the
+    // origin tile sampled before any modifications occur").
+    const float flatHeight = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
+
     // Phase 11h: mark all N×N footprint tiles.
     for (int dx = 0; dx < N; ++dx) {
         for (int dz = 0; dz < N; ++dz) {
@@ -1784,9 +1901,9 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
                 ftile.footprintOriginX = tileX;
                 ftile.footprintOriginZ = tileZ;
             }
-            // Phase 11h: terrain flattening for each footprint tile.
+            // Phase 11h: flatten all footprint tiles to origin tile height.
             if (m_terrain) {
-                m_terrain->setTileHeight(tileX + dx, tileZ + dz, 0.0f);
+                m_terrain->setTileHeight(tileX + dx, tileZ + dz, flatHeight);
             }
         }
     }

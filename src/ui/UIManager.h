@@ -359,6 +359,7 @@ private:
     // --- Phase 8: panel open-state tracking for input arbitration ---
     bool m_inspectorOpen{false};
     bool m_taxPanelOpen{false};
+    bool m_budgetPanelOpen{false};  // Phase 11h: BudgetDetailPanel toggle state
 
     // --- Phase 8: Ctrl-key state tracking for Ctrl+Z ---
     bool m_ctrlDown{false};

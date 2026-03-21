@@ -642,3 +642,108 @@ Three independent but thematically related gameplay/visual improvements:
 - No dependency on Phase 11f, 11g, or 12 — can run in parallel with those phases.
 - Post-V1 extension: angled / diagonal road tiles with lane curvature are deferred to a
   post-V1 traffic pass.
+
+---
+
+### Bug Fixes & Sign-off Gaps (added during implementation sign-off)
+
+The following items were discovered during the Phase 11h sign-off run and must be resolved
+before the phase is marked DONE.
+
+#### Bug 1 — E/W Road Center-Line Strip Rotated 90°
+
+**Symptom**: Roads placed in the East/West direction show the white center-line strip running
+along Z (North/South) instead of along the road direction.
+
+**Root cause**: `buildTileRoadMesh()` always builds the center-line strip running along the
+local Z-axis. E/W road tiles need the scene node rotated 90° around Y so the strip aligns with
+the carriageway.
+
+**Fix** (`src/rendering/IrrlichtRenderer.cpp` — `placeRoadMesh()` internal): after
+`node->setScale(...)` and before `LODNode* lodNode = new LODNode(node)`, check whether
+`m_roadNodes` has any E/W neighbours (tileX±1) but no N/S neighbours (tileZ±1); if so call
+`node->setRotation(core::vector3df(0.f, 90.f, 0.f))`.
+
+- [x] `placeRoadMesh()` applies 90° Y-rotation for pure E/W road tiles. (`graphics-dev-irrlicht`)
+
+#### Bug 2 — Houses Too Small (Phase 9 Assets at ±2 m Instead of Native Scale)
+
+**Symptom**: Residential buildings appear as tiny dots — roughly the size of a shrub. Phase 9
+assets were authored at ±2 m half-extent (placeholder) but `placeBuildingMesh()` places nodes
+at scale 1.0 (no runtime `setScale()` per spec).
+
+**Root cause**: Phase 9 assets must be re-exported at native world scale: Low = ±5 m, Med =
+±10 m, High = ±15 m, Service = ±10 m (1 Blender unit = 1 m).
+
+**Fix**: `graphics-artist-3d-model` re-exports all Phase 9 building assets
+(`res_low_*`, `res_med_*`, `res_high_*`, `com_low_*`, `com_med_*`, `com_high_*`,
+`ind_low_*`, `ind_med_*`, `ind_high_*`, `svc_fire_station`, `svc_police_station`,
+`svc_power_plant`, `svc_water_tower`) at native world scale. Spec in
+`architecture/asset-standards/3d-model-standards.md` §1a confirmed authoritative.
+
+- [x] `architecture/asset-standards/3d-model-standards.md` confirms ±2 m convention is retired
+  and native-size table (Low ±5 m / Med ±10 m / High ±15 m / Service ±10 m) is authoritative.
+  (`graphics-artist-3d-model`)
+- [ ] All Phase 9 `.b3d` building assets re-exported at native world scale; resident in
+  `assets/models/buildings/`. (`graphics-artist-3d-model`)
+
+#### Bug 3 — Terrain Flattening Sets All Footprint Tiles to Height 0
+
+**Symptom**: Placing a zone on elevated terrain produces a visible crater — all tiles in the
+N×N footprint are flattened to world height 0 instead of the origin tile's terrain height.
+
+**Root cause**: `placeZone()` called `m_terrain->setTileHeight(..., 0.0f)` rather than
+sampling the origin tile's height before flattening.
+
+**Fix** (`src/simulation/CitySimulation.cpp` — `placeZone()`): sample origin tile height via
+`m_terrain->getHeightAt(tileX, tileZ)` into `flatHeight` before the footprint loop; use
+`flatHeight` in all `setTileHeight()` calls inside that loop.
+
+- [x] `placeZone()` samples origin tile height before footprint loop; all footprint tiles are
+  flattened to that height. (`graphics-dev-irrlicht`)
+
+#### Bug 4 — Budget Detail Panel Not Visible (No Toggle Wired)
+
+**Symptom**: `BudgetDetailPanel` is constructed and owned by `HUD`, but no UI event triggers
+`show()` or `hide()`. The panel is never visible during gameplay.
+
+**Root cause**: `UIManager` had no click handler for the treasury balance label area.
+
+**Fix** (`src/ui/UIManager.h` + `src/ui/UIManager.cpp`): add `m_budgetPanelOpen{false}`
+state; wire a click on the treasury label region (x=8, y=8, w=200, h=48 → region 8–208, 8–56)
+to toggle `m_hud->getBudgetDetail()->show()/hide()`; add ESC handling (Priority 4a); call
+`hide()` + reset flag in `transitionToMainMenu()`.
+
+- [x] Click on treasury balance area toggles `BudgetDetailPanel`. (`graphics-dev-irrlicht`)
+- [x] ESC closes the budget panel when open. (`graphics-dev-irrlicht`)
+- [x] `transitionToMainMenu()` hides and resets the budget panel. (`graphics-dev-irrlicht`)
+
+#### Sign-off Gap — `doDensityUnlockTick()` Auto-Demolish / Retry / Cancel Logic Missing (FAIL)
+
+**Symptom**: Sign-off `doDensityUnlockTick` test FAIL — the density upgrade tick had no
+expanded-footprint check, no same-zone-type neighbour auto-demolition, no retry counter, and
+no 12-retry CRITICAL toast.
+
+**Root cause**: Phase 11h spec requires that when a Low→Med or Med→High upgrade is triggered,
+the code checks the expanded N×N footprint, silently demolishes same-zone-type lower-density
+neighbours, defers with retry counter if blockers (road/different-zone/OOB) found, and cancels
+after 12 retries with a `UpgradeBlocked` CRITICAL toast.
+
+**Fix** (`src/interfaces/simulation_types.h`, `src/simulation/CitySimulation.h`,
+`src/simulation/CitySimulation.cpp`):
+
+- Added `NeighbourCleared` and `UpgradeBlocked` to `NotificationType` enum.
+- `m_upgradeRetryCount` (`std::unordered_map<int64_t, int>`) tracks retries per origin tile
+  (keyed by `tileKey(tileX, tileZ)`); reset on successful upgrade or manual demolish.
+- `doDensityUnlockTick()` collects upgrade candidates first (avoid iterator invalidation),
+  then for each: scans expanded footprint, auto-demolishes same-zone lower-density neighbours,
+  defers (increments retry counter) if road/different-zone/OOB blockers present, cancels after
+  12 retries with `UpgradeBlocked` toast.
+
+- [x] `NotificationType::NeighbourCleared` and `NotificationType::UpgradeBlocked` added to
+  `simulation_types.h`. (`graphics-dev-irrlicht`)
+- [x] `doDensityUnlockTick()` implements expanded-footprint check, same-zone-type
+  auto-demolish, retry counter (12-retry cancel + `UpgradeBlocked` CRITICAL toast), and
+  iterator-safe candidate collection. (`graphics-dev-irrlicht`)
+- [x] `demolishTile()` already erases `m_upgradeRetryCount[key]` on manual demolish — verified
+  no additional change needed. (`graphics-dev-irrlicht`)

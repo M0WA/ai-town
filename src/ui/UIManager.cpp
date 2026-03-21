@@ -25,6 +25,7 @@
 #include "src/ui/PauseMenuPanel.h"
 #include "src/ui/SettingsPanel.h"
 #include "src/ui/ModalDialog.h"
+#include "src/ui/BudgetDetailPanel.h"  // Phase 11h: budget panel toggle via treasury label click
 
 // Explicit interface includes for method calls on forward-declared pointers.
 #include "src/interfaces/IAudioSystem.h"
@@ -405,6 +406,18 @@ bool UIManager::onEvent(const InputEvent& event) {
     }
 
     // ============================================================
+    // Priority 4a: BudgetDetailPanel (when open) — Phase 11h.
+    // Escape closes the panel; outside clicks pass through.
+    // ============================================================
+    if (m_budgetPanelOpen) {
+        if (event.type == InputEvent::Type::KeyDown && event.keyCode == kKeyEscape) {
+            if (m_hud && m_hud->getBudgetDetail()) m_hud->getBudgetDetail()->hide();
+            m_budgetPanelOpen = false;
+            return true;
+        }
+    }
+
+    // ============================================================
     // Priority 4: TaxRatePanel (when open).
     // Clicks within bounds are consumed.
     // Escape closes the panel.
@@ -757,6 +770,21 @@ bool UIManager::onEvent(const InputEvent& event) {
                    kBellRight - kBellLeft,
                    kBellBottom - kBellTop)) {
             m_notifications->toggleLog();
+            return true;
+        }
+
+        // Treasury balance label (top-left: x=8,y=8,w=200,h=48 → click region 8-208, 8-56).
+        // Phase 11h: click toggles BudgetDetailPanel.
+        if (inRect(event.x, event.y, 8, 8, 200, 48)) {
+            if (m_hud && m_hud->getBudgetDetail()) {
+                m_budgetPanelOpen = !m_budgetPanelOpen;
+                if (m_budgetPanelOpen) {
+                    m_hud->getBudgetDetail()->show();
+                } else {
+                    m_hud->getBudgetDetail()->hide();
+                }
+                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
+            }
             return true;
         }
 
@@ -1784,6 +1812,8 @@ void UIManager::transitionToMainMenu() {
     m_pauseMenu->hide();
     m_taxPanel->hide();
     m_taxPanelOpen = false;
+    if (m_hud && m_hud->getBudgetDetail()) m_hud->getBudgetDetail()->hide();
+    m_budgetPanelOpen = false;
     m_inspector->hide();
     m_inspectorOpen = false;
 
