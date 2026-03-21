@@ -655,16 +655,18 @@ before the phase is marked DONE.
 **Symptom**: Roads placed in the East/West direction show the white center-line strip running
 along Z (North/South) instead of along the road direction.
 
-**Root cause**: `buildTileRoadMesh()` always builds the center-line strip running along the
-local Z-axis. E/W road tiles need the scene node rotated 90° around Y so the strip aligns with
-the carriageway.
+**Root cause**: `buildTileRoadMesh()` always built the carriageway and center-line along the
+Z-axis. Rotating the scene node 90° Y cannot fix this because vertex Y heights are baked as
+absolute world-space coordinates; rotating the node maps the wrong corner heights to the wrong
+world positions, producing twisted geometry.
 
-**Fix** (`src/rendering/IrrlichtRenderer.cpp` — `placeRoadMesh()` internal): after
-`node->setScale(...)` and before `LODNode* lodNode = new LODNode(node)`, check whether
-`m_roadNodes` has any E/W neighbours (tileX±1) but no N/S neighbours (tileZ±1); if so call
-`node->setRotation(core::vector3df(0.f, 90.f, 0.f))`.
+**Fix** (`src/rendering/IrrlichtRenderer.cpp`): Add `bool isEW` parameter to
+`buildTileRoadMesh()`. When `isEW=true`, build the carriageway along X (Z=±cH), south/north
+kerbs on the Z sides, and interpolate the center-line heights at Z=0:
+`yCL_W = (y00+y01)*0.5f`, `yCL_E = (y10+y11)*0.5f`. `placeRoadMesh()` detects E/W-only
+tiles (`hasEW_dir && !hasNS_dir`) and passes `isEW=true` to the builder.
 
-- [x] `placeRoadMesh()` applies 90° Y-rotation for pure E/W road tiles. (`graphics-dev-irrlicht`)
+- [x] `buildTileRoadMesh()` accepts `isEW` parameter and builds correct E/W geometry. (`graphics-dev-irrlicht`)
 
 #### Bug 2 — Houses Too Small (Phase 9 Assets at ±2 m Instead of Native Scale)
 
@@ -747,3 +749,52 @@ after 12 retries with a `UpgradeBlocked` CRITICAL toast.
   iterator-safe candidate collection. (`graphics-dev-irrlicht`)
 - [x] `demolishTile()` already erases `m_upgradeRetryCount[key]` on manual demolish — verified
   no additional change needed. (`graphics-dev-irrlicht`)
+
+#### Bug 5 — Building World Position Off by Half-Tile (±5 m in X and Z)
+
+**Symptom**: All placed buildings are offset approximately one half-tile (5 m) to the
+north-east — they overlap the street on two sides and leave a gap on the other two.
+
+**Root cause**: `placeBuildingMesh()` computed the world centre of the N×N footprint as:
+
+```cpp
+worldCentreX = (tileX + (footprintN - 1) * 0.5f) * kTileSize;
+```
+
+For Low (N=1) this gives `tileX * 10` — the tile *corner*, not the tile *centre*
+(`(tileX + 0.5) * 10`). The correct formula is `(tileX + footprintN * 0.5f) * kTileSize`
+so that:
+
+- Low (N=1): `(tileX + 0.5) * 10` — tile centre ✓
+- Med (N=2): `(tileX + 1.0) * 10` — centre of 2×2 block ✓
+- High (N=3): `(tileX + 1.5) * 10` — centre of 3×3 block ✓
+
+**Fix** (`src/rendering/IrrlichtRenderer.cpp` — `placeBuildingMesh()`): replace
+`(footprintN - 1) * 0.5f` with `footprintN * 0.5f` in both `worldCentreX` and
+`worldCentreZ`.
+
+- [x] `placeBuildingMesh()` centres buildings at `(tileX + N*0.5) * kTileSize`. (`graphics-dev-irrlicht`)
+
+#### Bug 6 — E/W Center-Line Strip Partially Invisible (PolygonOffsetFactor Overwritten)
+
+**Symptom**: The white center-line on E/W road tiles is faint or intermittently invisible —
+z-fighting against the asphalt carriageway surface.
+
+**Root cause**: After building the 4-buffer road mesh (carriageway=buf0, south-kerb=buf1,
+north-kerb=buf2, center-line=buf3), `placeRoadMesh()` iterates *all* node materials and
+unconditionally sets `PolygonOffsetFactor = 4`. This overwrites the `factor = 5` set on
+the center-line buffer (buf3) during mesh creation, collapsing the differential that kept
+the center-line above the carriageway surface.
+
+**Fix** (`src/rendering/IrrlichtRenderer.cpp` — `placeRoadMesh()` post-bind loop): skip
+the factor assignment for material index 3 (center-line):
+
+```cpp
+if (m != 3) mat.PolygonOffsetFactor = 4;
+```
+
+Buffer 3 retains `PolygonOffsetFactor = 5` from mesh creation, ensuring the center-line
+consistently wins the depth test against the carriageway (factor 4) regardless of camera
+angle or terrain slope.
+
+- [x] Center-line `PolygonOffsetFactor` (5) is not overwritten by the post-bind loop. (`graphics-dev-irrlicht`)

@@ -518,34 +518,31 @@ These values are binding and derived from `architecture/asset-standards/3d-model
 The origin tile is the bottom-left corner `(tileX, tileZ)`. All tiles in the footprint are marked occupied in the simulation layer. The placed scene node's world origin is positioned at the **center** of the full footprint:
 
 ```text
-footprintW = 1 (LOW), 2 (MED), 3 (HIGH)
-footprintH = 1 (LOW), 2 (MED), 3 (HIGH)
+footprintN = 1 (LOW), 2 (MED), 3 (HIGH)
 
-worldX = (tileX + (footprintW - 1) * 0.5f) * kTileSize
-worldZ = (tileZ + (footprintH - 1) * 0.5f) * kTileSize
+worldX = (tileX + footprintN * 0.5f) * kTileSize
+worldZ = (tileZ + footprintN * 0.5f) * kTileSize
 ```
 
 For a LOW-tier (1×1) building at `(tileX, tileZ)`:
 
 ```text
-worldX = (tileX + 0 * 0.5f) * kTileSize = tileX * kTileSize
-worldZ = (tileZ + 0 * 0.5f) * kTileSize = tileZ * kTileSize
+worldX = (tileX + 0.5f) * kTileSize   // tile centre
+worldZ = (tileZ + 0.5f) * kTileSize
 ```
-
-(Unchanged from V1 baseline.)
 
 For a MED-tier (2×2) building at `(tileX, tileZ)`:
 
 ```text
-worldX = (tileX + 0.5f) * kTileSize
-worldZ = (tileZ + 0.5f) * kTileSize
+worldX = (tileX + 1.0f) * kTileSize   // centre of 2×2 block
+worldZ = (tileZ + 1.0f) * kTileSize
 ```
 
 For a HIGH-tier (3×3) building at `(tileX, tileZ)`:
 
 ```text
-worldX = (tileX + 1.0f) * kTileSize
-worldZ = (tileZ + 1.0f) * kTileSize
+worldX = (tileX + 1.5f) * kTileSize   // centre of 3×3 block
+worldZ = (tileZ + 1.5f) * kTileSize
 ```
 
 ### `placeServiceBuildingMesh()` Contract
@@ -556,11 +553,11 @@ worldZ = (tileZ + 1.0f) * kTileSize
 Service buildings occupy a **2×2 tile footprint** (20 m × 20 m world extent) at scale 1.0 (natively sized, no runtime `setScale()` applied). Service building models are authored at real-world scale (1 Blender unit = 1 m) with a local-space half-extent of **±10 m** (matching the MED-tier zone building convention).
 
 **World origin formula**:
-The origin tile is `(tileX, tileZ)`. The scene node's world origin is positioned at the **center** of the 2×2 footprint, using the same formula as MED-tier zone buildings:
+The origin tile is `(tileX, tileZ)`. The scene node's world origin is positioned at the **center** of the 2×2 footprint, using the same formula as MED-tier zone buildings (N=2):
 
 ```text
-worldX = (tileX + 0.5f) * kTileSize
-worldZ = (tileZ + 0.5f) * kTileSize
+worldX = (tileX + 1.0f) * kTileSize   // centre of 2×2 block
+worldZ = (tileZ + 1.0f) * kTileSize
 ```
 
 All four tiles of the 2×2 footprint `[(tileX, tileZ), (tileX+1, tileZ), (tileX, tileZ+1), (tileX+1, tileZ+1)]` are marked occupied in the simulation layer. At least one road tile must be edge-adjacent (4-directional cardinal, distance = 1) to any tile in the footprint for the building to be placeable.

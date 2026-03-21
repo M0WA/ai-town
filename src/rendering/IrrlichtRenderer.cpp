@@ -1334,9 +1334,10 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
         // its stored height below targetH. getHeightAt() would return that
         // blended-down value and position the node below the rendered terrain surface.
         const float postY = m_terrain ? targetH : 0.0f;
-        // World center of the NxN footprint: (tileX + (N-1)*0.5) * kTileSize, same for Z.
-        const float worldCentreX = (static_cast<f32>(tileX) + (footprintN - 1) * 0.5f) * kTileSize;
-        const float worldCentreZ = (static_cast<f32>(tileZ) + (footprintN - 1) * 0.5f) * kTileSize;
+        // World center of the NxN footprint: (tileX + N*0.5) * kTileSize, same for Z.
+        // Low (N=1): tile centre = (tileX + 0.5) * 10.  Med (N=2): (tileX + 1.0) * 10.
+        const float worldCentreX = (static_cast<f32>(tileX) + footprintN * 0.5f) * kTileSize;
+        const float worldCentreZ = (static_cast<f32>(tileZ) + footprintN * 0.5f) * kTileSize;
         node->setPosition(core::vector3df(
             worldCentreX,
             postY + 0.10f,
@@ -2032,12 +2033,18 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
     // At oblique camera angles one of the two triangles can face away, causing half
     // the tile to disappear.  Disabling back-face culling makes both triangles always
     // visible regardless of terrain slope or camera elevation.
+    //
+    // Buffer layout: [0]=carriageway, [1]=south kerb, [2]=north kerb, [3]=center-line.
+    // The center-line buffer (index 3) uses PolygonOffsetFactor=5 (set in the mesh
+    // buffer) to keep it on top of the carriageway (factor=4).  Preserve that value
+    // here — only reset the offset factor for buffers 0–2.
     for (u32 m = 0; m < node->getMaterialCount(); ++m) {
         SMaterial& mat = node->getMaterial(m);
         mat.Lighting               = false;
         mat.BackfaceCulling        = false;
         mat.PolygonOffsetDirection = irr::video::EPO_FRONT;
-        mat.PolygonOffsetFactor    = 4;
+        // Buffer 3 is the center-line; keep its factor=5 from mesh creation.
+        if (m != 3) mat.PolygonOffsetFactor = 4;
     }
 
     // Wrap in LODNode.

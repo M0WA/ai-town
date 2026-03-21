@@ -34,13 +34,27 @@ Standards** section below for full design requirements.
 
 **Carriageway width**: The asphalt surface covers **7.5 m** of the 10 m tile width (¾ of the tile). The remaining 1.25 m on each side is rendered as a kerb/verge strip using bevelled edge strips. The carriageway is centered within the tile.
 
-**Center-line strip**: A 0.3 m wide white painted strip runs along the Z-axis center of the carriageway (at local X = 0), implementing a two-way road divider. The strip is part of the LOD0 road mesh (≤2 additional tris, bringing the total to ≤50), implemented as a thin raised quad (+0.005 m above the asphalt surface to avoid Z-fighting) with white vertex color (`SColor(255, 255, 255, 255)`) and `EMT_SOLID` material (no texture binding required — vertex color suffices). The strip does NOT appear at LOD1 or LOD2.
+**Center-line strip**: A 0.3 m wide white painted strip implements a two-way road divider.
+Its orientation depends on the tile direction detected by `placeRoadMesh()`:
+
+- **N/S tile** (`isEW = false`): strip runs along the local Z-axis at X = 0 (south to north).
+- **E/W tile** (`isEW = true`): strip runs along the local X-axis at Z = 0 (west to east);
+  heights are interpolated at Z = 0 from the west-pair corners and the east-pair corners.
+
+The strip is part of the LOD0 road mesh (mesh buffer index 3), implemented as a thin raised
+quad (+0.005 m Y above the asphalt surface) with white vertex color (`SColor(255, 255, 255,
+255)`) and `EMT_SOLID` material. `PolygonOffsetFactor = 5` (one step above the carriageway's
+`factor = 4`) is set on this buffer at mesh-creation time and **must NOT be overwritten** by
+the post-bind material loop in `placeRoadMesh()` — that loop must skip buffer index 3 when
+resetting `PolygonOffsetFactor`. The strip does NOT appear at LOD1 or LOD2.
 
 **Lane layout** (two-way, keep-right):
 
 - **Left lane** (local X = −1.875 m center, 3.6 m wide): vehicle agents traveling in the **−Z direction** (southbound).
 - **Right lane** (local X = +1.875 m center, 3.6 m wide): vehicle agents traveling in the **+Z direction** (northbound).
-- Intersecting tiles rotate these conventions 90° about Y so the same lane rules hold in all cardinal directions.
+- E/W tiles build carriageway geometry oriented along X (`isEW = true` in `buildTileRoadMesh`)
+  so the same lane rules hold in all cardinal directions. Scene-node Y-rotation is not used
+  (vertex Y heights are baked in world space; rotation would mismap corner heights).
 
 Named constants (declared in `src/rendering/render_constants.h`):
 
