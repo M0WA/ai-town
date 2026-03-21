@@ -1043,7 +1043,7 @@ def _build_res_low(zone, tier, variant, lod):
         if lod == 1:
             m.add_box(-hx, hx, 0, bh, -hz, hz, wr, wc, rr, rc)
             _add_gabled_roof(m, wr, wc, rr, rc, -hx, hx, bh, ridge_h, -hz, hz)
-            # Ground quad clamped to ±5S so it stays within the 10×10 tile at scale=10.
+            # Ground quad ±5 m covers the full 10×10 m tile at native scale (setScale=1).
             _add_ground_quad(m, "tarmac", -5*S, 5*S, -5*S, 5*S)
             return m.to_b3d()
         # LOD0
@@ -1052,9 +1052,9 @@ def _build_res_low(zone, tier, variant, lod):
         # Chimney box
         chw = 0.8*S/2
         _add_chimney(m, wr, wc, rr, rc, 0.0, 0.0, bh + ridge_h*0.5, 2*S, hw=chw)
-        # Entrance canopy/step removed: building front (hz=5S) is at the tile edge
-        # (tile half-extent = 5S at scale=10), leaving no space to extend outward.
-        # Ground quad clamped to ±5S so it stays within the 10×10 tile at scale=10.
+        # Entrance canopy/step removed: building front (hz=5 m) is at the tile edge
+        # (tile half-extent = 5 m at native scale), leaving no space to extend outward.
+        # Ground quad ±5 m covers the full 10×10 m tile at native scale.
         _add_ground_quad(m, "tarmac", -5*S, 5*S, -5*S, 5*S)
         return m.to_b3d()
 
@@ -1148,7 +1148,7 @@ def _build_res_low(zone, tier, variant, lod):
         # Bungalow: box + low hipped roof
         # Phase-11d: red-brick, low brick boundary wall at plot edge, no garden
         # Depth reduced to 10S (was 12S) so the building fills but does not exceed
-        # the 10×10 tile at scale=10 (tile half-extent = 5S).
+        # the 10×10 m tile at native scale (tile half-extent = 5 m).
         # Veranda removed: building already fills the full tile depth.
         bw, bd, bh = 10*S, 10*S, 3*S
         hx, hz = bw/2, bd/2
