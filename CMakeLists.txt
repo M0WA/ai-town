@@ -89,6 +89,13 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # ============================================================================
+# BUILD_TESTING — standard CMake option to enable/disable test target compilation.
+# Default ON so dev builds and CI include tests. Packaging jobs pass -DBUILD_TESTING=OFF
+# to skip test compilation (GTest and rapidcheck are not installed in distro containers).
+# ============================================================================
+option(BUILD_TESTING "Build test targets (requires GTest and rapidcheck)" ON)
+
+# ============================================================================
 # AITOWN_ASSETS_DIR — compile-time asset path constant.
 # Default: absolute source-tree path (correct for dev builds).
 # Override at configure time for packaging: -DAITOWN_ASSETS_DIR=assets (Windows NSIS)
