@@ -979,7 +979,7 @@ void CitySimulation::doDensityUnlockTick() {
                     if (fkey == cand.key) continue;  // origin tile itself
 
                     auto fit = m_tiles.find(fkey);
-                    if (fit == m_tiles.end()) continue;  // empty tile: OK
+                    if (fit == m_tiles.end()) { hasBlocker = true; break; }  // un-zoned empty: blocker (no expansion outside zone)
 
                     const TileData& ft = fit->second;
                     if (ft.isRoad) { hasBlocker = true; break; }
@@ -995,6 +995,13 @@ void CitySimulation::doDensityUnlockTick() {
 
                         if (ftO.zone == targetZone && ftO.density < targetDensity) {
                             // Same zone type, lower density: candidate for silent demolish.
+                            // Skip if this resolves back to the upgrade candidate itself —
+                            // non-origin tiles of the candidate's current footprint are
+                            // already inside the new footprint and will be re-marked below.
+                            // Adding cand.key to toDemo would demolish the origin tile
+                            // (isZoned=false) without restoring it, since the re-mark loop
+                            // skips the origin (dx==0 && dz==0).
+                            if (ftOriginKey == cand.key) continue;
                             bool alreadyAdded = false;
                             for (auto& de : toDemo) {
                                 if (de.originKey == ftOriginKey) { alreadyAdded = true; break; }
@@ -1015,6 +1022,11 @@ void CitySimulation::doDensityUnlockTick() {
             }
 
             // --- No blockers: silently demolish same-zone lower-density neighbours ---
+            // Outer tiles that survive demolition with isZoned=true need a fresh
+            // Low-density building mesh so they are not invisible bare terrain.
+            struct OuterTile { int x; int z; ZoneType zone; };
+            std::vector<OuterTile> outerTiles;
+
             for (auto& de : toDemo) {
                 auto dIt = m_tiles.find(de.originKey);
                 if (dIt == m_tiles.end()) continue;
@@ -1023,12 +1035,52 @@ void CitySimulation::doDensityUnlockTick() {
                 // Remove renderer mesh (no treasury refund, no undo).
                 if (m_renderer) m_renderer->removeBuildingMesh(de.x, de.z);
 
-                // Clear all footprint tiles.
-                for (int ddx = 0; ddx < oldN; ++ddx)
-                    for (int ddz = 0; ddz < oldN; ++ddz)
-                        m_tiles.erase(tileKey(de.x + ddx, de.z + ddz));
+                // Clear all footprint tiles.  Tiles inside the new upgrade footprint
+                // will be re-marked by the loop below; tiles outside must remain
+                // zoned (reset to Low density) so the player's zoning is preserved.
+                for (int ddx = 0; ddx < oldN; ++ddx) {
+                    for (int ddz = 0; ddz < oldN; ++ddz) {
+                        auto it = m_tiles.find(tileKey(de.x + ddx, de.z + ddz));
+                        if (it == m_tiles.end()) continue;
+                        TileData& t = it->second;
+                        int tileX = de.x + ddx;
+                        int tileZ = de.z + ddz;
+                        bool insideNewFP = (tileX >= tx && tileX < tx + newN &&
+                                            tileZ >= tz && tileZ < tz + newN);
+                        // Tiles inside the new footprint: re-marking loop will restore
+                        // isZoned=true; set false here so stale state is never visible.
+                        // Tiles outside: keep isZoned=true at Low density so the
+                        // player's zone designation survives the upgrade.
+                        t.isZoned           = !insideNewFP;
+                        t.density           = insideNewFP ? t.density : DensityTier::Low;
+                        t.population        = 0.0f;
+                        t.footprintOriginX  = -1;
+                        t.footprintOriginZ  = -1;
+                        t.isAbandoned       = false;
+                        // zone type preserved — tile remains player-zoned land
+                        if (!insideNewFP) {
+                            outerTiles.push_back({tileX, tileZ, t.zone});
+                        }
+                    }
+                }
 
                 m_notifications.push({NotificationType::NeighbourCleared, de.x, de.z, 0});
+            }
+
+            // Place Low-density building meshes for outer tiles that survived as
+            // zoned-but-vacant, so they are visually distinguishable from bare terrain.
+            for (auto& ot : outerTiles) {
+                if (!m_renderer) break;
+                int zoneIdx = static_cast<int>(ot.zone);
+                int idx = zoneIdx * 3 + 0;  // tierIdx=0 for Low density
+                m_buildingVariantCounters[idx]++;
+                int variantNum = ((m_buildingVariantCounters[idx] - 1) % 4) + 1;
+                std::string baseName = zoneAssetBaseName(ot.zone, DensityTier::Low);
+                if (baseName.size() >= 2) {
+                    baseName[baseName.size() - 2] = '0';
+                    baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
+                }
+                m_renderer->placeBuildingMesh(ot.x, ot.z, baseName);
             }
 
             // --- Reset retry counter ---
@@ -1036,6 +1088,8 @@ void CitySimulation::doDensityUnlockTick() {
 
             // --- Upgrade origin tile ---
             TileData& originTile = m_tiles[cand.key];
+            originTile.isZoned    = true;   // defensive: toDemo guard above prevents clearing,
+                                            // but be explicit — origin must always stay zoned.
             originTile.density    = targetDensity;
             originTile.population = 0.0f;
             originTile.footprintOriginX = -1;
@@ -1674,13 +1728,20 @@ float CitySimulation::computePowerCoverage(int tileX, int tileZ) const {
     for (const ServiceBuilding& sb : m_serviceBuildings) {
         if (sb.type != ServiceType::PowerPlant) continue;
 
-        // BFS from this plant's location through all adjacent placed tiles
+        // BFS from all 2×2 footprint tiles of this plant through adjacent placed tiles.
+        // Starting from all footprint tiles (not just origin) ensures that zones
+        // adjacent to any footprint tile are BFS-reachable at depth 1.
         std::unordered_map<int64_t, int> bfsDepth;
         std::queue<std::pair<int,int>> bfsQueue;
 
-        int64_t plantKey = tileKey(sb.x, sb.z);
-        bfsDepth[plantKey] = 0;
-        bfsQueue.push({sb.x, sb.z});
+        const int sN = serviceFootprintSize();  // == 2
+        for (int fdx = 0; fdx < sN; ++fdx) {
+            for (int fdz = 0; fdz < sN; ++fdz) {
+                int64_t fpKey = tileKey(sb.x + fdx, sb.z + fdz);
+                bfsDepth[fpKey] = 0;
+                bfsQueue.push({sb.x + fdx, sb.z + fdz});
+            }
+        }
 
         int maxDepth = 0;
 
@@ -1818,14 +1879,13 @@ void CitySimulation::doProximityTick() {
         if (dist > 3 && !tile.isAbandoned) {
             tile.isAbandoned  = true;
             tile.population   = 0.0f;
-            // Emit a BudgetDeficitWarn notification as a proxy for "building abandoned"
-            // until a Phase 12 notification type is added for proximity abandonment.
-            m_notifications.push({NotificationType::BudgetDeficitWarn, 0, 0, 0});
+            m_notifications.push({NotificationType::BuildingAbandoned, ox, oz, 0});
         } else if (dist <= 3 && tile.isAbandoned) {
             tile.isAbandoned = false;
             // Restore partial population.
             float maxPop = static_cast<float>(maxPopulationForTile(tile.zone, tile.density));
             tile.population  = maxPop * 0.5f;
+            m_notifications.push({NotificationType::BuildingRecovered, ox, oz, 0});
         }
     }
 }
@@ -1844,19 +1904,40 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
             int fx = tileX + dx, fz = tileZ + dz;
             // Out-of-bounds check (negative coords are always OOB).
             if (fx < 0 || fz < 0) {
-                return;  // Out of bounds — silent no-op.
+                m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
+                return;
             }
             int64_t fkey = tileKey(fx, fz);
             auto fit = m_tiles.find(fkey);
             if (fit != m_tiles.end() && (fit->second.isRoad || fit->second.isZoned)) {
-                return;  // Tile occupied — demolish first.
+                m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
+                return;
+            }
+        }
+    }
+
+    // Service building overlap guard — service buildings use a 2×2 footprint and are
+    // NOT stored in m_tiles (they are in m_serviceBuildings). Zoning must not overwrite them.
+    for (const ServiceBuilding& sb : m_serviceBuildings) {
+        for (int sdx = 0; sdx < 2; ++sdx) {
+            for (int sdz = 0; sdz < 2; ++sdz) {
+                int sx = sb.x + sdx, sz = sb.z + sdz;
+                for (int dx = 0; dx < N; ++dx) {
+                    for (int dz = 0; dz < N; ++dz) {
+                        if (tileX + dx == sx && tileZ + dz == sz) {
+                            m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
+                            return;
+                        }
+                    }
+                }
             }
         }
     }
 
     // Phase 11h: road proximity check — at least one footprint tile within 3 of a road.
     if (nearestRoadDistance(m_tiles, tileX, tileZ, N) > 3) {
-        return;  // Too far from road — silent no-op.
+        m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
+        return;
     }
 
     int64_t key = tileKey(tileX, tileZ);
@@ -2282,7 +2363,8 @@ void CitySimulation::placeServiceBuilding(int tileX, int tileZ,
             }
         }
         if (!hasRoadAdjacent) {
-            return;  // No adjacent road — silent no-op.
+            m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
+            return;
         }
     }
 

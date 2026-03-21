@@ -803,15 +803,15 @@ bool UIManager::onEvent(const InputEvent& event) {
     // ============================================================
 
     // ============================================================
-    // Priority 6b: RMB cancels the active tool (deselects it).
+    // Priority 6b: RMB *click* (release without drag) cancels the active tool.
     // Only during Gameplay when a non-None tool is active.
-    // The camera drag starts after this check (EventReceiver sets m_rmbDragActive
-    // and forwards to CameraController only when UIManager returns false here).
-    // RMB down with an active tool: deselect the tool and consume the event so
-    // CameraController does NOT start a camera drag on the same press.
+    // EventReceiver only delivers RMB-up here when no camera drag occurred
+    // (m_rmbMoved == false in EventReceiver), so this handler fires exclusively
+    // on short right-clicks.  RMB drag always starts the camera and never
+    // reaches this branch.
     // ============================================================
     if (m_state == GameState::Gameplay &&
-        event.type == InputEvent::Type::MouseButtonDown &&
+        event.type == InputEvent::Type::MouseButtonUp &&
         event.button == 1 &&
         m_activeTool != ActiveTool::None) {
         // Close any open sub-panels and clear the active tool.
@@ -982,9 +982,17 @@ bool UIManager::onEvent(const InputEvent& event) {
             int hitX = -1, hitZ = -1;
             if (m_renderer->pickTerrainTile(event.physX, event.physY, hitX, hitZ)) {
                 // Determine hover colour from active tool.
+                // Zone tool: colour depends on selected zone type (res/com/ind).
                 uint32_t colour = 0u;
                 switch (m_activeTool) {
-                    case ActiveTool::Zone:      colour = kHoverArgbZone;      break;
+                    case ActiveTool::Zone:
+                        switch (m_selectedZoneType) {
+                            case 1:  colour = kHoverArgbZoneCom; break;  // Commercial
+                            case 2:  colour = kHoverArgbZoneInd; break;  // Industrial
+                            default: colour = kHoverArgbZoneRes; break;  // Residential
+                        }
+                        if (m_renderer) m_renderer->setZoneHoverColour(colour);
+                        break;
                     case ActiveTool::Road:      colour = kHoverArgbRoad;      break;
                     case ActiveTool::Utilities: colour = kHoverArgbUtilities; break;
                     case ActiveTool::Demolish:  colour = kHoverArgbDemolish;  break;
@@ -1097,21 +1105,14 @@ bool UIManager::onEvent(const InputEvent& event) {
                     } else if (m_activeTool == ActiveTool::Zone) {
                         // m_selectedDensityTier: 0=Low→1, 1=Med→2, 2=High→3
                         hoverFootprint = m_selectedDensityTier + 1;
+                    } else if (m_activeTool == ActiveTool::Utilities) {
+                        hoverFootprint = 2;  // Service buildings always have a 2×2 footprint
                     }
                     m_renderer->setTileHoverHighlight(hitX, hitZ, hoverFootprint);
                 }
 
-                // Utilities retains tile-by-tile drag placement when LMB is held and tile changes.
-                // Zone and Road use the deferred anchor/release pattern — no placement on move.
-                // Demolish uses mouse-up confirmation — no drag placement.
-                if (m_lmbHeld &&
-                    (hitX != m_hoveredTileX || hitZ != m_hoveredTileZ) &&
-                    m_activeTool != ActiveTool::Query &&
-                    m_activeTool != ActiveTool::Zone &&
-                    m_activeTool != ActiveTool::Road &&
-                    m_activeTool != ActiveTool::Demolish) {
-                    doTerrainPlacement(hitX, hitZ);
-                }
+                // Zone, Road, Utilities, and Demolish all use click-only or deferred placement.
+                // No tool places on drag (MouseMove while LMB held).
 
                 m_hoveredTileX = hitX;
                 m_hoveredTileZ = hitZ;
@@ -1656,6 +1657,36 @@ void UIManager::update(float realDeltaSeconds) {
                 // getCityRating() polling in section 4b above — NOT from this
                 // notification handler.  Removing the stinger call here prevents
                 // double-fire: both paths would otherwise fire on the same transition.
+                break;
+
+            case NotificationType::NeighbourCleared:
+                m_notifications->postNormal(
+                    "Neighbour Cleared",
+                    "Neighbouring building cleared for density upgrade.");
+                break;
+
+            case NotificationType::UpgradeBlocked:
+                m_notifications->postCritical(
+                    "Upgrade Blocked",
+                    "Upgrade blocked — clear surrounding tiles.");
+                break;
+
+            case NotificationType::PlacementBlocked:
+                m_notifications->postNormal(
+                    "Placement Blocked",
+                    "Cannot place here — check for occupied tiles or road proximity.");
+                break;
+
+            case NotificationType::BuildingAbandoned:
+                m_notifications->postNormal(
+                    "Building Abandoned",
+                    "Building abandoned — too far from road.");
+                break;
+
+            case NotificationType::BuildingRecovered:
+                m_notifications->postNormal(
+                    "Building Recovered",
+                    "Building recovered — road reconnected.");
                 break;
         }
     }

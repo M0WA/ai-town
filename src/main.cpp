@@ -448,9 +448,13 @@ int main(int argc, char** argv) {
                 // from the minimap overlay — agent sync uses a simple motion heuristic.
                 const float speedFraction = 1.0f;
                 if (it->second.idleIdx >= 0) {
+                    // Use the same sub-tile-interpolated position as the renderer
+                    // (agentWx/agentWz) so audio remains spatially synchronised with
+                    // the visual vehicle position, including the lane offset applied by
+                    // IrrlichtRenderer::moveVehicleAgent() (Phase 11h §4e).
                     audioSystem.updateVehicleAudio(
                         it->second.idleIdx, it->second.moveIdx,
-                        speedFraction, wx, wz);
+                        speedFraction, agentWx, agentWz);
                 }
             }
         }

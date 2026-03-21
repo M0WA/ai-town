@@ -93,7 +93,11 @@ enum class NotificationType {
                           //   (Village=0, Town=1, City=2, Metropolis=3, Megalopolis=4)
                           //   fires stinger_milestone at tier transitions ONLY; NOT at 100K raw population
     NeighbourCleared,    // same-zone lower-density neighbour auto-demolished during density upgrade
-    UpgradeBlocked       // density upgrade cancelled after 12 deferred retries (CRITICAL toast)
+    UpgradeBlocked,      // density upgrade cancelled after 12 deferred retries (CRITICAL toast)
+    PlacementBlocked,    // zone/service placement rejected (footprint occupied, OOB, road too far,
+                         //   or no adjacent road); tileX/tileZ hold the attempted origin tile
+    BuildingAbandoned,   // zone building abandoned — nearest road > 3 tiles away
+    BuildingRecovered    // previously-abandoned zone building recovered — road within 3 tiles again
 };
 
 // SimulationNotification — one queued event from CitySimulation for UIManager to process.

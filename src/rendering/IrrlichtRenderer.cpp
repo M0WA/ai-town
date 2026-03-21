@@ -635,8 +635,12 @@ void IrrlichtRenderer::setTileHoverHighlight(int tileX, int tileZ, int footprint
     // Select color from active tool.
     SColor colour(0x66, 0xFF, 0xFF, 0xFF);  // default: semi-transparent white
     switch (m_activeTool) {
-        case ToolMode::Zone:    colour = SColor(0x66, 0x00, 0xFF, 0x00); break;  // green
-        case ToolMode::Demolish:colour = SColor(0x66, 0xFF, 0x00, 0x00); break;  // red
+        case ToolMode::Zone: {
+            // Use the per-zone-type colour stored by setZoneHoverColour().
+            colour = SColor(m_zoneHoverArgb);
+            break;
+        }
+        case ToolMode::Demolish: colour = SColor(0x66, 0xFF, 0x00, 0x00); break;  // red
         default: break;
     }
 
@@ -678,6 +682,14 @@ void IrrlichtRenderer::setTileHoverHighlight(int tileX, int tileZ, int footprint
 void IrrlichtRenderer::setActiveTool(ToolMode mode)
 {
     m_activeTool = mode;
+}
+
+// -------------------------------------------------------------------------
+// setZoneHoverColour — store the ARGB colour for zone-tool hover highlights.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::setZoneHoverColour(unsigned int argb)
+{
+    m_zoneHoverArgb = argb;
 }
 
 // -------------------------------------------------------------------------
@@ -1277,43 +1289,8 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
     // unsupported format) the slot remains null and the zone-coloured placeholder
     // texture is bound instead so the building is still visually distinguishable.
     if (scene::ISceneNode* node = lodNode->getNode()) {
-        // Four-corner terrain flattening pattern (Phase 10b):
-        // Average all 4 tile-corner vertex heights then flatten each corner to that value.
-        // setTileHeight(tileX+1, tileZ, h) sets the top-left vertex of tile (tileX+1, tileZ),
-        // which IS the top-right vertex of tile (tileX, tileZ) — so calling all 4 corner
-        // coordinates flattens all 4 vertices of this tile to the same height, eliminating
-        // T-junction seams between the road/building mesh and the terrain quad edges.
-        const float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
-        const float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
-        const float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
-        const float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
-        const float targetH = (h00 + h10 + h01 + h11) * 0.25f;
-        if (m_terrain) {
-            m_terrain->setTileHeight(tileX,     tileZ,     targetH);
-            m_terrain->setTileHeight(tileX + 1, tileZ,     targetH);
-            m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
-            m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
-        }
-        if (m_terrain) m_terrain->flushTerrainRebuilds();
-
-        // Rebuild road tiles within ±2 of this building tile.
-        // setTileHeight() applies weighted neighbour blending to the 8 vertices
-        // surrounding each written corner; the four-corner sequence touches vertices
-        // up to 2 tiles away.  Road tiles at those positions have stale meshes until
-        // rebuilt here (same radius as placeRoadMesh Phase 3).
-        for (int dz = -2; dz <= 2; ++dz) {
-            for (int dx = -2; dx <= 2; ++dx) {
-                if (dx == 0 && dz == 0) continue;
-                const int nx = tileX + dx;
-                const int nz = tileZ + dz;
-                if (m_roadNodes.count(tileKey(nx, nz)) > 0)
-                    placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
-                                          /*rebuildNeighbors=*/false);
-            }
-        }
-
         // Parse density tier from assetBaseName (format: "zone_dens_NN", e.g. "res_low_01").
-        // Extract the second '_'-delimited segment to determine footprint size.
+        // Must be done BEFORE terrain flattening so we know how many tiles to flatten.
         int footprintN = 1;  // default: Low = 1×1
         {
             size_t first = assetBaseName.find('_');
@@ -1328,10 +1305,45 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
             }
         }
 
+        // Full-footprint terrain flattening:
+        // Average all (footprintN+1)×(footprintN+1) corner vertex heights, then flatten
+        // every corner to that average so the ground plate sits flush with terrain across
+        // the entire N×N tile footprint.  For LOW (N=1) this is the same as the original
+        // 4-corner pattern; for MED (N=2) and HIGH (N=3) it covers 9 or 16 vertices.
+        float heightSum = 0.0f;
+        int   heightCount = 0;
+        for (int cx = 0; cx <= footprintN; ++cx) {
+            for (int cz = 0; cz <= footprintN; ++cz) {
+                heightSum += m_terrain ? m_terrain->getHeightAt(tileX + cx, tileZ + cz) : 0.0f;
+                ++heightCount;
+            }
+        }
+        const float targetH = (heightCount > 0) ? (heightSum / heightCount) : 0.0f;
+        if (m_terrain) {
+            for (int cx = 0; cx <= footprintN; ++cx)
+                for (int cz = 0; cz <= footprintN; ++cz)
+                    m_terrain->setTileHeight(tileX + cx, tileZ + cz, targetH);
+        }
+        if (m_terrain) m_terrain->flushTerrainRebuilds();
+
+        // Rebuild road tiles within ±(footprintN+2) of the building origin.
+        // setTileHeight() applies weighted neighbour blending to the 8 surrounding vertices;
+        // for larger footprints the affected radius grows accordingly.
+        const int rebuildRadius = footprintN + 2;
+        for (int dz = -rebuildRadius; dz <= footprintN + rebuildRadius; ++dz) {
+            for (int dx = -rebuildRadius; dx <= footprintN + rebuildRadius; ++dx) {
+                if (dx >= 0 && dx < footprintN && dz >= 0 && dz < footprintN) continue;
+                const int nx = tileX + dx;
+                const int nz = tileZ + dz;
+                if (m_roadNodes.count(tileKey(nx, nz)) > 0)
+                    placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
+                                          /*rebuildNeighbors=*/false);
+            }
+        }
+
         // Use targetH directly — NOT getHeightAt() after setTileHeight().
-        // setTileHeight() applies neighbour blending to the 8 surrounding tiles;
-        // subsequent corner calls bleed back into vertex (tileX, tileZ), leaving
-        // its stored height below targetH. getHeightAt() would return that
+        // setTileHeight() applies neighbour blending to surrounding tiles;
+        // subsequent corner calls bleed back, so getHeightAt() would return a
         // blended-down value and position the node below the rendered terrain surface.
         const float postY = m_terrain ? targetH : 0.0f;
         // World center of the NxN footprint: (tileX + N*0.5) * kTileSize, same for Z.
@@ -1340,7 +1352,7 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
         const float worldCentreZ = (static_cast<f32>(tileZ) + footprintN * 0.5f) * kTileSize;
         node->setPosition(core::vector3df(
             worldCentreX,
-            postY + 0.10f,
+            postY + 0.05f,
             worldCentreZ));
         // Phase 11h: buildings are authored at world scale — no tile-size scaling.
         node->setScale(core::vector3df(1.0f, 1.0f, 1.0f));
@@ -2171,11 +2183,13 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
         // blended-down value and position the node below the rendered terrain surface.
         const float postY = m_terrain ? targetH : 0.0f;
         // Phase 11h: service buildings have a 2×2 footprint.
-        // World center of the 2×2 footprint: (tileX + 0.5) * kTileSize, same for Z.
+        // World center of the 2×2 footprint: (tileX + 1.0) * kTileSize, same for Z.
+        // The origin tile is (tileX, tileZ); footprint spans [tileX, tileX+2) × [tileZ, tileZ+2),
+        // so the geometric centre is tileX*kTileSize + kTileSize = (tileX+1)*kTileSize.
         node->setPosition(core::vector3df(
-            (static_cast<f32>(tileX) + 0.5f) * kTileSize,
+            (static_cast<f32>(tileX) + 1.0f) * kTileSize,
             postY + 0.10f,
-            (static_cast<f32>(tileZ) + 0.5f) * kTileSize));
+            (static_cast<f32>(tileZ) + 1.0f) * kTileSize));
         // Phase 11h: service buildings are authored at world scale — no tile-size scaling.
         node->setScale(core::vector3df(1.0f, 1.0f, 1.0f));
 
