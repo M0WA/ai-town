@@ -14,6 +14,11 @@
 using TextureHandle = uint32_t;
 static constexpr TextureHandle kInvalidTexture = 0;
 
+// ToolMode — mirrors ActiveTool (ui_types.h) but defined here so IRenderer.h
+// does not depend on src/ui/ headers. UIManager casts ActiveTool → ToolMode.
+// Values MUST match the order of ActiveTool in ui_types.h exactly.
+enum class ToolMode { None, Zone, Road, Utilities, Demolish, Query };
+
 // CameraParams — passed to IRenderer::setCamera() each frame.
 // Defined in IRenderer.h (alongside IRenderer) since it is only used as a parameter to IRenderer.
 // Not shared with IAudioSystem — that interface uses CameraState (position/forward/up vectors)
@@ -127,15 +132,28 @@ public:
     virtual bool pickTerrainTile(int screenX, int screenY,
                                  int& tileX, int& tileZ) const = 0;
 
-    // setTileHoverHighlight — render a wireframe/filled quad over the hovered tile.
+    // setTileHoverHighlight — render a highlight quad over the hovered tile or footprint.
     //
-    // ARGB colour encoded as 0xAARRGGBB (Irrlicht SColor format).
-    // Pass tileX = -1 to clear the highlight (sets m_hoverVisible = false without
-    // dropping or reallocating the internal mesh buffer).
-    // Called once per MouseMove event from UIManager; actual drawMeshBuffer() is issued
-    // inside IrrlichtRenderer::drawScene() after sceneManager->drawAll().
+    // footprintSize: 1 for 1×1 tile, 2 for 2×2, 3 for 3×3. Default=1 (backward compatible).
+    // Highlight color is determined by the renderer based on the current active tool:
+    //   Zone: semi-transparent green (0x6600FF00)
+    //   Demolish pending: semi-transparent red (0x66FF0000)
+    //   Other: semi-transparent white
+    // Pass tileX = -1 to clear the highlight.
     // main-thread-only.
-    virtual void setTileHoverHighlight(int tileX, int tileZ, uint32_t argb) = 0;
+    virtual void setTileHoverHighlight(int tileX, int tileZ, int footprintSize = 1) = 0;
+
+    // setActiveTool — inform the renderer which tool is currently active.
+    // Used by IrrlichtRenderer to select the hover-highlight color in setTileHoverHighlight().
+    // Called by UIManager whenever m_activeTool changes.
+    // main-thread-only.
+    virtual void setActiveTool(ToolMode mode) = 0;
+
+    // clearDemolishHighlight — clear any pending demolition highlight.
+    // Called by UIManager when the demolition confirmation modal is cancelled or dismissed.
+    // Equivalent to setTileHoverHighlight(-1, -1) but semantically explicit.
+    // main-thread-only.
+    virtual void clearDemolishHighlight() = 0;
 
     // setZoneOverlay — update the semi-transparent zone-colour overlay mesh.
     //

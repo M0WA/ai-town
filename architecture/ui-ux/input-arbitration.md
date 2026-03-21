@@ -183,3 +183,59 @@ if (event.EventType == irr::EET_GUI_EVENT) {
 - Always `return false` — consuming hover events blocks Irrlicht's own tooltip and focus logic
 - `kSpriteXxxHover` constants live in `src/ui/hud_sprite_ids.h`; the naming convention is
   `kSprite<Name>Hover` (e.g. `kSpriteZoneResidentialHover`, `kSpriteRoadHover`)
+
+## Demolition Tool
+
+The Demolish tool is activated via the Demolish button in the toolbar (or hotkey `X`).
+
+**Input ownership**: The Demolish tool takes exclusive input ownership of left-mouse tile
+interaction only while it is the active tool. As soon as the player switches to the Zone, Road,
+Utilities, or Query tool (via toolbar click, hotkey, or right-click tool deselect), any pending
+demolition highlight is cleared synchronously via `IRenderer::setTileHoverHighlight(-1, -1)` and
+the anchor state is reset to `{-1, -1}`. The new tool takes over tile interaction immediately —
+there is no lingering demolition state after a tool switch.
+
+**Guard — non-active state**: While Demolish is NOT the active tool, left-mouse events MUST NEVER
+trigger demolition logic. Tool-mode is checked before any tile-interaction handler fires
+(see Priority 7 world interaction layer). The Zone tool's LMB-down must not enter the demolition
+code path under any circumstances.
+
+**Mouse-down** (LMB press) while Demolish is active:
+
+1. Call `pickTerrainTile()` to identify the hovered tile.
+2. If the ray-cast succeeds: call `IRenderer::setTileHoverHighlight(tileX, tileZ)` to display a
+   demolition-colour highlight quad as visual feedback. Store the highlighted tile coordinates in
+   `m_demolishAnchorX` / `m_demolishAnchorZ`. Return `true` (event consumed).
+3. If the ray-cast fails (miss): no highlight is set. Return `false` (not consumed).
+
+No confirmation dialog is shown on mouse-down — the highlight is visual feedback only.
+
+**Mouse-up** (LMB release) while Demolish is active:
+
+1. Ray-cast the current cursor position to obtain the tile under the cursor at release time.
+2. If the release tile matches `m_demolishAnchorX` / `m_demolishAnchorZ` (same tile that was
+   highlighted on mouse-down): open the confirmation modal "Demolish [tile type]? [Yes] [No]".
+3. If the cursor has moved to a different tile between down and up (ray-cast differs from anchor):
+   clear the highlight via `IRenderer::setTileHoverHighlight(-1, -1)`, reset anchor state, and do
+   nothing further. No modal is shown.
+
+**Confirmation modal responses**:
+
+- **Yes**: call `ICitySimulation::demolishTile(tileX, tileZ)` with the coordinates stored from the
+  mouse-down anchor, then dismiss the modal.
+- **No** or modal dismissed (Esc): dismiss the modal, call
+  `IRenderer::setTileHoverHighlight(-1, -1)` to clear the highlight, reset anchor state to
+  `{-1, -1}`, and remain in Demolish tool mode ready for the next demolition attempt.
+
+**Tool switching — highlight cleared synchronously**: When the player switches away from Demolish
+(toolbar click to Zone, Road, Utilities, or Query; hotkey; or right-click tool deselect at
+Priority 7e), any pending demolition highlight is cleared as part of the tool-deselect handler
+before the new tool becomes active. This applies even if the confirmation modal is not open (i.e.,
+mid-drag between mouse-down and mouse-up). The clearing sequence is:
+
+1. `IRenderer::setTileHoverHighlight(-1, -1)` — clears the highlight quad.
+2. Reset `m_demolishAnchorX` / `m_demolishAnchorZ` to `{-1, -1}`.
+3. Set `m_activeTool` to the new tool value (or `None` on right-click deselect).
+
+Steps 1 and 2 MUST occur before step 3 so that no frame exists where `m_activeTool` is
+non-Demolish while a stale highlight quad remains visible.

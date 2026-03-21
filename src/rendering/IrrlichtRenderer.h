@@ -123,7 +123,9 @@ public:
     // Phase 9b — IRenderer world-interaction methods.
     bool      pickTerrainTile(int screenX, int screenY,
                                int& tileX, int& tileZ) const override;
-    void      setTileHoverHighlight(int tileX, int tileZ, uint32_t argb) override;
+    void      setTileHoverHighlight(int tileX, int tileZ, int footprintSize = 1) override;
+    void      setActiveTool(ToolMode mode) override;
+    void      clearDemolishHighlight() override;
     void      setZoneOverlay(int mapTilesX, int mapTilesZ,
                              const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) override;
     ScreenRect getTileScreenBounds(int tileX, int tileZ) const override;
@@ -216,6 +218,9 @@ private:
     // Returned by getListenerPosition() for use by CitySimulation's
     // sfx_intersection_tick 80 m pre-acquisition distance cull.
     vec3 m_lastCameraPosition{};
+
+    // Phase 11h: current active tool — used by setTileHoverHighlight() to select color.
+    ToolMode m_activeTool{ToolMode::None};
 
     // Texture handle map: TextureHandle → ITexture*
     TextureHandle                                      m_nextHandle{1};
@@ -459,5 +464,9 @@ private:
     // Helper: ensure m_buildingAssetLoader is created (idempotent).
     // Returns false and logs a warning if m_smgr is null (test/headless context).
     bool ensureAssetLoader();
+
+    // isIntersectionTile — returns true if the tile at (tileX, tileZ) has road
+    // nodes in 3 or more cardinal directions (used by moveVehicleAgent for lane offset).
+    bool isIntersectionTile(int tileX, int tileZ) const;
 
 };

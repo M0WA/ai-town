@@ -368,6 +368,11 @@ private:
     // Tests set this to false to suppress the modal and call demolishTile directly.
     bool m_demolishConfirmEnabled{true};
 
+    // Phase 11h: demolition pending tile (mouse-down records tile; mouse-up triggers modal).
+    int m_demolishPendingTileX{-1};
+    int m_demolishPendingTileZ{-1};
+    bool m_demolishModalPending{false};  // true while waiting for demolish confirm modal result
+
     // Background scrim element shown behind modal dialogs.
     // kInvalidUIElement (0) until Phase 6 creates the real element.
     UIElementHandle m_scrimHandle{kInvalidUIElement};

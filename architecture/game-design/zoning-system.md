@@ -213,6 +213,10 @@ An abandoned building remains abandoned until either (a) a road is restored with
 
 When the player hovers over the terrain with the Zone tool active, the tile hover highlight covers the **full footprint of the selected tier** (1×1, 2×2, or 3×3), not just the single hovered tile. The highlight is a semi-transparent overlay covering all tiles from `(tileX, tileZ)` to `(tileX + footprintSize − 1, tileZ + footprintSize − 1)`, where `footprintSize` is determined by the density tier selected in the Zone sub-panel.
 
+### Road Adjacency for Multi-Tile Buildings
+
+For multi-tile buildings (any N×N footprint where N > 1), road adjacency is satisfied if **at least one road tile is edge-adjacent (4-directional cardinal, distance = 1) to ANY tile in the footprint** — not only to the origin tile. This applies to both the Zone Street Proximity check (3-tile Manhattan distance from any footprint tile) and the Service Building Street Adjacency check (direct edge-adjacency to any footprint tile).
+
 ## Phase 10 Audio Callbacks for Zone Events
 
 The following calls are made from `CitySimulation` on zone placement, demolition, and density

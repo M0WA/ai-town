@@ -26,14 +26,21 @@ private:
     // Panel background / container
     UIElementHandle m_panelBg{kInvalidUIElement};
 
-    // 8 line items
+    // Income section line items
     UIElementHandle m_taxRevenueR{kInvalidUIElement};
     UIElementHandle m_taxRevenueC{kInvalidUIElement};
     UIElementHandle m_taxRevenueI{kInvalidUIElement};
+    UIElementHandle m_utilityFees{kInvalidUIElement};
+    UIElementHandle m_tourismIncome{kInvalidUIElement};  // Phase 11h: always $0 in V1
+    UIElementHandle m_incomeTotal{kInvalidUIElement};    // Phase 11h: sum of income items
+
+    // Expense section line items
     UIElementHandle m_wages{kInvalidUIElement};
     UIElementHandle m_roadMaint{kInvalidUIElement};
     UIElementHandle m_serviceUpkeep{kInvalidUIElement};
-    UIElementHandle m_utilityFees{kInvalidUIElement};
+    UIElementHandle m_expenseTotal{kInvalidUIElement};   // Phase 11h: sum of expense items
+
+    // Net balance
     UIElementHandle m_netBalance{kInvalidUIElement};
 
     // Density unlock preview (bottom of panel)

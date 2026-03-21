@@ -232,6 +232,13 @@ protected:
         // and on LMB-up (clear after commit).  Tests exercising the preview contents add
         // their own EXPECT_CALL; all others suppress via this catch-all.
         EXPECT_CALL(renderer_, setTilePlacementPreview(_, _, _)).Times(::testing::AnyNumber());
+        // Phase 11h: setActiveTool fires whenever m_activeTool changes (toolbar click, hotkey).
+        // clearDemolishHighlight fires on demolish cancel/dismiss.
+        // setTileHoverHighlight fires during hover and demolish pending-tile highlight.
+        // All three suppressed for tests that do not assert on these calls.
+        EXPECT_CALL(renderer_, setActiveTool(_)).Times(::testing::AnyNumber());
+        EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(::testing::AnyNumber());
+        EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(::testing::AnyNumber());
         // Phase 11d Deliverable 5d: queryTile is now called in Zone/Road commit loops
         // and drag preview partitioning to classify tiles as free vs blocked.
         // Suppress via catch-all; tests that verify placement counts add their own
@@ -398,15 +405,17 @@ TEST_F(WorldInteractionTest, WorldInteraction_DemolishTool_SteepSlope_NoEarthwor
     activateDemolishTool();
 
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
+        .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
 
     // Zone overlay may be called on demolish (erase entry).
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AtLeast(0));
 
     // Primary assertion: demolishTile IS called despite steep slope.
+    // New flow (phase-11h): down sets pending tile; up commits demolish.
     EXPECT_CALL(sim_, demolishTile(5, 7)).Times(1);
 
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 }
 
 // ---------------------------------------------------------------------------
@@ -568,9 +577,8 @@ TEST_F(WorldInteractionTest, WorldInteraction_HoverHighlight_ClearedOnMiss)
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
         .WillRepeatedly(Return(false));
 
-    // Primary assertion: clear call with (-1, -1, kHoverArgbClear).
-    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1,
-        static_cast<uint32_t>(kHoverArgbClear))).Times(AtLeast(1));
+    // Primary assertion: clear call with (-1, -1, footprintSize=1).
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(AtLeast(1));
 
     uiManager_->onEvent(makeMouseMove(500, 500));
 }
@@ -646,7 +654,9 @@ TEST_F(WorldInteractionTest, WorldInteraction_Demolish_SparseOverlay_ErasesEntry
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
         .WillOnce(SaveArg<2>(&capturedAfterDemolish));
 
+    // New flow (phase-11h): down sets pending tile; up commits demolish.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 
     // Assert: overlay map is empty after demolish.
     EXPECT_TRUE(capturedAfterDemolish.empty())
@@ -684,8 +694,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_NewGameLoad_ClearsOverlay)
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
         .WillOnce(SaveArg<2>(&capturedClear));
     // onNewGame() also clears the hover highlight — expect the clear call.
-    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1,
-        static_cast<uint32_t>(kHoverArgbClear))).Times(1);
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
 
     uiManager_->onNewGame();
 
@@ -1833,10 +1842,9 @@ TEST_F(WorldInteractionTest, WorldInteraction_HoverHighlight_ClearedOnRmbToolClo
     uiManager_->onEvent(makeMouseMove(500, 500));
 
     // Step 2: RMB press — tool deselected; hover must be cleared.
-    // The primary assertion: setTileHoverHighlight(-1, -1, kHoverArgbClear) called
-    // exactly once by the RMB handler.
-    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1,
-        static_cast<uint32_t>(kHoverArgbClear))).Times(1);
+    // The primary assertion: setTileHoverHighlight(-1, -1, ...) called exactly once
+    // by the RMB handler (footprintSize arg may vary).
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     uiManager_->onEvent(makeMouseButtonDown(1, 500, 500));
 
     // Postcondition: active tool must be None after RMB.
@@ -2165,6 +2173,8 @@ protected:
 
         EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AnyNumber());
         EXPECT_CALL(renderer_, setTilePlacementPreview(_, _, _)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, setActiveTool(_)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(AnyNumber());
         // Phase 11d Deliverable 5d: queryTile called in Zone/Road preview partitioning
         // and commit loop guards. Suppress via catch-all for this fixture.
         EXPECT_CALL(sim_, queryTile(_, _)).Times(AnyNumber()).WillRepeatedly(Return(QueryResult{}));
@@ -2269,19 +2279,20 @@ TEST_F(ValidHandleWorldInteractionTest, RoadDrag_ZDominant_ShowsZPreview)
 // ============================================================================
 TEST_F(ValidHandleWorldInteractionTest, DemolishDrag_DifferentTile_CallsPlacement)
 {
+    // Phase 11h: Demolish flow changed — down sets pending, up (same tile) triggers demolish.
+    // This test verifies the full click cycle (down → up on same tile) calls demolishTile.
     goToGameplay();
     uiManager_->onEvent(makeKeyDown(68));  // Demolish tool
 
+    // Down picks (5,5): sets pending tile (no demolish yet in new flow).
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
-    EXPECT_CALL(sim_, demolishTile(5, 5)).Times(1);
+        .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(AnyNumber());
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
 
-    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(5), Return(true)));
-    EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(AnyNumber());
-    EXPECT_CALL(sim_, demolishTile(6, 5)).Times(1);
-    uiManager_->onEvent(makeMouseMove(510, 500));
+    // Up on same tile (5,5): confirm disabled → demolishTile(5, 5) called immediately.
+    EXPECT_CALL(sim_, demolishTile(5, 5)).Times(1);
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 }
 
 // ============================================================================
@@ -2375,12 +2386,14 @@ TEST_F(WorldInteractionTest, Coverage_DemolishWithConfirmModal_ShowsModal)
     uiManager_->onEvent(makeMouseButtonDown(0, 40, 250));  // Demolish: y 232..279
 
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+        .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
 
     // demolishTile must NOT be called — modal defers it.
     EXPECT_CALL(sim_, demolishTile(_, _)).Times(0);
 
+    // New flow (phase-11h): down sets pending tile; up shows modal (confirm=true).
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 
     EXPECT_TRUE(uiManager_->hasActiveModal());
 }

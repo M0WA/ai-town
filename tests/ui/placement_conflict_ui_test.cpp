@@ -95,6 +95,8 @@ protected:
         EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AnyNumber());
         EXPECT_CALL(renderer_, setTilePlacementPreview(_, _, _)).Times(AnyNumber());
         EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, setActiveTool(_)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(AnyNumber());
         // Default: all tiles are free (not occupied).
         EXPECT_CALL(sim_, queryTile(_, _))
             .Times(AnyNumber())
@@ -149,9 +151,9 @@ TEST_F(PlacementConflictUITest, PlacementPreview_ZoneTool_OccupiedTile_ShowsRedH
     EXPECT_CALL(sim_, queryTile(2, 2))
         .WillRepeatedly(Return(occupiedResult));
 
-    // Assert: setTileHoverHighlight called with kHoverArgbBlocked for (2,2).
-    EXPECT_CALL(renderer_, setTileHoverHighlight(2, 2,
-        static_cast<uint32_t>(kHoverArgbBlocked))).Times(AtLeast(1));
+    // Assert: setTileHoverHighlight called with footprintSize=0 (blocked sentinel) for (2,2).
+    // Phase 11h: blocked tiles use footprintSize=0 instead of the ARGB colour approach.
+    EXPECT_CALL(renderer_, setTileHoverHighlight(2, 2, 0)).Times(AtLeast(1));
 
     uiManager_->onEvent(makeMouseMove(500, 500));
 }

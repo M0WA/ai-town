@@ -150,6 +150,8 @@ struct QueryResult {
     ServiceCoverage     coverage;                              // per-service; -1.0f = N/A
     ServiceBuildingType serviceType{ServiceBuildingType::None}; // ServiceBuildingType::None for non-service tiles
     bool                degraded{false};         // true if covering service building is in degraded state
+    // Phase 11h: multi-tile footprint fields.
+    bool isAbandoned{false};  // true when building is abandoned due to road proximity > 3 tiles
 };
 
 // -----------------------------------------------------------------------

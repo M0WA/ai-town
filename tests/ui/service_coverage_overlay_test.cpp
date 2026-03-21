@@ -78,6 +78,8 @@ protected:
         EXPECT_CALL(renderer_, setTilePlacementPreview(_, _, _)).Times(AnyNumber());
         EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(AnyNumber());
         EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, setActiveTool(_)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(AnyNumber());
         EXPECT_CALL(renderer_, getTileScreenBounds(_, _)).Times(AnyNumber())
             .WillRepeatedly(Return(ScreenRect{}));
         // Catch-alls for overlay methods — individual tests override with Times(1).

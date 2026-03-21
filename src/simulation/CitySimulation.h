@@ -203,6 +203,13 @@ private:
         float       desirability{static_cast<float>(SimulationConstants::desirability_base_value)};
         bool        firstDesirabilityTick{true};  // grace: skip service penalty on first tick
 
+        // Phase 11h: multi-tile footprint tracking.
+        // For non-origin footprint tiles: stores origin tile coords.
+        // For origin tiles or 1×1 buildings: -1,-1.
+        int  footprintOriginX{-1};
+        int  footprintOriginZ{-1};
+        bool isAbandoned{false};  // true when building abandoned due to road proximity > 3 tiles
+
         // Phase 10 per-tile audio transition flags.
         // Each flag fires its corresponding SFX exactly once per coverage-loss event
         // (not once per tick while uncovered) and resets silently when coverage is restored.
@@ -415,6 +422,10 @@ private:
     // ------------------------------------------------------------------
     std::array<int, 9> m_buildingVariantCounters{};
 
+    // Phase 11h: density upgrade retry counter per tile.
+    // Key: tileKey(tileX, tileZ). Reset to 0 on successful upgrade or manual demolish.
+    std::unordered_map<int64_t, int> m_upgradeRetryCount;
+
     // ------------------------------------------------------------------
     // Scenario state (V1 stub — always zero in Sandbox mode).
     // ------------------------------------------------------------------
@@ -506,4 +517,11 @@ private:
 
     // Undo helpers
     void recordUndoAction(const UndoAction& action);
+
+    // Phase 11h: footprint helpers.
+    static int footprintSize(DensityTier tier);     // returns 1, 2, or 3
+    static int serviceFootprintSize();              // returns 2
+    static int nearestRoadDistance(const std::unordered_map<int64_t, TileData>& tiles,
+                                    int tileX, int tileZ, int footprintN);
+    void doProximityTick();  // checks road proximity for all zone buildings
 };

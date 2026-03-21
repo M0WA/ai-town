@@ -573,6 +573,11 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/agent_render_sync_test.cpp
 )
 
+# Phase 11h: multi-tile footprint tests.
+target_sources(simulation_tests PRIVATE
+    tests/simulation/footprint_test.cpp
+)
+
 # Phase 10: AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier().
 # MUST be on simulation_tests ONLY — never on the main aitown binary target.
 target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
@@ -636,6 +641,11 @@ aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
 # Phase 5 add_executable(terrain_tests ...) definition intact.
 target_sources(terrain_tests PRIVATE
     tests/terrain/terrain_enqueue_all_chunks_test.cpp
+)
+
+# Phase 11h: road lane geometry constant verification tests.
+target_sources(terrain_tests PRIVATE
+    tests/terrain/road_lane_test.cpp
 )
 
 # ----------------------------------------------------------------------------
@@ -783,6 +793,12 @@ target_sources(ui_tests PRIVATE
     tests/ui/coverage_boost_test.cpp
 )
 
+# Phase 11h: budget breakdown section tests and demolition input tests.
+target_sources(ui_tests PRIVATE
+    tests/ui/budget_breakdown_test.cpp
+    tests/ui/demolition_input_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # audio_tests — duck state machine, occlusion smoothing, crossfade, stinger milestone tests
 # Vorbis::vorbisfile must be listed EXPLICITLY — it CANNOT resolve through aitown_audio's
@@ -857,6 +873,11 @@ target_sources(audio_tests PRIVATE
 # Do NOT call add_executable(audio_tests ...) or aitown_add_tests(audio_tests ...) again.
 target_sources(audio_tests PRIVATE
     tests/audio/volume_control_test.cpp
+)
+
+# Phase 11h: vehicle audio positioning tests (lane offset coordination).
+target_sources(audio_tests PRIVATE
+    tests/audio/vehicle_audio_positioning_test.cpp
 )
 
 # Copy default.mhr (OpenAL Soft HRTF data) next to audio_tests binary.
