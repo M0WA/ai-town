@@ -24,7 +24,12 @@
         "anthropic.claude-code",
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
-        "eamodio.gitlens"
+        "eamodio.gitlens",
+        "llvm-vs-code-extensions.vscode-clangd",
+        "twxs.cmake",
+        "ms-vscode.cmake-tools",
+        "redhat.vscode-yaml",
+        "github.vscode-github-actions"
       ],
       "settings": {
         "editor.formatOnSave": true,
