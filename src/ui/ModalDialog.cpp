@@ -557,6 +557,134 @@ void ModalDialog::layoutUnsavedQuit(bool /*quitToDesktop*/) {
 }
 
 // ---------------------------------------------------------------------------
+// showSaveFailure / layoutSaveFailure
+// Phase 11c: blocking error modal for manual save failures (Ctrl+S and
+// pause-menu Save paths). Title "Save Failed", body shows the reason,
+// two buttons: Retry (primary) / Cancel (secondary).
+// Accept = Retry, Cancel = dismiss without retry.
+// Escape activates Cancel.
+// ---------------------------------------------------------------------------
+void ModalDialog::showSaveFailure(const std::string& reason) {
+    m_saveFailureReason = reason;
+    openModal(DialogType::SaveFailure);
+    layoutSaveFailure(reason);
+}
+
+void ModalDialog::layoutSaveFailure(const std::string& reason) {
+    if (!m_backend) return;
+
+    // Small dialog: 480x240, centered
+    setDialogRect(480, 240);
+
+    const int kPad    = 20;
+    const int kTop    = 16;
+    const int kBtnH   = 40;
+    const int kBtnW   = 140;
+    const int kBtnGap = 16;
+    const int kBtnBot = 16;
+
+    // Title row.
+    m_backend->setElementRect(m_titleLabel,
+        m_dialogX + kPad, m_dialogY + kTop,
+        m_dialogW - kPad * 2, 40);
+
+    // Body: between title and button row.
+    const int bodyTop = m_dialogY + kTop + 40 + 12;
+    const int bodyBot = m_dialogY + m_dialogH - kBtnBot - kBtnH - 12;
+    m_backend->setElementRect(m_bodyLabel,
+        m_dialogX + kPad, bodyTop,
+        m_dialogW - kPad * 2, bodyBot - bodyTop);
+
+    // Two-button row: Retry (primary) left of Cancel (secondary), right-aligned.
+    const int btnY = m_dialogY + m_dialogH - kBtnBot - kBtnH;
+    m_backend->setElementRect(m_btnPrimary,
+        m_dialogX + m_dialogW - kPad - kBtnW * 2 - kBtnGap, btnY,
+        kBtnW, kBtnH);
+    m_backend->setElementRect(m_btnSecondary,
+        m_dialogX + m_dialogW - kPad - kBtnW, btnY,
+        kBtnW, kBtnH);
+
+    m_backend->setElementVisible(m_dialogBg,    true);
+    m_backend->setElementVisible(m_titleLabel,  true);
+    m_backend->setElementVisible(m_bodyLabel,   true);
+    m_backend->setElementVisible(m_btnPrimary,  true);
+    m_backend->setElementVisible(m_btnSecondary,true);
+    m_backend->setElementVisible(m_btnTertiary, false);
+    m_backend->setElementVisible(m_btnBack,     false);
+
+    m_backend->setElementText(m_titleLabel, "Save Failed");
+    m_backend->setElementText(m_bodyLabel,  reason.empty() ? "An unknown error occurred." : reason);
+    m_backend->setElementText(m_btnPrimary,   "Retry");
+    m_backend->setElementText(m_btnSecondary, "Cancel");
+
+    // Default focus on Cancel (least destructive — avoids spurious retries).
+    m_focusedButton = 1;
+}
+
+// ---------------------------------------------------------------------------
+// showRestoreDefaultsConfirm / layoutRestoreDefaultsConfirm
+// Phase 11c: small 480x240 modal, "Reset all Controls settings to defaults?"
+// Buttons: "Yes" (primary) / "Cancel" (secondary). Default focus Cancel.
+// Accept = restore defaults, Cancel = stay as-is.
+// ---------------------------------------------------------------------------
+void ModalDialog::showRestoreDefaultsConfirm() {
+    openModal(DialogType::RestoreDefaultsConfirm);
+    layoutRestoreDefaultsConfirm();
+}
+
+void ModalDialog::layoutRestoreDefaultsConfirm() {
+    if (!m_backend) return;
+
+    // Small dialog: 480x240, centered
+    setDialogRect(480, 240);
+
+    const int kPad    = 20;
+    const int kTop    = 16;
+    const int kBtnH   = 40;
+    const int kBtnW   = 140;
+    const int kBtnGap = 16;
+    const int kBtnBot = 16;
+
+    // Title row.
+    m_backend->setElementRect(m_titleLabel,
+        m_dialogX + kPad, m_dialogY + kTop,
+        m_dialogW - kPad * 2, 40);
+
+    // Body: between title and button row.
+    const int bodyTop = m_dialogY + kTop + 40 + 12;
+    const int bodyBot = m_dialogY + m_dialogH - kBtnBot - kBtnH - 12;
+    m_backend->setElementRect(m_bodyLabel,
+        m_dialogX + kPad, bodyTop,
+        m_dialogW - kPad * 2, bodyBot - bodyTop);
+
+    // Two-button row: "Yes" (primary) left of "Cancel" (secondary), right-aligned.
+    const int btnY = m_dialogY + m_dialogH - kBtnBot - kBtnH;
+    m_backend->setElementRect(m_btnPrimary,
+        m_dialogX + m_dialogW - kPad - kBtnW * 2 - kBtnGap, btnY,
+        kBtnW, kBtnH);
+    m_backend->setElementRect(m_btnSecondary,
+        m_dialogX + m_dialogW - kPad - kBtnW, btnY,
+        kBtnW, kBtnH);
+
+    m_backend->setElementVisible(m_dialogBg,    true);
+    m_backend->setElementVisible(m_titleLabel,  true);
+    m_backend->setElementVisible(m_bodyLabel,   true);
+    m_backend->setElementVisible(m_btnPrimary,  true);
+    m_backend->setElementVisible(m_btnSecondary,true);
+    m_backend->setElementVisible(m_btnTertiary, false);
+    m_backend->setElementVisible(m_btnBack,     false);
+
+    m_backend->setElementText(m_titleLabel, "Restore Defaults");
+    m_backend->setElementText(m_bodyLabel,
+        "Reset all Controls settings to defaults?");
+    m_backend->setElementText(m_btnPrimary,   "Yes");
+    m_backend->setElementText(m_btnSecondary, "Cancel");
+
+    // Default focus on Cancel (least destructive).
+    m_focusedButton = 1;
+}
+
+// ---------------------------------------------------------------------------
 // draw
 // ---------------------------------------------------------------------------
 void ModalDialog::draw() {
@@ -588,6 +716,7 @@ bool ModalDialog::onEvent(const InputEvent& event) {
             int maxButtons = 2;
             if (m_dialogType == DialogType::ForcedLoanScreen2) maxButtons = 4;
             if (m_dialogType == DialogType::UnsavedQuit)       maxButtons = 3;
+            // SaveFailure: 2 buttons (Retry / Cancel)
             m_focusedButton = (m_focusedButton + 1) % maxButtons;
             return true;
         }
@@ -672,6 +801,24 @@ bool ModalDialog::onEvent(const InputEvent& event) {
                     closeModal();
                     return true;
 
+                case DialogType::SaveFailure:
+                    if (m_focusedButton == 0) {
+                        m_lastResult = DialogResult::Accept;   // Retry
+                    } else {
+                        m_lastResult = DialogResult::Cancel;   // Cancel
+                    }
+                    closeModal();
+                    return true;
+
+                case DialogType::RestoreDefaultsConfirm:
+                    if (m_focusedButton == 0) {
+                        m_lastResult = DialogResult::Accept;   // Yes
+                    } else {
+                        m_lastResult = DialogResult::Cancel;   // Cancel
+                    }
+                    closeModal();
+                    return true;
+
                 default:
                     break;
             }
@@ -691,6 +838,8 @@ bool ModalDialog::onEvent(const InputEvent& event) {
                 case DialogType::DemolishConfirm:
                 case DialogType::WASDPreset:
                 case DialogType::UnsavedQuit:
+                case DialogType::SaveFailure:
+                case DialogType::RestoreDefaultsConfirm:
                     m_lastResult = DialogResult::Cancel;
                     closeModal();
                     return true;

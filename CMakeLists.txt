@@ -89,6 +89,21 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # ============================================================================
+# BUILD_TESTING — standard CMake option to enable/disable test target compilation.
+# Default ON so dev builds and CI include tests. Packaging jobs pass -DBUILD_TESTING=OFF
+# to skip test compilation (GTest and rapidcheck are not installed in distro containers).
+# ============================================================================
+option(BUILD_TESTING "Build test targets (requires GTest and rapidcheck)" ON)
+
+# ============================================================================
+# AITOWN_ASSETS_DIR — compile-time asset path constant.
+# Default: absolute source-tree path (correct for dev builds).
+# Override at configure time for packaging: -DAITOWN_ASSETS_DIR=assets (Windows NSIS)
+# or -DAITOWN_ASSETS_DIR=/usr/share/aitown/assets (Linux DEB).
+# ============================================================================
+set(AITOWN_ASSETS_DIR "${CMAKE_SOURCE_DIR}/assets" CACHE STRING "Runtime assets directory path")
+
+# ============================================================================
 # TESTING DEPENDENCIES — GTest and RapidCheck (via vcpkg)
 # googletest: vcpkg port "gtest" — CMake targets: GTest::gtest, GTest::gtest_main,
 #             GTest::gmock, GTest::gmock_main (namespaced, same as FetchContent).
@@ -96,15 +111,19 @@ endif()
 #             (bare names — upstream installs(EXPORT ...) has no NAMESPACE argument).
 #             rapidcheck_gtest is an INTERFACE library (headers only); no GTest dep.
 # ============================================================================
+if(BUILD_TESTING)
 find_package(GTest CONFIG REQUIRED)
 find_package(rapidcheck CONFIG REQUIRED)
+endif()
 
 # ============================================================================
 # TESTING INFRASTRUCTURE
 # ============================================================================
+if(BUILD_TESTING)
 enable_testing()
 include(GoogleTest)
 include(cmake/AitownTestHelpers.cmake)
+endif()
 
 # ============================================================================
 # LIBRARY STUBS
@@ -143,11 +162,10 @@ target_include_directories(aitown_render
     INTERFACE src/interfaces/      # propagates to consumers (test targets, etc.)
     INTERFACE src/rendering/       # IrrlichtUIBackend.h and IrrlichtRenderer.h for consumers
 )
-# AITOWN_ASSETS_DIR — absolute path expanded at configure time.
-# Correct for both Linux and Windows. Using CMAKE_CURRENT_SOURCE_DIR is incorrect
-# if the target is configured from a subdirectory.
+# AITOWN_ASSETS_DIR — set via CACHE STRING at configure time (see top of file).
+# Default is the source-tree path for dev builds; packaging jobs override via -D.
 target_compile_definitions(aitown_render PRIVATE
-    AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+    AITOWN_ASSETS_DIR="${AITOWN_ASSETS_DIR}"
 )
 # GLEW::GLEW BEFORE Irrlicht — mandatory link order (GLEW symbol duplication mitigation-2).
 # PRIVATE scope: Irrlicht and GLEW headers must NOT propagate to test targets.
@@ -191,7 +209,7 @@ target_include_directories(aitown_audio
     INTERFACE src/audio/           # AudioSystem.h visible to consumers (e.g. main.cpp)
 )
 target_compile_definitions(aitown_audio PRIVATE
-    AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+    AITOWN_ASSETS_DIR="${AITOWN_ASSETS_DIR}"
 )
 # PRIVATE scope: OpenAL, Vorbis, and fmt headers must NOT propagate to test targets.
 # Omitting any of these causes a cmake --build build link failure on Linux and Windows.
@@ -264,6 +282,11 @@ target_sources(aitown_ui PRIVATE
     src/ui/SettingsPanel.cpp
     src/ui/PauseMenuPanel.cpp
     src/ui/MainMenuPanel.cpp
+)
+
+# Phase 11c: KeyBindingsPanel (Controls tab keybinding table + capture-mode state machine).
+target_sources(aitown_ui PRIVATE
+    src/ui/KeyBindingsPanel.cpp
 )
 
 # ----------------------------------------------------------------------------
@@ -403,7 +426,7 @@ add_executable(aitown_benchmark
 target_link_libraries(aitown_benchmark PRIVATE aitown_render GLEW::GLEW Irrlicht)
 target_include_directories(aitown_benchmark PRIVATE src/ ${CMAKE_SOURCE_DIR})
 target_compile_definitions(aitown_benchmark PRIVATE
-    AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+    AITOWN_ASSETS_DIR="${AITOWN_ASSETS_DIR}"
 )
 # Irrlicht transitive deps (Linux only) — see find_package block above for rationale.
 if(UNIX AND NOT APPLE)
@@ -446,7 +469,7 @@ add_executable(aitown_model_validator
 target_link_libraries(aitown_model_validator PRIVATE aitown_render GLEW::GLEW Irrlicht)
 target_include_directories(aitown_model_validator PRIVATE src/ ${CMAKE_SOURCE_DIR})
 target_compile_definitions(aitown_model_validator PRIVATE
-    AITOWN_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+    AITOWN_ASSETS_DIR="${AITOWN_ASSETS_DIR}"
 )
 # Irrlicht transitive deps (Linux only) — same rationale as aitown_benchmark.
 if(UNIX AND NOT APPLE)
@@ -475,6 +498,8 @@ if(WIN32)
         COMMENT "Copying GLEW32.dll to aitown_model_validator output"
     )
 endif()
+
+if(BUILD_TESTING)
 
 # ============================================================================
 # TEST TARGETS
@@ -552,10 +577,25 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/save_system_real_test.cpp
 )
 
-# Coverage gap tests: target the ~30.8% miss identified in CI (static helpers,
-# speed/pause control, accessors, JSON round-trip, signal logic, demolish branches).
+# Extra simulation tests: static helpers, speed/pause control, accessors, JSON round-trip,
+# signal logic, demolish branches, smoothstep, time-of-day, bond issuance, escape sequences.
 target_sources(simulation_tests PRIVATE
-    tests/simulation/city_simulation_coverage_test.cpp
+    tests/simulation/city_simulation_extra_test.cpp
+)
+
+# Phase 11d Deliverable 5c: placement conflict tests — placeZone/placeRoad no-op guards.
+target_sources(simulation_tests PRIVATE
+    tests/simulation/placement_conflict_test.cpp
+)
+
+# Phase 11d Deliverable 3d: agent render sync tests — spawn/despawn/cull/audio.
+target_sources(simulation_tests PRIVATE
+    tests/simulation/agent_render_sync_test.cpp
+)
+
+# Phase 11h: multi-tile footprint tests.
+target_sources(simulation_tests PRIVATE
+    tests/simulation/footprint_test.cpp
 )
 
 # Phase 10: AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier().
@@ -569,7 +609,6 @@ target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
 # ----------------------------------------------------------------------------
 add_executable(terrain_tests
     tests/terrain/terrain_smoke_test.cpp
-    tests/terrain/terrain_stub.cpp        # Phase 3: compile-only stub for all terrain headers
     tests/terrain/terrain_chunk_test.cpp  # Phase 5: TerrainChunk vertex count + bounding box tests
     tests/terrain/terrain_system_test.cpp # Phase 5: TerrainSystem rebuild deque + hysteresis tests
     tests/terrain/texture_cache_test.cpp  # Phase 5: TextureCache unit tests (EDT_NULL guard + ref counts)
@@ -601,7 +640,7 @@ if(UNIX AND NOT APPLE)
     endif()
 endif()
 # tests/simulation/ — ManualClock (manual_clock.h) and MockRenderer (mock_renderer.h)
-# tests/terrain/   — MockTerrainRNG (mock_terrain_rng.h) and terrain_stub.cpp includes
+# tests/terrain/   — MockTerrainRNG (mock_terrain_rng.h)
 # src/terrain/     — ITerrainRNG.h (included by mock_terrain_rng.h)
 # src/rendering/   — TextureCache.h (referenced by texture_cache_test.cpp)
 # src/interfaces/  — IClock.h, IRenderer.h (propagated via aitown_terrain PUBLIC but
@@ -621,6 +660,11 @@ aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
 # Phase 5 add_executable(terrain_tests ...) definition intact.
 target_sources(terrain_tests PRIVATE
     tests/terrain/terrain_enqueue_all_chunks_test.cpp
+)
+
+# Phase 11h: road lane geometry constant verification tests.
+target_sources(terrain_tests PRIVATE
+    tests/terrain/road_lane_test.cpp
 )
 
 # ----------------------------------------------------------------------------
@@ -687,9 +731,9 @@ target_sources(ui_tests PRIVATE
 
 # (coverage_gap_test.cpp and query_panel_coverage_test.cpp dissolved —
 #  tests distributed to semantically correct files)
-# main_menu_coverage_test.cpp: MainMenuPanel keyboard navigation and lifecycle tests.
+# main_menu_flow_test.cpp: MainMenuPanel keyboard navigation and lifecycle tests.
 target_sources(ui_tests PRIVATE
-    tests/ui/main_menu_coverage_test.cpp
+    tests/ui/main_menu_flow_test.cpp
 )
 
 # Phase 11: stinger_milestone per-frame polling tests.
@@ -703,16 +747,75 @@ target_sources(ui_tests PRIVATE
     tests/ui/keybindings_load_test.cpp
 )
 
-# Coverage gap: HUD ratingName() variants, formatDollar() negative branch,
+# HUD display tests: ratingName() variants, formatDollar() negative branch,
 # grace-period fade/expire, budget-flash setElementAlpha.
 target_sources(ui_tests PRIVATE
-    tests/ui/hud_coverage_test.cpp
+    tests/ui/hud_display_test.cpp
 )
 
-# Coverage gap: UIManager pending-quit state machine (unsaved-changes modal,
+# UIManager quit tests: pending-quit state machine (unsaved-changes modal,
 # PendingQuitAction::Desktop/ToMenu dispatch), setSaveSystem/setSaveAvailable/setSaveStatusText.
 target_sources(ui_tests PRIVATE
-    tests/ui/ui_manager_quit_coverage_test.cpp
+    tests/ui/ui_manager_quit_test.cpp
+)
+
+# Phase 11c: Settings, Controls & Save/Load Dialog Polish.
+# Do NOT call add_executable(ui_tests ...) or aitown_add_tests(ui_tests ...) again —
+# that would produce a duplicate target error (Phase 4+ extension policy).
+#
+# NOTE: key_bindings_panel_test.cpp depends on src/ui/KeyBindingsPanel.h (delivered
+# by graphics-dev-irrlicht in Phase 11c).  The remaining four test files depend on
+# src/interfaces/ISaveSystem.h (already present) and UIManager::setSaveSystem(ISaveSystem*)
+# (already wired).
+target_sources(ui_tests PRIVATE
+    tests/ui/settings_panel_background_test.cpp
+    tests/ui/key_bindings_panel_test.cpp
+    tests/ui/ui_manager_unsaved_quit_test.cpp
+    tests/ui/ui_manager_save_failure_test.cpp
+    tests/ui/main_menu_save_state_test.cpp
+)
+
+# UI panel tests: ModalDialog showRestoreDefaultsConfirm, SettingsPanel
+# WASD preset + restore-defaults polling, MainMenuPanel loading-screen paths,
+# KeyBindingsPanel draw/resetToDefaults/arrow-key capture, UIManager keybindings
+# persistence and save-failure retry, budget-tick forwarding.
+target_sources(ui_tests PRIVATE
+    tests/ui/ui_panel_test.cpp
+)
+
+# Phase 11d Deliverable 4c: service coverage overlay tests.
+target_sources(ui_tests PRIVATE
+    tests/ui/service_coverage_overlay_test.cpp
+)
+
+# Phase 11d Deliverable 5e: placement conflict UI tests.
+target_sources(ui_tests PRIVATE
+    tests/ui/placement_conflict_ui_test.cpp
+)
+
+# Phase 11d — Minimap Traffic and ServiceCoverage overlay rendering tests.
+# Exercises Minimap::draw() branches for both overlay modes using NiceMock<MockCitySimulation>
+# to stub getRoadSegmentSpeeds() and getServiceCoverage() return values.
+target_sources(ui_tests PRIVATE
+    tests/ui/minimap_overlay_test.cpp
+)
+
+# Coverage boost — targets specific uncovered lines identified by lcov analysis:
+#   SettingsPanel.cpp: WASD/RestoreDefaults modal poll Accept/Cancel (lines 379-409),
+#     Controls Apply no-conflict callback (504-508), RestoreDefaults button (517-521),
+#     WASD preset button (525-528), getInteractiveElementCount Controls/Audio (557, 594),
+#     countdown-active branch in showGraphicsTab (300), destructor (148).
+#   UIManager.cpp: PauseMenu save success (1313), transitionToMainMenu in quit-flow
+#     Accept/Decline branches (1362, 1371), speed-selector handle polling (1491-1499),
+#     showForcedLoanDialog with saveSystem (1606), loadKeybindings file-exists path (1834).
+target_sources(ui_tests PRIVATE
+    tests/ui/coverage_boost_test.cpp
+)
+
+# Phase 11h: budget breakdown section tests and demolition input tests.
+target_sources(ui_tests PRIVATE
+    tests/ui/budget_breakdown_test.cpp
+    tests/ui/demolition_input_test.cpp
 )
 
 # ----------------------------------------------------------------------------
@@ -789,6 +892,11 @@ target_sources(audio_tests PRIVATE
 # Do NOT call add_executable(audio_tests ...) or aitown_add_tests(audio_tests ...) again.
 target_sources(audio_tests PRIVATE
     tests/audio/volume_control_test.cpp
+)
+
+# Phase 11h: vehicle audio positioning tests (lane offset coordination).
+target_sources(audio_tests PRIVATE
+    tests/audio/vehicle_audio_positioning_test.cpp
 )
 
 # Copy default.mhr (OpenAL Soft HRTF data) next to audio_tests binary.
@@ -886,19 +994,16 @@ target_sources(integration_tests PRIVATE
 # ----------------------------------------------------------------------------
 # opengl_tests — sRGB upload, setMesh grab/drop smoke test, shader compilation
 # Must run under xvfb-run on Linux.
-# Phase 0: ONLY stub_succeed.cpp in source list.
-# Phase 2 atomicity commit adds: lod_swap_smoke_test.cpp (GTEST_SKIP body), ShaderLoadingTest body,
-# 6 GLSL stubs, and getGPUProgrammingServices() null check — all four items in one commit.
 # ----------------------------------------------------------------------------
 add_executable(opengl_tests
-    tests/rendering/stub_succeed.cpp           # Phase 0 stub — remove when real tests cover target
-    tests/rendering/shader_stub_compile_test.cpp  # Phase 1+2: shader stub compile check
-    tests/rendering/lod_swap_smoke_test.cpp    # Phase 2: LOD swap grab/drop contract smoke test
+    tests/rendering/shader_loading_test.cpp           # shader compilation smoke test
+    tests/rendering/lod_swap_smoke_test.cpp           # Phase 2: LOD swap grab/drop contract smoke test
     tests/rendering/building_lod_swap_test.cpp        # Phase 9: LOD swap bounding box integration test
     tests/rendering/building_srgb_fallback_test.cpp   # Phase 9: building facade sRGB fallback test
-    tests/rendering/cloud_plane_test.cpp       # Phase 10b: cloud plane init test (EDT_OPENGL + EDT_NULL)
+    tests/rendering/cloud_plane_test.cpp              # Phase 10b: cloud plane init test (EDT_OPENGL + EDT_NULL)
+    tests/rendering/texture_cache_atlas_test.cpp      # Phase 11e: buildings atlas GL_TEXTURE_MAX_LEVEL check
 )
-# Irrlicht and GLEW::GLEW MUST be linked directly: shader_stub_compile_test.cpp includes
+# Irrlicht and GLEW::GLEW MUST be linked directly: shader_loading_test.cpp includes
 # <irrlicht.h> and <GL/glew.h>; aitown_render links both PRIVATE so their include paths
 # do NOT propagate to consumers (same rationale as integration_tests linking Irrlicht directly).
 target_link_libraries(opengl_tests PRIVATE
@@ -934,3 +1039,72 @@ target_include_directories(opengl_tests PRIVATE
     ${CMAKE_SOURCE_DIR}
 )
 aitown_add_tests(opengl_tests LABEL "requires-opengl")
+
+endif() # BUILD_TESTING
+
+# ============================================================================
+# INSTALL RULES
+# Windows (NSIS): binary + DLLs + assets/ + default.mhr alongside aitown.exe.
+# Linux (DEB): binary to /usr/games; assets to /usr/share/aitown/assets;
+#              default.mhr to /usr/share/openal/hrtf.
+# ============================================================================
+if(WIN32)
+    install(TARGETS aitown RUNTIME DESTINATION .)
+    # Assets directory — no trailing slash: installs assets/ as a subdirectory alongside exe.
+    install(DIRECTORY assets DESTINATION .)
+    # OpenAL Soft runtime (renamed to soft_oal.dll per Windows naming convention).
+    install(FILES "${CMAKE_BINARY_DIR}/soft_oal.dll" DESTINATION .)
+    # HRTF data file (required for 3D spatial audio; sourced by POST_BUILD copy rule).
+    install(FILES "${CMAKE_BINARY_DIR}/default.mhr" DESTINATION .)
+    # vcpkg runtime DLLs alongside the binary.
+    install(DIRECTORY "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/"
+        DESTINATION .
+        FILES_MATCHING PATTERN "*.dll"
+    )
+else()
+    install(TARGETS aitown RUNTIME DESTINATION games)
+    # Assets directory — trailing slash: copies contents into share/aitown/assets/.
+    install(DIRECTORY assets/ DESTINATION share/aitown/assets)
+    # HRTF data file to OpenAL Soft standard search path.
+    install(FILES "${CMAKE_BINARY_DIR}/default.mhr" DESTINATION share/openal/hrtf)
+endif()
+
+# ============================================================================
+# CPACK — Windows NSIS installer and Linux DEB packages.
+# Generator is NOT set here; always specify -G NSIS or -G DEB on the cpack command line.
+# ============================================================================
+set(CPACK_PACKAGE_NAME "AI Town")
+set(CPACK_PACKAGE_VENDOR "AI Town Contributors")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AI Town — 3D city simulator")
+set(CPACK_PACKAGE_DESCRIPTION
+"AI Town is a Sim City-style 3D city simulator built with C++, Irrlicht, and OpenAL Soft.
+ Design and manage a growing city: zone land, build roads, manage services,
+ and keep your citizens happy.")
+
+# NSIS (Windows installer) settings
+set(CPACK_NSIS_DISPLAY_NAME "AI Town")
+set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")
+set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+set(CPACK_NSIS_CREATE_ICONS_EXTRA
+    "CreateShortcut '$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\AI Town.lnk' '$INSTDIR\\\\aitown.exe'
+     CreateShortcut '$DESKTOP\\\\AI Town.lnk' '$INSTDIR\\\\aitown.exe'")
+set(CPACK_NSIS_DELETE_ICONS_EXTRA
+    "Delete '$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\AI Town.lnk'
+     Delete '$DESKTOP\\\\AI Town.lnk'")
+
+# DEB (Debian/Ubuntu package) settings
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "AI Town Contributors <aitown@example.com>")
+set(CPACK_DEBIAN_PACKAGE_SECTION "games")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libopenal1, libvorbis0a, libgl1, libx11-6, libxrandr2, libxinerama1")
+set(CPACK_DEBIAN_PACKAGE_DESCRIPTION
+"AI Town — 3D city simulator
+ AI Town is a Sim City-style 3D city simulator built with C++, Irrlicht, and OpenAL Soft.
+ Design and manage a growing city: zone land, build roads, manage services,
+ and keep your citizens happy.")
+set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+
+include(CPack)

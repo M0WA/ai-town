@@ -1,9 +1,13 @@
 #pragma once
 #include "src/interfaces/IUIBackend.h"  // UIElementHandle, IUIBackend
+#include "src/ui/key_bindings.h"        // KeyBindings
+#include <functional>
 
 // Forward declarations
 class IAudioSystem;
 class IClock;
+class KeyBindingsPanel;
+class ModalDialog;
 class PauseMenuPanel;
 struct InputEvent;
 
@@ -13,7 +17,9 @@ struct InputEvent;
 // Audio tab wires sliders to IAudioSystem::setMasterVolume/setMusicVolume/setSFXVolume.
 class SettingsPanel {
 public:
-    SettingsPanel(IUIBackend* backend, IAudioSystem* audio, IClock* clock);
+    SettingsPanel(IUIBackend* backend, IAudioSystem* audio, IClock* clock,
+                  ModalDialog* modal = nullptr);
+    ~SettingsPanel();
 
     void show();
     void hide();
@@ -22,14 +28,38 @@ public:
     bool onEvent(const InputEvent& event);
 
     void setPauseMenu(PauseMenuPanel* pauseMenu);
+    // Late-bind the ModalDialog pointer (called from UIManager after modal construction).
+    void setModal(ModalDialog* modal);
     bool isVisible() const { return m_visible; }
 
+    // Set the callback invoked when the player clicks Apply on the Controls tab.
+    // Called from UIManager constructor to wire keybindings persistence.
+    void setKeybindingsApplyFn(std::function<void(const KeyBindings&)> fn);
+
+    // Set the currently-applied keybindings (used to seed Controls tab on open).
+    // Called from UIManager after loadKeybindings() and after each successful apply.
+    void setCurrentBindings(const KeyBindings& b);
+
+    // Apply keybindings — public entry point called by UIManager for external updates.
+    // Calls applyKeybindings internally; exposed for test observability.
+    void applyKeybindings(const KeyBindings& b);
+
 private:
-    IUIBackend*     m_backend{nullptr};
-    IAudioSystem*   m_audio{nullptr};
-    IClock*         m_clock{nullptr};
-    PauseMenuPanel* m_pauseMenu{nullptr};
-    bool            m_visible{false};
+    IUIBackend*       m_backend{nullptr};
+    IAudioSystem*     m_audio{nullptr};
+    IClock*           m_clock{nullptr};
+    ModalDialog*      m_modal{nullptr};
+    PauseMenuPanel*   m_pauseMenu{nullptr};
+    bool              m_visible{false};
+
+    // Glass City background elements (created once, repositioned on show())
+    // scrimHandle: full-screen 50% opacity overlay beneath the panel.
+    // bgHandle:    deep-navy panel background (rgba(13,27,42,0.88)).
+    UIElementHandle m_scrimHandle{kInvalidUIElement};
+    UIElementHandle m_bgHandle{kInvalidUIElement};
+
+    // KeyBindingsPanel — owns the Controls tab keybinding table.
+    KeyBindingsPanel* m_keyBindings{nullptr};
 
     // Active tab index (0=Graphics, 1=Controls, 2=Audio, 3=Gameplay)
     int m_activeTab{0};
@@ -84,6 +114,17 @@ private:
 
     // Demolish confirm toggle state
     bool m_demolishConfirm{true};
+
+    // --- Keybindings callback and state ---
+    // Callback set by UIManager to persist keybindings on Controls Apply.
+    std::function<void(const KeyBindings&)> m_keybindingsApplyFn;
+    // The last applied (persisted) bindings — used to seed the Controls tab on open.
+    KeyBindings m_appliedBindings{};
+
+    // --- WASD preset modal polling state ---
+    bool m_wasdPresetPending{false};
+    // --- Restore Defaults modal polling state ---
+    bool m_restoreDefaultsPending{false};
 
     void switchTab(int tabIndex);
     void hideAllTabElements();

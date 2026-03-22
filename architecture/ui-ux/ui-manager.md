@@ -9,9 +9,9 @@
 
 ## IUIBackend Method Contract
 
-The total method count is **20**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+The total method count is **21**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
 
-Methods 1–17 were established in Phase 8. Method 18 (`setElementBackground`) was added in Phase 9b (minimap dark-panel fix — see `architecture/ui-ux/minimap.md` §IUIBackend method 18). Method 19 (`setElementMonoFont`) was added in Phase 10 (monospace numeric readout requirement — see below). Method 20 (`setElementRect`) was added in Phase 10 (modal dialog centring fix — see `architecture/ui-ux/modal-dialog-system.md` §Element Repositioning).
+Methods 1–17 were established in Phase 8. Method 18 (`setElementBackground`) was added in Phase 9b (minimap dark-panel fix — see `architecture/ui-ux/minimap.md` §IUIBackend method 18). Method 19 (`setElementMonoFont`) was added in Phase 10 (monospace numeric readout requirement — see below). Method 20 (`setElementRect`) was added in Phase 10 (modal dialog centring fix — see `architecture/ui-ux/modal-dialog-system.md` §Element Repositioning). Method 21 (`setElementTextColor`) was added post-Phase-10 (service coverage overlay text colour; already present in `src/interfaces/IUIBackend.h` and `tests/ui/MockUIBackend.h` — no plan step required).
 
 ```cpp
 class IUIBackend {
@@ -121,6 +121,13 @@ public:
     //     Added in Phase 10 for the modal dialog centring fix.
     //     See architecture/ui-ux/modal-dialog-system.md §Element Repositioning.
     virtual void setElementRect(UIElementHandle handle, int x, int y, int w, int h) = 0;
+
+    // 21. Override the text colour of a static text element.
+    //     r, g, b are in [0, 255]; alpha is fixed at 255 (fully opaque).
+    //     In IrrlichtUIBackend: calls IGUIStaticText::setOverrideColor(SColor(255, r, g, b)).
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     Added post-Phase-10 for service coverage overlay text colour (already implemented).
+    virtual void setElementTextColor(UIElementHandle handle, int r, int g, int b) = 0;
 };
 ```
 
@@ -306,8 +313,8 @@ public:
     // Clears m_overlayMap and calls m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, {})
     // if m_renderer is non-null, so the zone colour overlay from the previous session is not
     // displayed on the new map. Also resets m_activeTool to ActiveTool::None, clears
-    // m_hoveredTileX/Z to {-1,-1}, and calls m_renderer->setTileHoverHighlight(-1,-1,
-    // kHoverArgbClear) so any frozen hover quad from the previous session is hidden.
+    // m_hoveredTileX/Z to {-1,-1}, and calls m_renderer->setTileHoverHighlight(-1,-1)
+    // so any frozen hover quad from the previous session is hidden.
     // Does NOT change m_mapTilesX/m_mapTilesZ — the caller must call setMapDimensions()
     // separately if the new map has different dimensions.
     // Safe to call before setRenderer() is wired (null-check on m_renderer).

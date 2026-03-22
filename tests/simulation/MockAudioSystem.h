@@ -2,7 +2,7 @@
 #include "src/interfaces/IAudioSystem.h"
 #include "gmock/gmock.h"
 
-// MockAudioSystem — GMock implementation of IAudioSystem's 15 methods.
+// MockAudioSystem — GMock implementation of IAudioSystem's 18 methods.
 // Source location: tests/simulation/ (shared across simulation_tests, ui_tests, audio_tests).
 // Header-only — no .cpp file. Uses MOCK_METHOD macros only, no definitions.
 class MockAudioSystem : public IAudioSystem {
@@ -24,4 +24,10 @@ public:
     // Phase 10: adaptive music intensity tier (CALM / GROWTH / CRISIS).
     // Used by AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem in simulation_tests.
     MOCK_METHOD(void,        setMusicIntensity,    (MusicIntensity intensity),                                  (override));
+    // Phase 11d: vehicle engine audio pair API.
+    MOCK_METHOD((std::pair<int,int>), acquireVehicleEnginePair, (ZoneType zone),  (override));
+    MOCK_METHOD(void, releaseVehicleEnginePair, (int idleIdx, int moveIdx),         (override));
+    MOCK_METHOD(void, updateVehicleAudio,
+                (int idleIdx, int moveIdx, float speedFraction, float worldX, float worldZ),
+                (override));
 };

@@ -349,23 +349,48 @@ the scene graph as a persistent `ISceneNode*` and rebuilt (remove-old / add-new)
 event (hot path, in-place update required); zone overlay changes only on placement events
 (cold path, full rebuild acceptable).
 
-### Placement Preview — Dynamic Multi-Tile SMesh (Phase 10)
+### Placement Preview — Dynamic Multi-Tile SMesh (Phase 10 / extended Phase 11d)
 
-`IRenderer::setTilePlacementPreview(tiles, argb)` renders a multi-tile highlight covering
-the Zone rectangular drag-select or Road straight-line preview while LMB is held. Unlike
-the single-tile hover highlight (pre-allocated, in-place update), the preview mesh is
+`IRenderer::setTilePlacementPreview` renders a multi-tile highlight covering the Zone
+rectangular drag-select or Road straight-line preview while LMB is held. Unlike the
+single-tile hover highlight (pre-allocated, in-place update), the preview mesh is
 **fully rebuilt on every call** because its tile count varies from 1 to potentially
 hundreds per drag step.
 
+**Signature (Phase 11d two-list API)**:
+
+```cpp
+void setTilePlacementPreview(
+    const std::vector<std::pair<int,int>>& freeTiles,
+    uint32_t freeArgb,
+    const std::vector<std::pair<int,int>>& blockedTiles = {});
+```
+
+- `freeTiles` — tiles where placement would succeed (unoccupied). Rendered with
+  `freeArgb` (caller-supplied colour, typically `kHoverArgb` — the green/teal
+  preview colour).
+- `freeArgb` — ARGB colour applied to every vertex of every free-tile quad.
+- `blockedTiles` — tiles already occupied by an existing zone or road (placement
+  would be skipped). Defaults to empty for backward compatibility with callers that
+  do not distinguish free from blocked. Rendered with the fixed constant
+  `kHoverArgbBlocked` (0xBBFF2222 — semi-transparent red). The caller does NOT
+  supply a colour for blocked tiles; the renderer uses `kHoverArgbBlocked`
+  unconditionally.
+
+Both tile lists are packed into the same rebuilt `SMesh*` in a single call — one mesh
+covers all tiles (free and blocked combined). The SMesh rebuild behaviour is unchanged
+from Phase 10: one full rebuild per call, old mesh dropped before allocation.
+
+**Clear signal**: pass empty `freeTiles` (and empty or omitted `blockedTiles`) to hide
+the preview — sets `m_previewVisible = false`, skips mesh allocation.
+
 **Lifecycle**:
 
-- `m_previewMesh` (`SMesh*`) is `nullptr` at construction; allocated on the first non-empty
-  call to `setTilePlacementPreview()`.
+- `m_previewMesh` (`SMesh*`) is `nullptr` at construction; allocated on the first
+  non-empty call to `setTilePlacementPreview()`.
 - Each call drops the old mesh (`m_previewMesh->drop()`) before allocating a new one.
-  This is a cold path (at most one rebuild per `MouseMove` event) so the allocation cost
-  is acceptable.
-- An empty `tiles` vector is the clear signal: sets `m_previewVisible = false`, skips
-  mesh allocation.
+  This is a cold path (at most one rebuild per `MouseMove` event) so the allocation
+  cost is acceptable.
 - `m_previewMesh` is dropped in the `IrrlichtRenderer` destructor.
 - The mesh is NOT added to the Irrlicht scene graph. It is drawn in `drawScene()` after
   the single-tile hover highlight via a loop over `m_previewMesh->getMeshBufferCount()`
@@ -373,13 +398,16 @@ hundreds per drag step.
 
 **Buffer batching**: identical u16-index limit as zone overlay — max 10,922 quads per
 `SMeshBuffer`. Out-of-bounds tiles are skipped silently (clamped by `m_mapTilesX/Z`).
+Free-tile quads and blocked-tile quads share the same set of sequentially filled
+buffers — no separate buffer allocation per colour group is required.
 
 **When the single-tile hover is suppressed**: while a Zone or Road drag is active
 (`m_lmbHeld && m_zoneAnchorX != -1`) and the preview is shown, `UIManager` calls
-`setTileHoverHighlight(-1, -1, kHoverArgbClear)` to hide the single-tile cursor and
-`setTilePlacementPreview(tiles, colour)` to show the multi-tile preview. When LMB is
-released or the tool is deselected, `setTilePlacementPreview({}, 0)` clears the preview
-and the normal single-tile hover resumes on the next `MouseMove`.
+`setTileHoverHighlight(-1, -1)` to hide the single-tile cursor and
+`setTilePlacementPreview(freeTiles, kHoverArgb, blockedTiles)` to show the multi-tile
+preview. When LMB is released or the tool is deselected,
+`setTilePlacementPreview({}, 0)` clears the preview and the normal single-tile hover
+resumes on the next `MouseMove`.
 
 ---
 
@@ -455,6 +483,87 @@ placement time therefore survives LOD transitions without re-binding.
 
 ---
 
+## Building Mesh Placement Contracts (Phase 11)
+
+### `placeBuildingMesh()` Contract
+
+`placeBuildingMesh(tileX, tileZ, assetBaseName)` places a zone building (residential, commercial, or industrial) at a given origin tile, with footprint and world origin determined by the building's `DensityTier`.
+
+**Footprint collision responsibility**: `placeBuildingMesh()` assumes the footprint is already validated as clear before being called. Footprint occupancy checking is the exclusive responsibility of `CitySimulation::placeZone()` — the renderer's sole responsibility is computing the world origin and placing the scene node. No occupancy validation logic belongs in the rendering layer. Cross-reference: `architecture/game-design/zoning-system.md` § Multi-Tile Footprint Placement Rules.
+
+**DensityTier derivation from assetBaseName**:
+The `DensityTier` is derived from the second delimiter-separated segment of `assetBaseName`. For example:
+
+- `"res_low_01"` → split by `_` → `["res", "low", "01"]` → tier segment = `"low"` → `DensityTier::LOW`
+- `"com_med_03"` → split by `_` → `["com", "med", "03"]` → tier segment = `"med"` → `DensityTier::MED`
+- `"ind_high_02"` → split by `_` → `["ind", "high", "02"]` → tier segment = `"high"` → `DensityTier::HIGH`
+
+No new parameter is added to the signature; tier extraction is performed internally by the method.
+
+**Native-size convention**:
+No `setScale()` is applied to the placed node. Building models are authored at real-world scale (1 Blender unit = 1 m) and placed at scale 1.0. This departs from the V1 baseline, which used `setScale(kTileSize / 4.0f) = setScale(2.5f)` on ±2 m models; Phase 9+ assets are authored natively sized.
+
+**Per-tier local half-extent and footprint**:
+Each density tier has a defined local-space half-extent (±X, ±Y, ±Z from model origin) and corresponding world footprint size:
+
+| Density tier | Local half-extent | World footprint |
+|---|---|---|
+| `LOW` | ±5 m | 10 m × 10 m |
+| `MED` | ±10 m | 20 m × 20 m |
+| `HIGH` | ±15 m | 30 m × 30 m |
+
+These values are binding and derived from `architecture/asset-standards/3d-model-standards.md` § Multi-Tile Footprint.
+
+**World origin formula for multi-tile footprints**:
+The origin tile is the bottom-left corner `(tileX, tileZ)`. All tiles in the footprint are marked occupied in the simulation layer. The placed scene node's world origin is positioned at the **center** of the full footprint:
+
+```text
+footprintN = 1 (LOW), 2 (MED), 3 (HIGH)
+
+worldX = (tileX + footprintN * 0.5f) * kTileSize
+worldZ = (tileZ + footprintN * 0.5f) * kTileSize
+```
+
+For a LOW-tier (1×1) building at `(tileX, tileZ)`:
+
+```text
+worldX = (tileX + 0.5f) * kTileSize   // tile centre
+worldZ = (tileZ + 0.5f) * kTileSize
+```
+
+For a MED-tier (2×2) building at `(tileX, tileZ)`:
+
+```text
+worldX = (tileX + 1.0f) * kTileSize   // centre of 2×2 block
+worldZ = (tileZ + 1.0f) * kTileSize
+```
+
+For a HIGH-tier (3×3) building at `(tileX, tileZ)`:
+
+```text
+worldX = (tileX + 1.5f) * kTileSize   // centre of 3×3 block
+worldZ = (tileZ + 1.5f) * kTileSize
+```
+
+### `placeServiceBuildingMesh()` Contract
+
+`placeServiceBuildingMesh(tileX, tileZ, assetBaseName)` places a service building (power plant, water tower, etc.) at the given origin tile.
+
+**Footprint and native-size convention**:
+Service buildings occupy a **2×2 tile footprint** (20 m × 20 m world extent) at scale 1.0 (natively sized, no runtime `setScale()` applied). Service building models are authored at real-world scale (1 Blender unit = 1 m) with a local-space half-extent of **±10 m** (matching the MED-tier zone building convention).
+
+**World origin formula**:
+The origin tile is `(tileX, tileZ)`. The scene node's world origin is positioned at the **center** of the 2×2 footprint, using the same formula as MED-tier zone buildings (N=2):
+
+```text
+worldX = (tileX + 1.0f) * kTileSize   // centre of 2×2 block
+worldZ = (tileZ + 1.0f) * kTileSize
+```
+
+All four tiles of the 2×2 footprint `[(tileX, tileZ), (tileX+1, tileZ), (tileX, tileZ+1), (tileX+1, tileZ+1)]` are marked occupied in the simulation layer. At least one road tile must be edge-adjacent (4-directional cardinal, distance = 1) to any tile in the footprint for the building to be placeable.
+
+---
+
 ## Vehicle Node Registry (Phase 10)
 
 ### Registry structure
@@ -500,13 +609,16 @@ Vehicle material slots are configured in `placeVehicle()` immediately after
 | Property | Value | Rationale |
 |---|---|---|
 | `Lighting` | `false` | No light nodes in scene (Phase 6+). |
-| `BackfaceCulling` | `true` | Vehicles are authored with correct CW winding for Irrlicht left-handed space. Differs from buildings which default to `false`. |
+| `BackfaceCulling` | `false` | Procedural B3D vehicle assets (generated by `tools/generate_b3d_models.py`) may have mixed or inverted winding after the axis-reorientation pass (`(x,z)→(−z,x)` applied to all vertices). `BackfaceCulling = false` guarantees all faces are visible from any camera angle, consistent with the building mesh approach. May be changed to `true` per asset when production Blender-exported vehicles with validated CW winding are delivered. |
 | `Texture[0]` (fallback) | `vehicles_diffuse_atlas_d.dds` | Applied only when `BuildingAssetLoader::load()` did not bind a texture (atlas file missing). Loaded via `IVideoDriver::getTexture()` (linear pool). |
 
 ### Vehicles are NOT tile-scaled
 
-Building nodes are scaled by `kTileSize` to fill the 10 × 10 m tile footprint.
-Vehicle nodes are **NOT** scaled — vehicles are authored at world scale (real metres).
+Building nodes are placed at scale 1.0 (natively sized — 1 Blender unit = 1 m, exported at
+real-world dimensions) — see `placeBuildingMesh()` Contract section above for the world
+origin formula that centres buildings on multi-tile footprints. `setScale()` is **never**
+called on building nodes.
+Vehicle nodes are likewise **NOT** scaled — vehicles are authored at world scale (real metres).
 `placeVehicle()` calls only `setPosition` and `setRotation`; it never calls
 `setScale`.
 
@@ -528,3 +640,109 @@ contains `/3d/vehicles/` it selects the vehicles atlas. Both loaders share the s
 call. It returns `false` (and logs a warning) when `m_smgr` or `m_driver` is null
 (headless / unit-test context). `placeVehicle()` returns early without crashing when
 `ensureVehicleLoader()` returns `false`.
+
+---
+
+## Agent Vehicle Node Registry (Phase 11d)
+
+`IrrlichtRenderer` maintains a second vehicle registry for traffic-simulation agents:
+
+```cpp
+std::unordered_map<AgentHandle, ISceneNode*> m_agentNodes;
+```
+
+**Ownership**: `IrrlichtRenderer` owns all nodes in `m_agentNodes`. Nodes are created by
+`spawnVehicleAgent()`, updated by `moveVehicleAgent()`, and destroyed by `despawnVehicleAgent()`.
+`main.cpp` calls these methods but does NOT hold a reference to `m_agentNodes`.
+
+**Coexistence with Phase 10 `m_vehicleNodes`**: The two registries are completely independent.
+`m_vehicleNodes` holds manually placed vehicles (via `placeVehicle`/`moveVehicle`/`removeVehicle`);
+`m_agentNodes` holds simulation-driven traffic agents. A tile may have at most one agent node but
+any number of manually placed vehicle nodes.
+
+**Lifecycle rules**:
+
+1. `spawnVehicleAgent(AgentHandle, tileX, tileZ, zone)` → creates `IMeshSceneNode*`
+   (CMeshSceneNode) via `addMeshSceneNode(static_cast<IMesh*>(vehicleMesh))` — NOT
+   `addAnimatedMeshSceneNode` (same constraint as buildings, per §Why CMeshSceneNode is
+   required); loads LOD0 mesh for `zone`, inserts into `m_agentNodes[handle]`.
+   After `addMeshSceneNode`, iterates all material slots and sets:
+   - `mat.Lighting = false` (no scene lights)
+   - `mat.BackfaceCulling = false` (same rationale as `placeVehicle` — see Vehicle material
+     rules above; procedural B3D winding may be mixed after axis reorientation)
+   - `mat.setTexture(0, vehicleTex)` for slot 0 (vehicles atlas PNG)
+2. `moveVehicleAgent(handle, tileX, tileZ, headingDeg)` → looks up node, updates position and
+   Y-rotation; does nothing if handle is absent (agent was culled).
+3. `despawnVehicleAgent(handle)` → runs the following eviction sequence, then erases from
+   `m_agentNodes`:
+   1. Iterate all material slots — call `mat.setTexture(t, nullptr)` for every texture unit
+      `t` in `[0, MATERIAL_MAX_TEXTURES)` (same pattern as `destroyVehicleNode` / Phase 10).
+   2. `m_driver->setMaterial(SMaterial{})` — flush driver last-bound state.
+   3. `node->remove()` — release the scene node. Do NOT access the node pointer after this
+      line. (Agent nodes use raw `IMeshSceneNode*`, not `LODNode*` — no wrapper to delete.)
+   4. Erase the entry from `m_agentNodes`.
+
+   **TextureCache note**: vehicle atlas textures (`vehicles_diffuse_atlas_d.dds` etc.) are
+   loaded **once at renderer init**, not per-agent-spawn. `spawnVehicleAgent` does NOT call
+   `TextureCache::loadSRGB`; therefore `despawnVehicleAgent` does NOT call
+   `TextureCache::releaseSRGB`. Steps 1–2 above release the node's texture reference without
+   disturbing the shared atlas.
+
+**Cull policy**: agents beyond 150 m from the camera are not spawned (simulation skips calling
+`spawnVehicleAgent` for them); agents that move beyond 150 m trigger `despawnVehicleAgent`.
+
+**SMesh / drop() rules**: agent nodes use `IAnimatedMesh*` loaded via `ISceneManager::getMesh()`
+and cast to `IMesh*` for `addMeshSceneNode` — the scene manager owns the mesh;
+`IrrlichtRenderer` must NOT call `->drop()` on it.
+
+---
+
+## Intersection Signal Billboard Registry (Phase 11d)
+
+`IrrlichtRenderer` maintains a registry of intersection signal billboard nodes:
+
+**`TileKey` type**: `TileKey` is defined in `src/simulation/simulation_types.h` as a plain
+struct with a custom hash, following the same pattern used by `m_agentNodes`:
+
+```cpp
+struct TileKey { int x{0}; int z{0}; };
+struct TileKeyHash {
+    std::size_t operator()(TileKey k) const noexcept {
+        return std::hash<int>()(k.x) ^ (std::hash<int>()(k.z) << 16);
+    }
+};
+```
+
+```cpp
+std::unordered_map<TileKey, ISceneNode*, TileKeyHash> m_intersectionNodes;
+```
+
+**Ownership**: `IrrlichtRenderer` owns all nodes in `m_intersectionNodes`. Nodes are created
+by `setIntersectionSignalState()` on the first call for a given tile and reused on all
+subsequent calls for that same tile. Nodes are destroyed when the associated road tile is
+removed (caller invokes `setIntersectionSignalState` with a sentinel or the road tile is
+demolished — implementers must run the **Eviction sequence** (steps 1–4 below) when road
+tiles are removed).
+
+**Lifecycle rules**:
+
+1. `setIntersectionSignalState(tileX, tileZ, SignalPhase)` — if no node exists for `(tileX, tileZ)`,
+   create a `IBillboardSceneNode*` via `smgr->addBillboardSceneNode()`, insert into
+   `m_intersectionNodes[{tileX, tileZ}]`, and set initial material and colour.
+   On subsequent calls for the same tile, look up the existing node and update its material
+   colour only (no allocation). Position: world centre of the tile + Y-offset `+0.15 m` above
+   the road surface. Set `PolygonOffsetFactor = -1` and `PolygonOffsetDirection = EPO_FRONT`
+   on the node's material to prevent Z-fighting with the road quad.
+   Colour per `SignalPhase`: `SignalPhase::Green` → RGB `0x00FF00`; `SignalPhase::Red` → RGB
+   `0xFF0000`. Set via `node->setColor(SColor(255, r, g, b))`.
+   Material: `EMT_TRANSPARENT_ADD_COLOR` (no texture — solid colour billboard).
+
+2. **Eviction sequence** (road tile removed or renderer shutdown):
+   1. For `t` in `[0, MATERIAL_MAX_TEXTURES)`: `node->getMaterial(t).setTexture(0, nullptr)`.
+   2. `m_driver->setMaterial(SMaterial{})` — flush driver last-bound state.
+   3. `node->remove()` — release the scene node. Do NOT access the node pointer after this line.
+   4. Erase the entry from `m_intersectionNodes`.
+
+**TextureCache note**: intersection signal billboards use no textures (solid colour material);
+steps 1–2 of the eviction sequence are included for uniformity with the vehicle eviction
+pattern but have no effect in practice.

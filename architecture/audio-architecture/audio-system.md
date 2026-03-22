@@ -16,7 +16,8 @@ struct vec3;         // 3-component float vector (X, Y, Z)
 struct CameraState;  // position (vec3), forward (vec3), up (vec3)
 // SimSpeed is NOT a separate enum class — it is a type alias:
 //   using SimSpeed = SpeedMultiplier;   (defined in simulation_types.h)
-// IAudioSystem.h must #include "simulation_types.h" to get this alias.
+// ZoneType is also defined in simulation_types.h (enum class: Residential, Commercial, Industrial).
+// IAudioSystem.h must #include "simulation_types.h" to get both SimSpeed and ZoneType.
 // Do NOT forward-declare SimSpeed as "enum class SimSpeed;" — type aliases
 // cannot be forward-declared in C++, and this would create a duplicate-type
 // compile error when simulation_types.h is included.
@@ -60,6 +61,10 @@ enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 // Added in Phase 10 (see implementation/phase-10.md — Music intensity interface deliverable).
 enum class MusicIntensity { CALM, GROWTH, CRISIS };
 
+// IAudioSystem — 18 pure-virtual methods.
+// Phase history: Phase 7 (base 14 methods) → Phase 10 (+setMusicIntensity = 15) →
+// Phase 11d (+acquireVehicleEnginePair, +releaseVehicleEnginePair, +updateVehicleAudio = 18).
+// Authoritative source for testability-architecture.md method-count comment.
 class IAudioSystem {
 public:
     virtual ~IAudioSystem() = default;
@@ -196,10 +201,90 @@ public:
     // architecture/game-design/economy-model.md §Music Intensity Tiers.
     // MockAudioSystem: add MOCK_METHOD(void, setMusicIntensity, (MusicIntensity), (override));
     virtual void setMusicIntensity(MusicIntensity intensity) = 0;
+
+    // --- Phase 11d Vehicle Engine Pair API ---
+    // Acquire an idle+move source pair from the vehicle engine pool for a vehicle agent
+    // of the given zone type.  The pair is drawn from the 24-slot Traffic/Vehicle SFX
+    // budget (sources[0..50], NORMAL priority).  At most kMaxVehiclePairs (= 12) pairs
+    // may be active simultaneously.
+    //
+    // Returns: {idleIdx, moveIdx} — indices into the internal AL source pool to be used
+    //   for sfx_vehicle_engine_idle (idle source) and sfx_vehicle_engine_move (move source).
+    //   Returns {-1, -1} if the pool is exhausted (all 12 pairs in use) and no eviction
+    //   candidate with lower priority/greater distance exists.
+    //
+    // Callers MUST check the return value before using either index:
+    //   auto [idle, move] = m_audio->acquireVehicleEnginePair(zone);
+    //   if (idle == -1) { /* pool full — vehicle drives silently */ return; }
+    //
+    // Paired acquisition is atomic: either both sources are acquired or neither is
+    // (partial acquisition is prohibited — see source-pool.md §Paired acquisition).
+    //
+    // ZoneType determines base pitch multiplier applied to both idle and move sources:
+    //   ZoneType::Residential → 1.0  (car engine)
+    //   ZoneType::Commercial  → 0.85 (bus engine)
+    //   ZoneType::Industrial  → 0.85 (truck engine)
+    // This mapping is implemented in V1 and is not reserved for future use.
+    //
+    // See architecture/audio-architecture/source-pool.md §Vehicle Engine Source Constraints
+    // and §Vehicle Engine Source Pairing — Internal Tracking for the full pool contract.
+    //
+    // MockAudioSystem: add
+    //   MOCK_METHOD((std::pair<int,int>), acquireVehicleEnginePair, (ZoneType), (override));
+    virtual std::pair<int,int> acquireVehicleEnginePair(ZoneType zone) = 0;
+
+    // Return the idle+move source pair to the vehicle engine pool.
+    // idleIdx and moveIdx must be the values originally returned by acquireVehicleEnginePair().
+    // Both sources are stopped (alSourceStop) and their occlusion state is reset before
+    // the pool slots are marked free.
+    //
+    // Releasing only one source of a pair is prohibited.  The LOD-cull path must always
+    // call releaseVehicleEnginePair(idleIdx, moveIdx) — never release individual sources
+    // via any other pool release path.
+    //
+    // Passing {-1, -1} (a failed acquisition result) is a no-op and is safe to call.
+    //
+    // See architecture/audio-architecture/source-pool.md §releaseVehicleEnginePair.
+    //
+    // MockAudioSystem: add
+    //   MOCK_METHOD(void, releaseVehicleEnginePair, (int, int), (override));
+    virtual void releaseVehicleEnginePair(int idleIdx, int moveIdx) = 0;
+
+    // Per-frame vehicle engine audio state update.
+    // Called by main.cpp once per render frame for each active vehicle, inside the
+    // per-frame agent sync loop, AFTER calling getAgentPositions() and BEFORE drawScene().
+    // AudioSystem uses these values to:
+    //   - Set AL_PITCH on both sources: basePitch × lerp(0.75, 1.35, speedFraction),
+    //     where basePitch is 1.0 (car) or 0.85 (bus/truck — determined from zone type at
+    //     acquire time and stored internally by AudioSystem).
+    //   - Set AL_GAIN crossblend: idle gain = max(0, 1 − (speedFraction − 0.21) / 0.36);
+    //     move gain = 1 − idle gain (see dynamic-soundscape.md §Vehicle Engine Audio).
+    //     Derivation: speedFraction = currentSpeed / 13.9 m/s (max road speed per traffic-system.md);
+    //     0.21 ≈ 3/13.9 (idle-full-on threshold); 0.36 ≈ (8−3)/13.9 (ramp width).
+    //   - Set AL_POSITION on both sources to (worldX, 0.0f, worldZ) for 3D spatial rolloff.
+    // idleIdx / moveIdx must be the values returned by acquireVehicleEnginePair(); passing
+    // {-1, -1} (a failed acquisition) is a no-op.
+    //
+    // MockAudioSystem: add
+    //   MOCK_METHOD(void, updateVehicleAudio, (int, int, float, float, float), (override));
+    //
+    // Threading model: updateVehicleAudio() is called on the MAIN THREAD every frame.
+    // The implementation stores speedFraction, worldX, and worldZ into the per-slot
+    // std::atomic<float> fields of VehiclePairSlot (source-pool.md §Vehicle Engine Source
+    // Pairing — Internal Tracking).  The audio thread reads these atomics on each wake
+    // (same pattern as m_occlusionGainTarget) and applies the AL_PITCH, AL_GAIN, and
+    // AL_POSITION calls.  No mutex is required for the main-thread write; std::atomic
+    // provides the necessary memory ordering.  AL calls are NEVER made on the main thread
+    // from this method.
+    virtual void updateVehicleAudio(int idleIdx, int moveIdx,
+                                    float speedFraction,
+                                    float worldX, float worldZ) = 0;
 };
 ```
 
-`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all fifteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
+`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all eighteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
+
+**MockAudioSystem atomicity rule**: `MockAudioSystem` must declare all 18 `MOCK_METHOD` entries in exact sync with the `IAudioSystem` interface. Any commit that adds or removes a method on `IAudioSystem` must update `MockAudioSystem` in the same commit. Failure to do so causes `simulation_tests` and `ui_tests` targets to fail to compile (pure-virtual override missing). This constraint is especially critical before Phase 11d test authoring begins, when all three vehicle-audio methods (`acquireVehicleEnginePair`, `releaseVehicleEnginePair`, `updateVehicleAudio`) must already be present in `MockAudioSystem`.
 
 ---
 
@@ -325,7 +410,7 @@ private:
 The file `src/interfaces/IAudioSystem.h` must include the following headers:
 
 ```cpp
-#include "simulation_types.h"    // Required: SimSpeed (type alias for SpeedMultiplier)
+#include "simulation_types.h"    // Required: SimSpeed (type alias for SpeedMultiplier), ZoneType (enum class; Phase 11d)
 #include "audio_types.h"         // Required: SoundId, MusicTrackId, SoundPriority, StingerType, TimeOfDay, SoundHandle, MusicIntensity
 #include "camera_state.h"        // Required: CameraState (used in syncListenerToCamera)
 #include "vec3.h"                // Required: vec3 (used in playPositionalSound and syncListenerToCamera)
@@ -563,6 +648,98 @@ The pre-load tier boundary used when classifying sounds into the pre-load vs. st
 - `constexpr float kZoneLoopMaxPreloadDurationSeconds = 18.0f;` declared in `audio_types.h`
 - Zone loop SoundId assignments (IDs 17–19): `architecture/audio-architecture/v1-audio-asset-manifest.md`
 - Pre-load vs. streaming tier boundary (20 s): `architecture/audio-architecture/streaming-architecture.md`
+
+---
+
+## Linux SIGKILL Prevention — rtkit and PipeWire
+
+On Linux, two separate mechanisms can deliver an **uncatchable SIGKILL** to the process
+during heavy road/zone placement operations (terrain flushes, mesh rebuilds):
+
+### 1. rtkit RLIMIT_RTTIME (primary)
+
+When OpenAL Soft contacts **rtkit-daemon** via the system D-Bus to request `SCHED_RR`
+scheduling for its mixing thread, rtkit also calls `setrlimit(RLIMIT_RTTIME, 200ms)`,
+which applies **process-wide** (all threads). If the mixing thread then accumulates
+more than 200 ms of continuous RT CPU time without blocking — for example, catching up
+on a large backlog of samples after a long frame — the kernel delivers SIGKILL
+unconditionally (no signal handler fires).
+
+**Fix**: `rt-prio = 0` in the `[general]` section of the ALSOFT config disables rtkit
+integration entirely. The mixing thread runs as `SCHED_OTHER`; no `RLIMIT_RTTIME` is
+set on any thread.
+
+**Verified by**: monitoring `/proc/<pid>/task/*/limits` — with the fix all threads show
+`Max realtime timeout: unlimited`; without it the mixing thread shows `SCHED_RR` and
+all threads show `Max realtime timeout: 200000 µs`.
+
+### 2. PipeWire ALSA plugin kill() (secondary)
+
+The PipeWire ALSA plugin (`libasound_module_pcm_pipewire.so`) calls
+`kill(getpid(), SIGKILL)` when its stream is destroyed after repeated underruns.
+The PulseAudio ALSA plugin (`libasound_module_pcm_pulse.so`) does not have this
+behaviour.
+
+**Fix**: `device = pulse` in the `[alsa]` section routes OpenAL through the PulseAudio
+ALSA plugin instead of PipeWire's native ALSA plugin.
+
+### ALSOFT Config Written by AudioSystem
+
+`AudioSystem::AudioSystem()` writes `/tmp/aitown_alsoft.conf` (if `ALSOFT_CONF` is not
+already set) with both fixes before the first `alcOpenDevice()` call:
+
+```ini
+[general]
+rt-prio = 0
+period_size = 4096
+periods = 8
+
+[alsa]
+device = pulse
+```
+
+`period_size=4096, periods=8` gives a ~744 ms buffer at 44100 Hz as additional headroom
+against any remaining frame spikes. `ALSOFT_CONF` is set with `overwrite=0` so a user
+can override with their own config.
+
+### 3. Batch Placement Sound Flooding (contributing factor)
+
+Zone and road drag operations release all queued tiles at once on LMB-up.
+`UIManager` loops `doTerrainPlacement(tx, tz)` for every tile in the rectangle/line;
+each call reaches `CitySimulation::placeZone()` / `placeRoad()`, which previously fired
+`SFX_EARTHWORKS + SFX_BUILD_PLACE` (or `SFX_ROAD_BUILD`) unconditionally — 2 × N
+`playPositionalSound` calls in a single frame (e.g. 200 calls for a 10×10 zone).
+
+This floods the SFX source pool with identical concurrent positional sources and
+dramatically increases the HRTF mixing load per period, making the ALSA catch-up loop
+more likely to hit the 200 ms RLIMIT\_RTTIME limit described above.
+
+**Fix**: `CitySimulation` gates both `placeZone()` and `placeRoad()` behind a shared
+100 ms cooldown stored in `m_lastPlacementSoundTime` (a `double` member initialised to
+`-1.0`). The cooldown uses the injected `IClock*` (`m_clock->nowSeconds()`) for
+determinism in tests.
+
+```cpp
+// In placeZone() and placeRoad():
+if (m_audio && m_clock) {
+    const double now = m_clock->nowSeconds();
+    if (now - m_lastPlacementSoundTime >= 0.1) {
+        m_lastPlacementSoundTime = now;
+        const vec3 pos{static_cast<float>(tileX), 0.0f,
+                       static_cast<float>(tileZ)};
+        if (earthworksCostOverride > 0)
+            m_audio->playPositionalSound(SFX_EARTHWORKS, pos,
+                                         SoundPriority::NORMAL, 1.0f);
+        m_audio->playPositionalSound(SFX_BUILD_PLACE /*or SFX_ROAD_BUILD*/, pos,
+                                     SoundPriority::NORMAL, 1.0f);
+    }
+}
+```
+
+The result: any batch operation that completes within 100 ms plays exactly **one**
+earthworks cue and one placement cue, regardless of how many tiles were modified.
+The cooldown is shared between zone and road placement so interleaved calls are also
+gated correctly.
 
 ---
 

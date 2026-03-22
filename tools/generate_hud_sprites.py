@@ -1593,10 +1593,15 @@ def main():
         'ind_low': draw_ind_low, 'ind_med': draw_ind_med,
         'ind_high': draw_ind_high,
     }
+    # Density-major order: all Low across cols 0-2, all Med across cols 3-5, all High across
+    # cols 6-8 — matching hud_sprite_ids.h constants (kSpriteZoneResLowActive=64 at col 0,
+    # kSpriteZoneComLowActive=65 at col 1, ...) and the UIManager formula
+    # "kSpriteZoneResLowActive + zoneCol + densityRow*3" where zoneCol=0..2 (R/C/I)
+    # and densityRow=0..2 (Low/Med/High).
     zone_order = [
-        'res_low', 'res_med', 'res_high',
-        'com_low', 'com_med', 'com_high',
-        'ind_low', 'ind_med', 'ind_high',
+        'res_low', 'com_low', 'ind_low',
+        'res_med', 'com_med', 'ind_med',
+        'res_high', 'com_high', 'ind_high',
     ]
     for i, key in enumerate(zone_order):
         place(i, 2, zone_draw_fns[key](state='active'))

@@ -9,6 +9,7 @@
 // no relevance to the city simulation logic (economy, zoning, traffic, etc.).
 
 #include <irrlicht.h>
+#include "lane_constants.h"  // kCarriagewayHalfWidth, kLaneCenterOffset (Irrlicht-free)
 
 namespace RenderConstants {
 

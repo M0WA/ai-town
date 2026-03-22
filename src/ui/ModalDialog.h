@@ -34,9 +34,29 @@ public:
     // Accept = Save and Quit, Decline = Quit Without Saving, Cancel = stay in game.
     void showUnsavedQuit(bool quitToDesktop);
 
+    // Phase 11c: manual save failure modal ("Save Failed" + reason, Retry / Cancel).
+    // Accept = Retry, Cancel = dismiss without retry.
+    // Escape activates Cancel.
+    void showSaveFailure(const std::string& reason);
+
+    // Phase 11c: Restore Defaults confirmation modal (480x240 px virtual).
+    // Accept = "Yes" (restore defaults), Cancel = stay as-is.
+    // Default focus Cancel (least destructive).
+    void showRestoreDefaultsConfirm();
+
     // Result accessors for UIManager to check after dialog closes
     enum class DialogResult { None, Accept, Decline, Cancel };
     DialogResult getLastResult() const { return m_lastResult; }
+
+    // Poll and consume the last dialog result. Returns getLastResult() and then
+    // resets m_lastResult to None, so the caller is notified exactly once.
+    // Returns None if no result is available yet (modal still open or idle).
+    DialogResult pollResult() {
+        if (m_active) return DialogResult::None;
+        DialogResult r = m_lastResult;
+        m_lastResult = DialogResult::None;
+        return r;
+    }
 
 private:
     IUIBackend*      m_backend{nullptr};
@@ -54,7 +74,9 @@ private:
         DemolishConfirm,
         WASDPreset,
         GameOver,
-        UnsavedQuit
+        UnsavedQuit,
+        SaveFailure,
+        RestoreDefaultsConfirm
     };
     DialogType m_dialogType{DialogType::None};
 
@@ -79,6 +101,9 @@ private:
     int64_t m_gameOverDebt{0};
     int     m_gameOverMonths{0};
 
+    // Stored reason for save-failure modal
+    std::string m_saveFailureReason;
+
     // Focus tracking for keyboard navigation
     int m_focusedButton{0};  // 0-based index into active buttons
 
@@ -98,6 +123,8 @@ private:
     void layoutWASDPreset();
     void layoutGameOver(int64_t debt, int months);
     void layoutUnsavedQuit(bool quitToDesktop);
+    void layoutSaveFailure(const std::string& reason);
+    void layoutRestoreDefaultsConfirm();
     void hideAllDialogElements();
     void setDialogRect(int w, int h);
 };

@@ -39,6 +39,45 @@
   - **`getNextUnlockThreshold()` return semantics**: `ICitySimulation::getNextUnlockThreshold(Difficulty d)` returns the difficulty-adjusted revenue value (in dollars) that the player must sustain for 3 consecutive months to trigger the next pending density tier unlock. The tiers are evaluated in the canonical unlock order defined above: Med-R/Med-C (same threshold), Med-I, High-R, High-C, High-I. The function returns the threshold of the **lowest-indexed tier that is not yet unlocked**. When all six density tiers are unlocked (High-I is the final tier), the function returns **`-1.0f`** as a sentinel value meaning "no further unlocks pending". The sentinel is `−1.0f` (negative one, as a float) rather than `std::numeric_limits<float>::max()` for the following reasons: (a) `float` max (~3.4 × 10^38) cannot be meaningfully formatted in a HUD label without special-casing; (b) `−1.0f` is unambiguously out-of-range for any valid threshold (all valid thresholds are positive dollar amounts), so a simple `threshold < 0.0f` guard is sufficient to detect the sentinel with no risk of false positives; (c) the value is trivially comparable in both C++ and tests without pulling in `<limits>`. **Contract**: the return value is never `0.0f` or `NaN`; it is either a positive dollar value (difficulty-adjusted) or exactly `−1.0f`. The named constant `SimulationConstants::kNoUnlockThreshold = -1.0f` MUST be used at every call site that checks for the sentinel — do not compare against the literal `−1.0f` inline. **HUD handling of the sentinel**: when `getNextUnlockThreshold(d)` returns `kNoUnlockThreshold`, the density unlock progress indicator in the resource bar MUST be hidden via `IUIBackend::setElementVisible(handle, false)` and the Density Unlock Preview Tooltip MUST NOT appear regardless of proximity calculations — both the indicator and the tooltip are suppressed for the remainder of the session once all tiers are unlocked. See [HUD Layout](../ui-ux/hud-layout.md) (Density Unlock Preview Tooltip section) for the authoritative HUD suppression rule.
   - **Density upgrade rate limiter**: When a density tier is unlocked, at most **20% of eligible tiles per zone type** (rounded up, minimum 1 per zone type) upgrade per budget tick. The 20% cap is applied independently to each zone type (R, C, I) — upgrading Residential tiles does not count against the Commercial tile cap. This prevents a mass simultaneous upgrade from spiking wages and costs in a single tick — the transition smooths over approximately 5 budget ticks. HUD shows a preview: when monthly revenue is within 10% of an unlock threshold, a projected "After Unlock" estimated monthly expense change is shown in the resource bar tooltip so the player can prepare.
 
+## Budget Screen Section Mapping
+
+The Budget Detail Panel (see `architecture/ui-ux/hud-layout.md` §Budget Detail Panel) organises
+all economy line items into two sections. The authoritative assignment for each V1 revenue and
+expense category is:
+
+**Income section**
+
+- Tax revenue — Residential: `taxRate.residential * residentialPopulation` (per-tick, summed
+  across all R tiles)
+- Tax revenue — Commercial: `taxRate.commercial * commercialValue` (per-tick, summed across all
+  C tiles)
+- Tax revenue — Industrial: `taxRate.industrial * industrialValue` (per-tick, summed across all
+  I tiles)
+- Utility fees: collected each budget tick from covered zones (Power $5/covered R tile/tick,
+  Water $3/covered R tile/tick) — see revenue constants above
+- Tourism income: post-V1 scoped — renders as a grayed-out placeholder row "Tourism income: $0
+  (post-V1)" in the Income section; not a live V1 data source. Rendered via
+  `setElementEnabled(handle, false)`. See `architecture/ui-ux/hud-layout.md` §Budget Detail
+  Panel, Tourism income line item.
+
+**Expenses section**
+
+- Road maintenance: per-tile upkeep cost (`road_maintenance_cost_per_tile × road_tile_count`)
+  per budget tick
+- Service upkeep: fire/police/power/water building operating cost per budget tick (see service
+  upkeep constants above)
+- Wages: city employee payroll (`wages_per_tick` formula — see Wages section above)
+
+**Total**: Income total − Expenses total = net monthly balance (positive = surplus,
+negative = deficit).
+
+For display formatting, sign colours, and panel layout see
+`architecture/ui-ux/hud-layout.md` §Budget Detail Panel.
+
+**Governance rule**: Any future income or expense category added to this spec MUST be assigned
+to either the Income or Expenses section of the Budget Detail Panel before merging, to avoid
+future display regressions.
+
 ## Phase 10 Audio Callbacks for Economy Events
 
 The following `CitySimulation` internal methods fire audio events at the moment an economy

@@ -16,7 +16,7 @@ class IAudioSystem;
 class ICitySimulation;
 class IRenderer;
 class ITerrainQuery;
-class SaveSystem;
+class ISaveSystem;
 
 // INCLUDE PROHIBITION: Do NOT replace this forward declaration with
 // #include "src/platform/input_event.h". The platform header must not
@@ -183,9 +183,14 @@ public:
     // Silently uses defaults if the file is absent (normal first-run state).
     void loadKeybindings();
 
+    // Phase 11c: Apply keybindings — update m_keyBindings and persist to disk.
+    // Called from SettingsPanel via the m_keybindingsApplyFn callback.
+    void applyKeybindings(const KeyBindings& b);
+
     // Phase 11: Wire the SaveSystem to UIManager for manual save and quit-guard.
+    // Accepts ISaveSystem* so tests can pass MockSaveSystem without a real SaveSystem.
     // Called from main.cpp after SaveSystem is constructed.
-    void setSaveSystem(SaveSystem* saveSystem);
+    void setSaveSystem(ISaveSystem* saveSystem);
 
     // Phase 11: Update Load Game button enabled state in MainMenuPanel.
     // When available=false (default): button grayed, tooltip "No saves found."
@@ -320,8 +325,8 @@ private:
     // While true, update() returns immediately (terrain generation in progress).
     bool m_loadingTerrain{false};
 
-    // --- Phase 11: SaveSystem pointer (optional — null until setSaveSystem() is called) ---
-    SaveSystem* m_saveSystem{nullptr};
+    // --- Phase 11: ISaveSystem pointer (optional — null until setSaveSystem() is called) ---
+    ISaveSystem* m_saveSystem{nullptr};
 
     // --- Phase 11: key bindings loaded from keybindings.json at startup ---
     // Defaults are set by KeyBindings member initialisers; overridden by load().
@@ -332,6 +337,11 @@ private:
     // Cleared after the blocking modal resolves.
     enum class PendingQuitAction { None, Desktop, ToMenu };
     PendingQuitAction m_pendingQuit{PendingQuitAction::None};
+
+    // --- Phase 11c: pending save-failure retry ---
+    // True when a manual save failure modal (SaveFailure type) is open.
+    // update() polls the modal result and re-calls saveToSlot(1) on Retry.
+    bool m_pendingSaveFailure{false};
 
     // --- Phase 8: application quit flag ---
     // Set when MainMenu Quit or PauseMenu Quit to Desktop is consumed.
@@ -349,6 +359,7 @@ private:
     // --- Phase 8: panel open-state tracking for input arbitration ---
     bool m_inspectorOpen{false};
     bool m_taxPanelOpen{false};
+    bool m_budgetPanelOpen{false};  // Phase 11h: BudgetDetailPanel toggle state
 
     // --- Phase 8: Ctrl-key state tracking for Ctrl+Z ---
     bool m_ctrlDown{false};
@@ -358,9 +369,18 @@ private:
     // Tests set this to false to suppress the modal and call demolishTile directly.
     bool m_demolishConfirmEnabled{true};
 
+    // Phase 11h: demolition pending tile (mouse-down records tile; mouse-up triggers modal).
+    int m_demolishPendingTileX{-1};
+    int m_demolishPendingTileZ{-1};
+    bool m_demolishModalPending{false};  // true while waiting for demolish confirm modal result
+
     // Background scrim element shown behind modal dialogs.
     // kInvalidUIElement (0) until Phase 6 creates the real element.
     UIElementHandle m_scrimHandle{kInvalidUIElement};
+
+    // Helper: update m_keyBindings and write keybindings.json.
+    // Called from applyKeybindings().
+    void saveKeybindings(const KeyBindings& b);
 
     // Helper: show/hide Zone and Utilities sub-panels based on m_activeTool.
     // Called whenever m_activeTool changes (toolbar click or hotkey).

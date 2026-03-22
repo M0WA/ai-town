@@ -91,6 +91,8 @@ Do not suggest alternative engines, languages, or platforms.
 | Plan Spec | `/plan-spec` | Product Owner updates the implementation plan from specs, then design + tech squads review it in parallel and iterate until no CRITICAL/HIGH issues remain |
 | Plan Fix Spec | `/plan-fix-spec` | Sync the implementation plan with current specs AND iteratively fix all CRITICAL/HIGH issues in both specs and the plan — domain-scoped re-reviews, diff-based round-2+ prompts, issue deduplication, fix verification, `model: haiku` for review agents, deferred single commit |
 | Fix Implementation | `/fix-implementation` | Same as Plan Fix Spec but skips the Product Owner plan-sync step — iteratively fixes all CRITICAL/HIGH issues in both specs and the implementation plan as-is |
+| Fix Design Implementation | `/fix-design-implementation` | Like Fix Implementation but uses only the design squad (Game Designer, UI/UX, 2D Texture, 3D Model, Sound Artist) — no tech squad agents |
+| Fix Tech Implementation | `/fix-tech-implementation` | Like Fix Implementation but uses only the tech squad (GitHub Pipeline, Irrlicht dev, OpenAL Soft dev, Test Engineer) — no design squad agents |
 | Validate Phase Done | `/validate-phase-done` | Read a phase file and report whether all deliverable checkboxes and exit criteria are complete; lists every outstanding item if not |
 | Mark Phase Done | `/mark-phase-done` | Validate phase completion, then mark it as **DONE** in the implementation plan and sync the GitHub board; infers the phase from the current git branch (`planning/phase-N` → Phase N−1 done) if not specified |
 | Split Phase | `/split-phase` | Product Owner proposes splitting a phase into multiple phases or redistributing its deliverables; design + tech squads review the proposal, then the Product Owner applies the agreed split |
@@ -267,6 +269,21 @@ up to date with **all** build-time and run-time dependencies, including:
 **Rule**: whenever a new dependency is added to `vcpkg.json`, `CMakeLists.txt`, or the CI
 workflow, the Dockerfile must be updated in the same commit.
 
+### Makefile
+
+A `Makefile` at the repo root provides convenience targets that wrap the CMake/ctest
+commands. **Keep the Makefile targets in sync whenever build commands, presets, or test
+labels change.**
+
+| Target | Description |
+|---|---|
+| `make config` | Generate the CMake build configuration (`ci-linux` preset by default) |
+| `make build` | Build all binaries (runs `config` automatically if `build/` is missing) |
+| `make clean` | Remove all build artifacts (`build/` directory) |
+| `make test` | Build with coverage, run unit + integration tests, generate lcov report, enforce ≥95% gate |
+
+Override the preset with `make config PRESET=ci-linux-coverage` for a coverage build.
+
 ### Building
 
 ```bash
@@ -303,7 +320,7 @@ cmake --build build
 ctest --test-dir build -LE "integration|requires-opengl" --output-on-failure
 ctest --test-dir build -L "^integration$" --output-on-failure
 xvfb-run --auto-servernum ctest --test-dir build -L "^requires-opengl$" --output-on-failure
-lcov --capture --directory build --base-directory . --ignore-errors mismatch --output-file coverage.info
+lcov --capture --directory build --base-directory . --ignore-errors mismatch,inconsistent --output-file coverage.info
 BUILD_DIR=build
 lcov --remove coverage.info \
   --ignore-errors unused \
@@ -335,6 +352,8 @@ ctest --test-dir build -C Release --output-on-failure
 
 ### Build & Toolchain
 
+- **Makefile**: `make config / build / clean / test` are thin wrappers around cmake/ctest. Update `Makefile` targets whenever build commands, CMake presets, or ctest labels change — the Makefile is the canonical quick-start interface. `make test` enforces a **≥95% total line coverage gate** (target range 95–98%); override with `make test COVERAGE_MIN=90.0` if needed during active development.
+- **lcov `--ignore-errors`**: pass `mismatch,inconsistent,version` (comma-separated, single flag) to `lcov --capture` — `mismatch`/`inconsistent` suppress GCC 13 inline-function noise; `version` suppresses the GCC/gcov version-string mismatch emitted when the build and capture gcov versions differ slightly.
 - **Local build with gcc-12 fallback**: if the devcontainer image has not been rebuilt after the gcc-13 Dockerfile fix, `/usr/bin/c++` resolves to gcc-12 which lacks `<format>` (required by openal-soft ≥ 1.24.0). Workaround: pass `-DVCPKG_OVERLAY_PORTS=vcpkg-overlays` to cmake — the overlay pins openal-soft to 1.23.1. Once the devcontainer is rebuilt (which now sets the `c++` alternative to gcc-13), the overlay is not needed.
 - **CMakePresets**: Three CI presets defined in `CMakePresets.json`: `ci-linux` (Ninja, no coverage), `ci-linux-coverage` (Ninja, coverage), `ci-windows` (Ninja + MSVC). CI jobs call `cmake --preset <name>`. Local dev: set `VCPKG_ROOT` then `cmake --preset ci-linux` (add `-DVCPKG_OVERLAY_PORTS=vcpkg-overlays` if using gcc-12 fallback).
 - **Test deps via vcpkg**: `gtest` and `rapidcheck` are vcpkg-managed (not FetchContent). Targets: `GTest::gtest_main`, `GTest::gmock` (namespaced); `rapidcheck`, `rapidcheck_gtest` (bare, no namespace).
@@ -382,7 +401,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 - Tests use Google Test + GMock + RapidCheck (all vcpkg-managed); simulation injected via `IRenderer`/`IAudioSystem`; `UIManager` via `IUIBackend` (opaque `UIElementHandle` — no raw Irrlicht pointers in interface)
 - Mock policy: `StrictMock` for unit tests, `NiceMock` for property/integration tests; add `TearDown()` to explicitly reset `sim_` and document destructor-path contract
-- Coverage gate (lcov ≥95%) Linux only; do NOT include `${BUILD_DIR}/_deps/*` in lcov exclude patterns (path never exists); pass `--ignore-errors mismatch` to `lcov --capture` for GCC 13 compatibility
+- Coverage gate (lcov ≥95%) Linux only; do NOT include `${BUILD_DIR}/_deps/*` in lcov exclude patterns (path never exists); pass `--ignore-errors mismatch,inconsistent` (comma-separated single flag) to `lcov --capture` for GCC 13 + lcov 2.x compatibility — lcov 2.0 only forwards the first `--ignore-errors` flag to geninfo, so both categories must be combined in one flag
 - CI: permissions block needed (`checks: write`); `coverage-linux` is self-contained job (builds+tests+lcov with `ENABLE_COVERAGE=ON`); use `GTEST_OUTPUT=xml:test_results/` (directory form); `all-checks-pass` gate MUST have `if: always()` + strict branch protection; vcpkg baseline enforcement step required; `actions/upload-artifact` steps must be explicit
 - Linux CI: run unit tests with `ctest -LE "integration|requires-opengl"`; integration tests (no display) with `ctest -L "^integration$"`; OpenGL tests under `xvfb-run` with `ctest -L "^requires-opengl$"`
 - Windows CI: use `vswhere.exe` for MSVC version in cache key; include `AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` in test step `env:`

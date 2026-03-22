@@ -131,6 +131,12 @@ fire, police, power, water"). No service building type is deferred to post-V1.
 - Service buildings can be placed on any buildable tile (slope ≤ 15.0° without earthworks; any
   slope with earthworks cost). They do **not** require a zoned tile — infrastructure can be
   placed on unzoned terrain.
+- **No demolish prerequisite**: Service buildings are infrastructure, not competing zone types.
+  They may be placed on **any buildable tile** (slope ≤ 15.0°) regardless of whether that tile
+  is already occupied by a zone designation or a road. The player is **not** required to demolish
+  an existing zone or road before placing a service building. The zone or road occupancy on a
+  tile does not block service building placement. This exemption is authoritative and supersedes
+  any implementation-phase plan note that defers or qualifies it.
 - Service buildings are demolished via the Demolish tool (same as zones and roads). The
   demolish confirmation modal applies (same setting as zone/road demolish). Demolishing a
   service building removes coverage for all previously covered tiles on the next budget tick.

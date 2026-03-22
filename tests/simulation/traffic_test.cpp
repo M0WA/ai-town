@@ -170,12 +170,23 @@ TEST_F(NiceTrafficTest, TrafficAgent_Timeout_LoggedAsExtremeTravel_NotNullPath) 
     // With 1 road tile capacity = 8 vehicles, placing enough population-bearing
     // tiles forces extreme congestion.
     //
-    // Place road + zones forming a minimal connected graph:
+    // Place road + zones forming a congested single-bottleneck network.
+    // Single road at (5,5) — all zones within 3 Manhattan tiles of it.
+    // trafficLoad = totalZonedTiles / (1 road × 8 capacity) must exceed 1.0
+    // to trigger the timeout path (sampleR = 0.0 → factor < 0.5).
+    // 16 zones / 8 capacity = 2.0 > 1.0 → timeout → factor = 0.0 < 0.5.
     sim_->placeRoad(5, 5);
-    for (int i = 0; i < 10; ++i) {
-        sim_->placeZone(6 + i, 5, ZoneType::Residential, DensityTier::Low);
-        sim_->placeZone(6 + i, 6, ZoneType::Commercial,  DensityTier::Low);
-        sim_->placeZone(6 + i, 4, ZoneType::Industrial,  DensityTier::Low);
+    // Residential row at z=5 (x=2..8, skip road at x=5): 6 zones, dist ≤ 3.
+    for (int x = 2; x <= 8; ++x) {
+        if (x != 5) sim_->placeZone(x, 5, ZoneType::Residential, DensityTier::Low);
+    }
+    // Commercial row at z=4 (x=3..7): 5 zones, dist ≤ 3 from (5,5).
+    for (int x = 3; x <= 7; ++x) {
+        sim_->placeZone(x, 4, ZoneType::Commercial, DensityTier::Low);
+    }
+    // Industrial row at z=6 (x=3..7): 5 zones, dist ≤ 3 from (5,5).
+    for (int x = 3; x <= 7; ++x) {
+        sim_->placeZone(x, 6, ZoneType::Industrial, DensityTier::Low);
     }
 
     // Run enough ticks to fill the 5-tick rolling window for Residential.

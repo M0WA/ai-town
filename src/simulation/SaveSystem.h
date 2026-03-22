@@ -17,37 +17,24 @@
 // Phase-11 scope: does NOT create saves/scenarios/ subdirectory (post-V1).
 
 #include "IClock.h"
+#include "src/interfaces/ISaveSystem.h"
 
 #include <string>
 
 // Forward-declare to avoid pulling CitySimulation.h into the interface.
 class CitySimulation;
 
-// ---------------------------------------------------------------------------
-// SaveResult — result of a save operation.
-// ---------------------------------------------------------------------------
-struct SaveResult {
-    bool        ok{false};   // true if the save succeeded
-    std::string error;       // non-empty on failure
-};
-
-// ---------------------------------------------------------------------------
-// LoadResult — result of a load operation.
-// ---------------------------------------------------------------------------
-struct LoadResult {
-    bool        ok{false};     // true if the load succeeded
-    std::string jsonData;      // the raw JSON string read from disk (empty on failure)
-    std::string error;         // non-empty on failure
-};
+// SaveResult and LoadResult are defined in src/interfaces/ISaveSystem.h.
+// They are available here via the #include above.
 
 // ---------------------------------------------------------------------------
 // SaveSystem
 // ---------------------------------------------------------------------------
-class SaveSystem {
+class SaveSystem : public ISaveSystem {
 public:
     // clock: injected IClock* for real-time auto-save timer (must not be null).
     explicit SaveSystem(IClock* clock);
-    ~SaveSystem() = default;
+    ~SaveSystem() override = default;
 
     // Non-copyable, non-movable (owns timer state and file paths).
     SaveSystem(const SaveSystem&)            = delete;
@@ -62,36 +49,42 @@ public:
     // update — advance the real-time auto-save timer.  Call once per frame.
     // realDeltaSeconds: time since last frame (real time, not sim time).
     // Fires an auto-save when the 120 s timer expires (unless suspended).
-    void update(float realDeltaSeconds);
+    void update(float realDeltaSeconds) override;
 
     // onBudgetTick — increment the budget-tick counter for the 5-tick auto-save gate.
     // Call once per budget tick from the main loop or CitySimulation::tick().
     // Fires an auto-save when the 5-tick counter reaches the threshold (unless suspended).
-    void onBudgetTick();
+    void onBudgetTick() override;
 
     // onForcedLoanDialogActive — trigger an immediate auto-save.
     // Called by UIManager just before opening the forced-loan modal dialog.
-    void onForcedLoanDialogActive();
+    void onForcedLoanDialogActive() override;
 
     // onPauseMenuOpened — trigger an immediate auto-save.
     // Called by UIManager when the pause/settings menu is opened.
-    void onPauseMenuOpened();
+    void onPauseMenuOpened() override;
 
     // suspendAutoSave — pause or resume the auto-save timer.
     // Pass true to suspend (e.g., while a blocking modal is open or game is fully paused),
     // false to resume.  Immediate-trigger methods bypass this flag.
-    void suspendAutoSave(bool suspended);
+    void suspendAutoSave(bool suspended) override;
 
     // ---- Manual saves and loads ----
 
     // autoSave — write current simulation state to the auto-save slot.
     // Returns SaveResult{ok=false} if setSimulation() has not been called.
-    SaveResult autoSave();
+    SaveResult autoSave() override;
 
     // saveToSlot — write current simulation state to the numbered slot (1–3).
-    // name: optional human-readable label (not used in V1 filename, reserved for future UI).
-    // Returns SaveResult{ok=false} for slot values outside [1, 3].
-    SaveResult saveToSlot(int slot, const std::string& name = "");
+    // The ISaveSystem interface requires saveToSlot(int slot); this implementation
+    // also accepts an optional name label (not used in V1 filename, reserved for
+    // future UI). The override satisfies the interface's saveToSlot(int) signature.
+    SaveResult saveToSlot(int slot) override;
+
+    // saveToSlot with optional name label — non-virtual convenience overload.
+    // Delegates to saveToSlot(slot) so that production callers that previously
+    // passed a name continue to compile.
+    SaveResult saveToSlot(int slot, const std::string& name);
 
     // loadFromSlot — read the save file for the numbered slot (1–3).
     // Returns LoadResult with the raw JSON; caller applies it via
@@ -104,21 +97,27 @@ public:
     // loadMostRecentSave — return the save file (across all slots including autosave)
     // with the most recent filesystem modification time.
     // Returns LoadResult{ok=false, error="no save data"} if no save files exist.
-    LoadResult loadMostRecentSave() const;
+    LoadResult loadMostRecentSave() const override;
 
     // ---- Queries ----
 
     // hasSaveData — returns true if at least one save file exists (any slot).
-    bool hasSaveData() const;
+    bool hasSaveData() const override;
 
     // isSaveCorrupted — returns true if save files exist but the most recent one
     // cannot be loaded (schema mismatch, malformed JSON, truncated file).
     // Returns false when hasSaveData() is false (absent file ≠ corrupted).
     bool isSaveCorrupted() const;
 
+    // getSaveFileState — returns a three-state summary for the Load Game button.
+    // NoSaves    — no save files on disk.
+    // AllCorrupt — files exist but most recent is unreadable.
+    // Valid      — at least one valid, loadable save.
+    SaveFileState getSaveFileState() const override;
+
     // getSaveDirectoryPath — return the platform-specific save directory path.
     // The directory is created on first access (by autoSave/saveToSlot).
-    std::string getSaveDirectoryPath() const;
+    std::string getSaveDirectoryPath() const override;
 
 private:
     // ---- Members ----

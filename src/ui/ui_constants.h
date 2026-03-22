@@ -14,11 +14,12 @@ constexpr int kToolbarTop    = 64;   // virtual y-coordinate (1920x1080 space)
 constexpr int kToolbarBottom = 784;  // virtual y-coordinate (1920x1080 space)
 
 // Minimap widget top edge (virtual 1920x1080 space).
-// kMinimapWidgetTopOverlayActive: top edge when an overlay panel (e.g. QueryPanel)
-// is active above the minimap.
-// kMinimapWidgetTop: default top edge with no overlay active.
+// kMinimapWidgetTopOverlayActive: top edge when the legend panel is active above
+// the toggle row (legend at y:732–832, label strip y:832–848, toggle row y:848–880).
+// kMinimapWidgetTop: default top edge (toggle row at y:848–880, render area y:880–1080).
+// See architecture/ui-ux/minimap.md for the full widget footprint layout.
 constexpr int kMinimapWidgetTopOverlayActive = 732;
-constexpr int kMinimapWidgetTop = 880;
+constexpr int kMinimapWidgetTop = 848;
 
 // --- Phase 9b: Zone overlay and hover highlight ARGB colour constants ---
 // Format: 0xAARRGGBB  (Irrlicht SColor format, alpha 0x60 ≈ 38% for overlays)
@@ -31,9 +32,19 @@ constexpr unsigned int kOverlayArgbIndustrial  = 0x60FFFF00u;  // yellow
 
 // Hover highlight ARGB colours per active tool (alpha 0x80 ≈ 50%).
 // Used by UIManager::onEvent() MouseMove handler.
-constexpr unsigned int kHoverArgbZone      = 0x80FF00FFu;  // semi-transparent magenta
+// Zone tool: per-zone-type colours matching the zone overlay hues (same hue, higher alpha).
+constexpr unsigned int kHoverArgbZoneRes   = 0x8000FF00u;  // green  — Residential
+constexpr unsigned int kHoverArgbZoneCom   = 0x800000FFu;  // blue   — Commercial
+constexpr unsigned int kHoverArgbZoneInd   = 0x80FFFF00u;  // yellow — Industrial
 constexpr unsigned int kHoverArgbRoad      = 0x8000FFFFu;  // semi-transparent cyan
 constexpr unsigned int kHoverArgbUtilities = 0x80FF8000u;  // semi-transparent orange
 constexpr unsigned int kHoverArgbDemolish  = 0x80FF0000u;  // semi-transparent red
 constexpr unsigned int kHoverArgbQuery     = 0x80FFFFFFu;  // semi-transparent white
 constexpr unsigned int kHoverArgbClear     = 0x00000000u;  // clear / no highlight
+// Phase 11d Deliverable 5d: semi-opaque red highlight for tiles that are already occupied.
+// Used when Zone or Road tool is active and the hovered tile is a road or zone (blocked).
+constexpr unsigned int kHoverArgbBlocked   = 0xBBFF2222u;  // semi-opaque red, alpha=0xBB≈73%
+
+// Phase 11d Deliverable 3c: left edge of the full minimap widget footprint (virtual 1920x1080).
+// Extends from kMinimapWidgetLeft to x=1920. Used by UIManager::onEvent Inspector carve-out.
+constexpr int kMinimapWidgetLeft = 1576;

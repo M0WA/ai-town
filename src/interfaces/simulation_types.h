@@ -89,9 +89,15 @@ enum class NotificationType {
     ServiceDegraded,     // service building entered reduced-coverage state; amount unused
     BudgetDeficitWarn,   // city crossed the -25% deficit threshold; amount unused
     PopulationMilestone, // population crossed a milestone (1K/10K/50K/100K/500K); milestoneValue = pop count
-    CityRatingTransition // city rating tier changed; milestoneValue = new CityRatingTier as int
-                         //   (Village=0, Town=1, City=2, Metropolis=3, Megalopolis=4)
-                         //   fires stinger_milestone at tier transitions ONLY; NOT at 100K raw population
+    CityRatingTransition, // city rating tier changed; milestoneValue = new CityRatingTier as int
+                          //   (Village=0, Town=1, City=2, Metropolis=3, Megalopolis=4)
+                          //   fires stinger_milestone at tier transitions ONLY; NOT at 100K raw population
+    NeighbourCleared,    // same-zone lower-density neighbour auto-demolished during density upgrade
+    UpgradeBlocked,      // density upgrade cancelled after 12 deferred retries (CRITICAL toast)
+    PlacementBlocked,    // zone/service placement rejected (footprint occupied, OOB, road too far,
+                         //   or no adjacent road); tileX/tileZ hold the attempted origin tile
+    BuildingAbandoned,   // zone building abandoned — nearest road > 3 tiles away
+    BuildingRecovered    // previously-abandoned zone building recovered — road within 3 tiles again
 };
 
 // SimulationNotification — one queued event from CitySimulation for UIManager to process.
@@ -114,13 +120,18 @@ struct ServiceCoverage {
 };
 
 // ServiceBuildingType — the four placeable service infrastructure buildings.
-// Used by ICitySimulation::placeServiceBuilding().
-// All four types are mandatory in V1; see architecture/game-design/service-coverage.md.
+// Used by ICitySimulation::placeServiceBuilding() and QueryResult::serviceType.
+// None is the sentinel value for non-service-building tiles (used in QueryResult).
+// IMPORTANT: None is placed last to preserve the existing ordinals of the four
+// placeable types (PowerPlant=0..PoliceStation=3); UIManager casts an int index
+// 0-3 directly to ServiceBuildingType — inserting None before them would break that mapping.
+// All four non-None types are mandatory in V1; see architecture/game-design/service-coverage.md.
 enum class ServiceBuildingType {
     PowerPlant,
     WaterTower,
     FireStation,
-    PoliceStation
+    PoliceStation,
+    None
 };
 
 // QueryResult — per-tile data returned by ICitySimulation::queryTile().
@@ -142,5 +153,62 @@ struct QueryResult {
                                       // multiplied by 100. Formula: queryResult.demandPressurePct =
                                       // (1.0f - tileEffectiveDemandFactor) * 100.0f — NOT getDemandPressurePct() * 100.
                                       // NOT the same as getDemandPressurePct(ZoneType) which returns city-wide aggregate.
-    ServiceCoverage coverage;        // per-service; -1.0f = N/A
+    ServiceCoverage     coverage;                              // per-service; -1.0f = N/A
+    ServiceBuildingType serviceType{ServiceBuildingType::None}; // ServiceBuildingType::None for non-service tiles
+    bool                degraded{false};         // true if covering service building is in degraded state
+    // Phase 11h: multi-tile footprint fields.
+    bool isAbandoned{false};  // true when building is abandoned due to road proximity > 3 tiles
+};
+
+// -----------------------------------------------------------------------
+// Phase 11d — Types for traffic-agent and service-coverage query methods
+// added to ICitySimulation (getAgentPositions, getIntersectionSignalStates,
+// getRoadSegmentSpeeds, getServiceCoverage).
+// -----------------------------------------------------------------------
+
+// AgentHandle — opaque stable ID for a traffic agent, valid for the agent's
+// lifetime. Defined once here to avoid ODR violations when both simulation_types.h
+// and IRenderer.h appear in the same translation unit.
+using AgentHandle = uint32_t;
+
+// SignalPhase — current traffic-signal colour at an intersection tile.
+enum class SignalPhase {
+    Green,
+    Red
+};
+
+// AgentState — per-agent snapshot returned by ICitySimulation::getAgentPositions().
+// worldX/worldZ hold the sub-tile-interpolated world-space position (metres).
+// When non-zero they are used directly by the renderer for smooth movement;
+// tileX/tileZ retain the integer tile for audio distance culling.
+struct AgentState {
+    uint32_t agentId{0};
+    int      tileX{0};
+    int      tileZ{0};
+    float    headingDeg{0.0f};
+    ZoneType zone{ZoneType::Residential};
+    float    worldX{0.0f};   // sub-tile interpolated world X (m); 0 = use tile centre
+    float    worldZ{0.0f};   // sub-tile interpolated world Z (m); 0 = use tile centre
+};
+
+// IntersectionSignalState — signal-phase snapshot for one intersection tile.
+struct IntersectionSignalState {
+    int         tileX{0};
+    int         tileZ{0};
+    SignalPhase phase{SignalPhase::Green};
+};
+
+// RoadSegmentSpeed — fractional speed on one road tile (0.0 = stopped, 1.0 = free-flow).
+struct RoadSegmentSpeed {
+    int   tileX{0};
+    int   tileZ{0};
+    float speedFraction{1.0f};
+};
+
+// ServiceCoverageTile — coverage state for one tile.
+struct ServiceCoverageTile {
+    int                 tileX{0};
+    int                 tileZ{0};
+    ServiceBuildingType coveredBy{ServiceBuildingType::None};
+    bool                degraded{false};
 };

@@ -1,8 +1,12 @@
 # Building Atlas Layout
 
-**Status**: ACTIVE — schema and atlas structure are established. Phase 9 UV authoring is complete. All required sign-offs are recorded in this file: `graphics-artist-2d-texture` (general atlas layout 2026-02-25; service building cell (3,2) texture content 2026-03-04), `graphics-dev-irrlicht` (2026-02-26), and `graphics-artist-3d-model` (multiple sign-offs through 2026-03-04). No open sign-off gates remain.
+**Status**: ACTIVE — schema and atlas structure are established. Phase 9 UV authoring is complete.
+Phase-11e expanded atlas to 4096×4096 (8×8 grid, per-variant unique cells). All required sign-offs
+are recorded in this file: `graphics-artist-2d-texture` (general atlas layout 2026-02-25; service
+building texture content 2026-03-04), `graphics-dev-irrlicht` (2026-02-26), and
+`graphics-artist-3d-model` (multiple sign-offs through 2026-03-04). No open sign-off gates remain.
 
-## City Building Atlas (2048×2048)
+## City Building Atlas (4096×4096)
 
 - Format: DDS DXT1 sRGB (`GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`); use DXT5 sRGB (`GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`) if any atlas cell requires alpha
 - Upload path: raw-GL sRGB path (`glGenTextures` → `glBindTexture` → `glCompressedTexImage2D` with sRGB internal format) — diffuse color data requires sRGB decode. Do NOT use `IVideoDriver::getTexture()` for the building atlas.
@@ -24,47 +28,101 @@
 > image loader entirely and therefore is not affected by the disabled DDS loader or the
 > `ddsBuffer` struct alignment issue.
 
-- Resolution: 2048×2048 pixels
-- Cell grid: 4×4 cells at 512×512 px each (16 cells total for V1 module variants)
-- Mip chain: 4-level mandatory (`GL_TEXTURE_MAX_LEVEL = 3`; 2048→1024→512→256). All four mip
+- Resolution: 4096×4096 pixels
+- Cell grid: 8×8 cells at 512×512 px each (64 cells total; rows 0–4 assigned; row 5 cols 0–6 assigned (`ROOF_CELL` + 5 ground-feature cells + `SOLID_WALL_CELL`); row 6 cols 0–1 assigned (`res_low_02_door`, `res_low_03_door`); row 5 col 7, row 6 cols 2–7, and row 7 RESERVED)
+- Mip chain: 5-level mandatory (`GL_TEXTURE_MAX_LEVEL = 4`; 4096→2048→1024→512→256). All five mip
   levels MUST be present as data in the DDS file — a file whose `dwMipMapCount` field declares
-  4 mips but contains only mip 0 data is truncated and causes `TextureCache::loadSRGB()` to
-  render a black atlas. Regenerate stubs with `python3 tools/generate_dds_stubs.py` from the
-  repo root. See `architecture/asset-standards/2d-texture-standards.md` §DDS Mip Chain
-  Integrity for reference byte sizes and the truncation failure mode.
+  5 mips but contains only mip 0 data is truncated and causes `TextureCache::loadSRGB()` to
+  render a black atlas. See `architecture/asset-standards/2d-texture-standards.md` §DDS Mip Chain
+  Integrity for reference byte sizes, the truncation failure mode, and how to verify assets.
 - Per-cell usable area: 496×496 px (8 px border on each edge, per 2d-texture-standards.md)
 - All building LOD0/LOD1 UV channel 0 maps into this atlas
 
 ### Cell Assignment Table
 
-| Cell Row | Cell Col | Module Type | Zone | Tier | Notes |
-|---|---|---|---|---|---|
-| 0 | 0 | wall_residential_low | Residential | Low density | Phase 9 UV authoring complete. Variants `res_low_01` and `res_low_02` share this cell. |
-| 0 | 1 | wall_commercial_low | Commercial | Low density | Phase 9 UV authoring complete. Variants `com_low_01` and `com_low_02` share this cell. |
-| 0 | 2 | wall_industrial_low | Industrial | Low density | Phase 9 UV authoring complete. Variants `ind_low_01` and `ind_low_02` share this cell. |
-| 0 | 3 | base_shared_low | Residential / Commercial / Industrial | Low density | Phase 9 UV authoring complete. Shared base module for all zone types at Low density (per binding decision below). |
-| 1 | 0 | wall_residential_med | Residential | Med density | Phase 9 UV authoring complete. Variants `res_med_01` and `res_med_02` share this cell. |
-| 1 | 1 | wall_commercial_med | Commercial | Med density | Phase 9 UV authoring complete. Variants `com_med_01` and `com_med_02` share this cell. |
-| 1 | 2 | wall_industrial_med | Industrial | Med density | Phase 9 UV authoring complete. Variants `ind_med_01` and `ind_med_02` share this cell. |
-| 1 | 3 | base_shared_med | Residential / Commercial / Industrial | Med / High density | Phase 9 UV authoring complete. Shared base module for all zone types at Med density; High-density buildings also reuse this cell (binding decision below). |
-| 2 | 0 | wall_residential_high | Residential | High density | Phase 9 UV authoring complete. Variants `res_high_01` and `res_high_02` share this cell. |
-| 2 | 1 | wall_commercial_high | Commercial | High density | Phase 9 UV authoring complete. Variants `com_high_01` and `com_high_02` share this cell. |
-| 2 | 2 | wall_industrial_high | Industrial | High density | Phase 9 UV authoring complete. Variants `ind_high_01` and `ind_high_02` share this cell. |
-| 2 | 3 | roof_shared | All zones | All tiers | Phase 9 UV authoring complete. All V1 zone types and density tiers share this rooftop cell. |
-| 3 | 0 | facade_detail_balcony | All zones | Med/High | Phase 9 UV authoring complete. Balcony and window-bay facade detail pieces for Med and High density buildings. |
-| 3 | 1 | facade_detail_pilaster | All zones | Med/High | Phase 9 UV authoring complete. Pilaster and cornice facade detail pieces for Med and High density buildings. |
-| 3 | 2 | service_buildings | All service types (fire_station, police_station, power_plant, water_tower) | N/A — infrastructure | Assigned per `architecture/asset-standards/3d-model-standards.md` Service Building Model Standards (2026-03-04). Shared palette: concrete, glass, utility panels. `graphics-artist-3d-model` UV packing feasibility confirmed 2026-03-04. `graphics-artist-2d-texture` texture content confirmed 2026-03-04 (see sign-off block below). Phase 9 service building UV authoring gate is CLOSED. |
-| 3 | 3 | RESERVED | — | — | Available for Phase 9+ service building material variants. Do not assign in V1. |
+Phase-11e expansion: the 8×8 grid provides one unique 512×512 cell per variant. Each of the 40
+assigned cells (rows 0–4, cols 0–7) is exclusive to a single building variant or service building
+type. Row 5 cols 0–6 are also assigned: col 0 is `ROOF_CELL` (used by `generate_b3d_models.py`
+for building roof surfaces); cols 1–5 are ground-feature cells added in Phase 11f; col 6 is
+`SOLID_WALL_CELL` (plain brick/solid wall, used by `generate_b3d_models.py` for all building
+gable-end faces). Row 5 col 7 and rows 6–7 cols 2–7 (16 cells) are RESERVED for future expansion.
 
-**Note**: All zone building module cells (0,0)–(3,1) have Phase 9 UV authoring complete. Cell (3,2) is assigned to service buildings with UV authoring complete (geometry); the `graphics-artist-2d-texture` texture content quality sign-off was recorded 2026-03-04 (see sign-off block below) — this gate is CLOSED. Cell (3,3) remains reserved. The service building cell (3,2) assignment is binding and must not be reallocated.
+| Cell Row | Cell Col | Variant / Asset | Notes |
+|---|---|---|---|
+| 0 | 0 | `res_low_01` | Residential Low density variant 01. Phase 9 UV authoring complete. |
+| 0 | 1 | `res_low_02` | Residential Low density variant 02. Phase 9 UV authoring complete. |
+| 0 | 2 | `res_low_03` | Residential Low density variant 03. Phase 9 UV authoring complete. |
+| 0 | 3 | `res_low_04` | Residential Low density variant 04. Phase 9 UV authoring complete. |
+| 0 | 4 | `res_med_01` | Residential Med density variant 01. Phase 9 UV authoring complete. |
+| 0 | 5 | `res_med_02` | Residential Med density variant 02. Phase 9 UV authoring complete. |
+| 0 | 6 | `res_med_03` | Residential Med density variant 03. Phase 9 UV authoring complete. |
+| 0 | 7 | `res_med_04` | Residential Med density variant 04. Phase 9 UV authoring complete. |
+| 1 | 0 | `res_high_01` | Residential High density variant 01. Phase 9 UV authoring complete. |
+| 1 | 1 | `res_high_02` | Residential High density variant 02. Phase 9 UV authoring complete. |
+| 1 | 2 | `res_high_03` | Residential High density variant 03. Phase 9 UV authoring complete. |
+| 1 | 3 | `res_high_04` | Residential High density variant 04. Phase 9 UV authoring complete. |
+| 1 | 4 | `com_low_01` | Commercial Low density variant 01. Phase 9 UV authoring complete. |
+| 1 | 5 | `com_low_02` | Commercial Low density variant 02. Phase 9 UV authoring complete. |
+| 1 | 6 | `com_low_03` | Commercial Low density variant 03. Phase 9 UV authoring complete. |
+| 1 | 7 | `com_low_04` | Commercial Low density variant 04. Phase 9 UV authoring complete. |
+| 2 | 0 | `com_med_01` | Commercial Med density variant 01. Phase 9 UV authoring complete. |
+| 2 | 1 | `com_med_02` | Commercial Med density variant 02. Phase 9 UV authoring complete. |
+| 2 | 2 | `com_med_03` | Commercial Med density variant 03. Phase 9 UV authoring complete. |
+| 2 | 3 | `com_med_04` | Commercial Med density variant 04. Phase 9 UV authoring complete. |
+| 2 | 4 | `com_high_01` | Commercial High density variant 01. Phase 9 UV authoring complete. |
+| 2 | 5 | `com_high_02` | Commercial High density variant 02. Phase 9 UV authoring complete. |
+| 2 | 6 | `com_high_03` | Commercial High density variant 03. Phase 9 UV authoring complete. |
+| 2 | 7 | `com_high_04` | Commercial High density variant 04. Phase 9 UV authoring complete. |
+| 3 | 0 | `ind_low_01` | Industrial Low density variant 01. Phase 9 UV authoring complete. |
+| 3 | 1 | `ind_low_02` | Industrial Low density variant 02. Phase 9 UV authoring complete. |
+| 3 | 2 | `ind_low_03` | Industrial Low density variant 03. Phase 9 UV authoring complete. |
+| 3 | 3 | `ind_low_04` | Industrial Low density variant 04. Phase 9 UV authoring complete. |
+| 3 | 4 | `ind_med_01` | Industrial Med density variant 01. Phase 9 UV authoring complete. |
+| 3 | 5 | `ind_med_02` | Industrial Med density variant 02. Phase 9 UV authoring complete. |
+| 3 | 6 | `ind_med_03` | Industrial Med density variant 03. Phase 9 UV authoring complete. |
+| 3 | 7 | `ind_med_04` | Industrial Med density variant 04. Phase 9 UV authoring complete. |
+| 4 | 0 | `ind_high_01` | Industrial High density variant 01. Phase 9 UV authoring complete. |
+| 4 | 1 | `ind_high_02` | Industrial High density variant 02. Phase 9 UV authoring complete. |
+| 4 | 2 | `ind_high_03` | Industrial High density variant 03. Phase 9 UV authoring complete. |
+| 4 | 3 | `ind_high_04` | Industrial High density variant 04. Phase 9 UV authoring complete. |
+| 4 | 4 | `svc_fire_station` | Service: fire station. UV authoring complete; concrete/glass/utility palette confirmed 2026-03-04. |
+| 4 | 5 | `svc_police_station` | Service: police station. UV authoring complete; concrete/glass/utility palette confirmed 2026-03-04. |
+| 4 | 6 | `svc_power_plant` | Service: power plant. UV authoring complete; concrete/glass/utility palette confirmed 2026-03-04. |
+| 4 | 7 | `svc_water_tower` | Service: water tower. UV authoring complete; concrete/glass/utility palette confirmed 2026-03-04. |
+| 5 | 0 | `ROOF_CELL` | Roof surface texture used by all building variants in `generate_b3d_models.py`. Assigned pre-Phase 11f. |
+| 5 | 1 | `ground_garden` | Phase 11f: mid-green grass/garden patch. Used by residential building ground quads. |
+| 5 | 2 | `ground_pool` | Phase 11f: pool-blue water. Used by res_high_01 and com_high_04 optional pool quads. |
+| 5 | 3 | `ground_paving` | Phase 11f: light-grey concrete forecourt. Used by commercial and service building ground quads. |
+| 5 | 4 | `ground_tarmac` | Phase 11f: dark-grey asphalt. Used by industrial building ground quads. |
+| 5 | 5 | `ground_gravel` | Phase 11f: beige/tan gravel. Used by svc_power_plant and svc_water_tower ground quads. |
+| 5 | 6 | `SOLID_WALL_CELL` | Plain brick/solid wall — no windows. Used by `generate_b3d_models.py` for all building gable-end faces. |
+| 5 | 7 | RESERVED | Reserved for Phase 12+ expansion. |
+| 6 | 0 | `res_low_02_door` | Auxiliary door-face texture for `res_low_02`. Cream rendered wall with centred door and two flanking arched windows. Used only on the front face of the left unit of the semi-detached pair. |
+| 6 | 1 | `res_low_03_door` | Auxiliary door-face texture for `res_low_03`. Brick wall with centred door and two flanking windows. Used only on the front face of the cottage. |
+| 6 | 2–7 | RESERVED | 6 cells reserved for Phase 12+ expansion. |
+| 7 | 0–7 | RESERVED | 8 cells reserved for Phase 12+ expansion. |
 
-**IMPORTANT — Variant sharing of wall cells (binding decision)**: Building variants within the same zone-tier combination share the same wall module atlas cells — only distinct module types (wall, base, roof, facade detail) require separate cells. For example, `res_low_01` and `res_low_02` are two variants of Low-density Residential; both reference the same `wall_residential_low` atlas cell with different mesh geometry configurations. Unique cells are NOT required per variant, only per module type. This keeps the 4×4 (16-cell) atlas within capacity for all V1 building module types. This decision is binding and confirmed here before UV authoring begins. `graphics-artist-2d-texture` and `graphics-dev-irrlicht` must both sign off that all V1 variant UVs map into the correct shared module-type cell before Phase 9 UV authoring begins.
+**Phase-11e per-variant unique cell assignment**: The 8×8 atlas expansion (phase-11e) allows and
+implements a unique 512×512 cell per variant. Each of the 36 zone-building variants
+(`res`/`com`/`ind` × `low`/`med`/`high` × 01–04) and all 4 service building types has its own
+dedicated atlas cell. The previous shared-cell approach (multiple variants mapped to one
+module-type cell) is superseded; per-variant UV islands now occupy the full 496×496 px usable
+area of their own cell without sub-region partitioning constraints.
 
-**BINDING DECISION — Shared base module and roof cells across all zone types**: The single `roof_shared` cell (row 2, col 3) is intentional — all V1 zone types and density tiers share a common rooftop texture. Similarly, Commercial and Industrial buildings share the residential base module cells (`base_residential_low` at row 0, col 3 and `base_residential_med` at row 1, col 3) for ground-floor geometry. Any zone-specific ground-floor character is encoded via facade detail pieces (row 3, cols 0–1), not separate base module cells.
+### Ground Feature Cells (Phase 11f)
 
-**High-density base module (binding)**: There is no separate `base_*_high` cell in the V1 atlas. High-density (high-rise) buildings reuse `base_residential_med` (row 1, col 3) for their ground-floor base module. Any zone-specific High-density lobby character is handled via facade-detail pieces at row 3, cols 0–1, identical to Med density. Phase 9 UV artists must map High-density building base modules to row 1, col 3. A distinct High-density base cell would require one of the two reserved slots (row 3, col 2 or row 3, col 3) and is Phase 9+ scope only.
+Five cells in row 5 (cols 1–5) are allocated as ground-feature textures:
 
-This decision keeps the 4×4 (16-cell) atlas within capacity for all V1 module types. The two reserved cells (row 3, col 2 and row 3, col 3) remain available for Phase 9+ use precisely because no additional base or roof cells are required in V1. **This is a binding decision — UV authoring for Phase 9 must not require additional base or roof cells.**
+| Cell | Name | Base colour | Zone default | Notes |
+|---|---|---|---|---|
+| (5,1) | `ground_garden` | mid-green (≈ RGB 80,130,60) | Residential | Default ground plate for all residential zones (Low, Med, High) |
+| (5,2) | `ground_pool` | pool-blue (≈ RGB 70,160,200) | — (variant override) | Pool water for res_high_01 and com_high_04 only; not a zone-wide default |
+| (5,3) | `ground_paving` | light grey (≈ RGB 190,185,178) | Commercial, Industrial | Default ground plate for commercial and industrial zones (gray concrete forecourt) |
+| (5,4) | `ground_tarmac` | dark asphalt (≈ RGB 55,55,58) | — (variant override) | Artistic tarmac choice for specific variants only (e.g., urban residential forecourts, auto garage forecourts); no longer the industrial zone default |
+| (5,5) | `ground_gravel` | beige/tan (≈ RGB 180,165,130) | — (service only) | Gravel/service yard for service buildings only (power plant, water tower) |
+
+All ground-feature quads sit at `y = 0.01` (1 cm above terrain) to prevent depth-buffer conflict
+with the terrain mesh at `y = 0`.
 
 ## Road Marking Atlas (1024×1024)
 
@@ -201,23 +259,47 @@ Example:
 
 All three sign-off comment blocks must be present in this file before Phase 9 UV authoring begins. A missing or undated block is a blocking exit criterion failure.
 
-**Phase 9 UV authoring gate status (as of Phase 10 start, 2026-03-04)**: Phase 9 is complete. All items below are confirmed. The `graphics-artist-2d-texture` service building texture content sign-off for cell (3,2) was completed 2026-03-04 (see sign-off comment block below). No open sign-off gates remain.
+**Phase 9 UV authoring gate status (as of Phase 10 start, 2026-03-04; updated phase-11e)**: Phase 9
+is complete. All items below are confirmed. The `graphics-artist-2d-texture` service building
+texture content sign-off was completed 2026-03-04 (see sign-off comment block below). The
+phase-11e 8×8 atlas expansion assigns each service building type its own dedicated cell (row 4,
+cols 4–7). No open sign-off gates remain.
 
 Before Phase 9 UV authoring begins, all three reviewers must confirm:
 
-- [x] All V1 module variant types have a cell assignment (no unbounded "assign in Phase 9" placeholders remaining for zone building module types — service building cell (3,2) is already assigned). Confirmed: Phase 9 UV authoring complete; Cell Assignment Table updated 2026-03-04 by `graphics-artist-3d-model`.
+- [x] All V1 module variant types have a cell assignment (no unbounded "assign in Phase 9" placeholders remaining; phase-11e per-variant cells assigned for all 36 zone-building variants and 4 service building types). Confirmed: Phase 9 UV authoring complete; Cell Assignment Table updated 2026-03-04 and expanded phase-11e by `graphics-artist-3d-model`.
 - [x] Road marking atlas cell assignments cover all V1 decal types. Confirmed by `graphics-artist-2d-texture` 2026-02-25 sign-off.
 - [x] Vehicle atlas stub entries match the V1 vehicle type list. Confirmed by `graphics-artist-2d-texture` 2026-02-25 sign-off.
 - [x] Cell UV borders (8 px) respected in all assignments. Confirmed by `graphics-artist-2d-texture` 2026-02-25 sign-off.
-- [x] Document reviewed and approved by `graphics-artist-2d-texture`; service building cell (3,2) texture content confirmed 2026-03-04: concrete, glass, and utility panel materials for all four V1 service building types fit within the 496×496 px usable area of cell (3,2); cell (3,3) confirmed not needed for V1 (see sign-off block below). All sign-off items complete.
+- [x] Document reviewed and approved by `graphics-artist-2d-texture`; service building texture content confirmed 2026-03-04: concrete, glass, and utility panel materials for all four V1 service building types fit within the 496×496 px usable area of their respective dedicated cells (phase-11e: row 4, cols 4–7) (see sign-off block below). All sign-off items complete.
 - [x] Document reviewed and approved by `graphics-dev-irrlicht`. Confirmed 2026-02-26 sign-off.
-- [x] Document reviewed and approved by `graphics-artist-3d-model`: (a) the shared atlas cell variant approach (multiple mesh variants referencing one module-type cell) is compatible with modular kit UV authoring workflows; (b) per-module UV islands can be fully authored within the 496×496 px usable area per 512×512 cell without requiring bleed into the 8 px border; (c) the 4×4 cell grid and 16-cell capacity correctly covers the V1 minimum building module set, including all zone-tier wall, base, roof, and facade-detail types across Residential, Commercial, and Industrial zones; (d) service building UV islands for all four V1 service building types can be packed within the 496×496 px usable area of cell (3,2) without mutual overlap. Confirmed by multiple sign-offs (2026-02-21, 2026-02-25, 2026-02-28, 2026-03-01, 2026-03-04).
+  Updated 2026-03-17 post phase-11e expansion: (a) `GL_TEXTURE_MAX_LEVEL=4` is correct for the
+  4096×4096 primary atlas (5 mip levels: 4096→2048→1024→512→256 px; `GL_TEXTURE_MAX_LEVEL` is the
+  index of the last level, i.e. 4); (b) VRAM budget: 4096×4096 DXT1 = 8,388,608 bytes ≈ 8 MB for
+  the primary atlas, confirmed within the Phase 12 VRAM ceiling (180 MB); (c) the fallback
+  `buildings_atlas_d_2k.dds` with `GL_TEXTURE_MAX_LEVEL=3` covers GPUs below 4096 px max texture
+  size, as implemented in `TextureCache.cpp:157`. Budget and mip-dispatch logic approved.
+- [x] Document reviewed and approved by `graphics-artist-3d-model`: (a) the phase-11e 8×8 per-variant unique cell assignment is compatible with modular kit UV authoring workflows — each variant has its own 512×512 cell and may use the full 496×496 px usable area without sub-region partitioning; (b) per-variant UV islands can be fully authored within the 496×496 px usable area per 512×512 cell without requiring bleed into the 8 px border; (c) the 8×8 cell grid and 64-cell capacity correctly covers all 36 V1 zone-building variants and all 4 service building types across Residential, Commercial, and Industrial zones, with 24 cells reserved for future expansion; (d) service building UV islands for all four V1 service building types each occupy a dedicated cell (row 4, cols 4–7) with the full 496×496 px usable area available. Confirmed by multiple sign-offs (2026-02-21, 2026-02-25, 2026-02-28, 2026-03-01, 2026-03-04).
+- [x] Ground Feature Cells `(5,1)`–`(5,5)` authored and atlas rebuilt.
+  Signed off by `graphics-artist-2d-texture` 2026-03-17: five ground-feature cells
+  painted in `generate_atlas_dds.py` with correct colours and noise/detail patterns;
+  `CELL_DRAW_FNS` updated; DDS atlas regenerated successfully.
 
-**Service building atlas cell gate** (`graphics-artist-3d-model` decision, 2026-03-04; `graphics-artist-2d-texture` texture content confirmation, 2026-03-04): Cell (3,2) is assigned to service buildings with a shared palette. The UV packing constraint for four service building types within one 496×496 px cell is feasible because service buildings at `height_floors = 2` have a simple footprint and a limited material count (concrete, glass, utility panels). Each building type's UV islands may reference any sub-region of the cell; the shared-palette approach means all four types draw from the same texel data, so UV overlap between types is not only permitted but expected. The only constraint is that no single building type's UV islands extend outside the 496×496 px usable boundary. This is the same constraint already confirmed for zone building module types at this cell size. Both packing feasibility (by `graphics-artist-3d-model`) and texture content quality (by `graphics-artist-2d-texture`) are now confirmed. This gate is CLOSED.
+**Service building atlas cell gate** (`graphics-artist-3d-model` decision, 2026-03-04; `graphics-artist-2d-texture` texture content confirmation, 2026-03-04; updated phase-11e): Each service building type has its own dedicated cell: `svc_fire_station` (4,4), `svc_police_station` (4,5), `svc_power_plant` (4,6), `svc_water_tower` (4,7). The previous single-cell shared-palette approach (all four service types in one cell) is superseded by the phase-11e per-variant expansion. Each service type now has the full 496×496 px usable area of its dedicated cell. The material palette (concrete, glass, utility panels) and UV feasibility confirmation from 2026-03-04 remain valid. Both packing feasibility (by `graphics-artist-3d-model`) and texture content quality (by `graphics-artist-2d-texture`) are confirmed. This gate is CLOSED.
 
 **Phase 1 dated sign-off record — `graphics-artist-3d-model` atlas compatibility** (required before Phase 1 exit):
 
-> Phase 1 sign-off — 2026-02-21: The three shared atlas cell variant compatibility checks for `graphics-artist-3d-model` are confirmed as follows: (a) the shared atlas cell variant approach — multiple mesh variants of the same zone-tier type referencing a single module-type cell — is compatible with modular kit UV authoring workflows in Blender; per-variant UV islands can be placed within the same atlas cell without conflicting UV shells by isolating each variant's islands to a distinct sub-region of the cell; (b) per-module UV islands can be fully authored within the 496×496 px usable area of each 512×512 cell without requiring bleed into the 8 px border; (c) the 4×4 cell grid with 16 cells correctly covers the V1 minimum building module set, including all zone-tier wall, base, roof, and facade-detail types across Residential, Commercial, and Industrial zones without exceeding atlas capacity. This record confirms the Phase 1 exit criterion for the building atlas `graphics-artist-3d-model` sign-off gate is satisfied. Signed: graphics-artist-3d-model.
+> Phase 1 sign-off — 2026-02-21 (historical; superseded by phase-11e 8×8 expansion): The original
+> shared atlas cell variant compatibility checks for `graphics-artist-3d-model` were confirmed as
+> follows: (a) the shared atlas cell variant approach — multiple mesh variants of the same zone-tier
+> type referencing a single module-type cell — is compatible with modular kit UV authoring workflows
+> in Blender; (b) per-module UV islands can be fully authored within the 496×496 px usable area of
+> each 512×512 cell without requiring bleed into the 8 px border; (c) the then-current 4×4 cell
+> grid with 16 cells covered the V1 minimum building module set at the time of sign-off. The
+> phase-11e expansion to an 8×8 grid supersedes item (c) — each variant now has a unique dedicated
+> cell. Items (a) and (b) remain valid. This record confirms the Phase 1 exit criterion for the
+> building atlas `graphics-artist-3d-model` sign-off gate is satisfied. Signed:
+> graphics-artist-3d-model.
 
 <!-- SIGN-OFF: graphics-artist-2d-texture 2026-02-25 — confirmed all V1 cell assignments are within the 496×496 px usable area per cell; all required road marking cell types for V1 decals are covered; all V1 vehicle atlas stub rows are finalized and consistent with the diffuse/sprite/normal atlas split; texture unit assignments in shader_constants.h (kTexUnitDiffuse=0, kTexUnitNormal=1, kTexUnitBillboard=9, terrain layers 5–8) are finalized and will not change during Phase 5 texture production -->
 
@@ -237,27 +319,23 @@ Before Phase 9 UV authoring begins, all three reviewers must confirm:
 
 Confirmed:
 
-1. **Shared atlas cell variant approach**: Multiple mesh variants referencing one module-type cell
-   (e.g., all residential low-rise variants UV-mapped to the same `wall_residential_low` cell) is
-   fully compatible with modular kit UV authoring workflows. Artists author UV islands per module
-   type, not per building variant — this is the standard modular kit approach. Per-variant UV
-   islands are placed within distinct sub-regions of the shared cell without conflicting UV shells.
+1. **Per-variant unique cell approach (phase-11e)**: The 8×8 atlas expansion provides a dedicated
+   512×512 cell for each of the 36 zone-building variants and 4 service building types. Each
+   variant's UV islands occupy the full 496×496 px usable area of its own cell without sub-region
+   partitioning. This supersedes the earlier shared-cell approach and is fully compatible with
+   modular kit UV authoring workflows.
 
-2. **Per-module UV islands within 496x496 px usable area**: With a 512x512 px cell and 8 px border
-   on all sides, the 496x496 px usable area is sufficient for all V1 building module types at the
+2. **Per-variant UV islands within 496x496 px usable area**: With a 512x512 px cell and 8 px border
+   on all sides, the 496x496 px usable area is sufficient for all V1 building variant types at the
    planned resolution (diffuse at DXT1 256x256 effective per island, normal at DXT5nm 256x256 per
-   island). No module type requires bleed into the 8 px border.
+   island). No variant requires bleed into the 8 px border.
 
-3. **4x4 grid, 16-cell capacity covers V1 minimum module set**: The 16 cells cover: 9 zone-tier
-   wall module cells (Residential/Commercial/Industrial × Low/Med/High density — row 0–2, cols
-   0–2); 2 base module cells shared across all zones (base_residential_low at row 0 col 3 for
-   Low tier; base_residential_med at row 1 col 3 for Med tier — High-density buildings reuse
-   base_residential_med per the binding decision in this file); 1 shared roof cell (row 2, col 3);
-   2 facade-detail cells (balcony row 3 col 0; pilaster row 3 col 1). Road surface materials
-   are NOT in this atlas — they belong in the separate Road Marking Atlas (1024×1024) and
-   road_asphalt_tileable.dds. No civic zone exists in V1. 16 cells is sufficient for V1 scope with
-   2 spare cells (row 3, col 2 and row 3, col 3) remaining available for Phase 9+ use without
-   requiring an atlas resolution increase.
+3. **8x8 grid, 64-cell capacity covers V1 variants plus future expansion**: The 40 assigned cells
+   (rows 0–4, cols 0–7) cover all 36 zone-building variants (Residential/Commercial/Industrial ×
+   Low/Med/High density × 01–04 variants) and 4 service building types. Road surface materials are
+   NOT in this atlas — they belong in the separate Road Marking Atlas (1024×1024) and
+   road_asphalt_tileable.dds. No civic zone exists in V1. The 24 reserved cells (rows 5–7) are
+   available for future expansion without requiring an atlas resolution increase.
 
 This sign-off satisfies the Phase 5 exit criterion for the `graphics-artist-3d-model` building
 atlas sign-off gate. Phase 9 UV authoring for building mesh UV channel 0 may proceed once all
@@ -265,8 +343,4 @@ three required sign-off comment blocks are present in this file.
 
 <!-- SIGN-OFF: graphics-artist-3d-model 2026-02-25 — confirmed: (a) shared atlas cell variant approach (multiple mesh variants referencing one module-type cell) is compatible with modular kit UV authoring workflows; (b) per-module UV islands fit within 496x496 px usable area per 512x512 cell without bleed into 8 px border; (c) 4x4 grid 16-cell capacity covers V1 minimum building module set: 9 zone-tier wall cells (Res/Com/Ind x Low/Med/High), 2 shared base cells (Low=row0col3, Med=row1col3; High-density buildings reuse Med base cell per binding decision), 1 shared roof cell (row2col3), 2 facade-detail cells (row3col0-1), 2 reserved. Road modules and civic zone are NOT covered here — they belong in separate atlases or do not exist in V1. [CORRECTED 2026-02-26: original sign-off text erroneously listed road modules and civic building facades as covered by this atlas; corrected per Phase 5 verification review] -->
 
-<!-- SIGN-OFF: graphics-artist-3d-model 2026-03-04 — service building atlas cell assignment confirmed: cell (3,2) is assigned to all four V1 service building types (fire_station, police_station, power_plant, water_tower) sharing a common material palette (concrete, glass, utility panels). UV packing feasibility for all four service building types within the 496x496 px usable area of cell (3,2) confirmed: at height_floors=2 each service building has a simple rectangular footprint (LOD0 500-1500 tris) with a limited surface material count. All four types draw from the same texel data (shared palette approach), so UV overlap between types is permitted and expected — the only authoring constraint is that no single type's UV islands extend outside the 496x496 px usable boundary. This is identical to the zone building module-type cell constraint already confirmed in the 2026-02-25 sign-off. The cell (3,3) assignment remains RESERVED for Phase 9+ service building material variants. Cell (3,2) assignment is binding and must not be reallocated. The graphics-artist-2d-texture confirmation of texture content quality (concrete/glass/utility panels within 496x496 px) is separately required before Phase 9 service building UV authoring begins. -->
-
-<!-- SIGN-OFF: graphics-artist-2d-texture 2026-03-04 — service building atlas cell (3,2) texture content confirmed: (a) a shared palette covering concrete, glass, and utility panel materials for all four V1 service building types (fire_station, police_station, power_plant, water_tower) fits comfortably within the 496x496 px usable area of cell (3,2). Texture content assessment: concrete = grey tonal base with surface micro-detail (cracks, aggregation lines); glass = tonal vertical bands with specular highlight strip; utility panels = rectilinear panel lines, bolt detail, hazard stripe for power_plant variant. All three material types are low-polygon-silhouette, low-colour-complexity surfaces that pack efficiently within a shared palette — each material type requires approximately 80x496 px of horizontal strip space or equivalent sub-region, leaving adequate breathing room within the 496x496 cell. At 512 px per atlas axis (496 usable), the texel density is approximately 256 px per metre for a nominal 2 m service building face — sufficient for the utilitarian industrial aesthetic at LOD0 through LOD1 viewing distances. (b) The reserved cell (3,3) is NOT needed for V1 service buildings. The shared-palette approach means all four types draw from identical texel data; no additional cell is required for material variety within V1 scope. Cell (3,3) remains RESERVED for Phase 9+ service building material variants (e.g. a second palette for future building types). This sign-off resolves the PENDING gate noted by graphics-artist-3d-model. Phase 9 service building UV authoring may proceed with the confirmed cell (3,2) layout. -->
-
-<!-- SIGN-OFF: graphics-dev-irrlicht 2026-02-26 — confirmed: (1) building atlas upload path (buildings_atlas_d.dds) uses raw-GL sRGB path (glGenTextures + glBindTexture + glCompressedTexImage2D with GL_COMPRESSED_SRGB_S3TC_DXT1_EXT; DXT5 variant GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT used when alpha cells required) — correctly specified here and implemented in TextureCache::loadSRGB() (TextureCache.cpp); (2) GL_TEXTURE_MAX_LEVEL = 3 for all 4-level mip atlases (_d diffuse, _billboard imposter, vehicles_diffuse_atlas_d.dds) is consistent with the TextureCache GL_TEXTURE_MAX_LEVEL dispatch table in texture-cache.md and with the glTexParameteri call in TextureCache.cpp loadSRGB(); lightmaps (_lm) correctly use driver default (single-mip, no raw-GL path); splat maps correctly use GL_TEXTURE_MAX_LEVEL = 0; no mip-level collisions found; (3) texture unit assignments kTexUnitDiffuse=0, kTexUnitNormal=1, kTexUnitBillboard=9, terrain layers 5-8 are finalized in src/rendering/shader_constants.h and are consistent with the shader-loading.md terrain splat shader 5-unit binding sequence and the 2d-texture-standards.md Shader Texture Unit Assignment Table — no unit collisions; (4) vehicle sprite atlas linear upload exception (vehicles_sprite_atlas_d.dds: DXT5 format, loadLinear() path, NOT sRGB) is correctly documented here and in texture-cache.md, and is correctly implemented via exact-filename dispatch in TextureCache::loadSRGB() routing to loadLinear() — palette swatches are not photographic diffuse, sRGB decode is incorrect for this atlas; (5) DXT5 mandate for vehicle sprite atlas (not DXT1) is correctly specified and enforceable via validate_assets.py DDS FourCC check — current check #10 covers registry/UV cell assignments; the DDS format enforcement for vehicles_sprite_atlas_d.dds is a Phase 9 validate_assets.py deliverable per the registry integration scope noted in this file; the spec mandate is clear and the enforcement path is defined -->
+<!-- SIGN-OFF: graphics-dev-irrlicht 2026-02-26 — confirmed: (1) building atlas upload path (buildings_atlas_d.dds) uses raw-GL sRGB path (glGenTextures + glBindTexture + glCompressedTexImage2D with GL_COMPRESSED_SRGB_S3TC_DXT1_EXT; DXT5 variant GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT used when alpha cells required) — correctly specified here and implemented in TextureCache::loadSRGB() (TextureCache.cpp); (2) building atlas (buildings_atlas_d.dds, 4096×4096): GL_TEXTURE_MAX_LEVEL = 4 (5-level mip chain: 4096→2048→1024→512→256); billboard imposter atlas and vehicles_diffuse_atlas_d.dds: GL_TEXTURE_MAX_LEVEL = 3 (4-level mip chain: 1024×128/2048×2048→...→256 or smaller); all values consistent with the TextureCache GL_TEXTURE_MAX_LEVEL dispatch table in texture-cache.md; lightmaps (_lm) correctly use driver default (single-mip, no raw-GL path); splat maps correctly use GL_TEXTURE_MAX_LEVEL = 0; no mip-level collisions found; (3) texture unit assignments kTexUnitDiffuse=0, kTexUnitNormal=1, kTexUnitBillboard=9, terrain layers 5-8 are finalized in src/rendering/shader_constants.h and are consistent with the shader-loading.md terrain splat shader 5-unit binding sequence and the 2d-texture-standards.md Shader Texture Unit Assignment Table — no unit collisions; (4) vehicle sprite atlas linear upload exception (vehicles_sprite_atlas_d.dds: DXT5 format, loadLinear() path, NOT sRGB) is correctly documented here and in texture-cache.md, and is correctly implemented via exact-filename dispatch in TextureCache::loadSRGB() routing to loadLinear() — palette swatches are not photographic diffuse, sRGB decode is incorrect for this atlas; (5) DXT5 mandate for vehicle sprite atlas (not DXT1) is correctly specified and enforceable via validate_assets.py DDS FourCC check — current check #10 covers registry/UV cell assignments; the DDS format enforcement for vehicles_sprite_atlas_d.dds is a Phase 9 validate_assets.py deliverable per the registry integration scope noted in this file; the spec mandate is clear and the enforcement path is defined -->

@@ -27,6 +27,10 @@
 #include <memory>
 #include <string>
 #include <cstdlib>
+#if !defined(_WIN32)
+#  include <sys/stat.h>
+#  include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 using ::testing::NiceMock;
@@ -304,4 +308,98 @@ TEST_F(SaveSystemWithSimTest, OnPauseMenuOpened_FiresAutoSave) {
     auto ss = makeWithSim();
     ss->onPauseMenuOpened();
     EXPECT_TRUE(ss->hasSaveData());
+}
+
+// ============================================================================
+// getSaveFileState — all three return values
+// ============================================================================
+
+TEST_F(SaveSystemWithSimTest, GetSaveFileState_NoSaves_ReturnsNoSaves) {
+    auto ss = makeWithSim();
+    SaveFileState state = ss->getSaveFileState();
+    EXPECT_EQ(state, SaveFileState::NoSaves);
+}
+
+TEST_F(SaveSystemWithSimTest, GetSaveFileState_Valid_AfterAutoSave) {
+    auto ss = makeWithSim();
+    ASSERT_TRUE(ss->autoSave().ok);
+    SaveFileState state = ss->getSaveFileState();
+    EXPECT_EQ(state, SaveFileState::Valid);
+}
+
+TEST_F(SaveSystemWithSimTest, GetSaveFileState_AllCorrupt_WhenFileUnreadable) {
+#if defined(_WIN32)
+    GTEST_SKIP() << "chmod-based unreadable-file test not applicable on Windows";
+#else
+    if (geteuid() == 0) {
+        GTEST_SKIP() << "Running as root — cannot test unreadable file";
+    }
+
+    auto ss = makeWithSim();
+    ASSERT_TRUE(ss->autoSave().ok);
+
+    std::string saveDir = ss->getSaveDirectoryPath();
+    std::string autoSavePath = saveDir + "/autosave.json";
+    ASSERT_EQ(chmod(autoSavePath.c_str(), 0000), 0) << "chmod failed";
+
+    for (int slot = 1; slot <= 3; ++slot) {
+        std::string slotPath = saveDir + "/slot" + std::to_string(slot) + ".json";
+        if (fs::exists(slotPath)) chmod(slotPath.c_str(), 0000);
+    }
+
+    SaveFileState state = ss->getSaveFileState();
+    EXPECT_EQ(state, SaveFileState::AllCorrupt);
+
+    chmod(autoSavePath.c_str(), 0644);
+    for (int slot = 1; slot <= 3; ++slot) {
+        std::string slotPath = saveDir + "/slot" + std::to_string(slot) + ".json";
+        if (fs::exists(slotPath)) chmod(slotPath.c_str(), 0644);
+    }
+#endif
+}
+
+// ============================================================================
+// writeJsonToFile error path: write to a directory path (not a file).
+// ============================================================================
+
+TEST_F(SaveSystemWithSimTest, WriteJsonToFile_BadPath_ReturnsError) {
+    auto ss = makeWithSim();
+    std::string saveDir = ss->getSaveDirectoryPath();
+    std::string slotPath = saveDir + "/slot1.json";
+
+    std::error_code ec;
+    fs::create_directory(slotPath, ec);
+    if (ec || !fs::is_directory(slotPath, ec)) {
+        GTEST_SKIP() << "Cannot create directory at slot path on this platform";
+    }
+
+    SaveResult r = ss->saveToSlot(1);
+    EXPECT_FALSE(r.ok);
+    EXPECT_FALSE(r.error.empty());
+
+    fs::remove(slotPath, ec);
+}
+
+// ============================================================================
+// ensureSaveDirectory fallback: HOME unset → returns non-empty path.
+// ============================================================================
+
+TEST_F(SaveSystemNoSimTest, GetSaveDirectoryPath_HomeUnset_ReturnsNonEmpty) {
+#if defined(_WIN32)
+    _putenv_s("APPDATA", "");
+    SaveSystem ss(&clock_);
+    std::string dir = ss.getSaveDirectoryPath();
+    EXPECT_FALSE(dir.empty());
+    // no restore needed — test isolation via fixture doesn't redirect HOME for NoSim
+#else
+    const char* saved = std::getenv("HOME");
+    std::string savedHome = saved ? saved : "";
+    unsetenv("HOME");
+
+    SaveSystem ss(&clock_);
+    std::string dir = ss.getSaveDirectoryPath();
+    EXPECT_FALSE(dir.empty());
+
+    if (!savedHome.empty()) setenv("HOME", savedHome.c_str(), 1);
+#endif
 }

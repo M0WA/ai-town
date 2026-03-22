@@ -1,9 +1,9 @@
 {
-  "height_floors": 2,
+  "height_floors": 1,
   "category": "small_building",
   "atlas_cell": {
-    "row": 0,
-    "col": 2
+    "row": 3,
+    "col": 0
   },
   "lod_distances": [
     30,

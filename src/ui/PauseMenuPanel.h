@@ -35,6 +35,12 @@ private:
     SettingsPanel* m_settings{nullptr};
     bool           m_visible{false};
 
+    // Glass City background elements (created once, shown/hidden with the panel)
+    // scrimHandle: full-screen 50% opacity overlay beneath the panel.
+    // bgHandle:    deep-navy panel background (rgba(13,27,42,0.88)).
+    UIElementHandle m_scrimHandle{kInvalidUIElement};
+    UIElementHandle m_bgHandle{kInvalidUIElement};
+
     // Panel elements (centered vertically, 300 px wide)
     UIElementHandle m_panelBg{kInvalidUIElement};
     UIElementHandle m_titleLabel{kInvalidUIElement};

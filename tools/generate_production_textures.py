@@ -78,6 +78,174 @@ def _make_dxt5_solid_block(r: int, g: int, b: int, a: int = 255) -> bytes:
     return alpha_part + color_part
 
 
+def _make_dxt1_solid_block(r: int, g: int, b: int) -> bytes:
+    """8-byte DXT1 block encoding a solid RGB colour (fully opaque)."""
+    c = _rgb_to_rgb565(r, g, b)
+    # c0 == c1 with c0 > c1 is required for the 4-colour mode; if they're
+    # equal the block decodes as colour0 for all indices=0, which is correct.
+    return struct.pack('<HHI', c, c, 0x00000000)
+
+
+def _compress_rgba_image_to_dxt1(img: Image.Image) -> bytes:
+    """Pure-Python DXT1 (BC1) compressor for an RGBA PIL Image.
+
+    Processes each 4×4 pixel block independently.  For blocks with more than
+    two distinct colours the compressor picks the two extremes along the
+    principal-component axis (a fast approximation that is visually acceptable
+    for pre-authored pixel-art style textures).
+
+    Returns raw pixel data bytes (no header).
+    """
+    w, h = img.size
+    assert w % 4 == 0 and h % 4 == 0, f"Image size {w}×{h} must be multiples of 4"
+    arr = np.array(img.convert('RGBA'), dtype=np.uint8)
+    out = bytearray()
+
+    for by in range(0, h, 4):
+        for bx in range(0, w, 4):
+            block = arr[by:by + 4, bx:bx + 4, :3].reshape(16, 3).astype(np.int32)
+
+            # Find bounding box in colour space
+            c_min = block.min(axis=0)
+            c_max = block.max(axis=0)
+
+            r0, g0, b0 = int(c_max[0]), int(c_max[1]), int(c_max[2])
+            r1, g1, b1 = int(c_min[0]), int(c_min[1]), int(c_min[2])
+
+            col0 = _rgb_to_rgb565(r0, g0, b0)
+            col1 = _rgb_to_rgb565(r1, g1, b1)
+
+            # Ensure 4-colour mode: col0 > col1
+            if col0 < col1:
+                col0, col1 = col1, col0
+                r0, g0, b0, r1, g1, b1 = r1, g1, b1, r0, g0, b0
+
+            # Decode the two endpoints (quantised back from RGB565)
+            def from565(c565):
+                rr = ((c565 >> 11) & 0x1F) * 255 // 31
+                gg = ((c565 >> 5)  & 0x3F) * 255 // 63
+                bb = (c565 & 0x1F) * 255 // 31
+                return np.array([rr, gg, bb], dtype=np.int32)
+
+            p0 = from565(col0)
+            p1 = from565(col1)
+
+            # Build 4 palette entries (4-colour mode)
+            palette = np.array([
+                p0,
+                p1,
+                (2 * p0 + p1) // 3,
+                (p0 + 2 * p1) // 3,
+            ], dtype=np.int32)
+
+            # Assign each pixel the nearest palette entry
+            indices = np.zeros(16, dtype=np.uint32)
+            for i, px in enumerate(block):
+                dists = np.sum((palette - px) ** 2, axis=1)
+                indices[i] = int(np.argmin(dists))
+
+            # Pack 16 × 2-bit indices into a 32-bit word (row-major, LSB first)
+            idx_word = np.uint32(0)
+            for i in range(16):
+                idx_word |= np.uint32(indices[i]) << np.uint32(i * 2)
+
+            out += struct.pack('<HHI', col0, col1, int(idx_word))
+
+    return bytes(out)
+
+
+def _compress_rgba_image_to_dxt5nm(img: Image.Image) -> bytes:
+    """Pure-Python DXT5nm (BC3) compressor for a normal-map RGBA PIL Image.
+
+    DXT5nm packing convention: X→alpha channel, Y→green channel, Z ignored.
+    Flat normal (0,0,1) encodes as RGBA=(128,128,0,128) per project spec.
+
+    Returns raw pixel data bytes (no header).
+    """
+    w, h = img.size
+    assert w % 4 == 0 and h % 4 == 0, f"Image size {w}×{h} must be multiples of 4"
+    arr = np.array(img.convert('RGBA'), dtype=np.uint8)
+    out = bytearray()
+
+    for by in range(0, h, 4):
+        for bx in range(0, w, 4):
+            block_rgba = arr[by:by + 4, bx:bx + 4]
+            # alpha block (X channel) — 8-byte DXT5 alpha
+            alphas = block_rgba[:, :, 3].flatten()
+            a0 = int(alphas.max())
+            a1 = int(alphas.min())
+            if a0 == a1:
+                alpha_bytes = struct.pack('<BB', a0, a1) + b'\x00' * 6
+            else:
+                # Build 8-entry alpha palette (6-value interpolated mode when a0 > a1)
+                palette_a = [a0, a1]
+                for k in range(1, 7):
+                    palette_a.append((k * a1 + (7 - k) * a0) // 7)
+                # 3-bit index per pixel, packed into 6 bytes
+                idx_bits = 0
+                for i, av in enumerate(alphas):
+                    dists = [abs(int(av) - p) for p in palette_a]
+                    best = dists.index(min(dists))
+                    idx_bits |= (best & 0x7) << (i * 3)
+                idx_6 = idx_bits.to_bytes(6, 'little')
+                alpha_bytes = struct.pack('<BB', a0, a1) + idx_6
+
+            # RGB block (Y channel in green, rest zero) — 8-byte DXT1 block
+            # Build a greyscale proxy image: R=0, G=Y-channel, B=0
+            greens = block_rgba[:, :, 1].flatten().astype(np.int32)
+            g_max = int(greens.max())
+            g_min = int(greens.min())
+            col0 = _rgb_to_rgb565(0, g_max, 0)
+            col1 = _rgb_to_rgb565(0, g_min, 0)
+            if col0 < col1:
+                col0, col1 = col1, col0
+                g_max, g_min = g_min, g_max
+
+            def g565(c565):
+                return ((c565 >> 5) & 0x3F) * 255 // 63
+
+            pg0 = g565(col0)
+            pg1 = g565(col1)
+            pal_g = [pg0, pg1, (2 * pg0 + pg1) // 3, (pg0 + 2 * pg1) // 3]
+
+            idx_word = np.uint32(0)
+            for i, gv in enumerate(greens):
+                dists = [abs(gv - p) for p in pal_g]
+                idx_word |= np.uint32(dists.index(min(dists))) << np.uint32(i * 2)
+
+            color_bytes = struct.pack('<HHI', col0, col1, int(idx_word))
+
+            out += alpha_bytes + color_bytes
+
+    return bytes(out)
+
+
+def _build_mip_chain_dxt1(img: Image.Image, mip_count: int = 4) -> bytes:
+    """Generate DXT1 pixel data for mip_count mip levels starting from img."""
+    out = bytearray()
+    current = img
+    for level in range(mip_count):
+        out += _compress_rgba_image_to_dxt1(current)
+        if level + 1 < mip_count:
+            nw = max(4, current.width // 2)
+            nh = max(4, current.height // 2)
+            current = current.resize((nw, nh), Image.LANCZOS)
+    return bytes(out)
+
+
+def _build_mip_chain_dxt5nm(img: Image.Image, mip_count: int = 4) -> bytes:
+    """Generate DXT5nm pixel data for mip_count mip levels starting from img."""
+    out = bytearray()
+    current = img
+    for level in range(mip_count):
+        out += _compress_rgba_image_to_dxt5nm(current)
+        if level + 1 < mip_count:
+            nw = max(4, current.width // 2)
+            nh = max(4, current.height // 2)
+            current = current.resize((nw, nh), Image.NEAREST)
+    return bytes(out)
+
+
 def _write_dds_header(width: int, height: int, fourcc: bytes,
                       mip_levels: int = 1,
                       is_dx10: bool = False,
@@ -939,7 +1107,7 @@ def generate_wall_specular_maps() -> None:
 
 
 # ===========================================================================
-# Vehicle Diffuse Atlas
+# Vehicle Diffuse Atlas — detailed per-vehicle painters
 # ===========================================================================
 
 def _paint_vehicle_cell(atlas: Image.Image,
@@ -1052,61 +1220,6 @@ def _paint_vehicle_cell(atlas: Image.Image,
                      fill=tuple(max(c - 50, 0) for c in body_color))
 
 
-def generate_vehicle_diffuse_atlas() -> None:
-    """Vehicle diffuse atlas: 2048×2048, 4×4 cells, DXT1 sRGB, 4 mips."""
-    print("\n--- Vehicle diffuse atlas (2048x2048 DXT1, 4 mips) ---")
-    atlas = Image.new('RGBA', (2048, 2048), (20, 20, 20, 255))
-
-    # (0,0) car_sedan: pearl white, dark charcoal roof, red taillights
-    _paint_vehicle_cell(atlas, 0, 0,
-                        body_color=(240, 238, 232),
-                        roof_color=(48, 48, 48),
-                        accent_color=(180, 180, 185),
-                        tail_color=(200, 30, 30))
-
-    # (0,1) car_hatchback: red body, dark roof, silver door strip
-    _paint_vehicle_cell(atlas, CELL, 0,
-                        body_color=(192, 48, 48),
-                        roof_color=(40, 40, 40),
-                        accent_color=(160, 160, 165),
-                        tail_color=(180, 20, 20))
-
-    # (0,2) car_suv: dark navy, black roof rails, silver accents
-    _paint_vehicle_cell(atlas, CELL * 2, 0,
-                        body_color=(32, 48, 80),
-                        roof_color=(18, 18, 18),
-                        accent_color=(140, 145, 150),
-                        tail_color=(160, 20, 20))
-
-    # (0,3) RESERVED checker
-    _paint_reserved_checker(atlas, CELL * 3, 0)
-
-    # (1,0) bus_standard: yellow-cream body, white window band, dark roof, red stripe
-    _paint_bus_cell(atlas, 0, CELL)
-
-    # (1,1) truck_cargo: orange-red cab, beige cargo box
-    _paint_truck_cell(atlas, CELL, CELL)
-
-    # Remaining cells: reserved checker
-    for col in range(2, 4):
-        _paint_reserved_checker(atlas, CELL * col, CELL)
-    for row in range(2, 4):
-        for col in range(4):
-            _paint_reserved_checker(atlas, CELL * col, CELL * row)
-
-    tmp_png = Path('/tmp/vehicles_diffuse_atlas_d.png')
-    atlas.save(str(tmp_png))
-    out = ROOT / 'assets/textures/vehicles/vehicles_diffuse_atlas_d.dds'
-    _ensure_dir(out)
-    _im_convert([
-        str(tmp_png),
-        '-define', 'dds:compression=dxt1',
-        '-define', 'dds:mipmaps=3',
-        str(out),
-    ])
-    print(f"  Created: assets/textures/vehicles/vehicles_diffuse_atlas_d.dds  ({out.stat().st_size:,} bytes)")
-
-
 def _paint_reserved_checker(atlas: Image.Image, cx: int, cy: int, sq: int = 32) -> None:
     draw = ImageDraw.Draw(atlas)
     for row in range(CELL // sq):
@@ -1117,102 +1230,357 @@ def _paint_reserved_checker(atlas: Image.Image, cx: int, cy: int, sq: int = 32) 
                            fill=color)
 
 
-def _paint_bus_cell(atlas: Image.Image, cx: int, cy: int) -> None:
-    """Bus: yellow-cream body, white upper window band, dark roof, red bottom stripe."""
-    draw = ImageDraw.Draw(atlas)
-    W = CELL
-    BUS_BODY = (232, 208, 80)
-    BUS_ROOF = (64, 64, 64)
-    BUS_WIN  = (245, 248, 252)
-    BUS_STRIPE = (180, 30, 30)
+def _clamp_color(color: tuple[int, int, int],
+                 delta: int) -> tuple[int, int, int]:
+    """Return color adjusted by delta, clamped to [0, 255] per channel."""
+    return tuple(max(0, min(255, c + delta)) for c in color)
 
-    # Fill body
-    arr = np.full((W, W, 4), (*BUS_BODY, 255), dtype=np.uint8)
+
+def _paint_car_sedan(atlas: Image.Image, cx: int, cy: int) -> None:
+    """car_sedan — pearl white livery with panel gaps, glass band, chrome trim.
+
+    Side-elevation layout (primary UV surface):
+      Top 25%  : dark blue-grey glass strip (window band)
+      25–35%   : body above door line (pearl white)
+      35–65%   : main door body with vertical door gap at 50% x
+      65–70%   : chrome trim stripe
+      70–100%  : wheel arch zone (darker body shadow)
+    """
+    BODY   = (240, 238, 232)
+    GLASS  = (22, 28, 38)
+    SHADOW = (210, 208, 202)
+    GAP    = _clamp_color(BODY, -20)
+    CHROME = (255, 255, 240)
+    HEAD   = (245, 245, 235)
+    TAIL   = (200, 20, 20)
+
+    W = CELL
+    draw = ImageDraw.Draw(atlas)
+
+    # Base fill with noise
+    arr = np.full((W, W, 4), (*BODY, 255), dtype=np.uint8)
+    arr = _add_noise(arr, 3)
+    atlas.paste(Image.fromarray(arr, 'RGBA'), (cx, cy))
+
+    # Window band — top 25%
+    win_bottom = cy + int(W * 0.25)
+    draw.rectangle([cx, cy, cx + W - 1, win_bottom], fill=GLASS)
+
+    # Wheel arch zone — bottom 30% (darker shadow)
+    arch_top = cy + int(W * 0.70)
+    draw.rectangle([cx, arch_top, cx + W - 1, cy + W - 1], fill=SHADOW)
+
+    # Panel gap — horizontal at ~35% and ~65% (door top/bottom)
+    for gap_frac in (0.35, 0.65):
+        gy = cy + int(W * gap_frac)
+        draw.line([(cx, gy), (cx + W - 1, gy)], fill=GAP, width=2)
+
+    # Panel gap — vertical door divider at 50% width
+    gx = cx + W // 2
+    gap_top    = cy + int(W * 0.35)
+    gap_bottom = cy + int(W * 0.65)
+    draw.line([(gx, gap_top), (gx, gap_bottom)], fill=GAP, width=2)
+
+    # Chrome trim stripe at ~67% height (1-2px)
+    trim_y = cy + int(W * 0.67)
+    draw.line([(cx + 10, trim_y), (cx + W - 10, trim_y)], fill=CHROME, width=2)
+
+    # Headlight — right 15% of cell, centred vertically in lower body
+    hl_x = cx + int(W * 0.85)
+    hl_y = cy + int(W * 0.40)
+    draw.rectangle([hl_x, hl_y, cx + W - 1, hl_y + int(W * 0.18)], fill=HEAD)
+
+    # Taillight — left 15% of cell
+    tl_x1 = cx + int(W * 0.15)
+    draw.rectangle([cx, hl_y, tl_x1, hl_y + int(W * 0.18)], fill=TAIL)
+
+    # AO corner darkening — subtle 8px darkened border blend
+    for margin in range(1, 5):
+        alpha_draw = ImageDraw.Draw(atlas)
+        dark = _clamp_color(BODY, -(margin * 4))
+        # top edge (below window)
+        alpha_draw.rectangle([cx + margin, win_bottom + margin,
+                               cx + W - 1 - margin, win_bottom + margin + 1],
+                              fill=dark)
+        # bottom edge
+        alpha_draw.rectangle([cx + margin, cy + W - 1 - margin,
+                               cx + W - 1 - margin, cy + W - 1 - margin + 1],
+                              fill=dark)
+
+
+def _paint_car_hatchback(atlas: Image.Image, cx: int, cy: int) -> None:
+    """car_hatchback — warm red livery with extended rear glass and chrome trim."""
+    BODY   = (192, 48, 48)
+    GLASS  = (22, 28, 38)
+    SILL   = (160, 35, 35)
+    GAP    = _clamp_color(BODY, -20)
+    CHROME = (255, 200, 200)
+    HEAD   = (245, 245, 235)
+    TAIL   = (170, 10, 10)
+
+    W = CELL
+    draw = ImageDraw.Draw(atlas)
+
+    # Base fill with noise
+    arr = np.full((W, W, 4), (*BODY, 255), dtype=np.uint8)
+    arr = _add_noise(arr, 3)
+    atlas.paste(Image.fromarray(arr, 'RGBA'), (cx, cy))
+
+    # Window band — top 25%, extends to 80% of width (hatchback rear glass larger)
+    win_bottom = cy + int(W * 0.25)
+    # Main glass band — full width
+    draw.rectangle([cx, cy, cx + W - 1, win_bottom], fill=GLASS)
+    # Extended rear glass continues below to ~35% on left 80%
+    rear_glass_bottom = cy + int(W * 0.35)
+    draw.rectangle([cx, win_bottom, cx + int(W * 0.80), rear_glass_bottom], fill=GLASS)
+
+    # Sill/rocker — bottom 12%
+    sill_top = cy + int(W * 0.88)
+    draw.rectangle([cx, sill_top, cx + W - 1, cy + W - 1], fill=SILL)
+
+    # Panel gap lines
+    for gap_frac in (0.35, 0.65):
+        gy = cy + int(W * gap_frac)
+        draw.line([(cx, gy), (cx + W - 1, gy)], fill=GAP, width=2)
+    gx = cx + W // 2
+    draw.line([(gx, cy + int(W * 0.35)), (gx, cy + int(W * 0.65))], fill=GAP, width=2)
+
+    # Chrome trim
+    trim_y = cy + int(W * 0.67)
+    draw.line([(cx + 10, trim_y), (cx + W - 10, trim_y)], fill=CHROME, width=2)
+
+    # Lights
+    hl_y = cy + int(W * 0.40)
+    draw.rectangle([cx + int(W * 0.85), hl_y, cx + W - 1, hl_y + int(W * 0.15)], fill=HEAD)
+    draw.rectangle([cx, hl_y, cx + int(W * 0.15), hl_y + int(W * 0.15)], fill=TAIL)
+
+
+def _paint_car_suv(atlas: Image.Image, cx: int, cy: int) -> None:
+    """car_suv — dark navy with plastic cladding, silver trim, tinted windows."""
+    BODY    = (32, 48, 80)
+    GLASS   = (15, 18, 25)
+    CLAD    = (45, 45, 48)
+    GAP     = _clamp_color(BODY, -15)
+    CHROME  = (130, 140, 160)
+    HEAD    = (235, 240, 250)
+    TAIL    = (220, 80, 10)
+
+    W = CELL
+    draw = ImageDraw.Draw(atlas)
+
+    # Base fill with metallic noise (silver-blue tones)
+    arr = np.full((W, W, 4), (*BODY, 255), dtype=np.uint8)
     arr = _add_noise(arr, 4)
     atlas.paste(Image.fromarray(arr, 'RGBA'), (cx, cy))
 
-    # Roof band (top 18%)
-    roof_h = int(W * 0.18)
-    draw.rectangle([cx, cy, cx + W - 1, cy + roof_h], fill=BUS_ROOF)
+    # Dark tinted window band — top 28%
+    win_bottom = cy + int(W * 0.28)
+    draw.rectangle([cx, cy, cx + W - 1, win_bottom], fill=GLASS)
 
-    # Window band (upper 35% of remaining body)
-    win_y = cy + roof_h
-    win_h = int((W - roof_h) * 0.35)
-    draw.rectangle([cx, win_y, cx + W - 1, win_y + win_h], fill=BUS_WIN)
-    # Window division lines (every 64px)
-    for wx in range(cx, cx + W, 64):
-        draw.line([(wx, win_y), (wx, win_y + win_h)],
-                  fill=(200, 205, 210), width=3)
+    # Plastic cladding strip — lower 20%
+    clad_top = cy + int(W * 0.80)
+    draw.rectangle([cx, clad_top, cx + W - 1, cy + W - 1], fill=CLAD)
 
-    # Red bottom stripe (bottom 12%)
-    stripe_y = cy + W - int(W * 0.12)
-    draw.rectangle([cx, stripe_y, cx + W - 1, cy + W - 1], fill=BUS_STRIPE)
+    # Panel gaps
+    for gap_frac in (0.35, 0.65):
+        gy = cy + int(W * gap_frac)
+        draw.line([(cx, gy), (cx + W - 1, gy)], fill=GAP, width=2)
+    gx = cx + W // 2
+    draw.line([(gx, cy + int(W * 0.35)), (gx, cy + int(W * 0.65))], fill=GAP, width=2)
 
-    # Door section
-    door_x = cx + 40
-    door_y = win_y + win_h
-    door_h = stripe_y - door_y
-    draw.rectangle([door_x, door_y, door_x + 55, door_y + door_h],
-                   fill=(60, 65, 70))
-    draw.rectangle([door_x + 4, door_y + 4, door_x + 51, door_y + door_h - 4],
-                   fill=(150, 175, 200))
+    # Silver chrome trim (thicker for SUV)
+    trim_y = cy + int(W * 0.68)
+    draw.line([(cx + 5, trim_y), (cx + W - 5, trim_y)], fill=CHROME, width=3)
+
+    # Roof rack — subtle grey bars at very top (2px strips at 3% and 6%)
+    rack_color = (55, 60, 70)
+    for rack_frac in (0.03, 0.06):
+        ry = cy + int(W * rack_frac)
+        draw.line([(cx + 30, ry), (cx + W - 30, ry)], fill=rack_color, width=3)
+
+    # Lights
+    hl_y = cy + int(W * 0.40)
+    draw.rectangle([cx + int(W * 0.84), hl_y, cx + W - 1, hl_y + int(W * 0.16)], fill=HEAD)
+    draw.rectangle([cx, hl_y, cx + int(W * 0.16), hl_y + int(W * 0.16)], fill=TAIL)
 
 
-def _paint_truck_cell(atlas: Image.Image, cx: int, cy: int) -> None:
-    """Truck cargo: orange-red cab (left), beige cargo box (right)."""
-    draw = ImageDraw.Draw(atlas)
+def _paint_bus_cell(atlas: Image.Image, cx: int, cy: int) -> None:
+    """bus_standard — yellow-cream with passenger window band and route blind."""
+    BODY   = (232, 208, 80)
+    GLASS  = (22, 28, 38)
+    WIN_DIV = (32, 38, 48)
+    BLIND  = (245, 245, 240)
+    LOWER  = (200, 178, 65)
+    HEAD   = (250, 250, 235)
+    TAIL   = (200, 20, 20)
+    DOOR_BG = (210, 190, 72)
+
     W = CELL
-    CAB_COLOR   = (192, 72, 32)
-    BOX_COLOR   = (208, 192, 160)
-    BOX_DARK    = (190, 175, 143)
-    EXHAUST_C   = (180, 180, 185)
+    draw = ImageDraw.Draw(atlas)
 
-    # Cab occupies left 35%
-    cab_w = int(W * 0.35)
-    arr = np.full((W, W, 4), (*BOX_COLOR, 255), dtype=np.uint8)
+    # Base fill with noise
+    arr = np.full((W, W, 4), (*BODY, 255), dtype=np.uint8)
     arr = _add_noise(arr, 5)
     atlas.paste(Image.fromarray(arr, 'RGBA'), (cx, cy))
 
-    # Cab
-    draw.rectangle([cx, cy, cx + cab_w - 1, cy + W - 1], fill=CAB_COLOR)
-    # Cab roof
-    cab_roof_h = int(W * 0.15)
-    draw.rectangle([cx, cy, cx + cab_w - 1, cy + cab_roof_h], fill=(140, 50, 20))
-    # Cab windshield
-    ws_y = cy + cab_roof_h + 4
-    ws_h = int(W * 0.20)
-    draw.rectangle([cx + 8, ws_y, cx + cab_w - 12, ws_y + ws_h],
-                   fill=(180, 200, 215))
-    # Cab door
-    door_y = ws_y + ws_h + 4
-    draw.line([(cx + cab_w // 2, door_y), (cx + cab_w // 2, cy + W - 30)],
-              fill=(160, 55, 22), width=3)
-    # Cab window
-    cwin_y = door_y + 10
-    draw.rectangle([cx + 8, cwin_y, cx + cab_w // 2 - 6, cwin_y + int(W * 0.15)],
-                   fill=(160, 185, 205))
+    # Route destination blind — top 8% (white band)
+    blind_h = int(W * 0.08)
+    draw.rectangle([cx, cy, cx + W - 1, cy + blind_h], fill=BLIND)
+    # Black text pixel line in centre of blind
+    blind_mid = cy + blind_h // 2
+    draw.line([(cx + 20, blind_mid), (cx + W - 20, blind_mid)],
+              fill=(30, 30, 30), width=2)
 
-    # Cargo box (right 65%)
-    box_x = cx + cab_w
-    box_w = W - cab_w
-    draw.rectangle([box_x, cy + int(W * 0.06), box_x + box_w - 1, cy + W - 1], fill=BOX_COLOR)
-    # Cargo box panels (horizontal ribs)
-    panel_h = 48
-    for py in range(int(W * 0.06), W, panel_h):
-        alt = BOX_DARK if (py // panel_h) % 2 == 0 else BOX_COLOR
-        draw.rectangle([box_x + 2, cy + py + 2, box_x + box_w - 3, cy + py + panel_h - 3],
-                       fill=alt)
-        draw.line([(box_x, cy + py), (box_x + box_w - 1, cy + py)],
-                  fill=(170, 155, 125), width=2)
-    # Rear door handle area
-    draw.rectangle([box_x + box_w - 30, cy + W // 2 - 20,
-                    box_x + box_w - 6, cy + W // 2 + 20],
-                   fill=(170, 155, 125))
+    # Passenger window band — 8% to 38% height
+    win_top = cy + blind_h
+    win_bottom = cy + int(W * 0.38)
+    win_h = win_bottom - win_top
+    draw.rectangle([cx, win_top, cx + W - 1, win_bottom], fill=GLASS)
+    # Window divisions — vertical separators every ~30px
+    sep_spacing = 30
+    for wx in range(cx, cx + W + 1, sep_spacing):
+        draw.line([(wx, win_top), (wx, win_bottom)], fill=WIN_DIV, width=2)
 
-    # Exhaust pipe
-    ep_x = cx + cab_w - 8
-    draw.rectangle([ep_x, cy + 4, ep_x + 10, cy + cab_roof_h + 10], fill=EXHAUST_C)
-    draw.ellipse([ep_x, cy + 2, ep_x + 10, cy + 14], fill=(120, 120, 125))
+    # Lower panel / sill (bottom 20%)
+    sill_top = cy + int(W * 0.80)
+    draw.rectangle([cx, sill_top, cx + W - 1, cy + W - 1], fill=LOWER)
+
+    # Door area — right 20% of mid-body zone, fold lines
+    door_x = cx + int(W * 0.80)
+    body_top = win_bottom
+    body_bot = sill_top
+    draw.rectangle([door_x, body_top, cx + W - 1, body_bot], fill=DOOR_BG)
+    # 3 vertical fold-door dividers
+    door_zone_w = W - int(W * 0.80)
+    for i in range(1, 4):
+        dx = door_x + (door_zone_w * i) // 4
+        draw.line([(dx, body_top), (dx, body_bot)], fill=LOWER, width=3)
+
+    # Headlight — right edge bottom
+    draw.rectangle([cx + int(W * 0.88), body_top + 5,
+                    cx + W - 1, body_top + int(W * 0.12)], fill=HEAD)
+    # Taillight — left edge
+    draw.rectangle([cx, body_top + 5,
+                    cx + int(W * 0.08), body_top + int(W * 0.12)], fill=TAIL)
+
+
+def _paint_truck_cell(atlas: Image.Image, cx: int, cy: int) -> None:
+    """truck_cargo — dark charcoal cab (right 45%) + warm beige cargo box (left 45%)."""
+    BOX_COLOR = (195, 185, 155)
+    BOX_RIB   = (155, 148, 118)
+    CAB_COLOR = (55, 55, 60)
+    CAB_DARK  = (35, 35, 38)
+    GLASS     = (22, 28, 38)
+    GAP_COLOR = (25, 25, 28)
+    HEAD      = (245, 248, 252)
+    MARKER_R  = (200, 20, 20)
+    MARKER_A  = (220, 140, 10)
+    EXHAUST   = (80, 80, 85)
+
+    W = CELL
+    draw = ImageDraw.Draw(atlas)
+
+    # Base fill — cargo box colour with noise
+    arr = np.full((W, W, 4), (*BOX_COLOR, 255), dtype=np.uint8)
+    arr = _add_noise(arr, 4)
+    atlas.paste(Image.fromarray(arr, 'RGBA'), (cx, cy))
+
+    # --- Cargo box occupies left 45% ---
+    box_w = int(W * 0.45)
+    box_x0 = cx
+    box_x1 = cx + box_w
+
+    # 5 vertical rib lines across the box
+    rib_step = box_w // 6
+    for i in range(1, 6):
+        rx = box_x0 + i * rib_step
+        draw.line([(rx, cy), (rx, cy + W - 1)], fill=BOX_RIB, width=2)
+
+    # Horizontal rear-door split at 60% height
+    door_split = cy + int(W * 0.60)
+    draw.line([(box_x0, door_split), (box_x1, door_split)], fill=BOX_RIB, width=3)
+
+    # Rear marker lights at left edge (top-left = red, bottom-left = amber)
+    draw.rectangle([cx, cy + 5, cx + 8, cy + 20], fill=MARKER_R)
+    draw.rectangle([cx, cy + int(W * 0.65), cx + 8, cy + int(W * 0.65) + 15],
+                   fill=MARKER_A)
+
+    # --- Cab-cargo gap: centre 10% ---
+    gap_x0 = cx + int(W * 0.45)
+    gap_x1 = cx + int(W * 0.55)
+    draw.rectangle([gap_x0, cy, gap_x1, cy + W - 1], fill=GAP_COLOR)
+
+    # --- Cab occupies right 45% ---
+    cab_x0 = gap_x1
+    cab_x1 = cx + W
+    draw.rectangle([cab_x0, cy, cab_x1, cy + W - 1], fill=CAB_COLOR)
+
+    # Grille area — bottom 25% of cab (darkest)
+    grille_top = cy + int(W * 0.75)
+    draw.rectangle([cab_x0, grille_top, cab_x1, cy + W - 1], fill=CAB_DARK)
+    # Horizontal grille bars (every 12px)
+    for gy in range(int(grille_top), cy + W, 12):
+        draw.line([(cab_x0 + 4, gy), (cab_x1 - 4, gy)],
+                  fill=_clamp_color(CAB_DARK, -8), width=2)
+
+    # Windscreen — upper 30% of cab
+    ws_top = cy
+    ws_bottom = cy + int(W * 0.30)
+    draw.rectangle([cab_x0 + 6, ws_top, cab_x1 - 6, ws_bottom], fill=GLASS)
+
+    # Cab headlight — far right bottom corner
+    draw.rectangle([cab_x1 - 20, grille_top - int(W * 0.10),
+                    cab_x1 - 1, grille_top], fill=HEAD)
+
+    # Exhaust stack — dark vertical mark at top-right of cab
+    ep_x = cab_x1 - 14
+    draw.rectangle([ep_x, cy, ep_x + 8, cy + int(W * 0.20)], fill=EXHAUST)
+    draw.ellipse([ep_x, cy, ep_x + 8, cy + 10], fill=(40, 40, 42))
+
+
+def generate_vehicle_diffuse_atlas() -> None:
+    """Vehicle diffuse atlas: 2048×2048, DX10 BC1_UNORM_SRGB (DXGI=72), 4 mips.
+
+    Written via pure-Python DXT1 compression — no ImageMagick dependency.
+    """
+    print("\n--- Vehicle diffuse atlas (2048x2048 DXT1 sRGB, 4 mips) ---")
+    atlas = Image.new('RGBA', (2048, 2048), (20, 20, 20, 255))
+
+    # Row 0: passenger cars
+    _paint_car_sedan(atlas,     0,        0)       # (0,0) car_sedan
+    _paint_car_hatchback(atlas, CELL,     0)       # (0,1) car_hatchback
+    _paint_car_suv(atlas,       CELL * 2, 0)       # (0,2) car_suv
+    _paint_reserved_checker(atlas, CELL * 3, 0)   # (0,3) RESERVED
+
+    # Row 1: large vehicles
+    _paint_bus_cell(atlas,   0,      CELL)         # (1,0) bus_standard
+    _paint_truck_cell(atlas, CELL,   CELL)         # (1,1) truck_cargo
+    for col in range(2, 4):
+        _paint_reserved_checker(atlas, CELL * col, CELL)
+
+    # Rows 2–3: all reserved
+    for row in range(2, 4):
+        for col in range(4):
+            _paint_reserved_checker(atlas, CELL * col, CELL * row)
+
+    # Also save a reference PNG alongside the DDS for human inspection
+    png_out = ROOT / 'assets/textures/vehicles/vehicles_diffuse_atlas_d.png'
+    atlas.save(str(png_out))
+
+    # Compress to DXT1 with DX10 sRGB header (DXGI_FORMAT=72 = BC1_UNORM_SRGB)
+    print("  Compressing to DXT1 (pure Python — 4 mip levels)…")
+    pixel_data = _build_mip_chain_dxt1(atlas, mip_count=4)
+
+    header = _write_dds_header(2048, 2048, b'DXT1',
+                               mip_levels=4,
+                               is_dx10=True,
+                               dxgi_format=72)   # BC1_UNORM_SRGB
+    dds_data = header + pixel_data
+
+    out = ROOT / 'assets/textures/vehicles/vehicles_diffuse_atlas_d.dds'
+    _ensure_dir(out)
+    out.write_bytes(dds_data)
+    print(f"  Created: assets/textures/vehicles/vehicles_diffuse_atlas_d.dds  ({len(dds_data):,} bytes)")
 
 
 # ===========================================================================
@@ -1223,8 +1591,8 @@ def generate_vehicle_sprite_atlas() -> None:
     """256×256 DXT5 sprite atlas, 1 mip level. Written as binary DDS.
 
     16×16 grid, each cell 16×16px = 4×4 DXT5 blocks.
-    Roof color swatches per spec; all other cells black.
-    Linear upload path (not sRGB).
+    Roof color swatches updated to match reworked diffuse liveries.
+    Linear upload path (not sRGB) — synthetic palette-swatch exception.
     """
     print("\n--- Vehicle sprite atlas (256x256 DXT5, 1 mip, binary write) ---")
 
@@ -1232,50 +1600,184 @@ def generate_vehicle_sprite_atlas() -> None:
     CELL_PX = 16   # pixels per grid cell
     W = GRID * CELL_PX  # 256
 
-    # Cell (row, col) -> (R, G, B) solid fill
+    # Roof color swatches matching reworked diffuse liveries
     swatches = {
-        (0, 0): (204, 204, 204),   # car_sedan — light gray roof
-        (0, 1): (128, 32, 32),     # car_hatchback — dark red
-        (0, 2): (21, 32, 53),      # car_suv — very dark blue
-        (1, 0): (56, 56, 56),      # bus_standard — dark gray
-        (1, 1): (144, 64, 32),     # truck_cargo — dark orange
+        (0, 0): (210, 208, 200),   # car_sedan — pearl white roof
+        (0, 1): (165,  38,  38),   # car_hatchback — red roof
+        (0, 2): ( 22,  35,  58),   # car_suv — dark navy roof
+        (1, 0): (195, 172,  62),   # bus_standard — yellow-cream roof
+        (1, 1): ( 48,  48,  50),   # truck_cargo — charcoal cab roof
     }
 
     # Build flat array of DXT5 blocks
-    # Each 16×16 cell = (16/4) × (16/4) = 4×4 = 16 DXT5 blocks
-    # Atlas: 256/4 = 64 blocks wide, 256/4 = 64 blocks high
-
     blocks_wide = W // 4   # 64
     blocks_high = W // 4   # 64
     total_blocks = blocks_wide * blocks_high
 
-    # Default: black
     black_block = _make_dxt5_solid_block(0, 0, 0, 255)
     all_blocks = [black_block] * total_blocks
 
-    # Paint swatch cells
     for (cell_row, cell_col), (r, g, b) in swatches.items():
         color_block = _make_dxt5_solid_block(r, g, b, 255)
-        # Each cell is 4×4 DXT5 blocks at block offset
-        block_col_start = cell_col * (CELL_PX // 4)  # = cell_col * 4
-        block_row_start = cell_row * (CELL_PX // 4)  # = cell_row * 4
+        block_col_start = cell_col * (CELL_PX // 4)
+        block_row_start = cell_row * (CELL_PX // 4)
         for br in range(4):
             for bc in range(4):
                 block_idx = (block_row_start + br) * blocks_wide + (block_col_start + bc)
                 all_blocks[block_idx] = color_block
 
     pixel_data = b''.join(all_blocks)
-    # Verify size: 64×64 blocks × 16 bytes = 65536 bytes
     assert len(pixel_data) == blocks_wide * blocks_high * 16, \
         f"Sprite atlas pixel data size mismatch: {len(pixel_data)}"
 
-    header = _write_dds_header(W, W, b'DXT5', mip_levels=1)
+    # DX10 header required by check_26: DXGI_FORMAT=77 (BC3_UNORM, linear)
+    header = _write_dds_header(W, W, b'DXT5', mip_levels=1,
+                               is_dx10=True, dxgi_format=77)
     dds_data = header + pixel_data
 
     out = ROOT / 'assets/textures/vehicles/vehicles_sprite_atlas_d.dds'
     _ensure_dir(out)
     out.write_bytes(dds_data)
     print(f"  Created: assets/textures/vehicles/vehicles_sprite_atlas_d.dds  ({len(dds_data):,} bytes)")
+
+
+# ===========================================================================
+# Vehicle Normal Atlas — DX10 BC3_UNORM (DXT5nm), 2048×2048, 4 mips
+# ===========================================================================
+
+def _paint_normal_cell_flat(arr: np.ndarray, cx: int, cy: int) -> None:
+    """Fill a 512×512 cell with DXT5nm flat normal (RGBA = 0,128,0,128)."""
+    arr[cy:cy + CELL, cx:cx + CELL] = [0, 128, 0, 128]
+
+
+def _paint_normal_line_h(arr: np.ndarray, cx: int, cy: int,
+                          y_frac: float, half_width: int,
+                          green_val: int, alpha_val: int) -> None:
+    """Paint a horizontal normal highlight band at fractional y within a cell."""
+    y0 = cy + int(CELL * y_frac) - half_width
+    y1 = cy + int(CELL * y_frac) + half_width
+    y0 = max(cy, y0)
+    y1 = min(cy + CELL - 1, y1)
+    arr[y0:y1 + 1, cx:cx + CELL, 1] = green_val
+    arr[y0:y1 + 1, cx:cx + CELL, 3] = alpha_val
+
+
+def _paint_normal_line_v(arr: np.ndarray, cx: int, cy: int,
+                          x_frac: float, half_width: int,
+                          green_val: int, alpha_val: int) -> None:
+    """Paint a vertical normal highlight band at fractional x within a cell."""
+    x0 = cx + int(CELL * x_frac) - half_width
+    x1 = cx + int(CELL * x_frac) + half_width
+    x0 = max(cx, x0)
+    x1 = min(cx + CELL - 1, x1)
+    arr[cy:cy + CELL, x0:x1 + 1, 1] = green_val
+    arr[cy:cy + CELL, x0:x1 + 1, 3] = alpha_val
+
+
+def _paint_normal_band_h(arr: np.ndarray, cx: int, cy: int,
+                          y_top_frac: float, y_bot_frac: float,
+                          green_val: int, alpha_val: int) -> None:
+    """Paint a filled horizontal band with custom normal values."""
+    y0 = cy + int(CELL * y_top_frac)
+    y1 = cy + int(CELL * y_bot_frac)
+    arr[y0:y1, cx:cx + CELL, 1] = green_val
+    arr[y0:y1, cx:cx + CELL, 3] = alpha_val
+
+
+def generate_vehicle_normal_atlas() -> None:
+    """Vehicle normal atlas: 2048×2048, DX10 BC3_UNORM (DXGI=77), 4 mips.
+
+    DXT5nm packing: X→alpha, Y→green, Z=0.
+    Flat baseline: RGBA = (0, 128, 0, 128).
+
+    Per-vehicle normal detail per spec:
+      car_sedan    : hood crease at 70%; door step bands at 35%, 65%
+      car_hatchback: same crease + stronger vertical rear-hatch normal at right edge
+      car_suv      : subtle nose crease; body cladding step at lower 20%
+      bus_standard : 8 horizontal panel ribs; roof AC box perimeter
+      truck_cargo  : deep cab grille normals lower 25%; flat cargo box
+    """
+    print("\n--- Vehicle normal atlas (2048x2048 DXT5nm, 4 mips) ---")
+
+    # Build full RGBA array — all flat normals
+    arr = np.full((2048, 2048, 4), [0, 128, 0, 128], dtype=np.uint8)
+
+    # --- car_sedan (0,0) ---
+    cx, cy = 0, 0
+    # Hood/bonnet crease — horizontal highlight at 70% height
+    _paint_normal_line_h(arr, cx, cy, 0.70, 1, green_val=148, alpha_val=148)
+    # Door boundary steps at 35% and 65%
+    _paint_normal_line_h(arr, cx, cy, 0.35, 2, green_val=108, alpha_val=108)
+    _paint_normal_line_h(arr, cx, cy, 0.65, 2, green_val=108, alpha_val=108)
+
+    # --- car_hatchback (0,1) ---
+    cx, cy = CELL, 0
+    # Same crease and door patterns as sedan
+    _paint_normal_line_h(arr, cx, cy, 0.70, 1, green_val=148, alpha_val=148)
+    _paint_normal_line_h(arr, cx, cy, 0.35, 2, green_val=108, alpha_val=108)
+    _paint_normal_line_h(arr, cx, cy, 0.65, 2, green_val=108, alpha_val=108)
+    # Rear hatch vertical edge — stronger normal at right 3%
+    x_edge = cx + int(CELL * 0.97)
+    arr[cy:cy + CELL, x_edge:cx + CELL, 1] = 108
+    arr[cy:cy + CELL, x_edge:cx + CELL, 3] = 108
+
+    # --- car_suv (0,2) ---
+    cx, cy = CELL * 2, 0
+    # Subtle nose crease at 72%
+    _paint_normal_line_h(arr, cx, cy, 0.72, 1, green_val=140, alpha_val=140)
+    # Body cladding step at 80% — 4px wide transition band
+    _paint_normal_line_h(arr, cx, cy, 0.80, 4, green_val=100, alpha_val=100)
+
+    # --- bus_standard (1,0) ---
+    cx, cy = 0, CELL
+    # 8 horizontal panel ribs evenly spaced across cell height
+    for i in range(1, 9):
+        _paint_normal_line_h(arr, cx, cy, i / 9.0, 1, green_val=118, alpha_val=118)
+    # Roof AC box perimeter (top ~8-12%, left 30-70% width)
+    ac_y0 = cy + int(CELL * 0.08)
+    ac_y1 = cy + int(CELL * 0.12)
+    ac_x0 = cx + int(CELL * 0.30)
+    ac_x1 = cx + int(CELL * 0.70)
+    # Perimeter lines
+    arr[ac_y0:ac_y0 + 2, ac_x0:ac_x1, 1] = 108
+    arr[ac_y1 - 2:ac_y1, ac_x0:ac_x1, 1] = 108
+    arr[ac_y0:ac_y1, ac_x0:ac_x0 + 2, 1] = 108
+    arr[ac_y0:ac_y1, ac_x1 - 2:ac_x1, 1] = 108
+
+    # --- truck_cargo (1,1) ---
+    cx, cy = CELL, CELL
+    # Cab grille depth — lower 25% has deeper normals (X pushed)
+    grille_top = cy + int(CELL * 0.75)
+    arr[grille_top:cy + CELL, cx:cx + CELL, 3] = 100   # X channel (alpha)
+    arr[grille_top:cy + CELL, cx:cx + CELL, 1] = 110   # Y channel (green)
+    # Cargo box is intentionally flat — minimal normal variation
+    # Very slight panel boundary at 60% height in left 45%
+    box_x1 = cx + int(CELL * 0.45)
+    panel_y = cy + int(CELL * 0.60)
+    arr[panel_y:panel_y + 2, cx:box_x1, 1] = 120
+    arr[panel_y:panel_y + 2, cx:box_x1, 3] = 120
+
+    # Build RGBA PIL image from array
+    img = Image.fromarray(arr.astype(np.uint8), 'RGBA')
+
+    # Also save reference PNG
+    png_out = ROOT / 'assets/textures/vehicles/vehicles_normal_atlas_n.png'
+    img.save(str(png_out))
+
+    # Compress to DXT5nm with DX10 header (DXGI_FORMAT=77 = BC3_UNORM linear)
+    print("  Compressing to DXT5nm (pure Python — 4 mip levels)…")
+    pixel_data = _build_mip_chain_dxt5nm(img, mip_count=4)
+
+    header = _write_dds_header(2048, 2048, b'DXT5',
+                               mip_levels=4,
+                               is_dx10=True,
+                               dxgi_format=77)   # BC3_UNORM (linear)
+    dds_data = header + pixel_data
+
+    out = ROOT / 'assets/textures/vehicles/vehicles_normal_atlas_n.dds'
+    _ensure_dir(out)
+    out.write_bytes(dds_data)
+    print(f"  Created: assets/textures/vehicles/vehicles_normal_atlas_n.dds  ({len(dds_data):,} bytes)")
 
 
 # ===========================================================================
@@ -1468,6 +1970,7 @@ def main() -> None:
     generate_wall_specular_maps()
     generate_vehicle_diffuse_atlas()
     generate_vehicle_sprite_atlas()
+    generate_vehicle_normal_atlas()
     generate_building_lightmaps()
     generate_billboard_atlases()
 

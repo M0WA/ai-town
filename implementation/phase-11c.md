@@ -1,6 +1,6 @@
 ## Phase 11c: Settings, Controls & Save/Load Dialog Polish
 
-**Status: Planned**
+**Status: DONE**
 
 ### Goal
 
@@ -16,43 +16,47 @@ UI was never wired; (3) the save-slot picker and Load Game dialogs are incomplet
 
 #### 1. Settings Dialog — Glass City Background
 
-- [ ] **`SettingsPanel` background**: Apply the Glass City deep-navy panel style to
+- [x] **`SettingsPanel` background**: Apply the Glass City deep-navy panel style to
   `SettingsPanel`:
   - Background fill: `rgba(13, 27, 42, 0.88)` deep navy; **8 px corner radius** on all
     four edges (the panel is a floating centred overlay — never flush with the screen edge)
   - Background is drawn by `IrrlichtUIBackend` as a rounded-rect fill via the UI sprite-sheet
-    panel tile (rows 16+ of `hud_sprites_ui.dds`, 2048×2048 RGBA8 UNORM, per
+    panel tile (rows 16+ of `hud_sprites_ui.png`, 2048×2048 RGBA (8 bits per channel,
+    straight alpha), per
     `architecture/asset-standards/2d-texture-standards.md` §UI Sprite Sheet — the
     building-atlas-layout.md is the building facade atlas and does not contain panel tiles) or
     the equivalent `IVideoDriver::draw2DRectangle` path if the tile is not yet available
   - Full-screen scrim: solid `rgba(0, 0, 0, 0.50)` drawn beneath the panel (same scrim
     rule as modal dialogs — see `architecture/ui-ux/modal-dialog-system.md`)
 
-- [ ] **`PauseMenuPanel` background**: Same Glass City treatment as `SettingsPanel`
+- [x] **`PauseMenuPanel` background**: Same Glass City treatment as `SettingsPanel`
   (the two panels share identical panel style per `architecture/ui-ux/settings-pause-menu.md`):
   - Background: `rgba(13, 27, 42, 0.88)`, 8 px corner radius, floating centred
   - Scrim: `rgba(0, 0, 0, 0.50)` full-screen layer beneath the panel
 
-- [ ] **Tab strip visual state**: Settings tab headers use Glass City button tiles:
+- [x] **Tab strip visual state**: Settings tab headers use Glass City button tiles:
   - **Active tab**: `rgba(0, 201, 200, 0.22)` teal wash + 2 px `rgba(0, 201, 200, 0.75)`
     teal border + 4 px baked glow
   - **Inactive tab**: `rgba(255, 255, 255, 0.08)` fill + 1 px `rgba(255, 255, 255, 0.18)`
     border
   - **Hover**: `rgba(255, 255, 255, 0.15)` fill + 1 px `rgba(255, 255, 255, 0.35)` border
+  - **Tab focus (keyboard navigation)**: when focused via keyboard Tab, uses the active tab
+    style — `rgba(0, 201, 200, 0.22)` teal wash + 2 px `rgba(0, 201, 200, 0.75)` border +
+    4 px baked glow. Desktop keyboard accessibility requires a visible focus indicator.
 
-- [ ] **Text colour pass** — Settings panel text must match the Glass City palette:
+- [x] **Text colour pass** — Settings panel text must match the Glass City palette:
   - Panel title: `#EBF4F6` near-white
   - Active tab label: `#EBF4F6`; inactive tab label: `#4A7FA5` mid-blue
   - Field labels: `#4A7FA5`; field value readouts: `#F0B429` amber
   - Disabled control labels (e.g. "Post-launch" disaster toggle): `#4A7FA5` at 50% opacity
     (implemented via `IUIBackend::setElementAlpha` + `setElementEnabled(..., false)`)
 
-- [ ] **Apply / Cancel / Restore Defaults buttons** on all tabs: Glass City button tile
+- [x] **Apply / Cancel / Restore Defaults buttons** on all tabs: Glass City button tile
   (inactive default style; hover and focus states per tab-strip rules above)
 
-- [ ] **`SettingsPanelBackgroundTest`** (label `unit`, CMake target `ui_tests`): uses
+- [x] **`SettingsPanelBackgroundTest`** (label `unit`, CMake target `ui_tests`): uses
   `NiceMock<MockUIBackend>` to verify that `SettingsPanel::show()` calls
-  `setElementVisible(scrımHandle, true)` and `setElementImage(bgHandle, kPanelTileId)` at
+  `setElementVisible(scrimHandle, true)` and `setElementImage(bgHandle, kPanelTileId)` at
   the expected handles. Scrim handle and background handle are stored as `UIElementHandle`
   members of `SettingsPanel` (consistent with the `ModalDialog` element-repositioning
   pattern — elements created once at construction, repositioned on each `show()` call via
@@ -65,12 +69,12 @@ UI was never wired; (3) the save-slot picker and Load Game dialogs are incomplet
 The Controls tab in `SettingsPanel` currently has placeholder stubs. This deliverable
 wires the full rebinding table specified in `architecture/ui-ux/hotkey-scheme.md`.
 
-- [ ] **`KeyBindingsPanel`** — new class `src/ui/KeyBindingsPanel.h` /
+- [x] **`KeyBindingsPanel`** — new class `src/ui/KeyBindingsPanel.h` /
   `src/ui/KeyBindingsPanel.cpp` owned by `SettingsPanel`:
   - Renders the rebinding table within the Controls tab content area
   - Owns the capture-mode state machine (Idle → Capturing → ConflictPending → Idle)
 
-- [ ] **Rebinding table rows** — one capturable row per V1 rebindable action (per
+- [x] **Rebinding table rows** — one capturable row per V1 rebindable action (per
   `architecture/ui-ux/hotkey-scheme.md` §V1 rebindable actions): Zone tool (Z), Road tool
   (R), Utilities tool (U), Demolish tool (D), Inspector/Query tool (I), Toggle Tax Rate
   Panel (T), Toggle Notification Log (B), Pan Up (ArrowUp), Pan Down (ArrowDown), Pan Left
@@ -84,18 +88,22 @@ wires the full rebinding table specified in `architecture/ui-ux/hotkey-scheme.md
     2 px `rgba(0, 201, 200, 0.75)` border) — signals "recording"; row label changes to
     "Press a key…"
 
-- [ ] **Non-rebindable informational rows** (Ctrl+Z — Undo, Ctrl+S — Save):
+- [x] **Non-rebindable informational rows** (Ctrl+Z — Undo, Ctrl+S — Save):
   - Label: `#4A7FA5` mid-blue; chip: `#4A7FA5` mid-blue background (no capture on click)
   - Displayed as "Ctrl+Z — Undo (not rebindable in V1)" and
     "Ctrl+S — Save (not rebindable in V1)"
 
-- [ ] **Reserved-key rows** (Q and E):
+- [x] **Reserved-key rows** (Q and E):
   - Displayed as "Q — Reserved for future camera controls — unavailable" and
     "E — Reserved for future camera controls — unavailable"; label colour `#4A7FA5` at 50%
-    opacity; hover tooltip: "This key is reserved and cannot be assigned"
+    opacity; the text "This key is reserved and cannot be assigned" is displayed inline as
+    a static label in the row (style: `#4A7FA5` at 50% opacity, same as the row label) —
+    no hover mechanism is needed; the text is always visible
   - No capture state; clicking the row chip has no effect
+  - Q/E reserved-key rows are NOT Tab-navigable and do not respond to Enter or Space.
+    Keyboard Tab navigation skips these rows. The row chip has no click effect.
 
-- [ ] **Capture flow**:
+- [x] **Capture flow**:
   1. Player clicks a bindable key chip → row enters Capturing state
   2. Next key press (excluding Escape) is read as the candidate new key
   3. **Q/E guard**: if the candidate is Q or E, immediately display inline red text
@@ -107,34 +115,38 @@ wires the full rebinding table specified in `architecture/ui-ux/hotkey-scheme.md
   5. **Swap**: atomically exchange the two bindings in the in-memory `KeyBindings` struct;
      both rows update their chip labels; state returns to Idle
   6. **Cancel** (conflict): revert the candidate; row returns to Idle with original chip
-  7. **Escape during capture**: cancels capture (row returns to Idle, no change) before
-     the tab-level Escape handler fires (per
+  7. **Escape during capture**: cancels the capture AND the tab-level Escape handler then
+     fires normally — Settings closes. Both happen in the same event frame; no intermediate
+     Idle state is visible to the player (per
      `architecture/ui-ux/settings-pause-menu.md` §Controls tab)
 
-- [ ] **WASD preset button**: a "WASD" preset button at the bottom of the Controls tab
+- [x] **WASD preset button**: a "WASD" preset button at the bottom of the Controls tab
   content area (above Apply/Cancel/Restore Defaults). Clicking it opens the WASD preset
   confirmation modal (Small, 480×240 px) per
   `architecture/ui-ux/modal-dialog-system.md` §WASD camera preset confirmation modal:
-  - Body shows current binding of W, A, S, D (so the player sees what will be overwritten)
+  - Body text (verbatim per spec): "This will change: W=Pan Up, A=Pan Left, S=Pan Down,
+    D=Pan Right (Demolish moved to X). Any custom bindings for W/A/S/D will be
+    overwritten." The modal also displays the current binding of each affected key (W, A,
+    S, D) so the player understands what will be replaced before committing
   - Buttons: **Apply** (primary) / **Cancel** (default focus — least destructive)
   - On Apply: atomically rebind PanUp=W, PanDown=S, PanLeft=A, PanRight=D, Demolish=X;
     write `keybindings.json`; close modal; refresh all chip labels in the table
 
-- [ ] **Apply button (Controls tab)**: writes `keybindings.json` only when the in-memory
+- [x] **Apply button (Controls tab)**: writes `keybindings.json` only when the in-memory
   `KeyBindings` state is conflict-free (no two actions share a key). If the panel somehow
   reaches Apply with a conflict still present, Apply is grayed out and a summary line
   shows `#F04E37` "Resolve all key conflicts before saving"
 
-- [ ] **Cancel button (Controls tab)**: reverts all in-session rebinding changes in the
+- [x] **Cancel button (Controls tab)**: reverts all in-session rebinding changes in the
   `KeyBindings` struct to the state at the time the Controls tab was last opened (or the
   persisted state if never modified this session); closes Settings (returns to Pause Menu
   or Main Menu, matching the Escape-from-tab behaviour)
 
-- [ ] **Restore Defaults (Controls tab)**: shows "Reset all Controls settings to defaults?
+- [x] **Restore Defaults (Controls tab)**: shows "Reset all Controls settings to defaults?
   Yes / Cancel." confirmation; on Yes, resets the in-memory `KeyBindings` struct to
   defaults and refreshes all chip labels (does NOT write to disk until Apply)
 
-- [ ] **`KeyBindingsPanelTest`** (label `unit`, CMake target `ui_tests`):
+- [x] **`KeyBindingsPanelTest`** (label `unit`, CMake target `ui_tests`):
   - `KeyBindingsPanel_CaptureMode_TogglesOnClick`: clicking a bindable chip enters Capture
     state; clicking again (second key chip while first is active) cancels first capture and
     begins new one
@@ -145,11 +157,28 @@ wires the full rebinding table specified in `architecture/ui-ux/hotkey-scheme.md
   - `KeyBindingsPanel_ReservedKey_ShowsReservedError`: pressing Q or E during capture
     displays reserved-key error and does NOT advance to conflict detection
   - `KeyBindingsPanel_Escape_CancelsCapture`: pressing Escape during capture exits Capture
-    state without changing the binding; Settings panel does NOT close on this Escape
+    state without changing the binding; the tab-level Escape handler then fires normally
+    and Settings closes — both occur in the same event frame
   - `KeyBindingsPanel_ApplyGrayed_WhenConflictExists`: Apply button is disabled when any
     conflict is unresolved in the in-memory struct
-  - All tests use `NiceMock<MockUIBackend>` and `StrictMock` for calls under assertion;
-    `KeyBindings` is injected as a value type (copied on tab open, written on Apply)
+  - All tests use `NiceMock<MockUIBackend>`; strict call expectations are enforced via
+    `EXPECT_CALL` within the NiceMock fixture — do NOT use `StrictMock<MockUIBackend>` as
+    the UI backend generates many incidental calls. `KeyBindings` is injected as a value
+    type (copied on tab open, written on Apply).
+
+- [x] **CMakeLists.txt registration** — extend `ui_tests` target via `target_sources()`
+  following the Phase 4+ extension policy (do NOT call `add_executable` or
+  `aitown_add_tests` again — duplicate target error):
+
+  ```cmake
+  target_sources(ui_tests PRIVATE
+      tests/ui/settings_panel_background_test.cpp
+      tests/ui/key_bindings_panel_test.cpp
+      tests/ui/ui_manager_unsaved_quit_test.cpp
+      tests/ui/ui_manager_save_failure_test.cpp
+      tests/ui/main_menu_save_state_test.cpp
+  )
+  ```
 
 ---
 
@@ -165,35 +194,43 @@ Phase 11 delivered `SaveSystem` as a concrete class without a pure-virtual inter
 generate via GMock — following the testability architecture pattern for all injectable
 components (see `architecture/testing/testability-architecture.md`).
 
-- [ ] **`src/interfaces/ISaveSystem.h`** — new pure-virtual interface:
+- [x] **`src/interfaces/ISaveSystem.h`** — new pure-virtual interface:
   - Methods mirroring the `SaveSystem` public API used by `UIManager`:
-    `virtual bool saveToSlot(int slot) = 0;`
-    `virtual bool autoSave() = 0;`
-    `virtual LoadResult loadLastSave() = 0;`
-    `virtual bool hasSaveFile() const = 0;`
+    `virtual SaveResult saveToSlot(int slot) = 0;`
+    `virtual SaveResult autoSave() = 0;`
+    `virtual LoadResult loadMostRecentSave() = 0;`
+    `virtual bool hasSaveData() const = 0;`
     `virtual SaveFileState getSaveFileState() const = 0;`
     `virtual std::string getSaveDirectoryPath() const = 0;`
     `virtual ~ISaveSystem() = default;`
   - Enum `SaveFileState { NoSaves, AllCorrupt, Valid }` defined in `src/interfaces/ISaveSystem.h`
+  - `getSaveFileState()` is a new query method combining `hasSaveData()` and
+    `isSaveCorrupted()` logic into a single three-state result for the Load Game button;
+    it does not exist on the current concrete `SaveSystem` and must be added
 
-- [ ] **`SaveSystem` updated** to `class SaveSystem : public ISaveSystem` — all public methods
-  declared `override`; no other behaviour changes
+- [x] **`SaveSystem` updated** to `class SaveSystem : public ISaveSystem` — all existing
+  public methods declared `override`; `getSaveFileState()` added as a new method
+  (implementation: returns `NoSaves` when `!hasSaveData()`, `AllCorrupt` when
+  `isSaveCorrupted()`, otherwise `Valid`); no other behaviour changes
 
-- [ ] **`MockSaveSystem`** in `tests/ui/MockSaveSystem.h` — standard `NiceMock`/`StrictMock`-
-  compatible GMock stub for all `ISaveSystem` methods; used by `UIManagerUnsavedQuitTest`,
-  `UIManagerSaveFailureTest`, and `MainMenuSaveStateTest`
+- [x] **`MockSaveSystem`** in `tests/ui/MockSaveSystem.h` — **header-only** (no `.cpp` file),
+  following the `MockUIBackend` pattern used throughout the test suite; standard
+  `NiceMock`/`StrictMock`-compatible GMock stub for all `ISaveSystem` methods; used by
+  `UIManagerUnsavedQuitTest`, `UIManagerSaveFailureTest`, and `MainMenuSaveStateTest`
 
-- [ ] **`UIManager` constructor** updated to accept `ISaveSystem*` instead of `SaveSystem*`
+- [x] **`UIManager` constructor** updated to accept `ISaveSystem*` instead of `SaveSystem*`
   (if `UIManager` currently holds a concrete pointer); production `main.cpp` passes the real
   `SaveSystem` instance; all existing `UIManager` tests pass `MockSaveSystem` or `nullptr`
 
 ##### 3a. Unsaved-Changes Modal
 
-- [ ] **`ModalDialog::showUnsavedQuit()`** properly wired in `UIManager`:
+- [x] **`ModalDialog::showUnsavedQuit()`** properly wired in `UIManager`:
   - Called when `m_pendingQuit != None` and `m_hasUnsavedChanges == true` (see
     `architecture/game-design/save-system.md` §Quit-to-Desktop/Quit-to-Main-Menu safety)
   - Three buttons: **Save and Quit** / **Quit Without Saving** / **Cancel**
   - Default Tab focus: **Cancel** (least destructive, per global modal rule)
+  - **Keyboard Tab order**: Cancel (default focus) → Save and Quit → Quit Without Saving.
+    Escape activates Cancel (dismisses modal, returns to game/pause menu).
   - On **Save and Quit**: `SaveSystem::autoSave()` → dispatch quit via `m_pendingQuit`
   - On **Quit Without Saving**: dispatch quit immediately
   - On **Cancel** / Escape: clear `m_pendingQuit`; return to game/pause menu
@@ -203,9 +240,11 @@ components (see `architecture/testing/testability-architecture.md`).
     every state transition (action placed → dot shown; manual/auto-save → dot cleared;
     failed auto-save → dot remains shown)
 
-- [ ] **`UIManagerUnsavedQuitTest`** (label `unit`, CMake target `ui_tests`):
+- [x] **`UIManagerUnsavedQuitTest`** (label `unit`, CMake target `ui_tests`):
   - `UIManager_QuitToDesktop_WithUnsavedChanges_ShowsModal`
   - `UIManager_QuitToDesktop_NoUnsavedChanges_ExitsImmediately`
+  - `UIManager_QuitToMenu_WithUnsavedChanges_ShowsModal`
+  - `UIManager_QuitToMenu_NoUnsavedChanges_TransitionsImmediately`
   - `UIManager_UnsavedQuit_SaveAndQuit_CallsAutoSave`
   - `UIManager_UnsavedQuit_Cancel_ClearsPendingQuit`
   - Uses `StrictMock<MockCitySimulation>`, `NiceMock<MockUIBackend>`,
@@ -213,7 +252,7 @@ components (see `architecture/testing/testability-architecture.md`).
 
 ##### 3b. Manual Save Failure Modal
 
-- [ ] **`ModalDialog::showSaveFailure()`** — blocking error modal for manual save
+- [x] **`ModalDialog::showSaveFailure()`** — blocking error modal for manual save
   failures (Ctrl+S path): title "Save Failed", body "[reason]", buttons **Retry** /
   **Cancel** (per `architecture/ui-ux/settings-pause-menu.md` §Auto-save)
   - Dismissible via Escape (activates Cancel)
@@ -225,14 +264,14 @@ components (see `architecture/testing/testability-architecture.md`).
     Press Ctrl+S to save manually." (2 s display, non-dismissible until expiry per
     `NotificationManager::postCritical()`) — this path does NOT use the blocking modal
 
-- [ ] **`UIManagerSaveFailureTest`** (label `unit`, CMake target `ui_tests`):
+- [x] **`UIManagerSaveFailureTest`** (label `unit`, CMake target `ui_tests`):
   - `UIManager_ManualSave_Failure_ShowsBlockingModal`
   - `UIManager_ManualSave_RetrySuccess_ClearsUnsavedDot`
   - `UIManager_AutoSave_Failure_PostsCriticalToast_NotModal`
 
 ##### 3c. Load Game Dialogs — Main Menu State
 
-- [ ] **Main Menu "Load Game" button state** correctly reflects save file state at
+- [x] **Main Menu "Load Game" button state** correctly reflects save file state at
   startup and after save/load operations (three states per
   `architecture/ui-ux/main-menu-new-game-flow.md`):
   - **No saves**: grayed, tooltip "No saves found"
@@ -241,7 +280,7 @@ components (see `architecture/testing/testability-architecture.md`).
   - **At least one valid save**: enabled; on click → loading screen → terrain rebuild →
     gameplay; loading controller calls `UIManager::onGameLoaded()` after deserialisation
 
-- [ ] **`MainMenuSaveStateTest`** (label `unit`, CMake target `ui_tests`):
+- [x] **`MainMenuSaveStateTest`** (label `unit`, CMake target `ui_tests`):
   - `MainMenuPanel_NoSaves_LoadButtonGrayed`
   - `MainMenuPanel_CorruptSaves_LoadButtonGrayed_TooltipShowsPath`
   - `MainMenuPanel_ValidSave_LoadButtonEnabled`
@@ -263,7 +302,7 @@ in `UIManager::update()` at the `consumeSaveRequest()` call site is sufficient.
 - Settings > Controls tab shows the full rebinding table with Glass City chip styling;
   capture flow, conflict detection, Swap/Cancel, Q/E guard, and WASD preset modal all work
 - `keybindings.json` is written only after conflict-free Apply; Escape during capture
-  cancels capture only (does not close Settings)
+  cancels the capture and Settings closes (tab-level Escape handler fires in the same event frame)
 - Unsaved-changes modal (Save and Quit / Quit Without Saving / Cancel) fires correctly
   for both Quit-to-Desktop and Quit-to-Main-Menu paths
 - Manual save failure shows blocking error modal (Retry / Cancel); auto-save failure posts
@@ -289,7 +328,7 @@ in `UIManager::update()` at the `consumeSaveRequest()` call site is sufficient.
 ### Risks & Spikes
 
 - **RISK**: `IUIBackend` does not currently expose a rounded-rect draw call. The Glass City
-  panel background must be implemented using the existing panel sprite tile (building-atlas
+  panel background must be implemented using the existing panel sprite tile (hud_sprites_ui
   rows 16+) — if the tile does not have 8 px pre-baked corners, a fallback using four
   `draw2DRectangle` calls for body + corners is acceptable provided the visual result is
   indistinguishable at 1080p. Spike: render a test panel in the EDT_NULL integration
