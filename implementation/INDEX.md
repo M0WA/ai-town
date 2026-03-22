@@ -106,5 +106,6 @@ All open contradictions have been resolved. See the Resolved Contradictions list
 - [Phase 11h: Multi-Tile Building Footprints, Budget Screen Breakdown & Road Lane Design](phase-11h.md)
 - [Phase 11i: CI Packaging — Windows Installer, Debian/Ubuntu Packages & Asset Validation Consolidation](phase-11i.md)
 - [Phase 11j: Upgrade Unzoning Fix & Ground Plate Terrain Clearance](phase-11j.md)
+- [Phase 11k: CI Preflight Deduplication — supply-chain-lint & validate-assets Jobs](phase-11k.md)
 - [Phase 12: Polish, Performance & V1 Hardening](phase-12.md)
 - [Post-V1 Backlog](post-v1-backlog.md)
