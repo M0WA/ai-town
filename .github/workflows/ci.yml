@@ -1519,7 +1519,7 @@ jobs:
 
       - name: Install vcpkg packages
         run: |
-          $VCPKG_ROOT/vcpkg install --triplet x64-linux
+          $VCPKG_ROOT/vcpkg install --triplet x64-linux --overlay-ports=vcpkg-overlays
 
       - name: CMake configure
         run: |
@@ -1531,6 +1531,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DAITOWN_ASSETS_DIR=/usr/share/aitown/assets \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            -DVCPKG_OVERLAY_PORTS=vcpkg-overlays \
             -DVCPKG_MANIFEST_FEATURES="" \
             -DVCPKG_INSTALLED_DIR=$VCPKG_ROOT/installed
 
