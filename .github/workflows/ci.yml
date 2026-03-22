@@ -1498,7 +1498,7 @@ jobs:
         run: |
           git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg
           git -C /opt/vcpkg checkout ${{ env.VCPKG_COMMIT_ID }}
-          /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics -buildFromSource
           echo "VCPKG_ROOT=/opt/vcpkg" >> $GITHUB_ENV
 
       - name: Install vcpkg packages
