@@ -1503,7 +1503,7 @@ jobs:
 
       - name: Install vcpkg packages
         run: |
-          $VCPKG_ROOT/vcpkg install irrlicht --triplet x64-linux
+          $VCPKG_ROOT/vcpkg install --triplet x64-linux
 
       - name: CMake configure
         run: |
