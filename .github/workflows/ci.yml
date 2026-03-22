@@ -1490,8 +1490,12 @@ jobs:
             autoconf automake libtool \
             libgl1-mesa-dev libglu1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxxf86vm-dev \
             libopenal-dev libvorbis-dev \
-            python3 \
+            python3 python3-pip \
             dpkg-dev fakeroot
+          # Ubuntu 22.04 ships cmake 3.22; FindOpenAL.cmake creates OpenAL::OpenAL
+          # only on cmake >=3.23. Upgrade via pip so all matrix containers use
+          # a modern cmake regardless of distro package version.
+          python3 -m pip install --break-system-packages cmake
 
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
