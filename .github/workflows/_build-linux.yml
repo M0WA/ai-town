@@ -1,0 +1,216 @@
+# Build Linux — reusable workflow
+# Fast binary-verification build (ENABLE_COVERAGE=OFF).
+# Called by ci.yml after supply-chain-lint and validate-assets.
+# Preflight steps (SHA lint, asset validation, clouds/font/audio/terrain checks,
+# vcpkg baseline) are handled by the supply-chain-lint and validate-assets jobs
+# and are NOT duplicated here.
+name: Build Linux
+
+on:
+  workflow_call:
+    inputs:
+      vcpkg_commit_id:
+        type: string
+        required: true
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/m0wa/aitown-ci-linux@sha256:e5aabf7e2c7cf377987020564f5bc6e622df9accd6db0738d99fb8a5cf66192e
+      options: --user root
+    permissions:
+      packages: read    # pull from GHCR
+      checks: write     # required by dorny/test-reporter
+      contents: read    # required by actions/checkout
+    steps:
+      # Step 1: checkout (must be first — makes workflow files available on disk for subsequent steps)
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      # Step 4: Detect GCC version and write to GITHUB_ENV.
+      # MUST be a SEPARATE named step before the actions/cache step.
+      # $GITHUB_ENV writes are not visible within the same step.
+      - name: Detect GCC version
+        shell: bash
+        run: |
+          echo "COMPILER_VERSION=$(gcc -dumpfullversion -dumpversion)" >> $GITHUB_ENV
+
+      # Step 8: Set up ccache (Linux only — ccache does not support cl.exe on Windows).
+      - name: Set up ccache
+        if: runner.os == 'Linux'
+        uses: hendrikmuhs/ccache-action@ed74d11c0b343532753ecead8a951bb09bb34bc9  # v1.2.14
+        with:
+          key: ${{ runner.os }}-ccache-${{ env.COMPILER_VERSION }}
+
+      # Step 9: Configure CMake.
+      # ENABLE_COVERAGE=OFF for the fast build-linux job (via ci-linux preset).
+      # CMakePresets.json defines: Ninja generator, ccache launchers, ENABLE_COVERAGE=OFF.
+      - name: Configure CMake
+        run: cmake --preset ci-linux -DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed -DVCPKG_MANIFEST_INSTALL=OFF
+
+      # Step 10: Build.
+      - name: Build
+        run: cmake --build build --parallel
+
+      # Step 10b: Verify libGLEW.a artifact (CI-1) — Phase 4 deliverable.
+      # Globbed path — triplet-agnostic; do NOT hard-code a triplet subdirectory.
+      # Fails if GLEW was not built/installed by vcpkg (e.g., missing glew from vcpkg.json).
+      - name: Verify libGLEW.a artifact (CI-1)
+        shell: bash
+        run: |
+          find /opt/vcpkg_installed -name "libGLEW.a" | grep -q "libGLEW.a" || \
+            { echo "ERROR: libGLEW.a not found under /opt/vcpkg_installed. Ensure glew is in vcpkg.json."; exit 1; }
+          echo "libGLEW.a found."
+
+      # Step 11: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
+      # IrrlichtUIBackendCompileCheck::IsNonAbstract is registered under the 'integration' label.
+      # See architecture/testing/framework.md for rationale.
+      - name: Verify integration test routing (non-zero discovery)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No tests discovered under integration label. Check integration_tests CMake registration."
+            exit 1
+          fi
+          echo "Integration routing: $count test(s) discovered."
+
+      # Step 12: Verify requires-opengl test routing (non-zero discovery) — Phase 1 deliverable.
+      # Must appear BEFORE xvfb-run ctest to confirm routing before execution.
+      # The stub_succeed.cpp test from Phase 0 satisfies the non-zero discovery requirement.
+      # Phase 2 note: lod_swap_smoke_test.cpp (Phase 6) is the first real requires-opengl test body.
+      - name: Verify requires-opengl test routing (non-zero discovery)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No tests discovered under requires-opengl label. Check opengl_tests CMake registration."
+            exit 1
+          fi
+          echo "requires-opengl routing: $count test(s) discovered."
+
+      # Step 12b: Verify unit test routing (non-zero discovery) — CI-7, Phase 4 deliverable.
+      # Uses -N dry-run + grep -E 'Test +#' (handles ctest alignment padding for test #1-9999).
+      # --collect-labels does NOT exist in CTest — use -N (dry-run) instead.
+      - name: Verify unit test routing (non-zero discovery)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -cE 'Test +#' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No tests discovered under unit label. Check simulation_tests/terrain_tests/ui_tests/audio_tests CMake registration."
+            exit 1
+          fi
+          echo "Unit routing: $count test(s) discovered."
+
+      # Step 12c: Verify simulation_tests specifically is discoverable — Phase 6 deliverable.
+      # The unit-routing check above passes as long as ANY unit target (terrain_tests, ui_tests)
+      # has tests. This step verifies simulation_tests is not silently unregistered.
+      # Phase 6 is complete (CitySimulation.cpp exists); this is now a hard-fail.
+      # Phase 10 adds adaptive_music_intensity_test.cpp to simulation_tests — if the
+      # binary fails to start (e.g. missing symbol), ctest exits 0 with "No tests found".
+      # Hard-failing here catches that silent failure before it reaches the coverage gate.
+      # Note: ctest pads test numbers with spaces ("Test    #1:" for #1-9, "Test #1000:"
+      # for #1000+); use grep -E 'Test +#' to match all formats.
+      - name: Verify simulation_tests registration
+        shell: bash
+        run: |
+          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -cE 'Test +#' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No simulation_tests test cases discovered. Ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60) and that the binary links and starts correctly."
+            exit 1
+          fi
+          echo "simulation_tests routing: $count test(s) discovered."
+
+      # Step 13: Verify default.mhr HRTF data — hard-fail (Phase 4).
+      # Checks build/default.mhr (relative path) which is where the POST_BUILD
+      # copy_if_different rule writes the file from /opt/vcpkg_installed.
+      # Using a relative path avoids the ${{ github.workspace }} vs /__w/ mismatch:
+      # inside the container the workspace is at /__w/ai-town/ai-town but
+      # ${{ github.workspace }} evaluates to the host path /home/runner/work/...
+      # Without this file, AudioSystem HRTF initialization fails at runtime even
+      # though the binary compiles and links successfully.
+      - name: Verify default.mhr HRTF data
+        shell: bash
+        run: |
+          if ! test -f build/default.mhr; then
+            echo "ERROR: build/default.mhr not found — HRTF initialization will fail at runtime"
+            exit 1
+          fi
+          echo "default.mhr present at build/default.mhr."
+
+      # Step 14: Run unit tests.
+      # AITOWN_HEADLESS=1 — guard against unit tests that inadvertently trigger IrrlichtDevice init.
+      # ALSOFT_DRIVERS=null — guard against unit tests that inadvertently trigger AudioSystem init.
+      - name: Run unit tests (no display)
+        run: |
+          mkdir -p test_results
+          ctest --test-dir build -LE 'integration|requires-opengl' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 15: Run integration tests.
+      # Uses EDT_NULL Irrlicht (no display) + null audio driver.
+      - name: Run integration tests (no display, EDT_NULL)
+        run: |
+          mkdir -p test_results
+          ctest --test-dir build -L '^integration$' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 16: Run OpenGL tests under xvfb.
+      # AITOWN_HEADLESS must NOT appear here — it suppresses IrrlichtDevice init
+      # which is required for requires-opengl tests.
+      # ALSOFT_DRIVERS=null still applies (headless runner has no audio hardware).
+      - name: Run OpenGL tests (xvfb)
+        run: |
+          mkdir -p test_results
+          xvfb-run --auto-servernum ctest --test-dir build -L '^requires-opengl$' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 17: Verify test XML files were produced.
+      # if: always() — ensures this runs even if ctest fails.
+      - name: Verify test XML output
+        if: always()
+        shell: bash
+        run: |
+          count=$(find test_results -name '*.xml' 2>/dev/null | wc -l)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No test XML files in test_results/ — GTEST_OUTPUT may not have written output"
+            exit 1
+          fi
+          echo "Found $count test result file(s)."
+
+      # Step 18: Publish test results via dorny/test-reporter.
+      # if: always() — must post annotations even when tests fail.
+      # fail-on-error: false — prevents reporter errors from masking actual test failures.
+      # continue-on-error: true — dorny uses git ls-files which fails in container jobs
+      # due to safe.directory ownership mismatch (/__w vs /home/runner/work).
+      # This prevents the dorny action crash from blocking downstream steps.
+      - name: Publish test results
+        if: always()
+        continue-on-error: true
+        uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1
+        with:
+          name: 'Linux Unit Tests'
+          path: 'test_results/*.xml'
+          reporter: 'java-junit'
+          fail-on-error: false
+
+      # Step 19: Upload test results artifact.
+      # if: always() — upload even on failure for post-mortem analysis.
+      # Job-specific name (not runner.os-based) to avoid collision with coverage-linux.
+      - name: Upload test results (build-linux)
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: test-results-build-linux-${{ github.sha }}
+          path: test_results/
+          retention-days: 14

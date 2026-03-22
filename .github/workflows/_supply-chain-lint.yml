@@ -1,0 +1,59 @@
+# Supply-chain lint — reusable workflow
+# Greps ALL .github/workflows/*.yml files (not just ci.yml) for:
+#   (a) unresolved angle-bracket placeholder tokens
+#   (b) short SHAs (< 40 hex chars) in uses: lines
+#   (c) container image: lines missing full sha256 digest pin
+# Called by ci.yml with no inputs.
+name: Supply-Chain Lint
+
+on:
+  workflow_call:
+
+jobs:
+  supply-chain-lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Step 1: Checkout — makes all workflow YAML files available on disk.
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      # Step 2: SHA lint — checks ALL .github/workflows/*.yml files.
+      # Greps for placeholder SHAs and rejects any SHA shorter than 40 hex chars.
+      # Also validates container image: lines have full sha256 digest pins.
+      # Prevents accidental commit of incomplete supply-chain pins in any workflow file.
+      - name: Lint workflow for placeholder SHAs
+        shell: bash
+        run: |
+          failed=0
+          for f in .github/workflows/*.yml; do
+            # Check for unresolved angle-bracket placeholder tokens (e.g. uses: owner/action@<SHA>).
+            # Exclude comment lines and echo lines to avoid false-positives.
+            if grep -P '<[A-Z_][A-Z0-9_-]*>' "$f" | grep -v '^\s*#' | grep -v 'echo '; then
+              echo "ERROR: Unresolved angle-bracket placeholder found in $f."
+              failed=1
+            fi
+            # Check for short SHAs (fewer than 40 hex chars after '@') in uses: lines.
+            if grep -P 'uses:.*@[0-9a-f]{1,39}\b' "$f"; then
+              echo "ERROR: Short SHA detected in a uses: line in $f. All pinned actions must use the full 40-character commit SHA."
+              failed=1
+            fi
+          done
+          if [[ $failed -eq 1 ]]; then
+            echo "ERROR: SHA lint failed — placeholder tokens or short SHAs found."
+            exit 1
+          fi
+          echo "SHA lint passed — no placeholder tokens or short SHAs found."
+          echo "Checking container image digest pins..."
+          for f in .github/workflows/*.yml; do
+            if grep -E '^\s+image:\s+' "$f" | grep -Ev '@sha256:[0-9a-f]{64}'; then
+              echo "ERROR: container image: line without full sha256 digest pin found in $f."
+              failed=1
+            fi
+          done
+          if [[ $failed -eq 1 ]]; then
+            echo "ERROR: Container image digest lint failed."
+            exit 1
+          fi
+          echo "Container image digest lint passed."
