@@ -39,6 +39,25 @@
       }
     },
     {
+      "name": "local",
+      "displayName": "Local build (auto-detect generator, no ccache)",
+      "description": "For building outside the devcontainer. No Ninja or ccache required.",
+      "inherits": "base",
+      "cacheVariables": {
+        "ENABLE_COVERAGE": "OFF",
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
+      }
+    },
+    {
+      "name": "local-coverage",
+      "displayName": "Local coverage build (auto-detect generator, no ccache)",
+      "description": "Coverage build outside the devcontainer. No Ninja or ccache required.",
+      "inherits": "local",
+      "cacheVariables": {
+        "ENABLE_COVERAGE": "ON"
+      }
+    },
+    {
       "name": "ci-windows",
       "displayName": "CI Windows (Ninja + MSVC)",
       "description": "Windows CI build: Ninja generator. Requires ilammy/msvc-dev-cmd to set MSVC env before configure.",

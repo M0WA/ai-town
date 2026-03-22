@@ -112,6 +112,8 @@ TEST_F(TerrainFlatteningSimTest, TerrainFlattening_PlaceBuildingMesh_NodeYAtFlat
         << "getHeightAt() must return m_heightBeforeFlat (5.0f) before setTileHeight()";
 
     // 2. Place a residential zone tile at (0, 0).
+    //    Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(1, 0, 0);
     //    placeZone() calls renderer_.placeBuildingMesh(), which triggers the ON_CALL
     //    that executes the three-step flattening: getHeightAt → setTileHeight → getHeightAt.
     sim_->placeZone(/*tileX=*/0, /*tileZ=*/0, ZoneType::Residential,

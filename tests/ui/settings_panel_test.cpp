@@ -319,10 +319,11 @@ TEST_F(SettingsPanelStandaloneTest, ApplyButton_GraphicsTab_StartsCountdown) {
 
     // Each element defaults to rect (0,0,0,0). Tab headers are checked first
     // in hitTest order: tabGraphics, tabControls, tabAudio, tabGameplay.
-    // We override only the Apply button (handle 106) to match our click while
+    // We override only the Apply button (handle 108) to match our click while
     // all others stay at (0,0,0,0) and thus miss the click at (550, 900).
-    // Handle assignments: 101=panelBg, 102-105=tabs, 106=Apply, 107=Cancel, 108=RestoreDefaults.
-    ON_CALL(backend_, getElementRect(106)).WillByDefault(Return(Rect{500, 888, 140, 40}));
+    // Handle assignments: 101=scrim, 102=bgHandle, 103=panelBg, 104-107=tabs,
+    //                     108=Apply, 109=Cancel, 110=RestoreDefaults.
+    ON_CALL(backend_, getElementRect(108)).WillByDefault(Return(Rect{500, 888, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -345,8 +346,8 @@ TEST_F(SettingsPanelStandaloneTest, ApplyButton_GraphicsTab_StartsCountdown) {
 TEST_F(SettingsPanelStandaloneTest, Countdown_Expires_AutoReverts) {
     panel_->show();
 
-    // Start countdown by hitting Apply button (handle 106).
-    ON_CALL(backend_, getElementRect(106)).WillByDefault(Return(Rect{500, 888, 140, 40}));
+    // Start countdown by hitting Apply button (handle 108).
+    ON_CALL(backend_, getElementRect(108)).WillByDefault(Return(Rect{500, 888, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -392,11 +393,11 @@ TEST_F(SettingsPanelStandaloneTest, AudioTab_SliderClick_CallsSetMasterVolume) {
     panel_->onEvent(right); // 1->2 (Audio)
 
     // Handle assignments from SettingsPanel constructor:
-    // 101=panelBg, 102-105=tabs, 106=Apply, 107=Cancel, 108=RestoreDefaults,
-    // 109-112=gfx elements, 113=countdownLabel, 114-116=controls elements,
-    // 117=audioMasterLabel, 118=audioMasterSlider
-    // Target: audioMasterSlider = handle 118.
-    ON_CALL(backend_, getElementRect(118)).WillByDefault(Return(Rect{576, 190, 300, 32}));
+    // 101=scrim, 102=bgHandle, 103=panelBg, 104-107=tabs, 108=Apply, 109=Cancel,
+    // 110=RestoreDefaults, 111-114=gfx elements, 115=countdownLabel, 116-118=controls,
+    // 119=audioMasterLabel, 120=audioMasterSlider
+    // Target: audioMasterSlider = handle 120.
+    ON_CALL(backend_, getElementRect(120)).WillByDefault(Return(Rect{576, 190, 300, 32}));
 
     EXPECT_CALL(audio_, setMasterVolume(_)).Times(AtLeast(1));
 
@@ -434,9 +435,9 @@ TEST_F(SettingsPanelStandaloneTest, GameplayTab_DemolishToggle_TogglesOnOff) {
     panel_->onEvent(left);
 
     // Handle assignments from SettingsPanel constructor:
-    // 123=gameplayDiffLabel, 124=gameplayDemolishToggle, 125=gameplayDisasterToggle
-    // Target: gameplayDemolishToggle = handle 124.
-    ON_CALL(backend_, getElementRect(124)).WillByDefault(Return(Rect{376, 226, 400, 32}));
+    // 125=gameplayDiffLabel, 126=gameplayDemolishToggle, 127=gameplayDisasterToggle
+    // Target: gameplayDemolishToggle = handle 126.
+    ON_CALL(backend_, getElementRect(126)).WillByDefault(Return(Rect{376, 226, 400, 32}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -509,12 +510,12 @@ TEST_F(SettingsPanelStandaloneTest, AudioTab_MusicSliderClick_CallsSetMusicVolum
     panel_->onEvent(right); // 1->2 (Audio)
 
     // Handle assignments:
-    // 101=panelBg, 102-105=tabs, 106=Apply, 107=Cancel, 108=RestoreDefaults,
-    // 109-112=gfx, 113=countdownLabel, 114-116=controls,
-    // 117=audioMasterLabel, 118=audioMasterSlider,
-    // 119=audioMusicLabel, 120=audioMusicSlider,
-    // 121=audioSfxLabel, 122=audioSfxSlider.
-    ON_CALL(backend_, getElementRect(120)).WillByDefault(Return(Rect{576, 230, 300, 32}));
+    // 101=scrim, 102=bgHandle, 103=panelBg, 104-107=tabs, 108=Apply, 109=Cancel,
+    // 110=RestoreDefaults, 111-114=gfx, 115=countdownLabel, 116-118=controls,
+    // 119=audioMasterLabel, 120=audioMasterSlider,
+    // 121=audioMusicLabel, 122=audioMusicSlider,
+    // 123=audioSfxLabel, 124=audioSfxSlider.
+    ON_CALL(backend_, getElementRect(122)).WillByDefault(Return(Rect{576, 230, 300, 32}));
 
     EXPECT_CALL(audio_, setMusicVolume(_)).Times(AtLeast(1));
 
@@ -536,7 +537,7 @@ TEST_F(SettingsPanelStandaloneTest, AudioTab_SfxSliderClick_CallsSetSFXVolume) {
     panel_->onEvent(right); // 0->1
     panel_->onEvent(right); // 1->2 (Audio)
 
-    ON_CALL(backend_, getElementRect(122)).WillByDefault(Return(Rect{576, 270, 300, 32}));
+    ON_CALL(backend_, getElementRect(124)).WillByDefault(Return(Rect{576, 270, 300, 32}));
 
     EXPECT_CALL(audio_, setSFXVolume(_)).Times(AtLeast(1));
 
@@ -559,7 +560,7 @@ TEST_F(SettingsPanelStandaloneTest, CancelButtonClick_ControlsTab) {
     panel_->onEvent(right);
 
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(107)).WillByDefault(Return(Rect{500, 888, 140, 40}));
+    ON_CALL(backend_, getElementRect(109)).WillByDefault(Return(Rect{500, 888, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;

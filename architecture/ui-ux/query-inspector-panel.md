@@ -1,17 +1,17 @@
 # Query / Inspector Panel
 
-- Activated by Query tool; opens a floating panel **240×160 px** (virtual 1920×1080 space) anchored **40 px to the right and 40 px below** the cursor. **All cursor coordinates used in these formulas must be in virtual 1920×1080 space** (i.e., already un-projected from screen space via `UIScaler`). Using raw screen-space coordinates against virtual-space bounds will produce off-screen panels at non-1080p resolutions. Position computed as:
+- Activated by Query tool; opens a floating panel **340×280 px** (virtual 1920×1080 space) anchored **40 px to the right and 40 px below** the cursor. **All cursor coordinates used in these formulas must be in virtual 1920×1080 space** (i.e., already un-projected from screen space via `UIScaler`). Using raw screen-space coordinates against virtual-space bounds will produce off-screen panels at non-1080p resolutions. Position computed as:
 
   ```text
-  panel_x = clamp(cursor_x + 40, 0, 1920 − 240)
-  panel_y = clamp(cursor_y + 40, 0, 1080 − 160)
+  panel_x = clamp(cursor_x + 40, 0, 1920 − 340)
+  panel_y = clamp(cursor_y + 40, 0, 1080 − 280)
   ```
 
   **Tile overlap prevention**: If the computed panel rect intersects the queried tile's screen bounding box (`tileBounds` is the queried tile's bounding box expressed in virtual 1920×1080 coordinate space, already un-projected via `UIScaler` before being passed to `computePanelPosition()`), try placing the panel in the opposite diagonal (above-left of cursor):
 
   ```text
-  fallback_x = clamp(cursor_x − 40 − 240, 0, 1920 − 240)
-  fallback_y = clamp(cursor_y − 40 − 160, 0, 1080 − 160)
+  fallback_x = clamp(cursor_x − 40 − 340, 0, 1920 − 340)
+  fallback_y = clamp(cursor_y − 40 − 280, 0, 1080 − 280)
   ```
 
   Both primary and fallback positions are clamped to screen bounds, ensuring the panel is always fully visible. This ensures the player can see the queried tile while reading the panel.
@@ -20,8 +20,8 @@
 
   ```text
   if primary overlaps tile AND fallback overlaps tile:
-    edge_x = cursor_x <= 960 ? 1920 − 240 : 0   // right edge if cursor is in left half OR exactly at center (x=960); left edge if cursor is strictly in right half (x>960)
-    edge_y = clamp(cursor_y − 80, 0, 1080 − 160)
+    edge_x = cursor_x <= 960 ? 1920 − 340 : 0   // right edge if cursor is in left half OR exactly at center (x=960); left edge if cursor is strictly in right half (x>960)
+    edge_y = clamp(cursor_y − 140, 0, 1080 − 280)
     panel_position = (edge_x, edge_y)
   ```
 
@@ -37,7 +37,7 @@ cascade described above. Its authoritative signature (as of Phase 9b) is:
 // Returns the panel's top-left position in virtual 1920×1080 space as a ScreenRect.
 // cursorX, cursorY: cursor position in virtual 1920×1080 space (already un-projected via UIScaler).
 // tileBounds: the queried tile's bounding box in virtual 1920×1080 space (already un-projected via UIScaler).
-// The panel rect dimensions are fixed: w=240, h=160.
+// The panel rect dimensions are fixed: w=340, h=280 (kPanelW=340, kPanelH=280).
 // ScreenRect is defined in IRenderer.h (struct ScreenRect { int x{0}, y{0}, w{0}, h{0}; }).
 static ScreenRect computePanelPosition(int cursorX, int cursorY, const ScreenRect& tileBounds);
 ```
@@ -61,6 +61,33 @@ Existing Phase 8 pure-function tests must be updated to pass a `ScreenRect tileB
 instead of `screenW`/`screenH`; pass `ScreenRect{1000, 1000, 10, 10}` (off-screen — guaranteed
 non-overlapping) to keep existing placement assertions valid.
 
+## Panel Layout Constants
+
+| Constant | Value | Rationale |
+|---|---|---|
+| `kPanelW` | 340 | Wide enough for "Desirability: 99.0" at ~11 px/char mono font |
+| `kPanelH` | 280 | 8 rows × `kLineH` (33) + 16 px top/bottom padding |
+| `kLineH` | 33 | At 720 p: `ceil(22 px font × 1080 / 720) = 33` virtual px per row |
+
+**Background**: `m_panelBg` uses `setElementBackground(r=18, g=18, b=36, a=210)` — dark-navy
+semi-transparent fill drawn over world geometry to make text readable at all terrain colors.
+
+**Coverage line**: The service-coverage row uses a two-line format via a `'\n'` newline character
+and a double-height element (`h = 2 × kLineH`):
+
+```text
+Fire:X% Pol:X%
+Pwr:X%  Wtr:X%
+```
+
+Each line is ≤ 20 mono characters, fitting within `kPanelW=340` at all supported resolutions.
+
+**Font scaling note**: The bitmap fonts (`hud_font.xml`, `hud_mono_font.xml`) are fixed at 22 px
+physical height and do not scale with screen resolution. The virtual layout constants above are
+sized so that a 720 p display (the minimum supported resolution) produces non-overlapping rows.
+At higher resolutions rows will be slightly more spaced, which is acceptable. Dynamic per-frame
+font-size switching is deferred to a future typography pass.
+
 - **Fields per entity type**:
   - Zone tile: demand score, desirability score, tax yield/month, zone type + density, demand pressure % (unmet demand percentage per zone type from the `demand_pressure_pct` field of `QueryResult`)
   - Road segment: current occupancy %, current speed, capacity, congestion status
@@ -73,6 +100,7 @@ non-overlapping) to keep existing placement assertions valid.
   ```text
   if result.isZoned  → show zone/density/population/coverage data
   else if result.isRoad → show "Road" label; traffic data fields populated in future phase
+  else if result.serviceType != ServiceBuildingType::None → show service building panel
   else               → show "Unzoned"
   ```
 
@@ -80,6 +108,29 @@ non-overlapping) to keep existing placement assertions valid.
   `queryTile()` returns early after setting `isRoad = true` — no zone/population data is filled for
   road tiles. This is the V1 implementation; full road traffic fields (occupancy, speed, capacity,
   congestion) are deferred until the traffic system simulation phase.
+
+- **Service building tile detection via `QueryResult::serviceType`**: `ICitySimulation::queryTile()`
+  sets `QueryResult::serviceType` to the appropriate `ServiceBuildingType` enumerator when the tile
+  contains a service building (`PowerPlant`, `WaterTower`, `FireStation`, or `PoliceStation`).
+  Service building tiles have `isZoned = false` and `isRoad = false`, so without the explicit
+  `serviceType` check they would fall through to the "Unzoned" branch. When
+  `serviceType != ServiceBuildingType::None`, the Inspector displays the service building panel
+  showing: coverage radius, current upkeep, and service level %. The `serviceType` field is
+  declared in `src/interfaces/simulation_types.h` as
+  `ServiceBuildingType serviceType{ServiceBuildingType::None}` (after the `coverage` field).
+  `queryTile()` fills `serviceType` and leaves `isZoned = false`, `isRoad = false` for service
+  building tiles. A companion field `bool degraded{false}` is declared in
+  `src/interfaces/simulation_types.h` immediately after `serviceType`; it is populated by
+  `queryTile()` when `serviceType != ServiceBuildingType::None` and set to `true` when the
+  service building is in degraded state. When displaying the service coverage overlay,
+  `UIManager` reads `QueryResult::degraded` and passes it to
+  `IRenderer::showServiceCoverageOverlay(tileX, tileZ, serviceType, degraded)` so the renderer
+  can tint the overlay to indicate degraded service.
+  **Overlay lifecycle**: When the Inspector panel is dismissed (player presses **I** again,
+  clicks a non-tile target, or presses **Escape**), or when a different tile is queried and
+  the result is not a service building, `UIManager` calls `IRenderer::hideServiceCoverageOverlay()`
+  to clear the previously displayed overlay. Only the coverage overlay of the currently-queried
+  service building should be visible at any time.
 
 - **Mutual exclusion with Tax Rate Panel**: QueryPanel and Tax Rate Panel must NOT be simultaneously open. Opening the QueryPanel closes the Tax Rate Panel if it is open. See `input-arbitration.md` Priority 3 for the authoritative mutual exclusion rule.
 - Panel populated by a `QueryResult` data struct passed from the simulation layer to `UIManager`

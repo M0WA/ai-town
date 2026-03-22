@@ -320,6 +320,8 @@ TEST_F(UndoTest, UndoSystem_ExpiryTime_ComputedCorrectly_AtHighSpeed) {
     sim_->setSpeed(SpeedMultiplier::x10);
 
     // Place a zone to record the undo action.
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(1, 0, 0);
     sim_->placeZone(0, 0, ZoneType::Residential, DensityTier::Low);
 
     ASSERT_TRUE(sim_->hasUndoPendingAction())
@@ -393,6 +395,8 @@ TEST_F(UndoTest, UndoLastAction_EasyDifficulty_RefundClamped)
         &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Easy);
     sim_->setSpeed(SpeedMultiplier::x1);
 
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(1, 0, 0);
     // Place a zone (which records an undo entry).
     sim_->placeZone(0, 0, ZoneType::Residential, DensityTier::Low, 0);
     EXPECT_TRUE(sim_->hasUndoPendingAction());
@@ -400,9 +404,10 @@ TEST_F(UndoTest, UndoLastAction_EasyDifficulty_RefundClamped)
     sim_->undoLastAction();
     EXPECT_FALSE(sim_->hasUndoPendingAction());
 
-    // Treasury should be at starting_funds_easy (refunded and clamped).
+    // Treasury should be at starting_funds_easy minus the road cost (refunded zone, road persists).
     EXPECT_FLOAT_EQ(sim_->getTreasuryBalance(),
-                    static_cast<float>(SimulationConstants::starting_funds_easy));
+                    static_cast<float>(SimulationConstants::starting_funds_easy -
+                                       SimulationConstants::road_placement_cost_per_tile));
 }
 
 // ============================================================================
@@ -415,6 +420,8 @@ TEST_F(UndoTest, UndoLastAction_HardDifficulty_RefundClamped)
         &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Hard);
     sim_->setSpeed(SpeedMultiplier::x1);
 
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(1, 0, 0);
     sim_->placeZone(0, 0, ZoneType::Residential, DensityTier::Low, 0);
     EXPECT_TRUE(sim_->hasUndoPendingAction());
 
@@ -422,7 +429,8 @@ TEST_F(UndoTest, UndoLastAction_HardDifficulty_RefundClamped)
     EXPECT_FALSE(sim_->hasUndoPendingAction());
 
     EXPECT_FLOAT_EQ(sim_->getTreasuryBalance(),
-                    static_cast<float>(SimulationConstants::starting_funds_hard));
+                    static_cast<float>(SimulationConstants::starting_funds_hard -
+                                       SimulationConstants::road_placement_cost_per_tile));
 }
 
 // ============================================================================
@@ -433,6 +441,8 @@ TEST_F(UndoTest, RecordUndoAction_WhenPaused_SetsWallExpiry)
 {
     sim_->setSpeed(SpeedMultiplier::Paused);
 
+    // Phase 11h: placeZone requires a road within 3 tiles.
+    sim_->placeRoad(1, 0, 0);
     sim_->placeZone(0, 0, ZoneType::Residential, DensityTier::Low, 0);
     EXPECT_TRUE(sim_->hasUndoPendingAction());
 
@@ -448,23 +458,23 @@ TEST_F(UndoTest, RecordUndoAction_WhenPaused_SetsWallExpiry)
 // ============================================================================
 TEST_F(UndoTest, UndoZoneOverRoad_RestoresRoadAndIncrementsCount)
 {
-    // Place a road at (4,4).
+    // Phase 11d Deliverable 5a: placeZone returns early when tile is already a road
+    // (occupancy guard).  Zone over road is a no-op — tile remains a road.
+    // Place a road at (4,4) — this records one undo action.
     sim_->placeRoad(4, 4, 0);
+    ASSERT_TRUE(sim_->hasUndoPendingAction());
 
-    // Zone over it — replaces road with zone, records undo action.
+    // Attempt to zone over it — must be blocked by the occupancy guard.
     sim_->placeZone(4, 4, ZoneType::Residential, DensityTier::Low, 0);
 
-    // Verify zone placed.
-    QueryResult afterZone = sim_->queryTile(4, 4);
-    ASSERT_TRUE(afterZone.isZoned);
-    ASSERT_FALSE(afterZone.isRoad);
+    // Tile remains a road, not zoned.
+    QueryResult afterAttempt = sim_->queryTile(4, 4);
+    EXPECT_FALSE(afterAttempt.isZoned);
+    EXPECT_TRUE(afterAttempt.isRoad);
 
-    // Undo the zone placement — restores the road.
-    ASSERT_TRUE(sim_->hasUndoPendingAction());
+    // Undo the road placement — tile should revert to empty.
     sim_->undoLastAction();
-
-    // After undo, tile should be a road again.
     QueryResult afterUndo = sim_->queryTile(4, 4);
-    EXPECT_TRUE(afterUndo.isRoad);
+    EXPECT_FALSE(afterUndo.isRoad);
     EXPECT_FALSE(afterUndo.isZoned);
 }

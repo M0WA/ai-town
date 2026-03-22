@@ -118,6 +118,12 @@ public:
     // ---- Time of day ----
     TimeOfDay getTimeOfDay() const override;
 
+    // ---- Phase 11d — Per-frame simulation state queries (stubs; full impl in Phase 11d) ----
+    std::vector<AgentState>              getAgentPositions()          const override;
+    std::vector<IntersectionSignalState> getIntersectionSignalStates() const override;
+    std::vector<RoadSegmentSpeed>        getRoadSegmentSpeeds()        const override;
+    std::vector<ServiceCoverageTile>     getServiceCoverage()          const override;
+
     // ---- Serialization (Phase 11) ----
     // serializeToJson() — produce a full city-state JSON string (schema_version: 1).
     // consumeBudgetTicks — returns and clears the count of budget ticks fired since last call.
@@ -196,6 +202,13 @@ private:
         float       population{0.0f};    // actual pop (float for smooth growth)
         float       desirability{static_cast<float>(SimulationConstants::desirability_base_value)};
         bool        firstDesirabilityTick{true};  // grace: skip service penalty on first tick
+
+        // Phase 11h: multi-tile footprint tracking.
+        // For non-origin footprint tiles: stores origin tile coords.
+        // For origin tiles or 1×1 buildings: -1,-1.
+        int  footprintOriginX{-1};
+        int  footprintOriginZ{-1};
+        bool isAbandoned{false};  // true when building abandoned due to road proximity > 3 tiles
 
         // Phase 10 per-tile audio transition flags.
         // Each flag fires its corresponding SFX exactly once per coverage-loss event
@@ -280,6 +293,7 @@ private:
     // ------------------------------------------------------------------
     float           m_accumulatedSimSeconds{0.0f};   // sub-tick accumulator
     double          m_constructionTimeSeconds{0.0};  // clock at construction (grace period base)
+    double          m_lastPlacementSoundTime{-1.0};  // cooldown: placement SFX fire at most once per 100ms
     int             m_totalTicks{0};                 // budget ticks fired so far
     int             m_pendingBudgetTicks{0};         // ticks fired since last consumeBudgetTicks()
     int             m_month{1};                      // 1–12
@@ -323,7 +337,31 @@ private:
     // Populated by placeRoad() (when the new road tile is adjacent to 2+ existing roads)
     // and pruned by demolishTile() (remove entry when a road tile is demolished).
     // Each signal's phaseTimer is advanced by doTrafficSignalTick(realDeltaSeconds).
-    std::vector<TrafficSignal> m_trafficSignals;
+    std::vector<TrafficSignal>  m_trafficSignals;
+
+    // TrafficVehicle — Phase 11d Deliverable 3a path-following vehicle agent.
+    // Each vehicle traverses a sequence of road tiles. srcX/srcZ is the tile it
+    // departed from; dstX/dstZ is the tile it is heading towards. progress is
+    // 0..1 (0 = at src centre, 1 = at dst centre). When progress reaches 1 the
+    // vehicle picks the next road tile and resets progress. headingDeg is
+    // recomputed at each tile transition.
+    struct TrafficVehicle {
+        uint32_t  id{0};            // stable per-vehicle ID (never reused)
+        int       srcX{0}, srcZ{0}; // current source tile
+        int       dstX{0}, dstZ{0}; // current destination tile
+        float     progress{0.0f};   // 0..1 from src to dst
+        float     headingDeg{0.0f};
+        ZoneType  zone{ZoneType::Residential};
+        // World-space current position (interpolated each tick)
+        float     worldX{0.0f};
+        float     worldZ{0.0f};
+    };
+
+    // Phase 11d: path-following traffic vehicles.
+    // Spawned / despawned by placeRoad() / demolishTile().
+    // Positions advanced each tick by doTrafficVehicleTick().
+    std::vector<TrafficVehicle> m_trafficVehicles;
+    uint32_t                    m_nextVehicleId{1}; // monotonic; never reused
 
     // ------------------------------------------------------------------
     // Traffic — rolling windows (circular buffers, initialized to null_path default)
@@ -384,6 +422,10 @@ private:
     // ------------------------------------------------------------------
     std::array<int, 9> m_buildingVariantCounters{};
 
+    // Phase 11h: density upgrade retry counter per tile.
+    // Key: tileKey(tileX, tileZ). Reset to 0 on successful upgrade or manual demolish.
+    std::unordered_map<int64_t, int> m_upgradeRetryCount;
+
     // ------------------------------------------------------------------
     // Scenario state (V1 stub — always zero in Sandbox mode).
     // ------------------------------------------------------------------
@@ -428,10 +470,17 @@ private:
 
     // Phase 10: advance traffic signal timers and fire sfx_intersection_tick.
     // Called once per tick() with real delta seconds (NOT sim-speed-scaled).
-    // Signals are independent of budget ticks — they toggle every
-    // SimulationConstants::traffic_signal_phase_seconds real-time seconds.
-    // Pre-cull: skips playPositionalSound if listener distance > 80 m.
     void doTrafficSignalTick(float realDeltaSeconds);
+
+    // Phase 11d: advance vehicle positions along road tiles.
+    // Speed: kVehicleTilePerSecond tiles per second (real-time, not sim-scaled).
+    void doTrafficVehicleTick(float realDeltaSeconds);
+
+    // Pick a random adjacent road tile for a vehicle to move to next.
+    // Returns true and sets outX/outZ if a valid neighbour exists (excluding the
+    // tile the vehicle just came from, unless it is the only option).
+    bool pickNextRoadTile(int curX, int curZ, int prevX, int prevZ,
+                          int& outX, int& outZ);
 
     // Economy helpers
     int64_t computeTaxRevenue(ZoneType zone) const;
@@ -468,4 +517,11 @@ private:
 
     // Undo helpers
     void recordUndoAction(const UndoAction& action);
+
+    // Phase 11h: footprint helpers.
+    static int footprintSize(DensityTier tier);     // returns 1, 2, or 3
+    static int serviceFootprintSize();              // returns 2
+    static int nearestRoadDistance(const std::unordered_map<int64_t, TileData>& tiles,
+                                    int tileX, int tileZ, int footprintN);
+    void doProximityTick();  // checks road proximity for all zone buildings
 };

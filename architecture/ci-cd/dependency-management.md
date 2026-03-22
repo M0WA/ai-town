@@ -138,7 +138,7 @@ A 404 response means the `glew` port does not exist at the pinned baseline — t
 
 On Windows: `soft_oal.dll` **and** `default.mhr` (HRTF data) copied to output via post-build commands. `libvorbisfile` is a static library in vcpkg's default triplet — no DLL copy is needed for it.
 
-**OpenAL DLL naming**: vcpkg installs OpenAL Soft on Windows as `OpenAL32.dll` (not `soft_oal.dll`). The CMake post-build rule copies `OpenAL32.dll` from the vcpkg bin directory and places it in the output directory renamed as `soft_oal.dll`. The CI verification step checks for `build/soft_oal.dll`, which is correctly produced by this rename-copy. `$<TARGET_FILE:OpenAL::OpenAL>` resolves to `OpenAL32.lib` (the import library) on Windows — do not use it as the DLL copy source; use the explicit vcpkg bin path `${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin/OpenAL32.dll` instead.
+**OpenAL DLL naming**: vcpkg installs OpenAL Soft on Windows as `OpenAL32.dll` (not `soft_oal.dll`). The CMake post-build rule copies `OpenAL32.dll` from the vcpkg bin directory and places it in the output directory renamed as `soft_oal.dll`. The CI verification step checks for `build/soft_oal.dll`, which is correctly produced by this rename-copy. `$<TARGET_FILE:OpenAL::OpenAL>` resolves to `OpenAL32.lib` (the import library) on Windows — do not use it as the DLL copy source; use the explicit vcpkg bin path `${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/OpenAL32.dll` instead.
 
 ### Linux default.mhr Packaging
 
@@ -353,7 +353,7 @@ This step uses `find "${{ github.workspace }}" -name "default.mhr"` to locate th
 ```cmake
 add_custom_command(TARGET aitown POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin/OpenAL32.dll"
+        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/OpenAL32.dll"
         "$<TARGET_FILE_DIR:aitown>/soft_oal.dll"
     COMMENT "Copying OpenAL32.dll (OpenAL Soft runtime) to aitown output as soft_oal.dll"
 )

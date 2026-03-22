@@ -9,19 +9,63 @@
 
 | Asset category | LOD0 (near) | LOD1 (mid) | LOD2 (far) |
 |---|---|---|---|
-| Large buildings | 2000–5000 tris | 500–1000 tris | 300–500 tris |
-| Small buildings / props (height_floors <= 3) | 500–1500 tris | 100–300 tris | Billboard (point-sprite only) |
-| Small buildings / props (height_floors >= 4) | 500–1500 tris | 100–300 tris | 300–500 tris (`_lod2.b3d` geometry shell) |
-| Vehicles | 1000–3000 tris (indicative range — see per-class table in § Vehicle Polygon Budget for binding limits) | 200–500 tris (indicative range — see per-class table for binding limits) | Point/sprite |
+| Large buildings (general) | 4,000–8,000 tris | 1,000–1,500 tris | 400–600 tris |
+| Large buildings — Commercial High only (skyscrapers) | 7,000–10,000 tris | 1,200–2,000 tris | 500–700 tris |
+| Small buildings / props (height\_floors <= 3) | 1,500–3,000 tris | 200–400 tris | Billboard (point-sprite only) |
+| Small buildings / props (height\_floors >= 4) | 1,500–3,000 tris | 200–400 tris | 400–600 tris (`_lod2.b3d` geometry shell) |
+| Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | 2,000–4,000 tris | 200–400 tris | Billboard |
+| Vehicles (cars) | ≤2,000 tris | ≤400 tris | Point/sprite |
+| Vehicles (bus, truck) | ≤3,000 tris | ≤500 tris | Point/sprite |
+| Vehicles (general indicative range) | 1,000–3,000 tris (indicative range — see per-class table in § Vehicle Polygon Budget for binding limits) | 200–500 tris (indicative range — see per-class table for binding limits) | Point/sprite |
 | Terrain chunk (64×64 m) | 32×32 quad grid | 16×16 quad grid | 8×8 quad grid |
-| Road tile (10×10 m) | ≤48 tris (flat quad + kerb geometry) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
+| Road tile (10×10 m) | ≤50 tris (flat quad + kerb geometry + center-line strip; Phase-11h adds a 2-tri center-line quad bringing the total from the prior ≤48 to ≤50) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
 | Infrastructure props (lamp posts, signs) | ≤300 tris | ≤75 tris | Billboard (same system as small buildings) |
+
+**Commercial High skyscraper sub-row**: The `com_high_*` row (7,000–10,000 tris LOD0) applies
+exclusively to V1 skyscrapers — glass towers with `height_floors` 15–30. These buildings feature
+stepped or tapered forms, glass curtain-wall facades, and distinctive crown treatments (spire,
+antenna cluster, or setback pyramid) that require a higher polygon budget to preserve their
+silhouette fidelity at LOD0 and LOD1 viewing distances. See the **Commercial High Skyscraper
+Standards** section below for full design requirements.
 
 **Road tile LOD thresholds**: Road tiles use the same LOD distance thresholds as small buildings/props (LOD0→LOD1 at 30 m / 25 m; LOD1→LOD2 at 100 m / 90 m). At LOD2 (>100 m), road tiles are rendered as flat coloured quads with no kerb or road marking geometry — road marking decals from the road atlas are disabled at LOD2. **Road LOD2 color source**: The LOD2 road quad color is sampled from the road tileable texture's average color, computed at asset pipeline generation time and stored as a named constant `RenderConstants::road_lod2_color` (type `irr::video::SColor`) in `src/rendering/render_constants.h`. This value must be a perceptual match of the center region of `road_asphalt_tileable.dds` when viewed in linear space (approximately a mid-dark gray, e.g. SColor(255, 60, 60, 60) for standard asphalt). Do NOT hardcode a magic color literal inline in rendering code — always use `RenderConstants::road_lod2_color` so that the color is updated in one place when the road texture changes. The LOD2 road quad does NOT bind a texture — it is drawn as a flat-shaded quad using the material's vertex color channel, set to `road_lod2_color` at entity construction time.
 
-**Road tile mesh authoring source (binding decision, `graphics-artist-3d-model`, 2026-03-04)**: Road tile LOD0 and LOD1 geometry is **procedurally generated in C++ at runtime via `SMesh`/`IMeshBuffer`** — no `.b3d` file is authored on disk for road tiles. `IrrlichtRenderer::placeRoadMesh()` constructs the LOD0 quad+kerb mesh (≤48 tris) and LOD1 flat quad mesh (≤16 tris) directly in code using hardcoded vertex data for a 4×4 m tile footprint. The LOD2 flat colored quad is also constructed in code (≤8 tris, `road_lod2_color` vertex color, no texture). Rationale: (a) road tiles do not participate in the lightmap baking pipeline and therefore do not require UV channel 1 or the `.b3d` format; (b) the road custom shader binds `road_asphalt_tileable.dds` via the raw GL path, which is incompatible with a standard `IMeshSceneNode` loaded from a `.b3d` file via the Irrlicht mesh loader; (c) no road tile `.b3d` filename appears in any phase deliverable — road geometry is implicitly a code deliverable of `graphics-dev-irrlicht`, not an artist asset. **Artist action: none**. No road tile `.b3d`, `.obj`, or `.meta` file is required from the 3D model artist pipeline. The `validate_assets.py` script must NOT look for road tile `.b3d` files — they do not exist. Road tile UV-channel 0 tiling is specified in the road shader (UV tiles 2× per 4×4 m road quad — both U and V scale by 2.0 in the vertex shader), not authored per-asset. The road kerb geometry vertices are authored inline in `IrrlichtRenderer` as a unit of 4 bevelled edge strips (each strip = 6 tris, 4 strips = 24 tris) plus a central flat quad (2 tris), totaling 26 tris for LOD0 — well within the ≤48 tri budget. LOD1 is a single flat quad (2 tris) with no kerb, within the ≤16 tri budget.
+**Road tile mesh authoring source (binding decision, `graphics-artist-3d-model`, 2026-03-04)**: Road tile LOD0 and LOD1 geometry is **procedurally generated in C++ at runtime via `SMesh`/`IMeshBuffer`** — no `.b3d` file is authored on disk for road tiles. `IrrlichtRenderer::placeRoadMesh()` constructs the LOD0 quad+kerb mesh (≤50 tris) and LOD1 flat quad mesh (≤16 tris) directly in code using hardcoded vertex data for a 10 m × 10 m tile. The LOD2 flat colored quad is also constructed in code (≤8 tris, `road_lod2_color` vertex color, no texture). Rationale: (a) road tiles do not participate in the lightmap baking pipeline and therefore do not require UV channel 1 or the `.b3d` format; (b) the road custom shader binds `road_asphalt_tileable.dds` via the raw GL path, which is incompatible with a standard `IMeshSceneNode` loaded from a `.b3d` file via the Irrlicht mesh loader; (c) no road tile `.b3d` filename appears in any phase deliverable — road geometry is implicitly a code deliverable of `graphics-dev-irrlicht`, not an artist asset. **Artist action: none**. No road tile `.b3d`, `.obj`, or `.meta` file is required from the 3D model artist pipeline. The `validate_assets.py` script must NOT look for road tile `.b3d` files — they do not exist. Road tile UV-channel 0 tiling is specified in the road shader (UV tiles 2× per 10 m road quad — both U and V scale by 2.0 in the vertex shader), not authored per-asset.
 
-**Note on large building LOD2 budget**: 300–500 tris is required to represent building silhouettes (setbacks, rooftop details, entry bays) at the 185–200 m switch-in distance where tall buildings still occupy 50–80 vertical pixels. A 100–200 tri cap produces a featureless slab that is visually jarring against LOD1 counterparts.
+**Carriageway width**: The asphalt surface covers **7.5 m** of the 10 m tile width (¾ of the tile). The remaining 1.25 m on each side is rendered as a kerb/verge strip using bevelled edge strips. The carriageway is centered within the tile.
+
+**Center-line strip**: A 0.3 m wide white painted strip implements a two-way road divider.
+Its orientation depends on the tile direction detected by `placeRoadMesh()`:
+
+- **N/S tile** (`isEW = false`): strip runs along the local Z-axis at X = 0 (south to north).
+- **E/W tile** (`isEW = true`): strip runs along the local X-axis at Z = 0 (west to east);
+  heights are interpolated at Z = 0 from the west-pair corners and the east-pair corners.
+
+The strip is part of the LOD0 road mesh (mesh buffer index 3), implemented as a thin raised
+quad (+0.005 m Y above the asphalt surface) with white vertex color (`SColor(255, 255, 255,
+255)`) and `EMT_SOLID` material. `PolygonOffsetFactor = 5` (one step above the carriageway's
+`factor = 4`) is set on this buffer at mesh-creation time and **must NOT be overwritten** by
+the post-bind material loop in `placeRoadMesh()` — that loop must skip buffer index 3 when
+resetting `PolygonOffsetFactor`. The strip does NOT appear at LOD1 or LOD2.
+
+**Lane layout** (two-way, keep-right):
+
+- **Left lane** (local X = −1.875 m center, 3.6 m wide): vehicle agents traveling in the **−Z direction** (southbound).
+- **Right lane** (local X = +1.875 m center, 3.6 m wide): vehicle agents traveling in the **+Z direction** (northbound).
+- E/W tiles build carriageway geometry oriented along X (`isEW = true` in `buildTileRoadMesh`)
+  so the same lane rules hold in all cardinal directions. Scene-node Y-rotation is not used
+  (vertex Y heights are baked in world space; rotation would mismap corner heights).
+
+Named constants (declared in `src/rendering/render_constants.h`):
+
+```cpp
+static constexpr float kLaneCenterOffset = 1.875f;   // metres from road center
+static constexpr float kCarriagewayHalfWidth = 3.75f; // half of 7.5 m carriageway
+```
+
+The road kerb geometry vertices are authored inline in `IrrlichtRenderer` as a unit of 4 bevelled edge strips (each strip = 6 tris, 4 strips = 24 tris) plus a central flat quad (2 tris), totaling 26 tris for LOD0, plus the center-line strip (2 tris) = 28 tris — well within the ≤50 tri budget (Phase 11h raised from ≤48 to accommodate the 2-tri center-line quad). LOD1 is a single flat quad (2 tris) with no kerb or center-line, within the ≤16 tri budget.
+
+**Note on large building LOD2 budget**: 400–600 tris is required to represent building silhouettes (setbacks, rooftop details, entry bays) at the 185–200 m switch-in distance where tall buildings still occupy 50–80 vertical pixels. A 100–200 tri cap produces a featureless slab that is visually jarring against LOD1 counterparts.
 
 ### LOD Distance Thresholds and Hysteresis
 
@@ -31,10 +75,13 @@
 |---|---|---|---|---|
 | Large buildings | > 50 m | < 45 m | > 200 m | < 185 m |
 | Small buildings / props | > 30 m | < 25 m | > 100 m | < 90 m |
+| Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | > 30 m | < 25 m | > 100 m | < 90 m |
 | Vehicles | > 40 m | < 35 m | > 100 m | < 90 m |
 | Terrain chunk | > 100 m | < 92 m | > 300 m | < 285 m |
 | Road tile | > 30 m | < 25 m | > 100 m | < 90 m |
 | Infrastructure props | > 30 m | < 25 m | > 100 m | < 90 m |
+
+**Service buildings thresholds**: Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) are treated as a subtype of small buildings (`height_floors <= 3`) and use identical LOD distance thresholds. All four V1 service building types have `height_floors = 2`.
 
 **Road tile and Infrastructure props thresholds**: Road tiles and infrastructure props (lamp posts, signs) use the same thresholds as Small buildings/props (5 m close hysteresis, 10 m far hysteresis). Road tile LOD2 is a flat colored quad — not a billboard imposter — consistent with the road-tile LOD2 specification in the LOD Requirements table above.
 
@@ -73,10 +120,43 @@ Where:
 **Examples**:
 
 - `res_low_01_lod0.b3d` — Residential Low tier, variant 1, LOD0 geometry
-- `com_med_03_lod2.b3d` — Commercial Medium tier, variant 3, LOD2 shell
+- `res_low_02_lod0.b3d` — Residential Low tier, variant 2, LOD0 geometry
+- `res_low_03_lod0.b3d` — Residential Low tier, variant 3, LOD0 geometry
+- `res_low_04_lod0.b3d` — Residential Low tier, variant 4, LOD0 geometry
+- `com_high_03_lod2.b3d` — Commercial High tier (skyscraper), variant 3, LOD2 shell
 - `res_low_01_billboard.dds` — Residential Low tier, variant 1, billboard atlas (height_floors ≤ 3)
 
 The `<asset_name>` base (e.g. `res_low_01`) is referenced in `<asset_name>.meta` for `height_floors`, `category`, and atlas cell assignments. The C++ `BuildingAssetLoader` parses the naming convention to construct LOD file paths — do not use ad-hoc per-building naming.
+
+#### Commercial High Skyscraper Standards
+
+`com_high_*` buildings are V1 skyscrapers: glass towers with `height_floors` 15–30, stepped or
+tapered form, glass curtain-wall facade, and a distinctive crown. These assets are subject to
+the Commercial High sub-row budgets in the LOD Requirements table (7,000–10,000 tris LOD0,
+1,200–2,000 tris LOD1, 500–700 tris LOD2 geometry shell).
+
+**Design requirements** (binding for all four V1 `com_high_*` variants):
+
+- **Floor count**: `height_floors` must be in the range 15–30 for all `com_high_*` variants.
+- **Form language**: Each variant must have a distinct massing silhouette chosen from:
+  - `com_high_01`: narrow tower (tall, slender rectangular shaft)
+  - `com_high_02`: wide slab (broad, flat rectangular form)
+  - `com_high_03`: tapered pyramid (floor plates that step inward as they rise)
+  - `com_high_04`: stepped ziggurat (tiered horizontal setbacks at regular intervals)
+- **Facade**: Glass curtain-wall material using the `wall_commercial_high` atlas cell
+  (row 2, col 1). Horizontal spandrel bands are permitted as facade articulation detail.
+- **Crown treatment**: Each variant must have a unique top treatment. Approved crown types:
+  - Spire (tapered needle or broadcast antenna cluster)
+  - Setback pyramid (faceted glass cap)
+  - Antenna cluster (multi-element broadcast or cellular array)
+  - Flat mechanical penthouse (equipment enclosure with parapet)
+  No two `com_high_*` variants may share the same crown type.
+- **LOD2 strategy**: `height_floors >= 4` — all `com_high_*` variants must ship
+  `_lod2.b3d` geometry shells (500–700 tris). No `_billboard.dds` is used at LOD2 for
+  these assets. The geometry shell must preserve the crown silhouette and overall
+  massing outline visible at 185–200 m.
+- **Variant count**: exactly four variants (`com_high_01` through `com_high_04`),
+  consistent with the binding 4-variant-per-zone-tier policy.
 
 #### Variant Selection Policy (Round-Robin, Phase 11)
 
@@ -85,12 +165,17 @@ The `<asset_name>` base (e.g. `res_low_01`) is referenced in `<asset_name>.meta`
 **Phase 11 and later**: When `CitySimulation` places a zone tile, it selects a visual building variant from the available variants for that zone-tier combination using a **per-zone-tier round-robin counter**. The policy is:
 
 - `CitySimulation` maintains one `int` counter per unique zone-tier combination (9 combinations in V1: Res/Com/Ind × Low/Med/High). Each counter starts at `0` and increments by `1` on every successful placement for that zone-tier combination.
-- The variant index is `(counter % numVariants) + 1`, formatted as a zero-padded 2-digit string (`01`, `02`, …). `numVariants` is always `2` for V1 (two variants per zone-tier slot).
-- The resulting `assetBaseName` passed to `IRenderer::placeBuildingMesh()` is `<zone>_<tier>_<variant>` (e.g. `"res_low_01"`, `"res_low_02"`, `"res_low_01"`, …).
+- The variant index is `(counter % numVariants) + 1`, formatted as a zero-padded 2-digit string (`01`, `02`, `03`, `04`). `numVariants` is `4` for V1 (four variants per zone-tier slot). Service buildings have no variant system and do not use this counter.
+- The resulting `assetBaseName` passed to `IRenderer::placeBuildingMesh()` is `<zone>_<tier>_<variant>` (e.g. `"res_low_01"`, `"res_low_02"`, `"res_low_03"`, `"res_low_04"`, `"res_low_01"`, …).
 - After `CitySimulation::doDensityUnlockTick()` upgrades a tile to a higher density tier, the NEW `assetBaseName` uses the upgraded tier's round-robin counter (not the original tier's counter). Example: a tile originally placed as `"res_low_02"` that upgrades to Medium becomes `"res_med_<N>"` where `<N>` is the current Residential/Medium counter value.
 - The counter is a plain `int` member of `CitySimulation` per zone-tier slot. **Prior to Phase 11**, the counters are not persisted in the save file — on load, all existing zone tile variants are read from the tile's stored `assetBaseName` field in the save data, not recomputed from the counter; only newly placed tiles after a load use the counter (starting from 0), so save/load does not change existing visible building variants. **From Phase 11 onwards**, all 9 `m_buildingVariantCounters` are serialized to and deserialized from the save file so that post-load placements continue the pre-save sequence without restarting at 0; see `architecture/game-design/save-system.md`.
-- **No-repeat guarantee**: the round-robin ensures strict alternation between the two V1 variants (01, 02, 01, 02, …) without shuffling or RNG. This is intentional — using `ISimulationRNG` for variant selection would couple visible-asset selection to the simulation RNG stream, making reproduction of RNG-dependent events (service degradation, loan issuance) dependent on the number of tiles placed, which would break deterministic test replay. Visual variant selection MUST NOT use `ISimulationRNG`.
+- **No-repeat guarantee**: the round-robin cycles through the four V1 variants (01, 02, 03, 04, 01, 02, …) without shuffling or RNG. This is intentional — using `ISimulationRNG` for variant selection would couple visible-asset selection to the simulation RNG stream, making reproduction of RNG-dependent events (service degradation, loan issuance) dependent on the number of tiles placed, which would break deterministic test replay. Visual variant selection MUST NOT use `ISimulationRNG`.
 - **Counter storage location**: `CitySimulation` stores the nine counters as `std::array<int, 9> m_buildingVariantCounters` (indexed by `zone * 3 + tier` where `zone` = 0/1/2 for Res/Com/Ind and `tier` = 0/1/2 for Low/Med/High), initialised to `{0}` in the constructor initialiser list.
+- **Service buildings**: Service buildings (`svc_fire_station`, `svc_police_station`,
+  `svc_power_plant`, `svc_water_tower`) have **no variant system**. Each is a single
+  unique model. There is no round-robin counter for service buildings, and no variant
+  suffix (`_01`, `_02`, etc.) appears in their filenames. The `placeServiceBuildingMesh()`
+  call always uses the canonical base name directly (e.g. `"svc_fire_station"`).
 
 **`assetBaseName` construction helper** (implement as a `static` free function in `CitySimulation.cpp`):
 
@@ -98,7 +183,7 @@ The `<asset_name>` base (e.g. `res_low_01`) is referenced in `<asset_name>.meta`
 static std::string buildingAssetBaseName(ZoneType zone, DensityTier tier, int variantCounter) {
     static const char* zoneStr[]  = {"res", "com", "ind"};
     static const char* tierStr[]  = {"low", "med", "high"};
-    static const int numVariants  = 2;   // V1 constant
+    static const int numVariants  = 4;   // V1 constant
     int variantIdx = (variantCounter % numVariants) + 1;
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%s_%s_%02d",
@@ -142,7 +227,53 @@ Z = tileZ * kTileSize
 
 **Declaration**: `kTileSize` is declared as `static constexpr float kTileSize = 10.0f;` directly on `IrrlichtRenderer` in `src/rendering/IrrlichtRenderer.h`. It is used by `IrrlichtRenderer::placeBuildingMesh()`, `placeRoadMesh()`, and `placeServiceBuildingMesh()`. Do NOT hardcode the literal `10.0f` at call sites — always use `kTileSize` so that if the tile size changes (e.g., for a future map scale change), all placement calls update in one place.
 
-**Service building tile footprint**: Service buildings occupy a single 10×10 m tile in V1. The placed scene node's world X/Z origin is identical to the formula above. The service building mesh extends beyond the 10×10 m tile boundary at LOD0 (up to 30×30 m for a power plant), but the placement origin and collision registration tile are the single 10×10 m origin tile.
+**Service building tile footprint**: Service buildings occupy a **2×2 tile (20 m × 20 m) footprint** in V1. The origin tile is the bottom-left corner (`tileX, tileZ`); the placed scene node's world X/Z origin is the centre of the 2×2 footprint: `worldX = (tileX + 1.0f) * kTileSize`, `worldZ = (tileZ + 1.0f) * kTileSize` (i.e. `N=2 → N*0.5=1.0`). The mesh is authored at ±10 m half-extent (native world scale, no runtime `setScale()`); it must not visually exceed the 20 m × 20 m footprint at LOD0. All four tiles in the footprint are marked occupied; road adjacency requires at least one road tile edge-adjacent to any footprint tile.
+
+**Zone building footprint constraint**: Zone building (res/com/ind) geometry is authored at **native world scale** — 1 Blender unit = 1 m, no runtime `setScale()`. The local-space half-extent in X and Z is tier-dependent: `low` = ±5 m (10 m × 10 m footprint, 1×1 tile), `med` = ±10 m (20 m × 20 m, 2×2 tiles), `high` = ±15 m (30 m × 30 m, 3×3 tiles). Service buildings are authored at ±10 m half-extent (20 m × 20 m, 2×2 tiles). See the **Native-size authoring convention** table in the Multi-Tile Footprint section below for the authoritative half-extent values. The old ±2 m / `setScale(2.5f)` convention is **retired as of Phase 9** — do NOT author assets at ±2 m. Any geometry exceeding the tier's native half-extent in X/Z will visually intersect adjacent tiles at runtime.
+
+#### Multi-Tile Footprint
+
+**Tile footprint by density tier** (binding):
+
+| Density tier | Tile footprint | World footprint |
+|---|---|---|
+| `low` (res/com/ind) | 1×1 tiles | 10 m × 10 m |
+| `med` (res/com/ind) | 2×2 tiles | 20 m × 20 m |
+| `high` (res/com/ind) | 3×3 tiles | 30 m × 30 m |
+| Service buildings | 2×2 tiles | 20 m × 20 m |
+
+**Native-size authoring convention**: Zone buildings and service buildings are authored at real-world scale (1 Blender unit = 1 m). Each density tier has its own correctly-sized model. **No runtime `setScale()` is applied** — `placeBuildingMesh()` and `placeServiceBuildingMesh()` place nodes at scale 1.0. The old ±2 m authoring convention is **retired**; Phase 9 assets must be re-exported at native world size.
+
+| Density tier | Local-space half-extent | World footprint |
+|---|---|---|
+| `low` (res/com/ind) | ±5 m | 10 m × 10 m |
+| `med` (res/com/ind) | ±10 m | 20 m × 20 m |
+| `high` (res/com/ind) | ±15 m | 30 m × 30 m |
+| Service (2×2) | ±10 m | 20 m × 20 m |
+
+**Collision registration and simulation ownership**: All tiles in the footprint are marked occupied. The **origin tile** is the bottom-left corner (`tileX, tileZ`). The placed scene node's world origin is the **center of the full footprint**:
+
+```text
+worldX = (tileX + N * 0.5f) * kTileSize   where N = footprint tile count per side
+worldZ = (tileZ + N * 0.5f) * kTileSize
+```
+
+Examples: LOW (N=1) → `(tileX + 0.5f) * 10` (tile centre); MED (N=2) → `(tileX + 1.0f) * 10`; HIGH (N=3) → `(tileX + 1.5f) * 10`.
+
+**Ground quad coverage rule**: Every building B3D must include a ground quad (tarmac, garden, paving, or gravel) that covers the **full N×N tile footprint** — `(-N*5, N*5, -N*5, N*5)` in local space. This prevents bare terrain showing through around the building. In `generate_b3d_models.py` this is enforced via `FOOTPRINT_HALF[tier]`: LOW=5 m, MED=10 m, HIGH=15 m, SVC=10 m. Building structure geometry (walls, roofs) must not exceed the footprint half-extent in X/Z.
+
+**Zone-based ground plate defaults**: When no variant-specific override is defined, the ground quad material defaults by zone:
+
+- **Residential** (Low, Med, High) → garden (grass green)
+- **Commercial** → paving (gray concrete)
+- **Industrial** → paving (gray concrete)
+- **Service** → paving for civic/emergency buildings (fire station, police station); gravel for utility buildings (power plant, water tower)
+
+These are "if not specified" defaults. Specific variants may use a different ground type for artistic reasons — for example, a residential variant with an urban tarmac forecourt is permitted. The pool ground type is always a variant override, never a zone default.
+
+**LOW-tier bungalow exception**: Variant 04 (`res_low_04`) is a bungalow whose box was `10×10 m` (matching the tile exactly). It has been reduced to `8×8 m` so the 1 m tarmac border around the building remains visible — consistent with all other LOW-tier variants (`8 m` wide).
+
+**Road adjacency for multi-tile buildings**: At least one road tile must be edge-adjacent (4-directional cardinal, distance = 1) to **any tile in the footprint** — not only the origin tile.
 
 #### `.meta` Sidecar File Format
 
@@ -165,7 +296,7 @@ Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON side
 |---|---|---|---|
 | `category` | string | yes | One of `large_building`, `small_building`, `prop`, `vehicle`. Controls LOD2 strategy selection (billboard vs geometry shell) and export validation checks. |
 | `height_floors` | integer | yes | Total floor count. Used by export validation check #2 (billboard absent and `_lod2.b3d` absent when `height_floors <= 3`; `_lod2.b3d` required when `height_floors >= 4`), check #11 (geometry shell required for `height_floors >= 4`; `_lod2.b3d` prohibited for `height_floors <= 3`), and the C++ `LODNode` runtime upgrade path (billboard ↔ geometry shell switch on density tier change). Also used to compute building height (`height_floors × 3 m`) for collision mesh extrusion. The 4-floor threshold is the boundary: buildings with `height_floors >= 4` require a `_lod2.b3d` geometry shell for distant visibility; buildings with `height_floors <= 3` use the billboard imposter system at LOD2 (point-sprite only, no `_lod2.b3d`). |
-| `atlas_cell` | object | yes | `{ "row": R, "col": C }` — the asset's assigned cell in the 2048×2048 building atlas (see `building-atlas-layout.md`). Used by export validation check #4 (UV channel 0 within atlas cell). |
+| `atlas_cell` | object | yes | `{ "row": R, "col": C }` — the asset's assigned cell in the 4096×4096 building atlas (phase-11e expansion with 8×8 grid of per-variant 512×512 cells; see `building-atlas-layout.md`). Used by export validation check #4 (UV channel 0 within atlas cell). |
 | `lod_distances` | array(3) | yes | `[lod0_to_lod1_distance, lod1_to_lod2_distance, cull_distance]` in world units (metres). These values are the canonical source for `LODNode` configuration at runtime. Field semantics: `lod_distances[0]` is the LOD0→LOD1 switch-in threshold (author-specified); `lod_distances[1]` is the LOD1→LOD2 switch-in threshold (author-specified); `lod_distances[2]` is the **cull distance** — the distance at which the entity is entirely removed from the scene graph. **`lod_distances[2]` is NOT the LOD1→LOD2 switch-out distance.** The LOD1→LOD2 switch-out distance is derived by the engine from `lod_distances[1]` plus a hysteresis band (5–10 m per the LOD Distance Thresholds table); the artist does not author this value directly. The export validation script check #9 validates: `lod1_to_lod2_distance − lod0_to_lod1_distance ≥ 5` (close hysteresis ≥ 5 m) and `cull_distance > lod1_to_lod2_distance` (the entity is not culled before LOD2 becomes visible — see check #9 note below). Small buildings with billboard imposters must set `lod_distances[1]` to their billboard swap distance (i.e., the distance at which `LODNode` transitions from the LOD1 mesh to the billboard quad). Example: `[30.0, 100.0, 200.0]` — LOD0→LOD1 switch-in at 30 m, LOD1→billboard switch-in at 100 m, cull at 200 m; the engine sets the LOD1→billboard switch-out at `100 + hysteresis_band` (e.g. 110 m), matching the LOD Distance Thresholds table. |
 
 **Author guidance for `lod_distances` fields**:
@@ -195,13 +326,13 @@ Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON side
 
 | Vehicle class | LOD0 budget | LOD1 budget |
 |---|---|---|
-| Car (sedan, hatchback, SUV) | ≤1,500 tris | ≤300 tris |
-| Bus | ≤2,500 tris | ≤450 tris |
-| Truck | ≤2,500 tris | ≤450 tris |
+| Car (sedan, hatchback, SUV) | ≤2,000 tris | ≤400 tris |
+| Bus | ≤3,000 tris | ≤500 tris |
+| Truck | ≤3,000 tris | ≤500 tris |
 
 The LOD Requirements table above lists the general Vehicles row (1000–3000 tris LOD0, 200–500 tris LOD1) as a range covering all vehicle classes. The per-class caps above are the binding limits within that range. All vehicle assets must be exported as a **single solid mesh** (body + windows + wheels unified into one `IMesh`); modular sub-mesh assembly is not used for vehicles.
 
-**BINDING LIMIT NOTE**: The per-class budgets in the table above are the **binding limits**; the general range in the LOD Requirements table (1000–3000 tris LOD0, 200–500 tris LOD1) is **indicative only** — it covers the full span across all vehicle classes and must not be used as a per-class cap. For example, the general range does not permit a car to have 2,500 LOD0 triangles; the binding car LOD0 cap is ≤1,500 tris. The export validation script and artist review must use the per-class table above as the authoritative polygon budget source.
+**BINDING LIMIT NOTE**: The per-class budgets in the table above are the **binding limits**; the general range in the LOD Requirements table (1000–3000 tris LOD0, 200–500 tris LOD1) is **indicative only** — it covers the full span across all vehicle classes and must not be used as a per-class cap. For example, the general range does not permit a car to have 3,000 LOD0 triangles; the binding car LOD0 cap is ≤2,000 tris. The export validation script and artist review must use the per-class table above as the authoritative polygon budget source.
 
 #### Vehicle LOD File Naming Convention
 
@@ -250,18 +381,18 @@ Vehicles use **UV channel 0 only** (diffuse/albedo atlas UV). UV channel 1 (ligh
 
 #### V1 Minimum Building Coverage
 
-Artists must deliver a minimum of **18 building sets** across all zone/tier combinations: 2 variants × 3 zones (Residential/Commercial/Industrial) × 3 density tiers (Low/Mid/High) = 18 sets total. Sub-breakdown: 12 Low+Mid sets (2 variants × 3 zones × 2 tiers) and 6 High-density sets (2 variants × 3 zones × 1 tier). High-density buildings (`height_floors >= 4`) require `_lod2.b3d` geometry shells; Low/Mid buildings (`height_floors <= 3`) require `_billboard.dds` billboard imposters for LOD2.
+Artists must deliver a minimum of **36 building sets** across all zone/tier combinations: 4 variants × 3 zones (Residential/Commercial/Industrial) × 3 density tiers (Low/Mid/High) = 36 sets total. Sub-breakdown: 24 Low+Mid sets (4 variants × 3 zones × 2 tiers) and 12 High-density sets (4 variants × 3 zones × 1 tier). High-density buildings (`height_floors >= 4`) require `_lod2.b3d` geometry shells; Low/Mid buildings (`height_floors <= 3`) require `_billboard.dds` billboard imposters for LOD2.
 
 Each building set must include:
 
 - `<zone>_<tier>_<variant>_lod0.b3d` — LOD0 full-detail mesh
 - `<zone>_<tier>_<variant>_lod1.b3d` — LOD1 reduced mesh (≤50% of LOD0 tris)
 - For buildings with `height_floors <= 3`: `<zone>_<tier>_<variant>_billboard.dds` — billboard atlas (1024×128 DXT5 sRGB)
-- For buildings with `height_floors >= 4`: `<zone>_<tier>_<variant>_lod2.b3d` — LOD2 geometry shell (300–500 tris)
+- For buildings with `height_floors >= 4`: `<zone>_<tier>_<variant>_lod2.b3d` — LOD2 geometry shell (400–600 tris)
 - `<zone>_<tier>_<variant>.meta` — sidecar with `category`, `height_floors`, `atlas_cell`, `lod_distances`
 - `<zone>_<tier>_<variant>_col.obj` — collision mesh (or `_col_0/1/2.obj` / `_col_circle.obj` for non-convex/circular footprints)
 
-Variants sharing the same zone-tier slot (e.g. `res_low_01` and `res_low_02`) share the same wall module atlas cell in the 2048×2048 building atlas — they differ in mesh geometry only. See `architecture/asset-standards/building-atlas-layout.md` for the cell assignment table.
+Each zone-building variant has its own dedicated atlas cell in the 4096×4096 building atlas (phase-11e expansion). Variants differ in mesh geometry and occupy dedicated UV space within their own 512×512 cell. See `architecture/asset-standards/building-atlas-layout.md` for the cell assignment table.
 
 #### Service Building Model Standards
 
@@ -279,12 +410,14 @@ Examples:
 - `svc_power_plant_lod1.b3d`
 - `svc_water_tower_col.obj`
 
-**LOD strategy**: Service buildings use the **small building / props** LOD category
-(height_floors = 2 for all V1 service buildings — all are single or double-storey
-structures). This means:
+**LOD strategy**: Service buildings use the **small building / props** LOD distance
+thresholds (height_floors = 2 for all V1 service buildings — all are single or
+double-storey structures). LOD0 polygon budgets are raised in Phase 11d to support
+recognisable per-type architectural detail (antenna masts, equipment geometry, garage
+bay insets). This means:
 
-- LOD0: 500–1500 tris (full detail)
-- LOD1: 100–300 tris (reduced)
+- LOD0: 2,000–4,000 tris (full detail — binding budget per LOD Requirements table)
+- LOD1: 200–400 tris (reduced)
 - LOD2: `_billboard.dds` (1024×128 DXT5 sRGB, 8-direction bake at 45° below horizontal).
   No `_lod2.b3d` geometry shell — `height_floors = 2 <= 3` boundary applies.
 
@@ -342,12 +475,12 @@ delivery. No 3D model asset is on the Phase 10 critical path.
 
 - Buildings assembled from reusable mesh modules: base, mid-floor, roof, facade details
 - Module grid: 4 m × 4 m × 3 m per floor unit
-- **Maximum floor count**: Large buildings have a **hard cap of 10 floors** (30 m total height at 3 m/floor). At 10 floors: assembled LOD0 maximum ≈ base (400) + 8 mid-floor (8×300=2,400) + roof (500) + 10 facade details (10×100=1,000) = 4,300 tris — within the 5,000 tri LOD0 budget. 11+ floors risk budget overrun. The 10-floor limit is enforced by the export validation script using the `height_floors` field in `<asset_name>.meta`; any override requires a polygon audit and explicit approval.
+- **Maximum floor count**: Large buildings have a **hard cap of 10 floors** (30 m total height at 3 m/floor). At 10 floors: assembled LOD0 maximum ≈ base (400) + 8 mid-floor (8×300=2,400) + roof (500) + 10 facade details (10×100=1,000) = 4,300 tris — within the 5,000 tri LOD0 budget. 11+ floors risk budget overrun. The 10-floor limit is enforced by the export validation script using the `height_floors` field in `<asset_name>.meta`; any override requires a polygon audit and explicit approval. **Exemption — `com_high_*` only**: Commercial High skyscraper variants (`com_high_01` through `com_high_04`) are the sole exception to the 10-floor cap. Their `height_floors` must be in the range 15–30 as specified in the Commercial High Skyscraper sub-row (see line 107 and the LOD Requirements table). This exemption is justified by their dedicated, higher polygon budgets (7,000–10,000 tris LOD0) which are sized to accommodate the additional floor repetitions. The export validation script must treat any `com_high_*` asset with `height_floors` in [15, 30] as conformant; all other Large building types must still satisfy `height_floors` ≤ 10.
 - **Pivot convention**: Pivot at bottom-center of footprint. For a standard 4×4×3 m unit, pivot is at (0,0,0) with geometry in X:−2 to +2, Y:0 to +3, Z:−2 to +2 local space. This is a **hard export requirement**.
 - **Vertical geometry bounds**: Geometry must not exceed Y=3.0 (hard upper bound for floor modules). Wall tiles with decorative tops (parapets, cornices) must stay within the 3 m budget. Maximum tolerated vertex deviation from Y=0 (bottom) or Y=3.0 (top): **0.005 Irrlicht units (5 mm)**. This tolerance reflects practical floating-point precision limits in DCC tools — a 1 mm tolerance is unreliably tight for polygon modelling workflows. An export validation script checks all wall tile Y extents and rejects files that violate this tolerance.
 - **LOD2 pivot conformance**: The LOD2 baked shell mesh pivot MUST be at bottom-center (X=0, Y=0, Z=0 relative to the building's ground footprint center) — identical to LOD0 and LOD1 pivot convention. Using the bounding box centroid (center of mass vertically) will produce a position pop at the LOD1→LOD2 transition equal to half the building height. LOD transitions from LOD1 modules → LOD2 shell must not produce a position pop. Asset sign-off checklist includes: "Stack two identical floor modules in Irrlicht scene view; confirm no visible gap at join." Also: "Verify LOD2 shell silhouette matches LOD1 assembled building silhouette within 10% area deviation when viewed from the 8 standard bake angles at 45° below horizontal (camera pitch = −45°)."
 - **LOD2 shell lightmap requirement**: The LOD2 baked shell mesh must carry UV channel 1 (non-overlapping, covering the entire shell mesh) and be lightmap-baked to a dedicated `<asset_name>_lod2_lm.dds` texture at **256x256** resolution in **DDS DXT5/BC3 format** (quarter of the full-size lightmap, proportional to LOD2 viewing distance and reduced screen footprint; DXT5 used for consistency with full-resolution lightmaps and to allow alpha channel for AO data). Lightmap baking for LOD2 shells uses flat ambient-only lighting (same as billboard bakes) for consistency with the billboard system at similar distances. **LOD2 lightmap mip chain**: `_lod2_lm.dds` follows the **lightmap exemption rule** — lightmap textures (`_lm` suffix) are explicitly exempt from mip chain requirements. The LOD2 shell lightmap must be uploaded with `GL_TEXTURE_MAX_LEVEL = 0` (single mip level only), matching the lightmap exemption in `2d-texture-standards.md`. Do NOT generate a mip chain for `_lod2_lm.dds` — the VRAM budget calculation for LOD2 shell lightmaps assumes unmipmapped textures (0.0625 MB/texture at 256×256 DXT5, no ×1.33 overhead). Aliasing at distances beyond 200 m is acceptable for LOD2 shell lightmaps given the reduced screen footprint (typically fewer than 40 vertical pixels for a large building at 200 m). The absence of a mip chain is a deliberate VRAM budget tradeoff. The export validation script must NOT generate mip chains for `_lod2_lm.dds` files. The export validation script must verify UV channel 1 is present and non-degenerate on all `_lod2.b3d` building asset files.
-- **LOD2 shell UV channel 0 (diffuse)**: The LOD2 shell UV channel 0 maps into the same 2048×2048 city building atlas as LOD0/LOD1 modules. The shell UV islands are authored to cover the atlas cells of its dominant facade materials. This preserves texture continuity across LOD transitions. The export validation script must verify that LOD2 UV channel 0 coordinates fall within [0, 1] UV space.
+- **LOD2 shell UV channel 0 (diffuse)**: The LOD2 shell UV channel 0 maps into the same 4096×4096 city building atlas as LOD0/LOD1 modules (phase-11e expansion). The shell UV islands are authored to cover the atlas cells of its dominant facade materials within the dedicated 512×512 cell assigned to the variant. This preserves texture continuity across LOD transitions. The export validation script must verify that LOD2 UV channel 0 coordinates fall within [0, 1] UV space and correspond to the variant's assigned cell bounds.
 - **LOD2 baked shell lightmap blend mode**: The lightmap texture (UV channel 1, `_lod2_lm.dds`) is blended using **multiply blend mode at 100% opacity** over the diffuse. The runtime shader samples UV0 for diffuse and UV1 for lightmap, then multiplies: `finalColor = diffuseColor * lightmapColor`. No directional lighting is applied to LOD2 shell meshes (V1 scope) — the baked lightmap encodes all static shading. This is consistent with the flat ambient-only bake used for billboard LODs at similar distances.
 - **Per-module polygon caps**:
   Per-module polygon caps (LOD0):
@@ -386,7 +519,7 @@ delivery. No 3D model asset is on the Phase 10 critical path.
   10. Vehicle UV channel 0 coordinates fall within the asset's assigned atlas cell (see Vehicle Atlas Cell Registry below).
   11. Small building / prop assets with `height_floors >= 4` must have a `_lod2.b3d` geometry shell (not just billboard). Conversely, small building / prop assets with `height_floors <= 3` must NOT have a `_lod2.b3d` file — they use point-sprite LOD2 only. The 4-floor threshold is the boundary: buildings with `height_floors >= 4` require a `_lod2.b3d` geometry shell for distant visibility; buildings with `height_floors <= 3` use the billboard imposter system at LOD2 (point-sprite only, no `_lod2.b3d`).
   12. Vehicle normal map UV channel 0 coordinates fall within the asset's assigned atlas cell in `vehicles_normal_atlas_n.dds` (8×8 grid of 256×256 cells in 2048×2048; vehicle row/column assignments match the diffuse atlas registry in `vehicle_atlas_registry.json` — same row R and column C, but cell UV range is `U ∈ [C/8, (C+1)/8]`, `V ∈ [R/8, (R+1)/8]` since the normal atlas has an 8×8 grid). The V-axis origin convention (OpenGL, V=0 at bottom, row 0 is the bottom row) applies identically to normal atlas UV verification — artists must apply V-flip (`V_opengl = 1 − V_blender`) when authoring UV islands for the normal atlas in Blender, using the same convention documented in the Vehicle Atlas Cell Registry.
-  13. Facade atlas cell pixels — all non-transparent pixel content falls within the [8, 504] texel range on both U and V axes per 512×512 cell (496×496 usable zone; 8-texel border on each edge). Validate by reading pixel alpha values in the border zone for each cell in the 2048×2048 building atlas.
+  13. Facade atlas cell pixels — all non-transparent pixel content falls within the [8, 504] texel range on both U and V axes per 512×512 cell (496×496 usable zone; 8-texel border on each edge). Validate by reading pixel alpha values in the border zone for each cell in the 4096×4096 building atlas (phase-11e expansion).
   Note: Check #14 is the music JSON sidecar validation (`validate_assets.py` checks all `music_*.ogg` files have co-located `.json` sidecars matching `tools/music_sidecar_schema.json`) — defined in `architecture/audio-architecture/v1-audio-asset-manifest.md` and implemented in Phase 5.
   15. `.meta` sidecar file presence — every `.b3d` building or vehicle file must have a corresponding `<asset_name>.meta` sidecar file. Missing sidecar: validation error. This check is a stub in Phase 5 (`# TODO Phase 9` comment); replaced with full implementation in Phase 9.
   16. `music_*.ogg` must be stereo (channels == 2), 44100 Hz; `ambient_*.ogg` must be stereo, 44100 Hz. Hard error on mismatch. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
@@ -462,6 +595,234 @@ delivery. No 3D model asset is on the Phase 10 critical path.
   ```
 
   The export validation script reads this registry when checking vehicle UV channel 0 coordinates (check #10). A vehicle with no registry entry fails validation. A vehicle with UV coordinates outside its assigned cell fails validation. **Atlas UV calculation**: For a cell at (row R, col C) on a 4×4 grid, the atlas UV range is `U ∈ [C/4, (C+1)/4]`, `V ∈ [R/4, (R+1)/4]`. **V-axis origin convention (OpenGL)**: This formula uses **OpenGL UV convention** — V origin is at the bottom-left of the atlas; V increases upward; row 0 (R=0) is the BOTTOM row. DDS files store texels top-row-first, and Blender's UV editor shows V=0 at the top. Artists authoring vehicle UV islands in Blender must apply V-flip (`V_opengl = 1 − V_blender`) before mapping to atlas cells. The export validation script must use the OpenGL convention when checking UV coordinates against assigned cells.
+
+## Building Variant Geometry Standards
+
+This section is the canonical reference for per-variant geometry requirements for all V1 zone
+building sets. Each zone-tier combination requires exactly four geometry variants with distinct
+architectural vocabularies. A player must be able to identify the zone type and distinguish
+individual variants from mesh shape alone, without colour or texture cues.
+
+**Inter-variant differentiation is mandatory**: the four variants within each zone-tier must each
+differ from every other variant in at least one structural dimension (roof form, massing, external
+additions, or boundary treatment). A city block containing all four variants must not contain any
+two buildings that look alike when viewed from 60 m (large buildings) or from street-level view
+(small buildings).
+
+**Building atlas**: each zone-building variant occupies its own dedicated atlas cell. Phase 11e
+expansion establishes a per-variant unique cell approach: all 36 zone-building variants
+(`res`/`com`/`ind` × `low`/`med`/`high` × 01–04) and all 4 service building types each have a
+dedicated 512×512 cell in the 8×8 atlas grid (4096×4096 px total). The prior constraint that
+multiple variants shared a single module-type cell is superseded. UV islands for each variant must
+fit within the 496×496 px usable area of its dedicated cell (8 px border on each edge per
+`architecture/asset-standards/building-atlas-layout.md`). See the "Cell Assignment Table" in
+`architecture/asset-standards/building-atlas-layout.md` for the full mapping of each variant to
+its grid row and column.
+
+### Residential Low
+
+Floor count: `height_floors` 1 or 2 (`height_floors <= 3` small building tier). Variants within
+this tier may use different values within the range; height difference is the primary
+silhouette-variation tool.
+
+- **`res_low_01`** (flat-roof block): flat parapet roof, single AC condenser on parapet, no garden
+  (tarmac forecourt), utility meter box geometry on facade.
+- **`res_low_02`** (semi-detached pair): two single-storey units side by side under a common
+  gabled pitched roof; door centred on the front face of the left unit only (atlas cell (6,0));
+  plain cream rendered walls on all other faces; windows match `res_low_01` size and height
+  (same `ww`/`wh`/`wy` atlas proportions). Total footprint 8 S × 10 S, fits within one tile.
+- **`res_low_03`** (cottage): single-storey box with mono-pitch roof (low front, high rear),
+  brick chimney geometry stub, door on front face only (atlas cell (6,1)); brick+clay-tile
+  texture. Footprint 8 S × 10 S, height 6 S — matches `res_low_01`/`res_low_02`.
+- **`res_low_04`** (red-brick): steeply-pitched metal-tile roof with single dormer window, narrow
+  chimney, low brick boundary wall at plot edge (no garden). Total footprint 10 S × 10 S,
+  height 3 S — fits within one tile.
+
+Primary differentiators: roof form (flat vs. pitched; gabled vs. hipped; dormer count), external
+additions (carport, AC condenser), and boundary treatment (fence vs. wall vs. no enclosure).
+
+### Residential Medium
+
+Floor count: `height_floors` 2 or 3 (`height_floors <= 3` small building tier).
+
+- **`res_med_01`** (2-storey block): flat parapet roof, external staircase on side facade to
+  rooftop terrace, clustered AC condensers on parapet, tarmac apron.
+- **`res_med_02`** (2-storey villa): hipped metal roof in seafoam-green, full wrap-around
+  first-floor balcony with rendered balustrade, rendered perimeter wall with iron gate,
+  kidney-pool geometry in garden.
+- **`res_med_03`** (2-storey cottage): clay-tile hipped roof with dormer windows, brick chimney,
+  full-width covered balcony on first floor, wrought-iron fence with brick piers.
+- **`res_med_04`** (3-storey red-brick): pitched black metal roof with pair of dormers, projecting
+  bay window on first floor, low brick garden wall at plot edge.
+
+Primary differentiators: roof form (flat vs. hipped; dormer count), external additions (staircase,
+balcony, pool), and boundary treatment (fence vs. wall vs. no enclosure).
+
+### Residential High
+
+Floor count: `height_floors` 5–10 (`height_floors >= 4` large building tier). The four variants
+must span at least a 3-floor range (e.g. 5, 7, 8, 10 floors) to produce readable skyline height
+variation. No two variants may share the same `height_floors` value.
+
+LOD0 target: 6,000–8,000 tris. LOD1 must retain balcony slab extrusion profile (single flat slab
+per floor band, no railing geometry) and preserve height variation across all four variants.
+
+- **`res_high_01`** (flat-roof concrete slab): flat parapet roof, smooth render exterior, row of AC
+  condenser units on parapet (min 6 units, boxy geometry), punched window grid, ground-floor entry
+  canopy slab projecting from recessed lobby.
+- **`res_high_02`** (stepped-setback form): upper 2 floors set back on min 2 sides (visible ledge
+  profile at each step), corner tower element rising one floor above main roof, ground-floor
+  colonnade (min 4 columns with visible spacing), pool basin geometry in walled courtyard.
+- **`res_high_03`** (full-height curtain-wall tower): cantilevered balcony slabs at each floor
+  (20–35 cm overhang), alternating vertical sunshield fin geometry (one fin per 1.5–2 m of facade
+  width), small rooftop plant room.
+- **`res_high_04`** (flat-fronted concrete slab): plainest massing of the four (board-form texture
+  drives variant identity); recessed loggia balcony per floor (fully recessed behind facade plane,
+  min 0.8 m depth), horizontal spandrel band geometry between floors, ground-floor retail strip
+  with wider openings.
+
+Primary differentiators: rooftop silhouette (AC condenser deck vs. stepped setback vs. curtain-wall
+balcony tower vs. loggia slab) and footprint aspect ratio (narrow-tower vs. wider-slab massing).
+
+### Commercial Low
+
+Floor count: `height_floors` 1 or 2 (`height_floors <= 3` small building tier).
+
+- **`com_low_01`** (convenience store): flat parapet roof, full-width glazed shopfront, projecting
+  sign board above entrance (flat slab geometry, min 0.4 m depth), 3-bay parking apron.
+- **`com_low_02`** (café): flat roof, canvas awning frame over entrance and side terrace
+  (bracket-and-valance profile), café table and chair props, flower-pot props flanking door.
+- **`com_low_03`** (auto garage): corrugated metal facade, two wide roll-up shutter doors, open
+  forecourt (no awning), tyre prop stacks against side wall.
+- **`com_low_04`** (supermarket): flat parapet roof, full-width glazed shopfront with recessed
+  covered walkway canopy, freestanding trolley-bay shelter geometry in parking apron.
+
+Primary differentiator: building programme (convenience store vs. café vs. garage vs. supermarket)
+produces inherently different shopfront and roof configurations.
+
+### Commercial Medium
+
+Floor count: `height_floors` 2 or 3 (`height_floors <= 3` small building tier).
+
+- **`com_med_01`** (strip mall): flat roof with HVAC unit props, continuous glazed shopfronts on
+  ground floor, upper floor with ribbon windows, large parking apron with bay markings, multiple
+  fascia sign panels.
+- **`com_med_02`** (boutique hotel): flat or low-pitched roof, juliet balcony railings on every
+  upper floor window, fabric canopy frame over main entrance, ornamental bracket geometry above
+  ground-floor window lintels.
+- **`com_med_03`** (corner bank): flat roof with projecting cornice band, paired pilaster strips at
+  facade corners, arched window openings flanking entrance, revolving door recess (min 3 bays),
+  shallow front setback.
+- **`com_med_04`** (office block): glass curtain-wall facade (3 floors), flat roof with plant room
+  behind louvred parapet screen, recessed ground-floor entrance under projecting concrete canopy
+  slab.
+
+Primary differentiator: building programme (strip mall vs. hotel vs. bank vs. office block)
+produces inherently different shopfront and roof configurations.
+
+### Commercial High
+
+Floor count: `height_floors` 15–30 (skyscraper exception — these are tall glass landmark
+buildings, NOT subject to the standard 5–10 floor range for High-tier buildings). The four variants
+must span at least a 10-floor range (e.g. 15, 20, 25, 30 floors). No two variants may share the
+same `height_floors` value.
+
+LOD0 target: 8,000–10,000 tris (elevated budget reflecting landmark status). LOD1 must retain the
+variant-specific crown silhouette (spire, antenna cluster, tapered top, or ziggurat steps must
+still be readable at LOD1 polygon count).
+
+All four `com_high` variants must have: a unique crown treatment distinguishable by silhouette from
+skyline distance; ground floor grand entrance lobby canopy geometry (projecting flat canopy slab,
+min 4 m wide × 1.5 m deep); multi-bay revolving door recess (min 3 door bays, each min 1.2 m wide
+× 2.2 m tall, recessed min 0.4 m); podium base geometry (a wider base volume, min 1.5 m taller
+than street level, set back from the tower shaft above); facade floor-to-ceiling curtain-wall
+mullion grid throughout the full height (thin vertical and horizontal extrusions, not painted
+lines); expressed structural core visible on the exterior (a thickened central or corner volume
+carrying vertical columns proud of the curtain wall face by min 5 cm).
+
+Four distinct form vocabularies — one per variant:
+
+- **`com_high_01`** (spire tower): narrow glass tower with a spire crown — slender rectangular
+  shaft tapering to a spire pinnacle at rooftop; floor plate consistent throughout height.
+- **`com_high_02`** (slab with antenna cluster): wide slab with setback upper floors and an antenna
+  cluster crown — lower 60% is a broad rectangular slab; upper 40% steps back on at least two
+  sides; antenna cluster of 3–5 vertical rods of varying heights at the roof centre.
+- **`com_high_03`** (tapered pyramid): tapered pyramid form with chamfered corners — floor plate
+  reduces uniformly from base to crown, each floor stepping inward ~0.3–0.5 m; all four vertical
+  corners are chamfered throughout the full height.
+- **`com_high_04`** (stepped ziggurat): stepped ziggurat with floor-plate reductions every 3–4
+  floors — distinct horizontal ledge at every setback step, min 4 step levels visible from ground
+  to crown.
+
+### Industrial Low
+
+Floor count: `height_floors` 1 or 2 (`height_floors <= 3` small building tier).
+
+- **`ind_low_01`** (corrugated metal warehouse): mono-pitch or flat shed roof, corrugated metal
+  wall panel ribs (min 8 parallel extrusions on principal facade), wide roll-up shutter loading
+  doors, lean-to office annexe on one end, truck dock geometry with yellow kerb marker.
+- **`ind_low_02`** (brick workshop): flat felted roof with parapet, brick wall (no corrugated
+  ribs), roller-shutter entrance, tyre prop stacks, hand-painted sign board above entrance.
+- **`ind_low_03`** (sawtooth factory): sawtooth roofline with min 2 asymmetric north-light ridges
+  (highly distinctive stepped profile — primary zone identifier for this variant), chimney stack on
+  gable end, chain-link fence perimeter.
+- **`ind_low_04`** (storage yard): small flat-roof gatehouse as primary mesh anchor (min 3 m × 3 m
+  footprint), two-high shipping container stacks (rectangular box props in 3 distinct tints),
+  chain-link fence perimeter, floodlight mast.
+
+Primary differentiators: shed type (corrugated metal warehouse vs. brick workshop vs. sawtooth
+factory vs. storage yard) — roof profile is the primary identifier (mono-pitch shed, flat parapet,
+sawtooth ridgeline, or gatehouse anchor).
+
+### Industrial Medium
+
+Floor count: `height_floors` 2 or 3 (`height_floors <= 3` small building tier).
+
+- **`ind_med_01`** (flat-roof factory): flat roof with two concrete chimney stacks above parapet
+  (round or rectangular section, min 2 m above roof), ground-floor loading bays (min 2 bays),
+  metal-railed access walkway along second-floor facade.
+- **`ind_med_02`** (steel-frame warehouse): exposed structural steel frame visible on the exterior
+  (at least corner columns proud of the cladding), notably wider footprint than `ind_med_01`,
+  fire-escape staircase on gable end, elevated covered walkway connecting two building wings.
+- **`ind_med_03`** (brick mill): flat roof with rooftop cylindrical water tank on a steel support
+  frame, large multi-pane industrial windows (wider proportions than `ind_low_02`), arched window
+  head lintels, cast-iron fire escapes on rear facade.
+- **`ind_med_04`** (distribution centre): compact square footprint (notably wider than it is tall),
+  loading docks on two perpendicular sides with dock shelter hoods, elevated gatehouse booth at
+  site entrance, extensive concrete truck apron.
+
+Primary differentiators: structural type (flat-roof factory vs. steel-frame warehouse vs. brick
+mill vs. distribution centre) — roof form and structural expression drive differentiation.
+
+### Industrial High
+
+Floor count: `height_floors` 5–10 (`height_floors >= 4` large building tier). The four variants
+must span at least a 3-floor range. No two variants may share the same `height_floors` value.
+
+LOD0 target: 6,000–8,000 tris. LOD1 must retain rooftop plant-room box and zone-defining silhouette
+features at simplified fidelity.
+
+All Industrial High variants must also include: setback modelling at each floor band and rooftop
+equipment silhouettes (AC units, antennae stubs).
+
+- **`ind_high_01`** (concrete tower with chimney stacks): plain concrete tower with board-form
+  banding, two tall chimney stacks rising well above roofline (each min 3 m above parapet), small
+  punched windows with expressed lintels, rooftop service structure.
+- **`ind_high_02`** (exposed steel frame with pipe runs): exposed steel-frame structure, external
+  pipe runs of two distinct diameters along full facade height (large-bore: ~0.3 m diameter;
+  small-bore: ~0.1 m diameter), spherical pressure vessel at mid-height (min 2 m diameter),
+  wide-base cooling tower volume on one side.
+- **`ind_high_03`** (silo cluster): cluster of cylindrical silos (min 3 cylinders, each 3–5 m
+  diameter), silo cluster height equivalent to 7 floors; corrugated metal conveyor bridge
+  connecting silo tops; elevator head house at one end of bridge — the circular silhouette is the
+  primary identifier.
+- **`ind_high_04`** (grating-platform refinery): grating-platform horizontal bands at every floor,
+  dense roof-level pipe rack (min 5 horizontal pipe members visible in elevation), flare stack
+  rising from one corner (min 4 m above roof), large industrial louvred panels in place of
+  windows, hazard-stripe banding on structural posts at base.
+
+Primary differentiators: rooftop silhouette (chimney stacks vs. pipe runs vs. silo cluster vs.
+grating-platform refinery) and floor-band setback count.
 
 <!-- SIGN-OFF: graphics-artist-3d-model 2026-02-27 — confirmed: all 20 export validation checks present and correct; naming convention <zone>_<tier>_<variant>_lod<N>.<ext>; pivot at base center Y=0; 5 mm Y-axis vertical extent tolerance (max vertex deviation from Y=0 bottom or Y=3.0 top per floor module); 10-floor hard cap; collision mesh dispatch order confirmed — (1) _col_0.obj: multi-convex set, (2) _col_circle.obj: N-sided circular prism, (3) _col.obj: single convex hull, (4) none: log error; dispatch prevents _col_0 shadowing _col on dual-suffixed assets; billboard floor count limit (height_floors <= 3 uses billboard imposter, >= 4 uses _lod2.b3d); LOD2 pivot conformance (base-center identical to LOD0/LOD1); Blender export axis (-Z Forward, Y Up); asset formats .b3d (animated/rigged), .obj (collision/static). Atlas mip chain clamping (4 levels) is documented in building-atlas-layout.md and 2d-texture-standards.md — outside the scope of this document but verified as present. Phase 9 may proceed. -->
 

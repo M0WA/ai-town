@@ -509,13 +509,19 @@ prevents infinite recursion.
 
 #### Road tile scene node material requirements
 
+Road LOD0 mesh has 4 buffers: `[0]` carriageway, `[1]` south kerb, `[2]` north kerb,
+`[3]` center-line. The post-bind loop must preserve the per-buffer `PolygonOffsetFactor`
+set at mesh-creation time: buffers 0–2 use `factor = 4`; buffer 3 (center-line) uses
+`factor = 5` to win the depth test against the carriageway. **Do not overwrite buffer 3's
+factor in the post-bind loop.**
+
 ```cpp
 for (u32 m = 0; m < node->getMaterialCount(); ++m) {
     SMaterial& mat = node->getMaterial(m);
     mat.Lighting               = false;
     mat.BackfaceCulling        = false;   // MANDATORY — see below
     mat.PolygonOffsetDirection = irr::video::EPO_FRONT;
-    mat.PolygonOffsetFactor    = 4;
+    if (m != 3) mat.PolygonOffsetFactor = 4;  // buffer 3 keeps factor=5 from mesh creation
 }
 node->setAutomaticCulling(irr::scene::EAC_OFF);  // MANDATORY — see below
 ```

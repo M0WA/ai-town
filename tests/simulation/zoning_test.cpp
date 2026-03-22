@@ -564,14 +564,17 @@ TEST_F(ZoningTestNice, DensityUpgrade_AudioCallback_FiresOnUpgrade) {
     // Normal starting treasury $500K → unlocks after 3 months.
     // Need demand > 0.75 for upgrade wave to fire.
     sim_->placeRoad(0, 0);
-    // Place enough R tiles adjacent to road — they will be candidates for upgrade.
+    // Place a contiguous 2×2 block of R-low tiles so the upgrade wave can expand
+    // to a 2×2 Med-R footprint without crossing zone boundaries or empty tiles.
     sim_->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
     sim_->placeZone(2, 0, ZoneType::Residential, DensityTier::Low);
-    // Balanced C/I to create strong R demand.
+    sim_->placeZone(1, 1, ZoneType::Residential, DensityTier::Low);
+    sim_->placeZone(2, 1, ZoneType::Residential, DensityTier::Low);
+    // Balanced C/I elsewhere to create strong R demand.
     sim_->placeZone(0, 1, ZoneType::Commercial,  DensityTier::Low);
     sim_->placeZone(0, 2, ZoneType::Commercial,  DensityTier::Low);
-    sim_->placeZone(1, 1, ZoneType::Industrial,  DensityTier::Low);
-    sim_->placeZone(1, 2, ZoneType::Industrial,  DensityTier::Low);
+    sim_->placeZone(3, 0, ZoneType::Industrial,  DensityTier::Low);
+    sim_->placeZone(3, 1, ZoneType::Industrial,  DensityTier::Low);
 
     clock_.advance(121.0);
 

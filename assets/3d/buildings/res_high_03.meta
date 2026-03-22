@@ -1,0 +1,13 @@
+{
+  "height_floors": 8,
+  "category": "large_building",
+  "atlas_cell": {
+    "row": 1,
+    "col": 2
+  },
+  "lod_distances": [
+    50,
+    200,
+    400
+  ]
+}

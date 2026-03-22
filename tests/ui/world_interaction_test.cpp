@@ -231,7 +231,21 @@ protected:
         // setTilePlacementPreview fires on Zone/Road LMB-down (anchor set, clear preview)
         // and on LMB-up (clear after commit).  Tests exercising the preview contents add
         // their own EXPECT_CALL; all others suppress via this catch-all.
-        EXPECT_CALL(renderer_, setTilePlacementPreview(_, _)).Times(::testing::AnyNumber());
+        EXPECT_CALL(renderer_, setTilePlacementPreview(_, _, _)).Times(::testing::AnyNumber());
+        // Phase 11h: setActiveTool fires whenever m_activeTool changes (toolbar click, hotkey).
+        // clearDemolishHighlight fires on demolish cancel/dismiss.
+        // setTileHoverHighlight fires during hover and demolish pending-tile highlight.
+        // All three suppressed for tests that do not assert on these calls.
+        EXPECT_CALL(renderer_, setActiveTool(_)).Times(::testing::AnyNumber());
+        EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(::testing::AnyNumber());
+        EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(::testing::AnyNumber());
+        // setZoneHoverColour fires whenever the Zone tool hover color changes (per zone type).
+        EXPECT_CALL(renderer_, setZoneHoverColour(_)).Times(::testing::AnyNumber());
+        // Phase 11d Deliverable 5d: queryTile is now called in Zone/Road commit loops
+        // and drag preview partitioning to classify tiles as free vs blocked.
+        // Suppress via catch-all; tests that verify placement counts add their own
+        // EXPECT_CALL on placeZone/placeRoad (the call under test), not queryTile.
+        EXPECT_CALL(sim_, queryTile(_, _)).Times(::testing::AnyNumber()).WillRepeatedly(Return(QueryResult{}));
 
         uiManager_->setMapDimensions(10, 10);
 
@@ -393,15 +407,17 @@ TEST_F(WorldInteractionTest, WorldInteraction_DemolishTool_SteepSlope_NoEarthwor
     activateDemolishTool();
 
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
+        .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
 
     // Zone overlay may be called on demolish (erase entry).
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AtLeast(0));
 
     // Primary assertion: demolishTile IS called despite steep slope.
+    // New flow (phase-11h): down sets pending tile; up commits demolish.
     EXPECT_CALL(sim_, demolishTile(5, 7)).Times(1);
 
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 }
 
 // ---------------------------------------------------------------------------
@@ -563,20 +579,20 @@ TEST_F(WorldInteractionTest, WorldInteraction_HoverHighlight_ClearedOnMiss)
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
         .WillRepeatedly(Return(false));
 
-    // Primary assertion: clear call with (-1, -1, kHoverArgbClear).
-    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1,
-        static_cast<uint32_t>(kHoverArgbClear))).Times(AtLeast(1));
+    // Primary assertion: clear call with (-1, -1, footprintSize=1).
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(AtLeast(1));
 
     uiManager_->onEvent(makeMouseMove(500, 500));
 }
 
 // ---------------------------------------------------------------------------
-// Test 10: ZonePlacement_SparseOverlay_InsertsEntry
+// Test 10: ZonePlacement_NoOverlayInserted
 //
 // Zone tool; pickTerrainTile at (3,4); left-click.
-// m_mapTilesX=10 (set in SetUp), so key = 4*10+3 = 43.
-// After dispatch, captured sparseOverlay must contain {43 -> kOverlayArgbResidential}.
-// (ref: implementation/phase-9b.md Deliverable G)
+// placeZone() immediately places a building, so the zone overlay must NOT be
+// added — overlay is erased (or left empty) on placement, not inserted.
+// setZoneOverlay must NOT be called during zone placement.
+// (ref: implementation/phase-9b.md Deliverable G — overlay erased on placement)
 // ---------------------------------------------------------------------------
 TEST_F(WorldInteractionTest, WorldInteraction_ZonePlacement_SparseOverlay_InsertsEntry)
 {
@@ -589,22 +605,14 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZonePlacement_SparseOverlay_Insert
 
     EXPECT_CALL(sim_, placeZone(3, 4, _, _, 0)).Times(1);
 
-    // Capture the sparseOverlay argument passed to setZoneOverlay.
-    ZoneOverlayMap capturedMap;
-    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
-        .WillOnce(SaveArg<2>(&capturedMap));
+    // setZoneOverlay must NOT be called: placeZone() places a building immediately,
+    // so the overlay entry is erased (not inserted) and the overlay stays empty.
+    // StrictMock will fail if setZoneOverlay is unexpectedly called.
 
     // Zone rect-select: press sets anchor at (3,4); release fills the 1x1 rect.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
-
-    // Assert: exactly one entry; key=43; value=kOverlayArgbResidential (green, 0x6000FF00).
-    ASSERT_EQ(capturedMap.size(), 1u)
-        << "Overlay map must contain exactly one entry after first zone placement";
-    ASSERT_TRUE(capturedMap.count(43u) > 0)
-        << "Key must be tileZ*mapTilesX+tileX = 4*10+3 = 43";
-    EXPECT_EQ(capturedMap.at(43u), static_cast<uint32_t>(kOverlayArgbResidential))
-        << "Value must be kOverlayArgbResidential (0x6000FF00) for Residential zone";
+    // If we reach here without a StrictMock violation, the overlay was not set.
 }
 
 // ---------------------------------------------------------------------------
@@ -627,17 +635,14 @@ TEST_F(WorldInteractionTest, WorldInteraction_Demolish_SparseOverlay_ErasesEntry
 
     EXPECT_CALL(sim_, placeZone(3, 4, _, _, 0)).Times(1);
 
-    // First setZoneOverlay call — after placement (key 43 inserted).
-    ZoneOverlayMap capturedAfterPlace;
-    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
-        .WillOnce(SaveArg<2>(&capturedAfterPlace));
+    // setZoneOverlay must NOT be called on zone placement: building placed immediately,
+    // overlay stays empty (erase on empty map returns 0, condition is false).
 
     // Zone rect-select: press sets anchor at (3,4); release fills the 1x1 rect.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 
-    // Verify placement produced a non-empty map.
-    EXPECT_EQ(capturedAfterPlace.size(), 1u);
+    // After placement the overlay map is still empty (no insertion happened).
 
     // -- Step 2: switch to Demolish tool and demolish (3,4) --
     // (The confirm-before-demolish modal is OFF by design in this test to directly
@@ -651,7 +656,9 @@ TEST_F(WorldInteractionTest, WorldInteraction_Demolish_SparseOverlay_ErasesEntry
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
         .WillOnce(SaveArg<2>(&capturedAfterDemolish));
 
+    // New flow (phase-11h): down sets pending tile; up commits demolish.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 
     // Assert: overlay map is empty after demolish.
     EXPECT_TRUE(capturedAfterDemolish.empty())
@@ -678,7 +685,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_NewGameLoad_ClearsOverlay)
         EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
             .WillOnce(DoAll(SetArgReferee<2>(t[0]), SetArgReferee<3>(t[1]), Return(true)));
         EXPECT_CALL(sim_, placeZone(t[0], t[1], _, _, 0)).Times(1);
-        EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(1);
+        // setZoneOverlay NOT called on zone placement (building placed immediately).
         // Zone rect-select: press sets anchor; release fills the 1x1 rect.
         uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
         uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
@@ -689,8 +696,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_NewGameLoad_ClearsOverlay)
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
         .WillOnce(SaveArg<2>(&capturedClear));
     // onNewGame() also clears the hover highlight — expect the clear call.
-    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1,
-        static_cast<uint32_t>(kHoverArgbClear))).Times(1);
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
 
     uiManager_->onNewGame();
 
@@ -785,7 +791,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_SetMapDimensions_Recall_ClearsOver
         EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
             .WillOnce(DoAll(SetArgReferee<2>(i), SetArgReferee<3>(0), Return(true)));
         EXPECT_CALL(sim_, placeZone(i, 0, _, _, 0)).Times(1);
-        EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(1);
+        // setZoneOverlay NOT called on zone placement (building placed immediately).
         // Zone rect-select: press sets anchor; release fills the 1x1 rect.
         uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
         uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
@@ -1560,7 +1566,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_MovesToNewTile_PlacesOnMo
     // those tiles; setTileHoverHighlight(-1,-1,_) is called to clear the single-tile hover.
     EXPECT_CALL(renderer_, pickTerrainTile(600, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _, _))
         .Times(1);
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
@@ -1569,7 +1575,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_MovesToNewTile_PlacesOnMo
     // Step 3: MouseMove to tile (7,7) — line preview covers (5,7)–(7,7); still no placement.
     EXPECT_CALL(renderer_, pickTerrainTile(700, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(7), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _, _))
         .Times(1);
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
@@ -1621,7 +1627,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_RoadDrag_HoverUpdateOnClick_NoDoub
     // called to clear the single-tile hover.  No placement.
     EXPECT_CALL(renderer_, pickTerrainTile(500, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _, _))
         .Times(1);
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
@@ -1715,7 +1721,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_MultiTileRect_Fills
     // Step 2: MouseMove to (4,5) while LMB held — rect preview; no placement.
     EXPECT_CALL(renderer_, pickTerrainTile(400, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(4), SetArgReferee<3>(5), Return(true)));
-    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _, _))
         .Times(1);
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
@@ -1757,7 +1763,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_RoadDragUnchanged_P
     // setTilePlacementPreview called; setTileHoverHighlight(-1,-1,_) clears single-tile hover.
     EXPECT_CALL(renderer_, pickTerrainTile(600, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(7), Return(true)));
-    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _, _))
         .Times(1);
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeRoad(_, _, _)).Times(0);
@@ -1792,7 +1798,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_ZoneRectSelect_DragNoDragPlacement
     // Step 2: MouseMove to (4,5) — rect preview shown; no placement during drag.
     EXPECT_CALL(renderer_, pickTerrainTile(400, 500, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(4), SetArgReferee<3>(5), Return(true)));
-    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _))
+    EXPECT_CALL(renderer_, setTilePlacementPreview(::testing::Not(::testing::IsEmpty()), _, _))
         .Times(1);
     EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
     EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);
@@ -1837,14 +1843,14 @@ TEST_F(WorldInteractionTest, WorldInteraction_HoverHighlight_ClearedOnRmbToolClo
     EXPECT_CALL(renderer_, setTileHoverHighlight(3, 4, _)).Times(1);
     uiManager_->onEvent(makeMouseMove(500, 500));
 
-    // Step 2: RMB press — tool deselected; hover must be cleared.
-    // The primary assertion: setTileHoverHighlight(-1, -1, kHoverArgbClear) called
-    // exactly once by the RMB handler.
-    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1,
-        static_cast<uint32_t>(kHoverArgbClear))).Times(1);
-    uiManager_->onEvent(makeMouseButtonDown(1, 500, 500));
+    // Step 2: RMB up (short click, no movement) — tool deselected; hover must be cleared.
+    // Tool cancel fires on RMB up (not down) per input-arbitration Priority 6b:
+    // RMB down always starts camera drag; cancel only on RMB click (no movement).
+    // The primary assertion: setTileHoverHighlight(-1, -1, ...) called exactly once.
+    EXPECT_CALL(renderer_, setTileHoverHighlight(-1, -1, _)).Times(1);
+    uiManager_->onEvent(makeMouseButtonUp(1, 500, 500));
 
-    // Postcondition: active tool must be None after RMB.
+    // Postcondition: active tool must be None after RMB click.
     EXPECT_EQ(uiManager_->getActiveTool(), ActiveTool::None);
 }
 
@@ -2089,7 +2095,8 @@ TEST_F(WorldInteractionTest, Coverage_WorldClick_NoTerrainHit_ReturnsFalse)
 }
 
 // ============================================================================
-// Test: Commercial zone placement produces kOverlayArgbCommercial
+// Test: Commercial zone placement does NOT insert into overlay
+// (setZoneOverlay must NOT be called — building appears immediately)
 // ============================================================================
 TEST_F(WorldInteractionTest, Coverage_CommercialZone_OverlayColor)
 {
@@ -2104,21 +2111,15 @@ TEST_F(WorldInteractionTest, Coverage_CommercialZone_OverlayColor)
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(2), SetArgReferee<3>(3), Return(true)));
     EXPECT_CALL(sim_, placeZone(2, 3, ZoneType::Commercial, _, _)).Times(1);
-
-    ZoneOverlayMap captured;
-    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
-        .WillOnce(SaveArg<2>(&captured));
+    // setZoneOverlay must NOT be called: building placed immediately, overlay stays empty.
 
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
-
-    uint64_t key = static_cast<uint64_t>(3) * 10u + static_cast<uint64_t>(2);
-    ASSERT_TRUE(captured.count(key) > 0);
-    EXPECT_EQ(captured.at(key), static_cast<uint32_t>(kOverlayArgbCommercial));
 }
 
 // ============================================================================
-// Test: Industrial zone placement produces kOverlayArgbIndustrial
+// Test: Industrial zone placement does NOT insert into overlay
+// (setZoneOverlay must NOT be called — building appears immediately)
 // ============================================================================
 TEST_F(WorldInteractionTest, Coverage_IndustrialZone_OverlayColor)
 {
@@ -2133,17 +2134,10 @@ TEST_F(WorldInteractionTest, Coverage_IndustrialZone_OverlayColor)
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
         .WillOnce(DoAll(SetArgReferee<2>(1), SetArgReferee<3>(2), Return(true)));
     EXPECT_CALL(sim_, placeZone(1, 2, ZoneType::Industrial, _, _)).Times(1);
-
-    ZoneOverlayMap captured;
-    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
-        .WillOnce(SaveArg<2>(&captured));
+    // setZoneOverlay must NOT be called: building placed immediately, overlay stays empty.
 
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
-
-    uint64_t key = static_cast<uint64_t>(2) * 10u + static_cast<uint64_t>(1);
-    ASSERT_TRUE(captured.count(key) > 0);
-    EXPECT_EQ(captured.at(key), static_cast<uint32_t>(kOverlayArgbIndustrial));
 }
 
 // ============================================================================
@@ -2181,7 +2175,13 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
 
         EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AnyNumber());
-        EXPECT_CALL(renderer_, setTilePlacementPreview(_, _)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, setTilePlacementPreview(_, _, _)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, setActiveTool(_)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(AnyNumber());
+        EXPECT_CALL(renderer_, setZoneHoverColour(_)).Times(AnyNumber());
+        // Phase 11d Deliverable 5d: queryTile called in Zone/Road preview partitioning
+        // and commit loop guards. Suppress via catch-all for this fixture.
+        EXPECT_CALL(sim_, queryTile(_, _)).Times(AnyNumber()).WillRepeatedly(Return(QueryResult{}));
 
         uiManager_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
         uiManager_->setRenderer(&renderer_);
@@ -2283,19 +2283,20 @@ TEST_F(ValidHandleWorldInteractionTest, RoadDrag_ZDominant_ShowsZPreview)
 // ============================================================================
 TEST_F(ValidHandleWorldInteractionTest, DemolishDrag_DifferentTile_CallsPlacement)
 {
+    // Phase 11h: Demolish flow changed — down sets pending, up (same tile) triggers demolish.
+    // This test verifies the full click cycle (down → up on same tile) calls demolishTile.
     goToGameplay();
     uiManager_->onEvent(makeKeyDown(68));  // Demolish tool
 
+    // Down picks (5,5): sets pending tile (no demolish yet in new flow).
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
-    EXPECT_CALL(sim_, demolishTile(5, 5)).Times(1);
+        .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+    EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(AnyNumber());
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
 
-    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(5), Return(true)));
-    EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(AnyNumber());
-    EXPECT_CALL(sim_, demolishTile(6, 5)).Times(1);
-    uiManager_->onEvent(makeMouseMove(510, 500));
+    // Up on same tile (5,5): confirm disabled → demolishTile(5, 5) called immediately.
+    EXPECT_CALL(sim_, demolishTile(5, 5)).Times(1);
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 }
 
 // ============================================================================
@@ -2389,12 +2390,14 @@ TEST_F(WorldInteractionTest, Coverage_DemolishWithConfirmModal_ShowsModal)
     uiManager_->onEvent(makeMouseButtonDown(0, 40, 250));  // Demolish: y 232..279
 
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+        .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
 
     // demolishTile must NOT be called — modal defers it.
     EXPECT_CALL(sim_, demolishTile(_, _)).Times(0);
 
+    // New flow (phase-11h): down sets pending tile; up shows modal (confirm=true).
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 
     EXPECT_TRUE(uiManager_->hasActiveModal());
 }

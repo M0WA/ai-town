@@ -31,6 +31,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <cstdlib>   // getenv, setenv (setenv is POSIX/Linux only — used inside #ifndef _WIN32)
 
 // ---------------------------------------------------------------------------
 // Compile-time check that the local EFX function-pointer typedefs match <efx.h>.
@@ -288,7 +289,61 @@ AudioSystem::AudioSystem(IClock* clock, IAlcFunctions* alcFunctions)
 {
     // -----------------------------------------------------------------------
     // Step 1: Open device.
+    //
+    // On Linux, two separate mechanisms can deliver an uncatchable SIGKILL:
+    //
+    //   1. rtkit (primary): When OpenAL Soft contacts rtkit via D-Bus to
+    //      request SCHED_RR for its mixing thread, rtkit also sets
+    //      RLIMIT_RTTIME=200ms on ALL threads in the process.  During heavy
+    //      road/zone placement the mixing thread can accumulate >200ms of
+    //      continuous RT CPU time, and the kernel fires SIGKILL.
+    //      Fix: rt-prio=0 in the [general] section — disables rtkit entirely.
+    //
+    //   2. PipeWire ALSA plugin (secondary): libasound_module_pcm_pipewire.so
+    //      calls kill(getpid(), SIGKILL) when its stream is destroyed after
+    //      repeated underruns.  The PulseAudio ALSA plugin does not do this.
+    //      Fix: device=pulse in [alsa] — routes through PulseAudio instead.
+    //
+    // Write a minimal alsoft.conf to /tmp with both fixes, then point
+    // ALSOFT_CONF at it BEFORE the first alcOpenDevice call (OpenAL Soft
+    // reads the config on that call).
+    // Only do this if ALSOFT_CONF is not already set by the user/environment.
+    // Both issues (rtkit, PipeWire) are Linux-only; the block is excluded on Windows.
     // -----------------------------------------------------------------------
+#ifndef _WIN32
+    if (!getenv("ALSOFT_CONF")) {
+        const char* tmpConf = "/tmp/aitown_alsoft.conf";
+        FILE* cf = fopen(tmpConf, "w");
+        if (cf) {
+            // rt-prio = 0: prevents rtkit from granting SCHED_RR to the
+            //   OpenAL mixing thread.  When rtkit grants SCHED_RR it also
+            //   sets RLIMIT_RTTIME=200ms on both the soft and hard limit
+            //   process-wide.  A non-privileged process cannot raise the
+            //   hard limit back (setrlimit fails with EPERM), so the only
+            //   way to avoid the kernel SIGKILL is to prevent rtkit from
+            //   being contacted in the first place.
+            // device=pulse: routes through PulseAudio ALSA plugin instead of
+            //   PipeWire's native ALSA plugin.  The PipeWire ALSA plugin calls
+            //   kill(getpid(), SIGKILL) when its stream is destroyed after
+            //   repeated underruns; PulseAudio does not.
+            // period_size=4096, periods=8: ~744ms buffer at 44100Hz for
+            //   headroom against frame spikes during heavy road/zone placement.
+            fprintf(cf,
+                "[general]\n"
+                "rt-prio = 0\n"
+                "period_size = 4096\n"
+                "periods = 8\n"
+                "[alsa]\n"
+                "device = pulse\n");
+            fclose(cf);
+            setenv("ALSOFT_CONF", tmpConf, /*overwrite=*/0);
+            logInfo("AudioSystem: configured ALSA backend: rt-prio=0 "
+                    "(prevents rtkit RLIMIT_RTTIME=200ms SIGKILL), "
+                    "device=pulse, period_size=4096, periods=8 (~744ms buffer)");
+        }
+    }
+#endif // !_WIN32
+
     m_device = alcOpenDevice(nullptr);
     if (!m_device) {
         logWarning("alcOpenDevice failed — no audio device available; running in silent mode");
@@ -658,6 +713,20 @@ void AudioSystem::audioThreadFunc() {
         // CRITICAL: check m_stopThread FIRST before any AL call.
         if (m_stopThread.load()) break;
 
+        // Check ALC_EXT_disconnect: if the device was lost (e.g. PulseAudio
+        // broken pipe), stop the audio thread immediately to prevent flooding
+        // the dead backend and provoking an external SIGKILL.
+        {
+            ALCint connected = 1;
+            alcGetIntegerv(m_device, ALC_CONNECTED, 1, &connected);
+            if (!connected) {
+                logInfo("AudioSystem: device disconnected — stopping audio thread");
+                m_deviceLost.store(true);
+                m_stopThread.store(true);
+                break;
+            }
+        }
+
         // Compute real-time dt using IClock (not fixed 0.01f).
         // dt is passed to both updateStreams() and updateDuckState() so crossfade
         // timers and duck state machine use the same real-time measurement.
@@ -673,6 +742,8 @@ void AudioSystem::audioThreadFunc() {
             updateStreams(dt);
             updateOcclusion();
             updateDuckState(dt);
+            updateVehicleEngines();
+            cleanupFinishedSFX();
         } catch (const std::exception& e) {
             logError(std::string("AudioSystem: audio thread error, disabling audio: ") + e.what());
             m_deviceLost.store(true);
@@ -680,6 +751,11 @@ void AudioSystem::audioThreadFunc() {
             break;
         }
     }
+
+    // Clear the thread-local OpenAL context before the thread exits.
+    // Omitting this causes OpenAL Soft to log:
+    //   "[ALSOFT] (EE) Context current for thread being destroyed!"
+    m_fnSetThreadCtx(nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -1424,10 +1500,17 @@ void AudioSystem::updateStreams(float dt) {
     // ------------------------------------------------------------------
     // Apply final gain to all open streams (music duck multiplicative).
     // ------------------------------------------------------------------
+    // Clear any stale AL error left by refillStream / closeStream above.
+    // closeStream calls alSourceStop / alSourceUnqueueBuffers without error
+    // checks; a failure there leaves AL_INVALID_OPERATION in the error state
+    // which would otherwise be falsely attributed to alSourcef(AL_GAIN) below.
+    alGetError();
+
     float duckGain = m_musicDuckGain.load(std::memory_order_relaxed);
     float musicVol = m_musicVolume.load(std::memory_order_relaxed);
     for (int i = 0; i < kStreamSourceCount; ++i) {
         if (!m_streams[i].isOpen) continue;
+        if (m_streams[i].sourceHandle == 0) continue;
 
         float gain = m_streams[i].crossfadeGain;
         if (i < 2) {
@@ -1530,7 +1613,8 @@ void AudioSystem::updateDuckState(float dt) {
 
 // ---------------------------------------------------------------------------
 // onSourceRecycled — reset occlusion gain for a recycled SFX slot.
-// Called from main thread (pool eviction / release); must hold m_occlusionMutex.
+// Called from main thread (pool eviction / release via playSFX/stopSFX) OR from
+// the audio thread (cleanupFinishedSFX). Acquires m_occlusionMutex internally.
 // ---------------------------------------------------------------------------
 void AudioSystem::onSourceRecycled(int i) {
     if (i < 0 || i >= kEvictableSFXCount) return;
@@ -1540,6 +1624,10 @@ void AudioSystem::onSourceRecycled(int i) {
     m_occlusionGainTarget[i].store(1.0f, std::memory_order_relaxed);
 
     if (m_efxAvailable) {
+        // Clear any stale AL error from main-thread callers (playSFX/stopSFX
+        // eviction may call alSourceStop on a playing source, setting an error
+        // that would otherwise be misattributed to alFilterf below).
+        alGetError();
         m_fnFilterf(m_occlusionFilter[i], AL_LOWPASS_GAIN,   1.0f);
         alCheckError_real("alFilterf(AL_LOWPASS_GAIN) in onSourceRecycled");
         m_fnFilterf(m_occlusionFilter[i], AL_LOWPASS_GAINHF, 1.0f);
@@ -1966,18 +2054,9 @@ void AudioSystem::update(float /*realDeltaSeconds*/) {
     //     by the audio thread in updateStreams(). Crossfade requests are queued
     //     via m_streamMutex and processed by the audio thread.)
 
-    // Clean up finished (non-looping) SFX sources to keep the pool available.
-    for (int i = 0; i < kEvictableSFXCount; ++i) {
-        if (!m_sfxSlots[i].occupied) continue;
-        ALint state = AL_STOPPED;
-        alGetSourcei(static_cast<ALuint>(m_sources[i]),
-                     AL_SOURCE_STATE, &state);
-        if (state == AL_STOPPED) {
-            alSourcei(static_cast<ALuint>(m_sources[i]), AL_BUFFER, 0);
-            onSourceRecycled(i);
-            m_sfxSlots[i] = SFXSlot{};
-        }
-    }
+    // SFX cleanup is performed on the audio thread (cleanupFinishedSFX) to avoid
+    // making AL calls here that could set AL_INVALID_OPERATION in the shared context
+    // error state and bleed into the audio thread's alCheckError_real.
 }
 
 // ---------------------------------------------------------------------------
@@ -2035,4 +2114,431 @@ void AudioSystem::setSFXVolume(float gain) {
 // ---------------------------------------------------------------------------
 void AudioSystem::setMusicIntensity(MusicIntensity intensity) {
     m_currentMusicIntensity.store(static_cast<int>(intensity), std::memory_order_relaxed);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 11d — Vehicle engine audio pair implementation (Deliverable 3a).
+//
+// Threading model:
+//   acquireVehicleEnginePair / releaseVehicleEnginePair / updateVehicleAudio
+//   are MAIN THREAD entry points.  They write state into VehicleAudioSlot
+//   fields atomically.  The audio thread reads those atomics in
+//   updateVehicleEngines() (called every ~10 ms wake) and applies all AL
+//   calls (AL_VELOCITY, AL_PITCH, AL_GAIN, AL_POSITION, alSourcePlay,
+//   alSourceStop).  No AL calls are made on the main thread from these methods.
+//
+// Source acquisition uses the same inline pool logic as playSound() — scanning
+// m_sfxSlots[0..kTransientReserveStart-1] for free NORMAL-priority slots.
+// The VehicleAudioSlot array (m_vehicleAudio) is the sole cross-thread
+// communication mechanism; no mutex is needed because all fields are atomic.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// acquireVehicleEnginePair — main thread entry point.
+//
+// Finds a free VehicleAudioSlot and two free SFX pool sources (NORMAL priority
+// range [0..kTransientReserveStart-1]).  Stores their indices atomically and
+// sets pendingInit so the audio thread performs AL setup on its next wake.
+// Returns {idleIdx, moveIdx} on success, {-1,-1} if pool exhausted.
+// ---------------------------------------------------------------------------
+std::pair<int,int> AudioSystem::acquireVehicleEnginePair(ZoneType zone) {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return {-1, -1};
+
+    // Determine base pitch from zone type.
+    // Residential = car (1.0), Commercial = bus (0.85), Industrial = truck (0.85).
+    float basePitch = (zone == ZoneType::Residential) ? 1.0f : 0.85f;
+
+    // -----------------------------------------------------------------------
+    // Step 1: Find a free VehicleAudioSlot.
+    // -----------------------------------------------------------------------
+    int slotIdx = -1;
+    for (int i = 0; i < kMaxVehiclePairs; ++i) {
+        if (m_vehicleAudio[i].idleSourceIdx.load(std::memory_order_relaxed) == -1) {
+            slotIdx = i;
+            break;
+        }
+    }
+
+    // evictSlot >= 0 when eviction was needed; used in Step 3 to preserve pendingRelease.
+    int evictSlot = -1;
+    if (slotIdx < 0) {
+        // All 12 slots occupied — attempt to evict the lowest-priority /
+        // greatest-distance pair.  Vehicle pairs all have NORMAL priority,
+        // so distance alone determines the eviction candidate.
+        float evictDist = -1.f;
+        for (int i = 0; i < kMaxVehiclePairs; ++i) {
+            int   idleIdx = m_vehicleAudio[i].idleSourceIdx.load(std::memory_order_relaxed);
+            if (idleIdx < 0) continue;  // sanity — already free
+            float dist = (idleIdx >= 0 && idleIdx < kEvictableSFXCount)
+                         ? m_sfxSlots[idleIdx].listenerDistanceSq : 0.f;
+            if (dist > evictDist) {
+                evictDist = dist;
+                evictSlot = i;
+            }
+        }
+        if (evictSlot < 0) return {-1, -1};
+
+        // Queue the evicted sources for AL stop/detach on the audio thread via
+        // pendingRelease.  Do NOT make AL calls on the main thread: both threads
+        // share the same OpenAL context error state, so a main-thread AL error
+        // (e.g. alSourceStop on a source the audio thread is concurrently using)
+        // bleeds into the audio thread's alCheckError_real and triggers a
+        // spurious AL_INVALID_OPERATION that disables audio.
+        int evictIdle = m_vehicleAudio[evictSlot].idleSourceIdx.load(std::memory_order_relaxed);
+        int evictMove = m_vehicleAudio[evictSlot].moveSourceIdx.load(std::memory_order_relaxed);
+        if (evictIdle >= 0) {
+            // Clear vehicle-reserved flag before clearing the slot — cleanupFinishedSFX
+            // uses this atomic to skip vehicle sources; clearing it before the slot
+            // prevents cleanupFinishedSFX from racing on m_sfxSlots[evictIdle].soundId.
+            m_sfxVehicleReserved[evictIdle].store(false, std::memory_order_release);
+            m_sfxSlots[evictIdle] = SFXSlot{};
+            m_occlusionGainTarget[evictIdle].store(1.0f, std::memory_order_relaxed);
+        }
+        if (evictMove >= 0) {
+            m_sfxVehicleReserved[evictMove].store(false, std::memory_order_release);
+            m_sfxSlots[evictMove] = SFXSlot{};
+            m_occlusionGainTarget[evictMove].store(1.0f, std::memory_order_relaxed);
+        }
+        // Signal audio thread to stop and detach the evicted sources.
+        m_vehicleAudio[evictSlot].pendingReleaseIdle.store(evictIdle, std::memory_order_relaxed);
+        m_vehicleAudio[evictSlot].pendingReleaseMove.store(evictMove, std::memory_order_relaxed);
+        m_vehicleAudio[evictSlot].pendingRelease.store(true, std::memory_order_relaxed);
+        m_vehicleAudio[evictSlot].pendingInit.store(false, std::memory_order_relaxed);
+        m_vehicleAudio[evictSlot].speedFraction.store(0.f, std::memory_order_relaxed);
+        m_vehicleAudio[evictSlot].worldX.store(0.f, std::memory_order_relaxed);
+        m_vehicleAudio[evictSlot].worldZ.store(0.f, std::memory_order_relaxed);
+        // Mark slot free — idleSourceIdx=-1 is the "free" sentinel; set last.
+        m_vehicleAudio[evictSlot].moveSourceIdx.store(-1, std::memory_order_relaxed);
+        m_vehicleAudio[evictSlot].idleSourceIdx.store(-1, std::memory_order_relaxed);
+        slotIdx = evictSlot;
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 2: Acquire two free SFX pool sources in NORMAL range [0..50].
+    // -----------------------------------------------------------------------
+    int idleIdx = -1, moveIdx = -1;
+    for (int i = 0; i < kTransientReserveStart; ++i) {
+        if (!m_sfxSlots[i].occupied) {
+            if (idleIdx < 0)       idleIdx = i;
+            else if (moveIdx < 0)  moveIdx = i;
+        }
+        if (idleIdx >= 0 && moveIdx >= 0) break;
+    }
+
+    if (idleIdx < 0 || moveIdx < 0) {
+        // Partial acquisition prohibited — release anything grabbed.
+        // (No partial marks needed since we did not set occupied yet.)
+        return {-1, -1};
+    }
+
+    // Reserve slots as vehicle engine sources BEFORE populating m_sfxSlots.
+    // cleanupFinishedSFX (audio thread) loads this atomic flag with memory_order_acquire
+    // to skip vehicle sources; the release store here ensures the flag is visible before
+    // the non-atomic m_sfxSlots write, eliminating the data race on soundId.
+    m_sfxVehicleReserved[idleIdx].store(true, std::memory_order_release);
+    m_sfxVehicleReserved[moveIdx].store(true, std::memory_order_release);
+
+    // Mark both pool slots as occupied (NORMAL priority, zero initial distance).
+    m_sfxSlots[idleIdx] = SFXSlot{SFX_VEHICLE_ENGINE_IDLE, 0, 0,
+                                   SoundPriority::NORMAL, 0.f, true};
+    m_sfxSlots[moveIdx] = SFXSlot{SFX_VEHICLE_ENGINE_MOVE, 0, 0,
+                                   SoundPriority::NORMAL, 0.f, true};
+
+    // -----------------------------------------------------------------------
+    // Step 3: Populate the VehicleAudioSlot atomically.
+    // pendingInit=true signals the audio thread to perform AL setup on its
+    // next wake (bind buffers, set AL_VELOCITY=0, alSourcePlay).
+    // -----------------------------------------------------------------------
+    m_vehicleAudio[slotIdx].speedFraction.store(0.f, std::memory_order_relaxed);
+    m_vehicleAudio[slotIdx].worldX.store(0.f, std::memory_order_relaxed);
+    m_vehicleAudio[slotIdx].worldZ.store(0.f, std::memory_order_relaxed);
+    m_vehicleAudio[slotIdx].basePitch.store(basePitch, std::memory_order_relaxed);
+    // Do not clear pendingRelease when eviction already queued a stop for the audio thread.
+    if (evictSlot < 0) {
+        m_vehicleAudio[slotIdx].pendingRelease.store(false, std::memory_order_relaxed);
+    }
+    m_vehicleAudio[slotIdx].moveSourceIdx.store(moveIdx, std::memory_order_relaxed);
+    m_vehicleAudio[slotIdx].idleSourceIdx.store(idleIdx, std::memory_order_relaxed);  // last: marks slot live
+    m_vehicleAudio[slotIdx].pendingInit.store(true, std::memory_order_relaxed);
+
+    // Wake audio thread so it processes pendingInit promptly (< 10 ms latency).
+    m_streamCV.notify_one();
+
+    return {idleIdx, moveIdx};
+}
+
+// ---------------------------------------------------------------------------
+// releaseVehicleEnginePair — main thread entry point.
+//
+// Finds the VehicleAudioSlot whose idle/move indices match, marks it for
+// release (pendingRelease=true), frees the SFX pool slots so they can be
+// reacquired, and wakes the audio thread to do the actual alSourceStop.
+// Passing {-1,-1} (failed acquisition result) is a safe no-op per spec.
+// ---------------------------------------------------------------------------
+void AudioSystem::releaseVehicleEnginePair(int idleIdx, int moveIdx) {
+    // Guard: {-1,-1} is a safe no-op.
+    if (idleIdx == -1 || moveIdx == -1) return;
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
+
+    // Find the matching VehicleAudioSlot.
+    for (int i = 0; i < kMaxVehiclePairs; ++i) {
+        if (m_vehicleAudio[i].idleSourceIdx.load(std::memory_order_relaxed) == idleIdx &&
+            m_vehicleAudio[i].moveSourceIdx.load(std::memory_order_relaxed) == moveIdx)
+        {
+            // Store release indices BEFORE clearing idleSourceIdx, so the audio
+            // thread can read them when it processes pendingRelease.
+            m_vehicleAudio[i].pendingReleaseIdle.store(idleIdx, std::memory_order_relaxed);
+            m_vehicleAudio[i].pendingReleaseMove.store(moveIdx, std::memory_order_relaxed);
+            // Signal audio thread to stop sources.
+            m_vehicleAudio[i].pendingRelease.store(true, std::memory_order_relaxed);
+            // Free SFX pool slots immediately so they can be reacquired.
+            // alSourceStop happens on the audio thread via pendingRelease.
+            // Clear m_sfxVehicleReserved BEFORE clearing m_sfxSlots so that
+            // cleanupFinishedSFX, which checks the atomic flag, won't see a
+            // stale reserved=true after the slot has been logically freed.
+            if (idleIdx >= 0 && idleIdx < kEvictableSFXCount) {
+                m_sfxVehicleReserved[idleIdx].store(false, std::memory_order_release);
+                m_sfxSlots[idleIdx] = SFXSlot{};
+            }
+            if (moveIdx >= 0 && moveIdx < kEvictableSFXCount) {
+                m_sfxVehicleReserved[moveIdx].store(false, std::memory_order_release);
+                m_sfxSlots[moveIdx] = SFXSlot{};
+            }
+            // Mark slot as free so acquireVehicleEnginePair won't scan it as live.
+            m_vehicleAudio[i].idleSourceIdx.store(-1, std::memory_order_relaxed);
+            m_vehicleAudio[i].moveSourceIdx.store(-1, std::memory_order_relaxed);
+            // Cancel any pending init for this slot (was acquired but never played).
+            m_vehicleAudio[i].pendingInit.store(false, std::memory_order_relaxed);
+            // Wake audio thread to process stop promptly.
+            m_streamCV.notify_one();
+            return;
+        }
+    }
+    // No matching slot found — warn and return (implementation error or already released).
+    logInfo("releaseVehicleEnginePair: no matching slot for idleIdx=" +
+               std::to_string(idleIdx) + " moveIdx=" + std::to_string(moveIdx));
+}
+
+// ---------------------------------------------------------------------------
+// updateVehicleAudio — main thread entry point (called per-frame per vehicle).
+//
+// Stores the current per-frame state atomically into the VehicleAudioSlot.
+// The audio thread reads these on its next wake and applies AL_PITCH,
+// AL_GAIN crossblend, and AL_POSITION.  No AL calls on the main thread.
+// No-op if idleIdx == -1 (failed acquisition).
+// ---------------------------------------------------------------------------
+void AudioSystem::updateVehicleAudio(int idleIdx, int moveIdx,
+                                     float speedFraction,
+                                     float worldX, float worldZ) {
+    if (idleIdx == -1) return;
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
+
+    // Find the matching VehicleAudioSlot and update per-frame state.
+    for (int i = 0; i < kMaxVehiclePairs; ++i) {
+        if (m_vehicleAudio[i].idleSourceIdx.load(std::memory_order_relaxed) == idleIdx &&
+            m_vehicleAudio[i].moveSourceIdx.load(std::memory_order_relaxed) == moveIdx)
+        {
+            m_vehicleAudio[i].speedFraction.store(speedFraction, std::memory_order_relaxed);
+            m_vehicleAudio[i].worldX.store(worldX, std::memory_order_relaxed);
+            m_vehicleAudio[i].worldZ.store(worldZ, std::memory_order_relaxed);
+            return;
+        }
+    }
+    // No matching slot — silently ignore (slot may have been evicted).
+}
+
+// ---------------------------------------------------------------------------
+// updateVehicleEngines — audio thread, called each wake (~10 ms).
+//
+// Processes pending vehicle init/release commands and applies per-frame AL
+// state updates (AL_PITCH, AL_GAIN crossblend, AL_POSITION) for all active
+// vehicle pairs.
+//
+// pendingInit: newly-acquired pair — bind buffers, set AL_VELOCITY=0, play.
+// pendingRelease: releasing pair — stop both sources, clear slot.
+// Active pair: apply speed-derived pitch/gain and world-space position.
+//
+// Crossblend thresholds per dynamic-soundscape.md §Vehicle Engine Audio:
+//   idle gain = 1.0 - speedFraction (full at stop, 0 at max speed)
+//   move gain = speedFraction        (0 at stop, full at max speed)
+//   Both sources run simultaneously — never stop/restart at threshold.
+// ---------------------------------------------------------------------------
+void AudioSystem::updateVehicleEngines() {
+    auto it_idle = m_preloadedBuffers.find(SFX_VEHICLE_ENGINE_IDLE);
+    auto it_move = m_preloadedBuffers.find(SFX_VEHICLE_ENGINE_MOVE);
+    const bool buffersReady = (it_idle != m_preloadedBuffers.end() &&
+                                it_move != m_preloadedBuffers.end());
+
+    for (int i = 0; i < kMaxVehiclePairs; ++i) {
+        // ---------------------------------------------------------------
+        // Process pendingRelease first (takes priority over pendingInit).
+        // ---------------------------------------------------------------
+        if (m_vehicleAudio[i].pendingRelease.load(std::memory_order_relaxed)) {
+            // Main thread stored the source indices in pendingReleaseIdle/Move before
+            // clearing idleSourceIdx and setting pendingRelease=true.
+            int rIdle = m_vehicleAudio[i].pendingReleaseIdle.load(std::memory_order_relaxed);
+            int rMove = m_vehicleAudio[i].pendingReleaseMove.load(std::memory_order_relaxed);
+            if (rIdle >= 0 && rIdle < kEvictableSFXCount) {
+                alSourceStop(static_cast<ALuint>(m_sources[rIdle]));
+                alCheckError_real("updateVehicleEngines:release:alSourceStop(idle)");
+                alSourcei(static_cast<ALuint>(m_sources[rIdle]), AL_BUFFER, 0);
+                alCheckError_real("updateVehicleEngines:release:alSourcei(idle,AL_BUFFER,0)");
+            }
+            if (rMove >= 0 && rMove < kEvictableSFXCount) {
+                alSourceStop(static_cast<ALuint>(m_sources[rMove]));
+                alCheckError_real("updateVehicleEngines:release:alSourceStop(move)");
+                alSourcei(static_cast<ALuint>(m_sources[rMove]), AL_BUFFER, 0);
+                alCheckError_real("updateVehicleEngines:release:alSourcei(move,AL_BUFFER,0)");
+            }
+            m_vehicleAudio[i].pendingReleaseIdle.store(-1, std::memory_order_relaxed);
+            m_vehicleAudio[i].pendingReleaseMove.store(-1, std::memory_order_relaxed);
+            m_vehicleAudio[i].pendingRelease.store(false, std::memory_order_relaxed);
+            continue;
+        }
+
+        int idleIdx = m_vehicleAudio[i].idleSourceIdx.load(std::memory_order_relaxed);
+        int moveIdx = m_vehicleAudio[i].moveSourceIdx.load(std::memory_order_relaxed);
+
+        if (idleIdx < 0 || moveIdx < 0) continue;  // slot free
+
+        ALuint idleSrc = static_cast<ALuint>(m_sources[idleIdx]);
+        ALuint moveSrc = static_cast<ALuint>(m_sources[moveIdx]);
+
+        // ---------------------------------------------------------------
+        // Process pendingInit: first wake after acquisition.
+        // ---------------------------------------------------------------
+        if (m_vehicleAudio[i].pendingInit.load(std::memory_order_relaxed) && buffersReady) {
+            ALuint bufIdle = static_cast<ALuint>(it_idle->second);
+            ALuint bufMove = static_cast<ALuint>(it_move->second);
+
+            // Stop sources before binding buffers — AL_BUFFER on a PLAYING source
+            // triggers AL_INVALID_OPERATION (reused SFX sources may still be playing).
+            alSourceStop(idleSrc);
+            alSourceStop(moveSrc);
+
+            // Idle source: positional, looping, start at idle gain (speed=0).
+            alSourcei (idleSrc, AL_SOURCE_RELATIVE, AL_FALSE);
+            alCheckError_real("updateVehicleEngines:init:AL_SOURCE_RELATIVE(idle)");
+            alSource3f(idleSrc, AL_VELOCITY,      0.f, 0.f, 0.f);
+            alCheckError_real("updateVehicleEngines:init:AL_VELOCITY(idle)");
+            alSourcef (idleSrc, AL_ROLLOFF_FACTOR, 1.f);
+            alCheckError_real("updateVehicleEngines:init:AL_ROLLOFF_FACTOR(idle)");
+            alSourcef (idleSrc, AL_REFERENCE_DISTANCE, 5.f);
+            alCheckError_real("updateVehicleEngines:init:AL_REFERENCE_DISTANCE(idle)");
+            alSourcef (idleSrc, AL_MAX_DISTANCE, 150.f);
+            alCheckError_real("updateVehicleEngines:init:AL_MAX_DISTANCE(idle)");
+            alSourcef (idleSrc, AL_GAIN,  1.0f);  // speed=0 → full idle gain
+            alCheckError_real("updateVehicleEngines:init:AL_GAIN(idle)");
+            float bp = m_vehicleAudio[i].basePitch.load(std::memory_order_relaxed);
+            alSourcef (idleSrc, AL_PITCH, bp * 0.75f);  // stopped pitch
+            alCheckError_real("updateVehicleEngines:init:AL_PITCH(idle)");
+            alSourcei (idleSrc, AL_BUFFER,  static_cast<ALint>(bufIdle));
+            alCheckError_real("updateVehicleEngines:init:AL_BUFFER(idle)");
+            alSourcei (idleSrc, AL_LOOPING, AL_TRUE);
+            alCheckError_real("updateVehicleEngines:init:AL_LOOPING(idle)");
+
+            // Move source: positional, looping, start at zero gain (speed=0).
+            alSourcei (moveSrc, AL_SOURCE_RELATIVE, AL_FALSE);
+            alCheckError_real("updateVehicleEngines:init:AL_SOURCE_RELATIVE(move)");
+            alSource3f(moveSrc, AL_VELOCITY,      0.f, 0.f, 0.f);
+            alCheckError_real("updateVehicleEngines:init:AL_VELOCITY(move)");
+            alSourcef (moveSrc, AL_ROLLOFF_FACTOR, 1.f);
+            alCheckError_real("updateVehicleEngines:init:AL_ROLLOFF_FACTOR(move)");
+            alSourcef (moveSrc, AL_REFERENCE_DISTANCE, 5.f);
+            alCheckError_real("updateVehicleEngines:init:AL_REFERENCE_DISTANCE(move)");
+            alSourcef (moveSrc, AL_MAX_DISTANCE, 150.f);
+            alCheckError_real("updateVehicleEngines:init:AL_MAX_DISTANCE(move)");
+            alSourcef (moveSrc, AL_GAIN,  0.0f);  // speed=0 → zero move gain
+            alCheckError_real("updateVehicleEngines:init:AL_GAIN(move)");
+            alSourcef (moveSrc, AL_PITCH, bp * 0.75f);
+            alCheckError_real("updateVehicleEngines:init:AL_PITCH(move)");
+            alSourcei (moveSrc, AL_BUFFER,  static_cast<ALint>(bufMove));
+            alCheckError_real("updateVehicleEngines:init:AL_BUFFER(move)");
+            alSourcei (moveSrc, AL_LOOPING, AL_TRUE);
+            alCheckError_real("updateVehicleEngines:init:AL_LOOPING(move)");
+
+            // Set initial position (may be 0,0 until first updateVehicleAudio frame).
+            float wx = m_vehicleAudio[i].worldX.load(std::memory_order_relaxed);
+            float wz = m_vehicleAudio[i].worldZ.load(std::memory_order_relaxed);
+            alSource3f(idleSrc, AL_POSITION, wx, 0.f, wz);
+            alCheckError_real("updateVehicleEngines:init:AL_POSITION(idle)");
+            alSource3f(moveSrc, AL_POSITION, wx, 0.f, wz);
+            alCheckError_real("updateVehicleEngines:init:AL_POSITION(move)");
+
+            alSourcePlay(idleSrc);
+            alCheckError_real("updateVehicleEngines:init:alSourcePlay(idle)");
+            alSourcePlay(moveSrc);
+            alCheckError_real("updateVehicleEngines:init:alSourcePlay(move)");
+
+            m_vehicleAudio[i].pendingInit.store(false, std::memory_order_relaxed);
+            continue;  // Position and pitch/gain are already set for this wake
+        }
+
+        // ---------------------------------------------------------------
+        // Per-frame update: pitch, gain crossblend, position.
+        // Only for fully-initialized sources (pendingInit == false).
+        // ---------------------------------------------------------------
+        if (m_vehicleAudio[i].pendingInit.load(std::memory_order_relaxed)) continue;
+
+        float speed  = m_vehicleAudio[i].speedFraction.load(std::memory_order_relaxed);
+        float bp     = m_vehicleAudio[i].basePitch.load(std::memory_order_relaxed);
+        float wx     = m_vehicleAudio[i].worldX.load(std::memory_order_relaxed);
+        float wz     = m_vehicleAudio[i].worldZ.load(std::memory_order_relaxed);
+
+        // pitch = basePitch × lerp(0.75, 1.35, speedFraction)
+        float pitch  = bp * (0.75f + speed * (1.35f - 0.75f));
+
+        // gain crossblend: idle fades out as speed increases, move fades in.
+        float gainIdle = 1.0f - speed;
+        float gainMove = speed;
+
+        alSourcef(idleSrc, AL_PITCH, pitch);
+        alCheckError_real("updateVehicleEngines:AL_PITCH(idle)");
+        alSourcef(moveSrc, AL_PITCH, pitch);
+        alCheckError_real("updateVehicleEngines:AL_PITCH(move)");
+
+        alSourcef(idleSrc, AL_GAIN, gainIdle * m_sfxVolume.load(std::memory_order_relaxed));
+        alCheckError_real("updateVehicleEngines:AL_GAIN(idle)");
+        alSourcef(moveSrc, AL_GAIN, gainMove * m_sfxVolume.load(std::memory_order_relaxed));
+        alCheckError_real("updateVehicleEngines:AL_GAIN(move)");
+
+        alSource3f(idleSrc, AL_POSITION, wx, 0.f, wz);
+        alCheckError_real("updateVehicleEngines:AL_POSITION(idle)");
+        alSource3f(moveSrc, AL_POSITION, wx, 0.f, wz);
+        alCheckError_real("updateVehicleEngines:AL_POSITION(move)");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// cleanupFinishedSFX — audio thread, called each wake after updateVehicleEngines.
+//
+// Reclaims SFX pool sources whose non-looping one-shot playback has ended.
+// Runs exclusively on the audio thread so that:
+//   - alGetSourcei(AL_SOURCE_STATE) and alSourcei(AL_BUFFER, 0) are never
+//     called from the main thread concurrently with audio-thread AL calls.
+//   - Errors from these calls cannot bleed into alCheckError_real and
+//     falsely disable audio (the bug fixed by this refactor).
+//
+// Vehicle engine sources (SFX_VEHICLE_ENGINE_IDLE/MOVE) are skipped; they are
+// looping and managed exclusively by updateVehicleEngines().
+// ---------------------------------------------------------------------------
+void AudioSystem::cleanupFinishedSFX() {
+    for (int i = 0; i < kEvictableSFXCount; ++i) {
+        if (!m_sfxSlots[i].occupied) continue;
+        // Vehicle engine sources loop forever and are managed by updateVehicleEngines.
+        // Use the atomic m_sfxVehicleReserved flag — reading the non-atomic
+        // m_sfxSlots[i].soundId while the main thread writes it is a data race.
+        // The acquire load pairs with the release store in acquireVehicleEnginePair.
+        if (m_sfxVehicleReserved[i].load(std::memory_order_acquire)) continue;
+
+        ALint state = AL_STOPPED;
+        alGetSourcei(static_cast<ALuint>(m_sources[i]), AL_SOURCE_STATE, &state);
+        alCheckError_real("cleanupFinishedSFX:alGetSourcei");
+        if (state == AL_STOPPED) {
+            alSourcei(static_cast<ALuint>(m_sources[i]), AL_BUFFER, 0);
+            alCheckError_real("cleanupFinishedSFX:alSourcei(AL_BUFFER,0)");
+            onSourceRecycled(i);
+            m_sfxSlots[i] = SFXSlot{};
+        }
+    }
 }

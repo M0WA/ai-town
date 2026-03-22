@@ -161,8 +161,8 @@ enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 
 The 24 Traffic/Vehicle SFX pool slots support a maximum of **12 simultaneously-audible vehicles** because each vehicle requires 2 sources (one for `sfx_vehicle_engine_idle`, one for `sfx_vehicle_engine_move`, crossblended in real time).
 
-- **Paired acquisition**: `AudioSourcePool::acquireVehicleEnginePair(ALuint& outIdle, ALuint& outMove)` must atomically reserve 2 SFX pool slots or return `false` and reserve neither. This prevents orphaned single-source vehicles.
-- **Paired release**: `AudioSourcePool::releaseVehicleEnginePair(ALuint idle, ALuint move)` returns both sources to the pool atomically. Never release only one of a pair.
+- **Paired acquisition**: `AudioSourcePool::acquireVehicleEnginePair(ZoneType zone)` must atomically reserve 2 SFX pool slots and return `std::pair<int,int>{idleIdx, moveIdx}`, or return `{-1, -1}` and reserve neither if the pool is exhausted. Indices are opaque pool-internal integers — not `ALuint` handles. This prevents orphaned single-source vehicles.
+- **Paired release**: `AudioSourcePool::releaseVehicleEnginePair(int idleIdx, int moveIdx)` returns both sources to the pool atomically. Never release only one of a pair.
 - **Eviction unit**: When the pool must evict to satisfy a new vehicle acquisition request, the eviction candidate selection must find the lowest-priority vehicle pair (both sources share the same vehicle entity priority and distance) and evict both together.
 - **Audio LOD cull**: Vehicle engine sources are culled (pair released) when the vehicle exceeds **150 m** from the listener. This aligns with the `AL_INVERSE_DISTANCE_CLAMPED` max distance of 150 m for traffic/vehicles — beyond this distance the attenuation model produces inaudible output anyway.
 - **Re-entry**: When a culled vehicle re-enters the 150 m range, a new `acquireVehicleEnginePair()` call is attempted. If the pool is full (12 vehicles already active), the re-entering vehicle receives no engine audio until a slot becomes available via eviction.
@@ -178,6 +178,13 @@ struct VehiclePairSlot {
     int  moveSourceIdx{-1};   // index into sources[] for the move source (-1 = unused)
     float listenerDistanceSq{0.f}; // cached squared distance at last update (for eviction selection)
     int   priority{0};        // copied from the vehicle entity priority at acquire time
+    // Per-frame state written by the main thread in updateVehicleAudio(); read by the audio
+    // thread on each wake to apply AL_PITCH, AL_GAIN crossblend, and AL_POSITION.
+    // Must be std::atomic<float>: updateVehicleAudio() is called on the main thread while
+    // the audio thread concurrently reads these values (same pattern as m_occlusionGainTarget).
+    std::atomic<float> speedFraction{0.f};  // normalised 0.0 (stopped) → 1.0 (max speed)
+    std::atomic<float> worldX{0.f};         // world-space X for AL_POSITION
+    std::atomic<float> worldZ{0.f};         // world-space Z for AL_POSITION
 };
 std::array<VehiclePairSlot, 12> m_vehiclePairs{};  // up to 12 active vehicles (kMaxVehiclePairs = 12)
 ```
@@ -194,11 +201,83 @@ std::array<VehiclePairSlot, 12> m_vehiclePairs{};  // up to 12 active vehicles (
 4. Assign the newly-freed pair slot to the incoming vehicle. Return the pair index.
 5. **Partial acquisition is prohibited**: if either source index within the pair cannot be acquired after eviction (implementation error), the entire acquisition fails — call `onSourceRecycled` on any partially-acquired source, mark it free, and return `(-1, -1)`.
 
-**`releaseVehicleEnginePair(int pairIdx)`**:
+**`releaseVehicleEnginePair(int idleIdx, int moveIdx)`**:
 
-1. Look up `m_vehiclePairs[pairIdx]`.
-2. Call `onSourceRecycled(idleSourceIdx)` and `onSourceRecycled(moveSourceIdx)`.
+- **Invalid-index guard**: if `idleIdx == -1 || moveIdx == -1`, return immediately (no-op). Callers that store the result of a failed `acquireVehicleEnginePair()` call receive `{-1, -1}` and must call `releaseVehicleEnginePair(-1, -1)` without ill effect; the guard prevents double-free or out-of-bounds access.
+
+1. Locate the pair slot: scan `m_vehiclePairs` for the entry where `idleSourceIdx == idleIdx && moveSourceIdx == moveIdx`. If no matching slot is found (implementation error or already released), log a warning and return.
+2. Call `onSourceRecycled(idleIdx)` and `onSourceRecycled(moveIdx)`.
 3. Return both source indices to the free pool.
-4. Reset `m_vehiclePairs[pairIdx]` to `{-1, -1, 0.f, 0}`.
+4. Reset the matched `VehiclePairSlot`: set `idleSourceIdx` and `moveSourceIdx` to -1, `listenerDistanceSq` to 0.f, `priority` to 0; store 0.f to `speedFraction`, `worldX`, and `worldZ` atomics.
 
-Releasing only one source of a pair (e.g., on LOD cull) is prohibited. The cull path must call `releaseVehicleEnginePair(pairIdx)` — never free individual sources from a pair via `acquireSFXSource`/release paths.
+Releasing only one source of a pair (e.g., on LOD cull) is prohibited. The cull path must call `releaseVehicleEnginePair(idleIdx, moveIdx)` — never free individual sources from a pair via `acquireSFXSource`/release paths.
+
+## SFX Pool Thread Safety — `m_sfxVehicleReserved` and `cleanupFinishedSFX`
+
+### The race hazard
+
+`AudioSystem` maintains a `SFXSlot m_sfxSlots[kEvictableSFXCount]` array on the main thread
+(populated by `acquireVehicleEnginePair`, cleared by `releaseVehicleEnginePair`). A background
+cleanup function `cleanupFinishedSFX()` runs on the **audio thread** each wake to reclaim
+finished one-shot SFX sources. If `cleanupFinishedSFX` reads `m_sfxSlots[i].soundId` to
+identify vehicle engine sources to skip, that read races with the main-thread write to the same
+struct. This is a C++ data race (UB): the main thread can write `soundId = SFX_VEHICLE_ENGINE_IDLE`
+while the audio thread reads the uninitialized or partially-written value, bypasses the vehicle
+guard, and calls `alSourcei(AL_BUFFER, 0)` on a PLAYING vehicle engine source, triggering
+`AL_INVALID_OPERATION` which disables the audio system.
+
+### Fix — `m_sfxVehicleReserved[]` atomic flag
+
+`AudioSystem` MUST declare:
+
+```cpp
+std::atomic<bool> m_sfxVehicleReserved[kEvictableSFXCount]{};
+```
+
+This flag is the **only** data-race-free way for `cleanupFinishedSFX` to identify vehicle
+engine sources without reading the non-atomic `m_sfxSlots[i].soundId` field.
+
+**Ordering rules**:
+
+- `acquireVehicleEnginePair()` — main thread: call
+  `m_sfxVehicleReserved[idleIdx].store(true, memory_order_release)` and
+  `m_sfxVehicleReserved[moveIdx].store(true, memory_order_release)` **BEFORE** assigning
+  `m_sfxSlots[idleIdx]` and `m_sfxSlots[moveIdx]`. The release barrier ensures the flag
+  is visible to the audio thread before the non-atomic slot write.
+
+- `releaseVehicleEnginePair()` — main thread: call
+  `m_sfxVehicleReserved[idleIdx].store(false, memory_order_release)` and
+  `m_sfxVehicleReserved[moveIdx].store(false, memory_order_release)` **BEFORE** clearing
+  `m_sfxSlots[idleIdx]` and `m_sfxSlots[moveIdx]`.
+
+- Eviction path inside `acquireVehicleEnginePair()` — main thread: call
+  `m_sfxVehicleReserved[evictIdle/evictMove].store(false, memory_order_release)` **BEFORE**
+  clearing the evicted `m_sfxSlots` entries.
+
+- `cleanupFinishedSFX()` — audio thread: replace any read of `m_sfxSlots[i].soundId` with
+  `m_sfxVehicleReserved[i].load(memory_order_acquire)`. If the flag is true, `continue`
+  (skip the slot — it is a vehicle engine source managed by `updateVehicleEngines()`).
+
+### `cleanupFinishedSFX()` — audio-thread SFX reclamation
+
+`cleanupFinishedSFX()` is a private `AudioSystem` method called **once per audio thread wake**
+immediately after `updateVehicleEngines()`:
+
+```text
+updateStreams(dt);
+updateOcclusion();
+updateDuckState(dt);
+updateVehicleEngines();
+cleanupFinishedSFX();   ← audio thread only
+```
+
+It iterates `m_sfxSlots[0..kEvictableSFXCount-1]` and, for each occupied non-vehicle slot,
+queries `AL_SOURCE_STATE`. If `AL_STOPPED`, it calls `alSourcei(src, AL_BUFFER, 0)`,
+`onSourceRecycled(i)`, and clears the slot. Running this **exclusively on the audio thread**
+eliminates the TOCTOU race where a main-thread `alSourcei(AL_BUFFER, 0)` races with
+audio-thread AL calls and injects a spurious `AL_INVALID_OPERATION` into the shared OpenAL
+context error state.
+
+**MUST NOT** run on the main thread (e.g., inside `AudioSystem::update()`). Any prior
+implementation that performed SFX cleanup on the main thread must be replaced with this
+audio-thread pattern.

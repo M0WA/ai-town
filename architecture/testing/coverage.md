@@ -1,16 +1,22 @@
 # Coverage (Linux only)
 
-- **Minimum 95% line coverage** on `src/simulation/`, `src/terrain/`, `src/ui/` (Phase 6 target; Phase 5 gate was 80%)
+- **Coverage target range: 95–98% total line coverage** on `src/simulation/`, `src/terrain/`, `src/ui/`.
+  Minimum hard gate: **95%** (Phase 6+). Aspirational target: **98%**.
+  `make test` enforces the 95% gate locally; CI `coverage-linux` job enforces the same threshold.
   - `src/ui/` coverage is achievable only via an `IUIBackend` interface (see `testability-architecture.md`). Direct Irrlicht calls in `UIManager` must be abstracted behind `IUIBackend` before `src/ui/` is added to the coverage gate.
 - Coverage enforcement scoped to the Linux GCC/Clang build only. Windows builds run all tests but do not gate on coverage percentage.
 - `gcov` / `lcov` on Linux; enable via `-DENABLE_COVERAGE=ON`
 
 ```bash
 # --base-directory must be the repo root; $(pwd) assumes you run this command from the repo root.
-# --ignore-errors mismatch: GCC 13 geninfo emits "mismatched end line" for inline functions
-# and lambdas in headers (GTest macros, fmt). Benign; does not affect accuracy.
+# --ignore-errors mismatch,inconsistent,version:
+#   mismatch     — GCC 13 geninfo emits "mismatched end line" for inline functions/lambdas
+#                  in headers (GTest macros, fmt). Benign; does not affect accuracy.
+#   inconsistent — suppresses inconsistent line-count warnings in GCC 13 + lcov 2.x.
+#   version      — suppresses GCC/gcov version-string mismatch when build and capture
+#                  gcov versions differ (e.g. built with B33*, capturing with B42*).
 lcov --capture --directory build --base-directory $(pwd) \
-     --ignore-errors mismatch \
+     --ignore-errors mismatch,inconsistent,version \
      --output-file coverage.info
 # --base-directory normalizes all source file paths to be relative to the repo root,
 # preventing path mismatches between the source tree and gcov .gcda paths that would

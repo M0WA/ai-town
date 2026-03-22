@@ -25,6 +25,7 @@
 #include "src/ui/PauseMenuPanel.h"
 #include "src/ui/SettingsPanel.h"
 #include "src/ui/ModalDialog.h"
+#include "src/ui/BudgetDetailPanel.h"  // Phase 11h: budget panel toggle via treasury label click
 
 // Explicit interface includes for method calls on forward-declared pointers.
 #include "src/interfaces/IAudioSystem.h"
@@ -39,7 +40,8 @@
 #include "src/interfaces/IRenderer.h"       // IRenderer — for setZoneOverlay, pickTerrainTile
 #include "src/interfaces/ITerrainQuery.h"   // ITerrainQuery — for earthworks cost computation
 #include "src/interfaces/simulation_types.h"  // ZoneType, DensityTier, ServiceBuildingType
-#include "src/simulation/SaveSystem.h"        // SaveSystem — Phase 11 manual save + quit-guard
+#include "src/interfaces/ISaveSystem.h"        // ISaveSystem — Phase 11c interface abstraction
+#include "src/simulation/SaveSystem.h"         // SaveResult/LoadResult types used in save wiring
 
 #include <algorithm>
 #include <string>
@@ -57,6 +59,7 @@ namespace {
     constexpr int kKeyR      = 82;   // Irrlicht KEY_KEY_R
     constexpr int kKeyT      = 84;   // Irrlicht KEY_KEY_T
     constexpr int kKeyU      = 85;   // Irrlicht KEY_KEY_U
+    constexpr int kKeyS      = 83;   // Irrlicht KEY_KEY_S
     constexpr int kKeyZ      = 90;   // Irrlicht KEY_KEY_Z
     constexpr int kKeyLCtrl  = 162;  // Irrlicht KEY_LCONTROL
     constexpr int kKeyRCtrl  = 163;  // Irrlicht KEY_RCONTROL
@@ -111,6 +114,19 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
 
     // Wire pause menu into settings panel for back-navigation (Settings > back to Pause).
     m_settings->setPauseMenu(m_pauseMenu);
+
+    // Wire modal dialog into settings panel (for WASD preset + Restore Defaults modals).
+    // m_modal is constructed immediately before this call (see line above).
+    m_settings->setModal(m_modal);
+
+    // Wire keybindings apply callback: SettingsPanel calls this on Controls Apply.
+    m_settings->setKeybindingsApplyFn([this](const KeyBindings& b){ applyKeybindings(b); });
+
+    // Seed SettingsPanel with the current (default) keybindings so the Controls tab
+    // opens with the right state. (loadKeybindings() may not have been called yet —
+    // setCurrentBindings is re-called after loadKeybindings() in main.cpp. The seeding
+    // here ensures the Controls tab is never open with uninitialised bindings.)
+    m_settings->setCurrentBindings(m_keyBindings);
 
     // Create the background scrim element (50% opacity, hidden initially).
     // The scrim sits at Z-slot 9 between the settings panel (slot 8) and
@@ -296,6 +312,8 @@ bool UIManager::onEvent(const InputEvent& event) {
         if (event.type == InputEvent::Type::KeyDown && event.keyCode == kKeyEscape) {
             m_inspector->hide();
             m_inspectorOpen = false;
+            // Phase 11d Deliverable 4a: hide service coverage overlay on inspector close.
+            if (m_renderer) m_renderer->hideServiceCoverageOverlay();
             return true;
         }
 
@@ -323,6 +341,8 @@ bool UIManager::onEvent(const InputEvent& event) {
                     // Outside click — close inspector, consume event.
                     m_inspector->hide();
                     m_inspectorOpen = false;
+                    // Phase 11d Deliverable 4a: hide service coverage overlay on outside click.
+                    if (m_renderer) m_renderer->hideServiceCoverageOverlay();
                     return true;
                 }
             }
@@ -370,12 +390,31 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_inspector->populate(result, hitX, hitZ,
                                       event.x, event.y, tileBounds);
                 m_inspectorOpen = true;
+                // Phase 11d Deliverable 4a: show service coverage overlay when
+                // the queried tile holds a service building.
+                if (m_renderer &&
+                    result.serviceType != ServiceBuildingType::None) {
+                    m_renderer->showServiceCoverageOverlay(
+                        hitX, hitZ, result.serviceType, result.degraded);
+                }
             }
             return true;
         }
         // No terrain hit (ray missed all geometry) — do NOT return here.
         // Fall through to Priority 5 so toolbar buttons and other HUD regions
         // remain responsive when Query tool is active.
+    }
+
+    // ============================================================
+    // Priority 4a: BudgetDetailPanel (when open) — Phase 11h.
+    // Escape closes the panel; outside clicks pass through.
+    // ============================================================
+    if (m_budgetPanelOpen) {
+        if (event.type == InputEvent::Type::KeyDown && event.keyCode == kKeyEscape) {
+            if (m_hud && m_hud->getBudgetDetail()) m_hud->getBudgetDetail()->hide();
+            m_budgetPanelOpen = false;
+            return true;
+        }
     }
 
     // ============================================================
@@ -483,6 +522,24 @@ bool UIManager::onEvent(const InputEvent& event) {
             }
         }
 
+        // --- Ctrl+S: Manual save (Gameplay only) ---
+        if (event.keyCode == kKeyS && m_ctrlDown && m_state == GameState::Gameplay) {
+            if (m_saveSystem) {
+                // Post-V1: slot picker dialog
+                SaveResult result = m_saveSystem->saveToSlot(1);
+                if (result.ok) {
+                    setUnsavedChanges(false);
+                } else {
+                    // Manual save failure — show blocking Retry/Cancel modal.
+                    if (m_modal) {
+                        m_pendingSaveFailure = true;
+                        m_modal->showSaveFailure(result.error);
+                    }
+                }
+            }
+            return true;
+        }
+
         // --- Hotkeys (only during Gameplay) ---
         if (m_state == GameState::Gameplay) {
             // B: toggle notification log / bell
@@ -505,6 +562,7 @@ bool UIManager::onEvent(const InputEvent& event) {
             // Z: Zone tool hotkey
             if (event.keyCode == kKeyZ && !m_ctrlDown) {
                 m_activeTool = ActiveTool::Zone;
+                if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
                 if (m_hud) m_hud->setActiveToolLabel("Zone");
                 updateSubPanelVisibility();
                 return true;
@@ -513,6 +571,7 @@ bool UIManager::onEvent(const InputEvent& event) {
             // R: Road tool hotkey
             if (event.keyCode == kKeyR) {
                 m_activeTool = ActiveTool::Road;
+                if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
                 if (m_hud) m_hud->setActiveToolLabel("Road");
                 updateSubPanelVisibility();
                 return true;
@@ -521,6 +580,7 @@ bool UIManager::onEvent(const InputEvent& event) {
             // U: Utilities tool hotkey
             if (event.keyCode == kKeyU) {
                 m_activeTool = ActiveTool::Utilities;
+                if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
                 if (m_hud) m_hud->setActiveToolLabel("Utilities");
                 updateSubPanelVisibility();
                 return true;
@@ -529,6 +589,7 @@ bool UIManager::onEvent(const InputEvent& event) {
             // D: Demolish tool hotkey
             if (event.keyCode == kKeyD) {
                 m_activeTool = ActiveTool::Demolish;
+                if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
                 if (m_hud) m_hud->setActiveToolLabel("Demolish");
                 updateSubPanelVisibility();
                 return true;
@@ -542,6 +603,7 @@ bool UIManager::onEvent(const InputEvent& event) {
             if (event.keyCode == kKeyI) {
                 if (m_activeTool == ActiveTool::Query) {
                     m_activeTool = ActiveTool::None;
+                    if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
                     if (m_hud) m_hud->setActiveToolLabel("No tool");
                     if (m_inspectorOpen) {
                         m_inspector->hide();
@@ -549,6 +611,7 @@ bool UIManager::onEvent(const InputEvent& event) {
                     }
                 } else {
                     m_activeTool = ActiveTool::Query;
+                    if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
                     if (m_hud) m_hud->setActiveToolLabel("Query");
                     // Open inspector directly (existing behaviour preserved).
                     if (!m_inspectorOpen) {
@@ -624,22 +687,26 @@ bool UIManager::onEvent(const InputEvent& event) {
 
             if (y >= 64 && y < 112) {          // Zone
                 m_activeTool = ActiveTool::Zone;
+                if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
                 if (m_hud) m_hud->setActiveToolLabel("Zone");
                 updateSubPanelVisibility();
                 // Phase 10: ui_click SFX on toolbar button press.
                 if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 120 && y < 168) {  // Road
                 m_activeTool = ActiveTool::Road;
+                if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
                 if (m_hud) m_hud->setActiveToolLabel("Road");
                 updateSubPanelVisibility();
                 if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 176 && y < 224) {  // Utilities
                 m_activeTool = ActiveTool::Utilities;
+                if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
                 if (m_hud) m_hud->setActiveToolLabel("Utilities");
                 updateSubPanelVisibility();
                 if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             } else if (y >= 232 && y < 280) {  // Demolish
                 m_activeTool = ActiveTool::Demolish;
+                if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
                 if (m_hud) m_hud->setActiveToolLabel("Demolish");
                 updateSubPanelVisibility();
                 if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
@@ -649,6 +716,7 @@ bool UIManager::onEvent(const InputEvent& event) {
                 // Contrast with I hotkey which opens the inspector immediately.
                 if (m_activeTool == ActiveTool::Query) {
                     m_activeTool = ActiveTool::None;
+                    if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
                     if (m_hud) m_hud->setActiveToolLabel("No tool");
                     if (m_inspectorOpen) {
                         m_inspector->hide();
@@ -656,6 +724,7 @@ bool UIManager::onEvent(const InputEvent& event) {
                     }
                 } else {
                     m_activeTool = ActiveTool::Query;
+                    if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
                     if (m_hud) m_hud->setActiveToolLabel("Query");
                 }
                 updateSubPanelVisibility();
@@ -704,6 +773,21 @@ bool UIManager::onEvent(const InputEvent& event) {
             return true;
         }
 
+        // Treasury balance label (top-left: x=8,y=8,w=200,h=48 → click region 8-208, 8-56).
+        // Phase 11h: click toggles BudgetDetailPanel.
+        if (inRect(event.x, event.y, 8, 8, 200, 48)) {
+            if (m_hud && m_hud->getBudgetDetail()) {
+                m_budgetPanelOpen = !m_budgetPanelOpen;
+                if (m_budgetPanelOpen) {
+                    m_hud->getBudgetDetail()->show();
+                } else {
+                    m_hud->getBudgetDetail()->hide();
+                }
+                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
+            }
+            return true;
+        }
+
         // Minimap (bottom-right).
         Rect minimapBounds = m_minimap->getBounds();
         if (inRect(event.x, event.y, minimapBounds.x, minimapBounds.y,
@@ -719,31 +803,35 @@ bool UIManager::onEvent(const InputEvent& event) {
     // ============================================================
 
     // ============================================================
-    // Priority 6b: RMB cancels the active tool (deselects it).
+    // Priority 6b: RMB *click* (release without drag) cancels the active tool.
     // Only during Gameplay when a non-None tool is active.
-    // The camera drag starts after this check (EventReceiver sets m_rmbDragActive
-    // and forwards to CameraController only when UIManager returns false here).
-    // RMB down with an active tool: deselect the tool and consume the event so
-    // CameraController does NOT start a camera drag on the same press.
+    // EventReceiver only delivers RMB-up here when no camera drag occurred
+    // (m_rmbMoved == false in EventReceiver), so this handler fires exclusively
+    // on short right-clicks.  RMB drag always starts the camera and never
+    // reaches this branch.
     // ============================================================
     if (m_state == GameState::Gameplay &&
-        event.type == InputEvent::Type::MouseButtonDown &&
+        event.type == InputEvent::Type::MouseButtonUp &&
         event.button == 1 &&
         m_activeTool != ActiveTool::None) {
         // Close any open sub-panels and clear the active tool.
         m_activeTool = ActiveTool::None;
+        if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
         if (m_hud) m_hud->setActiveToolLabel("No tool");
         updateSubPanelVisibility();
         // Also clear zone/road anchor and placement preview in case a drag was in progress.
         m_zoneAnchorX = -1;
         m_zoneAnchorZ = -1;
         m_lmbHeld = false;
-        if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u);
+        if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u, {});
         // Clear the hover highlight so the last-hovered tile quad is not frozen
         // on screen after the tool is deselected.  The MouseMove handler at Priority 7
         // is gated on m_activeTool != None, so without this call m_hoverVisible
         // stays true and the quad persists until the next MouseMove.
-        if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
+        if (m_renderer) m_renderer->clearDemolishHighlight();
+        m_demolishPendingTileX = -1;
+        m_demolishPendingTileZ = -1;
+        if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1);
         m_hoveredTileX = -1;
         m_hoveredTileZ = -1;
         return true;  // Consumed: tool deselected.
@@ -788,6 +876,14 @@ bool UIManager::onEvent(const InputEvent& event) {
                     int z1 = std::max(m_zoneAnchorZ, releaseZ);
                     for (int tz = z0; tz <= z1; ++tz) {
                         for (int tx = x0; tx <= x1; ++tx) {
+                            // Phase 11d Deliverable 5d: skip tiles already occupied
+                            // (isRoad || isZoned) — sim guard already rejects them, but
+                            // skipping here avoids triggering the placeZone early-return
+                            // for every blocked tile in the rect.
+                            if (m_sim) {
+                                QueryResult q = m_sim->queryTile(tx, tz);
+                                if (q.isRoad || q.isZoned) continue;
+                            }
                             doTerrainPlacement(tx, tz);
                         }
                     }
@@ -795,7 +891,7 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_zoneAnchorX = -1;
                 m_zoneAnchorZ = -1;
                 // Clear placement preview.
-                m_renderer->setTilePlacementPreview({}, 0u);
+                m_renderer->setTilePlacementPreview({}, 0u, {});
             }
 
             // Road tool: commit straight-line placement on mouse-up.
@@ -810,6 +906,11 @@ bool UIManager::onEvent(const InputEvent& event) {
                         int x0 = std::min(m_zoneAnchorX, releaseX);
                         int x1 = std::max(m_zoneAnchorX, releaseX);
                         for (int tx = x0; tx <= x1; ++tx) {
+                            // Phase 11d Deliverable 5d: skip occupied tiles.
+                            if (m_sim) {
+                                QueryResult q = m_sim->queryTile(tx, m_zoneAnchorZ);
+                                if (q.isRoad || q.isZoned) continue;
+                            }
                             doTerrainPlacement(tx, m_zoneAnchorZ);
                         }
                     } else {
@@ -817,6 +918,11 @@ bool UIManager::onEvent(const InputEvent& event) {
                         int z0 = std::min(m_zoneAnchorZ, releaseZ);
                         int z1 = std::max(m_zoneAnchorZ, releaseZ);
                         for (int tz = z0; tz <= z1; ++tz) {
+                            // Phase 11d Deliverable 5d: skip occupied tiles.
+                            if (m_sim) {
+                                QueryResult q = m_sim->queryTile(m_zoneAnchorX, tz);
+                                if (q.isRoad || q.isZoned) continue;
+                            }
                             doTerrainPlacement(m_zoneAnchorX, tz);
                         }
                     }
@@ -824,7 +930,48 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_zoneAnchorX = -1;
                 m_zoneAnchorZ = -1;
                 // Clear placement preview.
-                m_renderer->setTilePlacementPreview({}, 0u);
+                m_renderer->setTilePlacementPreview({}, 0u, {});
+            }
+
+            // Phase 11h: Demolish tool — mouse-up triggers confirmation modal or immediate demolish.
+            if (m_activeTool == ActiveTool::Demolish && m_demolishPendingTileX != -1) {
+                int upHitX = -1, upHitZ = -1;
+                bool hitTerrain = m_renderer->pickTerrainTile(event.physX, event.physY,
+                                                               upHitX, upHitZ);
+                if (hitTerrain &&
+                    upHitX == m_demolishPendingTileX && upHitZ == m_demolishPendingTileZ) {
+                    // Mouse released on same tile as press — confirm demolish.
+                    if (m_demolishConfirmEnabled && m_modal) {
+                        m_modal->showDemolishConfirm(1);
+                        m_demolishModalPending = true;
+                    } else {
+                        // Immediate demolish (confirm disabled).
+                        if (m_sim) {
+                            m_sim->demolishTile(m_demolishPendingTileX, m_demolishPendingTileZ);
+                            if (m_mapTilesX > 0 && m_mapTilesZ > 0) {
+                                uint64_t key = static_cast<uint64_t>(m_demolishPendingTileZ)
+                                               * static_cast<uint64_t>(m_mapTilesX)
+                                               + static_cast<uint64_t>(m_demolishPendingTileX);
+                                m_overlayMap.erase(key);
+                                if (m_renderer) {
+                                    m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ,
+                                                               m_overlayMap);
+                                }
+                            }
+                            setUnsavedChanges(true);
+                        }
+                        m_renderer->clearDemolishHighlight();
+                        m_demolishPendingTileX = -1;
+                        m_demolishPendingTileZ = -1;
+                    }
+                } else {
+                    // Mouse released on a different tile — cancel.
+                    m_renderer->clearDemolishHighlight();
+                    m_demolishPendingTileX = -1;
+                    m_demolishPendingTileZ = -1;
+                }
+                m_lmbHeld = false;
+                return true;  // Consumed.
             }
 
             m_lmbHeld = false;
@@ -835,14 +982,40 @@ bool UIManager::onEvent(const InputEvent& event) {
             int hitX = -1, hitZ = -1;
             if (m_renderer->pickTerrainTile(event.physX, event.physY, hitX, hitZ)) {
                 // Determine hover colour from active tool.
+                // Zone tool: colour depends on selected zone type (res/com/ind).
                 uint32_t colour = 0u;
                 switch (m_activeTool) {
-                    case ActiveTool::Zone:      colour = kHoverArgbZone;      break;
+                    case ActiveTool::Zone:
+                        switch (m_selectedZoneType) {
+                            case 1:  colour = kHoverArgbZoneCom; break;  // Commercial
+                            case 2:  colour = kHoverArgbZoneInd; break;  // Industrial
+                            default: colour = kHoverArgbZoneRes; break;  // Residential
+                        }
+                        if (m_renderer) m_renderer->setZoneHoverColour(colour);
+                        break;
                     case ActiveTool::Road:      colour = kHoverArgbRoad;      break;
                     case ActiveTool::Utilities: colour = kHoverArgbUtilities; break;
                     case ActiveTool::Demolish:  colour = kHoverArgbDemolish;  break;
                     case ActiveTool::Query:     colour = kHoverArgbQuery;     break;
                     default:                    colour = kHoverArgbClear;     break;
+                }
+
+                // Phase 11d Deliverable 5d: override hover colour to blocked red when
+                // the Zone or Road tool is hovering over an already-occupied tile
+                // (isRoad || isZoned).  Only applied to single-tile hover; drag rect
+                // preview partitioning handles the multi-tile case below.
+                //
+                // Phase 11h: blocked state is signalled to the renderer via
+                // setTileHoverHighlight footprintSize=0 (sentinel for "blocked").
+                bool tileIsBlocked = false;
+                if (m_sim &&
+                    (m_activeTool == ActiveTool::Zone || m_activeTool == ActiveTool::Road) &&
+                    !(m_lmbHeld && m_zoneAnchorX != -1)) {
+                    QueryResult hoverQ = m_sim->queryTile(hitX, hitZ);
+                    if (hoverQ.isRoad || hoverQ.isZoned) {
+                        colour = kHoverArgbBlocked;
+                        tileIsBlocked = true;
+                    }
                 }
 
                 // Zone tool with anchor active: show rect preview instead of single-tile hover.
@@ -851,61 +1024,101 @@ bool UIManager::onEvent(const InputEvent& event) {
                     int x1 = std::max(m_zoneAnchorX, hitX);
                     int z0 = std::min(m_zoneAnchorZ, hitZ);
                     int z1 = std::max(m_zoneAnchorZ, hitZ);
-                    std::vector<std::pair<int,int>> previewTiles;
-                    previewTiles.reserve(static_cast<size_t>((x1 - x0 + 1) * (z1 - z0 + 1)));
+                    // Phase 11d Deliverable 5d: partition preview tiles into free vs blocked
+                    // so the renderer shows free tiles in zone colour and blocked tiles in red.
+                    std::vector<std::pair<int,int>> freeTiles;
+                    std::vector<std::pair<int,int>> blockedTiles;
+                    const size_t total = static_cast<size_t>((x1 - x0 + 1) * (z1 - z0 + 1));
+                    freeTiles.reserve(total);
+                    blockedTiles.reserve(total);
                     for (int tz = z0; tz <= z1; ++tz) {
                         for (int tx = x0; tx <= x1; ++tx) {
-                            previewTiles.push_back({tx, tz});
+                            if (m_sim) {
+                                QueryResult q = m_sim->queryTile(tx, tz);
+                                if (q.isRoad || q.isZoned) {
+                                    blockedTiles.push_back({tx, tz});
+                                } else {
+                                    freeTiles.push_back({tx, tz});
+                                }
+                            } else {
+                                freeTiles.push_back({tx, tz});
+                            }
                         }
                     }
-                    m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
-                    m_renderer->setTilePlacementPreview(previewTiles, colour);
+                    m_renderer->setTileHoverHighlight(-1, -1);
+                    m_renderer->setTilePlacementPreview(freeTiles, colour, blockedTiles);
                 }
                 // Road tool with anchor active: show axis-snapped line preview.
                 else if (m_lmbHeld && m_activeTool == ActiveTool::Road && m_zoneAnchorX != -1) {
                     int dX = std::abs(hitX - m_zoneAnchorX);
                     int dZ = std::abs(hitZ - m_zoneAnchorZ);
-                    std::vector<std::pair<int,int>> previewTiles;
+                    // Phase 11d Deliverable 5d: partition road preview into free vs blocked.
+                    std::vector<std::pair<int,int>> freeTiles;
+                    std::vector<std::pair<int,int>> blockedTiles;
                     if (dX >= dZ) {
                         int x0 = std::min(m_zoneAnchorX, hitX);
                         int x1 = std::max(m_zoneAnchorX, hitX);
-                        previewTiles.reserve(static_cast<size_t>(x1 - x0 + 1));
+                        freeTiles.reserve(static_cast<size_t>(x1 - x0 + 1));
+                        blockedTiles.reserve(static_cast<size_t>(x1 - x0 + 1));
                         for (int tx = x0; tx <= x1; ++tx) {
-                            previewTiles.push_back({tx, m_zoneAnchorZ});
+                            if (m_sim) {
+                                QueryResult q = m_sim->queryTile(tx, m_zoneAnchorZ);
+                                if (q.isRoad || q.isZoned) {
+                                    blockedTiles.push_back({tx, m_zoneAnchorZ});
+                                } else {
+                                    freeTiles.push_back({tx, m_zoneAnchorZ});
+                                }
+                            } else {
+                                freeTiles.push_back({tx, m_zoneAnchorZ});
+                            }
                         }
                     } else {
                         int z0 = std::min(m_zoneAnchorZ, hitZ);
                         int z1 = std::max(m_zoneAnchorZ, hitZ);
-                        previewTiles.reserve(static_cast<size_t>(z1 - z0 + 1));
+                        freeTiles.reserve(static_cast<size_t>(z1 - z0 + 1));
+                        blockedTiles.reserve(static_cast<size_t>(z1 - z0 + 1));
                         for (int tz = z0; tz <= z1; ++tz) {
-                            previewTiles.push_back({m_zoneAnchorX, tz});
+                            if (m_sim) {
+                                QueryResult q = m_sim->queryTile(m_zoneAnchorX, tz);
+                                if (q.isRoad || q.isZoned) {
+                                    blockedTiles.push_back({m_zoneAnchorX, tz});
+                                } else {
+                                    freeTiles.push_back({m_zoneAnchorX, tz});
+                                }
+                            } else {
+                                freeTiles.push_back({m_zoneAnchorX, tz});
+                            }
                         }
                     }
-                    m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
-                    m_renderer->setTilePlacementPreview(previewTiles, colour);
+                    m_renderer->setTileHoverHighlight(-1, -1);
+                    m_renderer->setTilePlacementPreview(freeTiles, colour, blockedTiles);
                 }
                 // All other cases: single-tile hover highlight (no drag preview).
                 else {
-                    m_renderer->setTilePlacementPreview({}, 0u);
-                    m_renderer->setTileHoverHighlight(hitX, hitZ, colour);
+                    m_renderer->setTilePlacementPreview({}, 0u, {});
+                    // footprintSize: Zone tool uses density-tier footprint (1/2/3),
+                    // all other tools use 1×1.
+                    // footprintSize=0 is a sentinel meaning "blocked" (red highlight).
+                    int hoverFootprint = 1;
+                    if (tileIsBlocked) {
+                        hoverFootprint = 0;  // Phase 11h: 0 = blocked sentinel → red highlight
+                    } else if (m_activeTool == ActiveTool::Zone) {
+                        // m_selectedDensityTier: 0=Low→1, 1=Med→2, 2=High→3
+                        hoverFootprint = m_selectedDensityTier + 1;
+                    } else if (m_activeTool == ActiveTool::Utilities) {
+                        hoverFootprint = 2;  // Service buildings always have a 2×2 footprint
+                    }
+                    m_renderer->setTileHoverHighlight(hitX, hitZ, hoverFootprint);
                 }
 
-                // Utilities and Demolish retain tile-by-tile drag placement
-                // when LMB is held and tile changes.  Zone and Road use the
-                // deferred anchor/release pattern — no placement on move.
-                if (m_lmbHeld &&
-                    (hitX != m_hoveredTileX || hitZ != m_hoveredTileZ) &&
-                    m_activeTool != ActiveTool::Query &&
-                    m_activeTool != ActiveTool::Zone &&
-                    m_activeTool != ActiveTool::Road) {
-                    doTerrainPlacement(hitX, hitZ);
-                }
+                // Zone, Road, Utilities, and Demolish all use click-only or deferred placement.
+                // No tool places on drag (MouseMove while LMB held).
 
                 m_hoveredTileX = hitX;
                 m_hoveredTileZ = hitZ;
             } else {
-                m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
-                m_renderer->setTilePlacementPreview({}, 0u);
+                m_renderer->setTileHoverHighlight(-1, -1);
+                m_renderer->setTilePlacementPreview({}, 0u, {});
                 m_hoveredTileX = -1;
                 m_hoveredTileZ = -1;
             }
@@ -941,7 +1154,7 @@ bool UIManager::onEvent(const InputEvent& event) {
             if (m_activeTool == ActiveTool::Zone) {
                 m_zoneAnchorX = hitX;
                 m_zoneAnchorZ = hitZ;
-                m_renderer->setTilePlacementPreview({}, 0u);
+                m_renderer->setTilePlacementPreview({}, 0u, {});
                 return true;  // Consumed: anchor recorded; no placement yet.
             }
 
@@ -951,8 +1164,18 @@ bool UIManager::onEvent(const InputEvent& event) {
             if (m_activeTool == ActiveTool::Road) {
                 m_zoneAnchorX = hitX;
                 m_zoneAnchorZ = hitZ;
-                m_renderer->setTilePlacementPreview({}, 0u);
+                m_renderer->setTilePlacementPreview({}, 0u, {});
                 return true;  // Consumed: anchor recorded; no placement yet.
+            }
+
+            // Phase 11h: Demolish tool — record pending tile on mouse-down.
+            // The demolish confirmation modal (or immediate demolish) is triggered on mouse-up.
+            if (m_activeTool == ActiveTool::Demolish) {
+                m_demolishPendingTileX = hitX;
+                m_demolishPendingTileZ = hitZ;
+                // The renderer will use demolish red color (ToolMode::Demolish is already set).
+                m_renderer->setTileHoverHighlight(hitX, hitZ, 1);
+                return true;  // Consumed: pending tile recorded; no placement yet.
             }
 
             return doTerrainPlacement(hitX, hitZ);
@@ -1002,21 +1225,11 @@ bool UIManager::doTerrainPlacement(int hitX, int hitZ) {
                              static_cast<DensityTier>(m_selectedDensityTier),
                              earthworksCost);
             if (m_mapTilesX > 0 && m_mapTilesZ > 0) {
-                // Determine overlay colour from zone type.
-                uint32_t overlayColour = 0u;
-                switch (static_cast<ZoneType>(m_selectedZoneType)) {
-                    case ZoneType::Residential: overlayColour = kOverlayArgbResidential; break;
-                    case ZoneType::Commercial:  overlayColour = kOverlayArgbCommercial;  break;
-                    case ZoneType::Industrial:  overlayColour = kOverlayArgbIndustrial;  break;
-                }
-                // Cap overlay map at 100K entries.
-                static constexpr size_t kOverlayCap = 100000u;
+                // placeZone() always places a building immediately — remove the tile from
+                // the overlay so the zone colour doesn't show through/under the building.
                 uint64_t key = static_cast<uint64_t>(hitZ) * static_cast<uint64_t>(m_mapTilesX)
                                + static_cast<uint64_t>(hitX);
-                if (m_overlayMap.size() < kOverlayCap || m_overlayMap.count(key)) {
-                    m_overlayMap[key] = overlayColour;
-                }
-                if (m_renderer) {
+                if (m_overlayMap.erase(key) && m_renderer) {
                     m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
                 }
             }
@@ -1036,32 +1249,9 @@ bool UIManager::doTerrainPlacement(int hitX, int hitZ) {
             break;
         }
         case ActiveTool::Demolish: {
-            if (m_demolishConfirmEnabled) {
-                // Show demolish confirmation modal (Phase 8 code path).
-                // The actual demolishTile() call is deferred until the modal confirms.
-                // For Phase 9b, show the modal and return — tile destruction occurs
-                // when the modal's Accept result is polled.
-                m_modal->showDemolishConfirm(1);
-                // Note: demolishTile is NOT called here; the modal must confirm first.
-                // In the current Phase 9b architecture, UIManager polls modal result
-                // via m_modal->getLastResult() during update(). This wiring is deferred
-                // to the full modal integration — for now the modal is shown and the
-                // event is consumed.
-                setUnsavedChanges(true);
-            } else {
-                // Confirmation suppressed — demolish immediately.
-                m_sim->demolishTile(hitX, hitZ);
-                if (m_mapTilesX > 0 && m_mapTilesZ > 0) {
-                    uint64_t key = static_cast<uint64_t>(hitZ)
-                                   * static_cast<uint64_t>(m_mapTilesX)
-                                   + static_cast<uint64_t>(hitX);
-                    m_overlayMap.erase(key);
-                    if (m_renderer) {
-                        m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
-                    }
-                }
-                setUnsavedChanges(true);
-            }
+            // Phase 11h: Demolish is handled at mouse-up (not mouse-down).
+            // doTerrainPlacement() is no longer called for Demolish — this case
+            // should not be reached in normal flow. No-op defensively.
             break;
         }
         default:
@@ -1194,10 +1384,19 @@ void UIManager::update(float realDeltaSeconds) {
     // 1c. Poll PauseMenuPanel for save/quit requests.
     if (m_pauseMenu) {
         // Manual save: call saveToSlot(1) if SaveSystem is available.
+        // Post-V1: slot picker dialog
         if (m_pauseMenu->consumeSaveRequest()) {
             if (m_saveSystem) {
-                m_saveSystem->saveToSlot(1);
-                setUnsavedChanges(false);
+                SaveResult result = m_saveSystem->saveToSlot(1);
+                if (result.ok) {
+                    setUnsavedChanges(false);
+                } else {
+                    // Manual save failure: show blocking Retry/Cancel modal.
+                    if (m_modal) {
+                        m_pendingSaveFailure = true;
+                        m_modal->showSaveFailure(result.error);
+                    }
+                }
             }
         }
 
@@ -1253,6 +1452,50 @@ void UIManager::update(float realDeltaSeconds) {
             return;
         }
         // DialogResult::Cancel — do nothing, user stays in the game.
+    }
+
+    // 1d2. Handle save-failure modal result (Retry / Cancel).
+    if (m_pendingSaveFailure && m_modal && !m_modal->isActive()) {
+        m_pendingSaveFailure = false;
+        auto result = m_modal->getLastResult();
+        if (result == ModalDialog::DialogResult::Accept && m_saveSystem) {
+            // Retry: call saveToSlot(1) again.
+            SaveResult retryResult = m_saveSystem->saveToSlot(1);
+            if (retryResult.ok) {
+                setUnsavedChanges(false);
+            } else {
+                // Second failure: show modal again.
+                m_pendingSaveFailure = true;
+                m_modal->showSaveFailure(retryResult.error);
+            }
+        }
+        // Cancel: modal dismissed; unsaved-changes dot remains visible.
+    }
+
+    // 1d3. Poll demolish confirmation modal result.
+    if (m_demolishModalPending && m_modal && !m_modal->isActive()) {
+        m_demolishModalPending = false;
+        auto result = m_modal->pollResult();
+        if (result == ModalDialog::DialogResult::Accept) {
+            if (m_sim && m_demolishPendingTileX != -1) {
+                m_sim->demolishTile(m_demolishPendingTileX, m_demolishPendingTileZ);
+                // Remove from overlay map and update zone overlay.
+                if (m_mapTilesX > 0 && m_mapTilesZ > 0 && m_renderer) {
+                    uint64_t key = static_cast<uint64_t>(m_demolishPendingTileZ)
+                                   * static_cast<uint64_t>(m_mapTilesX)
+                                   + static_cast<uint64_t>(m_demolishPendingTileX);
+                    m_overlayMap.erase(key);
+                    m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
+                }
+                setUnsavedChanges(true);
+            }
+            if (m_renderer) m_renderer->clearDemolishHighlight();
+        } else {
+            // No or Cancel — clear highlight only.
+            if (m_renderer) m_renderer->clearDemolishHighlight();
+        }
+        m_demolishPendingTileX = -1;
+        m_demolishPendingTileZ = -1;
     }
 
     // 1e. Forward budget ticks from CitySimulation to SaveSystem (5-tick auto-save gate).
@@ -1415,6 +1658,36 @@ void UIManager::update(float realDeltaSeconds) {
                 // notification handler.  Removing the stinger call here prevents
                 // double-fire: both paths would otherwise fire on the same transition.
                 break;
+
+            case NotificationType::NeighbourCleared:
+                m_notifications->postNormal(
+                    "Neighbour Cleared",
+                    "Neighbouring building cleared for density upgrade.");
+                break;
+
+            case NotificationType::UpgradeBlocked:
+                m_notifications->postCritical(
+                    "Upgrade Blocked",
+                    "Upgrade blocked — clear surrounding tiles.");
+                break;
+
+            case NotificationType::PlacementBlocked:
+                m_notifications->postNormal(
+                    "Placement Blocked",
+                    "Cannot place here — check for occupied tiles or road proximity.");
+                break;
+
+            case NotificationType::BuildingAbandoned:
+                m_notifications->postNormal(
+                    "Building Abandoned",
+                    "Building abandoned — too far from road.");
+                break;
+
+            case NotificationType::BuildingRecovered:
+                m_notifications->postNormal(
+                    "Building Recovered",
+                    "Building recovered — road reconnected.");
+                break;
         }
     }
 }
@@ -1570,6 +1843,8 @@ void UIManager::transitionToMainMenu() {
     m_pauseMenu->hide();
     m_taxPanel->hide();
     m_taxPanelOpen = false;
+    if (m_hud && m_hud->getBudgetDetail()) m_hud->getBudgetDetail()->hide();
+    m_budgetPanelOpen = false;
     m_inspector->hide();
     m_inspectorOpen = false;
 
@@ -1638,13 +1913,14 @@ void UIManager::onNewGame() {
         m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, {});
     }
     m_activeTool   = ActiveTool::None;
+    if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
     m_hoveredTileX = -1;
     m_hoveredTileZ = -1;
     m_zoneAnchorX  = -1;
     m_zoneAnchorZ  = -1;
     m_lmbHeld      = false;
-    if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u);
-    if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1, kHoverArgbClear);
+    if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u, {});
+    if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1);
     updateSubPanelVisibility();
 }
 
@@ -1694,12 +1970,45 @@ void UIManager::loadKeybindings() {
 
     // File exists: parse and apply overrides.
     m_keyBindings.load(path);
+
+    // Propagate loaded bindings to SettingsPanel so Controls tab reopens correctly.
+    if (m_settings) m_settings->setCurrentBindings(m_keyBindings);
+}
+
+// ----------------------------------------------------------------
+// Phase 11c: saveKeybindings — write m_keyBindings to disk.
+// ----------------------------------------------------------------
+void UIManager::saveKeybindings(const KeyBindings& b) {
+    m_keyBindings.copyMutableFrom(b);
+
+    char path[512] = {};
+#if defined(_WIN32)
+    const char* appdata = getenv("APPDATA");
+    if (!appdata || appdata[0] == '\0') return;
+    snprintf(path, sizeof(path), "%s\\aitown\\keybindings.json", appdata);
+#else
+    const char* home = getenv("HOME");
+    if (!home || home[0] == '\0') return;
+    snprintf(path, sizeof(path), "%s/.config/aitown/keybindings.json", home);
+#endif
+
+    m_keyBindings.writeToFile(path);
+}
+
+// ----------------------------------------------------------------
+// Phase 11c: applyKeybindings — update in-memory bindings, persist, update panel.
+// ----------------------------------------------------------------
+void UIManager::applyKeybindings(const KeyBindings& b) {
+    saveKeybindings(b);
+    // Inform SettingsPanel of the newly-applied bindings so the Controls tab
+    // reopens with the correct state next time.
+    if (m_settings) m_settings->setCurrentBindings(b);
 }
 
 // ----------------------------------------------------------------
 // Phase 11: setSaveSystem — bind the SaveSystem for manual save and quit-guard.
 // ----------------------------------------------------------------
-void UIManager::setSaveSystem(SaveSystem* saveSystem) {
+void UIManager::setSaveSystem(ISaveSystem* saveSystem) {
     m_saveSystem = saveSystem;
 }
 

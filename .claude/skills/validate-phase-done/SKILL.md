@@ -32,89 +32,103 @@ Read `implementation/phase-[N].md` in full. Extract:
 - Every exit criterion (every line or sub-bullet in the Exit Criteria section, stripping any
   checkbox prefix)
 
-### Step 2 — Verify each deliverable independently
+Note which specialist roles own which deliverables (see the **Team** table in the phase file).
 
-For every deliverable item, **do not trust the checkbox**. Instead, interpret the deliverable
-text and gather evidence from the codebase:
+### Step 2 — Dispatch domain agents in parallel
 
-- **Source files / headers**: use `Glob` to check the file exists at the expected path;
-  use `Grep` or `Read` to confirm key classes, functions, or constants are present.
-- **Test files**: use `Glob` to find the test file; use `Grep` to confirm the described
-  test cases or test names exist within it.
-- **CI / CMake changes**: use `Read` or `Grep` to confirm the described job, step, flag, or
-  target is present in `ci.yml` / `CMakeLists.txt` / `CMakePresets.json`.
-- **Spec / architecture docs**: use `Read` to confirm the described section or content
-  exists in the relevant `architecture/` file.
-- **Asset files**: use `Glob` to confirm the asset exists at the expected path.
-- **Implementation plan updates** (e.g. "phase marked DONE"): use `Read` on
-  `implementation/INDEX.md` or the relevant phase file.
+Group deliverables and exit criteria by specialist domain. For each domain that has
+deliverables, **launch the appropriate specialist agent** (using the Agent tool) with a
+read-only verification prompt listing every deliverable and criterion in that domain. Launch
+all domain agents in **a single parallel batch** so they run concurrently.
 
-Classify each deliverable as:
+**Domain → agent mapping** (use the role ID from CLAUDE.md):
 
-- **VERIFIED** — evidence found; the deliverable is genuinely present.
-- **UNVERIFIED** — no evidence found; file missing, content absent, or test not implemented.
-- **PARTIAL** — some evidence found but the deliverable appears incomplete (e.g. stub exists
-  but key logic is absent).
+| Domain | Agent type |
+|---|---|
+| C++ graphics / Irrlicht / renderer / TextureCache / CMake | `graphics-dev-irrlicht` |
+| C++ audio / OpenAL | `sound-dev-opensoftal` |
+| C++ simulation logic | `graphics-dev-irrlicht` (or general-purpose) |
+| C++ tests / mocks / CMakeLists test targets | `test-dev-cpp` |
+| CI/CD / GitHub Actions / validate_assets.py | `cicd-dev-github` |
+| 3D model assets (.b3d files, .meta files, generator) | `graphics-artist-3d-model` |
+| 2D texture assets (.dds, .png atlases, texture specs) | `graphics-artist-2d-texture` |
+| UI/UX spec documents | `gamedesign-ux` |
+| Gameplay / simulation spec documents | `gamedesign-lookandfeel` |
 
-### Step 3 — Verify each exit criterion independently
+**Agent prompt requirements** — each agent prompt must:
 
-For every exit criterion, **do not trust any checkbox or TODO marker**. Evaluate whether
-the condition is actually satisfied:
+1. State "READ-ONLY — do not modify any files."
+2. List every deliverable and exit criterion assigned to that domain, quoting the text verbatim
+   from the phase file.
+3. For each item, instruct the agent to find **specific code evidence**: exact file path,
+   line numbers, function/constant names, or file sizes that confirm the item is present and
+   correct.
+4. Instruct the agent to classify each item as VERIFIED / PARTIAL / UNVERIFIED (deliverables)
+   or MET / UNMET / UNVERIFIABLE (exit criteria) with the evidence inline.
 
-- **"All tests pass"** / **"N tests passing"**: look for the test files and check that the
-  described test cases exist and are not skipped/disabled. If CI artifacts are unavailable,
-  note this and verify the test code exists instead.
-- **"Coverage ≥ X%"**: check `architecture/testing/coverage.md` and the CMake gate in
-  `CMakeLists.txt` or `ci.yml` for the threshold; note whether the gate is enforced in CI.
-- **"CI passes"**: check that `ci.yml` contains the relevant jobs and that no obvious
-  blockers are present (missing steps, wrong flags, etc.).
-- **"Spec updated"** / **"architecture file contains X"**: `Read` the referenced file and
-  confirm the content is present.
-- **"Phase marked DONE"**: `Read` `implementation/INDEX.md` and confirm the status.
-- **Narrative criteria with no testable artefact**: state the criterion and explain why it
-  cannot be verified programmatically, then mark as **UNVERIFIABLE** (not a failure).
+Any deliverables not covered by a specialist agent should be verified directly using Glob,
+Grep, and Read.
 
-Classify each criterion as:
+### Step 3 — Collect agent results and synthesise
 
-- **MET** — evidence confirms the condition is satisfied.
-- **UNMET** — evidence is missing or contradicts the condition.
-- **UNVERIFIABLE** — criterion is qualitative/narrative with no inspectable artefact;
-  flag for human review.
+Wait for all agents to complete. For each agent result:
+
+- Record the VERIFIED / PARTIAL / UNVERIFIED / MET / UNMET / UNVERIFIABLE classification.
+- Extract the specific code evidence (file:line, function names, file sizes, etc.) provided
+  by the agent.
 
 ### Step 4 — Output the validation report
+
+Every entry in the report **must include a code evidence citation** — the specific file,
+line number, function name, or measurable fact that supports the classification. Entries
+without code evidence are treated as UNVERIFIED / UNMET.
 
 ```text
 === PHASE [N] VALIDATION ===
 Phase: [N] — [Phase Name]
 Current status in INDEX.md: [Planned | In Progress | Done | ...]
-(Note: checkbox states ignored — all items verified against codebase)
+(Note: checkbox states ignored — all items verified against real codebase by domain agents)
 
 DELIVERABLES ([V] verified / [P] partial / [U] unverified of [T] total)
 
   VERIFIED
-    ✓ <deliverable text> — <one-line evidence summary>
+    ✓ <deliverable text verbatim>
+      Evidence: <file:line — specific function/constant/content found>
+      Agent: <agent role that verified this>
     ...
 
   PARTIAL
-    ~ <deliverable text> — <what was found vs what is missing>
+    ~ <deliverable text verbatim>
+      Found: <what was found, with file:line>
+      Missing: <what is absent or incomplete>
+      Agent: <agent role>
     ...
 
   UNVERIFIED
-    ✗ <deliverable text> — <what was looked for and not found>
+    ✗ <deliverable text verbatim>
+      Looked for: <what was searched>
+      Not found: <what was missing>
+      Agent: <agent role>
     ...
 
 EXIT CRITERIA ([M] met / [UV] unverifiable / [F] unmet of [T] total)
 
   MET
-    ✓ <criterion text> — <one-line evidence summary>
+    ✓ <criterion text verbatim>
+      Evidence: <file:line or measurable fact>
+      Agent: <agent role>
     ...
 
   UNVERIFIABLE (human review needed)
-    ? <criterion text>
+    ? <criterion text verbatim>
+      Reason: <why this cannot be verified programmatically>
     ...
 
   UNMET
-    ✗ <criterion text> — <what was expected vs what was found>
+    ✗ <criterion text verbatim>
+      Expected: <what was expected>
+      Found: <what was actually found, with file:line if applicable>
+      Agent: <agent role>
     ...
 
 Result: COMPLETE ✓
@@ -135,6 +149,11 @@ is either MET or UNVERIFIABLE (i.e. zero UNVERIFIED, zero PARTIAL, zero UNMET).
 - If the phase file does not exist, report the error and stop.
 - **Never use checkbox state as evidence** — treat `[x]` and `[ ]` identically; only
   codebase inspection counts.
+- **Every classification requires code evidence**: file path + line number, function name,
+  file size, or other measurable artefact. "The spec says so" is not evidence — the actual
+  file content must be confirmed.
+- **Use domain agents**: do not rely solely on your own Grep/Read for all deliverables —
+  delegate to specialist agents so each domain gets expert-level inspection.
 - Be specific about what was searched for and what was (or was not) found.
 - If a deliverable description is ambiguous, state the interpretation used.
 - Do not paraphrase deliverable or criterion text — quote it verbatim in the report.

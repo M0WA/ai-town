@@ -49,36 +49,42 @@ using ::testing::AnyNumber;
 // from cursors in the upper-left quadrant or near screen edges.  The tile-overlap
 // rejection step is therefore never triggered and all pre-existing placement
 // assertions remain valid.
+//
+// Panel dimensions: 340x280 (kPanelW=340, kPanelH=280, kLineH=33).
+// Sized for 720p legibility: 22px physical font × (1080/720) = 33 virtual per row.
 // ============================================================================
 
 // Off-screen tileBounds sentinel used by all migrated Phase 8 tests.
 // Placed at (1000, 1000) — guaranteed non-overlapping with positions derived from
 // cursor clicks at (0,0), (5,500), (200,200), (500,5), (500,1075), (960,540).
-// NOTE: (1800, 200) fallback test: primary candidate at (1840, 240) — does NOT
-// overlap tileBounds at (1000,1000,10,10).  Fallback at (1560, 0) — also clear.
+// NOTE: (1800, 200) fallback test: primary at (1840, 240) size 340x280 — off-screen
+// right (1840+340=2180 > 1920); fallback at (1420, -120) — off-screen top; edge-snap
+// chosen instead (snaps to left side, y clamped).
 static constexpr ScreenRect kNoTileBounds{1000, 1000, 10, 10};
 
 // --- Test 1: Primary right-below placement ---
 TEST(QueryPanelPosition, PrimaryRightBelow_UpperLeftQuadrant) {
-    // cursor at (200,200): primary candidate = (240, 240) — fits 1920x1080, no tile overlap.
+    // cursor at (200,200): primary candidate = (240, 240), size 340x280 — fits 1920x1080,
+    // no tile overlap (kNoTileBounds at (1000,1000)).
     ScreenRect r = InspectorPanel::computePanelPosition(200, 200, kNoTileBounds);
     EXPECT_GE(r.x, 200);
     EXPECT_GE(r.y, 200);
-    EXPECT_EQ(r.w, 240);
-    EXPECT_EQ(r.h, 160);
+    EXPECT_EQ(r.w, 340);
+    EXPECT_EQ(r.h, 280);
     EXPECT_LE(r.x + r.w, 1920);
     EXPECT_LE(r.y + r.h, 1080);
 }
 
-// --- Test 2: Fallback left placement ---
+// --- Test 2: Fallback / edge-snap for right-side cursor ---
 TEST(QueryPanelPosition, FallbackLeft_TileInRightHalf) {
-    // cursor at (1800,200): primary = (1840, 240) — off-screen (1840+240=2080 > 1920).
-    // Fallback = (1800-40-240, 200-40-160) = (1520, 0) — fits.
+    // cursor at (1800,200): primary = (1840, 240), size 340x280 — off-screen (1840+340=2180>1920).
+    // Fallback = (1800-40-340, 200-40-280) = (1420, -120) — off-screen top.
+    // Edge-snap: cursor x=1800 > 960 → snap to left (x=0); y clamped to [0, 800].
     ScreenRect r = InspectorPanel::computePanelPosition(1800, 200, kNoTileBounds);
     EXPECT_GE(r.x, 0);
     EXPECT_LE(r.x + r.w, 1920);
-    EXPECT_EQ(r.w, 240);
-    EXPECT_EQ(r.h, 160);
+    EXPECT_EQ(r.w, 340);
+    EXPECT_EQ(r.h, 280);
 }
 
 // --- Test 3: Edge clamping (4 sub-cases) ---
@@ -136,12 +142,12 @@ TEST(QueryPanelPosition, CenterScreen_PanelPlacedRightBelow) {
 }
 
 // --- Test 7 (Phase 9b new): TileOverlap forces fallback ---
-// cursor at (200, 200): primary candidate = (240, 240), size 240x160.
-// tileBounds placed to overlap that primary candidate: e.g. (250, 250, 100, 100).
-// Primary rejected (overlaps tileBounds). Fallback = (200-40-240, 200-40-160) = (-80, -40)
-// — off-screen, also rejected. Edge-snap: cursor at x=200 <= 960 → snap to right edge (1680, y).
+// cursor at (200, 200): primary candidate = (240, 240), size 340x280.
+// tileBounds (250, 250, 100, 100) overlaps primary rect (240..580, 240..520).
+// Primary rejected. Fallback = (200-40-340, 200-40-280) = (-180, -120) — off-screen.
+// Edge-snap: cursor x=200 <= 960 → snap to right edge (kVirtualW-340=1580, y).
 TEST(QueryPanelPosition, QueryPanel_TileOverlap_FallsBackToFallback) {
-    // tileBounds overlaps the primary candidate position (240, 240, 240, 160).
+    // tileBounds overlaps the primary candidate position (240, 240, 340, 280).
     ScreenRect tileBounds{250, 250, 100, 100};
     ScreenRect r = InspectorPanel::computePanelPosition(200, 200, tileBounds);
     // Result must still be on screen regardless of which step was taken.
@@ -149,8 +155,8 @@ TEST(QueryPanelPosition, QueryPanel_TileOverlap_FallsBackToFallback) {
     EXPECT_LE(r.x + r.w, 1920);
     EXPECT_GE(r.y, 0);
     EXPECT_LE(r.y + r.h, 1080);
-    EXPECT_EQ(r.w, 240);
-    EXPECT_EQ(r.h, 160);
+    EXPECT_EQ(r.w, 340);
+    EXPECT_EQ(r.h, 280);
 }
 
 // ============================================================================
@@ -679,6 +685,6 @@ TEST_F(QueryPanelIntegrationTest, GetBounds_ReturnsValidRect)
     panel_->populate(qr, 3, 7, 500, 500, tileBounds);
 
     Rect bounds = panel_->getBounds();
-    EXPECT_EQ(bounds.w, 240);
-    EXPECT_EQ(bounds.h, 160);
+    EXPECT_EQ(bounds.w, 340);
+    EXPECT_EQ(bounds.h, 280);
 }

@@ -922,6 +922,29 @@ TEST_F(ModalDialogStandaloneTest, ForcedLoan_Screen2_MouseClickTertiary) {
     EXPECT_FALSE(dialog_->isActive());
 }
 
+// pollResult() coverage — exercises the inline pollResult() body in ModalDialog.h.
+// GCC attributes inline function coverage to the TU that calls it; calling pollResult()
+// directly from a test that includes ModalDialog.h ensures coverage is attributed
+// to ui/ModalDialog.h (not the production SettingsPanel.cpp TU).
+TEST_F(ModalDialogStandaloneTest, PollResult_WhenIdle_ReturnsNone) {
+    // No modal active — pollResult() should return None without side effects.
+    auto r = dialog_->pollResult();
+    EXPECT_EQ(r, ModalDialog::DialogResult::None);
+}
+
+TEST_F(ModalDialogStandaloneTest, PollResult_AfterAccept_ReturnsAcceptThenNone) {
+    // Open demolish confirm dialog. Default focus is button 1 (Cancel);
+    // Tab to button 0 (Accept), then press Enter.
+    dialog_->showDemolishConfirm(1);
+    dialog_->onEvent(keyDown(9));  // Tab → focus moves to button 0 (Accept)
+    dialog_->onEvent(keyDown(13)); // Enter = Accept
+    EXPECT_FALSE(dialog_->isActive());
+
+    // pollResult() should return Accept the first time and None the second time.
+    EXPECT_EQ(dialog_->pollResult(), ModalDialog::DialogResult::Accept);
+    EXPECT_EQ(dialog_->pollResult(), ModalDialog::DialogResult::None);
+}
+
 // Mouse click on back button (screen 2 Back = accept original loan).
 TEST_F(ModalDialogStandaloneTest, ForcedLoan_Screen2_MouseClickBack) {
     LoanTerms terms{5000.0f, 12, 0.05f};

@@ -63,9 +63,14 @@ public:
     // driver is used by loadLinear (IVideoDriver::getTexture) and loadSplatMap (createImageFromFile).
     // fileSystem is used by loadSRGB to open raw DDS files (IrrlichtDevice::getFileSystem()).
     //   Pass nullptr when no file system is available (e.g., EDT_NULL test context).
+    // maxTextureSize is the GL_MAX_TEXTURE_SIZE value queried by RenderSystem after
+    //   glewInit(). Used by loadSRGB() to select the primary (4096) or fallback (2k)
+    //   buildings atlas. Default 2048 is the conservative fallback for EDT_NULL tests
+    //   and any construction site that does not yet pass a real GL cap.
     explicit TextureCache(irr::video::E_DRIVER_TYPE driverType,
                           irr::video::IVideoDriver* driver = nullptr,
-                          irr::io::IFileSystem* fileSystem = nullptr);
+                          irr::io::IFileSystem* fileSystem = nullptr,
+                          int maxTextureSize = 2048);
     ~TextureCache() = default;
 
     // Non-copyable / non-movable — pool state and GL handles are not copyable.
@@ -87,7 +92,12 @@ public:
     //     (Exception: synthetic palette-swatch roof colors, not photographic diffuse)
     //   if path ends with "_billboard" → GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT upload;
     //     wrap mode GL_CLAMP_TO_EDGE; GL_TEXTURE_MAX_LEVEL = 3
-    //   if path ends with "_d" → GL_COMPRESSED_SRGB_S3TC_DXT1_EXT upload;
+    //   if basename == "buildings_atlas_d.dds" AND m_maxTextureSize >= 4096
+    //     → GL_TEXTURE_MAX_LEVEL = 4  (primary 4096×4096 atlas; 5 mip levels)
+    //   if basename == "buildings_atlas_d.dds" AND m_maxTextureSize < 4096
+    //     → redirect to buildings_atlas_d_2k.dds; GL_TEXTURE_MAX_LEVEL = 3
+    //   if basename == "buildings_atlas_d_2k.dds" → GL_TEXTURE_MAX_LEVEL = 3
+    //   if path ends with "_d" (all others) → GL_COMPRESSED_SRGB_S3TC_DXT1_EXT upload;
     //     wrap mode GL_REPEAT (default); GL_TEXTURE_MAX_LEVEL = 3
     //
     // sRGB upload is fully raw GL: glGenTextures + glCompressedTexImage2D.
@@ -185,6 +195,12 @@ private:
     // IFileSystem pointer — used by loadSRGB to open raw DDS files.
     // Obtained from IrrlichtDevice::getFileSystem(). May be nullptr in EDT_NULL test context.
     irr::io::IFileSystem* m_fileSystem{nullptr};
+
+    // GL_MAX_TEXTURE_SIZE value queried by RenderSystem after glewInit().
+    // Used by loadSRGB() to decide between the primary buildings_atlas_d.dds (4096×4096)
+    // and the fallback buildings_atlas_d_2k.dds (2048×2048) when GL_MAX_TEXTURE_SIZE < 4096.
+    // Default 2048: conservative fallback for EDT_NULL tests and uninitialised construction sites.
+    int m_maxTextureSize{2048};
 
     // Internal access timestamp counter — incremented on each load call.
     uint64_t m_accessCounter{0};

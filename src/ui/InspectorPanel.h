@@ -77,8 +77,14 @@ private:
     ICitySimulation* m_sim{nullptr};
     bool             m_visible{false};
 
-    static constexpr int kPanelW = 240;
-    static constexpr int kPanelH = 160;
+    // Panel dimensions in virtual 1920x1080 space.
+    // kPanelW = 340: wide enough for "Desirability: 99.0" at the monospace font width.
+    // kPanelH = 280: 8 rows × kLineH (33) + 16px top/bottom padding = 280.
+    // kLineH  = 33: ensures the 22px physical font cell doesn't overlap at 720p
+    //               (22 × 1080 / 720 ≈ 33 virtual pixels per row).
+    static constexpr int kPanelW = 340;
+    static constexpr int kPanelH = 280;
+    static constexpr int kLineH  = 33;   // virtual-space row height sized for 720p
 
     // Data refresh cadence — per architecture/ui-ux/query-inspector-panel.md.
     // Economy/service refresh: once per budget tick (~2 s at 60 FPS approximation).

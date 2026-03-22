@@ -107,10 +107,12 @@ static bool hasSuffix(const std::string& path, const std::string& suffix) {
 
 TextureCache::TextureCache(irr::video::E_DRIVER_TYPE driverType,
                            irr::video::IVideoDriver* driver,
-                           irr::io::IFileSystem* fileSystem)
+                           irr::io::IFileSystem* fileSystem,
+                           int maxTextureSize)
     : m_driverType{driverType}
     , m_driver{driver}
     , m_fileSystem{fileSystem}
+    , m_maxTextureSize{maxTextureSize}
 {
 }
 
@@ -118,13 +120,43 @@ TextureCache::TextureCache(irr::video::E_DRIVER_TYPE driverType,
 // loadSRGB — sRGB raw-GL upload path (DXT1/DXT5 compressed)
 // ---------------------------------------------------------------------------
 GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
+    // ----- Extract basename from path (used for exact-match dispatch below) -----
+    // Supports both '/' and '\\' separators for cross-platform paths.
+    auto extractBasename = [](const std::string& p) -> std::string {
+        size_t slashPos     = p.rfind('/');
+        size_t backslashPos = p.rfind('\\');
+        size_t sepPos = (slashPos == std::string::npos && backslashPos == std::string::npos)
+                            ? std::string::npos
+                            : (slashPos == std::string::npos ? backslashPos
+                                                             : (backslashPos == std::string::npos
+                                                                    ? slashPos
+                                                                    : std::max(slashPos, backslashPos)));
+        return (sepPos != std::string::npos) ? p.substr(sepPos + 1) : p;
+    };
+
+    const std::string basename = extractBasename(path);
+
     // ----- vehicles_sprite_atlas_d.dds exception -----
     // Vehicle sprite atlas encodes synthetic palette-swatch roof colors (not photographic diffuse).
     // It MUST NOT be sRGB-decoded — route to linear pool instead.
     // See architecture/asset-standards/2d-texture-standards.md — Vehicle Sprite Atlas.
-    {
-        // Extract filename from path for exact match check.
-        size_t slashPos = path.rfind('/');
+    if (basename == "vehicles_sprite_atlas_d.dds") {
+        // Route to linear pool — vehicles_sprite_atlas_d.dds is NOT sRGB.
+        loadLinear(path); // increments linear ref_count; return value is ITexture*, not GLuint
+        // Return 0: callers expecting a GLuint for this path should use getSRGBGLuint()
+        // which will also return 0 — this is correct since the texture is in the linear pool.
+        return GLuint{0};
+    }
+
+    // ----- buildings_atlas_d.dds fallback path (Phase 11e) -----
+    // When GL_MAX_TEXTURE_SIZE < 4096 the GPU cannot hold a 4096×4096 texture.
+    // Redirect to the 2048×2048 fallback atlas and emit a diagnostic warning.
+    // effectivePath is the path actually loaded and used as the cache key.
+    // It equals `path` for all textures except the primary atlas on constrained hardware.
+    std::string effectivePath = path;
+    if (basename == "buildings_atlas_d.dds" && m_maxTextureSize < 4096) {
+        // Replace the filename portion only — preserve the directory prefix.
+        size_t slashPos     = path.rfind('/');
         size_t backslashPos = path.rfind('\\');
         size_t sepPos = (slashPos == std::string::npos && backslashPos == std::string::npos)
                             ? std::string::npos
@@ -132,19 +164,21 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
                                                              : (backslashPos == std::string::npos
                                                                     ? slashPos
                                                                     : std::max(slashPos, backslashPos)));
-        std::string filename = (sepPos != std::string::npos) ? path.substr(sepPos + 1) : path;
-        if (filename == "vehicles_sprite_atlas_d.dds") {
-            // Route to linear pool — vehicles_sprite_atlas_d.dds is NOT sRGB.
-            loadLinear(path); // increments linear ref_count; return value is ITexture*, not GLuint
-            // Return 0: callers expecting a GLuint for this path should use getSRGBGLuint()
-            // which will also return 0 — this is correct since the texture is in the linear pool.
-            return GLuint{0};
-        }
+        const std::string dir = (sepPos != std::string::npos)
+                                    ? path.substr(0, sepPos + 1)
+                                    : std::string{};
+        effectivePath = dir + "buildings_atlas_d_2k.dds";
+        fprintf(stderr,
+                "WARNING: GL_MAX_TEXTURE_SIZE < 4096; "
+                "loading fallback atlas buildings_atlas_d_2k.dds\n");
     }
+
+    // Derive the effective basename for mip-level dispatch below.
+    const std::string effectiveBasename = extractBasename(effectivePath);
 
     // ----- Ref-count increment if already loaded -----
     {
-        auto it = m_srgbTextures.find(path);
+        auto it = m_srgbTextures.find(effectivePath);
         if (it != m_srgbTextures.end()) {
             it->second.ref_count++;
             it->second.lastAccessTimestamp = ++m_accessCounter;
@@ -162,34 +196,45 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
         entry.ref_count           = 1;
         entry.lastAccessTimestamp = ++m_accessCounter;
         entry.vramBytes           = 0;
-        m_srgbTextures[path]      = entry;
+        m_srgbTextures[effectivePath] = entry;
         return GLuint{0};
     }
 
     // ----- Determine path-based properties (wrap mode, mip cap) -----
-    // These are path-suffix-based hints that do NOT affect the internal GL format.
-    // The internal GL format is derived from the actual DDS FourCC (see below).
-    bool isBillboard = hasSuffix(path, "_billboard");
-    int maxMipLevel = 3; // 4-level mip chain mandatory
+    // Wrap mode uses the original suffix — not affected by the fallback redirect.
+    // Mip cap uses the effective basename per the GL_TEXTURE_MAX_LEVEL dispatch table:
+    //   buildings_atlas_d.dds (primary, 4096×4096, 5 mip levels) → GL_TEXTURE_MAX_LEVEL = 4
+    //   buildings_atlas_d_2k.dds (fallback, 2048×2048, 4 mip levels) → GL_TEXTURE_MAX_LEVEL = 3
+    //   all others → GL_TEXTURE_MAX_LEVEL = 3
+    // See architecture/graphics-architecture/texture-cache.md §GL_TEXTURE_MAX_LEVEL Dispatch Table.
+    bool isBillboard = hasSuffix(effectivePath, "_billboard");
+    int maxMipLevel;
+    if (effectiveBasename == "buildings_atlas_d.dds") {
+        maxMipLevel = 4; // primary 4096×4096 atlas: 5 mip levels (0–4)
+    } else {
+        maxMipLevel = 3; // fallback atlas, billboard atlas, and all other diffuse textures
+    }
 
     // ----- Load DDS file from disk via Irrlicht's filesystem -----
     // Use m_fileSystem (IrrlichtDevice::getFileSystem()) to open the file cross-platform.
     // IVideoDriver does NOT have getFileSystem() — must use the device's file system.
     if (!m_fileSystem) {
-        fprintf(stderr, "TextureCache::loadSRGB: m_fileSystem is null, cannot load %s\n", path.c_str());
+        fprintf(stderr, "TextureCache::loadSRGB: m_fileSystem is null, cannot load %s\n",
+                effectivePath.c_str());
         return GLuint{0};
     }
 
-    irr::io::IReadFile* file = m_fileSystem->createAndOpenFile(path.c_str());
+    irr::io::IReadFile* file = m_fileSystem->createAndOpenFile(effectivePath.c_str());
     if (!file) {
-        fprintf(stderr, "TextureCache::loadSRGB: cannot open file %s\n", path.c_str());
+        fprintf(stderr, "TextureCache::loadSRGB: cannot open file %s\n", effectivePath.c_str());
         return GLuint{0};
     }
 
     // Read entire file into memory.
     long fileSize = file->getSize();
     if (fileSize < static_cast<long>(sizeof(uint32_t) + sizeof(DDSHeader))) {
-        fprintf(stderr, "TextureCache::loadSRGB: file too small to be a valid DDS: %s\n", path.c_str());
+        fprintf(stderr, "TextureCache::loadSRGB: file too small to be a valid DDS: %s\n",
+                effectivePath.c_str());
         file->drop();
         return GLuint{0};
     }
@@ -202,7 +247,8 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     uint32_t magic = 0;
     memcpy(&magic, fileData.data(), sizeof(uint32_t));
     if (magic != kDDS_MAGIC) {
-        fprintf(stderr, "TextureCache::loadSRGB: invalid DDS magic in %s\n", path.c_str());
+        fprintf(stderr, "TextureCache::loadSRGB: invalid DDS magic in %s\n",
+                effectivePath.c_str());
         return GLuint{0};
     }
 
@@ -217,7 +263,7 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     // Validate FourCC matches expected format.
     if (fourCC != kFOURCC_DXT1 && fourCC != kFOURCC_DXT5) {
         fprintf(stderr, "TextureCache::loadSRGB: unsupported DDS format (fourCC 0x%08X) in %s\n",
-                fourCC, path.c_str());
+                fourCC, effectivePath.c_str());
         return GLuint{0};
     }
 
@@ -249,9 +295,11 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    // GL_TEXTURE_MAX_LEVEL dispatch per texture-cache.md:
-    //   _d suffix → 3 (4-level mip chain mandatory)
-    //   _billboard → 3 (4-level mip chain mandatory)
+    // GL_TEXTURE_MAX_LEVEL dispatch per architecture/graphics-architecture/texture-cache.md
+    // §GL_TEXTURE_MAX_LEVEL Dispatch Table:
+    //   buildings_atlas_d.dds (primary, 4096×4096) → 4  (5 mip levels: 0–4)
+    //   buildings_atlas_d_2k.dds (fallback, 2048×2048) → 3  (4 mip levels: 0–3)
+    //   _billboard and all other _d textures → 3  (4-level mip chain mandatory)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, maxMipLevel);
 
     // Wrap mode:
@@ -283,7 +331,7 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
 
         if (dataOffset + mipDataSize > static_cast<size_t>(fileSize)) {
             fprintf(stderr, "TextureCache::loadSRGB: DDS data truncated at mip %u in %s\n",
-                    mip, path.c_str());
+                    mip, effectivePath.c_str());
             break;
         }
 
@@ -309,7 +357,7 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     entry.ref_count            = 1;
     entry.lastAccessTimestamp  = ++m_accessCounter;
     entry.vramBytes            = estimateDXTVRAM(width, height, fourCC);
-    m_srgbTextures[path]       = entry;
+    m_srgbTextures[effectivePath] = entry;
 
     return texId;
 }

@@ -15,8 +15,8 @@
   - **Phase 3 implementers MUST use `kToolbarBottom = 784` for the input gate.** Using y:600 is incorrect; it leaves the undo button, demand bars, and active tool indicator exposed to accidental world-clicks when the player's cursor is in the lower portion of the toolbar panel.
 - **Undo button**: Positioned directly below the tool icon group within the left toolbar panel. Virtual bounds: x: 8–72 px, y: 608–656 px (immediately below the last tool icon, 8 px gap from y:600). A 48×48 px icon button labeled "↩ Undo" (or Ctrl+Z hotkey hint). Grayed out (via `IUIBackend::setElementEnabled(..., false)`) when no undo action is available or while a blocking modal is active. Disabled state must use `setElementEnabled` (non-interactive, grayed), not `setElementVisible` (hidden) — the button remains visible at all times. **Undo countdown**: When an undoable action is pending, the button label changes to "↩ Undo (expires in Xs)" where X is the real-time seconds remaining until the second budget tick expires the undo window, updated every real second. Text turns amber when `remainingSeconds < 5.0` or when the total undo window is ≤ 6 s (i.e., at 10× simulation speed where the second tick fires in ~6 real seconds — the countdown is amber from the moment the action is taken). Implementation: compute `remainingSeconds = secondBudgetTickTimeReal − IClock::nowSeconds()`; set amber if `remainingSeconds < 5.0 || totalWindowSeconds <= 6.0`. The countdown is absent when the button is grayed out (no pending undo). Requires `IClock` injection into the component responsible for rendering the undo button. See [Undo System](../game-design/undo-system.md) for the full undo expiry specification.
 - **Unsaved changes indicator**: A dot (**16×16 px**, amber fill) placed immediately to the **left** of the notification bell icon at virtual bounds x: **1796–1812 px**, y: 8–24 px. **Must not overlap the bell icon** (bell occupies x: 1820–1868 px; the dot must end at x ≤ 1812 with at least an 8 px gap before the bell's x:1820 left edge). Appears whenever there are unsaved changes since the last manual save or auto-save. Hidden when game state matches last save. Tooltip on hover: "You have unsaved changes. Press Ctrl+S to save." 16×16 px minimum ensures the dot is visually distinct and hoverable without pixel-perfect accuracy. The dot and bell are mutually exclusive interactive targets — no shared coordinate range between them. **The dot must remain visible (not cleared) after a failed auto-save** — a failed auto-save does not constitute a successful save and must not clear the unsaved-changes state. The dot element has a fixed amber fill color authored at creation time via the backend — it does not change color dynamically. Visibility is controlled exclusively via `setElementVisible`. No `setElementColor` method is required on `IUIBackend` for V1; the 19-method `IUIBackend` interface (see `architecture/ui-ux/ui-manager.md` §IUIBackend Method Contract) is sufficient for the dot element.
-- **Grace period indicator**: Virtual bounds: x: 8–1912 px, y: 60–92 px (32 px height, directly beneath the resource/budget bar which occupies approximately y: 0–56 px). Displayed while the wall-clock grace period is active. Label: "Cost waiver: Xs remaining" (green text with clock icon from UI sprite sheet), where X is `floor(120 − IClock::nowSeconds() elapsed since game start)`, updated every real second. When fewer than 20 real seconds remain, the label text turns amber as a last-chance visual cue. On expiry, the indicator fades to alpha 0 over 0.5 real seconds via `setElementAlpha`, then is hidden via `setElementVisible(false)` — the grace period has ended and no countdown is needed. The 120 s duration is a wall-clock measurement and is unaffected by simulation speed — at 10× speed the same 120 real seconds apply. **Interactive tooltip**: On hover or click, shows: "During the grace period, road maintenance ($10/tile/month) and building upkeep costs are waived. These costs will begin in approximately Xs" (where X is the real-seconds countdown already shown in the indicator label — not a month count, as the grace period is real-time not month-aligned) "Estimated monthly upkeep when active: $[calculated from current city]." The estimated figure updates each real second as the player builds. Note: road tile placement cost ($500/tile) is NOT waived during the grace period — only ongoing maintenance and upkeep costs are waived. See [Economy Model](../game-design/economy-model.md) for the authoritative 120 s definition.
-- **Demand pressure bar** (compact, anchored below undo button): virtual bounds x: 8–72 px, y: **664–744 px** (8 px visual gap from the undo button bottom edge at y:656). Per-zone-type (R/C/I) unmet demand percentage indicator as three vertical bars. Updates each budget tick. (**Layout note**: the previous placement at y:608–688 px overlapped the undo button at y:608–656 px; moved down to y:664–744 px to eliminate the overlap.) **Low-resolution text legibility**: Each bar is labeled with a single-character zone-type indicator ('R', 'C', 'I') rendered above the bar column. At the virtual 64 px toolbar width, each of the 3 bars occupies ~20 px horizontally. The 'R', 'C', 'I' labels must use a **minimum 9-point font** (virtual space) at all supported resolutions to remain legible. If the UI scaling factor produces a rendered label below 9 virtual pixels high, the HUD must fall back based on the active accessibility mode:
+- **Grace period indicator**: Virtual bounds: x: **80–1912 px**, y: 60–92 px (32 px height, directly beneath the resource/budget bar which occupies approximately y: 0–56 px). **Starts at x=80** (after the 64 px-wide toolbar column) so it does not visually overlap the left-side tool buttons. Displayed while the wall-clock grace period is active. Label: "Cost waiver: Xs remaining" (green text with clock icon from UI sprite sheet), where X is `floor(120 − IClock::nowSeconds() elapsed since game start)`, updated every real second. When fewer than 20 real seconds remain, the label text turns amber as a last-chance visual cue. On expiry, the indicator fades to alpha 0 over 0.5 real seconds via `setElementAlpha`, then is hidden via `setElementVisible(false)` — the grace period has ended and no countdown is needed. The 120 s duration is a wall-clock measurement and is unaffected by simulation speed — at 10× speed the same 120 real seconds apply. **Interactive tooltip**: On hover or click, shows: "During the grace period, road maintenance ($10/tile/month) and building upkeep costs are waived. These costs will begin in approximately Xs" (where X is the real-seconds countdown already shown in the indicator label — not a month count, as the grace period is real-time not month-aligned) "Estimated monthly upkeep when active: $[calculated from current city]." The estimated figure updates each real second as the player builds. Note: road tile placement cost ($500/tile) is NOT waived during the grace period — only ongoing maintenance and upkeep costs are waived. See [Economy Model](../game-design/economy-model.md) for the authoritative 120 s definition.
+- **Demand pressure bar** (compact, anchored below undo button): virtual bounds x: 8–72 px, y: **664–748 px** (8 px visual gap from the undo button bottom edge at y:656). Zone-type labels ("R", "C", "I") occupy y: 664–692 px (h=28); colored bar columns occupy y: 692–748 px (h=56). Per-zone-type (R/C/I) unmet demand percentage indicator as three vertical bars. Updates each budget tick. (**Layout note**: the previous placement at y:608–688 px overlapped the undo button at y:608–656 px; moved down to y:664–744 px to eliminate the overlap.) **Low-resolution text legibility**: Each bar is labeled with a single-character zone-type indicator ('R', 'C', 'I') rendered above the bar column. At the virtual 64 px toolbar width, each of the 3 bars occupies ~20 px horizontally. The 'R', 'C', 'I' labels must use a **minimum 9-point font** (virtual space) at all supported resolutions to remain legible. If the UI scaling factor produces a rendered label below 9 virtual pixels high, the HUD must fall back based on the active accessibility mode:
 
   - **Standard mode** (colorblind mode OFF): Switch to a **numeric percentage tooltip** (shown on hover/tap only) rather than a persistent label — do not render sub-9-pixel text. This prevents illegible "blur spots" on low-resolution displays or when the demand bar is very compact. The tooltip remains supplemental information in this mode.
   - **Colorblind mode** (colorblind mode ON): The tooltip-only fallback is **NOT permitted**. Color is already an insufficient encoding in colorblind mode, so removing the persistent label would leave users with no reliable zone-type identification. Instead, the HUD MUST render the single-character zone-type symbol ('R', 'C', or 'I') at the hard physical floor of **11 px physical pixels** (per `resolution-ui-scaling.md` Typography hard physical floor — `UIScaler` clamps text scale to this minimum). Alongside the clamped label, the bar column MUST also display a **pattern or hatching overlay** (see `resolution-ui-scaling.md` Colorblind Accessibility section — "Demand pressure bar hatching patterns (colorblind mode)": Residential = diagonal hatching at 45°, Commercial = horizontal lines, Industrial = cross-hatch) so that zone type can be distinguished by pattern alone, independent of both color and the small label. The tooltip remains available as supplemental information but may not be the sole encoding in colorblind mode.
@@ -217,9 +217,12 @@ The tile hover highlight is a semi-transparent wireframe quad rendered over the 
 terrain tile. ARGB values are encoded as `0xAARRGGBB` (Irrlicht `SColor` format;
 AA=alpha, RR=red, GG=green, BB=blue).
 
-**These values are authoritative and must be used by `UIManager::onEvent()` MouseMove
-handler when calling `IRenderer::setTileHoverHighlight()`. Do not use inline literals —
-define named constants in `src/ui/ui_constants.h`.**
+Highlight colours are hardcoded in `IrrlichtRenderer` based on the active tool mode.
+`UIManager` does not pass colour values at the call site — the renderer determines colour
+internally. The named constants below serve as the authoritative reference for what
+colours the renderer uses for each tool; implementors must match these values inside
+`IrrlichtRenderer`. Do not use inline literals — define named constants in
+`src/ui/ui_constants.h` for use as implementation references.
 
 | Active tool | ARGB value | Colour description | Named constant |
 |---|---|---|---|
@@ -228,6 +231,7 @@ define named constants in `src/ui/ui_constants.h`.**
 | Utilities | `0x80FF8000` | Semi-transparent orange (alpha=128) | `kHoverArgbUtilities` |
 | Demolish | `0x80FF0000` | Semi-transparent red (alpha=128) | `kHoverArgbDemolish` |
 | Query | `0x80FFFFFF` | Semi-transparent white (alpha=128) | `kHoverArgbQuery` |
+| Blocked tile (any placement tool) | `0xBBFF2222` | Semi-opaque red (alpha=187, ≈73%) — shown when the hovered tile cannot receive the current placement (occupied by existing zone or road) | `kHoverArgbBlocked` |
 
 Alpha value `0x80` = 128 = 50% opacity. This provides enough transparency to see terrain
 geometry beneath the highlight, while remaining clearly visible against both light and
@@ -235,10 +239,38 @@ dark terrain surfaces. The highlight quad is rendered via
 `IVideoDriver::drawMeshBuffer()` using `EMT_TRANSPARENT_ALPHA_CHANNEL` material type,
 placed at terrain height +0.05 world units above the terrain surface (Z-fighting prevention).
 
-**Clear sentinel**: pass `tileX = -1`, `tileZ = -1`, `argb = 0` to
+**`kHoverArgbBlocked` alpha rationale**: `0xBB` = 187 ≈ 73% opacity — intentionally more
+opaque than the standard `0x80` (50%) hover alpha used for the per-tool colours above.
+The higher opacity makes the blocking intent visually distinct: the player immediately reads
+the tile as "unavailable" rather than as a normal hover. The pure-red hue (`0xFF2222`)
+reinforces the "cannot place here" meaning.
+
+**`kHoverArgbBlocked` vs. Demolish tool red**: `kHoverArgbDemolish` uses `0x80FF0000`
+(fully-saturated red, 50% alpha). `kHoverArgbBlocked` uses `0xBBFF2222` (slightly
+desaturated warm red, 73% alpha). These two are visually distinct: the Demolish hover
+signals "will destroy this tile", whereas the blocked hover signals "cannot place here —
+tile is already occupied". The alpha difference (73% vs. 50%) is the primary differentiator
+because the colours are close in hue; implementors must not reduce `kHoverArgbBlocked`'s
+alpha to `0x80` as that would make the two states indistinguishable.
+
+**Clear sentinel**: pass `tileX = -1`, `tileZ = -1` to
 `IRenderer::setTileHoverHighlight()` to remove the highlight entirely (no active tool or
-ray-cast miss). The value `kHoverArgbClear = 0x00000000u` is the canonical constant for
-this case.
+ray-cast miss). The `argb` parameter is not used in the new interface and must not be
+passed. The sentinel value is `setTileHoverHighlight(-1, -1)` (no colour argument).
+The legacy constant `kHoverArgbClear = 0x00000000u` is retained as a reference only.
+
+**Interface change (Phase 11h)**: The `uint32_t argb` parameter has been removed from
+`IRenderer::setTileHoverHighlight()`. The new signature is:
+
+```cpp
+virtual void setTileHoverHighlight(int tileX, int tileZ, int footprintSize = 1) = 0;
+```
+
+UIManager passes only `(tileX, tileZ, footprintSize)`. The renderer determines the
+highlight colour internally from the active tool mode — specifically by reading
+`m_activeTool` (or equivalent tool-mode state member) inside `IrrlichtRenderer`. The named
+constants (`kHoverArgbZone`, `kHoverArgbDemolish`, `kHoverArgbBlocked`, etc.) are used as
+implementation references inside `IrrlichtRenderer` and must not appear in UIManager code.
 
 ## Zone Colour Overlay — ARGB Colour Scheme
 
@@ -468,18 +500,35 @@ BudgetDetailPanel is owned and drawn by HUD (not UIManager). UIManager does not 
 A floating detail panel that appears when the player hovers over or clicks the treasury balance display in the resource/budget bar.
 
 - **Trigger**: hover or click on the treasury balance field in the resource bar
-- **Dimensions**: approximately 320×200 px (virtual/scaled)
-- **Anchor**: below the resource bar, left-aligned to the left edge of the resource bar
+- **Dimensions**: 320×260 px (virtual/scaled — 60 px taller than the original 320×200 px to accommodate section headers and 1 px separator rules)
+- **Anchor**: below the resource bar, left-aligned to the left edge of the resource bar — top-left corner at virtual (8 px, 57 px), immediately below the resource bar bottom edge (resource bar ends at approximately y = 56 px virtual). The panel extends downward from its top-left anchor; the +60 px increase in height adds space below the previous bottom edge.
 - **Z-order**: above all HUD elements; below the modal scrim (when a blocking modal is active, the budget detail panel is covered by the scrim)
-- **Fields displayed** (named line items):
+- **Layout — three sections** separated by 1 px horizontal rules. Section headers are bold label rows using the HUD font. Subtotals are shown inline on the section header row:
+
+  **Income** [$X,XXX/month] ← bold header row with subtotal
+
   - Tax revenue — Residential
   - Tax revenue — Commercial
   - Tax revenue — Industrial
-  - Wages (city employee salaries)
-  - Road maintenance
-  - Service upkeep (fire, police, utilities)
   - Utility fees
-  - Net monthly balance
+  - Tourism income: $0 (post-V1) ← grayed-out placeholder; last item in Income section; rendered via `setElementEnabled(handle, false)` (visible but non-interactive and dimmed)
+
+  *(1 px separator rule)*
+
+  **Expenses** [$X,XXX/month] ← bold header row with subtotal
+
+  - Road maintenance
+  - Service upkeep (fire/police/utilities)
+  - Wages
+
+  *(1 px separator rule)*
+
+  **Total**
+
+  - Net monthly balance = Income total − Expenses total
+  - Displayed as "+$X,XXX" (green `SColor(255, 80, 200, 80)`) for surplus or "−$X,XXX" (red `SColor(255, 220, 80, 80)`) for deficit
+  - These colors are consistent with the existing deficit-pulsing color palette in the resource bar
+
 - **Data refresh**: updates once per budget tick (not real-time between ticks)
 - **Cross-reference**: see [Economy Model](../game-design/economy-model.md) for authoritative field definitions and calculation formulas
 
@@ -489,7 +538,7 @@ A supplemental line displayed within the budget detail panel (or as an additiona
 
 - **Trigger**: appears when the current monthly revenue is within 10% of any locked density tier threshold (evaluated at the difficulty-adjusted threshold value). Not shown when all density tiers are already unlocked.
 - **Display format**: "After Unlock: ~+$X/month expenses" where X is the estimated monthly upkeep increase resulting from the next density tier unlock
-- **Placement**: shown as a supplemental line at the bottom of the budget detail panel, or as an additional line in the resource bar tooltip if the budget detail panel is not open
+- **Placement**: shown as a supplemental line at the bottom of the budget detail panel — below the Total section and its 1 px separator rule (i.e. after all three sections of the 3-section layout), or as an additional line in the resource bar tooltip if the budget detail panel is not open
 - **Update cadence**: updates once per budget tick (same as the rest of the budget detail panel)
 - **Sentinel handling — all tiers unlocked**: The HUD calls `ICitySimulation::getNextUnlockThreshold(difficulty)` each budget tick to determine whether a threshold exists. When the return value equals `SimulationConstants::kNoUnlockThreshold` (`-1.0f`), the HUD MUST:
   1. Hide the density unlock progress indicator in the resource bar via `IUIBackend::setElementVisible(handle, false)` — the element is hidden (not merely disabled) because there is no actionable information to display.

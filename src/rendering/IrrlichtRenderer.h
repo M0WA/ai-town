@@ -123,13 +123,17 @@ public:
     // Phase 9b — IRenderer world-interaction methods.
     bool      pickTerrainTile(int screenX, int screenY,
                                int& tileX, int& tileZ) const override;
-    void      setTileHoverHighlight(int tileX, int tileZ, uint32_t argb) override;
+    void      setTileHoverHighlight(int tileX, int tileZ, int footprintSize = 1) override;
+    void      setActiveTool(ToolMode mode) override;
+    void      setZoneHoverColour(unsigned int argb) override;
+    void      clearDemolishHighlight() override;
     void      setZoneOverlay(int mapTilesX, int mapTilesZ,
                              const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) override;
     ScreenRect getTileScreenBounds(int tileX, int tileZ) const override;
     vec3       getListenerPosition() const override;
-    void       setTilePlacementPreview(const std::vector<std::pair<int,int>>& tiles,
-                                       uint32_t argb) override;
+    void       setTilePlacementPreview(const std::vector<std::pair<int,int>>& freeTiles,
+                                       uint32_t freeArgb,
+                                       const std::vector<std::pair<int,int>>& blockedTiles = {}) override;
 
     // Phase 10 — building mesh spawning and road mesh rendering API.
     // Six overrides corresponding to the pure-virtual methods added to IRenderer
@@ -162,6 +166,16 @@ public:
                      float worldX, float worldY, float worldZ,
                      float yawDegrees) override;
     void removeVehicle(uint32_t vehicleId) override;
+
+    // Phase 11d — traffic agent rendering stubs (full impl in Deliverable 3a)
+    void spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone) override;
+    void moveVehicleAgent(AgentHandle handle, float worldX, float worldZ, float headingDeg) override;
+    void despawnVehicleAgent(AgentHandle handle) override;
+    void setIntersectionSignalState(int tileX, int tileZ, SignalPhase phase) override;
+    // Phase 11d — service coverage overlay stubs (full impl in Deliverable 4b)
+    void showServiceCoverageOverlay(int tileX, int tileZ,
+                                    ServiceBuildingType type, bool degraded) override;
+    void hideServiceCoverageOverlay() override;
 
     // initCloudPlane() — build the scrolling cloud plane mesh and scene node.
     // Called once from the constructor after other initialization.
@@ -205,6 +219,10 @@ private:
     // Returned by getListenerPosition() for use by CitySimulation's
     // sfx_intersection_tick 80 m pre-acquisition distance cull.
     vec3 m_lastCameraPosition{};
+
+    // Phase 11h: current active tool — used by setTileHoverHighlight() to select color.
+    ToolMode     m_activeTool{ToolMode::None};
+    unsigned int m_zoneHoverArgb{0x8000FF00u};  // zone hover colour (default: Residential green)
 
     // Texture handle map: TextureHandle → ITexture*
     TextureHandle                                      m_nextHandle{1};
@@ -302,6 +320,33 @@ private:
     // node->remove()) before the LODNode wrapper is deleted.
     std::unordered_map<uint32_t, LODNode*> m_vehicleNodes;
 
+    // --- Phase 11d: traffic agent scene node registry (Deliverable 3a) ---
+    //
+    // Key: AgentHandle (uint32_t) — stable for agent lifetime.
+    // Value: non-owning IMeshSceneNode* (Irrlicht scene graph owns the node).
+    //
+    // Agent nodes are plain CMeshSceneNode (NOT LODNode wrappers) — agents use
+    // LOD0 only. The scene manager retains the B3D mesh; do NOT drop the mesh on
+    // despawn. On removal the eviction sequence clears textures then calls node->remove().
+    std::unordered_map<AgentHandle, irr::scene::IMeshSceneNode*> m_agentNodes;
+
+    // --- Phase 11d: intersection signal billboard registry (Deliverable 3b) ---
+    //
+    // Key: tileX*10000 + tileZ — compact int key for intersection tiles.
+    // Value: non-owning IMeshSceneNode* (Irrlicht scene graph owns the node).
+    //
+    // One small billboard quad per intersection; colour updated in-place by
+    // setIntersectionSignalState(). Nodes persist for the session and are never
+    // removed (intersection tiles are rarely demolished; V1 does not garbage-collect them).
+    std::unordered_map<int, irr::scene::IMeshSceneNode*> m_signalNodes;
+
+    // --- Phase 11d: service coverage overlay node (Deliverable 4a) ---
+    //
+    // Single dynamic SMesh* rendered as an IMeshSceneNode above the terrain.
+    // Built by showServiceCoverageOverlay(); removed by hideServiceCoverageOverlay().
+    // Null when no overlay is active.
+    irr::scene::ISceneNode* m_coverageOverlayNode{nullptr};
+
     // m_vehicleAssetLoader — separate BuildingAssetLoader instance for vehicle
     // assets (different atlas path: vehicles_diffuse_atlas_d.dds).
     // Created lazily on first placeVehicle() call.
@@ -395,8 +440,11 @@ private:
     // all Y displacement is baked directly into the vertex positions.
     // The caller is responsible for calling drop() after addMeshSceneNode().
     // Returns nullptr if m_driver is null (headless context).
+    // isEW=true: carriageway and center-line oriented along X (East/West).
+    // isEW=false (default): oriented along Z (North/South).
     irr::scene::SMesh* buildTileRoadMesh(float h00, float h10,
-                                          float h01, float h11) const;
+                                          float h01, float h11,
+                                          bool isEW = false) const;
 
     // placeRoadMesh (internal extended) — core implementation called by both the
     // public IRenderer override and recursive neighbor rebuild calls.
@@ -421,4 +469,9 @@ private:
     // Helper: ensure m_buildingAssetLoader is created (idempotent).
     // Returns false and logs a warning if m_smgr is null (test/headless context).
     bool ensureAssetLoader();
+
+    // isIntersectionTile — returns true if the tile at (tileX, tileZ) has road
+    // nodes in 3 or more cardinal directions (used by moveVehicleAgent for lane offset).
+    bool isIntersectionTile(int tileX, int tileZ) const;
+
 };

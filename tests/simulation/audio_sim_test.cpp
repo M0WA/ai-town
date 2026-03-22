@@ -139,6 +139,11 @@ TEST_F(AudioSimTest, CitySimulation_PlaceServiceBuilding_FiresSFXBuildPlace) {
         << "Easy difficulty must initialise a positive treasury so placeServiceBuilding() "
            "can proceed without an insufficient-funds early-return";
 
+    // Phase 11h: placeServiceBuilding requires an adjacent road to its 2×2 footprint.
+    // Place road at (4,7) — adjacent to footprint tile (5,7). Fires SFX_ROAD_BUILD.
+    EXPECT_CALL(audioSystem_, playPositionalSound(SFX_ROAD_BUILD, _, _, _)).Times(1);
+    sim_->placeRoad(4, 7, 0);
+
     // Set up expectation BEFORE calling placeServiceBuilding().
     // SFX_BUILD_PLACE (SoundId = 1) must fire exactly once.
     // No SFX_EARTHWORKS expected: earthworksCostOverride = 0.
@@ -173,6 +178,11 @@ TEST_F(AudioSimTest, CitySimulation_PlaceServiceBuilding_SteepSlope_FiresEarthwo
     // Verify the treasury is positive.
     ASSERT_GT(sim_->getTreasuryBalance(), 0.0f)
         << "Easy difficulty must initialise a positive treasury";
+
+    // Phase 11h: placeServiceBuilding requires an adjacent road to its 2×2 footprint.
+    // Place road at (4,7) — adjacent to footprint tile (5,7). Fires SFX_ROAD_BUILD.
+    EXPECT_CALL(audioSystem_, playPositionalSound(SFX_ROAD_BUILD, _, _, _)).Times(1);
+    sim_->placeRoad(4, 7, 0);
 
     // InSequence: SFX_EARTHWORKS must fire BEFORE SFX_BUILD_PLACE.
     // (ref: implementation/phase-9b.md Deliverable J.0 Audio Decision 1 call sequence)

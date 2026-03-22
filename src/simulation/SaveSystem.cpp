@@ -95,6 +95,10 @@ SaveResult SaveSystem::autoSave() {
     return writeJsonToFile(autoSaveFilePath(), jsonData);
 }
 
+SaveResult SaveSystem::saveToSlot(int slot) {
+    return saveToSlot(slot, "");
+}
+
 SaveResult SaveSystem::saveToSlot(int slot, const std::string& /*name*/) {
     if (slot < 1 || slot > 3) {
         return SaveResult{false, "SaveSystem: slot must be 1–3, got " + std::to_string(slot)};
@@ -174,6 +178,12 @@ bool SaveSystem::isSaveCorrupted() const {
     // corrupted (or at least the best candidate is unreadable).
     LoadResult r = loadMostRecentSave();
     return !r.ok;
+}
+
+SaveFileState SaveSystem::getSaveFileState() const {
+    if (!hasSaveData()) return SaveFileState::NoSaves;
+    if (isSaveCorrupted()) return SaveFileState::AllCorrupt;
+    return SaveFileState::Valid;
 }
 
 std::string SaveSystem::getSaveDirectoryPath() const {

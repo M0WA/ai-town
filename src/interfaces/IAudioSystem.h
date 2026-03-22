@@ -2,8 +2,9 @@
 
 #include "audio_types.h"
 #include "simulation_types.h"
+#include <utility>
 
-// Canonical IAudioSystem — 15 methods.
+// Canonical IAudioSystem — 18 methods.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType,
 // SimSpeed, SoundPriority, TimeOfDay, MusicIntensity, vec3, CameraState).
 // Never expose ALuint, ALfloat, or AL_* constants through this interface.
@@ -85,4 +86,37 @@ public:
     // Threshold conditions: see architecture/game-design/economy-model.md
     //   §Music Intensity Tiers.
     virtual void setMusicIntensity(MusicIntensity intensity) = 0;
+
+    // -----------------------------------------------------------------------
+    // Phase 11d — Vehicle engine audio pair API
+    //
+    // These three methods wire the traffic agent system (Deliverable 3a) to
+    // the SFX source pool.  All three are main-thread entry points; AL state
+    // changes are dispatched to the audio thread internally per the two-mutex
+    // design (see architecture/audio-architecture/audio-system.md §Two-Mutex Design).
+    //
+    // Indices returned by acquireVehicleEnginePair are OPAQUE SFX pool source
+    // indices — never ALuint.  IAudioSystem must not expose OpenAL types.
+    // (ref: architecture/audio-architecture/dynamic-soundscape.md §Vehicle Engine Audio)
+    // -----------------------------------------------------------------------
+
+    // acquireVehicleEnginePair — reserve an idle+move source pair from the
+    // vehicle engine pool for the given zone type (zone affects pitch/gain profile).
+    // Returns {idleIdx, moveIdx} on success; {-1, -1} if the pool is exhausted.
+    // Callers MUST check for {-1,-1} before calling updateVehicleAudio.
+    virtual std::pair<int,int> acquireVehicleEnginePair(ZoneType zone) = 0;
+
+    // releaseVehicleEnginePair — stop and return both sources to the pool.
+    // Passing {-1,-1} is a safe no-op.
+    virtual void releaseVehicleEnginePair(int idleIdx, int moveIdx) = 0;
+
+    // updateVehicleAudio — push per-frame speed and world position to the
+    // audio thread for AL_PITCH / AL_GAIN crossblend and AL_POSITION update.
+    // Called once per active agent per render frame, after getAgentPositions()
+    // and before drawScene().
+    // speedFraction: 0.0 = stopped (idle source dominant), 1.0 = free-flow (move source dominant).
+    // worldX / worldZ: world-space position in metres for AL_POSITION.
+    virtual void updateVehicleAudio(int idleIdx, int moveIdx,
+                                    float speedFraction,
+                                    float worldX, float worldZ) = 0;
 };

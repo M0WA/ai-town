@@ -37,16 +37,23 @@ driver->endScene();
    - `bool m_hoverVisible{false}` — set to `true` when a valid tile is hovered; set to
      `false` on a clear request (`tileX == -1`).
 
-   `setTileHoverHighlight(tileX, tileZ, colour)` behaves as follows:
+   `setTileHoverHighlight(tileX, tileZ, footprintSize = 1)` behaves as follows:
 
    - **Clear request (`tileX == -1`)**: sets `m_hoverVisible = false`. Does NOT touch
      `m_hoveredTileMesh` — the pointer remains valid and the buffer is retained for reuse.
-   - **Normal call (valid tile)**: updates vertex positions and colours in the existing buffer,
+   - **Normal call (valid tile)**: updates vertex positions in the existing buffer (colour is
+     hardcoded in `IrrlichtRenderer`), sets the highlighted footprint to
+     `footprintSize × footprintSize` tiles starting at `(tileX, tileZ)`,
      calls `recalculateBoundingBox()` on the buffer, then sets `m_hoverVisible = true`.
 
    `m_hoveredTileMesh` is dropped **only** in the `IrrlichtRenderer` destructor via `->drop()`.
    Setting the pointer to `nullptr` on clear is a bug — it loses the only reference to the
    allocated buffer, causing a memory leak.
+
+   **Phase 11h signature change**: the `uint32_t argb` parameter was removed in Phase 11h;
+   hover highlight colours are now hardcoded in `IrrlichtRenderer`. The third parameter
+   `footprintSize` (default = 1) controls the N×N footprint size. The clear sentinel is now
+   `setTileHoverHighlight(-1, -1)` (two arguments).
 
 3. `uiManager->draw()` — calls each panel's `draw()` method in explicit Z-order (slots 1–10 per `ui-manager.md`). Each panel's `draw()` updates element state (visibility, text, alpha) but does NOT render pixels.
 4. `guiEnvironment->drawAll()` — renders all visible `IGUIElement` nodes. Because step 3 has already set the correct visibility on every element (non-active panels hide theirs), only the intended elements are painted.
@@ -55,7 +62,51 @@ The Z-order concern (scrim must cover panels; modal must be topmost) is handled 
 
 **Loading screen exception**: Loading screen render loops may omit `guiEnvironment->drawAll()`. The loading screen UI (progress bar, status text) is rendered by `UIManager::draw()` using direct draw primitives (not Irrlicht `IGUIElement` nodes), so there are no GUI elements for `guiEnvironment->drawAll()` to paint. Calling `guiEnvironment->drawAll()` during the loading screen is harmless but unnecessary; omitting it is intentional and correct. The gameplay render loop (post-load) MUST include `guiEnvironment->drawAll()` as normal.
 
-The mandatory 10-step per-frame sequence is: `audioSystem->syncListenerToCamera(cam)` → `audioSystem->update(realDeltaSeconds)` → `UIManager::update(realDeltaSeconds)` → `terrainSystem->update(realDeltaSeconds)` → `driver->beginScene()` → `sceneManager->drawAll()` → hover tile highlight `drawMeshBuffer()` if `m_hoveredTileMesh && m_hoverVisible` (Phase 9b) → `UIManager::draw()` → `guiEnvironment->drawAll()` → `driver->endScene()`. The two audio calls must come before `beginScene()` so that the listener position and audio command queue are fully updated before rendering begins. `terrainSystem->update()` is also a pre-render step — it processes queued LOD rebuilds before the scene is drawn. The Irrlicht-internal ordering (`beginScene` → `drawAll` → `draw` → `guiEnv->drawAll` → `endScene`) is immutable; the audio and terrain setup calls are pre-steps that must not be moved inside the Irrlicht render block. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API.
+The mandatory 11-step per-frame sequence is: `audioSystem->syncListenerToCamera(cam)` → `audioSystem->update(realDeltaSeconds)` → `UIManager::update(realDeltaSeconds)` → `terrainSystem->update(realDeltaSeconds)` → `renderer->update(realDeltaSeconds)` (cloud UV scroll) → `driver->beginScene()` → `sceneManager->drawAll()` → hover tile highlight `drawMeshBuffer()` if `m_hoveredTileMesh && m_hoverVisible` (Phase 9b) → `UIManager::draw()` → `guiEnvironment->drawAll()` → `driver->endScene()` → **60 FPS frame cap sleep**. The two audio calls must come before `beginScene()` so that the listener position and audio command queue are fully updated before rendering begins. `terrainSystem->update()` is also a pre-render step — it processes queued LOD rebuilds before the scene is drawn. The Irrlicht-internal ordering (`beginScene` → `drawAll` → `draw` → `guiEnv->drawAll` → `endScene`) is immutable; the audio and terrain setup calls are pre-steps that must not be moved inside the Irrlicht render block. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API.
+
+## Frame Rate Cap
+
+The game loop targets **60 FPS** by sleeping out the remainder of each 16.67 ms budget after `driver->endScene()`. Without this cap, the loop pins a CPU core at 100% on software renderers (llvmpipe), causing thermal throttling and irregular frame-time spikes. The sleep uses `std::this_thread::sleep_for` and is skipped when the frame already took ≥ 16.67 ms (i.e. the cap never forces frames to be slower than natural rendering allows).
+
+```cpp
+static constexpr double kTargetFrameSeconds = 1.0 / 60.0;
+double elapsed  = wallClock.nowSeconds() - frameStartTime;
+double remaining = kTargetFrameSeconds - elapsed;
+if (remaining > 0.001)
+    std::this_thread::sleep_for(std::chrono::duration<double>(remaining));
+```
+
+**V1 note on llvmpipe**: `driver->endScene()` is where llvmpipe performs its software rasterisation flush — measured at ~81 ms per frame on a devcontainer CPU (12 FPS potential). All other per-frame steps combined cost < 0.5 ms. On a real GPU `endScene()` is a command-queue submit and returns in < 1 ms. The cap is necessary for the devcontainer development environment; it is neutral on hardware with a real GPU (those frames complete in < 1 ms and the sleep absorbs the rest of the 16.67 ms budget).
+
+## `--frames N` Profiling Argument
+
+`main()` accepts `--frames N`: run exactly N frames, print a per-step timing report to stderr, then exit cleanly. Intended for profiling and regression benchmarks.
+
+```bash
+./build/aitown --frames 300
+```
+
+Output (example on llvmpipe):
+
+```text
+=== FRAME TIMING REPORT (300 frames) ===
+  simulation tick :     1.38 µs/frame
+  camera update   :     6.23 µs/frame
+  terrain update  :     1.94 µs/frame
+  UI update       :     3.74 µs/frame
+  audio update    :     3.85 µs/frame
+  render (3D+GUI) : 82911.89 µs/frame
+    ├ renderer.update  :     1.91 µs/frame
+    ├ beginScene       :    70.03 µs/frame
+    ├ drawScene        :  1964.67 µs/frame
+    └ endScene (flush) : 80874.46 µs/frame
+  TOTAL measured  : 82932.00 µs/frame  (12.1 FPS potential)
+==========================================
+```
+
+`drawScene` is further broken down by `IrrlichtRenderer::drawScene()` which prints a `[drawScene]` line every 300 frames showing the split between `sceneManager->drawAll()` (3D), hover/preview mesh draws, `UIManager::draw()` (state update), and `guiEnvironment->drawAll()` (GUI pixel fill).
+
+**Key finding (llvmpipe)**: `endScene()` accounts for 97.5% of frame time — all software rasterisation is deferred to the flush. The 3D scene and GUI together cost only ~2 ms. There is no worthwhile optimisation target in the game code itself on a software renderer; performance is determined entirely by the GPU/CPU.
 
 ## IrrlichtRenderer Late-Binding Pattern
 
@@ -327,6 +378,75 @@ nm build/libaitown_render.a | grep -i glew | sort | uniq -d
 
 If this command produces any output, duplicate GLEW symbols are present and the build is BLOCKED — the issue must be resolved before merging. The result of this check (clean or duplicate list) must be recorded in the Phase 2 Spike Results section below.
 
+## Building Atlas Resolution Fallback
+
+`RenderSystem` queries and stores `m_maxTextureSize` during GL capability
+initialization (see "GL Capability Query Initialization" above). `TextureCache`
+reads this value when loading the building diffuse atlas to decide whether the
+primary 4096×4096 atlas is safe to upload.
+
+### Detection
+
+`TextureCache::loadSRGB()` checks `m_maxTextureSize` before loading
+`buildings_atlas_d.dds`. If `m_maxTextureSize < 4096`, the fallback path is
+taken instead of the primary path.
+
+```cpp
+const std::string atlasPath =
+    (m_maxTextureSize >= 4096)
+        ? "assets/textures/buildings_atlas_d.dds"
+        : "assets/textures/buildings_atlas_d_2k.dds";
+```
+
+### Fallback Asset
+
+When `m_maxTextureSize < 4096`, load `buildings_atlas_d_2k.dds` — the
+2048×2048 DXT1 sRGB fallback atlas — in place of the primary
+`buildings_atlas_d.dds` atlas. Both files must be shipped with the game; the
+fallback is not generated at runtime.
+
+### Warning Log
+
+When the fallback path is taken, log a `WARNING` to stderr before the load:
+
+```cpp
+std::fprintf(stderr,
+    "WARNING: GL_MAX_TEXTURE_SIZE < 4096; "
+    "loading fallback atlas buildings_atlas_d_2k.dds\n");
+```
+
+### Naming Convention
+
+The fallback asset uses the suffix `_2k` inserted immediately before the file
+extension: `<basename>_2k.dds`. For the building diffuse atlas:
+
+| Role | Filename | Resolution |
+|---|---|---|
+| Primary atlas | `buildings_atlas_d.dds` | 4096×4096 DXT1 sRGB |
+| Fallback atlas | `buildings_atlas_d_2k.dds` | 2048×2048 DXT1 sRGB |
+
+Both files must be present in the shipping build. The `_2k` suffix pattern
+applies to any future atlas that follows the same dual-resolution scheme.
+
+### GL_TEXTURE_MAX_LEVEL
+
+The two atlas sizes use different mip chain depths. Set `GL_TEXTURE_MAX_LEVEL`
+immediately after uploading the compressed texture data:
+
+| Atlas | Resolution | Mip levels | `GL_TEXTURE_MAX_LEVEL` |
+|---|---|---|---|
+| Primary | 4096×4096 | 5 (4096 → 256) | `4` |
+| Fallback | 2048×2048 | 4 (2048 → 256) | `3` |
+
+The fallback 2048 atlas retains the same 4-level mip chain as the V1 atlas
+(as documented in `architecture/asset-standards/2d-texture-standards.md`).
+The primary 4096 atlas adds one additional mip level (level 0 at 4096×4096).
+
+```cpp
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL,
+    (m_maxTextureSize >= 4096) ? 4 : 3);
+```
+
 ## Phase 2 Spike Results
 
 **Q1 — Does vendored Irrlicht use GLEW internally?**
@@ -355,9 +475,9 @@ VERIFIED by binary analysis of `CMeshSceneNode.cpp.o` extracted from `libIrrlich
 Caller MUST call `->drop()` on `newLODMesh` after `setMesh()`. See `scene-graph-ownership.md`.
 Phase 5 TerrainChunk work is UNBLOCKED.
 
-## Test Guard — `shader_stub_compile_test` Skip vs. Fail
+## Test Guard — `shader_loading_test` Skip vs. Fail
 
-The `GTEST_SKIP()` guard in `shader_stub_compile_test` must only activate when
+The `GTEST_SKIP()` guard in `shader_loading_test` must only activate when
 `createDevice()` returns null AND the `DISPLAY` environment variable is unset.
 Under `xvfb-run` (where `DISPLAY` is set), a null return from
 `createDevice(EDT_OPENGL)` is a test FAILURE (`FAIL()`), not a skip — it

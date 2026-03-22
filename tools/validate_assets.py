@@ -187,33 +187,438 @@ def check_3():
 
 
 # ---------------------------------------------------------------------------
-# Check #4: UV channel 0 within [0, 1] on all LOD levels.
-# NOTE: B3D UV channel extraction requires a B3D parser. Since no Python
-# B3D parser library is available, this check validates file existence and
-# meta consistency; full UV range validation requires a B3D-aware tool.
+# Phase 11e cell assignment table (canonical 8×8 atlas grid).
+# Key: asset base name (e.g. "res_low_01").  Value: (row, col).
 # ---------------------------------------------------------------------------
-def check_4():
-    """check_4: UV channel 0 coordinates on all LOD levels must be in [0, 1]."""
-    asset_dir = "assets/3d"
-    lod_files = (
-        glob.glob(os.path.join(asset_dir, "**", "*_lod0.b3d"), recursive=True) +
-        glob.glob(os.path.join(asset_dir, "**", "*_lod1.b3d"), recursive=True) +
-        glob.glob(os.path.join(asset_dir, "**", "*_lod2.b3d"), recursive=True) +
-        glob.glob(os.path.join(asset_dir, "*_lod0.b3d")) +
-        glob.glob(os.path.join(asset_dir, "*_lod1.b3d")) +
-        glob.glob(os.path.join(asset_dir, "*_lod2.b3d"))
-    )
-    if not lod_files:
-        print("INFO check_4: no _lod*.b3d files found — no-op")
-        return
-    # B3D binary parsing for UV channel 0 requires a full B3D parser.
-    # The check logic is present; UV validation deferred pending parser availability.
-    # Any B3D file that can be opened as a binary file and is non-empty is accepted here.
-    for path in lod_files:
-        if os.path.getsize(path) == 0:
-            raise AssertionError(f"check_4 FAIL: {path} is empty — not a valid B3D file")
-    print(f"check_4 PASS: {len(lod_files)} LOD .b3d file(s) verified non-empty "
-          f"(full UV[0,1] validation requires B3D parser — no .b3d assets present in Phase 5)")
+_PHASE_11E_CELL_ASSIGNMENT = {
+    # Row 0: res_low and res_med
+    "res_low_01": (0, 0),
+    "res_low_02": (0, 1),
+    "res_low_03": (0, 2),
+    "res_low_04": (0, 3),
+    "res_med_01": (0, 4),
+    "res_med_02": (0, 5),
+    "res_med_03": (0, 6),
+    "res_med_04": (0, 7),
+    # Row 1: res_high and com_low
+    "res_high_01": (1, 0),
+    "res_high_02": (1, 1),
+    "res_high_03": (1, 2),
+    "res_high_04": (1, 3),
+    "com_low_01": (1, 4),
+    "com_low_02": (1, 5),
+    "com_low_03": (1, 6),
+    "com_low_04": (1, 7),
+    # Row 2: com_med and com_high
+    "com_med_01": (2, 0),
+    "com_med_02": (2, 1),
+    "com_med_03": (2, 2),
+    "com_med_04": (2, 3),
+    "com_high_01": (2, 4),
+    "com_high_02": (2, 5),
+    "com_high_03": (2, 6),
+    "com_high_04": (2, 7),
+    # Row 3: ind_low and ind_med
+    "ind_low_01": (3, 0),
+    "ind_low_02": (3, 1),
+    "ind_low_03": (3, 2),
+    "ind_low_04": (3, 3),
+    "ind_med_01": (3, 4),
+    "ind_med_02": (3, 5),
+    "ind_med_03": (3, 6),
+    "ind_med_04": (3, 7),
+    # Row 4: ind_high and service buildings
+    "ind_high_01": (4, 0),
+    "ind_high_02": (4, 1),
+    "ind_high_03": (4, 2),
+    "ind_high_04": (4, 3),
+    "svc_fire_station":   (4, 4),
+    "svc_police_station": (4, 5),
+    "svc_power_plant":    (4, 6),
+    "svc_water_tower":    (4, 7),
+}
+
+
+def _parse_b3d_uv_channel0(filepath):
+    """
+    Parse a B3D binary file and return all UV channel 0 (u, v) pairs as a list
+    of float tuples.
+
+    B3D chunk format written by generate_b3d_models.py:
+      BB3D → version(i32) + TEXS + BRUS + NODE
+      NODE → name(str) + pos(3×f32) + scale(3×f32) + rot(4×f32) + MESH
+      MESH → brush_id(i32) + VRTS + TRIS
+      VRTS → flags(i32) + tc_sets(i32) + tc_flags[0..tc_sets-1](i32 each)
+             + per-vertex data
+
+    Per-vertex layout (flags=1 → normals present, tc_sets=1, tc_flags[0]=2):
+      x, y, z       (3 × float32)
+      nx, ny, nz    (3 × float32)   [present when flags & 1]
+      u0, v0        (2 × float32)   [first UV channel]
+
+    B3D sub-chunks (NODE, MESH) have non-chunk preamble bytes before their
+    child chunks, so they cannot be recursively scanned as a flat chunk list.
+    This function parses the known structure explicitly:
+      BB3D payload → skip version(i32) → scan TEXS/BRUS/NODE at top level
+      NODE payload → skip preamble (name str + 3+3+4 floats) → scan MESH
+      MESH payload → skip brush_id(i32) → scan VRTS/TRIS
+
+    Raises AssertionError if the file cannot be parsed or contains no VRTS chunk.
+    """
+    with open(filepath, "rb") as f:
+        data = f.read()
+
+    if len(data) < 12:
+        raise AssertionError(
+            f"_parse_b3d_uv_channel0: {filepath}: file too small ({len(data)} bytes)"
+        )
+
+    root_tag = data[0:4]
+    if root_tag != b"BB3D":
+        raise AssertionError(
+            f"_parse_b3d_uv_channel0: {filepath}: not a B3D file (magic {root_tag!r})"
+        )
+
+    def read_i32(pos):
+        return struct.unpack_from("<i", data, pos)[0], pos + 4
+
+    def read_f32(pos):
+        return struct.unpack_from("<f", data, pos)[0], pos + 4
+
+    def read_str(pos):
+        """Read null-terminated string; return (s, new_pos)."""
+        end = data.index(b"\x00", pos)
+        return data[pos:end].decode("ascii", errors="replace"), end + 1
+
+    def read_chunk_header(pos):
+        """Return (tag_bytes, payload_start, payload_end, next_chunk_pos)."""
+        if pos + 8 > len(data):
+            return None
+        tag = data[pos:pos + 4]
+        length, payload_start = read_i32(pos + 4)
+        if length < 0:
+            return None
+        payload_end = payload_start + length
+        if payload_end > len(data):
+            return None
+        return tag, payload_start, payload_end, payload_end
+
+    # ---- Locate NODE in the top-level BB3D payload ----
+    # BB3D payload: version(i32) then top-level chunks (TEXS, BRUS, NODE, ...)
+    root_length = struct.unpack_from("<i", data, 4)[0]
+    root_payload_end = 8 + root_length
+    pos = 12  # skip BB3D tag(4) + length(4) + version(4)
+
+    node_payload_start = None
+    node_payload_end = None
+    while pos + 8 <= root_payload_end:
+        hdr = read_chunk_header(pos)
+        if hdr is None:
+            break
+        tag, payload_start, payload_end, next_pos = hdr
+        if tag == b"NODE":
+            node_payload_start = payload_start
+            node_payload_end = payload_end
+            break
+        pos = next_pos
+
+    if node_payload_start is None:
+        raise AssertionError(
+            f"_parse_b3d_uv_channel0: {filepath}: no NODE chunk found"
+        )
+
+    # ---- Parse NODE preamble to reach MESH ----
+    # NODE payload: name(str) + pos(3×f32) + scale(3×f32) + rot(4×f32) + sub-chunks
+    pos = node_payload_start
+    _name, pos = read_str(pos)           # node name (null-terminated)
+    for _ in range(3):                   # position x, y, z
+        _, pos = read_f32(pos)
+    for _ in range(3):                   # scale x, y, z
+        _, pos = read_f32(pos)
+    for _ in range(4):                   # rotation w, x, y, z (quaternion)
+        _, pos = read_f32(pos)
+
+    mesh_payload_start = None
+    mesh_payload_end = None
+    while pos + 8 <= node_payload_end:
+        hdr = read_chunk_header(pos)
+        if hdr is None:
+            break
+        tag, payload_start, payload_end, next_pos = hdr
+        if tag == b"MESH":
+            mesh_payload_start = payload_start
+            mesh_payload_end = payload_end
+            break
+        pos = next_pos
+
+    if mesh_payload_start is None:
+        raise AssertionError(
+            f"_parse_b3d_uv_channel0: {filepath}: no MESH chunk found inside NODE"
+        )
+
+    # ---- Parse MESH preamble to reach VRTS ----
+    # MESH payload: brush_id(i32) + sub-chunks (VRTS, TRIS, ...)
+    pos = mesh_payload_start
+    _brush_id, pos = read_i32(pos)      # MESH brush_id
+
+    vrts_payload_start = None
+    vrts_payload_end = None
+    while pos + 8 <= mesh_payload_end:
+        hdr = read_chunk_header(pos)
+        if hdr is None:
+            break
+        tag, payload_start, payload_end, next_pos = hdr
+        if tag == b"VRTS":
+            vrts_payload_start = payload_start
+            vrts_payload_end = payload_end
+            break
+        pos = next_pos
+
+    if vrts_payload_start is None:
+        raise AssertionError(
+            f"_parse_b3d_uv_channel0: {filepath}: no VRTS chunk found inside MESH"
+        )
+
+    # ---- Parse VRTS payload ----
+    # VRTS: flags(i32) + tc_sets(i32) + tc_flags[0..tc_sets-1](i32 each) + vertices
+    p = vrts_payload_start
+    flags, p = read_i32(p)
+    tc_sets, p = read_i32(p)
+    tc_flags = []
+    for _ in range(tc_sets):
+        tf, p = read_i32(p)
+        tc_flags.append(tf)
+
+    has_normals = bool(flags & 1)
+    tc_size_0 = tc_flags[0] if tc_sets >= 1 else 0  # 2 for 2D UV
+
+    floats_per_vertex = 3                          # x, y, z
+    if has_normals:
+        floats_per_vertex += 3                     # nx, ny, nz
+    floats_per_vertex += tc_size_0                 # UV channel 0
+    for i in range(1, tc_sets):
+        floats_per_vertex += tc_flags[i]           # additional UV channels
+
+    bytes_per_vertex = floats_per_vertex * 4
+    if bytes_per_vertex == 0:
+        return []
+
+    n_verts = (vrts_payload_end - p) // bytes_per_vertex
+    if n_verts <= 0:
+        return []
+
+    # Byte offset to UV channel 0 within each vertex
+    uv0_byte_offset = (3 + (3 if has_normals else 0)) * 4
+
+    uvs = []
+    for vi in range(n_verts):
+        base = p + vi * bytes_per_vertex
+        u_pos = base + uv0_byte_offset
+        v_pos = u_pos + 4
+        if v_pos + 4 <= vrts_payload_end:
+            u = struct.unpack_from("<f", data, u_pos)[0]
+            v = struct.unpack_from("<f", data, v_pos)[0]
+            uvs.append((u, v))
+    return uvs
+
+
+def _parse_b3d_positions(filepath):
+    """Parse all vertex (x, y, z) positions from a B3D file's VRTS chunk.
+
+    Returns list of (x, y, z) float tuples.
+    Raises AssertionError on format errors.
+    """
+    with open(filepath, "rb") as f:
+        data = f.read()
+
+    # Locate VRTS chunk using same approach as _parse_b3d_uv_channel0
+    # Search for "VRTS" tag
+    vrts_pos = data.find(b"VRTS")
+    assert vrts_pos >= 0, "VRTS chunk not found"
+    payload_len = struct.unpack_from("<i", data, vrts_pos + 4)[0]
+    p = vrts_pos + 8  # start of VRTS payload
+
+    flags = struct.unpack_from("<i", data, p)[0]; p += 4
+    tc_sets = struct.unpack_from("<i", data, p)[0]; p += 4
+    has_normals = bool(flags & 1)
+    # Read tc_flags (one int per tc_set)
+    for _ in range(tc_sets):
+        p += 4
+
+    # Vertex stride: 3 floats pos + (3 floats normals if has_normals) + (2 floats * tc_sets)
+    stride = 3 * 4
+    if has_normals:
+        stride += 3 * 4
+    stride += tc_sets * 2 * 4
+
+    vrts_end = vrts_pos + 8 + payload_len
+    positions = []
+    while p + stride <= vrts_end:
+        x = struct.unpack_from("<f", data, p)[0]
+        y = struct.unpack_from("<f", data, p + 4)[0]
+        z = struct.unpack_from("<f", data, p + 8)[0]
+        positions.append((x, y, z))
+        p += stride
+
+    return positions
+
+
+# ---------------------------------------------------------------------------
+# Check #4: UV channel 0 within assigned 8×8 atlas cell for all building LOD0
+# models. Also validates .meta atlas_cell matches Phase 11e Cell Assignment Table.
+# ---------------------------------------------------------------------------
+def check_4_building_uv_atlas_cell(assets_dir):
+    """Check #4: UV channel 0 within assigned 8x8 atlas cell for all building LOD0 models.
+
+    For each entry in _PHASE_11E_CELL_ASSIGNMENT:
+      1. Verifies the .meta atlas_cell row/col matches the Phase 11e Cell Assignment Table.
+      2. Parses UV channel 0 from the _lod0.b3d file and verifies all UVs fall within
+         [col/8, (col+1)/8] × [row/8, (row+1)/8].
+
+    Returns a list of error strings. Empty list means the check passed.
+    """
+    buildings_dir = os.path.join(assets_dir, "3d", "buildings")
+    if not os.path.isdir(buildings_dir):
+        return [f"Check #4: buildings directory not found: {buildings_dir}"]
+
+    errors = []
+    checked = 0
+    TOL = 1e-4  # floating-point tolerance for boundary comparisons
+
+    for asset_name, (exp_row, exp_col) in _PHASE_11E_CELL_ASSIGNMENT.items():
+        lod0_path = os.path.join(buildings_dir, f"{asset_name}_lod0.b3d")
+        meta_path = os.path.join(buildings_dir, f"{asset_name}.meta")
+
+        # 1. Verify .meta atlas_cell matches Phase 11e Cell Assignment Table
+        if not os.path.exists(meta_path):
+            errors.append(
+                f"{asset_name}: missing {meta_path}"
+            )
+            continue
+        try:
+            with open(meta_path, "r") as mf:
+                meta = json.load(mf)
+        except Exception as exc:
+            errors.append(f"{asset_name}: cannot parse {meta_path}: {exc}")
+            continue
+        ac = meta.get("atlas_cell", {})
+        meta_row = ac.get("row")
+        meta_col = ac.get("col")
+        if meta_row != exp_row or meta_col != exp_col:
+            errors.append(
+                f"{asset_name}: {meta_path} atlas_cell={{row:{meta_row},col:{meta_col}}} "
+                f"expected row={exp_row} col={exp_col} per Phase 11e Cell Assignment Table"
+            )
+
+        # 2. Verify UV coordinates in LOD0 model fall within the assigned cell
+        if not os.path.exists(lod0_path):
+            errors.append(f"{asset_name}: missing {lod0_path}")
+            continue
+        try:
+            uvs = _parse_b3d_uv_channel0(lod0_path)
+        except AssertionError as exc:
+            errors.append(f"{asset_name}: {lod0_path}: {exc}")
+            continue
+
+        u_min = exp_col / 8.0
+        u_max = (exp_col + 1) / 8.0
+        v_min = exp_row / 8.0
+        v_max = (exp_row + 1) / 8.0
+        # ROOF_CELL = (5, 0): shared roof cell used by all buildings for roof faces
+        roof_u_min, roof_u_max = 0.0, 0.125   # col 0 → U=[0.0, 0.125]
+        roof_v_min, roof_v_max = 0.625, 0.75  # row 5 → V=[0.625, 0.75]
+        # SOLID_WALL_CELL = (5, 6): plain brick — used for gable ends on all buildings
+        solid_u_min, solid_u_max = 0.75, 0.875  # col 6 → U=[0.75, 0.875]
+        solid_v_min, solid_v_max = 0.625, 0.75  # row 5 → V=[0.625, 0.75]
+        # Door cells: res_low_02 uses (6,0), res_low_03 uses (6,1)
+        door_cells = []
+        if asset_name == "res_low_02":
+            door_cells.append((0.0, 0.125, 0.75, 0.875))    # DOOR_CELL (6,0)
+        elif asset_name == "res_low_03":
+            door_cells.append((0.125, 0.25, 0.75, 0.875))   # DOOR_CELL (6,1)
+        # Phase 11f ground-feature cells: row 5, cols 1-5 — UV V=[0.625, 0.75]
+        GROUND_V_MIN = 5 / 8.0 - TOL   # = 0.625 - TOL
+        GROUND_V_MAX = 6 / 8.0 + TOL   # = 0.75 + TOL
+        GROUND_U_RANGES = [(col / 8.0 - TOL, (col + 1) / 8.0 + TOL) for col in range(1, 6)]
+        violation = None
+        for u, v in uvs:
+            in_wall = u_min - TOL <= u <= u_max + TOL and v_min - TOL <= v <= v_max + TOL
+            in_roof = roof_u_min - TOL <= u <= roof_u_max + TOL and roof_v_min - TOL <= v <= roof_v_max + TOL
+            in_solid = solid_u_min - TOL <= u <= solid_u_max + TOL and solid_v_min - TOL <= v <= solid_v_max + TOL
+            in_door = any(du0 - TOL <= u <= du1 + TOL and dv0 - TOL <= v <= dv1 + TOL
+                          for du0, du1, dv0, dv1 in door_cells)
+            in_ground = (GROUND_V_MIN <= v <= GROUND_V_MAX and
+                         any(u_lo <= u <= u_hi for u_lo, u_hi in GROUND_U_RANGES))
+            if not (in_wall or in_roof or in_solid or in_door or in_ground):
+                violation = (u, v)
+                break
+        if violation is not None:
+            u, v = violation
+            errors.append(
+                f"{asset_name}: {lod0_path} UV ({u:.6f},{v:.6f}) "
+                f"outside cell ({exp_row},{exp_col}) bounds "
+                f"U=[{u_min:.4f},{u_max:.4f}] V=[{v_min:.4f},{v_max:.4f}]"
+            )
+        else:
+            checked += 1
+
+    if not errors:
+        print(f"  check_4: {checked} building LOD0 models verified UV within assigned 8x8 atlas cell")
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #4b: Bounding box of all building LOD0 models must include ground
+# quad vertices: min.Y <= 0 and max.Y >= 0.01 (Phase 11f requirement).
+# ---------------------------------------------------------------------------
+def check_4b_building_bbox(assets_dir):
+    """Check #4b: verify bounding box of each building LOD0 includes ground quad at y=0.01.
+
+    Reads all vertex positions from each _lod0.b3d file and checks:
+      - min.Y <= 0   (building base at ground level)
+      - max.Y >= 0.01  (ground quad vertex present at y=0.01)
+
+    Returns a list of error strings. Empty list means the check passed.
+    """
+    buildings_dir = os.path.join(assets_dir, "3d", "buildings")
+    if not os.path.isdir(buildings_dir):
+        return [f"Check #4b: buildings directory not found: {buildings_dir}"]
+
+    errors = []
+    checked = 0
+
+    for asset_name in _PHASE_11E_CELL_ASSIGNMENT:
+        lod0_path = os.path.join(buildings_dir, f"{asset_name}_lod0.b3d")
+        if not os.path.exists(lod0_path):
+            errors.append(f"Check #4b {asset_name}: missing {lod0_path}")
+            continue
+        try:
+            positions = _parse_b3d_positions(lod0_path)
+        except Exception as exc:
+            errors.append(f"Check #4b {asset_name}: cannot parse {lod0_path}: {exc}")
+            continue
+        if not positions:
+            errors.append(f"Check #4b {asset_name}: no vertices found in {lod0_path}")
+            continue
+
+        ys = [p[1] for p in positions]
+        min_y = min(ys)
+        max_y = max(ys)
+        TOL = 1e-4
+        if min_y > TOL:
+            errors.append(
+                f"Check #4b {asset_name}: min.Y={min_y:.6f} > 0 "
+                f"(building should start at y=0)")
+        if max_y < 0.01 - TOL:
+            errors.append(
+                f"Check #4b {asset_name}: max.Y={max_y:.6f} < 0.01 "
+                f"(ground quad at y=0.01 appears missing)")
+        else:
+            checked += 1
+
+    if not errors:
+        print(f"  check_4b: {checked} building LOD0 bounding boxes verified (min.Y<=0, max.Y>=0.01)")
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -1877,6 +2282,581 @@ def check_24_clouds_png(assets_dir):
     return errors
 
 
+# ---------------------------------------------------------------------------
+# Check #25 — vehicles_diffuse_atlas_d.dds DDS format
+#
+# Spec (phase-11d.md §2b):
+#   vehicles_diffuse_atlas_d.dds must be:
+#     - DDS magic at offset 0
+#     - DX10 extended header present (FourCC 'DX10' at offset 84)
+#     - DXGI_FORMAT at offset 128 = 72 (DXGI_FORMAT_BC1_UNORM_SRGB)
+#     - Width = 2048, Height = 2048
+#     - dwMipMapCount >= 4
+#
+# The existing Phase 9 stub uses a plain DXT1 FourCC (no DX10 header) so this
+# check will FAIL until the artist delivers the sRGB-tagged DDS from the
+# Phase 11d texture rework pipeline.  That is the expected and correct
+# behaviour — the check infrastructure is in place; the asset will follow.
+# ---------------------------------------------------------------------------
+_VEHICLES_DIFFUSE_ATLAS_PATH = os.path.join(
+    "assets", "textures", "vehicles", "vehicles_diffuse_atlas_d.dds"
+)
+_DXGI_FORMAT_BC1_UNORM_SRGB = 72
+
+
+def check_25_vehicles_diffuse_atlas_dds(assets_dir):
+    """Check #25: vehicles_diffuse_atlas_d.dds — BC1_UNORM_SRGB, DX10, 2048×2048, ≥4 mip.
+
+    Returns a list of error strings. Empty list means the check passed.
+    Returns a single-element list with a FAIL message if the file is not found.
+    """
+    repo_root = os.path.dirname(assets_dir)
+    path = os.path.join(repo_root, _VEHICLES_DIFFUSE_ATLAS_PATH)
+
+    if not os.path.isfile(path):
+        return [f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} not found"]
+
+    errors = []
+    try:
+        with open(path, "rb") as f:
+            data = f.read(132)
+    except OSError as exc:
+        return [f"check_25 FAIL: cannot read {_VEHICLES_DIFFUSE_ATLAS_PATH}: {exc}"]
+
+    if len(data) < 132:
+        return [f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} is too small to parse DDS header"]
+
+    if data[0:4] != b"DDS ":
+        errors.append(
+            f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} missing DDS magic "
+            f"(got {data[0:4]!r})"
+        )
+        return errors
+
+    height = struct.unpack_from("<I", data, 12)[0]
+    width  = struct.unpack_from("<I", data, 16)[0]
+    mip    = struct.unpack_from("<I", data, 28)[0]
+    fourcc = data[84:88]
+
+    if fourcc != b"DX10":
+        errors.append(
+            f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} missing DX10 extended header "
+            f"(FourCC at offset 84 = {fourcc!r}; expected b'DX10'). "
+            f"Re-export using Compressonator or nvcompress -color to produce BC1_UNORM_SRGB."
+        )
+        return errors
+
+    dxgi = struct.unpack_from("<I", data, 128)[0]
+    if dxgi != _DXGI_FORMAT_BC1_UNORM_SRGB:
+        errors.append(
+            f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} DXGI_FORMAT={dxgi} "
+            f"(expected {_DXGI_FORMAT_BC1_UNORM_SRGB} = BC1_UNORM_SRGB). "
+            f"Re-export as BC1_UNORM_SRGB for correct sRGB diffuse upload."
+        )
+
+    if width != 2048 or height != 2048:
+        errors.append(
+            f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} dimensions {width}×{height} "
+            f"(expected 2048×2048)."
+        )
+
+    if mip < 4:
+        errors.append(
+            f"check_25 FAIL: {_VEHICLES_DIFFUSE_ATLAS_PATH} dwMipMapCount={mip} "
+            f"(expected ≥4 mip levels)."
+        )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #26 — vehicles_sprite_atlas_d.dds DDS format
+#
+# Spec (phase-11d.md §2b):
+#   vehicles_sprite_atlas_d.dds must be:
+#     - DDS magic at offset 0
+#     - DX10 extended header present
+#     - DXGI_FORMAT at offset 128 = 77 (DXGI_FORMAT_BC3_UNORM — linear DXT5, NOT sRGB)
+#     - Width = 256, Height = 256
+#     - dwMipMapCount = 1 (base level only, GL_TEXTURE_MAX_LEVEL=0)
+#
+# Linear (not sRGB) because sprite atlas contains synthetic roof-colour swatches,
+# not photographic diffuse data.  The vehicles_sprite_atlas_d.dds upload path in
+# TextureCache uses a linear internal format accordingly.
+# ---------------------------------------------------------------------------
+_VEHICLES_SPRITE_ATLAS_PATH = os.path.join(
+    "assets", "textures", "vehicles", "vehicles_sprite_atlas_d.dds"
+)
+_DXGI_FORMAT_BC3_UNORM = 77
+
+
+def check_26_vehicles_sprite_atlas_dds(assets_dir):
+    """Check #26: vehicles_sprite_atlas_d.dds — BC3_UNORM (linear), DX10, 256×256, 1 mip.
+
+    Returns a list of error strings. Empty list means the check passed.
+    """
+    repo_root = os.path.dirname(assets_dir)
+    path = os.path.join(repo_root, _VEHICLES_SPRITE_ATLAS_PATH)
+
+    if not os.path.isfile(path):
+        return [f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} not found"]
+
+    errors = []
+    try:
+        with open(path, "rb") as f:
+            data = f.read(132)
+    except OSError as exc:
+        return [f"check_26 FAIL: cannot read {_VEHICLES_SPRITE_ATLAS_PATH}: {exc}"]
+
+    if len(data) < 132:
+        return [f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} is too small to parse DDS header"]
+
+    if data[0:4] != b"DDS ":
+        errors.append(
+            f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} missing DDS magic "
+            f"(got {data[0:4]!r})"
+        )
+        return errors
+
+    height = struct.unpack_from("<I", data, 12)[0]
+    width  = struct.unpack_from("<I", data, 16)[0]
+    mip    = struct.unpack_from("<I", data, 28)[0]
+    fourcc = data[84:88]
+
+    if fourcc != b"DX10":
+        errors.append(
+            f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} missing DX10 extended header "
+            f"(FourCC at offset 84 = {fourcc!r}; expected b'DX10'). "
+            f"Re-export using Compressonator with -fd BC3 to produce BC3_UNORM (linear)."
+        )
+        return errors
+
+    dxgi = struct.unpack_from("<I", data, 128)[0]
+    if dxgi != _DXGI_FORMAT_BC3_UNORM:
+        errors.append(
+            f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} DXGI_FORMAT={dxgi} "
+            f"(expected {_DXGI_FORMAT_BC3_UNORM} = BC3_UNORM linear). "
+            f"Sprite atlas uses linear DXT5 — do NOT use BC3_UNORM_SRGB (78) here."
+        )
+
+    if width != 256 or height != 256:
+        errors.append(
+            f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} dimensions {width}×{height} "
+            f"(expected 256×256)."
+        )
+
+    if mip != 1:
+        errors.append(
+            f"check_26 FAIL: {_VEHICLES_SPRITE_ATLAS_PATH} dwMipMapCount={mip} "
+            f"(expected exactly 1 — base level only; GL_TEXTURE_MAX_LEVEL=0 for sprite atlas)."
+        )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #27 — vehicles_normal_atlas_n.dds DDS format
+#
+# Spec (phase-11d.md §2b):
+#   vehicles_normal_atlas_n.dds must be:
+#     - DDS magic at offset 0
+#     - DX10 extended header present
+#     - DXGI_FORMAT at offset 128 = 77 (DXGI_FORMAT_BC3_UNORM — linear DXT5nm, NOT sRGB)
+#     - Width = 2048, Height = 2048
+#     - dwMipMapCount >= 4
+#
+# Normal maps are always linear (not sRGB).  DXT5nm packing: X→alpha, Y→green, Z=0.
+# ---------------------------------------------------------------------------
+_VEHICLES_NORMAL_ATLAS_PATH = os.path.join(
+    "assets", "textures", "vehicles", "vehicles_normal_atlas_n.dds"
+)
+
+
+def check_27_vehicles_normal_atlas_dds(assets_dir):
+    """Check #27: vehicles_normal_atlas_n.dds — BC3_UNORM (linear DXT5nm), DX10, 2048×2048, ≥4 mip.
+
+    Returns a list of error strings. Empty list means the check passed.
+    """
+    repo_root = os.path.dirname(assets_dir)
+    path = os.path.join(repo_root, _VEHICLES_NORMAL_ATLAS_PATH)
+
+    if not os.path.isfile(path):
+        return [f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} not found"]
+
+    errors = []
+    try:
+        with open(path, "rb") as f:
+            data = f.read(132)
+    except OSError as exc:
+        return [f"check_27 FAIL: cannot read {_VEHICLES_NORMAL_ATLAS_PATH}: {exc}"]
+
+    if len(data) < 132:
+        return [f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} is too small to parse DDS header"]
+
+    if data[0:4] != b"DDS ":
+        errors.append(
+            f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} missing DDS magic "
+            f"(got {data[0:4]!r})"
+        )
+        return errors
+
+    height = struct.unpack_from("<I", data, 12)[0]
+    width  = struct.unpack_from("<I", data, 16)[0]
+    mip    = struct.unpack_from("<I", data, 28)[0]
+    fourcc = data[84:88]
+
+    if fourcc != b"DX10":
+        errors.append(
+            f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} missing DX10 extended header "
+            f"(FourCC at offset 84 = {fourcc!r}; expected b'DX10'). "
+            f"Re-export using Compressonator with -fd BC3 to produce BC3_UNORM (linear DXT5nm)."
+        )
+        return errors
+
+    dxgi = struct.unpack_from("<I", data, 128)[0]
+    if dxgi != _DXGI_FORMAT_BC3_UNORM:
+        errors.append(
+            f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} DXGI_FORMAT={dxgi} "
+            f"(expected {_DXGI_FORMAT_BC3_UNORM} = BC3_UNORM linear). "
+            f"Normal maps are linear — do NOT use BC3_UNORM_SRGB (78) here."
+        )
+
+    if width != 2048 or height != 2048:
+        errors.append(
+            f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} dimensions {width}×{height} "
+            f"(expected 2048×2048)."
+        )
+
+    if mip < 4:
+        errors.append(
+            f"check_27 FAIL: {_VEHICLES_NORMAL_ATLAS_PATH} dwMipMapCount={mip} "
+            f"(expected ≥4 mip levels)."
+        )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #28 — Building atlas diffuse minimum variance
+#
+# Spec (phase-11d.md §2a):
+#   For each of the 9 zone-type wall cells (rows 0–2, cols 0–2) in the
+#   2048×2048 buildings_atlas_d.png, compute the standard deviation of pixel
+#   luminance within the 496×496 px usable area (8 px border on each edge of
+#   a 512×512 cell).  A stddev < 8.0 (0–255 scale) indicates a flat placeholder
+#   fill and is treated as a CI failure.
+#
+# Atlas cell layout (from building-atlas-layout.md):
+#   4×4 grid at 512×512 px per cell.
+#   Cell (row, col) starts at pixel (row*512, col*512).
+#   Usable area: 8 px inset on all four edges → starts at (row*512+8, col*512+8),
+#   size 496×496.
+#
+# Implementation note: this check requires Pillow.  If Pillow is absent or the
+# source PNG does not exist, the check is SKIPped (not FAILed) so that
+# environments without Pillow or without the PNG do not block CI jobs unrelated
+# to the texture rework deliverable.
+# ---------------------------------------------------------------------------
+_BUILDINGS_ATLAS_PNG = os.path.join("assets", "textures", "buildings", "buildings_atlas_d.png")
+_BUILDING_CELL_SIZE = 512
+_BUILDING_CELL_BORDER = 8
+_BUILDING_CELL_USABLE = _BUILDING_CELL_SIZE - 2 * _BUILDING_CELL_BORDER  # 496
+_BUILDING_LUMINANCE_STDDEV_MIN = 8.0
+
+# Zone-type wall cells: rows 0–2, cols 0–2 (9 cells total).
+_BUILDING_WALL_CELLS = [(r, c) for r in range(3) for c in range(3)]
+
+
+def _luminance_stddev(pixels):
+    """Compute the standard deviation of ITU-R BT.601 luminance for a list of RGB tuples."""
+    import math as _math
+    n = len(pixels)
+    if n == 0:
+        return 0.0
+    lum = [0.299 * r + 0.587 * g + 0.114 * b for r, g, b in pixels]
+    mean = sum(lum) / n
+    variance = sum((l - mean) ** 2 for l in lum) / n
+    return _math.sqrt(variance)
+
+
+def check_28_building_atlas_color_variance(assets_dir):
+    """Check #28: building atlas diffuse minimum variance.
+
+    For each of the 9 zone-type wall cells (rows 0–2, cols 0–2) in
+    buildings_atlas_d.png, the luminance stddev within the 496×496 usable
+    area must be ≥ 8.0 (otherwise the cell is a flat placeholder fill).
+
+    Returns a list of error strings. Empty list means the check passed.
+    SKIPs (returns []) when Pillow is absent or the source PNG does not exist.
+    """
+    repo_root = os.path.dirname(assets_dir)
+    png_path = os.path.join(repo_root, _BUILDINGS_ATLAS_PNG)
+
+    if not os.path.isfile(png_path):
+        # Asset not yet delivered — skip silently.
+        return []
+
+    try:
+        from PIL import Image  # noqa: PLC0415 — lazy import (Pillow optional)
+    except ImportError:
+        # Pillow not installed — skip with a note (not a failure).
+        print(
+            "SKIP check_28: Pillow not installed — "
+            "install with 'pip install Pillow' to enable building atlas variance check"
+        )
+        return []
+
+    errors = []
+    try:
+        img = Image.open(png_path).convert("RGB")
+    except Exception as exc:
+        return [f"check_28 FAIL: cannot open {_BUILDINGS_ATLAS_PNG}: {exc}"]
+
+    for row, col in _BUILDING_WALL_CELLS:
+        x0 = col * _BUILDING_CELL_SIZE + _BUILDING_CELL_BORDER
+        y0 = row * _BUILDING_CELL_SIZE + _BUILDING_CELL_BORDER
+        x1 = x0 + _BUILDING_CELL_USABLE
+        y1 = y0 + _BUILDING_CELL_USABLE
+
+        region = img.crop((x0, y0, x1, y1))
+        # Use get_flattened_data() (Pillow 14+) or fall back to getdata() for older Pillow.
+        if hasattr(region, "get_flattened_data"):
+            pixels = list(region.get_flattened_data())
+        else:
+            pixels = list(region.getdata())
+        stddev = _luminance_stddev(pixels)
+
+        if stddev < _BUILDING_LUMINANCE_STDDEV_MIN:
+            errors.append(
+                f"check_28 FAIL: wall cell (row={row}, col={col}) luminance stddev="
+                f"{stddev:.2f} < {_BUILDING_LUMINANCE_STDDEV_MIN} (placeholder fill); "
+                f"re-author per phase-11d.md §2a before committing the DDS"
+            )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #29 — Normal map non-flat check
+#
+# Spec (phase-11d.md §2a):
+#   For each of the 9 zone-type wall cells in the normal-map source PNG
+#   (buildings_atlas_d_n.png), compute the mean absolute deviation (MAD) of
+#   the green channel within the 496×496 usable area.  A MAD < 3.0 indicates
+#   a flat normal map (no authored surface relief) and is treated as a CI failure.
+#
+# The normal-map source PNG is an authoring intermediate; it is NOT committed
+# unless the artist also commits the corresponding height-map source.  When
+# the file does not exist the check is skipped (no-op).
+#
+# If Pillow is absent, the check is also skipped (not failed).
+# ---------------------------------------------------------------------------
+_BUILDINGS_NORMAL_PNG_CANDIDATES = [
+    os.path.join("assets", "textures", "buildings", "buildings_atlas_d_n.png"),
+    os.path.join("assets", "textures", "buildings", "buildings_atlas_n.png"),
+]
+_NORMAL_MAP_GREEN_MAD_MIN = 3.0
+
+
+def _green_channel_mad(pixels):
+    """Compute the mean absolute deviation of the green channel for a list of RGB tuples."""
+    n = len(pixels)
+    if n == 0:
+        return 0.0
+    greens = [g for _r, g, _b in pixels]
+    mean_g = sum(greens) / n
+    return sum(abs(g - mean_g) for g in greens) / n
+
+
+def check_29_normal_map_non_flat(assets_dir):
+    """Check #29: normal map non-flat check.
+
+    For each of the 9 zone-type wall cells in the normal-map source PNG, the
+    green-channel MAD must be ≥ 3.0 (otherwise the normal map is flat).
+
+    Returns a list of error strings. Empty list means the check passed.
+    SKIPs (returns []) when Pillow is absent or the source PNG does not exist.
+    """
+    repo_root = os.path.dirname(assets_dir)
+
+    png_path = None
+    for candidate in _BUILDINGS_NORMAL_PNG_CANDIDATES:
+        full = os.path.join(repo_root, candidate)
+        if os.path.isfile(full):
+            png_path = full
+            break
+
+    if png_path is None:
+        # Asset not yet delivered — skip silently.
+        return []
+
+    try:
+        from PIL import Image  # noqa: PLC0415 — lazy import (Pillow optional)
+    except ImportError:
+        print(
+            "SKIP check_29: Pillow not installed — "
+            "install with 'pip install Pillow' to enable normal map non-flat check"
+        )
+        return []
+
+    errors = []
+    try:
+        img = Image.open(png_path).convert("RGB")
+    except Exception as exc:
+        return [f"check_29 FAIL: cannot open normal map source PNG: {exc}"]
+
+    for row, col in _BUILDING_WALL_CELLS:
+        x0 = col * _BUILDING_CELL_SIZE + _BUILDING_CELL_BORDER
+        y0 = row * _BUILDING_CELL_SIZE + _BUILDING_CELL_BORDER
+        x1 = x0 + _BUILDING_CELL_USABLE
+        y1 = y0 + _BUILDING_CELL_USABLE
+
+        region = img.crop((x0, y0, x1, y1))
+        # Use get_flattened_data() (Pillow 14+) or fall back to getdata() for older Pillow.
+        if hasattr(region, "get_flattened_data"):
+            pixels = list(region.get_flattened_data())
+        else:
+            pixels = list(region.getdata())
+        mad = _green_channel_mad(pixels)
+
+        if mad < _NORMAL_MAP_GREEN_MAD_MIN:
+            errors.append(
+                f"check_29 FAIL: normal map cell (row={row}, col={col}) green channel "
+                f"MAD={mad:.2f} < {_NORMAL_MAP_GREEN_MAD_MIN} (flat normal map); "
+                f"re-author per phase-11d.md §2a before committing the DDS"
+            )
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Check #30 — Billboard atlas format and mip verification
+#
+# Spec (phase-11d.md §2c):
+#   For each *_billboard.dds in assets/3d/buildings/, verify:
+#     (a) DDS magic at offset 0
+#     (b) DX10 extended header (FourCC 'DX10' at offset 84)
+#     (c) DXGI_FORMAT at offset 128 = 78 (DXGI_FORMAT_BC3_UNORM_SRGB)
+#     (d) Width = 1024, Height = 128
+#     (e) dwMipMapCount = 4
+#     (f) File size = 174,228 bytes
+#
+# Reference size note: the architecture spec table at §DDS Mip Chain Integrity
+# cites 192,640 bytes for a DXT5/BC3 1024×128 4-mip DDS.  The correct
+# calculation for a file WITH the DX10 extended header is:
+#   4 (magic) + 124 (DDS_HEADER) + 20 (DX10 ext header) + 174,080 (pixel data)
+#   = 174,228 bytes
+# where pixel data = BC3 mip chain: 131,072 + 32,768 + 8,192 + 2,048 bytes.
+# The 192,640 figure in the spec table assumes a plain 128-byte header (no DX10)
+# AND has an arithmetic error; it does not match the actual file format used by
+# this project.  The authoritative reference value is 174,228 bytes, matching
+# the generate_dds_stubs.py output for all billboard atlas files.
+# ---------------------------------------------------------------------------
+_BILLBOARD_DIR = os.path.join("assets", "3d", "buildings")
+_BILLBOARD_EXPECTED_WIDTH = 1024
+_BILLBOARD_EXPECTED_HEIGHT = 128
+_BILLBOARD_EXPECTED_MIP_COUNT = 4
+_DXGI_FORMAT_BC3_UNORM_SRGB = 78
+# DX10 header: 4 (magic) + 124 (DDS_HEADER) + 20 (DX10 ext) + 174,080 (BC3 mip chain) = 174,228
+_BILLBOARD_EXPECTED_FILE_SIZE = 174_228
+
+
+def check_30_billboard_atlas_format(assets_dir):
+    """Check #30: Billboard atlas DDS format and mip verification.
+
+    Verifies every *_billboard.dds in assets/3d/buildings/ for correct DX10
+    header, BC3_UNORM_SRGB format, 1024×128 dimensions, 4 mip levels, and
+    correct file size.
+
+    Returns a list of error strings. Empty list means all files passed.
+    Returns [] (no-op) when no billboard DDS files are found.
+    """
+    repo_root = os.path.dirname(assets_dir)
+    billboard_dir = os.path.join(repo_root, _BILLBOARD_DIR)
+
+    if not os.path.isdir(billboard_dir):
+        return []
+
+    billboard_files = sorted(
+        p for p in os.listdir(billboard_dir) if p.endswith("_billboard.dds")
+    )
+
+    if not billboard_files:
+        return []
+
+    errors = []
+
+    for filename in billboard_files:
+        filepath = os.path.join(billboard_dir, filename)
+        rel_path = os.path.join(_BILLBOARD_DIR, filename)
+
+        file_size = os.path.getsize(filepath)
+
+        try:
+            with open(filepath, "rb") as f:
+                data = f.read(132)
+        except OSError as exc:
+            errors.append(f"check_30 FAIL: {rel_path} — cannot read file: {exc}")
+            continue
+
+        if len(data) < 132:
+            errors.append(
+                f"check_30 FAIL: {rel_path} — file too small to parse DDS header "
+                f"({len(data)} bytes)"
+            )
+            continue
+
+        if data[0:4] != b"DDS ":
+            errors.append(
+                f"check_30 FAIL: {rel_path} — missing DDS magic "
+                f"(got {data[0:4]!r})"
+            )
+            continue
+
+        height = struct.unpack_from("<I", data, 12)[0]
+        width  = struct.unpack_from("<I", data, 16)[0]
+        mip    = struct.unpack_from("<I", data, 28)[0]
+        fourcc = data[84:88]
+
+        if fourcc != b"DX10":
+            errors.append(
+                f"check_30 FAIL: {rel_path} — missing DX10 extended header "
+                f"(FourCC at offset 84 = {fourcc!r}; expected b'DX10')"
+            )
+            continue
+
+        dxgi = struct.unpack_from("<I", data, 128)[0]
+
+        file_errors = []
+
+        if dxgi != _DXGI_FORMAT_BC3_UNORM_SRGB:
+            file_errors.append(
+                f"DXGI_FORMAT={dxgi} (expected {_DXGI_FORMAT_BC3_UNORM_SRGB} = BC3_UNORM_SRGB)"
+            )
+
+        if width != _BILLBOARD_EXPECTED_WIDTH or height != _BILLBOARD_EXPECTED_HEIGHT:
+            file_errors.append(
+                f"dimensions {width}×{height} "
+                f"(expected {_BILLBOARD_EXPECTED_WIDTH}×{_BILLBOARD_EXPECTED_HEIGHT})"
+            )
+
+        if mip != _BILLBOARD_EXPECTED_MIP_COUNT:
+            file_errors.append(
+                f"dwMipMapCount={mip} (expected exactly {_BILLBOARD_EXPECTED_MIP_COUNT})"
+            )
+
+        if file_size != _BILLBOARD_EXPECTED_FILE_SIZE:
+            file_errors.append(
+                f"file size={file_size:,} bytes "
+                f"(expected {_BILLBOARD_EXPECTED_FILE_SIZE:,} bytes for DX10+BC3 1024×128 4-mip)"
+            )
+
+        for reason in file_errors:
+            errors.append(f"check_30 FAIL: {rel_path} — {reason}")
+
+    return errors
+
+
 def run_all_checks():
     """Run all asset validation checks. Returns the total number of errors."""
     # Resolve the assets directory relative to this script's location.
@@ -1888,10 +2868,18 @@ def run_all_checks():
 
     # Run each check and collect errors.
     checks = [
+        ("Check #4 (building LOD0 UV atlas cell)", check_4_building_uv_atlas_cell),
+        ("Check #4b (building LOD0 bounding box ground quad)", check_4b_building_bbox),
         ("Check #21 (zone loop silence-floor)", check_21_zone_loop_silence_floor),
         ("Check #22 (WAV SFX format)", check_22_wav_sfx_format),
         ("Check #23 (sprite sheet PNG)", check_23_sprite_sheet_png),
         ("Check #24 (cloud texture format)", check_24_clouds_png),
+        ("Check #25 (vehicles diffuse atlas DDS)", check_25_vehicles_diffuse_atlas_dds),
+        ("Check #26 (vehicles sprite atlas DDS)", check_26_vehicles_sprite_atlas_dds),
+        ("Check #27 (vehicles normal atlas DDS)", check_27_vehicles_normal_atlas_dds),
+        ("Check #28 (building atlas color variance)", check_28_building_atlas_color_variance),
+        ("Check #29 (normal map non-flat)", check_29_normal_map_non_flat),
+        ("Check #30 (billboard atlas format)", check_30_billboard_atlas_format),
     ]
 
     for check_name, check_fn in checks:
