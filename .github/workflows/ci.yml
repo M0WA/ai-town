@@ -1459,7 +1459,7 @@ jobs:
   # ============================================================================
   package-linux-deb:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
@@ -1499,7 +1499,22 @@ jobs:
         run: |
           git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg
           git -C /opt/vcpkg checkout ${{ env.VCPKG_COMMIT_ID }}
-          /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          # Prebuilt vcpkg-tool binary from GitHub Releases fails with 404 in bare
+          # containers (CDN returns 404 for the vcpkg-glibc asset and bootstrap-vcpkg.sh
+          # has no fallback — it calls exit 1 on curl failure). Build from source instead,
+          # which is what bootstrap would do on non-x86_64 architectures.
+          VCPKG_TOOL_TAG=$(grep '^VCPKG_TOOL_RELEASE_TAG=' /opt/vcpkg/scripts/vcpkg-tool-metadata.txt | cut -d= -f2)
+          curl -L "https://github.com/microsoft/vcpkg-tool/archive/${VCPKG_TOOL_TAG}.zip" \
+            -o /tmp/vcpkg-tool.zip --retry 3 --fail
+          unzip -q /tmp/vcpkg-tool.zip -d /tmp/vcpkg-tool-src
+          cmake -B /tmp/vcpkg-tool-build \
+            -S "/tmp/vcpkg-tool-src/vcpkg-tool-${VCPKG_TOOL_TAG}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVCPKG_DEVELOPMENT_WARNINGS=OFF \
+            -G Ninja
+          cmake --build /tmp/vcpkg-tool-build
+          cp /tmp/vcpkg-tool-build/vcpkg /opt/vcpkg/vcpkg
+          chmod +x /opt/vcpkg/vcpkg
           echo "VCPKG_ROOT=/opt/vcpkg" >> $GITHUB_ENV
 
       - name: Install vcpkg packages
