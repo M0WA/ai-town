@@ -98,6 +98,14 @@ RUN ARCH=$(dpkg --print-architecture) && \
     echo "Skipping compressonatorcli: only amd64 binaries available (arch=$ARCH)"; \
   fi
 
+# actionlint — GitHub Actions workflow linter
+ARG ACTIONLINT_VERSION=1.7.11
+RUN ARCH=$(dpkg --print-architecture) && \
+  wget -q "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" && \
+  tar -xzf "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" actionlint && \
+  mv actionlint /usr/local/bin/actionlint && \
+  rm "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz"
+
 # CMake is pre-installed in the CI base image at /opt/cmake/bin — PATH already set.
 
 # Transfer ownership of vcpkg directories to the non-root user so that
