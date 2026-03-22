@@ -16,47 +16,71 @@ permissions:
   packages: read      # required by build-linux and coverage-linux to pull GHCR image
 
 # VCPKG_COMMIT_ID declared here only — reusable workflows receive it as input.
+# NOTE: env context is not available in jobs.<job_id>.with for reusable workflow calls.
+# A 'prepare' job reads env.VCPKG_COMMIT_ID and exposes it as a job output so that
+# downstream with: blocks can reference it via ${{ needs.prepare.outputs.vcpkg_commit_id }}
+# (needs context IS available in jobs.<job_id>.with).
 env:
   VCPKG_COMMIT_ID: "b2f068faf45a3f04145bec0f52a66526ad590227"
 
 jobs:
+  # ============================================================================
+  # prepare — exports workflow-level env vars as job outputs so they can be
+  # referenced via needs context in reusable workflow with: blocks.
+  # env context is NOT available in jobs.<job_id>.with; needs context IS available.
+  # ============================================================================
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: none
+    outputs:
+      vcpkg_commit_id: ${{ steps.set_vars.outputs.vcpkg_commit_id }}
+    steps:
+      - name: Export vcpkg commit ID
+        id: set_vars
+        shell: bash
+        env:
+          COMMIT_ID: ${{ env.VCPKG_COMMIT_ID }}
+        run: echo "vcpkg_commit_id=${COMMIT_ID}" >> $GITHUB_OUTPUT
+
   supply-chain-lint:
     uses: ./.github/workflows/_supply-chain-lint.yml
     permissions:
       contents: read
 
   validate-assets:
-    needs: [supply-chain-lint]
+    needs: [supply-chain-lint, prepare]
     uses: ./.github/workflows/_validate-assets.yml
     with:
-      vcpkg_commit_id: ${{ env.VCPKG_COMMIT_ID }}
+      vcpkg_commit_id: ${{ needs.prepare.outputs.vcpkg_commit_id }}
     permissions:
       contents: read
 
   build-linux:
-    needs: [supply-chain-lint, validate-assets]
+    needs: [supply-chain-lint, validate-assets, prepare]
     uses: ./.github/workflows/_build-linux.yml
     with:
-      vcpkg_commit_id: ${{ env.VCPKG_COMMIT_ID }}
+      vcpkg_commit_id: ${{ needs.prepare.outputs.vcpkg_commit_id }}
     permissions:
       packages: read
       checks: write
       contents: read
 
   build-windows:
-    needs: [supply-chain-lint, validate-assets]
+    needs: [supply-chain-lint, validate-assets, prepare]
     uses: ./.github/workflows/_build-windows.yml
     with:
-      vcpkg_commit_id: ${{ env.VCPKG_COMMIT_ID }}
+      vcpkg_commit_id: ${{ needs.prepare.outputs.vcpkg_commit_id }}
     permissions:
       checks: write
       contents: read
 
   coverage-linux:
-    needs: [supply-chain-lint, validate-assets]
+    needs: [supply-chain-lint, validate-assets, prepare]
     uses: ./.github/workflows/_coverage-linux.yml
     with:
-      vcpkg_commit_id: ${{ env.VCPKG_COMMIT_ID }}
+      vcpkg_commit_id: ${{ needs.prepare.outputs.vcpkg_commit_id }}
     permissions:
       packages: read
       checks: write
@@ -77,6 +101,7 @@ jobs:
   # ============================================================================
   all-checks-pass:
     needs:
+      - prepare
       - supply-chain-lint
       - validate-assets
       - build-linux
@@ -91,6 +116,7 @@ jobs:
         shell: bash
         run: |
           results=(
+            "${{ needs.prepare.result }}"
             "${{ needs.supply-chain-lint.result }}"
             "${{ needs.validate-assets.result }}"
             "${{ needs.build-linux.result }}"
@@ -112,19 +138,19 @@ jobs:
           echo "All required jobs succeeded."
 
   package-windows:
-    needs: [build-windows]
+    needs: [build-windows, prepare]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     uses: ./.github/workflows/_package-windows.yml
     with:
-      vcpkg_commit_id: ${{ env.VCPKG_COMMIT_ID }}
+      vcpkg_commit_id: ${{ needs.prepare.outputs.vcpkg_commit_id }}
     permissions:
       contents: read
 
   package-linux-deb:
-    needs: [build-linux]
+    needs: [build-linux, prepare]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     uses: ./.github/workflows/_package-linux-deb.yml
     with:
-      vcpkg_commit_id: ${{ env.VCPKG_COMMIT_ID }}
+      vcpkg_commit_id: ${{ needs.prepare.outputs.vcpkg_commit_id }}
     permissions:
       contents: read
