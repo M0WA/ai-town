@@ -55,7 +55,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libnvtt-bin \
   mediainfo \
   scrot \
-  && apt-get clean && rm -rf /var/lib/apt/lists/*
+  htop \
+  tree \
+  ripgrep \
+  fd-find \
+  bat \
+  imagemagick \
+  libimage-exiftool-perl \
+  gdb \
+  lldb \
+  linux-perf \
+  heaptrack \
+  clang-format \
+  clang-tidy \
+  clangd \
+  bear \
+  && apt-get clean && rm -rf /var/lib/apt/lists/* \
+  && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
+  && (test -f /usr/bin/batcat && ln -sf /usr/bin/batcat /usr/local/bin/bat || true)
 
 # Ensure default node user has access to /usr/local/share
 RUN mkdir -p /usr/local/share/npm-global && \
