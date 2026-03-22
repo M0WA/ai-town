@@ -1487,7 +1487,7 @@ jobs:
           apt-get install -y --no-install-recommends \
             ca-certificates \
             build-essential cmake ninja-build git curl zip unzip tar pkg-config \
-            libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libgl1-mesa-dev libglu1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev \
             libopenal-dev libvorbis-dev \
             python3 \
             dpkg-dev fakeroot
