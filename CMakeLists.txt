@@ -1114,7 +1114,6 @@ set(CPACK_DEBIAN_PACKAGE_DESCRIPTION
  AI Town is a Sim City-style 3D city simulator built with C++, Irrlicht, and OpenAL Soft.
  Design and manage a growing city: zone land, build roads, manage services,
  and keep your citizens happy.")
-set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 
