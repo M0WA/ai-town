@@ -8,8 +8,10 @@
 //       A typo kSFXPoolSize=57 (instead of 58) compiles silently without these.
 #include "src/interfaces/IAudioSystem.h"
 #include "src/audio/audio_constants.h"
+#include "tests/simulation/MockAudioSystem.h"
 #include <vorbis/vorbisfile.h>
 #include <gtest/gtest.h>
+#include "gmock/gmock.h"
 
 // Validate pool-size constant values at compile time.
 static_assert(kEvictableSFXCount     == 55, "kEvictableSFXCount must be 55 (sources[0..54])");
@@ -31,5 +33,11 @@ static_assert(static_cast<int>(StingerType::MILESTONE) <  kSFXPoolSize,
 
 TEST(AudioSmoke, VorbisfileIAudioSystemAndConstantsCompile) {
     (void)&ov_pcm_total;
+    SUCCEED();
+}
+
+TEST(MockAudioSystem_InstantiatesCleanly, NiceMockConstructsAndDestructsCleanly) {
+    testing::NiceMock<MockAudioSystem> mock;
+    (void)mock;
     SUCCEED();
 }

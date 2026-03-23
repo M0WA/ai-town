@@ -21,5 +21,341 @@
   ```
 
   These are the single authoritative values for service desirability adjustment. No magic numbers for these rates may appear elsewhere in the codebase — all code must reference `SimulationConstants::service_uncovered_desirability_penalty_per_tick` and `SimulationConstants::service_recovery_desirability_per_tick` directly.
-- **Budget deficit degradation**: At −10% budget surplus, service buildings randomly enter a **reduced coverage state** to represent workforce reduction; player is notified via toast. For radius-based services (Fire, Police, Water), coverage radius is temporarily halved. For the Power plant (graph traversal model), degradation applies a **BFS-distance coverage reduction (brownout model)**: each power plant continues coverage only for nodes within BFS depth ≤ `floor(max_depth_i × 0.70)` from that plant, where `max_depth_i` is the longest BFS path from plant i to any reachable node in its connected subgraph. Equivalently, the farthest 30% of covered nodes by BFS depth become uncovered. **Definition of 'outermost'**: always means highest BFS depth from the power plant — not a random selection. **Multiple-plant behavior**: each plant independently applies its brownout; a tile remains covered if at least one plant's brownout depth still reaches it. Upon deficit recovery (surplus returns above −10%), full coverage is restored. This model is deterministic and predictable: buildings farthest from the power plant lose power first, motivating strategic plant placement. Priority order of degradation: **Fire → Police → Water → Power** (Fire is degraded first — without active fire events, reduced fire coverage has no immediate population impact; Power is preserved longest because power outages affect all grid-connected zones simultaneously and trigger the fastest desirability collapse). **Do NOT degrade Water first** — Water degradation immediately applies −5 desirability/tick to all uncovered residential tiles, which triggers rapid emigration, lowers revenue, deepens the deficit, and accelerates further degradation in a positive-feedback death spiral. Fire → Police → Water → Power order breaks this cycle by protecting the highest-impact services longest.
+- **Budget deficit degradation**: At −10% budget surplus (`budget_surplus_pct ≤ SimulationConstants::service_deficit_radius_halving_threshold`), service buildings randomly enter a **reduced coverage state** to represent workforce reduction; player is notified via toast. Each radius-based service building independently rolls `ISimulationRNG::nextFloat() < SimulationConstants::service_degradation_probability_per_tick` (= 0.5f) each budget tick while the deficit condition persists — 50% chance per building per tick. Phase 6 implementers must reference `SimulationConstants::service_degradation_probability_per_tick` at the degradation roll site; no magic number is permitted. **Audio on degradation**: only Fire, Police, and Water stations trigger `SFX_SERVICE_DEGRADE` on entering the reduced-coverage state. The Power plant uses a fully deterministic brownout model (described below) — it enters the degraded state silently with no `SFX_SERVICE_DEGRADE` audio event and no `ISimulationRNG` roll. For radius-based services (Fire, Police, Water), coverage radius is temporarily halved. For the Power plant (graph traversal model), degradation applies a **BFS-distance coverage reduction (brownout model)**: each power plant continues coverage only for nodes within BFS depth ≤ `floor(max_depth_i × 0.70)` from that plant, where `max_depth_i` is the longest BFS path from plant i to any reachable node in its connected subgraph. Equivalently, the farthest 30% of covered nodes by BFS depth become uncovered. **Definition of 'outermost'**: always means highest BFS depth from the power plant — not a random selection. **Multiple-plant behavior**: each plant independently applies its brownout; a tile remains covered if at least one plant's brownout depth still reaches it. **Disconnected-grid radial fallback**: if BFS from a Power plant cannot reach a candidate tile through placed tiles (disconnected grid — the tile and plant are on separate road/zone islands with no placed-tile path between them), coverage falls back to a radial-distance check using `computeServiceCoverageRadius(PowerPlant, degraded)` expressed in grid tiles. This ensures coverage is never silently dropped for isolated tiles due to a disconnected grid — the fallback treats them as radially reachable if within range. Upon deficit recovery (surplus returns above −10%), full coverage is restored. This model is deterministic and predictable: buildings farthest from the power plant lose power first, motivating strategic plant placement. Priority order of degradation: **Fire → Police → Water → Power** (Fire is degraded first — without active fire events, reduced fire coverage has no immediate population impact; Power is preserved longest because power outages affect all grid-connected zones simultaneously and trigger the fastest desirability collapse). **Do NOT degrade Water first** — Water degradation immediately applies −5 desirability/tick to all uncovered residential tiles, which triggers rapid emigration, lowers revenue, deepens the deficit, and accelerates further degradation in a positive-feedback death spiral. Fire → Police → Water → Power order breaks this cycle by protecting the highest-impact services longest. **No-service-building guard**: when zero service buildings of any type are placed, `anyUncovered` is set to `true` immediately (every residential tile is uncovered) — the grace-tick logic (`firstDesirabilityTick`) still suppresses the −5 desirability/tick penalty on the first tick, giving the player the standard one-tick window to respond.
 - **Multiple building stacking**: Coverage radii from multiple service buildings of the same type do **not** stack — tiles are covered or not. Overlap is allowed for redundancy (counts once for desirability purposes).
+
+## Utilities Tool — Placement Design (V1)
+
+### Decision
+
+Service buildings are **individually placed objects**, not zone tiles. The Utilities toolbar button
+activates the Utilities tool mode, which presents a sub-panel listing the four service building
+types. The player selects one type, then left-clicks a terrain tile to place that building at that
+tile. This is a discrete placement action — not a zone designation that auto-generates buildings
+from demand signals.
+
+**Rationale**: Each service building type is a strategic, high-cost infrastructure anchor with a
+fixed coverage radius. Placing them as zone tiles would imply auto-generation from demand, which
+contradicts their design role: the player must deliberately decide where to put a power plant to
+maximise the grid's BFS coverage, or where to position a fire station to cover a residential
+district. A zone-based model would remove this strategic decision. The placement mechanic mirrors
+SimCity's approach for infrastructure buildings.
+
+### Utilities Sub-Panel
+
+When `ActiveTool::Utilities` is selected, a compact sub-panel appears immediately to the right of
+the toolbar (virtual x:80 px, y:176 px — aligned with the Utilities button row) showing the four
+service building types as a 2×2 button grid:
+
+| Column 1 | Column 2 |
+|---|---|
+| Power Plant | Water Tower |
+| Fire Station | Police Station |
+
+Active selection is highlighted. `UIManager` tracks `ServiceBuildingType m_selectedServiceBuilding`
+(default: `ServiceBuildingType::PowerPlant`). Sub-panel is hidden when Utilities tool is not
+active.
+
+### `ICitySimulation` Method
+
+```cpp
+// Places a service building of the given type at the specified tile.
+// Deducts placement cost immediately from the treasury.
+// earthworksCostOverride: pre-computed earthworks cost (same convention as placeZone/placeRoad).
+// Records an undo entry (expires at second budget tick after action).
+// No-ops if the tile is already occupied by a service building (does not replace).
+virtual void placeServiceBuilding(int tileX, int tileZ,
+                                  ServiceBuildingType type,
+                                  int earthworksCostOverride = 0) = 0;
+```
+
+### `ServiceBuildingType` Enum (in `simulation_types.h`)
+
+```cpp
+enum class ServiceBuildingType {
+    PowerPlant,
+    WaterTower,
+    FireStation,
+    PoliceStation
+};
+```
+
+### Placement Costs
+
+Placement cost is deducted immediately from the treasury at the moment the player places the
+building, before any budget tick fires. These are `SimulationConstants` values and must not be
+hardcoded inline.
+
+| Building | Placement cost | `SimulationConstants` name |
+|---|---|---|
+| Power Plant | $10,000 | `service_placement_cost_power_plant` |
+| Water Tower | $3,000 | `service_placement_cost_water_tower` |
+| Fire Station | $5,000 | `service_placement_cost_fire_station` |
+| Police Station | $4,000 | `service_placement_cost_police_station` |
+
+**Cost rationale**: Power Plant is the most expensive ($10,000) because it provides city-wide
+coverage through a BFS graph model and is the single largest infrastructure investment in the
+early game. Fire Station ($5,000) is next — fire coverage has the largest radius (800 m) and the
+highest upkeep ($500/tick), making it a significant commitment. Police Station ($4,000) is
+slightly cheaper — smaller radius (600 m), lower upkeep ($400/tick). Water Tower ($3,000) is
+the cheapest placement cost — comparable coverage radius to fire (700 m) but the lowest upkeep
+($300/tick), making it accessible early to prevent the fast-feedback water-coverage desirability
+penalty.
+
+All four placement costs are calibrated to Normal difficulty starting funds ($500,000): placing
+one of each costs $22,000 — 4.4% of starting capital — which is affordable alongside a
+20-road-tile opening layout ($10,000 placement) without threatening the treasury before tax
+revenue arrives.
+
+Earthworks costs apply to service building placement under the same formula as `placeZone` and
+`placeRoad`: `earthworksCost = (slope > 15.0°) ? static_cast<int>(500.0f * clamp((slope - 15.0f) / 30.0f, 0.0f, 2.0f)) : 0`.
+The same insufficient-funds toast fires if earthworks cost exceeds treasury balance.
+
+### V1 Scope
+
+All four service building types are **mandatory for V1**. They are listed explicitly as core V1
+systems in `architecture/game-design/minimum-viable-simulation.md` ("basic service coverage:
+fire, police, power, water"). No service building type is deferred to post-V1.
+
+### Placement Rules
+
+- One service building per tile. Attempting to place a second building on an occupied tile is a
+  no-op at the `CitySimulation` level (no cost deducted, no undo entry recorded). `CitySimulation`
+  enforces this invariant — UIManager does not need a pre-placement `queryTile` call to check
+  occupancy. `placeServiceBuilding` returning without effect (no treasury change, no undo entry)
+  is the signal that the tile was already occupied; UIManager shows a Normal toast "Tile already
+  occupied" by checking whether the treasury balance changed after the call (or by a returned
+  bool — Phase 9b implementers may extend the return type of `placeServiceBuilding` to `bool` if
+  a pre-placement occupancy signal is needed for the toast; the default `void` signature is
+  sufficient for V1 if the toast is omitted).
+- Service buildings can be placed on any buildable tile (slope ≤ 15.0° without earthworks; any
+  slope with earthworks cost). They do **not** require a zoned tile — infrastructure can be
+  placed on unzoned terrain.
+- **No demolish prerequisite**: Service buildings are infrastructure, not competing zone types.
+  They may be placed on **any buildable tile** (slope ≤ 15.0°) regardless of whether that tile
+  is already occupied by a zone designation or a road. The player is **not** required to demolish
+  an existing zone or road before placing a service building. The zone or road occupancy on a
+  tile does not block service building placement. This exemption is authoritative and supersedes
+  any implementation-phase plan note that defers or qualifies it.
+- Service buildings are demolished via the Demolish tool (same as zones and roads). The
+  demolish confirmation modal applies (same setting as zone/road demolish). Demolishing a
+  service building removes coverage for all previously covered tiles on the next budget tick.
+
+### Audio Callbacks for `placeServiceBuilding()` (Phase 9b)
+
+`CitySimulation::placeServiceBuilding()` fires the following audio calls on successful placement
+(i.e. the tile was not already occupied and cost deduction succeeds). No audio is emitted on
+no-op (occupied tile) placements.
+
+**Call sequence** (matches the pattern used by `placeZone()` — see `CitySimulation.cpp`):
+
+1. If `earthworksCostOverride > 0` and `m_audio` is non-null:
+
+   ```cpp
+   m_audio->playPositionalSound(SFX_EARTHWORKS,
+       vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+       SoundPriority::NORMAL, 1.0f);
+   ```
+
+2. If `m_audio` is non-null (unconditional on successful placement):
+
+   ```cpp
+   m_audio->playPositionalSound(SFX_BUILD_PLACE,
+       vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+       SoundPriority::NORMAL, 1.0f);
+   ```
+
+**SoundId rationale**: `SFX_BUILD_PLACE` (SoundId = 1, `sfx_build_place.wav`) is shared by zone
+placement and service building placement — both represent a "something was built here" feedback
+event. A dedicated service-building SFX is post-V1. `SFX_ROAD_BUILD` (SoundId = 3) is reserved
+for road placement only (distinct mechanic, distinct feedback tone).
+
+**Y-position**: All three placement calls (`placeZone`, `placeRoad`, `placeServiceBuilding`) pass
+`Y = 0.0f` for the audio world-space position. Real terrain height sampling for audio positioning
+is **deferred to Phase 10**. The `ITerrainQuery::getHeightAt()` method added in Phase 9b
+Deliverable E is used exclusively for zone overlay Y-height rendering (`IrrlichtRenderer::
+setZoneOverlay`) and hover highlight rendering (`IrrlichtRenderer::setTileHoverHighlight`) —
+it is NOT used to update audio call-site Y positions in Phase 9b. Phase 10 may refine
+audio positioning by substituting `m_terrain->getHeightAt(tileX, tileZ)` for the `0.0f`
+Y component if perceptible mispositioning is observed with real terrain heights.
+
+## Phase 10 Audio Callbacks for Service Events
+
+All audio calls below are made from within `CitySimulation::tick()` (or the budget-deficit
+degradation sub-routine it calls) and are guarded by `m_audio != nullptr`. Building world-space
+positions use `vec3{static_cast<float>(bldg.tileX), 0.0f, static_cast<float>(bldg.tileZ)}`
+(Y = 0.0f as per the Y-position note above).
+
+### `sfx_service_degrade` — Service building enters reduced-coverage state
+
+**Trigger**: Immediately when any radius-based service building (Fire, Police, or Water Tower —
+NOT Power Plant) transitions from full-coverage to degraded state during the budget-deficit
+degradation roll. One call per building that successfully rolls into the degraded state in a
+given tick. Per the existing spec text ("Audio on degradation: only Fire, Police, and Water
+stations trigger `SFX_SERVICE_DEGRADE` on entering the reduced-coverage state"), all three
+building types share this single SFX.
+
+**Call site**: `CitySimulation::tick()`, inside the per-building degradation loop for Fire,
+Police, and Water Tower buildings, immediately after
+`ISimulationRNG::nextFloat() < service_degradation_probability_per_tick` evaluates true
+and the building's state is set to degraded.
+
+```cpp
+// In CitySimulation::tick(), per-building degradation roll (Fire, Police, Water Tower):
+if (rngRoll < SimulationConstants::service_degradation_probability_per_tick) {
+    bldg.degraded = true;
+    if (m_audio) {
+        m_audio->playSound(SFX_SERVICE_DEGRADE, SoundPriority::NORMAL, 1.0f);
+    }
+}
+```
+
+`SFX_SERVICE_DEGRADE` = SoundId 6 (`sfx_service_degrade.wav`). Non-positional
+(`AL_SOURCE_RELATIVE = AL_TRUE`), EFX bypass. No cooldown at the call site — the 50%
+per-building RNG roll and the once-per-tick-per-building gate are sufficient throttles.
+
+**Power Plant exclusion**: The Power Plant uses a deterministic brownout model with no
+`ISimulationRNG` roll and fires NO `SFX_SERVICE_DEGRADE` event. The `sfx_power_out` sound
+(non-positional, see below) fires instead when any zone tile first loses power coverage.
+
+### `sfx_power_out` — Zone tile loses power coverage
+
+**Trigger**: When a zone tile transitions from powered to unpowered for the first time in a
+coverage cycle — specifically, when `CitySimulation::tick()` evaluates the power grid BFS and
+finds a tile that was covered in the previous tick is now uncovered (either due to a brownout
+BFS-depth reduction or a full power plant loss). Fires once per coverage-loss event, not once
+per tick the tile remains unpowered. A per-tile `wasPowered` flag (toggled from
+`wasPowered=true` to `wasPowered=false`) gates the call to prevent re-fire on subsequent ticks
+while the tile is already unpowered.
+
+**Call site**: `CitySimulation::tick()`, inside the power coverage evaluation pass, when a
+tile's power coverage state transitions from covered to uncovered.
+
+```cpp
+// In CitySimulation::tick(), power coverage evaluation:
+if (tile.wasPowered && !currentlyCovered) {
+    tile.wasPowered = false;
+    if (m_audio) {
+        m_audio->playSound(SFX_POWER_OUT, SoundPriority::NORMAL, 1.0f);
+    }
+} else if (!tile.wasPowered && currentlyCovered) {
+    tile.wasPowered = true;  // restore flag; no SFX on recovery
+}
+```
+
+`SFX_POWER_OUT` = SoundId 9 (`sfx_power_out.wav`). Non-positional
+(`AL_SOURCE_RELATIVE = AL_TRUE`), EFX bypass. The `tile.wasPowered` transition guard
+ensures at most one fire per power-loss event.
+
+### `sfx_water_out` — Zone tile loses water coverage
+
+**Trigger**: Identical pattern to `sfx_power_out` but for Water Tower coverage. Fires when a
+zone tile that was previously covered by a Water Tower's coverage radius becomes uncovered
+(either because the Water Tower degraded and halved its radius, or because the tower was
+demolished). A per-tile `wasWaterCovered` flag gates the call.
+
+**Call site**: `CitySimulation::tick()`, inside the water coverage evaluation pass, when a
+tile's water coverage state transitions from covered to uncovered.
+
+```cpp
+// In CitySimulation::tick(), water coverage evaluation:
+if (tile.wasWaterCovered && !currentlyWaterCovered) {
+    tile.wasWaterCovered = false;
+    if (m_audio) {
+        m_audio->playSound(SFX_WATER_OUT, SoundPriority::NORMAL, 1.0f);
+    }
+} else if (!tile.wasWaterCovered && currentlyWaterCovered) {
+    tile.wasWaterCovered = true;  // restore flag; no SFX on recovery
+}
+```
+
+`SFX_WATER_OUT` = SoundId 10 (`sfx_water_out.wav`). Non-positional
+(`AL_SOURCE_RELATIVE = AL_TRUE`), EFX bypass. The `tile.wasWaterCovered` transition guard
+ensures at most one fire per water-loss event.
+
+**Degradation priority order and audio**: Audio fires in the same order as the degradation
+priority — Fire first (→ `SFX_SERVICE_DEGRADE`), Police (→ `SFX_SERVICE_DEGRADE`), Water
+(→ `SFX_SERVICE_DEGRADE` for building degradation; zone tiles losing water also fire
+`SFX_WATER_OUT`), Power last (zone tiles losing power fire `SFX_POWER_OUT`). At most one
+`SFX_SERVICE_DEGRADE` sound per degraded service building per tick; at most one
+`SFX_POWER_OUT` or `SFX_WATER_OUT` per tile per coverage-loss event.
+
+### `sfx_fire_alert` and `sfx_police_alert` — Service alert events (CRITICAL priority)
+
+**Trigger**: These SFX fire when a covered zone tile transitions to an **active service event**
+state — specifically when `CitySimulation` detects that a zone tile that was previously covered
+by a Fire Station or Police Station has crossed an internal alert threshold (e.g. desirability
+has fallen to or below `SimulationConstants::service_alert_desirability_threshold`). In V1 this
+represents a simulated service-demand spike on tiles with poor desirability under service
+pressure.
+
+**Call site**: `CitySimulation::tick()`, within the per-tile desirability update pass, when
+a zone tile's `desirability` first drops to or below the alert threshold while that tile is
+within a Fire Station or Police Station coverage radius.
+
+```cpp
+// In CitySimulation::tick(), per-tile desirability update:
+if (tile.desirability <= SimulationConstants::service_alert_desirability_threshold
+    && !tile.alertFired) {
+    tile.alertFired = true;
+    if (m_audio) {
+        if (coveredByFireStation) {
+            m_audio->playPositionalSound(
+                SFX_FIRE_ALERT,
+                vec3{static_cast<float>(tile.tileX), 0.0f,
+                     static_cast<float>(tile.tileZ)},
+                SoundPriority::CRITICAL, 1.0f);
+        } else if (coveredByPoliceStation) {
+            m_audio->playPositionalSound(
+                SFX_POLICE_ALERT,
+                vec3{static_cast<float>(tile.tileX), 0.0f,
+                     static_cast<float>(tile.tileZ)},
+                SoundPriority::CRITICAL, 1.0f);
+        }
+    }
+}
+// Reset tile.alertFired when desirability recovers above threshold.
+```
+
+`SFX_FIRE_ALERT` = SoundId 11, `SFX_POLICE_ALERT` = SoundId 12. Both are mono positional
+(`AL_SOURCE_RELATIVE = AL_FALSE`), CRITICAL priority, NO EFX bypass (positional — benefits
+from occlusion). The `tile.alertFired` bool is a per-tile transient flag reset when
+desirability recovers above the alert threshold, preventing repeated firing on the same tile
+in the same alert episode.
+
+**`service_alert_desirability_threshold`**: Add to `SimulationConstants`:
+
+```cpp
+static constexpr int service_alert_desirability_threshold = 20;
+// Tile desirability at or below this value triggers a service alert SFX.
+// Threshold of 20 (out of 100) represents severe desirability collapse.
+```
+
+**Distance cull**: `AudioSystem` culls positional sounds beyond their `AL_MAX_DISTANCE`;
+service alert sounds are thus inaudible when the camera is far from the affected tile —
+no additional cull logic is required in `CitySimulation`.
+
+## Per-Tile Audio Transition Fields (TileData — Phase 10)
+
+The three bool fields below are added to `CitySimulation::TileData` (defined in
+`src/simulation/CitySimulation.h`) as part of Phase 10. Each guards exactly one SFX
+per coverage-loss event (not per tick while uncovered). All three must be serialised
+in the save file (Phase 11) to prevent spurious SFX re-fire on load.
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `wasPowered` | `bool` | `true` | Fires `SFX_POWER_OUT` once when power coverage is lost; restored silently on recovery. Initialized `true` so the first brownout on a newly powered tile is audible. |
+| `wasWaterCovered` | `bool` | `true` | Fires `SFX_WATER_OUT` once when water coverage is lost; restored silently on recovery. Initialized `true` so the first water-loss event on a covered tile is audible. |
+| `alertFired` | `bool` | `false` | Fires `SFX_FIRE_ALERT` or `SFX_POLICE_ALERT` once per alert episode (desirability drops to or below `service_alert_desirability_threshold`). Reset to `false` when desirability recovers above the threshold, allowing re-fire in a future episode. Fire Station takes priority when both station types cover the tile. |
+
+**Initialization rationale for `wasPowered` and `wasWaterCovered`**: Defaulting to `true`
+means that when a zone tile is first placed and power/water coverage is subsequently lost
+(e.g. the player demolishes the Power Plant), the SFX fires correctly on the first
+coverage-loss event. If initialized to `false`, the very first power-out event would be
+silenced because the guard `tile.wasPowered == true && !currentlyCovered` would never be
+true on the first evaluation, and the flag would never be set — the player would hear
+nothing on the first brownout.
+
+**Save system note**: A save file written before Phase 10 (when these fields did not exist)
+must initialize all three to their default values on load. The Phase 11 save system must
+handle this via a version tag or field-presence check to avoid uninitialised reads.

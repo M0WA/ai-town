@@ -1,17 +1,17 @@
 # Query / Inspector Panel
 
-- Activated by Query tool; opens a floating panel **240×160 px** (virtual 1920×1080 space) anchored **40 px to the right and 40 px below** the cursor. **All cursor coordinates used in these formulas must be in virtual 1920×1080 space** (i.e., already un-projected from screen space via `UIScaler`). Using raw screen-space coordinates against virtual-space bounds will produce off-screen panels at non-1080p resolutions. Position computed as:
+- Activated by Query tool; opens a floating panel **340×280 px** (virtual 1920×1080 space) anchored **40 px to the right and 40 px below** the cursor. **All cursor coordinates used in these formulas must be in virtual 1920×1080 space** (i.e., already un-projected from screen space via `UIScaler`). Using raw screen-space coordinates against virtual-space bounds will produce off-screen panels at non-1080p resolutions. Position computed as:
 
   ```text
-  panel_x = clamp(cursor_x + 40, 0, 1920 − 240)
-  panel_y = clamp(cursor_y + 40, 0, 1080 − 160)
+  panel_x = clamp(cursor_x + 40, 0, 1920 − 340)
+  panel_y = clamp(cursor_y + 40, 0, 1080 − 280)
   ```
 
   **Tile overlap prevention**: If the computed panel rect intersects the queried tile's screen bounding box (`tileBounds` is the queried tile's bounding box expressed in virtual 1920×1080 coordinate space, already un-projected via `UIScaler` before being passed to `computePanelPosition()`), try placing the panel in the opposite diagonal (above-left of cursor):
 
   ```text
-  fallback_x = clamp(cursor_x − 40 − 240, 0, 1920 − 240)
-  fallback_y = clamp(cursor_y − 40 − 160, 0, 1080 − 160)
+  fallback_x = clamp(cursor_x − 40 − 340, 0, 1920 − 340)
+  fallback_y = clamp(cursor_y − 40 − 280, 0, 1080 − 280)
   ```
 
   Both primary and fallback positions are clamped to screen bounds, ensuring the panel is always fully visible. This ensures the player can see the queried tile while reading the panel.
@@ -20,21 +20,143 @@
 
   ```text
   if primary overlaps tile AND fallback overlaps tile:
-    edge_x = cursor_x <= 960 ? 1920 − 240 : 0   // right edge if cursor is in left half OR exactly at center (x=960); left edge if cursor is strictly in right half (x>960)
-    edge_y = clamp(cursor_y − 80, 0, 1080 − 160)
+    edge_x = cursor_x <= 960 ? 1920 − 340 : 0   // right edge if cursor is in left half OR exactly at center (x=960); left edge if cursor is strictly in right half (x>960)
+    edge_y = clamp(cursor_y − 140, 0, 1080 − 280)
     panel_position = (edge_x, edge_y)
   ```
 
   This three-step cascade (primary → fallback → edge-snap) guarantees the panel never overlaps the queried tile and is always fully on-screen.
+
+## `computePanelPosition` Function Signature (Phase 9b)
+
+`InspectorPanel::computePanelPosition` is a `static` pure-function that encapsulates the three-step
+cascade described above. Its authoritative signature (as of Phase 9b) is:
+
+```cpp
+// src/ui/inspector_panel.h (public static method)
+// Returns the panel's top-left position in virtual 1920×1080 space as a ScreenRect.
+// cursorX, cursorY: cursor position in virtual 1920×1080 space (already un-projected via UIScaler).
+// tileBounds: the queried tile's bounding box in virtual 1920×1080 space (already un-projected via UIScaler).
+// The panel rect dimensions are fixed: w=340, h=280 (kPanelW=340, kPanelH=280).
+// ScreenRect is defined in IRenderer.h (struct ScreenRect { int x{0}, y{0}, w{0}, h{0}; }).
+static ScreenRect computePanelPosition(int cursorX, int cursorY, const ScreenRect& tileBounds);
+```
+
+**Usage by `UIManager`** (Phase 9b):
+
+1. Convert physical cursor coordinates to virtual space via `UIScaler::unproject(physX, physY)`.
+2. Obtain the tile's bounding box in physical pixels via `m_renderer->getTileScreenBounds(tileX, tileZ)`.
+3. Un-project all four corners of the tile bounding box via `UIScaler::unproject()` to obtain
+   `tileBounds_virtual` — a `ScreenRect` in virtual 1920×1080 space.
+4. Call `InspectorPanel::computePanelPosition(cursorX_virtual, cursorY_virtual, tileBounds_virtual)`.
+5. The returned `ScreenRect` gives the panel's top-left pixel position in virtual space; use
+   destroy-and-recreate via `IUIBackend` to position the panel elements (no `setElementPosition`
+   method exists on `IUIBackend`).
+
+**Phase 8 note**: Phase 8 implemented a stub with signature
+`static Rect computePanelPosition(int clickX, int clickY, int screenW, int screenH)`.
+Phase 9b MUST update this signature to the above. The `screenW`/`screenH` parameters are no longer
+needed — the edge-snap step derives virtual screen bounds from the fixed constants 1920 × 1080.
+Existing Phase 8 pure-function tests must be updated to pass a `ScreenRect tileBounds` argument
+instead of `screenW`/`screenH`; pass `ScreenRect{1000, 1000, 10, 10}` (off-screen — guaranteed
+non-overlapping) to keep existing placement assertions valid.
+
+## Panel Layout Constants
+
+| Constant | Value | Rationale |
+|---|---|---|
+| `kPanelW` | 340 | Wide enough for "Desirability: 99.0" at ~11 px/char mono font |
+| `kPanelH` | 280 | 8 rows × `kLineH` (33) + 16 px top/bottom padding |
+| `kLineH` | 33 | At 720 p: `ceil(22 px font × 1080 / 720) = 33` virtual px per row |
+
+**Background**: `m_panelBg` uses `setElementBackground(r=18, g=18, b=36, a=210)` — dark-navy
+semi-transparent fill drawn over world geometry to make text readable at all terrain colors.
+
+**Coverage line**: The service-coverage row uses a two-line format via a `'\n'` newline character
+and a double-height element (`h = 2 × kLineH`):
+
+```text
+Fire:X% Pol:X%
+Pwr:X%  Wtr:X%
+```
+
+Each line is ≤ 20 mono characters, fitting within `kPanelW=340` at all supported resolutions.
+
+**Font scaling note**: The bitmap fonts (`hud_font.xml`, `hud_mono_font.xml`) are fixed at 22 px
+physical height and do not scale with screen resolution. The virtual layout constants above are
+sized so that a 720 p display (the minimum supported resolution) produces non-overlapping rows.
+At higher resolutions rows will be slightly more spaced, which is acceptable. Dynamic per-frame
+font-size switching is deferred to a future typography pass.
+
 - **Fields per entity type**:
   - Zone tile: demand score, desirability score, tax yield/month, zone type + density, demand pressure % (unmet demand percentage per zone type from the `demand_pressure_pct` field of `QueryResult`)
   - Road segment: current occupancy %, current speed, capacity, congestion status
   - Service building: coverage radius, current upkeep, service level %
+- **Road tile detection via `QueryResult::isRoad`**: `ICitySimulation::queryTile()` sets
+  `QueryResult::isRoad = true` for road tiles (`TileData::isRoad == true`). Road tiles have
+  `isZoned = false`, so without the explicit `isRoad` check they would fall through to the
+  "Unzoned" branch. The display priority is:
+
+  ```text
+  if result.isZoned  → show zone/density/population/coverage data
+  else if result.isRoad → show "Road" label; traffic data fields populated in future phase
+  else if result.serviceType != ServiceBuildingType::None → show service building panel
+  else               → show "Unzoned"
+  ```
+
+  `QueryResult::isRoad` is declared in `src/interfaces/simulation_types.h` as `bool isRoad{false}`.
+  `queryTile()` returns early after setting `isRoad = true` — no zone/population data is filled for
+  road tiles. This is the V1 implementation; full road traffic fields (occupancy, speed, capacity,
+  congestion) are deferred until the traffic system simulation phase.
+
+- **Service building tile detection via `QueryResult::serviceType`**: `ICitySimulation::queryTile()`
+  sets `QueryResult::serviceType` to the appropriate `ServiceBuildingType` enumerator when the tile
+  contains a service building (`PowerPlant`, `WaterTower`, `FireStation`, or `PoliceStation`).
+  Service building tiles have `isZoned = false` and `isRoad = false`, so without the explicit
+  `serviceType` check they would fall through to the "Unzoned" branch. When
+  `serviceType != ServiceBuildingType::None`, the Inspector displays the service building panel
+  showing: coverage radius, current upkeep, and service level %. The `serviceType` field is
+  declared in `src/interfaces/simulation_types.h` as
+  `ServiceBuildingType serviceType{ServiceBuildingType::None}` (after the `coverage` field).
+  `queryTile()` fills `serviceType` and leaves `isZoned = false`, `isRoad = false` for service
+  building tiles. A companion field `bool degraded{false}` is declared in
+  `src/interfaces/simulation_types.h` immediately after `serviceType`; it is populated by
+  `queryTile()` when `serviceType != ServiceBuildingType::None` and set to `true` when the
+  service building is in degraded state. When displaying the service coverage overlay,
+  `UIManager` reads `QueryResult::degraded` and passes it to
+  `IRenderer::showServiceCoverageOverlay(tileX, tileZ, serviceType, degraded)` so the renderer
+  can tint the overlay to indicate degraded service.
+  **Overlay lifecycle**: When the Inspector panel is dismissed (player presses **I** again,
+  clicks a non-tile target, or presses **Escape**), or when a different tile is queried and
+  the result is not a service building, `UIManager` calls `IRenderer::hideServiceCoverageOverlay()`
+  to clear the previously displayed overlay. Only the coverage overlay of the currently-queried
+  service building should be visible at any time.
+
 - **Mutual exclusion with Tax Rate Panel**: QueryPanel and Tax Rate Panel must NOT be simultaneously open. Opening the QueryPanel closes the Tax Rate Panel if it is open. See `input-arbitration.md` Priority 3 for the authoritative mutual exclusion rule.
 - Panel populated by a `QueryResult` data struct passed from the simulation layer to `UIManager`
 - **Data refresh policy**: The QueryPanel refreshes its displayed data at different rates by data category to balance accuracy with performance:
-  - **Budget/economy data** (tax yield, demand score, desirability): refreshed once per budget tick (same cadence as the simulation update).
-  - **Traffic data** (road occupancy %, current speed, congestion status): refreshed every **10 simulation frames** (approximately every 167 ms at 60 FPS) — traffic state changes frequently enough that per-budget-tick updates would be stale, but per-frame updates are unnecessary.
-  - **Service data** (coverage radius, upkeep, service level %): refreshed once per budget tick (coverage changes only on build/demolish or budget deficit events).
-  - A small "Updated N seconds ago" line is displayed at the bottom of the panel showing the age of the most recently refreshed data category. If all categories are current within 1 s, this line is hidden.
+  - **Budget/economy data** (tax yield, demand score, desirability): refreshed once per budget tick (same cadence as the simulation update). **Implementation note**: `ICitySimulation` does not expose a budget-tick counter, so the implementation uses a draw-frame count proxy — `kEconomyRefreshFrames = 120` draw frames (≈2 s at 60 FPS) — as an approximation of the budget tick cadence. The `m_lastEconomyFrame` member is initialised to `-kEconomyRefreshFrames` so the first `draw()` call always triggers an immediate refresh.
+  - **Traffic data** (road occupancy %, current speed, congestion status): refreshed every **10 simulation frames** (approximately every 167 ms at 60 FPS) — traffic state changes frequently enough that per-budget-tick updates would be stale, but per-frame updates are unnecessary. Implemented as `kTrafficRefreshFrames = 10` draw frames.
+  - **Service data** (coverage radius, upkeep, service level %): refreshed once per budget tick (coverage changes only on build/demolish or budget deficit events). Uses the same `kEconomyRefreshFrames = 120` frame proxy as economy data.
+  - A small "Updated N seconds ago" line is displayed at the bottom of the panel showing the age of the most recently refreshed data category. If all categories are current within 1 s, this line is hidden. **Implementation note**: staleness is detected by comparing draw-frame counts using `kStalenessFrames = 60` (≈1 s at 60 FPS); the label is rendered via a `m_updatedLabel` `UIElementHandle`.
+
+## Visual Design — Glass City
+
+The inspector panel uses the Glass City panel style:
+
+- **Background**: `rgba(13, 27, 42, 0.85)` deep navy, 8 px corner radius on all edges
+- **Panel title / field labels**: `#EBF4F6` near-white for primary labels; `#4A7FA5` mid-blue
+  for field-name sub-labels
+- **Numeric values** (demand score, desirability score, tax yield, demand pressure %, road
+  occupancy %, speed, capacity, coverage radius, upkeep, service level %):
+  `#F0B429` warm amber monospace font via `setElementMonoFont(handle)`
+- **Error / unavailable**: `#F04E37` red for fields that report a deficiency (e.g. service
+  level 0%)
+- **"Updated N seconds ago" staleness label**: `#4A7FA5` mid-blue (secondary label)
+- **Focus / hover border on panel close affordance**: 2 px teal `rgba(0, 201, 200, 0.75)`
+
+The `isRoad` and `isZoned` display-priority paths use the same label colours: the
+"Road", "Unzoned", zone-type, and density tier strings are near-white `#EBF4F6`; their
+corresponding data values are amber `#F0B429`.
+
 - **Dismissed** by pressing I again, clicking elsewhere, or pressing **Escape**. The Escape key is **consumed by the QueryPanel** when the panel is open — it closes the QueryPanel and does NOT trigger the Pause Menu. This is enforced by the input arbitration priority order (see Input Arbitration spec). If the QueryPanel is closed, Escape passes through to `UIManager` which opens the Pause Menu. **Escape feedback** (prevents "why didn't the game pause?" confusion): When Escape closes the QueryPanel, display a brief Normal-queue toast (1.5 s, auto-dismiss, non-blocking): "Panel closed — press Escape again to open Pause Menu." This communicates to the player that their first Escape press was consumed by the panel and the simulation is still running. The toast must not appear if the player was already at speed=0 (paused) when they pressed Escape — in that case no "will not pause" feedback is needed since the simulation is already stopped. **The Escape-feedback toast is a passive display element — it must NOT intercept or consume any input events.** If the player presses Escape while the toast is still visible (within the 1.5 s display window), that Escape event passes through the toast to `UIManager` and opens the Pause Menu normally. The toast has no input priority in the arbitration chain; it is rendered on-screen but takes no ownership of events. Failing to enforce this produces a bug where the player tries to pause after the QueryPanel closes but the toast "absorbs" their Escape press and nothing happens.

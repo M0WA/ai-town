@@ -63,6 +63,9 @@ All files contain the full verbatim content from the master spec (`CLAUDE.md`).
 | Scene Graph Ownership Policy | [graphics-architecture/scene-graph-ownership.md](graphics-architecture/scene-graph-ownership.md) |
 | Texture Cache | [graphics-architecture/texture-cache.md](graphics-architecture/texture-cache.md) |
 | Shader Loading | [graphics-architecture/shader-loading.md](graphics-architecture/shader-loading.md) |
+| Benchmark Tool (VRAM/FPS/Anisotropy Profiler) | [graphics-architecture/benchmark-tool.md](graphics-architecture/benchmark-tool.md) |
+| Model Validator Tool (Interactive Asset Visual Check) | [graphics-architecture/model-validator-tool.md](graphics-architecture/model-validator-tool.md) |
+| Sky Clouds (Cloud Plane, UV Scrolling, Phase 10b) | [graphics-architecture/sky-clouds.md](graphics-architecture/sky-clouds.md) |
 
 ---
 
@@ -81,6 +84,12 @@ All files contain the full verbatim content from the master spec (`CLAUDE.md`).
 | Audio Occlusion (V1) | [audio-architecture/audio-occlusion.md](audio-architecture/audio-occlusion.md) |
 | Dynamic Soundscape | [audio-architecture/dynamic-soundscape.md](audio-architecture/dynamic-soundscape.md) |
 | V1 Audio Asset Manifest | [audio-architecture/v1-audio-asset-manifest.md](audio-architecture/v1-audio-asset-manifest.md) |
+| Production Brief — Music Stems (SA-2/SA-3) | [audio-architecture/production-briefs/music-production-brief.md](audio-architecture/production-briefs/music-production-brief.md) |
+| Production Brief — Ambient Beds | [audio-architecture/production-briefs/ambient-bed-production-brief.md](audio-architecture/production-briefs/ambient-bed-production-brief.md) |
+| Production Brief — Zone Loops | [audio-architecture/production-briefs/zone-loop-production-brief.md](audio-architecture/production-briefs/zone-loop-production-brief.md) |
+| Production Brief — Vehicle SFX | [audio-architecture/production-briefs/vehicle-sfx-production-brief.md](audio-architecture/production-briefs/vehicle-sfx-production-brief.md) |
+| Production Brief — Stingers | [audio-architecture/production-briefs/stinger-production-brief.md](audio-architecture/production-briefs/stinger-production-brief.md) |
+| Production Brief — WAV SFX One-Shots | [audio-architecture/production-briefs/wav-sfx-production-brief.md](audio-architecture/production-briefs/wav-sfx-production-brief.md) |
 
 ---
 

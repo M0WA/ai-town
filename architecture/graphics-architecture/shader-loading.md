@@ -80,32 +80,134 @@ if (!gpu) {
 
   Without this save/restore, Irrlicht's internal active-unit tracking is corrupted starting from the first frame that uses a custom sRGB shader, producing intermittent texture-on-wrong-unit artifacts that are difficult to reproduce.
 
+  **Terrain Splat Shader — 5-Unit Binding Sequence in OnSetConstants()**
+
+  The terrain splat shader binds 5 raw `GLuint` textures simultaneously in `OnSetConstants()`:
+
+  - Unit 4: splat map (`getSplatMapGLuint()`)
+  - Unit 5: terrain detail layer 0 / R-channel (`getSRGBGLuint()`, biome base/grass)
+  - Unit 6: terrain detail layer 1 / G-channel (`getSRGBGLuint()`, asphalt)
+  - Unit 7: terrain detail layer 2 / B-channel (`getSRGBGLuint()`, soil)
+  - Unit 8: terrain detail layer 3 / A-channel (`getSRGBGLuint()`, concrete)
+
+  Required binding sequence (must be in exactly this order):
+
+  ```cpp
+  // Save current active unit
+  GLint savedUnit;
+  glGetIntegerv(GL_ACTIVE_TEXTURE, &savedUnit);
+
+  // Bind splat map (unit 4, linear upload — NOT sRGB)
+  glActiveTexture(GL_TEXTURE0 + kTexUnitSplatMap);  // = 4
+  glBindTexture(GL_TEXTURE_2D, tc->getSplatMapGLuint(m_splatPath));
+
+  // Bind 4 sRGB terrain detail layers (units 5–8)
+  for (int i = 0; i < 4; ++i) {
+      glActiveTexture(GL_TEXTURE0 + kTexUnitTerrainLayer0 + i);  // = 5,6,7,8
+      glBindTexture(GL_TEXTURE_2D, tc->getSRGBGLuint(m_detailPaths[i]));
+  }
+
+  // Set sampler uniforms AFTER all bindings
+  int unit4 = kTexUnitSplatMap;  // 4
+  services->setPixelShaderConstant("u_splatMap", &unit4, 1);
+  for (int i = 0; i < 4; ++i) {
+      int unit = kTexUnitTerrainLayer0 + i;  // 5–8
+      const char* names[] = {"u_layer0","u_layer1","u_layer2","u_layer3"};
+      services->setPixelShaderConstant(names[i], &unit, 1);
+  }
+
+  // Restore saved active unit
+  glActiveTexture(static_cast<GLenum>(savedUnit));
+  ```
+
+  **Do NOT unbind individual units** before restoring — Irrlicht's driver state machine
+  tracks active texture units internally. Restoring `GL_ACTIVE_TEXTURE` is sufficient.
+  The `GL_ACTIVE_TEXTURE` save/restore pattern is mandatory for ALL raw-GL texture bindings
+  in `OnSetConstants()` to prevent corrupting Irrlicht's internal texture state.
+
+  **sRGB Gamma Fallback — Uniform Bool Approach**
+
+  When `GL_EXT_texture_sRGB` is absent (`RenderSystem::isSRGBTextureSupported()` returns `false`),
+  terrain textures are uploaded as linear (not sRGB). The fragment shader must apply a manual
+  `pow(color.rgb, vec3(2.2))` gamma correction.
+
+  **Mechanism: uniform bool `u_srgbLinear`** (not two shader variants).
+
+  In `OnSetConstants()`:
+
+  ```cpp
+  bool srgbLinear = !m_renderer->isSRGBTextureSupported();
+  // Irrlicht setPixelShaderConstant passes bool as int (1 = true, 0 = false)
+  int srgbLinearInt = srgbLinear ? 1 : 0;
+  services->setPixelShaderConstant("u_srgbLinear", &srgbLinearInt, 1);
+  ```
+
+  In the terrain fragment shader:
+
+  ```glsl
+  uniform bool u_srgbLinear;
+  // ...
+  vec4 color = texture(u_layer0, uv) * splatWeights.r
+             + texture(u_layer1, uv) * splatWeights.g
+             + texture(u_layer2, uv) * splatWeights.b
+             + texture(u_layer3, uv) * splatWeights.a;
+  if (u_srgbLinear) {
+      color.rgb = pow(color.rgb, vec3(2.2));
+  }
+  gl_FragColor = color;
+  ```
+
+  **Why not two shader variants**: selecting between shader variants at runtime requires
+  storing two `s32` material IDs and branching in the render path. The uniform bool
+  is evaluated once per draw call on modern drivers with negligible overhead.
+
   **Note on shader version enums**: Irrlicht's GLSL backend **ignores** the `EVST_VS_*` / `EPST_PS_*` enum values entirely when compiling OpenGL GLSL shaders. These enums are meaningful only for the Direct3D HLSL backend. For GLSL, the active GLSL version is determined exclusively by the `#version` directive in the shader source file itself. Use `EVST_VS_1_1` / `EPST_PS_1_1` as the conventional placeholder values (matching Irrlicht Tutorial 10). All GLSL shader files must begin with a `#version` pragma appropriate for the features used (e.g. `#version 130` for `texture()`, `in`/`out` qualifiers, and multi-texture sampling). Do not assume that passing `EVST_VS_3_0` or higher will gate or enable any GLSL feature — it has no effect on the GLSL compilation path.
 
-## Phase 2 GLSL Stub Files — Co-Landing Requirement
+  **Vertex transform — use `gl_ModelViewProjectionMatrix` (GLSL compatibility built-in)**: Irrlicht creates a legacy OpenGL compatibility-profile context and drives the scene graph via `glVertexPointer` / `glNormalPointer` / `glTexCoordPointer` (fixed-function arrays) and `glLoadMatrix` / `glMultMatrix` on the `GL_MODELVIEW` / `GL_PROJECTION` stacks. The GLSL compatibility built-in `gl_ModelViewProjectionMatrix` (= Projection × View × World) is always current for the active scene node. **Do NOT declare a custom `uniform mat4 uWVPMatrix` and leave it unset in `OnSetConstants()`.** GLSL default-initialises matrix uniforms to zero — passing a zero matrix to `gl_Position` produces degenerate zero-area triangles, making all geometry invisible. The correct pattern:
 
-The Phase 2 GLSL stub files MUST be co-landed in the same commit as `shader_stub_compile_test.cpp` that asserts they can be found and compiled. This is a hard requirement, not a convention.
+  ```glsl
+  // road.vert — correct vertex transform using compatibility built-in:
+  void main() {
+      gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+      v_texCoord  = gl_MultiTexCoord0.st;
+      // ...
+  }
+  ```
 
-**Rationale**: `shader_stub_compile_test.cpp` calls `addHighLevelShaderMaterialFromFiles()` with paths to the Phase 2 lighting shader stubs. If those files are absent on disk, Irrlicht returns immediately with a `−1` material type and the test fails with a file-not-found error. Committing the test without the GLSL files causes an immediate CI failure on every subsequent push until the files are added — this is a broken-tree state and must not enter the branch.
+  Additionally, use the GLSL compatibility built-ins `gl_Vertex`, `gl_Normal`, and `gl_MultiTexCoord0` directly instead of user-defined `in` variables — this avoids attribute-location ambiguity when the GLSL linker assigns user-defined `in` variable locations in implementation-defined order (Irrlicht's `COpenGLSLMaterialRenderer` does not call `glBindAttribLocation`, so named `in` variables may not land at the compatibility alias locations 0/2/8).
 
-**Exit criterion**: A green `shader_stub_compile_test` in CI is ONLY valid evidence that both the shader files AND the shader loading code are present and functional. A green result obtained by stubbing the test to skip when the files are absent is NOT a valid exit criterion — the skip must never be triggered in CI (see the `GTEST_SKIP()` guard rules in `irrlicht-device-lifecycle.md`).
+## GLSL Shader Files
+
+The following GLSL shader files must always be present in the repository:
+
+- `assets/shaders/lighting.vert` — passthrough vertex shader (`#version 130`)
+- `assets/shaders/lighting.frag` — constant color fragment shader (`#version 130`)
+- `assets/shaders/terrain.vert` — passthrough vertex shader (`#version 130`)
+- `assets/shaders/terrain.frag` — constant color fragment shader (`#version 130`)
+- `assets/shaders/billboard.vert` — passthrough vertex shader (`#version 130`)
+- `assets/shaders/billboard.frag` — constant color fragment shader (`#version 130`)
+
+The test `ShaderLoadingTest::LightingShaderCompilesWithoutError` in `tests/rendering/shader_loading_test.cpp`
+calls `addHighLevelShaderMaterialFromFiles()` with paths to the lighting shaders and asserts
+`matType != -1`. If any shader file is absent, Irrlicht returns `−1` immediately and the test fails.
+
+## Phase 8 GLSL Co-Landing Requirement
+
+The Phase 8 GLSL files MUST be co-landed in the same commit as `IrrlichtUIBackend.cpp` in Phase 8.
 
 **Co-landing checklist (single commit must include all of the following):**
 
-- `assets/shaders/lighting.vert` — Phase 2 stub (minimal valid GLSL with `#version 130`, passthrough vertex shader)
-- `assets/shaders/lighting.frag` — Phase 2 stub (minimal valid GLSL with `#version 130`, constant color output)
-- `assets/shaders/terrain.vert` — Phase 2 stub (minimal valid GLSL with `#version 130`, passthrough vertex shader)
-- `assets/shaders/terrain.frag` — Phase 2 stub (minimal valid GLSL with `#version 130`, constant color output)
-- `assets/shaders/billboard.vert` — Phase 2 stub (minimal valid GLSL with `#version 130`, passthrough vertex shader)
-- `assets/shaders/billboard.frag` — Phase 2 stub (minimal valid GLSL with `#version 130`, constant color output)
-- `tests/rendering/shader_stub_compile_test.cpp` — exercises the lighting shaders (NOTE: not shader_loading_test.cpp)
-- `src/rendering/shader_loader.cpp` (or the relevant loading code) — the implementation being tested
+- `assets/shaders/ui_quad.vert` — 2D UI textured-quad vertex shader (position + UV attributes, NDC/orthographic transform, outputs interpolated UV `v_uv` to fragment stage); no sampler uniform in vertex stage
+- `assets/shaders/ui_quad.frag` — 2D UI textured-quad fragment shader (samples `u_tex` sampler uniform at interpolated `v_uv`, outputs texel colour)
 
-**Note**: `shader_stub_compile_test.cpp` exercises the `lighting` shaders; all six GLSL files must be present so Phase 3 can build against them.
+**Note**: These two files MUST be co-landed in the same commit as `IrrlichtUIBackend.cpp` in Phase 8. They are NOT Phase 2 files. See `implementation/phase-8.md` §IrrlichtUIBackend for the full co-landing requirement.
 
-If any of these artifacts is missing from the commit, the commit is incomplete and must not be merged.
-
-- **Error handling**: Check return value of `−1` (shader compile/link failure):
+- **Error handling — `addHighLevelShaderMaterialFromFiles()` path**: Check return value of `−1` (shader compile/link failure):
   - **Debug builds** (`NDEBUG` not defined): assert/abort with error message
   - **Release builds**: fall back to `EMT_SOLID` with magenta diffuse (highly visible error indicator); display a non-fatal error notification; log to file; do not abort. Clean shutdown proceeds normally.
 - Never apply an unvalidated (−1) material type index to a mesh node
+
+- **Exception — ui_quad raw GL path**: The ui_quad GLSL program (`ui_quad.vert` / `ui_quad.frag`) in `IrrlichtUIBackend` is compiled via raw GL calls (`glCreateShader` / `glShaderSource` / `glCompileShader` / `glLinkProgram`), NOT via `addHighLevelShaderMaterialFromFiles()`. The `−1` return code and `EMT_SOLID` fallback do NOT apply to this path. The correct fallback is:
+  - On `GL_COMPILE_STATUS == GL_FALSE` (per shader): log `glGetShaderInfoLog`, debug-assert; set `m_uiQuadProgram = 0` and return.
+  - On `GL_LINK_STATUS == GL_FALSE`: log `glGetProgramInfoLog`, debug-assert; set `m_uiQuadProgram = 0` and return.
+  - In `setElementImage`, if `m_uiQuadProgram == 0`, return immediately (silent no-op — caller falls back to Irrlicht's software renderer path for this element).

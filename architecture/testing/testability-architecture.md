@@ -1,7 +1,12 @@
 # Testability Architecture
 
 - Simulation logic must **not** depend directly on Irrlicht or OpenAL APIs
-- `UIManager` must depend on an `IUIBackend` interface for all Irrlicht `IGUIEnvironment` calls, enabling `src/ui/` to be tested with a `MockUIBackend` in unit tests without a display. The interface uses **opaque `UIElementHandle` (uint32_t)** instead of raw Irrlicht pointers — this fully severs the compile-time dependency on Irrlicht headers in any translation unit that only includes `IUIBackend.h`. The concrete `IrrlichtUIBackend` maintains an internal `std::unordered_map<UIElementHandle, IGUIElement*>` to map handles to real objects. **Source location**: `IUIBackend.h` lives in `src/ui/`; `IrrlichtUIBackend.h/.cpp` live in `src/rendering/` (since it depends on Irrlicht headers). `MockUIBackend` lives in `tests/ui/mock_ui_backend.h`. This placement ensures the `src/ui/` coverage gate does not pull in Irrlicht headers and the `src/rendering/` exclusion correctly covers `IrrlichtUIBackend`. **IMPORTANT: IUIBackend.h MUST be placed in `src/ui/` (not `src/interfaces/`). This is an intentional exception to the `src/interfaces/` pattern. IUIBackend is a UI-layer-only interface; placing it in `src/ui/` ensures its coverage is captured under the 80% coverage gate. All other shared interfaces (IClock, ISimulationRNG, ISimulationPauser, ICitySimulation) live in `src/interfaces/` as usual.**
+- `UIManager` must depend on an `IUIBackend` interface for all Irrlicht `IGUIEnvironment` calls, enabling `src/ui/` to be tested with a `MockUIBackend` in unit tests without a display. The interface uses **opaque `UIElementHandle` (uint32_t)** instead of raw Irrlicht pointers — this fully severs the compile-time dependency on Irrlicht headers in any translation unit that only includes `IUIBackend.h`. The concrete `IrrlichtUIBackend` maintains an internal `std::unordered_map<UIElementHandle, IGUIElement*>` to map handles to real objects. **Source location**: `IUIBackend.h` lives in `src/interfaces/` (moved from `src/ui/` in
+Phase 10b Feature 3 — all pure-virtual interfaces MUST reside in `src/interfaces/` per
+project convention); `IrrlichtUIBackend.h/.cpp` live in `src/rendering/` (since it depends
+on Irrlicht headers). `MockUIBackend` lives in `tests/ui/MockUIBackend.h` (renamed to
+`tests/ui/MockUIBackend.h` in Phase 10b Feature 3). `src/interfaces/` is not excluded from
+lcov, so coverage is captured correctly under the 80% gate.
 
 ```cpp
 using UIElementHandle = uint32_t;
@@ -40,10 +45,39 @@ public:
     // Load a texture from disk and return an opaque handle for setElementImage().
     // Returns kInvalidUIElement on failure. Backend owns the resource; call removeElement() to release.
     virtual UIElementHandle loadTexture(const std::string& path) = 0;
+    // 18. Set a filled background colour on an IGUIStaticText element.
+    //     r, g, b, a are each in [0, 255]. Added in Phase 9b for the Minimap dark-panel fix.
+    //     Only valid for addStaticText() handles. Has no effect on button elements.
+    //     NAMING NOTE: earlier spec drafts used setElementBackgroundColor(handle, uint32_t argb)
+    //     with a packed ARGB argument. The canonical form throughout the codebase uses four
+    //     separate int channels (r, g, b, a). All call sites must use this 4-channel form.
+    //     See architecture/ui-ux/minimap.md §IUIBackend method 18.
+    virtual void setElementBackground(UIElementHandle handle, int r, int g, int b, int a) = 0;
+    // 19. Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element.
+    //     Panel code calls this immediately after addStaticText() for every numeric readout element.
+    //     In IrrlichtUIBackend: calls IGUIStaticText::setOverrideFont(m_monoFont); no-op when m_monoFont is null.
+    //     In MockUIBackend: MOCK_METHOD stub. Labels and button text MUST NOT call this method.
+    //     Added in Phase 10. See architecture/ui-ux/hud-layout.md §Font Loading — Monospace requirement.
+    virtual void setElementMonoFont(UIElementHandle handle) = 0;
+    // 20. Reposition and resize an existing element in-place without destroying
+    //     its handle. Coordinates are in virtual 1920×1080 space.
+    //     In IrrlichtUIBackend: updates stored virtualRect + calls setRelativePosition().
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     Added in Phase 10 for the modal dialog centring fix.
+    //     See architecture/ui-ux/modal-dialog-system.md §Element Repositioning.
+    virtual void setElementRect(UIElementHandle handle, int x, int y, int w, int h) = 0;
+    // 21. Override the text colour of a static text element.
+    //     r, g, b are in [0, 255]; alpha is fixed at 255 (fully opaque).
+    //     In IrrlichtUIBackend: calls IGUIStaticText::setOverrideColor(SColor(255, r, g, b)).
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     Added post-Phase-10.
+    virtual void setElementTextColor(UIElementHandle handle, int r, int g, int b) = 0;
 };
 ```
 
-`MockUIBackend` returns arbitrary non-zero integer handles (e.g., an incrementing counter) with no real objects — unit tests that call UIManager methods never dereference Irrlicht pointers, making `src/ui/` genuinely headless-testable and the 80% coverage gate achievable.
+`MockUIBackend` **source location**: `tests/ui/MockUIBackend.h`. The file contains 21 `MOCK_METHOD` entries — one per `IUIBackend` virtual method — as of Phase 10 and later (method 19 `setElementMonoFont` added in Phase 10; method 20 `setElementRect` added in Phase 10; method 21 `setElementTextColor` added post-Phase-10). **Rule**: whenever a new virtual method is added to `IUIBackend`, a matching `MOCK_METHOD` entry MUST be added to `tests/ui/MockUIBackend.h` in the same commit. The spec description above (inline `IUIBackend` class block) and `tests/ui/MockUIBackend.h` must always have the same method count. `ui-manager.md` §IUIBackend Method Contract is the production-facing authority; this file is the test-facing authority; both must remain consistent.
+
+`MockUIBackend` returns arbitrary non-zero integer handles (e.g., an incrementing counter) with no real objects — unit tests that call UIManager methods never dereference Irrlicht pointers, making `src/ui/` genuinely headless-testable and the 95% coverage gate achievable.
 
 - **`UIScaler` testability**: `UIScaler` must accept viewport dimensions at construction (`UIScaler(int virtualW, int virtualH, int viewportW, int viewportH, int offsetX, int offsetY)`) rather than reading from a live `IVideoDriver`. Tests construct `UIScaler(1920, 1080, 1280, 720, 0, 90)` directly to validate coordinate projection and letterbox offset math without a display. The `unproject` method returns `UIScaler::VirtualPoint` — a nested struct, NOT at namespace scope, to avoid ODR violations. The five named unit tests that must be authored in `tests/ui/ui_scaler_test.cpp` are:
   1. `UIScaler_1280x720_LetterboxOffsets_ProjectsCorrectly`: construct with (1920, 1080, 1280, 720, 0, 90); unproject (640, 450) → virtual (960, 540).
@@ -51,11 +85,54 @@ public:
   3. `UIScaler_PillarboxOffset_UnprojectsCenterCorrectly`: construct with (1920, 1080, 1440, 1080, 240, 0); unproject (960, 540) → virtual (960, 540).
   4. `UIScaler_MouseInTopBlackBar_VirtualY_ClampedToZero`: construct with (1920, 1080, 1280, 720, 0, 90); unproject (640, 80) → virtual y clamped to 0 (actual_y=80 < offsetY=90 produces negative pre-clamp virtual_y, clamped to 0).
   5. `UIScaler_GetViewportRect_ReturnsCorrectOffsets`: construct with (1920, 1080, 1280, 720, 0, 90); `getViewportRect()` returns {x:0, y:90, w:1280, h:720}.
-- **`NotificationManager` testability**: `NotificationManager` must accept `IUIBackend*` for element creation, `ICitySimulation*` for auto-pause injection and deficit-streak queries, and `IClock*` for dismiss-after-5s timing. The correct constructor signature is: `NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock)`. **Source location**: `ISimulationPauser.h` lives in **`src/interfaces/`** (NOT `src/simulation/`) — placing it in `src/simulation/` creates a latent circular dependency when `src/ui/` headers include it (`src/ui/` → `src/simulation/` is a prohibited dependency direction; UI must not depend on simulation headers). `src/interfaces/` is a dependency-free common header directory that both `src/simulation/` and `src/ui/` may include. `MockCitySimulation` lives in `tests/ui/mock_city_simulation.h` (used by UI tests that need to verify pause/resume calls and simulation queries without pulling in `CitySimulation`). Tests inject `MockUIBackend` + `MockCitySimulation` + `ManualClock` and call `update()` with controlled time advances to verify queue ordering, auto-dismiss timing, CRITICAL vs Normal band placement, and log-fallback behavior. `NotificationManager` exposes a public `dismissCriticalToast(UIElementHandle handle)` method — this is the production API called by the UI event handler when the player clicks, presses Enter, or presses Delete on a CRITICAL toast; it is not a test-only backdoor. Tests call this method to simulate player dismissal. Additional required test cases:
+- **`NotificationManager` testability**: **CRITICAL — Constructor parameter types are fixed.** The correct constructor signature (Phase 10 and later) is: `NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock, IAudioSystem* audio)`. The `ICitySimulation*` parameter type (NOT `ISimulationPauser*`) is mandatory: `NotificationManager` calls `m_sim->setPaused(true)` on CRITICAL toast auto-pause; `setPaused()` is inherited from `ISimulationPauser`. `UIManager` already holds `m_sim` as `ICitySimulation*`, so no downcast is needed. `NotificationManager` does NOT call `getConsecutiveDeficitMonths()`; `UIManager::update()` is the exclusive polling bridge for deficit-month-based toast dispatch. If a Phase 1/2 stub mistakenly used `ISimulationPauser*`, Phase 3 MUST correct it to `ICitySimulation*`. The `IAudioSystem*` parameter (fourth, added in Phase 10) allows `postCritical()` and `postNormal()` to fire `UI_TOAST` SFX when a toast becomes visible. Before Phase 10, pass `nullptr`; every audio call site is guarded by `if (m_audio)`. **Phase 10 test update**: all existing test fixtures that construct `NotificationManager` directly must be updated to pass a fourth `IAudioSystem*` argument — either `nullptr` (tests not exercising toast audio) or `NiceMock<MockAudioSystem>` (tests verifying SFX behaviour). `MockAudioSystem` is in `tests/simulation/MockAudioSystem.h`.
+
+  **Interface inheritance contract** (required for type safety): `ICitySimulation` extends `ISimulationPauser` (defined in `src/interfaces/ICitySimulation.h` line 339: `class ICitySimulation : public ISimulationPauser {`). This allows `NotificationManager` to accept `ICitySimulation*` and safely call inherited `setPaused(bool)` without an explicit cast. Tests that construct `NotificationManager` with a mock must use `NiceMock<MockCitySimulation>` (which implements both `ICitySimulation` and `ISimulationPauser` via inheritance), NOT `MockSimulationPauser` alone (which only implements `ISimulationPauser` and cannot be passed as `ICitySimulation*`).
+
+  **Source locations**: `ISimulationPauser.h` lives in `src/interfaces/` (NOT `src/simulation/` — placing it in `src/simulation/` creates a latent circular dependency when `src/ui/` headers include it, violating the `src/ui/` → `src/simulation/` prohibition). `src/interfaces/` is a dependency-free common header directory that both `src/simulation/` and `src/ui/` may safely include. `MockCitySimulation` lives in `tests/ui/MockCitySimulation.h` (used by UI tests that need to verify pause/resume calls and simulation queries without pulling in the concrete `CitySimulation`).
+
+  **Test setup**: Tests inject `MockUIBackend` + `NiceMock<MockCitySimulation>` + `ManualClock` + `nullptr` (for `IAudioSystem*` — Phase 10 adds the fourth parameter; tests not exercising toast audio pass `nullptr`) and call `update()` with controlled time advances to verify queue ordering, auto-dismiss timing, CRITICAL vs Normal band placement, and log-fallback behavior. Tests that verify `ui_toast` SFX behaviour must inject `NiceMock<MockAudioSystem>` (from `tests/simulation/MockAudioSystem.h`) as the fourth argument instead of `nullptr`. `NotificationManager` exposes a public `dismissCriticalToast(UIElementHandle handle)` method — this is the production API called by the UI event handler when the player clicks, presses Enter, or presses Delete on a CRITICAL toast; it is not a test-only backdoor. Tests call this method to simulate player dismissal. Additional required test cases:
   - `CriticalToast_OnPost_AutoPausesCalled`: posting a CRITICAL toast calls `setPaused(true)` exactly once when the CRITICAL queue transitions from empty to non-empty.
   - `CriticalToast_OnLastDismiss_NoAutoResume`: calling `dismissCriticalToast(handle)` on the last remaining CRITICAL toast does **NOT** call `setPaused(false)` — auto-resume requires explicit player unpause. Verify `setPaused(false)` is never called by `NotificationManager` on CRITICAL toast dismissal.
   - `CriticalToast_SecondPost_NoDoublePause`: posting a second CRITICAL toast while one is already active does NOT call `setPaused(true)` again.
-- **`CameraController` testability**: `CameraController`'s pan/zoom/rotate input processing must be unit-testable by injecting synthetic `InputEvent` structs (defined in `src/platform/input_event.h`). The controller must accept a `CameraState` struct (position, target, pitch, yaw) and expose `getCameraState()` — tests drive events in, read state out, verify pitch clamping at [−70°, −20°] and edge-scroll behavior without a live scene node. `CameraController` must also expose `bool isEdgeScrollEnabled() const` as a public accessor returning the current value of `m_edgeScrollEnabled`; this is required by test case 6 (`CameraController_EdgeScroll_EnabledByDefaultInFullscreen`) to assert constructor initial state without input injection. **Source location**: `CameraController.h/.cpp` live in `src/ui/` (it is an input/UI concern, not a rendering concern); test file is `tests/ui/camera_controller_test.cpp`. This placement ensures `CameraController` is covered by the `src/ui/` 80% coverage gate.
+  - `NotificationSystem_AutoPause_OnFirstCriticalToast` *(Phase 8 deliverable)*: construct `NotificationManager` with `NiceMock<MockCitySimulation>` + `NiceMock<MockUIBackend>` + `ManualClock` + `nullptr`; post one CRITICAL toast when the CRITICAL queue is empty; verify `setPaused(true)` is called exactly once. Primary named test for `tests/ui/notification_system_test.cpp` Phase 8 expansion.
+  - `NotificationSystem_NoPause_OnNormalToast` *(Phase 8 deliverable)*: post a Normal-severity toast (not CRITICAL) to `NotificationManager`; verify `setPaused(true)` is never called — Normal toasts must not trigger auto-pause.
+  - `NotificationSFX_ToastVisible_UIToastSoundFires` *(Phase 10 deliverable)*: construct `NotificationManager` with `NiceMock<MockUIBackend>` + `NiceMock<MockCitySimulation>` + `ManualClock` + `NiceMock<MockAudioSystem>`; post a Normal toast; verify `playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f)` is called exactly once when the toast becomes visible (not on enqueue when the queue is at capacity). Named test for `tests/ui/notification_system_test.cpp` Phase 10 expansion. See `hud-layout.md` Phase 10 Audio Wiring — `ui_toast` section for the full guard rule.
+- **`UIManagerDeficitIntegrationTest` fixture** *(Phase 8 deliverable — canonical cross-subsystem fixture for deficit-streak CRITICAL toast dispatch)* in `tests/ui/notification_system_test.cpp`. This is a **separate fixture from `NotificationManagerTest`** — it tests the full dispatch path from `pollPendingNotification()` through `UIManager::update()` to `NotificationManager` CRITICAL toast dispatch and `IAudioSystem::triggerStinger()`. **Fixture setup**: real `UIManager` constructed with `NiceMock<MockUIBackend>`, `NiceMock<MockCitySimulation>`, `NiceMock<MockAudioSystem>`, and `ManualClock`. `MockAudioSystem` is injected as `IAudioSystem*` so that `triggerStinger` calls are interceptable and verifiable. **Include path**: `MockAudioSystem` is in `tests/simulation/MockAudioSystem.h` (NOT `tests/ui/` — audio mocks live alongside simulation mocks). `TearDown()` resets `ui_` to `nullptr` before mock destruction (mandatory: MockUIBackend destruction while UIManager holds a pointer to it causes a use-after-free crash in strict-mock verification).
+
+  **Approved mock policy deviation**: `NiceMock<MockAudioSystem>` (not `StrictMock`) is used here because `UIManager`'s `if(m_audio)` null-check guard requires a non-null injectable mock; `StrictMock` would require exhaustive construction-time `EXPECT_CALL` setup for all audio interactions. This leniency is compensated by explicit `Times(0)` assertions on negative-stinger tests (`UIManagerDeficit_Month1_NoStingerFired`).
+
+  Eight required test cases:
+
+  - `UIManagerDeficit_Month1_ToastDispatched_NoStinger` *(Phase 8 deliverable)*: set up `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(1))`; place both EXPECT_CALLs **before** calling `ui_.update(dt)` — EXPECT_CALL must precede the action under test: (a) **positive assertion** `EXPECT_CALL(backend_, addStaticText(HasSubstr("2 months"), _, _, _, _)).Times(AtLeast(1))` — prevents test passing trivially if dispatch chain is never entered; (b) **negative assertion** `EXPECT_CALL(audio_, triggerStinger(_)).Times(0)` — stinger must NOT fire on month-1 (condition `== 2 AND m_lastDeficitMonths < 2` not met — currentMonths is 1, not 2); then call `ui_.update(dt)`. **ON_CALL stubs are required**: `pollPendingNotification()` is no longer the dispatch trigger for deficit toasts — toast dispatch was changed to direct polling of `getConsecutiveDeficitMonths()`; the `BudgetDeficitWarn` notification no longer drives the deficit-toast branch in `UIManager::update()`. The `pollPendingNotification()` stub returns `std::monostate{}` to prevent surprise notification processing on unrelated notification types. The critical path is entered via `getConsecutiveDeficitMonths()` returning 1; without the `getConsecutiveDeficitMonths()` stub, NiceMock returns 0 and both assertions pass trivially for the wrong reason — a silent false-pass.
+
+  - `UIManagerDeficit_Month2_ToastDispatched_StingerFires` *(Phase 8 deliverable)*: set up `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(2))`; place `EXPECT_CALL(audio_, triggerStinger(StingerType::CRISIS)).Times(1)` **before** calling `ui_.update(dt)` — EXPECT_CALL must precede the action under test (GMock anti-pattern: setting expectations after the call will cause them to be verified before the call fires, potentially failing or passing for wrong reasons); then call `ui_.update(dt)`. **Production branch condition is `== 2` AND `m_lastDeficitMonths < 2`**: implementers must use `currentMonths == 2 AND m_lastDeficitMonths < 2` in the UIManager branch predicate — using `>= 2` would cause re-fires at month 3+ violating the 'at most once per deficit streak' rule in dynamic-soundscape.md. **ON_CALL stubs are required**: `pollPendingNotification()` is no longer the dispatch trigger for deficit toasts — toast dispatch was changed to direct polling of `getConsecutiveDeficitMonths()`; the stub returns `std::monostate{}` to prevent surprise notification processing on unrelated notification types. The critical path is entered via `getConsecutiveDeficitMonths()` returning 2; without the `getConsecutiveDeficitMonths()` stub, NiceMock returns 0, the `== 2` condition is never true, and the `Times(1)` expectation fails at teardown — another silent false-pass pattern that stubs prevent.
+
+  - `UIManagerDeficit_RapidFireCooldown_SecondStingerDropped` *(Phase 8 deliverable)*: uses a 3-update sequence to isolate the cooldown as the sole suppressor. Place `EXPECT_CALL(audio_, triggerStinger(StingerType::CRISIS)).Times(1)` **before** all updates so GMock can verify the total call count across all three update cycles. Stub `getConsecutiveDeficitMonths()` using a **stateful lambda** — **`ON_CALL` does NOT support `.InSequence()` and will not compile; `InSequence` is an `EXPECT_CALL`-only modifier and MUST NOT be used with `ON_CALL`**. The correct pattern:
+
+    ```cpp
+    int seq_idx = 0;
+    std::vector<int> seq_values = {2, 2, 0, 0, 2, 2}; // 2 calls/tick × 3 ticks (illustrative)
+    ON_CALL(sim_, getConsecutiveDeficitMonths())
+        .WillByDefault([&seq_values, &seq_idx]() {
+            return seq_values[seq_idx < (int)seq_values.size()
+                              ? seq_idx++ : (int)seq_values.size()-1];
+        });
+    ```
+
+    The vector size must cover all `getConsecutiveDeficitMonths()` calls per tick × number of ticks; the illustrative `{2, 2, 0, 0, 2, 2}` covers 2 calls/tick × 3 ticks — adjust to match the actual call count in the `update()` implementation. The test flow: (1) first `ui_.update(dt)` — lambda returns 2 → edge-detect fires (2==2 AND m_lastDeficitMonths==0<2); stinger triggers; m_lastDeficitMonths set to 2; (2) advance `ManualClock` by `1.0` second; (3) second `ui_.update(dt)` — lambda returns 0 → m_lastDeficitMonths resets to 0; no stinger (count ≠ 2); (4) advance `ManualClock` by `2.0` more seconds (total 3 seconds elapsed since first stinger, less than the 5-second cooldown); (5) third `ui_.update(dt)` — lambda returns 2 → edge-detect passes (2==2 AND m_lastDeficitMonths==0<2) BUT cooldown 3 s < 5 s → stinger is suppressed by the cooldown; verify `Times(1)` at teardown — the cooldown is the sole suppressor in the third update. This test requires `ManualClock` advancement and verifies that the `IAudioSystem::triggerStinger()` 5-second minimum-between-same-type-triggers rule (per `architecture/audio-architecture/dynamic-soundscape.md`) is enforced at the `UIManager::update()` call site, not just inside `AudioSystem`. **Why the third stinger is dropped**: suppressed by the stinger cooldown (the edge-detect passes on the 0→2 re-entry, but the 5s cooldown is not yet expired).
+
+  - `UIManagerDeficit_PerStreakSingleFire_NoReFireAfterCooldown_SameStreak` *(Phase 8 deliverable)*: stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(2))`; place `EXPECT_CALL(audio_, triggerStinger(StingerType::CRISIS)).Times(1)` before the first update call; call `ui_.update(dt)` (stinger fires); advance `ManualClock` by 6.0 seconds (greater than the 5-second cooldown); call `ui_.update(dt)` a second time; verify the stinger does NOT fire again despite the cooldown having expired — distinguishes per-streak single-fire behavior from cooldown-only suppression. **ON_CALL stub note**: `pollPendingNotification()` is no longer the dispatch trigger for deficit toasts (dispatch was changed to direct polling of `getConsecutiveDeficitMonths()`); the stub returns `std::monostate{}` to prevent surprise notification processing on unrelated notification types.
+
+  - `UIManagerDeficit_CounterZero_NoToastNoStinger` *(Phase 8 deliverable)*: stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` (no notification) and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0))`; place `EXPECT_CALL(backend_, addStaticText(_,_,_,_,_)).Times(0)` and `EXPECT_CALL(audio_, triggerStinger(_)).Times(0)` BEFORE `ui_.update(dt)`; call `ui_.update(dt)`; verify the test passes — baseline quiescent state with no events and zero streak produces no toast and no stinger.
+
+  - `UIManagerDeficit_StreakBreak_RecoveryToastDispatched` *(Phase 8 deliverable)*: set `m_lastDeficitMonths` to 1 by first calling `ui_.update(dt)` with `getConsecutiveDeficitMonths()` returning 1 (advancing internal state), then stub `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0))` (streak drops from 1 to 0); place `EXPECT_CALL(backend_, addStaticText(HasSubstr("Recovering"), _, _, _, _)).Times(AtLeast(1))` BEFORE the second `ui_.update(dt)` call — verifies that when `getConsecutiveDeficitMonths()` drops from 1 to 0 (`m_lastDeficitMonths > 0 AND currentMonths == 0`), `UIManager::update()` dispatches a "Finances Recovering" Normal-queue toast to `NotificationManager`. The `HasSubstr("Recovering")` matcher must match the exact toast message string defined in `UIManager`; implementers MUST use a message containing "Recovering" in the recovery toast dispatch branch. Stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` on both update calls to prevent unrelated notification processing.
+
+  - `UIManagerDeficit_Month1StreakBreak_ReenablesFutureStreak` *(Phase 8 deliverable)*: verify that after a streak break (consecutive deficit months drops to 0), a subsequent month-1 deficit re-fires the CRITICAL toast (streak tracking resets). Three-phase sequence: (1) stub `getConsecutiveDeficitMonths()` returning 1, call `ui_.update(dt)` (month-1 CRITICAL toast fires, `m_lastDeficitMonths` set to 1); (2) stub `getConsecutiveDeficitMonths()` returning 0, call `ui_.update(dt)` (streak break, recovery toast, `m_lastDeficitMonths` reset to 0); (3) stub `getConsecutiveDeficitMonths()` returning 1, place `EXPECT_CALL(backend_, addStaticText(HasSubstr("2 months"), _, _, _, _)).Times(AtLeast(1))` BEFORE the third `ui_.update(dt)` call — verifies that `UIManager` treats the re-entry into month-1 deficit as a fresh streak start and posts the month-1 CRITICAL toast again. Without this reset, a buggy implementation that never clears `m_lastDeficitMonths` on streak break would silently suppress future month-1 toasts. Stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` on all three update calls.
+
+  - `UIManagerDeficit_Month3_SandboxMode_NoGameOverModal` *(Phase 8 deliverable)*: stub `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(3))` and stub `ON_CALL(sim_, getGameMode()).WillByDefault(Return(GameMode::Sandbox))`; place `EXPECT_CALL(backend_, showGameOverModal()).Times(0)` (or equivalent modal-trigger assertion on `MockUIBackend`) BEFORE `ui_.update(dt)`; call `ui_.update(dt)`; verify the test passes — when `GameMode::Sandbox`, a month-3 deficit streak does NOT call `transitionToGameOver()` (or its equivalent UI trigger), confirming the Sandbox guard at the UIManager game-over branch. Stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` to prevent unrelated notification processing. The `Times(0)` assertion is the primary enforcement: without it, a missing Sandbox guard would silently fire the game-over modal and the test would still pass because `NiceMock` ignores unexpected calls by default.
+
+- **`CameraController` testability**: `CameraController`'s pan/zoom/rotate input processing must be unit-testable by injecting synthetic `InputEvent` structs (defined in `src/platform/input_event.h`). The controller must accept a `CameraState` struct (position, target, pitch, yaw) and expose `getCameraState()` — tests drive events in, read state out, verify pitch clamping at [−70°, −20°] and edge-scroll behavior without a live scene node. `CameraController` must also expose `bool isEdgeScrollEnabled() const` as a public accessor returning the current value of `m_edgeScrollEnabled`; this is required by test case 6 (`CameraController_EdgeScroll_EnabledByDefaultInFullscreen`) to assert constructor initial state without input injection. **Source location**: `CameraController.h/.cpp` live in `src/ui/` (it is an input/UI concern, not a rendering concern); test file is `tests/ui/camera_controller_test.cpp`. This placement ensures `CameraController` is covered by the `src/ui/` 95% coverage gate.
 - **`CameraController` input abstraction**: `CameraController` must accept an `InputEvent` struct (defined in `src/platform/input_event.h`) rather than Irrlicht's `SEvent`, to avoid pulling Irrlicht headers into test translation units:
 
   ```cpp
@@ -79,7 +156,7 @@ public:
 
   The concrete `IEventReceiver` implementation in `src/platform/` translates `SEvent` to `InputEvent` before forwarding to `CameraController`. Test files in `tests/ui/` construct `InputEvent` structs directly — no Irrlicht headers required. `CameraController::OnInputEvent(const InputEvent&)` replaces `IEventReceiver::OnEvent(const SEvent&)` in the `CameraController` public interface.
 
-  **Required Named Test Cases** — all 8 test cases must be authored in `tests/ui/camera_controller_test.cpp` and registered under the `ui_tests` CMake target (label `unit`). Per `architecture/ui-ux/camera-controls.md`, pitch clamp tests must use exact equality assertions (`EXPECT_EQ` / `EXPECT_FLOAT_EQ`) rather than strictly-less-than comparisons, because the spec defines inclusive bounds using `std::clamp` semantics:
+  **Required Named Test Cases** — all 9 test cases must be authored in `tests/ui/camera_controller_test.cpp` and registered under the `ui_tests` CMake target (label `unit`). Per `architecture/ui-ux/camera-controls.md`, pitch clamp tests must use exact equality assertions (`EXPECT_EQ` / `EXPECT_FLOAT_EQ`) rather than strictly-less-than comparisons, because the spec defines inclusive bounds using `std::clamp` semantics:
 
   Note: `MouseWheel` drives zoom distance ONLY — it MUST NOT be used in pitch-clamp test cases, as scroll wheel events do not affect pitch and produce a test that never reaches the pitch clamp boundary.
 
@@ -108,7 +185,8 @@ public:
      that distinguishes a correct implementation from one with a latent re-enable defect.
      Use `EXPECT_EQ` for bool assertions; use `EXPECT_NE` for camera position change.
   8. `CameraController_EdgeScroll_DisabledByDefaultInWindowed` — construct `CameraController` with `startInFullscreen=false`; immediately call `isEdgeScrollEnabled()` without any intervening call to `setEdgeScrollEnabled()`; assert the return value is `false`. This is the symmetric counterpart to test case 6 and confirms the windowed-default rule from `architecture/ui-ux/camera-controls.md`.
-- **`QueryPanel` testability**: `QueryPanel::computePanelPosition(int cursorX, int cursorY, Rect tileBounds)` must be a pure function (no side effects, no Irrlicht dependency) returning a `Rect`. Required test cases:
+  9. `CameraController_KeyboardPanIgnoresSensitivity` — **(Phase 8 enforcement point)** construct `CameraController` with a non-unit sensitivity multiplier (e.g., `sensitivityMultiplier=2.0`); inject a keyboard pan event (e.g., `InputEvent{Type::KeyDown, key=KEY_A}` or the left-pan hotkey from `architecture/ui-ux/hotkey-scheme.md`); assert that the camera position delta equals the expected **unscaled** pan step, confirming that keyboard pan speed is NOT multiplied by `sensitivityMultiplier`. Mouse drag pan (RMB, MMB) applies `sensitivityMultiplier`; keyboard pan must not. This test must pass from Phase 1 to establish the invariant before Phase 8 adds the sensitivity slider. Placing the test here ensures that the Phase 8 sensitivity implementation cannot accidentally apply the multiplier to keyboard pan without breaking this test.
+- **`QueryPanel` testability**: `QueryPanel::computePanelPosition(int cursorX, int cursorY, ScreenRect tileBounds)` must be a pure function (no side effects, no Irrlicht dependency) returning a `ScreenRect` (`ScreenRect` is added to `IRenderer.h` by Phase 9b Deliverable B as `struct ScreenRect { int x{0}, y{0}, w{0}, h{0}; }` — plain POD, Irrlicht-free; `inspector_panel.h` may include `IRenderer.h` without violating the Irrlicht-free UI rule). Required test cases:
   1. **Primary placement**: cursor at (100, 100) with no tile overlap → verify panel placed at (140, 140).
   2. **Fallback placement**: primary position overlaps tile bounds → verify panel moves to above-left fallback position.
   3. **Edge clamping**: four sub-cases (left, right, top, bottom edge) verifying `clamp()` correctness — panel never extends outside [0, 1920−240] × [0, 1080−160].
@@ -126,7 +204,20 @@ public:
 - **`ModalDialog` + auto-pause testability** (tests in `tests/ui/` and `tests/simulation/`). Required test cases:
   1. `ModalDialog_OnOpen_SimulationIsPaused` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: calling `UIManager::showModal()` calls `CitySimulation::setPaused(true)` before returning.
   2. `ModalDialog_OnOpen_SpeedSelectorIsDisabled` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: `IUIBackend::setElementEnabled(..., false)` is called on the speed selector handle (not `setElementVisible` — the selector remains visible but non-interactive).
-  3. `ModalDialog_OnClose_SimulationResumes` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: dismissing the modal calls `setPaused(false)` and calls `setElementEnabled(..., true)` on the speed selector to re-enable it.
+  3. `ModalDialog_OnClose_SimulationResumes` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: dismissing the modal calls `setPaused(false)` and calls `setElementEnabled(..., true)` on the speed selector to re-enable it. **Pre-condition**: the fixture MUST ensure `isPaused() == false` before calling `showModal()`, so that `UIManager` observes an unpaused simulation and sets its internal `m_didPauseSim` flag to `true` on modal open. Include `EXPECT_CALL(sim_, isPaused()).WillOnce(Return(false))` as part of the `showModal()` setup stub. **Assertion note**: `setPaused(false)` is called on `closeModal()` only when `m_didPauseSim == true` (i.e., only when `UIManager` paused the simulation when opening this modal); if the simulation is already paused at `showModal()` time, `m_didPauseSim` is left `false` and `setPaused(false)` will NOT be called on `closeModal()` — testing from an already-paused initial state would produce a false pass because the assertion would vacuously hold for the wrong reason. **Ordering assertion (mandatory)**: `closeModal()` MUST call `setPaused(false)` before `setModalActive(false)`. Enforce this with `::testing::InSequence seq;` declared before both `EXPECT_CALL`s so GMock fails immediately if the order is violated.
+
+     ```cpp
+     ::testing::InSequence seq;
+     // setPaused(false) must fire BEFORE setModalActive(false):
+     // closeModal() must unpause the simulation before clearing the modal-active flag
+     // so that any code observing isModalActive()==false can assume the simulation
+     // is already unpaused and will not see a transient paused+non-modal state.
+     EXPECT_CALL(sim_, setPaused(false)).Times(1);
+     EXPECT_CALL(ui_,  setModalActive(false)).Times(1);
+     uiManager_->closeModal();
+     ```
+
+     The `InSequence` guard covers exactly these two calls. Do NOT use `.After()` syntax here — `InSequence` is the preferred style for consecutive paired assertions in this test suite (consistent with `UIManagerDrawOrderTest` usage above). An implementation that reverses the order (`setModalActive(false)` before `setPaused(false)`) will fail this test with a GMock sequence violation, which is the intended enforcement.
   4. `UndoSystem_BlockedDuringModal_HotkeyIgnored` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: injecting a Ctrl+Z `InputEvent` while modal is active does NOT call any undo operation.
   5. `UndoSystem_BlockedDuringModal_ButtonGrayedOut` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: while modal is active, `setElementEnabled(..., false)` is called on the undo button element via `IUIBackend`.
   6. `CriticalToast_DuringModal_IsQueued_NotDisplayed` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: posting a CRITICAL toast while a blocking modal is active queues the toast but does NOT display it immediately (no `addStaticText` call to `IUIBackend` for the toast element). After modal dismissal, the toast becomes visible (a deferred `addStaticText` call is verified).
@@ -134,7 +225,27 @@ public:
   8. `ModalDialog_OnClose_WithQueuedCriticalToast_AutoPauseReevaluated` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: post a CRITICAL toast while a blocking modal is active (verifies no second `setPaused(true)` call during modal-active period), then dismiss the modal (`UIManager::closeModal()`), then verify: (a) the queued CRITICAL toast is now displayed (`addStaticText` called on `MockUIBackend`), and (b) `setPaused(true)` is called **once more** during `closeModal()` re-evaluation — meaning **twice total** across the test (once on modal open, once on re-evaluation in `closeModal()` because CRITICAL queue is non-empty); `setPaused(false)` is NOT called — simulation stays paused because the CRITICAL toast remains active after modal close. **Reconciliation with StrictMock matrix**: The StrictMock Expected Call Matrix entry for this test specifies `setPaused(true) × 2` (total) and `setPaused(false) × 0` — the prose description above matches this. The "exactly once" wording in prior spec drafts referred to the re-evaluation step only (one call within `closeModal()`), not the total across the test; this was ambiguous and has been corrected to "once more during closeModal()". This test exercises the deferred re-evaluation path explicitly — without it, the re-evaluation call in the `closeModal()` code path is unverified and can be silently dropped. **Deferred `addStaticText` call timing**: The CRITICAL toast's `addStaticText` call to `MockUIBackend` MUST occur synchronously within the same `closeModal()` call stack — NOT deferred to the next `update()` tick. This is a firm implementation requirement: the `closeModal()` implementation must call the display logic synchronously, not schedule it for the next frame. Tests assert the element handle's presence immediately after `closeModal()` returns, with no intervening `update()` call. Implementations that defer display to `update()` do not meet this requirement and must be refactored.
   9. `Modal_SpeedSelectorGrayed_DespiteCriticalToast_SpeedAccessible_WhenModalOnly` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: when only a CRITICAL toast is active (no modal), the speed selector remains ENABLED (accessible per CRITICAL-toast-pause spec). This distinguishes modal-pause (selector grayed) from CRITICAL-toast-pause (selector accessible).
   10. `ModalDialog_OnClose_WithEmptyCriticalQueue_NoAutoRePause` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: open a modal (verifies `setPaused(true)` called once), then dismiss the modal with no CRITICAL toasts in the queue, then verify: (a) `setPaused(false)` is called exactly once (simulation resumes), and (b) `setPaused(true)` is NOT called again during `closeModal()`. This is the inverse of test 8 — it confirms that the CRITICAL toast auto-pause re-evaluation in `closeModal()` does NOT call `setPaused(true)` when the CRITICAL queue is empty, preventing a spurious re-pause on normal modal dismiss.
-- **`ISimulationRNG`** — injectable RNG interface for deterministic simulation testing: Service degradation (random building selection at −10% budget surplus) and any other simulation-layer random draws must use this interface rather than `std::rand()` or a global `std::mt19937`. Tests inject a `ManualRNG` that returns a preset sequence. **Source location**: `ISimulationRNG.h` lives in `src/interfaces/`; `ManualRNG` lives in `tests/simulation/manual_rng.h` (used by simulation tests) — **not** in `src/` (it is a test double, never linked into production code).
+  11. `CriticalToast_HiddenWhileModalActive_ReappearsAfterClose` *(Phase 8 deliverable — Phase 3 delivers fixture stub with no test body)*: fixture is `NotificationManagerTest` (using `NiceMock<MockUIBackend>` + `NiceMock<MockCitySimulation>` + `ManualClock`); file is `notification_system_test.cpp`. Test sequence: (1) open a blocking modal so `isModalActive()` returns `true`; (2) post a CRITICAL toast to `NotificationManager` — verify `isElementVisible(toastHandle)` returns `false` immediately (toast is created in a hidden state because a modal is active, i.e., no `addStaticText` call or `setElementVisible(..., true)` is made while the modal-active flag is set); (3) call `closeModal()` synchronously; (4) advance `ManualClock` by one frame delta and call `NotificationManager::update(dt)` once; (5) verify `isElementVisible(toastHandle)` returns `true` — the CRITICAL toast that was hidden during modal-active state reappears (becomes visible) in the next frame after `closeModal()`. This test exercises the Priority 2 dual-guard interaction path: the modal-active guard suppresses toast display, and the post-close re-evaluation path restores visibility. The `NiceMock<MockCitySimulation>` satisfies the `ICitySimulation*` constructor parameter without requiring exhaustive stubs; the `NiceMock<MockUIBackend>` tracks `isElementVisible` state through delegated ON_CALL return values keyed by handle.
+  12. `BondModal_ExhaustedUses_ButtonGrayedOut` *(Phase 8 deliverable — no Phase 3 stub; authored in full in Phase 8)*: construct `UIManager` with `NiceMock<MockUIBackend>` and `NiceMock<MockCitySimulation>` stubbed to return 0 from `ICitySimulation::getOutstandingBondUses()`; trigger the forced loan dialog Screen 2 render path (the screen showing the three action options); verify `IUIBackend::setElementEnabled(bondButtonHandle, false)` is called — confirming the Emergency Municipal Bond option is grayed when no bond uses remain. This test did not exist at Phase 3 time and has no fixture stub. Test file: `tests/ui/modal_dialog_test.cpp`. Mock policy: `NiceMock<MockUIBackend>` + `NiceMock<MockCitySimulation>`. **Approved mock policy deviation**: `NiceMock<MockUIBackend>` (not `StrictMock`) is used here because `BondModalTest` constructs a full `UIManager`, whose constructor creates all panels (HUD, Minimap, MainMenu, etc.) producing dozens of `addStaticText`/`addButton`/`setElementVisible` calls. `StrictMock` would require 50+ `EXPECT_CALL` stubs in `SetUp()`, defeating the fixture's purpose. This is the same pragmatic rationale as `UIManagerModalTest` (see NiceMock + explicit `Times()` CONTRACT above). The `setElementEnabled(_, false).Times(AtLeast(1))` assertion compensates by explicitly verifying the critical grayed-button call. **Fixture isolation**: `BondModalTest` MUST be a standalone test class that does NOT inherit from `UIManagerModalTest`. Cross-reference: `architecture/ui-ux/modal-dialog-system.md` forced loan Screen 2 spec; `architecture/game-design/economy-model.md` bond-uses-per-difficulty table.
+
+## SettingsPanelTest Fixture (Phase 8)
+
+**Fixture setup**: `NiceMock<MockUIBackend>` + `ManualClock` + `StrictMock<MockAudioSystem> audio_`; `TearDown()` resets `panel_` (or equivalent `SettingsPanel` pointer) to `nullptr` before BOTH `MockUIBackend` AND `StrictMock<MockAudioSystem>` are destroyed. The `StrictMock<MockAudioSystem>` is the higher-risk destructor path: strict mocks fire unexpected-call errors on destruction if any unmatched call occurs during teardown, so `panel_` must be fully reset first.
+
+**Why `StrictMock` (not `NiceMock`) for `MockAudioSystem`**: The three volume-control test cases (`setMasterVolume`, `setMusicVolume`, `setSFXVolume`) exercise direct `IAudioSystem` calls made by the slider callbacks in `SettingsPanel`. These calls must be verified exactly — every slider movement must produce the correct `IAudioSystem` call with the correct gain value, and no unexpected `IAudioSystem` calls must occur. `NiceMock` would silently swallow unexpected calls, hiding regressions where a slider inadvertently triggers the wrong volume method or triggers it more times than expected. `StrictMock` enforces that only calls declared via `EXPECT_CALL` occur, making the fixture self-auditing for the volume-control path.
+
+**Three required test cases**:
+
+- `GraphicsTab_CountdownExpiry_AutoRevertsSettings` — Apply settings changes (stub a resolution change callback); advance `ManualClock` by 11 seconds (past the 10-second countdown); call `SettingsPanel::update()` after each advancement; verify that settings revert to pre-Apply values (the applied change is cancelled) — verifies the `IClock::nowSeconds()` countdown expiry path.
+
+- `GraphicsTab_ConfirmBeforeExpiry_SettingsRetained` — Apply settings changes; call confirm within 5 seconds (before 10-second expiry); advance `ManualClock` to 11 seconds; call `SettingsPanel::update()` after each advancement; verify settings are NOT reverted — verifies that player confirmation before expiry permanently applies the change.
+
+- `GraphicsTab_CountdownText_DecrementsEachSecond` — Apply settings changes; advance `ManualClock` one second at a time for 3 seconds; after each second advance, call `SettingsPanel::update()`; use `EXPECT_CALL(backend_, setElementText(countdownLabelHandle, HasSubstr("Reverting in"))).Times(AtLeast(3))` (placed before update calls) to verify the modal body label is updated with the correct per-second countdown text on each tick (ref: `architecture/ui-ux/settings-pause-menu.md` — "displayed numerically", "decrements each real second").
+
+- **`HUD` testability — undo countdown and density unlock preview** (tests in `tests/ui/undo_button_test.cpp` and `tests/ui/budget_detail_panel_test.cpp`). Required Phase 8 test cases:
+  - `UndoCountdown_AmberAt10xSpeed_ImmediatelyOnAction` *(Phase 8 deliverable)*: construct `HUD` with `ManualClock` at simulation speed 10×; take an undoable action; assert that the undo button label is amber immediately at action time (`t=0`), because the total undo window at 10× speed is ≤6 real seconds, meeting the amber-on-creation threshold. Verifies `hud-layout.md` rule: "set amber if `remainingSeconds < 5.0 || totalWindowSeconds <= 6.0`" — the `totalWindowSeconds <= 6.0` branch fires at 10× speed from the moment the action is taken.
+  - `DensityUnlockPreview_HiddenWhenSentinelReturned` *(Phase 8 deliverable)*: construct `HUD` with `MockCitySimulation` stubbed to return `SimulationConstants::kNoUnlockThreshold` (`−1.0f`) from `getNextUnlockThreshold()`; call `HUD::update()`; verify `IUIBackend::setElementVisible(densityUnlockHandle, false)` is called (element hidden) and no label text is set to `"−1"` or `"−1.0"`. Verifies the sentinel guard from `hud-layout.md`: the HUD MUST intercept `kNoUnlockThreshold` before any formatting occurs and hide the element unconditionally.
+- **`ISimulationRNG`** — injectable RNG interface for deterministic simulation testing: Service degradation (random building selection at −10% budget surplus) and any other simulation-layer random draws must use this interface rather than `std::rand()` or a global `std::mt19937`. Tests inject a `ManualRNG` that returns a preset sequence. **Source location**: `ISimulationRNG.h` lives in `src/interfaces/`; `ManualRNG` lives in `tests/simulation/ManualRNG.h` (used by simulation tests) — **not** in `src/` (it is a test double, never linked into production code).
 
   ```cpp
   class ISimulationRNG {
@@ -278,7 +389,7 @@ public:
   4. `ManualRNG_FloatSeqOutOfRange_ThrowsAtConstruction` — construct `ManualRNG({0}, {1.0f})` (one int, one float equal to 1.0f which is not in [0.0, 1.0)) → expect `std::out_of_range` to be thrown at construction time, confirming the inclusive-upper-bound guard fires.
   5. `ManualRNG_EmptyFloatSeq_ThrowsAtConstruction` — construct `ManualRNG({0}, {})` (non-empty int sequence, empty float sequence) → expect `std::invalid_argument` to be thrown at construction time, not at first `nextFloat()` call. This covers the `m_floatSeq.empty()` guard in the constructor body, which is distinct from the out-of-range float guard tested in case 4.
   6. `ManualRNG_NextInt_OutOfRange_ThrowsAtCallTime` — construct `ManualRNG({5}, {0.5f})` with a stored int value of 5; call `nextInt(0, 3)` (where `5 > 3`, so the stored value is outside `[min, max]`) → expect `std::out_of_range` to be thrown at call time (not at construction time). This validates the per-call range guard in `nextInt()`: the implementation throws immediately when the stored preset value falls outside the `[min, max]` bounds supplied by the caller, catching test-data bugs in both Debug and Release builds. Note: this test exercises the call-time range check only — the constructor does not validate int sequence values at construction (unlike float values which are range-checked at construction). Also verify the converse: a within-range call does NOT throw — construct `ManualRNG({2}, {0.5f})` and call `nextInt(0, 3)` → expect return value `2` and no exception.
-- **`ITerrainRNG`** — injectable RNG interface for deterministic terrain generation testing. **Source location**: `ITerrainRNG.h` lives in `src/terrain/`; `MockTerrainRNG` lives in `tests/terrain/mock_terrain_rng.h`. The `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` property test requires an injectable mock that counts re-seed calls:
+- **`ITerrainRNG`** — injectable RNG interface for deterministic terrain generation testing. **Source location**: `ITerrainRNG.h` lives in `src/interfaces/` (moved from `src/terrain/` in Phase 10b Feature 3); `MockTerrainRNG` lives in `tests/terrain/MockTerrainRNG.h` (renamed from `mock_terrain_rng.h` to CamelCase in Phase 10b Feature 3). The `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` property test requires an injectable mock that counts re-seed calls:
 
   ```cpp
   class ITerrainRNG {
@@ -288,11 +399,11 @@ public:
       virtual int   nextInt(int min, int max) = 0; // inclusive [min, max] — discrete terrain feature counts, tile selection
       virtual void  reseed(uint64_t seed) = 0;    // called when generator retries with a new seed
   };
-  // NAMING CONVENTION NOTE: Despite the `mock_` prefix, `MockTerrainRNG` does NOT use
-  // GMock macros (`MOCK_METHOD`). It is a manual stub with a real `std::mt19937_64` engine.
-  // The `mock_` prefix is used intentionally so the `'*/mock_*.h'` lcov exclusion pattern
-  // applies to this test-double header. The name `MockTerrainRNG` (not `ManualTerrainRNG`)
-  // is canonical — do not rename.
+  // NAMING CONVENTION NOTE: `MockTerrainRNG` does NOT use GMock macros (`MOCK_METHOD`).
+  // It is a manual stub with a real `std::mt19937_64` engine. The CamelCase `Mock` prefix
+  // (after Phase 10b Feature 3 rename from `mock_terrain_rng.h`) matches the `'*/Mock*.h'`
+  // lcov exclusion pattern added in Phase 10b. The name `MockTerrainRNG` (not
+  // `ManualTerrainRNG`) is canonical — do not rename.
   class MockTerrainRNG : public ITerrainRNG {
   public:
       explicit MockTerrainRNG(uint64_t seed) : m_rng(seed) {}
@@ -312,7 +423,7 @@ public:
   `TerrainGenerator` accepts `ITerrainRNG*` at construction; production code passes a `std::mt19937_64`-backed implementation. `MockTerrainRNG` is used in `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` to verify the reseed count stays ≤ 100. **Constructor signatures**: `TerrainGenerator(uint64_t seed)` for production use (constructs an internal `std::mt19937_64`-backed `ITerrainRNG`); `TerrainGenerator(uint64_t seed, ITerrainRNG* rng)` for testing (accepts injected `ITerrainRNG*` as non-owning pointer — the mock outlives the generator in all test fixtures).
 
   **CRITICAL — production constructor coverage**: The fixed-seed regression tests (`TerrainGenerator_OutputAlwaysMeetsConstraint`, `TerrainGenerator_OutputHasContiguousFlatArea`, `TerrainGenerator_PrimaryRegressionSeed_MeetsBothConstraints`) MUST use the single-argument production constructor `TerrainGenerator(seed)` — NOT the two-argument injectable form. Using the two-argument form in fixed-seed tests would leave the production constructor path (which constructs the internal `mt19937_64` RNG) with zero test coverage. The property test `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` uses the two-argument form with `MockTerrainRNG` (to count reseeds), but this does not cover the production constructor's RNG initialization code. The three fixed-seed `TEST_F` tests cover the production constructor path. **This division is mandatory**: property test → two-argument form with mock; fixed-seed regression tests → single-argument production form.
-- **`ICitySimulation`** — interface enabling `UIManager` to call simulation control methods without depending on the concrete `CitySimulation` class. **Source location**: `ICitySimulation.h` lives in `src/interfaces/` (alongside `ISimulationRNG.h`, `IClock.h`, and `ISimulationPauser.h` — the shared dependency-free header directory that both `src/simulation/` and `src/ui/` may include). `UIManager` must accept `ICitySimulation*` (not a concrete `CitySimulation*`) to enable headless testing. `MockCitySimulation` lives in `tests/ui/mock_city_simulation.h`.
+- **`ICitySimulation`** — interface enabling `UIManager` to call simulation control methods without depending on the concrete `CitySimulation` class. **Source location**: `ICitySimulation.h` lives in `src/interfaces/` (alongside `ISimulationRNG.h`, `IClock.h`, and `ISimulationPauser.h` — the shared dependency-free header directory that both `src/simulation/` and `src/ui/` may include). `UIManager` must accept `ICitySimulation*` (not a concrete `CitySimulation*`) to enable headless testing. `MockCitySimulation` lives in `tests/ui/MockCitySimulation.h`.
 
   ```cpp
   // src/interfaces/ICitySimulation.h
@@ -324,6 +435,10 @@ public:
   // those names do not exist and will cause a compile error.
   #include "simulation_types.h"
   #include "ISimulationPauser.h"
+
+  // BudgetDeficitWarn and SimNotification are defined in simulation_types.h (already included above):
+  //   struct BudgetDeficitWarn {};
+  //   using SimNotification = std::variant<std::monostate, BudgetDeficitWarn>;
 
   // ICitySimulation extends ISimulationPauser so that CitySimulation implements both interfaces
   // through a single concrete class. UIManager passes m_sim to NotificationManager as ICitySimulation*
@@ -337,7 +452,7 @@ public:
       virtual void setSpeed(SpeedMultiplier speed) = 0;
       // State-query methods used by UIManager panels:
       virtual bool isPaused() const = 0;
-      virtual SpeedMultiplier getSpeed() const = 0;
+      virtual SpeedMultiplier getSpeedMultiplier() const = 0;
 
       // Economy/treasury queries — called by HUD resource bar and Budget Detail Panel:
       virtual float getTreasuryBalance() const = 0;          // Called by HUD resource bar to display treasury balance
@@ -351,11 +466,10 @@ public:
       // Cross-reference: architecture/game-design/economy-model.md (getNextUnlockThreshold return semantics).
 
       // City rating — called by HUD to display star rating:
-      // Phase 1 stub: returns int [0, 5]. Phase 3 upgrades to CityRatingTier enum (Village/Town/
-      // City/Metropolis/Megalopolis) once CityRatingTier is added to simulation_types.h.
-      // See implementation/phase-3.md for the upgrade deliverable and game-progression-modes.md
-      // for the CityRatingTier enum definition.
-      virtual int getCityRating() const = 0;  // Phase 1: int [0,5]; Phase 3 upgrades to CityRatingTier
+      // Phase 3 upgrade complete: returns CityRatingTier (Village/Town/City/Metropolis/Megalopolis).
+      // CityRatingTier is defined in simulation_types.h.
+      // See architecture/game-design/game-progression-modes.md for tier definitions.
+      virtual CityRatingTier getCityRating() const = 0;
 
       // Demand pressure — called by HUD demand pressure bar per budget tick.
       // Returns the city-wide effective demand for the given zone type as a float in [0.0, 1.0].
@@ -404,11 +518,44 @@ public:
       //       bool unlock_flags[6];                        // true if the corresponding tier is unlocked
       //   };
       virtual DensityUnlockState getDensityUnlockState() const = 0;
+
+      // Pending-notification poll — called by UIManager::update() once per frame to drain the
+      // simulation's outbound event queue. Returns the next pending SimNotification, or
+      // std::monostate if no notification is queued.
+      //
+      // BudgetDeficitWarn semantics: enqueued by CitySimulation once per budget tick when
+      // budget_surplus_pct ≤ −0.25 (the forced-loan warning threshold at −25% deficit; see
+      // architecture/game-design/economy-model.md). It is NOT enqueued for minor deficits
+      // where budget_surplus_pct > −0.25 (deficits less severe than 25%). This ensures the
+      // event is only fired as part of the bankruptcy-warning system, not for everyday
+      // budget imbalances.
+      //
+      // UIManager reads getConsecutiveDeficitMonths() via DIRECT POLLING each frame in UIManager::update()
+      // (NOT triggered by BudgetDeficitWarn receipt). UIManager tracks m_lastDeficitMonths; the CRISIS
+      // stinger fires when currentMonths == 2 AND m_lastDeficitMonths < 2. BudgetDeficitWarn receipt
+      // determines which warning toast to dispatch only.
+      //
+      // Type aliases defined in simulation_types.h (ICitySimulation.h already includes it):
+      //   struct BudgetDeficitWarn {};  // tag type — no payload; use getConsecutiveDeficitMonths()
+      //                                  // for context
+      //   using SimNotification = std::variant<std::monostate, BudgetDeficitWarn>;
+      //   // std::monostate = no notification queued; BudgetDeficitWarn = deficit event pending.
+      //   // Additional notification types will extend SimNotification in later phases.
+      virtual SimNotification pollPendingNotification() = 0;
+
+      // Outstanding municipal bond uses — returns the number of emergency bond issues remaining
+      // for the current game session. Decremented by 1 each time the player accepts a forced loan.
+      // Difficulty tiers: Easy = 3, Normal = 2, Hard = 1. Returns 0 when all uses are exhausted.
+      // ModalDialog grays the Emergency Municipal Bond option and calls
+      //   setElementEnabled(bondButtonHandle, false)
+      // when this returns 0.
+      // Cross-reference: architecture/game-design/economy-model.md (Emergency Municipal Bond section).
+      virtual int getOutstandingBondUses() const = 0;
   };
   ```
 
   ```cpp
-  // tests/ui/mock_city_simulation.h
+  // tests/ui/MockCitySimulation.h
   #include "gmock/gmock.h"
   #include "src/interfaces/ICitySimulation.h"
 
@@ -417,7 +564,7 @@ public:
       MOCK_METHOD(void, setPaused, (bool paused), (override));
       MOCK_METHOD(void, setSpeed, (SpeedMultiplier speed), (override));
       MOCK_METHOD(bool, isPaused, (), (const, override));
-      MOCK_METHOD(SpeedMultiplier, getSpeed, (), (const, override));
+      MOCK_METHOD(SpeedMultiplier, getSpeedMultiplier, (), (const, override));
 
       // Economy/treasury queries:
       MOCK_METHOD(float, getTreasuryBalance, (), (const, override));          // Called by HUD resource bar to display treasury balance
@@ -428,8 +575,8 @@ public:
       // Returns kNoUnlockThreshold (-1.0f) when all tiers unlocked; positive dollar value otherwise.
       // Tests that exercise the "all tiers unlocked" branch must return SimulationConstants::kNoUnlockThreshold.
 
-      // City rating (Phase 1: returns int [0,5]; Phase 3 upgrades to CityRatingTier):
-      MOCK_METHOD(int, getCityRating, (), (const, override));  // Phase 3 changes to CityRatingTier
+      // City rating — CityRatingTier (Phase 3 upgrade complete):
+      MOCK_METHOD(CityRatingTier, getCityRating, (), (const, override));
 
       // Demand pressure — UI display aggregate. Returns the post-floor, post-bootstrap, post-combination
       // effective_demand_factor for the given zone type. Used by HUD demand pressure bars.
@@ -457,6 +604,23 @@ public:
       // Density-unlock state accessor. Returns consecutive-month counters and unlock flags for all 6
       // density tiers. Cross-reference: implementation/phase-11.md (getDensityUnlockState deliverable).
       MOCK_METHOD(DensityUnlockState, getDensityUnlockState, (), (const, override));
+
+      // Notification polling — drains simulation event queue. Returns next SimNotification or
+      // std::monostate when queue is empty.
+      // Test usage: ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(BudgetDeficitWarn{}));
+      // Note: BudgetDeficitWarn{} is implicitly convertible to SimNotification because
+      // SimNotification = std::variant<std::monostate, BudgetDeficitWarn>.
+      MOCK_METHOD(SimNotification, pollPendingNotification, (), (override));
+
+      // Outstanding bond uses — remaining bond-issue count per difficulty (Easy=3, Normal=2, Hard=1).
+      // Returns 0 when exhausted; ModalDialog grays the Emergency Municipal Bond option.
+      MOCK_METHOD(int, getOutstandingBondUses, (), (const, override));
+
+      // Phase 11d visual wiring query methods — added as Day-One Commit prerequisite:
+      MOCK_METHOD((std::vector<AgentState>), getAgentPositions, (), (const, override));
+      MOCK_METHOD((std::vector<IntersectionSignalState>), getIntersectionSignalStates, (), (const, override));
+      MOCK_METHOD((std::vector<RoadSegmentSpeed>), getRoadSegmentSpeeds, (), (const, override));
+      MOCK_METHOD((std::vector<ServiceCoverageTile>), getServiceCoverage, (), (const, override));
   };
   ```
 
@@ -481,23 +645,181 @@ struct CameraParams {
     float farClip{3000.0f};    // far clip plane distance in metres (covers 1024×1024 map + sky)
 };
 
+// ScreenRect — plain-old-data screen bounding rectangle in physical pixels.
+// Defined in IRenderer.h alongside IRenderer to keep IRenderer.h Irrlicht-free.
+// Do NOT use irr::core::rect<irr::s32> at any call site crossing the IRenderer boundary.
+struct ScreenRect { int x{0}, y{0}, w{0}, h{0}; };
+
 class IRenderer {   // main-thread-only
 public:
     virtual ~IRenderer() = default;
-    virtual void          beginFrame() = 0;              // main-thread-only
-    virtual void          endFrame() = 0;                // main-thread-only
-    virtual void          drawScene() = 0;               // main-thread-only
-    virtual TextureHandle loadTexture(const std::string& path) = 0;  // main-thread-only; returns kInvalidTexture on failure
-    virtual void          setCamera(const CameraParams& p) = 0;       // main-thread-only
+    virtual void          beginFrame() = 0;
+    virtual void          endFrame() = 0;
+    virtual void          drawScene() = 0;
+    virtual TextureHandle loadTexture(const std::string& path) = 0;
+    virtual void          setCamera(const CameraParams& p) = 0;
+    virtual void          rebuildTerrainChunk(const TerrainChunkRebuildParams& params) = 0;
+
+    // Phase 9b additions — world interaction:
+    virtual bool          pickTerrainTile(int screenX, int screenY,
+                                          int& tileX, int& tileZ) const = 0;
+    virtual void          setTileHoverHighlight(int tileX, int tileZ, int footprintSize = 1) = 0;
+    virtual void          setZoneOverlay(int mapTilesX, int mapTilesZ,
+                                         const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) = 0;
+    virtual ScreenRect    getTileScreenBounds(int tileX, int tileZ) const = 0;
+
+    // Phase 10 addition — listener position query for pre-acquisition distance culls.
+    // Returns the current camera/listener position in world space as a vec3.
+    // Used by CitySimulation::tick() to perform the 80 m pre-acquisition distance cull
+    // for sfx_intersection_tick before calling IAudioSystem::playPositionalSound().
+    // IrrlichtRenderer::getListenerPosition() returns the position component of the last
+    // CameraParams passed to setCamera(). MockRenderer::getListenerPosition() returns
+    // vec3{0,0,0} by default (suitable for distance-cull tests that set a specific value
+    // via ON_CALL).
+    virtual vec3          getListenerPosition() const = 0;
+
+    // Phase 10 additions — building mesh spawning and road mesh rendering.
+    // Called by CitySimulation after successful placeZone/placeRoad/placeServiceBuilding/demolishTile.
+    // IrrlichtRenderer implementation: loads .b3d via BuildingAssetLoader, creates scene node via
+    // SceneEntityManager::spawnBuilding(), registers with LODNode system.
+    // No-op on empty assetBaseName or missing .b3d file (log warning, do not assert).
+    // MockRenderer: MOCK_METHOD stubs; no default ON_CALL action (returns void).
+    // See phase-10.md City Rendering deliverables section for full wiring contract.
+    virtual void          placeBuildingMesh(int tileX, int tileZ, const std::string& assetBaseName) = 0;
+    virtual void          removeBuildingMesh(int tileX, int tileZ) = 0;
+    virtual void          placeRoadMesh(int tileX, int tileZ) = 0;
+    virtual void          removeRoadMesh(int tileX, int tileZ) = 0;
+    // type is ServiceBuildingType enum value: PowerPlant=0, WaterTower=1, FireStation=2, PoliceStation=3.
+    // Asset path: assets/3d/buildings/svc_<type>_lod0.b3d per 3d-model-standards.md naming convention.
+    virtual void          placeServiceBuildingMesh(int tileX, int tileZ, ServiceBuildingType type) = 0;
+    virtual void          removeServiceBuildingMesh(int tileX, int tileZ) = 0;
+
+    // Phase 10 — Vehicle rendering API (pre-agent, manually-placed vehicles).
+    virtual void          placeVehicle(uint32_t vehicleId, const std::string& assetName,
+                                       float worldX, float worldY, float worldZ, float yawDegrees) = 0;
+    virtual void          moveVehicle(uint32_t vehicleId,
+                                      float worldX, float worldY, float worldZ, float yawDegrees) = 0;
+    virtual void          removeVehicle(uint32_t vehicleId) = 0;
+
+    // Phase 10 — Multi-tile placement preview.
+    // Phase 11d extends to two-list signature: freeTiles (green) + blockedTiles (red).
+    // blockedTiles defaults to {} at call sites but MockRenderer requires the full signature.
+    virtual void          setTilePlacementPreview(const std::vector<std::pair<int,int>>& freeTiles,
+                                                   uint32_t freeArgb,
+                                                   const std::vector<std::pair<int,int>>& blockedTiles) = 0;
+
+    // Phase 11d — Traffic agent rendering API.
+    // These coexist with Phase 10 placeVehicle/moveVehicle/removeVehicle; both sets must be present.
+    // AgentHandle is defined in simulation_types.h (not in IRenderer.h) to avoid ODR violations.
+    virtual void          spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone) = 0;
+    virtual void          moveVehicleAgent(AgentHandle handle, int tileX, int tileZ, float headingDeg) = 0;
+    virtual void          despawnVehicleAgent(AgentHandle handle) = 0;
+
+    // Phase 11d — Traffic signal visual state.
+    // SignalPhase is defined in simulation_types.h: enum class SignalPhase { Green, Red };
+    virtual void          setIntersectionSignalState(int tileX, int tileZ, SignalPhase phase) = 0;
+
+    // Phase 11d — Service coverage radius overlay.
+    // showServiceCoverageOverlay: renders wireframe circle (or BFS tile highlight for PowerPlant)
+    //   at the building's coverage radius. degraded=true halves the radius.
+    // hideServiceCoverageOverlay: removes the overlay. Called on Inspector close.
+    virtual void          showServiceCoverageOverlay(int tileX, int tileZ,
+                                                      ServiceBuildingType type, bool degraded) = 0;
+    virtual void          hideServiceCoverageOverlay() = 0;
 };
 
-// Canonical IAudioSystem — 11 methods. Authoritative definition in audio-architecture/audio-system.md.
+// MockRenderer — GMock implementation of IRenderer (27 methods as of Phase 11d).
+// Method count: 5 base (beginFrame/endFrame/drawScene/loadTexture/setCamera) +
+//   1 (rebuildTerrainChunk) + 4 Phase 9b (pickTerrainTile/setTileHoverHighlight/setZoneOverlay/
+//   getTileScreenBounds) + 1 Phase 10 (getListenerPosition) +
+//   6 Phase 10 rendering (placeBuildingMesh/removeBuildingMesh/placeRoadMesh/removeRoadMesh/
+//   placeServiceBuildingMesh/removeServiceBuildingMesh) +
+//   3 Phase 10 vehicle (placeVehicle/moveVehicle/removeVehicle) +
+//   1 Phase 10 preview (setTilePlacementPreview — Phase 11d extended to two-list signature) +
+//   6 Phase 11d (spawnVehicleAgent/moveVehicleAgent/despawnVehicleAgent/
+//   setIntersectionSignalState/showServiceCoverageOverlay/hideServiceCoverageOverlay) = 27 total.
+// Note: getListenerPosition was added in Phase 10 context (already counted above) —
+//   Phase 11d Deliverable 0 originally listed it as one of 7; it was pre-landed in Phase 10.
+//
+// Phase 11d additions (6 new MOCK_METHOD stubs — must be present in MockRenderer after
+// Deliverable 0 Day-One Commit; prerequisite for Deliverables 3d and 4c test authoring):
+//   spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone) → void
+//   moveVehicleAgent(AgentHandle handle, int tileX, int tileZ, float headingDeg) → void
+//   despawnVehicleAgent(AgentHandle handle) → void
+//   setIntersectionSignalState(int tileX, int tileZ, SignalPhase phase) → void
+//   showServiceCoverageOverlay(int tileX, int tileZ, ServiceBuildingType type, bool degraded) → void
+//   hideServiceCoverageOverlay() → void
+// Note: spawnVehicleAgent/moveVehicleAgent/despawnVehicleAgent coexist with Phase 10's
+//   placeVehicle/moveVehicle/removeVehicle — both sets of methods must be present.
+// Note: setTilePlacementPreview extended from (tiles, argb) to (freeTiles, freeArgb, blockedTiles)
+//   in Phase 11d Deliverable 5d. blockedTiles defaults to {} at call sites but MockMethod
+//   requires the full three-parameter signature.
+// Source location: tests/simulation/MockRenderer.h
+// Shared across simulation_tests, ui_tests (via tests/simulation/ include path).
+//
+// Default ON_CALL actions (set in MockRenderer constructor):
+//   loadTexture               — returns incrementing non-zero integer
+//   pickTerrainTile           — returns false (no terrain hit; tileX/tileZ unchanged)
+//   getTileScreenBounds       — returns ScreenRect{} (zero-initialised)
+//   getListenerPosition       — returns vec3{0.0f, 0.0f, 0.0f} (origin; override per-test for
+//                               distance-cull scenarios via ON_CALL(renderer_, getListenerPosition())
+//                               .WillByDefault(Return(vec3{x, y, z})))
+//   placeBuildingMesh         — no default action (void return; NiceMock ignores; StrictMock
+//   removeBuildingMesh          requires explicit EXPECT_CALL for each call site exercised by test)
+//   placeRoadMesh             — no default action (same rule as placeBuildingMesh)
+//   removeRoadMesh            — no default action
+//   placeServiceBuildingMesh  — no default action
+//   removeServiceBuildingMesh — no default action
+//   spawnVehicleAgent         — no return value (void)
+//   moveVehicleAgent          — no default action (void return)
+//   despawnVehicleAgent       — no default action (void return)
+//   setIntersectionSignalState — no default action (void return)
+//   showServiceCoverageOverlay — no default action (void return)
+//   hideServiceCoverageOverlay — no default action (void return)
+//   setTilePlacementPreview   — no default action (void return; three-parameter form since Phase 11d)
+//
+// IMPORTANT — CitySimulationUnitTest uses StrictMock<MockRenderer>. After Phase 10 wiring,
+// any test that exercises placeZone(), placeRoad(), placeServiceBuilding(), demolishTile(),
+// or doDensityUnlockTick() will receive calls to the 6 rendering methods above.
+// Each such test MUST declare EXPECT_CALL stubs for every rendering method call triggered
+// by the code path under test. Alternatively, switch the renderer_ fixture member to
+// NiceMock<MockRenderer> for tests where rendering method calls are incidental (not the
+// focus of the assertion). See StrictMock Expected Call Matrix below for canonical patterns.
+//
+// Phase 9b stub usage in WorldInteractionTest:
+//   EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+//       .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
+//   EXPECT_CALL(renderer_, setTileHoverHighlight(3, 4, _)).Times(AtLeast(1));
+//   EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).WillOnce(SaveArg<2>(&capturedMap));
+//
+// IMPORTANT — StrictMock in WorldInteractionTest (all non-mock-configured IRenderer methods):
+// WorldInteractionTest uses StrictMock<MockRenderer>. EVERY IRenderer call made by the
+// production code under test must be covered by an EXPECT_CALL or ON_CALL. The methods
+// beginFrame, endFrame, drawScene, setCamera, rebuildTerrainChunk are NOT called during
+// UIManager::onEvent() or UIManager::update() — they are render-pass methods called from
+// the main game loop outside UIManager. Tests that construct a real UIManager and send
+// events do NOT need EXPECT_CALL stubs for these five methods.
+//
+// The four Phase 9b methods (pickTerrainTile, setTileHoverHighlight, setZoneOverlay,
+// getTileScreenBounds) ARE called from UIManager::onEvent() during tests. Each test
+// must declare EXPECT_CALL for each of these that the production code exercises.
+//
+// The Phase 11d method getListenerPosition() IS called from CitySimulation::tick() during
+// the sfx_intersection_tick 80 m pre-cull. Simulation tests that exercise tick() with
+// traffic signals must either set ON_CALL for getListenerPosition() or use NiceMock.
+
+// Canonical IAudioSystem — 18 methods (Phase 10 added setMusicIntensity; Phase 11d added acquireVehicleEnginePair, releaseVehicleEnginePair, updateVehicleAudio). Authoritative definition in audio-architecture/audio-system.md.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType, SimSpeed,
 // SoundPriority, TimeOfDay, vec3, CameraState). Never expose ALuint, ALfloat, or AL_* constants through this interface.
 // Forward declarations (defined in game-domain headers, not OpenAL headers):
 //   struct vec3;              // 3-component float vector (X, Y, Z)
 //   struct CameraState;       // position (vec3), forward (vec3), up (vec3)
-//   enum class SimSpeed;
+//   // NOTE: SimSpeed is a type alias (using SimSpeed = SpeedMultiplier) — DO NOT forward-declare
+//   //   as "enum class SimSpeed;" (type aliases cannot be forward-declared; will cause compile error).
+//   //   IAudioSystem.h must #include "simulation_types.h" instead.
+//   // NOTE: ZoneType (enum class: Residential, Commercial, Industrial) is also from simulation_types.h
+//   //   (added Phase 11d for acquireVehicleEnginePair). Since simulation_types.h is already included
+//   //   for SimSpeed, ZoneType is automatically available — do NOT add a separate forward declaration.
 //   enum class StingerType;
 //   enum class SoundPriority; // LOW=0, NORMAL=1, HIGH=2, CRITICAL=3 — controls SFX pool eviction
 //   enum class TimeOfDay;     // DAY, DUSK, NIGHT, DAWN — drives ambient bed and music intensity
@@ -555,10 +877,33 @@ public:
     // Responsibilities: advance occlusion raycast budget, push time-of-day transitions,
     // and forward any pending crossfade or zone-layer source updates.
     virtual void update(float realDeltaSeconds) = 0;
+
+    // Volume control — see audio-system.md Volume Control API section.
+    // Phase 8 creates the Settings > Audio slider UI elements; Phase 9 wires them to AudioSystem.
+    virtual void setMasterVolume(float gain) = 0;
+    virtual void setMusicVolume(float gain) = 0;
+    virtual void setSFXVolume(float gain) = 0;
+
+    // Set the music intensity tier driven by live simulation state (Phase 10).
+    // Threshold conditions: CALM (budget_surplus_pct >= 0%), GROWTH (net pop positive),
+    // CRISIS (consecutive_deficit_months >= 2). Priority: CRISIS > GROWTH > CALM.
+    virtual void setMusicIntensity(MusicIntensity intensity) = 0;
+
+    // Phase 11d — vehicle engine audio pair management. Returns source-pool indices for
+    // idle and move engine loops assigned to one traffic agent. ZoneType selects the
+    // vehicle subtype (Residential → car 1.0×, Commercial → bus 0.85×, Industrial → truck 0.85×).
+    virtual std::pair<int,int> acquireVehicleEnginePair(ZoneType zone) = 0;
+    virtual void releaseVehicleEnginePair(int idleIdx, int moveIdx) = 0;
+    // Per-frame audio state push (Phase 11d). Called by main.cpp for each active vehicle
+    // after getAgentPositions() and before drawScene(). AudioSystem applies crossblend,
+    // pitch, and AL_POSITION on the audio thread.
+    virtual void updateVehicleAudio(int idleIdx, int moveIdx,
+                                    float speedFraction,
+                                    float worldX, float worldZ) = 0;
 };
 
-// MockAudioSystem — GMock implementation of IAudioSystem's 11 methods.
-// Source location: tests/simulation/mock_audio_system.h
+// MockAudioSystem — GMock implementation of IAudioSystem's 18 methods.
+// Source location: tests/simulation/MockAudioSystem.h
 // Shared across simulation_tests, ui_tests, audio_tests CMake targets (header-only).
 class MockAudioSystem : public IAudioSystem {
 public:
@@ -573,6 +918,13 @@ public:
     MOCK_METHOD(void,        setTimeOfDay,          (TimeOfDay tod),                             (override));
     MOCK_METHOD(void,        transitionToGameplay,  (),                                          (override));
     MOCK_METHOD(void,        update,                (float realDeltaSeconds),                    (override));
+    MOCK_METHOD(void,        setMasterVolume,       (float gain),                                (override));
+    MOCK_METHOD(void,        setMusicVolume,        (float gain),                                (override));
+    MOCK_METHOD(void,        setSFXVolume,          (float gain),                                (override));
+    MOCK_METHOD(void,        setMusicIntensity,     (MusicIntensity intensity),                   (override));
+    MOCK_METHOD((std::pair<int,int>), acquireVehicleEnginePair, (ZoneType zone),                 (override));
+    MOCK_METHOD(void,        releaseVehicleEnginePair, (int idleIdx, int moveIdx),               (override));
+    MOCK_METHOD(void,        updateVehicleAudio, (int, int, float, float, float),                (override));
 };
 ```
 
@@ -591,19 +943,189 @@ public:
 
   **Canonical name note**: The exact test suite name `AudioSmokeTest` and case name `MockAudioSystem_InstantiatesCleanly` are canonical. Phase 3 deliverable and Phase 3 exit criteria must reference this exact GTest name. CTest filter: `-R MockAudioSystem_InstantiatesCleanly`. Do not use `TEST(MockAudioSmoke, Instantiates)` or any other form — name drift causes CI `-R` filter expressions to silently match nothing.
 
+**Phase 7 `audio_tests` canonical test names** — the following canonical names are mandated for the Phase 7 audio unit tests added via `target_sources(audio_tests ...)`. CTest `-R` filters reference these names exactly; name drift causes filter expressions to silently match nothing.
+
+| Test Suite | Test Case | Source File |
+|---|---|---|
+| `DuckStateMachineTest` | `IdleToReleasing_CompletesInCorrectDuration` | `tests/audio/duck_state_machine_test.cpp` |
+| `DuckStateMachineTest` | `InterruptedRelease_RampsFromCurrentGain` | `tests/audio/duck_state_machine_test.cpp` |
+| `DuckStateMachineTest` | `UsesWallClockDt_NotFixedIncrement` | `tests/audio/duck_state_machine_test.cpp` |
+| `DuckStateMachineTest` | `FirstWake_DtIsNotEpochSized` | `tests/audio/duck_state_machine_test.cpp` |
+| `OcclusionSmoothingTest` | `RecycledSlot_ResetsGainToOne` | `tests/audio/occlusion_smoothing_test.cpp` |
+| `AudioThreadTest` | `AbsentThreadLocalContext_ConstructorThrows` | `tests/audio/audio_thread_test.cpp` |
+| `OggHeaderValidationTest` | `ValidPlaceholder_ReturnsZero` | `tests/audio/ogg_header_validation_test.cpp` |
+| `OggHeaderValidationTest` | `MusicStem_IsStereo_44100Hz` | `tests/audio/ogg_header_validation_test.cpp` |
+| `OggHeaderValidationTest` | `ZoneLoop_IsMono_44100Hz` | `tests/audio/ogg_header_validation_test.cpp` |
+
+All Phase 7 audio tests carry label `unit` and run without a display device. CTest filter for all Phase 7 audio tests: `-R "DuckStateMachineTest|OcclusionSmoothingTest|AudioThreadTest|OggHeaderValidationTest"`.
+
+**Phase 10 `audio_tests` canonical test names** — the following canonical names are mandated for the Phase 10 audio unit tests added via `target_sources(audio_tests ...)`. CTest `-R` filters reference these names exactly; name drift causes filter expressions to silently match nothing.
+
+| Test Suite | Test Case | Source File |
+|---|---|---|
+| `CrossfadeTest` | `Crossfade_InterruptedFormula_NoDomainErrorAtBoundary` | `tests/audio/crossfade_interrupted_formula_test.cpp` |
+| `StingerTest` | `StingerMilestone_OnlyAtCityRatingTransition_NotRawPopulation` | `tests/audio/stinger_milestone_test.cpp` |
+| `AudioStreamTest` | `AudioStream_BarBoundary_UsesConsistentBuffersQueuedPerWake` | `tests/audio/audio_stream_bar_boundary_test.cpp` |
+| `AudioStreamTest` | `AudioStream_BarBoundary_StreamStart_NoFalseFire` | `tests/audio/audio_stream_bar_boundary_test.cpp` |
+| `NotificationSFXTest` | `NotificationSFX_EFXBypass_DirectFilterSetToNull` | `tests/audio/notification_sfx_efx_bypass_test.cpp` |
+
+All Phase 10 audio tests carry label `unit` and run without a display device or real audio device (headless CI via `IAlcFunctions` seam and `MockAudioSystem`). CTest filter for all Phase 10 audio tests: `-R "CrossfadeTest|StingerTest|AudioStreamTest|NotificationSFXTest"`.
+
+**Phase 10 `ui_tests` canonical test names** — the following canonical names are mandated for the Phase 10 UI unit tests. These extend the existing `notification_system_test.cpp` and are registered under the `ui_tests` CMake target (label `unit`). CTest `-R` filters reference these names exactly.
+
+| Test Suite | Test Case | Source File |
+|---|---|---|
+| `NotificationManagerTest` | `NotificationSFX_ToastVisible_UIToastSoundFires` | `tests/ui/notification_system_test.cpp` |
+
+**`NotificationSFX_ToastVisible_UIToastSoundFires` test contract** — fixture setup: construct `NotificationManager` with `NiceMock<MockUIBackend>` + `NiceMock<MockCitySimulation>` + `ManualClock` + `NiceMock<MockAudioSystem>` (the fourth argument added in Phase 10). Place `EXPECT_CALL(audio_, playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f)).Times(1)` BEFORE posting any toast. Post a Normal toast via `postNormal()`. Advance `ManualClock` if needed for the toast to become visible (e.g. if the queue was at capacity). Verify the expectation — `UI_TOAST` must fire exactly once when the toast transitions from queued to visible, NOT at enqueue time when the queue is at capacity. **Negative assertion variant**: post a second Normal toast while the first toast occupies the only available visible slot (Normal max-visible = 1 when 2 CRITICAL toasts are visible); verify `playSound(UI_TOAST, ...)` is NOT called until the slot opens. **Mock policy**: `NiceMock<MockAudioSystem>` (not `StrictMock`) because the `NotificationManager` constructor calls no audio methods at construction time, and the test focus is on the toast-visible trigger, not on suppressing all unexpected calls. **CTest filter**: `-R NotificationSFX_ToastVisible_UIToastSoundFires`.
+
+**Phase 10 `simulation_tests` canonical test names** — the following canonical names are mandated for the Phase 10 simulation unit tests. These are added to `simulation_tests` via `target_sources(simulation_tests ...)`.
+
+| Test Suite | Test Case | Source File |
+|---|---|---|
+| `AdaptiveMusicIntensityTest` | `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` | `tests/simulation/adaptive_music_intensity_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_PlaceZone_PlacesBuildingMesh` | `tests/simulation/city_simulation_render_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_PlaceRoad_PlacesRoadMesh` | `tests/simulation/city_simulation_render_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_PlaceServiceBuilding_PlacesServiceMesh` | `tests/simulation/city_simulation_render_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_DemolishZone_RemovesBuildingMesh` | `tests/simulation/city_simulation_render_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_DemolishRoad_RemovesRoadMesh` | `tests/simulation/city_simulation_render_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_DensityUpgrade_SwapsBuildingMesh` | `tests/simulation/city_simulation_render_test.cpp` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_MusicIntensity_CRISIS_OnDeficit` | `tests/simulation/city_simulation_render_test.cpp` |
+
+`CitySimulationRenderTest` fixture uses `NiceMock<MockSimRenderer>` (test-local standalone interface) and `NiceMock<MockMusicIntensityReceiver>`, driven by `CitySimulationRenderStub`. Does NOT use `MockRenderer`/`CitySimulation` — the stub models the render-dispatch protocol without the full simulation dependency chain. All `CitySimulationRenderTest` cases carry label `unit`. CTest filter: `-R CitySimulationRenderTest`.
+
+**`Crossfade_InterruptedFormula_NoDomainErrorAtBoundary` test contract** — this test verifies that the interrupted crossfade `t_offset` formula `t_offset=(2/π)×arccos(current_gain_out)` returns 0.0 when `current_gain_out=1.0` and 1.0 when `current_gain_out=0.0`, with no `arccos` domain error at either boundary.
+
+**Fixture**: No mock or device required — the formula is a pure mathematical function extracted to a static helper (or tested via a friend fixture). No audio thread construction needed.
+
+**Test assertions**:
+
+1. `EXPECT_NEAR(computeTOffset(1.0f), 0.0f, 1e-5f)` — at gain_out=1.0 (full outgoing gain), interruption at the very start → t_offset=0 (restart crossfade from scratch).
+2. `EXPECT_NEAR(computeTOffset(0.0f), 1.0f, 1e-5f)` — at gain_out=0.0 (outgoing fade complete), interruption at the very end → t_offset=1 (skip directly to end).
+3. No `std::domain_error`, `NaN`, or `Inf` at either boundary value.
+
+**Mock policy**: None required (pure formula test).
+
+**Source file**: `tests/audio/crossfade_interrupted_formula_test.cpp`
+
+**CTest filter**: `-R Crossfade_InterruptedFormula_NoDomainErrorAtBoundary`
+
+**`StingerMilestone_OnlyAtCityRatingTransition_NotRawPopulation` test contract** — this test
+verifies that `UIManager::onCityRatingTransition()` calls `m_audio->triggerStinger(StingerType::MILESTONE)` at City Rating tier transitions and does NOT call it at raw population milestones that do not coincide with a tier transition.
+
+**Fixture**: `StrictMock<MockAudioSystem>` injected into `UIManager`. The test directly calls
+`UIManager::onCityRatingTransition(CityRating::TOWN)` (or equivalent) to trigger the tier
+transition event; it also directly calls (or simulates) a population update reaching 100K without
+a City Rating transition to verify no stinger fires for raw population milestones. No real
+`CitySimulation` instance is required — the callback is invoked directly on `UIManager`.
+
+**Test assertions**:
+
+1. `EXPECT_CALL(audio, triggerStinger(StingerType::MILESTONE)).Times(1)` — fires at Village→Town at 1K population (City Rating transition).
+2. `EXPECT_CALL(audio, triggerStinger(_)).Times(0)` — population reaches 100K but no City Rating transition occurs; no stinger fires.
+
+**Mock policy**: `StrictMock` (unit test with exact call-count expectations on `triggerStinger`).
+
+**Source file**: `tests/audio/stinger_milestone_test.cpp`
+
+**CTest filter**: `-R StingerMilestone_OnlyAtCityRatingTransition_NotRawPopulation`
+
+**`AudioStream_BarBoundary_*` test isolation note** — the two `AudioStreamTest` cases test the
+bar-boundary formula in isolation. The `AL_BUFFERS_QUEUED` read-once-per-wake ordering and the
+`computeSamplesPlayed()` / `computeNextBarBoundary()` formula are extracted to testable static
+helper functions (or non-virtual members testable via a friend fixture). The `IAlcFunctions` seam
+is used to mock `alGetSourcei(AL_BUFFERS_QUEUED)` return values, exercising the formula without
+a real audio device. Neither test constructs an audio thread or streaming loop.
+
+**`NotificationSFX_EFXBypass_DirectFilterSetToNull` test contract** — this test verifies that all
+11 EFX-bypassed SFX assets (10 non-positional + 1 positional exception) have
+`alSourcei(src, AL_DIRECT_FILTER, AL_FILTER_NULL)` called on the acquired OpenAL source before
+playback, and that the 2 positional alert SFX are explicitly excluded from the bypass.
+
+**EFX bypass list (10 non-positional assets — bypass REQUIRED)**:
+
+- `ui_click`
+- `ui_toast`
+- `ui_menu_open`
+- `ui_menu_close`
+- `sfx_power_out`
+- `sfx_water_out`
+- `sfx_budget_warn`
+- `sfx_loan_issued`
+- `sfx_zone_upgrade`
+- `sfx_service_degrade`
+
+**EFX bypass positional exception (1 positional asset — bypass REQUIRED despite world-space position)**:
+
+- `sfx_earthworks` — mono positional (`AL_SOURCE_RELATIVE = AL_FALSE`, world-space source at tile
+  centroid), but `AL_DIRECT_FILTER: AL_FILTER_NULL` is required because construction occurs on
+  open, unoccluded tiles (design choice per `v1-audio-asset-manifest.md`). `AL_SOURCE_RELATIVE`
+  must NOT be changed to `AL_TRUE` — the sound remains world-space positional.
+
+**EFX bypass exclusion list (2 positional alert assets — bypass MUST NOT be applied)**:
+
+- `sfx_fire_alert` — mono positional, CRITICAL priority; benefits from EFX occlusion at building
+  location; `AL_DIRECT_FILTER` must NOT be set to `AL_FILTER_NULL`.
+- `sfx_police_alert` — mono positional, CRITICAL priority; same rationale as `sfx_fire_alert`.
+
+**Fixture and playback path**: The test uses a minimal real `AudioSystem` instance constructed
+with a headless ALC context (`EDT_NULL` / null OpenAL device) and a `MockAlcFunctions` (via
+`IAlcFunctions` seam) that captures all `alSourcei(src, AL_DIRECT_FILTER, ...)` calls. To drive
+the playback path for each SFX asset, the test calls `AudioSystem::playUISound(SfxId)` for UI
+sounds, `AudioSystem::playNotificationSound(SfxId)` for notification-category SFX, and
+`AudioSystem::playPositionalSound(SFX_EARTHWORKS, position)` for `sfx_earthworks`. The captured
+calls are checked against the bypass list after each play invocation.
+
+**Test assertions**:
+
+1. For each of the 10 non-positional assets in the EFX bypass list: verify that
+   `alSourcei(src, AL_DIRECT_FILTER, AL_FILTER_NULL)` is called on the acquired source before
+   `alSourcePlay()`. The test injects a mock or spy on the AL function table (via the
+   `IAlcFunctions` seam or equivalent AL-function injection) to capture `alSourcei` calls.
+2. For `sfx_earthworks` (positional exception): verify that `alSourcei(src, AL_DIRECT_FILTER,
+   AL_FILTER_NULL)` is called before `alSourcePlay()`, and that `AL_SOURCE_RELATIVE` is NOT set
+   to `AL_TRUE` (the source must remain world-space positional).
+3. For `sfx_fire_alert` and `sfx_police_alert`: verify that `alSourcei(src, AL_DIRECT_FILTER,
+   AL_FILTER_NULL)` is NOT called on their acquired sources — positional sounds must not bypass
+   EFX occlusion.
+
+**Mock policy**: `NiceMock` for `MockAudioSystem` (this is a property/integration test that drives
+the audio playback path, not a unit test with strict call-count expectations on unrelated methods).
+
+**Source file**: `tests/audio/notification_sfx_efx_bypass_test.cpp`
+
+**CTest filter**: `-R NotificationSFX_EFXBypass_DirectFilterSetToNull`
+
+**`AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` test contract** — this test verifies that `CitySimulation::update()` calls `audioSystem->setMusicIntensity()` with the correct `MusicIntensity` tier when treasury/growth/deficit state changes, matching the thresholds defined in `architecture/game-design/economy-model.md` Music Intensity Tiers section.
+
+**Fixture**: `StrictMock<MockAudioSystem>` injected into a real `CitySimulation` instance at construction. No `UIManager` instance required — the music intensity decision lives entirely in `CitySimulation::update()`.
+
+**Test assertions** (minimum three state transitions):
+
+1. Budget surplus (budget_surplus_pct ≥ 0%) with no population growth → `EXPECT_CALL(audio, setMusicIntensity(MusicIntensity::CALM))`.
+2. Positive population growth (population this tick > population previous tick), no deficit streak → `EXPECT_CALL(audio, setMusicIntensity(MusicIntensity::GROWTH))`.
+3. Two or more consecutive deficit months (consecutive_deficit_months ≥ 2) → `EXPECT_CALL(audio, setMusicIntensity(MusicIntensity::CRISIS))`.
+
+**Mock policy**: `StrictMock` (unit test with exact call-count expectations on `setMusicIntensity`). Priority order (CRISIS > GROWTH > CALM) must be verified: when both CRISIS and GROWTH conditions are true simultaneously, only `CRISIS` fires.
+
+**Source file**: `tests/simulation/adaptive_music_intensity_test.cpp`
+
+**CTest filter**: `-R AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem`
+
 `IRenderer` uses opaque `TextureHandle` (uint32_t) instead of `ITexture*` — the same pattern as `IUIBackend` with `UIElementHandle`. This fully severs the compile-time dependency on Irrlicht headers in any translation unit that only includes `IRenderer.h`, including all simulation test files. `MockRenderer::loadTexture()` returns an incrementing non-zero integer. The concrete `IrrlichtRenderer` maintains `std::unordered_map<TextureHandle, ITexture*>` internally.
 
-- **Shared mock header cross-target pattern**: `MockAudioSystem` and `MockRenderer` are defined in `tests/simulation/mock_audio_system.h` and `tests/simulation/mock_renderer.h` respectively. `ManualClock` is defined in `tests/simulation/manual_clock.h`. These headers are shared across multiple CMake test targets (`simulation_tests`, `ui_tests`, `audio_tests`). To avoid ODR (One Definition Rule) violations, these headers must be HEADER-ONLY GMock declarations (using MOCK_METHOD macros only, no definitions). Each test target that uses any of these shared headers MUST add `tests/simulation/` to its `target_include_directories`. This include path coupling is intentional and must be documented explicitly in the CMakeLists.txt for each consuming target. The ODR rule is safe because each test binary links into its own separate executable scope — there is no shared library or link-time merging across test targets. Required `target_include_directories` entries for each consuming target:
+- **Shared mock header cross-target pattern**: `MockAudioSystem` and `MockRenderer` are defined in `tests/simulation/MockAudioSystem.h` and `tests/simulation/MockRenderer.h` respectively. `ManualClock` is defined in `tests/simulation/ManualClock.h`. These headers are shared across multiple CMake test targets (`simulation_tests`, `ui_tests`, `audio_tests`). To avoid ODR (One Definition Rule) violations, these headers must be HEADER-ONLY GMock declarations (using MOCK_METHOD macros only, no definitions). Each test target that uses any of these shared headers MUST add `tests/simulation/` to its `target_include_directories`. This include path coupling is intentional and must be documented explicitly in the CMakeLists.txt for each consuming target. The ODR rule is safe because each test binary links into its own separate executable scope — there is no shared library or link-time merging across test targets. Required `target_include_directories` entries for each consuming target:
 
   ```cmake
-  # simulation_tests — owns the shared mock headers; also needs src/interfaces/ and ${CMAKE_SOURCE_DIR}
-  # for project-root-relative includes like #include "src/interfaces/IClock.h" in simulation_smoke_test.cpp
-  target_include_directories(simulation_tests PRIVATE tests/simulation/ src/interfaces/ ${CMAKE_SOURCE_DIR})
+  # simulation_tests — owns the shared mock headers; also needs src/simulation/ (for direct
+  # includes like #include "CitySimulation.h"), src/interfaces/, and ${CMAKE_SOURCE_DIR}
+  # for project-root-relative includes like #include "src/interfaces/IClock.h"
+  target_include_directories(simulation_tests PRIVATE tests/simulation/ src/simulation/ src/interfaces/ ${CMAKE_SOURCE_DIR})
 
   # ui_tests — uses MockAudioSystem, MockRenderer, ManualClock from tests/simulation/;
   # MockUIBackend, MockCitySimulation from tests/ui/;
-  # IUIBackend.h from src/ui/; interface headers from src/interfaces/
-  target_include_directories(ui_tests PRIVATE tests/simulation/ tests/ui/ src/interfaces/ src/ui/ ${CMAKE_SOURCE_DIR})
+  # IUIBackend.h from src/interfaces/ (moved in Phase 10b); interface headers from src/interfaces/
+  target_include_directories(ui_tests PRIVATE tests/simulation/ tests/ui/ src/interfaces/ ${CMAKE_SOURCE_DIR})
 
   # audio_tests — uses MockAudioSystem from tests/simulation/;
   # IAudioSystem.h from src/interfaces/; audio_constants.h from src/audio/
@@ -614,14 +1136,16 @@ public:
   target_include_directories(integration_tests PRIVATE tests/simulation/ tests/ui/ src/interfaces/ src/ui/ src/rendering/ ${CMAKE_SOURCE_DIR})
 
   # terrain_tests — needs tests/simulation/ for ManualClock (if timing tests added in Phase 5+),
-  # tests/terrain/ for MockTerrainRNG, src/terrain/ for ITerrainRNG.h (included by mock_terrain_rng.h
-  # via project-root-relative path "#include "src/terrain/ITerrainRNG.h""), and ${CMAKE_SOURCE_DIR}
-  # so that project-root-relative includes resolve correctly.
-  target_include_directories(terrain_tests PRIVATE tests/simulation/ tests/terrain/ src/terrain/ ${CMAKE_SOURCE_DIR})
+  # tests/terrain/ for MockTerrainRNG; src/interfaces/ for ITerrainRNG.h (moved from
+  # src/terrain/ in Phase 10b Feature 3); ${CMAKE_SOURCE_DIR} so project-root-relative
+  # includes resolve correctly. Phase 10b Feature 3 also removes src/terrain/ since
+  # ITerrainRNG.h is no longer there; MockTerrainRNG.h (renamed from mock_terrain_rng.h)
+  # updates its include to #include "src/interfaces/ITerrainRNG.h".
+  target_include_directories(terrain_tests PRIVATE tests/simulation/ tests/terrain/ src/interfaces/ ${CMAKE_SOURCE_DIR})
   ```
 
   If a test target needs a specialization, it must subclass the shared mock — not redefine it. This sharing is intentional: the same mock interface is used consistently across all simulation-adjacent tests.
-- **`IClock`** — injectable clock interface for audio timing and loan gate tests. **Source location**: `IClock.h` and `WallClock.h` live in `src/interfaces/`; `ManualClock` lives in `tests/simulation/manual_clock.h` (it is a test double used by both simulation tests and audio tests). `MockTerrainRNG` lives in `tests/terrain/mock_terrain_rng.h`. All test double headers (`manual_*.h`, `mock_*.h`) live under `tests/` — never under `src/`. See `coverage.md` for the full lcov exclusion patterns (including `mock_*` and `manual_*` exclusions).
+- **`IClock`** — injectable clock interface for audio timing and loan gate tests. **Source location**: `IClock.h` and `WallClock.h` live in `src/interfaces/`; `ManualClock` lives in `tests/simulation/ManualClock.h` (it is a test double used by both simulation tests and audio tests). `MockTerrainRNG` lives in `tests/terrain/MockTerrainRNG.h`. All test double headers (`manual_*.h`, `mock_*.h`) live under `tests/` — never under `src/`. See `coverage.md` for the full lcov exclusion patterns (including `mock_*` and `manual_*` exclusions).
 
   ```cpp
   class IClock {
@@ -639,6 +1163,108 @@ public:
   ```
 
   `AudioSystem` and `CitySimulation` accept `IClock*` at construction for crossfade timing and the forced-loan real-time gate (120 s) respectively. Production code passes `WallClock` which calls `std::chrono::steady_clock`. `ManualClock` allows deterministic time advancement in tests without wall-clock dependencies.
+- **`ITerrainQuery`** — injectable terrain interface for world-interaction and slope-cost tests. **Source location**: `ITerrainQuery.h` lives in `src/interfaces/`; `ManualTerrainQuery` lives in `tests/simulation/ManualTerrainQuery.h` (renamed from `manual_terrain_query.h` to CamelCase in Phase 10b Feature 3; alongside `ManualRNG.h` and `ManualClock.h` — all test doubles for injectable simulation interfaces). `ManualTerrainQuery` provides two slope configuration APIs:
+
+  **Global slope** (single `float` overload): sets a uniform slope for ALL tiles. Used by `WorldInteractionTest` when one slope applies to the whole map. **Per-tile slope** (3-argument overload): overrides a specific tile. Per-tile entries take precedence over the global slope. Both APIs coexist:
+
+  ```cpp
+  class ManualTerrainQuery : public ITerrainQuery {
+  public:
+      // Global slope — sets uniform slope for ALL tiles (default 0°, flat terrain).
+      // WorldInteractionTest uses this form: terrain_.setSlope(20.0f)
+      // to trigger the earthworks guard for the entire test map.
+      void setSlope(float degrees) { m_globalSlope = degrees; }
+
+      // Per-tile slope — overrides slope for a specific tile; takes precedence over
+      // the global slope. Used by CitySimulation earth-works tests needing distinct
+      // slopes per tile (e.g., slope canyon patterns).
+      void setSlope(int tileX, int tileZ, float degrees) {
+          m_slopes[makeKey(tileX, tileZ)] = degrees;
+      }
+
+      // Reset all slope configuration to 0° (flat terrain for all tiles).
+      void resetSlope() { m_globalSlope = 0.0f; m_slopes.clear(); }
+
+      // Returns per-tile slope if set, otherwise returns global slope (default 0°).
+      float getSlopeDegrees(int tileX, int tileZ) const override {
+          auto it = m_slopes.find(makeKey(tileX, tileZ));
+          return (it != m_slopes.end()) ? it->second : m_globalSlope;
+      }
+
+      // Phase 9b addition: always returns 0.0f (flat world at sea level).
+      // Required to satisfy pure-virtual contract of ITerrainQuery::getHeightAt().
+      // Phase 9b unit tests that need specific heights inject MockRenderer for the
+      // renderer path; no WorldInteractionTest requires non-zero heights here.
+      // Phase 10b: this return-0.0f form is superseded by the stateful form below
+      // (see "Phase 10b stateful extension"). The stateful form overrides getHeightAt()
+      // to return m_heightAfterFlat or m_heightBeforeFlat based on m_flattened.
+      float getHeightAt(int /*tileX*/, int /*tileZ*/) const override { return 0.0f; }
+  private:
+      static int64_t makeKey(int x, int z) {
+          return (static_cast<int64_t>(x) << 32) | static_cast<uint32_t>(z);
+      }
+      float m_globalSlope{0.0f};
+      std::unordered_map<int64_t, float> m_slopes;
+  };
+  ```
+
+  **CRITICAL — `setSlope()` overload selection**: `WorldInteractionTest` tests that exercise the earthworks guard call the SINGLE-ARGUMENT form `terrain_.setSlope(20.0f)` to apply slope 20° to all tiles uniformly. Calling the THREE-ARGUMENT form `terrain_.setSlope(5, 7, 20.0f)` would only affect tile (5,7) — other tiles remain 0°. Tests that use `MockRenderer::pickTerrainTile` to return tile (5,7) and then expect earthworks cost must call the global-slope form `terrain_.setSlope(20.0f)`.
+
+  Used in `WorldInteractionTest` (Phase 9b) as the `terrain_` fixture member, injected via `uiManager_->setTerrainQuery(&terrain_)`. The `getHeightAt()` override is required because it is pure virtual on `ITerrainQuery`; without it `ManualTerrainQuery` fails to compile, blocking all 17 Phase 9b unit tests.
+
+  **Phase 10b stateful extension**: Phase 10b adds `setTileHeight()` as a pure-virtual method
+  to `ITerrainQuery`, requiring a new override in `ManualTerrainQuery`. The Phase 10b form is
+  stateful, superseding the Phase 9b return-0.0f form of `getHeightAt()`:
+
+  ```cpp
+  // Phase 10b additions — stateful terrain flattening for TerrainFlattening tests.
+  bool  m_flattened{false};
+  float m_heightBeforeFlat{0.0f};
+  float m_heightAfterFlat{0.0f};
+
+  void setHeightBeforeFlattening(float h) { m_heightBeforeFlat = h; }
+  void setHeightAfterFlattening(float h)  { m_heightAfterFlat  = h; }
+
+  // Phase 10b override — returns post-flatten height if setTileHeight() was called,
+  // otherwise pre-flatten height. Defaults to 0.0f / 0.0f so existing tests are unaffected.
+  float getHeightAt(int /*tileX*/, int /*tileZ*/) const override {
+      return m_flattened ? m_heightAfterFlat : m_heightBeforeFlat;
+  }
+
+  // Phase 10b override — records that flattening occurred; TerrainFlattening tests
+  // assert m_flattened == true to confirm setTileHeight() was invoked.
+  void setTileHeight(int /*tileX*/, int /*tileZ*/, float /*height*/) override {
+      m_flattened = true;
+  }
+  ```
+
+  `IRenderer` placement methods carry no Y parameter, so height verification in
+  `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight` must go through
+  `ManualTerrainQuery::m_flattened` and `getHeightAt()`, not through `MockRenderer`.
+
+  **Phase 10b landing sequence**: the `setTileHeight()` pure-virtual addition to
+  `ITerrainQuery.h` and the `ManualTerrainQuery` override MUST land in the same commit to
+  avoid making `ManualTerrainQuery` abstract and breaking all 17+ simulation unit tests.
+  Step 1 (`graphics-dev-irrlicht` PR): add pure-virtual to `ITerrainQuery.h` AND add the
+  no-op `void setTileHeight(int, int, float) override {}` to `ManualTerrainQuery` in the
+  same commit. Step 2 (`test-dev-cpp` PR): replace the no-op with the stateful form
+  described above.
+
+- **`IAlcFunctions`** — injectable interface for ALC function-pointer lookup, enabling the thread-local context extension check in `AudioSystem` to be intercepted in tests without a real OpenAL device. **Source locations** (post-Phase 10b): `IAlcFunctions.h` in `src/interfaces/` (moved from `src/audio/ialc_functions.h` and renamed in Phase 10b Feature 3); `DefaultAlcFunctions.h`/`DefaultAlcFunctions.cpp` remain in `src/audio/`; `MockAlcFunctions` is defined locally in `tests/audio/audio_thread_test.cpp` (single-use — not a shared header). All test double headers live under `tests/` — never under `src/`.
+
+  ```cpp
+  class IAlcFunctions {
+  public:
+      virtual ~IAlcFunctions() = default;
+      virtual bool isExtensionPresent(const char* extName) = 0;
+      virtual void* getProcAddress(const char* funcName) = 0;
+  };
+  ```
+
+  `AudioSystem` constructor accepts `IAlcFunctions* alcFunctions = nullptr`; passing `nullptr` activates `DefaultAlcFunctions`, which delegates to the real `alcIsExtensionPresent()` and `alcGetProcAddress()`. **Windows compatibility**: the `IAlcFunctions` seam is the primary and mandatory test path — it works on both Linux and Windows. The weak-symbol override approach is Linux-only and is a secondary option only.
+
+  `AudioThreadTest::AbsentThreadLocalContext_ConstructorThrows` injects a `MockAlcFunctions` configured to return `nullptr` for `getProcAddress("alcSetThreadContext")`, verifying the constructor throws `std::runtime_error` before entering the streaming loop (ref: `implementation/phase-7.md` line 47).
+
 - **Ownership contract**: Simulation objects accept `IRenderer*` and `IAudioSystem*` as non-owning raw pointers. Ownership managed externally. In tests, fixture owns the mock and outlives the system under test:
 
 ### StrictMock Expected Call Matrix
@@ -656,6 +1282,29 @@ For every unit test that uses `StrictMock<MockAudioSystem>` or `StrictMock<MockR
 | ModalDialog_OnOpen | `setPaused(true)` × 1 (via MockCitySimulation, not IAudioSystem) | None |
 | ModalDialog_OnClose (no queued toast) | `setPaused(false)` × 1 (via MockCitySimulation) | None |
 | `ModalDialog_OnClose_WithQueuedCriticalToast_AutoPauseReevaluated` (test 8) | Via MockCitySimulation: `setPaused(true)` × 2 (once on modal open; once on re-evaluation in `closeModal()` because CRITICAL queue is non-empty); `setPaused(false)` × 0 (NOT called — simulation stays paused because CRITICAL toast remains active after modal close) | Via MockUIBackend: `addStaticText` × 1 (queued CRITICAL toast displayed synchronously within `closeModal()`) |
+| `WorldInteraction_ZonePlacement_CallsPlaceZone` | None (NiceMock audio unused) | `pickTerrainTile(_, _, _, _)` → returns true + tileX=5 tileZ=7 × 1; `setTileHoverHighlight` not called on MouseButtonDown; `setZoneOverlay(_, _, _)` × 1 (on successful placement); `MockCitySimulation::placeZone(5, 7, _, _, 0)` × 1 |
+| `WorldInteraction_RoadPlacement_CallsPlaceRoad` | None | `pickTerrainTile(_, _, _, _)` × 1 (returns tile 5,7); `setZoneOverlay` NOT called (road placement does not update zone overlay); `MockCitySimulation::placeRoad(5, 7, 0)` × 1 |
+| `WorldInteraction_DemolishTool_SteepSlope_NoEarthworksGuard` | None | `pickTerrainTile` × 1; `MockCitySimulation::demolishTile(5, 7)` × 1 (no earthworks guard on demolish) |
+| `WorldInteraction_ZoneTool_SteepSlope_InsufficientFunds_ToastNotPlace` | None | `pickTerrainTile` × 1; `MockCitySimulation::placeZone(_, _, _, _, _)` × 0 (not called — blocked by earthworks guard); `MockUIBackend::addStaticText(HasSubstr("insufficient funds"), _, _, _, _)` × AtLeast(1) |
+| `WorldInteraction_QueryTool_CallsQueryTile` | None | `pickTerrainTile` × 1; `getTileScreenBounds(5, 7)` × 1; `MockCitySimulation::queryTile(5, 7)` × 1 |
+| `WorldInteraction_NoActiveTool_LeftClickIgnored` | None | `pickTerrainTile` × 0 (no ray-cast when no tool active); `MockCitySimulation::placeZone(_, _, _, _, _)` × 0; `MockCitySimulation::placeRoad(_, _, _)` × 0 |
+| `WorldInteraction_ModalActive_LeftClickNotDispatched` | None | `pickTerrainTile` × 0 (modal Priority 1 consumes event before world layer); `MockCitySimulation::placeZone(_, _, _, _, _)` × 0 |
+| `WorldInteraction_HoverHighlight_SetOnMouseMove` | None | `pickTerrainTile` × 1 (returns tile 3,4); `setTileHoverHighlight(3, 4, _)` × AtLeast(1) |
+| `WorldInteraction_HoverHighlight_ClearedOnMiss` | None | `pickTerrainTile` × 1 (returns false); `setTileHoverHighlight(-1, -1, 0)` × AtLeast(1) |
+| `WorldInteraction_ZonePlacement_SparseOverlay_InsertsEntry` | None | `pickTerrainTile` × 1; `setZoneOverlay(_, _, _)` × 1 (SaveArg used to capture sparse map; assert key 43 maps to `0x6000FF00u`) |
+| `WorldInteraction_Demolish_SparseOverlay_ErasesEntry` | None | `pickTerrainTile` × AtLeast(2) (zone placement + demolish); `setZoneOverlay` × 2 (one after placement, one after demolish; second call has empty map) |
+| `WorldInteraction_UtilitiesPlacement_CallsPlaceServiceBuilding` | None | `pickTerrainTile` × 1 (returns tile 5,7); `MockCitySimulation::placeServiceBuilding(5, 7, ServiceBuildingType::FireStation, 0)` × 1 |
+| `CitySimulation_PlaceRoad_FiresSFXRoadBuild` | `StrictMock<MockAudioSystem>::playPositionalSound(SFX_ROAD_BUILD, _, _, _)` × 1 | None (`NiceMock<MockRenderer>` — renderer call is incidental) |
+| **Phase 10 rendering rows — `CitySimulationRenderTest` cases (use `CitySimulationRenderStub` + `NiceMock<MockSimRenderer>`; no audio mock — stub does not fire audio calls); these correlations apply to `CitySimulation` integration tests that exercise the same code paths with `StrictMock<MockRenderer>` + `MockAudioSystem`** | | |
+| `CitySimulationRenderTest_PlaceZone_PlacesBuildingMesh` (Phase 10) | `playPositionalSound(SFX_BUILD_PLACE, _, _, _)` × 1 (integration test only; stub test uses no audio mock) | `placeBuildingMesh(tile, ZoneType::Residential, 0)` × 1 |
+| `CitySimulationRenderTest_PlaceRoad_PlacesRoadMesh` (Phase 10) | `playPositionalSound(SFX_ROAD_BUILD, _, _, _)` × 1 (integration only) | `placeRoadMesh(tile)` × 1 |
+| `CitySimulationRenderTest_PlaceServiceBuilding_PlacesServiceMesh` (Phase 10) | `playPositionalSound(SFX_BUILD_PLACE, _, _, _)` × 1 (integration only) | `placeServiceBuildingMesh(tile, ServiceBuildingType::FireStation)` × 1 |
+| `CitySimulationRenderTest_DemolishZone_RemovesBuildingMesh` (Phase 10) | `playPositionalSound(SFX_BUILD_DEMOLISH, _, _, _)` × 1 (integration only) | `removeBuildingMesh(tile)` × 1 |
+| `CitySimulationRenderTest_DemolishRoad_RemovesRoadMesh` (Phase 10) | `playPositionalSound(SFX_BUILD_DEMOLISH, _, _, _)` × 1 (integration only) | `removeRoadMesh(tile)` × 1 |
+| `CitySimulationRenderTest_DensityUpgrade_SwapsBuildingMesh` (Phase 10) | `playSound(SFX_ZONE_UPGRADE, _, _)` × 1 (integration only; cap up to 3 per tick) | `removeBuildingMesh(tile)` × 1; `placeBuildingMesh(tile, zone, newTier)` × 1 |
+| Tests exercising `tick()` with earthworks cost > 0 (Phase 10) | `playPositionalSound(SFX_EARTHWORKS, _, _, _)` × 1 before `SFX_BUILD_PLACE`/`SFX_ROAD_BUILD` | `placeBuildingMesh` or `placeRoadMesh` × 1 (same tile) |
+| `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight` (Phase 10b) | `NiceMock<MockAudioSystem>` — audio calls (SFX_BUILD_PLACE, optionally SFX_EARTHWORKS) are incidental to the flattening assertion; no `EXPECT_CALL` needed | `NiceMock<MockRenderer>` — the assertion is on `ManualTerrainQuery::m_flattened`, not on renderer behavior; no `EXPECT_CALL` needed for `placeBuildingMesh` |
+| **Guidance**: For tests where rendering method calls are incidental to the assertion, switch `renderer_` to `NiceMock<MockRenderer>` — this avoids declaring EXPECT_CALL for every mesh placement side-effect and is the approved approach for audio-focused tests (`CitySimulation_PlaceRoad_FiresSFXRoadBuild` already uses `NiceMock<MockRenderer>` for this reason). Use `StrictMock<MockRenderer>` only when the test is asserting rendering behavior. | | |
 
 > **Post-V1 stinger scenarios**: `StingerType::GAME_OVER` (game-over stinger, fires in Scenario mode) is not defined in the V1 `StingerType` enum (`{ CRISIS, MILESTONE }` only). Do not reference `StingerType::GAME_OVER` in any V1 test or production code — it does not exist until Scenario mode is implemented post-V1. When Scenario mode is added post-V1, a new matrix row will be added here.
 
@@ -839,9 +1488,16 @@ protected:
     void SetUp() override {
         ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
     }
+    // **Mandatory**: This fixture MUST include the TearDown() override below.
+    // Explicitly calling ui_.reset() before the fixture destructs documents and enforces
+    // the destructor-path contract, preventing order-of-destruction issues with NiceMock
+    // expectations. The current member declaration order (ui_ declared last) satisfies
+    // the invariant automatically, but future reordering would silently break it.
+    // The explicit TearDown() makes the contract immune to member reordering.
     void TearDown() override {
-        // Reset ui_ before mock objects are destroyed so UIManager destructor calls
-        // (e.g. backend_.removeElement()) happen while MockUIBackend is still alive.
+        // **Mandatory**: Reset ui_ before mock objects are destroyed so UIManager
+        // destructor calls (e.g. backend_.removeElement()) happen while MockUIBackend
+        // is still alive. This enforces the destructor-path contract.
         ui_.reset();
     }
 };
@@ -909,13 +1565,20 @@ protected:
     void SetUp() override {
         ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
     }
+    // **Mandatory**: Each fixture MUST include a TearDown() override that explicitly calls
+    // ui_.reset() before the fixture destructs. This documents and enforces the
+    // destructor-path contract, preventing order-of-destruction issues with NiceMock
+    // expectations. Without it, a future member reordering could cause UIManager's
+    // destructor to fire after MockUIBackend is destroyed, producing use-after-destroy.
     void TearDown() override {
-        // UIManager destructor calls backend_.removeElement() for all live UI elements.
-        // The explicit ui_.reset() here is a defensive practice — the current declaration
-        // order already satisfies the destruction invariant automatically (ui_ declared last
+        // **Mandatory**: ui_.reset() must be called here. UIManager destructor calls
+        // backend_.removeElement() for all live UI elements. Explicitly resetting ui_
+        // before mock objects are destroyed ensures those destructor calls happen while
+        // MockUIBackend is still alive, enforcing the destructor-path contract. The current
+        // declaration order already satisfies the invariant automatically (ui_ declared last
         // is destroyed first in reverse order), but future fixture modifications could
-        // inadvertently reorder members. The explicit TearDown() makes the destruction
-        // contract immune to member reordering.
+        // inadvertently reorder members. The explicit TearDown() makes the contract
+        // immune to member reordering.
         ui_.reset();
     }
 };
@@ -936,8 +1599,16 @@ protected:
     void SetUp() override {
         sim_ = std::make_unique<CitySimulation>(&renderer_, &audio_, &rng_, &clock_);
     }
+    // **Mandatory**: Each fixture MUST include a TearDown() override that explicitly calls
+    // sim_.reset() before the fixture destructs. This documents and enforces the
+    // destructor-path contract, preventing order-of-destruction issues with StrictMock
+    // expectations. CitySimulation must be destroyed before its injected mock dependencies
+    // (renderer_, audio_). Without an explicit sim_.reset(), StrictMock will report
+    // unexpected calls if CitySimulation's destructor ever calls renderer_ or audio_
+    // after their expectations have been verified and cleared by the test framework.
     void TearDown() override {
-        // CitySimulation destructor must NOT call audio_ or renderer_ methods.
+        // **Mandatory**: sim_.reset() must be called here to enforce the destructor-path
+        // contract. CitySimulation destructor must NOT call audio_ or renderer_ methods.
         // This is an explicit design contract. If that contract changes, add EXPECT_CALL
         // expectations here BEFORE sim_.reset() to avoid spurious StrictMock failures.
         // IMPORTANT: Do NOT call rng_.verifyAllConsumed() here — zero-revenue tests never
@@ -975,12 +1646,20 @@ protected:
     void SetUp() override {
         sim_ = std::make_unique<CitySimulation>(&renderer_, &audio_, &rng_, &clock_);
     }
+    // **Mandatory**: Each fixture MUST include a TearDown() override that explicitly calls
+    // sim_.reset() before the fixture destructs. This documents and enforces the
+    // destructor-path contract, preventing order-of-destruction issues with NiceMock
+    // expectations. NiceMock suppresses unexpected-call warnings but does NOT protect
+    // against use-after-destroy if CitySimulation's destructor calls mock methods after
+    // the mock objects have been destroyed. The explicit TearDown() ensures CitySimulation
+    // is torn down first regardless of member declaration order.
     void TearDown() override {
-        // REQUIRED: CitySimulation must be destroyed before mock objects.
-        // NiceMock suppresses unexpected-call warnings but does NOT protect
-        // against use-after-destroy if CitySimulation destructor calls mocks.
-        // Members are destroyed in reverse declaration order (sim_ last),
-        // so sim_.reset() here ensures correct destruction order.
+        // **Mandatory**: sim_.reset() must be called here to enforce the destructor-path
+        // contract. CitySimulation must be destroyed before mock objects. NiceMock
+        // suppresses unexpected-call warnings but does NOT protect against use-after-destroy
+        // if CitySimulation destructor calls mocks. Members are destroyed in reverse
+        // declaration order (sim_ last), so sim_.reset() here ensures correct destruction
+        // order regardless of any future fixture member reordering.
         // NOTE: verifyAllConsumed() is NOT called here — the shared rng_{{0}} is a
         // placeholder; property tests that drive random draws must use a local RNG.
         // See ManualRNG exemption comment above the class definition for full rationale.
@@ -988,3 +1667,360 @@ protected:
     }
 };
 ```
+
+### WorldInteractionTest Fixture (Phase 9b)
+
+`WorldInteractionTest` is the canonical test fixture for all Phase 9b world-interaction unit tests
+(17 tests in `tests/ui/world_interaction_test.cpp`, registered under the `ui_tests` CMake target).
+
+**Source file**: `tests/ui/world_interaction_test.cpp`
+**CMake registration**: `target_sources(ui_tests PRIVATE tests/ui/world_interaction_test.cpp)` —
+do NOT call `add_executable` or `aitown_add_tests` again (duplicate target error).
+**Label**: `unit` (no `requires-opengl`).
+
+**Fixture design**: All 17 `WorldInteractionTest` methods share a single fixture. The fixture
+uses `StrictMock<MockCitySimulation>` and `StrictMock<MockRenderer>` to catch unexpected calls.
+`NiceMock<MockUIBackend>` suppresses noise from UIManager constructor panel-creation calls
+(50+ `addStaticText`/`addButton`/`setElementVisible` calls — `StrictMock<MockUIBackend>` would
+require exhaustive construction-time `EXPECT_CALL` setup, defeating the fixture's purpose).
+
+```cpp
+// tests/ui/world_interaction_test.cpp
+class WorldInteractionTest : public ::testing::Test {
+protected:
+    // Declaration order: mocks declared BEFORE uiManager_ so that
+    // they are destroyed AFTER uiManager_ (reverse declaration order).
+    // TearDown() makes this explicit regardless of member order.
+    ::testing::StrictMock<MockCitySimulation> sim_;
+    ::testing::StrictMock<MockRenderer>       renderer_;
+    ManualTerrainQuery                        terrain_;   // global slope defaults to 0°
+    ::testing::NiceMock<MockUIBackend>        backend_;
+    ManualClock                               clock_;
+    std::unique_ptr<UIManager>                uiManager_;
+
+    void SetUp() override {
+        // Construct UIManager with its locked 4-parameter constructor.
+        // renderer_ and terrain_ are wired via setters (Phase 9b additions).
+        uiManager_ = std::make_unique<UIManager>(&backend_, nullptr, &sim_, &clock_);
+        uiManager_->setRenderer(&renderer_);
+        uiManager_->setTerrainQuery(&terrain_);
+        // setMapDimensions(10, 10) establishes m_mapTilesX=10, m_mapTilesZ=10 so that
+        // zone overlay key computations use concrete, test-predictable values:
+        //   tile (tileX=3, tileZ=4) → key = 4 * 10 + 3 = 43.
+        uiManager_->setMapDimensions(10, 10);
+    }
+
+    // **Mandatory TearDown**: explicitly destroys UIManager before StrictMock members.
+    // UIManager destructor calls backend_.removeElement() for all live UI elements;
+    // it also holds raw m_renderer_ and m_terrain_ pointers that must be released
+    // before the mock objects they point to are destroyed. Failure to reset uiManager_
+    // here causes use-after-destroy in StrictMock verification.
+    // The current member declaration order (uiManager_ declared last) automatically
+    // satisfies this invariant via reverse-destruction order, but the explicit TearDown()
+    // is mandatory to make the contract immune to future member reordering.
+    void TearDown() override {
+        uiManager_.reset();
+    }
+};
+```
+
+**SetUp sequence contract (REQUIRED)**:
+
+1. `std::make_unique<UIManager>(&backend_, nullptr, &sim_, &clock_)` — audio is `nullptr`
+   (UIManager checks `if(m_audio)` before every audio call; passing null is safe here since
+   no Phase 9b test exercises the audio path through UIManager).
+2. `uiManager_->setRenderer(&renderer_)` — REQUIRED before any event that triggers
+   `pickTerrainTile()`. Without this, the null-check guard in the world-interaction block
+   returns `false` immediately and no `placeZone`/`placeRoad` calls fire.
+3. `uiManager_->setTerrainQuery(&terrain_)` — REQUIRED before any event that triggers the
+   earthworks cost computation (slope guard). Without this, `m_terrain` is null and
+   `getSlopeDegrees()` is unreachable.
+4. `uiManager_->setMapDimensions(10, 10)` — REQUIRED before any zone overlay test. Without
+   this, `m_mapTilesX == 0` and all overlay writes are skipped by the guard.
+
+**StrictMock expectations for each test**: See the StrictMock Expected Call Matrix section above
+for the complete per-test expected call specification. Common patterns:
+
+```cpp
+// Stubbing pickTerrainTile to return tile (5,7):
+EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+    .WillOnce(::testing::DoAll(
+        ::testing::SetArgReferee<2>(5),
+        ::testing::SetArgReferee<3>(7),
+        ::testing::Return(true)));
+
+// Stub getTileScreenBounds (needed when Query tool fires a tile lookup):
+ON_CALL(renderer_, getTileScreenBounds(5, 7))
+    .WillByDefault(::testing::Return(ScreenRect{100, 100, 50, 50}));
+
+// Capture the sparse overlay map for overlay-content assertions:
+std::unordered_map<uint64_t, uint32_t> capturedMap;
+EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
+    .WillOnce(::testing::SaveArg<2>(&capturedMap));
+
+// Verify zone overlay key and colour after zone placement at (3,4):
+// key = tileZ * m_mapTilesX + tileX = 4 * 10 + 3 = 43
+ASSERT_EQ(capturedMap.size(), 1u);
+EXPECT_EQ(capturedMap.at(43u), 0x6000FF00u);  // Residential green
+```
+
+**Active tool injection**: Tests set the active tool by simulating a toolbar button click event
+or by calling `uiManager_->setActiveTool(ActiveTool::Zone)` if a direct setter is available.
+The preferred approach is via toolbar button click to exercise the full dispatch path:
+
+```cpp
+// Set active tool to Zone via toolbar button click (Priority 5 dispatch):
+InputEvent zoneBtn;
+zoneBtn.type = InputEvent::Type::MouseButtonDown;
+zoneBtn.x = 36;   // toolbar center x (virtual coords)
+zoneBtn.y = 80;   // y:64-112 = Zone button row (virtual coords)
+zoneBtn.button = 0;
+uiManager_->onEvent(zoneBtn);
+// m_activeTool is now ActiveTool::Zone
+```
+
+**Slope guard testing** (earthworks guard): Call `terrain_.setSlope(20.0f)` (global form, ≥15°
+threshold triggers earthworks) BEFORE sending the left-click event. Set
+`MockCitySimulation::getTreasuryBalance()` to return 0.0f (insufficient funds) to verify the
+slope guard fires and `placeZone` is NOT called:
+
+```cpp
+terrain_.setSlope(20.0f);  // above 15° threshold; earthworks cost = 500 * clamp((20-15)/30,0,2) > 0
+ON_CALL(sim_, getTreasuryBalance()).WillByDefault(::testing::Return(0.0f));
+EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(0);  // must NOT be called
+EXPECT_CALL(backend_, addStaticText(::testing::HasSubstr("insufficient funds"), _, _, _, _))
+    .Times(::testing::AtLeast(1));
+// ... send left-click event
+```
+
+**Overlay cap test** (`WorldInteraction_OverlayCap_100K_StillCalls`): driving 100,000
+placements via 100K simulated events is impractical. Instead, access the overlay map
+through a test-friend mechanism or call a hypothetical `injectOverlayEntry()` test helper.
+Absent a test-friend, place 100K entries in a single-loop test using distinct tile coordinates
+(vary tileX from 0 to 9 and tileZ from 0 to 9999 for a 10×10000 set — verify all with
+`setMapDimensions(10, 10001)` to accommodate). The test verifies the 100,001st entry is
+rejected and `setZoneOverlay` is still called with `size() <= 100000`.
+
+**NiceMock MockUIBackend rationale**: UIManager's constructor calls `addStaticText`,
+`addButton`, and `setElementVisible` for all panels (HUD, Minimap, MainMenu, etc.) during
+initialization — typically 50+ backend calls. `StrictMock<MockUIBackend>` would require
+exhaustive `EXPECT_CALL` stubs in `SetUp()` before any test-specific assertions can be set.
+`NiceMock<MockUIBackend>` suppresses all unexpected calls silently, allowing test bodies to
+declare only the specific `EXPECT_CALL` assertions relevant to the test being verified.
+This is the same rationale as `UIManagerModalTest` and `UIManagerDeficitIntegrationTest`.
+Compensating assertions: every test that needs to verify a specific `MockUIBackend` call
+(e.g., `addStaticText(HasSubstr("insufficient funds"), ...)`) sets an explicit `EXPECT_CALL`
+with `Times(AtLeast(1))` to prevent the `NiceMock` leniency from masking missing calls.
+
+**Phase 9b canonical test names** (CTest `-R` filter expressions reference these exactly):
+
+| Test Suite | Test Case | Fixture |
+|---|---|---|
+| `WorldInteractionTest` | `ZonePlacement_CallsPlaceZone` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `RoadPlacement_CallsPlaceRoad` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `DemolishTool_SteepSlope_NoEarthworksGuard` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `ZoneTool_SteepSlope_InsufficientFunds_ToastNotPlace` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `QueryTool_CallsQueryTile` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `NoActiveTool_LeftClickIgnored` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `ModalActive_LeftClickNotDispatched` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `HoverHighlight_SetOnMouseMove` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `HoverHighlight_ClearedOnMiss` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `UtilitiesPlacement_CallsPlaceServiceBuilding` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `ZonePlacement_SparseOverlay_InsertsEntry` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `Demolish_SparseOverlay_ErasesEntry` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `NewGameLoad_ClearsOverlay` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `OverlayCap_100K_StillCalls` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `SetMapDimensions_Recall_ClearsOverlay` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `ZoneSubPanel_ButtonsInitialized` | `WorldInteractionTest` |
+| `WorldInteractionTest` | `UtilitiesSubPanel_ButtonsInitialized` | `WorldInteractionTest` |
+| `AudioSimTest` | `CitySimulation_PlaceRoad_FiresSFXRoadBuild` | `AudioSimTest` |
+
+CTest filter for all Phase 9b world-interaction tests:
+`-R "WorldInteractionTest|CitySimulation_PlaceRoad_FiresSFXRoadBuild"`
+
+## Phase 10 Simulation Test Table
+
+### `CitySimulationRenderTest` Fixture
+
+**Source file**: `tests/simulation/city_simulation_render_test.cpp`
+
+**CMake wiring**: `target_sources(simulation_tests PRIVATE tests/simulation/city_simulation_render_test.cpp)`.
+Do NOT call `add_executable(simulation_tests ...)` or `aitown_add_tests(simulation_tests ...)` again — that
+creates a duplicate target. Add `target_sources` only.
+
+**Design rationale**: Uses a test-local `CitySimulationRenderStub` (a minimal dispatch-protocol model)
+and `ISimRenderer` (a test-local standalone interface using `TileCoord`-based API). Does NOT use the
+full `CitySimulation` class or `IRenderer`/`MockRenderer` — `IRenderer` has 27 pure virtuals as of Phase 11d; extending
+it in a test would require all of them mocked. The stub faithfully models the render-dispatch contract
+(same `placeBuildingMesh`, `placeRoadMesh`, `removeBuildingMesh`, `removeRoadMesh`, `placeServiceBuildingMesh`
+call sequence) without incurring the `ManualRNG`, `ManualClock`, treasury, and audio side-effect
+dependencies of the full simulation.
+
+**Fixture setup**: Uses `NiceMock<MockSimRenderer>` and `NiceMock<MockMusicIntensityReceiver>`.
+
+```cpp
+class CitySimulationRenderTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        renderer_      = std::make_unique<NiceMock<MockSimRenderer>>();
+        musicReceiver_ = std::make_unique<NiceMock<MockMusicIntensityReceiver>>();
+        sim_ = std::make_unique<CitySimulationRenderStub>(
+            renderer_.get(), musicReceiver_.get());
+    }
+    void TearDown() override {
+        sim_.reset();
+        renderer_.reset();
+        musicReceiver_.reset();
+    }
+
+    std::unique_ptr<NiceMock<MockSimRenderer>>            renderer_;
+    std::unique_ptr<NiceMock<MockMusicIntensityReceiver>> musicReceiver_;
+    std::unique_ptr<CitySimulationRenderStub>             sim_;
+};
+```
+
+**Label**: `unit`. CTest filter: `-R CitySimulationRenderTest`.
+
+| Test Case | What is verified |
+|---|---|
+| `CitySimulationRenderTest_PlaceZone_PlacesBuildingMesh` | `placeZone()` calls `placeBuildingMesh()` with correct TileCoord, ZoneType, and density tier |
+| `CitySimulationRenderTest_PlaceRoad_PlacesRoadMesh` | `placeRoad()` calls `placeRoadMesh()` with correct TileCoord |
+| `CitySimulationRenderTest_DemolishZone_RemovesBuildingMesh` | `demolishTile()` on zone tile calls `removeBuildingMesh()`, NOT `removeRoadMesh()` |
+| `CitySimulationRenderTest_DemolishRoad_RemovesRoadMesh` | `demolishTile()` on road tile calls `removeRoadMesh()`, NOT `removeBuildingMesh()` |
+| `CitySimulationRenderTest_PlaceServiceBuilding_PlacesServiceMesh` | `placeServiceBuilding()` calls `placeServiceBuildingMesh()` with correct TileCoord and ServiceBuildingType |
+| `CitySimulationRenderTest_DensityUpgrade_SwapsBuildingMesh` | `testForceUnlockDensityTier()` calls `removeBuildingMesh()` then `placeBuildingMesh()` (upgraded tier) in order; guarded by `AITOWN_TESTING_ENABLED` |
+| `CitySimulationRenderTest_MusicIntensity_CRISIS_OnDeficit` | Two consecutive deficit ticks trigger CALM→CRISIS; third tick no duplicate; recovery fires CRISIS→CALM |
+
+#### `CitySimulationRenderTest_PlaceZone_PlacesBuildingMesh`
+
+```cpp
+TEST_F(CitySimulationRenderTest,
+       CitySimulationRenderTest_PlaceZone_PlacesBuildingMesh)
+{
+    const TileCoord tile{5, 3};
+    EXPECT_CALL(*renderer_,
+        placeBuildingMesh(
+            ::testing::Field(&TileCoord::x, 5),
+            ZoneType::Residential, 0))
+        .Times(1);
+    sim_->placeZone(tile, ZoneType::Residential, /*densityTier=*/0);
+}
+```
+
+#### `CitySimulationRenderTest_DensityUpgrade_SwapsBuildingMesh`
+
+Guarded by `#ifdef AITOWN_TESTING_ENABLED`; skipped via `GTEST_SKIP()` when undefined.
+`testForceUnlockDensityTier()` sets the internal unlock flag directly, bypassing the
+3-consecutive-month revenue gate — must NOT be compiled into production builds.
+
+```cpp
+TEST_F(CitySimulationRenderTest,
+       CitySimulationRenderTest_DensityUpgrade_SwapsBuildingMesh)
+{
+#ifdef AITOWN_TESTING_ENABLED
+    const TileCoord tile{4, 4};
+    sim_->placeZone(tile, ZoneType::Residential, 0);
+    {
+        ::testing::InSequence seq;
+        EXPECT_CALL(*renderer_,
+            removeBuildingMesh(::testing::Field(&TileCoord::x, 4))).Times(1);
+        EXPECT_CALL(*renderer_,
+            placeBuildingMesh(
+                ::testing::Field(&TileCoord::x, 4),
+                ZoneType::Residential, 1)).Times(1);
+    }
+    sim_->testForceUnlockDensityTier(tile, ZoneType::Residential, /*newTier=*/1);
+#else
+    GTEST_SKIP() << "AITOWN_TESTING_ENABLED not set — density tier test skipped";
+#endif
+}
+```
+
+#### `CitySimulationRenderTest_MusicIntensity_CRISIS_OnDeficit`
+
+```cpp
+TEST_F(CitySimulationRenderTest,
+       CitySimulationRenderTest_MusicIntensity_CRISIS_OnDeficit)
+{
+    sim_->simulateBudgetTick(-0.60f);  // deficit month 1 — still CALM
+    EXPECT_CALL(*musicReceiver_, setMusicIntensity(MusicIntensity::CRISIS)).Times(1);
+    sim_->simulateBudgetTick(-0.60f);  // deficit month 2 → CRISIS
+    sim_->simulateBudgetTick(-0.60f);  // deficit month 3 — no change
+    EXPECT_CALL(*musicReceiver_, setMusicIntensity(MusicIntensity::CALM)).Times(1);
+    sim_->simulateBudgetTick(+0.20f);  // recovery → CALM
+}
+```
+
+### `AdaptiveMusicIntensityTest` Fixture
+
+**Source file**: `tests/simulation/adaptive_music_intensity_test.cpp`
+
+**CMake wiring**: `target_sources(simulation_tests PRIVATE tests/simulation/adaptive_music_intensity_test.cpp)`.
+Do NOT call `add_executable` or `aitown_add_tests` again.
+
+**Test target**: `simulation_tests` (NOT `audio_tests`).
+
+**Design**: Uses a test-local `IMusicIntensityReceiver` interface and `MockMusicIntensityReceiver`
+(strict mock) with a `dispatchMusicIntensityIfChanged()` helper that models the state-change dispatch
+rule. Does NOT use the full `CitySimulation` — the dispatch protocol is verified directly without the
+full economic simulation dependency chain.
+
+**Fixture setup**:
+
+```cpp
+class AdaptiveMusicIntensityTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        mock_ = std::make_unique<StrictMock<MockMusicIntensityReceiver>>();
+    }
+    void TearDown() override { mock_.reset(); }
+
+    std::unique_ptr<StrictMock<MockMusicIntensityReceiver>> mock_;
+};
+```
+
+**Mock policy**: `StrictMock` (per CLAUDE.md unit-test policy) — any unexpected call to
+`setMusicIntensity()` immediately fails the test, enforcing that same-state transitions do NOT
+dispatch.
+
+**What is verified**: `dispatchMusicIntensityIfChanged()` calls `setMusicIntensity()` with the correct
+`MusicIntensity` value when state changes, and does NOT call it when state is unchanged (all 6
+permutations of CALM/GROWTH/CRISIS transitions, plus same-state no-ops, plus direct skip transitions).
+
+**Required test cases**:
+
+#### `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem`
+
+Single multi-phase test covering all transitions. Verifies CALM→GROWTH, GROWTH→CRISIS, CRISIS→CALM,
+same-state no-ops (3 combinations), CALM→CRISIS skip, CRISIS→GROWTH skip, and the 2-consecutive-deficit
+CRISIS trigger sequence.
+
+**CTest filter**: `-R AdaptiveMusicIntensityTest`
+
+### Phase 10 Canonical Test Name Summary
+
+| Test Suite | Test Case | Source File | CMake Target | Label |
+|---|---|---|---|---|
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_PlaceZone_PlacesBuildingMesh` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_PlaceRoad_PlacesRoadMesh` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_DemolishZone_RemovesBuildingMesh` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_DemolishRoad_RemovesRoadMesh` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_PlaceServiceBuilding_PlacesServiceMesh` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_DensityUpgrade_SwapsBuildingMesh` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `CitySimulationRenderTest` | `CitySimulationRenderTest_MusicIntensity_CRISIS_OnDeficit` | `tests/simulation/city_simulation_render_test.cpp` | `simulation_tests` | `unit` |
+| `AdaptiveMusicIntensityTest` | `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` | `tests/simulation/adaptive_music_intensity_test.cpp` | `simulation_tests` | `unit` |
+
+CTest filter for all Phase 10 simulation render and music intensity tests:
+`-R "CitySimulationRenderTest|AdaptiveMusicIntensityTest"`
+
+### Phase 10b Canonical Test Name Summary
+
+| Test Suite | Test Case | Source File | CMake Target | Label |
+|---|---|---|---|---|
+| `TerrainFlatteningTest` | `TerrainFlattening_SetTileHeight_EnqueuesChunkRebuild` | `tests/terrain/terrain_flattening_test.cpp` | `terrain_tests` | `unit` |
+| `TerrainFlatteningTest` | `TerrainFlattening_NeighborBlend_ClampedToMapBounds` | `tests/terrain/terrain_flattening_test.cpp` | `terrain_tests` | `unit` |
+| `TerrainFlatteningSimTest` | `TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight` | `tests/simulation/terrain_flattening_sim_test.cpp` | `simulation_tests` | `unit` |
+| `CloudPlaneTest` | `CloudPlane_Init_CreatesCloudNode` | `tests/rendering/cloud_plane_test.cpp` | `opengl_tests` | `requires-opengl` |
+
+CTest filter for all Phase 10b terrain flattening and cloud plane tests:
+`-R "TerrainFlatteningTest|TerrainFlatteningSimTest|CloudPlaneTest"`

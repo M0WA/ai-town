@@ -47,6 +47,6 @@ Branch protection rules that reference `all-checks-pass` by name do not automati
 2. `all-checks-pass` now reflects five upstream jobs (`build-linux`, `build-windows`, `coverage-linux`, `markdown-lint`, `validate-assets`) — confirm the branch protection rule still shows `all-checks-pass` as the required check and that it is not stale or misconfigured.
 3. If using a merge queue, re-confirm the merge queue required-checks list also still contains `all-checks-pass`.
 
-Note: The `validate-assets` job definition and `all-checks-pass` wiring introduced in Phase 1 remain unchanged in Phase 5 (when the stub script gains 13 real asset checks) and Phase 9 (when a 14th sidecar check is added). Only the script content changes across those later phases — the CI wiring is stable from Phase 1 onward.
+Note: The `validate-assets` job definition and `all-checks-pass` wiring introduced in Phase 1 remain unchanged in Phase 5 (when the stub script gains 18 real checks: Checks #1–#14 and Checks #16–#19, plus Check #15 as a stub) and Phase 9 (when Check #15 is fully implemented and Check #20 is added). Only the script content changes across those later phases — the CI wiring is stable from Phase 1 onward.
 
 Any future job additions to `needs:` in `all-checks-pass` must follow the same re-confirmation procedure.

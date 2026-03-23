@@ -16,7 +16,8 @@ struct vec3;         // 3-component float vector (X, Y, Z)
 struct CameraState;  // position (vec3), forward (vec3), up (vec3)
 // SimSpeed is NOT a separate enum class — it is a type alias:
 //   using SimSpeed = SpeedMultiplier;   (defined in simulation_types.h)
-// IAudioSystem.h must #include "simulation_types.h" to get this alias.
+// ZoneType is also defined in simulation_types.h (enum class: Residential, Commercial, Industrial).
+// IAudioSystem.h must #include "simulation_types.h" to get both SimSpeed and ZoneType.
 // Do NOT forward-declare SimSpeed as "enum class SimSpeed;" — type aliases
 // cannot be forward-declared in C++, and this would create a duplicate-type
 // compile error when simulation_types.h is included.
@@ -48,6 +49,22 @@ enum class TimeOfDay { DAY, DUSK, NIGHT, DAWN };
 // See source-pool.md for the full eviction and transient-reserve rules.
 enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 
+// Defined in audio_types.h — reproduced here for interface completeness.
+// Music intensity tier driven by live simulation state.  Set by CitySimulation::update()
+// via IAudioSystem::setMusicIntensity().  AudioSystem maps each tier to the corresponding
+// gameplay stem pair (CALM→calm_01/02, GROWTH→growth_01/02, CRISIS→crisis_01/02).
+// Threshold conditions are authoritative in architecture/game-design/economy-model.md:
+//   CALM:   budget_surplus_pct >= 0%  (default state)
+//   GROWTH: net population change positive (population this tick > population previous tick)
+//   CRISIS: consecutive_deficit_months >= 2  (highest priority tier)
+// Priority order (highest first): CRISIS > GROWTH > CALM.
+// Added in Phase 10 (see implementation/phase-10.md — Music intensity interface deliverable).
+enum class MusicIntensity { CALM, GROWTH, CRISIS };
+
+// IAudioSystem — 18 pure-virtual methods.
+// Phase history: Phase 7 (base 14 methods) → Phase 10 (+setMusicIntensity = 15) →
+// Phase 11d (+acquireVehicleEnginePair, +releaseVehicleEnginePair, +updateVehicleAudio = 18).
+// Authoritative source for testability-architecture.md method-count comment.
 class IAudioSystem {
 public:
     virtual ~IAudioSystem() = default;
@@ -150,17 +167,135 @@ public:
     // Responsibilities: advance occlusion raycast budget, push time-of-day transitions,
     // and forward any pending crossfade or zone-layer source updates.
     virtual void update(float realDeltaSeconds) = 0;
+
+    // --- Phase 8 Volume Control API ---
+    // These three methods are declared here so that UIManager (Settings > Audio sliders)
+    // can call them via IAudioSystem* without knowing the concrete AudioSystem type.
+    // Phase 8 adds these three methods to IAudioSystem as pure-virtual members, implements
+    // them in AudioSystem with the correct member declarations and thread-safety semantics
+    // (std::atomic<float> for m_musicVolume and m_sfxVolume), adds them to MockAudioSystem,
+    // and adds three SettingsPanel unit tests. Phase 9 does not need to add or modify these
+    // methods.
+    // All gain values are linear multipliers in the range [0.0, 1.0].
+    // Default values: master = 1.0, music = 0.8, SFX = 0.8 (see settings-pause-menu.md).
+    // Values are persisted in the settings/config file (separate from save game files)
+    // and restored on the next session load.
+    virtual void setMasterVolume(float gain) = 0;
+    virtual void setMusicVolume(float gain) = 0;
+    virtual void setSFXVolume(float gain) = 0;
+
+    // --- Phase 10 Adaptive Music API ---
+    // Set the music intensity tier driven by live simulation state.
+    // Called by CitySimulation::update() whenever the city's fiscal or population state
+    // changes tier.  AudioSystem crossfades the active gameplay stem pair on the next
+    // beat boundary to the stem pair matching the new tier
+    // (CALM→calm_01/02, GROWTH→growth_01/02, CRISIS→crisis_01/02).
+    // Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) takes precedence internally;
+    // CitySimulation does NOT need to suppress GROWTH calls during off-hours.
+    // Calling setMusicIntensity() with the tier already active is a no-op.
+    // Thread-safety: call from the main thread only.
+    // AudioSystem implementation MUST store m_currentMusicIntensity as std::atomic<int>
+    // (or read under the audio-thread lock) because the audio thread reads it to select
+    // the next crossfade target.
+    // Threshold conditions that determine which tier to pass are defined in
+    // architecture/game-design/economy-model.md §Music Intensity Tiers.
+    // MockAudioSystem: add MOCK_METHOD(void, setMusicIntensity, (MusicIntensity), (override));
+    virtual void setMusicIntensity(MusicIntensity intensity) = 0;
+
+    // --- Phase 11d Vehicle Engine Pair API ---
+    // Acquire an idle+move source pair from the vehicle engine pool for a vehicle agent
+    // of the given zone type.  The pair is drawn from the 24-slot Traffic/Vehicle SFX
+    // budget (sources[0..50], NORMAL priority).  At most kMaxVehiclePairs (= 12) pairs
+    // may be active simultaneously.
+    //
+    // Returns: {idleIdx, moveIdx} — indices into the internal AL source pool to be used
+    //   for sfx_vehicle_engine_idle (idle source) and sfx_vehicle_engine_move (move source).
+    //   Returns {-1, -1} if the pool is exhausted (all 12 pairs in use) and no eviction
+    //   candidate with lower priority/greater distance exists.
+    //
+    // Callers MUST check the return value before using either index:
+    //   auto [idle, move] = m_audio->acquireVehicleEnginePair(zone);
+    //   if (idle == -1) { /* pool full — vehicle drives silently */ return; }
+    //
+    // Paired acquisition is atomic: either both sources are acquired or neither is
+    // (partial acquisition is prohibited — see source-pool.md §Paired acquisition).
+    //
+    // ZoneType determines base pitch multiplier applied to both idle and move sources:
+    //   ZoneType::Residential → 1.0  (car engine)
+    //   ZoneType::Commercial  → 0.85 (bus engine)
+    //   ZoneType::Industrial  → 0.85 (truck engine)
+    // This mapping is implemented in V1 and is not reserved for future use.
+    //
+    // See architecture/audio-architecture/source-pool.md §Vehicle Engine Source Constraints
+    // and §Vehicle Engine Source Pairing — Internal Tracking for the full pool contract.
+    //
+    // MockAudioSystem: add
+    //   MOCK_METHOD((std::pair<int,int>), acquireVehicleEnginePair, (ZoneType), (override));
+    virtual std::pair<int,int> acquireVehicleEnginePair(ZoneType zone) = 0;
+
+    // Return the idle+move source pair to the vehicle engine pool.
+    // idleIdx and moveIdx must be the values originally returned by acquireVehicleEnginePair().
+    // Both sources are stopped (alSourceStop) and their occlusion state is reset before
+    // the pool slots are marked free.
+    //
+    // Releasing only one source of a pair is prohibited.  The LOD-cull path must always
+    // call releaseVehicleEnginePair(idleIdx, moveIdx) — never release individual sources
+    // via any other pool release path.
+    //
+    // Passing {-1, -1} (a failed acquisition result) is a no-op and is safe to call.
+    //
+    // See architecture/audio-architecture/source-pool.md §releaseVehicleEnginePair.
+    //
+    // MockAudioSystem: add
+    //   MOCK_METHOD(void, releaseVehicleEnginePair, (int, int), (override));
+    virtual void releaseVehicleEnginePair(int idleIdx, int moveIdx) = 0;
+
+    // Per-frame vehicle engine audio state update.
+    // Called by main.cpp once per render frame for each active vehicle, inside the
+    // per-frame agent sync loop, AFTER calling getAgentPositions() and BEFORE drawScene().
+    // AudioSystem uses these values to:
+    //   - Set AL_PITCH on both sources: basePitch × lerp(0.75, 1.35, speedFraction),
+    //     where basePitch is 1.0 (car) or 0.85 (bus/truck — determined from zone type at
+    //     acquire time and stored internally by AudioSystem).
+    //   - Set AL_GAIN crossblend: idle gain = max(0, 1 − (speedFraction − 0.21) / 0.36);
+    //     move gain = 1 − idle gain (see dynamic-soundscape.md §Vehicle Engine Audio).
+    //     Derivation: speedFraction = currentSpeed / 13.9 m/s (max road speed per traffic-system.md);
+    //     0.21 ≈ 3/13.9 (idle-full-on threshold); 0.36 ≈ (8−3)/13.9 (ramp width).
+    //   - Set AL_POSITION on both sources to (worldX, 0.0f, worldZ) for 3D spatial rolloff.
+    // idleIdx / moveIdx must be the values returned by acquireVehicleEnginePair(); passing
+    // {-1, -1} (a failed acquisition) is a no-op.
+    //
+    // MockAudioSystem: add
+    //   MOCK_METHOD(void, updateVehicleAudio, (int, int, float, float, float), (override));
+    //
+    // Threading model: updateVehicleAudio() is called on the MAIN THREAD every frame.
+    // The implementation stores speedFraction, worldX, and worldZ into the per-slot
+    // std::atomic<float> fields of VehiclePairSlot (source-pool.md §Vehicle Engine Source
+    // Pairing — Internal Tracking).  The audio thread reads these atomics on each wake
+    // (same pattern as m_occlusionGainTarget) and applies the AL_PITCH, AL_GAIN, and
+    // AL_POSITION calls.  No mutex is required for the main-thread write; std::atomic
+    // provides the necessary memory ordering.  AL calls are NEVER made on the main thread
+    // from this method.
+    virtual void updateVehicleAudio(int idleIdx, int moveIdx,
+                                    float speedFraction,
+                                    float worldX, float worldZ) = 0;
 };
 ```
 
-`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all eleven methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
+`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all eighteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
+
+**MockAudioSystem atomicity rule**: `MockAudioSystem` must declare all 18 `MOCK_METHOD` entries in exact sync with the `IAudioSystem` interface. Any commit that adds or removes a method on `IAudioSystem` must update `MockAudioSystem` in the same commit. Failure to do so causes `simulation_tests` and `ui_tests` targets to fail to compile (pure-virtual override missing). This constraint is especially critical before Phase 11d test authoring begins, when all three vehicle-audio methods (`acquireVehicleEnginePair`, `releaseVehicleEnginePair`, `updateVehicleAudio`) must already be present in `MockAudioSystem`.
 
 ---
 
 ```cpp
 class AudioSystem : public IAudioSystem {
 public:
-    explicit AudioSystem(IClock* clock);   // alcOpenDevice + alcCreateContext (with HRTF attrs); throws on failure
+    explicit AudioSystem(IClock* clock);   // alcOpenDevice + alcCreateContext (with HRTF attrs).
+                                  // alcOpenDevice failure: logs warning, sets m_deviceLost=true, returns early
+                                  // (silent mode — all IAudioSystem calls become no-ops). Does NOT throw.
+                                  // alcCreateContext / alcMakeContextCurrent / ALC_EXT_thread_local_context
+                                  // failures still throw std::runtime_error.
                                   // clock: injectable for deterministic timing in tests (crossfade duck timer,
                                   // m_lastDuckWakeTime). Production passes WallClock; tests pass ManualClock.
     ~AudioSystem();  // MUST follow the audio thread shutdown sequence below
@@ -226,6 +361,16 @@ private:
     // Never write PFNALCSETTHREADCONTEXTPROC in audio_system.h — that type requires
     // <AL/alext.h>, which would break headless test compilation.
     FnSetThreadCtx            m_fnSetThreadCtx{nullptr};
+    // Volume control — cross-thread members (written by main thread, read by audio thread):
+    // m_musicVolume and m_sfxVolume use std::atomic<float> because setMusicVolume() /
+    // setSFXVolume() are called from the main thread while the audio thread reads them
+    // during per-frame source gain updates — a plain float would be a C++ data race (UB).
+    // m_masterVolume uses plain float because setMasterVolume() calls
+    // alListenerf(AL_GAIN, gain) directly on the calling (main) thread and the raw value
+    // is never stored for later audio-thread reads; no cross-thread access occurs.
+    std::atomic<float>        m_musicVolume{0.8f};   // music source gain — written by main thread via setMusicVolume(), read by audio thread during source gain updates
+    std::atomic<float>        m_sfxVolume{0.8f};     // SFX source gain — written by main thread via setSFXVolume(), read by audio thread during source gain updates
+    float                     m_masterVolume{1.0f};  // master AL listener gain — applied immediately by setMasterVolume() via alListenerf(AL_GAIN, gain); no cross-thread read
     // Music ducking state machine (audio thread only for gain writes; main thread reads atomically):
     enum class DuckState { IDLE, DUCKING, DUCKED, RELEASING };
     std::atomic<DuckState>    m_duckState{DuckState::IDLE};
@@ -259,6 +404,21 @@ private:
     float                     m_gameOverFadeT{0.0f};   // seconds elapsed in game-over fade (0.0→2.0); advanced by audio thread dt each wake; used to compute per-stem gain during fade
 };
 ```
+
+## IAudioSystem Header Include Requirements
+
+The file `src/interfaces/IAudioSystem.h` must include the following headers:
+
+```cpp
+#include "simulation_types.h"    // Required: SimSpeed (type alias for SpeedMultiplier), ZoneType (enum class; Phase 11d)
+#include "audio_types.h"         // Required: SoundId, MusicTrackId, SoundPriority, StingerType, TimeOfDay, SoundHandle, MusicIntensity
+#include "camera_state.h"        // Required: CameraState (used in syncListenerToCamera)
+#include "vec3.h"                // Required: vec3 (used in playPositionalSound and syncListenerToCamera)
+```
+
+**Critical dependency**: `SimSpeed` is a type alias (`using SimSpeed = SpeedMultiplier`) defined in `simulation_types.h`. IAudioSystem method signatures (line 74: `virtual void setSpeed(SimSpeed speed)`) use `SimSpeed` directly. **Forward-declaring `SimSpeed` as `enum class SimSpeed;` is prohibited** — type aliases cannot be forward-declared in C++, and attempting this will produce a duplicate-type compile error when `simulation_types.h` is included. IAudioSystem must include the full `simulation_types.h` header, not a forward declaration.
+
+---
 
 - Owned by the application root; no other subsystem creates AL contexts
 - The `AudioSystem` constructor must launch `m_audioThread` and then wait on `m_initCV` (with a timeout of 5 seconds) before returning, so that thread-local context initialization failures are surfaced before the first audio call. The constructor wait must hold `m_initMutex` via `std::unique_lock` and use the predicate form of `wait_for` (calling `wait_for` without holding the mutex is undefined behavior):
@@ -312,15 +472,24 @@ The audio thread then **additionally** calls `alcSetThreadContext(m_context)` vi
 **Constructor sequence (within `AudioSystem::AudioSystem(IClock*)`):**
 
 ```cpp
-// Step 1: open device and create context (throws on failure — done before thread launch).
+// Step 1: open device and create context.
 // alcMakeContextCurrent(m_context) establishes the MANDATORY, PERMANENT process-wide
 // context binding for the main thread. This binding must remain active for the entire
 // application lifetime — syncListenerToCamera() issues AL listener calls on the main
 // thread every frame and requires a current context on that thread.
 // The audio thread will ADDITIONALLY call alcSetThreadContext(m_context) for its own
 // thread-local binding; this does not displace the process-wide binding.
-m_device  = alcOpenDevice(nullptr);
-if (!m_device) throw std::runtime_error("alcOpenDevice failed");
+m_device = alcOpenDevice(nullptr);
+if (!m_device) {
+    // No audio device — degrade to silent mode rather than aborting the game.
+    // m_deviceLost=true causes all IAudioSystem methods to return early (no AL calls).
+    // All partial-construction guards (m_deviceCreated, m_contextCreated, etc.) remain
+    // false; the destructor skips all AL/ALC cleanup safely. The audio thread is never
+    // launched; m_audioThread remains default-constructed (not joinable).
+    logWarning("alcOpenDevice failed — no audio device available; running in silent mode");
+    m_deviceLost.store(true);
+    return;
+}
 // ... build HRTF attrs array (see hrtf-initialization.md) ...
 m_context = alcCreateContext(m_device, attribs);
 if (!m_context || alcMakeContextCurrent(m_context) == ALC_FALSE)
@@ -440,6 +609,8 @@ The `m_initMutex` / `m_initCV` pair is a construction-time synchronization mecha
 
 ### Enforcement Point
 
+**This cap applies ONLY when `loadSound()` is called with a `SoundId` in the range [17, 19]. All other SoundIds are exempt from this duration check.**
+
 The check applies when `loadSound()` is called with a `SoundId` in the zone loop range:
 
 - `sfx_zone_residential` (ID 17)
@@ -480,6 +651,98 @@ The pre-load tier boundary used when classifying sounds into the pre-load vs. st
 
 ---
 
+## Linux SIGKILL Prevention — rtkit and PipeWire
+
+On Linux, two separate mechanisms can deliver an **uncatchable SIGKILL** to the process
+during heavy road/zone placement operations (terrain flushes, mesh rebuilds):
+
+### 1. rtkit RLIMIT_RTTIME (primary)
+
+When OpenAL Soft contacts **rtkit-daemon** via the system D-Bus to request `SCHED_RR`
+scheduling for its mixing thread, rtkit also calls `setrlimit(RLIMIT_RTTIME, 200ms)`,
+which applies **process-wide** (all threads). If the mixing thread then accumulates
+more than 200 ms of continuous RT CPU time without blocking — for example, catching up
+on a large backlog of samples after a long frame — the kernel delivers SIGKILL
+unconditionally (no signal handler fires).
+
+**Fix**: `rt-prio = 0` in the `[general]` section of the ALSOFT config disables rtkit
+integration entirely. The mixing thread runs as `SCHED_OTHER`; no `RLIMIT_RTTIME` is
+set on any thread.
+
+**Verified by**: monitoring `/proc/<pid>/task/*/limits` — with the fix all threads show
+`Max realtime timeout: unlimited`; without it the mixing thread shows `SCHED_RR` and
+all threads show `Max realtime timeout: 200000 µs`.
+
+### 2. PipeWire ALSA plugin kill() (secondary)
+
+The PipeWire ALSA plugin (`libasound_module_pcm_pipewire.so`) calls
+`kill(getpid(), SIGKILL)` when its stream is destroyed after repeated underruns.
+The PulseAudio ALSA plugin (`libasound_module_pcm_pulse.so`) does not have this
+behaviour.
+
+**Fix**: `device = pulse` in the `[alsa]` section routes OpenAL through the PulseAudio
+ALSA plugin instead of PipeWire's native ALSA plugin.
+
+### ALSOFT Config Written by AudioSystem
+
+`AudioSystem::AudioSystem()` writes `/tmp/aitown_alsoft.conf` (if `ALSOFT_CONF` is not
+already set) with both fixes before the first `alcOpenDevice()` call:
+
+```ini
+[general]
+rt-prio = 0
+period_size = 4096
+periods = 8
+
+[alsa]
+device = pulse
+```
+
+`period_size=4096, periods=8` gives a ~744 ms buffer at 44100 Hz as additional headroom
+against any remaining frame spikes. `ALSOFT_CONF` is set with `overwrite=0` so a user
+can override with their own config.
+
+### 3. Batch Placement Sound Flooding (contributing factor)
+
+Zone and road drag operations release all queued tiles at once on LMB-up.
+`UIManager` loops `doTerrainPlacement(tx, tz)` for every tile in the rectangle/line;
+each call reaches `CitySimulation::placeZone()` / `placeRoad()`, which previously fired
+`SFX_EARTHWORKS + SFX_BUILD_PLACE` (or `SFX_ROAD_BUILD`) unconditionally — 2 × N
+`playPositionalSound` calls in a single frame (e.g. 200 calls for a 10×10 zone).
+
+This floods the SFX source pool with identical concurrent positional sources and
+dramatically increases the HRTF mixing load per period, making the ALSA catch-up loop
+more likely to hit the 200 ms RLIMIT\_RTTIME limit described above.
+
+**Fix**: `CitySimulation` gates both `placeZone()` and `placeRoad()` behind a shared
+100 ms cooldown stored in `m_lastPlacementSoundTime` (a `double` member initialised to
+`-1.0`). The cooldown uses the injected `IClock*` (`m_clock->nowSeconds()`) for
+determinism in tests.
+
+```cpp
+// In placeZone() and placeRoad():
+if (m_audio && m_clock) {
+    const double now = m_clock->nowSeconds();
+    if (now - m_lastPlacementSoundTime >= 0.1) {
+        m_lastPlacementSoundTime = now;
+        const vec3 pos{static_cast<float>(tileX), 0.0f,
+                       static_cast<float>(tileZ)};
+        if (earthworksCostOverride > 0)
+            m_audio->playPositionalSound(SFX_EARTHWORKS, pos,
+                                         SoundPriority::NORMAL, 1.0f);
+        m_audio->playPositionalSound(SFX_BUILD_PLACE /*or SFX_ROAD_BUILD*/, pos,
+                                     SoundPriority::NORMAL, 1.0f);
+    }
+}
+```
+
+The result: any batch operation that completes within 100 ms plays exactly **one**
+earthworks cue and one placement cue, regardless of how many tiles were modified.
+The cooldown is shared between zone and road placement so interleaved calls are also
+gated correctly.
+
+---
+
 ## Phase 1 sound-dev-opensoftal Sign-Off
 
 **Date**: 2026-02-21
@@ -496,3 +759,50 @@ The following Phase 1 items have been verified by code inspection:
 4. **getCameraState() live-path uses getUpVector()**: Code inspection of `src/ui/CameraController.cpp` confirms that the live-camera path (when `camera != nullptr`) assigns `state.up = toVec3(m_camera->getUpVector())` with an explicit comment `// MUST use getUpVector(), NOT (0,1,0)`. The hardcoded `(0,1,0)` form is absent from the live path. VERIFIED.
 
 5. **onSourceRecycled() / m_occlusionMutex contract present**: Code inspection of `architecture/audio-architecture/audio-occlusion.md` confirms that the `onSourceRecycled()` implementation block explicitly shows `std::lock_guard<std::mutex> lk(m_occlusionMutex)` as the first statement before any EFX filter writes, with documentation that this is called from the main thread at SFX pool acquisition/eviction time, that the audio thread's `updateOcclusion()` holds the same mutex during EFX filter writes, and that acquiring `m_occlusionMutex` in `onSourceRecycled()` is correct and carries no deadlock risk because `m_streamMutex` and `m_occlusionMutex` are never held simultaneously by the same thread. VERIFIED.
+
+---
+
+## Phase 7 sound-dev-opensoftal Sign-Off
+
+**Date**: 2026-02-27
+**Role**: sound-dev-opensoftal
+
+Phase 7 full `AudioSystem` RAII implementation delivered. The following items are verified:
+
+1. **Constructor sequence**: `alcOpenDevice` (failure → silent mode: `m_deviceLost=true`, `return`)
+   → HRTF attrs context → `alcMakeContextCurrent` →
+   `alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED)` → `alGenSources(62)` → pre-load queue populate →
+   `alcGetProcAddress("alcSetThreadContext")` (throws `std::runtime_error` if null) → EFX filter
+   allocation → `m_occlusionGainTarget[]` init to 1.0f → `m_useThreadLocalCtx = true` → thread
+   launch → `m_initCV.wait_for` 5 s. VERIFIED by code inspection of
+   `src/audio/AudioSystem.cpp`. Silent-mode early-return verified: all `m_deviceLost` guards
+   confirmed on `setMusicTrack`, `triggerStinger`, `syncListenerToCamera`, `transitionToGameplay`,
+   `update`, `setMasterVolume`, `playSound`, `playPositionalSound`, `stopSound`.
+
+2. **Audio thread init order**: `m_fnSetThreadCtx(m_context)` FIRST action; pre-load queue drain;
+   `m_lastDuckWakeTime = m_clock->nowSeconds()` BEFORE `notify_one` (epoch-dt prevention);
+   `m_initDone = true; notify_one()`. VERIFIED — `DuckStateMachine_FirstWake_DtIsNotEpochSized`
+   test confirms epoch-dt prevention; test passes at 16/16.
+
+3. **Shutdown Step 3.5**: `if (m_context && m_useThreadLocalCtx) { alcMakeContextCurrent(m_context); }`
+   executed after `join()` before any AL cleanup. `AL_BUFFERS_QUEUED` query used (never hardcoded
+   count). `m_efxAllocationAttempted` (not `m_efxAvailable`) guards destructor filter loop.
+   VERIFIED by code inspection of destructor sequence.
+
+4. **`IAlcFunctions` seam**: `src/interfaces/IAlcFunctions.h` defines interface (moved from
+   `src/audio/ialc_functions.h` in Phase 10b Feature 3); `DefaultAlcFunctions` wraps
+   real ALC in `AudioSystem.cpp`; `MockAlcFunctions` in `audio_thread_test.cpp` returns null for
+   all `getProcAddress` calls. `AudioThread_AbsentThreadLocalContext_ConstructorThrows` now active
+   (GTEST\_SKIP removed) and passing. VERIFIED — 16/16 tests pass.
+
+5. **Source pool layout**: `VehiclePairSlot` defined in `AudioSourcePool.h` (complete type required
+   for `std::array<VehiclePairSlot, kMaxVehiclePairs>`). `kTransientReserveStart=51` for LOW/NORMAL
+   SFX; `kEvictableSFXCount=55` for HIGH/CRITICAL. Atomic pair acquisition in
+   `acquireVehicleEnginePair` — partial acquisition prohibited. VERIFIED.
+
+6. **Bar-boundary tracking**: `m_samplesQueued` software counter incremented by decoded frames.
+   `AL_SAMPLE_OFFSET` never used. Bootstrap branch fires once when
+   `m_nextBarBoundary == 0 && m_samplesQueued > 0`. VERIFIED by code inspection.
+
+7. **Test results**: `ALSOFT_DRIVERS=null AITOWN_HEADLESS=1 ./build/audio_tests` → 16/16 PASSED,
+   0 FAILED. Full project build: 282/282 unit tests pass.

@@ -22,3 +22,18 @@ enum class GameMode {
     Sandbox,
     Scenario
 };
+
+// ActiveTool — the currently active placement/interaction tool in the HUD toolbar.
+// None means no tool is active (camera-only mode, same as the Phase 8 default state).
+// Used by UIManager::m_activeTool and by the world-interaction input block (Priority 7)
+// in UIManager::onEvent() to route mouse events to the correct placement handler.
+// (ref: architecture/ui-ux/hud-layout.md, architecture/ui-ux/hotkey-scheme.md,
+//  architecture/ui-ux/input-arbitration.md — Priority 5 and Priority 7)
+enum class ActiveTool {
+    None,        // no tool active — camera drag/pan only
+    Zone,        // place zone tile (R/C/I, three density tiers)
+    Road,        // place road tile
+    Utilities,   // place service building (Power Plant / Water Tower / Fire Station / Police Station)
+    Demolish,    // demolish any tile
+    Query        // inspect tile data via InspectorPanel
+};

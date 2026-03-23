@@ -1,6 +1,7 @@
 #pragma once
 #include "src/platform/input_event.h"      // InputEvent definition
 #include "src/interfaces/camera_state.h"   // CameraState struct — minimal header, no audio-domain types
+#include "src/ui/key_bindings.h"           // KeyBindings — hotkey config accepted in constructor
 // Do NOT include audio_types.h here: including it leaks SoundPriority, StingerType, SoundId,
 // and other audio-domain types into every UI translation unit that includes CameraController.h.
 
@@ -18,7 +19,7 @@ namespace irr { namespace scene { class ICameraSceneNode; } }
 // Arrow-key pan uses the same formula * kKeyboardPanRate.
 // sensitivityMultiplier applies ONLY to MMB drag and edge-scroll — NOT keyboard pan.
 //
-// Constructor signature LOCKED at Phase 1.
+// Phase 3: constructor extended with optional KeyBindings parameter (default: KeyBindings{}).
 // camera parameter MAY be nullptr in unit tests (null-camera test seam).
 class CameraController {
 public:
@@ -35,8 +36,11 @@ public:
     // Constructor: camera may be nullptr (unit-test seam — getCameraState() uses m_pitch/m_yaw formula).
     // startInFullscreen: true → m_edgeScrollEnabled=true (fullscreen default: ON)
     //                    false → m_edgeScrollEnabled=false (windowed default: OFF)
+    // bindings: hotkey configuration; defaults to KeyBindings{} (default hotkeys).
+    //           Phase 3 adds KeyBindings parameter; existing tests pass default value.
     // Production instance constructed with startInFullscreen=false (1280x720 windowed window).
-    CameraController(irr::scene::ICameraSceneNode* camera, bool startInFullscreen);
+    CameraController(irr::scene::ICameraSceneNode* camera, bool startInFullscreen,
+                     const KeyBindings& bindings = KeyBindings{});
 
     // Process an input event. Returns true if consumed (stops further propagation).
     // Takes const InputEvent& — uses physX/physY for drag-delta (UX-1 requirement).
@@ -64,8 +68,13 @@ public:
     float getSensitivityMultiplier() const { return m_sensitivityMultiplier; }
     void  setSensitivityMultiplier(float s) { m_sensitivityMultiplier = s; }
 
+    // Set the camera look-at target in world space (XZ plane, Y=0).
+    // Used to position the camera over the terrain center after generation.
+    void setTarget(float worldX, float worldZ) { m_targetX = worldX; m_targetZ = worldZ; }
+
 private:
     irr::scene::ICameraSceneNode* m_camera;
+    KeyBindings m_bindings;  // hotkey config (Phase 8 wires Q/E to rotate)
 
     // Camera spherical coordinates
     float m_pitch{-45.0f};   // degrees, clamped to [-70, -20]
@@ -81,6 +90,12 @@ private:
     bool  m_mmbDragActive{false};  // MMB (button=2) drag in progress
     int   m_prevPhysX{0};          // previous physical x for drag-delta
     int   m_prevPhysY{0};          // previous physical y for drag-delta
+
+    // Arrow-key held state (continuous pan applied in update(dt))
+    bool  m_panLeft{false};
+    bool  m_panRight{false};
+    bool  m_panForward{false};
+    bool  m_panBackward{false};
 
     // Edge scroll & focus
     bool  m_edgeScrollEnabled;     // set from startInFullscreen in constructor

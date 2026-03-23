@@ -9,7 +9,9 @@
 
 ## IUIBackend Method Contract
 
-The total method count is **17**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+The total method count is **21**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+
+Methods 1–17 were established in Phase 8. Method 18 (`setElementBackground`) was added in Phase 9b (minimap dark-panel fix — see `architecture/ui-ux/minimap.md` §IUIBackend method 18). Method 19 (`setElementMonoFont`) was added in Phase 10 (monospace numeric readout requirement — see below). Method 20 (`setElementRect`) was added in Phase 10 (modal dialog centring fix — see `architecture/ui-ux/modal-dialog-system.md` §Element Repositioning). Method 21 (`setElementTextColor`) was added post-Phase-10 (service coverage overlay text colour; already present in `src/interfaces/IUIBackend.h` and `tests/ui/MockUIBackend.h` — no plan step required).
 
 ```cpp
 class IUIBackend {
@@ -47,6 +49,7 @@ public:
 
     // 10. Assign a texture (identified by its own UIElementHandle) to an image element.
     //     The textureHandle must have been obtained via loadTexture() (method 17).
+    //     Note: method numbering is stable — loadTexture is method 17 regardless of later additions.
     virtual void setElementImage(UIElementHandle handle, UIElementHandle textureHandle) = 0;
 
     // 11. Return the current displayed text of an element. Used in test assertions.
@@ -79,6 +82,52 @@ public:
     //     not found, unsupported format, or driver error). The backend owns the loaded
     //     texture resource; call removeElement(handle) to release it when no longer needed.
     virtual UIElementHandle loadTexture(const std::string& path) = 0;
+
+    // 18. Set a filled background colour on an IGUIStaticText element and enable background
+    //     drawing. r, g, b, a are each in [0, 255]. Enables IrrlichtUIBackend to call
+    //     setDrawBackground(true) and setBackgroundColor() on the underlying element without
+    //     exposing Irrlicht types to src/ui/ callers.
+    //     Only valid for handles created via addStaticText(). Has no effect on button elements.
+    //     Added in Phase 9b for the Minimap dark-panel fix.
+    //     NAMING NOTE: earlier spec drafts used setElementBackgroundColor(handle, uint32_t argb)
+    //     with a packed ARGB argument. The canonical form throughout the codebase uses four
+    //     separate int channels (r, g, b, a). All call sites must use this 4-channel form.
+    //     See architecture/ui-ux/minimap.md §IUIBackend method 18.
+    virtual void setElementBackground(UIElementHandle handle, int r, int g, int b, int a) = 0;
+
+    // 19. Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element via
+    //     IGUIStaticText::setOverrideFont(). Only valid for handles created via addStaticText().
+    //     In IrrlichtUIBackend: looks up element, casts to IGUIStaticText*, calls
+    //     setOverrideFont(m_monoFont). If m_monoFont is null (file absent — graceful fallback),
+    //     this method is a no-op (the element keeps the environment default font).
+    //     In MockUIBackend: MOCK_METHOD stub; no-op in StubUIBackend.
+    //     Panel code calls this on every numeric IGUIStaticText element (treasury balance,
+    //     population count, tax rate fields, budget line items, density unlock threshold,
+    //     in-game date/time) immediately after addStaticText(). Labels, tooltips, and button
+    //     text MUST NOT call setElementMonoFont().
+    //     Added in Phase 10 to replace the untestable static_cast<IrrlichtUIBackend*> pattern.
+    //     See architecture/ui-ux/hud-layout.md §Font Loading — Monospace requirement.
+    virtual void setElementMonoFont(UIElementHandle handle) = 0;
+
+    // 20. Reposition and resize an existing element in-place without destroying
+    //     its handle. Coordinates are in virtual 1920×1080 space.
+    //     In IrrlichtUIBackend: updates the stored virtualRect (so
+    //     handleViewportResize() continues to scale correctly) and immediately
+    //     applies IGUIElement::setRelativePosition() at the current physical
+    //     resolution. Element type and all other state are preserved.
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     ModalDialog uses this to centre the dialog box and reposition its
+    //     title/body/button children without destroying and recreating handles.
+    //     Added in Phase 10 for the modal dialog centring fix.
+    //     See architecture/ui-ux/modal-dialog-system.md §Element Repositioning.
+    virtual void setElementRect(UIElementHandle handle, int x, int y, int w, int h) = 0;
+
+    // 21. Override the text colour of a static text element.
+    //     r, g, b are in [0, 255]; alpha is fixed at 255 (fully opaque).
+    //     In IrrlichtUIBackend: calls IGUIStaticText::setOverrideColor(SColor(255, r, g, b)).
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     Added post-Phase-10 for service coverage overlay text colour (already implemented).
+    virtual void setElementTextColor(UIElementHandle handle, int r, int g, int b) = 0;
 };
 ```
 
@@ -113,13 +162,49 @@ constexpr int kToolbarLeft   = 8;    // virtual x-coordinate (1920×1080 space)
 constexpr int kToolbarRight  = 72;   // virtual x-coordinate (1920×1080 space)
 constexpr int kToolbarTop    = 64;   // virtual y-coordinate (1920×1080 space)
 constexpr int kToolbarBottom = 784;  // virtual y-coordinate covers tool group + undo + demand + active tool
+
+// Zone sub-panel (visible when ActiveTool::Zone is active)
+// 3×3 button grid: 3 columns (R/C/I) × 3 rows (Low/Med/High); each button 64×40 px, 4 px gap.
+constexpr int kZoneSubPanelLeft   = 80;   // virtual x — 8 px right of toolbar right edge (72)
+constexpr int kZoneSubPanelTop    = 64;   // virtual y — aligned with Zone button top (kToolbarTop)
+constexpr int kZoneSubPanelWidth  = 200;  // (64 × 3) + (4 × 2)
+constexpr int kZoneSubPanelHeight = 128;  // (40 × 3) + (4 × 2)
+constexpr int kZoneSubBtnW        = 64;   // zone sub-panel button width
+constexpr int kZoneSubBtnH        = 40;   // zone sub-panel button height
+constexpr int kZoneSubBtnGap      = 4;    // gap between zone sub-panel buttons
+
+// Utilities sub-panel (visible when ActiveTool::Utilities is active)
+// 2×2 button grid: 2 columns × 2 rows; each button 96×48 px, 4 px gap.
+// Aligned with the Utilities button row (y:176).
+constexpr int kUtilSubPanelLeft   = 80;   // virtual x — 8 px right of toolbar right edge (72)
+constexpr int kUtilSubPanelTop    = 176;  // virtual y — aligned with Utilities button row
+constexpr int kUtilSubPanelWidth  = 196;  // (96 × 2) + 4
+constexpr int kUtilSubPanelHeight = 100;  // (48 × 2) + 4
+constexpr int kUtilSubBtnW        = 96;   // utilities sub-panel button width
+constexpr int kUtilSubBtnH        = 48;   // utilities sub-panel button height
+constexpr int kUtilSubBtnGap      = 4;    // gap between utilities sub-panel buttons
+
+// Zone overlay ARGB colours (semi-transparent, alpha=0x60 ≈ 38%)
+// Encoding: 0xAARRGGBB (Irrlicht SColor format).
+// Used by UIManager::m_overlayMap values and IrrlichtRenderer::setZoneOverlay().
+// In colorblind mode UIManager substitutes kOverlayArgb*_Colorblind values (see
+// resolution-ui-scaling.md — 3D zone colour overlay colorblind spec).
+constexpr uint32_t kOverlayArgbResidential = 0x6000FF00u; // semi-transparent green
+constexpr uint32_t kOverlayArgbCommercial  = 0x600000FFu; // semi-transparent blue
+constexpr uint32_t kOverlayArgbIndustrial  = 0x60FFFF00u; // semi-transparent yellow
+// Colorblind-safe alternatives (deuteranopia / protanopia safe):
+constexpr uint32_t kOverlayArgbResidential_CB = 0x602020FFu; // blue-violet
+constexpr uint32_t kOverlayArgbCommercial_CB  = 0x60FF8000u; // orange
+constexpr uint32_t kOverlayArgbIndustrial_CB  = 0x60FF00FFu; // magenta
 ```
 
 All carve-out constants in `ui_constants.h` MUST be in 1920×1080 virtual space — NOT in physical pixel
 values or in the 1280×720 minimum resolution space. The UIScaler converts physical pixels to 1920×1080
 virtual space; constants must match the virtual space.
 
-These constants are used directly by `UIManager` and panel code (e.g., event carve-out checks in `onEvent()`, input arbitration skip zones). Runtime `IUIBackend` calls must NOT be used to derive these values — the toolbar layout is fixed in the virtual coordinate space and must not depend on element query results. If the toolbar dimensions ever change, update only `ui_constants.h`; no runtime query path is needed.
+These constants are used directly by `UIManager` and panel code (e.g., event carve-out checks in `onEvent()`, input arbitration skip zones, sub-panel button layout). Runtime `IUIBackend` calls must NOT be used to derive these values — the toolbar layout is fixed in the virtual coordinate space and must not depend on element query results. If the toolbar dimensions ever change, update only `ui_constants.h`; no runtime query path is needed.
+
+Any new toolbar item or sub-panel added to the UI MUST add its layout constants to `ui_constants.h` — no hardcoded pixel literals are permitted in dispatch logic, sub-panel position/size calculations, or input carve-out checks.
 
 ## Class Structure
 
@@ -157,6 +242,23 @@ public:
 
     // Per-frame update — call BEFORE sceneManager->drawAll().
     // realDeltaSeconds: wall-clock delta (not simulation delta).
+    // NOTE (GD-H3 bridge): UIManager::update() is the EXCLUSIVE polling bridge for the
+    // deficit-streak CRITICAL toast (GD-H3). Each frame, update() calls
+    // m_sim->getConsecutiveDeficitMonths() and dispatches the CRITICAL toast to
+    // NotificationManager when the threshold is crossed. NotificationManager does NOT
+    // call getConsecutiveDeficitMonths() — its only simulation interaction is calling
+    // m_sim->setPaused(true) (via ISimulationPauser inheritance) when a CRITICAL toast
+    // arrives. All deficit-month polling and threshold evaluation lives here, in update().
+    // NOTE (Phase 11 — stinger_milestone bridge): update() also polls
+    // m_sim->getCityRating() each frame and compares it to the cached m_previousCityRating.
+    // When getCityRating() returns a value greater than m_previousCityRating (upward tier
+    // transition), update() calls m_audio->triggerStinger(StingerType::MILESTONE) exactly
+    // once and advances the cache. m_previousCityRating is NOT serialised by SaveSystem;
+    // it is re-initialised by onGameLoaded() after each load to prevent a spurious stinger
+    // on the first update() tick. CitySimulation must NOT call triggerStinger directly —
+    // UIManager is the sole dispatcher for stinger_milestone, following the same pattern
+    // established for stinger_crisis in Phase 10. See architecture/audio-architecture/
+    // dynamic-soundscape.md § stinger_milestone and implementation/phase-11.md § stinger_milestone.
     void update(float realDeltaSeconds);
 
     // Render all GUI panels — call AFTER sceneManager->drawAll() and BEFORE endScene().
@@ -178,6 +280,69 @@ public:
     void showForcedLoanDialog(const LoanTerms& terms);
     void showGameOverModal(int64_t totalDebt, int monthsInDeficit);
     void closeModal();  // safe to call even if no modal active
+
+    // Terrain-load gate (called by main game loop):
+    // When loading = true, UIManager::update() returns immediately without polling
+    // pollPendingNotification() or updating any panel state. When loading = false,
+    // normal update() processing resumes.
+    // This method is NOT part of any interface — it is a public concrete method on
+    // UIManager and is called by the main loop which holds a concrete UIManager reference.
+    // It does NOT affect the IUIBackend interface.
+    // Do NOT add a Loading state to GameState — V1 uses this boolean flag instead
+    // (per architecture/game-design/game-over-flow.md line 19).
+    void setLoadingTerrain(bool loading);
+
+    // Unsaved-changes tracking (called from world-interaction and save paths):
+    // setUnsavedChanges(true)  — called after any successful tile placement, zone change, or demolish.
+    // setUnsavedChanges(false) — called after a successful manual save or auto-save.
+    // Controls m_hasUnsavedChanges, the amber dot indicator visibility (see hud-layout.md),
+    // and the Quit-to-Desktop / Quit-to-Main-Menu unsaved-progress modal gate
+    // (see settings-pause-menu.md). Phase 9b: only the true-path is wired (placement/demolish);
+    // the false-path is wired in the Save System phase.
+    void setUnsavedChanges(bool hasChanges);
+
+    // Phase 9b — World Interaction late-binding setters (NOT constructor parameters;
+    // called from main.cpp after terrain generation, before the game loop starts):
+    void setRenderer(IRenderer* renderer);          // stores m_renderer for pickTerrainTile calls
+    void setTerrainQuery(ITerrainQuery* terrain);   // stores m_terrain for slope/height queries
+    void setMapDimensions(int mapTilesX, int mapTilesZ); // stores m_mapTilesX/Z; clears m_overlayMap
+                                                    // if called a second time (re-call safety).
+
+    // Phase 9b — New-game reset (called from main.cpp when the player starts a new city or
+    // loads a saved game):
+    // Clears m_overlayMap and calls m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, {})
+    // if m_renderer is non-null, so the zone colour overlay from the previous session is not
+    // displayed on the new map. Also resets m_activeTool to ActiveTool::None, clears
+    // m_hoveredTileX/Z to {-1,-1}, and calls m_renderer->setTileHoverHighlight(-1,-1)
+    // so any frozen hover quad from the previous session is hidden.
+    // Does NOT change m_mapTilesX/m_mapTilesZ — the caller must call setMapDimensions()
+    // separately if the new map has different dimensions.
+    // Safe to call before setRenderer() is wired (null-check on m_renderer).
+    // Used by WorldInteraction_NewGameLoad_ClearsOverlay unit test as the authoritative
+    // overlay-clear trigger.
+    void onNewGame();
+
+    // Phase 11 — Save/Load wiring (called by SaveSystem or the loading controller immediately
+    // after save deserialization completes and before gameplay resumes):
+    // Re-initializes the City Rating tier cache (m_previousCityRating) to the current
+    // simulation state by calling m_sim->getCityRating(). Without this reset, the stale
+    // m_previousCityRating value left over from a previous session (or from the default
+    // construction value) would not match the loaded city's tier, causing UIManager::update()
+    // to detect a spurious tier change on the very first tick after load and fire an
+    // unwarranted stinger_milestone audio event.
+    // Contract:
+    //   - Caller MUST invoke onGameLoaded() before the first UIManager::update() tick after
+    //     a load completes. Calling it after update() has already run produces the same
+    //     spurious stinger that it is designed to prevent.
+    //   - Safe to call when m_sim is non-null (guaranteed by the load path; no null-check
+    //     needed at call sites, but UIManager asserts m_sim != nullptr in debug builds).
+    //   - Does NOT transition GameState — the caller (loading controller) is responsible for
+    //     calling transitionToGameplay(GameMode) separately.
+    //   - Does NOT clear m_overlayMap or reset m_activeTool — call onNewGame() for that.
+    void onGameLoaded();
+
+    // Phase 9b — World Interaction observable state (for test assertions):
+    ActiveTool getActiveTool() const; // returns m_activeTool; used by WorldInteractionTest
 
 private:
     IUIBackend*             m_backend{nullptr}; // non-owning
@@ -203,8 +368,69 @@ private:
     ICitySimulation*        m_sim{nullptr};   // non-owning
     IAudioSystem*           m_audio{nullptr}; // non-owning
     IClock*                 m_clock{nullptr}; // non-owning; forwarded to NotificationManager and HUD at construction
+
+    bool                    m_loadingTerrain{false}; // set by setLoadingTerrain(); gates update() early-return
+    bool                    m_hasUnsavedChanges{false}; // set to true on any successful tile placement
+                                                        // or demolish; cleared on manual save or auto-save.
+                                                        // Used by PauseMenuPanel Quit-to-Desktop and
+                                                        // Quit-to-Main-Menu flow to decide whether to show
+                                                        // the "Unsaved Progress" blocking modal
+                                                        // (see architecture/ui-ux/settings-pause-menu.md).
+                                                        // Also controls the amber unsaved-changes dot in
+                                                        // the resource bar (see architecture/ui-ux/hud-layout.md).
+
+    // Phase 9b — World Interaction state (all added via setter methods, not constructor params):
+    IRenderer*              m_renderer{nullptr};     // non-owning; set via setRenderer(); used for pickTerrainTile
+    ITerrainQuery*          m_terrain{nullptr};      // non-owning; set via setTerrainQuery(); used for getSlopeDegrees / getHeightAt
+    int                     m_mapTilesX{0};          // set via setMapDimensions(); used for zone overlay key computation
+    int                     m_mapTilesZ{0};          // set via setMapDimensions(); used for zone overlay dimension param
+    ActiveTool              m_activeTool{ActiveTool::None};          // tracks currently active placement tool
+    struct HoveredTile { int x{-1}; int z{-1}; bool valid{false}; };
+    HoveredTile             m_hoveredTile{};         // last terrain tile under cursor (valid only when m_activeTool != None)
+    std::unordered_map<uint64_t, uint32_t> m_overlayMap{}; // sparse zone overlay: key=(tileZ*m_mapTilesX+tileX), value=ARGB
+    ZoneType                m_selectedZoneType{ZoneType::Residential};       // Zone sub-panel selection
+    DensityTier             m_selectedDensityTier{DensityTier::Low};          // Zone sub-panel selection
+    ServiceBuildingType     m_selectedServiceBuilding{ServiceBuildingType::PowerPlant}; // Utilities sub-panel selection
+    // NOTE: ZoneType, DensityTier are in src/interfaces/simulation_types.h.
+    // ActiveTool, ServiceBuildingType are also in simulation_types.h (ServiceBuildingType added Phase 9b Deliverable I).
+    // ActiveTool enum is in src/ui/ui_types.h alongside GameState/GameMode.
+
+    // updateSubPanelVisibility() — enforces the sub-panel visibility table from hud-layout.md.
+    // Called immediately after every m_activeTool change (toolbar button click, hotkey, or any
+    // other input path). The caller is responsible for closing the inspector panel
+    // (m_inspector->hide() / m_inspectorOpen = false) BEFORE calling this method when
+    // transitioning away from ActiveTool::Query — this method does NOT close the inspector.
+    //
+    // Contract:
+    //   1. Hide both sub-panels unconditionally (cost-free if already hidden).
+    //   2. Show the sub-panel appropriate for m_activeTool (see table below).
+    //   3. Fire audio — close BEFORE open, exactly one sound per changed panel:
+    //      a. For each panel that transitions from visible→hidden: call
+    //         m_audio->playSound(UI_MENU_CLOSE, SoundPriority::NORMAL, 1.0f) guarded by if(m_audio).
+    //      b. For the panel that transitions from hidden→visible (if any): call
+    //         m_audio->playSound(UI_MENU_OPEN, SoundPriority::NORMAL, 1.0f) guarded by if(m_audio).
+    //      c. Do NOT fire ui_menu_open and ui_menu_close on the same frame for the same panel.
+    //         Sequence: close sounds first, then open sound, within the same call.
+    //
+    // Sub-panel visibility table (authoritative — matches hud-layout.md):
+    //   ActiveTool::None      → Zone sub-panel: hidden;   Utilities sub-panel: hidden
+    //   ActiveTool::Zone      → Zone sub-panel: visible;  Utilities sub-panel: hidden
+    //   ActiveTool::Road      → Zone sub-panel: hidden;   Utilities sub-panel: hidden
+    //   ActiveTool::Utilities → Zone sub-panel: hidden;   Utilities sub-panel: visible
+    //   ActiveTool::Demolish  → Zone sub-panel: hidden;   Utilities sub-panel: hidden
+    //   ActiveTool::Query     → Zone sub-panel: hidden;   Utilities sub-panel: hidden
+    //
+    // The inspector panel (m_inspector / m_inspectorOpen) is NOT controlled by this method
+    // for the Query→other transition — the caller closes the inspector at the transition site
+    // before calling updateSubPanelVisibility(). For transitions INTO Query mode, the inspector
+    // remains hidden (it only opens on a subsequent tile click handled at Priority 3).
+    void updateSubPanelVisibility();
 };
 ```
+
+### setLoadingTerrain(bool) — Terrain-Load Gate
+
+**`setLoadingTerrain(bool loading)`**: Called by the main game loop to suppress `UIManager::update()` and HUD rendering during terrain generation. When `loading = true`, `UIManager::update()` returns immediately without polling `pollPendingNotification()` or updating any panel state. When `loading = false`, normal `update()` processing resumes. This method is NOT part of any interface — it is a public concrete method on `UIManager` and is called by the main loop which has a concrete `UIManager` reference. It does NOT affect the `IUIBackend` interface. **Do NOT add a `Loading` state to `GameState`** — V1 uses this boolean flag instead (per `architecture/game-design/game-over-flow.md` line 19).
 
 ## MainMenuPanel show/hide Contract
 
@@ -243,7 +469,7 @@ Panels are constructed in this order (dependency order — later panels may read
 > `NotificationManager` does not yet exist when that call occurs the programme has undefined
 > behaviour. This invariant applies to `MainMenuPanel` and every future panel addition.
 
-1. `NotificationManager` — always first; see invariant above
+1. `NotificationManager` — always first; see invariant above. **Phase 10 constructor call**: `new NotificationManager(m_backend, m_sim, m_clock, m_audio)` — passes `m_audio` as the fourth parameter so that `postCritical()` and `postNormal()` can call `m_audio->playSound(UI_TOAST, ...)` when a toast becomes visible. Before Phase 10, `nullptr` is passed for the `IAudioSystem*` parameter; `NotificationManager` null-checks `m_audio` before every audio call.
 2. `MainMenuPanel` — constructed immediately after `NotificationManager`; visible on startup; UIManager owns its lifetime; hidden by `transitionToGameplay()`
 3. `HUD` — resource bar, speed selector, toolbar
 4. `TaxRatePanel` — hidden initially
@@ -284,7 +510,13 @@ All panels are visible-by-default set to false except `NotificationManager` (alw
 3. **QueryPanel / InspectorPanel**: if visible, forwards mouse events over its bounds and Escape; see input-arbitration.md for toolbar and minimap carve-out exceptions on dismiss-click.
 4. **TaxRatePanel**: if visible, forwards mouse events over its bounds; Escape closes it. Outside clicks are NOT consumed (pass-through).
 5. **HUD controls** (toolbar clicks, speed selector, minimap interactions; Ctrl+Z (undo) processed here). **SettingsPanel** is NOT a named priority level — when visible it intercepts events as part of this priority tier (UIManager HUD controls), returning its consumed state before the toolbar/minimap handlers run. When `SettingsPanel` is visible, Escape is consumed by `SettingsPanel` at this priority tier — it closes Settings and returns the player to PauseMenu by calling `PauseMenuPanel::show()`. `SettingsPanel::onEvent()` must return `true` for Escape events when visible. This does NOT trigger `transitionToGameplay_fromPaused()`. Escape only reaches the PauseMenu-to-gameplay transition if SettingsPanel is not currently visible. When `SettingsPanel` is NOT visible and `PauseMenuPanel` IS visible: Escape is consumed by `PauseMenuPanel`, which calls `transitionToGameplay_fromPaused()`. This is processed at Priority 5, after SettingsPanel's check, before HUD toolbar handlers.
-6. Return `false` — game logic (camera, tool placement) processes the event.
+6. Return `false` for CameraController — camera movement events (scroll-wheel zoom, MMB drag, RMB drag, edge-scroll `MouseMove`) that were not consumed by Priorities 1–5 are processed by `CameraController` (outside `UIManager::onEvent()`). Priority 6 is NOT the terminal layer.
+7. **World Interaction layer** (terminal layer, Phase 9b). Processes `MouseMove` and `MouseButtonDown button=0` (left-click) when `m_state == GameState::Gameplay` and `m_activeTool != ActiveTool::None` and `m_renderer != nullptr`. Rules:
+
+   - `MouseMove` does NOT consume the event (always returns `false` for `MouseMove`). Hover highlight update is a side-effect.
+   - `MouseButtonDown button=0` consumes the event (`return true`) only when: (1) a non-Query placement tool is active (Zone, Road, Utilities, or Demolish — NOT QueryTool), AND (2) `pickTerrainTile()` returns `true`. If either condition is false, returns `false`.
+   - `QueryTool` left-click does NOT consume here — it passes through to be handled at Priority 3 (QueryPanel open-path).
+   - See `input-arbitration.md` Priority 7 for the full rule set including modal suppression, RMB pass-through, and edge-scroll non-interference contracts.
 
 ## State Transitions
 
@@ -327,7 +559,7 @@ Within `UIManager::draw()`, panels are drawn in this order (back to front, match
 
 **BudgetDetailPanel ownership**: `BudgetDetailPanel` is owned and drawn by the `HUD` class internally — it is a detail overlay triggered by hovering the treasury balance field in the resource bar. It is NOT a top-level `UIManager` panel and does NOT appear in UIManager's panel member list or draw order. UIManager's draw order has exactly 10 slots as specified above.
 
-`UIManager::draw()` issues explicit per-panel draw calls in the back-to-front order listed above (items 1–10). This is the normative approach: each panel exposes a `draw()` method that is called directly by UIManager in the correct sequence. `m_gui->drawAll()` is NOT used — it would bypass the explicit layering required for the background scrim, the modal overlay, and the precise Z-order defined here. Each panel's `IGUIElement` children are managed internally within that panel's own draw call.
+`UIManager::draw()` issues explicit per-panel draw calls in the back-to-front order listed above (items 1–10). This is the normative approach: each panel exposes a `draw()` method that is called directly by UIManager in the correct sequence. Each panel's `draw()` method updates element state (visibility, text, alpha) via `IUIBackend` setter methods but does NOT render pixels directly. After `UIManager::draw()` completes, `IrrlichtRenderer::drawScene()` calls `guiEnvironment->drawAll()` which renders all visible `IGUIElement` nodes to the framebuffer. Because `UIManager::draw()` has already set the correct visibility on every element (non-active panels hide theirs), `drawAll()` only paints the intended elements. The Z-order concern (scrim must cover panels; modal must be topmost) is handled by visibility management — panels control which elements are visible/hidden before `drawAll()` executes.
 
 ## Thread Safety
 
@@ -361,9 +593,54 @@ The required frame sequence (abbreviated to the relevant steps) is shown from tw
 ```text
 Inside IrrlichtRenderer::drawScene():
   a. sceneManager->drawAll()       // 3D scene pass
-  b. uiManager->draw()             // 2D UI pass, per-panel Z-order; inside beginScene/endScene block
+  b. uiManager->draw()             // per-panel Z-order state update (visibility, text, alpha)
+  c. guiEnvironment->drawAll()     // render all visible IGUIElement nodes to framebuffer
 ```
 
-This internal sequence is the authoritative render loop defined in `architecture/graphics-architecture/irrlicht-device-lifecycle.md`. Any change to the ordering of `sceneManager->drawAll()` and `uiManager->draw()` must be made there first.
+Step (b) updates element state but does not render pixels. Step (c) paints all elements that are currently visible. Because (b) has already toggled visibility for the correct game state (e.g. main menu elements hidden during gameplay), (c) only renders what should be on screen. This sequence is the authoritative render loop defined in `architecture/graphics-architecture/irrlicht-device-lifecycle.md`. Any change to the ordering must be made there first.
 
-`UIManager::draw()` (internal step b) is called after `sceneManager->drawAll()` and before `endScene()` — this is correct and distinct from `UIManager::update()` (step 3b of the main loop), which must precede `beginScene()`. The two methods serve different purposes: `update()` advances timer state and dispatches dismissal logic; `draw()` issues rendering calls that must occur within the `beginScene()`/`endScene()` block.
+`UIManager::draw()` (internal step b) is called after `sceneManager->drawAll()` and before `guiEnvironment->drawAll()` and `endScene()` — this is correct and distinct from `UIManager::update()` (step 3b of the main loop), which must precede `beginScene()`. The two methods serve different purposes: `update()` advances timer state and dispatches dismissal logic; `draw()` updates element state that must be current when `guiEnvironment->drawAll()` renders within the `beginScene()`/`endScene()` block.
+
+## MainMenu State Input Routing
+
+When `m_state == GameState::MainMenu`, `UIManager::onEvent()` routes input with SettingsPanel taking priority over MainMenuPanel. If `SettingsPanel::isVisible()` returns true, events are dispatched to `SettingsPanel::onEvent()` first — if consumed, the event does not reach MainMenuPanel. If SettingsPanel does not consume the event (or is not visible), the event falls through to `MainMenuPanel::onEvent()`. MainMenuPanel consumes all events while visible (returns `true` for everything) to prevent HUD and camera input during the main menu. This routing must be checked before Priority 5 in the dispatch chain.
+
+This priority ordering is required because `UIManager::showSettings()` (called from the MainMenu polling path) shows the SettingsPanel overlay on top of MainMenuPanel. Without SettingsPanel priority, Escape and Cancel clicks in the settings overlay are consumed by MainMenuPanel (which swallows all input), preventing the player from closing settings and leaving stale settings elements visible on screen.
+
+**Main menu hide/restore on settings open/close**: `UIManager::showSettings()` calls `m_mainMenu->hide()` before `m_settings->show()` when `m_state == GameState::MainMenu`. This prevents main menu elements from remaining visible behind the settings overlay. When the settings panel closes (Escape or Cancel), the MainMenu routing block detects that `m_settings->isVisible()` changed from true to false and calls `m_mainMenu->show()` to restore the main menu. This hide/restore cycle is transparent to both panels — neither MainMenuPanel nor SettingsPanel holds a reference to the other.
+
+## Paused State Input Routing
+
+When `m_state == GameState::Paused`, `UIManager::onEvent()` routes input to `PauseMenuPanel` (and `SettingsPanel` if opened from the pause menu) before the Priority 5 HUD controls. This ensures that mouse clicks, Escape, and Enter reach the pause menu panels instead of falling through to inactive HUD handlers.
+
+The dispatch order within the Paused state:
+
+1. **SettingsPanel (if visible)**: events go to `SettingsPanel::onEvent()` first. If settings closes (Escape or Cancel), `PauseMenuPanel::show()` is called to restore the pause menu overlay.
+2. **PauseMenuPanel (if visible)**: events go to `PauseMenuPanel::onEvent()`. If PauseMenuPanel hides itself (Resume via Escape, Enter, or button click), `UIManager` checks whether SettingsPanel just opened (PauseMenu→Settings path). If settings is NOT visible, `transitionToGameplay_fromPaused()` is called to resume gameplay. If settings IS visible, the state remains Paused (the player navigated to settings, not back to gameplay).
+
+This routing must be placed before the Priority 5 Escape handler. Without it, mouse clicks on pause menu buttons fall through to `return false` (Priority 6 — camera), and Escape in the Paused state bypasses `PauseMenuPanel::onEvent()` entirely (the Priority 5 Escape handler calls `transitionToGameplay_fromPaused()` directly without letting PauseMenuPanel update its internal state).
+
+## MainMenu Polling Communication
+
+`MainMenuPanel` uses a polling-based communication pattern instead of direct method calls on `UIManager`. When the player clicks "Start City", "Settings", or "Quit", `MainMenuPanel` sets an internal flag (`m_startGameRequested`, `m_settingsRequested`, or `m_quitRequested`) and returns `true` from `onEvent()`. `UIManager::update()` polls these flags each frame via `consumeStartGameRequest()`, `consumeSettingsRequest()`, and `consumeQuitRequest()` — these are consume-once methods that read and clear the flag atomically. This avoids a circular dependency (MainMenuPanel does not hold a UIManager pointer) and keeps the communication unidirectional: panels set flags, UIManager polls and acts.
+
+## PauseMenu Polling Communication
+
+`PauseMenuPanel` uses the same polling pattern as `MainMenuPanel`. When the player clicks "Quit to Desktop" or "Quit to Main Menu", `PauseMenuPanel` sets an internal flag (`m_quitDesktopRequested` or `m_quitToMenuRequested`), calls `hide()`, and returns `true` from `onEvent()`. `UIManager::update()` polls these flags each frame via `consumeQuitDesktopRequest()` and `consumeQuitToMenuRequest()`. "Quit to Desktop" sets `m_quitRequested` on UIManager, which `main.cpp` polls via `isQuitRequested()` to call `device->closeDevice()`. "Quit to Main Menu" calls `transitionToMainMenu()` which hides gameplay panels and shows the main menu.
+
+## Application Quit Flow
+
+Application quit is requested from two entry points:
+
+1. **Main Menu → Quit button**: `MainMenuPanel` sets `m_quitRequested`, polled by `UIManager::update()` via `consumeQuitRequest()`, which sets `UIManager::m_quitRequested`.
+2. **Pause Menu → Quit to Desktop button**: `PauseMenuPanel` sets `m_quitDesktopRequested`, polled by `UIManager::update()` via `consumeQuitDesktopRequest()`, which sets `UIManager::m_quitRequested`.
+
+In both cases, `main.cpp` checks `uiManager.isQuitRequested()` after `uiManager.update()` in the frame loop. When true, it calls `device->closeDevice()` and skips rendering for that frame. The device loop exits naturally on the next iteration when `device->run()` returns false.
+
+## Audio Transition at Gameplay Start
+
+`UIManager::transitionToGameplay()` calls `m_audio->setTimeOfDay(TimeOfDay::DAY)` before `m_audio->transitionToGameplay()`. This establishes the correct ambient bed selection (new games start at DAY). `AudioSystem::transitionToGameplay()` then starts both the ambient bed on stream slot 2 and the default calm music stem (MUSIC_CALM_01) on stream slot 0 via `setMusicTrack()`.
+
+## CitySimulation Audio Wiring
+
+`CitySimulation` receives `&audioSystem` (not `nullptr`) at construction in `main.cpp`. This enables all simulation-driven SFX: build/place sounds, demolish sounds, earthworks sounds, budget warning sounds, loan-issued sounds, and zone upgrade sounds. Each call site is guarded with `if (m_audio)` null-checks.

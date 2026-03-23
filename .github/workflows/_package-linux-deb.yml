@@ -1,0 +1,108 @@
+# Package Linux Deb — reusable workflow
+# Debian/Ubuntu .deb packages via CPack.
+# Matrix over 4 distros. Runs only on push to main/develop (not PRs).
+# Not in all-checks-pass gate. fail-fast: false so one leg failure doesn't
+# cancel the other three.
+# The matrix strategy lives here in the called workflow's job block,
+# not in the caller — reusable workflows own their own strategy.
+# Called by ci.yml with vcpkg_commit_id input.
+name: Package Linux Deb
+
+on:
+  workflow_call:
+    inputs:
+      vcpkg_commit_id:
+        type: string
+        required: true
+
+jobs:
+  package-linux-deb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian-bookworm
+            container: debian:bookworm
+            codename: bookworm
+          - distro: debian-trixie
+            container: debian:trixie
+            codename: trixie
+          - distro: ubuntu-jammy
+            container: ubuntu:22.04
+            codename: jammy
+          - distro: ubuntu-noble
+            container: ubuntu:24.04
+            codename: noble
+    container: ${{ matrix.container }}
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update -y
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            build-essential cmake ninja-build git curl zip unzip tar pkg-config \
+            autoconf automake libtool \
+            libgl1-mesa-dev libglu1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxxf86vm-dev \
+            libopenal-dev libvorbis-dev \
+            python3 \
+            dpkg-dev fakeroot
+
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Set up vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg
+          git -C /opt/vcpkg checkout ${{ inputs.vcpkg_commit_id }}
+          # Prebuilt vcpkg-tool binary from GitHub Releases fails with 404 in bare
+          # containers (CDN returns 404 for the vcpkg-glibc asset and bootstrap-vcpkg.sh
+          # has no fallback — it calls exit 1 on curl failure). Build from source instead,
+          # which is what bootstrap would do on non-x86_64 architectures.
+          VCPKG_TOOL_TAG=$(grep '^VCPKG_TOOL_RELEASE_TAG=' /opt/vcpkg/scripts/vcpkg-tool-metadata.txt | cut -d= -f2)
+          curl -L "https://github.com/microsoft/vcpkg-tool/archive/${VCPKG_TOOL_TAG}.zip" \
+            -o /tmp/vcpkg-tool.zip --retry 3 --fail
+          unzip -q /tmp/vcpkg-tool.zip -d /tmp/vcpkg-tool-src
+          cmake -B /tmp/vcpkg-tool-build \
+            -S "/tmp/vcpkg-tool-src/vcpkg-tool-${VCPKG_TOOL_TAG}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVCPKG_DEVELOPMENT_WARNINGS=OFF \
+            -G Ninja
+          cmake --build /tmp/vcpkg-tool-build
+          cp /tmp/vcpkg-tool-build/vcpkg /opt/vcpkg/vcpkg
+          chmod +x /opt/vcpkg/vcpkg
+          echo "VCPKG_ROOT=/opt/vcpkg" >> $GITHUB_ENV
+
+      - name: Install vcpkg packages
+        run: |
+          $VCPKG_ROOT/vcpkg install --triplet x64-linux --overlay-ports=vcpkg-overlays
+
+      - name: CMake configure
+        run: |
+          cmake -B build -S . \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_COVERAGE=OFF \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DAITOWN_ASSETS_DIR=/usr/share/aitown/assets \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            -DVCPKG_OVERLAY_PORTS=vcpkg-overlays \
+            -DVCPKG_MANIFEST_FEATURES="" \
+            -DVCPKG_INSTALLED_DIR=$VCPKG_ROOT/installed
+
+      - name: CMake build
+        run: cmake --build build --parallel
+
+      - name: Create Debian package
+        working-directory: build
+        run: cpack -G DEB
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: aitown-deb-${{ matrix.distro }}-${{ github.sha }}
+          path: build/aitown-*.deb
+          retention-days: 30

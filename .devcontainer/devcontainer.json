@@ -11,7 +11,12 @@
   },
   "runArgs": [
     "--cap-add=NET_ADMIN",
-    "--cap-add=NET_RAW"
+    "--cap-add=NET_RAW",
+    "--env=DISPLAY=${localEnv:DISPLAY}",
+    "--volume=/tmp/.X11-unix:/tmp/.X11-unix",
+    "--device=/dev/snd",
+    "--volume=${localEnv:XDG_RUNTIME_DIR}/pulse/native:${localEnv:XDG_RUNTIME_DIR}/pulse/native",
+    "--env-file=${localWorkspaceFolder}/.env"
   ],
   "customizations": {
     "vscode": {
@@ -19,7 +24,11 @@
         "anthropic.claude-code",
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
-        "eamodio.gitlens"
+        "eamodio.gitlens",
+        "llvm-vs-code-extensions.vscode-clangd",
+        "ms-vscode.cmake-tools",
+        "redhat.vscode-yaml",
+        "github.vscode-github-actions"
       ],
       "settings": {
         "editor.formatOnSave": true,
@@ -27,7 +36,8 @@
         "editor.codeActionsOnSave": {
           "source.fixAll.eslint": "explicit"
         },
-        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "dev.containers.forwardWaylandSocket": false,
         "terminal.integrated.profiles.linux": {
           "bash": {
             "path": "bash",
@@ -48,7 +58,8 @@
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "CLAUDE_CONFIG_DIR": "/home/node/.claude",
-    "POWERLEVEL9K_DISABLE_GITSTATUS": "true"
+    "POWERLEVEL9K_DISABLE_GITSTATUS": "true",
+    "PULSE_SERVER": "unix:${localEnv:XDG_RUNTIME_DIR}/pulse/native"
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",

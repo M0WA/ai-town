@@ -1,0 +1,46 @@
+AI Town — Required Font Asset
+==============================
+
+File required: hud_font.xml  (+ companion hud_font_0.png texture)
+Location:      assets/fonts/hud_font.xml
+
+The game expects an Irrlicht XML bitmap font at this path. Without it,
+all HUD text falls back to the Irrlicht built-in 8px font, which is
+unreadably small at all supported resolutions (1280x720 and above).
+
+HOW TO CREATE
+-------------
+Option A — Irrlicht FontTool (recommended)
+  1. Open tools/GUIEditor/FontTool (shipped with the Irrlicht SDK).
+  2. Choose a system TTF font (e.g. DejaVu Sans, available on the
+     dev container at /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf).
+  3. Set size to 18 px. Export to assets/fonts/hud_font.xml.
+  4. The tool produces hud_font.xml + hud_font_0.png (or similar) —
+     keep both files in the same directory.
+
+Option B — Third-party bitmap font tool
+  Any tool that exports Irrlicht-compatible XML bitmap font format
+  (e.g. bmGlyph, Hiero with the Irrlicht export plugin).
+
+REQUIRED SPECIFICATION
+----------------------
+- Size:       18 px (maps to approximately 12 px physical at 1280x720;
+              satisfies the architecture/ui-ux/resolution-ui-scaling.md
+              minimum body font size of 14 px virtual / 11 px physical floor)
+- Characters: ASCII 32-126 minimum (printable US-ASCII)
+- Format:     Irrlicht XML bitmap font (<Font type="bitmap" ...>)
+- Encoding:   UTF-8 compatible subset (Latin-1 extended optional)
+
+WHY THIS IS NEEDED
+------------------
+Irrlicht's built-in font (IGUIEnvironment::getBuiltInFont()) is
+8x13 px. At 1280x720, virtual coordinates are scaled by 0.667x,
+so the physical rendering is only ~5px tall — invisible in practice.
+The font asset is the authoritative fix for:
+  - Issue 4: HUD text labels too small to read
+  - Issue 5: Toolbar buttons show only truncated first characters
+            ("Z" for Zone, "R" for Road, "U" for Utilities, etc.)
+            making them indistinguishable from demand-bar labels
+
+See architecture/ui-ux/resolution-ui-scaling.md for the complete
+font size specification (minimum 14px virtual body, 11px physical floor).

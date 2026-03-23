@@ -2,8 +2,8 @@
 
 - **Main Menu** (shown on launch and after "Quit to Main Menu"): Full-screen overlay with four options: **New Game**, **Load Game**, **Settings**, **Quit**. Load Game button states:
   - **Grayed out, tooltip "No saves found"**: no save files exist.
-  - **Grayed out, tooltip "Save data is corrupted — cannot load. Check [save folder path] for recovery."**: save files exist but all are unreadable (checksum failure, schema version mismatch, truncated file). The tooltip must show the actual save folder path so the player can attempt manual recovery.
-  - **Enabled**: at least one valid, loadable save file exists.
+  - **Grayed out, tooltip "Save data is corrupted — cannot load. Check [save folder path] for recovery."**: save files exist but all are unreadable (checksum failure, schema version mismatch, truncated file). The tooltip must show the actual save folder path so the player can attempt manual recovery. The path is obtained via `SaveSystem::getSaveDirectoryPath()`, which returns the platform-specific save directory (`~/.config/aitown/saves/` on Linux, `%APPDATA%\aitown\saves\` on Windows); see `architecture/game-design/save-system.md`.
+  - **Enabled**: at least one valid, loadable save file exists. On activation: the loading-screen path is used (same as New Game start) to deserialise the save and rebuild terrain; upon completion, `GameState` transitions to `Gameplay`. The loading controller must call `UIManager::onGameLoaded()` after deserialization completes and before the first `UIManager::update()` tick (see `architecture/ui-ux/ui-manager.md` § `onGameLoaded()`).
 - **New Game screen**:
   - Mode: Sandbox (V1 only; Scenario grayed out with "Post-launch" label)
   - Difficulty: Easy ($1M start) / Normal ($500K start) / Hard ($200K start) — radio buttons
@@ -17,3 +17,22 @@
 - **Difficulty is set at New Game creation only**. The Settings > Gameplay tab displays difficulty as read-only information during play (see `settings-pause-menu.md — Gameplay tab`). Players cannot change difficulty mid-game.
 - **Keyboard navigation — Main Menu**: All four buttons (New Game, Load Game, Settings, Quit) are Tab-navigable in document order (top to bottom). Default keyboard focus on launch: "New Game" button. Arrow Up/Down also navigate between buttons. Enter activates the focused button. Load Game when grayed out (no saves or corrupted saves) is skipped in the Tab order. Visual focus ring: 2 px accent-color border (matching modal dialog focus ring spec).
 - **Keyboard navigation — New Game screen**: Tab order follows document flow: Mode selector → Difficulty radio buttons → Disaster checkbox → Map seed field → Randomize button → Start City button → Back button. Arrow keys cycle within radio button groups (Difficulty: Easy/Normal/Hard). Enter activates buttons. Grayed-out controls (Scenario mode, Disaster toggle in V1) are skipped in Tab order. Escape on the New Game screen is equivalent to clicking Back (same as all pre-gameplay screens per the Escape key spec above).
+
+## MainMenuPanel → UIManager Communication
+
+`MainMenuPanel` communicates user actions (Start City, Settings) to `UIManager` via a polling pattern — MainMenuPanel does NOT hold a `UIManager*` pointer and does NOT call UIManager methods directly. This avoids circular dependencies (UIManager owns MainMenuPanel).
+
+**Mechanism**: When the player clicks "Start City" or "Settings", `MainMenuPanel::onEvent()` sets an internal flag (`m_startGameRequested` or `m_settingsRequested`) and returns `true`. Each frame, `UIManager::update()` polls these flags:
+
+```cpp
+// In UIManager::update(), when m_state == GameState::MainMenu:
+if (m_mainMenu->consumeStartGameRequest()) {
+    transitionToGameplay(GameMode::Sandbox);
+    return;
+}
+if (m_mainMenu->consumeSettingsRequest()) {
+    showSettings();
+}
+```
+
+`consumeStartGameRequest()` and `consumeSettingsRequest()` are consume-once methods: they return `true` exactly once per flag-set (reading clears the flag). This one-frame polling delay is invisible to the player. The pattern ensures communication is unidirectional (panels set flags, UIManager polls and acts) with no back-pointers from panels to UIManager.

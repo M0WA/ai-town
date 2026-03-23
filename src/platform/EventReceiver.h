@@ -6,6 +6,7 @@
 class UIScaler;
 class UIManager;
 class CameraController;
+class IrrlichtUIBackend;  // for handleGuiHoverEvent() hover sprite swapping
 
 // EventReceiver — translates Irrlicht SEvent to InputEvent and dispatches per the
 // 6-priority input arbitration chain (architecture/ui-ux/input-arbitration.md).
@@ -23,12 +24,16 @@ class CameraController;
 //     - RMB drag (MouseMove while m_rmbDragActive): direct to CameraController.
 //
 //   RMB MouseButtonDown (button=1):
-//     UIManager::onEvent() called FIRST. If false (not consumed): set m_rmbDragActive=true
-//     AND forward to CameraController in the same branch (atomicity — split branches = bug).
-//     If UIManager returns true (scrim consumed): m_rmbDragActive NOT set, not forwarded.
-//     NOTE: UIManager returning true for LMB/RMB while modal is active is CORRECT behavior
-//     (scrim element consuming at Priority 1 per input-arbitration.md). Phase 8 MUST NOT
-//     reinterpret UIManager returning true for those events as a bug.
+//     Always set m_rmbDragActive=true AND forward to CameraController — UIManager is NOT
+//     called on RMB down. Tool cancel is deferred to RMB up (click detection).
+//
+//   RMB MouseButtonUp (button=1):
+//     Clear m_rmbDragActive. If m_rmbMoved is false (no movement = short click), call
+//     UIManager::onEvent() so it can cancel the active tool (Priority 6b). If m_rmbMoved
+//     is true (drag), skip UIManager — camera was panning, do not cancel tool.
+//     ALWAYS forward to CameraController regardless of UIManager result — CameraController
+//     MUST receive RMB up to clear its own drag state; omitting this call leaves its
+//     m_rmbDragActive stuck true and mouse moves rotate the camera with no button held.
 //
 //   All other events: UIManager::onEvent() first; forward to CameraController if not consumed.
 //
@@ -36,7 +41,10 @@ class CameraController;
 class EventReceiver : public irr::IEventReceiver {
 public:
     // Constructor — all pointers may be null (null-safe dispatch).
-    EventReceiver(UIScaler* scaler, UIManager* uiManager, CameraController* camera);
+    // uiBackend: may be null; when non-null, EET_GUI_EVENT hover events are
+    // forwarded to IrrlichtUIBackend::handleGuiHoverEvent() for sprite swapping.
+    EventReceiver(UIScaler* scaler, UIManager* uiManager, CameraController* camera,
+                  IrrlichtUIBackend* uiBackend = nullptr);
 
     // IEventReceiver override — called by Irrlicht for every input event.
     bool OnEvent(const irr::SEvent& event) override;
@@ -50,11 +58,13 @@ public:
     void dispatchFocusEvent(bool gained);
 
 private:
-    UIScaler*        m_scaler;
-    UIManager*       m_uiManager;
-    CameraController* m_camera;
+    UIScaler*          m_scaler;
+    UIManager*         m_uiManager;
+    CameraController*  m_camera;
+    IrrlichtUIBackend* m_uiBackend{nullptr};  // for hover sprite swapping (may be null)
 
     // Drag state — MUST be initialized to false.
     bool m_rmbDragActive{false};  // true while RMB (button=1) is held down
+    bool m_rmbMoved{false};       // true if mouse moved during current RMB press (drag vs click)
     bool m_mmbDragActive{false};  // true while MMB (button=2) is held down
 };

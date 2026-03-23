@@ -144,7 +144,7 @@ Code inspection of `src/simulation/simulation_constants.h` confirms all Part A c
 |---|---|---|---|
 | `grace_period_real_seconds` | 120.0 | 120.0 | PASS |
 | `road_maintenance_cost_per_tile` | 10 | 10 | PASS |
-| `road_placement_cost` | 500 | 500 | PASS |
+| `road_placement_cost_per_tile` | 500 | 500 | PASS |
 | `base_day_duration_easy` | 1.0 | 1.0 | PASS |
 | `base_day_duration_normal` | 1.0 | 1.0 | PASS |
 | `base_day_duration_hard` | 1.0 | 1.0 | PASS |

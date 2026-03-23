@@ -1,0 +1,241 @@
+# Validate assets — reusable workflow
+# Runs tools/validate_assets.py and all source-tree presence gates.
+# Called by ci.yml with vcpkg_commit_id input.
+# Phase 9:  all 20 checks (Checks #1–#20) implemented in tools/validate_assets.py.
+# Phase 10: check #21 added — zone loop silence-floor gate; check #22, #23, #24 added.
+# Phase 11d: checks #25–#30 added.
+# Phase 11k: extended with vcpkg baseline consistency check, clouds.png, font,
+#            audio, and terrain presence gates (moved from build jobs to avoid duplication).
+# timeout-minutes: 10 is permanent.
+name: Validate Assets
+
+on:
+  workflow_call:
+    inputs:
+      vcpkg_commit_id:
+        type: string
+        required: true
+
+jobs:
+  validate-assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read  # minimum required — checkout only
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Set up Python 3
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: '3.12'  # pin to specific minor version — never use '3' (floating major breaks reproducibility)
+
+      - name: Verify check_20 present in validate_assets.py
+        run: |
+          grep -q "check_20" tools/validate_assets.py || (echo "FAIL: check_20 not found in validate_assets.py" && exit 1)
+          echo "PASS: check_20 present"
+
+      - name: Verify check_21 present in validate_assets.py
+        run: |
+          grep -q "check_21" tools/validate_assets.py || (echo "FAIL: check_21 not found in validate_assets.py — Phase 10 zone loop silence-floor gate missing" && exit 1)
+          echo "PASS: check_21 present"
+
+      - name: Verify check_22 present in validate_assets.py
+        # check_22: non-stinger WAV SFX (sfx_*.wav, ui_*.wav) must be mono, 44100 Hz, 16-bit PCM.
+        # Phase 10 mandates mono/44100/16-bit for all WAV SFX assets; check_19 covers only stingers.
+        # A missing check_22 allows stereo or mis-sampled SFX WAVs to pass CI and silently fail
+        # at runtime when OpenAL Soft rejects non-mono buffers for positional sources.
+        run: |
+          grep -q "check_22" tools/validate_assets.py || (echo "FAIL: check_22 not found in validate_assets.py — Phase 10 non-stinger WAV SFX format gate missing" && exit 1)
+          echo "PASS: check_22 present"
+
+      - name: Verify check_23 present in validate_assets.py
+        # check_23: assets/textures/ui/hud_sprites_ui.png must exist, be 2048x2048, and RGBA.
+        # Phase 10 commits the HUD sprite sheet PNG as a runtime asset; a missing or malformed
+        # PNG causes IrrlichtUIBackend::m_spriteTextureReady to remain false, making toolbar
+        # buttons display fallback text instead of sprite icons in every rendered frame.
+        # A missing check_23 allows a truncated or wrong-dimensions PNG to pass CI silently.
+        run: |
+          grep -q "check_23" tools/validate_assets.py || (echo "FAIL: check_23 not found in validate_assets.py — Phase 10 hud_sprites_ui.png dimension/RGBA gate missing" && exit 1)
+          echo "PASS: check_23 present"
+
+      - name: Verify check_24 present in validate_assets.py
+        # check_24: assets/textures/sky/clouds.png must exist, be 1024x1024, and RGBA.
+        # Phase 10b mandates this cloud texture format gate. A missing check_24 allows
+        # a wrong-dimensions or wrong-channel clouds.png to pass CI silently.
+        run: |
+          grep -q "check_24_clouds_png" tools/validate_assets.py || (echo "FAIL: check_24_clouds_png not found in validate_assets.py — Phase 10b cloud texture format gate missing" && exit 1)
+          echo "PASS: check_24 present"
+
+      - name: Verify check_25 present in validate_assets.py
+        # check_25: vehicles_diffuse_atlas_d.dds — BC1_UNORM_SRGB (DXGI_FORMAT=72), 2048x2048, 4 mip levels.
+        # A missing check_25 allows a misformatted vehicle diffuse atlas DDS to pass CI silently.
+        run: |
+          grep -q "check_25" tools/validate_assets.py || (echo "FAIL: check_25 not found in validate_assets.py — Phase 11d vehicle diffuse atlas DDS format gate missing" && exit 1)
+          echo "PASS: check_25 present"
+
+      - name: Verify check_26 present in validate_assets.py
+        # check_26: vehicles_sprite_atlas_d.dds — BC3_UNORM linear (DXGI_FORMAT=77), 256x256, exactly 1 mip level.
+        # A missing check_26 allows a misformatted vehicle sprite atlas DDS to pass CI silently.
+        run: |
+          grep -q "check_26" tools/validate_assets.py || (echo "FAIL: check_26 not found in validate_assets.py — Phase 11d vehicle sprite atlas DDS format gate missing" && exit 1)
+          echo "PASS: check_26 present"
+
+      - name: Verify check_27 present in validate_assets.py
+        # check_27: vehicles_normal_atlas_n.dds — BC3_UNORM linear DXT5nm (DXGI_FORMAT=77), 2048x2048, 4 mip levels.
+        # A missing check_27 allows a misformatted vehicle normal atlas DDS to pass CI silently.
+        run: |
+          grep -q "check_27" tools/validate_assets.py || (echo "FAIL: check_27 not found in validate_assets.py — Phase 11d vehicle normal atlas DDS format gate missing" && exit 1)
+          echo "PASS: check_27 present"
+
+      - name: Verify check_28 present in validate_assets.py
+        # check_28: buildings_atlas_d.png wall-cell luminance stddev gate (< 8.0 = CI failure).
+        # A missing check_28 allows a near-solid placeholder atlas to pass CI silently.
+        run: |
+          grep -q "check_28" tools/validate_assets.py || (echo "FAIL: check_28 not found in validate_assets.py — Phase 11d building atlas diffuse variance gate missing" && exit 1)
+          echo "PASS: check_28 present"
+
+      - name: Verify check_29 present in validate_assets.py
+        # check_29: building atlas normal-map green-channel MAD gate (< 3.0 = CI failure).
+        # A missing check_29 allows a flat normal map (no surface relief) to pass CI silently.
+        run: |
+          grep -q "check_29" tools/validate_assets.py || (echo "FAIL: check_29 not found in validate_assets.py — Phase 11d building atlas normal-map non-flat gate missing" && exit 1)
+          echo "PASS: check_29 present"
+
+      - name: Verify check_30 present in validate_assets.py
+        # check_30: billboard atlas DDS dimensions/format/mip/size gate.
+        # A missing check_30 allows an incorrectly formatted billboard atlas to pass CI silently.
+        run: |
+          grep -q "check_30" tools/validate_assets.py || (echo "FAIL: check_30 not found in validate_assets.py — Phase 11d billboard atlas format/mip verification gate missing" && exit 1)
+          echo "PASS: check_30 present"
+
+      - name: Verify hud_sprites_ui.dds not git-tracked
+        # The DDS intermediate is an authoring artifact and must never be committed.
+        # .gitignore has the entry; git rm --cached was run in Phase 10.
+        # This step catches any accidental re-addition via 'git add --force'.
+        # git ls-files exits 0 and prints the path if the file is tracked; we invert
+        # the logic so CI fails when the file IS present in the index.
+        shell: bash
+        run: |
+          if git ls-files --error-unmatch assets/textures/ui/hud_sprites_ui.dds 2>/dev/null; then
+            echo "ERROR: assets/textures/ui/hud_sprites_ui.dds is still tracked by git."
+            echo "Run 'git rm --cached assets/textures/ui/hud_sprites_ui.dds' and commit the result."
+            exit 1
+          fi
+          echo "PASS: hud_sprites_ui.dds is not git-tracked."
+
+      - name: Verify hud_sprites_ui_layout.json not git-tracked
+        # hud_sprites_ui_layout.json is an incompatible legacy layout artifact that must not
+        # be used as an authoring reference. It was removed in Phase 10 (git rm).
+        shell: bash
+        run: |
+          if git ls-files --error-unmatch assets/textures/ui/hud_sprites_ui_layout.json 2>/dev/null; then
+            echo "ERROR: assets/textures/ui/hud_sprites_ui_layout.json is still tracked by git."
+            echo "Run 'git rm assets/textures/ui/hud_sprites_ui_layout.json' and commit the result."
+            exit 1
+          fi
+          echo "PASS: hud_sprites_ui_layout.json is not git-tracked."
+
+      - name: Install Python dependencies
+        # mutagen: OGG/WAV metadata (checks #16–#19).
+        # Pillow: PNG image dimension and mode check (check #23 — hud_sprites_ui.png 2048x2048 RGBA).
+        # ffmpeg: required by check_21 (_decode_ogg_pcm_int16) to decode sfx_zone_*.ogg to
+        # raw int16 PCM for the silence-floor gate.  Installed as a system package (not pip)
+        # because the Python ffmpeg bindings are wrappers around the ffmpeg binary anyway.
+        run: |
+          pip install mutagen Pillow
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Verify shader assets
+        # Source-tree check — no build artifacts required.
+        # Moved from build-linux/coverage-linux per Phase 11i consolidation rule:
+        # any step checking source-tree file existence belongs in validate-assets.
+        shell: bash
+        run: |
+          test -f assets/shaders/ui_quad.vert || { echo "ERROR: assets/shaders/ui_quad.vert not found"; exit 1; }
+          test -f assets/shaders/ui_quad.frag || { echo "ERROR: assets/shaders/ui_quad.frag not found"; exit 1; }
+          echo "Shader assets verified."
+
+      - name: Run asset validation
+        run: python tools/validate_assets.py
+
+      # Step: Validate vcpkg baseline consistency.
+      # vcpkg.json builtin-baseline must match the vcpkg_commit_id input.
+      # Runs after asset validation so fast checks pass before this comparison.
+      - name: Validate vcpkg baseline consistency
+        shell: bash
+        env:
+          EXPECTED_BASELINE: ${{ inputs.vcpkg_commit_id }}
+        run: |
+          MANIFEST_BASELINE=$(jq -r '."builtin-baseline"' vcpkg.json)
+          if [[ "$MANIFEST_BASELINE" != "$EXPECTED_BASELINE" ]]; then
+            echo "ERROR: vcpkg.json builtin-baseline does not match VCPKG_COMMIT_ID"
+            echo "  vcpkg.json builtin-baseline: $MANIFEST_BASELINE"
+            echo "  VCPKG_COMMIT_ID:             $EXPECTED_BASELINE"
+            exit 1
+          fi
+          echo "vcpkg baseline validation passed: $MANIFEST_BASELINE"
+
+      # Step: Verify clouds.png present.
+      - name: Verify clouds.png present
+        shell: bash
+        run: |
+          test -f assets/textures/sky/clouds.png || { echo "ERROR: assets/textures/sky/clouds.png missing"; exit 1; }
+
+      # Step: Verify font assets present.
+      # hud_font.xml and hud_mono_font.xml are required at runtime by UIManager.
+      - name: Verify font assets present
+        shell: bash
+        run: |
+          if [ ! -f assets/fonts/hud_font.xml ]; then
+            echo "ERROR: assets/fonts/hud_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          fi
+          echo "assets/fonts/hud_font.xml: present."
+          if [ ! -f assets/fonts/hud_mono_font.xml ]; then
+            echo "ERROR: assets/fonts/hud_mono_font.xml not found — Phase 10 font asset missing."
+            exit 1
+          fi
+          echo "assets/fonts/hud_mono_font.xml: present."
+
+      # Step: Verify Phase 10 audio assets present.
+      # Hard-fail on core Phase 10 audio assets that must be present before build.
+      - name: Verify Phase 10 audio assets present
+        shell: bash
+        run: |
+          failed=0
+          for asset in \
+            assets/audio/sfx_build_place.wav \
+            assets/audio/sfx_build_demolish.wav \
+            assets/audio/stinger_milestone.wav \
+            assets/audio/ambient_day.ogg \
+            assets/audio/sfx_zone_residential.ogg \
+            assets/audio/sfx_zone_commercial.ogg \
+            assets/audio/sfx_zone_industrial.ogg; do
+            if [ ! -f "$asset" ]; then
+              echo "ERROR: $asset not found — Phase 10 audio asset missing."
+              failed=1
+            else
+              echo "$asset: present."
+            fi
+          done
+          if [ "$failed" -eq 1 ]; then
+            exit 1
+          fi
+
+      # Step: Verify terrain assets present.
+      # terrain_grass_d.dds, terrain_asphalt_d.dds, terrain_soil_d.dds, terrain_concrete_d.dds
+      # (diffuse DDS; normal-map validation is out of scope for this phase),
+      # terrain_chunk_splat.png, terrain.vert, terrain.frag.
+      - name: Verify terrain assets present
+        shell: bash
+        run: |
+          test -f assets/textures/terrain/terrain_grass_d.dds    || { echo "ERROR: terrain_grass_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_asphalt_d.dds  || { echo "ERROR: terrain_asphalt_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_soil_d.dds     || { echo "ERROR: terrain_soil_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_concrete_d.dds || { echo "ERROR: terrain_concrete_d.dds missing"; exit 1; }
+          test -f assets/textures/terrain/terrain_chunk_splat.png || { echo "ERROR: terrain_chunk_splat.png missing"; exit 1; }
+          test -f assets/shaders/terrain.vert || { echo "ERROR: terrain.vert missing"; exit 1; }
+          test -f assets/shaders/terrain.frag || { echo "ERROR: terrain.frag missing"; exit 1; }

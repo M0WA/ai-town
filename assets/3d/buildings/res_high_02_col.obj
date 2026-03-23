@@ -1,0 +1,26 @@
+# Minimal building collision mesh — side faces only, no top/bottom caps
+# 4m x 4m footprint at Y=0, 10m height
+# 8 vertices, 4 side faces (8 triangles), pivot at Y=0 base-center
+# Authored per architecture/asset-standards/3d-model-standards.md
+# Constraint: convex hull _col.obj, side-faces only, <= 24 tris, Y=0
+o building_col
+v -2.0  0.0 -2.0
+v  2.0  0.0 -2.0
+v  2.0  0.0  2.0
+v -2.0  0.0  2.0
+v -2.0 10.0 -2.0
+v  2.0 10.0 -2.0
+v  2.0 10.0  2.0
+v -2.0 10.0  2.0
+# South face (-Z side)
+f 1 2 6
+f 1 6 5
+# East face (+X side)
+f 2 3 7
+f 2 7 6
+# North face (+Z side)
+f 3 4 8
+f 3 8 7
+# West face (-X side)
+f 4 1 5
+f 4 5 8

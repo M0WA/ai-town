@@ -9,12 +9,22 @@
 //
 // glewInit() is called immediately after createDevice() returns non-null (EDT_NULL guard applied).
 // GL capability members are populated in the SUCCESS path; defaulted in EDT_NULL and RELEASE fallback.
+// GLEW available (vcpkg libGLEW.a, Q2 confirmed 2026-02-22) — using glewIsExtensionSupported().
+//
+// Per-frame sequence (for reference — call sites in src/main.cpp):
+//   1. syncListenerToCamera()  — commits camera position to OpenAL listener
+//   2. audioSystem->update()   — processes occlusion, crossfades, time-of-day transitions
+//                                 MUST be called AFTER syncListenerToCamera() and BEFORE driver->beginScene()
+//   3. driver->beginScene()    — first Irrlicht render call each frame
 
 // Forward-declare Irrlicht types to keep this header clean.
 // Consumers that need the full Irrlicht API must include <irrlicht.h> themselves.
 namespace irr {
     class IrrlichtDevice;
-    namespace video { class IVideoDriver; }
+    namespace video {
+        class IVideoDriver;
+        class IShaderConstantSetCallBack;
+    }
     namespace scene { class ISceneManager; }
 }
 
@@ -37,6 +47,12 @@ public:
     int   getMaxTextureSize()        const { return m_maxTextureSize; }
     bool  isSRGBTextureSupported()   const { return m_srgbTextureSupported; }
     float getMaxAnisotropy()         const { return m_maxAnisotropy; }
+
+    // Loads a GLSL shader pair via addHighLevelShaderMaterialFromFiles().
+    // Null-checks getGPUProgrammingServices() before calling — returns -1 if unavailable.
+    // cb: raw heap pointer; caller must drop() after this call (Irrlicht calls grab() internally).
+    int loadShader(const char* vsFile, const char* fsFile,
+                   irr::video::IShaderConstantSetCallBack* cb);
 
 private:
     irr::IrrlichtDevice* m_device{nullptr};

@@ -76,7 +76,6 @@ Do not suggest alternative engines, languages, or platforms.
 ### Product
 
 - **Senior Product Owner** (`prod-owner`): Specialized in implementation planning, phase breakdown, feature prioritization, backlog management, milestone definition, and roadmap creation
-- **Senior Project Manager** (`proj-manager`): Specialized in syncing the implementation plan with the GitHub project "AI Town". Uses the configured GitHub MCP server to keep milestones, issues, and the Projects v2 board up to date. Triggered automatically after every implementation plan update.
 
 ### Team Collaboration
 
@@ -92,7 +91,10 @@ Do not suggest alternative engines, languages, or platforms.
 | Plan Spec | `/plan-spec` | Product Owner updates the implementation plan from specs, then design + tech squads review it in parallel and iterate until no CRITICAL/HIGH issues remain |
 | Plan Fix Spec | `/plan-fix-spec` | Sync the implementation plan with current specs AND iteratively fix all CRITICAL/HIGH issues in both specs and the plan — domain-scoped re-reviews, diff-based round-2+ prompts, issue deduplication, fix verification, `model: haiku` for review agents, deferred single commit |
 | Fix Implementation | `/fix-implementation` | Same as Plan Fix Spec but skips the Product Owner plan-sync step — iteratively fixes all CRITICAL/HIGH issues in both specs and the implementation plan as-is |
-| Update Board | `/update-board` | Project Manager pushes the implementation plan to the GitHub project board (plan is source of truth); optionally scoped to a single phase (default: all phases) |
+| Fix Design Implementation | `/fix-design-implementation` | Like Fix Implementation but uses only the design squad (Game Designer, UI/UX, 2D Texture, 3D Model, Sound Artist) — no tech squad agents |
+| Fix Tech Implementation | `/fix-tech-implementation` | Like Fix Implementation but uses only the tech squad (GitHub Pipeline, Irrlicht dev, OpenAL Soft dev, Test Engineer) — no design squad agents |
+| Validate Phase Done | `/validate-phase-done` | Read a phase file and report whether all deliverable checkboxes and exit criteria are complete; lists every outstanding item if not |
+| Mark Phase Done | `/mark-phase-done` | Validate phase completion, then mark it as **DONE** in the implementation plan and sync the GitHub board; infers the phase from the current git branch (`planning/phase-N` → Phase N−1 done) if not specified |
 | Split Phase | `/split-phase` | Product Owner proposes splitting a phase into multiple phases or redistributing its deliverables; design + tech squads review the proposal, then the Product Owner applies the agreed split |
 
 ## Development Guidelines
@@ -102,6 +104,8 @@ Do not suggest alternative engines, languages, or platforms.
 - Follow modern C++ best practices (C++11 or later)
 - Object-oriented design principles
 - Clear separation of concerns (rendering, logic, audio)
+- **C++ class file naming**: C++ class implementation files (`.cpp`) and their paired class header files (`.h`) MUST use **CamelCase** (e.g., `TextureCache.cpp` / `TextureCache.h`, `SceneEntityManager.cpp` / `SceneEntityManager.h`, `TerrainChunk.cpp` / `TerrainChunk.h`). Non-class C-style headers that contain only constants, enums, or POD structs (e.g., `simulation_constants.h`, `terrain_types.h`, `shader_constants.h`) MAY use `snake_case`.
+- **Interface naming**: Pure-virtual interface classes MUST be placed under `src/interfaces/` and their filenames MUST be prefixed with `I` (e.g., `IRenderer.h`, `ITerrainQuery.h`, `IAudioSystem.h`). Concrete implementations live in their domain subdirectory (e.g., `src/rendering/`, `src/audio/`) without the `I` prefix.
 
 ### Dependencies
 
@@ -119,6 +123,12 @@ Do not suggest alternative engines, languages, or platforms.
 - Avoid platform-specific APIs where possible
 - Test on both Linux and Windows regularly
 - **Video driver**: Always use `EDT_OPENGL` on both platforms for consistent shader behavior
+
+### Branching Strategy
+
+- **Feature branches** (`implementation/phase-N`, `fix/...`, etc.) → merged into **`develop`** via PR when a phase or fix is complete
+- **`develop`** → merged into **`main`** only on **major releases** (not on individual phase completions)
+- PRs for completed phases always target `develop`, never `main` directly
 
 ## File Exclusions
 
@@ -190,6 +200,9 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Scene Graph Ownership | [architecture/graphics-architecture/scene-graph-ownership.md](architecture/graphics-architecture/scene-graph-ownership.md) |
 | Texture Cache | [architecture/graphics-architecture/texture-cache.md](architecture/graphics-architecture/texture-cache.md) |
 | Shader Loading | [architecture/graphics-architecture/shader-loading.md](architecture/graphics-architecture/shader-loading.md) |
+| Benchmark Tool | [architecture/graphics-architecture/benchmark-tool.md](architecture/graphics-architecture/benchmark-tool.md) |
+| Model Validator Tool | [architecture/graphics-architecture/model-validator-tool.md](architecture/graphics-architecture/model-validator-tool.md) |
+| Sky Clouds | [architecture/graphics-architecture/sky-clouds.md](architecture/graphics-architecture/sky-clouds.md) |
 
 #### Audio Architecture
 
@@ -239,7 +252,37 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 
 ## Getting Started
 
-(To be populated as project structure develops)
+Clone the repo, open in the dev container, then follow the build steps below.
+
+### Dev Container
+
+`.devcontainer/Dockerfile` defines the canonical build environment for AI Town. It must be kept
+up to date with **all** build-time and run-time dependencies, including:
+
+- C++ toolchain (GCC/Clang, CMake, Ninja)
+- vcpkg and all vcpkg-managed ports: Irrlicht, OpenAL Soft (`openal-soft`), libvorbis, GLEW,
+  Google Test + GMock, RapidCheck, and any future ports added to `vcpkg.json`
+- System libraries required at runtime (e.g. `libopenal`, `libGL`, X11/display libs for
+  headless CI via `xvfb`)
+- Any tools used in CI steps (e.g. `lcov`, `python3`, `nodejs` for markdownlint)
+
+**Rule**: whenever a new dependency is added to `vcpkg.json`, `CMakeLists.txt`, or the CI
+workflow, the Dockerfile must be updated in the same commit.
+
+### Makefile
+
+A `Makefile` at the repo root provides convenience targets that wrap the CMake/ctest
+commands. **Keep the Makefile targets in sync whenever build commands, presets, or test
+labels change.**
+
+| Target | Description |
+|---|---|
+| `make config` | Generate the CMake build configuration (`ci-linux` preset by default) |
+| `make build` | Build all binaries (runs `config` automatically if `build/` is missing) |
+| `make clean` | Remove all build artifacts (`build/` directory) |
+| `make test` | Build with coverage, run unit + integration tests, generate lcov report, enforce ≥95% gate |
+
+Override the preset with `make config PRESET=ci-linux-coverage` for a coverage build.
 
 ### Building
 
@@ -277,7 +320,7 @@ cmake --build build
 ctest --test-dir build -LE "integration|requires-opengl" --output-on-failure
 ctest --test-dir build -L "^integration$" --output-on-failure
 xvfb-run --auto-servernum ctest --test-dir build -L "^requires-opengl$" --output-on-failure
-lcov --capture --directory build --base-directory . --ignore-errors mismatch --output-file coverage.info
+lcov --capture --directory build --base-directory . --ignore-errors mismatch,inconsistent --output-file coverage.info
 BUILD_DIR=build
 lcov --remove coverage.info \
   --ignore-errors unused \
@@ -286,6 +329,8 @@ lcov --remove coverage.info \
   '*/tests/*' \
   '*/mock_*.h' '*/mock_*.cpp' \
   '*/manual_*.h' '*/manual_*.cpp' \
+  '*/Mock*.h' '*/Mock*.cpp' \
+  '*/Manual*.h' '*/Manual*.cpp' \
   '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
   --output-file coverage_filtered.info
 genhtml coverage_filtered.info --output-directory coverage_html/
@@ -299,40 +344,64 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## Notes for AI Assistants
 
-- C++ project using Irrlicht (EDT_OPENGL only) and OpenAL Soft
-- Focus on cross-platform compatibility (Linux + Windows)
-- Prioritize performance and code quality; follow OO design patterns
+### Policy
+
+- **NEVER merge a PR without EXPLICIT user request.** Do not merge pull requests autonomously, even after CI passes. Always wait for the user to explicitly ask before merging.
+- **PRs target `develop`, not `main`.** Completed phases are merged into `develop`. `main` receives merges only on major releases.
+- **Markdown linting**: run `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` and fix all errors before committing and pushing any `.md` changes. The bare `markdownlint` command is not installed; `npx markdownlint-cli` is the correct invocation for agents and local runs. CI/CD workflows are unchanged.
+
+### Build & Toolchain
+
+- **Makefile**: `make config / build / clean / test` are thin wrappers around cmake/ctest. Update `Makefile` targets whenever build commands, CMake presets, or ctest labels change — the Makefile is the canonical quick-start interface. `make test` enforces a **≥95% total line coverage gate** (target range 95–98%); override with `make test COVERAGE_MIN=90.0` if needed during active development.
+- **lcov `--ignore-errors`**: pass `mismatch,inconsistent,version` (comma-separated, single flag) to `lcov --capture` — `mismatch`/`inconsistent` suppress GCC 13 inline-function noise; `version` suppresses the GCC/gcov version-string mismatch emitted when the build and capture gcov versions differ slightly.
+- **Local build with gcc-12 fallback**: if the devcontainer image has not been rebuilt after the gcc-13 Dockerfile fix, `/usr/bin/c++` resolves to gcc-12 which lacks `<format>` (required by openal-soft ≥ 1.24.0). Workaround: pass `-DVCPKG_OVERLAY_PORTS=vcpkg-overlays` to cmake — the overlay pins openal-soft to 1.23.1. Once the devcontainer is rebuilt (which now sets the `c++` alternative to gcc-13), the overlay is not needed.
+- **CMakePresets**: Three CI presets defined in `CMakePresets.json`: `ci-linux` (Ninja, no coverage), `ci-linux-coverage` (Ninja, coverage), `ci-windows` (Ninja + MSVC). CI jobs call `cmake --preset <name>`. Local dev: set `VCPKG_ROOT` then `cmake --preset ci-linux` (add `-DVCPKG_OVERLAY_PORTS=vcpkg-overlays` if using gcc-12 fallback).
+- **Test deps via vcpkg**: `gtest` and `rapidcheck` are vcpkg-managed (not FetchContent). Targets: `GTest::gtest_main`, `GTest::gmock` (namespaced); `rapidcheck`, `rapidcheck_gtest` (bare, no namespace).
+- **CI build-linux**: uses `-DENABLE_COVERAGE=OFF`; only `coverage-linux` uses `-DENABLE_COVERAGE=ON`.
+- **CI PowerShell**: use `if (-not (Test-Path ...)) { exit 1 }` — `Test-Path ... || exit 1` is PS 7+ only; GitHub Actions Windows runners use PS 5.1.
+- **CI step order**: compiler-version detect step must write to `$GITHUB_ENV` in a **separate step before** the `actions/cache` step — `$GITHUB_ENV` writes are not visible within the same step.
+- **Windows CI**: Ninja generator (not MSBuild). DLL output at `build/` (not `build/Release/`). `ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c` runs vcvarsall before configure. After Build step: append `build\vcpkg_installed\x64-windows\bin` to `$env:GITHUB_PATH` so GTest/GMock DLLs are loadable. `AitownTestHelpers.cmake` uses `DISCOVERY_MODE PRE_TEST` — without it, POST_BUILD discovery runs before PATH is updated, silently finding 0 tests (gtest.dll not in PATH → test binary fails to start → ctest exits 0 with "No tests were found!!!").
+- **vcpkg Baseline Atomicity**: any vcpkg baseline bump MUST land all five changes
+  atomically in one PR:
+  1. `vcpkg.json` — `builtin-baseline` updated
+  2. `ci.yml` — `VCPKG_COMMIT_ID` env var updated to the same commit
+  3. `docker/ci-linux/Dockerfile` — `ARG VCPKG_COMMIT` build-arg updated to the same value
+  4. `.devcontainer/Dockerfile` — `FROM` line updated to
+     `ghcr.io/m0wa/aitown-ci-linux:vcpkg-<short-sha>@sha256:<digest>` (tag for
+     human readability + digest for immutability; identical `sha256:` to item 5)
+  5. `ci.yml` AND `.devcontainer/Dockerfile` — image digest pin (`sha256:...`)
+     updated to the `sha256:` output of the `docker-ci-image.yml` push step
+     (identical value in both files; the `.devcontainer/Dockerfile` FROM line
+     includes this digest per item 4)
+
+  All five must be updated in one PR. The `docker-ci-image.yml` validation step
+  enforces items 2 and 3 agree at image-build time. The supply-chain lint enforces
+  the digest is a full 64-hex SHA256 in `container: image:` lines.
+
+### Graphics / Irrlicht
+
 - Terrain uses chunked `IMeshBuffer` — never `ITerrainSceneNode`
 - `SMesh*` must be released via `->drop()`, never `delete`
-- **SMesh bounding boxes**: call `recalculateBoundingBox()` on every `SMeshBuffer` AND the `SMesh` itself before `addMeshSceneNode()` — omitting this breaks frustum culling
-- **LOD swap (buildings/vehicles)**: use `node->setMesh(newLODMesh)` to swap mesh reference in-place — preserves scene node transform and materials, avoids scene graph mutation. Only destroy and recreate the node on entity death or chunk unload. **Before calling `setMesh()`**, call `recalculateBoundingBox()` on each mesh buffer and then the `SMesh` itself — identical to the terrain mesh attachment sequence. Omitting this leaves a stale bounding box, causing incorrect frustum culling at the new LOD.
-- **LOD rebuild (terrain chunks)**: full node rebuild required (vertex count changes); always call `node->remove()` on the old node (via `SceneEntityManager::destroy()`) before creating the new one; store chunk IDs (not raw node pointers) in rebuild deque
-- **LOD hysteresis**: use separate swap-in / swap-out distances (5–10 m band); never bare threshold comparisons
-- **Eviction sequence**: iterate node's material slots to clear all texture pointers, THEN `driver->setMaterial(SMaterial{})`, THEN `textureCache->evictUnreferenced()`, THEN `node->remove()`
-- **sRGB textures**: upload diffuse via **fully raw GL path only** — `glGenTextures` + `glBindTexture` + `glCompressedTexImage2D` with `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` / `_DXT5_EXT`. **Never** use `addTexture(ECF_A8R8G8B8)` + `glCompressedTexImage2D` (linear internal format already committed — produces `GL_INVALID_OPERATION`) or `addTexture` + `COpenGLTexture::getOpenGLTextureName()` (same root cause). `ITexture::lock()` returns **null** for DXT compressed formats (no lockable CPU buffer) — always null-check before dereference. `TextureCache` tracks sRGB textures as raw `GLuint` in `m_srgbTextures` (separate from the `ITexture*` linear pool).
-- **GL_MAX_TEXTURE_SIZE**: query immediately after `createDevice()` in `RenderSystem`; stored as `m_maxTextureSize`; never at static init
-- **Shader callbacks**: Irrlicht **DOES** call `grab()` on `IShaderConstantSetCallBack` (Tutorial 10 pattern). Use **raw heap + `->drop()` after passing** to `addHighLevelShaderMaterialFromFiles`. Do NOT use `std::unique_ptr` or `std::vector<unique_ptr<>>` — `unique_ptr` calls `delete` directly, causing double-free when Irrlicht also drops the callback. No `m_shaderCallbacks` member needed in `RenderSystem`.
-- **Blender export axis**: use **"-Z Forward, Y Up"** (not "Y Forward, Z Up") — wrong setting produces Z-up assets in Irrlicht
-- **Asset formats**: `.b3d` mandatory for all building assets (UV2/lightmap support); `.obj` only for simple props with no lightmap
-- **Billboard imposters**: 8-direction bakes at **45° below horizontal (camera pitch = −45°)** (midpoint of [−70°, −20°] camera pitch range); **1024×128 DDS DXT5 atlas** (8 × 128×128 frames in 1×8 horizontal strip); flat ambient lighting only; 4-level mip chain mandatory
-- Scene node ownership via `SceneEntityManager`; destroy() nulls the pointer before remove()
+- Scene node ownership via `SceneEntityManager`; `destroy()` nulls the pointer before `remove()`
+- See [`architecture/graphics-architecture/`](architecture/graphics-architecture/) for full details on: SMesh bounding boxes, LOD swap/rebuild/hysteresis, texture eviction sequence, sRGB/DXT upload path, `GL_MAX_TEXTURE_SIZE`, and shader callback ownership (`grab()`/`drop()`)
+- See [`architecture/asset-standards/3d-model-standards.md`](architecture/asset-standards/3d-model-standards.md) for Blender export axis ("-Z Forward, Y Up"), asset formats (`.b3d` vs `.obj`), billboard imposter spec, and atlas mip chain (clamped at 4 levels)
+
+### Audio / OpenAL
+
 - All AL calls → `alCheckError()`; all ALC calls → `alcCheckError(device, op)`
-- **Audio thread**: must call `alcSetThreadContext(m_context)` at startup before any AL calls. **`alcSetThreadContext` requires `ALC_EXT_thread_local_context` extension** — check extension presence and load via `alcGetProcAddress` at `AudioSystem` construction; never call directly (null dereference if absent)
-- **Audio shutdown**: streaming sources — call `alSourceStop` then query `AL_BUFFERS_QUEUED` and `alSourceUnqueueBuffers` (never hardcode buffer count) before `alDeleteBuffers`; SFX pool sources — call `alSourceStop` then `alSourcei(src, AL_BUFFER, 0)` to detach static buffer before `alDeleteBuffers`; all must be done after `m_audioThread.join()` and before `alcDestroyContext`
-- Streaming music + ambient beds run on dedicated audio thread; both use non-evictable stream partition (4 sources total: 2 music + 2 ambient, sources[58..61]); 3 additional reserved SFX slots for stingers (crisis, milestone, game-over); main menu music reuses music stream sources[58..59] (main menu and gameplay are mutually exclusive states)
-- **Music crossfade**: queue to next bar boundary (90 BPM); constant-power curve; real-time delta (not simulation delta); minimum hold = 1 crossfade duration. Bar boundary tracked via **software sample counter** `m_samplesQueued` — never `AL_SAMPLE_OFFSET` (unreliable on buffer-queue sources; returns offset within current buffer only, not absolute stream position)
-- **Stingers**: WAV PCM; reserved non-evictable SFX sources; music ducks to 0.4 gain on stinger playback (ambient beds NOT ducked — `m_musicDuckGain` applies to music stems only); authored to −18 LUFS / −1 dBTP; drop if same type already in-progress; min 5 s between triggers of same type; `stinger_milestone` fires for City Rating transitions only at overlapping thresholds — population milestone toast still shown but no second stinger fires
-- **Vehicle engine SFX**: OGG Vorbis 5–20 s (min 6 s), pre-loaded, mono positional; WAV 1–2 s is prohibited (audibly mechanical repeat); max 12 simultaneous engine source pairs (24 pool slots ÷ 2 per vehicle); cull at > 150 m; idle + move sources must be acquired and released as an atomic pair — partial acquisition prohibited. **Why 6 s minimum**: at the lowest pitch-shift ratio (0.75 for stopped vehicles), a 4–5 s loop produces a ~3–3.75 s perceived loop — audibly mechanical. At 6 s minimum the lowest-pitch loop is ~4.5 s perceived, below the perceptibility threshold. See v1-audio-asset-manifest.md for full rationale.
+- See [`architecture/audio-architecture/`](architecture/audio-architecture/) for full details on: audio thread context (`alcSetThreadContext`), shutdown sequence, music crossfade bar-boundary tracking, stinger rules, and vehicle SFX loop-length rationale
+
+### Simulation
+
 - **Simulation RNG**: inject `ISimulationRNG*` at `CitySimulation` construction; never use `std::rand()` or global RNG in simulation logic — tests use `ManualRNG` for deterministic service-degradation scenarios
 - **IClock**: inject `IClock*` at `AudioSystem` and `CitySimulation` construction for deterministic timing in tests (crossfade timing and forced-loan 120 s gate); production uses `WallClock` (`std::chrono::steady_clock`); tests use `ManualClock`
-- **IUIBackend methods**: interface requires `setElementAlpha`, `isElementVisible`, `setElementImage`, `setElementEnabled`, `isElementEnabled` in addition to base methods — `setElementEnabled`/`isElementEnabled` distinguish disabled (grayed-out, non-interactive) from hidden (`setElementVisible`); required for ModalDialog speed-selector and undo-button disable tests; without these, grayed-out-vs-hidden semantics cannot be tested headlessly. `NotificationManager::dismissCriticalToast(UIElementHandle)` is the production API for player-dismissal of CRITICAL toasts (not a test backdoor)
-- **CI build-linux**: uses `-DENABLE_COVERAGE=OFF`; only `coverage-linux` uses `-DENABLE_COVERAGE=ON`
-- **CI PowerShell**: use `if (-not (Test-Path ...)) { exit 1 }` — `Test-Path ... || exit 1` is PS 7+ only; GitHub Actions Windows runners use PS 5.1
-- **FetchContent cache**: set `FETCHCONTENT_BASE_DIR` to `.fetchcontent_cache` (outside build tree); cache that path, not `build/_deps`
-- **CI step order**: compiler-version detect step must write to `$GITHUB_ENV` in a **separate step before** the `actions/cache` step — `$GITHUB_ENV` writes are not visible within the same step
-- Tests use Google Test + GMock (pinned v1.14.0) + RapidCheck (SHA-pinned); simulation injected via IRenderer/IAudioSystem; UIManager via IUIBackend (opaque UIElementHandle — no raw Irrlicht pointers in interface)
-- Mock policy: StrictMock for unit tests, NiceMock for property/integration tests; add TearDown() to explicitly reset sim_ and document destructor-path contract
-- Coverage gate (lcov 80%) Linux only; use `"${{ github.workspace }}/.fetchcontent_cache/*"` in CI YAML (or `"*/.fetchcontent_cache/*"` in local scripts) to exclude googletest/RapidCheck sources; do NOT include `${BUILD_DIR}/_deps/*` — with `FETCHCONTENT_BASE_DIR=.fetchcontent_cache` that path never exists and newer lcov (2.x) treats unused patterns as errors (exit 25); also pass `--ignore-errors mismatch` to `lcov --capture` for GCC 13 compatibility; building atlas mip chain clamped at 4 levels
-- CI: permissions block needed (`checks: write`); `coverage-linux` is self-contained job (builds+tests+lcov with ENABLE_COVERAGE=ON); use `GTEST_OUTPUT=xml:test_results/` (directory form); `all-checks-pass` gate MUST have `if: always()` + strict branch protection; vcpkg baseline enforcement step required; cache FetchContent `_deps/` in CI; DLL verification before upload; `actions/upload-artifact` steps must be explicit
+- **IUIBackend methods**: interface requires `setElementAlpha`, `isElementVisible`, `setElementImage`, `setElementEnabled`, `isElementEnabled` — `setElementEnabled`/`isElementEnabled` distinguish disabled (grayed-out, non-interactive) from hidden; `NotificationManager::dismissCriticalToast(UIElementHandle)` is the production API for player-dismissal of CRITICAL toasts (not a test backdoor). See [`architecture/testing/testability-architecture.md`](architecture/testing/testability-architecture.md) for full contract.
+
+### Testing & Coverage
+
+- Tests use Google Test + GMock + RapidCheck (all vcpkg-managed); simulation injected via `IRenderer`/`IAudioSystem`; `UIManager` via `IUIBackend` (opaque `UIElementHandle` — no raw Irrlicht pointers in interface)
+- Mock policy: `StrictMock` for unit tests, `NiceMock` for property/integration tests; add `TearDown()` to explicitly reset `sim_` and document destructor-path contract
+- Coverage gate (lcov ≥95%) Linux only; do NOT include `${BUILD_DIR}/_deps/*` in lcov exclude patterns (path never exists); pass `--ignore-errors mismatch,inconsistent` (comma-separated single flag) to `lcov --capture` for GCC 13 + lcov 2.x compatibility — lcov 2.0 only forwards the first `--ignore-errors` flag to geninfo, so both categories must be combined in one flag
+- CI: permissions block needed (`checks: write`); `coverage-linux` is self-contained job (builds+tests+lcov with `ENABLE_COVERAGE=ON`); use `GTEST_OUTPUT=xml:test_results/` (directory form); `all-checks-pass` gate MUST have `if: always()` + strict branch protection; vcpkg baseline enforcement step required; `actions/upload-artifact` steps must be explicit
 - Linux CI: run unit tests with `ctest -LE "integration|requires-opengl"`; integration tests (no display) with `ctest -L "^integration$"`; OpenGL tests under `xvfb-run` with `ctest -L "^requires-opengl$"`
 - Windows CI: use `vswhere.exe` for MSVC version in cache key; include `AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` in test step `env:`

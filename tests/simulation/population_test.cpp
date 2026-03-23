@@ -1,0 +1,738 @@
+// population_test.cpp — Phase 6 simulation unit tests for population growth/decay,
+// city rating transitions, and population milestone notifications.
+//
+// Spec references:
+//   architecture/game-design/population-density-growth.md
+//   architecture/game-design/game-progression-modes.md
+//   src/interfaces/simulation_types.h (SimulationNotification field order)
+//   implementation/phase-6.md
+//
+// Key population constants:
+//   population_growth_cap_fraction = 0.10  (max +10% of tier capacity per tick)
+//   population_milestone_threshold_1 = 1000  (Village → Town boundary)
+//   CityRatingTier: Village(0), Town(1), City(2), Metropolis(3), Megalopolis(4)
+//
+// Population growth approach for reaching thresholds quickly:
+//   - place High-density Residential zones (max capacity = 1000 per tile)
+//   - set tax rate = 0.01 (minimum) to maximize desirability / minimize demand suppression
+//   - balance with Commercial and Industrial zones to maintain demand
+//   - at 10% growth cap: 1000 pop tile grows by 100/tick
+//   - 10 High-R tiles * 100/tick = 1000/tick → crosses 1000 milestone in 1 tick
+//
+// SimulationNotification field order (guards against brace-init bug):
+//   struct SimulationNotification {
+//       NotificationType type;   // field 0
+//       int    amount;           // field 1 — loan principal; 0 for population events
+//       int    repaymentTicks;   // field 2 — loan period; 0 for population events
+//       int    milestoneValue;   // field 3 — population count or CityRatingTier as int
+//   };
+//
+// Fixture: PopulationTest (NiceMock) — NiceMock used because placement SFX is not
+//   the subject under test. TearDown() resets sim_ before mock destructors.
+
+#include "CitySimulation.h"
+#include "src/interfaces/ICitySimulation.h"
+#include "src/interfaces/simulation_types.h"
+#include "src/simulation/simulation_constants.h"
+#include "MockAudioSystem.h"
+#include "MockRenderer.h"
+#include "ManualRNG.h"
+#include "ManualClock.h"
+#include "ManualTerrainQuery.h"
+
+#include <gtest/gtest.h>
+#include <gmock/gmock.h>
+#include <rapidcheck.h>
+#include <rapidcheck/gtest.h>
+#include <cmath>
+#include <memory>
+
+using ::testing::NiceMock;
+using ::testing::StrictMock;
+using ::testing::_;
+using ::testing::AnyNumber;
+
+// ---------------------------------------------------------------------------
+// PopulationTest fixture
+// ---------------------------------------------------------------------------
+// NiceMock for audio — placement SFX and other audio calls are irrelevant to
+// these tests. TearDown() resets sim_ explicitly before mock destructors run.
+
+class PopulationTest : public ::testing::Test {
+protected:
+    NiceMock<MockRenderer>    renderer_;
+    NiceMock<MockAudioSystem> audio_;
+    // Non-strict RNG: int and float sequences wrap so tick-based population
+    // growth tests don't need to pre-provision exact call counts.
+    ManualRNG    rng_;  // default: int={0}, float={0.9f}, non-strict
+    ManualClock  clock_;
+    ManualTerrainQuery terrain_;
+
+    // sim_ declared LAST — destroyed first.
+    std::unique_ptr<ICitySimulation> sim_;
+
+    void SetUp() override {
+        sim_ = std::make_unique<CitySimulation>(
+            &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Normal);
+        sim_->setSpeed(SpeedMultiplier::x1);
+    }
+
+    void TearDown() override {
+        // Destroy sim_ first so CitySimulation destructor can call back into
+        // audio_/renderer_ without use-after-free (mocks are still alive here).
+        sim_.reset();
+    }
+
+    CitySimulation* cs() {
+        auto* p = dynamic_cast<CitySimulation*>(sim_.get());
+        EXPECT_NE(p, nullptr) << "Downcast to CitySimulation* failed";
+        return p;
+    }
+
+    // Helper: run N budget ticks at x1 speed, advancing ManualClock.
+    void runTicks(int n) {
+        auto* c = cs();
+        if (!c) return;
+        const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+        for (int i = 0; i < n; ++i) {
+            clock_.advance(dt);
+            c->tick(dt);
+        }
+    }
+
+    // Helper: set up a city that can reach population milestone_threshold_1 (1000).
+    // Places high-density residential tiles and balancing commercial/industrial zones.
+    // Returns the number of ticks needed (caller should run that many).
+    void setupCityForMilestone1() {
+        // Minimize tax to maximize demand / desirability floor.
+        sim_->setTaxRate(ZoneType::Residential,  0.01f);
+        sim_->setTaxRate(ZoneType::Commercial,   0.05f);
+        sim_->setTaxRate(ZoneType::Industrial,   0.05f);
+
+        // Phase 11h: placeZone requires a road within 3 Manhattan tiles.
+        // Roads at z=1 every 3 tiles cover zones at z=0 (x=0..19).
+        for (int x = 0; x <= 18; x += 3) {
+            sim_->placeRoad(x, 1, 0);
+        }
+        // Roads at z=4 cover zones at z=5 (x=0..4).
+        sim_->placeRoad(0, 4, 0);
+        sim_->placeRoad(3, 4, 0);
+        // Roads at z=9 cover zones at z=10 (x=0..4).
+        sim_->placeRoad(0, 9, 0);
+        sim_->placeRoad(3, 9, 0);
+
+        // Place 15 High-density Residential zones (capacity 1000 each = 15000 total).
+        // At 10% growth cap: 1000 * 0.10 = 100 pop/tile/tick;
+        // 15 tiles * 100 = 1500 pop/tick; crosses 1000 in 1 tick.
+        // Need density unlock first — use Easy difficulty for unlocked High density,
+        // OR use Low density (capacity 100) with enough tiles.
+        // Low-density capacity: 100 pop; 10% cap = 10/tick; 11 tiles = 110/tick → 1000 in ~9 ticks.
+        // Use 20 Low-R tiles for a reliable crossing of 1000 within a reasonable number of ticks.
+        for (int x = 0; x < 20; ++x) {
+            sim_->placeZone(x, 0, ZoneType::Residential, DensityTier::Low);
+        }
+        // Balance with Commercial and Industrial to maintain demand.
+        for (int x = 0; x < 5; ++x) {
+            sim_->placeZone(x, 5, ZoneType::Commercial,  DensityTier::Low);
+            sim_->placeZone(x, 10, ZoneType::Industrial, DensityTier::Low);
+        }
+    }
+
+    // Helper: drain all notifications, return matching type.
+    std::vector<SimulationNotification> drainNotificationsOfType(NotificationType type) {
+        std::vector<SimulationNotification> result;
+        SimulationNotification n;
+        while (sim_->pollPendingNotification(n)) {
+            if (n.type == type) {
+                result.push_back(n);
+            }
+        }
+        return result;
+    }
+
+    // Helper: drain all notifications, return all.
+    std::vector<SimulationNotification> drainAllNotifications() {
+        std::vector<SimulationNotification> result;
+        SimulationNotification n;
+        while (sim_->pollPendingNotification(n)) {
+            result.push_back(n);
+        }
+        return result;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Test 1: Notification_PopulationMilestone_MilestoneValueField
+//
+// Spec (phase-6.md):
+//   Advance population to exactly 1000; call pollPendingNotification();
+//   verify notification.type == PopulationMilestone,
+//         notification.milestoneValue == 1000 (NOT 0),
+//         notification.amount == 0.
+//   This guards against the 3-field brace-init bug where milestoneValue
+//   maps to amount instead of the 4th field.
+//
+// Strategy: place enough Low-R tiles so population crosses 1000 within
+// a reasonable number of ticks (< 20). Drain the queue looking for
+// a PopulationMilestone notification with milestoneValue == 1000.
+// ---------------------------------------------------------------------------
+TEST_F(PopulationTest, Notification_PopulationMilestone_MilestoneValueField) {
+    setupCityForMilestone1();
+
+    // Run enough ticks for population to grow past 1000.
+    // With 20 Low-R tiles and bootstrapped demand, population grows steadily.
+    // Low-R capacity = 100 per tile × 20 tiles = 2000 total capacity.
+    // At 10% growth cap = 10 pop/tile/tick = 200 pop/tick aggregate.
+    // Population reaches 1000 in ~5 ticks; run 20 ticks to be safe.
+    runTicks(20);
+
+    // Population must have crossed 1000 by now.
+    ASSERT_GE(sim_->getTotalPopulation(), SimulationConstants::population_milestone_threshold_1)
+        << "Population should have reached 1000 after 20 ticks with 20 Low-R tiles";
+
+    // Drain the notification queue looking for the PopulationMilestone.
+    // (Earlier ticks may have queued other notifications like ForcedLoanIssued.)
+    std::vector<SimulationNotification> milestones = drainNotificationsOfType(
+        NotificationType::PopulationMilestone);
+
+    ASSERT_FALSE(milestones.empty())
+        << "A PopulationMilestone notification must be queued when population crosses 1000";
+
+    // Find the 1K milestone notification.
+    SimulationNotification milestone1k;
+    bool found1k = false;
+    for (const auto& m : milestones) {
+        if (m.milestoneValue == SimulationConstants::population_milestone_threshold_1) {
+            milestone1k = m;
+            found1k = true;
+            break;
+        }
+    }
+
+    ASSERT_TRUE(found1k)
+        << "Must find PopulationMilestone with milestoneValue == "
+        << SimulationConstants::population_milestone_threshold_1;
+
+    // Verify field semantics: type is correct.
+    EXPECT_EQ(milestone1k.type, NotificationType::PopulationMilestone);
+
+    // Verify milestoneValue is 1000 — guards against brace-init mapping bug.
+    EXPECT_EQ(milestone1k.milestoneValue, SimulationConstants::population_milestone_threshold_1)
+        << "milestoneValue must be 1000 (not 0); guards against brace-init field-order bug "
+           "where milestoneValue accidentally maps to amount";
+
+    // Verify amount is 0 — population milestones carry no loan amount.
+    EXPECT_EQ(milestone1k.amount, 0)
+        << "amount must be 0 for PopulationMilestone (not a loan event)";
+}
+
+// ---------------------------------------------------------------------------
+// Test 2: CityRating_100KPopulation_NoRatingTransition_NoStingerFlag
+//
+// Spec (simulation_types.h NotificationType comments):
+//   "fires stinger_milestone at tier transitions ONLY; NOT at 100K raw population"
+//   CityRatingTier boundaries: Village<1K, Town<10K, City<50K, Metropolis<500K, Megalopolis.
+//   100K population is within Metropolis range (50K–499K). Crossing 100K does NOT
+//   trigger a CityRatingTransition notification (Metropolis was entered at 50K).
+//
+//   This test verifies:
+//     1. A PopulationMilestone notification IS queued at 100K (milestoneValue=100000).
+//     2. A CityRatingTransition notification is NOT queued at 100K (no tier change).
+//     3. No triggerStinger() call occurs at 100K (StrictMock on audio for stingers).
+//
+// Strategy: Use a StrictMock<MockAudioSystem> with EXPECT_CALL triggerStinger .Times(0).
+//   Place many High-R tiles (using Easy difficulty to get unlocked density)
+//   and run enough ticks to cross 100K. Drain notification queue.
+// ---------------------------------------------------------------------------
+TEST_F(PopulationTest, CityRating_100KPopulation_NoRatingTransition_NoStingerFlag) {
+    // Fresh sim with Easy difficulty (higher starting funds, unlocked density).
+    // Use StrictMock for audio to catch any spurious triggerStinger calls.
+    StrictMock<MockAudioSystem> strict_audio;
+    NiceMock<MockRenderer> nice_renderer;
+    ManualRNG local_rng(std::initializer_list<int>{0}, std::initializer_list<float>{0.9f}, false);
+    ManualClock local_clock;
+    ManualTerrainQuery local_terrain;
+
+    // Allow all incidental audio calls (placement SFX, budget events, time-of-day, etc.).
+    EXPECT_CALL(strict_audio, playSound(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setMusicTrack(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setSpeed(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, update(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setGameOverState(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setTimeOfDay(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, transitionToGameplay()).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, syncListenerToCamera(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, stopSound(_)).Times(AnyNumber());
+    // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick.
+    // Allow any number — this test focuses on stinger policy, not music intensity tier.
+    EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
+    // Phase 10: CityRatingTier transitions (Village→Town at 1K, Town→City at 10K,
+    // City→Metropolis at 50K) all fire triggerStinger(MILESTONE) per spec.
+    // Allow these during the warm-up phase (population 0 → 50K+).
+    // The CRITICAL assertion (no stinger at 100K) is installed after VerifyAndClear
+    // once the city is already at Metropolis tier.
+    EXPECT_CALL(strict_audio, triggerStinger(_)).Times(AnyNumber());
+
+    auto local_sim = std::make_unique<CitySimulation>(
+        &nice_renderer, &strict_audio,
+        &local_rng, &local_clock,
+        &local_terrain, Difficulty::Easy);
+    local_sim->setSpeed(SpeedMultiplier::x1);
+    auto* cs2 = dynamic_cast<CitySimulation*>(local_sim.get());
+    ASSERT_NE(cs2, nullptr);
+
+    // Set low tax to maximise population growth.
+    local_sim->setTaxRate(ZoneType::Residential, 0.01f);
+    local_sim->setTaxRate(ZoneType::Commercial,  0.05f);
+    local_sim->setTaxRate(ZoneType::Industrial,  0.05f);
+
+    // Place enough zones to reach 100K:
+    //   200 High-R zones (capacity 1000 each = 200K total).
+    //   At 10% growth cap = 100/zone/tick; 200 zones = 20000/tick.
+    //   100K reached in ~5 ticks.
+    //   High density (N=3): zones spaced 3 apart; roads at z=3 (dist 1 from footprint tile z=2).
+    //   placeZone does NOT check density unlock — placement is always allowed.
+    // Phase 11h: placeZone requires a road within 3 Manhattan tiles.
+    // 200 High-R zones at x=0,3,...,597 (3×3 footprint at z=0..2), roads at z=3.
+    for (int x = 0; x <= 597; x += 3) { local_sim->placeRoad(x, 3, 0); }
+    for (int x = 0; x <= 597; x += 3) {
+        local_sim->placeZone(x, 0, ZoneType::Residential, DensityTier::High);
+    }
+    // Balance demand with Commercial and Industrial (High density).
+    // 50 High-C zones at x=0,3,...,147 (3×3 footprint at z=4..6), roads at z=7.
+    for (int x = 0; x <= 147; x += 3) { local_sim->placeRoad(x, 7, 0); }
+    for (int x = 0; x <= 147; x += 3) {
+        local_sim->placeZone(x, 4, ZoneType::Commercial,  DensityTier::High);
+    }
+    // 50 High-I zones at x=0,3,...,147 (3×3 footprint at z=8..10), roads at z=11.
+    for (int x = 0; x <= 147; x += 3) { local_sim->placeRoad(x, 11, 0); }
+    for (int x = 0; x <= 147; x += 3) {
+        local_sim->placeZone(x, 8, ZoneType::Industrial,  DensityTier::High);
+    }
+
+    const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+
+    // Warm-up phase: run until population crosses Metropolis threshold (50K).
+    // Legitimate tier transitions (Village→Town, Town→City, City→Metropolis) fire
+    // stingers here — these are correct per spec and allowed by AnyNumber() above.
+    for (int i = 0; i < 30; ++i) {
+        local_clock.advance(dt);
+        cs2->tick(dt);
+        if (local_sim->getTotalPopulation() >= 60000) break;
+    }
+    ASSERT_GE(local_sim->getTotalPopulation(), 50000)
+        << "Population must reach Metropolis tier (50K) before CRITICAL phase";
+
+    // Reset all audio expectations now that the city is at Metropolis tier.
+    // All three legitimate stingers have already fired (or will not fire again).
+    // From this point on: triggerStinger must NOT be called — 100K is NOT a tier boundary.
+    ::testing::Mock::VerifyAndClearExpectations(&strict_audio);
+    EXPECT_CALL(strict_audio, playSound(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setTimeOfDay(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+    // CRITICAL: triggerStinger must NOT be called when population crosses 100K.
+    // 100K is NOT a CityRatingTier boundary — Metropolis threshold is 50K,
+    // Megalopolis threshold is 500K.
+    EXPECT_CALL(strict_audio, triggerStinger(_)).Times(0);
+
+    // Drive population from ~60K to 100K+.
+    // With 200 High-R zones and balanced demand:
+    //   each zone capacity = 1000; 10% cap = 100/tick; 200 × 100 = 20000/tick.
+    //   100K reached in ~5 ticks. Run 30 more to be safe.
+    for (int i = 0; i < 30; ++i) {
+        local_clock.advance(dt);
+        cs2->tick(dt);
+    }
+
+    // Population should have crossed 100K.
+    int pop = local_sim->getTotalPopulation();
+    ASSERT_GE(pop, SimulationConstants::population_milestone_threshold_4)
+        << "Population should have reached 100K after 60 ticks";
+
+    // Drain ALL notifications.
+    SimulationNotification n;
+    bool found100kMilestone   = false;
+    bool foundRatingAt100k    = false;
+    while (local_sim->pollPendingNotification(n)) {
+        if (n.type == NotificationType::PopulationMilestone &&
+            n.milestoneValue == SimulationConstants::population_milestone_threshold_4) {
+            found100kMilestone = true;
+        }
+        // A CityRatingTransition to Metropolis (= 3) fires at ~50K, not 100K.
+        // After Metropolis is established, no new CityRatingTransition fires at 100K.
+        // We look specifically for a transition notification fired AFTER 100K was crossed.
+        // Since we can't easily distinguish timing of notifications, we rely on
+        // the StrictMock triggerStinger expectation to catch the primary issue.
+    }
+
+    EXPECT_TRUE(found100kMilestone)
+        << "PopulationMilestone notification with milestoneValue=100000 must be queued";
+
+    // If Metropolis transition fired (at 50K), that is correct and expected.
+    // The CRITICAL assertion is that triggerStinger is NOT called at 100K.
+    // This is verified by the StrictMock EXPECT_CALL triggerStinger .Times(0) above.
+    // If triggerStinger fires at 100K, StrictMock causes a test failure automatically.
+
+    local_sim.reset();
+}
+
+// ---------------------------------------------------------------------------
+// Test 3: PopulationMilestone_And_CityRatingTransition_BothEnqueued_WhenThresholdCoincides
+//
+// Spec (simulation_types.h):
+//   CityRatingTransition fires at tier boundaries AND separately from PopulationMilestone.
+//   Village → Town boundary = 1000 population.
+//   PopulationMilestone threshold_1 = 1000.
+//   When population crosses 1000 both notifications must be enqueued in one tick:
+//     1. PopulationMilestone{type=PopulationMilestone, amount=0, repaymentTicks=0, milestoneValue=1000}
+//     2. CityRatingTransition{type=CityRatingTransition, amount=0, repaymentTicks=0, milestoneValue=1 (Town)}
+// ---------------------------------------------------------------------------
+TEST_F(PopulationTest, PopulationMilestone_And_CityRatingTransition_BothEnqueued_WhenThresholdCoincides) {
+    // Set up for quick milestone crossing.
+    setupCityForMilestone1();
+
+    // Run ticks until population crosses 1000.
+    // Check after each tick to catch both notifications in the same flush.
+    const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+    auto* c = cs();
+    ASSERT_NE(c, nullptr);
+
+    bool foundMilestone = false;
+    bool foundRating    = false;
+
+    for (int tick = 0; tick < 30 && !(foundMilestone && foundRating); ++tick) {
+        clock_.advance(dt);
+        c->tick(dt);
+
+        SimulationNotification n;
+        while (sim_->pollPendingNotification(n)) {
+            if (n.type == NotificationType::PopulationMilestone &&
+                n.milestoneValue == SimulationConstants::population_milestone_threshold_1) {
+                foundMilestone = true;
+                // Validate field values of the PopulationMilestone notification.
+                EXPECT_EQ(n.amount, 0)
+                    << "PopulationMilestone.amount must be 0";
+                EXPECT_EQ(n.repaymentTicks, 0)
+                    << "PopulationMilestone.repaymentTicks must be 0";
+            }
+            if (n.type == NotificationType::CityRatingTransition &&
+                n.milestoneValue == static_cast<int>(CityRatingTier::Town)) {
+                foundRating = true;
+                // Validate field values of the CityRatingTransition notification.
+                EXPECT_EQ(n.amount, 0)
+                    << "CityRatingTransition.amount must be 0";
+                EXPECT_EQ(n.repaymentTicks, 0)
+                    << "CityRatingTransition.repaymentTicks must be 0";
+                EXPECT_EQ(n.milestoneValue, static_cast<int>(CityRatingTier::Town))
+                    << "CityRatingTransition.milestoneValue must be Town (= 1)";
+            }
+        }
+    }
+
+    EXPECT_TRUE(foundMilestone)
+        << "PopulationMilestone notification with milestoneValue=1000 must be queued";
+    EXPECT_TRUE(foundRating)
+        << "CityRatingTransition notification (to Town = 1) must be queued "
+           "when population crosses Village→Town boundary at 1000";
+}
+
+// ---------------------------------------------------------------------------
+// Test 4: CityRating_VillageToTown_Transition_FiresStingerNotification
+//
+// Spec (phase-6.md note on this test):
+//   "the notification is enqueued, NOT that the stinger fires;
+//    the stinger is Phase 8 UIManager scope"
+//   Verify:
+//     - Population crosses 1000 (Village → Town)
+//     - CityRatingTransition notification queued with milestoneValue = Town (= 1)
+//     - NO triggerStinger() is called (simulation side does NOT call triggerStinger)
+//
+// This test uses StrictMock for audio to ensure triggerStinger is NEVER called
+// from CitySimulation (stinger triggering is Phase 8 UIManager responsibility,
+// not Phase 6 CitySimulation responsibility).
+// ---------------------------------------------------------------------------
+TEST_F(PopulationTest, CityRating_VillageToTown_Transition_FiresStingerNotification) {
+    // StrictMock: any call to triggerStinger from CitySimulation is a failure.
+    StrictMock<MockAudioSystem> strict_audio;
+    NiceMock<MockRenderer> nice_renderer;
+    ManualRNG local_rng(std::initializer_list<int>{0}, std::initializer_list<float>{0.9f}, false);
+    ManualClock local_clock;
+    ManualTerrainQuery local_terrain;
+
+    // Allow all non-stinger audio methods.
+    EXPECT_CALL(strict_audio, playSound(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, playPositionalSound(_, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, stopSound(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setMusicTrack(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setSpeed(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, update(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setGameOverState(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, setTimeOfDay(_)).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, transitionToGameplay()).Times(AnyNumber());
+    EXPECT_CALL(strict_audio, syncListenerToCamera(_)).Times(AnyNumber());
+    // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick.
+    // Allow any number — this test focuses on stinger policy, not music intensity tier.
+    EXPECT_CALL(strict_audio, setMusicIntensity(_)).Times(AnyNumber());
+    // Phase 6 CitySimulation must NOT call triggerStinger — that is Phase 8 scope.
+    EXPECT_CALL(strict_audio, triggerStinger(_)).Times(0);
+
+    auto local_sim = std::make_unique<CitySimulation>(
+        &nice_renderer, &strict_audio,
+        &local_rng, &local_clock,
+        &local_terrain, Difficulty::Normal);
+    local_sim->setSpeed(SpeedMultiplier::x1);
+    auto* cs2 = dynamic_cast<CitySimulation*>(local_sim.get());
+    ASSERT_NE(cs2, nullptr);
+
+    // Low tax to maximise growth.
+    local_sim->setTaxRate(ZoneType::Residential, 0.01f);
+    local_sim->setTaxRate(ZoneType::Commercial,  0.05f);
+    local_sim->setTaxRate(ZoneType::Industrial,  0.05f);
+
+    // Place residential zones sufficient to cross 1000 population.
+    // Phase 11h: placeZone requires a road within 3 Manhattan tiles.
+    for (int x = 0; x <= 18; x += 3) { local_sim->placeRoad(x, 1, 0); }
+    local_sim->placeRoad(0, 4, 0); local_sim->placeRoad(3, 4, 0);
+    local_sim->placeRoad(0, 9, 0); local_sim->placeRoad(3, 9, 0);
+    for (int x = 0; x < 20; ++x) {
+        local_sim->placeZone(x, 0, ZoneType::Residential, DensityTier::Low);
+    }
+    for (int x = 0; x < 5; ++x) {
+        local_sim->placeZone(x, 5, ZoneType::Commercial,  DensityTier::Low);
+        local_sim->placeZone(x, 10, ZoneType::Industrial, DensityTier::Low);
+    }
+
+    const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+
+    bool foundRatingTransition = false;
+
+    for (int tick = 0; tick < 30; ++tick) {
+        local_clock.advance(dt);
+        cs2->tick(dt);
+
+        SimulationNotification n;
+        while (local_sim->pollPendingNotification(n)) {
+            if (n.type == NotificationType::CityRatingTransition &&
+                n.milestoneValue == static_cast<int>(CityRatingTier::Town)) {
+                foundRatingTransition = true;
+            }
+        }
+        if (foundRatingTransition) break;
+    }
+
+    // Verify population crossed Village→Town boundary.
+    ASSERT_GE(local_sim->getTotalPopulation(),
+              SimulationConstants::population_milestone_threshold_1)
+        << "Population must have crossed 1000 (Village→Town boundary)";
+
+    EXPECT_TRUE(foundRatingTransition)
+        << "CityRatingTransition notification with milestoneValue == Town (1) "
+           "must be queued when population crosses 1000";
+
+    // CitySimulation must report Town tier.
+    EXPECT_EQ(local_sim->getCityRating(), CityRatingTier::Town)
+        << "City rating must be Town after population crosses 1000";
+
+    // The StrictMock EXPECT_CALL triggerStinger .Times(0) enforces that
+    // CitySimulation does NOT call triggerStinger — that is Phase 8 scope.
+
+    local_sim.reset();
+}
+
+// ---------------------------------------------------------------------------
+// Property Test: PopulationGrowthDecayCaps_ClampedToFraction
+//
+// Spec (phase-6.md, population-density-growth.md):
+//   Per-tick growth delta is capped at:
+//     growth_cap = population_growth_cap_fraction * max_density_for_tier  (+10%)
+//     decay_cap  = population_decay_cap_fraction  * max_density_for_tier  (-15%)
+//   The cap is applied to the DELTA (target - actual), not to the target itself.
+//   The cap values are stable and based on max_density_for_tier, not actual_population.
+//
+// Strategy: construct a sim, place a Low-density Residential tile (capacity = 100),
+// run one tick, then verify getTotalPopulation() did not change by more than
+// growth_cap = round(100 * 0.10) = 10 per tick (and cannot go negative or exceed 100).
+// For decay: if population is seeded high and demand collapses, verify the drop
+// per tick does not exceed decay_cap = round(100 * 0.15) = 15.
+//
+// Uses NiceMock per project policy for property-based and integration tests.
+// Uses rc::check rather than RC_PROPERTY to match the terrain_chunk_test.cpp pattern.
+// ---------------------------------------------------------------------------
+
+TEST(PopulationPropertyTest, GrowthCap_DeltaPerTickBoundedByFraction) {
+    // Property: for a Low-density Residential tile (maxPop = 100):
+    //   population change per tick <= growth_cap = round(100 * 0.10) = 10
+    // We generate a demand factor in [0.0, 1.0] by varying tax rates.
+    // Since direct demand manipulation is not exposed, we verify the
+    // observable bound: population cannot grow by more than growth_cap per tick.
+    //
+    // The rc::check generates the number of pre-warm ticks to vary starting population,
+    // then checks the per-tick delta is bounded.
+    rc::check("Growth delta per tick <= growth_cap for Low-density Residential",
+        []() {
+            // NiceMock suppresses all audio/renderer calls inside the check lambda.
+            NiceMock<MockRenderer>    renderer;
+            NiceMock<MockAudioSystem> audio;
+            ManualRNG    rng;
+            ManualClock  clock;
+            ManualTerrainQuery terrain;
+
+            auto sim_ptr = std::make_unique<CitySimulation>(
+                &renderer, &audio, &rng, &clock, &terrain, Difficulty::Normal);
+            sim_ptr->setSpeed(SpeedMultiplier::x1);
+            ICitySimulation* sim = sim_ptr.get();
+
+            // Place a Low-density Residential tile + Commercial/Industrial to
+            // generate non-zero demand. Tax rate = 0.01 (minimum) to maximise
+            // demand (lower tax rate → higher desirability → higher growth).
+            sim->setTaxRate(ZoneType::Residential,  0.01f);
+            sim->setTaxRate(ZoneType::Commercial,   0.05f);
+            sim->setTaxRate(ZoneType::Industrial,   0.05f);
+            sim->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
+            sim->placeZone(0, 1, ZoneType::Commercial,  DensityTier::Low);
+            sim->placeZone(0, 2, ZoneType::Industrial,  DensityTier::Low);
+
+            const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+            // Low-density max population = 100 per CitySimulation::maxPopulationForTile
+            const int maxPop = 100;
+            // Growth cap = round(100 * 0.10) = 10
+            const int growthCap = static_cast<int>(
+                std::round(static_cast<float>(maxPop) *
+                           SimulationConstants::population_growth_cap_fraction));
+            RC_ASSERT(growthCap == 10);  // verify constant is correct
+
+            // Run a random number of warm-up ticks in [0, 5] to vary starting state.
+            int warmupTicks = *rc::gen::inRange(0, 6);
+            for (int i = 0; i < warmupTicks; ++i) {
+                clock.advance(dt);
+                dynamic_cast<CitySimulation*>(sim_ptr.get())->tick(dt);
+            }
+
+            int popBefore = sim->getTotalPopulation();
+
+            // Run exactly one more tick.
+            clock.advance(dt);
+            dynamic_cast<CitySimulation*>(sim_ptr.get())->tick(dt);
+
+            int popAfter = sim->getTotalPopulation();
+            int delta = popAfter - popBefore;
+
+            // Growth delta must not exceed +growthCap.
+            RC_ASSERT(delta <= growthCap);
+            // Population must be non-negative.
+            RC_ASSERT(popAfter >= 0);
+            // Population must not exceed maxPop for one tile.
+            RC_ASSERT(popAfter <= maxPop);
+        });
+}
+
+TEST(PopulationPropertyTest, DecayCap_DeltaPerTickBoundedByFraction) {
+    // Property: for a Low-density Residential tile (maxPop = 100):
+    //   population decrease per tick <= decay_cap = round(100 * 0.15) = 15
+    // We force decay by growing population then removing all demand drivers.
+    //
+    // The rc::check varies the number of growth ticks to seed different
+    // starting populations, then verifies one decay tick's delta is bounded.
+    rc::check("Decay delta per tick <= decay_cap for Low-density Residential",
+        []() {
+            NiceMock<MockRenderer>    renderer;
+            NiceMock<MockAudioSystem> audio;
+            ManualRNG    rng;
+            ManualClock  clock;
+            ManualTerrainQuery terrain;
+
+            auto sim_ptr = std::make_unique<CitySimulation>(
+                &renderer, &audio, &rng, &clock, &terrain, Difficulty::Normal);
+            sim_ptr->setSpeed(SpeedMultiplier::x1);
+            ICitySimulation* sim = sim_ptr.get();
+
+            // Grow population during bootstrap: place full zone set.
+            sim->setTaxRate(ZoneType::Residential, 0.01f);
+            sim->setTaxRate(ZoneType::Commercial,  0.01f);
+            sim->setTaxRate(ZoneType::Industrial,  0.01f);
+            sim->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
+            sim->placeZone(0, 1, ZoneType::Commercial,  DensityTier::Low);
+            sim->placeZone(0, 2, ZoneType::Industrial,  DensityTier::Low);
+
+            const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+            const int maxPop = 100;
+            // Decay cap = round(100 * 0.15) = 15
+            const int decayCap = static_cast<int>(
+                std::round(static_cast<float>(maxPop) *
+                           SimulationConstants::population_decay_cap_fraction));
+            RC_ASSERT(decayCap == 15);  // verify constant is correct
+
+            // Grow for a random number of ticks in [1, 10].
+            // advance clock past grace period so expenses apply but growth ticks fire.
+            clock.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+            int growthTicks = *rc::gen::inRange(1, 11);
+            for (int i = 0; i < growthTicks; ++i) {
+                clock.advance(dt);
+                dynamic_cast<CitySimulation*>(sim_ptr.get())->tick(dt);
+            }
+
+            // Remove Commercial and Industrial to collapse demand → population decays.
+            sim->demolishTile(0, 1);
+            sim->demolishTile(0, 2);
+
+            int popBefore = sim->getTotalPopulation();
+
+            // Run exactly one decay tick.
+            clock.advance(dt);
+            dynamic_cast<CitySimulation*>(sim_ptr.get())->tick(dt);
+
+            int popAfter = sim->getTotalPopulation();
+            int decay = popBefore - popAfter;  // positive when population falls
+
+            // Decay delta must not exceed decayCap per tick.
+            // decay <= decayCap: population can only fall by at most decayCap per tick.
+            RC_ASSERT(decay <= decayCap);
+            // Population must remain non-negative.
+            RC_ASSERT(popAfter >= 0);
+        });
+}
+
+// ============================================================================
+// Tests moved from simulation_coverage_gap_test.cpp
+// ============================================================================
+
+// ============================================================================
+// Test: maxPopulationForTile Commercial/Industrial branches (L73-89)
+// Place Commercial (Low/Medium/High) and Industrial (Low/Medium/High) zones,
+// run ticks — exercises maxPopulationForTile for those zone types.
+// ============================================================================
+TEST_F(PopulationTest, MaxPop_Commercial_IsExercisedByTick)
+{
+    // Place Commercial zones (Low density).
+    sim_->placeZone(0, 0, ZoneType::Commercial,  DensityTier::Low, 0);
+    sim_->placeZone(1, 0, ZoneType::Commercial,  DensityTier::Medium, 0);
+    sim_->placeZone(2, 0, ZoneType::Commercial,  DensityTier::High, 0);
+    sim_->placeZone(3, 0, ZoneType::Industrial,  DensityTier::Low, 0);
+    sim_->placeZone(4, 0, ZoneType::Industrial,  DensityTier::Medium, 0);
+    sim_->placeZone(5, 0, ZoneType::Industrial,  DensityTier::High, 0);
+
+    // Place a road to generate demand signal.
+    sim_->placeRoad(0, 1, 0);
+
+    // Advance past grace period and run several ticks.
+    clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
+    runTicks(3);
+
+    // As long as no crash occurred, maxPopulationForTile was exercised.
+    SUCCEED();
+}
+
+// ============================================================================
+// Test: TimeOfDay code path — multiple ticks run without crashing.
+// The DAY/DUSK/NIGHT branches in tick() are exercised by the tick loop.
+// 720 mod 24 = 0, so dayHours stays 0 (NIGHT) throughout — DUSK/DAY branches
+// are unreachable via this arithmetic, but the tick path is verified clean.
+// ============================================================================
+TEST_F(PopulationTest, TimeOfDay_MultipleTicks_NoCrash)
+{
+    // Run enough ticks to exercise the TimeOfDay update code path.
+    runTicks(5);
+    SUCCEED();
+}

@@ -13,8 +13,10 @@ static vec3 toVec3(const irr::core::vector3df& v) {
     return vec3{v.X, v.Y, v.Z};
 }
 
-CameraController::CameraController(irr::scene::ICameraSceneNode* camera, bool startInFullscreen)
+CameraController::CameraController(irr::scene::ICameraSceneNode* camera, bool startInFullscreen,
+                                   const KeyBindings& bindings)
     : m_camera(camera)
+    , m_bindings(bindings)
     , m_edgeScrollEnabled(startInFullscreen)
 {
     // startInFullscreen=true → edge-scroll ON (fullscreen default)
@@ -154,33 +156,16 @@ bool CameraController::OnInputEvent(const InputEvent& event) {
 
     case Type::KeyDown:
         {
-            // Arrow-key pan: zoom-scaled pan formula.
-            // KEYBOARD PAN MUST NOT apply sensitivityMultiplier — only MMB drag and edge-scroll
-            // apply it per architecture/ui-ux/camera-controls.md.
-            // Phase 8 sensitivity slider MUST NOT regress this rule.
-            const float panSpeed = kBasePanSpeed * (m_zoomDistance / kDefaultZoomDistance)
-                                 * kKeyboardPanRate;  // NOTE: NO sensitivityMultiplier here
-            const float scale = panSpeed * 0.016f; // approximate one frame's worth
-            const float yaw_rad = m_yaw * static_cast<float>(M_PI / 180.0);
-            const float rightX =  std::cos(yaw_rad);
-            const float rightZ = -std::sin(yaw_rad);
-            const float fwdX   = std::sin(yaw_rad);
-            const float fwdZ   = std::cos(yaw_rad);
-
             bool consumed = true;
-            // Irrlicht key codes
+            // Irrlicht key codes — set held-state flags for continuous pan in update(dt)
             if (event.keyCode == irr::KEY_LEFT) {
-                m_targetX -= rightX * scale;
-                m_targetZ -= rightZ * scale;
+                m_panLeft = true;
             } else if (event.keyCode == irr::KEY_RIGHT) {
-                m_targetX += rightX * scale;
-                m_targetZ += rightZ * scale;
+                m_panRight = true;
             } else if (event.keyCode == irr::KEY_UP) {
-                m_targetX += fwdX * scale;
-                m_targetZ += fwdZ * scale;
+                m_panForward = true;
             } else if (event.keyCode == irr::KEY_DOWN) {
-                m_targetX -= fwdX * scale;
-                m_targetZ -= fwdZ * scale;
+                m_panBackward = true;
             } else {
                 consumed = false;
             }
@@ -188,14 +173,58 @@ bool CameraController::OnInputEvent(const InputEvent& event) {
         }
 
     case Type::KeyUp:
-        return false;
+        {
+            if (event.keyCode == irr::KEY_LEFT) {
+                m_panLeft = false;
+            } else if (event.keyCode == irr::KEY_RIGHT) {
+                m_panRight = false;
+            } else if (event.keyCode == irr::KEY_UP) {
+                m_panForward = false;
+            } else if (event.keyCode == irr::KEY_DOWN) {
+                m_panBackward = false;
+            }
+            return false;
+        }
 
     default:
         return false;
     }
 }
 
-void CameraController::update(float /*dt*/) {
+void CameraController::update(float dt) {
+    // --- Continuous keyboard pan (arrow-key held state) ---
+    // Applied before the null-camera guard because getCameraState() reads
+    // m_targetX/m_targetZ even for null cameras (unit-test path).
+    // KEYBOARD PAN MUST NOT apply sensitivityMultiplier — only MMB drag and edge-scroll
+    // apply it per architecture/ui-ux/camera-controls.md.
+    if (m_panLeft || m_panRight || m_panForward || m_panBackward) {
+        const float panSpeed = kBasePanSpeed * (m_zoomDistance / kDefaultZoomDistance)
+                             * kKeyboardPanRate;
+        const float scale = panSpeed * dt;
+        const float yaw_rad_pan = m_yaw * static_cast<float>(M_PI / 180.0);
+        const float rightX =  std::cos(yaw_rad_pan);
+        const float rightZ = -std::sin(yaw_rad_pan);
+        const float fwdX   = std::sin(yaw_rad_pan);
+        const float fwdZ   = std::cos(yaw_rad_pan);
+
+        if (m_panLeft) {
+            m_targetX += rightX * scale;
+            m_targetZ += rightZ * scale;
+        }
+        if (m_panRight) {
+            m_targetX -= rightX * scale;
+            m_targetZ -= rightZ * scale;
+        }
+        if (m_panForward) {
+            m_targetX -= fwdX * scale;
+            m_targetZ -= fwdZ * scale;
+        }
+        if (m_panBackward) {
+            m_targetX += fwdX * scale;
+            m_targetZ += fwdZ * scale;
+        }
+    }
+
     if (!m_camera) {
         return; // null-camera test seam: no live scene node to update
     }
@@ -221,6 +250,10 @@ void CameraController::update(float /*dt*/) {
 
     m_camera->setPosition(eye);
     m_camera->setTarget(target);
+    // Flush the absolute-position cache so getCameraState() live path and any
+    // headless callers see the correct value from getAbsolutePosition() without
+    // requiring a full scene draw (ISceneManager::drawAll).
+    m_camera->updateAbsolutePosition();
 }
 
 CameraState CameraController::getCameraState() const {

@@ -1,0 +1,225 @@
+# Build Windows — reusable workflow
+# Windows binary verification build.
+# Called by ci.yml after supply-chain-lint and validate-assets.
+# Preflight steps (SHA lint, asset validation, clouds/font/audio/terrain checks,
+# vcpkg baseline) are handled by the supply-chain-lint and validate-assets jobs
+# and are NOT duplicated here.
+name: Build Windows
+
+on:
+  workflow_call:
+    inputs:
+      vcpkg_commit_id:
+        type: string
+        required: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      checks: write     # required by dorny/test-reporter
+      contents: read    # required by actions/checkout
+    steps:
+      # Step 1: Checkout
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      # Step 3: Detect MSVC version via vswhere.exe.
+      # MUST be a SEPARATE named step before actions/cache.
+      # $GITHUB_ENV writes are not visible within the same step.
+      # Use "KEY=VALUE" >> $env:GITHUB_ENV (PS 5.1 compatible, not echo).
+      - name: Detect MSVC version
+        shell: pwsh
+        run: |
+          $version = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -property installationVersion
+          "COMPILER_VERSION=$version" >> $env:GITHUB_ENV
+
+      # Step 4: Cache vcpkg packages.
+      # Reads $env:COMPILER_VERSION set in step 3.
+      # restore-keys: two-tier fallback —
+      #   Tier 1 (same baseline, different vcpkg.json hash): safe partial restore — vcpkg
+      #     installs only the new/changed packages on top of the restored archive.
+      #   Tier 2 (any prior entry for this OS+compiler): last-resort fallback; may restore
+      #     a stale-baseline archive that triggers MSYS2 mirror 404s on cold-package rebuilds.
+      #     Acceptable only when no same-baseline entry exists (e.g. first run at a new baseline).
+      - name: Cache vcpkg packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
+          key: vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('vcpkg.json') }}-${{ inputs.vcpkg_commit_id }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ inputs.vcpkg_commit_id }}-
+            vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-
+
+      # Step 6: Set up MSVC environment for Ninja generator.
+      # ilammy/msvc-dev-cmd runs vcvarsall.bat x64, placing cl.exe and link.exe on PATH.
+      # MUST run BEFORE lukka/run-vcpkg: on a cold binary cache vcpkg builds packages from
+      # source and must use the same toolchain that CMake/Ninja will use. Without this,
+      # vcpkg uses its own vswhere detection which may select a different toolset version,
+      # producing ABI-mismatched archives that cause opaque link failures.
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c  # v1.13.0
+
+      # Step 7: Run vcpkg to install dependencies.
+      # Runs after msvc-dev-cmd so that cold-cache source builds use the same cl.exe
+      # that the subsequent cmake --preset ci-windows configure step will use.
+      - name: Install vcpkg dependencies
+        uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
+        with:
+          vcpkgGitCommitId: ${{ inputs.vcpkg_commit_id }}
+
+      # Step 8: Configure CMake (Ninja generator via ci-windows preset; no ccache on Windows).
+      # vcpkg manifest install runs here — build/vcpkg_installed/ is created during configure.
+      - name: Configure CMake
+        run: cmake --preset ci-windows
+        shell: pwsh
+
+      # Step 9: Verify glew vcpkg installed artifact (after cmake configure).
+      # glew is required by the Irrlicht vcpkg port on Windows. If it is absent the
+      # link step fails with an opaque error. This step catches the missing installed
+      # artifact immediately with a clear diagnostic message.
+      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1"
+      # is PS 7+ only; GitHub Actions Windows runners use PS 5.1.
+      - name: Verify glew vcpkg port
+        shell: pwsh
+        run: |
+          # Manifest mode installs to build/vcpkg_installed/; classic mode to $VCPKG_ROOT/installed/.
+          $manifestHdr = "build\vcpkg_installed\x64-windows\include\GL\glew.h"
+          $classicHdr  = Join-Path $env:VCPKG_ROOT "installed\x64-windows\include\GL\glew.h"
+          if (-not (Test-Path $manifestHdr) -and -not (Test-Path $classicHdr)) {
+            Write-Error "ERROR: GLEW not installed — GL/glew.h not found in manifest path ($manifestHdr) or classic path ($classicHdr)."
+            exit 1
+          }
+          Write-Host "GLEW installed artifact verified."
+
+      # Step 10: Verify GLEW vcpkg install (Windows) — sixth atomicity item.
+      # Dual-path check: manifest-mode install (build/vcpkg_installed/) first,
+      # then classic-mode fallback ($VCPKG_ROOT/installed/).
+      # NOTE: On Windows, vcpkg GLEW port installs glew32.lib (not glew.lib) per portfile libname override.
+      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
+      - name: Verify GLEW vcpkg install (Windows)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'build/vcpkg_installed/x64-windows/lib/glew32.lib') -and -not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\glew32.lib")) {
+            Write-Error 'glew32.lib not found in either vcpkg install path'
+            exit 1
+          }
+          Write-Host 'glew32.lib found.'
+
+      # Step 11: Build (Ninja single-config; no -C Release needed).
+      - name: Build
+        run: cmake --build build --parallel
+        shell: pwsh
+
+      # Step 12: Add vcpkg installed binaries to PATH.
+      # Required for GTest DLL discovery (DISCOVERY_MODE PRE_TEST) and test execution.
+      # vcpkg x64-windows triplet builds GTest/GMock as shared DLLs (gtest.dll, gmock.dll)
+      # in build/vcpkg_installed/x64-windows/bin/ — NOT in build/ alongside the .exe.
+      # Without this, test binaries fail to start and ctest reports "No tests were found!!!".
+      # GITHUB_PATH writes take effect for all subsequent steps in this job.
+      - name: Add vcpkg bin to PATH
+        shell: pwsh
+        run: |
+          "${{ github.workspace }}\build\vcpkg_installed\x64-windows\bin" >> $env:GITHUB_PATH
+
+      # Step 13: Run unit tests.
+      # AITOWN_HEADLESS=1 and ALSOFT_DRIVERS=null required — headless Windows runners
+      # have no audio hardware and will fail AudioSystem initialization without null driver.
+      - name: Run unit tests (no display)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path test_results
+          ctest --test-dir build -C Release -LE "integration|requires-opengl" --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 14: Run integration tests.
+      # No xvfb step on Windows — requires-opengl tests are Linux-only.
+      - name: Run integration tests (no display)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path test_results
+          ctest --test-dir build -C Release -L "^integration$" --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Step 15: Verify test XML files.
+      - name: Verify test XML output
+        if: always()
+        shell: pwsh
+        run: |
+          $count = (Get-ChildItem -Path test_results -Filter '*.xml' -ErrorAction SilentlyContinue | Measure-Object).Count
+          if ($count -eq 0) {
+            Write-Error "ERROR: No test XML files in test_results/ — GTEST_OUTPUT may not have written output"
+            exit 1
+          }
+          Write-Host "Found $count test result file(s)."
+
+      # Step 16: Publish test results.
+      - name: Publish test results
+        if: always()
+        uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1
+        with:
+          name: 'Windows Unit Tests'
+          path: 'test_results/*.xml'
+          reporter: 'java-junit'
+          fail-on-error: false
+
+      # Step 17: Upload test results artifact.
+      - name: Upload test results (build-windows)
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: test-results-build-windows-${{ github.sha }}
+          path: test_results/
+          retention-days: 14
+
+      # Step 18: DLL verification — Irrlicht.dll, GLEW32.dll, soft_oal.dll, and default.mhr all hard-fail (Phase 7).
+      # soft_oal.dll and default.mhr hardened from warning-only (Phase 0 placeholder) to hard-fail in Phase 7.
+      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
+      # NOTE: Ninja single-config outputs to build/ (not build/Release/).
+      - name: Verify required DLLs and HRTF data (all hard-fail)
+        shell: pwsh
+        run: |
+          # Irrlicht.dll — hard-fail (Phase 1: aitown_render now links Irrlicht).
+          # Ninja single-config: DLLs are copied to build/ (not build/Release/).
+          if (-not (Test-Path "build/Irrlicht.dll")) {
+            Write-Error "ERROR: Irrlicht.dll missing from build/ — post-build copy rule failed"
+            exit 1
+          }
+          Write-Host "Irrlicht.dll present."
+          # Phase 1 atomicity gate: GLEW32.dll check co-lands with target_link_libraries(aitown_render PRIVATE GLEW::GLEW Irrlicht ...)
+          if (-not (Test-Path "build/GLEW32.dll")) {
+            Write-Error "ERROR: GLEW32.dll missing from build/ — post-build CMake DLL copy rule failed"
+            exit 1
+          }
+          Write-Host "GLEW32.dll present."
+          # soft_oal.dll — hard-fail (Phase 7: post-build copy rule now wired; hardened from Phase 0 warning-only placeholder).
+          if (-not (Test-Path "build/soft_oal.dll")) {
+            Write-Error "soft_oal.dll not found"
+            exit 1
+          }
+          Write-Host "soft_oal.dll present."
+          # default.mhr — hard-fail (Phase 4: post-build copy rule now wired; Phase 7: also verified here alongside soft_oal.dll).
+          # Without this file, AudioSystem HRTF initialization fails at runtime.
+          if (-not (Test-Path "build/default.mhr")) {
+            Write-Error "default.mhr not found"
+            exit 1
+          }
+          Write-Host "default.mhr present."
+
+      # Step 19: Upload Windows binary artifact (only on push to main).
+      # Ninja single-config: executable is at build/aitown.exe (not build/Release/aitown.exe).
+      - name: Upload Windows binary artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: aitown-windows-${{ github.sha }}
+          path: build/aitown.exe
+          retention-days: 30

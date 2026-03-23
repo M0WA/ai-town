@@ -2,10 +2,11 @@
 
 #include "audio_types.h"
 #include "simulation_types.h"
+#include <utility>
 
-// Canonical IAudioSystem — 11 methods.
+// Canonical IAudioSystem — 18 methods.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType,
-// SimSpeed, SoundPriority, TimeOfDay, vec3, CameraState).
+// SimSpeed, SoundPriority, TimeOfDay, MusicIntensity, vec3, CameraState).
 // Never expose ALuint, ALfloat, or AL_* constants through this interface.
 //
 // Source location: src/interfaces/ (not src/audio/) so that MockAudioSystem in
@@ -61,4 +62,61 @@ public:
     // Responsibilities: advance occlusion raycast budget, push time-of-day transitions,
     // and forward any pending crossfade or zone-layer source updates.
     virtual void update(float realDeltaSeconds) = 0;
+
+    // Set the master volume (applied via alListenerf(AL_GAIN) on the calling thread).
+    // gain is a linear multiplier [0.0, 1.0].
+    virtual void setMasterVolume(float gain) = 0;
+
+    // Set the music volume (applied to music stream sources at next audio thread wake).
+    // gain is a linear multiplier [0.0, 1.0].
+    virtual void setMusicVolume(float gain) = 0;
+
+    // Set the SFX volume (applied to SFX sources at next audio thread wake).
+    // gain is a linear multiplier [0.0, 1.0].
+    virtual void setSFXVolume(float gain) = 0;
+
+    // Set the adaptive music intensity tier driven by live simulation state.
+    // Called by CitySimulation::update() whenever the city's fiscal or population
+    // state changes tier. AudioSystem crossfades the active gameplay stem pair on
+    // the next beat boundary to the stem pair matching the new tier.
+    // Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) is applied internally;
+    // CitySimulation does NOT need to suppress GROWTH/CRISIS calls during off-hours.
+    // Calling with the tier already active is a no-op.
+    // Thread-safety: call from the main thread only.
+    // Threshold conditions: see architecture/game-design/economy-model.md
+    //   §Music Intensity Tiers.
+    virtual void setMusicIntensity(MusicIntensity intensity) = 0;
+
+    // -----------------------------------------------------------------------
+    // Phase 11d — Vehicle engine audio pair API
+    //
+    // These three methods wire the traffic agent system (Deliverable 3a) to
+    // the SFX source pool.  All three are main-thread entry points; AL state
+    // changes are dispatched to the audio thread internally per the two-mutex
+    // design (see architecture/audio-architecture/audio-system.md §Two-Mutex Design).
+    //
+    // Indices returned by acquireVehicleEnginePair are OPAQUE SFX pool source
+    // indices — never ALuint.  IAudioSystem must not expose OpenAL types.
+    // (ref: architecture/audio-architecture/dynamic-soundscape.md §Vehicle Engine Audio)
+    // -----------------------------------------------------------------------
+
+    // acquireVehicleEnginePair — reserve an idle+move source pair from the
+    // vehicle engine pool for the given zone type (zone affects pitch/gain profile).
+    // Returns {idleIdx, moveIdx} on success; {-1, -1} if the pool is exhausted.
+    // Callers MUST check for {-1,-1} before calling updateVehicleAudio.
+    virtual std::pair<int,int> acquireVehicleEnginePair(ZoneType zone) = 0;
+
+    // releaseVehicleEnginePair — stop and return both sources to the pool.
+    // Passing {-1,-1} is a safe no-op.
+    virtual void releaseVehicleEnginePair(int idleIdx, int moveIdx) = 0;
+
+    // updateVehicleAudio — push per-frame speed and world position to the
+    // audio thread for AL_PITCH / AL_GAIN crossblend and AL_POSITION update.
+    // Called once per active agent per render frame, after getAgentPositions()
+    // and before drawScene().
+    // speedFraction: 0.0 = stopped (idle source dominant), 1.0 = free-flow (move source dominant).
+    // worldX / worldZ: world-space position in metres for AL_POSITION.
+    virtual void updateVehicleAudio(int idleIdx, int moveIdx,
+                                    float speedFraction,
+                                    float worldX, float worldZ) = 0;
 };

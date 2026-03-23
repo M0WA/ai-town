@@ -1,17 +1,34 @@
-FROM node:20
+# CI base image — extends ghcr.io/m0wa/aitown-ci-linux.
+# Both this file and ci.yml MUST pin identical digests (Atomicity Contract item 5).
+FROM ghcr.io/m0wa/aitown-ci-linux@sha256:e5aabf7e2c7cf377987020564f5bc6e622df9accd6db0738d99fb8a5cf66192e
 
 ARG TZ
 ENV TZ="$TZ"
 
 ARG CLAUDE_CODE_VERSION=latest
 
-# vcpkg baseline — must match builtin-baseline in vcpkg.json
-ARG VCPKG_COMMIT=ce35b1a53aac26d7fcdb8ee1ef7a8e4eea02d27b
+# Create node user (uid/gid 1000) to match the node:20 image convention
+RUN groupadd --gid 1000 node \
+  && useradd --uid 1000 --gid node --shell /bin/bash --create-home node
 
-# Install basic development tools, iptables/ipset, and C++ build toolchain
+# Install Node.js 20 via NodeSource (nodistro works on any Debian/Ubuntu variant)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl gnupg \
+  && mkdir -p /etc/apt/keyrings \
+  && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+  && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
+     > /etc/apt/sources.list.d/nodesource.list \
+  && apt-get update && apt-get install -y --no-install-recommends nodejs \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install developer-ergonomics packages not present in the CI base image.
+# Excluded (already in CI image): git, curl, wget, ca-certificates, jq, pkg-config,
+#   build-essential, ccache, ninja-build, gcc-13, g++-13, xvfb, libgl1-mesa-dev,
+#   libglu1-mesa-dev, libxxf86vm-dev, libx11-dev, libxext-dev, libglew-dev,
+#   libasound2-dev, libpulse-dev, lcov, ffmpeg, sox, python3, python3-pip, vorbis-tools.
 RUN apt-get update && apt-get install -y --no-install-recommends \
   less \
-  git \
   procps \
   sudo \
   fzf \
@@ -19,7 +36,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   man-db \
   unzip \
   zip \
-  curl \
   gnupg2 \
   gh \
   iptables \
@@ -27,39 +43,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   iproute2 \
   dnsutils \
   aggregate \
-  jq \
   nano \
   vim \
-  build-essential \
-  cmake \
-  ninja-build \
-  pkg-config \
-  lcov \
-  xvfb \
-  libgl1-mesa-dev \
-  libglu1-mesa-dev \
-  libasound2-dev \
-  libpulse-dev \
-  libx11-dev \
-  libxxf86vm-dev \
-  libxext-dev \
-  gcc-13 \
-  g++-13 \
-  && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
-     --slave /usr/bin/g++ g++ /usr/bin/g++-13 \
-  && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Bootstrap vcpkg at the pinned baseline commit (matches vcpkg.json builtin-baseline).
-# Packages are NOT pre-installed here — vcpkg manifest mode runs on first cmake configure.
-# chown so the node user can run vcpkg install without sudo.
-RUN git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg \
-  && git -C /opt/vcpkg checkout ${VCPKG_COMMIT} \
-  && /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics \
-  && chown -R node:node /opt/vcpkg
-
-ENV VCPKG_ROOT=/opt/vcpkg
-ENV VCPKG_DISABLE_METRICS=1
-ENV PATH=$PATH:/opt/vcpkg
+  autoconf \
+  automake \
+  libtool \
+  openssh-client \
+  valgrind \
+  binutils \
+  xauth \
+  libnvtt-bin \
+  mediainfo \
+  scrot \
+  htop \
+  tree \
+  ripgrep \
+  fd-find \
+  bat \
+  imagemagick \
+  libimage-exiftool-perl \
+  gdb \
+  lldb \
+  linux-perf \
+  heaptrack \
+  clang-format \
+  clang-tidy \
+  clangd \
+  bear \
+  && apt-get clean && rm -rf /var/lib/apt/lists/* \
+  && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
+  && (test -f /usr/bin/batcat && ln -sf /usr/bin/batcat /usr/local/bin/bat || true)
 
 # Ensure default node user has access to /usr/local/share
 RUN mkdir -p /usr/local/share/npm-global && \
@@ -76,6 +89,9 @@ RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhisto
 # Set `DEVCONTAINER` environment variable to help with orientation
 ENV DEVCONTAINER=true
 
+# Force Mesa software rendering (llvmpipe) — no GPU hardware in container
+ENV LIBGL_ALWAYS_SOFTWARE=1
+
 # Create workspace and config directories and set permissions
 RUN mkdir -p /workspace /home/node/.claude && \
   chown -R node:node /workspace /home/node/.claude
@@ -85,8 +101,35 @@ WORKDIR /workspace
 ARG GIT_DELTA_VERSION=0.18.2
 RUN ARCH=$(dpkg --print-architecture) && \
   wget "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
-  sudo dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
+  dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
+
+# AMD Compressonator CLI (amd64 only — no GPU required for CPU-based DXT compression)
+ARG COMPRESSONATOR_VERSION=4.5.52
+RUN ARCH=$(dpkg --print-architecture) && \
+  if [ "$ARCH" = "amd64" ]; then \
+    wget -q "https://github.com/GPUOpen-Tools/compressonator/releases/download/V${COMPRESSONATOR_VERSION}/compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
+    dpkg -i "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
+    rm "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb"; \
+  else \
+    echo "Skipping compressonatorcli: only amd64 binaries available (arch=$ARCH)"; \
+  fi
+
+# actionlint — GitHub Actions workflow linter
+ARG ACTIONLINT_VERSION=1.7.11
+RUN ARCH=$(dpkg --print-architecture) && \
+  wget -q "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" && \
+  tar -xzf "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" actionlint && \
+  mv actionlint /usr/local/bin/actionlint && \
+  rm "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz"
+
+# CMake is pre-installed in the CI base image at /opt/cmake/bin — PATH already set.
+
+# Transfer ownership of vcpkg directories to the non-root user so that
+# cmake --preset ci-linux can take vcpkg's write lock during configure.
+# Both /opt/vcpkg (the toolchain) and /opt/vcpkg_installed (pre-built packages)
+# are baked into the CI base image as root-owned; the node user needs write access.
+RUN chown -R node:node /opt/vcpkg /opt/vcpkg_installed
 
 # Set up non-root user
 USER node
@@ -115,11 +158,4 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
 # Install Claude
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
-
-# Copy and set up firewall script
-#COPY init-firewall.sh /usr/local/bin/
-#USER root
-#RUN chmod +x /usr/local/bin/init-firewall.sh && \
-#RUN  echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/node-firewall && \
-#  chmod 0440 /etc/sudoers.d/node-firewall
 USER node

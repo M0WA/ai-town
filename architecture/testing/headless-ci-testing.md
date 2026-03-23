@@ -10,3 +10,20 @@
   - Wrapping all of `ctest` in `xvfb-run` is wasteful and can mask headless test failures
 
 See `framework.md` for the `gtest_discover_tests()` / `aitown_add_tests()` label configuration (`LABELS "unit"`, `"integration"`, `"requires-opengl"`) that assigns the labels used by these `ctest` filter commands at CMake configure time.
+
+## Containerised CI (Phase 11b)
+
+When `build-linux` and `coverage-linux` switch to `container: image: ghcr.io/...` mode
+(Phase 11b), xvfb is pre-installed in the CI base image — no `apt-get install xvfb` step is
+needed inside those jobs.
+
+Test label routing is identical inside container jobs; the commands are unchanged:
+
+- `ctest -LE "integration|requires-opengl"` — unit tests, no display
+- `ctest -L "^integration$"` — integration tests, no display
+- `xvfb-run --auto-servernum ctest -L "^requires-opengl$"` — OpenGL tests, virtual display
+
+The Phase 11b spike PR introduces a temporary `test-container-xvfb` job (Model A) that runs
+`xvfb-run --auto-servernum ctest -L "^requires-opengl$"` inside the target container image.
+This job must pass before the main `build-linux` and `coverage-linux` jobs are switched to
+container mode.

@@ -1,0 +1,159 @@
+# Docker CI Image Build and Push
+# Builds the ghcr.io/m0wa/aitown-ci-linux base image used by build-linux and coverage-linux jobs.
+# The image bundles the full toolchain + vcpkg binary cache so CI cold-starts are eliminated.
+#
+# Triggers:
+#   1. Push to main/develop that touches docker/ci-linux/Dockerfile, vcpkg.json, or vcpkg-overlays/
+#   2. workflow_dispatch (manual trigger, with optional force_rebuild flag)
+#   3. Monthly schedule (1st of month 02:00 UTC) for OS security updates
+name: Docker CI Image
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - docker/ci-linux/Dockerfile
+      - vcpkg.json
+      - vcpkg-overlays/**
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild even if no relevant files changed'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 2 1 * *'
+
+permissions:
+  packages: write
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build and push CI base image
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      # Step 1: Checkout (must be first — makes ci.yml and Dockerfile available on disk).
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      # Step 2: Extract VCPKG_COMMIT_ID from ci.yml.
+      # MUST be a SEPARATE step that writes to $GITHUB_ENV BEFORE any step that reads
+      # env.VCPKG_COMMIT_ID — $GITHUB_ENV writes are not visible within the same step.
+      - name: Extract VCPKG_COMMIT_ID from ci.yml
+        shell: bash
+        run: |
+          VCPKG_COMMIT_ID=$(grep -E '^\s+VCPKG_COMMIT_ID:\s+"[0-9a-f]{40}"' .github/workflows/ci.yml | head -1 | sed 's/.*VCPKG_COMMIT_ID:[[:space:]]*//' | tr -d '"' | tr -d ' ')
+          if [ -z "$VCPKG_COMMIT_ID" ]; then
+            echo "ERROR: Could not extract VCPKG_COMMIT_ID from ci.yml"
+            exit 1
+          fi
+          echo "Extracted VCPKG_COMMIT_ID=${VCPKG_COMMIT_ID}"
+          echo "VCPKG_COMMIT_ID=${VCPKG_COMMIT_ID}" >> $GITHUB_ENV
+
+      # Step 3: Validate that the Dockerfile has no default VCPKG_COMMIT (build-arg only).
+      # Since the Dockerfile uses ARG VCPKG_COMMIT (no default), we just confirm the ARG
+      # is present and will be supplied as a build-arg from VCPKG_COMMIT_ID.
+      - name: Validate Dockerfile ARG VCPKG_COMMIT
+        shell: bash
+        run: |
+          if ! grep -q 'ARG VCPKG_COMMIT$' docker/ci-linux/Dockerfile; then
+            echo "ERROR: docker/ci-linux/Dockerfile must contain 'ARG VCPKG_COMMIT' with no default value."
+            echo "The build-arg is supplied by this workflow from VCPKG_COMMIT_ID in ci.yml."
+            exit 1
+          fi
+          echo "VCPKG_COMMIT will be supplied as build-arg: ${{ env.VCPKG_COMMIT_ID }}"
+
+      # Step 4: Compute VCPKG_SHORT_SHA (first 7 chars of VCPKG_COMMIT_ID).
+      # MUST be a SEPARATE step that writes to $GITHUB_ENV BEFORE any step that reads
+      # env.VCPKG_SHORT_SHA.
+      - name: Compute VCPKG_SHORT_SHA
+        shell: bash
+        run: |
+          FULL="${{ env.VCPKG_COMMIT_ID }}"
+          SHORT="${FULL:0:7}"
+          echo "VCPKG_SHORT_SHA=${SHORT}" >> $GITHUB_ENV
+          echo "VCPKG_SHORT_SHA=${SHORT}"
+
+      # Step 5: Supply-chain lint — validate that all uses: lines in this workflow
+      # have full 40-character hex SHAs, and that any container: image: lines have
+      # @sha256:[0-9a-f]{64} digest pins.
+      - name: Supply-chain lint (workflow self-check)
+        shell: bash
+        run: |
+          echo "Checking uses: SHA pins in docker-ci-image.yml..."
+          if grep -P 'uses:.*@[0-9a-f]{1,39}\b' .github/workflows/docker-ci-image.yml; then
+            echo "ERROR: Short SHA detected in a uses: line in docker-ci-image.yml."
+            exit 1
+          fi
+          if grep -P '<[A-Z_][A-Z0-9_-]*>' .github/workflows/docker-ci-image.yml | grep -v '^\s*#' | grep -v 'echo '; then
+            echo "ERROR: Unresolved angle-bracket placeholder found in docker-ci-image.yml."
+            exit 1
+          fi
+          echo "uses: SHA lint passed."
+          echo "Checking container image digest pins..."
+          if grep -E '^\s+image:\s+' .github/workflows/docker-ci-image.yml | grep -Ev '@sha256:[0-9a-f]{64}'; then
+            echo "ERROR: container image: line without full sha256 digest pin found in docker-ci-image.yml."
+            exit 1
+          fi
+          echo "Container image digest lint passed (no container: image: lines present or all pinned)."
+
+      # Step 6: Log in to GitHub Container Registry.
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 7: Set up Docker Buildx (required for GHA layer cache support).
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+
+      # Step 8: Build and push the CI image.
+      # Tags:
+      #   :vcpkg-<short-sha>  — content-addressed by vcpkg commit; used in ci.yml and .devcontainer
+      #   :latest             — convenience alias; never pinned in code
+      # build-args:
+      #   VCPKG_COMMIT        — supplied from VCPKG_COMMIT_ID extracted in step 2
+      # cache-from/cache-to:  GHA layer cache so re-runs after small changes skip the multi-hour
+      #                       vcpkg compilation layer (Docker BuildKit layer cache).
+      - name: Build and push Docker image
+        id: docker_build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+        with:
+          context: .
+          file: docker/ci-linux/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/m0wa/aitown-ci-linux:vcpkg-${{ env.VCPKG_SHORT_SHA }}
+            ghcr.io/m0wa/aitown-ci-linux:latest
+          build-args: VCPKG_COMMIT=${{ env.VCPKG_COMMIT_ID }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Step 9: Print digest and update instructions.
+      # The sha256 digest output by this step must be pinned in BOTH ci.yml and
+      # .devcontainer/Dockerfile (Atomicity Contract items 4 and 5).
+      - name: Print image digest and update instructions
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.docker_build.outputs.digest }}
+          SHORT_SHA: ${{ env.VCPKG_SHORT_SHA }}
+        run: |
+          echo "============================================================"
+          echo "Image digest: ${IMAGE_DIGEST}"
+          echo "============================================================"
+          echo ""
+          echo "Next steps — update these two files in one atomic PR:"
+          echo ""
+          echo "1. ci.yml — in the test-container-xvfb job container: block:"
+          echo "   image: ghcr.io/m0wa/aitown-ci-linux:vcpkg-${SHORT_SHA}@${IMAGE_DIGEST}"
+          echo ""
+          echo "2. .devcontainer/Dockerfile — first FROM line:"
+          echo "   FROM ghcr.io/m0wa/aitown-ci-linux:vcpkg-${SHORT_SHA}@${IMAGE_DIGEST}"
+          echo ""
+          echo "Both files MUST pin the same sha256: digest (Atomicity Contract item 5)."
+          echo "============================================================"

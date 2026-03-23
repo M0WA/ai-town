@@ -1,43 +1,29 @@
 # Framework
 
-- **Google Test (GTest) + GMock** via CMake `FetchContent`
+- **Google Test (GTest) + GMock** via **vcpkg** (port `gtest`) — FetchContent is NOT used.
 
 ```cmake
-include(FetchContent)
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG        f8d7d77c06936315286eb55f8de22cd23c188571  # v1.14.0 — SHA-pinned; never use the mutable tag string (it can be force-pushed). The CI supply-chain lint does NOT check CMakeLists.txt GIT_TAG values — this must be manually maintained. Verify: gh release view v1.14.0 --repo google/googletest --json tagName,targetCommitish
-)
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)  # required on Windows
-FetchContent_MakeAvailable(googletest)
-
-# Each test target links both:
+# Test targets link directly against vcpkg-managed GTest/GMock targets:
 target_link_libraries(my_test PRIVATE GTest::gtest_main GTest::gmock)
 ```
 
-- **RapidCheck** (property-based testing) is a firm dependency, also via `FetchContent`:
+- **RapidCheck** (property-based testing) via **vcpkg** (port `rapidcheck`) — FetchContent is NOT used:
 
 ```cmake
-FetchContent_Declare(
-  rapidcheck
-  GIT_REPOSITORY https://github.com/emil-e/rapidcheck.git
-  GIT_TAG        b96a4e626ef4c7348dcd16c500353c2f997a9f3f  # pinned SHA — no versioned tag available
-)
-set(RC_ENABLE_GTEST ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(rapidcheck)
-
-# Link RapidCheck GTest integration:
+# Bare targets (no namespace) — both required for GTest integration:
 target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
 ```
 
-- **SHA pin is mandatory** — RapidCheck has no stable release tags; always pin to a specific commit SHA. Update intentionally; do not use HEAD or branch refs.
+- Both `gtest` and `rapidcheck` are declared in `vcpkg.json` and installed by the vcpkg toolchain (see `cmake_minimum_required(3.21)` + `CMAKE_TOOLCHAIN_FILE`). **Do NOT add `FetchContent_Declare` blocks** for either library — vcpkg manages all test framework versions. The vcpkg `builtin-baseline` in `vcpkg.json` controls the pinned version; update the baseline to upgrade.
+- `RC_ENABLE_GTEST ON` is set in `CMakeLists.txt` (required for `rapidcheck_gtest` integration).
+- Windows note: `gtest` and `gmock` are built as shared DLLs (`gtest.dll`, `gmock.dll`) under the `x64-windows` vcpkg triplet; `DISCOVERY_MODE PRE_TEST` (see below) ensures DLLs are in PATH at test discovery time.
 - All tests in a `tests/` directory mirroring `src/` structure; `enable_testing()` + `gtest_discover_tests()` enabled
-- **`gtest_discover_tests()` must specify `WORKING_DIRECTORY`, `DISCOVERY_TIMEOUT`, `PROPERTIES TIMEOUT`, and test `LABELS`**:
+- **`gtest_discover_tests()` must specify `WORKING_DIRECTORY`, `DISCOVERY_MODE`, `DISCOVERY_TIMEOUT`, `PROPERTIES TIMEOUT`, and test `LABELS`**:
 
   ```cmake
   gtest_discover_tests(my_test
       WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"  # REQUIRED — see note below
+      DISCOVERY_MODE PRE_TEST  # REQUIRED on Windows — see note below
       DISCOVERY_TIMEOUT 30    # seconds; default 5s is insufficient for coverage-instrumented binaries
       PROPERTIES TIMEOUT 120  # per-test execution timeout; RapidCheck properties can run for seconds
       LABELS "unit"           # or "integration", "requires-opengl" — applied to ALL discovered tests in this target
@@ -46,7 +32,9 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
 
   Without `DISCOVERY_TIMEOUT 30`, CMake test discovery times out on coverage-instrumented (`-DENABLE_COVERAGE=ON`) binaries on loaded CI runners, silently producing 0 discovered tests and a misleading empty-coverage lcov report. Apply to ALL test targets.
 
-  **`WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"` is mandatory.** Without it, `gtest_discover_tests` defaults to `CMAKE_CURRENT_BINARY_DIR` (the build directory). When tests run from the build directory, `GTEST_OUTPUT=xml:test_results/` writes XML to `build/test_results/` instead of `<workspace>/test_results/`. The CI step that collects XML (`test_results/*.xml`) looks in the workspace root on both Linux and Windows, so an incorrect working directory silently produces zero XML files and causes `dorny/test-reporter` to fail with "No test report files were found". This is especially visible on Windows multi-config MSBuild builds where the executable lives in `build/Release/` and the default working directory could be even further from the workspace root.
+  **`WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"` is mandatory.** Without it, `gtest_discover_tests` defaults to `CMAKE_CURRENT_BINARY_DIR` (the build directory). When tests run from the build directory, `GTEST_OUTPUT=xml:test_results/` writes XML to `build/test_results/` instead of `<workspace>/test_results/`. The CI step that collects XML (`test_results/*.xml`) looks in the workspace root on both Linux and Windows, so an incorrect working directory silently produces zero XML files and causes `dorny/test-reporter` to fail with "No test report files were found".
+
+  **`DISCOVERY_MODE PRE_TEST` is mandatory.** The default `POST_BUILD` mode runs the test binary immediately after linking (during `cmake --build`). On Windows with the vcpkg `x64-windows` triplet, GTest/GMock are built as shared DLLs (`gtest.dll`, `gmock.dll`) in `build/vcpkg_installed/x64-windows/bin/` — not in `build/` alongside the `.exe`. The post-build discovery step runs before the CI step that adds the vcpkg bin directory to PATH, so the test binary cannot load `gtest.dll` → exits with a DLL load error → discovery produces empty output → ctest reports `No tests were found!!!` with exit code 0 → tests silently skip and no XML is written. `PRE_TEST` defers discovery to ctest time, where the vcpkg bin directory has already been added to PATH. `PRE_TEST` requires CMake ≥ 3.18; the project's `cmake_minimum_required(3.21)` satisfies this on all runners.
 
   **LABELS MUST be set inside `gtest_discover_tests()`, NOT via `set_tests_properties()` afterwards.** `gtest_discover_tests()` dynamically creates CTest test entries at configure time; calling `set_tests_properties()` after `gtest_discover_tests()` targets the statically-created wrapper test, not the individually-discovered test cases — the labels do not propagate to discovered tests and `-L`/`-LE` ctest filters will silently fail to include or exclude the correct tests. The `LABELS` keyword inside `gtest_discover_tests()` is the only reliable way to assign labels to all auto-discovered GTest cases.
 
@@ -69,40 +57,40 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
 
   ```cmake
   # cmake/AitownTestHelpers.cmake
-  # Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl>
-  #                         [TIMEOUT <seconds>] [DISCOVERY_TIMEOUT <seconds>])
+  # Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl> [TIMEOUT <seconds>] [DISCOVERY_TIMEOUT <seconds>])
   macro(aitown_add_tests TARGET)
       cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT;DISCOVERY_TIMEOUT" "" ${ARGN})
       if(NOT AITOWN_TEST_LABEL)
           message(FATAL_ERROR "aitown_add_tests: LABEL is required (unit, integration, or requires-opengl)")
       endif()
       if(NOT AITOWN_TEST_TIMEOUT)
-          set(AITOWN_TEST_TIMEOUT 120)  # default per-test timeout
+          set(AITOWN_TEST_TIMEOUT 120)  # default per-test timeout in seconds
       endif()
       if(NOT AITOWN_TEST_DISCOVERY_TIMEOUT)
-          set(AITOWN_TEST_DISCOVERY_TIMEOUT 30)  # default discovery timeout; coverage-instrumented binaries may need more
+          set(AITOWN_TEST_DISCOVERY_TIMEOUT 30)  # default discovery timeout in seconds
       endif()
       gtest_discover_tests(${TARGET}
           WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+          DISCOVERY_MODE PRE_TEST      # required on Windows — see DISCOVERY_MODE note above
           DISCOVERY_TIMEOUT ${AITOWN_TEST_DISCOVERY_TIMEOUT}
           PROPERTIES TIMEOUT ${AITOWN_TEST_TIMEOUT}
           LABELS "${AITOWN_TEST_LABEL}"
       )
   endmacro()
 
-  # Terrain tests: longer timeout for multi-seed generation property tests;
-  # DISCOVERY_TIMEOUT 60 because coverage-instrumented terrain binary is large
+  # Terrain tests: longer timeouts for multi-seed generation property tests
   # aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
   #
   # Standard unit tests:
-  # aitown_add_tests(simulation_tests LABEL "unit")
+  # aitown_add_tests(simulation_tests LABEL "unit" DISCOVERY_TIMEOUT 60)  # 60s: 8-file binary with RapidCheck property tests under coverage instrumentation
   # aitown_add_tests(ui_tests LABEL "unit")
+  # aitown_add_tests(audio_tests LABEL "unit")
   #
   # Integration tests:
   # aitown_add_tests(integration_tests LABEL "integration")
   ```
 
-  **Terrain test timeout**: Terrain generator tests (`tests/terrain/`) use a 300 s per-test timeout (overriding the default 120 s) because `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` runs up to 100 re-seed attempts for each RapidCheck shrinking iteration, and the multi-seed `TEST_F` cases (6 seeds × generation time) can exceed 120 s on coverage-instrumented CI runners. Call: `aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)`.
+  **Terrain test timeout**: Terrain generator tests (`tests/terrain/`) use a 300 s per-test timeout (overriding the default 120 s) because `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` runs up to 100 re-seed attempts for each RapidCheck shrinking iteration, and the multi-seed `TEST_F` cases (6 seeds × generation time) can exceed 120 s on coverage-instrumented CI runners. Call: `aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)`. **Discovery timeout**: The default 30 s discovery timeout (configurable via `DISCOVERY_TIMEOUT` parameter) is necessary because coverage-instrumented binaries on loaded CI runners require more time to enumerate test cases; the default CMake value (5 s) is insufficient and silently produces 0 discovered tests. Terrain tests and simulation tests override to 60 s.
 
 ## Source Directory Structure
 
@@ -144,9 +132,9 @@ tests/
 | `opengl_tests` | PROHIBITED — inline `add_executable` only | Prevents ctest discovery timing issues from deferred source registration |
 | `ui_tests` | PROHIBITED for Phase 3 (Test-C1); PERMITTED thereafter via `target_sources(ui_tests PRIVATE ...)` | Phase 3 requires consolidated 5-file `add_executable` committed as a single amendment; Phase 4+ additions MUST use `target_sources(ui_tests PRIVATE ...)` — never modify the root CMakeLists.txt |
 | `simulation_tests` | PERMITTED — inline listing preferred | |
-| `audio_tests` | PERMITTED — inline listing preferred | |
+| `audio_tests` | PERMITTED — inline listing preferred | Phase 0 creates target with `audio_smoke_test.cpp` inline; Phase 7 MUST extend via `target_sources(audio_tests PRIVATE ...)` — do NOT re-call `add_executable(audio_tests ...)` (duplicate target causes CMake configure error). Phase 7 adds 4 source files: `duck_state_machine_test.cpp`, `occlusion_smoothing_test.cpp`, `audio_thread_test.cpp`, `ogg_header_validation_test.cpp`. Phase 10 further extends via `target_sources(audio_tests PRIVATE ...)` with 4 additional source files: `crossfade_interrupted_formula_test.cpp`, `stinger_milestone_test.cpp`, `audio_stream_bar_boundary_test.cpp`, `notification_sfx_efx_bypass_test.cpp` — do NOT re-call `add_executable(audio_tests ...)` or `aitown_add_tests(audio_tests ...)` (duplicate target). |
 | `terrain_tests` | PERMITTED — inline listing preferred | |
-| `integration_tests` | PERMITTED — inline listing preferred | |
+| `integration_tests` | PERMITTED — inline listing preferred; Phase 10c onward MUST use `target_sources(integration_tests PRIVATE ...)` — do NOT re-call `add_executable(integration_tests ...)` (duplicate target causes CMake configure error) | |
 
 ```cmake
 # Example CMakeLists.txt registration:
@@ -183,7 +171,9 @@ add_executable(terrain_tests tests/terrain/terrain_generator_test.cpp ...)
 # editing CMakeLists.txt.
 target_link_libraries(terrain_tests PRIVATE aitown_terrain GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
 target_include_directories(terrain_tests PRIVATE
-    tests/simulation/ tests/terrain/ src/terrain/ ${CMAKE_SOURCE_DIR})
+    tests/simulation/ tests/terrain/ src/terrain/ src/rendering/ src/interfaces/ ${CMAKE_SOURCE_DIR})
+# Phase 10b: after ITerrainRNG.h moves to src/interfaces/ (Feature 3), src/terrain/ may be
+# dropped from this list — verify terrain_tests still builds cleanly after the removal.
 aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
 # Phase 3 prerequisite: `terrain_stub.cpp` references `#include "src/terrain/terrain_chunk.h"`.
 # This header does not exist as a full implementation until Phase 5. Phase 3 MUST create a
@@ -197,15 +187,23 @@ aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)
 # `target_include_directories(terrain_tests PRIVATE src/terrain/ ...)` path cannot be
 # exercised and verified.
 
-add_executable(audio_tests tests/audio/duck_state_test.cpp ...)
-# rapidcheck and rapidcheck_gtest are included proactively: removing them later is trivial,
-# but omitting them causes a confusing link failure if a property test is added to audio_tests.
+# Phase 0: initial target creation (smoke test only)
+add_executable(audio_tests tests/audio/audio_smoke_test.cpp)
+target_link_libraries(audio_tests PRIVATE aitown_audio GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
+target_include_directories(audio_tests PRIVATE tests/simulation/ src/interfaces/ src/audio/ ${CMAKE_SOURCE_DIR})
+aitown_add_tests(audio_tests LABEL "unit")
+# Phase 7: extend via target_sources — do NOT re-call add_executable(audio_tests) or
+# aitown_add_tests(audio_tests) — duplicate target registration causes a CMake configure error.
 # Vorbis::vorbisfile (vcpkg port libvorbis, header <vorbis/vorbisfile.h>) is required because
 # Phase 7 audio tests call ov_fopen(), ov_read(), and ov_pcm_total() directly for OGG header
 # validation. stb_vorbis is not used; Vorbis::vorbisfile is the sole OGG decode library.
-target_link_libraries(audio_tests PRIVATE aitown_audio Vorbis::vorbisfile GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
-target_include_directories(audio_tests PRIVATE tests/simulation/ src/interfaces/ src/audio/ ${CMAKE_SOURCE_DIR})
-aitown_add_tests(audio_tests LABEL "unit")
+# rapidcheck/rapidcheck_gtest already linked at Phase 0 — duplicate entries in CMake are harmless.
+target_sources(audio_tests PRIVATE
+    tests/audio/duck_state_machine_test.cpp
+    tests/audio/occlusion_smoothing_test.cpp
+    tests/audio/audio_thread_test.cpp
+    tests/audio/ogg_header_validation_test.cpp)
+target_link_libraries(audio_tests PRIVATE Vorbis::vorbisfile)
 
 # Phase 0 / Phase 5 coexistence note: multiple .cpp source files may coexist in the same
 # CMake target. During Phase 0, a stub file (e.g. tests/rendering/stub_succeed.cpp containing
@@ -235,6 +233,8 @@ add_executable(opengl_tests
     tests/rendering/shader_stub_compile_test.cpp
     # tests/rendering/lod_swap_smoke_test.cpp  -- added in Phase 2 with GTEST_SKIP() body;
     #                                             promoted to real OpenGL test in Phase 5
+    # tests/rendering/cloud_plane_test.cpp   -- added INLINE here in Phase 10b;
+    #                                           target_sources() PROHIBITED for opengl_tests
 )
 target_link_libraries(opengl_tests PRIVATE aitown_render GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
 # src/rendering/ required for Phase 5 lod_swap_smoke_test.cpp (full body) which needs scene-graph and mesh buffer headers.

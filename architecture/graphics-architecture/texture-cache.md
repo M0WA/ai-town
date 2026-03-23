@@ -1,9 +1,21 @@
 # Texture Cache
 
 - `TextureCache` manages **three distinct pools**: **(1) linear-format textures** loaded via `IVideoDriver::getTexture()` (normal maps, roughness — not sRGB, not splat maps); **(2) sRGB diffuse textures** uploaded via the raw OpenGL path (`glGenTextures` / `glCompressedTexImage2D` with sRGB internal format); **(3) splat maps** uploaded via raw OpenGL `glTexImage2D` with `GL_RGBA8` uncompressed format. Methods: `loadLinear(path)`, `loadSRGB(path, format)`, `loadSplatMap(path)`, `releaseLinear(ITexture*)`, `releaseSRGB(filename)`, `releaseSplatMap(filename)`. All three pools respect the LRU eviction budget. **Do not use `IVideoDriver::getTexture()` for sRGB textures or splat maps** — Irrlicht's internal decoder does not produce sRGB or uncompressed RGBA8 GL formats.
+
+  **Critical constraint — `IVideoDriver::getTexture()` cannot load DDS files**: Irrlicht 1.8.5's
+  DDS image loader is disabled by default (`_IRR_COMPILE_WITH_DDS_LOADER_` is commented out in
+  `IrrCompileConfig.h`). `loadLinear()` therefore only accepts formats that Irrlicht's active
+  image loaders support — PNG, JPG, TGA, BMP. There is also a structural bug: `ddsBuffer` in
+  `CImageLoaderDDS.h` has a `void* surface` field (8 bytes on x86\_64 with `#pragma pack(1)`),
+  which shifts `pixelFormat.fourCC` to file offset 88 instead of the correct DDS-spec offset 84,
+  causing DXT1 to be silently misidentified as ARGB8888 on 64-bit systems. **The raw-GL
+  `loadSRGB()` path is NOT affected** — it reads the DDS file with a bespoke header parser and
+  calls `glCompressedTexImage2D` directly, bypassing the Irrlicht image loader entirely.
 - **Linear pool** internal data: `std::unordered_map<std::string, CacheEntry>` where `CacheEntry` = { `ITexture*`, ref_count, last_access_timestamp, estimated_vram_bytes }
 - **Splat map pool** internal data: `std::unordered_map<std::string, SplatEntry>` where `SplatEntry` = { `GLuint texId`, ref_count, last_access_timestamp, estimated_vram_bytes }. Splat maps are uploaded via raw `glTexImage2D(GL_RGBA8)` — NEVER via `glCompressedTexImage2D` (DXT compression corrupts the smooth 0–255 blend weight gradients). `loadSplatMap(path)` performs the upload sequence described in `2d-texture-standards.md` (Splat Map GPU Upload). `evictUnreferenced()` calls `glDeleteTextures(1, &entry.texId)` for zero-reference splat map entries. The EDT_NULL guard applies to the splat map pool identically to the sRGB pool. Splat map VRAM estimation: `width × height × 4` bytes (no ×1.33 overhead — single mip level only, `GL_TEXTURE_MAX_LEVEL = 0`).
 - **sRGB pool** internal data: `std::unordered_map<std::string, SRGBEntry>` where `SRGBEntry` = { `GLuint texId`, ref_count, last_access_timestamp, estimated_vram_bytes }
+
+  **EXCEPTION — Vehicle Sprite Atlas**: `vehicles_sprite_atlas_d.dds` uses the **LINEAR pool** (`loadLinear()` / `IVideoDriver::getTexture()`) despite its `_d` filename suffix. The `_d` suffix normally routes to the sRGB pool, but the sprite atlas encodes synthetic palette-swatch roof colors (not photographic diffuse data) and must NOT be sRGB-decoded. See `architecture/asset-standards/building-atlas-layout.md § Vehicle Sprite Atlas` and `architecture/asset-standards/2d-texture-standards.md § Naming Conventions` for the full rationale. `TextureCache` must route `vehicles_sprite_atlas_d.dds` to `loadLinear()`, NOT `loadSRGB()`. **Dispatch condition**: `loadSRGB()` must check for an exact filename match (`if (filename == "vehicles_sprite_atlas_d.dds")`) and call `loadLinear(filename)` instead of the raw-GL upload path. No other `_d`-suffixed texture requires this exception — the condition must be an exact match, not a suffix override.
 - VRAM size estimated per texture format (format-aware, block-based calculation):
   - DXT1/BC1: `ceil(width / 4) × ceil(height / 4) × 8 × 1.33` bytes (8 bytes per 4×4 block, ×1.33 mipmap overhead)
   - DXT5/BC3: `ceil(width / 4) × ceil(height / 4) × 16 × 1.33` bytes (16 bytes per 4×4 block)
@@ -17,7 +29,7 @@
   glBindTexture(GL_TEXTURE_2D, texId);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 3); // clamp mip chain
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, N); // N per dispatch table below
   for (int mip = 0; mip < numMips; ++mip) {
       glCompressedTexImage2D(GL_TEXTURE_2D, mip,
           GL_COMPRESSED_SRGB_S3TC_DXT1_EXT, // or SRGB_ALPHA_S3TC_DXT5_EXT
@@ -46,22 +58,42 @@
 
 The `GL_TEXTURE_MAX_LEVEL` parameter controls how many mip levels the GPU may sample. Irrlicht's `IVideoDriver::getTexture()` does not set this parameter — it must be set explicitly via `glTexParameteri` immediately after the texture object is created. The dispatch key is the texture category, identified by filename suffix or by which `TextureCache` method (`loadSRGB`, `loadLinear`, `loadSplatMap`) is used to load the texture.
 
+**Truncated DDS files — silent black-surface failure in `loadSRGB()`**: `loadSRGB()` reads
+`dwMipMapCount` from the DDS header at byte offset 28 and iterates that many mip levels. If the
+DDS file declares `dwMipMapCount = 4` but only mip level 0 data is present in the byte stream
+(a truncated stub), the parser passes a dangling or zero-length pointer to
+`glCompressedTexImage2D` for mip levels 1–3. The GL driver accepts the call without error and
+uploads a **black surface** for each missing level. Symptoms:
+
+- Black atlas across the city at all distances (mip 0 absent or corrupted).
+- Correct near-range rendering, black surface beyond ~100–400 m (mip 1–3 absent) — the most
+  common symptom when only the base level was written by a buggy generator.
+
+There is no GL error, assertion, or log message for this failure. It must be caught at
+asset-authoring time. Verify that file sizes match the reference values in
+`architecture/asset-standards/2d-texture-standards.md` §DDS Mip Chain Integrity.
+
+**Internal format derived from DDS FourCC — NOT from path suffix**: `loadSRGB()` derives the sRGB GL internal format from the actual FourCC read from the DDS file header, not from the path suffix. This avoids mismatches when the filename doesn't end in `_d` or `_billboard` (e.g., `road_asphalt_tileable.dds` which is DXT5 but not a billboard). Path suffix is used ONLY for wrap mode (`_billboard` → `GL_CLAMP_TO_EDGE`, others → `GL_REPEAT`). Format mapping: `DXT1 (0x31545844)` → `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`; `DXT5 (0x35545844)` → `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`. Passing the wrong internal format to `glCompressedTexImage2D` (e.g., DXT1 format with DXT5 data) produces silent GL errors and garbled texture output.
+
 | Texture category | Filename suffix | TextureCache method | GL internal format | `GL_TEXTURE_MAX_LEVEL` | Rationale |
 |---|---|---|---|---|---|
-| Diffuse atlas (sRGB DXT1) | `_d` | `loadSRGB()` | `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` | **3** | 4-level mip chain mandatory (CLAUDE.md); building atlas mip chain clamped at 4 levels. |
-| Billboard imposter atlas (sRGB DXT5) | `_billboard` | `loadSRGB()` | `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` | **3** | 4-level mip chain mandatory (billboard imposter spec). |
+| Diffuse atlas — primary `buildings_atlas_d.dds` (sRGB DXT1, 4096×4096) | `_d` | `loadSRGB()` | `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` (from FourCC) | **4** | Phase-11e primary atlas: 4096×4096 with 5 mip levels (levels 0–4). |
+| Diffuse atlas — fallback `buildings_atlas_d_2k.dds` (sRGB DXT1, 2048×2048) | `_d` | `loadSRGB()` | `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` (from FourCC) | **3** | Fallback atlas for GPU/driver caps below `GL_MAX_TEXTURE_SIZE` = 4096: 2048×2048 with 4 mip levels (levels 0–3). |
+| Billboard imposter atlas (sRGB DXT5) | `_billboard` | `loadSRGB()` | `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` (from FourCC) | **3** | 4-level mip chain mandatory (billboard imposter spec). |
+| Road tileable texture (sRGB DXT5) | `_tileable` | `loadSRGB()` | `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` (from FourCC) | **3** | Repeat wrap; road_asphalt_tileable.dds is 1024×1024 DXT5 sRGB with alpha. |
 | Lightmap (linear, baked) | `_lm` | `loadLinear()` (or dedicated `loadLightmap()` if added) | `GL_RGB` / `GL_RGBA` linear | _(driver default)_ | Single mip only; lightmaps are pre-filtered at bake time; hardware mip filtering would corrupt the baked radiance values. `GL_TEXTURE_MAX_LEVEL` cannot be set via `glTexParameteri` through the `IVideoDriver` path — see note below. |
 | Splat map (terrain blend) | `_splat` | `loadSplatMap()` | `GL_RGBA8` uncompressed | **0** | Single mip only; smooth 0–255 blend weight gradients must not be filtered across mip levels (DXT compression and mip-averaging destroy the gradient precision). Documented in Splat map pool section above. |
 | Normal map (linear DXT5nm) | `_n` | `loadLinear()` | `GL_COMPRESSED_RGBA_S3TC_DXT5_EXT` | _(driver default)_ | See note below — `GL_TEXTURE_MAX_LEVEL` cannot be set via `glTexParameteri` through the `IVideoDriver` path. |
 | Specular map (linear) | `_s` | `loadLinear()` | `GL_RGBA` linear | _(driver default)_ | See note below — same constraint as normal maps. |
 | Specular packed (multi-channel) | `_sp` | `loadLinear()` | `GL_COMPRESSED_RGBA_S3TC_DXT5_EXT` (BC3) | _(driver default)_ | Packed roughness/metallic/AO data is linear; sRGB decode would corrupt channel values. Loaded via standard `IVideoDriver::getTexture()` path — same `GL_TEXTURE_MAX_LEVEL` constraint as `_n` and `_s`. |
-| Vehicle sprite atlas | `_sprite` | `loadLinear()` | `GL_RGBA` linear | _(driver default)_ | No mip chain authored; vehicle sprites are rendered at near-fixed screen size (zoomed-out city view). |
+
+**Vehicle sprite atlas (`vehicles_sprite_atlas_d.dds`) is NOT a suffix-dispatch row**: This file uses the `_d` suffix, which normally routes to `loadSRGB()`. However, `loadSRGB()` contains an exact-filename exception — `if (filename == "vehicles_sprite_atlas_d.dds")` — that redirects the call to `loadLinear()`. It is therefore handled under the `_d` row above (with `loadSRGB()` redirecting to `loadLinear()` internally), not by a separate `_sprite` suffix. No `_sprite` filename suffix exists in the project; any code or documentation referencing a `_sprite` suffix is incorrect.
 
 **Note on `loadLinear()` rows**: Normal map (`_n`) and specular (`_s`) textures uploaded via `IVideoDriver::getTexture()` cannot have `GL_TEXTURE_MAX_LEVEL` set via `glTexParameteri` — `IVideoDriver` provides no access to raw GL parameters. These textures have `GL_TEXTURE_MAX_LEVEL` set to the driver default (which for a fully-specified mip chain is the number of mip levels minus 1). Phase 2 may implement a raw-GL upload path for normal maps if explicit mip-level control is required; until then, normal maps and specular maps are excluded from the GL_TEXTURE_MAX_LEVEL dispatch.
 
 **Vehicle normal atlas mip levels**: The vehicle normal atlas (`vehicles_normal_atlas_n.dds`) requires exactly 4 authored mip levels pre-baked into the DDS file header to prevent driver-side mip generation beyond level 3. Because the atlas is uploaded via `IVideoDriver::getTexture()` (linear pool), `glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 3)` cannot be applied through the Irrlicht driver path. See `building-atlas-layout.md` for the V1 workaround.
 
-**Implementation rule**: `GL_TEXTURE_MAX_LEVEL` must be set via `glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, N)` immediately after `glGenTextures` / `glBindTexture`, before any `glCompressedTexImage2D` or `glTexImage2D` upload call. This applies only to textures uploaded through the raw-GL path (`loadSRGB()` and `loadSplatMap()`). The sRGB upload code block above already sets `GL_TEXTURE_MAX_LEVEL = 3` for diffuse and billboard atlases — this table is the authoritative cross-reference for all texture categories. If a new texture category is added, this table MUST be updated and the corresponding `TextureCache` load method MUST set the correct `GL_TEXTURE_MAX_LEVEL` where the raw-GL path is used.
+**Implementation rule**: `GL_TEXTURE_MAX_LEVEL` must be set via `glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, N)` immediately after `glGenTextures` / `glBindTexture`, before any `glCompressedTexImage2D` or `glTexImage2D` upload call. This applies only to textures uploaded through the raw-GL path (`loadSRGB()` and `loadSplatMap()`). The sRGB upload code block above sets `GL_TEXTURE_MAX_LEVEL = N` where `N` is determined per texture category — consult this table as the authoritative cross-reference (primary building atlas: `N = 4`; fallback building atlas and billboard atlas: `N = 3`). If a new texture category is added, this table MUST be updated and the corresponding `TextureCache` load method MUST set the correct `GL_TEXTURE_MAX_LEVEL` where the raw-GL path is used.
 
 - **Eviction policy**: When budget exceeded, evict the **LRU zero-reference** entry from either pool (linear: `IVideoDriver::removeTexture()`; sRGB: `glDeleteTextures()`); error-log and skip if no zero-reference entries available.
 - **Eviction safety**: Before any entity destruction, `SceneEntityManager::destroy()` must iterate over every material slot on the scene node and zero the texture layers explicitly (clearing the node's own material array), AND call `IVideoDriver::setMaterial(SMaterial{})` (to flush the driver's last-bound state). Both steps are required:
@@ -127,6 +159,35 @@ The `GL_TEXTURE_MAX_LEVEL` parameter controls how many mip levels the GPU may sa
 
   The `EDT_NULL` guard at the top of `evictUnreferenced()` covers both the sRGB pool AND the splat map pool — a single early-return before any pool iteration is sufficient.
 
+  **`getSplatMapGLuint(const std::string& path) const`**: returns the raw `GLuint` for a loaded splat map texture, for binding to a GLSL `sampler2D` uniform in the terrain shader. Returns `0` if the path is not loaded. Terrain rendering must call this to retrieve the splat map handle each frame before issuing draw calls. This is the only external accessor for the splat map pool — all other splat map management (load, release, eviction) is internal to `TextureCache`.
+
+  **PNG Decoder for Splat Maps**
+
+  `TextureCache::loadSplatMap(const std::string& path)` loads the splat PNG using
+  **Irrlicht's `IVideoDriver::createImageFromFile()`** (NOT `IVideoDriver::getTexture()`):
+
+  ```cpp
+  irr::video::IImage* img = m_driver->createImageFromFile(path.c_str());
+  // img->lock() returns RGBA pixels; Irrlicht's PNG loader does NOT premultiply alpha.
+  // Straight alpha is guaranteed — no premultiplied-alpha correction needed.
+  const void* pixels = img->lock();
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+  img->unlock();
+  img->drop();
+  ```
+
+  **Why `createImageFromFile()` not `getTexture()`**: `getTexture()` uploads to a driver-managed
+  `ITexture*` in the linear texture pool; we need raw pixel access and a raw `GLuint` handle.
+  `createImageFromFile()` returns a CPU-side `IImage*` with pixel access via `lock()`/`unlock()`.
+
+  **Alpha premultiplication**: Irrlicht's libpng-based PNG loader returns **straight alpha**
+  (not premultiplied). The splat map RGBA channels are blend weights in [0.0, 1.0];
+  premultiplied alpha would corrupt the weights. No correction step is required.
+  Document this as a verified spike result: `createImageFromFile()` → straight alpha confirmed.
+
+  **EDT_NULL guard**: `loadSplatMap()` must check `if (m_driverType == EDT_NULL) return 0;`
+  before calling any GL functions. The EDT_NULL guard is required for headless CI.
+
   **`_splat` is NOT a DDS suffix — suffix dispatch clarification**: In the `GL_TEXTURE_MAX_LEVEL` dispatch table, `_splat` appears as a logical tag identifying the texture category. It is NOT a file suffix used by the suffix dispatch table to select the sRGB raw-GL upload path. Splat maps are RGBA PNG files (`terrain_blend.png`, not `terrain_blend_splat.dds`) and are loaded via `loadSplatMap(path)` — which calls `glTexImage2D(GL_RGBA8)` — NOT via `loadSRGB()` or `glCompressedTexImage2D`. Linear color space is correct for splat maps (they encode blend weights, not perceptual color). The `_splat` tag is an internal documentation convention; there is no runtime code that dispatches on a `_splat` filename suffix. Any code that routes a `_splat`-suffixed path through `loadSRGB()` or the `glCompressedTexImage2D` path is a bug.
 
   **CRITICAL constraint — `evictUnreferenced()` must NOT be called from within `OnSetConstants()`**: If eviction fires while a draw call is in progress (inside the shader callback), `glDeleteTextures` would delete a texture that may still be referenced by the current draw command's parameter snapshot. `evictUnreferenced()` is called from `SceneEntityManager::destroy()` during the game logic update phase — strictly between `beginScene()`/`endScene()` boundaries but NOT within any `drawAll()` call. Callers must not invoke `evictUnreferenced()` from inside shader callback methods. Without calling `releaseLinear()` in Step 1, the ref_count is never decremented and `evictUnreferenced()` in Step 3 is always a no-op, causing texture memory to leak.
@@ -168,10 +229,10 @@ The `GL_TEXTURE_MAX_LEVEL` parameter controls how many mip levels the GPU may sa
   1. If the new LOD level requires an sRGB diffuse texture that is **not yet in `m_srgbTextureFilenames`** (i.e., a different texture than any previously loaded LOD): call `textureCache->loadSRGB(newFilename, format)` to increment ref_count, then push `newFilename` to `m_srgbTextureFilenames`.
   2. If the new LOD level uses an sRGB diffuse texture **already in `m_srgbTextureFilenames`** (same filename as a previously loaded LOD): do NOT call `loadSRGB()` again — the ref_count was already incremented at first load. Do NOT push the duplicate filename to `m_srgbTextureFilenames`.
   3. Do **NOT** call `releaseSRGB()` for the previous LOD's texture at swap time — the previous LOD texture remains referenced until entity destruction.
-  4. `releaseSRGB()` is called ONLY at entity destruction (Step 1b in `SceneEntityManager::destroy()`), once per entry in `m_srgbTextureFilenames`. If the same filename appears twice (loaded once for LOD0, once for LOD1 because both call `loadSRGB` and both push to the list), two `releaseSRGB()` calls are correct — they match two `loadSRGB()` calls.
+  4. `releaseSRGB()` is called ONLY at entity destruction (Step 1b in `SceneEntityManager::destroy()`), once per entry in `m_srgbTextureFilenames`. Because the deduplication rule (Points 1–2) prevents a filename from being pushed more than once, each unique filename in `m_srgbTextureFilenames` results in exactly one `releaseSRGB()` call at destroy — matching the single `loadSRGB()` call that pushed it.
   This policy ensures the VRAM budget never counts a texture that has been evicted (ref_count 0) while still visible at any LOD level.
 
-- **sRGB texture tracking across LOD levels (LOD swap safety)**: `m_srgbTextureFilenames` must track ALL sRGB textures loaded for an entity across ALL LOD levels simultaneously — not just the current active LOD. When `node->setMesh(newLODMesh)` is called for an LOD swap (e.g., LOD0→LOD1), if the LOD1 mesh requires a different sRGB diffuse texture (e.g., lower-resolution `_lod1_diffuse.dds` instead of `_lod0_diffuse.dds`), the new texture is loaded via `textureCache->loadSRGB()` and its filename must be pushed to `m_srgbTextureFilenames` at load time. The LOD0 texture remains in `m_srgbTextureFilenames` until `SceneEntityManager::destroy()` releases all tracked filenames. **Do not pop LOD0 filenames on LOD swap** — `releaseSRGB()` is called only at entity destruction (Step 1b), not at LOD swap time. If LOD0 and LOD1 share the same sRGB texture filename, `loadSRGB()` increments the ref_count (not a double-load); `releaseSRGB()` at destroy decrements once per entry in `m_srgbTextureFilenames`. If the same filename appears twice in `m_srgbTextureFilenames` (once for LOD0, once for LOD1 that loaded the same texture), two `releaseSRGB()` calls are made — this is correct, as two `loadSRGB()` calls incremented the ref_count twice.
+- **sRGB texture tracking across LOD levels (LOD swap safety)**: `m_srgbTextureFilenames` must track ALL sRGB textures loaded for an entity across ALL LOD levels simultaneously — not just the current active LOD. When `node->setMesh(newLODMesh)` is called for an LOD swap (e.g., LOD0→LOD1), if the LOD1 mesh requires a different sRGB diffuse texture (e.g., lower-resolution `_lod1_diffuse.dds` instead of `_lod0_diffuse.dds`), the new texture is loaded via `textureCache->loadSRGB()` and its filename must be pushed to `m_srgbTextureFilenames` at load time. The LOD0 texture remains in `m_srgbTextureFilenames` until `SceneEntityManager::destroy()` releases all tracked filenames. **Do not pop LOD0 filenames on LOD swap** — `releaseSRGB()` is called only at entity destruction (Step 1b), not at LOD swap time. If LOD0 and LOD1 share the same sRGB texture filename, the deduplication rule (Point 2 of the LOD swap release policy above) ensures `loadSRGB()` is called only ONCE — at the first LOD that loads the texture — and the filename is pushed to `m_srgbTextureFilenames` only once. Subsequent LOD levels that use the same filename skip `loadSRGB()` and skip the push. At entity destruction, `releaseSRGB()` is called once for that filename — matching the single `loadSRGB()` call. **Do NOT call `loadSRGB()` a second time for a filename already in `m_srgbTextureFilenames`** — that would increment ref_count twice, and a single `releaseSRGB()` at destroy would leave ref_count at 1, causing a VRAM leak.
 - **EDT_NULL guard for `evictUnreferenced()`**: `evictUnreferenced()` calls `glDeleteTextures()` for zero-reference sRGB pool entries. Under `EDT_NULL` (used in integration tests), there is no OpenGL context and `glDeleteTextures()` invokes undefined behavior. `evictUnreferenced()` must check the driver type before calling any raw GL deletion:
 
   ```cpp
@@ -182,4 +243,6 @@ The `GL_TEXTURE_MAX_LEVEL` parameter controls how many mip levels the GPU may sa
   ```
 
   `m_driverType` is set at `TextureCache` construction from `IVideoDriver::getDriverType()`. The linear-pool path (`IVideoDriver::removeTexture()`) is also a no-op under `EDT_NULL` (Irrlicht's null driver is safe here), but the raw-GL sRGB deletion path MUST be guarded explicitly.
+
+  **EDT_NULL guard ordering**: The `EDT_NULL` guard (`if (m_driverType == EDT_NULL) return;`) MUST be the **first statement** in `evictUnreferenced()`, before any iteration of `m_srgbTextures`, `m_splatMaps`, or the linear pool. This single early-return protects both the sRGB pool and the splat map pool from issuing `glDeleteTextures` calls in headless mode. Any code that precedes this guard (e.g., logging, stats) is prohibited — it must be placed after the guard or inlined into the guard condition.
 - All texture load/evict calls occur on the main render thread only

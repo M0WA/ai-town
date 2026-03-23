@@ -1,6 +1,6 @@
 #pragma once
-#include "src/ui/IUIBackend.h"
-// UIScaler.h must #include "src/ui/IUIBackend.h" (project-root-relative form)
+#include "src/interfaces/IUIBackend.h"
+// UIScaler.h must #include "src/interfaces/IUIBackend.h" (project-root-relative form)
 // so that methods returning Rect compile correctly.
 // Defining Rect only in IUIBackend.h and using it in UIScaler.h without the include
 // causes an ODR violation if a translation unit includes UIScaler.h without first
@@ -28,6 +28,14 @@ public:
 
     // Unproject physical coordinates to virtual 1920x1080 space.
     VirtualPoint unproject(int physicalX, int physicalY) const;
+
+    // Update viewport dimensions after a window resize.
+    // Must be called each frame (or on resize) so that unproject() uses
+    // the current physical viewport size, not the stale construction-time value.
+    void setViewportSize(int viewportW, int viewportH) {
+        m_viewportW = viewportW;
+        m_viewportH = viewportH;
+    }
 
 private:
     int m_virtualW;

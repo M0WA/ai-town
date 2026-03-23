@@ -89,8 +89,8 @@
   > **effective_demand_factor formula used throughout:**
   > `effective_demand_factor(zone, tick) = clamp(bootstrap(zone, tick) + formula_demand_factor(zone, tick), 0.0, 1.0)`
   > where `formula_demand_factor` is the rolling-window average of `traffic_demand_factor` values.
-  > Bootstrap formulas: `R_bootstrap(t) = 0.50 × max(0, 1 − t/6)`, `C_bootstrap(t) = 0.25 × max(0, 1 − t/6)`, `I_bootstrap(t) = 0.15 × max(0, 1 − t/6)`.
-  > Bootstrap period ends after tick 5; tick 6+ is purely formula-driven.
+  > Bootstrap formulas: `R_bootstrap(t) = 0.50 × max(0, 1 − t/demand_bootstrapping_ticks)`, `C_bootstrap(t) = 0.25 × max(0, 1 − t/demand_bootstrapping_ticks)`, `I_bootstrap(t) = 0.15 × max(0, 1 − t/demand_bootstrapping_ticks)`.
+  > Bootstrap period ends after tick demand_bootstrapping_ticks − 1; tick demand_bootstrapping_ticks+ is purely formula-driven (the following worked example assumes demand_bootstrapping_ticks = 6).
   >
   > **Tick-by-tick trajectory — Residential (R), 5-tick rolling window:**
   >
@@ -142,9 +142,222 @@
   >
   > The swing from tick T−1 (pre-demolition) to tick T (post-demolition) is exempt per the Demolition-Induced Swing Exemption — that is a player-action-driven capacity change, not formula oscillation. The swings documented above are all formula-driven (fixed city layout: no C/I tiles, 5 R tiles, roads present, ticks advancing automatically).
 
-- **Density upgrade wave re-evaluation**: When a density tier is unlocked and the upgrade wave fires (at most 20% of eligible tiles per zone type per tick), tile eligibility is re-evaluated at the start of each tick during the multi-tick wave — not locked to the snapshot from when the unlock first triggered. A tile that met the demand_factor > 0.75 criterion at tick N may not meet it at tick N+1 (if congestion or service degradation occurs during the wave). In that case, the tile is skipped in the current wave tick and re-evaluated in the next tick. This prevents a density upgrade wave from pushing a city into deficit by upgrading tiles whose demand has since dropped, which would cause wages and upkeep to spike beyond the city's revenue. **Wave end condition**: the upgrade wave ends when either (a) all eligible tiles have been upgraded, or (b) no remaining eligible tiles meet the demand_factor > 0.75 criterion. A wave that ends condition (b) does NOT automatically restart; the unlock remains in effect and future ticks will attempt upgrades when demand recovers.
+- **Density upgrade wave re-evaluation**: When a density tier is unlocked and the upgrade wave fires (at most 20% of eligible tiles per zone type per tick), tile eligibility is re-evaluated at the start of each tick during the multi-tick wave — not locked to the snapshot from when the unlock first triggered. A tile that met the `demand_factor >= SimulationConstants::density_upgrade_wave_demand_threshold` (0.50) criterion at tick N may not meet it at tick N+1 (if congestion or service degradation occurs during the wave). In that case, the tile is skipped in the current wave tick and re-evaluated in the next tick. This prevents a density upgrade wave from pushing a city into deficit by upgrading tiles whose demand has since dropped, which would cause wages and upkeep to spike beyond the city's revenue. **Wave end condition**: the upgrade wave ends when either (a) all eligible tiles have been upgraded, or (b) no remaining eligible tiles meet the `demand_factor >= density_upgrade_wave_demand_threshold` (0.50) criterion. A wave that ends condition (b) does NOT automatically restart; the unlock remains in effect and future ticks will attempt upgrades when demand recovers. **Same-tick unlock guard**: the upgrade wave must NOT fire on the same budget tick that a density tier first becomes unlocked — a `wasAlreadyUnlocked[]` snapshot taken at the start of `doDensityUnlockTick()` gates the wave loop, so only tiers that were already unlocked before the current tick can drive upgrades. This prevents a newly-unlocked tier from immediately triggering an upgrade wave before the player has had a chance to respond.
 - **Terrain interaction**: See [Terrain Interaction](terrain-interaction.md) for the authoritative slope threshold (> 15.0°, exact), earthworks cost formula, and map playability guarantee.
 - **Player action**: Player designates zones; engine auto-populates buildings based on demand and desirability scores
+
+## Multi-Tile Footprint Placement Rules
+
+Multi-tile footprints allow zone buildings and service buildings to occupy multiple tiles based on density tier. This section specifies placement collision checks, demolition behavior, terrain flattening, density upgrade resolution, street adjacency rules, and hover highlight behavior.
+
+### Placement Collision Check
+
+Before placing a zone tile at `(tileX, tileZ)` with an N×N footprint (where N = 1, 2, or 3 depending on density tier), the simulation must verify that **all tiles in the footprint** are empty. A tile is considered occupied if it contains a road, another building, or is out-of-bounds. If any tile in the footprint fails this check, placement is **rejected** and the player sees a toast: "Not enough space for [tier] zone".
+
+The footprint dimensions are:
+
+- **Low density**: 1×1 tile
+- **Medium density**: 2×2 tiles
+- **High density**: 3×3 tiles
+- **Service buildings**: 2×2 tiles
+
+### Demolish Behavior
+
+On demolition, **all tiles in the footprint are freed simultaneously**. If the player targets any tile within a multi-tile footprint (not just the origin tile), the simulation looks up the origin tile and demolishes the entire footprint as a single atomic operation.
+
+### Terrain Flattening
+
+During zone placement, `setTileHeight()` must be called for **all tiles in the N×N footprint**, not only the origin tile. This ensures the entire building footprint sits on flat, level ground.
+
+### Density Upgrade Resolution (Low→Med or Med→High)
+
+When a building upgrades to a higher density tier, its footprint expands (e.g., from 1×1 to 2×2, or 2×2 to 3×3). Upgrade resolution follows a strict four-step order:
+
+1. **Compute expanded footprint**: Calculate the new N×N footprint centered on the upgrading building's origin tile.
+
+2. **Demolish same-zone-type, lower-density neighbours**: For each tile in the expanded footprint that is currently occupied by a **same-zone-type, lower-density building** (e.g., a `res_low_*` building when the tile is upgrading to `res_med`), automatically demolish that neighbour **without cost** (no treasury refund, no undo window). Post a NORMAL-priority toast: "Neighbouring [zone] building cleared for upgrade".
+
+3. **Defer if blocked**: If any remaining tile in the expanded footprint is occupied by a **road**, a **different zone type**, a **service building**, or is **out-of-bounds**, do **NOT** demolish same-type neighbours preemptively. Instead, **defer** the entire upgrade. Increment `upgradeRetryCount` for this tile and return without upgrading.
+
+4. **Cancel after 12 retries**: If `upgradeRetryCount` reaches 12 for a single tile, cancel the pending upgrade and emit a CRITICAL-priority toast: "Upgrade blocked — clear surrounding tiles". Upon cancellation, reset `upgradeRetryCount` to 0 AND set a per-tile boolean flag `upgradeBlocked = true`. While `upgradeBlocked` is `true`, the tile is excluded from upgrade resolution entirely — step 3's defer logic is skipped and no further CRITICAL toasts are emitted for this tile. The `upgradeBlocked` flag is cleared (and the tile becomes eligible for upgrade resolution again) when the player manually demolishes any tile that was previously blocking the upgrade — i.e., when a tile in the previously expanded footprint that was a road, a different zone type, a service building, or an out-of-bounds boundary is removed and the expanded footprint no longer contains any blocking tiles. Reset `upgradeRetryCount` to 0 and clear `upgradeBlocked` whenever a tile successfully upgrades, is manually demolished, OR whenever the blocking condition that caused a prior cancellation is resolved (e.g., a blocking neighbour tile is demolished and the footprint is now fully clear).
+
+The `upgradeRetryCount` is tracked per tile in a `std::unordered_map<TileKey, int>` on `CitySimulation`. The `upgradeBlocked` flag is tracked per tile in a `std::unordered_map<TileKey, bool>` on `CitySimulation`.
+
+### Service Building Street Adjacency
+
+Service buildings (fire, police, water/power/trash plants) may only be placed if **at least one tile in their 2×2 footprint is directly edge-adjacent (4-directional cardinal, distance = 1) to a road tile**. This rule is stricter than the zone proximity rule below and applies only to service buildings.
+
+If no cardinal-adjacent road exists, placement is **rejected** and the player sees a toast: "Service building must be next to a road".
+
+### Zone Street Proximity
+
+A zone tile (any type, any density) requires a road tile within **3 tiles** (Manhattan distance, measured as straight-line grid steps, not path cost). **Service buildings are not subject to the 3-tile zone proximity rule**; they have a stricter direct street-adjacency requirement defined in §Service Building Street Adjacency above. The rule has two enforcement modes:
+
+#### New Placement
+
+At placement time, if no road tile is within 3 tiles Manhattan distance of **any tile in the footprint**, the placement is **rejected** and the player sees a toast: "Must be within 3 tiles of a road".
+
+The Manhattan distance is computed as the minimum distance from any tile in the N×N footprint to the nearest road tile: `min_distance = argmin over all footprint tiles T of (Manhattan distance from T to nearest road tile)`. If `min_distance > 3`, rejection.
+
+#### Abandonment and Recovery
+
+On each simulation tick, `doProximityTick()` iterates all placed zone buildings (not service buildings) and checks whether the nearest road tile remains within 3 tiles.
+
+- **Abandonment**: If the nearest road tile is **> 3 tiles away** and the building is **not already abandoned**, mark it as abandoned. Zero out its population contribution and tax revenue for this tick. Post a NORMAL-priority toast: "Building abandoned — too far from road".
+
+- **Recovery**: If the nearest road tile is **≤ 3 tiles away** and the building **is currently abandoned**, recover it automatically (restore population and tax contribution). Post a NORMAL-priority toast: "Building recovered — road reconnected".
+
+An abandoned building remains abandoned until either (a) a road is restored within 3 tiles (automatic recovery), or (b) the player demolishes it manually.
+
+### Hover Highlight Rule
+
+When the player hovers over the terrain with the Zone tool active, the tile hover highlight covers the **full footprint of the selected tier** (1×1, 2×2, or 3×3), not just the single hovered tile. The highlight is a semi-transparent overlay covering all tiles from `(tileX, tileZ)` to `(tileX + footprintSize − 1, tileZ + footprintSize − 1)`, where `footprintSize` is determined by the density tier selected in the Zone sub-panel.
+
+### Road Adjacency for Multi-Tile Buildings
+
+For multi-tile buildings (any N×N footprint where N > 1), road adjacency is satisfied if **at least one road tile is edge-adjacent (4-directional cardinal, distance = 1) to ANY tile in the footprint** — not only to the origin tile. This applies to both the Zone Street Proximity check (3-tile Manhattan distance from any footprint tile) and the Service Building Street Adjacency check (direct edge-adjacency to any footprint tile).
+
+## Phase 10 Audio Callbacks for Zone Events
+
+The following calls are made from `CitySimulation` on zone placement, demolition, and density
+upgrade events. All calls are guarded by `m_audio != nullptr`.
+
+### `sfx_build_place` and `sfx_earthworks` — Zone tile placed
+
+**Call site**: `CitySimulation::placeZone(int tileX, int tileZ, ZoneType type,
+DensityTier tier, int earthworksCostOverride)`. Called on successful zone placement (tile
+was not already occupied and cost deduction succeeds).
+
+```cpp
+// In CitySimulation::placeZone(), after treasury deduction and tile assignment:
+if (m_audio) {
+    if (earthworksCostOverride > 0) {
+        m_audio->playPositionalSound(
+            SFX_EARTHWORKS,
+            vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+            SoundPriority::NORMAL, 1.0f);
+    }
+    m_audio->playPositionalSound(
+        SFX_BUILD_PLACE,
+        vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+        SoundPriority::NORMAL, 1.0f);
+}
+```
+
+`SFX_EARTHWORKS` = SoundId 4 — positional (`AL_SOURCE_RELATIVE = AL_FALSE`), EFX bypass
+(`AL_DIRECT_FILTER = AL_FILTER_NULL`), fired only when earthworks cost > 0.
+`SFX_BUILD_PLACE` = SoundId 1 — positional (`AL_SOURCE_RELATIVE = AL_FALSE`), no EFX bypass.
+Both use `Y = 0.0f` (real terrain height is post-V1 refinement per service-coverage.md).
+
+### `sfx_build_demolish` — Zone tile demolished
+
+**Call site**: `CitySimulation::demolishTile(int tileX, int tileZ)` (or whichever method
+implements the Demolish tool for zone tiles). Called on successful demolition.
+
+```cpp
+// In CitySimulation::demolishTile(), after clearing the tile:
+if (m_audio) {
+    m_audio->playPositionalSound(
+        SFX_BUILD_DEMOLISH,
+        vec3{static_cast<float>(tileX), 0.0f, static_cast<float>(tileZ)},
+        SoundPriority::NORMAL, 1.0f);
+}
+```
+
+`SFX_BUILD_DEMOLISH` = SoundId 2 — positional (`AL_SOURCE_RELATIVE = AL_FALSE`), no EFX bypass.
+
+### `sfx_zone_upgrade` — Zone tile auto-upgraded to higher density tier
+
+**Trigger**: Fired once per tile that is successfully upgraded during a density upgrade wave
+tick. The upgrade wave runs inside `CitySimulation::doDensityUnlockTick()`.
+
+**Call site**: `CitySimulation::doDensityUnlockTick()`, immediately after a tile's density
+tier is incremented and before the 20%-per-type cap counter is updated.
+
+**Per-wave-tick audio call cap**: At most `SimulationConstants::sfx_zone_upgrade_per_tick_cap`
+(= 3) audio calls are made per single invocation of `doDensityUnlockTick()`. A local counter
+`sfxCallsThisTick` is incremented on each `playSound()` call; audio is suppressed (tile is
+still upgraded) when `sfxCallsThisTick >= sfx_zone_upgrade_per_tick_cap`. This prevents a
+jarring burst when a large upgrade wave fires across many tiles simultaneously. The cap
+communicates "upgrade wave happening" to the player without flooding the SFX pool. The
+constant must be defined in `simulation_constants.h` as
+`static constexpr int sfx_zone_upgrade_per_tick_cap = 3`.
+
+```cpp
+// In CitySimulation::doDensityUnlockTick(), per-tile upgrade:
+tile.densityTier = nextTier;
+if (m_audio && sfxCallsThisTick < SimulationConstants::sfx_zone_upgrade_per_tick_cap) {
+    m_audio->playSound(SFX_ZONE_UPGRADE, SoundPriority::NORMAL, 1.0f);
+    ++sfxCallsThisTick;
+}
+upgradeCountThisTick[tile.zoneType]++;
+```
+
+`SFX_ZONE_UPGRADE` = SoundId 5 (`sfx_zone_upgrade.wav`). Non-positional
+(`AL_SOURCE_RELATIVE = AL_TRUE`), EFX bypass. At most `sfx_zone_upgrade_per_tick_cap` (= 3)
+audio calls per `doDensityUnlockTick()` invocation; tiles beyond the cap are upgraded silently.
+
+## Zone Overlay Colour Scheme (Phase 9b — HUD)
+
+When the Zone tool is active or when zones have been placed, the renderer draws a semi-transparent
+colour overlay on each zoned tile so the player can always identify zone type at a glance.
+
+**ARGB encoding**: `0xAARRGGBB` (Irrlicht `SColor` format; AA = alpha, RR = red, GG = green,
+BB = blue).
+
+| Zone type | ARGB constant | Appearance |
+|---|---|---|
+| Residential (R) | `0x6000FF00u` | Semi-transparent green (alpha 0x60 ≈ 38%) |
+| Commercial (C) | `0x600000FFu` | Semi-transparent blue (alpha 0x60 ≈ 38%) |
+| Industrial (I) | `0x60FFFF00u` | Semi-transparent yellow (alpha 0x60 ≈ 38%) |
+
+These constants are used by `UIManager` when constructing the sparse overlay map passed to
+`IRenderer::setZoneOverlay()`. They are **not** `SimulationConstants` (they are pure UI/rendering
+values with no simulation logic dependency). They must be defined as named `constexpr uint32_t`
+values in `src/ui/ui_constants.h` (alongside the toolbar carve-out constants) so they are a single
+authoritative source for both `UIManager` and any future rendering code that needs zone colour
+lookups:
+
+```cpp
+// src/ui/ui_constants.h — zone overlay ARGB colours (ARGB: 0xAARRGGBB)
+constexpr uint32_t kZoneOverlayColourResidential = 0x6000FF00u; // semi-transparent green
+constexpr uint32_t kZoneOverlayColourCommercial  = 0x600000FFu; // semi-transparent blue
+constexpr uint32_t kZoneOverlayColourIndustrial  = 0x60FFFF00u; // semi-transparent yellow
+```
+
+**Rationale**: Green for Residential matches the SimCity convention that players intuitively
+recognise. Blue for Commercial reflects the "cool" economic tone of business districts.
+Yellow/amber for Industrial signals industrial caution/activity. The 38% alpha (0x60) keeps the
+overlay legible without completely obscuring the terrain and building 3D geometry below it.
+
+## Tile Hover Highlight Colour Scheme (Phase 9b — HUD)
+
+When any placement tool is active and the player hovers the cursor over the terrain, a
+single-tile wireframe-style colour fill is rendered to indicate the target tile. The highlight
+colour varies by active tool to provide immediate visual feedback about the action type.
+
+**ARGB encoding**: same `0xAARRGGBB` format as the zone overlay above. Alpha 0x80 ≈ 50% —
+slightly more opaque than zone overlay to make the hover highlight stand out even over a
+pre-existing zone overlay.
+
+| Active tool | ARGB constant | Appearance |
+|---|---|---|
+| Zone | `0x80FF00FFu` | Semi-transparent magenta (indicates zone placement) |
+| Road | `0x8000FFFFu` | Semi-transparent cyan (indicates road placement) |
+| Utilities | `0x80FF8000u` | Semi-transparent orange (indicates service building placement) |
+| Demolish | `0x80FF0000u` | Semi-transparent red (indicates destructive action) |
+| Query | `0x80FFFFFFu` | Semi-transparent white (indicates inspection, no modification) |
+
+These constants must be defined as named `constexpr uint32_t` values in `src/ui/ui_constants.h`:
+
+```cpp
+// src/ui/ui_constants.h — tile hover highlight ARGB colours (ARGB: 0xAARRGGBB)
+constexpr uint32_t kHoverColourZone      = 0x80FF00FFu; // semi-transparent magenta
+constexpr uint32_t kHoverColourRoad      = 0x8000FFFFu; // semi-transparent cyan
+constexpr uint32_t kHoverColourUtilities = 0x80FF8000u; // semi-transparent orange
+constexpr uint32_t kHoverColourDemolish  = 0x80FF0000u; // semi-transparent red
+constexpr uint32_t kHoverColourQuery     = 0x80FFFFFFu; // semi-transparent white
+```
 
 ## SimulationConstants Mapping
 
