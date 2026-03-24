@@ -98,7 +98,7 @@ The notification bell icon follows the Glass City icon state spec:
 
 The notification log panel is a scrollable history overlay toggled by the bell icon or the **B** key.
 
-- **Panel dimensions**: 400×500 px (virtual/scaled)
+- **Panel dimensions**: 400×500 px (virtual/scaled); content area width is 388 px when the scrollbar is visible (12 px scrollbar on the right edge)
 - **Anchor**: the top-right corner of the log panel aligns to the bottom-right corner of the bell icon. Bell icon virtual bounds: x:1820–1868, y:8–56. Log panel virtual bounds: x:1468–1868, y:56–556 (400×500 px). Do NOT use a bottom-left-to-bottom-left anchor — that formula yields a top-of-panel at y = 56 − 500 = −444, rendering entirely above the viewport.
 - **Z-order**: rendered above all HUD elements; when a blocking modal is active, the log panel is covered by the modal scrim (the log does NOT render above the scrim)
 - **Toggle**: **B** key or bell icon click; opening the panel resets the unread-count badge to 0
@@ -106,7 +106,7 @@ The notification log panel is a scrollable history overlay toggled by the bell i
   - Timestamp: elapsed time since the event (e.g., "2m 34s ago")
   - Priority badge: CRITICAL entries use a red badge; Normal entries use the default (no special color)
   - Message text: full message (not truncated, unlike toast display)
-- **Scroll**: mouse wheel scrolls the list; most-recent notification is at the top of the list
+- **Scroll**: Mouse wheel scrolls the list. A 12 px vertical scrollbar is rendered on the right inner edge of the log panel (right of content, left of panel boundary). Virtual bounds of scrollbar track: x:1856–1868 px, y:56–556 px (500 px height). Content area width is reduced from 400 px to **388 px** to accommodate the scrollbar. **Thumb dimensions**: `thumbH = max(20 px, floor(visibleRows / totalRows × trackH))`; `thumbY = trackTop + floor(scrollOffset / max(1, totalRows − visibleRows) × (trackH − thumbH))`. **Track colour**: `rgba(255, 255, 255, 0.08)` (same as inactive button fill). **Thumb colour**: `rgba(255, 255, 255, 0.25)` at rest; `rgba(255, 255, 255, 0.40)` on thumb hover (detected via `IGUIElement::isPointInside()`). The scrollbar is hidden (`setElementVisible(false)`) when `totalRows ≤ visibleRows` (all entries fit without scrolling). Most-recent notification is at the top of the list.
 - **Session persistence**: the log persists for the duration of the play session; it is NOT cleared on save or load within the same session
 - **Dismiss on outside click**: clicking anywhere outside the panel bounds closes the log panel. Outside clicks do not consume scroll-wheel or middle-mouse-button events — those pass through to the camera/3D view
 - **Panel background**: The log panel has a dark semi-opaque background applied via
@@ -162,7 +162,7 @@ Phase 10. Before Phase 10, `nullptr` is passed; every audio call site is guarded
 
 **Phase 10 audio call sites in NotificationManager**:
 
-- `postCritical()`: calls `m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f)` immediately
+- `postCritical()`: calls `m_audio->playSound(UI_TOAST, SoundPriority::HIGH, 1.0f)` immediately
   after the toast element is made visible (`m_backend->setElementVisible(handle, true)`). Fires
   once per toast display — not once per enqueue. If the toast is queued but not yet visible (because
   the max simultaneous limit is reached), the sound does NOT fire until the toast actually appears.

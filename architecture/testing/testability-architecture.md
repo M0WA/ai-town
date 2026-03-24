@@ -97,7 +97,7 @@ public:
   - `CriticalToast_SecondPost_NoDoublePause`: posting a second CRITICAL toast while one is already active does NOT call `setPaused(true)` again.
   - `NotificationSystem_AutoPause_OnFirstCriticalToast` *(Phase 8 deliverable)*: construct `NotificationManager` with `NiceMock<MockCitySimulation>` + `NiceMock<MockUIBackend>` + `ManualClock` + `nullptr`; post one CRITICAL toast when the CRITICAL queue is empty; verify `setPaused(true)` is called exactly once. Primary named test for `tests/ui/notification_system_test.cpp` Phase 8 expansion.
   - `NotificationSystem_NoPause_OnNormalToast` *(Phase 8 deliverable)*: post a Normal-severity toast (not CRITICAL) to `NotificationManager`; verify `setPaused(true)` is never called — Normal toasts must not trigger auto-pause.
-  - `NotificationSFX_ToastVisible_UIToastSoundFires` *(Phase 10 deliverable)*: construct `NotificationManager` with `NiceMock<MockUIBackend>` + `NiceMock<MockCitySimulation>` + `ManualClock` + `NiceMock<MockAudioSystem>`; post a Normal toast; verify `playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f)` is called exactly once when the toast becomes visible (not on enqueue when the queue is at capacity). Named test for `tests/ui/notification_system_test.cpp` Phase 10 expansion. See `hud-layout.md` Phase 10 Audio Wiring — `ui_toast` section for the full guard rule.
+  - `NotificationSFX_ToastVisible_UIToastSoundFires` *(Phase 10 deliverable)*: construct `NotificationManager` with `NiceMock<MockUIBackend>` + `NiceMock<MockCitySimulation>` + `ManualClock` + `NiceMock<MockAudioSystem>`; post a Normal toast; verify `playSound(UI_TOAST, SoundPriority::HIGH, 1.0f)` is called exactly once when the toast becomes visible (not on enqueue when the queue is at capacity). Named test for `tests/ui/notification_system_test.cpp` Phase 10 expansion. See `hud-layout.md` Phase 10 Audio Wiring — `ui_toast` section for the full guard rule.
 - **`UIManagerDeficitIntegrationTest` fixture** *(Phase 8 deliverable — canonical cross-subsystem fixture for deficit-streak CRITICAL toast dispatch)* in `tests/ui/notification_system_test.cpp`. This is a **separate fixture from `NotificationManagerTest`** — it tests the full dispatch path from `pollPendingNotification()` through `UIManager::update()` to `NotificationManager` CRITICAL toast dispatch and `IAudioSystem::triggerStinger()`. **Fixture setup**: real `UIManager` constructed with `NiceMock<MockUIBackend>`, `NiceMock<MockCitySimulation>`, `NiceMock<MockAudioSystem>`, and `ManualClock`. `MockAudioSystem` is injected as `IAudioSystem*` so that `triggerStinger` calls are interceptable and verifiable. **Include path**: `MockAudioSystem` is in `tests/simulation/MockAudioSystem.h` (NOT `tests/ui/` — audio mocks live alongside simulation mocks). `TearDown()` resets `ui_` to `nullptr` before mock destruction (mandatory: MockUIBackend destruction while UIManager holds a pointer to it causes a use-after-free crash in strict-mock verification).
 
   **Approved mock policy deviation**: `NiceMock<MockAudioSystem>` (not `StrictMock`) is used here because `UIManager`'s `if(m_audio)` null-check guard requires a non-null injectable mock; `StrictMock` would require exhaustive construction-time `EXPECT_CALL` setup for all audio interactions. This leniency is compensated by explicit `Times(0)` assertions on negative-stinger tests (`UIManagerDeficit_Month1_NoStingerFired`).
@@ -977,7 +977,7 @@ All Phase 10 audio tests carry label `unit` and run without a display device or 
 |---|---|---|
 | `NotificationManagerTest` | `NotificationSFX_ToastVisible_UIToastSoundFires` | `tests/ui/notification_system_test.cpp` |
 
-**`NotificationSFX_ToastVisible_UIToastSoundFires` test contract** — fixture setup: construct `NotificationManager` with `NiceMock<MockUIBackend>` + `NiceMock<MockCitySimulation>` + `ManualClock` + `NiceMock<MockAudioSystem>` (the fourth argument added in Phase 10). Place `EXPECT_CALL(audio_, playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f)).Times(1)` BEFORE posting any toast. Post a Normal toast via `postNormal()`. Advance `ManualClock` if needed for the toast to become visible (e.g. if the queue was at capacity). Verify the expectation — `UI_TOAST` must fire exactly once when the toast transitions from queued to visible, NOT at enqueue time when the queue is at capacity. **Negative assertion variant**: post a second Normal toast while the first toast occupies the only available visible slot (Normal max-visible = 1 when 2 CRITICAL toasts are visible); verify `playSound(UI_TOAST, ...)` is NOT called until the slot opens. **Mock policy**: `NiceMock<MockAudioSystem>` (not `StrictMock`) because the `NotificationManager` constructor calls no audio methods at construction time, and the test focus is on the toast-visible trigger, not on suppressing all unexpected calls. **CTest filter**: `-R NotificationSFX_ToastVisible_UIToastSoundFires`.
+**`NotificationSFX_ToastVisible_UIToastSoundFires` test contract** — fixture setup: construct `NotificationManager` with `NiceMock<MockUIBackend>` + `NiceMock<MockCitySimulation>` + `ManualClock` + `NiceMock<MockAudioSystem>` (the fourth argument added in Phase 10). Place `EXPECT_CALL(audio_, playSound(UI_TOAST, SoundPriority::HIGH, 1.0f)).Times(1)` BEFORE posting any toast. Post a Normal toast via `postNormal()`. Advance `ManualClock` if needed for the toast to become visible (e.g. if the queue was at capacity). Verify the expectation — `UI_TOAST` must fire exactly once when the toast transitions from queued to visible, NOT at enqueue time when the queue is at capacity. **Negative assertion variant**: post a second Normal toast while the first toast occupies the only available visible slot (Normal max-visible = 1 when 2 CRITICAL toasts are visible); verify `playSound(UI_TOAST, ...)` is NOT called until the slot opens. **Mock policy**: `NiceMock<MockAudioSystem>` (not `StrictMock`) because the `NotificationManager` constructor calls no audio methods at construction time, and the test focus is on the toast-visible trigger, not on suppressing all unexpected calls. **CTest filter**: `-R NotificationSFX_ToastVisible_UIToastSoundFires`.
 
 **Phase 10 `simulation_tests` canonical test names** — the following canonical names are mandated for the Phase 10 simulation unit tests. These are added to `simulation_tests` via `target_sources(simulation_tests ...)`.
 
@@ -1318,7 +1318,7 @@ For every unit test that uses `StrictMock<MockAudioSystem>` or `StrictMock<MockR
 
 Panel stubs used in `UIManagerDrawOrderTest` are NOT "no-op shells" — they must contain the sentinel `setElementVisible` call even if all other methods on the stub are no-ops. A stub `draw()` body of `{}` (empty) or `// TODO` is a defect: the draw-order test becomes vacuously green and provides zero ordering coverage.
 
-**CONTRACT**: Each test-stub panel (e.g. `StubHUD`, `StubMinimap`, `StubTaxRatePanel`, etc.) used by `UIManagerDrawOrderTest` must:
+**CONTRACT**: Each test-stub panel (e.g. `StubHUD`, `StubMinimap`, `StubFinancesPanel`, etc.) used by `UIManagerDrawOrderTest` must:
 
 1. Hold a fixed dummy `UIElementHandle` sentinel sourced from `tests/ui/panel_sentinel_handles.h` (e.g. `handles::kHUDSentinel` — a unique non-zero value per panel class to distinguish calls in the expectation sequence).
 2. Implement `draw()` as a single call: `m_backend->setElementVisible(handles::kXxxSentinel, true);` — NOT a no-op. The production panel classes do NOT include this header.
@@ -1408,7 +1408,7 @@ TEST_F(UIManagerDrawOrderTest, DrawOrder_BackToFront_MatchesSpec) {
     EXPECT_CALL(backend_, setElementVisible(handles::kMinimapSentinel, true)).Times(1);
     // 3. HUD
     EXPECT_CALL(backend_, setElementVisible(handles::kHUDSentinel, true)).Times(1);
-    // 4. TaxRatePanel (hidden — sentinel NOT expected)
+    // 4. FinancesPanel (hidden — sentinel NOT expected)
     // 5. InspectorPanel (hidden — sentinel NOT expected)
     // 6. NotificationManager toast stack
     EXPECT_CALL(backend_, setElementVisible(handles::kNotificationSentinel, true)).Times(1);
@@ -1441,7 +1441,7 @@ TEST_F(UIManagerDrawOrderTest, UIManagerDrawOrder_ModalActive) {
     EXPECT_CALL(backend_, setElementVisible(handles::kMinimapSentinel,          true)).Times(1);
     // 3. HUD
     EXPECT_CALL(backend_, setElementVisible(handles::kHUDSentinel,              true)).Times(1);
-    // 4. TaxRatePanel (hidden — sentinel NOT expected)
+    // 4. FinancesPanel (hidden — sentinel NOT expected)
     // 5. InspectorPanel (hidden — sentinel NOT expected)
     // 6. NotificationManager toast stack
     EXPECT_CALL(backend_, setElementVisible(handles::kNotificationSentinel,     true)).Times(1);
