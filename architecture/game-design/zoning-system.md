@@ -146,6 +146,29 @@
 - **Terrain interaction**: See [Terrain Interaction](terrain-interaction.md) for the authoritative slope threshold (> 15.0°, exact), earthworks cost formula, and map playability guarantee.
 - **Player action**: Player designates zones; engine auto-populates buildings based on demand and desirability scores
 
+## Construction Delay
+
+When a zone tile is placed it enters `underConstruction = true` state. No building mesh is
+spawned at placement time. The building mesh is only placed once `populationTick()` determines
+that demand is sufficient to warrant construction on that tile:
+
+- The zone-colour overlay (green / blue / yellow) is visible immediately in the same frame
+  as placement.
+- No 3D building mesh is placed at placement time.
+- The tile contributes `population = 0` and no tax revenue while `underConstruction = true`.
+
+**Demand gate**: in `populationTick()`, after computing `effective_demand_factor` for the tile,
+if `effective_demand_factor >= SimulationConstants::density_upgrade_wave_demand_threshold`
+(0.50) **and** the tile has `underConstruction = true`, clear the flag and call
+`m_renderer->placeBuildingMesh()`. If demand is below the threshold the tile stays as an empty
+lot and is re-evaluated each subsequent tick. This ensures buildings only appear when there is
+genuine need for them, consistent with the "engine auto-populates buildings based on demand and
+desirability scores" rule above.
+
+`underConstruction` is tracked as a per-tile boolean field in `CitySimulation` and must be
+serialised in the save-file tile struct so that in-progress construction survives save/load
+cycles.
+
 ## Multi-Tile Footprint Placement Rules
 
 Multi-tile footprints allow zone buildings and service buildings to occupy multiple tiles based on density tier. This section specifies placement collision checks, demolition behavior, terrain flattening, density upgrade resolution, street adjacency rules, and hover highlight behavior.
