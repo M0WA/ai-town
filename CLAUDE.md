@@ -96,6 +96,7 @@ Do not suggest alternative engines, languages, or platforms.
 | Validate Phase Done | `/validate-phase-done` | Read a phase file and report whether all deliverable checkboxes and exit criteria are complete; lists every outstanding item if not |
 | Mark Phase Done | `/mark-phase-done` | Validate phase completion, then mark it as **DONE** in the implementation plan and sync the GitHub board; infers the phase from the current git branch (`planning/phase-N` → Phase N−1 done) if not specified |
 | Split Phase | `/split-phase` | Product Owner proposes splitting a phase into multiple phases or redistributing its deliverables; design + tech squads review the proposal, then the Product Owner applies the agreed split |
+| Model Review | `/model-review` | Interactive visual review loop for 3D assets — launches the model validator with all LODs visible, user annotates issues with the paint tool, Claude dispatches fixes to artist agents and loops until approved; works for a single named model or all 45 assets |
 
 ## Development Guidelines
 
