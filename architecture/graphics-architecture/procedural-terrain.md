@@ -381,6 +381,12 @@ reads vertex heights from `m_chunkHeightmaps` (the per-chunk copy), not from
 causes `processOneRebuild` to rebuild the chunk mesh with the old (pre-flatten) heights,
 silently discarding the height change. Both arrays must be kept in sync on every write.
 
+Because vertex `(tileX, tileZ)` is shared by up to four chunks (see four-chunk
+boundary vertex rule in Step 3), up to four `m_chunkHeightmaps` entries may require
+updating — not just the entry for the chunk that "owns" tile `(tileX, tileZ)`.
+
+For each affected chunk, determine its origin tile coordinates `(chunkMinTileX, chunkMinTileZ)`. Compute local array indices as: `localX = tileX − chunkMinTileX`, `localZ = tileZ − chunkMinTileZ`. Write the new height to the heightmap array at index `localZ × (chunkSize + 1) + localX`.
+
 **Step 2 — Neighbour blending**: For each of the 8 surrounding tiles, compute the
 neighbour's new height by linearly interpolating toward `height`:
 
@@ -403,7 +409,21 @@ Out-of-bounds neighbours are silently skipped (no write, no crash).
 
 **Step 3 — Chunk rebuild enqueue**: After all heightmap writes (centre + in-bounds
 neighbours), iterate over all modified tile coordinates and determine which chunk(s) each
-tile belongs to. For each unique chunk affected:
+tile belongs to.
+
+**Boundary vertex four-chunk rule**: Vertex `(mx, mz)` is shared by up to four
+chunks — the chunks whose tile ranges include that coordinate as any of their four
+corners. These are the chunks owning tiles `(mx, mz)`, `(mx-1, mz)`, `(mx, mz-1)`,
+and `(mx-1, mz-1)` (all four clamped to `[0, m_mapTilesX-1] × [0, m_mapTilesZ-1]`
+before conversion). Convert each of these four tile coordinates to a chunk ID via
+`chunkIdOf()`. Deduplicate the resulting chunk IDs (a tile in the interior of a chunk
+maps to only one ID; a tile on a chunk-boundary edge maps to two; a tile exactly at a
+chunk corner maps to four). Mark each unique chunk `currentLOD = -1` and enqueue it
+for rebuild. Without this rule, chunks adjacent to the modified tile share the boundary
+vertex in their rendered mesh but never receive a rebuild request, producing visible
+height seams ("holes") at chunk boundaries after terrain flattening.
+
+For each unique chunk affected:
 
 1. **Mark the chunk dirty (LOD = -1) in `m_activeChunks`** before calling
    `enqueueRebuild`. `processOneRebuild` contains an "already at target LOD" guard:

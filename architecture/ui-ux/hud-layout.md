@@ -371,7 +371,7 @@ creation time; does not change colour dynamically.
 
 ## Phase 10 Audio Wiring for UI Events
 
-All UI SFX calls below use `m_audio->playSound(soundId, SoundPriority::NORMAL, 1.0f)`.
+All UI SFX calls below use `m_audio->playSound(soundId, SoundPriority::HIGH, 1.0f)`.
 `m_audio` is the `IAudioSystem*` stored as a private member on `UIManager` (see
 `architecture/ui-ux/ui-manager.md` Class Structure private members). The `HUD` class also
 holds its own `IAudioSystem* m_audio` (see HUD Class Structure — Constructor Signature) but
@@ -389,7 +389,7 @@ Demolish, Query) regardless of whether the tool changed.
 ```cpp
 // In UIManager::onEvent(), Priority 5 toolbar dispatch, after setActiveTool():
 if (m_hud && m_audio) {
-    m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
+    m_audio->playSound(UI_CLICK, SoundPriority::HIGH, 1.0f);
 }
 ```
 
@@ -405,13 +405,11 @@ is processed in the toolbar/sub-panel dispatch path triggers this SFX.
 ```cpp
 // In UIManager::updateSubPanelVisibility(), after showing a sub-panel:
 if (m_audio) {
-    m_audio->playSound(UI_MENU_OPEN, SoundPriority::NORMAL, 1.0f);
+    m_audio->playSound(UI_MENU_OPEN, SoundPriority::HIGH, 1.0f);
 }
 ```
 
-Also fires when the Budget Detail Panel is opened (hover → click on treasury balance field)
-and when the Tax Rate Panel opens. Call site: the panel's `show()` method or the UIManager
-handler that sets the panel visible.
+Also fires when the Finances Panel opens (T key or resource-bar click). Call site: `FinancesPanel::open()` or the UIManager handler that calls it.
 
 `UI_MENU_OPEN` = SoundId 24 (`ui_menu_open.wav`).
 
@@ -419,12 +417,12 @@ handler that sets the panel visible.
 
 **Call site**: `UIManager::updateSubPanelVisibility()`, immediately after
 `setElementVisible(panel, false)` is called when a sub-panel is hidden due to a tool change.
-Also fires on Budget Detail Panel close and Tax Rate Panel close.
+Also fires when the Finances Panel closes.
 
 ```cpp
 // In UIManager::updateSubPanelVisibility(), after hiding a sub-panel:
 if (m_audio) {
-    m_audio->playSound(UI_MENU_CLOSE, SoundPriority::NORMAL, 1.0f);
+    m_audio->playSound(UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f);
 }
 ```
 
@@ -445,7 +443,7 @@ immediately after the toast element is created and made visible via
 ```cpp
 // In NotificationManager::postCritical() / postNormal(), after toast element creation:
 if (m_audio) {
-    m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f);
+    m_audio->playSound(UI_TOAST, SoundPriority::HIGH, 1.0f);
 }
 ```
 
@@ -485,69 +483,18 @@ Updates the active tool indicator text (virtual bounds x:8–72 px, y:752–784 
 Required private members of the `HUD` class relevant to the budget detail overlay:
 
 ```cpp
-BudgetDetailPanel* m_budgetDetail{nullptr}; // owned by HUD; shown on treasury balance hover; Phase 8 full implementation
+FinancesPanel* m_finances{nullptr}; // owned by HUD; opened via T key or resource-bar click; Phase 8 full implementation
 ```
 
-> **Phase 8 stub requirement**: A companion stub class `src/ui/budget_detail_panel.h` MUST be created in
-> Phase 8 with an empty constructor accepting `IUIBackend*` and a no-op `draw()` method. This prevents
-> Phase 9 from requiring a header change to HUD (which would force recompilation of UIManager and all HUD
-> consumers).
+> **Phase 8 stub requirement**: A companion stub class `src/ui/FinancesPanel.h` MUST be created in
+> Phase 8 with a constructor accepting `IUIBackend*` and a no-op `draw()` method. The full constructor
+> signature `FinancesPanel(IUIBackend*, ICitySimulation*, IAudioSystem*, IClock*)` is introduced in
+> Phase 11l when the panel implementation is completed. This prevents Phase 9 from requiring a header
+> change to HUD (which would force recompilation of UIManager and all HUD consumers).
 
 ## Budget Detail Panel
 
-BudgetDetailPanel is owned and drawn by HUD (not UIManager). UIManager does not hold a pointer to BudgetDetailPanel.
-
-A floating detail panel that appears when the player hovers over or clicks the treasury balance display in the resource/budget bar.
-
-- **Trigger**: hover or click on the treasury balance field in the resource bar
-- **Dimensions**: 320×260 px (virtual/scaled — 60 px taller than the original 320×200 px to accommodate section headers and 1 px separator rules)
-- **Anchor**: below the resource bar, left-aligned to the left edge of the resource bar — top-left corner at virtual (8 px, 57 px), immediately below the resource bar bottom edge (resource bar ends at approximately y = 56 px virtual). The panel extends downward from its top-left anchor; the +60 px increase in height adds space below the previous bottom edge.
-- **Z-order**: above all HUD elements; below the modal scrim (when a blocking modal is active, the budget detail panel is covered by the scrim)
-- **Layout — three sections** separated by 1 px horizontal rules. Section headers are bold label rows using the HUD font. Subtotals are shown inline on the section header row:
-
-  **Income** [$X,XXX/month] ← bold header row with subtotal
-
-  - Tax revenue — Residential
-  - Tax revenue — Commercial
-  - Tax revenue — Industrial
-  - Utility fees
-  - Tourism income: $0 (post-V1) ← grayed-out placeholder; last item in Income section; rendered via `setElementEnabled(handle, false)` (visible but non-interactive and dimmed)
-
-  *(1 px separator rule)*
-
-  **Expenses** [$X,XXX/month] ← bold header row with subtotal
-
-  - Road maintenance
-  - Service upkeep (fire/police/utilities)
-  - Wages
-
-  *(1 px separator rule)*
-
-  **Total**
-
-  - Net monthly balance = Income total − Expenses total
-  - Displayed as "+$X,XXX" (green `SColor(255, 80, 200, 80)`) for surplus or "−$X,XXX" (red `SColor(255, 220, 80, 80)`) for deficit
-  - These colors are consistent with the existing deficit-pulsing color palette in the resource bar
-
-- **Data refresh**: updates once per budget tick (not real-time between ticks)
-- **Cross-reference**: see [Economy Model](../game-design/economy-model.md) for authoritative field definitions and calculation formulas
-
-### Density Unlock Preview Tooltip
-
-A supplemental line displayed within the budget detail panel (or as an additional line in the resource bar hover tooltip area) when the city is approaching a density tier unlock threshold.
-
-- **Trigger**: appears when the current monthly revenue is within 10% of any locked density tier threshold (evaluated at the difficulty-adjusted threshold value). Not shown when all density tiers are already unlocked.
-- **Display format**: "After Unlock: ~+$X/month expenses" where X is the estimated monthly upkeep increase resulting from the next density tier unlock
-- **Placement**: shown as a supplemental line at the bottom of the budget detail panel — below the Total section and its 1 px separator rule (i.e. after all three sections of the 3-section layout), or as an additional line in the resource bar tooltip if the budget detail panel is not open
-- **Update cadence**: updates once per budget tick (same as the rest of the budget detail panel)
-- **Sentinel handling — all tiers unlocked**: The HUD calls `ICitySimulation::getNextUnlockThreshold(difficulty)` each budget tick to determine whether a threshold exists. When the return value equals `SimulationConstants::kNoUnlockThreshold` (`-1.0f`), the HUD MUST:
-  1. Hide the density unlock progress indicator in the resource bar via `IUIBackend::setElementVisible(handle, false)` — the element is hidden (not merely disabled) because there is no actionable information to display.
-  2. Suppress the Density Unlock Preview Tooltip entirely — the 10% proximity check MUST NOT execute when the sentinel is returned (guard the check with `if (threshold >= 0.0f)` before comparing against `getCurrentMonthlyRevenue()`).
-  3. Never display the literal value `−1` or `−1.0` in any label — the sentinel MUST be intercepted before any formatting occurs.
-  The suppression state is permanent for the session once all tiers are unlocked: there is no mechanism to re-lock a density tier, so once `kNoUnlockThreshold` is returned it will be returned for every subsequent tick. The HUD does not need to re-check after first suppression, but doing so is harmless.
-- **Cross-reference**: See [Economy Model](../game-design/economy-model.md) (`getNextUnlockThreshold()` return semantics section) for the authoritative sentinel definition and the `SimulationConstants::kNoUnlockThreshold` named constant.
-
-See also: [Tax Rate Panel](tax-rate-panel.md) — the floating panel for adjusting zone tax rates, accessible by clicking the resource/budget bar.
+**Budget Detail Panel removed**: The separate Budget Detail Panel has been merged into the Finances Panel (see `architecture/ui-ux/finances-panel.md`). Hovering over the treasury balance field no longer opens any panel. The Finances Panel is opened exclusively via the T key or a click on the resource/budget bar.
 
 ## Font Loading
 
@@ -590,7 +537,7 @@ graceful fallback succeed — no constructor code changes are required in Phase 
 face for labels, button text, tooltips, and panel titles. A second font file
 `assets/fonts/hud_mono_font.xml` is a monospace face applied selectively to `IGUIStaticText`
 elements that display numeric values. A single monospace face applied globally degrades legibility
-in compact panels (Query/Inspector, Tax Rate Panel) where proportional glyphs are narrower and
+in compact panels (Query/Inspector, Finances Panel) where proportional glyphs are narrower and
 allow more characters per line. The two-face approach allows each font to be optimised for its
 role. Both font files must be delivered as Phase 10 assets.
 
@@ -610,8 +557,7 @@ Numeric elements that MUST call `m_backend->setElementMonoFont(handle)` after `a
 
 - Treasury balance display in resource bar
 - Population count display in resource bar
-- All numeric fields in Tax Rate Panel (current rate, projected rate)
-- All numeric fields in Budget Detail Panel (revenue, expense, and net balance line items)
+- All numeric fields in Finances Panel (current rate, projected rate, budget line items)
 - Density unlock progress threshold value in resource bar
 - In-game date/time display in resource bar
 

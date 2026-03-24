@@ -357,7 +357,7 @@ private:
     NotificationManager*    m_notifications{nullptr};  // created first — see invariant above
     MainMenuPanel*          m_mainMenu{nullptr};        // created second; hidden on transitionToGameplay()
     HUD*                    m_hud{nullptr};
-    TaxRatePanel*           m_taxPanel{nullptr};
+    FinancesPanel*          m_finances{nullptr};
     Minimap*                m_minimap{nullptr};
     InspectorPanel*         m_inspector{nullptr};
     PauseMenuPanel*         m_pauseMenu{nullptr};
@@ -406,9 +406,9 @@ private:
     //   2. Show the sub-panel appropriate for m_activeTool (see table below).
     //   3. Fire audio — close BEFORE open, exactly one sound per changed panel:
     //      a. For each panel that transitions from visible→hidden: call
-    //         m_audio->playSound(UI_MENU_CLOSE, SoundPriority::NORMAL, 1.0f) guarded by if(m_audio).
+    //         m_audio->playSound(UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f) guarded by if(m_audio).
     //      b. For the panel that transitions from hidden→visible (if any): call
-    //         m_audio->playSound(UI_MENU_OPEN, SoundPriority::NORMAL, 1.0f) guarded by if(m_audio).
+    //         m_audio->playSound(UI_MENU_OPEN, SoundPriority::HIGH, 1.0f) guarded by if(m_audio).
     //      c. Do NOT fire ui_menu_open and ui_menu_close on the same frame for the same panel.
     //         Sequence: close sounds first, then open sound, within the same call.
     //
@@ -472,7 +472,7 @@ Panels are constructed in this order (dependency order — later panels may read
 1. `NotificationManager` — always first; see invariant above. **Phase 10 constructor call**: `new NotificationManager(m_backend, m_sim, m_clock, m_audio)` — passes `m_audio` as the fourth parameter so that `postCritical()` and `postNormal()` can call `m_audio->playSound(UI_TOAST, ...)` when a toast becomes visible. Before Phase 10, `nullptr` is passed for the `IAudioSystem*` parameter; `NotificationManager` null-checks `m_audio` before every audio call.
 2. `MainMenuPanel` — constructed immediately after `NotificationManager`; visible on startup; UIManager owns its lifetime; hidden by `transitionToGameplay()`
 3. `HUD` — resource bar, speed selector, toolbar
-4. `TaxRatePanel` — hidden initially
+4. `FinancesPanel` — hidden initially
 5. `Minimap` — always visible during gameplay
 6. `InspectorPanel` — hidden initially; shown on query tool activation
 7. `PauseMenuPanel` — hidden initially; shown by `transitionToPaused()`
@@ -508,7 +508,7 @@ All panels are visible-by-default set to false except `NotificationManager` (alw
 
    The compound guard is mandatory — checking only `criticalVisible` is insufficient per `input-arbitration.md` Priority 2 dual-guard section. Same-frame state transitions can leave `criticalVisible == true` while a modal is simultaneously active (e.g., the game-over modal shown on the same frame a deficit CRITICAL toast is visible). Without the `!modalActive` check, Priority 2 would consume the event before Priority 1's modal handler, bypassing the modal's input lock.
 3. **QueryPanel / InspectorPanel**: if visible, forwards mouse events over its bounds and Escape; see input-arbitration.md for toolbar and minimap carve-out exceptions on dismiss-click.
-4. **TaxRatePanel**: if visible, forwards mouse events over its bounds; Escape closes it. Outside clicks are NOT consumed (pass-through).
+4. **FinancesPanel**: if visible, forwards mouse events over its bounds; Escape closes it. Outside clicks are NOT consumed (pass-through).
 5. **HUD controls** (toolbar clicks, speed selector, minimap interactions; Ctrl+Z (undo) processed here). **SettingsPanel** is NOT a named priority level — when visible it intercepts events as part of this priority tier (UIManager HUD controls), returning its consumed state before the toolbar/minimap handlers run. When `SettingsPanel` is visible, Escape is consumed by `SettingsPanel` at this priority tier — it closes Settings and returns the player to PauseMenu by calling `PauseMenuPanel::show()`. `SettingsPanel::onEvent()` must return `true` for Escape events when visible. This does NOT trigger `transitionToGameplay_fromPaused()`. Escape only reaches the PauseMenu-to-gameplay transition if SettingsPanel is not currently visible. When `SettingsPanel` is NOT visible and `PauseMenuPanel` IS visible: Escape is consumed by `PauseMenuPanel`, which calls `transitionToGameplay_fromPaused()`. This is processed at Priority 5, after SettingsPanel's check, before HUD toolbar handlers.
 6. Return `false` for CameraController — camera movement events (scroll-wheel zoom, MMB drag, RMB drag, edge-scroll `MouseMove`) that were not consumed by Priorities 1–5 are processed by `CameraController` (outside `UIManager::onEvent()`). Priority 6 is NOT the terminal layer.
 7. **World Interaction layer** (terminal layer, Phase 9b). Processes `MouseMove` and `MouseButtonDown button=0` (left-click) when `m_state == GameState::Gameplay` and `m_activeTool != ActiveTool::None` and `m_renderer != nullptr`. Rules:
@@ -544,7 +544,7 @@ Within `UIManager::draw()`, panels are drawn in this order (back to front, match
 1. MainMenuPanel (if visible — only during `GameState::MainMenu`)
 2. Minimap — **all Minimap chrome elements (toggle row, label strip, legend panel) are drawn inside `Minimap::draw()` at this slot**. These chrome elements are internal to the `Minimap` class and are NOT promoted to separate UIManager draw slots. HUD at slot 3 intentionally renders above any overlap with Minimap chrome. This ordering is normative and MUST NOT be changed to "fix" perceived z-order issues: moving the Minimap draw call later in the sequence would break the `UIManagerDrawOrderTest` ordering contract.
 3. HUD (resource bar, toolbar, speed selector)
-4. TaxRatePanel (if visible)
+4. FinancesPanel (if visible)
 5. InspectorPanel (if visible)
 6. NotificationManager toast stack
 7. PauseMenuPanel (if visible)
@@ -557,7 +557,7 @@ Within `UIManager::draw()`, panels are drawn in this order (back to front, match
    Priority 1 in `input-arbitration.md`).
 10. ModalDialog (always topmost)
 
-**BudgetDetailPanel ownership**: `BudgetDetailPanel` is owned and drawn by the `HUD` class internally — it is a detail overlay triggered by hovering the treasury balance field in the resource bar. It is NOT a top-level `UIManager` panel and does NOT appear in UIManager's panel member list or draw order. UIManager's draw order has exactly 10 slots as specified above.
+**FinancesPanel ownership**: `FinancesPanel` (introduced in phase-11l, replacing the former `TaxRatePanel` and `BudgetDetailPanel`) is a top-level `UIManager` panel in slot 4. It is opened by the T key or a resource-bar click and draws itself in the UIManager draw order as listed above. The former `BudgetDetailPanel` (treasury-hover overlay) has been merged into `FinancesPanel` and no longer exists as a separate class. UIManager's draw order has exactly 10 slots as specified above.
 
 `UIManager::draw()` issues explicit per-panel draw calls in the back-to-front order listed above (items 1–10). This is the normative approach: each panel exposes a `draw()` method that is called directly by UIManager in the correct sequence. Each panel's `draw()` method updates element state (visibility, text, alpha) via `IUIBackend` setter methods but does NOT render pixels directly. After `UIManager::draw()` completes, `IrrlichtRenderer::drawScene()` calls `guiEnvironment->drawAll()` which renders all visible `IGUIElement` nodes to the framebuffer. Because `UIManager::draw()` has already set the correct visibility on every element (non-active panels hide theirs), `drawAll()` only paints the intended elements. The Z-order concern (scrim must cover panels; modal must be topmost) is handled by visibility management — panels control which elements are visible/hidden before `drawAll()` executes.
 

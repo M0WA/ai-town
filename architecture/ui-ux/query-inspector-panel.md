@@ -132,7 +132,7 @@ font-size switching is deferred to a future typography pass.
   to clear the previously displayed overlay. Only the coverage overlay of the currently-queried
   service building should be visible at any time.
 
-- **Mutual exclusion with Tax Rate Panel**: QueryPanel and Tax Rate Panel must NOT be simultaneously open. Opening the QueryPanel closes the Tax Rate Panel if it is open. See `input-arbitration.md` Priority 3 for the authoritative mutual exclusion rule.
+- **Mutual exclusion with Finances Panel**: QueryPanel and Finances Panel must NOT be simultaneously open. Opening the QueryPanel closes the Finances Panel if it is open. See `input-arbitration.md` Priority 3 for the authoritative mutual exclusion rule.
 - Panel populated by a `QueryResult` data struct passed from the simulation layer to `UIManager`
 - **Data refresh policy**: The QueryPanel refreshes its displayed data at different rates by data category to balance accuracy with performance:
   - **Budget/economy data** (tax yield, demand score, desirability): refreshed once per budget tick (same cadence as the simulation update). **Implementation note**: `ICitySimulation` does not expose a budget-tick counter, so the implementation uses a draw-frame count proxy — `kEconomyRefreshFrames = 120` draw frames (≈2 s at 60 FPS) — as an approximation of the budget tick cadence. The `m_lastEconomyFrame` member is initialised to `-kEconomyRefreshFrames` so the first `draw()` call always triggers an immediate refresh.

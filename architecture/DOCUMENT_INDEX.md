@@ -30,7 +30,7 @@ All files contain the full verbatim content from the master spec (`CLAUDE.md`).
 |---|---|
 | Main Menu & New Game Flow | [ui-ux/main-menu-new-game-flow.md](ui-ux/main-menu-new-game-flow.md) |
 | HUD Layout | [ui-ux/hud-layout.md](ui-ux/hud-layout.md) |
-| Tax Rate Panel | [ui-ux/tax-rate-panel.md](ui-ux/tax-rate-panel.md) |
+| Finances Panel | [ui-ux/finances-panel.md](ui-ux/finances-panel.md) |
 | Camera Controls | [ui-ux/camera-controls.md](ui-ux/camera-controls.md) |
 | Hotkey Scheme | [ui-ux/hotkey-scheme.md](ui-ux/hotkey-scheme.md) |
 | Query / Inspector Panel | [ui-ux/query-inspector-panel.md](ui-ux/query-inspector-panel.md) |

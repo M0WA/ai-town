@@ -172,7 +172,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 |---|---|
 | Main Menu & New Game Flow | [architecture/ui-ux/main-menu-new-game-flow.md](architecture/ui-ux/main-menu-new-game-flow.md) |
 | HUD Layout | [architecture/ui-ux/hud-layout.md](architecture/ui-ux/hud-layout.md) |
-| Tax Rate Panel | [architecture/ui-ux/tax-rate-panel.md](architecture/ui-ux/tax-rate-panel.md) |
+| Finances Panel | [architecture/ui-ux/finances-panel.md](architecture/ui-ux/finances-panel.md) |
 | Camera Controls | [architecture/ui-ux/camera-controls.md](architecture/ui-ux/camera-controls.md) |
 | Hotkey Scheme | [architecture/ui-ux/hotkey-scheme.md](architecture/ui-ux/hotkey-scheme.md) |
 | Query / Inspector Panel | [architecture/ui-ux/query-inspector-panel.md](architecture/ui-ux/query-inspector-panel.md) |
