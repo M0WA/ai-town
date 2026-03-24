@@ -191,10 +191,10 @@ text line instead of sitting on the shared baseline. This was the root cause of 
 ## Typography
 
 - **Minimum body font size**: 14 px virtual (1920×1080 space). At 1280×720 (scale factor ≈ 0.667), this renders to approximately 9 px physical — the minimum for compact panels. Prefer **16 px virtual** for all interactive labels.
-- **Minimum label font size in compact panels** (Query/Inspector Panel, Tax Rate Panel, Notification toasts): **13 px virtual**, never smaller. These panels display numeric data that must be legible under time pressure.
+- **Minimum label font size in compact panels** (Query/Inspector Panel, Finances Panel, Notification toasts): **13 px virtual**, never smaller. These panels display numeric data that must be legible under time pressure.
 - **Hard physical floor**: No UI text may render below **11 px physical pixels** at the minimum supported resolution (1280×720). `UIScaler` must clamp text scale so that font sizes never fall below this floor, even if a window is resized below 1280×720.
 - **Typeface requirements**: Numeric readouts (tax rates, treasury balance, population counts, percentages) must use a **monospace typeface** (prevents layout shift as digits change). Labels (zone types, panel titles, button text) must use a **sans-serif typeface** for legibility at small sizes.
-- **These rules apply to all UI elements**: HUD resource bar, demand pressure bars (must supplement color with zone-type letters R/C/I), toolbar tooltip text, Query Panel fields, Tax Rate Panel rows, notification toasts, modal dialog body text, and minimap legend labels.
+- **These rules apply to all UI elements**: HUD resource bar, demand pressure bars (must supplement color with zone-type letters R/C/I), toolbar tooltip text, Query Panel fields, Finances Panel rows, notification toasts, modal dialog body text, and minimap legend labels.
 
 ## Visual Design — Glass City: Canonical Colour Palette
 

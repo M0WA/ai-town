@@ -7,7 +7,7 @@
 | U | Utilities tool |
 | D | Demolish tool |
 | I | Inspector / Query tool |
-| T | Toggle Tax Rate Panel |
+| T | Toggle Finances Panel |
 | B | Toggle Notification Log |
 | Space | Pause / unpause |
 | + / = | Increase simulation speed |
@@ -27,7 +27,7 @@ Camera pan (Arrow keys) and Undo (Ctrl+Z) are additional bindings not shown in t
 | Utilities tool | U | |
 | Demolish tool | D | WASD preset moves to X |
 | Inspector / Query tool | I | |
-| Toggle Tax Rate Panel | T | |
+| Toggle Finances Panel | T | |
 | Toggle Notification Log | B | |
 | Pan Up (camera) | ArrowUp | WASD preset moves to W |
 | Pan Down (camera) | ArrowDown | WASD preset moves to S |

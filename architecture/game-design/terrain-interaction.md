@@ -183,6 +183,46 @@ change.
   distances (pure Y offsets fail beyond ~400 m where depth precision degrades below 10 cm
   for a 24-bit buffer with near=0.1, far=3000).
 
+### Multi-tile footprint extension
+
+For buildings with an N×N footprint (N > 1 — Medium density: N=2, High density: N=3,
+Service buildings: N=2), `setTileHeight()` must be called for **all `(N+1) × (N+1)`
+corner vertices** spanning the full footprint, not only the 4 corners of the 1×1 origin
+tile. Flattening only the origin tile leaves the remaining footprint tiles at their
+original terrain heights, causing the building's ground plate to intersect raised terrain
+edges.
+
+The target height `targetH` for the entire footprint is computed from the 4 **outermost**
+corners of the full footprint:
+
+```cpp
+const float h_NW = m_terrain->getHeightAt(footX,       footZ);
+const float h_NE = m_terrain->getHeightAt(footX + N,   footZ);
+const float h_SW = m_terrain->getHeightAt(footX,       footZ + N);
+const float h_SE = m_terrain->getHeightAt(footX + N,   footZ + N);
+const float targetH = (h_NW + h_NE + h_SW + h_SE) * 0.25f;
+```
+
+Then call `setTileHeight(cx, cz, targetH)` for every corner vertex
+`cx ∈ [footX, footX+N]`, `cz ∈ [footZ, footZ+N]`:
+
+```cpp
+if (m_terrain) {
+    for (int cz = footZ; cz <= footZ + N; ++cz)
+        for (int cx = footX; cx <= footX + N; ++cx)
+            m_terrain->setTileHeight(cx, cz, targetH);
+    m_terrain->flushTerrainRebuilds();  // single flush after all writes
+}
+```
+
+A Low-density building (N=1) produces the same 4 calls as the original spec above —
+the loop collapses to 4 iterations and behaviour is unchanged for Low density.
+`flushTerrainRebuilds()` is called **once** after the full loop, not once per tile.
+
+The scene node Y position uses `targetH` directly (not `getHeightAt()` after
+`setTileHeight()` calls) per the bleed-back rule above — this applies to the full
+footprint: use the single `targetH` value computed from the outermost corners.
+
 For the full `setTileHeight()` implementation spec (blending formula, chunk rebuild
 enqueue, bounds clamping, rebuild budget interaction) see
 `architecture/graphics-architecture/procedural-terrain.md` — `setTileHeight()` Write
