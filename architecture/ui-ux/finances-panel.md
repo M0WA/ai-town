@@ -78,7 +78,13 @@ definitions and calculation formulas.
 
 ## Sound Effects
 
-- **Open**: `ui_menu_open` fires from `FinancesPanel::open()` via `IAudioSystem::playSound()`.
-- **Close**: `ui_menu_close` fires from `FinancesPanel::close()` via `IAudioSystem::playSound()`.
+- **Open**: `ui_menu_open` fires from `FinancesPanel::open()` via
+  `m_audio->playSound(UI_MENU_OPEN, SoundPriority::HIGH, 1.0f)`.
+- **Close**: `ui_menu_close` fires from `FinancesPanel::close()` via
+  `m_audio->playSound(UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f)`.
 
-The `FinancesPanel` constructor receives `IAudioSystem*` as a parameter for this purpose. This matches the floating-panel audio pattern documented in `architecture/ui-ux/hud-layout.md`.
+`SoundPriority::HIGH` is required for all UI sounds per `source-pool.md` to ensure access to
+the transient reserve and prevent audio starvation during heavy traffic.
+
+The `FinancesPanel` constructor receives `IAudioSystem*` as a parameter for this purpose. This
+matches the floating-panel audio pattern documented in `architecture/ui-ux/hud-layout.md`.
