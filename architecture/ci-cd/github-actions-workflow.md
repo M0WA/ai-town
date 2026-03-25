@@ -965,3 +965,84 @@ or `develop`. Does NOT run on pull requests. Does NOT block `all-checks-pass`.
 
 `package-windows` and `package-linux-deb` are NOT in `all-checks-pass` `needs:`. Packaging
 failures must not block PR merges — investigate before cutting a release.
+
+## `bump-version` Job
+
+Calculates the next patch version from git history, updates `CMakeLists.txt`, commits, and pushes the version tag on every push to `main`.
+
+- **Trigger**: `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`
+- **Runner**: `ubuntu-latest`
+- **Timeout**: `timeout-minutes: 5`
+- **Permissions**: `contents: write` (required to push commit and tag)
+
+### Step sequence
+
+1. Checkout with `fetch-depth: 0` (full history required for `git describe`)
+2. Calculate next version and write back to repo:
+
+   ```bash
+   CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo 'v0.0.0')
+   IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT#v}"
+   PATCH=$((PATCH + 1))
+   NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+   sed -i "s/project(aitown VERSION [0-9.]*)/project(aitown VERSION ${NEW_VERSION})/" CMakeLists.txt
+   git config user.name  "github-actions[bot]"
+   git config user.email "github-actions[bot]@users.noreply.github.com"
+   git add CMakeLists.txt
+   git commit -m "chore: bump version to v${NEW_VERSION} [skip ci]"
+   git tag "v${NEW_VERSION}"
+   git push --follow-tags
+   echo "AITOWN_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
+   ```
+
+   The `[skip ci]` token in the commit message prevents the push from re-triggering the workflow. The tag is pushed atomically with the commit via `--follow-tags`.
+
+### Versioning contract
+
+- Versions use semantic versioning `MAJOR.MINOR.PATCH`. Only the patch component is auto-incremented by the pipeline.
+- To increment MAJOR or MINOR, manually update `CMakeLists.txt` before merging to `main` (the pipeline will then increment patch from the new base).
+- `CMakeLists.txt` is the canonical source of the current version at any point in time; git tags are the authoritative release markers.
+
+## `release` Job
+
+Creates a GitHub release with attached installer and `.deb` packages after `bump-version` and packaging jobs succeed.
+
+- **Trigger**: `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`
+- **Runner**: `ubuntu-latest`
+- **Timeout**: `timeout-minutes: 10`
+- **Permissions**: `contents: write` (required to create releases and upload release assets)
+- **Dependencies**: `needs: [bump-version, package-windows, package-linux-deb]`
+
+### Step sequence
+
+1. Checkout (reads updated `CMakeLists.txt` committed by `bump-version`)
+2. Read version:
+
+   ```bash
+   VERSION=$(grep -m1 'project(aitown VERSION' CMakeLists.txt \
+     | sed 's/.*VERSION \([0-9.]*\).*/\1/')
+   echo "AITOWN_VERSION=${VERSION}" >> "$GITHUB_ENV"
+   ```
+
+3. `actions/download-artifact` (SHA-pinned) — download `aitown-installer-windows-${{ github.sha }}` into `./release-assets/`
+4. `actions/download-artifact` (SHA-pinned) — download `aitown-deb-debian-bookworm-${{ github.sha }}` into `./release-assets/`
+5. `actions/download-artifact` (SHA-pinned) — download `aitown-deb-debian-trixie-${{ github.sha }}` into `./release-assets/`
+6. `actions/download-artifact` (SHA-pinned) — download `aitown-deb-ubuntu-jammy-${{ github.sha }}` into `./release-assets/`
+7. `actions/download-artifact` (SHA-pinned) — download `aitown-deb-ubuntu-noble-${{ github.sha }}` into `./release-assets/`
+8. Create GitHub release via `softprops/action-gh-release` (SHA-pinned — resolve via `gh release view --repo softprops/action-gh-release --json tagName,targetCommitish` at implementation time):
+
+   ```yaml
+   - name: Create GitHub release
+     uses: softprops/action-gh-release@<40-CHAR-SHA>  # resolve at implementation time
+     with:
+       tag_name: v${{ env.AITOWN_VERSION }}
+       name: "AI Town v${{ env.AITOWN_VERSION }}"
+       fail_on_unmatched_files: true
+       files: release-assets/**
+   ```
+
+   `fail_on_unmatched_files: true` fails the job rather than silently publishing an incomplete release when a package artifact is missing.
+
+### Gate status
+
+`bump-version` and `release` are NOT in `all-checks-pass` `needs:`. Failures in these jobs must not block PR merges — investigate before the next merge to `main`.
