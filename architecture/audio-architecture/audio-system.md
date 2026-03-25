@@ -291,13 +291,19 @@ public:
 ```cpp
 class AudioSystem : public IAudioSystem {
 public:
-    explicit AudioSystem(IClock* clock);   // alcOpenDevice + alcCreateContext (with HRTF attrs).
+    explicit AudioSystem(irr::ILogger* logger = nullptr, IClock* clock);
+                                  // alcOpenDevice + alcCreateContext (with HRTF attrs).
                                   // alcOpenDevice failure: logs warning, sets m_deviceLost=true, returns early
                                   // (silent mode — all IAudioSystem calls become no-ops). Does NOT throw.
                                   // alcCreateContext / alcMakeContextCurrent / ALC_EXT_thread_local_context
                                   // failures still throw std::runtime_error.
-                                  // clock: injectable for deterministic timing in tests (crossfade duck timer,
-                                  // m_lastDuckWakeTime). Production passes WallClock; tests pass ManualClock.
+                                  // logger: non-owning pointer to Irrlicht logger; may be nullptr (null-guard
+                                  // applied before each log call); see Logging Policy in irrlicht-device-lifecycle.md.
+                                  // In tests, nullptr may be passed for logger — AudioSystem must not crash when
+                                  // logger is null.
+                                  // clock: non-owning pointer to IClock; injectable for deterministic timing in
+                                  // tests (crossfade duck timer, m_lastDuckWakeTime). Production passes WallClock;
+                                  // tests pass ManualClock.
     ~AudioSystem();  // MUST follow the audio thread shutdown sequence below
     AudioSystem(const AudioSystem&) = delete;
     AudioSystem& operator=(const AudioSystem&) = delete;
@@ -377,6 +383,7 @@ private:
     std::atomic<float>        m_musicDuckGain{1.0f};
     float                     m_duckTimer{0.0f};    // seconds elapsed in current duck phase (audio thread only)
     float                     m_duckStartGain{1.0f}; // gain at transition INTO DUCKING state; enables correct ramp from current gain (not 1.0) on RELEASING→DUCKING re-entry (audio thread only)
+    irr::ILogger*             m_logger{nullptr};         // non-owning pointer to Irrlicht logger; may be nullptr (null-guarded before use); see Logging Policy in irrlicht-device-lifecycle.md
     IClock*                   m_clock{nullptr};         // injectable clock for deterministic timing (crossfade duck timer, m_lastDuckWakeTime);
                                                        // production: WallClock; tests: ManualClock
     double                    m_lastDuckWakeTime{0.0}; // wall-clock timestamp (seconds) of the previous audio thread wake;
@@ -402,6 +409,10 @@ private:
     // Game-over fade state (post-V1, Scenario mode only):
     bool                      m_gameOverFade{false};    // set to true by setGameOverState(); triggers 2 s stem fade on audio thread
     float                     m_gameOverFadeT{0.0f};   // seconds elapsed in game-over fade (0.0→2.0); advanced by audio thread dt each wake; used to compute per-stem gain during fade
+    // Logging helpers — null-guard m_logger before each call:
+    void logWarning(const std::string& msg);
+    void logError(const std::string& msg);
+    void logInfo(const std::string& msg);
 };
 ```
 
@@ -469,7 +480,7 @@ The audio thread then **additionally** calls `alcSetThreadContext(m_context)` vi
 
 **What "no fallback" means in practice**: Phase 7 MUST NOT introduce a code path where `alcSetThreadContext` is absent and the audio thread instead relies on the process-wide `alcMakeContextCurrent` binding established in Step 1 to make its AL calls. That specific fallback is the prohibited pattern — it is not safe when the main thread also makes AL calls. The Step 1 `alcMakeContextCurrent` call itself is never the fallback; it is a separate, permanent, unconditional requirement.
 
-**Constructor sequence (within `AudioSystem::AudioSystem(IClock*)`):**
+**Constructor sequence (within `AudioSystem::AudioSystem(irr::ILogger*, IClock*)`):**
 
 ```cpp
 // Step 1: open device and create context.

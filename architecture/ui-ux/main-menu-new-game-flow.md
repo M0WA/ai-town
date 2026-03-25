@@ -8,6 +8,7 @@
   - Mode: Sandbox (V1 only; Scenario grayed out with "Post-launch" label)
   - Difficulty: Easy ($1M start) / Normal ($500K start) / Hard ($200K start) — radio buttons
   - Options: Disaster toggle (checkbox, default off for Easy/Normal, forced off in V1 — post-V1 scope)
+  - Map size: **Small** (128×128 tiles) / **Medium** (512×512 tiles — default) / **Large** (1024×1024 tiles) — radio buttons. Mutually exclusive. Medium is the default selection. All three options are enabled in V1.
   - Map seed: text input (default: random); "Randomize" button generates a new random seed
   - **Start City** button: validates seed, generates terrain (shows loading spinner), then enters gameplay
   - **Back button** (bottom-left of screen): returns to Main Menu with no confirmation dialog (no simulation state has been created yet). **Escape key** in the New Game screen (and all other pre-gameplay screens) is mapped to this Back action, navigating to the Main Menu. This Escape mapping applies only to pre-gameplay screens; during gameplay Escape opens the Pause Menu as defined in the Hotkey Scheme.
@@ -16,7 +17,7 @@
 - **Quit to Main Menu**: Available in Pause Menu. Performs unsaved-changes check (see Save System). On confirm, destroys simulation state, returns to Main Menu.
 - **Difficulty is set at New Game creation only**. The Settings > Gameplay tab displays difficulty as read-only information during play (see `settings-pause-menu.md — Gameplay tab`). Players cannot change difficulty mid-game.
 - **Keyboard navigation — Main Menu**: All four buttons (New Game, Load Game, Settings, Quit) are Tab-navigable in document order (top to bottom). Default keyboard focus on launch: "New Game" button. Arrow Up/Down also navigate between buttons. Enter activates the focused button. Load Game when grayed out (no saves or corrupted saves) is skipped in the Tab order. Visual focus ring: 2 px accent-color border (matching modal dialog focus ring spec).
-- **Keyboard navigation — New Game screen**: Tab order follows document flow: Mode selector → Difficulty radio buttons → Disaster checkbox → Map seed field → Randomize button → Start City button → Back button. Arrow keys cycle within radio button groups (Difficulty: Easy/Normal/Hard). Enter activates buttons. Grayed-out controls (Scenario mode, Disaster toggle in V1) are skipped in Tab order. Escape on the New Game screen is equivalent to clicking Back (same as all pre-gameplay screens per the Escape key spec above).
+- **Keyboard navigation — New Game screen**: Tab order follows document flow: Mode selector → Difficulty radio buttons → Map size radio buttons → Disaster checkbox → Map seed field → Randomize button → Start City button → Back button. Arrow keys cycle within radio button groups (Difficulty: Easy/Normal/Hard; Map size: Small/Medium/Large). Enter activates buttons. Grayed-out controls (Scenario mode, Disaster toggle in V1) are skipped in Tab order. Escape on the New Game screen is equivalent to clicking Back (same as all pre-gameplay screens per the Escape key spec above).
 
 ## MainMenuPanel → UIManager Communication
 
