@@ -291,19 +291,22 @@ public:
 ```cpp
 class AudioSystem : public IAudioSystem {
 public:
-    explicit AudioSystem(irr::ILogger* logger = nullptr, IClock* clock);
+    explicit AudioSystem(irr::ILogger* logger, IClock* clock, IAlcFunctions* alcFunctions = nullptr);
                                   // alcOpenDevice + alcCreateContext (with HRTF attrs).
                                   // alcOpenDevice failure: logs warning, sets m_deviceLost=true, returns early
                                   // (silent mode — all IAudioSystem calls become no-ops). Does NOT throw.
                                   // alcCreateContext / alcMakeContextCurrent / ALC_EXT_thread_local_context
                                   // failures still throw std::runtime_error.
-                                  // logger: non-owning pointer to Irrlicht logger; may be nullptr (null-guard
-                                  // applied before each log call); see Logging Policy in irrlicht-device-lifecycle.md.
-                                  // In tests, nullptr may be passed for logger — AudioSystem must not crash when
-                                  // logger is null.
+                                  // logger: non-owning pointer to irr::ILogger; must be passed explicitly
+                                  // (null-guarded in logWarning/logError/logInfo). Production passes
+                                  // device->getLogger(); tests pass nullptr (silences log output without crashing).
                                   // clock: non-owning pointer to IClock; injectable for deterministic timing in
                                   // tests (crossfade duck timer, m_lastDuckWakeTime). Production passes WallClock;
                                   // tests pass ManualClock.
+                                  // alcFunctions: non-owning pointer to IAlcFunctions; injectable for testing
+                                  // thread-local context availability without requiring a real AL device.
+                                  // Production passes nullptr (defaults to real AL calls via DefaultAlcFunctions);
+                                  // tests may pass a mock implementation.
     ~AudioSystem();  // MUST follow the audio thread shutdown sequence below
     AudioSystem(const AudioSystem&) = delete;
     AudioSystem& operator=(const AudioSystem&) = delete;
@@ -326,7 +329,7 @@ private:
     ALCcontext*               m_context{nullptr};
     std::atomic<bool>         m_stopThread{false};
     std::thread               m_audioThread;
-    std::mutex                m_streamMutex;       // Crossfade command queue mutex — see "Two-Mutex Design" section below
+    std::mutex                m_streamMutex;       // Crossfade command queue mutex — see "Thread-Safety Design" section below
     std::mutex                m_occlusionMutex;   // Protects EFX filter writes in onSourceRecycled() and updateOcclusion() — see audio-occlusion.md
     std::condition_variable   m_streamCV;
     // Audio thread init synchronization (constructor waits on m_initCV before returning):
@@ -384,6 +387,7 @@ private:
     float                     m_duckTimer{0.0f};    // seconds elapsed in current duck phase (audio thread only)
     float                     m_duckStartGain{1.0f}; // gain at transition INTO DUCKING state; enables correct ramp from current gain (not 1.0) on RELEASING→DUCKING re-entry (audio thread only)
     irr::ILogger*             m_logger{nullptr};         // non-owning pointer to Irrlicht logger; may be nullptr (null-guarded before use); see Logging Policy in irrlicht-device-lifecycle.md
+    std::mutex                m_logMutex;               // serializes m_logger->log() calls from any thread; see logWarning/logError/logInfo thread-safety note
     IClock*                   m_clock{nullptr};         // injectable clock for deterministic timing (crossfade duck timer, m_lastDuckWakeTime);
                                                        // production: WallClock; tests: ManualClock
     double                    m_lastDuckWakeTime{0.0}; // wall-clock timestamp (seconds) of the previous audio thread wake;
@@ -410,6 +414,11 @@ private:
     bool                      m_gameOverFade{false};    // set to true by setGameOverState(); triggers 2 s stem fade on audio thread
     float                     m_gameOverFadeT{0.0f};   // seconds elapsed in game-over fade (0.0→2.0); advanced by audio thread dt each wake; used to compute per-stem gain during fade
     // Logging helpers — null-guard m_logger before each call:
+    // Thread-safety: These methods may be called from the audio thread.
+    // All three MUST serialize the m_logger->log() call using m_logMutex
+    // (std::mutex member, see private section) per the Logging Policy
+    // thread-safety contract in irrlicht-device-lifecycle.md.
+    // Pattern: if (m_logger) { std::lock_guard<std::mutex> lk(m_logMutex); m_logger->log(...); }
     void logWarning(const std::string& msg);
     void logError(const std::string& msg);
     void logInfo(const std::string& msg);
@@ -480,7 +489,7 @@ The audio thread then **additionally** calls `alcSetThreadContext(m_context)` vi
 
 **What "no fallback" means in practice**: Phase 7 MUST NOT introduce a code path where `alcSetThreadContext` is absent and the audio thread instead relies on the process-wide `alcMakeContextCurrent` binding established in Step 1 to make its AL calls. That specific fallback is the prohibited pattern — it is not safe when the main thread also makes AL calls. The Step 1 `alcMakeContextCurrent` call itself is never the fallback; it is a separate, permanent, unconditional requirement.
 
-**Constructor sequence (within `AudioSystem::AudioSystem(irr::ILogger*, IClock*)`):**
+**Constructor sequence (within `AudioSystem::AudioSystem(irr::ILogger*, IClock*, IAlcFunctions*)`):**
 
 ```cpp
 // Step 1: open device and create context.
@@ -588,13 +597,13 @@ m_audioThread = std::thread(&AudioSystem::audioThreadFunc, this);
 
 ---
 
-## Two-Mutex Design
+## Thread-Safety Design (Three-Mutex Model)
 
-`AudioSystem` uses exactly two mutexes for its thread-safety model. This design is intentional and complete for V1.
+`AudioSystem` uses two primary operational mutexes plus one logging utility mutex for its thread-safety model. This design is intentional and complete for V1.
 
 ### `m_streamMutex` — Crossfade Command Queue Mutex
 
-`m_streamMutex` is the **crossfade command queue mutex**. It protects the queue of pending crossfade commands that the main thread enqueues and the audio thread dequeues. This is the ONLY mutex used for crossfade coordination — there is no separate crossfade mutex. Phase 7 MUST NOT introduce a third mutex for crossfade commands; use `m_streamMutex` exclusively. The two-mutex design (`m_streamMutex` for stream/crossfade commands, `m_occlusionMutex` for per-source GAINHF writes) is intentional and complete for V1.
+`m_streamMutex` is the **crossfade command queue mutex**. It protects the queue of pending crossfade commands that the main thread enqueues and the audio thread dequeues. This is the ONLY mutex used for crossfade coordination — there is no separate crossfade mutex. Phase 7 MUST NOT introduce an additional mutex for crossfade commands; use `m_streamMutex` exclusively. The primary operational mutex pair (`m_streamMutex` for stream/crossfade commands, `m_occlusionMutex` for per-source GAINHF writes) is intentional and complete for V1.
 
 `m_streamCV` is paired with `m_streamMutex` and is used to wake the audio thread when new crossfade or stream commands are enqueued.
 
@@ -602,15 +611,21 @@ m_audioThread = std::thread(&AudioSystem::audioThreadFunc, this);
 
 `m_occlusionMutex` protects EFX lowpass filter parameter writes (`alFilterf` calls that set `AL_LOWPASS_GAINHF`) in `onSourceRecycled()` and `updateOcclusion()`. It is separate from `m_streamMutex` to avoid blocking crossfade command delivery while occlusion updates are in progress. See `audio-occlusion.md` for the full occlusion filter protocol.
 
+### `m_logMutex` — Logging Utility Mutex
+
+`m_logMutex` (`std::mutex`) serializes `irr::ILogger::log()` calls issued from both the audio thread and the main thread. It is held solely for the duration of individual log calls (non-blocking, infrequent) and does not participate in crossfade command coordination or EFX filter write coordination.
+
+**Disjoint-use constraint**: `logWarning()`, `logError()`, and `logInfo()` MUST NOT be called from within any scope that holds `m_streamMutex` or `m_occlusionMutex`. If an error must be logged after detecting a problem inside a locked section, copy the error description to a local string, release the lock, then call the logging helper. This constraint eliminates the circular-wait risk between `m_logMutex` and the two operational mutexes — they are never held simultaneously by any thread.
+
 ### Prohibited Additions
 
-Do NOT add a third mutex for any V1 audio subsystem. Specifically:
+Do NOT add further mutexes beyond the three documented above (`m_streamMutex`, `m_occlusionMutex`, `m_logMutex`) for any V1 audio subsystem. Specifically:
 
 - No separate `m_crossfadeMutex` — crossfade commands use `m_streamMutex`.
 - No separate `m_duckMutex` — music duck state uses `std::atomic<DuckState> m_duckState` and `std::atomic<float> m_musicDuckGain` (lock-free).
 - No separate `m_stingerMutex` — stinger commands are enqueued through `m_streamMutex` along with crossfade commands.
 
-The `m_initMutex` / `m_initCV` pair is a construction-time synchronization mechanism only. It is not a runtime operational mutex and does not count against the two-mutex runtime design. It is unused after `AudioSystem` construction completes.
+The `m_initMutex` / `m_initCV` pair is a construction-time synchronization mechanism only. It is not a runtime operational mutex and does not count against the three-mutex runtime design. It is unused after `AudioSystem` construction completes.
 
 ---
 
