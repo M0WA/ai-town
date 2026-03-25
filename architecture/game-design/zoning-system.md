@@ -157,13 +157,17 @@ that demand is sufficient to warrant construction on that tile:
 - No 3D building mesh is placed at placement time.
 - The tile contributes `population = 0` and no tax revenue while `underConstruction = true`.
 
-**Demand gate**: in `populationTick()`, after computing `effective_demand_factor` for the tile,
-if `effective_demand_factor >= SimulationConstants::density_upgrade_wave_demand_threshold`
+**Demand gate**: in `populationTick()`, after computing `effective_demand_factor(zone, tick)`
+for the tile's zone type (R, C, or I — each uses its own per-zone-type demand factor as defined
+in the Demand curves section above), if
+`effective_demand_factor >= SimulationConstants::density_upgrade_wave_demand_threshold`
 (0.50) **and** the tile has `underConstruction = true`, clear the flag and call
 `m_renderer->placeBuildingMesh()`. If demand is below the threshold the tile stays as an empty
-lot and is re-evaluated each subsequent tick. This ensures buildings only appear when there is
-genuine need for them, consistent with the "engine auto-populates buildings based on demand and
-desirability scores" rule above.
+lot and is re-evaluated each subsequent tick. This applies equally to Residential, Commercial,
+and Industrial zones — all three zone types gate building construction on their respective
+zone-type demand factor. This ensures buildings only appear when there is genuine need for them,
+consistent with the "engine auto-populates buildings based on demand and desirability scores"
+rule above.
 
 `underConstruction` is tracked as a per-tile boolean field in `CitySimulation` and must be
 serialised in the save-file tile struct so that in-progress construction survives save/load

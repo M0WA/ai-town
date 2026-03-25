@@ -889,9 +889,9 @@ canonical palette (`architecture/ui-ux/resolution-ui-scaling.md`) spans all five
 - **80%** — zone/utilities sub-panels: `architecture/ui-ux/hud-layout.md`
 - **82%** — left toolbar, minimap legend, normal toast: `architecture/ui-ux/hud-layout.md`,
   `architecture/ui-ux/minimap.md`, `architecture/ui-ux/notification-system.md`
-- **85%** — inspector, minimap map bg, tax rate, budget detail:
+- **85%** — inspector, minimap map bg, finances panel:
   `architecture/ui-ux/query-inspector-panel.md`, `architecture/ui-ux/minimap.md`,
-  `architecture/ui-ux/tax-rate-panel.md`, `architecture/ui-ux/hud-layout.md`
+  `architecture/ui-ux/finances-panel.md`, `architecture/ui-ux/hud-layout.md`
 - **88%** — resource bar, modal, CRITICAL toast: `architecture/ui-ux/hud-layout.md`,
   `architecture/ui-ux/modal-dialog-system.md`, `architecture/ui-ux/notification-system.md`
 
