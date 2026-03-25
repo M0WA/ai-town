@@ -602,6 +602,8 @@ const float postY = m_terrain ? targetH : 0.0f;
 node->setPosition(... postY + 0.10f ...);
 ```
 
+**Note**: The example above shows Low-density (1×1) building placement. For buildings with multi-tile footprints (Medium: N=2, High: N=3, Service: N=2), the caller must iterate the full N×N grid and call `setTileHeight()` for every corner vertex of the footprint. See `architecture/game-design/terrain-interaction.md` — *Multi-tile footprint extension* — for the loop pattern.
+
 **Critical invariant**: `postY` must be `targetH`, not `getHeightAt(tileX, tileZ)` after
 the four corner writes. The neighbour blending from each subsequent `setTileHeight()` call
 bleeds back into the `(tileX, tileZ)` vertex, leaving it below `targetH` when all 4 calls
@@ -673,6 +675,37 @@ to assert that a `setTileHeight()` call enqueues at least one (or two, for a chu
 tile) rebuild requests. It is declared `public` on `TerrainSystem` solely to avoid
 requiring `friend` declarations or subclass seams in tests. Do not call from any non-test
 code path.
+
+## Map Size Presets
+
+Three named presets map the New Game screen selection to `mapTilesX`/`mapTilesZ` values passed to `TerrainSystem::generate()`. All maps are square (`mapTilesX == mapTilesZ`).
+
+| Preset | `mapTilesX` / `mapTilesZ` | Approx. world size (at 10 m/tile) |
+|---|---|---|
+| `kSmall` | 128 | 1 280 m × 1 280 m |
+| `kMedium` | 512 | 5 120 m × 5 120 m |
+| `kLarge` | 1024 | 10 240 m × 10 240 m |
+
+`TerrainSystem::generate()` already accepts arbitrary `mapTilesX`/`mapTilesZ` — the presets are UI-facing aliases, not internal constants in `TerrainSystem`. They are defined in `MainMenuPanel.h` as `enum class MapSize { kSmall = 128, kMedium = 512, kLarge = 1024 }`.
+
+### getPendingRebuildIds() Test API
+
+```cpp
+// Returns the deduplicated set of chunk IDs currently queued for rebuild.
+// Exposed for unit testing only — do NOT call in production rendering paths.
+// Duplicates are removed in the returned vector; order is unspecified.
+std::vector<uint64_t> getPendingRebuildIds() const;
+```
+
+This method is used by tests that must verify **which specific chunk IDs** are enqueued
+for rebuild — for example,
+`TerrainSystem_SetTileHeight_AtChunkBoundary_BothChunksEnqueued` (phase-11l Deliverable 1)
+asserts that both the `(0,0)` and `(1,0)` chunk IDs appear after a boundary tile write.
+`pendingRebuildCount()` cannot distinguish this case because it returns only a raw count
+and may include duplicates. `getPendingRebuildIds()` returns each chunk ID at most once,
+regardless of how many times that chunk was enqueued. It is declared `public` on
+`TerrainSystem` solely to avoid requiring `friend` declarations or subclass seams in
+tests. Do not call from any non-test code path.
 
 ### Rebuild Budget Interaction
 

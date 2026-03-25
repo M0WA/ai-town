@@ -407,12 +407,12 @@ fallback is not generated at runtime.
 
 ### Warning Log
 
-When the fallback path is taken, log a `WARNING` to stderr before the load:
+When the fallback path is taken, log a `WARNING` via the Irrlicht logger before the load:
 
 ```cpp
-std::fprintf(stderr,
-    "WARNING: GL_MAX_TEXTURE_SIZE < 4096; "
-    "loading fallback atlas buildings_atlas_d_2k.dds\n");
+device->getLogger()->log(
+    "GL_MAX_TEXTURE_SIZE < 4096; loading fallback atlas buildings_atlas_d_2k.dds",
+    irr::ELL_WARNING);
 ```
 
 ### Naming Convention
@@ -474,6 +474,27 @@ VERIFIED by binary analysis of `CMeshSceneNode.cpp.o` extracted from `libIrrlich
 `setMesh()` calls `grab()` on the new mesh and `drop()` on the old mesh.
 Caller MUST call `->drop()` on `newLODMesh` after `setMesh()`. See `scene-graph-ownership.md`.
 Phase 5 TerrainChunk work is UNBLOCKED.
+
+## Logging Policy
+
+All diagnostic output in game runtime code MUST route through `irr::ILogger*` obtained from `m_device->getLogger()`. Pass the logger to subsystems as a non-owning pointer at construction time.
+
+```cpp
+irr::ILogger* logger = device->getLogger();
+logger->log("message", irr::ELL_INFORMATION);  // progress / status
+logger->log("message", irr::ELL_WARNING);       // recoverable issues
+logger->log("message", irr::ELL_ERROR);         // failures
+```
+
+**Prohibited in runtime code**: `fprintf(stderr,...)`, `printf(...)`, `std::cerr`, `std::cout` for diagnostic output.
+
+**Exemptions**:
+
+- `src/benchmark/benchmark_main.cpp` — CLI tool; intentional stdout result output.
+- Pre-device fatal errors in `main.cpp` before the device is created.
+- `std::snprintf` / `fprintf(file,...)` — string formatting and named-file I/O (not terminal output).
+
+**Null-safety contract**: All logger call sites MUST guard with `if (m_logger)`. Tests that construct subsystems without a device may pass `nullptr`; the guard silences the call rather than crashing.
 
 ## Test Guard — `shader_loading_test` Skip vs. Fail
 

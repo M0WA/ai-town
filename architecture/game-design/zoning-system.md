@@ -160,7 +160,7 @@ that demand is sufficient to warrant construction on that tile:
 **Demand gate**: in `populationTick()`, after computing `effective_demand_factor(zone, tick)`
 for the tile's zone type (R, C, or I — each uses its own per-zone-type demand factor as defined
 in the Demand curves section above), if
-`effective_demand_factor >= SimulationConstants::density_upgrade_wave_demand_threshold`
+`effective_demand_factor >= SimulationConstants::construction_delay_demand_threshold`
 (0.50) **and** the tile has `underConstruction = true`, clear the flag and call
 `m_renderer->placeBuildingMesh()`. If demand is below the threshold the tile stays as an empty
 lot and is re-evaluated each subsequent tick. This applies equally to Residential, Commercial,
