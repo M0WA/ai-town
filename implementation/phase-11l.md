@@ -12,8 +12,11 @@ Five targeted bug fixes and UI improvements identified during visual QA:
    neighboring chunks that share the same boundary vertex.
 
 2. **Immediate building construction** — Zone buildings spawn in the same frame the player
-   places a zone tile. Buildings should appear only after the first demand evaluation tick,
-   giving the player a visible empty-lot for one tick before construction.
+   places a zone tile. Buildings should only appear once the tile's zone-type demand is
+   sufficient (`effective_demand_factor(zone, tick) >= 0.50`, using the per-zone-type demand
+   factor for R, C, or I), evaluated each `populationTick()`. This applies to all three zone
+   types. The empty-lot persists until demand is met — which may take many ticks if demand is
+   low, or resolve after the first tick if demand is already high.
 
 3. **Ground plate / terrain intersection** — Zone building ground plates intersect the
    terrain surface on multi-tile footprints (2×2 Medium, 3×3 High density). Root cause:
@@ -131,8 +134,12 @@ sub-section, already written):
   if (tile.isZoned && tile.underConstruction
       && effective_demand_factor >= SimulationConstants::density_upgrade_wave_demand_threshold) {
       tile.underConstruction = false;
-      m_renderer->placeBuildingMesh(tileX, tileZ, tile.zoneType, tile.density,
-                                    tile.variantIndex);
+      std::string baseName = zoneAssetBaseName(tile.zoneType, tile.density);
+      if (baseName.size() >= 2) {
+          baseName[baseName.size() - 2] = '0';
+          baseName[baseName.size() - 1] = static_cast<char>('0' + tile.variantIndex);
+      }
+      m_renderer->placeBuildingMesh(tileX, tileZ, baseName);
   }
   ```
 
@@ -143,7 +150,7 @@ sub-section, already written):
 
 **Test** (`tests/simulation/simulation_tests.cpp`):
 
-**Mock injection**: Tests inject `NiceMock<MockRenderer>` as the `IRenderer*` parameter to `CitySimulation`. For `ZoningSystem_PlaceZone_NoBuildingMeshAtPlacement`: use `EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _, _, _)).Times(0)`. For `ZoningSystem_PlaceZone_BuildingMeshSpawnsWhenDemandSufficient`: configure demand to return ≥ 0.50 and use `EXPECT_CALL(...).Times(1)`.
+**Mock injection**: Tests inject `NiceMock<MockRenderer>` as the `IRenderer*` parameter to `CitySimulation`. For `ZoningSystem_PlaceZone_NoBuildingMeshAtPlacement`: use `EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(0)`. For `ZoningSystem_PlaceZone_BuildingMeshSpawnsWhenDemandSufficient`: configure demand to return ≥ 0.50 and use `EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(1)`. The three arguments are `(int tileX, int tileZ, const std::string& assetBaseName)` per `IRenderer::placeBuildingMesh`; use `testing::_` matchers to match any baseName.
 
 - [ ] `ZoningSystem_PlaceZone_NoBuildingMeshAtPlacement`: mock renderer,
   place zone, assert `placeBuildingMesh` **not** called in `placeZone`.
@@ -226,7 +233,7 @@ GPU is required; the EDT_NULL device suffices.  (The Deliverable 1 terrain stitc
 `TerrainSystem_SetTileHeight_AtChunkBoundary_*` remain in
 `tests/terrain/terrain_tests.cpp` with CMake label `unit` — no change needed there.)
 
-**ManualTerrainQuery**: Defined in `tests/simulation/ManualTerrainQuery.h` per testability-architecture.md. Configure non-uniform heights via `setHeightAt(x, z, h)`. Records all `setTileHeight()` calls in `m_flattened` (vector of `{x, z, h}` tuples). Assert that all expected vertices appear in `m_flattened` with the same `targetH` value.
+**ManualTerrainQuery**: Defined in `tests/simulation/ManualTerrainQuery.h` per testability-architecture.md. Configure non-uniform heights via `setHeightAt(x, z, h)` (Phase 11l extension). Records all `setTileHeight()` calls in `m_flattenCalls` (vector of `{x, z, h}` tuples, Phase 11l extension — see testability-architecture.md). Assert that all expected vertices appear in `m_flattenCalls` with the same `targetH` value.
 
 - [ ] `IrrlichtRenderer_PlaceMediumBuilding_AllCornerVerticesFlattened`:
   Using `ManualTerrainQuery` with non-uniform heights, place a 2×2 building at
@@ -322,6 +329,14 @@ Tax Rate Panel was (T key or resource-bar click).
   field (old Budget Detail Panel trigger), assert no panel opens.
 - [ ] `FinancesPanel_TaxRate_PlusButton_IncreasesRate`: click +1% on R row,
   assert `ICitySimulation::setTaxRate(ZoneType::Residential, oldRate + 1)` called.
+- [ ] `FinancesPanel_Open_FiresUIMenuOpenSound`: open the Finances Panel; assert
+  `MockAudioSystem::playSound(UI_MENU_OPEN, SoundPriority::HIGH, 1.0f)` called
+  exactly once.  Use `EXPECT_CALL(audio_, playSound(UI_MENU_OPEN,
+  SoundPriority::HIGH, 1.0f)).Times(1)` before triggering the open action.
+- [ ] `FinancesPanel_Close_FiresUIMenuCloseSound`: open then close the Finances
+  Panel; assert `playSound(UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f)` called
+  exactly once.  Use `EXPECT_CALL(audio_, playSound(UI_MENU_CLOSE,
+  SoundPriority::HIGH, 1.0f)).Times(1)` before triggering the close action.
 - [ ] Existing `TaxRatePanel` and `BudgetDetailPanel` test fixtures removed or
   replaced with `FinancesPanel` equivalents.
 
