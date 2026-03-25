@@ -1250,6 +1250,47 @@ the audio playback path, not a unit test with strict call-count expectations on 
   same commit. Step 2 (`test-dev-cpp` PR): replace the no-op with the stateful form
   described above.
 
+  **Phase 11l extension**: Phase 11l adds per-tile height configuration and per-call
+  flatten recording to `ManualTerrainQuery` for the multi-tile footprint tests
+  (`IrrlichtRenderer_PlaceMediumBuilding_AllCornerVerticesFlattened`). The extension adds
+  `setHeightAt()` for non-uniform `getHeightAt()` returns and a `m_flattenCalls` vector
+  that records every `setTileHeight()` invocation with its `{x, z, h}` arguments:
+
+  ```cpp
+  // Phase 11l additions — per-tile height configuration and per-call flatten recording.
+  std::map<int64_t, float>                  m_tileHeights;   // keyed by makeKey(x, z)
+  std::vector<std::tuple<int, int, float>>  m_flattenCalls;  // {x, z, h} per call
+
+  // Set pre-existing height at a specific tile (for getHeightAt() to return).
+  // Overrides the Phase 10b global before/after heights for the given tile.
+  void setHeightAt(int x, int z, float h) {
+      m_tileHeights[makeKey(x, z)] = h;
+  }
+
+  // Phase 11l override — appends {x, z, height} to m_flattenCalls AND sets
+  // m_flattened = true, preserving the Phase 10b contract.
+  void setTileHeight(int tileX, int tileZ, float height) override {
+      m_flattened = true;
+      m_flattenCalls.emplace_back(tileX, tileZ, height);
+  }
+
+  // Phase 11l override — per-tile heights take precedence over Phase 10b globals.
+  float getHeightAt(int tileX, int tileZ) const override {
+      auto it = m_tileHeights.find(makeKey(tileX, tileZ));
+      if (it != m_tileHeights.end()) return it->second;
+      return m_flattened ? m_heightAfterFlat : m_heightBeforeFlat;
+  }
+  ```
+
+  Phase 10b tests are unaffected: they do not call `setHeightAt()`, so `m_tileHeights`
+  remains empty; `m_flattened == true` is still set by `setTileHeight()`; `getHeightAt()`
+  still returns `m_heightAfterFlat` / `m_heightBeforeFlat` for them.
+
+  **Phase 11l flatten assertion pattern**: call `setHeightAt()` to configure non-uniform
+  tile heights, place the building (which calls `setTileHeight()` internally), then assert
+  that `m_flattenCalls` contains all expected `{x, z, targetH}` tuples (order-independent
+  comparison via sorting or `EXPECT_THAT(..., UnorderedElementsAre(...))`).
+
 - **`IAlcFunctions`** — injectable interface for ALC function-pointer lookup, enabling the thread-local context extension check in `AudioSystem` to be intercepted in tests without a real OpenAL device. **Source locations** (post-Phase 10b): `IAlcFunctions.h` in `src/interfaces/` (moved from `src/audio/ialc_functions.h` and renamed in Phase 10b Feature 3); `DefaultAlcFunctions.h`/`DefaultAlcFunctions.cpp` remain in `src/audio/`; `MockAlcFunctions` is defined locally in `tests/audio/audio_thread_test.cpp` (single-use — not a shared header). All test double headers live under `tests/` — never under `src/`.
 
   ```cpp
