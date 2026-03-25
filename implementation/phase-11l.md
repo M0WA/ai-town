@@ -169,6 +169,8 @@ sub-section, already written):
 
 **Mock injection**: Tests inject `StrictMock<MockRenderer>` as the `IRenderer*` parameter to `CitySimulation`. `StrictMock` is required here because `placeBuildingMesh` presence/absence is the primary assertion being made — any unexpected call to `placeBuildingMesh` must be a hard test failure, not silently swallowed. For `ZoningSystem_PlaceZone_NoBuildingMeshAtPlacement`: use `EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(0)`. For `ZoningSystem_PlaceZone_BuildingMeshSpawnsWhenDemandSufficient`: configure demand to return ≥ 0.50 and use `EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(1)`. The three arguments are `(int tileX, int tileZ, const std::string& assetBaseName)` per `IRenderer::placeBuildingMesh`; use `testing::_` matchers to match any baseName.
 
+**Fixture note**: Create a separate fixture class `ZoningConstructionDelayTest` in the same `zoning_test.cpp` file, using `StrictMock<MockRenderer>` as the renderer mock. The existing `ZoningTestNice` fixture (which uses `NiceMock<MockRenderer>`) must NOT be modified — it continues to serve demand/zoning logic tests. The four construction delay tests below all use `ZoningConstructionDelayTest`.
+
 - [ ] `ZoningSystem_PlaceZone_NoBuildingMeshAtPlacement`: mock renderer,
   place zone, assert `placeBuildingMesh` **not** called in `placeZone`.
 - [ ] `ZoningSystem_PlaceZone_BuildingMeshSpawnsWhenDemandSufficient`: place zone,
@@ -252,6 +254,11 @@ GPU is required; the EDT_NULL device suffices.  (The Deliverable 1 terrain stitc
 
 **ManualTerrainQuery**: Defined in `tests/simulation/ManualTerrainQuery.h` per testability-architecture.md. Configure non-uniform heights via `setHeightAt(x, z, h)` (Phase 11l extension). Records all `setTileHeight()` calls in `m_flattenCalls` (vector of `{x, z, h}` tuples, Phase 11l extension — see testability-architecture.md). Assert that all expected vertices appear in `m_flattenCalls` with the same `targetH` value.
 
+- [ ] Register in `CMakeLists.txt`:
+  `target_sources(integration_tests PRIVATE tests/integration/irrlicht_renderer_flatten_test.cpp)`
+  Do NOT call `add_executable` or `aitown_add_tests` again — the `integration_tests` target
+  already exists (Phase 10c+); re-calling either would cause a duplicate-target CMake error.
+  The `integration_tests` target's `LABELS "integration"` property propagates automatically.
 - [ ] Extend `tests/simulation/ManualTerrainQuery.h` (Phase 11l per `testability-architecture.md`): add `std::map<int64_t, float> m_tileHeights`, `std::vector<std::tuple<int,int,float>> m_flattenCalls`, implement `void setHeightAt(int x, int z, float h)`, and update `setTileHeight()` override to append `{x, z, h}` to `m_flattenCalls`
 - [ ] `IrrlichtRenderer_PlaceMediumBuilding_AllCornerVerticesFlattened`:
   Using `ManualTerrainQuery` with non-uniform heights, place a 2×2 building at
@@ -333,7 +340,7 @@ Tax Rate Panel was (T key or resource-bar click).
     following the same pattern as `NotificationManager` in `UIManager.cpp`.)
 - [ ] Update `src/ui/UIManager.cpp` input handler: T key and resource-bar click now
   call `m_hud->toggleFinancesPanel()` (replacing old `toggleTaxPanel()`).
-- [ ] `SFX_UI_MENU_OPEN` / `SFX_UI_MENU_CLOSE` SFX wiring: `FinancesPanel::open()` must fire via `m_audio->playSound(SFX_UI_MENU_OPEN, SoundPriority::HIGH, 1.0f)` and `FinancesPanel::close()` must fire via `m_audio->playSound(SFX_UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f)`. `SoundPriority::HIGH` is required for all UI sounds per `source-pool.md` to ensure access to the transient reserve and prevent audio starvation during heavy traffic. The `FinancesPanel` constructor receives `IAudioSystem*` as a parameter to enable this. This matches the existing floating-panel audio pattern per `hud-layout.md`.
+- [ ] `UI_MENU_OPEN` / `UI_MENU_CLOSE` SFX wiring: `FinancesPanel::open()` must fire via `m_audio->playSound(UI_MENU_OPEN, SoundPriority::HIGH, 1.0f)` and `FinancesPanel::close()` must fire via `m_audio->playSound(UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f)`. `SoundPriority::HIGH` is required for all UI sounds per `source-pool.md` to ensure access to the transient reserve and prevent audio starvation during heavy traffic. The `FinancesPanel` constructor receives `IAudioSystem*` as a parameter to enable this. This matches the existing floating-panel audio pattern per `hud-layout.md`.
 - [ ] Implement key-repeat rate cap: track `int m_holdDelta{0}` (cumulative delta for the
   current hold event) in `FinancesPanel`. In the button hold/repeat handler, before applying
   a ±1% increment, check `std::abs(m_holdDelta) < 5`; if the cap is reached, skip the
@@ -356,7 +363,7 @@ Tax Rate Panel was (T key or resource-bar click).
 
 **Tests** (`tests/ui/finances_panel_test.cpp`):
 
-**Fixture**: `UIManagerFinancesPanelTest` uses `NiceMock<MockUIBackend>`, `NiceMock<MockCitySimulation>`, `NiceMock<MockAudioSystem>`, and `ManualClock`. This is an intentional combined fixture: UIManager instantiates FinancesPanel internally, so both layers share the same mock setup. `UIManager_*` tests exercise UIManager integration behavior; `FinancesPanel_*` tests exercise FinancesPanel behavior visible through that integration. No separate fixture file is required. `NiceMock<MockAudioSystem>` is the approved deviation for this fixture (per testability-architecture.md) — `EXPECT_CALL` assertions still verify that audio calls occur; `NiceMock` only silences failures for calls not covered by an `EXPECT_CALL`.
+**Fixture**: `UIManagerFinancesPanelTest` uses `NiceMock<MockUIBackend>`, `NiceMock<MockCitySimulation>`, `NiceMock<MockAudioSystem>`, and `ManualClock`. This is an intentional combined fixture: UIManager instantiates FinancesPanel internally, so both layers share the same mock setup. `UIManager_*` tests exercise UIManager integration behavior; `FinancesPanel_*` tests exercise FinancesPanel behavior visible through that integration. No separate fixture file is required. `NiceMock<MockAudioSystem>` is the correct choice for this mixed fixture: integration tests like `UIManager_TKey_OpensFinancesPanel` trigger audio calls (FinancesPanel::open() fires `playSound(UI_MENU_OPEN)`) without asserting them, while `FinancesPanel_Open_FiresUIMenuOpenSound` and `FinancesPanel_Close_FiresUIMenuCloseSound` use `EXPECT_CALL` for explicit audio verification. NiceMock silences unexpected calls in integration tests while still enforcing `EXPECT_CALL` assertions in the audio-focused tests.
 
 - [ ] Implement `void TearDown() override { m_uiManager.reset(); }` in `UIManagerFinancesPanelTest` to reset the `UIManager` smart pointer to `nullptr` before mock destruction, consistent with the destructor-path contract in testability-architecture.md.
 - [ ] `UIManager_TKey_OpensFinancesPanel`: press T, assert
@@ -370,12 +377,12 @@ Tax Rate Panel was (T key or resource-bar click).
 - [ ] `FinancesPanel_TaxRate_PlusButton_IncreasesRate`: click +1% on R row,
   assert `ICitySimulation::setTaxRate(ZoneType::Residential, oldRate + 1)` called.
 - [ ] `FinancesPanel_Open_FiresUIMenuOpenSound`: open the Finances Panel; assert
-  `MockAudioSystem::playSound(SFX_UI_MENU_OPEN, SoundPriority::HIGH, 1.0f)` called
-  exactly once.  Use `EXPECT_CALL(audio_, playSound(SFX_UI_MENU_OPEN,
+  `MockAudioSystem::playSound(UI_MENU_OPEN, SoundPriority::HIGH, 1.0f)` called
+  exactly once.  Use `EXPECT_CALL(audio_, playSound(UI_MENU_OPEN,
   SoundPriority::HIGH, 1.0f)).Times(1)` before triggering the open action.
 - [ ] `FinancesPanel_Close_FiresUIMenuCloseSound`: open then close the Finances
-  Panel; assert `playSound(SFX_UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f)` called
-  exactly once.  Use `EXPECT_CALL(audio_, playSound(SFX_UI_MENU_CLOSE,
+  Panel; assert `playSound(UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f)` called
+  exactly once.  Use `EXPECT_CALL(audio_, playSound(UI_MENU_CLOSE,
   SoundPriority::HIGH, 1.0f)).Times(1)` before triggering the close action.
 - [ ] Existing `TaxRatePanel` and `BudgetDetailPanel` test fixtures removed or
   replaced with `FinancesPanel` equivalents.
@@ -739,26 +746,53 @@ Warning Log section):
 
 **Code changes** (`src/audio/AudioSystem.h` / `.cpp`):
 
+- [ ] Add `std::mutex m_logMutex` private member to `AudioSystem` to serialize audio-thread logger calls.
 - [ ] Add `irr::ILogger* m_logger{nullptr}` private member to `AudioSystem`.
-- [ ] Add `irr::ILogger* logger` parameter to the `AudioSystem` constructor (as the **first**
-  parameter, before `IClock* clock`; default `nullptr` for backwards compat in existing test instantiations).
-  Store as `m_logger = logger`.
+- [ ] Add `irr::ILogger* logger` parameter to the `AudioSystem` constructor as the **first**
+  parameter, before `IClock* clock`. The parameter is **required** — it has no default. Pass
+  `nullptr` in tests (silences log output without crashing) and `device->getLogger()` in production.
+  The `IAlcFunctions* alcFunctions = nullptr` third parameter is **retained** — do NOT remove it.
+  The complete new signature is:
+
+  ```cpp
+  explicit AudioSystem(irr::ILogger* logger, IClock* clock, IAlcFunctions* alcFunctions = nullptr);
+  ```
+
+  All existing test call sites MUST update to pass logger explicitly: `AudioSystem(nullptr, clock_ptr)`.
+  The call in `tests/audio/audio_thread_test.cpp` that passes `(&m_clock, &m_mockAlc)` MUST update to
+  `(nullptr, &m_clock, &m_mockAlc)`.
+  Store logger as `m_logger = logger`.
 - [ ] In `logWarning()`, `logError()`, `logInfo()`: replace `std::cerr` with:
 
   ```cpp
   void AudioSystem::logWarning(const std::string& msg) {
-      if (m_logger) m_logger->log(msg.c_str(), irr::ELL_WARNING);
+      if (m_logger) {
+          std::lock_guard<std::mutex> lk(m_logMutex);
+          m_logger->log(msg.c_str(), irr::ELL_WARNING);
+      }
   }
   void AudioSystem::logError(const std::string& msg) {
-      if (m_logger) m_logger->log(msg.c_str(), irr::ELL_ERROR);
+      if (m_logger) {
+          std::lock_guard<std::mutex> lk(m_logMutex);
+          m_logger->log(msg.c_str(), irr::ELL_ERROR);
+      }
   }
   void AudioSystem::logInfo(const std::string& msg) {
-      if (m_logger) m_logger->log(msg.c_str(), irr::ELL_INFORMATION);
+      if (m_logger) {
+          std::lock_guard<std::mutex> lk(m_logMutex);
+          m_logger->log(msg.c_str(), irr::ELL_INFORMATION);
+      }
   }
   ```
 
 - [ ] Update `main.cpp` / wherever `AudioSystem` is constructed: pass
   `device->getLogger()` as the **first** argument (before `IClock*`).
+- [ ] Update all existing `AudioSystem` test instantiations: replace `AudioSystem(clock_ptr)`
+  with `AudioSystem(nullptr, clock_ptr)` in every test file under `tests/` that constructs
+  `AudioSystem` directly (search for `AudioSystem(` and audit each call site).
+- [ ] `tests/audio/audio_thread_test.cpp`: update `AudioSystem(&m_clock, &m_mockAlc)`
+  → `AudioSystem(nullptr, &m_clock, &m_mockAlc)` (IAlcFunctions injection call, NOT a clock-only
+  call).
 
 **Code changes** (`src/ui/key_bindings.h`):
 
@@ -772,9 +806,10 @@ Warning Log section):
 - [ ] Update all call sites of `KeyBindings::load()` to pass `device->getLogger()`.
 
 **No new unit tests** — the behaviour of `logWarning`/`logError`/`logInfo` and
-`KeyBindings::load()` is unchanged; only the output channel changes. Existing tests that
-construct `AudioSystem` with `nullptr` as the logger continue to compile and run without
-modification (the null guard silences the log call rather than crashing).
+`KeyBindings::load()` is unchanged; only the output channel changes. Existing test call sites
+that construct `AudioSystem(clock_ptr)` MUST be updated to `AudioSystem(nullptr, clock_ptr)` —
+`irr::ILogger*` is the new required first parameter. Pass `nullptr` in tests. The null guard on
+`m_logger` silences log calls (rather than crashing) when `nullptr` is passed.
 
 ---
 
@@ -794,7 +829,7 @@ modification (the null guard silences the log call rather than crashing).
 | `architecture/ci-cd/github-actions-workflow.md` | Add `## release Job` section; update versioning to CI-calculated patch-increment |
 | `architecture/ci-cd/caching.md` | Add `softprops/action-gh-release` to SHA-pinning requirement list |
 | `architecture/graphics-architecture/irrlicht-device-lifecycle.md` | Update Warning Log to use `device->getLogger()`; add Logging Policy subsection |
-| `architecture/audio-architecture/audio-system.md` | Add constructor documentation: `irr::ILogger* logger` as first parameter (default `nullptr`, null-guard contract, test-nullptr safe); see Logging Policy in `irrlicht-device-lifecycle.md` |
+| `architecture/audio-architecture/audio-system.md` | Add constructor documentation: `irr::ILogger* logger` as first required parameter (no default; pass `nullptr` in tests, `device->getLogger()` in production; null-guard contract, test-nullptr safe); see Logging Policy in `irrlicht-device-lifecycle.md` |
 | `architecture/ui-ux/main-menu-new-game-flow.md` | Add Map Size row (Small/Medium/Large) to New Game screen |
 | `architecture/graphics-architecture/procedural-terrain.md` | Add `## Map Size Presets` section (kSmall=128, kMedium=512, kLarge=1024) |
 | `architecture/game-design/minimum-viable-simulation.md` | Update map dimensions to the three configurable presets (128/512/1024) |

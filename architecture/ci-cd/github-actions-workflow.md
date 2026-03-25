@@ -1015,7 +1015,17 @@ Creates a GitHub release with attached installer and `.deb` packages after `bump
 
 ### Step sequence
 
-1. Checkout (reads updated `CMakeLists.txt` committed by `bump-version`)
+1. Checkout (reads updated `CMakeLists.txt` committed by `bump-version`):
+
+   ```yaml
+   - name: Checkout
+     uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+     with:
+       ref: main
+   ```
+
+   `ref: main` is critical — without it, `actions/checkout` defaults to the trigger SHA (the commit that triggered the workflow), which is before `bump-version` pushed its version-bump commit. With `ref: main`, the release job checks out the main branch HEAD, which includes the version bump, and reads the updated `CMakeLists.txt`.
+
 2. Read version:
 
    ```bash
