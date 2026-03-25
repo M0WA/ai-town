@@ -496,6 +496,8 @@ logger->log("message", irr::ELL_ERROR);         // failures
 
 **Null-safety contract**: All logger call sites MUST guard with `if (m_logger)`. Tests that construct subsystems without a device may pass `nullptr`; the guard silences the call rather than crashing.
 
+**Thread-safety contract**: `irr::ILogger::log()` is NOT guaranteed thread-safe. Logger calls from subsystem threads (e.g. the audio thread) MUST be serialized. The recommended approach is a lock-free string-queue posted to the main thread and flushed at the start of each main-loop iteration — the audio thread enqueues the message string; the main thread drains the queue and calls `m_logger->log()`. Alternatively, a `std::mutex` shared between the main thread and any calling thread may be held for the duration of each `log()` call. **Do NOT call `m_logger->log()` directly from the audio thread without one of these mechanisms.** AudioSystem's `logWarning()`, `logError()`, and `logInfo()` helper methods MUST implement one of these patterns.
+
 ## Test Guard — `shader_loading_test` Skip vs. Fail
 
 The `GTEST_SKIP()` guard in `shader_loading_test` must only activate when
