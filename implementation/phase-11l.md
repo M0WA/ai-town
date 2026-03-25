@@ -1,10 +1,10 @@
-## Phase 11l: Bug-Fix Batch — Terrain Stitching, Construction Delay, Ground Plates, Finances Panel, Notification Log Scrollbar
+## Phase 11l: Bug-Fix Batch — Terrain Stitching, Construction Delay, Ground Plates, Finances Panel, Notification Log Scrollbar, Load Button
 
 **Status: OPEN**
 
 ### Goal
 
-Five targeted bug fixes and UI improvements identified during visual QA:
+Six targeted bug fixes and UI improvements identified during visual QA:
 
 1. **Terrain stitching holes** — After `setTileHeight()` is called (e.g. during zone/road
    placement), visible seams or "holes" appear at chunk boundaries. Root cause:
@@ -32,6 +32,11 @@ Five targeted bug fixes and UI improvements identified during visual QA:
    visual scroll indicator. Mouse-wheel scrolling works internally but there is no thumb or
    track to communicate scroll position.
 
+6. **Load button does not work** — Clicking the Load Game button on the main menu does
+   nothing. The button is correctly enabled by `main.cpp` when a save file exists, but
+   the click is silently dropped because `MainMenuPanel` has no `m_loadGameRequested` flag
+   and `UIManager::update()` never polls for or dispatches a load request.
+
 ---
 
 ### Deliverables
@@ -56,19 +61,16 @@ a height discontinuity ("hole") in the rendered mesh.
 **Spec update** (`architecture/graphics-architecture/procedural-terrain.md` —
 `setTileHeight()` Step 3 — Chunk rebuild enqueue):
 
-- [ ] Verify that the four-chunk boundary vertex rule is documented in Step 3 of
-  `setTileHeight()` in `architecture/graphics-architecture/procedural-terrain.md`:
-  "For each modified tile coordinate `(mx, mz)` (centre + up to 8 blended
-  neighbours), determine the **set of all chunks** that include `(mx, mz)` as a
-  vertex.  Vertex `(mx, mz)` is used by up to four chunks — the ones whose tile
-  ranges include it as any corner: tiles `(mx, mz)`, `(mx-1, mz)`, `(mx, mz-1)`,
-  `(mx-1, mz-1)` (clamp to map bounds).  Each of these tiles maps to a chunk ID via
-  `chunkIdOf(tx, tz)`.  **All four chunk IDs** (deduplicated, valid, in-bounds) must
-  be marked `currentLOD = -1` and enqueued for rebuild."
-- [ ] Verify that the dual heightmap sync note in Step 1 documents:
-  "The write MUST update `m_generatedHeightmap` AND every `m_chunkHeightmaps` entry
-  that covers `(tileX, tileZ)`.  Because vertex `(tileX, tileZ)` is shared by up to
-  four chunks, up to four `m_chunkHeightmaps` entries may require updating."
+- [ ] Verify that the **Boundary vertex four-chunk rule** paragraph exists in Step 3 of
+  `setTileHeight()` in `architecture/graphics-architecture/procedural-terrain.md` and
+  documents: for each modified tile coordinate `(mx, mz)`, chunks owning tiles
+  `(mx, mz)`, `(mx-1, mz)`, `(mx, mz-1)`, `(mx-1, mz-1)` (clamped to map bounds)
+  are each converted to a chunk ID via `chunkIdOf()`; the resulting IDs are
+  deduplicated; and every unique chunk ID is marked `currentLOD = -1` and enqueued
+  for rebuild.
+- [ ] Verify that Step 1 of `setTileHeight()` documents that the height write must
+  update both `m_generatedHeightmap` AND every `m_chunkHeightmaps` entry that covers
+  `(tileX, tileZ)`, because that vertex is shared by up to four chunks.
 
 **Code fix** (`src/rendering/TerrainSystem.cpp` — `setTileHeight()`):
 
@@ -86,7 +88,7 @@ a height discontinuity ("hole") in the rendered mesh.
 - [ ] Mark each affected chunk `currentLOD = -1` before enqueueing (existing guard
   in `processOneRebuild` skips the rebuild if LOD is already at target).
 
-**Test** (`tests/terrain/terrain_tests.cpp`):
+**Test** (`tests/terrain/terrain_boundary_test.cpp`, label: `unit`):
 
 - [ ] `TerrainSystem_SetTileHeight_AtChunkBoundary_BothChunksEnqueued`:
   construct a `TerrainSystem` with chunk size 4 and a 8×8 tile map; call
@@ -97,7 +99,14 @@ a height discontinuity ("hole") in the rendered mesh.
   `setTileHeight(2, 2, 5.0f)` (interior tile, not on boundary); assert only one
   chunk ID in the deque.
 
-**Implementation note**: Access the rebuild queue via a public `getPendingRebuildIds() const` accessor on `TerrainSystem` (or equivalent test-visible accessor/friend class per testability-architecture.md). The deque should contain the deduplicated set of chunk IDs scheduled for rebuild.
+**Implementation note**: Access the rebuild queue via the public `getPendingRebuildIds() const` accessor on `TerrainSystem` (documented in `architecture/graphics-architecture/procedural-terrain.md` Test API section). The accessor returns `std::vector<uint64_t>` — a deduplicated snapshot of chunk IDs scheduled for rebuild; order is unspecified.
+
+- [ ] Create `tests/terrain/terrain_boundary_test.cpp` (new dedicated file, following the
+  per-feature-per-file pattern of `terrain_chunk_test.cpp`, `terrain_flattening_test.cpp`, etc.).
+  Register it in `CMakeLists.txt`:
+  `target_sources(terrain_tests PRIVATE tests/terrain/terrain_boundary_test.cpp)`
+  The `terrain_tests` target's `LABELS "unit"` property (set in Phase 1) propagates
+  automatically — no additional label registration is required.
 
 ---
 
@@ -107,7 +116,7 @@ a height discontinuity ("hole") in the rendered mesh.
 
 When a zone tile is placed it enters `underConstruction = true` state. The building mesh
 is not spawned immediately — it only appears once `populationTick()` evaluates demand as
-sufficient (`effective_demand_factor >= density_upgrade_wave_demand_threshold = 0.50`).
+sufficient (`effective_demand_factor >= construction_delay_demand_threshold = 0.50`).
 This means buildings only appear when there is genuine need for them, not merely after
 a fixed time delay.  The zone-colour overlay is visible immediately on placement; only
 the 3D mesh is deferred.  While `underConstruction = true` the tile contributes
@@ -117,8 +126,12 @@ the 3D mesh is deferred.  While `underConstruction = true` the tile contributes
 sub-section, already written):
 
 - [ ] Verify `## Construction Delay` section exists and documents the demand gate
-  (`effective_demand_factor >= density_upgrade_wave_demand_threshold` before
+  (`effective_demand_factor >= construction_delay_demand_threshold` before
   `placeBuildingMesh()` is called and `underConstruction` is cleared).
+- [ ] Add `construction_delay_demand_threshold = 0.50f` to `simulation_constants.h` as a
+  dedicated constant for the construction delay gate.  Do **not** reuse
+  `density_upgrade_wave_demand_threshold` for this purpose — that constant governs density
+  upgrades (a separate mechanic) and the two thresholds may diverge in future phases.
 
 **Code changes**:
 
@@ -132,25 +145,29 @@ sub-section, already written):
 
   ```cpp
   if (tile.isZoned && tile.underConstruction
-      && effective_demand_factor >= SimulationConstants::density_upgrade_wave_demand_threshold) {
+      && effective_demand_factor >= SimulationConstants::construction_delay_demand_threshold) {
       tile.underConstruction = false;
-      std::string baseName = zoneAssetBaseName(tile.zoneType, tile.density);
-      if (baseName.size() >= 2) {
-          baseName[baseName.size() - 2] = '0';
-          baseName[baseName.size() - 1] = static_cast<char>('0' + tile.variantIndex);
-      }
+      int zoneIdx = static_cast<int>(tile.zoneType);   // 0=Res, 1=Com, 2=Ind
+      int tierIdx = static_cast<int>(tile.density);    // 0=Low, 1=Med, 2=High
+      int& counter = m_buildingVariantCounters[zoneIdx * 3 + tierIdx];
+      std::string baseName = buildingAssetBaseName(tile.zoneType, tile.density, counter);
+      counter = (counter + 1) % 4;  // round-robin through 4 variants (01..04)
       m_renderer->placeBuildingMesh(tileX, tileZ, baseName);
   }
   ```
+
+  This uses the `buildingAssetBaseName()` helper and the `m_buildingVariantCounters` round-robin
+  array already defined in `CitySimulation` per `architecture/asset-standards/3d-model-standards.md`
+  Variant Selection Policy. Do **not** add a `variantIndex` field to per-tile data.
 
   Tiles below the demand threshold remain as empty lots and are re-evaluated every
   subsequent tick.
 - [ ] Serialise `underConstruction` in the save-file tile struct (Phase 12 save
   system must include it; add a `TODO(phase-12)` comment at the serialisation site).
 
-**Test** (`tests/simulation/simulation_tests.cpp`):
+**Test** (`tests/simulation/zoning_test.cpp`):
 
-**Mock injection**: Tests inject `NiceMock<MockRenderer>` as the `IRenderer*` parameter to `CitySimulation`. For `ZoningSystem_PlaceZone_NoBuildingMeshAtPlacement`: use `EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(0)`. For `ZoningSystem_PlaceZone_BuildingMeshSpawnsWhenDemandSufficient`: configure demand to return ≥ 0.50 and use `EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(1)`. The three arguments are `(int tileX, int tileZ, const std::string& assetBaseName)` per `IRenderer::placeBuildingMesh`; use `testing::_` matchers to match any baseName.
+**Mock injection**: Tests inject `StrictMock<MockRenderer>` as the `IRenderer*` parameter to `CitySimulation`. `StrictMock` is required here because `placeBuildingMesh` presence/absence is the primary assertion being made — any unexpected call to `placeBuildingMesh` must be a hard test failure, not silently swallowed. For `ZoningSystem_PlaceZone_NoBuildingMeshAtPlacement`: use `EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(0)`. For `ZoningSystem_PlaceZone_BuildingMeshSpawnsWhenDemandSufficient`: configure demand to return ≥ 0.50 and use `EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(1)`. The three arguments are `(int tileX, int tileZ, const std::string& assetBaseName)` per `IRenderer::placeBuildingMesh`; use `testing::_` matchers to match any baseName.
 
 - [ ] `ZoningSystem_PlaceZone_NoBuildingMeshAtPlacement`: mock renderer,
   place zone, assert `placeBuildingMesh` **not** called in `placeZone`.
@@ -223,18 +240,19 @@ Buildings and service buildings — full flattening):
 - [ ] `flushTerrainRebuilds()` is called **once** after the full loop, not once per
   iteration.
 
-**Test** (`tests/integration/integration_tests.cpp`, CMake label `integration`):
+**Test** (`tests/integration/irrlicht_renderer_flatten_test.cpp`, CMake label `integration`):
 
 Both renderer-level flatten tests exercise `IrrlichtRenderer` with a `ManualTerrainQuery`
 stub for the terrain query interface. However, `IrrlichtRenderer::placeBuildingMesh()`
 creates Irrlicht scene nodes and requires an EDT_NULL Irrlicht device — these tests go in
-`tests/integration/integration_tests.cpp` with CMake label `integration`. No display or
+`tests/integration/irrlicht_renderer_flatten_test.cpp` with CMake label `integration`. No display or
 GPU is required; the EDT_NULL device suffices.  (The Deliverable 1 terrain stitching tests
 `TerrainSystem_SetTileHeight_AtChunkBoundary_*` remain in
-`tests/terrain/terrain_tests.cpp` with CMake label `unit` — no change needed there.)
+`tests/terrain/terrain_boundary_test.cpp` with CMake label `unit` — no change needed there.)
 
 **ManualTerrainQuery**: Defined in `tests/simulation/ManualTerrainQuery.h` per testability-architecture.md. Configure non-uniform heights via `setHeightAt(x, z, h)` (Phase 11l extension). Records all `setTileHeight()` calls in `m_flattenCalls` (vector of `{x, z, h}` tuples, Phase 11l extension — see testability-architecture.md). Assert that all expected vertices appear in `m_flattenCalls` with the same `targetH` value.
 
+- [ ] Extend `tests/simulation/ManualTerrainQuery.h` (Phase 11l per `testability-architecture.md`): add `std::map<int64_t, float> m_tileHeights`, `std::vector<std::tuple<int,int,float>> m_flattenCalls`, implement `void setHeightAt(int x, int z, float h)`, and update `setTileHeight()` override to append `{x, z, h}` to `m_flattenCalls`
 - [ ] `IrrlichtRenderer_PlaceMediumBuilding_AllCornerVerticesFlattened`:
   Using `ManualTerrainQuery` with non-uniform heights, place a 2×2 building at
   `(2, 2)`.  Assert `setTileHeight` was called for all 9 vertices
@@ -309,16 +327,38 @@ Tax Rate Panel was (T key or resource-bar click).
   - Remove treasury-hover logic that was opening `m_budgetDetail`.
   - Delegate T key and resource-bar click to `m_finances->open()` /
     `m_finances->close()`.
+  - Construct with all required parameters:
+    `m_finances = new FinancesPanel(m_backend, m_sim, m_audio, m_clock);`
+    (`IAudioSystem* m_audio` and `IClock* m_clock` must be accessible in HUD — inject both via HUD constructor if not already present,
+    following the same pattern as `NotificationManager` in `UIManager.cpp`.)
 - [ ] Update `src/ui/UIManager.cpp` input handler: T key and resource-bar click now
   call `m_hud->toggleFinancesPanel()` (replacing old `toggleTaxPanel()`).
-- [ ] `ui_menu_open` / `ui_menu_close` SFX wiring: `FinancesPanel::open()` must fire `ui_menu_open` via `m_audio->playSound(UI_MENU_OPEN, SoundPriority::HIGH, 1.0f)` and `FinancesPanel::close()` must fire `ui_menu_close` via `m_audio->playSound(UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f)`. `SoundPriority::HIGH` is required for all UI sounds per `source-pool.md` to ensure access to the transient reserve and prevent audio starvation during heavy traffic. The `FinancesPanel` constructor receives `IAudioSystem*` as a parameter to enable this. This matches the existing floating-panel audio pattern per `hud-layout.md`.
+- [ ] `SFX_UI_MENU_OPEN` / `SFX_UI_MENU_CLOSE` SFX wiring: `FinancesPanel::open()` must fire via `m_audio->playSound(SFX_UI_MENU_OPEN, SoundPriority::HIGH, 1.0f)` and `FinancesPanel::close()` must fire via `m_audio->playSound(SFX_UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f)`. `SoundPriority::HIGH` is required for all UI sounds per `source-pool.md` to ensure access to the transient reserve and prevent audio starvation during heavy traffic. The `FinancesPanel` constructor receives `IAudioSystem*` as a parameter to enable this. This matches the existing floating-panel audio pattern per `hud-layout.md`.
+- [ ] Implement key-repeat rate cap: track `int m_holdDelta{0}` (cumulative delta for the
+  current hold event) in `FinancesPanel`. In the button hold/repeat handler, before applying
+  a ±1% increment, check `std::abs(m_holdDelta) < 5`; if the cap is reached, skip the
+  increment. Reset `m_holdDelta = 0` on button-release (`onButtonReleased` event). This
+  enforces the ±5 pp cap per hold event specified in `finances-panel.md`.
+- [ ] Implement pending rate change indicator: add `bool hasPendingRateChange() const` and
+  `void clearPendingRateChange()` to `FinancesPanel` (flag set when the player changes a tax
+  rate, cleared when the next budget tick commits the change). In `HUD::update(float dt)`,
+  poll `m_finances->hasPendingRateChange()` and show/hide the amber "Tax rates updating next
+  budget cycle" label on the resource/budget bar accordingly (per `finances-panel.md`
+  Pending rate change HUD indicator section).
 - [ ] Update `CMakeLists.txt` (or the relevant source list): replace
   `TaxRatePanel.cpp` and `BudgetDetailPanel.cpp` with `FinancesPanel.cpp`.
+- [ ] Update `CMakeLists.txt` test source list for `ui_tests`:
+  - Add: `target_sources(ui_tests PRIVATE tests/ui/finances_panel_test.cpp)`
+  - Remove: the `tests/ui/budget_detail_panel_test.cpp` line from target_sources
+    (the BudgetDetailPanel test fixture is superseded by FinancesPanel tests).
+  - Remove: the `tests/ui/tax_rate_panel_test.cpp` line from target_sources if present
+    (the TaxRatePanel test fixture is also superseded).
 
 **Tests** (`tests/ui/finances_panel_test.cpp`):
 
-**Fixture**: `UIManagerFinancesPanelTest` uses `NiceMock<MockUIBackend>`, `NiceMock<MockCitySimulation>`, `NiceMock<MockAudioSystem>`, and `ManualClock`. `TearDown()` must reset the `UIManager` smart pointer (`m_uiManager.reset()` if using `std::unique_ptr<UIManager> m_uiManager` per testability-architecture.md convention, or equivalent) to `nullptr` before mock destruction, consistent with the destructor-path contract in testability-architecture.md.
+**Fixture**: `UIManagerFinancesPanelTest` uses `NiceMock<MockUIBackend>`, `NiceMock<MockCitySimulation>`, `NiceMock<MockAudioSystem>`, and `ManualClock`. This is an intentional combined fixture: UIManager instantiates FinancesPanel internally, so both layers share the same mock setup. `UIManager_*` tests exercise UIManager integration behavior; `FinancesPanel_*` tests exercise FinancesPanel behavior visible through that integration. No separate fixture file is required. `NiceMock<MockAudioSystem>` is the approved deviation for this fixture (per testability-architecture.md) — `EXPECT_CALL` assertions still verify that audio calls occur; `NiceMock` only silences failures for calls not covered by an `EXPECT_CALL`.
 
+- [ ] Implement `void TearDown() override { m_uiManager.reset(); }` in `UIManagerFinancesPanelTest` to reset the `UIManager` smart pointer to `nullptr` before mock destruction, consistent with the destructor-path contract in testability-architecture.md.
 - [ ] `UIManager_TKey_OpensFinancesPanel`: press T, assert
   `FinancesPanel::isOpen() == true`.
 - [ ] `UIManager_TKey_Twice_ClosesFinancesPanel`: open then press T again,
@@ -330,12 +370,12 @@ Tax Rate Panel was (T key or resource-bar click).
 - [ ] `FinancesPanel_TaxRate_PlusButton_IncreasesRate`: click +1% on R row,
   assert `ICitySimulation::setTaxRate(ZoneType::Residential, oldRate + 1)` called.
 - [ ] `FinancesPanel_Open_FiresUIMenuOpenSound`: open the Finances Panel; assert
-  `MockAudioSystem::playSound(UI_MENU_OPEN, SoundPriority::HIGH, 1.0f)` called
-  exactly once.  Use `EXPECT_CALL(audio_, playSound(UI_MENU_OPEN,
+  `MockAudioSystem::playSound(SFX_UI_MENU_OPEN, SoundPriority::HIGH, 1.0f)` called
+  exactly once.  Use `EXPECT_CALL(audio_, playSound(SFX_UI_MENU_OPEN,
   SoundPriority::HIGH, 1.0f)).Times(1)` before triggering the open action.
 - [ ] `FinancesPanel_Close_FiresUIMenuCloseSound`: open then close the Finances
-  Panel; assert `playSound(UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f)` called
-  exactly once.  Use `EXPECT_CALL(audio_, playSound(UI_MENU_CLOSE,
+  Panel; assert `playSound(SFX_UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f)` called
+  exactly once.  Use `EXPECT_CALL(audio_, playSound(SFX_UI_MENU_CLOSE,
   SoundPriority::HIGH, 1.0f)).Times(1)` before triggering the close action.
 - [ ] Existing `TaxRatePanel` and `BudgetDetailPanel` test fixtures removed or
   replaced with `FinancesPanel` equivalents.
@@ -404,10 +444,337 @@ section, after the "Scroll: mouse wheel scrolls the list" bullet):
 - [ ] `NotificationManager_LogScrollbar_VisibleWhenOverflow`: post 30 entries
   (more than visible rows), open log, assert scrollbar track visible.
 - [ ] `NotificationManager_LogScrollbar_ThumbMovesOnScroll`: post 30 entries,
-  open log, record initial `thumbY`, scroll down 5 entries, assert `thumbY`
-  increased.
-- [ ] `NotificationManager_LogScrollbar_ThumbAtBottomAfterScrollToEnd`: scroll
-  to last entry, assert `thumbY + thumbH ≈ trackBottom` (within 1 px).
+  open log. Use `EXPECT_CALL(backend_, setElementPosition(_, _, _)).WillRepeatedly(SaveArg<2>(&capturedY))`
+  (or equivalent GMock argument capture) to record the Y argument of the last
+  `setElementPosition` call on the thumb element; scroll down 5 entries via the
+  mouse-wheel handler; assert the newly captured Y is greater than the initial Y.
+- [ ] `NotificationManager_LogScrollbar_ThumbAtBottomAfterScrollToEnd`: scroll to
+  the last entry; use `SaveArg` capture on `setElementSize` and `setElementPosition`
+  calls to record the final thumbH and thumbY values; assert
+  `thumbY + thumbH ≈ trackTop + trackH` (i.e. `trackBottom`) within 1 px.
+  Track bounds constants (trackTop=56, trackH=500) may be used directly.
+
+---
+
+#### 6. Load button fix
+
+**Root cause analysis**
+
+`MainMenuPanel::onEvent()` handles mouse clicks for New Game, Settings, and Quit
+(lines 352–363 in `MainMenuPanel.cpp`) but **omits the Load Game hit-test entirely**.
+The keyboard Enter handler (case 1) hits the button slot but returns `true` without
+setting any flag.  No `m_loadGameRequested` member or `consumeLoadGameRequest()` method
+exists in `MainMenuPanel`.  `UIManager::update()` polls only `consumeStartGameRequest()`
+and therefore never calls `m_saveSystem->loadMostRecentSave()`.
+
+No spec change is required — `architecture/ui-ux/main-menu-new-game-flow.md` already
+correctly documents that clicking Load Game when a save is available triggers the
+loading-screen path and calls `UIManager::onGameLoaded()` after deserialization.
+
+**Code changes** (`src/ui/MainMenuPanel.h`, `src/ui/MainMenuPanel.cpp`,
+`src/ui/UIManager.cpp`):
+
+- [ ] **`MainMenuPanel.h`** — add public declaration and private member:
+
+  ```cpp
+  bool consumeLoadGameRequest();   // returns true once, then resets
+
+  // in private:
+  bool m_loadGameRequested{false};
+  ```
+
+- [ ] **`MainMenuPanel.cpp` — `onEvent()` mouse click handler** — add the missing
+  hit-test for `m_btnLoadGame` inside the `Screen::MainMenu` block, guarded by
+  `isElementEnabled()` (mirrors the existing disabled-guard pattern used for
+  keyboard Enter path):
+
+  ```cpp
+  if (hitTest(mx, my, m_btnLoadGame) &&
+      m_backend->isElementEnabled(m_btnLoadGame)) {
+      m_loadGameRequested = true;
+      return true;
+  }
+  ```
+
+- [ ] **`MainMenuPanel.cpp` — Enter key handler (case 1)** — set the flag when the
+  button is enabled (replaces the bare `return true`):
+
+  ```cpp
+  case 1: // Load Game
+      if (m_backend->isElementEnabled(m_btnLoadGame))
+          m_loadGameRequested = true;
+      return true;
+  ```
+
+- [ ] **`MainMenuPanel.cpp` — `consumeLoadGameRequest()`** — implement as consume-once
+  (same pattern as `consumeStartGameRequest()`):
+
+  ```cpp
+  bool MainMenuPanel::consumeLoadGameRequest() {
+      if (!m_loadGameRequested) return false;
+      m_loadGameRequested = false;
+      return true;
+  }
+  ```
+
+- [ ] **`UIManager.cpp` — `update()`** — after the `consumeStartGameRequest()` poll,
+  add a load-game poll:
+
+  ```cpp
+  if (m_mainMenu->consumeLoadGameRequest()) {
+      auto result = m_saveSystem->loadMostRecentSave();
+      if (result == LoadResult::Ok) {
+          transitionToGameplay(GameMode::Loaded);
+          onGameLoaded();
+      }
+      // LoadResult::NoSaveFound should not occur here because the button
+      // is only enabled when a valid save exists (set by setSaveAvailable()).
+  }
+  ```
+
+**Test** (`tests/ui/ui_manager_test.cpp` and `tests/ui/main_menu_panel_test.cpp`,
+label: `unit`):
+
+**Fixture note**: Use the existing `UIManagerTest` fixture (which already injects
+`MockSaveSystem`, `MockUIBackend`, and `ManualClock` with the `TearDown()` null-reset
+contract per `testability-architecture.md`).  Use the existing `MainMenuPanelTest`
+fixture for the panel-level test.
+
+- [ ] `MainMenuPanel_LoadGame_ClickSetsFlag`: construct `MainMenuPanel` with a
+  `MockUIBackend`, call `setSaveAvailable(true)` to enable the button, simulate a
+  `MouseButtonDown` event hitting `m_btnLoadGame`'s rect, assert
+  `consumeLoadGameRequest()` returns `true`, assert a second call returns `false`.
+
+- [ ] `MainMenuPanel_LoadGame_ClickIgnoredWhenDisabled`: do NOT call
+  `setSaveAvailable(true)` (button remains disabled), simulate the same click,
+  assert `consumeLoadGameRequest()` returns `false`.
+
+- [ ] `UIManager_LoadGame_CallsLoadMostRecentSave`: configure
+  `MockMainMenuPanel::consumeLoadGameRequest()` to return `true` once; configure
+  `MockSaveSystem::loadMostRecentSave()` to return `LoadResult::Ok`;
+  call `update()`; assert `loadMostRecentSave()` was called exactly once and that
+  `onGameLoaded()` side-effects are observable (e.g. `m_previousCityRating` seeded).
+
+---
+
+#### 7. GitHub release on merge to main
+
+**Design**
+
+Every push to `main` triggers a two-phase release process:
+
+1. **Version bump**: the pipeline reads the latest `v*.*.*` git tag, increments the patch
+   component, writes the new version back to `CMakeLists.txt` (`project(aitown VERSION
+   X.Y.Z ...)`), commits the change with message `chore: bump version to vX.Y.Z [skip ci]`
+   (the `[skip ci]` token prevents a re-trigger loop), and pushes the commit + new tag to
+   `main`.  This means `CMakeLists.txt` is always kept in sync with the latest release tag
+   without requiring manual version bumps in PRs.
+2. **Release creation**: after packaging jobs succeed, a `release` job downloads the
+   installer and `.deb` artifacts and publishes a GitHub release tagged `vX.Y.Z` with all
+   packages attached.
+
+**Spec update** (`architecture/ci-cd/github-actions-workflow.md` — `## release Job`
+section, already added):
+
+- [ ] Verify the `## release Job` section in `architecture/ci-cd/github-actions-workflow.md`
+  reflects CI-calculated versioning (not CMake VERSION read from source) and the
+  version-bump commit step.
+
+**Code changes** (`.github/workflows/ci.yml`):
+
+- [ ] Add a `bump-version` job with:
+  - `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`
+  - `permissions: contents: write`
+  - `timeout-minutes: 5`
+  - Step: checkout with `fetch-depth: 0` (full history required for `git describe`)
+  - Step: calculate next version and bump:
+
+    ```bash
+    # Get latest tag (default to v0.0.0 if none)
+    CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo 'v0.0.0')
+    # Increment patch
+    IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT#v}"
+    PATCH=$((PATCH + 1))
+    NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+    # Update CMakeLists.txt
+    sed -i "s/project(aitown VERSION [0-9.]*)/project(aitown VERSION ${NEW_VERSION})/" CMakeLists.txt
+    # Commit and tag
+    git config user.name  "github-actions[bot]"
+    git config user.email "github-actions[bot]@users.noreply.github.com"
+    git add CMakeLists.txt
+    git commit -m "chore: bump version to v${NEW_VERSION} [skip ci]"
+    git tag "v${NEW_VERSION}"
+    git push --follow-tags
+    echo "AITOWN_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
+    ```
+
+- [ ] Add a `release` job with:
+  - `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`
+  - `needs: [bump-version, package-windows, package-linux-deb]`
+  - `permissions: contents: write`
+  - `timeout-minutes: 10`
+  - Step: checkout (to read the bumped `CMakeLists.txt` for the version)
+  - Step: read `AITOWN_VERSION` from `CMakeLists.txt` (same grep/sed as above, but read-only)
+  - Steps: `actions/download-artifact` (SHA-pinned) for each package artifact into
+    `./release-assets/` (same 5 artifacts as before)
+  - Step: `softprops/action-gh-release` (SHA-pinned at implementation time via
+    `gh release view --repo softprops/action-gh-release --json tagName,targetCommitish`):
+
+    ```yaml
+    - name: Create GitHub release
+      uses: softprops/action-gh-release@<40-CHAR-SHA>  # resolve at implementation time
+      with:
+        tag_name: v${{ env.AITOWN_VERSION }}
+        name: "AI Town v${{ env.AITOWN_VERSION }}"
+        fail_on_unmatched_files: true
+        files: release-assets/**
+    ```
+
+- [ ] `bump-version` and `release` must NOT be in `all-checks-pass` `needs:` — consistent
+  with packaging gate policy.
+
+**No unit tests** — verified by a real push to `main`; unit tests are not applicable.
+
+---
+
+#### 8. Configurable terrain size (Small / Medium / Large)
+
+**Design**
+
+The New Game screen gains a **Map Size** row with three mutually exclusive radio buttons:
+Small (128×128 tiles), Medium (512×512 tiles — default), Large (1024×1024 tiles).  The selected
+size is passed to `TerrainSystem::generate(mapTilesX, mapTilesZ, ...)` at game start.
+The V1 default of 512×512 is preserved as the default selection.
+
+**Spec updates**:
+
+- [ ] `architecture/ui-ux/main-menu-new-game-flow.md` — Add a **Map Size** row immediately
+  after the Difficulty row.  Three buttons: `( ) Small`, `(*) Medium`, `( ) Large`.  Medium
+  is the default selection.  Behaviour matches Difficulty radio buttons (mutual exclusion,
+  radio labels update with `(*)`/`( )` prefix on selection, grayed-out buttons use
+  `setElementEnabled(handle, false)`). Large is enabled in V1 (not grayed).
+- [ ] `architecture/graphics-architecture/procedural-terrain.md` — Add a `## Map Size
+  Presets` section defining the three presets: `kSmall = 128`, `kMedium = 512`,
+  `kLarge = 1024` (tile counts, square maps; `mapTilesX == mapTilesZ`).  Document that
+  `TerrainSystem::generate()` accepts arbitrary `mapTilesX`/`mapTilesZ` already; the
+  presets are UI-facing aliases for those values.
+
+**Code changes** (`src/ui/MainMenuPanel.h` / `.cpp`):
+
+- [ ] Add `MapSize` enum to `MainMenuPanel.h`: `kSmall=128, kMedium=512, kLarge=1024`.
+- [ ] Add three buttons in the New Game screen constructor after the Difficulty row (new
+  `y += 44` row): `m_ngBtnSizeSmall`, `m_ngBtnSizeMedium`, `m_ngBtnSizeLarge`.
+  Default text: `"( ) Small"`, `"(*) Medium"`, `"( ) Large"`. Add
+  `m_selectedMapSize{MapSize::kMedium}` private member.
+- [ ] Add these buttons to `hideAllElements()` and `showNewGameScreen()`.
+- [ ] In `draw()` (New Game branch), update the three size button labels with `(*)`/`( )`
+  based on `m_selectedMapSize` (same pattern as Difficulty).
+- [ ] In `onEvent()` mouse-click branch for New Game: handle hits on the three size buttons,
+  set `m_selectedMapSize` accordingly.
+- [ ] Add `MapSize getSelectedMapSize() const { return m_selectedMapSize; }` accessor.
+
+**Code changes** (`src/ui/UIManager.cpp` / `src/main.cpp`):
+
+- [ ] When `consumeStartGameRequest()` returns `true`, read
+  `m_mainMenu->getSelectedMapSize()` (cast to `int`) and pass it as both `mapTilesX` and
+  `mapTilesZ` to `TerrainSystem::generate()`.
+
+**Test** (`tests/ui/main_menu_panel_test.cpp`, label: `unit`):
+
+- [ ] `MainMenuPanel_MapSize_DefaultIsMedium`: construct panel, assert
+  `getSelectedMapSize() == MapSize::kMedium`.
+- [ ] `MainMenuPanel_MapSize_ClickSmall_SetsSmall`: simulate click on `m_ngBtnSizeSmall`,
+  assert `getSelectedMapSize() == MapSize::kSmall`.
+- [ ] `MainMenuPanel_MapSize_ClickLarge_SetsLarge`: simulate click on `m_ngBtnSizeLarge`,
+  assert `getSelectedMapSize() == MapSize::kLarge`.
+
+---
+
+#### 9. Migrate all diagnostic logging to Irrlicht logger
+
+**Design**
+
+All diagnostic output that currently writes to `stderr` or `stdout` via `fprintf`, `printf`,
+or `std::cerr` must be routed through `irr::ILogger*` (obtained from `m_device->getLogger()`
+and passed to each subsystem as a constructor or function parameter).
+
+**Exemptions** (do NOT change these):
+
+- `src/benchmark/benchmark_main.cpp` — intentional CLI stdout result output; exempt as a
+  standalone tool.
+- `std::snprintf`/`fprintf(file, ...)` calls used for string formatting or writing to named
+  files (not stderr/stdout) — these are not terminal output.
+- Pre-device fatal errors in `main.cpp` that fire before the Irrlicht device exists may
+  still use `fprintf(stderr, ...)`.
+
+**Irrlicht logger API**:
+
+```cpp
+irr::ILogger* logger = device->getLogger();
+logger->log("message text", irr::ELL_INFORMATION);
+logger->log("message text", irr::ELL_WARNING);
+logger->log("message text", irr::ELL_ERROR);
+```
+
+**Spec update** (`architecture/graphics-architecture/irrlicht-device-lifecycle.md` —
+Warning Log section):
+
+- [ ] Replace the `std::fprintf(stderr, "WARNING: GL_MAX_TEXTURE_SIZE...")` example with:
+
+  ```cpp
+  device->getLogger()->log(
+      "GL_MAX_TEXTURE_SIZE < 4096; loading fallback atlas buildings_atlas_d_2k.dds",
+      irr::ELL_WARNING);
+  ```
+
+- [ ] Add a **Logging Policy** subsection to `irrlicht-device-lifecycle.md`:
+  "All diagnostic output MUST use `irr::ILogger*` obtained from `m_device->getLogger()`.
+  Pass the logger pointer to subsystems that need it (non-owning). Use `ELL_ERROR` for
+  failures, `ELL_WARNING` for recoverable issues, `ELL_INFORMATION` for progress/status.
+  `fprintf(stderr,...)`, `printf(...)`, and `std::cerr`/`std::cout` are prohibited in
+  game runtime code (exemptions: benchmark CLI, pre-device fatal errors in `main.cpp`,
+  string-formatting `snprintf`, and file I/O `fprintf(file,...)`). Tests that construct
+  subsystems may pass `nullptr` as the logger; all logger calls MUST be guarded by
+  `if (m_logger)` null checks."
+
+**Code changes** (`src/audio/AudioSystem.h` / `.cpp`):
+
+- [ ] Add `irr::ILogger* m_logger{nullptr}` private member to `AudioSystem`.
+- [ ] Add `irr::ILogger* logger` parameter to the `AudioSystem` constructor (as the **first**
+  parameter, before `IClock* clock`; default `nullptr` for backwards compat in existing test instantiations).
+  Store as `m_logger = logger`.
+- [ ] In `logWarning()`, `logError()`, `logInfo()`: replace `std::cerr` with:
+
+  ```cpp
+  void AudioSystem::logWarning(const std::string& msg) {
+      if (m_logger) m_logger->log(msg.c_str(), irr::ELL_WARNING);
+  }
+  void AudioSystem::logError(const std::string& msg) {
+      if (m_logger) m_logger->log(msg.c_str(), irr::ELL_ERROR);
+  }
+  void AudioSystem::logInfo(const std::string& msg) {
+      if (m_logger) m_logger->log(msg.c_str(), irr::ELL_INFORMATION);
+  }
+  ```
+
+- [ ] Update `main.cpp` / wherever `AudioSystem` is constructed: pass
+  `device->getLogger()` as the **first** argument (before `IClock*`).
+
+**Code changes** (`src/ui/key_bindings.h`):
+
+- [ ] Add `irr::ILogger* logger = nullptr` parameter to `KeyBindings::load()`.
+- [ ] Replace the two `fprintf(stderr, ...)` calls with:
+
+  ```cpp
+  if (logger) logger->log("...", irr::ELL_WARNING);
+  ```
+
+- [ ] Update all call sites of `KeyBindings::load()` to pass `device->getLogger()`.
+
+**No new unit tests** — the behaviour of `logWarning`/`logError`/`logInfo` and
+`KeyBindings::load()` is unchanged; only the output channel changes. Existing tests that
+construct `AudioSystem` with `nullptr` as the logger continue to compile and run without
+modification (the null guard silences the log call rather than crashing).
 
 ---
 
@@ -423,6 +790,14 @@ section, after the "Scroll: mouse wheel scrolls the list" bullet):
 | `architecture/ui-ux/notification-system.md` | Add scrollbar spec (12 px track, thumb sizing formula, colour tokens) |
 | `architecture/DOCUMENT_INDEX.md` | `tax-rate-panel.md` → `finances-panel.md` |
 | `CLAUDE.md` | Architecture File Links table: Tax Rate Panel → Finances Panel |
+| `architecture/game-design/save-system.md` | Add `LoadResult` enum (`Ok`, `NoSaveFound`, `Corrupted`) and `loadMostRecentSave()` API documentation for `ISaveSystem` (Deliverable 6) |
+| `architecture/ci-cd/github-actions-workflow.md` | Add `## release Job` section; update versioning to CI-calculated patch-increment |
+| `architecture/ci-cd/caching.md` | Add `softprops/action-gh-release` to SHA-pinning requirement list |
+| `architecture/graphics-architecture/irrlicht-device-lifecycle.md` | Update Warning Log to use `device->getLogger()`; add Logging Policy subsection |
+| `architecture/audio-architecture/audio-system.md` | Add constructor documentation: `irr::ILogger* logger` as first parameter (default `nullptr`, null-guard contract, test-nullptr safe); see Logging Policy in `irrlicht-device-lifecycle.md` |
+| `architecture/ui-ux/main-menu-new-game-flow.md` | Add Map Size row (Small/Medium/Large) to New Game screen |
+| `architecture/graphics-architecture/procedural-terrain.md` | Add `## Map Size Presets` section (kSmall=128, kMedium=512, kLarge=1024) |
+| `architecture/game-design/minimum-viable-simulation.md` | Update map dimensions to the three configurable presets (128/512/1024) |
 
 ---
 
@@ -442,6 +817,17 @@ section, after the "Scroll: mouse wheel scrolls the list" bullet):
   (old Budget Detail Panel trigger is removed).
 - [ ] The notification log panel displays a visible scrollbar track and thumb when the
   entry count exceeds the visible row count; the thumb position updates on scroll.
+- [ ] Clicking the Load Game button on the main menu when a save file exists triggers the
+  load sequence: `loadMostRecentSave()` is called, the game transitions to gameplay, and
+  `onGameLoaded()` is called.
+- [ ] Clicking the Load Game button when it is disabled (no save file) does nothing.
+- [ ] Merging a PR to `main` triggers `bump-version` (auto-increments patch, commits updated
+  `CMakeLists.txt`, pushes tag) and then `release` (creates a GitHub release tagged
+  `vX.Y.Z` with the Windows `.exe` installer and one `.deb` per distro attached).
+- [ ] The New Game screen shows a Map Size row; selecting Small/Medium/Large passes
+  128/512/1024 as `mapTilesX`/`mapTilesZ` to `TerrainSystem::generate()`.
+- [ ] No game runtime code calls `fprintf(stderr,...)`, `printf(...)`, `std::cerr`, or
+  `std::cout` for diagnostic output; all such calls route through `irr::ILogger*`.
 - [ ] Full unit test suite passes: 0 failures, no regressions.
 
 ---
@@ -452,5 +838,8 @@ section, after the "Scroll: mouse wheel scrolls the list" bullet):
 |---|---|---|
 | `graphics-dev-irrlicht` | Terrain stitching chunk-boundary enqueue fix; multi-tile footprint flatten | ⬜ |
 | `gamedesign-lookandfeel` | Construction delay (1-tick empty lot before mesh spawns) | ⬜ |
-| `gamedesign-ux` | Finances Panel layout (360×520 px, two-section, dismiss rules); scrollbar visual spec | ⬜ |
-| `test-dev-cpp` | New unit tests: terrain stitching, construction delay, multi-tile flatten, Finances Panel, scrollbar | ⬜ |
+| `gamedesign-ux` | Finances Panel layout (360×520 px, two-section, dismiss rules); scrollbar visual spec; Load Game button UX | ⬜ |
+| `test-dev-cpp` | New unit tests: terrain stitching, construction delay, multi-tile flatten, Finances Panel, scrollbar, load button | ⬜ |
+| `cicd-dev-github` | GitHub release job: bump-version + release on push to main; attach Windows installer and Linux .deb packages | ⬜ |
+| `gamedesign-ux` (Deliverable 8) | Map Size row in New Game screen (Small/Medium/Large) | ⬜ |
+| `graphics-dev-irrlicht` + `sound-dev-opensoftal` (Deliverable 9) | Migrate `AudioSystem` and `KeyBindings` logging to `irr::ILogger*`; update spec | ⬜ |

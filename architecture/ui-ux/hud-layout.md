@@ -367,6 +367,8 @@ component itself is fixed at `#F04E37`.
 **Unsaved-changes dot**: fixed amber fill `#F0B429` (value amber token). Authored at
 creation time; does not change colour dynamically.
 
+- **Pending rate change indicator**: displayed inside the resource/budget bar when `HUD::m_finances->hasPendingRateChange()` returns `true`. A small amber text label — color `#E8960C` (warning amber per `finances-panel.md`), HUD font size, text: "Tax rates updating next budget cycle". Positioned to the left of the notification bell, virtual bounds approximately x: 1360–1812 px, y: 22–42 px (centered vertically in the bar). Hidden when no pending rate change. `HUD::update(float dt)` polls `hasPendingRateChange()` each frame and calls `setElementVisible()` accordingly. Cross-reference: `architecture/ui-ux/finances-panel.md` — Pending rate change HUD indicator section for the full functional spec.
+
 - **Notification log bell icon**: positioned at the right end of the resource/budget bar, virtual bounds x: 1820–1868 px, y: 8–56 px (48×48 px icon). Displays an unread-count badge (small numeral overlay) that increments when new notifications arrive and resets to zero when the log is opened. Keyboard shortcut: **B** (toggles the log open/closed; rebindable in Settings > Controls with standard conflict detection).
 
 ## Phase 10 Audio Wiring for UI Events
@@ -389,11 +391,11 @@ Demolish, Query) regardless of whether the tool changed.
 ```cpp
 // In UIManager::onEvent(), Priority 5 toolbar dispatch, after setActiveTool():
 if (m_hud && m_audio) {
-    m_audio->playSound(UI_CLICK, SoundPriority::HIGH, 1.0f);
+    m_audio->playSound(SFX_UI_CLICK, SoundPriority::HIGH, 1.0f);
 }
 ```
 
-`UI_CLICK` = SoundId 22 (`ui_click.wav`). Also fires on zone sub-panel button clicks and
+`SFX_UI_CLICK` = SoundId 22 (`ui_click.wav`). Also fires on zone sub-panel button clicks and
 Utilities sub-panel button clicks — any button element backed by `addButton()` whose click
 is processed in the toolbar/sub-panel dispatch path triggers this SFX.
 
@@ -405,13 +407,13 @@ is processed in the toolbar/sub-panel dispatch path triggers this SFX.
 ```cpp
 // In UIManager::updateSubPanelVisibility(), after showing a sub-panel:
 if (m_audio) {
-    m_audio->playSound(UI_MENU_OPEN, SoundPriority::HIGH, 1.0f);
+    m_audio->playSound(SFX_UI_MENU_OPEN, SoundPriority::HIGH, 1.0f);
 }
 ```
 
 Also fires when the Finances Panel opens (T key or resource-bar click). Call site: `FinancesPanel::open()` or the UIManager handler that calls it.
 
-`UI_MENU_OPEN` = SoundId 24 (`ui_menu_open.wav`).
+`SFX_UI_MENU_OPEN` = SoundId 24 (`ui_menu_open.wav`).
 
 ### `ui_menu_close` — Sub-panel or overlay panel closed
 
@@ -422,11 +424,11 @@ Also fires when the Finances Panel closes.
 ```cpp
 // In UIManager::updateSubPanelVisibility(), after hiding a sub-panel:
 if (m_audio) {
-    m_audio->playSound(UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f);
+    m_audio->playSound(SFX_UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f);
 }
 ```
 
-`UI_MENU_CLOSE` = SoundId 25 (`ui_menu_close.wav`).
+`SFX_UI_MENU_CLOSE` = SoundId 25 (`ui_menu_close.wav`).
 
 **Guard**: Do NOT fire `ui_menu_open` and `ui_menu_close` on the same frame (i.e. when
 `updateSubPanelVisibility()` hides one panel and shows another in the same tool-change event).
@@ -443,11 +445,11 @@ immediately after the toast element is created and made visible via
 ```cpp
 // In NotificationManager::postCritical() / postNormal(), after toast element creation:
 if (m_audio) {
-    m_audio->playSound(UI_TOAST, SoundPriority::HIGH, 1.0f);
+    m_audio->playSound(SFX_UI_TOAST, SoundPriority::HIGH, 1.0f);
 }
 ```
 
-`UI_TOAST` = SoundId 23 (`ui_toast.wav`). Fires once per toast display (not once per queue
+`SFX_UI_TOAST` = SoundId 23 (`ui_toast.wav`). Fires once per toast display (not once per queue
 enqueue — only when the toast becomes visible on screen). If a toast is queued but not yet
 visible (because the max simultaneous limit is reached), `ui_toast` does NOT fire until the
 toast actually appears. `NotificationManager` holds `IAudioSystem* m_audio{nullptr}` injected
@@ -462,13 +464,16 @@ at construction (Phase 10 adds this parameter to the constructor alongside the e
 HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock* clock)
 ```
 
-All four parameters are stored as non-owning pointers. The `IAudioSystem*` parameter is stored as:
+All four parameters are stored as non-owning pointers:
 
 ```cpp
 IAudioSystem* m_audio{nullptr};
+IClock*        m_clock{nullptr};
 ```
 
-**Rationale**: Phase 9 HUD calls `m_audio->playSound(SoundId::UI_CLICK, ...)` for toolbar clicks and `m_audio->playSound(SoundId::UI_MENU_OPEN, ...)` for panel opens. Adding this dependency now prevents a Phase 9 header change to HUD that would force recompilation of UIManager and all tests that construct HUD directly.
+`m_audio` is forwarded to `FinancesPanel` in Phase 11l and used directly for toolbar/panel audio calls from Phase 9 onward. `m_clock` is forwarded to `FinancesPanel` in Phase 11l (for key-repeat timing) and used directly by HUD for the undo-button countdown and grace-period indicator timing introduced in Phase 9.
+
+**Rationale**: Phase 9 HUD calls `m_audio->playSound(SFX_UI_CLICK, ...)` for toolbar clicks and `m_audio->playSound(SFX_UI_MENU_OPEN, ...)` for panel opens. Adding this dependency now prevents a Phase 9 header change to HUD that would force recompilation of UIManager and all tests that construct HUD directly.
 
 **Phase 8 stub contract**: The Phase 8 stub body stores `m_audio` but never calls it. No audio calls are made in Phase 8. Phase 9 fills in the audio call sites. Tests that construct HUD in Phase 8 must supply a mock or null-safe stub for `IAudioSystem*`.
 

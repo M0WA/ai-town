@@ -34,6 +34,7 @@
   - `actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0`
   - `actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0`
   - `hendrikmuhs/ccache-action@ed74d11c0b343532753ecead8a951bb09bb34bc9 # v1.2.14` — Linux only (`if: runner.os == 'Linux'`); do NOT use on Windows runners.
+  - `softprops/action-gh-release@<40-CHAR-SHA>  # resolve at implementation time` — used by the `release` job to create GitHub releases and upload package assets; SHA resolved via `gh release view --repo softprops/action-gh-release --json tagName,targetCommitish`.
 - **Compiler output caching — platform-specific rules**:
   - **Linux (GCC/Clang)**: Use `hendrikmuhs/ccache-action` with CMake flags `-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache`. ccache is safe across runner instances for GCC and Clang.
   - **Windows (MSVC)**: Do NOT use ccache — ccache does not support `cl.exe`. The vcpkg binary cache provided by `lukka/run-vcpkg` is the primary Windows caching benefit. The `hendrikmuhs/ccache-action` step must be **skipped or omitted** on the Windows job (use `if: runner.os == 'Linux'`).

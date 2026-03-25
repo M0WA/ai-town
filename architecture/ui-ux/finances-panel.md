@@ -78,10 +78,10 @@ definitions and calculation formulas.
 
 ## Sound Effects
 
-- **Open**: `ui_menu_open` fires from `FinancesPanel::open()` via
-  `m_audio->playSound(UI_MENU_OPEN, SoundPriority::HIGH, 1.0f)`.
-- **Close**: `ui_menu_close` fires from `FinancesPanel::close()` via
-  `m_audio->playSound(UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f)`.
+- **Open**: `SFX_UI_MENU_OPEN` fires from `FinancesPanel::open()` via
+  `m_audio->playSound(SFX_UI_MENU_OPEN, SoundPriority::HIGH, 1.0f)`.
+- **Close**: `SFX_UI_MENU_CLOSE` fires from `FinancesPanel::close()` via
+  `m_audio->playSound(SFX_UI_MENU_CLOSE, SoundPriority::HIGH, 1.0f)`.
 
 `SoundPriority::HIGH` is required for all UI sounds per `source-pool.md` to ensure access to
 the transient reserve and prevent audio starvation during heavy traffic.
