@@ -658,13 +658,14 @@ TEST_F(SettingsPanelStandaloneTest, AllTabs_GetInteractiveElementCount) {
 }
 
 // ===========================================================================
-// TaxRatePanelStandaloneTest -- standalone TaxRatePanel tests.
-// Covers: show/hide, draw, getBounds, onEvent (Escape, click outside,
+// FinancesPanelStandaloneTest -- standalone FinancesPanel tests (Phase 11l).
+// Covers: open/close, draw, onEvent (Escape, click outside,
 //         inc/dec buttons, click inside consumed, boundary rate clamping).
+// Replaces the old TaxRatePanelStandaloneTest (TaxRatePanel merged into FinancesPanel).
 // ===========================================================================
-#include "src/ui/TaxRatePanel.h"
+#include "src/ui/FinancesPanel.h"
 
-class TaxRatePanelStandaloneTest : public ::testing::Test {
+class FinancesPanelStandaloneTest : public ::testing::Test {
 protected:
     void SetUp() override {
         ON_CALL(backend_, addStaticText(_, _, _, _, _)).WillByDefault(
@@ -674,12 +675,18 @@ protected:
         ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 32, 36}));
+        ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
 
         ON_CALL(sim_, getTaxRate(ZoneType::Residential)).WillByDefault(Return(0.10f));
         ON_CALL(sim_, getTaxRate(ZoneType::Commercial)).WillByDefault(Return(0.10f));
         ON_CALL(sim_, getTaxRate(ZoneType::Industrial)).WillByDefault(Return(0.10f));
+        ON_CALL(sim_, getTaxRevenue(_)).WillByDefault(Return(0.0f));
+        ON_CALL(sim_, getUtilityFeeRevenue()).WillByDefault(Return(0.0f));
+        ON_CALL(sim_, getWagesCost()).WillByDefault(Return(0.0f));
+        ON_CALL(sim_, getRoadMaintenanceCost()).WillByDefault(Return(0.0f));
+        ON_CALL(sim_, getServiceUpkeepCost()).WillByDefault(Return(0.0f));
 
-        panel_ = std::make_unique<TaxRatePanel>(&backend_, &sim_);
+        panel_ = std::make_unique<FinancesPanel>(&backend_, &sim_, &audio_, nullptr);
     }
 
     void TearDown() override {
@@ -688,40 +695,44 @@ protected:
 
     NiceMock<MockUIBackend>      backend_;
     NiceMock<MockCitySimulation> sim_;
-    std::unique_ptr<TaxRatePanel> panel_;
+    NiceMock<MockAudioSystem>    audio_;
+    std::unique_ptr<FinancesPanel> panel_;
     uint32_t                     nextHandle_{200};
 };
 
-// Show/hide toggles visibility.
-TEST_F(TaxRatePanelStandaloneTest, ShowAndHide) {
+// Open/close toggles visibility.
+TEST_F(FinancesPanelStandaloneTest, ShowAndHide) {
     EXPECT_FALSE(panel_->isOpen());
-    panel_->show();
+    panel_->open();
     EXPECT_TRUE(panel_->isOpen());
-    panel_->hide();
+    panel_->close();
     EXPECT_FALSE(panel_->isOpen());
 }
 
 // Draw refreshes rate text for all zones.
-TEST_F(TaxRatePanelStandaloneTest, Draw_RefreshesRateText) {
-    panel_->show();
+TEST_F(FinancesPanelStandaloneTest, Draw_RefreshesRateText) {
+    panel_->open();
 
-    // At 10% rate, display should show "10%".
+    // At 10% rate, at least 3 calls must contain "10%" (one per zone row).
+    // The budget section (Section 2) also calls setElementText with non-"10%" strings;
+    // the catch-all below absorbs those so they don't fail the specific expectation.
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
     EXPECT_CALL(backend_, setElementText(_, HasSubstr("10%"))).Times(AtLeast(3));
     panel_->draw();
 }
 
 // Draw enables/disables buttons at rate boundaries.
-TEST_F(TaxRatePanelStandaloneTest, Draw_EnablesDisablesAtBoundaries) {
-    panel_->show();
+TEST_F(FinancesPanelStandaloneTest, Draw_EnablesDisablesAtBoundaries) {
+    panel_->open();
 
     EXPECT_CALL(backend_, setElementEnabled(_, _)).Times(AtLeast(6));
     panel_->draw();
 }
 
 // Draw at minimum rate (1%) disables decrement button.
-TEST_F(TaxRatePanelStandaloneTest, Draw_AtMinRate_DisablesDecButton) {
+TEST_F(FinancesPanelStandaloneTest, Draw_AtMinRate_DisablesDecButton) {
     ON_CALL(sim_, getTaxRate(_)).WillByDefault(Return(0.01f));
-    panel_->show();
+    panel_->open();
 
     EXPECT_CALL(backend_, setElementEnabled(_, _)).Times(AnyNumber());
     EXPECT_CALL(backend_, setElementEnabled(_, false)).Times(AtLeast(3));
@@ -729,25 +740,18 @@ TEST_F(TaxRatePanelStandaloneTest, Draw_AtMinRate_DisablesDecButton) {
 }
 
 // Draw at maximum rate (25%) disables increment button.
-TEST_F(TaxRatePanelStandaloneTest, Draw_AtMaxRate_DisablesIncButton) {
+TEST_F(FinancesPanelStandaloneTest, Draw_AtMaxRate_DisablesIncButton) {
     ON_CALL(sim_, getTaxRate(_)).WillByDefault(Return(0.25f));
-    panel_->show();
+    panel_->open();
 
     EXPECT_CALL(backend_, setElementEnabled(_, _)).Times(AnyNumber());
     EXPECT_CALL(backend_, setElementEnabled(_, false)).Times(AtLeast(3));
     panel_->draw();
 }
 
-// getBounds returns the expected panel rect.
-TEST_F(TaxRatePanelStandaloneTest, GetBounds_ReturnsCorrectRect) {
-    Rect r = panel_->getBounds();
-    EXPECT_EQ(r.w, 300);
-    EXPECT_EQ(r.h, 200);
-}
-
 // Escape closes the panel.
-TEST_F(TaxRatePanelStandaloneTest, Escape_ClosesPanel) {
-    panel_->show();
+TEST_F(FinancesPanelStandaloneTest, Escape_ClosesPanel) {
+    panel_->open();
     ASSERT_TRUE(panel_->isOpen());
 
     InputEvent esc;
@@ -759,54 +763,53 @@ TEST_F(TaxRatePanelStandaloneTest, Escape_ClosesPanel) {
 }
 
 // Click outside panel dismisses it (not consumed).
-TEST_F(TaxRatePanelStandaloneTest, ClickOutside_DismissesPanel) {
-    panel_->show();
+TEST_F(FinancesPanelStandaloneTest, ClickOutside_DismissesPanel) {
+    panel_->open();
     ASSERT_TRUE(panel_->isOpen());
 
-    Rect bounds = panel_->getBounds();
+    // FinancesPanel: x=780, y=60, w=360, h=520
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
-    click.x = bounds.x - 50; // Outside left edge
-    click.y = bounds.y + 10;
+    click.x = 730;  // Outside left edge (780 - 50)
+    click.y = 70;
     bool consumed = panel_->onEvent(click);
     EXPECT_FALSE(consumed); // Click not consumed (passed through)
     EXPECT_FALSE(panel_->isOpen());
 }
 
 // Click inside panel (not on button) is consumed.
-TEST_F(TaxRatePanelStandaloneTest, ClickInside_Consumed) {
-    panel_->show();
+TEST_F(FinancesPanelStandaloneTest, ClickInside_Consumed) {
+    panel_->open();
 
     // Return empty rects for buttons so no button is hit.
     ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
 
-    Rect bounds = panel_->getBounds();
+    // FinancesPanel: x=780, y=60 — click at (790, 70) is inside
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
-    click.x = bounds.x + 10; // Inside panel
-    click.y = bounds.y + 10;
+    click.x = 790;
+    click.y = 70;
     bool consumed = panel_->onEvent(click);
     EXPECT_TRUE(consumed);
 }
 
 // Increment button click calls setTaxRate with increased rate.
-TEST_F(TaxRatePanelStandaloneTest, IncButton_IncreasesTaxRate) {
-    panel_->show();
+TEST_F(FinancesPanelStandaloneTest, IncButton_IncreasesTaxRate) {
+    panel_->open();
 
-    Rect bounds = panel_->getBounds();
+    // FinancesPanel inc buttons are at kPanelX+204=984, kPanelY+32=92, 32x36
     // Make all dec buttons at (0,0,0,0) and all inc buttons at the click point.
     int callIdx = 0;
     ON_CALL(backend_, getElementRect(_)).WillByDefault(
-        [&callIdx, &bounds](UIElementHandle) {
-            // Alternate: first call dec (miss), second call inc (hit).
+        [&callIdx](UIElementHandle) {
             if (callIdx % 2 == 0) {
                 callIdx++;
                 return Rect{0, 0, 0, 0}; // Dec button - miss
             } else {
                 callIdx++;
-                return Rect{bounds.x + 204, bounds.y + 32, 32, 36}; // Inc button - hit
+                return Rect{984, 92, 32, 36}; // Inc button - hit
             }
         });
 
@@ -815,34 +818,33 @@ TEST_F(TaxRatePanelStandaloneTest, IncButton_IncreasesTaxRate) {
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
-    click.x = bounds.x + 210;
-    click.y = bounds.y + 40;
+    click.x = 990;
+    click.y = 100;
     bool consumed = panel_->onEvent(click);
     EXPECT_TRUE(consumed);
 }
 
 // Decrement button click calls setTaxRate with decreased rate.
-TEST_F(TaxRatePanelStandaloneTest, DecButton_DecreasesTaxRate) {
-    panel_->show();
+TEST_F(FinancesPanelStandaloneTest, DecButton_DecreasesTaxRate) {
+    panel_->open();
 
-    Rect bounds = panel_->getBounds();
-    // Make dec button at the click point.
+    // FinancesPanel dec buttons are at kPanelX+116=896, kPanelY+32=92, 32x36
     ON_CALL(backend_, getElementRect(_)).WillByDefault(
-        Return(Rect{bounds.x + 116, bounds.y + 32, 32, 36}));
+        Return(Rect{896, 92, 32, 36}));
 
     EXPECT_CALL(sim_, setTaxRate(ZoneType::Residential, _)).Times(1);
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
-    click.x = bounds.x + 120;
-    click.y = bounds.y + 40;
+    click.x = 900;
+    click.y = 100;
     bool consumed = panel_->onEvent(click);
     EXPECT_TRUE(consumed);
 }
 
 // Non-visible panel does not process events.
-TEST_F(TaxRatePanelStandaloneTest, OnEvent_WhenHidden_ReturnsFalse) {
+TEST_F(FinancesPanelStandaloneTest, OnEvent_WhenHidden_ReturnsFalse) {
     EXPECT_FALSE(panel_->isOpen());
 
     InputEvent esc;
@@ -852,7 +854,7 @@ TEST_F(TaxRatePanelStandaloneTest, OnEvent_WhenHidden_ReturnsFalse) {
 }
 
 // Draw when not visible is a no-op.
-TEST_F(TaxRatePanelStandaloneTest, Draw_WhenHidden_NoCrash) {
+TEST_F(FinancesPanelStandaloneTest, Draw_WhenHidden_NoCrash) {
     EXPECT_FALSE(panel_->isOpen());
     panel_->draw();
     SUCCEED();

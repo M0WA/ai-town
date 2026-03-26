@@ -5,10 +5,10 @@
 
 // Forward declarations — full includes in HUD.cpp only.
 class IAudioSystem;
-class BudgetDetailPanel;
+class FinancesPanel;
 
 // HUD — the in-gameplay heads-up display.
-// Owns BudgetDetailPanel as a sub-panel.
+// Owns FinancesPanel as a sub-panel.
 // Parameter order (backend, audio, sim, clock) matches the UIManager canonical order.
 //
 // All coordinates are in virtual 1920x1080 space.
@@ -29,15 +29,18 @@ public:
     // Update the active-tool indicator text (e.g. "Zone", "Road", "Query").
     void setActiveToolLabel(const std::string& text);
 
-    // Access the owned budget detail sub-panel.
-    BudgetDetailPanel* getBudgetDetail() const { return m_budgetDetail; }
+    // Access the owned finances sub-panel.
+    FinancesPanel* getFinances() const { return m_finances; }
+
+    // Toggle the Finances panel open/closed.
+    void toggleFinancesPanel();
 
 private:
     IUIBackend*        m_backend{nullptr};
     IAudioSystem*      m_audio{nullptr};
     ICitySimulation*   m_sim{nullptr};
     IClock*            m_clock{nullptr};
-    BudgetDetailPanel* m_budgetDetail{nullptr};
+    FinancesPanel*     m_finances{nullptr};
 
     bool m_visible{false};
 

@@ -6,7 +6,7 @@
 // All coordinates are in virtual 1920x1080 space.
 
 #include "src/ui/HUD.h"
-#include "src/ui/BudgetDetailPanel.h"
+#include "src/ui/FinancesPanel.h"
 #include "src/ui/hud_sprite_ids.h"
 #include "src/interfaces/IAudioSystem.h"
 
@@ -49,7 +49,7 @@ HUD::HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock*
     , m_audio(audio)
     , m_sim(sim)
     , m_clock(clock)
-    , m_budgetDetail(nullptr)
+    , m_finances(nullptr)
     , m_visible(false)
     , m_gameStartTime(clock ? clock->nowSeconds() : 0.0)
     , m_gracePeriodExpired(false)
@@ -58,7 +58,7 @@ HUD::HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock*
 {
     if (!m_backend) return;
 
-    m_budgetDetail = new BudgetDetailPanel(m_backend, m_sim);
+    m_finances = new FinancesPanel(m_backend, m_sim, m_audio, m_clock);
 
     // --- Resource / budget bar (top, y:0-56) ---
     m_treasuryLabel   = m_backend->addStaticText("$0", 8, 8, 200, 48);
@@ -146,8 +146,8 @@ HUD::HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock*
 // Destructor
 // ---------------------------------------------------------------------------
 HUD::~HUD() {
-    delete m_budgetDetail;
-    m_budgetDetail = nullptr;
+    delete m_finances;
+    m_finances = nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -294,9 +294,9 @@ void HUD::draw() {
     m_backend->setElementText(m_btnSpeed3,  speed == SpeedMultiplier::x3     ? "[3x]" : "3x");
     m_backend->setElementText(m_btnSpeed10, speed == SpeedMultiplier::x10    ? "[10x]": "10x");
 
-    // Budget detail sub-panel draw
-    if (m_budgetDetail) {
-        m_budgetDetail->draw();
+    // Finances sub-panel draw
+    if (m_finances) {
+        m_finances->draw();
     }
 }
 
@@ -352,9 +352,21 @@ void HUD::update(float dt) {
         }
     }
 
-    // Budget detail sub-panel update
-    if (m_budgetDetail) {
-        m_budgetDetail->update();
+    // Finances sub-panel update
+    if (m_finances) {
+        m_finances->update(dt);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// toggleFinancesPanel
+// ---------------------------------------------------------------------------
+void HUD::toggleFinancesPanel() {
+    if (!m_finances) return;
+    if (m_finances->isOpen()) {
+        m_finances->close();
+    } else {
+        m_finances->open();
     }
 }
 

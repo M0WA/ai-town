@@ -209,6 +209,8 @@ private:
         int  footprintOriginX{-1};
         int  footprintOriginZ{-1};
         bool isAbandoned{false};  // true when building abandoned due to road proximity > 3 tiles
+        bool underConstruction{false};  // true from placeZone() until demand >= construction_delay_demand_threshold
+        int  buildingVariantNum{0};     // variant (1–4) assigned at placeZone(); used when mesh spawns in doPopulationTick()
 
         // Phase 10 per-tile audio transition flags.
         // Each flag fires its corresponding SFX exactly once per coverage-loss event

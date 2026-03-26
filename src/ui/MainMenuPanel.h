@@ -4,8 +4,13 @@
 
 struct InputEvent;
 
+// Map size presets for the New Game screen (tile dimensions for TerrainSystem::generate()).
+// Defined here per architecture/graphics-architecture/procedural-terrain.md §Map Size Presets.
+// MainMenuPanel owns these as UI-facing aliases — not internal TerrainSystem constants.
+enum class MapSize { kSmall = 128, kMedium = 512, kLarge = 1024 };
+
 // MainMenuPanel -- full-screen overlay with New Game, Load Game, Settings, Quit buttons.
-// New Game flow: difficulty selector, mode selector, seed entry, loading screen.
+// New Game flow: mode selector, difficulty selector, map size selector, seed entry, loading screen.
 class MainMenuPanel {
 public:
     explicit MainMenuPanel(IUIBackend* backend);
@@ -22,6 +27,7 @@ public:
     // Polling API for UIManager: returns true (once) when "Start City" was clicked.
     bool consumeStartGameRequest();
     int getSelectedDifficulty() const { return m_selectedDifficulty; }
+    MapSize getSelectedMapSize() const { return m_selectedMapSize; }
 
     // Returns true when on the main menu screen (not New Game or Loading).
     bool isOnMainMenuScreen() const { return m_screen == Screen::MainMenu; }
@@ -31,6 +37,9 @@ public:
 
     // Returns true (once) when "Quit" was clicked or Enter-activated.
     bool consumeQuitRequest();
+
+    // Returns true (once) when "Load Game" was clicked while the button is enabled.
+    bool consumeLoadGameRequest();
 
     // Phase 11: Update Load Game button enabled state.
     // When available=false (default): button grayed with tooltip "No saves found."
@@ -71,6 +80,10 @@ private:
     UIElementHandle m_ngBtnEasy{kInvalidUIElement};
     UIElementHandle m_ngBtnNormal{kInvalidUIElement};
     UIElementHandle m_ngBtnHard{kInvalidUIElement};
+    UIElementHandle m_ngMapSizeLabel{kInvalidUIElement};
+    UIElementHandle m_ngBtnSizeSmall{kInvalidUIElement};
+    UIElementHandle m_ngBtnSizeMedium{kInvalidUIElement};
+    UIElementHandle m_ngBtnSizeLarge{kInvalidUIElement};
     UIElementHandle m_ngSeedLabel{kInvalidUIElement};
     UIElementHandle m_ngSeedInput{kInvalidUIElement};
     UIElementHandle m_ngBtnRandomize{kInvalidUIElement};
@@ -85,11 +98,13 @@ private:
 
     // Focus tracking
     int m_focusedButton{0};
-    int m_selectedDifficulty{1};   // 0=Easy, 1=Normal, 2=Hard
+    int m_selectedDifficulty{1};           // 0=Easy, 1=Normal, 2=Hard
+    MapSize m_selectedMapSize{MapSize::kMedium};  // default: Medium
     bool m_abortCheckpointPassed{false}; // Loading: past point of no return
     bool m_startGameRequested{false};    // "Start City" was clicked
     bool m_settingsRequested{false};     // "Settings" was clicked
     bool m_quitRequested{false};         // "Quit" was clicked
+    bool m_loadGameRequested{false};     // "Load Game" was clicked and enabled
 
     // Helpers
     void showMainMenuScreen();

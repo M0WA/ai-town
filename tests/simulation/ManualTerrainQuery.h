@@ -1,6 +1,9 @@
 #pragma once
 #include "ITerrainQuery.h"
+#include <map>
+#include <tuple>
 #include <unordered_map>
+#include <vector>
 #include <cstdint>
 
 // ManualTerrainQuery — test-local implementation of ITerrainQuery.
@@ -62,17 +65,29 @@ public:
         return m_globalSlope;                           // fall back to global slope
     }
 
-    // getHeightAt() — returns m_heightAfterFlat if m_flattened is true, otherwise
-    // m_heightBeforeFlat.  Both default to 0.0f so all existing tests that rely on
-    // a 0.0f return are unaffected.
-    float getHeightAt(int /*tileX*/, int /*tileZ*/) const override {
+    // getHeightAt() — checks m_tileHeights first (heights set via setHeightAt() or
+    // recorded via setTileHeight()), then falls back to the legacy flat/slope return.
+    // Both m_heightBeforeFlat and m_heightAfterFlat default to 0.0f so all existing
+    // tests that rely on a 0.0f return are unaffected.
+    float getHeightAt(int tileX, int tileZ) const override {
+        auto it = m_tileHeights.find(makeKey(tileX, tileZ));
+        if (it != m_tileHeights.end()) return it->second;
         return m_flattened ? m_heightAfterFlat : m_heightBeforeFlat;
     }
 
-    // setTileHeight() — stateful form: marks m_flattened = true so tests can assert
-    // that CitySimulation called this method during placement.
-    void setTileHeight(int /*tileX*/, int /*tileZ*/, float /*height*/) override {
+    // setTileHeight() — records the call in m_flattenCalls, updates m_tileHeights so
+    // subsequent getHeightAt() calls reflect the flattened value, and sets m_flattened.
+    void setTileHeight(int tileX, int tileZ, float height) override {
+        m_flattenCalls.emplace_back(tileX, tileZ, height);
+        m_tileHeights[makeKey(tileX, tileZ)] = height;
         m_flattened = true;
+    }
+
+    // setHeightAt() — configure a specific tile's height for getHeightAt() without
+    // recording a flatten call. Used by integration tests to set up non-uniform
+    // terrain before placement (simulates pre-existing terrain heights).
+    void setHeightAt(int x, int z, float h) {
+        m_tileHeights[makeKey(x, z)] = h;
     }
 
     // flushTerrainRebuilds() — no-op in tests; real TerrainSystem delegates to
@@ -89,6 +104,14 @@ public:
     bool  m_flattened{false};
     float m_heightBeforeFlat{0.0f};
     float m_heightAfterFlat{0.0f};
+
+    // Phase 11l additions:
+    // m_tileHeights: per-tile heights set via setHeightAt() or via setTileHeight().
+    //   Used by getHeightAt() as the primary lookup before the legacy flat fallback.
+    // m_flattenCalls: ordered record of every setTileHeight(tileX, tileZ, height)
+    //   call; integration tests assert on count and vertex coverage.
+    std::map<int64_t, float>                         m_tileHeights;
+    std::vector<std::tuple<int, int, float>>          m_flattenCalls;
 
 private:
     static int64_t makeKey(int x, int z) {

@@ -1,6 +1,9 @@
 #pragma once
 // AudioSystem.h — Phase 7 full implementation header.
 //
+// irr::ILogger forward-declared below — do NOT include <irrlicht.h> here.
+// The zero-AL-includes contract extends to zero-Irrlicht-includes as well.
+//
 // ZERO OpenAL includes in this header.  All AL/ALC types that appear as member
 // types are either forward-declared below (ALCdevice, ALCcontext) or represented
 // via local type aliases (FnSetThreadCtx) or unsigned int (ALuint = unsigned int).
@@ -46,6 +49,10 @@ using  ALCdevice  = ALCdevice_struct;
 struct ALCcontext_struct;
 using  ALCcontext = ALCcontext_struct;
 #endif // AL_ALC_H
+
+// Forward-declare irr::ILogger — avoids pulling <irrlicht.h> into this header.
+// AudioSystem.cpp includes <irrlicht.h> directly.
+namespace irr { class ILogger; }
 
 // Local type alias for alcSetThreadContext — matches the real signature exactly.
 // Using PFNALCSETTHREADCONTEXTPROC would require <AL/alext.h> and break the
@@ -135,11 +142,11 @@ struct AudioStream {
 // ---------------------------------------------------------------------------
 class AudioSystem : public IAudioSystem {
 public:
-    // Primary constructor (production use): IAlcFunctions defaults to nullptr,
-    // which causes the constructor to use the internal DefaultAlcFunctions adapter
-    // (real ALC calls).  Tests inject a mock IAlcFunctions to simulate absent
-    // extensions without a real OpenAL device.
-    explicit AudioSystem(IClock* clock, IAlcFunctions* alcFunctions = nullptr);
+    // Primary constructor (production use).
+    // logger    — Irrlicht ILogger* for diagnostic output; nullptr falls back to stderr.
+    // clock     — IClock injection for deterministic timing in tests.
+    // alcFunctions — IAlcFunctions injection seam; nullptr uses DefaultAlcFunctions (real ALC).
+    explicit AudioSystem(irr::ILogger* logger, IClock* clock, IAlcFunctions* alcFunctions = nullptr);
     ~AudioSystem() override;
 
     AudioSystem(const AudioSystem&)            = delete;
@@ -329,6 +336,15 @@ private:
     // -----------------------------------------------------------------------
     IClock* m_clock{nullptr};
     double  m_lastDuckWakeTime{0.0};  // FROZEN NAME (Phase 3)
+
+    // -----------------------------------------------------------------------
+    // ILogger injection (Phase 11l Deliverable 9).
+    // m_logger is non-owning; Irrlicht retains ownership.
+    // m_logMutex serialises concurrent log() calls from the audio thread and
+    // the main thread — irr::ILogger is not documented as thread-safe.
+    // -----------------------------------------------------------------------
+    irr::ILogger* m_logger{nullptr};
+    std::mutex    m_logMutex;
 
     // -----------------------------------------------------------------------
     // Game-over fade state (post-V1 Scenario mode only — stubs in V1).
@@ -538,8 +554,9 @@ private:
     // EFX filter allocation loop (runs in constructor on main thread).
     void allocateEFXFilters();
 
-    // Log helpers (write to stderr; no external logger dependency in Phase 7).
-    static void logWarning(const std::string& msg);
-    static void logError(const std::string& msg);
-    static void logInfo(const std::string& msg);
+    // Log helpers — route through irr::ILogger when available, else stderr.
+    // Instance methods (not static) so they can access m_logger / m_logMutex.
+    void logWarning(const std::string& msg);
+    void logError(const std::string& msg);
+    void logInfo(const std::string& msg);
 };

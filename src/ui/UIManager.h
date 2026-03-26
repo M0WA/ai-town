@@ -32,7 +32,7 @@ struct InputEvent;
 class NotificationManager;
 class MainMenuPanel;
 class HUD;
-class TaxRatePanel;
+class FinancesPanel;
 class Minimap;
 class InspectorPanel;
 class PauseMenuPanel;
@@ -202,6 +202,11 @@ public:
     // "" hides the label. "No saves found." for first run; corrupted message for bad saves.
     void setSaveStatusText(const std::string& text);
 
+    // Phase 11l: Return the map tile dimension selected in MainMenuPanel New Game screen.
+    // Returns the integer value of MapSize (128, 512, or 1024).
+    // Used by main.cpp to pass to TerrainSystem::generate() when starting a new game.
+    int getPendingMapTiles() const;
+
     // Returns true when the user requested application quit
     // (from Main Menu Quit or Pause Menu Quit to Desktop).
     // Polled by main.cpp to break the frame loop.
@@ -358,8 +363,7 @@ private:
 
     // --- Phase 8: panel open-state tracking for input arbitration ---
     bool m_inspectorOpen{false};
-    bool m_taxPanelOpen{false};
-    bool m_budgetPanelOpen{false};  // Phase 11h: BudgetDetailPanel toggle state
+    bool m_financesPanelOpen{false};  // Phase 11l: FinancesPanel toggle state
 
     // --- Phase 8: Ctrl-key state tracking for Ctrl+Z ---
     bool m_ctrlDown{false};
@@ -399,7 +403,6 @@ private:
     NotificationManager* m_notifications{nullptr};
     MainMenuPanel*       m_mainMenu{nullptr};
     HUD*                 m_hud{nullptr};
-    TaxRatePanel*        m_taxPanel{nullptr};
     Minimap*             m_minimap{nullptr};
     InspectorPanel*      m_inspector{nullptr};
     PauseMenuPanel*      m_pauseMenu{nullptr};

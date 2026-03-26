@@ -1,9 +1,10 @@
 // tests/ui/budget_breakdown_test.cpp
 //
-// Phase 11h Deliverable 5c: Budget Panel Income/Expense Breakdown Tests
+// Phase 11l update: Budget Panel Income/Expense Breakdown Tests
 //
-// Verifies that BudgetDetailPanel correctly reports sectioned income totals,
-// expense totals, net balance, and the V1 tourism income placeholder ($0).
+// Verifies that FinancesPanel (merged from BudgetDetailPanel + TaxRatePanel,
+// Phase 11l) correctly reports sectioned income totals, expense totals,
+// net balance, and the V1 tourism income placeholder ($0).
 //
 // Tests verify the arithmetic contract of the budget breakdown sections:
 //   Income = R_tax + C_tax + I_tax + utility_fees
@@ -18,16 +19,17 @@
 // Mock policy: NiceMock for all — construction calls are complex.
 // TearDown contract: panel_ reset before mocks destroyed.
 //
-// Spec reference: implementation/phase-11h.md §2a, §5c
+// Spec reference: architecture/ui-ux/finances-panel.md Budget Section
 //   Income section: Tax R + Tax C + Tax I + Utility fees
 //   Expenses section: Road maintenance + Service upkeep + Wages
 //   Total: Income - Expenses (net balance)
 //   Tourism income: always $0 in V1 (grayed-out placeholder row)
 
-#include "src/ui/BudgetDetailPanel.h"
+#include "src/ui/FinancesPanel.h"
 #include "src/simulation/simulation_constants.h"
 #include "tests/ui/MockUIBackend.h"
 #include "tests/ui/MockCitySimulation.h"
+#include "tests/simulation/MockAudioSystem.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>
@@ -67,8 +69,9 @@ protected:
             [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
         ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
+        ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
 
-        // Budget line items per Phase 11h test spec §5c.
+        // Budget line items per test spec.
         ON_CALL(sim_, getTaxRevenue(ZoneType::Residential)).WillByDefault(Return(100.0f));
         ON_CALL(sim_, getTaxRevenue(ZoneType::Commercial)).WillByDefault(Return(200.0f));
         ON_CALL(sim_, getTaxRevenue(ZoneType::Industrial)).WillByDefault(Return(150.0f));
@@ -76,15 +79,10 @@ protected:
         ON_CALL(sim_, getWagesCost()).WillByDefault(Return(80.0f));
         ON_CALL(sim_, getRoadMaintenanceCost()).WillByDefault(Return(30.0f));
         ON_CALL(sim_, getServiceUpkeepCost()).WillByDefault(Return(20.0f));
+        ON_CALL(sim_, getTaxRate(_)).WillByDefault(Return(0.10f));
 
-        // Additional stubs required by BudgetDetailPanel construction/draw.
-        ON_CALL(sim_, getCurrentMonthlyRevenue()).WillByDefault(Return(370.0f));
-        ON_CALL(sim_, estimateMonthlyUpkeep()).WillByDefault(Return(130.0f));
-        ON_CALL(sim_, getNextUnlockThreshold(_)).WillByDefault(Return(5000.0f));
-        ON_CALL(sim_, getDensityUnlockState()).WillByDefault(Return(DensityUnlockState{}));
-
-        panel_ = std::make_unique<BudgetDetailPanel>(&backend_, &sim_);
-        panel_->show();
+        panel_ = std::make_unique<FinancesPanel>(&backend_, &sim_, &audio_, nullptr);
+        panel_->open();
     }
 
     void TearDown() override {
@@ -93,7 +91,8 @@ protected:
 
     NiceMock<MockUIBackend>      backend_;
     NiceMock<MockCitySimulation> sim_;
-    std::unique_ptr<BudgetDetailPanel> panel_;
+    NiceMock<MockAudioSystem>    audio_;
+    std::unique_ptr<FinancesPanel> panel_;
     uint32_t nextHandle_{100};
 
     // Expected budget values (computed from stub data above).
@@ -115,12 +114,12 @@ protected:
 // ============================================================================
 // BudgetBreakdown_IncomeSectionTotal_MatchesSumOfLineItems
 //
-// The income section total shown by BudgetDetailPanel must equal the arithmetic
+// The income section total shown by FinancesPanel must equal the arithmetic
 // sum of all income line items:
 //   Income total = Tax R + Tax C + Tax I + Utility fees = 100 + 200 + 150 + 50 = 500
 //
 // Verified by checking that the panel's draw() outputs text containing "$500"
-// for the income section (section header or subtotal line).
+// for the income section (header row with subtotal).
 // ============================================================================
 TEST_F(BudgetBreakdownTest, BudgetBreakdown_IncomeSectionTotal_MatchesSumOfLineItems)
 {
@@ -130,7 +129,7 @@ TEST_F(BudgetBreakdownTest, BudgetBreakdown_IncomeSectionTotal_MatchesSumOfLineI
     EXPECT_FLOAT_EQ(incomeTotal, kExpectedIncomeTotal)
         << "Income total must equal sum of line items: 100 + 200 + 150 + 50 = 500";
 
-    // Verify BudgetDetailPanel displays the correct income total.
+    // Verify FinancesPanel displays the correct income total.
     EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
     EXPECT_CALL(backend_, setElementText(_, HasSubstr("$500"))).Times(AtLeast(1));
     panel_->draw();
@@ -152,7 +151,7 @@ TEST_F(BudgetBreakdownTest, BudgetBreakdown_ExpenseSectionTotal_MatchesSumOfLine
     EXPECT_FLOAT_EQ(expenseTotal, kExpectedExpenseTotal)
         << "Expense total must equal sum of line items: 80 + 30 + 20 = 130";
 
-    // Verify BudgetDetailPanel displays the correct expense total.
+    // Verify FinancesPanel displays the correct expense total.
     EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
     EXPECT_CALL(backend_, setElementText(_, HasSubstr("$130"))).Times(AtLeast(1));
     panel_->draw();
@@ -173,7 +172,7 @@ TEST_F(BudgetBreakdownTest, BudgetBreakdown_NetBalance_EqualsIncomeTotalMinusExp
     EXPECT_FLOAT_EQ(netBalance, kExpectedNetBalance)
         << "Net balance must equal income total minus expense total: 500 - 130 = 370";
 
-    // BudgetDetailPanel displays the net balance as a dollar amount.
+    // FinancesPanel displays the net balance as a dollar amount.
     // The format may be "$370" or "+$370" depending on implementation.
     EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
     EXPECT_CALL(backend_, setElementText(_, HasSubstr("$370"))).Times(AtLeast(1));
@@ -183,8 +182,8 @@ TEST_F(BudgetBreakdownTest, BudgetBreakdown_NetBalance_EqualsIncomeTotalMinusExp
 // ============================================================================
 // BudgetBreakdown_TourismIncome_AlwaysZeroInV1
 //
-// Tourism income is a post-V1 feature. In V1 the Budget Detail Panel income
-// section must display a grayed-out placeholder "Tourism income: $0 (post-V1)".
+// Tourism income is a post-V1 feature. In V1 the FinancesPanel income
+// section must display a grayed-out placeholder "Tourism: $0 (post-V1)".
 // This test verifies that the panel never reports a non-zero tourism value.
 //
 // The tourism line is always $0 regardless of treasury state, population, or
@@ -200,7 +199,7 @@ TEST_F(BudgetBreakdownTest, BudgetBreakdown_TourismIncome_AlwaysZeroInV1)
     // The panel must display the tourism placeholder row.
     // Draw and verify the tourism label appears in the output.
     EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
-    // The tourism line is labeled "Tourism income: $0 (post-V1)" per phase-11h.md §2a.
+    // The tourism line is labeled "Tourism: $0 (post-V1)".
     // Verify draw() calls setElementText with a substring matching the zero amount.
     EXPECT_CALL(backend_, setElementText(_, HasSubstr("$0"))).Times(AtLeast(1));
     panel_->draw();
