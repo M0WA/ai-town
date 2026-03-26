@@ -28,6 +28,7 @@
 // in IrrlichtUIBackend.cpp.
 namespace irr {
     class IrrlichtDevice;
+    class ILogger;                              // used by m_logger for diagnostic output
     struct SEvent;                              // used in handleGuiHoverEvent signature
     namespace gui  { class IGUIEnvironment; class IGUIElement; class IGUIFont; }
     namespace video { class IVideoDriver; class ITexture; }
@@ -173,6 +174,11 @@ private:
     irr::IrrlichtDevice*       m_device{nullptr};
     irr::gui::IGUIEnvironment* m_guiEnv{nullptr};
     irr::video::IVideoDriver*  m_driver{nullptr};
+
+    // Cached logger — derived from m_device->getLogger() at construction time.
+    // Used for all runtime diagnostics in place of fprintf(stderr,...).
+    // Falls back to fprintf(stderr,...) when null (device absent / headless CI).
+    irr::ILogger*              m_logger{nullptr};
 
     // Monospace bitmap font loaded from assets/fonts/hud_mono_font.xml.
     // null when the file is absent; callers must null-check before use.

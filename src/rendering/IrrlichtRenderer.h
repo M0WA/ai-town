@@ -200,6 +200,11 @@ private:
     irr::scene::ISceneManager*  m_smgr;
     irr::scene::ICameraSceneNode* m_camera{nullptr};
 
+    // Cached logger — derived from m_device->getLogger() at construction time.
+    // Used for all runtime diagnostics in place of fprintf(stderr,...).
+    // Falls back to fprintf(stderr,...) when null (device absent, e.g. unit tests).
+    irr::ILogger*               m_logger{nullptr};
+
     // --- Phase 10b: sky cloud plane ---
     // m_driverType: captured from the live device in the constructor body.
     //   Used to guard initCloudPlane() against headless (EDT_NULL) contexts.
