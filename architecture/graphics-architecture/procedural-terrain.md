@@ -615,7 +615,11 @@ footprint, the caller (`CitySimulation::placeZone()`) must also call `setTileHei
 every road tile within the 1-tile orthogonal+diagonal border ring of the footprint (a
 (N+2)×(N+2) candidate set minus the N×N footprint itself), bringing adjacent roads to the
 same `flatHeight`. Non-road tiles in the border ring are NOT modified. This prevents road
-geometry from intersecting the terrain after zone-triggered terrain flattening.
+geometry from intersecting the terrain after zone-triggered terrain flattening. After the
+border-ring loop completes, the caller must call `flushTerrainRebuilds()` (see
+*flushTerrainRebuilds() — Synchronous Geometry Update After Placement* below) to
+synchronously apply all height changes to terrain geometry before the next render frame;
+without this call, terrain chunks remain at pre-flatten heights for multiple frames.
 
 ### flushTerrainRebuilds() — Synchronous Geometry Update After Placement
 

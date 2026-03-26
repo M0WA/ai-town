@@ -1127,6 +1127,14 @@ the audio playback path, not a unit test with strict call-count expectations on 
   # IUIBackend.h from src/interfaces/ (moved in Phase 10b); interface headers from src/interfaces/
   target_include_directories(ui_tests PRIVATE tests/simulation/ tests/ui/ src/interfaces/ ${CMAKE_SOURCE_DIR})
 
+  # REQUIRED for ui_tests: enable AITOWN_TESTING_ENABLED so that UIManager test-only
+  # methods (handleNewGameRequest, setGameSessionActiveForTest — gated on
+  # #ifdef AITOWN_TESTING_ENABLED) are compiled into the ui_tests binary.
+  # Pattern mirrors simulation_tests (which uses AITOWN_TESTING_ENABLED for
+  # testForceUnlockDensityTier). MUST be on ui_tests ONLY — never on aitown or
+  # aitown_ui production targets. Added in Phase 11m.
+  target_compile_definitions(ui_tests PRIVATE AITOWN_TESTING_ENABLED=1)
+
   # audio_tests — uses MockAudioSystem from tests/simulation/;
   # IAudioSystem.h from src/interfaces/; audio_constants.h from src/audio/
   target_include_directories(audio_tests PRIVATE tests/simulation/ src/interfaces/ src/audio/ ${CMAKE_SOURCE_DIR})

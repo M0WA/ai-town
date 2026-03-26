@@ -760,12 +760,17 @@ on a clean slate without reinitializing the renderer or device.
    sequence on each entry — (1) clear all material texture slots (iterate
    `mat.setTexture(t, nullptr)` for each texture unit), (2) call
    `m_driver->setMaterial(SMaterial{})` to flush the driver state, (3) call
-   `node->remove()` — then call `m_buildingNodes.clear()` once after the loop.
+   `node->remove()`, (4) `delete kv.second` to free the `LODNode*` C++ wrapper (building
+   nodes are wrapped in `LODNode`; the wrapper is heap-allocated by `placeBuildingMesh` and
+   not reference-counted — it must be `delete`d explicitly after `node->remove()`). Call
+   `m_buildingNodes.clear()` once after the loop to drop all now-dangling map entries.
    **Do NOT call `destroyTileNode()` during the iteration** — that method erases from the
    map internally, causing iterator invalidation on `std::unordered_map`. Use the
    bulk-clear pattern instead.
-2. **Evict road nodes**: same safe bulk-clear pattern with full eviction sequence as step 1
-   for `m_roadNodes`.
+2. **Evict road nodes**: iterate `m_roadNodes`, applying the same 3-step eviction sequence
+   as step 1 — texture clear, driver material flush, `node->remove()` — then call
+   `m_roadNodes.clear()` after the loop. Road nodes are raw `ISceneNode*` (no `LODNode`
+   wrapper), so there is no `delete` step.
 3. **Evict agent nodes**: iterate `m_agentNodes`, perform the full eviction sequence
    (texture clear → `m_driver->setMaterial(SMaterial{})` → `node->remove()`), then
    `m_agentNodes.clear()` after the loop. Traffic vehicle scene nodes that persist from
@@ -781,6 +786,23 @@ on a clean slate without reinitializing the renderer or device.
 6. **Do NOT remove terrain chunk nodes** — terrain is regenerated separately via
    `TerrainSystem::generate()` after `clearCity()` returns. Terrain nodes must not be touched
    by this method.
+
+### TextureCache Note
+
+`clearCity()` does NOT call `TextureCache::releaseSRGB()` or `TextureCache::releaseSplatMap()`.
+The shared sRGB atlas textures (`buildings_atlas_d.dds`, billboard atlas, road tileable texture)
+are loaded once at renderer initialization and retained across game sessions — they are valid
+throughout the application lifetime and reused by `placeBuildingMesh()` and `addRoadTile()` in
+the next game session. Calling `releaseSRGB()` during `clearCity()` would incorrectly decrement
+ref-counts for atlas textures that remain in active use, eventually triggering premature eviction
+via `evictUnreferenced()`.
+
+The material-slot clearing in steps 1–3 (`mat.setTexture(t, nullptr)`) operates on the **linear**
+ITexture* pool only — sRGB atlas textures are raw `GLuint` values stored in the TextureCache sRGB
+pool and are **not** present in node material slots. No `releaseLinear()` call is needed for
+building material slots either, since buildings use sRGB atlas textures (not the linear pool).
+See `architecture/graphics-architecture/texture-cache.md §Eviction safety` for the full
+per-pool release contract.
 
 ### Call Site
 
