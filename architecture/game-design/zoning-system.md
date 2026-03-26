@@ -218,13 +218,13 @@ If no cardinal-adjacent road exists, placement is **rejected** and the player se
 
 ### Zone Street Proximity
 
-A zone tile (any type, any density) requires a road tile within **3 tiles** (Manhattan distance, measured as straight-line grid steps, not path cost). **Service buildings are not subject to the 3-tile zone proximity rule**; they have a stricter direct street-adjacency requirement defined in §Service Building Street Adjacency above. The rule has two enforcement modes:
+A zone tile (any type, any density) requires a road tile within **3 tiles** (Chebyshev distance, measured as max(|dx|, |dz|) — the 8-directional grid step count, not path cost). **Service buildings are not subject to the 3-tile zone proximity rule**; they have a stricter direct street-adjacency requirement defined in §Service Building Street Adjacency above. The rule has two enforcement modes:
 
 #### New Placement
 
-At placement time, if no road tile is within 3 tiles Manhattan distance of **any tile in the footprint**, the placement is **rejected** and the player sees a toast: "Must be within 3 tiles of a road".
+At placement time, if no road tile is within 3 tiles Chebyshev distance of **any tile in the footprint**, the placement is **rejected** and the player sees a toast: "Must be within 3 tiles of a road".
 
-The Manhattan distance is computed as the minimum distance from any tile in the N×N footprint to the nearest road tile: `min_distance = argmin over all footprint tiles T of (Manhattan distance from T to nearest road tile)`. If `min_distance > 3`, rejection.
+The Chebyshev distance is computed as the minimum distance from any tile in the N×N footprint to the nearest road tile: `min_distance = argmin over all footprint tiles T of (max(|dx|, |dz|) from T to nearest road tile)`. If `min_distance > 3`, rejection.
 
 #### Abandonment and Recovery
 
@@ -242,7 +242,7 @@ When the player hovers over the terrain with the Zone tool active, the tile hove
 
 ### Road Adjacency for Multi-Tile Buildings
 
-For multi-tile buildings (any N×N footprint where N > 1), road adjacency is satisfied if **at least one road tile is edge-adjacent (4-directional cardinal, distance = 1) to ANY tile in the footprint** — not only to the origin tile. This applies to both the Zone Street Proximity check (3-tile Manhattan distance from any footprint tile) and the Service Building Street Adjacency check (direct edge-adjacency to any footprint tile).
+For multi-tile buildings (any N×N footprint where N > 1), road adjacency is satisfied if **at least one road tile is edge-adjacent (4-directional cardinal, distance = 1) to ANY tile in the footprint** — not only to the origin tile. This applies to both the Zone Street Proximity check (3-tile Chebyshev distance from any footprint tile) and the Service Building Street Adjacency check (direct edge-adjacency to any footprint tile).
 
 ## Phase 10 Audio Callbacks for Zone Events
 
@@ -356,6 +356,50 @@ constexpr uint32_t kZoneOverlayColourIndustrial  = 0x60FFFF00u; // semi-transpar
 recognise. Blue for Commercial reflects the "cool" economic tone of business districts.
 Yellow/amber for Industrial signals industrial caution/activity. The 38% alpha (0x60) keeps the
 overlay legible without completely obscuring the terrain and building 3D geometry below it.
+
+## Unbuilt Zone Overlay Colors (Phase 11m)
+
+Unbuilt zone tiles — zone placed but building mesh not yet spawned (demand below
+`SimulationConstants::construction_delay_demand_threshold`) — display a **fixed-color**
+overlay rendered by `IrrlichtRenderer::setZoneOverlay()`. Color is keyed on
+**zone type × density tier** — no demand computation. This overlay:
+
+- Is **added** when the zone tile is placed (replaces the prior `m_overlayMap.erase()`
+  behavior that removed the overlay entirely).
+- Is **removed** when the building mesh spawns or when the tile is demolished.
+- Is **checked** each population-tick or every 60 frames (whichever fires first) to detect
+  building spawns; color does NOT change while the tile remains under construction.
+
+### Density-Tier Color Lookup
+
+Color encodes zone type (hue) and density tier (brightness): Low = pale, Medium = mid,
+High = dark. Alpha = 180 (0xB4) for all entries. ARGB format: `0xAARRGGBB`.
+
+| Zone type   | Density | ARGB         | Appearance    |
+|-------------|---------|--------------|---------------|
+| Residential | Low     | `0xB480CC80` | Pale green    |
+| Residential | Medium  | `0xB400AA00` | Medium green  |
+| Residential | High    | `0xB4005500` | Dark green    |
+| Commercial  | Low     | `0xB48080CC` | Pale blue     |
+| Commercial  | Medium  | `0xB40000AA` | Medium blue   |
+| Commercial  | High    | `0xB4000055` | Dark blue     |
+| Industrial  | Low     | `0xB4CCCC80` | Pale yellow   |
+| Industrial  | Medium  | `0xB4AAAA00` | Medium yellow |
+| Industrial  | High    | `0xB4555500` | Dark yellow   |
+
+`UIManager::computeZoneOverlayColor(ZoneType, DensityTier)` implements this as a 3×3
+constexpr lookup table. The `DensityTier` at placement is the value passed to
+`placeZone()` (known from the zone sub-panel selection).
+
+### Colorblind Mode — V1 Limitation
+
+V1 does not provide colorblind-safe density-tier color alternatives. The static
+`kOverlayArgb*_Colorblind` constants (from the Phase 9b static overlay system) are
+superseded for overlay use by Phase 11m. Colorblind-safe density-tier alternatives are
+deferred to a post-V1 phase; see `architecture/ui-ux/resolution-ui-scaling.md` for the
+existing colorblind spec. In V1 colorblind mode, zone overlays use the same density-tier
+colors as non-colorblind mode — only minimap coding and zone sub-panel button tints remain
+colorblind-safe (via `kOverlayArgb*_Colorblind`).
 
 ## Tile Hover Highlight Colour Scheme (Phase 9b — HUD)
 
