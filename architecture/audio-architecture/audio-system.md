@@ -298,8 +298,8 @@ public:
                                   // alcCreateContext / alcMakeContextCurrent / ALC_EXT_thread_local_context
                                   // failures still throw std::runtime_error.
                                   // logger: non-owning pointer to irr::ILogger; must be passed explicitly
-                                  // (null-guarded in logWarning/logError/logInfo). Production passes
-                                  // device->getLogger(); tests pass nullptr (silences log output without crashing).
+                                  // (null-guarded in logWarning/logError/logInfo; falls back to stderr when null).
+                                  // Production passes device->getLogger(); tests pass nullptr (output goes to stderr).
                                   // clock: non-owning pointer to IClock; injectable for deterministic timing in
                                   // tests (crossfade duck timer, m_lastDuckWakeTime). Production passes WallClock;
                                   // tests pass ManualClock.
@@ -386,7 +386,7 @@ private:
     std::atomic<float>        m_musicDuckGain{1.0f};
     float                     m_duckTimer{0.0f};    // seconds elapsed in current duck phase (audio thread only)
     float                     m_duckStartGain{1.0f}; // gain at transition INTO DUCKING state; enables correct ramp from current gain (not 1.0) on RELEASING→DUCKING re-entry (audio thread only)
-    irr::ILogger*             m_logger{nullptr};         // non-owning pointer to Irrlicht logger; may be nullptr (null-guarded before use); see Logging Policy in irrlicht-device-lifecycle.md
+    irr::ILogger*             m_logger{nullptr};         // non-owning pointer to Irrlicht logger; may be nullptr (falls back to std::fprintf(stderr, ...) when null); see Logging Policy in irrlicht-device-lifecycle.md
     std::mutex                m_logMutex;               // serializes m_logger->log() calls from any thread; see logWarning/logError/logInfo thread-safety note
     IClock*                   m_clock{nullptr};         // injectable clock for deterministic timing (crossfade duck timer, m_lastDuckWakeTime);
                                                        // production: WallClock; tests: ManualClock
@@ -418,7 +418,11 @@ private:
     // All three MUST serialize the m_logger->log() call using m_logMutex
     // (std::mutex member, see private section) per the Logging Policy
     // thread-safety contract in irrlicht-device-lifecycle.md.
-    // Pattern: if (m_logger) { std::lock_guard<std::mutex> lk(m_logMutex); m_logger->log(...); }
+    // Pattern:
+    //   if (m_logger) { std::lock_guard<std::mutex> lk(m_logMutex); m_logger->log(...); }
+    //   else { std::fprintf(stderr, "[AudioSystem LEVEL] (no ILogger) %s\n", msg.c_str()); }
+    // When m_logger is null (e.g. in tests), messages are printed to stderr with a
+    // "[AudioSystem WARNING/ERROR/INFO] (no ILogger)" prefix — NOT silently discarded.
     void logWarning(const std::string& msg);
     void logError(const std::string& msg);
     void logInfo(const std::string& msg);

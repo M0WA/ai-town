@@ -771,18 +771,24 @@ Warning Log section):
       if (m_logger) {
           std::lock_guard<std::mutex> lk(m_logMutex);
           m_logger->log(msg.c_str(), irr::ELL_WARNING);
+      } else {
+          std::fprintf(stderr, "[AudioSystem WARNING] (no ILogger) %s\n", msg.c_str());
       }
   }
   void AudioSystem::logError(const std::string& msg) {
       if (m_logger) {
           std::lock_guard<std::mutex> lk(m_logMutex);
           m_logger->log(msg.c_str(), irr::ELL_ERROR);
+      } else {
+          std::fprintf(stderr, "[AudioSystem ERROR] (no ILogger) %s\n", msg.c_str());
       }
   }
   void AudioSystem::logInfo(const std::string& msg) {
       if (m_logger) {
           std::lock_guard<std::mutex> lk(m_logMutex);
           m_logger->log(msg.c_str(), irr::ELL_INFORMATION);
+      } else {
+          std::fprintf(stderr, "[AudioSystem INFO] (no ILogger) %s\n", msg.c_str());
       }
   }
   ```
