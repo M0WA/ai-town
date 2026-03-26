@@ -1659,15 +1659,15 @@ TEST_F(UIManagerEventRoutingTest, TaxPanel_Escape_ClosesPanel) {
     EXPECT_TRUE(consumed);
 }
 
-// TaxPanel: click inside tax panel bounds is consumed.
+// FinancesPanel: click inside panel bounds is consumed.
 TEST_F(UIManagerEventRoutingTest, TaxPanel_ClickInside_Consumed) {
     InputEvent tKey;
     tKey.type = InputEvent::Type::KeyDown;
     tKey.keyCode = 84;
     ui_->onEvent(tKey);
 
-    // TaxRatePanel getBounds() returns {810, 60, 300, 200}.
-    // We need a click inside those bounds to be consumed.
+    // FinancesPanel bounds: x=780, y=60, w=360, h=520.
+    // Click at (820, 100) is inside the panel and must be consumed.
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2004,14 +2004,15 @@ TEST_F(MainMenuPanelStandaloneTest, ConsumeStartGameRequest_TrueOnce) {
     panel_->onEvent(enter);
 
     // On NewGame screen, click Start City button via mouse.
-    // Handle 318 = m_ngBtnStartCity (count constructor calls from nextHandle_=300):
+    // Handle 322 = m_ngBtnStartCity (count constructor calls from nextHandle_=300):
     //   301=titleLabel, 302=btnNewGame, 303=btnLoadGame, 304=btnSettings, 305=btnQuit,
     //   306=loadStatusLabel,
     //   307=ngTitle, 308=ngModeLabel, 309=ngBtnSandbox, 310=ngBtnScenario,
     //   311=ngDiffLabel, 312=ngBtnEasy, 313=ngBtnNormal, 314=ngBtnHard,
-    //   315=ngSeedLabel, 316=ngSeedInput, 317=ngBtnRandomize,
-    //   318=ngBtnStartCity, 319=ngBtnBack.
-    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    //   315=ngMapSizeLabel, 316=ngBtnSizeSmall, 317=ngBtnSizeMedium, 318=ngBtnSizeLarge,
+    //   319=ngSeedLabel, 320=ngSeedInput, 321=ngBtnRandomize,
+    //   322=ngBtnStartCity, 323=ngBtnBack, 324=ngErrorLabel.
+    ON_CALL(backend_, getElementRect(322)).WillByDefault(Return(Rect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;

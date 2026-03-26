@@ -721,13 +721,19 @@ void TerrainSystem::setTileHeight(int tileX, int tileZ, float height)
         writeHeight(nx, nz, newH);
     }
 
-    // Step 3: enqueue ChunkRebuildRequest for every chunk containing a modified tile.
-    // Affected tiles: centre + all 8 in-bounds neighbours.
-    // Chunk ID = (chunkZ * chunksPerSideX + chunkX), matching buildAllChunks().
-    // (chunkTiles, chunksX declared above alongside writeHeight)
+    // Step 3: enqueue ChunkRebuildRequest for every chunk that shares a vertex with
+    // any modified tile.  Each modified tile has up to 4 adjacent chunks sharing its
+    // boundary vertex (affectedChunkIds handles clamping + deduplication).
+    //
+    // Using affectedChunkIds() instead of a single chunkX/chunkZ division fixes
+    // the stitching-hole bug: a tile exactly on a chunk boundary (tx % chunkTiles == 0
+    // or tz % chunkTiles == 0) was previously only enqueuing its "owner" chunk, leaving
+    // the adjacent chunk with a stale mesh and a visible seam.
+    //
+    // Collect the superset of chunk IDs across all modified tiles, then deduplicate
+    // before enqueuing so each chunk only gets one rebuild request per setTileHeight call.
 
-    // Collect all tile coords that were written (centre + in-bounds neighbours).
-    // Use a small fixed array to avoid heap allocation on the placement hot-path.
+    // Collect affected tile coords (centre + in-bounds neighbours).
     struct TileCoord { int tx; int tz; };
     TileCoord modifiedTiles[9];
     int modifiedCount = 0;
@@ -741,12 +747,20 @@ void TerrainSystem::setTileHeight(int tileX, int tileZ, float height)
         }
     }
 
+    // Gather all chunk IDs affected by any of the modified tiles, deduplicated.
+    std::vector<uint64_t> chunksToRebuild;
+    chunksToRebuild.reserve(16); // upper bound: 9 tiles * 4 candidates each
     for (int i = 0; i < modifiedCount; ++i) {
-        int tx = modifiedTiles[i].tx;
-        int tz = modifiedTiles[i].tz;
-        int chunkX = tx / chunkTiles;
-        int chunkZ = tz / chunkTiles;
-        uint64_t chunkId = static_cast<uint64_t>(chunkZ * chunksX + chunkX);
+        for (uint64_t cid : affectedChunkIds(modifiedTiles[i].tx, modifiedTiles[i].tz)) {
+            bool already = false;
+            for (uint64_t existing : chunksToRebuild) {
+                if (existing == cid) { already = true; break; }
+            }
+            if (!already) chunksToRebuild.push_back(cid);
+        }
+    }
+
+    for (uint64_t chunkId : chunksToRebuild) {
         // Mark the chunk dirty (LOD = -1) so processOneRebuild's
         // "already at LOD" guard does not discard this height-change rebuild.
         // Without this, a LOD0 chunk receiving a LOD0 rebuild request is skipped.
@@ -793,3 +807,74 @@ float TerrainSystem::getHeightAt(int tileX, int tileZ) const {
 int   TerrainSystem::getMapTilesX() const { return m_mapTilesX; }
 int   TerrainSystem::getMapTilesZ() const { return m_mapTilesZ; }
 float TerrainSystem::getCellSize()  const { return m_cellSize; }
+
+// ---------------------------------------------------------------------------
+// getPendingRebuildIds() — test API.
+// Returns a sorted, deduplicated vector of chunk IDs currently in m_rebuildDeque.
+// Preserves no particular ordering beyond the sort — callers must not rely on
+// insertion order. Sorting is used for deduplication only.
+// ---------------------------------------------------------------------------
+std::vector<uint64_t> TerrainSystem::getPendingRebuildIds() const {
+    std::vector<uint64_t> ids;
+    ids.reserve(m_rebuildDeque.size());
+    for (const auto& req : m_rebuildDeque) {
+        ids.push_back(req.chunkId);
+    }
+    // Deduplicate (sort, then erase consecutive duplicates).
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    return ids;
+}
+
+// ---------------------------------------------------------------------------
+// affectedChunkIds() — private helper.
+//
+// A vertex at map position (tileX, tileZ) is the shared corner between up to
+// four chunks:
+//   - The chunk that "owns" tile (tileX,   tileZ)
+//   - The chunk that "owns" tile (tileX-1, tileZ)   [to the west]
+//   - The chunk that "owns" tile (tileX,   tileZ-1) [to the north]
+//   - The chunk that "owns" tile (tileX-1, tileZ-1) [to the northwest]
+//
+// Each candidate tile coordinate is clamped to [0, mapTiles-1] before the
+// chunk conversion, so map-edge and interior cases naturally collapse.
+// Duplicate chunk IDs (when the clamped positions land in the same chunk) are
+// removed before returning.
+// ---------------------------------------------------------------------------
+std::vector<uint64_t> TerrainSystem::affectedChunkIds(int tileX, int tileZ) const {
+    if (m_mapTilesX <= 0 || m_mapTilesZ <= 0) return {};
+
+    const int chunkTiles = kTerrainLOD0GridSize;  // 32 tiles per chunk side
+    const int chunksX    = (m_mapTilesX + chunkTiles - 1) / chunkTiles;
+
+    // Clamp a tile coordinate to valid map bounds, then return its chunk ID.
+    auto tileToChunkId = [&](int tx, int tz) -> uint64_t {
+        if (tx < 0) tx = 0;
+        if (tz < 0) tz = 0;
+        if (tx >= m_mapTilesX) tx = m_mapTilesX - 1;
+        if (tz >= m_mapTilesZ) tz = m_mapTilesZ - 1;
+        int cx = tx / chunkTiles;
+        int cz = tz / chunkTiles;
+        return static_cast<uint64_t>(cz * chunksX + cx);
+    };
+
+    // Four candidate positions that share vertex (tileX, tileZ).
+    uint64_t ids[4] = {
+        tileToChunkId(tileX,     tileZ),
+        tileToChunkId(tileX - 1, tileZ),
+        tileToChunkId(tileX,     tileZ - 1),
+        tileToChunkId(tileX - 1, tileZ - 1),
+    };
+
+    // Deduplicate while preserving order of first occurrence.
+    std::vector<uint64_t> result;
+    result.reserve(4);
+    for (uint64_t id : ids) {
+        bool found = false;
+        for (uint64_t existing : result) {
+            if (existing == id) { found = true; break; }
+        }
+        if (!found) result.push_back(id);
+    }
+    return result;
+}

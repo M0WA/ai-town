@@ -1270,65 +1270,50 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
     std::string basePath = std::string(AITOWN_ASSETS_DIR) +
                            "/3d/buildings/" + assetBaseName;
 
-    LODNode* lodNode = m_buildingAssetLoader->load(basePath);
-    if (!lodNode) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: placeBuildingMesh(%d,%d): failed to load "
-            "asset '%s' — node not created\n", tileX, tileZ, basePath.c_str());
-        return;
+    // Parse density tier from assetBaseName (format: "zone_dens_NN", e.g. "res_low_01").
+    // Done BEFORE terrain flattening and before asset load so that footprintN is available
+    // for the flatten loop even when the asset file is absent (e.g. EDT_NULL test context).
+    int footprintN = 1;  // default: Low = 1x1
+    {
+        size_t first = assetBaseName.find('_');
+        if (first != std::string::npos) {
+            size_t second = assetBaseName.find('_', first + 1);
+            std::string tierStr = (second != std::string::npos)
+                ? assetBaseName.substr(first + 1, second - first - 1)
+                : assetBaseName.substr(first + 1);
+            if (tierStr == "med")       footprintN = 2;
+            else if (tierStr == "high") footprintN = 3;
+            // "low" and any unknown -> 1
+        }
     }
 
-    // Position the scene node at the tile's world-space centre.
-    // B3D building meshes are 1×1×height unit boxes centred on X and Z.
-    // Scale by kTileSize so they fill the full tile footprint (10×10 m).
-    // Offset by kTileSize/2 in X and Z to centre the mesh on the tile.
-    // Disable lighting — no light nodes in the scene yet (Phase 6+).
-    //
-    // Texture fallback: BuildingAssetLoader::load() binds the buildings_atlas_d.dds
-    // to every material slot.  If the atlas fails to load (missing file, driver
-    // unsupported format) the slot remains null and the zone-coloured placeholder
-    // texture is bound instead so the building is still visually distinguishable.
-    if (scene::ISceneNode* node = lodNode->getNode()) {
-        // Parse density tier from assetBaseName (format: "zone_dens_NN", e.g. "res_low_01").
-        // Must be done BEFORE terrain flattening so we know how many tiles to flatten.
-        int footprintN = 1;  // default: Low = 1×1
-        {
-            size_t first = assetBaseName.find('_');
-            if (first != std::string::npos) {
-                size_t second = assetBaseName.find('_', first + 1);
-                std::string tierStr = (second != std::string::npos)
-                    ? assetBaseName.substr(first + 1, second - first - 1)
-                    : assetBaseName.substr(first + 1);
-                if (tierStr == "med")       footprintN = 2;
-                else if (tierStr == "high") footprintN = 3;
-                // "low" and any unknown → 1
-            }
+    // Full-footprint terrain flattening (Phase 11l Deliverable 3):
+    // Average all (footprintN+1)x(footprintN+1) corner vertex heights, then flatten
+    // every corner to that average so the ground plate sits flush with terrain across
+    // the entire NxN tile footprint.  For LOW (N=1) this produces 4 calls (same as
+    // original); for MED (N=2) it covers 9 vertices; for HIGH (N=3) it covers 16.
+    // Runs unconditionally when m_terrain is set — independent of whether the scene
+    // node is created successfully, so that terrain is always consistent on placement.
+    float heightSum = 0.0f;
+    int   heightCount = 0;
+    for (int cx = 0; cx <= footprintN; ++cx) {
+        for (int cz = 0; cz <= footprintN; ++cz) {
+            heightSum += m_terrain ? m_terrain->getHeightAt(tileX + cx, tileZ + cz) : 0.0f;
+            ++heightCount;
         }
+    }
+    const float targetH = (heightCount > 0) ? (heightSum / heightCount) : 0.0f;
+    if (m_terrain) {
+        for (int cx = 0; cx <= footprintN; ++cx)
+            for (int cz = 0; cz <= footprintN; ++cz)
+                m_terrain->setTileHeight(tileX + cx, tileZ + cz, targetH);
+        m_terrain->flushTerrainRebuilds();
+    }
 
-        // Full-footprint terrain flattening:
-        // Average all (footprintN+1)×(footprintN+1) corner vertex heights, then flatten
-        // every corner to that average so the ground plate sits flush with terrain across
-        // the entire N×N tile footprint.  For LOW (N=1) this is the same as the original
-        // 4-corner pattern; for MED (N=2) and HIGH (N=3) it covers 9 or 16 vertices.
-        float heightSum = 0.0f;
-        int   heightCount = 0;
-        for (int cx = 0; cx <= footprintN; ++cx) {
-            for (int cz = 0; cz <= footprintN; ++cz) {
-                heightSum += m_terrain ? m_terrain->getHeightAt(tileX + cx, tileZ + cz) : 0.0f;
-                ++heightCount;
-            }
-        }
-        const float targetH = (heightCount > 0) ? (heightSum / heightCount) : 0.0f;
-        if (m_terrain) {
-            for (int cx = 0; cx <= footprintN; ++cx)
-                for (int cz = 0; cz <= footprintN; ++cz)
-                    m_terrain->setTileHeight(tileX + cx, tileZ + cz, targetH);
-        }
-        if (m_terrain) m_terrain->flushTerrainRebuilds();
-
-        // Rebuild road tiles within ±(footprintN+2) of the building origin.
-        // setTileHeight() applies weighted neighbour blending to the 8 surrounding vertices;
-        // for larger footprints the affected radius grows accordingly.
+    // Rebuild road tiles within +(footprintN+2) of the building origin.
+    // setTileHeight() applies weighted neighbour blending to the 8 surrounding vertices;
+    // for larger footprints the affected radius grows accordingly.
+    {
         const int rebuildRadius = footprintN + 2;
         for (int dz = -rebuildRadius; dz <= footprintN + rebuildRadius; ++dz) {
             for (int dx = -rebuildRadius; dx <= footprintN + rebuildRadius; ++dx) {
@@ -1340,6 +1325,27 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
                                           /*rebuildNeighbors=*/false);
             }
         }
+    }
+
+    LODNode* lodNode = m_buildingAssetLoader->load(basePath);
+    if (!lodNode) {
+        fprintf(stderr,
+            "[IrrlichtRenderer] WARNING: placeBuildingMesh(%d,%d): failed to load "
+            "asset '%s' — node not created\n", tileX, tileZ, basePath.c_str());
+        return;
+    }
+
+    // Position the scene node at the tile's world-space centre.
+    // B3D building meshes are 1x1xheight unit boxes centred on X and Z.
+    // Scale by kTileSize so they fill the full tile footprint (10x10 m).
+    // Offset by kTileSize/2 in X and Z to centre the mesh on the tile.
+    // Disable lighting — no light nodes in the scene yet (Phase 6+).
+    //
+    // Texture fallback: BuildingAssetLoader::load() binds the buildings_atlas_d.dds
+    // to every material slot.  If the atlas fails to load (missing file, driver
+    // unsupported format) the slot remains null and the zone-coloured placeholder
+    // texture is bound instead so the building is still visually distinguishable.
+    if (scene::ISceneNode* node = lodNode->getNode()) {
 
         // Use targetH directly — NOT getHeightAt() after setTileHeight().
         // setTileHeight() applies neighbour blending to surrounding tiles;
@@ -2134,6 +2140,47 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
     // Remove any existing building on this tile first.
     destroyTileNode(m_buildingNodes, tileX, tileZ);
 
+    // Full-footprint terrain flattening (Phase 11l Deliverable 3):
+    // Service buildings have a fixed 2x2 tile footprint (footprintN = 2).
+    // Average all (footprintN+1)x(footprintN+1) = 3x3 = 9 corner vertex heights,
+    // then flatten every corner to that average so the ground plate sits flush
+    // with terrain across the entire 2x2 footprint.
+    // Runs unconditionally when m_terrain is set — independent of whether the scene
+    // node is created successfully, so terrain is always consistent on placement.
+    static constexpr int kSvcFootprintN = 2;
+    float svcHeightSum   = 0.0f;
+    int   svcHeightCount = 0;
+    for (int cx = 0; cx <= kSvcFootprintN; ++cx) {
+        for (int cz = 0; cz <= kSvcFootprintN; ++cz) {
+            svcHeightSum += m_terrain ? m_terrain->getHeightAt(tileX + cx, tileZ + cz) : 0.0f;
+            ++svcHeightCount;
+        }
+    }
+    const float svcTargetH = (svcHeightCount > 0) ? (svcHeightSum / svcHeightCount) : 0.0f;
+    if (m_terrain) {
+        for (int cx = 0; cx <= kSvcFootprintN; ++cx)
+            for (int cz = 0; cz <= kSvcFootprintN; ++cz)
+                m_terrain->setTileHeight(tileX + cx, tileZ + cz, svcTargetH);
+        m_terrain->flushTerrainRebuilds();
+    }
+
+    // Rebuild road tiles within +(kSvcFootprintN+2) of the service building origin.
+    // setTileHeight() applies weighted neighbour blending to surrounding vertices;
+    // for the 2x2 footprint the affected radius grows to kSvcFootprintN + 2 = 4.
+    {
+        const int rebuildRadius = kSvcFootprintN + 2;
+        for (int dz = -rebuildRadius; dz <= kSvcFootprintN + rebuildRadius; ++dz) {
+            for (int dx = -rebuildRadius; dx <= kSvcFootprintN + rebuildRadius; ++dx) {
+                if (dx >= 0 && dx < kSvcFootprintN && dz >= 0 && dz < kSvcFootprintN) continue;
+                const int nx = tileX + dx;
+                const int nz = tileZ + dz;
+                if (m_roadNodes.count(tileKey(nx, nz)) > 0)
+                    placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
+                                          /*rebuildNeighbors=*/false);
+            }
+        }
+    }
+
     std::string basePath = std::string(AITOWN_ASSETS_DIR) +
                            "/3d/buildings/" + stem;
 
@@ -2147,41 +2194,12 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
     }
 
     if (scene::ISceneNode* node = lodNode->getNode()) {
-        // Four-corner terrain flattening pattern (Phase 10b): average the 4 tile corner heights
-        // then flatten each corner vertex to that average, eliminating T-junction seams.
-        const float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
-        const float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
-        const float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
-        const float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
-        const float targetH = (h00 + h10 + h01 + h11) * 0.25f;
-        if (m_terrain) {
-            m_terrain->setTileHeight(tileX,     tileZ,     targetH);
-            m_terrain->setTileHeight(tileX + 1, tileZ,     targetH);
-            m_terrain->setTileHeight(tileX,     tileZ + 1, targetH);
-            m_terrain->setTileHeight(tileX + 1, tileZ + 1, targetH);
-        }
-        if (m_terrain) m_terrain->flushTerrainRebuilds();
-
-        // Rebuild road tiles within ±2 of this service building tile.
-        // Same rationale as placeBuildingMesh: setTileHeight() blending propagates
-        // height changes up to 2 tiles away, requiring road mesh rebuilds.
-        for (int dz = -2; dz <= 2; ++dz) {
-            for (int dx = -2; dx <= 2; ++dx) {
-                if (dx == 0 && dz == 0) continue;
-                const int nx = tileX + dx;
-                const int nz = tileZ + dz;
-                if (m_roadNodes.count(tileKey(nx, nz)) > 0)
-                    placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
-                                          /*rebuildNeighbors=*/false);
-            }
-        }
-
-        // Use targetH directly — NOT getHeightAt() after setTileHeight().
+        // Use svcTargetH directly — NOT getHeightAt() after setTileHeight().
         // setTileHeight() applies neighbour blending to the 8 surrounding tiles;
         // subsequent corner calls bleed back into vertex (tileX, tileZ), leaving
-        // its stored height below targetH. getHeightAt() would return that
+        // its stored height below svcTargetH. getHeightAt() would return that
         // blended-down value and position the node below the rendered terrain surface.
-        const float postY = m_terrain ? targetH : 0.0f;
+        const float postY = m_terrain ? svcTargetH : 0.0f;
         // Phase 11h: service buildings have a 2×2 footprint.
         // World center of the 2×2 footprint: (tileX + 1.0) * kTileSize, same for Z.
         // The origin tile is (tileX, tileZ); footprint spans [tileX, tileX+2) × [tileZ, tileZ+2),

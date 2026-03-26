@@ -798,7 +798,31 @@ void CitySimulation::doDesirabilityTick() {
 
 void CitySimulation::doPopulationTick() {
     for (auto& [key, tile] : m_tiles) {
-        if (!tile.isZoned) continue;
+        if (!tile.isZoned || tile.isRoad) continue;
+
+        // Phase 11l: demand-gated building mesh spawn.
+        // Origin tiles (footprintOriginX == -1) with underConstruction==true are
+        // waiting for demand to reach the construction threshold before the mesh spawns.
+        if (tile.underConstruction && tile.footprintOriginX == -1) {
+            float effective_demand_factor = effectiveDemandForTile(tile);
+            if (effective_demand_factor >= SimulationConstants::construction_delay_demand_threshold) {
+                tile.underConstruction = false;
+                int tileX = static_cast<int>(key >> 32);
+                int tileZ = static_cast<int>(static_cast<uint32_t>(key));
+                std::string baseName = zoneAssetBaseName(tile.zone, tile.density);
+                // Use the variant number that was assigned and stored at placeZone() time.
+                int variantNum = tile.buildingVariantNum;
+                if (baseName.size() >= 2 && variantNum >= 1 && variantNum <= 4) {
+                    baseName[baseName.size() - 2] = '0';
+                    baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
+                }
+                if (m_renderer) {
+                    m_renderer->placeBuildingMesh(tileX, tileZ, baseName);
+                }
+            }
+            // Tile is still under construction — no population growth yet; skip this tile.
+            if (tile.underConstruction) continue;
+        }
 
         int maxPop = maxPopulationForTile(tile.zone, tile.density);
         float demand = effectiveDemandForTile(tile);
@@ -1966,13 +1990,14 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
         for (int dz = 0; dz < N; ++dz) {
             int64_t fkey = tileKey(tileX + dx, tileZ + dz);
             TileData& ftile = m_tiles[fkey];
-            ftile.isZoned     = true;
-            ftile.isRoad      = false;
-            ftile.zone        = type;
-            ftile.density     = tier;
-            ftile.population  = 0.0f;
-            ftile.desirability = static_cast<float>(SimulationConstants::desirability_base_value);
-            ftile.isAbandoned = false;
+            ftile.isZoned          = true;
+            ftile.isRoad           = false;
+            ftile.zone             = type;
+            ftile.density          = tier;
+            ftile.population       = 0.0f;
+            ftile.desirability     = static_cast<float>(SimulationConstants::desirability_base_value);
+            ftile.isAbandoned      = false;
+            ftile.underConstruction = (dx == 0 && dz == 0);  // origin tile awaits demand gate
             if (dx == 0 && dz == 0) {
                 // Origin tile: footprintOrigin = -1,-1 (self is origin).
                 ftile.footprintOriginX = -1;
@@ -2005,7 +2030,13 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
         }
     }
 
-    // Phase 11: round-robin variant cycling (_01/_02/_03/_04).
+    // Phase 11l: building mesh is deferred — spawned by doPopulationTick() once
+    // effective_demand_factor >= construction_delay_demand_threshold (0.50).
+    // The variant counter is incremented NOW (so getBuildingVariantCounter() reflects
+    // the assigned variant immediately after placement), but placeBuildingMesh() is
+    // NOT called here; it is called by doPopulationTick() using tile.buildingVariantNum.
+    // TODO(phase-12): serialize tile.underConstruction and tile.buildingVariantNum in
+    // the save-file tile struct so in-progress constructions survive save/load.
     {
         int zoneIdx = static_cast<int>(type);
         int tierIdx = static_cast<int>(tier);
@@ -2013,13 +2044,10 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
         m_buildingVariantCounters[idx]++;
         int variantNum = ((m_buildingVariantCounters[idx] - 1) % 4) + 1;  // 1..4
 
-        if (m_renderer) {
-            std::string baseName = zoneAssetBaseName(type, tier);
-            if (baseName.size() >= 2) {
-                baseName[baseName.size() - 2] = '0';
-                baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
-            }
-            m_renderer->placeBuildingMesh(tileX, tileZ, baseName);
+        // Store assigned variant on the origin tile so doPopulationTick() can use it.
+        TileData* originTile = findTile(tileX, tileZ);
+        if (originTile) {
+            originTile->buildingVariantNum = variantNum;
         }
     }
 

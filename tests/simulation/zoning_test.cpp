@@ -733,3 +733,153 @@ TEST_F(ZoningTestNice, DemandPressurePct_MaxDemand_Returns1f) {
         << "getDemandPressurePct(Industrial) must return 1.0 when no Industrial "
            "zones exist (I_production_capacity = 0 → default demand = 1.0).";
 }
+
+// ---------------------------------------------------------------------------
+// ZoningConstructionDelayTest — Phase 11l Deliverable 2 tests.
+//
+// Verifies the building construction delay mechanic:
+//   - placeZone() no longer calls placeBuildingMesh() at placement time.
+//   - doPopulationTick() spawns the mesh once effective_demand_factor >= 0.50.
+//   - Tiles below the threshold remain as empty lots across multiple ticks.
+//   - Revenue (population) cannot grow while underConstruction==true.
+//
+// Fixture uses StrictMock<MockRenderer> so any unexpected renderer call is a
+// test failure; NiceMock<MockAudioSystem> suppresses placement audio calls.
+// ManualRNG non-strict with 0.9f float so service degradation never fires.
+// ---------------------------------------------------------------------------
+class ZoningConstructionDelayTest : public ::testing::Test {
+protected:
+    ::testing::StrictMock<MockRenderer>  m_renderer;
+    NiceMock<MockAudioSystem>            m_audio;
+    ManualRNG    m_rng;    // default: int={0}, float={0.9f}, non-strict
+    ManualClock  m_clock;
+    ManualTerrainQuery m_terrain;
+    std::unique_ptr<CitySimulation> m_sim;
+
+    void SetUp() override {
+        m_sim = std::make_unique<CitySimulation>(
+            &m_renderer, &m_audio, &m_rng, &m_clock, &m_terrain, Difficulty::Normal);
+        m_sim->setSpeed(SpeedMultiplier::x1);
+    }
+
+    void TearDown() override {
+        m_sim.reset();
+    }
+
+    void runTicks(int n) {
+        const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+        for (int i = 0; i < n; ++i) {
+            m_clock.advance(dt);
+            m_sim->tick(dt);
+        }
+    }
+};
+
+// ---------------------------------------------------------------------------
+// TEST CD-1: ZoningSystem_PlaceZone_NoBuildingMeshAtPlacement
+//
+// placeZone() must NOT call placeBuildingMesh() at the moment of placement.
+// The building mesh is deferred until demand is sufficient.
+//
+// StrictMock enforces that placeBuildingMesh is never called; placeRoadMesh
+// is expected exactly once (from placeRoad).
+// ---------------------------------------------------------------------------
+TEST_F(ZoningConstructionDelayTest, ZoningSystem_PlaceZone_NoBuildingMeshAtPlacement) {
+    // Allow the road placement renderer call.
+    EXPECT_CALL(m_renderer, placeRoadMesh(_, _)).Times(1);
+    // placeBuildingMesh must NOT be called at placement time.
+    EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(0);
+
+    m_sim->placeRoad(0, 0);
+    m_sim->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
+    // No ticks fired — mesh must not have spawned at placement.
+}
+
+// ---------------------------------------------------------------------------
+// TEST CD-2: ZoningSystem_PlaceZone_BuildingMeshSpawnsWhenDemandSufficient
+//
+// After placeZone(), a single budget tick should trigger placeBuildingMesh()
+// for the Residential tile when effective_demand_factor >= 0.50.
+//
+// Strategy: Place R + C zones + road. During bootstrap tick 1:
+//   effectiveR = trafficDemandFactorR + bootstrapR = 0.5 + 0.417 = 0.917 >= 0.50
+//   effectiveC = trafficDemandFactorC * C_demand + bootstrapC ≈ 0.208 < 0.50
+// CI-capacity gate does not zero R (C zone exists, totalCIWorkerCapacity > 0).
+// So the R tile's mesh spawns at tick 1 (demand met), C tile stays under construction.
+// ---------------------------------------------------------------------------
+TEST_F(ZoningConstructionDelayTest, ZoningSystem_PlaceZone_BuildingMeshSpawnsWhenDemandSufficient) {
+    // Allow road placement call.
+    EXPECT_CALL(m_renderer, placeRoadMesh(_, _)).Times(1);
+    // R tile mesh spawns exactly once at tick 1 (demand 0.917 >= 0.50).
+    // C tile demand is ~0.208 < 0.50, so its mesh does NOT spawn.
+    EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(1);
+
+    m_sim->placeRoad(0, 0);
+    // R zone: effectiveR = 0.917 >= 0.50 at tick 1 (bootstrap active, C zone present).
+    m_sim->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
+    // C zone: effectiveC ≈ 0.208 < 0.50 at tick 1 — does not spawn.
+    m_sim->placeZone(0, 1, ZoneType::Commercial, DensityTier::Low);
+
+    // One budget tick during bootstrap (m_totalTicks becomes 1 on first tick).
+    runTicks(1);
+}
+
+// ---------------------------------------------------------------------------
+// TEST CD-3: ZoningSystem_PlaceZone_NoBuildingMeshWhenDemandInsufficient
+//
+// When effective_demand_factor < 0.50, placeBuildingMesh() must never be called
+// across multiple ticks. The tile remains as an empty lot.
+//
+// Strategy: Residential demand = 0 when there are no Commercial or Industrial
+// zones (R capacity-ratio = 0, no bootstrap subsidy for growth). After bootstrap
+// ends, demand stays at 0 → threshold never met → no mesh.
+// ---------------------------------------------------------------------------
+TEST_F(ZoningConstructionDelayTest, ZoningSystem_PlaceZone_NoBuildingMeshWhenDemandInsufficient) {
+    // Allow road placement call.
+    EXPECT_CALL(m_renderer, placeRoadMesh(_, _)).Times(1);
+    // No mesh must ever be spawned — demand stays below 0.50.
+    EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(0);
+
+    m_sim->placeRoad(0, 0);
+    // Residential zone only — no C/I zones → R_demand = 0 < 0.50 after bootstrap.
+    m_sim->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
+
+    // Advance past grace period and bootstrap window; run many ticks.
+    m_clock.advance(121.0);
+    runTicks(SimulationConstants::demand_bootstrapping_ticks + 4);
+    // placeBuildingMesh must not have been called (Times(0) enforced by StrictMock).
+}
+
+// ---------------------------------------------------------------------------
+// TEST CD-4: ZoningSystem_PlaceZone_NoRevenueUntilMeshSpawned
+//
+// While a tile is underConstruction (demand below threshold), its population
+// stays at zero, meaning getTaxRevenue() for that zone type returns 0.
+//
+// Strategy: Place only a Residential zone with no C/I support so R_demand = 0.
+// After several ticks, the tile remains unconstructed → population = 0 →
+// residential tax revenue = 0.
+// ---------------------------------------------------------------------------
+TEST_F(ZoningConstructionDelayTest, ZoningSystem_PlaceZone_NoRevenueUntilMeshSpawned) {
+    // Allow road placement call.
+    EXPECT_CALL(m_renderer, placeRoadMesh(_, _)).Times(1);
+    // No mesh should spawn (demand insufficient).
+    EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(0);
+
+    m_sim->placeRoad(0, 0);
+    // Residential only — no C/I → demand stays 0.
+    m_sim->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
+
+    m_clock.advance(121.0);  // past grace period
+    runTicks(SimulationConstants::demand_bootstrapping_ticks);
+
+    // Population must be 0: tile is underConstruction and demand never met threshold.
+    EXPECT_EQ(m_sim->getTotalPopulation(), 0)
+        << "Population must remain 0 for an underConstruction tile when demand < threshold. "
+           "No revenue is generated from a tile whose building mesh has not yet spawned.";
+
+    // Tax revenue from Residential must reflect zero population.
+    EXPECT_FLOAT_EQ(m_sim->getTaxRevenue(ZoneType::Residential), 0.0f)
+        << "Residential tax revenue must be 0.0 while the zone tile is underConstruction "
+           "(no building mesh spawned, population = 0).";
+}

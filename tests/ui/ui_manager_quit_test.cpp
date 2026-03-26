@@ -18,6 +18,8 @@
 // Also covers:
 //   - setSaveSystem: binds a real SaveSystem stub; save request polling.
 //   - setSaveAvailable + setSaveStatusText: forwarded to MainMenuPanel.
+//   - UIManager_LoadGame_CallsLoadMostRecentSave: update() polls
+//     consumeLoadGameRequest() and calls ISaveSystem::loadMostRecentSave().
 //
 // Uses NiceMock throughout.  TearDown resets ui_ before mocks are destroyed.
 
@@ -25,8 +27,10 @@
 #include "src/ui/ui_types.h"
 #include "src/platform/input_event.h"
 #include "src/simulation/SaveSystem.h"
+#include "src/interfaces/ISaveSystem.h"
 #include "tests/ui/MockUIBackend.h"
 #include "tests/ui/MockCitySimulation.h"
+#include "tests/ui/MockSaveSystem.h"
 #include "tests/simulation/MockAudioSystem.h"
 #include "tests/simulation/ManualClock.h"
 
@@ -294,4 +298,97 @@ TEST_F(UIManagerQuitCoverageTest, SetSaveAvailable_NoCrash) {
 TEST_F(UIManagerQuitCoverageTest, SetSaveStatusText_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(ui_->setSaveStatusText("Last save: 2 mins ago"));
     EXPECT_NO_FATAL_FAILURE(ui_->setSaveStatusText(""));
+}
+
+// ===========================================================================
+// UIManagerMainMenuLoadTest — fixture for testing Load Game dispatch
+// from the MainMenu state.
+//
+// UIManager starts in MainMenu state (default after construction).
+// A NiceMock<MockSaveSystem> is wired via setSaveSystem() and
+// setSaveAvailable(true) so the Load Game button is enabled.
+//
+// The Load Game request is injected by calling MainMenuPanel::setSaveAvailable(true)
+// which enables the button, then sending a keyboard Enter on focused button 1
+// (Load Game).  UIManager::update() polls consumeLoadGameRequest() and calls
+// ISaveSystem::loadMostRecentSave() exactly once.
+// ===========================================================================
+
+class UIManagerMainMenuLoadTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        ON_CALL(backend_, addStaticText(_, _, _, _, _)).WillByDefault(
+            [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
+        ON_CALL(backend_, addButton(_, _, _, _, _)).WillByDefault(
+            [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
+        ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
+        ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
+        ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
+        ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
+        ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
+        ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
+        ON_CALL(sim_, getSpeedMultiplier()).WillByDefault(Return(SpeedMultiplier::x1));
+        ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(10000.0f));
+        ON_CALL(sim_, getOutstandingDebt()).WillByDefault(Return(0.0f));
+        ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Village));
+        ON_CALL(sim_, getTotalPopulation()).WillByDefault(Return(0));
+        ON_CALL(sim_, getSimulationTime()).WillByDefault(Return(SimulationTime{1, 1}));
+        ON_CALL(sim_, getDemandPressurePct(_)).WillByDefault(Return(0.0f));
+        ON_CALL(sim_, hasUndoPendingAction()).WillByDefault(Return(false));
+        ON_CALL(sim_, getUndoExpiryTimeSeconds()).WillByDefault(Return(0.0));
+        ON_CALL(sim_, consumeBudgetTicks()).WillByDefault(Return(0));
+
+        // UIManager stays in MainMenu state (default).
+        ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
+
+        // Wire save system and enable the Load Game button.
+        ui_->setSaveSystem(&save_);
+        ui_->setSaveAvailable(true);
+    }
+
+    void TearDown() override {
+        ui_.reset();
+    }
+
+    NiceMock<MockUIBackend>      backend_;
+    NiceMock<MockAudioSystem>    audio_;
+    NiceMock<MockCitySimulation> sim_;
+    NiceMock<MockSaveSystem>     save_;
+    ManualClock                  clock_;
+    std::unique_ptr<UIManager>   ui_;
+    uint32_t                     nextHandle_{100};
+};
+
+// ---------------------------------------------------------------------------
+// Test 9: UIManager::update() polls consumeLoadGameRequest() and calls
+// ISaveSystem::loadMostRecentSave() when Load Game is activated.
+//
+// Sequence:
+//   1. Navigate keyboard focus to Load Game (Down arrow once from New Game).
+//   2. Press Enter to set m_loadGameRequested in MainMenuPanel.
+//   3. update() picks up consumeLoadGameRequest() and calls loadMostRecentSave().
+// ---------------------------------------------------------------------------
+TEST_F(UIManagerMainMenuLoadTest, UIManager_LoadGame_CallsLoadMostRecentSave)
+{
+    // loadMostRecentSave must be called exactly once in update().
+    EXPECT_CALL(save_, loadMostRecentSave())
+        .Times(1)
+        .WillOnce(Return(LoadResult{true, "{}", ""}));
+
+    // Navigate MainMenuPanel focus to button 1 (Load Game): Down once.
+    InputEvent down{};
+    down.type    = InputEvent::Type::KeyDown;
+    down.keyCode = 40;
+    ui_->onEvent(down);
+
+    // Activate Load Game via Enter.
+    InputEvent enter{};
+    enter.type    = InputEvent::Type::KeyDown;
+    enter.keyCode = 13;
+    ui_->onEvent(enter);
+
+    // update() must call loadMostRecentSave() exactly once.
+    ui_->update(0.016f);
 }

@@ -35,7 +35,7 @@ protected:
 // ---------------------------------------------------------------------------
 TEST_F(VolumeControlTest, SetMasterVolume_HeadlessCI_NoAlError) {
     try {
-        AudioSystem audio(&clock_);
+        AudioSystem audio(nullptr, &clock_);
         // setMasterVolume calls alListenerf(AL_GAIN) followed by alCheckError_real.
         // If the null driver is functioning correctly, no AL error should occur.
         audio.setMasterVolume(0.5f);
@@ -67,7 +67,7 @@ TEST_F(VolumeControlTest, SetMasterVolume_HeadlessCI_NoAlError) {
 // ---------------------------------------------------------------------------
 TEST_F(VolumeControlTest, AudioSystem_StingerDropIfAlreadyPlaying) {
     try {
-        AudioSystem audio(&clock_);
+        AudioSystem audio(nullptr, &clock_);
 
         // First trigger — starts the crisis stinger playing.
         audio.triggerStinger(StingerType::CRISIS);

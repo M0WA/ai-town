@@ -771,6 +771,174 @@ TEST_F(NotificationManagerTest, NotificationSFX_CriticalToast_UIToastSoundFires)
 }
 
 // ============================================================================
+// Phase 11l Deliverable 5 — Notification log scrollbar tests
+//
+// Layout: toggleLog() creates three addStaticText elements in order:
+//   call 1 → panel (nextHandle_ starts at 100, so first call returns 101)
+//   call 2 → scroll track (returns 102)
+//   call 3 → scroll thumb (returns 103)
+// nextHandle_ is reset to 100 in SetUp() for each test.
+// kLogVisibleRows = kLogTrackH / kLogRowHeightPx = 500 / 20 = 25.
+// ============================================================================
+
+// Scrollbar hidden when all entries fit (totalRows ≤ visibleRows).
+// Verifies setElementVisible(trackHandle, false) is called by updateScrollThumb().
+TEST_F(NotificationManagerTest, NotificationManager_LogScrollbar_HiddenWhenAllFit) {
+    // Post 3 entries — fewer than the 25 visible rows (500 / 20 = 25).
+    notifMgr_->postNormal("N1", "Body1", 10.0f);
+    notifMgr_->postNormal("N2", "Body2", 10.0f);
+    notifMgr_->postNormal("N3", "Body3", 10.0f);
+
+    // Capture the track handle: it is the 1st addStaticText call at x=1856 coords.
+    UIElementHandle capturedTrack = kInvalidUIElement;
+    int scrollbarCallCount = 0;
+    ON_CALL(backend_, addStaticText(_, 1856, 56, 12, 500)).WillByDefault(
+        [this, &capturedTrack, &scrollbarCallCount](const std::string&, int, int, int, int) {
+            ++scrollbarCallCount;
+            UIElementHandle h = ++nextHandle_;
+            if (scrollbarCallCount == 1) { capturedTrack = h; }
+            return h;
+        });
+
+    // Expect setElementVisible(track, false) — scrollbar must be hidden when
+    // totalRows (3) ≤ visibleRows (25).
+    // Use AtLeast(1) because updateScrollThumb may be called more than once.
+    bool trackHiddenCalled = false;
+    ON_CALL(backend_, setElementVisible(_, _)).WillByDefault(
+        [&capturedTrack, &trackHiddenCalled](UIElementHandle h, bool vis) {
+            if (h == capturedTrack && !vis) { trackHiddenCalled = true; }
+        });
+
+    notifMgr_->toggleLog();
+
+    ASSERT_NE(capturedTrack, kInvalidUIElement);
+    EXPECT_TRUE(trackHiddenCalled) << "setElementVisible(trackHandle, false) was not called";
+}
+
+// Scrollbar visible when entries overflow the visible row count (totalRows > visibleRows).
+// Verifies setElementVisible(trackHandle, true) is called by updateScrollThumb().
+TEST_F(NotificationManagerTest, NotificationManager_LogScrollbar_VisibleWhenOverflow) {
+    // Post 30 entries — more than the 25 visible rows (500 / 20 = 25).
+    for (int i = 0; i < 30; ++i) {
+        notifMgr_->postNormal("N" + std::to_string(i), "Body", 10.0f);
+    }
+
+    UIElementHandle capturedTrack = kInvalidUIElement;
+    int scrollbarCallCount = 0;
+    ON_CALL(backend_, addStaticText(_, 1856, 56, 12, 500)).WillByDefault(
+        [this, &capturedTrack, &scrollbarCallCount](const std::string&, int, int, int, int) {
+            ++scrollbarCallCount;
+            UIElementHandle h = ++nextHandle_;
+            if (scrollbarCallCount == 1) { capturedTrack = h; }
+            return h;
+        });
+
+    bool trackShownCalled = false;
+    ON_CALL(backend_, setElementVisible(_, _)).WillByDefault(
+        [&capturedTrack, &trackShownCalled](UIElementHandle h, bool vis) {
+            if (h == capturedTrack && vis) { trackShownCalled = true; }
+        });
+
+    notifMgr_->toggleLog();
+
+    ASSERT_NE(capturedTrack, kInvalidUIElement);
+    EXPECT_TRUE(trackShownCalled) << "setElementVisible(trackHandle, true) was not called";
+}
+
+// Scrollbar thumb Y increases after scrolling down.
+// Verifies that after 5 downward scroll events, setElementRect is called with a
+// larger Y argument for the thumb than after the initial panel open.
+TEST_F(NotificationManagerTest, NotificationManager_LogScrollbar_ThumbMovesOnScroll) {
+    // Post 30 entries — totalRows(30) > visibleRows(25), scrollbar is shown.
+    for (int i = 0; i < 30; ++i) {
+        notifMgr_->postNormal("N" + std::to_string(i), "Body", 10.0f);
+    }
+
+    // Capture the thumb handle: it is the 2nd addStaticText call at scrollbar coords.
+    int scrollbarCallCount = 0;
+    UIElementHandle capturedThumb = kInvalidUIElement;
+    ON_CALL(backend_, addStaticText(_, 1856, 56, 12, 500)).WillByDefault(
+        [this, &scrollbarCallCount, &capturedThumb](const std::string&, int, int, int, int) {
+            ++scrollbarCallCount;
+            UIElementHandle h = ++nextHandle_;
+            if (scrollbarCallCount == 2) { capturedThumb = h; }
+            return h;
+        });
+
+    // Track the Y argument from every setElementRect call on the thumb.
+    int lastRectY = -1;
+    ON_CALL(backend_, setElementRect(_, _, _, _, _)).WillByDefault(
+        [&capturedThumb, &lastRectY](UIElementHandle h, int /*x*/, int y, int /*w*/, int /*h*/) {
+            if (h == capturedThumb) { lastRectY = y; }
+        });
+
+    notifMgr_->toggleLog();
+    ASSERT_NE(capturedThumb, kInvalidUIElement);
+
+    // Record the Y after the initial open (scrollOffset == 0).
+    int initialY = lastRectY;
+
+    // Scroll down 5 rows — each wheel event adjusts offset by +1.
+    for (int i = 0; i < 5; ++i) {
+        InputEvent wheel;
+        wheel.type       = InputEvent::Type::MouseWheel;
+        wheel.wheelDelta = -1.0f; // negative = scroll down (towards older entries)
+        notifMgr_->onEvent(wheel);
+    }
+
+    // After 5 downward scrolls the thumb must have moved down (Y increased).
+    EXPECT_GT(lastRectY, initialY);
+}
+
+// Scrollbar thumb bottom aligns with track bottom after scrolling to the last entry.
+// With 30 entries, visibleRows=25, maxOffset=5; scrolling 10 times clamps at offset 5.
+// At maxOffset: thumbY + thumbH must equal trackTop + trackH = 56 + 500 = 556 (±1 px).
+TEST_F(NotificationManagerTest, NotificationManager_LogScrollbar_ThumbAtBottomAfterScrollToEnd) {
+    // Post 30 entries — totalRows = 30, visibleRows = 25, maxOffset = 5.
+    for (int i = 0; i < 30; ++i) {
+        notifMgr_->postNormal("N" + std::to_string(i), "Body", 10.0f);
+    }
+
+    int scrollbarCallCount = 0;
+    UIElementHandle capturedThumb = kInvalidUIElement;
+    ON_CALL(backend_, addStaticText(_, 1856, 56, 12, 500)).WillByDefault(
+        [this, &scrollbarCallCount, &capturedThumb](const std::string&, int, int, int, int) {
+            ++scrollbarCallCount;
+            UIElementHandle h = ++nextHandle_;
+            if (scrollbarCallCount == 2) { capturedThumb = h; }
+            return h;
+        });
+
+    int capturedThumbY = -1;
+    int capturedThumbH = -1;
+    ON_CALL(backend_, setElementRect(_, _, _, _, _)).WillByDefault(
+        [&capturedThumb, &capturedThumbY, &capturedThumbH](
+                UIElementHandle h, int /*x*/, int y, int w, int height) {
+            (void)w;
+            if (h == capturedThumb) {
+                capturedThumbY = y;
+                capturedThumbH = height;
+            }
+        });
+
+    notifMgr_->toggleLog();
+    ASSERT_NE(capturedThumb, kInvalidUIElement);
+
+    // Scroll down past the end — clamped at maxOffset = 5.
+    for (int i = 0; i < 10; ++i) {
+        InputEvent wheel;
+        wheel.type       = InputEvent::Type::MouseWheel;
+        wheel.wheelDelta = -1.0f;
+        notifMgr_->onEvent(wheel);
+    }
+
+    // thumbY + thumbH should equal trackTop + trackH = 56 + 500 = 556, within 1 px.
+    ASSERT_GE(capturedThumbY, 0) << "setElementRect was not called for the thumb";
+    ASSERT_GE(capturedThumbH, 0) << "setElementRect was not called for the thumb";
+    EXPECT_NEAR(capturedThumbY + capturedThumbH, 556, 1);
+}
+
+// ============================================================================
 // Tests moved from coverage_gap_test.cpp
 // ============================================================================
 

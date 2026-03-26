@@ -174,6 +174,9 @@ public:
     int  pendingRebuildCount() const { return static_cast<int>(m_rebuildDeque.size()); }
     bool hasActiveChunk(uint64_t chunkId) const { return m_activeChunks.count(chunkId) > 0; }
 
+    // Test API: returns deduplicated snapshot of chunk IDs scheduled for rebuild.
+    std::vector<uint64_t> getPendingRebuildIds() const;
+
     // chunksRebuiltLastFrame() — number of chunk rebuilds processed in the last update() call.
     // Used by tests to verify at-most-2-per-frame and deduplication behaviour.
     int chunksRebuiltLastFrame() const { return m_chunksRebuiltLastFrame; }
@@ -236,6 +239,12 @@ private:
     // Returns true if the request was processed, false if skipped (dedup, already at LOD).
     bool processOneRebuild(const ChunkRebuildRequest& req,
                            std::unordered_set<uint64_t>& processedThisFrame);
+
+    // Returns deduplicated set of up to 4 chunk IDs that share vertex (tileX, tileZ).
+    // The four candidate tile positions are (tileX,tileZ), (tileX-1,tileZ),
+    // (tileX,tileZ-1), (tileX-1,tileZ-1). Each is clamped to map bounds before
+    // converting to a chunk ID, so boundary and corner cases collapse to fewer IDs.
+    std::vector<uint64_t> affectedChunkIds(int tileX, int tileZ) const;
 
     IRenderer* m_renderer;  // may be null in EDT_NULL test context
     IClock*    m_clock;     // injected for deterministic timing in tests
