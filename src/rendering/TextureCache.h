@@ -67,10 +67,13 @@ public:
     //   glewInit(). Used by loadSRGB() to select the primary (4096) or fallback (2k)
     //   buildings atlas. Default 2048 is the conservative fallback for EDT_NULL tests
     //   and any construction site that does not yet pass a real GL cap.
+    // logger is the Irrlicht ILogger* for diagnostic output. Pass nullptr (default) for
+    //   EDT_NULL test contexts; all log calls are null-guarded.
     explicit TextureCache(irr::video::E_DRIVER_TYPE driverType,
                           irr::video::IVideoDriver* driver = nullptr,
                           irr::io::IFileSystem* fileSystem = nullptr,
-                          int maxTextureSize = 2048);
+                          int maxTextureSize = 2048,
+                          irr::ILogger* logger = nullptr);
     ~TextureCache() = default;
 
     // Non-copyable / non-movable — pool state and GL handles are not copyable.
@@ -187,6 +190,10 @@ private:
     // Driver type stored at construction — used by EDT_NULL guard in evictUnreferenced()
     // and all raw-GL upload paths. Checked as: m_driverType == irr::video::EDT_NULL.
     irr::video::E_DRIVER_TYPE m_driverType;
+
+    // ILogger* for diagnostic output. May be nullptr (EDT_NULL test contexts).
+    // All log calls must be null-guarded before use.
+    irr::ILogger* m_logger{nullptr};
 
     // IVideoDriver pointer — used by loadLinear (getTexture) and loadSplatMap (createImageFromFile).
     // May be nullptr (for legacy EDT_NULL tests that pass only driverType).
