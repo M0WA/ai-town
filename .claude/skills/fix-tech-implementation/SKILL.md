@@ -128,12 +128,27 @@ structured issues.
 Never pass bracket-placeholders literally to agents. Agents must receive the actual resolved
 strings so they know exactly what to report and what to skip.
 
+**Per-domain spec files** — substitute `[AGENT_SPEC_FILES]` with the agent's entry from this
+table when constructing any prompt:
+
+| Domain | Spec files |
+|---|---|
+| `cicd-dev-github` | `architecture/ci-cd/` |
+| `graphics-dev-irrlicht` | `architecture/graphics-architecture/` |
+| `sound-dev-opensoftal` | `architecture/audio-architecture/` |
+| `test-dev-cpp` | `architecture/testing/` |
+
 #### Round 1 prompt (full read):
 
 > You are a [role title] working on AI Town, a 3D city simulator built with C++, Irrlicht, and
-> OpenAL Soft. Read the implementation plan files under `./implementation/` and the relevant
-> architecture spec files under `architecture/`. [PHASE SCOPE IF SPECIFIED] Review BOTH the
-> implementation plan AND the spec files from your domain's perspective.
+> OpenAL Soft. Read the implementation plan files under `./implementation/` and your domain's spec
+> files: **[AGENT_SPEC_FILES]**. [PHASE SCOPE IF SPECIFIED] Review BOTH the implementation plan
+> AND the spec files from your domain's perspective.
+>
+> **Do NOT flag:**
+> - Missing source `.cpp`/`.h` files — unwritten implementation is expected at spec-review time
+> - Content assumed to be in a file without reading it first
+> - Issues in phases outside the target scope
 >
 > Only report [TARGET_SEVERITIES] issues. Do NOT report lower-severity issues. If you find issues
 > but none reach [TARGET_SEVERITIES], output `NO ISSUES FOUND`. For each in-scope issue found,
@@ -143,6 +158,7 @@ strings so they know exactly what to report and what to skip.
 > ISSUE
 > severity: [CRITICAL|HIGH|MEDIUM|LOW]
 > location: [SPEC|PLAN]
+> reason: [SPEC_GAP|SPEC_CONFLICT|PLAN_GAP|PLAN_CONFLICT]
 > domain: [your agent type, e.g. test-dev-cpp]
 > file: [path/to/file.md]
 > section: [section heading or line reference]
@@ -150,7 +166,8 @@ strings so they know exactly what to report and what to skip.
 > recommendation: [concrete fix]
 > ```
 >
-> Output EITHER one or more ISSUE blocks OR exactly `NO ISSUES FOUND` — never both.
+> Output EITHER one or more ISSUE blocks OR exactly `NO ISSUES FOUND` — never both. Be concise —
+> output your findings directly; do not narrate your reading process.
 
 #### Round 2+ prompt (diff-based):
 
@@ -168,12 +185,18 @@ strings so they know exactly what to report and what to skip.
 > lower-severity issues. If you find issues but none reach [TARGET_SEVERITIES], output
 > `NO ISSUES FOUND`.
 >
+> **Do NOT flag:**
+> - Missing source `.cpp`/`.h` files — unwritten implementation is expected at spec-review time
+> - Content assumed to be in a file without reading it first
+> - Issues in phases outside the target scope
+>
 > Output each in-scope issue (new or persisting) using the same schema:
 >
 > ```
 > ISSUE
 > severity: [CRITICAL|HIGH|MEDIUM|LOW]
 > location: [SPEC|PLAN]
+> reason: [SPEC_GAP|SPEC_CONFLICT|PLAN_GAP|PLAN_CONFLICT]
 > domain: [your agent type]
 > file: [path/to/file.md]
 > section: [section heading or line reference]
@@ -182,7 +205,8 @@ strings so they know exactly what to report and what to skip.
 > status: [NEW|PERSISTING]
 > ```
 >
-> Output EITHER one or more ISSUE blocks OR exactly `NO ISSUES FOUND` — never both.
+> Output EITHER one or more ISSUE blocks OR exactly `NO ISSUES FOUND` — never both. Be concise —
+> output your findings directly; do not narrate your reading process.
 
 **If no files in this agent's domain appear in `TOUCHED_FILES`**: replace the files-modified
 opening with: "No files in your domain were modified since last round. Re-read the sections
@@ -302,7 +326,10 @@ Update `CLEAN_DOMAINS`:
 **Did every tech squad agent (all 4) reach `CLEAN_DOMAINS` this round?**
 
 - If **no** → return to Step 1 for the next cycle.
-- If **yes** → run a **verification pass** (Step 5a) before committing.
+- If **yes AND `ROUND = 1`** (no fixes applied) → skip Step 5a and proceed directly to Step 6.
+  Round 1 is already a full fresh read; a separate verification pass adds no value.
+- If **yes AND `ROUND > 1`** (fix cycles ran) → run a **verification pass** (Step 5a) before
+  committing.
 
 ---
 
