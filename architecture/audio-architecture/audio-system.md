@@ -61,9 +61,10 @@ enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 // Added in Phase 10 (see implementation/phase-10.md — Music intensity interface deliverable).
 enum class MusicIntensity { CALM, GROWTH, CRISIS };
 
-// IAudioSystem — 18 pure-virtual methods.
+// IAudioSystem — 19 pure-virtual methods.
 // Phase history: Phase 7 (base 14 methods) → Phase 10 (+setMusicIntensity = 15) →
-// Phase 11d (+acquireVehicleEnginePair, +releaseVehicleEnginePair, +updateVehicleAudio = 18).
+// Phase 11d (+acquireVehicleEnginePair, +releaseVehicleEnginePair, +updateVehicleAudio = 18) →
+// Phase 11m (+transitionToMainMenu = 19).
 // Authoritative source for testability-architecture.md method-count comment.
 class IAudioSystem {
 public:
@@ -161,6 +162,32 @@ public:
     //   (1) m_sim->start()  [which calls m_audio->setTimeOfDay(tod) internally]
     //   (2) m_audio->transitionToGameplay()
     virtual void transitionToGameplay() = 0;
+
+    // Transition from gameplay audio back to main menu audio.
+    // Called by UIManager::transitionToMainMenu() when the player quits to the main menu.
+    // Stops all active gameplay music stems and ambient beds on sources[58..61],
+    // then begins the main menu music system on sources[58..59], crossfading in main menu
+    // music over 1 s (constant-power curve) and establishing looping playback
+    // (main menu music loops indefinitely per dynamic-soundscape.md §Main Menu Audio).
+    // The 1 s crossfade is wall-clock time ONLY — bar-boundary synchronization is NOT
+    // applied to this transition. Bar-boundary tracking applies only to within-gameplay
+    // stem crossfades (calm/growth/crisis tier changes), not to the gameplay↔main-menu
+    // transitions which are triggered by user action and must start immediately.
+    // Safe to call if gameplay audio is not currently active — treated as a no-op.
+    //
+    // Calling convention: UIManager::transitionToMainMenu() calls this method FIRST
+    // (before showing the main menu). m_newGamePending is NOT set by
+    // transitionToMainMenu() — it is set later, in UIManager::update() when the player
+    // clicks "Start City" for a subsequent game (consumeStartGameRequest() returns true
+    // and m_gameSessionActive is true). The city reset (CitySimulation::reset() and
+    // IRenderer::clearCity()) is NOT called inside transitionToMainMenu() — it is deferred
+    // to main.cpp's polling loop via consumeNewGameRequest(), which runs after the
+    // transitionToMainMenu() call returns. Audio teardown (music/ambient stop) therefore
+    // happens slightly before city state teardown; this is intentional.
+    // Vehicle engine source pairs are released by CitySimulation::reset() iterating
+    // m_agents (not by this method) — see phase-11m.md §D6 reset() spec.
+    // Added in Phase 11m.
+    virtual void transitionToMainMenu() = 0;
 
     // Per-frame update called from the main game loop.
     // realDeltaSeconds is wall-clock elapsed time since the previous call.
@@ -282,9 +309,9 @@ public:
 };
 ```
 
-`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all eighteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
+`MockAudioSystem` in `tests/simulation/mock_audio_system.h` provides GMock implementations of all nineteen methods above (using `MOCK_METHOD` macros). Test files that need audio isolation include `mock_audio_system.h` and inject `MockAudioSystem` via the `IAudioSystem*` constructor parameter of `CitySimulation`.
 
-**MockAudioSystem atomicity rule**: `MockAudioSystem` must declare all 18 `MOCK_METHOD` entries in exact sync with the `IAudioSystem` interface. Any commit that adds or removes a method on `IAudioSystem` must update `MockAudioSystem` in the same commit. Failure to do so causes `simulation_tests` and `ui_tests` targets to fail to compile (pure-virtual override missing). This constraint is especially critical before Phase 11d test authoring begins, when all three vehicle-audio methods (`acquireVehicleEnginePair`, `releaseVehicleEnginePair`, `updateVehicleAudio`) must already be present in `MockAudioSystem`.
+**MockAudioSystem atomicity rule**: `MockAudioSystem` must declare all 19 `MOCK_METHOD` entries in exact sync with the `IAudioSystem` interface. Any commit that adds or removes a method on `IAudioSystem` must update `MockAudioSystem` in the same commit. Failure to do so causes `simulation_tests` and `ui_tests` targets to fail to compile (pure-virtual override missing). This constraint is especially critical before Phase 11d test authoring begins, when all three vehicle-audio methods (`acquireVehicleEnginePair`, `releaseVehicleEnginePair`, `updateVehicleAudio`) must already be present in `MockAudioSystem`.
 
 ---
 

@@ -808,7 +808,7 @@ public:
 // the sfx_intersection_tick 80 m pre-cull. Simulation tests that exercise tick() with
 // traffic signals must either set ON_CALL for getListenerPosition() or use NiceMock.
 
-// Canonical IAudioSystem — 18 methods (Phase 10 added setMusicIntensity; Phase 11d added acquireVehicleEnginePair, releaseVehicleEnginePair, updateVehicleAudio). Authoritative definition in audio-architecture/audio-system.md.
+// Canonical IAudioSystem — 19 methods (Phase 10 added setMusicIntensity; Phase 11d added acquireVehicleEnginePair, releaseVehicleEnginePair, updateVehicleAudio; Phase 11m added transitionToMainMenu). Authoritative definition in audio-architecture/audio-system.md.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType, SimSpeed,
 // SoundPriority, TimeOfDay, vec3, CameraState). Never expose ALuint, ALfloat, or AL_* constants through this interface.
 // Forward declarations (defined in game-domain headers, not OpenAL headers):
@@ -902,7 +902,7 @@ public:
                                     float worldX, float worldZ) = 0;
 };
 
-// MockAudioSystem — GMock implementation of IAudioSystem's 18 methods.
+// MockAudioSystem — GMock implementation of IAudioSystem's 19 methods.
 // Source location: tests/simulation/MockAudioSystem.h
 // Shared across simulation_tests, ui_tests, audio_tests CMake targets (header-only).
 class MockAudioSystem : public IAudioSystem {
