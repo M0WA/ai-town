@@ -75,6 +75,7 @@ IrrlichtRenderer::IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiMan
     , m_uiManager(uiManager)
     , m_driver(device ? device->getVideoDriver() : nullptr)
     , m_smgr(device ? device->getSceneManager() : nullptr)
+    , m_logger(device ? device->getLogger() : nullptr)
 {
     // Capture the driver type immediately — used by initCloudPlane() to guard
     // against EDT_NULL headless contexts (per sky-clouds.md Headless/EDT_NULL Guard).
@@ -273,10 +274,14 @@ void IrrlichtRenderer::setCamera(const CameraParams& p) {
             // Grab each animator before removal, drop after — per scene-graph-ownership.md.
 #ifndef NDEBUG
             if (m_camera->getAnimators().size() > 0) {
-                fprintf(stderr,
-                    "[IrrlichtRenderer] WARNING: unexpected animators on addCameraSceneNode() "
-                    "result — removing %zu animator(s)\n",
-                    static_cast<size_t>(m_camera->getAnimators().size()));
+                if (m_device && m_device->getLogger()) {
+                    char buf[256];
+                    std::snprintf(buf, sizeof(buf),
+                        "[IrrlichtRenderer] WARNING: unexpected animators on addCameraSceneNode() "
+                        "result - removing %zu animator(s)",
+                        static_cast<size_t>(m_camera->getAnimators().size()));
+                    m_device->getLogger()->log(buf, irr::ELL_WARNING);
+                }
             }
 #endif
             while (m_camera->getAnimators().size() > 0) {
@@ -1148,9 +1153,14 @@ bool IrrlichtRenderer::ensureAssetLoader()
 {
     if (m_buildingAssetLoader) return true;
     if (!m_smgr || !m_driver) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: ensureAssetLoader() called with null "
-            "m_smgr/m_driver — scene node cannot be created\n");
+        if (m_logger) {
+            m_logger->log("[IrrlichtRenderer] ensureAssetLoader() called with null "
+                "m_smgr/m_driver — scene node cannot be created", irr::ELL_WARNING);
+        } else {
+            fprintf(stderr,
+                "[IrrlichtRenderer WARNING] ensureAssetLoader() called with null "
+                "m_smgr/m_driver — scene node cannot be created\n");
+        }
         return false;
     }
     m_buildingAssetLoader = std::make_unique<BuildingAssetLoader>(m_smgr, m_driver);
@@ -1255,9 +1265,15 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
                                           const std::string& assetBaseName)
 {
     if (assetBaseName.empty()) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: placeBuildingMesh(%d,%d) called with "
-            "empty assetBaseName — skipping node creation\n", tileX, tileZ);
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "[IrrlichtRenderer] placeBuildingMesh(%d,%d) called with "
+            "empty assetBaseName — skipping node creation", tileX, tileZ);
+        if (m_logger) {
+            m_logger->log(buf, irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
+        }
         return;
     }
     if (!ensureAssetLoader()) return;
@@ -1329,9 +1345,15 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
 
     LODNode* lodNode = m_buildingAssetLoader->load(basePath);
     if (!lodNode) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: placeBuildingMesh(%d,%d): failed to load "
-            "asset '%s' — node not created\n", tileX, tileZ, basePath.c_str());
+        char buf[512];
+        std::snprintf(buf, sizeof(buf),
+            "[IrrlichtRenderer] placeBuildingMesh(%d,%d): failed to load "
+            "asset '%s' — node not created", tileX, tileZ, basePath.c_str());
+        if (m_logger) {
+            m_logger->log(buf, irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
+        }
         return;
     }
 
@@ -1415,7 +1437,9 @@ bool IrrlichtRenderer::initRoadShader()
         m_roadTextureCache = std::make_unique<TextureCache>(
             m_driver->getDriverType(),
             m_driver,
-            m_device ? m_device->getFileSystem() : nullptr);
+            m_device ? m_device->getFileSystem() : nullptr,
+            /*maxTextureSize=*/2048,
+            m_device ? m_device->getLogger() : nullptr);
     }
 
     // Determine sRGB support — drives texture upload format and shader correction.
@@ -1469,10 +1493,16 @@ bool IrrlichtRenderer::initRoadShader()
     cb->drop();  // unconditional per shader-loading.md
 
     if (matType == -1) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: road shader compile failed "
-            "(vs=%s, fs=%s) — road tiles will use EMT_SOLID fallback\n",
+        char buf[512];
+        std::snprintf(buf, sizeof(buf),
+            "[IrrlichtRenderer] road shader compile failed "
+            "(vs=%s, fs=%s) — road tiles will use EMT_SOLID fallback",
             vsPath.c_str(), fsPath.c_str());
+        if (m_logger) {
+            m_logger->log(buf, irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
+        }
         m_roadMaterialType = -2;  // mark done-with-failure
         return false;
     }
@@ -1505,7 +1535,9 @@ void IrrlichtRenderer::initTerrainShader()
         m_terrainTextureCache = std::make_unique<TextureCache>(
             m_driver->getDriverType(),
             m_driver,
-            m_device ? m_device->getFileSystem() : nullptr);
+            m_device ? m_device->getFileSystem() : nullptr,
+            /*maxTextureSize=*/2048,
+            m_device ? m_device->getLogger() : nullptr);
     }
 
     // Build paths for the 4 terrain diffuse layers (splat channel order: R/G/B/A).
@@ -1553,10 +1585,16 @@ void IrrlichtRenderer::initTerrainShader()
     cb->drop();  // unconditional per shader-loading.md
 
     if (matType == -1) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: terrain shader compile failed "
-            "(vs=%s, fs=%s) — terrain will use default material\n",
+        char buf[512];
+        std::snprintf(buf, sizeof(buf),
+            "[IrrlichtRenderer] terrain shader compile failed "
+            "(vs=%s, fs=%s) — terrain will use default material",
             vsPath.c_str(), fsPath.c_str());
+        if (m_logger) {
+            m_logger->log(buf, irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
+        }
         return;
     }
 
@@ -2010,9 +2048,15 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
     // --- Build per-tile LOD0 terrain-conforming mesh ---
     SMesh* tileMesh = buildTileRoadMesh(h00, h10, h01, h11, isEW);
     if (!tileMesh) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: placeRoadMesh(%d,%d): buildTileRoadMesh"
-            " failed — node not created\n", tileX, tileZ);
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "[IrrlichtRenderer] placeRoadMesh(%d,%d): buildTileRoadMesh"
+            " failed — node not created", tileX, tileZ);
+        if (m_logger) {
+            m_logger->log(buf, irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
+        }
         return;
     }
 
@@ -2020,9 +2064,15 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
     IMeshSceneNode* node = m_smgr->addMeshSceneNode(tileMesh);
     tileMesh->drop();  // release caller's ref; scene node now sole owner
     if (!node) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: placeRoadMesh(%d,%d): addMeshSceneNode"
-            " failed — node not created\n", tileX, tileZ);
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "[IrrlichtRenderer] placeRoadMesh(%d,%d): addMeshSceneNode"
+            " failed — node not created", tileX, tileZ);
+        if (m_logger) {
+            m_logger->log(buf, irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
+        }
         return;
     }
 
@@ -2130,10 +2180,16 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
         case ServiceBuildingType::PoliceStation: stem = "svc_police_station"; break;
     }
     if (!stem) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: placeServiceBuildingMesh(%d,%d): "
-            "unknown ServiceBuildingType %d — skipping\n",
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "[IrrlichtRenderer] placeServiceBuildingMesh(%d,%d): "
+            "unknown ServiceBuildingType %d — skipping",
             tileX, tileZ, static_cast<int>(type));
+        if (m_logger) {
+            m_logger->log(buf, irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
+        }
         return;
     }
 
@@ -2186,10 +2242,16 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
 
     LODNode* lodNode = m_buildingAssetLoader->load(basePath);
     if (!lodNode) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: placeServiceBuildingMesh(%d,%d): "
-            "failed to load asset '%s' — node not created\n",
+        char buf[512];
+        std::snprintf(buf, sizeof(buf),
+            "[IrrlichtRenderer] placeServiceBuildingMesh(%d,%d): "
+            "failed to load asset '%s' — node not created",
             tileX, tileZ, basePath.c_str());
+        if (m_logger) {
+            m_logger->log(buf, irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
+        }
         return;
     }
 
@@ -2267,9 +2329,14 @@ bool IrrlichtRenderer::ensureVehicleLoader()
 {
     if (m_vehicleAssetLoader) return true;
     if (!m_smgr || !m_driver) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: ensureVehicleLoader() called with null "
-            "m_smgr/m_driver — vehicle scene node cannot be created\n");
+        if (m_logger) {
+            m_logger->log("[IrrlichtRenderer] ensureVehicleLoader() called with null "
+                "m_smgr/m_driver — vehicle scene node cannot be created", irr::ELL_WARNING);
+        } else {
+            fprintf(stderr,
+                "[IrrlichtRenderer WARNING] ensureVehicleLoader() called with null "
+                "m_smgr/m_driver — vehicle scene node cannot be created\n");
+        }
         return false;
     }
     m_vehicleAssetLoader = std::make_unique<BuildingAssetLoader>(m_smgr, m_driver);
@@ -2330,9 +2397,15 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
                                      float yawDegrees)
 {
     if (assetName.empty()) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: placeVehicle(id=%u) called with empty "
-            "assetName — skipping node creation\n", vehicleId);
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "[IrrlichtRenderer] placeVehicle(id=%u) called with empty "
+            "assetName — skipping node creation", vehicleId);
+        if (m_logger) {
+            m_logger->log(buf, irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
+        }
         return;
     }
 
@@ -2346,9 +2419,15 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
 
     LODNode* lodNode = m_vehicleAssetLoader->load(basePath);
     if (!lodNode) {
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: placeVehicle(id=%u): failed to load "
-            "asset '%s' — node not created\n", vehicleId, basePath.c_str());
+        char buf[512];
+        std::snprintf(buf, sizeof(buf),
+            "[IrrlichtRenderer] placeVehicle(id=%u): failed to load "
+            "asset '%s' — node not created", vehicleId, basePath.c_str());
+        if (m_logger) {
+            m_logger->log(buf, irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
+        }
         return;
     }
 
@@ -2400,10 +2479,16 @@ void IrrlichtRenderer::moveVehicle(uint32_t vehicleId,
         // Unknown vehicleId — treat as a late-arriving place call.
         // assetName is not available here; caller must use placeVehicle() for
         // first-time placement.  Log and return to avoid a crash.
-        fprintf(stderr,
-            "[IrrlichtRenderer] WARNING: moveVehicle(id=%u): vehicleId not "
-            "registered — ignoring move (caller should use placeVehicle first)\n",
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "[IrrlichtRenderer] moveVehicle(id=%u): vehicleId not "
+            "registered — ignoring move (caller should use placeVehicle first)",
             vehicleId);
+        if (m_logger) {
+            m_logger->log(buf, irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
+        }
         return;
     }
 
@@ -2641,10 +2726,16 @@ void IrrlichtRenderer::initCloudPlane()
             // Do NOT drop cb unconditionally here — we store our reference for per-frame
             // setCameraY() updates.  Drop only on shader failure (we have no use for it).
             if (matType == -1) {
-                fprintf(stderr,
-                    "[IrrlichtRenderer] WARNING: cloud dome shader compile failed "
-                    "(vs=%s, fs=%s) — falling back to EMT_TRANSPARENT_VERTEX_ALPHA\n",
+                char buf[512];
+                std::snprintf(buf, sizeof(buf),
+                    "[IrrlichtRenderer] cloud dome shader compile failed "
+                    "(vs=%s, fs=%s) — falling back to EMT_TRANSPARENT_VERTEX_ALPHA",
                     vsPath.c_str(), fsPath.c_str());
+                if (m_logger) {
+                    m_logger->log(buf, irr::ELL_WARNING);
+                } else {
+                    fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
+                }
                 cb->drop();   // shader failed — discard our reference
                 // cloudMatType stays EMT_TRANSPARENT_VERTEX_ALPHA (set above).
             } else {
@@ -2765,8 +2856,13 @@ void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tile
     std::string meshPath = vehicleMeshPath(zone, handle);
     IAnimatedMesh* animMesh = m_smgr->getMesh(meshPath.c_str());
     if (!animMesh) {
-        fprintf(stderr, "[IrrlichtRenderer] spawnVehicleAgent: mesh not found: %s\n",
-                meshPath.c_str());
+        std::string meshMsg = "[IrrlichtRenderer] spawnVehicleAgent: mesh not found: ";
+        meshMsg += meshPath;
+        if (m_logger) {
+            m_logger->log(meshMsg.c_str(), irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", meshMsg.c_str());
+        }
         return;
     }
 

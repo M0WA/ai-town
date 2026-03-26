@@ -17,6 +17,7 @@
 #include "src/ui/hud_sprite_ids.h"            // kSpriteXxxHover / Active / Inactive constants
 
 #include <cassert>
+#include <cstdio>   // fprintf — fallback when m_logger is null
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -84,6 +85,7 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
     : m_device(device)
     , m_guiEnv(device ? device->getGUIEnvironment() : nullptr)
     , m_driver(device ? device->getVideoDriver() : nullptr)
+    , m_logger(device ? device->getLogger() : nullptr)
     , m_driverTypeInt(m_driver ? static_cast<int>(m_driver->getDriverType()) : 0)
     , m_isHeadless(m_driver ? (m_driver->getDriverType() == irr::video::EDT_NULL) : true)
     , m_maxAnisotropy(maxAnisotropy)
@@ -245,12 +247,17 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
         } else {
             // Font file not found — emit a visible warning so developers notice.
             // The built-in 8px font will be used; text will be unreadably small.
-            fprintf(stderr,
-                "[IrrlichtUIBackend] WARNING: assets/fonts/hud_font.xml not found — "
+            const char* fontWarnMsg =
+                "[IrrlichtUIBackend] assets/fonts/hud_font.xml not found — "
                 "falling back to Irrlicht built-in 8px font. "
                 "HUD text will be unreadably small at all resolutions. "
                 "Create a bitmap font at assets/fonts/hud_font.xml using Irrlicht's "
-                "FontTool or any compatible bitmap font generator (recommended: 18px).\n");
+                "FontTool or any compatible bitmap font generator (recommended: 18px).";
+            if (m_logger) {
+                m_logger->log(fontWarnMsg, irr::ELL_WARNING);
+            } else {
+                fprintf(stderr, "[IrrlichtUIBackend WARNING] %s\n", fontWarnMsg);
+            }
         }
     }
 
@@ -278,12 +285,17 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
             // IGUIEnvironment::getFont() caches fonts internally — the returned
             // pointer is owned by the environment; do NOT call grab() or drop().
         } else {
-            fprintf(stderr,
-                "[IrrlichtUIBackend] WARNING: assets/fonts/hud_mono_font.xml not found — "
+            const char* monoFontWarnMsg =
+                "[IrrlichtUIBackend] assets/fonts/hud_mono_font.xml not found — "
                 "falling back to default font for numeric HUD elements. "
                 "Treasury balance, population count, and tax rate fields will use "
                 "the proportional font until hud_mono_font.xml is placed at "
-                "assets/fonts/hud_mono_font.xml.\n");
+                "assets/fonts/hud_mono_font.xml.";
+            if (m_logger) {
+                m_logger->log(monoFontWarnMsg, irr::ELL_WARNING);
+            } else {
+                fprintf(stderr, "[IrrlichtUIBackend WARNING] %s\n", monoFontWarnMsg);
+            }
         }
     }
 }
