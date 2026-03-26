@@ -333,18 +333,20 @@ must not be used for new work:
 - **Zone placement preview/cursor tint**: In colorblind mode, zone type cursors must include a zone-type label overlay (small "R", "C", or "I" text) so players can confirm zone type without relying on color.
 - **3D zone colour overlay** (the `setZoneOverlay` semi-transparent quad layer introduced in Phase 9b):
   **Phase 11m supersession**: Phase 11m replaces the static per-zone-type ARGB colours below with a
-  demand-gradient system. Unbuilt zoned tiles receive a colour interpolated between a light base and
-  a dark base per zone type (see `architecture/game-design/zoning-system.md`, "Unbuilt Zone Overlay
-  Colors (Phase 11m)"), at alpha 180. Built tiles carry no overlay. The static ARGB constants below
-  apply only to code written before Phase 11m. After Phase 11m, `m_overlayMap` entries are populated
-  exclusively by `computeZoneOverlayColor()` using the demand-gradient formula.
+  density-tier-based fixed-color overlay system. Unbuilt zoned tiles receive a fixed colour keyed on
+  zone type × density tier (Low/Medium/High) with no demand computation (see
+  `architecture/game-design/zoning-system.md`, "Unbuilt Zone Overlay Colors (Phase 11m)"), at alpha
+  180. Built tiles carry no overlay. The static ARGB constants below apply only to code written before
+  Phase 11m. After Phase 11m, `m_overlayMap` entries are populated exclusively by
+  `computeZoneOverlayColor()` using the density-tier lookup table.
 
-  **Colorblind support for demand-gradient overlays (V1 scope limitation)**: In V1 (through Phase 11m),
-  colorblind mode uses the same demand-gradient colours as standard mode for zone overlays. The
+  **Colorblind support for density-tier overlays (V1 scope limitation)**: In V1 (through Phase 11m),
+  colorblind mode uses the same density-tier colours as standard mode for zone overlays. The
   pattern-supplemented colorblind palette and zone-type letter-stamp glyphs specified below apply to
   the pre–Phase 11m static overlay only and are superseded alongside it. Full colorblind support for
-  the demand-gradient system (separate light/dark colour ramps per zone type that are distinguishable
-  under deuteranopia and protanopia, plus letter stamps) is deferred to a post-V1 colorblind QA pass.
+  the density-tier-based fixed-color overlay system (separate colour entries per zone type × density
+  tier that are distinguishable under deuteranopia and protanopia, plus letter stamps) is deferred to
+  a post-V1 colorblind QA pass.
 
   **Static overlay spec (Phase 9b, superseded by Phase 11m)**: In standard mode, the zone overlay
   used: Residential = `0x6000FF00` (green, alpha 0x60), Commercial = `0x600000FF` (blue, alpha 0x60),
@@ -353,7 +355,7 @@ must not be used for new work:
   `0x60FF00FF` (magenta), with a zone-type letter stamp ('R'/'C'/'I') rendered via
   `IrrlichtRenderer::setZoneOverlay()` at Y + 0.15f from the UI sprite sheet glyph texture.
   `UIManager` selected the ARGB variant by querying `m_settings->isColorblindMode()`. This spec is
-  retained for reference; implementation is superseded by Phase 11m demand-gradient.
+  retained for reference; implementation is superseded by Phase 11m density-tier-based fixed-color overlay system.
 - **Tile hover highlight** (the `setTileHoverHighlight` per-tool ARGB introduced in Phase 9b):
   In standard mode, hover highlight colours are: Zone = `0x80FF00FF` (magenta), Road = `0x8000FFFF` (cyan), Utilities = `0x80FF8000` (orange), Demolish = `0x80FF0000` (red), Query = `0x80FFFFFF` (white). All five hues are distinguishable in standard mode.
   In colorblind mode, the hover highlight MUST additionally render a tool-type icon or letter in the highlight quad to supplement color: Zone shows a small 'Z' glyph, Road shows 'R', Utilities shows 'U', Demolish shows 'X'. Query retains the white highlight (white is colorblind-safe). The glyph is rendered as a sprite from the UI sprite sheet, centered on the tile, using the same Y + 0.05f offset as the hover quad. The actual hover highlight ARGB colours do not change in colorblind mode for the hover highlight (unlike the zone overlay) — the colours are bright and high-contrast enough that deuteranopia does not cause confusion between them. The glyph is additive supplemental encoding. **Implementation scope**: The hover highlight colorblind glyph is deferred to Phase 12 (colorblind QA pass), consistent with the Phase 8 colorblind delivery schedule. Phase 9b delivers only the standard-mode hover ARGB colours. The architecture commitment is made here so Phase 12 has a concrete spec.

@@ -326,6 +326,15 @@ audio calls per `doDensityUnlockTick()` invocation; tiles beyond the cap are upg
 
 ## Zone Overlay Colour Scheme (Phase 9b — HUD)
 
+> **SUPERSEDED — V1 implementers must read this note before using these constants.**
+> This 3-color overlay system was defined in Phase 9b but has been superseded by the
+> **Phase 11m 9-color density-tier system** described in the "Unbuilt Zone Overlay Colors
+> (Phase 11m)" section below. The `kZoneOverlayColourResidential`, `kZoneOverlayColourCommercial`,
+> and `kZoneOverlayColourIndustrial` constants are **no longer used for zone overlays in V1**.
+> Implementers must use the 9-color density-tier lookup defined in the Phase 11m section instead.
+> This section is retained for historical reference and to document the rationale for the
+> colour choices that informed the Phase 11m palette.
+
 When the Zone tool is active or when zones have been placed, the renderer draws a semi-transparent
 colour overlay on each zoned tile so the player can always identify zone type at a glance.
 

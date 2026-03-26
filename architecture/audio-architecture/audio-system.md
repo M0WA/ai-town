@@ -153,13 +153,12 @@ public:
     // Must not be called while gameplay audio is already active (undefined behaviour).
     //
     // Precondition: setTimeOfDay() must be called at least once before transitionToGameplay()
-    // is invoked (typically by CitySimulation::start() during the new-game initialization
-    // sequence). transitionToGameplay() reads m_currentTimeOfDay to determine which ambient
+    // is invoked. transitionToGameplay() reads m_currentTimeOfDay to determine which ambient
     // bed to start on sources[60..61]. If transitionToGameplay() is called before any
     // setTimeOfDay() call, the zero-initialized enum value (TimeOfDay::DAY) is used
     // unconditionally — this is acceptable behavior but must be documented. The call sequence
     // in UIManager::transitionToGameplay() MUST be:
-    //   (1) m_sim->start()  [which calls m_audio->setTimeOfDay(tod) internally]
+    //   (1) m_audio->setTimeOfDay(TimeOfDay::DAY)  [called directly by UIManager; new games start at DAY]
     //   (2) m_audio->transitionToGameplay()
     virtual void transitionToGameplay() = 0;
 
