@@ -186,7 +186,15 @@ constexpr int kUtilSubBtnGap      = 4;    // gap between utilities sub-panel but
 
 // Zone overlay ARGB colours (semi-transparent, alpha=0x60 ≈ 38%)
 // Encoding: 0xAARRGGBB (Irrlicht SColor format).
-// Used by UIManager::m_overlayMap values and IrrlichtRenderer::setZoneOverlay().
+// **Phase 11m supersession**: These constants are NO LONGER used to populate
+// UIManager::m_overlayMap entries. From Phase 11m onward, m_overlayMap uses
+// demand-gradient ARGB (alpha=180) computed by computeZoneOverlayColor() — see
+// architecture/game-design/zoning-system.md §Unbuilt Zone Overlay Colors.
+// These constants remain valid for minimap zone coding and zone sub-panel button
+// tints ONLY.
+// **Colorblind mode**: demand-gradient colorblind support is deferred to post-V1;
+// the colorblind constants below are superseded for overlay use alongside the
+// base constants. Resolution: tracked in architecture/ui-ux/resolution-ui-scaling.md.
 // In colorblind mode UIManager substitutes kOverlayArgb*_Colorblind values (see
 // resolution-ui-scaling.md — 3D zone colour overlay colorblind spec).
 constexpr uint32_t kOverlayArgbResidential = 0x6000FF00u; // semi-transparent green
@@ -265,7 +273,19 @@ public:
     void draw();
 
     // State transitions (called by game loop):
-    void transitionToGameplay(GameMode mode);  // Sets m_gameMode = mode and transitions state from MainMenu to Gameplay; hides main menu; shows HUD + minimap
+    void transitionToGameplay(GameMode mode);  // Sets m_gameMode = mode and transitions state from MainMenu to Gameplay; hides main menu; shows HUD + minimap.
+                                               // For the FIRST game, called directly from main.cpp after terrain generation.
+                                               // For SUBSEQUENT games (Phase 11m+), called by main.cpp AFTER it has polled
+                                               // consumeNewGameRequest(), run reset()+clearCity(), and re-generated terrain —
+                                               // UIManager itself does NOT call transitionToGameplay() for subsequent new games.
+    void transitionToMainMenu();   // Called by PauseMenuPanel ("Quit to Main Menu").
+                                   // Call order: (1) m_audio->transitionToMainMenu(), (2) onNewGame() — clears
+                                   // m_overlayMap and resets active tool state, (3) save-state refresh via
+                                   // m_saveSystem, (4) m_mainMenu->show(). Does NOT reset
+                                   // m_gameSessionActive — keeps it true so the next handleNewGameRequest()
+                                   // takes the subsequent-game path (sets m_newGamePending=true). Does NOT
+                                   // call reset() or clearCity() — deferred to main.cpp via
+                                   // consumeNewGameRequest(). (Phase 11m)
     void transitionToPaused();     // shows pause menu overlay
     void transitionToGameplay_fromPaused(); // hides pause menu overlay
     void transitionToGameOver();   // shows non-dismissible game-over modal; No-op in Sandbox mode (m_gameMode == GameMode::Sandbox). Only valid in Scenario mode (m_gameMode == GameMode::Scenario).
@@ -644,3 +664,79 @@ In both cases, `main.cpp` checks `uiManager.isQuitRequested()` after `uiManager.
 ## CitySimulation Audio Wiring
 
 `CitySimulation` receives `&audioSystem` (not `nullptr`) at construction in `main.cpp`. This enables all simulation-driven SFX: build/place sounds, demolish sounds, earthworks sounds, budget warning sounds, loan-issued sounds, and zone upgrade sounds. Each call site is guarded with `if (m_audio)` null-checks.
+
+## New Game Request Polling API
+
+Added in Phase 11m to support the "Quit to Main Menu → start a second new game" flow. When
+the player starts a second (or later) game via the main menu, `UIManager` cannot call
+`transitionToGameplay()` directly — it must first allow `main.cpp` to reset the simulation,
+clear city objects from the renderer, and re-generate terrain before the HUD reappears.
+
+`UIManager` exposes a consume-once polling pair for this purpose, following the same
+pattern as `consumeStartGameRequest()` / `consumeSettingsRequest()` (see §MainMenu Polling
+Communication):
+
+```cpp
+// Returns true exactly once after each "Start City" click that follows a prior gameplay
+// session (m_gameSessionActive == true). Resets m_newGamePending to false on return.
+// Returns false on the very first new-game click (handled inline via transitionToGameplay).
+// Called by main.cpp in the game loop, after uiManager.update().
+bool UIManager::consumeNewGameRequest();
+
+// Returns the NewGameParams captured at the moment of the last "Start City" click.
+// Only meaningful when consumeNewGameRequest() has just returned true; undefined before.
+NewGameParams UIManager::getNewGameParams() const;
+```
+
+### NewGameParams struct
+
+```cpp
+struct NewGameParams {
+    MapSize mapSize;   // MapSize::kSmall / kMedium / kLarge (tile dimensions for TerrainSystem::generate())
+    int     seed;      // terrain RNG seed entered by the player (or randomised)
+    int     difficulty;// 0=Easy, 1=Normal, 2=Hard
+    // NOTE: No gameMode field — V1 hardcodes Sandbox mode.
+    // Scenario mode is a post-V1 feature; main.cpp passes GameMode::Sandbox to transitionToGameplay().
+};
+```
+
+### Contract
+
+- `consumeNewGameRequest()` returns `true` exactly once per "Start City" click that follows a prior gameplay session. It atomically resets the internal `m_newGamePending` flag to `false`.
+- On the **first** new game (no prior session), `UIManager::update()` calls `transitionToGameplay()` directly and does NOT set `m_newGamePending`. `consumeNewGameRequest()` returns `false` on this first click.
+- `getNewGameParams()` is only meaningful immediately after `consumeNewGameRequest()` returns `true`. The captured params remain stable until the next "Start City" click.
+- `main.cpp` must call `consumeNewGameRequest()` each frame (after `uiManager.update()`). When it returns `true`, the main loop must: (1) call `sim.reset(startingFunds)`, (2) call `renderer.clearCity()`, (3) reseed terrain RNG and call `terrain.generate()`, (4) call `uiManager.transitionToGameplay(GameMode::Sandbox)`.
+- `UIManager` tracks session state via `bool m_gameSessionActive{false}`, set to `true` the first time `transitionToGameplay()` completes.
+
+### Test-Only Methods (Phase 11m)
+
+Two public methods are added to `UIManager` gated on `#ifdef AITOWN_TESTING_ENABLED`. They are
+compiled out of production builds and exist solely to support deterministic unit tests that need
+to drive the new-game flow without going through the event system.
+
+```cpp
+#ifdef AITOWN_TESTING_ENABLED
+// Simulates a "Start City" button press directly, bypassing the event system.
+// Stores params in m_newGameParams. If m_gameSessionActive is true (subsequent
+// game), sets m_newGamePending = true and calls m_mainMenu->showLoadingScreen().
+// If m_gameSessionActive is false (first game), calls
+// transitionToGameplay(GameMode::Sandbox) immediately (same path as production).
+// Required by UIManager_SecondNewGame_SetsNewGamePendingFlag test.
+void UIManager::handleNewGameRequest(const NewGameParams& params);
+
+// Forces m_gameSessionActive to the given value without running a full gameplay
+// session. Required by UIManager_SecondNewGame_SetsNewGamePendingFlag to place
+// UIManager into the "subsequent game" state without calling transitionToGameplay().
+void UIManager::setGameSessionActiveForTest(bool value);
+#endif // AITOWN_TESTING_ENABLED
+```
+
+**Contract**:
+
+- Neither method is callable in production builds — the `#ifdef` guard ensures zero overhead
+  and no public API surface in shipping code.
+- `handleNewGameRequest()` is the only test entry point for simulating "Start City" clicks;
+  tests must NOT call `UIManager::update()` to trigger the button handler.
+- `setGameSessionActiveForTest(true)` must be called before `handleNewGameRequest()` in any
+  test that exercises the subsequent-game path (i.e., tests expecting `m_newGamePending = true`
+  and `consumeNewGameRequest()` returning `true`).

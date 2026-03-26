@@ -4,7 +4,11 @@
 
 The Finances Panel uses the Glass City deep-navy panel style:
 
-- **Background**: `rgba(13, 27, 42, 0.85)` deep navy, **8 px corner radius** on all edges
+- **Background**: `rgba(13, 27, 42, 0.85)` deep navy, **8 px corner radius** on all edges.
+  **V1 limitation**: Irrlicht `IGUIStaticText` does not support corner radius natively; Phase 11m
+  delivers a solid-color background (`setElementBackground`) without rounded corners as the V1
+  fallback. Corner-radius rendering (via sprite slice or custom draw call) is deferred to a
+  post-V1 polish pass. This matches the same V1 limitation documented for SettingsPanel.
 - **Panel title** ("Finances"): `#EBF4F6` near-white
 - **Zone type row labels** (R / C / I): `#EBF4F6` near-white
 - **Current rate numeric readout**: `#F0B429` amber, monospace font
@@ -37,7 +41,7 @@ The +/− buttons use hover state as their highest visual state.
 
 ## Budget Section
 
-The Budget Section is displayed below the Tax Rates rows within the same Finances Panel. It is separated from the Tax Rates section by a 1 px horizontal rule. The Glass City visual style (`rgba(13, 27, 42, 0.85)` background, 8 px corner radius) applies to the full panel including this section.
+The Budget Section is displayed below the Tax Rates rows within the same Finances Panel. It is separated from the Tax Rates section by a 1 px horizontal rule. The Glass City visual style (`rgba(13, 27, 42, 0.85)` background, 8 px corner radius per the canonical spec; see V1 deferral note above) applies to the full panel including this section.
 
 The Budget Section layout uses three subsections separated by 1 px horizontal rules. Section headers are bold label rows using the HUD font. Subtotals are shown inline on the section header row.
 

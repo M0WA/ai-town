@@ -332,8 +332,28 @@ must not be used for new work:
 - **Service Coverage overlay on minimap**: In colorblind mode, use distinct geometric pattern overlays (e.g., diagonal hatching for fire, horizontal lines for police, dotted for power, cross-hatch for water) in addition to tint colors.
 - **Zone placement preview/cursor tint**: In colorblind mode, zone type cursors must include a zone-type label overlay (small "R", "C", or "I" text) so players can confirm zone type without relying on color.
 - **3D zone colour overlay** (the `setZoneOverlay` semi-transparent quad layer introduced in Phase 9b):
-  In standard mode, the zone overlay uses: Residential = `0x6000FF00` (green, alpha 0x60), Commercial = `0x600000FF` (blue, alpha 0x60), Industrial = `0x60FFFF00` (yellow, alpha 0x60).
-  In colorblind mode, the zone overlay MUST switch to a colorblind-safe palette: Residential = `0x602020FF` (blue-violet, alpha 0x60), Commercial = `0x60FF8000` (orange, alpha 0x60), Industrial = `0x60FF00FF` (magenta, alpha 0x60). These three hues are distinguishable under deuteranopia and protanopia. Additionally, each zone type's overlay quad MUST include a zone-type letter stamp — the `IrrlichtRenderer::setZoneOverlay()` implementation, when colorblind mode is active, renders a small 'R', 'C', or 'I' sprite centered on each zoned tile (drawn as a separate pass at Y + 0.15f, using a white-on-transparent glyph texture from the UI sprite sheet). This dual-encoding (color + letter) satisfies WCAG 2.1 SC 1.4.1. `UIManager` passes the colorblind-safe ARGB values to `setZoneOverlay` when colorblind mode is on; `IrrlichtRenderer` reads a `m_colorblindMode` boolean (set via a new `setColorblindMode(bool)` method on `IrrlichtRenderer`, called by `UIManager` when the Settings colorblind toggle changes) to know whether to render the glyph pass. The colorblind ARGB values for the overlay map entries are computed by `UIManager` when updating `m_overlayMap` — `UIManager` queries `m_settings->isColorblindMode()` (or a cached `m_colorblindMode` bool updated on settings change) to select the correct ARGB per zone type before inserting into `m_overlayMap`.
+  **Phase 11m supersession**: Phase 11m replaces the static per-zone-type ARGB colours below with a
+  demand-gradient system. Unbuilt zoned tiles receive a colour interpolated between a light base and
+  a dark base per zone type (see `architecture/game-design/zoning-system.md`, "Unbuilt Zone Overlay
+  Colors (Phase 11m)"), at alpha 180. Built tiles carry no overlay. The static ARGB constants below
+  apply only to code written before Phase 11m. After Phase 11m, `m_overlayMap` entries are populated
+  exclusively by `computeZoneOverlayColor()` using the demand-gradient formula.
+
+  **Colorblind support for demand-gradient overlays (V1 scope limitation)**: In V1 (through Phase 11m),
+  colorblind mode uses the same demand-gradient colours as standard mode for zone overlays. The
+  pattern-supplemented colorblind palette and zone-type letter-stamp glyphs specified below apply to
+  the pre–Phase 11m static overlay only and are superseded alongside it. Full colorblind support for
+  the demand-gradient system (separate light/dark colour ramps per zone type that are distinguishable
+  under deuteranopia and protanopia, plus letter stamps) is deferred to a post-V1 colorblind QA pass.
+
+  **Static overlay spec (Phase 9b, superseded by Phase 11m)**: In standard mode, the zone overlay
+  used: Residential = `0x6000FF00` (green, alpha 0x60), Commercial = `0x600000FF` (blue, alpha 0x60),
+  Industrial = `0x60FFFF00` (yellow, alpha 0x60). In colorblind mode, the zone overlay switched to:
+  Residential = `0x602020FF` (blue-violet), Commercial = `0x60FF8000` (orange), Industrial =
+  `0x60FF00FF` (magenta), with a zone-type letter stamp ('R'/'C'/'I') rendered via
+  `IrrlichtRenderer::setZoneOverlay()` at Y + 0.15f from the UI sprite sheet glyph texture.
+  `UIManager` selected the ARGB variant by querying `m_settings->isColorblindMode()`. This spec is
+  retained for reference; implementation is superseded by Phase 11m demand-gradient.
 - **Tile hover highlight** (the `setTileHoverHighlight` per-tool ARGB introduced in Phase 9b):
   In standard mode, hover highlight colours are: Zone = `0x80FF00FF` (magenta), Road = `0x8000FFFF` (cyan), Utilities = `0x80FF8000` (orange), Demolish = `0x80FF0000` (red), Query = `0x80FFFFFF` (white). All five hues are distinguishable in standard mode.
   In colorblind mode, the hover highlight MUST additionally render a tool-type icon or letter in the highlight quad to supplement color: Zone shows a small 'Z' glyph, Road shows 'R', Utilities shows 'U', Demolish shows 'X'. Query retains the white highlight (white is colorblind-safe). The glyph is rendered as a sprite from the UI sprite sheet, centered on the tile, using the same Y + 0.05f offset as the hover quad. The actual hover highlight ARGB colours do not change in colorblind mode for the hover highlight (unlike the zone overlay) — the colours are bright and high-contrast enough that deuteranopia does not cause confusion between them. The glyph is additive supplemental encoding. **Implementation scope**: The hover highlight colorblind glyph is deferred to Phase 12 (colorblind QA pass), consistent with the Phase 8 colorblind delivery schedule. Phase 9b delivers only the standard-mode hover ARGB colours. The architecture commitment is made here so Phase 12 has a concrete spec.
