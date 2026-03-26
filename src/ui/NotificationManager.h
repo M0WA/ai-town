@@ -146,6 +146,19 @@ private:
     // CRITICAL toast keyboard focus (Tab-navigable, oldest gets focus first).
     int m_focusedCriticalIndex{0};
 
+    // --- Helper methods (scrollbar) ---
+
+    // Recompute scrollbar thumb position/size and update element visibility.
+    // Called after any change to m_logScrollOffset or m_logEntries size while
+    // the log panel is open.
+    void updateScrollThumb();
+
+    // --- Scrollbar element handles ---
+    UIElementHandle m_logScrollTrack{kInvalidUIElement};
+    UIElementHandle m_logScrollThumb{kInvalidUIElement};
+    int             m_logVisibleRows{0};  // computed at panel open: floor(500 / kLogRowHeightPx)
+    int             m_logScrollOffset{0}; // first visible row index (0 = top)
+
     // --- Toast layout constants (virtual 1920x1080 space) ---
     static constexpr int kToastWidth          = 500;
     static constexpr int kCriticalToastHeight = 48;
@@ -157,4 +170,13 @@ private:
     static constexpr int kMaxNormalQueueDepth = 10;
     static constexpr int kMaxLogEntries       = 50;
     static constexpr int kMaxBodyChars        = 80;
+
+    // --- Log panel layout constants (virtual 1920x1080 space) ---
+    // Row height used to compute visible row count and text layout.
+    static constexpr int kLogRowHeightPx      = 20;
+    // Log panel dimensions (x:1468-1868, y:56-556 = 400x500 px).
+    static constexpr int kLogTrackX           = 1856;
+    static constexpr int kLogTrackY           = 56;
+    static constexpr int kLogTrackW           = 12;
+    static constexpr int kLogTrackH           = 500;
 };

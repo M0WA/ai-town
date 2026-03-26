@@ -19,13 +19,12 @@
 #include "src/ui/NotificationManager.h"
 #include "src/ui/MainMenuPanel.h"
 #include "src/ui/HUD.h"
-#include "src/ui/TaxRatePanel.h"
+#include "src/ui/FinancesPanel.h"
 #include "src/ui/Minimap.h"
 #include "src/ui/InspectorPanel.h"
 #include "src/ui/PauseMenuPanel.h"
 #include "src/ui/SettingsPanel.h"
 #include "src/ui/ModalDialog.h"
-#include "src/ui/BudgetDetailPanel.h"  // Phase 11h: budget panel toggle via treasury label click
 
 // Explicit interface includes for method calls on forward-declared pointers.
 #include "src/interfaces/IAudioSystem.h"
@@ -102,7 +101,6 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
     m_notifications = new NotificationManager(m_backend, m_sim, m_clock, m_audio);
     m_mainMenu      = new MainMenuPanel(m_backend);   // calls show() in its constructor
     m_hud           = new HUD(m_backend, m_audio, m_sim, m_clock);
-    m_taxPanel      = new TaxRatePanel(m_backend, m_sim);
     m_minimap       = new Minimap(m_backend);
     m_inspector     = new InspectorPanel(m_backend, m_sim);
     m_pauseMenu     = new PauseMenuPanel(m_backend);
@@ -228,7 +226,6 @@ UIManager::~UIManager() {
     delete m_pauseMenu;
     delete m_inspector;
     delete m_minimap;
-    delete m_taxPanel;
     delete m_hud;
     delete m_mainMenu;
     delete m_notifications;  // last
@@ -406,40 +403,17 @@ bool UIManager::onEvent(const InputEvent& event) {
     }
 
     // ============================================================
-    // Priority 4a: BudgetDetailPanel (when open) — Phase 11h.
-    // Escape closes the panel; outside clicks pass through.
+    // Priority 4: FinancesPanel (when open) — Phase 11l.
+    // Forwards events to FinancesPanel; panel handles Escape and
+    // outside-click dismiss internally. Outside-click is NOT consumed
+    // so the underlying game-world handlers still receive the event.
     // ============================================================
-    if (m_budgetPanelOpen) {
-        if (event.type == InputEvent::Type::KeyDown && event.keyCode == kKeyEscape) {
-            if (m_hud && m_hud->getBudgetDetail()) m_hud->getBudgetDetail()->hide();
-            m_budgetPanelOpen = false;
-            return true;
-        }
-    }
-
-    // ============================================================
-    // Priority 4: TaxRatePanel (when open).
-    // Clicks within bounds are consumed.
-    // Escape closes the panel.
-    // Outside clicks pass through (unlike inspector, which closes).
-    // ============================================================
-    if (m_taxPanelOpen) {
-        Rect taxBounds = m_taxPanel->getBounds();
-
-        // Escape closes the tax panel.
-        if (event.type == InputEvent::Type::KeyDown && event.keyCode == kKeyEscape) {
-            m_taxPanel->hide();
-            m_taxPanelOpen = false;
-            return true;
-        }
-
-        // Click inside tax panel bounds — consumed.
-        if (event.type == InputEvent::Type::MouseButtonDown && event.button == 0) {
-            if (inRect(event.x, event.y, taxBounds.x, taxBounds.y,
-                       taxBounds.w, taxBounds.h)) {
-                return true;
-            }
-            // Outside clicks pass through to lower priorities.
+    if (m_financesPanelOpen) {
+        if (m_hud && m_hud->getFinances()) {
+            bool consumed = m_hud->getFinances()->onEvent(event);
+            // Sync open state in case FinancesPanel closed itself
+            m_financesPanelOpen = m_hud->getFinances()->isOpen();
+            if (consumed) return true;
         }
     }
 
@@ -548,13 +522,13 @@ bool UIManager::onEvent(const InputEvent& event) {
                 return true;
             }
 
-            // T: toggle tax rate panel
+            // T: toggle finances panel
             if (event.keyCode == kKeyT) {
-                m_taxPanelOpen = !m_taxPanelOpen;
-                if (m_taxPanelOpen) {
-                    m_taxPanel->show();
-                } else {
-                    m_taxPanel->hide();
+                if (m_hud) {
+                    m_hud->toggleFinancesPanel();
+                    m_financesPanelOpen = m_hud->getFinances()
+                                         ? m_hud->getFinances()->isOpen()
+                                         : false;
                 }
                 return true;
             }
@@ -773,17 +747,22 @@ bool UIManager::onEvent(const InputEvent& event) {
             return true;
         }
 
-        // Treasury balance label (top-left: x=8,y=8,w=200,h=48 → click region 8-208, 8-56).
-        // Phase 11h: click toggles BudgetDetailPanel.
-        if (inRect(event.x, event.y, 8, 8, 200, 48)) {
-            if (m_hud && m_hud->getBudgetDetail()) {
-                m_budgetPanelOpen = !m_budgetPanelOpen;
-                if (m_budgetPanelOpen) {
-                    m_hud->getBudgetDetail()->show();
+        // Resource/budget bar click (top area: x=8-1912, y=0-56) → toggle FinancesPanel.
+        // Phase 11l: replaces the old treasury-hover BudgetDetailPanel.
+        // The FinancesPanel open() fires UI_MENU_OPEN via IAudioSystem internally.
+        if (inRect(event.x, event.y, 8, 0, 1904, 56)) {
+            if (m_hud) {
+                // If panel is already open, a resource-bar click dismisses it only
+                // (spec: dismiss handler at panel priority level consumes the click first).
+                if (m_financesPanelOpen && m_hud->getFinances()) {
+                    m_hud->getFinances()->close();
+                    m_financesPanelOpen = false;
                 } else {
-                    m_hud->getBudgetDetail()->hide();
+                    m_hud->toggleFinancesPanel();
+                    m_financesPanelOpen = m_hud->getFinances()
+                                         ? m_hud->getFinances()->isOpen()
+                                         : false;
                 }
-                if (m_audio) m_audio->playSound(UI_CLICK, SoundPriority::NORMAL, 1.0f);
             }
             return true;
         }
@@ -1336,7 +1315,7 @@ void UIManager::draw() {
     m_mainMenu->draw();       // slot 1 — main menu (hidden during gameplay)
     m_minimap->draw();        // slot 2 — minimap (bottom-right in gameplay)
     m_hud->draw();            // slot 3 — HUD toolbar and resource bar
-    m_taxPanel->draw();       // slot 4 — tax rate panel (toggled by T hotkey)
+    if (m_hud && m_hud->getFinances()) m_hud->getFinances()->draw();  // slot 4 — finances panel (toggled by T)
     m_inspector->draw();      // slot 5 — query/inspector panel (toggled by I hotkey)
     m_notifications->draw();  // slot 6 — toast stack and notification log
     m_pauseMenu->draw();      // slot 7 — pause menu overlay
@@ -1371,6 +1350,16 @@ void UIManager::update(float realDeltaSeconds) {
             // start() doesn't exist on ICitySimulation; the sim is already ticking.
             transitionToGameplay(GameMode::Sandbox);
             return; // Skip the rest of this frame's update — state just changed.
+        }
+        if (m_mainMenu->consumeLoadGameRequest()) {
+            if (m_saveSystem) {
+                LoadResult result = m_saveSystem->loadMostRecentSave();
+                if (result.ok) {
+                    transitionToGameplay(GameMode::Sandbox);
+                    onGameLoaded();
+                }
+            }
+            return;
         }
         if (m_mainMenu->consumeSettingsRequest()) {
             showSettings();
@@ -1841,10 +1830,10 @@ void UIManager::transitionToMainMenu() {
     m_hud->hide();
     m_minimap->hide();
     m_pauseMenu->hide();
-    m_taxPanel->hide();
-    m_taxPanelOpen = false;
-    if (m_hud && m_hud->getBudgetDetail()) m_hud->getBudgetDetail()->hide();
-    m_budgetPanelOpen = false;
+    if (m_hud && m_hud->getFinances() && m_hud->getFinances()->isOpen()) {
+        m_hud->getFinances()->close();
+    }
+    m_financesPanelOpen = false;
     m_inspector->hide();
     m_inspectorOpen = false;
 
@@ -2028,4 +2017,16 @@ void UIManager::setSaveStatusText(const std::string& text) {
     if (m_mainMenu) {
         m_mainMenu->setSaveStatusText(text);
     }
+}
+
+// ----------------------------------------------------------------
+// Phase 11l: getPendingMapTiles — return selected map size as tile count.
+// Returns the integer value of MapSize enum (128, 512, or 1024).
+// main.cpp passes this to TerrainSystem::generate() when starting a new game.
+// ----------------------------------------------------------------
+int UIManager::getPendingMapTiles() const {
+    if (m_mainMenu) {
+        return static_cast<int>(m_mainMenu->getSelectedMapSize());
+    }
+    return static_cast<int>(MapSize::kMedium);  // default
 }

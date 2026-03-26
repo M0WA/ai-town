@@ -17,6 +17,7 @@
 #include "src/interfaces/sound_ids.h"     // UI_TOAST = SoundId 23
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 
 // Key codes — must match the platform adapter's InputEvent keyCode mapping.
@@ -89,6 +90,11 @@ void NotificationManager::postCritical(const std::string& title, const std::stri
         m_criticalQueue.back().handle != kInvalidUIElement) {
         m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f);
     }
+
+    // Update scrollbar if the log panel is currently open (new entry added).
+    if (m_logOpen) {
+        updateScrollThumb();
+    }
 }
 
 // ----------------------------------------------------------------
@@ -116,6 +122,11 @@ void NotificationManager::postNormal(const std::string& title, const std::string
     if (m_audio && !m_normalQueue.empty() &&
         m_normalQueue.back().handle != kInvalidUIElement) {
         m_audio->playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f);
+    }
+
+    // Update scrollbar if the log panel is currently open (new entry added).
+    if (m_logOpen) {
+        updateScrollThumb();
     }
 }
 
@@ -215,6 +226,21 @@ void NotificationManager::draw() {
 // verified by UIManager::onEvent at Priority 2).
 // ----------------------------------------------------------------
 bool NotificationManager::onEvent(const InputEvent& event) {
+    // --- Mouse wheel: scroll the log panel if it is open ---
+    if (m_logOpen && event.type == InputEvent::Type::MouseWheel) {
+        int totalRows   = static_cast<int>(m_logEntries.size());
+        int maxOffset   = std::max(0, totalRows - m_logVisibleRows);
+        if (event.wheelDelta < 0.f) {
+            // Scroll down (towards older entries).
+            m_logScrollOffset = std::min(m_logScrollOffset + 1, maxOffset);
+        } else if (event.wheelDelta > 0.f) {
+            // Scroll up (towards newer entries).
+            m_logScrollOffset = std::max(m_logScrollOffset - 1, 0);
+        }
+        updateScrollThumb();
+        return true;
+    }
+
     if (m_criticalQueue.empty()) return false;
 
     // --- Click on a CRITICAL toast ---
@@ -307,12 +333,33 @@ void NotificationManager::toggleLog() {
         if (m_logPanelHandle == kInvalidUIElement && m_backend) {
             // Log panel: 400x500 px, aligned to bell icon bottom-right.
             // Virtual bounds: x:1468-1868, y:56-556.
+            // Content area width is 388 px (400 - 12 px scrollbar on right edge).
             m_logPanelHandle = m_backend->addStaticText("Notification Log",
-                                                        1468, 56, 400, 500);
+                                                        1468, 56, 388, 500);
             // Dark navy semi-opaque background. Phase 10c Glass City Colour Pass.
             // Signature: setElementBackground(handle, r, g, b, a)
             m_backend->setElementBackground(m_logPanelHandle, 13, 27, 42, 209);
         }
+
+        // Create scrollbar track (12 px wide, right edge of panel: x:1856-1868).
+        if (m_logScrollTrack == kInvalidUIElement && m_backend) {
+            m_logScrollTrack = m_backend->addStaticText("",
+                kLogTrackX, kLogTrackY, kLogTrackW, kLogTrackH);
+            // Track colour: rgba(255, 255, 255, 0.08) — approx 20/255.
+            m_backend->setElementBackground(m_logScrollTrack, 255, 255, 255, 20);
+        }
+
+        // Create scrollbar thumb (12 px wide, height and position computed below).
+        if (m_logScrollThumb == kInvalidUIElement && m_backend) {
+            m_logScrollThumb = m_backend->addStaticText("",
+                kLogTrackX, kLogTrackY, kLogTrackW, kLogTrackH);
+            // Thumb colour at rest: rgba(255, 255, 255, 0.25) — approx 64/255.
+            m_backend->setElementBackground(m_logScrollThumb, 255, 255, 255, 64);
+        }
+
+        // Compute visible rows from panel height and row height.
+        m_logVisibleRows = kLogTrackH / kLogRowHeightPx;
+
         if (m_logPanelHandle != kInvalidUIElement && m_backend) {
             // Build log text from entries.
             std::string logText = "Notification Log\n";
@@ -323,10 +370,57 @@ void NotificationManager::toggleLog() {
             m_backend->setElementText(m_logPanelHandle, logText);
             m_backend->setElementVisible(m_logPanelHandle, true);
         }
+
+        // Initialise scrollbar position and visibility.
+        updateScrollThumb();
     } else {
         if (m_logPanelHandle != kInvalidUIElement && m_backend) {
             m_backend->setElementVisible(m_logPanelHandle, false);
         }
+        if (m_logScrollTrack != kInvalidUIElement && m_backend) {
+            m_backend->setElementVisible(m_logScrollTrack, false);
+        }
+        if (m_logScrollThumb != kInvalidUIElement && m_backend) {
+            m_backend->setElementVisible(m_logScrollThumb, false);
+        }
+    }
+}
+
+// ----------------------------------------------------------------
+// updateScrollThumb — recompute thumb geometry and update visibility
+// ----------------------------------------------------------------
+void NotificationManager::updateScrollThumb() {
+    if (!m_backend) return;
+
+    int totalRows   = static_cast<int>(m_logEntries.size());
+    int visibleRows = m_logVisibleRows;
+
+    // Hide scrollbar when all entries fit without scrolling.
+    bool needsScrollbar = (totalRows > visibleRows);
+
+    if (m_logScrollTrack != kInvalidUIElement) {
+        m_backend->setElementVisible(m_logScrollTrack, needsScrollbar);
+    }
+    if (m_logScrollThumb != kInvalidUIElement) {
+        m_backend->setElementVisible(m_logScrollThumb, needsScrollbar);
+    }
+
+    if (!needsScrollbar) return;
+
+    // thumbH = max(20, floor(visibleRows / totalRows * trackH))
+    int thumbH = std::max(20,
+        static_cast<int>(std::floor(
+            static_cast<float>(visibleRows) / static_cast<float>(std::max(1, totalRows))
+            * static_cast<float>(kLogTrackH))));
+
+    // thumbY = trackTop + floor(scrollOffset / max(1, totalRows - visibleRows) * (trackH - thumbH))
+    int denom  = std::max(1, totalRows - visibleRows);
+    int thumbY = kLogTrackY + static_cast<int>(std::floor(
+        static_cast<float>(m_logScrollOffset) / static_cast<float>(denom)
+        * static_cast<float>(kLogTrackH - thumbH)));
+
+    if (m_logScrollThumb != kInvalidUIElement) {
+        m_backend->setElementRect(m_logScrollThumb, kLogTrackX, thumbY, kLogTrackW, thumbH);
     }
 }
 

@@ -1,7 +1,12 @@
 #pragma once
 #include <string>
-#include <cstdio>   // fopen/fclose/fread/fseek/ftell
-#include <cstring>  // strlen
+#include <cstdio>   // fopen/fclose/fread/fseek/ftell/fprintf
+
+// Forward declaration — the load() method accepts an optional irr::ILogger* pointer
+// but the full Irrlicht include is kept out of this header (testability rule: headers
+// included by test targets must not pull in Irrlicht).  The implementation in
+// key_bindings.cpp includes <irrlicht.h> for the full ILogger type.
+namespace irr { class ILogger; }
 
 // Default hotkey values per architecture/ui-ux/hotkey-scheme.md.
 // Camera pan defaults to Arrow keys (not WASD); the WASD preset is a player-applied
@@ -41,87 +46,13 @@ struct KeyBindings {
     // Load key bindings from a JSON config file at `path`.
     // Parses the flat string-to-string JSON object at startup.
     // If the file cannot be opened, returns immediately (caller handles absent file).
-    // Reserved keys ("Q", "E"): silently ignored with a warning logged to stderr.
+    // Reserved keys ("Q", "E"): silently ignored with a warning logged via logger or stderr.
     // Unrecognised action names: logged as unknown and skipped.
     // The const fields `undo` and `save` are never modified.
     // Does not throw — all errors are handled as warnings + skip.
-    void load(const std::string& path) {
-        // --- 1. Open file ---
-        FILE* f = fopen(path.c_str(), "r");
-        if (!f) {
-            return; // Absent file — caller already handled; no warning here.
-        }
-
-        // --- 2. Read entire file into a string ---
-        fseek(f, 0, SEEK_END);
-        long fileSize = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        std::string content;
-        if (fileSize > 0) {
-            content.resize(static_cast<std::string::size_type>(fileSize));
-            fread(&content[0], 1, static_cast<std::size_t>(fileSize), f);
-        }
-        fclose(f);
-
-        // --- 3. Hand-rolled flat JSON key-value parser ---
-        // Expects a flat object: { "key": "value", ... }
-        // Strategy: repeatedly find the next `"key"` : `"value"` pair.
-        std::string::size_type pos = 0;
-        while (pos < content.size()) {
-            // Find the opening quote of the next key.
-            std::string::size_type kStart = content.find('"', pos);
-            if (kStart == std::string::npos) break;
-            std::string::size_type kEnd = content.find('"', kStart + 1);
-            if (kEnd == std::string::npos) break;
-            std::string key = content.substr(kStart + 1, kEnd - kStart - 1);
-
-            // Skip past the key's closing quote and find the colon.
-            std::string::size_type colon = content.find(':', kEnd + 1);
-            if (colon == std::string::npos) break;
-
-            // Find the opening quote of the value.
-            std::string::size_type vStart = content.find('"', colon + 1);
-            if (vStart == std::string::npos) break;
-            std::string::size_type vEnd = content.find('"', vStart + 1);
-            if (vEnd == std::string::npos) break;
-            std::string value = content.substr(vStart + 1, vEnd - vStart - 1);
-
-            // Advance position past this pair for next iteration.
-            pos = vEnd + 1;
-
-            // --- 4. Reserved-key guard ---
-            if (isReservedKey(value)) {
-                fprintf(stderr,
-                    "[KeyBindings::load] Rejected reserved key \"%s\" for action \"%s\" — default retained.\n",
-                    value.c_str(), key.c_str());
-                continue;
-            }
-
-            // --- 5. Map key name to struct field and assign ---
-            if      (key == "camPanUp")        { camPanUp        = value; }
-            else if (key == "camPanDown")       { camPanDown       = value; }
-            else if (key == "camPanLeft")       { camPanLeft       = value; }
-            else if (key == "camPanRight")      { camPanRight      = value; }
-            else if (key == "toolZone")         { toolZone         = value; }
-            else if (key == "toolRoad")         { toolRoad         = value; }
-            else if (key == "toolUtilities")    { toolUtilities    = value; }
-            else if (key == "toolDemolish")     { toolDemolish     = value; }
-            else if (key == "toolInspector")    { toolInspector    = value; }
-            else if (key == "toggleTaxPanel")   { toggleTaxPanel   = value; }
-            else if (key == "toggleNotifLog")   { toggleNotifLog   = value; }
-            else if (key == "togglePause")      { togglePause      = value; }
-            else if (key == "speedIncrease")    { speedIncrease    = value; }
-            else if (key == "speedDecrease")    { speedDecrease    = value; }
-            else if (key == "openPauseMenu")    { openPauseMenu    = value; }
-            // Non-rebindable chords ("undo", "save") are intentionally absent here —
-            // the const fields must not be modified by load().
-            else {
-                fprintf(stderr,
-                    "[KeyBindings::load] Unknown key \"%s\" — ignored.\n",
-                    key.c_str());
-            }
-        }
-    }
+    // logger — optional irr::ILogger*; if nullptr, warnings fall back to stderr.
+    // Implementation in key_bindings.cpp (keeps Irrlicht out of test include paths).
+    void load(const std::string& path, irr::ILogger* logger = nullptr);
 
     // Returns true for keys that are reserved and cannot be assigned to any action.
     // Q and E are reserved for future camera controls.

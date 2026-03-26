@@ -103,8 +103,9 @@ protected:
 //    constructor throws std::runtime_error without entering the streaming loop
 //    when getProcAddress('alcSetThreadContext') returns null"
 //
-// The AudioSystem constructor signature for Phase 7 is:
-//   explicit AudioSystem(IClock* clock, IAlcFunctions* alcFunctions = nullptr);
+// The AudioSystem constructor signature (Phase 11l Deliverable 9) is:
+//   explicit AudioSystem(irr::ILogger* logger, IClock* clock, IAlcFunctions* alcFunctions = nullptr);
+// When logger is nullptr, AudioSystem falls back to stderr logging.
 // When alcFunctions is nullptr, AudioSystem uses DefaultAlcFunctions (real ALC calls).
 // When alcFunctions points to MockAlcFunctions, it uses the mock's returning null.
 //
@@ -141,7 +142,7 @@ TEST_F(AudioThreadTest, AudioThread_AbsentThreadLocalContext_ConstructorThrows) 
 #endif
     EXPECT_THROW(
         {
-            AudioSystem audioSystem(&m_clock, &m_mockAlc);
+            AudioSystem audioSystem(nullptr, &m_clock, &m_mockAlc);
         },
         std::runtime_error);
 }

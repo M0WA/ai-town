@@ -66,6 +66,12 @@ MainMenuPanel::MainMenuPanel(IUIBackend* backend)
     m_ngBtnHard   = m_backend->addButton("( ) Hard",    kBtnX + 285, y, 75, 32);
     y += 44;
 
+    m_ngMapSizeLabel  = m_backend->addStaticText("Map Size:", kBtnX, y, 100, 32);
+    m_ngBtnSizeSmall  = m_backend->addButton("( ) Small",  kBtnX + 105, y, 75,  32);
+    m_ngBtnSizeMedium = m_backend->addButton("(*) Medium", kBtnX + 185, y, 85,  32);
+    m_ngBtnSizeLarge  = m_backend->addButton("( ) Large",  kBtnX + 275, y, 75,  32);
+    y += 44;
+
     m_ngSeedLabel    = m_backend->addStaticText("Map Seed:", kBtnX, y, 120, 32);
     m_ngSeedInput    = m_backend->addStaticText("",          kBtnX + 130, y, 160, 32);
     m_ngBtnRandomize = m_backend->addButton("Randomize",    kBtnX + 300, y, 100, 32);
@@ -107,6 +113,10 @@ void MainMenuPanel::hideAllElements() {
     m_backend->setElementVisible(m_ngBtnEasy, false);
     m_backend->setElementVisible(m_ngBtnNormal, false);
     m_backend->setElementVisible(m_ngBtnHard, false);
+    m_backend->setElementVisible(m_ngMapSizeLabel, false);
+    m_backend->setElementVisible(m_ngBtnSizeSmall, false);
+    m_backend->setElementVisible(m_ngBtnSizeMedium, false);
+    m_backend->setElementVisible(m_ngBtnSizeLarge, false);
     m_backend->setElementVisible(m_ngSeedLabel, false);
     m_backend->setElementVisible(m_ngSeedInput, false);
     m_backend->setElementVisible(m_ngBtnRandomize, false);
@@ -165,6 +175,10 @@ void MainMenuPanel::showNewGameScreen() {
     m_backend->setElementVisible(m_ngBtnEasy, true);
     m_backend->setElementVisible(m_ngBtnNormal, true);
     m_backend->setElementVisible(m_ngBtnHard, true);
+    m_backend->setElementVisible(m_ngMapSizeLabel, true);
+    m_backend->setElementVisible(m_ngBtnSizeSmall, true);
+    m_backend->setElementVisible(m_ngBtnSizeMedium, true);
+    m_backend->setElementVisible(m_ngBtnSizeLarge, true);
     m_backend->setElementVisible(m_ngSeedLabel, true);
     m_backend->setElementVisible(m_ngSeedInput, true);
     m_backend->setElementVisible(m_ngBtnRandomize, true);
@@ -223,6 +237,12 @@ bool MainMenuPanel::consumeQuitRequest() {
     return false;
 }
 
+bool MainMenuPanel::consumeLoadGameRequest() {
+    if (!m_loadGameRequested) return false;
+    m_loadGameRequested = false;
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // setSaveAvailable — Phase 11: enable/disable the Load Game button.
 // Called by UIManager::setSaveAvailable() after SaveSystem probes disk.
@@ -248,11 +268,18 @@ void MainMenuPanel::setSaveStatusText(const std::string& text) {
 void MainMenuPanel::draw() {
     if (!m_visible || !m_backend) return;
 
-    // Update difficulty radio button labels
+    // Update difficulty and map size radio button labels
     if (m_screen == Screen::NewGame) {
         m_backend->setElementText(m_ngBtnEasy,   m_selectedDifficulty == 0 ? "(*) Easy"   : "( ) Easy");
         m_backend->setElementText(m_ngBtnNormal, m_selectedDifficulty == 1 ? "(*) Normal" : "( ) Normal");
         m_backend->setElementText(m_ngBtnHard,   m_selectedDifficulty == 2 ? "(*) Hard"   : "( ) Hard");
+
+        m_backend->setElementText(m_ngBtnSizeSmall,
+            m_selectedMapSize == MapSize::kSmall  ? "(*) Small"  : "( ) Small");
+        m_backend->setElementText(m_ngBtnSizeMedium,
+            m_selectedMapSize == MapSize::kMedium ? "(*) Medium" : "( ) Medium");
+        m_backend->setElementText(m_ngBtnSizeLarge,
+            m_selectedMapSize == MapSize::kLarge  ? "(*) Large"  : "( ) Large");
     }
 }
 
@@ -325,7 +352,9 @@ bool MainMenuPanel::onEvent(const InputEvent& event) {
                     case 0: // New Game
                         showNewGameScreen();
                         return true;
-                    case 1: // Load Game (grayed)
+                    case 1: // Load Game
+                        if (m_backend->isElementEnabled(m_btnLoadGame))
+                            m_loadGameRequested = true;
                         return true;
                     case 2: // Settings
                         m_settingsRequested = true;
@@ -353,6 +382,11 @@ bool MainMenuPanel::onEvent(const InputEvent& event) {
                 showNewGameScreen();
                 return true;
             }
+            if (hitTest(mx, my, m_btnLoadGame) &&
+                m_backend->isElementEnabled(m_btnLoadGame)) {
+                m_loadGameRequested = true;
+                return true;
+            }
             if (hitTest(mx, my, m_btnSettings)) {
                 m_settingsRequested = true;
                 return true;
@@ -368,6 +402,11 @@ bool MainMenuPanel::onEvent(const InputEvent& event) {
             if (hitTest(mx, my, m_ngBtnEasy))   { m_selectedDifficulty = 0; return true; }
             if (hitTest(mx, my, m_ngBtnNormal))  { m_selectedDifficulty = 1; return true; }
             if (hitTest(mx, my, m_ngBtnHard))    { m_selectedDifficulty = 2; return true; }
+
+            // Map size buttons
+            if (hitTest(mx, my, m_ngBtnSizeSmall))  { m_selectedMapSize = MapSize::kSmall;  return true; }
+            if (hitTest(mx, my, m_ngBtnSizeMedium)) { m_selectedMapSize = MapSize::kMedium; return true; }
+            if (hitTest(mx, my, m_ngBtnSizeLarge))  { m_selectedMapSize = MapSize::kLarge;  return true; }
 
             if (hitTest(mx, my, m_ngBtnBack)) {
                 showMainMenuScreen();

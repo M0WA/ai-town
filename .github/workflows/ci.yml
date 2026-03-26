@@ -154,3 +154,81 @@ jobs:
       vcpkg_commit_id: ${{ needs.prepare.outputs.vcpkg_commit_id }}
     permissions:
       contents: read
+
+  # ============================================================================
+  # bump-version — increments the patch version in CMakeLists.txt, commits, and
+  # pushes a new tag on every push to main. [skip ci] prevents a build loop.
+  # Not in all-checks-pass gate (release job only; gate covers build quality).
+  # ============================================================================
+  bump-version:
+    name: Bump version
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    timeout-minutes: 5
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - name: Calculate and bump version
+        run: |
+          CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo 'v0.0.0')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT#v}"
+          PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          sed -i "s/project(aitown VERSION [0-9.]*)/project(aitown VERSION ${NEW_VERSION})/" CMakeLists.txt
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt
+          git commit -m "chore: bump version to v${NEW_VERSION} [skip ci]"
+          git tag "v${NEW_VERSION}"
+          git push --follow-tags
+          echo "AITOWN_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
+
+  # ============================================================================
+  # release — downloads the Windows installer and debian-bookworm .deb artifacts
+  # produced by the package jobs, then creates a GitHub release with both.
+  # Runs only on main pushes, after bump-version and both package jobs succeed.
+  # Not in all-checks-pass gate.
+  # ============================================================================
+  release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [bump-version, package-windows, package-linux-deb]
+    permissions:
+      contents: write
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main (post-bump)
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+        with:
+          ref: main
+
+      - name: Read version from CMakeLists.txt
+        run: |
+          VERSION=$(grep -oP '(?<=project\(aitown VERSION )[0-9.]+' CMakeLists.txt)
+          echo "AITOWN_VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Download Windows installer
+        uses: actions/download-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: aitown-installer-windows-${{ github.sha }}
+          path: ./release-assets/
+
+      - name: Download Linux .deb (bookworm)
+        uses: actions/download-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: aitown-deb-debian-bookworm-${{ github.sha }}
+          path: ./release-assets/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564  # v2.1.0
+        with:
+          tag_name: v${{ env.AITOWN_VERSION }}
+          name: "AI Town v${{ env.AITOWN_VERSION }}"
+          fail_on_unmatched_files: true
+          files: release-assets/**

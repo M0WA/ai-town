@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
     // Constructor signature (IClock*) and all IAudioSystem method signatures are frozen.
     // CitySimulation receives &audioSystem for SFX playback during simulation ticks.
     // -------------------------------------------------------------------------
-    AudioSystem audioSystem(&wallClock);
+    AudioSystem audioSystem(device->getLogger(), &wallClock);
 
     // -------------------------------------------------------------------------
     // Phase 6: Simulation engine.
