@@ -274,14 +274,22 @@ implementation references inside `IrrlichtRenderer` and must not appear in UIMan
 
 ## Zone Colour Overlay — ARGB Colour Scheme
 
-The zone overlay is a persistent semi-transparent fill rendered over all zoned tiles.
-ARGB values are encoded as `0xAARRGGBB`. These are the **canonical zone identification
-colours** used consistently across all UI systems: zone overlay quads, minimap zone coding,
-and zone sub-panel button active-state icon tints.
+**Phase 11m supersession**: Phase 11m replaces the static zone overlay with a
+demand-gradient overlay for **unbuilt** tiles only (zone placed, building not yet spawned).
+The static constants below remain as canonical zone identification colours for minimap
+coding and zone sub-panel button tints, but are **no longer used** to populate
+`m_overlayMap` entries after Phase 11m. From Phase 11m onward:
 
-**These values are authoritative and must be used by `UIManager` when constructing the
-`m_overlayMap` entries passed to `IRenderer::setZoneOverlay()`. Define as named constants
-in `src/ui/ui_constants.h`.**
+- **Unbuilt zone tiles**: `UIManager::computeZoneOverlayColor()` generates demand-gradient
+  ARGB with alpha=180 (lerp between light and dark zone tones; see
+  `architecture/game-design/zoning-system.md §Unbuilt Zone Overlay Colors`).
+- **Built zone tiles** (building spawned): overlay entry is **removed** — no overlay is
+  rendered on tiles that have an active building.
+
+---
+
+ARGB values are encoded as `0xAARRGGBB`. These are the **canonical zone identification
+colours** for minimap zone coding and zone sub-panel button active-state icon tints.
 
 | Zone type | ARGB value | Colour description | Named constant |
 |---|---|---|---|
@@ -290,8 +298,8 @@ in `src/ui/ui_constants.h`.**
 | Industrial | `0x60FFFF00` | Semi-transparent yellow (alpha=96, ~38%) | `kOverlayArgbIndustrial` |
 
 Alpha value `0x60` = 96 = approximately 38% opacity. This is deliberately lower than the
-hover highlight alpha (0x80 = 50%) so that the always-on zone overlay is visually recessive
-and the temporary hover highlight reads as a distinct, foreground interaction cue on top.
+hover highlight alpha (0x80 = 50%) so that zone identification colours remain visually
+recessive relative to active interaction cues.
 
 **Overlay depth ordering**: Zone overlay quads use Y offset +0.1 world units above terrain
 surface. Hover highlight quads use Y offset +0.05 world units. This ensures the hover

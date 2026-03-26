@@ -746,3 +746,62 @@ tiles are removed).
 **TextureCache note**: intersection signal billboards use no textures (solid colour material);
 steps 1–2 of the eviction sequence are included for uniformity with the vehicle eviction
 pattern but have no effect in practice.
+
+## City Reset — clearCity() (Phase 11m)
+
+`IrrlichtRenderer::clearCity()` resets all city objects so that a second New Game can begin
+on a clean slate without reinitializing the renderer or device.
+
+### Contract
+
+`clearCity()` performs the following steps in order:
+
+1. **Evict building nodes**: iterate `m_buildingNodes`, perform the full node eviction
+   sequence on each entry — (1) clear all material texture slots (iterate
+   `mat.setTexture(t, nullptr)` for each texture unit), (2) call
+   `m_driver->setMaterial(SMaterial{})` to flush the driver state, (3) call
+   `node->remove()` — then call `m_buildingNodes.clear()` once after the loop.
+   **Do NOT call `destroyTileNode()` during the iteration** — that method erases from the
+   map internally, causing iterator invalidation on `std::unordered_map`. Use the
+   bulk-clear pattern instead.
+2. **Evict road nodes**: same safe bulk-clear pattern with full eviction sequence as step 1
+   for `m_roadNodes`.
+3. **Evict agent nodes**: iterate `m_agentNodes`, perform the full eviction sequence
+   (texture clear → `m_driver->setMaterial(SMaterial{})` → `node->remove()`), then
+   `m_agentNodes.clear()` after the loop. Traffic vehicle scene nodes that persist from
+   game 1 into game 2 would otherwise ghost in the scene.
+4. **Clear shared road SMesh buffers**: if `IrrlichtRenderer` maintains a persistent shared
+   `SMesh*` for batched road geometry (accumulated road segments), call its equivalent
+   `clear()` / remove-all-mesh-buffers operation and `recalculateBoundingBox()`. Do NOT
+   `->drop()` the mesh — it stays alive for reuse in the next game session. If roads use
+   only per-tile nodes (all evicted in step 2), this step is a no-op.
+5. **Reset road-tile counters**: reset any renderer-side road-tile count or per-tile mesh
+   state that accumulates across `addRoadTile()` calls (e.g., a `m_roadTileCount` member
+   on `IrrlichtRenderer`).
+6. **Do NOT remove terrain chunk nodes** — terrain is regenerated separately via
+   `TerrainSystem::generate()` after `clearCity()` returns. Terrain nodes must not be touched
+   by this method.
+
+### Call Site
+
+`clearCity()` is called from the `main.cpp` game loop when
+`uiManager.consumeNewGameRequest()` returns `true`, as step 2 in the new-game reset
+sequence:
+
+```text
+1. sim.reset(startingFunds)
+2. renderer.clearCity()          ← this method
+3. freshRng.reseed(ngp.seed); terrain.generate(...)
+4. uiManager.transitionToGameplay(GameMode::Sandbox)
+```
+
+### Interface
+
+`clearCity()` is a pure-virtual method on `IRenderer`:
+
+```cpp
+// Remove all building, road, and traffic-agent scene nodes from the scene graph and
+// reset road mesh buffers. Does NOT remove terrain chunk nodes — terrain is regenerated
+// separately.
+virtual void clearCity() = 0;
+```

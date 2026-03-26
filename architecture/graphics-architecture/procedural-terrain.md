@@ -610,6 +610,13 @@ bleeds back into the `(tileX, tileZ)` vertex, leaving it below `targetH` when al
 complete. Reading the corrupted vertex height for Y-positioning causes the mesh to sink
 into the terrain.
 
+**Zone placement — border-ring road-tile flatten (Phase 11m)**: After flattening the N×N
+footprint, the caller (`CitySimulation::placeZone()`) must also call `setTileHeight()` for
+every road tile within the 1-tile orthogonal+diagonal border ring of the footprint (a
+(N+2)×(N+2) candidate set minus the N×N footprint itself), bringing adjacent roads to the
+same `flatHeight`. Non-road tiles in the border ring are NOT modified. This prevents road
+geometry from intersecting the terrain after zone-triggered terrain flattening.
+
 ### flushTerrainRebuilds() — Synchronous Geometry Update After Placement
 
 `ITerrainQuery` exposes a second write-side method added in Phase 10b:
