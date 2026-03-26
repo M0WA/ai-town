@@ -142,9 +142,11 @@ and button tints remain colorblind-safe per existing constants).
 **Tests** (`tests/ui/uimanager_zone_overlay_test.cpp`, label: `unit`):
 
 Declare all three tests as a fixture with `NiceMock<MockUIBackend> backend_`,
-`NiceMock<MockCitySimulation> sim_`, `NiceMock<MockRenderer> renderer_` (defined in
-`tests/simulation/MockRenderer.h`), and `ManualClock clock_` as members.
-Call `uiManager_->setRenderer(&renderer_)` in `SetUp()`
+`NiceMock<MockAudioSystem> audio_`, `NiceMock<MockCitySimulation> sim_`,
+`NiceMock<MockRenderer> renderer_` (defined in `tests/simulation/MockRenderer.h`), and
+`ManualClock clock_` as members. Construct UIManager as
+`std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_)` (canonical 4-parameter
+order). Call `uiManager_->setRenderer(&renderer_)` in `SetUp()`
 after constructing UIManager. Include a `TearDown()` override that resets `uiManager_` to
 `nullptr` before mock destruction, enforcing the destructor-path contract per
 testability-architecture.md (UIManager holds raw pointers to backend, simulation, and
@@ -262,8 +264,13 @@ un-touched terrain.
   - Look up `m_tiles.find(tileKey(tileX + dx, tileZ + dz))`.
   - If the tile exists and `tile.isRoad`, call
     `m_terrain->setTileHeight(tileX + dx, tileZ + dz, flatHeight)`.
-- [ ] Clamp `tileX + dx` and `tileZ + dz` to `[0, mapWidth-1]` × `[0, mapHeight-1]` using
-  the same guards already present in the footprint-flatten loop.
+- [ ] For each offset in the border ring, skip any tile where `tileX + dx < 0 ||
+  tileX + dx >= m_mapWidth || tileZ + dz < 0 || tileZ + dz >= m_mapHeight` (map-edge
+  guard — use `m_mapWidth` / `m_mapHeight` stored in `CitySimulation` from the
+  `MapConfig` passed at construction). Do not rely on `ITerrainQuery::setTileHeight()`
+  silently ignoring out-of-bounds calls — the out-of-bounds contract is only documented
+  for `getHeightAt()` (returns 0.0f); `setTileHeight()` out-of-bounds behavior is
+  unspecified and must not be relied upon.
 - [ ] After the border-ring loop completes, call `m_terrain->flushTerrainRebuilds()` to
   synchronously apply the border-ring height changes to the terrain geometry. Without this
   flush, the border-ring terrain geometry will remain at the pre-flatten heights until
@@ -338,22 +345,29 @@ Starting a second new game leaves `m_gracePeriodExpired == true`, so
   - `NiceMock` is required for all four parameters because the HUD constructor makes
     many `addStaticText`/`addButton` calls that are not under test; `StrictMock` would
     fail on every unexpected UI-element creation call.
-  - Construct `HUD hud_(&backend_, &audio_, &sim_, &clock_)` (matching the canonical
-    parameter order: backend, audio, sim, clock per HUD.h).
   - Before constructing HUD, set up a capture on the grace period label handle:
     `ON_CALL(backend_, addStaticText(HasSubstr("Cost waiver"), _, _, _, _)).WillByDefault(Return(kTestLabelHandle))`.
-  - Construct `HUD` with the `NiceMock<MockUIBackend>` and a `ManualClock` at t=0.
-  - Call `hud_->show()`.
-  - Advance `ManualClock` to t=200 s (beyond the 120 s grace period + fade-out). Call
-    `hud_->update(0.016f)` with a normal frame delta so internal state tracks elapsed time
-    (the clock advance, not the delta argument, drives expiry). Do NOT reference
-    `m_gracePeriodExpired` directly.
-  - Set up the expectations:
-    `EXPECT_CALL(backend_, setElementAlpha(kTestLabelHandle, 1.0f)).Times(AtLeast(1))` and
-    `EXPECT_CALL(backend_, setElementVisible(kTestLabelHandle, true)).Times(AtLeast(1))`.
-  - Call `hud_->notifyGameStarted()`.
-  - Verify mock expectations are satisfied (GMock verifies on mock destruction or via
-    `Mock::VerifyAndClearExpectations(&backend)`).
+  - Construct `HUD hud_(&backend_, &audio_, &sim_, &clock_)` (matching the canonical
+    parameter order: backend, audio, sim, clock per HUD.h). Clock is at t=0.
+  - **Phase 1 — simulate first game and expire the grace period** (this is what sets
+    `m_gracePeriodExpired = true` internally, creating the bug precondition):
+    - Call `hud_->show()` and `hud_->notifyGameStarted()` (first game starts at t=0).
+    - Advance `ManualClock` to t=200 s (beyond the 120 s grace period + fade-out).
+    - Call `hud_->update(0.016f)` so the HUD processes the expired state
+      (`m_gracePeriodExpired` becomes `true` internally). Do NOT reference
+      `m_gracePeriodExpired` directly.
+  - **Phase 2 — verify second game resets the grace period**:
+    - Now install expectations (after first-game state is established):
+      `EXPECT_CALL(backend_, setElementAlpha(kTestLabelHandle, 1.0f)).Times(AtLeast(1))` and
+      `EXPECT_CALL(backend_, setElementVisible(kTestLabelHandle, true)).Times(AtLeast(1))`.
+    - Call `hud_->notifyGameStarted()` (second game starts — this must reset the
+      grace period and make the label visible again).
+    - Call `hud_->update(0.016f)` so the HUD renders the reset state.
+    - Verify mock expectations are satisfied (GMock verifies on mock destruction or via
+      `Mock::VerifyAndClearExpectations(&backend_)`).
+  - **Rationale**: Installing expectations only after the first game's expiry ensures
+    the test exclusively measures the second `notifyGameStarted()` call's effect on
+    visibility — not incidental calls during the first-game lifecycle.
 
 ---
 
@@ -519,6 +533,12 @@ terrain-generation pass from within the game loop.
 **Code changes — `ICitySimulation.h` / `CitySimulation.h` / `CitySimulation.cpp`**:
 
 - [ ] Add `virtual void reset(int64_t startingFunds) = 0;` to `ICitySimulation`.
+- [ ] Add `MOCK_METHOD(void, reset, (int64_t startingFunds), (override));` to
+  `tests/ui/MockCitySimulation.h` (under the "Zone/road action methods" section).
+  **Required**: `MockCitySimulation` inherits `ICitySimulation`; adding a new pure-virtual
+  method to the interface without updating the mock causes a compile error on every test
+  that instantiates `MockCitySimulation`. The mock must have an entry for every pure-virtual
+  method in `ICitySimulation`.
 - [ ] Implement `CitySimulation::reset(int64_t startingFunds)`:
   - Clear `m_tiles`.
   - Reset `m_totalPopulation = 0`, `m_roadTileCount = 0`, `m_treasury = startingFunds`.
@@ -536,6 +556,10 @@ terrain-generation pass from within the game loop.
   - Reset demand factors, desirability aggregate, population counters.
   - Reset `m_firstRevenueTicked = false`, `m_loanCooldownTicks = 0`,
     `m_outstandingDebt = 0`, `m_consecutiveDeficitMonths = 0`.
+  - Reset all building variant counters in `m_buildingVariantCounters` to `0`
+    (fill all 9 elements with 0). Per `save-system.md`, the default-constructed
+    value for a new game is `[0, 0, 0, 0, 0, 0, 0, 0, 0]`; failing to reset
+    these counters causes skewed variant distribution on the second game.
   - Does NOT call `clearCity()` on the renderer internally — main.cpp calls
     `renderer.clearCity()` as a separate step after `citySimulation.reset()` returns
     (see main.cpp code changes below). This avoids double-calling and keeps
@@ -558,30 +582,110 @@ terrain-generation pass from within the game loop.
   per the contract in `architecture/audio-architecture/audio-system.md`:
   stop all active gameplay music stems and ambient beds on sources[58..61], then
   crossfade in main menu music on sources[58..59] over 1 s using the constant-power
-  curve. Safe to call if gameplay audio is not active (no-op guard). Use `m_clock`
+  curve (wall-clock time ONLY — bar-boundary synchronization is NOT applied to this
+  transition; bar-boundary tracking applies only to within-gameplay stem crossfades,
+  not to gameplay↔main-menu transitions which are triggered by user action and must
+  start immediately — per `audio-system.md` lines 171-174), and establish looping
+  playback (main menu music loops indefinitely per `dynamic-soundscape.md` §Main Menu
+  Audio). Safe to call if gameplay audio is not active (no-op guard). Use `m_clock`
   for timing the crossfade, consistent with existing crossfade patterns in AudioSystem.
+- [ ] Add `bool m_mainMenuMusicLooping{false}` private member to `AudioSystem`
+  (declared in `src/audio/AudioSystem.h`). Set it to `true` inside
+  `transitionToMainMenu()` once the main menu music streaming loop is
+  configured for indefinite looping via the OGG seek mechanism (same
+  streaming refill mechanism as gameplay stems — the decode loop calls
+  `ov_pcm_seek(vf, 0)` at EOF and continues refilling; do NOT set
+  `AL_LOOPING = AL_TRUE` on buffer-queue streaming sources (sources[58..61]
+  — the entire streaming partition, not just main menu sources) — that flag
+  applies only to pre-loaded single-buffer sources and produces undefined
+  behavior on any buffer-queue source; all streaming looping uses the OGG
+  EOF→seek pattern per `streaming-architecture.md`). The looping refill itself
+  executes on the audio thread inside `updateStreams()` (called every audio
+  thread wake — see `architecture/audio-architecture/streaming-architecture.md`
+  §libvorbisfile EOF detection): when `ov_read()` returns `0` on sources[58..59]
+  during main menu playback, the decode loop calls `ov_pcm_seek(vf, 0)` and
+  continues refilling — exactly the same EOF→seek pattern as ambient beds.
+  **Ordering requirement**: `m_mainMenuMusicLooping = true` MUST be set as the
+  **final** operation in `transitionToMainMenu()`, after all stop-gameplay and
+  crossfade-initiation operations have completed. This makes the flag a
+  completion sentinel: `EXPECT_TRUE(audio.isMainMenuMusicLooping())` in the
+  test confirms that the full method body executed without an early exit,
+  implicitly covering the gameplay-stop path.
+  Thread-safety contract for `m_mainMenuMusicLooping`: the flag is written on
+  the calling thread (main thread) inside `transitionToMainMenu()` using a
+  **minimal critical section** — acquire `m_streamMutex` solely for the flag
+  assignment (`m_mainMenuMusicLooping = true`) and release it immediately after.
+  Do NOT hold `m_streamMutex` across the entire method body: the AL stop/crossfade
+  setup before the flag assignment must NOT hold the mutex (consistent with the
+  streaming-architecture.md rule that OGG decode and AL-call sequences acquire
+  the mutex in short scopes per Steps 1 and 3, not across full operations).
+  Holding the mutex for the full method duration would cause audio-thread starvation
+  on its 10 ms wake cycle. `isMainMenuMusicLooping()` reads
+  it without a lock (test-only accessor — the test calls
+  `transitionToMainMenu()` synchronously and reads the flag on the same thread
+  immediately after, under the same single-threaded assertion pattern used for
+  other `AudioSystem` state accessors).
+- [ ] Add `bool isMainMenuMusicLooping() const` test accessor to the concrete
+  `AudioSystem` class (declared in `AudioSystem.h`, implemented inline or in
+  `AudioSystem.cpp`). Returns `m_mainMenuMusicLooping`. This accessor is NOT part
+  of `IAudioSystem` — it is on the concrete class only, for unit-test inspection
+  without exposing AL types through any interface.
+- [ ] Add test file `tests/audio/audio_system_transition_main_menu_test.cpp`
+  (label: `unit`) with one test:
+  - `AudioSystem_TransitionToMainMenu_LoopingFlagSet`: construct
+    `AudioSystem audio(nullptr, &clock_)` (passing `nullptr` for `IAlcFunctions`
+    activates `DefaultAlcFunctions`; CI sets `ALSOFT_DRIVERS=null` globally so the
+    null audio backend is used — no `putenv` call needed in test code). Wrap
+    construction in `try/catch(std::runtime_error)` and call `GTEST_SKIP()` if
+    construction fails (mirrors the pattern in `volume_control_test.cpp`). After
+    successful construction call `audio.transitionToMainMenu()`. Assert
+    `audio.isMainMenuMusicLooping() == true`. Test file must NOT include any AL
+    headers (`<AL/al.h>`, `<AL/alc.h>`) — all verification is through the
+    `AudioSystem` public/test accessor API. (ref:
+    `architecture/audio-architecture/audio-system.md`,
+    `architecture/audio-architecture/dynamic-soundscape.md`)
 
 **Code changes — `IRenderer.h` / `IrrlichtRenderer.h` / `IrrlichtRenderer.cpp`**:
 
 - [ ] Add `virtual void clearCity() = 0;` to `IRenderer`.
 - [ ] Implement `IrrlichtRenderer::clearCity()`:
-  - For `m_buildingNodes` and `m_roadNodes`: iterate the map and perform the full
-    eviction sequence on each entry — (1) clear all material texture slots (iterate
-    `mat.setTexture(t, nullptr)` for each texture unit), (2) call
+  - For `m_buildingNodes` (stored as `LODNode*` wrappers): iterate the map and
+    perform the full 4-step eviction sequence on each entry — (1) clear all material
+    texture slots (iterate `mat.setTexture(t, nullptr)` for each texture unit), (2) call
     `m_driver->setMaterial(SMaterial{})` to flush the driver state, (3) call
-    `node->remove()` — then call `map.clear()` once after the loop. This matches the
-    `SceneEntityManager` eviction sequence documented in
-    `architecture/graphics-architecture/scene-graph-ownership.md` (texture clear →
-    `setMaterial({})` → `node->remove()`). Do NOT call `destroyTileNode()` during the
-    iteration — `destroyTileNode()` erases from the map internally, causing iterator
-    invalidation on `std::unordered_map`. Bulk-clear via `map.clear()` after the loop.
+    `node->remove()` to release the scene node from the scene graph, (4) call
+    `delete kv.second` to free the heap-allocated `LODNode*` C++ wrapper (the wrapper
+    is not reference-counted and is not freed by `node->remove()` — it must be deleted
+    explicitly). Call `m_buildingNodes.clear()` once after the loop. Do NOT call
+    `destroyTileNode()` during the iteration — `destroyTileNode()` erases from the map
+    internally, causing iterator invalidation on `std::unordered_map`. Authoritative
+    contract: `architecture/graphics-architecture/scene-graph-ownership.md §City Reset
+    — clearCity() (Phase 11m)`, step 1.
+  - For `m_roadNodes` (stored as raw `ISceneNode*`, no `LODNode` wrapper): iterate the
+    map and perform the 3-step eviction sequence on each entry — (1) clear all material
+    texture slots (iterate `mat.setTexture(t, nullptr)` for each texture unit), (2) call
+    `m_driver->setMaterial(SMaterial{})` to flush the driver state, (3) call
+    `node->remove()`. Road nodes are reference-counted `ISceneNode*` managed by
+    Irrlicht — there is no heap-allocated C++ wrapper to delete. Call
+    `m_roadNodes.clear()` once after the loop. Authoritative contract:
+    `architecture/graphics-architecture/scene-graph-ownership.md §City Reset —
+    clearCity() (Phase 11m)`, step 2.
   - For `m_agentNodes`: same full eviction sequence — texture clear, driver-state flush
     (`m_driver->setMaterial(SMaterial{})`), then `node->remove()` — then
     `m_agentNodes.clear()` after the loop. Traffic vehicle scene nodes must not persist
     from game 1 into game 2.
   - If `IrrlichtRenderer` maintains a persistent shared `SMesh*` for batched road
-    geometry, empty it (remove all mesh buffers and call `recalculateBoundingBox()`).
-    Do NOT `->drop()` the mesh — it is reused in the next game session. After
+    geometry, empty it using the following pattern — `SMesh::addMeshBuffer()` calls
+    `grab()` on each buffer, so the inverse `drop()` is required before clearing:
+
+    ```cpp
+    for (u32 i = 0; i < roadMesh->getMeshBufferCount(); ++i)
+        roadMesh->getMeshBuffer(i)->drop();   // reverse the grab() from addMeshBuffer()
+    roadMesh->MeshBuffers.clear();            // remove all buffer entries (public member of SMesh)
+    roadMesh->recalculateBoundingBox();       // reset bounding box to empty/degenerate
+    ```
+
+    Do NOT `->drop()` the `SMesh*` itself — it is reused in the next game session. After
     `clearCity()` returns the mesh object is present but empty (zero buffers); subsequent
     `addRoadTile()` calls in the next game session re-append mesh buffers and rebuild
     the batched geometry from scratch. If roads use only per-tile nodes (all already
@@ -606,6 +710,7 @@ terrain-generation pass from within the game loop.
       terrainSystem.generate(
           static_cast<int>(ngp.mapSize), static_cast<int>(ngp.mapSize),
           10.0f, &freshRng);
+      terrainSystem.buildAllChunks(); // subdivides heightmap into chunks, queues all LOD0 rebuilds
       // Run loading loop identical to the startup loading loop.
       double loadPrev2 = wallClock.nowSeconds();
       while (device->run() && terrainSystem.pendingRebuildCount() > 0) {
@@ -721,14 +826,26 @@ target_sources(ui_tests PRIVATE
     tests/ui/uimanager_zone_overlay_test.cpp          # D1 — 3 tests
     tests/ui/hud_grace_period_test.cpp               # D4 — 1 test
     tests/ui/uimanager_save_state_test.cpp           # D5 — 1 test
-    tests/ui/uimanager_new_game_reset_test.cpp       # D6 — 2 tests
+    tests/ui/uimanager_new_game_reset_test.cpp       # D6-UI — 2 tests
     tests/ui/finances_panel_background_test.cpp     # D7 — 1 test
 )
+
+# REQUIRED: enable AITOWN_TESTING_ENABLED so that UIManager test-only methods
+# (handleNewGameRequest, setGameSessionActiveForTest — gated on
+# #ifdef AITOWN_TESTING_ENABLED) are compiled into ui_tests.
+# MUST be on ui_tests ONLY — never on the aitown or aitown_ui production targets.
+# Pattern matches simulation_tests (line 637 of CMakeLists.txt).
+target_compile_definitions(ui_tests PRIVATE AITOWN_TESTING_ENABLED=1)
 
 # In CMakeLists.txt (root) — append to the existing target_sources(simulation_tests ...) block:
 target_sources(simulation_tests PRIVATE
     tests/simulation/city_simulation_road_proximity_test.cpp   # D2 — 3 tests
     tests/simulation/city_simulation_terrain_flatten_test.cpp  # D3 — 2 tests
+)
+
+# In CMakeLists.txt (root) — append to the existing target_sources(audio_tests ...) block:
+target_sources(audio_tests PRIVATE
+    tests/audio/audio_system_transition_main_menu_test.cpp  # D6-audio — 1 test
 )
 ```
 
@@ -737,11 +854,11 @@ Do NOT call `add_executable` or `aitown_add_tests` again — extend the existing
 ### Exit Criteria
 
 - [ ] All 7 deliverable code fixes implemented.
-- [ ] All 13 tests above pass (green) with `ctest --test-dir build -LE "integration|requires-opengl"`.
-- [ ] All 7 new test files registered in CMakeLists.txt via `target_sources()` (see above).
+- [ ] All 14 tests above pass (green) with `ctest --test-dir build -LE "integration|requires-opengl"`.
+- [ ] All 8 new test files registered in CMakeLists.txt via `target_sources()` (see above).
 - [ ] `make build` succeeds with zero warnings.
-- [ ] Zone overlay: place a Residential zone with high demand → tile shows dark green;
-  place with low demand → tile shows light green; building spawns → tile clears.
+- [ ] Zone overlay: place a Residential/High-density zone → tile shows dark green;
+  place a Residential/Low-density zone → tile shows light green; building spawns → tile clears.
 - [ ] Road proximity: zone a tile 2 steps diagonally from a road (Chebyshev 2, Manhattan 4)
   → placement succeeds; 4 steps diagonal → blocked.
 - [ ] Terrain border: place a zone adjacent to a road on sloped terrain → road no longer
