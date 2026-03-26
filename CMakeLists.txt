@@ -65,6 +65,21 @@ endif()
 # therefore references fmt symbols (e.g. fmt::v12::report_error) that must be satisfied
 # at link time.  Linking fmt::fmt PRIVATE to aitown_audio satisfies those symbols for
 # every target that links aitown_audio (including all audio_tests).
+# HRTF data check: default.mhr must be present in the vcpkg install tree.
+# Installed only when VCPKG_OVERLAY_PORTS=vcpkg-overlays is active (the overlay
+# portfile enables -DALSOFT_INSTALL_HRTF_DATA=ON for openal-soft 1.23.1).
+# The ci-linux / ci-linux-coverage / ci-windows presets set this automatically.
+# If you see this error, reconfigure with: cmake --preset ci-linux
+# or: cmake -B build -DVCPKG_OVERLAY_PORTS=${CMAKE_SOURCE_DIR}/vcpkg-overlays ...
+set(_HRTF_SRC "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr")
+if(NOT EXISTS "${_HRTF_SRC}")
+    message(FATAL_ERROR
+        "default.mhr not found at:\n  ${_HRTF_SRC}\n"
+        "HRTF data is installed by the vcpkg overlay (vcpkg-overlays/openal-soft).\n"
+        "Reconfigure using the CMake preset:  cmake --preset ci-linux\n"
+        "or pass:  -DVCPKG_OVERLAY_PORTS=${CMAKE_SOURCE_DIR}/vcpkg-overlays")
+endif()
+
 find_package(fmt CONFIG REQUIRED)
 
 # Vorbis: vcpkg port name is "libvorbis" (NOT "libvorbisfile" — no such port exists).
@@ -421,12 +436,10 @@ endif()
 # overlay portfile (openal-soft 1.23.1) so the hrtf/ directory is installed.
 # The copy is cross-platform — both Linux and Windows CI verify its presence in
 # the build directory.
-# Guard: skip gracefully when vcpkg was installed without the overlay (HRTF absent).
 add_custom_command(TARGET aitown POST_BUILD
-    COMMAND ${CMAKE_COMMAND}
-        -DSRC="${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
-        -DDST="$<TARGET_FILE_DIR:aitown>/default.mhr"
-        -P "${CMAKE_SOURCE_DIR}/cmake/CopyIfExists.cmake"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
+        "$<TARGET_FILE_DIR:aitown>/default.mhr"
     COMMENT "Copying default.mhr (OpenAL Soft HRTF data) to aitown output"
 )
 
@@ -934,12 +947,10 @@ target_sources(audio_tests PRIVATE
 # Required when audio_tests runs on a machine with real AL hardware (HRTF init).
 # On machines without AL hardware, audio_tests uses MockAlcFunctions (no device opened).
 # The copy is cross-platform: both Linux and Windows CI include this step.
-# Guard: skip gracefully when vcpkg was installed without the overlay (HRTF absent).
 add_custom_command(TARGET audio_tests POST_BUILD
-    COMMAND ${CMAKE_COMMAND}
-        -DSRC="${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
-        -DDST="$<TARGET_FILE_DIR:audio_tests>/default.mhr"
-        -P "${CMAKE_SOURCE_DIR}/cmake/CopyIfExists.cmake"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/openal/hrtf/default.mhr"
+        "$<TARGET_FILE_DIR:audio_tests>/default.mhr"
     COMMENT "Copying default.mhr (OpenAL Soft HRTF data) next to audio_tests"
 )
 
