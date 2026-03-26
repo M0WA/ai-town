@@ -189,8 +189,8 @@ jobs:
           echo "AITOWN_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
 
   # ============================================================================
-  # release — downloads the Windows installer and debian-bookworm .deb artifacts
-  # produced by the package jobs, then creates a GitHub release with both.
+  # release — downloads the Windows installer and all 4 distro .deb artifacts
+  # produced by the package jobs, then creates a GitHub release with all 5.
   # Runs only on main pushes, after bump-version and both package jobs succeed.
   # Not in all-checks-pass gate.
   # ============================================================================
@@ -223,6 +223,24 @@ jobs:
         uses: actions/download-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
         with:
           name: aitown-deb-debian-bookworm-${{ github.sha }}
+          path: ./release-assets/
+
+      - name: Download Linux .deb (trixie)
+        uses: actions/download-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: aitown-deb-debian-trixie-${{ github.sha }}
+          path: ./release-assets/
+
+      - name: Download Linux .deb (jammy)
+        uses: actions/download-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: aitown-deb-ubuntu-jammy-${{ github.sha }}
+          path: ./release-assets/
+
+      - name: Download Linux .deb (noble)
+        uses: actions/download-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: aitown-deb-ubuntu-noble-${{ github.sha }}
           path: ./release-assets/
 
       - name: Create GitHub release

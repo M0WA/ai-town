@@ -147,9 +147,27 @@ int main(int argc, char** argv) {
     StdSimulationRNG simRng;
     TerrainSystem terrainSystem(&renderer, &wallClock);
 
+    CitySimulation citySimulation(
+        &renderer, /*audio=*/&audioSystem, &simRng, &wallClock, &terrainSystem, Difficulty::Normal);
+
+    // -------------------------------------------------------------------------
+    // UIManager — Phase 8 full implementation.
+    // Now wired with real audio, simulation, and clock pointers.
+    // Panels (HUD, NotificationManager, etc.) receive these pointers at construction.
+    // UIManager is constructed BEFORE terrain generation so that getPendingMapTiles()
+    // (which reflects the player's Map Size selection in the New Game screen) is
+    // available when calling terrainSystem.generate().
+    // -------------------------------------------------------------------------
+    UIManager uiManager(&uiBackend, &audioSystem, &citySimulation, &wallClock);
+
+    // Late-bind UIManager to renderer (breaks circular construction dependency).
+    renderer.setUIManager(&uiManager);
+
     // -------------------------------------------------------------------------
     // Terrain generation — generate the procedural heightmap and enqueue all chunks.
-    // Uses 128x128 tiles (4x4 = 16 chunks at 32 tiles/chunk), cellSize = 10 m.
+    // Map size is read from uiManager.getPendingMapTiles() so that the player's
+    // selection in the New Game screen (Small=128, Medium=512, Large=1024) is
+    // honoured.  cellSize = 10 m throughout.
     // StdTerrainRNG provides mt19937-backed randomness with reseed() support.
     // generate() enforces playability constraints (20% flat, 50x50 contiguous region).
     // enqueueAllChunks() registers LOD0 rebuild requests WITHOUT flushing; the
@@ -157,7 +175,10 @@ int main(int argc, char** argv) {
     // per frame (100 ms CPU budget) so the UI spinner remains animated.
     // -------------------------------------------------------------------------
     StdTerrainRNG terrainRng;
-    terrainSystem.generate(128, 128, 10.0f, &terrainRng);
+    {
+        const int mapTiles = uiManager.getPendingMapTiles();
+        terrainSystem.generate(mapTiles, mapTiles, 10.0f, &terrainRng);
+    }
     terrainSystem.enqueueAllChunks();
 
     // -------------------------------------------------------------------------
@@ -170,21 +191,14 @@ int main(int argc, char** argv) {
     renderer.setCellSize(terrainSystem.getCellSize());
     renderer.setRendererMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
 
-    // Position camera over the terrain center (128 tiles × 10 m / 2 = 640 m per axis).
-    cameraController.setTarget(640.0f, 640.0f);
-
-    CitySimulation citySimulation(
-        &renderer, /*audio=*/&audioSystem, &simRng, &wallClock, &terrainSystem, Difficulty::Normal);
-
-    // -------------------------------------------------------------------------
-    // UIManager — Phase 8 full implementation.
-    // Now wired with real audio, simulation, and clock pointers.
-    // Panels (HUD, NotificationManager, etc.) receive these pointers at construction.
-    // -------------------------------------------------------------------------
-    UIManager uiManager(&uiBackend, &audioSystem, &citySimulation, &wallClock);
-
-    // Late-bind UIManager to renderer (breaks circular construction dependency).
-    renderer.setUIManager(&uiManager);
+    // Position camera over the terrain center.
+    // Center = (mapTiles * cellSize) / 2.  getCellSize() returns 10.0f; getMapTilesX()
+    // reflects the actual generated dimension (honours the player's Map Size selection).
+    {
+        const float halfWorld = terrainSystem.getMapTilesX()
+                                * terrainSystem.getCellSize() * 0.5f;
+        cameraController.setTarget(halfWorld, halfWorld);
+    }
 
     // -------------------------------------------------------------------------
     // Phase 9b: wire UIManager terrain/renderer/map-dimensions AFTER UIManager

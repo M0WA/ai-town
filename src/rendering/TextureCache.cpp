@@ -15,7 +15,7 @@
 
 #include "TextureCache.h"
 
-#include <cstdio>    // fprintf
+#include <cstdio>    // std::snprintf
 #include <cmath>     // ceil
 #include <cstring>   // memcmp
 #include <string>
@@ -108,11 +108,13 @@ static bool hasSuffix(const std::string& path, const std::string& suffix) {
 TextureCache::TextureCache(irr::video::E_DRIVER_TYPE driverType,
                            irr::video::IVideoDriver* driver,
                            irr::io::IFileSystem* fileSystem,
-                           int maxTextureSize)
+                           int maxTextureSize,
+                           irr::ILogger* logger)
     : m_driverType{driverType}
     , m_driver{driver}
     , m_fileSystem{fileSystem}
     , m_maxTextureSize{maxTextureSize}
+    , m_logger{logger}
 {
 }
 
@@ -168,9 +170,14 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
                                     ? path.substr(0, sepPos + 1)
                                     : std::string{};
         effectivePath = dir + "buildings_atlas_d_2k.dds";
-        fprintf(stderr,
-                "WARNING: GL_MAX_TEXTURE_SIZE < 4096; "
-                "loading fallback atlas buildings_atlas_d_2k.dds\n");
+        if (m_logger) {
+            m_logger->log("TextureCache: GL_MAX_TEXTURE_SIZE < 4096; "
+                          "loading fallback atlas buildings_atlas_d_2k.dds",
+                          irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[TextureCache WARNING] TextureCache: GL_MAX_TEXTURE_SIZE < 4096; "
+                    "loading fallback atlas buildings_atlas_d_2k.dds\n");
+        }
     }
 
     // Derive the effective basename for mip-level dispatch below.
@@ -219,22 +226,41 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     // Use m_fileSystem (IrrlichtDevice::getFileSystem()) to open the file cross-platform.
     // IVideoDriver does NOT have getFileSystem() — must use the device's file system.
     if (!m_fileSystem) {
-        fprintf(stderr, "TextureCache::loadSRGB: m_fileSystem is null, cannot load %s\n",
-                effectivePath.c_str());
+        if (m_logger) {
+            std::string msg = "TextureCache::loadSRGB: m_fileSystem is null, cannot load ";
+            msg += effectivePath;
+            m_logger->log(msg.c_str(), irr::ELL_ERROR);
+        } else {
+            fprintf(stderr, "[TextureCache ERROR] TextureCache::loadSRGB: m_fileSystem is null, cannot load %s\n",
+                    effectivePath.c_str());
+        }
         return GLuint{0};
     }
 
     irr::io::IReadFile* file = m_fileSystem->createAndOpenFile(effectivePath.c_str());
     if (!file) {
-        fprintf(stderr, "TextureCache::loadSRGB: cannot open file %s\n", effectivePath.c_str());
+        if (m_logger) {
+            std::string msg = "TextureCache::loadSRGB: cannot open file ";
+            msg += effectivePath;
+            m_logger->log(msg.c_str(), irr::ELL_ERROR);
+        } else {
+            fprintf(stderr, "[TextureCache ERROR] TextureCache::loadSRGB: cannot open file %s\n",
+                    effectivePath.c_str());
+        }
         return GLuint{0};
     }
 
     // Read entire file into memory.
     long fileSize = file->getSize();
     if (fileSize < static_cast<long>(sizeof(uint32_t) + sizeof(DDSHeader))) {
-        fprintf(stderr, "TextureCache::loadSRGB: file too small to be a valid DDS: %s\n",
-                effectivePath.c_str());
+        if (m_logger) {
+            std::string msg = "TextureCache::loadSRGB: file too small to be a valid DDS: ";
+            msg += effectivePath;
+            m_logger->log(msg.c_str(), irr::ELL_ERROR);
+        } else {
+            fprintf(stderr, "[TextureCache ERROR] TextureCache::loadSRGB: file too small to be a valid DDS: %s\n",
+                    effectivePath.c_str());
+        }
         file->drop();
         return GLuint{0};
     }
@@ -247,8 +273,13 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     uint32_t magic = 0;
     memcpy(&magic, fileData.data(), sizeof(uint32_t));
     if (magic != kDDS_MAGIC) {
-        fprintf(stderr, "TextureCache::loadSRGB: invalid DDS magic in %s\n",
-                effectivePath.c_str());
+        std::string magicMsg = "TextureCache::loadSRGB: invalid DDS magic in ";
+        magicMsg += effectivePath;
+        if (m_logger) {
+            m_logger->log(magicMsg.c_str(), irr::ELL_ERROR);
+        } else {
+            fprintf(stderr, "[TextureCache ERROR] %s\n", magicMsg.c_str());
+        }
         return GLuint{0};
     }
 
@@ -262,8 +293,15 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
 
     // Validate FourCC matches expected format.
     if (fourCC != kFOURCC_DXT1 && fourCC != kFOURCC_DXT5) {
-        fprintf(stderr, "TextureCache::loadSRGB: unsupported DDS format (fourCC 0x%08X) in %s\n",
-                fourCC, effectivePath.c_str());
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "TextureCache::loadSRGB: unsupported DDS format (fourCC 0x%08X) in %s",
+            fourCC, effectivePath.c_str());
+        if (m_logger) {
+            m_logger->log(buf, irr::ELL_ERROR);
+        } else {
+            fprintf(stderr, "[TextureCache ERROR] %s\n", buf);
+        }
         return GLuint{0};
     }
 
@@ -330,8 +368,15 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
         estimatedVRAM += dxtMipDataSize(mipW, mipH, fourCC);
 
         if (dataOffset + mipDataSize > static_cast<size_t>(fileSize)) {
-            fprintf(stderr, "TextureCache::loadSRGB: DDS data truncated at mip %u in %s\n",
-                    mip, effectivePath.c_str());
+            char buf[256];
+            std::snprintf(buf, sizeof(buf),
+                "TextureCache::loadSRGB: DDS data truncated at mip %u in %s",
+                mip, effectivePath.c_str());
+            if (m_logger) {
+                m_logger->log(buf, irr::ELL_WARNING);
+            } else {
+                fprintf(stderr, "[TextureCache WARNING] %s\n", buf);
+            }
             break;
         }
 
@@ -377,14 +422,27 @@ irr::video::ITexture* TextureCache::loadLinear(const std::string& path) {
     }
 
     if (!m_driver) {
-        fprintf(stderr, "TextureCache::loadLinear: m_driver is null, cannot load %s\n", path.c_str());
+        if (m_logger) {
+            std::string msg = "TextureCache::loadLinear: m_driver is null, cannot load ";
+            msg += path;
+            m_logger->log(msg.c_str(), irr::ELL_ERROR);
+        } else {
+            fprintf(stderr, "[TextureCache ERROR] TextureCache::loadLinear: m_driver is null, cannot load %s\n",
+                    path.c_str());
+        }
         return nullptr;
     }
 
     irr::video::ITexture* tex = m_driver->getTexture(path.c_str());
     if (!tex) {
-        fprintf(stderr, "TextureCache::loadLinear: IVideoDriver::getTexture() returned null for %s\n",
-                path.c_str());
+        if (m_logger) {
+            std::string msg = "TextureCache::loadLinear: IVideoDriver::getTexture() returned null for ";
+            msg += path;
+            m_logger->log(msg.c_str(), irr::ELL_ERROR);
+        } else {
+            fprintf(stderr, "[TextureCache ERROR] TextureCache::loadLinear: IVideoDriver::getTexture() returned null for %s\n",
+                    path.c_str());
+        }
         return nullptr;
     }
 
@@ -430,7 +488,14 @@ GLuint TextureCache::loadSplatMap(const std::string& path) {
     }
 
     if (!m_driver) {
-        fprintf(stderr, "TextureCache::loadSplatMap: m_driver is null, cannot load %s\n", path.c_str());
+        if (m_logger) {
+            std::string msg = "TextureCache::loadSplatMap: m_driver is null, cannot load ";
+            msg += path;
+            m_logger->log(msg.c_str(), irr::ELL_ERROR);
+        } else {
+            fprintf(stderr, "[TextureCache ERROR] TextureCache::loadSplatMap: m_driver is null, cannot load %s\n",
+                    path.c_str());
+        }
         return GLuint{0};
     }
 
@@ -439,8 +504,14 @@ GLuint TextureCache::loadSplatMap(const std::string& path) {
     // Irrlicht's PNG loader returns straight alpha (not premultiplied) — verified spike result.
     irr::video::IImage* img = m_driver->createImageFromFile(path.c_str());
     if (!img) {
-        fprintf(stderr, "TextureCache::loadSplatMap: createImageFromFile() returned null for %s\n",
-                path.c_str());
+        if (m_logger) {
+            std::string msg = "TextureCache::loadSplatMap: createImageFromFile() returned null for ";
+            msg += path;
+            m_logger->log(msg.c_str(), irr::ELL_ERROR);
+        } else {
+            fprintf(stderr, "[TextureCache ERROR] TextureCache::loadSplatMap: createImageFromFile() returned null for %s\n",
+                    path.c_str());
+        }
         return GLuint{0};
     }
 
@@ -451,7 +522,14 @@ GLuint TextureCache::loadSplatMap(const std::string& path) {
     // Irrlicht's PNG loader does NOT premultiply alpha — straight alpha is guaranteed.
     const void* pixels = img->lock();
     if (!pixels) {
-        fprintf(stderr, "TextureCache::loadSplatMap: IImage::lock() returned null for %s\n", path.c_str());
+        if (m_logger) {
+            std::string msg = "TextureCache::loadSplatMap: IImage::lock() returned null for ";
+            msg += path;
+            m_logger->log(msg.c_str(), irr::ELL_ERROR);
+        } else {
+            fprintf(stderr, "[TextureCache ERROR] TextureCache::loadSplatMap: IImage::lock() returned null for %s\n",
+                    path.c_str());
+        }
         img->drop();
         return GLuint{0};
     }
