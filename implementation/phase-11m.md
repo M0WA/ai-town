@@ -118,18 +118,26 @@ encodes brightness (Low = pale, Medium = mid, High = dark).
   `m_overlayMap[key] = computeZoneOverlayColor(zoneType, densityTier)`.
   Use the `densityTier` variable already available at the `placeZone()` call site — no
   demand query needed. Call `setZoneOverlay()` unconditionally (overlay may have grown).
-- [ ] In `UIManager::update()`, add a periodic overlay refresh block (runs once per
-  population-tick notification or every 60 frames, whichever fires first). For each entry
-  in `m_overlayMap`:
+- [ ] In `UIManager::update()`, add a periodic overlay refresh block.
+  `m_overlayRefreshCounter` increments each frame and resets to 0 after each refresh run
+  (whether triggered by reaching 60 frames or by receiving a populationTick notification);
+  whichever occurs first in an update cycle triggers the refresh and resets the counter.
+  For each entry in `m_overlayMap`:
   - Call `m_sim->queryTile(tileX, tileZ)`.
   - If `!result.isZoned || !result.underConstruction`: erase from map (building spawned
     or tile no longer zoned).
   - **Do not recompute color** — color is fixed by zone type and density tier and does
     not change while the tile remains under construction.
   - After all entries processed, call `setZoneOverlay()` only if any entries were removed.
-- [ ] Add a 60-frame counter `m_overlayRefreshCounter` to UIManager for the tick rate above.
-  Reset to 0 on each notification batch or whenever `populationTick` notification is
-  received.
+
+  **Overlay removal on building spawn**: When `underConstruction` becomes `false`
+  (building spawned), the overlay for that tile is automatically absent on the next
+  refresh cycle — the periodic 60-frame refresh is the removal mechanism; no special
+  fade or instant-clear transition is performed. The tile entry is erased from
+  `m_overlayMap` during the refresh pass and `setZoneOverlay()` is called once
+  immediately after to push the updated (now tile-absent) map to the renderer.
+- [ ] Add a 60-frame counter `m_overlayRefreshCounter` (type `int`, initialized to 0)
+  to UIManager to drive the periodic refresh described above.
 
 **Note — colorblind mode deferral**: The 9-color density-tier overlay system does not
 specify colorblind-safe alternatives. The static `kOverlayArgb*_Colorblind` constants
@@ -396,6 +404,9 @@ entirely within `transitionToMainMenu()`.
               m_mainMenu->setSaveStatusText("No saves found.");
               break;
           case SaveFileState::AllCorrupt:
+              // ISaveSystem::getSaveDirectoryPath() is already defined in the interface
+              // (returns std::string) — use it in the diagnostic message to help players
+              // locate corrupt saves.
               m_mainMenu->setSaveStatusText(
                   "Save data is corrupted — cannot load. Check "
                   + m_saveSystem->getSaveDirectoryPath() + " for recovery.");
@@ -539,6 +550,19 @@ terrain-generation pass from within the game loop.
   method to the interface without updating the mock causes a compile error on every test
   that instantiates `MockCitySimulation`. The mock must have an entry for every pure-virtual
   method in `ICitySimulation`.
+- [ ] **Prerequisite — `TrafficVehicle` struct field additions** (`src/simulation/CitySimulation.h`):
+  Before implementing `reset()`, add two new fields to the `TrafficVehicle` struct:
+
+  ```cpp
+  int idleIdx = -1;   // source-pool index for idle engine sound; -1 = not acquired
+  int moveIdx = -1;   // source-pool index for moving engine sound; -1 = not acquired
+  ```
+
+  These fields are required by the `releaseVehicleEnginePair(agent.idleIdx, agent.moveIdx)`
+  call inside `reset()` (see below). The default value `-1` signals "no audio pair acquired"
+  and is treated as a no-op by `IAudioSystem::releaseVehicleEnginePair()`. Without these
+  fields the `reset()` implementation will not compile.
+
 - [ ] Implement `CitySimulation::reset(int64_t startingFunds)`:
   - Clear `m_tiles`.
   - Reset `m_totalPopulation = 0`, `m_roadTileCount = 0`, `m_treasury = startingFunds`.
@@ -558,8 +582,9 @@ terrain-generation pass from within the game loop.
     `m_outstandingDebt = 0`, `m_consecutiveDeficitMonths = 0`.
   - Reset all building variant counters in `m_buildingVariantCounters` to `0`
     (fill all 9 elements with 0). Per `save-system.md`, the default-constructed
-    value for a new game is `[0, 0, 0, 0, 0, 0, 0, 0, 0]`; failing to reset
-    these counters causes skewed variant distribution on the second game.
+    value for a new game is `[0, 0, 0, 0, 0, 0, 0, 0, 0]` (index mapping defined
+    in `architecture/game-design/save-system.md`); failing to reset these counters
+    causes skewed variant distribution on the second game.
   - Does NOT call `clearCity()` on the renderer internally — main.cpp calls
     `renderer.clearCity()` as a separate step after `citySimulation.reset()` returns
     (see main.cpp code changes below). This avoids double-calling and keeps
@@ -578,6 +603,23 @@ terrain-generation pass from within the game loop.
 **Code changes — `AudioSystem.h` / `AudioSystem.cpp`**:
 
 - [ ] Add `void transitionToMainMenu() override;` to `src/audio/AudioSystem.h`.
+- [ ] Add `int m_lastMainMenuVariant{-1};` as a private member to `AudioSystem`
+  (declared in `src/audio/AudioSystem.h`). Initialized to `-1` in the constructor member
+  initializer list. This tracks the last-played main menu variant to enforce the
+  same random-excluding-repeat policy used for gameplay stems
+  (ref: `architecture/audio-architecture/dynamic-soundscape.md` §Main Menu Audio).
+- [ ] **Variant selection in `transitionToMainMenu()`** — implement using the
+  same random-excluding-repeat policy as gameplay stems:
+  1. Build the candidate set `{1, 2}` (the two main menu music variants).
+  2. Remove `m_lastMainMenuVariant` from the candidate set (exclude repeat).
+     If `m_lastMainMenuVariant == -1` (first call), both variants are candidates.
+  3. Select uniformly at random from the remaining candidates using
+     `std::uniform_int_distribution` seeded from `m_rng` (the existing RNG member
+     already present in `AudioSystem`; if `m_rng` is not yet present, add
+     `std::mt19937 m_rng{std::random_device{}()};` as a private member).
+  4. Store the selected variant in `m_lastMainMenuVariant` before calling
+     `setMusicTrack()` with that variant ID, so the next `transitionToMainMenu()`
+     call correctly excludes it.
 - [ ] Implement `AudioSystem::transitionToMainMenu()` in `src/audio/AudioSystem.cpp`
   per the contract in `architecture/audio-architecture/audio-system.md`:
   stop all active gameplay music stems and ambient beds on sources[58..61], then
@@ -734,7 +776,13 @@ terrain-generation pass from within the game loop.
       uiManager.setMapDimensions(
           static_cast<int>(ngp.mapSize), static_cast<int>(ngp.mapSize));
       uiManager.transitionToGameplay(GameMode::Sandbox);
-      uiManager.onGameLoaded();
+      uiManager.onGameLoaded(); // Re-initializes per-game view state: sets
+                                // m_previousCityRating to the current simulation
+                                // city-rating tier so that the first update() tick
+                                // after load does not fire a spurious stinger_milestone
+                                // event. Does NOT transition GameState, clear the
+                                // loading screen, or show HUD/minimap — those are
+                                // performed by transitionToGameplay() on the line above.
       continue;  // restart frame loop from the top after transition
   }
   ```
@@ -807,12 +855,16 @@ The 8 px corner radius remains in the spec as the authoritative post-V1 target.
     `ManualClock clock_` as members. Include a `TearDown()` override that explicitly
     resets `panel_` to `nullptr` before the mocks are destroyed, enforcing the
     destructor-path contract (FinancesPanel holds a raw pointer to the backend).
-  - Construct `FinancesPanel panel_(&backend_, &sim_, &audio_, &clock_)` (`NiceMock` is
-    required because the constructor calls `addStaticText` and `addButton` many times;
-    `StrictMock` would fail on every unexpected UI-element creation call).
-  - Before construction, set `EXPECT_CALL(backend_, setElementBackground(_, 13, 27, 42, 217)).Times(1)`.
-  - Construct `FinancesPanel`; assert the expectation is satisfied (mock verification on
-    destruction or via `Mock::VerifyAndClearExpectations`).
+    (`NiceMock` is required because the constructor calls `addStaticText` and
+    `addButton` many times; `StrictMock` would fail on every unexpected UI-element
+    creation call.)
+  - The test body must follow this exact sequence (GMock requires expectations to be
+    installed **before** the action that triggers them):
+    1. **Set expectation first**: `EXPECT_CALL(backend_, setElementBackground(_, 13, 27, 42, 217)).Times(1)`.
+    2. **Then construct FinancesPanel**: `auto panel_ = std::make_unique<FinancesPanel>(&backend_, &sim_, &audio_, &clock_)` —
+       the constructor fires `setElementBackground()`, satisfying the expectation installed in step 1.
+    3. **Then verify**: `Mock::VerifyAndClearExpectations(&backend_)` (or rely on mock
+       destruction at end of test scope to trigger GMock's automatic verification).
 
 ---
 
@@ -832,9 +884,20 @@ target_sources(ui_tests PRIVATE
 
 # REQUIRED: enable AITOWN_TESTING_ENABLED so that UIManager test-only methods
 # (handleNewGameRequest, setGameSessionActiveForTest — gated on
-# #ifdef AITOWN_TESTING_ENABLED) are compiled into ui_tests.
-# MUST be on ui_tests ONLY — never on the aitown or aitown_ui production targets.
-# Pattern matches simulation_tests (line 637 of CMakeLists.txt).
+# #ifdef AITOWN_TESTING_ENABLED) are compiled into both aitown_ui AND ui_tests.
+#
+# aitown_ui requires AITOWN_TESTING_ENABLED because the gated methods
+# (handleNewGameRequest, setGameSessionActiveForTest) are non-inline — their
+# definitions live in UIManager.cpp, which is compiled as part of aitown_ui.
+# Without this flag on aitown_ui, the gated .cpp definitions are elided and
+# ui_tests will fail to link (undefined symbol errors).
+#
+# ui_tests also requires it so that the #ifdef-guarded declarations in
+# UIManager.h are visible when test translation units include the header.
+#
+# aitown_ui PRIVATE keeps the flag out of any downstream consumer's compile
+# environment — it does not propagate to the production aitown binary.
+target_compile_definitions(aitown_ui PRIVATE AITOWN_TESTING_ENABLED=1)
 target_compile_definitions(ui_tests PRIVATE AITOWN_TESTING_ENABLED=1)
 
 # In CMakeLists.txt (root) — append to the existing target_sources(simulation_tests ...) block:
@@ -843,6 +906,11 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/city_simulation_terrain_flatten_test.cpp  # D3 — 2 tests
 )
 
+# CRITICAL: audio_tests was already registered at Phase 0 with aitown_add_tests().
+# DO NOT call aitown_add_tests(audio_tests) again — duplicate target registration
+# causes CMake FATAL_ERROR. Use ONLY target_sources(audio_tests PRIVATE ...) for
+# all Phase 11m additions, matching the Phase 7 and Phase 10 extension patterns.
+#
 # In CMakeLists.txt (root) — append to the existing target_sources(audio_tests ...) block:
 target_sources(audio_tests PRIVATE
     tests/audio/audio_system_transition_main_menu_test.cpp  # D6-audio — 1 test
@@ -855,6 +923,9 @@ Do NOT call `add_executable` or `aitown_add_tests` again — extend the existing
 
 - [ ] All 7 deliverable code fixes implemented.
 - [ ] All 14 tests above pass (green) with `ctest --test-dir build -LE "integration|requires-opengl"`.
+- [ ] Manual audio acceptance: start game, build city for ≥30 s, then quit to main menu →
+  main menu music begins playing within 1 s, loops continuously without audible clicks,
+  silence gaps, or abrupt cuts.
 - [ ] All 8 new test files registered in CMakeLists.txt via `target_sources()` (see above).
 - [ ] `make build` succeeds with zero warnings.
 - [ ] Zone overlay: place a Residential/High-density zone → tile shows dark green;
