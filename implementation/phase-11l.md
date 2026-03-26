@@ -433,7 +433,7 @@ section, after the "Scroll: mouse wheel scrolls the list" bullet):
     row-height constant).
 - [ ] Extract `updateScrollThumb()` helper: recomputes `thumbH` and `thumbY` from
   `m_logScrollOffset`, `m_logEntries.size()`, and `m_logVisibleRows`; updates
-  element bounds via `m_backend->setElementPosition()` / `setElementSize()`;
+  element bounds via `m_backend->setElementRect(m_logScrollThumb, 1856, thumbY, 12, thumbH)`;
   calls `setElementVisible(m_logScrollTrack, totalRows > visibleRows)` and same
   for thumb.
 - [ ] Call `updateScrollThumb()` from:
@@ -451,13 +451,15 @@ section, after the "Scroll: mouse wheel scrolls the list" bullet):
 - [ ] `NotificationManager_LogScrollbar_VisibleWhenOverflow`: post 30 entries
   (more than visible rows), open log, assert scrollbar track visible.
 - [ ] `NotificationManager_LogScrollbar_ThumbMovesOnScroll`: post 30 entries,
-  open log. Use `EXPECT_CALL(backend_, setElementPosition(_, _, _)).WillRepeatedly(SaveArg<2>(&capturedY))`
+  open log. Use `EXPECT_CALL(backend_, setElementRect(_, _, _, _, _)).WillRepeatedly(SaveArg<2>(&capturedY))`
   (or equivalent GMock argument capture) to record the Y argument of the last
-  `setElementPosition` call on the thumb element; scroll down 5 entries via the
-  mouse-wheel handler; assert the newly captured Y is greater than the initial Y.
+  `setElementRect` call on the thumb element — in `setElementRect(handle, x, y, w, h)`,
+  `y` is at position 2 (0-indexed), so `SaveArg<2>` captures the correct parameter;
+  scroll down 5 entries via the mouse-wheel handler; assert the newly captured Y is
+  greater than the initial Y.
 - [ ] `NotificationManager_LogScrollbar_ThumbAtBottomAfterScrollToEnd`: scroll to
-  the last entry; use `SaveArg` capture on `setElementSize` and `setElementPosition`
-  calls to record the final thumbH and thumbY values; assert
+  the last entry; use `SaveArg<2>` capture for `y` (thumbY) and `SaveArg<4>` capture
+  for `h` (thumbH) on `setElementRect(handle, x, y, w, h)` calls; assert
   `thumbY + thumbH ≈ trackTop + trackH` (i.e. `trackBottom`) within 1 px.
   Track bounds constants (trackTop=56, trackH=500) may be used directly.
 
@@ -785,6 +787,8 @@ Warning Log section):
   }
   ```
 
+- [ ] **Disjoint-use constraint**: `logWarning()`, `logError()`, and `logInfo()` MUST NOT be called from within any scope that holds `m_streamMutex` or `m_occlusionMutex`. If an error must be logged after detecting a problem inside a locked section, copy the error description to a local `std::string`, release the lock, then call the logging helper. This eliminates the circular-wait deadlock risk between `m_logMutex` and the two operational mutexes (per `audio-system.md` §Thread-Safety Design — m_logMutex subsection).
+- [ ] **Audit existing call sites**: search `AudioSystem.cpp` for all `logWarning()`/`logError()`/`logInfo()` calls that appear inside a `lock_guard` or `unique_lock` scope (pattern: `lock_guard` followed by a log call in the same block). Refactor each violation using the copy-then-release pattern before the changes in this deliverable are considered complete.
 - [ ] Update `main.cpp` / wherever `AudioSystem` is constructed: pass
   `device->getLogger()` as the **first** argument (before `IClock*`).
 - [ ] Update all existing `AudioSystem` test instantiations: replace `AudioSystem(clock_ptr)`
@@ -863,6 +867,9 @@ that construct `AudioSystem(clock_ptr)` MUST be updated to `AudioSystem(nullptr,
   128/512/1024 as `mapTilesX`/`mapTilesZ` to `TerrainSystem::generate()`.
 - [ ] No game runtime code calls `fprintf(stderr,...)`, `printf(...)`, `std::cerr`, or
   `std::cout` for diagnostic output; all such calls route through `irr::ILogger*`.
+- [ ] No calls to `logWarning()`, `logError()`, or `logInfo()` appear inside a `lock_guard` or
+  `unique_lock` scope protecting `m_streamMutex` or `m_occlusionMutex` in `AudioSystem.cpp`;
+  the copy-then-release pattern is correctly applied at all such sites (verified by code review).
 - [ ] Full unit test suite passes: 0 failures, no regressions.
 
 ---
