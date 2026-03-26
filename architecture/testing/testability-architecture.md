@@ -1376,7 +1376,7 @@ namespace handles {
     constexpr UIElementHandle kMainMenuSentinel      = 100u;
     constexpr UIElementHandle kMinimapSentinel       = 101u;
     constexpr UIElementHandle kHUDSentinel           = 102u;
-    constexpr UIElementHandle kTaxRateSentinel       = 103u;
+    constexpr UIElementHandle kFinancesSentinel       = 103u;
     constexpr UIElementHandle kInspectorSentinel     = 104u;
     constexpr UIElementHandle kNotificationSentinel  = 0xDEAD0105u;
     constexpr UIElementHandle kPauseMenuSentinel     = 106u;
@@ -1551,7 +1551,7 @@ protected:
 //     EXPECT_CALL(backend_, setElementVisible(handles::kMinimapSentinel,           true)).Times(1);
 //     EXPECT_CALL(backend_, setElementVisible(handles::kHUDSentinel,               true)).Times(1);
 //     EXPECT_CALL(backend_, setElementVisible(handles::kNotificationSentinel,      true)).Times(1);
-//     // Hidden panels (MainMenu, TaxRate, Inspector, PauseMenu, Settings, Scrim, Modal)
+//     // Hidden panels (MainMenu, Finances, Inspector, PauseMenu, Settings, Scrim, Modal)
 //     // are NOT listed here — their draw() is guarded and fires no sentinel.
 //     ui_->draw();
 // }

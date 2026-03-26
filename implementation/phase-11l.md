@@ -366,6 +366,13 @@ Tax Rate Panel was (T key or resource-bar click).
 **Fixture**: `UIManagerFinancesPanelTest` uses `NiceMock<MockUIBackend>`, `NiceMock<MockCitySimulation>`, `NiceMock<MockAudioSystem>`, and `ManualClock`. This is an intentional combined fixture: UIManager instantiates FinancesPanel internally, so both layers share the same mock setup. `UIManager_*` tests exercise UIManager integration behavior; `FinancesPanel_*` tests exercise FinancesPanel behavior visible through that integration. No separate fixture file is required. `NiceMock<MockAudioSystem>` is the correct choice for this mixed fixture: integration tests like `UIManager_TKey_OpensFinancesPanel` trigger audio calls (FinancesPanel::open() fires `playSound(UI_MENU_OPEN)`) without asserting them, while `FinancesPanel_Open_FiresUIMenuOpenSound` and `FinancesPanel_Close_FiresUIMenuCloseSound` use `EXPECT_CALL` for explicit audio verification. NiceMock silences unexpected calls in integration tests while still enforcing `EXPECT_CALL` assertions in the audio-focused tests.
 
 - [ ] Implement `void TearDown() override { m_uiManager.reset(); }` in `UIManagerFinancesPanelTest` to reset the `UIManager` smart pointer to `nullptr` before mock destruction, consistent with the destructor-path contract in testability-architecture.md.
+- [ ] **Sentinel rename**: In `tests/ui/panel_sentinel_handles.h`, rename
+  `constexpr UIElementHandle kTaxRateSentinel = 103u;` to
+  `constexpr UIElementHandle kFinancesSentinel = 103u;` (same magic value; only the name
+  changes to reflect the panel merge). Update every reference to `handles::kTaxRateSentinel`
+  in `UIManagerDrawOrderTest` (and any other test that uses this sentinel) to
+  `handles::kFinancesSentinel`. The numeric value `103u` is unchanged — only rename
+  the symbol.
 - [ ] `UIManager_TKey_OpensFinancesPanel`: press T, assert
   `FinancesPanel::isOpen() == true`.
 - [ ] `UIManager_TKey_Twice_ClosesFinancesPanel`: open then press T again,
@@ -622,7 +629,7 @@ section, already added):
   - `needs: [bump-version, package-windows, package-linux-deb]`
   - `permissions: contents: write`
   - `timeout-minutes: 10`
-  - Step: checkout (to read the bumped `CMakeLists.txt` for the version)
+  - Step: checkout with `ref: main` (critical: reads the version-bump commit pushed by `bump-version`; without `ref: main`, `actions/checkout` defaults to the trigger SHA which predates the version bump and `CMakeLists.txt` will contain the old version number)
   - Step: read `AITOWN_VERSION` from `CMakeLists.txt` (same grep/sed as above, but read-only)
   - Steps: `actions/download-artifact` (SHA-pinned) for each package artifact into
     `./release-assets/` (same 5 artifacts as before)
