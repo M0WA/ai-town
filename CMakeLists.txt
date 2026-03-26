@@ -221,15 +221,19 @@ target_include_directories(aitown_audio
 target_compile_definitions(aitown_audio PRIVATE
     AITOWN_ASSETS_DIR="${AITOWN_ASSETS_DIR}"
 )
-# PRIVATE scope: OpenAL, Vorbis, and fmt headers must NOT propagate to test targets.
-# Omitting any of these causes a cmake --build build link failure on Linux and Windows.
-# fmt::fmt is required because openal-soft's devendor-fmt patch causes libopenal.a to
-# reference fmt symbols; failing to link it produces "undefined reference to
-# fmt::v12::report_error" when linking audio_tests.
+# PRIVATE scope: OpenAL, Vorbis, fmt, and Irrlicht headers must NOT propagate to test
+# targets (headless CI guarantee — audio test TUs compile without a real AL device or
+# Irrlicht context; AudioSystem.h forward-declares irr::ILogger rather than including
+# Irrlicht headers, so only AudioSystem.cpp needs the Irrlicht include path).
+# Omitting fmt causes "undefined reference to fmt::v12::report_error" when linking audio_tests
+# (openal-soft's devendor-fmt patch references fmt symbols in libopenal.a).
+# Irrlicht is PRIVATE here (Phase 11l Deliverable 9): AudioSystem.cpp calls
+# irr::ILogger::log() for diagnostic output; AudioSystem.h only forward-declares the type.
 target_link_libraries(aitown_audio PRIVATE
     OpenAL::OpenAL
     Vorbis::vorbisfile
     fmt::fmt
+    Irrlicht
 )
 
 # ----------------------------------------------------------------------------
@@ -284,8 +288,7 @@ target_link_libraries(aitown_ui PRIVATE Irrlicht aitown_sim)
 # will move method bodies from headers into these .cpp files.
 target_sources(aitown_ui PRIVATE
     src/ui/HUD.cpp
-    src/ui/BudgetDetailPanel.cpp
-    src/ui/TaxRatePanel.cpp
+    src/ui/FinancesPanel.cpp
     src/ui/QueryPanel.cpp
     src/ui/Minimap.cpp
     src/ui/ModalDialog.cpp
@@ -297,6 +300,12 @@ target_sources(aitown_ui PRIVATE
 # Phase 11c: KeyBindingsPanel (Controls tab keybinding table + capture-mode state machine).
 target_sources(aitown_ui PRIVATE
     src/ui/KeyBindingsPanel.cpp
+)
+
+# Phase 11l: KeyBindings::load() moved from header-only to .cpp so ILogger.h
+# is not included transitively in test targets (testability isolation rule).
+target_sources(aitown_ui PRIVATE
+    src/ui/key_bindings.cpp
 )
 
 # ----------------------------------------------------------------------------
@@ -677,6 +686,11 @@ target_sources(terrain_tests PRIVATE
     tests/terrain/road_lane_test.cpp
 )
 
+# Phase 11l Deliverable 1: terrain stitching-hole fix boundary tests.
+target_sources(terrain_tests PRIVATE
+    tests/terrain/terrain_boundary_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # ui_tests — UIManager, NotificationManager, CameraController, QueryPanel, ModalDialog
 # Phase 3 Test-C1: consolidated 5-file form (ui_smoke_test.cpp dropped — its compile
@@ -722,7 +736,6 @@ target_sources(ui_tests PRIVATE
     tests/ui/modal_dialog_test.cpp
     tests/ui/undo_button_test.cpp
     tests/ui/notification_system_test.cpp
-    tests/ui/budget_detail_panel_test.cpp
     tests/ui/query_panel_test.cpp
     tests/ui/keybindings_test.cpp
 )
@@ -823,9 +836,15 @@ target_sources(ui_tests PRIVATE
 )
 
 # Phase 11h: budget breakdown section tests and demolition input tests.
+# Phase 11l: budget_breakdown_test.cpp updated to use FinancesPanel (merged panel).
 target_sources(ui_tests PRIVATE
     tests/ui/budget_breakdown_test.cpp
     tests/ui/demolition_input_test.cpp
+)
+
+# Phase 11l: FinancesPanel tests (merged TaxRatePanel + BudgetDetailPanel).
+target_sources(ui_tests PRIVATE
+    tests/ui/finances_panel_test.cpp
 )
 
 # ----------------------------------------------------------------------------
@@ -999,6 +1018,15 @@ aitown_add_tests(integration_tests LABEL "integration")
 # accessors land in IrrlichtRenderer.h.
 target_sources(integration_tests PRIVATE
     tests/integration/terrain_shader_wiring_test.cpp  # Phase 10c: terrain shader wiring
+)
+
+# Phase 11l Deliverable 3: multi-tile footprint flatten integration tests.
+# Verifies that placeBuildingMesh() calls setTileHeight() for all (N+1)x(N+1)
+# corner vertices of the building footprint (not only the 4 origin-tile corners).
+# Do NOT call add_executable(integration_tests ...) again — duplicate target error.
+# Do NOT call aitown_add_tests(integration_tests ...) again — duplicate registration.
+target_sources(integration_tests PRIVATE
+    tests/integration/irrlicht_renderer_flatten_test.cpp  # Phase 11l D3: multi-tile footprint flatten
 )
 
 # ----------------------------------------------------------------------------

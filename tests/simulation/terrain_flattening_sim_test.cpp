@@ -27,6 +27,7 @@
 #include "CitySimulation.h"
 #include "src/interfaces/ICitySimulation.h"
 #include "src/interfaces/simulation_types.h"
+#include "src/simulation/simulation_constants.h"
 #include "MockAudioSystem.h"
 #include "MockRenderer.h"
 #include "ManualRNG.h"
@@ -93,39 +94,51 @@ protected:
 // ---------------------------------------------------------------------------
 // TerrainFlatteningSimTest / TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight
 //
-// Steps:
-//   1. Assert terrain_ is NOT yet flattened before any placement.
-//   2. Place a residential zone tile via ICitySimulation::placeZone().
-//      CitySimulation calls renderer_.placeBuildingMesh(), which triggers
-//      the ON_CALL action that simulates the three-step flattening pattern.
-//   3. Assert terrain_.m_flattened == true — confirms setTileHeight() was called.
-//   4. Assert terrain_.getHeightAt(0, 0) returns 3.0f (m_heightAfterFlat).
+// Phase 11l update: terrain earthworks flattening now happens at placeZone() time
+// (Phase 11h behaviour), not inside placeBuildingMesh().  The 3D building mesh is
+// deferred until doPopulationTick() fires with sufficient demand (>= 0.50).
 //
-// Spec ref: implementation/phase-10b.md §test-dev-cpp
+// Steps:
+//   1. Assert terrain_ has no flattenCalls before any placement.
+//   2. Place road + R zone + C zone (C ensures R bootstrap demand ~0.917 >= 0.50).
+//      placeZone() calls setTileHeight() for earthworks flattening immediately —
+//      record the flattenCalls count after placement.
+//   3. Assert flattenCalls grew during placement (earthworks proof).
+//   4. Advance one budget tick; doPopulationTick() fires placeBuildingMesh(), which
+//      triggers the ON_CALL action (getHeightAt → setTileHeight).
+//   5. Assert flattenCalls grew again after the tick (placeBuildingMesh proof).
+//
+// Spec ref: architecture/game-design/terrain-interaction.md §Multi-tile footprint extension
 //           architecture/graphics-architecture/procedural-terrain.md §setTileHeight
 // ---------------------------------------------------------------------------
 TEST_F(TerrainFlatteningSimTest, TerrainFlattening_PlaceBuildingMesh_NodeYAtFlattenedHeight) {
-    // 1. Before placement: not yet flattened.
-    ASSERT_FALSE(terrain_.m_flattened)
-        << "ManualTerrainQuery must not be flattened before zone placement";
-    ASSERT_FLOAT_EQ(terrain_.getHeightAt(0, 0), 5.0f)
-        << "getHeightAt() must return m_heightBeforeFlat (5.0f) before setTileHeight()";
+    // 1. Before placement: no flatten calls recorded.
+    ASSERT_TRUE(terrain_.m_flattenCalls.empty())
+        << "ManualTerrainQuery must have no flattenCalls before zone placement";
 
-    // 2. Place a residential zone tile at (0, 0).
-    //    Phase 11h: placeZone requires a road within 3 tiles.
+    // 2. Phase 11l: placeZone() sets underConstruction=true and calls setTileHeight()
+    //    for Phase 11h earthworks flattening; placeBuildingMesh() is deferred.
     sim_->placeRoad(1, 0, 0);
-    //    placeZone() calls renderer_.placeBuildingMesh(), which triggers the ON_CALL
-    //    that executes the three-step flattening: getHeightAt → setTileHeight → getHeightAt.
     sim_->placeZone(/*tileX=*/0, /*tileZ=*/0, ZoneType::Residential,
                     DensityTier::Low, /*earthworksCostOverride=*/0);
+    // C zone at (2, 0) is within 3 tiles of road — boosts R bootstrap demand to ~0.917.
+    sim_->placeZone(/*tileX=*/2, /*tileZ=*/0, ZoneType::Commercial,
+                    DensityTier::Low, /*earthworksCostOverride=*/0);
 
-    // 3. The ON_CALL must have invoked terrain_.setTileHeight(), setting m_flattened = true.
-    EXPECT_TRUE(terrain_.m_flattened)
-        << "ManualTerrainQuery::m_flattened must be true after zone placement — "
-           "confirms that placeBuildingMesh invoked ITerrainQuery::setTileHeight()";
+    // 3. placeZone() must have called setTileHeight() for earthworks.
+    const std::size_t callsAfterPlacement = terrain_.m_flattenCalls.size();
+    EXPECT_GT(callsAfterPlacement, 0u)
+        << "placeZone() must invoke setTileHeight() for Phase 11h earthworks flattening";
 
-    // 4. getHeightAt() must now return the post-flatten value.
-    EXPECT_FLOAT_EQ(terrain_.getHeightAt(0, 0), 3.0f)
-        << "getHeightAt() must return m_heightAfterFlat (3.0f) after setTileHeight() "
-           "was invoked by the placeBuildingMesh three-step flattening pattern";
+    // 4. Advance one budget tick; doPopulationTick() checks demand (R ≈ 0.917 >= 0.50)
+    //    and calls renderer_.placeBuildingMesh(), which triggers the ON_CALL action
+    //    that invokes setTileHeight() via the simulated three-step flattening pattern.
+    auto* concreteSim = static_cast<CitySimulation*>(sim_.get());
+    clock_.advance(SimulationConstants::SECONDS_PER_BUDGET_TICK);
+    concreteSim->tick(SimulationConstants::SECONDS_PER_BUDGET_TICK);
+
+    // 5. placeBuildingMesh() ON_CALL must have added more flattenCalls.
+    EXPECT_GT(terrain_.m_flattenCalls.size(), callsAfterPlacement)
+        << "doPopulationTick() must invoke placeBuildingMesh() which calls setTileHeight() — "
+           "confirms Phase 11l demand-gated mesh spawn triggers terrain operations";
 }

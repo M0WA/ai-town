@@ -170,6 +170,12 @@ struct SimulationConstants {
     static constexpr float density_upgrade_wave_demand_threshold = 0.50f;
     static constexpr float density_max_upgrade_rate_per_tick = 0.20f;
 
+    // Construction delay demand threshold (architecture/game-design/zoning-system.md)
+    // A zoned tile in the underConstruction state will not spawn its building mesh
+    // until effective_demand_factor >= this value at the start of a doPopulationTick().
+    // Tiles below the threshold remain as empty lots and are re-evaluated every tick.
+    static constexpr float construction_delay_demand_threshold = 0.50f;
+
     // Desirability system (architecture/game-design/zoning-system.md)
     // desirability_base_value: starting desirability for a newly zoned tile (neutral mid-point of [0, 100])
     static constexpr int desirability_base_value = 50;

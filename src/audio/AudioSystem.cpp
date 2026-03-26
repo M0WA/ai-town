@@ -22,6 +22,8 @@
 
 #include <vorbis/vorbisfile.h>
 
+#include <irrlicht.h>  // irr::ILogger — only AudioSystem.cpp includes this; AudioSystem.h forward-declares only
+
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -101,16 +103,33 @@ struct DefaultAlcFunctions : public IAlcFunctions {
 };
 
 // ---------------------------------------------------------------------------
-// Static logging helpers.
+// Instance logging helpers — route through irr::ILogger when available.
+// m_logMutex serialises concurrent calls from audio thread and main thread
+// (irr::ILogger is not documented as thread-safe).
 // ---------------------------------------------------------------------------
 void AudioSystem::logWarning(const std::string& msg) {
-    std::cerr << "[AudioSystem WARNING] " << msg << '\n';
+    if (m_logger) {
+        std::lock_guard<std::mutex> lk(m_logMutex);
+        m_logger->log(msg.c_str(), irr::ELL_WARNING);
+    } else {
+        std::fprintf(stderr, "[AudioSystem WARNING] (no ILogger) %s\n", msg.c_str());
+    }
 }
 void AudioSystem::logError(const std::string& msg) {
-    std::cerr << "[AudioSystem ERROR] " << msg << '\n';
+    if (m_logger) {
+        std::lock_guard<std::mutex> lk(m_logMutex);
+        m_logger->log(msg.c_str(), irr::ELL_ERROR);
+    } else {
+        std::fprintf(stderr, "[AudioSystem ERROR] (no ILogger) %s\n", msg.c_str());
+    }
 }
 void AudioSystem::logInfo(const std::string& msg) {
-    std::cerr << "[AudioSystem INFO] " << msg << '\n';
+    if (m_logger) {
+        std::lock_guard<std::mutex> lk(m_logMutex);
+        m_logger->log(msg.c_str(), irr::ELL_INFORMATION);
+    } else {
+        std::fprintf(stderr, "[AudioSystem INFO] (no ILogger) %s\n", msg.c_str());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -284,8 +303,9 @@ void AudioSystem::setupStreamSource(int sourceIdx) {
 // ---------------------------------------------------------------------------
 // AudioSystem constructor — mandatory construction order per spec.
 // ---------------------------------------------------------------------------
-AudioSystem::AudioSystem(IClock* clock, IAlcFunctions* alcFunctions)
+AudioSystem::AudioSystem(irr::ILogger* logger, IClock* clock, IAlcFunctions* alcFunctions)
     : m_clock(clock)
+    , m_logger(logger)
 {
     // -----------------------------------------------------------------------
     // Step 1: Open device.
@@ -1174,6 +1194,12 @@ int AudioSystem::refillStream(int slot) {
         ALuint bufHandle = static_cast<ALuint>(s.buffers[bufIdx]);
 
         // --- Split-lock step 3: queue under mutex ---
+        // Disjoint-use constraint: logError/logWarning acquire m_logMutex internally,
+        // so they MUST NOT be called while m_streamMutex is held.  We capture any
+        // pending log message into a local std::string inside the lock, then call the
+        // log helper after the lock_guard goes out of scope.
+        std::string pendingLogError;
+        std::string pendingLogWarning;
         {
             std::lock_guard<std::mutex> lk(m_streamMutex);
 
@@ -1191,36 +1217,41 @@ int AudioSystem::refillStream(int slot) {
                     // Buffer still attached to source queue — skip this slot.
                     // m_samplesQueued is NOT incremented so the same bufIdx is retried
                     // on the next wake after the buffer has been processed and unqueued.
-                    logError("refillStream: alBufferData failed slot=" +
-                             std::to_string(slot) + " bufIdx=" +
-                             std::to_string(bufIdx));
-                    break;
+                    pendingLogError = "refillStream: alBufferData failed slot=" +
+                                      std::to_string(slot) + " bufIdx=" +
+                                      std::to_string(bufIdx);
+                    // Lock released at end of scope; log called below.
                 }
             }
-            alSourceQueueBuffers(src, 1, &bufHandle);
-            alGetError();  // consume — queue error is non-fatal; starvation recovery handles restart
+            if (pendingLogError.empty()) {
+                alSourceQueueBuffers(src, 1, &bufHandle);
+                alGetError();  // consume — queue error is non-fatal; starvation recovery handles restart
 
-            s.m_samplesQueued += static_cast<uint64_t>(framesDecoded);
-            ++queued;
+                s.m_samplesQueued += static_cast<uint64_t>(framesDecoded);
+                ++queued;
 
-            // Starvation recovery: if source stopped unintentionally, restart it.
-            ALint state = AL_STOPPED;
-            alGetSourcei(src, AL_SOURCE_STATE, &state);
-            if (state == AL_STOPPED && !s.m_intentionallyStopped) {
-                logWarning("Stream starvation recovery — restarting source " +
-                           std::to_string(slot));
-                alSourcePlay(src);
-                // Do NOT reset m_samplesQueued here.  It serves as the round-robin
-                // buffer index: (m_samplesQueued / kSamplesPerBuffer) % kNumBuffers.
-                // Resetting it mid-loop causes the next iteration to compute an index
-                // that collides with the buffer just queued in b==0, making
-                // alBufferData fail (buffer still attached).  Only one buffer ends up
-                // queued (~371 ms), the source starvates again next wake, and the
-                // recovery fires every 10 ms — flooding PulseAudio until SIGKILL.
-                // Reset bar-boundary only so it is recomputed after recovery.
-                s.m_nextBarBoundary = 0;
+                // Starvation recovery: if source stopped unintentionally, restart it.
+                ALint state = AL_STOPPED;
+                alGetSourcei(src, AL_SOURCE_STATE, &state);
+                if (state == AL_STOPPED && !s.m_intentionallyStopped) {
+                    pendingLogWarning = "Stream starvation recovery — restarting source " +
+                                        std::to_string(slot);
+                    alSourcePlay(src);
+                    // Do NOT reset m_samplesQueued here.  It serves as the round-robin
+                    // buffer index: (m_samplesQueued / kSamplesPerBuffer) % kNumBuffers.
+                    // Resetting it mid-loop causes the next iteration to compute an index
+                    // that collides with the buffer just queued in b==0, making
+                    // alBufferData fail (buffer still attached).  Only one buffer ends up
+                    // queued (~371 ms), the source starvates again next wake, and the
+                    // recovery fires every 10 ms — flooding PulseAudio until SIGKILL.
+                    // Reset bar-boundary only so it is recomputed after recovery.
+                    s.m_nextBarBoundary = 0;
+                }
             }
         }
+        // Log outside the lock (disjoint-use constraint).
+        if (!pendingLogError.empty())   { logError(pendingLogError);     break; }
+        if (!pendingLogWarning.empty()) { logWarning(pendingLogWarning); }
     }
 
     // --- Bar-boundary tracking ---
@@ -1321,6 +1352,9 @@ void AudioSystem::beginIntensityCrossfade(MusicIntensity intensity) {
 
     // Open the incoming stream on the incoming slot.
     std::string path = assetPath(musicTrackFilename(targetId));
+    // Disjoint-use constraint: capture error message before calling logError,
+    // because logError acquires m_logMutex which must not be held while m_streamMutex is.
+    std::string beginIntensityError;
     {
         std::lock_guard<std::mutex> lk(m_streamMutex);
 
@@ -1330,15 +1364,18 @@ void AudioSystem::beginIntensityCrossfade(MusicIntensity intensity) {
         }
 
         if (!openStreamOGG(inSlot, path, true)) {
-            logError("beginIntensityCrossfade: cannot open: " + path);
-            return;
+            beginIntensityError = "beginIntensityCrossfade: cannot open: " + path;
+        } else {
+            // Set incoming stream gain to 0 and start playing immediately.
+            m_streams[inSlot].crossfadeGain = 0.0f;
+            alSourcei(static_cast<ALuint>(m_streams[inSlot].sourceHandle),
+                      AL_LOOPING, AL_FALSE);
+            alSourcePlay(static_cast<ALuint>(m_streams[inSlot].sourceHandle));
         }
-
-        // Set incoming stream gain to 0 and start playing immediately.
-        m_streams[inSlot].crossfadeGain = 0.0f;
-        alSourcei(static_cast<ALuint>(m_streams[inSlot].sourceHandle),
-                  AL_LOOPING, AL_FALSE);
-        alSourcePlay(static_cast<ALuint>(m_streams[inSlot].sourceHandle));
+    }
+    if (!beginIntensityError.empty()) {
+        logError(beginIntensityError);
+        return;
     }
 
     // Reset crossfade progress and record state.
@@ -1366,18 +1403,24 @@ void AudioSystem::beginAmbientCrossfade(TimeOfDay tod) {
     int inSlot = m_streams[2].isOpen ? 3 : 2;
 
     std::string path = assetPath(ambientBedFilename(tod));
+    // Disjoint-use constraint: capture error message before calling logError,
+    // because logError acquires m_logMutex which must not be held while m_streamMutex is.
+    std::string beginAmbientError;
     {
         std::lock_guard<std::mutex> lk(m_streamMutex);
 
         if (!openStreamOGG(inSlot, path, false)) {
-            logError("beginAmbientCrossfade: cannot open: " + path);
-            return;
+            beginAmbientError = "beginAmbientCrossfade: cannot open: " + path;
+        } else {
+            m_streams[inSlot].crossfadeGain = 0.0f;
+            alSourcei(static_cast<ALuint>(m_streams[inSlot].sourceHandle),
+                      AL_LOOPING, AL_FALSE);
+            alSourcePlay(static_cast<ALuint>(m_streams[inSlot].sourceHandle));
         }
-
-        m_streams[inSlot].crossfadeGain = 0.0f;
-        alSourcei(static_cast<ALuint>(m_streams[inSlot].sourceHandle),
-                  AL_LOOPING, AL_FALSE);
-        alSourcePlay(static_cast<ALuint>(m_streams[inSlot].sourceHandle));
+    }
+    if (!beginAmbientError.empty()) {
+        logError(beginAmbientError);
+        return;
     }
 
     m_ambientCrossfadeT.store(0.0f, std::memory_order_relaxed);
