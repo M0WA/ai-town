@@ -51,6 +51,10 @@ public:
     // "Save data corrupted — check [path]" messages.
     void setSaveStatusText(const std::string& text);
 
+    // Phase 11m: Transition directly to the loading screen (called by UIManager
+    // for subsequent new-game requests when a game session is already active).
+    void showLoadingScreen();
+
 private:
     IUIBackend* m_backend{nullptr};
     bool m_visible{false};
@@ -109,6 +113,5 @@ private:
     // Helpers
     void showMainMenuScreen();
     void showNewGameScreen();
-    void showLoadingScreen();
     void hideAllElements();
 };

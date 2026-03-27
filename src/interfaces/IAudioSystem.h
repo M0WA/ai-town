@@ -4,7 +4,7 @@
 #include "simulation_types.h"
 #include <utility>
 
-// Canonical IAudioSystem — 18 methods.
+// Canonical IAudioSystem — 19 methods.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType,
 // SimSpeed, SoundPriority, TimeOfDay, MusicIntensity, vec3, CameraState).
 // Never expose ALuint, ALfloat, or AL_* constants through this interface.
@@ -56,6 +56,17 @@ public:
     // Called by UIManager when the player starts a new game or loads a saved game.
     // Must not be called while gameplay audio is already active (undefined behaviour).
     virtual void transitionToGameplay() = 0;
+
+    // Transition from gameplay audio back to main menu audio.
+    // Stops all active gameplay music stems and ambient beds on sources[58..61],
+    // then crossfades in main menu music on sources[58..59] over 1 s (constant-power
+    // curve, wall-clock time only — NOT bar-boundary synchronized).
+    // Main menu music loops indefinitely via OGG EOF→seek pattern.
+    // Safe to call if gameplay audio is not currently active — stops all sources[58..61]
+    // unconditionally via alSourceStop (no-op for non-playing sources); no guard required.
+    // Called by UIManager::transitionToMainMenu() as the FIRST operation.
+    // (Phase 11m)
+    virtual void transitionToMainMenu() = 0;
 
     // Per-frame update called from the main game loop.
     // realDeltaSeconds is wall-clock elapsed time since the previous call.

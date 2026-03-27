@@ -201,6 +201,119 @@ SpeedMultiplier CitySimulation::getSpeedMultiplier() const {
 }
 
 // ---------------------------------------------------------------------------
+// reset — clear all city state for a new game session.
+// ---------------------------------------------------------------------------
+
+void CitySimulation::reset(int64_t startingFunds) {
+    // Release audio sources for all traffic vehicles before clearing them.
+    for (auto& agent : m_trafficVehicles) {
+        if (m_audio) {
+            m_audio->releaseVehicleEnginePair(agent.idleIdx, agent.moveIdx);
+        }
+    }
+
+    // Clear all map and agent state.
+    m_tiles.clear();
+    m_trafficVehicles.clear();
+    m_trafficSignals.clear();
+    m_serviceBuildings.clear();
+
+    // Reset notification queue.
+    while (!m_notifications.empty()) {
+        m_notifications.pop();
+    }
+
+    // Reset population and road counters.
+    m_totalPopulation  = 0;
+    m_prevPopulation   = 0;
+    m_roadTileCount    = 0;
+
+    // Reset treasury.
+    m_treasury = startingFunds;
+
+    // Reset tick counters.
+    m_totalTicks          = 0;
+    m_pendingBudgetTicks  = 0;
+    m_accumulatedSimSeconds = 0.0f;
+    m_month = 1;
+    m_year  = 1;
+
+    // Reset time-of-day.
+    m_hoursAccumulator = 0.0f;
+    m_timeOfDay        = TimeOfDay::DAY;
+
+    // Reset loan / debt state.
+    m_loans.clear();
+    m_outstandingBondUses = 0;
+    switch (m_difficulty) {
+        case Difficulty::Easy:   m_outstandingBondUses = SimulationConstants::bond_max_uses_easy;   break;
+        case Difficulty::Normal: m_outstandingBondUses = SimulationConstants::bond_max_uses_normal; break;
+        case Difficulty::Hard:   m_outstandingBondUses = SimulationConstants::bond_max_uses_hard;   break;
+    }
+    m_loanCooldownTicks  = 0;
+    m_firstRevenueTicked = false;
+    m_consecutiveDeficitMonths = 0;
+    m_month1AutoSlowed        = false;
+    m_budgetSurplusPct        = 0.0f;
+    m_budgetWarnFired         = false;
+    m_lastMonthTaxRevenue[0]  = 0.0f;
+    m_lastMonthTaxRevenue[1]  = 0.0f;
+    m_lastMonthTaxRevenue[2]  = 0.0f;
+    m_lastMonthWagesCost           = 0.0f;
+    m_lastMonthRoadMaintenanceCost = 0.0f;
+    m_lastMonthServiceUpkeepCost   = 0.0f;
+    m_lastMonthUtilityFeeRevenue   = 0.0f;
+    m_currentMonthlyRevenue        = 0.0f;
+
+    // Reset traffic demand rolling windows.
+    for (int i = 0; i < SimulationConstants::traffic_rolling_window_r_c; ++i) {
+        m_trafficWindowR[i] = 0.0f;
+        m_trafficWindowC[i] = 0.0f;
+    }
+    for (int i = 0; i < SimulationConstants::traffic_rolling_window_i; ++i) {
+        m_trafficWindowI[i] = 0.0f;
+    }
+    m_trafficWindowIdxRC  = 0;
+    m_trafficWindowIdxI   = 0;
+    m_trafficDemandFactorR = SimulationConstants::null_path_demand_default;
+    m_trafficDemandFactorC = SimulationConstants::null_path_demand_default;
+    m_trafficDemandFactorI = SimulationConstants::null_path_demand_default;
+    m_roadSpeedFraction    = 1.0f;
+    m_demandPressurePct[0] = 0.0f;
+    m_demandPressurePct[1] = 0.0f;
+    m_demandPressurePct[2] = 0.0f;
+
+    // Reset city rating and milestones.
+    m_cityRating = CityRatingTier::Village;
+    for (int i = 0; i < 5; ++i) m_milestoneFired[i] = false;
+
+    // Reset density unlock state.
+    m_densityUnlockState = DensityUnlockState{};
+
+    // Reset building variant counters (all 9 slots to 0).
+    m_buildingVariantCounters.fill(0);
+
+    // Reset upgrade retry counts.
+    m_upgradeRetryCount.clear();
+
+    // Reset adaptive music intensity.
+    m_lastSentMusicIntensity = MusicIntensity::CALM;
+
+    // Reset vehicle ID counter (continues from wherever it was — IDs are only
+    // valid for an agent's lifetime; we can safely restart from 1 on a new game).
+    m_nextVehicleId = 1;
+
+    // Reset placement sound cooldown.
+    m_lastPlacementSoundTime = -1.0;
+
+    // Reset construction time to now (starts grace period fresh).
+    m_constructionTimeSeconds = m_clock->nowSeconds();
+
+    // Speed back to default (x3).
+    m_speed = kDefaultSimSpeed;
+}
+
+// ---------------------------------------------------------------------------
 // Main simulation tick
 // ---------------------------------------------------------------------------
 
@@ -1865,19 +1978,19 @@ int CitySimulation::nearestRoadDistance(
     int tileX, int tileZ, int footprintN)
 {
     int minDist = INT_MAX;
-    // Check Manhattan distance from each footprint tile to each road tile.
+    // Check Chebyshev distance from each footprint tile to each road tile.
     // Limit search radius to 3 (max we care about).
     for (int dx = 0; dx < footprintN; ++dx) {
         for (int dz = 0; dz < footprintN; ++dz) {
             int fx = tileX + dx, fz = tileZ + dz;
             for (int rx = -3; rx <= 3; ++rx) {
                 for (int rz = -3; rz <= 3; ++rz) {
-                    int manhattan = std::abs(rx) + std::abs(rz);
-                    if (manhattan == 0 || manhattan >= minDist) continue;
+                    int chebyshev = std::max(std::abs(rx), std::abs(rz));
+                    if (chebyshev == 0 || chebyshev >= minDist) continue;
                     int64_t key = tileKey(fx + rx, fz + rz);
                     auto it = tiles.find(key);
                     if (it != tiles.end() && it->second.isRoad) {
-                        minDist = manhattan;
+                        minDist = chebyshev;
                     }
                 }
             }
@@ -2014,6 +2127,28 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
         }
     }
 
+    // Phase 11m: border-ring terrain flattening.
+    // Flatten any adjacent road tiles so they smoothly meet the building footprint.
+    // Iterates the (N+2)×(N+2) candidate set, skipping the inner N×N footprint tiles
+    // (already flattened above). Map-edge guard uses m_mapWidth/m_mapHeight.
+    if (m_terrain) {
+        for (int dx = -1; dx <= N; ++dx) {
+            for (int dz = -1; dz <= N; ++dz) {
+                // Skip inner footprint tiles (already processed).
+                if (dx >= 0 && dx < N && dz >= 0 && dz < N) continue;
+                int bx = tileX + dx, bz = tileZ + dz;
+                // Map-edge guard.
+                if (bx < 0 || bx >= m_mapWidth || bz < 0 || bz >= m_mapHeight) continue;
+                int64_t bkey = tileKey(bx, bz);
+                auto bit = m_tiles.find(bkey);
+                if (bit != m_tiles.end() && bit->second.isRoad) {
+                    m_terrain->setTileHeight(bx, bz, flatHeight);
+                }
+            }
+        }
+        m_terrain->flushTerrainRebuilds();
+    }
+
     // Play audio — gated by 100ms cooldown so batch operations (large zone
     // drags placing N tiles in one frame) only trigger the sound once.
     if (m_audio && m_clock) {
@@ -2035,8 +2170,6 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
     // The variant counter is incremented NOW (so getBuildingVariantCounter() reflects
     // the assigned variant immediately after placement), but placeBuildingMesh() is
     // NOT called here; it is called by doPopulationTick() using tile.buildingVariantNum.
-    // TODO(phase-12): serialize tile.underConstruction and tile.buildingVariantNum in
-    // the save-file tile struct so in-progress constructions survive save/load.
     {
         int zoneIdx = static_cast<int>(type);
         int tierIdx = static_cast<int>(tier);
@@ -2585,6 +2718,13 @@ QueryResult CitySimulation::queryTile(int tileX, int tileZ) const {
     // Phase 11h: report abandonment state.
     result.isAbandoned = tile->isAbandoned;
 
+    // Phase 11m: report construction state.
+    result.underConstruction = tile->underConstruction;
+
+    result.footprintOriginX = tile->footprintOriginX;
+    result.footprintOriginZ = tile->footprintOriginZ;
+    result.buildingVariantNum = tile->buildingVariantNum;
+
     return result;
 }
 
@@ -3083,6 +3223,8 @@ std::string CitySimulation::serializeToJson() const {
                + ", \"is_road\": " + (tile.isRoad ? "true" : "false")
                + ", \"population\": " + popBuf
                + ", \"alert_fired\": " + (tile.alertFired ? "true" : "false")
+               + ", \"under_construction\": " + (tile.underConstruction ? "true" : "false")
+               + ", \"variant_num\": " + std::to_string(tile.buildingVariantNum)
                + "}";
         }
     }
@@ -3436,6 +3578,12 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
                         if (!parseFloat(json, pos, td.population, errorOut)) return false;
                     } else if (tk == "alert_fired") {
                         if (!parseBool(json, pos, td.alertFired, errorOut)) return false;
+                    } else if (tk == "under_construction") {
+                        if (!parseBool(json, pos, td.underConstruction, errorOut)) return false;
+                    } else if (tk == "variant_num") {
+                        int64_t v = 0;
+                        if (!parseInt64(json, pos, v, errorOut)) return false;
+                        td.buildingVariantNum = static_cast<int>(v);
                     } else {
                         // Unknown tile field — skip string, number, bool, or nested value
                         // Simple skip: consume until comma or }
@@ -3679,4 +3827,9 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
     m_accumulatedSimSeconds = 0.0f;
 
     return true;
+}
+
+bool CitySimulation::applyLoadedJson(const std::string& json) {
+    std::string err;
+    return deserializeFromJson(json, err);
 }

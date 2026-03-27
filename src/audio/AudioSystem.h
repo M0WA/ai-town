@@ -27,6 +27,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <cstdint>
+#include <random>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -163,6 +164,12 @@ public:
     void setGameOverState(bool active) override;
     void setTimeOfDay(TimeOfDay tod) override;
     void transitionToGameplay() override;
+    void transitionToMainMenu() override;
+
+    // Test accessor — NOT part of IAudioSystem interface (concrete class only).
+    // Returns true once transitionToMainMenu() completes its final sentinel store.
+    bool isMainMenuMusicLooping() const { return m_mainMenuMusicLooping; }
+
     void update(float realDeltaSeconds) override;
     void setMasterVolume(float gain) override;
     void setMusicVolume(float gain) override;
@@ -353,6 +360,24 @@ private:
     // -----------------------------------------------------------------------
     bool  m_gameOverFade{false};
     float m_gameOverFadeT{0.0f};
+
+    // -----------------------------------------------------------------------
+    // RNG for variant selection (main menu track random-excluding-repeat).
+    // Seeded from std::random_device at construction.
+    // Accessed only under m_streamMutex in transitionToMainMenu() and in
+    // the audio thread's updateStreams() EOF path — no additional lock needed.
+    // -----------------------------------------------------------------------
+    std::mt19937 m_rng{std::random_device{}()};
+
+    // -----------------------------------------------------------------------
+    // Main menu music state (Phase 11m).
+    // m_lastMainMenuVariant: last variant played (1 or 2); -1 = none yet.
+    //   Written under m_streamMutex; used to exclude repeat on next selection.
+    // m_mainMenuMusicLooping: set to true as the FINAL operation in
+    //   transitionToMainMenu() (completion sentinel for tests).
+    // -----------------------------------------------------------------------
+    int  m_lastMainMenuVariant{-1};
+    bool m_mainMenuMusicLooping{false};
 
     // -----------------------------------------------------------------------
     // Stinger cooldown tracking: time of last trigger per stinger type.

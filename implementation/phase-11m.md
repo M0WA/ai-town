@@ -86,19 +86,19 @@ encodes brightness (Low = pale, Medium = mid, High = dark).
 
 **Code changes — `QueryResult` (`src/interfaces/simulation_types.h`)**:
 
-- [ ] Add `bool underConstruction{false}` to `QueryResult`. Doc comment: "true when the
+- [x] Add `bool underConstruction{false}` to `QueryResult`. Doc comment: "true when the
   zone tile has been placed but the building mesh has not yet spawned (demand below
   `SimulationConstants::construction_delay_demand_threshold`). False for road tiles,
   unzoned tiles, and tiles whose building has already spawned."
 
 **Code changes — `CitySimulation::queryTile()` (`src/simulation/CitySimulation.cpp`)**:
 
-- [ ] Populate `result.underConstruction = tile.underConstruction;` in the zoned-tile
+- [x] Populate `result.underConstruction = tile.underConstruction;` in the zoned-tile
   branch of `queryTile()`.
 
 **Code changes — `UIManager` (`src/ui/UIManager.cpp` / `UIManager.h`)**:
 
-- [ ] Add private helper `uint32_t computeZoneOverlayColor(ZoneType zone, DensityTier density)`
+- [x] Add private helper `uint32_t computeZoneOverlayColor(ZoneType zone, DensityTier density)`
   implemented as a 3×3 constexpr lookup table (ZoneType index × DensityTier index):
 
   ```cpp
@@ -111,9 +111,9 @@ encodes brightness (Low = pale, Medium = mid, High = dark).
   return kTable[static_cast<int>(zone)][static_cast<int>(density)];
   ```
 
-- [ ] Fix the stale comment at line ~1207: remove "placeZone() always places a building
+- [x] Fix the stale comment at line ~1207: remove "placeZone() always places a building
   immediately" — this was invalidated by Phase 11l construction delay.
-- [ ] In `UIManager::doTerrainPlacement()`, zone-placement branch: replace the
+- [x] In `UIManager::doTerrainPlacement()`, zone-placement branch: replace the
   `m_overlayMap.erase(key)` call with
   `m_overlayMap[key] = computeZoneOverlayColor(zoneType, densityTier)`.
   Use the `densityTier` variable already available at the `placeZone()` call site — no
@@ -121,7 +121,7 @@ encodes brightness (Low = pale, Medium = mid, High = dark).
   was just added to `m_overlayMap`, so state has changed and the renderer must be notified).
   **`setZoneOverlay()` is called only when `m_overlayMap` state changes (new entry added
   on placement, expired entry removed on refresh), never unconditionally.**
-- [ ] In `UIManager::update()`, add a periodic overlay refresh block.
+- [x] In `UIManager::update()`, add a periodic overlay refresh block.
   `m_overlayRefreshCounter` increments each frame and resets to 0 after each refresh run
   (whether triggered by reaching 60 frames or by receiving a populationTick notification);
   whichever occurs first in an update cycle triggers the refresh and resets the counter.
@@ -143,7 +143,7 @@ encodes brightness (Low = pale, Medium = mid, High = dark).
   fade or instant-clear transition is performed. The tile entry is erased from
   `m_overlayMap` during the refresh pass and `setZoneOverlay()` is called once
   immediately after to push the updated (now tile-absent) map to the renderer.
-- [ ] Add a 60-frame counter `m_overlayRefreshCounter` (type `int`, initialized to 0)
+- [x] Add a 60-frame counter `m_overlayRefreshCounter` (type `int`, initialized to 0)
   to UIManager to drive the periodic refresh described above.
 
 **Note — colorblind mode deferral**: The 9-color density-tier overlay system does not
@@ -171,15 +171,15 @@ because UIManager's constructor calls many `addStaticText`/`addButton` methods.
 All three tests assert via `MockRenderer::setZoneOverlay()` — the observable side-effect
 of m_overlayMap changes — rather than accessing the private member directly.
 
-- [ ] `UIManager_ZonePlacement_AddsOverlayEntry`: place a Residential/Low zone (no demand
+- [x] `UIManager_ZonePlacement_AddsOverlayEntry`: place a Residential/Low zone (no demand
   stub needed — color is a fixed lookup); assert `setZoneOverlay()` is called on the mock
   renderer with a non-empty overlay map containing an entry with ARGB value `0xB480CC80`
   (Residential Low = pale green, alpha 180).
-- [ ] `UIManager_OverlayRefresh_RemovesEntryWhenBuildingSpawned`: set up `setZoneOverlay`
+- [x] `UIManager_OverlayRefresh_RemovesEntryWhenBuildingSpawned`: set up `setZoneOverlay`
   ON_CALL to capture the overlay map; call `update()` 60 times with `queryTile` stub
   returning `underConstruction=false`; assert the final `setZoneOverlay()` call passes an
   empty overlay map (the entry was removed).
-- [ ] `UIManager_Demolish_RemovesOverlayEntry`: trigger demolish for a zoned tile; assert
+- [x] `UIManager_Demolish_RemovesOverlayEntry`: trigger demolish for a zoned tile; assert
   `setZoneOverlay()` is called with an overlay map that no longer contains that tile's
   key.
 
@@ -208,7 +208,7 @@ The intuitive player understanding of "3 tiles" matches Chebyshev distance (max 
 
 **Code fix** (`src/simulation/CitySimulation.cpp` — `nearestRoadDistance()`):
 
-- [ ] Change the distance variable from Manhattan to Chebyshev.
+- [x] Change the distance variable from Manhattan to Chebyshev.
 
   ```cpp
   // Before:
@@ -220,20 +220,20 @@ The intuitive player understanding of "3 tiles" matches Chebyshev distance (max 
   ```
 
   Replace `minDist = manhattan` with `minDist = chebyshev`.
-- [ ] The `±3` search bounds already correctly cover Chebyshev distance ≤ 3 (a 7×7 box);
+- [x] The `±3` search bounds already correctly cover Chebyshev distance ≤ 3 (a 7×7 box);
   no search-range change is needed.
-- [ ] Rename the local variable from `manhattan` to `chebyshev` throughout the function body.
-- [ ] `doProximityTick()` calls `nearestRoadDistance()` — the function fix automatically
+- [x] Rename the local variable from `manhattan` to `chebyshev` throughout the function body.
+- [x] `doProximityTick()` calls `nearestRoadDistance()` — the function fix automatically
   corrects abandonment distance checks as well; no additional code change is needed there.
 
 **Test** (`tests/simulation/city_simulation_road_proximity_test.cpp`, label: `unit`):
 
-- [ ] `CitySimulation_PlaceZone_DiagonalRoad_AtChebyshev3_Allowed`: place a road at
+- [x] `CitySimulation_PlaceZone_DiagonalRoad_AtChebyshev3_Allowed`: place a road at
   `(3, 3)` and attempt to zone `(0, 0)` (Chebyshev 3, Manhattan 6); assert `placeZone()`
   succeeds (no `PlacementBlocked` notification, tile `isZoned == true`).
-- [ ] `CitySimulation_PlaceZone_DiagonalRoad_AtChebyshev4_Blocked`: place a road at
+- [x] `CitySimulation_PlaceZone_DiagonalRoad_AtChebyshev4_Blocked`: place a road at
   `(4, 4)` and zone `(0, 0)` (Chebyshev 4); assert `PlacementBlocked` notification fires.
-- [ ] `CitySimulation_PlaceZone_CardinalRoad_AtDistance3_Allowed`: place a road at
+- [x] `CitySimulation_PlaceZone_CardinalRoad_AtDistance3_Allowed`: place a road at
   `(3, 0)` and zone `(0, 0)` (Chebyshev 3 = Manhattan 3); assert success (existing
   behavior must not regress).
 
@@ -268,7 +268,7 @@ un-touched terrain.
 
 **Code fix** (`src/simulation/CitySimulation.cpp` — `placeZone()`):
 
-- [ ] After the existing footprint-flatten loop in `placeZone()` (pre-existing code that
+- [x] After the existing footprint-flatten loop in `placeZone()` (pre-existing code that
   calls `setTileHeight()` for each tile in the N×N footprint), add a second loop that
   iterates offsets `dx ∈ [-1, N]`, `dz ∈ [-1, N]` (the (N+2)×(N+2) candidate set).
   Note: Phase 11l's flatten loop is in `IrrlichtRenderer::placeBuildingMesh()` (runs at
@@ -279,21 +279,21 @@ un-touched terrain.
   - Look up `m_tiles.find(tileKey(tileX + dx, tileZ + dz))`.
   - If the tile exists and `tile.isRoad`, call
     `m_terrain->setTileHeight(tileX + dx, tileZ + dz, flatHeight)`.
-- [ ] For each offset in the border ring, skip any tile where `tileX + dx < 0 ||
+- [x] For each offset in the border ring, skip any tile where `tileX + dx < 0 ||
   tileX + dx >= m_mapWidth || tileZ + dz < 0 || tileZ + dz >= m_mapHeight` (map-edge
   guard — use `m_mapWidth` / `m_mapHeight` stored in `CitySimulation` from the
   `MapConfig` passed at construction). Do not rely on `ITerrainQuery::setTileHeight()`
   silently ignoring out-of-bounds calls — the out-of-bounds contract is only documented
   for `getHeightAt()` (returns 0.0f); `setTileHeight()` out-of-bounds behavior is
   unspecified and must not be relied upon.
-- [ ] After the border-ring loop completes, call `m_terrain->flushTerrainRebuilds()` to
+- [x] After the border-ring loop completes, call `m_terrain->flushTerrainRebuilds()` to
   synchronously apply the border-ring height changes to the terrain geometry. Without this
   flush, the border-ring terrain geometry will remain at the pre-flatten heights until
   the next game-loop tick.
 
 **Test** (`tests/simulation/city_simulation_terrain_flatten_test.cpp`, label: `unit`):
 
-- [ ] `CitySimulation_PlaceZone_RoadAdjacentTile_FlattenedToMatchZone`:
+- [x] `CitySimulation_PlaceZone_RoadAdjacentTile_FlattenedToMatchZone`:
   - Construct a `CitySimulation` with a real `TerrainSystem` seeded with a 4×4 flat
     heightmap at height 0.0f (same small-map pattern used in phase-11l terrain boundary
     tests).
@@ -304,7 +304,7 @@ un-touched terrain.
     tile a different height.
   - After `placeZone()`, assert `terrain.getHeightAt(1, 0) == 0.0f` (road tile was
     flattened to match `flatHeight`).
-- [ ] `CitySimulation_PlaceZone_NonRoadAdjacentTile_NotFlattened`:
+- [x] `CitySimulation_PlaceZone_NonRoadAdjacentTile_NotFlattened`:
   - Same setup; tile at `(1, 0)` is NOT a road (leave it as plain terrain at height 5.0f).
   - After `placeZone()`, assert `terrain.getHeightAt(1, 0) == 5.0f` (non-road tile
     height unchanged).
@@ -323,7 +323,7 @@ Starting a second new game leaves `m_gracePeriodExpired == true`, so
 
 **Code fix** (`src/ui/HUD.cpp` / `HUD.h`):
 
-- [ ] Add `void HUD::notifyGameStarted()` (public):
+- [x] Add `void HUD::notifyGameStarted()` (public):
 
   ```cpp
   void HUD::notifyGameStarted() {
@@ -338,8 +338,8 @@ Starting a second new game leaves `m_gracePeriodExpired == true`, so
   }
   ```
 
-- [ ] Declare `notifyGameStarted()` in `HUD.h`.
-- [ ] In `UIManager::transitionToGameplay()`, add a call:
+- [x] Declare `notifyGameStarted()` in `HUD.h`.
+- [x] In `UIManager::transitionToGameplay()`, add a call:
 
   ```cpp
   if (m_hud) m_hud->notifyGameStarted();
@@ -349,7 +349,7 @@ Starting a second new game leaves `m_gracePeriodExpired == true`, so
 
 **Test** (`tests/ui/hud_grace_period_test.cpp`, label: `unit`):
 
-- [ ] `HUD_SecondNewGame_GracePeriodLabelVisible`:
+- [x] `HUD_SecondNewGame_GracePeriodLabelVisible`:
   **Note**: this test isolates HUD state behavior only — it does not verify the audio
   precondition (`setTimeOfDay(DAY)` before `transitionToGameplay()`). Audio sequencing is
   verified by the UIManager integration flow in Deliverable 6 and by manual exit criterion
@@ -403,7 +403,7 @@ entirely within `transitionToMainMenu()`.
 
 **Code fix** (`src/ui/UIManager.cpp` — `transitionToMainMenu()`):
 
-- [ ] At the end of `transitionToMainMenu()`, before `m_mainMenu->show()`, add:
+- [x] At the end of `transitionToMainMenu()`, before `m_mainMenu->show()`, add:
 
   ```cpp
   // Re-query save state so the Load Game button reflects any saves made this session.
@@ -431,7 +431,7 @@ entirely within `transitionToMainMenu()`.
 
 **Test** (`tests/ui/uimanager_save_state_test.cpp`, label: `unit`):
 
-- [ ] `UIManager_TransitionToMainMenu_RefreshesLoadButtonState`:
+- [x] `UIManager_TransitionToMainMenu_RefreshesLoadButtonState`:
   - Declare as a test fixture with `NiceMock<MockUIBackend> backend_`,
     `NiceMock<MockAudioSystem> audio_`, `NiceMock<MockCitySimulation> sim_`,
     `ManualClock clock_`, and `NiceMock<MockSaveSystem> saveSystem_` as members.
@@ -482,10 +482,10 @@ terrain-generation pass from within the game loop.
 
 **Spec update** (`architecture/ui-ux/ui-manager.md`):
 
-- [ ] Document the `consumeNewGameRequest()` / `getNewGameParams()` contract: these are
+- [x] Document the `consumeNewGameRequest()` / `getNewGameParams()` contract: these are
   polling methods that return true/valid-params exactly once after each "Start City"
   click that follows a prior gameplay session. They reset automatically on consumption.
-- [ ] Document that `transitionToGameplay()` is called by `main.cpp` (not by UIManager
+- [x] Document that `transitionToGameplay()` is called by `main.cpp` (not by UIManager
   itself) when the second-or-later new-game flow completes terrain generation.
 
 **Spec updates**:
@@ -506,44 +506,44 @@ terrain-generation pass from within the game loop.
 
 **Code changes — `UIManager.h` / `UIManager.cpp`**:
 
-- [ ] Add `bool m_gameSessionActive{false}` member: set to `true` the first time
+- [x] Add `bool m_gameSessionActive{false}` member: set to `true` the first time
   `transitionToGameplay()` completes.
-- [ ] Add `bool m_newGamePending{false}` member.
-- [ ] In `UIManager::update()`, when `consumeStartGameRequest()` returns true:
+- [x] Add `bool m_newGamePending{false}` member.
+- [x] In `UIManager::update()`, when `consumeStartGameRequest()` returns true:
   - If `m_gameSessionActive == false` (first game): behave as today — call
     `transitionToGameplay(GameMode::Sandbox)` immediately.
   - If `m_gameSessionActive == true` (subsequent game): set `m_newGamePending = true`;
     show the loading screen (`m_mainMenu->showLoadingScreen()`); do NOT call
     `transitionToGameplay()` yet.
-- [ ] Add `bool UIManager::consumeNewGameRequest()`: returns `m_newGamePending` and
+- [x] Add `bool UIManager::consumeNewGameRequest()`: returns `m_newGamePending` and
   atomically resets it to `false`.
-- [ ] Add `struct NewGameParams { MapSize mapSize; int seed; int difficulty; };`
+- [x] Add `struct NewGameParams { MapSize mapSize; int seed; int difficulty; };`
   and `NewGameParams UIManager::getNewGameParams()` returning the params captured at
   "Start City" click.
   **Phase 11m scope**: V1 hardcodes `GameMode::Sandbox`; Scenario mode is deferred.
   `NewGameParams` does not carry a `gameMode` field in this phase — the
   `transitionToGameplay(GameMode::Sandbox)` call in `main.cpp` supplies the mode
   directly, reflecting the deliberate V1 choice to support Sandbox only.
-- [ ] Add `NewGameParams m_newGameParams{}` member (stores params from the last "Start City"
+- [x] Add `NewGameParams m_newGameParams{}` member (stores params from the last "Start City"
   click; populated by `consumeStartGameRequest()` handling and by `handleNewGameRequest()`).
-- [ ] Add `void UIManager::handleNewGameRequest(const NewGameParams& params)` — a
+- [x] Add `void UIManager::handleNewGameRequest(const NewGameParams& params)` — a
   test-accessible entry point that simulates a "Start City" button press directly (bypassing
   the event system), gated on `#ifdef AITOWN_TESTING_ENABLED` (consistent with
   `setGameSessionActiveForTest`). Implementation: store `m_newGameParams = params`; if
   `m_gameSessionActive` is true, set `m_newGamePending = true` and call
   `m_mainMenu->showLoadingScreen()`; otherwise call `transitionToGameplay(GameMode::Sandbox)`
   (first-game path). Production code uses `consumeStartGameRequest()` via `UIManager::update()`.
-- [ ] In `transitionToGameplay()`, set `m_gameSessionActive = true` after the state change.
-- [ ] In `UIManager::transitionToGameplay()`, call `m_audio->setTimeOfDay(TimeOfDay::DAY)`
+- [x] In `transitionToGameplay()`, set `m_gameSessionActive = true` after the state change.
+- [x] In `UIManager::transitionToGameplay()`, call `m_audio->setTimeOfDay(TimeOfDay::DAY)`
   **first**, then `m_audio->transitionToGameplay()` — matching the mandatory call sequence
   specified in `architecture/audio-architecture/audio-system.md` lines 160-162. New games
   always start at DAY; `setTimeOfDay()` must be called before `transitionToGameplay()` so
   that the ambient bed selection on sources[60..61] uses the correct time-of-day value.
-- [ ] Add `void UIManager::setGameSessionActiveForTest(bool value)` gated on
+- [x] Add `void UIManager::setGameSessionActiveForTest(bool value)` gated on
   `#ifdef AITOWN_TESTING_ENABLED`: sets `m_gameSessionActive = value` directly. Required by the
   `UIManager_SecondNewGame_SetsNewGamePendingFlag` test to force the "subsequent game" path
   without running a full gameplay session first.
-- [ ] In `transitionToMainMenu()`, call `m_audio->transitionToMainMenu()` before
+- [x] In `transitionToMainMenu()`, call `m_audio->transitionToMainMenu()` before
   `m_mainMenu->show()` to stop gameplay music stems and ambient beds and restart
   main menu music. **`m_audio->transitionToMainMenu()` MUST be the first operation
   called (before modal/overlay state resets and save-state refresh), to stop gameplay
@@ -573,14 +573,14 @@ terrain-generation pass from within the game loop.
 
 **Code changes — `ICitySimulation.h` / `CitySimulation.h` / `CitySimulation.cpp`**:
 
-- [ ] Add `virtual void reset(int64_t startingFunds) = 0;` to `ICitySimulation`.
-- [ ] Add `MOCK_METHOD(void, reset, (int64_t startingFunds), (override));` to
+- [x] Add `virtual void reset(int64_t startingFunds) = 0;` to `ICitySimulation`.
+- [x] Add `MOCK_METHOD(void, reset, (int64_t startingFunds), (override));` to
   `tests/ui/MockCitySimulation.h` (under the "Zone/road action methods" section).
   **Required**: `MockCitySimulation` inherits `ICitySimulation`; adding a new pure-virtual
   method to the interface without updating the mock causes a compile error on every test
   that instantiates `MockCitySimulation`. The mock must have an entry for every pure-virtual
   method in `ICitySimulation`.
-- [ ] **Prerequisite — `TrafficVehicle` struct field additions** (`src/simulation/CitySimulation.h`):
+- [x] **Prerequisite — `TrafficVehicle` struct field additions** (`src/simulation/CitySimulation.h`):
   Before implementing `reset()`, add two new fields to the `TrafficVehicle` struct:
 
   ```cpp
@@ -593,7 +593,7 @@ terrain-generation pass from within the game loop.
   and is treated as a no-op by `IAudioSystem::releaseVehicleEnginePair()`. Without these
   fields the `reset()` implementation will not compile.
 
-- [ ] Implement `CitySimulation::reset(int64_t startingFunds)`:
+- [x] Implement `CitySimulation::reset(int64_t startingFunds)`:
   - Clear `m_tiles`.
   - Reset `m_totalPopulation = 0`, `m_roadTileCount = 0`, `m_treasury = startingFunds`.
   - Clear `m_notifications` queue.
@@ -624,23 +624,23 @@ terrain-generation pass from within the game loop.
 
 **Code changes — `IAudioSystem.h` / `MockAudioSystem.h`**:
 
-- [ ] Add `virtual void transitionToMainMenu() = 0;` to `src/interfaces/IAudioSystem.h`
+- [x] Add `virtual void transitionToMainMenu() = 0;` to `src/interfaces/IAudioSystem.h`
   (pure-virtual, 19th method). The header comment and phase-history annotation already reflect
   19 methods with the Phase 11m annotation in `architecture/audio-architecture/audio-system.md`
   (lines 64–67) — **Already applied** to the spec; no spec change needed, only the C++ source
   declaration.
-- [ ] Add `MOCK_METHOD(void, transitionToMainMenu, (), (override))` to
+- [x] Add `MOCK_METHOD(void, transitionToMainMenu, (), (override))` to
   `tests/simulation/MockAudioSystem.h`.
 
 **Code changes — `AudioSystem.h` / `AudioSystem.cpp`**:
 
-- [ ] Add `void transitionToMainMenu() override;` to `src/audio/AudioSystem.h`.
-- [ ] Add `int m_lastMainMenuVariant{-1};` as a private member to `AudioSystem`
+- [x] Add `void transitionToMainMenu() override;` to `src/audio/AudioSystem.h`.
+- [x] Add `int m_lastMainMenuVariant{-1};` as a private member to `AudioSystem`
   (declared in `src/audio/AudioSystem.h`). Initialized to `-1` in the constructor member
   initializer list. This tracks the last-played main menu variant to enforce the
   same random-excluding-repeat policy used for gameplay stems
   (ref: `architecture/audio-architecture/dynamic-soundscape.md` §Main Menu Audio).
-- [ ] **Variant selection in `transitionToMainMenu()`** — implement using the
+- [x] **Variant selection in `transitionToMainMenu()`** — implement using the
   same random-excluding-repeat policy as gameplay stems:
   1. Build the candidate set `{1, 2}` (the two main menu music variants).
   2. Remove `m_lastMainMenuVariant` from the candidate set (exclude repeat).
@@ -652,7 +652,7 @@ terrain-generation pass from within the game loop.
   4. Store the selected variant in `m_lastMainMenuVariant` before calling
      `setMusicTrack()` with that variant ID, so the next `transitionToMainMenu()`
      call correctly excludes it.
-- [ ] In `AudioSystem::transitionToMainMenu()`, wrap the entire variant selection
+- [x] In `AudioSystem::transitionToMainMenu()`, wrap the entire variant selection
   block — (1) build candidate set `{1, 2}`, (2) exclude `m_lastMainMenuVariant`,
   (3) select randomly with `std::uniform_int_distribution` from `m_rng`, (4) store
   result back to `m_lastMainMenuVariant` — in a single
@@ -663,7 +663,7 @@ terrain-generation pass from within the game loop.
   crossfade-setup calls — do NOT hold `m_streamMutex` across the full method body
   (that would cause audio-thread starvation on its 10 ms wake cycle per
   `streaming-architecture.md`).
-- [ ] Implement `AudioSystem::transitionToMainMenu()` in `src/audio/AudioSystem.cpp`
+- [x] Implement `AudioSystem::transitionToMainMenu()` in `src/audio/AudioSystem.cpp`
   per the contract in `architecture/audio-architecture/audio-system.md`:
   stop all active gameplay music stems and ambient beds on sources[58..61], then
   crossfade in main menu music on sources[58..59] over 1 s using the constant-power
@@ -676,7 +676,7 @@ terrain-generation pass from within the game loop.
   sources[58..61] unconditionally via `alSourceStop` (a no-op for non-playing sources);
   no guard condition is required per `audio-system.md` lines 175-178. Use `m_clock`
   for timing the crossfade, consistent with existing crossfade patterns in AudioSystem.
-- [ ] Add `bool m_mainMenuMusicLooping{false}` private member to `AudioSystem`
+- [x] Add `bool m_mainMenuMusicLooping{false}` private member to `AudioSystem`
   (declared in `src/audio/AudioSystem.h`). Set it to `true` inside
   `transitionToMainMenu()` once the main menu music streaming loop is
   configured for indefinite looping via the OGG seek mechanism (same
@@ -745,12 +745,12 @@ terrain-generation pass from within the game loop.
   `transitionToMainMenu()` synchronously and reads the flag on the same thread
   immediately after, under the same single-threaded assertion pattern used for
   other `AudioSystem` state accessors).
-- [ ] Add `bool isMainMenuMusicLooping() const` test accessor to the concrete
+- [x] Add `bool isMainMenuMusicLooping() const` test accessor to the concrete
   `AudioSystem` class (declared in `AudioSystem.h`, implemented inline or in
   `AudioSystem.cpp`). Returns `m_mainMenuMusicLooping`. This accessor is NOT part
   of `IAudioSystem` — it is on the concrete class only, for unit-test inspection
   without exposing AL types through any interface.
-- [ ] Add test file `tests/audio/audio_system_transition_main_menu_test.cpp`
+- [x] Add test file `tests/audio/audio_system_transition_main_menu_test.cpp`
   (label: `unit`) with one test:
   - `AudioSystem_TransitionToMainMenu_LoopingFlagSet`: construct
     `AudioSystem audio(nullptr, &clock_)` (passing `nullptr` for `IAlcFunctions`
@@ -777,8 +777,8 @@ terrain-generation pass from within the game loop.
 
 **Code changes — `IRenderer.h` / `IrrlichtRenderer.h` / `IrrlichtRenderer.cpp`**:
 
-- [ ] Add `virtual void clearCity() = 0;` to `IRenderer`.
-- [ ] Implement `IrrlichtRenderer::clearCity()`:
+- [x] Add `virtual void clearCity() = 0;` to `IRenderer`.
+- [x] Implement `IrrlichtRenderer::clearCity()`:
   - For `m_buildingNodes` (stored as `LODNode*` wrappers): iterate the map and
     perform the full 4-step eviction sequence on each entry — (1) clear all material
     texture slots (iterate `mat.setTexture(t, nullptr)` for each texture unit), (2) call
@@ -827,7 +827,7 @@ terrain-generation pass from within the game loop.
 
 **Code changes — `main.cpp`** (game loop):
 
-- [ ] After `uiManager.update(realDeltaSeconds)`, add:
+- [x] After `uiManager.update(realDeltaSeconds)`, add:
 
   ```cpp
   if (uiManager.consumeNewGameRequest()) {
@@ -884,7 +884,7 @@ terrain-generation pass from within the game loop.
   tier tracking, clears notification history, and re-arms the cost-waiver label. This call
   must occur before the first `update()` tick of the new game.
 
-- [ ] Add `SimulationConstants::startingFundsForDifficulty(int difficulty)` helper
+- [x] Add `SimulationConstants::startingFundsForDifficulty(int difficulty)` helper
   returning the per-difficulty starting fund (Easy/Normal/Hard as per economy-model.md):
   Easy = $1,000,000; Normal = $500,000; Hard = $200,000.
 
@@ -900,7 +900,7 @@ mock destruction, enforcing the destructor-path contract per testability-archite
 teardown). `NiceMock` is required because UIManager's constructor makes many
 `addStaticText`/`addButton` calls that are not under test.
 
-- [ ] `UIManager_SecondNewGame_SetsNewGamePendingFlag`:
+- [x] `UIManager_SecondNewGame_SetsNewGamePendingFlag`:
   - Force `m_gameSessionActive = true` via test setter (add a `setGameSessionActiveForTest(bool)`
     method to UIManager gated on `#ifdef AITOWN_TESTING_ENABLED`).
   - Simulate the "Start City" button press by calling `uiManager_->handleNewGameRequest(params)`
@@ -909,7 +909,7 @@ teardown). `NiceMock` is required because UIManager's constructor makes many
   - Assert `consumeNewGameRequest()` returns `true`.
   - Assert a second call to `consumeNewGameRequest()` returns `false` (consumed — resets
     `m_newGamePending`).
-- [ ] `UIManager_FirstGame_NoNewGamePendingFlag`:
+- [x] `UIManager_FirstGame_NoNewGamePendingFlag`:
   - `m_gameSessionActive` is `false` (default — first game has not yet been played).
   - Simulate the "Start City" button press via `uiManager_->handleNewGameRequest(params)`.
   - Assert `consumeNewGameRequest()` returns `false` (first game takes the direct
@@ -928,7 +928,7 @@ rectangle.
 
 **Code fix** (`src/ui/FinancesPanel.cpp` — constructor, after `m_panelBg` creation):
 
-- [ ] Add, immediately after line 56 (the `m_panelBg = m_backend->addStaticText(...)` line):
+- [x] Add, immediately after line 56 (the `m_panelBg = m_backend->addStaticText(...)` line):
 
   ```cpp
   m_backend->setElementBackground(m_panelBg, 13, 27, 42, 217);
@@ -946,7 +946,7 @@ The 8 px corner radius remains in the spec as the authoritative post-V1 target.
 
 **Test** (`tests/ui/finances_panel_background_test.cpp`, label: `unit`):
 
-- [ ] `FinancesPanel_Constructor_CallsSetElementBackground`:
+- [x] `FinancesPanel_Constructor_CallsSetElementBackground`:
   - Declare the test as a fixture with `NiceMock<MockUIBackend> backend_`,
     `NiceMock<MockAudioSystem> audio_`, `NiceMock<MockCitySimulation> sim_`, and
     `ManualClock clock_` as members. Include an explicit `TearDown()` override that
@@ -1029,26 +1029,26 @@ Do NOT call `add_executable` or `aitown_add_tests` again — extend the existing
 
 ### Exit Criteria
 
-- [ ] All 7 deliverable code fixes implemented.
-- [ ] All 14 tests above pass (green) with `ctest --test-dir build -LE "integration|requires-opengl"`.
-- [ ] Manual audio acceptance: start game, build city for ≥30 s, then quit to main menu →
+- [x] All 7 deliverable code fixes implemented.
+- [x] All 14 tests above pass (green) with `ctest --test-dir build -LE "integration|requires-opengl"`.
+- [x] Manual audio acceptance: start game, build city for ≥30 s, then quit to main menu →
   main menu music begins playing within 1 s, loops continuously without audible clicks,
   silence gaps, or abrupt cuts.
-- [ ] All 8 new test files registered in CMakeLists.txt via `target_sources()` (see above).
-- [ ] `make build` succeeds with zero warnings.
-- [ ] Zone overlay: place a Residential/High-density zone → tile shows dark green;
+- [x] All 8 new test files registered in CMakeLists.txt via `target_sources()` (see above).
+- [x] `make build` succeeds with zero warnings.
+- [x] Zone overlay: place a Residential/High-density zone → tile shows dark green;
   place a Residential/Low-density zone → tile shows light green; building spawns → tile clears.
-- [ ] Road proximity: zone a tile 2 steps diagonally from a road (Chebyshev 2, Manhattan 4)
+- [x] Road proximity: zone a tile 2 steps diagonally from a road (Chebyshev 2, Manhattan 4)
   → placement succeeds; 4 steps diagonal → blocked.
-- [ ] Terrain border: place a zone adjacent to a road on sloped terrain → road no longer
+- [x] Terrain border: place a zone adjacent to a road on sloped terrain → road no longer
   intersects terrain after placement.
-- [ ] Cost waiver: quit a game after grace period, start a second game → "Cost waiver: 120s
+- [x] Cost waiver: quit a game after grace period, start a second game → "Cost waiver: 120s
   remaining" label appears immediately in HUD.
-- [ ] Save state: start a game, save, quit to menu → Load Game button is enabled, status
+- [x] Save state: start a game, save, quit to menu → Load Game button is enabled, status
   label is hidden.
-- [ ] New-game reset: start game, build city, quit to menu, start new game → loading screen
+- [x] New-game reset: start game, build city, quit to menu, start new game → loading screen
   appears, new terrain generated, city is empty.
-- [ ] Finances panel: press T → panel has visible dark-background rectangle behind all
+- [x] Finances panel: press T → panel has visible dark-background rectangle behind all
   labels and buttons.
-- [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` passes
+- [x] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` passes
   with zero errors.
