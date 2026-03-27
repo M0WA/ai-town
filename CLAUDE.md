@@ -93,6 +93,7 @@ Do not suggest alternative engines, languages, or platforms.
 | Fix Implementation | `/fix-implementation` | Same as Plan Fix Spec but skips the Product Owner plan-sync step — iteratively fixes all CRITICAL/HIGH issues in both specs and the implementation plan as-is |
 | Fix Design Implementation | `/fix-design-implementation` | Like Fix Implementation but uses only the design squad (Game Designer, UI/UX, 2D Texture, 3D Model, Sound Artist) — no tech squad agents |
 | Fix Tech Implementation | `/fix-tech-implementation` | Like Fix Implementation but uses only the tech squad (GitHub Pipeline, Irrlicht dev, OpenAL Soft dev, Test Engineer) — no design squad agents |
+| Implement Phase | `/implement-phase` | Fully implement a phase end-to-end: apply spec updates, write all C++ code and tests, build + test with auto-fix loops, pause for manual exit criteria confirmation, then commit and sign off |
 | Validate Phase Done | `/validate-phase-done` | Read a phase file and report whether all deliverable checkboxes and exit criteria are complete; lists every outstanding item if not |
 | Mark Phase Done | `/mark-phase-done` | Validate phase completion, then mark it as **DONE** in the implementation plan and sync the GitHub board; infers the phase from the current git branch (`planning/phase-N` → Phase N−1 done) if not specified |
 | Split Phase | `/split-phase` | Product Owner proposes splitting a phase into multiple phases or redistributing its deliverables; design + tech squads review the proposal, then the Product Owner applies the agreed split |
