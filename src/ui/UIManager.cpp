@@ -1409,12 +1409,9 @@ void UIManager::update(float realDeltaSeconds) {
             if (m_saveSystem) {
                 LoadResult result = m_saveSystem->loadMostRecentSave();
                 if (result.ok) {
-                    if (m_sim) {
-                        m_sim->applyLoadedJson(result.jsonData);
-                    }
-                    rebuildRendererFromSim();
-                    transitionToGameplay(GameMode::Sandbox);
-                    onGameLoaded();
+                    m_pendingLoadJson  = result.jsonData;
+                    m_loadGamePending  = true;
+                    if (m_mainMenu) m_mainMenu->showLoadingScreen();
                 }
             }
             return;
@@ -2099,9 +2096,9 @@ static std::string zoneAssetNameForLoad(ZoneType zone, DensityTier density) {
     return std::string(zoneStr) + "_" + densStr + "_01";
 }
 
-// rebuildRendererFromSim — recreate all renderer scene nodes from current sim state.
-// Called after applyLoadedJson() to make loaded buildings and roads visible.
-void UIManager::rebuildRendererFromSim() {
+// rebuildCityFromSim — recreate all renderer scene nodes from current sim state.
+// Called from main.cpp after applyLoadedJson() and terrain regeneration complete.
+void UIManager::rebuildCityFromSim() {
     if (!m_renderer || !m_sim || m_mapTilesX <= 0 || m_mapTilesZ <= 0) return;
     m_renderer->clearCity();
     for (int z = 0; z < m_mapTilesZ; ++z) {
@@ -2115,7 +2112,11 @@ void UIManager::rebuildRendererFromSim() {
                 std::string asset = zoneAssetNameForLoad(q.zoneType, q.densityTier);
                 if (!asset.empty()) {
                     int varNum = q.buildingVariantNum;
-                    if (varNum >= 1 && varNum <= 4 && asset.size() >= 2) {
+                    if (varNum < 1 || varNum > 4) {
+                        // Old save: no variant stored. Use position-based fallback for visual variety.
+                        varNum = ((x * 7 + z * 13) % 4) + 1;  // deterministic 1-4
+                    }
+                    if (asset.size() >= 2) {
                         asset[asset.size() - 2] = '0';
                         asset[asset.size() - 1] = static_cast<char>('0' + varNum);
                     }
@@ -2244,6 +2245,17 @@ bool UIManager::consumeNewGameRequest() {
 // ----------------------------------------------------------------
 NewGameParams UIManager::getNewGameParams() {
     return m_newGameParams;
+}
+
+// ----------------------------------------------------------------
+// Phase 11m: consumeLoadGameRequest — atomically consume pending load-game JSON.
+// ----------------------------------------------------------------
+bool UIManager::consumeLoadGameRequest(std::string& jsonOut) {
+    if (!m_loadGamePending) return false;
+    m_loadGamePending = false;
+    jsonOut = std::move(m_pendingLoadJson);
+    m_pendingLoadJson.clear();
+    return true;
 }
 
 #ifdef AITOWN_TESTING_ENABLED

@@ -3165,6 +3165,8 @@ std::string CitySimulation::serializeToJson() const {
 
     j += "{\n";
     j += "  \"schema_version\": 1,\n";
+    j += "  \"map_tiles_x\": " + std::to_string(m_mapWidth) + ",\n";
+    j += "  \"map_tiles_z\": " + std::to_string(m_mapHeight) + ",\n";
     j += "  \"treasury_balance\": " + std::to_string(m_treasury) + ",\n";
 
     // tax_rates array [Res, Com, Ind]
@@ -3432,6 +3434,10 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
     bool gotScenario = false;
 
     // Temporary storage for the deserialized data (applied atomically at the end)
+    // map_tiles_x / map_tiles_z are optional (backward-compatible: old saves without them
+    // fall back to the current in-memory m_mapWidth / m_mapHeight).
+    int newMapTilesX = m_mapWidth;
+    int newMapTilesZ = m_mapHeight;
     int64_t newTreasury = 0;
     float   newTaxRates[3] = {0.05f, 0.05f, 0.05f};
     int     newOutstandingBondUses = 0;
@@ -3458,6 +3464,18 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
             if (!parseInt64(json, pos, v, errorOut)) return false;
             if (v != 1) { errorOut = "unsupported schema_version: " + std::to_string(v); return false; }
             gotVersion = true;
+
+        } else if (key == "map_tiles_x") {
+            // Optional field (backward-compatible with saves before Bug 2 fix).
+            int64_t v = 0;
+            if (!parseInt64(json, pos, v, errorOut)) return false;
+            newMapTilesX = static_cast<int>(v);
+
+        } else if (key == "map_tiles_z") {
+            // Optional field (backward-compatible with saves before Bug 2 fix).
+            int64_t v = 0;
+            if (!parseInt64(json, pos, v, errorOut)) return false;
+            newMapTilesZ = static_cast<int>(v);
 
         } else if (key == "treasury_balance") {
             if (!parseInt64(json, pos, newTreasury, errorOut)) return false;
@@ -3784,6 +3802,8 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
     if (!gotScenario)        { errorOut = "missing scenario_state";               return false; }
 
     // ---- Atomically apply the deserialized state ----
+    m_mapWidth               = newMapTilesX;
+    m_mapHeight              = newMapTilesZ;
     m_treasury               = newTreasury;
     m_taxRates[0]            = newTaxRates[0];
     m_taxRates[1]            = newTaxRates[1];

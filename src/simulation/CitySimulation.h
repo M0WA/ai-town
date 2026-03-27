@@ -174,6 +174,10 @@ public:
         m_mapHeight = mapHeight;
     }
 
+    // getMapTilesX / getMapTilesZ — ICitySimulation interface implementation.
+    int getMapTilesX() const override { return m_mapWidth; }
+    int getMapTilesZ() const override { return m_mapHeight; }
+
 #ifdef AITOWN_TESTING_ENABLED
     // testForceUnlockDensityTier — test-friend method for Phase 10 unit tests.
     //

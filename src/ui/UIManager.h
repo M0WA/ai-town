@@ -235,6 +235,17 @@ public:
     // getNewGameParams — returns the stored new-game parameters (map size, seed, difficulty).
     NewGameParams getNewGameParams();
 
+    // consumeLoadGameRequest — returns true and provides the saved JSON when a load-game
+    //   request has been deferred for main.cpp to handle (subsequent-game path).
+    //   Atomically clears the pending flag and moves the JSON string to jsonOut.
+    //   Returns false if no load is pending.
+    bool consumeLoadGameRequest(std::string& jsonOut);
+
+    // rebuildCityFromSim — recreate all renderer scene nodes from current sim state.
+    // Called from main.cpp after applyLoadedJson() and terrain regeneration complete.
+    // Public so main.cpp can invoke it; formerly private rebuildRendererFromSim().
+    void rebuildCityFromSim();
+
 #ifdef AITOWN_TESTING_ENABLED
     // handleNewGameRequest — test seam: stores params, then either sets the pending flag
     //   (subsequent-game path) or calls transitionToGameplay() directly (first-game path).
@@ -424,12 +435,16 @@ private:
     // m_newGameParams: stores the parameters for the pending new-game request.
     NewGameParams m_newGameParams{};
 
+    // --- Phase 11m: load-game pending state ---
+    // m_loadGamePending: true when a load-game request has been deferred for main.cpp.
+    // m_pendingLoadJson: the JSON string from the save file, moved to main.cpp on consume.
+    bool        m_loadGamePending{false};
+    std::string m_pendingLoadJson;
+
     // --- Phase 11m: overlay refresh counter ---
     // Incremented each frame; triggers a construction-overlay refresh every 60 frames
     // (or immediately on a populationTick notification, whichever comes first).
     int m_overlayRefreshCounter{0};
-
-    void rebuildRendererFromSim();
 
     // Helper: compute the ARGB overlay color for a zoned tile (under-construction state).
     // Returns one of the 9 pre-defined ARGB values from the 3×3 (zone × density) table.
