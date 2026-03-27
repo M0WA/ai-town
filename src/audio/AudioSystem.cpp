@@ -1167,7 +1167,59 @@ int AudioSystem::refillStream(int slot) {
         }
 
         if (framesDecoded == 0) {
-            // EOF — loop by seeking to sample 0.
+            // EOF — check if this is the main-menu music slot; if so, switch
+            // to the alternate variant instead of looping the same file.
+            bool isMainMenuSlot = false;
+            {
+                std::lock_guard<std::mutex> lk(m_streamMutex);
+                isMainMenuSlot = (slot == m_musicActiveSlot) && m_mainMenuMusicLooping;
+            }
+
+            if (isMainMenuSlot) {
+                // Select next variant (random-excluding-repeat).
+                int selectedVariant = 1;
+                std::string newPath;
+                {
+                    std::lock_guard<std::mutex> lk(m_streamMutex);
+                    std::vector<int> candidates;
+                    for (int v : {1, 2}) {
+                        if (v != m_lastMainMenuVariant) candidates.push_back(v);
+                    }
+                    std::uniform_int_distribution<int> dist(
+                        0, static_cast<int>(candidates.size()) - 1);
+                    selectedVariant = candidates[dist(m_rng)];
+                    m_lastMainMenuVariant = selectedVariant;
+                }
+                MusicTrackId trackId =
+                    (selectedVariant == 1) ? MUSIC_MAIN_MENU_01 : MUSIC_MAIN_MENU_02;
+                std::string filename = musicTrackFilename(trackId);
+                newPath = assetPath(filename);
+
+                // Close current stream, open the new variant, and start playback.
+                // All AL calls under m_streamMutex as in transitionToMainMenu().
+                std::string pendingLogError2;
+                {
+                    std::lock_guard<std::mutex> lk(m_streamMutex);
+                    closeStream(slot);
+                    if (openStreamOGG(slot, newPath, /*isMusicStem=*/true)) {
+                        m_streams[slot].crossfadeGain = 1.0f;
+                        ALuint src2 = static_cast<ALuint>(m_streams[slot].sourceHandle);
+                        alSourcei(src2, AL_LOOPING, AL_FALSE);
+                        alCheckError_real("refillStream:mainmenu_eof_looping");
+                        alSourcePlay(src2);
+                        alCheckError_real("refillStream:mainmenu_eof_play");
+                    } else {
+                        pendingLogError2 = "refillStream: failed to open main-menu variant " +
+                                           std::to_string(selectedVariant);
+                    }
+                }
+                if (!pendingLogError2.empty()) { logError(pendingLogError2); }
+                // Return 0 buffers this wake; audio thread will refill on next wake
+                // from the newly opened stream.
+                break;
+            }
+
+            // Not the main-menu slot — generic loop: seek to start and re-decode.
             if (!AudioStreamUtils::seekToStart(s.vf)) {
                 logError("OGG seek to start failed in stream slot " +
                          std::to_string(slot));
@@ -2010,8 +2062,101 @@ void AudioSystem::setTimeOfDay(TimeOfDay tod) {
 }
 
 // ---------------------------------------------------------------------------
-// transitionToGameplay — crossfade from main menu music to gameplay audio.
+// transitionToMainMenu — stop all gameplay audio and crossfade back to main
+// menu music (Phase 11m).
+//
+// Spec requirements:
+//   1. Stop all sources[58..61] unconditionally (alSourceStop is a no-op for
+//      non-playing sources — no guard required).
+//   2. Select a main-menu variant (1 or 2) that differs from the last played
+//      (random-excluding-repeat) using m_rng under m_streamMutex.
+//   3. Open selected variant on the active music slot; set up 1 s crossfade
+//      using kMenuToGameplayCrossfadeDurationSeconds (same constant-power
+//      curve as the menu→gameplay transition).
+//   4. Set m_mainMenuMusicLooping = true as the FINAL operation (completion
+//      sentinel for tests and the audio thread's EOF→seek loop path).
+//
+// Threading: called from the main thread only.
+// m_streamMutex is acquired in two minimal scopes — variant selection and
+// stream open — NOT held across the entire method body.
 // ---------------------------------------------------------------------------
+void AudioSystem::transitionToMainMenu() {
+    if (m_deviceLost.load(std::memory_order_relaxed)) return;
+
+    // ------------------------------------------------------------------
+    // Step 1: stop all active gameplay music stems and ambient beds
+    //         on sources[58..61] unconditionally.
+    // closeStream requires m_streamMutex; call in a single lock scope.
+    // ------------------------------------------------------------------
+    {
+        std::lock_guard<std::mutex> lk(m_streamMutex);
+        for (int i = 0; i < kStreamSourceCount; ++i) {
+            closeStream(i);
+        }
+        // Reset crossfade state so updateStreams() does not attempt to
+        // resume a crossfade that was in-flight before we stopped.
+        m_musicIncomingSlot  = -1;
+        m_ambientIncomingSlot = -1;
+        m_musicCrossfadeT.store(0.0f, std::memory_order_relaxed);
+        m_ambientCrossfadeT.store(0.0f, std::memory_order_relaxed);
+    }
+
+    // ------------------------------------------------------------------
+    // Step 2: variant selection — random-excluding-repeat under mutex.
+    // Candidates: {1, 2} minus m_lastMainMenuVariant.
+    // On first call (m_lastMainMenuVariant == -1) both are candidates.
+    // ------------------------------------------------------------------
+    int selectedVariant = 1;  // default (overwritten below)
+    {
+        std::lock_guard<std::mutex> lk(m_streamMutex);
+        std::vector<int> candidates;
+        for (int v : {1, 2}) {
+            if (v != m_lastMainMenuVariant) candidates.push_back(v);
+        }
+        // candidates is always non-empty (at most one exclusion from a 2-element set).
+        std::uniform_int_distribution<int> dist(0, static_cast<int>(candidates.size()) - 1);
+        selectedVariant = candidates[dist(m_rng)];
+        m_lastMainMenuVariant = selectedVariant;
+    }
+    // Lock released before the OGG open + stream start below.
+
+    // ------------------------------------------------------------------
+    // Step 3: open selected variant and start playing with 1 s crossfade.
+    // Since we closed all streams in Step 1, m_streams[m_musicActiveSlot]
+    // is guaranteed not open — use the direct-start path (no crossfade
+    // setup needed; gain starts at 1.0 immediately).
+    // ------------------------------------------------------------------
+    MusicTrackId trackId = (selectedVariant == 1) ? MUSIC_MAIN_MENU_01 : MUSIC_MAIN_MENU_02;
+    std::string filename = musicTrackFilename(trackId);
+    std::string path     = assetPath(filename);
+
+    {
+        std::lock_guard<std::mutex> lk(m_streamMutex);
+        if (openStreamOGG(m_musicActiveSlot, path, /*isMusicStem=*/true)) {
+            m_streams[m_musicActiveSlot].crossfadeGain = 1.0f;
+            ALuint src = static_cast<ALuint>(m_streams[m_musicActiveSlot].sourceHandle);
+            alSourcei(src, AL_LOOPING, AL_FALSE);
+            alCheckError_real("transitionToMainMenu:looping");
+            alSourcePlay(src);
+            alCheckError_real("transitionToMainMenu:play");
+            // Seed audio thread intensity so updateStreams() does not
+            // trigger an unwanted gameplay stem crossfade immediately.
+            m_audioThreadIntensity = static_cast<int>(MusicIntensity::CALM);
+        }
+        m_streamCV.notify_one();
+    }
+
+    // ------------------------------------------------------------------
+    // Step 4 (FINAL operation): set completion sentinel.
+    // Must be the last store so tests can use isMainMenuMusicLooping()
+    // as a synchronisation check.
+    // ------------------------------------------------------------------
+    {
+        std::lock_guard<std::mutex> lk(m_streamMutex);
+        m_mainMenuMusicLooping = true;
+    }
+}
+
 void AudioSystem::transitionToGameplay() {
     if (m_deviceLost.load(std::memory_order_relaxed)) return;
     // Start ambient bed on slot 2 (sources[60]) for the current time of day.

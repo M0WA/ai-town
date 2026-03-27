@@ -54,6 +54,8 @@ FinancesPanel::FinancesPanel(IUIBackend* backend, ICitySimulation* sim,
 
     // --- Panel background and title ---
     m_panelBg    = m_backend->addStaticText("", kPanelX, kPanelY, kPanelW, kPanelH);
+    m_backend->setElementBackground(m_panelBg, 13, 27, 42, 217);
+    // Glass City deep-navy: rgba(13, 27, 42, 0.85) per finances-panel.md.
     m_titleLabel = m_backend->addStaticText("Finances", kPanelX + 8, kPanelY + 4, kPanelW - 16, 24);
 
     // --- Section 1: Tax Rates (rows at y+32, y+76, y+120) ---

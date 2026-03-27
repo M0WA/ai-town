@@ -371,6 +371,20 @@ void HUD::toggleFinancesPanel() {
 }
 
 // ---------------------------------------------------------------------------
+// notifyGameStarted — Phase 11m: reset grace period for new game session.
+// ---------------------------------------------------------------------------
+void HUD::notifyGameStarted() {
+    if (!m_clock) return;
+    m_gameStartTime      = m_clock->nowSeconds();
+    m_gracePeriodExpired = false;
+    m_graceFadeAlpha     = 1.0f;
+    if (m_backend && m_gracePeriodLabel != kInvalidUIElement && m_visible) {
+        m_backend->setElementAlpha(m_gracePeriodLabel, 1.0f);
+        m_backend->setElementVisible(m_gracePeriodLabel, true);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // setUnsavedChanges
 // ---------------------------------------------------------------------------
 void HUD::setUnsavedChanges(bool unsaved) {

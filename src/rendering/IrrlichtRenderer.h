@@ -177,6 +177,11 @@ public:
                                     ServiceBuildingType type, bool degraded) override;
     void hideServiceCoverageOverlay() override;
 
+    // clearCity — Phase 11m new-game reset: remove all building, road, and agent
+    // scene nodes from the scene graph, run the full eviction sequence on each.
+    // Does NOT remove terrain chunk nodes.
+    void clearCity() override;
+
     // initCloudPlane() — build the scrolling cloud plane mesh and scene node.
     // Called once from the constructor after other initialization.
     // Guarded by m_driverType == EDT_NULL: returns immediately in headless mode,

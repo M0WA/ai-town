@@ -1,6 +1,7 @@
 #pragma once
 #include "simulation_types.h"
 #include "ISimulationPauser.h"
+#include <string>
 #include <vector>
 
 // ICitySimulation — interface enabling UIManager to call simulation control methods without
@@ -209,4 +210,14 @@ public:
     // getServiceCoverage — return coverage state for all tiles currently covered
     // by a service building.
     virtual std::vector<ServiceCoverageTile> getServiceCoverage() const = 0;
+
+    // reset — clear all city state and restart with the given starting funds.
+    // Does NOT call clearCity() on the renderer — caller is responsible.
+    // Does NOT reset tax rates.
+    virtual void reset(int64_t startingFunds) = 0;
+
+    // applyLoadedJson — restore city state from a JSON string previously produced by
+    // serializeToJson(). Returns true on success; false on parse error.
+    // Called by UIManager load game handler after loadMostRecentSave() returns JSON.
+    virtual bool applyLoadedJson(const std::string& json) = 0;
 };

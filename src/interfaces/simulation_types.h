@@ -158,6 +158,16 @@ struct QueryResult {
     bool                degraded{false};         // true if covering service building is in degraded state
     // Phase 11h: multi-tile footprint fields.
     bool isAbandoned{false};  // true when building is abandoned due to road proximity > 3 tiles
+    // true when the zone tile has been placed but the building mesh has not yet spawned
+    // (demand below SimulationConstants::construction_delay_demand_threshold).
+    // False for road tiles, unzoned tiles, and tiles whose building has already spawned.
+    bool underConstruction{false};
+    // footprintOriginX/Z: -1,-1 means this tile IS the building origin (or 1×1 building).
+    // Any other value means this tile is a non-origin part of a multi-tile footprint —
+    // its visual mesh was placed at the origin tile, not here.
+    int footprintOriginX{-1};
+    int footprintOriginZ{-1};
+    int buildingVariantNum{0};  // variant assigned at placeZone() (1–4); 0 = not yet assigned or under construction
 };
 
 // -----------------------------------------------------------------------
