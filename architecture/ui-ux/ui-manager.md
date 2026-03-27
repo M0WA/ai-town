@@ -706,7 +706,8 @@ struct NewGameParams {
 - `consumeNewGameRequest()` returns `true` exactly once per "Start City" click that follows a prior gameplay session. It atomically resets the internal `m_newGamePending` flag to `false`.
 - On the **first** new game (no prior session), `UIManager::update()` calls `transitionToGameplay()` directly and does NOT set `m_newGamePending`. `consumeNewGameRequest()` returns `false` on this first click.
 - `getNewGameParams()` is only meaningful immediately after `consumeNewGameRequest()` returns `true`. The captured params remain stable until the next "Start City" click.
-- `main.cpp` must call `consumeNewGameRequest()` each frame (after `uiManager.update()`). When it returns `true`, the main loop must: (1) call `sim.reset(startingFunds)`, (2) call `renderer.clearCity()`, (3) reseed terrain RNG and call `terrain.generate()`, (4) call `uiManager.transitionToGameplay(GameMode::Sandbox)`.
+- `main.cpp` must call `consumeNewGameRequest()` each frame (after `uiManager.update()`). When it returns `true`, the main loop must: (1) call `sim.reset(startingFunds)`, (2) call `renderer.clearCity()`, (3) reseed terrain RNG and call `terrain.generate()` through `terrain.buildAllChunks()`, (4) call `uiManager.setMapDimensions()` with the new terrain dimensions, (5) call `uiManager.transitionToGameplay(GameMode::Sandbox)`.
+- **`setMapDimensions()` ordering contract**: `setMapDimensions()` MUST be called before `transitionToGameplay()` on the second and subsequent new games (after `terrain.buildAllChunks()` completes but before `transitionToGameplay()`), so that minimap dimensions match the newly generated terrain. On the first game, `setMapDimensions()` is called from `main.cpp`'s startup sequence before the first `transitionToGameplay()` call.
 - `UIManager` tracks session state via `bool m_gameSessionActive{false}`, set to `true` the first time `transitionToGameplay()` completes.
 
 ### Test-Only Methods (Phase 11m)
