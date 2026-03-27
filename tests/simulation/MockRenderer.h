@@ -62,6 +62,7 @@ public:
     MOCK_METHOD(TextureHandle, loadTexture,         (const std::string& path),                 (override));
     MOCK_METHOD(void,          setCamera,           (const CameraParams& p),                   (override));
     MOCK_METHOD(void,          rebuildTerrainChunk, (const TerrainChunkRebuildParams& params), (override));
+    MOCK_METHOD(void,          removeTerrainChunk,  (uint64_t chunkId),                        (override));
 
     // Phase 9b — world interaction methods
     MOCK_METHOD(bool, pickTerrainTile,

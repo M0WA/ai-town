@@ -555,6 +555,65 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        // Phase 11m: load-game polling block.
+        // Polled after UIManager::update() so that consumeLoadGameRequest() sees the
+        // m_loadGamePending flag set by the current frame's consumeLoadGameRequest() handler.
+        {
+            std::string loadJson;
+            if (uiManager.consumeLoadGameRequest(loadJson)) {
+                // Apply loaded JSON to sim — restores tile data and map dimensions.
+                citySimulation.applyLoadedJson(loadJson);
+                int loadedTilesX = citySimulation.getMapTilesX();
+                int loadedTilesZ = citySimulation.getMapTilesZ();
+                // Guard: if dims are 0 (old save without map_tiles), fall back to current terrain.
+                if (loadedTilesX <= 0 || loadedTilesZ <= 0) {
+                    loadedTilesX = terrainSystem.getMapTilesX();
+                    loadedTilesZ = terrainSystem.getMapTilesZ();
+                }
+                // Regenerate terrain for the loaded map size (seed 0 = V1 fixed seed).
+                renderer.clearCity();
+                StdTerrainRNG loadRng;
+                loadRng.reseed(0);
+                terrainSystem.generate(loadedTilesX, loadedTilesZ, 10.0f, &loadRng);
+                terrainSystem.enqueueAllChunks();
+                // Loading loop identical to new-game loading loop.
+                double loadPrevL = wallClock.nowSeconds();
+                while (device->run() && terrainSystem.pendingRebuildCount() > 0) {
+                    const double loadNowL  = wallClock.nowSeconds();
+                    const float  loadDtL   = static_cast<float>(loadNowL - loadPrevL);
+                    loadPrevL = loadNowL;
+                    uiManager.update(loadDtL);
+                    terrainSystem.update(loadDtL);
+                    terrainSystem.flushPendingRebuilds();
+                    CameraState loadCamL = cameraController.getCameraState();
+                    try {
+                        audioSystem.syncListenerToCamera(loadCamL);
+                        audioSystem.update(loadDtL);
+                    } catch (const std::exception& e) {
+                        fprintf(stderr, "[main] Audio error during load-game loading: %s\n", e.what());
+                    }
+                    renderer.beginFrame();
+                    renderer.drawScene();
+                    renderer.endFrame();
+                }
+                // Wire dimensions and reposition camera.
+                renderer.setRendererMapDimensions(loadedTilesX, loadedTilesZ);
+                renderer.setCellSize(terrainSystem.getCellSize());
+                {
+                    const float halfWorld = static_cast<float>(loadedTilesX)
+                                            * terrainSystem.getCellSize() * 0.5f;
+                    cameraController.setTarget(halfWorld, halfWorld);
+                }
+                uiManager.setMapDimensions(loadedTilesX, loadedTilesZ);
+                citySimulation.setMapDimensions(loadedTilesX, loadedTilesZ);
+                // Rebuild city scene nodes from loaded sim state.
+                uiManager.rebuildCityFromSim();
+                uiManager.transitionToGameplay(GameMode::Sandbox);
+                uiManager.onGameLoaded();
+                continue;
+            }
+        }
+
         // Check for application quit request (Main Menu Quit / Pause Menu Quit to Desktop).
         if (uiManager.isQuitRequested()) {
             device->closeDevice();

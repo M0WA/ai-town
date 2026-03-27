@@ -100,6 +100,12 @@ public:
     TextureHandle loadTexture(const std::string& path) override;
     void          setCamera(const CameraParams& p) override;
 
+    // removeTerrainChunk() — destroy the scene node for a single terrain chunk.
+    // Runs the eviction sequence (clear texture slots → setMaterial(SMaterial{}) →
+    // erase from m_chunkNodes → node->remove()). No-op if chunkId is not registered.
+    // main-thread-only.
+    void removeTerrainChunk(uint64_t chunkId) override;
+
     // rebuildTerrainChunk() — full LOD node rebuild for a terrain chunk.
     //
     // Step 1: Remove the old scene node for this chunk (if any) — clear all material texture

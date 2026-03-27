@@ -98,4 +98,8 @@ public:
     MOCK_METHOD(void, reset, (int64_t startingFunds), (override));
 
     MOCK_METHOD(bool, applyLoadedJson, (const std::string& json), (override));
+
+    // Map dimension getters (Bug 2 fix: load-game flow).
+    MOCK_METHOD(int, getMapTilesX, (), (const, override));
+    MOCK_METHOD(int, getMapTilesZ, (), (const, override));
 };

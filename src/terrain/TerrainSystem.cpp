@@ -67,6 +67,22 @@ void TerrainSystem::unregisterChunk(uint64_t chunkId) {
     m_chunkHeightmaps.erase(chunkId);
 }
 
+// ---------------------------------------------------------------------------
+// clearAllChunks() — remove all active terrain chunk scene nodes and clear
+// the internal chunk tracking maps.
+// ---------------------------------------------------------------------------
+void TerrainSystem::clearAllChunks() {
+    for (const auto& kv : m_activeChunks) {
+        if (m_renderer) {
+            m_renderer->removeTerrainChunk(kv.first);
+        }
+    }
+    m_activeChunks.clear();
+    m_chunkWorldOrigins.clear();
+    m_chunkHeightmaps.clear();
+    m_rebuildDeque.clear();
+}
+
 void TerrainSystem::registerChunkPosition(uint64_t chunkId, float worldOriginX, float worldOriginZ) {
     m_chunkWorldOrigins[chunkId] = ChunkOrigin{worldOriginX, worldOriginZ};
 }
@@ -329,6 +345,9 @@ void TerrainSystem::flushTerrainRebuilds() {
 // ---------------------------------------------------------------------------
 bool TerrainSystem::generate(int mapTilesX, int mapTilesZ, float cellSize,
                               ITerrainRNG* rng, int maxRetries) {
+    // Clear stale chunk nodes from any previous generate() call before building new ones.
+    clearAllChunks();
+
     static constexpr float kFlatSlopeThreshold = 15.0f; // degrees
     static constexpr float kMinFlatPercent     = 0.20f; // 20% of tiles
     static constexpr int   kMinContiguousSize  = 50;    // 50x50 tiles
@@ -555,6 +574,9 @@ void TerrainSystem::enqueueAllChunks() {
     if (m_generatedHeightmap.empty() || m_mapTilesX <= 0 || m_mapTilesZ <= 0) {
         return;
     }
+
+    // Clear stale chunk nodes from any previous enqueueAllChunks() call.
+    clearAllChunks();
 
     const int chunkTiles = kTerrainLOD0GridSize;
     const int chunkVerts = chunkTiles + 1;
