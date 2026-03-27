@@ -625,6 +625,13 @@ public:
   ```
 
   `UIManager` constructor accepts `ICitySimulation*` as a non-owning pointer. The full constructor signature is `UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock* clock)`. The `clock` parameter is passed to `NotificationManager` at construction (for dismiss-after-5s timing) and to the `HUD` component for grace-period and undo-countdown displays. In the `UIManagerModalTest` fixture, `sim_` is declared as `NiceMock<MockCitySimulation>` and passed to `UIManager` at construction: `UIManager(&backend_, &audio_, &sim_, &clock_)`. In tests that assert specific pause/resume call counts (modal tests 1, 3, 8, 10), `EXPECT_CALL(sim_, setPaused(...))` is set up on the `NiceMock<MockCitySimulation>` before the action under test. NiceMock is used rather than StrictMock here because the focus of these tests is on `MockUIBackend` call patterns; simulation pause/resume expectations are set selectively per test rather than requiring every possible call to be declared up front.
+- **Canonical UI class constructor parameter order**: ALL UI panel and manager classes MUST accept their injected dependencies in the following fixed order:
+  `(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock* clock)`
+  - This order is authoritative for every present and future UI panel class: `UIManager`, `NotificationManager`, `HUD`, `FinancesPanel`, `InspectorPanel`, `SettingsPanel`, and any panel added in later phases.
+  - Maintaining a consistent order allows test fixtures to reuse the same member declaration block (`MockUIBackend backend_; NiceMock<MockAudioSystem> audio_; NiceMock<MockCitySimulation> sim_; ManualClock clock_;`) without reordering per panel.
+  - Confirmed examples: `UIManager(IUIBackend*, IAudioSystem*, ICitySimulation*, IClock*)` (Phase 3+), `NotificationManager` receives `IClock*` at construction forwarded from UIManager, `FinancesPanel` (Phase 11m) follows the same order.
+  - Classes that do not need all four dependencies MUST still respect left-to-right subset ordering (e.g., a panel that needs only `IUIBackend*` and `IClock*` must NOT reorder them to `IClock*` first).
+
 - **Thread-safety annotations**: Use Clang's thread-safety analysis attributes (`GUARDED_BY`, `REQUIRES`, `EXCLUDES`) on Clang builds; document-only `// thread-safe` or `// main-thread-only` comments as fallback on MSVC. Enable `-Wthread-safety` in CMake for Clang builds.
 
 ## Interface Definitions (minimum required method signatures)
@@ -1127,13 +1134,18 @@ the audio playback path, not a unit test with strict call-count expectations on 
   # IUIBackend.h from src/interfaces/ (moved in Phase 10b); interface headers from src/interfaces/
   target_include_directories(ui_tests PRIVATE tests/simulation/ tests/ui/ src/interfaces/ ${CMAKE_SOURCE_DIR})
 
-  # REQUIRED for ui_tests: enable AITOWN_TESTING_ENABLED so that UIManager test-only
-  # methods (handleNewGameRequest, setGameSessionActiveForTest — gated on
-  # #ifdef AITOWN_TESTING_ENABLED) are compiled into the ui_tests binary.
-  # Pattern mirrors simulation_tests (which uses AITOWN_TESTING_ENABLED for
-  # testForceUnlockDensityTier). MUST be on ui_tests ONLY — never on aitown or
-  # aitown_ui production targets. Added in Phase 11m.
+  # REQUIRED for ui_tests AND aitown_ui: enable AITOWN_TESTING_ENABLED so that
+  # UIManager test-only methods (handleNewGameRequest, setGameSessionActiveForTest —
+  # gated on #ifdef AITOWN_TESTING_ENABLED) are compiled into the ui_tests binary
+  # AND into aitown_ui. aitown_ui requires it because handleNewGameRequest and
+  # setGameSessionActiveForTest are non-inline functions defined in UIManager.cpp —
+  # ui_tests would have undefined-reference link errors if aitown_ui were compiled
+  # without the flag. The PRIVATE qualifier ensures the definition does NOT propagate
+  # to the aitown binary (the top-level executable). MUST NOT be set on aitown.
+  # Pattern: apply to aitown_sim as well when simulation_tests needs non-inline test
+  # helpers (e.g. testForceUnlockDensityTier()). Added in Phase 11m.
   target_compile_definitions(ui_tests PRIVATE AITOWN_TESTING_ENABLED=1)
+  target_compile_definitions(aitown_ui PRIVATE AITOWN_TESTING_ENABLED=1)
 
   # audio_tests — uses MockAudioSystem from tests/simulation/;
   # IAudioSystem.h from src/interfaces/; audio_constants.h from src/audio/
