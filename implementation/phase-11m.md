@@ -595,8 +595,10 @@ terrain-generation pass from within the game loop.
 **Code changes — `IAudioSystem.h` / `MockAudioSystem.h`**:
 
 - [ ] Add `virtual void transitionToMainMenu() = 0;` to `src/interfaces/IAudioSystem.h`
-  (pure-virtual, 19th method). Update the header comment from "18 methods" to "19 methods"
-  and extend the phase-history annotation to include "Phase 11m (+transitionToMainMenu = 19)".
+  (pure-virtual, 19th method). The header comment and phase-history annotation already reflect
+  19 methods with the Phase 11m annotation in `architecture/audio-architecture/audio-system.md`
+  (lines 64–67) — **Already applied** to the spec; no spec change needed, only the C++ source
+  declaration.
 - [ ] Add `MOCK_METHOD(void, transitionToMainMenu, (), (override))` to
   `tests/simulation/MockAudioSystem.h`.
 
@@ -647,6 +649,27 @@ terrain-generation pass from within the game loop.
   §libvorbisfile EOF detection): when `ov_read()` returns `0` on sources[58..59]
   during main menu playback, the decode loop calls `ov_pcm_seek(vf, 0)` and
   continues refilling — exactly the same EOF→seek pattern as ambient beds.
+  **Variant switching at loop restart**: per `dynamic-soundscape.md` §Main Menu
+  Audio ("Variant selection: same random-excluding-repeat policy as gameplay
+  stems"), each time EOF triggers `ov_pcm_seek(vf, 0)` on a main-menu source,
+  the audio thread must apply the random-excluding-repeat variant selection.
+  With exactly 2 variants, "exclude the current" is deterministic — always flip:
+  if `m_lastMainMenuVariant == 1` select 2, else select 1. Update
+  `m_lastMainMenuVariant` and open the new OGG file before refilling.
+  **Thread-safety and mutex scope**: `m_lastMainMenuVariant` is written by the
+  main thread in `transitionToMainMenu()` (under `m_streamMutex`) and by the
+  audio thread at EOF. For the EOF path, the required operation sequence is:
+  (1) acquire `m_streamMutex` → read `m_lastMainMenuVariant` → compute flip →
+  write `m_lastMainMenuVariant` → release `m_streamMutex`;
+  (2) open the new OGG file OUTSIDE the mutex (variable-duration I/O per the
+  minimal critical section principle in `streaming-architecture.md`);
+  (3) acquire `m_streamMutex` → call `ov_pcm_seek(vf, 0)` and begin refilling
+  → release. Do NOT hold `m_streamMutex` across the OGG file open — this would
+  violate the streaming-architecture.md rule against variable-duration work
+  inside the mutex and cause audio-thread starvation.
+  **Note**: this variant switching uses the EOF event — NOT bar-boundary
+  crossfades (the bar-boundary software counter applies only to within-gameplay
+  calm/growth/crisis tier crossfades per `dynamic-soundscape.md` line 7).
   **Ordering requirement**: `m_mainMenuMusicLooping = true` MUST be set as the
   **final** operation in `transitionToMainMenu()`, after all stop-gameplay and
   crossfade-initiation operations have completed. This makes the flag a
