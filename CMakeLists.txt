@@ -862,6 +862,30 @@ target_sources(ui_tests PRIVATE
     tests/ui/finances_panel_test.cpp
 )
 
+# Phase 11m: Zone overlay, HUD grace period, save state, new-game reset, and
+# FinancesPanel background tests.
+# Do NOT call add_executable(ui_tests ...) or aitown_add_tests(ui_tests ...) again.
+target_sources(ui_tests PRIVATE
+    tests/ui/uimanager_zone_overlay_test.cpp
+    tests/ui/hud_grace_period_test.cpp
+    tests/ui/uimanager_save_state_test.cpp
+    tests/ui/uimanager_new_game_reset_test.cpp
+    tests/ui/finances_panel_background_test.cpp
+)
+
+# Phase 11m: AITOWN_TESTING_ENABLED=1 enables UIManager::handleNewGameRequest()
+# and UIManager::setGameSessionActiveForTest() test seams.
+# Also enable on aitown_ui so the production code compiles the guarded methods.
+target_compile_definitions(aitown_ui PRIVATE AITOWN_TESTING_ENABLED=1)
+target_compile_definitions(ui_tests PRIVATE AITOWN_TESTING_ENABLED=1)
+
+# Phase 11m: road proximity and border-ring terrain flatten tests.
+# Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(...) again.
+target_sources(simulation_tests PRIVATE
+    tests/simulation/city_simulation_road_proximity_test.cpp
+    tests/simulation/city_simulation_terrain_flatten_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # audio_tests — duck state machine, occlusion smoothing, crossfade, stinger milestone tests
 # Vorbis::vorbisfile must be listed EXPLICITLY — it CANNOT resolve through aitown_audio's
@@ -941,6 +965,12 @@ target_sources(audio_tests PRIVATE
 # Phase 11h: vehicle audio positioning tests (lane offset coordination).
 target_sources(audio_tests PRIVATE
     tests/audio/vehicle_audio_positioning_test.cpp
+)
+
+# Phase 11m: AudioSystem::transitionToMainMenu() looping flag test.
+# Do NOT call add_executable(audio_tests ...) or aitown_add_tests(audio_tests ...) again.
+target_sources(audio_tests PRIVATE
+    tests/audio/audio_system_transition_main_menu_test.cpp
 )
 
 # Copy default.mhr (OpenAL Soft HRTF data) next to audio_tests binary.

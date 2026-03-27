@@ -55,6 +55,14 @@ public:
     // Accumulates sim seconds and fires budget ticks when >= SECONDS_PER_BUDGET_TICK.
     void tick(float realDeltaSeconds);
 
+    // ---- New-game reset (Phase 11m) ----
+    // Clears all city state and resets treasury to startingFunds.
+    // Does NOT call clearCity() on the renderer — main.cpp calls it separately.
+    // Does NOT reset tax rates (carries over to new game per spec).
+    void reset(int64_t startingFunds) override;
+
+    bool applyLoadedJson(const std::string& json) override;
+
     // ---- Economy / treasury ----
     float getTreasuryBalance()       const override;
     float getCurrentMonthlyRevenue() const override;
@@ -157,6 +165,14 @@ public:
     // so undoLastAction() no-ops as specified in architecture/game-design/undo-system.md.
     // Tests downcast ICitySimulation* to CitySimulation* to reach this method.
     void setModalOpen(bool open);
+
+    // setMapDimensions — supply the map tile width and depth.
+    // Called from main.cpp after TerrainSystem::generate() completes.
+    // Used by the border-ring terrain flattening loop in placeZone() (Phase 11m).
+    void setMapDimensions(int mapWidth, int mapHeight) {
+        m_mapWidth  = mapWidth;
+        m_mapHeight = mapHeight;
+    }
 
 #ifdef AITOWN_TESTING_ENABLED
     // testForceUnlockDensityTier — test-friend method for Phase 10 unit tests.
@@ -291,6 +307,13 @@ private:
     Difficulty      m_difficulty;
 
     // ------------------------------------------------------------------
+    // Map dimensions (Phase 11m: border-ring terrain flattening bounds check)
+    // Set by setMapDimensions() after terrain generation.
+    // ------------------------------------------------------------------
+    int m_mapWidth{0};
+    int m_mapHeight{0};
+
+    // ------------------------------------------------------------------
     // Time tracking
     // ------------------------------------------------------------------
     float           m_accumulatedSimSeconds{0.0f};   // sub-tick accumulator
@@ -357,6 +380,9 @@ private:
         // World-space current position (interpolated each tick)
         float     worldX{0.0f};
         float     worldZ{0.0f};
+        // Phase 11m: audio source pool indices; -1 = not acquired.
+        int idleIdx{-1};   // source-pool index for idle engine sound; -1 = not acquired
+        int moveIdx{-1};   // source-pool index for moving engine sound; -1 = not acquired
     };
 
     // Phase 11d: path-following traffic vehicles.

@@ -93,4 +93,9 @@ public:
     MOCK_METHOD((std::vector<IntersectionSignalState>), getIntersectionSignalStates,  (), (const, override));
     MOCK_METHOD((std::vector<RoadSegmentSpeed>),        getRoadSegmentSpeeds,         (), (const, override));
     MOCK_METHOD((std::vector<ServiceCoverageTile>),     getServiceCoverage,           (), (const, override));
+
+    // Phase 11m: reset simulation state for a new game.
+    MOCK_METHOD(void, reset, (int64_t startingFunds), (override));
+
+    MOCK_METHOD(bool, applyLoadedJson, (const std::string& json), (override));
 };

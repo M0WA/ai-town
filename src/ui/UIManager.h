@@ -26,11 +26,14 @@ class ISaveSystem;
 // the platform layer. The full include belongs in UIManager.cpp ONLY.
 struct InputEvent;
 
+// MainMenuPanel.h is included here (not forward-declared) because NewGameParams
+// depends on the MapSize enum defined in that header.
+#include "src/ui/MainMenuPanel.h"
+
 // Panel forward declarations — full includes are in UIManager.cpp ONLY.
 // Headers that #include UIManager.h must not gain transitive dependencies
 // on panel implementation headers.
 class NotificationManager;
-class MainMenuPanel;
 class HUD;
 class FinancesPanel;
 class Minimap;
@@ -38,6 +41,14 @@ class InspectorPanel;
 class PauseMenuPanel;
 class SettingsPanel;
 class ModalDialog;
+
+// NewGameParams — parameters for starting a new game session.
+// V1 hardcodes Sandbox mode; gameMode field is intentionally absent.
+struct NewGameParams {
+    MapSize mapSize{};
+    int seed{0};
+    int difficulty{0};
+};
 
 // UIManager — Phase 3 shell implementation.
 // Phase 1 locked the 4-method signatures (constructor, onEvent, draw, update).
@@ -216,6 +227,23 @@ public:
     // Called when "Quit to Main Menu" is selected from PauseMenuPanel.
     void transitionToMainMenu();
 
+    // Phase 11m: New-game request polling and handling.
+    // consumeNewGameRequest — returns true and atomically resets the pending flag
+    //   when a new-game request has been posted (subsequent-game path only).
+    bool consumeNewGameRequest();
+
+    // getNewGameParams — returns the stored new-game parameters (map size, seed, difficulty).
+    NewGameParams getNewGameParams();
+
+#ifdef AITOWN_TESTING_ENABLED
+    // handleNewGameRequest — test seam: stores params, then either sets the pending flag
+    //   (subsequent-game path) or calls transitionToGameplay() directly (first-game path).
+    void handleNewGameRequest(const NewGameParams& params);
+
+    // setGameSessionActiveForTest — directly set m_gameSessionActive for tests.
+    void setGameSessionActiveForTest(bool value);
+#endif  // AITOWN_TESTING_ENABLED
+
 private:
     IUIBackend*      m_backend{nullptr};
     IAudioSystem*    m_audio{nullptr};
@@ -381,6 +409,31 @@ private:
     // Background scrim element shown behind modal dialogs.
     // kInvalidUIElement (0) until Phase 6 creates the real element.
     UIElementHandle m_scrimHandle{kInvalidUIElement};
+
+    // --- Phase 11m: new-game session state ---
+    // m_gameSessionActive: true once the first transitionToGameplay() has been called.
+    //   Used to distinguish first-game (direct transition) from subsequent-game (pending path).
+    //   NOT reset by transitionToMainMenu() — stays true so the next new-game correctly
+    //   takes the subsequent-game path (loading screen + pending flag).
+    bool m_gameSessionActive{false};
+
+    // m_newGamePending: set true when a new-game request arrives during an active session.
+    //   Consumed (reset to false) by consumeNewGameRequest().
+    bool m_newGamePending{false};
+
+    // m_newGameParams: stores the parameters for the pending new-game request.
+    NewGameParams m_newGameParams{};
+
+    // --- Phase 11m: overlay refresh counter ---
+    // Incremented each frame; triggers a construction-overlay refresh every 60 frames
+    // (or immediately on a populationTick notification, whichever comes first).
+    int m_overlayRefreshCounter{0};
+
+    void rebuildRendererFromSim();
+
+    // Helper: compute the ARGB overlay color for a zoned tile (under-construction state).
+    // Returns one of the 9 pre-defined ARGB values from the 3×3 (zone × density) table.
+    static uint32_t computeZoneOverlayColor(ZoneType zone, DensityTier density);
 
     // Helper: update m_keyBindings and write keybindings.json.
     // Called from applyKeybindings().

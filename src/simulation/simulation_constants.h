@@ -211,6 +211,14 @@ struct SimulationConstants {
     static_assert(starting_funds_easy   > starting_funds_normal, "easy must have more than normal");
     static_assert(starting_funds_normal > starting_funds_hard,   "normal must have more than hard");
 
+    // startingFundsForDifficulty — map difficulty int (0=Easy, 1=Normal, 2=Hard) to starting funds.
+    // 0=Easy, 1=Normal, 2=Hard per economy-model.md.
+    static int64_t startingFundsForDifficulty(int difficulty) {
+        if (difficulty == 0) return 1'000'000;
+        if (difficulty == 2) return 200'000;
+        return 500'000;  // Normal default
+    }
+
     // Traffic system constants (architecture/game-design/traffic-system.md)
     // null_path_demand_default: demand factor for tiles with no valid A* path to their destination;
     //   neither the 0-demand extreme nor full demand — represents "technically accessible but poorly

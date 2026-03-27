@@ -98,6 +98,7 @@ protected:
         EXPECT_CALL(renderer_, setActiveTool(_)).Times(AnyNumber());
         EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(AnyNumber());
         EXPECT_CALL(renderer_, setZoneHoverColour(_)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, placeRoadMesh(_, _)).Times(AnyNumber());
         // Default: all tiles are free (not occupied).
         EXPECT_CALL(sim_, queryTile(_, _))
             .Times(AnyNumber())
