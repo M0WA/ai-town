@@ -164,6 +164,9 @@ public:
                 (),
                 (override));
 
+    // Phase 11m: clear all city scene nodes (buildings, roads, agents).
+    MOCK_METHOD(void, clearCity, (), (override));
+
 private:
     TextureHandle m_nextHandle{1};
 };

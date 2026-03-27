@@ -86,6 +86,22 @@ namespace {
 } // namespace
 
 // ----------------------------------------------------------------
+// computeZoneOverlayColor — 3×3 lookup table for zone overlay ARGB colors.
+// Rows: ZoneType (Residential=0, Commercial=1, Industrial=2)
+// Cols: DensityTier (Low=0, Medium=1, High=2)
+// Alpha 0xB4 = ~71% opacity for the under-construction overlay.
+// ----------------------------------------------------------------
+/*static*/ uint32_t UIManager::computeZoneOverlayColor(ZoneType zone, DensityTier density) {
+    static constexpr uint32_t kTable[3][3] = {
+        // Low,         Medium,       High
+        { 0xB480CC80u, 0xB400AA00u, 0xB4005500u }, // Residential (green)
+        { 0xB48080CCu, 0xB40000AAu, 0xB4000055u }, // Commercial  (blue)
+        { 0xB4CCCC80u, 0xB4AAAA00u, 0xB4555500u }, // Industrial  (yellow)
+    };
+    return kTable[static_cast<int>(zone)][static_cast<int>(density)];
+}
+
+// ----------------------------------------------------------------
 // Constructor
 // Panel construction order is INVARIANT:
 //   NotificationManager FIRST — it has no dependencies on other panels.
@@ -1203,12 +1219,38 @@ bool UIManager::doTerrainPlacement(int hitX, int hitZ) {
                              static_cast<ZoneType>(m_selectedZoneType),
                              static_cast<DensityTier>(m_selectedDensityTier),
                              earthworksCost);
+            // Phase 11m: rebuild road mesh scene nodes adjacent to the zone footprint.
+            // placeZone() flattened their terrain heights; placeRoadMesh() rebakes
+            // road vertex Y positions from the updated terrain.
+            if (m_renderer && m_sim) {
+                const int N = m_selectedDensityTier + 1;  // footprint: Low=1, Med=2, High=3
+                for (int dx = -1; dx <= N; ++dx) {
+                    for (int dz = -1; dz <= N; ++dz) {
+                        // Skip the zone footprint itself — only the border ring.
+                        if (dx >= 0 && dx < N && dz >= 0 && dz < N) continue;
+                        int nx = hitX + dx;
+                        int nz = hitZ + dz;
+                        QueryResult q = m_sim->queryTile(nx, nz);
+                        if (q.isRoad) {
+                            m_renderer->placeRoadMesh(nx, nz);
+                        }
+                    }
+                }
+            }
             if (m_mapTilesX > 0 && m_mapTilesZ > 0) {
-                // placeZone() always places a building immediately — remove the tile from
-                // the overlay so the zone colour doesn't show through/under the building.
+                // Phase 11m: insert overlay entry showing the zone color for this
+                // under-construction tile. The tile starts in underConstruction state;
+                // the periodic overlay refresh in update() will remove it once the
+                // building has spawned (underConstruction becomes false).
                 uint64_t key = static_cast<uint64_t>(hitZ) * static_cast<uint64_t>(m_mapTilesX)
                                + static_cast<uint64_t>(hitX);
-                if (m_overlayMap.erase(key) && m_renderer) {
+                ZoneType  zoneType   = static_cast<ZoneType>(m_selectedZoneType);
+                DensityTier densityTier = static_cast<DensityTier>(m_selectedDensityTier);
+                static constexpr size_t kOverlayCap = 100000u;
+                if (m_overlayMap.size() < kOverlayCap) {
+                    m_overlayMap[key] = computeZoneOverlayColor(zoneType, densityTier);
+                }
+                if (m_renderer) {
                     m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
                 }
             }
@@ -1348,13 +1390,29 @@ void UIManager::update(float realDeltaSeconds) {
         if (m_mainMenu->consumeStartGameRequest()) {
             // Per spec: call m_sim->start() before transitionToGameplay() — but
             // start() doesn't exist on ICitySimulation; the sim is already ticking.
-            transitionToGameplay(GameMode::Sandbox);
+            if (!m_gameSessionActive) {
+                // First game: transition directly to gameplay.
+                transitionToGameplay(GameMode::Sandbox);
+            } else {
+                // Subsequent game: defer until main.cpp polls consumeNewGameRequest().
+                // Store parameters from the MainMenuPanel selection.
+                m_newGameParams.mapSize   = m_mainMenu ? m_mainMenu->getSelectedMapSize()
+                                                       : MapSize::kMedium;
+                m_newGameParams.seed      = 0;  // V1: fixed seed; may be extended later
+                m_newGameParams.difficulty = 1; // V1: Normal hardcoded; difficulty UI is future
+                m_newGamePending = true;
+                if (m_mainMenu) m_mainMenu->showLoadingScreen();
+            }
             return; // Skip the rest of this frame's update — state just changed.
         }
         if (m_mainMenu->consumeLoadGameRequest()) {
             if (m_saveSystem) {
                 LoadResult result = m_saveSystem->loadMostRecentSave();
                 if (result.ok) {
+                    if (m_sim) {
+                        m_sim->applyLoadedJson(result.jsonData);
+                    }
+                    rebuildRendererFromSim();
                     transitionToGameplay(GameMode::Sandbox);
                     onGameLoaded();
                 }
@@ -1636,6 +1694,27 @@ void UIManager::update(float realDeltaSeconds) {
                     "Population Milestone",
                     "Population reached "
                         + std::to_string(notif.milestoneValue) + "!");
+                // Phase 11m: populationTick triggers an immediate overlay refresh
+                // so that buildings that just spawned are removed from the overlay
+                // without waiting for the 60-frame counter.
+                if (!m_overlayMap.empty() && m_renderer && m_mapTilesX > 0 && m_mapTilesZ > 0) {
+                    bool anyRemoved = false;
+                    for (auto it = m_overlayMap.begin(); it != m_overlayMap.end(); ) {
+                        int tileX = static_cast<int>(it->first % static_cast<uint64_t>(m_mapTilesX));
+                        int tileZ = static_cast<int>(it->first / static_cast<uint64_t>(m_mapTilesX));
+                        QueryResult qr = m_sim->queryTile(tileX, tileZ);
+                        if (!qr.isZoned || !qr.underConstruction) {
+                            it = m_overlayMap.erase(it);
+                            anyRemoved = true;
+                        } else {
+                            ++it;
+                        }
+                    }
+                    if (anyRemoved) {
+                        m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
+                    }
+                }
+                m_overlayRefreshCounter = 0;
                 break;
 
             case NotificationType::CityRatingTransition:
@@ -1677,6 +1756,36 @@ void UIManager::update(float realDeltaSeconds) {
                     "Building Recovered",
                     "Building recovered — road reconnected.");
                 break;
+        }
+    }
+
+    // =============================================================
+    // 7. OVERLAY REFRESH (Phase 11m)
+    // Periodic removal of construction overlay entries whose buildings
+    // have already spawned (underConstruction == false).
+    // Counter increments each frame; refresh runs at 60 frames.
+    // PopulationMilestone notification (section 6) also triggers an
+    // immediate refresh and resets this counter.
+    // =============================================================
+    if (!m_overlayMap.empty() && m_renderer && m_mapTilesX > 0 && m_mapTilesZ > 0) {
+        ++m_overlayRefreshCounter;
+        if (m_overlayRefreshCounter >= 60) {
+            m_overlayRefreshCounter = 0;
+            bool anyRemoved = false;
+            for (auto it = m_overlayMap.begin(); it != m_overlayMap.end(); ) {
+                int tileX = static_cast<int>(it->first % static_cast<uint64_t>(m_mapTilesX));
+                int tileZ = static_cast<int>(it->first / static_cast<uint64_t>(m_mapTilesX));
+                QueryResult qr = m_sim->queryTile(tileX, tileZ);
+                if (!qr.isZoned || !qr.underConstruction) {
+                    it = m_overlayMap.erase(it);
+                    anyRemoved = true;
+                } else {
+                    ++it;
+                }
+            }
+            if (anyRemoved) {
+                m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
+            }
         }
     }
 }
@@ -1797,13 +1906,21 @@ void UIManager::transitionToGameplay(GameMode mode) {
     m_hud->show();
     m_minimap->show();
 
+    // Phase 11m: notify HUD that a new game session has started so the grace period
+    // indicator resets correctly for both first-game and subsequent new games.
+    if (m_hud) m_hud->notifyGameStarted();
+
     // Transition audio from menu to gameplay.
-    // setTimeOfDay must be called before transitionToGameplay() so the
-    // ambient bed selection reads the correct time period.
+    // setTimeOfDay MUST be called before transitionToGameplay() so the ambient bed
+    // selection reads the correct time period. New games always start at DAY.
     if (m_audio) {
-        m_audio->setTimeOfDay(TimeOfDay::DAY);  // New game starts at DAY
+        m_audio->setTimeOfDay(TimeOfDay::DAY);
         m_audio->transitionToGameplay();
     }
+
+    // Phase 11m: mark the game session as active so subsequent new-game requests
+    // take the pending-flag path (loading screen) instead of transitioning directly.
+    m_gameSessionActive = true;
 }
 
 void UIManager::setUnsavedChanges(bool value) {
@@ -1826,6 +1943,25 @@ bool UIManager::isQuitRequested() const {
 }
 
 void UIManager::transitionToMainMenu() {
+    // -----------------------------------------------------------------------
+    // MANDATORY CALL ORDER (Phase 11m spec):
+    //   1. m_audio->transitionToMainMenu() — MUST BE FIRST: stops all gameplay
+    //      audio before any UI state changes occur.
+    //   2. onNewGame()                     — clear overlay + tool state.
+    //   3. Save-state refresh              — re-query SaveFileState for the
+    //      Load Game button.
+    //   4. m_mainMenu->show()              — reveal the main menu.
+    //
+    // NOTE: m_gameSessionActive is NOT reset here. It remains true so that the
+    // next handleNewGameRequest() / consumeStartGameRequest() correctly takes
+    // the subsequent-game path (loading screen + pending flag).
+    // -----------------------------------------------------------------------
+
+    // Step 1: Stop all gameplay audio FIRST.
+    if (m_audio) {
+        m_audio->transitionToMainMenu();
+    }
+
     // Hide gameplay panels.
     m_hud->hide();
     m_minimap->hide();
@@ -1836,17 +1972,32 @@ void UIManager::transitionToMainMenu() {
     m_financesPanelOpen = false;
     m_inspector->hide();
     m_inspectorOpen = false;
+    m_state = GameState::MainMenu;
 
-    // Phase 10: cross-fade back to main menu music via setMusicTrack().
-    // IAudioSystem::setMusicTrack() handles the beat-boundary crossfade from
-    // whatever gameplay stem is playing; MUSIC_MAIN_MENU_01 is always used
-    // (no random selection for the back-to-menu transition).
-    if (m_audio) {
-        m_audio->setMusicTrack(MUSIC_MAIN_MENU_01);
+    // Step 2: Clear overlay and tool state.
+    onNewGame();
+
+    // Step 3: Re-query save state so the Load Game button reflects any saves
+    // made this session.
+    if (m_saveSystem && m_mainMenu) {
+        SaveFileState state = m_saveSystem->getSaveFileState();
+        m_mainMenu->setSaveAvailable(state == SaveFileState::Valid);
+        switch (state) {
+            case SaveFileState::NoSaves:
+                m_mainMenu->setSaveStatusText("No saves found.");
+                break;
+            case SaveFileState::AllCorrupt:
+                m_mainMenu->setSaveStatusText(
+                    "Save data is corrupted — cannot load. Check "
+                    + m_saveSystem->getSaveDirectoryPath() + " for recovery.");
+                break;
+            case SaveFileState::Valid:
+                m_mainMenu->setSaveStatusText("");
+                break;
+        }
     }
 
-    // Show main menu.
-    m_state = GameState::MainMenu;
+    // Step 4: Show main menu.
     m_mainMenu->show();
 }
 
@@ -1926,6 +2077,52 @@ void UIManager::onGameLoaded() {
         // Seed m_lastDeficitMonths so deficit-streak warnings do not
         // retroactively fire for months already counted before load.
         m_lastDeficitMonths = m_sim->getConsecutiveDeficitMonths();
+    }
+}
+
+// zoneAssetNameForLoad — map (ZoneType, DensityTier) to the _01 asset base name.
+// Mirrors CitySimulation::zoneAssetBaseName() (Phase 10 policy: always _01 suffix).
+static std::string zoneAssetNameForLoad(ZoneType zone, DensityTier density) {
+    const char* zoneStr = nullptr;
+    const char* densStr = nullptr;
+    switch (zone) {
+        case ZoneType::Residential: zoneStr = "res"; break;
+        case ZoneType::Commercial:  zoneStr = "com"; break;
+        case ZoneType::Industrial:  zoneStr = "ind"; break;
+    }
+    switch (density) {
+        case DensityTier::Low:    densStr = "low";  break;
+        case DensityTier::Medium: densStr = "med";  break;
+        case DensityTier::High:   densStr = "high"; break;
+    }
+    if (!zoneStr || !densStr) return {};
+    return std::string(zoneStr) + "_" + densStr + "_01";
+}
+
+// rebuildRendererFromSim — recreate all renderer scene nodes from current sim state.
+// Called after applyLoadedJson() to make loaded buildings and roads visible.
+void UIManager::rebuildRendererFromSim() {
+    if (!m_renderer || !m_sim || m_mapTilesX <= 0 || m_mapTilesZ <= 0) return;
+    m_renderer->clearCity();
+    for (int z = 0; z < m_mapTilesZ; ++z) {
+        for (int x = 0; x < m_mapTilesX; ++x) {
+            QueryResult q = m_sim->queryTile(x, z);
+            if (q.isRoad) {
+                m_renderer->placeRoadMesh(x, z);
+            } else if (q.isZoned && !q.underConstruction && !q.isAbandoned
+                       && q.footprintOriginX == -1) {
+                // This tile is a building origin (or 1×1) — place its mesh.
+                std::string asset = zoneAssetNameForLoad(q.zoneType, q.densityTier);
+                if (!asset.empty()) {
+                    int varNum = q.buildingVariantNum;
+                    if (varNum >= 1 && varNum <= 4 && asset.size() >= 2) {
+                        asset[asset.size() - 2] = '0';
+                        asset[asset.size() - 1] = static_cast<char>('0' + varNum);
+                    }
+                    m_renderer->placeBuildingMesh(x, z, asset);
+                }
+            }
+        }
     }
 }
 
@@ -2030,3 +2227,43 @@ int UIManager::getPendingMapTiles() const {
     }
     return static_cast<int>(MapSize::kMedium);  // default
 }
+
+// ----------------------------------------------------------------
+// Phase 11m: consumeNewGameRequest — return m_newGamePending and reset it.
+// ----------------------------------------------------------------
+bool UIManager::consumeNewGameRequest() {
+    if (m_newGamePending) {
+        m_newGamePending = false;
+        return true;
+    }
+    return false;
+}
+
+// ----------------------------------------------------------------
+// Phase 11m: getNewGameParams — return stored new-game parameters.
+// ----------------------------------------------------------------
+NewGameParams UIManager::getNewGameParams() {
+    return m_newGameParams;
+}
+
+#ifdef AITOWN_TESTING_ENABLED
+// ----------------------------------------------------------------
+// Phase 11m: handleNewGameRequest — test seam to inject new-game params.
+// ----------------------------------------------------------------
+void UIManager::handleNewGameRequest(const NewGameParams& params) {
+    m_newGameParams = params;
+    if (m_gameSessionActive) {
+        m_newGamePending = true;
+        if (m_mainMenu) m_mainMenu->showLoadingScreen();
+    } else {
+        transitionToGameplay(GameMode::Sandbox);
+    }
+}
+
+// ----------------------------------------------------------------
+// Phase 11m: setGameSessionActiveForTest — directly set m_gameSessionActive.
+// ----------------------------------------------------------------
+void UIManager::setGameSessionActiveForTest(bool value) {
+    m_gameSessionActive = value;
+}
+#endif  // AITOWN_TESTING_ENABLED

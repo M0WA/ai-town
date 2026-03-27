@@ -187,6 +187,91 @@ IrrlichtRenderer::~IrrlichtRenderer() {
     // destroyed automatically.
 }
 
+// -------------------------------------------------------------------------
+// clearCity — Phase 11m new-game reset.
+//
+// Removes all building, road, and agent scene nodes from the scene graph,
+// running the full eviction sequence on each. Does NOT remove terrain chunk
+// nodes. Shared procedural road meshes (LOD1/LOD2) are emptied so they are
+// ready for the next game session. Does not drop the SMesh* itself — it is
+// reused across sessions.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::clearCity() {
+    // --- Building nodes (zone buildings + service buildings) ---
+    // LODNode* wrappers are heap-allocated — delete them after eviction.
+    // Do NOT call destroyTileNode() during iteration (invalidates the iterator).
+    for (auto& kv : m_buildingNodes) {
+        LODNode* lodNode = kv.second;
+        if (!lodNode) continue;
+        scene::ISceneNode* node = lodNode->getNode();
+        if (node) {
+            // Clear material texture slots.
+            for (u32 m = 0; m < node->getMaterialCount(); ++m) {
+                for (u32 t = 0; t < MATERIAL_MAX_TEXTURES; ++t) {
+                    node->getMaterial(m).setTexture(t, nullptr);
+                }
+            }
+            if (m_driver) m_driver->setMaterial(SMaterial{});
+            node->remove();
+        }
+        delete lodNode;
+    }
+    m_buildingNodes.clear();
+
+    // --- Road nodes ---
+    // LODNode* wrappers are heap-allocated — delete them after eviction.
+    for (auto& kv : m_roadNodes) {
+        LODNode* lodNode = kv.second;
+        if (!lodNode) continue;
+        scene::ISceneNode* node = lodNode->getNode();
+        if (node) {
+            for (u32 m = 0; m < node->getMaterialCount(); ++m) {
+                for (u32 t = 0; t < MATERIAL_MAX_TEXTURES; ++t) {
+                    node->getMaterial(m).setTexture(t, nullptr);
+                }
+            }
+            if (m_driver) m_driver->setMaterial(SMaterial{});
+            node->remove();
+        }
+        delete lodNode;
+    }
+    m_roadNodes.clear();
+
+    // --- Agent nodes (plain IMeshSceneNode*, no LODNode wrapper) ---
+    for (auto& kv : m_agentNodes) {
+        scene::IMeshSceneNode* node = kv.second;
+        if (!node) continue;
+        for (u32 i = 0; i < node->getMaterialCount(); ++i) {
+            for (u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t) {
+                node->getMaterial(i).setTexture(t, nullptr);
+            }
+        }
+        if (m_driver) m_driver->setMaterial(SMaterial{});
+        node->remove();
+    }
+    m_agentNodes.clear();
+
+    // --- Shared procedural road meshes (LOD1 and LOD2 are shared / reused) ---
+    // LOD0 is nullptr (per-tile meshes owned by scene nodes — already removed above).
+    // LOD1 and LOD2: clear mesh buffers so addRoadTile() rebuilds them fresh.
+    // Do NOT ->drop() the SMesh* itself — it is reused in the next game session.
+    // (m_sharedRoadMeshLOD0 is always nullptr — no work needed.)
+    if (m_sharedRoadMeshLOD1) {
+        for (u32 i = 0; i < m_sharedRoadMeshLOD1->getMeshBufferCount(); ++i) {
+            m_sharedRoadMeshLOD1->getMeshBuffer(i)->drop();
+        }
+        m_sharedRoadMeshLOD1->MeshBuffers.clear();
+        m_sharedRoadMeshLOD1->recalculateBoundingBox();
+    }
+    if (m_sharedRoadMeshLOD2) {
+        for (u32 i = 0; i < m_sharedRoadMeshLOD2->getMeshBufferCount(); ++i) {
+            m_sharedRoadMeshLOD2->getMeshBuffer(i)->drop();
+        }
+        m_sharedRoadMeshLOD2->MeshBuffers.clear();
+        m_sharedRoadMeshLOD2->recalculateBoundingBox();
+    }
+}
+
 void IrrlichtRenderer::beginFrame() {
     if (!m_driver) return;
     // Sky-blue clear color — provides visual feedback that the 3D viewport is active.

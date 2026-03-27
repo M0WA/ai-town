@@ -24,6 +24,7 @@
 #include "src/platform/WallClock.h"
 #include "src/interfaces/camera_state.h"
 #include "src/simulation/CitySimulation.h"
+#include "src/simulation/simulation_constants.h"  // SimulationConstants::startingFundsForDifficulty
 #include "src/simulation/StdSimulationRNG.h"
 #include "src/simulation/SaveSystem.h"
 #include "src/terrain/TerrainSystem.h"
@@ -210,6 +211,9 @@ int main(int argc, char** argv) {
     uiManager.setRenderer(&renderer);
     uiManager.setTerrainQuery(&terrainSystem);
     uiManager.setMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
+
+    // Phase 11m: supply map dimensions to CitySimulation for border-ring terrain flattening.
+    citySimulation.setMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
 
     // -------------------------------------------------------------------------
     // Phase 10: start main menu music now that the AudioSystem is ready and all
@@ -498,6 +502,58 @@ int main(int argc, char** argv) {
         // MUST execute after UIManager::update() so that the save-requested flag
         // set by UIManager (from PauseMenuPanel) is consumed before the timer check.
         saveSystem.update(realDeltaSeconds);
+
+        // Phase 11m: new-game polling block.
+        // Polled after UIManager::update() so that consumeNewGameRequest() sees the
+        // m_newGamePending flag set by the current frame's consumeStartGameRequest().
+        if (uiManager.consumeNewGameRequest()) {
+            NewGameParams ngp = uiManager.getNewGameParams();
+            int64_t startingFunds = SimulationConstants::startingFundsForDifficulty(ngp.difficulty);
+            citySimulation.reset(startingFunds);
+            renderer.clearCity();
+            StdTerrainRNG freshRng;
+            freshRng.reseed(ngp.seed);
+            terrainSystem.generate(
+                static_cast<int>(ngp.mapSize), static_cast<int>(ngp.mapSize),
+                10.0f, &freshRng);
+            terrainSystem.enqueueAllChunks();
+            // Loading loop identical to startup loading loop.
+            double loadPrev2 = wallClock.nowSeconds();
+            while (device->run() && terrainSystem.pendingRebuildCount() > 0) {
+                const double loadNow2  = wallClock.nowSeconds();
+                const float  loadDt2   = static_cast<float>(loadNow2 - loadPrev2);
+                loadPrev2 = loadNow2;
+                uiManager.update(loadDt2);
+                terrainSystem.update(loadDt2);
+                terrainSystem.flushPendingRebuilds();
+                CameraState loadCam = cameraController.getCameraState();
+                try {
+                    audioSystem.syncListenerToCamera(loadCam);
+                    audioSystem.update(loadDt2);
+                } catch (const std::exception& e) {
+                    fprintf(stderr, "[main] Audio error during new-game loading: %s\n", e.what());
+                }
+                renderer.beginFrame();
+                renderer.drawScene();
+                renderer.endFrame();
+            }
+            // Update renderer and UI with new terrain dimensions.
+            renderer.setRendererMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
+            renderer.setCellSize(terrainSystem.getCellSize());
+            // Reposition camera to center of new terrain.
+            {
+                const float halfWorld = terrainSystem.getMapTilesX()
+                                        * terrainSystem.getCellSize() * 0.5f;
+                cameraController.setTarget(halfWorld, halfWorld);
+            }
+            uiManager.setMapDimensions(
+                static_cast<int>(ngp.mapSize), static_cast<int>(ngp.mapSize));
+            citySimulation.setMapDimensions(
+                static_cast<int>(ngp.mapSize), static_cast<int>(ngp.mapSize));
+            uiManager.transitionToGameplay(GameMode::Sandbox);
+            uiManager.onGameLoaded();
+            continue;
+        }
 
         // Check for application quit request (Main Menu Quit / Pause Menu Quit to Desktop).
         if (uiManager.isQuitRequested()) {

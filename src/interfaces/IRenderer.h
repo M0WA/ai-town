@@ -347,6 +347,16 @@ public:
     // No-op if vehicleId is not registered.
     virtual void removeVehicle(uint32_t vehicleId) = 0;
 
+    // clearCity — remove all building, road, and agent scene nodes from the scene graph.
+    //
+    // Called by main.cpp after CitySimulation::reset() in the new-game flow (Phase 11m).
+    // Clears m_buildingNodes, m_roadNodes, and m_agentNodes, running the full eviction
+    // sequence (clear textures → setMaterial(SMaterial{}) → node->remove()) on each node.
+    // Does NOT remove terrain chunk nodes — terrain is rebuilt separately.
+    // Resets any road-tile count and per-tile mesh state that accumulates across addRoadTile().
+    // main-thread-only.
+    virtual void clearCity() = 0;
+
     // setTilePlacementPreview — render a multi-tile placement preview highlight.
     //
     // freeTiles / freeArgb: tiles the player can freely place on (shown in tool colour).
