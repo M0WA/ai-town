@@ -172,7 +172,10 @@ public:
     // applied to this transition. Bar-boundary tracking applies only to within-gameplay
     // stem crossfades (calm/growth/crisis tier changes), not to the gameplay↔main-menu
     // transitions which are triggered by user action and must start immediately.
-    // Safe to call if gameplay audio is not currently active — treated as a no-op.
+    // Safe to call if gameplay audio is not currently active — the implementation
+    // stops all sources[58..61] unconditionally via alSourceStop (which is a no-op
+    // for sources not in AL_PLAYING state). No guard condition is required; the
+    // method proceeds unconditionally regardless of whether gameplay audio is active.
     //
     // Calling convention: UIManager::transitionToMainMenu() calls this method FIRST
     // (before showing the main menu). m_newGamePending is NOT set by
