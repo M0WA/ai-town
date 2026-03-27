@@ -278,6 +278,7 @@ public:
                                                // For SUBSEQUENT games (Phase 11m+), called by main.cpp AFTER it has polled
                                                // consumeNewGameRequest(), run reset()+clearCity(), and re-generated terrain —
                                                // UIManager itself does NOT call transitionToGameplay() for subsequent new games.
+                                               // Calls m_hud->notifyGameStarted() to reset the grace-period countdown for both first and subsequent games (Phase 11m).
     void transitionToMainMenu();   // Called by PauseMenuPanel ("Quit to Main Menu").
                                    // Call order: (1) m_audio->transitionToMainMenu(), (2) onNewGame() — clears
                                    // m_overlayMap and resets active tool state, (3) save-state refresh via

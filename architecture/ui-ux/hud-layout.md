@@ -493,6 +493,12 @@ void setActiveToolLabel(const std::string& text);
 
 Updates the active tool indicator text (virtual bounds x:8–72 px, y:752–784 px). Called by `UIManager::onEvent()` at Priority 5 when a toolbar tool button (Zone / Road / Utilities / Demolish / Query) is clicked. Sets the `m_activeToolLabel` element text via `m_backend->setElementText()`. Also called with `"No tool"` when Query mode is toggled off.
 
+```cpp
+void notifyGameStarted();
+```
+
+Resets the grace-period state so the cost-waiver label appears correctly for both the first game and all subsequent new games. Must be called by `UIManager::transitionToGameplay()` each time a new game session begins. Internally, resets `m_gameStartTime` (stores current `IClock` time) and sets `m_gracePeriodExpired = false`. Phase 11m: fixes the bug where `m_gracePeriodExpired` was never reset for second games.
+
 Required private members of the `HUD` class relevant to the budget detail overlay:
 
 ```cpp
