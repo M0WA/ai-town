@@ -211,6 +211,13 @@ public:
     // by a service building.
     virtual std::vector<ServiceCoverageTile> getServiceCoverage() const = 0;
 
+    // getMapTilesX / getMapTilesZ — return the map tile dimensions stored by
+    // setMapDimensions(). Return 0 before setMapDimensions() is called.
+    // Used by main.cpp load-game handler to obtain the correct map dimensions
+    // from a loaded save (which may differ from the startup terrain size).
+    virtual int getMapTilesX() const = 0;
+    virtual int getMapTilesZ() const = 0;
+
     // reset — clear all city state and restart with the given starting funds.
     // Does NOT call clearCity() on the renderer — caller is responsible.
     // Does NOT reset tax rates.

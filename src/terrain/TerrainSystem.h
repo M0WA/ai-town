@@ -142,6 +142,14 @@ public:
     // No-op if m_generatedHeightmap is empty (generate() not yet called).
     void enqueueAllChunks();
 
+    // clearAllChunks() — remove all active terrain chunk scene nodes from the renderer
+    // and clear the internal chunk tracking maps (m_activeChunks, m_chunkWorldOrigins,
+    // m_chunkHeightmaps). Called at the start of generate() and enqueueAllChunks() so
+    // stale scene nodes from a previous generation are destroyed before new ones are built.
+    // Guards each removeTerrainChunk() call with if(m_renderer) — m_renderer may be null
+    // in EDT_NULL test contexts.
+    void clearAllChunks();
+
     // ITerrainQuery implementation —
     // Returns slope in degrees at tile (tileX, tileZ) using the stored heightmap.
     // Returns 0.0f for out-of-bounds tiles or before generate() is called (flat stub).

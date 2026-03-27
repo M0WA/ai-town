@@ -87,6 +87,16 @@ public:
     virtual TextureHandle loadTexture(const std::string& path) = 0;  // main-thread-only; returns kInvalidTexture on failure
     virtual void          setCamera(const CameraParams& p) = 0;       // main-thread-only
 
+    // removeTerrainChunk() — destroy the scene node for a single terrain chunk.
+    //
+    // Runs the eviction sequence on the chunk's IMeshSceneNode*:
+    //   clear material texture slots, driver->setMaterial(SMaterial{}),
+    //   erase from the chunk node map, then node->remove().
+    // No-op if chunkId is not in the chunk node map.
+    // Called by TerrainSystem::clearAllChunks() before regenerating the terrain.
+    // main-thread-only.
+    virtual void removeTerrainChunk(uint64_t chunkId) = 0;
+
     // rebuildTerrainChunk() — full LOD node rebuild for a terrain chunk.
     //
     // Implements the 5-step terrain LOD rebuild sequence per

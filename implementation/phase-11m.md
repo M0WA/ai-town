@@ -1,6 +1,6 @@
 ## Phase 11m: Bug-Fix Batch — Zone Overlay Colors, Road Proximity Distance, Terrain Border Stitching, Cost Waiver Reset, Save State Refresh, New-Game Reset, Finances Background
 
-**Status: DONE**
+**Status: OPEN**
 
 ### Goal
 
