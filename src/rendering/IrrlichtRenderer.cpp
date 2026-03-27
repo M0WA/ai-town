@@ -388,6 +388,31 @@ void IrrlichtRenderer::setCamera(const CameraParams& p) {
     m_lastCameraPosition = p.position;  // cached for getListenerPosition()
 }
 
+void IrrlichtRenderer::removeTerrainChunk(uint64_t chunkId) {
+    auto nodeIt = m_chunkNodes.find(chunkId);
+    if (nodeIt == m_chunkNodes.end()) return;
+
+    IMeshSceneNode* node = nodeIt->second;
+    if (node) {
+        // Eviction sequence per scene-graph-ownership.md:
+        // Step 1a: clear material texture slots.
+        u32 matCount = node->getMaterialCount();
+        for (u32 m = 0; m < matCount; ++m) {
+            for (u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t) {
+                node->getMaterial(m).setTexture(t, nullptr);
+            }
+        }
+        // Step 1b: flush driver last-bound material state.
+        if (m_driver) m_driver->setMaterial(SMaterial{});
+        // Step 1c: null the map entry BEFORE remove() — dangling-pointer prevention.
+        nodeIt->second = nullptr;
+        m_chunkNodes.erase(nodeIt);
+        node->remove();
+    } else {
+        m_chunkNodes.erase(nodeIt);
+    }
+}
+
 void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& params) {
     if (!m_smgr || !m_driver) return;
 
