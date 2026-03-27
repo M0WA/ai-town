@@ -117,11 +117,18 @@ encodes brightness (Low = pale, Medium = mid, High = dark).
   `m_overlayMap.erase(key)` call with
   `m_overlayMap[key] = computeZoneOverlayColor(zoneType, densityTier)`.
   Use the `densityTier` variable already available at the `placeZone()` call site — no
-  demand query needed. Call `setZoneOverlay()` unconditionally (overlay may have grown).
+  demand query needed. Call `setZoneOverlay()` after inserting the new entry (a new entry
+  was just added to `m_overlayMap`, so state has changed and the renderer must be notified).
+  **`setZoneOverlay()` is called only when `m_overlayMap` state changes (new entry added
+  on placement, expired entry removed on refresh), never unconditionally.**
 - [ ] In `UIManager::update()`, add a periodic overlay refresh block.
   `m_overlayRefreshCounter` increments each frame and resets to 0 after each refresh run
   (whether triggered by reaching 60 frames or by receiving a populationTick notification);
   whichever occurs first in an update cycle triggers the refresh and resets the counter.
+  **When a populationTick notification triggers the refresh path, immediately process all
+  entries AND reset `m_overlayRefreshCounter` to 0. This ensures the "60-frame timer OR
+  populationTick, whichever comes first" rule is deterministic — the next 60-frame interval
+  starts fresh after each populationTick-driven refresh.**
   For each entry in `m_overlayMap`:
   - Call `m_sim->queryTile(tileX, tileZ)`.
   - If `!result.isZoned || !result.underConstruction`: erase from map (building spawned
@@ -343,6 +350,10 @@ Starting a second new game leaves `m_gracePeriodExpired == true`, so
 **Test** (`tests/ui/hud_grace_period_test.cpp`, label: `unit`):
 
 - [ ] `HUD_SecondNewGame_GracePeriodLabelVisible`:
+  **Note**: this test isolates HUD state behavior only — it does not verify the audio
+  precondition (`setTimeOfDay(DAY)` before `transitionToGameplay()`). Audio sequencing is
+  verified by the UIManager integration flow in Deliverable 6 and by manual exit criterion
+  MC-5.
   - Declare a test constant `kTestLabelHandle = UIElementHandle{42}`.
   - Declare the test as a fixture with `NiceMock<MockUIBackend> backend_`,
     `NiceMock<MockAudioSystem> audio_`, `NiceMock<MockCitySimulation> sim_`, and
@@ -523,17 +534,36 @@ terrain-generation pass from within the game loop.
   `m_mainMenu->showLoadingScreen()`; otherwise call `transitionToGameplay(GameMode::Sandbox)`
   (first-game path). Production code uses `consumeStartGameRequest()` via `UIManager::update()`.
 - [ ] In `transitionToGameplay()`, set `m_gameSessionActive = true` after the state change.
+- [ ] In `UIManager::transitionToGameplay()`, call `m_audio->setTimeOfDay(TimeOfDay::DAY)`
+  **first**, then `m_audio->transitionToGameplay()` — matching the mandatory call sequence
+  specified in `architecture/audio-architecture/audio-system.md` lines 160-162. New games
+  always start at DAY; `setTimeOfDay()` must be called before `transitionToGameplay()` so
+  that the ambient bed selection on sources[60..61] uses the correct time-of-day value.
 - [ ] Add `void UIManager::setGameSessionActiveForTest(bool value)` gated on
   `#ifdef AITOWN_TESTING_ENABLED`: sets `m_gameSessionActive = value` directly. Required by the
   `UIManager_SecondNewGame_SetsNewGamePendingFlag` test to force the "subsequent game" path
   without running a full gameplay session first.
 - [ ] In `transitionToMainMenu()`, call `m_audio->transitionToMainMenu()` before
   `m_mainMenu->show()` to stop gameplay music stems and ambient beds and restart
-  main menu music. Call order within `transitionToMainMenu()`:
-  1. `m_audio->transitionToMainMenu()`
+  main menu music. **`m_audio->transitionToMainMenu()` MUST be the first operation
+  called (before modal/overlay state resets and save-state refresh), to stop gameplay
+  audio stems before any UI state transitions occur. See audio-system.md lines 177-189.**
+  Call order within `transitionToMainMenu()`:
+  1. `m_audio->transitionToMainMenu()` — **must be first; stops all gameplay audio before UI changes**
   2. `onNewGame()` (clear overlay + tool state)
   3. Save-state refresh (re-query `m_saveSystem->getSaveFileState()`)
   4. `m_mainMenu->show()`
+
+  **Note**: `onNewGame()` clearing `m_overlayMap` in step (2) has no connection to audio
+  source state — the overlay map is a pure UI rendering construct. The "audio first"
+  requirement exists solely to ensure gameplay audio stems stop before UI transitions begin.
+
+  **Note**: when `main.cpp`'s new-game-request loop subsequently calls
+  `UIManager::transitionToGameplay()`, it will re-establish the mandatory audio
+  precondition — `setTimeOfDay(TimeOfDay::DAY)` is called first, then
+  `transitionToGameplay()` — per the requirement documented in this deliverable (and
+  `audio-system.md` lines 160-162). The audio state is correctly maintained across
+  multiple game sessions.
 
   `transitionToMainMenu()` does NOT reset `m_gameSessionActive`. The flag stays `true`
   after returning to the menu so that the next `handleNewGameRequest()` call correctly
@@ -622,6 +652,17 @@ terrain-generation pass from within the game loop.
   4. Store the selected variant in `m_lastMainMenuVariant` before calling
      `setMusicTrack()` with that variant ID, so the next `transitionToMainMenu()`
      call correctly excludes it.
+- [ ] In `AudioSystem::transitionToMainMenu()`, wrap the entire variant selection
+  block — (1) build candidate set `{1, 2}`, (2) exclude `m_lastMainMenuVariant`,
+  (3) select randomly with `std::uniform_int_distribution` from `m_rng`, (4) store
+  result back to `m_lastMainMenuVariant` — in a single
+  `std::lock_guard<std::mutex> lk(m_streamMutex)` scope. This prevents a data race
+  with the audio thread's EOF variant-switching path, which also reads and writes
+  `m_lastMainMenuVariant` under `m_streamMutex` (see thread-safety contract at
+  line ~676). Release the lock before the subsequent `setMusicTrack()` /
+  crossfade-setup calls — do NOT hold `m_streamMutex` across the full method body
+  (that would cause audio-thread starvation on its 10 ms wake cycle per
+  `streaming-architecture.md`).
 - [ ] Implement `AudioSystem::transitionToMainMenu()` in `src/audio/AudioSystem.cpp`
   per the contract in `architecture/audio-architecture/audio-system.md`:
   stop all active gameplay music stems and ambient beds on sources[58..61], then
@@ -631,7 +672,9 @@ terrain-generation pass from within the game loop.
   not to gameplay↔main-menu transitions which are triggered by user action and must
   start immediately — per `audio-system.md` lines 171-174), and establish looping
   playback (main menu music loops indefinitely per `dynamic-soundscape.md` §Main Menu
-  Audio). Safe to call if gameplay audio is not active (no-op guard). Use `m_clock`
+  Audio). Safe to call if gameplay audio is not active — the implementation stops all
+  sources[58..61] unconditionally via `alSourceStop` (a no-op for non-playing sources);
+  no guard condition is required per `audio-system.md` lines 175-178. Use `m_clock`
   for timing the crossfade, consistent with existing crossfade patterns in AudioSystem.
 - [ ] Add `bool m_mainMenuMusicLooping{false}` private member to `AudioSystem`
   (declared in `src/audio/AudioSystem.h`). Set it to `true` inside
@@ -653,13 +696,25 @@ terrain-generation pass from within the game loop.
   Audio ("Variant selection: same random-excluding-repeat policy as gameplay
   stems"), each time EOF triggers `ov_pcm_seek(vf, 0)` on a main-menu source,
   the audio thread must apply the random-excluding-repeat variant selection.
-  With exactly 2 variants, "exclude the current" is deterministic — always flip:
-  if `m_lastMainMenuVariant == 1` select 2, else select 1. Update
+  **Use random-excluding-repeat selection (NOT deterministic flip — do NOT use a
+  deterministic flip) to match gameplay stem variant selection policy per
+  dynamic-soundscape.md line 5.** Implementation: (1) build a candidate list of
+  all variants (`{1, 2}`) excluding `m_lastMainMenuVariant`, (2) randomly select
+  from that list using `std::uniform_int_distribution` seeded from `m_rng` (the
+  same RNG member used for gameplay stem selection). Do NOT use a deterministic
+  flip or index-toggle in place of this random selection. Update
   `m_lastMainMenuVariant` and open the new OGG file before refilling.
+  **Observation (mathematical, NOT implementation guidance)**: with exactly 2
+  variants the candidate list always contains one entry, so `std::uniform_int_distribution`
+  will always return the alternate variant — this is a consequence of the math, not
+  the intended mechanism. The implementation MUST use `std::uniform_int_distribution`
+  regardless; do NOT replace it with a deterministic flip even if the observable
+  result would currently be identical.
   **Thread-safety and mutex scope**: `m_lastMainMenuVariant` is written by the
   main thread in `transitionToMainMenu()` (under `m_streamMutex`) and by the
   audio thread at EOF. For the EOF path, the required operation sequence is:
-  (1) acquire `m_streamMutex` → read `m_lastMainMenuVariant` → compute flip →
+  (1) acquire `m_streamMutex` → read `m_lastMainMenuVariant` → randomly select
+  next variant via `std::uniform_int_distribution` (not a deterministic flip) →
   write `m_lastMainMenuVariant` → release `m_streamMutex`;
   (2) open the new OGG file OUTSIDE the mutex (variable-duration I/O per the
   minimal critical section principle in `streaming-architecture.md`);
@@ -709,6 +764,16 @@ terrain-generation pass from within the game loop.
     `AudioSystem` public/test accessor API. (ref:
     `architecture/audio-architecture/audio-system.md`,
     `architecture/audio-architecture/dynamic-soundscape.md`)
+  - **Note**: `isMainMenuMusicLooping()` is the designed completion sentinel for
+    `transitionToMainMenu()` — verifying this flag is the correct and complete
+    automated test contract per `testability-architecture.md`. The flag is set as
+    the **final** operation in `transitionToMainMenu()` (after all stop-gameplay
+    and crossfade-initiation operations), so its truth value implicitly confirms
+    the full method body executed without an early exit. Actual audio streaming
+    quality (source state transitions, crossfade onset, looping behavior) is
+    verified by manual exit criterion MC-3 (see exit criteria: "start game, build
+    city for ≥30 s, then quit to main menu → main menu music begins playing within
+    1 s, loops continuously without audible clicks, silence gaps, or abrupt cuts").
 
 **Code changes — `IRenderer.h` / `IrrlichtRenderer.h` / `IrrlichtRenderer.cpp`**:
 
@@ -799,16 +864,25 @@ terrain-generation pass from within the game loop.
       uiManager.setMapDimensions(
           static_cast<int>(ngp.mapSize), static_cast<int>(ngp.mapSize));
       uiManager.transitionToGameplay(GameMode::Sandbox);
-      uiManager.onGameLoaded(); // Re-initializes per-game view state: sets
-                                // m_previousCityRating to the current simulation
-                                // city-rating tier so that the first update() tick
-                                // after load does not fire a spurious stinger_milestone
-                                // event. Does NOT transition GameState, clear the
-                                // loading screen, or show HUD/minimap — those are
-                                // performed by transitionToGameplay() on the line above.
+      uiManager.onGameLoaded(); // Re-initializes per-game view state: resets
+                                // city-rating tracking state, clears notification
+                                // history, and re-arms the cost-waiver label —
+                                // see UIManager.h for full declaration.
+                                // Specifically: sets m_previousCityRating to the
+                                // current simulation city-rating tier so that the
+                                // first update() tick after load does not fire a
+                                // spurious stinger_milestone event. Does NOT
+                                // transition GameState, clear the loading screen,
+                                // or show HUD/minimap — those are performed by
+                                // transitionToGameplay() on the line above.
       continue;  // restart frame loop from the top after transition
   }
   ```
+
+  After step (5) (`transitionToGameplay()`), main.cpp calls `uiManager.onGameLoaded()`
+  (pre-existing Phase 11 method) to reinitialize per-game view state: resets city-rating
+  tier tracking, clears notification history, and re-arms the cost-waiver label. This call
+  must occur before the first `update()` tick of the new game.
 
 - [ ] Add `SimulationConstants::startingFundsForDifficulty(int difficulty)` helper
   returning the per-difficulty starting fund (Easy/Normal/Hard as per economy-model.md):
@@ -874,18 +948,23 @@ The 8 px corner radius remains in the spec as the authoritative post-V1 target.
 
 - [ ] `FinancesPanel_Constructor_CallsSetElementBackground`:
   - Declare the test as a fixture with `NiceMock<MockUIBackend> backend_`,
-    `NiceMock<MockCitySimulation> sim_`, `NiceMock<MockAudioSystem> audio_`, and
-    `ManualClock clock_` as members. Include a `TearDown()` override that explicitly
-    resets `panel_` to `nullptr` before the mocks are destroyed, enforcing the
-    destructor-path contract (FinancesPanel holds a raw pointer to the backend).
+    `NiceMock<MockAudioSystem> audio_`, `NiceMock<MockCitySimulation> sim_`, and
+    `ManualClock clock_` as members. Include an explicit `TearDown()` override that
+    calls `panel_ = nullptr;` before the mocks are destroyed, enforcing the
+    destructor-path contract (FinancesPanel holds a raw pointer to the backend;
+    resetting first prevents UAF during mock teardown). This matches the TearDown()
+    pattern documented in testability-architecture.md and used in D1, D4, and D5
+    test specs.
     (`NiceMock` is required because the constructor calls `addStaticText` and
     `addButton` many times; `StrictMock` would fail on every unexpected UI-element
     creation call.)
   - The test body must follow this exact sequence (GMock requires expectations to be
     installed **before** the action that triggers them):
     1. **Set expectation first**: `EXPECT_CALL(backend_, setElementBackground(_, 13, 27, 42, 217)).Times(1)`.
-    2. **Then construct FinancesPanel**: `auto panel_ = std::make_unique<FinancesPanel>(&backend_, &sim_, &audio_, &clock_)` —
-       the constructor fires `setElementBackground()`, satisfying the expectation installed in step 1.
+    2. **Then construct FinancesPanel**: `auto panel_ = std::make_unique<FinancesPanel>(&backend_, &audio_, &sim_, &clock_)` —
+       constructor parameter order is `(IUIBackend*, IAudioSystem*, ICitySimulation*, IClock*)`,
+       i.e., `(&backend_, &audio_, &sim_, &clock_)` — the constructor fires
+       `setElementBackground()`, satisfying the expectation installed in step 1.
     3. **Then verify**: `Mock::VerifyAndClearExpectations(&backend_)` (or rely on mock
        destruction at end of test scope to trigger GMock's automatic verification).
 
@@ -920,6 +999,12 @@ target_sources(ui_tests PRIVATE
 #
 # aitown_ui PRIVATE keeps the flag out of any downstream consumer's compile
 # environment — it does not propagate to the production aitown binary.
+#
+# NOTE: target_compile_definitions(aitown_ui PRIVATE AITOWN_TESTING_ENABLED=1) may be
+# placed anywhere in the CMakeLists.txt that defines aitown_ui — CMake compile definitions
+# apply to the target globally and are not position-sensitive relative to
+# target_sources() calls. The flag must simply be present before cmake's configure step
+# completes.
 target_compile_definitions(aitown_ui PRIVATE AITOWN_TESTING_ENABLED=1)
 target_compile_definitions(ui_tests PRIVATE AITOWN_TESTING_ENABLED=1)
 
