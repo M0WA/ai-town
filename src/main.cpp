@@ -195,6 +195,9 @@ int main(int argc, char** argv) {
     // Step 5: uiManager.setMapDimensions(...)
     // -------------------------------------------------------------------------
     uiManager.setRenderer(&renderer);
+    // UIManager transitioned to main menu during construction (before setRenderer was
+    // wired), so arm the background here now that the renderer is available.
+    renderer.setSceneBackground("assets/textures/ui/loading_screen.png");
     uiManager.setTerrainQuery(&terrainSystem);
     uiManager.setMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
 
