@@ -190,11 +190,14 @@ TEST_F(HUDCoverageTest, BudgetFlash_ResetAlpha_WhenDeficitClears) {
 
 // ---------------------------------------------------------------------------
 // Test 10: Grace period — label text updated while time remaining > 0
-// Before 120 s wall-clock elapsed, HUD::update() writes "Cost waiver: Xs remaining".
+// Before 120 s elapsed, HUD::update() writes "Cost waiver: Xs remaining".
 // ---------------------------------------------------------------------------
 TEST_F(HUDCoverageTest, GracePeriod_LabelText_WhileActive) {
-    // clock_ starts at 0.0; 10 s elapsed -> ~110 s remaining.
-    clock_.advance(10.0);
+    // 10 s of dt elapsed -> ~110 s remaining.
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementAlpha(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementVisible(_, _)).Times(AnyNumber());
+    ui_->update(10.0f);
 
     EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
     EXPECT_CALL(backend_, setElementText(_, HasSubstr("Cost waiver:"))).Times(AtLeast(1));
@@ -206,8 +209,11 @@ TEST_F(HUDCoverageTest, GracePeriod_LabelText_WhileActive) {
 // The HUD sets alpha 0.8f when remaining < 20.0 seconds.
 // ---------------------------------------------------------------------------
 TEST_F(HUDCoverageTest, GracePeriod_AmberAlpha_WhenLessThan20sRemaining) {
-    // 110 s elapsed -> 10 s remaining (< 20 s threshold).
-    clock_.advance(110.0);
+    // Accumulate 110 s of dt -> 10 s remaining (< 20 s threshold).
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementAlpha(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementVisible(_, _)).Times(AnyNumber());
+    ui_->update(110.0f);
 
     // Allow any other setElementAlpha calls (e.g., budget-flash reset to 1.0f).
     EXPECT_CALL(backend_, setElementAlpha(_, _)).Times(AnyNumber());
@@ -225,7 +231,11 @@ TEST_F(HUDCoverageTest, GracePeriod_AmberAlpha_WhenLessThan20sRemaining) {
 // setElementAlpha is called with the new (< 1.0) value.
 // ---------------------------------------------------------------------------
 TEST_F(HUDCoverageTest, GracePeriod_FadeOut_AfterElapsed120s) {
-    clock_.advance(121.0);
+    // Accumulate 121 s of dt -> past expiry, fade-out path.
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementAlpha(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementVisible(_, _)).Times(AnyNumber());
+    ui_->update(121.0f);
 
     // setElementAlpha must be called for the fade path (alpha < 1.0).
     EXPECT_CALL(backend_, setElementAlpha(_, _)).Times(AtLeast(1));
@@ -238,13 +248,17 @@ TEST_F(HUDCoverageTest, GracePeriod_FadeOut_AfterElapsed120s) {
 // After expiry, setElementVisible(gracePeriodLabel, false) is called.
 // ---------------------------------------------------------------------------
 TEST_F(HUDCoverageTest, GracePeriod_FullyExpired_LabelHidden) {
-    clock_.advance(125.0);  // well past 120 s
-
-    // Drive enough frames to fully deplete the 0.5s fade.
-    // dt=0.5 per call; alpha starts at 1.0 -> 0.0 in two frames.
+    // Allow any calls during warm-up and the 5-frame drain.
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementAlpha(_, _)).Times(AnyNumber());
     EXPECT_CALL(backend_, setElementVisible(_, _)).Times(AnyNumber());
+    // The grace period fade must call setElementVisible(gracePeriodLabel, false) at least once.
     EXPECT_CALL(backend_, setElementVisible(_, false)).Times(AtLeast(1));
 
+    // Accumulate 125 s of dt -> well past 120 s expiry; fade completes in this single call.
+    ui_->update(125.0f);
+
+    // Additional frames — grace period is already expired; no further hide calls required.
     for (int i = 0; i < 5; ++i) {
         ui_->update(0.5f);
     }
