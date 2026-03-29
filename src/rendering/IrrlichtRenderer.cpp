@@ -2701,9 +2701,9 @@ static SMesh* buildCloudDomeMesh()
 {
     constexpr int   kDomeRings         = 32;     // latitude bands — keep fade smooth
     constexpr int   kDomeSectors       = 32;     // longitude segments
-    constexpr float kCloudAltitude     = -1000.0f; // world-space Y of dome base (far below terrain)
-    constexpr float kCloudDomeRadius   = 6000.0f;  // horizontal radius at base ring
-    constexpr float kCloudDomeHeight   = 2000.0f;  // vertical height from base to apex (apex at Y=1000 m)
+    constexpr float kCloudAltitude     = -500.0f;   // base ring 500 m below camera (node tracks cam Y)
+    constexpr float kCloudDomeRadius   = 12000.0f;  // horizontal radius — must be < far clip (15000 m)
+    constexpr float kCloudDomeHeight   = 1500.0f;   // apex 1000 m above camera, base 500 m below
     constexpr float kCloudUVScale      = 4.0f;   // texture tiling factor
     // Horizon fade and atmospheric haze are handled entirely in the fragment shader
     // (cloud_dome.frag, rev 3).  All vertices use alpha=255.
@@ -2719,7 +2719,8 @@ static SMesh* buildCloudDomeMesh()
 
     // -----------------------------------------------------------------------
     // Vertex 0: shared apex (single vertex, no degenerate triangles at the top).
-    // The apex sits at world position (0, kCloudAltitude + kCloudDomeHeight, 0).
+    // The apex sits at local position (0, kCloudAltitude + kCloudDomeHeight, 0)
+    // relative to the node, which tracks the camera position each frame.
     // Its UV is centred (u=kCloudUVScale*0.5, v=0) — this value is only used by
     // the fan cap triangles and is never interpolated across a seam.
     // -----------------------------------------------------------------------
@@ -2944,12 +2945,11 @@ void IrrlichtRenderer::update(float dt)
         .getTextureMatrix(0)
         .setTextureTranslate(m_cloudUVOffset.X, m_cloudUVOffset.Y);
 
-    // Reposition dome to camera XZ so the horizon ring always surrounds the player.
+    // Node tracks full camera position (X, Y, Z) so dome stays centred on camera at all heights.
     // m_lastCameraPosition is updated by setCamera() every frame before update() runs.
-    // Y=0: dome vertex positions embed kCloudAltitude in world-space directly.
     if (m_camera) {
         const core::vector3df camPos = m_camera->getPosition();
-        m_cloudNode->setPosition(core::vector3df(camPos.X, 0.0f, camPos.Z));
+        m_cloudNode->setPosition(camPos);
 
         // Feed camera world-space Y to the shader callback so the elevation-angle
         // fade in cloud_dome.frag uses the correct reference height each frame.
