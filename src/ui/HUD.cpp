@@ -51,7 +51,7 @@ HUD::HUD(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock*
     , m_clock(clock)
     , m_finances(nullptr)
     , m_visible(false)
-    , m_gameStartTime(clock ? clock->nowSeconds() : 0.0)
+    , m_graceElapsedSeconds(0.0)
     , m_gracePeriodExpired(false)
     , m_graceFadeAlpha(1.0f)
     , m_budgetFlashTimer(0.0f)
@@ -308,9 +308,12 @@ void HUD::update(float dt) {
 
     // --- Grace period indicator ---
     // 120 real-second wall-clock grace period from game start
-    if (!m_gracePeriodExpired && m_clock) {
-        double elapsed = m_clock->nowSeconds() - m_gameStartTime;
-        double remaining = 120.0 - elapsed;
+    if (!m_gracePeriodExpired) {
+        // Advance grace timer only when the sim is not paused (e.g. ESC menu open).
+        if (m_sim && !m_sim->isPaused()) {
+            m_graceElapsedSeconds += static_cast<double>(dt);
+        }
+        double remaining = 120.0 - m_graceElapsedSeconds;
 
         if (remaining <= 0.0) {
             // Begin fade-out over 0.5s
@@ -374,9 +377,8 @@ void HUD::toggleFinancesPanel() {
 // notifyGameStarted — Phase 11m: reset grace period for new game session.
 // ---------------------------------------------------------------------------
 void HUD::notifyGameStarted() {
-    if (!m_clock) return;
-    m_gameStartTime      = m_clock->nowSeconds();
-    m_gracePeriodExpired = false;
+    m_graceElapsedSeconds = 0.0;
+    m_gracePeriodExpired  = false;
     m_graceFadeAlpha     = 1.0f;
     if (m_backend && m_gracePeriodLabel != kInvalidUIElement && m_visible) {
         m_backend->setElementAlpha(m_gracePeriodLabel, 1.0f);
