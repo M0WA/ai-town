@@ -177,6 +177,13 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------------
     StdTerrainRNG terrainRng;
     {
+        // Render one frame before the blocking generate() call so the loading screen
+        // is visible on screen before the CPU-intensive generation begins.
+        device->run();
+        renderer.beginFrame();
+        renderer.drawScene();
+        renderer.endFrame();
+
         const int mapTiles = uiManager.getPendingMapTiles();
         terrainSystem.generate(mapTiles, mapTiles, 10.0f, &terrainRng);
     }
@@ -240,28 +247,6 @@ int main(int argc, char** argv) {
     SaveSystem saveSystem(&wallClock);
     saveSystem.setSimulation(&citySimulation);
 
-    // Update Main Menu "Load Game" button state using ISaveSystem::getSaveFileState().
-    // Three states per architecture/ui-ux/main-menu-new-game-flow.md:
-    //   Valid      — button enabled; click → loading screen
-    //   AllCorrupt — button grayed; tooltip shows save directory path for recovery
-    //   NoSaves    — button grayed; tooltip "No saves found"
-    {
-        SaveFileState saveState = saveSystem.getSaveFileState();
-        uiManager.setSaveAvailable(saveState == SaveFileState::Valid);
-        switch (saveState) {
-            case SaveFileState::NoSaves:
-                uiManager.setSaveStatusText("No saves found.");
-                break;
-            case SaveFileState::AllCorrupt:
-                uiManager.setSaveStatusText(
-                    "Save data is corrupted — cannot load. Check "
-                    + saveSystem.getSaveDirectoryPath() + " for recovery.");
-                break;
-            case SaveFileState::Valid:
-                uiManager.setSaveStatusText("");  // hide label when saves are available
-                break;
-        }
-    }
     uiManager.setSaveSystem(&saveSystem);
 
     // -------------------------------------------------------------------------
@@ -303,6 +288,30 @@ int main(int argc, char** argv) {
             renderer.beginFrame();
             renderer.drawScene();
             renderer.endFrame();
+        }
+    }
+
+    // Update Load Game button state after loading screen completes (deferred from startup
+    // to avoid blocking before the loading screen is visible).
+    // Three states per architecture/ui-ux/main-menu-new-game-flow.md:
+    //   Valid      — button enabled; click → loading screen
+    //   AllCorrupt — button grayed; tooltip shows save directory path for recovery
+    //   NoSaves    — button grayed; tooltip "No saves found"
+    {
+        SaveFileState saveState = saveSystem.getSaveFileState();
+        uiManager.setSaveAvailable(saveState == SaveFileState::Valid);
+        switch (saveState) {
+            case SaveFileState::NoSaves:
+                uiManager.setSaveStatusText("No saves found.");
+                break;
+            case SaveFileState::AllCorrupt:
+                uiManager.setSaveStatusText(
+                    "Save data is corrupted — cannot load. Check "
+                    + saveSystem.getSaveDirectoryPath() + " for recovery.");
+                break;
+            case SaveFileState::Valid:
+                uiManager.setSaveStatusText("");  // hide label when saves are available
+                break;
         }
     }
 
