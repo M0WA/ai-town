@@ -276,6 +276,13 @@ void IrrlichtRenderer::clearCity() {
         m_overlayNode->remove();
         m_overlayNode = nullptr;
     }
+
+    // Note: TextureCache::evictUnreferenced() is intentionally NOT called here.
+    // Atlas textures (buildings_atlas_d.dds, road tileable, billboard atlas) are
+    // loaded once at init and retained across game sessions for reuse in the next
+    // game's placeBuildingMesh() / addRoadTile() calls.  Calling evictUnreferenced()
+    // here would prematurely free textures that are still in active use.
+    // Per architecture/graphics-architecture/scene-graph-ownership.md §TextureCache Note.
 }
 
 void IrrlichtRenderer::beginFrame() {
