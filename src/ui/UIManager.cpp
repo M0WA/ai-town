@@ -1393,21 +1393,14 @@ void UIManager::update(float realDeltaSeconds) {
     // 1b. Poll MainMenuPanel for user requests (start game, settings, quit).
     if (m_state == GameState::MainMenu && m_mainMenu) {
         if (m_mainMenu->consumeStartGameRequest()) {
-            // Per spec: call m_sim->start() before transitionToGameplay() — but
-            // start() doesn't exist on ICitySimulation; the sim is already ticking.
-            if (!m_gameSessionActive) {
-                // First game: transition directly to gameplay.
-                transitionToGameplay(GameMode::Sandbox);
-            } else {
-                // Subsequent game: defer until main.cpp polls consumeNewGameRequest().
-                // Store parameters from the MainMenuPanel selection.
-                m_newGameParams.mapSize   = m_mainMenu ? m_mainMenu->getSelectedMapSize()
-                                                       : MapSize::kMedium;
-                m_newGameParams.seed      = 0;  // V1: fixed seed; may be extended later
-                m_newGameParams.difficulty = 1; // V1: Normal hardcoded; difficulty UI is future
-                m_newGamePending = true;
-                if (m_mainMenu) m_mainMenu->showLoadingScreen();
-            }
+            // All game starts (first and subsequent) go through the pending-flag path
+            // so main.cpp regenerates terrain with the user-selected map size.
+            m_newGameParams.mapSize   = m_mainMenu ? m_mainMenu->getSelectedMapSize()
+                                                   : MapSize::kMedium;
+            m_newGameParams.seed      = 0;  // V1: fixed seed; may be extended later
+            m_newGameParams.difficulty = 1; // V1: Normal hardcoded; difficulty UI is future
+            m_newGamePending = true;
+            if (m_mainMenu) m_mainMenu->showLoadingScreen();
             return; // Skip the rest of this frame's update — state just changed.
         }
         if (m_mainMenu->consumeLoadGameRequest()) {
