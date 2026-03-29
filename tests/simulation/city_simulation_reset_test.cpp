@@ -233,12 +233,17 @@ TEST_F(ResetTest, CitySimulation_Reset_ClearsServiceBuildings)
 // ---------------------------------------------------------------------------
 TEST_F(ResetTest, CitySimulation_ApplyLoadedJson_WithServiceBuildings_RoundTrip)
 {
+    // placeServiceBuilding requires at least one cardinal-adjacent road next to
+    // its 2×2 footprint.  Road at (2,3) is adjacent to the west side of (3,3).
+    sim_->placeRoad(2, 3, 0);
     sim_->placeServiceBuilding(3, 3, ServiceBuildingType::FireStation);
     drainNotifications();
 
     std::string json = sim_->serializeToJson();
-    ASSERT_NE(json.find("service_buildings"), std::string::npos)
-        << "JSON must contain service_buildings array when a building is placed";
+    // "degraded" only appears when at least one service building was serialized.
+    ASSERT_NE(json.find("\"degraded\""), std::string::npos)
+        << "JSON must contain a serialized service building entry; "
+           "check that placeServiceBuilding(3,3) succeeded (road at (2,3) should satisfy adjacency)";
 
     bool ok = sim_->applyLoadedJson(json);
     EXPECT_TRUE(ok)
