@@ -548,10 +548,11 @@ All panels are visible-by-default set to false except `NotificationManager` (alw
 | `Paused` | `Gameplay` | Pause menu Resume button |
 | `Gameplay` or `Paused` | `GameOver` | `CitySimulation` fires game-over event **(Scenario mode only — `transitionToGameOver()` checks `m_gameMode == GameMode::Scenario` before transitioning; no-op when `m_gameMode == GameMode::Sandbox`)** |
 
-On `transitionToGameplay()`: show HUD, Minimap, NotificationManager; hide MainMenuPanel and all other panels.
+On `transitionToGameplay()`: show HUD, Minimap, NotificationManager; hide MainMenuPanel and all other panels. Also calls `m_renderer->clearSceneBackground()` — removes the loading screen background so the live 3D scene is visible.
 On `transitionToPaused()`: show `PauseMenuPanel`; simulation is paused via `CitySimulation::setPaused(true)`.
 On `transitionToGameplay_fromPaused()`: hide pause menu overlay; simulation resumes via `CitySimulation::setPaused(false)`.
 On `transitionToGameOver()`: show game-over modal; simulation is paused (and stays paused — no resume path after game-over).
+On `transitionToMainMenu()`: calls `m_renderer->setSceneBackground("assets/textures/ui/loading_screen.png")` — installs `loading_screen.png` as a fullscreen background drawn by `IrrlichtRenderer::drawScene()` after `sceneManager->drawAll()` but before `guiEnvironment->drawAll()`. This makes the loading screen visible behind all GUI elements during: (1) the main menu state, (2) the transition from "Start City" click through the loading loop until the first in-game frame, and (3) save-game loading. The background is cleared by `transitionToGameplay()` when the first gameplay frame is ready. This path is distinct from the blocking terrain-generation loading loops in `main.cpp`, which call `drawFullscreenTexture` directly and do not go through `setSceneBackground`.
 
 ## Draw Order (per frame)
 
@@ -614,11 +615,13 @@ The required frame sequence (abbreviated to the relevant steps) is shown from tw
 ```text
 Inside IrrlichtRenderer::drawScene():
   a. sceneManager->drawAll()       // 3D scene pass
+  a'. drawSceneBackground()        // if setSceneBackground() is active: blit loading_screen.png
+                                   // fullscreen above 3D scene, below GUI (main menu / load states only)
   b. uiManager->draw()             // per-panel Z-order state update (visibility, text, alpha)
   c. guiEnvironment->drawAll()     // render all visible IGUIElement nodes to framebuffer
 ```
 
-Step (b) updates element state but does not render pixels. Step (c) paints all elements that are currently visible. Because (b) has already toggled visibility for the correct game state (e.g. main menu elements hidden during gameplay), (c) only renders what should be on screen. This sequence is the authoritative render loop defined in `architecture/graphics-architecture/irrlicht-device-lifecycle.md`. Any change to the ordering must be made there first.
+Step (a') is a conditional blit — only active when `setSceneBackground()` has been called and not yet cleared by `clearSceneBackground()` (i.e. during main menu and loading states). Step (b) updates element state but does not render pixels. Step (c) paints all elements that are currently visible. Because (b) has already toggled visibility for the correct game state (e.g. main menu elements hidden during gameplay), (c) only renders what should be on screen. This sequence is the authoritative render loop defined in `architecture/graphics-architecture/irrlicht-device-lifecycle.md`. Any change to the ordering must be made there first.
 
 `UIManager::draw()` (internal step b) is called after `sceneManager->drawAll()` and before `guiEnvironment->drawAll()` and `endScene()` — this is correct and distinct from `UIManager::update()` (step 3b of the main loop), which must precede `beginScene()`. The two methods serve different purposes: `update()` advances timer state and dispatches dismissal logic; `draw()` updates element state that must be current when `guiEnvironment->drawAll()` renders within the `beginScene()`/`endScene()` block.
 

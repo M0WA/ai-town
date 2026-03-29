@@ -250,6 +250,9 @@ protected:
         // partitioning. StrictMock requires EXPECT_CALL (ON_CALL alone is not enough).
         // Tests that specifically verify road-blocking behaviour add their own override.
         EXPECT_CALL(sim_, isWithinRoadRange(_, _, _)).Times(::testing::AnyNumber()).WillRepeatedly(Return(true));
+        // setSceneBackground/clearSceneBackground fire on state transitions (main menu ↔ gameplay).
+        EXPECT_CALL(renderer_, setSceneBackground(_)).Times(::testing::AnyNumber());
+        EXPECT_CALL(renderer_, clearSceneBackground()).Times(::testing::AnyNumber());
 
         uiManager_->setMapDimensions(10, 10);
 
@@ -2189,6 +2192,8 @@ protected:
         // isWithinRoadRange: default true so tiles appear road-accessible in drag preview
         // partitioning. StrictMock requires EXPECT_CALL (ON_CALL alone is not enough).
         EXPECT_CALL(sim_, isWithinRoadRange(_, _, _)).Times(AnyNumber()).WillRepeatedly(Return(true));
+        EXPECT_CALL(renderer_, setSceneBackground(_)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, clearSceneBackground()).Times(AnyNumber());
 
         uiManager_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
         uiManager_->setRenderer(&renderer_);

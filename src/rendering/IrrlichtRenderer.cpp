@@ -32,22 +32,23 @@ using namespace irr::scene;
 
 // -------------------------------------------------------------------------
 // CloudDomeShaderCallback — IShaderConstantSetCallBack for the cloud dome
-// GLSL shader.  Sets u_tex (sampler2D, unit 0) and u_cameraY (float, world-
-// space Y of the camera) on every draw call.
+// GLSL shader.  Sets u_tex (sampler2D, unit 0) on every draw call.
+//
+// u_cameraY has been REMOVED: the dome node tracks the camera's full XYZ
+// position each frame (setPosition(camPos) in update()), so the vertex shader
+// receives gl_Vertex already in camera-relative local space.  No world-Y
+// offset is needed in the shader.
 //
 // Lifetime rule (per shader-loading.md and CLAUDE.md):
-//   Unlike the original drop-after-pass pattern, this callback is kept alive
-//   by the caller (IrrlichtRenderer) so that setCameraY() can be called each
-//   frame.  The caller holds its own reference and must ->drop() it in the
-//   destructor (stored as void* m_cloudShaderCbRaw in the header).  Irrlicht
-//   also calls grab() internally, so the final drop happens when the material
-//   renderer is destroyed.  Never use std::unique_ptr — causes double-free.
+//   This callback is kept alive by the caller (IrrlichtRenderer) so that it
+//   can be dropped in the destructor (stored as void* m_cloudShaderCbRaw in
+//   the header).  Irrlicht also calls grab() internally, so the final drop
+//   happens when the material renderer is destroyed.
+//   Never use std::unique_ptr — causes double-free.
 // -------------------------------------------------------------------------
 class CloudDomeShaderCallback : public irr::video::IShaderConstantSetCallBack
 {
 public:
-    void setCameraY(float y) { m_cameraY = y; }
-
     void OnSetConstants(irr::video::IMaterialRendererServices* services,
                         irr::s32 /*userData*/) override
     {
@@ -57,17 +58,7 @@ public:
         // never explicitly set.
         irr::s32 tex = 0;
         services->setPixelShaderConstant("u_tex", &tex, 1);
-
-        // u_cameraY is used in the vertex shader for elevation-angle fade.
-        // Set via both vertex and pixel shader constant setters — Irrlicht's GLSL
-        // backend behaviour differs across platforms; setting both ensures the
-        // uniform is visible to the linked program regardless of backend quirks.
-        services->setVertexShaderConstant("u_cameraY", &m_cameraY, 1);
-        services->setPixelShaderConstant("u_cameraY", &m_cameraY, 1);
     }
-
-private:
-    float m_cameraY{0.0f};
 };
 
 IrrlichtRenderer::IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiManager)
@@ -119,8 +110,8 @@ IrrlichtRenderer::IrrlichtRenderer(irr::IrrlichtDevice* device, UIManager* uiMan
 IrrlichtRenderer::~IrrlichtRenderer() {
     // Drop our reference to the cloud dome shader callback.  Irrlicht holds its own
     // grab() reference internally; this drop releases only the caller's reference
-    // (the one we retained in initCloudPlane() so that setCameraY() could be called
-    // each frame).  Null check covers headless runs where the shader compile failed.
+    // (retained in initCloudPlane() for the callback's lifetime).
+    // Null check covers headless runs where the shader compile failed.
     if (m_cloudShaderCbRaw) {
         static_cast<CloudDomeShaderCallback*>(m_cloudShaderCbRaw)->drop();
         m_cloudShaderCbRaw = nullptr;
@@ -333,6 +324,14 @@ void IrrlichtRenderer::drawScene() {
                 m_driver->drawMeshBuffer(buf);
             }
         }
+    }
+
+    // Scene background: drawn after all 3D scene content but before the GUI layer.
+    // Active during main menu and loading transitions (set via setSceneBackground).
+    // Covers the otherwise-empty 3D viewport; GUI buttons appear on top because
+    // guiEnv->drawAll() runs after this call.
+    if (!m_bgTexturePath.empty()) {
+        drawFullscreenTexture(m_bgTexturePath);
     }
 
     if (m_uiManager) {
@@ -2876,17 +2875,17 @@ void IrrlichtRenderer::initCloudPlane()
                 std::string(AITOWN_ASSETS_DIR) + "/shaders/cloud_dome.frag";
 
             // CloudDomeShaderCallback: raw heap allocation.  We keep our own reference
-            // (stored as m_cloudShaderCbRaw) so that setCameraY() can be called each
-            // frame in update().  Irrlicht also calls grab() internally on the passed
-            // pointer.  The caller's reference is dropped in IrrlichtRenderer::~IrrlichtRenderer().
+            // (stored as m_cloudShaderCbRaw) so the destructor can drop it.
+            // Irrlicht also calls grab() internally on the passed pointer.  The caller's
+            // reference is dropped in IrrlichtRenderer::~IrrlichtRenderer().
             // Never std::unique_ptr — causes double-free (see CLAUDE.md shader callbacks).
             CloudDomeShaderCallback* cb = new CloudDomeShaderCallback();
             irr::s32 matType = gpu->addHighLevelShaderMaterialFromFiles(
                 vsPath.c_str(), "main", irr::video::EVST_VS_1_1,
                 fsPath.c_str(), "main", irr::video::EPST_PS_1_1,
                 cb, irr::video::EMT_TRANSPARENT_ALPHA_CHANNEL);
-            // Do NOT drop cb unconditionally here — we store our reference for per-frame
-            // setCameraY() updates.  Drop only on shader failure (we have no use for it).
+            // Do NOT drop cb unconditionally here — we store our reference for its
+            // lifetime.  Drop only on shader failure (we have no further use for it).
             if (matType == -1) {
                 char buf[512];
                 std::snprintf(buf, sizeof(buf),
@@ -2966,14 +2965,10 @@ void IrrlichtRenderer::update(float dt)
     // m_lastCameraPosition is updated by setCamera() every frame before update() runs.
     if (m_camera) {
         const core::vector3df camPos = m_camera->getPosition();
+        // Node tracks full camera XYZ — dome stays centred on camera at all heights.
+        // The vertex shader uses gl_Vertex.y directly (already cam-relative local
+        // space) so no per-frame camera-Y uniform is needed.
         m_cloudNode->setPosition(camPos);
-
-        // Feed camera world-space Y to the shader callback so the elevation-angle
-        // fade in cloud_dome.frag uses the correct reference height each frame.
-        if (m_cloudShaderCbRaw) {
-            static_cast<CloudDomeShaderCallback*>(m_cloudShaderCbRaw)
-                ->setCameraY(camPos.Y);
-        }
     }
 }
 
