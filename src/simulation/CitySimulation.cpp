@@ -1999,6 +1999,12 @@ int CitySimulation::nearestRoadDistance(
     return minDist;
 }
 
+// isWithinRoadRange — public wrapper around nearestRoadDistance for UIManager.
+// Returns true if the footprint rooted at (x, z) has a road within Chebyshev distance 3.
+bool CitySimulation::isWithinRoadRange(int x, int z, DensityTier tier) const {
+    return nearestRoadDistance(m_tiles, x, z, footprintSize(tier)) <= 3;
+}
+
 // doProximityTick — check road proximity for all zoned buildings (origin tiles only).
 // Buildings > 3 tiles from road become abandoned; recovered when road is nearby again.
 void CitySimulation::doProximityTick() {
