@@ -68,7 +68,7 @@ private:
 
     // --- Grace period indicator (x:8-1912, y:60-92) ---
     UIElementHandle m_gracePeriodLabel{kInvalidUIElement};
-    double          m_gameStartTime{0.0};
+    double          m_graceElapsedSeconds{0.0};  // accumulated only when sim is not paused
     bool            m_gracePeriodExpired{false};
     float           m_graceFadeAlpha{1.0f};
 
