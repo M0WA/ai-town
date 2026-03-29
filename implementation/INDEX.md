@@ -114,5 +114,6 @@ All open contradictions have been resolved. See the Resolved Contradictions list
 - [Phase 11k: CI Preflight Deduplication — supply-chain-lint & validate-assets Jobs](phase-11k.md)
 - [Phase 11l: Bug-Fix Batch — Terrain Stitching, Construction Delay, Ground Plates, Finances Panel, Notification Log Scrollbar](phase-11l.md)
 - [Phase 11m: Bug-Fix Batch — Zone Overlay Colors, Road Proximity, Terrain Border Flatten, HUD Grace Period, Save State Refresh, New-Game Reset, Finances Panel Background](phase-11m.md)
+- [Phase 11n: Architecture Spec Consistency — CI/CD, Game Design, UI/UX, Graphics, Textures, Cross-Domain Interfaces](phase-11n.md)
 - [Phase 12: Polish, Performance & V1 Hardening](phase-12.md)
 - [Post-V1 Backlog](post-v1-backlog.md)
