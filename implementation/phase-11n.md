@@ -4,11 +4,19 @@
 
 ### Goal
 
-Fix all 52 approved specification inconsistencies identified in the full architecture review
+Fix specification inconsistencies identified in the full architecture review
 (`architecture-review/architecture-review.md`, `architecture-review-inconsistency-fixes.md`).
+Original count: 52 approved items. After OD resolution: **51 active checkboxes** (I-7 removed
+as its premise was wrong; B-1, C-4, C-6 pre-completed as already applied in the codebase).
+
 Every fix in this phase is a **spec-only edit** — no C++ source files are touched.
 Downstream code impacts (e.g. renaming `getDemandPressurePct` → `getZoneDemandFactor`,
 adding `src/interfaces/vec3.h`) are noted per deliverable and deferred to subsequent phases.
+
+> **Design change note (E-1):** The service-building placement rule in `service-coverage.md`
+> is being deliberately changed (not just consistency-fixed) to require road adjacency and
+> reject placement on road-occupied tiles. This aligns the spec with `zoning-system.md` and
+> was accepted as a game-design decision (OD-2 Option B).
 
 Each deliverable item references its INC number from the review for traceability.
 
@@ -41,11 +49,10 @@ Each deliverable item references its INC number from the review for traceability
 
 **Files:** `architecture/testing/coverage.md`
 
-- [ ] **B-1** `coverage.md` — `lcov --capture` step: Change `--ignore-errors mismatch,inconsistent`
-  to `--ignore-errors mismatch,inconsistent,version`. Add rationale comment: "`version`
-  suppresses the gcov version-string mismatch emitted when build and capture gcov versions
-  differ slightly." Apply to every code block in the file that shows a `lcov --capture`
-  invocation. _(INC-003, INC-067)_
+- [x] **B-1** `coverage.md` — `lcov --capture` step: Change `--ignore-errors mismatch,inconsistent`
+  to `--ignore-errors mismatch,inconsistent,version`. _(INC-003, INC-067)_
+  > **PRE-COMPLETED**: `coverage.md` already contains `--ignore-errors mismatch,inconsistent,version`
+  > with the rationale comment. No file change needed.
 
 - [ ] **B-2** `coverage.md` — `lcov --remove` step: Change `--ignore-errors unused` to
   `--ignore-errors unused,inconsistent`. Add rationale: "lcov 2.x emits inconsistent data
@@ -72,26 +79,28 @@ Each deliverable item references its INC number from the review for traceability
   Reword the adjacent note from "To pin to a specific version use `@0.47.0`" to
   "MUST pin to a specific version; current pin: `@0.47.0`." _(INC-016)_
 
-- [ ] **C-4** `github-actions-workflow.md` Linux coverage job: Change `--base-directory .`
-  to `--base-directory "${GITHUB_WORKSPACE}"` in the `lcov --capture` snippet. Add note:
-  "`$GITHUB_WORKSPACE` resolves to the container path inside the CI image, which is more
-  portable than `.` on non-standard runner layouts." _(INC-029)_
+- [x] **C-4** `github-actions-workflow.md` Linux coverage job: Change `--base-directory .`
+  to `--base-directory "${GITHUB_WORKSPACE}"` in the `lcov --capture` snippet. _(INC-029)_
+  > **PRE-COMPLETED**: `github-actions-workflow.md` line 431 already uses
+  > `--base-directory ${{ github.workspace }}`. No file change needed.
 
 - [ ] **C-5** `caching.md` line referencing `softprops/action-gh-release`: Replace the
   `<40-CHAR-SHA>` placeholder with `9d7c94cfd0a1f3ed45544c887983e9fa900f0564` and add
   comment `# v2.1.0`. _(INC-030)_
 
-- [ ] **C-6** `github-actions-workflow.md` Linux unit and integration test steps: Add
+- [x] **C-6** `github-actions-workflow.md` Linux unit and integration test steps: Add
   `ALSOFT_DRIVERS: "null"` to the `env:` block alongside the existing `AITOWN_HEADLESS: "1"`.
-  Add inline comment: "null driver required on headless Linux — prevents OpenAL from
-  attempting to open a real audio device." _(INC-032)_
+  _(INC-032)_
+  > **PRE-COMPLETED**: `ALSOFT_DRIVERS: 'null'` is already present in all three Linux test
+  > step `env:` blocks (unit, integration, opengl). No file change needed.
 
 - [ ] **C-7** `caching.md` cache key description: Replace the vague "OS" component label
   with the explicit expression `${{ runner.os }}` so the key format is unambiguous
   and matches the actual workflow syntax. _(INC-033)_
 
 - [ ] **C-8** `github-actions-workflow.md` Windows build job: Add a pre-test verification
-  step after the build step:
+  step after the build step.
+
   ```yaml
   - name: Verify soft_oal.dll present
     shell: pwsh
@@ -101,6 +110,7 @@ Each deliverable item references its INC number from the review for traceability
         exit 1
       }
   ```
+
   This is a hard-fail per Phase 7 (`hrtf-initialization.md`). _(INC-042)_
 
 ---
@@ -228,15 +238,25 @@ Each deliverable item references its INC number from the review for traceability
   value. Any change to toolbar height requires updating both `hud-layout.md` and
   `input-arbitration.md` simultaneously." _(INC-022)_
 
-- [ ] **G-5** `ui-manager.md` `ui_constants.h` block: Add the five missing minimap constants:
+- [ ] **G-5** `ui-manager.md` `ui_constants.h` block: Document all minimap constants.
+  Three constants already exist in `src/ui/ui_constants.h` with correct values (verified from
+  source). Two are missing. The spec must document all five.
+
+  **Already in `src/ui/ui_constants.h`** (document in spec, no code change needed):
+
   ```cpp
-  constexpr s32 kMinimapLeft                  = 1576;
-  constexpr s32 kMinimapRight                 = 1920;
-  constexpr s32 kMinimapBottom                = 1080;
-  constexpr s32 kMinimapWidgetTop             = 880;   // minimap top when no overlay active
-  constexpr s32 kMinimapWidgetTopOverlayActive = 920;  // minimap top when overlay panel open
+  constexpr int kMinimapWidgetLeft             = 1576;  // left edge of full widget footprint
+  constexpr int kMinimapWidgetTop              = 848;   // toggle row top (no overlay)
+  constexpr int kMinimapWidgetTopOverlayActive = 732;   // legend panel top (overlay active)
   ```
-  (Use actual values from the minimap spec if they differ from the placeholder values above.)
+
+  **Missing from `src/ui/ui_constants.h`** (add to both spec and source in a later phase):
+
+  ```cpp
+  constexpr int kMinimapRight   = 1920;  // right edge (screen right)
+  constexpr int kMinimapBottom  = 1080;  // bottom edge (screen bottom)
+  ```
+
   These are referenced by `input-arbitration.md` Priority 3 dispatch table. _(INC-052)_
 
 - [ ] **G-6** `resolution-ui-scaling.md` Glass City canonical palette table: Add the surplus-green
@@ -281,8 +301,9 @@ Each deliverable item references its INC number from the review for traceability
   from `src/ui/` in Phase 10b Feature 3 — see `testability-architecture.md` §IUIBackend
   for the canonical location and method list)." _(INC-018)_
 
-- [ ] **H-2** `testability-architecture.md`: Add a spec entry for `IClock`:
-  ```
+- [ ] **H-2** `testability-architecture.md`: Add a spec entry for `IClock`.
+
+  ```text
   Header: src/interfaces/IClock.h
   Methods:
     virtual double now() const = 0;   // seconds since epoch (steady_clock)
@@ -291,20 +312,24 @@ Each deliverable item references its INC number from the review for traceability
     WallClock  — production (std::chrono::steady_clock)
     ManualClock — tests (manually advanced via ManualClock::advance(seconds))
   ```
+
   Add cross-references from all specs that inject `IClock` (`audio-system.md`,
   `save-system.md`, `economy-model.md`). _(INC-023)_
 
-- [ ] **H-3** `testability-architecture.md`: Add a spec entry for `ISimulationRNG`:
-  ```
+- [ ] **H-3** `testability-architecture.md`: Add a formal spec entry block for `ISimulationRNG`,
+  documenting the **existing** interface (OD-4: keep no-arg `nextFloat()`).
+
+  ```text
   Header: src/interfaces/ISimulationRNG.h
   Methods:
-    virtual float nextFloat(float lo, float hi) = 0;  // uniform [lo, hi)
-    virtual int   nextInt(int lo, int hi)        = 0;  // uniform [lo, hi]
+    virtual float nextFloat()              = 0;  // uniform [0.0, 1.0)
+    virtual int   nextInt(int min, int max) = 0;  // inclusive [min, max]
     virtual ~ISimulationRNG() = default;
   Implementations:
     StdRNG    — production (std::mt19937)
     ManualRNG — tests (returns pre-loaded sequence)
   ```
+
   Cross-reference from `service-coverage.md` and any other spec referencing `ISimulationRNG`.
   _(INC-024)_
 
@@ -314,16 +339,19 @@ Each deliverable item references its INC number from the review for traceability
   cross-reference in `simulation-time.md`: "See `irrlicht-device-lifecycle.md §Per-Frame
   Loop` for the canonical combined sequence including render steps." _(INC-025)_
 
-- [ ] **H-5** `simulation-time.md` frame loop: Add step 3c explicitly:
-  ```
+- [ ] **H-5** `simulation-time.md` frame loop: Add step 3c explicitly.
+
+  ```text
   3c. SaveSystem::update(realDeltaSeconds)
       — ticks the 120-second auto-save timer; fires auto-save if threshold reached.
       — Runs after UIManager::update() (step 3b), before terrain/audio updates.
   ```
+
   _(INC-053)_
 
-- [ ] **H-6** `testability-architecture.md`: Add a spec entry for the `vec3` type alias:
-  ```
+- [ ] **H-6** `testability-architecture.md`: Add a spec entry for the `vec3` type alias.
+
+  ```text
   Header: src/interfaces/vec3.h  (or src/interfaces/simulation_math.h)
   Definition:
     struct vec3 { float x, y, z; };
@@ -331,6 +359,7 @@ Each deliverable item references its INC number from the review for traceability
     // IAudioSystem.h, ISpatialAudio.h, and all simulation interfaces use vec3.
     // IrrlichtRenderer converts vec3 ↔ irr::core::vector3df at the boundary.
   ```
+
   Add cross-references in `audio-system.md`, `spatial-audio.md`, and `traffic-system.md`
   pointing to this canonical header.
   > **Downstream code impact (deferred):** `src/interfaces/vec3.h` must be created before
@@ -376,8 +405,7 @@ Each deliverable item references its INC number from the review for traceability
   |---|---|---|
   | Vehicle LOD0 | 5 | car_sedan, car_hatchback, car_suv, bus_standard, truck_cargo |
 
-  Update the sub-total line to: "**Total: 45** (36 zone buildings + 4 service buildings
-  + 5 vehicles)." _(INC-019)_
+  Update the sub-total line to: "**Total: 45** (36 zone buildings + 4 service buildings + 5 vehicles)." _(INC-019)_
 
 - [ ] **I-4** `model-validator-tool.md` §Road tile category: Add a note: "Road tile geometry
   is **procedurally generated at runtime** via `buildTileRoadMesh()`. No road tile `.b3d`
@@ -394,12 +422,6 @@ Each deliverable item references its INC number from the review for traceability
   `renderer->update(realDeltaSeconds);` between `terrainSystem->update(dt);` and
   `driver->beginScene(...)`. Add inline comment: `// cloud UV scroll + per-frame renderer state`.
   _(INC-037)_
-
-- [ ] **I-7** `procedural-terrain.md` and `3d-model-standards.md` §Polygon offset: Reconcile
-  the carriageway `PolygonOffsetFactor`. The canonical value is **1** (per `procedural-terrain.md`).
-  Update `3d-model-standards.md` §Center-line strip to use `PolygonOffsetFactor = 2`
-  (one step above carriageway = 1) and remove the comment "one step above the carriageway's
-  `factor = 4`" — that comment is wrong. _(INC-038)_
 
 - [ ] **I-8** `irrlicht-device-lifecycle.md` §Construction sequence table — step 2
   (`IrrlichtUIBackend`): Add a note: "`IrrlichtUIBackend` MUST be constructed in `main.cpp`
@@ -463,20 +485,108 @@ Each deliverable item references its INC number from the review for traceability
   mip chains** — the additional fifth mip level (e.g. 256×256 for a 4096×4096 atlas) adds
   only ~0.4% of the mip-0 footprint and is negligible for budget estimation purposes." _(INC-050)_
 
-- [ ] **J-7** `building-atlas-layout.md` §Road Marking Atlas and `2d-texture-standards.md`
-  §Road marking: Add an authoritative ruling on the sRGB vs. linear decision:
-  "**Road marking atlas upload path: linear (not sRGB).** Road marking channel data
-  (white lane lines, crosswalk stripes) is authored as **grayscale mask values**, not
-  perceptual diffuse colors. The shader multiplies the mask against a hardcoded perceptual
-  color constant at sample time — the texture data itself is linear mask data.
-  Linear upload is correct. `texture-cache.md` dispatch table entry for `_road_marking`
-  is correct as-is." _(INC-056)_
+- [ ] **J-7** `texture-cache.md` §Suffix dispatch table: Add the missing `_road_marking`
+  entry. `2d-texture-standards.md` already specifies sRGB for road markings (OD-6: keep sRGB).
+  The dispatch table simply lacked the entry. Add:
+
+  ```text
+  _road_marking  →  loadSRGB()
+  ```
+
+  Add a note: "Road marking atlas (`road_marking_atlas.dds`) contains diffuse road surface
+  color and lane marking color — visual data requiring gamma-correct sampling. Upload via the
+  sRGB path, consistent with `2d-texture-standards.md` §Road marking." _(INC-056)_
+
+---
+
+---
+
+### Open Decisions
+
+The following items require a deliberate decision or pre-application verification before the
+implementing agent can proceed. Each entry documents the exact divergence found between the
+proposed fix and the current state of the target files.
+
+---
+
+#### OD-1 — B-1 already applied (no-op) ✅ RESOLVED
+
+**Decision:** B-1 marked as pre-completed (`[x]`). No file change needed.
+
+---
+
+#### OD-2 — E-1 rule change ✅ RESOLVED
+
+**Decision:** Option B — accepted as a deliberate game-design decision. E-1 fix as written
+applies the road-adjacency rule. Phase goal section updated with a design-change note.
+`zoning-system.md` should also be updated as part of E-1 to state the rule explicitly for
+service buildings (add to existing Multi-Tile Footprint Placement Rules section).
+
+---
+
+#### OD-3 — G-5 corrected to source code values ✅ RESOLVED
+
+**Decision:** Use source code values. `src/ui/ui_constants.h` already defines
+`kMinimapWidgetLeft = 1576`, `kMinimapWidgetTop = 848`, `kMinimapWidgetTopOverlayActive = 732`
+with correct values. G-5 checkbox updated to document these existing constants and flag
+`kMinimapRight = 1920` and `kMinimapBottom = 1080` as missing from source.
+
+---
+
+#### OD-4 — H-3 signature decision ✅ RESOLVED
+
+**Decision:** Option A — keep existing no-arg `nextFloat()`. H-3 checkbox updated to
+document the existing interface (`nextFloat()` returns [0.0, 1.0); `nextInt(int min, int max)`).
+No interface change; no downstream code impact.
+
+---
+
+#### OD-5 — I-7 removed ✅ RESOLVED
+
+**Decision:** I-7 removed from the checklist. Both `procedural-terrain.md` and
+`3d-model-standards.md` already agree: carriageway `PolygonOffsetFactor = 4`,
+center-line `= 5`. The `factor = 1` in `procedural-terrain.md` is for the terrain mesh
+material, not the road carriageway. No change needed.
+
+---
+
+#### OD-6 — J-7 sRGB ruling ✅ RESOLVED
+
+**Decision:** Option A — keep sRGB. `2d-texture-standards.md` already specifies sRGB for
+road markings. J-7 checkbox updated to add the missing `_road_marking` → `loadSRGB()` entry
+to `texture-cache.md`'s dispatch table. No changes to `2d-texture-standards.md` needed.
+
+---
+
+#### OD-7 — Pre-application verification ✅ RESOLVED
+
+All items flagged for pre-application verification have been read. Findings and implementor
+guidance are in the table below — no further decisions needed.
+
+| Item | File | Finding | Action |
+|---|---|---|---|
+| **A-1** | `caching.md` | No distinct "Linux vcpkg caching" or "FetchContent caching" headings exist. The FetchContent key in line 28 is explicitly scoped to the `coverage-linux` job. The "OS" label appears in prose on line 3. | Reword fix: modify inline prose on line 3 to use `${{ runner.os }}`; add a qualifying note to line 28 clarifying the FetchContent key is `coverage-linux`-only; do NOT mark FetchContent as N/A — it is in active use for that job |
+| **A-2** | `dependency-management.md` | Lines 26–33 describe `lukka/run-vcpkg` as the CI integration without Windows-only scope. No Docker-image language is present. | Add a scoping sentence to the existing paragraph (lines 26–33) rather than appending a standalone note — the added sentence must qualify that `lukka/run-vcpkg` is invoked in the Windows job; Linux jobs use `VCPKG_MANIFEST_INSTALL=OFF` against `/opt/vcpkg_installed` |
+| **C-1** | `dependency-management.md` | Confirmed: both PowerShell paths (lines 234 and 235) use `glew.lib`. Both must be changed. | Update **both** occurrences to `glew32.lib` |
+| **C-2** | `dependency-management.md` | Confirmed: neither `build-linux` (line 70) nor `coverage-linux` (line 77) install snippet includes `libxxf86vm-dev`. | Add `libxxf86vm-dev` to **both** install snippets |
+| **C-3** | `github-actions-workflow.md` | Line 583: `npm install -g markdownlint-cli` — **no version pin**. Line 594: optional pin note ("To pin to a specific version use `@0.47.0`"). Fix IS needed. | Change line 583 to `npm install -g markdownlint-cli@0.47.0`; change line 594 note from "To pin…" to "MUST pin…" |
+| **C-4** | `github-actions-workflow.md` | **Already applied.** Line 431 already uses `--base-directory ${{ github.workspace }}`. | Mark C-4 as pre-completed — no file change needed |
+| **C-6** | `github-actions-workflow.md` | **Already applied.** `ALSOFT_DRIVERS: 'null'` is present in all three Linux test steps (unit, integration, opengl). | Mark C-6 as pre-completed — no file change needed |
+| **C-8** | `github-actions-workflow.md` | No Phase 7 combined DLL+HRTF hard-fail step found in the Windows job. Only reference to `soft_oal.dll` is in the CPack install section. The single-DLL check proposed by phase-11n is safe to add. However, `dependency-management.md` already specifies a combined step checking **both** `soft_oal.dll` and `default.mhr`. | Add a combined step checking both `soft_oal.dll` AND `default.mhr` (not just `soft_oal.dll` as written in phase-11n). Update the phase-11n snippet accordingly. |
+| **E-2** | `zoning-system.md` | Confirmed at line 145: `density_upgrade_wave_demand_threshold = 0.50` exists; at line 163: `construction_delay_demand_threshold = 0.50` exists. Both are at 0.50, confirming the split has not been applied. | Fix IS needed: change `density_upgrade_wave_demand_threshold` → `density_upgrade_threshold = 0.75`; keep `construction_delay_demand_threshold = 0.50` unchanged |
+| **F-1** | `game-progression-modes.md` | File documents milestones inline at line 3 and explains the 100K no-stinger rule at line 16. **No explicit constant table** (`population_milestone_threshold_1..5`) exists. No conflicting table to resolve. | Fix IS needed: add the 5-row constant table as proposed |
+| **F-2** | `save-system.md` | Line 3 confirms auto-save fires before modal is shown. Missing: explicit statement that this resets the 120s timer and that the timer pauses during the blocking modal. | Fix IS needed: add the timer-reset and modal-pause clarification |
+| **G-1** | `hud-layout.md` | Confirmed at lines 114–124: 4×1 single-row grid, y:64, 64×40 px buttons, columns 0–3 = Power Plant / Water Tower / Fire Station / Police Station. Contradicts `ui-manager.md` (2×2, y:176, 96×48). | Fix IS needed. Correct 2×2 cell assignment (per `service-coverage.md`): **Row 0** = (Power Plant col 0, Water Tower col 1); **Row 1** = (Fire Station col 0, Police Station col 1) |
+| **G-2** | `hud-layout.md` + `ui-manager.md` | Confirmed: line 14 parenthetical still says `y:664–744` (stale). Primary bounds at line 19 already correct at `y:664–748`. No demand bar bounds constant exists in `ui-manager.md` — grep finds no `664`/`744`/`748` in that file. | Update line 14 parenthetical from `y:664–744` to `y:664–748`. **Scope the `ui-manager.md` portion of G-2 to "no change needed"** — there is no target text to update |
+| **G-4** | `hud-layout.md` | Confirmed: line 11 says "Priority 3". The `kToolbarBottom = 784` input gate is Priority 5 in `input-arbitration.md`. | Fix must change "Priority 3" → "Priority 5" on line 11 (in addition to adding the cross-reference note) |
+| **I-3** | `model-validator-tool.md` | Confirmed: no Vehicle LOD0 row in the table; line 183 states 45 LOD0 files. Zone(36)+Service(4) = 40, gap of 5 = vehicles. Current "Total `.b3d`: **92**" counts LOD0+LOD1+LOD2 for zone+service only (no vehicles). Vehicles have LOD0+LOD1 each, so adding them raises the all-`.b3d` total to 92+10 = **102**. | Add Vehicle LOD0 row (5). Add a separate "Total LOD0 `.b3d`" row = **45** (36+4+5). Update the "Total `.b3d`" all-level count from 92 → **102** (add 5 vehicle LOD0 + 5 vehicle LOD1). Do NOT replace the 92-total row with "45" — the two counts are distinct |
+| **J-5** | `building-atlas-layout.md` | Confirmed: Phase 5 exit criterion block exists (line 340). Line 330 contains "diffuse at DXT1 256x256 effective per island" — the stale value that needs the supersession note. | Fix IS needed: add the "SUPERSEDED by phase-11e: effective UV island resolution is now 496×496 px" correction note after the Phase 5 sign-off paragraph (after line 342) |
 
 ---
 
 ### Exit Criteria
 
-- [ ] All 52 checklist items above are ticked.
+- [ ] All 51 checklist items above are ticked (52 original − 1 removed (I-7); B-1, C-4, C-6 pre-completed).
 - [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` reports zero errors.
 - [ ] No new spec contradictions are introduced (spot-check: every edited file's cross-references remain consistent).
 - [ ] Downstream code impacts noted in E-2, E-3, H-6 are captured as open items in `INDEX.md` §Spec Contradictions Flagged (or as explicit deliverables in a subsequent phase).
