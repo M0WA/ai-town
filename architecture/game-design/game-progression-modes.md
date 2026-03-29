@@ -1,5 +1,18 @@
 # Game Progression & Modes
 
+## Population Milestone Constants
+
+| Constant | Value | Effect |
+|---|---|---|
+| `population_milestone_threshold_1` | 1 000 | Toast + stinger + City Rating → Town |
+| `population_milestone_threshold_2` | 10 000 | Toast + stinger + City Rating → City |
+| `population_milestone_threshold_3` | 50 000 | Toast + stinger + City Rating → Metropolis |
+| `population_milestone_threshold_4` | 100 000 | **Toast only** — no stinger, no City Rating change |
+| `population_milestone_threshold_5` | 500 000 | Toast + stinger + City Rating → Megalopolis |
+
+Note: 100K is intentionally a toast-only milestone. It does not trigger `stinger_milestone` and
+does not change the City Rating tier.
+
 - **Sandbox mode** (ships first): Configurable starting funds per difficulty tier (Easy=$1M / Normal=$500K / Hard=$200K); disasters: post-V1 scope (not available in V1 Sandbox); milestone notifications at 1K / 10K / 50K / 100K / 500K population
 - **City Rating tiers** (post-density-unlock progression layer for Sandbox): After all density tiers are unlocked, the player's city advances through City Rating tiers based on population. Tiers are displayed prominently in the HUD and serve as visible long-term goals in open-ended Sandbox play:
 

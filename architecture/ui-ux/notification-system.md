@@ -44,6 +44,8 @@
     - **320 px budget verification**: CRITICAL band = 2 × 48 px (fixed) = 96 px from y:20 → y:116. Normal band starts at y:130 (14 px visual gap below CRITICAL band). 3 Normal toasts × 63 px = 189 px; total from top = 130 + 189 = 319 px ≤ 320 px. ✓ `NotificationManager` must enforce the 63 px Normal toast height cap and the 48 px CRITICAL toast fixed height at element creation time.
     - Long notification messages that would overflow the toast body are stored in full in the notification log (bell icon) but displayed truncated with "…" in the toast. The `NotificationManager` must NOT allow toast body elements to exceed the max height; if text wraps beyond the allowed height, truncate and append "…".
   - Combined maximum height of both bands must not exceed 320 px (virtual) to prevent the stack from reaching center screen.
+  - **Z-order vs. resource bar**: CRITICAL toasts render above the resource bar (higher Z-order). The resource bar occupies y:0–56; CRITICAL toasts begin at y:20 and therefore overlap the resource bar visually. The toast layer MUST be assigned a higher Z-order than the resource bar layer so toasts are not occluded.
+  - **Layout constraints — grace period and Normal toast gap**: The grace period indicator occupies y:60–92. Normal toasts begin at y:130. The 38 px gap (y:92–130) ensures these two elements never overlap. This constraint must be preserved if either element's position changes.
 - **Notification log**: Accessible via a bell/log icon in the HUD. See [Notification Log Panel](#notification-log-panel) below for full specification.
 
 ## Visual Design — Glass City

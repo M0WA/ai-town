@@ -101,12 +101,18 @@ This distinction is required for the bootstrap demand mechanism (ticks 0–5) do
 2. CitySimulation::tick(realDelta)    ← game tick MUST be here
 3. CameraController::update()
 3b. UIManager::update()
+3c. SaveSystem::update(realDeltaSeconds)
+    — ticks the 120-second auto-save timer; fires auto-save if threshold reached.
+    — Runs after UIManager::update() (step 3b), before terrain/audio updates.
 4a. syncListenerToCamera(cameraState)
 4b. AudioSystem::update(realDeltaSeconds)
 5. beginScene()
 6. drawScene()  (includes UIManager::draw())
 7. endFrame()
 ```
+
+See `irrlicht-device-lifecycle.md §Per-Frame Loop` for the canonical combined sequence
+including render steps.
 
 Any implementation that advances the simulation tick after `beginScene()` has been called violates this ordering constraint. The city simulation must not advance while rendering for the frame is already in progress, as this would cause the rendered frame to reflect a simulation state that is inconsistent with the state that was current when camera, UI, and audio were updated.
 

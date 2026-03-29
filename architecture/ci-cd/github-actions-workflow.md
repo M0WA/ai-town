@@ -192,6 +192,22 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
   **`gtest_discover_tests DISCOVERY_MODE PRE_TEST`** (mandatory for Windows): `cmake/AitownTestHelpers.cmake` MUST pass `DISCOVERY_MODE PRE_TEST` to `gtest_discover_tests`. With the default `POST_BUILD` mode, CMake runs the test binary immediately after linking (during `cmake --build`) to enumerate test cases. At build time the vcpkg bin directory has not yet been added to `PATH`, so `gtest.dll` cannot be loaded → the binary exits with a DLL load error → discovery produces empty output → ctest finds 0 tests at run time. `PRE_TEST` defers discovery to ctest time (inside the test step), where `GITHUB_PATH` already includes the vcpkg bin directory. `PRE_TEST` requires CMake ≥ 3.18; the project's `cmake_minimum_required(3.21)` satisfies this on both runners (ubuntu-latest ships CMake 3.22+; VS2022 runner ships CMake 3.28+).
 
+  Then add a pre-test verification step to confirm Phase 7 DLLs and HRTF data are present before running tests. Both `soft_oal.dll` and `default.mhr` are hard-fails (see `hrtf-initialization.md`):
+
+  ```yaml
+  - name: Verify Phase 7 DLLs and HRTF data present
+    shell: pwsh
+    run: |
+      if (-not (Test-Path "build\soft_oal.dll")) {
+        Write-Error "soft_oal.dll not found in build\ — rename step failed or DLL was not copied."
+        exit 1
+      }
+      if (-not (Test-Path "build\default.mhr")) {
+        Write-Error "default.mhr not found in build\ — HRTF post-build copy rule failed."
+        exit 1
+      }
+  ```
+
   Then create the test results directory and run tests — use **explicit label filtering** to skip `requires-opengl` tests (no display available on Windows runners). The `requires-opengl` label is Linux-only (`xvfb-run`); Windows integration tests run under `AITOWN_HEADLESS=1`:
 
   ```yaml
@@ -580,7 +596,7 @@ markdown-lint:
       uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
     - name: Install markdownlint-cli
-      run: npm install -g markdownlint-cli
+      run: npm install -g markdownlint-cli@0.47.0
 
     - name: Run markdownlint
       run: markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
@@ -591,7 +607,7 @@ markdown-lint:
 - `runs-on: ubuntu-latest` — Node.js/npm are pre-installed; no additional setup required.
 - `timeout-minutes: 5` — linting is fast (seconds); a 5-minute cap prevents runaway npm installs from consuming runner minutes.
 - `permissions: contents: read` — the job only checks out and reads files; no artifact upload, no check annotations, no write access needed.
-- The `npm install -g markdownlint-cli` step installs `markdownlint-cli` at the version available from npm registry. To pin to a specific version use `npm install -g markdownlint-cli@0.47.0` — pin the version explicitly if the repo requires reproducible linting behavior.
+- The `npm install -g markdownlint-cli@0.47.0` step installs `markdownlint-cli` at the pinned version. MUST pin to a specific version; current pin: `@0.47.0`.
 - The `markdownlint` command runs with the glob patterns that cover all spec and documentation files: `architecture/**/*.md`, `implementation/*.md`, and `CLAUDE.md`. The shell expands these globs on `ubuntu-latest` (bash, globstar not needed for single-level `**`). If the `implementation/` directory does not yet exist the glob silently matches nothing and the step passes — this is correct behavior for an empty phase.
 - Exit code 1 on any violation — the job fails and blocks `all-checks-pass`.
 - No caching step needed — `npm install -g` for a single small package takes under 10 seconds and adds no meaningful cache key complexity.
