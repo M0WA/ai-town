@@ -223,6 +223,29 @@ TEST_F(ResetTest, CitySimulation_Reset_ClearsServiceBuildings)
 }
 
 // ---------------------------------------------------------------------------
+// TEST A-0: CitySimulation_ApplyLoadedJson_WithServiceBuildings_RoundTrip
+//
+// Places a service building so serializeToJson() emits the service_buildings
+// array, then round-trips through applyLoadedJson().  This covers the
+// serialization loop body (lines ~3246-3252) and the deserialization loop
+// (~3636-3673) which are otherwise unreachable from tests that use only
+// empty simulations.
+// ---------------------------------------------------------------------------
+TEST_F(ResetTest, CitySimulation_ApplyLoadedJson_WithServiceBuildings_RoundTrip)
+{
+    sim_->placeServiceBuilding(3, 3, ServiceBuildingType::FireStation);
+    drainNotifications();
+
+    std::string json = sim_->serializeToJson();
+    ASSERT_NE(json.find("service_buildings"), std::string::npos)
+        << "JSON must contain service_buildings array when a building is placed";
+
+    bool ok = sim_->applyLoadedJson(json);
+    EXPECT_TRUE(ok)
+        << "applyLoadedJson() must return true for JSON that includes service buildings";
+}
+
+// ---------------------------------------------------------------------------
 // TEST A-1: CitySimulation_ApplyLoadedJson_ValidJson_ReturnsTrue
 //
 // applyLoadedJson() delegates to deserializeFromJson(). A JSON string produced
