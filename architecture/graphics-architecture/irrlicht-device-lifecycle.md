@@ -13,6 +13,7 @@ audioSystem->syncListenerToCamera(cam);  // commit camera position to OpenAL lis
 audioSystem->update(realDeltaSeconds);   // process audio command queue with updated listener (Phase 7 — see src/rendering/render_system.h comment; ref: implementation/phase-7.md line 31)
 uiManager->update(realDeltaSeconds);    // advance UI timer state (notification auto-dismiss, HUD undo-countdown) — MUST be called before beginScene(); see ui-manager.md §Frame Loop Integration
 terrainSystem->update(realDeltaSeconds); // process at most 2 terrain LOD rebuilds per frame (Phase 5); see procedural-terrain.md
+renderer->update(realDeltaSeconds);     // cloud UV scroll + per-frame renderer state
 driver->beginScene(true, true, irr::video::SColor(255, 100, 149, 237));  // sky-blue clear color (cornflower blue) — provides visual feedback that the 3D viewport is active; pure black (0,0,0) is indistinguishable from "nothing rendered"
 sceneManager->drawAll();        // 3D scene (terrain, buildings, vehicles, sky)
 // Scene background blit (main menu / load states only):
