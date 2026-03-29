@@ -1916,6 +1916,11 @@ void UIManager::transitionToGameplay(GameMode mode) {
     // Phase 11m: mark the game session as active so subsequent new-game requests
     // take the pending-flag path (loading screen) instead of transitioning directly.
     m_gameSessionActive = true;
+
+    // Clear the loading screen background so it no longer covers the game view.
+    if (m_renderer) {
+        m_renderer->clearSceneBackground();
+    }
 }
 
 void UIManager::setUnsavedChanges(bool value) {
@@ -1998,6 +2003,12 @@ void UIManager::transitionToMainMenu() {
 
     // Step 4: Show main menu.
     m_mainMenu->show();
+
+    // Step 5: Show the loading screen background behind the main menu GUI.
+    // The background is cleared when the player transitions into gameplay.
+    if (m_renderer) {
+        m_renderer->setSceneBackground("assets/textures/ui/loading_screen.png");
+    }
 }
 
 // ----------------------------------------------------------------

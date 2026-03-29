@@ -98,6 +98,8 @@ public:
     void          drawScene()  override;  // smgr->drawAll() + uiManager->draw() inside begin/end pair
     void          endFrame()   override;  // driver->endScene()
     void          drawFullscreenTexture(const std::string& path) override;
+    void          setSceneBackground(const std::string& path) override { m_bgTexturePath = path; }
+    void          clearSceneBackground() override { m_bgTexturePath.clear(); }
     TextureHandle loadTexture(const std::string& path) override;
     void          setCamera(const CameraParams& p) override;
 
@@ -236,6 +238,11 @@ private:
     // Returned by getListenerPosition() for use by CitySimulation's
     // sfx_intersection_tick 80 m pre-acquisition distance cull.
     vec3 m_lastCameraPosition{};
+
+    // Scene background texture path — drawn fullscreen after smgr->drawAll()
+    // but before the GUI layer (set via setSceneBackground / clearSceneBackground).
+    // Empty string means no background is drawn.
+    std::string m_bgTexturePath;
 
     // Phase 11h: current active tool — used by setTileHoverHighlight() to select color.
     ToolMode     m_activeTool{ToolMode::None};
