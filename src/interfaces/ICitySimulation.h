@@ -172,6 +172,13 @@ public:
     // with isZoned=false. Never crashes on out-of-range coordinates.
     virtual QueryResult queryTile(int tileX, int tileZ) const = 0;
 
+    // --- Road proximity check (Phase 11m bug fix) ---
+    // Returns true if the footprint rooted at (x, z) has a road within Chebyshev
+    // distance 3.  footprintSize is derived from tier (Low=1, Med=2, High=3).
+    // Used by UIManager zone-drag preview to colour tiles red when they are too
+    // far from a road (consistent with the rejection performed by placeZone()).
+    virtual bool isWithinRoadRange(int x, int z, DensityTier tier) const = 0;
+
     // --- Bond use count (Phase 6 delivery) ---
     // Returns the number of Emergency Municipal Bond uses remaining for the current difficulty.
     // Required by Phase 8 forced loan modal Screen 2 to gray the Emergency Bond button.

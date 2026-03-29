@@ -200,6 +200,19 @@ TEST_F(ZoneOverlayTest, UIManager_ZonePlacement_AddsOverlayEntry)
         .Times(AtLeast(1))
         .WillRepeatedly(SaveArg<2>(&capturedMap));
 
+    // Stub queryTile for all tiles: catch-all returns free (isZoned=false).
+    // This covers adjacent-tile queries from the road-mesh-rebuild loop after placeZone.
+    // The more-specific expectation for (3,4) is added AFTER so GMock matches it first
+    // (LIFO order): first call returns free (pre-placement guard), subsequent calls
+    // return isZoned=true (post-placement overlay check).
+    EXPECT_CALL(sim_, queryTile(_, _)).Times(AnyNumber()).WillRepeatedly(Return(QueryResult{}));
+
+    QueryResult placed{};
+    placed.isZoned = true;
+    EXPECT_CALL(sim_, queryTile(3, 4))
+        .WillOnce(Return(QueryResult{}))     // pre-placement guard: tile is free
+        .WillRepeatedly(Return(placed));     // post-placement check: tile is now zoned
+
     // LMB down (sets anchor) then LMB up (commits placement).
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));

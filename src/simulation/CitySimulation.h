@@ -120,6 +120,9 @@ public:
     // ---- Per-tile query ----
     QueryResult queryTile(int tileX, int tileZ) const override;
 
+    // ---- Road proximity check (Phase 11m bug fix) ----
+    bool isWithinRoadRange(int x, int z, DensityTier tier) const override;
+
     // ---- Bond use count ----
     int getOutstandingBondUses() const override;
 

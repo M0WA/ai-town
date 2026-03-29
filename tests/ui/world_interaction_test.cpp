@@ -246,6 +246,10 @@ protected:
         // Suppress via catch-all; tests that verify placement counts add their own
         // EXPECT_CALL on placeZone/placeRoad (the call under test), not queryTile.
         EXPECT_CALL(sim_, queryTile(_, _)).Times(::testing::AnyNumber()).WillRepeatedly(Return(QueryResult{}));
+        // isWithinRoadRange: default true so tiles appear road-accessible in drag preview
+        // partitioning. StrictMock requires EXPECT_CALL (ON_CALL alone is not enough).
+        // Tests that specifically verify road-blocking behaviour add their own override.
+        EXPECT_CALL(sim_, isWithinRoadRange(_, _, _)).Times(::testing::AnyNumber()).WillRepeatedly(Return(true));
 
         uiManager_->setMapDimensions(10, 10);
 
@@ -2182,6 +2186,9 @@ protected:
         // Phase 11d Deliverable 5d: queryTile called in Zone/Road preview partitioning
         // and commit loop guards. Suppress via catch-all for this fixture.
         EXPECT_CALL(sim_, queryTile(_, _)).Times(AnyNumber()).WillRepeatedly(Return(QueryResult{}));
+        // isWithinRoadRange: default true so tiles appear road-accessible in drag preview
+        // partitioning. StrictMock requires EXPECT_CALL (ON_CALL alone is not enough).
+        EXPECT_CALL(sim_, isWithinRoadRange(_, _, _)).Times(AnyNumber()).WillRepeatedly(Return(true));
 
         uiManager_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
         uiManager_->setRenderer(&renderer_);
