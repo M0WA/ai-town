@@ -149,11 +149,19 @@ jobs:
           fi
           echo "Found $count test result file(s)."
 
+      # Step 16b: Fix git safe.directory for dorny/test-reporter.
+      # In container jobs the workspace is owned by a different UID than the runner;
+      # git 2.35.2+ refuses to read it unless the directory is marked safe.
+      # dorny/test-reporter calls 'git ls-files' internally — without this config it
+      # exits non-zero and the report is never posted to GitHub Checks.
+      - name: Fix git safe.directory for test reporter
+        if: always()
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       # Step 17: Publish test results.
       # MUST run BEFORE lcov capture — if lcov fails, annotations still post.
-      # continue-on-error: true — dorny uses git ls-files which fails in container jobs
-      # due to safe.directory ownership mismatch (/__w vs /home/runner/work).
-      # This prevents the dorny action crash from blocking the lcov coverage steps.
+      # continue-on-error: true kept as a safety net in case dorny fails for
+      # reasons other than safe.directory (e.g. network, permissions).
       - name: Publish test results (coverage)
         if: always()
         continue-on-error: true
