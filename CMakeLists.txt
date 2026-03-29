@@ -886,6 +886,12 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/city_simulation_terrain_flatten_test.cpp
 )
 
+# Phase 11l: reset(), applyLoadedJson(), isWithinRoadRange() coverage tests.
+# Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(...) again.
+target_sources(simulation_tests PRIVATE
+    tests/simulation/city_simulation_reset_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # audio_tests — duck state machine, occlusion smoothing, crossfade, stinger milestone tests
 # Vorbis::vorbisfile must be listed EXPLICITLY — it CANNOT resolve through aitown_audio's

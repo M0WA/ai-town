@@ -71,6 +71,43 @@ The Z-order concern (scrim must cover panels; modal must be topmost) is handled 
 
 The mandatory per-frame sequence is: `audioSystem->syncListenerToCamera(cam)` → `audioSystem->update(realDeltaSeconds)` → `UIManager::update(realDeltaSeconds)` → `terrainSystem->update(realDeltaSeconds)` → `renderer->update(realDeltaSeconds)` (cloud UV scroll) → `driver->beginScene()` → `sceneManager->drawAll()` → scene background blit `drawSceneBackground()` if `m_sceneBackgroundActive` (main menu / load states only) → hover tile highlight `drawMeshBuffer()` if `m_hoveredTileMesh && m_hoverVisible` (Phase 9b) → `UIManager::draw()` → `guiEnvironment->drawAll()` → `driver->endScene()` → **60 FPS frame cap sleep**. The two audio calls must come before `beginScene()` so that the listener position and audio command queue are fully updated before rendering begins. `terrainSystem->update()` is also a pre-render step — it processes queued LOD rebuilds before the scene is drawn. The Irrlicht-internal ordering (`beginScene` → `drawAll` → `draw` → `guiEnv->drawAll` → `endScene`) is immutable; the audio and terrain setup calls are pre-steps that must not be moved inside the Irrlicht render block. **Note**: Irrlicht uses `driver->endScene()` — `IVideoDriver` has no `endFrame()` method, so calling `driver->endFrame()` (or `endFrame()` on any other Irrlicht object such as `ISceneManager`) is a compile error. The prohibition is on calling `endFrame()` directly on any Irrlicht object. The `IRenderer` abstraction interface (in `src/interfaces/`) may expose a method named `endFrame()` as part of its rendering facade. This is acceptable — `IrrlichtRenderer::endFrame()` must internally call `driver->endScene()` (not `endFrame()`). The concrete `IrrlichtRenderer` implementation translates the facade call to the correct Irrlicht API.
 
+## Per-Frame Loop
+
+The following table is the authoritative combined sequence merging the 8-step simulation
+loop (from `simulation-time.md`) with the 11-step render loop. Every step must execute
+in this order each frame.
+
+| Step | Call | Phase |
+|---|---|---|
+| 1 | `device->run()` / poll events (`EventReceiver`) | System |
+| 2 | `CitySimulation::tick(realDeltaSeconds)` | Simulation |
+| 3 | `CameraController::update(realDeltaSeconds)` | Simulation |
+| 3b | `UIManager::update(realDeltaSeconds)` | Simulation |
+| 3c | `SaveSystem::update(realDeltaSeconds)` — ticks 120 s auto-save timer; fires auto-save if threshold reached | Simulation |
+| 4a | `audioSystem->syncListenerToCamera(cameraState)` — commits camera position to OpenAL listener | Audio |
+| 4b | `audioSystem->update(realDeltaSeconds)` — processes audio command queue with updated listener | Audio |
+| 5 | `terrainSystem->update(realDeltaSeconds)` — processes at most 2 terrain LOD rebuilds per frame | Terrain |
+| 6 | `renderer->update(realDeltaSeconds)` — cloud UV scroll + per-frame renderer state | Render |
+| 7 | `driver->beginScene(true, true, SColor(255, 100, 149, 237))` | Render |
+| 8 | `sceneManager->drawAll()` — 3D scene (terrain, buildings, vehicles, sky) | Render |
+| 8b | Scene background blit `drawSceneBackground()` if `m_sceneBackgroundActive` (main menu / load states only) | Render |
+| 8c | Hover tile highlight `drawMeshBuffer()` if `m_hoveredTileMesh && m_hoverVisible` (Phase 9b) | Render |
+| 9 | `uiManager->draw()` — 2D HUD: per-panel Z-order state update (visibility, text, alpha) | UI |
+| 10 | `guiEnvironment->drawAll()` — renders all visible `IGUIElement` nodes | UI |
+| 11 | `driver->endScene()` + 60 FPS frame-cap sleep | Render |
+
+**Ordering constraints** (violations are bugs):
+
+- Steps 2–6 are pre-render: all simulation, audio, and terrain state must be fully updated
+  before `beginScene()` (step 7). Advancing simulation or evicting textures after
+  `beginScene()` is a correctness error.
+- `evictUnreferenced()` (called from `SceneEntityManager::destroy()`) MUST execute during
+  the game-logic update phase — before step 7 (`beginScene()`). See
+  `texture-cache.md §evictUnreferenced() contract` for the full call-site safety rule.
+- Steps 8–10 are inside the `beginScene()`/`endScene()` block and must not be reordered.
+- `UIManager::draw()` (step 9) must precede `guiEnvironment->drawAll()` (step 10) so that
+  element state (visibility, text, alpha) is current when the GUI pixels are painted.
+
 ## Frame Rate Cap
 
 The game loop targets **60 FPS** by sleeping out the remainder of each 16.67 ms budget after `driver->endScene()`. Without this cap, the loop pins a CPU core at 100% on software renderers (llvmpipe), causing thermal throttling and irregular frame-time spikes. The sleep uses `std::this_thread::sleep_for` and is skipped when the frame already took ≥ 16.67 ms (i.e. the cap never forces frames to be slower than natural rendering allows).
@@ -124,6 +161,11 @@ The construction sequence in `main.cpp`:
 ```text
 1.  RenderSystem (owns IrrlichtDevice)
 2.  IrrlichtUIBackend (needs device)
+    (`IrrlichtUIBackend` MUST be constructed in `main.cpp` AFTER `RenderSystem`'s
+    constructor returns. `RenderSystem`'s constructor calls `glewInit()`; `IrrlichtUIBackend`
+    requires GLEW to be initialised before it can call any GL extension functions. Do NOT
+    make `IrrlichtUIBackend` a member of `RenderSystem` — this would invert the construction
+    order.)
     CRITICAL GL STATE RULE: IrrlichtUIBackend's constructor creates a VAO/VBO
     for UI quad rendering. After closing the VAO scope (glBindVertexArray(0)),
     it MUST also call glBindBuffer(GL_ARRAY_BUFFER, 0). GL_ARRAY_BUFFER is
@@ -132,6 +174,8 @@ The construction sequence in `main.cpp`:
     rendering zero geometry for ALL scene nodes.
 3.  UIScaler (needs uiBackend screen dimensions)
 4.  Camera scene node + CameraController
+    (The camera's far-clip distance MUST be set to ≥ 15 000 m. Values below 15 000 m will
+    hard-clip the cloud dome vertices. See `sky-clouds.md §Cloud Dome Geometry`.)
 5.  IrrlichtRenderer(device, /*uiManager=*/nullptr)
 6.  WallClock, AudioSystem, TerrainSystem, CitySimulation
 7.  (loading screen frame) render one frame of assets/textures/ui/loading_screen.png

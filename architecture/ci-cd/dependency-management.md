@@ -23,7 +23,7 @@
 **`fmt` is a required explicit dependency**: the `openal-soft` vcpkg portfile applies a `devendor-fmt.diff` patch that replaces OpenAL Soft's bundled copy of `{fmt}` with the external vcpkg `fmt` package. This means `libopenal.a` contains object files that reference `fmt::v12::report_error` and other `fmt` symbols. Any CMake target that links (directly or transitively) against `OpenAL::OpenAL` must also link `fmt::fmt`, or the linker will fail with `undefined reference to fmt::v12::report_error`. Adding `fmt` to `vcpkg.json` ensures the vcpkg `fmt` package is installed; `fmt::fmt` must then be linked PRIVATE to `aitown_audio` in `CMakeLists.txt`.
 
 - CMake configured with `-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake`
-- CI uses `lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1 # v11.5` with a pinned vcpkg commit hash stored as `env.VCPKG_COMMIT_ID`. **`VCPKG_COMMIT_ID` must be declared at the workflow level** (in the top-level `env:` block of the CI YAML file, not at the job or step level) so it is available to all jobs and steps. Declaring it at the job level would make it unavailable to the baseline validation step if that step runs in a different job. Example declaration at workflow level:
+- CI uses `lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1 # v11.5` with a pinned vcpkg commit hash stored as `env.VCPKG_COMMIT_ID`. `lukka/run-vcpkg` is used only in the Windows job. Linux jobs set `VCPKG_MANIFEST_INSTALL=OFF` and read from `/opt/vcpkg_installed` which is baked into the CI image at image-build time. **`VCPKG_COMMIT_ID` must be declared at the workflow level** (in the top-level `env:` block of the CI YAML file, not at the job or step level) so it is available to all jobs and steps. Declaring it at the job level would make it unavailable to the baseline validation step if that step runs in a different job. Example declaration at workflow level:
 
   ```yaml
   env:
@@ -56,6 +56,7 @@ The following apt-get packages must be installed on BOTH `build-linux` AND `cove
 - `libgl1-mesa-dev` — Mesa OpenGL development headers and stub libraries; required for CMake to find OpenGL during configuration and for linking against the Mesa software renderer
 - `mesa-utils` — Mesa GL utilities (`glxinfo`, `glxgears`); used to verify the xvfb display is operational in diagnostics
 - `libglew-dev` — GLEW development headers; required by the sRGB raw GL upload path (`glCompressedTexImage2D` and related calls); **also installed via vcpkg** (`glew` port), but the system package is needed for CMake's `find_package(GLEW)` fallback and for headers available during configuration before vcpkg runs
+- `libxxf86vm-dev` — required by Irrlicht (`-lXxf86vm`); omitting this causes a linker error during Irrlicht build
 
 **Additional required package (`coverage-linux` ONLY)**:
 
@@ -67,14 +68,14 @@ Install step for `build-linux` (place before the CMake configure step):
 
 ```yaml
 - name: Install system dependencies
-  run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libglew-dev
+  run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libglew-dev libxxf86vm-dev
 ```
 
 Install step for `coverage-linux` (place before the CMake configure step — includes `lcov`):
 
 ```yaml
 - name: Install system dependencies
-  run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libglew-dev lcov
+  run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libglew-dev libxxf86vm-dev lcov
 ```
 
 **Why both jobs need the base list**: `build-linux` and `coverage-linux` run on independent `ubuntu-latest` runner instances. There is no shared pre-install state between them. A package installed in one job's runner has no effect on the other. Omitting any package from either job causes a CMake configuration failure or a runtime failure during the `xvfb-run` test step in that job specifically.
@@ -223,7 +224,9 @@ Runs **before** the CMake configure step. Confirms the GLEW development headers 
 
 #### Step B — Library check ("Verify GLEW vcpkg install")
 
-Runs after the vcpkg install step and **before** the CMake configure step. Confirms the compiled `glew.lib` artifact is present so the linker can find it. A header-only check would not catch a scenario where headers were installed but the compiled library was not.
+Runs after the vcpkg install step and **before** the CMake configure step. Confirms the compiled `glew32.lib` artifact is present so the linker can find it. A header-only check would not catch a scenario where headers were installed but the compiled library was not.
+
+**Note**: On Windows, the vcpkg GLEW portfile uses a libname override that installs `glew32.lib` rather than `glew.lib`.
 
 ```yaml
 - name: Verify GLEW vcpkg install (Windows)
@@ -231,8 +234,8 @@ Runs after the vcpkg install step and **before** the CMake configure step. Confi
   run: |
     # Use explicit if-block syntax — "Test-Path ... || exit 1" is PowerShell 7+ only;
     # GitHub Actions Windows runners default to PowerShell 5.1 where || is not supported.
-    if (-not (Test-Path "build/vcpkg_installed/x64-windows/lib/glew.lib")) {
-      if (-not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\glew.lib")) {
+    if (-not (Test-Path "build/vcpkg_installed/x64-windows/lib/glew32.lib")) {
+      if (-not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\glew32.lib")) {
         Write-Error "GLEW not found in either manifest-mode or classic-mode install"; exit 1
       }
     }
@@ -271,7 +274,7 @@ endif()
 3. Add `target_link_libraries(aitown_render PRIVATE ... GLEW::GLEW)` to `CMakeLists.txt`
 4. Add the `Irrlicht.dll` CMake post-build copy command to `CMakeLists.txt`
 5. Add the `GLEW32.dll` CMake post-build copy command to `CMakeLists.txt` (this section)
-6. `build-windows` CI steps: add BOTH a "Verify glew vcpkg port" step (dual-path `GL/glew.h` header check — manifest path `build\vcpkg_installed\x64-windows\include\GL\glew.h` with fallback to `$VCPKG_ROOT\installed\x64-windows\include\GL\glew.h`) AND a "Verify GLEW vcpkg install" step (dual-path `glew.lib` library check — manifest path `build/vcpkg_installed/x64-windows/lib/glew.lib` with fallback to `$VCPKG_ROOT\installed\x64-windows\lib\glew.lib`). Both use PS 5.1-compatible `if (-not (Test-Path ...) -and -not (Test-Path ...)) { exit 1 }` syntax. The header check must run before the library check. See `### Windows GLEW vcpkg Verification` above for the canonical YAML for both steps. Owner: `cicd-dev-github`.
+6. `build-windows` CI steps: add BOTH a "Verify glew vcpkg port" step (dual-path `GL/glew.h` header check — manifest path `build\vcpkg_installed\x64-windows\include\GL\glew.h` with fallback to `$VCPKG_ROOT\installed\x64-windows\include\GL\glew.h`) AND a "Verify GLEW vcpkg install" step (dual-path `glew32.lib` library check — manifest path `build/vcpkg_installed/x64-windows/lib/glew32.lib` with fallback to `$VCPKG_ROOT\installed\x64-windows\lib\glew32.lib`). Both use PS 5.1-compatible `if (-not (Test-Path ...) -and -not (Test-Path ...)) { exit 1 }` syntax. The header check must run before the library check. See `### Windows GLEW vcpkg Verification` above for the canonical YAML for both steps. Owner: `cicd-dev-github`.
 
 Omitting item 5 causes the existing `build/GLEW32.dll` hard-fail CI check to trigger on every Windows build from Phase 1 onward. Omitting item 6 leaves the Windows GLEW vcpkg installation unverified — a missing or misconfigured GLEW port would silently produce a broken binary rather than failing the CI job immediately.
 

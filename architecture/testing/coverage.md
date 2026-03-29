@@ -1,5 +1,13 @@
 # Coverage (Linux only)
 
+## Phase Timeline
+
+| Phase | Gate | Notes |
+|---|---|---|
+| 4 | Informational only | `lcov --summary` output logged; no threshold enforced |
+| 5 | ≥ 80% | First enforced gate via awk |
+| 6+ | ≥ 95% (target 95–98%) | Current enforced gate; `make test` fails below 95% |
+
 - **Coverage target range: 95–98% total line coverage** on `src/simulation/`, `src/terrain/`, `src/ui/`.
   Minimum hard gate: **95%** (Phase 6+). Aspirational target: **98%**.
   `make test` enforces the 95% gate locally; CI `coverage-linux` job enforces the same threshold.
@@ -25,11 +33,13 @@ lcov --capture --directory build --base-directory $(pwd) \
 # the build tree (as in CI). FetchContent then writes to .fetchcontent_cache/, not
 # build/_deps/, so the pattern is unused. Newer lcov (2.x) treats unused patterns as
 # errors (exit code 25). Use "*/.fetchcontent_cache/*" instead.
-# --ignore-errors unused: lcov 2.x treats any --remove pattern matching no files as a
-# fatal error (exit 25). Many patterns are future-proofing (mock_*.h, src/audio/*, etc.)
-# and match nothing until Phase 2+ code exists. Keep all patterns; suppress the error.
+# --ignore-errors unused,inconsistent: lcov 2.x treats any --remove pattern matching no
+# files as a fatal error (exit 25). Many patterns are future-proofing (mock_*.h,
+# src/audio/*, etc.) and match nothing until Phase 2+ code exists. Keep all patterns;
+# suppress the error. lcov 2.x also emits inconsistent data errors during --remove when
+# processing coverage data with lambda inlining; suppress with ,inconsistent.
 lcov --remove coverage.info \
-  --ignore-errors unused \
+  --ignore-errors unused,inconsistent \
   '/usr/*' \
   "*/.fetchcontent_cache/*" \
   '*/tests/*' \
@@ -238,41 +248,37 @@ Phase 4 `src/ui/` baseline meets or exceeds 25%.
 **Phase 4 `src/ui/` 25% gate — awk pipeline**:
 
 ```bash
-# Preflight check 1: verify src/ui/ entries exist in lcov --list output.
-# If this fails, coverage_filtered.info contains no src/ui/ data — check that
-# src/ui/ source files were compiled with -DENABLE_COVERAGE=ON and that the
-# lcov --remove step did not inadvertently exclude src/ui/.
-if ! lcov --list coverage_filtered.info | grep -q "src/ui/"; then
-  echo "PREFLIGHT FAIL: No src/ui/ entries in lcov --list output."
+# Parse coverage_filtered.info directly — version-agnostic (works with lcov 1.x and 2.x).
+# Direct SF/LH/LF record parsing avoids dependency on lcov --list column delimiter format,
+# which changed between lcov versions and cannot be relied upon.
+# Preflight: verify src/ui/ SF entries exist in coverage_filtered.info.
+if ! grep -q "SF:.*src/ui/" coverage_filtered.info; then
+  echo "PREFLIGHT FAIL: No src/ui/ SF entries in coverage_filtered.info."
   echo "Check coverage_filtered.info generation and --remove patterns."
   exit 1
 fi
-# Preflight check 2: verify lcov --list uses '|' as column delimiter.
-# If this fails, the lcov version may have changed its output format.
-# Validate the output format manually: run 'lcov --list coverage_filtered.info'
-# and inspect whether column separator is '|'. Update awk -F'|' if format changed.
-if ! lcov --list coverage_filtered.info | grep -E "src/ui/" | grep -qF "|"; then
-  echo "PREFLIGHT FAIL: lcov --list output missing '|' column delimiter."
-  echo "lcov version may have changed output format — validate manually."
-  exit 1
-fi
-#
-# Format dependency: Assumes lcov 2.x --list output uses '|' as column delimiter.
-# If the format changes, $NF+0 coercion produces 0 -> gate FAILS with misleading
-# '0% coverage' message rather than 'lcov format mismatch'. Validate the lcov
-# --list output format manually if the pipeline produces unexpected results.
-# Preflight checks above catch the empty-data and format-mismatch cases explicitly.
-#
-# head -1 semantics: head -1 takes the minimum (worst-case) src/ui/ file coverage
-# — this is intentional; the gate enforces that even the least-covered src/ui/
-# file meets the threshold.
-lcov --list coverage_filtered.info \
-  | grep -E "src/ui/" \
-  | grep -v "^Total" \
-  | awk -F'|' '{print $NF+0}' \
-  | sort -n \
-  | head -1 \
-  | awk '{if ($1 < 25.0) { print "FAIL: src/ui/ worst-file coverage " $1 "% < 25% Phase 4 gate"; exit 1 } else { print "PASS: src/ui/ worst-file coverage " $1 "% >= 25%"; exit 0 }}'
+# Parse per-file LH/LF from the .info file and find the worst-case src/ui/ file.
+awk '
+  /^SF:/ { in_ui=0; fname="" }
+  /^SF:.*src\/ui\// { in_ui=1; fname=$0; sub(/^SF:/, "", fname); lh=0; lf=0 }
+  in_ui && /^LH:/ { lh=$0; sub(/^LH:/, "", lh) }
+  in_ui && /^LF:/ { lf=$0; sub(/^LF:/, "", lf) }
+  in_ui && /^end_of_record/ {
+    if (lf+0 > 0) {
+      pct = lh/lf*100
+      if (min_pct == "" || pct < min_pct+0) { min_pct=pct; min_file=fname }
+    }
+    in_ui=0
+  }
+  END {
+    if (min_pct == "") { print "PREFLIGHT FAIL: No src/ui/ files with coverage data found"; exit 1 }
+    if (min_pct+0 < 25.0) {
+      printf "FAIL: src/ui/ worst-file %s coverage %.1f%% < 25%% Phase 4 gate\n", min_file, min_pct; exit 1
+    } else {
+      printf "PASS: src/ui/ worst-file %s coverage %.1f%% >= 25%%\n", min_file, min_pct
+    }
+  }
+' coverage_filtered.info
 ```
 
 ## Coverage Test Placement Convention

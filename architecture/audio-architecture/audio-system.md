@@ -6,6 +6,10 @@
 
 **Important**: `IAudioSystem` has no OpenAL include dependencies. It uses only game-domain types (`SoundId`, `MusicTrackId`, `StingerType`, `SimSpeed`, `CameraState`, `vec3`, `TimeOfDay`, `SoundPriority`). Never expose `ALuint`, `ALfloat`, or any `AL_*` constant through this interface.
 
+**IClock injection**: `AudioSystem` accepts `IClock*` at construction for deterministic timing of the crossfade duck timer and `m_lastDuckWakeTime`. Production passes `WallClock`; tests pass `ManualClock`. See `architecture/testing/testability-architecture.md §IClock` for the canonical interface definition.
+
+**vec3 type**: `vec3` used in `playPositionalSound` and `syncListenerToCamera` is defined in `src/interfaces/vec3.h`. This header contains no Irrlicht dependencies. See `architecture/testing/testability-architecture.md §vec3 type alias` for the canonical spec entry.
+
 ```cpp
 // audio_types.h MUST #include <cstdint> — uint32_t is not guaranteed to be pulled in
 // transitively on all compilers (GCC strict include order exposed this; MSVC was silently
@@ -15,12 +19,12 @@
 struct vec3;         // 3-component float vector (X, Y, Z)
 struct CameraState;  // position (vec3), forward (vec3), up (vec3)
 // SimSpeed is NOT a separate enum class — it is a type alias:
-//   using SimSpeed = SpeedMultiplier;   (defined in simulation_types.h)
-// ZoneType is also defined in simulation_types.h (enum class: Residential, Commercial, Industrial).
+//   using SimSpeed = SpeedMultiplier;   (defined in src/interfaces/simulation_types.h)
+// ZoneType is also defined in src/interfaces/simulation_types.h (enum class: Residential, Commercial, Industrial).
 // IAudioSystem.h must #include "simulation_types.h" to get both SimSpeed and ZoneType.
 // Do NOT forward-declare SimSpeed as "enum class SimSpeed;" — type aliases
 // cannot be forward-declared in C++, and this would create a duplicate-type
-// compile error when simulation_types.h is included.
+// compile error when src/interfaces/simulation_types.h is included.
 enum class StingerType;  // Defined in audio_types.h; V1 values: CRISIS=55, MILESTONE=56.
                          // COUPLING NOTE: The integer values of StingerType are intentionally
                          // equal to their corresponding AL source pool indices (sources[55] and

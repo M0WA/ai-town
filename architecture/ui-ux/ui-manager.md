@@ -5,7 +5,7 @@
 
 ## IUIBackend Header Placement
 
-`IUIBackend.h` is placed in `src/ui/` (not `src/interfaces/`) because it is part of the UI subsystem abstraction boundary — it defines the contract between `UIManager` and its rendering backend. All other shared cross-subsystem interfaces live in `src/interfaces/`. See `architecture/testing/testability-architecture.md` for the authoritative placement rationale and the `MockUIBackend` (test-facing) definition.
+`IUIBackend.h` lives in `src/interfaces/` (moved from `src/ui/` in Phase 10b Feature 3 — see `testability-architecture.md` §IUIBackend for the canonical location and method list).
 
 ## IUIBackend Method Contract
 
@@ -204,6 +204,18 @@ constexpr uint32_t kOverlayArgbIndustrial  = 0x60FFFF00u; // semi-transparent ye
 constexpr uint32_t kOverlayArgbResidential_CB = 0x602020FFu; // blue-violet
 constexpr uint32_t kOverlayArgbCommercial_CB  = 0x60FF8000u; // orange
 constexpr uint32_t kOverlayArgbIndustrial_CB  = 0x60FF00FFu; // magenta
+
+// Minimap widget bounds (virtual 1920×1080 space)
+// These constants define the full minimap widget footprint used by input-arbitration.md
+// Priority 3 dispatch table. All five are required; kMinimapRight and kMinimapBottom are
+// referenced by input-arbitration.md and must be added to src/ui/ui_constants.h in a later phase.
+constexpr int kMinimapWidgetLeft             = 1576;  // left edge of full widget footprint
+constexpr int kMinimapWidgetTop              = 848;   // toggle row top (no overlay)
+constexpr int kMinimapWidgetTopOverlayActive = 732;   // legend panel top (overlay active)
+// NOTE: kMinimapRight and kMinimapBottom are not yet present in src/ui/ui_constants.h;
+// they must be added there in a future phase. Spec values:
+constexpr int kMinimapRight   = 1920;  // right edge (screen right)
+constexpr int kMinimapBottom  = 1080;  // bottom edge (screen bottom)
 ```
 
 All carve-out constants in `ui_constants.h` MUST be in 1920×1080 virtual space — NOT in physical pixel
@@ -413,7 +425,7 @@ private:
     DensityTier             m_selectedDensityTier{DensityTier::Low};          // Zone sub-panel selection
     ServiceBuildingType     m_selectedServiceBuilding{ServiceBuildingType::PowerPlant}; // Utilities sub-panel selection
     // NOTE: ZoneType, DensityTier are in src/interfaces/simulation_types.h.
-    // ActiveTool, ServiceBuildingType are also in simulation_types.h (ServiceBuildingType added Phase 9b Deliverable I).
+    // ActiveTool, ServiceBuildingType are also in src/interfaces/simulation_types.h (ServiceBuildingType added Phase 9b Deliverable I).
     // ActiveTool enum is in src/ui/ui_types.h alongside GameState/GameMode.
 
     // updateSubPanelVisibility() — enforces the sub-panel visibility table from hud-layout.md.

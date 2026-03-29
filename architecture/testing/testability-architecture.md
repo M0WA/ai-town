@@ -247,6 +247,21 @@ public:
   - `DensityUnlockPreview_HiddenWhenSentinelReturned` *(Phase 8 deliverable)*: construct `HUD` with `MockCitySimulation` stubbed to return `SimulationConstants::kNoUnlockThreshold` (`−1.0f`) from `getNextUnlockThreshold()`; call `HUD::update()`; verify `IUIBackend::setElementVisible(densityUnlockHandle, false)` is called (element hidden) and no label text is set to `"−1"` or `"−1.0"`. Verifies the sentinel guard from `hud-layout.md`: the HUD MUST intercept `kNoUnlockThreshold` before any formatting occurs and hide the element unconditionally.
 - **`ISimulationRNG`** — injectable RNG interface for deterministic simulation testing: Service degradation (random building selection at −10% budget surplus) and any other simulation-layer random draws must use this interface rather than `std::rand()` or a global `std::mt19937`. Tests inject a `ManualRNG` that returns a preset sequence. **Source location**: `ISimulationRNG.h` lives in `src/interfaces/`; `ManualRNG` lives in `tests/simulation/ManualRNG.h` (used by simulation tests) — **not** in `src/` (it is a test double, never linked into production code).
 
+  **Spec entry**:
+
+  ```text
+  Header: src/interfaces/ISimulationRNG.h
+  Methods:
+    virtual float nextFloat()              = 0;  // uniform [0.0, 1.0)
+    virtual int   nextInt(int min, int max) = 0;  // inclusive [min, max]
+    virtual ~ISimulationRNG() = default;
+  Implementations:
+    StdRNG    — production (std::mt19937)
+    ManualRNG — tests (returns pre-loaded sequence)
+  ```
+
+  Cross-reference: `architecture/game-design/service-coverage.md` (ISimulationRNG usage for service degradation rolls — see testability-architecture.md §ISimulationRNG for the canonical interface definition).
+
   ```cpp
   class ISimulationRNG {
   public:
@@ -427,16 +442,16 @@ public:
 
   ```cpp
   // src/interfaces/ICitySimulation.h
-  // SpeedMultiplier is the canonical enum defined in simulation_types.h.
+  // SpeedMultiplier is the canonical enum defined in src/interfaces/simulation_types.h.
   // ICitySimulation.h must #include "simulation_types.h" to get SpeedMultiplier, ZoneType, and Difficulty
   // as complete types — forward declarations are insufficient for by-value parameters.
   // NOTE: The canonical Difficulty enumerator names are Easy, Normal, Hard (PascalCase),
-  // matching Phase 0's simulation_types.h. Do NOT use EASY, NORMAL, HARD (all-caps) —
+  // matching Phase 0's src/interfaces/simulation_types.h. Do NOT use EASY, NORMAL, HARD (all-caps) —
   // those names do not exist and will cause a compile error.
   #include "simulation_types.h"
   #include "ISimulationPauser.h"
 
-  // BudgetDeficitWarn and SimNotification are defined in simulation_types.h (already included above):
+  // BudgetDeficitWarn and SimNotification are defined in src/interfaces/simulation_types.h (already included above):
   //   struct BudgetDeficitWarn {};
   //   using SimNotification = std::variant<std::monostate, BudgetDeficitWarn>;
 
@@ -467,7 +482,7 @@ public:
 
       // City rating — called by HUD to display star rating:
       // Phase 3 upgrade complete: returns CityRatingTier (Village/Town/City/Metropolis/Megalopolis).
-      // CityRatingTier is defined in simulation_types.h.
+      // CityRatingTier is defined in src/interfaces/simulation_types.h.
       // See architecture/game-design/game-progression-modes.md for tier definitions.
       virtual CityRatingTier getCityRating() const = 0;
 
@@ -512,7 +527,7 @@ public:
       // Density-unlock state accessor — returns a snapshot of all density-unlock counters and flags.
       // Required for Phase 11 save round-trip test to verify counter persistence across save/load.
       // Cross-reference: implementation/phase-11.md (getDensityUnlockState deliverable).
-      // DensityUnlockState is defined in simulation_types.h alongside ZoneType and SpeedMultiplier.
+      // DensityUnlockState is defined in src/interfaces/simulation_types.h alongside ZoneType and SpeedMultiplier.
       //   struct DensityUnlockState {
       //       int  consecutive_months_above_threshold[6];  // 0–2 range; one counter per density tier
       //       bool unlock_flags[6];                        // true if the corresponding tier is unlocked
@@ -535,7 +550,7 @@ public:
       // stinger fires when currentMonths == 2 AND m_lastDeficitMonths < 2. BudgetDeficitWarn receipt
       // determines which warning toast to dispatch only.
       //
-      // Type aliases defined in simulation_types.h (ICitySimulation.h already includes it):
+      // Type aliases defined in src/interfaces/simulation_types.h (ICitySimulation.h already includes it):
       //   struct BudgetDeficitWarn {};  // tag type — no payload; use getConsecutiveDeficitMonths()
       //                                  // for context
       //   using SimNotification = std::variant<std::monostate, BudgetDeficitWarn>;
@@ -634,6 +649,21 @@ public:
 
 - **Thread-safety annotations**: Use Clang's thread-safety analysis attributes (`GUARDED_BY`, `REQUIRES`, `EXCLUDES`) on Clang builds; document-only `// thread-safe` or `// main-thread-only` comments as fallback on MSVC. Enable `-Wthread-safety` in CMake for Clang builds.
 
+- **`vec3` type alias** — lightweight 3-component float vector used across all simulation and audio interfaces to avoid pulling Irrlicht headers into test translation units.
+
+  **Spec entry**:
+
+  ```text
+  Header: src/interfaces/vec3.h
+  Definition:
+    struct vec3 { float x, y, z; };
+    // Does NOT include any Irrlicht headers.
+    // IAudioSystem.h, ISpatialAudio.h, and all simulation interfaces use vec3.
+    // IrrlichtRenderer converts vec3 <-> irr::core::vector3df at the boundary.
+  ```
+
+  Cross-references: `architecture/audio-architecture/audio-system.md` (vec3 used in `playPositionalSound` and `syncListenerToCamera` — canonical header is `src/interfaces/vec3.h`); `architecture/audio-architecture/spatial-audio.md` (vec3 used for `CameraState` fields — canonical header is `src/interfaces/vec3.h`); `architecture/game-design/traffic-system.md` (vec3 used in positional sound call sites — canonical header is `src/interfaces/vec3.h`).
+
 ## Interface Definitions (minimum required method signatures)
 
 ```cpp
@@ -717,13 +747,13 @@ public:
 
     // Phase 11d — Traffic agent rendering API.
     // These coexist with Phase 10 placeVehicle/moveVehicle/removeVehicle; both sets must be present.
-    // AgentHandle is defined in simulation_types.h (not in IRenderer.h) to avoid ODR violations.
+    // AgentHandle is defined in src/interfaces/simulation_types.h (not in IRenderer.h) to avoid ODR violations.
     virtual void          spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone) = 0;
     virtual void          moveVehicleAgent(AgentHandle handle, int tileX, int tileZ, float headingDeg) = 0;
     virtual void          despawnVehicleAgent(AgentHandle handle) = 0;
 
     // Phase 11d — Traffic signal visual state.
-    // SignalPhase is defined in simulation_types.h: enum class SignalPhase { Green, Red };
+    // SignalPhase is defined in src/interfaces/simulation_types.h: enum class SignalPhase { Green, Red };
     virtual void          setIntersectionSignalState(int tileX, int tileZ, SignalPhase phase) = 0;
 
     // Phase 11d — Service coverage radius overlay.
@@ -824,8 +854,8 @@ public:
 //   // NOTE: SimSpeed is a type alias (using SimSpeed = SpeedMultiplier) — DO NOT forward-declare
 //   //   as "enum class SimSpeed;" (type aliases cannot be forward-declared; will cause compile error).
 //   //   IAudioSystem.h must #include "simulation_types.h" instead.
-//   // NOTE: ZoneType (enum class: Residential, Commercial, Industrial) is also from simulation_types.h
-//   //   (added Phase 11d for acquireVehicleEnginePair). Since simulation_types.h is already included
+//   // NOTE: ZoneType (enum class: Residential, Commercial, Industrial) is also from src/interfaces/simulation_types.h
+//   //   (added Phase 11d for acquireVehicleEnginePair). Since src/interfaces/simulation_types.h is already included
 //   //   for SimSpeed, ZoneType is automatically available — do NOT add a separate forward declaration.
 //   enum class StingerType;
 //   enum class SoundPriority; // LOW=0, NORMAL=1, HIGH=2, CRITICAL=3 — controls SFX pool eviction
@@ -1165,7 +1195,21 @@ the audio playback path, not a unit test with strict call-count expectations on 
   ```
 
   If a test target needs a specialization, it must subclass the shared mock — not redefine it. This sharing is intentional: the same mock interface is used consistently across all simulation-adjacent tests.
-- **`IClock`** — injectable clock interface for audio timing and loan gate tests. **Source location**: `IClock.h` and `WallClock.h` live in `src/interfaces/`; `ManualClock` lives in `tests/simulation/ManualClock.h` (it is a test double used by both simulation tests and audio tests). `MockTerrainRNG` lives in `tests/terrain/MockTerrainRNG.h`. All test double headers (`manual_*.h`, `mock_*.h`) live under `tests/` — never under `src/`. See `coverage.md` for the full lcov exclusion patterns (including `mock_*` and `manual_*` exclusions).
+- **`IClock`** — injectable clock interface for audio timing and loan gate tests.
+
+  **Spec entry**:
+
+  ```text
+  Header: src/interfaces/IClock.h
+  Methods:
+    virtual double nowSeconds() const = 0;   // seconds since epoch (steady_clock)
+    virtual ~IClock() = default;
+  Implementations:
+    WallClock   — production (std::chrono::steady_clock)
+    ManualClock — tests (manually advanced via ManualClock::advance(seconds))
+  ```
+
+  **Source location**: `IClock.h` and `WallClock.h` live in `src/interfaces/`; `ManualClock` lives in `tests/simulation/ManualClock.h` (it is a test double used by both simulation tests and audio tests). `MockTerrainRNG` lives in `tests/terrain/MockTerrainRNG.h`. All test double headers (`manual_*.h`, `mock_*.h`) live under `tests/` — never under `src/`. See `coverage.md` for the full lcov exclusion patterns (including `mock_*` and `manual_*` exclusions).
 
   ```cpp
   class IClock {
@@ -1182,7 +1226,7 @@ the audio playback path, not a unit test with strict call-count expectations on 
   };
   ```
 
-  `AudioSystem` and `CitySimulation` accept `IClock*` at construction for crossfade timing and the forced-loan real-time gate (120 s) respectively. Production code passes `WallClock` which calls `std::chrono::steady_clock`. `ManualClock` allows deterministic time advancement in tests without wall-clock dependencies.
+  `AudioSystem` and `CitySimulation` accept `IClock*` at construction for crossfade timing and the forced-loan real-time gate (120 s) respectively. Production code passes `WallClock` which calls `std::chrono::steady_clock`. `ManualClock` allows deterministic time advancement in tests without wall-clock dependencies. Cross-references: `architecture/audio-architecture/audio-system.md` (IClock injection into AudioSystem — see §IClock); `architecture/game-design/economy-model.md` (IClock injection into CitySimulation for grace-period and loan-gate timing — see §IClock); `architecture/game-design/save-system.md` (IClock injection for auto-save timer — see §IClock).
 - **`ITerrainQuery`** — injectable terrain interface for world-interaction and slope-cost tests. **Source location**: `ITerrainQuery.h` lives in `src/interfaces/`; `ManualTerrainQuery` lives in `tests/simulation/ManualTerrainQuery.h` (renamed from `manual_terrain_query.h` to CamelCase in Phase 10b Feature 3; alongside `ManualRNG.h` and `ManualClock.h` — all test doubles for injectable simulation interfaces). `ManualTerrainQuery` provides two slope configuration APIs:
 
   **Global slope** (single `float` overload): sets a uniform slope for ALL tiles. Used by `WorldInteractionTest` when one slope applies to the whole map. **Per-tile slope** (3-argument overload): overrides a specific tile. Per-tile entries take precedence over the global slope. Both APIs coexist:
