@@ -270,6 +270,21 @@ void IrrlichtRenderer::clearCity() {
         m_sharedRoadMeshLOD2->MeshBuffers.clear();
         m_sharedRoadMeshLOD2->recalculateBoundingBox();
     }
+
+    // --- Zone overlay node ---
+    // Must be cleared so the old game's preview quads don't appear at wrong
+    // heights on the new terrain (they would float in mid-air after resize).
+    if (m_overlayNode) {
+        u32 matCount = m_overlayNode->getMaterialCount();
+        for (u32 m = 0; m < matCount; ++m) {
+            SMaterial& mat = m_overlayNode->getMaterial(m);
+            for (u32 t = 0; t < MATERIAL_MAX_TEXTURES; ++t) {
+                mat.setTexture(t, nullptr);
+            }
+        }
+        m_overlayNode->remove();
+        m_overlayNode = nullptr;
+    }
 }
 
 void IrrlichtRenderer::beginFrame() {
@@ -1035,7 +1050,7 @@ void IrrlichtRenderer::setZoneOverlay(
     // → max 16383 quads per buffer (16384th quad's base index = 65536 > u16 max).
     static constexpr u32 kMaxQuadsPerBuffer = 16383u;
 
-    float yOffset = 0.05f;  // 5 cm above terrain — under the hover highlight (10 cm)
+    float yOffset = 0.25f;  // 25 cm above terrain — enough to prevent Z-fighting at far zoom
 
     SMesh*       omesh     = new SMesh();
     SMeshBuffer* cur       = nullptr;
@@ -1043,9 +1058,12 @@ void IrrlichtRenderer::setZoneOverlay(
 
     auto openBuffer = [&]() {
         cur = new SMeshBuffer();
-        cur->Material.MaterialType = EMT_TRANSPARENT_ALPHA_CHANNEL;
-        cur->Material.Lighting     = false;
-        cur->Material.ZWriteEnable = false;
+        cur->Material.MaterialType           = EMT_TRANSPARENT_ALPHA_CHANNEL;
+        cur->Material.Lighting               = false;
+        cur->Material.ZWriteEnable           = false;
+        // Polygon offset: push overlay toward camera to win depth test at far zoom.
+        cur->Material.PolygonOffsetFactor    = 3;
+        cur->Material.PolygonOffsetDirection = irr::video::EPO_FRONT;
         quadsInCur = 0;
     };
 
