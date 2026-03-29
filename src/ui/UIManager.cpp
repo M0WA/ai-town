@@ -1933,6 +1933,10 @@ void UIManager::setLoadingTerrain(bool loading) {
     m_loadingTerrain = loading;
 }
 
+bool UIManager::isGameplayOrPaused() const {
+    return m_state == GameState::Gameplay || m_state == GameState::Paused;
+}
+
 bool UIManager::isQuitRequested() const {
     return m_quitRequested;
 }

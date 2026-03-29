@@ -113,6 +113,10 @@ bool EventReceiver::OnEvent(const irr::SEvent& event) {
         case irr::EMIE_RMOUSE_PRESSED_DOWN:
             ev.type   = InputEvent::Type::MouseButtonDown;
             ev.button = 1;  // RMB
+            // Suppress camera drag when not in gameplay or paused (e.g., main menu).
+            if (!m_uiManager || !m_uiManager->isGameplayOrPaused()) {
+                return false;
+            }
             // Always start camera drag immediately — tool cancel is deferred to RMB up
             // (only when no movement occurred, i.e. a short click, not a drag).
             // UIManager is NOT called on RMB down; it sees RMB up only for click-cancel.
