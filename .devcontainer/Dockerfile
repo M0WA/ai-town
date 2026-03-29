@@ -142,16 +142,8 @@ RUN ARCH=$(dpkg --print-architecture) && \
     echo "Skipping Blender: only amd64 binaries available (arch=$ARCH)"; \
   fi
 
-# texdiag — DirectXTex DDS inspector (validates DX10 sRGB DXGI_FORMAT fields)
-ARG DIRECTXTEX_TAG=dec2024
-RUN git clone --depth 1 --branch ${DIRECTXTEX_TAG} \
-      https://github.com/microsoft/DirectXTex.git /tmp/directxtex \
-  && cmake -B /tmp/directxtex/build -S /tmp/directxtex \
-       -DCMAKE_BUILD_TYPE=Release \
-       -DBUILD_TOOLS=ON \
-  && cmake --build /tmp/directxtex/build --target texdiag -j$(nproc) \
-  && find /tmp/directxtex/build -name texdiag -type f -exec mv {} /usr/local/bin/ \; \
-  && rm -rf /tmp/directxtex
+# NOTE: texdiag (DirectXTex DDS inspector) is Windows-only (links ole32/version).
+# DDS inspection on Linux: use `identify -verbose file.dds` (ImageMagick).
 
 # CMake is pre-installed in the CI base image at /opt/cmake/bin — PATH already set.
 
