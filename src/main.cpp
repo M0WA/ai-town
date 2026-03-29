@@ -164,44 +164,23 @@ int main(int argc, char** argv) {
     // Late-bind UIManager to renderer (breaks circular construction dependency).
     renderer.setUIManager(&uiManager);
 
-    // -------------------------------------------------------------------------
-    // Terrain generation — generate the procedural heightmap and enqueue all chunks.
-    // Map size is read from uiManager.getPendingMapTiles() so that the player's
-    // selection in the New Game screen (Small=128, Medium=512, Large=1024) is
-    // honoured.  cellSize = 10 m throughout.
-    // StdTerrainRNG provides mt19937-backed randomness with reseed() support.
-    // generate() enforces playability constraints (20% flat, 50x50 contiguous region).
-    // enqueueAllChunks() registers LOD0 rebuild requests WITHOUT flushing; the
-    // loading screen loop below drains the deque one flushPendingRebuilds() call
-    // per frame (100 ms CPU budget) so the UI spinner remains animated.
-    // -------------------------------------------------------------------------
-    StdTerrainRNG terrainRng;
-    {
-        // Render one frame before the blocking generate() call so the loading screen
-        // is visible on screen before the CPU-intensive generation begins.
-        device->run();
-        renderer.beginFrame();
-        renderer.drawScene();
-        renderer.endFrame();
-
-        const int mapTiles = uiManager.getPendingMapTiles();
-        terrainSystem.generate(mapTiles, mapTiles, 10.0f, &terrainRng);
-    }
-    terrainSystem.enqueueAllChunks();
+    // Terrain is generated on-demand when the player starts or loads a game
+    // (consumeNewGameRequest / consumeLoadGameRequest polling blocks below).
+    // No startup terrain generation — the main menu shows without terrain.
 
     // -------------------------------------------------------------------------
-    // Phase 9b: wire renderer terrain query AFTER terrain generation.
+    // Phase 9b: wire renderer terrain query with defaults (dims 0x0 at startup).
+    // Actual terrain is generated when the player starts or loads a game.
     // Step 2:  renderer.setTerrainQuery(&terrainSystem)
     // Step 2a: renderer.setCellSize(terrainSystem.getCellSize())
-    // Step 2b: renderer.setRendererMapDimensions(...)
+    // Step 2b: renderer.setRendererMapDimensions(...) — 0x0 until terrain generated
     // -------------------------------------------------------------------------
     renderer.setTerrainQuery(&terrainSystem);
     renderer.setCellSize(terrainSystem.getCellSize());
     renderer.setRendererMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
 
-    // Position camera over the terrain center.
-    // Center = (mapTiles * cellSize) / 2.  getCellSize() returns 10.0f; getMapTilesX()
-    // reflects the actual generated dimension (honours the player's Map Size selection).
+    // Camera target is set to origin at startup (no terrain yet).
+    // Repositioned to terrain center after each new-game or load-game.
     {
         const float halfWorld = terrainSystem.getMapTilesX()
                                 * terrainSystem.getCellSize() * 0.5f;
@@ -249,47 +228,10 @@ int main(int argc, char** argv) {
 
     uiManager.setSaveSystem(&saveSystem);
 
-    // -------------------------------------------------------------------------
-    // Phase 11: Loading screen loop.
-    // Drains the terrain rebuild deque built by enqueueAllChunks() above.
-    // Runs one flushPendingRebuilds() call per frame (100 ms CPU budget) so that
-    // the UI spinner animates every frame rather than blocking for the full build.
-    //
-    // Frame sequence per architecture/graphics-architecture/irrlicht-device-lifecycle.md:
-    //   syncListenerToCamera → audioSystem.update → uiManager.update →
-    //   terrainSystem.update → flushPendingRebuilds (once) →
-    //   beginFrame → drawScene → endFrame.
-    //
-    // guiEnvironment->drawAll() is intentionally omitted — all loading screen
-    // elements (spinner, progress bar) are rendered via UIManager::draw() using
-    // Irrlicht draw primitives; no Irrlicht GUI environment involvement.
-    // -------------------------------------------------------------------------
-    {
-        double loadPrev = wallClock.nowSeconds();
-        while (device->run() && terrainSystem.pendingRebuildCount() > 0) {
-            const double loadNow = wallClock.nowSeconds();
-            const float  loadDt  = static_cast<float>(loadNow - loadPrev);
-            loadPrev = loadNow;
-
-            CameraState loadCam = cameraController.getCameraState();
-            try {
-                audioSystem.syncListenerToCamera(loadCam);
-                audioSystem.update(loadDt);
-            } catch (const std::exception& e) {
-                fprintf(stderr,
-                        "[main] Audio error during loading (audio disabled): %s\n",
-                        e.what());
-            }
-
-            uiManager.update(loadDt);
-            terrainSystem.update(loadDt);
-            terrainSystem.flushPendingRebuilds();  // once per frame, 100 ms budget
-
-            renderer.beginFrame();
-            renderer.drawScene();
-            renderer.endFrame();
-        }
-    }
+    // Show loading screen for one frame while save file state is checked.
+    renderer.beginFrame();
+    renderer.drawFullscreenTexture("assets/textures/ui/loading_screen.png");
+    renderer.endFrame();
 
     // Update Load Game button state after loading screen completes (deferred from startup
     // to avoid blocking before the loading screen is visible).
@@ -543,7 +485,7 @@ int main(int argc, char** argv) {
                     fprintf(stderr, "[main] Audio error during new-game loading: %s\n", e.what());
                 }
                 renderer.beginFrame();
-                renderer.drawScene();
+                renderer.drawFullscreenTexture("assets/textures/ui/loading_screen.png");
                 renderer.endFrame();
             }
             // Update renderer and UI with new terrain dimensions.
@@ -603,7 +545,7 @@ int main(int argc, char** argv) {
                         fprintf(stderr, "[main] Audio error during load-game loading: %s\n", e.what());
                     }
                     renderer.beginFrame();
-                    renderer.drawScene();
+                    renderer.drawFullscreenTexture("assets/textures/ui/loading_screen.png");
                     renderer.endFrame();
                 }
                 // Wire dimensions and reposition camera.

@@ -97,6 +97,7 @@ public:
     void          beginFrame() override;  // driver->beginScene(true, true, SColor(255,0,0,0))
     void          drawScene()  override;  // smgr->drawAll() + uiManager->draw() inside begin/end pair
     void          endFrame()   override;  // driver->endScene()
+    void          drawFullscreenTexture(const std::string& path) override;
     TextureHandle loadTexture(const std::string& path) override;
     void          setCamera(const CameraParams& p) override;
 
