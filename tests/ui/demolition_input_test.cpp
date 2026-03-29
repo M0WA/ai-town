@@ -168,6 +168,8 @@ protected:
         EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(AnyNumber());
         EXPECT_CALL(sim_, queryTile(_, _))
             .Times(AnyNumber()).WillRepeatedly(Return(QueryResult{}));
+        EXPECT_CALL(renderer_, setSceneBackground(_)).Times(AnyNumber());
+        EXPECT_CALL(renderer_, clearSceneBackground()).Times(AnyNumber());
 
         uiManager_ = std::make_unique<UIManager>(&backend_, nullptr, &sim_, &clock_);
         uiManager_->setRenderer(&renderer_);

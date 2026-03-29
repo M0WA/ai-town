@@ -87,6 +87,15 @@ public:
     // Must be called between beginFrame() and endFrame().
     // Used for loading screens. No-op when the texture file is missing.
     virtual void drawFullscreenTexture(const std::string& path) = 0;
+
+    // Set a persistent background texture drawn fullscreen after the 3D scene
+    // but before GUI elements (main menu, loading screens). Pass "" to clear.
+    // The background is drawn automatically each frame inside drawScene() while
+    // the path is non-empty — no per-frame call required by the caller.
+    // No-op when the texture file is missing.
+    // main-thread-only.
+    virtual void setSceneBackground(const std::string& path) = 0;
+    virtual void clearSceneBackground() = 0;
     virtual TextureHandle loadTexture(const std::string& path) = 0;  // main-thread-only; returns kInvalidTexture on failure
     virtual void          setCamera(const CameraParams& p) = 0;       // main-thread-only
 
