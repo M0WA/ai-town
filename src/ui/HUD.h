@@ -36,7 +36,7 @@ public:
     void toggleFinancesPanel();
 
     // Phase 11m: Reset grace period for a new game session.
-    // Resets m_gameStartTime, unhides and fully-opaque the grace period label.
+    // Resets m_graceElapsedSeconds to 0, unhides and fully-opaque the grace period label.
     // Called by UIManager::transitionToGameplay() for both first-game and subsequent new games.
     void notifyGameStarted();
 
