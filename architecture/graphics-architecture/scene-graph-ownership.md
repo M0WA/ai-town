@@ -124,7 +124,7 @@ These nodes have no game-object counterpart and are never referenced by `SceneEn
 
 ### WARNING — SMesh* Downcast Safety
 
-**Never use `static_cast<SMesh*>` on an `IMesh*` pointer unless you can guarantee the pointer was originally created as an `SMesh`.** Performing a `static_cast` on an `IMesh*` that actually points to an Irrlicht-internal mesh type (e.g. `CSkinnedMesh`, `CStaticMesh`, or any other concrete type returned by the asset loader) is undefined behavior — the object layout does not match `SMesh` and any subsequent member access corrupts memory silently.
+NEVER use `static_cast<SMesh*>` on an `IMesh*` pointer — this is an unsafe downcast that bypasses virtual dispatch and produces undefined behaviour if the object is not actually an `SMesh`. This prohibition applies only to downcasts. **Upcasting from `IAnimatedMesh*` to `IMesh*` via `static_cast` is always safe** because `IAnimatedMesh` publicly inherits `IMesh` — see §B3D Building Assets for the canonical usage.
 
 **The LOD asset cache must preserve the `SMesh*` type end-to-end.** Store as `SMesh*`; retrieve as `SMesh*`. Never store a `SMesh*` into an `IMesh*` container and cast it back later. The cast is unverifiable by the type system and becomes a latent UB hazard the moment any cache entry is replaced with a non-SMesh asset.
 

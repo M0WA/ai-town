@@ -221,8 +221,14 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
   | `_sp` | Specular packed (multi-channel roughness/metallic/AO). Upload path: **linear pool** (standard `IVideoDriver::getTexture()`) — packed roughness/metallic/AO data is linear; sRGB decode would corrupt channel values. |
   | `_lm` | Lightmap bake (UV channel 1) |
   | `_billboard` | Billboard imposter atlas (1024×128 DXT5 sRGB, 1×8 horizontal strip) |
+  | `_splat` | **PNG only** (not DDS) — Terrain splat map: blending weights for terrain texture layers |
+  | `_tileable` | DDS DXT1 sRGB — Road surface tileable texture (e.g. `road_asphalt_tileable.dds`) |
 
-  All suffixes are lowercase. No other suffix patterns are valid. `validate_assets.py` must reject any DDS file whose name does not end with one of these six suffixes. The `_billboard` suffix applies exclusively to LOD2 imposter atlases — small building and prop assets that ship a `_billboard.dds` must NOT also ship a `_lod2.b3d` mesh.
+  All suffixes are lowercase. No other suffix patterns are valid. `validate_assets.py` must reject any DDS file whose name does not end with one of these eight suffixes. The `_billboard` suffix applies exclusively to LOD2 imposter atlases — small building and prop assets that ship a `_billboard.dds` must NOT also ship a `_lod2.b3d` mesh.
+
+  **`_splat` note**: Splat maps are loaded as PNG at runtime via `IVideoDriver::getTexture()`. `validate_assets.py` MUST accept `.png` files ending in `_splat` and MUST NOT require them to be DDS. The canonical filename pattern is `terrain_splat.png`.
+
+  **`_tileable` note**: `_tileable` is used as a dispatch key in `texture-cache.md`. The naming convention and dispatch table must agree.
 
 **Upload path determination**: suffix `_d` alone does NOT determine the upload path. Diffuse textures that contain photographic color must use the sRGB raw-GL path. Diffuse textures that encode stylised data (e.g. vehicle sprite atlas roof swatches) must use the linear path. The `TextureCache` upload path is determined by the texture category, not the suffix alone. See `architecture/graphics-architecture/texture-cache.md` for the dispatch table.
 

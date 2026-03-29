@@ -35,8 +35,9 @@ Each deliverable item references its INC number from the review for traceability
   `VCPKG_MANIFEST_INSTALL=OFF`) and therefore require no `actions/cache` step for vcpkg.
   Clarify that the 4-component cache key (`runner.os`, `COMPILER_VERSION`,
   `hashFiles('vcpkg.json')`, `vcpkg_commit_id`) applies to the **Windows job only**.
-  Mark the FetchContent caching section "N/A — all dependencies are vcpkg-managed;
-  no FetchContent is used in this project." _(INC-001, INC-014)_
+  Add a clarifying note to the FetchContent key entry confirming it applies to the
+  `coverage-linux` job only (not all jobs). The FetchContent key IS in active use for
+  `coverage-linux` and MUST NOT be removed or marked N/A. _(INC-001, INC-014)_
 
 - [ ] **A-2** `dependency-management.md`: Clarify that Linux CI derives vcpkg from the
   Docker image rather than a live `lukka/run-vcpkg` invocation. Add a note: "`lukka/run-vcpkg`
@@ -102,16 +103,20 @@ Each deliverable item references its INC number from the review for traceability
   step after the build step.
 
   ```yaml
-  - name: Verify soft_oal.dll present
+  - name: Verify Phase 7 DLLs and HRTF data present
     shell: pwsh
     run: |
       if (-not (Test-Path "build\soft_oal.dll")) {
         Write-Error "soft_oal.dll not found in build\ — rename step failed or DLL was not copied."
         exit 1
       }
+      if (-not (Test-Path "build\default.mhr")) {
+        Write-Error "default.mhr not found in build\ — HRTF post-build copy rule failed."
+        exit 1
+      }
   ```
 
-  This is a hard-fail per Phase 7 (`hrtf-initialization.md`). _(INC-042)_
+  Both checks are hard-fails per Phase 7 (`hrtf-initialization.md`). _(INC-042)_
 
 ---
 
@@ -222,9 +227,10 @@ Each deliverable item references its INC number from the review for traceability
   - Top anchor: y:176 (not y:64; aligned with the Utilities toolbar button row)
   _(INC-005, INC-051)_
 
-- [ ] **G-2** `hud-layout.md` §Demand bars: Fix the inline layout note from "y:664–744" to
+- [x] **G-2** `hud-layout.md` §Demand bars: Fix the inline layout note from "y:664–744" to
   "y:664–748" (height = 56 px; y:692 + 56 = 748). Update `ui-manager.md` demand bar
   bounds to y:664–748 for consistency. _(INC-020)_
+  > **PRE-APPLIED**: `hud-layout.md` line 14 stale reference "y:664–744" changed to "y:664–748" to match the authoritative value on line 19. The `ui-manager.md` portion of G-2 requires no change (no 664/748 constants exist in that file). No file change needed.
 
 - [ ] **G-3** `notification-system.md` §CRITICAL toast Z-order: Add a note: "CRITICAL toasts
   render above the resource bar (higher Z-order). The resource bar occupies y:0–56;
@@ -232,7 +238,9 @@ Each deliverable item references its INC number from the review for traceability
   layer MUST be assigned a higher Z-order than the resource bar layer so toasts are not
   occluded." _(INC-021)_
 
-- [ ] **G-4** `hud-layout.md` §kToolbarBottom: Add a cross-reference note: "The `kToolbarBottom
+- [x] **G-4** `hud-layout.md` §kToolbarBottom: Also change the existing 'Priority 3' reference
+  in the `kToolbarBottom` cross-reference line to 'Priority 5' (the toolbar dispatch is
+  Priority 5 per `input-arbitration.md`). Then add a cross-reference note: "The `kToolbarBottom
   = 784` constant is the canonical input gate boundary. Its enforcement point is the
   `input-arbitration.md` Priority 5 toolbar dispatch table — both files must agree on this
   value. Any change to toolbar height requires updating both `hud-layout.md` and
@@ -306,7 +314,7 @@ Each deliverable item references its INC number from the review for traceability
   ```text
   Header: src/interfaces/IClock.h
   Methods:
-    virtual double now() const = 0;   // seconds since epoch (steady_clock)
+    virtual double nowSeconds() const = 0;   // seconds since epoch (steady_clock)
     virtual ~IClock() = default;
   Implementations:
     WallClock  — production (std::chrono::steady_clock)
@@ -369,7 +377,7 @@ Each deliverable item references its INC number from the review for traceability
 - [ ] **H-7** All architecture spec files: Standardize every reference to `simulation_types.h`
   to use the fully qualified form `src/interfaces/simulation_types.h`. Affected files
   include at minimum: `zoning-system.md`, `service-coverage.md`, `traffic-system.md`,
-  `testability-architecture.md`, `ui-manager.md`. _(INC-055)_
+  `testability-architecture.md`, `ui-manager.md`, `audio-system.md`. _(INC-055)_
 
 ---
 
@@ -390,13 +398,14 @@ Each deliverable item references its INC number from the review for traceability
   whose textures are evicted mid-draw." Cross-reference this rule in
   `irrlicht-device-lifecycle.md` §Frame loop eviction note. _(INC-006)_
 
-- [ ] **I-2** `scene-graph-ownership.md` §static_cast WARNING: Replace the blanket
+- [x] **I-2** `scene-graph-ownership.md` §static_cast WARNING: Replace the blanket
   prohibition with a precise rule: "NEVER use `static_cast<SMesh*>` on an `IMesh*`
   pointer — this is an unsafe downcast that bypasses virtual dispatch and produces
   undefined behaviour if the object is not actually an `SMesh`. This prohibition applies
   only to downcasts. **Upcasting from `IAnimatedMesh*` to `IMesh*` via `static_cast` is
   always safe** because `IAnimatedMesh` publicly inherits `IMesh` — see §B3D Building
   Assets for the canonical usage." _(INC-007)_
+  > **PRE-APPLIED**: The `static_cast` WARNING in `scene-graph-ownership.md` has been updated to distinguish unsafe downcasts (`SMesh*` from `IMesh*`) from safe upcasts (`IAnimatedMesh*` to `IMesh*`). No file change needed.
 
 - [ ] **I-3** `model-validator-tool.md` §Phase 11d Asset Inventory table: Add the missing
   vehicle row:
@@ -405,7 +414,11 @@ Each deliverable item references its INC number from the review for traceability
   |---|---|---|
   | Vehicle LOD0 | 5 | car_sedan, car_hatchback, car_suv, bus_standard, truck_cargo |
 
-  Update the sub-total line to: "**Total: 45** (36 zone buildings + 4 service buildings + 5 vehicles)." _(INC-019)_
+  Add a new **"Total LOD0 `.b3d`"** sub-total row = **45** (36 zone buildings + 4 service
+  buildings + 5 vehicles). This is a NEW row — do NOT replace the existing "Total `.b3d`"
+  all-level row. Also update the existing "Total `.b3d`" all-level count from **92 → 102**
+  (adding 5 vehicle LOD0 + 5 vehicle LOD1). The two counts are distinct: 45 = LOD0 only;
+  102 = all LOD levels across all asset categories. _(INC-019)_
 
 - [ ] **I-4** `model-validator-tool.md` §Road tile category: Add a note: "Road tile geometry
   is **procedurally generated at runtime** via `buildTileRoadMesh()`. No road tile `.b3d`
@@ -413,15 +426,22 @@ Each deliverable item references its INC number from the review for traceability
   function as `IrrlichtRenderer` — not by loading a file. This is the identical code path
   per the validator design goal." _(INC-026)_
 
-- [ ] **I-5** `irrlicht-device-lifecycle.md` §Camera scene node construction: Add a
-  requirement note: "The camera's far-clip distance MUST be set to ≥ 15 000 m.
+- [ ] **I-5** `irrlicht-device-lifecycle.md` §Construction Sequence table — Step 4 note:
+  Add a requirement note immediately below Step 4 ("Camera scene node + CameraController")
+  in the construction sequence: "The camera's far-clip distance MUST be set to ≥ 15 000 m.
   Values below 15 000 m will hard-clip the cloud dome vertices.
-  (See `sky-clouds.md` §farClip requirement.)" _(INC-036)_
+  (See `sky-clouds.md` §Cloud Dome Geometry.)" If the step already has a note column,
+  add to it. If no note column exists for Step 4, create a parenthetical or sub-bullet
+  beneath the step. _(INC-036)_
 
-- [ ] **I-6** `irrlicht-device-lifecycle.md` §Inline code sample (top of file): Add
+- [x] **I-6** `irrlicht-device-lifecycle.md` §Inline code sample (top of file): Add
   `renderer->update(realDeltaSeconds);` between `terrainSystem->update(dt);` and
   `driver->beginScene(...)`. Add inline comment: `// cloud UV scroll + per-frame renderer state`.
   _(INC-037)_
+  > **PRE-APPLIED**: `renderer->update(realDeltaSeconds);` with inline comment
+  > `// cloud UV scroll + per-frame renderer state` has been inserted in the
+  > `irrlicht-device-lifecycle.md` code block between `terrainSystem->update(dt)` and
+  > `driver->beginScene(...)`. No file change needed.
 
 - [ ] **I-8** `irrlicht-device-lifecycle.md` §Construction sequence table — step 2
   (`IrrlichtUIBackend`): Add a note: "`IrrlichtUIBackend` MUST be constructed in `main.cpp`
@@ -438,7 +458,7 @@ Each deliverable item references its INC number from the review for traceability
 `architecture/asset-standards/building-atlas-layout.md`,
 `architecture/graphics-architecture/texture-cache.md`
 
-- [ ] **J-1** `2d-texture-standards.md` §Naming convention table: Add `_splat` as a 7th
+- [x] **J-1** `2d-texture-standards.md` §Naming convention table: Add `_splat` as a 7th
   recognized suffix:
 
   | Suffix | Format | Usage |
@@ -449,6 +469,8 @@ Each deliverable item references its INC number from the review for traceability
   `validate_assets.py` MUST accept `.png` files ending in `_splat` and MUST NOT require
   them to be DDS. The canonical filename pattern is `terrain_splat.png`."
   _(INC-008)_
+  > **PRE-APPLIED**: `_splat` row (PNG only, terrain splat map) and associated note have been
+  > added to the `2d-texture-standards.md` naming convention table. No file change needed.
 
 - [ ] **J-2** `2d-texture-standards.md` §Building atlas section: Add a "V1 implementation
   note" box: "**V1 PNG workaround:** The production format for `buildings_atlas_d` is
@@ -463,7 +485,7 @@ Each deliverable item references its INC number from the review for traceability
   applied at sample time will corrupt the encoded XY direction vectors and produce
   incorrect lighting." _(INC-047)_
 
-- [ ] **J-4** `2d-texture-standards.md` §Naming convention table: Add `_tileable` as an
+- [x] **J-4** `2d-texture-standards.md` §Naming convention table: Add `_tileable` as an
   8th recognized suffix:
 
   | Suffix | Format | Usage |
@@ -472,13 +494,16 @@ Each deliverable item references its INC number from the review for traceability
 
   Add note: "`_tileable` is used as a dispatch key in `texture-cache.md`. The naming
   convention and dispatch table must agree." _(INC-048)_
+  > **PRE-APPLIED**: `_tileable` row (DDS DXT1 sRGB, road asphalt) and associated note have been
+  > added to the `2d-texture-standards.md` naming convention table. No file change needed.
 
-- [ ] **J-5** `building-atlas-layout.md` §Phase 5 sign-off block: Add a correction note
+- [x] **J-5** `building-atlas-layout.md` §Phase 5 sign-off block: Add a correction note
   directly after the sign-off: "> **SUPERSEDED by phase-11e:** Effective UV island
   resolution is now **496×496 px** per variant cell (512×512 cell minus 8 px border
   on each side × 2). The '256×256 effective per island' figure in this sign-off reflects
   the pre-phase-11e shared-cell design and is no longer valid. Current atlas: 8×8 grid,
   512×512 px per cell." _(INC-049)_
+  > **PRE-APPLIED**: Supersession note ("SUPERSEDED by phase-11e: effective UV island resolution is now 496×496 px per variant cell") has been added after the Phase 5 sign-off in `building-atlas-layout.md`. No file change needed.
 
 - [ ] **J-6** `texture-cache.md` §VRAM estimation formula: Add a note after the 1.33×
   factor explanation: "The 1.33× overhead factor applies equally to **4-level and 5-level
@@ -600,6 +625,6 @@ guidance are in the table below — no further decisions needed.
 | 1–4 (CI/CD, Testing) | `cicd-dev-github` |
 | 5–6 (Game Design) | `gamedesign-lookandfeel` |
 | 7 (UI/UX) | `gamedesign-ux` |
-| 8 (Cross-domain interfaces) | `graphics-dev-irrlicht` + `test-dev-cpp` |
+| 8 (Cross-domain interfaces) | `graphics-dev-irrlicht` + `test-dev-cpp` (H-6 audio spec cross-refs: `sound-dev-opensoftal`) |
 | 9 (Graphics) | `graphics-dev-irrlicht` |
 | 10 (Textures) | `graphics-artist-2d-texture` |
