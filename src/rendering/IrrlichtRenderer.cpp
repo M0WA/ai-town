@@ -2956,6 +2956,75 @@ void IrrlichtRenderer::initCloudPlane()
     }
 
     // m_cloudUVOffset initialised to {0.f, 0.f} by member initialiser in header.
+
+    // -----------------------------------------------------------------
+    // Ground plane — covers the void beyond the finite terrain mesh.
+    //
+    // The terrain is a finite rectangular mesh.  From a bird's-eye camera, the
+    // terrain boundary (where terrain ends and nothing is drawn) is visible as a
+    // sharp line — an "arch" in perspective — against the sky-blue clear colour.
+    // A large solid-coloured quad placed just below terrain level fills this void,
+    // eliminating the arch completely.
+    //
+    // The plane is 30 000 m on each side (2 * far clip distance) so it extends
+    // past the far clip in every direction.  It follows the camera XZ each frame
+    // (like the cloud dome) so the edges are never visible.
+    //
+    // Colour: dark terrain green (RGB 34,80,20) — blends with the terrain's
+    // lowest-altitude vertex colour.  The slight darkness makes the boundary
+    // imperceptible.
+    //
+    // Y offset: -5 m — below the terrain surface to avoid Z-fighting with
+    // terrain chunk geometry, but above the cloud dome base ring (-2000 m)
+    // so the ground plane occludes the void before the dome's transparent band.
+    // -----------------------------------------------------------------
+    {
+        constexpr float kGroundHalf = 15000.0f;  // half-extent = far clip distance
+        constexpr float kGroundY    = -5.0f;     // just below terrain surface
+
+        SMesh*       gmesh = new SMesh();
+        SMeshBuffer* gbuf  = new SMeshBuffer();
+
+        // Four corner vertices — flat quad at Y = kGroundY.
+        // Dark terrain green: blends seamlessly with lowland terrain vertex colour.
+        const SColor groundCol(255, 34, 80, 20);
+        gbuf->Vertices.push_back(S3DVertex(
+            core::vector3df(-kGroundHalf, kGroundY, -kGroundHalf),
+            core::vector3df(0, 1, 0), groundCol, core::vector2df(0, 0)));
+        gbuf->Vertices.push_back(S3DVertex(
+            core::vector3df( kGroundHalf, kGroundY, -kGroundHalf),
+            core::vector3df(0, 1, 0), groundCol, core::vector2df(1, 0)));
+        gbuf->Vertices.push_back(S3DVertex(
+            core::vector3df( kGroundHalf, kGroundY,  kGroundHalf),
+            core::vector3df(0, 1, 0), groundCol, core::vector2df(1, 1)));
+        gbuf->Vertices.push_back(S3DVertex(
+            core::vector3df(-kGroundHalf, kGroundY,  kGroundHalf),
+            core::vector3df(0, 1, 0), groundCol, core::vector2df(0, 1)));
+
+        // CW winding from above (+Y normal) — same convention as terrain chunks.
+        gbuf->Indices.push_back(0);
+        gbuf->Indices.push_back(2);
+        gbuf->Indices.push_back(1);
+        gbuf->Indices.push_back(0);
+        gbuf->Indices.push_back(3);
+        gbuf->Indices.push_back(2);
+
+        gbuf->recalculateBoundingBox();
+        gmesh->addMeshBuffer(gbuf);
+        gbuf->drop();
+        gmesh->recalculateBoundingBox();
+
+        m_groundPlaneNode = m_smgr->addMeshSceneNode(gmesh);
+        gmesh->drop();
+
+        if (m_groundPlaneNode) {
+            auto& gmat = m_groundPlaneNode->getMaterial(0);
+            gmat.MaterialType    = EMT_SOLID;
+            gmat.Lighting        = false;
+            gmat.BackfaceCulling = false;  // visible from below as well
+            gmat.ZWriteEnable    = true;   // solid geometry — writes depth normally
+        }
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -2995,6 +3064,13 @@ void IrrlichtRenderer::update(float dt)
         // The vertex shader uses gl_Vertex.y directly (already cam-relative local
         // space) so no per-frame camera-Y uniform is needed.
         m_cloudNode->setPosition(camPos);
+
+        // Ground plane follows camera XZ so its edges (at far clip distance) are
+        // never visible.  Y is fixed at 0 — the mesh vertices already embed the
+        // -5 m offset relative to node origin.
+        if (m_groundPlaneNode) {
+            m_groundPlaneNode->setPosition(core::vector3df(camPos.X, 0.0f, camPos.Z));
+        }
     }
 }
 
