@@ -540,11 +540,12 @@ int main(int argc, char** argv) {
             // Update renderer and UI with new terrain dimensions.
             renderer.setRendererMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
             renderer.setCellSize(terrainSystem.getCellSize());
-            // Reposition camera to center of new terrain.
+            // Reposition camera to center of new terrain and reset orbit.
             {
                 const float halfWorld = terrainSystem.getMapTilesX()
                                         * terrainSystem.getCellSize() * 0.5f;
                 cameraController.setTarget(halfWorld, halfWorld);
+                cameraController.resetOrbit();
             }
             uiManager.setMapDimensions(
                 static_cast<int>(ngp.mapSize), static_cast<int>(ngp.mapSize));
@@ -603,6 +604,7 @@ int main(int argc, char** argv) {
                     const float halfWorld = static_cast<float>(loadedTilesX)
                                             * terrainSystem.getCellSize() * 0.5f;
                     cameraController.setTarget(halfWorld, halfWorld);
+                    cameraController.resetOrbit();
                 }
                 uiManager.setMapDimensions(loadedTilesX, loadedTilesZ);
                 citySimulation.setMapDimensions(loadedTilesX, loadedTilesZ);
