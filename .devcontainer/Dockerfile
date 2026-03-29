@@ -70,6 +70,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   clang-tidy \
   clangd \
   bear \
+  pandoc \
   && apt-get clean && rm -rf /var/lib/apt/lists/* \
   && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
   && (test -f /usr/bin/batcat && ln -sf /usr/bin/batcat /usr/local/bin/bat || true)
