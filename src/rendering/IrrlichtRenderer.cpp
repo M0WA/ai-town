@@ -2717,25 +2717,15 @@ static SMesh* buildCloudDomeMesh()
 {
     constexpr int   kDomeRings         = 32;     // latitude bands — keep fade smooth
     constexpr int   kDomeSectors       = 32;     // longitude segments
-    constexpr float kCloudAltitude     = -2000.0f;  // base ring 2000 m below camera — atan(-2000/12000)≈-9.5°,
+    constexpr float kCloudAltitude     = -1000.0f;  // base ring 1000 m below camera — atan(-1000/6000)≈-9.5°,
                                                     // safely below the horizon so base is fully transparent
-    constexpr float kCloudDomeRadius   = 12000.0f;  // horizontal radius — must be < far clip (15000 m)
-    constexpr float kCloudDomeHeight   = 3000.0f;   // apex 1000 m above camera (-2000+3000), base 2000 m below
+    constexpr float kCloudDomeRadius   = 6000.0f;   // horizontal radius — must be < far clip (15000 m)
+    constexpr float kCloudDomeHeight   = 2000.0f;   // apex 1000 m above camera (-1000+2000), base 1000 m below
     constexpr float kCloudUVScale      = 4.0f;   // texture tiling factor
-    // Horizon fade is baked into vertex alpha AND the fragment shader.
-    // Vertex alpha ensures the dome fades correctly even when the custom GLSL
-    // shader fails to compile and Irrlicht falls back to EMT_TRANSPARENT_VERTEX_ALPHA.
-    // Without per-vertex alpha fade, the fallback renders the dome fully opaque
-    // (alpha=255 everywhere), creating a hard visible arch at the dome's base ring
-    // where the opaque cloud texture meets the sky-blue clear colour.
-    //
-    // Elevation thresholds for vertex alpha (radians):
-    //   kVtxFadeStart = 0.035  (~+2°, at horizon — fully opaque below)
-    //   kVtxFadeEnd   = 0.26   (~+15°, above — fully transparent above)
-    // Per-vertex alpha fallback: opaque at base (sky-blue via haze), transparent
-    // above +15°.  Must match cloud_dome.frag kAlphaFadeStart / kAlphaFadeEnd.
-    constexpr float kVtxFadeStart = 0.035f;   // ~+2°  — fully opaque at/below
-    constexpr float kVtxFadeEnd   = 0.26f;    // ~+15° — fully transparent at/above
+    // Vertex alpha: always 255 (fully opaque in vertex color).
+    // Horizon fade is handled entirely in the fragment shader using elevation angle.
+    // In EMT_TRANSPARENT_VERTEX_ALPHA fallback (shader compile failure) the dome
+    // renders as opaque vertex-coloured shell — acceptable degraded fallback.
     // UV is cylindrical (not polar) for uniform texture distribution at each ring.
 
     SMesh*       mesh = new SMesh();
@@ -2749,13 +2739,13 @@ static SMesh* buildCloudDomeMesh()
     // relative to the node, which tracks the camera position each frame.
     // Its UV is centred (u=kCloudUVScale*0.5, v=0) — this value is only used by
     // the fan cap triangles and is never interpolated across a seam.
-    // Apex is well above +15°, so vertex alpha = 0 (fully transparent).
+    // Apex vertex alpha = 255; shader zeroes it via fade = 0 above +40°.
     // -----------------------------------------------------------------------
     const float apexY = kCloudAltitude + kCloudDomeHeight;
     buf->Vertices.push_back(S3DVertex(
         core::vector3df(0.0f, apexY, 0.0f),
         core::vector3df(0.0f, 1.0f, 0.0f),          // straight-up inward normal at apex
-        SColor(0, 255, 255, 255),
+        SColor(255, 255, 255, 255),
         core::vector2df(kCloudUVScale * 0.5f, 0.0f)));
 
     // -----------------------------------------------------------------------
@@ -2767,24 +2757,19 @@ static SMesh* buildCloudDomeMesh()
     // interpolate between rather than wrapping across a seam fold.  With
     // ETC_REPEAT on the material this is seamless.
     //
-    // Vertex alpha is computed per-ring from the elevation angle to produce a
-    // smooth fade that works both with and without the custom GLSL shader.
+    // All vertices: alpha=255; horizon fade is handled entirely in cloud_dome.frag.
     // -----------------------------------------------------------------------
     for (int ring = 1; ring <= kDomeRings; ++ring) {
         const float t  = static_cast<float>(ring) / static_cast<float>(kDomeRings);
         const float y  = kCloudAltitude + kCloudDomeHeight * (1.0f - t);
         const float r  = kCloudDomeRadius * t;  // horizontal radius at this ring
 
-        // Compute elevation angle for this ring (same formula as vertex shader).
-        // r is the horizontal distance, y is the vertical offset from camera.
-        const float elevAngle = std::atan2(y, std::max(r, 0.1f));
-
-        // Smoothstep vertex alpha based on elevation angle.
-        float vtxT = (elevAngle - kVtxFadeStart) / (kVtxFadeEnd - kVtxFadeStart);
-        if (vtxT < 0.0f) vtxT = 0.0f;
-        if (vtxT > 1.0f) vtxT = 1.0f;
-        const float vtxSmooth = vtxT * vtxT * (3.0f - 2.0f * vtxT);  // smoothstep
-        const irr::u32 vtxAlpha = static_cast<irr::u32>((1.0f - vtxSmooth) * 255.0f + 0.5f);
+        // All vertices white (255,255,255,255) — horizon fade and haze blend are
+        // handled entirely in cloud_dome.frag via elevation-angle smoothstep.
+        const irr::u32 vtxAlpha = 255u;
+        const irr::u32 vtxR     = 255u;
+        const irr::u32 vtxG     = 255u;
+        const irr::u32 vtxB     = 255u;
 
         for (int sec = 0; sec <= kDomeSectors; ++sec) {
             const float phi      = static_cast<float>(sec)
@@ -2799,7 +2784,7 @@ static SMesh* buildCloudDomeMesh()
             buf->Vertices.push_back(S3DVertex(
                 core::vector3df(r * nx, y, r * nz),
                 core::vector3df(-nx, 1.0f, -nz),    // approximate inward normal
-                SColor(vtxAlpha, 255, 255, 255),
+                SColor(vtxAlpha, vtxR, vtxG, vtxB),
                 core::vector2df(u, v)));
         }
     }
