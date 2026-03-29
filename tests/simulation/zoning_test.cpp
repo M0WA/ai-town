@@ -799,25 +799,24 @@ TEST_F(ZoningConstructionDelayTest, ZoningSystem_PlaceZone_NoBuildingMeshAtPlace
 // TEST CD-2: ZoningSystem_PlaceZone_BuildingMeshSpawnsWhenDemandSufficient
 //
 // After placeZone(), a single budget tick should trigger placeBuildingMesh()
-// for the Residential tile when effective_demand_factor >= 0.50.
+// for both the Residential and Commercial tiles.
 //
 // Strategy: Place R + C zones + road. During bootstrap tick 1:
 //   effectiveR = trafficDemandFactorR + bootstrapR = 0.5 + 0.417 = 0.917 >= 0.50
-//   effectiveC = trafficDemandFactorC * C_demand + bootstrapC ≈ 0.208 < 0.50
+//   effectiveC (before floor) ≈ 0.208; demand_floor_commercial = 0.55 >= 0.50
 // CI-capacity gate does not zero R (C zone exists, totalCIWorkerCapacity > 0).
-// So the R tile's mesh spawns at tick 1 (demand met), C tile stays under construction.
+// Both R and C meshes spawn at tick 1 (both meet the 0.50 threshold).
 // ---------------------------------------------------------------------------
 TEST_F(ZoningConstructionDelayTest, ZoningSystem_PlaceZone_BuildingMeshSpawnsWhenDemandSufficient) {
     // Allow road placement call.
     EXPECT_CALL(m_renderer, placeRoadMesh(_, _)).Times(1);
-    // R tile mesh spawns exactly once at tick 1 (demand 0.917 >= 0.50).
-    // C tile demand is ~0.208 < 0.50, so its mesh does NOT spawn.
-    EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(1);
+    // Both R and C meshes spawn at tick 1: R via demand 0.917, C via demand floor 0.55.
+    EXPECT_CALL(m_renderer, placeBuildingMesh(_, _, _)).Times(2);
 
     m_sim->placeRoad(0, 0);
     // R zone: effectiveR = 0.917 >= 0.50 at tick 1 (bootstrap active, C zone present).
     m_sim->placeZone(1, 0, ZoneType::Residential, DensityTier::Low);
-    // C zone: effectiveC ≈ 0.208 < 0.50 at tick 1 — does not spawn.
+    // C zone: effectiveC floor = 0.55 >= 0.50 at tick 1 — spawns at floor.
     m_sim->placeZone(0, 1, ZoneType::Commercial, DensityTier::Low);
 
     // One budget tick during bootstrap (m_totalTicks becomes 1 on first tick).
