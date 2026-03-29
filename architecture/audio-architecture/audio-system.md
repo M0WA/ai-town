@@ -146,9 +146,9 @@ public:
 
     // Transition from main menu audio to gameplay audio.
     // Called by UIManager when the player starts a new game or loads a saved game.
-    // Crossfades main menu music out over 1 s (constant-power curve) on sources[58..59]
-    // using m_clock for real-time crossfade duration measurement (not simulation time),
-    // then hands those sources to the gameplay music system to begin the first gameplay stem.
+    // Stops main menu music immediately (hard direct-start, no ramp-out) on sources[58..59],
+    // then hands those sources to the gameplay music system to begin the first gameplay stem
+    // at full gain with no ramp-in.
     // Also starts the ambient bed layer (sources[60..61]) for the current time-of-day period.
     // Must not be called while gameplay audio is already active (undefined behaviour).
     //
@@ -164,14 +164,14 @@ public:
 
     // Transition from gameplay audio back to main menu audio.
     // Called by UIManager::transitionToMainMenu() when the player quits to the main menu.
-    // Stops all active gameplay music stems and ambient beds on sources[58..61],
-    // then begins the main menu music system on sources[58..59], crossfading in main menu
-    // music over 1 s (constant-power curve) and establishing looping playback
+    // Stops all active gameplay music stems and ambient beds on sources[58..61] immediately
+    // (hard stop, no fade-out), then starts main menu music on sources[58..59] at full gain
+    // with no ramp-in (hard direct-start) and establishes indefinite looping playback
     // (main menu music loops indefinitely per dynamic-soundscape.md §Main Menu Audio).
-    // The 1 s crossfade is wall-clock time ONLY — bar-boundary synchronization is NOT
-    // applied to this transition. Bar-boundary tracking applies only to within-gameplay
-    // stem crossfades (calm/growth/crisis tier changes), not to the gameplay↔main-menu
-    // transitions which are triggered by user action and must start immediately.
+    // No crossfade is performed — bar-boundary synchronization does NOT apply to this
+    // transition. Bar-boundary tracking applies only to within-gameplay stem crossfades
+    // (calm/growth/crisis tier changes), not to the gameplay↔main-menu transitions which
+    // are triggered by user action and must start immediately at full gain.
     // Safe to call if gameplay audio is not currently active — the implementation
     // stops all sources[58..61] unconditionally via alSourceStop (which is a no-op
     // for sources not in AL_PLAYING state). No guard condition is required; the
