@@ -2667,27 +2667,32 @@ void IrrlichtRenderer::removeVehicle(uint32_t vehicleId)
 // buildCloudDomeMesh — helper that constructs and returns the cloud dome SMesh.
 //
 // Dome geometry (Irrlicht left-handed, Y-up):
-//   - kDomeRings  rows of latitude from top (ring 0) to horizon (ring kDomeRings-1).
-//   - kDomeSectors columns of longitude around the dome.
-//   - Top cap: kDomeSectors triangles fanning from the apex vertex.
-//   - Body:    (kDomeRings-2) × kDomeSectors quads (2 triangles each).
-//   - Bottom ring vertices are placed at Y = kCloudAltitude (dome base), outer
-//     ring vertices at Y = kCloudAltitude + kCloudDomeHeight (apex).
+//   - A single shared apex vertex at the dome top (index 0).
+//   - kDomeRings rings of kDomeSectors+1 vertices each, numbered ring 1..kDomeRings
+//     (ring 1 = first latitude band below apex, ring kDomeRings = base).
+//   - Top cap: kDomeSectors triangles fanning from the shared apex vertex to the
+//     first ring — no degenerate triangles (each fan triangle has three distinct
+//     world positions).
+//   - Body: (kDomeRings-1) × kDomeSectors quads (2 triangles each).
 //
-// UV mapping (polar, from apex outward):
-//   Each vertex is mapped from dome-top (UV centre = 0.5,0.5) to dome base
-//   (UV radius = 0.5) scaled by kCloudUVScale so the texture tiles naturally.
-//     u = (nx * 0.5f + 0.5f) * kCloudUVScale
-//     v = (nz * 0.5f + 0.5f) * kCloudUVScale
-//   where (nx, nz) is the horizontal unit direction of the vertex.
+// Vertex layout in the buffer:
+//   index 0                                  — shared apex vertex
+//   indices 1 .. (kDomeSectors+1)            — ring 1 (kDomeSectors+1 vertices)
+//   indices (kDomeSectors+1)+1 .. 2*(kDomeSectors+1) — ring 2
+//   ...
+//   General: ring r (1-based) starts at offset 1 + (r-1)*(kDomeSectors+1).
 //
-// Vertex colour:
-//   Alpha 255 at apex, fading linearly to 0 at the bottom ring for a soft
-//   horizon blend. RGB always (255,255,255) — tint is done by the texture.
+// UV mapping (cylindrical):
+//   u = phi_norm * kCloudUVScale  (0 at sec=0, kCloudUVScale at sec=kDomeSectors)
+//   v = t * kCloudUVScale         (0 at apex, kCloudUVScale at base ring)
+//   Apex vertex: u=0.5*kCloudUVScale, v=0 (centred; not sampled by fan edges).
+//   Texture wrap mode ETC_REPEAT is set on the material so tiling works correctly.
 //
-// Winding: CW from outside (camera is inside the dome, looking up and outward).
-// Irrlicht back-face culling is disabled on the material so the inner surface
-// is always rendered.
+// Vertex colour: alpha=255 everywhere — horizon fade is applied in the fragment
+//   shader (cloud_dome.frag) using the elevation angle from the camera.
+//
+// Winding: CW from inside the dome (camera looks up and outward).
+//   Irrlicht back-face culling is disabled so the inner surface is always rendered.
 //
 // SMesh lifetime: caller owns the returned pointer (ref_count=1) and MUST call
 // smesh->drop() after addMeshSceneNode() to release its own reference.
@@ -2710,71 +2715,82 @@ static SMesh* buildCloudDomeMesh()
     SMesh*       mesh = new SMesh();
     SMeshBuffer* buf  = new SMeshBuffer();
 
-    // Build kDomeRings+1 rings of vertices (ring 0 = apex, ring kDomeRings = base).
-    // Each ring i has kDomeSectors+1 vertices (sector 0 and kDomeSectors share the
-    // same XZ position but have distinct UV to avoid a seam fold).
-    //
-    // latitude parameter t: 0 (apex) → 1 (base).
-    //   Y       = kCloudAltitude + kCloudDomeHeight * (1 - t)
-    //   radius  = kCloudDomeRadius * t
-    //   (nx,nz) = (sin(phi), cos(phi))  where phi = sector * 2π / kDomeSectors
-    //
-    // All vertices use alpha=255.  Horizon fade is handled entirely in the fragment
-    // shader (cloud_dome.frag, rev 2) using the elevation angle from the camera,
-    // which is symmetric in all azimuths.  See CloudDomeShaderCallback::setCameraY().
-
     const float piF = static_cast<float>(M_PI);
 
-    for (int ring = 0; ring <= kDomeRings; ++ring) {
-        const float t      = static_cast<float>(ring) / static_cast<float>(kDomeRings);
-        const float y      = kCloudAltitude + kCloudDomeHeight * (1.0f - t);
-        const float r      = kCloudDomeRadius * t;  // horizontal radius at this ring
+    // -----------------------------------------------------------------------
+    // Vertex 0: shared apex (single vertex, no degenerate triangles at the top).
+    // The apex sits at world position (0, kCloudAltitude + kCloudDomeHeight, 0).
+    // Its UV is centred (u=kCloudUVScale*0.5, v=0) — this value is only used by
+    // the fan cap triangles and is never interpolated across a seam.
+    // -----------------------------------------------------------------------
+    const float apexY = kCloudAltitude + kCloudDomeHeight;
+    buf->Vertices.push_back(S3DVertex(
+        core::vector3df(0.0f, apexY, 0.0f),
+        core::vector3df(0.0f, 1.0f, 0.0f),          // straight-up inward normal at apex
+        SColor(255, 255, 255, 255),
+        core::vector2df(kCloudUVScale * 0.5f, 0.0f)));
+
+    // -----------------------------------------------------------------------
+    // Rings 1 .. kDomeRings.
+    // Ring index r (1-based): t = r / kDomeRings.
+    // Each ring has kDomeSectors+1 vertices so that sector 0 (u=0) and sector
+    // kDomeSectors (u=kCloudUVScale) share the same XZ world position but carry
+    // distinct U coordinates, giving the texture sampler two separate texels to
+    // interpolate between rather than wrapping across a seam fold.  With
+    // ETC_REPEAT on the material this is seamless.
+    // -----------------------------------------------------------------------
+    for (int ring = 1; ring <= kDomeRings; ++ring) {
+        const float t  = static_cast<float>(ring) / static_cast<float>(kDomeRings);
+        const float y  = kCloudAltitude + kCloudDomeHeight * (1.0f - t);
+        const float r  = kCloudDomeRadius * t;  // horizontal radius at this ring
 
         for (int sec = 0; sec <= kDomeSectors; ++sec) {
-            const float phi = static_cast<float>(sec) / static_cast<float>(kDomeSectors)
-                              * 2.0f * piF;
-            const float nx  = std::sin(phi);
-            const float nz  = std::cos(phi);
-            const float px  = r * nx;
-            const float pz  = r * nz;
-
-            // UV: cylindrical mapping — u wraps around the azimuth (0→kCloudUVScale
-            // as phi goes 0→2π), v maps from apex (0) to base ring (kCloudUVScale).
-            // This ensures every ring samples the full texture width uniformly in all
-            // azimuth directions, so cloud density at any given elevation is statistically
-            // the same in every compass direction.  The old polar mapping (top-down
-            // projection) caused the UV sampling circle at the fade-band elevation ring to
-            // pass through denser cloud regions in some azimuths and sparse regions in
-            // others, producing an asymmetric horizon arc.
-            const float phi_norm = static_cast<float>(sec) / static_cast<float>(kDomeSectors);
+            const float phi      = static_cast<float>(sec)
+                                   / static_cast<float>(kDomeSectors) * 2.0f * piF;
+            const float nx       = std::sin(phi);
+            const float nz       = std::cos(phi);
+            const float phi_norm = static_cast<float>(sec)
+                                   / static_cast<float>(kDomeSectors);
             const float u = phi_norm * kCloudUVScale;
-            const float v = t * kCloudUVScale;
+            const float v = t        * kCloudUVScale;
 
-            // Normal points inward-upward (camera is inside the dome).
-            // Alpha=255 always — the fragment shader applies the elevation-angle fade.
             buf->Vertices.push_back(S3DVertex(
-                core::vector3df(px, y, pz),
+                core::vector3df(r * nx, y, r * nz),
                 core::vector3df(-nx, 1.0f, -nz),    // approximate inward normal
                 SColor(255, 255, 255, 255),
                 core::vector2df(u, v)));
         }
     }
 
-    // Index buffer: CW winding when viewed from inside the dome.
-    // Each quad (ring r, sector s) spans vertices:
-    //   top-left  = r       * (kDomeSectors+1) + s
-    //   top-right = r       * (kDomeSectors+1) + s + 1
-    //   bot-left  = (r+1)   * (kDomeSectors+1) + s
-    //   bot-right = (r+1)   * (kDomeSectors+1) + s + 1
-    // Inside-CW winding (looking from inside upward): top-left, bot-left, top-right
-    //                                                 bot-left,  bot-right, top-right
+    // -----------------------------------------------------------------------
+    // Index buffer.
+    //
+    // Helper: offset of sector s in ring r (1-based) within the vertex buffer.
+    //   ringOffset(r, s) = 1 + (r-1)*(kDomeSectors+1) + s
+    // -----------------------------------------------------------------------
+    auto ringOffset = [&](int r, int s) -> irr::u16 {
+        return static_cast<irr::u16>(1 + (r - 1) * (kDomeSectors + 1) + s);
+    };
 
-    for (int ring = 0; ring < kDomeRings; ++ring) {
+    // Top cap: kDomeSectors fan triangles from the apex (vertex 0) to ring 1.
+    // CW winding from inside (looking up): apex → ring1[s+1] → ring1[s].
+    for (int sec = 0; sec < kDomeSectors; ++sec) {
+        buf->Indices.push_back(static_cast<irr::u16>(0));    // apex
+        buf->Indices.push_back(ringOffset(1, sec + 1));
+        buf->Indices.push_back(ringOffset(1, sec));
+    }
+
+    // Body: quads for rings 1..(kDomeRings-1) → rings 2..kDomeRings.
+    // Each quad (ring r, sector s):
+    //   tl = ring r,   sector s        tr = ring r,   sector s+1
+    //   bl = ring r+1, sector s        br = ring r+1, sector s+1
+    // CW from inside: tl → bl → tr  and  bl → br → tr.
+    for (int ring = 1; ring < kDomeRings; ++ring) {
         for (int sec = 0; sec < kDomeSectors; ++sec) {
-            const irr::u16 tl = static_cast<irr::u16>( ring      * (kDomeSectors + 1) + sec);
-            const irr::u16 tr = static_cast<irr::u16>( ring      * (kDomeSectors + 1) + sec + 1);
-            const irr::u16 bl = static_cast<irr::u16>((ring + 1) * (kDomeSectors + 1) + sec);
-            const irr::u16 br = static_cast<irr::u16>((ring + 1) * (kDomeSectors + 1) + sec + 1);
+            const irr::u16 tl = ringOffset(ring,     sec);
+            const irr::u16 tr = ringOffset(ring,     sec + 1);
+            const irr::u16 bl = ringOffset(ring + 1, sec);
+            const irr::u16 br = ringOffset(ring + 1, sec + 1);
 
             // Triangle 1: tl → bl → tr  (CW from inside)
             buf->Indices.push_back(tl);
@@ -2887,6 +2903,12 @@ void IrrlichtRenderer::initCloudPlane()
         // frustum in one azimuth direction.  EZW_OFF disables all depth writes while still
         // reading depth (the dome correctly sits behind foreground objects).
         mat.ZWriteEnable    = false;  // Irrlicht 1.8.5: bool (EZW_OFF is 1.9+ only)
+        // Texture tiling: kCloudUVScale=4 means UV coordinates reach 4.0 at the dome
+        // base ring.  Without ETC_REPEAT the driver may clamp at 1.0, producing a hard
+        // edge / seam wherever u or v crosses 1.  ETC_REPEAT must be set explicitly
+        // because getTexture() does not guarantee a particular default wrap state.
+        mat.TextureLayer[0].TextureWrapU = irr::video::ETC_REPEAT;
+        mat.TextureLayer[0].TextureWrapV = irr::video::ETC_REPEAT;
         if (tex) mat.setTexture(0, tex);
     }
 
