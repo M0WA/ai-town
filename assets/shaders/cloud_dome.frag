@@ -39,17 +39,17 @@ void main() {
     // residual azimuthal texture variation has no visible colour contrast.
     // Sky background matches driver clear colour SColor(255, 100, 149, 237).
     const vec3  kSkyColor    = vec3(0.392, 0.584, 0.929);
-    const float kHazeEnd     = -0.12;   // matches kElevAlphaEnd
-    const float kHazeHigh    =  0.09;   // matches kElevAlphaHigh
+    const float kHazeEnd     =  0.035;  // ~+2° — sky-blue below the opaque threshold
+    const float kHazeHigh    =  0.09;   // ~+5° — cloud texture above this
 
     float th = clamp((v_elevAngle - kHazeEnd) / (kHazeHigh - kHazeEnd), 0.0, 1.0);
-    float hazeBlend = 1.0 - th * th * (3.0 - 2.0 * th); // 1 at bottom, 0 above +5°
+    float hazeBlend = 1.0 - th * th * (3.0 - 2.0 * th); // 1 below +2°, 0 above +5°
 
     vec3 cloudColor = mix(tex.rgb, kSkyColor, hazeBlend);
 
-    // Multiply texture alpha, fragment elevation fade, AND vertex alpha (from
-    // gl_Color which carries the interpolated vertex colour).  This ensures
-    // the vertex-baked fade is respected even when this shader is active.
-    float alpha = tex.a * horizFade * gl_Color.a;
+    // Near the horizon (hazeBlend=1), use full alpha regardless of tex.a so that
+    // transparent gaps in the cloud texture do not expose the terrain edge.
+    // Above +5° (hazeBlend=0), tex.a controls cloud sparseness normally.
+    float alpha = mix(tex.a, 1.0, hazeBlend) * horizFade * gl_Color.a;
     gl_FragColor = vec4(cloudColor, alpha);
 }
