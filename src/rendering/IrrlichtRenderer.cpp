@@ -2730,13 +2730,12 @@ static SMesh* buildCloudDomeMesh()
     // where the opaque cloud texture meets the sky-blue clear colour.
     //
     // Elevation thresholds for vertex alpha (radians):
-    //   kVtxFadeStart = -0.12  (~-7°, well below horizon — fully transparent below)
-    //   kVtxFadeEnd   =  0.09  (~+5°, above horizon — fully opaque above)
-    // This 12° transition band straddles the horizon so the fade is invisible:
-    // below-horizon vertices are transparent (hidden by terrain), above-horizon
-    // vertices are opaque (shader adds its own fade on top if running).
-    constexpr float kVtxFadeStart = -0.12f;  // ~-7° — fully transparent at/below
-    constexpr float kVtxFadeEnd   =  0.09f;  // ~+5° — fully opaque at/above
+    //   kVtxFadeStart = 0.035  (~+2°, at horizon — fully opaque below)
+    //   kVtxFadeEnd   = 0.26   (~+15°, above — fully transparent above)
+    // Per-vertex alpha fallback: opaque at base (sky-blue via haze), transparent
+    // above +15°.  Must match cloud_dome.frag kAlphaFadeStart / kAlphaFadeEnd.
+    constexpr float kVtxFadeStart = 0.035f;   // ~+2°  — fully opaque at/below
+    constexpr float kVtxFadeEnd   = 0.26f;    // ~+15° — fully transparent at/above
     // UV is cylindrical (not polar) for uniform texture distribution at each ring.
 
     SMesh*       mesh = new SMesh();
@@ -2750,13 +2749,13 @@ static SMesh* buildCloudDomeMesh()
     // relative to the node, which tracks the camera position each frame.
     // Its UV is centred (u=kCloudUVScale*0.5, v=0) — this value is only used by
     // the fan cap triangles and is never interpolated across a seam.
-    // Apex is well above +5°, so vertex alpha = 255 (fully opaque).
+    // Apex is well above +15°, so vertex alpha = 0 (fully transparent).
     // -----------------------------------------------------------------------
     const float apexY = kCloudAltitude + kCloudDomeHeight;
     buf->Vertices.push_back(S3DVertex(
         core::vector3df(0.0f, apexY, 0.0f),
         core::vector3df(0.0f, 1.0f, 0.0f),          // straight-up inward normal at apex
-        SColor(255, 255, 255, 255),
+        SColor(0, 255, 255, 255),
         core::vector2df(kCloudUVScale * 0.5f, 0.0f)));
 
     // -----------------------------------------------------------------------
@@ -2784,8 +2783,8 @@ static SMesh* buildCloudDomeMesh()
         float vtxT = (elevAngle - kVtxFadeStart) / (kVtxFadeEnd - kVtxFadeStart);
         if (vtxT < 0.0f) vtxT = 0.0f;
         if (vtxT > 1.0f) vtxT = 1.0f;
-        const float vtxFade = vtxT * vtxT * (3.0f - 2.0f * vtxT);  // smoothstep
-        const irr::u32 vtxAlpha = static_cast<irr::u32>(vtxFade * 255.0f + 0.5f);
+        const float vtxSmooth = vtxT * vtxT * (3.0f - 2.0f * vtxT);  // smoothstep
+        const irr::u32 vtxAlpha = static_cast<irr::u32>((1.0f - vtxSmooth) * 255.0f + 0.5f);
 
         for (int sec = 0; sec <= kDomeSectors; ++sec) {
             const float phi      = static_cast<float>(sec)
