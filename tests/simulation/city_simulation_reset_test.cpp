@@ -278,6 +278,23 @@ TEST_F(ResetTest, CitySimulation_IsWithinRoadRange_NoRoad_ReturnsFalse)
 }
 
 // ---------------------------------------------------------------------------
+// TEST M-1: CitySimulation_GetMapTilesX_ReturnsSetWidth
+//
+// getMapTilesX() / getMapTilesZ() are inline in CitySimulation.h.
+// They are not exercised by any other test and count against the
+// per-file coverage floor for CitySimulation.h.
+// ---------------------------------------------------------------------------
+TEST_F(ResetTest, CitySimulation_GetMapTilesXZ_ReturnsSetDimensions)
+{
+    sim_->setMapDimensions(20, 30);
+
+    EXPECT_EQ(sim_->getMapTilesX(), 20)
+        << "getMapTilesX() must return the width set via setMapDimensions()";
+    EXPECT_EQ(sim_->getMapTilesZ(), 30)
+        << "getMapTilesZ() must return the depth set via setMapDimensions()";
+}
+
+// ---------------------------------------------------------------------------
 // TEST S-1: SimulationConstants_StartingFundsForDifficulty_AllVariants
 //
 // startingFundsForDifficulty() maps difficulty int (0=Easy, 1=Normal, 2=Hard)
