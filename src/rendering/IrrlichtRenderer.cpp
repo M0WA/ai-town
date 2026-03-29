@@ -2960,19 +2960,22 @@ void IrrlichtRenderer::initCloudPlane()
     // -----------------------------------------------------------------
     // Ground plane — covers the void beyond the finite terrain mesh.
     //
-    // The terrain is a finite rectangular mesh.  From a bird's-eye camera, the
-    // terrain boundary (where terrain ends and nothing is drawn) is visible as a
-    // sharp line — an "arch" in perspective — against the sky-blue clear colour.
-    // A large solid-coloured quad placed just below terrain level fills this void,
-    // eliminating the arch completely.
+    // The terrain is a finite rectangular mesh.  From the camera, the terrain
+    // boundary is visible as a sharp line against the sky-blue clear colour.
+    // A large solid quad placed just below terrain level fills this void.
     //
     // The plane is 30 000 m on each side (2 * far clip distance) so it extends
     // past the far clip in every direction.  It follows the camera XZ each frame
     // (like the cloud dome) so the edges are never visible.
     //
-    // Colour: dark terrain green (RGB 34,80,20) — blends with the terrain's
-    // lowest-altitude vertex colour.  The slight darkness makes the boundary
-    // imperceptible.
+    // Colour: sky blue (RGB 100,149,237) — MUST match the driver clear colour
+    // SColor(255,100,149,237) in beginFrame().  The cloud dome's lower band is
+    // semi-transparent (vertex alpha fades from 0 at -7 deg to 255 at +5 deg).
+    // If the ground plane colour differs from the clear colour, the dome's
+    // alpha-blended region reveals a colour boundary at the angular elevation
+    // where the ground plane ends and the clear colour begins — visible as a
+    // persistent horizontal arch near the horizon.  Matching both colours means
+    // the dome's blend sees the same backdrop everywhere, eliminating the arch.
     //
     // Y offset: -5 m — below the terrain surface to avoid Z-fighting with
     // terrain chunk geometry, but above the cloud dome base ring (-2000 m)
@@ -2986,8 +2989,15 @@ void IrrlichtRenderer::initCloudPlane()
         SMeshBuffer* gbuf  = new SMeshBuffer();
 
         // Four corner vertices — flat quad at Y = kGroundY.
-        // Dark terrain green: blends seamlessly with lowland terrain vertex colour.
-        const SColor groundCol(255, 34, 80, 20);
+        // Sky-blue: MUST match the driver clear colour SColor(255,100,149,237)
+        // exactly.  The cloud dome's semi-transparent lower band reveals whatever
+        // is behind it; if the ground plane colour differs from the clear colour,
+        // the dome's alpha-blended transition region shows a colour shift at the
+        // angular boundary where the ground plane ends and the clear colour begins
+        // — visible as a persistent horizontal arch/band near the horizon.
+        // Matching both colours eliminates the arch entirely because the dome's
+        // blend sees the same backdrop everywhere.
+        const SColor groundCol(255, 100, 149, 237);
         gbuf->Vertices.push_back(S3DVertex(
             core::vector3df(-kGroundHalf, kGroundY, -kGroundHalf),
             core::vector3df(0, 1, 0), groundCol, core::vector2df(0, 0)));
