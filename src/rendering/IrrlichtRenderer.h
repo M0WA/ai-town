@@ -235,11 +235,12 @@ private:
     void*                           m_cloudShaderCbRaw{nullptr};
 
     // --- Ground plane (horizon arch fix) ---
-    // A large solid-coloured quad positioned just below terrain level, extending
-    // to the far clip distance in all directions.  Covers the void beyond the
-    // finite terrain mesh so the terrain edge does not create a visible arch
-    // against the sky-blue clear colour.  Follows the camera XZ position each
-    // frame (same as the cloud dome).  Null under EDT_NULL (headless).
+    // A large sky-blue quad positioned just below terrain level, extending to the
+    // far clip distance in all directions.  Covers the void beyond the finite
+    // terrain mesh.  Colour MUST match the driver clear colour so the cloud dome's
+    // semi-transparent lower band sees a uniform backdrop (mismatched colours
+    // create a visible arch at the angular boundary).  Follows the camera XZ
+    // position each frame (same as the cloud dome).  Null under EDT_NULL (headless).
     irr::scene::IMeshSceneNode*     m_groundPlaneNode{nullptr};
 
     // Cached camera eye position — updated every setCamera() call.
