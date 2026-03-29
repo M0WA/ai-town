@@ -324,7 +324,7 @@ accumulation over play sessions longer than ~500 seconds.
 ## Depth Ordering
 
 The cloud dome base is at `Y=−1000 m` (far below terrain) and apex at `Y=1000 m`. Visible
-cloud geometry fades in between +5° and 20° elevation angle (`kElevAlphaEnd` and
+cloud geometry fades in between −5° and 20° elevation angle (`kElevAlphaEnd` and
 `kElevAlphaHigh` shader constants), reaching full opacity above 20°. This range is well
 above all opaque scene geometry (terrain max ≈ 26 m, buildings max ~80 m).
 The depth buffer handles correct ordering automatically:
@@ -334,7 +334,7 @@ The depth buffer handles correct ordering automatically:
 - Zone overlay quads are at terrain height + 0.1 m; the cloud dome is always farther
   from the camera than overlay quads (camera pitch −20° to −70°, minimum camera height
   ~30 m over flat terrain).
-- Near-horizon fragments have `horizFade = 0` (elevation ≤ +5°), so even if the depth
+- Near-horizon fragments have `horizFade = 0` (elevation ≤ −5°), so even if the depth
   test ordering is imperfect near the horizon the elevation-angle fade makes them invisible.
 
 The cloud dome material has `ZWriteEnable = false` so it never writes depth values that
