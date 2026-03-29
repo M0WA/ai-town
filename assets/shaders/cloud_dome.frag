@@ -1,55 +1,38 @@
-#version 130
+#version 120
 
-// cloud_dome.frag — cloud dome fragment shader (Phase 10b, rev 4).
+// cloud_dome.frag — cloud dome fragment shader (Phase 10b, rev 9).
 //
-// Horizon fade uses BOTH per-vertex alpha AND per-fragment elevation-angle fade.
-// The per-vertex alpha (baked into the dome mesh by buildCloudDomeMesh()) is the
-// PRIMARY fade mechanism — it works even when this shader fails to compile and
-// Irrlicht falls back to EMT_TRANSPARENT_VERTEX_ALPHA.  The per-fragment fade
-// adds a smoother, higher-quality transition on top when the shader IS active.
+// GLSL 1.20: uses 'varying', texture2D(), and gl_FragColor — all standard in
+// 1.20.  Downgraded from 1.30 because 'out vec4 fragColor' caused silent
+// compile failure on some drivers even when 'in/out' was otherwise correct.
 //
-// Vertex alpha fade: opaque below +2°, transparent above +15° (baked into mesh).
-// Fragment elevation fade: opaque below +2°, transparent above +15° (matches vertex fade).
-// Atmospheric haze: blends cloud RGB toward sky colour near horizon.
+// Elevation-angle fade (-5° → +20°):
+//   Below -5° : fully transparent (no dome visible below horizon)
+//   -5° → 20° : smoothstep alpha and haze blend toward sky colour
+//   Above 20° : full cloud colour and opacity (tex.a)
 //
-// The elevation angle is computed in the vertex shader: the dome node tracks the
-// camera's full XYZ position each frame, so gl_Vertex.y is the camera-relative
-// local Y offset.  No u_cameraY uniform is needed or used.
+// hazeBlend tints near-horizon fragments toward sky colour so that the fade
+// boundary has no sharp dark-cloud edge regardless of cloud texture density.
 
 uniform sampler2D u_tex;
 
-in vec2  v_texCoord;
-in float v_elevAngle;   // elevation angle (radians) from camera to fragment
+varying vec2  v_texCoord;
+varying float v_elevAngle;
 
 void main() {
     vec4 tex = texture2D(u_tex, v_texCoord);
 
-    // ---------- alpha fade ----------
-    // Dome is fully opaque at and below +2° (horizon) where haze makes it sky-blue.
-    // Fades to transparent above +15° so open sky is visible higher up.
-    const float kAlphaFadeStart =  0.035;  // ~+2°  — fully opaque below this
-    const float kAlphaFadeEnd   =  0.26;   // ~+15° — fully transparent above this
+    // Elevation-angle smoothstep: 0 below -5°, 1 above +20°.
+    const float kElevAlphaEnd  = -0.0873;  // -5° in radians
+    const float kElevAlphaHigh =  0.3491;  // +20° in radians
+    float t         = clamp((v_elevAngle - kElevAlphaEnd) / (kElevAlphaHigh - kElevAlphaEnd), 0.0, 1.0);
+    float horizFade = t * t * (3.0 - 2.0 * t);  // smoothstep
 
-    float ta = clamp((v_elevAngle - kAlphaFadeStart) / (kAlphaFadeEnd - kAlphaFadeStart),
-                     0.0, 1.0);
-    float horizFade = 1.0 - ta * ta * (3.0 - 2.0 * ta);  // 1 at bottom, 0 above +15°
+    // Haze blend: near-horizon cloud RGB fades toward sky colour.
+    // This eliminates the dark-cloud band artefact at the fade boundary.
+    float hazeBlend = 1.0 - horizFade;
+    vec3  skyColor  = vec3(0.392, 0.584, 0.929);  // SColor(255,100,149,237)/255
+    vec3  cloudColor = mix(tex.rgb, skyColor, hazeBlend);
 
-    // ---------- atmospheric haze colour blend ----------
-    // Near the horizon, blend cloud RGB toward the sky background colour so any
-    // residual azimuthal texture variation has no visible colour contrast.
-    // Sky background matches driver clear colour SColor(255, 100, 149, 237).
-    const vec3  kSkyColor    = vec3(0.392, 0.584, 0.929);
-    const float kHazeEnd     =  0.035;  // ~+2° — sky-blue below the opaque threshold
-    const float kHazeHigh    =  0.09;   // ~+5° — cloud texture above this
-
-    float th = clamp((v_elevAngle - kHazeEnd) / (kHazeHigh - kHazeEnd), 0.0, 1.0);
-    float hazeBlend = 1.0 - th * th * (3.0 - 2.0 * th); // 1 below +2°, 0 above +5°
-
-    vec3 cloudColor = mix(tex.rgb, kSkyColor, hazeBlend);
-
-    // Near the horizon (hazeBlend=1), use full alpha regardless of tex.a so that
-    // transparent gaps in the cloud texture do not expose the terrain edge.
-    // Above +5° (hazeBlend=0), tex.a controls cloud sparseness normally.
-    float alpha = mix(tex.a, 1.0, hazeBlend) * horizFade * gl_Color.a;
-    gl_FragColor = vec4(cloudColor, alpha);
+    gl_FragColor = vec4(cloudColor, tex.a * horizFade);
 }
