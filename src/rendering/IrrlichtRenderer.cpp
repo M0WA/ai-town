@@ -2717,9 +2717,10 @@ static SMesh* buildCloudDomeMesh()
 {
     constexpr int   kDomeRings         = 32;     // latitude bands — keep fade smooth
     constexpr int   kDomeSectors       = 32;     // longitude segments
-    constexpr float kCloudAltitude     = -500.0f;   // base ring 500 m below camera (node tracks cam Y)
+    constexpr float kCloudAltitude     = -2000.0f;  // base ring 2000 m below camera — atan(-2000/12000)≈-9.5°,
+                                                    // safely below kElevAlphaEnd (-5°) so base is fully transparent
     constexpr float kCloudDomeRadius   = 12000.0f;  // horizontal radius — must be < far clip (15000 m)
-    constexpr float kCloudDomeHeight   = 1500.0f;   // apex 1000 m above camera, base 500 m below
+    constexpr float kCloudDomeHeight   = 3000.0f;   // apex 1000 m above camera (-2000+3000), base 2000 m below
     constexpr float kCloudUVScale      = 4.0f;   // texture tiling factor
     // Horizon fade and atmospheric haze are handled entirely in the fragment shader
     // (cloud_dome.frag, rev 3).  All vertices use alpha=255.
