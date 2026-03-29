@@ -2957,84 +2957,20 @@ void IrrlichtRenderer::initCloudPlane()
 
     // m_cloudUVOffset initialised to {0.f, 0.f} by member initialiser in header.
 
-    // -----------------------------------------------------------------
-    // Ground plane — covers the void beyond the finite terrain mesh.
+    // NOTE: Ground plane REMOVED.  The previous sky-blue ground plane at Y=-5
+    // was intended to fill the void beyond the finite terrain mesh.  However,
+    // because it used ZWriteEnable=true (opaque depth writes), it deposited
+    // depth values into the depth buffer.  At the elevation angle where the
+    // ground plane's depth equals the cloud dome's depth (~1.8 deg below
+    // horizontal at default zoom), the cloud dome's semi-transparent fade-band
+    // fragments FAILED the depth test and were discarded — creating a sharp
+    // horizontal arch/band artifact at that angle.
     //
-    // The terrain is a finite rectangular mesh.  From the camera, the terrain
-    // boundary is visible as a sharp line against the sky-blue clear colour.
-    // A large solid quad placed just below terrain level fills this void.
-    //
-    // The plane is 30 000 m on each side (2 * far clip distance) so it extends
-    // past the far clip in every direction.  It follows the camera XZ each frame
-    // (like the cloud dome) so the edges are never visible.
-    //
-    // Colour: sky blue (RGB 100,149,237) — MUST match the driver clear colour
-    // SColor(255,100,149,237) in beginFrame().  The cloud dome's lower band is
-    // semi-transparent (vertex alpha fades from 0 at -7 deg to 255 at +5 deg).
-    // If the ground plane colour differs from the clear colour, the dome's
-    // alpha-blended region reveals a colour boundary at the angular elevation
-    // where the ground plane ends and the clear colour begins — visible as a
-    // persistent horizontal arch near the horizon.  Matching both colours means
-    // the dome's blend sees the same backdrop everywhere, eliminating the arch.
-    //
-    // Y offset: -5 m — below the terrain surface to avoid Z-fighting with
-    // terrain chunk geometry, but above the cloud dome base ring (-2000 m)
-    // so the ground plane occludes the void before the dome's transparent band.
-    // -----------------------------------------------------------------
-    {
-        constexpr float kGroundHalf = 15000.0f;  // half-extent = far clip distance
-        constexpr float kGroundY    = -5.0f;     // just below terrain surface
-
-        SMesh*       gmesh = new SMesh();
-        SMeshBuffer* gbuf  = new SMeshBuffer();
-
-        // Four corner vertices — flat quad at Y = kGroundY.
-        // Sky-blue: MUST match the driver clear colour SColor(255,100,149,237)
-        // exactly.  The cloud dome's semi-transparent lower band reveals whatever
-        // is behind it; if the ground plane colour differs from the clear colour,
-        // the dome's alpha-blended transition region shows a colour shift at the
-        // angular boundary where the ground plane ends and the clear colour begins
-        // — visible as a persistent horizontal arch/band near the horizon.
-        // Matching both colours eliminates the arch entirely because the dome's
-        // blend sees the same backdrop everywhere.
-        const SColor groundCol(255, 100, 149, 237);
-        gbuf->Vertices.push_back(S3DVertex(
-            core::vector3df(-kGroundHalf, kGroundY, -kGroundHalf),
-            core::vector3df(0, 1, 0), groundCol, core::vector2df(0, 0)));
-        gbuf->Vertices.push_back(S3DVertex(
-            core::vector3df( kGroundHalf, kGroundY, -kGroundHalf),
-            core::vector3df(0, 1, 0), groundCol, core::vector2df(1, 0)));
-        gbuf->Vertices.push_back(S3DVertex(
-            core::vector3df( kGroundHalf, kGroundY,  kGroundHalf),
-            core::vector3df(0, 1, 0), groundCol, core::vector2df(1, 1)));
-        gbuf->Vertices.push_back(S3DVertex(
-            core::vector3df(-kGroundHalf, kGroundY,  kGroundHalf),
-            core::vector3df(0, 1, 0), groundCol, core::vector2df(0, 1)));
-
-        // CW winding from above (+Y normal) — same convention as terrain chunks.
-        gbuf->Indices.push_back(0);
-        gbuf->Indices.push_back(2);
-        gbuf->Indices.push_back(1);
-        gbuf->Indices.push_back(0);
-        gbuf->Indices.push_back(3);
-        gbuf->Indices.push_back(2);
-
-        gbuf->recalculateBoundingBox();
-        gmesh->addMeshBuffer(gbuf);
-        gbuf->drop();
-        gmesh->recalculateBoundingBox();
-
-        m_groundPlaneNode = m_smgr->addMeshSceneNode(gmesh);
-        gmesh->drop();
-
-        if (m_groundPlaneNode) {
-            auto& gmat = m_groundPlaneNode->getMaterial(0);
-            gmat.MaterialType    = EMT_SOLID;
-            gmat.Lighting        = false;
-            gmat.BackfaceCulling = false;  // visible from below as well
-            gmat.ZWriteEnable    = true;   // solid geometry — writes depth normally
-        }
-    }
+    // The ground plane was the same sky-blue as the clear colour, so removing
+    // it changes nothing visually: the clear colour already fills the void
+    // behind the terrain.  Without the ground plane's depth writes, the cloud
+    // dome's fade band renders correctly at all elevation angles and the arch
+    // artifact is eliminated.
 }
 
 // -------------------------------------------------------------------------
@@ -3074,13 +3010,6 @@ void IrrlichtRenderer::update(float dt)
         // The vertex shader uses gl_Vertex.y directly (already cam-relative local
         // space) so no per-frame camera-Y uniform is needed.
         m_cloudNode->setPosition(camPos);
-
-        // Ground plane follows camera XZ so its edges (at far clip distance) are
-        // never visible.  Y is fixed at 0 — the mesh vertices already embed the
-        // -5 m offset relative to node origin.
-        if (m_groundPlaneNode) {
-            m_groundPlaneNode->setPosition(core::vector3df(camPos.X, 0.0f, camPos.Z));
-        }
     }
 }
 

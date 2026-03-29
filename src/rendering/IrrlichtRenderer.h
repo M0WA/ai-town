@@ -234,14 +234,9 @@ private:
     irr::core::vector2df            m_cloudUVOffset{0.f, 0.f};
     void*                           m_cloudShaderCbRaw{nullptr};
 
-    // --- Ground plane (horizon arch fix) ---
-    // A large sky-blue quad positioned just below terrain level, extending to the
-    // far clip distance in all directions.  Covers the void beyond the finite
-    // terrain mesh.  Colour MUST match the driver clear colour so the cloud dome's
-    // semi-transparent lower band sees a uniform backdrop (mismatched colours
-    // create a visible arch at the angular boundary).  Follows the camera XZ
-    // position each frame (same as the cloud dome).  Null under EDT_NULL (headless).
-    irr::scene::IMeshSceneNode*     m_groundPlaneNode{nullptr};
+    // NOTE: Ground plane REMOVED — its depth writes were the true cause of the
+    // persistent horizon arch artifact.  See initCloudPlane() comment for details.
+    // The clear colour (sky blue) already fills the void beyond the terrain.
 
     // Cached camera eye position — updated every setCamera() call.
     // Returned by getListenerPosition() for use by CitySimulation's
