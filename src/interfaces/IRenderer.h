@@ -31,11 +31,9 @@ struct CameraParams {
     float fovDegrees{45.0f};   // horizontal field of view in degrees
     float nearClip{0.1f};      // near clip plane distance in metres
     float farClip{15000.0f};   // far clip plane distance in metres — must exceed cloud dome radius
-                               // (kCloudDomeRadius=6000 m; dome vertices at ~6082 m from camera).
+                               // (kCloudDomeRadius=12000 m; dome vertices at ~12010 m from camera).
                                // With near=0.1 the depth ratio is 150000; roads use polygon offset
-                               // (EPO_FRONT, factor=1) so z-fighting is handled. farClip=3000 caused
-                               // OpenGL to hard-clip dome triangles beyond 3000 m, producing a visible
-                               // circular arc ring at the frustum boundary.
+                               // (EPO_FRONT, factor=1) so z-fighting is handled.
 };
 
 // TerrainChunkRebuildParams — all data needed by IRenderer::rebuildTerrainChunk().
