@@ -1,14 +1,17 @@
 #version 130
 
-// cloud_dome.vert — cloud dome vertex shader (Phase 10b, rev 2).
+// cloud_dome.vert — cloud dome vertex shader (Phase 10b, rev 3).
 //
-// Passes UV coordinates and the elevation angle from the camera to this
-// vertex to the fragment shader.  The fragment shader computes a smooth
-// elevation-angle fade that is SYMMETRIC in all azimuths — solving the
-// directional arc artifact caused by the previous per-vertex alpha approach.
+// Passes UV coordinates, the elevation angle, and the vertex colour to the
+// fragment shader.  The fragment shader uses all three for horizon fade:
+//   - v_elevAngle: per-fragment elevation-based smoothstep fade
+//   - gl_Color (via gl_FrontColor): per-vertex alpha baked into the mesh
+//   - v_texCoord: cloud texture sampling
 //
-// Per-vertex alpha: REMOVED.  All dome vertices now have alpha=255 (SColor).
-// The shader owns all horizon-fade logic, keyed on elevation angle.
+// The per-vertex alpha (baked by buildCloudDomeMesh) is the PRIMARY fade
+// mechanism — it works even when this shader fails to compile and Irrlicht
+// falls back to EMT_TRANSPARENT_VERTEX_ALPHA.  The per-fragment elevation
+// fade is a refinement that adds smoother transitions when the shader IS active.
 //
 // NOTE: u_cameraY has been removed.  The dome node is positioned at the full
 // camera XYZ each frame (setPosition(camPos) in IrrlichtRenderer::update()),
@@ -21,6 +24,11 @@ out float v_elevAngle;   // elevation angle (radians) from camera to this vertex
 void main() {
     gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
     v_texCoord  = gl_MultiTexCoord0.st;
+
+    // Forward vertex colour to the fragment shader via the built-in varying.
+    // The fragment shader reads gl_Color.a to incorporate the per-vertex alpha
+    // fade baked into the dome mesh by buildCloudDomeMesh().
+    gl_FrontColor = gl_Color;
 
     // Elevation angle from camera to this dome vertex.
     // The dome node tracks the camera's full XYZ position, so gl_Vertex is
