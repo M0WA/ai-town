@@ -2101,6 +2101,8 @@ static std::string zoneAssetNameForLoad(ZoneType zone, DensityTier density) {
 void UIManager::rebuildCityFromSim() {
     if (!m_renderer || !m_sim || m_mapTilesX <= 0 || m_mapTilesZ <= 0) return;
     m_renderer->clearCity();
+    m_overlayMap.clear();
+    static constexpr size_t kOverlayCapLoad = 100000u;
     for (int z = 0; z < m_mapTilesZ; ++z) {
         for (int x = 0; x < m_mapTilesX; ++x) {
             QueryResult q = m_sim->queryTile(x, z);
@@ -2122,8 +2124,17 @@ void UIManager::rebuildCityFromSim() {
                     }
                     m_renderer->placeBuildingMesh(x, z, asset);
                 }
+            } else if (q.isZoned && q.underConstruction
+                       && m_overlayMap.size() < kOverlayCapLoad) {
+                // Restore zone overlay for unbuilt tiles.
+                uint64_t key = static_cast<uint64_t>(z)
+                             * static_cast<uint64_t>(m_mapTilesX) + x;
+                m_overlayMap[key] = computeZoneOverlayColor(q.zoneType, q.densityTier);
             }
         }
+    }
+    if (m_renderer && m_mapTilesX > 0 && m_mapTilesZ > 0) {
+        m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
     }
 }
 
