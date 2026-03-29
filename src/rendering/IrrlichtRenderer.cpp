@@ -353,6 +353,23 @@ void IrrlichtRenderer::endFrame() {
     m_driver->endScene();
 }
 
+void IrrlichtRenderer::drawFullscreenTexture(const std::string& path)
+{
+    if (!m_driver) return;
+    irr::video::ITexture* tex = m_driver->getTexture(path.c_str());
+    if (!tex) return;
+    const irr::core::dimension2d<irr::u32> screenDim = m_driver->getScreenSize();
+    const irr::core::dimension2d<irr::u32> texDim    = tex->getOriginalSize();
+    m_driver->draw2DImage(
+        tex,
+        irr::core::rect<irr::s32>(0, 0,
+            static_cast<irr::s32>(screenDim.Width),
+            static_cast<irr::s32>(screenDim.Height)),
+        irr::core::rect<irr::s32>(0, 0,
+            static_cast<irr::s32>(texDim.Width),
+            static_cast<irr::s32>(texDim.Height)));
+}
+
 TextureHandle IrrlichtRenderer::loadTexture(const std::string& path) {
     if (!m_driver) return kInvalidTexture;
 

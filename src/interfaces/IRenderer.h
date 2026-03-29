@@ -82,6 +82,11 @@ public:
     virtual void          beginFrame() = 0;              // main-thread-only
     virtual void          endFrame() = 0;                // main-thread-only
     virtual void          drawScene() = 0;               // main-thread-only
+
+    // Draw a texture fullscreen (fills the entire screen, stretched to fit).
+    // Must be called between beginFrame() and endFrame().
+    // Used for loading screens. No-op when the texture file is missing.
+    virtual void drawFullscreenTexture(const std::string& path) = 0;
     virtual TextureHandle loadTexture(const std::string& path) = 0;  // main-thread-only; returns kInvalidTexture on failure
     virtual void          setCamera(const CameraParams& p) = 0;       // main-thread-only
 

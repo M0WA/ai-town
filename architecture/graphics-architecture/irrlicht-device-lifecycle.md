@@ -127,8 +127,15 @@ The construction sequence in `main.cpp`:
 4.  Camera scene node + CameraController
 5.  IrrlichtRenderer(device, /*uiManager=*/nullptr)
 6.  WallClock, AudioSystem, TerrainSystem, CitySimulation
-7.  TerrainSystem::generate() + buildAllChunks()   // terrain generation before UI
+7.  (loading screen frame) render one frame of assets/textures/ui/loading_screen.png
+    while checking save-file state — terrain is NOT generated at startup; the main
+    menu is shown without terrain. Terrain generation occurs on-demand in the
+    new-game / load-game loading loops (consumeNewGameRequest() /
+    consumeLoadGameRequest() polling blocks), not before the main loop.
+    TerrainSystem::generate() + buildAllChunks() run inside those loops, after which
+    steps 8–9c and the camera target are applied before gameplay begins.
 8.  CameraController::setTarget(centerX, centerZ)  // center camera over terrain
+    // (step 8 executes inside the new-game / load-game loading loop, not at startup)
     // Phase 9b terrain-renderer wiring (steps 9a–9d must come before UIManager construction
     // so that IrrlichtRenderer has valid terrain pointers before any event can fire):
 9a. renderer.setTerrainQuery(&terrainSystem)       // Phase 9b — ITerrainQuery* for pickTerrainTile
@@ -160,11 +167,14 @@ The construction sequence in `main.cpp`:
   (distinct from `UIManager`'s same-named members). These are required by the DDA bounds
   check in `pickTerrainTile()`. Without step 9c, `pickTerrainTile()` always returns `false`
   (bounds check exits on the first step with default 0-valued dimensions).
-- All Phase 9b wiring steps must complete before the main game loop starts. The ordering
-  constraint is: terrain generation (step 7) → steps 9a–9c → UIManager construction
-  (step 10) → steps 12–14 → event receiver (step 15). Steps 9a–9c must precede step 10
-  to ensure that any hot-path event immediately after `setEventReceiver` in step 16 finds
-  `IrrlichtRenderer` fully wired.
+- All Phase 9b wiring steps must complete before gameplay begins. The ordering
+  constraint is: terrain generation (step 7 — inside the new-game/load-game loading loop)
+  → steps 9a–9c → UIManager construction (step 10) → steps 12–14 → event receiver
+  (step 15). Steps 9a–9c must precede step 10 to ensure that any hot-path event
+  immediately after `setEventReceiver` in step 16 finds `IrrlichtRenderer` fully wired.
+  Steps 7–9c do NOT execute at process startup; they execute inside the
+  `consumeNewGameRequest()` / `consumeLoadGameRequest()` polling blocks when the player
+  starts or loads a game.
 
 ## IrrlichtRenderer and UIManager — Header Dependency Rule
 

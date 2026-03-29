@@ -59,6 +59,7 @@ public:
     MOCK_METHOD(void,          beginFrame,          (),                                        (override));
     MOCK_METHOD(void,          endFrame,            (),                                        (override));
     MOCK_METHOD(void,          drawScene,           (),                                        (override));
+    MOCK_METHOD(void,          drawFullscreenTexture, (const std::string& path),               (override));
     MOCK_METHOD(TextureHandle, loadTexture,         (const std::string& path),                 (override));
     MOCK_METHOD(void,          setCamera,           (const CameraParams& p),                   (override));
     MOCK_METHOD(void,          rebuildTerrainChunk, (const TerrainChunkRebuildParams& params), (override));
