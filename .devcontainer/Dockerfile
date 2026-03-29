@@ -62,6 +62,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   bat \
   imagemagick \
   libimage-exiftool-perl \
+  libmagickwand-dev \
   gdb \
   lldb \
   linux-perf \
@@ -71,6 +72,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   clangd \
   bear \
   pandoc \
+  assimp-utils \
+  pngcheck \
+  python3-opencv \
   && apt-get clean && rm -rf /var/lib/apt/lists/* \
   && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
   && (test -f /usr/bin/batcat && ln -sf /usr/bin/batcat /usr/local/bin/bat || true)
@@ -124,6 +128,31 @@ RUN ARCH=$(dpkg --print-architecture) && \
   mv actionlint /usr/local/bin/actionlint && \
   rm "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz"
 
+# Blender headless (amd64 only — no GPU required for background Python export scripts)
+ARG BLENDER_VERSION=4.3.2
+RUN ARCH=$(dpkg --print-architecture) && \
+  if [ "$ARCH" = "amd64" ]; then \
+    BLENDER_MINOR="${BLENDER_VERSION%.*}" && \
+    wget -q "https://download.blender.org/release/Blender${BLENDER_MINOR}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" && \
+    tar -xJf "blender-${BLENDER_VERSION}-linux-x64.tar.xz" -C /opt && \
+    mv "/opt/blender-${BLENDER_VERSION}-linux-x64" /opt/blender && \
+    ln -sf /opt/blender/blender /usr/local/bin/blender && \
+    rm "blender-${BLENDER_VERSION}-linux-x64.tar.xz"; \
+  else \
+    echo "Skipping Blender: only amd64 binaries available (arch=$ARCH)"; \
+  fi
+
+# texdiag — DirectXTex DDS inspector (validates DX10 sRGB DXGI_FORMAT fields)
+ARG DIRECTXTEX_TAG=dec2024
+RUN git clone --depth 1 --branch ${DIRECTXTEX_TAG} \
+      https://github.com/microsoft/DirectXTex.git /tmp/directxtex \
+  && cmake -B /tmp/directxtex/build -S /tmp/directxtex \
+       -DCMAKE_BUILD_TYPE=Release \
+       -DBUILD_TOOLS=ON \
+  && cmake --build /tmp/directxtex/build --target texdiag -j$(nproc) \
+  && find /tmp/directxtex/build -name texdiag -type f -exec mv {} /usr/local/bin/ \; \
+  && rm -rf /tmp/directxtex
+
 # CMake is pre-installed in the CI base image at /opt/cmake/bin — PATH already set.
 
 # Transfer ownership of vcpkg directories to the non-root user so that
@@ -157,7 +186,13 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
   -x
 
 # Install Python packages
-RUN pip3 install --break-system-packages numpy
+# numpy: terrain/cloud/atlas generation scripts
+# Pillow: atlas cell coverage checks, billboard dimension validation, DDS mip header parsing
+# trimesh: collision mesh pivot tolerance checks, footprint overflow detection
+# Wand: ICC-preserving ImageMagick bindings for DXT5nm channel swizzle pipeline
+# scipy: tileable terrain noise synthesis (gaussian_filter for seamless edge blending)
+# pypng: byte-level PNG chunk introspection for sRGB/iCCP validation scripts
+RUN pip3 install --break-system-packages numpy Pillow trimesh Wand scipy pypng
 
 # Install Claude
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
