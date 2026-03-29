@@ -32,9 +32,10 @@ This feature is delivered in **Phase 10b**.
   the most oblique camera angles.
 - **Tessellation**: `kDomeRings = 32` latitude bands × `kDomeSectors = 32` longitude
   segments → `33 × 33 = 1089` vertices, `32 × 32 × 2 = 2048` triangles.
-- **Camera tracking**: the dome node is repositioned to camera XZ each frame in
-  `update()` so the horizon ring is always centred on the player. The dome vertex Y
-  coordinates are absolute world-space values; only the node's XZ translation changes.
+- **Camera tracking**: the dome node is repositioned to the full camera XYZ each
+  frame in `update()` so the dome stays centred on the camera at all altitudes.
+  Because the node tracks all three axes, `gl_Vertex` in the vertex shader is
+  already in camera-relative local space — no world-space Y offset uniform is needed.
 
 ### Why a Dome Instead of a Flat Plane
 
@@ -178,14 +179,13 @@ arc is possible.
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kElevAlphaEnd` | `+0.0873` rad (+5°) | Fully transparent at or below this elevation |
+| `kElevAlphaEnd` | `-0.0873` rad (-5°) | Fully transparent at or below this elevation |
 | `kElevAlphaHigh` | `0.3491` rad (20°) | Fully opaque at or above this elevation |
 
-The smoothstep between +5° and 20° produces a gradual, symmetric fade in all
-compass directions. The fade band starts slightly above the terrain horizon (+5°),
-ensuring the dome is fully transparent at and below +5° so no cloud arch can appear
-at the horizon; it reaches full opacity at 20° above the horizon. Below +5° elevation
-the dome is always fully transparent regardless of texture content.
+The smoothstep between -5° and 20° produces a gradual, symmetric fade in all
+compass directions. The fade band starts slightly below the geometric horizon (-5°),
+so clouds remain visible near the horizon and taper off naturally into the sky.
+Full opacity is reached at 20° above the horizon.
 
 ### Atmospheric Haze Colour Blend
 
@@ -198,11 +198,11 @@ as sky-coloured haze rather than dark clouds against the sky.
 | Property | Value |
 |---|---|
 | Sky colour constant | `vec3(0.392, 0.584, 0.929)` = `SColor(255, 100, 149, 237) / 255` |
-| `kHazeEnd` | +5° (full sky colour at this elevation and below) |
+| `kHazeEnd` | -5° (full sky colour at this elevation and below) |
 | `kHazeHigh` | 20° (no haze at this elevation and above) |
 
 The haze blend uses the same elevation-angle smoothstep as the alpha fade:
-a `hazeBlend` factor of `1.0` at +5° (full sky colour) tapering to `0.0` at 20°
+a `hazeBlend` factor of `1.0` at -5° (full sky colour) tapering to `0.0` at 20°
 (original cloud colour). The blended cloud colour is then combined with the
 alpha fade to produce the final output `vec4(cloudColor, tex.a * horizFade)`.
 
@@ -210,14 +210,14 @@ alpha fade to produce the final output `vec4(cloudColor, tex.a * horizFade)`.
 
 | File | Purpose |
 |---|---|
-| `assets/shaders/cloud_dome.vert` | Computes `v_elevAngle` (elevation angle in radians from camera to vertex) and passes `v_texCoord` to the fragment stage. Receives `u_cameraY` uniform. |
-| `assets/shaders/cloud_dome.frag` | Samples `u_tex`; applies elevation-angle smoothstep alpha fade (+5° → 20°); blends cloud RGB toward sky colour `vec3(0.392, 0.584, 0.929)` near the horizon (atmospheric haze); outputs `vec4(cloudColor, tex.a * horizFade)` |
+| `assets/shaders/cloud_dome.vert` | Computes `v_elevAngle` (elevation angle in radians from camera to vertex) and passes `v_texCoord` to the fragment stage. No world-space uniforms — `gl_Vertex` is already camera-relative because the node tracks full camera XYZ. |
+| `assets/shaders/cloud_dome.frag` | Samples `u_tex`; applies elevation-angle smoothstep alpha fade (-5° → 20°); blends cloud RGB toward sky colour `vec3(0.392, 0.584, 0.929)` near the horizon (atmospheric haze); outputs `vec4(cloudColor, tex.a * horizFade)` |
 
 The vertex shader computes:
 
 ```glsl
 float horizDist = length(gl_Vertex.xz);
-float deltaY    = gl_Vertex.y - u_cameraY;
+float deltaY    = gl_Vertex.y;   // node tracks camera XYZ → local Y = cam-relative offset
 v_elevAngle     = atan(deltaY, max(horizDist, 0.1));
 ```
 
@@ -233,9 +233,9 @@ gl_FragColor     = vec4(cloudColor, tex.a * horizFade);
 ```
 
 - `tex.a = 0` (non-cloud area) → `alpha = 0` fully transparent.
-- Elevation ≤ +5° → `horizFade = 0` → dome fully transparent at and below +5°.
+- Elevation ≤ -5° → `horizFade = 0` → dome fully transparent below 5° under the horizon.
 - Elevation ≥ 20° → `horizFade = 1`, `hazeBlend = 0` → fully opaque overhead clouds in original colour.
-- At the horizon band (+5° to 20°) cloud colour blends toward sky colour, eliminating dark-cloud artefacts.
+- At the horizon band (-5° to 20°) cloud colour blends toward sky colour, eliminating dark-cloud artefacts.
 - Identical result in every compass direction — no directional arc.
 
 ### Base Material and Blending
@@ -246,26 +246,23 @@ for semi-transparent cloud overlays.
 
 ### Shader Callback
 
-`CloudDomeShaderCallback` (defined inline in `IrrlichtRenderer.cpp`) sets two
-uniforms in `OnSetConstants`:
+`CloudDomeShaderCallback` (defined inline in `IrrlichtRenderer.cpp`) sets one
+uniform in `OnSetConstants`:
 
 - `u_tex` — sampler2D bound to texture unit 0.
-- `u_cameraY` — `float` world-space Y of the camera, updated each frame via
-  `setCameraY()` before the scene is drawn.
 
-`u_cameraY` is consumed by the vertex shader. It is set via both
-`setVertexShaderConstant` and `setPixelShaderConstant` for cross-platform
-compatibility (Irrlicht GLSL backend behaviour differs across drivers; both calls
-target the same linked program uniform).
+`u_cameraY` has been **removed**. Because the dome node tracks the camera's full
+XYZ position each frame (`setPosition(camPos)` in `update()`), `gl_Vertex` in the
+vertex shader is already in camera-relative local space. No world-space Y offset
+uniform is needed; subtracting `u_cameraY` from the already-relative local Y was
+the bug that produced the camera-height-dependent arch artefact.
 
 **Lifetime**: the callback is allocated on the raw heap and passed to
-`addHighLevelShaderMaterialFromFiles`. Unlike the standard drop-after-pass
-pattern, the caller (`IrrlichtRenderer`) **keeps its own reference** (stored as
-`void* m_cloudShaderCbRaw` in the header, cast to `CloudDomeShaderCallback*`
-inside the .cpp) so that `setCameraY()` can be called each frame in `update()`.
-The caller's reference is released via `->drop()` in
-`IrrlichtRenderer::~IrrlichtRenderer()`. Irrlicht also holds its own `grab()`
-reference; the final drop happens when the material renderer is destroyed.
+`addHighLevelShaderMaterialFromFiles`. The caller (`IrrlichtRenderer`) **keeps its
+own reference** (stored as `void* m_cloudShaderCbRaw` in the header, cast to
+`CloudDomeShaderCallback*` inside the .cpp). The caller's reference is released via
+`->drop()` in `IrrlichtRenderer::~IrrlichtRenderer()`. Irrlicht also holds its own
+`grab()` reference; the final drop happens when the material renderer is destroyed.
 Never `std::unique_ptr` — causes double-free.
 
 ### IrrlichtRenderer Members Required
@@ -312,10 +309,10 @@ m_cloudNode->getMaterial(0)
     .getTextureMatrix(0)
     .setTextureTranslate(m_cloudUVOffset.X, m_cloudUVOffset.Y);
 
-// Reposition dome to camera XZ each frame:
+// Reposition dome to full camera XYZ each frame:
 if (m_camera) {
     const core::vector3df camPos = m_camera->getPosition();
-    m_cloudNode->setPosition(core::vector3df(camPos.X, 0.0f, camPos.Z));
+    m_cloudNode->setPosition(camPos);  // full XYZ — gl_Vertex is camera-relative local space
 }
 ```
 
