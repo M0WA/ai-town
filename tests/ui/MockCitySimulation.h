@@ -80,6 +80,9 @@ public:
     // --- Per-tile query (Phase 6 delivery) ---
     MOCK_METHOD(QueryResult, queryTile, (int tileX, int tileZ), (const, override));
 
+    // --- Road proximity check (Phase 11m bug fix) ---
+    MOCK_METHOD(bool, isWithinRoadRange, (int x, int z, DensityTier tier), (const, override));
+
     // --- Bond use count (Phase 6 delivery) ---
     MOCK_METHOD(int, getOutstandingBondUses, (), (const, override));
 

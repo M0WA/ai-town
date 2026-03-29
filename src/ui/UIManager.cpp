@@ -1030,7 +1030,10 @@ bool UIManager::onEvent(const InputEvent& event) {
                         for (int tx = x0; tx <= x1; ++tx) {
                             if (m_sim) {
                                 QueryResult q = m_sim->queryTile(tx, tz);
-                                if (q.isRoad || q.isZoned) {
+                                const bool noRoadProximity = !m_sim->isWithinRoadRange(
+                                    tx, tz,
+                                    static_cast<DensityTier>(m_selectedDensityTier));
+                                if (q.isRoad || q.isZoned || noRoadProximity) {
                                     blockedTiles.push_back({tx, tz});
                                 } else {
                                     freeTiles.push_back({tx, tz});
@@ -1238,20 +1241,22 @@ bool UIManager::doTerrainPlacement(int hitX, int hitZ) {
                 }
             }
             if (m_mapTilesX > 0 && m_mapTilesZ > 0) {
-                // Phase 11m: insert overlay entry showing the zone color for this
-                // under-construction tile. The tile starts in underConstruction state;
-                // the periodic overlay refresh in update() will remove it once the
-                // building has spawned (underConstruction becomes false).
-                uint64_t key = static_cast<uint64_t>(hitZ) * static_cast<uint64_t>(m_mapTilesX)
-                               + static_cast<uint64_t>(hitX);
-                ZoneType  zoneType   = static_cast<ZoneType>(m_selectedZoneType);
-                DensityTier densityTier = static_cast<DensityTier>(m_selectedDensityTier);
-                static constexpr size_t kOverlayCap = 100000u;
-                if (m_overlayMap.size() < kOverlayCap) {
-                    m_overlayMap[key] = computeZoneOverlayColor(zoneType, densityTier);
-                }
-                if (m_renderer) {
-                    m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
+                // Phase 11m: insert overlay entry only when the tile was actually zoned.
+                // placeZone() may have rejected the placement (road proximity, OOB, occupied).
+                // Query the tile after placement to confirm it is now zoned.
+                QueryResult placed = m_sim->queryTile(hitX, hitZ);
+                if (placed.isZoned) {
+                    uint64_t key = static_cast<uint64_t>(hitZ) * static_cast<uint64_t>(m_mapTilesX)
+                                   + static_cast<uint64_t>(hitX);
+                    ZoneType  zoneType   = static_cast<ZoneType>(m_selectedZoneType);
+                    DensityTier densityTier = static_cast<DensityTier>(m_selectedDensityTier);
+                    static constexpr size_t kOverlayCap = 100000u;
+                    if (m_overlayMap.size() < kOverlayCap) {
+                        m_overlayMap[key] = computeZoneOverlayColor(zoneType, densityTier);
+                    }
+                    if (m_renderer) {
+                        m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, m_overlayMap);
+                    }
                 }
             }
             setUnsavedChanges(true);

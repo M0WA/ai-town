@@ -103,6 +103,11 @@ protected:
         EXPECT_CALL(sim_, queryTile(_, _))
             .Times(AnyNumber())
             .WillRepeatedly(Return(QueryResult{}));
+        // isWithinRoadRange: default true so tiles are road-accessible.
+        // Tests that verify occupation-based blocking (isRoad/isZoned) do not need to
+        // change this; the occupation check is separate from road-proximity gating.
+        // StrictMock requires EXPECT_CALL (ON_CALL alone is not enough to suppress errors).
+        EXPECT_CALL(sim_, isWithinRoadRange(_, _, _)).Times(AnyNumber()).WillRepeatedly(Return(true));
 
         uiManager_ = std::make_unique<UIManager>(&backend_, nullptr, &sim_, &clock_);
         uiManager_->setRenderer(&renderer_);
