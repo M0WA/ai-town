@@ -25,11 +25,11 @@ void main() {
     vec4 tex = texture2D(u_tex, v_texCoord);
 
     // ---------- elevation-angle alpha fade ----------
-    // Clouds become fully transparent below kElevAlphaEnd (−5°, below the terrain
+    // Clouds become fully transparent below kElevAlphaEnd (+5°, above the terrain
     // horizon) and fully opaque above kElevAlphaHigh (20°).
-    // Extending the fade start to −5° lets clouds appear at the horizon itself and
-    // slightly below it, so the cloud layer visually reaches the ground.
-    const float kElevAlphaEnd  = -0.0873;  // −5° — transparent below the horizon
+    // Raising the fade start to +5° ensures the dome is fully transparent at and
+    // below +5° elevation, eliminating any cloud arch artefact at the horizon.
+    const float kElevAlphaEnd  =  0.0873;  // +5° — transparent at/below 5° above horizon (eliminates arch artefact)
     const float kElevAlphaHigh =  0.3491;  //  20° — fully opaque above this
 
     float ta = clamp((v_elevAngle - kElevAlphaEnd) / (kElevAlphaHigh - kElevAlphaEnd),
@@ -44,7 +44,7 @@ void main() {
     // that made the arc perceptible.
     // Sky background matches driver clear colour SColor(255, 100, 149, 237).
     const vec3  kSkyColor    = vec3(0.392, 0.584, 0.929);
-    const float kHazeEnd     = -0.0873;  // full sky colour at −5° and below
+    const float kHazeEnd     =  0.0873;  // full sky colour at +5° and below (matches kElevAlphaEnd)
     const float kHazeHigh    =  0.3491;  //  20° — no haze above this
 
     float th = clamp((v_elevAngle - kHazeEnd) / (kHazeHigh - kHazeEnd), 0.0, 1.0);

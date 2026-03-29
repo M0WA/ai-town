@@ -173,6 +173,10 @@ public:
     // Called from UIManager::transitionToGameplay() or test harness.
     void onNewGame();
 
+    // Returns true when camera input (RMB drag, MMB drag) should be active.
+    // Used by EventReceiver to suppress camera rotation in non-gameplay states.
+    bool isGameplayOrPaused() const;
+
     // Returns true when a blocking modal dialog is currently active.
     // Used by the Priority-2 dual-guard and by tests.
     bool hasActiveModal() const;
