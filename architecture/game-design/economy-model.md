@@ -257,3 +257,7 @@ The 0.5 default for tiles with no valid A\* path represents a deliberate neutral
 ---
 
 **Sign-off summary**: All nine balance items reviewed and accepted. The V1 economy constants in `simulation_constants.h` are consistent with the spec in `architecture/game-design/economy-model.md`, with the pacing targets documented in this file, and with the V1 Sandbox-only scope defined in `architecture/game-design/minimum-viable-simulation.md`. No re-balancing is required before Phase 6 completion.
+
+---
+
+**IClock injection**: `CitySimulation` accepts `IClock*` at construction for the grace-period real-time gate (120 s) and the forced-loan real-time gate (120 s). Production passes `WallClock`; tests advance time deterministically via `ManualClock::advance(120.0)`. See `architecture/testing/testability-architecture.md §IClock` for the canonical interface definition.

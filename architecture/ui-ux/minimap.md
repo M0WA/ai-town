@@ -36,6 +36,12 @@
     4 px between lines/dots at the minimap tile resolution. Both tint colour and pattern
     are applied simultaneously in colorblind mode — the tint is not suppressed.
 
+    **Cross-hatch pattern reuse note**: The cross-hatch pattern (Water Tower) is also used
+    for the Industrial demand bar colorblind mode in `hud-layout.md` and
+    `resolution-ui-scaling.md`. This reuse is intentional — the two contexts (minimap service
+    coverage overlay vs. HUD demand bars) are visually distinct and do not appear
+    simultaneously in a way that could cause confusion.
+
   - **Traffic Congestion overlay**: Road segments are coloured by speed band relative to the
     free-flow speed of that segment. Authoritative hex values (used for both the minimap road
     colouring and the legend swatches):

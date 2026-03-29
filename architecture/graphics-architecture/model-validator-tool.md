@@ -91,6 +91,11 @@ The overlay is drawn after `smgr->drawAll()` and before the HUD text, inside the
 
 ### Road Tiles (Vehicles Category Only)
 
+**Note**: Road tile geometry is **procedurally generated at runtime** via
+`buildTileRoadMesh()`. No road tile `.b3d` asset exists. The validator exercises road
+tiles by calling the same `buildTileRoadMesh()` function as `IrrlichtRenderer` — not by
+loading a file. This is the identical code path per the validator design goal.
+
 The Vehicles category places 7 real game road tiles along the X axis beneath all vehicle
 models using the **identical rendering code path as `IrrlichtRenderer`**: the road shader,
 `TextureCache::loadSRGB()`, and the procedural LOD0 mesh geometry (10 × 10 m flat quad +
@@ -177,7 +182,10 @@ V1 total `.b3d` files validated by the tool (LOD0 categories 1–11 above):
 | Zone building LOD2 geometry shells | 12 | High-density only (res/com/ind high × 4 variants); Low/Med use billboard imposters |
 | Service building LOD0 | 4 | 1 unique model each (fire, police, power, water) |
 | Service building LOD1 | 4 | 1 unique model each |
-| **Total `.b3d`** | **92** | |
+| Vehicle LOD0 | 5 | car\_sedan, car\_hatchback, car\_suv, bus\_standard, truck\_cargo |
+| Vehicle LOD1 | 5 | car\_sedan, car\_hatchback, car\_suv, bus\_standard, truck\_cargo |
+| **Total LOD0 `.b3d`** | **45** | 36 zone buildings + 4 service buildings + 5 vehicles (LOD0 only) |
+| **Total `.b3d`** | **102** | All LOD levels across all asset categories |
 | Billboard DDS (`*_billboard.dds`) | 28 | 24 zone (Low/Med × 3 zone-types × 4 variants) + 4 service; High excluded (uses `_lod2.b3d`) |
 
 The validator tool exercises the 45 LOD0 `.b3d` files across categories 1–11. LOD1 and LOD2
