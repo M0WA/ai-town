@@ -163,8 +163,8 @@ struct SimulationConstants {
     static constexpr int demand_bootstrapping_ticks = 6;
     static_assert(demand_bootstrapping_ticks > 0, "must be positive");
     static constexpr float demand_floor_residential = 0.20f;
-    static constexpr float demand_floor_commercial  = 0.45f;
-    static constexpr float demand_floor_industrial  = 0.45f;
+    static constexpr float demand_floor_commercial  = 0.55f;
+    static constexpr float demand_floor_industrial  = 0.55f;
 
     // Density upgrade wave (architecture/game-design/zoning-system.md)
     static constexpr float density_upgrade_wave_demand_threshold = 0.50f;

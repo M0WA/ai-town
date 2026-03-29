@@ -274,6 +274,11 @@ private:
     // -----------------------------------------------------------------------
     AudioStream m_streams[kStreamSourceCount];
 
+    // Rate-limit cooldown for the "refillStream: alBufferData failed" error log.
+    // Counts down from 5.0f to 0.0f per slot; log is suppressed while > 0.
+    // Audio thread only — no mutex needed.
+    float m_refillFailLogCooldown[kStreamSourceCount]{};
+
     // Music crossfade progress: 0→1 over crossfade duration.
     std::atomic<float> m_musicCrossfadeT{0.0f};
     std::atomic<float> m_ambientCrossfadeT{0.0f};

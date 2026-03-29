@@ -1269,9 +1269,14 @@ int AudioSystem::refillStream(int slot) {
                     // Buffer still attached to source queue — skip this slot.
                     // m_samplesQueued is NOT incremented so the same bufIdx is retried
                     // on the next wake after the buffer has been processed and unqueued.
-                    pendingLogError = "refillStream: alBufferData failed slot=" +
-                                      std::to_string(slot) + " bufIdx=" +
-                                      std::to_string(bufIdx);
+                    // Rate-limit the error log to at most once per 5 s per slot to
+                    // avoid console spam (this normally self-recovers within 1–2 wakes).
+                    if (m_refillFailLogCooldown[slot] <= 0.0f) {
+                        pendingLogError = "refillStream: alBufferData failed slot=" +
+                                          std::to_string(slot) + " bufIdx=" +
+                                          std::to_string(bufIdx);
+                        m_refillFailLogCooldown[slot] = 5.0f;
+                    }
                     // Lock released at end of scope; log called below.
                 }
             }
@@ -1526,6 +1531,9 @@ void AudioSystem::updateStreams(float dt) {
     // Refill all open streams.
     // ------------------------------------------------------------------
     for (int i = 0; i < kStreamSourceCount; ++i) {
+        if (m_refillFailLogCooldown[i] > 0.0f) {
+            m_refillFailLogCooldown[i] = std::max(0.0f, m_refillFailLogCooldown[i] - dt);
+        }
         if (!m_streams[i].isOpen) continue;
         refillStream(i);
     }
