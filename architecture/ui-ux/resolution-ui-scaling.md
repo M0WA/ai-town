@@ -233,6 +233,7 @@ legibility against the sky.
 | Mid-blue / sub-labels | `#4A7FA5` | Secondary / sub-labels, less prominent text |
 | Error / deficit red | `#F04E37` | Deficit indicators, error states |
 | Warning amber | `#E8960C` | Warning states (distinct from value amber `#F0B429`) |
+| Surplus green | `#80C850` | Budget surplus positive balance indicator (used in `finances-panel.md` §Budget Section) |
 
 ### Button Tile States
 

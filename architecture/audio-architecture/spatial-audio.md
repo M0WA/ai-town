@@ -1,5 +1,7 @@
 # 3D Spatial Audio
 
+**vec3 type**: All positional parameters in this spec (`vec3` fields of `CameraState`, source positions) use the `vec3` struct defined in `src/interfaces/vec3.h`. This header contains no Irrlicht dependencies. See `architecture/testing/testability-architecture.md §vec3 type alias` for the canonical spec entry.
+
 - **Distance model**: `AL_INVERSE_DISTANCE_CLAMPED`
 
 | Category | Reference distance | Max distance | Rolloff factor |

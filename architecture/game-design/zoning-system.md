@@ -142,7 +142,11 @@
   >
   > The swing from tick T−1 (pre-demolition) to tick T (post-demolition) is exempt per the Demolition-Induced Swing Exemption — that is a player-action-driven capacity change, not formula oscillation. The swings documented above are all formula-driven (fixed city layout: no C/I tiles, 5 R tiles, roads present, ticks advancing automatically).
 
-- **Density upgrade wave re-evaluation**: When a density tier is unlocked and the upgrade wave fires (at most 20% of eligible tiles per zone type per tick), tile eligibility is re-evaluated at the start of each tick during the multi-tick wave — not locked to the snapshot from when the unlock first triggered. A tile that met the `demand_factor >= SimulationConstants::density_upgrade_wave_demand_threshold` (0.50) criterion at tick N may not meet it at tick N+1 (if congestion or service degradation occurs during the wave). In that case, the tile is skipped in the current wave tick and re-evaluated in the next tick. This prevents a density upgrade wave from pushing a city into deficit by upgrading tiles whose demand has since dropped, which would cause wages and upkeep to spike beyond the city's revenue. **Wave end condition**: the upgrade wave ends when either (a) all eligible tiles have been upgraded, or (b) no remaining eligible tiles meet the `demand_factor >= density_upgrade_wave_demand_threshold` (0.50) criterion. A wave that ends condition (b) does NOT automatically restart; the unlock remains in effect and future ticks will attempt upgrades when demand recovers. **Same-tick unlock guard**: the upgrade wave must NOT fire on the same budget tick that a density tier first becomes unlocked — a `wasAlreadyUnlocked[]` snapshot taken at the start of `doDensityUnlockTick()` gates the wave loop, so only tiers that were already unlocked before the current tick can drive upgrades. This prevents a newly-unlocked tier from immediately triggering an upgrade wave before the player has had a chance to respond.
+- **Density upgrade wave re-evaluation**: When a density tier is unlocked and the upgrade wave fires (at most 20% of eligible tiles per zone type per tick), tile eligibility is re-evaluated at the start of each tick during the multi-tick wave — not locked to the snapshot from when the unlock first triggered. A tile that met the `demand_factor >= SimulationConstants::density_upgrade_threshold` (0.75) criterion at tick N may not meet it at tick N+1 (if congestion or service degradation occurs during the wave). In that case, the tile is skipped in the current wave tick and re-evaluated in the next tick. This prevents a density upgrade wave from pushing a city into deficit by upgrading tiles whose demand has since dropped, which would cause wages and upkeep to spike beyond the city's revenue. **Wave end condition**: the upgrade wave ends when either (a) all eligible tiles have been upgraded, or (b) no remaining eligible tiles meet the `demand_factor >= density_upgrade_threshold` (0.75) criterion. A wave that ends condition (b) does NOT automatically restart; the unlock remains in effect and future ticks will attempt upgrades when demand recovers. **Same-tick unlock guard**: the upgrade wave must NOT fire on the same budget tick that a density tier first becomes unlocked — a `wasAlreadyUnlocked[]` snapshot taken at the start of `doDensityUnlockTick()` gates the wave loop, so only tiers that were already unlocked before the current tick can drive upgrades. This prevents a newly-unlocked tier from immediately triggering an upgrade wave before the player has had a chance to respond.
+
+  Note: `construction_delay_demand_threshold = 0.50` (minimum demand for a zone tile to start
+  construction). `density_upgrade_threshold = 0.75` (minimum demand for a built tile to qualify
+  for a density upgrade). These are distinct constants.
 - **Terrain interaction**: See [Terrain Interaction](terrain-interaction.md) for the authoritative slope threshold (> 15.0°, exact), earthworks cost formula, and map playability guarantee.
 - **Player action**: Player designates zones; engine auto-populates buildings based on demand and desirability scores
 
@@ -212,9 +216,20 @@ The `upgradeRetryCount` is tracked per tile in a `std::unordered_map<TileKey, in
 
 ### Service Building Street Adjacency
 
-Service buildings (fire, police, water/power/trash plants) may only be placed if **at least one tile in their 2×2 footprint is directly edge-adjacent (4-directional cardinal, distance = 1) to a road tile**. This rule is stricter than the zone proximity rule below and applies only to service buildings.
+Service buildings may be placed on unzoned tiles or tiles already carrying a zone designation,
+but MUST have at least one cardinal-adjacent road tile (4-directional, distance = 1). Placement
+on a road-occupied tile is rejected. Road adjacency is enforced at placement time the same way
+as for zone buildings. This is a deliberate game-design decision (OD-2 Option B): service
+buildings are strategic infrastructure anchors and must connect to the road network to serve
+the city, just as zone buildings must be accessible by road.
 
-If no cardinal-adjacent road exists, placement is **rejected** and the player sees a toast: "Service building must be next to a road".
+Concretely: service buildings (fire, police, water/power/trash plants) may only be placed if
+**at least one tile in their 2×2 footprint is directly edge-adjacent (4-directional cardinal,
+distance = 1) to a road tile**. This rule is stricter than the zone proximity rule below and
+applies only to service buildings.
+
+If no cardinal-adjacent road exists, placement is **rejected** and the player sees a toast:
+"Service building must be next to a road".
 
 ### Zone Street Proximity
 

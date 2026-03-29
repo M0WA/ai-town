@@ -69,7 +69,7 @@ virtual void placeServiceBuilding(int tileX, int tileZ,
                                   int earthworksCostOverride = 0) = 0;
 ```
 
-### `ServiceBuildingType` Enum (in `simulation_types.h`)
+### `ServiceBuildingType` Enum (in `src/interfaces/simulation_types.h`)
 
 ```cpp
 enum class ServiceBuildingType {
@@ -129,14 +129,13 @@ fire, police, power, water"). No service building type is deferred to post-V1.
   a pre-placement occupancy signal is needed for the toast; the default `void` signature is
   sufficient for V1 if the toast is omitted).
 - Service buildings can be placed on any buildable tile (slope ≤ 15.0° without earthworks; any
-  slope with earthworks cost). They do **not** require a zoned tile — infrastructure can be
-  placed on unzoned terrain.
-- **No demolish prerequisite**: Service buildings are infrastructure, not competing zone types.
-  They may be placed on **any buildable tile** (slope ≤ 15.0°) regardless of whether that tile
-  is already occupied by a zone designation or a road. The player is **not** required to demolish
-  an existing zone or road before placing a service building. The zone or road occupancy on a
-  tile does not block service building placement. This exemption is authoritative and supersedes
-  any implementation-phase plan note that defers or qualifies it.
+  slope with earthworks cost), on unzoned tiles or tiles already carrying a zone designation.
+  They do **not** require a zoned tile — infrastructure can be placed on unzoned terrain.
+  Placement on a road-occupied tile is rejected.
+- **Road adjacency requirement**: Service buildings may be placed on unzoned tiles or tiles
+  already carrying a zone designation, but MUST have at least one cardinal-adjacent road tile
+  (4-directional, distance = 1). Placement on a road-occupied tile is rejected. Road adjacency
+  is enforced at placement time the same way as for zone buildings.
 - Service buildings are demolished via the Demolish tool (same as zones and roads). The
   demolish confirmation modal applies (same setting as zone/road demolish). Demolishing a
   service building removes coverage for all previously covered tiles on the next budget tick.
@@ -359,3 +358,7 @@ nothing on the first brownout.
 **Save system note**: A save file written before Phase 10 (when these fields did not exist)
 must initialize all three to their default values on load. The Phase 11 save system must
 handle this via a version tag or field-presence check to avoid uninitialised reads.
+
+---
+
+**ISimulationRNG cross-reference**: Service degradation random rolls (`ISimulationRNG::nextFloat() < service_degradation_probability_per_tick`) use the injectable `ISimulationRNG` interface. See `architecture/testing/testability-architecture.md §ISimulationRNG` for the canonical interface definition (`src/interfaces/ISimulationRNG.h`).

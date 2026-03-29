@@ -1,6 +1,6 @@
 ## Phase 11n: Architecture Spec Consistency — CI/CD, Game Design, UI/UX, Graphics, Textures, Cross-Domain Interfaces
 
-**Status: OPEN**
+**Status: DONE**
 
 ### Goal
 
@@ -30,7 +30,7 @@ Each deliverable item references its INC number from the review for traceability
 
 **Files:** `architecture/ci-cd/caching.md`, `architecture/ci-cd/dependency-management.md`
 
-- [ ] **A-1** `caching.md`: Replace the Linux vcpkg caching section with a note explaining
+- [x] **A-1** `caching.md`: Replace the Linux vcpkg caching section with a note explaining
   that Linux builds use a pre-baked Docker image (`/opt/vcpkg_installed`,
   `VCPKG_MANIFEST_INSTALL=OFF`) and therefore require no `actions/cache` step for vcpkg.
   Clarify that the 4-component cache key (`runner.os`, `COMPILER_VERSION`,
@@ -39,7 +39,7 @@ Each deliverable item references its INC number from the review for traceability
   `coverage-linux` job only (not all jobs). The FetchContent key IS in active use for
   `coverage-linux` and MUST NOT be removed or marked N/A. _(INC-001, INC-014)_
 
-- [ ] **A-2** `dependency-management.md`: Clarify that Linux CI derives vcpkg from the
+- [x] **A-2** `dependency-management.md`: Clarify that Linux CI derives vcpkg from the
   Docker image rather than a live `lukka/run-vcpkg` invocation. Add a note: "`lukka/run-vcpkg`
   is used only in the Windows job. Linux jobs set `VCPKG_MANIFEST_INSTALL=OFF` and read
   from `/opt/vcpkg_installed` which is baked into the CI image at image-build time." _(INC-002)_
@@ -55,7 +55,7 @@ Each deliverable item references its INC number from the review for traceability
   > **PRE-COMPLETED**: `coverage.md` already contains `--ignore-errors mismatch,inconsistent,version`
   > with the rationale comment. No file change needed.
 
-- [ ] **B-2** `coverage.md` — `lcov --remove` step: Change `--ignore-errors unused` to
+- [x] **B-2** `coverage.md` — `lcov --remove` step: Change `--ignore-errors unused` to
   `--ignore-errors unused,inconsistent`. Add rationale: "lcov 2.x emits inconsistent data
   errors during `--remove` when processing coverage data with lambda inlining." _(INC-031)_
 
@@ -66,16 +66,16 @@ Each deliverable item references its INC number from the review for traceability
 **Files:** `architecture/ci-cd/dependency-management.md`, `architecture/ci-cd/github-actions-workflow.md`,
 `architecture/ci-cd/caching.md`
 
-- [ ] **C-1** `dependency-management.md` §Step B "Verify GLEW vcpkg install": Change
+- [x] **C-1** `dependency-management.md` §Step B "Verify GLEW vcpkg install": Change
   `glew.lib` → `glew32.lib`. Add note: "On Windows, the vcpkg GLEW portfile uses a libname
   override that installs `glew32.lib` rather than `glew.lib`." _(INC-013)_
 
-- [ ] **C-2** `dependency-management.md` apt package list: Add `libxxf86vm-dev` with the
+- [x] **C-2** `dependency-management.md` apt package list: Add `libxxf86vm-dev` with the
   comment "required by Irrlicht (`-lXxf86vm`); omitting this causes a linker error during
   Irrlicht build." Align with `architecture/testing/headless-ci-testing.md` which already
   lists it as required. _(INC-015)_
 
-- [ ] **C-3** `github-actions-workflow.md` §markdown-lint step: Change the install snippet
+- [x] **C-3** `github-actions-workflow.md` §markdown-lint step: Change the install snippet
   from `npm install -g markdownlint-cli` to `npm install -g markdownlint-cli@0.47.0`.
   Reword the adjacent note from "To pin to a specific version use `@0.47.0`" to
   "MUST pin to a specific version; current pin: `@0.47.0`." _(INC-016)_
@@ -85,7 +85,7 @@ Each deliverable item references its INC number from the review for traceability
   > **PRE-COMPLETED**: `github-actions-workflow.md` line 431 already uses
   > `--base-directory ${{ github.workspace }}`. No file change needed.
 
-- [ ] **C-5** `caching.md` line referencing `softprops/action-gh-release`: Replace the
+- [x] **C-5** `caching.md` line referencing `softprops/action-gh-release`: Replace the
   `<40-CHAR-SHA>` placeholder with `9d7c94cfd0a1f3ed45544c887983e9fa900f0564` and add
   comment `# v2.1.0`. _(INC-030)_
 
@@ -95,11 +95,11 @@ Each deliverable item references its INC number from the review for traceability
   > **PRE-COMPLETED**: `ALSOFT_DRIVERS: 'null'` is already present in all three Linux test
   > step `env:` blocks (unit, integration, opengl). No file change needed.
 
-- [ ] **C-7** `caching.md` cache key description: Replace the vague "OS" component label
+- [x] **C-7** `caching.md` cache key description: Replace the vague "OS" component label
   with the explicit expression `${{ runner.os }}` so the key format is unambiguous
   and matches the actual workflow syntax. _(INC-033)_
 
-- [ ] **C-8** `github-actions-workflow.md` Windows build job: Add a pre-test verification
+- [x] **C-8** `github-actions-workflow.md` Windows build job: Add a pre-test verification
   step after the build step.
 
   ```yaml
@@ -124,7 +124,7 @@ Each deliverable item references its INC number from the review for traceability
 
 **Files:** `architecture/testing/coverage.md`
 
-- [ ] **D-1** `coverage.md` — Add a phase timeline table near the top of the file:
+- [x] **D-1** `coverage.md` — Add a phase timeline table near the top of the file:
 
   | Phase | Gate | Notes |
   |---|---|---|
@@ -134,7 +134,7 @@ Each deliverable item references its INC number from the review for traceability
 
   _(INC-004)_
 
-- [ ] **D-2** `coverage.md` §Phase 4 src/ui/ gate: Replace the `lcov --list` column-parsing
+- [x] **D-2** `coverage.md` §Phase 4 src/ui/ gate: Replace the `lcov --list` column-parsing
   approach with the direct awk SF/LH/LF parse of the `.info` file (the same version-agnostic
   method used in the deployed workflow). Remove the lcov 2.x `|` delimiter preflight check
   as it is no longer needed. _(INC-017)_
@@ -145,14 +145,14 @@ Each deliverable item references its INC number from the review for traceability
 
 **Files:** `architecture/game-design/service-coverage.md`, `architecture/game-design/zoning-system.md`
 
-- [ ] **E-1** `service-coverage.md` §Placement Rules: Remove the sentence "This exemption is
+- [x] **E-1** `service-coverage.md` §Placement Rules: Remove the sentence "This exemption is
   authoritative and supersedes any implementation-phase plan note." Rewrite to align with
   `zoning-system.md`: "Service buildings may be placed on unzoned tiles or tiles already
   carrying a zone designation, but MUST have at least one cardinal-adjacent road tile (4-directional,
   distance = 1). Placement on a road-occupied tile is rejected. Road adjacency is enforced
   at placement time the same way as for zone buildings." _(INC-009)_
 
-- [ ] **E-2** `zoning-system.md` §Density upgrade wave re-evaluation: Change the demand
+- [x] **E-2** `zoning-system.md` §Density upgrade wave re-evaluation: Change the demand
   threshold from `0.50` to `0.75`. Rename the constant reference from
   `density_upgrade_wave_demand_threshold` to `density_upgrade_threshold` to distinguish it
   from `construction_delay_demand_threshold` (which remains at 0.50). Add a clarifying
@@ -164,7 +164,7 @@ Each deliverable item references its INC number from the review for traceability
   > closes. No code change in this phase.
   _(INC-010)_
 
-- [ ] **E-3** All architecture spec files: Rename every occurrence of
+- [x] **E-3** All architecture spec files: Rename every occurrence of
   `ICitySimulation::getDemandPressurePct(ZoneType)` to `ICitySimulation::getZoneDemandFactor(ZoneType)`.
   Add a disambiguation note where the method is first defined:
   "`getZoneDemandFactor(ZoneType)` returns the city-wide effective demand in [0.0, 1.0]
@@ -184,7 +184,7 @@ Each deliverable item references its INC number from the review for traceability
 **Files:** `architecture/game-design/game-progression-modes.md`,
 `architecture/game-design/save-system.md`, `architecture/game-design/traffic-system.md`
 
-- [ ] **F-1** `game-progression-modes.md`: Add an explicit constant table:
+- [x] **F-1** `game-progression-modes.md`: Add an explicit constant table:
 
   | Constant | Value | Effect |
   |---|---|---|
@@ -197,13 +197,13 @@ Each deliverable item references its INC number from the review for traceability
   Add note: "100K is intentionally a toast-only milestone. It does not trigger `stinger_milestone`
   and does not change the City Rating tier." _(INC-012)_
 
-- [ ] **F-2** `save-system.md` §Auto-save triggers: Clarify the forced-loan auto-save
+- [x] **F-2** `save-system.md` §Auto-save triggers: Clarify the forced-loan auto-save
   interaction with the 120-second timer: "The forced-loan auto-save fires on the same tick
   that the deficit condition is detected, before `UIManager::showModal()` is called. This
   resets the 120-second auto-save timer. The timer then pauses for the duration of the
   blocking modal and resumes when the modal is dismissed." _(INC-034)_
 
-- [ ] **F-3** `traffic-system.md` §null-path behavior: Add a clarifying note after the
+- [x] **F-3** `traffic-system.md` §null-path behavior: Add a clarifying note after the
   null-path floor definition: "**Timeout trips vs. null-path ticks:** Timeout trips
   (demand_factor = 0.0) are distinct from null-path ticks (demand_factor = 0.5 neutral
   floor). The 0.5 floor applies ONLY when ALL ticks in the smoothing window are null-path
@@ -219,7 +219,7 @@ Each deliverable item references its INC number from the review for traceability
 `architecture/ui-ux/minimap.md`, `architecture/ui-ux/modal-dialog-system.md`,
 `architecture/ui-ux/input-arbitration.md`
 
-- [ ] **G-1** `hud-layout.md` §Utilities sub-panel: Update to match `ui-manager.md` as the
+- [x] **G-1** `hud-layout.md` §Utilities sub-panel: Update to match `ui-manager.md` as the
   canonical source. Correct all four contradicting values:
   - Grid: 2×2 (not 4×1)
   - Button size: 96×48 px (not 64×40 px)
@@ -232,7 +232,7 @@ Each deliverable item references its INC number from the review for traceability
   bounds to y:664–748 for consistency. _(INC-020)_
   > **PRE-APPLIED**: `hud-layout.md` line 14 stale reference "y:664–744" changed to "y:664–748" to match the authoritative value on line 19. The `ui-manager.md` portion of G-2 requires no change (no 664/748 constants exist in that file). No file change needed.
 
-- [ ] **G-3** `notification-system.md` §CRITICAL toast Z-order: Add a note: "CRITICAL toasts
+- [x] **G-3** `notification-system.md` §CRITICAL toast Z-order: Add a note: "CRITICAL toasts
   render above the resource bar (higher Z-order). The resource bar occupies y:0–56;
   CRITICAL toasts begin at y:20 and therefore overlap the resource bar visually. The toast
   layer MUST be assigned a higher Z-order than the resource bar layer so toasts are not
@@ -246,7 +246,7 @@ Each deliverable item references its INC number from the review for traceability
   value. Any change to toolbar height requires updating both `hud-layout.md` and
   `input-arbitration.md` simultaneously." _(INC-022)_
 
-- [ ] **G-5** `ui-manager.md` `ui_constants.h` block: Document all minimap constants.
+- [x] **G-5** `ui-manager.md` `ui_constants.h` block: Document all minimap constants.
   Three constants already exist in `src/ui/ui_constants.h` with correct values (verified from
   source). Two are missing. The spec must document all five.
 
@@ -267,29 +267,29 @@ Each deliverable item references its INC number from the review for traceability
 
   These are referenced by `input-arbitration.md` Priority 3 dispatch table. _(INC-052)_
 
-- [ ] **G-6** `resolution-ui-scaling.md` Glass City canonical palette table: Add the surplus-green
+- [x] **G-6** `resolution-ui-scaling.md` Glass City canonical palette table: Add the surplus-green
   entry: `#80C850` — Budget surplus positive balance indicator (used in `finances-panel.md`
   §Budget Section). _(INC-057)_
 
-- [ ] **G-7** `minimap.md` §Water Tower colorblind pattern: Add a note: "The cross-hatch
+- [x] **G-7** `minimap.md` §Water Tower colorblind pattern: Add a note: "The cross-hatch
   pattern is also used for the Industrial demand bar colorblind mode in `hud-layout.md`
   and `resolution-ui-scaling.md`. This reuse is intentional — the two contexts (minimap
   service coverage overlay vs. HUD demand bars) are visually distinct and do not appear
   simultaneously in a way that could cause confusion." _(INC-063)_
 
-- [ ] **G-8** `modal-dialog-system.md` Small modal (480×240 px): Add a content layout note
+- [x] **G-8** `modal-dialog-system.md` Small modal (480×240 px): Add a content layout note
   for the demolish confirmation dialog: "Content layout: 14px title, 12px body text
   (max 2 lines), 11px 'Do not ask again' checkbox row, 32px button row with 8px gap —
   total content height ≈ 200 px, which fits within the 240 px height at default scaling.
   If a localized string exceeds 2 lines, the modal MUST be promoted to Medium (560×320 px)."
   _(INC-064)_
 
-- [ ] **G-9** `notification-system.md` §Layout constraints: Add a verified layout note:
+- [x] **G-9** `notification-system.md` §Layout constraints: Add a verified layout note:
   "The grace period indicator occupies y:60–92. Normal toasts begin at y:130. The 38 px
   gap (y:92–130) ensures these two elements never overlap. This constraint must be preserved
   if either element's position changes." _(INC-065)_
 
-- [ ] **G-10** `hud-layout.md` §Unsaved changes indicator: Clarify the x:1796 shared edge
+- [x] **G-10** `hud-layout.md` §Unsaved changes indicator: Clarify the x:1796 shared edge
   with the time controls block (x:1600–1796): "The unsaved changes dot begins at x:1796
   (immediately adjacent to the time controls right edge at x:1796). This zero-gap edge-share
   is intentional — the dot and time controls share the boundary pixel. If this causes visual
@@ -304,12 +304,12 @@ Each deliverable item references its INC number from the review for traceability
 `architecture/graphics-architecture/irrlicht-device-lifecycle.md`,
 `architecture/game-design/simulation-time.md`
 
-- [ ] **H-1** `ui-manager.md` §IUIBackend Header Placement: Remove the statement "`IUIBackend.h`
+- [x] **H-1** `ui-manager.md` §IUIBackend Header Placement: Remove the statement "`IUIBackend.h`
   is placed in `src/ui/`." Replace with: "`IUIBackend.h` lives in `src/interfaces/` (moved
   from `src/ui/` in Phase 10b Feature 3 — see `testability-architecture.md` §IUIBackend
   for the canonical location and method list)." _(INC-018)_
 
-- [ ] **H-2** `testability-architecture.md`: Add a spec entry for `IClock`.
+- [x] **H-2** `testability-architecture.md`: Add a spec entry for `IClock`.
 
   ```text
   Header: src/interfaces/IClock.h
@@ -324,7 +324,7 @@ Each deliverable item references its INC number from the review for traceability
   Add cross-references from all specs that inject `IClock` (`audio-system.md`,
   `save-system.md`, `economy-model.md`). _(INC-023)_
 
-- [ ] **H-3** `testability-architecture.md`: Add a formal spec entry block for `ISimulationRNG`,
+- [x] **H-3** `testability-architecture.md`: Add a formal spec entry block for `ISimulationRNG`,
   documenting the **existing** interface (OD-4: keep no-arg `nextFloat()`).
 
   ```text
@@ -341,13 +341,13 @@ Each deliverable item references its INC number from the review for traceability
   Cross-reference from `service-coverage.md` and any other spec referencing `ISimulationRNG`.
   _(INC-024)_
 
-- [ ] **H-4** `irrlicht-device-lifecycle.md`: Add a unified end-to-end per-frame loop table
+- [x] **H-4** `irrlicht-device-lifecycle.md`: Add a unified end-to-end per-frame loop table
   that merges the 8-step simulation loop (from `simulation-time.md`) with the 11-step
   render loop, producing one authoritative sequence showing all steps in order. Add a
   cross-reference in `simulation-time.md`: "See `irrlicht-device-lifecycle.md §Per-Frame
   Loop` for the canonical combined sequence including render steps." _(INC-025)_
 
-- [ ] **H-5** `simulation-time.md` frame loop: Add step 3c explicitly.
+- [x] **H-5** `simulation-time.md` frame loop: Add step 3c explicitly.
 
   ```text
   3c. SaveSystem::update(realDeltaSeconds)
@@ -357,7 +357,7 @@ Each deliverable item references its INC number from the review for traceability
 
   _(INC-053)_
 
-- [ ] **H-6** `testability-architecture.md`: Add a spec entry for the `vec3` type alias.
+- [x] **H-6** `testability-architecture.md`: Add a spec entry for the `vec3` type alias.
 
   ```text
   Header: src/interfaces/vec3.h  (or src/interfaces/simulation_math.h)
@@ -374,7 +374,7 @@ Each deliverable item references its INC number from the review for traceability
   > Phase 12 audio/simulation code can compile cleanly against IAudioSystem.h.
   _(INC-054)_
 
-- [ ] **H-7** All architecture spec files: Standardize every reference to `simulation_types.h`
+- [x] **H-7** All architecture spec files: Standardize every reference to `simulation_types.h`
   to use the fully qualified form `src/interfaces/simulation_types.h`. Affected files
   include at minimum: `zoning-system.md`, `service-coverage.md`, `traffic-system.md`,
   `testability-architecture.md`, `ui-manager.md`, `audio-system.md`. _(INC-055)_
@@ -390,7 +390,7 @@ Each deliverable item references its INC number from the review for traceability
 `architecture/graphics-architecture/procedural-terrain.md`,
 `architecture/asset-standards/3d-model-standards.md`
 
-- [ ] **I-1** `texture-cache.md` §evictUnreferenced() contract: Add an explicit call-site
+- [x] **I-1** `texture-cache.md` §evictUnreferenced() contract: Add an explicit call-site
   safety rule: "`evictUnreferenced()` MUST only be called during the game-logic update
   phase — strictly before `driver->beginScene()` is called. It MUST NOT be called from
   within any Irrlicht scene callback, event handler, or any code path that may execute
@@ -407,7 +407,7 @@ Each deliverable item references its INC number from the review for traceability
   Assets for the canonical usage." _(INC-007)_
   > **PRE-APPLIED**: The `static_cast` WARNING in `scene-graph-ownership.md` has been updated to distinguish unsafe downcasts (`SMesh*` from `IMesh*`) from safe upcasts (`IAnimatedMesh*` to `IMesh*`). No file change needed.
 
-- [ ] **I-3** `model-validator-tool.md` §Phase 11d Asset Inventory table: Add the missing
+- [x] **I-3** `model-validator-tool.md` §Phase 11d Asset Inventory table: Add the missing
   vehicle row:
 
   | Category | Count | Asset names |
@@ -420,13 +420,13 @@ Each deliverable item references its INC number from the review for traceability
   (adding 5 vehicle LOD0 + 5 vehicle LOD1). The two counts are distinct: 45 = LOD0 only;
   102 = all LOD levels across all asset categories. _(INC-019)_
 
-- [ ] **I-4** `model-validator-tool.md` §Road tile category: Add a note: "Road tile geometry
+- [x] **I-4** `model-validator-tool.md` §Road tile category: Add a note: "Road tile geometry
   is **procedurally generated at runtime** via `buildTileRoadMesh()`. No road tile `.b3d`
   asset exists. The validator exercises road tiles by calling the same `buildTileRoadMesh()`
   function as `IrrlichtRenderer` — not by loading a file. This is the identical code path
   per the validator design goal." _(INC-026)_
 
-- [ ] **I-5** `irrlicht-device-lifecycle.md` §Construction Sequence table — Step 4 note:
+- [x] **I-5** `irrlicht-device-lifecycle.md` §Construction Sequence table — Step 4 note:
   Add a requirement note immediately below Step 4 ("Camera scene node + CameraController")
   in the construction sequence: "The camera's far-clip distance MUST be set to ≥ 15 000 m.
   Values below 15 000 m will hard-clip the cloud dome vertices.
@@ -443,7 +443,7 @@ Each deliverable item references its INC number from the review for traceability
   > `irrlicht-device-lifecycle.md` code block between `terrainSystem->update(dt)` and
   > `driver->beginScene(...)`. No file change needed.
 
-- [ ] **I-8** `irrlicht-device-lifecycle.md` §Construction sequence table — step 2
+- [x] **I-8** `irrlicht-device-lifecycle.md` §Construction sequence table — step 2
   (`IrrlichtUIBackend`): Add a note: "`IrrlichtUIBackend` MUST be constructed in `main.cpp`
   AFTER `RenderSystem`'s constructor returns. `RenderSystem`'s constructor calls `glewInit()`;
   `IrrlichtUIBackend` requires GLEW to be initialised before it can call any GL extension
@@ -472,14 +472,14 @@ Each deliverable item references its INC number from the review for traceability
   > **PRE-APPLIED**: `_splat` row (PNG only, terrain splat map) and associated note have been
   > added to the `2d-texture-standards.md` naming convention table. No file change needed.
 
-- [ ] **J-2** `2d-texture-standards.md` §Building atlas section: Add a "V1 implementation
+- [x] **J-2** `2d-texture-standards.md` §Building atlas section: Add a "V1 implementation
   note" box: "**V1 PNG workaround:** The production format for `buildings_atlas_d` is
   DDS DXT1 sRGB (Phase 11+). In V1, the atlas is loaded as `buildings_atlas_d.png` via
   `IVideoDriver::getTexture()` (linear, uncompressed). See `building-atlas-layout.md`
   §V1 PNG workaround for details. Mark DDS artifacts as Phase 11+ deliverables in asset
   pipeline tasks." _(INC-027)_
 
-- [ ] **J-3** `2d-texture-standards.md` §Normal map authoring checklist: Add an inline
+- [x] **J-3** `2d-texture-standards.md` §Normal map authoring checklist: Add an inline
   note after the DXGI 77 entry: "**DXGI 77 = BC3_UNORM (linear) — this is correct for
   normal maps.** Do NOT use DXGI 78 (BC3_UNORM_SRGB) for normal maps — the sRGB decode
   applied at sample time will corrupt the encoded XY direction vectors and produce
@@ -505,12 +505,12 @@ Each deliverable item references its INC number from the review for traceability
   512×512 px per cell." _(INC-049)_
   > **PRE-APPLIED**: Supersession note ("SUPERSEDED by phase-11e: effective UV island resolution is now 496×496 px per variant cell") has been added after the Phase 5 sign-off in `building-atlas-layout.md`. No file change needed.
 
-- [ ] **J-6** `texture-cache.md` §VRAM estimation formula: Add a note after the 1.33×
+- [x] **J-6** `texture-cache.md` §VRAM estimation formula: Add a note after the 1.33×
   factor explanation: "The 1.33× overhead factor applies equally to **4-level and 5-level
   mip chains** — the additional fifth mip level (e.g. 256×256 for a 4096×4096 atlas) adds
   only ~0.4% of the mip-0 footprint and is negligible for budget estimation purposes." _(INC-050)_
 
-- [ ] **J-7** `texture-cache.md` §Suffix dispatch table: Add the missing `_road_marking`
+- [x] **J-7** `texture-cache.md` §Suffix dispatch table: Add the missing `_road_marking`
   entry. `2d-texture-standards.md` already specifies sRGB for road markings (OD-6: keep sRGB).
   The dispatch table simply lacked the entry. Add:
 
@@ -611,10 +611,10 @@ guidance are in the table below — no further decisions needed.
 
 ### Exit Criteria
 
-- [ ] All 51 checklist items above are ticked (52 original − 1 removed (I-7); B-1, C-4, C-6 pre-completed).
-- [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` reports zero errors.
-- [ ] No new spec contradictions are introduced (spot-check: every edited file's cross-references remain consistent).
-- [ ] Downstream code impacts noted in E-2, E-3, H-6 are captured as open items in `INDEX.md` §Spec Contradictions Flagged (or as explicit deliverables in a subsequent phase).
+- [x] All 51 checklist items above are ticked (52 original − 1 removed (I-7); B-1, C-4, C-6 pre-completed).
+- [x] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` reports zero errors.
+- [x] No new spec contradictions are introduced (spot-check: every edited file's cross-references remain consistent).
+- [x] Downstream code impacts noted in E-2, E-3, H-6 are captured as open items in `INDEX.md` §Spec Contradictions Flagged (or as explicit deliverables in a subsequent phase).
 
 ---
 
