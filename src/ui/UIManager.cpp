@@ -2062,13 +2062,17 @@ void UIManager::onNewGame() {
     if (m_renderer && m_mapTilesX > 0 && m_mapTilesZ > 0) {
         m_renderer->setZoneOverlay(m_mapTilesX, m_mapTilesZ, {});
     }
-    m_activeTool   = ActiveTool::None;
+    m_activeTool          = ActiveTool::None;
     if (m_renderer) m_renderer->setActiveTool(static_cast<ToolMode>(m_activeTool));
-    m_hoveredTileX = -1;
-    m_hoveredTileZ = -1;
-    m_zoneAnchorX  = -1;
-    m_zoneAnchorZ  = -1;
-    m_lmbHeld      = false;
+    m_hoveredTileX        = -1;
+    m_hoveredTileZ        = -1;
+    m_zoneAnchorX         = -1;
+    m_zoneAnchorZ         = -1;
+    m_lmbHeld             = false;
+    // Reset zone sub-panel selection to default (Low density, Residential) so
+    // returning from a High-density session does not leave a 3-tile footprint.
+    m_selectedZoneType    = 0;
+    m_selectedDensityTier = 0;
     if (m_renderer) m_renderer->setTilePlacementPreview({}, 0u, {});
     if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1);
     updateSubPanelVisibility();
