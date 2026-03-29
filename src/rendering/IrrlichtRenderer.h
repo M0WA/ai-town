@@ -234,6 +234,14 @@ private:
     irr::core::vector2df            m_cloudUVOffset{0.f, 0.f};
     void*                           m_cloudShaderCbRaw{nullptr};
 
+    // --- Ground plane (horizon arch fix) ---
+    // A large solid-coloured quad positioned just below terrain level, extending
+    // to the far clip distance in all directions.  Covers the void beyond the
+    // finite terrain mesh so the terrain edge does not create a visible arch
+    // against the sky-blue clear colour.  Follows the camera XZ position each
+    // frame (same as the cloud dome).  Null under EDT_NULL (headless).
+    irr::scene::IMeshSceneNode*     m_groundPlaneNode{nullptr};
+
     // Cached camera eye position — updated every setCamera() call.
     // Returned by getListenerPosition() for use by CitySimulation's
     // sfx_intersection_tick 80 m pre-acquisition distance cull.
