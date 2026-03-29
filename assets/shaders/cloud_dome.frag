@@ -8,8 +8,8 @@
 // Irrlicht falls back to EMT_TRANSPARENT_VERTEX_ALPHA.  The per-fragment fade
 // adds a smoother, higher-quality transition on top when the shader IS active.
 //
-// Vertex alpha fade: -7° to +5° (baked into mesh, see buildCloudDomeMesh).
-// Fragment elevation fade: -7° to +5° (matches vertex fade — reinforces it).
+// Vertex alpha fade: opaque below +2°, transparent above +15° (baked into mesh).
+// Fragment elevation fade: opaque below +2°, transparent above +15° (matches vertex fade).
 // Atmospheric haze: blends cloud RGB toward sky colour near horizon.
 //
 // The elevation angle is computed in the vertex shader: the dome node tracks the
@@ -24,15 +24,15 @@ in float v_elevAngle;   // elevation angle (radians) from camera to fragment
 void main() {
     vec4 tex = texture2D(u_tex, v_texCoord);
 
-    // ---------- elevation-angle alpha fade ----------
-    // Matches the vertex alpha fade band so both reinforce each other.
-    // Below -7°: fully transparent.  Above +5°: fully opaque.
-    const float kElevAlphaEnd  = -0.12;   // ~-7° — transparent below
-    const float kElevAlphaHigh =  0.09;   // ~+5° — fully opaque above
+    // ---------- alpha fade ----------
+    // Dome is fully opaque at and below +2° (horizon) where haze makes it sky-blue.
+    // Fades to transparent above +15° so open sky is visible higher up.
+    const float kAlphaFadeStart =  0.035;  // ~+2°  — fully opaque below this
+    const float kAlphaFadeEnd   =  0.26;   // ~+15° — fully transparent above this
 
-    float ta = clamp((v_elevAngle - kElevAlphaEnd) / (kElevAlphaHigh - kElevAlphaEnd),
+    float ta = clamp((v_elevAngle - kAlphaFadeStart) / (kAlphaFadeEnd - kAlphaFadeStart),
                      0.0, 1.0);
-    float horizFade = ta * ta * (3.0 - 2.0 * ta);   // smoothstep [0, 1]
+    float horizFade = 1.0 - ta * ta * (3.0 - 2.0 * ta);  // 1 at bottom, 0 above +15°
 
     // ---------- atmospheric haze colour blend ----------
     // Near the horizon, blend cloud RGB toward the sky background colour so any
