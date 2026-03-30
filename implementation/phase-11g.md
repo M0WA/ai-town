@@ -1,6 +1,6 @@
 ## Phase 11g: Per-Resolution Bitmap Font Switching
 
-**Status: Planned**
+**Status: DONE**
 
 ### Goal
 
