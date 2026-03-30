@@ -41,15 +41,15 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
   **One label per target rule**: `gtest_discover_tests()` applies a single LABELS value to ALL tests in the target. A test binary cannot have some tests labeled `unit` and others labeled `integration`. **Unit and integration tests MUST be in separate CMake targets** (separate `add_executable` / `gtest_discover_tests` calls). Mixing test categories in one binary and applying multiple LABELS values is not supported — only the first LABELS value is applied. The one-label-per-target rule is enforced by convention; the CMake helper macro `aitown_add_tests()` (see below) documents and enforces this.
 
   **Label conventions**:
-  - `unit`: pure logic tests, no display or audio required
-  - `integration`: tests requiring EDT_NULL Irrlicht + null audio
+  - `unit`: pure logic tests — no Irrlicht device, no audio driver; all dependencies injected via mock/manual doubles
+  - `integration`: tests that instantiate a real EDT_NULL Irrlicht device or wire multiple real (non-mock) subsystems together; no display required
   - `requires-opengl`: tests requiring a real OpenGL context under xvfb-run
 
   **Special case — Phase 1 compile-check test registered under `integration` label**: The `IrrlichtUIBackendCompileCheck::IsNonAbstract` test (in `tests/integration/irrlicht_ui_backend_compile_test.cpp`) is registered under the `integration` label at Phase 1 via the `integration_tests` CMake target. This is a deliberate special case and does NOT contradict the label convention above or the statement that "Phase 3 first registers integration tests with real domain assertions." The distinction is:
 
   - The Phase 1 test contains only a `static_assert` (compile-time non-abstract check) and a runtime `TEST() { SUCCEED(); }` body. It has no domain-specific runtime assertions, requires no Irrlicht device (EDT_NULL or otherwise), and requires no real audio backend. It is a compile-only verification test that lives in `tests/integration/` to co-locate it with the future integration test suite.
   - "Phase 3 first registers integration tests" refers specifically to tests with real domain assertions — tests that exercise multiple subsystems together using EDT_NULL Irrlicht and the null audio driver, requiring the full integration test infrastructure (MockRenderer, MockAudioSystem, CitySimulation wired to both) introduced in Phase 3.
-  - The Phase 1 compile-check test satisfies the non-zero discovery requirement for `ctest -L '^integration$'`. Consequently, the integration routing verification step in `build-linux` and `coverage-linux` CAN be added in Phase 1 alongside this target — it will discover exactly 1 test and pass. The label routing verification step verifies label correctness (non-zero discovery), not phase-exclusion. Registering a compile-only test under `integration` at Phase 1 is a valid and intentional use of the label.
+  - The Phase 1 compile-check test satisfies the non-zero discovery requirement for `ctest -L '^integration$'`. Consequently, the integration routing verification step in `build-linux` and `coverage-linux` CAN be added in Phase 1 alongside this target — it will discover exactly 1 test and pass. The label routing verification step verifies label correctness (non-zero discovery), not phase-exclusion. Registering a compile-only test under `integration` at Phase 1 is a valid and intentional use of the label. Note: the original `integration_smoke_test.cpp` (Phase 0 bare `SUCCEED()` stub) has been removed; `irrlicht_ui_backend_compile_test.cpp` is the sole non-device test in `integration_tests`.
 
   See `headless-ci-testing.md` for the full `ctest` invocation commands and CI execution rules for each label.
 
@@ -114,11 +114,11 @@ tests/
 
 | CMake target | Source directory | Label | CTest filter | Notes |
 |---|---|---|---|---|
-| `simulation_tests` | `tests/simulation/` | `unit` | `-LE "integration\|requires-opengl"` | Economy, traffic, zoning, population tests; StrictMock/NiceMock; no display |
-| `terrain_tests` | `tests/terrain/` | `unit` | `-LE "integration\|requires-opengl"` | Terrain generator property tests and fixed-seed regression; TIMEOUT 300 |
+| `simulation_tests` | `tests/simulation/` | `unit` | `-LE "integration\|requires-opengl"` | Economy, traffic, zoning, population, 60-tick, comprehensive sim, save-system tests; StrictMock/NiceMock; no display |
+| `terrain_tests` | `tests/terrain/` | `unit` | `-LE "integration\|requires-opengl"` | Terrain generator property tests, fixed-seed regression, rebuild-queue deduplication; TIMEOUT 300 |
 | `ui_tests` | `tests/ui/` | `unit` | `-LE "integration\|requires-opengl"` | UIManager, NotificationManager, CameraController, QueryPanel, ModalDialog; MockUIBackend |
 | `audio_tests` | `tests/audio/` | `unit` | `-LE "integration\|requires-opengl"` | Duck state machine, occlusion smoothing, crossfade, stinger milestone tests; MockAudioSystem; no display required; `src/audio/` excluded from coverage gate |
-| `integration_tests` | `tests/integration/` | `integration` | `-L "^integration$"` | Multi-subsystem tests with EDT_NULL Irrlicht + null audio driver; no xvfb needed |
+| `integration_tests` | `tests/integration/` | `integration` | `-L "^integration$"` | Tests requiring a real EDT_NULL Irrlicht device or null audio driver; no xvfb needed |
 | `opengl_tests` | `tests/rendering/` | `requires-opengl` | `-L "^requires-opengl$"` | sRGB upload, setMesh grab/drop smoke test, shader compilation; must run under `xvfb-run` |
 
 **One CMake target per label** — do not mix labels within a target. `aitown_add_tests()` enforces this by requiring exactly one LABEL. Unit and integration tests must live in separate `add_executable` calls.
