@@ -809,6 +809,26 @@ markdown-lint:
             echo "PASS: check_4 UV-coordinate reader present"
     ```
 
+  - Phase 11g: Check #31 (bitmap font XML + PNG file existence) is added to the script. For
+    each of the six resolution pairs under `assets/fonts/` (`hud_font_720`, `hud_font_1080`,
+    `hud_font_1440`, `hud_mono_font_720`, `hud_mono_font_1080`, `hud_mono_font_1440`), the
+    check verifies that both the `.xml` descriptor and the paired `.png` glyph atlas exist on
+    disk. A missing file in any resolution pair is a CI failure. No change to the
+    `validate-assets` job definition or `all-checks-pass` wiring.
+
+    Guard step (add to `validate-assets` job after the existing check_30 guard, before
+    `Run asset validation`):
+
+    ```yaml
+        - name: Verify check_31 present in validate_assets.py
+          # check_31: bitmap font XML + PNG existence for all six font tier pairs under assets/fonts/.
+          # A missing check_31 allows absent font files to pass CI silently.
+          run: |
+            grep -q "check_31" tools/validate_assets.py || \
+              (echo "FAIL: check_31 not found in validate_assets.py — Phase 11g bitmap font file existence gate missing" && exit 1)
+            echo "PASS: check_31 present"
+    ```
+
 ### PHASE 0 FORM (validate-assets not yet introduced)
 
 ```yaml
