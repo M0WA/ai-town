@@ -67,7 +67,7 @@ non-overlapping) to keep existing placement assertions valid.
 |---|---|---|
 | `kPanelW` | 340 | Wide enough for "Desirability: 99.0" at ~11 px/char mono font |
 | `kPanelH` | 280 | 8 rows × `kLineH` (33) + 16 px top/bottom padding |
-| `kLineH` | 33 | Valid for all three resolution tiers (720p/1080p/1440p): `22×1080÷720=33.0`, `33×1080÷1080=33.0`, `44×1080÷1440=33.0` virtual px per row |
+| `kLineH` | 33 | Valid for all three resolution tiers (720p/1080p/1440p) |
 
 **Background**: `m_panelBg` uses `setElementBackground(r=18, g=18, b=36, a=210)` — dark-navy
 semi-transparent fill drawn over world geometry to make text readable at all terrain colors.
