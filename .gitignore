@@ -5,6 +5,7 @@
 .fetchcontent_cache/
 /build*/
 /coverage*
+/*.gcov
 __pycache__
 # UI sprite sheet intermediates — authoring artifact only, never committed
 assets/textures/ui/hud_sprites_ui.dds
