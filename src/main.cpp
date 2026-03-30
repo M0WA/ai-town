@@ -93,10 +93,10 @@ int main(int argc, char** argv) {
     if (cameraNode) {
 #ifndef NDEBUG
         if (cameraNode->getAnimators().size() > 0) {
-            fprintf(stderr,
-                "[main] WARNING: unexpected animators on addCameraSceneNode() result "
-                "— removing %zu animator(s)\n",
-                static_cast<size_t>(cameraNode->getAnimators().size()));
+            device->getLogger()->log(
+                "[main] WARNING: unexpected animators on addCameraSceneNode() result — "
+                "removing animator(s)",
+                irr::ELL_WARNING);
         }
 #endif
         while (cameraNode->getAnimators().size() > 0) {
@@ -163,6 +163,8 @@ int main(int argc, char** argv) {
 
     // Late-bind UIManager to renderer (breaks circular construction dependency).
     renderer.setUIManager(&uiManager);
+    // Phase 11l: supply Irrlicht logger so KeyBindings::load() routes warnings through ILogger.
+    uiManager.setLogger(device->getLogger());
 
     // Terrain is generated on-demand when the player starts or loads a game
     // (consumeNewGameRequest / consumeLoadGameRequest polling blocks below).
@@ -324,8 +326,7 @@ int main(int argc, char** argv) {
         try {
             citySimulation.tick(realDeltaSeconds);
         } catch (const std::exception& e) {
-            fprintf(stderr, "[main] Error in citySimulation.tick (continuing): %s\n",
-                    e.what());
+            device->getLogger()->log(e.what(), irr::ELL_ERROR);
         }
 
         // Phase 11d Deliverable 3a: per-frame vehicle agent sync loop.
@@ -395,7 +396,7 @@ int main(int argc, char** argv) {
                     try {
                         audioPair = audioSystem.acquireVehicleEnginePair(a.zone);
                     } catch (const std::exception& e) {
-                        fprintf(stderr, "[main] Audio error (audio disabled): %s\n", e.what());
+                        device->getLogger()->log(e.what(), irr::ELL_ERROR);
                     }
                     AgentAudioState aud;
                     aud.idleIdx = audioPair.first;
@@ -448,8 +449,7 @@ int main(int argc, char** argv) {
             // AL error thrown by alCheckError_real inside a sim/audio call
             // (e.g. playPositionalSound on SFX_EARTHWORKS after device loss).
             // Log and continue — audio is already degraded.
-            fprintf(stderr, "[main] Error in uiManager.update (continuing): %s\n",
-                    e.what());
+            device->getLogger()->log(e.what(), irr::ELL_ERROR);
         }
 
         // Step 3c: SaveSystem::update(realDeltaSeconds) — advance auto-save timer.
@@ -485,7 +485,7 @@ int main(int argc, char** argv) {
                     audioSystem.syncListenerToCamera(loadCam);
                     audioSystem.update(loadDt2);
                 } catch (const std::exception& e) {
-                    fprintf(stderr, "[main] Audio error during new-game loading: %s\n", e.what());
+                    device->getLogger()->log(e.what(), irr::ELL_ERROR);
                 }
                 renderer.beginFrame();
                 renderer.drawFullscreenTexture("assets/textures/ui/loading_screen.png");
@@ -545,7 +545,7 @@ int main(int argc, char** argv) {
                         audioSystem.syncListenerToCamera(loadCamL);
                         audioSystem.update(loadDtL);
                     } catch (const std::exception& e) {
-                        fprintf(stderr, "[main] Audio error during load-game loading: %s\n", e.what());
+                        device->getLogger()->log(e.what(), irr::ELL_ERROR);
                     }
                     renderer.beginFrame();
                     renderer.drawFullscreenTexture("assets/textures/ui/loading_screen.png");
@@ -616,7 +616,7 @@ int main(int argc, char** argv) {
         } catch (const std::exception& e) {
             // AL backend failure (e.g. broken pipe) — audio degraded to silent.
             // The m_deviceLost flag in AudioSystem will suppress further AL calls.
-            fprintf(stderr, "[main] Audio error (audio disabled): %s\n", e.what());
+            device->getLogger()->log(e.what(), irr::ELL_ERROR);
         }
 
         // Phase 10b: update renderer (cloud plane UV scrolling).
