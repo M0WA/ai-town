@@ -26,7 +26,7 @@ deferred pass — at startup (not per-frame).
 
 #### 1. Spec Update — `architecture/ui-ux/resolution-ui-scaling.md`
 
-- [ ] Add a **Bitmap Font Tier Selection** section documenting the three resolution tiers,
+- [x] Add a **Bitmap Font Tier Selection** section documenting the three resolution tiers,
   physical font sizes, and the selection rule:
 
   ```text
@@ -39,7 +39,7 @@ deferred pass — at startup (not per-frame).
   (1080 px) uses the 1080p tier; 1440 p (1440 px) and 4 K (2160 px) use the 1440p tier.
   (`gamedesign-ux`)
 
-- [ ] Document that `kLineH = 33` virtual pixels is invariant across all tiers. Place the full
+- [x] Document that `kLineH = 33` virtual pixels is invariant across all tiers. Place the full
   math proof in the **new Bitmap Font Tier Selection section in
   `architecture/ui-ux/resolution-ui-scaling.md`** only:
   - `22 × 1080 / 720 = 33.0`
@@ -51,18 +51,18 @@ deferred pass — at startup (not per-frame).
   resolution tiers (720p/1080p/1440p)" (see Deliverable 2). No layout constant changes are
   required in any panel. (`gamedesign-ux`)
 
-- [ ] Document that font tier selection occurs once at `IrrlichtUIBackend` construction
+- [x] Document that font tier selection occurs once at `IrrlichtUIBackend` construction
   (before any UI element is created) and is NOT dynamic — resolution changes during a
   session are not supported in V1. (`gamedesign-ux`, `graphics-dev-irrlicht`)
 
-- [ ] Update the existing **Bitmap Font Physical Size** section in
+- [x] Update the existing **Bitmap Font Physical Size** section in
   `architecture/ui-ux/resolution-ui-scaling.md` to replace **all occurrences** of
   `tools/generate_hud_font.py` with `tools/generate_bitmap_fonts.py`, and note that
   the new script now generates all six tier-specific font pairs (22 px, 33 px, 44 px for
   both proportional and mono typefaces) rather than the original single-size pair.
   (`gamedesign-ux`)
 
-- [ ] Add a **Font Atlas Exception** note to `architecture/asset-standards/2d-texture-standards.md`
+- [x] Add a **Font Atlas Exception** note to `architecture/asset-standards/2d-texture-standards.md`
   **immediately before the `## DDS Authoring Pipeline` section heading**, stating that
   Irrlicht's `CGUIFont` bitmap font loader reads PNG natively (not via
   `IVideoDriver::getTexture()`) and font atlas PNGs are exempt from the DDS-only runtime
@@ -71,18 +71,18 @@ deferred pass — at startup (not per-frame).
 
 #### 2. Spec Update — `architecture/ui-ux/query-inspector-panel.md`
 
-- [ ] **Remove the entire "Font scaling note" paragraph** (currently lines 85–89 of
+- [x] **Remove the entire "Font scaling note" paragraph** (currently lines 85–89 of
   `query-inspector-panel.md`) and replace it with a single sentence: "For per-resolution
   font tier selection (22 px / 33 px / 44 px depending on screen height), see the Bitmap
   Font Tier Selection section in `architecture/ui-ux/resolution-ui-scaling.md`."
   (`gamedesign-ux`)
 
-- [ ] Update the Panel Layout Constants table to clarify that `kLineH = 33` is valid for all
+- [x] Update the Panel Layout Constants table to clarify that `kLineH = 33` is valid for all
   three resolution tiers (not only 720 p as currently noted). (`gamedesign-ux`)
 
 #### 3. Spec Update — `architecture/ui-ux/hud-layout.md`
 
-- [ ] Add a **Font Tier Assets** subsection to the existing **Font Loading** section in
+- [x] Add a **Font Tier Assets** subsection to the existing **Font Loading** section in
   `hud-layout.md` documenting the six asset paths:
   - `assets/fonts/hud_font_720.xml` + `assets/fonts/hud_font_720.png` (22 px)
   - `assets/fonts/hud_font_1080.xml` + `assets/fonts/hud_font_1080.png` (33 px)
@@ -96,14 +96,14 @@ deferred pass — at startup (not per-frame).
   with any hard-coded references in Phase 8 code that cannot be updated in this phase.
   (`gamedesign-ux`)
 
-- [ ] Update the **Font Loading** Implementation paragraph in `hud-layout.md` to replace
+- [x] Update the **Font Loading** Implementation paragraph in `hud-layout.md` to replace
   `m_monoFont` with `m_hudMonoFont` and update the constructor load description to reference
   the tier-specific font paths (`hud_mono_font_720.xml` etc.) rather than the bare
   `hud_mono_font.xml` name. (`gamedesign-ux`)
 
 #### 4. Font Asset Generation — `tools/generate_bitmap_fonts.py`
 
-- [ ] Author `tools/generate_bitmap_fonts.py` that generates Irrlicht-compatible bitmap font
+- [x] Author `tools/generate_bitmap_fonts.py` that generates Irrlicht-compatible bitmap font
   XML + PNG pairs for each tier. The script uses Pillow (`PIL`) to render a TTF source font
   (DejaVu Sans and DejaVu Sans Mono from `assets/fonts/source/`) at the target physical
   pixel cell heights (22, 33, 44 px) and writes:
@@ -123,7 +123,7 @@ deferred pass — at startup (not per-frame).
   > are not game textures and are exempt from the project's DDS-only runtime texture rule.
   > No DDS conversion is required.
 
-- [ ] The script accepts `--cell-heights 22,33,44` and `--output-dir assets/fonts` as
+- [x] The script accepts `--cell-heights 22,33,44` and `--output-dir assets/fonts` as
   arguments, with sensible defaults. Running `python3 tools/generate_bitmap_fonts.py`
   without arguments regenerates all six pairs. The script requires Python 3 with Pillow
   (`pip install Pillow`). Add `python3-pil` (or `python3-pillow`) to
@@ -131,13 +131,13 @@ deferred pass — at startup (not per-frame).
   dependency installation. The font generation script is a developer tool only — CI uses
   the pre-generated committed PNG files and does not run the script. (`graphics-dev-irrlicht`)
 
-- [ ] Source TTF files are committed under `assets/fonts/source/`:
+- [x] Source TTF files are committed under `assets/fonts/source/`:
   - `DejaVuSans.ttf` (SIL OFL 1.1 — compatible with the project's open-source posture)
   - `DejaVuSansMono.ttf`
 
   Both files are ≤700 KB; total source asset addition ≤1.4 MB. (`graphics-artist-2d-texture`)
 
-- [ ] Generated PNG files use RGBA8 (Pillow `RGBA` mode) with white glyphs on a transparent
+- [x] Generated PNG files use RGBA8 (Pillow `RGBA` mode) with white glyphs on a transparent
   background, compatible with Irrlicht's `EBF_MIPMAP` font loading path. Font atlas PNGs
   are alpha-coverage masks (white glyphs on transparent background) and do NOT require
   embedded sRGB ICC profiles; use Pillow's default PNG output without `icc_profile`
@@ -145,7 +145,7 @@ deferred pass — at startup (not per-frame).
 
 #### 5. `IrrlichtUIBackend` — Font Tier Selection
 
-- [ ] Add a `FontTier` enum in `src/ui/IrrlichtUIBackend.h`:
+- [x] Add a `FontTier` enum in `src/ui/IrrlichtUIBackend.h`:
 
   ```cpp
   enum class FontTier { k720p, k1080p, k1440p };
@@ -159,7 +159,7 @@ deferred pass — at startup (not per-frame).
 
   (`graphics-dev-irrlicht`)
 
-- [ ] In `IrrlichtUIBackend::IrrlichtUIBackend(...)` constructor, call `selectFontTier` with
+- [x] In `IrrlichtUIBackend::IrrlichtUIBackend(...)` constructor, call `selectFontTier` with
   `getScreenHeight()` and load the matching font pair via
   `m_env->getFont("assets/fonts/hud_font_<tier>.xml")` and
   `m_env->getFont("assets/fonts/hud_mono_font_<tier>.xml")`. Store as
@@ -171,21 +171,21 @@ deferred pass — at startup (not per-frame).
   > convention. All existing code that references `m_monoFont` must be updated to
   > `m_hudMonoFont` as part of this deliverable.
 
-- [ ] Apply `m_hudFont` as the environment default font via
+- [x] Apply `m_hudFont` as the environment default font via
   `m_env->getSkin()->setFont(m_hudFont)` immediately after loading, so all
   subsequently created `IGUIStaticText` elements inherit the correct tier font without
   per-element font assignment. (`graphics-dev-irrlicht`)
 
-- [ ] `m_hudMonoFont` is applied per-element via the existing `setElementMonoFont(handle)`
+- [x] `m_hudMonoFont` is applied per-element via the existing `setElementMonoFont(handle)`
   `IUIBackend` method; no new interface methods are required. (`graphics-dev-irrlicht`)
 
-- [ ] EDT_NULL fallback: when the device driver is `EDT_NULL` (headless CI), skip font loading
+- [x] EDT_NULL fallback: when the device driver is `EDT_NULL` (headless CI), skip font loading
   — `m_hudFont` and `m_hudMonoFont` remain `nullptr`. This preserves existing headless
   test behaviour. (`graphics-dev-irrlicht`)
 
 #### 6. CI Asset Verification — `tools/validate_assets.py` Check #31
 
-- [ ] Add **Check #31** to `tools/validate_assets.py`: verify all six font XML files and their
+- [x] Add **Check #31** to `tools/validate_assets.py`: verify all six font XML files and their
   paired PNG files exist under `assets/fonts/`:
   - `hud_font_720.xml`, `hud_font_720.png`
   - `hud_font_1080.xml`, `hud_font_1080.png`
@@ -196,14 +196,14 @@ deferred pass — at startup (not per-frame).
 
   The check exits non-zero if any file is missing. (`cicd-dev-github`)
 
-- [ ] Add a `Verify check_31 present` guard step to the `validate-assets` job in
+- [x] Add a `Verify check_31 present` guard step to the `validate-assets` job in
   `.github/workflows/_validate-assets.yml`: grep `tools/validate_assets.py` for the `check_31` function
   symbol; exit 1 with a descriptive error message if not found. Follow the same pattern as
   the Phase 11d guard steps. (`cicd-dev-github`)
 
 #### 7. Unit Tests — `FontTierSelectionTest` and EDT_NULL Constructor Test
 
-- [ ] Add `tests/ui/font_tier_test.cpp` containing `FontTierSelectionTest` with at least the
+- [x] Add `tests/ui/font_tier_test.cpp` containing `FontTierSelectionTest` with at least the
   following cases:
 
   | Test name | Input `screenHeight` | Expected `FontTier` |
@@ -222,7 +222,7 @@ deferred pass — at startup (not per-frame).
   All 10 tests call `IrrlichtUIBackend::selectFontTier(screenHeight)` directly (static method,
   no device required; unit label). (`test-dev-cpp`)
 
-- [ ] Add a test case `IrrlichtUIBackend_EDT_NULL_ConstructorSkipsFontLoadingGracefully` in
+- [x] Add a test case `IrrlichtUIBackend_EDT_NULL_ConstructorSkipsFontLoadingGracefully` in
   `font_tier_test.cpp` (or a separate EDT_NULL test file) to verify constructor behavior
   on headless devices:
   - Construct `IrrlichtUIBackend` with an `EDT_NULL` device (headless, no font loading required).
@@ -233,7 +233,7 @@ deferred pass — at startup (not per-frame).
     is covered by the existing `requires-opengl` integration test suite (Phase 8 or later;
     no new test required here). (`test-dev-cpp`)
 
-- [ ] Add `font_tier_test.cpp` to the `ui_tests` CMake target. (`test-dev-cpp`)
+- [x] Add `font_tier_test.cpp` to the `ui_tests` CMake target. (`test-dev-cpp`)
 
 ---
 
