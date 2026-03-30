@@ -110,6 +110,15 @@ jobs:
           grep -q "check_30" tools/validate_assets.py || (echo "FAIL: check_30 not found in validate_assets.py — Phase 11d billboard atlas format/mip verification gate missing" && exit 1)
           echo "PASS: check_30 present"
 
+      - name: Verify check_31 present in validate_assets.py
+        # check_31: all six tier-specific bitmap font XML + PNG pairs (hud_font_{720,1080,1440}.xml/png,
+        # hud_mono_font_{720,1080,1440}.xml/png) must exist under assets/fonts/.
+        # A missing check_31 allows the font generation step to be skipped, causing
+        # IrrlichtUIBackend to fall back to the 8px built-in font at all resolutions.
+        run: |
+          grep -q "check_31" tools/validate_assets.py || (echo "FAIL: check_31 not found in validate_assets.py — Phase 11g bitmap font tier assets gate missing" && exit 1)
+          echo "PASS: check_31 present"
+
       - name: Verify hud_sprites_ui.dds not git-tracked
         # The DDS intermediate is an authoring artifact and must never be committed.
         # .gitignore has the entry; git rm --cached was run in Phase 10.
