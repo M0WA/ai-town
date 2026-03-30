@@ -17,6 +17,7 @@ class ICitySimulation;
 class IRenderer;
 class ITerrainQuery;
 class ISaveSystem;
+namespace irr { class ILogger; }
 
 // INCLUDE PROHIBITION: Do NOT replace this forward declaration with
 // #include "src/platform/input_event.h". The platform header must not
@@ -207,6 +208,11 @@ public:
     // Called from main.cpp after SaveSystem is constructed.
     void setSaveSystem(ISaveSystem* saveSystem);
 
+    // Phase 11l: Supply the Irrlicht logger so KeyBindings::load() can route
+    // warnings through irr::ILogger* instead of falling back to stderr.
+    // Called from main.cpp after device creation.  nullptr is safe (no-op logging).
+    void setLogger(irr::ILogger* logger);
+
     // Phase 11: Update Load Game button enabled state in MainMenuPanel.
     // When available=false (default): button grayed, tooltip "No saves found."
     // When available=true: button enabled.
@@ -272,6 +278,9 @@ private:
     // --- Phase 9b: late-bound renderer and terrain query (set via setters after construction) ---
     IRenderer*    m_renderer{nullptr};
     ITerrainQuery* m_terrain{nullptr};
+
+    // Phase 11l: Irrlicht logger — non-owning, may be nullptr (tests pass nullptr).
+    irr::ILogger* m_logger{nullptr};
 
     // --- Phase 9b: active tool state ---
     // Default: None (camera-only mode, same as Phase 8 initial state).

@@ -8,7 +8,6 @@
 #include "RenderSystem.h"
 
 #include <cstdlib>   // std::abort
-#include <cstdio>    // fprintf
 
 using namespace irr;
 using namespace irr::video;
@@ -60,8 +59,10 @@ RenderSystem::RenderSystem() {
     if (glewResult == GLEW_OK || glewResult == GLEW_ERROR_NO_GL_VERSION) {
         // SUCCESS PATH — GLEW_ERROR_NO_GL_VERSION is non-fatal: log and continue.
         if (glewResult == GLEW_ERROR_NO_GL_VERSION) {
-            fprintf(stderr, "[RenderSystem] WARNING: glewInit returned GLEW_ERROR_NO_GL_VERSION — "
-                    "continuing without version string (non-fatal).\n");
+            m_device->getLogger()->log(
+                "[RenderSystem] WARNING: glewInit returned GLEW_ERROR_NO_GL_VERSION — "
+                "continuing without version string (non-fatal).",
+                irr::ELL_WARNING);
         }
 
         // Query GL_MAX_TEXTURE_SIZE and store (Phase 1 mandatory — same step as glewInit SUCCESS)
@@ -76,8 +77,10 @@ RenderSystem::RenderSystem() {
         if (glewIsExtensionSupported("GL_EXT_texture_filter_anisotropic")) {
             glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &m_maxAnisotropy);
         } else {
-            fprintf(stderr, "[RenderSystem] WARNING: GL_EXT_texture_filter_anisotropic not supported — "
-                    "anisotropy defaulting to 1.0f.\n");
+            m_device->getLogger()->log(
+                "[RenderSystem] WARNING: GL_EXT_texture_filter_anisotropic not supported — "
+                "anisotropy defaulting to 1.0f.",
+                irr::ELL_WARNING);
             m_maxAnisotropy = 1.0f;
         }
 
@@ -85,8 +88,9 @@ RenderSystem::RenderSystem() {
         // FAILURE PATH — any other glewResult value
 #ifndef NDEBUG
         // DEBUG builds: abort immediately (hard assert)
-        fprintf(stderr, "[RenderSystem] FATAL (DEBUG): glewInit failed: %s\n",
-                glewGetErrorString(glewResult));
+        m_device->getLogger()->log(
+            "[RenderSystem] FATAL (DEBUG): glewInit failed.",
+            irr::ELL_ERROR);
         std::abort();
 #else
         // RELEASE builds: fall back to EDT_NULL device
@@ -106,10 +110,11 @@ RenderSystem::RenderSystem() {
         m_srgbTextureSupported = false;
         m_maxAnisotropy        = 1.0f;
 
-        // (4) Display user-facing error notification
-        fprintf(stderr, "[RenderSystem] ERROR: GLEW initialization failed in RELEASE build. "
-                "Falling back to EDT_NULL (headless mode). glewInit error: %s\n",
-                glewGetErrorString(glewResult));
+        // (4) Display user-facing error notification via the EDT_NULL device's logger
+        m_device->getLogger()->log(
+            "[RenderSystem] ERROR: GLEW initialization failed in RELEASE build. "
+            "Falling back to EDT_NULL (headless mode).",
+            irr::ELL_ERROR);
 
         // (5) Return — SUCCESS-path GL query block is skipped entirely in RELEASE fallback
         return;
@@ -127,7 +132,11 @@ int RenderSystem::loadShader(
 {
     irr::video::IVideoDriver* driver = m_device ? m_device->getVideoDriver() : nullptr;
     if (!driver) {
-        fprintf(stderr, "[RenderSystem] loadShader: no video driver available.\n");
+        if (m_device) {
+            m_device->getLogger()->log(
+                "[RenderSystem] loadShader: no video driver available.",
+                irr::ELL_WARNING);
+        }
         return -1;
     }
 
@@ -137,13 +146,17 @@ int RenderSystem::loadShader(
         // Non-EDT_NULL returning null is a fatal configuration error in debug builds.
 #ifndef NDEBUG
         if (driver->getDriverType() != irr::video::EDT_NULL) {
-            fprintf(stderr, "[RenderSystem] FATAL (DEBUG): getGPUProgrammingServices() returned null "
-                    "on a non-EDT_NULL driver — OpenGL GPU programming services missing.\n");
+            m_device->getLogger()->log(
+                "[RenderSystem] FATAL (DEBUG): getGPUProgrammingServices() returned null "
+                "on a non-EDT_NULL driver — OpenGL GPU programming services missing.",
+                irr::ELL_ERROR);
             std::abort();
         }
 #endif
-        fprintf(stderr, "[RenderSystem] loadShader: getGPUProgrammingServices() returned null "
-                "(EDT_NULL or unsupported driver) — shader loading skipped.\n");
+        m_device->getLogger()->log(
+            "[RenderSystem] loadShader: getGPUProgrammingServices() returned null "
+            "(EDT_NULL or unsupported driver) — shader loading skipped.",
+            irr::ELL_WARNING);
         return -1;
     }
 
