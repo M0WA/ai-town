@@ -438,7 +438,7 @@ protected:
     // Creates a temporary file path for testing writeToFile/load
     std::string makeTempPath() {
         char buf[256];
-        std::snprintf(buf, sizeof(buf), "/tmp/aitown_kb_test_%p.json", (void*)this);
+        snprintf(buf, sizeof(buf), "/tmp/aitown_kb_test_%p.json", (void*)this);
         return std::string(buf);
     }
 
