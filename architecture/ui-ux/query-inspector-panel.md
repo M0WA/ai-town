@@ -67,7 +67,7 @@ non-overlapping) to keep existing placement assertions valid.
 |---|---|---|
 | `kPanelW` | 340 | Wide enough for "Desirability: 99.0" at ~11 px/char mono font |
 | `kPanelH` | 280 | 8 rows × `kLineH` (33) + 16 px top/bottom padding |
-| `kLineH` | 33 | At 720 p: `ceil(22 px font × 1080 / 720) = 33` virtual px per row |
+| `kLineH` | 33 | Valid for all three resolution tiers (720p/1080p/1440p): `22×1080÷720=33.0`, `33×1080÷1080=33.0`, `44×1080÷1440=33.0` virtual px per row |
 
 **Background**: `m_panelBg` uses `setElementBackground(r=18, g=18, b=36, a=210)` — dark-navy
 semi-transparent fill drawn over world geometry to make text readable at all terrain colors.
@@ -82,11 +82,8 @@ Pwr:X%  Wtr:X%
 
 Each line is ≤ 20 mono characters, fitting within `kPanelW=340` at all supported resolutions.
 
-**Font scaling note**: The bitmap fonts (`hud_font.xml`, `hud_mono_font.xml`) are fixed at 22 px
-physical height and do not scale with screen resolution. The virtual layout constants above are
-sized so that a 720 p display (the minimum supported resolution) produces non-overlapping rows.
-At higher resolutions rows will be slightly more spaced, which is acceptable. Dynamic per-frame
-font-size switching is deferred to a future typography pass.
+For per-resolution font tier selection (22 px / 33 px / 44 px depending on screen height), see
+the Bitmap Font Tier Selection section in `architecture/ui-ux/resolution-ui-scaling.md`.
 
 - **Fields per entity type**:
   - Zone tile: demand score, desirability score, tax yield/month, zone type + density, demand pressure % (unmet demand percentage per zone type from the `demand_pressure_pct` field of `QueryResult`)

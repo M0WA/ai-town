@@ -53,7 +53,7 @@ deferred pass — at startup (not per-frame).
 
 - [ ] Document that font tier selection occurs once at `IrrlichtUIBackend` construction
   (before any UI element is created) and is NOT dynamic — resolution changes during a
-  session are not supported in V1. (`graphics-dev-irrlicht`)
+  session are not supported in V1. (`gamedesign-ux`, `graphics-dev-irrlicht`)
 
 - [ ] Update the existing **Bitmap Font Physical Size** section in
   `architecture/ui-ux/resolution-ui-scaling.md` to replace **all occurrences** of
@@ -96,6 +96,11 @@ deferred pass — at startup (not per-frame).
   with any hard-coded references in Phase 8 code that cannot be updated in this phase.
   (`gamedesign-ux`)
 
+- [ ] Update the **Font Loading** Implementation paragraph in `hud-layout.md` to replace
+  `m_monoFont` with `m_hudMonoFont` and update the constructor load description to reference
+  the tier-specific font paths (`hud_mono_font_720.xml` etc.) rather than the bare
+  `hud_mono_font.xml` name. (`gamedesign-ux`)
+
 #### 4. Font Asset Generation — `tools/generate_bitmap_fonts.py`
 
 - [ ] Author `tools/generate_bitmap_fonts.py` that generates Irrlicht-compatible bitmap font
@@ -120,7 +125,11 @@ deferred pass — at startup (not per-frame).
 
 - [ ] The script accepts `--cell-heights 22,33,44` and `--output-dir assets/fonts` as
   arguments, with sensible defaults. Running `python3 tools/generate_bitmap_fonts.py`
-  without arguments regenerates all six pairs. (`graphics-dev-irrlicht`)
+  without arguments regenerates all six pairs. The script requires Python 3 with Pillow
+  (`pip install Pillow`). Add `python3-pil` (or `python3-pillow`) to
+  `.devcontainer/Dockerfile` so all contributors can run the script without manual
+  dependency installation. The font generation script is a developer tool only — CI uses
+  the pre-generated committed PNG files and does not run the script. (`graphics-dev-irrlicht`)
 
 - [ ] Source TTF files are committed under `assets/fonts/source/`:
   - `DejaVuSans.ttf` (SIL OFL 1.1 — compatible with the project's open-source posture)
@@ -240,6 +249,9 @@ deferred pass — at startup (not per-frame).
 - [ ] All 10 `FontTierSelectionTest` cases pass.
 - [ ] `architecture/asset-standards/2d-texture-standards.md` Font Atlas Exception note present
   immediately before the `## DDS Authoring Pipeline` section heading.
+- [ ] `architecture/ui-ux/hud-layout.md` Font Loading Implementation paragraph updated to
+  reference `m_hudMonoFont` (renamed from `m_monoFont` in Phase 11g) and tier-specific font
+  paths.
 - [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` exits
   zero.
 
