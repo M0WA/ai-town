@@ -9,6 +9,8 @@ Phase 10: check #21 added — zone loop silence-floor gate (leading/trailing 441
           be committed; .gitignore entry + git rm --cached enforce this at the repo level).
 Phase 10b: check #24 added — clouds.png must exist at assets/textures/sky/, be 1024×1024, and RGBA
            (4 channels). No-op when the file does not yet exist.
+Phase 11g: check #31 added — all six tier-specific bitmap font XML + PNG pairs must exist under
+           assets/fonts/ (hud_font_{720,1080,1440}.xml/png, hud_mono_font_{720,1080,1440}.xml/png).
 """
 import glob
 import json
@@ -2901,6 +2903,28 @@ def check_30_billboard_atlas_format(assets_dir):
     return errors
 
 
+def check_31_bitmap_font_assets(assets_dir):
+    """Check #31: verify all six tier-specific bitmap font XML + PNG pairs exist."""
+    errors = []
+    fonts_dir = os.path.join(assets_dir, 'fonts')
+    required_files = [
+        'hud_font_720.xml',  'hud_font_720.png',
+        'hud_font_1080.xml', 'hud_font_1080.png',
+        'hud_font_1440.xml', 'hud_font_1440.png',
+        'hud_mono_font_720.xml',  'hud_mono_font_720.png',
+        'hud_mono_font_1080.xml', 'hud_mono_font_1080.png',
+        'hud_mono_font_1440.xml', 'hud_mono_font_1440.png',
+    ]
+    for filename in required_files:
+        path = os.path.join(fonts_dir, filename)
+        if not os.path.isfile(path):
+            errors.append(
+                f"check_31 FAIL: assets/fonts/{filename} missing — "
+                f"run python3 tools/generate_bitmap_fonts.py to regenerate."
+            )
+    return errors
+
+
 def run_all_checks():
     """Run all asset validation checks. Returns the total number of errors."""
     # Resolve the assets directory relative to this script's location.
@@ -2924,6 +2948,7 @@ def run_all_checks():
         ("Check #28 (building atlas color variance)", check_28_building_atlas_color_variance),
         ("Check #29 (normal map non-flat)", check_29_normal_map_non_flat),
         ("Check #30 (billboard atlas format)", check_30_billboard_atlas_format),
+        ("Check #31 (bitmap font tier assets)", check_31_bitmap_font_assets),
     ]
 
     for check_name, check_fn in checks:
