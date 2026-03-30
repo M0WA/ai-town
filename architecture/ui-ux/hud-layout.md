@@ -559,17 +559,37 @@ in compact panels (Query/Inspector, Finances Panel) where proportional glyphs ar
 allow more characters per line. The two-face approach allows each font to be optimised for its
 role. Both font files must be delivered as Phase 10 assets.
 
-**Implementation**: `IrrlichtUIBackend` loads `hud_mono_font.xml` in its constructor and stores
-the result as `irr::gui::IGUIFont* m_monoFont{nullptr}`. Panel code applies the monospace font
-by calling `m_backend->setElementMonoFont(handle)` immediately after each `addStaticText()` call
+### Font Tier Assets
+
+Three resolution tiers each have a proportional and a monospace font pair (six pairs total):
+
+| File | Physical cell height | Tier |
+|---|---|---|
+| `assets/fonts/hud_font_720.xml` + `hud_font_720.png` | 22 px | 720p |
+| `assets/fonts/hud_font_1080.xml` + `hud_font_1080.png` | 33 px | 1080p |
+| `assets/fonts/hud_font_1440.xml` + `hud_font_1440.png` | 44 px | 1440p |
+| `assets/fonts/hud_mono_font_720.xml` + `hud_mono_font_720.png` | 22 px | 720p |
+| `assets/fonts/hud_mono_font_1080.xml` + `hud_mono_font_1080.png` | 33 px | 1080p |
+| `assets/fonts/hud_mono_font_1440.xml` + `hud_mono_font_1440.png` | 44 px | 1440p |
+
+The existing `assets/fonts/hud_font.xml` and `assets/fonts/hud_mono_font.xml` are retained as
+the 720p-tier copies (symlinks or duplicates) for backwards compatibility with any hard-coded
+references in Phase 8 code. All font atlas PNGs are exempt from the DDS-only runtime texture
+rule — see `architecture/asset-standards/2d-texture-standards.md` § Font Atlas Exception.
+
+**Implementation**: `IrrlichtUIBackend` loads the tier-specific monospace font (e.g.
+`hud_mono_font_720.xml` / `hud_mono_font_1080.xml` / `hud_mono_font_1440.xml`) in its
+constructor and stores the result as `irr::gui::IGUIFont* m_hudMonoFont{nullptr}` (renamed
+from `m_monoFont` in Phase 11g). Panel code applies the monospace font by calling
+`m_backend->setElementMonoFont(handle)` immediately after each `addStaticText()` call
 that creates a numeric element. `setElementMonoFont()` is method 19 on `IUIBackend`
 (see `architecture/ui-ux/ui-manager.md` §IUIBackend Method Contract). `IrrlichtUIBackend`
-implements it by calling `IGUIStaticText::setOverrideFont(m_monoFont)` on the looked-up element;
-when `m_monoFont` is null (font file absent — graceful fallback), the call is a no-op and the
-element keeps the environment default font. **Panel code MUST NOT cast `m_backend` to
-`IrrlichtUIBackend*` to access `m_monoFont` directly** — the `static_cast` pattern breaks
-unit tests that inject `MockUIBackend` (which is not an `IrrlichtUIBackend`) and produces
-undefined behavior. Use `m_backend->setElementMonoFont(handle)` exclusively.
+implements it by calling `IGUIStaticText::setOverrideFont(m_hudMonoFont)` on the looked-up
+element; when `m_hudMonoFont` is null (font file absent — graceful fallback), the call is a
+no-op and the element keeps the environment default font. **Panel code MUST NOT cast
+`m_backend` to `IrrlichtUIBackend*` to access `m_hudMonoFont` directly** — the `static_cast`
+pattern breaks unit tests that inject `MockUIBackend` (which is not an `IrrlichtUIBackend`)
+and produces undefined behavior. Use `m_backend->setElementMonoFont(handle)` exclusively.
 
 Numeric elements that MUST call `m_backend->setElementMonoFont(handle)` after `addStaticText()`:
 
