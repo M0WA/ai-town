@@ -41,6 +41,7 @@
 #include "src/interfaces/simulation_types.h"  // ZoneType, DensityTier, ServiceBuildingType
 #include "src/interfaces/ISaveSystem.h"        // ISaveSystem — Phase 11c interface abstraction
 #include "src/simulation/SaveSystem.h"         // SaveResult/LoadResult types used in save wiring
+#include <irrlicht.h>                          // irr::ILogger — passed to KeyBindings::load()
 
 #include <algorithm>
 #include <string>
@@ -2026,6 +2027,10 @@ void UIManager::setTerrainQuery(ITerrainQuery* terrain) {
     m_terrain = terrain;
 }
 
+void UIManager::setLogger(irr::ILogger* logger) {
+    m_logger = logger;
+}
+
 void UIManager::setMapDimensions(int mapTilesX, int mapTilesZ) {
     // Re-call safety: if dimensions change AND we already had valid dimensions set,
     // clear stale overlay keys from the previous map so old indices cannot corrupt
@@ -2184,7 +2189,7 @@ void UIManager::loadKeybindings() {
     fclose(f);
 
     // File exists: parse and apply overrides.
-    m_keyBindings.load(path);
+    m_keyBindings.load(path, m_logger);
 
     // Propagate loaded bindings to SettingsPanel so Controls tab reopens correctly.
     if (m_settings) m_settings->setCurrentBindings(m_keyBindings);
