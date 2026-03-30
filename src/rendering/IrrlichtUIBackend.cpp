@@ -214,87 +214,55 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
     m_spriteTexture = m_driver->getTexture("assets/textures/ui/hud_sprites_ui.png");
     m_spriteTextureReady = (m_spriteTexture != nullptr);
 
-    // --- Load custom bitmap font for the GUI skin ---
+    // --- Font tier selection and loading ---
     //
-    // The Irrlicht built-in font is 8×13 px — unreadably small at 1280×720 and
-    // above. All addStaticText() and addButton() calls inherit the skin default
-    // font, so setting it once here applies to every GUI element in the game.
-    //
-    // Font format: Irrlicht XML bitmap font (.xml + companion .png texture).
-    // Expected path: assets/fonts/hud_font.xml
-    // The companion texture is automatically found by getFont() next to the xml.
-    //
-    // Graceful degradation: if the font file is absent (e.g. during development
-    // before the font asset is authored), the Irrlicht built-in 8px font is
-    // retained and a warning is printed to stderr.  This is NOT fatal — the game
-    // runs, but text will be tiny until the font asset is placed.
-    //
-    // Font authoring guide: use Irrlicht's FontTool (tools/GUIEditor/FontTool)
-    // or any Irrlicht-compatible bitmap font generator to export a 16 px or 18 px
-    // bitmap font to assets/fonts/hud_font.xml.  The recommended size is 18 px
-    // virtual (maps to ≥12 px physical at 1280×720) per
-    // architecture/ui-ux/resolution-ui-scaling.md — minimum body font size 14 px
-    // virtual, prefer 16+ px virtual for interactive labels.
-    {
-        irr::gui::IGUIFont* customFont =
-            m_guiEnv->getFont("assets/fonts/hud_font.xml");
-        if (customFont) {
-            // Apply as the skin's default font — affects all GUI elements globally.
-            irr::gui::IGUISkin* skin = m_guiEnv->getSkin();
-            if (skin) {
-                skin->setFont(customFont);
-            }
-        } else {
-            // Font file not found — emit a visible warning so developers notice.
-            // The built-in 8px font will be used; text will be unreadably small.
-            const char* fontWarnMsg =
-                "[IrrlichtUIBackend] assets/fonts/hud_font.xml not found — "
-                "falling back to Irrlicht built-in 8px font. "
-                "HUD text will be unreadably small at all resolutions. "
-                "Create a bitmap font at assets/fonts/hud_font.xml using Irrlicht's "
-                "FontTool or any compatible bitmap font generator (recommended: 18px).";
-            if (m_logger) {
-                m_logger->log(fontWarnMsg, irr::ELL_WARNING);
+    // Skip font loading entirely in headless (EDT_NULL) mode — no GUI environment
+    // has fonts and the font pointers remain nullptr, which is the valid state for
+    // all subsequent callers (null-checked before use).
+    if (!m_isHeadless) {
+        const FontTier tier = selectFontTier(getScreenHeight());
+        const char* suffix = (tier == FontTier::k720p)  ? "720" :
+                             (tier == FontTier::k1080p) ? "1080" : "1440";
+
+        // --- Load proportional font ---
+        {
+            std::string fontPath = std::string("assets/fonts/hud_font_") + suffix + ".xml";
+            irr::gui::IGUIFont* hudFont = m_guiEnv->getFont(fontPath.c_str());
+            if (hudFont) {
+                m_hudFont = hudFont;
+                irr::gui::IGUISkin* skin = m_guiEnv->getSkin();
+                if (skin) {
+                    skin->setFont(m_hudFont);
+                }
             } else {
-                fprintf(stderr, "[IrrlichtUIBackend WARNING] %s\n", fontWarnMsg);
+                const std::string warnMsg =
+                    std::string("[IrrlichtUIBackend] ") + fontPath +
+                    " not found — falling back to Irrlicht built-in 8px font. "
+                    "HUD text will be unreadably small.";
+                if (m_logger) {
+                    m_logger->log(warnMsg.c_str(), irr::ELL_WARNING);
+                } else {
+                    fprintf(stderr, "[IrrlichtUIBackend WARNING] %s\n", warnMsg.c_str());
+                }
             }
         }
-    }
 
-    // --- Load monospace bitmap font for numeric HUD elements ---
-    //
-    // hud_mono_font.xml is a monospace face applied selectively to numeric
-    // IGUIStaticText elements (treasury balance, population count, tax rate
-    // fields, monthly revenue/expense, density unlock progress) via
-    // element->setOverrideFont(getMonoFont()) after addStaticText().
-    //
-    // Rationale: a monospace face applied to numeric readouts prevents layout
-    // jitter as digits change (e.g. "1,000" vs "9,000"), while keeping
-    // proportional hud_font.xml for labels and panel titles (better legibility
-    // at small sizes in compact panels such as Query/Inspector and Tax Rate).
-    //
-    // Graceful degradation: if the file is absent the environment default
-    // (hud_font.xml, or the built-in 8px font if that also failed) is retained
-    // for numeric elements; a warning is emitted but the game continues.
-    // Callers of getMonoFont() must null-check before calling setOverrideFont().
-    {
-        irr::gui::IGUIFont* monoFont =
-            m_guiEnv->getFont("assets/fonts/hud_mono_font.xml");
-        if (monoFont) {
-            m_monoFont = monoFont;
-            // IGUIEnvironment::getFont() caches fonts internally — the returned
-            // pointer is owned by the environment; do NOT call grab() or drop().
-        } else {
-            const char* monoFontWarnMsg =
-                "[IrrlichtUIBackend] assets/fonts/hud_mono_font.xml not found — "
-                "falling back to default font for numeric HUD elements. "
-                "Treasury balance, population count, and tax rate fields will use "
-                "the proportional font until hud_mono_font.xml is placed at "
-                "assets/fonts/hud_mono_font.xml.";
-            if (m_logger) {
-                m_logger->log(monoFontWarnMsg, irr::ELL_WARNING);
+        // --- Load monospace font ---
+        {
+            std::string monoPath = std::string("assets/fonts/hud_mono_font_") + suffix + ".xml";
+            irr::gui::IGUIFont* monoFont = m_guiEnv->getFont(monoPath.c_str());
+            if (monoFont) {
+                m_hudMonoFont = monoFont;
             } else {
-                fprintf(stderr, "[IrrlichtUIBackend WARNING] %s\n", monoFontWarnMsg);
+                const std::string monoWarnMsg =
+                    std::string("[IrrlichtUIBackend] ") + monoPath +
+                    " not found — falling back to default font for numeric HUD elements. "
+                    "Treasury balance and population count will use the proportional font.";
+                if (m_logger) {
+                    m_logger->log(monoWarnMsg.c_str(), irr::ELL_WARNING);
+                } else {
+                    fprintf(stderr, "[IrrlichtUIBackend WARNING] %s\n", monoWarnMsg.c_str());
+                }
             }
         }
     }
@@ -886,7 +854,7 @@ void IrrlichtUIBackend::setElementBackground(UIElementHandle handle,
 //   - No-op when the handle is invalid or not in m_elementMap.
 //   - No-op when the element is not EGUIET_STATIC_TEXT (buttons have their
 //     own font machinery; do not call this on button handles).
-//   - No-op when m_monoFont is null (font file absent at construction or
+//   - No-op when m_hudMonoFont is null (font file absent at construction or
 //     running headless) — graceful fallback, no assert.
 //
 // MUST NOT be called on label text, button text, tooltips, or panel title
@@ -894,7 +862,7 @@ void IrrlichtUIBackend::setElementBackground(UIElementHandle handle,
 // ---------------------------------------------------------------------------
 void IrrlichtUIBackend::setElementMonoFont(UIElementHandle handle)
 {
-    if (!m_monoFont) {
+    if (!m_hudMonoFont) {
         // Font absent (file missing at load time, or headless CI) — graceful no-op.
         return;
     }
@@ -911,7 +879,7 @@ void IrrlichtUIBackend::setElementMonoFont(UIElementHandle handle)
         return;
     }
 
-    static_cast<irr::gui::IGUIStaticText*>(elem)->setOverrideFont(m_monoFont);
+    static_cast<irr::gui::IGUIStaticText*>(elem)->setOverrideFont(m_hudMonoFont);
 }
 
 // ---------------------------------------------------------------------------

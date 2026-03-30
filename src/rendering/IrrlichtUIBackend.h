@@ -39,6 +39,7 @@ namespace irr {
 // Method 18 (setElementBackground) added in Phase 9b.
 // Method 19 (setElementMonoFont) added in Phase 10.
 // Method 21 (setElementTextColor) added in Phase 10c.
+// FontTier / selectFontTier / m_hudFont / m_hudMonoFont added in Phase 11g.
 //
 // Constructor: takes irr::IrrlichtDevice* (non-null, asserted in the .cpp) and
 // a pre-cached maxAnisotropy value from RenderSystem (1.0f when extension absent).
@@ -47,6 +48,18 @@ namespace irr {
 // Irrlicht or GL.
 class IrrlichtUIBackend : public IUIBackend {
 public:
+    // Resolution tier used to select the correct bitmap font atlas size.
+    // k720p  → hud_font_720.xml   (cell_h=22, ~720p screens)
+    // k1080p → hud_font_1080.xml  (cell_h=33, ~1080p screens)
+    // k1440p → hud_font_1440.xml  (cell_h=44, ~1440p screens)
+    enum class FontTier { k720p, k1080p, k1440p };
+    // Defined inline so unit tests (ui_tests) can call it without linking aitown_render.
+    static FontTier selectFontTier(int screenHeight) {
+        if (screenHeight < 900)  return FontTier::k720p;
+        if (screenHeight < 1260) return FontTier::k1080p;
+        return FontTier::k1440p;
+    }
+
     // Constructor — device must be non-null (programming error otherwise).
     // maxAnisotropy: pre-cached from RenderSystem after glewInit(); 1.0f if
     // GL_EXT_texture_filter_anisotropic is absent. IrrlichtUIBackend MUST NOT
@@ -77,14 +90,20 @@ public:
     // Not part of IUIBackend — internal rendering concern.
     bool handleGuiHoverEvent(const irr::SEvent& event);
 
-    // Return the monospace font loaded from assets/fonts/hud_mono_font.xml.
+    // Return the monospace font loaded from the tier-specific hud_mono_font_<tier>.xml.
     // Used by HUD and panel code to call element->setOverrideFont(getMonoFont())
     // on numeric IGUIStaticText elements (treasury balance, population count,
     // tax rate fields, monthly revenue/expense, density unlock progress).
-    // Returns nullptr when hud_mono_font.xml was absent at construction time;
-    // callers must null-check before calling setOverrideFont().
+    // Returns nullptr when the font file was absent at construction time or when
+    // running headless (EDT_NULL); callers must null-check before setOverrideFont().
+    // m_hudMonoFont renamed from m_monoFont in Phase 11g.
     // Not part of IUIBackend — concrete backend detail on IrrlichtUIBackend only.
-    irr::gui::IGUIFont* getMonoFont() const { return m_monoFont; }
+    irr::gui::IGUIFont* getMonoFont() const { return m_hudMonoFont; }
+
+    // Return the proportional font loaded from the tier-specific hud_font_<tier>.xml.
+    // Returns nullptr on EDT_NULL or when font file absent.
+    // Not part of IUIBackend — concrete backend detail on IrrlichtUIBackend only.
+    irr::gui::IGUIFont* getHudFont() const { return m_hudFont; }
 
     // -------------------------------------------------------------------------
     // IUIBackend overrides — 19 methods
@@ -153,8 +172,8 @@ public:
     //     r, g, b, a in [0, 255]. Has no visible effect on button elements.
     void setElementBackground(UIElementHandle handle, int r, int g, int b, int a) override;
 
-    // 19. Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element.
-    //     Calls IGUIStaticText::setOverrideFont(m_monoFont). No-op when m_monoFont is null
+    // 19. Apply the monospace font (hud_mono_font_<tier>.xml) to an IGUIStaticText element.
+    //     Calls IGUIStaticText::setOverrideFont(m_hudMonoFont). No-op when m_hudMonoFont is null
     //     (font absent or headless CI mode) — graceful fallback, no assert.
     //     Labels, button text, and panel titles MUST NOT call this method.
     void setElementMonoFont(UIElementHandle handle) override;
@@ -180,12 +199,18 @@ private:
     // Falls back to fprintf(stderr,...) when null (device absent / headless CI).
     irr::ILogger*              m_logger{nullptr};
 
-    // Monospace bitmap font loaded from assets/fonts/hud_mono_font.xml.
-    // null when the file is absent; callers must null-check before use.
+    // Proportional bitmap font loaded from tier-specific hud_font_<tier>.xml.
+    // null when EDT_NULL (headless) or font file absent; callers must null-check.
+    // Ownership: IGUIEnvironment owns the font; this is a non-owning pointer.
+    irr::gui::IGUIFont* m_hudFont{nullptr};
+
+    // Monospace bitmap font loaded from tier-specific hud_mono_font_<tier>.xml.
+    // null when the file is absent or running headless; callers must null-check.
     // Ownership: Irrlicht's IGUIEnvironment owns the font object; this is a
     // non-owning observing pointer (do NOT call drop() on it).
     // Exposed via getMonoFont() for HUD and panel code to apply via setOverrideFont().
-    irr::gui::IGUIFont* m_monoFont{nullptr};
+    // Renamed from m_monoFont in Phase 11g.
+    irr::gui::IGUIFont* m_hudMonoFont{nullptr};
 
     // Sprite sheet texture loaded from hud_sprites_ui.png.
     // Used by setElementImage() to assign per-button images via IGUIButton::setImage().
