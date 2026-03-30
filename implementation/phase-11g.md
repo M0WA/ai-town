@@ -135,7 +135,7 @@ deferred pass — at startup (not per-frame).
   - `DejaVuSans.ttf` (SIL OFL 1.1 — compatible with the project's open-source posture)
   - `DejaVuSansMono.ttf`
 
-  Both files are ≤700 KB; total source asset addition ≤1.4 MB. (`graphics-artist-2d-texture`)
+  Both files are ≤800 KB; total source asset addition ≤1.4 MB. (`graphics-artist-2d-texture`)
 
 - [x] Generated PNG files use RGBA8 (Pillow `RGBA` mode) with white glyphs on a transparent
   background, compatible with Irrlicht's `EBF_MIPMAP` font loading path. Font atlas PNGs
