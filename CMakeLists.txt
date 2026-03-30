@@ -706,6 +706,11 @@ target_sources(terrain_tests PRIVATE
     tests/terrain/terrain_boundary_test.cpp
 )
 
+# Reclassified from integration_tests: pure STL stub with no Irrlicht or project headers.
+target_sources(terrain_tests PRIVATE
+    tests/terrain/terrain_loading_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # ui_tests — UIManager, NotificationManager, CameraController, QueryPanel, ModalDialog
 # Phase 3 Test-C1: consolidated 5-file form (ui_smoke_test.cpp dropped — its compile
@@ -873,6 +878,12 @@ target_sources(ui_tests PRIVATE
     tests/ui/finances_panel_background_test.cpp
 )
 
+# Phase 11g: FontTier boundary tests — pure static method, no Irrlicht device required.
+# Do NOT call add_executable(ui_tests ...) or aitown_add_tests(ui_tests ...) again.
+target_sources(ui_tests PRIVATE
+    tests/ui/font_tier_test.cpp
+)
+
 # Phase 11m: AITOWN_TESTING_ENABLED=1 enables UIManager::handleNewGameRequest()
 # and UIManager::setGameSessionActiveForTest() test seams.
 # Also enable on aitown_ui so the production code compiles the guarded methods.
@@ -890,6 +901,14 @@ target_sources(simulation_tests PRIVATE
 # Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(...) again.
 target_sources(simulation_tests PRIVATE
     tests/simulation/city_simulation_reset_test.cpp
+)
+
+# Reclassified from integration_tests: pure mock-based simulation tests with no Irrlicht device.
+# Do NOT call add_executable(simulation_tests ...) or aitown_add_tests(...) again.
+target_sources(simulation_tests PRIVATE
+    tests/simulation/simulation_60tick_test.cpp
+    tests/simulation/simulation_comprehensive_integration_test.cpp
+    tests/simulation/save_system_integration_test.cpp
 )
 
 # ----------------------------------------------------------------------------
@@ -997,14 +1016,10 @@ add_custom_command(TARGET audio_tests POST_BUILD
 # available only when aitown_render is linked.
 # ----------------------------------------------------------------------------
 add_executable(integration_tests
-    tests/integration/integration_smoke_test.cpp
     tests/integration/irrlicht_ui_backend_compile_test.cpp  # Phase 1: non-abstract compile check
     tests/integration/irrlicht_ui_backend_test.cpp          # Phase 3: EDT_NULL runtime handle test
     tests/integration/texture_cache_integration_test.cpp    # Phase 5: TextureCache + SceneEntityManager EDT_NULL tests
-    tests/integration/simulation_60tick_test.cpp            # Phase 6: 60-tick no-crash + SimulationTime exit criterion
     tests/integration/camera_controller_live_test.cpp       # Phase 6: CameraController live-camera path coverage
-    tests/integration/terrain_loading_test.cpp              # Phase 11: flushPendingRebuilds deduplication test
-    tests/integration/save_system_integration_test.cpp      # Phase 11: SaveSystem auto-save suspension during modal
 )
 # aitown_render and aitown_ui MUST be present: IrrlichtUIBackend.h depends on Irrlicht.
 # Irrlicht MUST be linked directly: IrrlichtUIBackend.h includes <irrlicht.h> at compile time;
@@ -1012,8 +1027,8 @@ add_executable(integration_tests
 # aitown_terrain: Phase 5 adds texture_cache_integration_test.cpp which tests TextureCache
 # and SceneEntityManager; both live in aitown_render/aitown_terrain.
 # GLEW::GLEW: TextureCache.h includes <GL/glew.h> at the top.
-# aitown_sim: Phase 6 adds simulation_60tick_test.cpp which constructs CitySimulation directly.
-# aitown_ui: Phase 6 adds camera_controller_live_test.cpp (CameraController live-camera path).
+# aitown_sim: needed by ui_manager_integration_test.cpp and terrain_system_integration_test.cpp.
+# aitown_ui: camera_controller_live_test.cpp (CameraController live-camera path) and UIManager panel tests.
 # rapidcheck and rapidcheck_gtest always linked (proactive policy — architecture/testing/framework.md).
 target_link_libraries(integration_tests PRIVATE
     aitown_render
@@ -1044,7 +1059,7 @@ if(UNIX AND NOT APPLE)
 endif()
 # src/rendering/  MUST be present: IrrlichtUIBackend.h lives in src/rendering/.
 # src/terrain/    Phase 5: TextureCache integration tests include TerrainChunk/TerrainSystem headers.
-# src/simulation/ Phase 6: simulation_60tick_test.cpp includes CitySimulation.h and simulation_constants.h.
+# src/simulation/ needed by ui_manager_integration_test.cpp (ICitySimulation mock includes simulation headers).
 target_include_directories(integration_tests PRIVATE
     tests/simulation/
     tests/ui/
@@ -1080,17 +1095,24 @@ target_sources(integration_tests PRIVATE
     tests/integration/irrlicht_renderer_flatten_test.cpp  # Phase 11l D3: multi-tile footprint flatten
 )
 
-# Coverage-boost integration tests — exercise CitySimulation, UIManager panels,
-# TerrainSystem, and TerrainChunk via EDT_NULL Irrlicht + NiceMock doubles.
+# Coverage-boost integration tests — exercise UIManager panels, TerrainSystem,
+# and TerrainChunk via EDT_NULL Irrlicht + NiceMock doubles.
 # Do NOT call add_executable(integration_tests ...) again — duplicate target error.
 # Do NOT call aitown_add_tests(integration_tests ...) again — duplicate registration.
+# Note: simulation_comprehensive_integration_test.cpp was reclassified to simulation_tests
+# (unit label) — it uses only NiceMock doubles, no EDT_NULL Irrlicht device.
 target_sources(integration_tests PRIVATE
-    tests/integration/simulation_comprehensive_integration_test.cpp
     tests/integration/ui_manager_integration_test.cpp
     tests/integration/terrain_system_integration_test.cpp
     tests/integration/ui_manager_events_integration_test.cpp
     tests/integration/camera_and_keybindings_integration_test.cpp
     tests/integration/keybindings_panel_integration_test.cpp
+)
+
+# Phase 11g: EDT_NULL constructor test — verifies m_hudFont/m_hudMonoFont null on headless.
+# Do NOT call add_executable(integration_tests ...) or aitown_add_tests(integration_tests ...) again.
+target_sources(integration_tests PRIVATE
+    tests/integration/font_tier_edt_null_test.cpp
 )
 
 # ----------------------------------------------------------------------------
