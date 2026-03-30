@@ -575,17 +575,39 @@ def check_4b_building_bbox(assets_dir):
     """Check #4b: verify bounding box of each building LOD0 includes ground quad at y=0.01.
 
     Reads all vertex positions from each _lod0.b3d file and checks:
-      - min.Y <= 0   (building base at ground level)
-      - max.Y >= 0.01  (ground quad vertex present at y=0.01)
+      - min.Y <= 0          (building base at ground level)
+      - max.Y >= 0.01       (ground quad vertex present at y=0.01)
+      - |min.X| >= fh-TOL   (ground quad XZ extent matches FOOTPRINT_HALF)
+      - max.X  >= fh-TOL
+      - |min.Z| >= fh-TOL
+      - max.Z  >= fh-TOL
+
+    Expected half-extents (metres) match FOOTPRINT_HALF in generate_b3d_models.py:
+      low  → 5.0,  med → 10.0,  high → 15.0,  svc → 10.0
 
     Returns a list of error strings. Empty list means the check passed.
     """
+    # Mirror of FOOTPRINT_HALF from generate_b3d_models.py
+    _FOOTPRINT_HALF = {"low": 5.0, "med": 10.0, "high": 15.0, "svc": 10.0}
+
+    def _expected_fh(name):
+        """Derive expected XZ half-extent from asset name tier."""
+        if name == "svc_water_tower":
+            return 4.0  # spec: 8S×8S centred pad (Phase 11f)
+        for tier in ("low", "med", "high"):
+            if f"_{tier}_" in name:
+                return _FOOTPRINT_HALF[tier]
+        if name.startswith("svc_"):
+            return _FOOTPRINT_HALF["svc"]
+        return None
+
     buildings_dir = os.path.join(assets_dir, "3d", "buildings")
     if not os.path.isdir(buildings_dir):
         return [f"Check #4b: buildings directory not found: {buildings_dir}"]
 
     errors = []
     checked = 0
+    TOL = 1e-4
 
     for asset_name in _PHASE_11E_CELL_ASSIGNMENT:
         lod0_path = os.path.join(buildings_dir, f"{asset_name}_lod0.b3d")
@@ -601,23 +623,45 @@ def check_4b_building_bbox(assets_dir):
             errors.append(f"Check #4b {asset_name}: no vertices found in {lod0_path}")
             continue
 
+        xs = [p[0] for p in positions]
         ys = [p[1] for p in positions]
-        min_y = min(ys)
-        max_y = max(ys)
-        TOL = 1e-4
+        zs = [p[2] for p in positions]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        min_z, max_z = min(zs), max(zs)
+
+        asset_errors = []
+
         if min_y > TOL:
-            errors.append(
-                f"Check #4b {asset_name}: min.Y={min_y:.6f} > 0 "
-                f"(building should start at y=0)")
+            asset_errors.append(
+                f"min.Y={min_y:.6f} > 0 (building should start at y=0)")
         if max_y < 0.01 - TOL:
-            errors.append(
-                f"Check #4b {asset_name}: max.Y={max_y:.6f} < 0.01 "
-                f"(ground quad at y=0.01 appears missing)")
-        else:
+            asset_errors.append(
+                f"max.Y={max_y:.6f} < 0.01 (ground quad at y=0.01 appears missing)")
+
+        fh = _expected_fh(asset_name)
+        if fh is not None:
+            if max_x < fh - TOL:
+                asset_errors.append(
+                    f"max.X={max_x:.4f} < {fh:.1f} (ground quad XZ extent too small)")
+            if min_x > -(fh - TOL):
+                asset_errors.append(
+                    f"min.X={min_x:.4f} > -{fh:.1f} (ground quad XZ extent too small)")
+            if max_z < fh - TOL:
+                asset_errors.append(
+                    f"max.Z={max_z:.4f} < {fh:.1f} (ground quad XZ extent too small)")
+            if min_z > -(fh - TOL):
+                asset_errors.append(
+                    f"min.Z={min_z:.4f} > -{fh:.1f} (ground quad XZ extent too small)")
+
+        for msg in asset_errors:
+            errors.append(f"Check #4b {asset_name}: {msg}")
+        if not asset_errors:
             checked += 1
 
     if not errors:
-        print(f"  check_4b: {checked} building LOD0 bounding boxes verified (min.Y<=0, max.Y>=0.01)")
+        print(f"  check_4b: {checked} building LOD0 bounding boxes verified "
+              f"(min.Y<=0, max.Y>=0.01, XZ>=FOOTPRINT_HALF)")
     return errors
 
 
