@@ -39,22 +39,42 @@ deferred pass — at startup (not per-frame).
   (1080 px) uses the 1080p tier; 1440 p (1440 px) and 4 K (2160 px) use the 1440p tier.
   (`gamedesign-ux`)
 
-- [ ] Document that `kLineH = 33` virtual pixels is invariant across all tiers. At each tier,
-  `round(fontPhysicalH × 1080 / screenH)` ≈ 33 virtual px:
-  - 720p: `22 × 1080 / 720 = 33.0`
-  - 1080p: `33 × 1080 / 1080 = 33.0`
-  - 1440p: `44 × 1080 / 1440 = 33.0`
+- [ ] Document that `kLineH = 33` virtual pixels is invariant across all tiers. Place the full
+  math proof in the **new Bitmap Font Tier Selection section in
+  `architecture/ui-ux/resolution-ui-scaling.md`** only:
+  - `22 × 1080 / 720 = 33.0`
+  - `33 × 1080 / 1080 = 33.0`
+  - `44 × 1080 / 1440 = 33.0`
 
-  No layout constant changes are required in any panel. (`gamedesign-ux`)
+  Do **not** repeat the full proof in `query-inspector-panel.md`; that file only needs the
+  Panel Layout Constants table row for `kLineH` updated to read "valid for all three
+  resolution tiers (720p/1080p/1440p)" (see Deliverable 2). No layout constant changes are
+  required in any panel. (`gamedesign-ux`)
 
 - [ ] Document that font tier selection occurs once at `IrrlichtUIBackend` construction
   (before any UI element is created) and is NOT dynamic — resolution changes during a
   session are not supported in V1. (`graphics-dev-irrlicht`)
 
+- [ ] Update the existing **Bitmap Font Physical Size** section in
+  `architecture/ui-ux/resolution-ui-scaling.md` to replace **all occurrences** of
+  `tools/generate_hud_font.py` with `tools/generate_bitmap_fonts.py`, and note that
+  the new script now generates all six tier-specific font pairs (22 px, 33 px, 44 px for
+  both proportional and mono typefaces) rather than the original single-size pair.
+  (`gamedesign-ux`)
+
+- [ ] Add a **Font Atlas Exception** note to `architecture/asset-standards/2d-texture-standards.md`
+  **immediately before the `## DDS Authoring Pipeline` section heading**, stating that
+  Irrlicht's `CGUIFont` bitmap font loader reads PNG natively (not via
+  `IVideoDriver::getTexture()`) and font atlas PNGs are exempt from the DDS-only runtime
+  texture rule. No DDS conversion is required for files under `assets/fonts/`.
+  (`graphics-dev-irrlicht`, `graphics-artist-2d-texture`)
+
 #### 2. Spec Update — `architecture/ui-ux/query-inspector-panel.md`
 
-- [ ] Remove the deferral note *"Dynamic per-frame font-size switching is deferred to a future
-  typography pass"* and replace with a reference to Phase 11g multi-size font assets.
+- [ ] **Remove the entire "Font scaling note" paragraph** (currently lines 85–89 of
+  `query-inspector-panel.md`) and replace it with a single sentence: "For per-resolution
+  font tier selection (22 px / 33 px / 44 px depending on screen height), see the Bitmap
+  Font Tier Selection section in `architecture/ui-ux/resolution-ui-scaling.md`."
   (`gamedesign-ux`)
 
 - [ ] Update the Panel Layout Constants table to clarify that `kLineH = 33` is valid for all
@@ -62,8 +82,8 @@ deferred pass — at startup (not per-frame).
 
 #### 3. Spec Update — `architecture/ui-ux/hud-layout.md`
 
-- [ ] Add a **Font Tier Assets** subsection to the Typography section documenting the six
-  asset paths:
+- [ ] Add a **Font Tier Assets** subsection to the existing **Font Loading** section in
+  `hud-layout.md` documenting the six asset paths:
   - `assets/fonts/hud_font_720.xml` + `assets/fonts/hud_font_720.png` (22 px)
   - `assets/fonts/hud_font_1080.xml` + `assets/fonts/hud_font_1080.png` (33 px)
   - `assets/fonts/hud_font_1440.xml` + `assets/fonts/hud_font_1440.png` (44 px)
@@ -93,6 +113,11 @@ deferred pass — at startup (not per-frame).
   `<font type="bitmap"><Texture file="..." />` with per-character `<c .../>` entries.
   (`graphics-dev-irrlicht`, `graphics-artist-2d-texture`)
 
+  > **Note:** Irrlicht's `CGUIFont` bitmap font loader reads PNG natively via its own
+  > font-atlas path — it does not use `IVideoDriver::getTexture()`. These font atlas PNGs
+  > are not game textures and are exempt from the project's DDS-only runtime texture rule.
+  > No DDS conversion is required.
+
 - [ ] The script accepts `--cell-heights 22,33,44` and `--output-dir assets/fonts` as
   arguments, with sensible defaults. Running `python3 tools/generate_bitmap_fonts.py`
   without arguments regenerates all six pairs. (`graphics-dev-irrlicht`)
@@ -104,8 +129,10 @@ deferred pass — at startup (not per-frame).
   Both files are ≤700 KB; total source asset addition ≤1.4 MB. (`graphics-artist-2d-texture`)
 
 - [ ] Generated PNG files use RGBA8 (Pillow `RGBA` mode) with white glyphs on a transparent
-  background, compatible with Irrlicht's `EBF_MIPMAP` font loading path.
-  (`graphics-dev-irrlicht`)
+  background, compatible with Irrlicht's `EBF_MIPMAP` font loading path. Font atlas PNGs
+  are alpha-coverage masks (white glyphs on transparent background) and do NOT require
+  embedded sRGB ICC profiles; use Pillow's default PNG output without `icc_profile`
+  embedding. (`graphics-dev-irrlicht`)
 
 #### 5. `IrrlichtUIBackend` — Font Tier Selection
 
@@ -129,6 +156,12 @@ deferred pass — at startup (not per-frame).
   `m_env->getFont("assets/fonts/hud_mono_font_<tier>.xml")`. Store as
   `m_hudFont` and `m_hudMonoFont` (`irr::gui::IGUIFont*`). (`graphics-dev-irrlicht`)
 
+  > **Naming clarification:** `m_hudFont` is a new `irr::gui::IGUIFont*` member (not
+  > previously present in `IrrlichtUIBackend`). The existing `m_monoFont` member is
+  > renamed to `m_hudMonoFont` in the same commit to match the tier-aware naming
+  > convention. All existing code that references `m_monoFont` must be updated to
+  > `m_hudMonoFont` as part of this deliverable.
+
 - [ ] Apply `m_hudFont` as the environment default font via
   `m_env->getSkin()->setFont(m_hudFont)` immediately after loading, so all
   subsequently created `IGUIStaticText` elements inherit the correct tier font without
@@ -141,9 +174,9 @@ deferred pass — at startup (not per-frame).
   — `m_hudFont` and `m_hudMonoFont` remain `nullptr`. This preserves existing headless
   test behaviour. (`graphics-dev-irrlicht`)
 
-#### 6. CI Asset Verification — `tools/validate_assets.py` Check #25
+#### 6. CI Asset Verification — `tools/validate_assets.py` Check #31
 
-- [ ] Add **Check #25** to `tools/validate_assets.py`: verify all six font XML files and their
+- [ ] Add **Check #31** to `tools/validate_assets.py`: verify all six font XML files and their
   paired PNG files exist under `assets/fonts/`:
   - `hud_font_720.xml`, `hud_font_720.png`
   - `hud_font_1080.xml`, `hud_font_1080.png`
@@ -153,6 +186,11 @@ deferred pass — at startup (not per-frame).
   - `hud_mono_font_1440.xml`, `hud_mono_font_1440.png`
 
   The check exits non-zero if any file is missing. (`cicd-dev-github`)
+
+- [ ] Add a `Verify check_31 present` guard step to the `validate-assets` job in
+  `.github/workflows/ci.yml`: grep `tools/validate_assets.py` for the `check_31` function
+  symbol; exit 1 with a descriptive error message if not found. Follow the same pattern as
+  the Phase 11d guard steps. (`cicd-dev-github`)
 
 #### 7. Unit Tests — `FontTierSelectionTest`
 
@@ -189,15 +227,19 @@ deferred pass — at startup (not per-frame).
   asset paths.
 - [ ] `tools/generate_bitmap_fonts.py` present; running it regenerates all six XML + PNG pairs
   without error (requires Pillow and source TTF files).
-- [ ] All six font XML + PNG files committed under `assets/fonts/`.
+- [ ] All six tier-specific font XML + PNG pairs (12 files) committed under `assets/fonts/`;
+  backward-compatibility files (`hud_font.xml`, `hud_mono_font.xml`) exist as symlinks or
+  copies of the 720p tier files.
 - [ ] Source TTF files (`DejaVuSans.ttf`, `DejaVuSansMono.ttf`) committed under
   `assets/fonts/source/`.
 - [ ] `IrrlichtUIBackend::selectFontTier(int)` static method present and matches the
   boundary table.
 - [ ] `IrrlichtUIBackend` constructor loads and applies the correct font tier on a live device;
   EDT_NULL path skips font loading without crash.
-- [ ] `tools/validate_assets.py` Check #25 present and exits zero with all six pairs present.
+- [ ] `tools/validate_assets.py` Check #31 present and exits zero with all six pairs present.
 - [ ] All 10 `FontTierSelectionTest` cases pass.
+- [ ] `architecture/asset-standards/2d-texture-standards.md` Font Atlas Exception note present
+  immediately before the `## DDS Authoring Pipeline` section heading.
 - [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'` exits
   zero.
 
@@ -209,9 +251,9 @@ deferred pass — at startup (not per-frame).
 |---|---|
 | `gamedesign-ux` | Author spec updates in `resolution-ui-scaling.md`, `query-inspector-panel.md`, `hud-layout.md`; sign off on tier boundary values and `kLineH` invariant documentation |
 | `graphics-artist-2d-texture` | Commit source TTF files; review generated PNG glyph quality for all three tiers; sign off on visual result |
-| `graphics-dev-irrlicht` | Author `tools/generate_bitmap_fonts.py`; implement `FontTier` enum + `selectFontTier()` in `IrrlichtUIBackend`; wire font loading in constructor |
+| `graphics-dev-irrlicht` | Author `tools/generate_bitmap_fonts.py`; implement `FontTier` enum + `selectFontTier()` in `IrrlichtUIBackend`; wire font loading in constructor; co-author the font tier selection timing documentation in `resolution-ui-scaling.md` (Deliverable 1c) |
 | `test-dev-cpp` | Author `font_tier_test.cpp`; add to `ui_tests` CMake target |
-| `cicd-dev-github` | Implement `validate_assets.py` Check #25; verify `validate-assets` CI job exits zero after all font assets are committed |
+| `cicd-dev-github` | Implement `validate_assets.py` Check #31; verify `validate-assets` CI job exits zero after all font assets are committed |
 
 ---
 
