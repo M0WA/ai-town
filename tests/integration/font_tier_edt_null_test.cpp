@@ -9,7 +9,7 @@
 #include <irrlicht.h>
 #include <gtest/gtest.h>
 
-TEST(IrrlichtUIBackend_FontTier, EDT_NULL_ConstructorSkipsFontLoadingGracefully) {
+TEST(IrrlichtUIBackend_EDT_NULL, ConstructorSkipsFontLoadingGracefully) {
     irr::IrrlichtDevice* device = irr::createDevice(
         irr::video::EDT_NULL,
         irr::core::dimension2d<irr::u32>(1920, 1080));
