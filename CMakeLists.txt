@@ -1080,6 +1080,19 @@ target_sources(integration_tests PRIVATE
     tests/integration/irrlicht_renderer_flatten_test.cpp  # Phase 11l D3: multi-tile footprint flatten
 )
 
+# Coverage-boost integration tests — exercise CitySimulation, UIManager panels,
+# TerrainSystem, and TerrainChunk via EDT_NULL Irrlicht + NiceMock doubles.
+# Do NOT call add_executable(integration_tests ...) again — duplicate target error.
+# Do NOT call aitown_add_tests(integration_tests ...) again — duplicate registration.
+target_sources(integration_tests PRIVATE
+    tests/integration/simulation_comprehensive_integration_test.cpp
+    tests/integration/ui_manager_integration_test.cpp
+    tests/integration/terrain_system_integration_test.cpp
+    tests/integration/ui_manager_events_integration_test.cpp
+    tests/integration/camera_and_keybindings_integration_test.cpp
+    tests/integration/keybindings_panel_integration_test.cpp
+)
+
 # ----------------------------------------------------------------------------
 # opengl_tests — sRGB upload, setMesh grab/drop smoke test, shader compilation
 # Must run under xvfb-run on Linux.
