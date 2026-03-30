@@ -55,7 +55,8 @@ public:
     virtual void setElementBackground(UIElementHandle handle, int r, int g, int b, int a) = 0;
     // 19. Apply the monospace font (hud_mono_font.xml) to an IGUIStaticText element.
     //     Panel code calls this immediately after addStaticText() for every numeric readout element.
-    //     In IrrlichtUIBackend: calls IGUIStaticText::setOverrideFont(m_monoFont); no-op when m_monoFont is null.
+    //     In IrrlichtUIBackend: calls IGUIStaticText::setOverrideFont(m_hudMonoFont); no-op when m_hudMonoFont is null.
+    //     (Member renamed from m_monoFont to m_hudMonoFont in Phase 11g.)
     //     In MockUIBackend: MOCK_METHOD stub. Labels and button text MUST NOT call this method.
     //     Added in Phase 10. See architecture/ui-ux/hud-layout.md §Font Loading — Monospace requirement.
     virtual void setElementMonoFont(UIElementHandle handle) = 0;
