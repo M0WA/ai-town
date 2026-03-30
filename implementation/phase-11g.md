@@ -197,7 +197,7 @@ deferred pass — at startup (not per-frame).
   The check exits non-zero if any file is missing. (`cicd-dev-github`)
 
 - [ ] Add a `Verify check_31 present` guard step to the `validate-assets` job in
-  `.github/workflows/ci.yml`: grep `tools/validate_assets.py` for the `check_31` function
+  `.github/workflows/_validate-assets.yml`: grep `tools/validate_assets.py` for the `check_31` function
   symbol; exit 1 with a descriptive error message if not found. Follow the same pattern as
   the Phase 11d guard steps. (`cicd-dev-github`)
 
