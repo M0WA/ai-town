@@ -577,10 +577,14 @@ the 720p-tier copies (symlinks or duplicates) for backwards compatibility with a
 references in Phase 8 code. All font atlas PNGs are exempt from the DDS-only runtime texture
 rule — see `architecture/asset-standards/2d-texture-standards.md` § Font Atlas Exception.
 
-**Implementation**: `IrrlichtUIBackend` loads the tier-specific monospace font (e.g.
-`hud_mono_font_720.xml` / `hud_mono_font_1080.xml` / `hud_mono_font_1440.xml`) in its
-constructor and stores the result as `irr::gui::IGUIFont* m_hudMonoFont{nullptr}` (renamed
-from `m_monoFont` in Phase 11g). Panel code applies the monospace font by calling
+**Implementation**: `IrrlichtUIBackend` loads both tier-specific fonts in its constructor:
+`m_hudFont` from `hud_font_<tier>.xml` (e.g. `hud_font_720.xml` / `hud_font_1080.xml` /
+`hud_font_1440.xml`) is applied immediately as the environment default via
+`m_env->getSkin()->setFont(m_hudFont)`, so all subsequently created `IGUIStaticText` elements
+inherit the correct proportional tier font without per-element font assignment.
+`m_hudMonoFont` is loaded from `hud_mono_font_<tier>.xml` (e.g. `hud_mono_font_720.xml` /
+`hud_mono_font_1080.xml` / `hud_mono_font_1440.xml`) and stored as
+`irr::gui::IGUIFont* m_hudMonoFont{nullptr}` (renamed from `m_monoFont` in Phase 11g). Panel code applies the monospace font by calling
 `m_backend->setElementMonoFont(handle)` immediately after each `addStaticText()` call
 that creates a numeric element. `setElementMonoFont()` is method 19 on `IUIBackend`
 (see `architecture/ui-ux/ui-manager.md` §IUIBackend Method Contract). `IrrlichtUIBackend`
