@@ -65,6 +65,13 @@
 - Normal maps, roughness, specular, and splat maps are always authored in **linear space**.
 - **Normal map Y-channel convention**: Normal maps must use **OpenGL convention** (Y-up: green channel points toward +Y in tangent space). If sourcing from Substance Painter or other DirectX-convention bakers, flip the green channel on export. Validate with a sphere test: a light from above-left must produce a highlight on the upper-left surface of bumps (not lower-right). If the convention is wrong, lighting appears inverted on all affected surfaces — there is no runtime error. Note: when using DXT5nm packing, apply Y-flip (this step) before the DXT5nm swizzle — see the DDS export pipeline in the DXT5nm packing section above.
 
+## Font Atlas Exception
+
+Irrlicht's `CGUIFont` bitmap font loader reads PNG natively via its own font-atlas path — it
+does **not** use `IVideoDriver::getTexture()`. Font atlas PNG files under `assets/fonts/` are
+therefore **exempt from the DDS-only runtime texture rule**. No DDS conversion is required for
+any file under `assets/fonts/`.
+
 ## DDS Authoring Pipeline
 
 All DDS textures must be produced via a validated command-line pipeline rather than DCC-tool GUI exporters. The canonical pipeline entry point is `tools/export_textures.py` (to be created in Phase 9 when full atlas textures are produced). Direct invocation of the tools below is permitted for individual asset iteration, but CI must call only `export_textures.py`.
