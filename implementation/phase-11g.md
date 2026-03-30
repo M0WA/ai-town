@@ -201,7 +201,7 @@ deferred pass — at startup (not per-frame).
   symbol; exit 1 with a descriptive error message if not found. Follow the same pattern as
   the Phase 11d guard steps. (`cicd-dev-github`)
 
-#### 7. Unit Tests — `FontTierSelectionTest`
+#### 7. Unit Tests — `FontTierSelectionTest` and EDT_NULL Constructor Test
 
 - [ ] Add `tests/ui/font_tier_test.cpp` containing `FontTierSelectionTest` with at least the
   following cases:
@@ -219,8 +219,19 @@ deferred pass — at startup (not per-frame).
   | `At1440p_Uses1440pTier` | 1440 | `k1440p` |
   | `At2160p_Uses1440pTier` | 2160 | `k1440p` |
 
-  All tests call `IrrlichtUIBackend::selectFontTier(screenHeight)` directly (static method,
-  no device required). (`test-dev-cpp`)
+  All 10 tests call `IrrlichtUIBackend::selectFontTier(screenHeight)` directly (static method,
+  no device required; unit label). (`test-dev-cpp`)
+
+- [ ] Add a test case `IrrlichtUIBackend_EDT_NULL_ConstructorSkipsFontLoadingGracefully` in
+  `font_tier_test.cpp` (or a separate EDT_NULL test file) to verify constructor behavior
+  on headless devices:
+  - Construct `IrrlichtUIBackend` with an `EDT_NULL` device (headless, no font loading required).
+  - Assert that `m_hudFont == nullptr` and `m_hudMonoFont == nullptr` after construction.
+  - Assert no crash occurs during construction or destruction.
+  - This test runs under the `unit` label (no display required; EDT_NULL is headless-safe).
+  - The live-device constructor verification (applying correct tier font on real OpenGL device)
+    is covered by the existing `requires-opengl` integration test suite (Phase 8 or later;
+    no new test required here). (`test-dev-cpp`)
 
 - [ ] Add `font_tier_test.cpp` to the `ui_tests` CMake target. (`test-dev-cpp`)
 
@@ -243,10 +254,14 @@ deferred pass — at startup (not per-frame).
   `assets/fonts/source/`.
 - [ ] `IrrlichtUIBackend::selectFontTier(int)` static method present and matches the
   boundary table.
-- [ ] `IrrlichtUIBackend` constructor loads and applies the correct font tier on a live device;
-  EDT_NULL path skips font loading without crash.
+- [ ] `IrrlichtUIBackend` constructor: (a) EDT_NULL path skips font loading gracefully
+  (`m_hudFont == nullptr`, `m_hudMonoFont == nullptr`, no crash); verified by
+  `IrrlichtUIBackend_EDT_NULL_ConstructorSkipsFontLoadingGracefully` unit test.
+  (b) Live-device constructor loads and applies the correct font tier; verified by the
+  existing `requires-opengl` integration test suite (not a new test required).
 - [ ] `tools/validate_assets.py` Check #31 present and exits zero with all six pairs present.
-- [ ] All 10 `FontTierSelectionTest` cases pass.
+- [ ] All 10 `FontTierSelectionTest` boundary cases pass, plus the EDT_NULL constructor test
+  (`IrrlichtUIBackend_EDT_NULL_ConstructorSkipsFontLoadingGracefully`).
 - [ ] `architecture/asset-standards/2d-texture-standards.md` Font Atlas Exception note present
   immediately before the `## DDS Authoring Pipeline` section heading.
 - [ ] `architecture/ui-ux/hud-layout.md` Font Loading Implementation paragraph updated to
