@@ -45,34 +45,48 @@ jobs:
         run: echo "vcpkg_commit_id=${COMMIT_ID}" >> $GITHUB_OUTPUT
 
   # ============================================================================
-  # develop-version — calculates a pre-release version string for develop branch
-  # builds. Uses the latest release tag as base and appends "-develop" suffix.
-  # Skipped on main and PR runs; bump-version handles main.
+  # compute-version — single version job for both main and develop pushes.
+  # On main: increments patch, pushes a release tag (e.g. v0.1.1), outputs "0.1.1".
+  # On develop: reads latest tag, appends -develop suffix (e.g. "0.1.1-develop").
+  # Skipped on PRs. All packaging jobs depend only on this one job, avoiding
+  # the skipped-job propagation problem that occurs when two branch-conditional
+  # jobs are both listed in needs:.
   # ============================================================================
-  develop-version:
-    name: Develop version
+  compute-version:
+    name: Compute version
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     permissions:
-      contents: read
+      contents: write
     timeout-minutes: 5
     outputs:
-      version: ${{ steps.devver.outputs.version }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout (full history)
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
         with:
           fetch-depth: 0
 
-      - name: Calculate develop version
-        id: devver
+      - name: Compute version
+        id: version
         env:
-          DEFAULT_VERSION: v0.0.0
+          DEFAULT_MAIN: v0.0.1
+          DEFAULT_DEVELOP: v0.0.0
         run: |
-          CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "${DEFAULT_VERSION}")
-          BASE="${CURRENT#v}"
-          DEV_VERSION="${BASE}-develop"
-          echo "version=${DEV_VERSION}" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "${DEFAULT_MAIN}")
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT#v}"
+            PATCH=$((PATCH + 1))
+            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "v${NEW_VERSION}"
+            git push origin "v${NEW_VERSION}"
+          else
+            CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "${DEFAULT_DEVELOP}")
+            NEW_VERSION="${CURRENT#v}-develop"
+          fi
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
   supply-chain-lint:
     uses: ./.github/workflows/_supply-chain-lint.yml
@@ -168,75 +182,39 @@ jobs:
           echo "All required jobs succeeded."
 
   package-windows:
-    needs: [build-windows, prepare, bump-version, develop-version]
+    needs: [build-windows, prepare, compute-version]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     uses: ./.github/workflows/_package-windows.yml
     with:
       vcpkg_commit_id: ${{ needs.prepare.outputs.vcpkg_commit_id }}
-      bump_version: ${{ needs.bump-version.outputs.version }}
-      develop_version: ${{ needs.develop-version.outputs.version }}
+      pkg_version: ${{ needs.compute-version.outputs.version }}
     permissions:
       contents: read
 
   package-linux-deb:
-    needs: [build-linux, prepare, bump-version, develop-version]
+    needs: [build-linux, prepare, compute-version]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     uses: ./.github/workflows/_package-linux-deb.yml
     with:
       vcpkg_commit_id: ${{ needs.prepare.outputs.vcpkg_commit_id }}
-      bump_version: ${{ needs.bump-version.outputs.version }}
-      develop_version: ${{ needs.develop-version.outputs.version }}
+      pkg_version: ${{ needs.compute-version.outputs.version }}
     permissions:
       contents: read
 
-  # ============================================================================
-  # bump-version — determines next patch version from the latest git release tag
-  # (default v0.0.0 when no tags exist), creates and pushes the new tag, and
-  # exposes the version as a job output. No source files are modified.
-  # Not in all-checks-pass gate (release job only; gate covers build quality).
-  # ============================================================================
-  bump-version:
-    name: Bump version
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: write
-    timeout-minutes: 5
-    outputs:
-      version: ${{ steps.bump.outputs.version }}
-    steps:
-      - name: Checkout (full history)
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
-        with:
-          fetch-depth: 0
-
-      - name: Calculate and tag version
-        id: bump
-        env:
-          DEFAULT_VERSION: v0.0.1
-        run: |
-          CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "${DEFAULT_VERSION}")
-          IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT#v}"
-          PATCH=$((PATCH + 1))
-          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "v${NEW_VERSION}"
-          git push origin "v${NEW_VERSION}"
-          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+  # bump-version removed — replaced by compute-version above.
 
   # ============================================================================
   # release — downloads the Windows installer and all 4 distro .deb artifacts
   # produced by the package jobs, then creates a GitHub release with all 5.
   # Uses the version tag produced by bump-version (needs.bump-version.outputs.version).
-  # Runs only on main pushes, after bump-version and both package jobs succeed.
+  # Runs only on main pushes, after compute-version and both package jobs succeed.
   # Not in all-checks-pass gate.
   # ============================================================================
   release:
     name: Create GitHub release
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [bump-version, package-windows, package-linux-deb]
+    needs: [compute-version, package-windows, package-linux-deb]
     permissions:
       contents: write
     timeout-minutes: 10
@@ -274,7 +252,7 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564  # v2.1.0
         with:
-          tag_name: v${{ needs.bump-version.outputs.version }}
-          name: "AI Town v${{ needs.bump-version.outputs.version }}"
+          tag_name: v${{ needs.compute-version.outputs.version }}
+          name: "AI Town v${{ needs.compute-version.outputs.version }}"
           fail_on_unmatched_files: true
           files: release-assets/**

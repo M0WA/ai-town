@@ -1155,7 +1155,9 @@ Runs only on push to `develop`.
 
 ## `release` Job
 
-Creates a GitHub release with attached installer and `.deb` packages after `bump-version` and packaging jobs succeed.
+Creates a GitHub release with attached installer and `.deb` packages after `bump-version` and
+packaging jobs succeed. **Only runs on `main` — develop pushes never produce a GitHub release.**
+`develop` builds produce packages (with `-develop` version suffix) but no release is published.
 
 - **Trigger**: `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`
 - **Runner**: `ubuntu-latest`
