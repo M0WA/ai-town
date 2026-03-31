@@ -42,7 +42,7 @@ jobs:
 
       - name: CMake configure
         shell: pwsh
-        run: cmake --preset ci-windows -DAITOWN_ASSETS_DIR=assets -DBUILD_TESTING=OFF -DCPACK_PACKAGE_VERSION=${{ steps.pkgver.outputs.version }}
+        run: cmake --preset ci-windows -DAITOWN_ASSETS_DIR=assets -DBUILD_TESTING=OFF "-DCPACK_PACKAGE_VERSION=${{ steps.pkgver.outputs.version }}"
 
       - name: Append vcpkg DLL directory to PATH
         shell: pwsh
