@@ -14,6 +14,14 @@ on:
       vcpkg_commit_id:
         type: string
         required: true
+      bump_version:
+        type: string
+        required: false
+        default: ""
+      develop_version:
+        type: string
+        required: false
+        default: ""
 
 jobs:
   package-linux-deb:
@@ -79,6 +87,18 @@ jobs:
         run: |
           $VCPKG_ROOT/vcpkg install --triplet x64-linux --overlay-ports=vcpkg-overlays
 
+      - name: Resolve package version
+        id: pkgver
+        env:
+          BUMP_VERSION: ${{ inputs.bump_version }}
+          DEVELOP_VERSION: ${{ inputs.develop_version }}
+        run: |
+          VERSION="${BUMP_VERSION}"
+          if [ -z "$VERSION" ]; then
+            VERSION="${DEVELOP_VERSION}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: CMake configure
         run: |
           cmake -B build -S . \
@@ -91,7 +111,8 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
             -DVCPKG_OVERLAY_PORTS=vcpkg-overlays \
             -DVCPKG_MANIFEST_FEATURES="" \
-            -DVCPKG_INSTALLED_DIR=$VCPKG_ROOT/installed
+            -DVCPKG_INSTALLED_DIR=$VCPKG_ROOT/installed \
+            -DCPACK_PACKAGE_VERSION=${{ steps.pkgver.outputs.version }}
 
       - name: CMake build
         run: cmake --build build --parallel
