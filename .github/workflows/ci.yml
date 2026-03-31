@@ -70,6 +70,7 @@ jobs:
       - name: Compute version
         id: version
         env:
+          GH_TOKEN: ${{ github.token }}
           DEFAULT_MAIN: v0.0.1
           DEFAULT_DEVELOP: v0.0.0
         run: |
@@ -78,13 +79,13 @@ jobs:
             IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT#v}"
             PATCH=$((PATCH + 1))
             NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-            if git ls-remote --tags origin "refs/tags/v${NEW_VERSION}" | grep -q "refs/tags/v${NEW_VERSION}"; then
-              echo "Tag v${NEW_VERSION} already exists — skipping push."
+            if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/v${NEW_VERSION}" &>/dev/null; then
+              echo "Tag v${NEW_VERSION} already exists — reusing."
             else
-              git config user.name  "github-actions[bot]"
-              git config user.email "github-actions[bot]@users.noreply.github.com"
-              git tag "v${NEW_VERSION}"
-              git push origin "v${NEW_VERSION}"
+              gh api repos/${GITHUB_REPOSITORY}/git/refs \
+                -f ref="refs/tags/v${NEW_VERSION}" \
+                -f sha="${GITHUB_SHA}"
+              echo "Tag v${NEW_VERSION} created."
             fi
           else
             CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "${DEFAULT_DEVELOP}")
