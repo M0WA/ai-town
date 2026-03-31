@@ -114,8 +114,14 @@ jobs:
             -DVCPKG_INSTALLED_DIR=$VCPKG_ROOT/installed \
             -DCPACK_PACKAGE_VERSION=${{ steps.pkgver.outputs.version }}
 
-      - name: CMake build
-        run: cmake --build build --parallel
+      - name: Download Linux staging artifact
+        uses: actions/download-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: aitown-staging-linux-${{ github.sha }}
+          path: build/
+
+      - name: Set executable bit on binary
+        run: chmod +x build/aitown
 
       - name: Create Debian package
         working-directory: build
