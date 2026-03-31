@@ -306,4 +306,5 @@ jobs:
           name: "AI Town v${{ needs.compute-version.outputs.version }}"
           body_path: /tmp/changelog.md
           fail_on_unmatched_files: true
+          recreate_release: true
           files: release-assets/**
