@@ -212,7 +212,17 @@ jobs:
           reporter: 'java-junit'
           fail-on-error: false
 
-      # Step 19: Upload test results artifact.
+      # Step 19: Upload Linux staging artifact (on push to main or develop).
+      # Used by package-linux-deb to run CPack without rebuilding.
+      - name: Upload Linux staging artifact
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: aitown-staging-linux-${{ github.sha }}
+          path: build/aitown
+          retention-days: 30
+
+      # Step 20: Upload test results artifact.
       # if: always() — upload even on failure for post-mortem analysis.
       # Job-specific name (not runner.os-based) to avoid collision with coverage-linux.
       - name: Upload test results (build-linux)

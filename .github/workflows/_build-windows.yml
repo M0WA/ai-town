@@ -214,12 +214,16 @@ jobs:
           }
           Write-Host "default.mhr present."
 
-      # Step 19: Upload Windows binary artifact (only on push to main).
+      # Step 19: Upload Windows staging artifact (on push to main or develop).
       # Ninja single-config: executable is at build/aitown.exe (not build/Release/aitown.exe).
-      - name: Upload Windows binary artifact
-        if: github.ref == 'refs/heads/main'
+      # Includes DLLs and default.mhr so packaging jobs can run CPack without rebuilding.
+      - name: Upload Windows staging artifact
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
         with:
-          name: aitown-windows-${{ github.sha }}
-          path: build/aitown.exe
+          name: aitown-staging-windows-${{ github.sha }}
+          path: |
+            build/aitown.exe
+            build/*.dll
+            build/default.mhr
           retention-days: 30
