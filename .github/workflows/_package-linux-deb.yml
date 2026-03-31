@@ -14,14 +14,9 @@ on:
       vcpkg_commit_id:
         type: string
         required: true
-      bump_version:
+      pkg_version:
         type: string
-        required: false
-        default: ""
-      develop_version:
-        type: string
-        required: false
-        default: ""
+        required: true
 
 jobs:
   package-linux-deb:
@@ -89,15 +84,7 @@ jobs:
 
       - name: Resolve package version
         id: pkgver
-        env:
-          BUMP_VERSION: ${{ inputs.bump_version }}
-          DEVELOP_VERSION: ${{ inputs.develop_version }}
-        run: |
-          VERSION="${BUMP_VERSION}"
-          if [ -z "$VERSION" ]; then
-            VERSION="${DEVELOP_VERSION}"
-          fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${{ inputs.pkg_version }}" >> "$GITHUB_OUTPUT"
 
       - name: CMake configure
         run: |

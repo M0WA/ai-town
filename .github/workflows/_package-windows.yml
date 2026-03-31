@@ -12,14 +12,9 @@ on:
       vcpkg_commit_id:
         type: string
         required: true
-      bump_version:
+      pkg_version:
         type: string
-        required: false
-        default: ""
-      develop_version:
-        type: string
-        required: false
-        default: ""
+        required: true
 
 jobs:
   package-windows:
@@ -43,15 +38,7 @@ jobs:
       - name: Resolve package version
         id: pkgver
         shell: pwsh
-        env:
-          BUMP_VERSION: ${{ inputs.bump_version }}
-          DEVELOP_VERSION: ${{ inputs.develop_version }}
-        run: |
-          $version = $env:BUMP_VERSION
-          if (-not $version) {
-            $version = $env:DEVELOP_VERSION
-          }
-          echo "version=$version" >> $env:GITHUB_OUTPUT
+        run: echo "version=${{ inputs.pkg_version }}" >> $env:GITHUB_OUTPUT
 
       - name: CMake configure
         shell: pwsh
