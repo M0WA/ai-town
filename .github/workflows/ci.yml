@@ -215,6 +215,11 @@ jobs:
       contents: write
     timeout-minutes: 10
     steps:
+      - name: Checkout (for changelog)
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+        with:
+          fetch-depth: 0
+
       - name: Download Windows installer
         uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110  # v4.1.0
         with:
@@ -245,6 +250,38 @@ jobs:
           name: aitown-deb-ubuntu-noble-${{ github.sha }}
           path: ./release-assets/
 
+      # Generate changelog from commits since the previous version tag.
+      # Commits are grouped by conventional-commit prefix (feat/fix/ci/chore/docs/test).
+      # Falls back to "Initial release" when no prior tag exists.
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          extract() {
+            git log "$RANGE" --pretty=format:"%s" | grep -E "^$1" | sed "s/^$1[^:]*: /- /" || true
+          }
+          FEATS=$(extract "feat")
+          FIXES=$(extract "fix")
+          CI=$(extract "ci")
+          DOCS=$(extract "docs")
+          TESTS=$(extract "test")
+          CHORES=$(extract "chore")
+          BODY=""
+          [ -n "$FEATS" ]  && BODY="${BODY}### Features\n${FEATS}\n\n"
+          [ -n "$FIXES" ]  && BODY="${BODY}### Bug Fixes\n${FIXES}\n\n"
+          [ -n "$CI" ]     && BODY="${BODY}### CI/CD\n${CI}\n\n"
+          [ -n "$TESTS" ]  && BODY="${BODY}### Tests\n${TESTS}\n\n"
+          [ -n "$DOCS" ]   && BODY="${BODY}### Documentation\n${DOCS}\n\n"
+          [ -n "$CHORES" ] && BODY="${BODY}### Chores\n${CHORES}\n\n"
+          [ -z "$BODY" ]   && BODY="Initial release.\n"
+          printf "%b" "$BODY" > /tmp/changelog.md
+          echo "prev_tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
+
       # Create the version tag via REST API before softprops runs.
       # git push and softprops tag-creation both fail with GH013 pre-receive
       # hook violations; direct REST API calls are not subject to that hook.
@@ -267,5 +304,6 @@ jobs:
         with:
           tag_name: v${{ needs.compute-version.outputs.version }}
           name: "AI Town v${{ needs.compute-version.outputs.version }}"
+          body_path: /tmp/changelog.md
           fail_on_unmatched_files: true
           files: release-assets/**
