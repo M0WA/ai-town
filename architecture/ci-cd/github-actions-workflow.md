@@ -310,18 +310,35 @@ This step runs as the **first named step** in the `build-linux` job — before v
       name: coverage-report-${{ github.sha }}
       path: coverage_html/
       retention-days: 14
-  # After DLL verification (Windows job, on push to main only):
+  # After DLL verification (Windows job, on push to main or develop):
+  # Uploads staging artifact used by package-windows (no rebuild in packaging).
   # Ninja single-config: executable is at build/aitown.exe (not build/Release/aitown.exe).
-  - name: Upload Windows binary
-    if: github.ref == 'refs/heads/main'
+  - name: Upload Windows staging artifact
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
     with:
-      name: aitown-windows-${{ github.sha }}
-      path: build/aitown.exe
+      name: aitown-staging-windows-${{ github.sha }}
+      path: |
+        build/aitown.exe
+        build/*.dll
+        build/default.mhr
       retention-days: 30
   ```
 
-- **Artifact retention**: test XML retained 14 days (all three jobs: `build-linux`, `coverage-linux`, `build-windows`); coverage HTML report retained 14 days (same as test XML — both are diagnostic artifacts consumed during the CI review window); release binaries (Windows, on push to `main` only) retained 30 days. Every `upload-artifact` step MUST carry an explicit `retention-days:` value — never rely on the GitHub Actions default (90 days) or assume another job's step definition applies.
+  Linux build job must also upload a staging artifact for use by `package-linux-deb`:
+
+  ```yaml
+  # After test run (build-linux job, on push to main or develop):
+  - name: Upload Linux staging artifact
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+    with:
+      name: aitown-staging-linux-${{ github.sha }}
+      path: build/aitown
+      retention-days: 30
+  ```
+
+- **Artifact retention**: test XML retained 14 days (all three jobs: `build-linux`, `coverage-linux`, `build-windows`); coverage HTML report retained 14 days (same as test XML — both are diagnostic artifacts consumed during the CI review window); staging artifacts (`aitown-staging-windows-*`, `aitown-staging-linux-*`) and release installers retained 30 days. Every `upload-artifact` step MUST carry an explicit `retention-days:` value — never rely on the GitHub Actions default (90 days) or assume another job's step definition applies.
 - **`coverage-linux` is a separate, self-contained job** — it performs its own configure+build+test+lcov sequence with `-DENABLE_COVERAGE=ON`. It does NOT depend on artifacts from `build-linux` (which would require large artifact transfers). This means `coverage-linux` re-runs the full build, but with coverage instrumentation enabled; `build-linux` can run a faster non-coverage build for binary verification. Both jobs run in parallel. The `all-checks-pass` gate references both. **Naming note**: the job can be renamed `build-test-coverage-linux` for clarity, as long as the name matches in the `needs:` list.
 
   **Note**: Do NOT add a "Verify shader assets" step to this job. Shader file existence checks are source-tree checks that belong in `validate-assets` (see Phase 11i phasing note below). This keeps build jobs focused on compilation and test execution.
@@ -916,19 +933,50 @@ Does NOT run on pull requests. Does NOT block `all-checks-pass`.
 - **Runner**: `windows-latest`
 - **Timeout**: `timeout-minutes: 60`
 - **Permissions**: `contents: read`
-- **Dependencies**: `needs: [build-windows]` — quality gate only; packaging rebuilds from source.
+- **Dependencies**:
+  - On `main`: `needs: [bump-version, build-windows]` — version from `needs.bump-version.outputs.version`
+  - On `develop`: `needs: [develop-version, build-windows]` — version from `needs.develop-version.outputs.version`
+
+### Package version injection
+
+The version is passed to CMake/CPack via `-DCPACK_PACKAGE_VERSION=<version>` at configure time —
+do NOT modify `CMakeLists.txt`. Use a workflow expression to select the right version output:
+
+```yaml
+env:
+  PKG_VERSION: ${{ github.ref == 'refs/heads/main' && needs.bump-version.outputs.version || needs.develop-version.outputs.version }}
+```
+
+Then pass `-DCPACK_PACKAGE_VERSION=${{ env.PKG_VERSION }}` in the CMake configure step.
+
+### No-rebuild principle
+
+`package-windows` **must not recompile** — it downloads the pre-built staging artifact
+produced by `build-windows` and passes it directly to CPack. cmake configure is still
+required (generates `CPackConfig.cmake` and the install rules); only `cmake --build` is
+omitted.
+
+`build-windows` must upload a staging artifact (`aitown-staging-windows-${{ github.sha }}`)
+on every push to `main` **or** `develop` (not only `main`) containing:
+
+- `build/aitown.exe`
+- all `build/*.dll` files (GLEW, soft_oal, vcpkg runtime DLLs)
+- `build/default.mhr`
 
 ### Step sequence
 
 1. Checkout (`actions/checkout` SHA-pinned)
-2. Install NSIS via Chocolatey (`choco install nsis --no-progress -y`)
-3. `ilammy/msvc-dev-cmd` (SHA-pinned) — vcvarsall for CMake configure
-4. `lukka/run-vcpkg` (SHA-pinned) — restore vcpkg packages
-5. CMake configure with `-DAITOWN_ASSETS_DIR=assets -DBUILD_TESTING=OFF`
-6. CMake build: `cmake --build build --parallel`
+2. Resolve package version (see "Package version injection" above)
+3. Install NSIS via Chocolatey (`choco install nsis --no-progress -y`)
+4. `ilammy/msvc-dev-cmd` (SHA-pinned) — vcvarsall for CMake configure
+5. `lukka/run-vcpkg` (SHA-pinned) — restore vcpkg packages (needed for cmake configure)
+6. CMake configure with `-DAITOWN_ASSETS_DIR=assets -DBUILD_TESTING=OFF -DCPACK_PACKAGE_VERSION=<version>`
+   — generates `CPackConfig.cmake` and install rules; **no build step follows**
 7. Append `build\vcpkg_installed\x64-windows\bin` to `$env:GITHUB_PATH`
-8. CPack — `cpack -G NSIS -C Release` (run inside `build/`)
-9. Upload installer artifact (`name: aitown-installer-windows-<sha>`, `retention-days: 30`)
+8. Download staging artifact `aitown-staging-windows-${{ github.sha }}` into `build/`
+   — restores `aitown.exe`, DLLs, and `default.mhr` produced by `build-windows`
+9. CPack — `cpack -G NSIS -C Release` (run inside `build/`)
+10. Upload installer artifact (`name: aitown-installer-windows-<sha>`, `retention-days: 30`)
 
 ### CPack NSIS requirements in `CMakeLists.txt`
 
@@ -952,6 +1000,9 @@ Does NOT run on pull requests. Does NOT block `all-checks-pass`.
 
 Produces `.deb` packages for four Debian/Ubuntu distros via CPack. Runs only on push to `main`
 or `develop`. Does NOT run on pull requests. Does NOT block `all-checks-pass`.
+Version injection follows the same pattern as `package-windows` — `-DCPACK_PACKAGE_VERSION=<version>`
+at CMake configure time, using `needs.bump-version.outputs.version` on `main` and
+`needs.develop-version.outputs.version` on `develop`.
 
 ### Matrix
 
@@ -970,18 +1021,36 @@ or `develop`. Does NOT run on pull requests. Does NOT block `all-checks-pass`.
 - **Permissions**: `contents: read`
 - **Dependencies**: none (`needs:` omitted)
 
+### No-rebuild principle
+
+`package-linux-deb` **must not recompile** — it downloads the pre-built binary produced by
+`build-linux` and passes it to CPack after cmake configure. cmake configure is still required
+(generates `CPackConfig.cmake` and the install rules); only `cmake --build` is omitted.
+
+`build-linux` must upload a staging artifact (`aitown-staging-linux-${{ github.sha }}`) on
+every push to `main` **or** `develop` (not only main) containing:
+
+- `build/aitown` (the compiled binary)
+
+The same binary is used for all four distro matrix legs (bookworm, trixie, jammy, noble).
+This is acceptable because the binary is linked against vcpkg-managed libraries and the
+system-lib dependency set is stable across supported distros.
+
 ### Step sequence
 
 1. Install system build dependencies (apt-get: build-essential, cmake, ninja-build, git,
    curl, zip, unzip, tar, pkg-config, libgl1-mesa-dev, libx11-dev, libxrandr-dev,
    libxinerama-dev, libopenal-dev, libvorbis-dev, python3, dpkg-dev, fakeroot)
 2. Checkout (`actions/checkout` SHA-pinned)
-3. Install vcpkg (clone + `git checkout $VCPKG_COMMIT_ID` + bootstrap)
-4. Install vcpkg packages: `$VCPKG_ROOT/vcpkg install irrlicht --triplet x64-linux`
-5. CMake configure with `-DBUILD_TESTING=OFF -DCMAKE_INSTALL_PREFIX=/usr -DAITOWN_ASSETS_DIR=/usr/share/aitown/assets`
-6. CMake build: `cmake --build build --parallel`
-7. CPack DEB: `cpack -G DEB` (run inside `build/`)
-8. Upload `.deb` artifact (`name: aitown-deb-<distro>-<sha>`, `retention-days: 30`)
+3. Resolve package version (same pattern as `package-windows`)
+4. Install vcpkg (clone + `git checkout $VCPKG_COMMIT_ID` + build vcpkg-tool from source)
+5. Install vcpkg packages (needed for cmake configure)
+6. CMake configure with `-DBUILD_TESTING=OFF -DCMAKE_INSTALL_PREFIX=/usr -DAITOWN_ASSETS_DIR=/usr/share/aitown/assets -DCPACK_PACKAGE_VERSION=<version>`
+   — generates `CPackConfig.cmake` and install rules; **no build step follows**
+7. Download staging artifact `aitown-staging-linux-${{ github.sha }}` and place binary at `build/aitown`
+8. Set executable bit: `chmod +x build/aitown`
+9. CPack DEB: `cpack -G DEB` (run inside `build/`)
+10. Upload `.deb` artifact (`name: aitown-deb-<distro>-<sha>`, `retention-days: 30`)
 
 ### CPack DEB requirements in `CMakeLists.txt`
 
@@ -1004,40 +1073,85 @@ failures must not block PR merges — investigate before cutting a release.
 
 ## `bump-version` Job
 
-Calculates the next patch version from git history, updates `CMakeLists.txt`, commits, and pushes the version tag on every push to `main`.
+Calculates the next patch version from the latest git release tag (no source file modification)
+and pushes the new tag on every push to `main`. Exposes the version as a job output for the
+`release` job.
 
 - **Trigger**: `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`
 - **Runner**: `ubuntu-latest`
 - **Timeout**: `timeout-minutes: 5`
-- **Permissions**: `contents: write` (required to push commit and tag)
+- **Permissions**: `contents: write` (required to push the new tag)
+- **Outputs**: `version` — the new version string (e.g. `0.1.1`)
 
 ### Step sequence
 
 1. Checkout with `fetch-depth: 0` (full history required for `git describe`)
-2. Calculate next version and write back to repo:
+2. Calculate next version, create and push tag — **no file modifications**:
 
-   ```bash
-   CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo 'v0.0.0')
-   IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT#v}"
-   PATCH=$((PATCH + 1))
-   NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-   sed -i "s/project(aitown VERSION [0-9.]*)/project(aitown VERSION ${NEW_VERSION})/" CMakeLists.txt
-   git config user.name  "github-actions[bot]"
-   git config user.email "github-actions[bot]@users.noreply.github.com"
-   git add CMakeLists.txt
-   git commit -m "chore: bump version to v${NEW_VERSION} [skip ci]"
-   git tag "v${NEW_VERSION}"
-   git push --follow-tags
-   echo "AITOWN_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
+   ```yaml
+   - name: Calculate and tag version
+     id: bump
+     env:
+       DEFAULT_VERSION: v0.0.1
+     run: |
+       CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "${DEFAULT_VERSION}")
+       IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT#v}"
+       PATCH=$((PATCH + 1))
+       NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+       git config user.name  "github-actions[bot]"
+       git config user.email "github-actions[bot]@users.noreply.github.com"
+       git tag "v${NEW_VERSION}"
+       git push origin "v${NEW_VERSION}"
+       echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
    ```
 
-   The `[skip ci]` token in the commit message prevents the push from re-triggering the workflow. The tag is pushed atomically with the commit via `--follow-tags`.
+   No commit is made; only the tag is pushed. No `[skip ci]` workaround needed.
 
 ### Versioning contract
 
 - Versions use semantic versioning `MAJOR.MINOR.PATCH`. Only the patch component is auto-incremented by the pipeline.
-- To increment MAJOR or MINOR, manually update `CMakeLists.txt` before merging to `main` (the pipeline will then increment patch from the new base).
-- `CMakeLists.txt` is the canonical source of the current version at any point in time; git tags are the authoritative release markers.
+- Git tags (`v<MAJOR>.<MINOR>.<PATCH>`) are the sole authoritative release markers. `CMakeLists.txt` is NOT modified by the pipeline and does NOT carry the live version.
+- **Default start version on `main`**: `v0.0.1` (via the `DEFAULT_VERSION` env var). When no release tags exist, the first push to `main` produces `v0.0.2` (0.0.1 + 1). To override the start version, set a different `DEFAULT_VERSION` value in the workflow env block.
+- To increment MAJOR or MINOR, manually push a tag (e.g. `git tag v1.0.0 && git push origin v1.0.0`) before the next merge to `main`; the pipeline will then increment patch from that base.
+- The version is passed to packaging jobs via `needs.bump-version.outputs.version`.
+
+## `develop-version` Job
+
+Computes the package version string for `develop` builds and exposes it as a job output.
+Runs only on push to `develop`.
+
+- **Trigger**: `if: github.event_name == 'push' && github.ref == 'refs/heads/develop'`
+- **Runner**: `ubuntu-latest`
+- **Timeout**: `timeout-minutes: 5`
+- **Permissions**: `contents: read`
+- **Outputs**: `version` — the develop version string (e.g. `0.1.1-develop`)
+
+### Step sequence
+
+1. Checkout with `fetch-depth: 0`
+2. Derive version from latest release tag with `-develop` suffix:
+
+   ```yaml
+   - name: Calculate develop version
+     id: devver
+     env:
+       DEFAULT_VERSION: v0.0.0
+     run: |
+       CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "${DEFAULT_VERSION}")
+       BASE="${CURRENT#v}"
+       DEV_VERSION="${BASE}-develop"
+       echo "version=${DEV_VERSION}" >> "$GITHUB_OUTPUT"
+   ```
+
+   No tag is created; no files are modified. The `-develop` suffix is appended to the latest
+   release tag base (e.g. latest tag `v0.1.1` → `0.1.1-develop`). When no release tags exist
+   the version is `0.0.0-develop` (via `DEFAULT_VERSION=v0.0.0`).
+
+### Develop versioning contract
+
+- `develop` packages are identified by the `-develop` suffix. They are pre-release artifacts, not official releases — no GitHub release is created.
+- The base is always the latest **released** tag on the repository (shared across `main` and `develop`). After `main` is tagged `v0.1.1`, `develop` packages become `0.1.1-develop`.
+- No new tags are pushed for develop builds.
 
 ## `release` Job
 
@@ -1051,38 +1165,21 @@ Creates a GitHub release with attached installer and `.deb` packages after `bump
 
 ### Step sequence
 
-1. Checkout (reads updated `CMakeLists.txt` committed by `bump-version`):
+No checkout required — the version is read from `needs.bump-version.outputs.version` directly.
 
-   ```yaml
-   - name: Checkout
-     uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
-     with:
-       ref: main
-   ```
-
-   `ref: main` is critical — without it, `actions/checkout` defaults to the trigger SHA (the commit that triggered the workflow), which is before `bump-version` pushed its version-bump commit. With `ref: main`, the release job checks out the main branch HEAD, which includes the version bump, and reads the updated `CMakeLists.txt`.
-
-2. Read version:
-
-   ```bash
-   VERSION=$(grep -m1 'project(aitown VERSION' CMakeLists.txt \
-     | sed 's/.*VERSION \([0-9.]*\).*/\1/')
-   echo "AITOWN_VERSION=${VERSION}" >> "$GITHUB_ENV"
-   ```
-
-3. `actions/download-artifact` (SHA-pinned) — download `aitown-installer-windows-${{ github.sha }}` into `./release-assets/`
-4. `actions/download-artifact` (SHA-pinned) — download `aitown-deb-debian-bookworm-${{ github.sha }}` into `./release-assets/`
-5. `actions/download-artifact` (SHA-pinned) — download `aitown-deb-debian-trixie-${{ github.sha }}` into `./release-assets/`
-6. `actions/download-artifact` (SHA-pinned) — download `aitown-deb-ubuntu-jammy-${{ github.sha }}` into `./release-assets/`
-7. `actions/download-artifact` (SHA-pinned) — download `aitown-deb-ubuntu-noble-${{ github.sha }}` into `./release-assets/`
-8. Create GitHub release via `softprops/action-gh-release` (SHA-pinned — resolve via `gh release view --repo softprops/action-gh-release --json tagName,targetCommitish` at implementation time):
+1. `actions/download-artifact` (SHA-pinned) — download `aitown-installer-windows-${{ github.sha }}` into `./release-assets/`
+2. `actions/download-artifact` (SHA-pinned) — download `aitown-deb-debian-bookworm-${{ github.sha }}` into `./release-assets/`
+3. `actions/download-artifact` (SHA-pinned) — download `aitown-deb-debian-trixie-${{ github.sha }}` into `./release-assets/`
+4. `actions/download-artifact` (SHA-pinned) — download `aitown-deb-ubuntu-jammy-${{ github.sha }}` into `./release-assets/`
+5. `actions/download-artifact` (SHA-pinned) — download `aitown-deb-ubuntu-noble-${{ github.sha }}` into `./release-assets/`
+6. Create GitHub release via `softprops/action-gh-release` (SHA-pinned — resolve via `gh release view --repo softprops/action-gh-release --json tagName,targetCommitish` at implementation time):
 
    ```yaml
    - name: Create GitHub release
      uses: softprops/action-gh-release@<40-CHAR-SHA>  # resolve at implementation time
      with:
-       tag_name: v${{ env.AITOWN_VERSION }}
-       name: "AI Town v${{ env.AITOWN_VERSION }}"
+       tag_name: v${{ needs.bump-version.outputs.version }}
+       name: "AI Town v${{ needs.bump-version.outputs.version }}"
        fail_on_unmatched_files: true
        files: release-assets/**
    ```
