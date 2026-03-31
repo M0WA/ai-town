@@ -99,7 +99,8 @@ jobs:
             -DVCPKG_OVERLAY_PORTS=vcpkg-overlays \
             -DVCPKG_MANIFEST_FEATURES="" \
             -DVCPKG_INSTALLED_DIR=$VCPKG_ROOT/installed \
-            -DCPACK_PACKAGE_VERSION=${{ steps.pkgver.outputs.version }}
+            -DCPACK_PACKAGE_VERSION=${{ steps.pkgver.outputs.version }} \
+            "-DCPACK_PACKAGE_FILE_NAME=aitown-${{ steps.pkgver.outputs.version }}-${{ matrix.codename }}"
 
       - name: Download Linux staging artifact
         uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110  # v4.1.0
