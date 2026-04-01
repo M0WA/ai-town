@@ -14,8 +14,7 @@ Every deliverable in this phase is a **source-only or build-system edit** — no
 architecture spec files are touched (downstream spec updates, if needed, are
 captured as open items in the exit criteria).
 
-**Traceability**: each item references its proposal ID (e.g. `REN-1`) from
-`src_review.pdf` (generated alongside this phase file).
+**Traceability**: each item references its proposal ID (e.g. `REN-1`).
 
 ---
 
@@ -555,7 +554,6 @@ captured as open items in the exit criteria).
 - [ ] No new spec contradictions are introduced by the renames (specifically: if
   `getDemandPressurePct` is renamed per D-16, the corresponding spec rename must be
   tracked as a deliverable in a subsequent phase-11p spec-consistency pass).
-- [ ] `src_review.pdf` is present in the repository root and referenced from this file.
 
 ### Open Items
 
