@@ -12,11 +12,42 @@ and CI workflows. A third pass focused specifically on splitting large functions
 HIGH-priority proposals in full and the MEDIUM-priority proposals as secondary
 deliverables. LOW-priority proposals are listed as non-blocking stretch goals.
 
-Every deliverable in this phase is a **source-only or build-system edit** — no
-architecture spec files are touched (downstream spec updates, if needed, are
-captured as open items in the exit criteria).
+Most deliverables in this phase are **source-only or build-system edits**.
+Architecture spec updates required by the tech-squad review are listed in
+the **Spec Updates** section below and have already been applied.
 
 **Traceability**: each item references its proposal ID (e.g. `REN-1`).
+
+---
+
+### Spec Updates
+
+The following architecture spec files were updated as part of the tech-squad review
+(already applied — commit `881f52c`):
+
+- [x] **S-1** `architecture/graphics-architecture/scene-graph-ownership.md` — Added
+  `### Tile Node Eviction Sequence` subsection with a full 6-step contract for
+  `destroyTileNode(tileX, tileZ)` (lookup guard → texture-slot clear →
+  `m_driver->setMaterial(SMaterial{})` flush → `node->remove()` → `delete lodNode` →
+  erase from `m_buildingNodes`). Updated vehicle eviction section to cross-reference
+  the new tile section as the canonical pattern. Added step 4 to the `clearCity()`
+  contract: iterate `m_intersectionNodes`, run the eviction sequence on each node,
+  then call `m_intersectionNodes.clear()`.
+
+- [x] **S-2** `architecture/graphics-architecture/procedural-terrain.md` — Expanded the
+  LOD-rebuild CRITICAL note with an explicit 3-step eviction sequence (iterate
+  material slots → `m_driver->setMaterial(SMaterial{})` flush →
+  `SceneEntityManager::destroy()`) that must precede node removal. Added
+  cross-reference to `scene-graph-ownership.md §Tile Node Eviction Sequence`.
+
+- [x] **S-3** `architecture/testing/testability-architecture.md` — Added
+  `### NiceSimulationTestBase` subsection documenting: purpose (behavioral and
+  integration-style tests without exact call-count assertions), constructor params
+  (`NiceMock<MockRenderer>`, `NiceMock<MockAudioSystem>`, injected `ISimulationRNG*`
+  and `IClock*`), SetUp/TearDown sequences (explicit `sim_.reset()` in TearDown),
+  mock-type comparison table, and a three-way decision guide (StrictMock for
+  call-count unit tests, NiceMock for behavioral tests, NiceMock + RapidCheck for
+  property invariants).
 
 ---
 
