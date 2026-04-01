@@ -300,11 +300,13 @@ jobs:
           fi
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564  # v2.1.0
-        with:
-          tag_name: v${{ needs.compute-version.outputs.version }}
-          name: "AI Town v${{ needs.compute-version.outputs.version }}"
-          body_path: /tmp/changelog.md
-          fail_on_unmatched_files: true
-          recreate_release: true
-          files: release-assets/**
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ needs.compute-version.outputs.version }}"
+          # --clobber overwrites an existing release so retries are safe
+          gh release create "${TAG}" \
+            --title "AI Town ${TAG}" \
+            --notes-file /tmp/changelog.md \
+            --clobber \
+            release-assets/**
