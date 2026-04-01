@@ -8,7 +8,7 @@ Apply improvements identified in the tech-squad code review of `src/` (2026-03-3
 The review covered rendering, audio, simulation, UI, and the build/CI subsystems,
 producing structured proposals across five domains (rendering, audio, simulation, UI, build/CI),
 with additional improvements identified in a subsequent deep-dive review of `src/`, `tests/`,
-and CI workflows. This phase implements the
+and CI workflows. A third pass focused specifically on splitting large functions (>60 lines) and converting multi-branch if/else-if chains to `switch` statements or constexpr lookup tables. This phase implements the
 HIGH-priority proposals in full and the MEDIUM-priority proposals as secondary
 deliverables. LOW-priority proposals are listed as non-blocking stretch goals.
 
@@ -76,6 +76,10 @@ captured as open items in the exit criteria).
   `void logError(const std::string& msg)` private helpers in `IrrlichtRenderer` to
   eliminate the 15+ copies of the two-branch null-guard + `fprintf` fallback pattern
   (`if (m_logger) { m_logger->log(...); } else { fprintf(stderr, ...); }`). _(REN-27)_
+
+- [ ] **A-33** _(REN-36)_ Split `IrrlichtRenderer::placeRoad()` (~170 lines) into three
+  private helpers: `flattenRoadTerrain(tileX, tileZ)`, `rebuildRoadNeighbors(tileX, tileZ)`,
+  and `buildRoadSceneNode(tileX, tileZ)`, so each method has a single responsibility. _(REN-36)_
 
 ##### MEDIUM — best practices / simplification
 
@@ -150,6 +154,15 @@ captured as open items in the exit criteria).
   and `lodSwitchInDistance()` with `static constexpr float` arrays indexed by LOD level for
   clarity and easier extensibility. _(TER-2)_
 
+- [ ] **A-34** _(REN-37)_ Replace the 4-branch if/else-if heading-degree binning in
+  `moveVehicleAgent()` with a `switch` on a computed quadrant index (0–3), or a
+  `static constexpr` angle-range → direction-enum table, to make the binning logic
+  self-documenting. _(REN-37)_
+
+- [ ] **A-35** _(TER-3)_ Replace the 3-branch if/else-if LOD→grid-size mapping in
+  `TerrainSystem::processOneRebuild()` with a `static constexpr int kLODGridSizes[]` array
+  indexed by LOD level, parallel to the table approach proposed for LOD distances in A-28. _(TER-3)_
+
 ##### LOW — optional / stretch
 
 - [ ] **A-19** _(REN-19)_ Define a `struct PoolEntryBase { int ref_count; uint64_t lastAccessTimestamp; size_t vramBytes; }`
@@ -174,6 +187,17 @@ captured as open items in the exit criteria).
 - [ ] **A-32** _(REN-34)_ Either make `IRenderer::setZoneHoverColour()` pure-virtual (`= 0`)
   to match all other `IRenderer` methods, or add an explicit comment documenting why the
   default no-op body is intentional so that a concrete subclass cannot silently omit it. _(REN-34)_
+
+- [ ] **A-36** _(REN-38)_ Verify and update the `"Lighting=false: no light nodes in scene
+  yet (Phase 6+)"` comment in `spawnVehicleAgent()` — if Phase 6 has not added light nodes,
+  document why; if it has, remove the stale note. _(REN-38)_
+
+- [ ] **A-37** _(REN-39)_ Apply the same stale-comment check to the equivalent
+  `"no light nodes in the scene yet (Phase 6+)"` comment in `placeBuildingMesh()`. _(REN-39)_
+
+- [ ] **A-38** _(REN-40)_ Remove or update the Phase 5/6 terrain-texture commentary in
+  `rebuildTerrainChunk()` that describes texturing as a future addition — texture support is
+  already implemented. _(REN-40)_
 
 ---
 
@@ -295,6 +319,21 @@ captured as open items in the exit criteria).
   `AudioStream.h` to co-locate it with the `AudioStreamUtils` namespace and remove the
   confusing split between the two headers. _(AUD-36)_
 
+- [ ] **B-39** _(AUD-42)_ Extract the bar-boundary tracking block inside `refillStream()`
+  (distinct from the main-menu EOF branch covered by B-11) into a private
+  `updateBarBoundary(AudioStream& s, uint64_t samplesPlayed, ALint buffersQueued)` method. _(AUD-42)_
+
+- [ ] **B-40** _(AUD-43)_ Extract the duplicate idle-source and move-source AL state
+  initialisation sequences in `updateVehicleEngines()` into private helpers
+  `setupVehicleIdleSource(ALuint src, float basePitch)` and
+  `setupVehicleMoveSource(ALuint src, float basePitch)` to eliminate ~39 lines of
+  repeated AL property calls. _(AUD-43)_
+
+- [ ] **B-41** _(AUD-44)_ Extract the per-frame pitch/gain/position update block from
+  `updateVehicleEngines()` into a private
+  `updateVehicleEngineFrame(const VehicleAudioSlot& slot, ALuint idleSrc, ALuint moveSrc)`
+  to separate one-time initialisation from recurring updates in the 144-line function. _(AUD-44)_
+
 ##### LOW — optional / stretch
 
 - [ ] **B-19** _(AUD-22)_ Mark all `AudioStreamUtils` functions `[[nodiscard]]` and
@@ -337,6 +376,11 @@ captured as open items in the exit criteria).
   to the `reinterpret_cast<ALuint*>(m_sources)` call in the `AudioSystem` constructor to make
   the aliasing assumption explicit. _(AUD-41)_
 
+- [ ] **B-42** _(AUD-45)_ Extract the pitch and gain crossblend calculation in
+  `updateVehicleEngines()` into small named helpers (e.g. `vehicleEnginePitch(float speed,
+  float basePitch)`) to make the interpolation formula readable and independently
+  testable. _(AUD-45)_
+
 ---
 
 #### 3. Simulation clean-up (Group C)
@@ -371,6 +415,12 @@ captured as open items in the exit criteria).
   `m_budgetSurplusPct` (and optionally caches subtotals) so that `doEconomyTick()` can
   reuse the pre-computed values instead of calling all revenue/expense helpers twice per
   budget tick. _(SIM-7)_
+
+- [ ] **C-27** _(SIM-27)_ Split `doDensityUnlockTick()` (~295 lines) into focused private
+  helpers: extract a `getDensityUnlockThreshold(TierIndex)` lookup, a
+  `scanUnlockCandidates(zone, currentDensity, outTiles)` pass, and an
+  `applyDensityUpgrade(tileX, tileZ)` apply pass, reducing the monolithic function to an
+  orchestration loop. _(SIM-27)_
 
 ##### MEDIUM — best practices / magic numbers
 
@@ -422,6 +472,21 @@ captured as open items in the exit criteria).
 - [ ] **C-26** _(SIM-26)_ Replace the 5-branch if-else time-of-day classifier in `tick()` with a
   `static constexpr` table of `{upperHour, SimPeriod}` pairs iterated with a ranged for-loop,
   making time-window adjustments a single-line table edit. _(SIM-26)_
+
+- [ ] **C-28** _(SIM-28)_ Replace the 6-case `switch` mapping `tierIdx` to `(zone, density)`
+  pairs inside `doDensityUnlockTick()` with a `static constexpr` struct-array
+  `{ZoneType zone; DensityLevel density}` indexed by tier, eliminating the switch
+  body entirely. _(SIM-28)_
+
+- [ ] **C-29** _(SIM-29)_ Split `doDesirabilityTick()` (~158 lines) by extracting the
+  service-coverage BFS phase into `buildServiceCoverageMap(outCoveredTiles)` and the
+  per-tile desirability-score update into `applyDesirabilityScores(coveredTiles)`, leaving
+  `doDesirabilityTick()` as a thin orchestrator. (Note: C-4 covers only the boolean-scan
+  hoist; this is the full function split.) _(SIM-29)_
+
+- [ ] **C-30** _(SIM-30)_ Split `doPopulationTick()` (~72 lines) by extracting
+  `computeZoneGrowthDelta(ZoneType, tileCount)` and `accumulateHouseDemand()` helpers,
+  so the tick method only coordinates the calls. _(SIM-30)_
 
 ##### LOW — optional / stretch
 
@@ -481,6 +546,11 @@ captured as open items in the exit criteria).
 
 - [ ] **D-5** _(UI-2)_ Promote `ratingName(CityRatingTier)` from a file-local static in
   `HUD.cpp` to a free function declared in `src/ui/ui_format.h` (or `simulation_types.h`). _(UI-2)_
+
+- [ ] **D-23** _(UI-23)_ Split `UIManager::update()` (~397 lines) into private sub-methods:
+  `pollMainMenuRequests()`, `pollPauseMenuRequests()`, `updateModalDialogState()`, and
+  `updateHUDState()`, so the top-level `update()` becomes a thin dispatcher with a clear
+  phase ordering. _(UI-23)_
 
 ##### MEDIUM — best practices
 
@@ -666,6 +736,10 @@ captured as open items in the exit criteria).
   paragraph in the `--ignore-errors` section (both describe historical decisions, not current
   rationale). _(BUILD-32)_
 
+- [ ] **E-35** _(BUILD-35)_ Hoist the repeated `mkdir -p test_results` directory-creation
+  command into a single dedicated step that runs before all three `ctest` invocations in
+  both `_build-linux.yml` and `_coverage-linux.yml`, eliminating three per-run duplicates. _(BUILD-35)_
+
 ##### LOW — optional / stretch
 
 - [ ] **E-22** _(BUILD-22)_ Add an explicit configure-time error if `XXFV86VM_LIB` is not
@@ -704,6 +778,10 @@ captured as open items in the exit criteria).
 
 - [ ] **E-34** _(BUILD-34)_ Remove the `"(Phase 7)"` parenthetical hardening annotation from
   the DLL verification step comment in `_build-windows.yml`. _(BUILD-34)_
+
+- [ ] **E-36** _(BUILD-36)_ Refactor the `all-checks-pass` gate in `ci.yml` to iterate over a
+  newline-delimited list of job-result variables rather than hardcoding each of the 7 result
+  comparisons individually, making additions/removals a single-line change. _(BUILD-36)_
 
 ---
 
@@ -806,8 +884,9 @@ captured as open items in the exit criteria).
 
 ### Exit Criteria
 
-- [ ] All HIGH-priority deliverables (A-1–A-6, A-21–A-22, B-1–B-7, B-25–B-27, C-1–C-6,
-  D-1–D-5, E-1–E-7, F-1–F-4) are implemented and all tests pass (`make test`).
+- [ ] All HIGH-priority deliverables (A-1–A-6, A-21–A-22, A-33, B-1–B-7, B-25–B-27,
+  C-1–C-6, C-27, D-1–D-5, D-23, E-1–E-7, F-1–F-4) are implemented and all tests pass
+  (`make test`).
 - [ ] All MEDIUM-priority deliverables are implemented or explicitly deferred with a
   documented reason.
 - [ ] All existing unit, integration, and OpenGL tests pass unchanged under
