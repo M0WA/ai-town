@@ -30,9 +30,10 @@ captured as open items in the exit criteria).
 
 ##### HIGH — correctness / significant duplication
 
-- [ ] **A-1** _(REN-4 + REN-10)_ Add the missing `m_driver->setMaterial(SMaterial{})`
-  flush call to `destroyTileNode()`, `destroyVehicleNode()`, and `rebuildTerrainChunk()`
-  immediately after the texture-slot-clearing loop (labelled "Step 2" in each function).
+- [ ] **A-1** _(REN-4 + REN-10)_ The `m_driver->setMaterial(SMaterial{})` flush call is
+  **missing** from `destroyTileNode()`, `destroyVehicleNode()`, and `rebuildTerrainChunk()`
+  and must be **added** immediately after the texture-slot-clearing loop (labelled "Step 2"
+  in each function). Do not treat this as a verification task — the calls do not exist yet.
   The same call is already present in `clearCity()` and `despawnVehicleAgent()`; these
   three functions silently omit it, violating the eviction contract in
   `scene-graph-ownership.md`. _(REN-4, REN-10)_
@@ -135,7 +136,7 @@ captured as open items in the exit criteria).
 
 ##### HIGH — correctness / significant duplication
 
-- [ ] **B-1** _(AUD-1, AUD-2, AUD-3)_ Add `alCheckError_real()` after every AL call that
+- [ ] **B-1** _(AUD-1, AUD-2, AUD-3)_ Add `alCheckError()` after every AL call that
   currently has no error check: all `alSourceStop`, `alSourcei(AL_BUFFER, 0)` calls in
   `AudioSourcePool.cpp`; the setup block in `playSound()` and `playPositionalSound()`;
   and the three listener calls in `syncListenerToCamera()`. _(AUD-1, AUD-2, AUD-3)_
@@ -343,7 +344,8 @@ captured as open items in the exit criteria).
 
 - [ ] **D-2** _(UI-4)_ Remove `const` from `KeyBindings::undo` and `KeyBindings::save` to
   restore default copy/move assignment; enforce their non-rebindability via a runtime guard
-  in `load()`; delete `copyMutableFrom()`. _(UI-4)_
+  in `load()`; delete `copyMutableFrom()`. Before deleting, verify no test file calls
+  `copyMutableFrom()` (run `grep -r copyMutableFrom tests/`). _(UI-4)_
 
 - [ ] **D-3** _(UI-5)_ Move `KeyBindings::writeToFile()` body from the header to a new
   `key_bindings.cpp`. Replace the 11 individual `fprintf` calls with an `ostringstream`
@@ -352,7 +354,10 @@ captured as open items in the exit criteria).
 - [ ] **D-4** _(UI-3)_ Extract `WorldInteractionState` (activeTool, hoveredTile, zoneAnchor,
   overlay map, selectedZoneType, etc.) and `GameSessionState` (gameSessionActive,
   pendingNewGame, pendingLoadJson, pendingQuit, etc.) as private structs in `UIManager.h`.
-  Group the remaining member variables under clearly labelled `// --- section ---` comments. _(UI-3)_
+  Group the remaining member variables under clearly labelled `// --- section ---` comments.
+  If any test fixture currently accesses `UIManager` internal state members directly, add
+  `const` accessors (e.g., `getWorldInteractionStateForTest()`) or friend declarations to
+  preserve test access after extraction. _(UI-3)_
 
 - [ ] **D-5** _(UI-2)_ Promote `ratingName(CityRatingTier)` from a file-local static in
   `HUD.cpp` to a free function declared in `src/ui/ui_format.h` (or `simulation_types.h`). _(UI-2)_
@@ -436,9 +441,18 @@ captured as open items in the exit criteria).
 - [ ] **E-2** _(BUILD-4)_ Change `target_link_libraries(aitown_terrain PUBLIC aitown_render)`
   to `PRIVATE` to stop leaking Irrlicht and GLEW headers into the terrain test graph. _(BUILD-4)_
 
-- [ ] **E-3** _(BUILD-2)_ Audit `AITOWN_TESTING_ENABLED=1` on `aitown_ui PRIVATE`: either
-  move it to a separate `INTERFACE` library consumed only by test targets, or add an
-  explicit comment acknowledging the deviation from the "test-only" rule. _(BUILD-2)_
+- [ ] **E-3** _(BUILD-2)_ Audit the `AITOWN_TESTING_ENABLED=1` compile definition on
+  `aitown_ui`. Confirm it is set with the `PRIVATE` qualifier (not `PUBLIC` or
+  `INTERFACE`) so the flag does not leak into downstream consumers. Add an explanatory
+  comment in `CMakeLists.txt` directly alongside the
+  `target_compile_definitions(aitown_ui PRIVATE AITOWN_TESTING_ENABLED=1)` call that
+  reads, in substance: "`AITOWN_TESTING_ENABLED=1` MUST remain on `aitown_ui PRIVATE`
+  because `handleNewGameRequest` and `setGameSessionActiveForTest` are non-inline
+  functions defined in `UIManager.cpp`; compiling `aitown_ui` without this flag would
+  cause undefined-reference link errors in `ui_tests`. See
+  `architecture/testing/testability-architecture.md`." Do **not** move the definition to
+  an `INTERFACE` library or remove it from `aitown_ui`; doing so would break the
+  production-library link. _(BUILD-2)_
 
 - [ ] **E-4** _(BUILD-1)_ Create a CMake `INTERFACE` library `aitown_coverage_flags` and
   apply it only to the targets that feed lcov; remove `add_compile_options`/`add_link_options`
@@ -549,6 +563,8 @@ captured as open items in the exit criteria).
   are implemented and all tests pass (`make test`).
 - [ ] All MEDIUM-priority deliverables are implemented or explicitly deferred with a
   documented reason.
+- [ ] All existing unit, integration, and OpenGL tests pass unchanged under
+  `make test` — no regressions introduced by the refactoring.
 - [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
   reports zero errors.
 - [ ] No new spec contradictions are introduced by the renames (specifically: if
