@@ -1202,7 +1202,9 @@ set(CPACK_PACKAGE_VENDOR "AI Town Contributors")
 if(NOT CPACK_PACKAGE_VERSION)
   set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 endif()
-set(CPACK_PACKAGE_FILE_NAME "aitown-${CPACK_PACKAGE_VERSION}")
+if(NOT CPACK_PACKAGE_FILE_NAME)
+  set(CPACK_PACKAGE_FILE_NAME "aitown-${CPACK_PACKAGE_VERSION}")
+endif()
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AI Town — 3D city simulator")
 set(CPACK_PACKAGE_DESCRIPTION
 "AI Town is a Sim City-style 3D city simulator built with C++, Irrlicht, and OpenAL Soft.
