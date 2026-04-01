@@ -32,7 +32,26 @@
     ```
 
     **`recalculateBoundingBox()` type requirement**: The mesh pointer must be typed as `SMesh*` — see `scene-graph-ownership.md — LOD Swap — Bounding Box Requirement` for the full rule (do NOT use a `getMesh()` return value typed as `IMesh*`).
-  - **CRITICAL — LOD rebuild must call `node->remove()` on the old node**: When replacing a chunk's scene node with a new LOD level, the old `IMeshSceneNode*` must be explicitly removed via `SceneEntityManager::destroy()` (which calls `node->remove()`) **before** creating the new node. Failing to remove the old node leaves orphaned nodes accumulating in the scene graph each LOD transition, causing unbounded memory growth and redundant render calls.
+  - **CRITICAL — LOD rebuild must run the full eviction sequence on the old node**: When replacing a chunk's scene node with a new LOD level, the full eviction sequence must execute on the old node **before** creating the new node — in this order:
+
+    1. Iterate all material slots on the old node — for every texture unit `t` in
+       `[0, MATERIAL_MAX_TEXTURES)`, call `oldNode->getMaterial(t).setTexture(t, nullptr)`.
+       This releases the driver's reference to each `ITexture*` so
+       `TextureCache::evictUnreferenced()` can reclaim textures that are no longer
+       referenced by any live node.
+    2. `m_driver->setMaterial(SMaterial{})` — flush the driver's last-bound material
+       state. Irrlicht caches the last-bound material; omitting this flush leaves stale
+       texture pointers in the driver state until the next draw call overwrites them.
+    3. Remove the old node from the scene graph via `SceneEntityManager::destroy()`,
+       which calls `node->remove()`. Do NOT access the old node pointer after this step.
+
+    See `scene-graph-ownership.md §Tile Node Eviction Sequence` for the canonical
+    eviction pattern that terrain chunk rebuilds follow.
+
+    Failing to remove the old node (or to clear texture references before removal)
+    leaves orphaned nodes accumulating in the scene graph each LOD transition, causing
+    unbounded memory growth and redundant render calls, as well as preventing
+    unreferenced textures from being reclaimed by `evictUnreferenced()`.
   - **Deque pointer safety**: The `ChunkRebuildRequest` struct must store a **`uint64_t` chunk ID** (not a raw `IMeshSceneNode*`). Before processing a request, validate the chunk is still live in `TerrainSystem::m_activeChunks` by ID. If not found (chunk was unloaded while request was queued), discard the request without dereferencing any pointer.
   - **Deque deduplication** (prevents same-frame double rebuild): `TerrainSystem::update()` must maintain a per-frame `std::unordered_set<uint64_t> processedThisFrame`. Before processing a request, skip if `processedThisFrame` already contains the chunk ID. Also skip if `it->second.currentLOD == req.targetLOD` (chunk already at the requested level — prevents redundant rebuilds from stale queued requests). This ensures the "never transitions up and down in the same frame" invariant is structurally enforced, not just documented as a property of `LODNode`.
   - **`TerrainSystem::flushPendingRebuilds()`**: `TerrainSystem` exposes a `flushPendingRebuilds()` method called **once per frame** during the loading screen loop. It bypasses the normal 2-per-frame cap and processes as many rebuild requests as possible, but it is **not** a blocking loop-until-empty: it exits after a 100 ms CPU budget per call regardless of remaining queue depth, to prevent the loading screen from stalling visibly. `TerrainSystem::update(dt)` is also called every loading-screen frame; it continues draining any requests that `flushPendingRebuilds()` did not reach within its budget. Together, the two calls drain the rebuild deque progressively over multiple frames until empty. This cooperative approach eliminates the startup LOD thrashing that would otherwise occur if only the 2-per-frame normal cap were active, while still keeping the spinner animated and the UI responsive each frame.

@@ -581,10 +581,44 @@ stable integer ID assigned by the traffic simulation for the vehicle's lifetime.
 | `moveVehicle(vehicleId, x, y, z, yaw)` | Looks up `m_vehicleNodes[vehicleId]`. If missing, logs a warning and returns (caller must use `placeVehicle` for first-time placement). Otherwise updates `node->setPosition` and `node->setRotation(0, yaw, 0)` in-place. |
 | `removeVehicle(vehicleId)` | Calls `destroyVehicleNode(vehicleId)` (no-op when not found). |
 
+### Tile Node Eviction Sequence
+
+`destroyTileNode(tileX, tileZ)` is the canonical eviction helper for building
+(and road-tile) scene nodes stored in `m_buildingNodes`. Its contract is:
+
+1. Look up the `LODNode*` in `m_buildingNodes` by `(tileX, tileZ)`. If not found,
+   return immediately (no-op — caller may safely call on an absent tile).
+2. Iterate all material slots on the underlying scene node — for every texture unit
+   `t` in `[0, MATERIAL_MAX_TEXTURES)`, call
+   `lodNode->getNode()->getMaterial(t).setTexture(t, nullptr)`. This clears the
+   driver's reference to each `ITexture*` so `TextureCache::evictUnreferenced()`
+   can reclaim textures that are no longer referenced by any live node.
+3. `m_driver->setMaterial(SMaterial{})` — flush the driver's last-bound material
+   state. Irrlicht caches the last-bound material; omitting this flush leaves stale
+   texture pointers in the driver until the next draw call overwrites them, which
+   can delay eviction of unreferenced textures.
+4. `lodNode->getNode()->remove()` — detach the scene node from the scene graph and
+   release the scene manager's ownership. Do NOT access the node pointer after this
+   line; the scene manager may destroy it immediately.
+5. `delete lodNode` — free the `LODNode*` C++ wrapper. The wrapper is non-owning
+   after `node->remove()` (the Irrlicht scene manager released the node).
+6. Erase the entry from `m_buildingNodes`.
+
+**TextureCache integration**: after one or more `destroyTileNode()` calls, the
+caller must invoke `m_textureCache->evictUnreferenced()` to reclaim GPU memory
+from any textures that are now unreferenced. Calling `evictUnreferenced()` inside
+`destroyTileNode()` itself is not permitted — batching the eviction after the full
+demolish pass prevents redundant scans on bulk operations (e.g., `clearCity()`).
+
+**`clearCity()` exception**: `clearCity()` must NOT call `destroyTileNode()` in a
+loop — that method erases from `m_buildingNodes` during iteration, causing iterator
+invalidation. Use the bulk-clear pattern instead (see §City Reset — clearCity()).
+
 ### Vehicle eviction sequence
 
-`destroyVehicleNode(vehicleId)` runs the full eviction sequence per
-`scene-graph-ownership.md` (same pattern as `destroyTileNode`):
+`destroyVehicleNode(vehicleId)` runs the full eviction sequence following the same
+pattern as `destroyTileNode` (see §Tile Node Eviction Sequence above for the
+canonical steps). The vehicle-specific contract is:
 
 1. Iterate all material slots — call `mat.setTexture(t, nullptr)` for every texture
    unit `t` in `[0, MATERIAL_MAX_TEXTURES)`.
@@ -775,15 +809,24 @@ on a clean slate without reinitializing the renderer or device.
    (texture clear → `m_driver->setMaterial(SMaterial{})` → `node->remove()`), then
    `m_agentNodes.clear()` after the loop. Traffic vehicle scene nodes that persist from
    game 1 into game 2 would otherwise ghost in the scene.
-4. **Clear shared road SMesh buffers**: if `IrrlichtRenderer` maintains a persistent shared
+4. **Evict intersection signal nodes**: iterate `m_intersectionNodes` and apply the full
+   eviction sequence on each node (see §Intersection Signal Billboard Registry for the
+   canonical contract):
+   (1) for `t` in `[0, MATERIAL_MAX_TEXTURES)`: `node->getMaterial(t).setTexture(0, nullptr)`,
+   (2) `m_driver->setMaterial(SMaterial{})` — flush driver last-bound state,
+   (3) `node->remove()`. Call `m_intersectionNodes.clear()` once after the loop.
+   Although intersection signal billboards use no textures (solid-colour material), the
+   texture-clear and driver-flush steps are required for uniformity with the canonical
+   eviction pattern.
+5. **Clear shared road SMesh buffers**: if `IrrlichtRenderer` maintains a persistent shared
    `SMesh*` for batched road geometry (accumulated road segments), call its equivalent
    `clear()` / remove-all-mesh-buffers operation and `recalculateBoundingBox()`. Do NOT
    `->drop()` the mesh — it stays alive for reuse in the next game session. If roads use
    only per-tile nodes (all evicted in step 2), this step is a no-op.
-5. **Reset road-tile counters**: reset any renderer-side road-tile count or per-tile mesh
+6. **Reset road-tile counters**: reset any renderer-side road-tile count or per-tile mesh
    state that accumulates across `addRoadTile()` calls (e.g., a `m_roadTileCount` member
    on `IrrlichtRenderer`).
-6. **Do NOT remove terrain chunk nodes** — terrain is regenerated separately via
+7. **Do NOT remove terrain chunk nodes** — terrain is regenerated separately via
    `TerrainSystem::generate()` after `clearCity()` returns. Terrain nodes must not be touched
    by this method.
 
@@ -822,8 +865,8 @@ sequence:
 `clearCity()` is a pure-virtual method on `IRenderer`:
 
 ```cpp
-// Remove all building, road, and traffic-agent scene nodes from the scene graph and
-// reset road mesh buffers. Does NOT remove terrain chunk nodes — terrain is regenerated
-// separately.
+// Remove all building, road, traffic-agent, and intersection signal scene nodes from the
+// scene graph and reset road mesh buffers. Does NOT remove terrain chunk nodes — terrain
+// is regenerated separately.
 virtual void clearCity() = 0;
 ```

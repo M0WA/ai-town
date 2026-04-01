@@ -219,11 +219,7 @@ captured as open items in the exit criteria).
   helper that encapsulates the scan-for-free-slot plus priority-based eviction logic
   currently duplicated verbatim in `playSound()` and `playPositionalSound()`. _(AUD-4)_
 
-- [ ] **B-3** _(AUD-11)_ Resolve the `AudioSourcePool` dead-code situation: either delete
-  `AudioSourcePool.h/.cpp` entirely (option A — preferred for immediate clarity) and rely
-  on `AudioSystem`'s inline pool, or wire `AudioSystem` to use `AudioSourcePool`
-  exclusively and remove the inline duplicate state (option B — matches intended
-  architecture). Decision must be recorded as a comment in `AudioSystem.h`. _(AUD-11)_
+- [ ] **B-3** _(AUD-11)_ Wire `AudioSystem` to use `AudioSourcePool` exclusively (option B — matches intended architecture). Remove the inline pool state currently duplicated in `playSound()` and `playPositionalSound()`; delegate all source acquisition to `AudioSourcePool`. Record this architectural decision as a comment in `AudioSystem.h`. _(AUD-11)_
 
 - [ ] **B-4** _(AUD-12)_ Delete `src/audio/sound_ids.h` (stale predecessor). Update
   `src/simulation/CitySimulation.cpp` to `#include "src/interfaces/sound_ids.h"`.
@@ -902,6 +898,4 @@ captured as open items in the exit criteria).
 - **Spec rename tracking (D-16)**: If `getDemandPressureFraction()` rename is applied,
   a follow-up spec-consistency pass is needed to update `ICitySimulation.h` references
   in all architecture spec files.
-- **AudioSourcePool decision (B-3)**: The choice between option A (delete) and option B
-  (wire) must be made and documented before B-3 is implemented. The decision affects
-  the scope of the subsequent audio test coverage.
+- **AudioSourcePool decision (B-3)**: Option B has been mandated — `AudioSystem` is wired to use `AudioSourcePool` exclusively, with inline duplicate pool state removed. All subsequent audio test coverage (including B-13, B-18, B-32, and B-35) follows Option B and assumes `AudioSourcePool` is retained.

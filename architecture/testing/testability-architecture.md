@@ -1774,6 +1774,98 @@ protected:
 };
 ```
 
+### `NiceSimulationTestBase` Contract (Phase 11o)
+
+#### Purpose
+
+`NiceSimulationTestBase` is the base fixture for **behavioral and integration-style** simulation tests — tests that exercise a code path and assert on outcomes (return values, state changes, side-effects) **without asserting exact mock call counts** on every injected dependency. Use it when uninteresting calls to `renderer_` or `audio_` are noise rather than signal.
+
+Contrast with `CitySimulationUnitTest`, which uses `StrictMock<>` on all injected mocks and requires an explicit `EXPECT_CALL` for every call the system under test makes. `StrictMock` is correct for precision call-count assertions; it becomes boilerplate overhead when the test does not care about renderer or audio interactions.
+
+**Decision guide**:
+
+| Scenario | Use |
+|---|---|
+| Assert exact renderer/audio call counts (e.g., `placeBuildingMesh` × 1) | `CitySimulationUnitTest` (`StrictMock`) |
+| Assert simulation state outcome; renderer/audio calls are incidental | `NiceSimulationTestBase` (`NiceMock`) |
+| RapidCheck property invariant; randomness driven by RapidCheck generators | `CitySimulationPropertyTest` (`NiceMock`) |
+| Behavioral tests — need `NiceMock` but NOT RapidCheck | `NiceSimulationTestBase` (`NiceMock`) |
+
+`NiceSimulationTestBase` fills the gap between `CitySimulationUnitTest` (strict, precision) and `CitySimulationPropertyTest` (property-based). Property tests inject a placeholder `ManualRNG` and do NOT call `verifyAllConsumed()`. Behavioral tests that use `NiceSimulationTestBase` MAY call `verifyAllConsumed()` in the test body when exact RNG consumption counts matter — it is not suppressed at the fixture level.
+
+#### Constructor Parameters / Member Types
+
+All injected dependencies are identical to `CitySimulationUnitTest`, but wrapped in `NiceMock<>`:
+
+```cpp
+// Behavioral / integration-style tests — NiceMock suppresses unexpected-call warnings
+// on renderer_ and audio_ so tests can focus on simulation state assertions.
+// Use this base when exact call counts on renderer or audio are NOT the test focus.
+// For precise call-count assertions, use CitySimulationUnitTest (StrictMock) instead.
+class NiceSimulationTestBase : public ::testing::Test {
+protected:
+    ::testing::NiceMock<MockRenderer>    renderer_;
+    ::testing::NiceMock<MockAudioSystem> audio_;
+    // ManualRNG default sequence {0}: satisfies CitySimulation constructor requirement.
+    // Tests that need deterministic RNG draws should declare a LOCAL ManualRNG in the
+    // test body and inject it via a re-constructed sim_ (or use ON_CALL / rng_ override).
+    // TearDown() does NOT call rng_.verifyAllConsumed() — zero-revenue behavioral tests
+    // never consume the sequence; auto-verifying would throw for those tests.
+    ManualRNG                            rng_{{0}};
+    ManualClock                          clock_;
+    std::unique_ptr<CitySimulation>      sim_;
+
+    void SetUp() override {
+        sim_ = std::make_unique<CitySimulation>(&renderer_, &audio_, &rng_, &clock_);
+    }
+
+    // **Mandatory**: TearDown() MUST explicitly call sim_.reset() before the fixture
+    // destructs. This documents and enforces the destructor-path contract:
+    // CitySimulation must be destroyed before its injected mock dependencies
+    // (renderer_, audio_). NiceMock suppresses unexpected-call WARNINGS but does NOT
+    // protect against use-after-destroy if CitySimulation's destructor calls a mock
+    // method after that mock has been destroyed. The explicit sim_.reset() ensures
+    // correct destruction order regardless of member declaration order, making the
+    // contract immune to future fixture member reordering.
+    void TearDown() override {
+        // **Mandatory**: sim_.reset() must be called here.
+        // CitySimulation destructor must NOT call audio_ or renderer_ methods.
+        // This is an explicit design contract. If that contract changes, add EXPECT_CALL
+        // expectations BEFORE sim_.reset() to avoid use-after-destroy.
+        // NOTE: verifyAllConsumed() is NOT called here — see rng_ comment above.
+        sim_.reset();
+    }
+};
+```
+
+#### Mock Types
+
+| Member | Type in `NiceSimulationTestBase` | Type in `CitySimulationUnitTest` |
+|---|---|---|
+| `renderer_` | `NiceMock<MockRenderer>` | `StrictMock<MockRenderer>` |
+| `audio_` | `NiceMock<MockAudioSystem>` | `StrictMock<MockAudioSystem>` |
+| `rng_` | `ManualRNG{{0}}` (same) | `ManualRNG{{0}}` (same) |
+| `clock_` | `ManualClock` (same) | `ManualClock` (same) |
+| `sim_` | `unique_ptr<CitySimulation>` (same) | `unique_ptr<CitySimulation>` (same) |
+
+`NiceMock<MockAudioSystem>` silently ignores calls for which no `EXPECT_CALL` is set — including calls that must NOT occur. When a behavioral test needs to assert the **absence** of a specific call (e.g., no audio during a no-op tick), use an explicit `EXPECT_CALL(audio_, ...).Times(0)` — NiceMock will NOT catch it otherwise.
+
+#### SetUp / TearDown Sequences
+
+The SetUp/TearDown sequences follow the same pattern as `CitySimulationUnitTest`:
+
+1. **SetUp**: construct `sim_` from injected `renderer_`, `audio_`, `rng_`, `clock_`.
+2. **TearDown**: call `sim_.reset()` explicitly before the fixture destructs — this enforces the destructor-path contract. Mock objects (`renderer_`, `audio_`) are destroyed after `sim_` returns from `reset()`.
+3. **`verifyAllConsumed()` policy**: NOT called in `TearDown()`. Tests that require exact RNG consumption counts must call `rng_.verifyAllConsumed()` (or a local `ManualRNG::verifyAllConsumed()`) explicitly at the end of the test body.
+
+#### When to Choose Each Fixture
+
+- **`CitySimulationUnitTest` (`StrictMock`)**: the test is verifying that a specific renderer or audio method is called exactly N times. Any unexpected call is a test failure. Use for `placeBuildingMesh`, `placeRoadMesh`, `playPositionalSound`, etc. call-count assertions. Requires exhaustive `EXPECT_CALL` coverage of every call the code path under test makes.
+
+- **`NiceSimulationTestBase` (`NiceMock`)**: the test is verifying simulation state (tile zones, balances, density levels, service coverage, serialization round-trips, etc.) and renderer/audio calls are incidental. Unexpected calls are suppressed rather than failing. Reduces boilerplate when the test does not care about rendering side-effects. Still enforces absence of calls via explicit `EXPECT_CALL(...).Times(0)` when needed.
+
+- **`CitySimulationPropertyTest` (`NiceMock` + RapidCheck)**: property invariant tests driven by RapidCheck `rc::gen` generators. The `rng_{{0}}` member is a placeholder only; property tests must NOT call `verifyAllConsumed()` in `TearDown()`. Choose this fixture exclusively for `rc::check`-based tests.
+
 ### WorldInteractionTest Fixture (Phase 9b)
 
 `WorldInteractionTest` is the canonical test fixture for all Phase 9b world-interaction unit tests
