@@ -6,7 +6,9 @@
 
 Apply improvements identified in the tech-squad code review of `src/` (2026-03-30).
 The review covered rendering, audio, simulation, UI, and the build/CI subsystems,
-producing 124 structured proposals across four domains. This phase implements the
+producing structured proposals across five domains (rendering, audio, simulation, UI, build/CI),
+with additional improvements identified in a subsequent deep-dive review of `src/`, `tests/`,
+and CI workflows. This phase implements the
 HIGH-priority proposals in full and the MEDIUM-priority proposals as secondary
 deliverables. LOW-priority proposals are listed as non-blocking stretch goals.
 
@@ -26,7 +28,9 @@ captured as open items in the exit criteria).
 
 **Files:** `src/rendering/IrrlichtRenderer.cpp`, `src/rendering/IrrlichtRenderer.h`,
 `src/rendering/TextureCache.cpp`, `src/rendering/TextureCache.h`,
-`src/rendering/SceneEntityManager.cpp`, `src/rendering/render_constants.h`
+`src/rendering/SceneEntityManager.cpp`, `src/rendering/render_constants.h`,
+`src/rendering/LODNode.h`, `src/rendering/RenderSystem.h`,
+`src/terrain/TerrainSystem.cpp`, `src/terrain/TerrainSystem.h`
 
 ##### HIGH — correctness / significant duplication
 
@@ -62,6 +66,16 @@ captured as open items in the exit criteria).
 - [ ] **A-6** _(REN-9)_ Add a file-scope `static irr::video::SColor argbToSColor(uint32_t argb)`
   helper in `IrrlichtRenderer.cpp` and replace the four separate ARGB bit-shift/mask blocks
   with calls to it. _(REN-9)_
+
+- [ ] **A-21** _(REN-26)_ Remove `using namespace irr;` from `SceneEntityManager.h` (file scope
+  in a header); replace all unqualified `irr` names in the header with fully-qualified names
+  (e.g. `irr::scene::ISceneNode*`). Every TU that includes `SceneEntityManager.h` silently
+  imports the entire `irr` namespace, creating name-collision risk. _(REN-26)_
+
+- [ ] **A-22** _(REN-27)_ Extract `void logWarning(const std::string& msg)` and
+  `void logError(const std::string& msg)` private helpers in `IrrlichtRenderer` to
+  eliminate the 15+ copies of the two-branch null-guard + `fprintf` fallback pattern
+  (`if (m_logger) { m_logger->log(...); } else { fprintf(stderr, ...); }`). _(REN-27)_
 
 ##### MEDIUM — best practices / simplification
 
@@ -113,6 +127,29 @@ captured as open items in the exit criteria).
 - [ ] **A-18** _(REN-20)_ Hoist the repeated `std::string(AITOWN_ASSETS_DIR) + "/3d/vehicles/"` prefix
   out of the `vehicleMeshPath()` switch arms into a single `const std::string prefix` variable. _(REN-20)_
 
+- [ ] **A-23** _(REN-28)_ Replace all `unordered_map::count(k) > 0` / `unordered_set::count(k) > 0`
+  patterns with `::contains(k)` (C++20) across `IrrlichtRenderer.cpp`, `SceneEntityManager.cpp`,
+  and `TerrainSystem.cpp` (~12 call sites). _(REN-28)_
+
+- [ ] **A-24** _(REN-30)_ Change the three `std::vector<std::string>&` parameters in
+  the raw-pointer `SceneEntityManager::destroy()` overload to `const std::vector<std::string>&`
+  (the function only reads them). _(REN-30)_
+
+- [ ] **A-25** _(REN-32)_ Extract a `static std::string vehicleAtlasPath(int variantIndex)`
+  private helper in `IrrlichtRenderer.cpp`, parallel to the existing `vehicleMeshPath()`, to
+  deduplicate the inline atlas-path string construction in `spawnVehicleAgent()`. _(REN-32)_
+
+- [ ] **A-26** _(REN-35)_ Add `[[nodiscard]]` to `ITerrainQuery::getHeightAt()` and
+  `getSlopeDegrees()` virtual declarations (pure queries with no side-effects). _(REN-35)_
+
+- [ ] **A-27** _(TER-1)_ Replace the `std::stable_sort` on the full rebuild queue after every
+  push in `TerrainSystem::enqueueRebuild()` with `std::lower_bound` + `deque::insert` to avoid
+  O(n log n) per-push cost; the deque is maintained sorted by ascending distance. _(TER-1)_
+
+- [ ] **A-28** _(TER-2)_ Replace the 2-branch if-else chains in `TerrainSystem::lodSwitchOutDistance()`
+  and `lodSwitchInDistance()` with `static constexpr float` arrays indexed by LOD level for
+  clarity and easier extensibility. _(TER-2)_
+
 ##### LOW — optional / stretch
 
 - [ ] **A-19** _(REN-19)_ Define a `struct PoolEntryBase { int ref_count; uint64_t lastAccessTimestamp; size_t vramBytes; }`
@@ -125,6 +162,19 @@ captured as open items in the exit criteria).
   to `const std::vector<std::string>&`; add `inline` to `road_lod2_color` in
   `render_constants.h`. _(REN-21, REN-22, REN-23, REN-25)_
 
+- [ ] **A-29** _(REN-29)_ Promote `kBlockedArgb` from a function-local `constexpr` to
+  `render_constants.h` alongside the other zone-colour ARGB constants. _(REN-29)_
+
+- [ ] **A-30** _(REN-31)_ Add `[[nodiscard]]` to `LODNode::getCurrentLOD()` and
+  `getMesh()` (pure queries, no side-effects). _(REN-31)_
+
+- [ ] **A-31** _(REN-33)_ Add `[[nodiscard]]` to `RenderSystem::maxTextureSize()`,
+  `supportsS3TC()`, and `supportsAnisoFiltering()` (device-queried values, no side-effects). _(REN-33)_
+
+- [ ] **A-32** _(REN-34)_ Either make `IRenderer::setZoneHoverColour()` pure-virtual (`= 0`)
+  to match all other `IRenderer` methods, or add an explicit comment documenting why the
+  default no-op body is intentional so that a concrete subclass cannot silently omit it. _(REN-34)_
+
 ---
 
 #### 2. Audio clean-up (Group B)
@@ -132,7 +182,7 @@ captured as open items in the exit criteria).
 **Files:** `src/audio/AudioSystem.cpp`, `src/audio/AudioSystem.h`,
 `src/audio/AudioSourcePool.h`, `src/audio/AudioSourcePool.cpp`,
 `src/audio/AudioStream.h`, `src/audio/audio_constants.h`,
-`src/audio/sound_ids.h`, `src/interfaces/sound_ids.h`
+`src/audio/al_check.h`, `src/audio/sound_ids.h`, `src/interfaces/sound_ids.h`
 
 ##### HIGH — correctness / significant duplication
 
@@ -166,6 +216,19 @@ captured as open items in the exit criteria).
 - [ ] **B-7** _(AUD-6)_ Fix the `path.substr(path.size() - 4)` pattern in
   `processPreloadCommand()`: replace with a `hasSuffix()` helper that guards against
   short strings and avoids heap allocation. _(AUD-6)_
+
+- [ ] **B-25** _(AUD-28)_ Remove the stale `"Phase 3 stubs — no-op. Phase 7 replaces with real
+  AL error checking."` comment and the `/* Phase 7: real impl */` placeholder bodies from
+  `al_check.h`; replace with accurate documentation of the actual seam contract. _(AUD-28)_
+
+- [ ] **B-26** _(AUD-29)_ Remove the three-point stale responsibility list inside
+  `AudioSystem::update()` that describes work already fully implemented on the audio thread
+  (not in `update()`); replace with an accurate one-line description of what `update()` actually
+  does (or a note that it is intentionally minimal). _(AUD-29)_
+
+- [ ] **B-27** _(AUD-30)_ Remove the `"NOTE: Phase 10 deliverable … is also a Phase 10
+  deliverable and is implemented in the same Phase 10 commit"` implementation-planning note
+  from the `setMusicIntensity()` body; it belongs in the git log, not in shipping source. _(AUD-30)_
 
 ##### MEDIUM — best practices / simplification
 
@@ -207,6 +270,31 @@ captured as open items in the exit criteria).
 - [ ] **B-18** _(AUD-19)_ Rename `AudioSourcePool::SFXSourceSlot` to `PoolSFXEntry` (or
   similar) to distinguish it from `AudioSystem::SFXSlot`. _(AUD-19)_
 
+- [ ] **B-28** _(AUD-31)_ Update the comment block above `alCheckError_real` / `alcCheckError_real`
+  in `AudioSystem.cpp` (lines ~51–58) which misattributes their location by quoting a spec
+  line about `al_check.cpp`; the real implementations live in `AudioSystem.cpp` — the comment
+  should explain why rather than contradict the file layout. _(AUD-31)_
+
+- [ ] **B-29** _(AUD-32)_ Replace `std::max(0.0f, std::min(1.0f, t))` in
+  `applyCrossfadeGains()` with `std::clamp(t, 0.0f, 1.0f)` (C++17, already used elsewhere). _(AUD-32)_
+
+- [ ] **B-30** _(AUD-33)_ Extract a private `void setupNonPositionalSource(int sourceIdx)`
+  helper for the four-call sequence (`AL_SOURCE_RELATIVE`, `AL_POSITION`, `AL_ROLLOFF_FACTOR`,
+  `AL_VELOCITY`) copy-pasted verbatim in both `setupStingerSource()` and
+  `setupStreamSource()`. _(AUD-33)_
+
+- [ ] **B-31** _(AUD-34)_ Define `constexpr` `kAmbientCrossfadeDurationSeconds` separately
+  from `kMusicCrossfadeDurationSeconds` in `audio_constants.h` so the two crossfade categories
+  can be tuned independently; `beginAmbientCrossfade()` currently reuses the music constant. _(AUD-34)_
+
+- [ ] **B-32** _(AUD-35)_ Reuse `findEvictionCandidate()` (or extract a shared private helper)
+  in `AudioSourcePool::acquireVehicleEnginePair()` to eliminate the duplicated
+  priority-plus-distance eviction-candidate scan. _(AUD-35)_
+
+- [ ] **B-33** _(AUD-36)_ Move the `AudioStream` struct definition from `AudioSystem.h` to
+  `AudioStream.h` to co-locate it with the `AudioStreamUtils` namespace and remove the
+  confusing split between the two headers. _(AUD-36)_
+
 ##### LOW — optional / stretch
 
 - [ ] **B-19** _(AUD-22)_ Mark all `AudioStreamUtils` functions `[[nodiscard]]` and
@@ -229,12 +317,33 @@ captured as open items in the exit criteria).
   `static_assert(std::is_trivially_copyable_v<DuckState>, "DuckState must be trivially copyable")`
   in `AudioSystem.cpp`. _(AUD-27)_
 
+- [ ] **B-34** _(AUD-37)_ Rename the `src2` local variable in the main-menu EOF branch of
+  `refillStream()` to `mainMenuSrc` to distinguish it from the outer `src` loop variable. _(AUD-37)_
+
+- [ ] **B-35** _(AUD-38)_ Remove the stale `"use AudioSourcePool logic inline (pool object is
+  embedded in AudioSystem to keep the implementation self-contained in Phase 7)"` comment from
+  `playSound()`; it describes a historical Phase 7 design decision superseded by the current
+  `AudioSourcePool.h/.cpp` layout. _(AUD-38)_
+
+- [ ] **B-36** _(AUD-39)_ Define `constexpr std::chrono::milliseconds kAudioThreadWakeInterval{10}`
+  in `audio_constants.h` and use it in the `wait_for` call in `audioThreadFunc()` in place of the
+  raw `std::chrono::milliseconds(10)` literal. _(AUD-39)_
+
+- [ ] **B-37** _(AUD-40)_ Replace the manual `alGetError()` pre-clear + post-check pattern in
+  `allocateEFXFilters()` with `alCheckError()` calls to match the convention used everywhere
+  else in the file. _(AUD-40)_
+
+- [ ] **B-38** _(AUD-41)_ Add `static_assert(sizeof(ALuint) == sizeof(unsigned int))` adjacent
+  to the `reinterpret_cast<ALuint*>(m_sources)` call in the `AudioSystem` constructor to make
+  the aliasing assumption explicit. _(AUD-41)_
+
 ---
 
 #### 3. Simulation clean-up (Group C)
 
 **Files:** `src/simulation/CitySimulation.cpp`, `src/simulation/CitySimulation.h`,
-`src/simulation/simulation_constants.h`, `src/simulation/SaveSystem.cpp`
+`src/simulation/simulation_constants.h`, `src/simulation/SaveSystem.cpp`,
+`src/terrain/TerrainSystem.cpp`, `src/terrain/TerrainSystem.h`
 
 ##### HIGH — correctness / significant duplication
 
@@ -302,6 +411,17 @@ captured as open items in the exit criteria).
 
 - [ ] **C-17** _(SIM-12)_ Move `setMapDimensions()` body from the header to
   `CitySimulation.cpp`. _(SIM-12)_
+
+- [ ] **C-24** _(SIM-24)_ Replace the three fixed-length C-arrays `m_taxRates[3]`,
+  `m_demandPressurePct[3]`, and `m_lastMonthTaxRevenue[3]` in `CitySimulation.h` with
+  `std::array<float, 3>` to gain `fill()`, range-for, and bounds-checked `.at()`. _(SIM-24)_
+
+- [ ] **C-25** _(SIM-25)_ After C-24, replace the three explicit per-index zero-assignments in
+  `reset()` (`m_lastMonthTaxRevenue[0/1/2] = 0.0f`) with a single `.fill(0.0f)` call. _(SIM-25)_
+
+- [ ] **C-26** _(SIM-26)_ Replace the 5-branch if-else time-of-day classifier in `tick()` with a
+  `static constexpr` table of `{upperHour, SimPeriod}` pairs iterated with a ranged for-loop,
+  making time-window adjustments a single-line table edit. _(SIM-26)_
 
 ##### LOW — optional / stretch
 
@@ -403,6 +523,13 @@ captured as open items in the exit criteria).
 - [ ] **D-16** _(UI-19)_ Rename `ICitySimulation::getDemandPressurePct()` →
   `getDemandPressureFraction()` (returns `float` in `[0,1]`, not a percentage). Update
   all callers. The rename resolves the off-by-100 hazard documented at the declaration site. _(UI-19)_
+
+- [ ] **D-21** _(UI-21)_ Declare `m_bindings` as `const KeyBindings` in `CameraController.h`;
+  it is set once in the constructor initialiser list and never reassigned. _(UI-21)_
+
+- [ ] **D-22** _(UI-22)_ Change the `m_overlayMap` key computation in `UIManager` from `int`
+  arithmetic to `static_cast<int64_t>(tileZ) * m_mapTilesX + tileX` and update the map type
+  to `std::unordered_map<int64_t, ...>` to prevent signed-integer overflow on large maps. _(UI-22)_
 
 ##### LOW — optional / stretch
 
@@ -523,6 +650,22 @@ captured as open items in the exit criteria).
 - [ ] **E-21** _(BUILD-21)_ Add `name:` labels to the `ilammy/msvc-dev-cmd` and
   `lukka/run-vcpkg` steps in `_package-windows.yml`. _(BUILD-21)_
 
+- [ ] **E-30** _(BUILD-30)_ Remove all `"Phase N:"` / `"Phase N delivers..."` / `"Phase N
+  replaces..."` historical narrative comments from `CMakeLists.txt` library blocks: the
+  `aitown_render` Phase 1 block, `aitown_audio` Phase 7 block, `aitown_sim` Phase 6/11 block,
+  `aitown_ui` Phase 8 "Do NOT edit" note, `aitown_terrain` Phase 3/5 history, `KeyBindingsPanel`
+  Phase 11c label, Phase 11l Deliverable 9 label on the Irrlicht PRIVATE note, Phase 9 label on
+  `aitown_benchmark`, and the Phase 11m prefix on the `AITOWN_TESTING_ENABLED` comment. _(BUILD-30)_
+
+- [ ] **E-31** _(BUILD-31)_ Renumber (or remove) the out-of-sequence `# Step N:` step annotations
+  in `_build-linux.yml` and `_coverage-linux.yml`; the numbering skips Steps 2, 3, 5–7
+  entirely, making cross-referencing confusing. _(BUILD-31)_
+
+- [ ] **E-32** _(BUILD-32)_ Remove stale prose from `_coverage-linux.yml`: the `"lcov --summary
+  informational step REMOVED in Phase 5"` notice and the `"At Phase 0 only smoke tests exist…"`
+  paragraph in the `--ignore-errors` section (both describe historical decisions, not current
+  rationale). _(BUILD-32)_
+
 ##### LOW — optional / stretch
 
 - [ ] **E-22** _(BUILD-22)_ Add an explicit configure-time error if `XXFV86VM_LIB` is not
@@ -555,12 +698,116 @@ captured as open items in the exit criteria).
   in `CMakeLists.txt` (lines 54–61) given the project's cmake_minimum_required of 3.21
   already ships a `FindOpenAL.cmake` that creates the target natively. _(BUILD-29)_
 
+- [ ] **E-33** _(BUILD-33)_ Collapse the per-phase check-number inventory in the
+  `_validate-assets.yml` header comment to a single line stating the current highest check
+  number so it stays accurate without requiring incremental per-phase updates. _(BUILD-33)_
+
+- [ ] **E-34** _(BUILD-34)_ Remove the `"(Phase 7)"` parenthetical hardening annotation from
+  the DLL verification step comment in `_build-windows.yml`. _(BUILD-34)_
+
+---
+
+#### 6. Testing clean-up (Group F)
+
+**Files:** `tests/` (all subdirectories), `tests/ui/MockUIBackend.h`,
+`tests/simulation/SimulationTestBase.h`, `CMakeLists.txt` (test source annotations)
+
+##### HIGH — correctness / significant duplication
+
+- [ ] **F-1** _(TEST-1)_ In the `cs()` downcast helpers in `population_test.cpp`,
+  `undo_system_test.cpp`, and `service_coverage_test.cpp`, replace `EXPECT_NE(p, nullptr)`
+  with `ASSERT_NE(p, nullptr)` — `EXPECT_NE` continues execution after a null, causing a
+  crash in `runTicks()` rather than a clean test failure. _(TEST-1)_
+
+- [ ] **F-2** _(TEST-2)_ Extract `NiceSimulationTestBase` (mirroring `SimulationTestBase` but
+  with `NiceMock`) to eliminate the duplicated `NiceMock` construction pattern in the 8
+  NiceMock-based simulation fixtures that independently replicate the same members, `SetUp`,
+  `TearDown`, `cs()`, and `runTicks()`. _(TEST-2)_
+
+- [ ] **F-3** _(TEST-3)_ Extract a `UITestFixtureBase` class (or free helper
+  `setupStandardBackendStubs()`) in a new `tests/ui/UITestBase.h` to eliminate the identical
+  8-call `ON_CALL` block (`addStaticText`, `addButton`, `getVirtualWidth`, `getVirtualHeight`,
+  `isElementVisible`, `isElementEnabled`, `getElementRect`, …) duplicated across 27 UI test
+  fixture `SetUp()` methods. _(TEST-3)_
+
+- [ ] **F-4** _(TEST-4)_ Centralise `makeKeyDown`, `makeClick`, `makeMouseButtonDown`, and
+  equivalent `InputEvent` factory functions in a new `tests/ui/input_event_helpers.h` to
+  replace the 15+ file-local identical definitions scattered across UI test files. _(TEST-4)_
+
+##### MEDIUM — stale comments / naming / assertions
+
+- [ ] **F-5** _(TEST-5)_ In `UIManagerModalTest::SetUp()` (line ~41), replace the `nullptr`
+  `IClock*` and its stale `"Phase 3 stubs do not dereference the clock pointer"` comment with
+  a real `ManualClock` instance, matching every other fixture in the file. _(TEST-5)_
+
+- [ ] **F-6** _(TEST-6)_ Rename all `*_InPhase3Stub` and `*_Phase3*` test names in
+  `ui_manager_modal_test.cpp` (e.g. `HasActiveModal_ReturnsFalse_InPhase3Stub` →
+  `HasActiveModal_BeforeModalShown_ReturnsFalse`) and remove `"Phase 3 stub"` qualifiers from
+  assertion failure message strings. _(TEST-6)_
+
+- [ ] **F-7** _(TEST-7)_ Either implement real assertions in the `EscapeClosesSettings*` stub
+  tests in `ui_manager_modal_test.cpp` (commented `"Phase 6 replaces SUCCEED() with real
+  assertions"`) or delete the empty stubs — both `UIManager` Escape-routing paths are fully
+  implemented and testable. _(TEST-7)_
+
+- [ ] **F-8** _(TEST-8)_ Replace the four `"Phase 10:"` comment prefixes in
+  `SimulationTestBase::SetUp()` with plain explanatory prose (e.g. `"tick() calls
+  setMusicIntensity() once per budget tick — suppress in base fixture"`) so the fixture is
+  self-documenting without version watermarks. _(TEST-8)_
+
+- [ ] **F-9** _(TEST-9)_ Remove `"Phase N stub"` / `"Phase 6 stub — full impl in Phase 11"`
+  inline comments on `save_system_test.cpp` and `undo_system_test.cpp` in the
+  `simulation_tests` source list in `CMakeLists.txt`; both phases are complete. _(TEST-9)_
+
+- [ ] **F-10** _(TEST-10)_ Replace hardcoded fund literals (`500000.0f`, `1000000.0f`,
+  `200000.0f`) in `simulation_comprehensive_integration_test.cpp` with
+  `SimulationConstants::starting_funds_normal / _easy / _hard` so mismatches produce a
+  named constant mismatch rather than an unexplained numeric failure. _(TEST-10)_
+
+- [ ] **F-11** _(TEST-11)_ Add at least one non-trivial `EXPECT_*` assertion to each
+  `SUCCEED()`-only test body in `city_simulation_extra_test.cpp` and `economy_test.cpp`
+  that sets up multi-tile state but asserts nothing — these tests inflate test count without
+  verifying any behaviour. _(TEST-11)_
+
+- [ ] **F-12** _(TEST-12)_ Remove the 16 `"Phase 3 stub bodies"` / `"Phase 3 no-ops"` comment
+  blocks throughout `UIManagerTransitionTest` and `NotificationManagerStandaloneTest` in
+  `ui_manager_modal_test.cpp`; the described methods have real implementations. _(TEST-12)_
+
+##### LOW — optional / stretch
+
+- [ ] **F-13** _(TEST-13)_ Unify `NiceCoverageTest` and `NiceExtraCoverageTest` in
+  `city_simulation_extra_test.cpp` (identical members, `SetUp`, `TearDown`, `cs()`,
+  `runTicks()`) into a single fixture, or have `NiceExtraCoverageTest` inherit from
+  `NiceCoverageTest`. _(TEST-13)_
+
+- [ ] **F-14** _(TEST-14)_ In `EconomyTest`, either switch `audio_` from `StrictMock` to
+  `NiceMock` or remove the blanket `EXPECT_CALL(audio_, playPositionalSound(...)).Times(AnyNumber())`
+  suppression — the combination silently reduces `StrictMock` to `NiceMock` behaviour for
+  that method. _(TEST-14)_
+
+- [ ] **F-15** _(TEST-15)_ Derive `PlacementConflictTest` from `SimulationTestBase` instead
+  of reimplementing all 8 `EXPECT_CALL` suppressions and construction boilerplate (~35 duplicate
+  lines). _(TEST-15)_
+
+- [ ] **F-16** _(TEST-16)_ Rename the `UIManagerModalTest_Phase8` fixture class to
+  `UIManagerModalBehaviourTest` (or similar) to remove the `_Phase8` delivery watermark from CI
+  test output. _(TEST-16)_
+
+- [ ] **F-17** _(TEST-17)_ Remove ordinal delivery labels (`"Method 19 — Phase 10 addition"`,
+  `"Method 20 — repositions…"`) from `MockUIBackend.h` and replace with plain behavioural
+  comments describing what each method does. _(TEST-17)_
+
+- [ ] **F-18** _(TEST-18)_ Update the `save_system_test.cpp` file header which says
+  `"stub implementations"` and `"real classes are not yet available"` to describe the file's
+  current role: contract-level tests against a hand-written stub that avoids disk I/O, kept
+  alongside `save_system_real_test.cpp`. _(TEST-18)_
+
 ---
 
 ### Exit Criteria
 
-- [ ] All HIGH-priority deliverables (A-1–A-6, B-1–B-7, C-1–C-6, D-1–D-5, E-1–E-7)
-  are implemented and all tests pass (`make test`).
+- [ ] All HIGH-priority deliverables (A-1–A-6, A-21–A-22, B-1–B-7, B-25–B-27, C-1–C-6,
+  D-1–D-5, E-1–E-7, F-1–F-4) are implemented and all tests pass (`make test`).
 - [ ] All MEDIUM-priority deliverables are implemented or explicitly deferred with a
   documented reason.
 - [ ] All existing unit, integration, and OpenGL tests pass unchanged under
