@@ -304,9 +304,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v${{ needs.compute-version.outputs.version }}"
-          # --clobber overwrites an existing release so retries are safe
+          # Delete existing release for this tag (idempotent retry), ignore errors
+          gh release delete "${TAG}" --yes 2>/dev/null || true
           gh release create "${TAG}" \
             --title "AI Town ${TAG}" \
             --notes-file /tmp/changelog.md \
-            --clobber \
             release-assets/**
