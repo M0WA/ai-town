@@ -851,13 +851,13 @@ bool ModalDialog::onEvent(const InputEvent& event) {
 
     // Mouse clicks on buttons
     if (event.type == InputEvent::Type::MouseButtonDown && event.button == 0) {
-        Rect primary   = m_backend->getElementRect(m_btnPrimary);
-        Rect secondary = m_backend->getElementRect(m_btnSecondary);
+        UIRect primary   = m_backend->getElementRect(m_btnPrimary);
+        UIRect secondary = m_backend->getElementRect(m_btnSecondary);
 
         int mx = event.x;
         int my = event.y;
 
-        auto hitTest = [](int mx, int my, Rect r) {
+        auto hitTest = [](int mx, int my, UIRect r) {
             return mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h;
         };
 
@@ -877,7 +877,7 @@ bool ModalDialog::onEvent(const InputEvent& event) {
             return onEvent(enterEvent);
         }
         if (m_backend->isElementVisible(m_btnTertiary)) {
-            Rect tertiary = m_backend->getElementRect(m_btnTertiary);
+            UIRect tertiary = m_backend->getElementRect(m_btnTertiary);
             if (hitTest(mx, my, tertiary)) {
                 m_focusedButton = 2;
                 InputEvent enterEvent;
@@ -887,7 +887,7 @@ bool ModalDialog::onEvent(const InputEvent& event) {
             }
         }
         if (m_backend->isElementVisible(m_btnBack)) {
-            Rect back = m_backend->getElementRect(m_btnBack);
+            UIRect back = m_backend->getElementRect(m_btnBack);
             if (hitTest(mx, my, back)) {
                 m_focusedButton = 3;
                 InputEvent enterEvent;

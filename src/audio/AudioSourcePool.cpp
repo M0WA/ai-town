@@ -1,6 +1,7 @@
 // AudioSourcePool.cpp — Source pool implementation.
 #include "src/audio/AudioSourcePool.h"
-#include "src/audio/AudioSystem.h"   // for onSourceRecycled forward call
+#include "src/audio/AudioSystem.h"   // for onSourceRecycled
+#include "src/audio/al_check.h"      // alCheckError
 
 #include <AL/al.h>
 #include <algorithm>
@@ -13,7 +14,7 @@
 AudioSourcePool::AudioSourcePool(
     unsigned int* sources,
     float*        occlusionGainCurrent,
-    void*         audioSystem)
+    AudioSystem*  audioSystem)
     : m_sources(sources)
     , m_occlusionGainCurrent(occlusionGainCurrent)
     , m_audioSystem(audioSystem)
@@ -52,8 +53,7 @@ int AudioSourcePool::findEvictionCandidate(int upperBound, SoundPriority callerP
 }
 
 void AudioSourcePool::callOnSourceRecycled(int idx) {
-    // Cast through void* to avoid circular header include.
-    reinterpret_cast<AudioSystem*>(m_audioSystem)->onSourceRecycled(idx);
+    m_audioSystem->onSourceRecycled(idx);
 }
 
 // ---------------------------------------------------------------------------
@@ -70,10 +70,10 @@ int AudioSourcePool::acquireSFXSource(SoundPriority priority, float listenerDist
     // Try to find a free slot.
     int idx = findFreeSFXSource(upperBound);
     if (idx >= 0) {
-        m_sfxSlots[idx].occupied        = true;
-        m_sfxSlots[idx].priority        = priority;
+        m_sfxSlots[idx].occupied           = true;
+        m_sfxSlots[idx].priority           = priority;
         m_sfxSlots[idx].listenerDistanceSq = listenerDistanceSq;
-        m_sfxSlots[idx].buffer          = 0;
+        m_sfxSlots[idx].buffer             = 0;
         return idx;
     }
 
@@ -86,22 +86,34 @@ int AudioSourcePool::acquireSFXSource(SoundPriority priority, float listenerDist
 
     // Evict the candidate.
     alSourceStop(m_sources[evictIdx]);
+    alCheckError("acquireSFXSource:alSourceStop");
     alSourcei(m_sources[evictIdx], AL_BUFFER, 0);
+    alCheckError("acquireSFXSource:alSourcei(AL_BUFFER,0)");
     callOnSourceRecycled(evictIdx);
 
-    m_sfxSlots[evictIdx].occupied        = true;
-    m_sfxSlots[evictIdx].priority        = priority;
+    m_sfxSlots[evictIdx].occupied           = true;
+    m_sfxSlots[evictIdx].priority           = priority;
     m_sfxSlots[evictIdx].listenerDistanceSq = listenerDistanceSq;
-    m_sfxSlots[evictIdx].buffer          = 0;
+    m_sfxSlots[evictIdx].buffer             = 0;
     return evictIdx;
 }
 
 void AudioSourcePool::releaseSFXSource(int idx) {
     if (idx < 0 || idx >= kEvictableSFXCount) return;
     alSourceStop(m_sources[idx]);
+    alCheckError("releaseSFXSource:alSourceStop");
     alSourcei(m_sources[idx], AL_BUFFER, 0);
+    alCheckError("releaseSFXSource:alSourcei(AL_BUFFER,0)");
     callOnSourceRecycled(idx);
-    m_sfxSlots[idx] = SFXSourceSlot{};
+    m_sfxSlots[idx] = PoolSFXEntry{};
+}
+
+void AudioSourcePool::notifyFreed(int idx) {
+    // Called by cleanupFinishedSFX (audio thread) after it has already stopped
+    // and detached the source. Only resets the pool's occupied tracking — no AL
+    // calls are made here to avoid duplicating work the audio thread already did.
+    if (idx < 0 || idx >= kEvictableSFXCount) return;
+    m_sfxSlots[idx] = PoolSFXEntry{};
 }
 
 void AudioSourcePool::markOccupied(int idx, SoundPriority priority,
@@ -158,17 +170,18 @@ int AudioSourcePool::acquireVehicleEnginePair(int& outIdle, int& outMove,
     }
 
     if (freeSlot < 0) {
-        // All pair slots occupied — evict the lowest-priority / greatest-distance pair.
-        int   evictSlot  = -1;
-        int   evictPri   = vehiclePriority + 1; // evict only if strictly lower
-        float evictDist  = -1.f;
-        for (int i = 0; i < kMaxVehiclePairs; ++i) {
-            int pri = m_vehiclePairs[i].priority;
-            float dist = m_vehiclePairs[i].listenerDistanceSq;
-            if (pri < evictPri || (pri == evictPri && dist > evictDist)) {
-                evictSlot = i;
-                evictPri  = pri;
-                evictDist = dist;
+        // All pair slots occupied — use findEvictionCandidate to select the SFX slot to
+        // evict, then find which vehicle pair owns it (B-32).
+        int sfxEvictIdx = findEvictionCandidate(kTransientReserveStart,
+                                                 static_cast<SoundPriority>(vehiclePriority));
+        int evictSlot = -1;
+        if (sfxEvictIdx >= 0) {
+            for (int i = 0; i < kMaxVehiclePairs; ++i) {
+                if (m_vehiclePairs[i].idleSourceIdx == sfxEvictIdx ||
+                    m_vehiclePairs[i].moveSourceIdx == sfxEvictIdx) {
+                    evictSlot = i;
+                    break;
+                }
             }
         }
         if (evictSlot < 0) return -1;  // Cannot evict
@@ -177,13 +190,17 @@ int AudioSourcePool::acquireVehicleEnginePair(int& outIdle, int& outMove,
         int idleIdx = m_vehiclePairs[evictSlot].idleSourceIdx;
         int moveIdx = m_vehiclePairs[evictSlot].moveSourceIdx;
         alSourceStop(m_sources[idleIdx]);
+        alCheckError("acquireVehicleEnginePair:evict:alSourceStop(idle)");
         alSourceStop(m_sources[moveIdx]);
+        alCheckError("acquireVehicleEnginePair:evict:alSourceStop(move)");
         alSourcei(m_sources[idleIdx], AL_BUFFER, 0);
+        alCheckError("acquireVehicleEnginePair:evict:alSourcei(idle,AL_BUFFER,0)");
         alSourcei(m_sources[moveIdx], AL_BUFFER, 0);
+        alCheckError("acquireVehicleEnginePair:evict:alSourcei(move,AL_BUFFER,0)");
         callOnSourceRecycled(idleIdx);
         callOnSourceRecycled(moveIdx);
-        m_sfxSlots[idleIdx] = SFXSourceSlot{};
-        m_sfxSlots[moveIdx] = SFXSourceSlot{};
+        m_sfxSlots[idleIdx] = PoolSFXEntry{};
+        m_sfxSlots[moveIdx] = PoolSFXEntry{};
         m_vehiclePairs[evictSlot] = VehiclePairSlot{};
         freeSlot = evictSlot;
     }
@@ -199,7 +216,7 @@ int AudioSourcePool::acquireVehicleEnginePair(int& outIdle, int& outMove,
 
     if (idleIdx < 0 || moveIdx < 0) {
         // Partial acquisition — prohibited. Return nothing.
-        if (idleIdx >= 0) { m_sfxSlots[idleIdx] = SFXSourceSlot{}; }
+        if (idleIdx >= 0) { m_sfxSlots[idleIdx] = PoolSFXEntry{}; }
         return -1;
     }
 
@@ -223,15 +240,19 @@ void AudioSourcePool::releaseVehicleEnginePair(int pairIdx) {
     int moveIdx = m_vehiclePairs[pairIdx].moveSourceIdx;
     if (idleIdx >= 0) {
         alSourceStop(m_sources[idleIdx]);
+        alCheckError("releaseVehicleEnginePair:alSourceStop(idle)");
         alSourcei(m_sources[idleIdx], AL_BUFFER, 0);
+        alCheckError("releaseVehicleEnginePair:alSourcei(idle,AL_BUFFER,0)");
         callOnSourceRecycled(idleIdx);
-        m_sfxSlots[idleIdx] = SFXSourceSlot{};
+        m_sfxSlots[idleIdx] = PoolSFXEntry{};
     }
     if (moveIdx >= 0) {
         alSourceStop(m_sources[moveIdx]);
+        alCheckError("releaseVehicleEnginePair:alSourceStop(move)");
         alSourcei(m_sources[moveIdx], AL_BUFFER, 0);
+        alCheckError("releaseVehicleEnginePair:alSourcei(move,AL_BUFFER,0)");
         callOnSourceRecycled(moveIdx);
-        m_sfxSlots[moveIdx] = SFXSourceSlot{};
+        m_sfxSlots[moveIdx] = PoolSFXEntry{};
     }
     m_vehiclePairs[pairIdx] = VehiclePairSlot{};
 }

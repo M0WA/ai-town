@@ -25,6 +25,13 @@ CameraController::CameraController(irr::scene::ICameraSceneNode* camera, bool st
     // per architecture/ui-ux/camera-controls.md windowed-default rule.
 }
 
+// D-14 / UI-12: moved from inline definition in CameraController.h.
+void CameraController::resetOrbit() {
+    m_pitch        = -45.0f;
+    m_yaw          = 0.0f;
+    m_zoomDistance = kDefaultZoomDistance;
+}
+
 bool CameraController::OnInputEvent(const InputEvent& event) {
     using Type = InputEvent::Type;
 

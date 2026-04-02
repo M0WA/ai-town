@@ -5,13 +5,13 @@
 // Phase 11l: single panel opened via T key or resource-bar click.
 
 #include "src/ui/FinancesPanel.h"
+#include "src/ui/ui_format.h"   // D-1: formatDollar() (replaces local fmtDollar)
 #include "src/interfaces/ICitySimulation.h"
 #include "src/interfaces/IAudioSystem.h"
 #include "src/interfaces/sound_ids.h"
 #include "src/interfaces/audio_types.h"
 #include "src/platform/input_event.h"
 
-#include <cstdio>
 #include <algorithm>
 #include <string>
 
@@ -25,18 +25,8 @@ static constexpr float kHoldInitialDelay = 0.4f;   // 400ms initial repeat delay
 static constexpr float kHoldRepeatDelay  = 0.15f;  // 150ms repeat interval
 static constexpr int   kHoldDeltaCap     = 5;      // ±5 pp cap per continuous hold
 
-// ---------------------------------------------------------------------------
-// Helper: format a float as a dollar string
-// ---------------------------------------------------------------------------
-static std::string fmtDollar(float value) {
-    char buf[64];
-    if (value < 0.0f) {
-        std::snprintf(buf, sizeof(buf), "-$%.0f", -value);
-    } else {
-        std::snprintf(buf, sizeof(buf), "$%.0f", value);
-    }
-    return buf;
-}
+// D-1 / UI-1: formatDollar() replaced by UIFormat::formatDollar() from ui_format.h.
+using UIFormat::formatDollar;
 
 // ---------------------------------------------------------------------------
 // Constructor
@@ -59,9 +49,10 @@ FinancesPanel::FinancesPanel(IUIBackend* backend, ICitySimulation* sim,
     m_titleLabel = m_backend->addStaticText("Finances", kPanelX + 8, kPanelY + 4, kPanelW - 16, 24);
 
     // --- Section 1: Tax Rates (rows at y+32, y+76, y+120) ---
-    m_rowR = createRow("Residential", kPanelY + 32);
-    m_rowC = createRow("Commercial",  kPanelY + 76);
-    m_rowI = createRow("Industrial",  kPanelY + 120);
+    // D-11 / UI-13: indexed by (int)ZoneType — [0]=Residential, [1]=Commercial, [2]=Industrial
+    m_rows[0] = createRow("Residential", kPanelY + 32);
+    m_rows[1] = createRow("Commercial",  kPanelY + 76);
+    m_rows[2] = createRow("Industrial",  kPanelY + 120);
 
     m_noUndoLabel = m_backend->addStaticText("Tax changes cannot be undone",
                                               kPanelX + 8, kPanelY + 168, kPanelW - 16, 20);
@@ -134,9 +125,7 @@ void FinancesPanel::showAllElements() {
         m_backend->setElementVisible(row.readout, true);
         m_backend->setElementVisible(row.btnInc,  true);
     };
-    showRow(m_rowR);
-    showRow(m_rowC);
-    showRow(m_rowI);
+    for (auto& row : m_rows) showRow(row);
 
     m_backend->setElementVisible(m_noUndoLabel,      true);
     m_backend->setElementVisible(m_budgetSeparator,  true);
@@ -167,9 +156,7 @@ void FinancesPanel::hideAllElements() {
         m_backend->setElementVisible(row.readout, false);
         m_backend->setElementVisible(row.btnInc,  false);
     };
-    hideRow(m_rowR);
-    hideRow(m_rowC);
-    hideRow(m_rowI);
+    for (auto& row : m_rows) hideRow(row);
 
     m_backend->setElementVisible(m_noUndoLabel,      false);
     m_backend->setElementVisible(m_budgetSeparator,  false);
@@ -282,17 +269,15 @@ void FinancesPanel::draw() {
     if (!m_sim) return;
 
     // --- Tax Rates section ---
-    float rateR = m_sim->getTaxRate(ZoneType::Residential);
-    float rateC = m_sim->getTaxRate(ZoneType::Commercial);
-    float rateI = m_sim->getTaxRate(ZoneType::Industrial);
-
-    updateRowText(m_rowR, rateR);
-    updateRowText(m_rowC, rateC);
-    updateRowText(m_rowI, rateI);
-
-    setRowEnabled(m_rowR, rateR);
-    setRowEnabled(m_rowC, rateC);
-    setRowEnabled(m_rowI, rateI);
+    // D-11 / UI-13: use m_rows indexed by (int)ZoneType
+    static const ZoneType kZones[3] = {
+        ZoneType::Residential, ZoneType::Commercial, ZoneType::Industrial
+    };
+    for (int i = 0; i < 3; ++i) {
+        float rate = m_sim->getTaxRate(kZones[i]);
+        updateRowText(m_rows[i], rate);
+        setRowEnabled(m_rows[i], rate);
+    }
 
     // --- Budget section ---
     const float incomeR    = m_sim->getTaxRevenue(ZoneType::Residential);
@@ -303,18 +288,18 @@ void FinancesPanel::draw() {
     const float incomeTotal   = incomeR + incomeC + incomeI + incomeUtil + incomeTourism;
 
     m_backend->setElementText(m_taxRevenueR,
-        "Tax Residential: " + fmtDollar(incomeR));
+        "Tax Residential: " + formatDollar(incomeR));
     m_backend->setElementText(m_taxRevenueC,
-        "Tax Commercial: " + fmtDollar(incomeC));
+        "Tax Commercial: " + formatDollar(incomeC));
     m_backend->setElementText(m_taxRevenueI,
-        "Tax Industrial: " + fmtDollar(incomeI));
+        "Tax Industrial: " + formatDollar(incomeI));
     m_backend->setElementText(m_utilityFees,
-        "Utility Fees: " + fmtDollar(incomeUtil));
+        "Utility Fees: " + formatDollar(incomeUtil));
     m_backend->setElementText(m_tourismIncome,
-        "Tourism: " + fmtDollar(incomeTourism) + " (post-V1)");
+        "Tourism: " + formatDollar(incomeTourism) + " (post-V1)");
 
     m_backend->setElementText(m_incomeHeader,
-        "Income  " + fmtDollar(incomeTotal) + "/month");
+        "Income  " + formatDollar(incomeTotal) + "/month");
 
     const float expRoad    = m_sim->getRoadMaintenanceCost();
     const float expService = m_sim->getServiceUpkeepCost();
@@ -322,19 +307,19 @@ void FinancesPanel::draw() {
     const float expTotal   = expRoad + expService + expWages;
 
     m_backend->setElementText(m_roadMaint,
-        "Road Maintenance: " + fmtDollar(expRoad));
+        "Road Maintenance: " + formatDollar(expRoad));
     m_backend->setElementText(m_serviceUpkeep,
-        "Service Upkeep: " + fmtDollar(expService));
+        "Service Upkeep: " + formatDollar(expService));
     m_backend->setElementText(m_wages,
-        "Wages: " + fmtDollar(expWages));
+        "Wages: " + formatDollar(expWages));
 
     m_backend->setElementText(m_expensesHeader,
-        "Expenses  " + fmtDollar(expTotal) + "/month");
+        "Expenses  " + formatDollar(expTotal) + "/month");
 
     // Net monthly balance
     float net = incomeTotal - expTotal;
     m_backend->setElementText(m_netBalance,
-        "Net Monthly Balance: " + fmtDollar(net));
+        "Net Monthly Balance: " + formatDollar(net));
 }
 
 void FinancesPanel::updateRowText(ZoneRow& row, float rate) {
@@ -366,20 +351,21 @@ bool FinancesPanel::onEvent(const InputEvent& event) {
         }
 
         // Check each zone row's +/- buttons
+        // D-11 / UI-13: use m_rows indexed by (int)ZoneType
         struct ZoneCheck {
             ZoneRow* row;
             ZoneType zone;
             int      idx;
         };
         ZoneCheck zones[] = {
-            {&m_rowR, ZoneType::Residential, 0},
-            {&m_rowC, ZoneType::Commercial,  1},
-            {&m_rowI, ZoneType::Industrial,  2}
+            {&m_rows[0], ZoneType::Residential, 0},
+            {&m_rows[1], ZoneType::Commercial,  1},
+            {&m_rows[2], ZoneType::Industrial,  2}
         };
 
         for (auto& zc : zones) {
-            Rect decRect = m_backend->getElementRect(zc.row->btnDec);
-            Rect incRect = m_backend->getElementRect(zc.row->btnInc);
+            UIRect decRect = m_backend->getElementRect(zc.row->btnDec);
+            UIRect incRect = m_backend->getElementRect(zc.row->btnInc);
 
             if (mx >= decRect.x && mx <= decRect.x + decRect.w &&
                 my >= decRect.y && my <= decRect.y + decRect.h &&

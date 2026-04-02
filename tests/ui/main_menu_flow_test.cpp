@@ -68,7 +68,7 @@ protected:
             [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
         ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 10, 10}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 10, 10}));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
 
         panel_ = std::make_unique<MainMenuPanel>(&backend_);
@@ -205,7 +205,7 @@ TEST_F(MainMenuCoverageTest, ConsumeStartGameRequest_NotRequested_ReturnsFalse)
 
 // ============================================================================
 // Test: MainMenu mouse click on New Game button position
-// The backend returns a Rect{0,0,10,10} for all elements. A click at (5,5)
+// The backend returns a UIRect{0,0,10,10} for all elements. A click at (5,5)
 // will hit any element whose rect starts at (0,0,10,10).
 // ============================================================================
 TEST_F(MainMenuCoverageTest, MouseClick_AtButtonRect_Consumed)
@@ -251,7 +251,7 @@ TEST_F(MainMenuCoverageTest, MainMenuPanel_MapSize_ClickSmall_SetsSmall)
     // Small is checked before Medium and Large in onEvent.
     // Override to make only Small match the click point.
     ON_CALL(backend_, getElementRect(testing::_)).WillByDefault(
-        testing::Return(Rect{9000, 9000, 10, 10}));  // no match for most elements
+        testing::Return(UIRect{9000, 9000, 10, 10}));  // no match for most elements
 
     // Now configure a specific click handler.
     // Actually, let's use a simple approach: verify default is Medium,
@@ -272,7 +272,7 @@ TEST_F(MainMenuCoverageTest, MainMenuPanel_MapSize_ClickSmall_SetsSmall)
     ON_CALL(b2, getVirtualHeight()).WillByDefault(Return(1080));
     ON_CALL(b2, isElementEnabled(_)).WillByDefault(Return(true));
     // Return {0,0,0,0} by default (no hit), then override for size-small button.
-    ON_CALL(b2, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(b2, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
 
     auto p2 = std::make_unique<MainMenuPanel>(&b2);
     p2->show();
@@ -312,7 +312,7 @@ TEST_F(MainMenuCoverageTest, MainMenuPanel_MapSize_ClickLarge_SetsLarge)
     // All rects zero (miss), except we'll use click-inside for testing.
     // Since FinancesPanel bounds check is x/y-based (absolute coords), use
     // New Game screen hit-test which calls getElementRect per button.
-    ON_CALL(b3, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(b3, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
 
     auto p3 = std::make_unique<MainMenuPanel>(&b3);
     p3->show();

@@ -31,31 +31,31 @@
 
 class TextureCache {
 public:
+    // PoolEntryBase — common fields shared by all three pool entry types (A-19).
+    // Inheriting from this struct de-duplicates the ref_count / lastAccessTimestamp /
+    // vramBytes fields that were previously repeated in CacheEntry, SRGBEntry, and SplatEntry.
+    struct PoolEntryBase {
+        int      ref_count{0};
+        uint64_t lastAccessTimestamp{0};
+        size_t   vramBytes{0};
+    };
+
     // CacheEntry — entry in the linear-format ITexture* pool.
-    struct CacheEntry {
+    struct CacheEntry : PoolEntryBase {
         irr::video::ITexture* tex{nullptr};
-        int       ref_count{0};
-        uint64_t  lastAccessTimestamp{0};
-        size_t    vramBytes{0};
     };
 
     // SRGBEntry — raw GLuint handle for sRGB diffuse textures (DXT1/DXT5 compressed).
     // Stored separately from the ITexture* linear pool — sRGB textures are never ITexture*.
-    struct SRGBEntry {
-        GLuint   glHandle{0};
-        int      ref_count{0};
-        uint64_t lastAccessTimestamp{0};
-        size_t   vramBytes{0};
+    struct SRGBEntry : PoolEntryBase {
+        GLuint glHandle{0};
     };
 
     // SplatEntry — raw GLuint handle for terrain splat/blend maps (GL_RGBA8 uncompressed).
     // Uploaded via glTexImage2D (NOT glCompressedTexImage2D — DXT compression corrupts blend weights).
     // Canonical member name: m_splatMaps (do NOT use m_splatMapTextures).
-    struct SplatEntry {
-        GLuint   glHandle{0};
-        int      ref_count{0};
-        uint64_t lastAccessTimestamp{0};
-        size_t   vramBytes{0};
+    struct SplatEntry : PoolEntryBase {
+        GLuint glHandle{0};
     };
 
     // Constructor: driverType is stored for the EDT_NULL guard in evictUnreferenced() and

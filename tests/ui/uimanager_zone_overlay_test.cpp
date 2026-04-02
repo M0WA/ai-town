@@ -38,7 +38,7 @@ using ::testing::SaveArg;
 using ::testing::SetArgReferee;
 using ::testing::StrictMock;
 
-using ZoneOverlayMap = std::unordered_map<uint64_t, uint32_t>;
+using ZoneOverlayMap = std::unordered_map<int64_t, uint32_t>;
 
 // ---------------------------------------------------------------------------
 // Helpers — input event factories (same pattern as world_interaction_test.cpp)
@@ -115,7 +115,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
 
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
@@ -245,7 +245,7 @@ TEST_F(ZoneOverlayTest, UIManager_OverlayRefresh_RemovesEntryWhenBuildingSpawned
 
     // Pre-populate overlay map with tile (2,3) key = 3*10+2 = 32.
     ZoneOverlayMap preloaded;
-    preloaded[32u] = 0xB480CC80u;  // Residential/Low color
+    preloaded[32] = 0xB480CC80u;  // Residential/Low color
     uiManager_->setOverlayMapForTest(preloaded);
 
     // queryTile returns underConstruction=false -> building spawned -> remove overlay.
@@ -280,7 +280,7 @@ TEST_F(ZoneOverlayTest, UIManager_Demolish_RemovesOverlayEntry)
 {
     // Pre-populate overlay map with tile (5,5) key=55.
     ZoneOverlayMap preloaded;
-    preloaded[55u] = 0xB480CC80u;
+    preloaded[55] = 0xB480CC80u;
     uiManager_->setOverlayMapForTest(preloaded);
 
     activateDemolishTool();

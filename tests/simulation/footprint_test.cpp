@@ -17,15 +17,9 @@
 // All tests use ManualRNG (non-strict, 0.9f float so service degradation never fires)
 // and ManualClock.
 
-#include "src/simulation/CitySimulation.h"
-#include "src/interfaces/ICitySimulation.h"
+#include "tests/simulation/NiceSimulationTestBase.h"
 #include "src/interfaces/simulation_types.h"
 #include "src/simulation/simulation_constants.h"
-#include "tests/simulation/MockRenderer.h"
-#include "tests/simulation/MockAudioSystem.h"
-#include "tests/simulation/ManualRNG.h"
-#include "tests/simulation/ManualClock.h"
-#include "tests/simulation/ManualTerrainQuery.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <memory>
@@ -35,38 +29,12 @@ using ::testing::_;
 
 // ---------------------------------------------------------------------------
 // FootprintTest fixture
-// NiceMock policy: placement calls fire audio/renderer side effects that are
-// irrelevant to footprint logic. NiceMock suppresses unexpected-call failures.
-// ManualRNG non-strict with 0.9f float so no service degradation fires.
+// Inherits from NiceSimulationTestBase: NiceMock renderer_/audio_, ManualRNG,
+// ManualClock, ManualTerrainQuery, sim_, SetUp/TearDown, cs(), runTicks().
+// NiceMock suppresses audio/renderer side effects from placement calls.
 // ---------------------------------------------------------------------------
-class FootprintTest : public ::testing::Test {
+class FootprintTest : public NiceSimulationTestBase {
 protected:
-    NiceMock<MockRenderer>    renderer_;
-    NiceMock<MockAudioSystem> audio_;
-    ManualRNG    rng_;   // default: int={0}, float={0.9f}, non-strict
-    ManualClock  clock_;
-    ManualTerrainQuery terrain_;
-    std::unique_ptr<ICitySimulation> sim_;
-
-    void SetUp() override {
-        sim_ = std::make_unique<CitySimulation>(
-            &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Normal);
-        sim_->setSpeed(SpeedMultiplier::x1);
-    }
-
-    void TearDown() override {
-        sim_.reset();
-    }
-
-    CitySimulation* cs() { return dynamic_cast<CitySimulation*>(sim_.get()); }
-
-    void runTicks(int n) {
-        const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
-        for (int i = 0; i < n; ++i) {
-            clock_.advance(dt);
-            cs()->tick(dt);
-        }
-    }
 
     // Helper: place a road adjacent to the given tile so zone placement
     // passes the 3-tile street proximity check.

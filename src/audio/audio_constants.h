@@ -1,5 +1,6 @@
 #pragma once
 #include "src/interfaces/audio_types.h"
+#include <chrono>
 
 // Pool-size constants (kEvictableSFXCount, kStingerCount, kSFXPoolSize,
 // kStreamSourceCount, kTotalSources, kTransientReserveStart, kMaxVehiclePairs,
@@ -62,3 +63,19 @@ inline constexpr float kIntersectionTickCullDistance = 80.0f;
 // Forced-loan IClock gate duration: AudioSystem waits at least this many
 // seconds (real-time, via IClock) before allowing a second forced loan event.
 inline constexpr double kForcedLoanGateSeconds = 120.0;
+
+// Duck ramp timing constants.
+// DUCKING ramp: gain descends from m_duckStartGain to kMusicDuckGain over kDuckRampDownSeconds.
+// RELEASING ramp: gain ascends from kMusicDuckGain back to 1.0 over kDuckRampUpSeconds.
+inline constexpr float kDuckRampDownSeconds = 0.2f;
+inline constexpr float kDuckRampUpSeconds   = 1.5f;
+
+// Vehicle engine pitch range (applied as basePitch × lerp(idle, full, speedFraction)).
+inline constexpr float kVehicleEnginePitchIdle = 0.75f;
+inline constexpr float kVehicleEnginePitchFull = 1.35f;
+
+// Ambient bed crossfade duration in seconds (real-time delta, constant-power curve).
+inline constexpr float kAmbientCrossfadeDurationSeconds = 4.0f;
+
+// Audio thread wake interval.
+inline constexpr std::chrono::milliseconds kAudioThreadWakeInterval{10};

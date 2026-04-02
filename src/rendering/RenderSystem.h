@@ -41,12 +41,12 @@ public:
 
     // Returns the owned device pointer. May be nullptr if construction failed.
     // Consumers must null-check before use.
-    irr::IrrlichtDevice* getDevice() const { return m_device; }
+    [[nodiscard]] irr::IrrlichtDevice* getDevice() const { return m_device; }
 
     // GL capability accessors (populated from glewInit() SUCCESS path)
-    int   getMaxTextureSize()        const { return m_maxTextureSize; }
-    bool  isSRGBTextureSupported()   const { return m_srgbTextureSupported; }
-    float getMaxAnisotropy()         const { return m_maxAnisotropy; }
+    [[nodiscard]] int   getMaxTextureSize()        const { return m_maxTextureSize; }
+    [[nodiscard]] bool  isSRGBTextureSupported()   const { return m_srgbTextureSupported; }
+    [[nodiscard]] float getMaxAnisotropy()         const { return m_maxAnisotropy; }
 
     // Loads a GLSL shader pair via addHighLevelShaderMaterialFromFiles().
     // Null-checks getGPUProgrammingServices() before calling — returns -1 if unavailable.

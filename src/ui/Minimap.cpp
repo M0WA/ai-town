@@ -10,6 +10,8 @@
 #include "src/ui/Minimap.h"
 #include "src/platform/input_event.h"
 #include "src/interfaces/simulation_types.h"  // RoadSegmentSpeed, ServiceCoverageTile, ServiceBuildingType
+#include <cassert>
+#include <cstdio>
 
 // ---------------------------------------------------------------------------
 // Constructor
@@ -178,8 +180,31 @@ void Minimap::draw() {
 // ---------------------------------------------------------------------------
 // getBounds — returns the 200x200 render area only, excludes chrome
 // ---------------------------------------------------------------------------
-Rect Minimap::getBounds() const {
+UIRect Minimap::getBounds() const {
     return {kMapX, kMapY, kMapW, kMapH};
+}
+
+// ---------------------------------------------------------------------------
+// setSimulation — D-17 guard: sim must not be null.
+// ---------------------------------------------------------------------------
+void Minimap::setSimulation(ICitySimulation* sim) {
+    assert(sim != nullptr && "Minimap::setSimulation called with null sim pointer");
+    if (!sim) {
+        fprintf(stderr, "Minimap::setSimulation: null pointer — call ignored\n");
+        return;
+    }
+    m_sim = sim;
+}
+
+// ---------------------------------------------------------------------------
+// setOverlayMode — D-17 guard: Traffic mode requires m_sim != nullptr.
+// ---------------------------------------------------------------------------
+void Minimap::setOverlayMode(MinimapOverlay mode) {
+    if (mode == MinimapOverlay::Traffic && m_sim == nullptr) {
+        m_overlayMode = MinimapOverlay::None;
+        return;
+    }
+    m_overlayMode = mode;
 }
 
 // ---------------------------------------------------------------------------

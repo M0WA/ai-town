@@ -58,7 +58,7 @@ using ::testing::StrictMock;
 
 // ZoneOverlayMap alias — matches MockRenderer::ZoneOverlayMap for SaveArg capture.
 // (ref: tests/simulation/mock_renderer.h)
-using ZoneOverlayMap = std::unordered_map<uint64_t, uint32_t>;
+using ZoneOverlayMap = std::unordered_map<int64_t, uint32_t>;
 
 // ---------------------------------------------------------------------------
 // Helper: build InputEvent structs.
@@ -745,7 +745,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_OverlayCap_100K_StillCalls)
     static constexpr size_t kCap = 100000u;
     ZoneOverlayMap seed;
     seed.reserve(kCap);
-    for (uint64_t k = 0; k < kCap; ++k) {
+    for (int64_t k = 0; k < static_cast<int64_t>(kCap); ++k) {
         seed[k] = static_cast<uint32_t>(kOverlayArgbResidential);
     }
     uiManager_->setOverlayMapForTest(seed);
@@ -2362,8 +2362,8 @@ TEST_F(ValidHandleWorldInteractionTest, Update_ConsumesStartGameRequest_Transiti
     ASSERT_NE(startCityHandle, 0u) << "Start City handle must be non-zero";
 
     ON_CALL(backend_, getElementRect(_)).WillByDefault([startCityHandle](uint32_t h) {
-        if (h == startCityHandle) return Rect{0, 0, 20, 20};
-        return Rect{9000, 9000, 0, 0};
+        if (h == startCityHandle) return UIRect{0, 0, 20, 20};
+        return UIRect{9000, 9000, 0, 0};
     });
 
     // Navigate to New Game screen.

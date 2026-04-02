@@ -1,5 +1,8 @@
 #pragma once
 
+// simulation_types.h — included for the Difficulty enum used in startingFundsForDifficulty().
+#include "src/interfaces/simulation_types.h"
+
 // SimulationConstants — tuning constants for simulation logic.
 // Use struct with constexpr members (NOT free k-prefix constants).
 // The k-prefix naming style is incompatible with architecture/game-design/economy-model.md
@@ -211,12 +214,15 @@ struct SimulationConstants {
     static_assert(starting_funds_easy   > starting_funds_normal, "easy must have more than normal");
     static_assert(starting_funds_normal > starting_funds_hard,   "normal must have more than hard");
 
-    // startingFundsForDifficulty — map difficulty int (0=Easy, 1=Normal, 2=Hard) to starting funds.
-    // 0=Easy, 1=Normal, 2=Hard per economy-model.md.
-    static int64_t startingFundsForDifficulty(int difficulty) {
-        if (difficulty == 0) return 1'000'000;
-        if (difficulty == 2) return 200'000;
-        return 500'000;  // Normal default
+    // startingFundsForDifficulty — map Difficulty enum to starting funds (C-16).
+    // Changed from int to Difficulty to prevent silent integer-range bugs.
+    static constexpr int64_t startingFundsForDifficulty(Difficulty difficulty) {
+        switch (difficulty) {
+            case Difficulty::Easy:   return starting_funds_easy;
+            case Difficulty::Normal: return starting_funds_normal;
+            case Difficulty::Hard:   return starting_funds_hard;
+        }
+        return starting_funds_normal;  // unreachable; satisfies non-void return
     }
 
     // Traffic system constants (architecture/game-design/traffic-system.md)
@@ -293,6 +299,40 @@ struct SimulationConstants {
     static_assert(density_unlock_base_threshold_3 < density_unlock_base_threshold_4, "unlock thresholds must be ascending");
     static_assert(density_unlock_base_threshold_4 < density_unlock_base_threshold_5, "unlock thresholds must be ascending");
 
+    // Population capacity by zone type and density tier (architecture/game-design/population-density-growth.md)
+    // Referenced from CitySimulation::maxPopulationForTile() — MUST NOT be hardcoded inline.
+    static constexpr int max_pop_residential_low    = 100;
+    static constexpr int max_pop_residential_medium = 400;
+    static constexpr int max_pop_residential_high   = 1000;
+    static constexpr int max_pop_commercial_low     = 25;
+    static constexpr int max_pop_commercial_medium  = 100;
+    static constexpr int max_pop_commercial_high    = 300;
+    static constexpr int max_pop_industrial_low     = 50;
+    static constexpr int max_pop_industrial_medium  = 200;
+    static constexpr int max_pop_industrial_high    = 600;
+    static_assert(max_pop_residential_low < max_pop_residential_medium, "density tiers must ascend");
+    static_assert(max_pop_residential_medium < max_pop_residential_high, "density tiers must ascend");
+    static_assert(max_pop_commercial_low < max_pop_commercial_medium, "density tiers must ascend");
+    static_assert(max_pop_commercial_medium < max_pop_commercial_high, "density tiers must ascend");
+    static_assert(max_pop_industrial_low < max_pop_industrial_medium, "density tiers must ascend");
+    static_assert(max_pop_industrial_medium < max_pop_industrial_high, "density tiers must ascend");
+
+    // City rating population thresholds (architecture/game-design/game-progression-modes.md)
+    // Referenced from CitySimulation::checkCityRatingTransition() — MUST NOT be hardcoded inline.
+    static constexpr int city_rating_town_threshold        =     1'000;
+    static constexpr int city_rating_city_threshold        =    10'000;
+    static constexpr int city_rating_metropolis_threshold  =    50'000;
+    static constexpr int city_rating_megalopolis_threshold =   500'000;
+    static_assert(city_rating_town_threshold < city_rating_city_threshold, "thresholds must ascend");
+    static_assert(city_rating_city_threshold < city_rating_metropolis_threshold, "thresholds must ascend");
+    static_assert(city_rating_metropolis_threshold < city_rating_megalopolis_threshold, "thresholds must ascend");
+
+    // Loan interest rate (annual; architecture/game-design/economy-model.md)
+    // Monthly interest = remainingPrincipal * (loan_interest_rate / ticks_per_year)
+    // MUST NOT be hardcoded as 0.05f inline in processLoanRepayments().
+    static constexpr float loan_interest_rate = 0.05f;
+    static_assert(loan_interest_rate > 0.0f && loan_interest_rate < 1.0f, "must be a valid rate");
+
     // sfx_zone_upgrade_per_tick_cap: maximum number of sfx_zone_upgrade audio calls fired per
     // doDensityUnlockTick() invocation. Tiles beyond the cap are upgraded silently.
     // Prevents a jarring burst when a large upgrade wave fires simultaneously.
@@ -312,6 +352,15 @@ struct SimulationConstants {
     // (phase-10.md §sfx_intersection_tick wiring, architecture/audio-architecture/v1-audio-asset-manifest.md)
     static constexpr float traffic_signal_cull_distance_meters = 80.0f;
     static_assert(traffic_signal_cull_distance_meters > 0.0f, "must be positive");
+
+    // Traffic vehicle tuning (architecture/game-design/traffic-system.md)
+    // C-19 / SIM-19: moved from CitySimulation.cpp file scope.
+    // vehicle_tile_per_second: number of 10-m tiles a vehicle traverses per real-time second.
+    static constexpr float vehicle_tile_per_second = 4.0f;  // 1 tile / 0.25 s
+    static_assert(vehicle_tile_per_second > 0.0f, "must be positive");
+    // vehicle_spawn_interval: spawn one vehicle for every N road tiles placed.
+    static constexpr int vehicle_spawn_interval = 3;
+    static_assert(vehicle_spawn_interval > 0, "must be positive");
 
     // Population milestone thresholds (architecture/game-design/game-progression-modes.md)
     // Each threshold fires exactly once per playthrough (per-milestone boolean flag in CitySimulation).

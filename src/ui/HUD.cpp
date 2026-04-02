@@ -8,38 +8,17 @@
 #include "src/ui/HUD.h"
 #include "src/ui/FinancesPanel.h"
 #include "src/ui/hud_sprite_ids.h"
+#include "src/ui/ui_format.h"   // D-1: formatDollar(); D-5: ratingName()
 #include "src/interfaces/IAudioSystem.h"
 
 #include <cmath>
 #include <string>
-#include <cstdio>
 
-// ---------------------------------------------------------------------------
-// Helper: format a float as a dollar string like "$1,234"
-// ---------------------------------------------------------------------------
-static std::string formatDollar(float value) {
-    char buf[64];
-    if (value < 0.0f) {
-        std::snprintf(buf, sizeof(buf), "-$%.0f", -value);
-    } else {
-        std::snprintf(buf, sizeof(buf), "$%.0f", value);
-    }
-    return buf;
-}
-
-// ---------------------------------------------------------------------------
-// Helper: CityRatingTier to display name
-// ---------------------------------------------------------------------------
-static const char* ratingName(CityRatingTier tier) {
-    switch (tier) {
-        case CityRatingTier::Village:    return "Village";
-        case CityRatingTier::Town:       return "Town";
-        case CityRatingTier::City:       return "City";
-        case CityRatingTier::Metropolis: return "Metropolis";
-        case CityRatingTier::Megalopolis:return "Megalopolis";
-    }
-    return "Unknown";
-}
+// D-1 / UI-1: formatDollar() is now UIFormat::formatDollar() (ui_format.h).
+// D-5 / UI-2: ratingName() is now UIFormat::ratingName() (ui_format.h).
+// File-local static duplicates removed.
+using UIFormat::formatDollar;
+using UIFormat::ratingName;
 
 // ---------------------------------------------------------------------------
 // Constructor

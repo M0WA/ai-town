@@ -15,7 +15,7 @@
 //   Demand:      "Demand: 55%"
 
 #include "src/ui/InspectorPanel.h"
-#include "src/interfaces/IUIBackend.h"     // Rect
+#include "src/interfaces/IUIBackend.h"     // UIRect
 #include "src/interfaces/IRenderer.h"  // ScreenRect
 #include "src/ui/UIManager.h"
 #include "src/ui/ui_types.h"
@@ -684,7 +684,7 @@ TEST_F(QueryPanelIntegrationTest, GetBounds_ReturnsValidRect)
 
     panel_->populate(qr, 3, 7, 500, 500, tileBounds);
 
-    Rect bounds = panel_->getBounds();
+    UIRect bounds = panel_->getBounds();
     EXPECT_EQ(bounds.w, 340);
     EXPECT_EQ(bounds.h, 280);
 }

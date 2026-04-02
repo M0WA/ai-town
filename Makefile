@@ -52,21 +52,35 @@ $(BUILD_DIR)/CMakeCache.txt:
 clean:
 	rm -rf $(BUILD_DIR) $(COVERAGE_INFO) $(COVERAGE_FILTERED) $(COVERAGE_HTML)
 
-## Build with coverage, run unit + integration tests, generate lcov report,
+## Build with coverage, run unit + integration + OpenGL tests, generate lcov report,
 ## and enforce the $(COVERAGE_MIN)% total line coverage gate.
 ## Coverage report is written to $(COVERAGE_HTML)/index.html.
+## If build/ already exists with ENABLE_COVERAGE=ON, the reconfigure step is skipped
+## to save time; otherwise a full reconfigure is performed.
+## Override the minimum with: make test COVERAGE_MIN=90.0
 test:
-	cmake --preset $(COVERAGE_PRESET)
+	@if [ -f $(BUILD_DIR)/CMakeCache.txt ] && grep -q "ENABLE_COVERAGE:BOOL=ON\|ENABLE_COVERAGE=ON" $(BUILD_DIR)/CMakeCache.txt 2>/dev/null; then \
+	  echo "Coverage build already configured — skipping reconfigure."; \
+	else \
+	  cmake --preset $(COVERAGE_PRESET); \
+	fi
 	cmake --build $(BUILD_DIR)
 	ctest --test-dir $(BUILD_DIR) -LE "integration|requires-opengl" --output-on-failure
 	ctest --test-dir $(BUILD_DIR) -L "^integration$$" --output-on-failure
+	@if which xvfb-run > /dev/null 2>&1; then \
+	  echo "xvfb-run found — running requires-opengl tests."; \
+	  xvfb-run --auto-servernum ctest --test-dir $(BUILD_DIR) -L "^requires-opengl$$" --output-on-failure; \
+	else \
+	  echo "xvfb-run not found — skipping requires-opengl tests (not available in this environment)."; \
+	fi
 	lcov --capture --directory $(BUILD_DIR) --base-directory . \
 	     --gcov-tool gcov-13 \
-	     --ignore-errors mismatch,inconsistent,version,empty,empty \
+	     --ignore-errors mismatch,inconsistent,version,empty \
 	     --output-file $(COVERAGE_INFO)
 	lcov --remove $(COVERAGE_INFO) \
 	     --ignore-errors unused,inconsistent \
 	     '/usr/*' \
+	     "/opt/vcpkg_installed/*" \
 	     "*/build/vcpkg_installed/*" \
 	     "*/.fetchcontent_cache/*" \
 	     '*/tests/*' \

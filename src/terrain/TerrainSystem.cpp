@@ -41,17 +41,27 @@ TerrainSystem::TerrainSystem(IRenderer* renderer, IClock* clock)
 // Per architecture/asset-standards/3d-model-standards.md terrain LOD table:
 //   LOD0→LOD1: switch-out >100 m, switch-in <92 m  (8 m hysteresis band)
 //   LOD1→LOD2: switch-out >300 m, switch-in <285 m (15 m hysteresis band)
+//
+// A-28: replaced if-else chains with static constexpr arrays indexed by fromLOD.
+// Index 0 = LOD0 thresholds; index 1 = LOD1 thresholds.
+// fromLOD values outside [0,1] return 0.0f (clamped to index 1 and checked).
 // ---------------------------------------------------------------------------
 float TerrainSystem::lodSwitchOutDistance(int fromLOD) {
-    if (fromLOD == 0) return kLOD0to1SwitchOut;  // 100.5f (strictly > 100 m per spec)
-    if (fromLOD == 1) return kLOD1to2SwitchOut;  // 300.5f (strictly > 300 m per spec)
-    return 0.0f; // unknown LOD
+    static constexpr float kSwitchOut[] = {
+        kLOD0to1SwitchOut,  // fromLOD 0: 100.5f (strictly > 100 m)
+        kLOD1to2SwitchOut,  // fromLOD 1: 300.5f (strictly > 300 m)
+    };
+    if (fromLOD < 0 || fromLOD > 1) return 0.0f;
+    return kSwitchOut[fromLOD];
 }
 
 float TerrainSystem::lodSwitchInDistance(int fromLOD) {
-    if (fromLOD == 0) return kLOD0to1SwitchIn;   // 91.5f (strictly < 92 m per spec)
-    if (fromLOD == 1) return kLOD1to2SwitchIn;   // 284.5f (strictly < 285 m per spec)
-    return 0.0f; // unknown LOD
+    static constexpr float kSwitchIn[] = {
+        kLOD0to1SwitchIn,   // fromLOD 0:  91.5f (strictly < 92 m)
+        kLOD1to2SwitchIn,   // fromLOD 1: 284.5f (strictly < 285 m)
+    };
+    if (fromLOD < 0 || fromLOD > 1) return 0.0f;
+    return kSwitchIn[fromLOD];
 }
 
 // ---------------------------------------------------------------------------
@@ -105,14 +115,16 @@ void TerrainSystem::enqueueRebuild(uint64_t chunkId, int targetLOD, float distan
     req.chunkId          = chunkId;
     req.targetLOD        = targetLOD;
     req.distanceToCamera = distanceToCamera;
-    m_rebuildDeque.push_back(req);
-
-    // Sort the deque nearest-first after each insertion.
-    // This maintains distance-weighted priority per procedural-terrain.md.
-    std::stable_sort(m_rebuildDeque.begin(), m_rebuildDeque.end(),
-                     [](const ChunkRebuildRequest& a, const ChunkRebuildRequest& b) {
-                         return a.distanceToCamera < b.distanceToCamera;
-                     });
+    // Insert in sorted order (nearest-first) per procedural-terrain.md.
+    // std::lower_bound + deque::insert keeps the deque sorted in O(n) per insertion
+    // (O(log n) comparisons + O(n) shift) — O(n log n) total for N insertions.
+    // This is equivalent to stable_sort after push_back but avoids a full re-sort
+    // on every call when most insertions land near the back (newly enqueued distant chunks).
+    auto pos = std::lower_bound(m_rebuildDeque.begin(), m_rebuildDeque.end(), req,
+                                [](const ChunkRebuildRequest& a, const ChunkRebuildRequest& b) {
+                                    return a.distanceToCamera < b.distanceToCamera;
+                                });
+    m_rebuildDeque.insert(pos, req);
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +133,7 @@ void TerrainSystem::enqueueRebuild(uint64_t chunkId, int targetLOD, float distan
 bool TerrainSystem::processOneRebuild(const ChunkRebuildRequest& req,
                                        std::unordered_set<uint64_t>& processedThisFrame) {
     // Dedup: skip if this chunk was already processed in this update/flush call.
-    if (processedThisFrame.count(req.chunkId) > 0) {
+    if (processedThisFrame.find(req.chunkId) != processedThisFrame.end()) {
         return false;
     }
 
@@ -161,13 +173,15 @@ bool TerrainSystem::processOneRebuild(const ChunkRebuildRequest& req,
     // render call — the LOD tracking update below still runs, keeping the system consistent.
     // -------------------------------------------------------------------------
     if (m_renderer) {
-        // Determine target LOD grid size from the spec constants.
-        int targetGridSize = kTerrainLOD0GridSize; // 32 quads per side — LOD0 default
-        if (req.targetLOD == 1) {
-            targetGridSize = kTerrainLOD1GridSize; // 16 quads per side
-        } else if (req.targetLOD >= 2) {
-            targetGridSize = kTerrainLOD2GridSize; // 8 quads per side
-        }
+        // Determine target LOD grid size from the spec constants (A-35).
+        // Index: 0=LOD0 (32 quads/side), 1=LOD1 (16 quads/side), 2+=LOD2 (8 quads/side).
+        static constexpr int kLODGridSizes[] = {
+            kTerrainLOD0GridSize,   // LOD0: 32 quads per side
+            kTerrainLOD1GridSize,   // LOD1: 16 quads per side
+            kTerrainLOD2GridSize,   // LOD2:  8 quads per side
+        };
+        const int lodIndex = std::min(req.targetLOD, 2);
+        const int targetGridSize = kLODGridSizes[lodIndex];
 
         // Look up the chunk's LOD0 heightmap.
         auto hmapIt = m_chunkHeightmaps.find(req.chunkId);

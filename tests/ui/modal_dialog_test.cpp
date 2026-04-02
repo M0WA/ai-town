@@ -2,7 +2,7 @@
 //
 // Phase 8 modal dialog tests -- two fixtures:
 //
-//   UIManagerModalTest_Phase8 (tests 1-10): NiceMock<MockUIBackend> + NiceMock<MockAudioSystem>
+//   UIManagerModalBehaviourTest (tests 1-10): NiceMock<MockUIBackend> + NiceMock<MockAudioSystem>
 //     + NiceMock<MockCitySimulation> per testability-architecture.md.
 //     Tests 1-5: ModalDialog_OnOpen_SimulationIsPaused, ModalDialog_OnOpen_SpeedSelectorIsDisabled,
 //       ModalDialog_OnClose_SimulationResumes, UndoSystem_BlockedDuringModal_HotkeyIgnored,
@@ -42,7 +42,7 @@ using ::testing::InSequence;
 // ============================================================================
 // UIManagerModalTest -- tests 1-10 (NiceMock policy)
 // ============================================================================
-class UIManagerModalTest_Phase8 : public ::testing::Test {
+class UIManagerModalBehaviourTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Default return values for construction and general queries.
@@ -54,7 +54,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
@@ -94,7 +94,7 @@ protected:
 
 // --- Test 1: ModalDialog_OnOpen_SimulationIsPaused ---
 // Opening a forced-loan dialog pauses the simulation.
-TEST_F(UIManagerModalTest_Phase8, ModalDialog_OnOpen_SimulationIsPaused) {
+TEST_F(UIManagerModalBehaviourTest, ModalDialog_OnOpen_SimulationIsPaused) {
     // Transition to gameplay first so we can open modals.
     ui_->transitionToGameplay(GameMode::Scenario);
 
@@ -108,7 +108,7 @@ TEST_F(UIManagerModalTest_Phase8, ModalDialog_OnOpen_SimulationIsPaused) {
 
 // --- Test 2: ModalDialog_OnOpen_SpeedSelectorIsDisabled ---
 // When modal is active, speed selector clicks are consumed.
-TEST_F(UIManagerModalTest_Phase8, ModalDialog_OnOpen_SpeedSelectorIsDisabled) {
+TEST_F(UIManagerModalBehaviourTest, ModalDialog_OnOpen_SpeedSelectorIsDisabled) {
     ui_->transitionToGameplay(GameMode::Scenario);
 
     LoanTerms terms{5000.0f, 12, 0.05f};
@@ -129,7 +129,7 @@ TEST_F(UIManagerModalTest_Phase8, ModalDialog_OnOpen_SpeedSelectorIsDisabled) {
 
 // --- Test 3: ModalDialog_OnClose_SimulationResumes ---
 // CRITICAL ordering: setPaused(false) called on closeModal().
-TEST_F(UIManagerModalTest_Phase8, ModalDialog_OnClose_SimulationResumes) {
+TEST_F(UIManagerModalBehaviourTest, ModalDialog_OnClose_SimulationResumes) {
     ui_->transitionToGameplay(GameMode::Scenario);
 
     LoanTerms terms{5000.0f, 12, 0.05f};
@@ -146,7 +146,7 @@ TEST_F(UIManagerModalTest_Phase8, ModalDialog_OnClose_SimulationResumes) {
 
 // --- Test 4: UndoSystem_BlockedDuringModal_HotkeyIgnored ---
 // Ctrl+Z while modal is active should be consumed by the modal, not trigger undo.
-TEST_F(UIManagerModalTest_Phase8, UndoSystem_BlockedDuringModal_HotkeyIgnored) {
+TEST_F(UIManagerModalBehaviourTest, UndoSystem_BlockedDuringModal_HotkeyIgnored) {
     ui_->transitionToGameplay(GameMode::Scenario);
     ON_CALL(sim_, hasUndoPendingAction()).WillByDefault(Return(true));
 
@@ -162,7 +162,7 @@ TEST_F(UIManagerModalTest_Phase8, UndoSystem_BlockedDuringModal_HotkeyIgnored) {
 
 // --- Test 5: UndoSystem_BlockedDuringModal_ButtonGrayedOut ---
 // Verify the undo button has setElementEnabled called during draw when no action.
-TEST_F(UIManagerModalTest_Phase8, UndoSystem_BlockedDuringModal_ButtonGrayedOut) {
+TEST_F(UIManagerModalBehaviourTest, UndoSystem_BlockedDuringModal_ButtonGrayedOut) {
     ui_->transitionToGameplay(GameMode::Scenario);
     ON_CALL(sim_, hasUndoPendingAction()).WillByDefault(Return(false));
 
@@ -174,7 +174,7 @@ TEST_F(UIManagerModalTest_Phase8, UndoSystem_BlockedDuringModal_ButtonGrayedOut)
 // --- Test 6: CriticalToast_DuringModal_IsQueued_NotDisplayed ---
 // When a modal is active and NotificationManager::setModalActive(true) has been called,
 // posting a CRITICAL toast does not create visible UI elements.
-TEST_F(UIManagerModalTest_Phase8, CriticalToast_DuringModal_IsQueued_NotDisplayed) {
+TEST_F(UIManagerModalBehaviourTest, CriticalToast_DuringModal_IsQueued_NotDisplayed) {
     ui_->transitionToGameplay(GameMode::Scenario);
 
     LoanTerms terms{5000.0f, 12, 0.05f};
@@ -193,7 +193,7 @@ TEST_F(UIManagerModalTest_Phase8, CriticalToast_DuringModal_IsQueued_NotDisplaye
 // --- Test 7: CriticalToast_DuringModal_AutoPauseDeferred ---
 // With a modal active, posting a CRITICAL toast should not call setPaused(true)
 // again (sim is already paused by the modal).
-TEST_F(UIManagerModalTest_Phase8, CriticalToast_DuringModal_AutoPauseDeferred) {
+TEST_F(UIManagerModalBehaviourTest, CriticalToast_DuringModal_AutoPauseDeferred) {
     ui_->transitionToGameplay(GameMode::Scenario);
 
     LoanTerms terms{5000.0f, 12, 0.05f};
@@ -213,7 +213,7 @@ TEST_F(UIManagerModalTest_Phase8, CriticalToast_DuringModal_AutoPauseDeferred) {
 
 // --- Test 8: ModalDialog_OnClose_WithQueuedCriticalToast_AutoPauseReevaluated ---
 // After closing a modal, if CRITICAL toasts are queued, auto-pause is re-evaluated.
-TEST_F(UIManagerModalTest_Phase8, ModalDialog_OnClose_WithQueuedCriticalToast_AutoPauseReevaluated) {
+TEST_F(UIManagerModalBehaviourTest, ModalDialog_OnClose_WithQueuedCriticalToast_AutoPauseReevaluated) {
     ui_->transitionToGameplay(GameMode::Scenario);
 
     // Open modal.
@@ -238,7 +238,7 @@ TEST_F(UIManagerModalTest_Phase8, ModalDialog_OnClose_WithQueuedCriticalToast_Au
 
 // --- Test 9: Modal_SpeedSelectorGrayed_DespiteCriticalToast_SpeedAccessible_WhenModalOnly ---
 // With no CRITICAL toast and modal active, camera events still pass through.
-TEST_F(UIManagerModalTest_Phase8, Modal_SpeedSelectorGrayed_DespiteCriticalToast_SpeedAccessible_WhenModalOnly) {
+TEST_F(UIManagerModalBehaviourTest, Modal_SpeedSelectorGrayed_DespiteCriticalToast_SpeedAccessible_WhenModalOnly) {
     ui_->transitionToGameplay(GameMode::Scenario);
 
     LoanTerms terms{5000.0f, 12, 0.05f};
@@ -254,7 +254,7 @@ TEST_F(UIManagerModalTest_Phase8, Modal_SpeedSelectorGrayed_DespiteCriticalToast
 
 // --- Test 10: ModalDialog_OnClose_WithEmptyCriticalQueue_NoAutoRePause ---
 // Closing a modal with no queued CRITICAL toasts should not re-pause the sim.
-TEST_F(UIManagerModalTest_Phase8, ModalDialog_OnClose_WithEmptyCriticalQueue_NoAutoRePause) {
+TEST_F(UIManagerModalBehaviourTest, ModalDialog_OnClose_WithEmptyCriticalQueue_NoAutoRePause) {
     ui_->transitionToGameplay(GameMode::Scenario);
 
     LoanTerms terms{5000.0f, 12, 0.05f};
@@ -286,7 +286,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
@@ -366,7 +366,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
@@ -598,7 +598,7 @@ TEST_F(ModalDialogKeyNavTest, ForcedLoan_MouseClickAccept) {
 
     // Set button rects to known positions so mouse click hits them.
     ON_CALL(backend_, getElementRect(_)).WillByDefault(
-        Return(Rect{810, 500, 140, 40}));
+        Return(UIRect{810, 500, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -669,7 +669,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getTaxRate(ZoneType::Residential)).WillByDefault(Return(0.10f));
         ON_CALL(sim_, getTaxRate(ZoneType::Commercial)).WillByDefault(Return(0.10f));
@@ -712,14 +712,14 @@ TEST_F(ModalDialogStandaloneTest, DemolishConfirm_Escape_Cancels) {
     EXPECT_CALL(sim_, setPaused(false)).Times(1);
     dialog_->onEvent(keyDown(27));
     EXPECT_FALSE(dialog_->isActive());
-    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Cancel);
+    EXPECT_EQ(dialog_->peekResult(), ModalDialog::DialogResult::Cancel);
 }
 
 TEST_F(ModalDialogStandaloneTest, DemolishConfirm_DefaultFocus_Cancel) {
     dialog_->showDemolishConfirm(1);
     dialog_->onEvent(keyDown(13));
     EXPECT_FALSE(dialog_->isActive());
-    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Cancel);
+    EXPECT_EQ(dialog_->peekResult(), ModalDialog::DialogResult::Cancel);
 }
 
 TEST_F(ModalDialogStandaloneTest, DemolishConfirm_Tab_Yes_Accepts) {
@@ -727,12 +727,12 @@ TEST_F(ModalDialogStandaloneTest, DemolishConfirm_Tab_Yes_Accepts) {
     dialog_->onEvent(keyDown(9));
     dialog_->onEvent(keyDown(13));
     EXPECT_FALSE(dialog_->isActive());
-    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Accept);
+    EXPECT_EQ(dialog_->peekResult(), ModalDialog::DialogResult::Accept);
 }
 
 TEST_F(ModalDialogStandaloneTest, DemolishConfirm_MouseClick_Yes) {
     dialog_->showDemolishConfirm(1);
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{810, 500, 140, 40}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{810, 500, 140, 40}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -756,14 +756,14 @@ TEST_F(ModalDialogStandaloneTest, WASDPreset_Escape_Cancels) {
     dialog_->showWASDPreset();
     dialog_->onEvent(keyDown(27));
     EXPECT_FALSE(dialog_->isActive());
-    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Cancel);
+    EXPECT_EQ(dialog_->peekResult(), ModalDialog::DialogResult::Cancel);
 }
 
 TEST_F(ModalDialogStandaloneTest, WASDPreset_DefaultFocus_Cancel) {
     dialog_->showWASDPreset();
     dialog_->onEvent(keyDown(13));
     EXPECT_FALSE(dialog_->isActive());
-    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Cancel);
+    EXPECT_EQ(dialog_->peekResult(), ModalDialog::DialogResult::Cancel);
 }
 
 TEST_F(ModalDialogStandaloneTest, WASDPreset_Tab_Apply_Accepts) {
@@ -771,7 +771,7 @@ TEST_F(ModalDialogStandaloneTest, WASDPreset_Tab_Apply_Accepts) {
     dialog_->onEvent(keyDown(9));
     dialog_->onEvent(keyDown(13));
     EXPECT_FALSE(dialog_->isActive());
-    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Accept);
+    EXPECT_EQ(dialog_->peekResult(), ModalDialog::DialogResult::Accept);
 }
 
 TEST_F(ModalDialogStandaloneTest, GameOver_Standalone_Show_IsActive) {
@@ -789,7 +789,7 @@ TEST_F(ModalDialogStandaloneTest, GameOver_Standalone_Enter_LoadSave) {
     dialog_->showGameOver(100000LL, 3);
     dialog_->onEvent(keyDown(13));
     EXPECT_FALSE(dialog_->isActive());
-    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Accept);
+    EXPECT_EQ(dialog_->peekResult(), ModalDialog::DialogResult::Accept);
 }
 
 TEST_F(ModalDialogStandaloneTest, GameOver_Standalone_Tab_MainMenu) {
@@ -797,7 +797,7 @@ TEST_F(ModalDialogStandaloneTest, GameOver_Standalone_Tab_MainMenu) {
     dialog_->onEvent(keyDown(9));
     dialog_->onEvent(keyDown(13));
     EXPECT_FALSE(dialog_->isActive());
-    EXPECT_EQ(dialog_->getLastResult(), ModalDialog::DialogResult::Decline);
+    EXPECT_EQ(dialog_->peekResult(), ModalDialog::DialogResult::Decline);
 }
 
 TEST_F(ModalDialogStandaloneTest, ForcedLoan_Standalone_Show) {
@@ -877,14 +877,14 @@ TEST_F(ModalDialogStandaloneTest, ForcedLoan_MouseClickSecondary) {
     // Set secondary button rect at a known position.
     // Handles: 501..506 = title, body, primary, secondary, tertiary, back (approx).
     // Primary (m_btnPrimary) at rect (0,0,0,0) so it misses. Secondary at click point.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
     ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
 
     // We need the secondary button's rect to match. ModalDialog button handles:
     // Constructor creates: m_scrim=501, m_dialogBg=502, m_titleLabel=503,
     // m_bodyLabel=504, m_btnPrimary=505, m_btnSecondary=506, m_btnTertiary=507,
     // m_btnBack=508.
-    ON_CALL(backend_, getElementRect(506)).WillByDefault(Return(Rect{810, 560, 140, 40}));
+    ON_CALL(backend_, getElementRect(506)).WillByDefault(Return(UIRect{810, 560, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -908,9 +908,9 @@ TEST_F(ModalDialogStandaloneTest, ForcedLoan_Screen2_MouseClickTertiary) {
     dialog_->onEvent(keyDown(13));
     EXPECT_TRUE(dialog_->isActive());
 
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
     ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
-    ON_CALL(backend_, getElementRect(507)).WillByDefault(Return(Rect{810, 620, 140, 40}));
+    ON_CALL(backend_, getElementRect(507)).WillByDefault(Return(UIRect{810, 620, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -954,9 +954,9 @@ TEST_F(ModalDialogStandaloneTest, ForcedLoan_Screen2_MouseClickBack) {
     dialog_->onEvent(keyDown(9));
     dialog_->onEvent(keyDown(13));
 
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
     ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
-    ON_CALL(backend_, getElementRect(508)).WillByDefault(Return(Rect{810, 680, 140, 40}));
+    ON_CALL(backend_, getElementRect(508)).WillByDefault(Return(UIRect{810, 680, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;

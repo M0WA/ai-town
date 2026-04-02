@@ -36,7 +36,9 @@
 #include <vector>
 #include "TextureCache.h"
 
-using namespace irr;
+// NOTE: using namespace irr intentionally removed from header (A-21).
+// All irr names in this header use fully-qualified names to avoid polluting
+// every translation unit that includes SceneEntityManager.h.
 
 // SceneEntityManager — authoritative owner of all scene nodes.
 // Sole caller of addXxxSceneNode() and node->remove().
@@ -46,7 +48,7 @@ public:
     // Constructor: driver and textureCache must outlive this object.
     // driver is used in Step 2 (setMaterial) of the destroy sequence.
     // textureCache is used in Steps 1, 1b, 1c, and 3.
-    SceneEntityManager(video::IVideoDriver* driver, TextureCache* textureCache);
+    SceneEntityManager(irr::video::IVideoDriver* driver, TextureCache* textureCache);
 
     // Non-copyable / non-movable — manages non-copyable GL and scene graph resources.
     SceneEntityManager(const SceneEntityManager&)            = delete;
@@ -56,10 +58,10 @@ public:
 
     // track() — register a scene node after creation via addXxxSceneNode().
     // Returns the same node pointer for convenience (enables chained calls).
-    scene::ISceneNode* track(scene::ISceneNode* node,
-                              std::vector<std::string> linearTextures,
-                              std::vector<std::string> srgbTextures,
-                              std::vector<std::string> splatMaps);
+    irr::scene::ISceneNode* track(irr::scene::ISceneNode* node,
+                                  const std::vector<std::string>& linearTextures,
+                                  const std::vector<std::string>& srgbTextures,
+                                  const std::vector<std::string>& splatMaps);
 
     // destroy() — execute the full 4-step eviction sequence on a scene node.
     // Raw-pointer overload: caller passes node ref + texture filename vectors directly.
@@ -71,10 +73,10 @@ public:
     //   splatMaps     — filenames for splat map pool textures to release in Step 1c.
     //
     // After return: node == nullptr; all texture ref_counts decremented; evictUnreferenced() called.
-    void destroy(scene::ISceneNode*& node,
-                 std::vector<std::string>& linearTextures,
-                 std::vector<std::string>& srgbTextures,
-                 std::vector<std::string>& splatMaps);
+    void destroy(irr::scene::ISceneNode*& node,
+                 const std::vector<std::string>& linearTextures,
+                 const std::vector<std::string>& srgbTextures,
+                 const std::vector<std::string>& splatMaps);
 
     // destroy<TEntity>(entity) — template overload for entity objects.
     // TEntity must have:
@@ -87,7 +89,7 @@ public:
     // entity classes (Building, Vehicle, TerrainChunk) without requiring inheritance.
     template<typename TEntity>
     void destroy(TEntity& entity) {
-        scene::ISceneNode* node = entity.getNode();
+        irr::scene::ISceneNode* node = entity.getNode();
         if (!node) return;
 
         // ------------------------------------------------------------------
@@ -95,12 +97,12 @@ public:
         //
         // MANDATORY (C-4): getMaterial(m) called ONCE per outer loop iteration.
         // ------------------------------------------------------------------
-        u32 matCount = node->getMaterialCount();
-        for (u32 m = 0; m < matCount; ++m) {
+        irr::u32 matCount = node->getMaterialCount();
+        for (irr::u32 m = 0; m < matCount; ++m) {
             // MANDATORY: call getMaterial(m) exactly once per outer loop iteration.
-            video::SMaterial& mat = node->getMaterial(m);
-            for (u32 t = 0; t < video::MATERIAL_MAX_TEXTURES; ++t) {
-                video::ITexture* tex = mat.getTexture(t);
+            irr::video::SMaterial& mat = node->getMaterial(m);
+            for (irr::u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t) {
+                irr::video::ITexture* tex = mat.getTexture(t);
                 if (tex) {
                     m_textureCache->releaseLinear(tex);
                     mat.setTexture(t, nullptr);
@@ -126,7 +128,7 @@ public:
         // Step 2: Set driver's active material to the default SMaterial.
         // ------------------------------------------------------------------
         if (m_driver) {
-            m_driver->setMaterial(video::SMaterial{});
+            m_driver->setMaterial(irr::video::SMaterial{});
         }
 
         // ------------------------------------------------------------------
@@ -143,11 +145,11 @@ public:
     }
 
 private:
-    video::IVideoDriver* m_driver;
-    TextureCache*        m_textureCache;
+    irr::video::IVideoDriver* m_driver;
+    TextureCache*             m_textureCache;
 
     // Internal implementation of the 4-step destroy sequence used by the raw-pointer overload.
-    void destroyImpl(scene::ISceneNode* node,
+    void destroyImpl(irr::scene::ISceneNode* node,
                      const std::vector<std::string>& srgbTextures,
                      const std::vector<std::string>& splatMaps);
 };

@@ -26,23 +26,23 @@ using namespace irr;
 using namespace irr::video;
 using namespace irr::scene;
 
-SceneEntityManager::SceneEntityManager(video::IVideoDriver* driver,
+SceneEntityManager::SceneEntityManager(irr::video::IVideoDriver* driver,
                                        TextureCache* textureCache)
     : m_driver{driver}
     , m_textureCache{textureCache}
 {
 }
 
-scene::ISceneNode* SceneEntityManager::track(scene::ISceneNode* node,
-                                              std::vector<std::string> /*linearTextures*/,
-                                              std::vector<std::string> /*srgbTextures*/,
-                                              std::vector<std::string> /*splatMaps*/) {
+irr::scene::ISceneNode* SceneEntityManager::track(irr::scene::ISceneNode* node,
+                                                   const std::vector<std::string>& /*linearTextures*/,
+                                                   const std::vector<std::string>& /*srgbTextures*/,
+                                                   const std::vector<std::string>& /*splatMaps*/) {
     // Phase 5: tracking is informational. Entity objects (TerrainChunk, Building, Vehicle)
     // hold the node pointer directly.
     return node;
 }
 
-void SceneEntityManager::destroyImpl(scene::ISceneNode* node,
+void SceneEntityManager::destroyImpl(irr::scene::ISceneNode* node,
                                       const std::vector<std::string>& srgbTextures,
                                       const std::vector<std::string>& splatMaps) {
     // Step 1b: Release sRGB diffuse textures by filename.
@@ -57,7 +57,7 @@ void SceneEntityManager::destroyImpl(scene::ISceneNode* node,
 
     // Step 2: Set driver's active material to the default SMaterial.
     if (m_driver) {
-        m_driver->setMaterial(video::SMaterial{});
+        m_driver->setMaterial(irr::video::SMaterial{});
     }
 
     // Step 3: Evict zero-reference entries from all three texture pools.
@@ -67,10 +67,10 @@ void SceneEntityManager::destroyImpl(scene::ISceneNode* node,
     node->remove();
 }
 
-void SceneEntityManager::destroy(scene::ISceneNode*& node,
-                                  std::vector<std::string>& linearTextures,
-                                  std::vector<std::string>& srgbTextures,
-                                  std::vector<std::string>& splatMaps) {
+void SceneEntityManager::destroy(irr::scene::ISceneNode*& node,
+                                  const std::vector<std::string>& linearTextures,
+                                  const std::vector<std::string>& srgbTextures,
+                                  const std::vector<std::string>& splatMaps) {
     if (!node) {
         return;
     }
@@ -82,12 +82,12 @@ void SceneEntityManager::destroy(scene::ISceneNode*& node,
     // Result cached as SMaterial& — re-calling getMaterial() in the inner t loop
     // is a temporary-object hazard per texture-cache.md line 139.
     // ------------------------------------------------------------------
-    u32 matCount = node->getMaterialCount();
-    for (u32 m = 0; m < matCount; ++m) {
+    irr::u32 matCount = node->getMaterialCount();
+    for (irr::u32 m = 0; m < matCount; ++m) {
         // MANDATORY: call getMaterial(m) exactly once per outer loop iteration.
-        video::SMaterial& mat = node->getMaterial(m);
-        for (u32 t = 0; t < video::MATERIAL_MAX_TEXTURES; ++t) {
-            video::ITexture* tex = mat.getTexture(t);
+        irr::video::SMaterial& mat = node->getMaterial(m);
+        for (irr::u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t) {
+            irr::video::ITexture* tex = mat.getTexture(t);
             if (tex) {
                 m_textureCache->releaseLinear(tex);
                 mat.setTexture(t, nullptr);
@@ -97,13 +97,12 @@ void SceneEntityManager::destroy(scene::ISceneNode*& node,
 
     // Steps 1b, 1c, 2, 3 via shared implementation.
     // Step 4: null the caller's reference BEFORE node->remove().
-    scene::ISceneNode* nodeToRemove = node;
+    irr::scene::ISceneNode* nodeToRemove = node;
     node = nullptr; // null the caller's reference first
 
     destroyImpl(nodeToRemove, srgbTextures, splatMaps);
 
-    // Clear the texture filename lists.
-    linearTextures.clear();
-    srgbTextures.clear();
-    splatMaps.clear();
+    // Note: linearTextures, srgbTextures, splatMaps are now const refs (A-24).
+    // Callers that need to clear their lists must do so themselves after this call.
+    (void)linearTextures;
 }

@@ -23,6 +23,11 @@ enum class GameMode {
     Scenario
 };
 
+// PendingQuitAction — describes a deferred quit action waiting for an unsaved-changes
+// modal to close. Moved from UIManager::GameSessionState to ui_types.h so that
+// test files can reference it without including UIManager.h (D-13 / UI-7).
+enum class PendingQuitAction { None, Desktop, ToMenu };
+
 // ActiveTool — the currently active placement/interaction tool in the HUD toolbar.
 // None means no tool is active (camera-only mode, same as the Phase 8 default state).
 // Used by UIManager::m_activeTool and by the world-interaction input block (Priority 7)

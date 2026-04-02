@@ -477,7 +477,7 @@ bool SettingsPanel::onEvent(const InputEvent& event) {
 
         // Tab header clicks
         auto hitTest = [this](int mx, int my, UIElementHandle handle) {
-            Rect r = m_backend->getElementRect(handle);
+            UIRect r = m_backend->getElementRect(handle);
             return mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h;
         };
 
@@ -571,14 +571,14 @@ void SettingsPanel::setKeybindingsApplyFn(std::function<void(const KeyBindings&)
 // setCurrentBindings — seed m_appliedBindings (called after load / apply).
 // ---------------------------------------------------------------------------
 void SettingsPanel::setCurrentBindings(const KeyBindings& b) {
-    m_appliedBindings.copyMutableFrom(b);
+    m_appliedBindings = b;  // D-2: copyMutableFrom() removed; operator= works now
 }
 
 // ---------------------------------------------------------------------------
 // applyKeybindings — update applied bindings and call the callback.
 // ---------------------------------------------------------------------------
 void SettingsPanel::applyKeybindings(const KeyBindings& b) {
-    m_appliedBindings.copyMutableFrom(b);
+    m_appliedBindings = b;  // D-2: copyMutableFrom() removed; operator= works now
     if (m_keybindingsApplyFn) m_keybindingsApplyFn(b);
 }
 

@@ -104,10 +104,10 @@ public:
 
     // getNode() — accessor for the wrapped scene node (exposed as ISceneNode* for
     // positioning/removal/material access). Caller must not call remove() or drop().
-    irr::scene::ISceneNode* getNode() const;
+    [[nodiscard]] irr::scene::ISceneNode* getNode() const;
 
     // getCurrentLOD() — returns the active LOD index (0, 1, or 2).
-    int getCurrentLOD() const { return m_currentLOD; }
+    [[nodiscard]] int getCurrentLOD() const { return m_currentLOD; }
 
 private:
     // Hysteresis band widths (metres).

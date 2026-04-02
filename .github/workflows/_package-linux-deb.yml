@@ -56,6 +56,18 @@ jobs:
 
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
+      # Cache vcpkg binary tool and installed packages to avoid re-bootstrapping on
+      # every packaging run. Key includes distro codename so different distro legs
+      # do not share potentially ABI-incompatible archives.
+      - name: Cache vcpkg packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: /opt/vcpkg/packages
+          key: vcpkg-deb-${{ matrix.codename }}-${{ hashFiles('vcpkg.json') }}-${{ inputs.vcpkg_commit_id }}
+          restore-keys: |
+            vcpkg-deb-${{ matrix.codename }}-${{ inputs.vcpkg_commit_id }}-
+            vcpkg-deb-${{ matrix.codename }}-
+
       - name: Set up vcpkg
         run: |
           git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg
@@ -103,7 +115,7 @@ jobs:
             "-DCPACK_PACKAGE_FILE_NAME=aitown-${{ steps.pkgver.outputs.version }}-${{ matrix.codename }}"
 
       - name: Download Linux staging artifact
-        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110  # v4.1.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: aitown-staging-linux-${{ github.sha }}
           path: build/

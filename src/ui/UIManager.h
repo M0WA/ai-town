@@ -1,11 +1,12 @@
 #pragma once
 
-#include "src/interfaces/IUIBackend.h"      // UIElementHandle, kInvalidUIElement, Rect
+#include "src/interfaces/IUIBackend.h"      // UIElementHandle, kInvalidUIElement, UIRect
 #include "src/ui/ui_types.h"        // GameMode, GameState, ActiveTool
 #include "src/interfaces/IClock.h"  // IClock — full include (available at Phase 0)
 #include "src/interfaces/simulation_types.h"  // CityRatingTier — used as m_previousCityRating type
 #include "src/interfaces/LoanTerms.h"  // LoanTerms
 #include "key_bindings.h"           // KeyBindings — loaded at startup from keybindings.json
+#include <array>
 #include <unordered_map>
 #include <cstdint>
 
@@ -145,32 +146,35 @@ public:
     // Must be called from main.cpp after terrain generation completes (step 5 of Phase 9b
     // wiring, via terrainSystem.getMapTilesX() / getMapTilesZ()).
     // Re-call safety: if called a second time (e.g. new-game load with different map size),
-    // m_overlayMap is cleared and setZoneOverlay({}) is issued before updating dimensions
+    // m_world.overlayMap is cleared and setZoneOverlay({}) is issued before updating dimensions
     // so stale overlay keys from the old map width cannot corrupt the new map.
     void setMapDimensions(int mapTilesX, int mapTilesZ);
 
     // getActiveTool — returns the current active tool state (for test observability).
     ActiveTool getActiveTool() const;
 
+    // --- Test seam API (methods called only from unit tests) ---
+
     // setDemolishConfirm — enable/disable the demolish confirmation modal.
     // When false, demolishTile() is called immediately without showing a modal.
     // Used by tests to suppress the modal; production default is true (confirm ON).
     void setDemolishConfirm(bool enabled) { m_demolishConfirmEnabled = enabled; }
 
-    // setOverlayMapForTest — test-seam to pre-populate m_overlayMap without
+    // setOverlayMapForTest — test-seam to pre-populate m_world.overlayMap without
     // routing 100K UI events through onEvent().
     // Used exclusively by WorldInteraction_OverlayCap_100K_StillCalls to
     // inject exactly kOverlayCap entries so the cap-enforcement path can be
     // exercised with a single subsequent placement. Production code never calls
     // this method.
     // (ref: architecture/testing/testability-architecture.md — test seam pattern)
-    void setOverlayMapForTest(const std::unordered_map<uint64_t, uint32_t>& map) {
-        m_overlayMap = map;
+    [[deprecated("for tests only")]]
+    void setOverlayMapForTest(const std::unordered_map<int64_t, uint32_t>& map) {
+        m_world.overlayMap = map;
     }
 
     // onNewGame — reset all world-interaction state for a new game load.
-    // Clears m_overlayMap, calls setZoneOverlay({}) if renderer is non-null,
-    // resets m_activeTool to None, and clears m_hoveredTileX/Z.
+    // Clears m_world.overlayMap, calls setZoneOverlay({}) if renderer is non-null,
+    // resets m_world.activeTool to None, and clears m_world.hoveredTileX/Z.
     // Called from UIManager::transitionToGameplay() or test harness.
     void onNewGame();
 
@@ -261,203 +265,143 @@ public:
     //   (subsequent-game path) or calls transitionToGameplay() directly (first-game path).
     void handleNewGameRequest(const NewGameParams& params);
 
-    // setGameSessionActiveForTest — directly set m_gameSessionActive for tests.
+    // setGameSessionActiveForTest — directly set m_session.active for tests.
     void setGameSessionActiveForTest(bool value);
 #endif  // AITOWN_TESTING_ENABLED
 
 private:
-    IUIBackend*      m_backend{nullptr};
-    IAudioSystem*    m_audio{nullptr};
-    ICitySimulation* m_sim{nullptr};
-    IClock*          m_clock{nullptr};
+    // D-4 / UI-3: WorldInteractionState — groups all active-tool and map-interaction members.
+    // Extracted from the flat private section to make the tool-related cohesion explicit.
+    struct WorldInteractionState {
+        // Active tool selection (Phase 9b)
+        ActiveTool activeTool{ActiveTool::None};
 
-    // UI state machine
+        // Zone sub-panel selection (Phase 9b)
+        // ZoneType / DensityTier are ints here to avoid pulling simulation headers into UIManager.h.
+        int selectedZoneType{0};       // 0=Residential, 1=Commercial, 2=Industrial
+        int selectedDensityTier{0};    // 0=Low, 1=Medium, 2=High
+        int selectedServiceBuilding{0}; // matches ServiceBuildingType enum ordinal
+
+        // Map dimensions (set via setMapDimensions() from main.cpp)
+        int mapTilesX{0};
+        int mapTilesZ{0};
+
+        // Sparse zone overlay map
+        // Key: static_cast<int64_t>(tileZ) * mapTilesX + tileX (int64_t); Value: ARGB colour (0xAARRGGBB).
+        std::unordered_map<int64_t, uint32_t> overlayMap;
+
+        // Last hovered tile coordinates ({-1,-1} = no valid tile)
+        int hoveredTileX{-1};
+        int hoveredTileZ{-1};
+
+        // LMB held state (drag-to-zone / road / demolish)
+        bool lmbHeld{false};
+
+        // Zone rectangular selection anchor (Phase 10)
+        // Set on first LMB press; reset on release after rectangle fill.
+        int zoneAnchorX{-1};
+        int zoneAnchorZ{-1};
+
+        // Zone sub-panel button handles (3×3 grid, row-major: densityRow*3+zoneCol)
+        std::array<UIElementHandle, 9> zoneSubPanelBtns{};
+
+        // Utilities sub-panel button handles (2×2 grid)
+        // Layout: [0]=PowerPlant, [1]=WaterTower, [2]=FireStation, [3]=PoliceStation.
+        std::array<UIElementHandle, 4> utilSubPanelBtns{};
+
+        // Overlay refresh counter (Phase 11m)
+        int overlayRefreshCounter{0};
+
+        // Demolish pending tile and modal gate (Phase 11h)
+        int  demolishPendingTileX{-1};
+        int  demolishPendingTileZ{-1};
+        bool demolishModalPending{false};
+    };
+    WorldInteractionState m_world;
+
+    // D-4 / UI-3: GameSessionState — groups all session-lifecycle and pending-request members.
+    struct GameSessionState {
+        // True once the first transitionToGameplay() has been called.
+        // NOT reset by transitionToMainMenu() — stays true for subsequent-game path.
+        bool active{false};
+
+        // Pending new-game request (set when a new game arrives during an active session)
+        bool        newGamePending{false};
+        NewGameParams newGameParams{};
+
+        // Pending load-game request
+        bool        loadGamePending{false};
+        std::string pendingLoadJson;
+
+        // Pending quit action after unsaved-changes modal (type defined in ui_types.h)
+        PendingQuitAction pendingQuit{PendingQuitAction::None};
+
+        // Pending save-failure retry (manual save failure modal is open)
+        bool pendingSaveFailure{false};
+
+        // Application quit flag (polled by main.cpp via isQuitRequested())
+        bool quitRequested{false};
+
+        // Unsaved-changes indicator
+        bool hasUnsavedChanges{false};
+    };
+    GameSessionState m_session;
+
+    // --- Injected dependencies ---
+    IUIBackend*    m_backend{nullptr};
+    IAudioSystem*  m_audio{nullptr};
+    ICitySimulation* m_sim{nullptr};
+    IClock*        m_clock{nullptr};
+    IRenderer*     m_renderer{nullptr};
+    ITerrainQuery* m_terrain{nullptr};
+    irr::ILogger*  m_logger{nullptr};
+    ISaveSystem*   m_saveSystem{nullptr};
+
+    // --- Game state machine ---
     GameState  m_state{GameState::MainMenu};
     GameMode   m_gameMode{GameMode::Sandbox};
 
-    // --- Phase 9b: late-bound renderer and terrain query (set via setters after construction) ---
-    IRenderer*    m_renderer{nullptr};
-    ITerrainQuery* m_terrain{nullptr};
-
-    // Phase 11l: Irrlicht logger — non-owning, may be nullptr (tests pass nullptr).
-    irr::ILogger* m_logger{nullptr};
-
-    // --- Phase 9b: active tool state ---
-    // Default: None (camera-only mode, same as Phase 8 initial state).
-    // Set by Priority-5 toolbar dispatch and hotkeys Z/R/U/D/I.
-    ActiveTool m_activeTool{ActiveTool::None};
-
-    // --- Phase 9b: zone sub-panel selection state ---
-    // ZoneType and DensityTier are defined in simulation_types.h; forward-declared here
-    // to avoid pulling the full simulation header into UIManager.h.  The concrete values
-    // are used only in UIManager.cpp.
-    // Default: Residential + Low (leftmost/topmost button in the 3x3 grid).
-    int m_selectedZoneType{0};    // 0=Residential, 1=Commercial, 2=Industrial
-    int m_selectedDensityTier{0}; // 0=Low, 1=Medium, 2=High
-
-    // --- Phase 9b: utilities sub-panel selection state ---
-    // Default: PowerPlant (index 0 in ServiceBuildingType enum).
-    int m_selectedServiceBuilding{0}; // matches ServiceBuildingType enum ordinal
-
-    // --- Phase 9b: map dimensions (set via setMapDimensions() from main.cpp) ---
-    // Both default to 0; overlay writes are skipped until setMapDimensions() has been called.
-    int m_mapTilesX{0};
-    int m_mapTilesZ{0};
-
-    // --- Phase 9b: sparse zone overlay map ---
-    // Key: tileZ * m_mapTilesX + tileX  (uint64_t)
-    // Value: ARGB colour (0xAARRGGBB)
-    // Updated on each successful placeZone() or demolishTile() call.
-    // Passed directly to IRenderer::setZoneOverlay() — sparse entries only.
-    // Capped at 100K entries for V1 (enforced in the overlay-insert path).
-    std::unordered_map<uint64_t, uint32_t> m_overlayMap;
-
-    // --- Phase 9b: last hovered tile coordinates ---
-    // Stored by the MouseMove handler and consumed by the left-click handler.
-    // {-1, -1} means no valid hovered tile (ray missed or no active tool).
-    int m_hoveredTileX{-1};
-    int m_hoveredTileZ{-1};
-
-    // Left mouse button held state — tracked for drag-to-zone/road/demolish.
-    // Set true on MouseButtonDown button==0, false on MouseButtonUp button==0.
-    bool m_lmbHeld{false};
-
-    // --- Phase 10: Zone rectangular selection anchor ---
-    // Set to the first tile clicked when Zone tool LMB is pressed.
-    // Reset to {-1,-1} on LMB release (after filling the rectangle).
-    // While held (-1 means no active rect drag), drag does NOT fill tiles — only
-    // the hover highlight moves. On release, ALL tiles in the axis-aligned rectangle
-    // [min(anchor,current), max(anchor,current)] are filled via doTerrainPlacement().
-    // Road, Utilities, and Demolish tools retain their original tile-by-tile drag
-    // behavior; only Zone uses this deferred rectangular fill pattern.
-    int m_zoneAnchorX{-1};
-    int m_zoneAnchorZ{-1};
-
-    // --- Phase 9b: Zone sub-panel button handles (3×3 grid: col=zone R/C/I, row=density Low/Med/High) ---
-    // Created during UIManager construction via m_backend->addButton().
-    // Stored in row-major order: m_zoneSubPanelBtns[densityRow * 3 + zoneCol].
-    // All 9 initialized to kInvalidUIElement; populated if m_backend is non-null.
-    UIElementHandle m_zoneSubPanelBtns[9]{
-        kInvalidUIElement, kInvalidUIElement, kInvalidUIElement,
-        kInvalidUIElement, kInvalidUIElement, kInvalidUIElement,
-        kInvalidUIElement, kInvalidUIElement, kInvalidUIElement
-    };
-
-    // --- Phase 9b: Utilities sub-panel button handles (2×2 grid) ---
-    // Layout: [0]=PowerPlant, [1]=WaterTower, [2]=FireStation, [3]=PoliceStation.
-    // Matches ServiceBuildingType enum ordinals.
-    UIElementHandle m_utilSubPanelBtns[4]{
-        kInvalidUIElement, kInvalidUIElement,
-        kInvalidUIElement, kInvalidUIElement
-    };
-
-    // Unsaved-changes indicator state
-    bool m_hasUnsavedChanges{false};
-
-    // --- Phase 8: deficit-streak polling (GD-H3 bridge) ---
-
-    // Edge-detect: last polled value of getConsecutiveDeficitMonths().
-    // Initialized to 0 so the first poll at month 1 triggers the edge.
-    int m_lastDeficitMonths{0};
-
-    // Cooldown for CRISIS stinger (5 s minimum gap).
-    // Initialized to -5.0 so the first fire always passes the cooldown check.
-    double m_lastCrisisStingerFireTime{-5.0};
-
-    // Cooldown for MILESTONE stinger (5 s minimum gap per StingerType).
-    // Initialized to -5.0 so the first City Rating transition always fires.
-    // Phase 11: triggerStinger(MILESTONE) fires via per-frame getCityRating() polling
-    // (replaces Phase 10 notification-based dispatch to prevent double-fire on load).
-    double m_lastMilestoneStingerFireTime{-5.0};
-
-    // Phase 11: stinger_milestone per-frame cache.
-    // Stores the city rating seen on the previous frame so update() can detect upward
-    // transitions and call triggerStinger(StingerType::MILESTONE) exactly once.
-    // Seeded by onGameLoaded() after deserialization to prevent a spurious stinger on
-    // the first update() tick of a loaded game. NOT serialized by SaveSystem.
-    // Default Village (smallest tier) — matches a new-game / pre-load state.
-    CityRatingTier m_previousCityRating{CityRatingTier::Village};
-
-    // --- Phase 8: loading gate ---
-    // While true, update() returns immediately (terrain generation in progress).
-    bool m_loadingTerrain{false};
-
-    // --- Phase 11: ISaveSystem pointer (optional — null until setSaveSystem() is called) ---
-    ISaveSystem* m_saveSystem{nullptr};
-
-    // --- Phase 11: key bindings loaded from keybindings.json at startup ---
-    // Defaults are set by KeyBindings member initialisers; overridden by load().
+    // --- Key bindings ---
     KeyBindings m_keyBindings{};
 
-    // --- Phase 11: pending quit action after unsaved-changes modal ---
-    // Set when a quit is requested while m_hasUnsavedChanges is true.
-    // Cleared after the blocking modal resolves.
-    enum class PendingQuitAction { None, Desktop, ToMenu };
-    PendingQuitAction m_pendingQuit{PendingQuitAction::None};
+    // --- Pending quit action type (defined in ui_types.h as top-level PendingQuitAction) ---
+    // D-13: PendingQuitAction moved from GameSessionState to ui_types.h.
+    // Use PendingQuitAction::None / Desktop / ToMenu directly.
 
-    // --- Phase 11c: pending save-failure retry ---
-    // True when a manual save failure modal (SaveFailure type) is open.
-    // update() polls the modal result and re-calls saveToSlot(1) on Retry.
-    bool m_pendingSaveFailure{false};
+    // --- Stinger and city-rating tracking ---
+    int            m_lastDeficitMonths{0};
+    double         m_lastCrisisStingerFireTime{-5.0};
+    double         m_lastMilestoneStingerFireTime{-5.0};
+    CityRatingTier m_previousCityRating{CityRatingTier::Village};
 
-    // --- Phase 8: application quit flag ---
-    // Set when MainMenu Quit or PauseMenu Quit to Desktop is consumed.
-    // Polled by main.cpp via isQuitRequested() to break the frame loop.
-    bool m_quitRequested{false};
-
-    // --- Phase 8: speed selector element handle (created by HUD) ---
+    // --- UI element handles and panel state ---
     UIElementHandle m_speedSelectorHandle{kInvalidUIElement};
-
-    // --- Phase 8: modal-pause tracking ---
-    // True if UIManager called setPaused(true) when opening a modal.
-    // closeModal() only calls setPaused(false) if this flag is true.
+    UIElementHandle m_scrimHandle{kInvalidUIElement};
+    bool m_loadingTerrain{false};
     bool m_didPauseSim{false};
-
-    // --- Phase 8: panel open-state tracking for input arbitration ---
     bool m_inspectorOpen{false};
-    bool m_financesPanelOpen{false};  // Phase 11l: FinancesPanel toggle state
-
-    // --- Phase 8: Ctrl-key state tracking for Ctrl+Z ---
+    bool m_financesPanelOpen{false};
     bool m_ctrlDown{false};
-
-    // --- Phase 9b: demolish confirmation gate ---
-    // Mirrors Settings > Gameplay "Confirm before demolish" (default ON).
-    // Tests set this to false to suppress the modal and call demolishTile directly.
     bool m_demolishConfirmEnabled{true};
 
-    // Phase 11h: demolition pending tile (mouse-down records tile; mouse-up triggers modal).
-    int m_demolishPendingTileX{-1};
-    int m_demolishPendingTileZ{-1};
-    bool m_demolishModalPending{false};  // true while waiting for demolish confirm modal result
+    // D-23 / UI-23: update() sub-methods — thin dispatcher calls these in sequence.
 
-    // Background scrim element shown behind modal dialogs.
-    // kInvalidUIElement (0) until Phase 6 creates the real element.
-    UIElementHandle m_scrimHandle{kInvalidUIElement};
+    // Poll MainMenuPanel for new-game / load-game / settings / quit requests.
+    // Returns true if a state transition occurred and update() should return early.
+    bool pollMainMenuRequests();
 
-    // --- Phase 11m: new-game session state ---
-    // m_gameSessionActive: true once the first transitionToGameplay() has been called.
-    //   Used to distinguish first-game (direct transition) from subsequent-game (pending path).
-    //   NOT reset by transitionToMainMenu() — stays true so the next new-game correctly
-    //   takes the subsequent-game path (loading screen + pending flag).
-    bool m_gameSessionActive{false};
+    // Poll PauseMenuPanel for save, quit-to-desktop, and quit-to-menu requests.
+    // Returns true if a state transition occurred and update() should return early.
+    bool pollPauseMenuRequests();
 
-    // m_newGamePending: set true when a new-game request arrives during an active session.
-    //   Consumed (reset to false) by consumeNewGameRequest().
-    bool m_newGamePending{false};
+    // Check if an unsaved-changes or save-failure modal has just closed and
+    // dispatch the corresponding quit / retry / cancel action.
+    // Returns true if a state transition occurred and update() should return early.
+    bool updateModalDialogState();
 
-    // m_newGameParams: stores the parameters for the pending new-game request.
-    NewGameParams m_newGameParams{};
-
-    // --- Phase 11m: load-game pending state ---
-    // m_loadGamePending: true when a load-game request has been deferred for main.cpp.
-    // m_pendingLoadJson: the JSON string from the save file, moved to main.cpp on consume.
-    bool        m_loadGamePending{false};
-    std::string m_pendingLoadJson;
-
-    // --- Phase 11m: overlay refresh counter ---
-    // Incremented each frame; triggers a construction-overlay refresh every 60 frames
-    // (or immediately on a populationTick notification, whichever comes first).
-    int m_overlayRefreshCounter{0};
+    // HUD/overlay per-frame updates: deficit-streak polling, stinger milestone,
+    // speed selector text, notification polling, and overlay refresh.
+    void updateHUDState(float realDeltaSeconds);
 
     // Helper: compute the ARGB overlay color for a zoned tile (under-construction state).
     // Returns one of the 9 pre-defined ARGB values from the 3×3 (zone × density) table.
@@ -467,8 +411,8 @@ private:
     // Called from applyKeybindings().
     void saveKeybindings(const KeyBindings& b);
 
-    // Helper: show/hide Zone and Utilities sub-panels based on m_activeTool.
-    // Called whenever m_activeTool changes (toolbar click or hotkey).
+    // Helper: show/hide Zone and Utilities sub-panels based on m_world.activeTool.
+    // Called whenever m_world.activeTool changes (toolbar click or hotkey).
     void updateSubPanelVisibility();
 
     // Helper: execute terrain placement at (hitX, hitZ) for the current active tool.

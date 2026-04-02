@@ -5,6 +5,10 @@
 # Preflight steps (SHA lint, asset validation, clouds/font/audio/terrain checks,
 # vcpkg baseline) are handled by the supply-chain-lint and validate-assets jobs
 # and are NOT duplicated here.
+#
+# Two-job structure:
+#   coverage-linux  — compile (ENABLE_COVERAGE=ON), upload build artifact, run lcov.
+#   test-linux      — delegate all ctest steps to _test-linux.yml (reusable workflow).
 name: Coverage Linux
 
 on:
@@ -26,208 +30,74 @@ jobs:
       checks: write     # required by dorny/test-reporter
       contents: read    # required by actions/checkout
     steps:
-      # Step 1: Checkout
+      # Checkout
       - name: Checkout code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
-      # Step 4: Detect GCC version (separate step before actions/cache).
+      # Detect GCC version (separate step before actions/cache).
+      # $GITHUB_ENV writes are not visible within the same step.
       - name: Detect GCC version
         shell: bash
         run: |
           echo "COMPILER_VERSION=$(gcc -dumpfullversion -dumpversion)" >> $GITHUB_ENV
 
-      # Step 8: Set up ccache.
+      # Set up ccache.
       - name: Set up ccache
-        if: runner.os == 'Linux'
         uses: hendrikmuhs/ccache-action@ed74d11c0b343532753ecead8a951bb09bb34bc9  # v1.2.14
         with:
           key: ${{ runner.os }}-ccache-coverage-${{ env.COMPILER_VERSION }}
 
-      # Step 9: Configure CMake with ENABLE_COVERAGE=ON (via ci-linux-coverage preset).
+      # Configure CMake with ENABLE_COVERAGE=ON (via ci-linux-coverage preset).
       # CMakePresets.json defines: Ninja generator, ccache launchers, ENABLE_COVERAGE=ON.
       - name: Configure CMake (coverage)
         run: cmake --preset ci-linux-coverage -DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed -DVCPKG_MANIFEST_INSTALL=OFF
 
-      # Step 10: Build.
+      # Build.
       - name: Build (coverage)
         run: cmake --build build --parallel
 
-      # Step 11: Verify integration test routing (non-zero discovery) — Phase 1 deliverable.
-      # IrrlichtUIBackendCompileCheck::IsNonAbstract is registered under the 'integration' label.
-      # See architecture/testing/framework.md for rationale.
-      - name: Verify integration test routing (non-zero discovery)
-        shell: bash
-        run: |
-          count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
-          if [[ "$count" -eq 0 ]]; then
-            echo "ERROR: No tests discovered under integration label. Check integration_tests CMake registration."
-            exit 1
-          fi
-          echo "Integration routing: $count test(s) discovered."
-
-      # Step 12: Verify requires-opengl test routing (non-zero discovery) — Phase 1 deliverable.
-      # Must appear BEFORE xvfb-run ctest to confirm routing before execution.
-      # The stub_succeed.cpp test from Phase 0 satisfies the non-zero discovery requirement.
-      # Phase 2 note: lod_swap_smoke_test.cpp (Phase 6) is the first real requires-opengl test body.
-      - name: Verify requires-opengl test routing (non-zero discovery)
-        shell: bash
-        run: |
-          count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #' || true)
-          if [[ "$count" -eq 0 ]]; then
-            echo "ERROR: No tests discovered under requires-opengl label. Check opengl_tests CMake registration."
-            exit 1
-          fi
-          echo "requires-opengl routing: $count test(s) discovered."
-
-      # Step 12b: Verify unit test routing (non-zero discovery) — CI-7, Phase 4 deliverable.
-      # Mirrors the identical step in build-linux. Uses -N dry-run + grep -E 'Test +#'.
-      - name: Verify unit test routing (non-zero discovery)
-        shell: bash
-        run: |
-          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -cE 'Test +#' || true)
-          if [[ "$count" -eq 0 ]]; then
-            echo "ERROR: No tests discovered under unit label. Check simulation_tests/terrain_tests/ui_tests/audio_tests CMake registration."
-            exit 1
-          fi
-          echo "Unit routing: $count test(s) discovered."
-
-      # Step 12c: Verify simulation_tests specifically is discoverable — Phase 6 deliverable.
-      # Mirrors the identical step in build-linux.
-      # Phase 6 is complete; hardened from WARNING-ONLY to hard-fail.
-      # Phase 10 adds adaptive_music_intensity_test.cpp — silent 0-test ctest exit must be caught.
-      # Note: ctest pads test numbers with spaces; use grep -E 'Test +#' for all formats.
-      - name: Verify simulation_tests registration
-        shell: bash
-        run: |
-          count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -cE 'Test +#' || true)
-          if [[ "$count" -eq 0 ]]; then
-            echo "ERROR: No simulation_tests test cases discovered. Ensure simulation_tests is registered in CMakeLists.txt with aitown_add_tests(simulation_tests LABEL \"unit\" DISCOVERY_TIMEOUT 60) and that the binary links and starts correctly."
-            exit 1
-          fi
-          echo "simulation_tests routing: $count test(s) discovered."
-
-      # Step 13: Run unit tests.
-      - name: Run unit tests (no display)
-        run: |
-          mkdir -p test_results
-          ctest --test-dir build -LE 'integration|requires-opengl' --output-on-failure
-        env:
-          GTEST_OUTPUT: 'xml:test_results/'
-          AITOWN_HEADLESS: '1'
-          ALSOFT_DRIVERS: 'null'
-
-      # Step 14: Run integration tests.
-      - name: Run integration tests (no display, EDT_NULL)
-        run: |
-          mkdir -p test_results
-          ctest --test-dir build -L '^integration$' --output-on-failure
-        env:
-          GTEST_OUTPUT: 'xml:test_results/'
-          AITOWN_HEADLESS: '1'
-          ALSOFT_DRIVERS: 'null'
-
-      # Step 15: Run OpenGL tests under xvfb.
-      # AITOWN_HEADLESS must NOT appear here.
-      - name: Run OpenGL tests (xvfb)
-        run: |
-          mkdir -p test_results
-          xvfb-run --auto-servernum ctest --test-dir build -L '^requires-opengl$' --output-on-failure
-        env:
-          GTEST_OUTPUT: 'xml:test_results/'
-          ALSOFT_DRIVERS: 'null'
-
-      # Step 16: Verify test XML files.
-      # MUST run BEFORE dorny/test-reporter and lcov — if lcov fails, annotations still post.
-      - name: Verify test XML output
-        if: always()
-        shell: bash
-        run: |
-          count=$(find test_results -name '*.xml' 2>/dev/null | wc -l)
-          if [[ "$count" -eq 0 ]]; then
-            echo "ERROR: No test XML files in test_results/ — GTEST_OUTPUT may not have written output"
-            exit 1
-          fi
-          echo "Found $count test result file(s)."
-
-      # Step 16b: Fix git safe.directory for dorny/test-reporter.
-      # In container jobs the workspace is owned by a different UID than the runner;
-      # git 2.35.2+ refuses to read it unless the directory is marked safe.
-      # dorny/test-reporter calls 'git ls-files' internally — without this config it
-      # exits non-zero and the report is never posted to GitHub Checks.
-      - name: Fix git safe.directory for test reporter
-        if: always()
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      # Step 17: Publish test results.
-      # MUST run BEFORE lcov capture — if lcov fails, annotations still post.
-      # continue-on-error: true kept as a safety net in case dorny fails for
-      # reasons other than safe.directory (e.g. network, permissions).
-      - name: Publish test results (coverage)
-        if: always()
-        continue-on-error: true
-        uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1
-        with:
-          name: 'Linux Coverage Tests'
-          path: 'test_results/*.xml'
-          reporter: 'java-junit'
-          fail-on-error: false
-
-      # Step 18: Upload test results artifact (coverage-linux).
-      # if: always() — upload even on failure for post-mortem analysis.
-      - name: Upload test results (coverage-linux)
-        if: always()
+      # Upload the build directory so the test-linux job can run ctest against it.
+      # Retention-days=1 — only needed for the duration of this workflow run.
+      - name: Upload build artifact for test job
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
         with:
-          name: test-results-coverage-linux-${{ github.sha }}
-          path: test_results/
-          retention-days: 14
+          name: build-coverage-linux-${{ github.sha }}
+          path: build/
+          retention-days: 1
 
-      # Step 19: lcov capture, filter, report, and gate.
+      # lcov capture, filter, report.
       # All within a single run: block so BUILD_DIR variable persists.
-      # Required order: lcov --remove -> lcov --list -> genhtml -> lcov --fail-under-percent
-      # lcov --list MUST appear before --fail-under-percent so output is visible even on gate failure.
       - name: Generate coverage report
         run: |
           BUILD_DIR=build
-          # --gcov-tool gcov-13: the Dockerfile installs gcc-13/g++-13 but does not
-          # set up a gcov alternative, so the default gcov resolves to gcov-14 on
-          # Debian trixie. gcov-14 cannot read .gcda files produced by GCC 13 (version
-          # mismatch). Explicitly passing gcov-13 matches the compiler used for the build.
+          # --gcov-tool gcov-13: the Dockerfile installs gcc-13/g++-13; the default gcov
+          # may resolve to a different version on the runner. Explicitly passing gcov-13
+          # matches the compiler used for the build.
           # GCC 13 + lcov 2.x compatibility:
           # --ignore-errors mismatch,inconsistent: suppress "mismatched end line" and
-          #   "function not hit but line is" (lambda false positives). lcov 2.0 expands
-          #   comma-separated values to separate flags when calling geninfo internally.
-          # --rc check_data_consistency=0: lcov itself re-validates data after geninfo and
-          #   may throw the (inconsistent) "function not hit but line is" error even with
-          #   --ignore-errors in place. This rc flag disables that post-geninfo consistency
-          #   check entirely. The error message itself recommends this approach:
-          #   "see the 'check_data_consistency' section in man lcovrc(5)".
-          # All these are known false positives from GCC 13 lambda inlining and do not
-          # affect coverage accuracy.
+          #   "function not hit but line is" (lambda false positives from GCC 13 inlining).
+          # --rc check_data_consistency=0: disables post-geninfo consistency check that
+          #   re-throws the (inconsistent) error even with --ignore-errors in place.
           lcov --capture --directory "${BUILD_DIR}" --base-directory . \
                --gcov-tool gcov-13 \
                --ignore-errors mismatch,inconsistent \
                --rc check_data_consistency=0 \
                --output-file coverage.info
           # --ignore-errors unused: lcov 2.x treats any --remove pattern that matches
-          # no files as a fatal error (exit 25). At Phase 0 only smoke tests exist, so
-          # many exclusion patterns (mock_*.h, manual_*.h, src/audio/*, etc.) match
-          # nothing yet. These patterns are correct future-proofing — they must stay so
-          # they suppress coverage for those paths when real code arrives in Phase 1+.
+          # no files as a fatal error (exit 25). Patterns are correct future-proofing
+          # and are safe to include unconditionally.
           # Note: "${BUILD_DIR}/_deps/*" is intentionally absent — gtest and rapidcheck
           # are vcpkg-managed; FetchContent is not used and build/_deps never exists.
-          # ".fetchcontent_cache/*" is included below: FETCHCONTENT_BASE_DIR is set to
-          # .fetchcontent_cache (outside the build tree) so any future FetchContent use
-          # lands there. The --ignore-errors unused flag makes this pattern a no-op when
-          # the directory does not exist, so it is safe to include unconditionally.
+          # $(pwd) is used for workspace-relative paths to avoid the
+          # ${{ github.workspace }} vs container /__w/ path mismatch.
           lcov --remove coverage.info \
             --ignore-errors unused,inconsistent \
             --rc check_data_consistency=0 \
             '/usr/*' \
             '/opt/vcpkg_installed/*' \
-            "${{ github.workspace }}/.fetchcontent_cache/*" \
-            "${{ github.workspace }}/vcpkg_installed/*" \
-            "${{ github.workspace }}/build/vcpkg_installed/*" \
+            "$(pwd)/.fetchcontent_cache/*" \
+            "$(pwd)/vcpkg_installed/*" \
+            "$(pwd)/build/vcpkg_installed/*" \
             '*/tests/*' \
             '*/mock_*.h' '*/mock_*.cpp' \
             '*/manual_*.h' '*/manual_*.cpp' \
@@ -241,16 +111,10 @@ jobs:
           genhtml coverage_filtered.info --output-directory coverage_html/ \
             --ignore-errors inconsistent \
             --rc check_data_consistency=0
-          # lcov --summary informational step REMOVED in Phase 5 — replaced by the
-          # 80% total-line-coverage awk gate in the step below.
 
-      # Step 19b: src/simulation/ preflight — verify simulation coverage data is present.
-      # Phase 6 deliverable: if simulation_tests fails to run (DISCOVERY_TIMEOUT, binary crash,
-      # or missing CMake registration), coverage_filtered.info has no src/simulation/ SF entries.
-      # In that case the total-line gate would compute coverage across only src/terrain/ and
-      # src/ui/, which could pass at 95% while all simulation code is uncovered.
-      # WARNING: before Phase 6, simulation_tests produces only SUCCEED() stubs with trivial
-      # coverage — this check warns but does not hard-fail until Phase 6 is implemented.
+      # src/simulation/ preflight — verify simulation coverage data is present.
+      # If simulation_tests fails to run, coverage_filtered.info has no src/simulation/ SF
+      # entries and the total-line gate could pass while simulation code is entirely uncovered.
       - name: Preflight src/simulation/ coverage entries
         shell: bash
         run: |
@@ -307,13 +171,10 @@ jobs:
             }
           }'
 
-      # Step 20: Enforce src/ui/ 25% worst-file coverage gate — Phase 4 blocking deliverable.
-      # Parses coverage_filtered.info directly (SF/LH/LF records) — version-agnostic, works
-      # with lcov 1.x and 2.x (lcov --list changed delimiters in 2.0, so display parsing is
-      # unreliable). LH = lines hit, LF = lines found; per-file % = LH/LF*100.
+      # Enforce src/ui/ 25% worst-file coverage gate.
+      # Parses coverage_filtered.info directly (SF/LH/LF records) — version-agnostic.
+      # LH = lines hit, LF = lines found; per-file % = LH/LF*100.
       # Uses sort -n | head -1 to extract the MINIMUM (worst-file) value.
-      # Do NOT use average coverage — it masks under-covered files.
-      # Do NOT use integer comparison (-lt 25) — it truncates floats and incorrectly passes 24.8%.
       - name: Enforce src/ui/ 25% worst-file coverage gate
         shell: bash
         run: |
@@ -341,13 +202,9 @@ jobs:
             }
           }'
 
-      # Step 17a: Check src/ui/ coverage completeness (Phase 8 deliverable).
-      # Parses coverage_filtered.info directly and exits non-zero if any src/ui/
-      # file has zero lines hit. Catches dead-code gaps that the percentage gates
-      # above cannot detect (a file with 0/0 lines or all-zero DA records passes
-      # a percentage check vacuously).
-      # MUST use if: always() — without it, GitHub Actions skips this step when
-      # the lcov gate (step 17) fails, silently bypassing dead-code detection.
+      # Check src/ui/ coverage completeness.
+      # Exits non-zero if any src/ui/ file has zero lines hit — catches dead-code gaps
+      # the percentage gates cannot detect. if: always() prevents skipping on gate failure.
       - name: Check src/ui/ coverage completeness
         if: always()
         shell: bash
@@ -377,7 +234,7 @@ jobs:
           print('All src/ui/ files have coverage.')
           "
 
-      # Step 21: Upload coverage HTML artifact.
+      # Upload coverage HTML artifact.
       # if: always() — upload even if lcov gate fails for post-mortem analysis.
       - name: Upload coverage report
         if: always()
@@ -386,3 +243,20 @@ jobs:
           name: coverage-report-linux-${{ github.sha }}
           path: coverage_html/
           retention-days: 14
+
+  # Delegate all ctest steps (routing checks, unit/integration/opengl runs, result
+  # publishing) to the shared _test-linux.yml reusable workflow.
+  # Runs in parallel with the lcov steps in coverage-linux — both need the build
+  # artifact uploaded above.
+  test-linux:
+    needs: coverage-linux
+    permissions:
+      packages: read
+      checks: write
+      contents: read
+    uses: ./.github/workflows/_test-linux.yml
+    with:
+      build_artifact_name: build-coverage-linux-${{ github.sha }}
+      build_dir: build
+      reporter_name: 'Linux Coverage Tests'
+      test_artifact_name: test-results-coverage-linux-${{ github.sha }}

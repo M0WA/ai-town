@@ -1,11 +1,7 @@
 # Validate assets — reusable workflow
 # Runs tools/validate_assets.py and all source-tree presence gates.
 # Called by ci.yml with vcpkg_commit_id input.
-# Phase 9:  all 20 checks (Checks #1–#20) implemented in tools/validate_assets.py.
-# Phase 10: check #21 added — zone loop silence-floor gate; check #22, #23, #24 added.
-# Phase 11d: checks #25–#30 added.
-# Phase 11k: extended with vcpkg baseline consistency check, clouds.png, font,
-#            audio, and terrain presence gates (moved from build jobs to avoid duplication).
+# Current highest check number in tools/validate_assets.py: check_31.
 # timeout-minutes: 10 is permanent.
 name: Validate Assets
 
@@ -31,93 +27,36 @@ jobs:
         with:
           python-version: '3.12'  # pin to specific minor version — never use '3' (floating major breaks reproducibility)
 
-      - name: Verify check_20 present in validate_assets.py
+      # Verify all required check functions are present in validate_assets.py.
+      # Adding a new check: add its identifier to the list below. One loop step
+      # replaces N individual steps so new checks cost a single-line addition.
+      - name: Verify required checks present in validate_assets.py
+        shell: bash
         run: |
-          grep -q "check_20" tools/validate_assets.py || (echo "FAIL: check_20 not found in validate_assets.py" && exit 1)
-          echo "PASS: check_20 present"
-
-      - name: Verify check_21 present in validate_assets.py
-        run: |
-          grep -q "check_21" tools/validate_assets.py || (echo "FAIL: check_21 not found in validate_assets.py — Phase 10 zone loop silence-floor gate missing" && exit 1)
-          echo "PASS: check_21 present"
-
-      - name: Verify check_22 present in validate_assets.py
-        # check_22: non-stinger WAV SFX (sfx_*.wav, ui_*.wav) must be mono, 44100 Hz, 16-bit PCM.
-        # Phase 10 mandates mono/44100/16-bit for all WAV SFX assets; check_19 covers only stingers.
-        # A missing check_22 allows stereo or mis-sampled SFX WAVs to pass CI and silently fail
-        # at runtime when OpenAL Soft rejects non-mono buffers for positional sources.
-        run: |
-          grep -q "check_22" tools/validate_assets.py || (echo "FAIL: check_22 not found in validate_assets.py — Phase 10 non-stinger WAV SFX format gate missing" && exit 1)
-          echo "PASS: check_22 present"
-
-      - name: Verify check_23 present in validate_assets.py
-        # check_23: assets/textures/ui/hud_sprites_ui.png must exist, be 2048x2048, and RGBA.
-        # Phase 10 commits the HUD sprite sheet PNG as a runtime asset; a missing or malformed
-        # PNG causes IrrlichtUIBackend::m_spriteTextureReady to remain false, making toolbar
-        # buttons display fallback text instead of sprite icons in every rendered frame.
-        # A missing check_23 allows a truncated or wrong-dimensions PNG to pass CI silently.
-        run: |
-          grep -q "check_23" tools/validate_assets.py || (echo "FAIL: check_23 not found in validate_assets.py — Phase 10 hud_sprites_ui.png dimension/RGBA gate missing" && exit 1)
-          echo "PASS: check_23 present"
-
-      - name: Verify check_24 present in validate_assets.py
-        # check_24: assets/textures/sky/clouds.png must exist, be 1024x1024, and RGBA.
-        # Phase 10b mandates this cloud texture format gate. A missing check_24 allows
-        # a wrong-dimensions or wrong-channel clouds.png to pass CI silently.
-        run: |
-          grep -q "check_24_clouds_png" tools/validate_assets.py || (echo "FAIL: check_24_clouds_png not found in validate_assets.py — Phase 10b cloud texture format gate missing" && exit 1)
-          echo "PASS: check_24 present"
-
-      - name: Verify check_25 present in validate_assets.py
-        # check_25: vehicles_diffuse_atlas_d.dds — BC1_UNORM_SRGB (DXGI_FORMAT=72), 2048x2048, 4 mip levels.
-        # A missing check_25 allows a misformatted vehicle diffuse atlas DDS to pass CI silently.
-        run: |
-          grep -q "check_25" tools/validate_assets.py || (echo "FAIL: check_25 not found in validate_assets.py — Phase 11d vehicle diffuse atlas DDS format gate missing" && exit 1)
-          echo "PASS: check_25 present"
-
-      - name: Verify check_26 present in validate_assets.py
-        # check_26: vehicles_sprite_atlas_d.dds — BC3_UNORM linear (DXGI_FORMAT=77), 256x256, exactly 1 mip level.
-        # A missing check_26 allows a misformatted vehicle sprite atlas DDS to pass CI silently.
-        run: |
-          grep -q "check_26" tools/validate_assets.py || (echo "FAIL: check_26 not found in validate_assets.py — Phase 11d vehicle sprite atlas DDS format gate missing" && exit 1)
-          echo "PASS: check_26 present"
-
-      - name: Verify check_27 present in validate_assets.py
-        # check_27: vehicles_normal_atlas_n.dds — BC3_UNORM linear DXT5nm (DXGI_FORMAT=77), 2048x2048, 4 mip levels.
-        # A missing check_27 allows a misformatted vehicle normal atlas DDS to pass CI silently.
-        run: |
-          grep -q "check_27" tools/validate_assets.py || (echo "FAIL: check_27 not found in validate_assets.py — Phase 11d vehicle normal atlas DDS format gate missing" && exit 1)
-          echo "PASS: check_27 present"
-
-      - name: Verify check_28 present in validate_assets.py
-        # check_28: buildings_atlas_d.png wall-cell luminance stddev gate (< 8.0 = CI failure).
-        # A missing check_28 allows a near-solid placeholder atlas to pass CI silently.
-        run: |
-          grep -q "check_28" tools/validate_assets.py || (echo "FAIL: check_28 not found in validate_assets.py — Phase 11d building atlas diffuse variance gate missing" && exit 1)
-          echo "PASS: check_28 present"
-
-      - name: Verify check_29 present in validate_assets.py
-        # check_29: building atlas normal-map green-channel MAD gate (< 3.0 = CI failure).
-        # A missing check_29 allows a flat normal map (no surface relief) to pass CI silently.
-        run: |
-          grep -q "check_29" tools/validate_assets.py || (echo "FAIL: check_29 not found in validate_assets.py — Phase 11d building atlas normal-map non-flat gate missing" && exit 1)
-          echo "PASS: check_29 present"
-
-      - name: Verify check_30 present in validate_assets.py
-        # check_30: billboard atlas DDS dimensions/format/mip/size gate.
-        # A missing check_30 allows an incorrectly formatted billboard atlas to pass CI silently.
-        run: |
-          grep -q "check_30" tools/validate_assets.py || (echo "FAIL: check_30 not found in validate_assets.py — Phase 11d billboard atlas format/mip verification gate missing" && exit 1)
-          echo "PASS: check_30 present"
-
-      - name: Verify check_31 present in validate_assets.py
-        # check_31: all six tier-specific bitmap font XML + PNG pairs (hud_font_{720,1080,1440}.xml/png,
-        # hud_mono_font_{720,1080,1440}.xml/png) must exist under assets/fonts/.
-        # A missing check_31 allows the font generation step to be skipped, causing
-        # IrrlichtUIBackend to fall back to the 8px built-in font at all resolutions.
-        run: |
-          grep -q "check_31" tools/validate_assets.py || (echo "FAIL: check_31 not found in validate_assets.py — Phase 11g bitmap font tier assets gate missing" && exit 1)
-          echo "PASS: check_31 present"
+          failed=0
+          for check in \
+            check_20 \
+            check_21 \
+            check_22 \
+            check_23 \
+            check_24_clouds_png \
+            check_25 \
+            check_26 \
+            check_27 \
+            check_28 \
+            check_29 \
+            check_30 \
+            check_31; do
+            if grep -q "$check" tools/validate_assets.py; then
+              echo "PASS: $check present"
+            else
+              echo "FAIL: $check not found in tools/validate_assets.py"
+              failed=1
+            fi
+          done
+          if [ "$failed" -eq 1 ]; then
+            exit 1
+          fi
 
       - name: Verify hud_sprites_ui.dds not git-tracked
         # The DDS intermediate is an authoring artifact and must never be committed.
@@ -149,11 +88,12 @@ jobs:
       - name: Install Python dependencies
         # mutagen: OGG/WAV metadata (checks #16–#19).
         # Pillow: PNG image dimension and mode check (check #23 — hud_sprites_ui.png 2048x2048 RGBA).
+        # Versions pinned for reproducibility; update when a new check requires a newer API.
         # ffmpeg: required by check_21 (_decode_ogg_pcm_int16) to decode sfx_zone_*.ogg to
-        # raw int16 PCM for the silence-floor gate.  Installed as a system package (not pip)
+        # raw int16 PCM for the silence-floor gate. Installed as a system package (not pip)
         # because the Python ffmpeg bindings are wrappers around the ffmpeg binary anyway.
         run: |
-          pip install mutagen Pillow
+          pip install "mutagen==1.47.0" "Pillow==10.4.0"
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends ffmpeg
 

@@ -9,13 +9,14 @@
 // MockUIBackend lives in tests/ui/mock_ui_backend.h.
 
 using UIElementHandle = uint32_t;
-static constexpr UIElementHandle kInvalidUIElement = 0;
+constexpr UIElementHandle kInvalidUIElement = 0;
 
-// Rect struct — MUST be defined BEFORE IUIBackend to avoid a forward-declaration-as-return-type
-// ambiguity in the virtual method signature. Placing the definition after the class compiles
-// on some compilers but is non-conforming and breaks with strict C++ parsing rules for return
-// types in virtual method declarations.
-struct Rect { int x{0}, y{0}, w{0}, h{0}; };
+// UIRect struct — renamed from Rect (D-19) to avoid collision with irr::core::rect and
+// platform-level Rect types. MUST be defined BEFORE IUIBackend to avoid a
+// forward-declaration-as-return-type ambiguity in the virtual method signature.
+// Placing the definition after the class compiles on some compilers but is non-conforming
+// and breaks with strict C++ parsing rules for return types in virtual method declarations.
+struct UIRect { int x{0}, y{0}, w{0}, h{0}; };
 
 class IUIBackend {
 public:
@@ -45,7 +46,7 @@ public:
     virtual std::string     getElementText(UIElementHandle handle) const = 0;   // for test assertions on displayed values
     // 12. Return the bounding rectangle of an element in virtual coordinate space.
     //     Returns {x, y, w, h} in virtual space; for position/size assertions.
-    virtual Rect            getElementRect(UIElementHandle handle) const = 0;   // {x, y, w, h} in virtual space
+    virtual UIRect          getElementRect(UIElementHandle handle) const = 0;   // {x, y, w, h} in virtual space
     // 13. Return the physical screen width in pixels (driver resolution).
     virtual int             getScreenWidth()  const = 0;
     // 14. Return the physical screen height in pixels (driver resolution).

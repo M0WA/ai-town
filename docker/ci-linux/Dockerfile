@@ -1,4 +1,4 @@
-FROM debian:trixie
+FROM debian:trixie@sha256:348ca344599ceea2396cc6af4dc5c8477c39f53709f34ff3c6867b42260c70ef
 
 # VCPKG_COMMIT must be supplied as a build-arg (no default — enforced by docker-ci-image.yml
 # validation step, which compares this ARG against VCPKG_COMMIT_ID in ci.yml).

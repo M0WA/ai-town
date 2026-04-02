@@ -357,7 +357,7 @@ bool KeyBindingsPanel::onEvent(const InputEvent& event) {
 
         auto hitTest = [this](int mx, int my, UIElementHandle h) -> bool {
             if (h == kInvalidUIElement) return false;
-            Rect r = m_backend->getElementRect(h);
+            UIRect r = m_backend->getElementRect(h);
             return mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h;
         };
 
@@ -521,7 +521,7 @@ void KeyBindingsPanel::showConflictButtons(int row) {
     if (!m_backend) return;
 
     // Position Swap/Cancel buttons on the row below the conflict message.
-    Rect msgRect{kContentX, kContentY + row * (kLineH + kRowGap) + kLineH, kContentW, kLineH};
+    UIRect msgRect{kContentX, kContentY + row * (kLineH + kRowGap) + kLineH, kContentW, kLineH};
     if (m_rowMsg[row] != kInvalidUIElement) {
         msgRect = m_backend->getElementRect(m_rowMsg[row]);
     }

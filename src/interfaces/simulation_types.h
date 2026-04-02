@@ -102,12 +102,37 @@ enum class NotificationType {
 
 // SimulationNotification — one queued event from CitySimulation for UIManager to process.
 // Dequeued via ICitySimulation::pollPendingNotification() (singular, FIFO, one per call).
+//
+// Field usage by NotificationType:
+//   ForcedLoanIssued    — loanPrincipal = loan amount; loanRepaymentTicks = repayment period
+//   BondIssued          — loanPrincipal = bond amount; loanRepaymentTicks = repayment period
+//   ServiceDegraded     — loanPrincipal unused (0);    loanRepaymentTicks unused (0)
+//   BudgetDeficitWarn   — loanPrincipal unused (0);    loanRepaymentTicks unused (0)
+//   PopulationMilestone — loanPrincipal unused (0);    loanRepaymentTicks unused (0);
+//                         milestoneValue = population count at milestone
+//   CityRatingTransition— loanPrincipal unused (0);    loanRepaymentTicks unused (0);
+//                         milestoneValue = new CityRatingTier cast to int
+//   NeighbourCleared    — all fields unused (0)
+//   UpgradeBlocked      — all fields unused (0)
+//   PlacementBlocked    — all fields unused (0); tileX/tileZ stored separately in notification queue
+//   BuildingAbandoned   — all fields unused (0)
+//   BuildingRecovered   — all fields unused (0)
 struct SimulationNotification {
     NotificationType type{NotificationType::ForcedLoanIssued};
-    int    amount{0};            // loan principal for loan types; 0 for others (int: all treasury values are integers; avoids float precision loss for large principals)
-    int    repaymentTicks{0};    // repayment period for loan types; 0 for others
-    int    milestoneValue{0};    // population count for PopulationMilestone;
-                                 // CityRatingTier as int for CityRatingTransition; 0 for others
+
+    // Loan principal (currency units, integer to avoid float precision loss for large values).
+    // Used by: ForcedLoanIssued (mandatory loan amount), BondIssued (bond amount).
+    // Unused (0) for all other notification types.
+    int loanPrincipal{0};
+
+    // Loan repayment period in simulation ticks.
+    // Used by: ForcedLoanIssued (loan_repayment_ticks), BondIssued (bond_repayment_ticks).
+    // Unused (0) for all other notification types.
+    int loanRepaymentTicks{0};
+
+    // Population count (PopulationMilestone) or CityRatingTier as int (CityRatingTransition).
+    // Unused (0) for all other notification types.
+    int milestoneValue{0};
 };
 
 // ServiceCoverage — per-service coverage percentage for a tile.

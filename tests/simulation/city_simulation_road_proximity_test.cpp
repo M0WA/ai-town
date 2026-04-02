@@ -21,18 +21,9 @@
 // Added to simulation_tests via:
 //   target_sources(simulation_tests PRIVATE tests/simulation/city_simulation_road_proximity_test.cpp)
 
-#include "src/simulation/CitySimulation.h"
-#include "src/interfaces/ICitySimulation.h"
-#include "src/interfaces/simulation_types.h"
-#include "tests/simulation/MockRenderer.h"
-#include "tests/simulation/MockAudioSystem.h"
-#include "tests/simulation/ManualRNG.h"
-#include "tests/simulation/ManualClock.h"
-#include "tests/simulation/ManualTerrainQuery.h"
+#include "NiceSimulationTestBase.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
-#include <memory>
-#include <limits>
 
 using ::testing::_;
 using ::testing::AnyNumber;
@@ -41,27 +32,8 @@ using ::testing::NiceMock;
 // ---------------------------------------------------------------------------
 // RoadProximityTest fixture
 // ---------------------------------------------------------------------------
-class RoadProximityTest : public ::testing::Test {
+class RoadProximityTest : public NiceSimulationTestBase {
 protected:
-    NiceMock<MockRenderer>    renderer_;
-    NiceMock<MockAudioSystem> audio_;
-    ManualRNG                 rng_;   // default: float=0.9f (no service degradation)
-    ManualClock               clock_;
-    ManualTerrainQuery        terrain_;
-
-    // sim_ declared LAST — destroyed first.
-    std::unique_ptr<ICitySimulation> sim_;
-
-    void SetUp() override {
-        sim_ = std::make_unique<CitySimulation>(
-            &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Normal);
-        sim_->setSpeed(SpeedMultiplier::x1);
-    }
-
-    void TearDown() override {
-        sim_.reset();
-    }
-
     // Helper: drain all pending notifications and return true if PlacementBlocked was found.
     bool hasPlacementBlocked() {
         SimulationNotification notif{};

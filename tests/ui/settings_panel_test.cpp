@@ -51,7 +51,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
@@ -301,7 +301,7 @@ TEST_F(SettingsPanelStandaloneTest, CancelButton_ClosesPanel) {
     ASSERT_TRUE(panel_->isVisible());
 
     // Mock getElementRect to return a rect at the Cancel button position.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
 
     // A click outside the settings panel bounds dismisses it.
     InputEvent click;
@@ -323,7 +323,7 @@ TEST_F(SettingsPanelStandaloneTest, ApplyButton_GraphicsTab_StartsCountdown) {
     // all others stay at (0,0,0,0) and thus miss the click at (550, 900).
     // Handle assignments: 101=scrim, 102=bgHandle, 103=panelBg, 104-107=tabs,
     //                     108=Apply, 109=Cancel, 110=RestoreDefaults.
-    ON_CALL(backend_, getElementRect(108)).WillByDefault(Return(Rect{500, 888, 140, 40}));
+    ON_CALL(backend_, getElementRect(108)).WillByDefault(Return(UIRect{500, 888, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -347,7 +347,7 @@ TEST_F(SettingsPanelStandaloneTest, Countdown_Expires_AutoReverts) {
     panel_->show();
 
     // Start countdown by hitting Apply button (handle 108).
-    ON_CALL(backend_, getElementRect(108)).WillByDefault(Return(Rect{500, 888, 140, 40}));
+    ON_CALL(backend_, getElementRect(108)).WillByDefault(Return(UIRect{500, 888, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -397,7 +397,7 @@ TEST_F(SettingsPanelStandaloneTest, AudioTab_SliderClick_CallsSetMasterVolume) {
     // 110=RestoreDefaults, 111-114=gfx elements, 115=countdownLabel, 116-118=controls,
     // 119=audioMasterLabel, 120=audioMasterSlider
     // Target: audioMasterSlider = handle 120.
-    ON_CALL(backend_, getElementRect(120)).WillByDefault(Return(Rect{576, 190, 300, 32}));
+    ON_CALL(backend_, getElementRect(120)).WillByDefault(Return(UIRect{576, 190, 300, 32}));
 
     EXPECT_CALL(audio_, setMasterVolume(_)).Times(AtLeast(1));
 
@@ -437,7 +437,7 @@ TEST_F(SettingsPanelStandaloneTest, GameplayTab_DemolishToggle_TogglesOnOff) {
     // Handle assignments from SettingsPanel constructor:
     // 125=gameplayDiffLabel, 126=gameplayDemolishToggle, 127=gameplayDisasterToggle
     // Target: gameplayDemolishToggle = handle 126.
-    ON_CALL(backend_, getElementRect(126)).WillByDefault(Return(Rect{376, 226, 400, 32}));
+    ON_CALL(backend_, getElementRect(126)).WillByDefault(Return(UIRect{376, 226, 400, 32}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -457,7 +457,7 @@ TEST_F(SettingsPanelStandaloneTest, TabHeaderClick_SwitchesTab) {
     panel_->show();
 
     // Mock: all elements at same rect.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{376, 144, 140, 36}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{376, 144, 140, 36}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -515,7 +515,7 @@ TEST_F(SettingsPanelStandaloneTest, AudioTab_MusicSliderClick_CallsSetMusicVolum
     // 119=audioMasterLabel, 120=audioMasterSlider,
     // 121=audioMusicLabel, 122=audioMusicSlider,
     // 123=audioSfxLabel, 124=audioSfxSlider.
-    ON_CALL(backend_, getElementRect(122)).WillByDefault(Return(Rect{576, 230, 300, 32}));
+    ON_CALL(backend_, getElementRect(122)).WillByDefault(Return(UIRect{576, 230, 300, 32}));
 
     EXPECT_CALL(audio_, setMusicVolume(_)).Times(AtLeast(1));
 
@@ -537,7 +537,7 @@ TEST_F(SettingsPanelStandaloneTest, AudioTab_SfxSliderClick_CallsSetSFXVolume) {
     panel_->onEvent(right); // 0->1
     panel_->onEvent(right); // 1->2 (Audio)
 
-    ON_CALL(backend_, getElementRect(124)).WillByDefault(Return(Rect{576, 270, 300, 32}));
+    ON_CALL(backend_, getElementRect(124)).WillByDefault(Return(UIRect{576, 270, 300, 32}));
 
     EXPECT_CALL(audio_, setSFXVolume(_)).Times(AtLeast(1));
 
@@ -559,8 +559,8 @@ TEST_F(SettingsPanelStandaloneTest, CancelButtonClick_ControlsTab) {
     right.keyCode = 39;
     panel_->onEvent(right);
 
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(109)).WillByDefault(Return(Rect{500, 888, 140, 40}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(109)).WillByDefault(Return(UIRect{500, 888, 140, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -575,8 +575,8 @@ TEST_F(SettingsPanelStandaloneTest, CancelButtonClick_ControlsTab) {
 TEST_F(SettingsPanelStandaloneTest, RestoreDefaultsClick_Consumed) {
     panel_->show();
 
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(108)).WillByDefault(Return(Rect{700, 888, 180, 40}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(108)).WillByDefault(Return(UIRect{700, 888, 180, 40}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -674,7 +674,7 @@ protected:
             [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
         ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 32, 36}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 32, 36}));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
 
         ON_CALL(sim_, getTaxRate(ZoneType::Residential)).WillByDefault(Return(0.10f));
@@ -783,7 +783,7 @@ TEST_F(FinancesPanelStandaloneTest, ClickInside_Consumed) {
     panel_->open();
 
     // Return empty rects for buttons so no button is hit.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
 
     // FinancesPanel: x=780, y=60 — click at (790, 70) is inside
     InputEvent click;
@@ -806,10 +806,10 @@ TEST_F(FinancesPanelStandaloneTest, IncButton_IncreasesTaxRate) {
         [&callIdx](UIElementHandle) {
             if (callIdx % 2 == 0) {
                 callIdx++;
-                return Rect{0, 0, 0, 0}; // Dec button - miss
+                return UIRect{0, 0, 0, 0}; // Dec button - miss
             } else {
                 callIdx++;
-                return Rect{984, 92, 32, 36}; // Inc button - hit
+                return UIRect{984, 92, 32, 36}; // Inc button - hit
             }
         });
 
@@ -830,7 +830,7 @@ TEST_F(FinancesPanelStandaloneTest, DecButton_DecreasesTaxRate) {
 
     // FinancesPanel dec buttons are at kPanelX+116=896, kPanelY+32=92, 32x36
     ON_CALL(backend_, getElementRect(_)).WillByDefault(
-        Return(Rect{896, 92, 32, 36}));
+        Return(UIRect{896, 92, 32, 36}));
 
     EXPECT_CALL(sim_, setTaxRate(ZoneType::Residential, _)).Times(1);
 

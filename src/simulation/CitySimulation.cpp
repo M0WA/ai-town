@@ -7,7 +7,7 @@
 
 #include "CitySimulation.h"
 #include "simulation_constants.h"
-#include "sound_ids.h"
+#include "src/interfaces/sound_ids.h"
 
 #include <algorithm>
 #include <cassert>
@@ -30,20 +30,19 @@
 // Phase 10 policy (locked): always use the _01 suffix; variant cycling (_02, _03)
 // is deferred to Phase 11.  Returns empty string on unknown combination.
 /*static*/ std::string CitySimulation::zoneAssetBaseName(ZoneType zone, DensityTier density) {
-    const char* zoneStr  = nullptr;
-    const char* densStr  = nullptr;
-    switch (zone) {
-        case ZoneType::Residential: zoneStr = "res"; break;
-        case ZoneType::Commercial:  zoneStr = "com"; break;
-        case ZoneType::Industrial:  zoneStr = "ind"; break;
-    }
-    switch (density) {
-        case DensityTier::Low:    densStr = "low";  break;
-        case DensityTier::Medium: densStr = "med";  break;
-        case DensityTier::High:   densStr = "high"; break;
-    }
-    if (!zoneStr || !densStr) return {};
-    return std::string(zoneStr) + "_" + densStr + "_01";
+    // C-18 / SIM-18: 2D constexpr lookup table replacing two switch statements.
+    // Row: ZoneType (0=Residential, 1=Commercial, 2=Industrial).
+    // Col: DensityTier (0=Low, 1=Medium, 2=High).
+    // Suffix "_01" is always appended (Phase 10 policy; variant cycling is Phase 11).
+    static constexpr const char* kZonePrefix[3][3] = {
+        { "res_low",  "res_med",  "res_high"  },  // Residential
+        { "com_low",  "com_med",  "com_high"  },  // Commercial
+        { "ind_low",  "ind_med",  "ind_high"  },  // Industrial
+    };
+    int zi = static_cast<int>(zone);
+    int di = static_cast<int>(density);
+    if (zi < 0 || zi > 2 || di < 0 || di > 2) return {};
+    return std::string(kZonePrefix[zi][di]) + "_01";
 }
 
 /*static*/ float CitySimulation::speedValue(SpeedMultiplier s) {
@@ -92,27 +91,78 @@ const CitySimulation::TileData* CitySimulation::findTile(int x, int z) const {
     switch (zone) {
         case ZoneType::Residential:
             switch (density) {
-                case DensityTier::Low:    return 100;
-                case DensityTier::Medium: return 400;
-                case DensityTier::High:   return 1000;
+                case DensityTier::Low:    return SimulationConstants::max_pop_residential_low;
+                case DensityTier::Medium: return SimulationConstants::max_pop_residential_medium;
+                case DensityTier::High:   return SimulationConstants::max_pop_residential_high;
             }
             break;
         case ZoneType::Commercial:
             switch (density) {
-                case DensityTier::Low:    return 25;
-                case DensityTier::Medium: return 100;
-                case DensityTier::High:   return 300;
+                case DensityTier::Low:    return SimulationConstants::max_pop_commercial_low;
+                case DensityTier::Medium: return SimulationConstants::max_pop_commercial_medium;
+                case DensityTier::High:   return SimulationConstants::max_pop_commercial_high;
             }
             break;
         case ZoneType::Industrial:
             switch (density) {
-                case DensityTier::Low:    return 50;
-                case DensityTier::Medium: return 200;
-                case DensityTier::High:   return 600;
+                case DensityTier::Low:    return SimulationConstants::max_pop_industrial_low;
+                case DensityTier::Medium: return SimulationConstants::max_pop_industrial_medium;
+                case DensityTier::High:   return SimulationConstants::max_pop_industrial_high;
             }
             break;
     }
     return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Map dimensions (C-17 / SIM-12) — moved from header to avoid template bloat
+// ---------------------------------------------------------------------------
+
+void CitySimulation::setMapDimensions(int mapWidth, int mapHeight) {
+    m_mapWidth  = mapWidth;
+    m_mapHeight = mapHeight;
+}
+
+// ---------------------------------------------------------------------------
+// Difficulty-dependent initial value helpers (C-1 / SIM-1)
+// ---------------------------------------------------------------------------
+
+int64_t CitySimulation::startingFundsForDifficulty(Difficulty d) {
+    switch (d) {
+        case Difficulty::Easy:   return SimulationConstants::starting_funds_easy;
+        case Difficulty::Normal: return SimulationConstants::starting_funds_normal;
+        case Difficulty::Hard:   return SimulationConstants::starting_funds_hard;
+    }
+    return SimulationConstants::starting_funds_normal;
+}
+
+int CitySimulation::bondMaxUsesForDifficulty(Difficulty d) {
+    switch (d) {
+        case Difficulty::Easy:   return SimulationConstants::bond_max_uses_easy;
+        case Difficulty::Normal: return SimulationConstants::bond_max_uses_normal;
+        case Difficulty::Hard:   return SimulationConstants::bond_max_uses_hard;
+    }
+    return SimulationConstants::bond_max_uses_normal;
+}
+
+// ---------------------------------------------------------------------------
+// Traffic window zero-initialisation helper (C-2 / SIM-2)
+// ---------------------------------------------------------------------------
+
+void CitySimulation::resetTrafficWindows() {
+    // Initialize traffic rolling windows to 0.0 (zero-initialised, unwritten slots
+    // excluded via partial-window averaging: divisor = min(totalTicks, window_size)).
+    // Pre-filling with null_path_demand_default would violate the [0,1] contract at tick 0.
+    for (int i = 0; i < SimulationConstants::traffic_rolling_window_r_c; ++i) {
+        m_trafficWindowR[i] = 0.0f;
+        m_trafficWindowC[i] = 0.0f;
+    }
+    for (int i = 0; i < SimulationConstants::traffic_rolling_window_i; ++i) {
+        m_trafficWindowI[i] = 0.0f;
+    }
+    m_trafficDemandFactorR = SimulationConstants::null_path_demand_default;
+    m_trafficDemandFactorC = SimulationConstants::null_path_demand_default;
+    m_trafficDemandFactorI = SimulationConstants::null_path_demand_default;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,43 +182,17 @@ CitySimulation::CitySimulation(IRenderer*      renderer,
     , m_terrain(terrain)
     , m_difficulty(difficulty)
 {
-    // Starting funds by difficulty
-    switch (difficulty) {
-        case Difficulty::Easy:   m_treasury = SimulationConstants::starting_funds_easy;   break;
-        case Difficulty::Normal: m_treasury = SimulationConstants::starting_funds_normal; break;
-        case Difficulty::Hard:   m_treasury = SimulationConstants::starting_funds_hard;   break;
-    }
-
-    // Bond uses by difficulty
-    switch (difficulty) {
-        case Difficulty::Easy:   m_outstandingBondUses = SimulationConstants::bond_max_uses_easy;   break;
-        case Difficulty::Normal: m_outstandingBondUses = SimulationConstants::bond_max_uses_normal; break;
-        case Difficulty::Hard:   m_outstandingBondUses = SimulationConstants::bond_max_uses_hard;   break;
-    }
+    // Starting funds and bond max uses by difficulty (C-1).
+    m_treasury            = startingFundsForDifficulty(difficulty);
+    m_outstandingBondUses = bondMaxUsesForDifficulty(difficulty);
 
     // Default speed: x3 (kDefaultSimSpeed = SpeedMultiplier::x3)
     m_speed = kDefaultSimSpeed;
 
-    // Default tax rates: 5% for all zone types
-    m_taxRates[0] = 0.05f;
-    m_taxRates[1] = 0.05f;
-    m_taxRates[2] = 0.05f;
+    // m_taxRates[0/1/2] are 0.05f via in-class initialiser in CitySimulation.h (C-5).
 
-    // Initialize traffic rolling windows to 0.0 (zero-initialised, unwritten slots
-    // excluded via partial-window averaging: divisor = min(totalTicks, window_size)).
-    // Pre-filling with null_path_demand_default would make sumR = 5×0.5 = 2.5 on
-    // tick 0 while the partial-window divisor is 1, producing a factor of 2.5 and
-    // violating the [0,1] interface contract.
-    for (int i = 0; i < SimulationConstants::traffic_rolling_window_r_c; ++i) {
-        m_trafficWindowR[i] = 0.0f;
-        m_trafficWindowC[i] = 0.0f;
-    }
-    for (int i = 0; i < SimulationConstants::traffic_rolling_window_i; ++i) {
-        m_trafficWindowI[i] = 0.0f;
-    }
-    m_trafficDemandFactorR = SimulationConstants::null_path_demand_default;
-    m_trafficDemandFactorC = SimulationConstants::null_path_demand_default;
-    m_trafficDemandFactorI = SimulationConstants::null_path_demand_default;
+    // Initialize traffic rolling windows to 0.0 (C-2).
+    resetTrafficWindows();
 
     // Record wall-clock time at construction for clock-based grace period checks
     m_constructionTimeSeconds = m_clock->nowSeconds();
@@ -244,44 +268,26 @@ void CitySimulation::reset(int64_t startingFunds) {
 
     // Reset loan / debt state.
     m_loans.clear();
-    m_outstandingBondUses = 0;
-    switch (m_difficulty) {
-        case Difficulty::Easy:   m_outstandingBondUses = SimulationConstants::bond_max_uses_easy;   break;
-        case Difficulty::Normal: m_outstandingBondUses = SimulationConstants::bond_max_uses_normal; break;
-        case Difficulty::Hard:   m_outstandingBondUses = SimulationConstants::bond_max_uses_hard;   break;
-    }
+    m_outstandingBondUses = bondMaxUsesForDifficulty(m_difficulty);  // C-1
     m_loanCooldownTicks  = 0;
     m_firstRevenueTicked = false;
     m_consecutiveDeficitMonths = 0;
     m_month1AutoSlowed        = false;
     m_budgetSurplusPct        = 0.0f;
     m_budgetWarnFired         = false;
-    m_lastMonthTaxRevenue[0]  = 0.0f;
-    m_lastMonthTaxRevenue[1]  = 0.0f;
-    m_lastMonthTaxRevenue[2]  = 0.0f;
+    m_lastMonthTaxRevenue.fill(0.0f);  // C-25
     m_lastMonthWagesCost           = 0.0f;
     m_lastMonthRoadMaintenanceCost = 0.0f;
     m_lastMonthServiceUpkeepCost   = 0.0f;
     m_lastMonthUtilityFeeRevenue   = 0.0f;
     m_currentMonthlyRevenue        = 0.0f;
 
-    // Reset traffic demand rolling windows.
-    for (int i = 0; i < SimulationConstants::traffic_rolling_window_r_c; ++i) {
-        m_trafficWindowR[i] = 0.0f;
-        m_trafficWindowC[i] = 0.0f;
-    }
-    for (int i = 0; i < SimulationConstants::traffic_rolling_window_i; ++i) {
-        m_trafficWindowI[i] = 0.0f;
-    }
-    m_trafficWindowIdxRC  = 0;
-    m_trafficWindowIdxI   = 0;
-    m_trafficDemandFactorR = SimulationConstants::null_path_demand_default;
-    m_trafficDemandFactorC = SimulationConstants::null_path_demand_default;
-    m_trafficDemandFactorI = SimulationConstants::null_path_demand_default;
+    // Reset traffic demand rolling windows (C-2).
+    m_trafficWindowIdxRC = 0;
+    m_trafficWindowIdxI  = 0;
+    resetTrafficWindows();
     m_roadSpeedFraction    = 1.0f;
-    m_demandPressurePct[0] = 0.0f;
-    m_demandPressurePct[1] = 0.0f;
-    m_demandPressurePct[2] = 0.0f;
+    m_demandPressurePct.fill(0.0f);
 
     // Reset city rating and milestones.
     m_cityRating = CityRatingTier::Village;
@@ -349,21 +355,24 @@ void CitySimulation::tick(float realDeltaSeconds) {
         // We cycle through 24-hour days. Track total hours modulo 24.
         m_hoursAccumulator += 720.0f; // 720 in-game hours per budget tick
         float dayHours = std::fmod(m_hoursAccumulator, 24.0f);
-        // Time of day thresholds (simplified 4-phase cycle):
-        // DAY:   6:00 - 17:59
-        // DUSK: 18:00 - 19:59
-        // NIGHT: 20:00 - 3:59 (wraps)
-        // DAWN:  4:00 -  5:59 (precedes DAY in the cycle)
+        // C-26 / SIM-26: static constexpr table replaces 4-branch if-else.
+        // Each row: { upperHourExclusive, TimeOfDay }.  Iterated in ascending hour order.
+        // The last row (sentinel upperHour=24) maps the remainder (NIGHT wraps past midnight).
+        // To change a window boundary: edit a single table row.
+        struct TimeWindow { float upperHour; TimeOfDay period; };
+        static constexpr TimeWindow kTimeWindows[] = {
+            {  4.0f, TimeOfDay::NIGHT },  // 0:00 – 3:59
+            {  6.0f, TimeOfDay::DAWN  },  // 4:00 – 5:59
+            { 18.0f, TimeOfDay::DAY   },  // 6:00 – 17:59
+            { 20.0f, TimeOfDay::DUSK  },  // 18:00 – 19:59
+            { 24.0f, TimeOfDay::NIGHT },  // 20:00 – 23:59
+        };
         TimeOfDay prevTimeOfDay = m_timeOfDay;
-        if (dayHours >= 6.0f && dayHours < 18.0f) {
-            m_timeOfDay = TimeOfDay::DAY;
-        } else if (dayHours >= 18.0f && dayHours < 20.0f) {
-            m_timeOfDay = TimeOfDay::DUSK;
-        } else if (dayHours >= 4.0f && dayHours < 6.0f) {
-            m_timeOfDay = TimeOfDay::DAWN;
-        } else {
-            // dayHours >= 20.0f || dayHours < 4.0f
-            m_timeOfDay = TimeOfDay::NIGHT;
+        for (const TimeWindow& tw : kTimeWindows) {
+            if (dayHours < tw.upperHour) {
+                m_timeOfDay = tw.period;
+                break;
+            }
         }
 
         // Phase 10: notify AudioSystem whenever time-of-day changes.
@@ -432,25 +441,54 @@ int CitySimulation::consumeBudgetTicks() {
     return n;
 }
 
+// ---------------------------------------------------------------------------
+// computeEconomySnapshot — C-6
+//
+// Computes all revenue/expense subtotals for the current budget tick, writes
+// m_budgetSurplusPct and all m_lastMonth* cache members, and returns the net
+// (revenue - expenses). Called once per doBudgetTick() so that both the early
+// pre-compute (before doServiceDegradationTick()) and doEconomyTick() share
+// the same calculation path without calling all helpers twice.
+// ---------------------------------------------------------------------------
+int64_t CitySimulation::computeEconomySnapshot() {
+    bool inGracePeriod = ((m_clock->nowSeconds() - m_constructionTimeSeconds) <
+                          SimulationConstants::grace_period_real_seconds);
+
+    int64_t taxRevR = computeTaxRevenue(ZoneType::Residential);
+    int64_t taxRevC = computeTaxRevenue(ZoneType::Commercial);
+    int64_t taxRevI = computeTaxRevenue(ZoneType::Industrial);
+
+    int64_t totalCIRevenue = taxRevC + taxRevI;
+    int64_t wages      = computeWagesCost(totalCIRevenue);
+    int64_t svcUpkeep  = inGracePeriod ? 0LL : computeServiceUpkeepCost();
+    int64_t roadMaint  = inGracePeriod ? 0LL : computeRoadMaintenanceCost();
+    int64_t utilFees   = computeUtilityFeeRevenue();
+
+    int64_t totalRevenue  = taxRevR + taxRevC + taxRevI + utilFees;
+    int64_t totalExpenses = wages + svcUpkeep + roadMaint;
+
+    m_budgetSurplusPct = computeBudgetSurplusPct(totalRevenue, totalExpenses);
+
+    // Cache line items for HUD/FinancesPanel accessors.
+    m_lastMonthTaxRevenue[0]       = static_cast<float>(taxRevR);
+    m_lastMonthTaxRevenue[1]       = static_cast<float>(taxRevC);
+    m_lastMonthTaxRevenue[2]       = static_cast<float>(taxRevI);
+    m_lastMonthWagesCost           = static_cast<float>(wages);
+    m_lastMonthRoadMaintenanceCost = static_cast<float>(roadMaint);
+    m_lastMonthServiceUpkeepCost   = static_cast<float>(svcUpkeep);
+    m_lastMonthUtilityFeeRevenue   = static_cast<float>(utilFees);
+    m_currentMonthlyRevenue        = static_cast<float>(totalRevenue);
+
+    return totalRevenue - totalExpenses;
+}
+
 void CitySimulation::doBudgetTick() {
     ++m_pendingBudgetTicks;
-    // Pre-compute m_budgetSurplusPct BEFORE doServiceDegradationTick() reads it.
-    // doEconomyTick() (later in this same tick) will re-compute and also modify
-    // the treasury; this block is read-only — it mirrors the same calculation.
-    {
-        bool inGracePeriod = ((m_clock->nowSeconds() - m_constructionTimeSeconds) <
-                              SimulationConstants::grace_period_real_seconds);
-        int64_t taxRevC = computeTaxRevenue(ZoneType::Commercial);
-        int64_t taxRevI = computeTaxRevenue(ZoneType::Industrial);
-        int64_t totalCIRevenue = taxRevC + taxRevI;
-        int64_t wages      = computeWagesCost(totalCIRevenue);
-        int64_t svcUpkeep  = inGracePeriod ? 0LL : computeServiceUpkeepCost();
-        int64_t roadMaint  = inGracePeriod ? 0LL : computeRoadMaintenanceCost();
-        int64_t utilFees   = computeUtilityFeeRevenue();
-        int64_t totalRevenue  = computeTaxRevenue(ZoneType::Residential) + taxRevC + taxRevI + utilFees;
-        int64_t totalExpenses = wages + svcUpkeep + roadMaint;
-        m_budgetSurplusPct = computeBudgetSurplusPct(totalRevenue, totalExpenses);
-    }
+    // Pre-compute m_budgetSurplusPct (and m_lastMonth* cache) BEFORE
+    // doServiceDegradationTick() reads it. computeEconomySnapshot() writes all
+    // subtotals so doEconomyTick() can apply the net to the treasury directly
+    // without re-calling all revenue/expense helpers (C-6).
+    computeEconomySnapshot();
 
     // Sub-methods called in EXACTLY this order (per spec):
     computeTrafficDemand();
@@ -536,48 +574,34 @@ void CitySimulation::computeTrafficDemand() {
     speedFraction = std::min(1.0f, speedFraction);
     m_roadSpeedFraction = speedFraction;
 
-    // Compute traffic demand samples for each zone type.
-    // When trafficLoad > 1.0 (overcapacity): road-adjacent tiles record timeout (0.0).
-    // Otherwise: travel time = tile_size_m / (road_max_speed_mps * speed_fraction).
-    float sampleR, sampleC, sampleI;
+    // C-3: hoist travelTime — depends only on kTileSizeMeters and speedFraction,
+    // both constant across the three zone-type sample calls below.
+    const float travelTime = kTileSizeMeters /
+                             (SimulationConstants::road_max_speed_mps * speedFraction);
 
-    if (rAdjacentCount == 0) {
-        sampleR = SimulationConstants::null_path_demand_default;
-    } else if (trafficLoad > 1.0f) {
-        sampleR = 0.0f;  // timeout: overcongested road network
-    } else {
-        float travelTime = kTileSizeMeters /
-                           (SimulationConstants::road_max_speed_mps * speedFraction);
-        sampleR = travelTimeDemand(travelTime, 25.0f, 60.0f);
-    }
+    // computeZoneSample — C-3: compute one zone's traffic demand sample.
+    // adjacentCount: number of road-adjacent tiles for this zone type.
+    // fullTime/zeroTime: travelTimeDemand thresholds (zone-specific).
+    // Returns null_path_demand_default when no road-adjacent tiles exist,
+    // 0.0f on overcapacity (trafficLoad > 1.0), otherwise smoothstep result.
+    auto computeZoneSample = [&](int adjacentCount, float fullTime, float zeroTime) -> float {
+        if (adjacentCount == 0) return SimulationConstants::null_path_demand_default;
+        if (trafficLoad > 1.0f) return 0.0f;  // timeout: overcongested road network
+        return travelTimeDemand(travelTime, fullTime, zeroTime);
+    };
 
-    if (cAdjacentCount == 0) {
-        sampleC = SimulationConstants::null_path_demand_default;
-    } else if (trafficLoad > 1.0f) {
-        sampleC = 0.0f;  // timeout
-    } else {
-        float travelTime = kTileSizeMeters /
-                           (SimulationConstants::road_max_speed_mps * speedFraction);
-        sampleC = travelTimeDemand(travelTime, 30.0f, 65.0f);
-    }
+    const float sampleR = computeZoneSample(rAdjacentCount, 25.0f, 60.0f);
+    const float sampleC = computeZoneSample(cAdjacentCount, 30.0f, 65.0f);
+    const float sampleI = computeZoneSample(iAdjacentCount, 40.0f, 80.0f);
 
-    if (iAdjacentCount == 0) {
-        sampleI = SimulationConstants::null_path_demand_default;
-    } else if (trafficLoad > 1.0f) {
-        sampleI = 0.0f;  // timeout
-    } else {
-        float travelTime = kTileSizeMeters /
-                           (SimulationConstants::road_max_speed_mps * speedFraction);
-        sampleI = travelTimeDemand(travelTime, 40.0f, 80.0f);
-    }
-
-    // Update rolling windows for R and C (shared index m_trafficWindowIdxRC)
-    m_trafficWindowR[m_trafficWindowIdxRC % SimulationConstants::traffic_rolling_window_r_c] = sampleR;
-    m_trafficWindowC[m_trafficWindowIdxRC % SimulationConstants::traffic_rolling_window_r_c] = sampleC;
+    // Update rolling windows for R and C (shared index m_trafficWindowIdxRC).
+    // Index is already in-range after the previous tick's (idx+1)%window_size increment (C-7).
+    m_trafficWindowR[m_trafficWindowIdxRC] = sampleR;
+    m_trafficWindowC[m_trafficWindowIdxRC] = sampleC;
     m_trafficWindowIdxRC = (m_trafficWindowIdxRC + 1) % SimulationConstants::traffic_rolling_window_r_c;
 
-    // Update rolling window for I
-    m_trafficWindowI[m_trafficWindowIdxI % SimulationConstants::traffic_rolling_window_i] = sampleI;
+    // Update rolling window for I.
+    m_trafficWindowI[m_trafficWindowIdxI] = sampleI;
     m_trafficWindowIdxI = (m_trafficWindowIdxI + 1) % SimulationConstants::traffic_rolling_window_i;
 
     // Compute rolling averages using partial average (divide by samples written,
@@ -702,12 +726,12 @@ void CitySimulation::doServiceDegradationTick() {
         // Budget deficit: stochastic degradation in Fire → Police → Water order
         // (Power plant uses a deterministic BFS brownout — no RNG roll, no audio).
         // Sort service buildings by type to guarantee order
-        auto typeOrder = [](ServiceType t) -> int {
+        auto typeOrder = [](ServiceBuildingType t) -> int {
             switch (t) {
-                case ServiceType::FireStation:   return 0;
-                case ServiceType::PoliceStation: return 1;
-                case ServiceType::WaterTower:    return 2;
-                case ServiceType::PowerPlant:    return 3;
+                case ServiceBuildingType::FireStation:   return 0;
+                case ServiceBuildingType::PoliceStation: return 1;
+                case ServiceBuildingType::WaterTower:    return 2;
+                case ServiceBuildingType::PowerPlant:    return 3;
             }
             return 4;
         };
@@ -721,7 +745,7 @@ void CitySimulation::doServiceDegradationTick() {
 
         for (size_t idx : indices) {
             ServiceBuilding& sb = m_serviceBuildings[idx];
-            if (sb.type == ServiceType::PowerPlant) {
+            if (sb.type == ServiceBuildingType::PowerPlant) {
                 // Power brownout is deterministic: mark degraded silently.
                 // Coverage reduction is handled by computePowerCoverage() via
                 // the m_budgetSurplusPct BFS-depth cutoff — no audio needed.
@@ -751,7 +775,43 @@ void CitySimulation::doServiceDegradationTick() {
 // Desirability tick
 // ---------------------------------------------------------------------------
 
+// C-29 / SIM-29: service-coverage BFS phase — extracted from doDesirabilityTick().
+// Scans m_serviceBuildings once and sets the four presence flags.
+// Called at the start of doDesirabilityTick() before applyDesirabilityScores().
+void CitySimulation::buildServiceCoverageMap(bool& outHasFireStation, bool& outHasPolice,
+                                              bool& outHasWater,       bool& outHasPower) {
+    outHasFireStation = false;
+    outHasPolice      = false;
+    outHasWater       = false;
+    outHasPower       = false;
+
+    for (const ServiceBuilding& sb : m_serviceBuildings) {
+        switch (sb.type) {
+            case ServiceBuildingType::FireStation:   outHasFireStation = true; break;
+            case ServiceBuildingType::PoliceStation: outHasPolice      = true; break;
+            case ServiceBuildingType::WaterTower:    outHasWater       = true; break;
+            case ServiceBuildingType::PowerPlant:    outHasPower       = true; break;
+            default: break;
+        }
+    }
+}
+
 void CitySimulation::doDesirabilityTick() {
+    // C-29 / SIM-29: thin orchestrator — delegates to sub-steps.
+
+    // Step 1: C-14 — build per-tick power coverage cache (one BFS for all tiles).
+    buildPowerCoverageCache();
+
+    // Step 2: C-29 — scan service building types ONCE before the per-tile loop.
+    bool hasFireStation = false, hasPolice = false, hasWater = false, hasPower = false;
+    buildServiceCoverageMap(hasFireStation, hasPolice, hasWater, hasPower);
+
+    // Step 3: apply per-tile adjacency and service-coverage desirability scores.
+    applyDesirabilityScores(hasFireStation, hasPolice, hasWater, hasPower);
+}
+
+void CitySimulation::applyDesirabilityScores(bool hasFireStation, bool hasPolice,
+                                              bool hasWater,       bool hasPower) {
     for (auto& [key, tile] : m_tiles) {
         if (!tile.isZoned) continue;
 
@@ -785,16 +845,6 @@ void CitySimulation::doDesirabilityTick() {
 
             // Service coverage desirability effect
             bool anyUncovered = false;
-            // Check if service buildings of each type exist and if this tile is covered
-            bool hasFireStation = false, hasPolice = false, hasWater = false, hasPower = false;
-            for (const ServiceBuilding& sb : m_serviceBuildings) {
-                switch (sb.type) {
-                    case ServiceType::FireStation:   hasFireStation = true; break;
-                    case ServiceType::PoliceStation: hasPolice      = true; break;
-                    case ServiceType::WaterTower:    hasWater       = true; break;
-                    case ServiceType::PowerPlant:    hasPower       = true; break;
-                }
-            }
 
             // No service buildings at all → every residential tile is uncovered
             if (!hasFireStation && !hasPolice && !hasWater && !hasPower) {
@@ -802,20 +852,19 @@ void CitySimulation::doDesirabilityTick() {
             }
 
             if (hasFireStation) {
-                float cov = computeRadialCoverage(x, z, ServiceType::FireStation);
+                float cov = computeRadialCoverage(x, z, ServiceBuildingType::FireStation);
                 if (cov == 0.0f) anyUncovered = true;
             }
             if (hasPolice) {
-                float cov = computeRadialCoverage(x, z, ServiceType::PoliceStation);
+                float cov = computeRadialCoverage(x, z, ServiceBuildingType::PoliceStation);
                 if (cov == 0.0f) anyUncovered = true;
             }
 
             // Phase 10: water coverage SFX — fire SFX_WATER_OUT exactly once per
-            // coverage-loss event (wasPowered / wasWaterCovered flag gates re-fire).
-            // Only fires for residential tiles (water billing affects residential coverage).
+            // coverage-loss event (wasWaterCovered flag gates re-fire).
             bool currentlyWaterCovered = false;
             if (hasWater) {
-                float cov = computeRadialCoverage(x, z, ServiceType::WaterTower);
+                float cov = computeRadialCoverage(x, z, ServiceBuildingType::WaterTower);
                 if (cov == 0.0f) {
                     anyUncovered = true;
                 } else {
@@ -823,7 +872,6 @@ void CitySimulation::doDesirabilityTick() {
                 }
             }
             if (tile.wasWaterCovered && !currentlyWaterCovered && hasWater) {
-                // Water just lost — fire SFX once (NORMAL priority per V1 manifest).
                 if (m_audio) {
                     m_audio->playSound(SFX_WATER_OUT, SoundPriority::NORMAL, 1.0f);
                 }
@@ -832,19 +880,17 @@ void CitySimulation::doDesirabilityTick() {
                 tile.wasWaterCovered = true;
             }
 
-            // Phase 10: power coverage SFX — fire SFX_POWER_OUT exactly once per
-            // coverage-loss event.
+            // Phase 10: power coverage SFX — fire SFX_POWER_OUT exactly once per coverage-loss.
+            // C-14: use pre-built m_powerCoverageCache (O(1)) instead of per-tile BFS.
             bool currentlyPowered = false;
             if (hasPower) {
-                float cov = computePowerCoverage(x, z);
-                if (cov == 0.0f) {
+                if (!m_powerCoverageCache.count(tileKey(x, z))) {
                     anyUncovered = true;
                 } else {
                     currentlyPowered = true;
                 }
             }
             if (tile.wasPowered && !currentlyPowered && hasPower) {
-                // Power just lost — fire SFX once (NORMAL priority per V1 manifest).
                 if (m_audio) {
                     m_audio->playSound(SFX_POWER_OUT, SoundPriority::NORMAL, 1.0f);
                 }
@@ -854,8 +900,7 @@ void CitySimulation::doDesirabilityTick() {
             }
 
             if (anyUncovered) {
-                // Grace: skip service penalty on the very first desirability tick
-                // (newly placed tiles should not immediately lose desirability).
+                // Grace: skip service penalty on the very first desirability tick.
                 if (!tile.firstDesirabilityTick) {
                     desirability -= static_cast<float>(SimulationConstants::service_uncovered_desirability_penalty_per_tick);
                 }
@@ -871,26 +916,16 @@ void CitySimulation::doDesirabilityTick() {
         // Clamp desirability to [0, 100]
         tile.desirability = std::min(100.0f, std::max(0.0f, desirability));
 
-        // Phase 10: service-alert SFX — fire SFX_FIRE_ALERT or SFX_POLICE_ALERT
-        // exactly once per crisis episode. Fire takes priority over Police when
-        // both stations cover this tile. Only residential tiles are tested.
-        // alertFired prevents re-fire while desirability stays at or below threshold.
-        // Resets when desirability recovers above service_alert_desirability_threshold.
+        // Phase 10: service-alert SFX — fire SFX_FIRE_ALERT or SFX_POLICE_ALERT exactly once
+        // per crisis episode. Fire takes priority over Police. alertFired gates re-fire.
         if (tile.isZoned && tile.zone == ZoneType::Residential && m_audio) {
             if (tile.desirability <= static_cast<float>(SimulationConstants::service_alert_desirability_threshold)) {
                 if (!tile.alertFired) {
-                    // Determine which alert to fire: Fire takes priority over Police.
-                    bool hasFire  = false;
-                    bool hasPoliceForAlert = false;
-                    for (const ServiceBuilding& sb : m_serviceBuildings) {
-                        if (sb.type == ServiceType::FireStation)   hasFire = true;
-                        if (sb.type == ServiceType::PoliceStation) hasPoliceForAlert = true;
-                    }
-                    if (hasFire) {
+                    if (hasFireStation) {
                         m_audio->playPositionalSound(SFX_FIRE_ALERT,
                             vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)},
                             SoundPriority::CRITICAL, 1.0f);
-                    } else if (hasPoliceForAlert) {
+                    } else if (hasPolice) {
                         m_audio->playPositionalSound(SFX_POLICE_ALERT,
                             vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)},
                             SoundPriority::CRITICAL, 1.0f);
@@ -898,7 +933,6 @@ void CitySimulation::doDesirabilityTick() {
                     tile.alertFired = true;
                 }
             } else {
-                // Desirability recovered — allow alert to re-fire in a future episode.
                 tile.alertFired = false;
             }
         }
@@ -909,7 +943,44 @@ void CitySimulation::doDesirabilityTick() {
 // Population tick
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// C-30 / SIM-30: doPopulationTick() helpers
+// ---------------------------------------------------------------------------
+
+/*static*/ float CitySimulation::computeZoneGrowthDelta(float currentPop, float demand, int maxPop) {
+    float targetPop = static_cast<float>(maxPop) * demand;
+    float delta     = targetPop - currentPop;
+    float maxGrowth = SimulationConstants::population_growth_cap_fraction * static_cast<float>(maxPop);
+    float maxDecay  = SimulationConstants::population_decay_cap_fraction  * static_cast<float>(maxPop);
+    return std::max(-maxDecay, std::min(maxGrowth, delta));
+}
+
+void CitySimulation::accumulateHouseDemand() {
+    m_totalPopulation = 0;
+    for (auto& [key, tile] : m_tiles) {
+        if (tile.isZoned && tile.zone == ZoneType::Residential) {
+            m_totalPopulation += static_cast<int>(tile.population);
+        }
+    }
+
+    // Check population milestones
+    const int milestoneThresholds[5] = {
+        SimulationConstants::population_milestone_threshold_1,
+        SimulationConstants::population_milestone_threshold_2,
+        SimulationConstants::population_milestone_threshold_3,
+        SimulationConstants::population_milestone_threshold_4,
+        SimulationConstants::population_milestone_threshold_5
+    };
+    for (int i = 0; i < 5; ++i) {
+        if (!m_milestoneFired[i] && m_totalPopulation >= milestoneThresholds[i]) {
+            m_milestoneFired[i] = true;
+            m_notifications.push({NotificationType::PopulationMilestone, 0, 0, milestoneThresholds[i]});
+        }
+    }
+}
+
 void CitySimulation::doPopulationTick() {
+    // Phase 11l: per-tile construction gate + population growth step.
     for (auto& [key, tile] : m_tiles) {
         if (!tile.isZoned || tile.isRoad) continue;
 
@@ -939,68 +1010,234 @@ void CitySimulation::doPopulationTick() {
 
         int maxPop = maxPopulationForTile(tile.zone, tile.density);
         float demand = effectiveDemandForTile(tile);
-        float targetPop = static_cast<float>(maxPop) * demand;
-
-        float delta = targetPop - tile.population;
-
-        // Cap delta
-        float maxGrowth = SimulationConstants::population_growth_cap_fraction * static_cast<float>(maxPop);
-        float maxDecay  = SimulationConstants::population_decay_cap_fraction  * static_cast<float>(maxPop);
-        delta = std::max(-maxDecay, std::min(maxGrowth, delta));
-
+        // C-30: delta computation extracted to computeZoneGrowthDelta().
+        float delta = computeZoneGrowthDelta(tile.population, demand, maxPop);
         tile.population = std::max(0.0f, std::min(static_cast<float>(maxPop),
                                                     tile.population + delta));
     }
 
-    // Recompute total population from residential tiles only
-    m_totalPopulation = 0;
-    for (auto& [key, tile] : m_tiles) {
-        if (tile.isZoned && tile.zone == ZoneType::Residential) {
-            m_totalPopulation += static_cast<int>(tile.population);
-        }
-    }
-
-    // Check population milestones
-    const int milestoneThresholds[5] = {
-        SimulationConstants::population_milestone_threshold_1,
-        SimulationConstants::population_milestone_threshold_2,
-        SimulationConstants::population_milestone_threshold_3,
-        SimulationConstants::population_milestone_threshold_4,
-        SimulationConstants::population_milestone_threshold_5
-    };
-
-    for (int i = 0; i < 5; ++i) {
-        if (!m_milestoneFired[i] && m_totalPopulation >= milestoneThresholds[i]) {
-            m_milestoneFired[i] = true;
-            m_notifications.push({NotificationType::PopulationMilestone, 0, 0, milestoneThresholds[i]});
-        }
-    }
+    // C-30: accumulate residential population and fire milestone notifications.
+    accumulateHouseDemand();
 }
 
 // ---------------------------------------------------------------------------
 // Density unlock tick
 // ---------------------------------------------------------------------------
 
-void CitySimulation::doDensityUnlockTick() {
-    // Returns the treasury threshold for a density tier index (0-5)
-    auto getDensityUnlockThreshold = [](int tierIndex) -> float {
-        switch (tierIndex) {
-            case 0: return static_cast<float>(SimulationConstants::density_unlock_base_threshold_1); // Med-R
-            case 1: return static_cast<float>(SimulationConstants::density_unlock_base_threshold_1); // Med-C
-            case 2: return static_cast<float>(SimulationConstants::density_unlock_base_threshold_2); // Med-I
-            case 3: return static_cast<float>(SimulationConstants::density_unlock_base_threshold_3); // High-R
-            case 4: return static_cast<float>(SimulationConstants::density_unlock_base_threshold_4); // High-C
-            case 5: return static_cast<float>(SimulationConstants::density_unlock_base_threshold_5); // High-I
-            default: return std::numeric_limits<float>::max();
-        }
-    };
+// ---------------------------------------------------------------------------
+// getDensityUnlockThreshold — C-27 helper: treasury threshold for tier index 0-5.
+// ---------------------------------------------------------------------------
+/*static*/ float CitySimulation::getDensityUnlockThreshold(int tierIndex) {
+    switch (tierIndex) {
+        case 0: return static_cast<float>(SimulationConstants::density_unlock_base_threshold_1); // Med-R
+        case 1: return static_cast<float>(SimulationConstants::density_unlock_base_threshold_1); // Med-C
+        case 2: return static_cast<float>(SimulationConstants::density_unlock_base_threshold_2); // Med-I
+        case 3: return static_cast<float>(SimulationConstants::density_unlock_base_threshold_3); // High-R
+        case 4: return static_cast<float>(SimulationConstants::density_unlock_base_threshold_4); // High-C
+        case 5: return static_cast<float>(SimulationConstants::density_unlock_base_threshold_5); // High-I
+        default: return std::numeric_limits<float>::max();
+    }
+}
 
+// ---------------------------------------------------------------------------
+// scanUnlockCandidates — C-27 helper: collect origin tiles eligible for upgrade.
+// ---------------------------------------------------------------------------
+std::vector<CitySimulation::UpgradeCandidate>
+CitySimulation::scanUnlockCandidates(ZoneType targetZone, DensityTier currentRequired) const {
+    std::vector<UpgradeCandidate> candidates;
+    for (const auto& [key, tile] : m_tiles) {
+        if (!tile.isZoned) continue;
+        if (tile.zone != targetZone) continue;
+        if (tile.density != currentRequired) continue;
+        if (tile.footprintOriginX != -1) continue;  // skip non-origin tiles
+        int tx = static_cast<int>(key >> 32);
+        int tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
+        candidates.push_back({key, tx, tz});
+    }
+    return candidates;
+}
+
+// ---------------------------------------------------------------------------
+// applyDensityUpgrade — C-27 helper: attempt to upgrade one tile.
+// Returns true if the upgrade was applied; false if blocked or deferred.
+// ---------------------------------------------------------------------------
+bool CitySimulation::applyDensityUpgrade(int tx, int tz, int64_t candKey,
+                                          ZoneType targetZone, DensityTier targetDensity,
+                                          DensityTier currentRequired, int& sfxCallsThisTick)
+{
+    // Re-validate: tile may have been modified during the outer loop.
+    auto it = m_tiles.find(candKey);
+    if (it == m_tiles.end()) return false;
+    if (!it->second.isZoned || it->second.zone != targetZone ||
+        it->second.density != currentRequired) return false;
+
+    const int newN = footprintSize(targetDensity);
+
+    // --- Check / enforce retry limit ---
+    int& retryCount = m_upgradeRetryCount[candKey];
+    if (retryCount >= 12) {
+        m_upgradeRetryCount.erase(candKey);
+        m_notifications.push({NotificationType::UpgradeBlocked, tx, tz, 0});
+        return false;
+    }
+
+    // --- Scan expanded N×N footprint for blockers vs same-zone neighbours ---
+    bool hasBlocker = false;
+    struct DemoEntry { int x; int z; int64_t originKey; };
+    std::vector<DemoEntry> toDemo;
+
+    for (int dx = 0; dx < newN && !hasBlocker; ++dx) {
+        for (int dz = 0; dz < newN && !hasBlocker; ++dz) {
+            int fx = tx + dx, fz = tz + dz;
+            if (fx < 0 || fz < 0) { hasBlocker = true; break; }
+            int64_t fkey = tileKey(fx, fz);
+            if (fkey == candKey) continue;  // origin tile itself
+
+            auto fit = m_tiles.find(fkey);
+            if (fit == m_tiles.end()) { hasBlocker = true; break; }
+
+            const TileData& ft = fit->second;
+            if (ft.isRoad) { hasBlocker = true; break; }
+            if (ft.isZoned) {
+                int originX = (ft.footprintOriginX == -1) ? fx : ft.footprintOriginX;
+                int originZ = (ft.footprintOriginZ == -1) ? fz : ft.footprintOriginZ;
+                int64_t ftOriginKey = tileKey(originX, originZ);
+
+                auto ftOIt = m_tiles.find(ftOriginKey);
+                if (ftOIt == m_tiles.end()) { hasBlocker = true; break; }
+                const TileData& ftO = ftOIt->second;
+
+                if (ftO.zone == targetZone && ftO.density < targetDensity) {
+                    if (ftOriginKey == candKey) continue;
+                    bool alreadyAdded = false;
+                    for (auto& de : toDemo) {
+                        if (de.originKey == ftOriginKey) { alreadyAdded = true; break; }
+                    }
+                    if (!alreadyAdded)
+                        toDemo.push_back({originX, originZ, ftOriginKey});
+                } else {
+                    hasBlocker = true;
+                }
+            }
+        }
+    }
+
+    if (hasBlocker) {
+        retryCount++;
+        return false;
+    }
+
+    // --- No blockers: silently demolish same-zone lower-density neighbours ---
+    struct OuterTile { int x; int z; ZoneType zone; };
+    std::vector<OuterTile> outerTiles;
+
+    for (auto& de : toDemo) {
+        auto dIt = m_tiles.find(de.originKey);
+        if (dIt == m_tiles.end()) continue;
+        const int oldN = footprintSize(dIt->second.density);
+
+        if (m_renderer) m_renderer->removeBuildingMesh(de.x, de.z);
+
+        for (int ddx = 0; ddx < oldN; ++ddx) {
+            for (int ddz = 0; ddz < oldN; ++ddz) {
+                auto tileIt = m_tiles.find(tileKey(de.x + ddx, de.z + ddz));
+                if (tileIt == m_tiles.end()) continue;
+                TileData& t = tileIt->second;
+                int tileX = de.x + ddx;
+                int tileZ = de.z + ddz;
+                bool insideNewFP = (tileX >= tx && tileX < tx + newN &&
+                                    tileZ >= tz && tileZ < tz + newN);
+                t.isZoned           = !insideNewFP;
+                t.density           = insideNewFP ? t.density : DensityTier::Low;
+                t.population        = 0.0f;
+                t.footprintOriginX  = -1;
+                t.footprintOriginZ  = -1;
+                t.isAbandoned       = false;
+                if (!insideNewFP) {
+                    outerTiles.push_back({tileX, tileZ, t.zone});
+                }
+            }
+        }
+
+        m_notifications.push({NotificationType::NeighbourCleared, de.x, de.z, 0});
+    }
+
+    // Place Low-density building meshes for outer surviving zoned tiles.
+    for (auto& ot : outerTiles) {
+        if (!m_renderer) break;
+        int zoneIdx = static_cast<int>(ot.zone);
+        int idx = zoneIdx * 3 + 0;
+        m_buildingVariantCounters[idx]++;
+        int variantNum = ((m_buildingVariantCounters[idx] - 1) % 4) + 1;
+        std::string baseName = zoneAssetBaseName(ot.zone, DensityTier::Low);
+        if (baseName.size() >= 2) {
+            baseName[baseName.size() - 2] = '0';
+            baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
+        }
+        m_renderer->placeBuildingMesh(ot.x, ot.z, baseName);
+    }
+
+    // --- Reset retry counter ---
+    m_upgradeRetryCount.erase(candKey);
+
+    // --- Upgrade origin tile ---
+    TileData& originTile = m_tiles[candKey];
+    originTile.isZoned    = true;
+    originTile.density    = targetDensity;
+    originTile.population = 0.0f;
+    originTile.footprintOriginX = -1;
+    originTile.footprintOriginZ = -1;
+
+    // --- Mark new N×N footprint tiles ---
+    for (int dx = 0; dx < newN; ++dx) {
+        for (int dz = 0; dz < newN; ++dz) {
+            if (dx == 0 && dz == 0) continue;
+            int64_t fkey = tileKey(tx + dx, tz + dz);
+            TileData& ftile = m_tiles[fkey];
+            ftile.isZoned    = true;
+            ftile.isRoad     = false;
+            ftile.zone       = targetZone;
+            ftile.density    = targetDensity;
+            ftile.population = 0.0f;
+            ftile.desirability = static_cast<float>(SimulationConstants::desirability_base_value);
+            ftile.isAbandoned  = false;
+            ftile.footprintOriginX = tx;
+            ftile.footprintOriginZ = tz;
+        }
+    }
+
+    // --- Swap building mesh ---
+    if (m_renderer) {
+        m_renderer->removeBuildingMesh(tx, tz);
+        int zoneIdx2 = static_cast<int>(targetZone);
+        int tierIdx2 = static_cast<int>(targetDensity);
+        int idx2     = zoneIdx2 * 3 + tierIdx2;
+        m_buildingVariantCounters[idx2]++;
+        int variantNum = ((m_buildingVariantCounters[idx2] - 1) % 4) + 1;
+        std::string baseName = zoneAssetBaseName(targetZone, targetDensity);
+        if (baseName.size() >= 2) {
+            baseName[baseName.size() - 2] = '0';
+            baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
+        }
+        m_renderer->placeBuildingMesh(tx, tz, baseName);
+    }
+
+    // --- SFX (capped per tick) ---
+    if (m_audio && sfxCallsThisTick < SimulationConstants::sfx_zone_upgrade_per_tick_cap) {
+        m_audio->playSound(SFX_ZONE_UPGRADE, SoundPriority::NORMAL, 1.0f);
+        ++sfxCallsThisTick;
+    }
+
+    return true;
+}
+
+void CitySimulation::doDensityUnlockTick() {
     // Phase 10: per-wave-tick audio cap — tracks total sfx_zone_upgrade calls this tick
     // across ALL tier loops combined. Tiles beyond the cap are upgraded silently.
     // (SimulationConstants::sfx_zone_upgrade_per_tick_cap = 3)
     int sfxCallsThisTick = 0;
 
-    float scale = getDensityUnlockScale();
+    const float scale = getDensityUnlockScale();
 
     // Snapshot which tiers were already unlocked before this tick's unlock check.
     // The upgrade wave must not fire on the same tick a tier first becomes unlocked.
@@ -1009,14 +1246,13 @@ void CitySimulation::doDensityUnlockTick() {
         wasAlreadyUnlocked[i] = m_densityUnlockState.unlock_flags[i];
     }
 
+    // --- Unlock check: advance consecutive-month counters (C-27: getDensityUnlockThreshold) ---
     for (int i = 0; i < 6; ++i) {
         if (m_densityUnlockState.unlock_flags[i]) continue;
-
         // Special prerequisite: High-R (tier 3) requires Med-I (tier 2) unlocked
         if (i == 3 && !m_densityUnlockState.unlock_flags[2]) continue;
 
-        float threshold = getDensityUnlockThreshold(i) * scale;
-
+        const float threshold = getDensityUnlockThreshold(i) * scale;
         if (static_cast<float>(m_treasury) >= threshold) {
             m_densityUnlockState.consecutive_months_above_threshold[i]++;
             if (m_densityUnlockState.consecutive_months_above_threshold[i] >= 3) {
@@ -1028,252 +1264,49 @@ void CitySimulation::doDensityUnlockTick() {
         }
     }
 
-    // Density upgrade wave: upgrade eligible tiles that are unlocked
-    // Map tier index to zone type and density
-    // tier 0 = Med-R, tier 1 = Med-C, tier 2 = Med-I,
-    // tier 3 = High-R, tier 4 = High-C, tier 5 = High-I
+    // --- Upgrade wave (C-27: scanUnlockCandidates + applyDensityUpgrade) ---
+    // tier 0=Med-R, 1=Med-C, 2=Med-I, 3=High-R, 4=High-C, 5=High-I
+    struct TierMapping { ZoneType zone; DensityTier target; DensityTier current; };
+    static constexpr TierMapping kTierMap[6] = {
+        {ZoneType::Residential, DensityTier::Medium, DensityTier::Low},
+        {ZoneType::Commercial,  DensityTier::Medium, DensityTier::Low},
+        {ZoneType::Industrial,  DensityTier::Medium, DensityTier::Low},
+        {ZoneType::Residential, DensityTier::High,   DensityTier::Medium},
+        {ZoneType::Commercial,  DensityTier::High,   DensityTier::Medium},
+        {ZoneType::Industrial,  DensityTier::High,   DensityTier::Medium},
+    };
 
-    // For each zone type, count how many tiles are eligible and cap upgrades
     for (int tierIdx = 0; tierIdx < 6; ++tierIdx) {
         if (!m_densityUnlockState.unlock_flags[tierIdx]) continue;
-        // Skip upgrade wave on the tick a tier first becomes unlocked
-        if (!wasAlreadyUnlocked[tierIdx]) continue;
+        if (!wasAlreadyUnlocked[tierIdx]) continue;  // skip wave on first-unlock tick
 
-        ZoneType   targetZone;
-        DensityTier targetDensity;  // The NEW density that becomes available
-        DensityTier currentRequired; // The current density a tile must have to be upgraded
+        const auto& tm = kTierMap[tierIdx];
 
-        switch (tierIdx) {
-            case 0: targetZone = ZoneType::Residential; targetDensity = DensityTier::Medium; currentRequired = DensityTier::Low; break;
-            case 1: targetZone = ZoneType::Commercial;  targetDensity = DensityTier::Medium; currentRequired = DensityTier::Low; break;
-            case 2: targetZone = ZoneType::Industrial;  targetDensity = DensityTier::Medium; currentRequired = DensityTier::Low; break;
-            case 3: targetZone = ZoneType::Residential; targetDensity = DensityTier::High;   currentRequired = DensityTier::Medium; break;
-            case 4: targetZone = ZoneType::Commercial;  targetDensity = DensityTier::High;   currentRequired = DensityTier::Medium; break;
-            case 5: targetZone = ZoneType::Industrial;  targetDensity = DensityTier::High;   currentRequired = DensityTier::Medium; break;
-            default: continue;
-        }
-
-        // Count total tiles of this zone type for the cap
-        int totalZoneTiles = 0;
-        for (auto& [key, tile] : m_tiles) {
-            if (tile.isZoned && tile.zone == targetZone) totalZoneTiles++;
-        }
-
-        int maxUpgrades = static_cast<int>(
-            SimulationConstants::density_max_upgrade_rate_per_tick * static_cast<float>(totalZoneTiles));
-        maxUpgrades = std::max(1, maxUpgrades); // at least 1 if any tiles exist
-
-        int upgradeCount = 0;
-
-        float demandForZone = m_demandPressurePct[static_cast<int>(targetZone)];
+        // Demand threshold guard
+        const float demandForZone = m_demandPressurePct[static_cast<int>(tm.zone)];
         if (demandForZone < SimulationConstants::density_upgrade_wave_demand_threshold) continue;
 
-        // Phase 11h: collect origin-tile upgrade candidates first to avoid
-        // iterator invalidation when we demolish neighbours inside the loop.
-        struct UpgradeCandidate { int64_t key; int tx; int tz; };
-        std::vector<UpgradeCandidate> candidates;
-        for (auto& [key, tile] : m_tiles) {
-            if (!tile.isZoned) continue;
-            if (tile.zone != targetZone) continue;
-            if (tile.density != currentRequired) continue;
-            if (tile.footprintOriginX != -1) continue;  // skip non-origin tiles
-            int tx = static_cast<int>(key >> 32);
-            int tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
-            candidates.push_back({key, tx, tz});
+        // Count total tiles of this zone type for the upgrade rate cap
+        int totalZoneTiles = 0;
+        for (const auto& [key, tile] : m_tiles) {
+            if (tile.isZoned && tile.zone == tm.zone) totalZoneTiles++;
         }
+        int maxUpgrades = static_cast<int>(
+            SimulationConstants::density_max_upgrade_rate_per_tick * static_cast<float>(totalZoneTiles));
+        maxUpgrades = std::max(1, maxUpgrades);
 
+        // Collect candidates (C-27: scanUnlockCandidates)
+        std::vector<UpgradeCandidate> candidates = scanUnlockCandidates(tm.zone, tm.current);
+
+        int upgradeCount = 0;
         for (auto& cand : candidates) {
             if (upgradeCount >= maxUpgrades) break;
-
-            // Re-validate: tile may have been modified during this loop iteration.
-            auto it = m_tiles.find(cand.key);
-            if (it == m_tiles.end()) continue;
-            if (!it->second.isZoned || it->second.zone != targetZone ||
-                it->second.density != currentRequired) continue;
-
-            const int tx = cand.tx, tz = cand.tz;
-            const int newN = footprintSize(targetDensity);
-
-            // --- Check / enforce retry limit ---
-            int& retryCount = m_upgradeRetryCount[cand.key];
-            if (retryCount >= 12) {
-                // 12 deferred retries exhausted: cancel upgrade for this tile.
-                m_upgradeRetryCount.erase(cand.key);
-                m_notifications.push({NotificationType::UpgradeBlocked, tx, tz, 0});
-                continue;
+            // C-27: applyDensityUpgrade handles re-validation, retry, blocker scan, and apply
+            if (applyDensityUpgrade(cand.tx, cand.tz, cand.key,
+                                    tm.zone, tm.target, tm.current,
+                                    sfxCallsThisTick)) {
+                ++upgradeCount;
             }
-
-            // --- Scan expanded N×N footprint for blockers vs same-zone neighbours ---
-            bool hasBlocker = false;
-            struct DemoEntry { int x; int z; int64_t originKey; };
-            std::vector<DemoEntry> toDemo;
-
-            for (int dx = 0; dx < newN && !hasBlocker; ++dx) {
-                for (int dz = 0; dz < newN && !hasBlocker; ++dz) {
-                    int fx = tx + dx, fz = tz + dz;
-                    if (fx < 0 || fz < 0) { hasBlocker = true; break; }
-                    int64_t fkey = tileKey(fx, fz);
-                    if (fkey == cand.key) continue;  // origin tile itself
-
-                    auto fit = m_tiles.find(fkey);
-                    if (fit == m_tiles.end()) { hasBlocker = true; break; }  // un-zoned empty: blocker (no expansion outside zone)
-
-                    const TileData& ft = fit->second;
-                    if (ft.isRoad) { hasBlocker = true; break; }
-                    if (ft.isZoned) {
-                        // Resolve to this zone's origin tile.
-                        int originX = (ft.footprintOriginX == -1) ? fx : ft.footprintOriginX;
-                        int originZ = (ft.footprintOriginZ == -1) ? fz : ft.footprintOriginZ;
-                        int64_t ftOriginKey = tileKey(originX, originZ);
-
-                        auto ftOIt = m_tiles.find(ftOriginKey);
-                        if (ftOIt == m_tiles.end()) { hasBlocker = true; break; }
-                        const TileData& ftO = ftOIt->second;
-
-                        if (ftO.zone == targetZone && ftO.density < targetDensity) {
-                            // Same zone type, lower density: candidate for silent demolish.
-                            // Skip if this resolves back to the upgrade candidate itself —
-                            // non-origin tiles of the candidate's current footprint are
-                            // already inside the new footprint and will be re-marked below.
-                            // Adding cand.key to toDemo would demolish the origin tile
-                            // (isZoned=false) without restoring it, since the re-mark loop
-                            // skips the origin (dx==0 && dz==0).
-                            if (ftOriginKey == cand.key) continue;
-                            bool alreadyAdded = false;
-                            for (auto& de : toDemo) {
-                                if (de.originKey == ftOriginKey) { alreadyAdded = true; break; }
-                            }
-                            if (!alreadyAdded)
-                                toDemo.push_back({originX, originZ, ftOriginKey});
-                        } else {
-                            // Different zone, same/higher density, or service building: blocker.
-                            hasBlocker = true;
-                        }
-                    }
-                }
-            }
-
-            if (hasBlocker) {
-                retryCount++;
-                continue;
-            }
-
-            // --- No blockers: silently demolish same-zone lower-density neighbours ---
-            // Outer tiles that survive demolition with isZoned=true need a fresh
-            // Low-density building mesh so they are not invisible bare terrain.
-            struct OuterTile { int x; int z; ZoneType zone; };
-            std::vector<OuterTile> outerTiles;
-
-            for (auto& de : toDemo) {
-                auto dIt = m_tiles.find(de.originKey);
-                if (dIt == m_tiles.end()) continue;
-                const int oldN = footprintSize(dIt->second.density);
-
-                // Remove renderer mesh (no treasury refund, no undo).
-                if (m_renderer) m_renderer->removeBuildingMesh(de.x, de.z);
-
-                // Clear all footprint tiles.  Tiles inside the new upgrade footprint
-                // will be re-marked by the loop below; tiles outside must remain
-                // zoned (reset to Low density) so the player's zoning is preserved.
-                for (int ddx = 0; ddx < oldN; ++ddx) {
-                    for (int ddz = 0; ddz < oldN; ++ddz) {
-                        auto it = m_tiles.find(tileKey(de.x + ddx, de.z + ddz));
-                        if (it == m_tiles.end()) continue;
-                        TileData& t = it->second;
-                        int tileX = de.x + ddx;
-                        int tileZ = de.z + ddz;
-                        bool insideNewFP = (tileX >= tx && tileX < tx + newN &&
-                                            tileZ >= tz && tileZ < tz + newN);
-                        // Tiles inside the new footprint: re-marking loop will restore
-                        // isZoned=true; set false here so stale state is never visible.
-                        // Tiles outside: keep isZoned=true at Low density so the
-                        // player's zone designation survives the upgrade.
-                        t.isZoned           = !insideNewFP;
-                        t.density           = insideNewFP ? t.density : DensityTier::Low;
-                        t.population        = 0.0f;
-                        t.footprintOriginX  = -1;
-                        t.footprintOriginZ  = -1;
-                        t.isAbandoned       = false;
-                        // zone type preserved — tile remains player-zoned land
-                        if (!insideNewFP) {
-                            outerTiles.push_back({tileX, tileZ, t.zone});
-                        }
-                    }
-                }
-
-                m_notifications.push({NotificationType::NeighbourCleared, de.x, de.z, 0});
-            }
-
-            // Place Low-density building meshes for outer tiles that survived as
-            // zoned-but-vacant, so they are visually distinguishable from bare terrain.
-            for (auto& ot : outerTiles) {
-                if (!m_renderer) break;
-                int zoneIdx = static_cast<int>(ot.zone);
-                int idx = zoneIdx * 3 + 0;  // tierIdx=0 for Low density
-                m_buildingVariantCounters[idx]++;
-                int variantNum = ((m_buildingVariantCounters[idx] - 1) % 4) + 1;
-                std::string baseName = zoneAssetBaseName(ot.zone, DensityTier::Low);
-                if (baseName.size() >= 2) {
-                    baseName[baseName.size() - 2] = '0';
-                    baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
-                }
-                m_renderer->placeBuildingMesh(ot.x, ot.z, baseName);
-            }
-
-            // --- Reset retry counter ---
-            m_upgradeRetryCount.erase(cand.key);
-
-            // --- Upgrade origin tile ---
-            TileData& originTile = m_tiles[cand.key];
-            originTile.isZoned    = true;   // defensive: toDemo guard above prevents clearing,
-                                            // but be explicit — origin must always stay zoned.
-            originTile.density    = targetDensity;
-            originTile.population = 0.0f;
-            originTile.footprintOriginX = -1;
-            originTile.footprintOriginZ = -1;
-
-            // --- Mark new N×N footprint tiles ---
-            for (int dx = 0; dx < newN; ++dx) {
-                for (int dz = 0; dz < newN; ++dz) {
-                    if (dx == 0 && dz == 0) continue;  // origin already updated above
-                    int64_t fkey = tileKey(tx + dx, tz + dz);
-                    TileData& ftile = m_tiles[fkey];
-                    ftile.isZoned    = true;
-                    ftile.isRoad     = false;
-                    ftile.zone       = targetZone;
-                    ftile.density    = targetDensity;
-                    ftile.population = 0.0f;
-                    ftile.desirability = static_cast<float>(SimulationConstants::desirability_base_value);
-                    ftile.isAbandoned  = false;
-                    ftile.footprintOriginX = tx;
-                    ftile.footprintOriginZ = tz;
-                }
-            }
-
-            // --- Swap building mesh ---
-            if (m_renderer) {
-                m_renderer->removeBuildingMesh(tx, tz);
-
-                // Round-robin variant cycling — same logic as placeZone().
-                int zoneIdx2 = static_cast<int>(targetZone);
-                int tierIdx2 = static_cast<int>(targetDensity);
-                int idx2     = zoneIdx2 * 3 + tierIdx2;
-                m_buildingVariantCounters[idx2]++;
-                int variantNum = ((m_buildingVariantCounters[idx2] - 1) % 4) + 1;
-                std::string baseName = zoneAssetBaseName(targetZone, targetDensity);
-                if (baseName.size() >= 2) {
-                    baseName[baseName.size() - 2] = '0';
-                    baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
-                }
-                m_renderer->placeBuildingMesh(tx, tz, baseName);
-            }
-
-            // --- SFX (capped per tick) ---
-            if (m_audio && sfxCallsThisTick < SimulationConstants::sfx_zone_upgrade_per_tick_cap) {
-                m_audio->playSound(SFX_ZONE_UPGRADE, SoundPriority::NORMAL, 1.0f);
-                ++sfxCallsThisTick;
-            }
-            upgradeCount++;
         }
     }
 }
@@ -1283,24 +1316,11 @@ void CitySimulation::doDensityUnlockTick() {
 // ---------------------------------------------------------------------------
 
 void CitySimulation::doEconomyTick() {
-    bool inGracePeriod = ((m_clock->nowSeconds() - m_constructionTimeSeconds) <
-                          SimulationConstants::grace_period_real_seconds);
-
-    // Compute revenue components
-    int64_t taxRevR = computeTaxRevenue(ZoneType::Residential);
-    int64_t taxRevC = computeTaxRevenue(ZoneType::Commercial);
-    int64_t taxRevI = computeTaxRevenue(ZoneType::Industrial);
-
-    int64_t totalCIRevenue = taxRevC + taxRevI;
-    int64_t wages = computeWagesCost(totalCIRevenue);
-
-    int64_t svcUpkeep  = inGracePeriod ? 0LL : computeServiceUpkeepCost();
-    int64_t roadMaint  = inGracePeriod ? 0LL : computeRoadMaintenanceCost();
-    int64_t utilFees   = computeUtilityFeeRevenue();
-
-    int64_t totalRevenue = taxRevR + taxRevC + taxRevI + utilFees;
-    int64_t totalExpenses = wages + svcUpkeep + roadMaint;
-    int64_t net = totalRevenue - totalExpenses;
+    // computeEconomySnapshot() was already called in doBudgetTick() before this
+    // method runs. It wrote m_budgetSurplusPct and all m_lastMonth* members.
+    // Re-call it here to get the net for treasury update — the snapshot values
+    // may have changed if called multiple times per tick (not in V1, but safe).
+    const int64_t net = computeEconomySnapshot();
 
     // Update treasury
     m_treasury += net;
@@ -1308,21 +1328,8 @@ void CitySimulation::doEconomyTick() {
     // Process loan repayments
     processLoanRepayments(m_treasury);
 
-    // Compute budget surplus percentage
-    m_budgetSurplusPct = computeBudgetSurplusPct(totalRevenue, totalExpenses);
-
-    // Cache line items
-    m_lastMonthTaxRevenue[0] = static_cast<float>(taxRevR);
-    m_lastMonthTaxRevenue[1] = static_cast<float>(taxRevC);
-    m_lastMonthTaxRevenue[2] = static_cast<float>(taxRevI);
-    m_lastMonthWagesCost          = static_cast<float>(wages);
-    m_lastMonthRoadMaintenanceCost = static_cast<float>(roadMaint);
-    m_lastMonthServiceUpkeepCost  = static_cast<float>(svcUpkeep);
-    m_lastMonthUtilityFeeRevenue  = static_cast<float>(utilFees);
-    m_currentMonthlyRevenue       = static_cast<float>(totalRevenue);
-
-    // First revenue check
-    if (totalRevenue > 0) {
+    // First revenue check — m_currentMonthlyRevenue was written by computeEconomySnapshot().
+    if (m_currentMonthlyRevenue > 0.0f) {
         m_firstRevenueTicked = true;
     }
 
@@ -1415,14 +1422,15 @@ int64_t CitySimulation::computeServiceUpkeepCost() const {
     int64_t total = 0;
     for (const ServiceBuilding& sb : m_serviceBuildings) {
         switch (sb.type) {
-            case ServiceType::FireStation:
+            case ServiceBuildingType::FireStation:
                 total += SimulationConstants::service_upkeep_fire_station_per_tick; break;
-            case ServiceType::PoliceStation:
+            case ServiceBuildingType::PoliceStation:
                 total += SimulationConstants::service_upkeep_police_station_per_tick; break;
-            case ServiceType::WaterTower:
+            case ServiceBuildingType::WaterTower:
                 total += SimulationConstants::service_upkeep_water_tower_per_tick; break;
-            case ServiceType::PowerPlant:
+            case ServiceBuildingType::PowerPlant:
                 total += SimulationConstants::service_upkeep_power_plant_per_tick; break;
+            default: break;
         }
     }
     return total;
@@ -1449,8 +1457,8 @@ int64_t CitySimulation::computeUtilityFeeRevenue() const {
 
     bool hasPower = false, hasWater = false;
     for (const ServiceBuilding& sb : m_serviceBuildings) {
-        if (sb.type == ServiceType::PowerPlant) hasPower = true;
-        if (sb.type == ServiceType::WaterTower) hasWater = true;
+        if (sb.type == ServiceBuildingType::PowerPlant) hasPower = true;
+        if (sb.type == ServiceBuildingType::WaterTower) hasWater = true;
     }
 
     int64_t total = 0;
@@ -1461,13 +1469,13 @@ int64_t CitySimulation::computeUtilityFeeRevenue() const {
         int z = static_cast<int>(static_cast<uint32_t>(key));
 
         if (hasPower) {
-            float powerCov = computePowerCoverage(x, z);
-            if (powerCov > 0.0f) {
+            // C-14: use pre-built m_powerCoverageCache (O(1)) instead of per-tile BFS.
+            if (m_powerCoverageCache.count(tileKey(x, z))) {
                 total += SimulationConstants::utility_fee_power_per_tile;
             }
         }
         if (hasWater) {
-            float waterCov = computeRadialCoverage(x, z, ServiceType::WaterTower);
+            float waterCov = computeRadialCoverage(x, z, ServiceBuildingType::WaterTower);
             if (waterCov > 0.0f) {
                 total += SimulationConstants::utility_fee_water_per_tile;
             }
@@ -1481,19 +1489,17 @@ int64_t CitySimulation::computeUtilityFeeRevenue() const {
 // ---------------------------------------------------------------------------
 
 void CitySimulation::processLoanRepayments(int64_t& treasury) {
-    std::vector<size_t> toRemove;
-
-    for (size_t i = 0; i < m_loans.size(); ++i) {
-        LoanEntry& loan = m_loans[i];
+    for (LoanEntry& loan : m_loans) {
         if (loan.ticksRemaining > 1) {
             // Regular repayment: principal portion
             int64_t repayment = loan.remainingPrincipal / static_cast<int64_t>(loan.ticksRemaining);
             treasury -= repayment;
             loan.remainingPrincipal -= repayment;
 
-            // Monthly interest: outstanding * (0.05 / ticks_per_year)
+            // Monthly interest: outstanding * (loan_interest_rate / ticks_per_year)
             float interest = static_cast<float>(loan.remainingPrincipal) *
-                             (0.05f / static_cast<float>(SimulationConstants::ticks_per_year));
+                             (SimulationConstants::loan_interest_rate /
+                              static_cast<float>(SimulationConstants::ticks_per_year));
             treasury -= static_cast<int64_t>(interest);
 
             loan.ticksRemaining--;
@@ -1501,14 +1507,16 @@ void CitySimulation::processLoanRepayments(int64_t& treasury) {
             // Final payment: absorb remaining principal
             treasury -= loan.remainingPrincipal;
             loan.remainingPrincipal = 0;
-            toRemove.push_back(i);
         }
     }
 
-    // Remove paid-off loans (in reverse order to preserve indices)
-    for (int i = static_cast<int>(toRemove.size()) - 1; i >= 0; --i) {
-        m_loans.erase(m_loans.begin() + static_cast<ptrdiff_t>(toRemove[static_cast<size_t>(i)]));
-    }
+    // Remove paid-off loans (C-13 / SIM-13): erase-remove idiom (C++17 compatible).
+    m_loans.erase(
+        std::remove_if(m_loans.begin(), m_loans.end(),
+            [](const LoanEntry& loan) {
+                return loan.remainingPrincipal == 0 && loan.ticksRemaining <= 1;
+            }),
+        m_loans.end());
 }
 
 // ---------------------------------------------------------------------------
@@ -1631,13 +1639,13 @@ void CitySimulation::doGameOverTick() {
 
 void CitySimulation::checkCityRatingTransition() {
     CityRatingTier newTier;
-    if (m_totalPopulation >= 500000) {
+    if (m_totalPopulation >= SimulationConstants::city_rating_megalopolis_threshold) {
         newTier = CityRatingTier::Megalopolis;
-    } else if (m_totalPopulation >= 50000) {
+    } else if (m_totalPopulation >= SimulationConstants::city_rating_metropolis_threshold) {
         newTier = CityRatingTier::Metropolis;
-    } else if (m_totalPopulation >= 10000) {
+    } else if (m_totalPopulation >= SimulationConstants::city_rating_city_threshold) {
         newTier = CityRatingTier::City;
-    } else if (m_totalPopulation >= 1000) {
+    } else if (m_totalPopulation >= SimulationConstants::city_rating_town_threshold) {
         newTier = CityRatingTier::Town;
     } else {
         newTier = CityRatingTier::Village;
@@ -1718,9 +1726,16 @@ void CitySimulation::doTrafficSignalTick(float realDeltaSeconds) {
 // placed) and despawned lazily when their current or destination tile is no longer
 // a road tile (detected at tile-arrival time).
 
-static constexpr float kVehicleTilePerSecond   = 4.0f;  // one 10-m tile per 0.25 s
-static constexpr int   kVehicleSpawnInterval   = 3;     // spawn 1 vehicle every N roads placed
-static constexpr float kTileSizeM              = 10.0f; // metres per tile (matches IrrlichtRenderer)
+// C-19: kVehicleTilePerSecond and kVehicleSpawnInterval moved to SimulationConstants.
+// kTileSizeMeters removed — use kTileSizeMeters consistently throughout this file.
+
+// kPiF — π as float (C++17 compatible, replaces bare 3.14159265f literals) (C-10 / SIM-10).
+// Use std::numbers::pi_v<float> when the project upgrades to C++20.
+static constexpr float kPiF = 3.14159265f;
+
+// kDespawnedVehicleTile — sentinel tile coordinate indicating a vehicle is despawned (C-11 / SIM-11).
+// Any vehicle with srcX == kDespawnedVehicleTile is removed by the pruning pass in doTrafficVehicleTick().
+static constexpr int kDespawnedVehicleTile = -9999;
 
 bool CitySimulation::pickNextRoadTile(int curX, int curZ, int prevX, int prevZ,
                                        int& outX, int& outZ) {
@@ -1751,7 +1766,7 @@ bool CitySimulation::pickNextRoadTile(int curX, int curZ, int prevX, int prevZ,
 void CitySimulation::doTrafficVehicleTick(float realDeltaSeconds) {
     if (m_trafficVehicles.empty()) return;
 
-    const float step = kVehicleTilePerSecond * realDeltaSeconds;
+    const float step = SimulationConstants::vehicle_tile_per_second * realDeltaSeconds;
 
     for (TrafficVehicle& v : m_trafficVehicles) {
         v.progress += step;
@@ -1760,13 +1775,13 @@ void CitySimulation::doTrafficVehicleTick(float realDeltaSeconds) {
             const TileData* dst = findTile(v.dstX, v.dstZ);
             if (!dst || !dst->isRoad) {
                 // Destination demolished — despawn by marking src invalid (handled below).
-                v.srcX = v.dstX = -9999;
+                v.srcX = v.dstX = kDespawnedVehicleTile;
                 continue;
             }
             // Pick next tile.
             int nextX, nextZ;
             if (!pickNextRoadTile(v.dstX, v.dstZ, v.srcX, v.srcZ, nextX, nextZ)) {
-                v.srcX = v.dstX = -9999; // no road to follow — despawn
+                v.srcX = v.dstX = kDespawnedVehicleTile; // no road to follow — despawn
                 continue;
             }
             v.srcX = v.dstX;
@@ -1777,18 +1792,18 @@ void CitySimulation::doTrafficVehicleTick(float realDeltaSeconds) {
             // Update heading.
             float dx = static_cast<float>(v.dstX - v.srcX);
             float dz = static_cast<float>(v.dstZ - v.srcZ);
-            v.headingDeg = std::atan2(dx, dz) * (180.0f / 3.14159265f);
+            v.headingDeg = std::atan2(dx, dz) * (180.0f / kPiF);
         }
         // Interpolate world position.
         float t = std::max(0.0f, std::min(1.0f, v.progress));
-        v.worldX = (static_cast<float>(v.srcX) + (v.dstX - v.srcX) * t + 0.5f) * kTileSizeM;
-        v.worldZ = (static_cast<float>(v.srcZ) + (v.dstZ - v.srcZ) * t + 0.5f) * kTileSizeM;
+        v.worldX = (static_cast<float>(v.srcX) + (v.dstX - v.srcX) * t + 0.5f) * kTileSizeMeters;
+        v.worldZ = (static_cast<float>(v.srcZ) + (v.dstZ - v.srcZ) * t + 0.5f) * kTileSizeMeters;
     }
 
     // Prune despawned vehicles.
     m_trafficVehicles.erase(
         std::remove_if(m_trafficVehicles.begin(), m_trafficVehicles.end(),
-            [](const TrafficVehicle& v){ return v.srcX == -9999; }),
+            [](const TrafficVehicle& v){ return v.srcX == kDespawnedVehicleTile; }),
         m_trafficVehicles.end());
 }
 
@@ -1817,28 +1832,31 @@ float CitySimulation::effectiveDemandForTile(const TileData& tile) const {
 // Service coverage helpers
 // ---------------------------------------------------------------------------
 
-float CitySimulation::computeServiceCoverageRadius(ServiceType type, bool degraded) const {
+float CitySimulation::computeServiceCoverageRadius(ServiceBuildingType type, bool degraded) const {
     float radius;
     switch (type) {
-        case ServiceType::FireStation:
+        case ServiceBuildingType::FireStation:
             radius = static_cast<float>(SimulationConstants::fire_station_coverage_radius_m);
             break;
-        case ServiceType::PoliceStation:
+        case ServiceBuildingType::PoliceStation:
             radius = static_cast<float>(SimulationConstants::police_station_coverage_radius_m);
             break;
-        case ServiceType::WaterTower:
+        case ServiceBuildingType::WaterTower:
             radius = static_cast<float>(SimulationConstants::water_tower_coverage_radius_m);
             break;
-        case ServiceType::PowerPlant:
+        case ServiceBuildingType::PowerPlant:
             // Power plant uses a large default radius (same as fire station for simplicity)
             radius = static_cast<float>(SimulationConstants::fire_station_coverage_radius_m);
+            break;
+        default:
+            radius = 0.0f;  // ServiceBuildingType::None — no radius
             break;
     }
     if (degraded) radius *= 0.5f;
     return radius;
 }
 
-float CitySimulation::computeRadialCoverage(int tileX, int tileZ, ServiceType type) const {
+float CitySimulation::computeRadialCoverage(int tileX, int tileZ, ServiceBuildingType type) const {
     for (const ServiceBuilding& sb : m_serviceBuildings) {
         if (sb.type != type) continue;
         float radius = computeServiceCoverageRadius(type, sb.degraded);
@@ -1853,6 +1871,92 @@ float CitySimulation::computeRadialCoverage(int tileX, int tileZ, ServiceType ty
     return 0.0f;
 }
 
+void CitySimulation::buildPowerCoverageCache() {
+    // C-14 / SIM-15: run the BFS from all power plants once per budget tick,
+    // populating m_powerCoverageCache. Per-tile code queries the set in O(1)
+    // instead of running a full BFS per tile (O(tiles * BFS_size) -> O(BFS_size)).
+    m_powerCoverageCache.clear();
+
+    const int dx4[] = {0, 0, -1, 1};
+    const int dz4[] = {-1, 1, 0, 0};
+
+    for (const ServiceBuilding& sb : m_serviceBuildings) {
+        if (sb.type != ServiceBuildingType::PowerPlant) continue;
+
+        std::unordered_map<int64_t, int> bfsDepth;
+        std::queue<std::pair<int,int>> bfsQueue;
+
+        const int sN = serviceFootprintSize();  // == 2
+        for (int fdx = 0; fdx < sN; ++fdx) {
+            for (int fdz = 0; fdz < sN; ++fdz) {
+                int64_t fpKey = tileKey(sb.x + fdx, sb.z + fdz);
+                bfsDepth[fpKey] = 0;
+                bfsQueue.push({sb.x + fdx, sb.z + fdz});
+            }
+        }
+
+        int maxDepth = 0;
+        while (!bfsQueue.empty()) {
+            auto [cx, cz] = bfsQueue.front();
+            bfsQueue.pop();
+            int depth = bfsDepth[tileKey(cx, cz)];
+
+            for (int d = 0; d < 4; ++d) {
+                int nx = cx + dx4[d];
+                int nz = cz + dz4[d];
+                int64_t nkey = tileKey(nx, nz);
+                if (bfsDepth.count(nkey)) continue;
+                if (!isBuildableTile(nx, nz)) continue;
+
+                int newDepth = depth + 1;
+                bfsDepth[nkey] = newDepth;
+                if (newDepth > maxDepth) maxDepth = newDepth;
+                bfsQueue.push({nx, nz});
+            }
+        }
+
+        // Determine brownout depth cutoff
+        int coverDepth = maxDepth;
+        if (m_budgetSurplusPct <=
+            SimulationConstants::service_deficit_radius_halving_threshold) {
+            coverDepth = static_cast<int>(
+                std::floor(static_cast<float>(maxDepth) * 0.70f));
+        }
+
+        // All BFS-reached tiles within the cover depth are "powered".
+        // Tiles unreachable by BFS fall back to radial distance (same logic as before).
+        float radiusTiles = computeServiceCoverageRadius(ServiceBuildingType::PowerPlant, sb.degraded)
+                            / kTileSizeMeters;
+
+        for (const auto& [key, depth] : bfsDepth) {
+            if (depth <= coverDepth && depth > 0) {
+                // BFS-reachable within depth limit
+                m_powerCoverageCache.insert(key);
+            } else if (depth == 0) {
+                // Footprint tiles are always powered
+                m_powerCoverageCache.insert(key);
+            }
+        }
+
+        // Radial fallback: mark all tiles within radius that BFS could not reach
+        // (same disconnected-grid handling as computePowerCoverage()).
+        int r = static_cast<int>(std::ceil(radiusTiles)) + 1;
+        for (int dx = -r; dx <= r; ++dx) {
+            for (int dz = -r; dz <= r; ++dz) {
+                int nx = sb.x + dx;
+                int nz = sb.z + dz;
+                int64_t nkey = tileKey(nx, nz);
+                if (bfsDepth.count(nkey)) continue;  // already handled by BFS
+                float fdx = static_cast<float>(dx);
+                float fdz = static_cast<float>(dz);
+                if (std::sqrt(fdx * fdx + fdz * fdz) <= radiusTiles) {
+                    m_powerCoverageCache.insert(nkey);
+                }
+            }
+        }
+    }
+}
+
 float CitySimulation::computePowerCoverage(int tileX, int tileZ) const {
     // Power coverage uses BFS from the plant through placed tiles.
     // During budget deficit (m_budgetSurplusPct <= threshold), the power grid
@@ -1863,7 +1967,7 @@ float CitySimulation::computePowerCoverage(int tileX, int tileZ) const {
     const int dz4[] = {-1, 1, 0, 0};
 
     for (const ServiceBuilding& sb : m_serviceBuildings) {
-        if (sb.type != ServiceType::PowerPlant) continue;
+        if (sb.type != ServiceBuildingType::PowerPlant) continue;
 
         // BFS from all 2×2 footprint tiles of this plant through adjacent placed tiles.
         // Starting from all footprint tiles (not just origin) ensures that zones
@@ -1908,7 +2012,7 @@ float CitySimulation::computePowerCoverage(int tileX, int tileZ) const {
             // BFS couldn't reach via placed tiles; fall back to radial distance.
             // This handles disconnected grids (e.g. plant at (0,0) and tile at (10,0)
             // with no intermediate tiles).
-            float radiusTiles = computeServiceCoverageRadius(ServiceType::PowerPlant, sb.degraded)
+            float radiusTiles = computeServiceCoverageRadius(ServiceBuildingType::PowerPlant, sb.degraded)
                                 / kTileSizeMeters;
             float fdx = static_cast<float>(tileX - sb.x);
             float fdz = static_cast<float>(tileZ - sb.z);
@@ -2337,7 +2441,7 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
     // The new tile becomes the vehicle's starting position; pick an adjacent road tile
     // as the initial destination. Vehicles only spawn when at least one road neighbour
     // exists so they have somewhere to go.
-    if (!wasRoad && (m_roadTileCount % kVehicleSpawnInterval == 0)) {
+    if (!wasRoad && (m_roadTileCount % SimulationConstants::vehicle_spawn_interval == 0)) {
         const int dirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
         int dstX = tileX, dstZ = tileZ;  // fallback: stay on new tile (will despawn instantly)
         for (auto& d : dirs) {
@@ -2354,9 +2458,9 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
             v.progress = 0.0f;
             float dx = static_cast<float>(dstX - tileX);
             float dz = static_cast<float>(dstZ - tileZ);
-            v.headingDeg = std::atan2(dx, dz) * (180.0f / 3.14159265f);
-            v.worldX = (static_cast<float>(tileX) + 0.5f) * kTileSizeM;
-            v.worldZ = (static_cast<float>(tileZ) + 0.5f) * kTileSizeM;
+            v.headingDeg = std::atan2(dx, dz) * (180.0f / kPiF);
+            v.worldX = (static_cast<float>(tileX) + 0.5f) * kTileSizeMeters;
+            v.worldZ = (static_cast<float>(tileZ) + 0.5f) * kTileSizeMeters;
             // Zone nearest zoned tile for vehicle type selection
             for (auto& d2 : dirs) {
                 const TileData* nd2 = findTile(tileX + d2[0], tileZ + d2[1]);
@@ -2535,26 +2639,19 @@ void CitySimulation::placeServiceBuilding(int tileX, int tileZ,
         }
     }
 
-    // Map ServiceBuildingType (public) to ServiceType (private).
-    // ServiceBuildingType: PowerPlant=0, WaterTower=1, FireStation=2, PoliceStation=3.
-    // ServiceType:         FireStation=0, PoliceStation=1, WaterTower=2, PowerPlant=3.
-    ServiceType internalType;
+    // C-15 / SIM-16: ServiceBuildingType is used directly in private data — no mapping needed.
     int placementCost = 0;
     switch (type) {
         case ServiceBuildingType::PowerPlant:
-            internalType  = ServiceType::PowerPlant;
             placementCost = SimulationConstants::service_placement_cost_power_plant;
             break;
         case ServiceBuildingType::WaterTower:
-            internalType  = ServiceType::WaterTower;
             placementCost = SimulationConstants::service_placement_cost_water_tower;
             break;
         case ServiceBuildingType::FireStation:
-            internalType  = ServiceType::FireStation;
             placementCost = SimulationConstants::service_placement_cost_fire_station;
             break;
         case ServiceBuildingType::PoliceStation:
-            internalType  = ServiceType::PoliceStation;
             placementCost = SimulationConstants::service_placement_cost_police_station;
             break;
         default:
@@ -2579,9 +2676,9 @@ void CitySimulation::placeServiceBuilding(int tileX, int tileZ,
 
     // Register the service building.
     ServiceBuilding sb;
-    sb.x       = tileX;
-    sb.z       = tileZ;
-    sb.type    = internalType;
+    sb.x        = tileX;
+    sb.z        = tileZ;
+    sb.type     = type;
     sb.degraded = false;
     m_serviceBuildings.push_back(sb);
 
@@ -2668,12 +2765,8 @@ QueryResult CitySimulation::queryTile(int tileX, int tileZ) const {
         for (const ServiceBuilding& sb : m_serviceBuildings) {
             if (tileX >= sb.x && tileX < sb.x + sN &&
                 tileZ >= sb.z && tileZ < sb.z + sN) {
-                switch (sb.type) {
-                    case ServiceType::PowerPlant:    result.serviceType = ServiceBuildingType::PowerPlant;    break;
-                    case ServiceType::WaterTower:    result.serviceType = ServiceBuildingType::WaterTower;    break;
-                    case ServiceType::FireStation:   result.serviceType = ServiceBuildingType::FireStation;   break;
-                    case ServiceType::PoliceStation: result.serviceType = ServiceBuildingType::PoliceStation; break;
-                }
+                // C-15: sb.type is already ServiceBuildingType — assign directly.
+                result.serviceType = sb.type;
                 result.degraded = sb.degraded;
                 return result;
             }
@@ -2709,16 +2802,17 @@ QueryResult CitySimulation::queryTile(int tileX, int tileZ) const {
     bool hasFireStation = false, hasPolice = false, hasWater = false, hasPower = false;
     for (const ServiceBuilding& sb : m_serviceBuildings) {
         switch (sb.type) {
-            case ServiceType::FireStation:   hasFireStation = true; break;
-            case ServiceType::PoliceStation: hasPolice      = true; break;
-            case ServiceType::WaterTower:    hasWater       = true; break;
-            case ServiceType::PowerPlant:    hasPower       = true; break;
+            case ServiceBuildingType::FireStation:   hasFireStation = true; break;
+            case ServiceBuildingType::PoliceStation: hasPolice      = true; break;
+            case ServiceBuildingType::WaterTower:    hasWater       = true; break;
+            case ServiceBuildingType::PowerPlant:    hasPower       = true; break;
+            default: break;
         }
     }
 
-    result.coverage.fire   = hasFireStation ? computeRadialCoverage(tileX, tileZ, ServiceType::FireStation)   : -1.0f;
-    result.coverage.police = hasPolice      ? computeRadialCoverage(tileX, tileZ, ServiceType::PoliceStation) : -1.0f;
-    result.coverage.water  = hasWater       ? computeRadialCoverage(tileX, tileZ, ServiceType::WaterTower)    : -1.0f;
+    result.coverage.fire   = hasFireStation ? computeRadialCoverage(tileX, tileZ, ServiceBuildingType::FireStation)   : -1.0f;
+    result.coverage.police = hasPolice      ? computeRadialCoverage(tileX, tileZ, ServiceBuildingType::PoliceStation) : -1.0f;
+    result.coverage.water  = hasWater       ? computeRadialCoverage(tileX, tileZ, ServiceBuildingType::WaterTower)    : -1.0f;
     result.coverage.power  = hasPower       ? computePowerCoverage(tileX, tileZ)                              : -1.0f;
 
     // Phase 11h: report abandonment state.
@@ -3008,31 +3102,23 @@ std::vector<ServiceCoverageTile> CitySimulation::getServiceCoverage() const {
     // Phase 11d Deliverable 4b: return coverage state for all tiles covered by a service building.
     // For each service building, compute its coverage radius (in metres) and enumerate all tiles
     // within that radius. Tile size is 10 m per the simulation architecture.
-    static constexpr float kTileSizeM = 10.0f;  // world metres per tile (matches kTileSize in IrrlichtRenderer)
     std::vector<ServiceCoverageTile> coverage;
 
     for (const ServiceBuilding& sb : m_serviceBuildings) {
-        // Map internal ServiceType to public ServiceBuildingType.
-        ServiceBuildingType sbType;
-        switch (sb.type) {
-            case ServiceType::FireStation:   sbType = ServiceBuildingType::FireStation;   break;
-            case ServiceType::PoliceStation: sbType = ServiceBuildingType::PoliceStation; break;
-            case ServiceType::WaterTower:    sbType = ServiceBuildingType::WaterTower;    break;
-            case ServiceType::PowerPlant:    sbType = ServiceBuildingType::PowerPlant;    break;
-            default:                         continue;
-        }
+        // C-15: sb.type is already ServiceBuildingType — no mapping needed.
+        if (sb.type == ServiceBuildingType::None) continue;
 
         float radius = computeServiceCoverageRadius(sb.type, sb.degraded);
-        int radiusTiles = static_cast<int>(radius / kTileSizeM) + 1;
+        int radiusTiles = static_cast<int>(radius / kTileSizeMeters) + 1;
 
         for (int dz = -radiusTiles; dz <= radiusTiles; ++dz) {
             for (int dx = -radiusTiles; dx <= radiusTiles; ++dx) {
-                float dist = std::sqrt(static_cast<float>(dx*dx + dz*dz)) * kTileSizeM;
+                float dist = std::sqrt(static_cast<float>(dx*dx + dz*dz)) * kTileSizeMeters;
                 if (dist > radius) continue;
                 ServiceCoverageTile sct;
                 sct.tileX     = sb.x + dx;
                 sct.tileZ     = sb.z + dz;
-                sct.coveredBy = sbType;
+                sct.coveredBy = sb.type;
                 sct.degraded  = sb.degraded;
                 coverage.push_back(sct);
             }
@@ -3043,13 +3129,25 @@ std::vector<ServiceCoverageTile> CitySimulation::getServiceCoverage() const {
 
 // ---------------------------------------------------------------------------
 // Test-only API: inject a service building directly (not via ICitySimulation).
-// serviceTypeInt: 0=FireStation, 1=PoliceStation, 2=WaterTower, 3=PowerPlant.
+// serviceTypeInt ordinal convention (preserved from original test contract):
+//   0=FireStation, 1=PoliceStation, 2=WaterTower, 3=PowerPlant.
+// This mapping is DIFFERENT from ServiceBuildingType's enum ordinals
+// (PowerPlant=0, WaterTower=1, FireStation=2, PoliceStation=3).
+// The explicit switch preserves backward compatibility with all test call sites.
 // ---------------------------------------------------------------------------
 void CitySimulation::addServiceBuilding(int x, int z, int serviceTypeInt) {
+    ServiceBuildingType mappedType = ServiceBuildingType::None;
+    switch (serviceTypeInt) {
+        case 0: mappedType = ServiceBuildingType::FireStation;   break;
+        case 1: mappedType = ServiceBuildingType::PoliceStation; break;
+        case 2: mappedType = ServiceBuildingType::WaterTower;    break;
+        case 3: mappedType = ServiceBuildingType::PowerPlant;    break;
+        default: return;
+    }
     ServiceBuilding sb;
-    sb.x = x;
-    sb.z = z;
-    sb.type = static_cast<ServiceType>(serviceTypeInt);
+    sb.x       = x;
+    sb.z       = z;
+    sb.type    = mappedType;
     sb.degraded = false;
     m_serviceBuildings.push_back(sb);
 }
@@ -3654,7 +3752,8 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
                     } else if (sk == "type") {
                         int64_t v = 0; if (!parseInt64(json, pos, v, errorOut)) return false;
                         if (v < 0 || v > 3) { errorOut = "invalid service building type"; return false; }
-                        sb.type = static_cast<ServiceType>(v);
+                        // C-15: ServiceBuildingType ordinals: PowerPlant=0, WaterTower=1, FireStation=2, PoliceStation=3.
+                        sb.type = static_cast<ServiceBuildingType>(v);
                     } else if (sk == "degraded") {
                         if (!parseBool(json, pos, sb.degraded, errorOut)) return false;
                     } else {

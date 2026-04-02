@@ -22,13 +22,13 @@ public:
     bool isVisible() const { return m_visible; }
 
     // Polling API for UIManager: returns true (once) when Save was clicked.
-    bool consumeSaveRequest();
+    [[nodiscard]] bool consumeSaveRequest();
 
     // Polling API for UIManager: returns true (once) when Quit to Desktop was clicked.
-    bool consumeQuitDesktopRequest();
+    [[nodiscard]] bool consumeQuitDesktopRequest();
 
     // Polling API for UIManager: returns true (once) when Quit to Main Menu was clicked.
-    bool consumeQuitToMenuRequest();
+    [[nodiscard]] bool consumeQuitToMenuRequest();
 
 private:
     IUIBackend*    m_backend{nullptr};
