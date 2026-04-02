@@ -38,6 +38,7 @@
 #include <cstring>
 #include <cmath>
 #include <exception>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -199,7 +200,7 @@ int main(int argc, char** argv) {
     uiManager.setRenderer(&renderer);
     // UIManager transitioned to main menu during construction (before setRenderer was
     // wired), so arm the background here now that the renderer is available.
-    renderer.setSceneBackground("assets/textures/ui/loading_screen.png");
+    renderer.setSceneBackground(std::string(AITOWN_ASSETS_DIR) + "/textures/ui/loading_screen.png");
     uiManager.setTerrainQuery(&terrainSystem);
     uiManager.setMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
 
@@ -235,7 +236,7 @@ int main(int argc, char** argv) {
 
     // Show loading screen for one frame while save file state is checked.
     renderer.beginFrame();
-    renderer.drawFullscreenTexture("assets/textures/ui/loading_screen.png");
+    renderer.drawFullscreenTexture(std::string(AITOWN_ASSETS_DIR) + "/textures/ui/loading_screen.png");
     renderer.endFrame();
 
     // Update Load Game button state after loading screen completes (deferred from startup
@@ -489,7 +490,7 @@ int main(int argc, char** argv) {
                     device->getLogger()->log(e.what(), irr::ELL_ERROR);
                 }
                 renderer.beginFrame();
-                renderer.drawFullscreenTexture("assets/textures/ui/loading_screen.png");
+                renderer.drawFullscreenTexture(std::string(AITOWN_ASSETS_DIR) + "/textures/ui/loading_screen.png");
                 renderer.endFrame();
             }
             // Update renderer and UI with new terrain dimensions.
@@ -549,7 +550,7 @@ int main(int argc, char** argv) {
                         device->getLogger()->log(e.what(), irr::ELL_ERROR);
                     }
                     renderer.beginFrame();
-                    renderer.drawFullscreenTexture("assets/textures/ui/loading_screen.png");
+                    renderer.drawFullscreenTexture(std::string(AITOWN_ASSETS_DIR) + "/textures/ui/loading_screen.png");
                     renderer.endFrame();
                 }
                 // Wire dimensions and reposition camera.
