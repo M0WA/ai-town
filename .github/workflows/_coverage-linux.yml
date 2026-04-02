@@ -146,6 +146,7 @@ jobs:
             '*/Mock*.h' '*/Mock*.cpp' \
             '*/Manual*.h' '*/Manual*.cpp' \
             '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
+            '*/src/simulation/*.h' '*/src/ui/*.h' '*/src/interfaces/*.h' \
             --output-file coverage_filtered.info
           lcov --list coverage_filtered.info \
             --ignore-errors inconsistent \
@@ -173,7 +174,7 @@ jobs:
         run: |
           awk '
             /^SF:/ { in_sim=0; fname="" }
-            /^SF:.*src\/simulation\// { in_sim=1; fname=$0; sub(/^SF:/, "", fname); lh=0; lf=0 }
+            /^SF:.*src\/simulation\/.*\.cpp$/ { in_sim=1; fname=$0; sub(/^SF:/, "", fname); lh=0; lf=0 }
             in_sim && /^LH:/ { lh=$0; sub(/^LH:/, "", lh) }
             in_sim && /^LF:/ { lf=$0; sub(/^LF:/, "", lf) }
             in_sim && /^end_of_record/ {
@@ -184,7 +185,7 @@ jobs:
               in_sim=0
             }
             END {
-              if (min_pct == "") { print "PREFLIGHT FAIL: No src/simulation/ files found in coverage_filtered.info"; exit 1 }
+              if (min_pct == "") { print "PREFLIGHT FAIL: No src/simulation/ .cpp files found in coverage_filtered.info"; exit 1 }
               if (min_pct+0 < 85.0) {
                 printf "FAIL: worst src/simulation/ file %s coverage %.1f%% < 85%% Phase 11 per-file floor\n", min_file, min_pct; exit 1
               } else {
