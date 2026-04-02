@@ -102,8 +102,8 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
     // Guarded: no GL calls in headless mode (EDT_NULL has no GL context).
     if (!m_isHeadless) {
         // Read shader source files.
-        std::string vertSrc = readFileToString("assets/shaders/ui_quad.vert");
-        std::string fragSrc = readFileToString("assets/shaders/ui_quad.frag");
+        std::string vertSrc = readFileToString(std::string(AITOWN_ASSETS_DIR) + "/shaders/ui_quad.vert");
+        std::string fragSrc = readFileToString(std::string(AITOWN_ASSETS_DIR) + "/shaders/ui_quad.frag");
 
         if (vertSrc.empty() || fragSrc.empty()) {
             // Shader files not found — set program to 0 (graceful degradation).
@@ -211,7 +211,7 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
     // Use PNG — Irrlicht's built-in PNG loader is unconditionally compiled in.
     // The texture is shared across all buttons; setElementImage() calls
     // IGUIButton::setImage(m_spriteTexture, srcRect) with the per-sprite source rect.
-    m_spriteTexture = m_driver->getTexture("assets/textures/ui/hud_sprites_ui.png");
+    m_spriteTexture = m_driver->getTexture((std::string(AITOWN_ASSETS_DIR) + "/textures/ui/hud_sprites_ui.png").c_str());
     m_spriteTextureReady = (m_spriteTexture != nullptr);
 
     // --- Font tier selection and loading ---
@@ -226,7 +226,7 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
 
         // --- Load proportional font ---
         {
-            std::string fontPath = std::string("assets/fonts/hud_font_") + suffix + ".xml";
+            std::string fontPath = std::string(AITOWN_ASSETS_DIR) + "/fonts/hud_font_" + suffix + ".xml";
             irr::gui::IGUIFont* hudFont = m_guiEnv->getFont(fontPath.c_str());
             if (hudFont) {
                 m_hudFont = hudFont;
@@ -249,7 +249,7 @@ IrrlichtUIBackend::IrrlichtUIBackend(irr::IrrlichtDevice* device,
 
         // --- Load monospace font ---
         {
-            std::string monoPath = std::string("assets/fonts/hud_mono_font_") + suffix + ".xml";
+            std::string monoPath = std::string(AITOWN_ASSETS_DIR) + "/fonts/hud_mono_font_" + suffix + ".xml";
             irr::gui::IGUIFont* monoFont = m_guiEnv->getFont(monoPath.c_str());
             if (monoFont) {
                 m_hudMonoFont = monoFont;
