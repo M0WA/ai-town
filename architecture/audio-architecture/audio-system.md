@@ -477,6 +477,32 @@ The file `src/interfaces/IAudioSystem.h` must include the following headers:
 
 ---
 
+## Source Acquisition Architecture
+
+`AudioSystem` owns a private `AudioSourcePool m_pool` member. This object is the **single source of truth** for all 62 AL source handles (`alGenSources(kTotalSources, ...)` is called inside `AudioSourcePool`'s constructor, not inline in `AudioSystem`). All SFX and vehicle-engine source acquisition is delegated exclusively to `m_pool`; `AudioSystem` contains no inline pool-scanning or pool-state logic of its own.
+
+### Delegation Contract
+
+1. **`playSound` and `playPositionalSound`** call `m_pool.acquireSFXSource(priority)` to obtain a source handle. They apply volume, pitch, 3D positioning, and AL playback calls to the returned handle, but they never scan `m_sources[]` directly or maintain secondary tracking arrays for free/occupied status. If `acquireSFXSource()` returns `AL_NONE` (pool full and no eviction candidate exists at the requested priority), the call is silently dropped.
+
+2. **`acquireVehicleEnginePair`** delegates to `m_pool.acquireVehicleEnginePair(zone)`. Pair tracking (`VehiclePairSlot`, `m_vehiclePairs`), atomic-pair eviction, and the `{-1, -1}` failure path are entirely encapsulated inside `AudioSourcePool`. `AudioSystem` stores only the pair indices returned by the pool; it does not duplicate or shadow pool state.
+
+3. **`releaseVehicleEnginePair`** delegates to `m_pool.releaseVehicleEnginePair(idleIdx, moveIdx)`. All `alSourceStop`, `onSourceRecycled`, and slot-reset logic executes inside the pool. `AudioSystem` provides no parallel release path.
+
+4. **Stinger and stream sources** are acquired via `m_pool.acquireStingerSource(StingerType)` and `m_pool.acquireStreamSource()` respectively. Neither `AudioSystem` nor any callee above the pool layer holds raw AL source indices for these partitions outside of the pool's own bookkeeping.
+
+### Rationale
+
+Separating pool management (eviction priority, pair tracking, EFX filter binding, source-index bookkeeping) from playback logic (gain computation, pitch calculation, 3D positioning, crossfade) into distinct classes (`AudioSourcePool` vs. `AudioSystem`) prevents `AudioSystem` from becoming a god class and ensures that any change to the pool layout (e.g., the post-V1 `stinger_game_over` promotion) is isolated to `AudioSourcePool` and `audio_types.h` without touching `playSound` or `playPositionalSound` call sites.
+
+The `m_sfxVehicleReserved[kEvictableSFXCount]` atomic flag array (documented in `source-pool.md §SFX Pool Thread Safety`) is the only pool-adjacent state that lives in `AudioSystem` rather than `AudioSourcePool`. It exists there because `cleanupFinishedSFX()` is an `AudioSystem`-private audio-thread method; the flag lets it skip vehicle-reserved sources without reading non-atomic slot metadata. This is an explicit, named exception to the delegation rule — all other pool state belongs exclusively in `AudioSourcePool`.
+
+### Cross-Reference
+
+See `architecture/audio-architecture/source-pool.md` for the full pool contract: source layout constants (`kEvictableSFXCount`, `kSFXPoolSize`, `kTotalSources`), `SoundPriority` eviction rules, transient reserve (`kTransientReserveStart = 51`), stinger-source setup at construction, `VehiclePairSlot` internal tracking, `acquireVehicleEnginePair` atomic-acquisition algorithm, and `releaseVehicleEnginePair` paired-release protocol.
+
+---
+
 - Owned by the application root; no other subsystem creates AL contexts
 - The `AudioSystem` constructor must launch `m_audioThread` and then wait on `m_initCV` (with a timeout of 5 seconds) before returning, so that thread-local context initialization failures are surfaced before the first audio call. The constructor wait must hold `m_initMutex` via `std::unique_lock` and use the predicate form of `wait_for` (calling `wait_for` without holding the mutex is undefined behavior):
 
