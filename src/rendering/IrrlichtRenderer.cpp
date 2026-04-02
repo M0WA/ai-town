@@ -2819,7 +2819,7 @@ void IrrlichtRenderer::initCloudPlane()
     if (m_cloudNode) {
         // Load cloud texture from linear pool (PNG — Irrlicht DDS loader disabled).
         // Per sky-clouds.md: IVideoDriver::getTexture(), NOT TextureCache::loadSRGB().
-        ITexture* tex = m_driver->getTexture("assets/textures/sky/clouds.png");
+        ITexture* tex = m_driver->getTexture((std::string(AITOWN_ASSETS_DIR) + "/textures/sky/clouds.png").c_str());
 
         // --- Cloud dome shader ---
         // Load cloud_dome.vert / cloud_dome.frag via the GPU programming services.
