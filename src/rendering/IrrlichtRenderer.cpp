@@ -2552,9 +2552,11 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
         // the approach used for building assets.
         // Lighting=false: V1 uses no dynamic light nodes (same rationale as buildings).
         // Atlas fallback: if BuildingAssetLoader did not bind the atlas (file missing),
-        // bind vehicles_diffuse_atlas_d.dds directly as a safety fallback.
+        // bind vehicles_diffuse_atlas_d.png directly as a safety fallback.
+        // Use PNG (not DDS): Irrlicht's DDS loader does not recognise the BC1_UNORM_SRGB
+        // format used by the DDS atlas (same rationale as vehicleAtlasPath()).
         const std::string atlasPath = std::string(AITOWN_ASSETS_DIR)
-            + "/textures/vehicles/vehicles_diffuse_atlas_d.dds";
+            + "/textures/vehicles/vehicles_diffuse_atlas_d.png";
 
         for (u32 m = 0; m < node->getMaterialCount(); ++m) {
             SMaterial& mat = node->getMaterial(m);
