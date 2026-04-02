@@ -653,9 +653,24 @@ int main(int argc, char** argv)
                 }
             }
 
-            // Atlas texture used by all building meshes.
-            std::string texPath = std::string(AITOWN_ASSETS_DIR)
-                                + "/textures/buildings/buildings_atlas_d.png";
+            // Atlas texture: vehicles use their own diffuse atlas; buildings use the building atlas.
+            // Also add the vehicle directory to the Irrlicht file system so B3D-embedded
+            // texture references (e.g. "vehicles_diffuse_atlas_d.dds") resolve correctly.
+            // Vehicle textures live in textures/vehicles/, not 3d/vehicles/.
+            // Add the vehicle texture directory to Irrlicht's VFS so B3D-embedded
+            // texture references (e.g. "vehicles_diffuse_atlas_d.dds") resolve correctly.
+            const bool isVehicleCat = (cat.pathPrefix == "3d/vehicles");
+            if (isVehicleCat)
+            {
+                std::string vehicleTexDir = std::string(AITOWN_ASSETS_DIR) + "/textures/vehicles/";
+                device->getFileSystem()->addFileArchive(vehicleTexDir.c_str(),
+                    /*ignoreCase=*/true, /*ignorePaths=*/true,
+                    irr::io::EFAT_FOLDER);
+            }
+            // Vehicles: use PNG atlas (Irrlicht natively reads PNG; DDS is for GPU upload path only).
+            std::string texPath = isVehicleCat
+                ? std::string(AITOWN_ASSETS_DIR) + "/textures/vehicles/vehicles_diffuse_atlas_d.png"
+                : std::string(AITOWN_ASSETS_DIR) + "/textures/buildings/buildings_atlas_d.png";
             irr::video::ITexture* atlasTex = driver->getTexture(texPath.c_str());
 
             const int totalSlots = static_cast<int>(slots.size());
