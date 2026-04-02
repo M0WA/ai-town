@@ -19,11 +19,7 @@
 #include <string>
 #include <system_error>
 
-#if defined(_WIN32)
-#  include <cstdlib>   // getenv
-#else
-#  include <cstdlib>   // getenv
-#endif
+#include <cstdlib>   // getenv (C-21: redundant platform-discriminated block removed)
 
 namespace fs = std::filesystem;
 
@@ -195,23 +191,19 @@ std::string SaveSystem::getSaveDirectoryPath() const {
 // ---------------------------------------------------------------------------
 
 std::string SaveSystem::ensureSaveDirectory() const {
-    std::string base;
+    // C-22: build path with fs::path / operator — handles both '/' and '\' automatically.
+    fs::path base;
 
 #if defined(_WIN32)
     const char* appdata = std::getenv("APPDATA");
-    if (appdata && appdata[0] != '\0') {
-        base = std::string(appdata) + "\\aitown\\saves";
-    } else {
-        // Fallback: use current directory
-        base = "aitown_saves";
-    }
+    base = (appdata && appdata[0] != '\0')
+        ? fs::path(appdata) / "aitown" / "saves"
+        : fs::path("aitown_saves");
 #else
     const char* home = std::getenv("HOME");
-    if (home && home[0] != '\0') {
-        base = std::string(home) + "/.config/aitown/saves";
-    } else {
-        base = "aitown_saves";
-    }
+    base = (home && home[0] != '\0')
+        ? fs::path(home) / ".config" / "aitown" / "saves"
+        : fs::path("aitown_saves");
 #endif
 
     // Create the directory tree if it doesn't exist.
@@ -220,25 +212,17 @@ std::string SaveSystem::ensureSaveDirectory() const {
     std::error_code ec;
     fs::create_directories(base, ec);
 
-    return base;
+    return base.string();
 }
 
 std::string SaveSystem::slotFilePath(int slot) const {
-    std::string dir = ensureSaveDirectory();
-#if defined(_WIN32)
-    return dir + "\\slot" + std::to_string(slot) + ".json";
-#else
-    return dir + "/slot" + std::to_string(slot) + ".json";
-#endif
+    // C-22: use std::filesystem::path / operator for cross-platform separator.
+    return (fs::path(ensureSaveDirectory()) / ("slot" + std::to_string(slot) + ".json")).string();
 }
 
 std::string SaveSystem::autoSaveFilePath() const {
-    std::string dir = ensureSaveDirectory();
-#if defined(_WIN32)
-    return dir + "\\autosave.json";
-#else
-    return dir + "/autosave.json";
-#endif
+    // C-22: use std::filesystem::path / operator for cross-platform separator.
+    return (fs::path(ensureSaveDirectory()) / "autosave.json").string();
 }
 
 SaveResult SaveSystem::writeJsonToFile(const std::string& filePath,

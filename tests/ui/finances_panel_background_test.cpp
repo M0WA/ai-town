@@ -45,7 +45,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
 
         // Sim stubs.
         ON_CALL(sim_, getTaxRate(_)).WillByDefault(Return(0.0f));

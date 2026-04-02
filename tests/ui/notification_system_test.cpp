@@ -196,7 +196,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
@@ -591,9 +591,9 @@ TEST_F(NotificationManagerTest, HasCriticalToastVisible_FalseWhenModalActive) {
 // --- Notification polling integration: ForcedLoanIssued fires showForcedLoanDialog ---
 TEST_F(UIManagerDeficitIntegrationTest, NotificationPolling_ForcedLoan) {
     SimulationNotification notif;
-    notif.type = NotificationType::ForcedLoanIssued;
-    notif.amount = 50000.0;
-    notif.repaymentTicks = 12;
+    notif.type               = NotificationType::ForcedLoanIssued;
+    notif.loanPrincipal      = 50000;
+    notif.loanRepaymentTicks = 12;
 
     ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(
         [&notif](SimulationNotification& out) {
@@ -613,8 +613,8 @@ TEST_F(UIManagerDeficitIntegrationTest, NotificationPolling_ForcedLoan) {
 // --- Notification polling integration: BondIssued posts normal toast ---
 TEST_F(UIManagerDeficitIntegrationTest, NotificationPolling_BondIssued) {
     SimulationNotification notif;
-    notif.type = NotificationType::BondIssued;
-    notif.amount = 10000.0;
+    notif.type          = NotificationType::BondIssued;
+    notif.loanPrincipal = 10000;
 
     ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(
         [&notif](SimulationNotification& out) {
@@ -953,9 +953,9 @@ TEST_F(UIManagerDeficitIntegrationTest, Coverage_Update_ForcedLoanNotification_S
 
     // First poll returns ForcedLoanIssued, subsequent return false.
     SimulationNotification notif{};
-    notif.type           = NotificationType::ForcedLoanIssued;
-    notif.amount         = 50000;
-    notif.repaymentTicks = 12;
+    notif.type               = NotificationType::ForcedLoanIssued;
+    notif.loanPrincipal      = 50000;
+    notif.loanRepaymentTicks = 12;
     EXPECT_CALL(sim_, pollPendingNotification(_))
         .WillOnce(DoAll(SetArgReferee<0>(notif), Return(true)))
         .WillRepeatedly(Return(false));

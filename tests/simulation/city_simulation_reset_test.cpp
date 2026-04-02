@@ -100,7 +100,7 @@ TEST_F(ResetTest, CitySimulation_Reset_ClearsZonedTilesAndPopulation)
     // Confirm zone is present before reset.
     ASSERT_TRUE(sim_->queryTile(1, 0).isZoned);
 
-    sim_->reset(500000);
+    sim_->reset(SimulationConstants::starting_funds_normal);
 
     EXPECT_EQ(sim_->getTotalPopulation(), 0)
         << "reset() must clear all population";
@@ -119,7 +119,7 @@ TEST_F(ResetTest, CitySimulation_Reset_SpeedRestoredToDefault)
     sim_->setPaused(true);
     sim_->setSpeed(SpeedMultiplier::x10);
 
-    sim_->reset(500000);
+    sim_->reset(SimulationConstants::starting_funds_normal);
 
     EXPECT_EQ(sim_->getSpeedMultiplier(), kDefaultSimSpeed)
         << "reset() must restore speed to kDefaultSimSpeed (x3)";
@@ -140,7 +140,7 @@ TEST_F(ResetTest, CitySimulation_Reset_BondUsesResetByDifficulty)
         &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Hard);
     hard_sim->setSpeed(SpeedMultiplier::x1);
 
-    hard_sim->reset(200000);
+    hard_sim->reset(SimulationConstants::starting_funds_hard);
 
     EXPECT_EQ(hard_sim->getOutstandingBondUses(),
               SimulationConstants::bond_max_uses_hard)
@@ -160,7 +160,7 @@ TEST_F(ResetTest, CitySimulation_Reset_EasyDifficultyBondUses)
         &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Easy);
     easy_sim->setSpeed(SpeedMultiplier::x1);
 
-    easy_sim->reset(1000000);
+    easy_sim->reset(SimulationConstants::starting_funds_easy);
 
     EXPECT_EQ(easy_sim->getOutstandingBondUses(),
               SimulationConstants::bond_max_uses_easy)
@@ -196,7 +196,7 @@ TEST_F(ResetTest, CitySimulation_Reset_ReleasesVehicleAudioSources)
     // Vehicles from placeRoad() have idleIdx=-1, moveIdx=-1.
     EXPECT_CALL(audio_, releaseVehicleEnginePair(-1, -1)).Times(AtLeast(1));
 
-    sim_->reset(500000);
+    sim_->reset(SimulationConstants::starting_funds_normal);
 
     EXPECT_TRUE(sim_->getAgentPositions().empty())
         << "reset() must clear all traffic vehicles";
@@ -213,7 +213,7 @@ TEST_F(ResetTest, CitySimulation_Reset_ClearsServiceBuildings)
     sim_->placeServiceBuilding(5, 5, ServiceBuildingType::FireStation);
     drainNotifications();
 
-    sim_->reset(500000);
+    sim_->reset(SimulationConstants::starting_funds_normal);
 
     // After reset, no service buildings and no zoned tiles exist.
     // getServiceCoverage() iterates zoned tiles, so coverage must be empty.
@@ -325,18 +325,17 @@ TEST_F(ResetTest, CitySimulation_GetMapTilesXZ_ReturnsSetDimensions)
 // ---------------------------------------------------------------------------
 // TEST S-1: SimulationConstants_StartingFundsForDifficulty_AllVariants
 //
-// startingFundsForDifficulty() maps difficulty int (0=Easy, 1=Normal, 2=Hard)
-// to the expected starting fund constants.
+// startingFundsForDifficulty() maps Difficulty enum to expected starting fund constants.
 // ---------------------------------------------------------------------------
 TEST(SimulationConstantsTest, StartingFundsForDifficulty_AllVariants)
 {
-    EXPECT_EQ(SimulationConstants::startingFundsForDifficulty(0),
+    EXPECT_EQ(SimulationConstants::startingFundsForDifficulty(Difficulty::Easy),
               SimulationConstants::starting_funds_easy)
-        << "Easy (0) must map to starting_funds_easy";
-    EXPECT_EQ(SimulationConstants::startingFundsForDifficulty(1),
+        << "Easy must map to starting_funds_easy";
+    EXPECT_EQ(SimulationConstants::startingFundsForDifficulty(Difficulty::Normal),
               SimulationConstants::starting_funds_normal)
-        << "Normal (1) must map to starting_funds_normal";
-    EXPECT_EQ(SimulationConstants::startingFundsForDifficulty(2),
+        << "Normal must map to starting_funds_normal";
+    EXPECT_EQ(SimulationConstants::startingFundsForDifficulty(Difficulty::Hard),
               SimulationConstants::starting_funds_hard)
-        << "Hard (2) must map to starting_funds_hard";
+        << "Hard must map to starting_funds_hard";
 }

@@ -95,7 +95,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
@@ -171,7 +171,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{100, 100, 200, 50}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{100, 100, 200, 50}));
         ON_CALL(sim_, getTaxRate(_)).WillByDefault(Return(0.05f));
 
         modal_ = std::make_unique<ModalDialog>(&backend_, &sim_);
@@ -204,7 +204,7 @@ TEST_F(ModalDialogDirectTest, RestoreDefaultsConfirm_Enter_FocusZero_Accepts) {
     modal_->onEvent(keyDown(13));  // Enter on "Yes"
 
     EXPECT_FALSE(modal_->isActive());
-    EXPECT_EQ(modal_->getLastResult(), ModalDialog::DialogResult::Accept);
+    EXPECT_EQ(modal_->peekResult(), ModalDialog::DialogResult::Accept);
 }
 
 TEST_F(ModalDialogDirectTest, RestoreDefaultsConfirm_Enter_FocusOne_Cancels) {
@@ -213,7 +213,7 @@ TEST_F(ModalDialogDirectTest, RestoreDefaultsConfirm_Enter_FocusOne_Cancels) {
     modal_->onEvent(keyDown(13));  // Enter on "Cancel"
 
     EXPECT_FALSE(modal_->isActive());
-    EXPECT_EQ(modal_->getLastResult(), ModalDialog::DialogResult::Cancel);
+    EXPECT_EQ(modal_->peekResult(), ModalDialog::DialogResult::Cancel);
 }
 
 TEST_F(ModalDialogDirectTest, RestoreDefaultsConfirm_Escape_Cancels) {
@@ -221,7 +221,7 @@ TEST_F(ModalDialogDirectTest, RestoreDefaultsConfirm_Escape_Cancels) {
     modal_->onEvent(keyDown(27));  // Escape
 
     EXPECT_FALSE(modal_->isActive());
-    EXPECT_EQ(modal_->getLastResult(), ModalDialog::DialogResult::Cancel);
+    EXPECT_EQ(modal_->peekResult(), ModalDialog::DialogResult::Cancel);
 }
 
 TEST_F(ModalDialogDirectTest, RestoreDefaultsConfirm_Draw_NocrashWhenActive) {
@@ -236,7 +236,7 @@ TEST_F(ModalDialogDirectTest, UnsavedQuit_Enter_FocusOne_Decline) {
     modal_->onEvent(keyDown(13));  // Enter
 
     EXPECT_FALSE(modal_->isActive());
-    EXPECT_EQ(modal_->getLastResult(), ModalDialog::DialogResult::Decline);
+    EXPECT_EQ(modal_->peekResult(), ModalDialog::DialogResult::Decline);
 }
 
 TEST_F(ModalDialogDirectTest, UnsavedQuit_Enter_FocusTwo_Cancel) {
@@ -247,7 +247,7 @@ TEST_F(ModalDialogDirectTest, UnsavedQuit_Enter_FocusTwo_Cancel) {
     modal_->onEvent(keyDown(13));
 
     EXPECT_FALSE(modal_->isActive());
-    EXPECT_EQ(modal_->getLastResult(), ModalDialog::DialogResult::Cancel);
+    EXPECT_EQ(modal_->peekResult(), ModalDialog::DialogResult::Cancel);
 }
 
 TEST_F(ModalDialogDirectTest, GameOver_Escape_ConsumedNoAction) {
@@ -273,7 +273,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
 
         modal_ = std::make_unique<ModalDialog>(&backend_, &sim_);
         settings_ = std::make_unique<SettingsPanel>(&backend_, &audio_, &clock_, modal_.get());
@@ -435,7 +435,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 200, 50}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 200, 50}));
 
         panel_ = std::make_unique<MainMenuPanel>(&backend_);
         panel_->show();
@@ -569,7 +569,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 200, 32}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 200, 32}));
 
         panel_ = std::make_unique<KeyBindingsPanel>(&backend_, nullptr);
         KeyBindings defaults{};
@@ -597,7 +597,7 @@ protected:
     // Enter capture mode for row 0 (all elements at same rect → first chip hit).
     void enterCapture() {
         panel_->show();
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 200, 32}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 200, 32}));
         panel_->onEvent(chipClick(50, 10));
     }
 
@@ -753,7 +753,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
@@ -951,7 +951,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));

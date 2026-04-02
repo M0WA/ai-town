@@ -10,8 +10,8 @@ UIScaler::UIScaler(int virtualW, int virtualH, int viewportW, int viewportH, int
     , m_offsetY(offsetY)
 {}
 
-Rect UIScaler::getViewportRect() const {
-    return Rect{m_offsetX, m_offsetY, m_viewportW, m_viewportH};
+UIRect UIScaler::getViewportRect() const {
+    return UIRect{m_offsetX, m_offsetY, m_viewportW, m_viewportH};
 }
 
 UIScaler::VirtualPoint UIScaler::unproject(int physicalX, int physicalY) const {

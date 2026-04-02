@@ -87,11 +87,12 @@ public:
     // Called from main.cpp after renderer construction (Phase 10c wiring order).
     void setRenderSystem(RenderSystem* rs);
 
+    // TEST API — production code must NOT call these methods.
+
     // terrainMaterialTypeForTest() — test-only accessor for the terrain shader material type.
     // Returns -1 when initTerrainShader() has not run or shader compile failed.
-    // Production code must NOT call this method.
-    int  terrainMaterialTypeForTest() const { return m_terrainMaterialType; }
-    void setTerrainMaterialTypeForTest(int t) { m_terrainMaterialType = t; }
+    [[deprecated("for tests only")]] int  terrainMaterialTypeForTest() const { return m_terrainMaterialType; }
+    [[deprecated("for tests only")]] void setTerrainMaterialTypeForTest(int t) { m_terrainMaterialType = t; }
 
     // IRenderer interface — main-thread-only
     void          beginFrame() override;  // driver->beginScene(true, true, SColor(255,0,0,0))
@@ -137,7 +138,7 @@ public:
     void      setZoneHoverColour(unsigned int argb) override;
     void      clearDemolishHighlight() override;
     void      setZoneOverlay(int mapTilesX, int mapTilesZ,
-                             const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) override;
+                             const std::unordered_map<int64_t, uint32_t>& sparseOverlay) override;
     ScreenRect getTileScreenBounds(int tileX, int tileZ) const override;
     vec3       getListenerPosition() const override;
     void       setTilePlacementPreview(const std::vector<std::pair<int,int>>& freeTiles,
@@ -201,11 +202,12 @@ public:
     // Called from main.cpp frame loop before beginFrame().
     void update(float dt);
 
+    // TEST API — production code must NOT call this method.
+
     // cloudNodeForTest() — test-only accessor for the cloud plane scene node.
     // Returns nullptr when constructed with EDT_NULL (headless guard triggered).
     // Intended for use by cloud_plane_test.cpp in opengl_tests.
-    // Production code must NOT call this method.
-    irr::scene::IMeshSceneNode* cloudNodeForTest() const { return m_cloudNode; }
+    [[deprecated("for tests only")]] irr::scene::IMeshSceneNode* cloudNodeForTest() const { return m_cloudNode; }
 
 private:
     irr::IrrlichtDevice*        m_device;
@@ -360,13 +362,14 @@ private:
 
     // --- Phase 11d: intersection signal billboard registry (Deliverable 3b) ---
     //
-    // Key: tileX*10000 + tileZ — compact int key for intersection tiles.
+    // Key: tileKey(tileX, tileZ) — stable uint64_t key for intersection tiles,
+    //   matching all other tile-keyed registries (A-11 clean-up).
     // Value: non-owning IMeshSceneNode* (Irrlicht scene graph owns the node).
     //
     // One small billboard quad per intersection; colour updated in-place by
     // setIntersectionSignalState(). Nodes persist for the session and are never
     // removed (intersection tiles are rarely demolished; V1 does not garbage-collect them).
-    std::unordered_map<int, irr::scene::IMeshSceneNode*> m_signalNodes;
+    std::unordered_map<uint64_t, irr::scene::IMeshSceneNode*> m_signalNodes;
 
     // --- Phase 11d: service coverage overlay node (Deliverable 4a) ---
     //
@@ -494,12 +497,83 @@ private:
     void destroyTileNode(std::unordered_map<uint64_t, LODNode*>& registry,
                          int tileX, int tileZ);
 
+    // evictLODNodeRegistry — evict all entries in a LODNode registry.
+    // Runs the full eviction sequence on each entry:
+    //   clear material texture slots → driver->setMaterial(SMaterial{}) → node->remove()
+    //   → delete LODNode wrapper
+    // Then clears the registry.
+    // Used by clearCity() and other mass-eviction paths.
+    //
+    // NOTE: NOT used in the IrrlichtRenderer destructor. The destructor omits node->remove()
+    // because device->drop() in main.cpp tears down the entire scene graph AFTER the
+    // IrrlichtRenderer destructor runs. Calling node->remove() during destruction would
+    // be a redundant (and potentially unsafe) operation on an already-in-flight teardown.
+    //
+    // Template body is defined in IrrlichtRenderer.cpp (not here) to avoid calling
+    // lodNode->getNode() on the forward-declared (incomplete) LODNode type. Explicit
+    // instantiations for uint64_t and uint32_t key types are provided there.
+    template<typename KeyT>
+    void evictLODNodeRegistry(std::unordered_map<KeyT, LODNode*>& registry);
+
     // Helper: ensure m_buildingAssetLoader is created (idempotent).
     // Returns false and logs a warning if m_smgr is null (test/headless context).
     bool ensureAssetLoader();
 
+    // flattenFootprint — flatten terrain under a building footprint (A-4).
+    // Averages all (footprintN+1)×(footprintN+1) corner heights, writes the average
+    // back to every corner via m_terrain->setTileHeight(), then calls flushTerrainRebuilds().
+    // After that rebuilds all road tiles within +(footprintN+2) of the origin that already
+    // exist in m_roadNodes (mesh-only rebuild — no terrain reflatten).
+    // Returns the averaged target height (used by caller to position the building node).
+    // Returns 0.0f if m_terrain is null.
+    float flattenFootprint(int tileX, int tileZ, int footprintN);
+
+    // applyBuildingMaterialDefaults — apply standard material settings to every
+    // material slot on a building scene node (A-4).
+    // Sets Lighting=false, BackfaceCulling=false, PolygonOffsetDirection=EPO_FRONT,
+    // PolygonOffsetFactor=1.  Binds zoneTex to slot 0 only when the slot is empty.
+    // zoneTex may be null (no-op for the fallback bind in that case).
+    void applyBuildingMaterialDefaults(irr::scene::ISceneNode* node,
+                                       irr::video::ITexture* zoneTex);
+
+    // openOverlayBuffer / closeOverlayBuffer — manage SMeshBuffer lifecycle for
+    // the zone overlay and coverage overlay mesh builds (A-5).
+    // openOverlayBuffer:  allocates a new SMeshBuffer with overlay material defaults.
+    //   cur is set to the new buffer; quadsInCur is reset to 0.
+    // closeOverlayBuffer: calls recalculateBoundingBox(), adds cur to mesh, drops cur.
+    //   cur is set to nullptr.
+    // Both helpers are no-ops when mesh is null; openOverlayBuffer no-ops when cur is
+    // already non-null.
+    void openOverlayBuffer(irr::scene::SMesh* mesh,
+                           irr::scene::SMeshBuffer*& cur,
+                           irr::u32& quadsInCur);
+    void closeOverlayBuffer(irr::scene::SMesh* mesh,
+                            irr::scene::SMeshBuffer*& cur);
+
+    // Logging helpers — eliminate the 15+ copies of the two-branch null-guard pattern.
+    // If m_logger is non-null, forwards to ILogger; otherwise falls back to fprintf(stderr).
+    void logWarning(const std::string& msg);
+    void logError(const std::string& msg);
+
     // isIntersectionTile — returns true if the tile at (tileX, tileZ) has road
     // nodes in 3 or more cardinal directions (used by moveVehicleAgent for lane offset).
     bool isIntersectionTile(int tileX, int tileZ) const;
+
+    // placeRoadMesh helpers (A-33) — extracted from placeRoadMesh() to reduce its length.
+    // flattenRoadTerrain: flatten the main tile terrain and flush terrain rebuilds.
+    //   Only called when flattenTerrain=true. Writes heights via m_terrain->setTileHeight()
+    //   then calls flushTerrainRebuilds() once for the main tile only.
+    void flattenRoadTerrain(int tileX, int tileZ);
+    // rebuildRoadNeighbors: rebuild road tile meshes in the ±2 affected area.
+    //   Called when rebuildNeighbors=true, after the main tile node is created.
+    //   Calls placeRoadMesh with flattenTerrain=false, rebuildNeighbors=false for each.
+    void rebuildRoadNeighbors(int tileX, int tileZ);
+    // buildRoadSceneNode: create the scene node and LODNode wrapper for one road tile.
+    //   Returns the new LODNode* (caller registers in m_roadNodes), or nullptr on failure.
+    //   h00/h10/h01/h11 are the four corner terrain heights for the tile.
+    //   isEW indicates East-West orientation (used by buildTileRoadMesh).
+    LODNode* buildRoadSceneNode(int tileX, int tileZ,
+                                float h00, float h10, float h01, float h11,
+                                bool isEW);
 
 };

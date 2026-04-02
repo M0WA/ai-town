@@ -2,7 +2,7 @@
 //
 // Integration tests for:
 //   - CameraController (null-camera seam, pan/zoom/rotate, edge-scroll, focus)
-//   - KeyBindings (defaults, load from file, writeToFile, isReservedKey, copyMutableFrom)
+//   - KeyBindings (defaults, load from file, writeToFile, isReservedKey, assignment)
 //   - InspectorPanel::computePanelPosition (pure static function — three-step cascade)
 //
 // CameraController uses the null-camera test seam (camera==nullptr) per architecture.
@@ -513,25 +513,28 @@ TEST_F(KeyBindingsTest, IsReservedKey_Empty_False) {
 }
 
 // ---------------------------------------------------------------------------
-// copyMutableFrom
+// Assignment (replaces copyMutableFrom — D-2 / UI-4)
 // ---------------------------------------------------------------------------
-TEST_F(KeyBindingsTest, CopyMutableFrom_CopiesRebindableFields) {
+TEST_F(KeyBindingsTest, Assignment_CopiesRebindableFields) {
+    // D-2: copyMutableFrom() removed; operator= now works correctly because
+    // `undo` and `save` are no longer const.
     KeyBindings src;
     src.toolZone = "F1";
     src.camPanUp = "W";
 
     KeyBindings dst;
-    dst.copyMutableFrom(src);
+    dst = src;
 
     EXPECT_EQ(dst.toolZone, "F1");
     EXPECT_EQ(dst.camPanUp, "W");
 }
 
-TEST_F(KeyBindingsTest, CopyMutableFrom_DoesNotChangeConstFields) {
+TEST_F(KeyBindingsTest, Assignment_PreservesNonRebindableDefaults) {
+    // After assignment, undo/save carry over the source values (which are the
+    // canonical defaults — the load() runtime guard prevents them from changing).
     KeyBindings src;
     KeyBindings dst;
-    dst.copyMutableFrom(src);
-    // Const fields remain unchanged
+    dst = src;
     EXPECT_EQ(dst.undo, "Ctrl+Z");
     EXPECT_EQ(dst.save, "Ctrl+S");
 }

@@ -65,7 +65,8 @@
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "ENABLE_COVERAGE": "OFF"
+        "ENABLE_COVERAGE": "OFF",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
       }
     }
   ]

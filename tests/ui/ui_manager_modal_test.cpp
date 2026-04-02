@@ -13,9 +13,9 @@
 // UIManager destructor runs first — but the explicit reset() in TearDown() makes
 // the contract visible and document-able rather than relying on implicit ordering.
 //
-// Full modal assertions (speed-selector, undo-button disable, scrim blocking) are
-// implemented in Phase 6 when the modal panels have real logic. These stubs
-// reserve the test names so the Phase 6 engineer has clear landing spots.
+// Stub tests below reserve the test names with SUCCEED() bodies. Full modal
+// assertions (speed-selector, undo-button disable, scrim blocking) are deferred
+// pending deeper UI simulation integration.
 
 #include "src/ui/UIManager.h"
 #include "src/ui/ui_types.h"
@@ -35,10 +35,7 @@ using ::testing::Return;
 class UIManagerModalTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // IClock* is nullptr: Phase 3 stubs do not dereference the clock pointer
-        // from within UIManager::draw() or any panel constructor invoked during
-        // UIManager construction. Safe for this fixture.
-        ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, nullptr);
+        ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
     }
 
     void TearDown() override {
@@ -49,43 +46,76 @@ protected:
     }
 
     // MANDATORY member declaration order (C++ reverse-destruction):
-    //   Mocks declared first -> destroyed LAST (they outlive UIManager).
-    //   ui_ declared last   -> destroyed FIRST (UIManager destructor runs before mocks).
+    //   Mocks/clock declared first -> destroyed LAST (they outlive UIManager).
+    //   ui_ declared last          -> destroyed FIRST (UIManager destructor runs before mocks).
     NiceMock<MockUIBackend>         backend_;   // 1st declared -> destroyed last
     NiceMock<MockAudioSystem>       audio_;     // 2nd
     NiceMock<MockCitySimulation>    sim_;       // 3rd
-    std::unique_ptr<UIManager>      ui_;        // 4th declared -> destroyed first
+    ManualClock                     clock_;     // 4th
+    std::unique_ptr<UIManager>      ui_;        // 5th declared -> destroyed first
 };
 
 // Smoke test: the fixture constructs and destructs cleanly.
 // Passing this test confirms that UIManager, all 9 owned panels, and all 3 mocks
-// are wired correctly for the Phase 3 test suite.
+// are wired correctly.
 TEST_F(UIManagerModalTest, FixtureConstructsAndDestructsCleanly) {
     SUCCEED();
 }
 
-// Phase 3 stub: hasActiveModal() returns false in the Phase 3 shell.
-// Full implementation and real assertion arrive in Phase 6 when ModalDialog
-// has live show()/hide() logic wired through UIManager.
-TEST_F(UIManagerModalTest, HasActiveModal_ReturnsFalse_InPhase3Stub) {
+// Verifies hasActiveModal() returns false when no modal has been shown.
+TEST_F(UIManagerModalTest, HasActiveModal_ReturnsFalse_WhenNoModalShown) {
     EXPECT_FALSE(ui_->hasActiveModal());
 }
 
-// Compile-only stubs — Phase 6 replaces SUCCEED() with real assertions.
+// Stub tests below use SUCCEED() as placeholder bodies.
 // Naming convention: <Trigger>_<Action>_<ExpectedOutcome>.
 
 // Verifies: pressing Escape while settings panel is open (entered from pause menu)
 // closes the settings panel and returns focus to the pause menu.
-// Phase 6: assert m_settings->isVisible() == false && m_pauseMenu->isVisible() == true.
+// The event is consumed (onEvent returns true) while settings is visible,
+// and no modal is active after the close.
 TEST_F(UIManagerModalTest, EscapeClosesSettingsAndReturnsToPauseMenu) {
-    SUCCEED();
+    // Enter Gameplay then Paused so showSettings() opens from the pause menu path.
+    ui_->transitionToGameplay(GameMode::Sandbox);
+    ui_->transitionToPaused();
+    ui_->showSettings();
+
+    // Escape with settings visible: SettingsPanel::onEvent consumes the key,
+    // hides itself, and UIManager re-shows the pause menu.
+    InputEvent ev{};
+    ev.type    = InputEvent::Type::KeyDown;
+    ev.keyCode = 27;  // Escape
+    EXPECT_TRUE(ui_->onEvent(ev))
+        << "Escape with settings panel open must be consumed";
+
+    // After close: still in Paused state (pause menu visible), no modal active.
+    EXPECT_TRUE(ui_->isGameplayOrPaused())
+        << "After settings close from pause menu, UI must remain in Gameplay/Paused state";
+    EXPECT_FALSE(ui_->hasActiveModal())
+        << "No modal dialog should be active after closing settings";
 }
 
 // Verifies: pressing Escape while settings panel is open (entered from main menu
 // pre-game flow) closes the settings panel and returns to the main menu.
-// Phase 6: assert m_settings->isVisible() == false && m_mainMenu->isVisible() == true.
+// The event is consumed (onEvent returns true) while settings is visible,
+// and the UI is no longer in gameplay state afterward.
 TEST_F(UIManagerModalTest, EscapeClosesSettingsAndReturnsToMainMenu) {
-    SUCCEED();
+    // Settings opened from main menu (default state — no transitionToGameplay call).
+    ui_->showSettings();
+
+    // Escape with settings visible: SettingsPanel::onEvent consumes the key
+    // and hides itself; UIManager re-shows the main menu.
+    InputEvent ev{};
+    ev.type    = InputEvent::Type::KeyDown;
+    ev.keyCode = 27;  // Escape
+    EXPECT_TRUE(ui_->onEvent(ev))
+        << "Escape with settings panel open must be consumed";
+
+    // After close: back in MainMenu state (not gameplay/paused), no modal active.
+    EXPECT_FALSE(ui_->isGameplayOrPaused())
+        << "After settings close from main menu, UI must not be in Gameplay/Paused state";
+    EXPECT_FALSE(ui_->hasActiveModal())
+        << "No modal dialog should be active after closing settings";
 }
 
 // Verifies: showForcedLoanDialog() transitions the modal into an active state
@@ -129,15 +159,14 @@ TEST_F(UIManagerModalTest, ScrimBlocksHUDClickWhenModalActive) {
 }
 
 // Verifies: closeModal() transitions the modal back to inactive.
-// Phase 6: show a modal, call closeModal(), assert hasActiveModal() == false.
+// TODO: show a modal, call closeModal(), assert hasActiveModal() == false.
 TEST_F(UIManagerModalTest, CloseModal_ClearsModalActive) {
     SUCCEED();
 }
 
-// Phase 6 carve-out stub (Phase 3 exit criterion per phase-3.md §UX-4).
 // Verifies: a dismiss click on InspectorPanel does NOT block events targeted
 // at the Minimap area — the Minimap bounds check at Priority 3 must pass through.
-// Phase 6: inject a click InputEvent at a Minimap-area coordinate, assert
+// TODO: inject a click InputEvent at a Minimap-area coordinate, assert
 // onEvent() returns false (not consumed by InspectorPanel) and Minimap receives it.
 TEST(InspectorPanel, InspectorPanel_DismissClick_MinimapAreaPassesThrough) {
     SUCCEED();
@@ -146,13 +175,13 @@ TEST(InspectorPanel, InspectorPanel_DismissClick_MinimapAreaPassesThrough) {
 // ============================================================================
 // UIManagerTransitionTest — covers state-transition methods and onEvent routing.
 //
-// These tests exercise the otherwise-uncovered Phase 3 stub bodies for:
+// These tests exercise the method bodies for:
 //   transitionToGameplay(), transitionToPaused(), transitionToGameplay_fromPaused(),
 //   transitionToGameOver(), showForcedLoanDialog(), showGameOverModal(),
 //   closeModal(), showSettings(), setUnsavedChanges(), update().
 //
-// Mock policy: NiceMock — transition stubs call no mock methods directly in
-// Phase 3; NiceMock avoids spurious failures for incidental backend calls.
+// Mock policy: NiceMock — transition tests may trigger incidental backend calls;
+// NiceMock avoids spurious failures.
 // TearDown: explicit ui_.reset() before mocks are destroyed.
 // ============================================================================
 class UIManagerTransitionTest : public ::testing::Test {
@@ -175,9 +204,8 @@ protected:
 
 // ---------------------------------------------------------------------------
 // transitionToGameplay — sets gameMode and clears unsaved-changes flag.
-// In Phase 3 the method body does: m_gameMode = mode; m_hasUnsavedChanges = false.
-// We verify indirectly: calling it with Sandbox and then transitionToGameOver()
-// (which has a Sandbox guard) must be a no-op for GameOver (guard fires).
+// Verify indirectly: calling it with Sandbox and then transitionToGameOver()
+// (which has a Sandbox guard) must be a no-op (guard fires).
 // ---------------------------------------------------------------------------
 TEST_F(UIManagerTransitionTest, TransitionToGameplay_Sandbox_ThenGameOver_IsNoop) {
     // transitionToGameplay sets m_gameMode = Sandbox and clears unsaved flag.
@@ -199,8 +227,8 @@ TEST_F(UIManagerTransitionTest, TransitionToGameplay_Scenario_ThenGameOver_Shows
 }
 
 // ---------------------------------------------------------------------------
-// transitionToPaused / transitionToGameplay_fromPaused — Phase 3 stubs.
-// Both are no-ops in Phase 3; we just verify they can be called without crash.
+// transitionToPaused / transitionToGameplay_fromPaused — round-trip.
+// Verifies both calls complete without crash and leave UI in a consistent state.
 // ---------------------------------------------------------------------------
 TEST_F(UIManagerTransitionTest, TransitionToPaused_AndFromPaused_NoCrash) {
     ui_->transitionToGameplay(GameMode::Sandbox);
@@ -209,7 +237,7 @@ TEST_F(UIManagerTransitionTest, TransitionToPaused_AndFromPaused_NoCrash) {
 }
 
 // ---------------------------------------------------------------------------
-// showForcedLoanDialog — Phase 3 stub. Verifies call completes without crash.
+// showForcedLoanDialog — verifies call completes without crash.
 // ---------------------------------------------------------------------------
 TEST_F(UIManagerTransitionTest, ShowForcedLoanDialog_NoCrash) {
     LoanTerms terms;
@@ -220,7 +248,7 @@ TEST_F(UIManagerTransitionTest, ShowForcedLoanDialog_NoCrash) {
 }
 
 // ---------------------------------------------------------------------------
-// showGameOverModal — Phase 3 stub. Verifies call completes without crash.
+// showGameOverModal — verifies call completes without crash.
 // ---------------------------------------------------------------------------
 TEST_F(UIManagerTransitionTest, ShowGameOverModal_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(ui_->showGameOverModal(/*totalDebt=*/100000LL,
@@ -232,20 +260,19 @@ TEST_F(UIManagerTransitionTest, ShowGameOverModal_NoCrash) {
 // ---------------------------------------------------------------------------
 TEST_F(UIManagerTransitionTest, CloseModal_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(ui_->closeModal());
-    // After closeModal(), hasActiveModal() must still be false
-    // (ModalDialog is not active in Phase 3).
+    // After closeModal() with no prior modal shown, hasActiveModal() must be false.
     EXPECT_FALSE(ui_->hasActiveModal());
 }
 
 // ---------------------------------------------------------------------------
-// showSettings — Phase 3 stub. Verifies call completes without crash.
+// showSettings — verifies call completes without crash.
 // ---------------------------------------------------------------------------
 TEST_F(UIManagerTransitionTest, ShowSettings_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(ui_->showSettings());
 }
 
 // ---------------------------------------------------------------------------
-// setUnsavedChanges — Phase 3 stub. Called with true then false; no crash.
+// setUnsavedChanges — called with true then false; verifies no crash.
 // ---------------------------------------------------------------------------
 TEST_F(UIManagerTransitionTest, SetUnsavedChanges_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(ui_->setUnsavedChanges(true));
@@ -311,8 +338,8 @@ TEST_F(UIManagerTransitionTest, OnEvent_MouseMove_NoModal_NoCriticalToast_Return
 }
 
 // ============================================================================
-// NotificationManagerStandaloneTest — covers NotificationManager's Phase 3
-// smoke-test bodies (no-crash, basic state checks).
+// NotificationManagerStandaloneTest — no-crash smoke tests and basic state checks
+// for NotificationManager.
 //
 // Renamed from NotificationManagerTest (which was defined in both this file
 // and notification_system_test.cpp) to prevent an ODR violation: when two
@@ -347,57 +374,56 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
-// postNormal — Phase 3 stub; must not crash.
+// postNormal — verifies call completes without crash.
 // ---------------------------------------------------------------------------
 TEST_F(NotificationManagerStandaloneTest, PostNormal_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->postNormal("Title", "Body text"));
 }
 
 // ---------------------------------------------------------------------------
-// postCritical — Phase 3 stub; must not crash.
+// postCritical — verifies call completes without crash.
 // ---------------------------------------------------------------------------
 TEST_F(NotificationManagerStandaloneTest, PostCritical_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->postCritical("Critical Title", "Critical body"));
 }
 
 // ---------------------------------------------------------------------------
-// hasCriticalToastVisible — Phase 3 stub always returns false.
+// hasCriticalToastVisible — returns false when no critical toast has been posted.
 // ---------------------------------------------------------------------------
-TEST_F(NotificationManagerStandaloneTest, HasCriticalToastVisible_ReturnsFalse_InPhase3) {
+TEST_F(NotificationManagerStandaloneTest, HasCriticalToastVisible_ReturnsFalse_WhenNonePosted) {
     EXPECT_FALSE(notif_->hasCriticalToastVisible())
-        << "Phase 3 stub: hasCriticalToastVisible() must return false";
+        << "hasCriticalToastVisible() must return false before any postCritical call";
 }
 
 // ---------------------------------------------------------------------------
-// hasCriticalToastVisible — true after postCritical (Phase 8 real implementation).
+// hasCriticalToastVisible — true after postCritical.
 // ---------------------------------------------------------------------------
 TEST_F(NotificationManagerStandaloneTest, HasCriticalToastVisible_TrueAfterPostCritical) {
     notif_->postCritical("Alert", "Something bad happened");
     EXPECT_TRUE(notif_->hasCriticalToastVisible())
-        << "Phase 8: hasCriticalToastVisible() must return true after postCritical";
+        << "hasCriticalToastVisible() must return true after postCritical";
 }
 
 // ---------------------------------------------------------------------------
-// update — Phase 3 stub; must not crash.
+// update — verifies call completes without crash.
 // ---------------------------------------------------------------------------
 TEST_F(NotificationManagerStandaloneTest, Update_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->update());
 }
 
 // ---------------------------------------------------------------------------
-// onEvent — Phase 3 stub always returns false (event not consumed).
+// onEvent — returns false when no critical toast is blocking input.
 // ---------------------------------------------------------------------------
 TEST_F(NotificationManagerStandaloneTest, OnEvent_ReturnsFalse) {
     InputEvent ev{};
     ev.type = InputEvent::Type::MouseButtonDown;
     ev.button = 0;
     EXPECT_FALSE(notif_->onEvent(ev))
-        << "Phase 3 stub: onEvent() must return false (event not consumed)";
+        << "onEvent() must return false (event not consumed) when no critical toast is visible";
 }
 
 // ---------------------------------------------------------------------------
-// setModalActive — sets the m_modalActive flag; no crash.
-// Phase 3: the flag is private, but the method body sets it without dereferences.
+// setModalActive — sets the m_modalActive flag; verifies no crash.
 // ---------------------------------------------------------------------------
 TEST_F(NotificationManagerStandaloneTest, SetModalActive_NoCrash) {
     EXPECT_NO_FATAL_FAILURE(notif_->setModalActive(true));
@@ -405,7 +431,7 @@ TEST_F(NotificationManagerStandaloneTest, SetModalActive_NoCrash) {
 }
 
 // ---------------------------------------------------------------------------
-// dismissCriticalToast — Phase 3 stub; must not crash.
+// dismissCriticalToast — must not crash.
 // ---------------------------------------------------------------------------
 TEST_F(NotificationManagerStandaloneTest, DismissCriticalToast_NoCrash) {
     constexpr UIElementHandle kSomeHandle = 0x0001u;
@@ -439,7 +465,7 @@ protected:
             [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
         ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
 
         panel_ = std::make_unique<MainMenuPanel>(&backend_);
     }
@@ -590,7 +616,7 @@ TEST_F(MainMenuPanelStandaloneTest, Escape_OnNewGame_ReturnsToMainMenu) {
 // Mouse click on "New Game" button transitions to NewGame screen.
 TEST_F(MainMenuPanelStandaloneTest, MouseClick_NewGame_TransitionsToNewGameScreen) {
     // Set all element rects to a point we will click.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{780, 320, 360, 48}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{780, 320, 360, 48}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -609,7 +635,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickEasyDifficulty) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{890, 300, 100, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{890, 300, 100, 32}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -636,7 +662,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickStartCity_ShowsLoading) {
     // Need different rects for different buttons. Use a counter approach.
     // First clicks will miss most buttons, but eventually "Start City" will be hit.
     // Simplify: set all rects large so every click is a hit on the first button.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{780, 480, 360, 48}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{780, 480, 360, 48}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -655,7 +681,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickBack_ReturnsToMainMenu) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{780, 530, 120, 36}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{780, 530, 120, 36}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -690,7 +716,7 @@ TEST_F(MainMenuPanelStandaloneTest, Loading_Escape_ReturnsToNewGame) {
 
     // Simulate going to Loading via clicking Start City.
     // We need all rects to match Start City position.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{780, 480, 360, 48}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{780, 480, 360, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -745,7 +771,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickStartCity_NavigatesToLoading) {
     panel_->onEvent(enter);
 
     // Set only m_ngBtnStartCity (handle 318) rect; others default to (0,0,0,0).
-    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 480, 360, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(UIRect{780, 480, 360, 48}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -767,7 +793,7 @@ TEST_F(MainMenuPanelStandaloneTest, Loading_EscapeToNewGame) {
     enter.keyCode = 13;
     panel_->onEvent(enter); // MainMenu -> NewGame
 
-    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 480, 360, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(UIRect{780, 480, 360, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -791,7 +817,7 @@ TEST_F(MainMenuPanelStandaloneTest, Loading_CancelButtonClick) {
     enter.keyCode = 13;
     panel_->onEvent(enter); // MainMenu -> NewGame
 
-    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{780, 480, 360, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(UIRect{780, 480, 360, 48}));
     InputEvent startClick;
     startClick.type = InputEvent::Type::MouseButtonDown;
     startClick.button = 0;
@@ -800,8 +826,8 @@ TEST_F(MainMenuPanelStandaloneTest, Loading_CancelButtonClick) {
     panel_->onEvent(startClick); // NewGame -> Loading
 
     // Reset rects, then set only m_loadingCancelBtn (handle 323).
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(323)).WillByDefault(Return(Rect{900, 570, 120, 36}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(323)).WillByDefault(Return(UIRect{900, 570, 120, 36}));
 
     InputEvent cancelClick;
     cancelClick.type = InputEvent::Type::MouseButtonDown;
@@ -814,8 +840,8 @@ TEST_F(MainMenuPanelStandaloneTest, Loading_CancelButtonClick) {
 
 // Click on Settings button on MainMenu screen.
 TEST_F(MainMenuPanelStandaloneTest, MainMenu_ClickSettings) {
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(304)).WillByDefault(Return(Rect{780, 260, 360, 48}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(304)).WillByDefault(Return(UIRect{780, 260, 360, 48}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -828,8 +854,8 @@ TEST_F(MainMenuPanelStandaloneTest, MainMenu_ClickSettings) {
 
 // Click on Quit button on MainMenu screen.
 TEST_F(MainMenuPanelStandaloneTest, MainMenu_ClickQuit) {
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(305)).WillByDefault(Return(Rect{780, 320, 360, 48}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(305)).WillByDefault(Return(UIRect{780, 320, 360, 48}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -847,8 +873,8 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickNormalDifficulty) {
     enter.keyCode = 13;
     panel_->onEvent(enter); // MainMenu -> NewGame
 
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(313)).WillByDefault(Return(Rect{1000, 300, 120, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(313)).WillByDefault(Return(UIRect{1000, 300, 120, 32}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -866,8 +892,8 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickHardDifficulty) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(314)).WillByDefault(Return(Rect{780, 340, 120, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(314)).WillByDefault(Return(UIRect{780, 340, 120, 32}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -885,8 +911,8 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickBack) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(319)).WillByDefault(Return(Rect{780, 530, 120, 36}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(319)).WillByDefault(Return(UIRect{780, 530, 120, 36}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -904,8 +930,8 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickRandomize) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{1060, 280, 100, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(UIRect{1060, 280, 100, 32}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -932,7 +958,7 @@ protected:
             [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
         ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
 
         panel_ = std::make_unique<PauseMenuPanel>(&backend_);
         settings_ = std::make_unique<SettingsPanel>(&backend_, nullptr, nullptr);
@@ -1123,7 +1149,7 @@ TEST_F(PauseMenuPanelStandaloneTest, ClickOnResumeButton_HidesPanel) {
 
     // Set the button rects to cover the click position.
     ON_CALL(backend_, getElementRect(_)).WillByDefault(
-        Return(Rect{830, 392, 260, 48}));
+        Return(UIRect{830, 392, 260, 48}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -1141,7 +1167,7 @@ TEST_F(PauseMenuPanelStandaloneTest, ClickInsidePanel_NotOnButton_Consumed) {
     panel_->show();
 
     // Button rects at 0,0,0,0 so no button is hit.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -1213,7 +1239,7 @@ TEST_F(MinimapStandaloneTest, ShowHide_NoCrash) {
 
 // getBounds returns 200x200 at bottom-right.
 TEST_F(MinimapStandaloneTest, GetBounds) {
-    Rect r = minimap_->getBounds();
+    UIRect r = minimap_->getBounds();
     EXPECT_EQ(r.w, 200);
     EXPECT_EQ(r.h, 200);
     EXPECT_EQ(r.x, 1720);
@@ -1317,7 +1343,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
@@ -1747,8 +1773,8 @@ TEST_F(MainMenuPanelStandaloneTest, ConsumeQuitRequest_FalseWhenNoQuit) {
 
 // Mouse click on Quit sets the quit flag.
 TEST_F(MainMenuPanelStandaloneTest, ClickQuit_SetsQuitFlag) {
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
-    ON_CALL(backend_, getElementRect(305)).WillByDefault(Return(Rect{780, 320, 360, 48}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
+    ON_CALL(backend_, getElementRect(305)).WillByDefault(Return(UIRect{780, 320, 360, 48}));
 
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
@@ -1829,7 +1855,7 @@ TEST_F(UIManagerEventRoutingTest, MainMenu_QuitPolling_SetsQuitRequested) {
         [](const std::string&, int, int, int, int) { return 1u; });
     ON_CALL(freshBackend, getVirtualWidth()).WillByDefault(Return(1920));
     ON_CALL(freshBackend, getVirtualHeight()).WillByDefault(Return(1080));
-    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
     ON_CALL(freshBackend, isElementEnabled(_)).WillByDefault(Return(true));
 
     UIManager freshUI(&freshBackend, &freshAudio, &freshSim, &freshClock);
@@ -1955,7 +1981,7 @@ TEST_F(UIManagerEventRoutingTest, MainMenu_SettingsVisible_RoutesToSettings) {
         [](const std::string&, int, int, int, int) { return 1u; });
     ON_CALL(freshBackend, getVirtualWidth()).WillByDefault(Return(1920));
     ON_CALL(freshBackend, getVirtualHeight()).WillByDefault(Return(1080));
-    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
     ON_CALL(freshBackend, isElementEnabled(_)).WillByDefault(Return(true));
     ON_CALL(freshBackend, isElementVisible(_)).WillByDefault(Return(true));
 
@@ -2012,7 +2038,7 @@ TEST_F(MainMenuPanelStandaloneTest, ConsumeStartGameRequest_TrueOnce) {
     //   315=ngMapSizeLabel, 316=ngBtnSizeSmall, 317=ngBtnSizeMedium, 318=ngBtnSizeLarge,
     //   319=ngSeedLabel, 320=ngSeedInput, 321=ngBtnRandomize,
     //   322=ngBtnStartCity, 323=ngBtnBack, 324=ngErrorLabel.
-    ON_CALL(backend_, getElementRect(322)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    ON_CALL(backend_, getElementRect(322)).WillByDefault(Return(UIRect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2060,12 +2086,12 @@ TEST_F(UIManagerEventRoutingTest, MainMenu_StartGame_TransitionsToGameplay) {
         [](const std::string&, int, int, int, int) { return 1u; });
     ON_CALL(freshBackend, getVirtualWidth()).WillByDefault(Return(1920));
     ON_CALL(freshBackend, getVirtualHeight()).WillByDefault(Return(1080));
-    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
     ON_CALL(freshBackend, isElementEnabled(_)).WillByDefault(Return(true));
     ON_CALL(freshBackend, isElementVisible(_)).WillByDefault(Return(true));
 
     // Stub getElementRect for Start City button.
-    ON_CALL(freshBackend, getElementRect(13u)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    ON_CALL(freshBackend, getElementRect(13u)).WillByDefault(Return(UIRect{810, 500, 300, 48}));
 
     UIManager freshUI(&freshBackend, &freshAudio, &freshSim, &freshClock);
 
@@ -2119,7 +2145,7 @@ TEST_F(UIManagerEventRoutingTest, MainMenu_Settings_OpensSettings) {
         [](const std::string&, int, int, int, int) { return 1u; });
     ON_CALL(freshBackend, getVirtualWidth()).WillByDefault(Return(1920));
     ON_CALL(freshBackend, getVirtualHeight()).WillByDefault(Return(1080));
-    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
     ON_CALL(freshBackend, isElementEnabled(_)).WillByDefault(Return(true));
 
     UIManager freshUI(&freshBackend, &freshAudio, &freshSim, &freshClock);
@@ -2169,9 +2195,9 @@ TEST_F(UIManagerEventRoutingTest, ShowForcedLoanDialog_SimAlreadyPaused) {
 // update() handles ForcedLoanIssued notification from sim.
 TEST_F(UIManagerEventRoutingTest, Update_ForcedLoanNotification_ShowsDialog) {
     SimulationNotification notif;
-    notif.type = NotificationType::ForcedLoanIssued;
-    notif.amount = 50000;
-    notif.repaymentTicks = 12;
+    notif.type               = NotificationType::ForcedLoanIssued;
+    notif.loanPrincipal      = 50000;
+    notif.loanRepaymentTicks = 12;
 
     ON_CALL(sim_, pollPendingNotification(_))
         .WillByDefault([&notif](SimulationNotification& out) {
@@ -2215,7 +2241,7 @@ TEST_F(MainMenuPanelStandaloneTest, ShowLoadingScreen_ViaStartCityClick) {
     panel_->onEvent(enter);
 
     // Click Start City (handle 318) to trigger showLoadingScreen.
-    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(UIRect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2240,7 +2266,7 @@ TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_Escape_BackToNewGame) {
     panel_->onEvent(enter);
 
     // Click Start City to enter loading screen.
-    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(UIRect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2267,7 +2293,7 @@ TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_Escape_AfterCheckpoint_Ignored
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(UIRect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2297,7 +2323,7 @@ TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_CancelClick_BackToNewGame) {
     enter.keyCode = 13;
     panel_->onEvent(enter);
 
-    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(Rect{810, 500, 300, 48}));
+    ON_CALL(backend_, getElementRect(318)).WillByDefault(Return(UIRect{810, 500, 300, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2306,7 +2332,7 @@ TEST_F(MainMenuPanelStandaloneTest, LoadingScreen_CancelClick_BackToNewGame) {
     panel_->onEvent(click);
 
     // Click the Cancel button (handle 323 = m_loadingCancelBtn).
-    ON_CALL(backend_, getElementRect(323)).WillByDefault(Return(Rect{860, 570, 120, 36}));
+    ON_CALL(backend_, getElementRect(323)).WillByDefault(Return(UIRect{860, 570, 120, 36}));
     InputEvent cancelClick;
     cancelClick.type = InputEvent::Type::MouseButtonDown;
     cancelClick.button = 0;
@@ -2331,7 +2357,7 @@ TEST_F(UIManagerEventRoutingTest, Escape_InMainMenuState_Consumed) {
         [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
     ON_CALL(freshBackend, getVirtualWidth()).WillByDefault(Return(1920));
     ON_CALL(freshBackend, getVirtualHeight()).WillByDefault(Return(1080));
-    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+    ON_CALL(freshBackend, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
     ON_CALL(freshSim, isPaused()).WillByDefault(Return(false));
 
     UIManager freshUI(&freshBackend, &freshAudio, &freshSim, &freshClock);
@@ -2402,7 +2428,7 @@ TEST_F(MainMenuPanelStandaloneTest, UpKey_AdvancesFocus) {
 TEST_F(MainMenuPanelStandaloneTest, ClickSettings_SetsSettingsRequested) {
     ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
     // Handle 304 = m_btnSettings
-    ON_CALL(backend_, getElementRect(304)).WillByDefault(Return(Rect{780, 320, 360, 48}));
+    ON_CALL(backend_, getElementRect(304)).WillByDefault(Return(UIRect{780, 320, 360, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2417,7 +2443,7 @@ TEST_F(MainMenuPanelStandaloneTest, ClickSettings_SetsSettingsRequested) {
 TEST_F(MainMenuPanelStandaloneTest, ClickQuit_SetsQuitRequestedViaClick) {
     ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
     // Handle 305 = m_btnQuit
-    ON_CALL(backend_, getElementRect(305)).WillByDefault(Return(Rect{780, 380, 360, 48}));
+    ON_CALL(backend_, getElementRect(305)).WillByDefault(Return(UIRect{780, 380, 360, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2450,7 +2476,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_Escape_BackToMainMenu) {
 TEST_F(MainMenuPanelStandaloneTest, ClickNewGame_ShowsNewGameScreen) {
     ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
     // Handle 302 = m_btnNewGame
-    ON_CALL(backend_, getElementRect(302)).WillByDefault(Return(Rect{780, 200, 360, 48}));
+    ON_CALL(backend_, getElementRect(302)).WillByDefault(Return(UIRect{780, 200, 360, 48}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2471,7 +2497,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickBack_MouseReturnsToMainMenu) {
     panel_->onEvent(enter);
 
     // Handle 319 = m_ngBtnBack
-    ON_CALL(backend_, getElementRect(319)).WillByDefault(Return(Rect{780, 560, 120, 36}));
+    ON_CALL(backend_, getElementRect(319)).WillByDefault(Return(UIRect{780, 560, 120, 36}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;
@@ -2492,7 +2518,7 @@ TEST_F(MainMenuPanelStandaloneTest, NewGame_ClickRandomize_Consumed) {
     panel_->onEvent(enter);
 
     // Handle 317 = m_ngBtnRandomize
-    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(Rect{1080, 420, 100, 32}));
+    ON_CALL(backend_, getElementRect(317)).WillByDefault(Return(UIRect{1080, 420, 100, 32}));
     InputEvent click;
     click.type = InputEvent::Type::MouseButtonDown;
     click.button = 0;

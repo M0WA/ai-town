@@ -30,15 +30,9 @@
 // Fixture: PopulationTest (NiceMock) — NiceMock used because placement SFX is not
 //   the subject under test. TearDown() resets sim_ before mock destructors.
 
-#include "CitySimulation.h"
-#include "src/interfaces/ICitySimulation.h"
+#include "NiceSimulationTestBase.h"
 #include "src/interfaces/simulation_types.h"
 #include "src/simulation/simulation_constants.h"
-#include "MockAudioSystem.h"
-#include "MockRenderer.h"
-#include "ManualRNG.h"
-#include "ManualClock.h"
-#include "ManualTerrainQuery.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -55,50 +49,12 @@ using ::testing::AnyNumber;
 // ---------------------------------------------------------------------------
 // PopulationTest fixture
 // ---------------------------------------------------------------------------
-// NiceMock for audio — placement SFX and other audio calls are irrelevant to
-// these tests. TearDown() resets sim_ explicitly before mock destructors run.
+// Inherits from NiceSimulationTestBase: NiceMock renderer_/audio_, ManualRNG,
+// ManualClock, ManualTerrainQuery, sim_, SetUp/TearDown, cs(), runTicks().
+// NiceMock suppresses audio callbacks from placement that are irrelevant here.
 
-class PopulationTest : public ::testing::Test {
+class PopulationTest : public NiceSimulationTestBase {
 protected:
-    NiceMock<MockRenderer>    renderer_;
-    NiceMock<MockAudioSystem> audio_;
-    // Non-strict RNG: int and float sequences wrap so tick-based population
-    // growth tests don't need to pre-provision exact call counts.
-    ManualRNG    rng_;  // default: int={0}, float={0.9f}, non-strict
-    ManualClock  clock_;
-    ManualTerrainQuery terrain_;
-
-    // sim_ declared LAST — destroyed first.
-    std::unique_ptr<ICitySimulation> sim_;
-
-    void SetUp() override {
-        sim_ = std::make_unique<CitySimulation>(
-            &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Normal);
-        sim_->setSpeed(SpeedMultiplier::x1);
-    }
-
-    void TearDown() override {
-        // Destroy sim_ first so CitySimulation destructor can call back into
-        // audio_/renderer_ without use-after-free (mocks are still alive here).
-        sim_.reset();
-    }
-
-    CitySimulation* cs() {
-        auto* p = dynamic_cast<CitySimulation*>(sim_.get());
-        EXPECT_NE(p, nullptr) << "Downcast to CitySimulation* failed";
-        return p;
-    }
-
-    // Helper: run N budget ticks at x1 speed, advancing ManualClock.
-    void runTicks(int n) {
-        auto* c = cs();
-        if (!c) return;
-        const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
-        for (int i = 0; i < n; ++i) {
-            clock_.advance(dt);
-            c->tick(dt);
-        }
-    }
 
     // Helper: set up a city that can reach population milestone_threshold_1 (1000).
     // Places high-density residential tiles and balancing commercial/industrial zones.
@@ -168,7 +124,7 @@ protected:
 //   Advance population to exactly 1000; call pollPendingNotification();
 //   verify notification.type == PopulationMilestone,
 //         notification.milestoneValue == 1000 (NOT 0),
-//         notification.amount == 0.
+//         notification.loanPrincipal == 0.
 //   This guards against the 3-field brace-init bug where milestoneValue
 //   maps to amount instead of the 4th field.
 //
@@ -221,9 +177,9 @@ TEST_F(PopulationTest, Notification_PopulationMilestone_MilestoneValueField) {
         << "milestoneValue must be 1000 (not 0); guards against brace-init field-order bug "
            "where milestoneValue accidentally maps to amount";
 
-    // Verify amount is 0 — population milestones carry no loan amount.
-    EXPECT_EQ(milestone1k.amount, 0)
-        << "amount must be 0 for PopulationMilestone (not a loan event)";
+    // Verify loanPrincipal is 0 — population milestones carry no loan amount.
+    EXPECT_EQ(milestone1k.loanPrincipal, 0)
+        << "loanPrincipal must be 0 for PopulationMilestone (not a loan event)";
 }
 
 // ---------------------------------------------------------------------------
@@ -412,19 +368,19 @@ TEST_F(PopulationTest, PopulationMilestone_And_CityRatingTransition_BothEnqueued
                 n.milestoneValue == SimulationConstants::population_milestone_threshold_1) {
                 foundMilestone = true;
                 // Validate field values of the PopulationMilestone notification.
-                EXPECT_EQ(n.amount, 0)
-                    << "PopulationMilestone.amount must be 0";
-                EXPECT_EQ(n.repaymentTicks, 0)
-                    << "PopulationMilestone.repaymentTicks must be 0";
+                EXPECT_EQ(n.loanPrincipal, 0)
+                    << "PopulationMilestone.loanPrincipal must be 0";
+                EXPECT_EQ(n.loanRepaymentTicks, 0)
+                    << "PopulationMilestone.loanRepaymentTicks must be 0";
             }
             if (n.type == NotificationType::CityRatingTransition &&
                 n.milestoneValue == static_cast<int>(CityRatingTier::Town)) {
                 foundRating = true;
                 // Validate field values of the CityRatingTransition notification.
-                EXPECT_EQ(n.amount, 0)
-                    << "CityRatingTransition.amount must be 0";
-                EXPECT_EQ(n.repaymentTicks, 0)
-                    << "CityRatingTransition.repaymentTicks must be 0";
+                EXPECT_EQ(n.loanPrincipal, 0)
+                    << "CityRatingTransition.loanPrincipal must be 0";
+                EXPECT_EQ(n.loanRepaymentTicks, 0)
+                    << "CityRatingTransition.loanRepaymentTicks must be 0";
                 EXPECT_EQ(n.milestoneValue, static_cast<int>(CityRatingTier::Town))
                     << "CityRatingTransition.milestoneValue must be Town (= 1)";
             }

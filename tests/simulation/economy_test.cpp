@@ -1578,7 +1578,11 @@ TEST_F(EconomyHardTest, GetDensityUnlockScale_HardDifficulty_ReturnsHardScale)
     sim_->placeZone(0, 0, ZoneType::Residential, DensityTier::Low, 0);
     clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
     runTicks(1);
-    SUCCEED();
+    // Hard difficulty uses a scale factor > 1.0, so the first unlock threshold
+    // must be strictly greater than the Normal-difficulty threshold.
+    float hardThreshold   = sim_->getNextUnlockThreshold(Difficulty::Hard);
+    float normalThreshold = sim_->getNextUnlockThreshold(Difficulty::Normal);
+    EXPECT_GT(hardThreshold, normalThreshold);
 }
 
 // ============================================================================
@@ -1694,7 +1698,14 @@ TEST_F(EconomyTest, PlaceRoad_FormingIntersection_CreatesTrafficSignal)
     // Trigger neighbor re-check: (2,1) gains E neighbor at (3,1) → 2 neighbors ≥ 2.
     sim_->placeRoad(3, 1, 0);
 
-    SUCCEED();
+    // Verify the traffic signal was created at the intersection tile (1,1).
+    const auto signals = sim_->getIntersectionSignalStates();
+    bool foundSignalAt1_1 = false;
+    for (const auto& s : signals) {
+        if (s.tileX == 1 && s.tileZ == 1) { foundSignalAt1_1 = true; break; }
+    }
+    EXPECT_TRUE(foundSignalAt1_1)
+        << "Expected a traffic signal at (1,1) after placing a 4-way intersection";
 }
 
 // ============================================================================

@@ -46,9 +46,9 @@ public:
 
     // Result accessors for UIManager to check after dialog closes
     enum class DialogResult { None, Accept, Decline, Cancel };
-    DialogResult getLastResult() const { return m_lastResult; }
+    DialogResult peekResult() const noexcept { return m_lastResult; }
 
-    // Poll and consume the last dialog result. Returns getLastResult() and then
+    // Poll and consume the last dialog result. Returns the current result and then
     // resets m_lastResult to None, so the caller is notified exactly once.
     // Returns None if no result is available yet (modal still open or idle).
     DialogResult pollResult() {

@@ -30,6 +30,18 @@ using namespace irr;
 using namespace irr::video;
 using namespace irr::scene;
 
+// Degrees-to-radians conversion constant — used in setFOV.
+static constexpr float kDegToRad = static_cast<float>(M_PI / 180.0);
+
+// argbToSColor — unpack a packed ARGB uint32 (0xAARRGGBB) into an Irrlicht SColor(A,R,G,B).
+static irr::video::SColor argbToSColor(uint32_t argb) {
+    irr::u8 a = static_cast<irr::u8>((argb >> 24) & 0xFF);
+    irr::u8 r = static_cast<irr::u8>((argb >> 16) & 0xFF);
+    irr::u8 g = static_cast<irr::u8>((argb >>  8) & 0xFF);
+    irr::u8 b = static_cast<irr::u8>( argb        & 0xFF);
+    return irr::video::SColor(a, r, g, b);
+}
+
 // -------------------------------------------------------------------------
 // CloudDomeShaderCallback — IShaderConstantSetCallBack for the cloud dome
 // GLSL shader.  Sets u_tex (sampler2D, unit 0) on every draw call.
@@ -135,21 +147,20 @@ IrrlichtRenderer::~IrrlichtRenderer() {
     // device/smgr may already be in a partially-torn-down state by the time this
     // destructor runs.
 
-    // Phase 10: clean up all LODNode wrappers in building and road registries.
-    // LODNode objects are heap-allocated by BuildingAssetLoader::load() and owned by
-    // IrrlichtRenderer. Deleting a LODNode does NOT remove its wrapped scene node
-    // (scene node lifetime is managed by the Irrlicht scene graph, which is torn down
-    // by device->drop() in main.cpp AFTER IrrlichtRenderer is destroyed).
-    // We only delete the wrapper objects here; the underlying scene nodes are cleaned
-    // up when the scene manager is destroyed.
-    for (auto& kv : m_buildingNodes) {
-        delete kv.second;
-    }
+    // Phase 10: clean up all LODNode wrappers in building, road, and vehicle registries.
+    //
+    // IMPORTANT: evictLODNodeRegistry() is NOT used here. That helper calls node->remove()
+    // on each scene node, but by the time this destructor runs the device is still alive
+    // (device->drop() is called in main.cpp AFTER IrrlichtRenderer is destroyed). Calling
+    // node->remove() here would be redundant and potentially unsafe — the scene manager
+    // tears down all remaining nodes when the device is dropped.
+    //
+    // We therefore only delete the C++ LODNode wrapper objects (releasing their heap
+    // allocation). The underlying scene nodes are cleaned up by device->drop().
+    for (auto& kv : m_buildingNodes) { delete kv.second; }
     m_buildingNodes.clear();
 
-    for (auto& kv : m_roadNodes) {
-        delete kv.second;
-    }
+    for (auto& kv : m_roadNodes) { delete kv.second; }
     m_roadNodes.clear();
 
     // Drop shared procedural road meshes (each ref_count 1 → 0 → freed).
@@ -157,12 +168,8 @@ IrrlichtRenderer::~IrrlichtRenderer() {
     if (m_sharedRoadMeshLOD1) { m_sharedRoadMeshLOD1->drop(); m_sharedRoadMeshLOD1 = nullptr; }
     if (m_sharedRoadMeshLOD2) { m_sharedRoadMeshLOD2->drop(); m_sharedRoadMeshLOD2 = nullptr; }
 
-    // Phase 10: clean up all LODNode wrappers in the vehicle registry.
-    // Same rationale as building/road cleanup above: only delete the C++ wrapper;
-    // the underlying Irrlicht scene nodes are destroyed by device->drop() in main.cpp.
-    for (auto& kv : m_vehicleNodes) {
-        delete kv.second;
-    }
+    // Vehicle LODNode wrappers — same rationale: only delete the C++ wrapper.
+    for (auto& kv : m_vehicleNodes) { delete kv.second; }
     m_vehicleNodes.clear();
 
     // Phase 11d: agent nodes — clear map (scene nodes destroyed by scene manager).
@@ -179,6 +186,53 @@ IrrlichtRenderer::~IrrlichtRenderer() {
 }
 
 // -------------------------------------------------------------------------
+// evictLODNodeRegistry — template body (A-20).
+//
+// Defined here (not in the header) because the body calls lodNode->getNode(),
+// which requires the full LODNode definition. IrrlichtRenderer.h only
+// forward-declares LODNode, so instantiating the template body there would
+// produce "invalid use of incomplete type 'class LODNode'" in any TU that
+// includes IrrlichtRenderer.h without also including LODNode.h (e.g. main.cpp).
+//
+// Explicit instantiations at the bottom of this block cover the two key types
+// in use: uint64_t (building/road registries) and uint32_t (vehicle registry).
+// -------------------------------------------------------------------------
+template<typename KeyT>
+void IrrlichtRenderer::evictLODNodeRegistry(
+    std::unordered_map<KeyT, LODNode*>& registry)
+{
+    for (auto& kv : registry) {
+        LODNode* lodNode = kv.second;
+        if (!lodNode) continue;
+        irr::scene::ISceneNode* node = lodNode->getNode();
+        if (node) {
+            // Step 1: clear material texture slots.
+            for (irr::u32 m = 0; m < node->getMaterialCount(); ++m) {
+                irr::video::SMaterial& mat = node->getMaterial(m);
+                for (irr::u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t) {
+                    mat.setTexture(t, nullptr);
+                }
+            }
+            // Step 2: flush driver last-bound state.
+            if (m_driver) m_driver->setMaterial(irr::video::SMaterial{});
+            // Step 3: remove from scene graph.
+            node->remove();
+        }
+        // Step 4: delete the LODNode wrapper.
+        delete lodNode;
+    }
+    registry.clear();
+}
+
+// Explicit instantiations — must appear after the template definition.
+// uint64_t: m_buildingNodes and m_roadNodes (tile-keyed registries).
+// uint32_t: m_vehicleNodes (vehicle-id-keyed registry).
+template void IrrlichtRenderer::evictLODNodeRegistry<uint64_t>(
+    std::unordered_map<uint64_t, LODNode*>&);
+template void IrrlichtRenderer::evictLODNodeRegistry<uint32_t>(
+    std::unordered_map<uint32_t, LODNode*>&);
+
+// -------------------------------------------------------------------------
 // clearCity — Phase 11m new-game reset.
 //
 // Removes all building, road, and agent scene nodes from the scene graph,
@@ -189,44 +243,17 @@ IrrlichtRenderer::~IrrlichtRenderer() {
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::clearCity() {
     // --- Building nodes (zone buildings + service buildings) ---
-    // LODNode* wrappers are heap-allocated — delete them after eviction.
-    // Do NOT call destroyTileNode() during iteration (invalidates the iterator).
-    for (auto& kv : m_buildingNodes) {
-        LODNode* lodNode = kv.second;
-        if (!lodNode) continue;
-        scene::ISceneNode* node = lodNode->getNode();
-        if (node) {
-            // Clear material texture slots.
-            for (u32 m = 0; m < node->getMaterialCount(); ++m) {
-                for (u32 t = 0; t < MATERIAL_MAX_TEXTURES; ++t) {
-                    node->getMaterial(m).setTexture(t, nullptr);
-                }
-            }
-            if (m_driver) m_driver->setMaterial(SMaterial{});
-            node->remove();
-        }
-        delete lodNode;
-    }
-    m_buildingNodes.clear();
+    // Use evictLODNodeRegistry to run the full eviction sequence on each entry.
+    evictLODNodeRegistry(m_buildingNodes);
 
     // --- Road nodes ---
-    // LODNode* wrappers are heap-allocated — delete them after eviction.
-    for (auto& kv : m_roadNodes) {
-        LODNode* lodNode = kv.second;
-        if (!lodNode) continue;
-        scene::ISceneNode* node = lodNode->getNode();
-        if (node) {
-            for (u32 m = 0; m < node->getMaterialCount(); ++m) {
-                for (u32 t = 0; t < MATERIAL_MAX_TEXTURES; ++t) {
-                    node->getMaterial(m).setTexture(t, nullptr);
-                }
-            }
-            if (m_driver) m_driver->setMaterial(SMaterial{});
-            node->remove();
-        }
-        delete lodNode;
-    }
-    m_roadNodes.clear();
+    evictLODNodeRegistry(m_roadNodes);
+
+    // --- Vehicle nodes ---
+    // Vehicles must be cleared on new-game reset: the simulation will spawn a fresh
+    // set of vehicles for the new city.  evictLODNodeRegistry runs the full
+    // material-slot-clear / setMaterial(SMaterial{}) / node->remove() / delete sequence.
+    evictLODNodeRegistry(m_vehicleNodes);
 
     // --- Agent nodes (plain IMeshSceneNode*, no LODNode wrapper) ---
     for (auto& kv : m_agentNodes) {
@@ -420,7 +447,7 @@ void IrrlichtRenderer::setCamera(const CameraParams& p) {
 
     m_camera->setPosition(core::vector3df(p.position.x, p.position.y, p.position.z));
     m_camera->setTarget(core::vector3df(p.target.x, p.target.y, p.target.z));
-    m_camera->setFOV(p.fovDegrees * static_cast<float>(M_PI / 180.0));
+    m_camera->setFOV(p.fovDegrees * kDegToRad);
     m_camera->setNearValue(p.nearClip);
     m_camera->setFarValue(p.farClip);
     m_lastCameraPosition = p.position;  // cached for getListenerPosition()
@@ -459,9 +486,9 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
     //
     // Per scene-graph-ownership.md eviction sequence:
     //   a. Iterate material slots — clear all texture pointers.
-    //      (Phase 5 terrain chunks have no assigned textures; this loop is a
-    //      defensive no-op but is required for correctness when Phase 6+
-    //      terrain texturing is added.)
+    //      (Terrain chunks use the splat-map shader for texturing — material slots
+    //      are set by rebuildTerrainChunk() before the eviction sequence runs.
+    //      This loop clears those slots before remove() as required by the spec.)
     //   b. driver->setMaterial(SMaterial{}) — flushes driver last-bound state.
     //   c. Null the node pointer BEFORE calling node->remove() — prevents
     //      any dangling-pointer access if downstream code holds a copy.
@@ -484,7 +511,7 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
         }
 
         // Step 1b: flush driver last-bound material state.
-        
+        if (m_driver) m_driver->setMaterial(SMaterial{});
 
         // Step 1c: null the map entry BEFORE remove() — dangling-pointer prevention.
         nodeIt->second = nullptr;
@@ -553,8 +580,8 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
             );
 
             // Height-based vertex colour: interpolate from forest green (lowlands)
-            // to brown (highlands) so terrain is clearly visible against the sky.
-            // Phase 9 replaces this with textured materials.
+            // to brown (highlands). Blended under the splat-map shader (Phase 10c)
+            // which applies actual terrain textures on top of this vertex colour.
             float normH = std::clamp(h / 80.0f, 0.0f, 1.0f);  // normalize to [0,1] over ~80m range
             u8 r = static_cast<u8>(34  + normH * (139 - 34));   // 34→139
             u8 g = static_cast<u8>(139 - normH * (139 - 90));   // 139→90
@@ -627,7 +654,7 @@ void IrrlichtRenderer::rebuildTerrainChunk(const TerrainChunkRebuildParams& para
         newNode->setPosition(core::vector3df(
             params.worldOriginX, 0.0f, params.worldOriginZ));
         newNode->setMaterialFlag(EMF_LIGHTING, false);  // material type set in Phase 10c — see initTerrainShader()
-        newNode->setMaterialFlag(EMF_BACK_FACE_CULLING, false);  // both sides visible — Phase 5 has no winding-dependent lighting
+        newNode->setMaterialFlag(EMF_BACK_FACE_CULLING, false);  // both sides visible — no winding-dependent lighting
 
         // Assign terrain splat shader material type if available (Phase 10c).
         irr::video::SMaterial& mat = newNode->getMaterial(0);
@@ -783,7 +810,7 @@ void IrrlichtRenderer::setTileHoverHighlight(int tileX, int tileZ, int footprint
     }
 
     // Clamp footprint to valid range [1, 3].
-    const int N = (footprintSize < 1) ? 1 : (footprintSize > 3) ? 3 : footprintSize;
+    const int N = std::clamp(footprintSize, 1, 3);
 
     // Select color from active tool.
     SColor colour(0x66, 0xFF, 0xFF, 0xFF);  // default: semi-transparent white
@@ -798,7 +825,7 @@ void IrrlichtRenderer::setTileHoverHighlight(int tileX, int tileZ, int footprint
     }
 
     // Build the four footprint-corner positions slightly above terrain surface.
-    float yOffset = 0.1f;  // 10 cm above terrain to avoid Z-fighting
+    float yOffset = RenderConstants::kHoverHighlightYOffset;
     // v0: bottom-left corner of footprint (tileX, tileZ)
     // v2: top-right corner of footprint (tileX+N-1, tileZ+N-1) — but vertex coords
     //     use the far corner of those tiles (i.e. tileX+N, tileZ+N vertices).
@@ -854,6 +881,76 @@ void IrrlichtRenderer::clearDemolishHighlight()
 }
 
 // -------------------------------------------------------------------------
+// appendTerrainQuad — push 4 vertices and 6 indices for one terrain-conforming
+// quad into an SMeshBuffer (A-5).
+//
+// Parameters:
+//   buf       — the target SMeshBuffer (must be non-null).
+//   x0/x1     — world-space X extents of the tile.
+//   z0/z1     — world-space Z extents of the tile.
+//   h00/h10/h11/h01 — world-space Y heights at the four tile corners (including yOffset).
+//   colour    — vertex colour (encodes ARGB for transparency).
+//   quadIndex — 0-based index of this quad within the buffer (base vertex = quadIndex*4).
+//
+// Vertex order and triangle winding: CW from above (+Y normal) per scene-graph-ownership.md.
+// -------------------------------------------------------------------------
+static void appendTerrainQuad(irr::scene::SMeshBuffer* buf,
+                               float x0, float x1,
+                               float z0, float z1,
+                               float h00, float h10, float h11, float h01,
+                               const irr::video::SColor& colour,
+                               irr::u32 quadIndex)
+{
+    using namespace irr;
+    const u32 base = quadIndex * 4;
+    buf->Vertices.push_back(video::S3DVertex(
+        core::vector3df(x0, h00, z0), core::vector3df(0, 1, 0), colour,
+        core::vector2df(0, 0)));
+    buf->Vertices.push_back(video::S3DVertex(
+        core::vector3df(x1, h10, z0), core::vector3df(0, 1, 0), colour,
+        core::vector2df(1, 0)));
+    buf->Vertices.push_back(video::S3DVertex(
+        core::vector3df(x1, h11, z1), core::vector3df(0, 1, 0), colour,
+        core::vector2df(1, 1)));
+    buf->Vertices.push_back(video::S3DVertex(
+        core::vector3df(x0, h01, z1), core::vector3df(0, 1, 0), colour,
+        core::vector2df(0, 1)));
+    buf->Indices.push_back(static_cast<u16>(base + 0));
+    buf->Indices.push_back(static_cast<u16>(base + 2));
+    buf->Indices.push_back(static_cast<u16>(base + 1));
+    buf->Indices.push_back(static_cast<u16>(base + 0));
+    buf->Indices.push_back(static_cast<u16>(base + 3));
+    buf->Indices.push_back(static_cast<u16>(base + 2));
+}
+
+// -------------------------------------------------------------------------
+// openOverlayBuffer / closeOverlayBuffer — SMeshBuffer lifecycle helpers (A-5).
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::openOverlayBuffer(irr::scene::SMesh* mesh,
+                                          irr::scene::SMeshBuffer*& cur,
+                                          irr::u32& quadsInCur)
+{
+    if (!mesh || cur) return;
+    cur = new irr::scene::SMeshBuffer();
+    cur->Material.MaterialType           = irr::video::EMT_TRANSPARENT_ALPHA_CHANNEL;
+    cur->Material.Lighting               = false;
+    cur->Material.ZWriteEnable           = false;
+    cur->Material.PolygonOffsetFactor    = 3;
+    cur->Material.PolygonOffsetDirection = irr::video::EPO_FRONT;
+    quadsInCur = 0;
+}
+
+void IrrlichtRenderer::closeOverlayBuffer(irr::scene::SMesh* mesh,
+                                           irr::scene::SMeshBuffer*& cur)
+{
+    if (!mesh || !cur) return;
+    cur->recalculateBoundingBox();
+    mesh->addMeshBuffer(cur);
+    cur->drop();
+    cur = nullptr;
+}
+
+// -------------------------------------------------------------------------
 // setTilePlacementPreview — rebuild the multi-tile placement preview mesh.
 //
 // Called every MouseMove while LMB is held for Zone (rect) and Road (line)
@@ -890,13 +987,9 @@ void IrrlichtRenderer::setTilePlacementPreview(
     }
 
     // Decode ARGB (0xAARRGGBB) for Irrlicht SColor(A, R, G, B).
-    u8 a = static_cast<u8>((freeArgb >> 24) & 0xFF);
-    u8 r = static_cast<u8>((freeArgb >> 16) & 0xFF);
-    u8 g = static_cast<u8>((freeArgb >>  8) & 0xFF);
-    u8 b = static_cast<u8>( freeArgb        & 0xFF);
-    SColor colour(a, r, g, b);
+    SColor colour = argbToSColor(freeArgb);
 
-    const float yOffset = 0.05f;  // same as single-tile hover highlight
+    const float yOffset = RenderConstants::kHoverYOffset;
 
     // Maximum quads per SMeshBuffer (u16 index cap: 65535 / 6 indices per quad).
     static constexpr u32 kMaxQuadsPerBuffer = 10922u;
@@ -947,30 +1040,7 @@ void IrrlichtRenderer::setTilePlacementPreview(
         float h11 = m_terrain->getHeightAt(tx + 1, tz + 1) + yOffset;
         float h01 = m_terrain->getHeightAt(tx,     tz + 1) + yOffset;
 
-        u32 base = quadsInCur * 4;
-
-        // Four vertices — CW winding from above (+Y normal).
-        cur->Vertices.push_back(S3DVertex(
-            core::vector3df(x0, h00, z0), core::vector3df(0,1,0), colour,
-            core::vector2df(0, 0)));
-        cur->Vertices.push_back(S3DVertex(
-            core::vector3df(x1, h10, z0), core::vector3df(0,1,0), colour,
-            core::vector2df(0, 0)));
-        cur->Vertices.push_back(S3DVertex(
-            core::vector3df(x1, h11, z1), core::vector3df(0,1,0), colour,
-            core::vector2df(0, 0)));
-        cur->Vertices.push_back(S3DVertex(
-            core::vector3df(x0, h01, z1), core::vector3df(0,1,0), colour,
-            core::vector2df(0, 0)));
-
-        // Indices: v0→v2→v1, v0→v3→v2 (CW from +Y view per scene-graph-ownership.md).
-        cur->Indices.push_back(static_cast<u16>(base + 0));
-        cur->Indices.push_back(static_cast<u16>(base + 2));
-        cur->Indices.push_back(static_cast<u16>(base + 1));
-        cur->Indices.push_back(static_cast<u16>(base + 0));
-        cur->Indices.push_back(static_cast<u16>(base + 3));
-        cur->Indices.push_back(static_cast<u16>(base + 2));
-
+        appendTerrainQuad(cur, x0, x1, z0, z1, h00, h10, h11, h01, colour, quadsInCur);
         ++quadsInCur;
     }
 
@@ -979,12 +1049,8 @@ void IrrlichtRenderer::setTilePlacementPreview(
     // Phase 11d Deliverable 5d: add blocked tiles in semi-opaque red (kHoverArgbBlocked).
     // kHoverArgbBlocked = 0xBBFF2222 (semi-opaque red, alpha=0xBB≈73%).
     if (!blockedTiles.empty() && m_terrain) {
-        static constexpr uint32_t kBlockedArgb = 0xBBFF2222u;
-        u8 ba = static_cast<u8>((kBlockedArgb >> 24) & 0xFF);
-        u8 br = static_cast<u8>((kBlockedArgb >> 16) & 0xFF);
-        u8 bg = static_cast<u8>((kBlockedArgb >>  8) & 0xFF);
-        u8 bb = static_cast<u8>( kBlockedArgb        & 0xFF);
-        SColor blockedColour(ba, br, bg, bb);
+        // kBlockedArgb promoted to render_constants.h (A-29); local alias for backward compat.
+        SColor blockedColour = argbToSColor(RenderConstants::kBlockedArgb);
 
         openBuffer();
         for (const auto& tile : blockedTiles) {
@@ -1003,17 +1069,7 @@ void IrrlichtRenderer::setTilePlacementPreview(
             float h10 = m_terrain->getHeightAt(tx + 1, tz)     + yOffset;
             float h11 = m_terrain->getHeightAt(tx + 1, tz + 1) + yOffset;
             float h01 = m_terrain->getHeightAt(tx,     tz + 1) + yOffset;
-            u32 base = quadsInCur * 4;
-            cur->Vertices.push_back(S3DVertex(core::vector3df(x0, h00, z0), core::vector3df(0,1,0), blockedColour, core::vector2df(0,0)));
-            cur->Vertices.push_back(S3DVertex(core::vector3df(x1, h10, z0), core::vector3df(0,1,0), blockedColour, core::vector2df(0,0)));
-            cur->Vertices.push_back(S3DVertex(core::vector3df(x1, h11, z1), core::vector3df(0,1,0), blockedColour, core::vector2df(0,0)));
-            cur->Vertices.push_back(S3DVertex(core::vector3df(x0, h01, z1), core::vector3df(0,1,0), blockedColour, core::vector2df(0,0)));
-            cur->Indices.push_back(static_cast<u16>(base + 0));
-            cur->Indices.push_back(static_cast<u16>(base + 2));
-            cur->Indices.push_back(static_cast<u16>(base + 1));
-            cur->Indices.push_back(static_cast<u16>(base + 0));
-            cur->Indices.push_back(static_cast<u16>(base + 3));
-            cur->Indices.push_back(static_cast<u16>(base + 2));
+            appendTerrainQuad(cur, x0, x1, z0, z1, h00, h10, h11, h01, blockedColour, quadsInCur);
             ++quadsInCur;
         }
         closeBuffer();
@@ -1045,7 +1101,7 @@ void IrrlichtRenderer::setTilePlacementPreview(
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::setZoneOverlay(
     int mapTilesX, int mapTilesZ,
-    const std::unordered_map<uint64_t, uint32_t>& sparseOverlay)
+    const std::unordered_map<int64_t, uint32_t>& sparseOverlay)
 {
     if (!m_smgr || !m_driver) return;
 
@@ -1059,7 +1115,7 @@ void IrrlichtRenderer::setZoneOverlay(
                 mat.setTexture(t, nullptr);
             }
         }
-        
+        if (m_driver) m_driver->setMaterial(SMaterial{});
         m_overlayNode->remove();
         m_overlayNode = nullptr;
     }
@@ -1073,56 +1129,32 @@ void IrrlichtRenderer::setZoneOverlay(
     // → max 16383 quads per buffer (16384th quad's base index = 65536 > u16 max).
     static constexpr u32 kMaxQuadsPerBuffer = 16383u;
 
-    float yOffset = 0.25f;  // 25 cm above terrain — enough to prevent Z-fighting at far zoom
+    float yOffset = RenderConstants::kZoneOverlayYOffset;
 
     SMesh*       omesh     = new SMesh();
     SMeshBuffer* cur       = nullptr;
     u32          quadsInCur = 0;
 
-    auto openBuffer = [&]() {
-        cur = new SMeshBuffer();
-        cur->Material.MaterialType           = EMT_TRANSPARENT_ALPHA_CHANNEL;
-        cur->Material.Lighting               = false;
-        cur->Material.ZWriteEnable           = false;
-        // Polygon offset: push overlay toward camera to win depth test at far zoom.
-        cur->Material.PolygonOffsetFactor    = 3;
-        cur->Material.PolygonOffsetDirection = irr::video::EPO_FRONT;
-        quadsInCur = 0;
-    };
-
-    auto closeBuffer = [&]() {
-        if (!cur) return;
-        cur->recalculateBoundingBox();
-        omesh->addMeshBuffer(cur);
-        cur->drop();  // mesh is sole owner
-        cur = nullptr;
-    };
-
-    openBuffer();
+    openOverlayBuffer(omesh, cur, quadsInCur);
 
     size_t written = 0;
     for (const auto& kv : sparseOverlay) {
         if (written >= kMaxOverlayQuads) break;
 
         // Decode tile index from key.
-        int tx = static_cast<int>(kv.first % static_cast<uint64_t>(mapTilesX));
-        int tz = static_cast<int>(kv.first / static_cast<uint64_t>(mapTilesX));
+        int tx = static_cast<int>(kv.first % mapTilesX);
+        int tz = static_cast<int>(kv.first / mapTilesX);
 
         // Skip out-of-bounds tiles.
         if (tx < 0 || tx >= mapTilesX || tz < 0 || tz >= mapTilesZ) continue;
 
         if (quadsInCur >= kMaxQuadsPerBuffer) {
-            closeBuffer();
-            openBuffer();
+            closeOverlayBuffer(omesh, cur);
+            openOverlayBuffer(omesh, cur, quadsInCur);
         }
 
         // Decode ARGB colour.
-        uint32_t ac = kv.second;
-        u8 ca = static_cast<u8>((ac >> 24) & 0xFF);
-        u8 cr = static_cast<u8>((ac >> 16) & 0xFF);
-        u8 cg = static_cast<u8>((ac >>  8) & 0xFF);
-        u8 cb = static_cast<u8>( ac        & 0xFF);
-        SColor colour(ca, cr, cg, cb);
+        SColor colour = argbToSColor(kv.second);
 
         float x0 = static_cast<float>(tx)     * m_cellSize;
         float x1 = static_cast<float>(tx + 1) * m_cellSize;
@@ -1134,34 +1166,13 @@ void IrrlichtRenderer::setZoneOverlay(
         float h11 = (m_terrain ? m_terrain->getHeightAt(tx + 1, tz + 1) : 0.0f) + yOffset;
         float h01 = (m_terrain ? m_terrain->getHeightAt(tx,     tz + 1) : 0.0f) + yOffset;
 
-        u32 base = quadsInCur * 4;
-
-        cur->Vertices.push_back(S3DVertex(
-            core::vector3df(x0, h00, z0), core::vector3df(0, 1, 0), colour,
-            core::vector2df(0, 0)));
-        cur->Vertices.push_back(S3DVertex(
-            core::vector3df(x1, h10, z0), core::vector3df(0, 1, 0), colour,
-            core::vector2df(1, 0)));
-        cur->Vertices.push_back(S3DVertex(
-            core::vector3df(x1, h11, z1), core::vector3df(0, 1, 0), colour,
-            core::vector2df(1, 1)));
-        cur->Vertices.push_back(S3DVertex(
-            core::vector3df(x0, h01, z1), core::vector3df(0, 1, 0), colour,
-            core::vector2df(0, 1)));
-
-        // Two triangles per quad: v0→v2→v1, v0→v3→v2 (CW from above = +Y normal).
-        cur->Indices.push_back(static_cast<u16>(base + 0));
-        cur->Indices.push_back(static_cast<u16>(base + 2));
-        cur->Indices.push_back(static_cast<u16>(base + 1));
-        cur->Indices.push_back(static_cast<u16>(base + 0));
-        cur->Indices.push_back(static_cast<u16>(base + 3));
-        cur->Indices.push_back(static_cast<u16>(base + 2));
+        appendTerrainQuad(cur, x0, x1, z0, z1, h00, h10, h11, h01, colour, quadsInCur);
 
         ++quadsInCur;
         ++written;
     }
 
-    closeBuffer();
+    closeOverlayBuffer(omesh, cur);
 
     if (omesh->getMeshBufferCount() == 0) {
         // All entries were out-of-bounds — drop and bail.
@@ -1297,6 +1308,26 @@ vec3 IrrlichtRenderer::getListenerPosition() const
 // =============================================================================
 
 // -------------------------------------------------------------------------
+// logWarning / logError — logging helpers (A-22).
+// Eliminates the 15+ copies of the two-branch null-guard + fprintf fallback pattern.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::logWarning(const std::string& msg) {
+    if (m_logger) {
+        m_logger->log(msg.c_str(), irr::ELL_WARNING);
+    } else {
+        fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", msg.c_str());
+    }
+}
+
+void IrrlichtRenderer::logError(const std::string& msg) {
+    if (m_logger) {
+        m_logger->log(msg.c_str(), irr::ELL_ERROR);
+    } else {
+        fprintf(stderr, "[IrrlichtRenderer ERROR] %s\n", msg.c_str());
+    }
+}
+
+// -------------------------------------------------------------------------
 // ensureAssetLoader — lazily construct m_buildingAssetLoader.
 // Returns true if the loader is ready; false if m_smgr is null.
 // -------------------------------------------------------------------------
@@ -1304,14 +1335,8 @@ bool IrrlichtRenderer::ensureAssetLoader()
 {
     if (m_buildingAssetLoader) return true;
     if (!m_smgr || !m_driver) {
-        if (m_logger) {
-            m_logger->log("[IrrlichtRenderer] ensureAssetLoader() called with null "
-                "m_smgr/m_driver — scene node cannot be created", irr::ELL_WARNING);
-        } else {
-            fprintf(stderr,
-                "[IrrlichtRenderer WARNING] ensureAssetLoader() called with null "
-                "m_smgr/m_driver — scene node cannot be created\n");
-        }
+        logWarning("[IrrlichtRenderer] ensureAssetLoader() called with null "
+            "m_smgr/m_driver — scene node cannot be created");
         return false;
     }
     m_buildingAssetLoader = std::make_unique<BuildingAssetLoader>(m_smgr, m_driver);
@@ -1355,7 +1380,7 @@ void IrrlichtRenderer::destroyTileNode(
             }
         }
         // Step 2: flush driver last-bound state.
-        
+        m_driver->setMaterial(SMaterial{});
         // Step 3 + 4: remove the scene node.
         node->remove();  // do NOT access node* after this
     }
@@ -1410,6 +1435,61 @@ irr::video::ITexture* IrrlichtRenderer::getOrCreateZoneTexture(const std::string
 }
 
 // -------------------------------------------------------------------------
+// flattenFootprint — terrain flattening + road rebuild helper (A-4).
+// -------------------------------------------------------------------------
+float IrrlichtRenderer::flattenFootprint(int tileX, int tileZ, int footprintN)
+{
+    if (!m_terrain) return 0.0f;
+
+    // Average all (footprintN+1)×(footprintN+1) corner heights.
+    float heightSum   = 0.0f;
+    int   heightCount = 0;
+    for (int cx = 0; cx <= footprintN; ++cx) {
+        for (int cz = 0; cz <= footprintN; ++cz) {
+            heightSum += m_terrain->getHeightAt(tileX + cx, tileZ + cz);
+            ++heightCount;
+        }
+    }
+    const float targetH = (heightCount > 0) ? (heightSum / heightCount) : 0.0f;
+
+    // Write the averaged height back to every corner.
+    for (int cx = 0; cx <= footprintN; ++cx)
+        for (int cz = 0; cz <= footprintN; ++cz)
+            m_terrain->setTileHeight(tileX + cx, tileZ + cz, targetH);
+    m_terrain->flushTerrainRebuilds();
+
+    // Rebuild road tiles within +(footprintN+2) of the origin (mesh-only, no re-flatten).
+    const int rebuildRadius = footprintN + 2;
+    for (int dz = -rebuildRadius; dz <= footprintN + rebuildRadius; ++dz) {
+        for (int dx = -rebuildRadius; dx <= footprintN + rebuildRadius; ++dx) {
+            if (dx >= 0 && dx < footprintN && dz >= 0 && dz < footprintN) continue;
+            const int nx = tileX + dx;
+            const int nz = tileZ + dz;
+            if (m_roadNodes.count(tileKey(nx, nz)) > 0)
+                placeRoadMesh(nx, nz, /*flattenTerrain=*/false, /*rebuildNeighbors=*/false);
+        }
+    }
+    return targetH;
+}
+
+// -------------------------------------------------------------------------
+// applyBuildingMaterialDefaults — standard material settings for building nodes (A-4).
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::applyBuildingMaterialDefaults(irr::scene::ISceneNode* node,
+                                                      irr::video::ITexture* zoneTex)
+{
+    if (!node) return;
+    for (irr::u32 m = 0; m < node->getMaterialCount(); ++m) {
+        irr::video::SMaterial& mat = node->getMaterial(m);
+        mat.Lighting          = false;
+        mat.BackfaceCulling   = false;
+        mat.PolygonOffsetDirection = irr::video::EPO_FRONT;
+        mat.PolygonOffsetFactor    = 1;
+        if (!mat.getTexture(0) && zoneTex) mat.setTexture(0, zoneTex);
+    }
+}
+
+// -------------------------------------------------------------------------
 // placeBuildingMesh — zone building placement.
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
@@ -1420,11 +1500,7 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
         std::snprintf(buf, sizeof(buf),
             "[IrrlichtRenderer] placeBuildingMesh(%d,%d) called with "
             "empty assetBaseName — skipping node creation", tileX, tileZ);
-        if (m_logger) {
-            m_logger->log(buf, irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
-        }
+        logWarning(buf);
         return;
     }
     if (!ensureAssetLoader()) return;
@@ -1455,44 +1531,9 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
     }
 
     // Full-footprint terrain flattening (Phase 11l Deliverable 3):
-    // Average all (footprintN+1)x(footprintN+1) corner vertex heights, then flatten
-    // every corner to that average so the ground plate sits flush with terrain across
-    // the entire NxN tile footprint.  For LOW (N=1) this produces 4 calls (same as
-    // original); for MED (N=2) it covers 9 vertices; for HIGH (N=3) it covers 16.
-    // Runs unconditionally when m_terrain is set — independent of whether the scene
-    // node is created successfully, so that terrain is always consistent on placement.
-    float heightSum = 0.0f;
-    int   heightCount = 0;
-    for (int cx = 0; cx <= footprintN; ++cx) {
-        for (int cz = 0; cz <= footprintN; ++cz) {
-            heightSum += m_terrain ? m_terrain->getHeightAt(tileX + cx, tileZ + cz) : 0.0f;
-            ++heightCount;
-        }
-    }
-    const float targetH = (heightCount > 0) ? (heightSum / heightCount) : 0.0f;
-    if (m_terrain) {
-        for (int cx = 0; cx <= footprintN; ++cx)
-            for (int cz = 0; cz <= footprintN; ++cz)
-                m_terrain->setTileHeight(tileX + cx, tileZ + cz, targetH);
-        m_terrain->flushTerrainRebuilds();
-    }
-
-    // Rebuild road tiles within +(footprintN+2) of the building origin.
-    // setTileHeight() applies weighted neighbour blending to the 8 surrounding vertices;
-    // for larger footprints the affected radius grows accordingly.
-    {
-        const int rebuildRadius = footprintN + 2;
-        for (int dz = -rebuildRadius; dz <= footprintN + rebuildRadius; ++dz) {
-            for (int dx = -rebuildRadius; dx <= footprintN + rebuildRadius; ++dx) {
-                if (dx >= 0 && dx < footprintN && dz >= 0 && dz < footprintN) continue;
-                const int nx = tileX + dx;
-                const int nz = tileZ + dz;
-                if (m_roadNodes.count(tileKey(nx, nz)) > 0)
-                    placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
-                                          /*rebuildNeighbors=*/false);
-            }
-        }
-    }
+    // flattenFootprint() averages corner heights, flattens, flushes terrain rebuilds,
+    // and rebuilds adjacent road tiles. Returns the averaged height for node positioning.
+    const float targetH = flattenFootprint(tileX, tileZ, footprintN);
 
     LODNode* lodNode = m_buildingAssetLoader->load(basePath);
     if (!lodNode) {
@@ -1500,11 +1541,7 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
         std::snprintf(buf, sizeof(buf),
             "[IrrlichtRenderer] placeBuildingMesh(%d,%d): failed to load "
             "asset '%s' — node not created", tileX, tileZ, basePath.c_str());
-        if (m_logger) {
-            m_logger->log(buf, irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
-        }
+        logWarning(buf);
         return;
     }
 
@@ -1512,7 +1549,8 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
     // B3D building meshes are 1x1xheight unit boxes centred on X and Z.
     // Scale by kTileSize so they fill the full tile footprint (10x10 m).
     // Offset by kTileSize/2 in X and Z to centre the mesh on the tile.
-    // Disable lighting — no light nodes in the scene yet (Phase 6+).
+    // Disable lighting — V1 uses no dynamic light nodes; all shading uses Irrlicht's
+    // default ambient illumination and baked lightmaps (UV2 channel, buildings atlas).
     //
     // Texture fallback: BuildingAssetLoader::load() binds the buildings_atlas_d.dds
     // to every material slot.  If the atlas fails to load (missing file, driver
@@ -1540,22 +1578,7 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
         const std::string prefix = (assetBaseName.size() >= 4)
             ? assetBaseName.substr(0, 4) : "dflt";
         video::ITexture* zoneTex = getOrCreateZoneTexture(prefix);
-
-        for (u32 m = 0; m < node->getMaterialCount(); ++m) {
-            video::SMaterial& mat = node->getMaterial(m);
-            mat.Lighting = false;
-            // Disable backface culling for B3D building assets.
-            // The procedural B3D generator uses CCW winding in Irrlicht left-handed
-            // space, but we keep BackfaceCulling=false as a robust default while
-            // production Blender assets are being authored.
-            mat.BackfaceCulling = false;
-            // Polygon offset: push the building base surface toward the camera so it
-            // wins the depth test against the co-planar terrain quad at all distances.
-            mat.PolygonOffsetDirection = irr::video::EPO_FRONT;
-            mat.PolygonOffsetFactor    = 1;
-            // Apply zone-coloured fallback only if atlas was not bound by loader.
-            if (!mat.getTexture(0) && zoneTex) mat.setTexture(0, zoneTex);
-        }
+        applyBuildingMaterialDefaults(node, zoneTex);
     }
 
     m_buildingNodes[tileKey(tileX, tileZ)] = lodNode;
@@ -1649,11 +1672,7 @@ bool IrrlichtRenderer::initRoadShader()
             "[IrrlichtRenderer] road shader compile failed "
             "(vs=%s, fs=%s) — road tiles will use EMT_SOLID fallback",
             vsPath.c_str(), fsPath.c_str());
-        if (m_logger) {
-            m_logger->log(buf, irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
-        }
+        logWarning(buf);
         m_roadMaterialType = -2;  // mark done-with-failure
         return false;
     }
@@ -1741,11 +1760,7 @@ void IrrlichtRenderer::initTerrainShader()
             "[IrrlichtRenderer] terrain shader compile failed "
             "(vs=%s, fs=%s) — terrain will use default material",
             vsPath.c_str(), fsPath.c_str());
-        if (m_logger) {
-            m_logger->log(buf, irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
-        }
+        logWarning(buf);
         return;
     }
 
@@ -1981,10 +1996,10 @@ irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
             buf->Material.PolygonOffsetFactor    = 5;
             const SColor lineWhite(255, 255, 255, 255);
             const float lHW = 0.15f;
-            addV(buf, -lHW, y00 + 0.005f, -H,  0.f, 0.f, lineWhite);
-            addV(buf,  lHW, y10 + 0.005f, -H,  1.f, 0.f, lineWhite);
-            addV(buf,  lHW, y11 + 0.005f,  H,  1.f, 1.f, lineWhite);
-            addV(buf, -lHW, y01 + 0.005f,  H,  0.f, 1.f, lineWhite);
+            addV(buf, -lHW, y00 + RenderConstants::kCenterlineYBias, -H,  0.f, 0.f, lineWhite);
+            addV(buf,  lHW, y10 + RenderConstants::kCenterlineYBias, -H,  1.f, 0.f, lineWhite);
+            addV(buf,  lHW, y11 + RenderConstants::kCenterlineYBias,  H,  1.f, 1.f, lineWhite);
+            addV(buf, -lHW, y01 + RenderConstants::kCenterlineYBias,  H,  0.f, 1.f, lineWhite);
             addQuadIdx(buf, 0);
             buf->recalculateBoundingBox();
             mesh->addMeshBuffer(buf);
@@ -2046,8 +2061,8 @@ irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
             buf->Material.PolygonOffsetFactor    = 5;
             const SColor lineWhite(255, 255, 255, 255);
             const float lHW = 0.15f;
-            const float yCL_W = (y00 + y01) * 0.5f + 0.005f;  // west edge at Z=0
-            const float yCL_E = (y10 + y11) * 0.5f + 0.005f;  // east edge at Z=0
+            const float yCL_W = (y00 + y01) * 0.5f + RenderConstants::kCenterlineYBias;  // west edge at Z=0
+            const float yCL_E = (y10 + y11) * 0.5f + RenderConstants::kCenterlineYBias;  // east edge at Z=0
             addV(buf, -H, yCL_W, -lHW,  0.f, 0.f, lineWhite);  // west, south
             addV(buf,  H, yCL_E, -lHW,  1.f, 0.f, lineWhite);  // east, south
             addV(buf,  H, yCL_E,  lHW,  1.f, 1.f, lineWhite);  // east, north
@@ -2094,121 +2109,73 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ)
 //   with world-space heights baked into vertex Y.  Node is placed at tile
 //   world X/Z centre with Y=0 (heights already encoded in vertices).
 // -------------------------------------------------------------------------
-void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
-                                      bool flattenTerrain, bool rebuildNeighbors)
+// -------------------------------------------------------------------------
+// flattenRoadTerrain — A-33 helper: flatten main tile terrain and flush.
+// Maximum road grade: 5% (0.05 rise/run). If steepest gradient exceeds this,
+// all four corner heights are scaled toward their average until max gradient
+// equals exactly 5%. Tiles below the threshold are left as-is.
+// Only setTileHeight() is called — no flush per-call — so all height writes
+// are committed in one flushTerrainRebuilds() call (prevents shared-corner cascade).
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::flattenRoadTerrain(int tileX, int tileZ)
 {
-    if (!m_smgr || !m_driver) return;
+    if (!m_terrain) return;
 
-    // Remove any existing road on this tile first (before mesh build to avoid
-    // a stale node blocking the registry slot).
-    destroyTileNode(m_roadNodes, tileX, tileZ);
-
-    // Ensure shader and shared LOD1/LOD2 meshes are ready (idempotent).
-    initRoadShader();
-    ensureRoadMeshes();
-
-    // Affected tile radius for Phase 3.
-    // setTileHeight() applies weighted neighbour blending: each call modifies not
-    // only the target vertex but also its 8 surrounding vertices (cardinal ×0.5,
-    // diagonal ×0.25).  Flattening the 4 corners of this tile therefore touches
-    // vertices in the range [tileX-1..tileX+2] × [tileZ-1..tileZ+2].  A road tile
-    // at offset (dx, dz) is affected if any of its 4 corner vertices falls in that
-    // range.  The maximum Manhattan offset for such a tile is |dx| ≤ 2, |dz| ≤ 2,
-    // requiring a 5×5 rebuild area (dx, dz ∈ [-2..+2], centre excluded).
-    // Rebuilding only ±1 (8 neighbours) leaves tiles 2 steps away with road meshes
-    // built from pre-blend heights while the terrain uses post-blend heights → seam.
-
-    // --- Phase 1: flatten main tile + road neighbors, then flush once ---
-    //
-    // Maximum road grade: 5% (0.05 rise/run).  If the steepest gradient across
-    // the tile exceeds this, all four corner heights are scaled toward their
-    // average until the max gradient equals exactly 5%.  Tiles below the
-    // threshold are left as-is (roads can tilt naturally up to ~5%).
-    //
-    // Only setTileHeight() is called here — no flush, no mesh rebuild — so that
-    // all height writes for this tile and its neighbors are committed in one
-    // flushTerrainRebuilds() call.  This prevents the shared-corner cascade
-    // where a neighbor's flush overwrites a corner that this tile already read.
     static constexpr float kMaxRoadGrade = 0.05f;  // 5% grade (0.05 rise/run)
 
-    auto flattenTile = [&](int tx, int tz) {
-        if (!m_terrain) return;
-        float f00 = m_terrain->getHeightAt(tx,     tz);
-        float f10 = m_terrain->getHeightAt(tx + 1, tz);
-        float f01 = m_terrain->getHeightAt(tx,     tz + 1);
-        float f11 = m_terrain->getHeightAt(tx + 1, tz + 1);
+    float f00 = m_terrain->getHeightAt(tileX,     tileZ);
+    float f10 = m_terrain->getHeightAt(tileX + 1, tileZ);
+    float f01 = m_terrain->getHeightAt(tileX,     tileZ + 1);
+    float f11 = m_terrain->getHeightAt(tileX + 1, tileZ + 1);
 
-        // Gradient magnitude at each corner (X and Z components separately,
-        // combined as sqrt(dX² + dZ²)).
-        const float dX0 = (f10 - f00) / kTileSize;
-        const float dX1 = (f11 - f01) / kTileSize;
-        const float dZ0 = (f01 - f00) / kTileSize;
-        const float dZ1 = (f11 - f10) / kTileSize;
+    // Gradient magnitude at each corner (X and Z components separately,
+    // combined as sqrt(dX² + dZ²)).
+    const float dX0 = (f10 - f00) / kTileSize;
+    const float dX1 = (f11 - f01) / kTileSize;
+    const float dZ0 = (f01 - f00) / kTileSize;
+    const float dZ1 = (f11 - f10) / kTileSize;
 
-        auto mag = [](float a, float b) { return std::sqrt(a*a + b*b); };
-        const float gradeMax = std::max({
-            mag(dX0, dZ0), mag(dX0, dZ1),
-            mag(dX1, dZ0), mag(dX1, dZ1)
-        });
+    auto mag = [](float a, float b) { return std::sqrt(a*a + b*b); };
+    const float gradeMax = std::max({
+        mag(dX0, dZ0), mag(dX0, dZ1),
+        mag(dX1, dZ0), mag(dX1, dZ1)
+    });
 
-        if (gradeMax > kMaxRoadGrade) {
-            const float scale = kMaxRoadGrade / gradeMax;
-            const float avg = (f00 + f10 + f01 + f11) * 0.25f;
-            f00 = avg + (f00 - avg) * scale;
-            f10 = avg + (f10 - avg) * scale;
-            f01 = avg + (f01 - avg) * scale;
-            f11 = avg + (f11 - avg) * scale;
-            m_terrain->setTileHeight(tx,     tz,     f00);
-            m_terrain->setTileHeight(tx + 1, tz,     f10);
-            m_terrain->setTileHeight(tx,     tz + 1, f01);
-            m_terrain->setTileHeight(tx + 1, tz + 1, f11);
-        }
-        // Grade ≤ 5%: leave heights as-is; road will naturally tilt.
-    };
-
-    if (flattenTerrain && m_terrain) {
-        // Flatten ONLY the main tile.  Flattening neighbors here would cause each
-        // neighbor's flattenTile() to read the already-modified shared corners
-        // (written by the main tile), compute a different average, and overwrite
-        // those same corners with a different value.  Phase 2 would then re-read
-        // the neighbor-corrupted values and produce an inconsistent main tile mesh.
-        // Neighbors need their meshes rebuilt from the correct terrain (Phase 3),
-        // not their terrain re-flattened.
-        flattenTile(tileX, tileZ);
-        // Single flush: commits the height writes to the terrain heightmap and
-        // triggers chunk rebuilds.  No further setTileHeight calls follow.
-        m_terrain->flushTerrainRebuilds();
+    if (gradeMax > kMaxRoadGrade) {
+        const float scale = kMaxRoadGrade / gradeMax;
+        const float avg = (f00 + f10 + f01 + f11) * 0.25f;
+        f00 = avg + (f00 - avg) * scale;
+        f10 = avg + (f10 - avg) * scale;
+        f01 = avg + (f01 - avg) * scale;
+        f11 = avg + (f11 - avg) * scale;
+        m_terrain->setTileHeight(tileX,     tileZ,     f00);
+        m_terrain->setTileHeight(tileX + 1, tileZ,     f10);
+        m_terrain->setTileHeight(tileX,     tileZ + 1, f01);
+        m_terrain->setTileHeight(tileX + 1, tileZ + 1, f11);
     }
+    // Grade ≤ 5%: leave heights as-is; road will naturally tilt.
 
-    // --- Phase 2: re-read heights from terrain (after all modifications) ---
-    // Reading back after the flush guarantees the mesh is built from the same
-    // height values that are now stored in the terrain, matching every neighbor.
-    float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
-    float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
-    float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
-    float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
+    // Single flush: commits the height writes to the terrain heightmap and
+    // triggers chunk rebuilds. No further setTileHeight calls follow for this tile.
+    m_terrain->flushTerrainRebuilds();
+}
 
-    // Detect E/W orientation: tile has at least one E/W neighbour but no N/S neighbours.
-    // Intersections and T-junctions (both N/S and E/W neighbours present) use N/S geometry.
-    const bool hasNS_dir = m_roadNodes.count(tileKey(tileX, tileZ - 1)) > 0
-                        || m_roadNodes.count(tileKey(tileX, tileZ + 1)) > 0;
-    const bool hasEW_dir = m_roadNodes.count(tileKey(tileX + 1, tileZ)) > 0
-                        || m_roadNodes.count(tileKey(tileX - 1, tileZ)) > 0;
-    const bool isEW = hasEW_dir && !hasNS_dir;
-
-    // --- Build per-tile LOD0 terrain-conforming mesh ---
+// -------------------------------------------------------------------------
+// buildRoadSceneNode — A-33 helper: create scene node and LODNode for one road tile.
+// Returns the new LODNode* (caller registers in m_roadNodes), or nullptr on failure.
+// -------------------------------------------------------------------------
+LODNode* IrrlichtRenderer::buildRoadSceneNode(int tileX, int tileZ,
+                                               float h00, float h10, float h01, float h11,
+                                               bool isEW)
+{
     SMesh* tileMesh = buildTileRoadMesh(h00, h10, h01, h11, isEW);
     if (!tileMesh) {
         char buf[256];
         std::snprintf(buf, sizeof(buf),
-            "[IrrlichtRenderer] placeRoadMesh(%d,%d): buildTileRoadMesh"
+            "[IrrlichtRenderer] buildRoadSceneNode(%d,%d): buildTileRoadMesh"
             " failed — node not created", tileX, tileZ);
-        if (m_logger) {
-            m_logger->log(buf, irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
-        }
-        return;
+        logWarning(buf);
+        return nullptr;
     }
 
     // Create scene node.  addMeshSceneNode() calls grab() → tileMesh ref_count 1→2.
@@ -2217,14 +2184,10 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
     if (!node) {
         char buf[256];
         std::snprintf(buf, sizeof(buf),
-            "[IrrlichtRenderer] placeRoadMesh(%d,%d): addMeshSceneNode"
+            "[IrrlichtRenderer] buildRoadSceneNode(%d,%d): addMeshSceneNode"
             " failed — node not created", tileX, tileZ);
-        if (m_logger) {
-            m_logger->log(buf, irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
-        }
-        return;
+        logWarning(buf);
+        return nullptr;
     }
 
     // Position node at tile world X/Z centre with Y=0.
@@ -2268,33 +2231,93 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
 
     // Wrap in LODNode.
     // LOD transitions (swap to m_sharedRoadMeshLOD1/LOD2) are a future per-frame
-    // update path; distance thresholds stored for documentation.
-    static constexpr float kRoadLOD0to1 = 50.0f;
-    static constexpr float kRoadLOD1to2 = 150.0f;
-    static constexpr float kRoadCullDist = 300.0f;
-    (void)kRoadLOD0to1; (void)kRoadLOD1to2; (void)kRoadCullDist;
+    // update path; distance thresholds now in RoadLOD namespace (render_constants.h, A-14).
+    (void)RoadLOD::kLOD0to1; (void)RoadLOD::kLOD1to2; (void)RoadLOD::kCullDist;
 
-    LODNode* lodNode = new LODNode(node);
+    return new LODNode(node);
+}
+
+// -------------------------------------------------------------------------
+// rebuildRoadNeighbors — A-33 helper: rebuild road tile meshes in the ±2 area.
+// Called after the main tile node has been created. Rebuilds all road tiles
+// within ±2 of (tileX, tileZ) that already exist in m_roadNodes.
+// flattenTerrain=false, rebuildNeighbors=false to prevent cascade/recursion.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::rebuildRoadNeighbors(int tileX, int tileZ)
+{
+    for (int dz = -2; dz <= 2; ++dz) {
+        for (int dx = -2; dx <= 2; ++dx) {
+            if (dx == 0 && dz == 0) continue;  // main tile already built
+            const int nx = tileX + dx;
+            const int nz = tileZ + dz;
+            if (m_roadNodes.count(tileKey(nx, nz)) > 0) {
+                placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
+                                      /*rebuildNeighbors=*/false);
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------------------
+// placeRoadMesh — place or rebuild the road tile scene node at (tileX, tileZ).
+//
+// Phase 1 (flattenTerrain): flatten main tile terrain and flush rebuilds.
+// Phase 2: re-read heights from terrain and detect orientation.
+// Phase 3 (rebuildNeighbors): rebuild road meshes in the 5×5 affected area.
+// -------------------------------------------------------------------------
+void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
+                                      bool flattenTerrain, bool rebuildNeighbors)
+{
+    if (!m_smgr || !m_driver) return;
+
+    // Remove any existing road on this tile first (before mesh build to avoid
+    // a stale node blocking the registry slot).
+    destroyTileNode(m_roadNodes, tileX, tileZ);
+
+    // Ensure shader and shared LOD1/LOD2 meshes are ready (idempotent).
+    initRoadShader();
+    ensureRoadMeshes();
+
+    // --- Phase 1: flatten main tile terrain and flush once ---
+    // Flatten ONLY the main tile. Flattening neighbors here would cause each
+    // neighbor's flatten to read already-modified shared corners and overwrite them
+    // with a different average. Neighbors need their meshes rebuilt (Phase 3),
+    // not their terrain re-flattened.
+    if (flattenTerrain && m_terrain) {
+        flattenRoadTerrain(tileX, tileZ);
+    }
+
+    // --- Phase 2: re-read heights from terrain (after all modifications) ---
+    // Reading back after the flush guarantees the mesh is built from the same
+    // height values that are now stored in the terrain, matching every neighbor.
+    float h00 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ)     : 0.0f;
+    float h10 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ)     : 0.0f;
+    float h01 = m_terrain ? m_terrain->getHeightAt(tileX,     tileZ + 1) : 0.0f;
+    float h11 = m_terrain ? m_terrain->getHeightAt(tileX + 1, tileZ + 1) : 0.0f;
+
+    // Detect E/W orientation: tile has at least one E/W neighbour but no N/S neighbours.
+    // Intersections and T-junctions (both N/S and E/W neighbours present) use N/S geometry.
+    const bool hasNS_dir = (m_roadNodes.count(tileKey(tileX, tileZ - 1)) > 0)
+                        || (m_roadNodes.count(tileKey(tileX, tileZ + 1)) > 0);
+    const bool hasEW_dir = (m_roadNodes.count(tileKey(tileX + 1, tileZ)) > 0)
+                        || (m_roadNodes.count(tileKey(tileX - 1, tileZ)) > 0);
+    const bool isEW = hasEW_dir && !hasNS_dir;
+
+    // Build scene node and LODNode wrapper.
+    LODNode* lodNode = buildRoadSceneNode(tileX, tileZ, h00, h10, h01, h11, isEW);
+    if (!lodNode) return;
     m_roadNodes[tileKey(tileX, tileZ)] = lodNode;
 
     // --- Phase 3: rebuild road meshes in the 5×5 affected area ---
     // Terrain was already flushed in Phase 1.  Any road tile within ±2 tiles
     // may have had a corner vertex modified by setTileHeight's blending; rebuild
     // all such tiles so their meshes match the updated terrain.
-    // flattenTerrain=false: no second height writes (prevents cascade).
-    // rebuildNeighbors=false: prevents infinite recursion.
+    // setTileHeight() applies weighted neighbour blending: each call modifies not
+    // only the target vertex but also its 8 surrounding vertices (cardinal ×0.5,
+    // diagonal ×0.25). The maximum Manhattan offset for an affected tile is
+    // |dx| ≤ 2, |dz| ≤ 2, requiring a 5×5 rebuild area.
     if (rebuildNeighbors) {
-        for (int dz = -2; dz <= 2; ++dz) {
-            for (int dx = -2; dx <= 2; ++dx) {
-                if (dx == 0 && dz == 0) continue;  // main tile already built above
-                const int nx = tileX + dx;
-                const int nz = tileZ + dz;
-                if (m_roadNodes.count(tileKey(nx, nz)) > 0) {
-                    placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
-                                          /*rebuildNeighbors=*/false);
-                }
-            }
-        }
+        rebuildRoadNeighbors(tileX, tileZ);
     }
 }
 
@@ -2336,11 +2359,7 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
             "[IrrlichtRenderer] placeServiceBuildingMesh(%d,%d): "
             "unknown ServiceBuildingType %d — skipping",
             tileX, tileZ, static_cast<int>(type));
-        if (m_logger) {
-            m_logger->log(buf, irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
-        }
+        logWarning(buf);
         return;
     }
 
@@ -2348,45 +2367,10 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
     destroyTileNode(m_buildingNodes, tileX, tileZ);
 
     // Full-footprint terrain flattening (Phase 11l Deliverable 3):
-    // Service buildings have a fixed 2x2 tile footprint (footprintN = 2).
-    // Average all (footprintN+1)x(footprintN+1) = 3x3 = 9 corner vertex heights,
-    // then flatten every corner to that average so the ground plate sits flush
-    // with terrain across the entire 2x2 footprint.
-    // Runs unconditionally when m_terrain is set — independent of whether the scene
-    // node is created successfully, so terrain is always consistent on placement.
+    // Service buildings have a fixed 2×2 tile footprint (footprintN = 2).
+    // flattenFootprint() averages corners, flattens, flushes, and rebuilds road tiles.
     static constexpr int kSvcFootprintN = 2;
-    float svcHeightSum   = 0.0f;
-    int   svcHeightCount = 0;
-    for (int cx = 0; cx <= kSvcFootprintN; ++cx) {
-        for (int cz = 0; cz <= kSvcFootprintN; ++cz) {
-            svcHeightSum += m_terrain ? m_terrain->getHeightAt(tileX + cx, tileZ + cz) : 0.0f;
-            ++svcHeightCount;
-        }
-    }
-    const float svcTargetH = (svcHeightCount > 0) ? (svcHeightSum / svcHeightCount) : 0.0f;
-    if (m_terrain) {
-        for (int cx = 0; cx <= kSvcFootprintN; ++cx)
-            for (int cz = 0; cz <= kSvcFootprintN; ++cz)
-                m_terrain->setTileHeight(tileX + cx, tileZ + cz, svcTargetH);
-        m_terrain->flushTerrainRebuilds();
-    }
-
-    // Rebuild road tiles within +(kSvcFootprintN+2) of the service building origin.
-    // setTileHeight() applies weighted neighbour blending to surrounding vertices;
-    // for the 2x2 footprint the affected radius grows to kSvcFootprintN + 2 = 4.
-    {
-        const int rebuildRadius = kSvcFootprintN + 2;
-        for (int dz = -rebuildRadius; dz <= kSvcFootprintN + rebuildRadius; ++dz) {
-            for (int dx = -rebuildRadius; dx <= kSvcFootprintN + rebuildRadius; ++dx) {
-                if (dx >= 0 && dx < kSvcFootprintN && dz >= 0 && dz < kSvcFootprintN) continue;
-                const int nx = tileX + dx;
-                const int nz = tileZ + dz;
-                if (m_roadNodes.count(tileKey(nx, nz)) > 0)
-                    placeRoadMesh(nx, nz, /*flattenTerrain=*/false,
-                                          /*rebuildNeighbors=*/false);
-            }
-        }
-    }
+    const float svcTargetH = flattenFootprint(tileX, tileZ, kSvcFootprintN);
 
     std::string basePath = std::string(AITOWN_ASSETS_DIR) +
                            "/3d/buildings/" + stem;
@@ -2398,11 +2382,7 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
             "[IrrlichtRenderer] placeServiceBuildingMesh(%d,%d): "
             "failed to load asset '%s' — node not created",
             tileX, tileZ, basePath.c_str());
-        if (m_logger) {
-            m_logger->log(buf, irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
-        }
+        logWarning(buf);
         return;
     }
 
@@ -2427,18 +2407,7 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
         // Zone-colour fallback (amber) for service buildings — only used when
         // the atlas was not successfully bound by BuildingAssetLoader::load().
         video::ITexture* zoneTex = getOrCreateZoneTexture("svc_");
-
-        for (u32 m = 0; m < node->getMaterialCount(); ++m) {
-            video::SMaterial& mat = node->getMaterial(m);
-            mat.Lighting = false;
-            // Disable backface culling — same rationale as placeBuildingMesh().
-            mat.BackfaceCulling = false;
-            // Polygon offset: push the service building base toward the camera so it
-            // wins the depth test against the co-planar terrain quad at all distances.
-            mat.PolygonOffsetDirection = irr::video::EPO_FRONT;
-            mat.PolygonOffsetFactor    = 1;
-            if (!mat.getTexture(0) && zoneTex) mat.setTexture(0, zoneTex);
-        }
+        applyBuildingMaterialDefaults(node, zoneTex);
     }
 
     // Service buildings share the m_buildingNodes registry with zone buildings:
@@ -2480,14 +2449,8 @@ bool IrrlichtRenderer::ensureVehicleLoader()
 {
     if (m_vehicleAssetLoader) return true;
     if (!m_smgr || !m_driver) {
-        if (m_logger) {
-            m_logger->log("[IrrlichtRenderer] ensureVehicleLoader() called with null "
-                "m_smgr/m_driver — vehicle scene node cannot be created", irr::ELL_WARNING);
-        } else {
-            fprintf(stderr,
-                "[IrrlichtRenderer WARNING] ensureVehicleLoader() called with null "
-                "m_smgr/m_driver — vehicle scene node cannot be created\n");
-        }
+        logWarning("[IrrlichtRenderer] ensureVehicleLoader() called with null "
+            "m_smgr/m_driver — vehicle scene node cannot be created");
         return false;
     }
     m_vehicleAssetLoader = std::make_unique<BuildingAssetLoader>(m_smgr, m_driver);
@@ -2523,7 +2486,7 @@ void IrrlichtRenderer::destroyVehicleNode(uint32_t vehicleId)
             }
         }
         // Step 2: flush driver last-bound state.
-        
+        m_driver->setMaterial(SMaterial{});
         // Step 3: remove scene node from the scene graph.
         node->remove();  // do NOT access node* after this
     }
@@ -2552,11 +2515,7 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
         std::snprintf(buf, sizeof(buf),
             "[IrrlichtRenderer] placeVehicle(id=%u) called with empty "
             "assetName — skipping node creation", vehicleId);
-        if (m_logger) {
-            m_logger->log(buf, irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
-        }
+        logWarning(buf);
         return;
     }
 
@@ -2574,11 +2533,7 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
         std::snprintf(buf, sizeof(buf),
             "[IrrlichtRenderer] placeVehicle(id=%u): failed to load "
             "asset '%s' — node not created", vehicleId, basePath.c_str());
-        if (m_logger) {
-            m_logger->log(buf, irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
-        }
+        logWarning(buf);
         return;
     }
 
@@ -2595,7 +2550,7 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
         // mixed winding after the axis-reorientation pass; disabling culling
         // guarantees all faces are visible from any camera angle, matching
         // the approach used for building assets.
-        // Lighting=false: no light nodes in scene yet (Phase 6+).
+        // Lighting=false: V1 uses no dynamic light nodes (same rationale as buildings).
         // Atlas fallback: if BuildingAssetLoader did not bind the atlas (file missing),
         // bind vehicles_diffuse_atlas_d.dds directly as a safety fallback.
         const std::string atlasPath = std::string(AITOWN_ASSETS_DIR)
@@ -2635,11 +2590,7 @@ void IrrlichtRenderer::moveVehicle(uint32_t vehicleId,
             "[IrrlichtRenderer] moveVehicle(id=%u): vehicleId not "
             "registered — ignoring move (caller should use placeVehicle first)",
             vehicleId);
-        if (m_logger) {
-            m_logger->log(buf, irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
-        }
+        logWarning(buf);
         return;
     }
 
@@ -2722,13 +2673,13 @@ void IrrlichtRenderer::removeVehicle(uint32_t vehicleId)
 // -------------------------------------------------------------------------
 static SMesh* buildCloudDomeMesh()
 {
-    constexpr int   kDomeRings         = 32;     // latitude bands — keep fade smooth
-    constexpr int   kDomeSectors       = 32;     // longitude segments
-    constexpr float kCloudAltitude     = -1000.0f;  // base ring 1000 m below camera — atan(-1000/6000)≈-9.5°,
-                                                    // safely below the horizon so base is fully transparent
-    constexpr float kCloudDomeRadius   = 6000.0f;   // horizontal radius — must be < far clip (15000 m)
-    constexpr float kCloudDomeHeight   = 2000.0f;   // apex 1000 m above camera (-1000+2000), base 1000 m below
-    constexpr float kCloudUVScale      = 4.0f;   // texture tiling factor
+    // Geometry constants from render_constants.h CloudDome namespace (A-12).
+    const int   kDomeRings       = CloudDome::kRings;
+    const int   kDomeSectors     = CloudDome::kSectors;
+    const float kCloudAltitude   = CloudDome::kAltitude;
+    const float kCloudDomeRadius = CloudDome::kRadius;
+    const float kCloudDomeHeight = CloudDome::kHeight;
+    const float kCloudUVScale    = CloudDome::kUVScale;
     // Vertex alpha: always 255 (fully opaque in vertex color).
     // Horizon fade is handled entirely in the fragment shader using elevation angle.
     // In EMT_TRANSPARENT_VERTEX_ALPHA fallback (shader compile failure) the dome
@@ -2909,11 +2860,7 @@ void IrrlichtRenderer::initCloudPlane()
                     "[IrrlichtRenderer] cloud dome shader compile failed "
                     "(vs=%s, fs=%s) — falling back to EMT_TRANSPARENT_VERTEX_ALPHA",
                     vsPath.c_str(), fsPath.c_str());
-                if (m_logger) {
-                    m_logger->log(buf, irr::ELL_WARNING);
-                } else {
-                    fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", buf);
-                }
+                logWarning(buf);
                 cb->drop();   // shader failed — discard our reference
                 // cloudMatType stays EMT_TRANSPARENT_VERTEX_ALPHA (set above).
             } else {
@@ -3020,21 +2967,32 @@ void IrrlichtRenderer::update(float dt)
 // Distance cull: only agents within 150 m of getListenerPosition() are spawned.
 // -------------------------------------------------------------------------
 
+// vehicleAtlasPath — A-25: return the path to the vehicle diffuse atlas texture.
+// Uses PNG (not DDS): the DDS atlas uses BC1_UNORM_SRGB (DXGI format 72) which
+// Irrlicht's DDS loader does not recognise.
+static std::string vehicleAtlasPath()
+{
+    static const std::string kPath =
+        std::string(AITOWN_ASSETS_DIR) + "/textures/vehicles/vehicles_diffuse_atlas_d.png";
+    return kPath;
+}
+
 // Helper: return the vehicle mesh filename (relative to assets root) for a given zone/handle.
 static std::string vehicleMeshPath(ZoneType zone, AgentHandle handle)
 {
+    // A-18: hoist repeated path prefix into a single local variable.
+    static const std::string kVehicleDir = std::string(AITOWN_ASSETS_DIR) + "/3d/vehicles/";
     switch (zone) {
         case ZoneType::Residential: {
             const char* variants[3] = {"car_sedan", "car_hatchback", "car_suv"};
-            return std::string(AITOWN_ASSETS_DIR) + "/3d/vehicles/"
-                   + variants[handle % 3] + "_lod0.b3d";
+            return kVehicleDir + variants[handle % 3] + "_lod0.b3d";
         }
         case ZoneType::Commercial:
-            return std::string(AITOWN_ASSETS_DIR) + "/3d/vehicles/bus_standard_lod0.b3d";
+            return kVehicleDir + "bus_standard_lod0.b3d";
         case ZoneType::Industrial:
-            return std::string(AITOWN_ASSETS_DIR) + "/3d/vehicles/truck_cargo_lod0.b3d";
+            return kVehicleDir + "truck_cargo_lod0.b3d";
     }
-    return std::string(AITOWN_ASSETS_DIR) + "/3d/vehicles/car_sedan_lod0.b3d";
+    return kVehicleDir + "car_sedan_lod0.b3d";
 }
 
 void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone)
@@ -3042,7 +3000,7 @@ void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tile
     if (!m_smgr || !m_driver) return;
 
     // If a node already exists for this handle, despawn first (replace guard).
-    if (m_agentNodes.count(handle)) {
+    if (m_agentNodes.count(handle) > 0) {
         despawnVehicleAgent(handle);
     }
 
@@ -3052,11 +3010,7 @@ void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tile
     if (!animMesh) {
         std::string meshMsg = "[IrrlichtRenderer] spawnVehicleAgent: mesh not found: ";
         meshMsg += meshPath;
-        if (m_logger) {
-            m_logger->log(meshMsg.c_str(), irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[IrrlichtRenderer WARNING] %s\n", meshMsg.c_str());
-        }
+        logWarning(meshMsg);
         return;
     }
 
@@ -3070,14 +3024,12 @@ void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tile
     node->setPosition(core::vector3df(wx, 0.0f, wz));
     node->setRotation(core::vector3df(0.0f, 0.0f, 0.0f));
 
-    // Apply vehicle atlas texture. Use PNG — the DDS atlas uses BC1_UNORM_SRGB
-    // (DXGI format 72) which Irrlicht's DDS loader does not recognise.
-    ITexture* vehicleTex = m_driver->getTexture(
-        (std::string(AITOWN_ASSETS_DIR) + "/textures/vehicles/vehicles_diffuse_atlas_d.png").c_str());
+    // Apply vehicle atlas texture via vehicleAtlasPath() (A-25).
+    ITexture* vehicleTex = m_driver->getTexture(vehicleAtlasPath().c_str());
 
     for (u32 m = 0; m < node->getMaterialCount(); ++m) {
         SMaterial& mat = node->getMaterial(m);
-        mat.Lighting = false;
+        mat.Lighting = false;  // no dynamic light nodes in V1; all shading is ambient + baked
         // BackfaceCulling=false: procedural B3D assets may have inverted or
         // mixed winding after the axis-reorientation pass; disabling culling
         // ensures the vehicle is visible from all camera angles.
@@ -3085,10 +3037,6 @@ void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tile
         if (vehicleTex && !mat.getTexture(0)) {
             mat.setTexture(0, vehicleTex);
         }
-    }
-    // Ensure slot 0 always gets the atlas even if it already had a texture bound.
-    if (vehicleTex) {
-        node->getMaterial(0).setTexture(0, vehicleTex);
     }
 
     m_agentNodes[handle] = node;
@@ -3128,22 +3076,24 @@ void IrrlichtRenderer::moveVehicleAgent(AgentHandle handle, float worldX, float 
         // Determine primary direction from headingDeg.
         // headingDeg: 0=+Z (north), 90=+X (east), 180=-Z (south), 270=-X (west).
         // Normalize to [0,360).
-        float h = headingDeg;
-        while (h < 0.0f)   h += 360.0f;
-        while (h >= 360.0f) h -= 360.0f;
+        float h = std::fmod(headingDeg, 360.0f);
+        if (h < 0.0f) h += 360.0f;
 
-        if (h < 45.0f || h >= 315.0f) {
-            // Northbound (+Z): offset worldX += kLaneCenterOffset
-            laneX += kLaneCenterOffset;
-        } else if (h >= 45.0f && h < 135.0f) {
-            // Eastbound (+X): offset worldZ += kLaneCenterOffset
-            laneZ += kLaneCenterOffset;
-        } else if (h >= 135.0f && h < 225.0f) {
-            // Southbound (-Z): offset worldX -= kLaneCenterOffset
-            laneX -= kLaneCenterOffset;
-        } else {
-            // Westbound (-X): offset worldZ -= kLaneCenterOffset
-            laneZ -= kLaneCenterOffset;
+        // Bin heading into one of four 90° quadrants.
+        // headingDeg: 0=+Z (north), 90=+X (east), 180=-Z (south), 270=-X (west).
+        // Quadrant 0: [315, 360) ∪ [0, 45)  → Northbound
+        // Quadrant 1: [45,  135)             → Eastbound
+        // Quadrant 2: [135, 225)             → Southbound
+        // Quadrant 3: [225, 315)             → Westbound
+        const int quadrant = (h < 45.0f || h >= 315.0f) ? 0
+                           : (h < 135.0f)               ? 1
+                           : (h < 225.0f)               ? 2
+                                                         : 3;
+        switch (quadrant) {
+            case 0:  laneX += kLaneCenterOffset; break;  // Northbound (+Z)
+            case 1:  laneZ += kLaneCenterOffset; break;  // Eastbound  (+X)
+            case 2:  laneX -= kLaneCenterOffset; break;  // Southbound (-Z)
+            default: laneZ -= kLaneCenterOffset; break;  // Westbound  (-X)
         }
     }
 
@@ -3188,7 +3138,7 @@ void IrrlichtRenderer::setIntersectionSignalState(int tileX, int tileZ, SignalPh
 {
     if (!m_smgr || !m_driver) return;
 
-    int key = tileX * 10000 + tileZ;
+    uint64_t key = tileKey(tileX, tileZ);
 
     // Determine signal colour.
     SColor signalColour = (phase == SignalPhase::Green)
@@ -3305,13 +3255,9 @@ void IrrlichtRenderer::showServiceCoverageOverlay(int tileX, int tileZ,
     }
 
     // Decode ARGB for SColor(A, R, G, B).
-    u8 ca = static_cast<u8>((argb >> 24) & 0xFF);
-    u8 cr = static_cast<u8>((argb >> 16) & 0xFF);
-    u8 cg = static_cast<u8>((argb >>  8) & 0xFF);
-    u8 cb = static_cast<u8>( argb        & 0xFF);
-    SColor colour(ca, cr, cg, cb);
+    SColor colour = argbToSColor(argb);
 
-    const float yOffset = 0.08f;  // slightly above placement preview to avoid z-fighting
+    const float yOffset = RenderConstants::kCoverageOverlayYOffset;
 
     SMesh*       mesh      = new SMesh();
     SMeshBuffer* cur       = new SMeshBuffer();
@@ -3425,11 +3371,12 @@ void IrrlichtRenderer::showServiceCoverageOverlay(int tileX, int tileZ,
         // Enumerate all tiles within radiusM via Euclidean distance check.
         // -----------------------------------------------------------------------
         int radiusTiles = static_cast<int>(radiusM / kTileSize) + 1;
+        const float radiusSq = radiusM * radiusM;
 
         for (int dz = -radiusTiles; dz <= radiusTiles; ++dz) {
             for (int dx = -radiusTiles; dx <= radiusTiles; ++dx) {
-                float dist = std::sqrt(static_cast<float>(dx*dx + dz*dz)) * kTileSize;
-                if (dist > radiusM) continue;
+                float distSq = static_cast<float>(dx*dx + dz*dz) * (kTileSize * kTileSize);
+                if (distSq > radiusSq) continue;
 
                 int tx = tileX + dx;
                 int tz = tileZ + dz;

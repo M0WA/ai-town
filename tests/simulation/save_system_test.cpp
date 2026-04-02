@@ -1,19 +1,17 @@
-// save_system_test.cpp — Phase 11 save system unit tests.
-// Tests use mock-based stubs since CitySimulation and SaveSystem are stub
-// implementations at this phase. Each test documents the behaviour it will
-// enforce once the real implementation lands.
+// save_system_test.cpp — Contract-level unit tests for the SaveSystem interface.
+// These tests exercise the serialization/deserialization contract using a
+// hand-written in-process stub that avoids all disk I/O, making them safe to
+// run in headless CI without a writable filesystem or real save paths.
+//
+// This file is intentionally kept alongside save_system_real_test.cpp:
+//   - save_system_test.cpp     — stub-based contract tests (this file); fast,
+//                                deterministic, no filesystem side-effects.
+//   - save_system_real_test.cpp — integration tests against the real SaveSystem
+//                                 and CitySimulation; labelled "integration".
 //
 // All tests: CMake target simulation_tests, label "unit".
-// Mock policy: StrictMock for unit tests (per CLAUDE.md).
-//
-// CitySimulation and SaveSystem interfaces are declared below as minimal
-// abstract interfaces matching the Phase 11 spec contracts. The concrete
-// classes will implement these when Phase 11 is fully delivered; these
-// tests will then compile unchanged against the real implementations.
-//
-// SaveSystemTest uses NiceMock where the system under test (SaveSystem) is
-// driven via its interface, and StrictMock for the city simulation mock to
-// ensure no unexpected calls are made.
+// Mock policy: StrictMock for the city simulation mock (no unexpected calls);
+//              hand-written stubs replace SaveSystem to eliminate I/O.
 
 #include "src/interfaces/IClock.h"
 #include "ManualClock.h"

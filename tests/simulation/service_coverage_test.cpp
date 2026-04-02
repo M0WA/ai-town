@@ -31,16 +31,10 @@
 //
 // Source: tests/simulation/service_coverage_test.cpp
 
-#include "CitySimulation.h"
-#include "src/interfaces/ICitySimulation.h"
+#include "NiceSimulationTestBase.h"
 #include "src/interfaces/simulation_types.h"
 #include "src/interfaces/sound_ids.h"
 #include "src/simulation/simulation_constants.h"
-#include "MockAudioSystem.h"
-#include "MockRenderer.h"
-#include "ManualRNG.h"
-#include "ManualClock.h"
-#include "ManualTerrainQuery.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -57,58 +51,13 @@ using ::testing::Return;
 // ---------------------------------------------------------------------------
 // ServiceTest fixture
 // ---------------------------------------------------------------------------
-// NiceMock is used throughout service coverage tests. The degradation tests
-// that check audio expectations set explicit EXPECT_CALL before running ticks.
-// TearDown() resets sim_ first so CitySimulation destructor does not access
-// mock objects after they have been torn down (reverse declaration order
-// ensures renderer_/audio_ outlive sim_).
+// Inherits from NiceSimulationTestBase: NiceMock renderer_/audio_, ManualRNG,
+// ManualClock, ManualTerrainQuery, sim_, SetUp/TearDown, cs(), runTicks().
+// NiceMock suppresses incidental renderer/audio calls from placement.
+// Degradation tests set explicit EXPECT_CALL before running ticks.
 
-class ServiceTest : public ::testing::Test {
+class ServiceTest : public NiceSimulationTestBase {
 protected:
-    NiceMock<MockRenderer>    renderer_;
-    NiceMock<MockAudioSystem> audio_;
-    // Default RNG: strict=false, wraps; float sequence 0.9f prevents accidental
-    // degradation. Tests that need forced degradation construct their own ManualRNG
-    // values. Because ManualRNG constructor requires non-empty sequences we supply
-    // one int and one float.
-    ManualRNG    rng_;  // default: int={0}, float={0.9f}, non-strict
-    ManualClock  clock_;
-    ManualTerrainQuery terrain_;  // flat (0° slope); all tiles buildable
-
-    // sim_ declared LAST — destroyed first (reverse declaration order prevents
-    // use-after-free when CitySimulation destructor calls back into interfaces).
-    std::unique_ptr<ICitySimulation> sim_;
-
-    void SetUp() override {
-        sim_ = std::make_unique<CitySimulation>(
-            &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Normal);
-        sim_->setSpeed(SpeedMultiplier::x1);
-    }
-
-    void TearDown() override {
-        // Destroy sim_ before mock destructors to prevent use-after-free.
-        sim_.reset();
-    }
-
-    // Helper: downcast to access test-only API (addServiceBuilding, setModalOpen).
-    CitySimulation* cs() {
-        auto* p = dynamic_cast<CitySimulation*>(sim_.get());
-        EXPECT_NE(p, nullptr) << "Downcast to CitySimulation* failed";
-        return p;
-    }
-
-    // Helper: run N budget ticks at x1 speed (30 real seconds each).
-    // Advances ManualClock by SECONDS_PER_BUDGET_TICK per tick.
-    void runTicks(int n) {
-        auto* c = cs();
-        if (!c) return;
-        const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
-        for (int i = 0; i < n; ++i) {
-            clock_.advance(dt);
-            c->tick(dt);
-        }
-    }
-
     // Helper: advance clock past grace period (120 s) so deficit consequences fire.
     void expireGracePeriod() {
         clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);

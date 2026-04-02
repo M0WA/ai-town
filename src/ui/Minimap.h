@@ -1,5 +1,5 @@
 #pragma once
-#include "src/interfaces/IUIBackend.h"      // UIElementHandle, IUIBackend, Rect
+#include "src/interfaces/IUIBackend.h"      // UIElementHandle, IUIBackend, UIRect
 #include "src/interfaces/ICitySimulation.h" // ICitySimulation — for getRoadSegmentSpeeds / getServiceCoverage
 
 struct InputEvent;
@@ -24,17 +24,19 @@ public:
     void hide();
     void draw();
     bool onEvent(const InputEvent& event);
-    Rect getBounds() const;
+    UIRect getBounds() const;
 
     bool isOverlayActive() const { return m_overlayActive; }
     void toggleOverlay();
 
     // Phase 11d: wire ICitySimulation pointer so draw() can poll traffic/coverage data.
     // Called from UIManager constructor after m_sim is available.
-    void setSimulation(ICitySimulation* sim) { m_sim = sim; }
+    // Precondition: sim must not be null. Asserts in debug builds; logs and returns in release.
+    void setSimulation(ICitySimulation* sim);
 
     // Phase 11d: switch overlay mode explicitly (called from UIManager toolbar button).
-    void setOverlayMode(MinimapOverlay mode) { m_overlayMode = mode; }
+    // Guard: if Traffic mode is requested while m_sim == nullptr, falls back to None.
+    void setOverlayMode(MinimapOverlay mode);
     MinimapOverlay getOverlayMode() const { return m_overlayMode; }
 
 private:

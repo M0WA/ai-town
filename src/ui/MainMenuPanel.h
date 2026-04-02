@@ -25,7 +25,7 @@ public:
     void setAbortCheckpointPassed();
 
     // Polling API for UIManager: returns true (once) when "Start City" was clicked.
-    bool consumeStartGameRequest();
+    [[nodiscard]] bool consumeStartGameRequest();
     int getSelectedDifficulty() const { return m_selectedDifficulty; }
     MapSize getSelectedMapSize() const { return m_selectedMapSize; }
 
@@ -33,13 +33,13 @@ public:
     bool isOnMainMenuScreen() const { return m_screen == Screen::MainMenu; }
 
     // Returns true when on the Settings button (UIManager opens SettingsPanel).
-    bool consumeSettingsRequest();
+    [[nodiscard]] bool consumeSettingsRequest();
 
     // Returns true (once) when "Quit" was clicked or Enter-activated.
-    bool consumeQuitRequest();
+    [[nodiscard]] bool consumeQuitRequest();
 
     // Returns true (once) when "Load Game" was clicked while the button is enabled.
-    bool consumeLoadGameRequest();
+    [[nodiscard]] bool consumeLoadGameRequest();
 
     // Phase 11: Update Load Game button enabled state.
     // When available=false (default): button grayed with tooltip "No saves found."

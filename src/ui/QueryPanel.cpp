@@ -398,7 +398,7 @@ void InspectorPanel::draw() {
 // ---------------------------------------------------------------------------
 // getBounds
 // ---------------------------------------------------------------------------
-Rect InspectorPanel::getBounds() const {
+UIRect InspectorPanel::getBounds() const {
     return {m_panelX, m_panelY, kPanelW, kPanelH};
 }
 

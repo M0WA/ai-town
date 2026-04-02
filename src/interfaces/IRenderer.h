@@ -200,7 +200,7 @@ public:
     // Called once per budget tick when zone layout changes; NOT called every frame.
     // main-thread-only.
     virtual void setZoneOverlay(int mapTilesX, int mapTilesZ,
-                                const std::unordered_map<uint64_t, uint32_t>& sparseOverlay) = 0;
+                                const std::unordered_map<int64_t, uint32_t>& sparseOverlay) = 0;
 
     // getTileScreenBounds — return the screen bounding box of tile (tileX, tileZ).
     //

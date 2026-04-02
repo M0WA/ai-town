@@ -12,16 +12,12 @@
 //   6. HUD::setActiveToolLabel forwarding (called via UIManager when a toolbar
 //      button is pressed).
 //
-// Uses NiceMock<MockUIBackend> + NiceMock<MockCitySimulation> + ManualClock.
+// Inherits from UITestFixtureBase (NiceMock suite + standard ON_CALL stubs).
 // TearDown resets ui_ before mocks are destroyed (destructor-path contract).
 
-#include "src/ui/UIManager.h"
+#include "UITestBase.h"
 #include "src/ui/ui_types.h"
 #include "src/platform/input_event.h"
-#include "tests/ui/MockUIBackend.h"
-#include "tests/ui/MockCitySimulation.h"
-#include "tests/simulation/MockAudioSystem.h"
-#include "tests/simulation/ManualClock.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -38,49 +34,20 @@ using ::testing::HasSubstr;
 // ---------------------------------------------------------------------------
 // HUDCoverageTest fixture
 //
-// Sets up UIManager with a full NiceMock suite so draw() + update() can be
-// called without triggering unexpected-call failures.
+// Inherits the standard NiceMock suite and ON_CALL stubs from UITestFixtureBase.
+// Overrides getTreasuryBalance() to return 10000.0f (non-zero positive balance
+// needed by formatDollar and debt-label tests) and calls transitionToGameplay()
+// so HUD::draw() and HUD::update() are exercised.
 // ---------------------------------------------------------------------------
-class HUDCoverageTest : public ::testing::Test {
+class HUDCoverageTest : public UITestFixtureBase {
 protected:
     void SetUp() override {
-        ON_CALL(backend_, addStaticText(_, _, _, _, _)).WillByDefault(
-            [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
-        ON_CALL(backend_, addButton(_, _, _, _, _)).WillByDefault(
-            [this](const std::string&, int, int, int, int) { return ++nextHandle_; });
-        ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
-        ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
-        ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
-        // Default sim stubs
-        ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
-        ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
-        ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
-        ON_CALL(sim_, getSpeedMultiplier()).WillByDefault(Return(SpeedMultiplier::x1));
+        UITestFixtureBase::SetUp();
+        // Override the base's getTreasuryBalance(0.0f) stub — HUD tests need a
+        // positive balance so the formatDollar branch and debt-label logic fire.
         ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(10000.0f));
-        ON_CALL(sim_, getOutstandingDebt()).WillByDefault(Return(0.0f));
-        ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Village));
-        ON_CALL(sim_, getTotalPopulation()).WillByDefault(Return(0));
-        ON_CALL(sim_, getSimulationTime()).WillByDefault(Return(SimulationTime{1, 1}));
-        ON_CALL(sim_, getDemandPressurePct(_)).WillByDefault(Return(0.0f));
-        ON_CALL(sim_, hasUndoPendingAction()).WillByDefault(Return(false));
-        ON_CALL(sim_, getUndoExpiryTimeSeconds()).WillByDefault(Return(0.0));
-
-        ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
         ui_->transitionToGameplay(GameMode::Scenario);
     }
-
-    void TearDown() override {
-        ui_.reset();
-    }
-
-    NiceMock<MockUIBackend>      backend_;
-    NiceMock<MockAudioSystem>    audio_;
-    NiceMock<MockCitySimulation> sim_;
-    ManualClock                  clock_;
-    std::unique_ptr<UIManager>   ui_;
-    uint32_t                     nextHandle_{100};
 };
 
 // ---------------------------------------------------------------------------

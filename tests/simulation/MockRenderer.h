@@ -38,7 +38,7 @@
 class MockRenderer : public IRenderer {
 public:
     // Type alias to avoid comma-in-template-arg issue with MOCK_METHOD macro.
-    using ZoneOverlayMap = std::unordered_map<uint64_t, uint32_t>;
+    using ZoneOverlayMap = std::unordered_map<int64_t, uint32_t>;
 
     MockRenderer() {
         ON_CALL(*this, loadTexture(::testing::_))

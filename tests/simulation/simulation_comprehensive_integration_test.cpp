@@ -80,8 +80,8 @@ protected:
 // ---------------------------------------------------------------------------
 
 TEST_F(SimComprehensiveTest, InitialState_TreasuryEqualsNormalStartingFunds) {
-    // Normal difficulty: starting_funds = 500,000
-    EXPECT_FLOAT_EQ(sim_->getTreasuryBalance(), 500000.0f);
+    EXPECT_FLOAT_EQ(sim_->getTreasuryBalance(),
+                    static_cast<float>(SimulationConstants::starting_funds_normal));
 }
 
 TEST_F(SimComprehensiveTest, InitialState_PopulationIsZero) {
@@ -128,8 +128,8 @@ TEST(SimDifficultyTest, EasyDifficulty_StartingFunds_1M) {
     ManualClock clk;
     ManualTerrainQuery t;
     CitySimulation sim(&r, &a, &rng, &clk, &t, Difficulty::Easy);
-    // Easy = 1,000,000
-    EXPECT_FLOAT_EQ(sim.getTreasuryBalance(), 1000000.0f);
+    EXPECT_FLOAT_EQ(sim.getTreasuryBalance(),
+                    static_cast<float>(SimulationConstants::starting_funds_easy));
 }
 
 TEST(SimDifficultyTest, HardDifficulty_StartingFunds_200K) {
@@ -139,8 +139,8 @@ TEST(SimDifficultyTest, HardDifficulty_StartingFunds_200K) {
     ManualClock clk;
     ManualTerrainQuery t;
     CitySimulation sim(&r, &a, &rng, &clk, &t, Difficulty::Hard);
-    // Hard = 200,000
-    EXPECT_FLOAT_EQ(sim.getTreasuryBalance(), 200000.0f);
+    EXPECT_FLOAT_EQ(sim.getTreasuryBalance(),
+                    static_cast<float>(SimulationConstants::starting_funds_hard));
 }
 
 // ---------------------------------------------------------------------------

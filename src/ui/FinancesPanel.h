@@ -1,5 +1,6 @@
 #pragma once
-#include "src/interfaces/IUIBackend.h"  // UIElementHandle, IUIBackend, Rect
+#include "src/interfaces/IUIBackend.h"  // UIElementHandle, IUIBackend, UIRect
+#include <array>
 
 // Forward declarations — avoid pulling full headers into every consumer.
 class ICitySimulation;
@@ -56,9 +57,8 @@ private:
         UIElementHandle readout{kInvalidUIElement};
         UIElementHandle btnInc{kInvalidUIElement};
     };
-    ZoneRow m_rowR;  // Residential
-    ZoneRow m_rowC;  // Commercial
-    ZoneRow m_rowI;  // Industrial
+    // D-11 / UI-13: indexed by (int)ZoneType — [0]=Residential, [1]=Commercial, [2]=Industrial
+    std::array<ZoneRow, 3> m_rows{};
 
     UIElementHandle m_noUndoLabel{kInvalidUIElement};
 

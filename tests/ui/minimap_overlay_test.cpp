@@ -95,7 +95,16 @@ TEST_F(MinimapOverlayTest, ToggleOverlay_ActiveThenInactive_TogglesTwice) {
 // setOverlayMode / getOverlayMode
 // ===========================================================================
 
-TEST_F(MinimapOverlayTest, SetOverlayMode_Traffic_GetReturnsTraffic) {
+// D-17 guard: Traffic mode without sim wired falls back to None.
+TEST_F(MinimapOverlayTest, SetOverlayMode_Traffic_NoSim_FallsBackToNone) {
+    minimap_->setOverlayMode(MinimapOverlay::Traffic);
+    EXPECT_EQ(minimap_->getOverlayMode(), MinimapOverlay::None)
+        << "Traffic mode must fall back to None when m_sim == nullptr (D-17 guard).";
+}
+
+// D-17 guard: Traffic mode accepted when sim is wired.
+TEST_F(MinimapOverlayTest, SetOverlayMode_Traffic_WithSim_GetReturnsTraffic) {
+    minimap_->setSimulation(&sim_);
     minimap_->setOverlayMode(MinimapOverlay::Traffic);
     EXPECT_EQ(minimap_->getOverlayMode(), MinimapOverlay::Traffic);
 }
@@ -106,6 +115,8 @@ TEST_F(MinimapOverlayTest, SetOverlayMode_ServiceCoverage_GetReturnsServiceCover
 }
 
 TEST_F(MinimapOverlayTest, SetOverlayMode_None_GetReturnsNone) {
+    // Wire sim so Traffic is accepted as the intermediate state.
+    minimap_->setSimulation(&sim_);
     minimap_->setOverlayMode(MinimapOverlay::Traffic);  // change from default
     minimap_->setOverlayMode(MinimapOverlay::None);
     EXPECT_EQ(minimap_->getOverlayMode(), MinimapOverlay::None);

@@ -28,6 +28,12 @@ jobs:
   # prepare — exports workflow-level env vars as job outputs so they can be
   # referenced via needs context in reusable workflow with: blocks.
   # env context is NOT available in jobs.<job_id>.with; needs context IS available.
+  # Evaluated for removal (E-18): GitHub Actions does not support ${{ env.* }} in
+  # jobs.<id>.with for reusable workflow calls. The prepare job is the only supported
+  # mechanism to pass workflow-level env vars as reusable workflow inputs. It cannot
+  # be replaced with vars context (vars requires repository/org-level variable
+  # configuration) or direct string literals (would require duplicating the commit ID
+  # in every with: block, violating single-source-of-truth). Retain as-is.
   # ============================================================================
   prepare:
     runs-on: ubuntu-latest
@@ -221,31 +227,31 @@ jobs:
           fetch-depth: 0
 
       - name: Download Windows installer
-        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110  # v4.1.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: aitown-installer-windows-${{ github.sha }}
           path: ./release-assets/
 
       - name: Download Linux .deb (bookworm)
-        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110  # v4.1.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: aitown-deb-debian-bookworm-${{ github.sha }}
           path: ./release-assets/
 
       - name: Download Linux .deb (trixie)
-        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110  # v4.1.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: aitown-deb-debian-trixie-${{ github.sha }}
           path: ./release-assets/
 
       - name: Download Linux .deb (jammy)
-        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110  # v4.1.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: aitown-deb-ubuntu-jammy-${{ github.sha }}
           path: ./release-assets/
 
       - name: Download Linux .deb (noble)
-        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110  # v4.1.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: aitown-deb-ubuntu-noble-${{ github.sha }}
           path: ./release-assets/

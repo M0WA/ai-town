@@ -75,15 +75,11 @@ public:
     // Reset orbit parameters (pitch, yaw, zoom) to their defaults.
     // Call after setTarget() when starting a new game so the player gets a
     // clean top-down overview regardless of the previous session's camera state.
-    void resetOrbit() {
-        m_pitch        = -45.0f;
-        m_yaw          = 0.0f;
-        m_zoomDistance = kDefaultZoomDistance;
-    }
+    void resetOrbit();
 
 private:
     irr::scene::ICameraSceneNode* m_camera;
-    KeyBindings m_bindings;  // hotkey config (Phase 8 wires Q/E to rotate)
+    const KeyBindings m_bindings;  // set once in constructor initialiser list, never reassigned
 
     // Camera spherical coordinates
     float m_pitch{-45.0f};   // degrees, clamped to [-70, -20]

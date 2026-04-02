@@ -462,7 +462,8 @@ int main(int argc, char** argv) {
         // m_newGamePending flag set by the current frame's consumeStartGameRequest().
         if (uiManager.consumeNewGameRequest()) {
             NewGameParams ngp = uiManager.getNewGameParams();
-            int64_t startingFunds = SimulationConstants::startingFundsForDifficulty(ngp.difficulty);
+            int64_t startingFunds = SimulationConstants::startingFundsForDifficulty(
+                static_cast<Difficulty>(ngp.difficulty));
             citySimulation.reset(startingFunds);
             renderer.clearCity();
             StdTerrainRNG freshRng;
