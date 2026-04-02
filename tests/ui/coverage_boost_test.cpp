@@ -111,7 +111,7 @@ protected:
         ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         // Default: all elements at (0,0,0,0) — no hits unless explicitly overridden.
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
 
         modal_    = std::make_unique<ModalDialog>(&backend_, &sim_);
         settings_ = std::make_unique<SettingsPanel>(&backend_, &audio_, &clock_, modal_.get());
@@ -137,24 +137,24 @@ protected:
 
     // Click the Apply button (handle 208) inside the settings panel.
     void clickApply() {
-        ON_CALL(backend_, getElementRect(208)).WillByDefault(Return(Rect{860, 888, 140, 40}));
+        ON_CALL(backend_, getElementRect(208)).WillByDefault(Return(UIRect{860, 888, 140, 40}));
         settings_->onEvent(makeClick(880, 900));
         // Reset to avoid side-effects on subsequent hit-tests.
-        ON_CALL(backend_, getElementRect(208)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+        ON_CALL(backend_, getElementRect(208)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
     }
 
     // Click the RestoreDefaults button (handle 210) on Controls tab.
     void clickRestoreDefaults() {
-        ON_CALL(backend_, getElementRect(210)).WillByDefault(Return(Rect{1100, 888, 180, 40}));
+        ON_CALL(backend_, getElementRect(210)).WillByDefault(Return(UIRect{1100, 888, 180, 40}));
         settings_->onEvent(makeClick(1150, 900));
-        ON_CALL(backend_, getElementRect(210)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+        ON_CALL(backend_, getElementRect(210)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
     }
 
     // Click the WASD Preset button (handle 218) on Controls tab.
     void clickWasdPreset() {
-        ON_CALL(backend_, getElementRect(218)).WillByDefault(Return(Rect{376, 240, 200, 32}));
+        ON_CALL(backend_, getElementRect(218)).WillByDefault(Return(UIRect{376, 240, 200, 32}));
         settings_->onEvent(makeClick(450, 250));
-        ON_CALL(backend_, getElementRect(218)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+        ON_CALL(backend_, getElementRect(218)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
     }
 
     NiceMock<MockUIBackend>      backend_;
@@ -417,7 +417,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
@@ -661,9 +661,9 @@ TEST_F(UIManagerCoverageTest, ForcedLoanDialog_WithSaveSystem_CallsOnForcedLoanD
 
     // Inject a ForcedLoanIssued notification via pollPendingNotification.
     SimulationNotification notif;
-    notif.type            = NotificationType::ForcedLoanIssued;
-    notif.amount          = 50000;
-    notif.repaymentTicks  = 24;
+    notif.type               = NotificationType::ForcedLoanIssued;
+    notif.loanPrincipal      = 50000;
+    notif.loanRepaymentTicks = 24;
 
     // pollPendingNotification signature: bool pollPendingNotification(SimulationNotification& out)
     bool notifSent = false;
@@ -719,7 +719,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));

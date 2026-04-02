@@ -93,7 +93,7 @@ TEST_F(HUDGracePeriodTest, HUD_SecondNewGame_GracePeriodLabelVisible)
     ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
     ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
     ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
 
     // Construct HUD — this will assign gracePeriodHandle.
     hud_ = std::make_unique<HUD>(&backend_, &audio_, &sim_, &clock_);

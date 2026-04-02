@@ -140,7 +140,7 @@ using ::testing::Return;
 using ::testing::AtLeast;
 using ::testing::HasSubstr;
 
-class HUDCoverageTest : public ::testing::Test {
+class HUDDrawCoverageTest : public ::testing::Test {
 protected:
     void SetUp() override {
         ON_CALL(backend_, addStaticText(_, _, _, _, _)).WillByDefault(
@@ -151,7 +151,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(true));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
@@ -182,43 +182,43 @@ protected:
 };
 
 // HUD draw with Town rating.
-TEST_F(HUDCoverageTest, Draw_TownRating) {
+TEST_F(HUDDrawCoverageTest, Draw_TownRating) {
     ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Town));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // HUD draw with City rating.
-TEST_F(HUDCoverageTest, Draw_CityRating) {
+TEST_F(HUDDrawCoverageTest, Draw_CityRating) {
     ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::City));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // HUD draw with Metropolis rating.
-TEST_F(HUDCoverageTest, Draw_MetropolisRating) {
+TEST_F(HUDDrawCoverageTest, Draw_MetropolisRating) {
     ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Metropolis));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // HUD draw with Megalopolis rating.
-TEST_F(HUDCoverageTest, Draw_MegalopolisRating) {
+TEST_F(HUDDrawCoverageTest, Draw_MegalopolisRating) {
     ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Megalopolis));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // HUD draw with negative treasury balance.
-TEST_F(HUDCoverageTest, Draw_NegativeBalance) {
+TEST_F(HUDDrawCoverageTest, Draw_NegativeBalance) {
     ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(-5000.0f));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // HUD draw with outstanding debt.
-TEST_F(HUDCoverageTest, Draw_OutstandingDebt) {
+TEST_F(HUDDrawCoverageTest, Draw_OutstandingDebt) {
     ON_CALL(sim_, getOutstandingDebt()).WillByDefault(Return(50000.0f));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // HUD update with deficit flash (consecutive months >= 2 triggers alpha pulse).
-TEST_F(HUDCoverageTest, Update_DeficitFlash) {
+TEST_F(HUDDrawCoverageTest, Update_DeficitFlash) {
     ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(2));
     ui_->update(0.016f);
     EXPECT_CALL(backend_, setElementAlpha(_, _)).Times(AtLeast(1));
@@ -226,32 +226,32 @@ TEST_F(HUDCoverageTest, Update_DeficitFlash) {
 }
 
 // HUD draw with paused simulation shows paused speed indicator.
-TEST_F(HUDCoverageTest, Draw_PausedShowsIndicator) {
+TEST_F(HUDDrawCoverageTest, Draw_PausedShowsIndicator) {
     ON_CALL(sim_, isPaused()).WillByDefault(Return(true));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // HUD draw with x3 speed shows correct indicator.
-TEST_F(HUDCoverageTest, Draw_Speed3x) {
+TEST_F(HUDDrawCoverageTest, Draw_Speed3x) {
     ON_CALL(sim_, getSpeedMultiplier()).WillByDefault(Return(SpeedMultiplier::x3));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // HUD draw with x10 speed shows correct indicator.
-TEST_F(HUDCoverageTest, Draw_Speed10x) {
+TEST_F(HUDDrawCoverageTest, Draw_Speed10x) {
     ON_CALL(sim_, getSpeedMultiplier()).WillByDefault(Return(SpeedMultiplier::x10));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // HUD draw with undo action pending.
-TEST_F(HUDCoverageTest, Draw_UndoPending) {
+TEST_F(HUDDrawCoverageTest, Draw_UndoPending) {
     ON_CALL(sim_, hasUndoPendingAction()).WillByDefault(Return(true));
     ON_CALL(sim_, getUndoExpiryTimeSeconds()).WillByDefault(Return(8.5));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // HUD with various demand pressure percentages.
-TEST_F(HUDCoverageTest, Draw_HighDemand) {
+TEST_F(HUDDrawCoverageTest, Draw_HighDemand) {
     ON_CALL(sim_, getDemandPressurePct(ZoneType::Residential)).WillByDefault(Return(0.9f));
     ON_CALL(sim_, getDemandPressurePct(ZoneType::Commercial)).WillByDefault(Return(0.1f));
     ON_CALL(sim_, getDemandPressurePct(ZoneType::Industrial)).WillByDefault(Return(0.5f));
@@ -259,7 +259,7 @@ TEST_F(HUDCoverageTest, Draw_HighDemand) {
 }
 
 // HUD update with no deficit resets flash timer.
-TEST_F(HUDCoverageTest, Update_NoDeficit_ResetsFlash) {
+TEST_F(HUDDrawCoverageTest, Update_NoDeficit_ResetsFlash) {
     // First trigger flash.
     ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(2));
     ui_->update(0.5f);
@@ -270,30 +270,30 @@ TEST_F(HUDCoverageTest, Update_NoDeficit_ResetsFlash) {
 }
 
 // HUD setUnsavedChanges coverage.
-TEST_F(HUDCoverageTest, SetUnsavedChanges_True) {
+TEST_F(HUDDrawCoverageTest, SetUnsavedChanges_True) {
     ui_->setUnsavedChanges(true);
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
-TEST_F(HUDCoverageTest, SetUnsavedChanges_False) {
+TEST_F(HUDDrawCoverageTest, SetUnsavedChanges_False) {
     ui_->setUnsavedChanges(false);
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // Simulation time display with different month/year.
-TEST_F(HUDCoverageTest, Draw_SimulationTime_Year5Month12) {
+TEST_F(HUDDrawCoverageTest, Draw_SimulationTime_Year5Month12) {
     ON_CALL(sim_, getSimulationTime()).WillByDefault(Return(SimulationTime{5, 12}));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // Large population display.
-TEST_F(HUDCoverageTest, Draw_LargePopulation) {
+TEST_F(HUDDrawCoverageTest, Draw_LargePopulation) {
     ON_CALL(sim_, getTotalPopulation()).WillByDefault(Return(999999));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
 // Grace period fade-out: elapsed > 120s, fade alpha decreasing.
-TEST_F(HUDCoverageTest, Update_GracePeriodFadeOut) {
+TEST_F(HUDDrawCoverageTest, Update_GracePeriodFadeOut) {
     // Advance clock past 120s grace period.
     clock_.advance(121.0);
     // First update: remaining <= 0, graceFadeAlpha starts decreasing (1.0 - dt/0.5).
@@ -302,7 +302,7 @@ TEST_F(HUDCoverageTest, Update_GracePeriodFadeOut) {
 }
 
 // Grace period fully expired: alpha reaches 0, label hidden.
-TEST_F(HUDCoverageTest, Update_GracePeriodFullyExpired) {
+TEST_F(HUDDrawCoverageTest, Update_GracePeriodFullyExpired) {
     clock_.advance(121.0);
     // Large dt to drive alpha to 0.
     ui_->update(2.0f);
@@ -310,7 +310,7 @@ TEST_F(HUDCoverageTest, Update_GracePeriodFullyExpired) {
 }
 
 // Grace period amber warning: remaining < 20s.
-TEST_F(HUDCoverageTest, Update_GracePeriodAmberWarning) {
+TEST_F(HUDDrawCoverageTest, Update_GracePeriodAmberWarning) {
     // Advance to 105s (remaining = 15s, < 20s threshold).
     clock_.advance(105.0);
     ui_->update(0.016f);

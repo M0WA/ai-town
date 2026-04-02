@@ -64,7 +64,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 200, 32}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 200, 32}));
 
         // Construct the panel (no modal needed for unit tests).
         panel_ = std::make_unique<KeyBindingsPanel>(&backend_, nullptr);
@@ -126,9 +126,9 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_CaptureMode_TogglesOnClick) {
     UIElementHandle chip0 = btnHandles_[0];
     UIElementHandle chip1 = btnHandles_[1];
 
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{2000, 2000, 1, 1}));
-    ON_CALL(backend_, getElementRect(chip0)).WillByDefault(Return(Rect{30, 30, 200, 32}));
-    ON_CALL(backend_, getElementRect(chip1)).WillByDefault(Return(Rect{30, 70, 200, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{2000, 2000, 1, 1}));
+    ON_CALL(backend_, getElementRect(chip0)).WillByDefault(Return(UIRect{30, 30, 200, 32}));
+    ON_CALL(backend_, getElementRect(chip1)).WillByDefault(Return(UIRect{30, 70, 200, 32}));
 
     // Act: click inside chip 0's rect.
     panel_->onEvent(chipClick(50, 40));
@@ -154,7 +154,7 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_ConflictDetected_ShowsSwapOption) 
     panel_->show();
 
     // Enter capture mode for row 0 (Zone tool, currently "Z").
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{30, 30, 200, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{30, 30, 200, 32}));
     panel_->onEvent(chipClick(50, 40));
     ASSERT_TRUE(panel_->isCapturing());
 
@@ -182,7 +182,7 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_Swap_ExchangesBothRows) {
     ASSERT_EQ(panel_->currentBindings().toolRoad, "R");
 
     // Enter capture for row 0 (Zone), press "R" to create a conflict with Road.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{30, 30, 200, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{30, 30, 200, 32}));
     panel_->onEvent(chipClick(50, 40));
     ASSERT_TRUE(panel_->isCapturing());
 
@@ -210,7 +210,7 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_ReservedKey_ShowsReservedError) {
     panel_->show();
 
     // Enter capture for row 0 (Zone tool).
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{30, 30, 200, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{30, 30, 200, 32}));
     panel_->onEvent(chipClick(50, 40));
     ASSERT_TRUE(panel_->isCapturing());
 
@@ -248,7 +248,7 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_Escape_CancelsCapture) {
     const std::string originalZone = panel_->currentBindings().toolZone;
 
     // Enter capture for row 0.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{30, 30, 200, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{30, 30, 200, 32}));
     panel_->onEvent(chipClick(50, 40));
     ASSERT_TRUE(panel_->isCapturing());
 
@@ -275,7 +275,7 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_ApplyGrayed_WhenConflictExists) {
     panel_->show();
 
     // Create a conflict: capture Zone row and press "R" (used by Road).
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{30, 30, 200, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{30, 30, 200, 32}));
     panel_->onEvent(chipClick(50, 40));
     ASSERT_TRUE(panel_->isCapturing());
 
@@ -299,7 +299,7 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_EscapeDuringConflict_CancelsConfli
     panel_->show();
 
     // Enter Capturing state for row 0, press "R" to trigger conflict.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{30, 30, 200, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{30, 30, 200, 32}));
     panel_->onEvent(chipClick(50, 40));
     ASSERT_TRUE(panel_->isCapturing());
 
@@ -315,14 +315,14 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_EscapeDuringConflict_CancelsConfli
 
 // ---------------------------------------------------------------------------
 // Test 8: Clicking the Swap button during ConflictPending via onEvent() hit-test
-//         (line 366-368). The mock returns a Rect that the click lands inside.
+//         (line 366-368). The mock returns a UIRect that the click lands inside.
 // ---------------------------------------------------------------------------
 TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_ConflictSwapButtonClick_AppliesSwap) {
     panel_->show();
 
     // btnHandles_[11] = Swap button (12th button created after 11 chip rows).
     // Create conflict first.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{30, 30, 200, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{30, 30, 200, 32}));
     panel_->onEvent(chipClick(50, 40));
     panel_->onEvent(keyDown('R'));
     ASSERT_TRUE(panel_->isConflictPending());
@@ -331,7 +331,7 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_ConflictSwapButtonClick_AppliesSwa
     // btnHandles_[11] is the Swap button handle.
     if (btnHandles_.size() > 11) {
         ON_CALL(backend_, getElementRect(btnHandles_[11])).WillByDefault(
-            Return(Rect{50, 120, 100, 32}));
+            Return(UIRect{50, 120, 100, 32}));
         panel_->onEvent(chipClick(80, 130));  // Click inside Swap button rect.
         EXPECT_FALSE(panel_->isConflictPending()) << "Swap click must resolve conflict";
     } else {
@@ -347,7 +347,7 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_ConflictCancelButtonClick_CancelsC
     panel_->show();
 
     // Create conflict.
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{30, 30, 200, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{30, 30, 200, 32}));
     panel_->onEvent(chipClick(50, 40));
     panel_->onEvent(keyDown('R'));
     ASSERT_TRUE(panel_->isConflictPending());
@@ -356,7 +356,7 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_ConflictCancelButtonClick_CancelsC
     // btnHandles_[12] is the conflict Cancel button handle.
     if (btnHandles_.size() > 12) {
         ON_CALL(backend_, getElementRect(btnHandles_[12])).WillByDefault(
-            Return(Rect{160, 120, 100, 32}));
+            Return(UIRect{160, 120, 100, 32}));
         panel_->onEvent(chipClick(200, 130));  // Click inside Cancel button rect.
         EXPECT_FALSE(panel_->isConflictPending()) << "Cancel click must resolve conflict";
     } else {
@@ -371,7 +371,7 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_ConflictCancelButtonClick_CancelsC
 TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_DoubleClickSameChip_CancelsCapture) {
     panel_->show();
 
-    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{30, 30, 200, 32}));
+    ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{30, 30, 200, 32}));
 
     // First click: enter Capturing state for row 0.
     panel_->onEvent(chipClick(50, 40));
@@ -386,7 +386,7 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_DoubleClickSameChip_CancelsCapture
 // Test 11: Clicking an informational (non-rebindable) row chip consumes the
 //          event silently (line 398).
 //          Informational chips: rows kNumCapturable..kTotalRows-1.
-//          We fake the hit-test by returning a valid Rect for a high-index chip.
+//          We fake the hit-test by returning a valid UIRect for a high-index chip.
 // ---------------------------------------------------------------------------
 TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_InfoRowChipClick_ConsumesEvent) {
     panel_->show();
@@ -403,7 +403,7 @@ TEST_F(KeyBindingsPanelTest, KeyBindingsPanel_InfoRowChipClick_ConsumesEvent) {
     if (btnHandles_.size() > 13) {
         // Make informational chip (index 13) at a unique rect.
         ON_CALL(backend_, getElementRect(btnHandles_[13])).WillByDefault(
-            Return(Rect{30, 500, 200, 32}));
+            Return(UIRect{30, 500, 200, 32}));
         bool consumed = panel_->onEvent(chipClick(80, 510));
         EXPECT_TRUE(consumed) << "Info row chip click must be consumed silently";
     } else {

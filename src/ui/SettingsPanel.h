@@ -1,6 +1,7 @@
 #pragma once
 #include "src/interfaces/IUIBackend.h"  // UIElementHandle, IUIBackend
 #include "src/ui/key_bindings.h"        // KeyBindings
+#include "src/ui/ui_constants.h"        // kDefaultMasterVolume, kDefaultMusicVolume, kDefaultSfxVolume
 #include <functional>
 
 // Forward declarations
@@ -108,9 +109,10 @@ private:
     UIElementHandle m_countdownLabel{kInvalidUIElement};
 
     // Audio slider values (cached for immediate-apply)
-    float m_masterVolume{1.0f};
-    float m_musicVolume{0.8f};
-    float m_sfxVolume{0.8f};
+    // D-15 / UI-18: initialised from ui_constants.h defaults.
+    float m_masterVolume{kDefaultMasterVolume};
+    float m_musicVolume{kDefaultMusicVolume};
+    float m_sfxVolume{kDefaultSfxVolume};
 
     // Demolish confirm toggle state
     bool m_demolishConfirm{true};

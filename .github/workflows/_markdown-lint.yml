@@ -20,13 +20,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
-      # Step 2: Install markdownlint-cli.
+      # Run markdownlint via npx — no global install step needed.
       # Pinned to v0.47.0 for reproducible linting behavior.
-      - name: Install markdownlint-cli
-        run: npm install -g markdownlint-cli@0.47.0
-
-      # Step 3: Run markdownlint over all spec and documentation files.
       # Exits 1 on any violation — job fails and blocks all-checks-pass.
       # Rule configuration is read from .markdownlint.json at repo root.
       - name: Run markdownlint
-        run: markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+        run: npx markdownlint-cli@0.47.0 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'

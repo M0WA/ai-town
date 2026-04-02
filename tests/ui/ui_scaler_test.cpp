@@ -168,7 +168,7 @@ TEST(UIScalerTest, UIScaler_GetViewportRect_ReturnsCorrectOffsets)
     // 1920x1080 virtual, 1280x720 viewport, 0px left offset, 90px top letterbox.
     UIScaler scaler(1920, 1080, 1280, 720, 0, 90);
 
-    Rect rect = scaler.getViewportRect();
+    UIRect rect = scaler.getViewportRect();
 
     EXPECT_EQ(rect.x, 0)    << "Viewport rect x must equal offsetX (0)";
     EXPECT_EQ(rect.y, 90)   << "Viewport rect y must equal offsetY (90)";

@@ -373,7 +373,7 @@ bool MainMenuPanel::onEvent(const InputEvent& event) {
         int my = event.y;
 
         auto hitTest = [this](int mx, int my, UIElementHandle handle) {
-            Rect r = m_backend->getElementRect(handle);
+            UIRect r = m_backend->getElementRect(handle);
             return mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h;
         };
 

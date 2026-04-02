@@ -11,12 +11,12 @@
 // GLuint is represented as uint32_t in the header; the static_assert in the
 // .cpp confirms sizeof(GLuint) == sizeof(uint32_t).
 //
-// Rect is a complete type (defined in IUIBackend.h) — it is used as a return
+// UIRect is a complete type (defined in IUIBackend.h) — it is used as a return
 // type of getElementRect() which is an override of the pure-virtual method in
-// IUIBackend. DO NOT forward-declare Rect; IUIBackend.h already defines it.
+// IUIBackend. DO NOT forward-declare UIRect; IUIBackend.h already defines it.
 
-// IUIBackend.h — UIElementHandle, kInvalidUIElement, Rect, IUIBackend.
-// MUST be first: Rect must be a complete type before the override declaration.
+// IUIBackend.h — UIElementHandle, kInvalidUIElement, UIRect, IUIBackend.
+// MUST be first: UIRect must be a complete type before the override declaration.
 #include "src/interfaces/IUIBackend.h"
 
 #include <string>
@@ -151,7 +151,7 @@ public:
     std::string getElementText(UIElementHandle handle) const override;
 
     // 12.
-    Rect getElementRect(UIElementHandle handle) const override;
+    UIRect getElementRect(UIElementHandle handle) const override;
 
     // 13. Physical screen width — queries driver (EDT_NULL guard applied in .cpp).
     int getScreenWidth()  const override;
@@ -245,7 +245,7 @@ private:
     // to avoid the physical->virtual round-trip that breaks after window resize.
     struct ElementInfo {
         irr::gui::IGUIElement* element{nullptr};
-        Rect virtualRect{};
+        UIRect virtualRect{};
     };
 
     // GUI element handle → ElementInfo mapping.

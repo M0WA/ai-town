@@ -63,19 +63,19 @@ protected:
             &renderer_, &audio_, &rng_, &clock_, &terrain_, difficulty());
         // Default to x1 speed so tests don't accidentally fire rapid ticks
         sim_->setSpeed(SpeedMultiplier::x1);
-        // Phase 10: CitySimulation::tick() calls setMusicIntensity() each budget tick
+        // CitySimulation::tick() calls setMusicIntensity() each budget tick
         // to communicate adaptive music intensity tier to IAudioSystem.
         // Allow any number of calls from StrictMock — base fixture tests do not
         // assert music intensity; individual tests that do will override with their
         // own EXPECT_CALL after calling SimulationTestBase::SetUp().
         EXPECT_CALL(audio_, setMusicIntensity(::testing::_)).Times(::testing::AnyNumber());
-        // Phase 10: CitySimulation::tick() also calls setTimeOfDay() whenever the
+        // CitySimulation::tick() also calls setTimeOfDay() whenever the
         // in-game clock crosses a DAY/DUSK/NIGHT/DAWN boundary.  This is incidental
         // to most test scenarios; allow any number of calls so StrictMock does not
         // fail on time-of-day transitions that occur during multi-tick test runs.
         EXPECT_CALL(audio_, setTimeOfDay(::testing::_)).Times(::testing::AnyNumber());
-        // Phase 10: CitySimulation placement methods (placeZone, placeRoad,
-        // placeServiceBuilding, demolishTile, doDensityUnlockTick) call the six new
+        // CitySimulation placement methods (placeZone, placeRoad,
+        // placeServiceBuilding, demolishTile, doDensityUnlockTick) call the six
         // IRenderer mesh placement/removal methods when they succeed.  These calls
         // are incidental to simulation-logic tests; suppress them so StrictMock does
         // not fail on unexpected renderer calls in tests that focus on treasury,
@@ -100,7 +100,7 @@ protected:
         // removeServiceBuildingMesh(tileX, tileZ) — 2 args
         EXPECT_CALL(renderer_, removeServiceBuildingMesh(::testing::_, ::testing::_))
             .Times(::testing::AnyNumber());
-        // Phase 10: CitySimulation::doTrafficSignalTick() calls
+        // CitySimulation::doTrafficSignalTick() calls
         // m_renderer->getListenerPosition() once per tick() call when
         // m_trafficSignals is non-empty (road intersections exist).
         // Allow any number of calls — SimulationTestBase tests do not assert

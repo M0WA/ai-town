@@ -65,7 +65,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 140, 40}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 140, 40}));
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
         ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false));
@@ -192,7 +192,7 @@ protected:
             });
         ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(false));
 
         panel_ = std::make_unique<MainMenuPanel>(&backend_);
@@ -206,7 +206,7 @@ protected:
 
         // Return a hit-able rect only for the Load Game button.
         ON_CALL(backend_, getElementRect(loadGameHandle_)).WillByDefault(
-            Return(Rect{760, 188, 360, 48}));
+            Return(UIRect{760, 188, 360, 48}));
 
         // Enable only the Load Game button for the enabled tests.
         ON_CALL(backend_, isElementEnabled(loadGameHandle_)).WillByDefault(Return(true));

@@ -89,12 +89,43 @@ static size_t estimateDXTVRAM(uint32_t w, uint32_t h, uint32_t fourCC) {
 }
 
 // ---------------------------------------------------------------------------
-// Suffix helpers
+// Path helpers
 // ---------------------------------------------------------------------------
+
+// extractBasename — return the filename component from a path string.
+// Supports both '/' and '\\' separators for cross-platform paths.
+// Example: "/assets/textures/foo.dds" → "foo.dds"
+static std::string extractBasename(const std::string& p) {
+    size_t slashPos     = p.rfind('/');
+    size_t backslashPos = p.rfind('\\');
+    size_t sepPos = (slashPos == std::string::npos && backslashPos == std::string::npos)
+                        ? std::string::npos
+                        : (slashPos == std::string::npos ? backslashPos
+                                                         : (backslashPos == std::string::npos
+                                                                ? slashPos
+                                                                : std::max(slashPos, backslashPos)));
+    return (sepPos != std::string::npos) ? p.substr(sepPos + 1) : p;
+}
+
+// extractDirectory — return the directory component from a path string (including trailing separator).
+// Supports both '/' and '\\' separators for cross-platform paths.
+// Example: "/assets/textures/foo.dds" → "/assets/textures/"
+// Returns empty string when the path has no separator.
+static std::string extractDirectory(const std::string& p) {
+    size_t slashPos     = p.rfind('/');
+    size_t backslashPos = p.rfind('\\');
+    size_t sepPos = (slashPos == std::string::npos && backslashPos == std::string::npos)
+                        ? std::string::npos
+                        : (slashPos == std::string::npos ? backslashPos
+                                                         : (backslashPos == std::string::npos
+                                                                ? slashPos
+                                                                : std::max(slashPos, backslashPos)));
+    return (sepPos != std::string::npos) ? p.substr(0, sepPos + 1) : std::string{};
+}
+
+// hasSuffix — return true if the path's basename (without extension) ends with suffix.
+// Example: "buildings_atlas_d.dds" → base "buildings_atlas_d" → suffix "_d" → true
 static bool hasSuffix(const std::string& path, const std::string& suffix) {
-    // Strip extension to get the base name suffix.
-    // Example: "buildings_atlas_d.dds" → base "buildings_atlas_d" → suffix "_d"
-    // Find the last dot to strip extension.
     size_t dotPos = path.rfind('.');
     std::string base = (dotPos != std::string::npos) ? path.substr(0, dotPos) : path;
     if (base.size() < suffix.size()) return false;
@@ -123,19 +154,6 @@ TextureCache::TextureCache(irr::video::E_DRIVER_TYPE driverType,
 // ---------------------------------------------------------------------------
 GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     // ----- Extract basename from path (used for exact-match dispatch below) -----
-    // Supports both '/' and '\\' separators for cross-platform paths.
-    auto extractBasename = [](const std::string& p) -> std::string {
-        size_t slashPos     = p.rfind('/');
-        size_t backslashPos = p.rfind('\\');
-        size_t sepPos = (slashPos == std::string::npos && backslashPos == std::string::npos)
-                            ? std::string::npos
-                            : (slashPos == std::string::npos ? backslashPos
-                                                             : (backslashPos == std::string::npos
-                                                                    ? slashPos
-                                                                    : std::max(slashPos, backslashPos)));
-        return (sepPos != std::string::npos) ? p.substr(sepPos + 1) : p;
-    };
-
     const std::string basename = extractBasename(path);
 
     // ----- vehicles_sprite_atlas_d.dds exception -----
@@ -158,18 +176,7 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     std::string effectivePath = path;
     if (basename == "buildings_atlas_d.dds" && m_maxTextureSize < 4096) {
         // Replace the filename portion only — preserve the directory prefix.
-        size_t slashPos     = path.rfind('/');
-        size_t backslashPos = path.rfind('\\');
-        size_t sepPos = (slashPos == std::string::npos && backslashPos == std::string::npos)
-                            ? std::string::npos
-                            : (slashPos == std::string::npos ? backslashPos
-                                                             : (backslashPos == std::string::npos
-                                                                    ? slashPos
-                                                                    : std::max(slashPos, backslashPos)));
-        const std::string dir = (sepPos != std::string::npos)
-                                    ? path.substr(0, sepPos + 1)
-                                    : std::string{};
-        effectivePath = dir + "buildings_atlas_d_2k.dds";
+        effectivePath = extractDirectory(path) + "buildings_atlas_d_2k.dds";
         if (m_logger) {
             m_logger->log("TextureCache: GL_MAX_TEXTURE_SIZE < 4096; "
                           "loading fallback atlas buildings_atlas_d_2k.dds",
@@ -358,14 +365,14 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
 
     // Upload each mip level.
     // DDS data starts at offset: sizeof(magic) + sizeof(DDSHeader) = 4 + 124 = 128 bytes.
+    // VRAM tracking uses estimateDXTVRAM() (width × height × bpp × 1.33 mip overhead),
+    // not a per-mip accumulator — the accumulator was removed (A-15).
     size_t dataOffset = sizeof(uint32_t) + sizeof(DDSHeader);
     uint32_t mipW = width;
     uint32_t mipH = height;
-    size_t estimatedVRAM = 0;
 
     for (uint32_t mip = 0; mip < mipCount; ++mip) {
         uint32_t mipDataSize = dxtMipDataSize(mipW, mipH, fourCC);
-        estimatedVRAM += dxtMipDataSize(mipW, mipH, fourCC);
 
         if (dataOffset + mipDataSize > static_cast<size_t>(fileSize)) {
             char buf[256];

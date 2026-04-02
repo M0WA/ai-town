@@ -20,6 +20,7 @@
 #include "src/audio/audio_command_queue.h"
 #include "src/interfaces/IAlcFunctions.h"
 #include "src/audio/AudioSourcePool.h"   // for AudioSourcePool (vehicle pair pool management)
+#include "src/audio/AudioStream.h"       // for AudioStream struct (B-33: moved from AudioSystem.h)
 
 #include <atomic>
 #include <array>
@@ -29,6 +30,7 @@
 #include <cstdint>
 #include <random>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -68,60 +70,6 @@ using LPALGENFILTERS_t    = void(*)(int, unsigned int*);
 using LPALFILTERI_t       = void(*)(unsigned int, int, int);
 using LPALFILTERF_t       = void(*)(unsigned int, int, float);
 using LPALDELETEFILTERS_t = void(*)(int, const unsigned int*);
-
-// ---------------------------------------------------------------------------
-// AudioStream — per-stream state for one streaming OGG source.
-// Defined here (not in a separate header) because AudioSystem holds an
-// inline array of kStreamSourceCount AudioStream objects.
-// ---------------------------------------------------------------------------
-struct OggVorbis_File;  // forward-declared; full type in <vorbis/vorbisfile.h>
-
-struct AudioStream {
-    // AL source handle backing this stream slot (sourced from m_sources[]).
-    unsigned int sourceHandle{0};  // ALuint
-
-    // AL buffer pool for this stream (8 × 64 KB buffers).
-    static constexpr int kNumBuffers = 8;
-    unsigned int buffers[kNumBuffers]{};  // ALuint[]
-
-    // Software sample counter — incremented by frame count decoded each update.
-    // Used for bar-boundary crossfade calculation (NOT AL_SAMPLE_OFFSET).
-    // "Samples" = PCM frames (per-channel samples at one point in time).
-    uint64_t m_samplesQueued{0};
-
-    // Absolute sample-frame index of the next bar boundary.
-    // Initialized to 0; bootstrap branch fires once after first decode.
-    // Guard: m_nextBarBoundary > 0 prevents false crossfade at stream start.
-    uint64_t m_nextBarBoundary{0};
-
-    // kSamplesPerBuffer: 64 KB / (2 channels × 2 bytes/sample) = 16384 frames.
-    static constexpr uint32_t kSamplesPerBuffer = 64u * 1024u / (2u * 2u);
-
-    // OggVorbis file handle — persistent member opened at stream start,
-    // closed via ov_clear() in the destructor/stop path.
-    // Raw pointer managed manually — libvorbisfile owns the struct memory.
-    OggVorbis_File* vf{nullptr};
-
-    // Sidecar metadata (music stems only — ambient beds have no sidecar).
-    float bpm{90.0f};
-    int   beatsPerBar{4};
-    bool  isMusicStem{false};   // true = bar-boundary crossfade; false = ambient (real-time)
-    bool  isOpen{false};        // true when vf is valid and ready to decode
-    bool  m_intentionallyStopped{false};  // set+alSourceStop must be in same m_streamMutex scope
-
-    // Gain computed by the crossfade curve [0..1]; applied by the audio thread.
-    float crossfadeGain{1.0f};
-
-    // Computed samples-played estimate helper (same formula as spec).
-    static uint64_t computeSamplesPlayed(uint64_t samplesQueued, int buffersQueued) {
-        uint64_t queued = static_cast<uint64_t>(buffersQueued) * kSamplesPerBuffer;
-        return (samplesQueued > queued) ? samplesQueued - queued : 0u;
-    }
-
-    AudioStream() = default;
-    AudioStream(const AudioStream&) = delete;
-    AudioStream& operator=(const AudioStream&) = delete;
-};
 
 // ---------------------------------------------------------------------------
 // AudioSystem — full RAII implementation of IAudioSystem.
@@ -329,6 +277,14 @@ private:
     float              m_occlusionGainCurrent[kEvictableSFXCount]{};
     std::atomic<float> m_occlusionGainTarget[kEvictableSFXCount];
 
+    // S-4: AudioSourcePool encapsulates source acquisition, priority-based
+    // eviction, and slot lifecycle for all evictable SFX sources (slots 0–54).
+    // playSound/playPositionalSound delegate to acquireSFXSlot() which calls
+    // m_pool.acquireSFXSource() — no inline pool scanning is permitted.
+    // Declared after m_sources and m_occlusionGainCurrent so member-initializer
+    // list order guarantees those arrays are laid out before m_pool is constructed.
+    AudioSourcePool m_pool;
+
     // Occlusion raycast budget tracking.
     int m_raycastFrameCounter[kEvictableSFXCount]{};  // frames since last raycast per source
 
@@ -372,7 +328,7 @@ private:
     // Accessed only under m_streamMutex in transitionToMainMenu() and in
     // the audio thread's updateStreams() EOF path — no additional lock needed.
     // -----------------------------------------------------------------------
-    std::mt19937 m_rng{std::random_device{}()};
+    std::mt19937 m_rng;  // seeded in constructor body after guard flags are set
 
     // -----------------------------------------------------------------------
     // Main menu music state (Phase 11m).
@@ -387,7 +343,10 @@ private:
     // -----------------------------------------------------------------------
     // Stinger cooldown tracking: time of last trigger per stinger type.
     // Indexed by static_cast<int>(StingerType) - kEvictableSFXCount.
+    // e.g. [0] = CRISIS (StingerType::CRISIS=55, 55-55=0),
+    //      [1] = MILESTONE (StingerType::MILESTONE=56, 56-55=1).
     // -----------------------------------------------------------------------
+    static_assert(kStingerCount == 2, "m_stingerLastTriggerTime array sized for exactly 2 stinger types");
     double m_stingerLastTriggerTime[kStingerCount]{};
 
     // -----------------------------------------------------------------------
@@ -515,6 +474,11 @@ private:
     // Internal helpers.
     // -----------------------------------------------------------------------
 
+    // S-4: All source acquisition delegates to m_pool — no inline pool scanning in playSound/playPositionalSound.
+    // Acquires one evictable SFX source via m_pool.acquireSFXSource(). Returns source index or -1.
+    // After a successful return callers must still update m_sfxSlots[idx] and call m_pool.markOccupied().
+    [[nodiscard]] int acquireSFXSlot(SoundPriority priority, float listenerDistanceSq = 0.f);
+
     // Audio thread entry point.
     void audioThreadFunc();
 
@@ -575,6 +539,10 @@ private:
     // Load JSON sidecar for a music stem; fills bpm/beatsPerBar.
     bool loadMusicSidecar(const std::string& stemPath, float& bpmOut, int& beatsPerBarOut);
 
+    // Common non-positional source setup: SOURCE_RELATIVE=AL_TRUE, position/velocity at
+    // origin, ROLLOFF_FACTOR=0. Shared by setupStingerSource and setupStreamSource.
+    void setupNonPositionalSource(int sourceIdx);
+
     // Setup stinger source attributes (called at construction for each stinger slot).
     void setupStingerSource(int sourceIdx);
 
@@ -584,9 +552,39 @@ private:
     // EFX filter allocation loop (runs in constructor on main thread).
     void allocateEFXFilters();
 
+    // Open the incoming stream slot and start it playing at gain 0.
+    // Shared by beginIntensityCrossfade and beginAmbientCrossfade (B-10).
+    // errorOut is set to a non-empty string on failure; caller logs it after releasing locks.
+    void startCrossfadeIncomingStream(int slot, const std::string& path,
+                                      bool isStem, std::string& errorOut);
+
+    // Complete a crossfade: close outSlot, reset incoming slot's gain to 1.0 (B-10).
+    // Shared by music and ambient crossfade completion in updateStreams().
+    void finalizeCrossfade(int outSlot, int inSlot);
+
+    // Handle main-menu EOF in refillStream: select next variant, close/reopen stream (B-11).
+    // Called on the audio thread. slot is the active music slot.
+    void handleMainMenuEOF(int slot);
+
+    // Update the bar-boundary counter for a music-stem stream (B-39).
+    // Called from refillStream after all buffer operations are complete.
+    void updateBarBoundary(AudioStream& s, uint64_t samplesPlayed, int buffersQueued);
+
+    // Setup helpers for vehicle engine sources during pendingInit (B-40).
+    void setupVehicleIdleSource(unsigned int src, float basePitch);
+    void setupVehicleMoveSource(unsigned int src, float basePitch);
+
+    // Per-frame pitch/gain/position update for one vehicle engine pair (B-41).
+    void updateVehicleEngineFrame(int slotIdx, unsigned int idleSrc, unsigned int moveSrc);
+
+    // Compute interpolated engine pitch from speed and base pitch (B-42).
+    [[nodiscard]] static float vehicleEnginePitch(float speed, float basePitch) noexcept;
+
     // Log helpers — route through irr::ILogger when available, else stderr.
     // Instance methods (not static) so they can access m_logger / m_logMutex.
-    void logWarning(const std::string& msg);
-    void logError(const std::string& msg);
-    void logInfo(const std::string& msg);
+    // std::string_view avoids a copy when called with string literals or
+    // temporaries; the underlying c_str() is obtained via a local std::string.
+    void logWarning(std::string_view msg);
+    void logError(std::string_view msg);
+    void logInfo(std::string_view msg);
 };

@@ -1,0 +1,192 @@
+# Test Linux — reusable workflow
+# Shared ctest verification steps used by both build-linux and coverage-linux.
+# Callers upload their build directory as an artifact and pass the artifact name
+# via the build_artifact_name input.  This job downloads the artifact, runs all
+# three ctest suites (unit / integration / requires-opengl), publishes results,
+# and uploads the test XML artifact.
+#
+# Inputs:
+#   build_artifact_name : name of the artifact containing the build directory
+#                         (uploaded by the caller before invoking this workflow)
+#   build_dir           : path to the CMake build directory (default: build)
+#   reporter_name       : display name for dorny/test-reporter (caller-specific)
+#   test_artifact_name  : name for the uploaded test-results artifact
+name: Test Linux (shared)
+
+on:
+  workflow_call:
+    inputs:
+      build_artifact_name:
+        type: string
+        required: true
+      build_dir:
+        type: string
+        required: false
+        default: build
+      reporter_name:
+        type: string
+        required: false
+        default: 'Linux Tests'
+      test_artifact_name:
+        type: string
+        required: false
+        default: 'test-results-linux'
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/m0wa/aitown-ci-linux@sha256:e5aabf7e2c7cf377987020564f5bc6e622df9accd6db0738d99fb8a5cf66192e
+      options: --user root
+    permissions:
+      packages: read
+      checks: write
+      contents: read
+    env:
+      BUILD_DIR: ${{ inputs.build_dir }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      # Download the build directory artifact uploaded by the caller job.
+      # The artifact contains the compiled binaries, CTestTestfile.cmake, and
+      # CTest-discovered test lists needed by all subsequent ctest invocations.
+      - name: Download build artifact
+        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110  # v4.1.0
+        with:
+          name: ${{ inputs.build_artifact_name }}
+          path: ${{ inputs.build_dir }}
+
+      # Restore execute permissions on test binaries.
+      # actions/upload-artifact strips permissions; chmod is required before ctest.
+      - name: Restore execute permissions on test binaries
+        shell: bash
+        run: find "$BUILD_DIR" -maxdepth 2 -type f -name '*_tests' -exec chmod +x {} \;
+
+      # Verify integration test routing (non-zero discovery).
+      # IrrlichtUIBackendCompileCheck::IsNonAbstract is registered under the 'integration' label.
+      # See architecture/testing/framework.md for rationale.
+      - name: Verify integration test routing (non-zero discovery)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir "${BUILD_DIR}" -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No tests discovered under integration label."
+            exit 1
+          fi
+          echo "Integration routing: $count test(s) discovered."
+
+      # Verify requires-opengl test routing (non-zero discovery).
+      # Must appear BEFORE xvfb-run ctest to confirm routing before execution.
+      - name: Verify requires-opengl test routing (non-zero discovery)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir "${BUILD_DIR}" -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No tests discovered under requires-opengl label."
+            exit 1
+          fi
+          echo "requires-opengl routing: $count test(s) discovered."
+
+      # Verify unit test routing (non-zero discovery).
+      # Uses -N dry-run + grep -E 'Test +#' (handles ctest alignment padding for test #1-9999).
+      - name: Verify unit test routing (non-zero discovery)
+        shell: bash
+        run: |
+          count=$(ctest --test-dir "${BUILD_DIR}" -N -L '^unit$' 2>/dev/null | grep -cE 'Test +#' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No tests discovered under unit label."
+            exit 1
+          fi
+          echo "Unit routing: $count test(s) discovered."
+
+      # Verify simulation_tests is discoverable.
+      # The unit-routing check above passes as long as ANY unit target has tests.
+      # This step verifies simulation_tests is not silently unregistered.
+      - name: Verify simulation_tests registration
+        shell: bash
+        run: |
+          count=$(ctest --test-dir "${BUILD_DIR}" -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -cE 'Test +#' || true)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No simulation_tests test cases discovered."
+            exit 1
+          fi
+          echo "simulation_tests routing: $count test(s) discovered."
+
+      # Create test_results directory once before all ctest invocations.
+      - name: Create test results directory
+        run: mkdir -p test_results
+
+      # Run unit tests.
+      # AITOWN_HEADLESS=1 — guard against unit tests that inadvertently trigger IrrlichtDevice init.
+      # ALSOFT_DRIVERS=null — guard against unit tests that inadvertently trigger AudioSystem init.
+      - name: Run unit tests (no display)
+        run: ctest --test-dir "${BUILD_DIR}" -LE 'integration|requires-opengl' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Run integration tests. Uses EDT_NULL Irrlicht (no display) + null audio driver.
+      - name: Run integration tests (no display, EDT_NULL)
+        run: ctest --test-dir "${BUILD_DIR}" -L '^integration$' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Run OpenGL tests under xvfb.
+      # AITOWN_HEADLESS must NOT appear here — it suppresses IrrlichtDevice init
+      # which is required for requires-opengl tests.
+      # ALSOFT_DRIVERS=null still applies (headless runner has no audio hardware).
+      - name: Run OpenGL tests (xvfb)
+        run: xvfb-run --auto-servernum ctest --test-dir "${BUILD_DIR}" -L '^requires-opengl$' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          ALSOFT_DRIVERS: 'null'
+
+      # Verify test XML files were produced.
+      # if: always() — ensures this runs even if ctest fails.
+      - name: Verify test XML output
+        if: always()
+        shell: bash
+        run: |
+          count=$(find test_results -name '*.xml' 2>/dev/null | wc -l)
+          if [[ "$count" -eq 0 ]]; then
+            echo "ERROR: No test XML files in test_results/ — GTEST_OUTPUT may not have written output"
+            exit 1
+          fi
+          echo "Found $count test result file(s)."
+
+      # Fix git safe.directory for dorny/test-reporter.
+      # In container jobs the workspace is owned by a different UID than the runner;
+      # git 2.35.2+ refuses to read it unless the directory is marked safe.
+      # dorny/test-reporter calls 'git ls-files' internally.
+      - name: Fix git safe.directory for test reporter
+        if: always()
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # Publish test results via dorny/test-reporter.
+      # if: always() — must post annotations even when tests fail.
+      # fail-on-error: false — prevents reporter errors from masking actual test failures.
+      # continue-on-error: true is a safety net for network/permissions failures.
+      - name: Publish test results
+        if: always()
+        continue-on-error: true
+        uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1
+        with:
+          name: ${{ inputs.reporter_name }}
+          path: 'test_results/*.xml'
+          reporter: 'java-junit'
+          fail-on-error: false
+
+      # Upload test results artifact.
+      # if: always() — upload even on failure for post-mortem analysis.
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: ${{ inputs.test_artifact_name }}
+          path: test_results/
+          retention-days: 14

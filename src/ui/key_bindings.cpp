@@ -1,6 +1,9 @@
 #include "src/ui/key_bindings.h"
 #include <irrlicht.h>  // irr::ILogger, irr::ELL_WARNING
 
+#include <fstream>
+#include <sstream>
+
 void KeyBindings::load(const std::string& path, irr::ILogger* logger) {
     // --- 1. Open file ---
     FILE* f = fopen(path.c_str(), "r");
@@ -45,7 +48,7 @@ void KeyBindings::load(const std::string& path, irr::ILogger* logger) {
         // Advance position past this pair for next iteration.
         pos = vEnd + 1;
 
-        // --- 4. Reserved-key guard ---
+        // --- 4. Reserved-key guard (Q, E) ---
         if (isReservedKey(value)) {
             std::string warnMsg = std::string("[KeyBindings::load] Rejected reserved key \"") +
                                  value + "\" for action \"" + key + "\" — default retained.";
@@ -57,7 +60,19 @@ void KeyBindings::load(const std::string& path, irr::ILogger* logger) {
             continue;
         }
 
-        // --- 5. Map key name to struct field and assign ---
+        // --- 5. D-2 / UI-4: Non-rebindable chord guard ---
+        // Reject any attempt to bind "Ctrl+Z" or "Ctrl+S" to a rebindable field.
+        // Also reject assigning to the "undo" or "save" keys via the config file.
+        if (value == "Ctrl+Z" || value == "Ctrl+S") {
+            // Silently skip — these values are reserved for the undo/save chords.
+            continue;
+        }
+        if (key == "undo" || key == "save") {
+            // These fields are display-only; config file must not override their values.
+            continue;
+        }
+
+        // --- 6. Map key name to struct field and assign ---
         if      (key == "camPanUp")        { camPanUp        = value; }
         else if (key == "camPanDown")       { camPanDown       = value; }
         else if (key == "camPanLeft")       { camPanLeft       = value; }
@@ -73,8 +88,6 @@ void KeyBindings::load(const std::string& path, irr::ILogger* logger) {
         else if (key == "speedIncrease")    { speedIncrease    = value; }
         else if (key == "speedDecrease")    { speedDecrease    = value; }
         else if (key == "openPauseMenu")    { openPauseMenu    = value; }
-        // Non-rebindable chords ("undo", "save") are intentionally absent here —
-        // the const fields must not be modified by load().
         else {
             std::string warnMsg = std::string("[KeyBindings::load] Unknown key \"") + key + "\" — ignored.";
             if (logger) {
@@ -83,5 +96,32 @@ void KeyBindings::load(const std::string& path, irr::ILogger* logger) {
                 std::fprintf(stderr, "[KeyBindings WARNING] (no ILogger) %s\n", warnMsg.c_str());
             }
         }
+    }
+}
+
+// D-3 / UI-5: writeToFile() body moved from the header.
+// Uses std::ofstream + std::ostringstream to replace 11 individual fprintf calls.
+// Does not write the `undo` or `save` fields (non-rebindable display-only values).
+void KeyBindings::writeToFile(const std::string& path) const {
+    if (path.empty()) return;
+
+    std::ostringstream oss;
+    oss << "{\n";
+    oss << "  \"camPanUp\": \""       << camPanUp       << "\",\n";
+    oss << "  \"camPanDown\": \""     << camPanDown      << "\",\n";
+    oss << "  \"camPanLeft\": \""     << camPanLeft      << "\",\n";
+    oss << "  \"camPanRight\": \""    << camPanRight     << "\",\n";
+    oss << "  \"toolZone\": \""       << toolZone        << "\",\n";
+    oss << "  \"toolRoad\": \""       << toolRoad        << "\",\n";
+    oss << "  \"toolUtilities\": \""  << toolUtilities   << "\",\n";
+    oss << "  \"toolDemolish\": \""   << toolDemolish    << "\",\n";
+    oss << "  \"toolInspector\": \""  << toolInspector   << "\",\n";
+    oss << "  \"toggleTaxPanel\": \"" << toggleTaxPanel  << "\",\n";
+    oss << "  \"toggleNotifLog\": \"" << toggleNotifLog  << "\"\n";
+    oss << "}\n";
+
+    std::ofstream out(path);
+    if (out.is_open()) {
+        out << oss.str();
     }
 }

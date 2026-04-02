@@ -14,54 +14,29 @@
 #include "src/simulation/CitySimulation.h"
 #include "src/interfaces/ICitySimulation.h"
 #include "src/interfaces/simulation_types.h"
-#include "tests/simulation/MockRenderer.h"
-#include "tests/simulation/MockAudioSystem.h"
-#include "tests/simulation/ManualRNG.h"
-#include "tests/simulation/ManualClock.h"
-#include "tests/simulation/ManualTerrainQuery.h"
+#include "SimulationTestBase.h"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
-#include <memory>
 
 using ::testing::_;
 using ::testing::AnyNumber;
-using ::testing::StrictMock;
 
 // ---------------------------------------------------------------------------
 // PlacementConflictTest fixture
 // ---------------------------------------------------------------------------
-class PlacementConflictTest : public ::testing::Test {
+// Derives from SimulationTestBase to inherit StrictMock<MockRenderer>,
+// StrictMock<MockAudioSystem>, ManualRNG, ManualClock, ManualTerrainQuery,
+// and sim_, along with the shared EXPECT_CALL suppressions set up in
+// SimulationTestBase::SetUp(). This avoids reimplementing the full boilerplate.
+class PlacementConflictTest : public SimulationTestBase {
 protected:
-    StrictMock<MockRenderer>    renderer_;
-    StrictMock<MockAudioSystem> audio_;
-    ManualRNG                   rng_;
-    ManualClock                 clock_;
-    ManualTerrainQuery          terrain_;
-    std::unique_ptr<ICitySimulation> sim_;
-
     void SetUp() override {
-        sim_ = std::make_unique<CitySimulation>(
-            &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Normal);
-        sim_->setSpeed(SpeedMultiplier::x1);
+        SimulationTestBase::SetUp();
 
-        // Allow all audio calls — these tests focus on sim state, not audio.
+        // Suppress positional and non-positional SFX — these tests focus on
+        // simulation state (tile occupancy, treasury, undo stack), not audio.
         EXPECT_CALL(audio_, playPositionalSound(_, _, _, _)).Times(AnyNumber());
         EXPECT_CALL(audio_, playSound(_, _, _)).Times(AnyNumber());
-        EXPECT_CALL(audio_, setMusicIntensity(_)).Times(AnyNumber());
-        EXPECT_CALL(audio_, setTimeOfDay(_)).Times(AnyNumber());
-
-        // Allow renderer mesh calls from initial placement (1st call per tile is valid).
-        // Individual tests override with their own EXPECT_CALLs for Times(0) assertions.
-        EXPECT_CALL(renderer_, placeBuildingMesh(_, _, _)).Times(AnyNumber());
-        EXPECT_CALL(renderer_, removeBuildingMesh(_, _)).Times(AnyNumber());
-        EXPECT_CALL(renderer_, placeRoadMesh(_, _)).Times(AnyNumber());
-        EXPECT_CALL(renderer_, removeRoadMesh(_, _)).Times(AnyNumber());
-        EXPECT_CALL(renderer_, placeServiceBuildingMesh(_, _, _)).Times(AnyNumber());
-        EXPECT_CALL(renderer_, removeServiceBuildingMesh(_, _)).Times(AnyNumber());
-    }
-
-    void TearDown() override {
-        sim_.reset();
     }
 
     CitySimulation* cs() {

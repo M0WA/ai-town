@@ -24,6 +24,7 @@
 
 #include <irrlicht.h>  // irr::ILogger — only AudioSystem.cpp includes this; AudioSystem.h forward-declares only
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -38,24 +39,30 @@
 // ---------------------------------------------------------------------------
 // Compile-time check that the local EFX function-pointer typedefs match <efx.h>.
 // These are the types stored as AudioSystem member function pointers.
+// std::is_same_v checks full type identity (not just size), catching any
+// signature drift between our local aliases and the real EFX typedefs.
 // ---------------------------------------------------------------------------
-static_assert(sizeof(LPALGENFILTERS_t) == sizeof(LPALGENFILTERS),
-              "LPALGENFILTERS_t size mismatch with <efx.h>");
-static_assert(sizeof(LPALFILTERI_t)    == sizeof(LPALFILTERI),
-              "LPALFILTERI_t size mismatch with <efx.h>");
-static_assert(sizeof(LPALFILTERF_t)    == sizeof(LPALFILTERF),
-              "LPALFILTERF_t size mismatch with <efx.h>");
-static_assert(sizeof(LPALDELETEFILTERS_t) == sizeof(LPALDELETEFILTERS),
-              "LPALDELETEFILTERS_t size mismatch with <efx.h>");
+static_assert(std::is_same_v<LPALGENFILTERS_t,    LPALGENFILTERS>,
+              "LPALGENFILTERS_t type mismatch with <efx.h>");
+static_assert(std::is_same_v<LPALFILTERI_t,       LPALFILTERI>,
+              "LPALFILTERI_t type mismatch with <efx.h>");
+static_assert(std::is_same_v<LPALFILTERF_t,       LPALFILTERF>,
+              "LPALFILTERF_t type mismatch with <efx.h>");
+static_assert(std::is_same_v<LPALDELETEFILTERS_t, LPALDELETEFILTERS>,
+              "LPALDELETEFILTERS_t type mismatch with <efx.h>");
 
 // ---------------------------------------------------------------------------
-// al_check.cpp implementation (defined inline here per error-checking.md:
-// "Phase 7 creates src/audio/al_check.cpp which is the only file that includes
-// <AL/alc.h>".  We implement both wrappers here in the same TU.)
-// The header declares them inline no-ops in Phase 3 — Phase 7 provides real
-// implementations by linking al_check.cpp.  We define them here as non-inline
-// so that if al_check.h's inline stubs are still visible they take precedence
-// for the other TUs while this TU gets the real implementation.
+// alCheckError_real / alcCheckError_real — real AL/ALC error implementations.
+//
+// These functions are declared in al_check.h (which also declares the inline
+// wrappers alCheckError / alcCheckError that forward to them).  They are
+// defined HERE in AudioSystem.cpp — the only TU that includes <AL/al.h> and
+// <AL/alc.h> — because alGetError() and alcGetError() require those headers.
+//
+// The architecture spec originally described a separate al_check.cpp; that
+// design was consolidated into AudioSystem.cpp to avoid having a second TU
+// that pulls in OpenAL headers, keeping the AL-header footprint minimal and
+// the headless-CI build surface unchanged.
 // ---------------------------------------------------------------------------
 
 // Real alCheckError — called after every AL function.
@@ -107,29 +114,46 @@ struct DefaultAlcFunctions : public IAlcFunctions {
 // m_logMutex serialises concurrent calls from audio thread and main thread
 // (irr::ILogger is not documented as thread-safe).
 // ---------------------------------------------------------------------------
-void AudioSystem::logWarning(const std::string& msg) {
+void AudioSystem::logWarning(std::string_view msg) {
     if (m_logger) {
+        std::string s(msg);
         std::lock_guard<std::mutex> lk(m_logMutex);
-        m_logger->log(msg.c_str(), irr::ELL_WARNING);
+        m_logger->log(s.c_str(), irr::ELL_WARNING);
     } else {
-        std::fprintf(stderr, "[AudioSystem WARNING] (no ILogger) %s\n", msg.c_str());
+        std::fprintf(stderr, "[AudioSystem WARNING] (no ILogger) %.*s\n",
+                     static_cast<int>(msg.size()), msg.data());
     }
 }
-void AudioSystem::logError(const std::string& msg) {
+void AudioSystem::logError(std::string_view msg) {
     if (m_logger) {
+        std::string s(msg);
         std::lock_guard<std::mutex> lk(m_logMutex);
-        m_logger->log(msg.c_str(), irr::ELL_ERROR);
+        m_logger->log(s.c_str(), irr::ELL_ERROR);
     } else {
-        std::fprintf(stderr, "[AudioSystem ERROR] (no ILogger) %s\n", msg.c_str());
+        std::fprintf(stderr, "[AudioSystem ERROR] (no ILogger) %.*s\n",
+                     static_cast<int>(msg.size()), msg.data());
     }
 }
-void AudioSystem::logInfo(const std::string& msg) {
+void AudioSystem::logInfo(std::string_view msg) {
     if (m_logger) {
+        std::string s(msg);
         std::lock_guard<std::mutex> lk(m_logMutex);
-        m_logger->log(msg.c_str(), irr::ELL_INFORMATION);
+        m_logger->log(s.c_str(), irr::ELL_INFORMATION);
     } else {
-        std::fprintf(stderr, "[AudioSystem INFO] (no ILogger) %s\n", msg.c_str());
+        std::fprintf(stderr, "[AudioSystem INFO] (no ILogger) %.*s\n",
+                     static_cast<int>(msg.size()), msg.data());
     }
+}
+
+// ---------------------------------------------------------------------------
+// hasSuffix — case-sensitive suffix check without heap allocation.
+// Returns true if s ends with suffix (suffix must be a null-terminated literal).
+// Safe when s.size() < suffixLen (returns false, no underflow).
+// ---------------------------------------------------------------------------
+static bool hasSuffix(const std::string& s, const char* suffix) {
+    const std::size_t suffixLen = std::strlen(suffix);
+    if (s.size() < suffixLen) return false;
+    return s.compare(s.size() - suffixLen, suffixLen, suffix) == 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,16 +208,23 @@ bool AudioSystem::loadMusicSidecar(const std::string& stemPath,
     }
 
     // Minimal JSON parse: look for "bpm" and "beats_per_bar".
+    // Parse limitations: no whitespace after colon, no duplicate keys, no escaping.
+    // Values must appear immediately after the colon with no leading whitespace.
     std::string content((std::istreambuf_iterator<char>(f)),
                          std::istreambuf_iterator<char>());
     f.close();
+
+    // Maximum value string length accepted (guards against pathological inputs).
+    constexpr std::size_t kMaxValueLen = 32;
 
     auto extractFloat = [&](const std::string& key, float& out) -> bool {
         auto pos = content.find("\"" + key + "\"");
         if (pos == std::string::npos) return false;
         auto colon = content.find(':', pos);
         if (colon == std::string::npos) return false;
-        try { out = std::stof(content.substr(colon + 1)); return true; }
+        std::string valStr = content.substr(colon + 1);
+        if (valStr.empty() || valStr.size() > kMaxValueLen) return false;
+        try { out = std::stof(valStr); return true; }
         catch (...) { return false; }
     };
     auto extractInt = [&](const std::string& key, int& out) -> bool {
@@ -201,7 +232,9 @@ bool AudioSystem::loadMusicSidecar(const std::string& stemPath,
         if (pos == std::string::npos) return false;
         auto colon = content.find(':', pos);
         if (colon == std::string::npos) return false;
-        try { out = std::stoi(content.substr(colon + 1)); return true; }
+        std::string valStr = content.substr(colon + 1);
+        if (valStr.empty() || valStr.size() > kMaxValueLen) return false;
+        try { out = std::stoi(valStr); return true; }
         catch (...) { return false; }
     };
 
@@ -243,6 +276,7 @@ void AudioSystem::allocateEFXFilters() {
     m_efxAllocationAttempted = true;
     for (int i = 0; i < kEvictableSFXCount; ++i) {
         m_fnGenFilters(1, &m_occlusionFilter[i]);
+        alCheckError("allocateEFXFilters:alGenFilters");
 
         if (m_occlusionFilter[i] == AL_FILTER_NULL) {
             logWarning("EFX filter allocation failed at index " +
@@ -252,22 +286,19 @@ void AudioSystem::allocateEFXFilters() {
         }
 
         // Set filter type to lowpass.
-        alGetError();  // clear before checking
         m_fnFilteri(m_occlusionFilter[i], AL_FILTER_TYPE, AL_FILTER_LOWPASS);
-        if (alGetError() != AL_NO_ERROR) {
-            m_fnDeleteFilters(1, &m_occlusionFilter[i]);
-            m_occlusionFilter[i] = AL_FILTER_NULL;
-            m_efxAvailable = false;
-            return;
-        }
+        alCheckError("allocateEFXFilters:alFilteri(AL_FILTER_TYPE)");
 
         // Fully open default gains.
         m_fnFilterf(m_occlusionFilter[i], AL_LOWPASS_GAIN,   1.0f);
+        alCheckError("allocateEFXFilters:alFilterf(AL_LOWPASS_GAIN)");
         m_fnFilterf(m_occlusionFilter[i], AL_LOWPASS_GAINHF, 1.0f);
+        alCheckError("allocateEFXFilters:alFilterf(AL_LOWPASS_GAINHF)");
 
         // Bind filter to source.
         alSourcei(m_sources[i], AL_DIRECT_FILTER,
                   static_cast<ALint>(m_occlusionFilter[i]));
+        alCheckError("allocateEFXFilters:alSourcei(AL_DIRECT_FILTER)");
 
         // Initialize per-source gain state.
         m_occlusionGainCurrent[i] = 1.0f;
@@ -280,24 +311,32 @@ void AudioSystem::allocateEFXFilters() {
 }
 
 // ---------------------------------------------------------------------------
+// setupNonPositionalSource — shared setup for stinger and stream sources.
+// Sets SOURCE_RELATIVE=AL_TRUE, position/velocity at origin, ROLLOFF_FACTOR=0.
+// ---------------------------------------------------------------------------
+void AudioSystem::setupNonPositionalSource(int sourceIdx) {
+    alSourcei (m_sources[sourceIdx], AL_SOURCE_RELATIVE, AL_TRUE);
+    alCheckError("setupNonPositionalSource:AL_SOURCE_RELATIVE");
+    alSource3f(m_sources[sourceIdx], AL_POSITION,      0.f, 0.f, 0.f);
+    alCheckError("setupNonPositionalSource:AL_POSITION");
+    alSourcef (m_sources[sourceIdx], AL_ROLLOFF_FACTOR, 0.f);
+    alCheckError("setupNonPositionalSource:AL_ROLLOFF_FACTOR");
+    alSource3f(m_sources[sourceIdx], AL_VELOCITY,      0.f, 0.f, 0.f);
+    alCheckError("setupNonPositionalSource:AL_VELOCITY");
+}
+
+// ---------------------------------------------------------------------------
 // Stinger source setup (called at construction for each stinger slot).
 // ---------------------------------------------------------------------------
 void AudioSystem::setupStingerSource(int sourceIdx) {
-    // Non-positional — no distance attenuation, position at origin.
-    alSourcei(m_sources[sourceIdx], AL_SOURCE_RELATIVE, AL_TRUE);
-    alSource3f(m_sources[sourceIdx], AL_POSITION,     0.f, 0.f, 0.f);
-    alSourcef(m_sources[sourceIdx],  AL_ROLLOFF_FACTOR, 0.f);
-    alSource3f(m_sources[sourceIdx], AL_VELOCITY,     0.f, 0.f, 0.f);
+    setupNonPositionalSource(sourceIdx);
 }
 
 // ---------------------------------------------------------------------------
 // Stream source setup (called at construction for each stream slot).
 // ---------------------------------------------------------------------------
 void AudioSystem::setupStreamSource(int sourceIdx) {
-    alSourcei(m_sources[sourceIdx],  AL_SOURCE_RELATIVE, AL_TRUE);
-    alSource3f(m_sources[sourceIdx], AL_POSITION,       0.f, 0.f, 0.f);
-    alSourcef(m_sources[sourceIdx],  AL_ROLLOFF_FACTOR,  0.f);
-    alSource3f(m_sources[sourceIdx], AL_VELOCITY,       0.f, 0.f, 0.f);
+    setupNonPositionalSource(sourceIdx);
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +345,8 @@ void AudioSystem::setupStreamSource(int sourceIdx) {
 AudioSystem::AudioSystem(irr::ILogger* logger, IClock* clock, IAlcFunctions* alcFunctions)
     : m_clock(clock)
     , m_logger(logger)
+    , m_rng(std::random_device{}())  // seeded here (after guard flags default-init) per B-21
+    , m_pool(m_sources, m_occlusionGainCurrent, this)  // S-4: pool initialized after m_sources/m_occlusionGainCurrent
 {
     // -----------------------------------------------------------------------
     // Step 1: Open device.
@@ -422,6 +463,10 @@ AudioSystem::AudioSystem(irr::ILogger* logger, IClock* clock, IAlcFunctions* alc
     // Must happen BEFORE EFX filter allocation (which calls alSourcei to bind
     // filters) and BEFORE thread launch.
     // -----------------------------------------------------------------------
+    // ALuint is unsigned int on all supported platforms — required for the
+    // reinterpret_cast below (m_sources is unsigned int[], ALuint = unsigned int).
+    static_assert(sizeof(ALuint) == sizeof(unsigned int),
+                  "ALuint must be the same size as unsigned int for reinterpret_cast to be safe");
     alGenSources(kTotalSources, reinterpret_cast<ALuint*>(m_sources));
     alCheckError_real("alGenSources");
     m_sourcesGenerated = true;
@@ -598,82 +643,81 @@ AudioSystem::~AudioSystem() {
 
     // Guard all AL cleanup behind m_contextMadeCurrent — if the context was never
     // made current we have no valid AL state to clean up.
-    if (!m_contextMadeCurrent) goto cleanup_alc;
-
-    // -----------------------------------------------------------------------
-    // Step 4: Streaming source stop + query + unqueue.
-    // Never hardcode buffer count — always query AL_BUFFERS_QUEUED.
-    // -----------------------------------------------------------------------
-    if (m_sourcesGenerated) {
-        for (int i = 0; i < kStreamSourceCount; ++i) {
-            ALuint src = static_cast<ALuint>(m_streams[i].sourceHandle);
-            alSourceStop(src);
-            ALint queued = 0;
-            alGetSourcei(src, AL_BUFFERS_QUEUED, &queued);
-            if (queued > 0) {
-                std::vector<ALuint> tmp(static_cast<size_t>(queued));
-                alSourceUnqueueBuffers(src, queued, tmp.data());
+    if (m_contextMadeCurrent) {
+        // -----------------------------------------------------------------------
+        // Step 4: Streaming source stop + query + unqueue.
+        // Never hardcode buffer count — always query AL_BUFFERS_QUEUED.
+        // -----------------------------------------------------------------------
+        if (m_sourcesGenerated) {
+            for (int i = 0; i < kStreamSourceCount; ++i) {
+                ALuint src = static_cast<ALuint>(m_streams[i].sourceHandle);
+                alSourceStop(src);
+                ALint queued = 0;
+                alGetSourcei(src, AL_BUFFERS_QUEUED, &queued);
+                if (queued > 0) {
+                    std::vector<ALuint> tmp(static_cast<size_t>(queued));
+                    alSourceUnqueueBuffers(src, queued, tmp.data());
+                }
             }
-        }
 
-        // Delete stream AL buffers.
-        for (int i = 0; i < kStreamSourceCount; ++i) {
-            alDeleteBuffers(AudioStream::kNumBuffers,
-                            reinterpret_cast<ALuint*>(m_streams[i].buffers));
-        }
-
-        // Close OGG stream handles.
-        for (int i = 0; i < kStreamSourceCount; ++i) {
-            if (m_streams[i].vf && m_streams[i].isOpen) {
-                AudioStreamUtils::closeOGG(m_streams[i].vf);
-                m_streams[i].isOpen = false;
+            // Delete stream AL buffers.
+            for (int i = 0; i < kStreamSourceCount; ++i) {
+                alDeleteBuffers(AudioStream::kNumBuffers,
+                                reinterpret_cast<ALuint*>(m_streams[i].buffers));
             }
-            delete m_streams[i].vf;
-            m_streams[i].vf = nullptr;
+
+            // Close OGG stream handles.
+            for (int i = 0; i < kStreamSourceCount; ++i) {
+                if (m_streams[i].vf && m_streams[i].isOpen) {
+                    AudioStreamUtils::closeOGG(m_streams[i].vf);
+                    m_streams[i].isOpen = false;
+                }
+                delete m_streams[i].vf;
+                m_streams[i].vf = nullptr;
+            }
+
+            // -----------------------------------------------------------------------
+            // Step 4a: SFX pool source stop + detach static buffer.
+            // Covers sources[0..kSFXPoolSize-1] = [0..57].
+            // -----------------------------------------------------------------------
+            for (int i = 0; i < kSFXPoolSize; ++i) {
+                ALuint src = static_cast<ALuint>(m_sources[i]);
+                alSourceStop(src);
+                alSourcei(src, AL_BUFFER, 0);
+            }
+
+            // Delete pre-loaded static buffers.
+            for (auto& kv : m_preloadedBuffers) {
+                if (kv.second != 0) {
+                    ALuint buf = static_cast<ALuint>(kv.second);
+                    alDeleteBuffers(1, &buf);
+                }
+            }
+            m_preloadedBuffers.clear();
         }
 
         // -----------------------------------------------------------------------
-        // Step 4a: SFX pool source stop + detach static buffer.
-        // Covers sources[0..kSFXPoolSize-1] = [0..57].
+        // Step 4b: EFX filter cleanup.
+        // Guard: m_efxAllocationAttempted (not m_efxAvailable — see spec).
+        // Loop bound: kEvictableSFXCount (55) only — stinger/stream slots have no filters.
         // -----------------------------------------------------------------------
-        for (int i = 0; i < kSFXPoolSize; ++i) {
-            ALuint src = static_cast<ALuint>(m_sources[i]);
-            alSourceStop(src);
-            alSourcei(src, AL_BUFFER, 0);
-        }
-
-        // Delete pre-loaded static buffers.
-        for (auto& kv : m_preloadedBuffers) {
-            if (kv.second != 0) {
-                ALuint buf = static_cast<ALuint>(kv.second);
-                alDeleteBuffers(1, &buf);
+        if (m_efxAllocationAttempted && m_fnDeleteFilters) {
+            for (int i = 0; i < kEvictableSFXCount; ++i) {
+                if (m_occlusionFilter[i] != AL_FILTER_NULL) {
+                    m_fnDeleteFilters(1, &m_occlusionFilter[i]);
+                    m_occlusionFilter[i] = AL_FILTER_NULL;
+                }
             }
         }
-        m_preloadedBuffers.clear();
-    }
 
-    // -----------------------------------------------------------------------
-    // Step 4b: EFX filter cleanup.
-    // Guard: m_efxAllocationAttempted (not m_efxAvailable — see spec).
-    // Loop bound: kEvictableSFXCount (55) only — stinger/stream slots have no filters.
-    // -----------------------------------------------------------------------
-    if (m_efxAllocationAttempted && m_fnDeleteFilters) {
-        for (int i = 0; i < kEvictableSFXCount; ++i) {
-            if (m_occlusionFilter[i] != AL_FILTER_NULL) {
-                m_fnDeleteFilters(1, &m_occlusionFilter[i]);
-                m_occlusionFilter[i] = AL_FILTER_NULL;
-            }
+        // -----------------------------------------------------------------------
+        // Step 5: Delete all AL source handles.
+        // -----------------------------------------------------------------------
+        if (m_sourcesGenerated) {
+            alDeleteSources(kTotalSources, reinterpret_cast<ALuint*>(m_sources));
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Step 5: Delete all AL source handles.
-    // -----------------------------------------------------------------------
-    if (m_sourcesGenerated) {
-        alDeleteSources(kTotalSources, reinterpret_cast<ALuint*>(m_sources));
-    }
-
-cleanup_alc:
     // -----------------------------------------------------------------------
     // Steps 6–8: Context + device teardown.
     // -----------------------------------------------------------------------
@@ -726,7 +770,7 @@ void AudioSystem::audioThreadFunc() {
     while (true) {
         {
             std::unique_lock<std::mutex> lock(m_streamMutex);
-            m_streamCV.wait_for(lock, std::chrono::milliseconds(10),
+            m_streamCV.wait_for(lock, kAudioThreadWakeInterval,
                                 [this]{ return m_stopThread.load(); });
         }
 
@@ -778,6 +822,12 @@ void AudioSystem::audioThreadFunc() {
     m_fnSetThreadCtx(nullptr);
 }
 
+// Zone ordering assertion: SFX_ZONE_RESIDENTIAL < SFX_ZONE_INDUSTRIAL ensures
+// the range-check (soundId >= SFX_ZONE_RESIDENTIAL && soundId <= SFX_ZONE_INDUSTRIAL)
+// in processPreloadCommand is valid regardless of constant assignment order.
+static_assert(SFX_ZONE_RESIDENTIAL < SFX_ZONE_INDUSTRIAL,
+              "Zone SFX IDs must be in ascending order: RESIDENTIAL < INDUSTRIAL");
+
 // ---------------------------------------------------------------------------
 // processPreloadCommand — called on audio thread during pre-load phase.
 // ---------------------------------------------------------------------------
@@ -785,10 +835,8 @@ void AudioSystem::processPreloadCommand(const PreloadCommand& cmd) {
     if (cmd.soundId == SFX_INVALID) return;
 
     const std::string& path = cmd.filePath;
-    bool isOGG = (path.size() >= 4 &&
-                  path.substr(path.size() - 4) == ".ogg");
-    bool isWAV = (path.size() >= 4 &&
-                  path.substr(path.size() - 4) == ".wav");
+    bool isOGG = hasSuffix(path, ".ogg");
+    bool isWAV = hasSuffix(path, ".wav");
 
     if (!isOGG && !isWAV) {
         logError("processPreloadCommand: unsupported format: " + path);
@@ -809,15 +857,22 @@ void AudioSystem::processPreloadCommand(const PreloadCommand& cmd) {
     }
 
     // OGG Looping game SFX (zone loops / vehicle engine).
-    OggVorbis_File vf;
-    memset(&vf, 0, sizeof(vf));
-    if (!AudioStreamUtils::openOGG(path, &vf)) {
+    // RAII holder: ensures closeOGG() is called on all exit paths (B-23).
+    struct OggHolder {
+        OggVorbis_File vf{};
+        bool open{false};
+        ~OggHolder() { if (open) { AudioStreamUtils::closeOGG(&vf); } }
+    } holder;
+
+    if (!AudioStreamUtils::openOGG(path, &holder.vf)) {
         logError("Failed to open OGG: " + path);
         return;
     }
+    holder.open = true;
+    OggVorbis_File& vf = holder.vf;
 
     int sr = 0, channels = 0;
-    AudioStreamUtils::getInfo(&vf, sr, channels);
+    (void)AudioStreamUtils::getInfo(&vf, sr, channels);
 
     // OGG header validation.
     bool isZoneLoop    = (cmd.soundId >= SFX_ZONE_RESIDENTIAL &&
@@ -830,15 +885,17 @@ void AudioSystem::processPreloadCommand(const PreloadCommand& cmd) {
         if (sr != 44100 || channels != 1) {
             logError("Zone loop / vehicle OGG header mismatch "
                      "(expected 44100 Hz mono): " + path);
-            AudioStreamUtils::closeOGG(&vf);
             // return kInvalidSoundHandle equivalent — do NOT throw.
+            // holder destructor calls closeOGG automatically.
             return;
         }
     }
 
+    // Cache getTotalFrames() once — used for both the duration cap and decode sizing.
+    int64_t totalFrames = AudioStreamUtils::getTotalFrames(&vf);
+
     // Zone loop duration cap (IDs 17–19): <= 18 s.
     if (isZoneLoop) {
-        int64_t totalFrames = AudioStreamUtils::getTotalFrames(&vf);
         float dur = (sr > 0) ? static_cast<float>(totalFrames) / static_cast<float>(sr)
                               : 0.f;
         if (dur > kZoneLoopMaxPreloadDurationSeconds) {
@@ -846,17 +903,14 @@ void AudioSystem::processPreloadCommand(const PreloadCommand& cmd) {
                      std::to_string(dur) + "s > " +
                      std::to_string(kZoneLoopMaxPreloadDurationSeconds) +
                      "s): " + path);
-            AudioStreamUtils::closeOGG(&vf);
-            return;
+            return;  // holder destructor calls closeOGG automatically
         }
     }
 
     // Fully decode OGG into a PCM buffer.
-    int64_t totalFrames = AudioStreamUtils::getTotalFrames(&vf);
     if (totalFrames <= 0) {
         logError("OGG has no frames: " + path);
-        AudioStreamUtils::closeOGG(&vf);
-        return;
+        return;  // holder destructor calls closeOGG automatically
     }
 
     std::vector<int16_t> pcm(static_cast<size_t>(totalFrames) *
@@ -864,8 +918,7 @@ void AudioSystem::processPreloadCommand(const PreloadCommand& cmd) {
 
     int decoded = AudioStreamUtils::decodeFrames(
         &vf, pcm.data(), static_cast<int>(totalFrames), channels);
-
-    AudioStreamUtils::closeOGG(&vf);
+    // closeOGG handled by holder destructor — no manual call needed
 
     if (decoded <= 0) {
         logError("OGG decode failed: " + path);
@@ -1007,7 +1060,7 @@ bool AudioSystem::openStreamOGG(int streamSlot, const std::string& path,
     }
 
     int sr = 0, channels = 0;
-    AudioStreamUtils::getInfo(s.vf, sr, channels);
+    (void)AudioStreamUtils::getInfo(s.vf, sr, channels);
 
     // Validate header (44100 Hz stereo for all streaming sources).
     if (sr != 44100 || channels != 2) {
@@ -1150,7 +1203,7 @@ int AudioSystem::refillStream(int slot) {
     int   queued = 0;
     int   sr     = 44100;
     int   channels = 2;
-    AudioStreamUtils::getInfo(s.vf, sr, channels);
+    (void)AudioStreamUtils::getInfo(s.vf, sr, channels);
 
     for (int b = 0; b < toFill && b < bufLen; ++b) {
         std::vector<int16_t> pcmBuf(AudioStream::kSamplesPerBuffer *
@@ -1167,8 +1220,8 @@ int AudioSystem::refillStream(int slot) {
         }
 
         if (framesDecoded == 0) {
-            // EOF — check if this is the main-menu music slot; if so, switch
-            // to the alternate variant instead of looping the same file.
+            // EOF — check if this is the main-menu music slot; if so, delegate
+            // to handleMainMenuEOF (B-11) which merges the two lock scopes.
             bool isMainMenuSlot = false;
             {
                 std::lock_guard<std::mutex> lk(m_streamMutex);
@@ -1176,44 +1229,7 @@ int AudioSystem::refillStream(int slot) {
             }
 
             if (isMainMenuSlot) {
-                // Select next variant (random-excluding-repeat).
-                int selectedVariant = 1;
-                std::string newPath;
-                {
-                    std::lock_guard<std::mutex> lk(m_streamMutex);
-                    std::vector<int> candidates;
-                    for (int v : {1, 2}) {
-                        if (v != m_lastMainMenuVariant) candidates.push_back(v);
-                    }
-                    std::uniform_int_distribution<int> dist(
-                        0, static_cast<int>(candidates.size()) - 1);
-                    selectedVariant = candidates[dist(m_rng)];
-                    m_lastMainMenuVariant = selectedVariant;
-                }
-                MusicTrackId trackId =
-                    (selectedVariant == 1) ? MUSIC_MAIN_MENU_01 : MUSIC_MAIN_MENU_02;
-                std::string filename = musicTrackFilename(trackId);
-                newPath = assetPath(filename);
-
-                // Close current stream, open the new variant, and start playback.
-                // All AL calls under m_streamMutex as in transitionToMainMenu().
-                std::string pendingLogError2;
-                {
-                    std::lock_guard<std::mutex> lk(m_streamMutex);
-                    closeStream(slot);
-                    if (openStreamOGG(slot, newPath, /*isMusicStem=*/true)) {
-                        m_streams[slot].crossfadeGain = 1.0f;
-                        ALuint src2 = static_cast<ALuint>(m_streams[slot].sourceHandle);
-                        alSourcei(src2, AL_LOOPING, AL_FALSE);
-                        alCheckError_real("refillStream:mainmenu_eof_looping");
-                        alSourcePlay(src2);
-                        alCheckError_real("refillStream:mainmenu_eof_play");
-                    } else {
-                        pendingLogError2 = "refillStream: failed to open main-menu variant " +
-                                           std::to_string(selectedVariant);
-                    }
-                }
-                if (!pendingLogError2.empty()) { logError(pendingLogError2); }
+                handleMainMenuEOF(slot);
                 // Return 0 buffers this wake; audio thread will refill on next wake
                 // from the newly opened stream.
                 break;
@@ -1318,30 +1334,11 @@ int AudioSystem::refillStream(int slot) {
         alGetSourcei(src, AL_BUFFERS_QUEUED, &buffersQueued);
     }
 
-    if (s.isMusicStem) {
-        // Bootstrap: compute first bar boundary once after stream start.
-        if (s.m_nextBarBoundary == 0 && s.m_samplesQueued > 0) {
-            // computeNextBarBoundary uses buffersQueued as captured before unqueue.
-            uint64_t spb = static_cast<uint64_t>(
-                (44100.0 * 60.0 / s.bpm) * s.beatsPerBar);
-            uint64_t sp  = AudioStream::computeSamplesPlayed(
-                s.m_samplesQueued, buffersQueued);
-            s.m_nextBarBoundary = ((sp / spb) + 1) * spb;
-        }
-
-        // Bar boundary tracking — advance m_nextBarBoundary as playback progresses.
-        // Phase 10: The intensity crossfade is driven from updateStreams() using the
-        // wall-clock wake interval accumulator (kWakeInterval).  The bar boundary
-        // counter here ensures the bootstrap completes and keeps m_nextBarBoundary
-        // current for future use (e.g. post-V1 beat-synchronized stingers).
-        uint64_t sp = AudioStream::computeSamplesPlayed(s.m_samplesQueued, buffersQueued);
-        if (sp >= s.m_nextBarBoundary && s.m_nextBarBoundary > 0) {
-            // Bar boundary crossed — advance to the NEXT boundary.
-            uint64_t spb = static_cast<uint64_t>(
-                (44100.0 * 60.0 / s.bpm) * s.beatsPerBar);
-            s.m_nextBarBoundary = ((sp / spb) + 1) * spb;
-        }
-    }
+    // Delegate bar-boundary bootstrap and advance to the extracted helper (B-39).
+    updateBarBoundary(s,
+        AudioStream::computeSamplesPlayed(s.m_samplesQueued,
+                                          static_cast<int>(buffersQueued)),
+        static_cast<int>(buffersQueued));
 
     return queued;
 }
@@ -1357,9 +1354,113 @@ int AudioSystem::refillStream(int slot) {
     // 3.14159265358979323846f — avoids M_PI which is POSIX-only (not in C++ standard).
     constexpr float kPi = 3.14159265358979323846f;
     // Clamp t to [0, 1] to guard floating-point rounding at boundaries.
-    const float tc = std::max(0.0f, std::min(1.0f, t));
+    const float tc = std::clamp(t, 0.0f, 1.0f);
     outStream.crossfadeGain = std::cos(tc * kPi * 0.5f);
     inStream.crossfadeGain  = std::sin(tc * kPi * 0.5f);
+}
+
+// ---------------------------------------------------------------------------
+// startCrossfadeIncomingStream — open a stream slot and start it at gain 0.
+// Shared by beginIntensityCrossfade and beginAmbientCrossfade (B-10).
+// Must be called while m_streamMutex is held by the caller.
+// errorOut is set on failure; caller must log it after releasing the mutex.
+// ---------------------------------------------------------------------------
+void AudioSystem::startCrossfadeIncomingStream(int slot, const std::string& path,
+                                                bool isStem, std::string& errorOut) {
+    // m_streamMutex must already be held by the caller.
+    if (!openStreamOGG(slot, path, isStem)) {
+        errorOut = "startCrossfadeIncomingStream: cannot open: " + path;
+        return;
+    }
+    m_streams[slot].crossfadeGain = 0.0f;
+    ALuint src = static_cast<ALuint>(m_streams[slot].sourceHandle);
+    alSourcei(src, AL_LOOPING, AL_FALSE);
+    alCheckError("startCrossfadeIncomingStream:AL_LOOPING");
+    alSourcePlay(src);
+    alCheckError("startCrossfadeIncomingStream:alSourcePlay");
+}
+
+// ---------------------------------------------------------------------------
+// finalizeCrossfade — close the outgoing slot and set incoming gain to 1.0.
+// Shared by music and ambient crossfade completion in updateStreams() (B-10).
+// Must be called while m_streamMutex is held for closeStream.
+// ---------------------------------------------------------------------------
+void AudioSystem::finalizeCrossfade(int outSlot, int inSlot) {
+    // m_streamMutex must already be held by the caller.
+    closeStream(outSlot);
+    m_streams[inSlot].crossfadeGain = 1.0f;
+}
+
+// ---------------------------------------------------------------------------
+// handleMainMenuEOF — select and start the next main-menu music variant (B-11).
+// Called on the audio thread from refillStream when the active main-menu slot
+// reaches EOF.  Two lock scopes are merged into one combined unlock/relock
+// sequence to avoid a deadlock with m_streamMutex already held by refillStream.
+// ---------------------------------------------------------------------------
+void AudioSystem::handleMainMenuEOF(int slot) {
+    // Step 1: select next variant (random-excluding-repeat) under lock.
+    int selectedVariant = 1;
+    {
+        std::lock_guard<std::mutex> lk(m_streamMutex);
+        std::vector<int> candidates;
+        for (int v : {1, 2}) {
+            if (v != m_lastMainMenuVariant) candidates.push_back(v);
+        }
+        std::uniform_int_distribution<int> dist(
+            0, static_cast<int>(candidates.size()) - 1);
+        selectedVariant = candidates[dist(m_rng)];
+        m_lastMainMenuVariant = selectedVariant;
+    }
+
+    MusicTrackId trackId = (selectedVariant == 1) ? MUSIC_MAIN_MENU_01 : MUSIC_MAIN_MENU_02;
+    std::string newPath  = assetPath(musicTrackFilename(trackId));
+
+    // Step 2: close current stream and open the next variant under lock.
+    std::string pendingErr;
+    {
+        std::lock_guard<std::mutex> lk(m_streamMutex);
+        closeStream(slot);
+        if (openStreamOGG(slot, newPath, /*isMusicStem=*/true)) {
+            m_streams[slot].crossfadeGain = 1.0f;
+            ALuint mainMenuSrc = static_cast<ALuint>(m_streams[slot].sourceHandle);
+            alSourcei(mainMenuSrc, AL_LOOPING, AL_FALSE);
+            alCheckError_real("handleMainMenuEOF:looping");
+            alSourcePlay(mainMenuSrc);
+            alCheckError_real("handleMainMenuEOF:play");
+        } else {
+            pendingErr = "handleMainMenuEOF: failed to open variant " +
+                         std::to_string(selectedVariant);
+        }
+    }
+    if (!pendingErr.empty()) logError(pendingErr);
+}
+
+// ---------------------------------------------------------------------------
+// updateBarBoundary — advance m_nextBarBoundary after each refillStream wake.
+// Called on the audio thread after all buffer operations are complete (B-39).
+// Bootstraps on first call (m_nextBarBoundary == 0) and advances the counter
+// whenever the estimated sample-play position crosses the current boundary.
+// ---------------------------------------------------------------------------
+void AudioSystem::updateBarBoundary(AudioStream& s,
+                                    uint64_t samplesPlayed,
+                                    int buffersQueued) {
+    if (!s.isMusicStem) return;
+
+    uint64_t spb = static_cast<uint64_t>((44100.0 * 60.0 / s.bpm) * s.beatsPerBar);
+    if (spb == 0) return;  // guard against bad sidecar data
+
+    // Bootstrap: compute first bar boundary once after stream start.
+    if (s.m_nextBarBoundary == 0 && s.m_samplesQueued > 0) {
+        uint64_t sp = AudioStream::computeSamplesPlayed(s.m_samplesQueued,
+                                                        buffersQueued);
+        s.m_nextBarBoundary = ((sp / spb) + 1) * spb;
+        return;
+    }
+
+    // Advance boundary when playback position crosses it.
+    if (samplesPlayed >= s.m_nextBarBoundary && s.m_nextBarBoundary > 0) {
+        s.m_nextBarBoundary = ((samplesPlayed / spb) + 1) * spb;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1420,15 +1521,7 @@ void AudioSystem::beginIntensityCrossfade(MusicIntensity intensity) {
             closeStream(m_musicIncomingSlot);
         }
 
-        if (!openStreamOGG(inSlot, path, true)) {
-            beginIntensityError = "beginIntensityCrossfade: cannot open: " + path;
-        } else {
-            // Set incoming stream gain to 0 and start playing immediately.
-            m_streams[inSlot].crossfadeGain = 0.0f;
-            alSourcei(static_cast<ALuint>(m_streams[inSlot].sourceHandle),
-                      AL_LOOPING, AL_FALSE);
-            alSourcePlay(static_cast<ALuint>(m_streams[inSlot].sourceHandle));
-        }
+        startCrossfadeIncomingStream(inSlot, path, /*isStem=*/true, beginIntensityError);
     }
     if (!beginIntensityError.empty()) {
         logError(beginIntensityError);
@@ -1465,15 +1558,7 @@ void AudioSystem::beginAmbientCrossfade(TimeOfDay tod) {
     std::string beginAmbientError;
     {
         std::lock_guard<std::mutex> lk(m_streamMutex);
-
-        if (!openStreamOGG(inSlot, path, false)) {
-            beginAmbientError = "beginAmbientCrossfade: cannot open: " + path;
-        } else {
-            m_streams[inSlot].crossfadeGain = 0.0f;
-            alSourcei(static_cast<ALuint>(m_streams[inSlot].sourceHandle),
-                      AL_LOOPING, AL_FALSE);
-            alSourcePlay(static_cast<ALuint>(m_streams[inSlot].sourceHandle));
-        }
+        startCrossfadeIncomingStream(inSlot, path, /*isStem=*/false, beginAmbientError);
     }
     if (!beginAmbientError.empty()) {
         logError(beginAmbientError);
@@ -1481,7 +1566,7 @@ void AudioSystem::beginAmbientCrossfade(TimeOfDay tod) {
     }
 
     m_ambientCrossfadeT.store(0.0f, std::memory_order_relaxed);
-    m_ambientCrossfadeDuration = kMusicCrossfadeDurationSeconds;
+    m_ambientCrossfadeDuration = kAmbientCrossfadeDurationSeconds;
     m_ambientIncomingSlot      = inSlot;
 }
 
@@ -1563,12 +1648,11 @@ void AudioSystem::updateStreams(float dt) {
         applyCrossfadeGains(m_streams[outSlot], m_streams[m_musicIncomingSlot], t);
 
         if (t >= 1.0f) {
-            // Crossfade complete: close the outgoing slot.
+            // Crossfade complete: close outgoing slot, set incoming gain to 1.
             {
                 std::lock_guard<std::mutex> lk(m_streamMutex);
-                closeStream(outSlot);
+                finalizeCrossfade(outSlot, m_musicIncomingSlot);
             }
-            m_streams[m_musicIncomingSlot].crossfadeGain = 1.0f;
             m_musicActiveSlot    = m_musicIncomingSlot;
             m_musicIncomingSlot  = -1;
             m_musicCrossfadeT.store(0.0f, std::memory_order_relaxed);
@@ -1592,9 +1676,8 @@ void AudioSystem::updateStreams(float dt) {
         if (t >= 1.0f) {
             {
                 std::lock_guard<std::mutex> lk(m_streamMutex);
-                closeStream(ambOutSlot);
+                finalizeCrossfade(ambOutSlot, m_ambientIncomingSlot);
             }
-            m_streams[m_ambientIncomingSlot].crossfadeGain = 1.0f;
             m_ambientIncomingSlot = -1;
             m_ambientCrossfadeT.store(0.0f, std::memory_order_relaxed);
         }
@@ -1662,16 +1745,19 @@ void AudioSystem::updateOcclusion() {
 // updateDuckState — called each audio thread wake with real-time dt.
 // ---------------------------------------------------------------------------
 void AudioSystem::updateDuckState(float dt) {
+    // DuckState is stored in std::atomic<DuckState> — must be trivially copyable.
+    static_assert(std::is_trivially_copyable_v<DuckState>,
+                  "DuckState must be trivially copyable for use in std::atomic<>");
     switch (m_duckState.load(std::memory_order_relaxed)) {
         case DuckState::IDLE:
             break;
 
         case DuckState::DUCKING: {
             m_duckTimer += dt;
-            float t = std::min(m_duckTimer / 0.2f, 1.0f);
+            float t = std::min(m_duckTimer / kDuckRampDownSeconds, 1.0f);
             float gain = m_duckStartGain + (kMusicDuckGain - m_duckStartGain) * t;
             m_musicDuckGain.store(gain, std::memory_order_relaxed);
-            if (m_duckTimer >= 0.2f) {
+            if (m_duckTimer >= kDuckRampDownSeconds) {
                 m_musicDuckGain.store(kMusicDuckGain, std::memory_order_relaxed);
                 m_duckTimer = 0.f;
                 m_duckState.store(DuckState::DUCKED, std::memory_order_relaxed);
@@ -1700,11 +1786,11 @@ void AudioSystem::updateDuckState(float dt) {
 
         case DuckState::RELEASING: {
             m_duckTimer += dt;
-            float t    = std::min(m_duckTimer / 1.5f, 1.0f);
-            float gain = kMusicDuckGain + 0.6f * t;
+            float t    = std::min(m_duckTimer / kDuckRampUpSeconds, 1.0f);
+            float gain = kMusicDuckGain + (1.0f - kMusicDuckGain) * t;
             gain = std::max(kMusicDuckGain, std::min(gain, 1.0f));
             m_musicDuckGain.store(gain, std::memory_order_relaxed);
-            if (m_duckTimer >= 1.5f) {
+            if (m_duckTimer >= kDuckRampUpSeconds) {
                 m_musicDuckGain.store(1.0f, std::memory_order_relaxed);
                 m_duckTimer = 0.f;
                 m_duckState.store(DuckState::IDLE, std::memory_order_relaxed);
@@ -1747,6 +1833,16 @@ void AudioSystem::onSourceRecycled(int i) {
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
+// acquireSFXSlot — delegates entirely to m_pool.acquireSFXSource().
+// Returns source index into m_sources[], or -1 if the pool is exhausted.
+// Callers must subsequently update m_sfxSlots[idx] and call
+// m_pool.markOccupied(idx, ...) to keep both tracking structures in sync.
+// ---------------------------------------------------------------------------
+int AudioSystem::acquireSFXSlot(SoundPriority priority, float listenerDistanceSq) {
+    return m_pool.acquireSFXSource(priority, listenerDistanceSq);
+}
+
+// ---------------------------------------------------------------------------
 // playSound — non-positional (2D) one-shot.
 // ---------------------------------------------------------------------------
 SoundHandle AudioSystem::playSound(SoundId id, SoundPriority priority,
@@ -1758,59 +1854,36 @@ SoundHandle AudioSystem::playSound(SoundId id, SoundPriority priority,
         return 0;
     }
 
-    // Acquire SFX source (no distance — non-positional, use 0.f).
-    // Use AudioSourcePool logic inline (pool object is embedded in AudioSystem
-    // to keep the implementation self-contained in Phase 7).
-    // Simple scan for free slot.
-    int upperBound = (priority == SoundPriority::LOW ||
-                      priority == SoundPriority::NORMAL)
-                     ? kTransientReserveStart
-                     : kEvictableSFXCount;
-
-    int idx = -1;
-    for (int i = 0; i < upperBound; ++i) {
-        if (!m_sfxSlots[i].occupied) { idx = i; break; }
-    }
-
-    if (idx < 0) {
-        // Try eviction: find lowest-priority / greatest-distance.
-        int   bestPri  = static_cast<int>(priority);
-        float bestDist = -1.f;
-        for (int i = 0; i < upperBound; ++i) {
-            if (!m_sfxSlots[i].occupied) continue;
-            int pri = static_cast<int>(m_sfxSlots[i].priority);
-            if (pri < bestPri || (pri == bestPri &&
-                    m_sfxSlots[i].listenerDistanceSq > bestDist)) {
-                idx      = i;
-                bestPri  = pri;
-                bestDist = m_sfxSlots[i].listenerDistanceSq;
-            }
-        }
-        if (idx < 0) return 0;  // Cannot acquire
-
-        // Evict the candidate.
-        alSourceStop(static_cast<ALuint>(m_sources[idx]));
-        alSourcei(static_cast<ALuint>(m_sources[idx]), AL_BUFFER, 0);
-        onSourceRecycled(idx);
-    }
+    // Acquire SFX source via pool (B-2/B-3: delegates to m_pool, no inline scan).
+    int idx = acquireSFXSlot(priority, 0.f);
+    if (idx < 0) return 0;  // Cannot acquire
 
     ALuint src = static_cast<ALuint>(m_sources[idx]);
     ALuint buf = static_cast<ALuint>(it->second);
 
     // Non-positional setup.
     alSourcei (src, AL_SOURCE_RELATIVE, AL_TRUE);
+    alCheckError("playSound:alSourcei(AL_SOURCE_RELATIVE)");
     alSource3f(src, AL_POSITION,        0.f, 0.f, 0.f);
+    alCheckError("playSound:alSource3f(AL_POSITION)");
     alSourcef (src, AL_ROLLOFF_FACTOR,  0.f);
+    alCheckError("playSound:alSourcef(AL_ROLLOFF_FACTOR)");
     alSourcei (src, AL_DIRECT_FILTER,   AL_FILTER_NULL);  // EFX bypass
+    alCheckError("playSound:alSourcei(AL_DIRECT_FILTER)");
 
     alSourcef (src, AL_GAIN,  gain);
+    alCheckError("playSound:alSourcef(AL_GAIN)");
     alSourcei (src, AL_BUFFER, static_cast<ALint>(buf));
+    alCheckError("playSound:alSourcei(AL_BUFFER)");
     alSourcei (src, AL_LOOPING, AL_FALSE);
+    alCheckError("playSound:alSourcei(AL_LOOPING)");
     alSourcePlay(src);
+    alCheckError("playSound:alSourcePlay");
 
     SoundHandle handle = m_nextHandle.fetch_add(1, std::memory_order_relaxed);
     m_sfxSlots[idx] = {id, static_cast<unsigned int>(buf), handle,
                         priority, 0.f, true};
+    m_pool.markOccupied(idx, priority, 0.f, static_cast<unsigned int>(buf));
     return handle;
 }
 
@@ -1828,49 +1901,29 @@ SoundHandle AudioSystem::playPositionalSound(SoundId id, vec3 pos,
         return 0;
     }
 
-    // No listener position available in this method; use large distance as heuristic.
+    // No listener position available in this method; use 0.f distance as heuristic.
     float distSq = 0.f;
 
-    int upperBound = (priority == SoundPriority::LOW ||
-                      priority == SoundPriority::NORMAL)
-                     ? kTransientReserveStart
-                     : kEvictableSFXCount;
-
-    int idx = -1;
-    for (int i = 0; i < upperBound; ++i) {
-        if (!m_sfxSlots[i].occupied) { idx = i; break; }
-    }
-
-    if (idx < 0) {
-        int   bestPri  = static_cast<int>(priority);
-        float bestDist = -1.f;
-        for (int i = 0; i < upperBound; ++i) {
-            if (!m_sfxSlots[i].occupied) continue;
-            int pri = static_cast<int>(m_sfxSlots[i].priority);
-            if (pri < bestPri || (pri == bestPri &&
-                    m_sfxSlots[i].listenerDistanceSq > bestDist)) {
-                idx      = i;
-                bestPri  = pri;
-                bestDist = m_sfxSlots[i].listenerDistanceSq;
-            }
-        }
-        if (idx < 0) return 0;
-
-        alSourceStop(static_cast<ALuint>(m_sources[idx]));
-        alSourcei(static_cast<ALuint>(m_sources[idx]), AL_BUFFER, 0);
-        onSourceRecycled(idx);
-    }
+    // Acquire SFX source via pool — no inline pool scanning.
+    int idx = acquireSFXSlot(priority, distSq);
+    if (idx < 0) return 0;  // Cannot acquire
 
     ALuint src = static_cast<ALuint>(m_sources[idx]);
     ALuint buf = static_cast<ALuint>(it->second);
 
     // Positional setup — default rolloff for general SFX category.
     alSourcei (src, AL_SOURCE_RELATIVE, AL_FALSE);
+    alCheckError("playPositionalSound:alSourcei(AL_SOURCE_RELATIVE)");
     alSource3f(src, AL_POSITION,        pos.x, pos.y, pos.z);
+    alCheckError("playPositionalSound:alSource3f(AL_POSITION)");
     alSource3f(src, AL_VELOCITY,        0.f, 0.f, 0.f);
+    alCheckError("playPositionalSound:alSource3f(AL_VELOCITY)");
     alSourcef (src, AL_ROLLOFF_FACTOR,  1.0f);
+    alCheckError("playPositionalSound:alSourcef(AL_ROLLOFF_FACTOR)");
     alSourcef (src, AL_REFERENCE_DISTANCE, 10.f);
+    alCheckError("playPositionalSound:alSourcef(AL_REFERENCE_DISTANCE)");
     alSourcef (src, AL_MAX_DISTANCE,       150.f);
+    alCheckError("playPositionalSound:alSourcef(AL_MAX_DISTANCE)");
 
     // Phase 10: EFX bypass for SFX_EARTHWORKS — construction occurs on open,
     // unoccluded tiles so the lowpass filter would incorrectly muffle the sound.
@@ -1879,17 +1932,22 @@ SoundHandle AudioSystem::playPositionalSound(SoundId id, vec3 pos,
     // value set by the last onSourceRecycled() call, which restores it to open).
     if (id == SFX_EARTHWORKS) {
         alSourcei(src, AL_DIRECT_FILTER, AL_FILTER_NULL);
-        alCheckError_real("playPositionalSound:EFXBypass(SFX_EARTHWORKS)");
+        alCheckError("playPositionalSound:EFXBypass(SFX_EARTHWORKS)");
     }
 
     alSourcef(src, AL_GAIN,   gain);
+    alCheckError("playPositionalSound:alSourcef(AL_GAIN)");
     alSourcei(src, AL_BUFFER, static_cast<ALint>(buf));
+    alCheckError("playPositionalSound:alSourcei(AL_BUFFER)");
     alSourcei(src, AL_LOOPING, AL_FALSE);
+    alCheckError("playPositionalSound:alSourcei(AL_LOOPING)");
     alSourcePlay(src);
+    alCheckError("playPositionalSound:alSourcePlay");
 
     SoundHandle handle = m_nextHandle.fetch_add(1, std::memory_order_relaxed);
     m_sfxSlots[idx] = {id, static_cast<unsigned int>(buf), handle,
                         priority, distSq, true};
+    m_pool.markOccupied(idx, priority, distSq, static_cast<unsigned int>(buf));
     return handle;
 }
 
@@ -2033,9 +2091,11 @@ void AudioSystem::syncListenerToCamera(const CameraState& cam) {
     if (m_deviceLost.load(std::memory_order_relaxed)) return;
     // AL_POSITION.
     alListener3f(AL_POSITION, cam.position.x, cam.position.y, cam.position.z);
+    alCheckError("syncListenerToCamera:alListener3f(AL_POSITION)");
 
     // AL_VELOCITY — always zero (no Doppler for camera movement).
     alListener3f(AL_VELOCITY, 0.f, 0.f, 0.f);
+    alCheckError("syncListenerToCamera:alListener3f(AL_VELOCITY)");
 
     // AL_ORIENTATION — 6-float [at.x at.y at.z up.x up.y up.z].
     // COORDINATE CONVERSION: Irrlicht left-handed (Z into screen) → OpenAL
@@ -2045,6 +2105,7 @@ void AudioSystem::syncListenerToCamera(const CameraState& cam) {
          cam.up.x,       cam.up.y,      -cam.up.z          // "up" (Z negated)
     };
     alListenerfv(AL_ORIENTATION, orientation);
+    alCheckError("syncListenerToCamera:alListenerfv(AL_ORIENTATION)");
 }
 
 // ---------------------------------------------------------------------------
@@ -2235,24 +2296,15 @@ void AudioSystem::transitionToGameplay() {
 // ---------------------------------------------------------------------------
 void AudioSystem::update(float /*realDeltaSeconds*/) {
     if (m_deviceLost.load(std::memory_order_relaxed)) return;
-    // Phase 7 main-thread responsibilities:
-    // 1. Advance occlusion raycast budget / per-source distance cull checks.
-    //    (Full raycast implementation deferred to Phase 10 — occlusion gain
-    //     targets are written by the main-thread occlusion raycast pass;
-    //     the per-source smoothing runs on the audio thread in updateOcclusion().)
+    // Main-thread update is intentionally minimal.
     //
-    // 2. Process time-of-day transition queue.
-    //    (Queued by setTimeOfDay(); executed here once per frame.)
+    // All per-frame audio work (streaming, crossfade gain application, duck
+    // state machine, vehicle engine AL updates, occlusion smoothing, and SFX
+    // cleanup) runs on the audio thread (~10 ms wake interval via m_streamCV).
     //
-    // 3. Queue crossfade commands to audio thread via m_streamMutex.
-    //    (NOTE: MUST NOT call alSourcef(AL_GAIN) directly on streaming sources
-    //     from the main thread. All gain writes to streaming sources are done
-    //     by the audio thread in updateStreams(). Crossfade requests are queued
-    //     via m_streamMutex and processed by the audio thread.)
-
-    // SFX cleanup is performed on the audio thread (cleanupFinishedSFX) to avoid
-    // making AL calls here that could set AL_INVALID_OPERATION in the shared context
-    // error state and bleed into the audio thread's alCheckError_real.
+    // The main thread writes to atomic members (m_currentMusicIntensity,
+    // m_pendingAmbientTod, m_occlusionGainTarget, etc.) and the audio thread
+    // picks them up on its next wake — no AL calls are made here.
 }
 
 // ---------------------------------------------------------------------------
@@ -2302,11 +2354,6 @@ void AudioSystem::setSFXVolume(float gain) {
 // Calling with the tier already active is a no-op (audio thread detects no change).
 // Thread-safety: call from the main thread only (store to m_currentMusicIntensity
 // is atomic, so there is no data race with audio thread reads).
-//
-// NOTE: Phase 10 deliverable.  updateStreams() cross-fade logic that responds
-// to m_currentMusicIntensity is also a Phase 10 deliverable and is implemented
-// in the same Phase 10 commit that delivers the adaptive music stems and wires
-// CitySimulation::update().
 // ---------------------------------------------------------------------------
 void AudioSystem::setMusicIntensity(MusicIntensity intensity) {
     m_currentMusicIntensity.store(static_cast<int>(intensity), std::memory_order_relaxed);
@@ -2323,8 +2370,10 @@ void AudioSystem::setMusicIntensity(MusicIntensity intensity) {
 //   calls (AL_VELOCITY, AL_PITCH, AL_GAIN, AL_POSITION, alSourcePlay,
 //   alSourceStop).  No AL calls are made on the main thread from these methods.
 //
-// Source acquisition uses the same inline pool logic as playSound() — scanning
-// m_sfxSlots[0..kTransientReserveStart-1] for free NORMAL-priority slots.
+// Source acquisition: playSound/playPositionalSound delegate to
+// m_pool.acquireSFXSource().  acquireVehicleEnginePair uses its own inline
+// scan of m_sfxSlots[0..kTransientReserveStart-1] because vehicle pairs must
+// be acquired atomically — two sources committed together or neither.
 // The VehicleAudioSlot array (m_vehicleAudio) is the sole cross-thread
 // communication mechanism; no mutex is needed because all fields are atomic.
 // ---------------------------------------------------------------------------
@@ -2439,6 +2488,12 @@ std::pair<int,int> AudioSystem::acquireVehicleEnginePair(ZoneType zone) {
                                    SoundPriority::NORMAL, 0.f, true};
     m_sfxSlots[moveIdx] = SFXSlot{SFX_VEHICLE_ENGINE_MOVE, 0, 0,
                                    SoundPriority::NORMAL, 0.f, true};
+    // Sync pool tracking so acquireSFXSource() does not hand these slots to
+    // playSound/playPositionalSound while the vehicle engine source is active.
+    // Without this, the pool sees the slot as free and hands it to SFX which
+    // then calls alSourcei(AL_BUFFER) on an AL_PLAYING source → AL_INVALID_OPERATION.
+    m_pool.markOccupied(idleIdx, SoundPriority::NORMAL, 0.f, 0);
+    m_pool.markOccupied(moveIdx, SoundPriority::NORMAL, 0.f, 0);
 
     // -----------------------------------------------------------------------
     // Step 3: Populate the VehicleAudioSlot atomically.
@@ -2544,6 +2599,98 @@ void AudioSystem::updateVehicleAudio(int idleIdx, int moveIdx,
 }
 
 // ---------------------------------------------------------------------------
+// vehicleEnginePitch — interpolate engine pitch from speed fraction (B-42).
+// ---------------------------------------------------------------------------
+float AudioSystem::vehicleEnginePitch(float speed, float basePitch) noexcept {
+    return basePitch * (kVehicleEnginePitchIdle +
+                        speed * (kVehicleEnginePitchFull - kVehicleEnginePitchIdle));
+}
+
+// ---------------------------------------------------------------------------
+// setupVehicleIdleSource — bind idle buffer and set initial AL state (B-40).
+// Called on the audio thread during pendingInit processing.
+// ---------------------------------------------------------------------------
+void AudioSystem::setupVehicleIdleSource(unsigned int src, float basePitch) {
+    ALuint alSrc = static_cast<ALuint>(src);
+    alSourcei (alSrc, AL_SOURCE_RELATIVE, AL_FALSE);
+    alCheckError_real("setupVehicleIdleSource:AL_SOURCE_RELATIVE");
+    alSource3f(alSrc, AL_VELOCITY,         0.f, 0.f, 0.f);
+    alCheckError_real("setupVehicleIdleSource:AL_VELOCITY");
+    alSourcef (alSrc, AL_ROLLOFF_FACTOR,   1.f);
+    alCheckError_real("setupVehicleIdleSource:AL_ROLLOFF_FACTOR");
+    alSourcef (alSrc, AL_REFERENCE_DISTANCE, 5.f);
+    alCheckError_real("setupVehicleIdleSource:AL_REFERENCE_DISTANCE");
+    alSourcef (alSrc, AL_MAX_DISTANCE,     150.f);
+    alCheckError_real("setupVehicleIdleSource:AL_MAX_DISTANCE");
+    alSourcef (alSrc, AL_GAIN,             1.0f);  // speed=0 → full idle gain
+    alCheckError_real("setupVehicleIdleSource:AL_GAIN");
+    alSourcef (alSrc, AL_PITCH,            basePitch * kVehicleEnginePitchIdle);
+    alCheckError_real("setupVehicleIdleSource:AL_PITCH");
+    alSourcei (alSrc, AL_LOOPING,          AL_TRUE);
+    alCheckError_real("setupVehicleIdleSource:AL_LOOPING");
+}
+
+// ---------------------------------------------------------------------------
+// setupVehicleMoveSource — bind move buffer and set initial AL state (B-40).
+// Called on the audio thread during pendingInit processing.
+// ---------------------------------------------------------------------------
+void AudioSystem::setupVehicleMoveSource(unsigned int src, float basePitch) {
+    ALuint alSrc = static_cast<ALuint>(src);
+    alSourcei (alSrc, AL_SOURCE_RELATIVE, AL_FALSE);
+    alCheckError_real("setupVehicleMoveSource:AL_SOURCE_RELATIVE");
+    alSource3f(alSrc, AL_VELOCITY,         0.f, 0.f, 0.f);
+    alCheckError_real("setupVehicleMoveSource:AL_VELOCITY");
+    alSourcef (alSrc, AL_ROLLOFF_FACTOR,   1.f);
+    alCheckError_real("setupVehicleMoveSource:AL_ROLLOFF_FACTOR");
+    alSourcef (alSrc, AL_REFERENCE_DISTANCE, 5.f);
+    alCheckError_real("setupVehicleMoveSource:AL_REFERENCE_DISTANCE");
+    alSourcef (alSrc, AL_MAX_DISTANCE,     150.f);
+    alCheckError_real("setupVehicleMoveSource:AL_MAX_DISTANCE");
+    alSourcef (alSrc, AL_GAIN,             0.0f);  // speed=0 → zero move gain
+    alCheckError_real("setupVehicleMoveSource:AL_GAIN");
+    alSourcef (alSrc, AL_PITCH,            basePitch * kVehicleEnginePitchIdle);
+    alCheckError_real("setupVehicleMoveSource:AL_PITCH");
+    alSourcei (alSrc, AL_LOOPING,          AL_TRUE);
+    alCheckError_real("setupVehicleMoveSource:AL_LOOPING");
+}
+
+// ---------------------------------------------------------------------------
+// updateVehicleEngineFrame — per-frame pitch/gain/position update (B-41).
+// Called on the audio thread for each fully-initialised vehicle pair.
+// ---------------------------------------------------------------------------
+void AudioSystem::updateVehicleEngineFrame(int slotIdx,
+                                           unsigned int idleSrc,
+                                           unsigned int moveSrc) {
+    ALuint alIdle = static_cast<ALuint>(idleSrc);
+    ALuint alMove = static_cast<ALuint>(moveSrc);
+
+    float speed    = m_vehicleAudio[slotIdx].speedFraction.load(std::memory_order_relaxed);
+    float bp       = m_vehicleAudio[slotIdx].basePitch.load(std::memory_order_relaxed);
+    float wx       = m_vehicleAudio[slotIdx].worldX.load(std::memory_order_relaxed);
+    float wz       = m_vehicleAudio[slotIdx].worldZ.load(std::memory_order_relaxed);
+    const float sfxVolume = m_sfxVolume.load(std::memory_order_relaxed);
+
+    float pitch    = vehicleEnginePitch(speed, bp);
+    float gainIdle = 1.0f - speed;
+    float gainMove = speed;
+
+    alSourcef(alIdle, AL_PITCH, pitch);
+    alCheckError_real("updateVehicleEngineFrame:AL_PITCH(idle)");
+    alSourcef(alMove, AL_PITCH, pitch);
+    alCheckError_real("updateVehicleEngineFrame:AL_PITCH(move)");
+
+    alSourcef(alIdle, AL_GAIN, gainIdle * sfxVolume);
+    alCheckError_real("updateVehicleEngineFrame:AL_GAIN(idle)");
+    alSourcef(alMove, AL_GAIN, gainMove * sfxVolume);
+    alCheckError_real("updateVehicleEngineFrame:AL_GAIN(move)");
+
+    alSource3f(alIdle, AL_POSITION, wx, 0.f, wz);
+    alCheckError_real("updateVehicleEngineFrame:AL_POSITION(idle)");
+    alSource3f(alMove, AL_POSITION, wx, 0.f, wz);
+    alCheckError_real("updateVehicleEngineFrame:AL_POSITION(move)");
+}
+
+// ---------------------------------------------------------------------------
 // updateVehicleEngines — audio thread, called each wake (~10 ms).
 //
 // Processes pending vehicle init/release commands and applies per-frame AL
@@ -2579,12 +2726,16 @@ void AudioSystem::updateVehicleEngines() {
                 alCheckError_real("updateVehicleEngines:release:alSourceStop(idle)");
                 alSourcei(static_cast<ALuint>(m_sources[rIdle]), AL_BUFFER, 0);
                 alCheckError_real("updateVehicleEngines:release:alSourcei(idle,AL_BUFFER,0)");
+                // Free pool slot so acquireSFXSource() can reuse it for SFX.
+                m_pool.notifyFreed(rIdle);
             }
             if (rMove >= 0 && rMove < kEvictableSFXCount) {
                 alSourceStop(static_cast<ALuint>(m_sources[rMove]));
                 alCheckError_real("updateVehicleEngines:release:alSourceStop(move)");
                 alSourcei(static_cast<ALuint>(m_sources[rMove]), AL_BUFFER, 0);
                 alCheckError_real("updateVehicleEngines:release:alSourcei(move,AL_BUFFER,0)");
+                // Free pool slot so acquireSFXSource() can reuse it for SFX.
+                m_pool.notifyFreed(rMove);
             }
             m_vehicleAudio[i].pendingReleaseIdle.store(-1, std::memory_order_relaxed);
             m_vehicleAudio[i].pendingReleaseMove.store(-1, std::memory_order_relaxed);
@@ -2612,46 +2763,17 @@ void AudioSystem::updateVehicleEngines() {
             alSourceStop(idleSrc);
             alSourceStop(moveSrc);
 
-            // Idle source: positional, looping, start at idle gain (speed=0).
-            alSourcei (idleSrc, AL_SOURCE_RELATIVE, AL_FALSE);
-            alCheckError_real("updateVehicleEngines:init:AL_SOURCE_RELATIVE(idle)");
-            alSource3f(idleSrc, AL_VELOCITY,      0.f, 0.f, 0.f);
-            alCheckError_real("updateVehicleEngines:init:AL_VELOCITY(idle)");
-            alSourcef (idleSrc, AL_ROLLOFF_FACTOR, 1.f);
-            alCheckError_real("updateVehicleEngines:init:AL_ROLLOFF_FACTOR(idle)");
-            alSourcef (idleSrc, AL_REFERENCE_DISTANCE, 5.f);
-            alCheckError_real("updateVehicleEngines:init:AL_REFERENCE_DISTANCE(idle)");
-            alSourcef (idleSrc, AL_MAX_DISTANCE, 150.f);
-            alCheckError_real("updateVehicleEngines:init:AL_MAX_DISTANCE(idle)");
-            alSourcef (idleSrc, AL_GAIN,  1.0f);  // speed=0 → full idle gain
-            alCheckError_real("updateVehicleEngines:init:AL_GAIN(idle)");
             float bp = m_vehicleAudio[i].basePitch.load(std::memory_order_relaxed);
-            alSourcef (idleSrc, AL_PITCH, bp * 0.75f);  // stopped pitch
-            alCheckError_real("updateVehicleEngines:init:AL_PITCH(idle)");
-            alSourcei (idleSrc, AL_BUFFER,  static_cast<ALint>(bufIdle));
-            alCheckError_real("updateVehicleEngines:init:AL_BUFFER(idle)");
-            alSourcei (idleSrc, AL_LOOPING, AL_TRUE);
-            alCheckError_real("updateVehicleEngines:init:AL_LOOPING(idle)");
 
-            // Move source: positional, looping, start at zero gain (speed=0).
-            alSourcei (moveSrc, AL_SOURCE_RELATIVE, AL_FALSE);
-            alCheckError_real("updateVehicleEngines:init:AL_SOURCE_RELATIVE(move)");
-            alSource3f(moveSrc, AL_VELOCITY,      0.f, 0.f, 0.f);
-            alCheckError_real("updateVehicleEngines:init:AL_VELOCITY(move)");
-            alSourcef (moveSrc, AL_ROLLOFF_FACTOR, 1.f);
-            alCheckError_real("updateVehicleEngines:init:AL_ROLLOFF_FACTOR(move)");
-            alSourcef (moveSrc, AL_REFERENCE_DISTANCE, 5.f);
-            alCheckError_real("updateVehicleEngines:init:AL_REFERENCE_DISTANCE(move)");
-            alSourcef (moveSrc, AL_MAX_DISTANCE, 150.f);
-            alCheckError_real("updateVehicleEngines:init:AL_MAX_DISTANCE(move)");
-            alSourcef (moveSrc, AL_GAIN,  0.0f);  // speed=0 → zero move gain
-            alCheckError_real("updateVehicleEngines:init:AL_GAIN(move)");
-            alSourcef (moveSrc, AL_PITCH, bp * 0.75f);
-            alCheckError_real("updateVehicleEngines:init:AL_PITCH(move)");
-            alSourcei (moveSrc, AL_BUFFER,  static_cast<ALint>(bufMove));
+            // Idle source: apply spatial/looping properties, then bind buffer (B-40).
+            setupVehicleIdleSource(m_sources[idleIdx], bp);
+            alSourcei(idleSrc, AL_BUFFER, static_cast<ALint>(bufIdle));
+            alCheckError_real("updateVehicleEngines:init:AL_BUFFER(idle)");
+
+            // Move source: apply spatial/looping properties, then bind buffer (B-40).
+            setupVehicleMoveSource(m_sources[moveIdx], bp);
+            alSourcei(moveSrc, AL_BUFFER, static_cast<ALint>(bufMove));
             alCheckError_real("updateVehicleEngines:init:AL_BUFFER(move)");
-            alSourcei (moveSrc, AL_LOOPING, AL_TRUE);
-            alCheckError_real("updateVehicleEngines:init:AL_LOOPING(move)");
 
             // Set initial position (may be 0,0 until first updateVehicleAudio frame).
             float wx = m_vehicleAudio[i].worldX.load(std::memory_order_relaxed);
@@ -2676,32 +2798,7 @@ void AudioSystem::updateVehicleEngines() {
         // ---------------------------------------------------------------
         if (m_vehicleAudio[i].pendingInit.load(std::memory_order_relaxed)) continue;
 
-        float speed  = m_vehicleAudio[i].speedFraction.load(std::memory_order_relaxed);
-        float bp     = m_vehicleAudio[i].basePitch.load(std::memory_order_relaxed);
-        float wx     = m_vehicleAudio[i].worldX.load(std::memory_order_relaxed);
-        float wz     = m_vehicleAudio[i].worldZ.load(std::memory_order_relaxed);
-
-        // pitch = basePitch × lerp(0.75, 1.35, speedFraction)
-        float pitch  = bp * (0.75f + speed * (1.35f - 0.75f));
-
-        // gain crossblend: idle fades out as speed increases, move fades in.
-        float gainIdle = 1.0f - speed;
-        float gainMove = speed;
-
-        alSourcef(idleSrc, AL_PITCH, pitch);
-        alCheckError_real("updateVehicleEngines:AL_PITCH(idle)");
-        alSourcef(moveSrc, AL_PITCH, pitch);
-        alCheckError_real("updateVehicleEngines:AL_PITCH(move)");
-
-        alSourcef(idleSrc, AL_GAIN, gainIdle * m_sfxVolume.load(std::memory_order_relaxed));
-        alCheckError_real("updateVehicleEngines:AL_GAIN(idle)");
-        alSourcef(moveSrc, AL_GAIN, gainMove * m_sfxVolume.load(std::memory_order_relaxed));
-        alCheckError_real("updateVehicleEngines:AL_GAIN(move)");
-
-        alSource3f(idleSrc, AL_POSITION, wx, 0.f, wz);
-        alCheckError_real("updateVehicleEngines:AL_POSITION(idle)");
-        alSource3f(moveSrc, AL_POSITION, wx, 0.f, wz);
-        alCheckError_real("updateVehicleEngines:AL_POSITION(move)");
+        updateVehicleEngineFrame(i, m_sources[idleIdx], m_sources[moveIdx]);  // B-41
     }
 }
 
@@ -2735,6 +2832,12 @@ void AudioSystem::cleanupFinishedSFX() {
             alCheckError_real("cleanupFinishedSFX:alSourcei(AL_BUFFER,0)");
             onSourceRecycled(i);
             m_sfxSlots[i] = SFXSlot{};
+            // Sync pool tracking so main-thread acquireSFXSource() sees the slot
+            // as free. Without this call the pool's PoolSFXEntry.occupied stays
+            // true after natural playback completion, forcing every subsequent
+            // acquisition through the eviction path and causing
+            // AL_INVALID_OPERATION when an evicted source is still playing.
+            m_pool.notifyFreed(i);
         }
     }
 }

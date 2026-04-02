@@ -26,6 +26,26 @@ namespace {
     constexpr int kKeyReturn = 13;   // Enter/Return
     constexpr int kKeyDelete = 46;   // Delete key (Irrlicht KEY_DELETE)
     constexpr int kKeyTab    = 9;    // Tab
+
+    // --- Toast layout constants (virtual 1920x1080 space) ---
+    // D-9 / UI-10: moved from NotificationManager.h to keep the header clean.
+    constexpr int kToastWidth           = 500;
+    constexpr int kCriticalToastHeight  = 48;
+    constexpr int kNormalToastMaxHeight = 63;
+    constexpr int kCriticalBandY        = 20;
+    constexpr int kNormalBandY          = 130;
+    constexpr int kMaxCriticalVisible   = 2;
+    constexpr int kMaxNormalBase        = 3;
+    constexpr int kMaxNormalQueueDepth  = 10;
+    constexpr int kMaxLogEntries        = 50;
+    constexpr int kMaxBodyChars         = 80;
+
+    // --- Log panel layout constants (virtual 1920x1080 space) ---
+    constexpr int kLogRowHeightPx = 20;
+    constexpr int kLogTrackX      = 1856;
+    constexpr int kLogTrackY      = 56;
+    constexpr int kLogTrackW      = 12;
+    constexpr int kLogTrackH      = 500;
 } // namespace
 
 // ----------------------------------------------------------------

@@ -1,5 +1,5 @@
 #pragma once
-#include "src/interfaces/IUIBackend.h"      // UIElementHandle, IUIBackend, Rect
+#include "src/interfaces/IUIBackend.h"      // UIElementHandle, IUIBackend, UIRect
 #include "src/interfaces/IRenderer.h"  // ScreenRect — Irrlicht-free bounding-box type
 
 // Forward declarations — avoid pulling full headers into every consumer.
@@ -46,7 +46,7 @@ public:
     void draw();
     bool onEvent(const InputEvent& event);
     bool isOpen() const { return m_visible; }
-    Rect getBounds() const;
+    UIRect getBounds() const;
 
     // computePanelPosition — pure function for testable panel placement logic.
     //

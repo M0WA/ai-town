@@ -21,23 +21,23 @@ public:
     MOCK_METHOD(void,            setElementAlpha,      (UIElementHandle handle, float alpha),                   (override));
     MOCK_METHOD(void,            setElementImage,      (UIElementHandle handle, UIElementHandle textureHandle), (override));
     MOCK_METHOD(std::string,     getElementText,       (UIElementHandle handle),                                (const, override));
-    MOCK_METHOD(Rect,            getElementRect,       (UIElementHandle handle),                                (const, override));
+    MOCK_METHOD(UIRect,          getElementRect,       (UIElementHandle handle),                                (const, override));
     MOCK_METHOD(int,             getScreenWidth,       (),                                                      (const, override));
     MOCK_METHOD(int,             getScreenHeight,      (),                                                      (const, override));
     MOCK_METHOD(int,             getVirtualWidth,      (),                                                      (const, override));
     MOCK_METHOD(int,             getVirtualHeight,     (),                                                      (const, override));
     MOCK_METHOD(UIElementHandle, loadTexture,          (const std::string& path),                               (override));
     MOCK_METHOD(void,            setElementBackground, (UIElementHandle handle, int r, int g, int b, int a),   (override));
-    // Method 19 — Phase 10 addition.
-    // No-op in most tests; use NiceMock<MockUIBackend> to suppress unexpected-call warnings
-    // when the system under test calls setElementMonoFont() during construction.
+    // Applies a monospaced font to the given element. Called during construction of
+    // panels that display fixed-width numeric readouts (e.g. budget breakdown).
+    // No-op in most tests; use NiceMock<MockUIBackend> to suppress unexpected-call warnings.
     MOCK_METHOD(void,            setElementMonoFont,   (UIElementHandle handle),                                (override));
-    // Method 20 — repositions an existing element in virtual coordinate space without
-    // destroying its handle. Used by ModalDialog::setDialogRect() to centre dialog content.
+    // Repositions an existing element in virtual coordinate space without destroying
+    // its handle. Used by ModalDialog::setDialogRect() to centre dialog content.
     // No-op in most tests; NiceMock<MockUIBackend> suppresses unexpected-call warnings.
     MOCK_METHOD(void,            setElementRect,       (UIElementHandle handle, int x, int y, int w, int h),   (override));
-    // Method 21 — overrides text colour on a static text element.
-    // HUD numeric readouts call this with amber #F0B429 = (240, 180, 41).
+    // Overrides the text colour of a static text element. HUD numeric readouts
+    // call this with amber #F0B429 = (240, 180, 41) for financial figures.
     // No-op in most tests; NiceMock<MockUIBackend> suppresses unexpected-call warnings.
     MOCK_METHOD(void,            setElementTextColor,  (UIElementHandle handle, int r, int g, int b),           (override));
 };

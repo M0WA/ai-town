@@ -12,6 +12,7 @@
 #include "src/platform/input_event.h"
 #include "src/interfaces/camera_state.h"
 #include "src/ui/UIScaler.h"
+#include "tests/ui/input_event_helpers.h"
 #include <gtest/gtest.h>
 #include <cmath>
 
@@ -49,14 +50,6 @@ static InputEvent makeMouseMove(int physX, int physY, int virtX = 0, int virtY =
     ev.physY = physY;
     ev.x     = virtX;
     ev.y     = virtY;
-    return ev;
-}
-
-static InputEvent makeKeyDown(int keyCode)
-{
-    InputEvent ev{};
-    ev.type    = InputEvent::Type::KeyDown;
-    ev.keyCode = keyCode;
     return ev;
 }
 

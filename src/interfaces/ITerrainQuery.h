@@ -29,7 +29,7 @@ public:
 
     // Returns slope in degrees [0, 90] for the tile at grid position (tileX, tileZ).
     // Returns 0.0f for tiles outside map bounds (treated as flat — no earthworks cost).
-    virtual float getSlopeDegrees(int tileX, int tileZ) const = 0;
+    [[nodiscard]] virtual float getSlopeDegrees(int tileX, int tileZ) const = 0;
 
     // Returns the Y-axis terrain height in world-space metres for the tile centre at
     // grid position (tileX, tileZ).
@@ -38,7 +38,7 @@ public:
     // Used by IrrlichtRenderer::setTileHoverHighlight() and setZoneOverlay() to
     // position overlay quads above terrain surface (Phase 9b Deliverables B, C, E).
     // (ref: architecture/graphics-architecture/procedural-terrain.md — Heightmap Query API)
-    virtual float getHeightAt(int tileX, int tileZ) const = 0;
+    [[nodiscard]] virtual float getHeightAt(int tileX, int tileZ) const = 0;
 
     // Sets the persistent LOD0 heightmap height at (tileX, tileZ) to height,
     // applies weighted neighbour blending to the 8 surrounding tiles, and enqueues
@@ -46,8 +46,8 @@ public:
     // Out-of-bounds coordinates are silently ignored.
     virtual void setTileHeight(int tileX, int tileZ, float height) = 0;
 
-    /// Flush all pending terrain chunk rebuilds synchronously.
-    /// Called after setTileHeight to ensure terrain geometry matches the new
-    /// heightmap data before the next render frame.
+    // Flush all pending terrain chunk rebuilds synchronously.
+    // Called after setTileHeight to ensure terrain geometry matches the new
+    // heightmap data before the next render frame.
     virtual void flushTerrainRebuilds() = 0;
 };

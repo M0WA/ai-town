@@ -23,15 +23,22 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
 
       - name: Install NSIS
         shell: pwsh
         run: choco install nsis --no-progress -y
 
-      - uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c
+      # Set up MSVC environment (vcvarsall x64) before vcpkg so cold-cache builds
+      # use the same toolchain as the subsequent cmake configure.
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c  # v1.13.0
 
-      - uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
+      # Install vcpkg dependencies after msvc-dev-cmd so cold-cache source builds
+      # use the same cl.exe that cmake will use.
+      - name: Install vcpkg dependencies
+        uses: lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1  # v11.5
         with:
           vcpkgGitCommitId: ${{ inputs.vcpkg_commit_id }}
 
@@ -40,7 +47,11 @@ jobs:
         shell: pwsh
         run: echo "version=${{ inputs.pkg_version }}" >> $env:GITHUB_OUTPUT
 
-      - name: CMake configure
+      # CMake configure only — does NOT build the binaries.
+      # Purpose: produce CMakeCache.txt so that cpack -C Release can locate install
+      # rules and NSIS script templates embedded in the build system.
+      # The actual aitown.exe and DLLs come from the staging artifact downloaded below.
+      - name: CMake configure (for CPack metadata only)
         shell: pwsh
         run: cmake --preset ci-windows -DAITOWN_ASSETS_DIR=assets -DBUILD_TESTING=OFF "-DCPACK_PACKAGE_VERSION=${{ steps.pkgver.outputs.version }}"
 
@@ -51,10 +62,21 @@ jobs:
           echo "$vcpkgBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Download Windows staging artifact
-        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110  # v4.1.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: aitown-staging-windows-${{ github.sha }}
           path: build/
+
+      # Verify aitown.exe is present in the staging artifact before running cpack.
+      # Prevents a silent packaging failure where cpack succeeds but installs an empty bundle.
+      - name: Verify aitown.exe in staging artifact
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "build\aitown.exe")) {
+            Write-Error "ERROR: aitown.exe not found in build/ — staging artifact download may have failed"
+            exit 1
+          }
+          Write-Host "aitown.exe present in staging artifact."
 
       - name: Create Windows installer
         shell: pwsh

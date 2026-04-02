@@ -159,24 +159,6 @@ private:
     int             m_logVisibleRows{0};  // computed at panel open: floor(500 / kLogRowHeightPx)
     int             m_logScrollOffset{0}; // first visible row index (0 = top)
 
-    // --- Toast layout constants (virtual 1920x1080 space) ---
-    static constexpr int kToastWidth          = 500;
-    static constexpr int kCriticalToastHeight = 48;
-    static constexpr int kNormalToastMaxHeight = 63;
-    static constexpr int kCriticalBandY       = 20;
-    static constexpr int kNormalBandY         = 130;
-    static constexpr int kMaxCriticalVisible  = 2;
-    static constexpr int kMaxNormalBase       = 3;
-    static constexpr int kMaxNormalQueueDepth = 10;
-    static constexpr int kMaxLogEntries       = 50;
-    static constexpr int kMaxBodyChars        = 80;
-
-    // --- Log panel layout constants (virtual 1920x1080 space) ---
-    // Row height used to compute visible row count and text layout.
-    static constexpr int kLogRowHeightPx      = 20;
-    // Log panel dimensions (x:1468-1868, y:56-556 = 400x500 px).
-    static constexpr int kLogTrackX           = 1856;
-    static constexpr int kLogTrackY           = 56;
-    static constexpr int kLogTrackW           = 12;
-    static constexpr int kLogTrackH           = 500;
+    // Layout constants are defined as anonymous-namespace constexpr values in
+    // NotificationManager.cpp (D-9 / UI-10 — not repeated here to keep the header clean).
 };

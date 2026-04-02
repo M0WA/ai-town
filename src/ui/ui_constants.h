@@ -48,3 +48,10 @@ constexpr unsigned int kHoverArgbBlocked   = 0xBBFF2222u;  // semi-opaque red, a
 // Phase 11d Deliverable 3c: left edge of the full minimap widget footprint (virtual 1920x1080).
 // Extends from kMinimapWidgetLeft to x=1920. Used by UIManager::onEvent Inspector carve-out.
 constexpr int kMinimapWidgetLeft = 1576;
+
+// --- D-15 / UI-18: Default audio volume levels ---
+// Referenced from SettingsPanel.h member initialisers and AudioSystem member initialisers.
+// All values in [0.0, 1.0].
+inline constexpr float kDefaultMasterVolume = 1.0f;
+inline constexpr float kDefaultMusicVolume  = 0.8f;
+inline constexpr float kDefaultSfxVolume    = 0.8f;

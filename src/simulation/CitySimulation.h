@@ -10,6 +10,7 @@
 #include <array>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <queue>
 #include <optional>
@@ -172,10 +173,8 @@ public:
     // setMapDimensions — supply the map tile width and depth.
     // Called from main.cpp after TerrainSystem::generate() completes.
     // Used by the border-ring terrain flattening loop in placeZone() (Phase 11m).
-    void setMapDimensions(int mapWidth, int mapHeight) {
-        m_mapWidth  = mapWidth;
-        m_mapHeight = mapHeight;
-    }
+    // Body is in CitySimulation.cpp (C-17 / SIM-12).
+    void setMapDimensions(int mapWidth, int mapHeight);
 
     // getMapTilesX / getMapTilesZ — ICitySimulation interface implementation.
     int getMapTilesX() const override { return m_mapWidth; }
@@ -205,7 +204,9 @@ private:
     // ------------------------------------------------------------------
     // Private nested types
     // ------------------------------------------------------------------
-    enum class ServiceType { FireStation, PoliceStation, WaterTower, PowerPlant };
+    // C-15 / SIM-16: ServiceBuildingType (from simulation_types.h) is used directly in
+    // private data — the private ServiceType enum has been removed to eliminate the
+    // redundant type and the public↔private mapping conversion in placeServiceBuilding().
 
     // ScenarioState — placeholder for V1 scenario mode scaffolding.
     // Serialized as the "scenario_state" object in the save JSON so that
@@ -272,9 +273,9 @@ private:
     };
 
     struct ServiceBuilding {
-        int         x{0}, z{0};
-        ServiceType type{ServiceType::FireStation};
-        bool        degraded{false};    // true if in reduced-coverage state
+        int                 x{0}, z{0};
+        ServiceBuildingType type{ServiceBuildingType::FireStation};
+        bool                degraded{false};    // true if in reduced-coverage state
     };
 
     struct UndoAction {
@@ -340,7 +341,7 @@ private:
     // Economy / treasury
     // ------------------------------------------------------------------
     int64_t             m_treasury{0};
-    float               m_taxRates[3]{0.05f, 0.05f, 0.05f};  // indexed by (int)ZoneType
+    std::array<float, 3> m_taxRates{0.05f, 0.05f, 0.05f};  // indexed by (int)ZoneType; C-24
     std::vector<LoanEntry> m_loans;
     int                 m_outstandingBondUses{0};
     int                 m_loanCooldownTicks{0};    // ticks until next forced loan allowed
@@ -348,7 +349,7 @@ private:
     float               m_budgetSurplusPct{0.0f};   // from last tick
 
     // Last-tick budget line items (returned by budget-panel accessors)
-    float m_lastMonthTaxRevenue[3]{};
+    std::array<float, 3> m_lastMonthTaxRevenue{};  // C-24
     float m_lastMonthWagesCost{0.0f};
     float m_lastMonthRoadMaintenanceCost{0.0f};
     float m_lastMonthServiceUpkeepCost{0.0f};
@@ -364,6 +365,15 @@ private:
     std::unordered_map<int64_t, TileData> m_tiles;
     std::vector<ServiceBuilding>           m_serviceBuildings;
     int                                    m_roadTileCount{0};
+
+    // C-14: per-tick power coverage cache.
+    // Built once per budget tick by buildPowerCoverageCache() at the top of doDesirabilityTick().
+    // Contains the set of tileKey(x,z) values that are BFS-reachable from at least one power plant.
+    // Per-tile code in doDesirabilityTick() and computeUtilityFeeRevenue() queries this set
+    // in O(1) rather than running a full BFS for every tile.
+    // The cache is rebuilt at the start of each doDesirabilityTick(); it is stale between ticks
+    // (acceptable: coverage state only changes on budget tick boundaries).
+    std::unordered_set<int64_t> m_powerCoverageCache;
 
     // Phase 10: traffic signals — one entry per intersection road tile.
     // Populated by placeRoad() (when the new road tile is adjacent to 2+ existing roads)
@@ -415,7 +425,7 @@ private:
     float m_roadSpeedFraction{1.0f};
 
     // Cached effective demand (post-floor, post-bootstrap, city-wide aggregate)
-    float m_demandPressurePct[3]{0.0f, 0.0f, 0.0f};  // indexed by (int)ZoneType
+    std::array<float, 3> m_demandPressurePct{0.0f, 0.0f, 0.0f};  // indexed by (int)ZoneType; C-24
 
     // ------------------------------------------------------------------
     // Population & city rating
@@ -496,12 +506,25 @@ private:
     void computeTrafficDemand();          // update rolling windows and traffic demand factors
     void computeEffectiveDemand();        // combine traffic + capacity-ratio + bootstrap + floor
     void doServiceDegradationTick();      // stochastic degradation / recovery of service buildings
-    void doDesirabilityTick();            // adjacency & service-coverage desirability updates
+    void doDesirabilityTick();            // thin orchestrator: buildPowerCoverageCache → applyDesirabilityScores
     void doPopulationTick();              // grow/decay tile populations; fire milestone notifications
     void doDensityUnlockTick();           // 3-month threshold check + density upgrade wave
     void doEconomyTick();                 // revenue, expenses, loan repayment, deficit checks
     void doGameOverTick();                // deficit streak, auto-slow, game-over counter
     void checkCityRatingTransition();     // tier change notification
+
+    // C-29 / SIM-29: doDesirabilityTick() sub-steps.
+    // buildServiceCoverageMap: scan all service buildings once and set the four
+    //   service-type presence flags via output parameters (service-coverage BFS phase).
+    //   Called at the start of doDesirabilityTick(), before applyDesirabilityScores().
+    void buildServiceCoverageMap(bool& outHasFireStation, bool& outHasPolice,
+                                 bool& outHasWater,       bool& outHasPower);
+
+    // applyDesirabilityScores: per-tile adjacency + service-coverage desirability update.
+    //   hasFireStation / hasPolice / hasWater / hasPower: pre-scanned service-type flags
+    //   populated by buildServiceCoverageMap().
+    void applyDesirabilityScores(bool hasFireStation, bool hasPolice,
+                                 bool hasWater,       bool hasPower);
 
     // Phase 10: advance traffic signal timers and fire sfx_intersection_tick.
     // Called once per tick() with real delta seconds (NOT sim-speed-scaled).
@@ -517,6 +540,35 @@ private:
     bool pickNextRoadTile(int curX, int curZ, int prevX, int prevZ,
                           int& outX, int& outZ);
 
+    // Difficulty-dependent initial value helpers (C-1 / SIM-1).
+    // Called from both the constructor and reset() to eliminate duplicated switch blocks.
+    static int64_t startingFundsForDifficulty(Difficulty d);
+    static int     bondMaxUsesForDifficulty(Difficulty d);
+
+    // Traffic window zero-initialisation (C-2 / SIM-2).
+    // Called from both the constructor and reset().
+    void resetTrafficWindows();
+
+    // computeEconomySnapshot — C-6: compute all revenue/expense subtotals for one budget
+    // tick and write m_budgetSurplusPct (used by doServiceDegradationTick() and others).
+    // Also caches the subtotals in the m_lastMonth* members so doEconomyTick() can reuse
+    // them without calling all helpers a second time. Returns the net (revenue - expenses).
+    int64_t computeEconomySnapshot();
+
+    // doDensityUnlockTick helpers (C-27) — extracted from the monolithic function.
+    // getDensityUnlockThreshold: return the treasury threshold for tier index 0-5.
+    static float getDensityUnlockThreshold(int tierIndex);
+    // scanUnlockCandidates: collect origin tiles eligible for upgrade to (targetZone, currentRequired).
+    //   Returns candidates sorted by key (map iteration order). Internal struct defined in .cpp.
+    struct UpgradeCandidate { int64_t key; int tx; int tz; };
+    std::vector<UpgradeCandidate> scanUnlockCandidates(ZoneType targetZone, DensityTier currentRequired) const;
+    // applyDensityUpgrade: attempt to upgrade the tile at (tx, tz) to targetDensity.
+    //   Returns true if the upgrade was applied, false if blocked or retry-deferred.
+    //   sfxCallsThisTick: in-out counter capped at sfx_zone_upgrade_per_tick_cap.
+    bool applyDensityUpgrade(int tx, int tz, int64_t candKey,
+                             ZoneType targetZone, DensityTier targetDensity,
+                             DensityTier currentRequired, int& sfxCallsThisTick);
+
     // Economy helpers
     int64_t computeTaxRevenue(ZoneType zone) const;
     int64_t computeWagesCost(int64_t totalCIRevenue) const;
@@ -531,6 +583,14 @@ private:
     // Population helpers
     static int   maxPopulationForTile(ZoneType zone, DensityTier density);
 
+    // C-30 / SIM-30: doPopulationTick() sub-steps.
+    // computeZoneGrowthDelta: compute the capped population delta for a single tile.
+    //   demand: effectiveDemandForTile result; maxPop: maxPopulationForTile result.
+    static float computeZoneGrowthDelta(float currentPop, float demand, int maxPop);
+    // accumulateHouseDemand: sum residential tile populations into m_totalPopulation
+    //   and fire population milestone notifications.
+    void accumulateHouseDemand();
+
     // Phase 10: map (ZoneType, DensityTier) to the _01 asset base name for
     // IRenderer::placeBuildingMesh().  Round-robin variant cycling is Phase 11.
     // Returns empty string on unknown inputs (renderer no-ops on empty baseName).
@@ -540,10 +600,17 @@ private:
     // Service coverage helpers (tile-unit coordinates)
     // tile_size_m = 10.0f (implicit: coverage radii in constants are in metres)
     static constexpr float kTileSizeMeters = 10.0f;
-    float computeServiceCoverageRadius(ServiceType type, bool degraded) const;
+    float computeServiceCoverageRadius(ServiceBuildingType type, bool degraded) const;
     bool  isBuildableTile(int x, int z) const;
-    float computeRadialCoverage(int tileX, int tileZ, ServiceType type) const;
+    float computeRadialCoverage(int tileX, int tileZ, ServiceBuildingType type) const;
     float computePowerCoverage(int tileX, int tileZ) const;
+
+    // buildPowerCoverageCache() — C-14: run the BFS from all power plants once per budget tick.
+    // Populates m_powerCoverageCache with tileKey values for all BFS-reachable tiles.
+    // Replaces per-tile computePowerCoverage() calls in doDesirabilityTick() and
+    // computeUtilityFeeRevenue() with O(1) set lookups.
+    // Must be called once at the top of doDesirabilityTick() before the per-tile loop.
+    void buildPowerCoverageCache();
 
     // Traffic helpers
     static float smoothstep(float t);                         // [0,1] S-curve

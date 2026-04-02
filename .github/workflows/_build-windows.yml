@@ -76,37 +76,30 @@ jobs:
         run: cmake --preset ci-windows
         shell: pwsh
 
-      # Step 9: Verify glew vcpkg installed artifact (after cmake configure).
-      # glew is required by the Irrlicht vcpkg port on Windows. If it is absent the
-      # link step fails with an opaque error. This step catches the missing installed
-      # artifact immediately with a clear diagnostic message.
-      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1"
-      # is PS 7+ only; GitHub Actions Windows runners use PS 5.1.
-      - name: Verify glew vcpkg port
+      # Verify GLEW vcpkg installed artifacts (header + import lib).
+      # glew is required by the Irrlicht vcpkg port. Dual-path check: manifest-mode
+      # install (build/vcpkg_installed/) first, then classic-mode fallback.
+      # On Windows, vcpkg GLEW port installs glew32.lib (not glew.lib).
+      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — PS 5.1 does not support || short-circuit.
+      - name: Verify GLEW vcpkg artifacts (header and import lib)
         shell: pwsh
         run: |
-          # Manifest mode installs to build/vcpkg_installed/; classic mode to $VCPKG_ROOT/installed/.
+          # Header check — triplet-agnostic manifest path first, then classic fallback.
           $manifestHdr = "build\vcpkg_installed\x64-windows\include\GL\glew.h"
           $classicHdr  = Join-Path $env:VCPKG_ROOT "installed\x64-windows\include\GL\glew.h"
           if (-not (Test-Path $manifestHdr) -and -not (Test-Path $classicHdr)) {
             Write-Error "ERROR: GLEW not installed — GL/glew.h not found in manifest path ($manifestHdr) or classic path ($classicHdr)."
             exit 1
           }
-          Write-Host "GLEW installed artifact verified."
-
-      # Step 10: Verify GLEW vcpkg install (Windows) — sixth atomicity item.
-      # Dual-path check: manifest-mode install (build/vcpkg_installed/) first,
-      # then classic-mode fallback ($VCPKG_ROOT/installed/).
-      # NOTE: On Windows, vcpkg GLEW port installs glew32.lib (not glew.lib) per portfile libname override.
-      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
-      - name: Verify GLEW vcpkg install (Windows)
-        shell: pwsh
-        run: |
-          if (-not (Test-Path 'build/vcpkg_installed/x64-windows/lib/glew32.lib') -and -not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\glew32.lib")) {
-            Write-Error 'glew32.lib not found in either vcpkg install path'
+          Write-Host "GL/glew.h found."
+          # Import library check — vcpkg GLEW port installs glew32.lib.
+          $manifestLib = "build\vcpkg_installed\x64-windows\lib\glew32.lib"
+          $classicLib  = Join-Path $env:VCPKG_ROOT "installed\x64-windows\lib\glew32.lib"
+          if (-not (Test-Path $manifestLib) -and -not (Test-Path $classicLib)) {
+            Write-Error "ERROR: glew32.lib not found in either vcpkg install path."
             exit 1
           }
-          Write-Host 'glew32.lib found.'
+          Write-Host "glew32.lib found."
 
       # Step 11: Build (Ninja single-config; no -C Release needed).
       - name: Build
@@ -180,34 +173,30 @@ jobs:
           path: test_results/
           retention-days: 14
 
-      # Step 18: DLL verification — Irrlicht.dll, GLEW32.dll, soft_oal.dll, and default.mhr all hard-fail (Phase 7).
-      # soft_oal.dll and default.mhr hardened from warning-only (Phase 0 placeholder) to hard-fail in Phase 7.
-      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — "Test-Path ... || exit 1" is PS 7+ only.
+      # DLL verification — Irrlicht.dll, GLEW32.dll, soft_oal.dll, and default.mhr all hard-fail.
+      # NOTE: Use if (-not (Test-Path ...)) { exit 1 } — PS 5.1 does not support || short-circuit.
       # NOTE: Ninja single-config outputs to build/ (not build/Release/).
       - name: Verify required DLLs and HRTF data (all hard-fail)
         shell: pwsh
         run: |
-          # Irrlicht.dll — hard-fail (Phase 1: aitown_render now links Irrlicht).
-          # Ninja single-config: DLLs are copied to build/ (not build/Release/).
+          # Irrlicht.dll — Ninja single-config: DLLs are copied to build/ (not build/Release/).
           if (-not (Test-Path "build/Irrlicht.dll")) {
             Write-Error "ERROR: Irrlicht.dll missing from build/ — post-build copy rule failed"
             exit 1
           }
           Write-Host "Irrlicht.dll present."
-          # Phase 1 atomicity gate: GLEW32.dll check co-lands with target_link_libraries(aitown_render PRIVATE GLEW::GLEW Irrlicht ...)
           if (-not (Test-Path "build/GLEW32.dll")) {
             Write-Error "ERROR: GLEW32.dll missing from build/ — post-build CMake DLL copy rule failed"
             exit 1
           }
           Write-Host "GLEW32.dll present."
-          # soft_oal.dll — hard-fail (Phase 7: post-build copy rule now wired; hardened from Phase 0 warning-only placeholder).
+          # soft_oal.dll — OpenAL Soft runtime; post-build copy from vcpkg bin.
           if (-not (Test-Path "build/soft_oal.dll")) {
             Write-Error "soft_oal.dll not found"
             exit 1
           }
           Write-Host "soft_oal.dll present."
-          # default.mhr — hard-fail (Phase 4: post-build copy rule now wired; Phase 7: also verified here alongside soft_oal.dll).
-          # Without this file, AudioSystem HRTF initialization fails at runtime.
+          # default.mhr — HRTF data required for 3D spatial audio; post-build copy.
           if (-not (Test-Path "build/default.mhr")) {
             Write-Error "default.mhr not found"
             exit 1

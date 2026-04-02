@@ -355,7 +355,7 @@ UIElementHandle IrrlichtUIBackend::addStaticText(
     elem->setOverrideColor(irr::video::SColor(255, 235, 244, 246));
 
     UIElementHandle handle = m_nextHandle++;
-    m_elementMap[handle] = ElementInfo{elem, Rect{x, y, w, h}};
+    m_elementMap[handle] = ElementInfo{elem, UIRect{x, y, w, h}};
     return handle;
 }
 
@@ -390,7 +390,7 @@ UIElementHandle IrrlichtUIBackend::addButton(
     }
 
     UIElementHandle handle = m_nextHandle++;
-    m_elementMap[handle] = ElementInfo{elem, Rect{x, y, w, h}};
+    m_elementMap[handle] = ElementInfo{elem, UIRect{x, y, w, h}};
     return handle;
 }
 
@@ -639,11 +639,11 @@ std::string IrrlichtUIBackend::getElementText(UIElementHandle handle) const
 // Returning the stored virtual rect avoids the physical→virtual round-trip
 // that produces incorrect coordinates after a window resize.
 // ---------------------------------------------------------------------------
-Rect IrrlichtUIBackend::getElementRect(UIElementHandle handle) const
+UIRect IrrlichtUIBackend::getElementRect(UIElementHandle handle) const
 {
     auto it = m_elementMap.find(handle);
     if (it == m_elementMap.end() || !it->second.element) {
-        return Rect{};
+        return UIRect{};
     }
     return it->second.virtualRect;
 }
@@ -898,7 +898,7 @@ void IrrlichtUIBackend::setElementRect(UIElementHandle handle,
     }
 
     // Update the stored virtual rect so future resize handling stays correct.
-    it->second.virtualRect = Rect{x, y, w, h};
+    it->second.virtualRect = UIRect{x, y, w, h};
 
     // Scale virtual coordinates to physical pixel coordinates.
     const int sw = getScreenWidth();
@@ -965,7 +965,7 @@ void IrrlichtUIBackend::handleViewportResize()
 
     for (auto& [h, info] : m_elementMap) {
         if (!info.element) continue;
-        const Rect& vr = info.virtualRect;
+        const UIRect& vr = info.virtualRect;
         const int px = (vr.x * sw) / vw;
         const int py = (vr.y * sh) / vh;
         const int pw = (vr.w * sw) / vw;

@@ -225,7 +225,7 @@ bool PauseMenuPanel::onEvent(const InputEvent& event) {
         };
 
         for (int i = 0; i < kNumButtons; ++i) {
-            Rect r = m_backend->getElementRect(buttons[i]);
+            UIRect r = m_backend->getElementRect(buttons[i]);
             if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
                 m_focusedButton = i;
                 // Simulate Enter press

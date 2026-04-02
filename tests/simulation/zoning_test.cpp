@@ -23,15 +23,10 @@
 //   SECONDS_PER_BUDGET_TICK = 30.0f
 
 #include "SimulationTestBase.h"
-#include "src/interfaces/ICitySimulation.h"
+#include "NiceSimulationTestBase.h"
 #include "src/interfaces/simulation_types.h"
 #include "src/simulation/simulation_constants.h"
 #include "src/interfaces/sound_ids.h"
-#include "MockAudioSystem.h"
-#include "MockRenderer.h"
-#include "ManualRNG.h"
-#include "ManualClock.h"
-#include "ManualTerrainQuery.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -43,38 +38,11 @@ using ::testing::AtLeast;
 
 // ---------------------------------------------------------------------------
 // ZoningTestNice — NiceMock fixture for zoning tests that place zones/roads.
-// NiceMock suppresses unexpected calls to audio_ and renderer_ from placement.
-// ManualRNG non-strict with 0.9f float (> service_degradation_probability 0.5)
-// so service degradation never fires during these tests.
+// Inherits from NiceSimulationTestBase: NiceMock renderer_/audio_, ManualRNG,
+// ManualClock, ManualTerrainQuery, sim_, SetUp/TearDown, cs(), runTicks().
+// NiceMock suppresses unexpected audio/renderer calls from placement.
 // ---------------------------------------------------------------------------
-class ZoningTestNice : public ::testing::Test {
-protected:
-    NiceMock<MockRenderer>     renderer_;
-    NiceMock<MockAudioSystem>  audio_;
-    ManualRNG    rng_;  // default: int={0}, float={0.9f}, non-strict
-    ManualClock  clock_;
-    ManualTerrainQuery terrain_;
-    std::unique_ptr<ICitySimulation> sim_;
-
-    void SetUp() override {
-        sim_ = std::make_unique<CitySimulation>(
-            &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Normal);
-        sim_->setSpeed(SpeedMultiplier::x1);
-    }
-
-    void TearDown() override {
-        sim_.reset();
-    }
-
-    CitySimulation* cs() { return dynamic_cast<CitySimulation*>(sim_.get()); }
-
-    void runTicks(int n) {
-        const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
-        for (int i = 0; i < n; ++i) {
-            clock_.advance(dt);
-            cs()->tick(dt);
-        }
-    }
+class ZoningTestNice : public NiceSimulationTestBase {
 };
 
 // ---------------------------------------------------------------------------

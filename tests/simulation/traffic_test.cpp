@@ -17,15 +17,10 @@
 // before any ticks have fired.
 
 #include "SimulationTestBase.h"
-#include "src/interfaces/ICitySimulation.h"
+#include "NiceSimulationTestBase.h"
 #include "src/interfaces/simulation_types.h"
 #include "src/simulation/simulation_constants.h"
 #include "src/interfaces/sound_ids.h"
-#include "MockAudioSystem.h"
-#include "MockRenderer.h"
-#include "ManualRNG.h"
-#include "ManualClock.h"
-#include "ManualTerrainQuery.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -37,45 +32,11 @@ using ::testing::AtLeast;
 
 // ---------------------------------------------------------------------------
 // NiceTrafficTest — NiceMock fixture used for all traffic tests.
-// placeZone() and placeRoad() fire audio callbacks (SFX_BUILD_PLACE,
-// SFX_ROAD_BUILD) that are irrelevant to traffic logic; NiceMock suppresses
-// unexpected-call failures for them without requiring per-test EXPECT_CALLs.
-// Declaration order: sim_ last (destroyed first — prevents use-after-free).
+// Inherits from NiceSimulationTestBase: NiceMock renderer_/audio_, ManualRNG,
+// ManualClock, ManualTerrainQuery, sim_, SetUp/TearDown, cs(), runTicks().
+// NiceMock suppresses unexpected SFX/renderer calls from placeZone/placeRoad.
 // ---------------------------------------------------------------------------
-class NiceTrafficTest : public ::testing::Test {
-protected:
-    NiceMock<MockRenderer>     renderer_;
-    NiceMock<MockAudioSystem>  audio_;
-    // Non-strict RNG: service degradation may fire nextFloat() an unpredictable
-    // number of times depending on budget surplus state. Wrap-around on a safe
-    // all-pass value (0.9f > service_degradation_probability_per_tick = 0.5f).
-    ManualRNG    rng_;  // default: int={0}, float={0.9f}, non-strict
-    ManualClock  clock_;
-    ManualTerrainQuery terrain_;
-    std::unique_ptr<ICitySimulation> sim_;
-
-    void SetUp() override {
-        sim_ = std::make_unique<CitySimulation>(
-            &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Normal);
-        sim_->setSpeed(SpeedMultiplier::x1);
-    }
-
-    void TearDown() override {
-        // Destroy sim_ before NiceMock destructors run — prevents use-after-free
-        // when CitySimulation destructor logs or calls back into interfaces.
-        sim_.reset();
-    }
-
-    CitySimulation* cs() { return dynamic_cast<CitySimulation*>(sim_.get()); }
-
-    // Fire N budget ticks: advance clock by SECONDS_PER_BUDGET_TICK per tick.
-    void runTicks(int n) {
-        const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
-        for (int i = 0; i < n; ++i) {
-            clock_.advance(dt);
-            cs()->tick(dt);
-        }
-    }
+class NiceTrafficTest : public NiceSimulationTestBase {
 };
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 #pragma once
 #include "src/interfaces/IUIBackend.h"
 // UIScaler.h must #include "src/interfaces/IUIBackend.h" (project-root-relative form)
-// so that methods returning Rect compile correctly.
-// Defining Rect only in IUIBackend.h and using it in UIScaler.h without the include
+// so that methods returning UIRect compile correctly.
+// Defining UIRect only in IUIBackend.h and using it in UIScaler.h without the include
 // causes an ODR violation if a translation unit includes UIScaler.h without first
 // including IUIBackend.h.
 
@@ -24,7 +24,7 @@ public:
 
     // Returns the active viewport x, y, w, h in physical pixels.
     // Used by the platform event receiver before input un-projection.
-    Rect getViewportRect() const;
+    UIRect getViewportRect() const;
 
     // Unproject physical coordinates to virtual 1920x1080 space.
     VirtualPoint unproject(int physicalX, int physicalY) const;
@@ -38,10 +38,10 @@ public:
     }
 
 private:
-    int m_virtualW;
-    int m_virtualH;
+    const int m_virtualW;
+    const int m_virtualH;
     int m_viewportW;
     int m_viewportH;
-    int m_offsetX;
-    int m_offsetY;
+    const int m_offsetX;
+    const int m_offsetY;
 };

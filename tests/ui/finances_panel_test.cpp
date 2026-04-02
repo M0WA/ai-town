@@ -54,7 +54,7 @@ protected:
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
         ON_CALL(backend_, isElementVisible(_)).WillByDefault(Return(false));
         ON_CALL(backend_, isElementEnabled(_)).WillByDefault(Return(true));
-        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(Rect{0, 0, 0, 0}));
+        ON_CALL(backend_, getElementRect(_)).WillByDefault(Return(UIRect{0, 0, 0, 0}));
 
         ON_CALL(sim_, isPaused()).WillByDefault(Return(false));
         ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0));
@@ -196,7 +196,7 @@ TEST(FinancesPanelDirectTest, FinancesPanel_TaxRate_PlusButton_IncreasesRate) {
     // Make the inc button rect match the click point.
     // FinancesPanel: kPanelX=780, kPanelY=60; row R at y=92; btnInc at x+204=984
     ON_CALL(backend, getElementRect(_)).WillByDefault(
-        Return(Rect{0, 0, 0, 0})); // default miss
+        Return(UIRect{0, 0, 0, 0})); // default miss
 
     FinancesPanel panel(&backend, &sim, &audio, nullptr);
     panel.open();
@@ -204,7 +204,7 @@ TEST(FinancesPanelDirectTest, FinancesPanel_TaxRate_PlusButton_IncreasesRate) {
     // Override to hit the inc button for residential row at (984, 92, 32, 36)
     int callCount = 0;
     ON_CALL(backend, getElementRect(_)).WillByDefault(
-        [&callCount](UIElementHandle) -> Rect {
+        [&callCount](UIElementHandle) -> UIRect {
             // Return dec-miss for even calls, inc-hit for odd calls
             if (callCount % 2 == 0) {
                 ++callCount;

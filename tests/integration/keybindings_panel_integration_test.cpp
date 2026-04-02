@@ -610,7 +610,7 @@ TEST_F(InspectorPanelIntegrationTest, OnEvent_EscapeWhenHidden_NotConsumed) {
 
 TEST_F(InspectorPanelIntegrationTest, GetBounds_ReturnsRect) {
     panel_->show();
-    Rect bounds = panel_->getBounds();
+    UIRect bounds = panel_->getBounds();
     EXPECT_GE(bounds.w, 0);
     EXPECT_GE(bounds.h, 0);
 }

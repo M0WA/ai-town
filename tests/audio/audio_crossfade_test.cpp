@@ -10,7 +10,7 @@
 
 #include "src/interfaces/IAudioSystem.h"
 #include "src/audio/audio_constants.h"
-#include "src/audio/sound_ids.h"
+#include "src/interfaces/sound_ids.h"
 #include "tests/simulation/MockAudioSystem.h"
 #include "tests/simulation/ManualClock.h"
 
@@ -228,10 +228,10 @@ TEST(NotificationSFX, EFXBypass_DirectFilterSetToNull) {
     };
 
     // Verify all 10 EFX bypass SFX are in the list
-    EXPECT_TRUE(isBypassed(SFX_UI_CLICK))        << "ui_click must be EFX bypassed";
-    EXPECT_TRUE(isBypassed(SFX_UI_TOAST))        << "ui_toast must be EFX bypassed";
-    EXPECT_TRUE(isBypassed(SFX_UI_MENU_OPEN))    << "ui_menu_open must be EFX bypassed";
-    EXPECT_TRUE(isBypassed(SFX_UI_MENU_CLOSE))   << "ui_menu_close must be EFX bypassed";
+    EXPECT_TRUE(isBypassed(UI_CLICK))        << "ui_click must be EFX bypassed";
+    EXPECT_TRUE(isBypassed(UI_TOAST))        << "ui_toast must be EFX bypassed";
+    EXPECT_TRUE(isBypassed(UI_MENU_OPEN))    << "ui_menu_open must be EFX bypassed";
+    EXPECT_TRUE(isBypassed(UI_MENU_CLOSE))   << "ui_menu_close must be EFX bypassed";
     EXPECT_TRUE(isBypassed(SFX_POWER_OUT))       << "sfx_power_out must be EFX bypassed";
     EXPECT_TRUE(isBypassed(SFX_WATER_OUT))       << "sfx_water_out must be EFX bypassed";
     EXPECT_TRUE(isBypassed(SFX_BUDGET_WARN))     << "sfx_budget_warn must be EFX bypassed";

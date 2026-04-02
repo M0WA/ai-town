@@ -27,15 +27,9 @@
 // Fixture: UndoTest (NiceMock) — placement SFX is irrelevant to undo logic.
 //   TearDown() resets sim_ before mock destructors run.
 
-#include "CitySimulation.h"
-#include "src/interfaces/ICitySimulation.h"
+#include "NiceSimulationTestBase.h"
 #include "src/interfaces/simulation_types.h"
 #include "src/simulation/simulation_constants.h"
-#include "MockAudioSystem.h"
-#include "MockRenderer.h"
-#include "ManualRNG.h"
-#include "ManualClock.h"
-#include "ManualTerrainQuery.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -48,42 +42,12 @@ using ::testing::AnyNumber;
 // ---------------------------------------------------------------------------
 // UndoTest fixture
 // ---------------------------------------------------------------------------
-// NiceMock for audio and renderer — undo logic tests do not care about SFX calls.
-// ManualRNG with non-strict wrapping — int/float sequences are not the subject here.
-// TearDown() resets sim_ before mocks are destroyed, preventing use-after-free
-// in CitySimulation destructor if it calls back into audio_/renderer_.
+// Inherits from NiceSimulationTestBase: NiceMock renderer_/audio_, ManualRNG,
+// ManualClock, ManualTerrainQuery, sim_, SetUp/TearDown, cs(), runTicks().
+// NiceMock suppresses SFX/renderer calls that are irrelevant to undo logic.
 
-class UndoTest : public ::testing::Test {
+class UndoTest : public NiceSimulationTestBase {
 protected:
-    NiceMock<MockRenderer>    renderer_;
-    NiceMock<MockAudioSystem> audio_;
-    // Non-strict, wrapping RNG: undo tests don't depend on stochastic behaviour.
-    ManualRNG    rng_;  // default: int={0}, float={0.9f}, non-strict
-    ManualClock  clock_;
-    ManualTerrainQuery terrain_;
-
-    // sim_ declared LAST — destroyed first (reverse declaration order).
-    std::unique_ptr<ICitySimulation> sim_;
-
-    void SetUp() override {
-        sim_ = std::make_unique<CitySimulation>(
-            &renderer_, &audio_, &rng_, &clock_, &terrain_, Difficulty::Normal);
-        sim_->setSpeed(SpeedMultiplier::x1);
-    }
-
-    void TearDown() override {
-        // Explicitly reset sim_ before mocks are destroyed.
-        // CitySimulation destructor must not call back into mock objects
-        // after they have been torn down.
-        sim_.reset();
-    }
-
-    CitySimulation* cs() {
-        auto* p = dynamic_cast<CitySimulation*>(sim_.get());
-        EXPECT_NE(p, nullptr) << "Downcast to CitySimulation* failed";
-        return p;
-    }
-
     // Helper: run one budget tick at the current speed.
     // Advances ManualClock by SECONDS_PER_BUDGET_TICK real seconds.
     void runOneTick() {

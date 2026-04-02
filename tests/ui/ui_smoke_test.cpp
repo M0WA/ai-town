@@ -19,7 +19,7 @@ struct StubUIBackend : public IUIBackend {
     void            setElementAlpha(UIElementHandle, float) override {}
     void            setElementImage(UIElementHandle, UIElementHandle) override {}
     std::string     getElementText(UIElementHandle) const override { return {}; }
-    Rect            getElementRect(UIElementHandle) const override { return {}; }
+    UIRect          getElementRect(UIElementHandle) const override { return {}; }
     int             getScreenWidth()  const override { return 1920; }
     int             getScreenHeight() const override { return 1080; }
     int             getVirtualWidth()  const override { return 1920; }
