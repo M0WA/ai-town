@@ -1,14 +1,10 @@
 # Coverage Linux — reusable workflow
 # Instrumented build with lcov HTML report.
-# Self-contained job: does NOT inherit steps from build-linux.
+# Self-contained single job: build → test → lcov.
+# Tests MUST run before lcov --capture because .gcda files are only written
+# during test execution. Running them in separate jobs (build then lcov then
+# test) produces "no .gcda files found" — hence everything is inlined here.
 # Called by ci.yml after supply-chain-lint and validate-assets.
-# Preflight steps (SHA lint, asset validation, clouds/font/audio/terrain checks,
-# vcpkg baseline) are handled by the supply-chain-lint and validate-assets jobs
-# and are NOT duplicated here.
-#
-# Two-job structure:
-#   coverage-linux  — compile (ENABLE_COVERAGE=ON), upload build artifact, run lcov.
-#   test-linux      — delegate all ctest steps to _test-linux.yml (reusable workflow).
 name: Coverage Linux
 
 on:
@@ -56,16 +52,62 @@ jobs:
       - name: Build (coverage)
         run: cmake --build build --parallel
 
-      # Upload the build directory so the test-linux job can run ctest against it.
-      # Retention-days=1 — only needed for the duration of this workflow run.
-      - name: Upload build artifact for test job
+      # --- Test execution (must run BEFORE lcov --capture) ---
+      # .gcda files are only written when test binaries execute; lcov --capture
+      # finds 0 .gcda files if tests have not yet run.
+
+      - name: Create test results directory
+        run: mkdir -p test_results
+
+      # Run unit tests.
+      - name: Run unit tests (no display)
+        run: ctest --test-dir build -LE 'integration|requires-opengl' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Run integration tests.
+      - name: Run integration tests (no display, EDT_NULL)
+        run: ctest --test-dir build -L '^integration$' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          AITOWN_HEADLESS: '1'
+          ALSOFT_DRIVERS: 'null'
+
+      # Run OpenGL tests under xvfb.
+      - name: Run OpenGL tests (xvfb)
+        run: xvfb-run --auto-servernum ctest --test-dir build -L '^requires-opengl$' --output-on-failure
+        env:
+          GTEST_OUTPUT: 'xml:test_results/'
+          ALSOFT_DRIVERS: 'null'
+
+      # Fix git safe.directory for dorny/test-reporter.
+      - name: Fix git safe.directory for test reporter
+        if: always()
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # Publish test results via dorny/test-reporter.
+      - name: Publish test results
+        if: always()
+        continue-on-error: true
+        uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1
+        with:
+          name: 'Linux Coverage Tests'
+          path: 'test_results/*.xml'
+          reporter: 'java-junit'
+          fail-on-error: false
+
+      # Upload test results artifact.
+      - name: Upload test results
+        if: always()
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
         with:
-          name: build-coverage-linux-${{ github.sha }}
-          path: build/
-          retention-days: 1
+          name: test-results-coverage-linux-${{ github.sha }}
+          path: test_results/
+          retention-days: 14
 
-      # lcov capture, filter, report.
+      # --- lcov capture, filter, report ---
       # All within a single run: block so BUILD_DIR variable persists.
       - name: Generate coverage report
         run: |
@@ -243,20 +285,3 @@ jobs:
           name: coverage-report-linux-${{ github.sha }}
           path: coverage_html/
           retention-days: 14
-
-  # Delegate all ctest steps (routing checks, unit/integration/opengl runs, result
-  # publishing) to the shared _test-linux.yml reusable workflow.
-  # Runs in parallel with the lcov steps in coverage-linux — both need the build
-  # artifact uploaded above.
-  test-linux:
-    needs: coverage-linux
-    permissions:
-      packages: read
-      checks: write
-      contents: read
-    uses: ./.github/workflows/_test-linux.yml
-    with:
-      build_artifact_name: build-coverage-linux-${{ github.sha }}
-      build_dir: build
-      reporter_name: 'Linux Coverage Tests'
-      test_artifact_name: test-results-coverage-linux-${{ github.sha }}
