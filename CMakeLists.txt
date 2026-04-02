@@ -307,6 +307,9 @@ target_include_directories(aitown_ui
 # aitown_sim: UIManager.cpp includes SaveSystem.h for save wiring.
 target_link_libraries(aitown_ui PRIVATE Irrlicht aitown_sim aitown_coverage_flags aitown_project_root_includes)
 target_compile_features(aitown_ui PRIVATE cxx_std_17)
+target_compile_definitions(aitown_ui PRIVATE
+    AITOWN_ASSETS_DIR="${AITOWN_ASSETS_DIR}"
+)
 
 # Per-panel .cpp translation units.
 target_sources(aitown_ui PRIVATE
@@ -392,6 +395,9 @@ target_link_libraries(aitown PRIVATE
     aitown_project_root_includes
 )
 target_compile_features(aitown PRIVATE cxx_std_17)
+target_compile_definitions(aitown PRIVATE
+    AITOWN_ASSETS_DIR="${AITOWN_ASSETS_DIR}"
+)
 
 # Windows: copy DLLs to executable output directory.
 aitown_copy_runtime_dlls(aitown)
