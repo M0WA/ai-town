@@ -49,6 +49,15 @@ The following architecture spec files were updated as part of the tech-squad rev
   call-count unit tests, NiceMock for behavioral tests, NiceMock + RapidCheck for
   property invariants).
 
+- [x] **S-4** `architecture/audio-architecture/audio-system.md` — Added
+  `## Source Acquisition Architecture` subsection documenting that `AudioSystem`
+  owns a private `AudioSourcePool m_pool` member as the single source of truth for
+  all 62 AL source handles; `playSound`/`playPositionalSound` delegate to
+  `m_pool.acquireSFXSource(priority)` with no inline pool scanning; vehicle engine
+  acquisition/release delegates to `m_pool.acquireVehicleEnginePair/releaseVehicleEnginePair`;
+  rationale (separating pool management from playback logic) and cross-reference to
+  `source-pool.md` for the full pool contract.
+
 ---
 
 ### Deliverables
