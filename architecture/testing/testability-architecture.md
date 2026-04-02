@@ -1835,6 +1835,29 @@ protected:
         // NOTE: verifyAllConsumed() is NOT called here — see rng_ comment above.
         sim_.reset();
     }
+
+    // Downcast sim_ to the concrete CitySimulation type to access methods not
+    // present on the ICitySimulation interface. Uses static_cast (sim_ is always
+    // constructed as CitySimulation) with a null guard so a misconfigured fixture
+    // fails with a clear ASSERT rather than a hard crash.
+    CitySimulation* cs() {
+        auto* ptr = static_cast<CitySimulation*>(sim_.get());
+        EXPECT_NE(ptr, nullptr) << "cs(): sim_ is null — was SetUp() called?";
+        return ptr;
+    }
+
+    // Advance simulation time by n ticks, each of duration
+    // SimulationConstants::SECONDS_PER_BUDGET_TICK. Calls clock_.advance(dt)
+    // then cs()->tick(dt) for each tick so that both the injected clock and the
+    // simulation state stay in sync. Eliminates per-test boilerplate of manually
+    // looping clock.advance() + sim_->tick().
+    void runTicks(int n) {
+        const float dt = SimulationConstants::SECONDS_PER_BUDGET_TICK;
+        for (int i = 0; i < n; ++i) {
+            clock_.advance(dt);
+            cs()->tick(dt);
+        }
+    }
 };
 ```
 
@@ -1857,6 +1880,14 @@ The SetUp/TearDown sequences follow the same pattern as `CitySimulationUnitTest`
 1. **SetUp**: construct `sim_` from injected `renderer_`, `audio_`, `rng_`, `clock_`.
 2. **TearDown**: call `sim_.reset()` explicitly before the fixture destructs — this enforces the destructor-path contract. Mock objects (`renderer_`, `audio_`) are destroyed after `sim_` returns from `reset()`.
 3. **`verifyAllConsumed()` policy**: NOT called in `TearDown()`. Tests that require exact RNG consumption counts must call `rng_.verifyAllConsumed()` (or a local `ManualRNG::verifyAllConsumed()`) explicitly at the end of the test body.
+
+#### Protected Helpers
+
+`NiceSimulationTestBase` exposes two protected helper methods that eliminate repetitive boilerplate present in every NiceMock-based simulation fixture:
+
+**`cs()`** — returns `sim_.get()` downcast to `CitySimulation*` via `static_cast`. Because `sim_` is always constructed as a `CitySimulation` object, the cast is safe; the helper adds an `EXPECT_NE(ptr, nullptr)` guard so a misconfigured fixture (e.g. `SetUp` not called) fails with a clear assertion message rather than a null-pointer crash. Use `cs()` whenever a test needs to call a `CitySimulation`-specific method that is not declared on the `ICitySimulation` interface (e.g. `setSpeed`, `setModalOpen`, `addServiceBuilding`, `serializeToJson`, `setMapDimensions`).
+
+**`runTicks(int n)`** — advances the simulation by `n` budget ticks. Each tick advances `clock_` by `SimulationConstants::SECONDS_PER_BUDGET_TICK` seconds and then calls `cs()->tick(dt)`, keeping the injected `ManualClock` and the `CitySimulation` internal state in sync. This replaces the per-test pattern of writing a manual `for` loop with `clock_.advance(...)` + `sim_->tick(...)`. Pass `n = 1` for a single-tick state check; pass larger values to exercise multi-tick convergence behaviour (e.g. service-coverage propagation, forced-loan expiry, density level-up).
 
 #### When to Choose Each Fixture
 
