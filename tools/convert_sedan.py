@@ -256,6 +256,9 @@ def build_lod_mesh_decimate(source_obj, target_tris: int, label: str):
     collapse edges between disconnected components (wheels vs body etc).
     Each part is decimated proportionally to its share of the total tri count.
     """
+    # Snapshot existing object names before creating the work copy
+    before_names = {o.name for o in bpy.data.objects}
+
     # Work on a copy, triangulate, then separate by loose parts
     work = source_obj.copy()
     work.data = source_obj.data.copy()
@@ -269,7 +272,9 @@ def build_lod_mesh_decimate(source_obj, target_tris: int, label: str):
     bpy.ops.mesh.separate(type='LOOSE')
     bpy.ops.object.mode_set(mode='OBJECT')
 
-    parts = [o for o in bpy.data.objects if o.type == 'MESH' and o != source_obj]
+    # Collect all objects created during this call (work + its split-off parts)
+    parts = [o for o in bpy.data.objects
+             if o.type == 'MESH' and o.name not in before_names]
     n_total = sum(len(p.data.polygons) for p in parts)
     print(f"  [{label}] {len(parts)} parts, {n_total} total tris  target={target_tris}")
 
