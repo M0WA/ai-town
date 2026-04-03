@@ -188,6 +188,21 @@ endmacro()
 # ============================================================================
 
 # ----------------------------------------------------------------------------
+# aitown_platform — exe-relative asset path resolution (PlatformUtils).
+# Windows: resolves assets dir from GetModuleFileNameW (exe-relative).
+# Linux:   returns AITOWN_ASSETS_DIR (absolute at compile time).
+# Linked into every final executable so g_assetsDir is defined at link time.
+# ----------------------------------------------------------------------------
+add_library(aitown_platform STATIC
+    src/platform/PlatformUtils.cpp
+)
+target_compile_features(aitown_platform PRIVATE cxx_std_17)
+target_compile_definitions(aitown_platform PRIVATE
+    AITOWN_ASSETS_DIR="${AITOWN_ASSETS_DIR}"
+)
+target_link_libraries(aitown_platform PRIVATE aitown_project_root_includes)
+
+# ----------------------------------------------------------------------------
 # aitown_render — Irrlicht rendering adapter
 # GLEW::GLEW MUST be linked BEFORE Irrlicht (GLEW symbol duplication mitigation-2).
 # PRIVATE scope — Irrlicht and GLEW headers must NOT propagate to test targets.
@@ -388,6 +403,7 @@ target_link_libraries(aitown PRIVATE
     aitown_sim
     aitown_terrain
     aitown_audio
+    aitown_platform
     Irrlicht
     GLEW::GLEW
     aitown_irrlicht_system_deps
@@ -659,6 +675,7 @@ add_executable(ui_tests
 target_link_libraries(ui_tests PRIVATE
     aitown_ui
     aitown_sim         # MockCitySimulation includes ICitySimulation.h which includes simulation_types.h
+    aitown_platform
     GTest::gtest_main
     GTest::gmock
     rapidcheck
@@ -837,6 +854,7 @@ target_sources(audio_tests PRIVATE
 )
 target_link_libraries(audio_tests PRIVATE
     aitown_audio
+    aitown_platform
     Vorbis::vorbisfile   # must be explicit — PRIVATE scope in aitown_audio does not propagate
     GTest::gtest_main
     GTest::gmock
@@ -913,6 +931,7 @@ target_link_libraries(integration_tests PRIVATE
     aitown_ui
     aitown_terrain
     aitown_sim
+    aitown_platform
     Irrlicht
     GLEW::GLEW
     aitown_irrlicht_system_deps
@@ -986,6 +1005,7 @@ add_executable(opengl_tests
 target_link_libraries(opengl_tests PRIVATE
     aitown_render
     aitown_ui      # required: IrrlichtRenderer.cpp references UIManager::draw()
+    aitown_platform
     Irrlicht
     GLEW::GLEW
     aitown_irrlicht_system_deps

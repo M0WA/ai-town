@@ -1,5 +1,54 @@
 # Irrlicht Device Lifecycle
 
+## Asset Path Resolution
+
+All subsystems access game assets through a single global `g_assetsDir` (defined in
+`src/platform/PlatformUtils.h`). It is initialised **once at startup** in `main()` before
+any subsystem is constructed:
+
+```cpp
+g_assetsDir = resolveAssetsDir();  // first line of main()
+```
+
+### Platform behaviour
+
+| Platform | Resolution strategy | Result |
+|---|---|---|
+| **Windows** | `GetModuleFileNameW(nullptr, ...)` strips the exe filename, appends `\assets` | `C:\Program Files\AI Town\assets` — works from any CWD, shortcut, or double-click |
+| **Linux (DEB install)** | Compiled-in `AITOWN_ASSETS_DIR` (`/usr/share/aitown/assets`) | Absolute FHS path — correct from any CWD |
+| **Linux (dev build)** | Compiled-in `AITOWN_ASSETS_DIR` (`<repo>/assets`) | Absolute source-tree path — correct when running from repo root |
+
+### Why not compile-time only?
+
+On Windows, `AITOWN_ASSETS_DIR` is set to the relative string `"assets"` at configure time
+(for the NSIS installer layout). A relative path resolves from CWD, which breaks if the user
+launches via a desktop shortcut or from a different directory. Resolving from the exe path
+removes this dependency entirely.
+
+On Linux, installed paths are absolute (`/usr/share/aitown/assets`) so the compiled-in
+constant is always correct and `resolveAssetsDir()` simply returns it unchanged.
+
+### Usage
+
+Every call site that previously used `std::string(AITOWN_ASSETS_DIR)` now uses `g_assetsDir`.
+`AITOWN_ASSETS_DIR` is still defined by CMake for `PlatformUtils.cpp` (Linux fallback) and for
+the model validator and benchmark tools (standalone binaries that do not call `main()`'s
+`resolveAssetsDir()` and instead use the macro directly).
+
+### CMake wiring
+
+`aitown_platform` is a static library containing `PlatformUtils.cpp`. It must be linked into
+every final executable **after** all other AI Town static libs so the linker resolves
+`g_assetsDir` from it:
+
+```cmake
+target_link_libraries(<exe> PRIVATE
+    aitown_render aitown_ui aitown_audio ...  # reference g_assetsDir
+    aitown_platform                           # defines g_assetsDir — must come last
+    ...
+)
+```
+
 - A `RenderSystem` class owns the `IrrlichtDevice*` exclusively (RAII)
 - The destructor calls `device->drop()`
 - No raw `IrrlichtDevice*` stored outside `RenderSystem`
