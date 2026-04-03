@@ -132,6 +132,18 @@ Do not suggest alternative engines, languages, or platforms.
 - **`develop`** → merged into **`main`** only on **major releases** (not on individual phase completions)
 - PRs for completed phases always target `develop`, never `main` directly
 
+## README Maintenance
+
+`README.md` at the repo root is the public-facing project page. **Keep it in sync whenever any of the following change:**
+
+- Game description or key features
+- Installation steps or build dependencies
+- Default keybindings (`architecture/ui-ux/hotkey-scheme.md` is canonical — README table must match)
+- Screenshots (`docs/` directory — use the latest `screenshot-v*.png`)
+- Release download links (GitHub Releases page)
+
+The README structure must always contain: short description + screenshot, installation (Linux & Windows with download links), and the default keybindings table.
+
 ## File Exclusions
 
 The following files should be ignored when analyzing the codebase:
