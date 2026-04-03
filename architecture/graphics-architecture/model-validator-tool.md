@@ -120,24 +120,35 @@ The fallback when `getGPUProgrammingServices()` returns null (e.g. software driv
 
 ### Camera
 
-Orbiting camera: default radius 65 m, height 15 m, centre (0, 5, 0), advancing 0.3°/frame.
+Orbiting camera with full game-equivalent controls. Default radius 65 m, pitch 13°,
+centre (0, 5, 0), advancing 0.3°/frame in normal category mode.
+
 The 65 m radius keeps the maximum 5-model vehicle row (±24 m span) comfortably in view.
 All other categories have 4 models (±18 m span at 12 m spacing).
 
-Mouse wheel zooms the camera in/out by adjusting the orbit radius (scroll up = zoom in,
-scroll down = zoom out). Range: 5 m (minimum) to 200 m (maximum). Step: 3 m per scroll notch.
-The zoom level persists for the duration of the category; it resets to 65 m when advancing
-to the next category (new orbit state is initialised per category).
+All orbit state (radius, pitch, center) resets to defaults when advancing to the next
+category so each category starts with a clean view.
 
-| Orbit parameter | Value |
+**Camera controls** match the game's `CameraController` conventions:
+
+| Input | Action |
 |---|---|
-| Centre | `(0, 5, 0)` |
-| Default radius | 65 m |
-| Minimum radius | 5 m |
-| Maximum radius | 200 m |
-| Zoom step | 3 m per scroll notch |
-| Height above centre | 15 m |
-| Speed | 0.3°/frame |
+| **RMB drag horizontal** | Yaw (orbit around vertical axis) |
+| **RMB drag vertical** | Pitch (elevation angle) — clamped to \[3°, 85°\] |
+| **MMB drag** | Pan orbit centre in the ground plane (zoom-scaled) |
+| **Arrow keys** | Pan orbit centre (same direction convention as game) |
+| **Scroll wheel** | Zoom — adjusts orbit radius (scroll up = zoom in) |
+
+In normal category mode the camera auto-rotates at 0.3°/frame when no RMB drag is active.
+In `--model` (single-model) mode auto-rotation is disabled; all controls still work.
+
+| Orbit parameter | Default | Range |
+|---|---|---|
+| Centre | `(0, 5, 0)` | panned by MMB / arrow keys |
+| Radius | 65 m | 5 m – 200 m |
+| Pitch | 13° above horizontal | 3° – 85° |
+| Zoom step | 3 m per scroll notch | — |
+| Auto-rotation speed | 0.3°/frame | — |
 
 ---
 
@@ -265,7 +276,7 @@ A single line of text at the bottom of the screen (drawn in the current mark col
 shows the active tool state and available hotkeys:
 
 ```text
-Draw: 1=Red 2=Green 3=Blue 4=Yellow 5=Magenta  C=shape[DOT]  LClick=place  Z=undo  X=clear  S=screenshot
+Draw: C=colour[Red] V=shape[DOT]  LHold=draw  RDrag=orbit  MMB=pan  Arrows=pan  Wheel=zoom  Z=undo  X=clear  S=screenshot
 ```
 
 ---
@@ -280,8 +291,10 @@ The operator clicks to place marks; screenshots of annotated views are saved for
 | Input | Action |
 |---|---|
 | **Left hold/drag** | Freehand draw annotation marks |
-| **Right drag** | Orbit camera (all modes) |
-| **Mouse wheel** | Zoom in/out (adjusts orbit radius, 3 m per notch, range 5–200 m) |
+| **RMB drag** | Orbit camera — horizontal = yaw, vertical = pitch |
+| **MMB drag** | Pan orbit centre in ground plane |
+| **Arrow keys** | Pan orbit centre (Left/Right/Up/Down, continuous while held) |
+| **Scroll wheel** | Zoom in/out (adjusts orbit radius, 3 m per notch, range 5–200 m) |
 | **C** | Cycle annotation colour (Red → Green → Blue → Yellow → Cyan → Magenta → White → Black) |
 | **V** | Cycle mark shape: `DOT` → `CIRCLE` → `CROSS` → `DOT` |
 | **S** | Save an annotated screenshot (one file per press, counter resumes across sessions) |
