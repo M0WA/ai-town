@@ -1,29 +1,31 @@
 """
-Blender 4.3 headless pipeline: car_sedan FBX -> B3D (LOD0 + LOD1)
+Blender 4.3 headless pipeline: vehicle FBX -> B3D (LOD0 + LOD1)
 
-Strategy: full-fidelity conversion, NO polygon reduction.
-  Both LOD0 and LOD1 use the complete mesh as-is from the FBX.
-  Triangle budgets are ignored — geometry is preserved exactly.
+Usage:
+  blender --background --python tools/convert_vehicle_fbx.py -- \\
+    <fbx_path> <asset_name> <atlas_col> [atlas_row]
+
+  fbx_path   : path to the source .fbx file
+  asset_name : e.g. car_sedan, car_hatchback, car_suv
+  atlas_col  : column index in the 4x4 vehicle atlas (0-3)
+  atlas_row  : row index (default 0)
+
+Example:
+  blender --background --python tools/convert_vehicle_fbx.py -- \\
+    /tmp/sedan_import/classic+sedan+3d+model.fbx car_sedan 0
 
 Coordinate system:
-  Many FBX exporters (3ds Max, Maya default) produce Z-up geometry.
-  We import with default axes, then apply a -90° rotation around X to
-  convert Z-up to Y-up (Irrlicht convention).  After rotation the long
-  axis of the car lies along Z; we remap it to X (rotate +90° around Y)
-  so the car faces +Z in Irrlicht (forward into screen), length along X.
-  Triangle winding is flipped (swap i1,i2 per tri) to correct for
-  the Blender→Irrlicht handedness change (which reverses winding order).
+  Irrlicht: Y-up, car length along Z, nose faces +Z (yaw=0 = forward).
+  R1: -90° X  ->  Z-up to Y-up
+  R2: +90° Y  ->  if long axis is X after R1
+  R3: 180° Y  ->  nose faces +Z
 
 B3D format v2: BB3D > TEXS + BRUS + NODE > MESH > VRTS + TRIS
   VRTS: pos(3f) + normal(3f) + uv(2f), flags=1, tc_sets=1, tc_size=2
   Normals: per-loop via mesh.corner_normals (Blender 4.x API)
 
 UV atlas remapping:
-  The FBX UVs cover [0,1]x[0,1] (full texture space for the original
-  material).  car_sedan lives at row=0, col=0 of the 4x4 vehicles atlas
-  (2048x2048 px, 512x512 px cells).  UVs are remapped to [0,0.25]x[0,0.25]
-  by scaling both axes by 0.25.  The atlas texture is bound at runtime
-  so the full atlas coordinates must be baked into the B3D file.
+  FBX UVs normalized to [0,1], V-flipped, remapped to atlas cell.
 """
 
 import bpy
@@ -32,22 +34,35 @@ import struct
 import os
 import sys
 
-FBX_PATH      = "/tmp/sedan_import/classic+sedan+3d+model.fbx"
+# ---------------------------------------------------------------------------
+# Parse arguments after '--' separator
+# ---------------------------------------------------------------------------
+_argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+if len(_argv) < 3:
+    sys.exit(
+        "Usage: blender --background --python convert_vehicle_fbx.py -- "
+        "<fbx_path> <asset_name> <atlas_col> [atlas_row]"
+    )
+FBX_PATH      = _argv[0]
+ASSET_NAME    = _argv[1]
+ATLAS_COL_IDX = int(_argv[2])
+ATLAS_ROW_IDX = int(_argv[3]) if len(_argv) > 3 else 0
 
-# Atlas remapping constants for car_sedan (row=0, col=0, 4x4 grid)
+_tools_dir    = os.path.dirname(os.path.abspath(__file__))
+_assets_dir   = os.path.join(_tools_dir, "..", "assets")
+OUT_LOD0      = os.path.join(_assets_dir, "3d", "vehicles", f"{ASSET_NAME}_lod0.b3d")
+OUT_LOD1      = os.path.join(_assets_dir, "3d", "vehicles", f"{ASSET_NAME}_lod1.b3d")
+
+# Atlas remapping constants (4x4 grid)
 ATLAS_COLS    = 4
 ATLAS_ROWS    = 4
-ATLAS_COL_IDX = 0
-ATLAS_ROW_IDX = 0
-ATLAS_CELL_U  = 1.0 / ATLAS_COLS   # 0.25
-ATLAS_CELL_V  = 1.0 / ATLAS_ROWS   # 0.25
-ATLAS_OFF_U   = ATLAS_COL_IDX * ATLAS_CELL_U  # 0.0
-ATLAS_OFF_V   = ATLAS_ROW_IDX * ATLAS_CELL_V  # 0.0
-OUT_LOD0      = "/workspace/assets/3d/vehicles/car_sedan_lod0.b3d"
-OUT_LOD1      = "/workspace/assets/3d/vehicles/car_sedan_lod1.b3d"
+ATLAS_CELL_U  = 1.0 / ATLAS_COLS
+ATLAS_CELL_V  = 1.0 / ATLAS_ROWS
+ATLAS_OFF_U   = ATLAS_COL_IDX * ATLAS_CELL_U
+ATLAS_OFF_V   = ATLAS_ROW_IDX * ATLAS_CELL_V
 ATLAS_TEXTURE = "vehicles_diffuse_atlas_d.dds"
 
-TARGET_LENGTH_M   = 4.0    # metres along the X axis (car length)
+TARGET_LENGTH_M   = 4.0    # metres along Z (car length)
 LOD1_TARGET_TRIS  = 10000  # target triangle count for LOD1 via DECIMATE modifier
 
 
@@ -424,7 +439,7 @@ def extract_b3d_data(obj):
 
 def main():
     print("=" * 60)
-    print("AI Town — car_sedan FBX -> B3D LOD conversion")
+    print(f"AI Town — {ASSET_NAME} FBX -> B3D LOD conversion")
     print(f"  Source: {FBX_PATH}")
     print(f"  LOD0 out: {OUT_LOD0}")
     print(f"  LOD1 out: {OUT_LOD1}")
