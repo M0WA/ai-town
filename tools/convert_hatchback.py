@@ -439,16 +439,13 @@ def main():
     # ------------------------------------------------------------------
     # Step 1: Import FBX and correct orientation to Irrlicht convention
     #
-    # Many FBX exporters (3ds Max, Maya) produce Z-up geometry regardless
-    # of the axis_forward/axis_up import arguments.  We import with the
-    # Blender default axes so the importer applies no hidden transform,
-    # then manually rotate the mesh into Irrlicht convention:
-    #   Irrlicht: Y-up, car length along X, faces +Z (into screen)
+    # Irrlicht convention: Y-up, car length along Z, nose faces +Z.
+    # yaw=0 in-game means the car drives in the +Z direction.
     #
-    # Rotation sequence (applied, then baked):
+    # Many FBX exporters produce Z-up geometry.  Apply:
     #   R1: -90° around X  ->  converts Z-up to Y-up
-    #   R2: +90° around Y  ->  rotates so the long axis maps to X and
-    #                          the car faces +Z
+    #       After R1 the long axis is along Z and nose faces +Z (or -Z).
+    #   R2 (optional): 180° around Y if the nose faces -Z after R1.
     # ------------------------------------------------------------------
     import math
     from mathutils import Euler
@@ -456,7 +453,7 @@ def main():
     print(f"\n[Step 1] Importing FBX")
     bpy.ops.import_scene.fbx(
         filepath=FBX_PATH,
-        use_custom_normals=False,   # we recalculate normals from decimated geo
+        use_custom_normals=False,
         ignore_leaf_bones=True,
         use_image_search=False,
     )
@@ -492,34 +489,23 @@ def main():
     print(f"  After R1 (-90° X):")
     print(f"    X=[{mn_x:.3f},{mx_x:.3f}]  Y=[{mn_y:.3f},{mx_y:.3f}]  Z=[{mn_z:.3f},{mx_z:.3f}]")
 
-    # R2: Rotate +90° around Y so the long axis is X and car faces +Z
-    src.rotation_euler = Euler((0.0, math.radians(90.0), 0.0), 'XYZ')
-    bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
-
-    mn_x, mx_x, mn_y, mx_y, mn_z, mx_z = get_bbox(src)
-    print(f"  After R2 (+90° Y):")
-    print(f"    X=[{mn_x:.3f},{mx_x:.3f}]  Y=[{mn_y:.3f},{mx_y:.3f}]  Z=[{mn_z:.3f},{mx_z:.3f}]")
-
-    # Measure the long axis (should now be X)
+    # Ensure the long axis is Z; if X is longer, rotate +90° around Y
     raw_len_x = mx_x - mn_x
     raw_len_z = mx_z - mn_z
-    # Pick whichever horizontal axis is longer as the car length axis
-    if raw_len_x >= raw_len_z:
-        raw_len = raw_len_x
-        long_axis = 'X'
-    else:
-        # Car ended up along Z instead — rotate +90° around Y once more
+    if raw_len_x > raw_len_z:
         src.rotation_euler = Euler((0.0, math.radians(90.0), 0.0), 'XYZ')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
         mn_x, mx_x, mn_y, mx_y, mn_z, mx_z = get_bbox(src)
-        raw_len = mx_x - mn_x
-        long_axis = 'X (after extra 90° Y)'
-    print(f"  Long axis: {long_axis}  raw_len={raw_len:.4f}m  H={mx_y-mn_y:.4f}m  W={mx_z-mn_z:.4f}m")
+        print(f"  After extra +90° Y (long axis was X):")
+        print(f"    X=[{mn_x:.3f},{mx_x:.3f}]  Y=[{mn_y:.3f},{mx_y:.3f}]  Z=[{mn_z:.3f},{mx_z:.3f}]")
+
+    raw_len = mx_z - mn_z
+    print(f"  Long axis: Z  raw_len={raw_len:.4f}m  H={mx_y-mn_y:.4f}m  W={mx_x-mn_x:.4f}m")
 
     # ------------------------------------------------------------------
     # Step 2: Scale to target length; center at origin, bottom at Y=0
     # ------------------------------------------------------------------
-    print(f"\n[Step 2] Scale to {TARGET_LENGTH_M}m length (along X)")
+    print(f"\n[Step 2] Scale to {TARGET_LENGTH_M}m length (along Z)")
     sf = TARGET_LENGTH_M / raw_len if raw_len > 1e-5 else 1.0
     print(f"  Scale factor: {sf:.4f}")
     src.scale = (sf, sf, sf)
@@ -535,9 +521,9 @@ def main():
 
     mn_x, mx_x, mn_y, mx_y, mn_z, mx_z = get_bbox(src)
     print(f"  After center+floor:")
-    print(f"    X=[{mn_x:.3f},{mx_x:.3f}] = {mx_x-mn_x:.3f}m (length, target ~{TARGET_LENGTH_M}m)")
+    print(f"    X=[{mn_x:.3f},{mx_x:.3f}] = {mx_x-mn_x:.3f}m (width)")
     print(f"    Y=[{mn_y:.3f},{mx_y:.3f}] = {mx_y-mn_y:.3f}m (height)")
-    print(f"    Z=[{mn_z:.3f},{mx_z:.3f}] = {mx_z-mn_z:.3f}m (width)")
+    print(f"    Z=[{mn_z:.3f},{mx_z:.3f}] = {mx_z-mn_z:.3f}m (length, target ~{TARGET_LENGTH_M}m)")
 
     # ------------------------------------------------------------------
     # Step 2b: Separate by loose parts, remove tiny interior pieces,
@@ -628,8 +614,8 @@ def main():
     print(f"LOD0: {tris_lod0:6d} tris  file={os.path.getsize(OUT_LOD0):,} bytes")
     print(f"LOD1: {tris_lod1:6d} tris  file={os.path.getsize(OUT_LOD1):,} bytes")
     print(f"\nFinal bounding box (LOD0):")
-    print(f"  Length (X): {mx_x - mn_x:.3f} m  (target ~4.0 m)")
-    print(f"  Width  (Z): {mx_z - mn_z:.3f} m  (target ~2.0 m)")
+    print(f"  Width  (X): {mx_x - mn_x:.3f} m  (target ~2.0 m)")
+    print(f"  Length (Z): {mx_z - mn_z:.3f} m  (target ~4.0 m)")
     print(f"  Height (Y): {mx_y - mn_y:.3f} m  (target ~1.5 m)")
     print(f"  Atlas texture: {ATLAS_TEXTURE}")
     print(f"  UV channel: 0 (single), remapped to cell ({ATLAS_COL_IDX},{ATLAS_ROW_IDX})"
