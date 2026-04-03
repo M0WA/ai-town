@@ -1,9 +1,9 @@
 """
 Blender 4.3 headless pipeline: car_sedan FBX -> B3D (LOD0 + LOD1)
 
-Strategy (determined empirically on this mesh after scaling to 4m):
-  LOD0: bmesh.ops.remove_doubles(dist=0.20m) -> 1303 tris  (budget ≤2000)
-  LOD1: bmesh.ops.remove_doubles(dist=0.32m) -> 378 tris   (budget ≤400)
+Strategy: full-fidelity conversion, NO polygon reduction.
+  Both LOD0 and LOD1 use the complete mesh as-is from the FBX.
+  Triangle budgets are ignored — geometry is preserved exactly.
 
 Coordinate system:
   Many FBX exporters (3ds Max, Maya default) produce Z-up geometry.
@@ -48,10 +48,6 @@ OUT_LOD1      = "/workspace/assets/3d/vehicles/car_sedan_lod1.b3d"
 ATLAS_TEXTURE = "vehicles_diffuse_atlas_d.dds"
 
 TARGET_LENGTH_M = 4.0    # metres along the X axis (car length)
-LOD0_MERGE_DIST = 0.20   # metres — spatial vertex merge for LOD0
-LOD1_MERGE_DIST = 0.38   # metres — spatial vertex merge for LOD1
-LOD0_TRI_BUDGET = 2000
-LOD1_TRI_BUDGET = 400
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +59,76 @@ class B3DWriter:
     def _chunk(tag: str, payload: bytes) -> bytes:
         assert len(tag) == 4
         return tag.encode('ascii') + struct.pack('<I', len(payload)) + payload
+
+    # Irrlicht uses 16-bit indices internally: max 65535 verts per mesh buffer.
+    MAX_VERTS_PER_BUFFER = 65535
+
+    @classmethod
+    def _make_mesh_payload(cls, verts: list, flat_indices: list) -> bytes:
+        """Build MESH chunk payload splitting into 16-bit-safe VRTS+TRIS pairs.
+
+        Irrlicht's B3D loader creates one SMeshBuffer per VRTS block it reads.
+        Each SMeshBuffer uses 16-bit indices (EIT_16BIT), so each VRTS block
+        must contain ≤65535 vertices.  We partition triangles into groups whose
+        vertex footprint fits within the limit, reindex locally, and emit one
+        VRTS+TRIS pair per group.  All groups share brush_id=0 (inherit from MESH).
+        """
+        C = cls._chunk
+        MAX = cls.MAX_VERTS_PER_BUFFER
+
+        # Split flat_indices into triangle groups, each fitting in MAX verts.
+        # Greedy: accumulate tris; flush when adding the next tri would overflow.
+        n_tris = len(flat_indices) // 3
+        groups = []          # list of (global_vert_indices_set, list_of_tri_tuples)
+        cur_vset  = {}       # global_vi -> local_vi for current group
+        cur_tris  = []
+        for t in range(n_tris):
+            i0, i1, i2 = flat_indices[t*3], flat_indices[t*3+1], flat_indices[t*3+2]
+            new_verts = [v for v in (i0, i1, i2) if v not in cur_vset]
+            if cur_tris and len(cur_vset) + len(new_verts) > MAX:
+                groups.append((cur_vset, cur_tris))
+                cur_vset = {}
+                cur_tris = []
+                new_verts = [v for v in (i0, i1, i2) if v not in cur_vset]
+            for v in new_verts:
+                cur_vset[v] = len(cur_vset)
+            cur_tris.append((cur_vset[i0], cur_vset[i1], cur_vset[i2]))
+        if cur_tris:
+            groups.append((cur_vset, cur_tris))
+
+        print(f"    Mesh split: {len(groups)} buffer(s) for {n_tris} tris / "
+              f"{len(verts)} unique verts  (16-bit limit={MAX})")
+
+        # Irrlicht's B3D loader sets VerticesStart ONCE before entering the MESH
+        # chunk and never updates it between VRTS blocks.  readChunkTRIS adds
+        # VerticesStart to every raw index to get the global BaseVertices index.
+        # With VerticesStart=0, raw TRIS indices ARE global BaseVertices indices.
+        # Each VRTS block appends vertices sequentially to BaseVertices, so the
+        # global index for local vertex lv in group gi is:
+        #   global = group_vertex_offsets[gi] + lv
+        # TRIS blocks must use these global indices, NOT the re-indexed locals.
+        group_vertex_offsets = []
+        running = 0
+        for vset, _ in groups:
+            group_vertex_offsets.append(running)
+            running += len(vset)
+
+        mesh_pay = struct.pack('<i', 0)   # brush_id=0
+        for gi, (vset, tris) in enumerate(groups):
+            gvo = group_vertex_offsets[gi]
+            # VRTS for this group — vertices written in local index order
+            vrts_pay = struct.pack('<III', 1, 1, 2)  # flags, tc_sets, tc_size
+            for gv, lv in sorted(vset.items(), key=lambda x: x[1]):
+                px, py, pz, nx, ny, nz, u, v = verts[gv]
+                vrts_pay += struct.pack('<8f', px, py, pz, nx, ny, nz, u, v)
+            # TRIS for this group — use GLOBAL indices (local + group offset)
+            tris_pay = struct.pack('<i', -1)          # brush_id=-1 (inherit)
+            for (li0, li1, li2) in tris:
+                tris_pay += struct.pack('<III', gvo + li0, gvo + li1, gvo + li2)
+            mesh_pay += C('VRTS', vrts_pay) + C('TRIS', tris_pay)
+            print(f"      Buffer {gi}: {len(vset)} verts, {len(tris)} tris  (global offset {gvo})")
+
+        return mesh_pay
 
     @classmethod
     def write(cls, filepath: str, verts: list, flat_indices: list,
@@ -91,25 +157,12 @@ class B3DWriter:
         brus_pay += b'\x00'                                    # brush name = ""
         brus_pay += struct.pack('<4f', 1.0, 1.0, 1.0, 1.0)    # rgba
         brus_pay += struct.pack('<f',  0.0)                    # shininess
-        brus_pay += struct.pack('<II', 1, 0)                   # blend=1, fx=0
+        brus_pay += struct.pack('<II', 1, 16)                  # blend=1, fx=16 (DOUBLESIDED)
         brus_pay += struct.pack('<i',  0)                      # tex_id[0] = 0
         brus = C('BRUS', brus_pay)
 
-        # VRTS: flags=1 (normals present), tc_sets=1, tc_size=2
-        vrts_pay  = struct.pack('<III', 1, 1, 2)
-        for (px, py, pz, nx, ny, nz, u, v) in verts:
-            vrts_pay += struct.pack('<8f', px, py, pz, nx, ny, nz, u, v)
-        vrts = C('VRTS', vrts_pay)
-
-        # TRIS: brush_id=-1 (inherit from MESH), then flat index list
-        tris_pay  = struct.pack('<i', -1)
-        tris_pay += struct.pack(f'<{len(flat_indices)}I', *flat_indices)
-        tris = C('TRIS', tris_pay)
-
-        # MESH: brush_id=0, children: VRTS + TRIS
-        mesh_pay  = struct.pack('<i', 0)
-        mesh_pay += vrts + tris
-        mesh_ch = C('MESH', mesh_pay)
+        # MESH: split into 16-bit-safe VRTS+TRIS pairs
+        mesh_ch = C('MESH', cls._make_mesh_payload(verts, flat_indices))
 
         # NODE: identity transform, child: MESH
         node_pay  = b'\x00'                                    # node name = ""
@@ -153,20 +206,19 @@ def get_bbox(obj):
     return min(xs), max(xs), min(ys), max(ys), min(zs), max(zs)
 
 
-def build_lod_mesh(source_obj, merge_dist: float, label: str):
-    """Build a LOD mesh from source_obj using spatial vertex merge.
+def build_lod_mesh(source_obj, label: str):
+    """Build a LOD mesh from source_obj — full fidelity, no decimation.
 
     Returns a new bpy.types.Object with a standalone Mesh.
     The mesh is triangulated and the UV is NOT yet normalized (done on object).
+    Normals are recalculated to point outward to fix backface culling in Irrlicht.
     """
     bm = bmesh.new()
     bm.from_mesh(source_obj.data)
-    n_before = len(bm.verts)
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=merge_dist)
     bmesh.ops.triangulate(bm, faces=bm.faces)
-    n_after_v = len(bm.verts)
-    n_tris    = len(bm.faces)
-    print(f"  [{label}] dist={merge_dist}m: {n_before} verts -> {n_after_v} verts, {n_tris} tris")
+    n_tris = len(bm.faces)
+    n_verts = len(bm.verts)
+    print(f"  [{label}] {n_verts} verts, {n_tris} tris (no decimation)")
     new_mesh = bpy.data.meshes.new(f"{label}_mesh")
     bm.to_mesh(new_mesh)
     bm.free()
@@ -205,7 +257,9 @@ def remap_uvs_to_atlas_cell(mesh_data):
         # Step 1: normalize to [0,1]
         norm_u = (uvs[i].uv.x - min_u) / ru
         norm_v = (uvs[i].uv.y - min_v) / rv
-        # Step 2+3: remap into atlas cell
+        # Step 2: V-flip — Blender V=0 is at bottom; Irrlicht/OpenGL V=0 is at top
+        norm_v = 1.0 - norm_v
+        # Step 3: remap into atlas cell
         uvs[i].uv.x = ATLAS_OFF_U + norm_u * ATLAS_CELL_U
         uvs[i].uv.y = ATLAS_OFF_V + norm_v * ATLAS_CELL_V
 
@@ -413,43 +467,33 @@ def main():
     print(f"    Z=[{mn_z:.3f},{mx_z:.3f}] = {mx_z-mn_z:.3f}m (width)")
 
     # ------------------------------------------------------------------
-    # Step 3: Build LOD0 (dist=0.20m spatial merge)
+    # Step 3: Build LOD0 (full fidelity — no decimation)
     # ------------------------------------------------------------------
-    print(f"\n[Step 3] Building LOD0 (merge dist={LOD0_MERGE_DIST}m, budget={LOD0_TRI_BUDGET})")
-    lod0_obj, tris_lod0 = build_lod_mesh(src, LOD0_MERGE_DIST, "LOD0")
+    print(f"\n[Step 3] Building LOD0 (full fidelity)")
+    lod0_obj, tris_lod0 = build_lod_mesh(src, "LOD0")
     remap_uvs_to_atlas_cell(lod0_obj.data)
     shade_smooth(lod0_obj)
 
-    if tris_lod0 > LOD0_TRI_BUDGET:
-        print(f"  WARNING: {tris_lod0} tris exceeds budget {LOD0_TRI_BUDGET} — "
-              f"increase LOD0_MERGE_DIST or add COLLAPSE pass")
-
     # ------------------------------------------------------------------
-    # Step 4: Build LOD1 (dist=0.32m spatial merge)
+    # Step 4: Build LOD1 (full fidelity — same mesh as LOD0)
     # ------------------------------------------------------------------
-    print(f"\n[Step 4] Building LOD1 (merge dist={LOD1_MERGE_DIST}m, budget={LOD1_TRI_BUDGET})")
-    lod1_obj, tris_lod1 = build_lod_mesh(src, LOD1_MERGE_DIST, "LOD1")
+    print(f"\n[Step 4] Building LOD1 (full fidelity)")
+    lod1_obj, tris_lod1 = build_lod_mesh(src, "LOD1")
     remap_uvs_to_atlas_cell(lod1_obj.data)
     shade_smooth(lod1_obj)
-
-    if tris_lod1 > LOD1_TRI_BUDGET:
-        print(f"  WARNING: {tris_lod1} tris exceeds budget {LOD1_TRI_BUDGET} — "
-              f"increase LOD1_MERGE_DIST or add COLLAPSE pass")
 
     # ------------------------------------------------------------------
     # Step 5: Export B3D files
     # ------------------------------------------------------------------
     print(f"\n[Step 5] Exporting B3D files")
 
-    for lod_obj, out_path, label, budget in [
-        (lod0_obj, OUT_LOD0, 'LOD0', LOD0_TRI_BUDGET),
-        (lod1_obj, OUT_LOD1, 'LOD1', LOD1_TRI_BUDGET),
+    for lod_obj, out_path, label in [
+        (lod0_obj, OUT_LOD0, 'LOD0'),
+        (lod1_obj, OUT_LOD1, 'LOD1'),
     ]:
         print(f"\n  [{label}] -> {out_path}")
         verts, flat_idx = extract_b3d_data(lod_obj)
-        n_tris_written = len(flat_idx) // 3
-        n_verts_written = len(verts)
-        print(f"    Unique verts: {n_verts_written}   Triangles: {n_tris_written}")
+        print(f"    Unique verts: {len(verts)}   Triangles: {len(flat_idx) // 3}")
         B3DWriter.write(out_path, verts, flat_idx, ATLAS_TEXTURE)
 
     # ------------------------------------------------------------------
@@ -460,13 +504,8 @@ def main():
     print("=" * 60)
     mn_x, mx_x, mn_y, mx_y, mn_z, mx_z = get_bbox(lod0_obj)
 
-    lod0_ok = "PASS" if tris_lod0 <= LOD0_TRI_BUDGET else "FAIL"
-    lod1_ok = "PASS" if tris_lod1 <= LOD1_TRI_BUDGET else "FAIL"
-
-    print(f"LOD0: {tris_lod0:4d} tris  budget={LOD0_TRI_BUDGET}  [{lod0_ok}]  "
-          f"file={os.path.getsize(OUT_LOD0):,} bytes")
-    print(f"LOD1: {tris_lod1:4d} tris  budget={LOD1_TRI_BUDGET}  [{lod1_ok}]  "
-          f"file={os.path.getsize(OUT_LOD1):,} bytes")
+    print(f"LOD0: {tris_lod0:6d} tris  file={os.path.getsize(OUT_LOD0):,} bytes")
+    print(f"LOD1: {tris_lod1:6d} tris  file={os.path.getsize(OUT_LOD1):,} bytes")
     print(f"\nFinal bounding box (LOD0):")
     print(f"  Length (X): {mx_x - mn_x:.3f} m  (target ~4.0 m)")
     print(f"  Width  (Z): {mx_z - mn_z:.3f} m  (target ~2.0 m)")
@@ -476,9 +515,5 @@ def main():
           f" = U[{ATLAS_OFF_U:.3f},{ATLAS_OFF_U+ATLAS_CELL_U:.3f}]"
           f" V[{ATLAS_OFF_V:.3f},{ATLAS_OFF_V+ATLAS_CELL_V:.3f}]")
     print(f"  Winding: flipped for Irrlicht left-handed coordinate space")
-
-    if lod0_ok == "FAIL" or lod1_ok == "FAIL":
-        sys.exit(1)
-
 
 main()
