@@ -15,6 +15,7 @@
 #include <efx.h>
 
 #include "src/audio/AudioSystem.h"
+#include "src/platform/PlatformUtils.h"
 #include "src/audio/al_check.h"
 #include "src/audio/AudioStream.h"
 #include "src/interfaces/sound_ids.h"
@@ -160,7 +161,7 @@ static bool hasSuffix(const std::string& s, const char* suffix) {
 // Asset path helpers.
 // ---------------------------------------------------------------------------
 std::string AudioSystem::assetPath(const std::string& filename) {
-    return std::string(AITOWN_ASSETS_DIR) + "/audio/" + filename;
+    return g_assetsDir + "/audio/" + filename;
 }
 
 std::string AudioSystem::musicTrackFilename(MusicTrackId id) {

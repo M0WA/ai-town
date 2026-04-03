@@ -5,6 +5,7 @@
 #include <irrlicht.h>
 
 #include "IrrlichtRenderer.h"
+#include "src/platform/PlatformUtils.h"
 #include "src/ui/UIManager.h"            // FULL include here (not in header — per Header Dependency Rule)
 #include "src/interfaces/ITerrainQuery.h" // ITerrainQuery full include (forward-decl in header only)
 #include "BuildingAssetLoader.h"          // Phase 10: load .b3d asset families via BuildingAssetLoader::load()
@@ -1510,7 +1511,7 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
 
     // Construct the asset base path: assets/3d/buildings/<assetBaseName>
     // BuildingAssetLoader::load() appends _lod0.b3d, _lod1.b3d, _lod2.b3d, .meta.
-    std::string basePath = std::string(AITOWN_ASSETS_DIR) +
+    std::string basePath = g_assetsDir +
                            "/3d/buildings/" + assetBaseName;
 
     // Parse density tier from assetBaseName (format: "zone_dens_NN", e.g. "res_low_01").
@@ -1636,7 +1637,7 @@ bool IrrlichtRenderer::initRoadShader()
     //   Authored ~RGB(82,80,82) appears correctly on the non-sRGB framebuffer.
     const bool srgbOk = (glewIsExtensionSupported("GL_EXT_texture_sRGB") == GL_TRUE);
 
-    const std::string texPath = std::string(AITOWN_ASSETS_DIR)
+    const std::string texPath = g_assetsDir
                                 + "/textures/roads/road_asphalt_tileable.dds";
 
     GLuint texHandle = m_roadTextureCache->loadSRGB(texPath,
@@ -1654,8 +1655,8 @@ bool IrrlichtRenderer::initRoadShader()
         return false;
     }
 
-    const std::string vsPath = std::string(AITOWN_ASSETS_DIR) + "/shaders/road.vert";
-    const std::string fsPath = std::string(AITOWN_ASSETS_DIR) + "/shaders/road.frag";
+    const std::string vsPath = g_assetsDir + "/shaders/road.vert";
+    const std::string fsPath = g_assetsDir + "/shaders/road.frag";
 
     // srgbOk drives u_srgbLinear in the callback (0 when sRGB, 1 when linear upload).
     // road.frag uses this to decide whether to apply the linear→sRGB inverse correction.
@@ -1711,7 +1712,7 @@ void IrrlichtRenderer::initTerrainShader()
     }
 
     // Build paths for the 4 terrain diffuse layers (splat channel order: R/G/B/A).
-    const std::string assetsDir = std::string(AITOWN_ASSETS_DIR);
+    const std::string assetsDir = g_assetsDir;
     const std::string grassPath    = assetsDir + "/textures/terrain/terrain_grass_d.dds";
     const std::string asphaltPath  = assetsDir + "/textures/terrain/terrain_asphalt_d.dds";
     const std::string soilPath     = assetsDir + "/textures/terrain/terrain_soil_d.dds";
@@ -2372,7 +2373,7 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
     static constexpr int kSvcFootprintN = 2;
     const float svcTargetH = flattenFootprint(tileX, tileZ, kSvcFootprintN);
 
-    std::string basePath = std::string(AITOWN_ASSETS_DIR) +
+    std::string basePath = g_assetsDir +
                            "/3d/buildings/" + stem;
 
     LODNode* lodNode = m_buildingAssetLoader->load(basePath);
@@ -2524,7 +2525,7 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
 
     if (!ensureVehicleLoader()) return;
 
-    const std::string basePath = std::string(AITOWN_ASSETS_DIR)
+    const std::string basePath = g_assetsDir
                                  + "/3d/vehicles/" + assetName;
 
     LODNode* lodNode = m_vehicleAssetLoader->load(basePath);
@@ -2555,7 +2556,7 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
         // bind vehicles_diffuse_atlas_d.png directly as a safety fallback.
         // Use PNG (not DDS): Irrlicht's DDS loader does not recognise the BC1_UNORM_SRGB
         // format used by the DDS atlas (same rationale as vehicleAtlasPath()).
-        const std::string atlasPath = std::string(AITOWN_ASSETS_DIR)
+        const std::string atlasPath = g_assetsDir
             + "/textures/vehicles/vehicles_diffuse_atlas_d.png";
 
         for (u32 m = 0; m < node->getMaterialCount(); ++m) {
@@ -2821,7 +2822,7 @@ void IrrlichtRenderer::initCloudPlane()
     if (m_cloudNode) {
         // Load cloud texture from linear pool (PNG — Irrlicht DDS loader disabled).
         // Per sky-clouds.md: IVideoDriver::getTexture(), NOT TextureCache::loadSRGB().
-        ITexture* tex = m_driver->getTexture((std::string(AITOWN_ASSETS_DIR) + "/textures/sky/clouds.png").c_str());
+        ITexture* tex = m_driver->getTexture((g_assetsDir + "/textures/sky/clouds.png").c_str());
 
         // --- Cloud dome shader ---
         // Load cloud_dome.vert / cloud_dome.frag via the GPU programming services.
@@ -2840,9 +2841,9 @@ void IrrlichtRenderer::initCloudPlane()
         irr::video::IGPUProgrammingServices* gpu = m_driver->getGPUProgrammingServices();
         if (gpu) {
             const std::string vsPath =
-                std::string(AITOWN_ASSETS_DIR) + "/shaders/cloud_dome.vert";
+                g_assetsDir + "/shaders/cloud_dome.vert";
             const std::string fsPath =
-                std::string(AITOWN_ASSETS_DIR) + "/shaders/cloud_dome.frag";
+                g_assetsDir + "/shaders/cloud_dome.frag";
 
             // CloudDomeShaderCallback: raw heap allocation.  We keep our own reference
             // (stored as m_cloudShaderCbRaw) so the destructor can drop it.
@@ -2975,7 +2976,7 @@ void IrrlichtRenderer::update(float dt)
 static std::string vehicleAtlasPath()
 {
     static const std::string kPath =
-        std::string(AITOWN_ASSETS_DIR) + "/textures/vehicles/vehicles_diffuse_atlas_d.png";
+        g_assetsDir + "/textures/vehicles/vehicles_diffuse_atlas_d.png";
     return kPath;
 }
 
@@ -2983,7 +2984,7 @@ static std::string vehicleAtlasPath()
 static std::string vehicleMeshPath(ZoneType zone, AgentHandle handle)
 {
     // A-18: hoist repeated path prefix into a single local variable.
-    static const std::string kVehicleDir = std::string(AITOWN_ASSETS_DIR) + "/3d/vehicles/";
+    const std::string kVehicleDir = g_assetsDir + "/3d/vehicles/";
     switch (zone) {
         case ZoneType::Residential: {
             const char* variants[3] = {"car_sedan", "car_hatchback", "car_suv"};
