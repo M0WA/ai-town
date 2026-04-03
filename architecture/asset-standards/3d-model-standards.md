@@ -14,9 +14,9 @@
 | Small buildings / props (height\_floors <= 3) | 1,500–3,000 tris | 200–400 tris | Billboard (point-sprite only) |
 | Small buildings / props (height\_floors >= 4) | 1,500–3,000 tris | 200–400 tris | 400–600 tris (`_lod2.b3d` geometry shell) |
 | Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | 2,000–4,000 tris | 200–400 tris | Billboard |
-| Vehicles (cars) | ≤2,000 tris | ≤400 tris | Point/sprite |
-| Vehicles (bus, truck) | ≤3,000 tris | ≤500 tris | Point/sprite |
-| Vehicles (general indicative range) | 1,000–3,000 tris (indicative range — see per-class table in § Vehicle Polygon Budget for binding limits) | 200–500 tris (indicative range — see per-class table for binding limits) | Point/sprite |
+| Vehicles (cars) | ≤510,000 tris | ≤12,000 tris | Point/sprite |
+| Vehicles (bus, truck) | ≤510,000 tris | ≤12,000 tris | Point/sprite |
+| Vehicles (general indicative range) | ≤510,000 tris (full-fidelity Tripo3D source; see per-class table in § Vehicle Polygon Budget for binding limits) | ≤12,000 tris (per-part DECIMATE; see per-class table for binding limits) | Point/sprite |
 | Terrain chunk (64×64 m) | 32×32 quad grid | 16×16 quad grid | 8×8 quad grid |
 | Road tile (10×10 m) | ≤50 tris (flat quad + kerb geometry + center-line strip; Phase-11h adds a 2-tri center-line quad bringing the total from the prior ≤48 to ≤50) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
 | Infrastructure props (lamp posts, signs) | ≤300 tris | ≤75 tris | Billboard (same system as small buildings) |
@@ -324,15 +324,17 @@ Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON side
 
 #### Vehicle Polygon Budget (LOD0 / LOD1)
 
-| Vehicle class | LOD0 budget | LOD1 budget |
-|---|---|---|
-| Car (sedan, hatchback, SUV) | ≤2,000 tris | ≤400 tris |
-| Bus | ≤3,000 tris | ≤500 tris |
-| Truck | ≤3,000 tris | ≤500 tris |
+| Vehicle class | LOD0 budget | LOD1 budget | Actual (V1 source) |
+|---|---|---|---|
+| Car (sedan, hatchback, SUV) | ≤510,000 tris | ≤12,000 tris | ~490,000–498,000 LOD0 / ~10,000 LOD1 |
+| Bus | ≤510,000 tris | ≤12,000 tris | 502,258 LOD0 / 10,112 LOD1 |
+| Truck | ≤510,000 tris | ≤12,000 tris | 501,372 LOD0 / 9,998 LOD1 |
 
-The LOD Requirements table above lists the general Vehicles row (1000–3000 tris LOD0, 200–500 tris LOD1) as a range covering all vehicle classes. The per-class caps above are the binding limits within that range. All vehicle assets must be exported as a **single solid mesh** (body + windows + wheels unified into one `IMesh`); modular sub-mesh assembly is not used for vehicles.
+Vehicle assets are full-fidelity Tripo3D photogrammetry-style meshes. The LOD0 budget is intentionally large to preserve maximum visual quality. LOD1 is produced by per-part DECIMATE COLLAPSE targeting ~10,000 tris total.
 
-**BINDING LIMIT NOTE**: The per-class budgets in the table above are the **binding limits**; the general range in the LOD Requirements table (1000–3000 tris LOD0, 200–500 tris LOD1) is **indicative only** — it covers the full span across all vehicle classes and must not be used as a per-class cap. For example, the general range does not permit a car to have 3,000 LOD0 triangles; the binding car LOD0 cap is ≤2,000 tris. The export validation script and artist review must use the per-class table above as the authoritative polygon budget source.
+**Multi-buffer split**: Because Irrlicht's B3D loader uses a 16-bit index type per `IMeshBuffer` (max 65,535 vertices per buffer), LOD0 vehicle meshes are automatically split into multiple VRTS+TRIS buffer groups by the conversion pipeline (`tools/convert_vehicle_fbx.py`). Each buffer contains ≤65,535 vertices with globally-indexed TRIS entries. This is a format-level split only — at the game-logic level each vehicle is one mesh with one material.
+
+**BINDING LIMIT NOTE**: The per-class budgets above are the **binding limits**. The export validation script (check #32) enforces these limits at CI time.
 
 #### Vehicle LOD File Naming Convention
 

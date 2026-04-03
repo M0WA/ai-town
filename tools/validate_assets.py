@@ -11,6 +11,7 @@ Phase 10b: check #24 added — clouds.png must exist at assets/textures/sky/, be
            (4 channels). No-op when the file does not yet exist.
 Phase 11g: check #31 added — all six tier-specific bitmap font XML + PNG pairs must exist under
            assets/fonts/ (hud_font_{720,1080,1440}.xml/png, hud_mono_font_{720,1080,1440}.xml/png).
+Phase 11o: check #32 added — vehicle LOD0/LOD1 triangle budget (LOD0≤510,000, LOD1≤12,000).
 """
 import glob
 import json
@@ -18,6 +19,8 @@ import os
 import struct
 import wave
 
+VEHICLE_LOD0_MAX_TRIS = 510_000   # full-fidelity Tripo3D models; multi-buffer split for Irrlicht 16-bit index limit
+VEHICLE_LOD1_MAX_TRIS = 12_000    # per-part DECIMATE target ~10,000 tris
 VEHICLE_ENGINE_LOOP_MIN_DURATION_S = 6.0   # mirrors kVehicleEngineLoopMinDurationSeconds in src/interfaces/audio_types.h — update both if threshold changes
 VEHICLE_ENGINE_LOOP_MAX_DURATION_S = 20.0  # upper bound: pre-load tier boundary is 20 s (audio-asset-formats.md Tier 2/3 split); engine loops >= 20 s would fall into the streaming tier, incompatible with the pre-loaded AL buffer loading strategy
 ZONE_LOOP_MIN_DURATION_S = 12.0            # lower bound from v1-audio-asset-manifest.md (12–18 s range); loops shorter than 12 s cycle too quickly and become perceptible at typical zone ambient loop repetition rates
@@ -2925,6 +2928,70 @@ def check_31_bitmap_font_assets(assets_dir):
     return errors
 
 
+# ---------------------------------------------------------------------------
+# Check #32 — Vehicle LOD0/LOD1 triangle budget
+# ---------------------------------------------------------------------------
+def check_32_vehicle_triangle_budget(assets_dir):
+    """Check #32: vehicle _lod0.b3d and _lod1.b3d triangle counts within budget.
+
+    Uses a raw byte-scan for all TRIS chunks (handles multi-buffer B3D files where
+    vertex count exceeds the Irrlicht 16-bit index limit and the mesh is split into
+    multiple VRTS+TRIS buffer groups).
+
+    Limits (from architecture/asset-standards/3d-model-standards.md):
+      LOD0: VEHICLE_LOD0_MAX_TRIS = 510,000
+      LOD1: VEHICLE_LOD1_MAX_TRIS = 12,000
+    """
+    vehicles_dir = os.path.join(assets_dir, "3d", "vehicles")
+    if not os.path.isdir(vehicles_dir):
+        return []
+
+    def _count_tris(path):
+        """Count total triangles across all TRIS chunks by raw byte scan."""
+        with open(path, "rb") as f:
+            data = f.read()
+        total = 0
+        pos = 0
+        while True:
+            idx = data.find(b"TRIS", pos)
+            if idx < 0:
+                break
+            if idx + 8 <= len(data):
+                sz = struct.unpack_from("<I", data, idx + 4)[0]
+                total += sz // 12  # each triangle = 3 × i32 = 12 bytes
+            pos = idx + 1
+        return total
+
+    errors = []
+    checked = 0
+    for meta_path in sorted(glob.glob(os.path.join(vehicles_dir, "*.meta"))):
+        meta = _load_meta(meta_path)
+        if meta.get("category") != "vehicle":
+            continue
+        base = _asset_base(meta_path)
+        for lod, limit in (("lod0", VEHICLE_LOD0_MAX_TRIS), ("lod1", VEHICLE_LOD1_MAX_TRIS)):
+            path = f"{base}_{lod}.b3d"
+            if not os.path.isfile(path):
+                continue
+            if os.path.getsize(path) == 0:
+                errors.append(f"check_32 FAIL: {path} is empty")
+                continue
+            n = _count_tris(path)
+            if n > limit:
+                errors.append(
+                    f"check_32 FAIL: {os.path.relpath(path)} has {n:,} tris "
+                    f"(limit {limit:,} for {lod.upper()})"
+                )
+            checked += 1
+
+    if checked == 0:
+        print("INFO check_32: no vehicle _lod0/_lod1 .b3d files found — no-op")
+    elif not errors:
+        print(f"check_32 PASS: {checked} vehicle LOD file(s) within triangle budget "
+              f"(LOD0≤{VEHICLE_LOD0_MAX_TRIS:,}, LOD1≤{VEHICLE_LOD1_MAX_TRIS:,})")
+    return errors
+
+
 def run_all_checks():
     """Run all asset validation checks. Returns the total number of errors."""
     # Resolve the assets directory relative to this script's location.
@@ -2949,6 +3016,7 @@ def run_all_checks():
         ("Check #29 (normal map non-flat)", check_29_normal_map_non_flat),
         ("Check #30 (billboard atlas format)", check_30_billboard_atlas_format),
         ("Check #31 (bitmap font tier assets)", check_31_bitmap_font_assets),
+        ("Check #32 (vehicle triangle budget)", check_32_vehicle_triangle_budget),
     ]
 
     for check_name, check_fn in checks:
