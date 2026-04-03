@@ -133,9 +133,21 @@ public:
     bool spacePressed = false;
     bool escPressed   = false;
 
-    // Camera drag (right mouse)
-    int  orbitDeltaX = 0;   // accumulated drag pixels; reset by render loop
+    // Camera drag (right mouse — yaw + pitch)
+    int  orbitDeltaX = 0;   // accumulated horizontal drag pixels; reset by render loop
+    int  orbitDeltaY = 0;   // accumulated vertical drag pixels; reset by render loop
     bool rightHeld   = false;
+
+    // MMB pan
+    bool mmbHeld   = false;
+    int  mmbDeltaX = 0;     // accumulated horizontal MMB drag; reset by render loop
+    int  mmbDeltaY = 0;     // accumulated vertical MMB drag; reset by render loop
+
+    // Arrow key pan (continuous held state)
+    bool arrowLeft  = false;
+    bool arrowRight = false;
+    bool arrowUp    = false;
+    bool arrowDown  = false;
 
     // Annotation
     enum MarkType { DOT, CIRCLE, CROSS };
@@ -200,7 +212,11 @@ public:
     {
         if (ev.EventType == irr::EET_KEY_INPUT_EVENT && !ev.KeyInput.PressedDown)
         {
-            if (ev.KeyInput.Key == irr::KEY_KEY_S) sKeyDown = false;
+            if (ev.KeyInput.Key == irr::KEY_KEY_S) sKeyDown   = false;
+            if (ev.KeyInput.Key == irr::KEY_LEFT)  arrowLeft  = false;
+            if (ev.KeyInput.Key == irr::KEY_RIGHT)  arrowRight = false;
+            if (ev.KeyInput.Key == irr::KEY_UP)     arrowUp    = false;
+            if (ev.KeyInput.Key == irr::KEY_DOWN)   arrowDown  = false;
         }
         if (ev.EventType == irr::EET_KEY_INPUT_EVENT && ev.KeyInput.PressedDown)
         {
@@ -208,6 +224,10 @@ public:
             {
             case irr::KEY_SPACE:  spacePressed = true; return true;
             case irr::KEY_ESCAPE: escPressed   = true; return true;
+            case irr::KEY_LEFT:   arrowLeft    = true; return true;
+            case irr::KEY_RIGHT:  arrowRight   = true; return true;
+            case irr::KEY_UP:     arrowUp      = true; return true;
+            case irr::KEY_DOWN:   arrowDown    = true; return true;
             case irr::KEY_KEY_C:
                 colorIdx = (colorIdx + 1) % kNumColors();
                 return true;
@@ -245,6 +265,12 @@ public:
             case irr::EMIE_RMOUSE_LEFT_UP:
                 rightHeld = false;
                 break;
+            case irr::EMIE_MMOUSE_PRESSED_DOWN:
+                mmbHeld = true;
+                break;
+            case irr::EMIE_MMOUSE_LEFT_UP:
+                mmbHeld = false;
+                break;
             case irr::EMIE_MOUSE_MOVED:
                 if (leftHeld)
                 {
@@ -253,7 +279,15 @@ public:
                         placeMark(curX, curY);
                 }
                 if (rightHeld)
+                {
                     orbitDeltaX += curX - mouseX;
+                    orbitDeltaY += curY - mouseY;
+                }
+                if (mmbHeld)
+                {
+                    mmbDeltaX += curX - mouseX;
+                    mmbDeltaY += curY - mouseY;
+                }
                 break;
             case irr::EMIE_MOUSE_WHEEL:
                 wheelDelta += ev.MouseInput.Wheel;
@@ -433,16 +467,17 @@ int main(int argc, char** argv)
     ShowcaseReceiver receiver;
     device->setEventReceiver(&receiver);
 
-    // Orbit camera constants: slow Y-axis orbit so the operator can inspect
-    // all sides of the models without manual camera control.
+    // Orbit camera constants.
     // Radius 65 m keeps the full 6-model row (±30 m span) comfortably in view.
-    const irr::core::vector3df kOrbitCentre(0.0f, 5.0f, 0.0f);
+    // Default pitch 13° matches old fixed height of 15 m at 65 m radius (atan(15/65)).
+    const irr::core::vector3df kOrbitCentreDefault(0.0f, 5.0f, 0.0f);
     const float kOrbitRadiusDefault = 65.0f;
     const float kOrbitRadiusMin     =  5.0f;
     const float kOrbitRadiusMax     = 200.0f;
-    float orbitRadius               = kOrbitRadiusDefault;
-    const float kOrbitHeight      = 15.0f;
-    const float kOrbitDegPerFrame = 0.3f;
+    const float kOrbitPitchDefault  = 13.0f;   // degrees above horizontal
+    const float kOrbitPitchMin      =  3.0f;
+    const float kOrbitPitchMax      = 85.0f;
+    const float kOrbitDegPerFrame   = 0.3f;
 
     bool exitEarly = false;
 
@@ -758,6 +793,11 @@ int main(int argc, char** argv)
         receiver.marks.clear();
         receiver.strokeStarts.clear();
 
+        // Per-category orbit state — reset each time so categories start clean.
+        float orbitRadius = kOrbitRadiusDefault;
+        float orbitPitch  = kOrbitPitchDefault;
+        irr::core::vector3df orbitCenter = kOrbitCentreDefault;
+
         // --- Render loop for this category ---
         // In screenshot mode, start at a 35° orbit angle so the front face AND
         // one side are visible without relying on the animation to reach a good pose.
@@ -778,8 +818,13 @@ int main(int argc, char** argv)
             }
 
             // Update orbiting camera.
-            // Single-model mode: no auto-rotation; right-drag steers orbit, scroll zooms.
-            // Normal mode: auto-rotate at fixed speed; scroll zooms.
+            // RMB drag: yaw (horizontal) + pitch (vertical).
+            // MMB drag: pan orbit center (same convention as game CameraController).
+            // Arrow keys: pan orbit center (same convention as game CameraController).
+            // Scroll wheel: zoom (adjust orbit radius).
+            // Normal mode: auto-rotate yaw at fixed speed when no RMB drag.
+
+            // Scroll wheel → zoom
             if (receiver.wheelDelta != 0.0f)
             {
                 orbitRadius -= receiver.wheelDelta * 3.0f;  // scroll up = zoom in
@@ -787,23 +832,59 @@ int main(int argc, char** argv)
                 if (orbitRadius > kOrbitRadiusMax)  orbitRadius = kOrbitRadiusMax;
                 receiver.wheelDelta = 0.0f;
             }
-            if (receiver.orbitDeltaX != 0)
+
+            // RMB drag → yaw + pitch
+            if (receiver.orbitDeltaX != 0 || receiver.orbitDeltaY != 0)
             {
                 orbitAngle -= static_cast<float>(receiver.orbitDeltaX) * 0.5f;
+                orbitPitch -= static_cast<float>(receiver.orbitDeltaY) * 0.3f;
+                orbitPitch = orbitPitch < kOrbitPitchMin ? kOrbitPitchMin
+                           : orbitPitch > kOrbitPitchMax ? kOrbitPitchMax : orbitPitch;
                 receiver.orbitDeltaX = 0;
+                receiver.orbitDeltaY = 0;
             }
             else if (!singleModelMode)
             {
                 orbitAngle += kOrbitDegPerFrame;
             }
-            float rad = orbitAngle * irr::core::DEGTORAD;
+
+            // Compute right/forward vectors in XZ plane at current yaw (same as CameraController).
+            const float yaw_rad = orbitAngle * irr::core::DEGTORAD;
+            const float rightX  =  cosf(yaw_rad);
+            const float rightZ  = -sinf(yaw_rad);
+            const float fwdX    =  sinf(yaw_rad);
+            const float fwdZ    =  cosf(yaw_rad);
+
+            // MMB drag → pan orbit center
+            if (receiver.mmbDeltaX != 0 || receiver.mmbDeltaY != 0)
+            {
+                const float panScale = orbitRadius * 0.005f;
+                orbitCenter.X -= static_cast<float>(receiver.mmbDeltaX) * rightX * panScale;
+                orbitCenter.Z -= static_cast<float>(receiver.mmbDeltaX) * rightZ * panScale;
+                orbitCenter.X += static_cast<float>(receiver.mmbDeltaY) * fwdX   * panScale;
+                orbitCenter.Z += static_cast<float>(receiver.mmbDeltaY) * fwdZ   * panScale;
+                receiver.mmbDeltaX = 0;
+                receiver.mmbDeltaY = 0;
+            }
+
+            // Arrow keys → pan orbit center (continuous, same direction convention as game)
+            {
+                const float panStep = orbitRadius * 0.02f;
+                if (receiver.arrowLeft)  { orbitCenter.X += rightX * panStep; orbitCenter.Z += rightZ * panStep; }
+                if (receiver.arrowRight) { orbitCenter.X -= rightX * panStep; orbitCenter.Z -= rightZ * panStep; }
+                if (receiver.arrowUp)    { orbitCenter.X -= fwdX   * panStep; orbitCenter.Z -= fwdZ   * panStep; }
+                if (receiver.arrowDown)  { orbitCenter.X += fwdX   * panStep; orbitCenter.Z += fwdZ   * panStep; }
+            }
+
+            // Apply yaw + pitch to camera position
+            const float pitchRad = orbitPitch * irr::core::DEGTORAD;
             if (cam)
             {
                 cam->setPosition(irr::core::vector3df(
-                    kOrbitCentre.X + orbitRadius * sinf(rad),
-                    kOrbitCentre.Y + kOrbitHeight,
-                    kOrbitCentre.Z + orbitRadius * cosf(rad)));
-                cam->setTarget(kOrbitCentre);
+                    orbitCenter.X + orbitRadius * cosf(pitchRad) * sinf(yaw_rad),
+                    orbitCenter.Y + orbitRadius * sinf(pitchRad),
+                    orbitCenter.Z + orbitRadius * cosf(pitchRad) * cosf(yaw_rad)));
+                cam->setTarget(orbitCenter);
             }
 
             driver->beginScene(true, true, irr::video::SColor(255, 190, 215, 245));
@@ -881,11 +962,11 @@ int main(int argc, char** argv)
             {
                 const char* shapeNames[] = {"DOT", "CIRCLE", "CROSS"};
                 std::string toolHud =
-                    std::string("Colour: ") +
+                    std::string("Draw: C=colour[") +
                     ShowcaseReceiver::colorNameAt(receiver.colorIdx) +
-                    " (C=next)  Shape: " +
+                    "] V=shape[" +
                     shapeNames[receiver.currentType] +
-                    " (V=cycle)  LHold=draw  RDrag=rotate  Z=undo  X=clear  S=screenshot";
+                    "]  LHold=draw  RDrag=orbit  MMB=pan  Arrows=pan  Wheel=zoom  Z=undo  X=clear  S=screenshot";
                 font->draw(
                     irr::core::stringw(toolHud.c_str()),
                     irr::core::rect<irr::s32>(8, H2 - 18, W - 8, H2),
