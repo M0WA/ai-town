@@ -70,7 +70,11 @@ jobs:
 
       - name: Set up vcpkg
         run: |
-          git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg
+          # Cache restore creates /opt/vcpkg/packages/ (and thus /opt/vcpkg/) before
+          # this step runs — skip clone when the git repo is already present.
+          if [ ! -d /opt/vcpkg/.git ]; then
+            git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg
+          fi
           git -C /opt/vcpkg checkout ${{ inputs.vcpkg_commit_id }}
           # Prebuilt vcpkg-tool binary from GitHub Releases fails with 404 in bare
           # containers (CDN returns 404 for the vcpkg-glibc asset and bootstrap-vcpkg.sh
