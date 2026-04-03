@@ -47,7 +47,8 @@ OUT_LOD0      = "/workspace/assets/3d/vehicles/car_sedan_lod0.b3d"
 OUT_LOD1      = "/workspace/assets/3d/vehicles/car_sedan_lod1.b3d"
 ATLAS_TEXTURE = "vehicles_diffuse_atlas_d.dds"
 
-TARGET_LENGTH_M = 4.0    # metres along the X axis (car length)
+TARGET_LENGTH_M   = 4.0   # metres along the X axis (car length)
+LOD1_MERGE_DIST   = 0.38  # spatial vertex merge distance for LOD1 decimation
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +220,25 @@ def build_lod_mesh(source_obj, label: str):
     n_tris = len(bm.faces)
     n_verts = len(bm.verts)
     print(f"  [{label}] {n_verts} verts, {n_tris} tris (no decimation)")
+    new_mesh = bpy.data.meshes.new(f"{label}_mesh")
+    bm.to_mesh(new_mesh)
+    bm.free()
+    new_mesh.update()
+    new_obj = bpy.data.objects.new(label, new_mesh)
+    bpy.context.collection.objects.link(new_obj)
+    new_obj.matrix_world = source_obj.matrix_world.copy()
+    return new_obj, n_tris
+
+
+def build_lod_mesh_decimated(source_obj, merge_dist: float, label: str):
+    """Build a decimated LOD mesh via spatial vertex merge (remove_doubles)."""
+    bm = bmesh.new()
+    bm.from_mesh(source_obj.data)
+    n_before = len(bm.verts)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=merge_dist)
+    bmesh.ops.triangulate(bm, faces=bm.faces)
+    n_tris = len(bm.faces)
+    print(f"  [{label}] dist={merge_dist}m: {n_before} -> {len(bm.verts)} verts, {n_tris} tris")
     new_mesh = bpy.data.meshes.new(f"{label}_mesh")
     bm.to_mesh(new_mesh)
     bm.free()
@@ -475,10 +495,10 @@ def main():
     shade_smooth(lod0_obj)
 
     # ------------------------------------------------------------------
-    # Step 4: Build LOD1 (full fidelity — same mesh as LOD0)
+    # Step 4: Build LOD1 (spatial vertex merge for decimation)
     # ------------------------------------------------------------------
-    print(f"\n[Step 4] Building LOD1 (full fidelity)")
-    lod1_obj, tris_lod1 = build_lod_mesh(src, "LOD1")
+    print(f"\n[Step 4] Building LOD1 (spatial merge dist={LOD1_MERGE_DIST}m)")
+    lod1_obj, tris_lod1 = build_lod_mesh_decimated(src, LOD1_MERGE_DIST, "LOD1")
     remap_uvs_to_atlas_cell(lod1_obj.data)
     shade_smooth(lod1_obj)
 
