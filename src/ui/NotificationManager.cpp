@@ -428,13 +428,7 @@ void NotificationManager::toggleLog() {
         m_logVisibleRows = kLogTrackH / kLogRowHeightPx;
 
         if (m_logPanelHandle != kInvalidUIElement && m_backend) {
-            // Build log text from entries.
-            std::string logText = "Notification Log\n";
-            for (const auto& entry : m_logEntries) {
-                logText += (entry.isCritical ? "[!] " : "    ");
-                logText += entry.title + ": " + entry.body + "\n";
-            }
-            m_backend->setElementText(m_logPanelHandle, logText);
+            refreshLogText();
             m_backend->setElementVisible(m_logPanelHandle, true);
         }
 
@@ -451,6 +445,25 @@ void NotificationManager::toggleLog() {
             m_backend->setElementVisible(m_logScrollThumb, false);
         }
     }
+}
+
+// ----------------------------------------------------------------
+// refreshLogText — rebuild log panel text for the current scroll window
+// ----------------------------------------------------------------
+void NotificationManager::refreshLogText() {
+    if (!m_logOpen || m_logPanelHandle == kInvalidUIElement || !m_backend) return;
+
+    int totalRows  = static_cast<int>(m_logEntries.size());
+    int firstRow   = std::clamp(m_logScrollOffset, 0, std::max(0, totalRows - 1));
+    int lastRow    = std::min(firstRow + m_logVisibleRows, totalRows);
+
+    std::string logText;
+    for (int i = firstRow; i < lastRow; ++i) {
+        const auto& entry = m_logEntries[static_cast<std::size_t>(i)];
+        logText += (entry.isCritical ? "[!] " : "    ");
+        logText += entry.title + ": " + entry.body + "\n";
+    }
+    m_backend->setElementText(m_logPanelHandle, logText);
 }
 
 // ----------------------------------------------------------------
@@ -489,6 +502,9 @@ void NotificationManager::updateScrollThumb() {
     if (m_logScrollThumb != kInvalidUIElement) {
         m_backend->setElementRect(m_logScrollThumb, kLogTrackX, thumbY, kLogTrackW, thumbH);
     }
+
+    // Keep visible text in sync with scroll offset.
+    refreshLogText();
 }
 
 // ----------------------------------------------------------------
