@@ -153,6 +153,10 @@ private:
     // the log panel is open.
     void updateScrollThumb();
 
+    // Rebuild the log panel text element to show the current scroll window.
+    // Must be called after any change to m_logScrollOffset or m_logEntries.
+    void refreshLogText();
+
     // --- Scrollbar element handles ---
     UIElementHandle m_logScrollTrack{kInvalidUIElement};
     UIElementHandle m_logScrollThumb{kInvalidUIElement};
