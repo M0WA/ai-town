@@ -53,7 +53,7 @@ jobs:
       # The artifact contains the compiled binaries, CTestTestfile.cmake, and
       # CTest-discovered test lists needed by all subsequent ctest invocations.
       - name: Download build artifact
-        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf03d3c67110  # v4.1.0
+        uses: actions/download-artifact@65462800fd760344b1a7b4382951275a0abb4808  # v4.1.3
         with:
           name: ${{ inputs.build_artifact_name }}
           path: ${{ inputs.build_dir }}
