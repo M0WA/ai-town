@@ -13,23 +13,8 @@ manage finances, and grow a living city with traffic, economy simulation, and sp
 
 Pre-built packages are available on the [Releases page](https://github.com/M0WA/ai-town/releases).
 
-**Linux** — pick the package for your distro:
-
-| Distro | Package |
-|---|---|
-| Debian 12 Bookworm | [aitown-0.0.12-bookworm.deb](https://github.com/M0WA/ai-town/releases/download/v0.0.12/aitown-0.0.12-bookworm.deb) |
-| Debian 13 Trixie | [aitown-0.0.12-trixie.deb](https://github.com/M0WA/ai-town/releases/download/v0.0.12/aitown-0.0.12-trixie.deb) |
-| Ubuntu 22.04 Jammy | [aitown-0.0.12-jammy.deb](https://github.com/M0WA/ai-town/releases/download/v0.0.12/aitown-0.0.12-jammy.deb) |
-| Ubuntu 24.04 Noble | [aitown-0.0.12-noble.deb](https://github.com/M0WA/ai-town/releases/download/v0.0.12/aitown-0.0.12-noble.deb) |
-
-```bash
-sudo dpkg -i aitown-0.0.12-<distro>.deb
-aitown
-```
-
-**Windows** — download and run the installer:
-
-[aitown-0.0.12.exe](https://github.com/M0WA/ai-town/releases/download/v0.0.12/aitown-0.0.12.exe)
+- **Linux**: download the `.deb` package for your distro (Debian Bookworm/Trixie, Ubuntu Jammy/Noble) and install with `sudo dpkg -i aitown-*.deb`
+- **Windows**: download and run the `.exe` installer
 
 ### Build from source
 
