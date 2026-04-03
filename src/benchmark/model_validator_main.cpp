@@ -36,6 +36,7 @@ struct ValidatorOptions {
     std::vector<std::string> filterModels;  // --model <n1> [n2 ...]: show only these
     std::string screenshotPath;             // --screenshot <file>: save PNG and exit
     int screenshotFrame = 3;                // --screenshot-frame N: frame to capture (3 = stable first pose)
+    std::vector<float> screenshotAngles;    // --screenshot-angles a,b,...: capture at each orbit angle
     bool softwareDriver = false;            // --driver burnings: software renderer (headless-safe)
 };
 
@@ -48,6 +49,7 @@ static void printUsage(const char* prog)
         "  --model <n1> [n2...]   show only the named model(s) then exit\n"
         "  --screenshot <file>    render --screenshot-frame frames, save PNG, exit\n"
         "  --screenshot-frame N   frame number to capture (default: 3)\n"
+        "  --screenshot-angles A  comma-separated orbit angles, e.g. 35,125,215,305\n"
         "  --driver burnings      use software renderer (headless/xvfb safe)\n"
         "  --help                 print this usage message\n",
         prog
@@ -88,6 +90,18 @@ static bool parseArgs(int argc, char** argv, ValidatorOptions& opts)
         else if (std::strcmp(argv[i], "--screenshot-frame") == 0 && i + 1 < argc)
         {
             opts.screenshotFrame = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "--screenshot-angles") == 0 && i + 1 < argc)
+        {
+            // Parse comma-separated floats, e.g. "35,125,215,305"
+            const char* s = argv[++i];
+            while (*s)
+            {
+                char* end;
+                float v = std::strtof(s, &end);
+                opts.screenshotAngles.push_back(v);
+                if (*end == ',') s = end + 1; else break;
+            }
         }
         else if (std::strcmp(argv[i], "--driver") == 0 && i + 1 < argc)
         {
@@ -794,14 +808,21 @@ int main(int argc, char** argv)
         receiver.strokeStarts.clear();
 
         // Per-category orbit state — reset each time so categories start clean.
-        float orbitRadius = kOrbitRadiusDefault;
-        float orbitPitch  = kOrbitPitchDefault;
-        irr::core::vector3df orbitCenter = kOrbitCentreDefault;
+        // Vehicles are small (~4.4 m long) — use a much closer default radius than buildings.
+        const bool catIsVehicle = (cat.pathPrefix == "3d/vehicles");
+        float orbitRadius = (catIsVehicle && singleModelMode) ?  10.0f : kOrbitRadiusDefault;
+        float orbitPitch  = (catIsVehicle && singleModelMode) ?  22.0f : kOrbitPitchDefault;
+        irr::core::vector3df orbitCenter = (catIsVehicle && singleModelMode)
+            ? irr::core::vector3df(0.0f, 0.7f, 0.0f)
+            : kOrbitCentreDefault;
 
         // --- Render loop for this category ---
         // In screenshot mode, start at a 35° orbit angle so the front face AND
         // one side are visible without relying on the animation to reach a good pose.
-        float orbitAngle = opts.screenshotPath.empty() ? 0.0f : 35.0f;
+        const bool multiAngleMode = !opts.screenshotPath.empty() && !opts.screenshotAngles.empty();
+        size_t shotAngleIdx = 0;
+        float orbitAngle = opts.screenshotPath.empty() ? 0.0f
+                         : (multiAngleMode ? opts.screenshotAngles[0] : 35.0f);
         int   frameCount = 0;
         auto  t0         = std::chrono::steady_clock::now();
 
@@ -1086,34 +1107,82 @@ int main(int argc, char** argv)
                 }
             }
 
-            driver->endScene();
-            ++frameCount;
-
-            // Auto-screenshot: capture frame N then advance to next category.
-            if (!opts.screenshotPath.empty() && frameCount == opts.screenshotFrame)
+            // Auto-screenshot: capture frame N from GL_BACK (before endScene swap)
+            // using the same glReadPixels path as the 'S' key handler.
+            // Multi-angle mode: capture at each angle in opts.screenshotAngles.
+            const bool doCapture = !opts.screenshotPath.empty() &&
+                (multiAngleMode ? (frameCount + 1 == opts.screenshotFrame)
+                                : (frameCount + 1 == opts.screenshotFrame));
+            if (doCapture)
             {
-                // Build per-category filename: insert category index before extension.
+                // Build output path with angle and category suffixes
                 std::string shotPath = opts.screenshotPath;
-                if (kTotalCategories > 1)
                 {
-                    // Insert "_N" before last '.' (or append if no extension).
                     size_t dot = shotPath.rfind('.');
-                    std::string idx = "_" + std::to_string(ci + 1);
-                    if (dot == std::string::npos)
-                        shotPath += idx;
-                    else
-                        shotPath = shotPath.substr(0, dot) + idx + shotPath.substr(dot);
+                    std::string suffix;
+                    if (multiAngleMode)
+                    {
+                        char buf[32];
+                        std::snprintf(buf, sizeof(buf), "_a%03d",
+                            static_cast<int>(opts.screenshotAngles[shotAngleIdx]));
+                        suffix += buf;
+                    }
+                    if (kTotalCategories > 1)
+                        suffix += "_" + std::to_string(ci + 1);
+                    if (!suffix.empty())
+                    {
+                        if (dot == std::string::npos) shotPath += suffix;
+                        else shotPath = shotPath.substr(0, dot) + suffix + shotPath.substr(dot);
+                    }
                 }
-                irr::video::IImage* shot = driver->createScreenShot();
-                if (shot)
+                bool saved = false;
+                if (!opts.softwareDriver)
                 {
-                    driver->writeImageToFile(shot, shotPath.c_str());
-                    shot->drop();
+                    const irr::core::dimension2du sz = driver->getScreenSize();
+                    const int sw = static_cast<int>(sz.Width);
+                    const int sh = static_cast<int>(sz.Height);
+                    std::vector<irr::u8> raw(static_cast<size_t>(sw * sh * 4));
+                    glReadBuffer(GL_BACK);
+                    glReadPixels(0, 0, sw, sh, GL_BGRA_EXT, GL_UNSIGNED_BYTE, raw.data());
+                    std::vector<irr::u8> flipped(raw.size());
+                    for (int row = 0; row < sh; ++row)
+                        std::memcpy(&flipped[static_cast<size_t>(row * sw * 4)],
+                                    &raw[static_cast<size_t>((sh - 1 - row) * sw * 4)],
+                                    static_cast<size_t>(sw * 4));
+                    irr::video::IImage* img = driver->createImageFromData(
+                        irr::video::ECF_A8R8G8B8, sz, flipped.data(), false);
+                    if (img) { driver->writeImageToFile(img, shotPath.c_str()); img->drop(); saved = true; }
+                }
+                if (!saved)
+                {
+                    irr::video::IImage* shot = driver->createScreenShot();
+                    if (shot) { driver->writeImageToFile(shot, shotPath.c_str()); shot->drop(); saved = true; }
+                }
+                if (saved)
+                {
                     std::printf("  Screenshot saved: %s\n", shotPath.c_str());
                     std::fflush(stdout);
                 }
-                break;  // advance to next category
+                driver->endScene();
+                ++frameCount;
+
+                // Multi-angle: advance to next angle or exit category
+                if (multiAngleMode)
+                {
+                    ++shotAngleIdx;
+                    if (shotAngleIdx < opts.screenshotAngles.size())
+                    {
+                        // Jump orbit to next angle and reset frame counter
+                        orbitAngle = opts.screenshotAngles[shotAngleIdx];
+                        frameCount = 0;
+                        continue;
+                    }
+                }
+                break;
             }
+
+            driver->endScene();
+            ++frameCount;
         }
 
         // If device->run() returned false the window was closed.
