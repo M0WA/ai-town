@@ -10,6 +10,7 @@
 // Deficit-streak polling: edge-detect on getConsecutiveDeficitMonths() each frame.
 
 #include "src/ui/UIManager.h"
+#include "src/platform/PlatformUtils.h"
 #include "src/platform/input_event.h"     // Full include here (NOT in UIManager.h — see prohibition comment)
 #include "src/ui/ui_constants.h"          // kToolbarLeft, kToolbarRight, kToolbarTop, kToolbarBottom
 #include "src/ui/hud_sprite_ids.h"        // kSpriteZone*, kSpriteUtil* sprite handle constants
@@ -1985,7 +1986,7 @@ void UIManager::transitionToMainMenu() {
     // Step 5: Show the loading screen background behind the main menu GUI.
     // The background is cleared when the player transitions into gameplay.
     if (m_renderer) {
-        m_renderer->setSceneBackground(std::string(AITOWN_ASSETS_DIR) + "/textures/ui/loading_screen.png");
+        m_renderer->setSceneBackground(g_assetsDir + "/textures/ui/loading_screen.png");
     }
 }
 
