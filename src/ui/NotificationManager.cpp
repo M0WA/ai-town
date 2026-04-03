@@ -246,19 +246,66 @@ void NotificationManager::draw() {
 // verified by UIManager::onEvent at Priority 2).
 // ----------------------------------------------------------------
 bool NotificationManager::onEvent(const InputEvent& event) {
-    // --- Mouse wheel: scroll the log panel if it is open ---
-    if (m_logOpen && event.type == InputEvent::Type::MouseWheel) {
-        int totalRows   = static_cast<int>(m_logEntries.size());
-        int maxOffset   = std::max(0, totalRows - m_logVisibleRows);
-        if (event.wheelDelta < 0.f) {
-            // Scroll down (towards older entries).
-            m_logScrollOffset = std::min(m_logScrollOffset + 1, maxOffset);
-        } else if (event.wheelDelta > 0.f) {
-            // Scroll up (towards newer entries).
-            m_logScrollOffset = std::max(m_logScrollOffset - 1, 0);
+    // --- Log panel scrollbar interaction (when panel is open) ---
+    if (m_logOpen) {
+        int totalRows = static_cast<int>(m_logEntries.size());
+        int maxOffset = std::max(0, totalRows - m_logVisibleRows);
+
+        // Mouse wheel — scroll one row per tick.
+        if (event.type == InputEvent::Type::MouseWheel) {
+            if (event.wheelDelta < 0.f)
+                m_logScrollOffset = std::min(m_logScrollOffset + 1, maxOffset);
+            else if (event.wheelDelta > 0.f)
+                m_logScrollOffset = std::max(m_logScrollOffset - 1, 0);
+            updateScrollThumb();
+            return true;
         }
-        updateScrollThumb();
-        return true;
+
+        // Left mouse down in scrollbar track — begin drag and jump to position.
+        if (event.type == InputEvent::Type::MouseButtonDown && event.button == 0) {
+            if (event.x >= kLogTrackX && event.x < kLogTrackX + kLogTrackW &&
+                event.y >= kLogTrackY && event.y < kLogTrackY + kLogTrackH) {
+                m_scrollDragging        = true;
+                m_scrollDragStartY      = event.y;
+                m_scrollDragStartOffset = m_logScrollOffset;
+                // Jump thumb to click position immediately.
+                float ratio = std::clamp(
+                    static_cast<float>(event.y - kLogTrackY) / static_cast<float>(kLogTrackH),
+                    0.f, 1.f);
+                m_logScrollOffset = std::min(
+                    static_cast<int>(std::round(ratio * static_cast<float>(maxOffset))),
+                    maxOffset);
+                m_scrollDragStartY      = event.y;
+                m_scrollDragStartOffset = m_logScrollOffset;
+                updateScrollThumb();
+                return true;
+            }
+        }
+
+        // Mouse move — update scroll while dragging.
+        if (event.type == InputEvent::Type::MouseMove && m_scrollDragging) {
+            int thumbH = std::max(20,
+                static_cast<int>(std::floor(
+                    static_cast<float>(m_logVisibleRows) /
+                    static_cast<float>(std::max(1, totalRows)) *
+                    static_cast<float>(kLogTrackH))));
+            int travelRange = std::max(1, kLogTrackH - thumbH);
+            int dy          = event.y - m_scrollDragStartY;
+            int newOffset   = m_scrollDragStartOffset +
+                static_cast<int>(std::round(
+                    static_cast<float>(dy) / static_cast<float>(travelRange) *
+                    static_cast<float>(maxOffset)));
+            m_logScrollOffset = std::clamp(newOffset, 0, maxOffset);
+            updateScrollThumb();
+            return true;
+        }
+
+        // Left mouse up — end drag.
+        if (event.type == InputEvent::Type::MouseButtonUp && event.button == 0
+                && m_scrollDragging) {
+            m_scrollDragging = false;
+            return true;
+        }
     }
 
     if (m_criticalQueue.empty()) return false;

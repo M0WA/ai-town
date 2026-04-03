@@ -308,7 +308,8 @@ bool UIManager::onEvent(const InputEvent& event) {
     // is visible AND no modal is active. Both conditions evaluated independently.
     // ============================================================
     bool criticalVisible = m_notifications->hasCriticalToastVisible();
-    if (criticalVisible && !modalActive) {
+    bool logOpen         = m_notifications->isLogOpen();
+    if ((criticalVisible || logOpen) && !modalActive) {
         if (m_notifications->onEvent(event)) return true;
     }
 
