@@ -48,7 +48,7 @@ OUT_LOD1      = "/workspace/assets/3d/vehicles/car_sedan_lod1.b3d"
 ATLAS_TEXTURE = "vehicles_diffuse_atlas_d.dds"
 
 TARGET_LENGTH_M   = 4.0    # metres along the X axis (car length)
-LOD1_TARGET_TRIS  = 2000   # target triangle count for LOD1 via DECIMATE modifier
+LOD1_TARGET_TRIS  = 10000  # target triangle count for LOD1 via DECIMATE modifier
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ class B3DWriter:
         brus_pay += b'\x00'                                    # brush name = ""
         brus_pay += struct.pack('<4f', 1.0, 1.0, 1.0, 1.0)    # rgba
         brus_pay += struct.pack('<f',  0.0)                    # shininess
-        brus_pay += struct.pack('<II', 1, 16)                  # blend=1, fx=16 (DOUBLESIDED)
+        brus_pay += struct.pack('<II', 0, 0)                   # blend=0 (opaque), fx=0
         brus_pay += struct.pack('<i',  0)                      # tex_id[0] = 0
         brus = C('BRUS', brus_pay)
 
@@ -250,32 +250,50 @@ def build_lod_mesh_decimated(source_obj, merge_dist: float, label: str):
 
 
 def build_lod_mesh_decimate(source_obj, target_tris: int, label: str):
-    """Decimate via Blender DECIMATE modifier (respects UV seams).
+    """Decimate via DECIMATE COLLAPSE applied per loose part, then rejoin.
 
-    Triangulates first so the ratio is accurate, then applies DECIMATE COLLAPSE.
+    Decimating per-part avoids the 'torn' look caused by DECIMATE trying to
+    collapse edges between disconnected components (wheels vs body etc).
+    Each part is decimated proportionally to its share of the total tri count.
     """
-    # Work on a copy
-    lod_obj = source_obj.copy()
-    lod_obj.data = source_obj.data.copy()
-    bpy.context.collection.objects.link(lod_obj)
-    bpy.context.view_layer.objects.active = lod_obj
+    # Work on a copy, triangulate, then separate by loose parts
+    work = source_obj.copy()
+    work.data = source_obj.data.copy()
+    bpy.context.collection.objects.link(work)
+    bpy.context.view_layer.objects.active = work
     bpy.ops.object.select_all(action='DESELECT')
-    lod_obj.select_set(True)
-    # Triangulate first so ratio = target/n_tris is accurate
+    work.select_set(True)
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_all(action='SELECT')
     bpy.ops.mesh.quads_convert_to_tris()
+    bpy.ops.mesh.separate(type='LOOSE')
     bpy.ops.object.mode_set(mode='OBJECT')
-    n_src = len(lod_obj.data.polygons)
-    # DECIMATE COLLAPSE ratio is approximate — scale down to compensate for overshoot
-    ratio = min(1.0, (target_tris / max(n_src, 1)) * 0.51)
-    print(f"  [{label}] source tris={n_src}  target={target_tris}  ratio={ratio:.6f}")
-    mod = lod_obj.modifiers.new("Decimate", 'DECIMATE')
-    mod.decimate_type = 'COLLAPSE'
-    mod.ratio = ratio
-    bpy.ops.object.modifier_apply(modifier="Decimate")
+
+    parts = [o for o in bpy.data.objects if o.type == 'MESH' and o != source_obj]
+    n_total = sum(len(p.data.polygons) for p in parts)
+    print(f"  [{label}] {len(parts)} parts, {n_total} total tris  target={target_tris}")
+
+    for p in parts:
+        n_part = len(p.data.polygons)
+        part_target = max(4, int(target_tris * n_part / n_total))
+        ratio = min(1.0, part_target / max(n_part, 1))
+        bpy.context.view_layer.objects.active = p
+        bpy.ops.object.select_all(action='DESELECT')
+        p.select_set(True)
+        mod = p.modifiers.new("Dec", 'DECIMATE')
+        mod.decimate_type = 'COLLAPSE'
+        mod.ratio = ratio
+        bpy.ops.object.modifier_apply(modifier="Dec")
+        print(f"    {p.name}: {n_part} -> {len(p.data.polygons)} tris (target {part_target})")
+
+    # Rejoin all parts
+    bpy.ops.object.select_all(action='DESELECT')
+    for p in parts: p.select_set(True)
+    bpy.context.view_layer.objects.active = parts[0]
+    bpy.ops.object.join()
+    lod_obj = bpy.context.active_object
     n_tris = len(lod_obj.data.polygons)
-    print(f"  [{label}] result: {n_tris} tris")
+    print(f"  [{label}] joined: {n_tris} tris")
     return lod_obj, n_tris
 
 
@@ -517,6 +535,54 @@ def main():
     print(f"    Z=[{mn_z:.3f},{mx_z:.3f}] = {mx_z-mn_z:.3f}m (width)")
 
     # ------------------------------------------------------------------
+    # Step 2b: Separate by loose parts, remove tiny interior pieces,
+    #          then rejoin into a clean exterior-only mesh.
+    #
+    # The FBX has 7 loose parts: main body (441k polys) + wheels + tiny
+    # interior components.  Parts with <5% of the main body poly count
+    # and entirely enclosed inside the car bounding box are interior — drop them.
+    # ------------------------------------------------------------------
+    print(f"\n[Step 2b] Removing interior loose parts")
+    bpy.context.view_layer.objects.active = src
+    bpy.ops.object.select_all(action='DESELECT')
+    src.select_set(True)
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.separate(type='LOOSE')
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    parts = sorted([o for o in bpy.data.objects if o.type == 'MESH'],
+                   key=lambda o: -len(o.data.polygons))
+    max_polys = len(parts[0].data.polygons)
+    mn_x, mx_x, mn_y, mx_y, mn_z, mx_z = get_bbox(parts[0])
+    keep = []
+    for p in parts:
+        n = len(p.data.polygons)
+        pverts = [p.matrix_world @ v.co for v in p.data.vertices]
+        px_min = min(v.x for v in pverts); px_max = max(v.x for v in pverts)
+        py_min = min(v.y for v in pverts); py_max = max(v.y for v in pverts)
+        pz_min = min(v.z for v in pverts); pz_max = max(v.z for v in pverts)
+        # Interior: fully enclosed in XZ and above the floor by >10% of car height
+        is_enclosed_x = px_min > mn_x + 0.05 and px_max < mx_x - 0.05
+        is_enclosed_z = pz_min > mn_z + 0.05 and pz_max < mx_z - 0.05
+        is_tiny = n < max_polys * 0.02
+        if is_tiny and is_enclosed_x and is_enclosed_z:
+            print(f"  REMOVE interior part: {p.name}  {n} polys  "
+                  f"X=[{px_min:.3f},{px_max:.3f}] Z=[{pz_min:.3f},{pz_max:.3f}]")
+            bpy.data.objects.remove(p, do_unlink=True)
+        else:
+            print(f"  KEEP: {p.name}  {n} polys")
+            keep.append(p)
+
+    # Rejoin kept parts
+    bpy.ops.object.select_all(action='DESELECT')
+    for p in keep: p.select_set(True)
+    bpy.context.view_layer.objects.active = keep[0]
+    bpy.ops.object.join()
+    src = next(o for o in bpy.data.objects if o.type == 'MESH')
+    bpy.context.view_layer.objects.active = src
+    print(f"  Rejoined: {count_tris(src.data):,} tris remaining")
+
+    # ------------------------------------------------------------------
     # Step 3: Build LOD0 (full fidelity — no decimation, UVs intact)
     # ------------------------------------------------------------------
     print(f"\n[Step 3] Building LOD0 (full fidelity)")
@@ -525,7 +591,7 @@ def main():
     shade_smooth(lod0_obj)
 
     # ------------------------------------------------------------------
-    # Step 4: Build LOD1 (spatial vertex merge for decimation)
+    # Step 4: Build LOD1 (DECIMATE on exterior-only mesh)
     # ------------------------------------------------------------------
     print(f"\n[Step 4] Building LOD1 (DECIMATE target={LOD1_TARGET_TRIS} tris)")
     lod1_obj, tris_lod1 = build_lod_mesh_decimate(src, LOD1_TARGET_TRIS, "LOD1")
