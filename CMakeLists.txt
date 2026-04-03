@@ -53,9 +53,16 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 find_package(Irrlicht REQUIRED)
 
 # OpenAL Soft: required for aitown_audio.
-# cmake_minimum_required is 3.21 — FindOpenAL.cmake in CMake 3.21+ creates the
-# OpenAL::OpenAL imported target natively; no manual workaround is needed.
+# OpenAL::OpenAL imported target was added in CMake 3.25. Ubuntu 22.04 (Jammy)
+# ships CMake 3.22, so we create the target manually when it is absent.
 find_package(OpenAL REQUIRED)
+if(OPENAL_FOUND AND NOT TARGET OpenAL::OpenAL)
+    add_library(OpenAL::OpenAL UNKNOWN IMPORTED)
+    set_target_properties(OpenAL::OpenAL PROPERTIES
+        IMPORTED_LOCATION             "${OPENAL_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${OPENAL_INCLUDE_DIR}"
+    )
+endif()
 
 # fmt: required because openal-soft is built with the devendor-fmt vcpkg patch, which
 # replaces its bundled copy of fmt with the external vcpkg fmt package.  libopenal.a
