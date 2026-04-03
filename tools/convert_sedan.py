@@ -47,9 +47,8 @@ OUT_LOD0      = "/workspace/assets/3d/vehicles/car_sedan_lod0.b3d"
 OUT_LOD1      = "/workspace/assets/3d/vehicles/car_sedan_lod1.b3d"
 ATLAS_TEXTURE = "vehicles_diffuse_atlas_d.dds"
 
-TARGET_LENGTH_M   = 4.0   # metres along the X axis (car length)
-LOD0_MERGE_DIST   = 0.38  # spatial vertex merge distance for LOD0 (~278 tris)
-LOD1_MERGE_DIST   = 0.80  # spatial vertex merge distance for LOD1 (more aggressive)
+TARGET_LENGTH_M   = 4.0    # metres along the X axis (car length)
+LOD1_TARGET_TRIS  = 2000   # target triangle count for LOD1 via DECIMATE modifier
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +247,36 @@ def build_lod_mesh_decimated(source_obj, merge_dist: float, label: str):
     bpy.context.collection.objects.link(new_obj)
     new_obj.matrix_world = source_obj.matrix_world.copy()
     return new_obj, n_tris
+
+
+def build_lod_mesh_decimate(source_obj, target_tris: int, label: str):
+    """Decimate via Blender DECIMATE modifier (respects UV seams).
+
+    Triangulates first so the ratio is accurate, then applies DECIMATE COLLAPSE.
+    """
+    # Work on a copy
+    lod_obj = source_obj.copy()
+    lod_obj.data = source_obj.data.copy()
+    bpy.context.collection.objects.link(lod_obj)
+    bpy.context.view_layer.objects.active = lod_obj
+    bpy.ops.object.select_all(action='DESELECT')
+    lod_obj.select_set(True)
+    # Triangulate first so ratio = target/n_tris is accurate
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.quads_convert_to_tris()
+    bpy.ops.object.mode_set(mode='OBJECT')
+    n_src = len(lod_obj.data.polygons)
+    # DECIMATE COLLAPSE ratio is approximate — scale down to compensate for overshoot
+    ratio = min(1.0, (target_tris / max(n_src, 1)) * 0.51)
+    print(f"  [{label}] source tris={n_src}  target={target_tris}  ratio={ratio:.6f}")
+    mod = lod_obj.modifiers.new("Decimate", 'DECIMATE')
+    mod.decimate_type = 'COLLAPSE'
+    mod.ratio = ratio
+    bpy.ops.object.modifier_apply(modifier="Decimate")
+    n_tris = len(lod_obj.data.polygons)
+    print(f"  [{label}] result: {n_tris} tris")
+    return lod_obj, n_tris
 
 
 def remap_uvs_to_atlas_cell(mesh_data):
@@ -488,19 +517,18 @@ def main():
     print(f"    Z=[{mn_z:.3f},{mx_z:.3f}] = {mx_z-mn_z:.3f}m (width)")
 
     # ------------------------------------------------------------------
-    # Step 3: Build LOD0 (spatial merge dist=LOD0_MERGE_DIST)
+    # Step 3: Build LOD0 (full fidelity — no decimation, UVs intact)
     # ------------------------------------------------------------------
-    print(f"\n[Step 3] Building LOD0 (spatial merge dist={LOD0_MERGE_DIST}m)")
-    lod0_obj, tris_lod0 = build_lod_mesh_decimated(src, LOD0_MERGE_DIST, "LOD0")
+    print(f"\n[Step 3] Building LOD0 (full fidelity)")
+    lod0_obj, tris_lod0 = build_lod_mesh(src, "LOD0")
     remap_uvs_to_atlas_cell(lod0_obj.data)
     shade_smooth(lod0_obj)
 
     # ------------------------------------------------------------------
     # Step 4: Build LOD1 (spatial vertex merge for decimation)
     # ------------------------------------------------------------------
-    print(f"\n[Step 4] Building LOD1 (spatial merge dist={LOD1_MERGE_DIST}m)")
-    lod1_obj, tris_lod1 = build_lod_mesh_decimated(src, LOD1_MERGE_DIST, "LOD1")
-    print(f"  LOD1: {tris_lod1} tris")
+    print(f"\n[Step 4] Building LOD1 (DECIMATE target={LOD1_TARGET_TRIS} tris)")
+    lod1_obj, tris_lod1 = build_lod_mesh_decimate(src, LOD1_TARGET_TRIS, "LOD1")
     remap_uvs_to_atlas_cell(lod1_obj.data)
     shade_smooth(lod1_obj)
 
