@@ -499,6 +499,11 @@ def main():
         print(f"  After extra +90° Y (long axis was X):")
         print(f"    X=[{mn_x:.3f},{mx_x:.3f}]  Y=[{mn_y:.3f},{mx_y:.3f}]  Z=[{mn_z:.3f},{mx_z:.3f}]")
 
+    # Flip 180° around Y so nose faces +Z (not -Z)
+    src.rotation_euler = Euler((0.0, math.radians(180.0), 0.0), 'XYZ')
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+    mn_x, mx_x, mn_y, mx_y, mn_z, mx_z = get_bbox(src)
+
     raw_len = mx_z - mn_z
     print(f"  Long axis: Z  raw_len={raw_len:.4f}m  H={mx_y-mn_y:.4f}m  W={mx_x-mn_x:.4f}m")
 
