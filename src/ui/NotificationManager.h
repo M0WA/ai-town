@@ -159,6 +159,11 @@ private:
     int             m_logVisibleRows{0};  // computed at panel open: floor(500 / kLogRowHeightPx)
     int             m_logScrollOffset{0}; // first visible row index (0 = top)
 
+    // --- Scrollbar drag state ---
+    bool m_scrollDragging{false};
+    int  m_scrollDragStartY{0};
+    int  m_scrollDragStartOffset{0};
+
     // Layout constants are defined as anonymous-namespace constexpr values in
     // NotificationManager.cpp (D-9 / UI-10 — not repeated here to keep the header clean).
 };
