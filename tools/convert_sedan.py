@@ -48,7 +48,8 @@ OUT_LOD1      = "/workspace/assets/3d/vehicles/car_sedan_lod1.b3d"
 ATLAS_TEXTURE = "vehicles_diffuse_atlas_d.dds"
 
 TARGET_LENGTH_M   = 4.0   # metres along the X axis (car length)
-LOD1_MERGE_DIST   = 0.38  # spatial vertex merge distance for LOD1 decimation
+LOD0_MERGE_DIST   = 0.38  # spatial vertex merge distance for LOD0 (~278 tris)
+LOD1_MERGE_DIST   = 0.80  # spatial vertex merge distance for LOD1 (more aggressive)
 
 
 # ---------------------------------------------------------------------------
@@ -487,10 +488,10 @@ def main():
     print(f"    Z=[{mn_z:.3f},{mx_z:.3f}] = {mx_z-mn_z:.3f}m (width)")
 
     # ------------------------------------------------------------------
-    # Step 3: Build LOD0 (full fidelity — no decimation)
+    # Step 3: Build LOD0 (spatial merge dist=LOD0_MERGE_DIST)
     # ------------------------------------------------------------------
-    print(f"\n[Step 3] Building LOD0 (full fidelity)")
-    lod0_obj, tris_lod0 = build_lod_mesh(src, "LOD0")
+    print(f"\n[Step 3] Building LOD0 (spatial merge dist={LOD0_MERGE_DIST}m)")
+    lod0_obj, tris_lod0 = build_lod_mesh_decimated(src, LOD0_MERGE_DIST, "LOD0")
     remap_uvs_to_atlas_cell(lod0_obj.data)
     shade_smooth(lod0_obj)
 
@@ -499,6 +500,7 @@ def main():
     # ------------------------------------------------------------------
     print(f"\n[Step 4] Building LOD1 (spatial merge dist={LOD1_MERGE_DIST}m)")
     lod1_obj, tris_lod1 = build_lod_mesh_decimated(src, LOD1_MERGE_DIST, "LOD1")
+    print(f"  LOD1: {tris_lod1} tris")
     remap_uvs_to_atlas_cell(lod1_obj.data)
     shade_smooth(lod1_obj)
 
