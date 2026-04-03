@@ -75,6 +75,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   assimp-utils \
   pngcheck \
   python3-opencv \
+  xxd \
   && apt-get clean && rm -rf /var/lib/apt/lists/* \
   && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
   && (test -f /usr/bin/batcat && ln -sf /usr/bin/batcat /usr/local/bin/bat || true)
