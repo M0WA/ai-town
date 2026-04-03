@@ -10,7 +10,7 @@
 | Asset category | LOD0 (near) | LOD1 (mid) | LOD2 (far) |
 |---|---|---|---|
 | Large buildings (general) | 4,000–8,000 tris | 1,000–1,500 tris | 400–600 tris |
-| Large buildings — Commercial High only (skyscrapers) | 7,000–10,000 tris | 1,200–2,000 tris | 500–700 tris |
+| Large buildings — Commercial High only (skyscrapers) | ≤510,000 tris (full-fidelity Tripo3D source; no LOD0 decimation) | ≤8,000 tris (DECIMATE COLLAPSE to ~5,000 tris target) | ≤600 tris (voxel remesh + DECIMATE shell) |
 | Small buildings / props (height\_floors <= 3) | 1,500–3,000 tris | 200–400 tris | Billboard (point-sprite only) |
 | Small buildings / props (height\_floors >= 4) | 1,500–3,000 tris | 200–400 tris | 400–600 tris (`_lod2.b3d` geometry shell) |
 | Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | 2,000–4,000 tris | 200–400 tris | Billboard |
@@ -132,8 +132,8 @@ The `<asset_name>` base (e.g. `res_low_01`) is referenced in `<asset_name>.meta`
 
 `com_high_*` buildings are V1 skyscrapers: glass towers with `height_floors` 15–30, stepped or
 tapered form, glass curtain-wall facade, and a distinctive crown. These assets are subject to
-the Commercial High sub-row budgets in the LOD Requirements table (7,000–10,000 tris LOD0,
-1,200–2,000 tris LOD1, 500–700 tris LOD2 geometry shell).
+the Commercial High sub-row budgets in the LOD Requirements table (≤510,000 tris LOD0 full-fidelity
+Tripo3D source; ≤8,000 tris LOD1 DECIMATE COLLAPSE to ~5,000 tris target; ≤600 tris LOD2 voxel remesh + DECIMATE shell).
 
 **Design requirements** (binding for all four V1 `com_high_*` variants):
 
@@ -326,7 +326,7 @@ Every `.b3d` building or vehicle asset must ship a `<asset_name>.meta` JSON side
 
 | Vehicle class | LOD0 budget | LOD1 budget | Actual (V1 source) |
 |---|---|---|---|
-| Car (sedan, hatchback, SUV) | ≤510,000 tris | ≤12,000 tris | ~490,000–498,000 LOD0 / ~10,000 LOD1 |
+| Car (sedan, hatchback, SUV) | ≤510,000 tris | ≤12,000 tris | 489,029–497,478 LOD0 / ~10,000 LOD1 |
 | Bus | ≤510,000 tris | ≤12,000 tris | 502,258 LOD0 / 10,112 LOD1 |
 | Truck | ≤510,000 tris | ≤12,000 tris | 501,372 LOD0 / 9,998 LOD1 |
 
@@ -335,6 +335,41 @@ Vehicle assets are full-fidelity Tripo3D photogrammetry-style meshes. The LOD0 b
 **Multi-buffer split**: Because Irrlicht's B3D loader uses a 16-bit index type per `IMeshBuffer` (max 65,535 vertices per buffer), LOD0 vehicle meshes are automatically split into multiple VRTS+TRIS buffer groups by the conversion pipeline (`tools/convert_vehicle_fbx.py`). Each buffer contains ≤65,535 vertices with globally-indexed TRIS entries. This is a format-level split only — at the game-logic level each vehicle is one mesh with one material.
 
 **BINDING LIMIT NOTE**: The per-class budgets above are the **binding limits**. The export validation script (check #32) enforces these limits at CI time.
+
+#### Tripo3D Asset Processing Pipeline
+
+All V1 Tripo3D-sourced assets (vehicles and commercial high buildings) follow a Blender headless pipeline:
+
+**Vehicles** (`tools/convert_vehicle_fbx.py`):
+
+1. Import FBX (`axis_forward='-Z', axis_up='Y'` — Tripo3D Z-up → Irrlicht Y-up)
+2. Join all mesh objects; apply transforms
+3. Rotate to align nose with +Z axis (Irrlicht forward)
+4. Scale to target length (cars: ~4 m, bus/truck: ~10 m)
+5. LOD0: no decimation — full Tripo3D mesh exported as-is
+6. LOD1: per-part DECIMATE COLLAPSE targeting ~10,000 tris
+7. UV channel 0: FBX UVs V-flipped, remapped into assigned vehicle atlas cell
+8. Export B3D via B3DWriter with 16-bit buffer splitting (max 65,535 verts/buffer)
+
+**Commercial High Buildings** (`tools/convert_building_fbx.py`):
+
+1. Import FBX (`axis_forward='-Z', axis_up='Y'`)
+2. Join all mesh objects; scale footprint to ±15 m (30 m × 30 m, 3×3 tiles)
+3. Base at Y=0 (ground level)
+4. LOD0: no decimation — full Tripo3D mesh + 30 m × 30 m ground plate
+5. LOD1: DECIMATE COLLAPSE targeting ~5,000 tris
+6. LOD2: voxel remesh (1.5 m voxel size) + DECIMATE targeting ~500 tris
+7. UV: smart project → remap into assigned building atlas cell (8×8 grid, 256×256 px cell)
+8. Basecolor JPG baked into buildings\_atlas\_d.png at atlas cell; DDS regenerated from PNG
+9. Export B3D via B3DWriter with 16-bit buffer splitting
+
+**Actual V1 com\_high tri counts**:
+
+| Asset | LOD0 | LOD1 | LOD2 |
+|---|---|---|---|
+| com\_high\_01 | 495,416 | 7,100 | 500 |
+| com\_high\_02 | 212,081 | 4,999 | 499 |
+| com\_high\_03 | 229,706 | 5,000 | 500 |
 
 #### Vehicle LOD File Naming Convention
 
