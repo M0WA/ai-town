@@ -1,6 +1,6 @@
 # AI Town
 
-A Sim City–style 3D city simulator built with C++ and the Irrlicht engine. Zone land, build roads,
+A 3D city simulator built with C++ and the Irrlicht engine. Zone land, build roads,
 manage finances, and grow a living city with traffic, economy simulation, and spatial audio.
 
 ![AI Town screenshot](docs/screenshot-v0.0.12.png)
@@ -11,14 +11,25 @@ manage finances, and grow a living city with traffic, economy simulation, and sp
 
 ### Download (recommended)
 
-Pre-built binaries are available on the [Releases page](https://github.com/M0WA/aitown/releases).
+Pre-built packages are available on the [Releases page](https://github.com/M0WA/ai-town/releases).
 
-| Platform | Download |
+**Linux** — pick the package for your distro:
+
+| Distro | Package |
 |---|---|
-| Linux (x86-64) | `aitown-linux-x86_64.tar.gz` |
-| Windows (x86-64) | `aitown-windows-x86_64.zip` |
+| Debian 12 Bookworm | [aitown-0.0.12-bookworm.deb](https://github.com/M0WA/ai-town/releases/download/v0.0.12/aitown-0.0.12-bookworm.deb) |
+| Debian 13 Trixie | [aitown-0.0.12-trixie.deb](https://github.com/M0WA/ai-town/releases/download/v0.0.12/aitown-0.0.12-trixie.deb) |
+| Ubuntu 22.04 Jammy | [aitown-0.0.12-jammy.deb](https://github.com/M0WA/ai-town/releases/download/v0.0.12/aitown-0.0.12-jammy.deb) |
+| Ubuntu 24.04 Noble | [aitown-0.0.12-noble.deb](https://github.com/M0WA/ai-town/releases/download/v0.0.12/aitown-0.0.12-noble.deb) |
 
-Extract the archive and run `aitown` (Linux) or `aitown.exe` (Windows). No installation required.
+```bash
+sudo dpkg -i aitown-0.0.12-<distro>.deb
+aitown
+```
+
+**Windows** — download and run the installer:
+
+[aitown-0.0.12.exe](https://github.com/M0WA/ai-town/releases/download/v0.0.12/aitown-0.0.12.exe)
 
 ### Build from source
 
