@@ -212,12 +212,19 @@ def scale_to_footprint(obj):
 
 
 def add_ground_plate(obj):
-    """Add a 30m × 30m ground plate at Y=0, joined into obj."""
+    """Add a 30m × 30m ground plate at Y=0, joined into obj.
+
+    The plate is created with default Blender UVs ([0,1]×[0,1]). These are
+    remapped to the atlas cell before joining so the joined mesh has correct
+    atlas UVs for both the building body and the ground plate.
+    """
     bpy.ops.mesh.primitive_plane_add(size=HALF_EXTENT * 2, location=(0, 0, 0))
     plate = bpy.context.view_layer.objects.active
-    # Rotate so plane is in XZ plane at Y=0 (Blender plane is XY by default)
+    # Rotate so plane is in XZ plane at Y=0 (Blender default plane is XY)
     plate.rotation_euler = (math.radians(90), 0, 0)
     apply_transforms(plate)
+    # Remap plate UVs to the atlas cell before joining
+    remap_uvs_to_cell(plate)
     # Join into main mesh
     plate.select_set(True)
     obj.select_set(True)
@@ -426,9 +433,12 @@ def main():
     print("\n[3] Scaling to footprint...")
     scale_to_footprint(obj)
 
-    # 5. UV unwrap the scaled mesh
-    print("\n[4] UV unwrapping...")
-    smart_unwrap(obj)
+    # 5. Remap original FBX UVs to atlas cell.
+    # The Tripo3D FBX already carries correct UVs referencing its basecolor texture.
+    # Do NOT call smart_unwrap here — that would discard the original UVs and replace
+    # them with an angle-based projection that does not match the basecolor layout.
+    # Just remap the existing [0,1] UV range into the atlas cell for this asset.
+    print("\n[4] Remapping FBX UVs to atlas cell...")
     remap_uvs_to_cell(obj)
 
     # 6. Bake basecolor into atlas PNG
@@ -441,12 +451,11 @@ def main():
     select_only(obj_lod0)
     obj_lod0.data.calc_loop_triangles()
     print(f"  LOD0 tris: {len(obj_lod0.data.loop_triangles)}")
-    # Add ground plate to LOD0 only
+    # Add ground plate to LOD0 only.
+    # add_ground_plate() creates the plate with default Blender UVs and remaps
+    # them to the atlas cell before joining, so no additional UV work is needed.
     print("  Adding ground plate...")
     obj_lod0 = add_ground_plate(obj_lod0)
-    select_only(obj_lod0)
-    smart_unwrap(obj_lod0)
-    remap_uvs_to_cell(obj_lod0)
     v0, i0 = extract_verts_tris(obj_lod0)
     B3DWriter.write(OUT_LOD0, v0, i0, ATLAS_TEXTURE)
 
