@@ -226,14 +226,38 @@ def add_ground_plate(obj):
     return bpy.context.view_layer.objects.active
 
 
-def decimate(obj, target_tris):
-    """Decimate obj to approximately target_tris. Returns new tri count."""
+def decimate(obj, target_tris, use_voxel_remesh=False):
+    """Decimate obj to approximately target_tris. Returns new tri count.
+
+    When use_voxel_remesh=True, a REMESH (voxel) modifier is applied first to
+    break up high-density uniform topology that DECIMATE cannot reduce below a
+    certain floor (Blender's DECIMATE gets stuck when all edges are nearly equal
+    length and the ratio is very small).
+    """
     me = obj.data
     me.calc_loop_triangles()
     current = len(me.loop_triangles)
     if current <= target_tris:
         print(f"  No decimate needed: {current} ≤ {target_tris}")
         return current
+
+    select_only(obj)
+
+    if use_voxel_remesh:
+        # Voxel remesh breaks uniform topology so DECIMATE can reach the target.
+        # voxel_size=1.5 m gives ~500 tris on a 30×30×75 m building shell.
+        mod_r = obj.modifiers.new(name="REMESH", type='REMESH')
+        mod_r.mode = 'VOXEL'
+        mod_r.voxel_size = 1.5
+        bpy.ops.object.modifier_apply(modifier="REMESH")
+        obj.data.calc_loop_triangles()
+        after_remesh = len(obj.data.loop_triangles)
+        print(f"  Voxel remesh: {current} → {after_remesh} tris")
+        current = after_remesh
+
+    if current <= target_tris:
+        return current
+
     ratio = target_tris / current
     mod = obj.modifiers.new(name="DECIMATE", type='DECIMATE')
     mod.ratio = max(ratio, 0.001)
@@ -327,6 +351,12 @@ def duplicate_obj(src_obj, name):
 # Paste basecolor into atlas PNG
 # ---------------------------------------------------------------------------
 def bake_to_atlas():
+    import sys as _sys
+    # Blender ships its own Python; the user's site-packages may not be on its
+    # path. Try the common user-install location so Pillow is found.
+    _user_site = '/home/node/.local/lib/python3.11/site-packages'
+    if _user_site not in _sys.path:
+        _sys.path.insert(0, _user_site)
     try:
         from PIL import Image
     except ImportError:
@@ -385,6 +415,13 @@ def main():
     obj = bpy.context.view_layer.objects.active
     apply_transforms(obj)
 
+    # Tripo3D FBX buildings have an embedded 90° X rotation baked into the
+    # object transform. After apply_transforms the tall axis ends up as Z.
+    # Rotate -90° X to convert Z-up → Y-up (Irrlicht convention).
+    print("  Correcting axis: rotating -90° X (Z-up → Y-up)...")
+    obj.rotation_euler = (math.radians(-90), 0, 0)
+    apply_transforms(obj)
+
     # 4. Scale to fit 30m × 30m footprint, base at Y=0
     print("\n[3] Scaling to footprint...")
     scale_to_footprint(obj)
@@ -422,11 +459,11 @@ def main():
     v1, i1 = extract_verts_tris(obj_lod1)
     B3DWriter.write(OUT_LOD1, v1, i1, ATLAS_TEXTURE)
 
-    # 9. LOD2 — far shell (up to 500 tris)
+    # 9. LOD2 — far shell (up to 500 tris); voxel remesh breaks topology lock
     print("\n[8] LOD2...")
     obj_lod2 = duplicate_obj(obj, f"{ASSET_NAME}_lod2")
     select_only(obj_lod2)
-    decimate(obj_lod2, LOD2_TARGET)
+    decimate(obj_lod2, LOD2_TARGET, use_voxel_remesh=True)
     remap_uvs_to_cell(obj_lod2)
     v2, i2 = extract_verts_tris(obj_lod2)
     B3DWriter.write(OUT_LOD2, v2, i2, ATLAS_TEXTURE)
