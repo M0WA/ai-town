@@ -70,6 +70,14 @@ int AudioSourcePool::acquireSFXSource(SoundPriority priority, float listenerDist
     // Try to find a free slot.
     int idx = findFreeSFXSource(upperBound);
     if (idx >= 0) {
+        // Stop the source unconditionally: the slot may have been freed by
+        // releaseVehicleEnginePair() before the audio thread called alSourceStop
+        // (it defers the stop to avoid a main-thread→audio-thread data race on
+        // the source state).  alSourceStop is a no-op for already-stopped sources.
+        alSourceStop(m_sources[idx]);
+        alCheckError("acquireSFXSource:alSourceStop(free)");
+        alSourcei(m_sources[idx], AL_BUFFER, 0);
+        alCheckError("acquireSFXSource:alSourcei(AL_BUFFER,0)(free)");
         m_sfxSlots[idx].occupied           = true;
         m_sfxSlots[idx].priority           = priority;
         m_sfxSlots[idx].listenerDistanceSq = listenerDistanceSq;
