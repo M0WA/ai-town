@@ -288,38 +288,34 @@ jobs:
           printf "%b" "$BODY" > /tmp/changelog.md
           echo "prev_tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
 
-      # Create the version tag via REST API.
-      # Always delete-then-create to avoid 422 from leftover tags from previous
-      # failed runs and to avoid the check-then-create race condition (where GET
-      # returns 404 due to eventual consistency but POST returns 422 because the
-      # tag still exists in GitHub's backend).
-      # git push and gh release tag-creation both fail with GH013 pre-receive
-      # hook violations; direct REST API calls are not subject to that hook.
-      - name: Create version tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="v${{ needs.compute-version.outputs.version }}"
-          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" \
-            2>/dev/null || true
-          gh api repos/${GITHUB_REPOSITORY}/git/refs \
-            -f ref="refs/tags/${TAG}" \
-            -f sha="${{ github.sha }}"
-          echo "Tag ${TAG} created at ${{ github.sha }}."
-
+      # Create GitHub release (tag created atomically by the releases API).
+      #
+      # The git-refs API (POST /git/refs) is not used — it returns 422 even
+      # when the tag does not exist (likely a GitHub policy on this repo). The
+      # releases API (POST /releases with target_commitish) creates the
+      # lightweight tag and release atomically, which is how v0.0.1–v0.0.13
+      # were successfully created.
+      #
+      # Cleanup sequence before creating:
+      #   1. Delete existing release by ID (immutable releases reject the tag-
+      #      name DELETE endpoint with 422 — look up by ID first).
+      #   2. Delete the orphan tag left by a previously failed run (if any).
+      #      Uses || true so a missing tag doesn't abort the step.
+      #   3. gh release create --target pins the new tag to github.sha.
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v${{ needs.compute-version.outputs.version }}"
-          # Delete existing release by ID via REST API — gh release delete uses the
-          # tag-name endpoint which GitHub rejects with 422 for immutable releases.
           RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
             --jq '.id' 2>/dev/null || true)
           if [ -n "$RELEASE_ID" ]; then
             gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" || true
           fi
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" \
+            2>/dev/null || true
           gh release create "${TAG}" \
             --title "AI Town ${TAG}" \
             --notes-file /tmp/changelog.md \
+            --target "${{ github.sha }}" \
             release-assets/**
