@@ -288,22 +288,24 @@ jobs:
           printf "%b" "$BODY" > /tmp/changelog.md
           echo "prev_tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
 
-      # Create the version tag via REST API before softprops runs.
-      # git push and softprops tag-creation both fail with GH013 pre-receive
+      # Create the version tag via REST API.
+      # Always delete-then-create to avoid 422 from leftover tags from previous
+      # failed runs and to avoid the check-then-create race condition (where GET
+      # returns 404 due to eventual consistency but POST returns 422 because the
+      # tag still exists in GitHub's backend).
+      # git push and gh release tag-creation both fail with GH013 pre-receive
       # hook violations; direct REST API calls are not subject to that hook.
       - name: Create version tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v${{ needs.compute-version.outputs.version }}"
-          if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" &>/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists — skipping."
-          else
-            gh api repos/${GITHUB_REPOSITORY}/git/refs \
-              -f ref="refs/tags/${TAG}" \
-              -f sha="${{ github.sha }}"
-            echo "Tag ${TAG} created."
-          fi
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" \
+            2>/dev/null || true
+          gh api repos/${GITHUB_REPOSITORY}/git/refs \
+            -f ref="refs/tags/${TAG}" \
+            -f sha="${{ github.sha }}"
+          echo "Tag ${TAG} created at ${{ github.sha }}."
 
       - name: Create GitHub release
         env:
@@ -316,10 +318,6 @@ jobs:
             --jq '.id' 2>/dev/null || true)
           if [ -n "$RELEASE_ID" ]; then
             gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" || true
-            # Delete the tag so the next push recreates it cleanly
-            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" || true
-            # Re-push the local tag (created by the previous step)
-            git push origin "refs/tags/${TAG}"
           fi
           gh release create "${TAG}" \
             --title "AI Town ${TAG}" \
