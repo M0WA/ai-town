@@ -3331,6 +3331,8 @@ std::string CitySimulation::serializeToJson() const {
                + ", \"alert_fired\": " + (tile.alertFired ? "true" : "false")
                + ", \"under_construction\": " + (tile.underConstruction ? "true" : "false")
                + ", \"variant_num\": " + std::to_string(tile.buildingVariantNum)
+               + ", \"fp_origin_x\": " + std::to_string(tile.footprintOriginX)
+               + ", \"fp_origin_z\": " + std::to_string(tile.footprintOriginZ)
                + "}";
         }
     }
@@ -3706,6 +3708,14 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
                         int64_t v = 0;
                         if (!parseInt64(json, pos, v, errorOut)) return false;
                         td.buildingVariantNum = static_cast<int>(v);
+                    } else if (tk == "fp_origin_x") {
+                        int64_t v = 0;
+                        if (!parseInt64(json, pos, v, errorOut)) return false;
+                        td.footprintOriginX = static_cast<int>(v);
+                    } else if (tk == "fp_origin_z") {
+                        int64_t v = 0;
+                        if (!parseInt64(json, pos, v, errorOut)) return false;
+                        td.footprintOriginZ = static_cast<int>(v);
                     } else {
                         // Unknown tile field — skip string, number, bool, or nested value
                         // Simple skip: consume until comma or }
