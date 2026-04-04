@@ -75,6 +75,18 @@ jobs:
           cmakeBuildDirectory: ${{ env.build }}
           ruleset: NativeRecommendedRules.ruleset
 
+      # CodeQL upload-sarif rejects SARIF files with multiple runs.
+      # The MSVC analysis action produces one run per build target; keep only the first.
+      - name: Filter SARIF to single run
+        shell: pwsh
+        run: |
+          $sarifPath = "${{ steps.run-analysis.outputs.sarif }}"
+          $sarif = Get-Content $sarifPath -Raw | ConvertFrom-Json
+          if ($sarif.runs.Count -gt 1) {
+            $sarif.runs = @($sarif.runs[0])
+            $sarif | ConvertTo-Json -Depth 100 | Set-Content $sarifPath
+          }
+
       - name: Upload SARIF to GitHub
         uses: github/codeql-action/upload-sarif@0e9f55954318745b37b7933c693bc093f7336125 # v4.35.1
         with:
