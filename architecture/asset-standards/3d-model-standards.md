@@ -11,6 +11,7 @@
 |---|---|---|---|
 | Large buildings (general) | 4,000–8,000 tris | 1,000–1,500 tris | 400–600 tris |
 | Large buildings — Commercial High only (skyscrapers) | ≤510,000 tris (full-fidelity Tripo3D source; no LOD0 decimation) | ≤8,000 tris (DECIMATE COLLAPSE to ~5,000 tris target) | ≤600 tris (voxel remesh + DECIMATE shell) |
+| Large buildings — Commercial Medium Tripo3D variants (`com_med_01/02`) | ≤510,000 tris (full-fidelity Tripo3D source; no LOD0 decimation) | ≤5,500 tris (DECIMATE COLLAPSE to ~5,000 tris target) | ≤500 tris (voxel remesh + DECIMATE shell) |
 | Small buildings / props (height\_floors <= 3) | 1,500–3,000 tris | 200–400 tris | Billboard (point-sprite only) |
 | Small buildings / props (height\_floors >= 4) | 1,500–3,000 tris | 200–400 tris | 400–600 tris (`_lod2.b3d` geometry shell) |
 | Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | 2,000–4,000 tris | 200–400 tris | Billboard |
@@ -338,7 +339,7 @@ Vehicle assets are full-fidelity Tripo3D photogrammetry-style meshes. The LOD0 b
 
 #### Tripo3D Asset Processing Pipeline
 
-All V1 Tripo3D-sourced assets (vehicles and commercial high buildings) follow a Blender headless pipeline:
+All V1 Tripo3D-sourced assets (vehicles, commercial high buildings, and commercial medium Tripo3D variants) follow a Blender headless pipeline:
 
 **Vehicles** (`tools/convert_vehicle_fbx.py`):
 
@@ -351,25 +352,37 @@ All V1 Tripo3D-sourced assets (vehicles and commercial high buildings) follow a 
 7. UV channel 0: FBX UVs V-flipped, remapped into assigned vehicle atlas cell
 8. Export B3D via B3DWriter with 16-bit buffer splitting (max 65,535 verts/buffer)
 
-**Commercial High Buildings** (`tools/convert_building_fbx.py`):
+**Commercial High Buildings** (`tools/convert_building_fbx.py`, `footprint_tiles=3`):
 
 1. Import FBX (`axis_forward='-Z', axis_up='Y'`)
-2. Join all mesh objects; scale footprint to ±15 m (30 m × 30 m, 3×3 tiles)
-3. Base at Y=0 (ground level)
-4. LOD0: no decimation — full Tripo3D mesh + 30 m × 30 m ground plate
-5. LOD1: DECIMATE COLLAPSE targeting ~5,000 tris
-6. LOD2: voxel remesh (1.5 m voxel size) + DECIMATE targeting ~500 tris
-7. UV: smart project → remap into assigned building atlas cell (8×8 grid, 256×256 px cell)
-8. Basecolor JPG baked into buildings\_atlas\_d.png at atlas cell; DDS regenerated from PNG
+2. Join all mesh objects; apply transforms; rotate −90° X to correct Z-up → Y-up
+3. Scale footprint to ±15 m (30 m × 30 m, 3×3 tiles); base at Y=0
+4. UV: remap original Tripo3D FBX UV coordinates into assigned building atlas cell (8×8 grid,
+   256×256 px cell). **Do NOT smart_unwrap** — FBX UVs correctly map faces to the basecolor
+   texture; discarding them destroys the texture mapping
+5. Basecolor JPG baked into buildings\_atlas\_d.png at atlas cell; DDS regenerated from PNG
+6. LOD0: no decimation — full Tripo3D mesh + 30 m × 30 m ground plate (ground plate UVs
+   remapped to atlas cell before joining)
+7. LOD1: DECIMATE COLLAPSE targeting ~5,000 tris; re-remap UVs to atlas cell
+8. LOD2: voxel remesh (1.5 m voxel size) + DECIMATE targeting ~500 tris; re-remap UVs
 9. Export B3D via B3DWriter with 16-bit buffer splitting
 
-**Actual V1 com\_high tri counts**:
+**Commercial Medium Tripo3D Buildings** (`tools/convert_building_fbx.py`, `footprint_tiles=2`):
+
+Same pipeline as Commercial High with the following differences:
+
+- Footprint: ±10 m (20 m × 20 m, 2×2 tiles); ground plate is 20 m × 20 m
+- Pass `footprint_tiles=2` as the optional 6th argument to `convert_building_fbx.py`
+
+**Actual V1 Tripo3D tri counts** (binding upper limits for `validate_assets.py`):
 
 | Asset | LOD0 | LOD1 | LOD2 |
 |---|---|---|---|
-| com\_high\_01 | 495,416 | 7,100 | 500 |
-| com\_high\_02 | 212,081 | 4,999 | 499 |
-| com\_high\_03 | 229,706 | 5,000 | 500 |
+| com\_high\_01 | 495,414 | 7,104 | 500 |
+| com\_high\_02 | 212,079 | 4,999 | 500 |
+| com\_high\_03 | 229,704 | 5,000 | 500 |
+| com\_med\_01 | 501,000 | 5,000 | 500 |
+| com\_med\_02 | 500,877 | 4,999 | 500 |
 
 #### Vehicle LOD File Naming Convention
 
