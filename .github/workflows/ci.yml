@@ -84,19 +84,6 @@ jobs:
             IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT#v}"
             PATCH=$((PATCH + 1))
             NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-            # Skip versions whose tags are blocked by repository rules (e.g. immutable
-            # releases whose tags were deleted — the tag name remains reserved).
-            # Probe with --dry-run; if rejected, keep incrementing the patch number.
-            for _ in $(seq 1 10); do
-              PROBE=$(git push --dry-run origin "HEAD:refs/tags/v${NEW_VERSION}" 2>&1 || true)
-              if echo "$PROBE" | grep -q "repository rule violations\|Cannot create ref"; then
-                echo "v${NEW_VERSION} blocked by repository rules, trying next patch."
-                PATCH=$((PATCH + 1))
-                NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-              else
-                break
-              fi
-            done
           else
             CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "${DEFAULT_DEVELOP}")
             NEW_VERSION="${CURRENT#v}-develop"
@@ -315,23 +302,39 @@ jobs:
       #   2. Delete the orphan tag left by a previously failed run (if any).
       #      Uses || true so a missing tag doesn't abort the step.
       #   3. gh release create --target pins the new tag to github.sha.
+      #   4. If the release API rejects the tag with "tag_name was used by an
+      #      immutable release" (permanently reserved name), increment patch and
+      #      retry — git push --dry-run does NOT enforce GitHub rulesets so the
+      #      probe must happen at release-create time instead.
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v${{ needs.compute-version.outputs.version }}"
-          # Look up release ID by tag; guard against non-numeric output (e.g. a JSON
-          # error object when the tag does not exist — gh api may print the raw error
-          # JSON to stdout even when --jq is supplied on a non-2xx response).
-          RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-            --jq '.id' 2>/dev/null || true)
-          if [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
-            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" || true
-          fi
-          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" \
-            2>/dev/null || true
-          gh release create "${TAG}" \
-            --title "AI Town ${TAG}" \
-            --notes-file /tmp/changelog.md \
-            --target "${{ github.sha }}" \
-            release-assets/**
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${TAG#v}"
+          for _ in $(seq 1 10); do
+            # Look up release ID by tag; guard against non-numeric output (e.g. a
+            # JSON error object when the tag does not exist — gh api may print the
+            # raw error JSON to stdout even when --jq is supplied on a non-2xx
+            # response).
+            RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              --jq '.id' 2>/dev/null || true)
+            if [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" || true
+            fi
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" \
+              2>/dev/null || true
+            CREATE_OUT=$(gh release create "${TAG}" \
+              --title "AI Town ${TAG}" \
+              --notes-file /tmp/changelog.md \
+              --target "${{ github.sha }}" \
+              release-assets/** 2>&1) && { echo "$CREATE_OUT"; break; }
+            if echo "$CREATE_OUT" | grep -qi "tag_name was used by an immutable release"; then
+              echo "${TAG} reserved by immutable release, trying next patch."
+              PATCH=$((PATCH + 1))
+              TAG="v${MAJOR}.${MINOR}.${PATCH}"
+            else
+              echo "$CREATE_OUT" >&2
+              exit 1
+            fi
+          done
