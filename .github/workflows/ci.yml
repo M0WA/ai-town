@@ -310,8 +310,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v${{ needs.compute-version.outputs.version }}"
-          # Delete existing release for this tag (idempotent retry), ignore errors
-          gh release delete "${TAG}" --yes 2>/dev/null || true
+          # Delete existing release by ID via REST API — gh release delete uses the
+          # tag-name endpoint which GitHub rejects with 422 for immutable releases.
+          RELEASE_ID=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            --jq '.id' 2>/dev/null || true)
+          if [ -n "$RELEASE_ID" ]; then
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" || true
+            # Delete the tag so the next push recreates it cleanly
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" || true
+            # Re-push the local tag (created by the previous step)
+            git push origin "refs/tags/${TAG}"
+          fi
           gh release create "${TAG}" \
             --title "AI Town ${TAG}" \
             --notes-file /tmp/changelog.md \
