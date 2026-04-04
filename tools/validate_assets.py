@@ -428,7 +428,12 @@ def _parse_b3d_uv_channel0(filepath):
 
 
 def _parse_b3d_positions(filepath):
-    """Parse all vertex (x, y, z) positions from a B3D file's VRTS chunk.
+    """Parse all vertex (x, y, z) positions from ALL VRTS chunks in a B3D file.
+
+    Large meshes are split across multiple mesh buffers (each with its own VRTS
+    chunk). Scanning only the first VRTS chunk misses vertices in later buffers
+    (e.g. a ground plate appended after a high-poly building body). This function
+    scans every VRTS occurrence in the file.
 
     Returns list of (x, y, z) float tuples.
     Raises AssertionError on format errors.
@@ -436,35 +441,39 @@ def _parse_b3d_positions(filepath):
     with open(filepath, "rb") as f:
         data = f.read()
 
-    # Locate VRTS chunk using same approach as _parse_b3d_uv_channel0
-    # Search for "VRTS" tag
-    vrts_pos = data.find(b"VRTS")
-    assert vrts_pos >= 0, "VRTS chunk not found"
-    payload_len = struct.unpack_from("<i", data, vrts_pos + 4)[0]
-    p = vrts_pos + 8  # start of VRTS payload
-
-    flags = struct.unpack_from("<i", data, p)[0]; p += 4
-    tc_sets = struct.unpack_from("<i", data, p)[0]; p += 4
-    has_normals = bool(flags & 1)
-    # Read tc_flags (one int per tc_set)
-    for _ in range(tc_sets):
-        p += 4
-
-    # Vertex stride: 3 floats pos + (3 floats normals if has_normals) + (2 floats * tc_sets)
-    stride = 3 * 4
-    if has_normals:
-        stride += 3 * 4
-    stride += tc_sets * 2 * 4
-
-    vrts_end = vrts_pos + 8 + payload_len
     positions = []
-    while p + stride <= vrts_end:
-        x = struct.unpack_from("<f", data, p)[0]
-        y = struct.unpack_from("<f", data, p + 4)[0]
-        z = struct.unpack_from("<f", data, p + 8)[0]
-        positions.append((x, y, z))
-        p += stride
+    search_start = 0
+    found_any = False
+    while True:
+        vrts_pos = data.find(b"VRTS", search_start)
+        if vrts_pos < 0:
+            break
+        found_any = True
+        payload_len = struct.unpack_from("<i", data, vrts_pos + 4)[0]
+        p = vrts_pos + 8  # start of VRTS payload
 
+        flags = struct.unpack_from("<i", data, p)[0]; p += 4
+        tc_sets = struct.unpack_from("<i", data, p)[0]; p += 4
+        has_normals = bool(flags & 1)
+        for _ in range(tc_sets):
+            p += 4
+
+        stride = 3 * 4
+        if has_normals:
+            stride += 3 * 4
+        stride += tc_sets * 2 * 4
+
+        vrts_end = vrts_pos + 8 + payload_len
+        while p + stride <= vrts_end:
+            x = struct.unpack_from("<f", data, p)[0]
+            y = struct.unpack_from("<f", data, p + 4)[0]
+            z = struct.unpack_from("<f", data, p + 8)[0]
+            positions.append((x, y, z))
+            p += stride
+
+        search_start = vrts_pos + 8 + payload_len
+
+    assert found_any, "VRTS chunk not found"
     return positions
 
 
