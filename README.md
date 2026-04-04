@@ -9,44 +9,10 @@ manage finances, and grow a living city with traffic, economy simulation, and sp
 
 ## Installation
 
-### Download (recommended)
-
-Pre-built packages are available on the [Releases page](https://github.com/M0WA/ai-town/releases).
+Pre-built installer/packages are available on the [Releases page](https://github.com/M0WA/ai-town/releases).
 
 - **Linux**: download the `.deb` package for your distro (Debian Bookworm/Trixie, Ubuntu Jammy/Noble) and install with `sudo dpkg -i aitown-*.deb`
 - **Windows**: download and run the `.exe` installer
-
-### Build from source
-
-**Prerequisites**
-
-| Tool         | Linux                        | Windows                      |
-| ------------ | ---------------------------- | ---------------------------- |
-| C++ compiler | GCC 13 or Clang 16           | MSVC 2022                    |
-| CMake        | ≥ 3.21                       | ≥ 3.21                       |
-| vcpkg        | [vcpkg.io](https://vcpkg.io) | [vcpkg.io](https://vcpkg.io) |
-| Ninja        | `apt install ninja-build`    | included with VS 2022        |
-
-**Linux**
-
-```bash
-git clone https://github.com/M0WA/aitown.git
-cd aitown
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
-cmake --build build
-./build/aitown
-```
-
-**Windows**
-
-```powershell
-git clone https://github.com/M0WA/aitown.git
-cd aitown
-cmake -B build -S . -G "Visual Studio 17 2022" `
-      -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
-cmake --build build --config Release
-.\build\aitown.exe
-```
 
 ---
 
@@ -85,3 +51,37 @@ cmake --build build --config Release
 | Middle-mouse drag | Pan camera     |
 
 Keys can be rebound in **Settings > Controls**. WASD camera pan is available as a preset.
+
+---
+
+## Build from source
+
+**Prerequisites**
+
+| Tool         | Linux                        | Windows                      |
+| ------------ | ---------------------------- | ---------------------------- |
+| C++ compiler | GCC 13 or Clang 16           | MSVC 2022                    |
+| CMake        | ≥ 3.21                       | ≥ 3.21                       |
+| vcpkg        | [vcpkg.io](https://vcpkg.io) | [vcpkg.io](https://vcpkg.io) |
+| Ninja        | `apt install ninja-build`    | included with VS 2022        |
+
+**Linux**
+
+```bash
+git clone https://github.com/M0WA/aitown.git
+cd aitown
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+cmake --build build
+./build/aitown
+```
+
+**Windows**
+
+```powershell
+git clone https://github.com/M0WA/aitown.git
+cd aitown
+cmake -B build -S . -G "Visual Studio 17 2022" `
+      -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+cmake --build build --config Release
+.\build\aitown.exe
+```
