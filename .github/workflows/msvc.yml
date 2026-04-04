@@ -76,9 +76,10 @@ jobs:
           ruleset: NativeRecommendedRules.ruleset
 
       - name: Upload SARIF to GitHub
-        uses: github/codeql-action/upload-sarif@5c8a8a642e79153f5d047b10ec1cba1d1cc65699 # v3.35.1
+        uses: github/codeql-action/upload-sarif@0e9f55954318745b37b7933c693bc093f7336125 # v4.35.1
         with:
           sarif_file: ${{ steps.run-analysis.outputs.sarif }}
+          category: msvc-code-analysis
 
       - name: Upload SARIF as an Artifact
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
