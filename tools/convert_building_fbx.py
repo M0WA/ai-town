@@ -7,21 +7,23 @@ The Tripo3D basecolor JPG is pasted into the buildings_atlas_d.png at the asset'
 
 Usage:
   blender --background --python tools/convert_building_fbx.py -- \\
-    <fbx_path> <basecolor_jpg> <asset_name> <atlas_row> <atlas_col>
+    <fbx_path> <basecolor_jpg> <asset_name> <atlas_row> <atlas_col> [footprint_tiles]
 
-  fbx_path      : path to the source .fbx file (Tripo3D export)
-  basecolor_jpg : path to the matching basecolor JPG
-  asset_name    : e.g. com_high_01, com_high_02
-  atlas_row     : row in 8×8 building atlas grid (row 2 for com_high)
-  atlas_col     : col in 8×8 building atlas grid (col 4/5/6 for com_high_01/02/03)
+  fbx_path        : path to the source .fbx file (Tripo3D export)
+  basecolor_jpg   : path to the matching basecolor JPG
+  asset_name      : e.g. com_high_01, com_med_02
+  atlas_row       : row in 8×8 building atlas grid
+  atlas_col       : col in 8×8 building atlas grid
+  footprint_tiles : NxN tile footprint side length (default 3 for com_high = 30 m;
+                    use 2 for com_med = 20 m)
 
 Coordinate system:
   Tripo3D exports Z-up. Irrlicht is Y-up, Z-forward.
   Apply -90° X rotation to convert Z-up → Y-up.
 
 Building footprint:
-  com_high (3×3 tiles) → ±15 m in X and Z, Y ≥ 0.
-  Ground plate: 30 m × 30 m quad at Y = 0.
+  com_high (3×3 tiles) → ±15 m in X and Z, Y ≥ 0.  Ground plate: 30×30 m.
+  com_med  (2×2 tiles) → ±10 m in X and Z, Y ≥ 0.  Ground plate: 20×20 m.
 
 Atlas layout:
   buildings_atlas_d.png — 2048×2048, 8×8 grid, 256×256 px per cell.
@@ -47,14 +49,15 @@ _argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 if len(_argv) < 5:
     sys.exit(
         "Usage: blender --background --python convert_building_fbx.py -- "
-        "<fbx_path> <basecolor_jpg> <asset_name> <atlas_row> <atlas_col>"
+        "<fbx_path> <basecolor_jpg> <asset_name> <atlas_row> <atlas_col> [footprint_tiles]"
     )
 
-FBX_PATH     = _argv[0]
-BASECOLOR    = _argv[1]
-ASSET_NAME   = _argv[2]
-ATLAS_ROW    = int(_argv[3])
-ATLAS_COL    = int(_argv[4])
+FBX_PATH        = _argv[0]
+BASECOLOR       = _argv[1]
+ASSET_NAME      = _argv[2]
+ATLAS_ROW       = int(_argv[3])
+ATLAS_COL       = int(_argv[4])
+FOOTPRINT_TILES = int(_argv[5]) if len(_argv) > 5 else 3   # default: 3×3 (com_high)
 
 _tools_dir   = os.path.dirname(os.path.abspath(__file__))
 _assets_dir  = os.path.join(_tools_dir, "..", "assets")
@@ -64,18 +67,19 @@ OUT_LOD2     = os.path.join(_assets_dir, "3d", "buildings", f"{ASSET_NAME}_lod2.
 ATLAS_PNG    = os.path.join(_assets_dir, "textures", "buildings", "buildings_atlas_d.png")
 
 # Atlas constants (2048×2048, 8×8 cells of 256×256 px)
-ATLAS_GRID   = 8
+ATLAS_GRID    = 8
 ATLAS_SIZE_PX = 2048
-CELL_PX      = ATLAS_SIZE_PX // ATLAS_GRID          # 256
-CELL_U       = 1.0 / ATLAS_GRID
-CELL_V       = 1.0 / ATLAS_GRID
-CELL_U_MIN   = ATLAS_COL * CELL_U
-CELL_V_MIN   = ATLAS_ROW * CELL_V
+CELL_PX       = ATLAS_SIZE_PX // ATLAS_GRID          # 256
+CELL_U        = 1.0 / ATLAS_GRID
+CELL_V        = 1.0 / ATLAS_GRID
+CELL_U_MIN    = ATLAS_COL * CELL_U
+CELL_V_MIN    = ATLAS_ROW * CELL_V
 
 ATLAS_TEXTURE = "buildings_atlas_d.dds"
 
-# Footprint: com_high = 3×3 tiles = 30 m × 30 m → ±15 m in X/Z
-HALF_EXTENT   = 15.0   # metres
+# Footprint: N×N tiles, each tile = 10 m → full side = N×10 m, half-extent = N×5 m
+TILE_SIZE_M   = 10.0
+HALF_EXTENT   = FOOTPRINT_TILES * TILE_SIZE_M / 2.0   # e.g. 3→15 m, 2→10 m
 
 LOD0_TARGET   = 50000
 LOD1_TARGET   = 5000
