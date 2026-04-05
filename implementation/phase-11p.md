@@ -30,6 +30,16 @@ The following architecture spec files require updates as part of this phase:
   render pass; used by `Minimap::draw()` for tile colour overlays without element leakage;
   `IrrlichtUIBackend` implements via `IVideoDriver::draw2DRectangle`.
 
+- [ ] **SU-03** `architecture/ui-ux/camera-controls.md` — Add Phase 11p extension section
+  after the "Phase 1 gamedesign-lookandfeel sign-off" documenting the three new `CameraState`
+  fields added by MM-05: `targetX{0.f}`, `targetZ{0.f}`, `zoomDistance{200.f}` — their
+  semantics, who populates them (MM-06 `CameraController::getCameraState()`), and who reads
+  them (MM-21 `Minimap::draw()` viewport projection).
+
+- [ ] **SU-04** `architecture/ui-ux/minimap.md` — Update the Phase 9b section to replace the
+  deferred `CameraController::panTo()` reference with `CameraController::setTarget(float worldX,
+  float worldZ)` (MM-31), aligning the spec with the actual API used in the Phase 11p plan.
+
 ---
 
 ### Deliverables
@@ -100,16 +110,20 @@ any `StubUIBackend` in smoke tests
   (ref: `architecture/ui-ux/minimap.md` — click-to-pan)
 
 - [ ] **MM-10** `src/ui/Minimap.h`: Add public method
-  `UIRect getWidgetFootprint() const` — returns the full input-arbitration footprint
-  `{1576, 848, 344, 232}` (x:1576–1920, y:848–1080), distinct from `getBounds()` which
-  returns only the 200×200 render area.
-  (ref: `architecture/ui-ux/minimap.md` — input-arbitration widget footprint)
+  `UIRect getWidgetFootprint() const` — returns the **dynamic** input-arbitration footprint:
+  `{1576, m_overlayActive ? 732 : 848, 344, m_overlayActive ? 348 : 232}`.
+  When no overlay is active: x:1576–1920, y:848–1080 (h:232). When any overlay is active:
+  x:1576–1920, y:732–1080 (h:348), extending upward to cover the legend panel (y:732–832)
+  and label strip (y:832–848). Distinct from `getBounds()` which returns only the 200×200
+  render area. UIManager calls this each frame to keep arbitration bounds in sync.
+  (ref: `architecture/ui-ux/minimap.md` — input-arbitration widget footprint, dynamic bounds)
 
 - [ ] **MM-11** `src/ui/Minimap.h`: Replace `UIElementHandle m_toggleBtn` with two named
   handles: `UIElementHandle m_toggleBtnSvc{kInvalidUIElement}` (Service Coverage toggle,
   x:1720, y:848, 32×32) and `UIElementHandle m_toggleBtnTfc{kInvalidUIElement}` (Traffic
   Congestion toggle, x:1684, y:848, 32×32, 4 px gap leftward from Svc button).
   (ref: `architecture/ui-ux/minimap.md` — overlay toggle row, radio behavior)
+  **Note**: Phase 11p creates text-label buttons ('Svc' / 'Tfc') as placeholders. Icon sprite implementation using `kSpriteOverlayXxx` constants (`setElementImage` wiring) is a **Phase 12** deliverable per `architecture/asset-standards/2d-texture-standards.md` §Phase 10 Sign-Off — UI Sprite Sheet.
 
 - [ ] **MM-12** `src/ui/Minimap.h`: Add private member `UIElementHandle m_labelStrip{kInvalidUIElement}`
   for the 16 px tall label strip at virtual y:832–848 px (overlay name text, left-aligned
@@ -171,7 +185,7 @@ any `StubUIBackend` in smoke tests
 
 - [ ] **MM-22** `src/ui/Minimap.cpp` — `draw()`: Budget-tick cadence. Cache the
   `queryTile()` iteration results (zone grid snapshot and road grid snapshot) in member
-  arrays. Re-query only when `consumeBudgetTicks()` returns a dirty flag. Per-frame `draw()`
+  arrays. Re-query only when `consumeBudgetTicks()` returns a non-zero count (> 0). Per-frame `draw()`
   uses the cached snapshot; no `queryTile()` calls are made on non-tick frames.
   (ref: `architecture/ui-ux/minimap.md` — "Overlay data is rendered into the minimap texture
   at budget-tick cadence (not per-frame)")
@@ -204,14 +218,20 @@ any `StubUIBackend` in smoke tests
 - [ ] **MM-27** `src/ui/Minimap.cpp` — `setCameraState()` implementation: Store the supplied
   `CameraState` in `m_cameraState` for use during the next `draw()` call.
 
-- [ ] **MM-28** `src/ui/Minimap.cpp` — `getWidgetFootprint()` implementation: Return
-  `UIRect{1576, 848, 344, 232}` (x:1576–1920, y:848–1080).
-  (ref: `architecture/ui-ux/minimap.md` — full overlay toggle row occupies x:1576–1752)
+- [ ] **MM-28** `src/ui/Minimap.cpp` — `getWidgetFootprint()` implementation: Return the
+  dynamic footprint `UIRect{1576, m_overlayActive ? 732 : 848, 344, m_overlayActive ? 348 : 232}`.
+  No overlay active → `{1576, 848, 344, 232}`; overlay active → `{1576, 732, 344, 348}`.
+  (ref: `architecture/ui-ux/minimap.md` — dynamic input-arbitration widget footprint)
 
-- [ ] **MM-29** `src/ui/Minimap.cpp` — input arbitration: Register the full widget footprint
-  `{1576, 848, 344, 232}` with the input-arbitration system so that overlay toggle button
-  click events are routed correctly and not lost to lower-priority handlers.
-  (ref: `architecture/ui-ux/minimap.md` — input-arbitration widget footprint)
+- [ ] **MM-29** `src/ui/UIManager.cpp` — input arbitration: In `UIManager`'s draw/update loop,
+  call `m_minimap->getWidgetFootprint()` each frame and cache the result; use this dynamic
+  rect (not a hard-coded constant) when evaluating whether a click falls inside the minimap
+  widget. When no overlay is active the footprint is `{1576,848,344,232}`; when any overlay
+  is active the footprint expands to `{1576,732,344,348}` so the legend panel and label strip
+  block click-through to city tiles. The `kMinimapWidgetTop`/`kMinimapWidgetTopOverlayActive`
+  constants in `ui_constants.h` encode the two Y values (848 and 732 respectively); do NOT
+  hard-code raw numbers in UIManager.
+  (ref: `architecture/ui-ux/input-arbitration.md` — minimap carve-out with dynamic bounds)
 
 ---
 
@@ -295,12 +315,15 @@ any `StubUIBackend` in smoke tests
   (ref: `architecture/ui-ux/minimap.md` — budget-tick cadence)
 
 - [ ] **MM-41** `tests/ui/minimap_overlay_test.cpp` — Group 9: Input footprint (8 tests).
-  Verify `getBounds()` returns `Rect{1720, 880, 200, 200}` (render area only, not chrome);
-  verify `getWidgetFootprint()` returns `UIRect{1576, 848, 344, 232}` (full toggle row and
-  legend extent); verify the two methods return distinct values; verify toggle button hit-test
-  regions lie within the widget footprint; verify the label strip and legend panel lie within
-  the widget footprint.
-  (ref: `architecture/ui-ux/minimap.md` — `getBounds()` semantics, widget footprint)
+  Verify `getBounds()` always returns `Rect{1720, 880, 200, 200}` (render area only);
+  verify `getWidgetFootprint()` returns `UIRect{1576, 848, 344, 232}` when no overlay active;
+  verify `getWidgetFootprint()` returns `UIRect{1576, 732, 344, 348}` when overlay is active
+  (toggle a service coverage overlay on, then call getWidgetFootprint() — y drops to 732,
+  height grows to 348); verify the two `getBounds()`/`getWidgetFootprint()` methods return
+  distinct values in both overlay states; verify toggle button hit-test regions lie within the
+  base (no-overlay) footprint; verify the label strip and legend panel Y coords lie within the
+  overlay-active footprint.
+  (ref: `architecture/ui-ux/minimap.md` — `getBounds()` semantics, dynamic widget footprint)
 
 - [ ] **MM-42** `tests/ui/minimap_overlay_test.cpp` — Group 10: Element leak regression
   (5 tests). Set `EXPECT_CALL(mockBackend, addStaticText(...)).Times(0)` and
@@ -325,7 +348,8 @@ any `StubUIBackend` in smoke tests
   `MOCK_METHOD` stub and in `IrrlichtUIBackend` with a real `draw2DRectangle` implementation.
 - [ ] `CameraState` has `targetX`, `targetZ`, `zoomDistance` fields (MM-05) and
   `CameraController::getCameraState()` populates them (MM-06).
-- [ ] `Minimap::getWidgetFootprint()` returns `UIRect{1576, 848, 344, 232}` (MM-11, MM-28);
+- [ ] `Minimap::getWidgetFootprint()` returns `UIRect{1576,848,344,232}` when no overlay
+  active and `UIRect{1576,732,344,348}` when overlay active (MM-10, MM-28);
   `Minimap::getBounds()` continues to return `Rect{1720, 880, 200, 200}` unchanged.
 - [ ] Legend panel geometry is 200×100 at virtual x:1720, y:732 (not 80×100 at the former
   position) — verified by Group 7 tests (MM-39).
@@ -333,6 +357,9 @@ any `StubUIBackend` in smoke tests
   not once per frame — verified by Group 8 tests (MM-40).
 - [ ] `architecture/ui-ux/minimap.md` Colorblind mode deferral note added (SU-01).
 - [ ] `architecture/ui-ux/ui-manager.md` IUIBackend method 22 `fillColoredRect` documented (SU-02).
+- [ ] `architecture/ui-ux/camera-controls.md` Phase 11p extension section added (SU-03).
+- [ ] `architecture/ui-ux/minimap.md` Phase 9b deferred API updated from `panTo()` to
+  `setTarget()` (SU-04).
 - [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
   reports zero errors.
 
@@ -354,7 +381,7 @@ any `StubUIBackend` in smoke tests
   method 21 established; `UITestFixtureBase` and `MockUIBackend.h` in their clean state).
 - `ICitySimulation::queryTile()`, `getMapTilesX()`, `getMapTilesZ()` must be present on the
   interface (confirmed present from Phase 6 onward).
-- `consumeBudgetTicks()` dirty-flag mechanism must be accessible from `Minimap` (confirmed
+- `consumeBudgetTicks()` tick-count mechanism must be accessible from `Minimap` (confirmed
   present from Phase 9b onward).
 - `CameraController::kMaxZoomDistance` must be accessible as a public `constexpr` so
   `Minimap.cpp` can compute the viewport side length (confirm or expose before implementing
@@ -375,8 +402,8 @@ any `StubUIBackend` in smoke tests
   confirm the constant name and visibility; expose or rename before authoring the viewport
   formula.
 
-- **RISK**: The budget-tick dirty-flag mechanism (`consumeBudgetTicks()`) may return the tick
-  delta rather than a boolean, requiring the minimap to compare against zero. **Spike**: Read
+- **RISK**: The budget-tick tick-count mechanism (`consumeBudgetTicks()`) may return the tick
+  delta rather than a non-zero tick count, requiring the minimap to compare against zero. **Spike**: Read
   `src/ui/Minimap.h` and `ICitySimulation.h` to confirm the exact return type and semantics
   before implementing MM-22.
 

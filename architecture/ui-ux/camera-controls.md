@@ -73,3 +73,18 @@ Code inspection of `src/interfaces/camera_state.h` confirms the `CameraState` st
 - `float yaw{0.0f}` — test-seam spherical coordinate (degrees)
 
 The three `vec3` fields match the locked canonical definition established in Phase 0. The `pitch` and `float yaw` fields are the newly added test-seam fields required for null-camera unit tests. Field layout is compliant with spec.
+
+## Phase 11p Extension: CameraState Fields for Minimap Viewport Projection
+
+`MM-05` (Phase 11p) adds three new fields to the `CameraState` struct in
+`src/interfaces/camera_state.h` for minimap viewport rectangle projection:
+
+| Field | Type | Default | Semantics |
+|---|---|---|---|
+| `targetX` | `float` | `0.f` | World X coordinate of the camera look-at target |
+| `targetZ` | `float` | `0.f` | World Z coordinate of the camera look-at target |
+| `zoomDistance` | `float` | `200.f` | Distance from the camera to its look-at target (proxy for zoom level) |
+
+`CameraController::getCameraState()` (`MM-06`) populates all three fields each frame.
+`Minimap::draw()` (`MM-21`) reads them to project the camera viewport rectangle onto the
+200×200 minimap area. The three fields are read-only from Minimap's perspective.
