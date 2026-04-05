@@ -32,7 +32,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Analyze with SonarCloud
-        uses: SonarSource/sonarcloud-github-action@5c8a8a642e79153f5d047b10ec1cba1d1cc65699  # v3.35.1
+        uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8  # v5.0.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
@@ -44,4 +44,5 @@ jobs:
             -Dsonar.coverageReportPaths=coverage.xml
             -Dsonar.exclusions=assets/**,build/**,tools/**
             -Dsonar.cpd.exclusions=tests/**
+            -Dsonar.scm.provider=git
           projectBaseDir: .
