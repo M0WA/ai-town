@@ -18,6 +18,7 @@ class ICitySimulation;
 class IRenderer;
 class ITerrainQuery;
 class ISaveSystem;
+class CameraController;
 namespace irr { class ILogger; }
 
 // INCLUDE PROHIBITION: Do NOT replace this forward declaration with
@@ -212,6 +213,12 @@ public:
     // Called from main.cpp after SaveSystem is constructed.
     void setSaveSystem(ISaveSystem* saveSystem);
 
+    // Phase 11p: late-bind CameraController for minimap viewport and click-to-pan.
+    void setCameraController(CameraController* cc);
+
+    // Phase 11p: draw minimap overlay (transient fill rects, called after guiEnv->drawAll).
+    void drawMinimapOverlay();
+
     // Phase 11l: Supply the Irrlicht logger so KeyBindings::load() can route
     // warnings through irr::ILogger* instead of falling back to stderr.
     // Called from main.cpp after device creation.  nullptr is safe (no-op logging).
@@ -356,6 +363,7 @@ private:
     ITerrainQuery* m_terrain{nullptr};
     irr::ILogger*  m_logger{nullptr};
     ISaveSystem*   m_saveSystem{nullptr};
+    CameraController* m_cameraController{nullptr};
 
     // --- Game state machine ---
     GameState  m_state{GameState::MainMenu};

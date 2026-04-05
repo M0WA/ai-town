@@ -380,6 +380,12 @@ void IrrlichtRenderer::drawScene() {
             guiEnv->drawAll();
         }
     }
+
+    // Minimap overlay: transient fillColoredRect calls must happen after guiEnv->drawAll()
+    // so they paint on top of the minimap background element.
+    if (m_uiManager) {
+        m_uiManager->drawMinimapOverlay();
+    }
 }
 
 void IrrlichtRenderer::endFrame() {

@@ -107,4 +107,9 @@ public:
     //     amber #F0B429 = (240, 180, 41) immediately after addStaticText().
     virtual void            setElementTextColor(UIElementHandle handle,
                                                 int r, int g, int b) = 0;
+
+    // 22. Transient filled-rectangle draw call in virtual 1920x1080 coordinate space;
+    //     no persistent UIElementHandle created; must be called inside a frame render pass
+    //     (between beginScene/endScene); r, g, b, a each in [0, 255].
+    virtual void fillColoredRect(int x, int y, int w, int h, int r, int g, int b, int a) = 0;
 };

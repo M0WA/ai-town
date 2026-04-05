@@ -1212,7 +1212,7 @@ protected:
         ON_CALL(backend_, getVirtualWidth()).WillByDefault(Return(1920));
         ON_CALL(backend_, getVirtualHeight()).WillByDefault(Return(1080));
 
-        minimap_ = std::make_unique<Minimap>(&backend_);
+        minimap_ = std::make_unique<Minimap>(&backend_, nullptr, nullptr, nullptr);
     }
 
     void TearDown() override {
@@ -1246,10 +1246,10 @@ TEST_F(MinimapStandaloneTest, GetBounds) {
     EXPECT_EQ(r.y, 880);
 }
 
-// Draw when visible updates toggle button text.
+// Draw when visible updates button alpha.
 TEST_F(MinimapStandaloneTest, Draw_Visible_UpdatesToggleText) {
     minimap_->show();
-    EXPECT_CALL(backend_, setElementText(_, "Svc")).Times(AtLeast(1));
+    EXPECT_CALL(backend_, setElementAlpha(_, _)).Times(AtLeast(1));
     minimap_->draw();
 }
 
@@ -1263,16 +1263,17 @@ TEST_F(MinimapStandaloneTest, Draw_WhenHidden_NoCrash) {
 TEST_F(MinimapStandaloneTest, ToggleOverlay) {
     minimap_->show();
     minimap_->toggleOverlay();
+    EXPECT_TRUE(minimap_->isOverlayActive());
 
-    EXPECT_CALL(backend_, setElementText(_, "[Svc]")).Times(AtLeast(1));
     minimap_->draw();
 
     minimap_->toggleOverlay();
-    EXPECT_CALL(backend_, setElementText(_, "Svc")).Times(AtLeast(1));
+    EXPECT_FALSE(minimap_->isOverlayActive());
+
     minimap_->draw();
 }
 
-// Click on toggle button (1720-1752, 848-880) toggles overlay.
+// Click on Svc toggle button (1720-1752, 848-880) activates service overlay.
 TEST_F(MinimapStandaloneTest, ClickToggleButton_TogglesOverlay) {
     minimap_->show();
 
@@ -1283,10 +1284,8 @@ TEST_F(MinimapStandaloneTest, ClickToggleButton_TogglesOverlay) {
     click.y = 860;
     bool consumed = minimap_->onEvent(click);
     EXPECT_TRUE(consumed);
-
-    // Verify overlay toggled.
-    EXPECT_CALL(backend_, setElementText(_, "[Svc]")).Times(AtLeast(1));
-    minimap_->draw();
+    EXPECT_TRUE(minimap_->isOverlayActive());
+    EXPECT_EQ(minimap_->getOverlayMode(), MinimapOverlay::ServiceCoverage);
 }
 
 // Click on minimap area (1720-1920, 880-1080) is consumed (click-to-pan).

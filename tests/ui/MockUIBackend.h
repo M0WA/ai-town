@@ -3,7 +3,7 @@
 #include "src/interfaces/IUIBackend.h"
 #include "gmock/gmock.h"
 
-// MockUIBackend — GMock implementation of IUIBackend's 21 methods.
+// MockUIBackend — GMock implementation of IUIBackend's 22 methods.
 // Source location: tests/ui/mock_ui_backend.h
 // Returns arbitrary non-zero integer handles (e.g., an incrementing counter)
 // with no real objects — unit tests that call UIManager methods never dereference
@@ -40,4 +40,5 @@ public:
     // call this with amber #F0B429 = (240, 180, 41) for financial figures.
     // No-op in most tests; NiceMock<MockUIBackend> suppresses unexpected-call warnings.
     MOCK_METHOD(void,            setElementTextColor,  (UIElementHandle handle, int r, int g, int b),           (override));
+    MOCK_METHOD(void,            fillColoredRect,      (int x, int y, int w, int h, int r, int g, int b, int a), (override));
 };
