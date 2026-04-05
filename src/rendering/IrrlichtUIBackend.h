@@ -34,7 +34,7 @@ namespace irr {
     namespace video { class IVideoDriver; class ITexture; }
 }  // namespace irr
 
-// IrrlichtUIBackend — Full Irrlicht-backed implementation of all 21 IUIBackend
+// IrrlichtUIBackend — Full Irrlicht-backed implementation of all 22 IUIBackend
 // pure-virtual methods. Phase 8 deliverable replacing Phase 1 stubs.
 // Method 18 (setElementBackground) added in Phase 9b.
 // Method 19 (setElementMonoFont) added in Phase 10.
@@ -188,6 +188,10 @@ public:
     //     Calls IGUIStaticText::setOverrideColor(SColor(255, r, g, b)).
     //     No-op on button elements or invalid handles.
     void setElementTextColor(UIElementHandle handle, int r, int g, int b) override;
+
+    // 22. Transient filled-rectangle draw call in virtual 1920x1080 coordinate space.
+    //     Scales to physical screen pixels and calls m_driver->draw2DRectangle().
+    void fillColoredRect(int x, int y, int w, int h, int r, int g, int b, int a) override;
 
 private:
     irr::IrrlichtDevice*       m_device{nullptr};

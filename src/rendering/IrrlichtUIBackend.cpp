@@ -944,6 +944,34 @@ void IrrlichtUIBackend::setElementTextColor(UIElementHandle handle, int r, int g
 }
 
 // ---------------------------------------------------------------------------
+// 22. fillColoredRect
+// Transient filled-rectangle draw call. Scales virtual 1920x1080 coordinates
+// to physical screen pixels and calls m_driver->draw2DRectangle().
+// ---------------------------------------------------------------------------
+void IrrlichtUIBackend::fillColoredRect(int x, int y, int w, int h,
+                                         int r, int g, int b, int a)
+{
+    if (!m_driver) return;
+
+    const int sw = getScreenWidth();
+    const int sh = getScreenHeight();
+    const int vw = getVirtualWidth();
+    const int vh = getVirtualHeight();
+    const int px = (x * sw) / vw;
+    const int py = (y * sh) / vh;
+    const int pw = (w * sw) / vw;
+    const int ph = (h * sh) / vh;
+
+    m_driver->draw2DRectangle(
+        irr::video::SColor(
+            static_cast<irr::u32>(a),
+            static_cast<irr::u32>(r),
+            static_cast<irr::u32>(g),
+            static_cast<irr::u32>(b)),
+        irr::core::rect<irr::s32>(px, py, px + pw, py + ph));
+}
+
+// ---------------------------------------------------------------------------
 // handleViewportResize
 // Detects screen size changes and repositions every GUI element so that its
 // physical pixel position matches its stored virtual coordinate at the new

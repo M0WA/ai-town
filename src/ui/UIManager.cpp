@@ -26,6 +26,7 @@
 #include "src/ui/PauseMenuPanel.h"
 #include "src/ui/SettingsPanel.h"
 #include "src/ui/ModalDialog.h"
+#include "src/ui/CameraController.h"
 
 // Explicit interface includes for method calls on forward-declared pointers.
 #include "src/interfaces/IAudioSystem.h"
@@ -119,7 +120,7 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
     m_notifications = new NotificationManager(m_backend, m_sim, m_clock, m_audio);
     m_mainMenu      = new MainMenuPanel(m_backend);   // calls show() in its constructor
     m_hud           = new HUD(m_backend, m_audio, m_sim, m_clock);
-    m_minimap       = new Minimap(m_backend);
+    m_minimap       = new Minimap(m_backend, m_audio, m_sim, m_clock);
     m_inspector     = new InspectorPanel(m_backend, m_sim);
     m_pauseMenu     = new PauseMenuPanel(m_backend);
     m_settings      = new SettingsPanel(m_backend, m_audio, m_clock);
@@ -347,11 +348,11 @@ bool UIManager::onEvent(const InputEvent& event) {
                        kToolbarBottom - kToolbarTop)) {
                 // Fall through to lower priorities.
             }
-            // Minimap carve-out: clicks in minimap bounds pass through.
+            // Minimap carve-out: clicks in minimap widget footprint pass through.
             else {
-                UIRect minimapBounds = m_minimap->getBounds();
-                if (inRect(event.x, event.y, minimapBounds.x, minimapBounds.y,
-                           minimapBounds.w, minimapBounds.h)) {
+                UIRect minimapFp = m_minimap->getWidgetFootprint();
+                if (inRect(event.x, event.y, minimapFp.x, minimapFp.y,
+                           minimapFp.w, minimapFp.h)) {
                     // Fall through to lower priorities.
                 } else {
                     // Outside click — close inspector, consume event.
@@ -786,13 +787,14 @@ bool UIManager::onEvent(const InputEvent& event) {
             return true;
         }
 
-        // Minimap (bottom-right).
-        UIRect minimapBounds = m_minimap->getBounds();
-        if (inRect(event.x, event.y, minimapBounds.x, minimapBounds.y,
-                   minimapBounds.w, minimapBounds.h)) {
-            // Minimap click — consumed. Full click-to-move-camera logic is
-            // wired when the minimap is interactable.
-            return true;
+        // Minimap widget footprint (bottom-right, includes toggle buttons and legend).
+        {
+            UIRect minimapFp = m_minimap->getWidgetFootprint();
+            if (inRect(event.x, event.y, minimapFp.x, minimapFp.y,
+                       minimapFp.w, minimapFp.h)) {
+                m_minimap->onEvent(event);
+                return true;
+            }
         }
     }
 
@@ -1363,6 +1365,9 @@ void UIManager::updateSubPanelVisibility() {
 // ----------------------------------------------------------------
 void UIManager::draw() {
     m_mainMenu->draw();       // slot 1 — main menu (hidden during gameplay)
+    if (m_minimap && m_cameraController) {
+        m_minimap->setCameraState(m_cameraController->getCameraState());
+    }
     m_minimap->draw();        // slot 2 — minimap (bottom-right in gameplay)
     m_hud->draw();            // slot 3 — HUD toolbar and resource bar
     if (m_hud && m_hud->getFinances()) m_hud->getFinances()->draw();  // slot 4 — finances panel (toggled by T)
@@ -1560,6 +1565,7 @@ bool UIManager::updateModalDialogState() {
         for (int i = 0; i < ticks; ++i) {
             m_saveSystem->onBudgetTick();
         }
+        if (m_minimap && ticks > 0) m_minimap->onBudgetTicks(ticks);
     }
 
     return false;
@@ -2008,6 +2014,19 @@ void UIManager::setTerrainQuery(ITerrainQuery* terrain) {
 
 void UIManager::setLogger(irr::ILogger* logger) {
     m_logger = logger;
+}
+
+void UIManager::setCameraController(CameraController* cc) {
+    m_cameraController = cc;
+    if (m_minimap && cc) {
+        m_minimap->setPanCallback([cc](float worldX, float worldZ) {
+            cc->setTarget(worldX, worldZ);
+        });
+    }
+}
+
+void UIManager::drawMinimapOverlay() {
+    if (m_minimap) m_minimap->drawOverlay();
 }
 
 void UIManager::setMapDimensions(int mapTilesX, int mapTilesZ) {

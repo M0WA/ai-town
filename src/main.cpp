@@ -168,6 +168,8 @@ int main(int argc, char** argv) {
 
     // Late-bind UIManager to renderer (breaks circular construction dependency).
     renderer.setUIManager(&uiManager);
+    // Phase 11p: late-bind CameraController for minimap viewport and click-to-pan.
+    uiManager.setCameraController(&cameraController);
     // Phase 11l: supply Irrlicht logger so KeyBindings::load() routes warnings through ILogger.
     uiManager.setLogger(device->getLogger());
 

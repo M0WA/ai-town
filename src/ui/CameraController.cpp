@@ -301,6 +301,9 @@ CameraState CameraController::getCameraState() const {
         state.position = vec3{m_targetX + offX, offY, m_targetZ + offZ};
         state.pitch    = m_pitch;
         state.yaw      = m_yaw;
+        state.targetX      = m_targetX;
+        state.targetZ      = m_targetZ;
+        state.zoomDistance  = m_zoomDistance;
 
         return state;
     }
@@ -321,6 +324,9 @@ CameraState CameraController::getCameraState() const {
     state.up       = toVec3(m_camera->getUpVector());  // MUST use getUpVector(), NOT (0,1,0)
     state.pitch    = m_pitch;
     state.yaw      = m_yaw;
+    state.targetX      = m_targetX;
+    state.targetZ      = m_targetZ;
+    state.zoomDistance  = m_zoomDistance;
 
     return state;
 }
