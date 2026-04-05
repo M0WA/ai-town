@@ -112,6 +112,14 @@ any `StubUIBackend` in smoke tests
   world-coordinate pan callback invoked when the player clicks the minimap.
   (ref: `architecture/ui-ux/minimap.md` — click-to-pan)
 
+- [ ] **MM-09a** `src/ui/Minimap.h`: Add public method
+  `void onBudgetTicks(int count)` — called by `UIManager::update()` with the tick count
+  already obtained from `ICitySimulation::consumeBudgetTicks()`. Stores `count` into a
+  private `int m_pendingTicks{0}` member (add to private section). `draw()` checks
+  `m_pendingTicks > 0` instead of calling `consumeBudgetTicks()` directly, then resets
+  `m_pendingTicks` to 0 after refreshing the cache.
+  (ref: `architecture/ui-ux/minimap.md` — budget-tick cadence)
+
 - [ ] **MM-10** `src/ui/Minimap.h`: Add public method
   `UIRect getWidgetFootprint() const` — returns the **dynamic** input-arbitration footprint:
   `{1576, m_overlayActive ? 732 : 848, 344, m_overlayActive ? 348 : 232}`.
@@ -133,8 +141,9 @@ any `StubUIBackend` in smoke tests
   to x:1720, text colour `#EBF4F6`).
   (ref: `architecture/ui-ux/minimap.md` — label strip)
 
-- [ ] **MM-13** `src/ui/Minimap.h`: Add private members `CameraState m_cameraState{}` and
-  `std::function<void(float, float)> m_panCallback{}`.
+- [ ] **MM-13** `src/ui/Minimap.h`: Add private members `CameraState m_cameraState{}`,
+  `std::function<void(float, float)> m_panCallback{}`, and `int m_pendingTicks{0}` (the
+  forwarded tick count set by `onBudgetTicks()`, consumed and reset to 0 by `draw()`).
 
 - [ ] **MM-13b** `src/ui/Minimap.h` + `src/ui/Minimap.cpp` + `src/ui/UIManager.cpp`: Widen
   the Minimap constructor to the 4-param canonical form:
@@ -214,7 +223,7 @@ any `StubUIBackend` in smoke tests
   (`m_overlayActive && m_overlayMode == MinimapOverlay::Traffic`), iterate road tiles using the cached
   snapshot from `ICitySimulation::getRoadSegmentSpeeds()` (populated at budget-tick cadence,
   MM-22) and colour each road tile by speed band: free-flowing (>=40% of free-flow speed) ->
-  `#27AE60`, mild congestion (31-39% of free-flow speed) -> `#E67E22`, heavy congestion
+  `#27AE60`, mild congestion (>30% and <40% of free-flow speed) -> `#E67E22`, heavy congestion
   (<=30% of free-flow speed) -> `#E74C3C`.
   These colours replace the base road grey `#7F8C8D` for those tiles when the Tfc overlay is
   active. Do NOT call `getRoadSegmentSpeeds()` redundantly — reuse the cached snapshot.
@@ -246,7 +255,9 @@ any `StubUIBackend` in smoke tests
 
 - [ ] **MM-22** `src/ui/Minimap.cpp` — `draw()`: Budget-tick cadence. Cache **all three**
   simulation data sources in member arrays, refreshed together when
-  `consumeBudgetTicks()` returns a non-zero count (> 0):
+  `m_pendingTicks > 0` (set by `UIManager::update()` via `onBudgetTicks()`, then reset to 0 after
+  the cache refresh — do NOT call `consumeBudgetTicks()` directly from `Minimap::draw()` as
+  `UIManager::update()` already consumes all ticks before `draw()` is called):
   1. `queryTile(x, z)` iteration — zone grid snapshot and road grid snapshot (used by
      MM-19 zone colours, MM-20 road grey).
   2. `ICitySimulation::getServiceCoverage()` — service coverage tile snapshot (used by
@@ -327,6 +338,13 @@ any `StubUIBackend` in smoke tests
   each frame, passing the `CameraState` obtained from `m_cameraController->getCameraState()`,
   so the minimap always has current camera position and zoom for viewport rectangle projection.
   (ref: `architecture/ui-ux/minimap.md` — camera viewport rectangle)
+
+- [ ] **MM-30c** `src/ui/UIManager.cpp` — `update()`: Forward budget ticks to the minimap.
+  Immediately after the existing `int ticks = m_sim->consumeBudgetTicks()` block (which
+  forwards ticks to `m_saveSystem`), add: `if (m_minimap && ticks > 0) m_minimap->onBudgetTicks(ticks);`
+  This ensures the Minimap receives the tick count that UIManager already consumed, so
+  `Minimap::draw()` can refresh its tile cache on the correct cadence.
+  (ref: `architecture/ui-ux/minimap.md` — budget-tick cadence)
 
 - [ ] **MM-30a** `src/ui/UIManager.h` + `src/ui/UIManager.cpp`: Declare and implement the new
   public method `void drawMinimapOverlay()`. In `UIManager.h`, add the public method declaration.
@@ -443,12 +461,12 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   not re-query; verify that a budget tick occurring between two `draw()` calls triggers a
   re-query on the second `draw()`; verify the cached snapshot is used for rendering in
   non-tick frames.
-  **Mock setup**: Use `ON_CALL(m_sim, consumeBudgetTicks()).WillByDefault(Return(0))` as the
-  base stub (no tick occurred). To simulate a tick arrival, call
-  `EXPECT_CALL(m_sim, consumeBudgetTicks()).WillOnce(Return(1))` before the relevant `draw()`
-  call — a return value of 1 (non-zero) triggers a full re-query of zone/road data; a return
-  of 0 means no re-query. This pattern controls tick delivery precisely in all 4 Group 8 test
-  cases.
+  **Mock setup**: No `consumeBudgetTicks()` mock is needed — Group 8 tests call
+  `m_minimap->onBudgetTicks(1)` directly (bypassing UIManager) to simulate a tick arrival
+  before the relevant `draw()` call. A non-zero argument triggers a full re-query of
+  zone/road/overlay data; no `onBudgetTicks()` call (or `onBudgetTicks(0)`) means no
+  re-query. This pattern controls tick delivery precisely in all 4 Group 8 test cases
+  without coupling the tests to the `consumeBudgetTicks()` API.
   (ref: `architecture/ui-ux/minimap.md` — budget-tick cadence)
 
 - [ ] **MM-41** `tests/ui/minimap_overlay_test.cpp` — Group 9: Input footprint (8 tests).
@@ -500,7 +518,7 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   or road colours apply instead); (c) Traffic Congestion overlay: activate Tfc overlay, stub
   `getRoadSegmentSpeeds()` with known speed values, call `drawOverlay()`, and assert
   `fillColoredRect` is called with `#27AE60` for road tiles at >=40% of their free-flow speed,
-  `#E67E22` for 31-39% of their free-flow speed, `#E74C3C` for <=30% of their free-flow
+  `#E67E22` for >30% and <40% of their free-flow speed, `#E74C3C` for <=30% of their free-flow
   speed; (d) verify base road grey (`#7F8C8D`) is NOT emitted for road tiles
   when Tfc overlay is active; (e) deactivating the overlay reverts to base zone/road rendering.
   (ref: `architecture/ui-ux/minimap.md` — overlay tile rendering)
