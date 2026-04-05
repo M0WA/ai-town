@@ -166,11 +166,22 @@ any `StubUIBackend` in smoke tests
   - Change the `SetUp()` constructor call from
     `minimap_ = std::make_unique<Minimap>(&backend_)` to
     `minimap_ = std::make_unique<Minimap>(&m_backend, nullptr, &m_sim, &m_clock)`.
+  - **Exception — three null-sim tests**: The following three tests exercise the
+    `m_sim == nullptr` code path and MUST NOT use `&m_sim` as the third constructor
+    argument:
+    - `SetOverlayMode_Traffic_NoSim_FallsBackToNone`
+    - `Draw_TrafficOverlay_NoSimulation_NoQueryCall`
+    - `Draw_ServiceCoverageOverlay_NoSimulation_NoQueryCall`
+    These three tests must pass `nullptr` for the `ICitySimulation*` parameter:
+    `Minimap(&m_backend, nullptr, nullptr, &m_clock)`. Move them to a separate
+    `MinimapNoSimTest` fixture (or construct the minimap directly in each test body),
+    so they do not inherit the shared `SetUp()` that wires `&m_sim`.
   - The target form is already described in MM-33 (the Phase 11p `MinimapOverlayTest`
-    fixture spec); MM-13c brings the 25 existing Phase 11d tests into alignment with that
-    target so all test cases in the file share a single consistent fixture.
+    fixture spec); MM-13c brings the remaining 22 Phase 11d tests into alignment with
+    that target so all non-null-sim test cases in the file share a single consistent
+    fixture.
   (ref: `architecture/testing/testability-architecture.md` — MinimapOverlayTest fixture,
-  4-param canonical constructor order)
+  null-sim construction variant)
 
 ---
 
@@ -186,12 +197,13 @@ any `StubUIBackend` in smoke tests
   and populate the budget-tick cache. `Minimap::drawOverlay()` is invoked from
   `IrrlichtRenderer::drawScene()` AFTER `guiEnv->drawAll()`, so tile colours always
   render on top of the GUI background panel (`m_mapBg`).
-  **Visibility guard**: `drawOverlay()` MUST begin with the same early-return guard as
-  `draw()`: `if (!m_visible || !m_backend) return;` — this ensures all `fillColoredRect`
+  **Visibility guard**: `drawOverlay()` MUST begin with `if (!m_visible || !m_backend || !m_sim) return;` — this ensures all `fillColoredRect`
   tile colour calls and the viewport outline call are suppressed when the minimap is
   hidden (e.g. on the main menu and game-over screens where `hide()` has been called),
   matching the behaviour of `draw()` and preventing transient rect draws every frame
-  while the minimap is not visible.
+  while the minimap is not visible. When `m_sim` is null, `drawOverlay()` emits no
+  `fillColoredRect` calls; the viewport formula requires world tile dimensions from
+  `m_sim->getMapTilesX()` / `m_sim->getMapTilesZ()` and cannot proceed without a live sim pointer.
   (ref: `architecture/graphics-architecture/irrlicht-device-lifecycle.md` — render order)
 
 - [ ] **MM-15** `src/ui/Minimap.cpp` — constructor: Replace the single `m_toggleBtn` button
@@ -286,7 +298,11 @@ any `StubUIBackend` in smoke tests
   simulation data sources in member arrays, refreshed together when
   `m_pendingTicks > 0` (set by `UIManager::update()` via `onBudgetTicks()`, then reset to 0 after
   the cache refresh — do NOT call `consumeBudgetTicks()` directly from `Minimap::draw()` as
-  `UIManager::update()` already consumes all ticks before `draw()` is called):
+  `UIManager::update()` already consumes all ticks before `draw()` is called).
+  At the start of the `m_pendingTicks > 0` cache-refresh block, guard against a null sim:
+  `if (!m_sim) { m_pendingTicks = 0; return; }` — clear the pending tick count and skip
+  all three simulation queries if `m_sim` is not yet wired. This handles the null-sim
+  path confirmed by the `SetOverlayMode_Traffic_NoSim_FallsBackToNone` test in Phase 11d.
   1. `queryTile(x, z)` iteration — zone grid snapshot and road grid snapshot (used by
      MM-19 zone colours, MM-20 road grey).
   2. `ICitySimulation::getServiceCoverage()` — service coverage tile snapshot (used by
@@ -409,14 +425,14 @@ any `StubUIBackend` in smoke tests
 
 **CMakeLists.txt registration** (required before tests are discoverable by CTest):
 
-- [ ] **MM-32** Root `CMakeLists.txt`: Register the test file by extending the existing
-  `ui_tests` target via `target_sources(ui_tests PRIVATE tests/ui/minimap_overlay_test.cpp)`.
-  Do NOT call `add_executable(ui_tests ...)` again — use `target_sources` per framework.md
-  §Phase 4+ target extension policy. **No additional `aitown_add_tests()` call is needed**:
-  the existing `aitown_add_tests(ui_tests LABEL "unit" TIMEOUT 300)` call already registers
-  the entire `ui_tests` target with the `unit` CTest label; adding sources via `target_sources`
-  automatically makes the 76 new cases discoverable by CTest under the `unit` label in all CI
-  jobs (`build-linux`, `build-windows`, `coverage-linux`).
+- [ ] **MM-32** Root `CMakeLists.txt`: **Verify** that `tests/ui/minimap_overlay_test.cpp` is
+  already registered in the `ui_tests` target via `target_sources` (this registration was done
+  in Phase 11d). **Do NOT add a duplicate `target_sources` call.** The existing
+  `aitown_add_tests(ui_tests LABEL "unit" TIMEOUT 300)` call already registers the entire
+  `ui_tests` target with the `unit` CTest label; the 76 new cases added by Phase 11p are
+  automatically discoverable by CTest under the `unit` label in all CI jobs (`build-linux`,
+  `build-windows`, `coverage-linux`) once the new test cases are compiled into the existing
+  registered binary.
   (ref: `architecture/testing/framework.md` — `target_sources` policy)
 
 **File:** `tests/ui/minimap_overlay_test.cpp` (extended via `target_sources`)
@@ -439,6 +455,10 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   objects are destroyed, to prevent unexpected `removeElement()` calls during Minimap
   destruction from triggering mock violations. Document this destructor-path contract in a
   comment. Base fixture setup includes
+  `ON_CALL(m_sim, getMapTilesX()).WillByDefault(Return(64))` and
+  `ON_CALL(m_sim, getMapTilesZ()).WillByDefault(Return(64))` (prevents division-by-zero in
+  the viewport projection formula where worldW = getMapTilesX() * kTileSize is used as a
+  divisor in drawOverlay()), plus
   `ON_CALL(m_sim, consumeBudgetTicks()).WillByDefault(Return(0))` as a defensive guard
   (this prevents accidental double-consumption if `Minimap` ever incorrectly called
   `consumeBudgetTicks` directly; it does NOT trigger cache population). Individual tests
@@ -446,12 +466,13 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   before invoking `draw()` and `drawOverlay()` — this is the correct injection path because
   `Minimap` receives the tick count forwarded by `UIManager` via `onBudgetTicks(count)`,
   never by calling `consumeBudgetTicks()` itself (per MM-09a and MM-22). Stub
-  `ICitySimulation::queryTile()` to return each of the four zone types (Residential,
-  Commercial, Industrial, None) and verify that `drawOverlay()` emits `fillColoredRect` calls
-  with the correct authoritative hex colours (`#27AE60`, `#2980B9`, `#F39C12`) and skips
-  empty tiles. Include tests for mixed-zone maps. The 9th test verifies the visibility guard
+  `ICitySimulation::queryTile()` to return each of the three zone types (Residential,
+  Commercial, Industrial) and an unzoned tile (`QueryResult{.isZoned = false}`) — note:
+  `ZoneType` has no `None` variant; unzoned tiles are represented by `isZoned == false`.
+  Verify that `drawOverlay()` emits `fillColoredRect` calls with the correct authoritative
+  hex colours (`#27AE60`, `#2980B9`, `#F39C12`) and skips unzoned tiles. Include tests for mixed-zone maps. The 9th test verifies the visibility guard
   (MM-14): call `m_minimap->hide()` followed by `m_minimap->drawOverlay()` and assert that
-  zero `fillColoredRect` calls are emitted — confirming that the `if (!m_visible || !m_backend) return;`
+  zero `fillColoredRect` calls are emitted — confirming that the `if (!m_visible || !m_backend || !m_sim) return;`
   guard suppresses all transient drawing when the minimap is not visible.
   (ref: `architecture/ui-ux/minimap.md` — zone color coding, authoritative hex values;
   `architecture/ui-ux/minimap.md` — visibility guard suppresses drawing when hidden)
@@ -547,9 +568,14 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   The `MinimapElementLeakTest` fixture must include a `TearDown()` override that resets the
   Minimap to `nullptr` before the mock is destroyed, to prevent unexpected `removeElement()`
   calls during destruction from triggering mock violations.
+  **Cache pre-population**: The `MinimapElementLeakTest` fixture `SetUp()` must call
+  `m_minimap->onBudgetTicks(1)` after constructing the Minimap AND configure a default
+  `ON_CALL(m_sim, queryTile(_, _)).WillByDefault(Return(zonedResidentialTile))` so that
+  `drawOverlay()` has cached tile data to render. Without this setup, `drawOverlay()` emits
+  zero `fillColoredRect` calls and the `Times(AtLeast(1))` expectation always fails.
   **Two-step call pattern**: Each test scenario calls `draw()` first, then `drawOverlay()`,
-  matching the production rendering order (MM-14). `draw()` updates element states and
-  populates the budget-tick cache; `drawOverlay()` emits all `fillColoredRect` calls.
+  matching the production rendering order (MM-14). `draw()` updates element states;
+  `drawOverlay()` emits all `fillColoredRect` calls from the already-populated cache.
   Set `EXPECT_CALL(mockBackend, addStaticText(...)).Times(0)` and
   `EXPECT_CALL(mockBackend, addButton(...)).Times(0)` before the `draw()` call — these
   `Times(0)` expectations verify that `draw()` creates no new GUI elements, and `NiceMock`
@@ -558,7 +584,7 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   is satisfied by `drawOverlay()` (not `draw()`), since MM-14 moved all `fillColoredRect`
   calls to `drawOverlay()`. Verify that: a single `draw()` + `drawOverlay()` pair, ten
   consecutive `draw()` + `drawOverlay()` pairs, and a `draw()` + `drawOverlay()` pair after
-  a budget tick each produce zero element-creation calls from `draw()` while
+  a second budget tick each produce zero element-creation calls from `draw()` while
   `fillColoredRect` is called at least once from `drawOverlay()`.
   (ref: `architecture/ui-ux/minimap.md` — colored-rectangle approach, not element-per-tile)
 
