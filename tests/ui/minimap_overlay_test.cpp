@@ -1723,3 +1723,65 @@ TEST_F(MinimapOverlayTest, Overlay_DeactivateSvc_RevertsToZoneColor) {
     EXPECT_CALL(m_backend, fillColoredRect(_, _, _, _, 0xC0, 0x39, 0x2B, _)).Times(0);
     m_minimap->drawOverlay();
 }
+
+// ###########################################################################
+// Coverage gap fill: sort lambda, setSimulation(), Tfc deactivation
+// ###########################################################################
+
+// Exercises the service-coverage sort comparator (lines 111-119, 122 in Minimap.cpp)
+// by providing two tiles of different service types — the sort is only called
+// when there are 2+ elements, causing the lambda body to execute.
+TEST_F(MinimapOverlayTest, Draw_ServiceCoverage_TwoTiles_SortLambdaExecuted) {
+    QueryResult tile;
+    tile.isZoned  = true;
+    tile.zoneType = ZoneType::Residential;
+    tile.isRoad   = false;
+    stubAllTiles(tile);
+
+    // Provide WaterTower then FireStation — comparator must be called to sort them.
+    std::vector<ServiceCoverageTile> coverage;
+    ServiceCoverageTile sct1;
+    sct1.tileX = 5; sct1.tileZ = 5; sct1.coveredBy = ServiceBuildingType::WaterTower;
+    ServiceCoverageTile sct2;
+    sct2.tileX = 10; sct2.tileZ = 10; sct2.coveredBy = ServiceBuildingType::FireStation;
+    coverage.push_back(sct1);
+    coverage.push_back(sct2);
+    ON_CALL(m_sim, getServiceCoverage()).WillByDefault(Return(coverage));
+
+    m_minimap->show();
+    m_minimap->setOverlayMode(MinimapOverlay::ServiceCoverage);
+    m_minimap->toggleOverlay();
+    tickAndDraw();
+
+    // Both service colours are emitted after correct sort order.
+    allowAllFillColoredRect();
+    EXPECT_CALL(m_backend, fillColoredRect(_, _, _, _, 0xC0, 0x39, 0x2B, _)).Times(AtLeast(1));
+    EXPECT_CALL(m_backend, fillColoredRect(_, _, _, _, 0x1A, 0xBC, 0x9C, _)).Times(AtLeast(1));
+    m_minimap->drawOverlay();
+}
+
+// Exercises Minimap::setSimulation() (lines 302-304 in Minimap.cpp).
+// Temporarily sets sim to nullptr (triggering the visibility guard in drawOverlay)
+// then restores it.
+TEST_F(MinimapOverlayTest, SetSimulation_NullSim_GuardSuppressesDrawOverlay) {
+    m_minimap->show();
+    m_minimap->setSimulation(nullptr);
+    // With no sim, drawOverlay must emit zero fillColoredRect calls.
+    EXPECT_CALL(m_backend, fillColoredRect(_, _, _, _, _, _, _, _)).Times(0);
+    m_minimap->drawOverlay();
+    // Restore to avoid TearDown mock violations.
+    m_minimap->setSimulation(&m_sim);
+}
+
+// Exercises the Tfc-deactivation branch (line 370 in Minimap.cpp):
+// clicking the Tfc button when Tfc is already the active overlay deactivates it.
+TEST_F(MinimapOverlayTest, OverlayToggle_ClickActiveTfcButton_Deactivates) {
+    m_minimap->show();
+
+    clickAt(1700, 864);  // activate Tfc (center of Tfc button: x:1684-1716, y:848-880)
+    EXPECT_TRUE(m_minimap->isOverlayActive());
+    EXPECT_EQ(m_minimap->getOverlayMode(), MinimapOverlay::Traffic);
+
+    clickAt(1700, 864);  // click active Tfc button again → deactivates
+    EXPECT_FALSE(m_minimap->isOverlayActive());
+}
