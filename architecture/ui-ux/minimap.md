@@ -111,6 +111,16 @@ The overlay toggle icon buttons on the minimap border follow the Glass City icon
 This extends and replaces the earlier description "Active button state: filled icon with
 accent color border. Inactive: outline icon, no border."
 
+**Phase boundary**: Full Glass City icon visual states (filled vs. outlined icons,
+2 px teal `rgba(0, 201, 200, 0.75)` border, baked glow) are implemented in **Phase 12**
+when `setElementImage` wiring and `kSpriteOverlayXxx` constants are added (see
+`architecture/asset-standards/2d-texture-standards.md` §Phase 10 Sign-Off — UI Sprite
+Sheet). Phase 11p delivers opacity-based button states using text-label placeholders
+('Svc' / 'Tfc'): active button at 100% opacity (`setElementAlpha(255)`), inactive button
+at 65% opacity (`setElementAlpha(166)`). The inactive sprite cell opacity (65%) is baked
+into the sprite sheet artwork; Phase 12 does NOT rely on `setElementAlpha` for inactive
+icon rendering.
+
 ### Legend and Label Text
 
 - **Overlay label strip text**: `#EBF4F6` near-white, left-aligned

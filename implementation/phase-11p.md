@@ -9,7 +9,7 @@ Complete the minimap implementation to match the full specification in
 this phase adds zone color coding, road network rendering, correct camera viewport
 projection, a two-button radio toggle row, the label strip, a properly-sized legend
 panel, click-to-pan wiring, and budget-tick cadence — plus the
-73 new test cases that verify every gap.
+75 new test cases that verify every gap.
 
 ---
 
@@ -35,7 +35,7 @@ The following architecture spec files were updated as part of the squad review
   after the "Phase 1 gamedesign-lookandfeel sign-off" documenting the three new `CameraState`
   fields added by MM-05: `targetX{0.f}`, `targetZ{0.f}`, `zoomDistance{200.f}` — their
   semantics, who populates them (MM-06 `CameraController::getCameraState()`), and who reads
-  them (MM-21 `Minimap::draw()` viewport projection).
+  them (MM-21 `Minimap::drawOverlay()` viewport projection).
 
 - [x] **SU-04** `architecture/ui-ux/minimap.md` — Update the Phase 9b section to replace the
   deferred `CameraController::panTo()` reference with `CameraController::setTarget(float worldX,
@@ -299,9 +299,10 @@ any `StubUIBackend` in smoke tests
   Radio behavior: clicking the currently active button deactivates it (no overlay);
   clicking the inactive button activates it and deactivates the other. On toggle, show or
   hide `m_labelStrip` and `m_legendPanel` appropriately, and update button visual states
-  (active: filled solid icon, 100% opacity, 2 px teal `rgba(0,201,200,0.75)` border + glow;
-  inactive: outlined 2 px stroke icon, 65% opacity, no border) per
-  `architecture/ui-ux/minimap.md §Visual Design — Glass City`.
+  via `setElementAlpha()`: active button to 100% opacity (255), inactive button to 65%
+  opacity (≈166). **Note**: Phase 11p implements text-label buttons ('Svc' / 'Tfc') with
+  opacity-based states. Full Glass City icon visual states (2 px teal border, glow, filled
+  vs. outlined icons) are deferred to Phase 12 when `setElementImage` wiring is added.
   (ref: `architecture/ui-ux/minimap.md` — overlay toggle, button states)
 
 - [ ] **MM-27** `src/ui/Minimap.cpp` — `setCameraState()` implementation: Store the supplied
@@ -372,7 +373,7 @@ any `StubUIBackend` in smoke tests
 
 ---
 
-#### 6. Tests — 73 new cases in 11 groups
+#### 6. Tests — 75 new cases in 11 groups
 
 **CMakeLists.txt registration** (required before tests are discoverable by CTest):
 
@@ -382,7 +383,7 @@ any `StubUIBackend` in smoke tests
   §Phase 4+ target extension policy. **No additional `aitown_add_tests()` call is needed**:
   the existing `aitown_add_tests(ui_tests LABEL "unit" TIMEOUT 300)` call already registers
   the entire `ui_tests` target with the `unit` CTest label; adding sources via `target_sources`
-  automatically makes the 73 new cases discoverable by CTest under the `unit` label in all CI
+  automatically makes the 75 new cases discoverable by CTest under the `unit` label in all CI
   jobs (`build-linux`, `build-windows`, `coverage-linux`).
   (ref: `architecture/testing/framework.md` — `target_sources` policy)
 
@@ -435,11 +436,13 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   (ref: `architecture/ui-ux/minimap.md` — click-to-pan)
 
 - [ ] **MM-37** `tests/ui/minimap_overlay_test.cpp` — Group 5: Overlay toggle radio behavior
-  (5 tests). Verify two buttons exist; clicking the inactive Svc button activates it and
+  (7 tests). Verify two buttons exist; clicking the inactive Svc button activates it and
   deactivates Tfc; clicking the active Svc button deactivates it (no active overlay); only
   one overlay can be active at a time; clicking inactive Tfc button activates it and shows
-  Traffic Congestion legend.
-  (ref: `architecture/ui-ux/minimap.md` — radio behavior)
+  Traffic Congestion legend. Verify that when Svc is activated, `setElementAlpha(255)` is
+  called on the Svc button (active state at 100% opacity); verify that when Tfc is deactivated,
+  `setElementAlpha(166)` is called on the Tfc button (inactive state at ~65% opacity).
+  (ref: `architecture/ui-ux/minimap.md` §Overlay Toggle Button States — opacity states in Phase 11p)
 
 - [ ] **MM-38** `tests/ui/minimap_overlay_test.cpp` — Group 6: Label strip (7 tests). Verify
   `m_labelStrip` is hidden when no overlay is active; visible when Svc overlay is active;
@@ -468,6 +471,15 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   zone/road/overlay data; no `onBudgetTicks()` call (or `onBudgetTicks(0)`) means no
   re-query. This pattern controls tick delivery precisely in all 4 Group 8 test cases
   without coupling the tests to the `consumeBudgetTicks()` API.
+  **Clarification**: In unit tests, direct `onBudgetTicks(1)` injection is correct because
+  UIManager is not instantiated in the test environment — tests inject ticks directly into
+  Minimap to avoid UIManager coupling. This differs from production (MM-09a) where UIManager
+  calls `onBudgetTicks(count)` after obtaining the tick count from `consumeBudgetTicks()`.
+  The `ON_CALL(m_sim, consumeBudgetTicks()).WillByDefault(Return(0))` guard in the MM-33 base
+  fixture serves a defensive role: it prevents accidental double-tick consumption if Minimap
+  ever incorrectly called `consumeBudgetTicks()` directly in production. Unit tests do not
+  trigger this guard because they bypass `consumeBudgetTicks()` entirely via direct
+  `onBudgetTicks(1)` calls — the guard and the direct-call pattern are not in conflict.
   (ref: `architecture/ui-ux/minimap.md` — budget-tick cadence)
 
 - [ ] **MM-41** `tests/ui/minimap_overlay_test.cpp` — Group 9: Input footprint (8 tests).
@@ -530,8 +542,8 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
 
 - [ ] `make build` completes without errors or warnings on both Linux and Windows.
 - [ ] `CMakeLists.txt` extended via `target_sources(ui_tests PRIVATE tests/ui/minimap_overlay_test.cpp)`
-  (MM-32); CTest discovers all 73 new cases under the `unit` label.
-- [ ] All 73 new test cases in `tests/ui/minimap_overlay_test.cpp` (Groups 1–11) pass under
+  (MM-32); CTest discovers all 75 new cases under the `unit` label.
+- [ ] All 75 new test cases in `tests/ui/minimap_overlay_test.cpp` (Groups 1–11) pass under
   `make test`.
 - [ ] All pre-existing unit, integration, and OpenGL tests continue to pass unchanged —
   zero regressions introduced.
@@ -570,7 +582,7 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
 |---|---|
 | `graphics-dev-irrlicht` | `fillColoredRect` in `IrrlichtUIBackend`; `CameraState` extension; `CameraController::getCameraState()` update; `Minimap.cpp` full rewrite (zone, road, viewport, overlay tints, budget-tick cache, legend, radio toggle, click-to-pan, two-pass `draw()`/`drawOverlay()` split); `UIManager.cpp` wiring incl. `drawMinimapOverlay()`; `IrrlichtRenderer.cpp` post-GUI `drawOverlay()` call (MM-30b) |
 | `gamedesign-ux` | Review minimap visual output against `architecture/ui-ux/minimap.md` (Glass City colors, button states, label strip position, legend panel geometry) |
-| `test-dev-cpp` | Author all 73 test cases across the 11 groups in `minimap_overlay_test.cpp`; add `MOCK_METHOD` stub in `MockUIBackend`; verify no-op override in `StubUIBackend` |
+| `test-dev-cpp` | Author all 75 test cases across the 11 groups in `minimap_overlay_test.cpp`; add `MOCK_METHOD` stub in `MockUIBackend`; verify no-op override in `StubUIBackend` |
 
 ---
 
