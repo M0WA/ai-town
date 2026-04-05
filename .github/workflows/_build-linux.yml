@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     container:
-      image: ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:07587277fc30c8b712fea7f259b0261e64a904ceb2108fb3c28b5b6db16f2e00
+      image: ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:9623ce264965034d6176c66ada1f1029688e64d9233f16e0f15f605d4ecab109
       options: --user root
     permissions:
       packages: read    # pull from GHCR
