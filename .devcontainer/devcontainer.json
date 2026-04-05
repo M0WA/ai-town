@@ -37,6 +37,7 @@
           "source.fixAll.eslint": "explicit"
         },
         "terminal.integrated.defaultProfile.linux": "bash",
+        "clangd.path": "/usr/bin/clangd",
         "dev.containers.forwardWaylandSocket": false,
         "terminal.integrated.profiles.linux": {
           "bash": {
