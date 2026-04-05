@@ -2290,6 +2290,13 @@ protected:
     std::unique_ptr<Minimap>                 m_minimap;
 
     void SetUp() override {
+        // Non-zero map dimensions prevent division-by-zero in the viewport
+        // projection formula (worldW = getMapTilesX() * kTileSize used as divisor).
+        ON_CALL(m_sim, getMapTilesX()).WillByDefault(Return(64));
+        ON_CALL(m_sim, getMapTilesZ()).WillByDefault(Return(64));
+        // Defensive guard: prevents accidental double-consumption if Minimap ever
+        // incorrectly calls consumeBudgetTicks() directly (does NOT populate cache).
+        ON_CALL(m_sim, consumeBudgetTicks()).WillByDefault(Return(0));
         m_minimap = std::make_unique<Minimap>(&m_backend, nullptr, &m_sim, &m_clock);
     }
 
@@ -2314,6 +2321,39 @@ setting) and `ICitySimulation` queries (`getMapTilesX`, `getMapTilesZ`,
 examination. This matches the `NiceMock` pattern established by
 `UIManagerModalTest` and `NiceSimulationTestBase`.
 
+**Budget-tick injection**: `Minimap` populates its internal tile-cache snapshot
+when `onBudgetTicks(int count)` is called — this is the forwarded path from
+`UIManager::update()`. Tests that need a populated cache MUST call this method
+directly before exercising draw logic; they must NOT attempt to trigger cache
+population via `consumeBudgetTicks()` mock overrides, because `Minimap` never
+calls `consumeBudgetTicks()` itself (that call belongs to `UIManager`). The
+correct three-step sequence for any test requiring a populated cache is:
+
+1. `m_minimap->onBudgetTicks(1);`  -- populate tile-cache snapshot
+2. `m_minimap->draw();`            -- advance internal state
+3. `m_minimap->drawOverlay();`     -- exercise the code under test
+
+A defensive `ON_CALL(m_sim, consumeBudgetTicks()).WillByDefault(Return(0))` in
+fixture `SetUp()` prevents accidental double-consumption if `Minimap` ever
+incorrectly calls `consumeBudgetTicks()` directly, but this guard does **not**
+trigger cache population on its own.
+
+**Null-sim construction variant**: three Phase 11d tests exercise the code path
+where no `ICitySimulation` is wired to `Minimap` — specifically:
+`SetOverlayMode_Traffic_NoSim_FallsBackToNone`,
+`Draw_TrafficOverlay_NoSimulation_NoQueryCall`, and
+`Draw_ServiceCoverageOverlay_NoSimulation_NoQueryCall`. These three tests MUST
+construct `Minimap` with `nullptr` as the `ICitySimulation*` parameter:
+
+```cpp
+minimap_ = std::make_unique<Minimap>(&m_backend, nullptr, nullptr, &m_clock);
+```
+
+All other tests in the fixture use `&m_sim`. The three null-sim tests may be
+kept in the same fixture file but must not use the shared `SetUp()` — either
+override `SetUp()` in a separate `MinimapNoSimTest` fixture, or construct the
+minimap directly inside each test body, bypassing `SetUp()`.
+
 #### `MinimapElementLeakTest` Fixture (Group 10)
 
 A separate fixture class dedicated to verifying that `Minimap::drawOverlay()`
@@ -2331,7 +2371,18 @@ protected:
     std::unique_ptr<Minimap>                 m_minimap;
 
     void SetUp() override {
+        // Non-zero map dimensions prevent division-by-zero in viewport formula.
+        ON_CALL(m_sim, getMapTilesX()).WillByDefault(Return(64));
+        ON_CALL(m_sim, getMapTilesZ()).WillByDefault(Return(64));
+        // Default queryTile returns a zoned Residential tile so drawOverlay()
+        // emits at least one fillColoredRect call, satisfying Times(AtLeast(1)).
+        QueryResult zonedTile;
+        zonedTile.isZoned   = true;
+        zonedTile.zoneType  = ZoneType::Residential;
+        ON_CALL(m_sim, queryTile(_, _)).WillByDefault(Return(zonedTile));
         m_minimap = std::make_unique<Minimap>(&m_backend, nullptr, &m_sim, nullptr);
+        // Populate the tile cache so drawOverlay() has data to render.
+        m_minimap->onBudgetTicks(1);
     }
 
     void TearDown() override {
