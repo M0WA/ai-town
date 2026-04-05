@@ -9,7 +9,7 @@ Complete the minimap implementation to match the full specification in
 this phase adds zone color coding, road network rendering, correct camera viewport
 projection, a two-button radio toggle row, the label strip, a properly-sized legend
 panel, click-to-pan wiring, and budget-tick cadence — plus the
-65 new test cases that verify every gap.
+73 new test cases that verify every gap.
 
 ---
 
@@ -28,7 +28,7 @@ The following architecture spec files were updated as part of the squad review
   IUIBackend method contract section: `fillColoredRect(int x, int y, int w, int h, int r,
   int g, int b, int a)` — transient filled-rectangle draw call in virtual 1920×1080
   coordinate space; no persistent `UIElementHandle` created; must be called inside a frame
-  render pass; used by `Minimap::draw()` for tile colour overlays without element leakage;
+  render pass; used by `Minimap::drawOverlay()` for tile colour overlays without element leakage;
   `IrrlichtUIBackend` implements via `IVideoDriver::draw2DRectangle`.
 
 - [x] **SU-03** `architecture/ui-ux/camera-controls.md` — Add Phase 11p extension section
@@ -64,6 +64,8 @@ any `StubUIBackend` in smoke tests
   `fillColoredRect` by applying the `UIScaler` transform to (x, y, w, h) to produce a
   screen-space `irr::core::recti`, then calling
   `m_driver->draw2DRectangle(irr::video::SColor(a, r, g, b), screenRect)`.
+  Note: `fillColoredRect` calls for minimap tile rendering are issued from
+  `Minimap::drawOverlay()` (MM-14), not from `Minimap::draw()`.
   (ref: `architecture/ui-ux/minimap.md` — colored-rectangle tile approach)
 
 - [ ] **MM-03** `tests/ui/MockUIBackend.h`: Add `MOCK_METHOD(void, fillColoredRect,
@@ -134,11 +136,33 @@ any `StubUIBackend` in smoke tests
 - [ ] **MM-13** `src/ui/Minimap.h`: Add private members `CameraState m_cameraState{}` and
   `std::function<void(float, float)> m_panCallback{}`.
 
+- [ ] **MM-13b** `src/ui/Minimap.h` + `src/ui/Minimap.cpp` + `src/ui/UIManager.cpp`: Widen
+  the Minimap constructor to the 4-param canonical form:
+  `Minimap(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* sim, IClock* clock)`.
+  - Add private members `ICitySimulation* m_sim{nullptr}` and `IClock* m_clock{nullptr}` to
+    `Minimap.h`.
+  - Store `sim` as `m_sim` and `clock` as `m_clock` in the constructor body; the `audio`
+    parameter is accepted for API consistency but not stored (minimap has no audio dependency).
+  - Update the `UIManager.cpp` call site from `new Minimap(m_backend)` to
+    `new Minimap(m_backend, nullptr, m_sim, m_clock)` (IAudioSystem not needed by Minimap).
+  (ref: `architecture/testing/testability-architecture.md` — MinimapOverlayTest fixture,
+  4-param canonical constructor order `(IUIBackend*, IAudioSystem*, ICitySimulation*, IClock*)`)
+
 ---
 
 #### 4. Minimap implementation — `draw()` rewrite and all missing rendering
 
 **File:** `src/ui/Minimap.cpp`
+
+- [ ] **MM-14** `src/ui/Minimap.h` + `src/ui/Minimap.cpp` — Add a new public method
+  `void drawOverlay()`. This method performs all `fillColoredRect` calls (zone tile
+  colours, road tile colours, overlay tints from MM-19b/MM-19c when active) and the
+  viewport rectangle outline (MM-21). It does NOT create or modify GUI elements.
+  `Minimap::draw()` continues to update element states (visibility, text, positions)
+  and populate the budget-tick cache. `Minimap::drawOverlay()` is invoked from
+  `IrrlichtRenderer::drawScene()` AFTER `guiEnv->drawAll()`, so tile colours always
+  render on top of the GUI background panel (`m_mapBg`).
+  (ref: `architecture/graphics-architecture/irrlicht-device-lifecycle.md` — render order)
 
 - [ ] **MM-15** `src/ui/Minimap.cpp` — constructor: Replace the single `m_toggleBtn` button
   creation with two button creations:
@@ -161,24 +185,49 @@ any `StubUIBackend` in smoke tests
   (`setElementBackground(handle, 13, 27, 42, 217)`).
   (ref: `architecture/ui-ux/minimap.md §Visual Design — Glass City`)
 
-- [ ] **MM-19** `src/ui/Minimap.cpp` — `draw()`: Zone color coding via `fillColoredRect`.
-  Iterate all `getMapTilesX()` × `getMapTilesZ()` tiles using `ICitySimulation::queryTile()`.
-  Map zone type to authoritative colours: Residential `#27AE60` (green), Commercial `#2980B9`
-  (blue), Industrial `#F39C12` (yellow). Scale each tile to its pixel footprint in the
-  200×200 render area. Emit one `fillColoredRect` call per non-empty zone tile. Do NOT call
-  `addStaticText` or `addButton` inside `draw()`.
+- [ ] **MM-19** `src/ui/Minimap.cpp` — `drawOverlay()`: Zone color coding via `fillColoredRect`.
+  Iterate the cached tile snapshot (populated by `draw()` on budget ticks, MM-22) and for
+  each non-empty zone tile emit one `fillColoredRect` call with authoritative colours:
+  Residential `#27AE60` (green), Commercial `#2980B9` (blue), Industrial `#F39C12` (yellow).
+  Scale each tile to its pixel footprint in the 200×200 render area. Do NOT call
+  `addStaticText` or `addButton` inside `drawOverlay()`. All `fillColoredRect` calls for
+  zone tiles are in `drawOverlay()`, not `draw()`.
   (ref: `architecture/ui-ux/minimap.md` — zone color coding)
 
-- [ ] **MM-20** `src/ui/Minimap.cpp` — `draw()`: Road network rendering via `fillColoredRect`.
-  For each tile where `queryTile().isRoad == true`, fill the corresponding minimap pixel
-  rect with road grey `#7F8C8D`. Non-road tiles are skipped.
+- [ ] **MM-20** `src/ui/Minimap.cpp` — `drawOverlay()`: Road network rendering via
+  `fillColoredRect`. For each tile in the cached snapshot where `isRoad == true`, fill the
+  corresponding minimap pixel rect with road grey `#7F8C8D`. Non-road tiles are skipped.
+  All `fillColoredRect` calls for road tiles are in `drawOverlay()`, not `draw()`.
   (ref: `architecture/ui-ux/minimap.md` — road network grey lines)
 
-- [ ] **MM-21** `src/ui/Minimap.cpp` — `draw()`: Camera viewport rectangle projection.
+- [ ] **MM-19b** `src/ui/Minimap.cpp` — `drawOverlay()`: Service Coverage overlay tile tints.
+  When the Service Coverage overlay is active (`m_activeOverlay == OverlayType::ServiceCoverage`),
+  iterate all map tiles using the cached snapshot from `ICitySimulation::getServiceCoverage()`
+  (populated at budget-tick cadence, MM-22) and for each covered tile draw a `fillColoredRect`
+  call using the authoritative service-type colour: Fire Station `#C0392B`, Police Station
+  `#2E4482`, Power Plant `#F1C40F`, Water Tower `#1ABC9C`. These tints replace the zone
+  colours for covered tiles. Do NOT call `queryTile()` redundantly — reuse the cached snapshot.
+  (ref: `architecture/ui-ux/minimap.md` — Service Coverage overlay tints)
+
+- [ ] **MM-19c** `src/ui/Minimap.cpp` — `drawOverlay()`: Traffic Congestion overlay speed-band
+  colouring. When the Traffic Congestion overlay is active
+  (`m_activeOverlay == OverlayType::TrafficCongestion`), iterate road tiles using the cached
+  snapshot from `ICitySimulation::getRoadSegmentSpeeds()` (populated at budget-tick cadence,
+  MM-22) and colour each road tile by speed band: free-flowing (>=40% of free-flow speed) ->
+  `#27AE60`, mild congestion (31-39% of free-flow speed) -> `#E67E22`, heavy congestion
+  (<=30% of free-flow speed) -> `#E74C3C`.
+  These colours replace the base road grey `#7F8C8D` for those tiles when the Tfc overlay is
+  active. Do NOT call `getRoadSegmentSpeeds()` redundantly — reuse the cached snapshot.
+  (ref: `architecture/ui-ux/minimap.md` — Traffic Congestion overlay speed-band colours)
+
+- [ ] **MM-21** `src/ui/Minimap.cpp` — `drawOverlay()`: Camera viewport rectangle projection.
   Use the authoritative formula from `architecture/ui-ux/minimap.md` §Viewport projection
   formula:
   - `kTileSize = 10.0f` — declare as a `static constexpr float` local to `Minimap.cpp`
-    (not shared with IrrlichtRenderer; the two usages are independent).
+    (not shared with IrrlichtRenderer; the two usages are independent). Add a
+    `static_assert(kTileSize == 10.0f, "kTileSize must match IrrlichtRenderer::kTileSize");`
+    comment cross-reference so that if either value changes, the divergence is caught at
+    compile time.
   - World extents: `worldW = m_sim->getMapTilesX() * kTileSize`;
     `worldD = m_sim->getMapTilesZ() * kTileSize`.
   - Centre pixel: `cx = (m_cameraState.targetX / worldW) * 200`;
@@ -186,29 +235,44 @@ any `StubUIBackend` in smoke tests
   - Side: `side = 200.f * (m_cameraState.zoomDistance / CameraController::kMaxZoomDistance)`,
     clamped to [8, 190] px.
   - Draw centred at `(cx, cz)`, clamp rect to [0, 200] render area.
-  - Call `m_backend->setElementRect(m_viewportRect, rectX, rectZ, side, side)` each frame —
-    no new element is created.
+  - Draw the viewport outline as four thin `fillColoredRect` strips (white, 1-2 px thick)
+    in `drawOverlay()` AFTER the zone/road tile colours, ensuring the outline appears on top.
+    Do NOT use `m_backend->setElementRect(m_viewportRect, ...)` for this update — the
+    `m_viewportRect` GUI element is removed (its original role is replaced by this transient
+    draw). Remove the `m_viewportRect` member and any constructor code that creates it.
   (ref: `architecture/ui-ux/minimap.md` — Viewport projection formula, size constraints 8–190 px)
 
-- [ ] **MM-22** `src/ui/Minimap.cpp` — `draw()`: Budget-tick cadence. Cache the
-  `queryTile()` iteration results (zone grid snapshot and road grid snapshot) in member
-  arrays. Re-query only when `consumeBudgetTicks()` returns a non-zero count (> 0). Per-frame `draw()`
-  uses the cached snapshot; no `queryTile()` calls are made on non-tick frames.
+- [ ] **MM-22** `src/ui/Minimap.cpp` — `draw()`: Budget-tick cadence. Cache **all three**
+  simulation data sources in member arrays, refreshed together when
+  `consumeBudgetTicks()` returns a non-zero count (> 0):
+  1. `queryTile(x, z)` iteration — zone grid snapshot and road grid snapshot (used by
+     MM-19 zone colours, MM-20 road grey).
+  2. `ICitySimulation::getServiceCoverage()` — service coverage tile snapshot (used by
+     MM-19b service overlay tints).
+  3. `ICitySimulation::getRoadSegmentSpeeds()` — road segment speed snapshot (used by
+     MM-19c traffic overlay speed-band colouring).
+
+  All three snapshots are populated atomically on the same budget-tick boundary.
+  Per-frame `drawOverlay()` reads exclusively from the cached snapshots for all three
+  data sources; no `queryTile()`, `getServiceCoverage()`, or `getRoadSegmentSpeeds()`
+  calls are made on non-tick frames.
   (ref: `architecture/ui-ux/minimap.md` — "Overlay data is rendered into the minimap texture
   at budget-tick cadence (not per-frame)")
 
-- [ ] **MM-23** `src/ui/Minimap.cpp` — `draw()`: Legend content — dynamic switching.
+- [ ] **MM-23** `src/ui/Minimap.cpp` — Legend content — dynamic switching.
   **Element lifecycle rule**: Legend `addStaticText` elements are created **once** (in
-  the constructor or on first overlay activation), never inside `draw()` — this satisfies
-  the MM-42 zero-element-creation contract. `draw()` only calls `setElementText()`,
-  `setElementVisible()`, and `fillColoredRect()` on pre-existing elements.
+  the constructor or on first overlay activation), never inside `draw()` or `drawOverlay()`
+  — this satisfies the MM-42 zero-element-creation contract. `draw()` calls
+  `setElementText()` and `setElementVisible()` on pre-existing legend text elements when
+  the overlay changes (not by creating new elements). `drawOverlay()` renders the 8×8 px
+  `fillColoredRect` colour swatches for the legend each frame (transient draws).
 
   When Service Coverage overlay is active, render four rows using 8×8 px `fillColoredRect`
-  swatches: Fire Station `#C0392B`, Police Station `#2E4482`, Power Plant `#F1C40F`,
-  Water Tower `#1ABC9C`. When Traffic Congestion overlay is active, render three rows:
-  Free-flowing `#27AE60`, Mild congestion `#E67E22`, Heavy congestion `#E74C3C`. Legend
+  swatches in `drawOverlay()`: Fire Station `#C0392B`, Police Station `#2E4482`, Power Plant
+  `#F1C40F`, Water Tower `#1ABC9C`. When Traffic Congestion overlay is active, render three
+  rows: Free-flowing `#27AE60`, Mild congestion `#E67E22`, Heavy congestion `#E74C3C`. Legend
   text labels use colour `#EBF4F6`; update via `setElementText()` in `draw()` when overlay
-  changes (not by creating new elements).
+  changes.
   (ref: `architecture/ui-ux/minimap.md` — legend panel, authoritative hex values)
 
 - [ ] **MM-25** `src/ui/Minimap.cpp` — `onEvent()`: Click-to-pan. Map click pixel coordinates
@@ -262,6 +326,14 @@ any `StubUIBackend` in smoke tests
   so the minimap always has current camera position and zoom for viewport rectangle projection.
   (ref: `architecture/ui-ux/minimap.md` — camera viewport rectangle)
 
+- [ ] **MM-30b** `src/rendering/IrrlichtRenderer.cpp` — After `guiEnv->drawAll()` in
+  `drawScene()`, call `m_uiManager->drawMinimapOverlay()` (new method on `UIManager` that
+  delegates to `m_minimap->drawOverlay()`). This ensures the correct Z-order:
+  `m_mapBg` background (via `guiEnv->drawAll()`) -> tile colour fills (via `drawOverlay()`)
+  -> viewport outline (via `drawOverlay()`, drawn last). Without this post-GUI call, all
+  `fillColoredRect` tile colours would be overdrawn by `guiEnv->drawAll()`.
+  (ref: `architecture/graphics-architecture/irrlicht-device-lifecycle.md` — render order)
+
 - [ ] **MM-31** `src/ui/UIManager.cpp` — initialization: Call `m_minimap->setPanCallback(...)`,
   passing a lambda that calls `m_cameraController->setTarget(worldX, worldZ)` — the
   `CameraController::setTarget(float, float)` method moves the camera look-at to the specified
@@ -272,7 +344,7 @@ any `StubUIBackend` in smoke tests
 
 ---
 
-#### 6. Tests — 65 new cases in 10 groups
+#### 6. Tests — 73 new cases in 11 groups
 
 **CMakeLists.txt registration** (required before tests are discoverable by CTest):
 
@@ -282,22 +354,37 @@ any `StubUIBackend` in smoke tests
   §Phase 4+ target extension policy. **No additional `aitown_add_tests()` call is needed**:
   the existing `aitown_add_tests(ui_tests LABEL "unit" TIMEOUT 300)` call already registers
   the entire `ui_tests` target with the `unit` CTest label; adding sources via `target_sources`
-  automatically makes the 65 new cases discoverable by CTest under the `unit` label in all CI
+  automatically makes the 73 new cases discoverable by CTest under the `unit` label in all CI
   jobs (`build-linux`, `build-windows`, `coverage-linux`).
   (ref: `architecture/testing/framework.md` — `target_sources` policy)
 
 **File:** `tests/ui/minimap_overlay_test.cpp` (extended via `target_sources`)
 
-**Mock strategy**: Groups 1–9 use `NiceMock<MockUIBackend>` and `NiceMock<MockCitySimulation>`
-(standard policy for UI overlay interaction tests per `architecture/testing/testability-architecture.md`
-§Mock Policy). Group 10 (element leak regression, MM-42) uses `StrictMock<MockUIBackend>` in a
-separate fixture class `MinimapElementLeakTest` to enforce `Times(0)` call-count contracts.
+**Mock strategy**: Groups 1–9 and Group 11 use `NiceMock<MockUIBackend>` and
+`NiceMock<MockCitySimulation>` (standard policy for UI overlay interaction tests per
+`architecture/testing/testability-architecture.md` §Mock Policy). Group 10 (element leak
+regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
+`MinimapElementLeakTest` — `NiceMock` silently ignores unconfigured calls (e.g.
+`setElementVisible`, `setElementText`) while still enforcing the explicitly configured
+`Times(0)` expectations on `addStaticText`/`addButton` during `draw()` and
+`Times(AtLeast(1))` on `fillColoredRect` during `drawOverlay()`.
 
 - [ ] **MM-33** `tests/ui/minimap_overlay_test.cpp` — Group 1: Zone color coding (8 tests).
-  Stub `ICitySimulation::queryTile()` to return each of the four zone types (Residential,
-  Commercial, Industrial, None) and verify that `draw()` emits `fillColoredRect` calls with
-  the correct authoritative hex colours (`#27AE60`, `#2980B9`, `#F39C12`) and skips empty
-  tiles. Include tests for mixed-zone maps.
+  Use `NiceMock<MockUIBackend>` and `NiceMock<MockCitySimulation>`. The primary fixture
+  (`MinimapOverlayTest`, Groups 1–9 and 11) declares a `ManualClock m_clock;` member and
+  constructs the minimap as `Minimap(&m_backend, nullptr, &m_sim, &m_clock)` (4-param
+  canonical order with `nullptr` for `IAudioSystem*`). Both fixtures must include a
+  `TearDown()` override that resets the `Minimap` smart pointer to `nullptr` before the mock
+  objects are destroyed, to prevent unexpected `removeElement()` calls during Minimap
+  destruction from triggering mock violations. Document this destructor-path contract in a
+  comment. Base fixture setup includes
+  `ON_CALL(m_sim, consumeBudgetTicks()).WillByDefault(Return(0))` so that `draw()` calls in
+  Groups 1-9 and 11 use the cached snapshot by default; individual tests override this with
+  `WillOnce(Return(1))` when they want to trigger a re-query. Stub
+  `ICitySimulation::queryTile()` to return each of the four zone types (Residential,
+  Commercial, Industrial, None) and verify that `drawOverlay()` emits `fillColoredRect` calls
+  with the correct authoritative hex colours (`#27AE60`, `#2980B9`, `#F39C12`) and skips
+  empty tiles. Include tests for mixed-zone maps.
   (ref: `architecture/ui-ux/minimap.md` — zone color coding, authoritative hex values)
 
 - [ ] **MM-34** `tests/ui/minimap_overlay_test.cpp` — Group 2: Road network rendering (4 tests).
@@ -307,10 +394,10 @@ separate fixture class `MinimapElementLeakTest` to enforce `Times(0)` call-count
   (ref: `architecture/ui-ux/minimap.md` — road network grey lines)
 
 - [ ] **MM-35** `tests/ui/minimap_overlay_test.cpp` — Group 3: Camera viewport rectangle
-  (5 tests). Verify `setElementRect` is called on `m_viewportRect` with the correct computed
-  pixel rect for a range of (targetX, targetZ, zoomDistance) values; verify the 8 px minimum
-  clamp; verify the 190 px maximum clamp; verify no crash when `setCameraState()` has never
-  been called.
+  (5 tests). Verify `drawOverlay()` emits four `fillColoredRect` strips (white outline) with
+  the correct computed pixel rect for a range of (targetX, targetZ, zoomDistance) values;
+  verify the 8 px minimum clamp; verify the 190 px maximum clamp; verify no crash when
+  `setCameraState()` has never been called.
   (ref: `architecture/ui-ux/minimap.md` — viewport indicator size constraints)
 
 - [ ] **MM-36** `tests/ui/minimap_overlay_test.cpp` — Group 4: Click-to-pan (6 tests).
@@ -347,10 +434,16 @@ separate fixture class `MinimapElementLeakTest` to enforce `Times(0)` call-count
   not re-query; verify that a budget tick occurring between two `draw()` calls triggers a
   re-query on the second `draw()`; verify the cached snapshot is used for rendering in
   non-tick frames.
+  **Mock setup**: Use `ON_CALL(m_sim, consumeBudgetTicks()).WillByDefault(Return(0))` as the
+  base stub (no tick occurred). To simulate a tick arrival, call
+  `EXPECT_CALL(m_sim, consumeBudgetTicks()).WillOnce(Return(1))` before the relevant `draw()`
+  call — a return value of 1 (non-zero) triggers a full re-query of zone/road data; a return
+  of 0 means no re-query. This pattern controls tick delivery precisely in all 4 Group 8 test
+  cases.
   (ref: `architecture/ui-ux/minimap.md` — budget-tick cadence)
 
 - [ ] **MM-41** `tests/ui/minimap_overlay_test.cpp` — Group 9: Input footprint (8 tests).
-  Verify `getBounds()` always returns `Rect{1720, 880, 200, 200}` (render area only);
+  Verify `getBounds()` always returns `UIRect{1720, 880, 200, 200}` (render area only);
   verify `getWidgetFootprint()` returns `UIRect{1576, 848, 344, 232}` when no overlay active;
   verify `getWidgetFootprint()` returns `UIRect{1576, 732, 344, 348}` when overlay is active
   (toggle a service coverage overlay on, then call getWidgetFootprint() — y drops to 732,
@@ -362,13 +455,41 @@ separate fixture class `MinimapElementLeakTest` to enforce `Times(0)` call-count
 
 - [ ] **MM-42** `tests/ui/minimap_overlay_test.cpp` — Group 10: Element leak regression
   (5 tests). Use a **separate fixture** `MinimapElementLeakTest : public ::testing::Test`
-  with `StrictMock<MockUIBackend>` (not NiceMock) to enforce `Times(0)` call-count contracts.
+  with `NiceMock<MockUIBackend>` so that unconfigured backend calls made by `draw()` (e.g.
+  `setElementVisible`, `setElementText`, `setElementAlpha`, `isElementVisible`) are silently
+  ignored rather than triggering "uninteresting mock function call" failures. The
+  `MinimapElementLeakTest` fixture must include a `TearDown()` override that resets the
+  Minimap to `nullptr` before the mock is destroyed, to prevent unexpected `removeElement()`
+  calls during destruction from triggering mock violations.
+  **Two-step call pattern**: Each test scenario calls `draw()` first, then `drawOverlay()`,
+  matching the production rendering order (MM-14). `draw()` updates element states and
+  populates the budget-tick cache; `drawOverlay()` emits all `fillColoredRect` calls.
   Set `EXPECT_CALL(mockBackend, addStaticText(...)).Times(0)` and
-  `EXPECT_CALL(mockBackend, addButton(...)).Times(0)` before calling `draw()`; verify that
-  one `draw()` call, ten consecutive `draw()` calls, and a `draw()` after a budget tick each
-  produce zero element-creation calls; verify that `fillColoredRect` is called (not zero)
-  during these same `draw()` invocations so the test is not vacuous.
+  `EXPECT_CALL(mockBackend, addButton(...)).Times(0)` before the `draw()` call — these
+  `Times(0)` expectations verify that `draw()` creates no new GUI elements, and `NiceMock`
+  still enforces them. Additionally set
+  `EXPECT_CALL(mockBackend, fillColoredRect(...)).Times(AtLeast(1))` — this expectation
+  is satisfied by `drawOverlay()` (not `draw()`), since MM-14 moved all `fillColoredRect`
+  calls to `drawOverlay()`. Verify that: a single `draw()` + `drawOverlay()` pair, ten
+  consecutive `draw()` + `drawOverlay()` pairs, and a `draw()` + `drawOverlay()` pair after
+  a budget tick each produce zero element-creation calls from `draw()` while
+  `fillColoredRect` is called at least once from `drawOverlay()`.
   (ref: `architecture/ui-ux/minimap.md` — colored-rectangle approach, not element-per-tile)
+
+- [ ] **MM-43** `tests/ui/minimap_overlay_test.cpp` — Group 11: Overlay tile rendering
+  (8 tests). Use `NiceMock<MockUIBackend>` and `NiceMock<MockCitySimulation>`. (a) Service
+  Coverage overlay tile tints: activate Svc overlay, stub
+  `ICitySimulation::getServiceCoverage()` to return specific covered tiles, call
+  `drawOverlay()`, and assert `fillColoredRect` is called with `#C0392B` for Fire Station
+  tiles, `#2E4482` for Police Station tiles, `#F1C40F` for Power Plant tiles, `#1ABC9C` for
+  Water Tower tiles; (b) verify uncovered tiles are NOT overridden with service colours (zone
+  or road colours apply instead); (c) Traffic Congestion overlay: activate Tfc overlay, stub
+  `getRoadSegmentSpeeds()` with known speed values, call `drawOverlay()`, and assert
+  `fillColoredRect` is called with `#27AE60` for road tiles at >=40% of their free-flow speed,
+  `#E67E22` for 31-39% of their free-flow speed, `#E74C3C` for <=30% of their free-flow
+  speed; (d) verify base road grey (`#7F8C8D`) is NOT emitted for road tiles
+  when Tfc overlay is active; (e) deactivating the overlay reverts to base zone/road rendering.
+  (ref: `architecture/ui-ux/minimap.md` — overlay tile rendering)
 
 ---
 
@@ -376,13 +497,16 @@ separate fixture class `MinimapElementLeakTest` to enforce `Times(0)` call-count
 
 - [ ] `make build` completes without errors or warnings on both Linux and Windows.
 - [ ] `CMakeLists.txt` extended via `target_sources(ui_tests PRIVATE tests/ui/minimap_overlay_test.cpp)`
-  (MM-32); CTest discovers all 65 new cases under the `unit` label.
-- [ ] All 65 new test cases in `tests/ui/minimap_overlay_test.cpp` (Groups 1–10) pass under
+  (MM-32); CTest discovers all 73 new cases under the `unit` label.
+- [ ] All 73 new test cases in `tests/ui/minimap_overlay_test.cpp` (Groups 1–11) pass under
   `make test`.
 - [ ] All pre-existing unit, integration, and OpenGL tests continue to pass unchanged —
   zero regressions introduced.
-- [ ] The element-leak regression tests (Group 10, MM-42) run in CI using `StrictMock<MockUIBackend>`;
-  `addStaticText` and `addButton` are never called inside `draw()`.
+- [ ] The element-leak regression tests (Group 10, MM-42) run in CI using `NiceMock<MockUIBackend>`
+  with explicit `Times(0)` on `addStaticText` and `addButton` during `draw()` and
+  `Times(AtLeast(1))` on `fillColoredRect` during `drawOverlay()`; each scenario calls
+  `draw()` then `drawOverlay()` in sequence; `addStaticText` and `addButton` are never
+  called inside `draw()`.
 - [ ] `IUIBackend::fillColoredRect` (MM-01) is verified present in `MockUIBackend` with a
   `MOCK_METHOD` stub and in `IrrlichtUIBackend` with a real `draw2DRectangle` implementation.
 - [ ] `CameraState` has `targetX`, `targetZ`, `zoomDistance` fields (MM-05) and
@@ -391,7 +515,7 @@ separate fixture class `MinimapElementLeakTest` to enforce `Times(0)` call-count
   `kMinimapWidgetTopOverlayActive = 732` (MM-29a).
 - [ ] `Minimap::getWidgetFootprint()` returns `UIRect{1576,848,344,232}` when no overlay
   active and `UIRect{1576,732,344,348}` when overlay active (MM-10, MM-28);
-  `Minimap::getBounds()` continues to return `Rect{1720, 880, 200, 200}` unchanged.
+  `Minimap::getBounds()` continues to return `UIRect{1720, 880, 200, 200}` unchanged.
 - [ ] Legend panel geometry is 200×100 at virtual x:1720, y:732 (not 80×100 at the former
   position) — verified by Group 7 tests (MM-39).
 - [ ] Budget-tick cadence is enforced: `queryTile()` is called at most once per budget tick,
@@ -410,9 +534,9 @@ separate fixture class `MinimapElementLeakTest` to enforce `Times(0)` call-count
 
 | Role | Responsibility |
 |---|---|
-| `graphics-dev-irrlicht` | `fillColoredRect` in `IrrlichtUIBackend`; `CameraState` extension; `CameraController::getCameraState()` update; `Minimap.cpp` full rewrite (zone, road, viewport, budget-tick cache, legend, radio toggle, click-to-pan); `UIManager.cpp` wiring |
+| `graphics-dev-irrlicht` | `fillColoredRect` in `IrrlichtUIBackend`; `CameraState` extension; `CameraController::getCameraState()` update; `Minimap.cpp` full rewrite (zone, road, viewport, overlay tints, budget-tick cache, legend, radio toggle, click-to-pan, two-pass `draw()`/`drawOverlay()` split); `UIManager.cpp` wiring incl. `drawMinimapOverlay()`; `IrrlichtRenderer.cpp` post-GUI `drawOverlay()` call (MM-30b) |
 | `gamedesign-ux` | Review minimap visual output against `architecture/ui-ux/minimap.md` (Glass City colors, button states, label strip position, legend panel geometry) |
-| `test-dev-cpp` | Author all 65 test cases across the 10 groups in `minimap_overlay_test.cpp`; add `MOCK_METHOD` stub in `MockUIBackend`; verify no-op override in `StubUIBackend` |
+| `test-dev-cpp` | Author all 73 test cases across the 11 groups in `minimap_overlay_test.cpp`; add `MOCK_METHOD` stub in `MockUIBackend`; verify no-op override in `StubUIBackend` |
 
 ---
 

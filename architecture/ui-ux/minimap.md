@@ -12,7 +12,11 @@
   - **Side length**: `side = 200 × (zoomDistance / CameraController::kMaxZoomDistance)`,
     clamped to [8, 190] px.
   - The rectangle is drawn centred at `(cx, cz)` with half-side in each direction, then
-    clamped to the 200×200 render area before calling `setElementRect(m_viewportRect, ...)`.
+    clamped to the 200×200 render area. Draw the viewport outline as four transient
+    `fillColoredRect` white strips (1--2 px thick) in `drawOverlay()`, after zone/road
+    tile colours: top strip, bottom strip, left strip, right strip -- all at
+    `rgba(255, 255, 255, 200)`. `m_viewportRect` is no longer a persistent GUI element
+    as of Phase 11p; the viewport indicator is fully transient.
   - `CameraController::kMaxZoomDistance` must be a `public static constexpr float` on
     `CameraController`; Minimap accesses it via the class name (no instance required).
 - **Interaction**: Click-to-pan camera to clicked minimap position
@@ -72,7 +76,7 @@
 
     Overlay data is rendered into the minimap texture at budget-tick cadence (not per-frame).
     Unroaded tiles are not coloured.
-- **`getBounds()` return value semantics**: The `Minimap::getBounds()` method returns `Rect` (the struct defined in `IUIBackend.h` — `struct Rect { int x{0}, y{0}, w{0}, h{0}; }`) representing the bounding rectangle of the minimap **render area only** — the 200×200 px tile (virtual bounds x: 1720–1920 px, y: 880–1080 px). Returning `Rect` rather than `irr::core::rect<irr::s32>` keeps Irrlicht headers out of `src/ui/` translation units. It explicitly excludes the toggle row (y: 848–880 px), the label strip (y: 832–848 px when an overlay is active), and the legend overlay panel (y: 732–832 px when an overlay is active). Tests that call `getBounds()` and check its dimensions MUST compare against the 200×200 px render area, not the full minimap widget footprint including chrome. Using the full widget bounds in tests will produce incorrect hit-test and overlap results because the chrome elements can be toggled independently of the render area.
+- **`getBounds()` return value semantics**: The `Minimap::getBounds()` method returns `UIRect` (the struct defined in `IUIBackend.h` — `struct UIRect { int x{0}, y{0}, w{0}, h{0}; }`) representing the bounding rectangle of the minimap **render area only** — the 200×200 px tile (virtual bounds x: 1720–1920 px, y: 880–1080 px). Returning `UIRect` rather than `irr::core::rect<irr::s32>` keeps Irrlicht headers out of `src/ui/` translation units. It explicitly excludes the toggle row (y: 848–880 px), the label strip (y: 832–848 px when an overlay is active), and the legend overlay panel (y: 732–832 px when an overlay is active). Tests that call `getBounds()` and check its dimensions MUST compare against the 200×200 px render area, not the full minimap widget footprint including chrome. Using the full widget bounds in tests will produce incorrect hit-test and overlap results because the chrome elements can be toggled independently of the render area.
 
 - **Scrim input behavior during blocking modals**: When a blocking modal (`ModalDialog`) is active, the full-screen scrim `IGUIElement` (50% opacity fill rect) **must consume left-mouse click events and right-click context events** that would otherwise reach HUD elements behind it (minimap, toolbar, undo button, resource bar). The scrim is not merely a visual overlay — it must be an event-consuming element at Priority 1 of the input arbitration chain. Without this, left-clicks and right-clicks on the minimap (and other HUD elements) pass through the scrim while the modal is visible, allowing accidental tool activations (zone placement, road placement) during a blocking modal. **Camera pass-through (mandatory)**: The following input events must NOT be consumed by the scrim — they pass through directly to `CameraController` per input-arbitration.md Priority 1: scroll-wheel zoom, middle-mouse-button drag (pan), and right-mouse-button drag (rotate/pan). These camera interactions are non-destructive and provide useful spatial context while the player reads the modal. Only left-click and right-click context events (which could trigger tool activations or HUD interactions) are consumed.
 
@@ -127,8 +131,10 @@ Authoritative hex values for the base minimap tile rendering (implemented in Pha
 | Industrial zone | Yellow | `#F39C12` |
 | Road network | Grey | `#7F8C8D` |
 
-These values are used in `Minimap::draw()` for the per-tile `fillColoredRect` calls and in
-`minimap_overlay_test.cpp` for colour-assertion tests. Unzoned tiles are not coloured (no
+These values are used in `Minimap::drawOverlay()` for the per-tile `fillColoredRect` calls and in
+`minimap_overlay_test.cpp` for colour-assertion tests. `drawOverlay()` is a separate method
+invoked after `guiEnv->drawAll()` to ensure tile colours and the viewport outline render on
+top of the GUI background panel (see `irrlicht-device-lifecycle.md` render sequence). Unzoned tiles are not coloured (no
 `fillColoredRect` call). Note that `#27AE60` also appears in the Traffic Congestion overlay
 free-flow colour — the values are coincidentally identical but represent independent design
 decisions (zone presence vs. traffic speed).
