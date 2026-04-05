@@ -54,7 +54,7 @@ jobs:
             python3 \
             dpkg-dev fakeroot
 
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
       # Cache vcpkg binary tool and installed packages to avoid re-bootstrapping on
       # every packaging run. Key includes distro codename so different distro legs
