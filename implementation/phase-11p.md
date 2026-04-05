@@ -201,7 +201,7 @@ any `StubUIBackend` in smoke tests
   (ref: `architecture/ui-ux/minimap.md` — road network grey lines)
 
 - [ ] **MM-19b** `src/ui/Minimap.cpp` — `drawOverlay()`: Service Coverage overlay tile tints.
-  When the Service Coverage overlay is active (`m_activeOverlay == OverlayType::ServiceCoverage`),
+  When the Service Coverage overlay is active (`m_overlayActive && m_overlayMode == MinimapOverlay::ServiceCoverage`),
   iterate all map tiles using the cached snapshot from `ICitySimulation::getServiceCoverage()`
   (populated at budget-tick cadence, MM-22) and for each covered tile draw a `fillColoredRect`
   call using the authoritative service-type colour: Fire Station `#C0392B`, Police Station
@@ -211,7 +211,7 @@ any `StubUIBackend` in smoke tests
 
 - [ ] **MM-19c** `src/ui/Minimap.cpp` — `drawOverlay()`: Traffic Congestion overlay speed-band
   colouring. When the Traffic Congestion overlay is active
-  (`m_activeOverlay == OverlayType::TrafficCongestion`), iterate road tiles using the cached
+  (`m_overlayActive && m_overlayMode == MinimapOverlay::Traffic`), iterate road tiles using the cached
   snapshot from `ICitySimulation::getRoadSegmentSpeeds()` (populated at budget-tick cadence,
   MM-22) and colour each road tile by speed band: free-flowing (>=40% of free-flow speed) ->
   `#27AE60`, mild congestion (31-39% of free-flow speed) -> `#E67E22`, heavy congestion
@@ -224,10 +224,12 @@ any `StubUIBackend` in smoke tests
   Use the authoritative formula from `architecture/ui-ux/minimap.md` §Viewport projection
   formula:
   - `kTileSize = 10.0f` — declare as a `static constexpr float` local to `Minimap.cpp`
-    (not shared with IrrlichtRenderer; the two usages are independent). Add a
-    `static_assert(kTileSize == 10.0f, "kTileSize must match IrrlichtRenderer::kTileSize");`
-    comment cross-reference so that if either value changes, the divergence is caught at
-    compile time.
+    (not shared with IrrlichtRenderer; the two usages are intentionally independent). Add a
+    `static_assert(kTileSize == 10.0f, "kTileSize must match IrrlichtRenderer::kTileSize — update both if tile size changes");`
+    as a documentation cross-reference. Note: this assertion only validates the local constant
+    against its own literal; it does NOT detect changes to `IrrlichtRenderer::kTileSize` at
+    compile time (IrrlichtRenderer.h is not included in Minimap.cpp). If either constant
+    changes, the developer must update both files manually.
   - World extents: `worldW = m_sim->getMapTilesX() * kTileSize`;
     `worldD = m_sim->getMapTilesZ() * kTileSize`.
   - Centre pixel: `cx = (m_cameraState.targetX / worldW) * 200`;
@@ -319,12 +321,19 @@ any `StubUIBackend` in smoke tests
 
 #### 5. UIManager wiring
 
-**File:** `src/ui/UIManager.cpp`
+**Files:** `src/ui/UIManager.h`, `src/ui/UIManager.cpp`, `src/rendering/IrrlichtRenderer.cpp`
 
 - [ ] **MM-30** `src/ui/UIManager.cpp` — `draw()`: Call `m_minimap->setCameraState(camState)`
   each frame, passing the `CameraState` obtained from `m_cameraController->getCameraState()`,
   so the minimap always has current camera position and zoom for viewport rectangle projection.
   (ref: `architecture/ui-ux/minimap.md` — camera viewport rectangle)
+
+- [ ] **MM-30a** `src/ui/UIManager.h` + `src/ui/UIManager.cpp`: Declare and implement the new
+  public method `void drawMinimapOverlay()`. In `UIManager.h`, add the public method declaration.
+  In `UIManager.cpp`, implement it as a one-liner delegation:
+  `if (m_minimap) m_minimap->drawOverlay();`. This method is the bridge called by
+  `IrrlichtRenderer::drawScene()` (MM-30b) to invoke the minimap's post-GUI tile colour fill
+  pass. (ref: `architecture/ui-ux/ui-manager.md` — drawMinimapOverlay() public method)
 
 - [ ] **MM-30b** `src/rendering/IrrlichtRenderer.cpp` — After `guiEnv->drawAll()` in
   `drawScene()`, call `m_uiManager->drawMinimapOverlay()` (new method on `UIManager` that
@@ -458,7 +467,12 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   with `NiceMock<MockUIBackend>` so that unconfigured backend calls made by `draw()` (e.g.
   `setElementVisible`, `setElementText`, `setElementAlpha`, `isElementVisible`) are silently
   ignored rather than triggering "uninteresting mock function call" failures. The
-  `MinimapElementLeakTest` fixture must include a `TearDown()` override that resets the
+  `MinimapElementLeakTest` fixture constructs Minimap as
+  `Minimap(&m_backend, nullptr, &m_sim, nullptr)` — the final `nullptr` for `IClock` differs
+  from `MinimapOverlayTest` (which injects `&m_clock`) because element-leak tests do not
+  exercise time-gated logic and do not require deterministic clock control.
+  (ref: `architecture/testing/testability-architecture.md` — MinimapElementLeakTest fixture)
+  The `MinimapElementLeakTest` fixture must include a `TearDown()` override that resets the
   Minimap to `nullptr` before the mock is destroyed, to prevent unexpected `removeElement()`
   calls during destruction from triggering mock violations.
   **Two-step call pattern**: Each test scenario calls `draw()` first, then `drawOverlay()`,
