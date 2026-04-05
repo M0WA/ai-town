@@ -15,28 +15,29 @@ panel, click-to-pan wiring, and budget-tick cadence — plus the
 
 ### Spec Updates
 
-The following architecture spec files require updates as part of this phase:
+The following architecture spec files were updated as part of the squad review
+(already applied — commit `fbe9a0f`):
 
-- [ ] **SU-01** `architecture/ui-ux/minimap.md` — Add a **Phase boundary** note at the end
+- [x] **SU-01** `architecture/ui-ux/minimap.md` — Add a **Phase boundary** note at the end
   of the Colorblind mode subsection stating that colorblind pattern rendering for the minimap
   Service Coverage overlay is implemented in Phase 12 (not Phase 11p); Phase 11p delivers
   only the base tint colour per service type; `setColorblindMode(bool)` and pattern draw
   logic are Phase 12 deliverables.
 
-- [ ] **SU-02** `architecture/ui-ux/ui-manager.md` — Add method 22 documentation to the
+- [x] **SU-02** `architecture/ui-ux/ui-manager.md` — Add method 22 documentation to the
   IUIBackend method contract section: `fillColoredRect(int x, int y, int w, int h, int r,
   int g, int b, int a)` — transient filled-rectangle draw call in virtual 1920×1080
   coordinate space; no persistent `UIElementHandle` created; must be called inside a frame
   render pass; used by `Minimap::draw()` for tile colour overlays without element leakage;
   `IrrlichtUIBackend` implements via `IVideoDriver::draw2DRectangle`.
 
-- [ ] **SU-03** `architecture/ui-ux/camera-controls.md` — Add Phase 11p extension section
+- [x] **SU-03** `architecture/ui-ux/camera-controls.md` — Add Phase 11p extension section
   after the "Phase 1 gamedesign-lookandfeel sign-off" documenting the three new `CameraState`
   fields added by MM-05: `targetX{0.f}`, `targetZ{0.f}`, `zoomDistance{200.f}` — their
   semantics, who populates them (MM-06 `CameraController::getCameraState()`), and who reads
   them (MM-21 `Minimap::draw()` viewport projection).
 
-- [ ] **SU-04** `architecture/ui-ux/minimap.md` — Update the Phase 9b section to replace the
+- [x] **SU-04** `architecture/ui-ux/minimap.md` — Update the Phase 9b section to replace the
   deferred `CameraController::panTo()` reference with `CameraController::setTarget(float worldX,
   float worldZ)` (MM-31), aligning the spec with the actual API used in the Phase 11p plan.
 
@@ -173,15 +174,21 @@ any `StubUIBackend` in smoke tests
   rect with road grey `#7F8C8D`. Non-road tiles are skipped.
   (ref: `architecture/ui-ux/minimap.md` — road network grey lines)
 
-- [ ] **MM-21** `src/ui/Minimap.cpp` — `draw()`: Camera viewport rectangle projection. Compute
-  the indicator pixel position from `m_cameraState.targetX` and `m_cameraState.targetZ`
-  proportionally within the 200×200 px render area (using `kTileSize = 10.0f` world units per
-  tile and `getMapTilesX()`/`getMapTilesZ()` for map extents). Compute the indicator side
-  length as `kMapW × (zoomDistance / CameraController::kMaxZoomDistance)`, clamped to a
-  minimum of 8 px and a maximum of 190 px (square approximation). Call
-  `m_backend->setElementRect(m_viewportRect, pixelX, pixelZ, side, side)` each frame — no
-  new element is created.
-  (ref: `architecture/ui-ux/minimap.md` — viewport indicator size constraints, min 8×8, max 190×190)
+- [ ] **MM-21** `src/ui/Minimap.cpp` — `draw()`: Camera viewport rectangle projection.
+  Use the authoritative formula from `architecture/ui-ux/minimap.md` §Viewport projection
+  formula:
+  - `kTileSize = 10.0f` — declare as a `static constexpr float` local to `Minimap.cpp`
+    (not shared with IrrlichtRenderer; the two usages are independent).
+  - World extents: `worldW = m_sim->getMapTilesX() * kTileSize`;
+    `worldD = m_sim->getMapTilesZ() * kTileSize`.
+  - Centre pixel: `cx = (m_cameraState.targetX / worldW) * 200`;
+    `cz = (m_cameraState.targetZ / worldD) * 200` (clamp each to [0, 200]).
+  - Side: `side = 200.f * (m_cameraState.zoomDistance / CameraController::kMaxZoomDistance)`,
+    clamped to [8, 190] px.
+  - Draw centred at `(cx, cz)`, clamp rect to [0, 200] render area.
+  - Call `m_backend->setElementRect(m_viewportRect, rectX, rectZ, side, side)` each frame —
+    no new element is created.
+  (ref: `architecture/ui-ux/minimap.md` — Viewport projection formula, size constraints 8–190 px)
 
 - [ ] **MM-22** `src/ui/Minimap.cpp` — `draw()`: Budget-tick cadence. Cache the
   `queryTile()` iteration results (zone grid snapshot and road grid snapshot) in member
@@ -190,13 +197,18 @@ any `StubUIBackend` in smoke tests
   (ref: `architecture/ui-ux/minimap.md` — "Overlay data is rendered into the minimap texture
   at budget-tick cadence (not per-frame)")
 
-- [ ] **MM-23** `src/ui/Minimap.cpp` — `draw()`: Legend content — dynamic switching. When
-  Service Coverage overlay is active, populate `m_legendPanel` with four rows using the
-  authoritative hex swatches (8×8 px `fillColoredRect` per swatch): Fire Station `#C0392B`,
-  Police Station `#2E4482`, Power Plant `#F1C40F`, Water Tower `#1ABC9C`. When Traffic
-  Congestion overlay is active, show three rows: Free-flowing `#27AE60`, Mild congestion
-  `#E67E22`, Heavy congestion `#E74C3C`. Legend text colour `#EBF4F6`. Do not use a
-  static hardcoded string; legend content must update whenever the active overlay changes.
+- [ ] **MM-23** `src/ui/Minimap.cpp` — `draw()`: Legend content — dynamic switching.
+  **Element lifecycle rule**: Legend `addStaticText` elements are created **once** (in
+  the constructor or on first overlay activation), never inside `draw()` — this satisfies
+  the MM-42 zero-element-creation contract. `draw()` only calls `setElementText()`,
+  `setElementVisible()`, and `fillColoredRect()` on pre-existing elements.
+
+  When Service Coverage overlay is active, render four rows using 8×8 px `fillColoredRect`
+  swatches: Fire Station `#C0392B`, Police Station `#2E4482`, Power Plant `#F1C40F`,
+  Water Tower `#1ABC9C`. When Traffic Congestion overlay is active, render three rows:
+  Free-flowing `#27AE60`, Mild congestion `#E67E22`, Heavy congestion `#E74C3C`. Legend
+  text labels use colour `#EBF4F6`; update via `setElementText()` in `draw()` when overlay
+  changes (not by creating new elements).
   (ref: `architecture/ui-ux/minimap.md` — legend panel, authoritative hex values)
 
 - [ ] **MM-25** `src/ui/Minimap.cpp` — `onEvent()`: Click-to-pan. Map click pixel coordinates
@@ -223,14 +235,20 @@ any `StubUIBackend` in smoke tests
   No overlay active → `{1576, 848, 344, 232}`; overlay active → `{1576, 732, 344, 348}`.
   (ref: `architecture/ui-ux/minimap.md` — dynamic input-arbitration widget footprint)
 
+- [ ] **MM-29a** `src/ui/ui_constants.h` — Add two named constants for the minimap widget
+  input-arbitration Y bounds:
+  `constexpr int kMinimapWidgetTop = 848;` (no overlay active)
+  `constexpr int kMinimapWidgetTopOverlayActive = 732;` (any overlay active)
+  These constants are referenced by MM-29 and MM-10 and must exist before either is compiled.
+  (ref: `architecture/ui-ux/minimap.md` — dynamic widget footprint, toggle button position)
+
 - [ ] **MM-29** `src/ui/UIManager.cpp` — input arbitration: In `UIManager`'s draw/update loop,
   call `m_minimap->getWidgetFootprint()` each frame and cache the result; use this dynamic
   rect (not a hard-coded constant) when evaluating whether a click falls inside the minimap
   widget. When no overlay is active the footprint is `{1576,848,344,232}`; when any overlay
   is active the footprint expands to `{1576,732,344,348}` so the legend panel and label strip
-  block click-through to city tiles. The `kMinimapWidgetTop`/`kMinimapWidgetTopOverlayActive`
-  constants in `ui_constants.h` encode the two Y values (848 and 732 respectively); do NOT
-  hard-code raw numbers in UIManager.
+  block click-through to city tiles. Use `kMinimapWidgetTop`/`kMinimapWidgetTopOverlayActive`
+  from `ui_constants.h` (added in MM-29a); do NOT hard-code raw numbers in UIManager.
   (ref: `architecture/ui-ux/input-arbitration.md` — minimap carve-out with dynamic bounds)
 
 ---
@@ -256,7 +274,24 @@ any `StubUIBackend` in smoke tests
 
 #### 6. Tests — 65 new cases in 10 groups
 
+**CMakeLists.txt registration** (required before tests are discoverable by CTest):
+
+- [ ] **MM-32** Root `CMakeLists.txt`: Register the test file by extending the existing
+  `ui_tests` target via `target_sources(ui_tests PRIVATE tests/ui/minimap_overlay_test.cpp)`.
+  Do NOT call `add_executable(ui_tests ...)` again — use `target_sources` per framework.md
+  §Phase 4+ target extension policy. **No additional `aitown_add_tests()` call is needed**:
+  the existing `aitown_add_tests(ui_tests LABEL "unit" TIMEOUT 300)` call already registers
+  the entire `ui_tests` target with the `unit` CTest label; adding sources via `target_sources`
+  automatically makes the 65 new cases discoverable by CTest under the `unit` label in all CI
+  jobs (`build-linux`, `build-windows`, `coverage-linux`).
+  (ref: `architecture/testing/framework.md` — `target_sources` policy)
+
 **File:** `tests/ui/minimap_overlay_test.cpp` (extended via `target_sources`)
+
+**Mock strategy**: Groups 1–9 use `NiceMock<MockUIBackend>` and `NiceMock<MockCitySimulation>`
+(standard policy for UI overlay interaction tests per `architecture/testing/testability-architecture.md`
+§Mock Policy). Group 10 (element leak regression, MM-42) uses `StrictMock<MockUIBackend>` in a
+separate fixture class `MinimapElementLeakTest` to enforce `Times(0)` call-count contracts.
 
 - [ ] **MM-33** `tests/ui/minimap_overlay_test.cpp` — Group 1: Zone color coding (8 tests).
   Stub `ICitySimulation::queryTile()` to return each of the four zone types (Residential,
@@ -326,7 +361,9 @@ any `StubUIBackend` in smoke tests
   (ref: `architecture/ui-ux/minimap.md` — `getBounds()` semantics, dynamic widget footprint)
 
 - [ ] **MM-42** `tests/ui/minimap_overlay_test.cpp` — Group 10: Element leak regression
-  (5 tests). Set `EXPECT_CALL(mockBackend, addStaticText(...)).Times(0)` and
+  (5 tests). Use a **separate fixture** `MinimapElementLeakTest : public ::testing::Test`
+  with `StrictMock<MockUIBackend>` (not NiceMock) to enforce `Times(0)` call-count contracts.
+  Set `EXPECT_CALL(mockBackend, addStaticText(...)).Times(0)` and
   `EXPECT_CALL(mockBackend, addButton(...)).Times(0)` before calling `draw()`; verify that
   one `draw()` call, ten consecutive `draw()` calls, and a `draw()` after a budget tick each
   produce zero element-creation calls; verify that `fillColoredRect` is called (not zero)
@@ -338,16 +375,20 @@ any `StubUIBackend` in smoke tests
 ### Exit Criteria
 
 - [ ] `make build` completes without errors or warnings on both Linux and Windows.
+- [ ] `CMakeLists.txt` extended via `target_sources(ui_tests PRIVATE tests/ui/minimap_overlay_test.cpp)`
+  (MM-32); CTest discovers all 65 new cases under the `unit` label.
 - [ ] All 65 new test cases in `tests/ui/minimap_overlay_test.cpp` (Groups 1–10) pass under
   `make test`.
 - [ ] All pre-existing unit, integration, and OpenGL tests continue to pass unchanged —
   zero regressions introduced.
-- [ ] The element-leak regression tests (Group 10, MM-42) run in CI; `addStaticText` and
-  `addButton` are never called inside `draw()`.
+- [ ] The element-leak regression tests (Group 10, MM-42) run in CI using `StrictMock<MockUIBackend>`;
+  `addStaticText` and `addButton` are never called inside `draw()`.
 - [ ] `IUIBackend::fillColoredRect` (MM-01) is verified present in `MockUIBackend` with a
   `MOCK_METHOD` stub and in `IrrlichtUIBackend` with a real `draw2DRectangle` implementation.
 - [ ] `CameraState` has `targetX`, `targetZ`, `zoomDistance` fields (MM-05) and
   `CameraController::getCameraState()` populates them (MM-06).
+- [ ] `src/ui/ui_constants.h` contains `kMinimapWidgetTop = 848` and
+  `kMinimapWidgetTopOverlayActive = 732` (MM-29a).
 - [ ] `Minimap::getWidgetFootprint()` returns `UIRect{1576,848,344,232}` when no overlay
   active and `UIRect{1576,732,344,348}` when overlay active (MM-10, MM-28);
   `Minimap::getBounds()` continues to return `Rect{1720, 880, 200, 200}` unchanged.
@@ -355,11 +396,11 @@ any `StubUIBackend` in smoke tests
   position) — verified by Group 7 tests (MM-39).
 - [ ] Budget-tick cadence is enforced: `queryTile()` is called at most once per budget tick,
   not once per frame — verified by Group 8 tests (MM-40).
-- [ ] `architecture/ui-ux/minimap.md` Colorblind mode deferral note added (SU-01).
-- [ ] `architecture/ui-ux/ui-manager.md` IUIBackend method 22 `fillColoredRect` documented (SU-02).
-- [ ] `architecture/ui-ux/camera-controls.md` Phase 11p extension section added (SU-03).
-- [ ] `architecture/ui-ux/minimap.md` Phase 9b deferred API updated from `panTo()` to
-  `setTarget()` (SU-04).
+- [x] `architecture/ui-ux/minimap.md` Colorblind mode deferral note added (SU-01) — already applied commit `fbe9a0f`.
+- [x] `architecture/ui-ux/ui-manager.md` IUIBackend method 22 `fillColoredRect` documented (SU-02) — already applied commit `fbe9a0f`.
+- [x] `architecture/ui-ux/camera-controls.md` Phase 11p extension section added (SU-03) — already applied commit `fbe9a0f`.
+- [x] `architecture/ui-ux/minimap.md` Phase 9b deferred API updated from `panTo()` to
+  `setTarget()` (SU-04) — already applied commit `fbe9a0f`.
 - [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
   reports zero errors.
 
