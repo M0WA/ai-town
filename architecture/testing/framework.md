@@ -83,7 +83,7 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
   #
   # Standard unit tests:
   # aitown_add_tests(simulation_tests LABEL "unit" DISCOVERY_TIMEOUT 60)  # 60s: 8-file binary with RapidCheck property tests under coverage instrumentation
-  # aitown_add_tests(ui_tests LABEL "unit")
+  # aitown_add_tests(ui_tests LABEL "unit" TIMEOUT 300)  # 300s: WorldInteraction_OverlayCap_100K_StillCalls (~225s unoptimized, coverage build)
   # aitown_add_tests(audio_tests LABEL "unit")
   #
   # Integration tests:
