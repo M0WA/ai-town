@@ -1,5 +1,8 @@
 # SonarCloud analysis triggered after CI completes.
 # Downloads the Cobertura XML artifact produced by coverage-linux and runs the scan.
+# Note: SonarSource composite actions transitively use unpinned actions/cache@v4,
+# which is blocked by this repo's "all actions must be SHA-pinned" policy.
+# Instead we inline the scanner steps directly so every action reference is SHA-pinned.
 name: SonarCloud analysis
 
 on:
@@ -10,6 +13,10 @@ on:
 
 permissions:
   pull-requests: read
+
+env:
+  SONAR_SCANNER_VERSION: 7.0.2.4839
+  SONAR_SCANNER_BINARIES_URL: https://binaries.sonarsource.com/Distribution/sonar-scanner-cli
 
 jobs:
   Analysis:
@@ -32,18 +39,38 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
 
-      - name: Analyze with SonarCloud
-        uses: SonarSource/sonarqube-scan-action@0303d6b62e310685c0e34d0b9cde218036885c4d  # v5.0.0
+      - name: Cache Sonar Scanner CLI
+        id: sonar-scanner-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: ${{ runner.temp }}/sonar-scanner-cli-${{ env.SONAR_SCANNER_VERSION }}-Linux-X64
+          key: sonar-scanner-cli-${{ env.SONAR_SCANNER_VERSION }}-Linux-X64
+
+      - name: Install Sonar Scanner CLI
+        if: steps.sonar-scanner-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/sonarscanner"
+          cd "$RUNNER_TEMP/sonarscanner"
+          SCANNER_FILE="sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux-x64.zip"
+          curl --fail --silent --show-error --user-agent sonarqube-scan-action \
+               --location --output "$SCANNER_FILE" \
+               "${SONAR_SCANNER_BINARIES_URL}/${SCANNER_FILE}"
+          unzip -q -o "$SCANNER_FILE"
+          mv -f "sonar-scanner-${SONAR_SCANNER_VERSION}-linux-x64" \
+               "$RUNNER_TEMP/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-Linux-X64"
+
+      - name: Run SonarScanner
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          args: >
-            -Dsonar.projectKey=M0WA_ai-town
-            -Dsonar.organization=m0wa
-            -Dsonar.sources=src
-            -Dsonar.tests=tests
-            -Dsonar.coverageReportPaths=coverage.xml
-            -Dsonar.exclusions=assets/**,build/**,tools/**
-            -Dsonar.cpd.exclusions=tests/**
-            -Dsonar.scm.provider=git
-          projectBaseDir: .
+        run: |
+          SCANNER_BIN="$RUNNER_TEMP/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-Linux-X64/bin/sonar-scanner"
+          "$SCANNER_BIN" \
+            -Dsonar.projectKey=M0WA_ai-town \
+            -Dsonar.organization=m0wa \
+            -Dsonar.sources=src \
+            -Dsonar.tests=tests \
+            -Dsonar.coverageReportPaths=coverage.xml \
+            -Dsonar.exclusions="assets/**,build/**,tools/**" \
+            -Dsonar.cpd.exclusions="tests/**" \
+            -Dsonar.scm.provider=git \
+            -Dsonar.projectBaseDir=.
