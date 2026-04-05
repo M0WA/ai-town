@@ -1,5 +1,5 @@
 # SonarCloud analysis triggered after CI completes.
-# Downloads the Cobertura XML artifact produced by coverage-linux and runs the scan.
+# Downloads the Sonar Generic Coverage XML artifact produced by coverage-linux and runs the scan.
 # Note: SonarSource composite actions transitively use unpinned actions/cache@v4,
 # which is blocked by this repo's "all actions must be SHA-pinned" policy.
 # Instead we inline the scanner steps directly so every action reference is SHA-pinned.
@@ -31,10 +31,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download Cobertura coverage XML
+      - name: Download Sonar Generic Coverage XML
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
-          name: coverage-cobertura-linux-${{ github.event.workflow_run.head_sha }}
+          name: coverage-sonar-linux-${{ github.event.workflow_run.head_sha }}
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
 

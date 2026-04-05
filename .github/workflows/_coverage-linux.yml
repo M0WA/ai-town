@@ -91,7 +91,7 @@ jobs:
       - name: Publish test results
         if: always()
         continue-on-error: true
-        uses: dorny/test-reporter@6e6a65b7a0bd2c9197df7d0ae36ac5cee784230c  # v3.0.0
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2  # v3.0.0
         with:
           name: 'Linux Coverage Tests'
           path: 'test_results/*.xml'
@@ -151,10 +151,15 @@ jobs:
           lcov --list coverage_filtered.info \
             --ignore-errors inconsistent \
             --rc check_data_consistency=0
-          lcov_cobertura coverage_filtered.info --output coverage.xml
           genhtml coverage_filtered.info --output-directory coverage_html/ \
             --ignore-errors inconsistent \
             --rc check_data_consistency=0
+
+      # Convert lcov to SonarQube Generic Coverage XML.
+      # sonar.coverageReportPaths requires Generic Coverage XML, NOT Cobertura format.
+      # lcov_cobertura generates Cobertura XML which Sonar rejects with exit code 3.
+      - name: Generate Sonar Generic Coverage XML
+        run: python3 .github/scripts/lcov_to_sonar.py coverage_filtered.info coverage.xml
 
       # src/simulation/ preflight — verify simulation coverage data is present.
       # If simulation_tests fails to run, coverage_filtered.info has no src/simulation/ SF
@@ -278,12 +283,12 @@ jobs:
           print('All src/ui/ files have coverage.')
           "
 
-      # Upload Cobertura XML for SonarCloud (sonarcloud.yml downloads via workflow_run).
-      - name: Upload coverage XML (Cobertura)
+      # Upload Sonar Generic Coverage XML for SonarCloud (sonarcloud.yml downloads via workflow_run).
+      - name: Upload coverage XML (Sonar Generic)
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
         with:
-          name: coverage-cobertura-linux-${{ github.sha }}
+          name: coverage-sonar-linux-${{ github.sha }}
           path: coverage.xml
           retention-days: 14
 

@@ -17,6 +17,10 @@ jobs:
   build-windows:
     runs-on: windows-latest
     timeout-minutes: 40
+    env:
+      # ilammy/msvc-dev-cmd and lukka/run-vcpkg have no node24 release yet;
+      # force them to run on node24 to suppress the node20-deprecation warning.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     permissions:
       checks: write     # required by dorny/test-reporter
       contents: read    # required by actions/checkout
@@ -45,7 +49,7 @@ jobs:
       #     a stale-baseline archive that triggers MSYS2 mirror 404s on cold-package rebuilds.
       #     Acceptable only when no same-baseline entry exists (e.g. first run at a new baseline).
       - name: Cache vcpkg packages
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7  # v5.0.4
         with:
           path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
           key: vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('vcpkg.json') }}-${{ inputs.vcpkg_commit_id }}
@@ -157,7 +161,7 @@ jobs:
       # Step 16: Publish test results.
       - name: Publish test results
         if: always()
-        uses: dorny/test-reporter@6e6a65b7a0bd2c9197df7d0ae36ac5cee784230c  # v3.0.0
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2  # v3.0.0
         with:
           name: 'Windows Unit Tests'
           path: 'test_results/*.xml'
