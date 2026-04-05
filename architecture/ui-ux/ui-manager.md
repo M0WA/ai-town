@@ -298,6 +298,13 @@ public:
     // Render all GUI panels — call AFTER sceneManager->drawAll() and BEFORE endScene().
     void draw();
 
+    // Post-GUI minimap overlay pass — call AFTER guiEnv->drawAll() and BEFORE driver->endScene().
+    // Delegates to m_minimap->drawOverlay() to render transient per-frame tile colour fills
+    // (zone tint, viewport rectangle) that must appear on top of the minimap background element.
+    // Called by IrrlichtRenderer::drawScene() (Phase 11p).
+    // (ref: architecture/graphics-architecture/irrlicht-device-lifecycle.md — render order)
+    void drawMinimapOverlay();
+
     // State transitions (called by game loop):
     void transitionToGameplay(GameMode mode);  // Sets m_gameMode = mode and transitions state from MainMenu to Gameplay; hides main menu; shows HUD + minimap.
                                                // For the FIRST game, called directly from main.cpp after terrain generation.
