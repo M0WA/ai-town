@@ -71,7 +71,7 @@
     | Speed band | Condition | Hex |
     |---|---|---|
     | ≥ 40 % of free-flow speed | Green (free-flowing) | `#27AE60` |
-    | 31 – 39 % of free-flow speed | Orange (mild congestion) | `#E67E22` |
+    | > 30 % and < 40 % of free-flow speed | Orange (mild congestion) | `#E67E22` |
     | ≤ 30 % of free-flow speed | Red (moderate–heavy congestion) | `#E74C3C` |
 
     Overlay data is rendered into the minimap texture at budget-tick cadence (not per-frame).
