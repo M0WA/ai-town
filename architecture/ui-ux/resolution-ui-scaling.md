@@ -20,7 +20,7 @@
   public:
       struct VirtualPoint { int x; int y; };
       VirtualPoint unproject(int physicalX, int physicalY) const;
-      Rect getViewportRect() const;
+      UIRect getViewportRect() const;
       // ... other methods
   };
   ```
@@ -32,7 +32,7 @@
   ```cpp
   // Returns the active viewport rectangle in physical pixels (accounts for letterbox).
   // Call before un-projecting any input coordinate.
-  Rect getViewportRect() const;
+  UIRect getViewportRect() const;
 
   // Transforms a physical-pixel input coordinate to virtual 1920×1080 space.
   // Must be applied exactly once at the entry point of the input chain.
@@ -69,17 +69,17 @@ UIScaler(int virtualW, int virtualH, int viewportW, int viewportH, int offsetX, 
 - **Viewport resize**: After window resize, `UIScaler`'s cached `m_viewportW` and `m_viewportH` become stale. `UIScaler` exposes `void setViewportSize(int viewportW, int viewportH)` to update these cached dimensions. The main loop MUST call `uiScaler.setViewportSize(uiBackend.getScreenWidth(), uiBackend.getScreenHeight())` each frame (before event processing) so that `unproject()` always uses the current physical viewport size. Without this update, mouse coordinate unprojection after resize produces incorrect virtual coordinates, making buttons unclickable despite being visually positioned correctly (IrrlichtUIBackend dynamically queries the driver's screen size for element positioning, but UIScaler would still use stale construction-time dimensions for input unprojection).
 - This constructor is the testability seam used by `tests/ui/ui_scaler_test.cpp` (see `architecture/testing/testability-architecture.md` UIScaler tests section). Tests construct `UIScaler(1920, 1080, 1280, 720, 0, 90)` directly to validate coordinate projection and letterbox offset math without a display.
 
-## Rect Type Ownership
+## UIRect Type Ownership
 
-`getViewportRect()` returns a `Rect` value. The `Rect` struct is defined **exclusively** in `src/ui/IUIBackend.h`:
+`getViewportRect()` returns a `UIRect` value. The `UIRect` struct is defined **exclusively** in `src/ui/IUIBackend.h`:
 
 ```cpp
-struct Rect { int x{0}, y{0}, w{0}, h{0}; };
+struct UIRect { int x{0}, y{0}, w{0}, h{0}; };
 ```
 
-- `UIScaler.h` MUST `#include "src/ui/IUIBackend.h"` to obtain the `Rect` type for `getViewportRect()`.
-- No other header may define or forward-declare `struct Rect`. Duplicate definitions across translation units risk ODR (One Definition Rule) violations and linker errors that are difficult to diagnose.
-- **Acknowledged transitive include coupling**: Including `IUIBackend.h` in `UIScaler.h` creates a transitive dependency: any translation unit that includes `UIScaler.h` (directly or through `CameraController.h` or the platform adapter) will also see all 17 `IUIBackend` virtual method declarations. This coupling is **intentional and accepted** — `Rect` is defined in `IUIBackend.h` by design (co-location with the interface that returns it), and `UIScaler.h` is a UI-domain header legitimately coupled to the UI backend. An alternative — extracting `Rect` into a minimal `src/ui/rect.h` — was evaluated and rejected to avoid header proliferation for a single 4-field struct. Test targets (`ui_tests`) that include `UIScaler.h` must link `aitown_ui` (which provides `IUIBackend` via the `aitown_render`→`IrrlichtUIBackend` linkage chain) — this is already satisfied by the existing `target_link_libraries(ui_tests ...)` setup. If this transitive dependency ever becomes a build-time bottleneck (e.g., slow incremental compilation), the `rect.h` extraction is the clean upgrade path.
+- `UIScaler.h` MUST `#include "src/ui/IUIBackend.h"` to obtain the `UIRect` type for `getViewportRect()`.
+- No other header may define or forward-declare `struct UIRect`. Duplicate definitions across translation units risk ODR (One Definition Rule) violations and linker errors that are difficult to diagnose.
+- **Acknowledged transitive include coupling**: Including `IUIBackend.h` in `UIScaler.h` creates a transitive dependency: any translation unit that includes `UIScaler.h` (directly or through `CameraController.h` or the platform adapter) will also see all 17 `IUIBackend` virtual method declarations. This coupling is **intentional and accepted** — `UIRect` is defined in `IUIBackend.h` by design (co-location with the interface that returns it), and `UIScaler.h` is a UI-domain header legitimately coupled to the UI backend. An alternative — extracting `UIRect` into a minimal `src/ui/ui_rect.h` — was evaluated and rejected to avoid header proliferation for a single 4-field struct. Test targets (`ui_tests`) that include `UIScaler.h` must link `aitown_ui` (which provides `IUIBackend` via the `aitown_render`→`IrrlichtUIBackend` linkage chain) — this is already satisfied by the existing `target_link_libraries(ui_tests ...)` setup. If this transitive dependency ever becomes a build-time bottleneck (e.g., slow incremental compilation), the `ui_rect.h` extraction is the clean upgrade path.
 
 - **Mouse un-projection ownership**: `UIScaler::unproject()` MUST be applied exactly once, at the entry point of the input chain. The platform event receiver (in `src/platform/`) applies the transform before handing the resulting `InputEvent` to `UIManager::onEvent()`. Panels receive virtual-space coordinates and must not call `UIScaler` again. Panel unit tests inject pre-projected virtual-space coordinates directly, bypassing the platform receiver entirely.
 
@@ -97,7 +97,7 @@ struct Rect { int x{0}, y{0}, w{0}, h{0}; };
 ```cpp
 struct ElementInfo {
     irr::gui::IGUIElement* element{nullptr};
-    Rect virtualRect{};  // captured at addStaticText/addButton time
+    UIRect virtualRect{};  // captured at addStaticText/addButton time
 };
 std::unordered_map<UIElementHandle, ElementInfo> m_elementMap;
 ```

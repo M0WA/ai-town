@@ -12,11 +12,11 @@ lcov, so coverage is captured correctly under the 80% gate.
 using UIElementHandle = uint32_t;
 static constexpr UIElementHandle kInvalidUIElement = 0;
 
-// Rect struct used by IUIBackend::getElementRect — MUST be defined BEFORE IUIBackend
+// UIRect struct used by IUIBackend::getElementRect — MUST be defined BEFORE IUIBackend
 // to avoid a forward-declaration-as-return-type ambiguity in the virtual method signature.
 // Placing the definition after the class compiles on some compilers but is non-conforming
 // and breaks with strict C++ parsing rules for return types in virtual method declarations.
-struct Rect { int x{0}, y{0}, w{0}, h{0}; };
+struct UIRect { int x{0}, y{0}, w{0}, h{0}; };
 
 class IUIBackend {
 public:
@@ -32,7 +32,7 @@ public:
     virtual void            setElementAlpha(UIElementHandle handle, float alpha) = 0;  // [0.0, 1.0]
     virtual void            setElementImage(UIElementHandle handle, UIElementHandle textureHandle) = 0;
     virtual std::string     getElementText(UIElementHandle handle) const = 0;   // for test assertions on displayed values
-    virtual Rect            getElementRect(UIElementHandle handle) const = 0;   // {x, y, w, h} in virtual space; for position/size assertions
+    virtual UIRect          getElementRect(UIElementHandle handle) const = 0;   // {x, y, w, h} in virtual space; for position/size assertions
     virtual int             getScreenWidth()  const = 0;
     virtual int             getScreenHeight() const = 0;
     // Returns the virtual UI canvas width (always 1920 in V1).
@@ -78,7 +78,7 @@ public:
     //     In IrrlichtUIBackend: calls IVideoDriver::draw2DRectangle(SColor(a,r,g,b), recti).
     //     No UIElementHandle is created or returned — this is a transient per-frame draw call.
     //     Must be called inside a frame render pass (between beginScene/endScene).
-    //     Used by Minimap::draw() for tile colour overlays without element leakage.
+    //     Used by Minimap::drawOverlay() for tile colour overlays without element leakage.
     //     In MockUIBackend: MOCK_METHOD stub. In StubUIBackend: no-op override.
     //     Added in Phase 11p. See architecture/ui-ux/ui-manager.md §IUIBackend Method Contract.
     virtual void fillColoredRect(int x, int y, int w, int h, int r, int g, int b, int a) = 0;
@@ -646,6 +646,12 @@ public:
       MOCK_METHOD((std::vector<IntersectionSignalState>), getIntersectionSignalStates, (), (const, override));
       MOCK_METHOD((std::vector<RoadSegmentSpeed>), getRoadSegmentSpeeds, (), (const, override));
       MOCK_METHOD((std::vector<ServiceCoverageTile>), getServiceCoverage, (), (const, override));
+
+      // Phase 11p minimap query methods — required by MM-33, MM-40, MM-21, MM-22:
+      MOCK_METHOD(QueryResult, queryTile, (int x, int z), (const, override));  // Returns zone type, road flag, etc. for the given tile coordinates
+      MOCK_METHOD(int, getMapTilesX, (), (const, override));                // Map width in tiles
+      MOCK_METHOD(int, getMapTilesZ, (), (const, override));                // Map depth in tiles
+      MOCK_METHOD(int, consumeBudgetTicks, (), (override));                 // Returns number of budget ticks elapsed since last call; 0 if none
   };
   ```
 
@@ -2262,3 +2268,92 @@ CTest filter for all Phase 10 simulation render and music intensity tests:
 
 CTest filter for all Phase 10b terrain flattening and cloud plane tests:
 `-R "TerrainFlatteningTest|TerrainFlatteningSimTest|CloudPlaneTest"`
+
+### MinimapOverlayTest / MinimapElementLeakTest Fixture (Phase 11p)
+
+Two test fixtures cover the Phase 11p minimap overlay tests. Both live in
+`tests/ui/minimap_overlay_test.cpp` under the `ui_tests` CMake target with label `unit`.
+
+#### `MinimapOverlayTest` Fixture (Groups 1--9 and 11)
+
+The primary fixture for minimap overlay draw logic, colour mapping, camera-frustum
+indicator, zoom interaction, and click-to-pan dispatch.
+
+**Members**:
+
+```cpp
+class MinimapOverlayTest : public ::testing::Test {
+protected:
+    ::testing::NiceMock<MockUIBackend>       m_backend;
+    ::testing::NiceMock<MockCitySimulation>  m_sim;
+    ManualClock                              m_clock;
+    std::unique_ptr<Minimap>                 m_minimap;
+
+    void SetUp() override {
+        m_minimap = std::make_unique<Minimap>(&m_backend, nullptr, &m_sim, &m_clock);
+    }
+
+    void TearDown() override {
+        // **Mandatory destructor-path contract**: Reset m_minimap to nullptr
+        // BEFORE NiceMock<MockUIBackend> and NiceMock<MockCitySimulation> are
+        // destroyed. During Minimap destruction, removeElement() and other
+        // backend calls may fire. If the mocks are already destroyed at that
+        // point, the test process crashes with a use-after-free. Resetting
+        // here also prevents unexpected removeElement() calls from triggering
+        // NiceMock warnings that could obscure real test failures.
+        m_minimap.reset();
+    }
+};
+```
+
+**NiceMock rationale**: `Minimap` constructor and `drawOverlay()` invoke many
+incidental `IUIBackend` methods (element creation, visibility toggling, alpha
+setting) and `ICitySimulation` queries (`getMapTilesX`, `getMapTilesZ`,
+`queryTile`). Using `NiceMock` silences these unconfigured calls while explicit
+`EXPECT_CALL` declarations in individual tests still enforce the contracts under
+examination. This matches the `NiceMock` pattern established by
+`UIManagerModalTest` and `NiceSimulationTestBase`.
+
+#### `MinimapElementLeakTest` Fixture (Group 10)
+
+A separate fixture class dedicated to verifying that `Minimap::drawOverlay()`
+does not leak UI elements across successive draw passes. The fixture enforces
+that repeated draw calls reuse existing colour-rect primitives rather than
+creating new text or button elements.
+
+**Members**:
+
+```cpp
+class MinimapElementLeakTest : public ::testing::Test {
+protected:
+    ::testing::NiceMock<MockUIBackend>       m_backend;
+    ::testing::NiceMock<MockCitySimulation>  m_sim;
+    std::unique_ptr<Minimap>                 m_minimap;
+
+    void SetUp() override {
+        m_minimap = std::make_unique<Minimap>(&m_backend, nullptr, &m_sim, nullptr);
+    }
+
+    void TearDown() override {
+        // Same destructor-path contract as MinimapOverlayTest — reset
+        // m_minimap before mocks are destroyed to prevent use-after-free
+        // and suppress spurious NiceMock warnings from removeElement().
+        m_minimap.reset();
+    }
+};
+```
+
+**Core contracts enforced per draw pass**:
+
+- `EXPECT_CALL(m_backend, addStaticText(...)).Times(0)` -- no new text elements
+  created during a redraw (elements are created once, then reused).
+- `EXPECT_CALL(m_backend, addButton(...)).Times(0)` -- no new button elements
+  created during a redraw.
+- `EXPECT_CALL(m_backend, fillColoredRect(...)).Times(AtLeast(1))` -- at least
+  one colour-rect draw occurs per pass, preventing vacuous tests that pass
+  because `drawOverlay()` silently short-circuits.
+
+These three expectations together guarantee that the minimap draw path is both
+active (non-vacuous) and leak-free (no element accumulation).
+
+**CTest filter**: `-R "MinimapOverlayTest|MinimapElementLeakTest"`
