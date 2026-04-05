@@ -62,7 +62,7 @@ jobs:
           echo "$vcpkgBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Download Windows staging artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
           name: aitown-staging-windows-${{ github.sha }}
           path: build/
@@ -84,7 +84,7 @@ jobs:
         run: cpack -G NSIS -C Release
 
       - name: Upload Windows installer
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
         with:
           name: aitown-installer-windows-${{ github.sha }}
           path: build/aitown-*.exe

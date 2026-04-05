@@ -227,31 +227,31 @@ jobs:
           fetch-depth: 0
 
       - name: Download Windows installer
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
           name: aitown-installer-windows-${{ github.sha }}
           path: ./release-assets/
 
       - name: Download Linux .deb (bookworm)
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
           name: aitown-deb-debian-bookworm-${{ github.sha }}
           path: ./release-assets/
 
       - name: Download Linux .deb (trixie)
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
           name: aitown-deb-debian-trixie-${{ github.sha }}
           path: ./release-assets/
 
       - name: Download Linux .deb (jammy)
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
           name: aitown-deb-ubuntu-jammy-${{ github.sha }}
           path: ./release-assets/
 
       - name: Download Linux .deb (noble)
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
           name: aitown-deb-ubuntu-noble-${{ github.sha }}
           path: ./release-assets/
