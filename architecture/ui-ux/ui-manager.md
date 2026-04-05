@@ -56,11 +56,11 @@ public:
     virtual std::string getElementText(UIElementHandle handle) const = 0;
 
     // 12. Return the bounding rectangle of an element in virtual coordinate space.
-    //     Returns Rect{x, y, w, h} (defined in IUIBackend.h — no Irrlicht dependency).
+    //     Returns UIRect{x, y, w, h} (defined in IUIBackend.h — no Irrlicht dependency).
     //     IrrlichtUIBackend::getElementRect() converts from irr::core::rect<irr::s32>
-    //     internally before returning Rect, keeping Irrlicht headers out of src/ui/.
+    //     internally before returning UIRect, keeping Irrlicht headers out of src/ui/.
     //     Used in position/size assertions.
-    virtual Rect getElementRect(UIElementHandle handle) const = 0;
+    virtual UIRect getElementRect(UIElementHandle handle) const = 0;
 
     // 13. Return the physical screen width in pixels (driver resolution).
     virtual int getScreenWidth() const = 0;
@@ -134,7 +134,7 @@ public:
     //     Must be called inside a frame render pass (between beginScene/endScene).
     //     x, y, w, h are in virtual space (scaled by UIScaler before drawing).
     //     r, g, b, a are each in [0, 255].
-    //     Used by Minimap::draw() to render tile colour overlays per-frame without
+    //     Used by Minimap::drawOverlay() to render tile colour overlays per-frame without
     //     persistent element leakage.
     //     IrrlichtUIBackend implements via
     //     IVideoDriver::draw2DRectangle(SColor(a,r,g,b), scaledRect).
@@ -147,7 +147,7 @@ public:
 
 Cross-references:
 
-- `architecture/testing/testability-architecture.md` — `MockUIBackend` (GMock implementation), `UIElementHandle` typedef, `Rect` struct, and the rationale for `src/ui/` placement.
+- `architecture/testing/testability-architecture.md` — `MockUIBackend` (GMock implementation), `UIElementHandle` typedef, `UIRect` struct, and the rationale for `src/ui/` placement.
 - `architecture/ui-ux/resolution-ui-scaling.md` — virtual coordinate space definition and letterbox/pillarbox mapping.
 
 ## IUIBackend Virtual Dimension Accessors
@@ -645,9 +645,10 @@ Inside IrrlichtRenderer::drawScene():
                                    // fullscreen above 3D scene, below GUI (main menu / load states only)
   b. uiManager->draw()             // per-panel Z-order state update (visibility, text, alpha)
   c. guiEnvironment->drawAll()     // render all visible IGUIElement nodes to framebuffer
+  d. uiManager->drawMinimapOverlay()  // transient per-frame minimap tile colour fills
 ```
 
-Step (a') is a conditional blit — only active when `setSceneBackground()` has been called and not yet cleared by `clearSceneBackground()` (i.e. during main menu and loading states). Step (b) updates element state but does not render pixels. Step (c) paints all elements that are currently visible. Because (b) has already toggled visibility for the correct game state (e.g. main menu elements hidden during gameplay), (c) only renders what should be on screen. This sequence is the authoritative render loop defined in `architecture/graphics-architecture/irrlicht-device-lifecycle.md`. Any change to the ordering must be made there first.
+Step (a') is a conditional blit — only active when `setSceneBackground()` has been called and not yet cleared by `clearSceneBackground()` (i.e. during main menu and loading states). Step (b) updates element state but does not render pixels. Step (c) paints all elements that are currently visible. Because (b) has already toggled visibility for the correct game state (e.g. main menu elements hidden during gameplay), (c) only renders what should be on screen. Step (d) is the post-GUI minimap overlay pass added by Phase 11p: `UIManager::drawMinimapOverlay()` is a public method that delegates to `Minimap::drawOverlay()`. It is called by `IrrlichtRenderer::drawScene()` after `guiEnvironment->drawAll()` and before `driver->endScene()`. This pass renders transient per-frame tile colour fills (zone tint, viewport rectangle) that must appear on top of the minimap's GUI element background image. Because these fills are drawn directly via the Irrlicht video driver (not as IGUIElement children), they must execute after step (c) to avoid being occluded by the minimap background element. This sequence is the authoritative render loop defined in `architecture/graphics-architecture/irrlicht-device-lifecycle.md`. Any change to the ordering must be made there first.
 
 `UIManager::draw()` (internal step b) is called after `sceneManager->drawAll()` and before `guiEnvironment->drawAll()` and `endScene()` — this is correct and distinct from `UIManager::update()` (step 3b of the main loop), which must precede `beginScene()`. The two methods serve different purposes: `update()` advances timer state and dispatches dismissal logic; `draw()` updates element state that must be current when `guiEnvironment->drawAll()` renders within the `beginScene()`/`endScene()` block.
 

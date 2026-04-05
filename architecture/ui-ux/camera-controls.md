@@ -86,5 +86,24 @@ The three `vec3` fields match the locked canonical definition established in Pha
 | `zoomDistance` | `float` | `200.f` | Distance from the camera to its look-at target (proxy for zoom level) |
 
 `CameraController::getCameraState()` (`MM-06`) populates all three fields each frame.
-`Minimap::draw()` (`MM-21`) reads them to project the camera viewport rectangle onto the
+`Minimap::drawOverlay()` (`MM-21`) reads them to project the camera viewport rectangle onto the
 200×200 minimap area. The three fields are read-only from Minimap's perspective.
+
+### CameraController::setTarget (Minimap Click-to-Pan)
+
+`MM-31` (Phase 11p) adds a public method for minimap click-to-pan:
+
+```cpp
+void CameraController::setTarget(float worldX, float worldZ);
+```
+
+**Semantics**: Moves the camera look-at target to the specified world XZ coordinates.
+Updates `m_targetX` and `m_targetZ` to the provided values. Does **not** alter pitch,
+yaw, or zoom distance -- only the horizontal position of the look-at point changes.
+The camera position is recomputed from the new target using the existing pitch, yaw,
+and zoom distance on the next `update()` call.
+
+**Caller**: `UIManager`'s minimap pan callback invokes `setTarget()` when the player
+clicks on the minimap surface. The minimap converts the click position from minimap-local
+pixel coordinates to world XZ via the inverse of the projection used in
+`Minimap::drawOverlay()`, then passes the result to `CameraController::setTarget()`.
