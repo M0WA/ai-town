@@ -312,11 +312,12 @@ any `StubUIBackend` in smoke tests
   No overlay active → `{1576, 848, 344, 232}`; overlay active → `{1576, 732, 344, 348}`.
   (ref: `architecture/ui-ux/minimap.md` — dynamic input-arbitration widget footprint)
 
-- [ ] **MM-29a** `src/ui/ui_constants.h` — Add two named constants for the minimap widget
-  input-arbitration Y bounds:
-  `constexpr int kMinimapWidgetTop = 848;` (no overlay active)
-  `constexpr int kMinimapWidgetTopOverlayActive = 732;` (any overlay active)
-  These constants are referenced by MM-29 and MM-10 and must exist before either is compiled.
+- [ ] **MM-29a** `src/ui/ui_constants.h` — Verify that the three minimap widget
+  input-arbitration constants added in Phase 11d Deliverable 3c are present:
+  `kMinimapWidgetTop = 848`, `kMinimapWidgetTopOverlayActive = 732`,
+  `kMinimapWidgetLeft = 1576`. These must exist before MM-10, MM-28, and MM-29 are
+  compiled. Do NOT re-add them; if they are missing for any reason (e.g. phase-11d
+  was skipped), add all three now.
   (ref: `architecture/ui-ux/minimap.md` — dynamic widget footprint, toggle button position)
 
 - [ ] **MM-29** `src/ui/UIManager.cpp` — input arbitration: In `UIManager`'s draw/update loop,
@@ -543,8 +544,9 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   `MOCK_METHOD` stub and in `IrrlichtUIBackend` with a real `draw2DRectangle` implementation.
 - [ ] `CameraState` has `targetX`, `targetZ`, `zoomDistance` fields (MM-05) and
   `CameraController::getCameraState()` populates them (MM-06).
-- [ ] `src/ui/ui_constants.h` contains `kMinimapWidgetTop = 848` and
-  `kMinimapWidgetTopOverlayActive = 732` (MM-29a).
+- [ ] `src/ui/ui_constants.h` contains `kMinimapWidgetTop = 848`,
+  `kMinimapWidgetTopOverlayActive = 732`, and `kMinimapWidgetLeft = 1576` (added in
+  Phase 11d Deliverable 3c; MM-29a verifies presence).
 - [ ] `Minimap::getWidgetFootprint()` returns `UIRect{1576,848,344,232}` when no overlay
   active and `UIRect{1576,732,344,348}` when overlay active (MM-10, MM-28);
   `Minimap::getBounds()` continues to return `UIRect{1720, 880, 200, 200}` unchanged.
