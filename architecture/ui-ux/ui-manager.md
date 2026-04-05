@@ -9,9 +9,9 @@
 
 ## IUIBackend Method Contract
 
-The total method count is **21**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+The total method count is **22**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
 
-Methods 1–17 were established in Phase 8. Method 18 (`setElementBackground`) was added in Phase 9b (minimap dark-panel fix — see `architecture/ui-ux/minimap.md` §IUIBackend method 18). Method 19 (`setElementMonoFont`) was added in Phase 10 (monospace numeric readout requirement — see below). Method 20 (`setElementRect`) was added in Phase 10 (modal dialog centring fix — see `architecture/ui-ux/modal-dialog-system.md` §Element Repositioning). Method 21 (`setElementTextColor`) was added post-Phase-10 (service coverage overlay text colour; already present in `src/interfaces/IUIBackend.h` and `tests/ui/MockUIBackend.h` — no plan step required).
+Methods 1–17 were established in Phase 8. Method 18 (`setElementBackground`) was added in Phase 9b (minimap dark-panel fix — see `architecture/ui-ux/minimap.md` §IUIBackend method 18). Method 19 (`setElementMonoFont`) was added in Phase 10 (monospace numeric readout requirement — see below). Method 20 (`setElementRect`) was added in Phase 10 (modal dialog centring fix — see `architecture/ui-ux/modal-dialog-system.md` §Element Repositioning). Method 21 (`setElementTextColor`) was added post-Phase-10 (service coverage overlay text colour; already present in `src/interfaces/IUIBackend.h` and `tests/ui/MockUIBackend.h` — no plan step required). Method 22 (`fillColoredRect`) was added in Phase 11p (minimap per-frame tile colour rendering — see `architecture/ui-ux/minimap.md` §Service Coverage overlay).
 
 ```cpp
 class IUIBackend {
@@ -128,6 +128,20 @@ public:
     //     In MockUIBackend: MOCK_METHOD stub.
     //     Added post-Phase-10 for service coverage overlay text colour (already implemented).
     virtual void setElementTextColor(UIElementHandle handle, int r, int g, int b) = 0;
+
+    // 22. Transient filled-rectangle draw call in virtual 1920×1080 coordinate space.
+    //     No persistent UIElementHandle is created or returned.
+    //     Must be called inside a frame render pass (between beginScene/endScene).
+    //     x, y, w, h are in virtual space (scaled by UIScaler before drawing).
+    //     r, g, b, a are each in [0, 255].
+    //     Used by Minimap::draw() to render tile colour overlays per-frame without
+    //     persistent element leakage.
+    //     IrrlichtUIBackend implements via
+    //     IVideoDriver::draw2DRectangle(SColor(a,r,g,b), scaledRect).
+    //     MockUIBackend provides a MOCK_METHOD stub; any StubUIBackend in smoke tests
+    //     provides a no-op override.
+    //     Added in Phase 11p for minimap per-frame tile colour rendering.
+    virtual void fillColoredRect(int x, int y, int w, int h, int r, int g, int b, int a) = 0;
 };
 ```
 
