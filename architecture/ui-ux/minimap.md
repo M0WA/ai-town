@@ -42,6 +42,11 @@
     coverage overlay vs. HUD demand bars) are visually distinct and do not appear
     simultaneously in a way that could cause confusion.
 
+    **Phase boundary**: Colorblind pattern rendering for the minimap Service Coverage overlay
+    is implemented in **Phase 12** (polish and QA pass), not Phase 11p. Phase 11p delivers
+    only the base tint colour per service type. The `setColorblindMode(bool)` method and
+    pattern draw logic are Phase 12 deliverables.
+
   - **Traffic Congestion overlay**: Road segments are coloured by speed band relative to the
     free-flow speed of that segment. Authoritative hex values (used for both the minimap road
     colouring and the legend swatches):
