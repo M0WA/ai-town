@@ -25,6 +25,8 @@ Parse at the very start, before doing anything else.
 **Max fix iterations** (optional, default: `5`): the maximum number of build/test fix rounds
 before escalating to the user. Parse `max=[N]` from the invocation if present.
 
+**Agent model**: all Agent tool calls within this skill MUST use `model: "opus"`.
+
 ---
 
 ## State
@@ -300,3 +302,5 @@ Phase [PHASE_ID] has been committed and marked DONE.
 - If the same file is assigned to two different agents (rare), serialize those agents: complete
   one before launching the other, and pass the first agent's output as context to the second.
 - If `[MAX_FIX_ITERATIONS]` is reached in Step 4, do not loop further — escalate to the user.
+- **All Agent tool calls must set `model: "opus"`** — this applies to every specialist agent
+  launched in Steps 2, 3, and 4 (spec agents, implementation agents, and fix agents).
