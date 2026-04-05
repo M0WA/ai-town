@@ -73,10 +73,19 @@ public:
     //     In MockUIBackend: MOCK_METHOD stub.
     //     Added post-Phase-10.
     virtual void setElementTextColor(UIElementHandle handle, int r, int g, int b) = 0;
+    // 22. Draw a filled rectangle directly into the frame without creating a persistent element.
+    //     x, y, w, h are in virtual 1920×1080 coordinate space. r, g, b, a are each in [0, 255].
+    //     In IrrlichtUIBackend: calls IVideoDriver::draw2DRectangle(SColor(a,r,g,b), recti).
+    //     No UIElementHandle is created or returned — this is a transient per-frame draw call.
+    //     Must be called inside a frame render pass (between beginScene/endScene).
+    //     Used by Minimap::draw() for tile colour overlays without element leakage.
+    //     In MockUIBackend: MOCK_METHOD stub. In StubUIBackend: no-op override.
+    //     Added in Phase 11p. See architecture/ui-ux/ui-manager.md §IUIBackend Method Contract.
+    virtual void fillColoredRect(int x, int y, int w, int h, int r, int g, int b, int a) = 0;
 };
 ```
 
-`MockUIBackend` **source location**: `tests/ui/MockUIBackend.h`. The file contains 21 `MOCK_METHOD` entries — one per `IUIBackend` virtual method — as of Phase 10 and later (method 19 `setElementMonoFont` added in Phase 10; method 20 `setElementRect` added in Phase 10; method 21 `setElementTextColor` added post-Phase-10). **Rule**: whenever a new virtual method is added to `IUIBackend`, a matching `MOCK_METHOD` entry MUST be added to `tests/ui/MockUIBackend.h` in the same commit. The spec description above (inline `IUIBackend` class block) and `tests/ui/MockUIBackend.h` must always have the same method count. `ui-manager.md` §IUIBackend Method Contract is the production-facing authority; this file is the test-facing authority; both must remain consistent.
+`MockUIBackend` **source location**: `tests/ui/MockUIBackend.h`. The file contains 22 `MOCK_METHOD` entries — one per `IUIBackend` virtual method — as of Phase 11p (method 19 `setElementMonoFont` added in Phase 10; method 20 `setElementRect` added in Phase 10; method 21 `setElementTextColor` added post-Phase-10; method 22 `fillColoredRect` added in Phase 11p). **Rule**: whenever a new virtual method is added to `IUIBackend`, a matching `MOCK_METHOD` entry MUST be added to `tests/ui/MockUIBackend.h` in the same commit. The spec description above (inline `IUIBackend` class block) and `tests/ui/MockUIBackend.h` must always have the same method count. `ui-manager.md` §IUIBackend Method Contract is the production-facing authority; this file is the test-facing authority; both must remain consistent.
 
 `MockUIBackend` returns arbitrary non-zero integer handles (e.g., an incrementing counter) with no real objects — unit tests that call UIManager methods never dereference Irrlicht pointers, making `src/ui/` genuinely headless-testable and the 95% coverage gate achievable.
 

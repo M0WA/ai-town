@@ -4,7 +4,7 @@
 - **Rendered content**: Top-down zone color coding (R=green, C=blue, I=yellow), road network (grey lines), camera viewport rectangle (white outline). **Viewport indicator size constraints**: The white viewport rectangle has a **minimum size of 8×8 px** (to remain visible when the camera is zoomed far out and the viewport maps to a large world area) and a **maximum size of 190×190 px** (clamped to keep the indicator within the 200×200 px minimap boundaries with 5 px margin on each side). These clamp values are applied to the computed viewport rectangle before rendering; the camera's actual world frustum is unaffected.
 - **Interaction**: Click-to-pan camera to clicked minimap position
 - **Overlay toggle**: An extensible icon-button row on the minimap border; **one button per overlay type** (radio behavior — only one overlay active at a time; clicking active overlay deactivates it). For V1 with Service Coverage and Traffic Congestion overlays, the row has two icon buttons plus the implicit "off" state. This architecture scales to additional overlays (demand heat map, etc.) without UX redesign.
-  - **Toggle button position**: The overlay toggle row is anchored to the **top edge of the minimap**. The minimap occupies virtual bounds x: 1720–1920 px, y: 880–1080 px (bottom-right corner). The toggle row sits at virtual x: 1720–1752 px, y: 848–880 px (32×32 px icon button, 8 px gap above minimap top edge at y=880). Additional overlay buttons extend leftward from x:1720 (each 32×32 px with 4 px gap between buttons). **Up to 4 overlay toggle buttons are supported; each button is 32 px wide with 4 px gap; the leftmost button's left edge is no further left than x: 1576 (= 1720 − 4 × (32+4)). The full overlay toggle row occupies x: 1576–1752, y: 848–880 px. The input-arbitration widget footprint for the minimap widget includes this full toggle row extent (x: 1576–1920, y: 848–1080), not only the 200×200 px render area.**
+  - **Toggle button position**: The overlay toggle row is anchored to the **top edge of the minimap**. The minimap occupies virtual bounds x: 1720–1920 px, y: 880–1080 px (bottom-right corner). The toggle row sits at virtual x: 1720–1752 px, y: 848–880 px (32×32 px icon button, 8 px gap above minimap top edge at y=880). Additional overlay buttons extend leftward from x:1720 (each 32×32 px with 4 px gap between buttons). **Up to 4 overlay toggle buttons are supported; each button is 32 px wide with 4 px gap; the leftmost button's left edge is no further left than x: 1576 (= 1720 − 4 × (32+4)). The full overlay toggle row occupies x: 1576–1752, y: 848–880 px. The input-arbitration widget footprint for the minimap widget is **dynamic**: when no overlay is active it spans (x: 1576–1920, y: 848–1080); when any overlay is active it expands upward to (x: 1576–1920, y: 732–1080) to cover the legend panel (y:732–832) and label strip (y:832–848). `Minimap::getWidgetFootprint()` returns the correct current footprint (computed from `m_overlayActive`); UIManager must call `getWidgetFootprint()` each frame to keep arbitration bounds in sync with overlay state. The `kMinimapWidgetTop` (y:848, no overlay) and `kMinimapWidgetTopOverlayActive` (y:732, overlay active) constants in `ui_constants.h` encode these two Y values.**
   - Active button state: filled icon with accent color border. Inactive: outline icon, no border. States defined in UI sprite sheet.
   - When an overlay is active: a **label strip** (16 px tall) appears **immediately above the toggle row** at virtual y: 832–848 px (overlay name, left-aligned to x:1720), and a **legend panel** (200×100 px) is anchored **above the label strip** at virtual x: 1720–1920, y: **732–832 px** (100 px tall, positioned immediately above the label strip at y:832). The legend panel spans the full minimap width (x: 1720–1920) and is positioned immediately below the minimap render area's chrome stack (above the label strip). This placement keeps the legend clear of the minimap (y:880–1080), toggle row (y:848–880), and label strip (y:832–848). **Do NOT anchor the legend inside the minimap bounds** (y:880–1080) — this causes visual overlap with the city map tiles. The legend panel dynamically updates to show data for whichever overlay is currently active (Service Coverage or Traffic Congestion), displaying category colors with text labels (8×8 px color swatch and text label per category).
   - **Service Coverage overlay**: Covered tiles receive a colour tint according to the active
@@ -103,6 +103,23 @@ accent color border. Inactive: outline icon, no border."
   Traffic Congestion: `#27AE60`, `#E67E22`, `#E74C3C`). These are data-encoding
   colours, not UI chrome, and are unchanged by Glass City.
 
+### Zone Colors and Road Network
+
+Authoritative hex values for the base minimap tile rendering (implemented in Phase 11p):
+
+| Layer | Colour | Hex |
+|---|---|---|
+| Residential zone | Green | `#27AE60` |
+| Commercial zone | Blue | `#2980B9` |
+| Industrial zone | Yellow | `#F39C12` |
+| Road network | Grey | `#7F8C8D` |
+
+These values are used in `Minimap::draw()` for the per-tile `fillColoredRect` calls and in
+`minimap_overlay_test.cpp` for colour-assertion tests. Unzoned tiles are not coloured (no
+`fillColoredRect` call). Note that `#27AE60` also appears in the Traffic Congestion overlay
+free-flow colour — the values are coincidentally identical but represent independent design
+decisions (zone presence vs. traffic speed).
+
 ## Minimap Lifecycle — Show/Hide on State Transitions
 
 The `Minimap` constructor calls `hide()` internally as its last step, so the minimap starts
@@ -164,8 +181,8 @@ Channels r, g, b, a are each in `[0, 255]`. Irrlicht `SColor` constructor order 
   which is out of scope for V1. The colored-rectangle approach (tile data → pixel grid) is the
   correct implementation for all V1 phases.
 - **Click-to-pan camera**: the `onEvent()` stub in `Minimap.cpp` already consumes the click;
-  the actual `CameraController::panTo()` call is wired in **Phase 11** when minimap coordinates
-  are mapped to world coordinates.
+  the actual `CameraController::setTarget(float worldX, float worldZ)` call is wired in
+  **Phase 11** (MM-31) when minimap coordinates are mapped to world coordinates.
 - **Service coverage overlay**: **Phase 11**.
 - **Overlay toggle button functional**: the toggle button is shown in Phase 9b but clicking it
   only flips `m_overlayActive`; no visual change results until the overlay rendering is

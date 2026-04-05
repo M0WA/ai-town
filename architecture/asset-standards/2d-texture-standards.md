@@ -955,7 +955,13 @@ signed-off PNG remains in use.
 > - Rows 0-6 painted: Toolbar active/inactive, Zone active/inactive, Utilities
 >   active/inactive, Active tool indicator badges
 > - Row 7 painted: Cursor shape icons (reserved for Phase 12 `setMouseCursor()`)
-> - Rows 8-9 painted: Minimap overlay toggle (active/inactive)
+> - Rows 8-9 painted: Minimap overlay toggle icons — **row 8** holds Service Coverage
+>   active/inactive/hover (3 cells); **row 9** holds Traffic Congestion active/inactive/hover
+>   (3 cells). Sprite ID constants (`kSpriteOverlaySvcActive`, `kSpriteOverlaySvcInactive`,
+>   `kSpriteOverlaySvcHover`, `kSpriteOverlayTfcActive`, `kSpriteOverlayTfcInactive`,
+>   `kSpriteOverlayTfcHover`) are **Phase 12 deliverables** — Phase 11p uses text-based
+>   button labels ("Svc"/"Tfc") as placeholders. The pixel cells are already painted in
+>   the sprite sheet; only the constant definitions and setElementImage wiring are deferred.
 > - Row 10 painted: Notification bell, clock, unsaved dot, undo arrow
 > - Rows 11-31: fully transparent (unused; reserved for future icon expansion)
 > - 42 unique sprites total across rows 0-10 (no duplicated shapes between cells)
