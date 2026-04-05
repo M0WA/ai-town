@@ -287,8 +287,9 @@ any `StubUIBackend` in smoke tests
   - Side: `side = 200.f * (m_cameraState.zoomDistance / CameraController::kMaxZoomDistance)`,
     clamped to [8, 190] px.
   - Draw centred at `(cx, cz)`, clamp rect to [0, 200] render area.
-  - Draw the viewport outline as four thin `fillColoredRect` strips (white, 1-2 px thick)
-    in `drawOverlay()` AFTER the zone/road tile colours, ensuring the outline appears on top.
+  - Draw the viewport outline as four thin `fillColoredRect` strips (`rgba(255, 255, 255, 200)`,
+    1-2 px thick) in `drawOverlay()` AFTER the zone/road tile colours, ensuring the outline
+    appears on top.
     Do NOT use `m_backend->setElementRect(m_viewportRect, ...)` for this update — the
     `m_viewportRect` GUI element is removed (its original role is replaced by this transient
     draw). Remove the `m_viewportRect` member and any constructor code that creates it.
@@ -484,10 +485,11 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   (ref: `architecture/ui-ux/minimap.md` — road network grey lines)
 
 - [ ] **MM-35** `tests/ui/minimap_overlay_test.cpp` — Group 3: Camera viewport rectangle
-  (5 tests). Verify `drawOverlay()` emits four `fillColoredRect` strips (white outline) with
-  the correct computed pixel rect for a range of (targetX, targetZ, zoomDistance) values;
-  verify the 8 px minimum clamp; verify the 190 px maximum clamp; verify no crash when
-  `setCameraState()` has never been called.
+  (5 tests). Verify `drawOverlay()` emits four `fillColoredRect` strips with colour
+  `rgba(255, 255, 255, 200)` (alpha=200, NOT fully-opaque 255) and the correct computed
+  pixel rect for a range of (targetX, targetZ, zoomDistance) values; verify the 8 px minimum
+  clamp; verify the 190 px maximum clamp; verify no crash when `setCameraState()` has never
+  been called.
   (ref: `architecture/ui-ux/minimap.md` — viewport indicator size constraints)
 
 - [ ] **MM-36** `tests/ui/minimap_overlay_test.cpp` — Group 4: Click-to-pan (6 tests).
