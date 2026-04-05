@@ -56,7 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python packages required for asset validation.
 # mutagen: OGG/WAV metadata (validate_assets.py checks #16–#19, #21, #22).
 # Pillow:  PNG dimension/mode check (validate_assets.py check #23, #24).
-RUN pip3 install --break-system-packages mutagen Pillow
+RUN pip3 install --break-system-packages mutagen Pillow lcov_cobertura
 
 # Install CMake 3.31.10 (apt version in Debian Trixie is too old for vcpkg).
 # Pinned to match the devcontainer.

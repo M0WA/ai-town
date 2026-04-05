@@ -151,6 +151,7 @@ jobs:
           lcov --list coverage_filtered.info \
             --ignore-errors inconsistent \
             --rc check_data_consistency=0
+          lcov_cobertura coverage_filtered.info --output coverage.xml
           genhtml coverage_filtered.info --output-directory coverage_html/ \
             --ignore-errors inconsistent \
             --rc check_data_consistency=0
@@ -277,6 +278,15 @@ jobs:
           print('All src/ui/ files have coverage.')
           "
 
+      # Upload Cobertura XML for SonarCloud (sonarcloud.yml downloads via workflow_run).
+      - name: Upload coverage XML (Cobertura)
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: coverage-cobertura-linux-${{ github.sha }}
+          path: coverage.xml
+          retention-days: 14
+
       # Upload coverage HTML artifact.
       # if: always() — upload even if lcov gate fails for post-mortem analysis.
       - name: Upload coverage report
@@ -285,4 +295,11 @@ jobs:
         with:
           name: coverage-report-linux-${{ github.sha }}
           path: coverage_html/
+          retention-days: 14
+      - name: Upload coverage info (lcov)
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: coverage-info-linux-${{ github.sha }}
+          path: coverage_filtered.info
           retention-days: 14
