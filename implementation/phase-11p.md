@@ -9,7 +9,7 @@ Complete the minimap implementation to match the full specification in
 this phase adds zone color coding, road network rendering, correct camera viewport
 projection, a two-button radio toggle row, the label strip, a properly-sized legend
 panel, click-to-pan wiring, and budget-tick cadence — plus the
-75 new test cases that verify every gap.
+76 new test cases that verify every gap.
 
 ---
 
@@ -157,6 +157,21 @@ any `StubUIBackend` in smoke tests
   (ref: `architecture/testing/testability-architecture.md` — MinimapOverlayTest fixture,
   4-param canonical constructor order `(IUIBackend*, IAudioSystem*, ICitySimulation*, IClock*)`)
 
+- [ ] **MM-13c** `tests/ui/minimap_overlay_test.cpp` — Migrate the existing Phase 11d
+  `MinimapOverlayTest` fixture (25 test cases) to the 4-param constructor introduced by
+  MM-13b. No new test cases are added; only the fixture and member names are updated:
+  - Add `ManualClock m_clock;` member to the fixture.
+  - Rename member `backend_` → `m_backend` and `sim_` → `m_sim` throughout the fixture
+    class and all 25 existing test cases.
+  - Change the `SetUp()` constructor call from
+    `minimap_ = std::make_unique<Minimap>(&backend_)` to
+    `minimap_ = std::make_unique<Minimap>(&m_backend, nullptr, &m_sim, &m_clock)`.
+  - The target form is already described in MM-33 (the Phase 11p `MinimapOverlayTest`
+    fixture spec); MM-13c brings the 25 existing Phase 11d tests into alignment with that
+    target so all test cases in the file share a single consistent fixture.
+  (ref: `architecture/testing/testability-architecture.md` — MinimapOverlayTest fixture,
+  4-param canonical constructor order)
+
 ---
 
 #### 4. Minimap implementation — `draw()` rewrite and all missing rendering
@@ -171,6 +186,12 @@ any `StubUIBackend` in smoke tests
   and populate the budget-tick cache. `Minimap::drawOverlay()` is invoked from
   `IrrlichtRenderer::drawScene()` AFTER `guiEnv->drawAll()`, so tile colours always
   render on top of the GUI background panel (`m_mapBg`).
+  **Visibility guard**: `drawOverlay()` MUST begin with the same early-return guard as
+  `draw()`: `if (!m_visible || !m_backend) return;` — this ensures all `fillColoredRect`
+  tile colour calls and the viewport outline call are suppressed when the minimap is
+  hidden (e.g. on the main menu and game-over screens where `hide()` has been called),
+  matching the behaviour of `draw()` and preventing transient rect draws every frame
+  while the minimap is not visible.
   (ref: `architecture/graphics-architecture/irrlicht-device-lifecycle.md` — render order)
 
 - [ ] **MM-15** `src/ui/Minimap.cpp` — constructor: Replace the single `m_toggleBtn` button
@@ -216,6 +237,14 @@ any `StubUIBackend` in smoke tests
   call using the authoritative service-type colour: Fire Station `#C0392B`, Police Station
   `#2E4482`, Power Plant `#F1C40F`, Water Tower `#1ABC9C`. These tints replace the zone
   colours for covered tiles. Do NOT call `queryTile()` redundantly — reuse the cached snapshot.
+  **Multi-coverage draw order (painter's algorithm)**: when populating the service coverage
+  cache snapshot in MM-22, store entries sorted in ascending priority order — Fire Station
+  first, Police Station second, Power Plant third, Water Tower last. `drawOverlay()` iterates
+  the snapshot in this stored order, so each subsequent `fillColoredRect` call overwrites the
+  previous one for the same tile pixel rect. The result is that Water Tower has the highest
+  display priority, followed by Power Plant, Police Station, and Fire Station lowest. This
+  ordering is deterministic regardless of `getServiceCoverage()` iteration order from the
+  simulation.
   (ref: `architecture/ui-ux/minimap.md` — Service Coverage overlay tints)
 
 - [ ] **MM-19c** `src/ui/Minimap.cpp` — `drawOverlay()`: Traffic Congestion overlay speed-band
@@ -261,7 +290,9 @@ any `StubUIBackend` in smoke tests
   1. `queryTile(x, z)` iteration — zone grid snapshot and road grid snapshot (used by
      MM-19 zone colours, MM-20 road grey).
   2. `ICitySimulation::getServiceCoverage()` — service coverage tile snapshot (used by
-     MM-19b service overlay tints).
+     MM-19b service overlay tints). Store entries sorted in ascending priority order:
+     Fire Station first, Police Station second, Power Plant third, Water Tower last
+     (matches the painter's algorithm draw order defined in MM-19b).
   3. `ICitySimulation::getRoadSegmentSpeeds()` — road segment speed snapshot (used by
      MM-19c traffic overlay speed-band colouring).
 
@@ -299,8 +330,9 @@ any `StubUIBackend` in smoke tests
   Radio behavior: clicking the currently active button deactivates it (no overlay);
   clicking the inactive button activates it and deactivates the other. On toggle, show or
   hide `m_labelStrip` and `m_legendPanel` appropriately, and update button visual states
-  via `setElementAlpha()`: active button to 100% opacity (255), inactive button to 65%
-  opacity (≈166). **Note**: Phase 11p implements text-label buttons ('Svc' / 'Tfc') with
+  via `setElementAlpha()`: active button to 100% opacity (`setElementAlpha(m_toggleBtnSvc, 1.0f)`
+  or `setElementAlpha(m_toggleBtnTfc, 1.0f)`), inactive button to 65% opacity
+  (`setElementAlpha(m_toggleBtnSvc, 0.65f)` or `setElementAlpha(m_toggleBtnTfc, 0.65f)`). **Note**: Phase 11p implements text-label buttons ('Svc' / 'Tfc') with
   opacity-based states. Full Glass City icon visual states (2 px teal border, glow, filled
   vs. outlined icons) are deferred to Phase 12 when `setElementImage` wiring is added.
   (ref: `architecture/ui-ux/minimap.md` — overlay toggle, button states)
@@ -373,7 +405,7 @@ any `StubUIBackend` in smoke tests
 
 ---
 
-#### 6. Tests — 75 new cases in 11 groups
+#### 6. Tests — 76 new cases in 11 groups
 
 **CMakeLists.txt registration** (required before tests are discoverable by CTest):
 
@@ -383,7 +415,7 @@ any `StubUIBackend` in smoke tests
   §Phase 4+ target extension policy. **No additional `aitown_add_tests()` call is needed**:
   the existing `aitown_add_tests(ui_tests LABEL "unit" TIMEOUT 300)` call already registers
   the entire `ui_tests` target with the `unit` CTest label; adding sources via `target_sources`
-  automatically makes the 75 new cases discoverable by CTest under the `unit` label in all CI
+  automatically makes the 76 new cases discoverable by CTest under the `unit` label in all CI
   jobs (`build-linux`, `build-windows`, `coverage-linux`).
   (ref: `architecture/testing/framework.md` — `target_sources` policy)
 
@@ -398,7 +430,7 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
 `Times(0)` expectations on `addStaticText`/`addButton` during `draw()` and
 `Times(AtLeast(1))` on `fillColoredRect` during `drawOverlay()`.
 
-- [ ] **MM-33** `tests/ui/minimap_overlay_test.cpp` — Group 1: Zone color coding (8 tests).
+- [ ] **MM-33** `tests/ui/minimap_overlay_test.cpp` — Group 1: Zone color coding (9 tests).
   Use `NiceMock<MockUIBackend>` and `NiceMock<MockCitySimulation>`. The primary fixture
   (`MinimapOverlayTest`, Groups 1–9 and 11) declares a `ManualClock m_clock;` member and
   constructs the minimap as `Minimap(&m_backend, nullptr, &m_sim, &m_clock)` (4-param
@@ -407,14 +439,22 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   objects are destroyed, to prevent unexpected `removeElement()` calls during Minimap
   destruction from triggering mock violations. Document this destructor-path contract in a
   comment. Base fixture setup includes
-  `ON_CALL(m_sim, consumeBudgetTicks()).WillByDefault(Return(0))` so that `draw()` calls in
-  Groups 1-9 and 11 use the cached snapshot by default; individual tests override this with
-  `WillOnce(Return(1))` when they want to trigger a re-query. Stub
+  `ON_CALL(m_sim, consumeBudgetTicks()).WillByDefault(Return(0))` as a defensive guard
+  (this prevents accidental double-consumption if `Minimap` ever incorrectly called
+  `consumeBudgetTicks` directly; it does NOT trigger cache population). Individual tests
+  that need to populate the cache snapshot call `m_minimap->onBudgetTicks(1)` directly
+  before invoking `draw()` and `drawOverlay()` — this is the correct injection path because
+  `Minimap` receives the tick count forwarded by `UIManager` via `onBudgetTicks(count)`,
+  never by calling `consumeBudgetTicks()` itself (per MM-09a and MM-22). Stub
   `ICitySimulation::queryTile()` to return each of the four zone types (Residential,
   Commercial, Industrial, None) and verify that `drawOverlay()` emits `fillColoredRect` calls
   with the correct authoritative hex colours (`#27AE60`, `#2980B9`, `#F39C12`) and skips
-  empty tiles. Include tests for mixed-zone maps.
-  (ref: `architecture/ui-ux/minimap.md` — zone color coding, authoritative hex values)
+  empty tiles. Include tests for mixed-zone maps. The 9th test verifies the visibility guard
+  (MM-14): call `m_minimap->hide()` followed by `m_minimap->drawOverlay()` and assert that
+  zero `fillColoredRect` calls are emitted — confirming that the `if (!m_visible || !m_backend) return;`
+  guard suppresses all transient drawing when the minimap is not visible.
+  (ref: `architecture/ui-ux/minimap.md` — zone color coding, authoritative hex values;
+  `architecture/ui-ux/minimap.md` — visibility guard suppresses drawing when hidden)
 
 - [ ] **MM-34** `tests/ui/minimap_overlay_test.cpp` — Group 2: Road network rendering (4 tests).
   Verify that road tiles produce `fillColoredRect` calls with grey `#7F8C8D`; non-road
@@ -439,9 +479,10 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
   (7 tests). Verify two buttons exist; clicking the inactive Svc button activates it and
   deactivates Tfc; clicking the active Svc button deactivates it (no active overlay); only
   one overlay can be active at a time; clicking inactive Tfc button activates it and shows
-  Traffic Congestion legend. Verify that when Svc is activated, `setElementAlpha(255)` is
-  called on the Svc button (active state at 100% opacity); verify that when Tfc is deactivated,
-  `setElementAlpha(166)` is called on the Tfc button (inactive state at ~65% opacity).
+  Traffic Congestion legend. Verify that when Svc is activated,
+  `setElementAlpha(m_toggleBtnSvc, 1.0f)` is called (active state at 100% opacity); verify
+  that when Tfc is deactivated, `setElementAlpha(m_toggleBtnTfc, 0.65f)` is called (inactive
+  state at 65% opacity).
   (ref: `architecture/ui-ux/minimap.md` §Overlay Toggle Button States — opacity states in Phase 11p)
 
 - [ ] **MM-38** `tests/ui/minimap_overlay_test.cpp` — Group 6: Label strip (7 tests). Verify
@@ -542,8 +583,8 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
 
 - [ ] `make build` completes without errors or warnings on both Linux and Windows.
 - [ ] `CMakeLists.txt` extended via `target_sources(ui_tests PRIVATE tests/ui/minimap_overlay_test.cpp)`
-  (MM-32); CTest discovers all 75 new cases under the `unit` label.
-- [ ] All 75 new test cases in `tests/ui/minimap_overlay_test.cpp` (Groups 1–11) pass under
+  (MM-32); CTest discovers all 76 new cases under the `unit` label.
+- [ ] All 76 new test cases in `tests/ui/minimap_overlay_test.cpp` (Groups 1–11) pass under
   `make test`.
 - [ ] All pre-existing unit, integration, and OpenGL tests continue to pass unchanged —
   zero regressions introduced.
@@ -582,7 +623,7 @@ regression, MM-42) uses `NiceMock<MockUIBackend>` in a separate fixture class
 |---|---|
 | `graphics-dev-irrlicht` | `fillColoredRect` in `IrrlichtUIBackend`; `CameraState` extension; `CameraController::getCameraState()` update; `Minimap.cpp` full rewrite (zone, road, viewport, overlay tints, budget-tick cache, legend, radio toggle, click-to-pan, two-pass `draw()`/`drawOverlay()` split); `UIManager.cpp` wiring incl. `drawMinimapOverlay()`; `IrrlichtRenderer.cpp` post-GUI `drawOverlay()` call (MM-30b) |
 | `gamedesign-ux` | Review minimap visual output against `architecture/ui-ux/minimap.md` (Glass City colors, button states, label strip position, legend panel geometry) |
-| `test-dev-cpp` | Author all 75 test cases across the 11 groups in `minimap_overlay_test.cpp`; add `MOCK_METHOD` stub in `MockUIBackend`; verify no-op override in `StubUIBackend` |
+| `test-dev-cpp` | Author all 76 test cases across the 11 groups in `minimap_overlay_test.cpp`; add `MOCK_METHOD` stub in `MockUIBackend`; verify no-op override in `StubUIBackend` |
 
 ---
 
