@@ -37,6 +37,16 @@
 
     Overlay data is rendered into the minimap texture at budget-tick cadence (not per-frame).
 
+    **Multi-service overlap**: When a tile is covered by more than one service type,
+    `drawOverlay()` processes the cached `getServiceCoverage()` snapshot in a fixed ascending
+    draw-priority order — Fire Station first, then Police Station, then Power Plant, then
+    Water Tower — so the last-drawn color wins via painter's algorithm (Water Tower cyan wins
+    over all others; Power Plant yellow wins over Fire and Police; Police blue wins over Fire).
+    Before iterating, sort or bucket the snapshot entries into this order; duplicate
+    `(tileX, tileZ)` entries are permitted since painter's algorithm handles them correctly.
+    This produces deterministic, design-intentional display regardless of building placement
+    order or simulation iteration order.
+
     **Colorblind mode** (required per `architecture/ui-ux/resolution-ui-scaling.md`
     §Colorblind Accessibility): when colorblind mode is active, each covered-tile colour
     must also include a distinct geometric pattern overlay so the service type is
@@ -116,8 +126,8 @@ accent color border. Inactive: outline icon, no border."
 when `setElementImage` wiring and `kSpriteOverlayXxx` constants are added (see
 `architecture/asset-standards/2d-texture-standards.md` §Phase 10 Sign-Off — UI Sprite
 Sheet). Phase 11p delivers opacity-based button states using text-label placeholders
-('Svc' / 'Tfc'): active button at 100% opacity (`setElementAlpha(255)`), inactive button
-at 65% opacity (`setElementAlpha(166)`). The inactive sprite cell opacity (65%) is baked
+('Svc' / 'Tfc'): active button at 100% opacity (`setElementAlpha(handle, 1.0f)`), inactive button
+at 65% opacity (`setElementAlpha(handle, 0.65f)`). The inactive sprite cell opacity (65%) is baked
 into the sprite sheet artwork; Phase 12 does NOT rely on `setElementAlpha` for inactive
 icon rendering.
 
