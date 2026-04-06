@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
-"""Normalize compile_commands.json paths to be relative to the project root.
+"""Normalize compile_commands.json for SonarCloud CFamily analysis.
 
 Usage: normalize_compile_commands.py <input.json> <output.json>
 
-CMake generates compile_commands.json with absolute paths based on the build
-container's filesystem (e.g. /__w/ai-town/ai-town/src/foo.cpp). SonarCloud's
-CFamily sensor runs in a separate job where the checkout lives at a different
-absolute path (e.g. /home/runner/work/ai-town/ai-town/src/foo.cpp).
+Three transformations applied to every entry:
 
-This script strips the workspace prefix (GITHUB_WORKSPACE env var, falling back
-to CWD) from both "file" and "directory" fields so SonarCloud can match source
-files against its indexed tree using relative paths resolved from projectBaseDir.
+1. Make "file" absolute using the project root.
+   CMake writes "file" as relative (e.g. "src/foo.cpp") when using Ninja.
+   Sonar resolves it against "directory", but "directory" is the build dir —
+   so "build/src/foo.cpp" is produced and no source file matches.
+   Fix: resolve "file" against the project root directly.
+
+2. Make "directory" the project root (absolute).
+   After fix 1, "directory" is only used as the working dir for the compiler
+   command, which still works with the project root as CWD.
+
+3. Replace /usr/bin/c++ with /usr/bin/g++ in "command".
+   SonarCloud CFamily only recognises gcc/g++/clang/clang++ by name.
+   The c++ alias is not in its supported-compiler list → all 138 units are
+   reported as "unsupported" and skipped.
 """
 
 import json
@@ -22,21 +30,24 @@ if len(sys.argv) != 3:
     sys.exit(1)
 
 in_file, out_file = sys.argv[1], sys.argv[2]
-ws = (os.environ.get("GITHUB_WORKSPACE") or os.getcwd()).rstrip("/") + "/"
+project_root = os.path.abspath(
+    os.environ.get("GITHUB_WORKSPACE") or os.getcwd()
+)
 
 with open(in_file) as f:
     db = json.load(f)
 
 for entry in db:
-    for key in ("file", "directory"):
-        val = entry.get(key, "")
-        # Strip any workspace-rooted absolute prefix so paths become relative.
-        # os.path.relpath handles both /__w/... and /home/runner/work/... prefixes.
-        if os.path.isabs(val):
-            try:
-                entry[key] = os.path.relpath(val, ws.rstrip("/"))
-            except ValueError:
-                pass  # Windows cross-drive edge case — leave unchanged
+    # 1+2: resolve "file" to absolute against project root; set "directory" to root
+    raw_file = entry.get("file", "")
+    if not os.path.isabs(raw_file):
+        raw_file = os.path.join(project_root, raw_file)
+    entry["file"] = raw_file
+    entry["directory"] = project_root
+
+    # 3: replace /usr/bin/c++ with /usr/bin/g++ so CFamily recognises the compiler
+    if "command" in entry:
+        entry["command"] = entry["command"].replace("/usr/bin/c++", "/usr/bin/g++")
 
 with open(out_file, "w") as f:
     json.dump(db, f)
