@@ -1,0 +1,100 @@
+name: SonarCloud debug
+
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: 'CI run ID to pull artifacts from (find in Actions URL)'
+        required: true
+        type: string
+      head_sha:
+        description: 'HEAD SHA of that CI run (used for artifact names)'
+        required: true
+        type: string
+
+permissions:
+  pull-requests: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Download compile_commands.json
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: compile-commands-linux-${{ inputs.head_sha }}
+          run-id: ${{ inputs.ci_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Debug paths BEFORE remap
+        run: |
+          echo "=== GITHUB_WORKSPACE ==="
+          echo "$GITHUB_WORKSPACE"
+          echo "=== First entry BEFORE remap ==="
+          python3 -c "
+          import json
+          with open('compile_commands.json') as f:
+              db = json.load(f)
+          e = db[0]
+          print('file:     ', e.get('file',''))
+          print('directory:', e.get('directory',''))
+          print('command[:120]:', e.get('command','')[:120])
+          print(f'Total entries: {len(db)}')
+          "
+          echo "=== Missing file check BEFORE remap ==="
+          python3 -c "
+          import json, os
+          with open('compile_commands.json') as f:
+              db = json.load(f)
+          missing = [e['file'] for e in db if not os.path.exists(e.get('file',''))]
+          print(f'Missing files: {len(missing)} / {len(db)}')
+          if missing:
+              print('First 5 missing:', missing[:5])
+          "
+
+      - name: Remap compile_commands.json paths to runner workspace
+        run: |
+          python3 - <<'EOF'
+          import json, os, re
+          workspace = os.environ["GITHUB_WORKSPACE"]
+          with open("compile_commands.json") as f:
+              db = json.load(f)
+          pat = re.compile(r"/__w/[^/]+/[^/]+")
+          for entry in db:
+              for key in ("file", "directory", "command"):
+                  if key in entry:
+                      entry[key] = pat.sub(workspace, entry[key])
+          with open("compile_commands.json", "w") as f:
+              json.dump(db, f)
+          print(f"Remapped {len(db)} entries to {workspace}")
+          EOF
+
+      - name: Debug paths AFTER remap
+        run: |
+          echo "=== First entry AFTER remap ==="
+          python3 -c "
+          import json
+          with open('compile_commands.json') as f:
+              db = json.load(f)
+          e = db[0]
+          print('file:     ', e.get('file',''))
+          print('directory:', e.get('directory',''))
+          print('command[:120]:', e.get('command','')[:120])
+          "
+          echo "=== Missing file check AFTER remap ==="
+          python3 -c "
+          import json, os
+          with open('compile_commands.json') as f:
+              db = json.load(f)
+          missing = [e['file'] for e in db if not os.path.exists(e.get('file',''))]
+          present = len(db) - len(missing)
+          print(f'Present: {present} / {len(db)}')
+          print(f'Missing: {len(missing)} / {len(db)}')
+          if missing:
+              print('First 5 missing:', missing[:5])
+          "
