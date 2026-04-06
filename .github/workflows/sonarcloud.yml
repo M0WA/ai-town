@@ -55,6 +55,29 @@ jobs:
           run-id: ${{ github.event.workflow_run.id || inputs.ci_run_id }}
           github-token: ${{ github.token }}
 
+      # The compile_commands.json was produced inside a Docker container where
+      # GITHUB_WORKSPACE is mounted at /__w/<owner>/<repo>.  On this ubuntu-latest
+      # runner the checkout lives at /home/runner/work/<owner>/<repo>.
+      # Replace every occurrence of the container prefix so Sonar CFamily can
+      # resolve source files on disk.  Without this all 138 compilation units are
+      # reported as "skipped unsupported" and analysis produces 0 C/C++ issues.
+      - name: Remap compile_commands.json paths to runner workspace
+        run: |
+          python3 - <<'EOF'
+          import json, os, re
+          workspace = os.environ["GITHUB_WORKSPACE"]
+          with open("compile_commands.json") as f:
+              db = json.load(f)
+          pat = re.compile(r"/__w/[^/]+/[^/]+")
+          for entry in db:
+              for key in ("file", "directory", "command"):
+                  if key in entry:
+                      entry[key] = pat.sub(workspace, entry[key])
+          with open("compile_commands.json", "w") as f:
+              json.dump(db, f)
+          print(f"Remapped {len(db)} entries to {workspace}")
+          EOF
+
       - name: Cache Sonar Scanner CLI
         id: sonar-scanner-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
