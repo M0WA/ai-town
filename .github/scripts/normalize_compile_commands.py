@@ -63,10 +63,12 @@ else:
     print("No container prefix detected — paths may already be absolute/relative")
 
 for entry in db:
-    # 1+2: resolve "file" to absolute; set "directory" to project root
+    # 1+2: make "file" absolute under project root; set "directory" to project root
     raw_file = entry.get("file", "")
     if not os.path.isabs(raw_file):
         raw_file = os.path.join(project_root, raw_file)
+    elif container_prefix and raw_file.startswith(container_prefix.rstrip("/")):
+        raw_file = raw_file.replace(container_prefix.rstrip("/"), project_root, 1)
     entry["file"] = raw_file
     entry["directory"] = project_root
 
