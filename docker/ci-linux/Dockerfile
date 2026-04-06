@@ -12,7 +12,7 @@ ARG VCPKG_COMMIT
 #   CI runtime:    xvfb, xauth, libgl1-mesa-dev, mesa-utils, libglu1-mesa-dev,
 #                  libxxf86vm-dev, libx11-dev, libxext-dev, libglew-dev,
 #                  libasound2-dev, libpulse-dev, lcov
-#   asset tools:   ffmpeg, sox, vorbis-tools, python3, python3-pip
+#   asset tools:   ffmpeg, sox, vorbis-tools, python3, python3-pip, gcovr (pip)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -56,7 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python packages required for asset validation.
 # mutagen: OGG/WAV metadata (validate_assets.py checks #16–#19, #21, #22).
 # Pillow:  PNG dimension/mode check (validate_assets.py check #23, #24).
-RUN pip3 install --break-system-packages mutagen Pillow lcov_cobertura
+RUN pip3 install --break-system-packages mutagen Pillow gcovr
 
 # Install CMake 3.31.10 (apt version in Debian Trixie is too old for vcpkg).
 # Pinned to match the devcontainer.

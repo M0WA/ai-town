@@ -155,11 +155,22 @@ jobs:
             --ignore-errors inconsistent \
             --rc check_data_consistency=0
 
-      # Convert lcov to SonarQube Generic Coverage XML.
-      # sonar.coverageReportPaths requires Generic Coverage XML, NOT Cobertura format.
-      # lcov_cobertura generates Cobertura XML which Sonar rejects with exit code 3.
+      # Generate Sonar Generic Coverage XML directly from gcov data.
+      # gcovr --sonarqube emits the exact format sonar.coverageReportPaths expects.
+      # Filters mirror the lcov --remove exclusions above.
       - name: Generate Sonar Generic Coverage XML
-        run: python3 .github/scripts/lcov_to_sonar.py coverage_filtered.info coverage.xml
+        run: |
+          gcovr --sonarqube coverage.xml \
+                --gcov-executable gcov-13 \
+                --root . \
+                --object-directory build \
+                --filter 'src/' \
+                --exclude 'src/rendering/.*' \
+                --exclude 'src/audio/.*' \
+                --exclude 'src/platform/.*' \
+                --exclude 'src/simulation/.*\.h' \
+                --exclude 'src/ui/.*\.h' \
+                --exclude 'src/interfaces/.*\.h'
 
       # src/simulation/ preflight — verify simulation coverage data is present.
       # If simulation_tests fails to run, coverage_filtered.info has no src/simulation/ SF
