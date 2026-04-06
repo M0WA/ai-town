@@ -78,6 +78,32 @@ jobs:
           print(f"Remapped {len(db)} entries to {workspace}")
           EOF
 
+      - name: Debug compile_commands.json paths
+        run: |
+          echo "=== GITHUB_WORKSPACE ==="
+          echo "$GITHUB_WORKSPACE"
+          echo "=== First entry (file + directory) ==="
+          python3 -c "
+          import json
+          with open('compile_commands.json') as f:
+              db = json.load(f)
+          e = db[0]
+          print('file:     ', e.get('file',''))
+          print('directory:', e.get('directory',''))
+          print('command[:120]:', e.get('command','')[:120])
+          print(f'Total entries: {len(db)}')
+          "
+          echo "=== File exists check (first entry) ==="
+          python3 -c "
+          import json, os
+          with open('compile_commands.json') as f:
+              db = json.load(f)
+          missing = [e['file'] for e in db if not os.path.exists(e.get('file',''))]
+          print(f'Missing files: {len(missing)} / {len(db)}')
+          if missing:
+              print('First 5 missing:', missing[:5])
+          "
+
       - name: Cache Sonar Scanner CLI
         id: sonar-scanner-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
