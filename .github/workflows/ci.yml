@@ -76,7 +76,7 @@ jobs:
       - name: Compute version
         id: version
         env:
-          DEFAULT_MAIN: v0.0.1
+          DEFAULT_MAIN: v0.0.21
           DEFAULT_DEVELOP: v0.0.0
         run: |
           if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
