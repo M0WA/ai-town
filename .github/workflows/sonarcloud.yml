@@ -83,7 +83,7 @@ jobs:
           "$SCANNER_BIN" \
             -Dsonar.projectKey=M0WA_ai-town \
             -Dsonar.organization=m0wa \
-            -Dsonar.sources=src,.github/workflows,docker \
+            -Dsonar.sources=src,.github/workflows,docker,.devcontainer \
             -Dsonar.tests=tests \
             -Dsonar.coverageReportPaths=coverage.xml \
             -Dsonar.exclusions="assets/**,build/**,tools/**" \
