@@ -38,6 +38,13 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
 
+      - name: Download compile_commands.json
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: compile-commands-linux-${{ github.event.workflow_run.head_sha }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
       - name: Cache Sonar Scanner CLI
         id: sonar-scanner-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
@@ -73,5 +80,4 @@ jobs:
             -Dsonar.cpd.exclusions="tests/**" \
             -Dsonar.scm.provider=git \
             -Dsonar.projectBaseDir=. \
-            -Dsonar.c.file.suffixes=- \
-            -Dsonar.cpp.file.suffixes=-
+            -Dsonar.cfamily.compile-commands=compile_commands.json

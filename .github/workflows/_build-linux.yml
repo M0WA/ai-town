@@ -80,6 +80,23 @@ jobs:
           fi
           echo "default.mhr present at build/default.mhr."
 
+            # Normalize compile_commands.json paths for SonarCloud.
+      # CMake generates absolute paths rooted at the container workspace (/__w/...).
+      # SonarCloud CFamily checks out sources at a different absolute path, so we
+      # strip the prefix to produce project-root-relative paths sonar.cfamily can match.
+      - name: Normalize compile_commands.json for SonarCloud
+        run: |
+          python3 .github/scripts/normalize_compile_commands.py \
+            build/compile_commands.json compile_commands.json
+
+      # Upload compile_commands.json for SonarCloud (sonarcloud.yml downloads via workflow_run).
+      - name: Upload compile_commands.json
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        with:
+          name: compile-commands-linux-${{ github.sha }}
+          path: compile_commands.json
+          retention-days: 14
+
       # Upload the build directory so the test-linux job can run ctest against it.
       # Includes all test binaries, CTestTestfile.cmake, and CTest-discovered test lists.
       # The staging artifact (aitown binary + default.mhr) is uploaded separately below.
