@@ -6,9 +6,12 @@ Usage: lcov_to_sonar.py <input.info> <output.xml>
 sonar.coverageReportPaths requires Generic Coverage XML format:
   https://docs.sonarsource.com/sonarqube/latest/analyzing-source-code/test-coverage/generic-test-data/
 
-lcov_cobertura generates Cobertura XML which SonarScanner rejects with exit code 3.
+Paths in the lcov SF: records are absolute (e.g. /__w/ai-town/ai-town/src/foo.cpp).
+SonarScanner resolves them against sonar.projectBaseDir (the checkout root).
+This script strips the CWD prefix so every path is relative to the project root.
 """
 
+import os
 import sys
 
 if len(sys.argv) != 3:
@@ -16,6 +19,14 @@ if len(sys.argv) != 3:
     sys.exit(1)
 
 lcov_file, out_file = sys.argv[1], sys.argv[2]
+cwd = os.getcwd()
+
+def to_relative(path: str) -> str:
+    """Return path relative to CWD; leave unchanged if not under CWD."""
+    try:
+        return os.path.relpath(path, cwd)
+    except ValueError:
+        return path  # Windows: different drives — return as-is
 
 # Parse lcov DA records: DA:<lineno>,<hits>[,<checksum>]
 # A line is "covered" if hits > 0. If the same line appears in multiple DA
@@ -27,7 +38,7 @@ with open(lcov_file) as f:
     for raw in f:
         line = raw.rstrip()
         if line.startswith("SF:"):
-            current = line[3:]
+            current = to_relative(line[3:])
             files.setdefault(current, {})
         elif line.startswith("DA:") and current is not None:
             parts = line[3:].split(",", 2)

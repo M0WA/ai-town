@@ -72,4 +72,6 @@ jobs:
             -Dsonar.exclusions="assets/**,build/**,tools/**" \
             -Dsonar.cpd.exclusions="tests/**" \
             -Dsonar.scm.provider=git \
-            -Dsonar.projectBaseDir=.
+            -Dsonar.projectBaseDir=. \
+            -Dsonar.c.file.suffixes=- \
+            -Dsonar.cpp.file.suffixes=-
