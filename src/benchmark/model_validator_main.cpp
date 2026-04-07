@@ -1113,8 +1113,7 @@ int main(int argc, char** argv)
             // using the same glReadPixels path as the 'S' key handler.
             // Multi-angle mode: capture at each angle in opts.screenshotAngles.
             const bool doCapture = !opts.screenshotPath.empty() &&
-                (multiAngleMode ? (frameCount + 1 == opts.screenshotFrame)
-                                : (frameCount + 1 == opts.screenshotFrame));
+                (frameCount + 1 == opts.screenshotFrame);
             if (doCapture)
             {
                 // Build output path with angle and category suffixes
