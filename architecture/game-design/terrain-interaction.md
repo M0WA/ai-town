@@ -118,13 +118,14 @@ creating the scene node. The call sequence is:
    // its stored height below targetH. getHeightAt() would return that
    // blended-down value and position the node below the rendered terrain surface.
    const float postY = m_terrain ? targetH : 0.0f;
-   // Roads, buildings, service buildings: postY + 0.10f
-   // (10 cm offset covers tile-edge height interpolation bleed-back after neighbour
+   // Roads, buildings, service buildings: postY + 0.25f
+   // (25 cm offset covers tile-edge height interpolation bleed-back after neighbour
    //  blending; polygon offset on the material is the primary Z-fighting defence —
-   //  see step 5 below)
+   //  see step 5 below; canonical constant: kRoadSurfaceYBias in
+   //  src/rendering/render_constants.h)
    node->setPosition(irr::core::vector3df(
        static_cast<float>(tileX) * kTileSize + kTileSize * 0.5f,
-       postY + 0.10f,
+       postY + 0.25f,
        static_cast<float>(tileZ) * kTileSize + kTileSize * 0.5f));
    ```
 
@@ -176,7 +177,7 @@ change.
 
 **Z-fighting defence summary**: the placement helpers use two complementary mechanisms:
 
-- A **10 cm Y offset** (`postY + 0.10f`) to handle the residual case where tile-edge
+- A **25 cm Y offset** (`postY + 0.25f`) to handle the residual case where tile-edge
   terrain vertices are fractionally above `targetH` after neighbour blending completes.
 - **Polygon offset** (`EPO_FRONT`, factor=1, units=4) applied to every material slot,
   which provides a distance-independent depth bias that prevents Z-fighting at all camera
@@ -286,14 +287,15 @@ actual corner heights after the conditional-flatten step above. The mesh is not 
 flat quad at a single Y; it follows the terrain surface. Vertices are positioned at:
 
 ```text
-V00 = (tileX * kTileSize,       c00 + 0.10f, tileZ * kTileSize)
-V10 = ((tileX+1) * kTileSize,   c10 + 0.10f, tileZ * kTileSize)
-V01 = (tileX * kTileSize,       c01 + 0.10f, (tileZ+1) * kTileSize)
-V11 = ((tileX+1) * kTileSize,   c11 + 0.10f, (tileZ+1) * kTileSize)
+V00 = (tileX * kTileSize,       c00 + 0.25f, tileZ * kTileSize)
+V10 = ((tileX+1) * kTileSize,   c10 + 0.25f, tileZ * kTileSize)
+V01 = (tileX * kTileSize,       c01 + 0.25f, (tileZ+1) * kTileSize)
+V11 = ((tileX+1) * kTileSize,   c11 + 0.25f, (tileZ+1) * kTileSize)
 ```
 
-The 0.10f Y offset is applied per-vertex (not to the scene node position), for the
-same Z-fighting reason as buildings. The scene node origin is placed at the tile centre
+The 0.25f Y offset (`kRoadSurfaceYBias` in `src/rendering/render_constants.h`) is
+applied per-vertex (not to the scene node position), for the same Z-fighting reason
+as buildings. The scene node origin is placed at the tile centre
 at the average of the 4 corner heights; vertices carry the per-corner offsets relative
 to that origin.
 
