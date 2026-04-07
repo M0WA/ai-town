@@ -3,16 +3,53 @@
 Create `.github/workflows/ci.yml`:
 
 - **Triggers**: push to `main` / `develop`; pull requests targeting `main` / `develop`; `workflow_dispatch` (manual trigger — required for re-running stale CI without a code push, e.g. after a transient runner failure or after updating vcpkg baseline). Without `workflow_dispatch`, a broken `main` with a non-code root cause (expired cache, runner issue) cannot be re-triggered without a dummy commit.
-- **Permissions block** (required for `dorny/test-reporter` to write PR annotations):
+- **Permissions block** (required for `dorny/test-reporter` to write PR annotations and for Linux
+  container jobs to pull the GHCR image):
 
   ```yaml
   permissions:
     checks: write       # required by dorny/test-reporter to post check results
     contents: read      # required to checkout code
+    packages: read      # required by build-linux and coverage-linux to pull GHCR image
   ```
 
-  Without `checks: write`, `dorny/test-reporter` receives a 403 and silently fails to publish test results. This block must appear at the workflow level (applies to all jobs) or per-job level.
-- **Job timeout requirements**: All jobs must include `timeout-minutes` to prevent runaway builds from consuming runner minutes indefinitely. Recommended values: `build-linux: 30`, `build-windows: 40`, `coverage-linux: 60` (longer due to full build + instrumented tests + lcov; Phase 7 AudioSystem instrumented build + streaming tests + three-tier ctest execution exceeds the Phase 0 estimate; 60 min confirmed as sufficient headroom), `all-checks-pass: 5`. Without these limits, a hung MSVC linker or stuck xvfb process can block the runner for the GitHub Actions default 6-hour maximum, wasting all allocated minutes on the repo for that billing period.
+  Without `checks: write`, `dorny/test-reporter` receives a 403 and silently fails to publish test
+  results. Without `packages: read`, the Linux container jobs cannot pull
+  `ghcr.io/m0wa/aitown-ci-linux` and fail with a 401 at job startup.
+  This block must appear at the workflow level (applies to all jobs) or per-job level.
+  Individual jobs may override permissions where required: `compute-version` and `release` use
+  `contents: write` (tag and release creation); `prepare` uses `contents: none`.
+- **Job timeout requirements**: All jobs must include `timeout-minutes` to prevent runaway builds
+  from consuming runner minutes indefinitely. Deployed values for all jobs with explicit timeouts:
+
+  | Job | `timeout-minutes` | Notes |
+  |---|---|---|
+  | `prepare` | 2 | Lightweight env-export job |
+  | `validate-assets` | 10 | Python validation + asset checks |
+  | `build-linux` (compile) | 30 | Compile-only container job |
+  | `test-linux` | 30 | Test execution inside `_test-linux.yml`; `build-linux` pipeline path can take up to 60 min total (compile + test in sequence) |
+  | `build-windows` | 40 | |
+  | `coverage-linux` | 60 | Full build + instrumented tests + lcov; Phase 7 AudioSystem instrumented build + streaming tests + three-tier ctest exceeds Phase 0 estimate; 60 min confirmed as sufficient headroom |
+  | `markdown-lint` | 5 | Fast linting step |
+  | `all-checks-pass` | 5 | Gate job |
+  | `compute-version` | 5 | Tag increment logic |
+  | `release` | 10 | Multi-artifact download + gh release create |
+  | `package-linux-deb` | 90 | apt installs in bare containers + vcpkg-from-source bootstrap |
+  | `package-windows` | 60 | NSIS + vcpkg restore + CPack |
+  | `docker-ci-image` build-and-push | 120 | Cold vcpkg compilation from source can exceed 1 hour |
+  | `supply-chain-lint` | (none set — gap) | Currently inherits GitHub Actions 6-hour default; recommend adding `timeout-minutes: 5` inside `_supply-chain-lint.yml` |
+
+  Note: `compute-version` is intentionally excluded from `all-checks-pass` — it is skipped on PRs
+  and `workflow_dispatch`, which would cause the gate to fail on those triggers.
+
+  **Timeout placement for reusable workflows**: for jobs called via `uses:`,
+  `timeout-minutes` must be set INSIDE the reusable workflow's job definition (e.g., inside
+  `_supply-chain-lint.yml`), NOT in the `ci.yml` caller entry. Setting it in the caller has no
+  effect.
+
+  Without these limits, a hung MSVC linker or stuck xvfb process can block the runner for the
+  GitHub Actions default 6-hour maximum, wasting all allocated minutes on the repo for that billing
+  period.
 
   ```yaml
   build-linux:
@@ -22,44 +59,130 @@ Create `.github/workflows/ci.yml`:
 
   Set `timeout-minutes` on the job level (not individual steps), unless a specific step (e.g., xvfb OpenGL tests) needs its own step-level timeout via `timeout-minutes` on the step.
 
-## Supply-Chain SHA Lint Step
+## ci.yml Job Structure and Dependency Graph
 
-This step runs as the **first named step** in the `build-linux` job — before vcpkg install, before ccache setup, and before any CMake configure step. It is a regular step (no `if: always()`); if placeholder patterns are found the step exits non-zero and the entire job fails immediately, preventing a broken workflow from touching the supply chain.
+`ci.yml` defines **twelve jobs**:
 
-**Step ordering clarification**: `actions/checkout` must run as step 1 (it makes `.github/workflows/ci.yml` available on disk). The supply-chain lint step runs as step 2, immediately after checkout and before all other steps (compiler detect, ccache, vcpkg, CMake configure). "First named step" means first among all steps after checkout — it does not mean before checkout, which would make the workflow file unavailable to grep.
+| Job | Trigger | Purpose |
+|---|---|---|
+| `prepare` | All events | Exports `VCPKG_COMMIT_ID` as a job output so reusable-workflow `with:` blocks can reference it via `needs` context. (`env` context is unavailable in `jobs.<id>.with`.) |
+| `compute-version` | Push to main/develop only | Auto-increments patch version on main; appends `-develop` suffix on develop. NOT in `all-checks-pass`. |
+| `supply-chain-lint` | All events | Calls `_supply-chain-lint.yml` — validates SHA pins and container digest pins across all workflow files. |
+| `validate-assets` | All events | Calls `_validate-assets.yml` — Python asset validation + structural checks. |
+| `build-linux` | All events | Calls `_build-linux.yml` — compiles in GHCR container, delegates test execution to `test-linux` via `_test-linux.yml`. |
+| `build-windows` | All events | Calls `_build-windows.yml` — compiles and tests on Windows. |
+| `coverage-linux` | All events | Calls `_coverage-linux.yml` — build + test + lcov in GHCR container. |
+| `markdown-lint` | All events | Calls `_markdown-lint.yml` — markdownlint via `npx`. |
+| `all-checks-pass` | All events | Gate job (`if: always()`). |
+| `package-windows` | Push to main/develop | Calls `_package-windows.yml`. NOT in `all-checks-pass`. |
+| `package-linux-deb` | Push to main/develop | Calls `_package-linux-deb.yml`. NOT in `all-checks-pass`. |
+| `release` | Push to main only | Creates GitHub release. NOT in `all-checks-pass`. |
 
-**Step definition** (place at the top of `build-linux`'s `steps:` list):
+**Full `needs:` dependency graph**:
 
-```yaml
-- name: Lint workflow for placeholder SHAs
-  shell: bash
-  run: |
-    # Fail if any angle-bracket placeholders remain (e.g. @<SHA>, uses: owner/action@<VERSION_SHA>)
-    if grep -P '<[A-Z_][A-Z0-9_-]*>' .github/workflows/ci.yml; then
-      echo "ERROR: Unresolved angle-bracket placeholder found in ci.yml. Replace all <PLACEHOLDER> tokens with real values before merging."
-      exit 1
-    fi
-    # Fail if any short SHA is used (fewer than 40 hex chars after '@')
-    # Full 40-character SHAs are required for all pinned actions and dependencies.
-    if grep -P '@[0-9a-f]{1,39}\b' .github/workflows/ci.yml; then
-      echo "ERROR: Short SHA detected in ci.yml. All pinned actions must use the full 40-character commit SHA."
-      exit 1
-    fi
-    echo "SHA lint passed — no placeholder tokens or short SHAs found."
-```
+- `validate-assets` has `needs: [supply-chain-lint, prepare]`
+- `build-linux` has `needs: [supply-chain-lint, validate-assets, prepare]`
+- `build-windows` has `needs: [supply-chain-lint, validate-assets, prepare]`
+- `coverage-linux` has `needs: [supply-chain-lint, validate-assets, prepare]`
+- `compute-version` has NO `needs:` — runs independently, gated only by push event `if:` condition
+- `package-windows` has `needs: [build-windows, prepare, compute-version]` — `prepare` for its `vcpkg_commit_id` output
+- `package-linux-deb` has `needs: [build-linux, prepare, compute-version]` — same rationale
+- `all-checks-pass` has `needs: [prepare, supply-chain-lint, validate-assets, build-linux, build-windows, coverage-linux, markdown-lint]`
+
+**Rationale — `validate-assets` gates all build jobs**: all three build jobs wait for
+`validate-assets` before starting. A failing `validate-assets` blocks ALL build jobs — not just
+`all-checks-pass`. This avoids wasting build minutes compiling code with missing or malformed
+assets.
+
+**Rationale — `compute-version` excluded from `all-checks-pass`**: `compute-version` is skipped
+on PRs and `workflow_dispatch`. Including it would cause `all-checks-pass` to fail on those
+triggers where it is legitimately skipped.
+
+## Supply-Chain SHA Lint
+
+The supply-chain lint runs as a dedicated **`supply-chain-lint` job** defined in
+`.github/workflows/_supply-chain-lint.yml` and called by `ci.yml` via
+`uses: ./.github/workflows/_supply-chain-lint.yml`. It is NOT an inline step inside
+`build-linux`. The `build-linux` job has no inline lint step.
+
+The `supply-chain-lint` job is a separate upstream job in `ci.yml` and is listed in
+`all-checks-pass`'s `needs:` list (see Phase 0 and Phase 1+ forms below). A lint failure in this
+job blocks `all-checks-pass` and prevents merging.
+
+### Three lint checks
+
+The lint runs three sequential checks against ALL `*.yml` files under `.github/workflows/`:
+
+1. **Placeholder angle-bracket tokens**: greps all workflow files for `<[A-Z_][A-Z0-9_-]*>` —
+   unresolved `@<SHA>` or `@<VERSION_SHA>` tokens left by template authors. Exits non-zero if any
+   are found.
+
+2. **Short SHAs on `uses:` lines**: greps only `uses:` lines for `@[0-9a-f]{1,39}\b` — any
+   SHA-like string shorter than 40 hex characters after `@`. The check is scoped to `uses:` lines
+   (not all occurrences), because short hexadecimal strings in run scripts are common and
+   intentional.
+
+3. **Container image digest pins**: greps `container: image:` lines for the pattern
+   `@sha256:[0-9a-f]{64}` — all container image references must include a full 64-hex sha256
+   digest pin. An image reference without a digest pin allows the image to change between runs
+   without a workflow update.
+
+**Early-exit known gap**: the SHA lint loop uses a `failed=1` accumulator and reports all SHA pin
+failures before calling `exit 1`. However, if any SHA lint failure is found, the step terminates
+before the container image digest check (check 3) runs. Container digest failures are only reported
+when the SHA lint passes. Future improvement: use a shared `failed=1` accumulator across all three
+loops so all errors surface in one execution.
 
 **Pattern rationale**:
 
-- `<[A-Z_][A-Z0-9_-]*>` matches angle-bracket placeholder tokens left by template authors (e.g. `actions/checkout@<CHECKOUT_SHA>`). These indicate the implementer has not yet looked up and substituted the real SHA.
-- `@[0-9a-f]{1,39}\b` matches any SHA-like string after `@` that is shorter than 40 hex characters. Supply-chain attacks rely on shortened SHAs being accepted as valid references; requiring the full 40-character SHA prevents a malicious tag from silently resolving to a different commit.
+- `<[A-Z_][A-Z0-9_-]*>` matches angle-bracket placeholder tokens left by template authors (e.g.,
+  `actions/checkout@<CHECKOUT_SHA>`).
+- `@[0-9a-f]{1,39}\b` on `uses:` lines matches shortened SHAs; requiring the full 40-character SHA
+  prevents a malicious tag from silently resolving to a different commit.
+- Container digest pins prevent silent image substitution on GHCR.
 
-**Cross-reference**: The `validate-assets` job definition (later in this file) uses `actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11` (v4.1.1, verified). The `actions/setup-python` SHA is a placeholder — the implementer must re-resolve at time of implementation — never copy a cached SHA from documentation. This lint step will catch any unresolved `@<...>` placeholder tokens at CI time.
+- **`build-linux` job**: defined in `.github/workflows/_build-linux.yml` as a reusable workflow.
+  It has TWO internal jobs: `build-linux` (compile only, runs in the pre-baked GHCR container
+  `ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:...`, `options: --user root`) and
+  `test-linux` (delegates to `_test-linux.yml` via `uses:`). The `build-linux` compile job does
+  NOT run ctest — it uploads the build directory as an artifact (`build-linux-${{ github.sha }}`,
+  `retention-days: 1`), which `test-linux` downloads and runs. There is no `apt-get install` step
+  — all system packages are pre-installed in the container image. The compile job also uploads
+  `compile-commands-linux-${{ github.sha }}` (normalized `compile_commands.json` for SonarCloud,
+  `retention-days: 14`) and, on push to main/develop, `aitown-staging-linux-${{ github.sha }}`
+  (binary + HRTF, `retention-days: 30`).
 
-**Scope of this lint step**: `build-linux` is the **minimum required location** for this lint step — it MUST appear in `build-linux`. Running it in additional jobs (`build-windows`, `coverage-linux`) is permitted as defense-in-depth hardening and does not introduce inconsistency: all jobs check out the same `ci.yml` from the same commit, so every instance of the step evaluates identical file contents. The minimum requirement is one instance in `build-linux`; additional instances in other jobs do not replace this requirement and do not need to be removed if present. The gate effect remains the same regardless of how many jobs carry the step: a lint failure in `build-linux` blocks `all-checks-pass` and prevents merging.
+  CMake configure uses **`-DENABLE_COVERAGE=OFF`** (this is the fast binary-verification build,
+  not the coverage build). Coverage is in the separate `coverage-linux` job.
 
-- **`build-linux` job** (`ubuntu-latest`): install xvfb + Mesa + libgl1-mesa-dev + vcpkg; CMake configure with **`-DENABLE_COVERAGE=OFF`** (coverage instrumentation disabled — this is the fast binary-verification build, not the coverage build); build; then, before running tests, verify that label routing is non-zero; then run tests in three explicitly named steps.
+  SonarCloud-related steps in `build-linux`:
+  - "Verify libGLEW.a artifact (CI-1)": `find /opt/vcpkg_installed -name "libGLEW.a" | grep -q "libGLEW.a"` — targets the container's pre-baked vcpkg path at `/opt/vcpkg_installed` (not `build/vcpkg_installed/`), uses a glob to be triplet-agnostic, guards against `glew` removal from `vcpkg.json`.
+  - "Verify default.mhr HRTF data": `test -f build/default.mhr` — relative path (preferred over
+    `${{ github.workspace }}` in container jobs to avoid host-path mismatch).
+  - "Normalize compile_commands.json for SonarCloud": calls
+    `python3 .github/scripts/normalize_compile_commands.py` to strip container-internal path
+    prefixes before uploading.
+  - "Upload compile_commands.json": uploads `compile-commands-linux-${{ github.sha }}` for use by
+    `sonarcloud.yml`.
 
-  **Note**: Do NOT add a "Verify shader assets" step to this job. Shader file existence checks are source-tree checks that belong in `validate-assets` (see Phase 11i phasing note below). This keeps build jobs focused on compilation and test execution.
+  The `_test-linux.yml` reusable workflow inputs: `build_artifact_name`, `build_dir`,
+  `reporter_name`, `test_artifact_name`. The `test-linux` job uses `BUILD_DIR` as a job-level
+  env var set from `inputs.build_dir`. The artifact upload name is `${{ inputs.test_artifact_name
+  }}` — the sha uniqueness suffix is applied at the call site.
+
+  **Container `options: --user root`**: All three Linux container jobs (`_build-linux.yml`,
+  `_test-linux.yml`, `_coverage-linux.yml`) set `options: --user root` on their `container:`
+  block. This is required because the pre-baked GHCR image's default user is non-root, which
+  causes permission failures when writing to `$GITHUB_WORKSPACE` and `/home/runner`. Without it,
+  artifact upload and workspace writes fail with permission denied.
+
+  **Container-pull permissions for reusable workflows**: reusable workflow jobs that pull GHCR
+  container images must declare `packages: read` in their own job-level permissions block inside
+  the reusable workflow — callers cannot delegate this by setting it only in their own permissions
+  block.
+
+  **Shader assets step**: This step is in `validate-assets`, not in `build-linux`/`coverage-linux`
+  (consolidated in Phase 11i). Build jobs are focused on compilation and test execution only.
 
   **Integration test routing verification (mandatory post-build step)**: After the build step and before any test execution step, add a CI step that queries the number of tests discovered under the `integration` label. If zero tests are discovered, the step exits non-zero and the job fails immediately. This prevents the false-green scenario where `gtest_discover_tests()` with a misconfigured `LABEL` silently produces zero tests and `ctest -L '^integration$'` exits 0 — a zero-test discovery does NOT constitute a passing verification:
 
@@ -67,7 +190,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
   - name: Verify integration test routing (non-zero discovery)
     shell: bash
     run: |
-      count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
+      count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -cE 'Test +#' || true)
       if [[ "$count" -eq 0 ]]; then
         echo 'ERROR: ctest -L '\''^integration$'\'' discovered 0 tests — label routing is broken'
         exit 1
@@ -87,13 +210,43 @@ This step runs as the **first named step** in the `build-linux` job — before v
   - name: Verify unit test routing (non-zero discovery)
     shell: bash
     run: |
-      count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -c 'Test #' || true)
+      count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -cE 'Test +#' || true)
       if [[ "$count" -eq 0 ]]; then
         echo 'ERROR: ctest -L '\''^unit$'\'' discovered 0 tests — label routing is broken'
         exit 1
       fi
       echo "Unit test routing verified: $count test(s) discovered."
+
+  - name: Verify simulation_tests registration
+    shell: bash
+    run: |
+      count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -i 'simulation' | grep -cE 'Test +#' || true)
+      if [[ "$count" -eq 0 ]]; then
+        echo 'ERROR: no simulation tests discovered under the unit label — simulation_tests may be misconfigured'
+        exit 1
+      fi
+      echo "simulation_tests routing verified: $count test(s) discovered."
   ```
+
+  **Note on grep patterns**: the deployed `_test-linux.yml` uses `grep -cE 'Test +#'` for the
+  unit and simulation_tests checks, and `grep -cE 'Test +#'` for all checks. Use
+  `grep -cE 'Test +#'` uniformly — this is future-proof as CTest emits two spaces before `#`
+  for test counts above 9. The `Test #` literal pattern would silently undercount in those cases.
+
+  **Step ordering in `_test-linux.yml`**: the deployed order is integration check → requires-opengl
+  check → unit check (→ simulation_tests check) — not unit-first as in earlier spec text. The
+  ordering has no functional consequence but this note reflects the deployed reality.
+
+  Also required: a "Restore execute permissions on test binaries" step immediately after
+  downloading the build artifact in `_test-linux.yml`, before any ctest invocation:
+
+  ```yaml
+  - name: Restore execute permissions on test binaries
+    run: find $BUILD_DIR -maxdepth 2 -type f -name '*_tests' -exec chmod +x {} \;
+  ```
+
+  `actions/upload-artifact` strips file permissions when archiving; without this step, test
+  binaries downloaded from the build artifact cannot be executed by ctest.
 
   **Phase assignment (requires-opengl label routing)**: The `requires-opengl` label routing non-zero discovery verification step MAY be added in Phase 1, once `opengl_tests` is linked against `aitown_render`. The `stub_succeed.cpp` test registered in Phase 0 under `opengl_tests` satisfies the non-zero discovery requirement. This step is a Phase 1 deliverable and must not be deferred to Phase 3.
 
@@ -103,7 +256,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
   - name: Verify requires-opengl test routing (non-zero discovery)
     shell: bash
     run: |
-      count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #' || true)
+      count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -cE 'Test +#' || true)
       if [[ "$count" -eq 0 ]]; then
         echo 'ERROR: ctest -L '\''^requires-opengl$'\'' discovered 0 tests — label routing is broken'
         exit 1
@@ -111,31 +264,39 @@ This step runs as the **first named step** in the `build-linux` job — before v
       echo "Requires-opengl test routing verified: $count test(s) discovered."
   ```
 
-  All three routing checks (`unit`, `integration`, `requires-opengl`) must be placed **after the CMake build step and before any ctest execution step** so that a label misconfiguration fails the job before any false-passing `ctest -L` invocation can run. Neither step requires a display or audio device — they only invoke `ctest -N` (list mode, no test execution).
+  All three routing checks (`unit`, `integration`, `requires-opengl`) must be placed **after the
+  CMake build step and before any ctest execution step** so that a label misconfiguration fails
+  the job before any false-passing `ctest -L` invocation can run. Neither step requires a display
+  or audio device — they only invoke `ctest -N` (list mode, no test execution).
+
+  **"Create test results directory" step** (Linux container jobs): Both `_test-linux.yml` and
+  `_coverage-linux.yml` use a single dedicated "Create test results directory" step
+  (`run: mkdir -p test_results`) placed before all three ctest steps. Each ctest step's `run:`
+  contains only the `ctest` invocation — no inline `mkdir -p`. The Windows job
+  (`_build-windows.yml`) uses `New-Item -Force` inline in each test step. The inline form for
+  Windows and the single pre-test step for Linux are both valid; the Linux container jobs use
+  the single pre-test step for clarity.
 
   ```yaml
+  - name: Create test results directory
+    run: mkdir -p test_results
+
   - name: Run unit tests (no display)
-    run: |
-      mkdir -p test_results
-      ctest --test-dir build -LE 'integration|requires-opengl' --output-on-failure
+    run: ctest --test-dir build -LE 'integration|requires-opengl' --output-on-failure
     env:
       GTEST_OUTPUT: 'xml:test_results/'
       AITOWN_HEADLESS: '1'      # guard against unit tests that inadvertently trigger IrrlichtDevice init
       ALSOFT_DRIVERS: 'null'    # guard against unit tests that inadvertently trigger AudioSystem init
 
   - name: Run integration tests (no display, EDT_NULL)
-    run: |
-      mkdir -p test_results
-      ctest --test-dir build -L '^integration$' --output-on-failure
+    run: ctest --test-dir build -L '^integration$' --output-on-failure
     env:
       GTEST_OUTPUT: 'xml:test_results/'
       AITOWN_HEADLESS: '1'
       ALSOFT_DRIVERS: 'null'
 
   - name: Run opengl tests (xvfb)
-    run: |
-      mkdir -p test_results
-      xvfb-run --auto-servernum ctest --test-dir build -L '^requires-opengl$' --output-on-failure
+    run: xvfb-run --auto-servernum ctest --test-dir build -L '^requires-opengl$' --output-on-failure
     env:
       GTEST_OUTPUT: 'xml:test_results/'
       ALSOFT_DRIVERS: 'null'    # OpenGL tests use real display via xvfb but still need null audio
@@ -153,14 +314,21 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
   Configure steps call `cmake --preset <name>` instead of `cmake -B build -S . -G ... -D...`. Local development: set `VCPKG_ROOT` then `cmake --preset ci-linux` (add `-DVCPKG_OVERLAY_PORTS=vcpkg-overlays` if using gcc-12 fallback).
 
-- **`build-linux` ccache setup**: Include `hendrikmuhs/ccache-action` before the CMake configure step (Linux job only — `if: runner.os == 'Linux'`; ccache does not support `cl.exe` on Windows). The `ci-linux` and `ci-linux-coverage` CMake presets include `CMAKE_C_COMPILER_LAUNCHER=ccache` and `CMAKE_CXX_COMPILER_LAUNCHER=ccache` — no additional `-D` flags are needed in the configure step. See `caching.md` for the authoritative platform-specific caching rules, ccache key format, and action SHA.
+- **`build-linux` ccache setup**: Include `hendrikmuhs/ccache-action` before the CMake configure
+  step. In Linux-only dedicated reusable workflows (`_build-linux.yml`, `_coverage-linux.yml`) the
+  `if: runner.os == 'Linux'` guard is unnecessary and is omitted in the deployed source — these
+  workflows always run in a Linux container. The guard is only required in mixed-OS workflows
+  (e.g., a monolithic `ci.yml` where Linux and Windows steps coexist in the same job). The
+  `ci-linux` and `ci-linux-coverage` CMake presets include `CMAKE_C_COMPILER_LAUNCHER=ccache`
+  and `CMAKE_CXX_COMPILER_LAUNCHER=ccache` — no additional `-D` flags are needed in the configure
+  step. See `caching.md` for the authoritative platform-specific caching rules, ccache key format,
+  and action SHA.
 
   **`build-linux` job** — use the standard key (no suffix):
 
   ```yaml
   - name: Set up ccache
-    if: runner.os == 'Linux'
-    uses: hendrikmuhs/ccache-action@ed74d11c0b343532753ecead8a951bb09bb34bc9  # v1.2.14 — pin to SHA
+    uses: hendrikmuhs/ccache-action@33522472633dbd32578e909b315f5ee43ba878ce  # v1.2.22 — pin to SHA
     with:
       key: ${{ runner.os }}-ccache-${{ env.COMPILER_VERSION }}
   ```
@@ -169,15 +337,25 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
   ```yaml
   - name: Set up ccache
-    if: runner.os == 'Linux'
-    uses: hendrikmuhs/ccache-action@ed74d11c0b343532753ecead8a951bb09bb34bc9  # v1.2.14 — pin to SHA
+    uses: hendrikmuhs/ccache-action@33522472633dbd32578e909b315f5ee43ba878ce  # v1.2.22 — pin to SHA
     with:
       key: ${{ runner.os }}-ccache-coverage-${{ env.COMPILER_VERSION }}
   ```
 
   The `-coverage` suffix is mandatory. GCC emits different object code when `-fprofile-arcs -ftest-coverage` is active — coverage-instrumented objects are ABI-incompatible with non-instrumented objects. Using the same ccache key for both jobs would cause stale-cache hits that silently mix instrumented and non-instrumented objects in the coverage build, producing incorrect or missing `.gcda` output. See `caching.md` for the full rationale and authoritative platform-specific caching rules.
 
-- **Windows job** (`windows-latest`): uses the Ninja generator (not MSBuild) via the `ci-windows` CMake preset. The `ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c` (v1.13.0) action runs `vcvarsall.bat x64` to place `cl.exe` and `link.exe` on `PATH` before `cmake --preset ci-windows` — Ninja does not auto-detect MSVC. DLL output lands at `build/` (not `build/Release/`) because Ninja is single-config and `CMAKE_BUILD_TYPE=Release` is set in the preset. Build step: `cmake --build build --parallel` (no `-C Release` needed for Ninja single-config, though `-C Release` is harmless and can be kept for ctest consistency).
+- **Windows job** (`windows-latest`): uses the Ninja generator (not MSBuild) via the `ci-windows`
+  CMake preset. The `ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c` (v1.13.0)
+  action runs `vcvarsall.bat x64` to place `cl.exe` and `link.exe` on `PATH` before
+  `cmake --preset ci-windows` — Ninja does not auto-detect MSVC. DLL output lands at `build/`
+  (not `build/Release/`) because Ninja is single-config and `CMAKE_BUILD_TYPE=Release` is set in
+  the preset. Build step: `cmake --build build --parallel` (no `-C Release` needed for Ninja
+  single-config, though `-C Release` is harmless and can be kept for ctest consistency).
+
+  **`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true`** must be set at the **job `env:` level** to
+  suppress node20-deprecation warnings from `ilammy/msvc-dev-cmd` and `lukka/run-vcpkg`, which
+  have no node24 release. This is a job-level env var, not a step-level env var. Setting it at
+  job level suppresses the warnings for all steps in the job.
 
   **Windows vcpkg DLL PATH requirement**: After the Build step and before any test step, add a step to append the vcpkg installed bin directory to `GITHUB_PATH`. This is required because the vcpkg `x64-windows` triplet builds GTest/GMock as **shared DLLs** (`gtest.dll`, `gmock.dll`) in `build/vcpkg_installed/x64-windows/bin/` — NOT in `build/` alongside the test executables. Without this, test binaries fail to start and ctest reports `No tests were found!!!` (silently, with exit code 0), so no XML is written.
 
@@ -192,12 +370,22 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
   **`gtest_discover_tests DISCOVERY_MODE PRE_TEST`** (mandatory for Windows): `cmake/AitownTestHelpers.cmake` MUST pass `DISCOVERY_MODE PRE_TEST` to `gtest_discover_tests`. With the default `POST_BUILD` mode, CMake runs the test binary immediately after linking (during `cmake --build`) to enumerate test cases. At build time the vcpkg bin directory has not yet been added to `PATH`, so `gtest.dll` cannot be loaded → the binary exits with a DLL load error → discovery produces empty output → ctest finds 0 tests at run time. `PRE_TEST` defers discovery to ctest time (inside the test step), where `GITHUB_PATH` already includes the vcpkg bin directory. `PRE_TEST` requires CMake ≥ 3.18; the project's `cmake_minimum_required(3.21)` satisfies this on both runners (ubuntu-latest ships CMake 3.22+; VS2022 runner ships CMake 3.28+).
 
-  Then add a pre-test verification step to confirm Phase 7 DLLs and HRTF data are present before running tests. Both `soft_oal.dll` and `default.mhr` are hard-fails (see `hrtf-initialization.md`):
+  The DLL verification step ("Verify required DLLs and HRTF data (all hard-fail)") runs AFTER
+  test execution and after test result publication, immediately before staging artifact upload
+  (not before tests as in an earlier spec revision). All four files are hard-fails:
 
   ```yaml
-  - name: Verify Phase 7 DLLs and HRTF data present
+  - name: Verify required DLLs and HRTF data (all hard-fail)
     shell: pwsh
     run: |
+      if (-not (Test-Path "build\Irrlicht.dll")) {
+        Write-Error "Irrlicht.dll not found in build\ — Phase 1 post-build copy rule failed."
+        exit 1
+      }
+      if (-not (Test-Path "build\GLEW32.dll")) {
+        Write-Error "GLEW32.dll not found in build\ — Phase 1 post-build copy rule failed."
+        exit 1
+      }
       if (-not (Test-Path "build\soft_oal.dll")) {
         Write-Error "soft_oal.dll not found in build\ — rename step failed or DLL was not copied."
         exit 1
@@ -207,6 +395,10 @@ This step runs as the **first named step** in the `build-linux` job — before v
         exit 1
       }
   ```
+
+  `Irrlicht.dll` and `GLEW32.dll` are copied by post-build rules in Phase 1 CMakeLists.txt.
+  All four checks use `if (-not (Test-Path ...)) { exit 1 }` syntax — the `||` short-circuit
+  operator is PowerShell 7+ only; GitHub Actions Windows runners use PowerShell 5.1.
 
   Then create the test results directory and run tests — use **explicit label filtering** to skip `requires-opengl` tests (no display available on Windows runners). The `requires-opengl` label is Linux-only (`xvfb-run`); Windows integration tests run under `AITOWN_HEADLESS=1`:
 
@@ -237,18 +429,31 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
   ```yaml
   - name: Publish test results
-    uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1 — pin to SHA
+    uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2  # v3.0.0 — pin to SHA
     if: always()  # publish even on test failure
+    continue-on-error: true  # Linux container jobs only — see rationale above
     with:
-      name: Test Results (${{ github.job }})
+      name: ${{ inputs.reporter_name }}  # caller-supplied via reusable workflow input
       path: test_results/*.xml
       reporter: java-junit  # GTest XML is JUnit-compatible
       fail-on-error: false  # annotation failures must not mask test failures
   ```
 
-  The `if: always()` is required so results are published even when tests fail. `fail-on-error: false` prevents a `dorny/test-reporter` error (e.g., no XML when tests crash early) from overwriting the real ctest exit code. **Implementation note**: The SHA `31a54ee7ebcacc03a09ea97a7e5465a47b84aea5` has been verified against the `v1.9.1` tag as of 2026-02-19. Re-verify before any baseline update using `gh release view v1.9.1 --repo dorny/test-reporter --json tagName,targetCommitish`.
+  For hardcoded reporter names (non-reusable workflows): `_coverage-linux.yml` uses
+  `name: 'Linux Coverage Tests'`; `_build-windows.yml` uses `name: 'Windows Unit Tests'` and
+  omits `continue-on-error: true` (Windows job, not container). For `_test-linux.yml` the
+  `name:` is supplied via the `inputs.reporter_name` reusable workflow input (e.g.,
+  `'Linux Unit Tests'`).
 
-  **Before `dorny/test-reporter`**, all three jobs (`build-linux`, `build-windows`, `coverage-linux`) must include a verification step that fails the job if no test XML was produced:
+  The `if: always()` is required so results are published even when tests fail. `fail-on-error: false` prevents a `dorny/test-reporter` error (e.g., no XML when tests crash early) from overwriting the real ctest exit code. **Implementation note**: The SHA `a43b3a5f7366b97d083190328d2c652e1a8b6aa2` has been verified against the `v3.0.0` tag. Re-verify before any baseline update using `gh release view v3.0.0 --repo dorny/test-reporter --json tagName,targetCommitish`.
+
+**`continue-on-error: true` on Linux container jobs only**: Linux container jobs (`_test-linux.yml` and `_coverage-linux.yml`) must include `continue-on-error: true` on the `dorny/test-reporter` step. Rationale: inside the GHCR container the checkout UID differs from the runner process UID, which can occasionally cause dorny to produce a non-zero exit code even when `fail-on-error: false` is set — `continue-on-error: true` prevents that exit code from masking the real test result. The Windows job (`_build-windows.yml`) does NOT include `continue-on-error: true` — it does not run in a container and this scenario does not occur.
+
+  **Before `dorny/test-reporter`**, Linux jobs and the Windows job each include a verification step
+  that fails the job if no test XML was produced. The Linux form uses `shell: bash`; the Windows
+  form uses `shell: pwsh` (step name "Verify test XML output" — no "exists" suffix):
+
+  **Linux form (`_test-linux.yml`, `_coverage-linux.yml`)**:
 
   ```yaml
   - name: Verify test XML output exists
@@ -263,8 +468,49 @@ This step runs as the **first named step** in the `build-linux` job — before v
       echo "Found $count test result file(s)."
   ```
 
-  This step must use `shell: bash` (safe on both Linux and Windows runners via Git Bash) and run with `if: always()` so it catches failures even when ctest exits non-zero.
-- **Artifact upload steps** (must be explicitly included in workflow YAML — not specifying these means nothing is uploaded despite retention policy requirements):
+  **Windows form (`_build-windows.yml`)**:
+
+  ```yaml
+  - name: Verify test XML output
+    if: always()
+    shell: pwsh
+    run: |
+      $count = (Get-ChildItem -Path test_results -Filter '*.xml' -ErrorAction SilentlyContinue | Measure-Object).Count
+      if ($count -eq 0) { Write-Error "No test XML files found in test_results/"; exit 1 }
+      Write-Host "Found $count test result file(s)."
+  ```
+
+  Note: `_coverage-linux.yml` does NOT include a "Verify test XML output exists" step — the
+  coverage job goes directly from ctest execution to the git safe.directory fix and dorny reporter
+  without an XML pre-check. The XML verification requirement applies to `_test-linux.yml` and
+  `_build-windows.yml` only.
+
+  **"Fix git safe.directory for test reporter"** (required in ALL Linux container jobs before
+  dorny): both `_test-linux.yml` and `_coverage-linux.yml` must include:
+
+  ```yaml
+  - name: Fix git safe.directory for test reporter
+    if: always()
+    run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+  ```
+
+  This step is required because inside the GHCR container the checkout directory is owned by a
+  different UID than the container runner process, which causes `dorny/test-reporter` to produce a
+  non-zero exit code. The `git config` step must be placed immediately before the dorny step with
+  `if: always()`. The Windows job does not run in a container and does not need this step.
+
+- **Artifact upload steps** (must be explicitly included in workflow YAML — not specifying these
+  means nothing is uploaded despite retention policy requirements):
+
+  **Anti-wildcard rule**: `path:` values should list explicit paths where possible. Wildcards that
+  might silently match nothing are forbidden. The following are the three **approved exceptions**
+  where wildcards are required (because CPack or the release job generates version-stamped
+  filenames at runtime that cannot be hard-coded at authoring time):
+  - `build/*.dll` — acceptable in the Windows staging artifact upload because the DLL
+    verification hard-fail step immediately preceding it guarantees at least one DLL is present.
+  - `build/aitown-*.deb` — CPack generates the full `.deb` filename at packaging time.
+  - `build/aitown-*.exe` — CPack generates the full `.exe` installer filename at packaging time.
+  - `release-assets/**` — release artifact filenames contain the computed version string.
 
   **Artifact name uniqueness requirement**: All `upload-artifact` `name:` values MUST include `${{ github.sha }}` as a suffix. Without it, concurrent workflow runs (e.g., two PRs merging in rapid succession) upload artifacts with identical names — GitHub Actions silently overwrites the first with the second, destroying post-mortem data for the earlier run. The `${{ github.sha }}` suffix guarantees globally unique artifact names for the lifetime of the artifact retention window.
 
@@ -275,10 +521,10 @@ This step runs as the **first named step** in the `build-linux` job — before v
   # ALL names MUST include ${{ github.sha }} for uniqueness across concurrent builds:
   #   build-linux job:    name: test-results-build-linux-${{ github.sha }}
   #   coverage-linux job: name: test-results-coverage-linux-${{ github.sha }}
-  #   build-windows job:  name: test-results-windows-${{ github.sha }}
+  #   build-windows job:  name: test-results-build-windows-${{ github.sha }}
   - name: Upload test results
     if: always()
-    uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+    uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
     with:
       name: test-results-build-linux-${{ github.sha }}
       path: test_results/
@@ -288,7 +534,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
   # retention-days value and must NOT rely on the build-linux step definition above.
   - name: Upload test results
     if: always()
-    uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+    uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
     with:
       name: test-results-coverage-linux-${{ github.sha }}
       path: test_results/
@@ -296,26 +542,42 @@ This step runs as the **first named step** in the `build-linux` job — before v
   # After tests (build-windows job):
   - name: Upload test results
     if: always()
-    uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+    uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
     with:
-      name: test-results-windows-${{ github.sha }}
+      name: test-results-build-windows-${{ github.sha }}
       path: test_results/
       retention-days: 14
-  # After lcov (coverage-linux job):
-  # Coverage HTML report uses 14-day retention — same as test XML (see retention policy below).
-  - name: Upload coverage report
-    if: always()  # Upload even on gate failure — the report is most valuable when coverage is below 80%
-    uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+  # After lcov (coverage-linux job) — all four coverage artifacts use if: always() and 14-day retention:
+  # 1. Sonar Generic Coverage XML (consumed by sonarcloud.yml):
+  - name: Upload Sonar coverage XML
+    if: always()
+    uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
     with:
-      name: coverage-report-${{ github.sha }}
+      name: coverage-sonar-linux-${{ github.sha }}
+      path: coverage.xml
+      retention-days: 14
+  # 2. Coverage HTML report:
+  - name: Upload coverage HTML report
+    if: always()  # Upload even on gate failure — the report is most valuable when coverage is below threshold
+    uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+    with:
+      name: coverage-report-linux-${{ github.sha }}
       path: coverage_html/
+      retention-days: 14
+  # 3. Filtered lcov info (for post-mortem analysis):
+  - name: Upload coverage info
+    if: always()
+    uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+    with:
+      name: coverage-info-linux-${{ github.sha }}
+      path: coverage_filtered.info
       retention-days: 14
   # After DLL verification (Windows job, on push to main or develop):
   # Uploads staging artifact used by package-windows (no rebuild in packaging).
   # Ninja single-config: executable is at build/aitown.exe (not build/Release/aitown.exe).
   - name: Upload Windows staging artifact
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
-    uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+    uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
     with:
       name: aitown-staging-windows-${{ github.sha }}
       path: |
@@ -332,7 +594,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
   # After test run (build-linux job, on push to main or develop):
   - name: Upload Linux staging artifact
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
-    uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+    uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
     with:
       name: aitown-staging-linux-${{ github.sha }}
       path: |
@@ -348,40 +610,46 @@ This step runs as the **first named step** in the `build-linux` job — before v
 
   - **`coverage-linux` must include three explicit, separately named YAML steps for ctest** (unit tests, integration tests without display, and OpenGL tests under xvfb) **before the lcov capture step**. A single combined `ctest` step cannot use both `-LE` and `-L` flags simultaneously; three named steps make coverage tracing explicit. The three ctest steps in `coverage-linux` must mirror the three ctest steps in `build-linux` exactly (same label filters `-LE "integration|requires-opengl"`, `-L "^integration$"`, `-L "^requires-opengl$"`) to ensure coverage data is collected for all test categories.
 
-  **Label-routing verification in `coverage-linux` (mandatory)**: The `coverage-linux` job MUST include the same three label-routing non-zero discovery verification steps that `build-linux` includes — one for the `unit` label, one for the `integration` label, and one for the `requires-opengl` label. The exact step order within `coverage-linux` is:
+  **`coverage-linux` runs in the pre-baked GHCR container** (`container: image:
+  ghcr.io/m0wa/aitown-ci-linux:vcpkg-b2f068f@sha256:...`, `options: --user root`). There is no
+  `apt-get install` step, no `actions/cache` step for vcpkg, and no `lukka/run-vcpkg` step — all
+  system packages and vcpkg packages are pre-installed in the image.
 
-  1. Install system dependencies (`apt-get`)
+  **`coverage-linux` does NOT include label-routing verification steps** (no "Verify unit test
+  routing", "Verify integration test routing", or "Verify requires-opengl test routing"). Routing
+  is verified by the parallel `test-linux` job (called by `build-linux` via `_test-linux.yml`).
+  The `coverage-linux` job goes directly from build to `mkdir -p test_results` and ctest execution.
+
+  The deployed step ordering for `coverage-linux` is:
+
+  1. Checkout
   2. Detect compiler version (write `COMPILER_VERSION` to `$GITHUB_ENV`)
-  3. `actions/cache` for vcpkg (reads `COMPILER_VERSION` from step 2)
-  4. `lukka/run-vcpkg` — install vcpkg packages (includes gtest and rapidcheck via vcpkg.json)
-  5. `hendrikmuhs/ccache-action` — set up ccache with `-coverage` key suffix
-  6. CMake configure (`cmake --preset ci-linux-coverage`)
-  7. CMake build (`cmake --build build`)
-  8. **Verify unit test routing (non-zero discovery)** — after build, before any ctest
-  9. **Verify integration test routing (non-zero discovery)** — after build, before any ctest
-  10. **Verify requires-opengl test routing (non-zero discovery)** — after build, before any ctest
-  11. Run unit tests ctest step
-  12. Run integration tests ctest step
-  13. Run OpenGL tests ctest step (xvfb)
-  14. Verify test XML output exists
-  15. Publish test results (dorny/test-reporter)
-  16. Capture and gate lcov coverage
-  16a. Check src/ui/ zero-hit files (zero-hit coverage completeness checkpoint) — this step MUST use `if: always()` in the CI YAML so the zero-hit check runs unconditionally even when step 16 (lcov gate) exits non-zero; without `if: always()`, GitHub Actions skips step 16a after a lcov gate failure, silently bypassing dead-code detection
-  16b. **Phase 6 deliverable** — `src/simulation/` SF preflight: verifies that `coverage_filtered.info` contains at least one `SF:` entry for `src/simulation/`. Placement: inside step 16 (the lcov capture-and-gate `run:` block), immediately before the 95% total gate awk step. See `architecture/testing/coverage.md` § Phase 6 for the exact bash snippet.
-  16c. **Phase 11 deliverable** — `src/simulation/` per-file 85% floor gate: awk step that fails the build if any single `src/simulation/` file is below 85% line coverage. Placement: inside step 16 (the lcov capture-and-gate `run:` block), immediately after the `src/simulation/` SF preflight (step 16b) and before the 95% total gate. See `architecture/testing/coverage.md` § Phase 11 for the exact awk code.
-  17. Upload coverage artifact
-
-  Steps 8, 9, and 10 (the three label-routing verification steps) are placed **after CMake build step (7) and before the first ctest execution step (11)**. A label misconfiguration that produces zero-test discovery in `build-linux` will equally affect `coverage-linux`; without these checks, a zero-discovery run silently under-reports coverage and exits 0.
-
-  **coverage-linux: label-routing verification YAML**
-
-  These steps are IDENTICAL to the `build-linux` forms — copy them exactly. They are reproduced here verbatim so that an implementer building `coverage-linux` from this spec alone can derive the exact YAML without referring back to the `build-linux` documentation.
+  3. `hendrikmuhs/ccache-action` — set up ccache with `-coverage` key suffix (reads `COMPILER_VERSION`)
+  4. CMake configure (`cmake --preset ci-linux-coverage`)
+  5. CMake build (`cmake --build build`)
+  6. Create test results directory (`mkdir -p test_results`)
+  7. Run unit tests ctest step
+  8. Run integration tests ctest step
+  9. Run OpenGL tests ctest step (xvfb)
+  10. Fix git safe.directory for test reporter (`if: always()`)
+  11. Publish test results (dorny/test-reporter, `if: always()`, `continue-on-error: true`)
+  12. Upload test results (`if: always()`)
+  13. Generate coverage report (lcov capture + filter + list + genhtml)
+  14. Generate Sonar Generic Coverage XML (gcovr)
+  15. Preflight src/simulation/ coverage entries (warning-only, deferred exit 1 until Phase 6)
+  16. Enforce src/simulation/ 85% per-file floor (Phase 11, hard-fail)
+  17. Enforce 95% total line coverage gate (hard-fail, Phase 6 applied)
+  18. Enforce src/ui/ 25% worst-file coverage gate (hard-fail, Phase 4 applied)
+  19. Check src/ui/ coverage completeness (`if: always()`)
+  20. Upload Sonar coverage XML (`if: always()`)
+  21. Upload coverage HTML (`if: always()`)
+  22. Upload coverage info (`if: always()`)
 
   ```yaml
   - name: Verify unit test routing (non-zero discovery)
     shell: bash
     run: |
-      count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -c 'Test #' || true)
+      count=$(ctest --test-dir build -N -L '^unit$' 2>/dev/null | grep -cE 'Test +#' || true)
       if [[ "$count" -eq 0 ]]; then
         echo 'ERROR: ctest -L '\''^unit$'\'' discovered 0 tests — label routing is broken'
         exit 1
@@ -391,7 +659,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
   - name: Verify integration test routing (non-zero discovery)
     shell: bash
     run: |
-      count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -c 'Test #' || true)
+      count=$(ctest --test-dir build -N -L '^integration$' 2>/dev/null | grep -cE 'Test +#' || true)
       if [[ "$count" -eq 0 ]]; then
         echo 'ERROR: ctest -L '\''^integration$'\'' discovered 0 tests — label routing is broken'
         exit 1
@@ -401,7 +669,7 @@ This step runs as the **first named step** in the `build-linux` job — before v
   - name: Verify requires-opengl test routing (non-zero discovery)
     shell: bash
     run: |
-      count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -c 'Test #' || true)
+      count=$(ctest --test-dir build -N -L '^requires-opengl$' 2>/dev/null | grep -cE 'Test +#' || true)
       if [[ "$count" -eq 0 ]]; then
         echo 'ERROR: ctest -L '\''^requires-opengl$'\'' discovered 0 tests — label routing is broken'
         exit 1
@@ -448,88 +716,143 @@ This step runs as the **first named step** in the `build-linux` job — before v
         # EDT_OPENGL devices; AITOWN_HEADLESS would cause those paths to be bypassed, producing
         # false green results.
 
-    - name: Capture and gate lcov coverage
+    - name: Generate coverage report
       run: |
         BUILD_DIR=build
-        # --ignore-errors mismatch: GCC 13 geninfo emits "mismatched end line" for inline
-        # functions and lambdas in headers (GTest macros, fmt headers, etc.). This is a
-        # known lcov/GCC 13 compatibility issue; the mismatch is benign and does not affect
-        # coverage accuracy. Without this flag lcov --capture exits non-zero and the entire
-        # coverage job fails before genhtml runs.
-        # Use ${{ github.workspace }} (absolute path) rather than '.'.
-        # On GitHub-hosted runners the shell CWD is reset to $GITHUB_WORKSPACE at the
-        # start of each step, so '.' works correctly there. However, ${{ github.workspace }}
-        # is preferred because: (1) it is explicit and self-documenting — the intent is
-        # unambiguous in the YAML; (2) it works correctly on self-hosted runners where the
-        # runner's working directory convention may differ from $GITHUB_WORKSPACE.
-        # ${{ github.workspace }} is expanded by GitHub Actions at YAML evaluation time
-        # and always resolves to the absolute path of the checked-out repository root.
-        lcov --capture --directory build --base-directory ${{ github.workspace }} \
-             --ignore-errors mismatch \
+        # NOTE: In container jobs, use --base-directory . (NOT ${{ github.workspace }}).
+        # ${{ github.workspace }} resolves to the HOST path (/__w/repo/repo) which differs
+        # from the container working directory, causing path mismatches in coverage source
+        # attribution. Use '.' (current directory) instead.
+        lcov --capture --directory "${BUILD_DIR}" --base-directory . \
+             --gcov-tool gcov-13 \
+             --ignore-errors mismatch,inconsistent \
+             --rc check_data_consistency=0 \
              --output-file coverage.info
-        # --ignore-errors unused: lcov 2.x treats any --remove pattern matching no files
-        # as a fatal error (exit 25). At Phase 0 only smoke tests exist; many patterns
-        # (mock_*.h, src/audio/*, etc.) are future-proofing and match nothing yet.
+        # Additional exclude patterns vs Phase 0 spec:
+        # /opt/vcpkg_installed/* — container pre-baked vcpkg headers
+        # $(pwd)/vcpkg_installed/* — workspace vcpkg fallback
+        # $(pwd)/build/vcpkg_installed/* — build-dir vcpkg headers
+        # */src/simulation/*.h, */src/ui/*.h, */src/interfaces/*.h — exclude inline headers
+        #   from double-counting (the .cpp files are measured; .h files are defense-in-depth)
+        # $(pwd)/.fetchcontent_cache/* — absolute form preferred over glob in containers
         # Note: "${BUILD_DIR}/_deps/*" intentionally absent — build/_deps/ never exists
         # with FETCHCONTENT_BASE_DIR=.fetchcontent_cache.
         lcov --remove coverage.info \
-          --ignore-errors unused \
+          --ignore-errors unused,inconsistent \
+          --rc check_data_consistency=0 \
           '/usr/*' \
-          "${{ github.workspace }}/.fetchcontent_cache/*" \
+          '/opt/vcpkg_installed/*' \
+          "$(pwd)/vcpkg_installed/*" \
+          "$(pwd)/build/vcpkg_installed/*" \
+          "$(pwd)/.fetchcontent_cache/*" \
           '*/tests/*' \
           '*/mock_*.h' '*/mock_*.cpp' \
           '*/manual_*.h' '*/manual_*.cpp' \
           '*/Mock*.h' '*/Mock*.cpp' \
           '*/Manual*.h' '*/Manual*.cpp' \
           '*/src/rendering/*' '*/src/audio/*' '*/src/platform/*' \
+          '*/src/simulation/*.h' '*/src/ui/*.h' '*/src/interfaces/*.h' \
           --output-file coverage_filtered.info
-        lcov --list coverage_filtered.info
-        genhtml coverage_filtered.info --output-directory coverage_html/
-        # PHASING NOTE: No hard coverage gate at Phase 0.
-        # lcov --fail-under-percent does NOT exist in lcov 2.0 (ubuntu-latest ships 2.0;
-        # the flag was added in lcov 2.1). Using it exits 1 with "Unknown option".
-        # At Phase 0 the gate would be 0% anyway. Use --summary for informational output.
-        # Phase 5 TODO: implement 80% gate via bash awk check or after confirming lcov 2.1+:
-        #   lcov --summary coverage_filtered.info | awk '/lines/ {if ($2+0 < 80) exit 1}'
-        lcov --summary coverage_filtered.info
-        # Phase 4+ only — DO NOT add this block before Phase 4.
-        # At Phase 1 and earlier, src/ui/ files are absent from the build entirely.
-        # Adding this block before Phase 4 causes the gate to exit 1 with
-        # "No src/ui/ coverage data found" on every CI run, breaking all merges.
-        # Phase 4 src/ui/ coverage gate (BLOCKING): enforce a 25% floor on src/ui/ files.
-        # lcov --list emits per-file coverage lines; grep filters to src/ui/ files only;
-        # awk extracts the rightmost percentage field; sort -n and head -1 find the minimum.
-        # If no src/ui/ files are present in the coverage data (empty grep output) the check
-        # also fails — an absent src/ui/ entry is treated as 0%, not a vacuous pass.
-        #
-        # IMPORTANT: Do NOT use Bash integer comparison ("$pct" -lt 25). Integer comparison
-        # truncates floats — 24.8% becomes 24, which incorrectly passes the gate. Use
-        # float-aware awk arithmetic instead. Also validate that $pct is numeric before
-        # comparison; lcov --list format changes (e.g. extra columns, missing separator) would
-        # otherwise silently pass the gate with an empty or non-numeric string.
-        pct=$(lcov --list coverage_filtered.info \
-            | grep -E "src/ui/" \
-            | grep -v "^Total" \
-            | awk -F'|' '{gsub(/%/,"",$NF); print $NF+0}' \
-            | sort -n | head -1)
-        # head -1 takes the minimum (worst-case) src/ui/ file — intentional gate behavior
-        # NOTE: awk -F'|' assumes lcov 2.x --list uses | as column delimiter.
-        # If format changes, $NF+0 coercion produces 0 -> gate FAILS with misleading
-        # '0% coverage' message rather than 'lcov format mismatch'.
+        lcov --list coverage_filtered.info \
+          --ignore-errors inconsistent \
+          --rc check_data_consistency=0
+        genhtml coverage_filtered.info --output-directory coverage_html/ \
+          --ignore-errors inconsistent \
+          --rc check_data_consistency=0
+
+    - name: Generate Sonar Generic Coverage XML
+      run: |
+        gcovr --sonarqube coverage.xml \
+          --gcov-executable gcov-13 \
+          --exclude 'src/rendering/.*' \
+          --exclude 'src/audio/.*' \
+          --exclude 'src/platform/.*' \
+          --exclude 'src/simulation/.*\.h' \
+          --exclude 'src/ui/.*\.h' \
+          --exclude 'src/interfaces/.*\.h'
+        # NOTE: gcovr --exclude patterns must mirror lcov --remove patterns exactly.
+        # Any new lcov --remove pattern must also be added to gcovr --exclude and vice versa.
+
+    - name: Preflight src/simulation/ coverage entries
+      run: |
+        # WARNING-ONLY: fails if no src/simulation/ SF entries are found.
+        # After Phase 6 implementation, change this step to exit 1 on missing simulation entries.
+        if ! grep -q "SF:.*src/simulation/" coverage_filtered.info; then
+          echo "WARNING: No src/simulation/ SF entries found in coverage_filtered.info — simulation coverage may be absent"
+        fi
+
+    - name: Enforce src/simulation/ 85% per-file floor (Phase 11)
+      run: |
+        # Parses coverage_filtered.info directly via SF/LH/LF records — version-agnostic.
+        # Restricted to *.cpp$ (defense-in-depth: headers already excluded by lcov --remove).
+        awk '
+          /^SF:.*src\/simulation\/.*\.cpp$/ { file=$0; lh=0; lf=0; in_sim=1; next }
+          in_sim && /^LH:/ { lh=substr($0,4)+0 }
+          in_sim && /^LF:/ { lf=substr($0,4)+0 }
+          in_sim && /^end_of_record/ {
+            if (lf>0) { pct=lh/lf*100; if (min_pct=="" || pct<min_pct+0) { min_pct=pct; min_file=file } }
+            in_sim=0
+          }
+          END {
+            if (min_pct=="") { print "ERROR: no src/simulation/ .cpp entries found"; exit 1 }
+            if (min_pct+0 < 85.0) {
+              printf "FAIL: worst src/simulation/ file coverage %.1f%% < 85%% Phase 11 per-file floor\n", min_pct+0; exit 1
+            }
+            printf "PASS: src/simulation/ per-file floor %.1f%% >= 85%%\n", min_pct+0
+          }
+        ' coverage_filtered.info
+
+    - name: Enforce 95% total line coverage gate
+      run: |
+        pct=$(lcov --summary coverage_filtered.info \
+          --ignore-errors inconsistent --rc check_data_consistency=0 2>&1 \
+          | grep 'lines' | grep -oP '[0-9]+\.[0-9]+(?=%)' | head -1)
         if [[ -z "$pct" ]]; then
-          echo "ERROR: No src/ui/ coverage data found — src/ui/ files may be absent from build or excluded from coverage_filtered.info"
-          exit 1
+          echo "ERROR: could not parse total line coverage from lcov --summary"; exit 1
         fi
-        if ! [[ "$pct" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-          echo "ERROR: src/ui/ coverage value '$pct' is not numeric — lcov --list format may have changed"
-          exit 1
-        fi
-        result=$(echo "$pct 25" | awk '{if ($1+0 < $2+0) print "FAIL"; else print "PASS"}')
+        result=$(echo "$pct 95" | awk '{if ($1+0 < $2+0) print "FAIL"; else print "PASS"}')
         if [[ "$result" == "FAIL" ]]; then
-          echo "ERROR: src/ui/ coverage below 25% (found: ${pct}%)"
-          exit 1
+          echo "ERROR: Total line coverage ${pct}% below 95% gate"; exit 1
         fi
+        echo "PASS: Total line coverage ${pct}% >= 95%"
+
+    - name: Enforce src/ui/ 25% worst-file coverage gate
+      run: |
+        # Direct SF/LH/LF parse — version-agnostic (lcov --list column format changed in 2.0).
+        if ! grep -q "SF:.*src/ui/" coverage_filtered.info; then
+          echo "ERROR: No src/ui/ coverage data found"; exit 1
+        fi
+        min_pct=$(awk '
+          /^SF:.*src\/ui\// { in_ui=1; lh=0; lf=0; next }
+          in_ui && /^LH:/ { lh=substr($0,4)+0 }
+          in_ui && /^LF:/ { lf=substr($0,4)+0 }
+          in_ui && /^end_of_record/ { if (lf>0) print (lh/lf)*100; in_ui=0 }
+        ' coverage_filtered.info | sort -n | head -1)
+        result=$(echo "$min_pct 25" | awk '{if ($1+0 < $2+0) print "FAIL"; else print "PASS"}')
+        if [[ "$result" == "FAIL" ]]; then
+          echo "ERROR: src/ui/ worst-file coverage ${min_pct}% below 25% Phase 4 gate"; exit 1
+        fi
+        echo "PASS: src/ui/ worst-file coverage ${min_pct}% >= 25%"
     ```
+
+  **Note on coverage gate step separation**: The `_coverage-linux.yml` source implements each
+  gate as a separate named YAML step (not inside a single opaque `run:` block). Separate steps
+  give individual failure messages in the GitHub Actions UI — a critical operational advantage.
+  The above YAML shows the deployed separate-step structure.
+
+  **Phase 6 note on 95% gate**: The Phase 5 80% gate described in earlier spec revisions has
+  been superseded. The deployed step is named "Enforce 95% total line coverage gate" and uses
+  `if (pct+0 < 95.0)`. Phase 6 applied the threshold increase — the gate is now at 95%.
+
+  **`coverage-linux` step ordering** (deployed, no routing checks — routing is verified by
+  the parallel `test-linux` job): Checkout → Detect GCC version → Set up ccache →
+  CMake configure → CMake build → Create test results directory →
+  Run unit tests → Run integration tests → Run OpenGL tests (xvfb) →
+  Fix git safe.directory → Publish test results (dorny) → Upload test results →
+  Generate coverage report → Generate Sonar Generic Coverage XML →
+  Preflight src/simulation/ → 85% per-file floor → 95% total gate → 25% UI gate →
+  Check src/ui/ zero-hit files (`if: always()`) →
+  Upload Sonar coverage XML → Upload coverage HTML → Upload coverage info.
 
     The lcov capture-and-gate step must run **after all three ctest steps complete** — lcov reads the `.gcda` files produced by test execution. Running lcov before all three ctest steps complete will under-report coverage for integration-tested code paths. `BUILD_DIR` is set and used within the same `run:` block as all lcov operations, keeping variable scope self-contained.
   - **Step 17a — Check src/ui/ zero-hit files** (Phase 8 deliverable): Immediately after the lcov capture-and-gate step (step 17) and before the Upload coverage artifact step (step 18), add the following step. This step MUST use `if: always()` so it runs even when the lcov gate fails:
@@ -584,10 +907,11 @@ This step runs as the **first named step** in the `build-linux` job — before v
         echo "Found $count test result file(s)."
 
     - name: Publish test results
-      uses: dorny/test-reporter@31a54ee7ebcacc03a09ea97a7e5465a47b84aea5  # v1.9.1 — pin to SHA
+      uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2  # v3.0.0 — pin to SHA
       if: always()
+      continue-on-error: true  # Linux container job — see rationale in test-reporter section above
       with:
-        name: Test Results (${{ github.job }})
+        name: 'Linux Coverage Tests'
         path: test_results/*.xml
         reporter: java-junit
         fail-on-error: false
@@ -613,24 +937,21 @@ markdown-lint:
     contents: read  # checkout only — no write access needed
   steps:
     - name: Checkout code
-      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
-
-    - name: Install markdownlint-cli
-      run: npm install -g markdownlint-cli@0.47.0
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
     - name: Run markdownlint
-      run: markdownlint 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
+      run: npx markdownlint-cli@0.47.0 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'
 ```
 
 **Key properties**:
 
-- `runs-on: ubuntu-latest` — Node.js/npm are pre-installed; no additional setup required.
+- `runs-on: ubuntu-latest` — Node.js/npm/npx are pre-installed; no additional setup required.
 - `timeout-minutes: 5` — linting is fast (seconds); a 5-minute cap prevents runaway npm installs from consuming runner minutes.
 - `permissions: contents: read` — the job only checks out and reads files; no artifact upload, no check annotations, no write access needed.
-- The `npm install -g markdownlint-cli@0.47.0` step installs `markdownlint-cli` at the pinned version. MUST pin to a specific version; current pin: `@0.47.0`.
-- The `markdownlint` command runs with the glob patterns that cover all spec and documentation files: `architecture/**/*.md`, `implementation/*.md`, and `CLAUDE.md`. The shell expands these globs on `ubuntu-latest` (bash, globstar not needed for single-level `**`). If the `implementation/` directory does not yet exist the glob silently matches nothing and the step passes — this is correct behavior for an empty phase.
+- The `npx markdownlint-cli@0.47.0` invocation pins the version inline — no prior `npm install -g` step is needed. The version pin is expressed inline in the `npx` command. `npx` is the correct invocation — the bare `markdownlint` command is NOT installed globally. Current pin: `@0.47.0`.
+- The glob patterns cover all spec and documentation files: `architecture/**/*.md`, `implementation/*.md`, and `CLAUDE.md`. The shell expands these globs on `ubuntu-latest`. If the `implementation/` directory does not yet exist the glob silently matches nothing and the step passes — this is correct behavior for an empty phase.
 - Exit code 1 on any violation — the job fails and blocks `all-checks-pass`.
-- No caching step needed — `npm install -g` for a single small package takes under 10 seconds and adds no meaningful cache key complexity.
+- No caching step needed — `npx` for a single small package takes under 10 seconds.
 - No `dorny/test-reporter` step — `markdownlint` produces plain text output, not JUnit XML. CI log output is sufficient for diagnosis.
 - No artifact upload step — no binary or report output is produced.
 
@@ -659,40 +980,37 @@ markdown-lint:
       contents: read  # checkout only — no check annotations or artifact writes needed
     steps:
       - name: Checkout
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1 — verified
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2 — verified
   ```
 
-  The next step sets up Python 3 using `actions/setup-python`. This step MUST use a fully-resolved 40-character commit SHA pinned to the desired release tag — it must never appear in a committed `ci.yml` as a tag reference or a short SHA. To obtain the correct SHA at implementation time, run:
+  The next step sets up Python 3 using `actions/setup-python`. The resolved SHA is
+  `a309ff8b426b58ec0e2a45f0f869d46889d02405` (v6.2.0). All Python pip dependencies must be
+  pinned to exact versions for reproducibility.
 
-  ```sh
-  gh release view --repo actions/setup-python --json tagName,targetCommitish
-  ```
-
-  This prints the tag name and the full 40-character commit SHA for the latest release. Record the SHA, verify it matches the tag on the `actions/setup-python` releases page, and substitute it directly into the `uses:` line. The resulting step looks like the following, where `<40-CHAR-SHA>` is replaced with the real value resolved above:
-
-  **`python-version` MUST be set to a specific minor version (e.g., `'3.12'`) — NOT a floating major version (`'3'`).** Floating major versions break supply-chain reproducibility because `python-version: '3'` resolves to different patch versions on different runner instances — GitHub-hosted runners update their pre-installed Python over time, meaning the same workflow YAML can silently execute against `3.12.x` today and `3.13.x` next month. A floating `'3'` also interacts poorly with `actions/setup-python`'s resolution logic, which may select a different minor version depending on what is cached in the runner image at the time of execution. The pinned version MUST be documented in the YAML alongside the SHA-pinned `actions/setup-python` action reference. At Phase 1 implementation, use `python-version: '3.12'` (the current Python 3 LTS minor version).
+  **`python-version` MUST be set to a specific minor version (e.g., `'3.12'`) — NOT a floating major version (`'3'`).** Floating major versions break supply-chain reproducibility because `python-version: '3'` resolves to different patch versions on different runner instances — GitHub-hosted runners update their pre-installed Python over time, meaning the same workflow YAML can silently execute against `3.12.x` today and `3.13.x` next month.
 
   ```yaml
       - name: Set up Python 3
-        uses: actions/setup-python@<40-CHAR-SHA>  # replace with full SHA resolved via gh release view
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: '3.12'  # pin to specific minor version — never use '3' (floating major breaks reproducibility)
   ```
 
-  **CRITICAL**: The token `@<40-CHAR-SHA>` above is illustrative prose — it is NOT a valid `uses:` value and MUST NEVER appear verbatim in a committed `ci.yml`. The supply-chain lint step in `build-linux` will match any `<...>` angle-bracket token and immediately fail the job, catching this mistake at CI time. Resolve the SHA live before committing.
-
-  **Phase 5 Python dependencies**: the `validate-assets` job must install `mutagen` before
-  running `validate_assets.py`. Add a pip install step immediately after the Python setup step:
+  **Phase 5 Python dependencies**: the `validate-assets` job must install pinned Python packages
+  and `ffmpeg` before running `validate_assets.py`. Add a pip install step immediately after the
+  Python setup step:
 
   ```yaml
       - name: Install Python dependencies
-        run: pip install mutagen
+        run: |
+          pip install "mutagen==1.47.0" "Pillow==10.4.0"
+          sudo apt-get install -y --no-install-recommends ffmpeg
   ```
 
-  `mutagen` is required by checks #16–#19 for OGG/WAV duration and format inspection. The
-  package is available on PyPI and installs in under 5 seconds. Do NOT pin `mutagen` to a
-  specific version — use `pip install mutagen` without version pinning to always use the
-  latest compatible release.
+  `mutagen==1.47.0` is required by checks #16–#19 for OGG/WAV duration and format inspection.
+  `Pillow==10.4.0` is required by image-dimension and atlas checks. `ffmpeg` (via apt-get) is
+  required for check_21 OGG decode. Pin all Python dependencies to exact versions for
+  reproducibility — do NOT use `pip install mutagen` without a version pin.
 
   **Phase 11i deliverable — Shader asset verification** (source-tree check consolidated here from `build-linux`/`coverage-linux`; added to this job as part of Phase 11i implementation, not before): After the Python dependencies step and before `Run asset validation`, add a step that confirms both `IrrlichtUIBackend` raw-GL draw path shader files are present in the source tree. This is a pure source-tree file check — it requires no build artifacts, no C++ toolchain, and no OS-specific environment. **General rule: any CI step that checks source-tree file existence, file format, or file content and requires no compiled binary must be placed in `validate-assets`, not in `build-linux`, `build-windows`, or `coverage-linux`.** This rule prevents future duplication.
 
@@ -963,6 +1281,37 @@ all-checks-pass:
         echo "All required jobs succeeded."
 ```
 
+## `prepare` Job
+
+The `prepare` job is a lightweight (~2 s) job that exports `VCPKG_COMMIT_ID` as a job output so
+reusable-workflow `with:` blocks can reference it via the `needs` context. The `env` context is
+unavailable in `jobs.<id>.with` blocks for reusable workflows — values must be passed explicitly
+via job outputs.
+
+- **Runner**: `ubuntu-latest`
+- **Timeout**: `timeout-minutes: 2`
+- **Permissions**: `contents: none`
+- **Runs on all triggers** including `workflow_dispatch`
+
+Pattern:
+
+```yaml
+prepare:
+  runs-on: ubuntu-latest
+  timeout-minutes: 2
+  permissions:
+    contents: none
+  outputs:
+    vcpkg_commit_id: ${{ steps.export.outputs.vcpkg_commit_id }}
+  steps:
+    - name: Export vcpkg_commit_id
+      id: export
+      run: echo "vcpkg_commit_id=${{ env.VCPKG_COMMIT_ID }}" >> $GITHUB_OUTPUT
+```
+
+Downstream jobs consume this via `${{ needs.prepare.outputs.vcpkg_commit_id }}` in `with:` blocks.
+Including `prepare` in `all-checks-pass` ensures the export step itself is healthy.
+
 ## Versioning
 
 Version is computed from git tags only — no source file is modified by the pipeline.
@@ -989,16 +1338,24 @@ branch logic avoids this entirely.
 #### On `main`
 
 1. Checkout with `fetch-depth: 0` (full history required for `git describe`)
-2. Read latest `v[0-9]*` tag via `git describe --tags --abbrev=0`; increment patch;
-   default fallback `v0.0.1` when no tags exist → outputs e.g. `0.0.2`
+2. Read latest `v[0-9]*` tag via `git describe --tags --abbrev=0`; increment patch. Default
+   fallback env vars: `DEFAULT_MAIN: v0.0.21` and `DEFAULT_DEVELOP: v0.0.0` are declared as
+   named env vars (not magic literals) — update these values whenever the pipeline is reset after
+   a history rewrite.
+3. **Floor comparison (main only)**: if `DEFAULT_MAIN` is higher than what `git describe` found
+   (e.g., after a deliberate history rewrite that removed old tags), `CURRENT` is replaced with
+   `DEFAULT_MAIN`. This prevents version regression and is the key mechanism that ensures CI does
+   not fail after a tag history rewrite.
+   → outputs e.g. `0.0.22`
 
-No tag is created here. Tag creation happens in the `release` job (main only).
+No tag is created here. Tag creation happens in the `release` job (main only) via
+`gh release create --target`.
 
 #### On `develop`
 
 1. Checkout with `fetch-depth: 0`
-2. Read latest `v[0-9]*` tag and append `-develop` suffix; default fallback `v0.0.0`
-   → outputs e.g. `0.1.1-develop`
+2. Read latest `v[0-9]*` tag and append `-develop` suffix; default fallback `DEFAULT_DEVELOP: v0.0.0`
+   (not `v0.0.1`). No floor comparison on develop. → outputs e.g. `0.1.1-develop`
 
 No tag is created; no files are modified. The base is always the latest released tag
 shared across `main` and `develop`.
@@ -1216,40 +1573,291 @@ Creates a GitHub release with attached installer and `.deb` packages. **Only run
 4. Download Linux .deb (trixie): `aitown-deb-debian-trixie-${{ github.sha }}` → `./release-assets/`
 5. Download Linux .deb (jammy): `aitown-deb-ubuntu-jammy-${{ github.sha }}` → `./release-assets/`
 6. Download Linux .deb (noble): `aitown-deb-ubuntu-noble-${{ github.sha }}` → `./release-assets/`
-7. Generate changelog from `git log <prev-tag>..HEAD` grouped by conventional-commit prefix
-   (`feat`/`fix`/`ci`/`test`/`docs`/`chore`); written to `/tmp/changelog.md`; falls back to
-   `"Initial release."` when no prior tag exists
-8. Create version tag via REST API (idempotent — checks if tag already exists before
-   creating; `gh api repos/${GITHUB_REPOSITORY}/git/refs`). Tag creation via `git push`
-   and via `softprops/action-gh-release` both fail with GH013 pre-receive hook violations
-   on this repository; direct REST API calls bypass the hook
-9. Create GitHub release via `softprops/action-gh-release` (SHA-pinned):
+7. Generate changelog: an `extract()` shell function calls
+   `git log "$RANGE" --pretty=format:"%s"` with conventional-commit prefix filtering (`feat`,
+   `fix`, `ci`, `docs`, `test`, `chore`) to group commits into Markdown sections (Features,
+   Bug Fixes, CI/CD, Tests, Documentation, Chores). Results are written to `/tmp/changelog.md`.
+   Falls back to `"Initial release."` when no prior tag exists (`PREV_TAG` empty). The step
+   outputs `prev_tag` to `$GITHUB_OUTPUT`.
+8. Create GitHub release using the GitHub CLI `gh release create` in a 10-iteration idempotent
+   retry loop. On each iteration: look up the existing release by tag; delete it and its orphan
+   tag if found; then call:
 
-   ```yaml
-   - name: Create GitHub release
-     uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564  # v2.1.0
-     with:
-       tag_name: v${{ needs.compute-version.outputs.version }}
-       name: "AI Town v${{ needs.compute-version.outputs.version }}"
-       body_path: /tmp/changelog.md
-       fail_on_unmatched_files: true
-       files: release-assets/**
+   ```bash
+   gh release create "${TAG}" \
+     --title "AI Town ${TAG}" \
+     --notes-file /tmp/changelog.md \
+     --target "${{ github.sha }}" \
+     release-assets/**
    ```
 
-   `fail_on_unmatched_files: true` fails the job rather than silently publishing an
-   incomplete release when a package artifact is missing.
+   The `--target "${{ github.sha }}"` flag pins the release to the exact commit, preventing a
+   tag/commit mismatch if the tag was pre-created. The `release-assets/**` glob covers all
+   downloaded package artifacts (Windows installer + four `.deb` files) whose filenames contain
+   the computed version string and cannot be hard-coded at authoring time — this is one of the
+   three approved wildcard exceptions to the anti-wildcard artifact rule (see artifact upload
+   section). When an immutable-release conflict is detected (error message contains
+   `tag_name was used by an immutable release`), the loop increments the patch version component
+   and retries with the new tag.
+
+   `softprops/action-gh-release` is NOT used. Both `git push` tag creation and
+   `softprops/action-gh-release` fail with GH013 pre-receive hook violations on this repository;
+   the `gh release create` CLI call creates the git tag and GitHub Release atomically in a single
+   API call and bypasses the pre-receive hook.
+
+   **`compute-version` does NOT create or push a git tag.** The job produces only a version
+   string output (`$GITHUB_OUTPUT`). Tag creation is deferred to the `release` job via
+   `gh release create --target` (atomic tag + GitHub Release). Develop pushes produce a
+   `-develop`-suffixed version with no corresponding tag at all.
 
 ### Tag-creation design notes
 
 - Tag is NOT created in `compute-version` — `compute-version` runs on both `main` and
   `develop`, but a release tag should only be created on `main`. Creating the tag in
   `release` (main only) keeps the responsibility co-located with the release step.
-- Idempotent: the step checks `gh api repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}`
-  before calling the create endpoint; re-running the job (e.g. after a transient failure)
-  does not create a duplicate tag.
+- Idempotent retry loop: up to 10 iterations; deletes the existing release and tag before
+  recreating to handle transient failures without leaving orphaned releases.
 
 ### Gate status
 
 `compute-version`, `package-windows`, `package-linux-deb`, and `release` are NOT in
 `all-checks-pass` `needs:`. Failures in these jobs must not block PR merges — investigate
 before the next merge to `main`.
+
+---
+
+## `docker-ci-image.yml` — CI Image Build Workflow
+
+Manages the `ghcr.io/m0wa/aitown-ci-linux` container image lifecycle.
+
+**Triggers**:
+
+- Push to `main`/`develop` touching `docker/ci-linux/Dockerfile`, `vcpkg.json`, or `vcpkg-overlays/**`
+- `workflow_dispatch` with `force_rebuild` boolean input (manual rebuild without a code change)
+- Monthly schedule: `cron: '0 2 1 * *'` (1st of month, 02:00 UTC)
+
+**Permissions**: `packages: write`, `contents: read`
+
+**Timeout**: `timeout-minutes: 120` — a cold vcpkg build in Docker takes 30+ minutes on cache
+miss; 120 min provides sufficient headroom.
+
+**Key steps**:
+
+1. Checkout
+2. Extract `VCPKG_COMMIT_ID` from `ci.yml` env block and write to `$GITHUB_ENV` (separate step
+   — `$GITHUB_ENV` writes are NOT visible within the same step)
+3. Validate that `ARG VCPKG_COMMIT` exists in `docker/ci-linux/Dockerfile` WITHOUT a default
+   value (the ARG must be explicit so the digest is always specified at build time)
+4. Run an inline supply-chain lint (validates SHAs in ci.yml before building the image)
+5. Compute `VCPKG_SHORT_SHA` (first 7 chars of `VCPKG_COMMIT_ID`) and write to `$GITHUB_ENV`
+   (must be a SEPARATE step — demonstrates the `$GITHUB_ENV` step-ordering visibility rule)
+6. `docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121` (v4.1.0) — GHCR login
+7. `docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd` (v4.0.0) — BuildKit
+8. `docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294` (v7.0.0) — build and
+   push with tag `vcpkg-${VCPKG_SHORT_SHA}` and GHA layer cache:
+   `cache-from: type=gha`, `cache-to: type=gha,mode=max`
+   (`mode=max` caches ALL intermediate layers — required because the expensive vcpkg compilation
+   layer is deep in the image; `mode=min` would miss it, producing cold-cache build times on every run)
+9. Print image digest and update instructions — the `steps.docker_build.outputs.digest` value
+   (sha256) must be pinned in: (1) `.github/workflows/_build-linux.yml`, (2) `_test-linux.yml`,
+   (3) `_coverage-linux.yml`, and (4) `.devcontainer/Dockerfile`. The digest output is the
+   authoritative source for the pin values.
+
+**Image tag format**: `ghcr.io/m0wa/aitown-ci-linux:vcpkg-${VCPKG_SHORT_SHA}`
+
+**Known issue — stale echo in "Print image digest" step**: the step currently references
+`test-container-xvfb` job (which no longer exists). The correct jobs to update after an image
+rebuild are: `_build-linux.yml`, `_test-linux.yml`, `_coverage-linux.yml`, and
+`.devcontainer/Dockerfile`.
+
+---
+
+## `sonarcloud.yml` — SonarCloud Analysis Workflow
+
+Performs static analysis with coverage data for SonarCloud.
+
+**Triggers**:
+
+- `workflow_run` on CI completion — `if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}`. The `Analysis` job is entirely SKIPPED when the triggering CI run failed (no coverage XML artifact exists). `workflow_dispatch` bypasses this filter.
+- `workflow_dispatch` with two required inputs: `ci_run_id` (CI run ID to pull artifacts from)
+  and `head_sha` (HEAD SHA of that CI run — used to construct artifact names)
+
+**Security**: `workflow_run` executes with base-branch secrets. NEVER check out the PR HEAD
+(untrusted contributor code). Check out base branch only; coverage data comes from the
+already-vetted CI artifact. Adding a PR HEAD checkout to this workflow is a security vulnerability
+that would expose `SONAR_TOKEN` to contributor code.
+
+**Permissions**: `pull-requests: read`
+
+**Top-level env vars**:
+
+- `SONAR_SCANNER_VERSION: 7.0.2.4839`
+- `SONAR_SCANNER_BINARIES_URL: https://binaries.sonarsource.com/Distribution/sonar-scanner-cli`
+
+**Key steps**:
+
+1. Checkout base branch
+2. Download `coverage-sonar-linux-<sha>` artifact (Sonar Generic Coverage XML from `_coverage-linux.yml`)
+3. Download `compile-commands-linux-<sha>` artifact (normalized `compile_commands.json` from `_build-linux.yml`)
+4. "Debug compile_commands.json paths" — permanent inline Python diagnostic step (NOT
+   debug-mode-only) that prints `GITHUB_WORKSPACE`, first entry's fields, and missing-file count
+5. Cache SonarScanner CLI at `${{ runner.temp }}/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-Linux-X64`
+6. Install SonarScanner CLI on cache miss: downloads from `${SONAR_SCANNER_BINARIES_URL}/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux-x64.zip` (lowercase `linux-x64`), then `mv` to capitalize → `Linux-X64`. The rename is required so the path matches the `actions/cache` key — a mismatch silently breaks cache hits.
+7. Inline Python remap of `/__w/<owner>/<repo>` container paths to `${{ github.workspace }}` in the downloaded `compile_commands.json`
+8. Run SonarScanner with:
+   - `sonar.sources=src,.github/workflows,docker,.devcontainer`
+   - `sonar.tests=tests`
+   - `sonar.exclusions="assets/**,build/**,tools/**"`
+   - `sonar.cpd.exclusions="tests/**"`
+   - `sonar.cfamily.compile-commands=compile_commands.json`
+
+**Two-stage path normalization**: (1) `normalize_compile_commands.py` called from `_build-linux.yml`
+strips container-internal path prefixes during build; (2) `sonarcloud.yml` applies a second
+`/__w/` → `${{ github.workspace }}` inline Python remap on the downloaded artifact. Both stages
+must be updated if the container workspace path changes.
+
+---
+
+## `sonarcloud-debug.yml` — SonarCloud Diagnostic Workflow
+
+`workflow_dispatch`-only diagnostic workflow. Same two inputs as `sonarcloud.yml`
+(`ci_run_id`, `head_sha`). Downloads only `compile-commands-linux-<sha>` (no coverage XML),
+prints path counts before/after the `/__w/` → `$GITHUB_WORKSPACE` remap (identical Python
+logic to `sonarcloud.yml`), reports missing-file counts. Does NOT run SonarScanner and requires
+no `SONAR_TOKEN`.
+
+**Permissions**: `pull-requests: read`
+
+**No `timeout-minutes`** — gap: recommend adding 10 minutes.
+
+**Uses**: `actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd` (v6.0.2) and
+`actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131` (v7.0.0).
+
+**Intended use**: triggered manually when `sonarcloud.yml` fails path resolution to diagnose
+whether the container-path remap is producing valid workspace-relative paths.
+
+---
+
+## `flawfinder.yml` — Security Analysis Workflow
+
+Static security analysis via `david-a-wheeler/flawfinder`. Uploads SARIF to the GitHub
+Security tab. Runs independently of the main CI pipeline (NOT in `all-checks-pass`).
+
+**Triggers**: push/PR to `main` ONLY (not `develop` — scans only release-track code).
+Weekly schedule: `cron: '26 9 * * 6'` (Saturdays, 09:26 UTC).
+
+**Job-level permissions**: `security-events: write` (required for SARIF Security tab upload),
+`contents: read`, `actions: read`.
+
+**No `timeout-minutes`** — gap: recommend adding a value (e.g., 15 minutes).
+
+**SHA-pinned actions**:
+
+- `david-a-wheeler/flawfinder@8e4a779ad59dbfaee5da586aa9210853b701959c` — arguments: `'--sarif ./'` (scans entire repo root recursively)
+- `github/codeql-action/upload-sarif@5c8a8a642e79153f5d047b10ec1cba1d1cc65699` (v3.35.1)
+
+---
+
+## `msvc.yml` — MSVC Static Analysis Workflow
+
+Full MSVC code analysis workflow using `microsoft/msvc-code-analysis-action`. Uploads SARIF
+to the GitHub Security tab. Runs independently of the main CI pipeline (NOT in `all-checks-pass`).
+
+**Triggers**: push/PR to `main` and weekly schedule: `cron: "33 13 * * 0"` (Sundays 13:33 UTC).
+The two security-analysis workflows run on different days to stagger runner usage.
+
+**Independent `VCPKG_COMMIT_ID`**: `msvc.yml` declares `VCPKG_COMMIT_ID` in its own `env:` block
+(top-level workflow, not a reusable workflow). This is the correct pattern — top-level workflows
+use `${{ env.VCPKG_COMMIT_ID }}` directly. **MAINTENANCE RISK**: `msvc.yml`'s `VCPKG_COMMIT_ID`
+does NOT inherit from `prepare` and must be updated MANUALLY on every vcpkg baseline bump. This
+is an additional item in the vcpkg baseline atomicity checklist (see `dependency-management.md`).
+
+**SHA-pinned actions**:
+
+- `microsoft/msvc-code-analysis-action@04825f6d9e00f87422d6bf04e1a38b1f3ed60d99`
+- `github/codeql-action/upload-sarif@0e9f55954318745b37b7933c693bc093f7336125` (v4.35.1)
+- `actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f` (v7.0.0) — "Upload SARIF as
+  an Artifact" step: artifact name `sarif-file`, no explicit `retention-days` (gap: recommend
+  7–14 days for a debug artifact).
+
+**Version inconsistency**: `flawfinder.yml` uses `codeql-action/upload-sarif` v3.35.1
+(`5c8a8a64...`) while `msvc.yml` uses v4.35.1 (`0e9f5595...`). Recommend standardising on v4
+(v4.35.1) in a future maintenance pass.
+
+**SARIF multi-run filter**: `msvc.yml` filters SARIF output to a single run (required by
+`codeql-action/upload-sarif` which rejects multi-run SARIF).
+
+**Job-level permissions**: `security-events: write`, `actions: read`, `contents: read`.
+
+---
+
+## `_package-linux-deb.yml` — Linux DEB Packaging Workflow
+
+Produces `.deb` packages for four Debian/Ubuntu distros. The matrix strategy is defined INSIDE
+the reusable workflow (not in the `ci.yml` caller).
+
+**Checkout placement**: this is the ONLY workflow where checkout is NOT the first step. Bare
+Debian/Ubuntu containers do not have `git` pre-installed. The `apt-get install` step (which
+installs `git`) must run BEFORE `actions/checkout`. The checkout step also uses the bare `uses:`
+form (no `name:` field) — recommend adding `name: Checkout code` for consistency.
+
+**vcpkg bootstrap from source**: CDN prebuilt binaries return 404 in bare containers (`bootstrap-vcpkg.sh`
+calls `exit 1` on curl failure). The `vcpkg-tool` CMake project is built from source. The tool
+version is determined from `scripts/vcpkg-tool-metadata.txt` (self-consistent — always matches
+the fetched vcpkg commit). Uses `if [ ! -d /opt/vcpkg/.git ]` pattern before `git init && git fetch
+--depth=1 origin $VCPKG_COMMIT_ID && git checkout FETCH_HEAD` — handles `actions/cache` restoring
+`/opt/vcpkg/packages/` before the setup step pre-creates the parent directory (causing plain
+`git clone` to fail on a non-empty directory).
+
+**vcpkg cache**: `actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830` (v4.3.0) —
+path: `/opt/vcpkg/packages`, key includes `${{ matrix.codename }}` for distro-level ABI isolation.
+
+**Step sequence** (after apt-get):
+
+1. (apt-get install — git + build deps)
+2. Checkout
+3. Cache vcpkg packages
+4. vcpkg bootstrap from source + install (`--overlay-ports=vcpkg-overlays` for openal-soft 1.23.1 pin)
+5. CMake configure (for CPack metadata only — no build step); uses `ci-linux` preset
+6. Download `aitown-staging-linux-${{ github.sha }}` into `build/`
+7. Set executable bit: `chmod +x build/aitown` (required — `actions/upload-artifact` strips permissions)
+8. CPack DEB: `cpack -G DEB`
+9. Upload `.deb` artifacts (four per matrix leg, `retention-days: 30`)
+
+**Artifacts**: `aitown-deb-debian-bookworm-${{ github.sha }}`, `aitown-deb-debian-trixie-${{ github.sha }}`, `aitown-deb-ubuntu-jammy-${{ github.sha }}`, `aitown-deb-ubuntu-noble-${{ github.sha }}`
+
+**`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`**: NOT set in this workflow — known inconsistency with
+`_build-windows.yml`. Recommend adding in a maintenance pass.
+
+---
+
+## `_package-windows.yml` — Windows NSIS Packaging Workflow
+
+Produces an NSIS `.exe` installer via CPack.
+
+**Configure-only CMake**: runs `cmake --preset ci-windows -DAITOWN_ASSETS_DIR=assets -DBUILD_TESTING=OFF`
+for metadata only — does NOT build binaries. Purpose: produce `CMakeCache.txt` so CPack can
+locate install rules and NSIS script templates.
+
+**PATH append**: uses `Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append` (NOT bare `>>`
+which writes UTF-16 LE with BOM in PowerShell 5.1, corrupting `$GITHUB_PATH`).
+
+**Step sequence**:
+
+1. Checkout
+2. `choco install nsis --no-progress -y` (only workflow using Chocolatey)
+3. `ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c` — vcvarsall
+4. `lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1` — restore vcpkg
+5. Resolve package version
+6. CMake configure (metadata only)
+7. Append vcpkg bin to `GITHUB_PATH` via `Out-File -Encoding utf8 -Append`
+8. Download `aitown-staging-windows-${{ github.sha }}` into `build/`
+9. "Verify aitown.exe in staging artifact" (`Test-Path "build\aitown.exe"` hard-fail)
+10. `cpack -G NSIS -C Release`
+11. Upload installer: `name: aitown-installer-windows-${{ github.sha }}`, `path: build/aitown-*.exe`, `retention-days: 30`
+
+**`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`**: NOT set — oversight (contrast with `_build-windows.yml`).
+Recommend adding in a maintenance pass.
+
+**No `actions/cache` step for vcpkg** — relies on `lukka/run-vcpkg` internal caching only.
+Cold-cache packaging runs may approach the 60-minute timeout ceiling.

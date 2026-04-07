@@ -43,8 +43,8 @@ Branch protection rules that reference `all-checks-pass` by name do not automati
 
 **Phase 1 — `validate-assets` addition**: When Phase 1 introduces the `validate-assets` job (as a stub running `tools/validate_assets.py` that always exits 0) and it is added to the `all-checks-pass` `needs:` list, branch protection rules for both `main` and `develop` must be re-confirmed. The `all-checks-pass` check name remains the same, so the UI rule does not need to be re-added, but the following must be verified:
 
-1. The `validate-assets` job has run at least once on a PR targeting each protected branch (so the check name is known to GitHub).
-2. `all-checks-pass` now reflects five upstream jobs (`build-linux`, `build-windows`, `coverage-linux`, `markdown-lint`, `validate-assets`) — confirm the branch protection rule still shows `all-checks-pass` as the required check and that it is not stale or misconfigured.
+1. The `validate-assets` job, the `prepare` job, and the `supply-chain-lint` job have all run at least once on a PR targeting each protected branch (so their check names are known to GitHub). All three are upstream of `all-checks-pass` and must appear in GitHub's branch protection UI autocomplete before they can be confirmed.
+2. `all-checks-pass` now reflects seven upstream jobs (`prepare`, `supply-chain-lint`, `validate-assets`, `build-linux`, `build-windows`, `coverage-linux`, `markdown-lint`) — confirm the branch protection rule still shows `all-checks-pass` as the required check and that it is not stale or misconfigured.
 3. If using a merge queue, re-confirm the merge queue required-checks list also still contains `all-checks-pass`.
 
 Note: The `validate-assets` job definition and `all-checks-pass` wiring introduced in Phase 1 remain unchanged in Phase 5 (when the stub script gains 18 real checks: Checks #1–#14 and Checks #16–#19, plus Check #15 as a stub) and Phase 9 (when Check #15 is fully implemented and Check #20 is added). Only the script content changes across those later phases — the CI wiring is stable from Phase 1 onward.

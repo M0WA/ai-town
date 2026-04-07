@@ -35,64 +35,58 @@
 
   ```yaml
   - name: Validate vcpkg baseline consistency
-    shell: bash  # Required for Bash syntax on Windows runners (available via Git Bash)
+    shell: bash
+    env:
+      EXPECTED_BASELINE: ${{ inputs.vcpkg_commit_id }}
     run: |
       MANIFEST_BASELINE=$(jq -r '."builtin-baseline"' vcpkg.json)
-      if [[ "$MANIFEST_BASELINE" != "${{ env.VCPKG_COMMIT_ID }}" ]]; then
-        echo "ERROR: vcpkg.json builtin-baseline does not match VCPKG_COMMIT_ID"
+      if [[ "$MANIFEST_BASELINE" != "$EXPECTED_BASELINE" ]]; then
+        echo "ERROR: vcpkg.json builtin-baseline does not match vcpkg_commit_id input"
         exit 1
       fi
-      # Note: jq is pre-installed on ubuntu-latest and windows-latest GitHub Actions runners
-      # as of mid-2024 runner images. If jq availability is uncertain, add an install step.
   ```
+
+  **Location**: This step resides in `_validate-assets.yml` (not in the build jobs). It receives the `vcpkg_commit_id` value via the `inputs.` context (populated by the `prepare` job output and passed through `ci.yml`'s `with:` block) — the `env.VCPKG_COMMIT_ID` form is unavailable in reusable workflow `with:` contexts.
 
 ## Linux System Package Requirements
 
-The following apt-get packages must be installed on BOTH `build-linux` AND `coverage-linux` before CMake configuration runs. These packages provide the OpenGL development headers and virtual display support required by Irrlicht, GLEW, and xvfb-based OpenGL testing.
+Linux CI jobs (`_build-linux.yml`, `_test-linux.yml`, `_coverage-linux.yml`) run in a pre-baked GHCR container image: `ghcr.io/m0wa/aitown-ci-linux:vcpkg-<short-sha>@sha256:<digest>`. All system packages are installed into this image at image-build time via `docker/ci-linux/Dockerfile`. CI jobs use `container: image:` to pull this image — **no runtime `apt-get install` step is needed or present in any Linux CI job**.
 
-**Required packages (both `build-linux` and `coverage-linux`)**:
+The `docker-ci-image.yml` workflow manages building and pushing the container image (see `## docker-ci-image.yml` section in `github-actions-workflow.md`).
+
+**Required packages (must remain in `docker/ci-linux/Dockerfile`)**:
 
 - `xvfb` — X Virtual Frame Buffer; required to run `requires-opengl` tests on headless CI runners via `xvfb-run`
 - `libgl1-mesa-dev` — Mesa OpenGL development headers and stub libraries; required for CMake to find OpenGL during configuration and for linking against the Mesa software renderer
 - `mesa-utils` — Mesa GL utilities (`glxinfo`, `glxgears`); used to verify the xvfb display is operational in diagnostics
 - `libglew-dev` — GLEW development headers; required by the sRGB raw GL upload path (`glCompressedTexImage2D` and related calls); **also installed via vcpkg** (`glew` port), but the system package is needed for CMake's `find_package(GLEW)` fallback and for headers available during configuration before vcpkg runs
 - `libxxf86vm-dev` — required by Irrlicht (`-lXxf86vm`); omitting this causes a linker error during Irrlicht build
+- `lcov` — required by the `coverage-linux` job for the `lcov --capture`, `lcov --remove`, `lcov --list`, and `genhtml` commands that generate and filter the coverage report
 
-**Additional required package (`coverage-linux` ONLY)**:
+**This package list is a Dockerfile requirement, not a CI-job-step requirement.** Whenever a new system package is needed by a CI job, it must be added to `docker/ci-linux/Dockerfile` and the image must be rebuilt via `docker-ci-image.yml`. The CI jobs read from the pre-baked image — they do not install packages at runtime.
 
-- `lcov` — required by the `coverage-linux` job for the `lcov --capture`, `lcov --remove`, `lcov --list`, `lcov --summary`, and `genhtml` commands that generate and filter the coverage report. This package is NOT required by `build-linux` — that job uses `-DENABLE_COVERAGE=OFF` and never invokes lcov.
-
-**THIS LIST MUST BE KEPT IN SYNC BETWEEN `build-linux` AND `coverage-linux` — they are fully independent jobs and each must install all required packages before CMake configuration. `coverage-linux` installs the base set PLUS `lcov`.**
-
-Install step for `build-linux` (place before the CMake configure step):
-
-```yaml
-- name: Install system dependencies
-  run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libglew-dev libxxf86vm-dev
-```
-
-Install step for `coverage-linux` (place before the CMake configure step — includes `lcov`):
-
-```yaml
-- name: Install system dependencies
-  run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dev mesa-utils libglew-dev libxxf86vm-dev lcov
-```
-
-**Why both jobs need the base list**: `build-linux` and `coverage-linux` run on independent `ubuntu-latest` runner instances. There is no shared pre-install state between them. A package installed in one job's runner has no effect on the other. Omitting any package from either job causes a CMake configuration failure or a runtime failure during the `xvfb-run` test step in that job specifically.
-
-**Why `lcov` is `coverage-linux`-only**: `build-linux` configures with `-DENABLE_COVERAGE=OFF` and never produces `.gcda` instrumentation data. Installing `lcov` in `build-linux` would be dead weight with no functional effect. `coverage-linux` configures with `-DENABLE_COVERAGE=ON`, runs all three ctest categories, and then invokes `lcov --capture` to collect `.gcda` output — without `lcov` installed, the capture step exits with "command not found" and the entire coverage job fails.
+Additionally, the Linux jobs set `VCPKG_MANIFEST_INSTALL=OFF` and pass `-DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed` to CMake. The vcpkg packages (Irrlicht, OpenAL Soft, GLEW, etc.) are also pre-installed in the container image at `/opt/vcpkg_installed`, consistent with the same vcpkg commit pinned in `ci.yml`.
 
 ## Baseline Staleness Risk
 
 **Old vcpkg baselines break Windows CI via MSYS2 mirror 404s.** Confirmed failure mode (encountered in Phase 0): the `zlib` portfile at baseline `f7423ee` called `vcpkg_fixup_pkgconfig`, which attempted to download `msys2-runtime-3.5.3-3` from MSYS2 mirrors to obtain `pkgconf`. All six MSYS2 mirrors returned HTTP 404 — the package had been superseded and removed. The build failed with `error: Failed to download file with error: 1`.
 
-**Rule**: If Windows CI fails with vcpkg download errors referencing MSYS2 packages, the baseline is too old. Update `builtin-baseline` in `vcpkg.json` AND `VCPKG_COMMIT_ID` in `ci.yml` to the current vcpkg HEAD (or a recent commit). Always verify that the `irrlicht` port still exists at the new baseline before committing:
+**Rule**: If Windows CI fails with vcpkg download errors referencing MSYS2 packages, the baseline is too old. Update `builtin-baseline` in `vcpkg.json` AND `VCPKG_COMMIT_ID` in BOTH `ci.yml` AND `msvc.yml` to the current vcpkg HEAD (or a recent commit). Always verify that the `irrlicht` port still exists at the new baseline before committing:
 
 ```bash
 curl -s https://api.github.com/repos/microsoft/vcpkg/contents/ports/irrlicht?ref=<NEW_SHA>
 ```
 
 A 200 response confirms the port exists. A 404 means the port was removed — try a slightly older commit.
+
+**`msvc.yml` baseline atomicity**: `msvc.yml` declares its own independent `VCPKG_COMMIT_ID` env var — it does NOT inherit the value from the `prepare` job or `ci.yml`. A vcpkg baseline bump in `ci.yml` does NOT automatically update `msvc.yml`. Failing to update `msvc.yml` in the same PR as `ci.yml` causes MSVC static analysis to run against a different vcpkg tree than the main CI build, producing inconsistent results. The complete baseline atomicity checklist (from `CLAUDE.md`) is:
+
+1. `vcpkg.json` — `builtin-baseline` updated
+2. `ci.yml` — `VCPKG_COMMIT_ID` env var updated to the same commit
+3. `msvc.yml` — `VCPKG_COMMIT_ID` env var updated to the same commit
+4. `docker/ci-linux/Dockerfile` — `ARG VCPKG_COMMIT` build-arg updated to the same value
+5. `.devcontainer/Dockerfile` — `FROM` line updated with new image tag and sha256 digest
+6. `ci.yml` AND `.devcontainer/Dockerfile` — image digest pin updated to the `sha256:` output of the `docker-ci-image.yml` push step
 
 ### CMake Dependencies
 
@@ -150,14 +144,16 @@ Add the following step immediately after `cmake --build build` in the `build-lin
 **PHASING**: At Phase 0, `default.mhr` is not yet copied to the binary output directory — the CMake post-build copy rule is a Phase 7 deliverable. At Phase 0, this step must be a **warning-only no-op** (see `implementation/phase-0.md` for the exact placeholder text: `step may be a documented no-op at Phase 0 with a TODO comment referencing Phase 7 where the full HRTF check is wired`). Implement the warning-only form at Phase 0 (e.g., log a message and exit 0 regardless). The hard-fail form below is the **Phase 7+ version** — replace the placeholder with this hard-fail step at Phase 7 delivery. This is the same pattern as the Windows DLL verification step (see the phasing note at the DLL verification block above).
 
 ```yaml
-- name: Verify default.mhr is present (Linux)
+- name: Verify default.mhr HRTF data
   shell: bash
   run: |
-    if ! find "${{ github.workspace }}" -name "default.mhr" | grep -q .; then
+    if ! test -f build/default.mhr; then
       echo "ERROR: default.mhr not found — HRTF initialization will fail at runtime"
       exit 1
     fi
 ```
+
+Relative paths (`build/default.mhr`) are preferred over `${{ github.workspace }}` in container jobs — the GitHub expression resolves to the host path (`/__w/repo/repo`) which may differ from the container working directory, causing a `find` across the entire workspace to silently find nothing even when the file exists at the expected relative path.
 
 A CMake install rule may also be needed to copy `default.mhr` from the vcpkg install tree into the binary directory on Linux builds, so that runtime lookups by the OpenAL Soft HRTF loader succeed relative to the executable path. This rule is parallel to the Windows post-build copy command already specified. The CI verification step catches the absence of this rule before a broken binary is promoted to integration tests.
 
@@ -177,71 +173,59 @@ A CMake install rule may also be needed to copy `default.mhr` from the vcpkg ins
 **DLL verification step required before artifact upload**: the Windows CI job must verify that `soft_oal.dll` and `default.mhr` are present in the output directory before uploading artifacts — a missing DLL produces a binary that crashes on launch and would waste the 30-day artifact retention window. **PHASING**: The `soft_oal.dll` and `default.mhr` post-build CMake copy commands are not delivered until Phase 7. At Phase 0, the DLL verification step MUST be a **warning-only placeholder that always exits 0** (see `implementation/phase-0.md` for the exact YAML). This hard-fail form below is the **Phase 7+ version** — it must replace the Phase 0 placeholder at Phase 7 delivery. Committing the hard-fail form at Phase 0 breaks the Windows CI job because the files do not yet exist. Add the Phase 7+ hard-fail step:
 
 ```yaml
-- name: Verify required DLLs are present
+- name: Verify required DLLs and HRTF data (all hard-fail)
   shell: pwsh
   run: |
     # Use explicit if-block syntax — "Test-Path ... || exit 1" is PowerShell 7+ only;
     # GitHub Actions Windows runners default to PowerShell 5.1 where || is not supported.
     # Ninja single-config: DLLs are at build/ (not build/Release/).
-    if (-not (Test-Path "build/soft_oal.dll")) {
-      Write-Error "soft_oal.dll not found"
-      exit 1
+    if (-not (Test-Path "build\Irrlicht.dll")) {
+      Write-Error "Irrlicht.dll not found"; exit 1
     }
-    if (-not (Test-Path "build/default.mhr")) {
-      Write-Error "default.mhr not found"
-      exit 1
+    if (-not (Test-Path "build\GLEW32.dll")) {
+      Write-Error "GLEW32.dll not found"; exit 1
+    }
+    if (-not (Test-Path "build\soft_oal.dll")) {
+      Write-Error "soft_oal.dll not found"; exit 1
+    }
+    if (-not (Test-Path "build\default.mhr")) {
+      Write-Error "default.mhr not found"; exit 1
     }
 ```
 
-**Note**: Both `soft_oal.dll` AND `default.mhr` must be verified. The Phase 0 placeholder (see `implementation/phase-0.md`) is a warning-only check for both files.
+**All four files — `Irrlicht.dll`, `GLEW32.dll`, `soft_oal.dll`, and `default.mhr` — must be verified.** `Irrlicht.dll` and `GLEW32.dll` are copied by post-build rules in Phase 1 CMakeLists.txt; their absence causes all test binaries to fail with a DLL load error. The Phase 0 placeholder (see `implementation/phase-0.md`) is a warning-only check for `soft_oal.dll` and `default.mhr` only; the hard-fail form for all four files is the Phase 7+ version.
 
 ### Windows GLEW vcpkg Verification
 
-Two sequential CI steps verify the GLEW vcpkg installation on Windows before the build step runs: a **header check** (step "Verify glew vcpkg port") and a **library check** (step "Verify GLEW vcpkg install"). Both use the same dual-path pattern — manifest-mode path first, classic-mode fallback — because vcpkg installs differ by invocation context:
+A single CI step ("Verify GLEW vcpkg artifacts (header and import lib)") verifies the GLEW vcpkg installation on Windows. This step runs **after** the CMake configure step (between Configure and Build) and checks both the GLEW header and the compiled import library in a single PowerShell block.
+
+The step uses a dual-path pattern — manifest-mode path first, classic-mode fallback — because vcpkg installs differ by invocation context:
 
 - **Manifest mode** (default when `vcpkg.json` is present): packages install into `build/vcpkg_installed/<triplet>/`
 - **Classic mode** (global vcpkg install, no `vcpkg.json` in scope): packages install into `$VCPKG_ROOT/installed/<triplet>/`
 
-Checking only one path causes false negatives in the other mode. Both steps are mandatory and must use PS 5.1-compatible `if (-not (...)) { exit 1 }` syntax — the `||` short-circuit for process exit codes is PowerShell 7+ only.
-
-#### Step A — Header check ("Verify glew vcpkg port")
-
-Runs **before** the CMake configure step. Confirms the GLEW development headers are present so CMake's `find_package(GLEW REQUIRED)` can locate them. If headers are absent, the configure step fails with an opaque CMake error rather than a clear diagnostic.
-
 ```yaml
-- name: Verify glew vcpkg port
-  shell: pwsh
-  run: |
-    # Manifest mode installs to build/vcpkg_installed/; classic mode to $VCPKG_ROOT/installed/.
-    $manifestHdr = "build\vcpkg_installed\x64-windows\include\GL\glew.h"
-    $classicHdr  = Join-Path $env:VCPKG_ROOT "installed\x64-windows\include\GL\glew.h"
-    if (-not (Test-Path $manifestHdr) -and -not (Test-Path $classicHdr)) {
-      Write-Error "ERROR: GLEW not installed — GL/glew.h not found in manifest path ($manifestHdr) or classic path ($classicHdr)."
-      exit 1
-    }
-    Write-Host "GLEW installed artifact verified."
-```
-
-#### Step B — Library check ("Verify GLEW vcpkg install")
-
-Runs after the vcpkg install step and **before** the CMake configure step. Confirms the compiled `glew32.lib` artifact is present so the linker can find it. A header-only check would not catch a scenario where headers were installed but the compiled library was not.
-
-**Note**: On Windows, the vcpkg GLEW portfile uses a libname override that installs `glew32.lib` rather than `glew.lib`.
-
-```yaml
-- name: Verify GLEW vcpkg install (Windows)
+- name: Verify GLEW vcpkg artifacts (header and import lib)
   shell: pwsh
   run: |
     # Use explicit if-block syntax — "Test-Path ... || exit 1" is PowerShell 7+ only;
     # GitHub Actions Windows runners default to PowerShell 5.1 where || is not supported.
-    if (-not (Test-Path "build/vcpkg_installed/x64-windows/lib/glew32.lib")) {
-      if (-not (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\glew32.lib")) {
-        Write-Error "GLEW not found in either manifest-mode or classic-mode install"; exit 1
-      }
+    $manifestHdr = "build\vcpkg_installed\x64-windows\include\GL\glew.h"
+    $classicHdr  = Join-Path $env:VCPKG_ROOT "installed\x64-windows\include\GL\glew.h"
+    if (-not (Test-Path $manifestHdr) -and -not (Test-Path $classicHdr)) {
+      Write-Error "ERROR: GLEW not installed — GL/glew.h not found in manifest or classic path."
+      exit 1
     }
+    $manifestLib = "build\vcpkg_installed\x64-windows\lib\glew32.lib"
+    $classicLib  = Join-Path $env:VCPKG_ROOT "installed\x64-windows\lib\glew32.lib"
+    if (-not (Test-Path $manifestLib) -and -not (Test-Path $classicLib)) {
+      Write-Error "ERROR: GLEW not installed — glew32.lib not found in manifest or classic path."
+      exit 1
+    }
+    Write-Host "GLEW vcpkg artifacts verified."
 ```
 
-**PowerShell 5.1 compatibility**: GitHub Actions Windows runners ship PowerShell 5.1 as the default shell. Use the explicit `if (-not (...)) { ... }` form as shown in both steps above.
+**Note**: On Windows, the vcpkg GLEW portfile uses a libname override that installs `glew32.lib` rather than `glew.lib`. Both paths must be checked (manifest-mode and classic-mode) to avoid false negatives.
 
 ### Irrlicht DLL on Windows (Phase 1+)
 
@@ -302,27 +286,26 @@ Both partial states leave the repository in a broken or unverified condition. Th
 
 Phase 7 hardens the `build-windows` CI job's DLL verification step from the Phase 0 warning-only placeholder to a full hard-fail for both `soft_oal.dll` and `default.mhr`.
 
-**Step name**: `Verify required DLLs and HRTF data (all hard-fail)` (`.github/workflows/ci.yml`, `build-windows` job, Step 18)
+**Step name**: `Verify required DLLs and HRTF data (all hard-fail)` (`.github/workflows/_build-windows.yml`, `build-windows` job)
 
-**Evidence — `soft_oal.dll` hard-fail**:
+**Evidence — all four hard-fail checks**:
 
 ```powershell
-if (-not (Test-Path "build/soft_oal.dll")) {
-  Write-Error "soft_oal.dll not found"
-  exit 1
+if (-not (Test-Path "build\Irrlicht.dll")) {
+  Write-Error "Irrlicht.dll not found"; exit 1
+}
+if (-not (Test-Path "build\GLEW32.dll")) {
+  Write-Error "GLEW32.dll not found"; exit 1
+}
+if (-not (Test-Path "build\soft_oal.dll")) {
+  Write-Error "soft_oal.dll not found"; exit 1
+}
+if (-not (Test-Path "build\default.mhr")) {
+  Write-Error "default.mhr not found"; exit 1
 }
 ```
 
-**Evidence — `default.mhr` hard-fail**:
-
-```powershell
-if (-not (Test-Path "build/default.mhr")) {
-  Write-Error "default.mhr not found"
-  exit 1
-}
-```
-
-Both checks use `if (-not (Test-Path ...)) { exit 1 }` syntax — the `||` short-circuit operator is PowerShell 7+ only; GitHub Actions Windows runners use PowerShell 5.1.
+All checks use `if (-not (Test-Path ...)) { exit 1 }` syntax — the `||` short-circuit operator is PowerShell 7+ only; GitHub Actions Windows runners use PowerShell 5.1. `Irrlicht.dll` and `GLEW32.dll` are Phase 1 deliverables; `soft_oal.dll` and `default.mhr` are Phase 7 deliverables.
 
 ### Music Stem JSON Sidecar Enforcement (Linux)
 
@@ -341,9 +324,9 @@ This removal is a Phase 9 CI deliverable — see `implementation/phase-9.md` for
 
 The `build-linux` job already contains a hard-fail verification step added in Phase 4:
 
-**Step name**: `Verify default.mhr HRTF data` (`.github/workflows/ci.yml`, `build-linux` job, Step 13)
+**Step name**: `Verify default.mhr HRTF data` (`.github/workflows/_build-linux.yml`, `build-linux` job)
 
-This step uses `find "${{ github.workspace }}" -name "default.mhr"` to locate the HRTF data file anywhere in the workspace (including the vcpkg install tree) and exits non-zero if not found. No change required in Phase 7 — the Phase 4 hard-fail form is already in place.
+This step uses `test -f build/default.mhr` to confirm the HRTF data file is present at the expected relative path and exits non-zero if not found. No change required in Phase 7 — the Phase 4 hard-fail form is already in place.
 
 ### Risk Mitigation
 
