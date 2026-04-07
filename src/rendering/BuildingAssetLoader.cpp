@@ -48,6 +48,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -85,7 +86,7 @@ static IAnimatedMesh* loadAnimMesh(ISceneManager* smgr, const std::string& path)
 // load()
 // ---------------------------------------------------------------------------
 
-LODNode* BuildingAssetLoader::load(const std::string& basePath)
+std::unique_ptr<LODNode> BuildingAssetLoader::load(const std::string& basePath)
 {
     // ------------------------------------------------------------------
     // Step 1: Parse .meta sidecar.
@@ -232,7 +233,7 @@ LODNode* BuildingAssetLoader::load(const std::string& basePath)
     // alive in the Irrlicht mesh cache for the lifetime of the scene.
     // The caller (IrrlichtRenderer) owns the returned LODNode*.
     // ------------------------------------------------------------------
-    return new LODNode(node, lod0, lod1, lod2, lod0dist, lod1dist, cullDist);
+    return std::make_unique<LODNode>(node, lod0, lod1, lod2, lod0dist, lod1dist, cullDist);
 }
 
 // ---------------------------------------------------------------------------

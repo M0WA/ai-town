@@ -84,7 +84,7 @@ public:
 
     // OnSetMaterial — optional callback; called when the material is set.
     // No action needed here — all state is set per-draw in OnSetConstants().
-    void OnSetMaterial(const irr::video::SMaterial& /*material*/) override {}
+    void OnSetMaterial(const irr::video::SMaterial& /*material*/) override { /* intentionally empty — all state set per-draw in OnSetConstants() */ }
 
     // srgbLinearValue() — test accessor.
     // Returns the int that will be passed to setPixelShaderConstant("u_srgbLinear", ...).

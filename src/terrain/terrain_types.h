@@ -10,6 +10,6 @@ struct ITerrainLoadProgress {
     // Called after each chunk rebuild during flushPendingRebuilds().
     // done:  number of chunks rebuilt so far.
     // total: total number of chunks to rebuild (size of deque at flush start).
-    virtual void onChunkRebuilt(int done, int total) {}
+    virtual void onChunkRebuilt(int done, int total) { /* intentionally empty — default no-op progress callback */ }
     virtual ~ITerrainLoadProgress() = default;
 };

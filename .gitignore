@@ -3,6 +3,7 @@
 .claude/worktrees
 .env
 .fetchcontent_cache/
+.cache/
 /build*/
 /coverage*
 /*.gcov

@@ -177,7 +177,7 @@ public:
     // blue=Commercial, yellow=Industrial).  Default no-op for implementations that
     // do not support per-zone hover colours.
     // main-thread-only.
-    virtual void setZoneHoverColour(unsigned int argb) {}
+    virtual void setZoneHoverColour(unsigned int argb) { /* intentionally empty — default no-op; renderers that do not support per-zone hover colour ignore this */ }
 
     // clearDemolishHighlight — clear any pending demolition highlight.
     // Called by UIManager when the demolition confirmation modal is cancelled or dismissed.

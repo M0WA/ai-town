@@ -13,9 +13,11 @@
 //          - dev builds:        <repo>/assets
 //          - DEB installs:      /usr/share/aitown/assets
 //
-// Called once at startup; result stored in g_assetsDir.
+// Called once at startup; result stored via setAssetsDir().
 std::string resolveAssetsDir();
 
-// g_assetsDir — the resolved assets directory, set once at startup by main()
-// and read-only thereafter. All subsystems use this instead of AITOWN_ASSETS_DIR.
-extern std::string g_assetsDir;
+// setAssetsDir / getAssetsDir — assets directory accessor.
+// setAssetsDir() must be called exactly once at startup (in main()) before any
+// subsystem threads are started. getAssetsDir() is read-only after that point.
+void setAssetsDir(std::string dir);
+const std::string& getAssetsDir();

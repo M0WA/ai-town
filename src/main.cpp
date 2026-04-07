@@ -45,7 +45,7 @@
 
 int main(int argc, char** argv) {
     // Resolve assets directory once at startup (exe-relative on Windows, compiled-in on Linux).
-    g_assetsDir = resolveAssetsDir();
+    setAssetsDir(resolveAssetsDir());
 
     // --frames N : auto-exit after N frames (used for profiling / benchmarking)
     int maxFrames = 0;
@@ -206,7 +206,7 @@ int main(int argc, char** argv) {
     uiManager.setRenderer(&renderer);
     // UIManager transitioned to main menu during construction (before setRenderer was
     // wired), so arm the background here now that the renderer is available.
-    renderer.setSceneBackground(g_assetsDir + "/textures/ui/loading_screen.png");
+    renderer.setSceneBackground(getAssetsDir() + "/textures/ui/loading_screen.png");
     uiManager.setTerrainQuery(&terrainSystem);
     uiManager.setMapDimensions(terrainSystem.getMapTilesX(), terrainSystem.getMapTilesZ());
 
@@ -242,7 +242,7 @@ int main(int argc, char** argv) {
 
     // Show loading screen for one frame while save file state is checked.
     renderer.beginFrame();
-    renderer.drawFullscreenTexture(g_assetsDir + "/textures/ui/loading_screen.png");
+    renderer.drawFullscreenTexture(getAssetsDir() + "/textures/ui/loading_screen.png");
     renderer.endFrame();
 
     // Update Load Game button state after loading screen completes (deferred from startup
@@ -496,7 +496,7 @@ int main(int argc, char** argv) {
                     device->getLogger()->log(e.what(), irr::ELL_ERROR);
                 }
                 renderer.beginFrame();
-                renderer.drawFullscreenTexture(g_assetsDir + "/textures/ui/loading_screen.png");
+                renderer.drawFullscreenTexture(getAssetsDir() + "/textures/ui/loading_screen.png");
                 renderer.endFrame();
             }
             // Update renderer and UI with new terrain dimensions.
@@ -556,7 +556,7 @@ int main(int argc, char** argv) {
                         device->getLogger()->log(e.what(), irr::ELL_ERROR);
                     }
                     renderer.beginFrame();
-                    renderer.drawFullscreenTexture(g_assetsDir + "/textures/ui/loading_screen.png");
+                    renderer.drawFullscreenTexture(getAssetsDir() + "/textures/ui/loading_screen.png");
                     renderer.endFrame();
                 }
                 // Wire dimensions and reposition camera.

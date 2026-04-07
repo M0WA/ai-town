@@ -1993,7 +1993,7 @@ void UIManager::transitionToMainMenu() {
     // Step 5: Show the loading screen background behind the main menu GUI.
     // The background is cleared when the player transitions into gameplay.
     if (m_renderer) {
-        m_renderer->setSceneBackground(g_assetsDir + "/textures/ui/loading_screen.png");
+        m_renderer->setSceneBackground(getAssetsDir() + "/textures/ui/loading_screen.png");
     }
 }
 
