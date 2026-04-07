@@ -141,6 +141,20 @@
 
   `TerrainSystem::getHeightAt(int tileX, int tileZ)` returns the exact LOD0 heightmap height sample at the grid-centre of tile `(tileX, tileZ)`. **No interpolation is performed**. This method always queries the persistent LOD0 heightmap array stored in `TerrainSystem`, never the active scene-node mesh geometry (which may be rendered at LOD1 or LOD2). This contract is authoritative for ray-march cursor-to-terrain intersection queries (e.g. `pickTerrainTile()`): the query will always return the exact grid-centre height, regardless of which LOD level is currently rendered for that tile. Cursor positions that fall between grid-centres will not interpolate; callers requiring bilinear-interpolated heights for sub-tile precision must implement interpolation on top of multiple `getHeightAt()` calls.
 
+  **`getHeightAtWorld(float worldX, float worldZ)` — bilinear world-space query (Phase 11q)**:
+  Returns the bilinearly interpolated terrain height at arbitrary world-space coordinates.
+  Internally it converts world coordinates to tile-grid coordinates using `kTileSize` from
+  `src/rendering/render_constants.h` (`RenderConstants::kTileSize`), then samples the four
+  tile-corner heights (h00, h10, h01, h11) surrounding the position and blends them with
+  standard bilinear interpolation. This provides smooth sub-tile height values suitable for
+  vehicle terrain-following and slope-normal computation.
+
+  Added as a pure-virtual method to `ITerrainQuery` (`src/interfaces/ITerrainQuery.h`) in
+  Phase 11q. **Implementation atomicity**: the `ITerrainQuery.h` pure-virtual declaration,
+  `TerrainSystem.h`/`TerrainSystem.cpp` bilinear implementation, and `ManualTerrainQuery`
+  no-op stub must all be committed together to avoid making `TerrainSystem` or
+  `ManualTerrainQuery` abstract (compilation failure).
+
   **`ITerrainQuery` interface promotion (Phase 9b)**: `getHeightAt` is promoted to the
   `ITerrainQuery` interface (`src/interfaces/ITerrainQuery.h`) so that `IrrlichtRenderer` can
   sample terrain height for zone overlay Y-positions, hover highlight Y-positions, and **mesh

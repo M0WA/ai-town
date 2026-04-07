@@ -238,9 +238,11 @@ add_executable(opengl_tests
 )
 target_link_libraries(opengl_tests PRIVATE aitown_render GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
 # src/rendering/ required for Phase 5 lod_swap_smoke_test.cpp (full body) which needs scene-graph and mesh buffer headers.
+# tests/simulation/ required by Phase 11q Y-bias renderer tests for ManualTerrainQuery.h access.
 target_include_directories(opengl_tests PRIVATE
     src/interfaces/
     src/rendering/
+    tests/simulation/
     ${CMAKE_SOURCE_DIR})
 aitown_add_tests(opengl_tests LABEL "requires-opengl")
 
