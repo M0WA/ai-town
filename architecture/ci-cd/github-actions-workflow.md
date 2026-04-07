@@ -1679,8 +1679,8 @@ Performs static analysis with coverage data for SonarCloud.
 **Triggers**:
 
 - `workflow_run` on CI completion — `if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}`. The `Analysis` job is entirely SKIPPED when the triggering CI run failed (no coverage XML artifact exists). `workflow_dispatch` bypasses this filter.
-- `workflow_dispatch` with two required inputs: `ci_run_id` (CI run ID to pull artifacts from)
-  and `head_sha` (HEAD SHA of that CI run — used to construct artifact names)
+- `workflow_dispatch` with one required input: `ci_run_id` (CI run ID to pull artifacts from —
+  used as both the `run-id:` lookup and the artifact name suffix)
 
 **Security**: `workflow_run` executes with base-branch secrets. NEVER check out the PR HEAD
 (untrusted contributor code). Check out base branch only; coverage data comes from the
@@ -1697,8 +1697,8 @@ that would expose `SONAR_TOKEN` to contributor code.
 **Key steps**:
 
 1. Checkout base branch
-2. Download `coverage-sonar-linux-<sha>` artifact (Sonar Generic Coverage XML from `_coverage-linux.yml`)
-3. Download `compile-commands-linux-<sha>` artifact (normalized `compile_commands.json` from `_build-linux.yml`)
+2. Download `coverage-sonar-linux-<run-id>` artifact (Sonar Generic Coverage XML from `_coverage-linux.yml`)
+3. Download `compile-commands-linux-<run-id>` artifact (normalized `compile_commands.json` from `_build-linux.yml`)
 4. "Debug compile_commands.json paths" — permanent inline Python diagnostic step (NOT
    debug-mode-only) that prints `GITHUB_WORKSPACE`, first entry's fields, and missing-file count
 5. Cache SonarScanner CLI at `${{ runner.temp }}/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-Linux-X64`
@@ -1720,8 +1720,8 @@ must be updated if the container workspace path changes.
 
 ## `sonarcloud-debug.yml` — SonarCloud Diagnostic Workflow
 
-`workflow_dispatch`-only diagnostic workflow. Same two inputs as `sonarcloud.yml`
-(`ci_run_id`, `head_sha`). Downloads only `compile-commands-linux-<sha>` (no coverage XML),
+`workflow_dispatch`-only diagnostic workflow. Same input as `sonarcloud.yml`
+(`ci_run_id`). Downloads only `compile-commands-linux-<run-id>` (no coverage XML),
 prints path counts before/after the `/__w/` → `$GITHUB_WORKSPACE` remap (identical Python
 logic to `sonarcloud.yml`), reports missing-file counts. Does NOT run SonarScanner and requires
 no `SONAR_TOKEN`.
