@@ -113,7 +113,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/sonarscanner"
           cd "$RUNNER_TEMP/sonarscanner"
           SCANNER_FILE="sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux-x64.zip"
-          curl --fail --silent --show-error --user-agent sonarqube-scan-action \
+          curl --proto '=https' --tlsv1.2 \
+               --fail --silent --show-error \
+               --user-agent sonarqube-scan-action \
                --location --output "$SCANNER_FILE" \
                "${SONAR_SCANNER_BINARIES_URL}/${SCANNER_FILE}"
           unzip -q -o "$SCANNER_FILE"

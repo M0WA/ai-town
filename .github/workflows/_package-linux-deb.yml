@@ -86,8 +86,9 @@ jobs:
           # has no fallback — it calls exit 1 on curl failure). Build from source instead,
           # which is what bootstrap would do on non-x86_64 architectures.
           VCPKG_TOOL_TAG=$(grep '^VCPKG_TOOL_RELEASE_TAG=' /opt/vcpkg/scripts/vcpkg-tool-metadata.txt | cut -d= -f2)
-          curl -L "https://github.com/microsoft/vcpkg-tool/archive/${VCPKG_TOOL_TAG}.zip" \
-            -o /tmp/vcpkg-tool.zip --retry 3 --fail
+          curl --proto '=https' --tlsv1.2 --location --retry 3 --fail \
+            "https://github.com/microsoft/vcpkg-tool/archive/${VCPKG_TOOL_TAG}.zip" \
+            -o /tmp/vcpkg-tool.zip
           unzip -q /tmp/vcpkg-tool.zip -d /tmp/vcpkg-tool-src
           cmake -B /tmp/vcpkg-tool-build \
             -S "/tmp/vcpkg-tool-src/vcpkg-tool-${VCPKG_TOOL_TAG}" \
