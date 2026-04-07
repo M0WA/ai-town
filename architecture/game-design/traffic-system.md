@@ -23,6 +23,37 @@
 - **Bootstrap oscillation invariant (testable constraint)**: During the first `demand_bootstrapping_ticks` budget ticks (ticks 0–5), demand values must not oscillate. Specifically, for any two consecutive ticks, `|demand_factor[tick+1] − demand_factor[tick]| < 1.0` for all zone types. A jump of 1.0 (the full [0.0, 1.0] range) indicates a sign-flip error in the bootstrap subsidy calculation. On a blank map at any simulation speed (including `SpeedMultiplier::x3`), `getTrafficDemandFactor()` and `getZoneDemandFactor()` must remain bounded in [0.0, 1.0] with no tick-to-tick delta exceeding 1.0. Verified by `DemandBootstrap_AtX3Speed_NoBoundaryViolationAndNoOscillation` in `tests/simulation/zoning_test.cpp`.
 - **Demand pressure readouts** (C/I feedback): When Commercial or Industrial demand prerequisites are unmet, the unmet demand must be surfaced to the player. The `QueryResult` struct exposes a `demand_pressure_pct` field per tile = `(1.0f − effective_demand_factor) × 100`, where `effective_demand_factor` is the post-combination demand in [0.0, 1.0]. **Inverse semantics**: 0 means fully satisfied demand (high traffic flow, maximum demand); 100 means zero effective demand (demand collapsed). **CRITICAL — Do NOT confuse with `ICitySimulation::getZoneDemandFactor(ZoneType)`**, which returns the city-wide EFFECTIVE demand in [0.0, 1.0] (1.0 = maximum demand pressure) — the opposite direction. `getZoneDemandFactor(ZoneType)` returns the city-wide effective demand in [0.0, 1.0] (1.0 = maximum demand pressure). This is DISTINCT from `QueryResult::demandPressurePct` which is `(1.0f − effective_demand_factor) × 100` — an inverse per-tile percentage used only in the query inspector panel. `QueryResult::demandPressurePct` = `(1.0f − tileEffectiveDemandFactor) × 100.0f`; it is NOT `getZoneDemandFactor(zone) × 100`. See `src/interfaces/simulation_types.h QueryResult::demandPressurePct` for the canonical definition and cross-reference. This is shown in the Inspector panel for zone tiles and as a compact HUD indicator bar per zone type (R/C/I). Without this readout, an economy flatline cannot be distinguished from a design error by the player.
 
+## Vehicle Zone Assignment
+
+### Unzoned Destination Zone Fallback
+
+When a vehicle is spawned and its destination tile has no active zone (`isZoned == false`),
+the vehicle's zone type cannot be read from the tile. In this case, the zone is assigned
+via a **proportional random draw** using the injected `ISimulationRNG*`:
+
+| Zone Type   | Probability |
+|-------------|-------------|
+| Residential | 70%         |
+| Commercial  | 20%         |
+| Industrial  | 10%         |
+
+**Rationale**: The 70/20/10 split mirrors the typical zoning distribution found in a V1
+city — predominantly residential with a commercial district and light industrial activity.
+Using this distribution as a fallback keeps spawned vehicles demographically representative
+of the actual city rather than defaulting to a single arbitrary zone type.
+
+**Scope rules**:
+
+- This fallback applies **at initial vehicle spawn only** (the moment a vehicle is created
+  and its destination tile is sampled).
+- It is **not re-applied on trip completion**. When a vehicle finishes a trip and picks a
+  new destination, zone assignment is updated only if the new destination tile **is** zoned
+  (`isZoned == true`). Unzoned new destinations reuse the vehicle's previously assigned zone
+  for the duration of that trip without re-rolling.
+- All random draws must go through `ISimulationRNG*` injected at `CitySimulation`
+  construction. Never use `std::rand()` or any global RNG for this draw — tests rely on
+  `ManualRNG` for deterministic zone-assignment scenarios.
+
 ## Lane Assignment
 
 Each road edge in the traffic graph is **directional**. Each physical road tile hosts **two directed edges** — one per lane direction — allowing vehicles to travel in both directions on the same road.

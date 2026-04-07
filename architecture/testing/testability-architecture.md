@@ -1371,6 +1371,40 @@ the audio playback path, not a unit test with strict call-count expectations on 
   that `m_flattenCalls` contains all expected `{x, z, targetH}` tuples (order-independent
   comparison via sorting or `EXPECT_THAT(..., UnorderedElementsAre(...))`).
 
+  **Phase 11q extension**: Phase 11q adds `getHeightAtWorld(float, float)` as a pure-virtual
+  method to `ITerrainQuery`, requiring a new no-op override in `ManualTerrainQuery`:
+
+  ```cpp
+  // Phase 11q override — returns 0.0f unconditionally.
+  // Sufficient for zone-assignment and audio-lifecycle tests where terrain height is irrelevant.
+  float getHeightAtWorld(float /*worldX*/, float /*worldZ*/) const override {
+      return 0.0f;
+  }
+  ```
+
+  **Phase 11q landing sequence**: all three items MUST land in the same commit — committing
+  any subset breaks the build or simulation unit tests:
+
+  1. `ITerrainQuery.h` — add `getHeightAtWorld()` as a pure-virtual method. Committing this
+     alone leaves every concrete `ITerrainQuery` implementor (`TerrainSystem`,
+     `ManualTerrainQuery`, and any other stub) abstract, breaking the build immediately.
+  2. `TerrainSystem.h` + `TerrainSystem.cpp` — add the bilinear implementation
+     (requires `#include "render_constants.h"` and `using namespace RenderConstants;`).
+     Committing (1)+(2) without (3) still leaves `ManualTerrainQuery` abstract and breaks
+     all simulation unit tests that construct it.
+  3. `ManualTerrainQuery` (and every other `ITerrainQuery` stub) — add the no-op override
+     shown above (returns `0.0f` unconditionally).
+
+  Only once all three are present does the build and full test suite remain green.
+  This is the same 3-item atomicity rule applied for Phase 10b `setTileHeight()`.
+
+  **Y-position tests** (`MoveVehicleAgent_FlatTerrain_YIncludesRoadBias` and
+  `SpawnVehicleAgent_FlatTerrain_YIncludesRoadBias`) require inspecting a real Irrlicht
+  scene-node `getPosition().Y` after a renderer call and are therefore placed in
+  `tests/rendering/` with `requires-opengl` label. Those tests create an `IrrlichtRenderer`
+  with a `ManualTerrainQuery` stub returning `0.0f`, spawn or move a vehicle agent, then
+  assert `node.getPosition().Y == kRoadSurfaceYBias (0.25f)`.
+
 - **`IAlcFunctions`** — injectable interface for ALC function-pointer lookup, enabling the thread-local context extension check in `AudioSystem` to be intercepted in tests without a real OpenAL device. **Source locations** (post-Phase 10b): `IAlcFunctions.h` in `src/interfaces/` (moved from `src/audio/ialc_functions.h` and renamed in Phase 10b Feature 3); `DefaultAlcFunctions.h`/`DefaultAlcFunctions.cpp` remain in `src/audio/`; `MockAlcFunctions` is defined locally in `tests/audio/audio_thread_test.cpp` (single-use — not a shared header). All test double headers live under `tests/` — never under `src/`.
 
   ```cpp
