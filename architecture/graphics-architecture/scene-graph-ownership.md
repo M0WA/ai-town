@@ -712,7 +712,17 @@ any number of manually placed vehicle nodes.
    - **Rotation**: full three-axis orientation — yaw (Y-axis) from `headingDeg`, plus pitch
      (X-axis) and roll (Z-axis) derived from the terrain slope normal. The slope normal is
      computed via finite-difference sampling of `getHeightAtWorld` at half-tile offset
-     positions around the vehicle's world location.
+     positions around the vehicle's world location. The pitch/roll decomposition must be
+     performed in the vehicle's **local frame**, not world space. Before computing pitch
+     and roll, the world-space slope gradients (`dhX`, `dhZ`) must be rotated into the
+     vehicle's local coordinate frame using the current yaw angle:
+     - `localForward = dhX * sin(yawRad) + dhZ * cos(yawRad)` (slope along vehicle heading)
+     - `localRight = dhX * cos(yawRad) - dhZ * sin(yawRad)` (slope across vehicle width)
+     - Then: `pitchRad = atan2(localForward, 1)` (nose up/down) and
+       `rollRad = atan2(-localRight, 1)` (lean left/right)
+
+     This ensures a vehicle facing east on a north-south slope correctly rolls rather
+     than pitches.
    Does nothing if handle is absent (agent was culled).
 3. `despawnVehicleAgent(handle)` → runs the following eviction sequence, then erases from
    `m_agentNodes`:

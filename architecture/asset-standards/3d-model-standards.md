@@ -60,8 +60,15 @@ resetting `PolygonOffsetFactor`. The strip does NOT appear at LOD1 or LOD2.
 Named constants (declared in `src/rendering/render_constants.h`):
 
 ```cpp
-static constexpr float kLaneCenterOffset = 1.875f;   // metres from road center
-static constexpr float kCarriagewayHalfWidth = 3.75f; // half of 7.5 m carriageway
+static constexpr float kLaneCenterOffset   = 1.875f;  // metres from road center
+static constexpr float kCarriagewayHalfWidth = 3.75f;  // half of 7.5 m carriageway
+static constexpr float kRoadSurfaceYBias   = 0.25f;   // vertical offset applied to road surface
+                                                        // vertices and used for vehicle
+                                                        // Y-positioning to align vehicles with
+                                                        // the raised road surface
+static constexpr float kTileSize           = 10.0f;   // simulation tile edge length (metres);
+                                                        // see "World-Space Tile Positioning"
+                                                        // section below for full details
 ```
 
 The road kerb geometry vertices are authored inline in `IrrlichtRenderer` as a unit of 4 bevelled edge strips (each strip = 6 tris, 4 strips = 24 tris) plus a central flat quad (2 tris), totaling 26 tris for LOD0, plus the center-line strip (2 tris) = 28 tris — well within the ≤50 tri budget (Phase 11h raised from ≤48 to accommodate the 2-tri center-line quad). LOD1 is a single flat quad (2 tris) with no kerb or center-line, within the ≤16 tri budget.

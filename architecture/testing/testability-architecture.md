@@ -1372,15 +1372,56 @@ the audio playback path, not a unit test with strict call-count expectations on 
   comparison via sorting or `EXPECT_THAT(..., UnorderedElementsAre(...))`).
 
   **Phase 11q extension**: Phase 11q adds `getHeightAtWorld(float, float)` as a pure-virtual
-  method to `ITerrainQuery`, requiring a new no-op override in `ManualTerrainQuery`:
+  method to `ITerrainQuery`, requiring a bilinear-interpolation override in
+  `ManualTerrainQuery`:
+
+  **`kTileSize` locality constraint**: `ManualTerrainQuery::getHeightAtWorld()` must NOT
+  `#include "render_constants.h"` — that header includes `irrlicht.h` (which pulls in
+  `irr::video::SColor` and other Irrlicht types), and `simulation_tests` does not link
+  Irrlicht. Instead, define `kTileSize` locally within the `ManualTerrainQuery` header:
 
   ```cpp
-  // Phase 11q override — returns 0.0f unconditionally.
-  // Sufficient for zone-assignment and audio-lifecycle tests where terrain height is irrelevant.
-  float getHeightAtWorld(float /*worldX*/, float /*worldZ*/) const override {
-      return 0.0f;
+  // Must match RenderConstants::kTileSize in src/rendering/render_constants.h
+  static constexpr float kTileSize = 10.0f;
+  ```
+
+  ```cpp
+  // Phase 11q override — bilinear interpolation over the m_heights grid.
+  // Converts world coordinates to grid indices via kTileSize, samples four
+  // corner heights from m_tileHeights (set via setHeightAt()), and bilinearly
+  // interpolates.  Tiles absent from m_tileHeights fall back to the Phase 10b
+  // m_flattened ? m_heightAfterFlat : m_heightBeforeFlat default — so tests
+  // that never call setHeightAt() see a flat plane at the default height,
+  // while slope-rotation tests (e.g. MoveVehicleAgent_SlopedTerrain_AppliesPitchAndRoll)
+  // configure per-tile heights and receive correct sub-tile interpolation.
+  float getHeightAtWorld(float worldX, float worldZ) const override {
+      // Integer tile and fractional offset (uses local kTileSize, not render_constants.h)
+      float gx = worldX / kTileSize;
+      float gz = worldZ / kTileSize;
+      int ix = static_cast<int>(std::floor(gx));
+      int iz = static_cast<int>(std::floor(gz));
+      float fx = gx - ix;   // 0..1
+      float fz = gz - iz;   // 0..1
+
+      // Sample four corners — delegates to getHeightAt() which
+      // honours m_tileHeights with Phase 10b fallback.
+      float h00 = getHeightAt(ix,     iz);
+      float h10 = getHeightAt(ix + 1, iz);
+      float h01 = getHeightAt(ix,     iz + 1);
+      float h11 = getHeightAt(ix + 1, iz + 1);
+
+      // Bilinear interpolation (same formula as TerrainSystem)
+      float top    = h00 + (h10 - h00) * fx;
+      float bottom = h01 + (h11 - h01) * fx;
+      return top + (bottom - top) * fz;
   }
   ```
+
+  This makes `ManualTerrainQuery` the canonical "real-but-configurable" test stub:
+  tests control terrain shape via `setHeightAt()` calls and receive the same bilinear
+  interpolation that `TerrainSystem::getHeightAtWorld()` uses in production. Tests that
+  never call `setHeightAt()` (zone-assignment, audio-lifecycle, flat-terrain Y-position)
+  still see a uniform height surface and are unaffected.
 
   **Phase 11q landing sequence**: all three items MUST land in the same commit — committing
   any subset breaks the build or simulation unit tests:
@@ -1392,8 +1433,9 @@ the audio playback path, not a unit test with strict call-count expectations on 
      (requires `#include "render_constants.h"` and `using namespace RenderConstants;`).
      Committing (1)+(2) without (3) still leaves `ManualTerrainQuery` abstract and breaks
      all simulation unit tests that construct it.
-  3. `ManualTerrainQuery` (and every other `ITerrainQuery` stub) — add the no-op override
-     shown above (returns `0.0f` unconditionally).
+  3. `ManualTerrainQuery` (and every other `ITerrainQuery` stub) — add the bilinear
+     interpolation override shown above, delegating to the existing `getHeightAt()` and
+     `m_tileHeights` infrastructure.
 
   Only once all three are present does the build and full test suite remain green.
   This is the same 3-item atomicity rule applied for Phase 10b `setTileHeight()`.
@@ -2442,3 +2484,45 @@ These three expectations together guarantee that the minimap draw path is both
 active (non-vacuous) and leak-free (no element accumulation).
 
 **CTest filter**: `-R "MinimapOverlayTest|MinimapElementLeakTest"`
+
+### Phase 11q Canonical Test Name Summary
+
+| Test Suite | Test Case | Source File | CMake Target | Label |
+|---|---|---|---|---|
+| `TrafficVehicleTest` | `VehicleMeshPath_CommercialZone_ReturnsBusMesh` | `tests/simulation/VehicleZoneTest.cpp` | `simulation_tests` | `unit` |
+| `TrafficVehicleTest` | `VehicleMeshPath_IndustrialZone_ReturnsTruckMesh` | `tests/simulation/VehicleZoneTest.cpp` | `simulation_tests` | `unit` |
+| `TrafficVehicleTest` | `TrafficVehicle_SpawnOnUnzonedDestination_FallsBackToProportionalDistribution` | `tests/simulation/VehicleZoneTest.cpp` | `simulation_tests` | `unit` |
+| `TrafficVehicleTest` | `TrafficVehicle_ZoneUpdated_OnTripCompletion` | `tests/simulation/VehicleZoneTest.cpp` | `simulation_tests` | `unit` |
+| `IrrlichtRendererTest` | `MoveVehicleAgent_FlatTerrain_VehicleYIncludesBias` | `tests/rendering/VehicleYBiasTest.cpp` | `opengl_tests` | `requires-opengl` |
+| `IrrlichtRendererTest` | `SpawnVehicleAgent_FlatTerrain_VehicleYIncludesBias` | `tests/rendering/VehicleYBiasTest.cpp` | `opengl_tests` | `requires-opengl` |
+| `IrrlichtRendererTest` | `MoveVehicleAgent_SlopedTerrain_AppliesPitchAndRoll` | `tests/rendering/VehicleYBiasTest.cpp` | `opengl_tests` | `requires-opengl` |
+| `IrrlichtRendererTest` | `MoveVehicleAgent_SlopedTerrain_YawRelativeDecomposition` | `tests/rendering/VehicleYBiasTest.cpp` | `opengl_tests` | `requires-opengl` |
+
+**Test details**:
+
+- `VehicleMeshPath_CommercialZone_ReturnsBusMesh` — `vehicleMeshPath()` returns
+  the bus mesh path for a Commercial zone destination.
+- `VehicleMeshPath_IndustrialZone_ReturnsTruckMesh` — `vehicleMeshPath()` returns
+  the truck mesh path for an Industrial zone destination.
+- `TrafficVehicle_SpawnOnUnzonedDestination_FallsBackToProportionalDistribution` —
+  when the destination tile is unzoned, the vehicle type falls back to the 70/20/10
+  RNG proportional distribution; uses `ManualRNG` seeded with `[72]` and asserts
+  the result maps to Commercial.
+- `TrafficVehicle_ZoneUpdated_OnTripCompletion` — the vehicle zone type is
+  re-evaluated via the public `tick()` API when the destination changes to a
+  zoned tile.
+- `MoveVehicleAgent_FlatTerrain_VehicleYIncludesBias` — after `moveVehicleAgent()`
+  on flat terrain, the scene node Y coordinate includes `kRoadSurfaceYBias`.
+- `SpawnVehicleAgent_FlatTerrain_VehicleYIncludesBias` — at spawn time on flat
+  terrain, the scene node Y coordinate includes `kRoadSurfaceYBias`.
+- `MoveVehicleAgent_SlopedTerrain_AppliesPitchAndRoll` — on a Z-slope
+  (`+Z = 1.0`) with `yaw = 0`, `rotation.X != 0` (pitch) and `rotation.Z == 0`
+  (no roll).
+- `MoveVehicleAgent_SlopedTerrain_YawRelativeDecomposition` — on a pure Z-slope
+  (`+Z = 1.0`) with `yaw = 90`, the Z-axis slope is perpendicular to the
+  vehicle heading, producing roll (`rotation.Z != 0`) and no pitch
+  (`rotation.X == 0` within 1e-3 tolerance). Complement of the yaw=0 test;
+  together they prove yaw-relative decomposition correctness.
+
+CTest filter for all Phase 11q vehicle zone and Y-bias tests:
+`-R "TrafficVehicleTest|IrrlichtRendererTest.*(VehicleY|SlopedTerrain)"`
