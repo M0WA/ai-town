@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -579,17 +580,19 @@ int main(int argc, char** argv)
             if (fireImg)
             {
                 for (irr::u32 py = 0; py < 32u; ++py)
-                for (irr::u32 px = 0; px < 32u; ++px)
                 {
-                    float dx   = (static_cast<float>(px) - 15.5f) / 15.5f;
-                    float dy   = (static_cast<float>(py) - 15.5f) / 15.5f;
-                    float dist = sqrtf(dx*dx + dy*dy);
-                    if (dist > 1.0f) dist = 1.0f;
-                    irr::u32 a = static_cast<irr::u32>((1.0f - dist) * 220.0f);
-                    irr::u32 r = 255u;
-                    irr::u32 g = static_cast<irr::u32>(200.0f * (1.0f - dist * 0.8f));
-                    irr::u32 b = static_cast<irr::u32>(50.0f  * (1.0f - dist));
-                    fireImg->setPixel(px, py, irr::video::SColor(a, r, g, b));
+                    for (irr::u32 px = 0; px < 32u; ++px)
+                    {
+                        float dx   = (static_cast<float>(px) - 15.5f) / 15.5f;
+                        float dy   = (static_cast<float>(py) - 15.5f) / 15.5f;
+                        float dist = sqrtf(dx*dx + dy*dy);
+                        if (dist > 1.0f) dist = 1.0f;
+                        irr::u32 a = static_cast<irr::u32>((1.0f - dist) * 220.0f);
+                        irr::u32 r = 255u;
+                        irr::u32 g = static_cast<irr::u32>(200.0f * (1.0f - dist * 0.8f));
+                        irr::u32 b = static_cast<irr::u32>(50.0f  * (1.0f - dist));
+                        fireImg->setPixel(px, py, irr::video::SColor(a, r, g, b));
+                    }
                 }
                 fireTex = driver->addTexture("__bench_fire", fireImg);
                 fireImg->drop();
@@ -643,7 +646,7 @@ int main(int argc, char** argv)
     // 7. Determine anisotropy test levels (skip levels beyond hardware max)
     // -----------------------------------------------------------------------
     const int kTestLevels[]  = {1, 2, 4, 8, 16};
-    const int kNumTestLevels = static_cast<int>(sizeof(kTestLevels) / sizeof(kTestLevels[0]));
+    const int kNumTestLevels = static_cast<int>(std::size(kTestLevels));
 
     std::vector<LevelResult> results1;
     std::vector<LevelResult> results2;

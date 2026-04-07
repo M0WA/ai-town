@@ -38,6 +38,7 @@
 //   SceneEntityManager::destroy() (which calls node->remove()) before deleting.
 //   BuildingAssetLoader does not retain any reference to loaded meshes or nodes.
 
+#include <memory>
 #include <string>
 
 // Forward declarations.
@@ -75,12 +76,12 @@ public:
     //   "assets/3d/buildings/res_low_01"
     // The loader appends "_lod0.b3d", "_lod1.b3d", "_lod2.b3d", and ".meta".
     //
-    // Returns a new LODNode* on success. The caller owns the returned pointer.
+    // Returns a new LODNode on success (unique_ptr). The caller owns the returned pointer.
     // Returns nullptr if:
     //   - The .meta sidecar is not found or cannot be parsed.
     //   - _lod0.b3d or _lod1.b3d cannot be loaded.
     //   - The LOD0 mesh is not an SMesh (cannot call recalculateBoundingBox).
-    LODNode* load(const std::string& basePath);
+    std::unique_ptr<LODNode> load(const std::string& basePath);
 
 private:
     irr::scene::ISceneManager* m_smgr;

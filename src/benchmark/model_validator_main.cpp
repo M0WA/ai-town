@@ -24,6 +24,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -193,7 +195,7 @@ public:
         static const char* kNames[] = {
             "Red","Green","Blue","Yellow","Cyan","Magenta","White","Black"
         };
-        static const int kN = static_cast<int>(sizeof(kNames) / sizeof(kNames[0]));
+        static const int kN = static_cast<int>(std::size(kNames));
         return kNames[((idx % kN) + kN) % kN];
     }
     static int kNumColors() { return 8; }
@@ -677,7 +679,7 @@ int main(int argc, char** argv)
         // --- Load all models for this category via BuildingAssetLoader ---
         // In --model (single-model) mode: load LOD0, LOD1, LOD2 separately side by side.
         // In normal category mode: use BuildingAssetLoader (distance-based LOD switching).
-        std::vector<LODNode*> lodNodes;
+        std::vector<std::unique_ptr<LODNode>> lodNodes;
         std::vector<std::string> loadedNames;
         std::vector<float> loadedXPositions;
 
@@ -758,7 +760,7 @@ int main(int argc, char** argv)
                 const std::string& name = cat.names[static_cast<size_t>(mi)];
                 std::string basePath = std::string(AITOWN_ASSETS_DIR) + "/"
                                      + cat.pathPrefix + "/" + name;
-                LODNode* lodNode = loader.load(basePath);
+                std::unique_ptr<LODNode> lodNode = loader.load(basePath);
                 if (!lodNode)
                 {
                     std::fprintf(stderr, "  WARNING: failed to load '%s'. Skipping.\n",
@@ -776,7 +778,7 @@ int main(int argc, char** argv)
                     sn->setMaterialFlag(irr::video::EMF_LIGHTING,          false);
                     sn->setMaterialFlag(irr::video::EMF_BACK_FACE_CULLING, false);
                 }
-                lodNodes.push_back(lodNode);
+                lodNodes.push_back(std::move(lodNode));
                 loadedNames.push_back(name);
                 float xPos = (static_cast<float>(mi) - (static_cast<float>(N - 1) * 0.5f))
                              * kShowcaseSpacing;
@@ -1202,9 +1204,8 @@ int main(int argc, char** argv)
         std::fflush(stdout);
 
         // Cleanup: drop scene manager first (removes all scene nodes owned by it),
-        // then delete the LODNode heap wrappers (plain objects, not Irrlicht ref-counted).
+        // then clear the LODNode vector (unique_ptr destructors fire automatically).
         smgr3->drop();
-        for (LODNode* ln : lodNodes) { delete ln; }
         lodNodes.clear();
     }
 

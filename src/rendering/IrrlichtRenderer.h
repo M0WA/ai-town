@@ -11,6 +11,7 @@
 // IrrlichtRenderer stores m_terrain as ITerrainQuery* (non-owning observer pointer)
 // and calls only ITerrainQuery interface methods — no concrete TerrainSystem API
 // is referenced inside IrrlichtRenderer.h.
+class CloudDomeShaderCallback;
 class ITerrainQuery;
 
 // Forward-declare UIManager — must NOT #include "UIManager.h" in this header.
@@ -227,14 +228,13 @@ private:
     // m_cloudNode: scene node for the scrolling cloud quad; null under EDT_NULL.
     // m_cloudUVOffset: accumulated UV translation, wrapped to [0,1) via fmod.
     // m_cloudShaderCbRaw: caller's reference to the CloudDomeShaderCallback (defined
-    //   in IrrlichtRenderer.cpp only).  Stored as void* to avoid pulling the class
-    //   definition into the header.  Cast to CloudDomeShaderCallback* at all use sites
-    //   inside the .cpp.  Null when the shader compile failed or under EDT_NULL.
+    //   in IrrlichtRenderer.cpp only).  Forward-declared in the header; full definition
+    //   is in IrrlichtRenderer.cpp.  Null when the shader compile failed or under EDT_NULL.
     //   Dropped in the destructor via ->drop().
     irr::video::E_DRIVER_TYPE       m_driverType{irr::video::EDT_NULL};
     irr::scene::IMeshSceneNode*     m_cloudNode{nullptr};
     irr::core::vector2df            m_cloudUVOffset{0.f, 0.f};
-    void*                           m_cloudShaderCbRaw{nullptr};
+    CloudDomeShaderCallback*        m_cloudShaderCbRaw{nullptr};
 
     // NOTE: Ground plane REMOVED — its depth writes were the true cause of the
     // persistent horizon arch artifact.  See initCloudPlane() comment for details.
@@ -330,10 +330,10 @@ private:
     // Building scene node registry (zone buildings + service buildings share one map).
     // All placed buildings (zone and service) are keyed by tile. A tile can hold at most
     // one building at a time — the simulation enforces the one-building-per-tile invariant.
-    std::unordered_map<uint64_t, LODNode*> m_buildingNodes;
+    std::unordered_map<uint64_t, std::unique_ptr<LODNode>> m_buildingNodes;
 
     // Road tile scene node registry.
-    std::unordered_map<uint64_t, LODNode*> m_roadNodes;
+    std::unordered_map<uint64_t, std::unique_ptr<LODNode>> m_roadNodes;
 
     // BuildingAssetLoader — created lazily (on first placeBuildingMesh call) to avoid
     // constructing when m_smgr is null (e.g. unit tests with null device).
@@ -348,7 +348,7 @@ private:
     // Invariant: every entry corresponds to a live scene node.
     // On removal the eviction sequence is run (clear textures → setMaterial →
     // node->remove()) before the LODNode wrapper is deleted.
-    std::unordered_map<uint32_t, LODNode*> m_vehicleNodes;
+    std::unordered_map<uint32_t, std::unique_ptr<LODNode>> m_vehicleNodes;
 
     // --- Phase 11d: traffic agent scene node registry (Deliverable 3a) ---
     //
@@ -494,7 +494,7 @@ private:
     //   clear material texture slots → driver->setMaterial(SMaterial{}) → node->remove()
     // then deletes the LODNode wrapper. Erases the map entry.
     // No-op if the key is not in the map.
-    void destroyTileNode(std::unordered_map<uint64_t, LODNode*>& registry,
+    void destroyTileNode(std::unordered_map<uint64_t, std::unique_ptr<LODNode>>& registry,
                          int tileX, int tileZ);
 
     // evictLODNodeRegistry — evict all entries in a LODNode registry.
@@ -513,7 +513,7 @@ private:
     // lodNode->getNode() on the forward-declared (incomplete) LODNode type. Explicit
     // instantiations for uint64_t and uint32_t key types are provided there.
     template<typename KeyT>
-    void evictLODNodeRegistry(std::unordered_map<KeyT, LODNode*>& registry);
+    void evictLODNodeRegistry(std::unordered_map<KeyT, std::unique_ptr<LODNode>>& registry);
 
     // Helper: ensure m_buildingAssetLoader is created (idempotent).
     // Returns false and logs a warning if m_smgr is null (test/headless context).
@@ -569,11 +569,11 @@ private:
     //   Calls placeRoadMesh with flattenTerrain=false, rebuildNeighbors=false for each.
     void rebuildRoadNeighbors(int tileX, int tileZ);
     // buildRoadSceneNode: create the scene node and LODNode wrapper for one road tile.
-    //   Returns the new LODNode* (caller registers in m_roadNodes), or nullptr on failure.
+    //   Returns the new LODNode (caller registers in m_roadNodes), or nullptr on failure.
     //   h00/h10/h01/h11 are the four corner terrain heights for the tile.
     //   isEW indicates East-West orientation (used by buildTileRoadMesh).
-    LODNode* buildRoadSceneNode(int tileX, int tileZ,
-                                float h00, float h10, float h01, float h11,
-                                bool isEW);
+    std::unique_ptr<LODNode> buildRoadSceneNode(int tileX, int tileZ,
+                                                float h00, float h10, float h01, float h11,
+                                                bool isEW);
 
 };

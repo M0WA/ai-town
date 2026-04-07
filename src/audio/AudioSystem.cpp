@@ -161,7 +161,7 @@ static bool hasSuffix(const std::string& s, const char* suffix) {
 // Asset path helpers.
 // ---------------------------------------------------------------------------
 std::string AudioSystem::assetPath(const std::string& filename) {
-    return g_assetsDir + "/audio/" + filename;
+    return getAssetsDir() + "/audio/" + filename;
 }
 
 std::string AudioSystem::musicTrackFilename(MusicTrackId id) {

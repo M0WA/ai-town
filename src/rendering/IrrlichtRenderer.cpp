@@ -54,8 +54,8 @@ static irr::video::SColor argbToSColor(uint32_t argb) {
 //
 // Lifetime rule (per shader-loading.md and CLAUDE.md):
 //   This callback is kept alive by the caller (IrrlichtRenderer) so that it
-//   can be dropped in the destructor (stored as void* m_cloudShaderCbRaw in
-//   the header).  Irrlicht also calls grab() internally, so the final drop
+//   can be dropped in the destructor (stored as CloudDomeShaderCallback*
+//   m_cloudShaderCbRaw in the header).  Irrlicht also calls grab() internally, so the final drop
 //   happens when the material renderer is destroyed.
 //   Never use std::unique_ptr — causes double-free.
 // -------------------------------------------------------------------------
@@ -126,7 +126,7 @@ IrrlichtRenderer::~IrrlichtRenderer() {
     // (retained in initCloudPlane() for the callback's lifetime).
     // Null check covers headless runs where the shader compile failed.
     if (m_cloudShaderCbRaw) {
-        static_cast<CloudDomeShaderCallback*>(m_cloudShaderCbRaw)->drop();
+        m_cloudShaderCbRaw->drop();
         m_cloudShaderCbRaw = nullptr;
     }
 
@@ -156,12 +156,10 @@ IrrlichtRenderer::~IrrlichtRenderer() {
     // node->remove() here would be redundant and potentially unsafe — the scene manager
     // tears down all remaining nodes when the device is dropped.
     //
-    // We therefore only delete the C++ LODNode wrapper objects (releasing their heap
-    // allocation). The underlying scene nodes are cleaned up by device->drop().
-    for (auto& kv : m_buildingNodes) { delete kv.second; }
+    // unique_ptr destructors fire automatically when the maps are destroyed.
+    // The underlying scene nodes are cleaned up by device->drop().
     m_buildingNodes.clear();
 
-    for (auto& kv : m_roadNodes) { delete kv.second; }
     m_roadNodes.clear();
 
     // Drop shared procedural road meshes (each ref_count 1 → 0 → freed).
@@ -169,8 +167,7 @@ IrrlichtRenderer::~IrrlichtRenderer() {
     if (m_sharedRoadMeshLOD1) { m_sharedRoadMeshLOD1->drop(); m_sharedRoadMeshLOD1 = nullptr; }
     if (m_sharedRoadMeshLOD2) { m_sharedRoadMeshLOD2->drop(); m_sharedRoadMeshLOD2 = nullptr; }
 
-    // Vehicle LODNode wrappers — same rationale: only delete the C++ wrapper.
-    for (auto& kv : m_vehicleNodes) { delete kv.second; }
+    // Vehicle LODNode wrappers — unique_ptr destructors fire on clear.
     m_vehicleNodes.clear();
 
     // Phase 11d: agent nodes — clear map (scene nodes destroyed by scene manager).
@@ -200,10 +197,10 @@ IrrlichtRenderer::~IrrlichtRenderer() {
 // -------------------------------------------------------------------------
 template<typename KeyT>
 void IrrlichtRenderer::evictLODNodeRegistry(
-    std::unordered_map<KeyT, LODNode*>& registry)
+    std::unordered_map<KeyT, std::unique_ptr<LODNode>>& registry)
 {
     for (auto& kv : registry) {
-        LODNode* lodNode = kv.second;
+        LODNode* lodNode = kv.second.get();  // raw ptr still needed for scene-graph steps
         if (!lodNode) continue;
         irr::scene::ISceneNode* node = lodNode->getNode();
         if (node) {
@@ -219,8 +216,7 @@ void IrrlichtRenderer::evictLODNodeRegistry(
             // Step 3: remove from scene graph.
             node->remove();
         }
-        // Step 4: delete the LODNode wrapper.
-        delete lodNode;
+        // Step 4: unique_ptr destructor destroys the LODNode wrapper on registry.clear().
     }
     registry.clear();
 }
@@ -229,9 +225,9 @@ void IrrlichtRenderer::evictLODNodeRegistry(
 // uint64_t: m_buildingNodes and m_roadNodes (tile-keyed registries).
 // uint32_t: m_vehicleNodes (vehicle-id-keyed registry).
 template void IrrlichtRenderer::evictLODNodeRegistry<uint64_t>(
-    std::unordered_map<uint64_t, LODNode*>&);
+    std::unordered_map<uint64_t, std::unique_ptr<LODNode>>&);
 template void IrrlichtRenderer::evictLODNodeRegistry<uint32_t>(
-    std::unordered_map<uint32_t, LODNode*>&);
+    std::unordered_map<uint32_t, std::unique_ptr<LODNode>>&);
 
 // -------------------------------------------------------------------------
 // clearCity — Phase 11m new-game reset.
@@ -1367,14 +1363,14 @@ bool IrrlichtRenderer::ensureAssetLoader()
 // No-op if the key is not in the registry.
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::destroyTileNode(
-    std::unordered_map<uint64_t, LODNode*>& registry,
+    std::unordered_map<uint64_t, std::unique_ptr<LODNode>>& registry,
     int tileX, int tileZ)
 {
     uint64_t key = tileKey(tileX, tileZ);
     auto it = registry.find(key);
     if (it == registry.end() || !it->second) return;
 
-    LODNode* lodNode = it->second;
+    LODNode* lodNode = it->second.get();
     scene::ISceneNode* node = lodNode->getNode();
 
     if (node && m_driver) {
@@ -1392,8 +1388,7 @@ void IrrlichtRenderer::destroyTileNode(
         node->remove();  // do NOT access node* after this
     }
 
-    // Delete the LODNode wrapper (non-owning — scene node already removed above).
-    delete lodNode;
+    // Erase destroys the unique_ptr, which deletes the LODNode wrapper.
     registry.erase(it);
 }
 
@@ -1517,7 +1512,7 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
 
     // Construct the asset base path: assets/3d/buildings/<assetBaseName>
     // BuildingAssetLoader::load() appends _lod0.b3d, _lod1.b3d, _lod2.b3d, .meta.
-    std::string basePath = g_assetsDir +
+    std::string basePath = getAssetsDir() +
                            "/3d/buildings/" + assetBaseName;
 
     // Parse density tier from assetBaseName (format: "zone_dens_NN", e.g. "res_low_01").
@@ -1542,7 +1537,7 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
     // and rebuilds adjacent road tiles. Returns the averaged height for node positioning.
     const float targetH = flattenFootprint(tileX, tileZ, footprintN);
 
-    LODNode* lodNode = m_buildingAssetLoader->load(basePath);
+    std::unique_ptr<LODNode> lodNode = m_buildingAssetLoader->load(basePath);
     if (!lodNode) {
         char buf[512];
         std::snprintf(buf, sizeof(buf),
@@ -1588,7 +1583,7 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
         applyBuildingMaterialDefaults(node, zoneTex);
     }
 
-    m_buildingNodes[tileKey(tileX, tileZ)] = lodNode;
+    m_buildingNodes[tileKey(tileX, tileZ)] = std::move(lodNode);
 }
 
 // -------------------------------------------------------------------------
@@ -1643,7 +1638,7 @@ bool IrrlichtRenderer::initRoadShader()
     //   Authored ~RGB(82,80,82) appears correctly on the non-sRGB framebuffer.
     const bool srgbOk = (glewIsExtensionSupported("GL_EXT_texture_sRGB") == GL_TRUE);
 
-    const std::string texPath = g_assetsDir
+    const std::string texPath = getAssetsDir()
                                 + "/textures/roads/road_asphalt_tileable.dds";
 
     GLuint texHandle = m_roadTextureCache->loadSRGB(texPath,
@@ -1661,8 +1656,8 @@ bool IrrlichtRenderer::initRoadShader()
         return false;
     }
 
-    const std::string vsPath = g_assetsDir + "/shaders/road.vert";
-    const std::string fsPath = g_assetsDir + "/shaders/road.frag";
+    const std::string vsPath = getAssetsDir() + "/shaders/road.vert";
+    const std::string fsPath = getAssetsDir() + "/shaders/road.frag";
 
     // srgbOk drives u_srgbLinear in the callback (0 when sRGB, 1 when linear upload).
     // road.frag uses this to decide whether to apply the linear→sRGB inverse correction.
@@ -1718,7 +1713,7 @@ void IrrlichtRenderer::initTerrainShader()
     }
 
     // Build paths for the 4 terrain diffuse layers (splat channel order: R/G/B/A).
-    const std::string assetsDir = g_assetsDir;
+    const std::string assetsDir = getAssetsDir();
     const std::string grassPath    = assetsDir + "/textures/terrain/terrain_grass_d.dds";
     const std::string asphaltPath  = assetsDir + "/textures/terrain/terrain_asphalt_d.dds";
     const std::string soilPath     = assetsDir + "/textures/terrain/terrain_soil_d.dds";
@@ -2169,11 +2164,11 @@ void IrrlichtRenderer::flattenRoadTerrain(int tileX, int tileZ)
 
 // -------------------------------------------------------------------------
 // buildRoadSceneNode — A-33 helper: create scene node and LODNode for one road tile.
-// Returns the new LODNode* (caller registers in m_roadNodes), or nullptr on failure.
+// Returns the new LODNode (caller registers in m_roadNodes), or nullptr on failure.
 // -------------------------------------------------------------------------
-LODNode* IrrlichtRenderer::buildRoadSceneNode(int tileX, int tileZ,
-                                               float h00, float h10, float h01, float h11,
-                                               bool isEW)
+std::unique_ptr<LODNode> IrrlichtRenderer::buildRoadSceneNode(int tileX, int tileZ,
+                                                               float h00, float h10, float h01, float h11,
+                                                               bool isEW)
 {
     SMesh* tileMesh = buildTileRoadMesh(h00, h10, h01, h11, isEW);
     if (!tileMesh) {
@@ -2241,7 +2236,7 @@ LODNode* IrrlichtRenderer::buildRoadSceneNode(int tileX, int tileZ,
     // update path; distance thresholds now in RoadLOD namespace (render_constants.h, A-14).
     (void)RoadLOD::kLOD0to1; (void)RoadLOD::kLOD1to2; (void)RoadLOD::kCullDist;
 
-    return new LODNode(node);
+    return std::make_unique<LODNode>(node);
 }
 
 // -------------------------------------------------------------------------
@@ -2311,9 +2306,9 @@ void IrrlichtRenderer::placeRoadMesh(int tileX, int tileZ,
     const bool isEW = hasEW_dir && !hasNS_dir;
 
     // Build scene node and LODNode wrapper.
-    LODNode* lodNode = buildRoadSceneNode(tileX, tileZ, h00, h10, h01, h11, isEW);
+    std::unique_ptr<LODNode> lodNode = buildRoadSceneNode(tileX, tileZ, h00, h10, h01, h11, isEW);
     if (!lodNode) return;
-    m_roadNodes[tileKey(tileX, tileZ)] = lodNode;
+    m_roadNodes[tileKey(tileX, tileZ)] = std::move(lodNode);
 
     // --- Phase 3: rebuild road meshes in the 5×5 affected area ---
     // Terrain was already flushed in Phase 1.  Any road tile within ±2 tiles
@@ -2379,10 +2374,10 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
     static constexpr int kSvcFootprintN = 2;
     const float svcTargetH = flattenFootprint(tileX, tileZ, kSvcFootprintN);
 
-    std::string basePath = g_assetsDir +
+    std::string basePath = getAssetsDir() +
                            "/3d/buildings/" + stem;
 
-    LODNode* lodNode = m_buildingAssetLoader->load(basePath);
+    std::unique_ptr<LODNode> lodNode = m_buildingAssetLoader->load(basePath);
     if (!lodNode) {
         char buf[512];
         std::snprintf(buf, sizeof(buf),
@@ -2419,7 +2414,7 @@ void IrrlichtRenderer::placeServiceBuildingMesh(int tileX, int tileZ,
 
     // Service buildings share the m_buildingNodes registry with zone buildings:
     // a tile can hold at most one building of any type (simulation invariant).
-    m_buildingNodes[tileKey(tileX, tileZ)] = lodNode;
+    m_buildingNodes[tileKey(tileX, tileZ)] = std::move(lodNode);
 }
 
 // -------------------------------------------------------------------------
@@ -2480,7 +2475,7 @@ void IrrlichtRenderer::destroyVehicleNode(uint32_t vehicleId)
     auto it = m_vehicleNodes.find(vehicleId);
     if (it == m_vehicleNodes.end() || !it->second) return;
 
-    LODNode* lodNode = it->second;
+    LODNode* lodNode = it->second.get();
     scene::ISceneNode* node = lodNode->getNode();
 
     if (node && m_driver) {
@@ -2498,8 +2493,7 @@ void IrrlichtRenderer::destroyVehicleNode(uint32_t vehicleId)
         node->remove();  // do NOT access node* after this
     }
 
-    // Step 4: delete the LODNode wrapper.
-    delete lodNode;
+    // Step 4: erase destroys the unique_ptr, which deletes the LODNode wrapper.
     m_vehicleNodes.erase(it);
 }
 
@@ -2531,10 +2525,10 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
 
     if (!ensureVehicleLoader()) return;
 
-    const std::string basePath = g_assetsDir
+    const std::string basePath = getAssetsDir()
                                  + "/3d/vehicles/" + assetName;
 
-    LODNode* lodNode = m_vehicleAssetLoader->load(basePath);
+    std::unique_ptr<LODNode> lodNode = m_vehicleAssetLoader->load(basePath);
     if (!lodNode) {
         char buf[512];
         std::snprintf(buf, sizeof(buf),
@@ -2562,7 +2556,7 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
         // bind vehicles_diffuse_atlas_d.png directly as a safety fallback.
         // Use PNG (not DDS): Irrlicht's DDS loader does not recognise the BC1_UNORM_SRGB
         // format used by the DDS atlas (same rationale as vehicleAtlasPath()).
-        const std::string atlasPath = g_assetsDir
+        const std::string atlasPath = getAssetsDir()
             + "/textures/vehicles/vehicles_diffuse_atlas_d.png";
 
         for (u32 m = 0; m < node->getMaterialCount(); ++m) {
@@ -2577,7 +2571,7 @@ void IrrlichtRenderer::placeVehicle(uint32_t vehicleId,
         }
     }
 
-    m_vehicleNodes[vehicleId] = lodNode;
+    m_vehicleNodes[vehicleId] = std::move(lodNode);
 }
 
 // -------------------------------------------------------------------------
@@ -2828,7 +2822,7 @@ void IrrlichtRenderer::initCloudPlane()
     if (m_cloudNode) {
         // Load cloud texture from linear pool (PNG — Irrlicht DDS loader disabled).
         // Per sky-clouds.md: IVideoDriver::getTexture(), NOT TextureCache::loadSRGB().
-        ITexture* tex = m_driver->getTexture((g_assetsDir + "/textures/sky/clouds.png").c_str());
+        ITexture* tex = m_driver->getTexture((getAssetsDir() + "/textures/sky/clouds.png").c_str());
 
         // --- Cloud dome shader ---
         // Load cloud_dome.vert / cloud_dome.frag via the GPU programming services.
@@ -2847,9 +2841,9 @@ void IrrlichtRenderer::initCloudPlane()
         irr::video::IGPUProgrammingServices* gpu = m_driver->getGPUProgrammingServices();
         if (gpu) {
             const std::string vsPath =
-                g_assetsDir + "/shaders/cloud_dome.vert";
+                getAssetsDir() + "/shaders/cloud_dome.vert";
             const std::string fsPath =
-                g_assetsDir + "/shaders/cloud_dome.frag";
+                getAssetsDir() + "/shaders/cloud_dome.frag";
 
             // CloudDomeShaderCallback: raw heap allocation.  We keep our own reference
             // (stored as m_cloudShaderCbRaw) so the destructor can drop it.
@@ -2982,7 +2976,7 @@ void IrrlichtRenderer::update(float dt)
 static std::string vehicleAtlasPath()
 {
     static const std::string kPath =
-        g_assetsDir + "/textures/vehicles/vehicles_diffuse_atlas_d.png";
+        getAssetsDir() + "/textures/vehicles/vehicles_diffuse_atlas_d.png";
     return kPath;
 }
 
@@ -2990,7 +2984,7 @@ static std::string vehicleAtlasPath()
 static std::string vehicleMeshPath(ZoneType zone, AgentHandle handle)
 {
     // A-18: hoist repeated path prefix into a single local variable.
-    const std::string kVehicleDir = g_assetsDir + "/3d/vehicles/";
+    const std::string kVehicleDir = getAssetsDir() + "/3d/vehicles/";
     switch (zone) {
         case ZoneType::Residential: {
             const char* variants[3] = {"car_sedan", "car_hatchback", "car_suv"};

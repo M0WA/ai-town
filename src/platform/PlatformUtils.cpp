@@ -5,7 +5,15 @@
 #include <cstdio>
 #include <string>
 
-std::string g_assetsDir;
+namespace {
+    std::string& mutableAssetsDir() {
+        static std::string s;
+        return s;
+    }
+}
+
+void setAssetsDir(std::string dir) { mutableAssetsDir() = std::move(dir); }
+const std::string& getAssetsDir()  { return mutableAssetsDir(); }
 
 #if defined(_WIN32)
 
