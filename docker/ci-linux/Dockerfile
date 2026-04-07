@@ -6,7 +6,7 @@ ARG VCPKG_COMMIT
 
 # Install system dependencies in one RUN layer to keep the image lean.
 # Packages included:
-#   build tools:   git, curl, wget, ca-certificates, zip, unzip, tar, jq, pkg-config,
+#   build tools:   git, curl, ca-certificates, zip, unzip, tar, jq, pkg-config,
 #                  build-essential, ccache, ninja-build, gcc-13, g++-13,
 #                  autoconf, automake, libtool (required by vcpkg alsa port)
 #   CI runtime:    xvfb, xauth, libgl1-mesa-dev, mesa-utils, libglu1-mesa-dev,
@@ -16,7 +16,6 @@ ARG VCPKG_COMMIT
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
-    wget \
     ca-certificates \
     zip \
     unzip \
@@ -62,7 +61,9 @@ RUN pip3 install --break-system-packages mutagen Pillow gcovr
 # Pinned to match the devcontainer.
 ARG CMAKE_VERSION=3.31.10
 RUN CMAKE_ARCH=$(uname -m) && \
-  wget -q "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz" && \
+  curl --proto '=https' --tlsv1.2 --fail --silent --location \
+    --output "cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz" \
+    "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz" && \
   tar -xzf "cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz" -C /opt && \
   ln -s "/opt/cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}" /opt/cmake && \
   rm "cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz"
