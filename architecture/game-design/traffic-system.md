@@ -44,12 +44,26 @@ of the actual city rather than defaulting to a single arbitrary zone type.
 
 **Scope rules**:
 
-- This fallback applies **at initial vehicle spawn only** (the moment a vehicle is created
-  and its destination tile is sampled).
-- It is **not re-applied on trip completion**. When a vehicle finishes a trip and picks a
-  new destination, zone assignment is updated only if the new destination tile **is** zoned
-  (`isZoned == true`). Unzoned new destinations reuse the vehicle's previously assigned zone
-  for the duration of that trip without re-rolling.
+- **"Trip" definition (single-hop routing model)**: In V1, the traffic simulation uses
+  single-tile-hop routing: each step, a vehicle picks one adjacent tile as its next
+  destination (`dstX`/`dstZ`). A "trip" therefore equals one tile-hop. Trip completion
+  fires every time the vehicle arrives at an adjacent tile and selects a new destination.
+- **Spawn-time fallback (proportional draw)**: The 70/20/10 proportional random draw
+  applies **only at initial vehicle spawn** (the moment a vehicle is created and its
+  spawn-tile destination is sampled). If the spawn tile is unzoned, the proportional
+  draw determines the vehicle's initial zone type. The proportional draw is **never
+  re-applied** after spawn — it is a one-time fallback for unzoned spawn tiles only.
+- **Trip-completion zone re-evaluation**: On each tile-hop completion, when the vehicle
+  picks a new destination tile, zone assignment is re-evaluated:
+  - If the new destination tile **is** zoned (`isZoned == true`), the vehicle's zone type
+    is updated to match the tile's zone type.
+  - If the new destination tile is **unzoned** (`isZoned == false`), the vehicle retains
+    its previously assigned zone type. The proportional draw is NOT re-rolled.
+- **Zone-boundary mesh transitions**: Because zone re-evaluation fires on every tile-hop,
+  vehicles change mesh type (e.g., car to bus, car to truck) when crossing zone boundaries
+  mid-journey. This is intentional: buses serve Commercial zones, trucks serve Industrial
+  zones. If visual transitions prove jarring, a future phase may add a minimum
+  zone-persistence duration to suppress rapid mesh swaps.
 - All random draws must go through `ISimulationRNG*` injected at `CitySimulation`
   construction. Never use `std::rand()` or any global RNG for this draw — tests rely on
   `ManualRNG` for deterministic zone-assignment scenarios.

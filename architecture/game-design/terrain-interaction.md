@@ -19,12 +19,17 @@
 When `ICitySimulation::placeZone()` succeeds, the following player-visible feedback must occur
 in the same frame as the click:
 
-1. **Zone colour overlay**: `UIManager` inserts the tile's key (`tileZ * mapTilesX + tileX`)
-   into its sparse `m_overlayMap` with the zone-type ARGB colour (`kOverlayArgbResidential`,
-   `kOverlayArgbCommercial`, or `kOverlayArgbIndustrial` — see
-   `architecture/ui-ux/hud-layout.md` and `architecture/game-design/zoning-system.md`) and
-   immediately calls `IRenderer::setZoneOverlay(mapTilesX, mapTilesZ, m_overlayMap)`. The
-   semi-transparent colour quad is rendered over the tile on the same frame. **Prerequisite**:
+1. **Zone colour overlay**: `UIManager` inserts **N×N keys** into its sparse `m_overlayMap`
+   (where N = `selectedDensityTier + 1`: Low=1, Medium=2, High=3). Each key has the form
+   `(tileZ + dz) * mapTilesX + (tileX + dx)` for `dx, dz` in `[0, N)`. All N² keys receive
+   the same demand-gradient ARGB from `computeZoneOverlayColor()` (see
+   `architecture/ui-ux/hud-layout.md` and `architecture/game-design/zoning-system.md`).
+   After inserting all in-bounds keys, `IRenderer::setZoneOverlay(mapTilesX, mapTilesZ,
+   m_overlayMap)` is called immediately. The semi-transparent colour quads are rendered over
+   the entire N×N footprint on the same frame. Out-of-bounds tiles (where `tileX + dx >=
+   mapTilesX` or `tileZ + dz >= mapTilesZ`) are skipped via `continue`. The insert is
+   all-or-nothing: if `m_overlayMap.size() + N² > kOverlayCap` (100,000), the entire
+   footprint is rejected and `setZoneOverlay` is still called (cap enforcement). **Prerequisite**:
    `UIManager::setMapDimensions(mapTilesX, mapTilesZ)` must be called from `main.cpp` after
    terrain generation completes, before the first frame of gameplay. If `setMapDimensions` has
    not been called (both dimensions are 0), the overlay update is skipped silently — the

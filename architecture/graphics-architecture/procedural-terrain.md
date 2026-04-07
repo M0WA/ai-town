@@ -152,7 +152,7 @@
   Added as a pure-virtual method to `ITerrainQuery` (`src/interfaces/ITerrainQuery.h`) in
   Phase 11q. **Implementation atomicity**: the `ITerrainQuery.h` pure-virtual declaration,
   `TerrainSystem.h`/`TerrainSystem.cpp` bilinear implementation, and `ManualTerrainQuery`
-  no-op stub must all be committed together to avoid making `TerrainSystem` or
+  bilinear implementation must all be committed together to avoid making `TerrainSystem` or
   `ManualTerrainQuery` abstract (compilation failure).
 
   **`ITerrainQuery` interface promotion (Phase 9b)**: `getHeightAt` is promoted to the
@@ -177,7 +177,7 @@
   const float postY = m_terrain ? targetH : 0.0f;
   node->setPosition(irr::core::vector3df(
       static_cast<float>(tileX) * kTileSize + kTileSize * 0.5f,
-      postY + 0.10f,   // 10 cm above terrain for roads, buildings, and service buildings
+      postY + 0.25f,   // 25 cm above terrain (kRoadSurfaceYBias in render_constants.h)
       static_cast<float>(tileZ) * kTileSize + kTileSize * 0.5f));
   ```
 
@@ -632,7 +632,7 @@ for (int dz = -2; dz <= 2; ++dz)
 
 // Use targetH directly — NOT getHeightAt() after setTileHeight().
 const float postY = m_terrain ? targetH : 0.0f;
-node->setPosition(... postY + 0.10f ...);
+node->setPosition(... postY + 0.25f ...);  // kRoadSurfaceYBias
 ```
 
 **Note**: The example above shows Low-density (1×1) building placement. For buildings with multi-tile footprints (Medium: N=2, High: N=3, Service: N=2), the caller must iterate the full N×N grid and call `setTileHeight()` for every corner vertex of the footprint. See `architecture/game-design/terrain-interaction.md` — *Multi-tile footprint extension* — for the loop pattern.

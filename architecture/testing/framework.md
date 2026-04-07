@@ -139,7 +139,8 @@ tests/
 ```cmake
 # Example CMakeLists.txt registration:
 add_executable(simulation_tests tests/simulation/economy_test.cpp ...)
-target_link_libraries(simulation_tests PRIVATE aitown_sim GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
+target_link_libraries(simulation_tests PRIVATE aitown_sim aitown_platform GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
+# aitown_platform: Phase 11q — required for getAssetsDir() called by vehicleMeshPath()
 # src/simulation/ is REQUIRED: simulation test files use #include "simulation_constants.h" and other
 # simulation headers (e.g. simulation_types.h, city_simulation.h) via project-relative paths that
 # resolve relative to src/simulation/. Without this entry, the compiler cannot find these headers
@@ -148,7 +149,8 @@ target_link_libraries(simulation_tests PRIVATE aitown_sim GTest::gtest_main GTes
 # simulation headers — future test files in tests/simulation/ will need it, and the include path
 # must be present before first use to avoid a retroactive CMakeLists.txt amendment.
 target_include_directories(simulation_tests PRIVATE
-    tests/simulation/ src/interfaces/ src/simulation/ ${CMAKE_SOURCE_DIR})
+    tests/simulation/ src/interfaces/ src/simulation/ src/rendering/ ${CMAKE_SOURCE_DIR})
+# src/rendering/: Phase 11q — required for vehicle_mesh_path.h
 aitown_add_tests(simulation_tests LABEL "unit")
 # Phase 3 exit criterion: All 6 ManualRNG self-tests must pass.
 # These tests live in tests/simulation/manual_rng_test.cpp and are registered
