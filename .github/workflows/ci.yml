@@ -9,11 +9,8 @@ on:
     branches: [main, develop]
   workflow_dispatch:
 
-# permissions block — required for dorny/test-reporter to write PR annotations.
-permissions:
-  checks: write       # required by dorny/test-reporter to post check results
-  contents: read      # required to checkout code
-  packages: read      # required by build-linux and coverage-linux to pull GHCR image
+# Lock down by default — each job declares only what it needs.
+permissions: {}
 
 # VCPKG_COMMIT_ID declared here only — reusable workflows receive it as input.
 # NOTE: env context is not available in jobs.<job_id>.with for reusable workflow calls.
@@ -162,6 +159,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
+    permissions: {}   # only runs a bash gate script — no permissions needed
     steps:
       - name: Verify all platform builds passed
         shell: bash
