@@ -1670,6 +1670,13 @@ miss; 120 min provides sufficient headroom.
 rebuild are: `_build-linux.yml`, `_test-linux.yml`, `_coverage-linux.yml`, and
 `.devcontainer/Dockerfile`.
 
+**Secure download policy**: All file downloads in `docker/ci-linux/Dockerfile` and
+`.devcontainer/Dockerfile` must use `curl` (not `wget`) with `--proto '=https' --tlsv1.2`.
+`wget --https-only` is **not** a valid substitute — it applies only to recursive crawls and
+does not enforce HTTPS in non-recursive mode. Use `curl --proto '=https' --tlsv1.2 --fail
+--location` for all artifact downloads. `npm install -g` calls must include `--ignore-scripts`
+to prevent execution of lifecycle scripts from transitive dependencies.
+
 ---
 
 ## `sonarcloud.yml` — SonarCloud Analysis Workflow
