@@ -161,7 +161,7 @@ enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 
 The 24 Traffic/Vehicle SFX pool slots support a maximum of **12 simultaneously-audible vehicles** because each vehicle requires 2 sources (one for `sfx_vehicle_engine_idle`, one for `sfx_vehicle_engine_move`, crossblended in real time).
 
-- **Paired acquisition**: `AudioSourcePool::acquireVehicleEnginePair(ZoneType zone)` must atomically reserve 2 SFX pool slots and return `std::pair<int,int>{idleIdx, moveIdx}`, or return `{-1, -1}` and reserve neither if the pool is exhausted. Indices are opaque pool-internal integers — not `ALuint` handles. This prevents orphaned single-source vehicles.
+- **Paired acquisition**: `AudioSourcePool::acquireVehicleEnginePair(ZoneType zone)` must atomically reserve 2 SFX pool slots and return `std::pair<int,int>{idleIdx, moveIdx}`, or return `{-1, -1}` and reserve neither if the pool is exhausted. Indices are opaque pool-internal integers — not `ALuint` handles. This prevents orphaned single-source vehicles. The `zone` parameter determines the base pitch multiplier applied to both sources: `Residential` → 1.0 (car engine), `Commercial` → 0.85 (bus engine), `Industrial` → 0.85 (truck engine); see `audio-system.md` for the full pitch mapping.
 - **Paired release**: `AudioSourcePool::releaseVehicleEnginePair(int idleIdx, int moveIdx)` returns both sources to the pool atomically. Never release only one of a pair.
 - **Eviction unit**: When the pool must evict to satisfy a new vehicle acquisition request, the eviction candidate selection must find the lowest-priority vehicle pair (both sources share the same vehicle entity priority and distance) and evict both together.
 - **Audio LOD cull**: Vehicle engine sources are culled (pair released) when the vehicle exceeds **150 m** from the listener. This aligns with the `AL_INVERSE_DISTANCE_CLAMPED` max distance of 150 m for traffic/vehicles — beyond this distance the attenuation model produces inaudible output anyway.
@@ -185,6 +185,11 @@ struct VehiclePairSlot {
     std::atomic<float> speedFraction{0.f};  // normalised 0.0 (stopped) → 1.0 (max speed)
     std::atomic<float> worldX{0.f};         // world-space X for AL_POSITION
     std::atomic<float> worldZ{0.f};         // world-space Z for AL_POSITION
+    // Zone-based pitch multiplier set once at acquisition time and read by the audio thread on
+    // each wake to apply the base pitch before the speed-fraction crossblend.
+    // Residential (car) → 1.0f; Commercial (bus) → 0.85f; Industrial (truck) → 0.85f.
+    // See audio-system.md for the full zone→pitch mapping.
+    std::atomic<float> basePitch{1.0f};
 };
 std::array<VehiclePairSlot, 12> m_vehiclePairs{};  // up to 12 active vehicles (kMaxVehiclePairs = 12)
 ```
@@ -192,7 +197,7 @@ std::array<VehiclePairSlot, 12> m_vehiclePairs{};  // up to 12 active vehicles (
 **`acquireVehicleEnginePair()` — atomic acquisition with eviction**:
 
 1. Scan `m_vehiclePairs` for the first entry with `idleSourceIdx == -1` (an unused pair slot).
-2. If a free pair slot exists, find 2 free sources from the NORMAL-priority evictable SFX range (`sources[0..50]`) and assign them. Return the pair index.
+2. If a free pair slot exists, find 2 free sources from the NORMAL-priority evictable SFX range (`sources[0..50]`) and assign them. Store the zone-based `basePitch` into the pair slot: `Residential` → `1.0f`, `Commercial` or `Industrial` → `0.85f`. Return the pair index.
 3. If NO free pair slot exists (all 12 vehicles active), select the eviction candidate: the pair with the **lowest combined priority** and, as a tiebreak, the **greatest average listener distance squared**. Evict both sources of the candidate pair:
    - Call `alSourceStop` on both source indices.
    - Call `onSourceRecycled(i)` for each (resets occlusion state).
@@ -208,7 +213,7 @@ std::array<VehiclePairSlot, 12> m_vehiclePairs{};  // up to 12 active vehicles (
 1. Locate the pair slot: scan `m_vehiclePairs` for the entry where `idleSourceIdx == idleIdx && moveSourceIdx == moveIdx`. If no matching slot is found (implementation error or already released), log a warning and return.
 2. Call `onSourceRecycled(idleIdx)` and `onSourceRecycled(moveIdx)`.
 3. Return both source indices to the free pool.
-4. Reset the matched `VehiclePairSlot`: set `idleSourceIdx` and `moveSourceIdx` to -1, `listenerDistanceSq` to 0.f, `priority` to 0; store 0.f to `speedFraction`, `worldX`, and `worldZ` atomics.
+4. Reset the matched `VehiclePairSlot`: set `idleSourceIdx` and `moveSourceIdx` to -1, `listenerDistanceSq` to 0.f, `priority` to 0; store 0.f to `speedFraction`, `worldX`, and `worldZ` atomics; store 1.0f to `basePitch`.
 
 Releasing only one source of a pair (e.g., on LOD cull) is prohibited. The cull path must call `releaseVehicleEnginePair(idleIdx, moveIdx)` — never free individual sources from a pair via `acquireSFXSource`/release paths.
 
