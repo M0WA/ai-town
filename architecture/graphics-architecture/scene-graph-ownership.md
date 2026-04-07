@@ -705,8 +705,15 @@ any number of manually placed vehicle nodes.
    - `mat.BackfaceCulling = false` (same rationale as `placeVehicle` — see Vehicle material
      rules above; procedural B3D winding may be mixed after axis reorientation)
    - `mat.setTexture(0, vehicleTex)` for slot 0 (vehicles atlas PNG)
-2. `moveVehicleAgent(handle, worldX, worldZ, headingDeg)` → looks up node, updates position
-   (world-space metres) and Y-rotation; does nothing if handle is absent (agent was culled).
+2. `moveVehicleAgent(handle, worldX, worldZ, headingDeg)` → looks up node and updates:
+   - **Position**: world X/Z from arguments; Y set to bilinear terrain height via
+     `getHeightAtWorld(worldX, worldZ)` plus `kRoadSurfaceYBias` (so the vehicle sits on the
+     road surface rather than clipping through terrain).
+   - **Rotation**: full three-axis orientation — yaw (Y-axis) from `headingDeg`, plus pitch
+     (X-axis) and roll (Z-axis) derived from the terrain slope normal. The slope normal is
+     computed via finite-difference sampling of `getHeightAtWorld` at half-tile offset
+     positions around the vehicle's world location.
+   Does nothing if handle is absent (agent was culled).
 3. `despawnVehicleAgent(handle)` → runs the following eviction sequence, then erases from
    `m_agentNodes`:
    1. Iterate all material slots — call `mat.setTexture(t, nullptr)` for every texture unit
