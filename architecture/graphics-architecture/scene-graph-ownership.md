@@ -705,8 +705,8 @@ any number of manually placed vehicle nodes.
    - `mat.BackfaceCulling = false` (same rationale as `placeVehicle` — see Vehicle material
      rules above; procedural B3D winding may be mixed after axis reorientation)
    - `mat.setTexture(0, vehicleTex)` for slot 0 (vehicles atlas PNG)
-2. `moveVehicleAgent(handle, tileX, tileZ, headingDeg)` → looks up node, updates position and
-   Y-rotation; does nothing if handle is absent (agent was culled).
+2. `moveVehicleAgent(handle, worldX, worldZ, headingDeg)` → looks up node, updates position
+   (world-space metres) and Y-rotation; does nothing if handle is absent (agent was culled).
 3. `despawnVehicleAgent(handle)` → runs the following eviction sequence, then erases from
    `m_agentNodes`:
    1. Iterate all material slots — call `mat.setTexture(t, nullptr)` for every texture unit
@@ -722,8 +722,44 @@ any number of manually placed vehicle nodes.
    `TextureCache::releaseSRGB`. Steps 1–2 above release the node's texture reference without
    disturbing the shared atlas.
 
+**`vehicleMeshPath()` — zone-to-mesh mapping**: `spawnVehicleAgent()` calls a free function
+`vehicleMeshPath(ZoneType zone, int variantIdx = 0)` declared in
+**`src/rendering/vehicle_mesh_path.h`** to select the LOD0 asset path. Declaring it in a
+standalone header (not as a file-scope static) allows direct unit testing without a live
+Irrlicht context.
+
+| `ZoneType` | `vehicle_id` | LOD0 asset path |
+|---|---|---|
+| `Residential` | `car_sedan` / `car_hatchback` / `car_suv` (round-robin via `variantIdx % 3`) | `assets/3d/vehicles/<variant>_lod0.b3d` |
+| `Commercial` | `bus_standard` | `assets/3d/vehicles/bus_standard_lod0.b3d` |
+| `Industrial` | `truck_cargo` | `assets/3d/vehicles/truck_cargo_lod0.b3d` |
+
+Signature: `inline std::string vehicleMeshPath(ZoneType zone, int variantIdx = 0)` (defined
+in the header). `spawnVehicleAgent()` passes `static_cast<int>(handle) % 3` as `variantIdx`
+for deterministic per-vehicle Residential variant selection.
+**Fallback**: unrecognised `zone` values (and default `variantIdx = 0`) return the `car_sedan`
+path, preventing an empty string from reaching `ISceneManager::getMesh()`.
+
 **Cull policy**: agents beyond 150 m from the camera are not spawned (simulation skips calling
 `spawnVehicleAgent` for them); agents that move beyond 150 m trigger `despawnVehicleAgent`.
+
+**Zone-change respawn**: when the per-frame agent sync loop detects that an active agent's
+`zone` field has changed (i.e. `activeAgents[handle].zone != a.zone`), the renderer node
+must be fully replaced — the mesh is zone-specific and cannot be hot-swapped on an existing
+node. The required sequence is:
+
+1. `audioSystem.releaseVehicleEnginePair(s.idleIdx, s.moveIdx)` — return old audio pair first.
+2. `renderer.despawnVehicleAgent(handle)` — removes the stale mesh node.
+3. `renderer.spawnVehicleAgent(handle, tileX, tileZ, newZone)` — creates a new node with the
+   correct mesh for the new zone (bus, truck, or car variant).
+4. `audioSystem.acquireVehicleEnginePair(newZone)` — obtain a fresh audio pair whose pitch
+   multiplier matches the new zone (`Residential` → 1.0, `Commercial`/`Industrial` → 0.85).
+5. Store the new audio pair indices and zone in the cached agent state.
+
+If `acquireVehicleEnginePair()` returns `{-1, -1}` (pool exhausted), the vehicle renders
+with the correct mesh but produces no engine audio (silent mode). This is acceptable per the
+source-pool spec. See `architecture/audio-architecture/source-pool.md` §Vehicle Engine Source
+Constraints for the invalid-index guard contract.
 
 **SMesh / drop() rules**: agent nodes use `IAnimatedMesh*` loaded via `ISceneManager::getMesh()`
 and cast to `IMesh*` for `addMeshSceneNode` — the scene manager owns the mesh;

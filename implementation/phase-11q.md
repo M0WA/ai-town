@@ -25,8 +25,10 @@ in simulation logic and renderer positioning code.
 
 The deliverables are sequenced from lowest risk to highest effort:
 
-1. **Fix 2a** — Add `kRoadSurfaceYBias` constant and apply it in `moveVehicleAgent()`.
-   Single-line change; eliminates 25 cm sink/hover on flat terrain.
+1. **Fix 2a** — Add `kRoadSurfaceYBias` and `kTileSize` constants to `render_constants.h`
+   and replace the function-local `B = 0.25f` in `buildTileRoadMesh()` with the shared
+   constant. (Fix 2b applies `kRoadSurfaceYBias` in `moveVehicleAgent()` — Fix 2a only
+   touches `buildTileRoadMesh()`.)
 2. **Fix 2d** — Correct stale comment (0.10 m → 0.25 m). Zero risk; cosmetic only.
 3. **Fix 1b** — Assign vehicle zone from destination tile at spawn (primary zone fix).
 4. **Fix 1c** — Re-query destination zone on trip completion (retroactive update).
@@ -44,6 +46,56 @@ The deliverables are sequenced from lowest risk to highest effort:
 
 ---
 
+#### 0. `vehicle_mesh_path.h` — Extract zone-to-mesh mapping as a testable free function
+
+**Prerequisite for Tests (Deliverable 8)**
+
+`vehicleMeshPath(ZoneType zone, int variantIdx)` must be declared in a standalone header
+so it can be unit-tested without a live Irrlicht context. `variantIdx` selects among the
+three Residential car variants deterministically (caller passes `static_cast<int>(handle) % 3`
+so each vehicle always uses the same model across re-spawns).
+
+- [ ] **`src/rendering/vehicle_mesh_path.h`** (new file) — Declare and define
+  `vehicleMeshPath()` as an `inline` free function:
+
+  ```cpp
+  #pragma once
+  #include "src/interfaces/simulation_types.h"  // ZoneType
+  #include "src/platform/PlatformUtils.h"        // getAssetsDir()
+  #include <array>
+  #include <string>
+
+  /// Returns the LOD0 mesh asset path for the given zone type.
+  /// Commercial → bus_standard_lod0.b3d, Industrial → truck_cargo_lod0.b3d.
+  /// Residential: round-robins among car_sedan, car_hatchback, car_suv via
+  /// variantIdx % 3 (pass static_cast<int>(handle) % 3 for deterministic per-vehicle
+  /// assignment; pass 0 for the car_sedan default / fallback for unknown zones).
+  inline std::string vehicleMeshPath(ZoneType zone, int variantIdx = 0) {
+      const std::string kVehicleDir = getAssetsDir() + "/3d/vehicles/";
+      if (zone == ZoneType::Commercial) return kVehicleDir + "bus_standard_lod0.b3d";
+      if (zone == ZoneType::Industrial) return kVehicleDir + "truck_cargo_lod0.b3d";
+      // Residential — round-robin across three car variants.
+      static const std::array<const char*, 3> kResidential = {{
+          "car_sedan_lod0.b3d",
+          "car_hatchback_lod0.b3d",
+          "car_suv_lod0.b3d",
+      }};
+      return kVehicleDir + kResidential[static_cast<unsigned>(variantIdx) % 3];
+  }
+  ```
+
+- [ ] **`src/rendering/IrrlichtRenderer.cpp`** — In `spawnVehicleAgent()`, replace any
+  existing inline zone→mesh selection logic with a call to
+  `vehicleMeshPath(zone, static_cast<int>(handle) % 3)` (include `vehicle_mesh_path.h`).
+
+- [ ] **`CMakeLists.txt`** — Add `src/rendering/` to `simulation_tests`
+  `target_include_directories()` so the vehicleMeshPath unit tests can `#include
+  "vehicle_mesh_path.h"`. Do NOT add `src/platform/` to `simulation_tests` — the
+  `VehicleMeshPath` unit tests must avoid depending on `getAssetsDir()` at test time;
+  instead they assert only the path suffix using `EndsWith` matchers (see Deliverable 8).
+
+---
+
 #### 1. Fix 2a — `kRoadSurfaceYBias` shared constant + `moveVehicleAgent()` Y correction
 
 **Root cause**
@@ -57,13 +109,30 @@ raw terrain height with no bias (`IrrlichtRenderer.cpp:3067–3072`), leaving ve
 
 **Code changes**
 
-- [ ] **`src/rendering/render_constants.h`** — Add a new entry:
+- [ ] **`src/rendering/render_constants.h`** — Add two new entries **inside the existing
+  `namespace RenderConstants { }` block**:
 
   ```cpp
+  /// Side length of one map tile in world-space metres.
+  /// Shared between IrrlichtRenderer and TerrainSystem (getHeightAtWorld).
+  static constexpr float kTileSize = 10.0f;
+
   /// Vertical offset (metres) baked into road surface vertices by buildTileRoadMesh().
   /// Must be added to the terrain height when positioning vehicles on the road surface.
-  inline constexpr float kRoadSurfaceYBias = 0.25f;
+  static constexpr float kRoadSurfaceYBias = 0.25f;
   ```
+
+  Both constants must be inside `namespace RenderConstants { ... }` so they are accessible
+  as `RenderConstants::kTileSize` and `RenderConstants::kRoadSurfaceYBias`, or via a
+  `using namespace RenderConstants;` at function scope (the pattern already used in
+  `moveVehicleAgent()` at `IrrlichtRenderer.cpp:3075`).
+
+- [ ] **`src/rendering/IrrlichtRenderer.h`** — Remove the private class member
+  `static constexpr float kTileSize = 10.0f;` (currently at line 322) to eliminate the
+  duplicate. All IrrlichtRenderer member functions that use bare `kTileSize` already have
+  `using namespace RenderConstants;` in scope (or can add it at function scope), so they
+  will transparently resolve to `RenderConstants::kTileSize` after removal. This is a
+  single-source-of-truth consolidation with no functional change.
 
 - [ ] **`src/rendering/IrrlichtRenderer.cpp:1884`** — Replace the function-local
   `static constexpr float B = 0.25f;` declaration with a direct use of
@@ -81,17 +150,6 @@ raw terrain height with no bias (`IrrlichtRenderer.cpp:3067–3072`), leaving ve
 
   Apply the same substitution to every occurrence of `B` within `buildTileRoadMesh()`
   (`y10`, `y01`, `y11`).
-
-- [ ] **`src/rendering/IrrlichtRenderer.cpp:3067–3072`** — In `moveVehicleAgent()`,
-  change the `y` assignment:
-
-  ```cpp
-  // Before:
-  y = m_terrain->getHeightAt(tileX, tileZ);
-
-  // After:
-  y = m_terrain->getHeightAt(tileX, tileZ) + kRoadSurfaceYBias;
-  ```
 
 ---
 
@@ -125,13 +183,13 @@ distribution when the destination is unzoned.
   ```cpp
   // Derive zone from the destination tile.
   ZoneType spawnZone = ZoneType::Residential; // fallback default
-  const Tile* dst = findTile(v.dstX, v.dstZ);
-  if (dst && dst->zone != ZoneType::None) {
+  const TileData* dst = findTile(v.dstX, v.dstZ);
+  if (dst && dst->isZoned) {
       spawnZone = dst->zone;
   } else {
       // Destination is unzoned: use proportional distribution.
       // 70% Residential, 20% Commercial, 10% Industrial.
-      const int roll = m_rng->nextInt(100);
+      const int roll = m_rng->nextInt(0, 99);
       if (roll < 70)       spawnZone = ZoneType::Residential;
       else if (roll < 90)  spawnZone = ZoneType::Commercial;
       else                 spawnZone = ZoneType::Industrial;
@@ -159,8 +217,8 @@ indefinitely.
 
   ```cpp
   // Re-evaluate zone from new destination.
-  const Tile* newDst = findTile(v.dstX, v.dstZ);
-  if (newDst && newDst->zone != ZoneType::None) {
+  const TileData* newDst = findTile(v.dstX, v.dstZ);
+  if (newDst && newDst->isZoned) {
       v.zone = newDst->zone;
   }
   // If destination is still unzoned, retain the existing zone value;
@@ -179,16 +237,30 @@ distance-cull cycle.
 
 **Code changes**
 
+> **Already implemented**: `IRenderer::spawnVehicleAgent()` already carries the
+> 4-parameter signature `spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ,
+> ZoneType zone)` from Phase 11d (`src/interfaces/IRenderer.h:237–238`).
+> `IrrlichtRenderer` and `MockRenderer` already implement this signature. No interface
+> change is required in this phase.
+>
+> **Already implemented**: The audio-pair tracking map already exists as
+> `std::unordered_map<AgentHandle, AgentAudioState> activeAgents` where `AgentAudioState`
+> carries `idleIdx`, `moveIdx`, AND `zone` fields (`src/main.cpp:293–298`). The initial
+> zone value is already populated at spawn (`main.cpp:404–412`). No struct or map rename
+> is required. The zone-change detection branch (below) uses `activeAgents.find(handle)` to guard against operator[] default-insertion before checking `.zone`
+> against `a.zone` to detect when a respawn is needed.
+
 - [ ] **`src/main.cpp:339–440`** (agent sync loop) — Add a zone-change detection branch
   alongside the existing distance-cull despawn/respawn logic
   (`main.cpp:389–394`). For each active agent whose `zone` differs between the cached
   value in `activeAgents[handle]` and the new `AgentState a.zone`:
 
   ```cpp
-  if (activeAgents[handle].zone != a.zone) {
+  auto it = activeAgents.find(handle);
+  if (it != activeAgents.end() && it->second.zone != a.zone) {
+      auto& s = it->second;
       // 1. Release the old audio source pair back to the pool.
-      const auto& aud = activeAgents[handle].audio;
-      audioSystem.releaseVehicleEnginePair(aud.idleIdx, aud.moveIdx);
+      audioSystem.releaseVehicleEnginePair(s.idleIdx, s.moveIdx);
 
       // 2. Remove the stale renderer node.
       renderer.despawnVehicleAgent(handle);
@@ -196,20 +268,36 @@ distance-cull cycle.
       // 3. Spawn a new node with the correct mesh for the new zone.
       renderer.spawnVehicleAgent(handle, a.tileX, a.tileZ, a.zone);
 
-      // 4. Acquire a fresh audio source pair. If the pool is exhausted,
-      //    the vehicle renders visually but runs in silent mode.
-      const auto newAud = audioSystem.acquireVehicleEnginePair();
+      // 4. Acquire a fresh audio source pair for the NEW zone.
+      //    Zone determines the engine pitch multiplier applied to both sources
+      //    (Residential/car → 1.0, Commercial/bus → 0.85, Industrial/truck → 0.85;
+      //    see audio-system.md lines 256-260). A fresh pair is required so the
+      //    pitch matches the new vehicle type. If the pool is exhausted, the
+      //    vehicle renders visually but runs in silent mode.
+      const auto newAud = audioSystem.acquireVehicleEnginePair(a.zone);
       // newAud == {-1, -1} when pool is exhausted — silent mode is
       // acceptable; do NOT assert or log a fatal error here.
+      // Silent mode contract: the existing guard at main.cpp:~430
+      //   if (it->second.idleIdx >= 0) { audioSystem.updateVehicleAudio(...); }
+      // already prevents AL calls on -1 indices for per-frame updateVehicleAudio().
+      // Per source-pool.md §releaseVehicleEnginePair, the invalid-index guard
+      // (-1 short-circuit) already protects future releaseVehicleEnginePair calls.
+      // No new guard code is required.
 
       // 5. Store updated audio state and new zone value.
-      activeAgents[handle].audio = newAud;
-      activeAgents[handle].zone  = a.zone;
+      activeAgents[handle].idleIdx = newAud.first;
+      activeAgents[handle].moveIdx = newAud.second;
+      activeAgents[handle].zone    = a.zone;
   }
   ```
 
   This sequence mirrors the existing distance-cull despawn/respawn at `main.cpp:389–394`
   and adds audio lifecycle management to prevent orphaned audio sources.
+  If `acquireVehicleEnginePair()` returns `{-1, -1}`, the vehicle enters silent mode: it
+  renders visually with the correct mesh but produces no engine audio. The existing guards
+  at `main.cpp:~430` (for `updateVehicleAudio()`) and in `releaseVehicleEnginePair()`
+  (invalid-index short-circuit per `source-pool.md §releaseVehicleEnginePair`) already
+  prevent AL errors on `{-1, -1}` indices — no additional guard code is required.
 
 ---
 
@@ -240,11 +328,23 @@ can reach `~0.35 m`, causing residual hover/sink after Fix 2a on non-flat ground
   float getHeightAtWorld(float worldX, float worldZ) const override;
   ```
 
-- [ ] **`src/terrain/TerrainSystem.cpp:826–833`** — Implement `getHeightAtWorld()`:
+- [ ] **`src/terrain/TerrainSystem.cpp:826–833`** — Add `#include "render_constants.h"` at
+  the top of the file. Use `using namespace RenderConstants;` at function scope (matching
+  the pattern in `IrrlichtRenderer.cpp:3075` for `moveVehicleAgent()`).
+
+  > **Note on the Irrlicht header pull-in**: `render_constants.h` includes `<irrlicht.h>` (for
+  > `irr::video::SColor road_lod2_color`). Adding this include to `TerrainSystem.cpp` is
+  > intentional — `getHeightAtWorld()` uses only `kTileSize` and `kRoadSurfaceYBias` (plain
+  > `float` constants) and standard float arithmetic; no Irrlicht types appear in the function
+  > body. The build will not introduce circular dependencies because Irrlicht does not depend on
+  > AI Town's terrain code. This is the same include pattern used by `IrrlichtRenderer.cpp`.
+
+  Implement `getHeightAtWorld()`:
 
   ```cpp
   float TerrainSystem::getHeightAtWorld(float worldX, float worldZ) const {
-      // Convert world coordinates to tile-space (1 tile = kTileSize metres).
+      using namespace RenderConstants;
+      // Convert world coordinates to tile-space (kTileSize from render_constants.h).
       const float tx = worldX / kTileSize;
       const float tz = worldZ / kTileSize;
 
@@ -272,7 +372,9 @@ can reach `~0.35 m`, causing residual hover/sink after Fix 2a on non-flat ground
   ```
 
 - [ ] **`src/rendering/IrrlichtRenderer.cpp:3067–3072`** — In `moveVehicleAgent()`,
-  replace `getHeightAt(tileX, tileZ)` with `getHeightAtWorld()`:
+  replace `getHeightAt(tileX, tileZ)` with `getHeightAtWorld()`. The function body already
+  begins with `using namespace RenderConstants;` (line 3075), so bare `kTileSize` and
+  `kRoadSurfaceYBias` names are valid without further qualification:
 
   ```cpp
   // Compute world-space center of the tile.
@@ -281,14 +383,30 @@ can reach `~0.35 m`, causing residual hover/sink after Fix 2a on non-flat ground
   y = m_terrain->getHeightAtWorld(worldX, worldZ) + kRoadSurfaceYBias;
   ```
 
-- [ ] **Mock / stub updates** — Add a no-op `getHeightAtWorld()` override to every class
-  that implements `ITerrainQuery` (e.g. `ManualTerrainQuery`, any mock used in tests):
+- [ ] **`src/interfaces/ITerrainQuery.h` + `ManualTerrainQuery` (atomic commit)** — Add a
+  no-op `getHeightAtWorld()` override to **every** class that implements `ITerrainQuery`.
+  Required updates (non-exhaustive — check all `ITerrainQuery` implementors):
+
+  - `ManualTerrainQuery` (`tests/simulation/ManualTerrainQuery.h`)
+  - Any other mock or stub that implements `ITerrainQuery`
 
   ```cpp
   float getHeightAtWorld(float /*worldX*/, float /*worldZ*/) const override {
       return 0.0f;
   }
   ```
+
+  > **Atomicity requirement**: All three of the following MUST land in the same commit:
+  > (1) the `getHeightAtWorld()` pure-virtual addition to `ITerrainQuery.h`,
+  > (2) the bilinear implementation in `TerrainSystem.h` / `TerrainSystem.cpp` (with
+  > `#include "render_constants.h"` added and `using namespace RenderConstants;` at
+  > function scope), and
+  > (3) the `ManualTerrainQuery` no-op override (and any other `ITerrainQuery` stub).
+  > Committing the interface alone leaves `TerrainSystem` abstract and breaks the build;
+  > committing `TerrainSystem` without the stubs leaves `ManualTerrainQuery` abstract and
+  > breaks all simulation unit tests. See
+  > `architecture/testing/testability-architecture.md` §Phase 11q extension.
+  > Same rule as Phase 10b `setTileHeight()` atomicity.
 
 ---
 
@@ -306,13 +424,18 @@ origin.
 **Code change**
 
 - [ ] **`src/rendering/IrrlichtRenderer.cpp:3025–3027`** — Replace `Y = 0.0f` with the
-  same bilinear terrain query plus road bias used by `moveVehicleAgent()`:
+  same bilinear terrain query plus road bias used by `moveVehicleAgent()`. The `tileX`
+  and `tileZ` values arrive as the 2nd and 3rd parameters of `spawnVehicleAgent()`; they
+  are used here to compute `worldX`/`worldZ` for the bilinear terrain query. Add
+  `using namespace RenderConstants;` at the start of `spawnVehicleAgent()` if not already
+  present (check line ~3025; `moveVehicleAgent` at 3075 already has it but the two
+  functions have separate bodies):
 
   ```cpp
   // Before:
   node->setPosition(irr::core::vector3df(spawnX, 0.0f, spawnZ));
 
-  // After:
+  // After (add 'using namespace RenderConstants;' to spawnVehicleAgent body first):
   const float worldX = (static_cast<float>(tileX) + 0.5f) * kTileSize;
   const float worldZ = (static_cast<float>(tileZ) + 0.5f) * kTileSize;
   const float spawnY = m_terrain->getHeightAtWorld(worldX, worldZ) + kRoadSurfaceYBias;
@@ -323,25 +446,20 @@ origin.
 
 #### 8. Tests
 
-**New test cases** — add to the appropriate existing test source files
-(`tests/rendering/` and `tests/simulation/`).
+**New test cases** — split by test infrastructure requirements:
 
-- [ ] **`VehicleMeshPath_CommercialZone_ReturnsBusPath`** (`tests/rendering/`) — Call
-  `vehicleMeshPath(ZoneType::Commercial)` (or equivalent accessor) and assert the
-  returned path ends with `"bus_standard_lod0.b3d"`.
+**`tests/simulation/` (4 tests, `simulation_tests` CMake target, `unit` label)**
+These tests are mock-based and require no OpenGL context or Irrlicht device.
 
-- [ ] **`VehicleMeshPath_IndustrialZone_ReturnsTruckPath`** (`tests/rendering/`) — Call
-  `vehicleMeshPath(ZoneType::Industrial)` and assert the returned path ends with
-  `"truck_cargo_lod0.b3d"`.
+- [ ] **`VehicleMeshPath_CommercialZone_ReturnsBusPath`** (`tests/simulation/`) — Include
+  `vehicle_mesh_path.h`. Call `vehicleMeshPath(ZoneType::Commercial)` and assert with
+  `EXPECT_THAT(path, EndsWith("bus_standard_lod0.b3d"))`. Do NOT use exact-string
+  equality — the base prefix comes from `getAssetsDir()` which varies by install path.
 
-- [ ] **`MoveVehicleAgent_FlatTerrain_YIncludesRoadBias`** (`tests/rendering/`) — Use
-  a `ManualTerrainQuery` stub returning `0.0f` for all height queries. Call
-  `moveVehicleAgent()` and assert the node Y position equals `kRoadSurfaceYBias`
-  (i.e. `0.25f`).
-
-- [ ] **`SpawnVehicleAgent_FlatTerrain_YIncludesRoadBias`** (`tests/rendering/`) — Same
-  stub. Call `spawnVehicleAgent()` (Fix 2c) and assert the node Y position equals
-  `kRoadSurfaceYBias`.
+- [ ] **`VehicleMeshPath_IndustrialZone_ReturnsTruckPath`** (`tests/simulation/`) — Include
+  `vehicle_mesh_path.h`. Call `vehicleMeshPath(ZoneType::Industrial)` and assert with
+  `EXPECT_THAT(path, EndsWith("truck_cargo_lod0.b3d"))`. Same rationale: suffix-only
+  assertion avoids a runtime dependency on `getAssetsDir()` in tests.
 
 - [ ] **`TrafficVehicle_SpawnOnUnzonedDestination_ZoneIsNotAlwaysResidential`**
   (`tests/simulation/`) — Spawn 100 vehicles with an unzoned destination tile.
@@ -353,13 +471,37 @@ origin.
   `ZoneType::Commercial`. Call `doTrafficVehicleTick()` through a trip completion.
   Assert `v.zone == ZoneType::Commercial` after the tick.
 
+**`tests/rendering/` (2 tests, `opengl_tests` CMake target, `requires-opengl` label)**
+These tests must inspect a real Irrlicht scene-node `getPosition().Y` and therefore
+require a live `IrrlichtRenderer` instance with an Irrlicht null or OpenGL device.
+
+- [ ] **`CMakeLists.txt`** — Register the two new test `.cpp` files **inline in the
+  `add_executable(opengl_tests ...)` call** (do NOT use `target_sources()` — `framework.md`
+  prohibits it for `opengl_tests` to prevent ctest discovery timing issues). Then add
+  both `src/rendering/` AND `tests/simulation/` to the `opengl_tests`
+  `target_include_directories()`. Neither is currently present in the `opengl_tests` block
+  (which contains only `src/interfaces/`); both must be added — `src/rendering/` was NOT
+  added by Phase 5 as previously assumed, and `tests/simulation/` is required so the
+  Y-bias tests can `#include "ManualTerrainQuery.h"`.
+
+- [ ] **`MoveVehicleAgent_FlatTerrain_YIncludesRoadBias`** (`tests/rendering/`) — Create
+  `IrrlichtRenderer` with a `ManualTerrainQuery` stub returning `0.0f` for all queries.
+  Call `spawnVehicleAgent()` then `moveVehicleAgent()`. Retrieve the spawned scene node
+  and assert `node->getPosition().Y == kRoadSurfaceYBias` (i.e. `0.25f`).
+
+- [ ] **`SpawnVehicleAgent_FlatTerrain_YIncludesRoadBias`** (`tests/rendering/`) — Same
+  setup. Call `spawnVehicleAgent()` (Fix 2c) and assert the newly created node's
+  `getPosition().Y == kRoadSurfaceYBias` without any subsequent `moveVehicleAgent()` call.
+
 ---
 
 ### Affected Files Summary
 
 | File | Lines | Change |
 |---|---|---|
-| `src/rendering/render_constants.h` | new entry | Add `kRoadSurfaceYBias = 0.25f` |
+| `src/rendering/vehicle_mesh_path.h` | new file | `inline vehicleMeshPath(ZoneType, int variantIdx=0)` free function; base path via `getAssetsDir() + "/3d/vehicles/"` (includes `src/platform/PlatformUtils.h` read-only); Residential round-robins via `variantIdx % 3` |
+| `src/rendering/render_constants.h` | new entries | Add `kTileSize = 10.0f` and `kRoadSurfaceYBias = 0.25f` inside `namespace RenderConstants` |
+| `src/rendering/IrrlichtRenderer.h` | line 322 | Remove private `kTileSize` member (consolidated to `RenderConstants::kTileSize`) |
 | `src/rendering/IrrlichtRenderer.cpp` | 1868 | Fix stale comment (0.10 m → 0.25 m) |
 | `src/rendering/IrrlichtRenderer.cpp` | 1884 | Replace local `B` with `kRoadSurfaceYBias` |
 | `src/rendering/IrrlichtRenderer.cpp` | 3025–3027 | Use bilinear terrain query + bias at spawn (Fix 2c) |
@@ -367,11 +509,14 @@ origin.
 | `src/terrain/TerrainSystem.h` | — | Declare `getHeightAtWorld(float, float)` override |
 | `src/terrain/TerrainSystem.cpp` | 826–833 | Implement `getHeightAtWorld()` with bilinear interpolation |
 | `src/interfaces/ITerrainQuery.h` | — | Expose `getHeightAtWorld(float, float)` pure-virtual |
+| `src/interfaces/IRenderer.h` | — | No change — `spawnVehicleAgent(AgentHandle, int, int, ZoneType)` 4-param signature already present from Phase 11d |
 | `src/simulation/CitySimulation.cpp` | 1766–1808 | Re-assign zone on trip completion (Fix 1c) |
 | `src/simulation/CitySimulation.cpp` | ~2450–2480 | Assign zone from destination tile at spawn (Fix 1b) |
-| `src/main.cpp` | 339–440 | Detect zone change → despawn + respawn + audio lifecycle (Fix 1d) |
-| `tests/rendering/` | new cases | `vehicleMeshPath` Commercial/Industrial + Y bias tests |
-| `tests/simulation/` | new cases | Zone assignment and trip-completion zone-update tests |
+| `src/main.cpp` | 339–440 | Add zone-change detection branch (`activeAgents.find(handle)->second.zone != a.zone` → despawn + respawn + audio lifecycle); `AgentAudioState` struct and initial zone population already present from Phase 11d |
+| `tests/simulation/` | new cases | 4 unit tests: `vehicleMeshPath` Commercial/Industrial, zone assignment (proportional fallback), trip-completion zone-update |
+| `tests/rendering/` | new cases | 2 renderer tests (`requires-opengl`): Y bias verification for `moveVehicleAgent` and `spawnVehicleAgent` |
+| `CMakeLists.txt` | `opengl_tests` target | Add BOTH `src/rendering/` AND `tests/simulation/` to `target_include_directories`; neither is currently present (block contains only `src/interfaces/`); `src/rendering/` was NOT added by Phase 5 |
+| `CMakeLists.txt` | `simulation_tests` target | Add `src/rendering/` to `target_include_directories` so `VehicleMeshPath` tests can `#include "vehicle_mesh_path.h"` |
 | Any `ITerrainQuery` mock/stub | — | Add no-op `getHeightAtWorld()` override |
 
 ---
@@ -385,6 +530,7 @@ origin.
 - [ ] Vehicle Y position on sloped terrain no longer diverges from the road surface
   (bilinear interpolation active).
 - [ ] `spawnVehicleAgent()` no longer places the node at world origin on non-flat terrain.
-- [ ] All 6 new unit tests pass.
-- [ ] All existing `simulation_tests` and `rendering_tests` continue to pass.
+- [ ] All 4 new `simulation_tests` (unit label) pass.
+- [ ] Both new `opengl_tests` (requires-opengl label) pass.
+- [ ] All existing `simulation_tests` and `opengl_tests` continue to pass.
 - [ ] `all-checks-pass` CI job is green.
