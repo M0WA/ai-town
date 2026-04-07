@@ -38,7 +38,10 @@ The deliverables are sequenced from lowest risk to highest effort:
    `TerrainSystem`; expose on `ITerrainQuery`; use in `moveVehicleAgent()`.
 7. **Fix 2c** — Replace `Y = 0.0f` in `spawnVehicleAgent()` with bilinear terrain query
    plus road bias (requires Fix 2b to land first).
-8. **Tests** — Unit tests locking in both bug-fix behaviours.
+8. **Fix 2e** — Compute terrain normal from three height samples and apply pitch/roll to
+   vehicle scene node in `moveVehicleAgent()` (and `spawnVehicleAgent()` post-Fix-2c).
+   Requires Fix 2b to land first (uses `getHeightAtWorld()`).
+9. **Tests** — Unit tests locking in both bug-fix behaviours.
 
 ---
 
@@ -444,7 +447,72 @@ origin.
 
 ---
 
-#### 8. Tests
+#### 8. Fix 2e — Vehicle terrain slope rotation in `moveVehicleAgent()` and `spawnVehicleAgent()`
+
+**Root cause**
+
+Vehicles are placed at the correct height (after Fix 2b) but always remain horizontally level,
+causing them to float above or clip into sloped road surfaces. A vehicle driving up a hill should
+pitch nose-up; one on a cambered road should roll slightly.
+
+**Prerequisite**: Fix 2b (`getHeightAtWorld()`) must land before this deliverable.
+
+**Approach**
+
+Sample three terrain heights near the vehicle position (centre, +X, +Z) to compute finite-
+difference tangent vectors. Their cross product gives the local terrain normal in world space.
+Decompose the normal into pitch (X-axis rotation) and roll (Z-axis rotation) and apply them via
+`node->setRotation()`, preserving the existing Y (yaw) from the vehicle's heading.
+
+**Code changes**
+
+- [ ] **`src/rendering/IrrlichtRenderer.cpp`** — In `moveVehicleAgent()`, immediately after
+  computing `worldX`, `worldZ`, and `y` (the bilinear height), add:
+
+  ```cpp
+  // Terrain slope rotation — compute normal from three height samples.
+  const float kStep = kTileSize * 0.5f;  // half-tile step for finite difference
+  const float hRight = m_terrain->getHeightAtWorld(worldX + kStep, worldZ);
+  const float hFront = m_terrain->getHeightAtWorld(worldX, worldZ + kStep);
+
+  // Finite-difference slopes
+  const float dhX = (hRight - y + kRoadSurfaceYBias) / kStep;
+  const float dhZ = (hFront - y + kRoadSurfaceYBias) / kStep;
+
+  // Terrain normal in Y-up space: N = (-dhX, 1, -dhZ), then normalize.
+  const float nx  = -dhX;
+  const float ny  =  1.0f;
+  const float nz  = -dhZ;
+  const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
+  const float pitchRad = std::atan2(-nz / len, ny / len);  // nose up/down
+  const float rollRad  = std::atan2( nx / len, ny / len);  // lean left/right
+
+  constexpr float kRadToDeg = 180.0f / 3.14159265f;
+  const float pitchDeg = pitchRad * kRadToDeg;
+  const float rollDeg  = rollRad  * kRadToDeg;
+
+  // Preserve existing yaw (Y-axis heading); replace pitch and roll only.
+  const float existingYaw = node->getRotation().Y;
+  node->setRotation(irr::core::vector3df(pitchDeg, existingYaw, rollDeg));
+  ```
+
+  > **Note**: `y` here is the bilinear height BEFORE the bias is added (i.e., the raw terrain
+  > height at the vehicle centre). Subtracting `kRoadSurfaceYBias` from the adjacent samples
+  > is not needed because the bias is uniform — slope differences cancel it. Simplified:
+  > `dhX = (hRight - (y - kRoadSurfaceYBias)) / kStep` where `y - kRoadSurfaceYBias` is the
+  > raw terrain height. In practice, since `hRight` and `y-bias` both already include the road
+  > offset uniformly, the delta is simply `(hRight - hCenter_raw) / kStep`. Ensure that `y`
+  > in the computation refers to the **raw terrain height** (before bias is added) — rename
+  > local variables if needed to avoid confusion.
+
+- [ ] **`src/rendering/IrrlichtRenderer.cpp`** — Apply the same slope rotation in
+  `spawnVehicleAgent()` (after Fix 2c adds the terrain query). The spawn node should match
+  the rotation the first `moveVehicleAgent()` call will immediately set, so there is no single-
+  frame pop from level-to-sloped orientation.
+
+---
+
+#### 9. Tests
 
 **New test cases** — split by test infrastructure requirements:
 
@@ -505,7 +573,7 @@ require a live `IrrlichtRenderer` instance with an Irrlicht null or OpenGL devic
 | `src/rendering/IrrlichtRenderer.cpp` | 1868 | Fix stale comment (0.10 m → 0.25 m) |
 | `src/rendering/IrrlichtRenderer.cpp` | 1884 | Replace local `B` with `kRoadSurfaceYBias` |
 | `src/rendering/IrrlichtRenderer.cpp` | 3025–3027 | Use bilinear terrain query + bias at spawn (Fix 2c) |
-| `src/rendering/IrrlichtRenderer.cpp` | 3067–3072 | Add bilinear query + `kRoadSurfaceYBias` to vehicle Y (Fix 2b) |
+| `src/rendering/IrrlichtRenderer.cpp` | 3067–3072 | Add bilinear query + `kRoadSurfaceYBias` to vehicle Y; add pitch/roll from terrain normal (Fix 2b + Fix 2e) |
 | `src/terrain/TerrainSystem.h` | — | Declare `getHeightAtWorld(float, float)` override |
 | `src/terrain/TerrainSystem.cpp` | 826–833 | Implement `getHeightAtWorld()` with bilinear interpolation |
 | `src/interfaces/ITerrainQuery.h` | — | Expose `getHeightAtWorld(float, float)` pure-virtual |
@@ -530,6 +598,8 @@ require a live `IrrlichtRenderer` instance with an Irrlicht null or OpenGL devic
 - [ ] Vehicle Y position on sloped terrain no longer diverges from the road surface
   (bilinear interpolation active).
 - [ ] `spawnVehicleAgent()` no longer places the node at world origin on non-flat terrain.
+- [ ] Vehicles pitch and roll to match road surface slope (verified visually and/or by asserting
+  `node->getRotation().X != 0` on sloped terrain after `moveVehicleAgent()`).
 - [ ] All 4 new `simulation_tests` (unit label) pass.
 - [ ] Both new `opengl_tests` (requires-opengl label) pass.
 - [ ] All existing `simulation_tests` and `opengl_tests` continue to pass.
