@@ -15,7 +15,7 @@ RUN groupadd --gid 1000 node \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg \
   && mkdir -p /etc/apt/keyrings \
-  && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+  && curl -fsSL --proto '=https' --tlsv1.2 https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
      | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
   && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
      > /etc/apt/sources.list.d/nodesource.list \
@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install developer-ergonomics packages not present in the CI base image.
-# Excluded (already in CI image): git, curl, wget, ca-certificates, jq, pkg-config,
+# Excluded (already in CI image): git, curl, ca-certificates, jq, pkg-config,
 #   build-essential, ccache, ninja-build, gcc-13, g++-13, xvfb, libgl1-mesa-dev,
 #   libglu1-mesa-dev, libxxf86vm-dev, libx11-dev, libxext-dev, libglew-dev,
 #   libasound2-dev, libpulse-dev, lcov, ffmpeg, sox, python3, python3-pip, vorbis-tools.
@@ -106,7 +106,9 @@ WORKDIR /workspace
 
 ARG GIT_DELTA_VERSION=0.18.2
 RUN ARCH=$(dpkg --print-architecture) && \
-  wget "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
+  curl --proto '=https' --tlsv1.2 --fail --location \
+    --output "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" \
+    "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
 
@@ -114,7 +116,9 @@ RUN ARCH=$(dpkg --print-architecture) && \
 ARG COMPRESSONATOR_VERSION=4.5.52
 RUN ARCH=$(dpkg --print-architecture) && \
   if [ "$ARCH" = "amd64" ]; then \
-    wget -q "https://github.com/GPUOpen-Tools/compressonator/releases/download/V${COMPRESSONATOR_VERSION}/compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
+    curl --proto '=https' --tlsv1.2 --fail --silent --location \
+      --output "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" \
+      "https://github.com/GPUOpen-Tools/compressonator/releases/download/V${COMPRESSONATOR_VERSION}/compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
     dpkg -i "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
     rm "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb"; \
   else \
@@ -124,7 +128,9 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # actionlint — GitHub Actions workflow linter
 ARG ACTIONLINT_VERSION=1.7.11
 RUN ARCH=$(dpkg --print-architecture) && \
-  wget -q "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" && \
+  curl --proto '=https' --tlsv1.2 --fail --silent --location \
+    --output "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" \
+    "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" && \
   tar -xzf "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" actionlint && \
   mv actionlint /usr/local/bin/actionlint && \
   rm "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz"
@@ -134,7 +140,9 @@ ARG BLENDER_VERSION=4.3.2
 RUN ARCH=$(dpkg --print-architecture) && \
   if [ "$ARCH" = "amd64" ]; then \
     BLENDER_MINOR="${BLENDER_VERSION%.*}" && \
-    wget -q "https://download.blender.org/release/Blender${BLENDER_MINOR}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" && \
+    curl --proto '=https' --tlsv1.2 --fail --silent --location \
+      --output "blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
+      "https://download.blender.org/release/Blender${BLENDER_MINOR}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" && \
     tar -xJf "blender-${BLENDER_VERSION}-linux-x64.tar.xz" -C /opt && \
     mv "/opt/blender-${BLENDER_VERSION}-linux-x64" /opt/blender && \
     ln -sf /opt/blender/blender /usr/local/bin/blender && \
@@ -170,7 +178,7 @@ ENV VISUAL=nano
 
 # Default powerline10k theme
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
-RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/v${ZSH_IN_DOCKER_VERSION}/zsh-in-docker.sh)" -- \
+RUN sh -c "$(curl --proto '=https' --tlsv1.2 --fail --location https://github.com/deluan/zsh-in-docker/releases/download/v${ZSH_IN_DOCKER_VERSION}/zsh-in-docker.sh)" -- \
   -p git \
   -p fzf \
   -a "source /usr/share/doc/fzf/examples/key-bindings.zsh" \
@@ -188,6 +196,6 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
 RUN pip3 install --break-system-packages numpy Pillow trimesh Wand scipy pypng
 
 # Install Claude
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+RUN npm install -g --ignore-scripts @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 USER node
