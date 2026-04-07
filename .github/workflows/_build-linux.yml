@@ -93,7 +93,7 @@ jobs:
       - name: Upload compile_commands.json
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
         with:
-          name: compile-commands-linux-${{ github.sha }}
+          name: compile-commands-linux-${{ github.run_id }}
           path: compile_commands.json
           retention-days: 14
 
