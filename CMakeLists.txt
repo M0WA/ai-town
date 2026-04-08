@@ -542,6 +542,7 @@ add_executable(simulation_tests
     tests/simulation/save_system_test.cpp
     tests/simulation/undo_system_test.cpp
     tests/simulation/manual_rng_test.cpp
+    tests/simulation/VehicleZoneTest.cpp
 )
 # Adaptive music intensity and city simulation render tests.
 # adaptive_music_intensity_test.cpp — tests music intensity state machine driven by
@@ -555,6 +556,7 @@ target_sources(simulation_tests PRIVATE
 )
 target_link_libraries(simulation_tests PRIVATE
     aitown_sim
+    aitown_platform
     GTest::gtest_main
     GTest::gmock
     rapidcheck
@@ -569,6 +571,7 @@ target_include_directories(simulation_tests PRIVATE
     tests/simulation/
     src/interfaces/
     src/simulation/
+    src/rendering/
 )
 aitown_add_tests(simulation_tests LABEL "unit" DISCOVERY_TIMEOUT 60)
 
@@ -1005,6 +1008,7 @@ add_executable(opengl_tests
     tests/rendering/building_srgb_fallback_test.cpp
     tests/rendering/cloud_plane_test.cpp
     tests/rendering/texture_cache_atlas_test.cpp
+    tests/rendering/VehicleYBiasTest.cpp
 )
 # Irrlicht and GLEW::GLEW MUST be linked directly: shader_loading_test.cpp includes
 # <irrlicht.h> and <GL/glew.h>; aitown_render links both PRIVATE so their include paths
@@ -1029,6 +1033,7 @@ target_compile_features(opengl_tests PRIVATE cxx_std_17)
 # ${CMAKE_SOURCE_DIR} — project-root-relative includes
 target_include_directories(opengl_tests PRIVATE
     src/interfaces/
+    tests/simulation/
 )
 aitown_add_tests(opengl_tests LABEL "requires-opengl")
 

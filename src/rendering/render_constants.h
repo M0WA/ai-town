@@ -40,6 +40,14 @@ namespace RenderConstants {
     //   0.5 cm — enough to eliminate Z-fighting without visible floating.
     static constexpr float kCenterlineYBias         = 0.005f;
 
+    /// Side length of one map tile in world-space metres.
+    /// Shared between IrrlichtRenderer and TerrainSystem (getHeightAtWorld).
+    static constexpr float kTileSize = 10.0f;
+
+    /// Vertical offset (metres) baked into road surface vertices by buildTileRoadMesh().
+    /// Must be added to the terrain height when positioning vehicles on the road surface.
+    static constexpr float kRoadSurfaceYBias = 0.25f;
+
     // kBlockedArgb — ARGB colour for blocked tiles in placement preview.
     // Semi-opaque red (alpha=0xBB≈73%) per Phase 11d Deliverable 5d spec.
     static constexpr uint32_t kBlockedArgb = 0xBBFF2222u;

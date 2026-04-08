@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cstdint>
+#include <cmath>
 
 // ManualTerrainQuery — test-local implementation of ITerrainQuery.
 //
@@ -88,6 +89,42 @@ public:
     // terrain before placement (simulates pre-existing terrain heights).
     void setHeightAt(int x, int z, float h) {
         m_tileHeights[makeKey(x, z)] = h;
+    }
+
+    // getHeightAtWorld() — bilinear interpolation over configurable per-tile heights.
+    // Mirrors TerrainSystem::getHeightAtWorld() but reads from m_tileHeights (via
+    // getHeightAt()) instead of the live terrain buffer. Tests that never call
+    // setHeightAt() still see a flat surface (0.0f), preserving backwards compatibility.
+    //
+    // IMPORTANT: Must NOT include render_constants.h (which pulls in irrlicht.h).
+    // simulation_tests does not link Irrlicht — including it would cause compile failure.
+    // Uses a local constexpr kTileSize instead.
+    float getHeightAtWorld(float worldX, float worldZ) const override {
+        // Must match RenderConstants::kTileSize in src/rendering/render_constants.h
+        static constexpr float kTileSize = 10.0f;
+
+        // Convert world coordinates to tile-space.
+        const float tx = worldX / kTileSize;
+        const float tz = worldZ / kTileSize;
+
+        const int x0 = static_cast<int>(std::floor(tx));
+        const int z0 = static_cast<int>(std::floor(tz));
+        const int x1 = x0 + 1;
+        const int z1 = z0 + 1;
+
+        const float fx = tx - static_cast<float>(x0);
+        const float fz = tz - static_cast<float>(z0);
+
+        // getHeightAt() returns 0.0f for unconfigured tiles, so tests that
+        // never call setHeightAt() still see a flat surface.
+        const float h00 = getHeightAt(x0, z0);
+        const float h10 = getHeightAt(x1, z0);
+        const float h01 = getHeightAt(x0, z1);
+        const float h11 = getHeightAt(x1, z1);
+
+        const float h0 = h00 + fx * (h10 - h00);
+        const float h1 = h01 + fx * (h11 - h01);
+        return h0 + fz * (h1 - h0);
     }
 
     // flushTerrainRebuilds() — no-op in tests; real TerrainSystem delegates to

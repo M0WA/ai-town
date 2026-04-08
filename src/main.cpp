@@ -396,6 +396,17 @@ int main(int argc, char** argv) {
                 }
 
                 auto it = activeAgents.find(handle);
+                if (it != activeAgents.end() && it->second.zone != a.zone) {
+                    // Zone changed: despawn+respawn with correct mesh, re-acquire audio.
+                    auto& s = it->second;
+                    audioSystem.releaseVehicleEnginePair(s.idleIdx, s.moveIdx);
+                    renderer.despawnVehicleAgent(handle);
+                    renderer.spawnVehicleAgent(handle, a.tileX, a.tileZ, a.zone);
+                    const auto newAud = audioSystem.acquireVehicleEnginePair(a.zone);
+                    activeAgents[handle].idleIdx = newAud.first;
+                    activeAgents[handle].moveIdx = newAud.second;
+                    activeAgents[handle].zone    = a.zone;
+                }
                 if (it == activeAgents.end()) {
                     // New agent: spawn renderer node and acquire audio pair.
                     renderer.spawnVehicleAgent(handle, a.tileX, a.tileZ, a.zone);

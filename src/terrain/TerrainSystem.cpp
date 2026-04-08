@@ -25,6 +25,7 @@
 // IRenderer is forward-declared in TerrainSystem.h.
 // Include the actual header here for any method calls.
 #include "../interfaces/IRenderer.h"
+#include "../rendering/render_constants.h"  // RenderConstants::kTileSize (getHeightAtWorld)
 // IClock is included via TerrainSystem.h (full definition required for subclassing in tests).
 
 // ---------------------------------------------------------------------------
@@ -831,6 +832,34 @@ float TerrainSystem::getHeightAt(int tileX, int tileZ) const {
     }
     const int vertX = m_mapTilesX + 1;
     return m_generatedHeightmap[static_cast<size_t>(tileZ * vertX + tileX)];
+}
+
+// ---------------------------------------------------------------------------
+// getHeightAtWorld() — bilinear interpolation at arbitrary world coords.
+// Uses the persistent LOD0 heightmap (same source as getHeightAt()).
+// (ref: implementation/phase-11q.md Fix 2b)
+// ---------------------------------------------------------------------------
+float TerrainSystem::getHeightAtWorld(float worldX, float worldZ) const {
+    using namespace RenderConstants;
+    const float tx = worldX / kTileSize;
+    const float tz = worldZ / kTileSize;
+
+    const int x0 = static_cast<int>(std::floor(tx));
+    const int z0 = static_cast<int>(std::floor(tz));
+    const int x1 = x0 + 1;
+    const int z1 = z0 + 1;
+
+    const float fx = tx - static_cast<float>(x0);
+    const float fz = tz - static_cast<float>(z0);
+
+    const float h00 = getHeightAt(x0, z0);
+    const float h10 = getHeightAt(x1, z0);
+    const float h01 = getHeightAt(x0, z1);
+    const float h11 = getHeightAt(x1, z1);
+
+    const float h0 = h00 + fx * (h10 - h00);
+    const float h1 = h01 + fx * (h11 - h01);
+    return h0 + fz * (h1 - h0);
 }
 
 // ---------------------------------------------------------------------------
