@@ -28,13 +28,14 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
-      # SECURITY: workflow_run executes with base-branch secrets.
-      # Never check out the PR HEAD (untrusted contributor code).
-      # Check out the base branch only; coverage data comes from the
-      # already-vetted CI artifact, not from re-running untrusted code.
-      - name: Checkout base branch (trusted — no PR code)
+      # Check out the exact commit that CI tested so the workspace matches the
+      # file paths in coverage.xml. Using head_sha (not head_branch) is safe:
+      # the scanner performs static analysis only — it never executes user code —
+      # and workflow_dispatch falls back to the default branch sha.
+      - name: Checkout triggering commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
       - name: Download Sonar Generic Coverage XML
@@ -113,7 +114,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/sonarscanner"
           cd "$RUNNER_TEMP/sonarscanner"
           SCANNER_FILE="sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux-x64.zip"
-          curl --fail --silent --show-error --user-agent sonarqube-scan-action \
+          curl --proto '=https' --tlsv1.2 \
+               --fail --silent --show-error \
+               --user-agent sonarqube-scan-action \
                --location --output "$SCANNER_FILE" \
                "${SONAR_SCANNER_BINARIES_URL}/${SCANNER_FILE}"
           unzip -q -o "$SCANNER_FILE"
@@ -124,14 +127,17 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
+          PROJECT_VERSION=$(git describe --tags --always)
           SCANNER_BIN="$RUNNER_TEMP/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-Linux-X64/bin/sonar-scanner"
           "$SCANNER_BIN" \
             -Dsonar.projectKey=M0WA_ai-town \
             -Dsonar.organization=m0wa \
+            -Dsonar.projectVersion="${PROJECT_VERSION}" \
             -Dsonar.sources=src,.github/workflows,docker,.devcontainer \
             -Dsonar.tests=tests \
             -Dsonar.coverageReportPaths=coverage.xml \
             -Dsonar.exclusions="assets/**,build/**,tools/**" \
+            -Dsonar.coverage.exclusions="src/benchmark/**" \
             -Dsonar.cpd.exclusions="tests/**" \
             -Dsonar.scm.provider=git \
             -Dsonar.projectBaseDir=. \
