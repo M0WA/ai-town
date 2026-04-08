@@ -58,14 +58,14 @@ m_traffic.doTrafficVehicleTick(realDt, m_zoning, m_renderer, m_audio);
 bool inGracePeriod = (m_clock->nowSeconds() - m_timing.getConstructionTimeSeconds())
                      < SimulationConstants::grace_period_real_seconds;
 m_zoning.buildPowerCoverageCache();
-m_economy.computeEconomySnapshot(m_zoning, m_population, inGracePeriod);
+m_economy.computeEconomySnapshot(m_zoning, m_traffic, m_population, inGracePeriod);
 m_traffic.computeTrafficDemand();
 m_traffic.computeEffectiveDemand(m_zoning, m_timing.getTotalTicks());
 m_zoning.doServiceDegradationTick(m_economy, *m_rng, m_audio, m_notifications);
-m_zoning.doDesirabilityTick(m_economy, m_traffic);
+m_zoning.doDesirabilityTick(m_economy, m_traffic, m_audio, m_notifications);
 m_population.doPopulationTick(m_zoning, m_traffic, m_economy,
                               m_audio, m_renderer, m_notifications);
-m_population.doDensityUnlockTick(m_zoning, m_economy, m_difficulty,
+m_population.doDensityUnlockTick(m_zoning, m_traffic, m_economy, m_difficulty,
                                  m_renderer, m_audio, m_notifications);
 m_zoning.doProximityTick(m_notifications);
 m_economy.doEconomyTick(m_zoning, m_population, inGracePeriod,
@@ -119,17 +119,23 @@ Public accessors (called by `CitySimulation` to implement `ICitySimulation`):
 `getWagesCost()`, `getRoadMaintenanceCost()`,
 `getServiceUpkeepCost()`, `getUtilityFeeRevenue()`.
 
+Inter-sub-system read-only accessors (not part of `IEconomyQuery`; used only by `Population`):
+`getBudgetSurplusPct() const` — read by `Population::doGameOverTick()` for the −50% game-over
+threshold check and by `Population::updateMusicIntensity()` for music intensity tier determination.
+`isFirstRevenueTicked() const` — read by `Population::doGameOverTick()` to gate forced-loan
+checks before first revenue tick fires.
+
 Internal tick methods (called only from `CitySimulation::doBudgetTick()`):
-`computeEconomySnapshot(const Zoning&, const Population&, bool inGracePeriod)`,
+`computeEconomySnapshot(const Zoning&, const Traffic&, const Population&, bool inGracePeriod)`,
 `doEconomyTick(Zoning&, const Population&, bool inGracePeriod,
                IAudioSystem*, IClock&,
                std::queue<SimulationNotification>&)`,
-`checkAndIssueForcedLoan(bool inGracePeriod, IClock&,
+`checkAndIssueForcedLoan(bool inGracePeriod, IClock&, IAudioSystem*,
                          std::queue<SimulationNotification>&)`,
 `processLoanRepayments()`.
 
 Private helpers (stay private to `Economy`):
-`computeTaxRevenue(ZoneType, const Zoning&) const`,
+`computeTaxRevenue(ZoneType, const Zoning&, const Traffic&) const`,
 `computeWagesCost(int64_t) const`,
 `computeServiceUpkeepCost(const Zoning&) const`,
 `computeRoadMaintenanceCost(const Zoning&) const`,
@@ -146,6 +152,16 @@ Private helpers (stay private to `Economy`):
   `CitySimulation.cpp` verbatim; update references to `m_*` fields that now
   live in this struct (they drop the `m_` prefix or keep it — choose consistently).
 - [ ] Add `Economy.cpp` to the simulation CMake target.
+- [ ] Update `architecture/game-design/economy-model.md` — change the sentence on
+  approximately line 27 that describes `outstanding_bond_uses` as "tracked as a field
+  in `CitySimulation` state" to "tracked as a field in the `Economy` sub-system
+  (`src/simulation/Economy.h`)".
+- [ ] Update `architecture/audio-architecture/production-briefs/wav-sfx-production-brief.md`
+  — change the trigger fields for:
+  (a) `sfx_budget_warn` (approximately line 287) from `CitySimulation::tick()` to
+      `Economy::doEconomyTick()` called from `CitySimulation::doBudgetTick()`;
+  (b) `sfx_loan_issued` (approximately line 312) from `CitySimulation::tick()` to
+      `Economy::checkAndIssueForcedLoan()` called from `Economy::doEconomyTick()`.
 
 ---
 
@@ -176,7 +192,11 @@ Internal tick methods:
 `computeEffectiveDemand(const Zoning&, int totalTicks)`,
 `doTrafficSignalTick(float realDt, IRenderer*, IAudioSystem*, IClock*)`,
 `doTrafficVehicleTick(float realDt, Zoning&, IRenderer*, IAudioSystem*)`,
-`resetTrafficWindows()`.
+`resetTrafficWindows()`,
+`reset(IAudioSystem*)` — releases all vehicle engine source pairs (calls
+`IAudioSystem::releaseVehicleEnginePair()` for each vehicle's idle+move pair) and clears `m_trafficVehicles`,
+`m_trafficSignals`, and rolling-window arrays; called from
+`CitySimulation::reset()`.
 
 Private helpers:
 `pickNextRoadTile(const Zoning&, int, int, int, int, int&, int&) const`,
@@ -189,6 +209,23 @@ and vehicles — these become `addSignalForTile()` / `removeSignalForTile()` /
 
 - [ ] Create `src/simulation/Traffic.h` and `Traffic.cpp`.
 - [ ] Add to CMake target.
+- [ ] Update `architecture/audio-architecture/production-briefs/vehicle-sfx-production-brief.md`
+  — change the vehicle-distance-cull trigger reference on approximately line 229 from
+  `CitySimulation::tick()` to `Traffic::doTrafficSignalTick()` called from
+  `CitySimulation::tick()` to reflect the method migration in this phase.
+- [ ] Update `architecture/game-design/traffic-system.md` — change the `sfx_intersection_tick`
+  call-site and distance-cull specification on approximately lines 167–199 that reference
+  `CitySimulation::tick()` as the implementation location:
+  (a) change the call-site annotation on lines 171 and 175 from "In `CitySimulation::tick()`"
+      to "In `Traffic::doTrafficSignalTick()`";
+  (b) change the distance-cull paragraph on lines 194–199 that says "in `CitySimulation`,
+      NOT in `AudioSystem`" and "in `CitySimulation::tick()`" to reference
+      `Traffic::doTrafficSignalTick()` called from `CitySimulation::tick()` instead.
+- [ ] Update `architecture/audio-architecture/audio-system.md` — change the comment on
+  approximately lines 193–194 that says "Vehicle engine source pairs are released by
+  `CitySimulation::reset()` iterating `m_agents`" to reference `Traffic::reset(IAudioSystem*)`
+  iterating `m_trafficVehicles`, called from `CitySimulation::reset()`, to reflect the
+  traffic-vehicle lifecycle migrating to the `Traffic` sub-system in this phase.
 
 ---
 
@@ -201,6 +238,7 @@ Fields to migrate from `CitySimulation.h`:
 - `m_roadTileCount` (`int`)
 - `m_powerCoverageCache` (`std::unordered_set<int64_t>`)
 - `m_upgradeRetryCount` (`std::unordered_map<int64_t, int>`)
+- `m_upgradeBlocked` (`std::unordered_map<int64_t, bool>`)
 - `m_buildingVariantCounters` (`std::array<int, 9>`)
 
 `TileData` and `ServiceBuilding` struct definitions move into `Zoning.h`.
@@ -212,13 +250,16 @@ Public accessors:
 `getServiceCoverage() const`,
 `isWithinRoadRange(int, int, DensityTier) const`,
 `queryTile(int, int) const`,
-`isBuildableTile(int, int) const`.
+`isBuildableTile(int, int) const`,
+`tiles() const` — returns `const std::unordered_map<int64_t, TileData>&`; used by `Population` to iterate all tiles for population accumulation, density-unlock candidate scanning, and desirability-weighted growth.
 
 Internal tick methods:
 `buildPowerCoverageCache()`,
 `buildServiceCoverageMap(bool&, bool&, bool&, bool&)`,
-`applyDesirabilityScores(bool, bool, bool, bool, const Economy&)`,
-`doDesirabilityTick(const Economy&, const Traffic&)`,
+`applyDesirabilityScores(bool, bool, bool, bool, const Economy&, IAudioSystem*,
+                        std::queue<SimulationNotification>&)`,
+`doDesirabilityTick(const Economy&, const Traffic&, IAudioSystem*,
+                   std::queue<SimulationNotification>&)`,
 `doServiceDegradationTick(const Economy&, ISimulationRNG&, IAudioSystem*,
                           std::queue<SimulationNotification>&)`,
 `doProximityTick(std::queue<SimulationNotification>&)`.
@@ -258,7 +299,46 @@ as `Zoning::placeZone(…)`, `Zoning::placeRoad(…)` etc., with
       zone-tier combination";
   (f) change the sentence on line 179 ("The counter is a plain `int` member of
       `CitySimulation` per zone-tier slot") to "The counter is a plain `int`
-      member of the `Zoning` sub-system per zone-tier slot."
+      member of the `Zoning` sub-system per zone-tier slot.";
+  (g) change the sentence on approximately line 173 ("When `CitySimulation` places a
+      zone tile, it selects a visual building variant") to "When a zone tile is placed,
+      the `Zoning` sub-system selects a visual building variant using
+      `zoneAssetBaseName()`".
+- [ ] Update `architecture/game-design/save-system.md` — change any reference from
+  `CitySimulation::m_buildingVariantCounters` to `Zoning::m_buildingVariantCounters`
+  to reflect the field migration in this phase.
+- [ ] Update `architecture/game-design/zoning-system.md` — change the sentence on
+  line 215 that describes `upgradeRetryCount` and `upgradeBlocked` as tracked "on
+  `CitySimulation`" to reference the `Zoning` sub-system
+  (`src/simulation/Zoning.h/cpp`) instead.
+- [ ] Update `architecture/game-design/service-coverage.md` — change the reference
+  on approximately line 339 that says `TileData` is "defined in
+  `src/simulation/CitySimulation.h`" to "defined in `src/simulation/Zoning.h`"
+  to reflect the struct migration in this phase.
+- [ ] Update `architecture/game-design/service-coverage.md` — change the code-snippet
+  comments that say the service-degradation and power/water-out audio calls happen
+  "inside `CitySimulation::tick()`" (approximately lines 183–296) to reference
+  `Zoning::doServiceDegradationTick()` called from `CitySimulation::doBudgetTick()`
+  instead, matching the approach used for the `dynamic-soundscape.md` and
+  `audio-system.md` spec updates in Deliverable 6.
+- [ ] Update `architecture/audio-architecture/production-briefs/wav-sfx-production-brief.md`
+  — change the trigger fields for:
+  (a) `sfx_fire_alert` (approximately line 158) from `CitySimulation::tick()` to
+      `Zoning::doDesirabilityTick()` called from `CitySimulation::doBudgetTick()`;
+  (b) `sfx_police_alert` (approximately line 185) from `CitySimulation::tick()` to
+      `Zoning::doDesirabilityTick()` called from `CitySimulation::doBudgetTick()`;
+  (c) `sfx_power_out` (approximately line 223) from `CitySimulation::tick()` to
+      `Zoning::doServiceDegradationTick()` called from `CitySimulation::doBudgetTick()`;
+  (d) `sfx_water_out` (approximately line 245) from `CitySimulation::tick()` to
+      `Zoning::doServiceDegradationTick()` called from `CitySimulation::doBudgetTick()`;
+  (e) `sfx_service_degrade` (approximately line 262) from `CitySimulation::tick()` to
+      `Zoning::doServiceDegradationTick()` called from `CitySimulation::doBudgetTick()`.
+- [ ] Update `architecture/graphics-architecture/scene-graph-ownership.md` — change the
+  footprint-collision responsibility annotation on approximately line 492 from
+  "the exclusive responsibility of `CitySimulation::placeZone()`" to
+  "the exclusive responsibility of `Zoning::placeZone()` (called from
+  `CitySimulation::placeZone()`)" to reflect that the actual footprint validation logic
+  moves into the `Zoning` sub-system in this phase.
 
 ---
 
@@ -288,7 +368,7 @@ Internal tick methods:
 `doPopulationTick(Zoning&, const Traffic&, const Economy&,
                   IAudioSystem*, IRenderer*,
                   std::queue<SimulationNotification>&)`,
-`doDensityUnlockTick(Zoning&, const Economy&, Difficulty,
+`doDensityUnlockTick(Zoning&, const Traffic&, const Economy&, Difficulty,
                      IRenderer*, IAudioSystem*,
                      std::queue<SimulationNotification>&)`,
 `doGameOverTick(const Economy&, SimTiming&, IClock&)`,
@@ -306,6 +386,13 @@ Private helpers:
 
 - [ ] Create `src/simulation/Population.h` and `Population.cpp`.
 - [ ] Add to CMake target.
+- [ ] Update `architecture/audio-architecture/production-briefs/wav-sfx-production-brief.md`
+  — change the trigger field on approximately line 330 for `sfx_zone_upgrade` from
+  `CitySimulation::doDensityUnlockTick()` to `Population::doDensityUnlockTick()` to
+  reflect the method migration in this phase.
+- [ ] Update `architecture/game-design/zoning-system.md` — change the references on
+  approximately lines 314, 316, and 329 that refer to `CitySimulation::doDensityUnlockTick()`
+  to `Population::doDensityUnlockTick()` to reflect the method migration in this phase.
 
 ---
 
@@ -407,10 +494,14 @@ Cross-System Dependencies section above).
   `m_zoning.serializeTo(j)`, `m_population.serializeTo(j)`,
   `m_timing.serializeTo(j)`. Each sub-system owns its own JSON section.
   `deserializeFromJson()` mirrors this.
-- [ ] Run `make build`. Fix all compiler errors before proceeding.
-- [ ] Run `ctest -LE "integration|requires-opengl"` — zero regressions.
-- [ ] Run `ctest -L "^integration$"` — zero regressions.
-- [ ] Run `xvfb-run --auto-servernum ctest -L "^requires-opengl$"` — zero regressions.
+- [ ] Run `make test` — this builds with coverage instrumentation, runs all three test
+  tiers (unit, integration, OpenGL), generates `coverage_filtered.info` via lcov, and
+  enforces the ≥ 95% total coverage gate. Fix any regressions before continuing.
+- [ ] Run the per-file 85% coverage awk check from `architecture/testing/coverage.md`
+  against `coverage_filtered.info` for each new sub-system file
+  (`Economy.cpp`, `Traffic.cpp`, `Zoning.cpp`, `Population.cpp`, `SimTiming.cpp`).
+  If any file is below 85%, add targeted unit tests in the relevant
+  `tests/simulation/*_test.cpp` before proceeding to Deliverable 6.
 
 ---
 
@@ -546,9 +637,15 @@ individual method declarations that moved.
 
 **`MockCitySimulation`** in `tests/` implements `ICitySimulation` and therefore
 still inherits all sub-interface pure-virtual declarations — the mock already
-has `MOCK_METHOD` entries for all 44 methods; the only change required is
-renaming the `MOCK_METHOD` entry for `getDemandPressurePct` to
-`getZoneDemandFactor` (method count stays at 44).
+has `MOCK_METHOD` entries for all 44 methods.
+The spec's `MockCitySimulation` listing already shows the target name
+`getZoneDemandFactor` (the spec was updated proactively). However, the **actual
+source file** `tests/ui/MockCitySimulation.h` still uses `getDemandPressurePct`
+and MUST be renamed as part of the codebase-wide rename in the deliverable below.
+The spec note "no MOCK_METHOD changes are needed" refers only to the
+sub-interface decomposition itself (method count stays at 44 — no methods are
+added or removed); the rename from `getDemandPressurePct` to `getZoneDemandFactor`
+IS required in source files.
 
 **Deliverable checkboxes:**
 
@@ -584,12 +681,37 @@ renaming the `MOCK_METHOD` entry for `getDemandPressurePct` to
   Update `MockCitySimulation`'s `MOCK_METHOD` entry for this method to use the
   new name.
 - [ ] Verify `MockCitySimulation` still compiles after the rename above.
-- [ ] Update `architecture/testing/testability-architecture.md` — (a) add
+- [ ] Update `architecture/testing/testability-architecture.md` — (a) verify
   `IEconomyQuery`, `IZoningActions`, `ISimulationState` sub-interface
-  descriptions; (b) update the `ICitySimulation` class definition to show the
+  descriptions are present and accurate; (b) update the `ICitySimulation` class definition to show the
   new base class list and 7-method own declaration; (c) note that
   `MockCitySimulation` `MOCK_METHOD` entries are structurally unchanged since
-  all methods are still inherited through the sub-interfaces.
+  all methods are still inherited through the sub-interfaces; (d) update the
+  `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` test contract
+  description to state that `Population::updateMusicIntensity()` (called from
+  `CitySimulation::doBudgetTick()`) dispatches `IAudioSystem::setMusicIntensity()`,
+  replacing the description that says the call lives in `CitySimulation::update()`.
+- [ ] Update `architecture/game-design/economy-model.md` — change the references on
+  approximately lines 134 and 150 that describe `CitySimulation::update()` as the
+  call site for `audioSystem->setMusicIntensity()` to reference
+  `Population::updateMusicIntensity()` called from `CitySimulation::doBudgetTick()`
+  instead (reflecting the sub-system extraction in this phase).
+- [ ] Update `architecture/audio-architecture/audio-system.md` — change the references
+  on approximately lines 57 and 222 that describe `CitySimulation::update()` as the
+  call site for `setMusicIntensity()` to reference `Population::updateMusicIntensity()`
+  called from `CitySimulation::doBudgetTick()` instead.
+- [ ] Update `architecture/audio-architecture/dynamic-soundscape.md`:
+  (a) change all stale `CitySimulation` callback references in the Stinger vs SFX
+      decision matrix on approximately line 147:
+      — the SFX_BUDGET_WARN row "(CitySimulation via audio callback)" → reference
+        `Economy::doEconomyTick()` called from `CitySimulation::doBudgetTick()`;
+      — item (3) "service degradation: SFX_SERVICE_DEGRADE fires (CitySimulation
+        audio callback)" → reference `Zoning::doServiceDegradationTick()` called
+        from `CitySimulation::doBudgetTick()`;
+  (b) change the implementation-contract paragraph on approximately line 157 that says
+      "`CitySimulation::update()` wiring" to reference `Population::updateMusicIntensity()`
+      called from `CitySimulation::doBudgetTick()`; the no-op guard sentence
+      (`AudioSystem::setMusicIntensity()` deduplicates) is unchanged.
 - [ ] Run `make build` and fix any compiler errors.
 - [ ] Verify `ICitySimulation.h` now declares exactly 7 own methods.
 
@@ -618,3 +740,6 @@ renaming the `MOCK_METHOD` entry for `getDemandPressurePct` to
   `src/interfaces/ICitySimulation.h` (own methods drop from 44 to 7, well under 35).
 - [ ] Code coverage gate (≥ 95%) maintained — no production logic deleted, only
   moved.
+- [ ] Each new sub-system `.cpp` file (`Economy.cpp`, `Traffic.cpp`, `Zoning.cpp`,
+  `Population.cpp`, `SimTiming.cpp`) individually meets the per-file 85% line-coverage
+  floor required by the Phase 11 CI gate.
