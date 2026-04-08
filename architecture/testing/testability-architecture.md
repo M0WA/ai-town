@@ -1440,8 +1440,8 @@ the audio playback path, not a unit test with strict call-count expectations on 
   Only once all three are present does the build and full test suite remain green.
   This is the same 3-item atomicity rule applied for Phase 10b `setTileHeight()`.
 
-  **Y-position tests** (`MoveVehicleAgent_FlatTerrain_YIncludesRoadBias` and
-  `SpawnVehicleAgent_FlatTerrain_YIncludesRoadBias`) require inspecting a real Irrlicht
+  **Y-position tests** (`MoveVehicleAgent_FlatTerrain_VehicleYIncludesBias` and
+  `SpawnVehicleAgent_FlatTerrain_VehicleYIncludesBias`) require inspecting a real Irrlicht
   scene-node `getPosition().Y` after a renderer call and are therefore placed in
   `tests/rendering/` with `requires-opengl` label. Those tests create an `IrrlichtRenderer`
   with a `ManualTerrainQuery` stub returning `0.0f`, spawn or move a vehicle agent, then
